@@ -616,3 +616,62 @@ class StoreReader:
 
     def __exit__(self, *args) -> None:
         self.close()
+
+
+def fact_signatures(
+    store_path: Path, ids: Iterable[str], *, timeout: float = 5.0
+) -> dict[str, str | None]:
+    """Read-only batched lookup of the ``facts.signature`` column by fact id.
+
+    The ONLY source of per-fact signatures for the canonical review projection
+    (0.9.0 S4): the fold/Surface path drops signatures entirely, so a review
+    that carries authorship must read the column directly.
+
+    Custody constraint: the column is read VERBATIM — a signature travels
+    exactly as stored, never recomputed or re-signed. Opens the store read-only
+    (URI ``mode=ro``, mirroring ``declaration._open_readonly``) so the lookup
+    never mutates it and is safe alongside a concurrent WAL writer, consistent
+    with the S2 read-purity posture.
+
+    PRAGMA-probes the ``signature`` column: on a pre-signature store (the column
+    is absent) EVERY requested id maps to ``None`` rather than raising
+    (``no such column``). An id with no matching row, or a stored NULL signature,
+    also maps to ``None``. The returned dict has exactly one entry per DISTINCT
+    requested id (insertion order preserved for determinism); passing no ids
+    returns ``{}``.
+
+    A module-level function, not a :class:`StoreReader` method, so the app layer
+    reaches per-fact signatures through the public ``engine`` surface without
+    importing ``StoreReader`` directly (the architecture ratchet).
+    """
+    wanted = list(dict.fromkeys(ids))  # de-dupe, preserve first-seen order
+    out: dict[str, str | None] = dict.fromkeys(wanted, None)
+    if not wanted:
+        return out
+    try:
+        conn = sqlite3.connect(
+            f"file:{store_path}?mode=ro", uri=True, timeout=timeout
+        )
+    except sqlite3.Error:
+        return out
+    try:
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(facts)")}
+        if "signature" not in cols:
+            return out
+        # Chunk the IN (...) set to stay well under SQLite's bound-variable
+        # ceiling (default 999) on a large fold.
+        for start in range(0, len(wanted), 500):
+            chunk = wanted[start : start + 500]
+            placeholders = ",".join("?" * len(chunk))
+            for fid, sig in conn.execute(
+                f"SELECT id, signature FROM facts WHERE id IN ({placeholders})",
+                chunk,
+            ):
+                out[fid] = sig
+    except sqlite3.Error:
+        # A malformed/locked store degrades to all-None rather than aborting a
+        # read-only review — same posture as declaration._open_readonly.
+        return out
+    finally:
+        conn.close()
+    return out

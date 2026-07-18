@@ -43,7 +43,7 @@ from typing import TYPE_CHECKING, Any
 from atoms import Address
 
 if TYPE_CHECKING:
-    from atoms import Edge, FoldItem, FoldState
+    from atoms import Edge, FoldItem, FoldSection, FoldState
 
 
 # ---------------------------------------------------------------------------
@@ -1138,3 +1138,152 @@ def to_dict(surface: Surface) -> dict:
         },
         "window": _window_to_dict(surface.window),
     }
+
+
+# ---------------------------------------------------------------------------
+# to_review — the canonical review projection (--review, 0.9.0 S4).
+# ---------------------------------------------------------------------------
+#
+# A deterministic, diffable snapshot of the FOLDED entity state — one row per
+# (kind, key), sorted by (kind, key, id) so the ordering is stable across runs
+# and machines regardless of emit order. This is a REVIEW artifact, NOT a SPEC
+# §10 interchange dump: it is not witness-ordered, carries no ticks or
+# declaration-event rows and no chain, and makes no JCS byte-canonicalization or
+# rebuild-round-trip claim (that layer is gated on GlobalReceiptPosition +
+# loops-go, arbiter S4-F4). Its determinism is the review property "same folded
+# state → same bytes", not §10.2 canonical interchange bytes.
+#
+# The encoder is a painted-free leaf like ``to_dict``: per-fact signatures are
+# INJECTED by the caller (fold.py, via ``engine.fact_signatures``) so no engine
+# import is pulled to module scope here.
+#
+# Why plain ``read --json`` (``to_dict``) does NOT already cover review — three
+# concrete gaps, each closed here:
+#   1. TRAVERSAL ORDER is fold order (declaration order across sections, first-
+#      seen/emit order within a by-fold), so two stores with identical folded
+#      state but different emit order diff spuriously. ``to_review`` sorts by
+#      (kind, key, id) — stable across runs and machines.
+#   2. DIFF-NOISE FIELDS: ``to_dict`` emits salience/tier/inbound/
+#      inbound_predicates/depth/via_anchor/granularity (read-time DERIVED — they
+#      shift when OTHER facts emit, or are render choices) plus a read-time
+#      ``window`` slice and ``schema`` ranking hints. ``to_review`` carries only
+#      the emit-derived whitelist (REVIEW_EXCLUDED_FIELDS lists what it drops).
+#   3. MISSING SIGNATURES: the fold/Surface path drops per-fact signatures
+#      entirely (they live only in the store column, keyed by id). ``to_review``
+#      threads them back in verbatim from ``engine.fact_signatures``.
+
+#: The review projection's format version. Bump only on a shape change; a bump
+#: legitimately moves the bytes (a code change, not a store change), so it does
+#: not violate "unchanged folded state → identical bytes" for a fixed version.
+REVIEW_VERSION = 1
+
+#: Read-time DERIVED fields deliberately EXCLUDED from the review row — each
+#: changes without an emit to THIS fact, so including them would make every
+#: diff noisy (the exact defect the whitelist fights). ``salience``/``tier``/
+#: ``inbound``/``inbound_predicates`` shift when OTHER facts emit refs; ``depth``/
+#: ``via_anchor`` are ref-graph-walk artifacts; ``granularity`` is a render
+#: choice. The row is built by EXPLICITLY listing what to INCLUDE (additive by
+#: choice, in ``_review_row``), never by subtracting from a FoldItem — this
+#: tuple exists so the exclusion is legible and test-assertable, not as the
+#: mechanism of exclusion.
+REVIEW_EXCLUDED_FIELDS = (
+    "salience",
+    "tier",
+    "inbound",
+    "inbound_predicates",
+    "depth",
+    "via_anchor",
+    "granularity",
+    "window",
+    "schema",
+)
+
+
+def _review_row(
+    item: FoldItem, *, kind: str, key_field: str | None, signature: str | None
+) -> dict:
+    """One review row — the emit-derived whitelist only, keys sorted.
+
+    ``key`` is the fold-key VALUE (``item.payload[key_field]``) for a keyed
+    ("by") fold, or ``None`` for a keyless ("collect") item. ``signature`` is
+    the verbatim store column (or ``None`` when unsigned / unavailable). The
+    payload keys are pre-sorted here and ``json.dumps(sort_keys=True)`` at the
+    call site is the end-to-end determinism guarantee (nested dicts included).
+    """
+    key: str | None = None
+    if key_field is not None:
+        kv = item.payload.get(key_field)
+        if kv is not None:
+            key = str(kv)
+    return {
+        "kind": kind,
+        "key": key,
+        "key_field": key_field,
+        "payload": {k: item.payload[k] for k in sorted(item.payload)},
+        "id": item.id,
+        "ts": item.ts,
+        "observer": item.observer,
+        "origin": item.origin,
+        "n": item.n,
+        "refs": sorted(item.refs),
+        "edges": sorted(
+            ({"predicate": e.predicate, "address": e.address} for e in item.edges),
+            key=lambda d: (d["predicate"], d["address"]),
+        ),
+        "signature": signature,
+    }
+
+
+def _iter_fold_items(sections: tuple[FoldSection, ...]):
+    """Yield ``(kind, key_field, item)`` for every folded item, depth-first.
+
+    Recurses into nested sub-sections so an aggregation vertex degrades to its
+    folded items rather than crashing — each nested section carries its own
+    kind/key_field. A flat single-store vertex has no sub-sections.
+    """
+    for section in sections:
+        for item in section.items:
+            yield section.kind, section.key_field, item
+        if section.sections:
+            yield from _iter_fold_items(section.sections)
+
+
+def to_review(
+    state: FoldState,
+    *,
+    header: dict,
+    signatures: dict[str, str | None],
+) -> dict:
+    """The canonical review projection of a ``FoldState`` (--review, S4).
+
+    Returns ``{"review_version", "header", "facts"}`` — a fully DETERMINISTIC
+    object: two reads of unchanged folded state produce byte-identical output
+    once ``json.dumps(..., sort_keys=True)`` is applied at the call site. Every
+    field here is content-derived; there is no wall-clock inside this object
+    (the CLI adds a labeled ``rendered_at`` sibling OUTSIDE it, so the
+    determinism guarantee stays whole).
+
+    ``facts`` are sorted by ``(kind, key or "", id or "")`` — a keyless collect
+    row (no fold key) orders by its fact id, so the whole projection is stable
+    across emit order (contrast ``to_dict``, which preserves faithful FOLD
+    order and so diffs spuriously when two stores fold the same state in
+    different emit order). Each row carries only the emit-derived whitelist (see
+    ``_review_row`` / ``REVIEW_EXCLUDED_FIELDS``) plus its verbatim signature.
+
+    ``header`` is assembled by the caller (vertex name, cursor disclosure,
+    declaration generation, seal cut) and passed through verbatim.
+    ``signatures`` maps ``item.id → signature|None`` (from
+    ``engine.fact_signatures``); an id absent from the map (or a keyless
+    synthetic item with ``id=None``) yields ``None``.
+    """
+    rows = [
+        _review_row(
+            item,
+            kind=kind,
+            key_field=key_field,
+            signature=signatures.get(item.id) if item.id is not None else None,
+        )
+        for kind, key_field, item in _iter_fold_items(state.sections)
+    ]
+    rows.sort(key=lambda r: (r["kind"], r["key"] or "", r["id"] or ""))
+    return {"review_version": REVIEW_VERSION, "header": header, "facts": rows}

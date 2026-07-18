@@ -515,6 +515,152 @@ def load_declaration_status(
     return _finish(file_ast, "file-pre-genesis")
 
 
+def declaration_generation(
+    vertex_path: Path,
+    *,
+    as_of: float | None = None,
+    at: WitnessPosition | None = None,
+    store_timeout: float = 5.0,
+) -> dict[str, Any]:
+    """Disclose which GENERATION of declarations interpreted a read (0.9.0 S4).
+
+    A REVIEW comparator — it answers ONE question: "did the ontology change
+    between two reads?" It is explicitly **NOT** SPEC §10.2 JCS canonical bytes
+    and carries **no interchange claim**; the fingerprint below is a
+    review-only content hash, never a portable encoding.
+
+    Honest across BOTH declaration residences — the adopted store and the
+    pre-genesis file — because it fingerprints the RESOLVED declaration AST that
+    :func:`load_declaration_status` returns (the same ``VertexFile`` every read
+    actually folds under), projected through :func:`lang.vertex_to_documents`.
+    That projection is the residence-excluded canonical decomposition: the
+    ``store`` locator and the file ``path`` are dropped, so the fingerprint
+    tracks the ONTOLOGY, not where it currently lives. Using one projection
+    function for both residences (rather than hashing stored ``_decl`` documents
+    on adopted stores but file bytes pre-genesis) means the two eras hash the
+    same space and are directly comparable.
+
+    Returns a dict with four keys:
+
+    - ``status`` — the :func:`load_declaration_status` label
+      (``store`` / ``file-pre-genesis`` / ``unhistorized`` / ``aggregate-head``).
+    - ``lineage`` — the store's own genesis id, or ``None`` (pre-genesis /
+      unadopted / aggregate / store-less).
+    - ``review_fingerprint`` — ``"sha256:<hex>"`` over
+      ``json.dumps([d.as_json() for d in vertex_to_documents(ast)],
+      sort_keys=True, separators=(",", ":"))``. Stable across repeated reads of
+      an unedited declaration; changes when the declaration changes. Because it
+      hashes the PARSED projection (not raw file bytes), a cosmetic ``.vertex``
+      edit the parser discards — whitespace, comments, key reordering — does not
+      churn it, while a semantic edit does. ``None`` only if the projection
+      itself fails (a malformed declaration that still parsed to an AST).
+    - ``decl_head`` — the ULID of the latest-applied self-lineage ``_decl.*``
+      event within the cutoff on an ADOPTED store (rebuild-stable, unlike a
+      rowid); ``None`` on pre-genesis (no ``_decl`` lineage), aggregate, and
+      store-less vertices. On an adopted store with only a genesis it is the
+      genesis id itself — the head of a one-event declaration lineage.
+    """
+    import hashlib
+
+    from lang.document import vertex_to_documents
+
+    ast, status = load_declaration_status(
+        vertex_path, as_of=as_of, at=at, store_timeout=store_timeout,
+    )
+    try:
+        docs = vertex_to_documents(ast)
+        canonical = json.dumps(
+            [d.as_json() for d in docs], sort_keys=True, separators=(",", ":"),
+        )
+        fingerprint: str | None = (
+            "sha256:" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+        )
+    except Exception:
+        # A resolved-but-unprojectable declaration must not abort a review —
+        # degrade the ONE field honestly rather than crash the read.
+        fingerprint = None
+
+    lineage, decl_head = _decl_lineage_and_head(
+        vertex_path, as_of=as_of, at=at, timeout=store_timeout,
+    )
+    return {
+        "status": status,
+        "lineage": lineage,
+        "review_fingerprint": fingerprint,
+        "decl_head": decl_head,
+    }
+
+
+def _decl_lineage_and_head(
+    vertex_path: Path,
+    *,
+    as_of: float | None,
+    at: WitnessPosition | None,
+    timeout: float,
+) -> tuple[str | None, str | None]:
+    """``(lineage, decl_head)`` for the adopted-store residence, else ``(None,
+    None)``.
+
+    ``lineage`` is the store's ``own_lineage`` marker (the genesis id).
+    ``decl_head`` is the ULID of the newest-by-``(ts, id)`` self-lineage
+    ``_decl.*`` row within the cutoff — the last declaration event that would
+    win under replay. Pre-genesis / unadopted / aggregate / store-less all
+    resolve to ``(None, None)`` — there is no declaration lineage to head.
+    """
+    from lang import parse_vertex_file
+
+    file_ast = parse_vertex_file(vertex_path)
+    if file_ast.combine is not None or file_ast.discover is not None:
+        return None, None  # aggregate — no single store lineage
+    store_field = file_ast.store
+    if store_field is None:
+        return None, None
+    store_path = store_field
+    if not store_path.is_absolute():
+        store_path = (vertex_path.parent / store_path).resolve()
+    if not store_path.exists():
+        return None, None
+    conn = _open_readonly(store_path, timeout=timeout)
+    if conn is None:
+        return None, None
+    try:
+        lineage = _read_own_lineage(conn)
+        if lineage is None:
+            return None, None  # pre-genesis / unadopted — no self lineage
+        cutoff = ""
+        params: list[Any] = []
+        if at is not None:
+            cutoff = " AND rowid <= ?"
+            params.append(at.rowid)
+        elif as_of is not None:
+            cutoff = " AND ts <= ?"
+            params.append(as_of)
+        # Newest-first by replay order; the first row that is self-lineage
+        # (the genesis itself, id == lineage, or an overlay whose payload
+        # lineage matches) is the declaration head. Foreign _decl rows sort
+        # in but are skipped — they never participate in this store's fold.
+        try:
+            rows = conn.execute(
+                "SELECT id, payload FROM facts WHERE kind GLOB '_decl.*'"
+                + cutoff
+                + " ORDER BY ts DESC, id DESC",
+                params,
+            ).fetchall()
+        except sqlite3.Error:
+            return lineage, None
+        for fid, payload_text in rows:
+            if fid == lineage:
+                return lineage, fid
+            try:
+                if json.loads(payload_text).get("lineage") == lineage:
+                    return lineage, fid
+            except (json.JSONDecodeError, TypeError, AttributeError):
+                continue
+        return lineage, None
+    finally:
+        conn.close()
+
+
 def load_declaration(
     vertex_path: Path,
     *,

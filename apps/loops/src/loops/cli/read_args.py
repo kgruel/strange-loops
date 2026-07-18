@@ -137,6 +137,17 @@ def add_read_args(parser: argparse.ArgumentParser) -> None:
             "--at); or pair with --at A --diff B"
         ),
     )
+    # Canonical review projection (0.9.0 S4) — a deterministic, diffable JSON
+    # snapshot of folded state (kind-key-sorted, emit-derived whitelist, verbatim
+    # signatures) under a disclosed head/at cursor + declaration generation.
+    # JSON-only; honors --at/--as-of, refuses --facts/--ticks/--diff/--why.
+    parser.add_argument(
+        "--review", action="store_true", default=False,
+        help=(
+            "Canonical review projection — deterministic, diffable JSON "
+            "snapshot of folded state with cursor + declaration disclosure"
+        ),
+    )
     parser.add_argument(
         "--match", "--grep", default=None, metavar="QUERY", dest="match",
         help="Content search — FTS5 for indexed kinds, substring for the rest",

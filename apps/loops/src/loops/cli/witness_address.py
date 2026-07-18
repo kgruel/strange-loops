@@ -30,7 +30,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from engine.witness import TickAnchor, WitnessPosition
+    from engine.witness import CutSummary, TickAnchor, WitnessPosition
 
 
 class AddressError(Exception):
@@ -423,6 +423,14 @@ def _resolve_cut_body(vertex_path: Path) -> dict:
         # (risk mitigation noted in the S6 brief).
         return unavailable_cut("unavailable", f"unexpected: {exc}")
 
+    return _cut_from_summary(summary)
+
+
+def _cut_from_summary(summary: "CutSummary") -> dict:
+    """The ``head``-mode :class:`CutMeta` dict derived from a resolved
+    :class:`~engine.witness.CutSummary` — the shared tail of the default-read
+    (:func:`resolve_cut`) and the S4 review-head (:func:`resolve_review_head`)
+    paths, so both report seal provenance identically from one resolution."""
     position = summary.position
     anchor = position.anchor
     sealed_to_head = anchor is not None and anchor.fact_cursor == position.fact_id
@@ -446,3 +454,91 @@ def _resolve_cut_body(vertex_path: Path) -> dict:
         tick_total=summary.tick_total,
         facts_beyond_seal=facts_beyond_seal,
     ).to_dict()
+
+
+# --- Review head disclosure (0.9.0, S4) -------------------------------------
+#
+# The --review header discloses the read's HEAD cursor position alongside its
+# seal cut. Both derive from ONE head resolution — S6's single-transaction
+# ``resolve_cut_summary`` primitive (arbiter S4-F3: a second independent
+# head-resolve path is a refusable finding). So the cursor and the cut can
+# never describe two different head states.
+
+
+def _head_cursor_meta(vertex_path: Path, position: "WitnessPosition") -> dict:
+    """Build the head cursor disclosure from an already-resolved position.
+
+    Same machine-readable shape as the ``--at`` cursor (``cli.views.fold.
+    _resolve_cursor``) — ``mode``/``status``/``fact_id``/``seq``/``unadopted``/
+    ``lineage``/``durable_handle``/``portable``/``anchor`` — plus ``address:
+    "head"`` and a ``head: True`` marker so a consumer can phrase "at head"
+    distinctly from an explicit rewind. Reuses ``load_declaration_status`` for
+    the ontology-provenance label (a declaration read, NOT a second witness
+    head-resolve) and ``durable_handle`` for portability (A10: only an adopted
+    store yields a portable ``fact:<lineage>/<id>`` handle)."""
+    from engine import durable_handle, load_declaration_status
+
+    _ast, status = load_declaration_status(vertex_path, at=position)
+    handle = durable_handle(position)
+    return {
+        "mode": "witness",
+        "address": "head",
+        "head": True,
+        "status": status,
+        "fact_id": position.fact_id,
+        "seq": position.seq,
+        "unadopted": position.unadopted,
+        "lineage": position.lineage,
+        "durable_handle": handle,
+        "portable": handle is not None,
+        "anchor": _anchor_to_dict(position.anchor),
+    }
+
+
+def resolve_review_head(vertex_path: Path) -> tuple[dict | None, dict]:
+    """Head cursor + seal cut for a ``--review`` read, from ONE head resolution.
+
+    Returns ``(cursor_meta | None, cut_dict)``. Reuses
+    ``engine.witness.resolve_cut_summary`` — the SAME single-transaction engine
+    primitive :func:`resolve_cut` wraps (arbiter S4-F3: no second independent
+    head-resolve) — and derives BOTH the head-cursor disclosure and the seal cut
+    from the one resolved :class:`~engine.witness.WitnessPosition`.
+
+    Degrades honestly, never raises: an aggregate vertex, a store-less vertex, an
+    uncreated store, or an engine resolution failure yields ``cursor=None`` and
+    ``cut`` = ``available=False`` with a stated reason — the same refusal paths
+    (and reason strings) as :func:`resolve_cut`, so the review header's cut is
+    identical to what a plain read would disclose.
+    """
+    if is_aggregate_vertex(vertex_path):
+        return None, unavailable_cut(
+            "unavailable",
+            "aggregate vertex — no single witness cut across members",
+        )
+
+    from loops.commands.resolve import _resolve_vertex_store_path
+
+    try:
+        store_path = _resolve_vertex_store_path(vertex_path)
+    except Exception as exc:  # VertexNotFound / VertexParseError etc.
+        return None, unavailable_cut("unavailable", f"vertex could not be resolved: {exc}")
+    if store_path is None:
+        return None, unavailable_cut(
+            "unavailable", "this vertex has no store configured — nothing to seal",
+        )
+    if not store_path.exists():
+        return None, unavailable_cut(
+            "unavailable", "this vertex's store has not been created yet",
+        )
+
+    from engine.witness import WitnessResolutionError, resolve_cut_summary
+
+    try:
+        summary = resolve_cut_summary(store_path)
+    except WitnessResolutionError as exc:
+        return None, unavailable_cut("unavailable", str(exc))
+    except Exception as exc:
+        return None, unavailable_cut("unavailable", f"unexpected: {exc}")
+
+    cursor = _head_cursor_meta(vertex_path, summary.position)
+    return cursor, _cut_from_summary(summary)

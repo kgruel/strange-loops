@@ -42,6 +42,7 @@ def run(argv: list[str], ctx: Invocation) -> int:
     pre.add_argument("--id", default=None, dest="fact_id")
     pre.add_argument("--at", default=None)
     pre.add_argument("--diff", default=None)
+    pre.add_argument("--review", action="store_true", default=False)
     known, rest = pre.parse_known_args(argv)
 
     # --at/--diff are fold-route-only concerns (A9/A11). Resolve their
@@ -65,6 +66,28 @@ def run(argv: list[str], ctx: Invocation) -> int:
                 "event-history view, not the fold read"
             )
         ctx.reporter.err(f"read: --at/--diff address the fold route only — {reason}.")
+        return 2
+
+    # --review is a fold-route-only projection of FOLDED state — it has no
+    # meaning on the event-history (--facts+window) or tick (--ticks) routes,
+    # and --diff is a distinct two-position operation. Refuse the combination
+    # here (same honor-or-refuse posture as the --at/--diff guard above) rather
+    # than route away and silently drop --review. A bare --review (or with
+    # --at/--as-of) falls through to the fold route below, honored.
+    if known.review and (routes_away_from_fold or known.diff):
+        if known.diff:
+            reason = "`--diff` is a separate two-position operation"
+        elif known.ticks:
+            reason = "`--ticks` reads tick windows, not folded state"
+        else:
+            reason = (
+                "`--facts` with a temporal window/anchor reads the event "
+                "history, not folded state"
+            )
+        ctx.reporter.err(
+            f"read --review: the review projection is a fold-route snapshot — "
+            f"{reason}. Drop it, or drop --review."
+        )
         return 2
 
     # Temporal facts query → stream (re-injects --since / --as-of / --id).
@@ -140,6 +163,8 @@ def run(argv: list[str], ctx: Invocation) -> int:
         fold_rest += ["--as-of", known.as_of]
     if known.diff:
         fold_rest += ["--diff", known.diff]
+    if known.review:
+        fold_rest.append("--review")
     from . import fold as fold_view
 
     return fold_view.run(fold_rest, ctx)

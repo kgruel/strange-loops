@@ -578,6 +578,21 @@ def run(argv: list[str], ctx: Invocation) -> int:
         ctx.reporter.err("No vertex resolved — run `loops init` first.")
         return 1
 
+    # --review (0.9.0 S4) is a fold-route JSON projection of folded state. It
+    # composes with --at/--as-of (a review AT a witnessed/event-time position)
+    # but not with the other short-circuits: --why is a different drill, --diff
+    # a two-position op, --facts the raw event stream. Refuse the combination
+    # here — the router already refuses --review with --facts+window / --ticks,
+    # but a bare --facts or an in-view --why/--diff reaches this parser, so the
+    # honor-or-refuse guard lives at both boundaries.
+    if args.review and (args.why or args.diff or args.facts):
+        other = "--why" if args.why else ("--diff" if args.diff else "--facts")
+        ctx.reporter.err(
+            f"read --review: {other} is a different read — the review "
+            "projection snapshots folded state on its own. Run one or the other."
+        )
+        return 2
+
     # --why is an address-scoped provenance drill: it renders ONE folded
     # (kind, key) entry field by field, so it short-circuits the multi-section
     # fold path entirely (own fetch, own lens, own --json shape). Cursor
@@ -623,6 +638,17 @@ def run(argv: list[str], ctx: Invocation) -> int:
         except CursorAddressError as exc:
             ctx.reporter.err(f"read: {exc}")
             return 2
+
+    # --review (0.9.0 S4): the canonical review projection short-circuits here,
+    # AFTER cursor resolution so it reuses the already-resolved --at/--as-of
+    # position (and, for a head read, S6's resolve_cut_summary — never a second
+    # head-resolve, arbiter S4-F3). JSON-only, own encoding — like --why/--diff
+    # it owns its fetch/render and never reaches the multi-section dispatch.
+    if args.review:
+        return _run_review(
+            ctx, vertex_path, kind, fetch_key,
+            at_position=at_position, as_of_ts=as_of_ts, cursor_meta=cursor_meta,
+        )
 
     # Honest seal-cut provenance (0.9.0 S6, arbiter F1 + sol P1 TOCTOU fix):
     # a RESOLVER closure, not a precomputed dict. "unavailable" is itself a
@@ -959,6 +985,110 @@ def _collect_section_facts(state: Any, kind: str) -> list[dict]:
     return facts
 
 
+# --- Canonical review projection (0.9.0, S4) -------------------------------
+
+
+def _fold_item_ids(sections) -> list[str]:
+    """Every folded item's fact id across sections (nested included), for the
+    batched signature lookup. Keyless synthetic items (``id is None``) are
+    skipped — they carry no store row to sign."""
+    ids: list[str] = []
+    for section in sections:
+        for item in section.items:
+            if item.id is not None:
+                ids.append(item.id)
+        if section.sections:
+            ids.extend(_fold_item_ids(section.sections))
+    return ids
+
+
+def _run_review(
+    ctx: Invocation,
+    vertex_path: Path,
+    kind: str | None,
+    key: str | None,
+    *,
+    at_position: Any,
+    as_of_ts: float | None,
+    cursor_meta: dict | None,
+) -> int:
+    """Emit the canonical review projection (JSON-only) — a deterministic,
+    diffable snapshot of folded state under a disclosed cursor + declaration
+    generation + seal cut.
+
+    Strictly read-only (S2 read-purity is a precondition): the fold fetch, the
+    per-fact signature lookup, and the declaration-generation resolution all use
+    read-only connections; nothing here mutates the store. The projection stops
+    short of SPEC §10 (no witness-ordered every-row stream, no JCS byte
+    determinism, no rebuild round-trip, no chain) — that layer is gated on
+    GlobalReceiptPosition + loops-go (arbiter S4-F4). See ``surface.to_review``
+    for the encoder and ``cli.witness_address.resolve_review_head`` for the
+    head resolution shared with S6.
+    """
+    import json as _json
+    import time as _time
+
+    from engine import declaration_generation, fact_signatures
+
+    from loops.cli import witness_address
+    from loops.commands.fetch import fetch_fold
+    from loops.commands.resolve import (
+        _apply_vertex_scope,
+        _resolve_vertex_store_path,
+        _vertex_name,
+    )
+    from loops.surface import to_review
+
+    obs = _apply_vertex_scope(ctx.observer, vertex_path) or None
+    _validate_kind_or_exit(kind, vertex_path)
+
+    # Cursor + seal cut. An active --at/--as-of reuses its already-resolved
+    # cursor_meta (zero extra store I/O); a head read resolves both from S6's
+    # single-transaction resolve_cut_summary (arbiter S4-F3 — never a second
+    # independent head-resolve).
+    if at_position is not None:
+        review_cursor = cursor_meta
+        cut = witness_address.cut_from_witness_position(at_position)
+    elif as_of_ts is not None:
+        review_cursor = cursor_meta
+        cut = witness_address.unavailable_cut(
+            "as_of", "event-time projection has no witness-anchored cut",
+        )
+    else:
+        review_cursor, cut = witness_address.resolve_review_head(vertex_path)
+
+    state = fetch_fold(
+        vertex_path, kind=kind, key=key, observer=obs,
+        at=at_position, as_of=as_of_ts,
+    )
+
+    # Per-fact signatures — verbatim from the store column, the ONLY source
+    # (the fold path drops them). None on a store-less / aggregate vertex.
+    ids = _fold_item_ids(state.sections)
+    signatures: dict[str, str | None] = {}
+    if ids:
+        try:
+            store_path = _resolve_vertex_store_path(vertex_path)
+        except Exception:
+            store_path = None
+        if store_path is not None:
+            signatures = fact_signatures(store_path, ids)
+
+    decl_gen = declaration_generation(vertex_path, at=at_position, as_of=as_of_ts)
+
+    header = {
+        "vertex": _vertex_name(vertex_path),
+        "cursor": review_cursor,
+        "declaration": decl_gen,
+        "cut": cut,
+    }
+    review = to_review(state, header=header, signatures=signatures)
+    # rendered_at is the SOLE render-time field — labeled and kept OUTSIDE the
+    # deterministic `review` object so byte-identity of the projection itself
+    # holds across repeated reads of unchanged folded state.
+    out = {"review": review, "rendered_at": _time.time()}
+    ctx.reporter.msg(_json.dumps(out, sort_keys=True))
+    return 0
 
 
 # --- Structural diff (0.8.0, C2) -------------------------------------------

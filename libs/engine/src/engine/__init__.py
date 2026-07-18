@@ -97,6 +97,9 @@ __all__ = [
     "load_declaration",
     "load_declaration_status",
     "resolve_declaration_documents",
+    "declaration_generation",
+    # Per-fact signature lookup (canonical review projection, 0.9.0 S4)
+    "fact_signatures",
     # Witness positions (read-path temporal cursor)
     "WitnessPosition",
     "WitnessFold",
@@ -231,6 +234,8 @@ _LAZY_IMPORTS: dict[str, tuple[str, str]] = {
         "engine.declaration",
         "resolve_declaration_documents",
     ),
+    "declaration_generation": ("engine.declaration", "declaration_generation"),
+    "fact_signatures": ("engine.store_reader", "fact_signatures"),
     # Witness positions (read-path temporal cursor)
     "WitnessPosition": ("engine.witness", "WitnessPosition"),
     "WitnessFold": ("engine.witness", "WitnessFold"),

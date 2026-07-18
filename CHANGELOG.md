@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.8.1 — 2026-07-18
 
 ### Fixed
 - **deps: widen the painted cap to `<0.14`.** 0.8.0 was cut with

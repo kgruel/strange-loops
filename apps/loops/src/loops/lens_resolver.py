@@ -458,6 +458,26 @@ def normalize_width(width: int | None) -> int | None:
     return width
 
 
+def accepts_kwarg(fn, name: str) -> bool:
+    """True when ``fn`` would RECEIVE the named kwarg under ``call_lens``/
+    ``call_lens_fetch``'s own signature-based dispatch rule (``**kwargs``
+    opts into everything; otherwise only a matching named param is passed).
+
+    A predicate sibling of the dispatch itself — for a caller that needs to
+    know in advance whether a kwarg will land, rather than passing it and
+    seeing it silently dropped (0.8.0 capstone M6: dispatch uses this to
+    decide whether a render-only custom lens needs the cursor mode-line
+    injected on its behalf, since the lens's own render wouldn't otherwise
+    receive — and so wouldn't render — the ``cursor`` kwarg at all).
+    """
+    import inspect
+
+    params = inspect.signature(fn).parameters
+    if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()):
+        return True
+    return name in params
+
+
 def call_lens(fn: LensRenderFn, data, fidelity, width, **kwargs) -> "Block":
     """Call a lens render function, passing optional context kwargs if accepted.
 

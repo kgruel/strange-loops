@@ -170,12 +170,219 @@ def _fold_card(
 # ---------------------------------------------------------------------------
 
 
+#: Honesty-ladder status → its rendered notice (A13). Shared by the single-
+#: cursor mode line and each --diff endpoint's label — one source for the
+#: phrasing so the two registers never drift.
+_CURSOR_STATUS_NOTICE = {
+    "unhistorized": (
+        "unhistorized at this position — genesis floor (earliest known state)"
+    ),
+    "aggregate-head": (
+        "aggregation membership is CURRENT file state — not historized"
+    ),
+    "file-pre-genesis": "no declaration lineage — ontology is the current file",
+}
+
+
+def _cursor_lines(cursor: dict) -> tuple[str, str | None]:
+    """``(head_line, notice_line_or_None)`` for one cursor/endpoint meta dict.
+
+    The shared content builder behind :func:`cursor_mode_line` (single
+    ``--at``/``--as-of`` read) and each ``--diff`` endpoint's label
+    (:func:`diff_view`, capstone M8) — same witness/as_of phrasing, same
+    honesty-ladder status mapping (A13), one source instead of two labels
+    that quietly diverge.
+    """
+    notice = _CURSOR_STATUS_NOTICE.get(cursor.get("status", ""))
+
+    if cursor.get("mode") == "witness":
+        fact_id = cursor.get("fact_id") or "(genesis)"
+        handle = cursor.get("durable_handle")
+        if handle:
+            # Adopted store — advertise the PORTABLE lineage-qualified handle.
+            bits = [f"witness cursor: {handle} (seq {cursor.get('seq')})"]
+        else:
+            # Unadopted (or genesis) — show the id but NOT as a reusable
+            # `fact:ID`; the position is session-local, not portable (A10/B1a).
+            bits = [f"witness cursor: fact {fact_id} (seq {cursor.get('seq')})"]
+        if cursor.get("unadopted"):
+            bits.append("unadopted store — position not portable")
+        anchor = cursor.get("anchor")
+        if anchor:
+            bits.append(
+                f"anchored at tick '{anchor['name']}' sealed "
+                f"{_format_ts_full(anchor['ts'])}"
+            )
+        else:
+            bits.append("unsealed tail — no prior tick anchor")
+        head = "⏱ " + " — ".join(bits)
+    else:
+        head = f"⏱ event-time projection: as of {_format_ts_full(cursor.get('as_of'))}"
+
+    notice_line = f"⚠ ontology: {notice}" if notice else None
+    return head, notice_line
+
+
+def cursor_mode_line(cursor: dict, width: int | None) -> Block:
+    """The ``--at``/``--as-of`` mode-line disclosure (0.8.0, A11).
+
+    Rendered-text sibling of the machine-readable ``cursor`` field dispatch
+    merges into JSON output — every register gets the same honesty-ladder
+    treatment ``stream_view`` already gives ``ontology_notice``. Prepended
+    above the fold body, at every zoom level (never gated to SUMMARY+): a
+    rewound read must say so as prominently as an unrewound one hides it.
+
+    Public (not lens-private): ``dispatch`` calls this directly to inject the
+    label for a RENDER-ONLY custom lens whose own signature doesn't declare a
+    ``cursor`` kwarg — the data is correctly selected (fetch-side cursor
+    support is verified upstream), only the label would otherwise be lost
+    (capstone M6).
+    """
+    head, notice_line = _cursor_lines(cursor)
+    rows = [Block.text(head, Style(dim=True), width=width)]
+    if notice_line:
+        rows.append(Block.text(f"  {notice_line}", Style(dim=True), width=width))
+    return join_vertical(*rows)
+
+
+def _diff_endpoint_block(label: str, meta: dict, width: int | None) -> Block:
+    """``"  from: <mode line>"`` (+ an indented notice line) for one endpoint.
+
+    Full parity with a bare ``--at``/``--as-of`` read's disclosure (anchor,
+    unadopted/portable state, honesty-ladder status) — a diff endpoint is a
+    resolved position too, and previously showed only a bare fact id/seq
+    (capstone M8).
+    """
+    head, notice_line = _cursor_lines(meta)
+    rows = [Block.text(f"  {label}: {head}", Style(dim=True), width=width)]
+    if notice_line:
+        rows.append(Block.text(f"        {notice_line}", Style(dim=True), width=width))
+    return join_vertical(*rows)
+
+
+def _diff_interval_block(interval: dict | None, width: int | None) -> Block | None:
+    """Interval honesty lines (late arrivals + declaration change, M8/A13).
+
+    ``interval`` is ``engine.diff_interval_report``'s output (or ``None`` —
+    aggregate/error paths that never computed one), plus the ``baseline``
+    key the CLI stamps on: which endpoint label ('from'/'to') is the
+    rowid-earlier baseline the late arrivals were computed against. The
+    engine report is symmetric by rowid, so on a reversed ``--diff B..A``
+    the baseline is 'to' — naming 'from' unconditionally would make a false
+    temporal attribution. Returns ``None`` when there is nothing to disclose
+    (no late arrivals, no declaration change) — a clean interval says
+    nothing rather than an empty reassurance line.
+    """
+    if not interval:
+        return None
+    late = interval.get("late_arrivals") or []
+    changed = interval.get("declaration_changed", False)
+    if not late and not changed:
+        return None
+
+    rows: list[Block] = []
+    if late:
+        baseline = interval.get("baseline", "from")
+        rows.append(Block.text(
+            f"⚠ {len(late)} late arrival(s) in the interval — received here "
+            f"with an earlier ts than the '{baseline}' position had already "
+            "seen:",
+            Style(dim=True), width=width,
+        ))
+        for entry in late:
+            rows.append(Block.text(
+                f"    {entry['kind']} (ts {_format_ts_full(entry['ts'])}, "
+                f"fact {entry['id']})",
+                Style(dim=True), width=width,
+            ))
+    if changed:
+        rows.append(Block.text(
+            "⚠ declaration changed within this interval — the ontology may "
+            "differ between the two positions",
+            Style(dim=True), width=width,
+        ))
+    return join_vertical(*rows)
+
+
+def diff_view(
+    meta1: dict, meta2: dict, rows: list[dict], width: int | None,
+    *, piped: bool = False, interval: dict | None = None,
+) -> Block:
+    """Structural fold diff between two resolved positions (0.8.0, C2/M8).
+
+    Two independent full reconstructions (never incremental — a backdated
+    arrival can reorder ``(ts, id)`` replay, so an interval-application diff
+    would be dishonest); this renders their KEY-LEVEL difference per kind
+    section. Plain and textual — no colors beyond the fold lens's existing
+    dim/bold conventions, on either register.
+
+    ``rows`` is ``_compute_diff``'s output: each entry either
+    ``{"kind", "collect_count": (before, after)}`` (a keyless collect fold —
+    count-only, item-level diffing needs stable identity collect folds
+    don't have) or ``{"kind", "added", "removed", "changed"}`` (a keyed
+    ``by``-fold — ``changed`` is ``[(key, before_payload, after_payload)]``).
+
+    ``interval`` (``engine.diff_interval_report``'s output) surfaces what a
+    bare structural diff cannot: late arrivals and declaration changes
+    between the two positions — rendered even when the structural diff
+    itself is empty ("no differences" can still hide a receipt-only event).
+    """
+    header_blocks = [
+        Block.text("diff", Style(bold=True), width=width),
+        _diff_endpoint_block("from", meta1, width),
+        _diff_endpoint_block("to", meta2, width),
+    ]
+    interval_block = _diff_interval_block(interval, width)
+    if interval_block is not None:
+        header_blocks.append(interval_block)
+    header = join_vertical(*header_blocks)
+
+    if not rows:
+        return join_vertical(
+            header, Block.text("(no differences)", Style(dim=True), width=width),
+        )
+
+    blocks: list[Block] = [header]
+    for row in rows:
+        blocks.append(Block.text("", Style(), width=width))
+        if "collect_count" in row:
+            before, after = row["collect_count"]
+            blocks.append(Block.text(
+                f"{row['kind']}: {before} → {after} items "
+                "(collect fold — count only)",
+                Style(bold=True), width=width,
+            ))
+            continue
+
+        added, removed, changed = row["added"], row["removed"], row["changed"]
+        blocks.append(Block.text(
+            f"{row['kind']}: +{len(added)} added, -{len(removed)} removed, "
+            f"~{len(changed)} changed",
+            Style(bold=True), width=width,
+        ))
+        for k in added:
+            blocks.append(Block.text(f"  + {k}", Style(fg="green"), width=width))
+        for k in removed:
+            blocks.append(Block.text(f"  - {k}", Style(fg="red"), width=width))
+        for k, before, after in changed:
+            blocks.append(Block.text(f"  ~ {k}", Style(), width=width))
+            for field in sorted(set(before) | set(after)):
+                bv, av = before.get(field), after.get(field)
+                if bv != av:
+                    blocks.append(Block.text(
+                        f"      {field}: {bv!r} → {av!r}",
+                        Style(dim=True), width=width,
+                    ))
+    return join_vertical(*blocks)
+
+
 def fold_view(
     data: "Surface | FoldState", zoom: Zoom, width: int | None,
     *, vertex_name: str | None = None, vertex_path: str | None = None,
     visible: frozenset[str] = frozenset(),
     lines: int = 0, chars: int = 0,
     piped: bool | None = None,
+    cursor: dict | None = None,
 ) -> Block:
     """Render fold data at the given zoom level.
 
@@ -198,7 +405,21 @@ def fold_view(
       chars: max display width for body text. Caps the body budget that
              width-based truncation already enforces — useful for context-
              window economics where total tokens matter more than terminal fit.
+
+    ``cursor`` (0.8.0 temporal cursor, optional — ``None`` for every existing
+    caller, so default renders are byte-identical) carries the resolved
+    --at/--as-of mode/status/position; when present it prepends the mode-line
+    disclosure above the fold body, in every register.
     """
+    if cursor is not None:
+        body = fold_view(
+            data, zoom, width,
+            vertex_name=vertex_name, vertex_path=vertex_path,
+            visible=visible, lines=lines, chars=chars, piped=piped,
+        )
+        line_width = None if (piped or (piped is None and width is None)) else width
+        return join_vertical(cursor_mode_line(cursor, line_width), body)
+
     if isinstance(data, FoldState):
         data = project(data)
 

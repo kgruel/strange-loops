@@ -1,0 +1,10 @@
+## THREAD (1)
+KEY                      TIER   N  IN  DATE        MESSAGE
+tasked-forcing-function  mid    1   0  2026-07-17  open · The forcing-function loop is working at day latency: tasked reveals a gap in the morning, loops fixes it by night (custody lib f384e2d; Receipt/close fdda675 — both same-day file-to-resolve). NEXT ENTRY POINTS, in order: (1) daemon-shaped store access (friction:no-daemon-shaped-store-access) — needs a real design session, and observation:architecture/daemon-access-serves-tui says it IS the 0.7.0 TUI substrate, so sequence it before TUI work; (2) conditional emit / CAS (friction:no-conditional-emit) — absorb_edit expected_head is the in-house precedent; (3) payload value-typing contract at receive() (the bool trap tasked still guards by hand — engine validation, ties to friction:boundary-prop-silent-match); (4) fold-shape read grammar for embedded clients (items/_ts/string-coercion conventions tasked re-derives). When 1+2 land, tasked's substrate.py deletes as its docstring predicts — that deletion is the arc's done-bar.
+  observer: kyle/loops-claude
+  id:01KXPYFH
+  ref_ref: 01KXM4GB6356A3SV8GDD3WXWGM,01KXFGJVD1NM81KN42NFC62C1D,01KXPY5GCW45YB0SKB5W25M9QR
+  ▸ Jul 17 open
+  _id: 01KXPYFHSWSPEM18K0R7TSCTFS
+  _ts: 2026-07-17T02:28:54+00:00
+  _observer: kyle/loops-claude

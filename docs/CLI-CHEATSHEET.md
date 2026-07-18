@@ -39,6 +39,13 @@ loops read <vertex> --facts --since 7d        # time window (7d, 24h, 1h)
 loops read <vertex> --facts --kind thread --since 7d
 loops read <vertex> --facts --as-of 30d       # rewind: facts AND ontology as of 30d ago (SPEC §9.3)
 loops read <vertex> --ticks --as-of 30d       # tick-window listing rewound to 30d ago
+loops read <vertex> --at head                 # witness cursor: the folded read AT a receipt position (0.8.0)
+loops read <vertex> --at seq:42               # …by receipt ordinal
+loops read <vertex> --at fact:01J...          # …by fact id (or an unambiguous prefix)
+loops read <vertex> --at tick:01J...          # …by a tick's own id (via its fact_cursor)
+loops read <vertex> --at 2026-07-01           # …by wall-clock (snaps to the tick floor)
+loops read <vertex> --as-of 30d               # folded read as of a ts (event-time projection, 0.8.0)
+loops read <vertex> --diff seq:1..seq:2       # structural fold diff between two positions (0.8.0)
 loops read <vertex> --lens prompt             # custom lens
 loops read <vertex> --lens confluence         # observer cut: who's active, kind mix, tier (--kind/--observer compose)
 loops read <vertex> --lens graph              # ref/edge cut: hubs, chains, orphans over Surface edges
@@ -63,14 +70,54 @@ Absent, the anchor is *now* and the ontology is head (current behavior, exactly)
   "the 7-day window ending 30 days ago, under 30-days-ago's ontology."
 - A `--ticks <idx>` **drill** always interprets its own snapshot under the
   ontology in force at that tick's boundary, regardless of `--as-of`.
-- **Head-only surfaces** (never rewound): the default folded read (`sl read`,
-  "current state"), `store summary`, and every **write/identity** path
-  (`emit`, `sign`, `whoami`, `resolve`) — you cannot write or sign into the past.
+- **Head-only surfaces** (never rewound): `store summary`, `-i`/`--lens
+  autoresearch` interactive mode, and every **write/identity** path (`emit`,
+  `sign`, `whoami`, `resolve`) — you cannot write, sign, or drive the
+  interactive TUI into the past. The default folded read is no longer
+  head-only — see **Temporal cursor** below (0.8.0).
 - **Caveats**: tier glyphs are present-session lens state and stay head under a
   rewind (§9.3 permits non-critical state to follow the reading session). FTS
   content search (`--match`) is a head-built index; a historical result set is
-  window-filtered but queries the head kind set. `--ontology-as-of` (unequal
-  cursors — deliberate reinterpretation) is reserved for 0.8.0, not yet wired.
+  window-filtered but queries the head kind set.
+
+### Temporal cursor — `--at` / `--as-of` / `--diff` on the fold route (0.8.0)
+
+The plain folded read (`sl read <vertex>`, no `--facts`/`--ticks`) now takes
+its own two mutually-exclusive temporal selectors — distinct from `--as-of`
+on `--facts`/`--ticks` above, which is unaffected.
+
+- **`--at <address>`** — a WITNESS-CURSOR read: the fold reconstructed at the
+  inclusive prefix of facts a store had *received* at that position (append
+  order, not `ts`) — a backdated/merged arrival never rewrites what an
+  earlier position already showed. Address forms:
+  - `head` — the newest received fact (frozen once resolved).
+  - `fact:ID` — a full fact id or an unambiguous prefix; `fact:<lineage>/<id>`
+    is the durable, portable form an *adopted* store's position serializes
+    to (an *unadopted* store has no durable handle at all).
+  - `seq:N` — the Nth receipt ordinal (1-based).
+  - `tick:ID` — a tick's own id, resolved via its sealed `fact_cursor`.
+  - an ISO date/datetime — snaps to the last sealed tick at-or-before the
+    mark (the wall-clock **floor**); no usable tick refuses, naming
+    `--as-of` as the fallback (never a silent ts-approximation).
+  - Refused outright against a combine/discover aggregate (witness order is
+    per-store, no shared order across members) — use `--as-of` there
+    instead, or address a member vertex directly.
+- **`--as-of <duration|epoch|ISO>`** — the explicit EVENT-TIME projection on
+  the fold route (same grammar as `--facts --as-of`): `ts <= T` for both
+  facts and ontology. Allowed on aggregates (current membership, each
+  member's facts cut by the same cutoff).
+- **`--diff A..B`** (or `--at A --diff B`) — two independent full
+  reconstructions (never an incremental interval-application) plus a
+  key-level structural diff per kind (added/removed/changed; a collect-fold
+  degrades honestly to a before/after count). Also reports interval
+  honesty: late (backdated) arrivals between the two positions, and whether
+  the declaration changed within the interval — a "no differences"
+  structural diff can still hide either.
+- Every answer discloses its resolved **mode** (`witness`/`as_of`), the
+  honesty-ladder **status** (`store`/`file-pre-genesis`/`unhistorized`/
+  `aggregate-head`), and — for a witness position — its seq/anchor/
+  portable state, both as a prepended text line and as a `cursor` (or, for
+  `--diff`, `interval`) key in `--json` output.
 
 ### Query & transform grammar
 

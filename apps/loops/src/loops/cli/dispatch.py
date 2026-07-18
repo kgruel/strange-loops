@@ -179,7 +179,9 @@ def _project_surface(op: Operation, data):
     return surface
 
 
-def _render_foldstate_json(data, reporter: Reporter) -> int:
+def _render_foldstate_json(
+    data, reporter: Reporter, *, extra: dict | None = None,
+) -> int:
     """Raw-JSON dump for the legacy / lens-override path.
 
     The lifted body of the old ``cli/views/fold._render_json``. Used when the
@@ -188,6 +190,11 @@ def _render_foldstate_json(data, reporter: Reporter) -> int:
     emitting the raw fetched shape instead of degrading to a rendered Block.
     The gate-PASS path emits ``to_dict(surface)`` instead (the structured,
     ranked encoding).
+
+    ``extra`` (e.g. the 0.8.0 cursor disclosure) is merged into the top-level
+    dict when *data* is itself a dict; otherwise it wraps ``data`` under a
+    ``"data"`` key alongside the extra fields (a non-dict gate-fail shape —
+    e.g. a raw ``FoldState`` — has no top level to merge into).
     """
     import json
 
@@ -198,7 +205,10 @@ def _render_foldstate_json(data, reporter: Reporter) -> int:
             return obj.__dict__
         return str(obj)
 
-    reporter.msg(json.dumps(data, default=_default))
+    payload = data
+    if extra:
+        payload = {**data, **extra} if isinstance(data, dict) else {"data": data, **extra}
+    reporter.msg(json.dumps(payload, default=_default))
     return 0
 
 
@@ -293,21 +303,33 @@ def dispatch(op: Operation, *, reporter: Reporter) -> int:
             f"custom-lens vertex '{vtx}' — flags ignored "
             f"(--kind and single --key still apply)."
         )
+    # Temporal cursor (0.8.0, A11): when the view resolved an --at/--as-of
+    # position, render_context carries its machine-readable mode/status/
+    # position disclosure under "cursor" — merged into whichever JSON shape
+    # answers below, so the mode is a structured field, never prose-only.
+    cursor_meta = op.render_context.get("cursor")
+
     if op.format is Format.JSON:
         if gate:
             import json
 
             from loops.surface import to_dict
 
-            reporter.msg(json.dumps(to_dict(_project_surface(op, data))))
+            payload = to_dict(_project_surface(op, data))
+            if cursor_meta is not None:
+                payload["cursor"] = cursor_meta
+            reporter.msg(json.dumps(payload))
             return 0
         # Override / vertex-decl lens, or a non-FoldState shape (lens-fetch
         # dict) → keep the legacy raw dump instead of degrading to text.
-        return _render_foldstate_json(data, reporter)
+        return _render_foldstate_json(
+            data, reporter,
+            extra={"cursor": cursor_meta} if cursor_meta is not None else None,
+        )
     if gate:
         render_data = _project_surface(op, data)
 
-    from loops.lens_resolver import call_lens
+    from loops.lens_resolver import accepts_kwarg, call_lens
 
     # call_lens unpacks Fidelity into the legacy (zoom, **kwargs) shape that
     # existing lenses accept. visible/chars/lines flow as kwargs; the lens
@@ -346,6 +368,24 @@ def dispatch(op: Operation, *, reporter: Reporter) -> int:
     if not isinstance(block, Block):
         # Lens may return None when there's nothing to render.
         return 0
+    # Render-only mode-line fallback (0.8.0 capstone M6): the fetch-side
+    # cursor check upstream (cli.views.fold._lens_fetch_accepts_cursor)
+    # already guarantees the DATA is correctly selected for an active
+    # --at/--as-of read; this is a SEPARATE concern — whether the resolved
+    # render lens's own signature accepts the `cursor` kwarg at all.
+    # call_lens's dispatch silently drops kwargs a lens doesn't declare, so a
+    # render-only custom lens (correct fetch, plain `fold_view(data, zoom,
+    # width)` signature) would answer with the right data but no witness/
+    # as_of label in TEXT — while JSON (merged unconditionally above) still
+    # carries it. Inject the label here, outside the lens body, rather than
+    # refusing: the answer is honest, only the disclosure was about to be
+    # lost.
+    if cursor_meta is not None and not accepts_kwarg(lens_fn, "cursor"):
+        from painted import join_vertical
+
+        from loops.lenses.fold import cursor_mode_line
+
+        block = join_vertical(cursor_mode_line(cursor_meta, width), block)
     reporter.print_block(block)
     return 0
 

@@ -1,0 +1,147 @@
+<title>0.8.0 Overnight Run — Morning Review</title>
+<style>
+  :root {
+    --bg: #F7F8F9; --panel: #FFFFFF; --ink: #22272B; --muted: #5C666E;
+    --line: #E1E6E9; --accent: #1E9E97; --violet: #6C5FC7;
+    --good: #2E8B5F; --warn: #B07E2B; --crit: #C05348;
+    --chipbg: #EEF2F3; --codebg: #F0F3F4;
+  }
+  @media (prefers-color-scheme: dark) { :root {
+    --bg: #101319; --panel: #171B23; --ink: #E8ECEF; --muted: #97A1AB;
+    --line: #262C36; --accent: #2FB7B0; --violet: #8A7FD8;
+    --good: #4CAF7A; --warn: #D9A03F; --crit: #D96459;
+    --chipbg: #1F2530; --codebg: #1C212B;
+  } }
+  :root[data-theme="dark"] {
+    --bg: #101319; --panel: #171B23; --ink: #E8ECEF; --muted: #97A1AB;
+    --line: #262C36; --accent: #2FB7B0; --violet: #8A7FD8;
+    --good: #4CAF7A; --warn: #D9A03F; --crit: #D96459;
+    --chipbg: #1F2530; --codebg: #1C212B;
+  }
+  :root[data-theme="light"] {
+    --bg: #F7F8F9; --panel: #FFFFFF; --ink: #22272B; --muted: #5C666E;
+    --line: #E1E6E9; --accent: #1E9E97; --violet: #6C5FC7;
+    --good: #2E8B5F; --warn: #B07E2B; --crit: #C05348;
+    --chipbg: #EEF2F3; --codebg: #F0F3F4;
+  }
+  body { background: var(--bg); color: var(--ink); font: 15px/1.55 system-ui, -apple-system, sans-serif;
+         margin: 0; padding: 2.2rem 1.2rem 4rem; }
+  main { max-width: 880px; margin: 0 auto; display: flex; flex-direction: column; gap: 1.6rem; }
+  h1 { font-size: 1.45rem; font-weight: 650; letter-spacing: -0.01em; margin: 0; text-wrap: balance; }
+  h2 { font-size: 0.8rem; font-weight: 650; text-transform: uppercase; letter-spacing: 0.08em;
+       color: var(--muted); margin: 0 0 0.7rem; }
+  .sub { color: var(--muted); margin: 0.3rem 0 0; font-size: 0.92rem; }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 1.1rem 1.3rem; }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 0.9rem; }
+  .stat b { display: block; font-size: 1.5rem; font-weight: 650; font-variant-numeric: tabular-nums; }
+  .stat span { font-size: 0.78rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
+  .chip { display: inline-block; font: 600 0.72rem/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
+          padding: 0 0.55em; border-radius: 3px; background: var(--chipbg); vertical-align: 1px; }
+  .chip.good { color: var(--good); } .chip.warn { color: var(--warn); }
+  .chip.crit { color: var(--crit); } .chip.violet { color: var(--violet); } .chip.accent { color: var(--accent); }
+  table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+  th { text-align: left; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em;
+       color: var(--muted); font-weight: 600; padding: 0.35rem 0.8rem 0.35rem 0; border-bottom: 1px solid var(--line); }
+  td { padding: 0.5rem 0.8rem 0.5rem 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+  tr:last-child td { border-bottom: none; }
+  code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.85em;
+                background: var(--codebg); padding: 0.1em 0.35em; border-radius: 3px; }
+  .decisions li { margin-bottom: 0.9rem; }
+  .decisions b { color: var(--accent); }
+  ol, ul { padding-left: 1.2rem; margin: 0; }
+  .flow { display: flex; flex-wrap: wrap; gap: 0.35rem 0.5rem; align-items: center;
+          font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.8rem; color: var(--muted); }
+  .flow .arrow { color: var(--line); }
+  .note { font-size: 0.85rem; color: var(--muted); margin-top: 0.6rem; }
+  .tablewrap { overflow-x: auto; }
+  a { color: var(--accent); }
+</style>
+<main>
+  <header>
+    <h1>0.8.0 overnight run — morning review</h1>
+    <p class="sub">2026-07-16 23:30 → 07:10 · four design sessions closed · three branches landed · Opus/Sonnet built, codex reviewed, loops-claude arbitrated</p>
+  </header>
+
+  <section>
+    <div class="stats">
+      <div class="stat"><b>4/4</b><span>design sessions</span></div>
+      <div class="stat"><b>23</b><span>commits, 3 branches</span></div>
+      <div class="stat"><b>~50</b><span>review findings fixed</span></div>
+      <div class="stat"><b>3,440</b><span>tests green</span></div>
+      <div class="stat"><b>0</b><span>merges (yours)</span></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Decisions waiting on you</h2>
+    <ol class="decisions">
+      <li><b>Merge calls.</b> Three unpushed local branches, all gates green, all review rounds applied:
+        <code>feat/temporal-cursor</code> (13 commits — re-verification closed <span class="chip good">MERGE-READY</span>, trail below),
+        <code>feat/vertex-handle</code> (7 commits, branched off temporal-cursor — merge after it),
+        <code>feat/tui-s0-goldens</code> (2 commits, test-only, in the agent worktree — safe first merge).</li>
+      <li><b>The Digest gate</b> — <code>design:architecture/digest-first-consumer</code> is held at <span class="chip violet">PROPOSED</span> because three calls are yours:
+        (a) ratify the canonical authorization evaluator (decl-chain classifier, engine gate as shadow + singleness ratchet),
+        (b) owner-only first slice: the advisor called it a dodge, the panel showed that argument proves too much — both paths staged neutrally,
+        (c) promote <code>architecture/parallel-authorization-paths</code> from observation to decision if it is to bind as the gate.</li>
+      <li><b>Protocol coordination package → loops-go</b> (one batch): GlobalReceiptPosition (store-wide receipt ordinal, §10 prerequisite), payload-carried <code>_decl</code> receipt-group id, and five owed vector families (two-authorities late-arrival, cursor-selection, same-ts tie-break, ceremony groups, dump round-trip). Accrued on <code>thread:loops-go-conformance-oracle</code>.</li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>The design wave — closed in one night</h2>
+    <div class="tablewrap"><table>
+      <tr><th>Session</th><th>Verdict</th><th>Core</th></tr>
+      <tr><td>1 · Cursor axis</td><td><span class="chip good">RATIFIED</span></td>
+        <td>Witness-prefix position, fact-id identity; selection=witness (§8.4), replay=(ts,id) (§6.2); ticks are verified <em>names</em> for positions. The "three conflicting authorities" dissolved into roles-in-a-stack. Wall-clock refuses honestly off-anchor and teaches <code>--as-of</code>.</td></tr>
+      <tr><td>2 · VertexHandle</td><td><span class="chip good">RATIFIED</span></td>
+        <td>In-process long-lived handle ("orchestration dissolves daemon" validated); probe transaction-free between probes; full (ts,id) reconstruction per receipt group is the contract.</td></tr>
+      <tr><td>3 · TUI shell</td><td><span class="chip good">RATIFIED</span></td>
+        <td>Interactive RUN tier over fetch+lens; q always zooms out; ONE lens-signature migration including apps/tasks' 7 sites; painted plan reconciled to shipped ViewportAdapter/HostSurface.</td></tr>
+      <tr><td>4 · Digest</td><td><span class="chip violet">PROPOSED — your gate</span></td>
+        <td>Cursor-addressed synthesis window; signature attests authorship-at-receipt, not reproducibility; verifiable coverage manifest; nothing writes until the gate.</td></tr>
+    </table></div>
+    <p class="note">Go-vector oracle check answered empirically (both model families agree): existing vectors certify §4–§6 only — green conformance was <em>silent</em> on the cursor axis. The S5 ts cutoff survives as the explicit labeled projection.</p>
+  </section>
+
+  <section>
+    <h2>Branches</h2>
+    <div class="tablewrap"><table>
+      <tr><th>Branch</th><th>State</th><th>Gates</th><th>Review trail</th></tr>
+      <tr><td><code>feat/temporal-cursor</code><br><span class="note">engine E1-E3 + CLI C1-C2 + design record</span></td>
+        <td><span class="chip good">MERGE-READY</span></td>
+        <td class="mono">engine 1029 · loops 2103 · goldens 145/145</td>
+        <td>2 per-slice codex reviews (13 findings, fixed) → high-effort capstone <span class="chip crit">NOT-MERGE-READY</span> (B1 lineage BLOCKER + 7 MAJOR) → all 10 resolved (<code>7480235</code>, <code>306d28e</code>) → re-verification: 9/10 FIXED + 1 new MAJOR (reversed <code>--diff B..A</code> attributed the late-arrival baseline to 'from', which already contains the late fact) → fixed at the CLI seam, engine's symmetric contract untouched (<code>cdbb24d</code>) → scoped re-check: <span class="chip good">MERGE-READY</span>, no remaining findings.</td></tr>
+      <tr><td><code>feat/vertex-handle</code><br><span class="note">S0-S3 + review round</span></td>
+        <td><span class="chip good">REVIEWED + FIXED</span></td>
+        <td class="mono">engine 1052 · handle 56</td>
+        <td>codex review: 1 CRITICAL (committed write surfacing as uncommitted → retry-duplication) + 8 more — all applied, none disputed (<code>cb2527f</code>). S5 checkpoint rung is required-for-cutover, next session.</td></tr>
+      <tr><td><code>feat/tui-s0-goldens</code><br><span class="note">migration safety net, test-only</span></td>
+        <td><span class="chip good">REVIEWED + FIXED</span></td>
+        <td class="mono">loops 2093 · 74 new goldens</td>
+        <td>sync's first-ever byte coverage; 2 AST ratchets (renderer-contract, isatty-guard), empty allowlists; 3 MAJOR review findings fixed (<code>5066473</code>).</td></tr>
+    </table></div>
+  </section>
+
+  <section>
+    <h2>What the cross-family pipeline caught</h2>
+    <ul>
+      <li><b>codex on Claude code:</b> the serialized-lineage BLOCKER; <code>--facts</code> silently dropping <code>--at</code>; lens metadata labeling head data as witness-derived; <code>--refs</code> escaping the cursor; committed-write-reported-uncommitted.</li>
+      <li><b>Claude panels on codex designs:</b> a fabricated benchmark citation; a false <code>data_version</code> safety claim (empirically refuted); painted-main drift the dossier snapshot missed; the Digest advisor pre-deciding a call it claimed to reserve for you.</li>
+      <li><b>Both on the arbiter:</b> my v2 wall-clock auto-route breached the design's own explicitness clause — the honesty panel caught it; the fix costs one retype (<code>--as-of</code>).</li>
+      <li><b>Residuals banked as observations:</b> floor-snap anchor consistency (merge-reordered stores only); <code>sync_view</code> aggregation fallback bug (byte-locked deliberately, triage before the migration "fixes" it silently).</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>Where everything lives</h2>
+    <div class="flow">
+      <span>docs/scratch/080-overnight/</span><span class="arrow">→</span>
+      <span>final-contracts.md (dispositions)</span><span class="arrow">·</span>
+      <span>s1-arbitration.md (v1→v3)</span><span class="arrow">·</span>
+      <span>8 dossier chapters</span><span class="arrow">·</span>
+      <span>8 panel reviews</span><span class="arrow">·</span>
+      <span>5 codex review verdicts</span>
+    </div>
+    <p class="note">Committed as <code>b7b26da</code> on <code>feat/temporal-cursor</code>. Store: 4 design facts, thread updates on <code>080-design-wave</code> + <code>loops-go-conformance-oracle</code>, retrospective <code>080-overnight-multi-model-run</code>. Also flagged: the TUI mock corpus lives only in <code>~/Downloads</code> — vendoring candidate.</p>
+  </section>
+</main>

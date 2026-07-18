@@ -1,0 +1,11 @@
+## THREAD (1)
+KEY                                          TIER   N  IN  DATE        MESSAGE
+dispatch-default-subsumes-vertex-pre-router  mid    1   0  2026-07-06  open · painted 0.7.0's run_app(default=) models 'unmatched arg0 ⇒ default handler receiving full argv' — EXACTLY the tier-3 vertex-shorthand pre-router that cli/app.py:236-238 comments say painted couldn't do. The whole known-set gate + manual fall-through (incl the completion-dispatch bug just patched) is now a dissolution candidate: pass default=<vertex-shorthand AppCommand> to run_app, delete the known-set gate, let painted own all dispatch. Deferred out of the release bump (touches the most-used sl <vertex> path, needs own test+smoke cycle). Minimal fix shipped instead: known |= {'completion'}. ref=decision:design/full-painted-integration-residue
+  observer: kyle/loops-claude
+  id:01KWVXTB
+  ops: loops-cli
+  feature: painted-070-bump
+  ▸ Jul 6 open
+  _id: 01KWVXTBFFNX98VY8BR43D93H7
+  _ts: 2026-07-06T14:37:49+00:00
+  _observer: kyle/loops-claude

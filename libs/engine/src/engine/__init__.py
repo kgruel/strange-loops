@@ -92,7 +92,28 @@ __all__ = [
     "vertex_summary",
     # Declaration resolver (store-backed declaration seam)
     "load_declaration",
+    "load_declaration_status",
     "resolve_declaration_documents",
+    # Witness positions (read-path temporal cursor)
+    "WitnessPosition",
+    "WitnessFold",
+    "TickAnchor",
+    "resolve_witness_position",
+    "resolve_seq",
+    "resolve_tick_cursor",
+    "resolve_tick_floor",
+    "expand_fact_prefix",
+    "durable_handle",
+    "verify_position_for_store",
+    "diff_interval_report",
+    "WitnessResolutionError",
+    "UnknownWitnessHandle",
+    "MidReceiptGroupPosition",
+    "WitnessAggregateUnsupported",
+    "WitnessLineageMismatch",
+    "SeqOutOfRange",
+    "UnknownTickHandle",
+    "NoWitnessAnchor",
 ]
 
 _LAZY_IMPORTS: dict[str, tuple[str, str]] = {
@@ -171,10 +192,37 @@ _LAZY_IMPORTS: dict[str, tuple[str, str]] = {
     "vertex_ticks": ("engine.vertex_reader", "vertex_ticks"),
     # Declaration resolver
     "load_declaration": ("engine.declaration", "load_declaration"),
+    "load_declaration_status": ("engine.declaration", "load_declaration_status"),
     "resolve_declaration_documents": (
         "engine.declaration",
         "resolve_declaration_documents",
     ),
+    # Witness positions (read-path temporal cursor)
+    "WitnessPosition": ("engine.witness", "WitnessPosition"),
+    "WitnessFold": ("engine.witness", "WitnessFold"),
+    "TickAnchor": ("engine.witness", "TickAnchor"),
+    "resolve_witness_position": ("engine.witness", "resolve_witness_position"),
+    "resolve_seq": ("engine.witness", "resolve_seq"),
+    "resolve_tick_cursor": ("engine.witness", "resolve_tick_cursor"),
+    "resolve_tick_floor": ("engine.witness", "resolve_tick_floor"),
+    "expand_fact_prefix": ("engine.witness", "expand_fact_prefix"),
+    "durable_handle": ("engine.witness", "durable_handle"),
+    "verify_position_for_store": (
+        "engine.witness",
+        "verify_position_for_store",
+    ),
+    "diff_interval_report": ("engine.witness", "diff_interval_report"),
+    "WitnessResolutionError": ("engine.witness", "WitnessResolutionError"),
+    "UnknownWitnessHandle": ("engine.witness", "UnknownWitnessHandle"),
+    "MidReceiptGroupPosition": ("engine.witness", "MidReceiptGroupPosition"),
+    "WitnessAggregateUnsupported": (
+        "engine.witness",
+        "WitnessAggregateUnsupported",
+    ),
+    "WitnessLineageMismatch": ("engine.witness", "WitnessLineageMismatch"),
+    "SeqOutOfRange": ("engine.witness", "SeqOutOfRange"),
+    "UnknownTickHandle": ("engine.witness", "UnknownTickHandle"),
+    "NoWitnessAnchor": ("engine.witness", "NoWitnessAnchor"),
 }
 
 

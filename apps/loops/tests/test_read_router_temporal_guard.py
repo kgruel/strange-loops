@@ -6,8 +6,11 @@ stream (--facts + temporal) and ticks routes. On the default fold route
 they used to vanish — ``sl read project --as-of X`` rendered head state
 with exit 0, a silent anachronism against SPEC §9.3's honesty posture.
 
-Until fold-state-as-of ships (0.8.0 temporal-cursor work), the router
-refuses: exit 2 + a reporter error naming the supported spellings.
+0.8.0 (temporal-cursor, C1) closes the gap for two of the three: --at
+(witness cursor) and --as-of (event-time projection) are now honored
+directly on the fold route (A11) — mutually exclusive with each other.
+--since and --id still have no fold-route meaning and stay refused,
+teaching --facts/--ticks AND the two new cursor flags.
 """
 
 from __future__ import annotations
@@ -29,7 +32,6 @@ class TestFoldRouteRefusesTemporalFlags:
     @pytest.mark.parametrize(
         "argv",
         [
-            ["project", "--as-of", "30d"],
             ["project", "--since", "7d"],
             ["project", "--id", "01ARZ3NDEKTSV4RRFFQ69G5FAV"],
             ["project", "--since", "7d", "--as-of", "30d"],
@@ -42,11 +44,31 @@ class TestFoldRouteRefusesTemporalFlags:
         err = "\n".join(reporter.err_lines)
         assert "cannot honor" in err
         assert "--facts" in err  # points at the supported spelling
+        assert "--at" in err and "--as-of" in err  # and the cursor flags
 
     def test_error_names_the_flag(self):
         reporter = BufferReporter()
-        read_view.run(["project", "--as-of", "30d"], ctx(reporter))
-        assert "--as-of" in "\n".join(reporter.err_lines)
+        read_view.run(["project", "--since", "7d"], ctx(reporter))
+        assert "--since" in "\n".join(reporter.err_lines)
+
+    def test_at_and_as_of_together_refused(self):
+        reporter = BufferReporter()
+        rc = read_view.run(["project", "--at", "head", "--as-of", "30d"], ctx(reporter))
+        assert rc == 2
+        err = "\n".join(reporter.err_lines)
+        assert "mutually exclusive" in err
+
+    def test_ticks_with_at_refused(self):
+        reporter = BufferReporter()
+        rc = read_view.run(["project", "--ticks", "--at", "head"], ctx(reporter))
+        assert rc == 2
+        assert "fold route only" in "\n".join(reporter.err_lines)
+
+    def test_ticks_with_diff_refused(self):
+        reporter = BufferReporter()
+        rc = read_view.run(["project", "--ticks", "--diff", "head..head"], ctx(reporter))
+        assert rc == 2
+        assert "fold route only" in "\n".join(reporter.err_lines)
 
 
 class TestTemporalRoutesStillCarryTheCursor:
@@ -88,3 +110,38 @@ class TestTemporalRoutesStillCarryTheCursor:
         assert rc == 0
         argv = m.call_args[0][0]
         assert "--facts" in argv
+
+    def test_bare_as_of_routes_to_fold_with_flag(self):
+        # 0.8.0: --as-of alone (no --facts/--ticks) is the fold-route
+        # event-time projection — no longer refused.
+        c = ctx()
+        with mock.patch("loops.cli.views.fold.run", return_value=0) as m:
+            rc = read_view.run(["project", "--as-of", "30d"], c)
+        assert rc == 0
+        argv = m.call_args[0][0]
+        assert "--as-of" in argv and "30d" in argv
+
+    def test_at_routes_to_fold_with_flag(self):
+        c = ctx()
+        with mock.patch("loops.cli.views.fold.run", return_value=0) as m:
+            rc = read_view.run(["project", "--at", "head"], c)
+        assert rc == 0
+        argv = m.call_args[0][0]
+        assert "--at" in argv and "head" in argv
+
+    def test_diff_routes_to_fold_with_flag(self):
+        c = ctx()
+        with mock.patch("loops.cli.views.fold.run", return_value=0) as m:
+            rc = read_view.run(["project", "--diff", "head..head"], c)
+        assert rc == 0
+        argv = m.call_args[0][0]
+        assert "--diff" in argv and "head..head" in argv
+
+    def test_at_diff_alt_syntax_routes_to_fold_with_both_flags(self):
+        c = ctx()
+        with mock.patch("loops.cli.views.fold.run", return_value=0) as m:
+            rc = read_view.run(["project", "--at", "head", "--diff", "seq:1"], c)
+        assert rc == 0
+        argv = m.call_args[0][0]
+        assert "--at" in argv and "head" in argv
+        assert "--diff" in argv and "seq:1" in argv

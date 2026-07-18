@@ -263,7 +263,129 @@ def _resolve_mode(
     return "static"
 
 
+# --- Temporal cursor (0.8.0) — --at / --as-of resolution -------------------
+
+
+class CursorAddressError(Exception):
+    """Wraps any --at/--as-of resolution failure with a ``read --at/--as-of:
+    `` prefix — the single catch site in ``run()`` reports it and exits 2."""
+
+
+def _anchor_dict(position: Any) -> dict | None:
+    """JSON-clean projection of a ``WitnessPosition.anchor`` (TickAnchor)."""
+    anchor = position.anchor
+    if anchor is None:
+        return None
+    return {"name": anchor.name, "ts": anchor.ts, "fact_cursor": anchor.fact_cursor}
+
+
+def _resolve_cursor(
+    vertex_path: Path, at_address: str | None, as_of_raw: str | None,
+) -> tuple[Any, float | None, dict]:
+    """Resolve ``--at``/``--as-of`` (mutually exclusive, enforced upstream by
+    the read router) into ``(witness_position_or_None, as_of_ts_or_None,
+    cursor_meta)``.
+
+    ``cursor_meta`` is the machine-readable mode/status/position disclosure
+    (A11) — carried in ``render_context`` for text rendering and merged into
+    the JSON payload by ``dispatch``. Raises :class:`CursorAddressError` for
+    every failure mode (aggregate refusal, unresolvable address, mid-ceremony
+    position, out-of-range seq, unanchored wall-clock/tick) with the
+    underlying teaching message intact.
+    """
+    from loops.cli.witness_address import (
+        AddressError,
+        is_aggregate_vertex,
+        refuse_aggregate_at,
+        resolve_at_address,
+    )
+    from loops.commands.resolve import _resolve_vertex_store_path
+
+    if at_address is not None:
+        if is_aggregate_vertex(vertex_path):
+            raise CursorAddressError(str(refuse_aggregate_at(at_address)))
+        try:
+            store_path = _resolve_vertex_store_path(vertex_path)
+        except Exception as exc:  # VertexNotFound/VertexParseError etc.
+            raise CursorAddressError(str(exc)) from exc
+        if store_path is None:
+            raise CursorAddressError(
+                "this vertex has no store — there is nothing to address a "
+                "witness position against."
+            )
+        try:
+            position = resolve_at_address(store_path, at_address)
+        except AddressError as exc:
+            raise CursorAddressError(str(exc)) from exc
+        except Exception as exc:  # engine WitnessResolutionError family
+            raise CursorAddressError(str(exc)) from exc
+
+        from engine import durable_handle, load_declaration_status
+
+        _ast, status = load_declaration_status(vertex_path, at=position)
+        # A10 durable-handle contract (B1a): only an adopted store yields a
+        # PORTABLE handle (fact:<lineage>/<id>); an unadopted position is
+        # session-local, so no reusable handle is advertised — `durable_handle`
+        # is None and consumers render the id as non-portable, never as a bare
+        # `fact:ID` that would silently resolve in another store.
+        handle = durable_handle(position)
+        meta = {
+            "mode": "witness",
+            "address": at_address,
+            "status": status,
+            "fact_id": position.fact_id,
+            "seq": position.seq,
+            "unadopted": position.unadopted,
+            "lineage": position.lineage,
+            "durable_handle": handle,
+            "portable": handle is not None,
+            "anchor": _anchor_dict(position),
+        }
+        return position, None, meta
+
+    # --as-of: the explicit event-time projection. Same duration/epoch/ISO
+    # grammar the shipped stream/ticks --as-of already accepts.
+    from datetime import datetime, timezone
+
+    from loops.commands.fetch import _parse_as_of
+
+    try:
+        as_of_ts = _parse_as_of(as_of_raw, datetime.now(timezone.utc))
+    except ValueError as exc:
+        raise CursorAddressError(str(exc)) from exc
+
+    from engine import load_declaration_status
+
+    _ast, status = load_declaration_status(vertex_path, as_of=as_of_ts)
+    meta = {"mode": "as_of", "address": as_of_raw, "status": status, "as_of": as_of_ts}
+    return None, as_of_ts, meta
+
+
 # --- Fetch closures --------------------------------------------------------
+
+
+def _lens_fetch_accepts_cursor(fetch_fn: Any, *, at: bool, as_of: bool) -> bool:
+    """True when a lens-declared fetch can honor the active cursor selector.
+
+    Mirrors ``call_lens_fetch``'s own signature-based dispatch (``**kwargs``
+    opts into everything; otherwise only named params are passed) so this
+    check and the actual call always agree on what "accepts" means. Called
+    by ``run()`` BEFORE dispatch — a lens fetch that doesn't declare the
+    active selector would silently answer at head while the render context
+    still carries witness/as_of metadata (review finding 2: a head answer
+    mislabeled as a historical one). ``at``/``as_of`` here are just "is this
+    selector active", not the resolved values.
+    """
+    import inspect
+
+    params = inspect.signature(fetch_fn).parameters
+    if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()):
+        return True
+    if at and "at" not in params:
+        return False
+    if as_of and "as_of" not in params:
+        return False
+    return True
 
 
 def _build_fold_fetch(
@@ -273,22 +395,25 @@ def _build_fold_fetch(
     key: str | None,
     refs_depth: int,
     want_facts: bool,
-    lens: str | None,
+    lens_fetch: Any,
+    *,
+    at: Any = None,
+    as_of: float | None = None,
 ) -> Any:
     """Return a zero-arg callable that produces the fold data.
 
-    Honours lens-declared fetch (composition lenses) when present;
-    otherwise calls ``commands.fetch.fetch_fold`` with the full kwarg
-    surface.
+    Takes an already-resolved lens-declared fetch (composition lenses) —
+    resolved once by the caller (``run``), which also checks it can honor
+    an active cursor selector (``_lens_fetch_accepts_cursor``) before ever
+    reaching here, so this closure never needs a fallback "did it actually
+    apply the cursor" check of its own. ``None`` falls through to
+    ``commands.fetch.fetch_fold``. ``at``/``as_of`` (0.8.0 temporal cursor)
+    pass straight through either path.
     """
     from loops.commands.resolve import _apply_vertex_scope
 
     obs = _apply_vertex_scope(observer, vertex_path) or None
     _validate_kind_or_exit(kind, vertex_path)
-
-    from loops.cli.lens import _resolve_lens_fetch
-
-    lens_fetch = _resolve_lens_fetch(lens, vertex_path, "fold_view")
 
     def fetch_data():
         if lens_fetch is not None:
@@ -299,6 +424,7 @@ def _build_fold_fetch(
                 kind=kind, key=key, observer=obs,
                 retain_facts=want_facts,
                 refs_depth=refs_depth,
+                at=at, as_of=as_of,
             )
         from loops.commands.fetch import fetch_fold
 
@@ -306,6 +432,7 @@ def _build_fold_fetch(
             vertex_path, kind=kind, key=key, observer=obs,
             retain_facts=want_facts,
             refs_depth=refs_depth,
+            at=at, as_of=as_of,
         )
 
     return fetch_data
@@ -443,20 +570,81 @@ def run(argv: list[str], ctx: Invocation) -> int:
 
     # --why is an address-scoped provenance drill: it renders ONE folded
     # (kind, key) entry field by field, so it short-circuits the multi-section
-    # fold path entirely (own fetch, own lens, own --json shape).
+    # fold path entirely (own fetch, own lens, own --json shape). Cursor
+    # addressing on --why is out of scope tonight — refuse rather than
+    # silently drop the flag (the same honesty stance as the router refusal).
+    # --diff is a SEPARATE temporal operation (two reconstructions), not a
+    # cursor address, but the same silent-discard hazard applies: --why
+    # returns before the --diff branch ever runs, so `--why --diff A..B`
+    # used to answer the head provenance query while --diff vanished with
+    # no error (capstone M4).
     if args.why:
+        if args.at or args.as_of or args.diff:
+            flag = "--diff" if args.diff else ("--at" if args.at else "--as-of")
+            ctx.reporter.err(
+                f"read --why: {flag} is not supported together with --why "
+                "yet — the provenance drill always reads at head (historical "
+                "why is future work)."
+            )
+            return 2
         return _run_why(
             ctx, vertex_path, kind, queried_key, key_or,
             json=(parse_format(args) is Format.JSON),
             zoom=parse_zoom(args),
         )
 
+    # --diff: two full reconstructions + a structural diff. Wholly different
+    # render shape from a single fold, so it short-circuits here too (own
+    # fetch pair, own render, own --json shape) — mirrors --why.
+    if args.diff:
+        return _run_diff(ctx, vertex_path, args, kind=kind, key=fetch_key)
+
+    # Temporal cursor (0.8.0, A8/A11): --at (witness) / --as-of (event-time)
+    # are mutually exclusive (enforced by the read router before this view
+    # ever runs) and resolve to a position/ts + machine-readable metadata.
+    at_position: Any = None
+    as_of_ts: float | None = None
+    cursor_meta: dict | None = None
+    if args.at or args.as_of:
+        try:
+            at_position, as_of_ts, cursor_meta = _resolve_cursor(
+                vertex_path, args.at, args.as_of,
+            )
+        except CursorAddressError as exc:
+            ctx.reporter.err(f"read: {exc}")
+            return 2
+
+    # Resolve the lens fetch ONCE here (rather than inside _build_fold_fetch)
+    # so a cursor selector can be checked against it before anything runs:
+    # a lens-declared fetch that doesn't accept at=/as_of= would otherwise
+    # silently answer at head while cursor_meta still claims a witness/as_of
+    # position — a head answer mislabeled as historical (review finding 2).
+    # Refuse rather than degrade; the built-in fold fetch (lens_fetch is
+    # None) always supports both, so this never fires on the default path.
+    from loops.cli.lens import _resolve_lens_fetch
+
+    lens_fetch = _resolve_lens_fetch(args.lens, vertex_path, "fold_view")
+    if cursor_meta is not None and lens_fetch is not None:
+        if not _lens_fetch_accepts_cursor(
+            lens_fetch, at=at_position is not None, as_of=as_of_ts is not None,
+        ):
+            flag = "--at" if at_position is not None else "--as-of"
+            ctx.reporter.err(
+                f"read: this vertex's lens fetch doesn't accept {flag} — "
+                "it would answer at head while the response still claimed "
+                "a historical position. Drop --at/--as-of, or use a lens "
+                "whose fetch declares at=/as_of= (or **kwargs)."
+            )
+            return 2
+
     fetch_data = _build_fold_fetch(
         vertex_path, ctx.observer,
         kind=kind, key=fetch_key,
         refs_depth=refs_depth,
         want_facts=args.facts,
-        lens=args.lens,
+        lens_fetch=lens_fetch,
+        at=at_position,
+        as_of=as_of_ts,
     )
 
     # Format (JSON / PLAIN / AUTO) flows onto the Operation; dispatch forks on
@@ -503,6 +691,22 @@ def run(argv: list[str], ctx: Invocation) -> int:
     elif args.live and not ctx.isatty:
         ctx.reporter.err("live mode needs a TTY; rendering static instead")
 
+    # Interactive dispatch (autoresearch TUI) is head-only in 0.8.0: the
+    # cursor was already resolved above into at_position/as_of_ts/cursor_meta,
+    # but dispatch's INTERACTIVE branch calls op.interactive_handler() directly
+    # and never touches op.fn/fetch_data at all — the resolved position would
+    # be silently discarded and the TUI would read live/head data while the
+    # user believed they'd addressed a historical one (capstone M5). Refuse
+    # rather than let the Operation carry a cursor no code path applies.
+    if mode == "interactive" and (at_position is not None or as_of_ts is not None):
+        flag = "--at" if at_position is not None else "--as-of"
+        ctx.reporter.err(
+            f"read -i: {flag} is not supported together with -i yet — "
+            "interactive mode (autoresearch) is head-only in 0.8.0. Drop "
+            f"{flag}, or drop -i for a static witnessed/event-time read."
+        )
+        return 2
+
     # Stream / interactive bindings ---------------------------------------
     stream_fn: Callable[[], AsyncIterator[Any]] | None = None
     if mode == "live":
@@ -523,7 +727,13 @@ def run(argv: list[str], ctx: Invocation) -> int:
         surface_spec=surface_spec,
         # Presentation register keys on the channel (TTY = human "Threads (N):"
         # headers, pipe = terse "## KIND (N)"), decoupled from width/truncation.
-        render_context={"piped": not ctx.isatty},
+        # "cursor" (0.8.0, A11) carries the --at/--as-of mode/status/position
+        # disclosure — read by the fold lens (mode-line) and by dispatch's
+        # JSON branch (merged into the structured payload).
+        render_context={
+            "piped": not ctx.isatty,
+            **({"cursor": cursor_meta} if cursor_meta is not None else {}),
+        },
         vertex_path=vertex_path,
         observer=ctx.observer,
         mode=mode,  # type: ignore[arg-type]
@@ -666,6 +876,209 @@ def _collect_section_facts(state: Any, kind: str) -> list[dict]:
             facts.append(pd)
     facts.sort(key=lambda f: f.get("_ts") or 0)
     return facts
+
+
+
+
+# --- Structural diff (0.8.0, C2) -------------------------------------------
+
+
+def _split_diff_addresses(
+    at_value: str | None, diff_value: str,
+) -> tuple[str | None, str | None, str | None]:
+    """Split ``--diff``'s value (+ optional ``--at``) into two addresses.
+
+    Two accepted forms: ``--diff A..B`` (split on the first ``..`` — ISO
+    fractional seconds use a single dot, never a double, so this is
+    unambiguous) or ``--at A --diff B`` (the trivial alt syntax). Returns
+    ``(addr1, addr2, error)`` — exactly one of the pair is ``None`` on error.
+    """
+    if ".." in diff_value:
+        if at_value:
+            return None, None, (
+                "give either `--diff A..B` or `--at A --diff B`, not both"
+            )
+        a, b = diff_value.split("..", 1)
+        a, b = a.strip(), b.strip()
+        if not a or not b:
+            return None, None, (
+                f"`--diff {diff_value!r}` needs two addresses on either "
+                "side of '..'"
+            )
+        return a, b, None
+    if not at_value:
+        return None, None, (
+            "--diff needs two addresses: `--diff A..B`, or `--at A --diff B`"
+        )
+    return at_value, diff_value, None
+
+
+def _diff_snapshot(state: Any) -> dict[str, dict[str, dict]]:
+    """A ``FoldState`` reduced to ``{kind: {key: payload}}`` for diffing.
+
+    Keyed (``by``-fold) sections diff at the key level. Each key's payload
+    carries a synthetic ``_n`` (revision count) alongside the visible
+    fields — a backdated arrival that loses the ``(ts, id)`` replay to an
+    earlier-received-but-later-ts fact leaves the VISIBLE payload unchanged
+    (the winner didn't change) while still advancing the receipt count; `_n`
+    is what makes that witnessed event honestly visible in the diff instead
+    of two positions that "look" identical.
+
+    Keyless (``collect``) sections have no stable per-item identity to diff
+    against, so they reduce to a single synthetic ``"_count"`` entry — an
+    honest degradation (item-level collect diffing is out of scope, not
+    silently faked).
+    """
+    out: dict[str, dict[str, dict]] = {}
+    for section in state.sections:
+        if section.key_field:
+            snap: dict[str, dict] = {}
+            for item in section.items:
+                key = str(item.payload.get(section.key_field, ""))
+                payload = dict(item.payload)
+                payload["_n"] = item.n
+                snap[key] = payload
+            out[section.kind] = snap
+        else:
+            out[section.kind] = {"_count": {"n": len(section.items)}}
+    return out
+
+
+def _compute_diff(before: dict, after: dict) -> list[dict]:
+    """Structural (kind, key) diff between two ``_diff_snapshot`` maps.
+
+    One row per kind that differs: keyed kinds carry added/removed/changed
+    keys (changed = same key, different payload); collect kinds carry a
+    before/after item count. Kinds identical across both sides are omitted.
+    """
+    rows: list[dict] = []
+    for kind in sorted(set(before) | set(after)):
+        b, a = before.get(kind, {}), after.get(kind, {})
+        if "_count" in b or "_count" in a:
+            bn, an = b.get("_count", {}).get("n", 0), a.get("_count", {}).get("n", 0)
+            if bn != an:
+                rows.append({"kind": kind, "collect_count": (bn, an)})
+            continue
+        added = sorted(set(a) - set(b))
+        removed = sorted(set(b) - set(a))
+        changed = sorted(k for k in (set(a) & set(b)) if a[k] != b[k])
+        if added or removed or changed:
+            rows.append({
+                "kind": kind, "added": added, "removed": removed,
+                "changed": [(k, b[k], a[k]) for k in changed],
+            })
+    return rows
+
+
+def _diff_row_to_json(row: dict) -> dict:
+    if "collect_count" in row:
+        before, after = row["collect_count"]
+        return {"kind": row["kind"], "collect_count": {"before": before, "after": after}}
+    return {
+        "kind": row["kind"],
+        "added": row["added"],
+        "removed": row["removed"],
+        "changed": [
+            {"key": k, "before": b, "after": a} for k, b, a in row["changed"]
+        ],
+    }
+
+
+def _run_diff(
+    ctx: Invocation, vertex_path: Path, args: argparse.Namespace,
+    *, kind: str | None, key: str | None,
+) -> int:
+    """``--diff A..B``: two full reconstructions + a structural fold diff.
+
+    Never incremental — a backdated arrival inserts early in ``(ts, id)``
+    replay and can change order-sensitive state, so each endpoint is folded
+    independently from scratch (the same discipline ``--at`` uses). Each
+    endpoint resolves through the same address grammar and aggregate
+    refusal as a bare ``--at`` (``_resolve_cursor``). Mixed axis (one
+    endpoint witness, one event-time) is refused — same-axis endpoints only
+    tonight (C2); since this implementation's two addresses are always
+    witness-grammar, the only reachable "mixed" request is `--as-of`
+    combined with `--diff`, refused explicitly below.
+    """
+    if args.as_of:
+        ctx.reporter.err(
+            "read --diff: mixed modes are refused — one endpoint would be "
+            "event-time (--as-of), the other a witness address (--diff's "
+            "grammar). Give two witness addresses instead: `--diff A..B` "
+            "(or `--at A --diff B`)."
+        )
+        return 2
+
+    addr1, addr2, err = _split_diff_addresses(args.at, args.diff)
+    if err is not None:
+        ctx.reporter.err(f"read --diff: {err}")
+        return 2
+
+    try:
+        pos1, _, meta1 = _resolve_cursor(vertex_path, addr1, None)
+        pos2, _, meta2 = _resolve_cursor(vertex_path, addr2, None)
+    except CursorAddressError as exc:
+        ctx.reporter.err(f"read --diff: {exc}")
+        return 2
+
+    from loops.commands.fetch import fetch_fold
+    from loops.commands.resolve import _apply_vertex_scope
+
+    obs = _apply_vertex_scope(ctx.observer, vertex_path) or None
+    state1 = fetch_fold(vertex_path, kind=kind, key=key, observer=obs, at=pos1)
+    state2 = fetch_fold(vertex_path, kind=kind, key=key, observer=obs, at=pos2)
+    rows = _compute_diff(_diff_snapshot(state1), _diff_snapshot(state2))
+
+    # Interval honesty (M8/A13): a structural diff can look "clean" while
+    # something still happened between the two positions — a late (backdated)
+    # arrival, or a declaration change — that a payload-level diff would never
+    # surface. Both endpoints already resolved against the SAME store (a
+    # precondition diff_interval_report also documents), so this is best-effort
+    # supplementary info: a failure here must not sink the diff itself.
+    interval: dict | None = None
+    try:
+        from engine import diff_interval_report
+        from loops.commands.resolve import _resolve_vertex_store_path
+
+        store_path = _resolve_vertex_store_path(vertex_path)
+        if store_path is not None:
+            interval = diff_interval_report(store_path, pos1, pos2)
+    except Exception:
+        interval = None
+
+    if interval is not None:
+        # Baseline attribution (codex re-verify, post-capstone): the engine
+        # report is symmetric by rowid — late arrivals are computed against
+        # the rowid-LOWER endpoint, whichever the user named first. Only this
+        # layer knows which CLI label ('from'/'to') that endpoint wears, so
+        # stamp it here for both the JSON contract and the lens sentence; a
+        # reversed `--diff B..A` must attribute the baseline to 'to', not
+        # hardcode 'from'.
+        interval = {
+            **interval,
+            "baseline": "from" if pos1.rowid <= pos2.rowid else "to",
+        }
+
+    if parse_format(args) is Format.JSON:
+        import json as _json
+
+        ctx.reporter.msg(_json.dumps({
+            "mode": "diff", "from": meta1, "to": meta2,
+            "sections": [_diff_row_to_json(r) for r in rows],
+            "interval": interval,
+        }))
+        return 0
+
+    import shutil
+
+    from loops.lenses.fold import diff_view
+
+    width = shutil.get_terminal_size().columns if ctx.isatty else None
+    block = diff_view(
+        meta1, meta2, rows, width, piped=not ctx.isatty, interval=interval,
+    )
+    ctx.reporter.print_block(block)
+    return 0
 
 
 # --- Interactive handler (autoresearch TUI) -------------------------------

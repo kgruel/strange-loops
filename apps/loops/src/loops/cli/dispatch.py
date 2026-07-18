@@ -308,6 +308,10 @@ def dispatch(op: Operation, *, reporter: Reporter) -> int:
     # position disclosure under "cursor" — merged into whichever JSON shape
     # answers below, so the mode is a structured field, never prose-only.
     cursor_meta = op.render_context.get("cursor")
+    # Seal-cut provenance (0.9.0 S6): unlike "cursor", "cut" is present on
+    # EVERY fold-route read (unavailable is itself an honest value) — merged
+    # the same way so --json consumers always get it, never just for --at.
+    cut_meta = op.render_context.get("cut")
 
     if op.format is Format.JSON:
         if gate:
@@ -318,14 +322,18 @@ def dispatch(op: Operation, *, reporter: Reporter) -> int:
             payload = to_dict(_project_surface(op, data))
             if cursor_meta is not None:
                 payload["cursor"] = cursor_meta
+            if cut_meta is not None:
+                payload["cut"] = cut_meta
             reporter.msg(json.dumps(payload))
             return 0
         # Override / vertex-decl lens, or a non-FoldState shape (lens-fetch
         # dict) → keep the legacy raw dump instead of degrading to text.
-        return _render_foldstate_json(
-            data, reporter,
-            extra={"cursor": cursor_meta} if cursor_meta is not None else None,
-        )
+        extra = {}
+        if cursor_meta is not None:
+            extra["cursor"] = cursor_meta
+        if cut_meta is not None:
+            extra["cut"] = cut_meta
+        return _render_foldstate_json(data, reporter, extra=extra or None)
     if gate:
         render_data = _project_surface(op, data)
 

@@ -301,6 +301,61 @@ class DateGrouper:
 
 
 # ---------------------------------------------------------------------------
+# Seal-cut provenance disclosure (0.9.0 S6) — the honesty-ladder line for the
+# `cut` render_context/JSON contract (cli.views.fold / cli.witness_address).
+# ---------------------------------------------------------------------------
+
+
+def cut_line(cut: dict, width: int | None) -> Block:
+    """Honest seal-cut disclosure — the ONE place that owns the never-guess-
+    from-None discipline for seal/cut provenance.
+
+    Any lens (built-in, by declaring a ``cut`` kwarg, or an out-of-repo
+    consumer lens) should call here instead of hand-rolling its own default
+    from a missing/None value — that hand-rolling is exactly the defect
+    class this helper exists to close (the friction this slice fixes: an
+    external lens defaulted an absent projection to a positive "Live
+    unsealed fold" claim instead of asking for real data).
+
+    Four states, driven entirely by ``cut``'s own fields — never inferred
+    from absence:
+
+    - ``available`` is ``False`` → "seal status unavailable — <reason>".
+      The reason is always named (aggregate vertex, no store, event-time
+      mode, or a resolution failure) — never silently blank.
+    - ``sealed_to_head`` → "sealed as of tick '<name>' <ts> — head is the
+      sealed cut".
+    - an anchor exists but head sits beyond it → "live head — <n> fact(s)
+      beyond the last seal (sealed at tick '<name>' <ts>)".
+    - no anchor at all → "live head — unsealed tail — no prior tick anchor"
+      (the ``"unsealed tail — no prior tick anchor"`` clause is the exact
+      phrase already proven honest at the witness mode-line,
+      ``lenses/fold.py``'s ``_cursor_lines`` — one wording, not two that
+      quietly diverge).
+    """
+    if not cut.get("available"):
+        reason = cut.get("reason") or "no provenance resolved"
+        return block(f"seal status unavailable — {reason}", Style(dim=True), width)
+
+    anchor = cut.get("anchor")
+    if cut.get("sealed_to_head") and anchor:
+        text = (
+            f"sealed as of tick '{anchor['name']}' {full_iso(anchor['ts'])} — "
+            "head is the sealed cut"
+        )
+    elif anchor:
+        tail = cut.get("facts_beyond_seal")
+        tail_text = f"{tail} fact(s)" if tail is not None else "some facts"
+        text = (
+            f"live head — {tail_text} beyond the last seal "
+            f"(sealed at tick '{anchor['name']}' {full_iso(anchor['ts'])})"
+        )
+    else:
+        text = "live head — unsealed tail — no prior tick anchor"
+    return block(text, Style(dim=True), width)
+
+
+# ---------------------------------------------------------------------------
 # Tick envelope rendering (shared by stream drill + read --ticks drill)
 # ---------------------------------------------------------------------------
 

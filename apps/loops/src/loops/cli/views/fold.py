@@ -624,6 +624,26 @@ def run(argv: list[str], ctx: Invocation) -> int:
             ctx.reporter.err(f"read: {exc}")
             return 2
 
+    # Honest seal-cut provenance (0.9.0 S6, arbiter F1): computed
+    # UNCONDITIONALLY — unlike cursor_meta (only set for an explicit
+    # --at/--as-of), "unavailable" is itself a meaningful, honest value
+    # distinct from "key absent", so every read carries a `cut`. An active
+    # --at read reuses its ALREADY-resolved witness position (zero extra
+    # store I/O); --as-of has no witness-anchored cut by construction; the
+    # default (head) path resolves fresh. S4 (--review header/head-cursor)
+    # MUST reuse `witness_address.resolve_cut`/`cut_from_witness_position`
+    # rather than a second independent head-resolve (S6 arbitration F3).
+    from loops.cli import witness_address
+
+    if at_position is not None:
+        cut_meta: dict = witness_address.cut_from_witness_position(at_position)
+    elif as_of_ts is not None:
+        cut_meta = witness_address.unavailable_cut(
+            "as_of", "event-time projection has no witness-anchored cut",
+        )
+    else:
+        cut_meta = witness_address.resolve_cut(vertex_path)
+
     # Resolve the lens fetch ONCE here (rather than inside _build_fold_fetch)
     # so a cursor selector can be checked against it before anything runs:
     # a lens-declared fetch that doesn't accept at=/as_of= would otherwise
@@ -771,9 +791,15 @@ def run(argv: list[str], ctx: Invocation) -> int:
         # headers, pipe = terse "## KIND (N)"), decoupled from width/truncation.
         # "cursor" (0.8.0, A11) carries the --at/--as-of mode/status/position
         # disclosure — read by the fold lens (mode-line) and by dispatch's
-        # JSON branch (merged into the structured payload).
+        # JSON branch (merged into the structured payload). "cut" (0.9.0 S6)
+        # is the sibling seal-provenance disclosure — ALWAYS present (never
+        # gated the way "cursor" is): any lens (built-in or custom) that
+        # declares a `cut` kwarg receives it for free via call_lens's
+        # existing signature-filtered dispatch; dispatch's JSON branches
+        # merge it in unconditionally too.
         render_context={
             "piped": not ctx.isatty,
+            "cut": cut_meta,
             **({"cursor": cursor_meta} if cursor_meta is not None else {}),
         },
         vertex_path=vertex_path,

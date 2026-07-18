@@ -24,12 +24,13 @@ message tailored to the form (member-scoped handles vs. "not yet built").
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from engine.witness import WitnessPosition
+    from engine.witness import TickAnchor, WitnessPosition
 
 
 class AddressError(Exception):
@@ -244,3 +245,198 @@ def resolve_at_address(store_path: Path, address: str) -> "WitnessPosition":
         anchor=TickAnchor(name=name, ts=ts, fact_cursor=fid),
         group_boundary="floor",
     )
+
+
+# --- Honest seal-cut provenance (0.9.0, S6) ---------------------------------
+#
+# The head-cut resolution primitive: "which sealed cut (if any) is newest at
+# or behind head, is head itself sealed, how many ticks exist, how many
+# facts sit beyond the last seal" — for ANY read, not only an explicit --at.
+# Reuses the SAME witness machinery above rather than a second store-access
+# path (S6 arbitration F3 — S4's --review header/head-cursor disclosure
+# MUST reuse this resolution, not stand up its own).
+
+
+@dataclass(frozen=True)
+class CutMeta:
+    """Honest seal-cut provenance for one read — the ``cut`` render_context/
+    JSON contract (0.9.0 S6).
+
+    ``available=False`` is a genuine, confidently-known state (aggregate
+    vertex, no/uncreated store, an --as-of event-time read, or an engine
+    resolution failure) — ``reason`` is always stated, never left for a
+    consumer to guess from a missing key (the defect this slice closes: the
+    external homelab-audit lens's "Live unsealed fold" guess from a bare
+    ``projection=None`` default).
+
+    ``tick_total``/``facts_beyond_seal`` are ``None`` when the answering mode
+    didn't resolve them — the ``mode="witness"`` case (an active ``--at``
+    read) reuses an ALREADY-resolved :class:`~engine.witness.WitnessPosition`
+    and deliberately does no extra store I/O, so those two derived counts
+    are honestly "not computed here" rather than a guessed value.
+    """
+
+    available: bool
+    #: "head" (default read), "witness" (--at), "as_of" (--as-of), or
+    #: "unavailable" (aggregate / no store / resolution failure).
+    mode: str
+    anchor: dict | None = None
+    sealed_to_head: bool = False
+    tick_total: int | None = None
+    facts_beyond_seal: int | None = None
+    reason: str | None = None
+
+    def to_dict(self) -> dict:
+        """JSON-safe, uniformly-shaped dict — every key always present so a
+        consumer never has to branch on which keys exist before reading one
+        (``reason`` is simply ``None`` when ``available`` is ``True``)."""
+        return {
+            "available": self.available,
+            "mode": self.mode,
+            "anchor": self.anchor,
+            "sealed_to_head": self.sealed_to_head,
+            "tick_total": self.tick_total,
+            "facts_beyond_seal": self.facts_beyond_seal,
+            "reason": self.reason,
+        }
+
+
+def _anchor_to_dict(anchor: "TickAnchor | None") -> dict | None:
+    """JSON-clean projection of a bare :class:`~engine.witness.TickAnchor`.
+
+    Sibling of ``cli.views.fold._anchor_dict`` (which projects off a
+    ``WitnessPosition``) — kept separate rather than shared so the existing
+    ``--at``/``--as-of`` cursor logic stays untouched by this slice.
+    """
+    if anchor is None:
+        return None
+    return {"name": anchor.name, "ts": anchor.ts, "fact_cursor": anchor.fact_cursor}
+
+
+def unavailable_cut(mode: str, reason: str) -> dict:
+    """The ``{"available": False, "reason": ...}`` shape, for every refusal
+    path (aggregate, no store, --as-of, resolution failure) — one source so
+    the shape never drifts across call sites."""
+    return CutMeta(available=False, mode=mode, reason=reason).to_dict()
+
+
+def cut_from_witness_position(position: "WitnessPosition") -> dict:
+    """Cut provenance derived from an ALREADY-RESOLVED witness position —
+    zero extra store I/O. Called for an active ``--at`` read (and, per S6
+    arbitration F3, the function S4's ``--review``/head-cursor work must
+    reuse rather than re-resolving head a second time).
+
+    ``tick_total``/``facts_beyond_seal`` are not resolved here — both need a
+    query beyond what the position itself carries, and the whole point of
+    this path is to add zero I/O to an already-completed ``--at`` resolution
+    (AC7). Use :func:`resolve_cut` for the richer, freshly-resolved default
+    (head) read, which affords itself those extra cheap reads.
+    """
+    anchor = position.anchor
+    sealed_to_head = anchor is not None and anchor.fact_cursor == position.fact_id
+    return CutMeta(
+        available=True,
+        mode="witness",
+        anchor=_anchor_to_dict(anchor),
+        sealed_to_head=sealed_to_head,
+        tick_total=None,
+        facts_beyond_seal=None,
+    ).to_dict()
+
+
+def resolve_cut(vertex_path: Path) -> dict:
+    """The default (head) read's honest seal-cut provenance dict.
+
+    Wraps :func:`is_aggregate_vertex` + store-path resolution +
+    ``engine.witness.resolve_witness_position(store_path, "head")`` +
+    ``engine.vertex_summary(vertex_path)`` (tick count) into the JSON-safe
+    :class:`CutMeta` shape. NEVER raises — every failure mode (aggregate
+    vertex, no/uncreated store, a malformed ``.vertex`` file, any
+    ``WitnessResolutionError``, or any other unexpected exception) degrades
+    to ``available=False`` with a stated reason instead of propagating: a
+    provenance-resolution failure must never abort the read itself (S6
+    arbitration F1/F4). The outer try/except is the belt to
+    ``_resolve_cut_body``'s more specific suspenders — it exists because
+    even the FIRST step (``is_aggregate_vertex``, which parses the vertex
+    file) can raise on a malformed declaration, a case a plain read must
+    survive too.
+    """
+    try:
+        return _resolve_cut_body(vertex_path)
+    except Exception as exc:
+        return unavailable_cut("unavailable", f"unexpected: {exc}")
+
+
+def _resolve_cut_body(vertex_path: Path) -> dict:
+    if is_aggregate_vertex(vertex_path):
+        return unavailable_cut(
+            "unavailable",
+            "aggregate vertex — no single witness cut across members",
+        )
+
+    from loops.commands.resolve import _resolve_vertex_store_path
+
+    try:
+        store_path = _resolve_vertex_store_path(vertex_path)
+    except Exception as exc:  # VertexNotFound / VertexParseError etc.
+        return unavailable_cut("unavailable", f"vertex could not be resolved: {exc}")
+    if store_path is None:
+        return unavailable_cut(
+            "unavailable",
+            "this vertex has no store configured — nothing to seal",
+        )
+    if not store_path.exists():
+        return unavailable_cut(
+            "unavailable", "this vertex's store has not been created yet",
+        )
+
+    from engine.witness import WitnessResolutionError, resolve_witness_position
+
+    try:
+        position = resolve_witness_position(store_path, "head")
+    except WitnessResolutionError as exc:
+        return unavailable_cut("unavailable", str(exc))
+    except Exception as exc:
+        # A genuine unexpected failure (not one of the named engine
+        # resolution errors) — still degrades rather than aborting the read,
+        # but tagged distinctly ("unexpected:") so a test asserting a healthy
+        # store never hits this branch catches a real regression here rather
+        # than it silently blending into the honest-refusal cases forever
+        # (risk mitigation noted in the S6 brief).
+        return unavailable_cut("unavailable", f"unexpected: {exc}")
+
+    # tick_total via the vertex-level read surface (engine.vertex_summary),
+    # not StoreReader directly — apps must not touch StoreReader (architecture
+    # ratchet, tests/test_architecture.py::test_apps_do_not_import_store_reader;
+    # this module isn't in that shrink-only exception list, nor should it be).
+    from engine import vertex_summary
+
+    try:
+        tick_total = vertex_summary(vertex_path)["ticks"]["total"]
+    except Exception as exc:
+        return unavailable_cut("unavailable", f"unexpected: {exc}")
+
+    anchor = position.anchor
+    sealed_to_head = anchor is not None and anchor.fact_cursor == position.fact_id
+    if anchor is None:
+        # Nothing sealed yet — the whole store (by receipt count) is the
+        # unsealed tail.
+        facts_beyond_seal: int | None = position.seq
+    else:
+        try:
+            anchor_position = resolve_witness_position(store_path, anchor.fact_cursor)
+            facts_beyond_seal = position.seq - anchor_position.seq
+        except Exception:
+            # The derived tail count is best-effort supplementary info — a
+            # failure here degrades that ONE field, not the whole cut (the
+            # anchor/sealed_to_head answer above is already sound).
+            facts_beyond_seal = None
+
+    return CutMeta(
+        available=True,
+        mode="head",
+        anchor=_anchor_to_dict(anchor),
+        sealed_to_head=sealed_to_head,
+        tick_total=tick_total,
+        facts_beyond_seal=facts_beyond_seal,
+    ).to_dict()

@@ -525,6 +525,71 @@ def _resolve_key_grammar(
     return None, None, ()
 
 
+# --- Review compose-set (0.9.0 S4, anti-drift whitelist) -------------------
+
+#: Parsed-namespace dests whose non-default value COMPOSES with ``--review``.
+#: A whitelist, enumerated so the exception is legible and the guard is
+#: refuse-by-default: a read flag added in a FUTURE slice is refused under
+#: ``--review`` until it is deliberately added here, rather than silently
+#: passing through inert. (arbiter capstone P2 — the earlier blacklist form
+#: drifted WITHIN one wave: --last, --all (S5), --edge (S3) all leaked.)
+#:
+#: What composes and why:
+#:  - the addressing selectors ``--review`` actually consumes: kind/key/at/as_of;
+#:  - ``tokens`` — the vertex/entity positional (addressing, not reshaping); its
+#:    where/observer PREDICATES do filter, and are refused separately;
+#:  - output/display globals that never reshape the projection: json (review IS
+#:    json), plain, quiet, verbose, static (review IS a static one-shot),
+#:    no_input (a SUPPRESS'd painted no-op).
+#: Everything else refuses — reshaping transforms (limit/last/match/fields/
+#: count/by/full), selectors --review doesn't apply (lens/edge, and --refs which
+#: is pre-extracted), a different read (why/diff/facts), and a delivery mode it
+#: cannot honor (live/interactive).
+_REVIEW_COMPOSE = frozenset({
+    "review", "kind", "key", "at", "as_of", "tokens",
+    "json", "plain", "quiet", "verbose", "static", "no_input",
+})
+
+#: dest → user-facing flag, for the refusal message. Only dests whose flag name
+#: is not ``--<dest-with-dashes>`` need an entry (today: --all's dest show_all).
+_REVIEW_FLAG_OVERRIDE = {"show_all": "--all"}
+
+
+def _review_flag_label(dest: str) -> str:
+    return _REVIEW_FLAG_OVERRIDE.get(dest, "--" + dest.replace("_", "-"))
+
+
+def _review_incompatible_flag(
+    args: argparse.Namespace,
+    parser: argparse.ArgumentParser,
+    *,
+    refs_depth: int,
+    where: dict,
+    observer: str | None,
+) -> str | None:
+    """First flag/predicate on a ``--review`` read that ``--review`` does NOT
+    compose with, as a user-facing label — or ``None`` when the read is clean.
+
+    Structural whitelist (arbiter capstone P2): every parsed-namespace value is
+    compared against ``parser.get_default`` and refused unless its dest is in
+    :data:`_REVIEW_COMPOSE`, so "non-default" tracks the real parser and a flag
+    added later refuses by DEFAULT (never silently drops). ``--refs`` is
+    pre-extracted from argv (absent from the namespace) and the where/observer
+    predicates ride in the composed positional bucket while still filtering the
+    projection — all three are checked explicitly.
+    """
+    for name, value in vars(args).items():
+        if name not in _REVIEW_COMPOSE and value != parser.get_default(name):
+            return _review_flag_label(name)
+    if refs_depth > 0:
+        return "--refs"
+    if where:
+        return f"{next(iter(where))}=…"
+    if observer is not None:
+        return "observer=…"
+    return None
+
+
 # --- Entry point -----------------------------------------------------------
 
 
@@ -578,46 +643,29 @@ def run(argv: list[str], ctx: Invocation) -> int:
         ctx.reporter.err("No vertex resolved — run `loops init` first.")
         return 1
 
-    # --review (0.9.0 S4) is a fold-route JSON projection of folded state. It
-    # composes with --at/--as-of (a review AT a witnessed/event-time position)
-    # and with --kind/--key (scoping is compatible with a canonical projection),
-    # and NOTHING else — silently ignoring a flag is the silent-inert defect
-    # class this wave kills (arbiter S4; S3-F3 idiom). Two refusals:
-    #   - a DIFFERENT read/operation (--why drill, --diff two-position op,
-    #     --facts raw stream): run one or the other;
-    #   - an inert Surface transform / walk / lens the review projection does
-    #     not apply (it is a FULL canonical snapshot): narrow with --kind/--key.
-    # The router already refuses --review with --facts+window / --ticks; a bare
-    # --facts or the in-view transforms reach this parser, so the guard lives at
-    # both boundaries.
+    # --review (0.9.0 S4) is a fold-route JSON projection of folded state that
+    # composes with a WHITELIST (_REVIEW_COMPOSE) and refuses everything else by
+    # default — silently ignoring a flag is the silent-inert defect class this
+    # wave kills (arbiter S4/S3-F3), and the earlier blacklist form of this
+    # guard drifted within one wave (arbiter capstone P2). The router already
+    # refuses --review with --facts+window / --ticks (routes that never reach
+    # this view); a bare --facts or any in-view flag reaches this parser, so the
+    # refuse-by-default guard lives here.
     if args.review:
-        other_read = next(
-            (n for n, v in (
-                ("--why", args.why), ("--diff", args.diff), ("--facts", args.facts),
-            ) if v),
-            None,
+        bad = _review_incompatible_flag(
+            args, parser,
+            refs_depth=refs_depth, where=where, observer=observer_filter,
         )
-        if other_read is not None:
+        if bad == "--all":
             ctx.reporter.err(
-                f"read --review: {other_read} is a different read — the review "
-                "projection snapshots folded state on its own. Run one or the other."
+                "read --review: --all is redundant — the review projection "
+                "always shows everything, inactive entities included; no "
+                "lifecycle hide applies to it. Drop --all."
             )
             return 2
-        inert = next(
-            (n for n, v in (
-                ("--lens", args.lens is not None),
-                ("--match", args.match is not None),
-                ("--fields", args.fields is not None),
-                ("--limit", args.limit is not None),
-                ("--count", args.count),
-                ("--by", args.by is not None),
-                ("--refs", refs_depth > 0),
-            ) if v),
-            None,
-        )
-        if inert is not None:
+        if bad is not None:
             ctx.reporter.err(
-                f"read --review: {inert} is not honored — the review projection "
+                f"read --review: {bad} is not honored — the review projection "
                 "is a full canonical snapshot of folded state. Narrow with "
                 "--kind/--key, or drop --review."
             )

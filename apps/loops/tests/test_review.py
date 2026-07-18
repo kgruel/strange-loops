@@ -545,8 +545,7 @@ class TestGuards:
             ["--review", "--why", "decision/auth"],
             ["--review", "--diff", "seq:1..seq:2"],
             ["--review", "--ticks"],
-            # Inert Surface transforms / walk / lens (arbiter S4: refuse, not
-            # silently ignore).
+            # Reshaping Surface transforms / selectors / walk / lens.
             ["--review", "--lens", "graph"],
             ["--review", "--match", "auth"],
             ["--review", "--fields", "topic"],
@@ -554,6 +553,18 @@ class TestGuards:
             ["--review", "--count"],
             ["--review", "--by", "kind"],
             ["--review", "--refs", "2"],
+            ["--review", "--full"],
+            # Previously LEAKING flags the blacklist form silently ignored —
+            # the drift the whitelist closes (arbiter capstone P2).
+            ["--review", "--last", "5"],
+            ["--review", "--all"],
+            ["--review", "--edge", "ref"],
+            # Delivery modes --review cannot honor.
+            ["--review", "--live"],
+            ["--review", "-i"],
+            # Filtering predicates that ride in the positional bucket.
+            ["--review", "status=open"],
+            ["--review", "observer=kyle"],
         ],
     )
     def test_refused_combos(self, review_vertex, argv):
@@ -561,6 +572,13 @@ class TestGuards:
         rc, r = _run(vpath, argv)
         assert rc == 2
         assert "review" in r.err_text.lower()
+
+    def test_all_refusal_teaches_redundancy(self, review_vertex):
+        vpath, _ = review_vertex
+        rc, r = _run(vpath, ["--review", "--all"])
+        assert rc == 2
+        assert "redundant" in r.err_text.lower()
+        assert "always shows everything" in r.err_text.lower()
 
     def test_facts_since_routes_away_refused(self, review_vertex):
         vpath, _ = review_vertex
@@ -582,6 +600,54 @@ class TestGuards:
         facts = json.loads(r.out_lines[0])["review"]["facts"]
         assert facts  # scoping narrowed, did not empty
         assert {f["kind"] for f in facts} == expect_kinds
+
+    @pytest.mark.parametrize(
+        "argv",
+        [
+            ["--review"],                       # bare
+            ["--review", "--json"],             # review IS json — composes
+            ["--review", "--plain"],            # display global — composes
+            ["--review", "-q"],                 # zoom — composes (no reshape)
+            ["--review", "-v"],
+            ["--review", "--static"],           # review IS a static one-shot
+            ["--review", "--at", "seq:2"],      # addressing — composes
+            ["--review", "--as-of", "30d"],
+            ["--review", "--kind", "decision", "--at", "seq:2"],  # combo
+        ],
+    )
+    def test_compose_set_accepted(self, review_vertex, argv):
+        vpath, _ = review_vertex
+        rc, r = _run(vpath, argv)
+        assert rc == 0, r.err_text
+        assert "review" in json.loads(r.out_lines[0])
+
+    def test_guard_is_whitelist_shaped_future_flag_refuses(self):
+        """Anti-drift canary: a flag the compose-set has NEVER heard of refuses
+        by default. If the guard ever reverts to a blacklist, this fails —
+        the whitelist property itself is pinned, not a fixed flag list."""
+        from loops.cli.views import fold
+
+        parser = fold._build_parser()
+        parser.add_argument("--future-thing", default=None)
+        args = parser.parse_intermixed_args(
+            ["v", "--review", "--future-thing", "x"]
+        )
+        bad = fold._review_incompatible_flag(
+            args, parser, refs_depth=0, where={}, observer=None,
+        )
+        assert bad == "--future-thing"
+
+    def test_clean_review_read_passes_the_guard(self):
+        from loops.cli.views import fold
+
+        parser = fold._build_parser()
+        args = parser.parse_intermixed_args(
+            ["v", "--review", "--kind", "decision", "--at", "seq:2", "--json"]
+        )
+        bad = fold._review_incompatible_flag(
+            args, parser, refs_depth=0, where={}, observer=None,
+        )
+        assert bad is None
 
 
 # ---------------------------------------------------------------------------

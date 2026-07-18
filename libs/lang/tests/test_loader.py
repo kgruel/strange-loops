@@ -3196,6 +3196,37 @@ loops {
 }
 """)
 
+    def test_extra_positional_arg_rejected(self):
+        # sol P2, verbatim example: a second positional (a config typo) must not
+        # be silently discarded — extra positionals alter default visibility.
+        with pytest.raises(ParseError, match="takes exactly one field name"):
+            parse_vertex("""\
+name "v"
+loops {
+  task {
+    fold { items "by" "name" }
+    lifecycle "status" "typo" active="open"
+  }
+}
+""")
+
+    def test_single_arg_still_valid(self):
+        # The fix rejects >1 positional only — the well-formed one-arg form is
+        # unchanged.
+        from lang import LifecycleDecl
+        vertex = parse_vertex("""\
+name "v"
+loops {
+  task {
+    fold { items "by" "name" }
+    lifecycle "status" active="open"
+  }
+}
+""")
+        assert vertex.loops["task"].lifecycle == LifecycleDecl(
+            field="status", active=("open",),
+        )
+
     def test_missing_active_rejected(self):
         with pytest.raises(ParseError, match="requires active="):
             parse_vertex("""\

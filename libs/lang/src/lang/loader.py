@@ -455,6 +455,18 @@ def _load_loop_def(node: ckdl.Node, path: Path | None) -> LoopDef:
                     '(lifecycle "status" active="open,in-progress")',
                     path,
                 )
+            if len(child.args) > 1:
+                # Exactly one positional field name. Extra positionals are the
+                # last silent-accept hole — a config typo
+                # (`lifecycle "status" "typo" active=…`) silently discarding an
+                # arg could alter default visibility unnoticed (sol P2).
+                got = ", ".join('"' + str(a) + '"' for a in child.args)
+                raise _error(
+                    f"lifecycle takes exactly one field name, got "
+                    f"{len(child.args)} ({got}); expected: "
+                    'lifecycle "status" active="open,in-progress"',
+                    path,
+                )
             field_name = str(child.args[0])
             if not field_name:
                 raise _error("lifecycle field name is empty", path)

@@ -547,7 +547,8 @@ class StoreReader:
     ) -> list[dict]:
         """FTS5 search over fact payloads.
 
-        Requires facts_fts virtual table to exist (see vertex_reader._ensure_fts).
+        Requires facts_fts virtual table to exist (built only by the explicit
+        vertex_reader.vertex_reindex — reads never create or update the index).
         Returns newest-first, same dict shape as facts_between.
         """
         # Query-time internal exclusion (SPEC §9.4, defense in depth): internal

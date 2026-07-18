@@ -343,6 +343,7 @@ loops store ticks <vertex>                    # tick series as attention windows
 loops store ticks <vertex> --chain            # per-tick attestation envelope (linkage/signature/cursor); requires .vertex, refused on combine aggregates
 loops store stats <vertex>                    # topline store totals (.db or .vertex)
 loops store stats <vertex> --by-kind          # count-descending per-kind tally
+loops store reindex <vertex>                  # (re)build the FTS search index — the SOLE index writer; reads never write. Aggregates recurse per child. Run after adding a `search` decl to an already-populated kind, or when --match discloses "index stale"
 ```
 
 ---

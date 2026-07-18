@@ -509,6 +509,14 @@ def resolve_review_head(vertex_path: Path) -> tuple[dict | None, dict]:
     ``cut`` = ``available=False`` with a stated reason — the same refusal paths
     (and reason strings) as :func:`resolve_cut`, so the review header's cut is
     identical to what a plain read would disclose.
+
+    CALLER CONTRACT (sol P1 — same as :func:`resolve_cut`): this does real store
+    I/O, so a caller pairing the disclosure with a fold MUST call it AFTER that
+    fold has been fetched, never before/concurrently. The store is append-only,
+    so a head resolved strictly after the fetch is equal-to-or-NEWER than what
+    the fold witnessed — the disclosed cursor/cut can only over-report the
+    unsealed tail, never under-report it or claim a seal over content the fold
+    already moved past. See ``cli.views.fold._run_review`` for the ordered call.
     """
     if is_aggregate_vertex(vertex_path):
         return None, unavailable_cut(

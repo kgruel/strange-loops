@@ -580,18 +580,48 @@ def run(argv: list[str], ctx: Invocation) -> int:
 
     # --review (0.9.0 S4) is a fold-route JSON projection of folded state. It
     # composes with --at/--as-of (a review AT a witnessed/event-time position)
-    # but not with the other short-circuits: --why is a different drill, --diff
-    # a two-position op, --facts the raw event stream. Refuse the combination
-    # here — the router already refuses --review with --facts+window / --ticks,
-    # but a bare --facts or an in-view --why/--diff reaches this parser, so the
-    # honor-or-refuse guard lives at both boundaries.
-    if args.review and (args.why or args.diff or args.facts):
-        other = "--why" if args.why else ("--diff" if args.diff else "--facts")
-        ctx.reporter.err(
-            f"read --review: {other} is a different read — the review "
-            "projection snapshots folded state on its own. Run one or the other."
+    # and with --kind/--key (scoping is compatible with a canonical projection),
+    # and NOTHING else — silently ignoring a flag is the silent-inert defect
+    # class this wave kills (arbiter S4; S3-F3 idiom). Two refusals:
+    #   - a DIFFERENT read/operation (--why drill, --diff two-position op,
+    #     --facts raw stream): run one or the other;
+    #   - an inert Surface transform / walk / lens the review projection does
+    #     not apply (it is a FULL canonical snapshot): narrow with --kind/--key.
+    # The router already refuses --review with --facts+window / --ticks; a bare
+    # --facts or the in-view transforms reach this parser, so the guard lives at
+    # both boundaries.
+    if args.review:
+        other_read = next(
+            (n for n, v in (
+                ("--why", args.why), ("--diff", args.diff), ("--facts", args.facts),
+            ) if v),
+            None,
         )
-        return 2
+        if other_read is not None:
+            ctx.reporter.err(
+                f"read --review: {other_read} is a different read — the review "
+                "projection snapshots folded state on its own. Run one or the other."
+            )
+            return 2
+        inert = next(
+            (n for n, v in (
+                ("--lens", args.lens is not None),
+                ("--match", args.match is not None),
+                ("--fields", args.fields is not None),
+                ("--limit", args.limit is not None),
+                ("--count", args.count),
+                ("--by", args.by is not None),
+                ("--refs", refs_depth > 0),
+            ) if v),
+            None,
+        )
+        if inert is not None:
+            ctx.reporter.err(
+                f"read --review: {inert} is not honored — the review projection "
+                "is a full canonical snapshot of folded state. Narrow with "
+                "--kind/--key, or drop --review."
+            )
+            return 2
 
     # --why is an address-scoped provenance drill: it renders ONE folded
     # (kind, key) entry field by field, so it short-circuits the multi-section
@@ -1042,10 +1072,26 @@ def _run_review(
     obs = _apply_vertex_scope(ctx.observer, vertex_path) or None
     _validate_kind_or_exit(kind, vertex_path)
 
-    # Cursor + seal cut. An active --at/--as-of reuses its already-resolved
-    # cursor_meta (zero extra store I/O); a head read resolves both from S6's
-    # single-transaction resolve_cut_summary (arbiter S4-F3 — never a second
-    # independent head-resolve).
+    # Fetch the fold FIRST, then resolve the head disclosure — the SAME
+    # after-the-fetch ordering S6 established (sol P1 both times). A head
+    # review's cursor/cut come from resolve_review_head, which does real store
+    # I/O; resolving it before the fold opens its snapshot would let a
+    # concurrent append land in the gap, so the fold could contain facts BEYOND
+    # a cursor that predates them, or cut could claim sealed_to_head=True over a
+    # head that has since moved (the exact TOCTOU S6 fixed in a981221,
+    # reversed). The store is append-only (rowid never shrinks), so a head
+    # resolved strictly AFTER the fetch is equal-to-or-NEWER than what the fold
+    # witnessed: the disclosure can only OVER-report the unsealed tail, never
+    # under-report it or claim a seal over unsealed content. An active
+    # --at/--as-of read has no race — it reuses its already-resolved position
+    # (cut_from_witness_position/unavailable_cut are pure computation over an
+    # immutable position, zero store I/O) — so its cursor/cut can be bound
+    # either side of the fetch; they are bound here for symmetry.
+    state = fetch_fold(
+        vertex_path, kind=kind, key=key, observer=obs,
+        at=at_position, as_of=as_of_ts,
+    )
+
     if at_position is not None:
         review_cursor = cursor_meta
         cut = witness_address.cut_from_witness_position(at_position)
@@ -1055,12 +1101,10 @@ def _run_review(
             "as_of", "event-time projection has no witness-anchored cut",
         )
     else:
+        # Head disclosure resolved AFTER the fetch above (sol P1) — and from
+        # S6's single-transaction resolve_cut_summary, never a second
+        # independent head-resolve (arbiter S4-F3).
         review_cursor, cut = witness_address.resolve_review_head(vertex_path)
-
-    state = fetch_fold(
-        vertex_path, kind=kind, key=key, observer=obs,
-        at=at_position, as_of=as_of_ts,
-    )
 
     # Per-fact signatures — verbatim from the store column, the ONLY source
     # (the fold path drops them). None on a store-less / aggregate vertex.

@@ -72,6 +72,19 @@ def _append(store, kind, ts, *, fid=None, observer="kyle", signature=None, **pay
     return fid
 
 
+def _append_tick(store, name, ts, *, fact_cursor=None):
+    conn = sqlite3.connect(str(store))
+    tid = gen_id()
+    conn.execute(
+        "INSERT INTO ticks (id, name, ts, since, origin, payload, fact_cursor) "
+        "VALUES (?, ?, ?, 0.0, '', '{}', ?)",
+        (tid, name, ts, fact_cursor),
+    )
+    conn.commit()
+    conn.close()
+    return tid
+
+
 def _empty_store(path):
     SqliteStore(
         path=path, serialize=lambda f: f.to_dict(), deserialize=Fact.from_dict,
@@ -443,6 +456,82 @@ class TestReadPurity:
 
 
 # ---------------------------------------------------------------------------
+# Head disclosure resolved AFTER the fetch (sol P1 TOCTOU) — mirrors S6's
+# TestCutBoundAfterFetchTOCTOU, applied to the review header.
+# ---------------------------------------------------------------------------
+
+
+class TestReviewHeadBoundAfterFetchTOCTOU:
+    @pytest.fixture
+    def sealed_vertex(self, tmp_path):
+        v = vertex("seal").store("./seal.db").loop("decision", fold_by("topic"))
+        vpath = tmp_path / "seal.vertex"
+        v.write(vpath)
+        db = tmp_path / "seal.db"
+        _empty_store(db)
+        return vpath, db
+
+    def test_header_reflects_a_write_that_lands_during_fetch(
+        self, sealed_vertex, monkeypatch
+    ):
+        """A concurrent append as a side effect of the fetch: since the head
+        disclosure is resolved strictly AFTER fetch_fold returns (sol P1), the
+        header cursor/cut must SEE that write — never echo a pre-write
+        sealed_to_head=True answer over a head that has moved."""
+        vpath, db = sealed_vertex
+        f1 = _append(db, "decision", 100.0, topic="a", message="alpha")
+        _append_tick(db, "seal", 150.0, fact_cursor=f1)
+        # The store is now exactly sealed_to_head=True at head f1.
+
+        import loops.commands.fetch as fetch_mod
+
+        real = fetch_mod.fetch_fold
+
+        def fetch_with_concurrent_write(*args, **kwargs):
+            state = real(*args, **kwargs)
+            # A fact lands after the fold read the store, before the review
+            # header is resolved.
+            _append(db, "decision", 200.0, topic="b", message="beta")
+            return state
+
+        monkeypatch.setattr(fetch_mod, "fetch_fold", fetch_with_concurrent_write)
+
+        out = _review(vpath)
+        header = out["review"]["header"]
+        facts = out["review"]["facts"]
+
+        # The fold (fetched first) does NOT contain the late fact...
+        assert not any(f["key"] == "b" for f in facts)
+        # ...but the header, resolved after, must NOT claim a stale seal: it
+        # honestly reports the store as it stood at resolution time (conservative
+        # bias — over-report tail, never a false seal).
+        assert header["cut"]["sealed_to_head"] is False
+        assert header["cut"]["facts_beyond_seal"] == 1
+        # The head cursor reflects the appended fact, not the pre-fetch head.
+        assert header["cursor"]["fact_id"] != f1
+        assert header["cursor"]["seq"] == 2
+
+    def test_pre_fetch_resolution_would_be_stale(self, sealed_vertex):
+        """Documents the defect directly: resolving the head disclosure BEFORE a
+        later append (the buggy ordering) yields sealed_to_head=True that a
+        moment later is false — proving the regression above exercises the real
+        defect class, not a strawman."""
+        vpath, db = sealed_vertex
+        f1 = _append(db, "decision", 100.0, topic="a", message="alpha")
+        _append_tick(db, "seal", 150.0, fact_cursor=f1)
+
+        from loops.cli import witness_address
+
+        _cursor, stale_cut = witness_address.resolve_review_head(vpath)
+        assert stale_cut["sealed_to_head"] is True  # true at THIS moment
+
+        _append(db, "decision", 200.0, topic="b", message="beta")
+
+        _cursor2, fresh_cut = witness_address.resolve_review_head(vpath)
+        assert fresh_cut["sealed_to_head"] is False
+
+
+# ---------------------------------------------------------------------------
 # Router / combo guards — honor-or-refuse
 # ---------------------------------------------------------------------------
 
@@ -451,10 +540,20 @@ class TestGuards:
     @pytest.mark.parametrize(
         "argv",
         [
+            # Different read / operation.
             ["--review", "--facts"],
             ["--review", "--why", "decision/auth"],
             ["--review", "--diff", "seq:1..seq:2"],
             ["--review", "--ticks"],
+            # Inert Surface transforms / walk / lens (arbiter S4: refuse, not
+            # silently ignore).
+            ["--review", "--lens", "graph"],
+            ["--review", "--match", "auth"],
+            ["--review", "--fields", "topic"],
+            ["--review", "--limit", "5"],
+            ["--review", "--count"],
+            ["--review", "--by", "kind"],
+            ["--review", "--refs", "2"],
         ],
     )
     def test_refused_combos(self, review_vertex, argv):
@@ -468,6 +567,21 @@ class TestGuards:
         rc, r = _run(vpath, ["--review", "--facts", "--since", "7d"])
         assert rc == 2
         assert "review" in r.err_text.lower()
+
+    @pytest.mark.parametrize(
+        "argv,expect_kinds",
+        [
+            (["--review", "--kind", "decision"], {"decision"}),
+            (["--review", "--key", "auth"], {"decision"}),
+        ],
+    )
+    def test_kind_and_key_still_honored(self, review_vertex, argv, expect_kinds):
+        vpath, _ = review_vertex
+        rc, r = _run(vpath, argv)
+        assert rc == 0, r.err_text
+        facts = json.loads(r.out_lines[0])["review"]["facts"]
+        assert facts  # scoping narrowed, did not empty
+        assert {f["kind"] for f in facts} == expect_kinds
 
 
 # ---------------------------------------------------------------------------

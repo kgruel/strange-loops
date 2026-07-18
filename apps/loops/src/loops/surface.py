@@ -118,7 +118,18 @@ class Window:
     query: str | None = None  # the search string if search() ran
     fields: tuple[str, ...] | None = None  # the projection if select() ran
     granularity: str = "headline"  # derived summary: "whole" | "headline" | "mixed"
-    unindexed: tuple[str, ...] = ()  # kinds with facts but no FTS coverage (S5)
+    unindexed: tuple[str, ...] = ()  # kinds with facts but NO search declaration
+    # at all (S5) — "never indexed", a declaration-time fact.
+    stale: tuple[str, ...] = ()  # kinds that DO declare search but whose FTS
+    # index is missing or behind head (S2) — "declared, but the index can't be
+    # trusted right now". Distinct signal from `unindexed` by design (S2
+    # arbitration F1: never-declared and declared-but-stale are different
+    # claims); both route through the same substring fallback, but the reason
+    # differs and the fix differs (`sl store reindex` heals `stale`, a vertex
+    # edit is needed for `unindexed`).
+    truncated: bool = False  # True when the FTS query hit its result limit —
+    # no-silent-caps disclosure (S2, friction:fts-match-limit-100-silent-cap).
+    # The limit itself is unchanged; this only names the gap.
 
 
 @dataclass(frozen=True)
@@ -780,57 +791,106 @@ def _indexed_kinds(vertex_path) -> set[str]:
     return {kind for kind, ld in ast.loops.items() if getattr(ld, "search", ())}
 
 
+# The engine's own vertex_search default (kept unchanged per S2 arbitration
+# F2 — "no limit redesign"). Requesting one more than this lets the FTS path
+# detect truncation (len(facts) > _FTS_LIMIT) without silently changing what
+# "the limit" means to a caller — the extra row is trimmed back off below.
+_FTS_LIMIT = 100
+
+
 def search(surface: Surface, query: str, *, vertex_path=None) -> Surface:
-    """CONTENT-SEARCH → event-axis rows: FTS5 for indexed kinds, substring for
-    the rest, with a coverage signal for the gap.
+    """CONTENT-SEARCH → event-axis rows: FTS5 for trustworthy-indexed kinds,
+    substring for the rest, with coverage + staleness + truncation signals
+    for the gaps.
 
     Two disjoint sources, combined and ordered ts-desc:
 
-    * FTS path — ``engine.vertex_search`` over the kinds that declare ``search``
-      fields. These return RAW facts (the event axis: every matching write, not
-      the folded item), converted to event Rows.
-    * Substring path — for kinds with NO ``search`` declaration (which FTS can't
-      see), a case-insensitive substring scan over the already-projected rows,
-      re-tagged ``axis="event"``. Folded-granularity, but it covers undeclared
-      kinds at all.
+    * FTS path — ``engine.vertex_search`` over present kinds that declare
+      ``search`` fields AND whose index is fresh (per
+      ``engine.vertex_search_coverage``). These return RAW facts (the event
+      axis: every matching write, not the folded item), converted to event
+      Rows.
+    * Substring path — for every other present kind: those with NO ``search``
+      declaration at all (``Window.unindexed``), and those that declare
+      search but whose index is missing/behind head (``Window.stale``) — a
+      case-insensitive substring scan over the already-projected rows,
+      re-tagged ``axis="event"``. Folded-granularity, but it covers the gap
+      honestly instead of silently returning nothing.
 
-    ``Window.unindexed`` records every present kind that lacked FTS coverage (the
-    superset-of-``unfolded`` coverage-K), so the lens can footer ``(K not
-    indexed)`` — the honesty signal that those kinds were substring-scanned, not
-    FTS-searched. The two sets are disjoint by construction (a kind is indexed
-    XOR not), so no fact is double-counted.
+    ``Window.unindexed`` vs ``Window.stale`` are deliberately separate
+    signals (S2 arbitration F1): "never declared searchable" is a
+    declaration-time fact about the vertex; "declared but the index can't be
+    trusted right now" is fixed by ``sl store reindex`` and says nothing
+    about the declaration. Both route through the identical substring
+    fallback — the FIX differs, so the DISCLOSURE must too. The sets
+    (fts_kinds, unindexed, stale) partition ``present`` — no fact is
+    double-counted.
+
+    This function is strictly read-only: it never builds or touches
+    ``facts_fts``/``fts_state`` (that's ``sl store reindex``'s sole job —
+    closes friction:search-read-mutates-canonical-store, including its
+    aggregation aggravator, since the coverage probe recurses per child the
+    same read-only way ``vertex_search`` itself does).
     """
     indexed = _indexed_kinds(vertex_path)
     present = {r.kind for r in surface.rows}
-    # FTS covers present-AND-indexed; substring covers present-AND-not-indexed.
-    # Scoping to ``present`` respects the fetch-time --kind narrowing (which only
-    # shrank the surface, not vertex_search's view) — else FTS would leak hits
-    # from other indexed kinds the user filtered out.
-    fts_kinds = present & indexed
+
+    # Staleness probe — read-only, never writes. `missing` (no index built at
+    # all, or the vertex was never reindexed) makes EVERY declared-indexed
+    # kind untrustworthy; `stale_kinds` narrows that to just the kinds whose
+    # facts postdate the last reindex.
+    stale_kinds: set[str] = set()
+    if vertex_path is not None and indexed:
+        try:
+            from engine import vertex_search_coverage
+
+            coverage = vertex_search_coverage(vertex_path)
+        except Exception:
+            coverage = None
+        if coverage is not None:
+            stale_kinds = set(indexed) if coverage.missing else set(coverage.stale_kinds)
+
+    # FTS covers present ∧ indexed ∧ fresh; substring covers everything else
+    # present. Scoping to ``present`` respects the fetch-time --kind narrowing
+    # (which only shrank the surface, not vertex_search's view) — else FTS
+    # would leak hits from other indexed kinds the user filtered out.
+    trustworthy = indexed - stale_kinds
+    fts_kinds = present & trustworthy
     unindexed = tuple(sorted(present - indexed))
+    stale = tuple(sorted((present & indexed) - trustworthy))
 
     rows: list[Row] = []
+    truncated = False
 
-    # FTS path — only meaningful when the vertex is known and a present kind is
-    # indexed.
+    # FTS path — only meaningful when the vertex is known and a present kind
+    # is both indexed and fresh.
     if vertex_path is not None and fts_kinds:
         try:
             from engine import vertex_search
 
-            facts = vertex_search(vertex_path, query)
+            # Peek one past the limit to detect truncation (see _FTS_LIMIT).
+            # Coverage-gating above means every kind reaching this call has a
+            # live facts_fts table, so the OperationalError vertex_search
+            # documents for a missing index is not expected here — this
+            # except is a defensive backstop, not the mechanism this branch
+            # relies on.
+            facts = vertex_search(vertex_path, query, limit=_FTS_LIMIT + 1)
         except Exception:
             facts = []
+        if len(facts) > _FTS_LIMIT:
+            truncated = True
+            facts = facts[:_FTS_LIMIT]
         rows.extend(_event_row(f) for f in facts if f.get("kind") in fts_kinds)
 
-    # Substring path — over the projected rows of UN-indexed kinds only (disjoint
-    # from the FTS set).
+    # Substring path — over the projected rows of every kind NOT covered by a
+    # trustworthy FTS index (unindexed ∪ stale, disjoint from fts_kinds).
     q = query.lower()
     rows.extend(
         # Match _event_row's grammar: event-axis rows are level="fact", even
         # when sourced from a projected key row (the substring fallback).
         replace(r, axis="event", level="fact")
         for r in surface.rows
-        if r.kind in unindexed and q in _payload_text(r.payload).lower()
+        if r.kind not in fts_kinds and q in _payload_text(r.payload).lower()
     )
 
     rows.sort(key=lambda r: (r.ts if r.ts is not None else 0.0), reverse=True)
@@ -841,6 +901,8 @@ def search(surface: Surface, query: str, *, vertex_path=None) -> Surface:
         total=len(row_tuple),
         shown=len(row_tuple),
         unindexed=unindexed,
+        stale=stale,
+        truncated=truncated,
     )
     return replace(surface, rows=row_tuple, window=window)
 
@@ -1033,6 +1095,8 @@ def _window_to_dict(window: Window) -> dict:
         "fields": list(window.fields) if window.fields is not None else None,
         "granularity": window.granularity,
         "unindexed": list(window.unindexed),
+        "stale": list(window.stale),
+        "truncated": window.truncated,
     }
 
 

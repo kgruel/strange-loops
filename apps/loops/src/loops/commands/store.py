@@ -1339,6 +1339,102 @@ def _run_store_stats(argv: list[str], *, vertex_path: Path | None = None) -> int
     )
 
 
+def _run_reindex(argv: list[str], *, vertex_path: Path | None = None) -> int:
+    """``sl store reindex <vertex>`` — drop and rebuild the FTS derived index.
+
+    The SOLE writer of ``facts_fts``/``fts_state`` anywhere in this codebase
+    (closes friction:search-read-mutates-canonical-store): every read path
+    (``vertex_search``, and its aggregation recursion) is strictly
+    read-only, so this verb is now the only supported way to build or
+    refresh the search index. Because it's a full drop+rebuild against the
+    vertex's CURRENT ``search`` declarations rather than an incremental
+    watermark, it also closes friction:fts-search-declaration-not-retroactive
+    for free — a newly-declared ``search`` field on an already-populated
+    kind is fully searchable after one reindex, including facts written
+    before the declaration existed.
+
+    Unlike ``ticks``/``absorb`` (which require a single store and refuse
+    combine/discover aggregates outright), reindex does NOT refuse an
+    aggregate — it recurses per child, mirroring the read-side recursion
+    ``vertex_search``/``vertex_search_coverage`` already do, so reindexing
+    an aggregate touches only each child's own store and nothing else.
+
+    For a single (non-aggregate) target, the store must already be
+    materialized — same existence contract as ticks/stats/verify
+    (decision/design/store-verb-existence-exit-code-parity): a present
+    ``.vertex`` whose store was never written refuses cleanly rather than
+    silently no-op'ing, so an operator asking to reindex a specific target
+    gets a clear answer. (The underlying ``engine.vertex_reindex`` primitive
+    is more lenient about a missing store — it no-ops instead of raising —
+    because it doubles as the per-child recursion step for an aggregate,
+    where a not-yet-materialized child must not abort the whole reindex.)
+    """
+    import argparse
+
+    p = argparse.ArgumentParser(
+        prog="loops store reindex",
+        description="Drop and rebuild the FTS5 derived index (facts_fts/"
+                    "fts_state) against the vertex's current search "
+                    "declarations. The sole writer of the FTS index — every "
+                    "read path stays strictly read-only.",
+    )
+    if vertex_path is None:
+        p.add_argument("file", nargs="?", help="Vertex .vertex file or vertex name")
+    p.add_argument("--json", action="store_true", help="JSON receipt")
+    # -h/--help is owned by argparse (add_help=True): parse_args prints the
+    # help built from this parser and exits 0 natively. No hand-rolled block.
+    args = p.parse_args(argv)
+
+    target_path = _resolve_target(getattr(args, "file", None), vertex_path).resolve()
+    if target_path.suffix != ".vertex":
+        raise ValueError(
+            "reindex requires a .vertex target — search field declarations "
+            "live in the vertex file, not the raw database"
+        )
+
+    from lang import parse_vertex_file
+
+    ast = parse_vertex_file(target_path)
+    is_aggregate = ast.combine is not None or ast.discover is not None
+    if not is_aggregate:
+        # State 2 of the existence contract: a present .vertex with no
+        # materialized store refuses cleanly (RC=1), matching
+        # ticks/stats/verify — not silently no-op'd. Aggregates skip this:
+        # they own no store of their own, and per-child materialization is
+        # engine.vertex_reindex's concern (a not-yet-emitted child is a
+        # graceful no-op there, not a whole-aggregate refusal).
+        _require_materialized_store(target_path)
+
+    from engine import vertex_reindex
+
+    receipt = vertex_reindex(target_path)
+
+    if args.json:
+        import json as _json
+        print(_json.dumps(receipt, indent=2))  # noqa: T201 — machine output path
+        return 0
+
+    from painted import Block, Style, paint
+
+    if receipt.get("aggregate"):
+        children = receipt.get("children", [])
+        reindexed = sum(1 for c in children if c.get("reindexed"))
+        line = (
+            f"✓ {target_path.stem}: reindexed {reindexed}/{len(children)} "
+            "child store(s)"
+        )
+    elif not receipt.get("reindexed"):
+        line = f"· {target_path.stem}: nothing to reindex — {receipt.get('reason')}"
+    else:
+        line = (
+            f"✓ {target_path.stem}: reindexed — "
+            f"{receipt['facts_indexed']}/{receipt['facts_scanned']} facts "
+            f"indexed across {len(receipt['kinds_indexed'])} kind(s)"
+        )
+    paint(Block.text(line, Style()))
+    return 0
+
+
 def _run_store(
     argv: list[str], *, vertex_path: Path | None = None, observer: str | None = None
 ) -> int:
@@ -1366,6 +1462,8 @@ def _run_store(
         return _run_store_ticks(argv[1:], vertex_path=vertex_path)
     if argv and argv[0] == "stats":
         return _run_store_stats(argv[1:], vertex_path=vertex_path)
+    if argv and argv[0] == "reindex":
+        return _run_reindex(argv[1:], vertex_path=vertex_path)
 
     # Base inspect: pre-parse the optional ``file`` target; run_cli owns -h
     # and the -i/-q/-v/--json/--plain axes, listing ``file`` (when accepted)
@@ -1439,7 +1537,9 @@ def _run_store(
             "through a transform with a verifiable receipt; "
             "'loops store reanchor <vertex>' recomputes chain hashes; "
             "'loops store absorb <vertex>' opens the declaration lineage "
-            "with a signed genesis event."
+            "with a signed genesis event; "
+            "'loops store reindex <vertex>' drops and rebuilds the FTS "
+            "search index (the sole writer — reads stay read-only)."
         ),
         help_args=help_args,
     )

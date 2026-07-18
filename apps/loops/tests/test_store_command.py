@@ -487,3 +487,167 @@ class TestStoreExistenceParity:
         assert rc == 1
         payload = json.loads(capsys.readouterr().out)
         assert "not yet materialized" in payload["error"]
+
+
+def _make_search_vertex(tmp_path: Path) -> Path:
+    """A vertex with one search-declared kind (``decision``), materialized
+    store, one seeded fact — the fixture ``TestStoreReindex`` builds on."""
+    from engine.builder import fold_by, vertex
+
+    vpath = tmp_path / "srch.vertex"
+    (
+        vertex("srch")
+        .store("./srch.db")
+        .loop("decision", fold_by("topic"), search=["topic", "message"])
+        .write(vpath)
+    )
+    _emit(vpath, "decision", topic="auth", message="choose JWT over sessions")
+    return vpath
+
+
+class TestStoreReindex:
+    """``sl store reindex`` — the sole FTS index writer (S2)."""
+
+    def test_happy_path_reindexes_and_reports_counts(self, tmp_path, capsys):
+        from loops.commands.store import _run_store
+
+        vpath = _make_search_vertex(tmp_path)
+        capsys.readouterr()
+        rc = _run_store(["reindex", str(vpath)])
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "reindexed" in out
+        assert "1/1 facts indexed" in out
+
+    def test_reindex_makes_the_store_actually_searchable(self, tmp_path, capsys):
+        from engine import vertex_search
+        from loops.commands.store import _run_store
+
+        vpath = _make_search_vertex(tmp_path)
+        capsys.readouterr()
+        rc = _run_store(["reindex", str(vpath)])
+        assert rc == 0
+        results = vertex_search(vpath, "JWT")
+        assert len(results) == 1
+
+    def test_json_receipt_shape(self, tmp_path, capsys):
+        import json
+        from loops.commands.store import _run_store
+
+        vpath = _make_search_vertex(tmp_path)
+        capsys.readouterr()
+        rc = _run_store(["reindex", str(vpath), "--json"])
+        assert rc == 0
+        receipt = json.loads(capsys.readouterr().out)
+        assert receipt["reindexed"] is True
+        assert receipt["facts_indexed"] == 1
+        assert receipt["facts_scanned"] == 1
+        assert receipt["kinds_indexed"] == ["decision"]
+
+    def test_db_target_is_clean_error(self, tmp_path):
+        # reindex refuses a raw .db (search declarations live in the .vertex).
+        from loops.cli.views.store import run
+
+        ctx, reporter = TestStoreErrorBoundary._ctx_with_reporter()
+        rc = run(["reindex", str(tmp_path / "x.db")], ctx)
+        assert rc == 1
+        assert any("requires a .vertex" in line for line in reporter.err_lines)
+
+    def test_no_facts_yet_is_clean_refusal(self, tmp_path, capsys):
+        # State 2 of the existence contract: present .vertex, never emitted
+        # -> no .db. Reindex refuses cleanly (RC=1), same as ticks/stats/verify
+        # — not a silent no-op that could be mistaken for success.
+        vpath = _make_boundary_vertex(tmp_path)
+        db = tmp_path / "project.db"
+        assert not db.exists()
+        rc, out = _run_store_verb_unified("reindex", vpath, capsys)
+        assert rc == 1
+        assert "not yet materialized" in out
+        assert not db.exists()  # the refusal must not create the .db
+
+    def test_no_search_declared_is_a_no_op_receipt(self, tmp_path, capsys):
+        # A materialized store with NOTHING declared searchable — not an
+        # error (there's nothing wrong), just nothing to do.
+        from loops.commands.store import _run_store
+
+        vpath = _make_boundary_vertex(tmp_path)
+        _emit(vpath, "decision", topic="auth", message="no search here")
+        capsys.readouterr()
+        rc = _run_store(["reindex", str(vpath)])
+        assert rc == 0
+        assert "nothing to reindex" in capsys.readouterr().out
+
+    def test_reindex_is_idempotent(self, tmp_path, capsys):
+        from loops.commands.store import _run_store
+
+        vpath = _make_search_vertex(tmp_path)
+        capsys.readouterr()
+        rc1 = _run_store(["reindex", str(vpath)])
+        out1 = capsys.readouterr().out
+        rc2 = _run_store(["reindex", str(vpath)])
+        out2 = capsys.readouterr().out
+        assert rc1 == rc2 == 0
+        assert out1 == out2
+
+    def test_aggregate_vertex_reindexes_every_child_store(
+        self, tmp_path, capsys, monkeypatch,
+    ):
+        """reindex does NOT refuse a combine/discover aggregate (unlike
+        ticks/absorb) — it recurses per child, mirroring the read-side
+        recursion vertex_search already does."""
+        import sqlite3
+
+        from loops.commands.store import _run_store
+
+        home = tmp_path / "loops_home"
+        alpha_dir = home / "alpha"
+        alpha_dir.mkdir(parents=True)
+        alpha_vertex = alpha_dir / "alpha.vertex"
+        alpha_vertex.write_text(
+            'name "alpha"\n'
+            'store "./store.db"\n'
+            'loops {\n'
+            '  decision { fold { items "by" "topic" }\n    search "topic" "message"\n  }\n'
+            '}\n'
+        )
+        beta_dir = home / "beta"
+        beta_dir.mkdir(parents=True)
+        beta_vertex = beta_dir / "beta.vertex"
+        beta_vertex.write_text(
+            'name "beta"\n'
+            'store "./store.db"\n'
+            'loops {\n'
+            '  decision { fold { items "by" "topic" }\n    search "topic" "message"\n  }\n'
+            '}\n'
+        )
+        monkeypatch.setenv("LOOPS_HOME", str(home))
+        _emit(alpha_vertex, "decision", topic="auth", message="alpha fact")
+        _emit(beta_vertex, "decision", topic="deploy", message="beta fact")
+
+        combine_vpath = tmp_path / "combined.vertex"
+        combine_vpath.write_text(
+            'name "combined"\n'
+            'combine {\n'
+            '    vertex "alpha"\n'
+            '    vertex "beta"\n'
+            '}\n'
+            'loops {\n'
+            '  decision { fold { items "by" "topic" }\n    search "topic" "message"\n  }\n'
+            '}\n'
+        )
+
+        capsys.readouterr()
+        rc = _run_store(["reindex", str(combine_vpath)])
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "reindexed 2/2 child store" in out
+
+        for db_path in (alpha_dir / "store.db", beta_dir / "store.db"):
+            conn = sqlite3.connect(str(db_path))
+            try:
+                row = conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name='facts_fts'"
+                ).fetchone()
+                assert row is not None
+            finally:
+                conn.close()

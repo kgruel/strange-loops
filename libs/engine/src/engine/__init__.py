@@ -88,6 +88,9 @@ __all__ = [
     "vertex_fact_by_id",
     "vertex_facts",
     "vertex_search",
+    "vertex_search_coverage",
+    "FtsCoverage",
+    "vertex_reindex",
     "vertex_ticks",
     "vertex_summary",
     # Declaration resolver (store-backed declaration seam)
@@ -216,6 +219,9 @@ _LAZY_IMPORTS: dict[str, tuple[str, str]] = {
     "vertex_tick_fold": ("engine.vertex_reader", "vertex_tick_fold"),
     "vertex_read": ("engine.vertex_reader", "vertex_read"),
     "vertex_search": ("engine.vertex_reader", "vertex_search"),
+    "vertex_search_coverage": ("engine.vertex_reader", "vertex_search_coverage"),
+    "FtsCoverage": ("engine.vertex_reader", "FtsCoverage"),
+    "vertex_reindex": ("engine.vertex_reader", "vertex_reindex"),
     "vertex_summary": ("engine.vertex_reader", "vertex_summary"),
     "vertex_ticks": ("engine.vertex_reader", "vertex_ticks"),
     # Declaration resolver

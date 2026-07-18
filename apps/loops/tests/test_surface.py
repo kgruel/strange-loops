@@ -493,10 +493,15 @@ def test_search_orders_ts_desc():
 # --- S5: FTS5 + substring fallback + coverage signal -----------------------
 
 
-def _search_vertex(tmp_path):
+def _search_vertex(tmp_path, *, reindex: bool = True):
     """A two-kind vertex: ``decision`` FTS-indexed (search=), ``thread`` NOT.
 
-    Returns (vpath) after seeding one searchable fact in each kind.
+    Returns (vpath) after seeding one searchable fact in each kind. Calls
+    ``engine.vertex_reindex`` by default (S2: reads never build the index —
+    a caller that wants FTS-fresh results must reindex explicitly, same as
+    ``sl store reindex`` would). Pass ``reindex=False`` to get a vertex whose
+    index was NEVER built, for tests exercising the staleness/missing-index
+    fallback path itself.
     """
     import argparse
 
@@ -521,6 +526,12 @@ def _search_vertex(tmp_path):
 
     emit("decision", topic="design/auth", message="choose JWT over sessions")
     emit("thread", name="auth-arc", message="revisit JWT rotation later")
+
+    if reindex:
+        from engine import vertex_reindex
+
+        vertex_reindex(vpath)
+
     return vpath
 
 
@@ -546,6 +557,61 @@ def test_search_fts_finds_bodies_in_indexed_kind(tmp_path):
     assert "decision" in kinds
     assert "thread" in found.window.unindexed
     assert found.window.query == "JWT"
+    # Proves this genuinely went through FTS, not a silent substring
+    # degradation: search()'s substring branch is `kind not in fts_kinds`,
+    # so a hit for a kind that's neither unindexed NOR stale can only have
+    # come from the FTS branch — the fixture reindexed, so the index is
+    # fresh for `decision`.
+    assert found.window.stale == ()
+
+
+def test_search_never_reindexed_falls_back_with_disclosure(tmp_path):
+    """A search-declared kind whose index was NEVER built (no `sl store
+    reindex` ever ran) still finds matches — via the substring fallback, not
+    a crash and not a silently-empty result — with the gap named as
+    ``stale`` (distinct from ``unindexed``, which is a declaration-time
+    fact: this kind DOES declare search, the index just isn't there yet)."""
+    from loops.commands.fetch import fetch_fold
+
+    vpath = _search_vertex(tmp_path, reindex=False)
+    state = fetch_fold(vpath)
+    found = search(project(state), "JWT", vertex_path=vpath)
+    kinds = {r.kind for r in found.rows}
+    assert "decision" in kinds
+    assert "decision" in found.window.stale
+    assert "decision" not in found.window.unindexed
+
+
+def test_search_stale_after_edit_falls_back_with_disclosure(tmp_path):
+    """S2 phantom-symmetry re-derivation (design:fts-confirm-symmetry-is-
+    phantom): a fact emitted AFTER the last reindex is STILL found by the
+    very next ``--match`` — that property survives read-purity — but now via
+    the substring fallback rather than FTS auto-catch-up, with the gap named
+    honestly in ``Window.stale`` instead of silently riding on a read that
+    mutates the store."""
+    import argparse
+
+    from loops.commands.fetch import fetch_fold
+    from loops.main import cmd_emit
+
+    vpath = _search_vertex(tmp_path)  # reindexed once by the fixture
+
+    # Emit a NEW decision fact with no reindex afterward — the index is now
+    # behind head for `decision`.
+    cmd_emit(
+        argparse.Namespace(
+            vertex=None, kind="decision",
+            parts=["topic=design/late", "message=unreindexed uniquephrase"],
+            observer="", dry_run=False,
+        ),
+        vertex_path=vpath,
+    )
+
+    state = fetch_fold(vpath)
+    found = search(project(state), "uniquephrase", vertex_path=vpath)
+    kinds = {r.kind for r in found.rows}
+    assert "decision" in kinds  # found — not silently missing
+    assert "decision" in found.window.stale  # and the gap is disclosed
 
 
 def test_search_substring_fallback_for_undeclared_kind(tmp_path):
@@ -571,6 +637,67 @@ def test_search_fts_respects_kind_scoped_surface(tmp_path):
     assert {r.kind for r in found.rows} == {"decision"}
     # thread was filtered out at fetch → not present → not in the coverage gap.
     assert "thread" not in found.window.unindexed
+
+
+def test_search_fts_truncation_disclosed_in_window(tmp_path):
+    """S2 arbitration F2 (friction:fts-match-limit-100-silent-cap): when the
+    FTS query hits its result limit, ``Window.truncated`` names the gap
+    instead of silently capping with no signal. The default limit itself is
+    unchanged (still exactly 100 results surfaced) — disclosure only."""
+    import json
+    import sqlite3
+
+    from engine import vertex_reindex
+    from engine.builder import fold_by, vertex
+    from loops.commands.fetch import fetch_fold
+
+    v = (
+        vertex("trunc")
+        .store("./trunc.db")
+        .loop("decision", fold_by("topic"), search=["topic", "message"])
+    )
+    vpath = tmp_path / "trunc.vertex"
+    v.write(vpath)
+
+    db_path = tmp_path / "trunc.db"
+    conn = sqlite3.connect(str(db_path))
+    conn.executescript(
+        "CREATE TABLE IF NOT EXISTS facts ("
+        "    id TEXT NOT NULL PRIMARY KEY,"
+        "    kind TEXT NOT NULL,"
+        "    ts REAL NOT NULL,"
+        "    observer TEXT NOT NULL,"
+        "    origin TEXT NOT NULL DEFAULT '',"
+        "    payload TEXT NOT NULL"
+        ");"
+    )
+    for i in range(101):  # one past the default limit
+        conn.execute(
+            "INSERT INTO facts (id, kind, ts, observer, origin, payload) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (
+                f"TRUNC{i:04d}", "decision", float(i), "test", "",
+                json.dumps({"topic": f"topic-{i}", "message": "truncatetoken"}),
+            ),
+        )
+    conn.commit()
+    conn.close()
+
+    vertex_reindex(vpath)
+    state = fetch_fold(vpath)
+    found = search(project(state), "truncatetoken", vertex_path=vpath)
+    assert found.window.truncated is True
+    assert len([r for r in found.rows if r.kind == "decision"]) == 100
+
+
+def test_search_no_truncation_when_under_limit(tmp_path):
+    # Sanity converse: a result set under the limit is never flagged truncated.
+    from loops.commands.fetch import fetch_fold
+
+    vpath = _search_vertex(tmp_path)
+    state = fetch_fold(vpath)
+    found = search(project(state), "JWT", vertex_path=vpath)
+    assert found.window.truncated is False
 
 
 # ---------------------------------------------------------------------------

@@ -41,6 +41,7 @@ __all__ = [
     "Upsert",
     "Window",
     # Fold output contract
+    "Address",
     "Edge",
     "FoldItem",
     "FoldSection",
@@ -93,6 +94,7 @@ _LAZY_IMPORTS: dict[str, tuple[str, str]] = {
     "Upsert": ("atoms.fold", "Upsert"),
     "Window": ("atoms.fold", "Window"),
     # Fold output contract
+    "Address": ("atoms.address", "Address"),
     "Edge": ("atoms.fold_state", "Edge"),
     "FoldItem": ("atoms.fold_state", "FoldItem"),
     "FoldSection": ("atoms.fold_state", "FoldSection"),

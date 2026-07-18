@@ -40,6 +40,8 @@ from collections import Counter
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
 
+from atoms import Address
+
 if TYPE_CHECKING:
     from atoms import Edge, FoldItem, FoldState
 
@@ -91,7 +93,7 @@ class Row:
     inbound: int = 0  # MATERIALIZED (lifted from the lens) — was render-only
     inbound_predicates: tuple[tuple[str, int], ...] = ()  # ←N broken out by
     # predicate, e.g. (("stakeholder", 3), ("ref", 2)); sums to ``inbound``
-    salience: int = 0  # MATERIALIZED = n + inbound (lifted from _salience)
+    salience: int = 0  # MATERIALIZED = n + inbound (computed inline in project)
     depth: int = 0  # >0 for ref-walk rows
     via_anchor: str | None = None  # the anchor whose ref pulled a walked row in
     granularity: str = "headline"  # "whole" | "headline"
@@ -143,9 +145,14 @@ class Surface:
 # lenses/fold.py). Kept painted-free so every consumer can depend on it: the
 # built-in fold lens and the orient lenses (session_start / session_landing /
 # identity_prompt) all read the materialized Row scalars and carry no copies.
-# The three-form match in _inbound_count (bare ``key`` / ``/key`` / ``:key``) is
-# load-bearing: dropping the bare-key branch silently halves salience for
-# namespaced keys, and dropping the colon branch drops the dominant ref form.
+# Matching is EXACT on ``atoms.Address(kind, key)``: the corpus is parsed into
+# ``Counter[Address]`` once, and an item's inbound is ``inbound[Address(kind,
+# key)] + inbound[Address('', key)]`` — its own kind-qualified count plus the
+# bare (separator-less, kind-unknown) fallback. This replaces the old three-form
+# suffix scan, whose kind-blindness aliased ``decision:X`` onto a ``thread``
+# keyed ``X`` (and vice versa). Legacy ``kind/key`` refs still match their own
+# kind (Address.parse splits on the first slash); only cross-kind aliasing is
+# removed.
 # ---------------------------------------------------------------------------
 
 
@@ -200,20 +207,19 @@ class PromotionCandidate:
 def _candidate_addr_kind(value: object) -> str | None:
     """The addr-kind of an address-looking value, else None.
 
-    Mirrors resolve._is_addr_candidate + _split_addr (kept local so surface
-    stays a leaf): must be separator-bearing, whitespace-free; returns the
-    ``kind`` half of ``kind:key`` / ``kind/key``.
+    Must be separator-bearing and whitespace-free; returns the ``kind`` half
+    of a ``kind:key`` / ``kind/key`` address (``Address.parse``), or None for a
+    bare (kind-less) or non-address value. The whitespace guard is kept ahead
+    of the parse — ``Address.parse`` itself is separator-honest but would read
+    ``"note: see foo"`` as ``kind="note"``; the guard rejects prose first.
     """
     if not isinstance(value, str):
         return None
     v = value.strip()
     if not v or any(c.isspace() for c in v):
         return None
-    if ":" in v:
-        return v.split(":", 1)[0] or None
-    if "/" in v:
-        return v.split("/", 1)[0] or None
-    return None
+    parsed = Address.parse(v)
+    return parsed.kind or None if parsed is not None else None
 
 
 def promotion_candidates(
@@ -264,26 +270,48 @@ def promotion_candidates(
 
 
 def _compute_inbound_refs(data: FoldState) -> Counter:
-    """Count inbound references (ref + typed edges) across all sections."""
+    """Count inbound references (ref + typed edges), keyed by parsed ``Address``.
+
+    Every corpus address is parsed once (colon / legacy-slash / bare); a bare
+    separator-less address lands under ``Address('', key)`` so an item can pick
+    it up through the bare fallback. Un-parseable addresses (empty / empty
+    half) name no target and are dropped. The resulting ``Counter[Address]``
+    gives ``_inbound_count`` an O(1) exact lookup.
+    """
     inbound: Counter = Counter()
     for addr, _pred, _src in _edge_corpus(data):
-        inbound[addr] += 1
+        parsed = Address.parse(addr)
+        if parsed is not None:
+            inbound[parsed] += 1
     return inbound
 
 
-def _address_matches_key(addr: str, key: str) -> bool:
-    """Three-form match (bare / ``/key`` / ``:key``) — the ref/edge semantic."""
-    return addr == key or addr.endswith(f"/{key}") or addr.endswith(f":{key}")
+def _addr_matches(addr: str, kind: str, key: str) -> bool:
+    """Exact ``(kind, key)`` match over a raw corpus address, with bare fallback.
+
+    Parses ``addr`` and matches when it is the target's own kind-qualified
+    address (``kind:key`` colon or the legacy ``kind/key`` slash both parse to
+    ``(kind, key)``) OR a bare separator-less address bearing the key. Replaces
+    the old kind-blind suffix matcher — a ``decision:X`` corpus address no
+    longer matches a ``thread`` keyed ``X``.
+    """
+    a = Address.parse(addr)
+    if a is None:
+        return False
+    return (a.kind == kind and a.key == key) or (a.kind == "" and a.key == key)
 
 
 def _compute_inbound_edges(data: FoldState) -> dict[str, list[tuple[str, str]]]:
     """Build adjacency map: target ``kind/key`` → [(source, predicate), ...].
 
-    Uses the three-form match (``_address_matches_key``) so an edge in any ref
-    form — bare key, ``kind/key``, or the canonical ``kind:key`` — resolves to
-    the target row's address, and the ``←`` expansion agrees with the ``←N``
-    salience count (both read the same corpus + matcher). Typed edges carry
-    their declared field as the predicate; ref edges carry ``"ref"``.
+    Uses the exact ``(kind, key)`` match (``_addr_matches``) so an edge in any
+    ref form — the canonical ``kind:key``, the legacy ``kind/key``, or a bare
+    key — resolves to the target row of its OWN kind, and the ``←`` expansion
+    agrees with the ``←N`` salience count (both read the same corpus + matcher).
+    Targets stay keyed by the ``kind/key`` slash-form Row address — the graph
+    consumer contract in ``fetch.py`` — even though matching is now kind-exact.
+    Typed edges carry their declared field as the predicate; ref edges carry
+    ``"ref"``.
     """
     corpus = _edge_corpus(data)
     edges: dict[str, list[tuple[str, str]]] = {}
@@ -295,7 +323,7 @@ def _compute_inbound_edges(data: FoldState) -> dict[str, list[tuple[str, str]]]:
                 continue
             target = _address(section.kind, key, item.id)
             for addr, pred, source in corpus:
-                if source and _address_matches_key(addr, key):
+                if source and _addr_matches(addr, section.kind, key):
                     edges.setdefault(target, []).append((source, pred))
     return edges
 
@@ -310,66 +338,52 @@ def _item_full_key(item: FoldItem, key_field: str | None, kind: str = "") -> str
     return f"{kind}/{key}" if kind else str(key)
 
 
-def _salience(item: FoldItem, key_field: str | None, inbound: Counter) -> int:
-    """Salience = n + inbound ref count."""
-    return item.n + _inbound_count(item, key_field, inbound)
-
-
 def _inbound_predicates(
     item: FoldItem,
+    kind: str,
     key_field: str | None,
     corpus: list[tuple[str, str, str]],
 ) -> tuple[tuple[str, int], ...]:
     """Break an item's inbound count out by predicate, count-desc then name.
 
-    Scans the SAME corpus + three-form matcher as ``_inbound_count`` (which
-    keys off ``_compute_inbound_refs``), so the breakdown SUMS to the ``←N``
-    total — the render can show ``←5 (3 via stakeholder, 2 via ref)`` and the
-    parts always reconcile. Keyless (collect) sources contribute here exactly
-    as they contribute to the count, even though they cannot be named in the
-    ``← source`` adjacency expansion.
+    Scans the SAME corpus + exact ``(kind, key)`` matcher as ``_inbound_count``
+    (which keys off ``_compute_inbound_refs``), so the breakdown SUMS to the
+    ``←N`` total — the render can show ``←5 (3 via stakeholder, 2 via ref)`` and
+    the parts always reconcile. Keyless (collect) sources contribute here
+    exactly as they contribute to the count, even though they cannot be named
+    in the ``← source`` adjacency expansion.
     """
     key = _row_key(item, key_field)
     if not key:
         return ()
     counts: Counter = Counter()
     for addr, pred, _src in corpus:
-        if _address_matches_key(addr, key):
+        if _addr_matches(addr, kind, key):
             counts[pred] += 1
     return tuple(sorted(counts.items(), key=lambda kv: (-kv[1], kv[0])))
 
 
-def _inbound_count(item: FoldItem, key_field: str | None, inbound: Counter) -> int:
-    """Look up inbound ref count for this item.
+def _inbound_count(
+    item: FoldItem, kind: str, key_field: str | None, inbound: Counter
+) -> int:
+    """Look up an item's inbound ref count by EXACT ``(kind, key)`` address.
 
-    Matches refs in three forms:
-    * Kind-qualified colon — ``<fact-kind>:<key>`` (CANONICAL — e.g.
-      ``decision:design/foo``, ``thread:arc-name``)
-    * Kind-qualified slash — ``<fact-kind>/<key>`` (legacy — e.g. ``decision/design/foo``)
-    * Bare — the key_field value itself (e.g. ``design/foo``)
-
-    The colon form is the documented ref convention; matching only the slash
-    and bare forms silently dropped EVERY ``kind:key`` inbound ref from
-    salience — the dominant form in practice (the read-side twin of the
-    emit-time colon-blindness fixed in resolve.py). The bare form matters when
-    the key contains a namespace slash: ``endswith("/foo")`` alone misses it.
+    Returns the item's own kind-qualified count plus the bare (separator-less,
+    kind-unknown) fallback: ``inbound[Address(kind, key)] + inbound[Address('',
+    key)]``. Both the canonical ``kind:key`` colon form and the legacy
+    ``kind/key`` slash form parse to ``Address(kind, key)`` in the corpus, so
+    they land on the first term; only a bare address bearing the key falls
+    through the second. Cross-kind refs (``thread:X`` against a ``decision``
+    keyed ``X``) no longer count — the old kind-blind suffix scan aliased them.
     """
     if not key_field:
         return 0
     key = item.payload.get(key_field, "")
     if not key:
         return 0
-    count = 0
-    suffix_slash = f"/{key}"
-    suffix_colon = f":{key}"
-    for ref_key, ref_count in inbound.items():
-        if (
-            ref_key == key
-            or ref_key.endswith(suffix_slash)
-            or ref_key.endswith(suffix_colon)
-        ):
-            count += ref_count
-    return count
+    key = str(key)
+    own = inbound[Address(kind, key)] if kind else 0
+    return own + inbound[Address("", key)]
 
 
 # ---------------------------------------------------------------------------
@@ -578,7 +592,7 @@ def project(
         )
         for item in section.items:
             key = _row_key(item, kf)
-            inbound_count = _inbound_count(item, kf, inbound)
+            inbound_count = _inbound_count(item, section.kind, kf, inbound)
             payload = dict(item.payload)
             if fields:
                 payload = {k: payload[k] for k in fields if k in payload}
@@ -598,7 +612,7 @@ def project(
                     refs=tuple(item.refs),
                     edges=tuple(item.edges),
                     inbound=inbound_count,
-                    inbound_predicates=_inbound_predicates(item, kf, corpus),
+                    inbound_predicates=_inbound_predicates(item, section.kind, kf, corpus),
                     salience=item.n + inbound_count,
                     depth=0,
                     via_anchor=None,
@@ -611,7 +625,7 @@ def project(
         item = w.item
         kf = w.key_field
         key = _row_key(item, kf)
-        inbound_count = _inbound_count(item, kf, inbound)
+        inbound_count = _inbound_count(item, w.section_kind, kf, inbound)
         payload = dict(item.payload)
         if fields:
             payload = {k: payload[k] for k in fields if k in payload}
@@ -631,7 +645,7 @@ def project(
                 refs=tuple(item.refs),
                 edges=tuple(item.edges),
                 inbound=inbound_count,
-                inbound_predicates=_inbound_predicates(item, kf, corpus),
+                inbound_predicates=_inbound_predicates(item, w.section_kind, kf, corpus),
                 salience=item.n + inbound_count,
                 depth=w.depth,
                 via_anchor=w.via_anchor,

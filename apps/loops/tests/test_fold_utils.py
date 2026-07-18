@@ -4,7 +4,7 @@ import time
 from collections import Counter
 from datetime import datetime, timezone
 
-from atoms import FoldItem, FoldSection, FoldState
+from atoms import Address, FoldItem, FoldSection, FoldState
 
 from painted import Zoom
 
@@ -148,30 +148,38 @@ class TestItemFullKey:
 
 class TestInboundCount:
     def test_no_key_field(self):
-        assert _inbound_count(item(), None, Counter()) == 0
+        assert _inbound_count(item(), "decision", None, Counter()) == 0
 
     def test_no_key_value(self):
-        assert _inbound_count(item({}), "name", Counter()) == 0
+        assert _inbound_count(item({}), "decision", "name", Counter()) == 0
 
-    def test_with_refs(self):
-        inbound = Counter({"decision/auth": 3, "thread/auth": 1})
-        assert _inbound_count(item({"name": "auth"}), "name", inbound) == 4
+    def test_exact_kind_match_no_cross_alias(self):
+        """A colon/slash ref counts only for a row of its OWN kind (defect a).
 
-    def test_namespaced_key_matches_both_forms(self):
-        """Keys with a namespace slash must match bare and kind-qualified refs.
+        The corpus is keyed by parsed Address, so decision:auth and
+        thread:auth are distinct — a decision keyed 'auth' counts the
+        decision ref, never the thread ref (the old suffix scan aliased both).
+        """
+        inbound = Counter({Address("decision", "auth"): 3, Address("thread", "auth"): 1})
+        assert _inbound_count(item({"name": "auth"}), "decision", "name", inbound) == 3
+        assert _inbound_count(item({"name": "auth"}), "thread", "name", inbound) == 1
 
-        Fixes the endswith("/{key}") miss: for key="design/foo" the bare
-        ref "design/foo" doesn't end with "/design/foo" and was skipped.
-        Both forms appear in practice — ref=design/foo and
-        ref=decision/design/foo should contribute equivalently.
+    def test_namespaced_key_matches_kind_qualified_forms(self):
+        """A namespaced key matches its kind-qualified refs (colon or legacy
+        slash both parse to Address(decision, design/foo)); a same-key ref of
+        another kind does NOT alias, and a bare same-name-different-key ref
+        does not match.
         """
         inbound = Counter({
-            "design/foo": 5,                    # bare kind/key form
-            "decision/design/foo": 3,           # fully-qualified form
-            "design/other": 7,                  # should NOT match (different key)
+            Address("decision", "design/foo"): 3,   # decision:design/foo or decision/design/foo
+            Address("thread", "design/foo"): 4,     # different kind — must NOT alias
+            Address("", "design/foo"): 5,           # bare — matches by key fallback
+            Address("decision", "design/other"): 7,  # different key — must NOT match
         })
-        result = _inbound_count(item({"topic": "design/foo"}), "topic", inbound)
-        assert result == 8  # 5 + 3, not 3 alone
+        result = _inbound_count(
+            item({"topic": "design/foo"}), "decision", "topic", inbound
+        )
+        assert result == 8  # 3 (kind-exact) + 5 (bare fallback), NOT the thread 4
 
 
 class TestComputeInboundRefs:
@@ -180,8 +188,9 @@ class TestComputeInboundRefs:
         i2 = item(refs=("decision/x",))
         s = section(items=(i1, i2))
         result = _compute_inbound_refs(state(sections=(s,)))
-        assert result["decision/x"] == 2
-        assert result["thread/y"] == 1
+        # Keyed by parsed Address now — decision/x and thread/y split on kind.
+        assert result[Address("decision", "x")] == 2
+        assert result[Address("thread", "y")] == 1
 
 
 class TestComputeInboundEdges:
@@ -219,6 +228,41 @@ class TestComputeInboundEdges:
         s = section(items=(i1,))
         result = _compute_inbound_edges(state(sections=(s,)))
         assert result == {}
+
+
+class TestCrossKindAliasing:
+    """Defect (a): a colon/slash ref must not alias across kinds."""
+
+    def test_colon_ref_counts_only_its_own_kind(self):
+        # A decision keyed 'design/foo' AND a thread keyed 'design/foo' both
+        # present; a ref to decision:design/foo must increment ONLY the
+        # decision row's inbound — never the thread's.
+        src = item({"topic": "referrer"}, refs=("decision:design/foo",))
+        dec = item({"topic": "design/foo"})
+        thr = item({"name": "design/foo"})
+        s_src = section(items=(src,), kind="observation", key_field="topic")
+        s_dec = section(items=(dec,), kind="decision", key_field="topic")
+        s_thr = section(items=(thr,), kind="thread", key_field="name")
+        st = state(sections=(s_src, s_dec, s_thr))
+
+        inbound = _compute_inbound_refs(st)
+        assert _inbound_count(dec, "decision", "topic", inbound) == 1
+        assert _inbound_count(thr, "thread", "name", inbound) == 0
+
+        # And the adjacency agrees: only decision/design/foo gets the edge.
+        edges = _compute_inbound_edges(st)
+        assert edges.get("decision/design/foo") == [("observation/referrer", "ref")]
+        assert "thread/design/foo" not in edges
+
+    def test_legacy_slash_ref_still_counts_its_own_kind(self):
+        # Guards the 493 live kind/key slash refs: decision/atoms/n-on-fold-item
+        # must keep resolving to a decision keyed atoms/n-on-fold-item.
+        src = item({"topic": "referrer"}, refs=("decision/atoms/n-on-fold-item",))
+        dec = item({"topic": "atoms/n-on-fold-item"})
+        s_src = section(items=(src,), kind="observation", key_field="topic")
+        s_dec = section(items=(dec,), kind="decision", key_field="topic")
+        inbound = _compute_inbound_refs(state(sections=(s_src, s_dec)))
+        assert _inbound_count(dec, "decision", "topic", inbound) == 1
 
 
 # ---------------------------------------------------------------------------

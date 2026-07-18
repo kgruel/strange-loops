@@ -35,7 +35,6 @@ from loops.surface import (
 from loops.surface import (
     _compute_inbound_refs,
     _inbound_count,
-    _salience,
 )
 
 
@@ -90,16 +89,19 @@ def test_surface_is_painted_free():
 
 
 def test_project_materializes_salience_parity():
-    """Every Row.salience/inbound equals the LENS helpers on the same FoldState.
+    """Every Row.salience/inbound equals recomputing on the same FoldState.
 
-    Uses refs so inbound varies, including the dual-form bare/kind-qualified
-    match (ref 'decision/design/b' AND bare 'design/b' both count toward
-    design/b's inbound). Non-circular: the reference is fold.py, not surface.py.
+    Exercises all three matching forms against ``cache``: a canonical
+    ``decision:cache`` colon ref AND a legacy ``decision/cache`` slash ref
+    both land on ``Address(decision, cache)`` (kind-exact), and a bare
+    separator-less ``cache`` ref lands on ``Address('', cache)`` (the bare
+    fallback). Non-circular: project() and _inbound_count are compared, and
+    the explicit counts pin the exact-match contract.
     """
     state = _byfold_state(
-        _decision("design/a", n=2, refs=("decision/design/b", "design/c")),
-        _decision("design/b", n=1, refs=()),
-        _decision("design/c", n=3, refs=("decision/design/b",)),
+        _decision("cache", n=2, refs=()),
+        _decision("auth", n=1, refs=("decision:cache", "decision/cache")),
+        _decision("db", n=3, refs=("cache",)),
     )
     inbound = _compute_inbound_refs(state)
     surface = project(state)
@@ -110,16 +112,17 @@ def test_project_materializes_salience_parity():
         for item in section.items:
             topic = item.payload["topic"]
             row = by_topic[topic]
-            assert row.inbound == _inbound_count(item, kf, inbound), topic
-            assert row.salience == _salience(item, kf, inbound), topic
+            assert row.inbound == _inbound_count(item, section.kind, kf, inbound), topic
+            assert row.salience == item.n + _inbound_count(
+                item, section.kind, kf, inbound
+            ), topic
 
-    # design/b is referenced by both a (kind-qualified) and c (kind-qualified)
-    # → inbound 2; plus n=1 → salience 3. design/c referenced by a via bare
-    # 'design/c' → inbound 1.
-    assert by_topic["design/b"].inbound == 2
-    assert by_topic["design/b"].salience == 3
-    assert by_topic["design/c"].inbound == 1
-    assert by_topic["design/c"].salience == 4
+    # cache: colon + legacy-slash both count kind-exact (2) + one bare ref (1)
+    # → inbound 3; plus n=2 → salience 5. auth/db reference out, not in.
+    assert by_topic["cache"].inbound == 3
+    assert by_topic["cache"].salience == 5
+    assert by_topic["auth"].inbound == 0
+    assert by_topic["db"].inbound == 0
 
 
 # ---------------------------------------------------------------------------

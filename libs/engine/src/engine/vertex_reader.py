@@ -1226,34 +1226,22 @@ def vertex_tick_fold(
     return _raw_to_fold_state(raw, ast, specs, kind=kind)
 
 
-def _normalize_edge_address(value: str, target_kind: str) -> str:
-    """Normalize a raw edge-field address to canonical ``kind:key`` form.
-
-    A value already carrying a ``:`` is kind-qualified — kept verbatim. A bare
-    value (``acme``, or a slashed key ``design/foo``) is qualified with the
-    declared target kind (``person:acme``) so it walks and matches inbound the
-    same way an explicit ``kind:key`` ref does. Empty parts are dropped.
-    """
-    v = value.strip()
-    if not v:
-        return ""
-    if ":" in v:
-        return v
-    return f"{target_kind}:{v}"
-
-
 def _lift_edges(payload: dict, edge_specs: tuple[tuple[str, str], ...]) -> tuple:
     """Lift declared edge fields from a folded payload into typed ``Edge``s.
 
     ``edge_specs`` are ``(field, target_kind)`` pairs from the kind's
     declaration. For each declared field present in the payload, the raw
     ADDRESS value (not the ``{field}_ref`` ULID pin) is comma-split and each
-    part normalized to ``kind:key``. Predicate = field name. This is the
-    read-time projection: overlay edges are the latest folded field value, so
-    they are retroactive (historical facts light up on declaration) and
-    emission-correctable (re-emit changes the value → the edge set changes).
+    part qualified into a canonical ``kind:key`` string via
+    :meth:`atoms.Address.for_edge` (the declaration-qualified constructor,
+    SHARED with the emit path — a bare/slashed value is qualified WHOLE with
+    the declared target, an explicit colon is kept verbatim). Predicate =
+    field name. This is the read-time projection: overlay edges are the latest
+    folded field value, so they are retroactive (historical facts light up on
+    declaration) and emission-correctable (re-emit changes the value → the
+    edge set changes).
     """
-    from atoms import Edge
+    from atoms import Address, Edge
 
     edges: list = []
     for field_name, target_kind in edge_specs:
@@ -1261,9 +1249,9 @@ def _lift_edges(payload: dict, edge_specs: tuple[tuple[str, str], ...]) -> tuple
         if not isinstance(raw, str) or not raw.strip():
             continue
         for part in raw.split(","):
-            addr = _normalize_edge_address(part, target_kind)
-            if addr:
-                edges.append(Edge(predicate=field_name, address=addr))
+            addr = Address.for_edge(part, target_kind)
+            if addr is not None:
+                edges.append(Edge(predicate=field_name, address=str(addr)))
     return tuple(edges)
 
 

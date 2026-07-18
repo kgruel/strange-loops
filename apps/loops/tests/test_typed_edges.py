@@ -330,3 +330,58 @@ def test_edge_declaration_is_kind_scoped_at_emit(tmp_path, capsys):
     state = vertex_fold(p)
     dec = _item(state, "decision", "design/foo")
     assert {e.address for e in dec.edges} == {"person:acme", "person:globex"}
+
+
+def test_bare_declared_edge_value_validated_and_qualified_at_emit(tmp_path, capsys):
+    """Defect (c): a BARE declared-edge value is validated at emit time and its
+    receipt reads the qualified address the read lift produces.
+
+    Before, ``stakeholder=acme`` (no separator) failed the address-candidate
+    check and was silently skipped — no validation, no receipt edge line —
+    while the read lift still qualified it to ``person:acme``. Now emit
+    qualifies it through the same ``Address.for_edge`` the lift uses.
+    """
+    p = tmp_path / "t.vertex"
+    _write(p, _WITH_EDGE)
+    _emit(p, "person", handle="acme", name="Acme")
+    capsys.readouterr()
+    ns = argparse.Namespace(
+        vertex=None, kind="decision",
+        parts=["topic=design/foo", "stakeholder=acme", "message=x"],
+        observer="", dry_run=False, verbose=1,
+    )
+    cmd_emit(ns, vertex_path=p)
+    err = capsys.readouterr().err
+    # Bare value resolved + rendered as the qualified edge (matches read lift).
+    assert "inbound edge via stakeholder: person:acme" in err
+    # And the lifted edge agrees.
+    dec = _item(vertex_fold(p), "decision", "design/foo")
+    assert {e.address for e in dec.edges} == {"person:acme"}
+
+
+def test_slashed_declared_edge_value_qualified_not_split_at_emit(tmp_path, capsys):
+    """Defect (b): emit and read qualify a slashed declared-edge value the SAME
+    way — ``stakeholder=design/foo`` → ``person:design/foo`` on both sides.
+
+    Before, emit slash-split ``design/foo`` into kind=design,key=foo (an
+    orphan pin) while the read lift qualified it to person:design/foo — the
+    two paths built different edges from the identical value.
+    """
+    p = tmp_path / "t.vertex"
+    _write(p, _WITH_EDGE)
+    # A person keyed with a slash (unusual but valid) so the edge resolves.
+    _emit(p, "person", handle="design/foo", name="Slashed")
+    capsys.readouterr()
+    ns = argparse.Namespace(
+        vertex=None, kind="decision",
+        parts=["topic=design/bar", "stakeholder=design/foo", "message=x"],
+        observer="", dry_run=False, verbose=1,
+    )
+    cmd_emit(ns, vertex_path=p)
+    err = capsys.readouterr().err
+    # Qualified WHOLE with the declared target — NOT split into design:foo.
+    assert "inbound edge via stakeholder: person:design/foo" in err
+    assert "design:foo" not in err
+    # Read lift agrees byte-for-byte.
+    dec = _item(vertex_fold(p), "decision", "design/bar")
+    assert {e.address for e in dec.edges} == {"person:design/foo"}

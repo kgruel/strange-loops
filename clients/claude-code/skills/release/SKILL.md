@@ -31,6 +31,12 @@ passes; do not announce until the PyPI install smokes.
   deletable (`git branch -D` is fine once content is merged to HEAD — the
   local branch is often ahead of its stale remote ref).
 - `CHANGELOG.md` has an `## Unreleased` section maintained during the wave.
+- **Sibling-release cap cross-check**: if a sibling package (painted, or any
+  inter-dep) shipped since the last cut, confirm this release's dependency
+  caps ADMIT the sibling's current version — or widen them in this cut.
+  (0.8.0 kept `painted<0.13` while painted 0.13.0 shipped the same day; no
+  released strange-loops admitted it, and a downstream floor-bump could not
+  lock. Cost a 0.8.1. friction:release-pairing-inter-dep-cap.)
 - `git push` is multi-remote (GitLab + GitHub on one push); `gh` operates on
   the GitHub side, which is where the release workflow lives.
 
@@ -153,5 +159,8 @@ The release is not "done" until an install **from PyPI** reads a live store.
 - **painted/loops version collision** — the pinned painted range must have a
   published wheel; gating against a local painted checkout proves nothing
   about the PyPI resolve (re-gate when the pin's target ships).
+- **Sibling release excludes sibling** — the inverse direction: the cap's
+  UPPER bound must admit the sibling's latest published version, checked at
+  cut time (step 0), not discovered by the first downstream consumer.
 - **Tag without release** — a pushed tag alone never publishes; the workflow
   triggers on the GitHub release event.

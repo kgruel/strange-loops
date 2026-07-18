@@ -13,6 +13,45 @@ import pytest
 from atoms import Address
 
 
+class TestReadings:
+    """Dual-reading for the MATCH path — a slash address is ambiguous (sol-P1)."""
+
+    def test_colon_single_exact_reading(self):
+        # Colon declares the kind — one reading, no ambiguity, no alias.
+        assert Address.readings("decision:design/foo") == (Address("decision", "design/foo"),)
+        assert Address.readings("thread:arc-name") == (Address("thread", "arc-name"),)
+
+    def test_slash_yields_both_readings(self):
+        # Legacy kind-qualified (primary) AND bare whole-key.
+        assert Address.readings("design/foo") == (
+            Address("design", "foo"),
+            Address("", "design/foo"),
+        )
+        assert Address.readings("decision/atoms/n-on-fold-item") == (
+            Address("decision", "atoms/n-on-fold-item"),
+            Address("", "decision/atoms/n-on-fold-item"),
+        )
+
+    def test_bare_single_reading(self):
+        assert Address.readings("arc-name") == (Address("", "arc-name"),)
+
+    def test_empty_and_colon_empty_half_yield_no_readings(self):
+        assert Address.readings("") == ()
+        assert Address.readings("   ") == ()
+        assert Address.readings(":key") == ()
+        assert Address.readings("kind:") == ()
+
+    def test_slash_empty_half_keeps_only_bare_reading(self):
+        # No valid legacy kind-qualified reading, but the whole string is still
+        # a (degenerate) bare key — harmless, matches nothing real.
+        assert Address.readings("/key") == (Address("", "/key"),)
+        assert Address.readings("kind/") == (Address("", "kind/"),)
+
+    def test_parse_returns_primary_reading(self):
+        for raw in ("decision:design/foo", "design/foo", "arc-name"):
+            assert Address.parse(raw) == Address.readings(raw)[0]
+
+
 class TestParse:
     """Self-describing refs — the corpus population (item.refs, cites)."""
 

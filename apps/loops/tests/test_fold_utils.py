@@ -265,6 +265,61 @@ class TestCrossKindAliasing:
         assert _inbound_count(dec, "decision", "topic", inbound) == 1
 
 
+class TestDualReadingSlash:
+    """sol-P1: a slash address is genuinely ambiguous and matches under BOTH
+    the legacy kind-qualified reading AND the bare namespaced-key reading."""
+
+    def test_bare_namespaced_key_ref_still_counts(self):
+        # The RESTORED regression: a ref written bare as ``design/foo`` (where
+        # design/ is the topic prefix) must keep counting toward a decision
+        # keyed ``design/foo`` — via the bare whole-key reading.
+        src = item({"topic": "referrer"}, refs=("design/foo",))
+        dec = item({"topic": "design/foo"})
+        s_src = section(items=(src,), kind="observation", key_field="topic")
+        s_dec = section(items=(dec,), kind="decision", key_field="topic")
+        inbound = _compute_inbound_refs(state(sections=(s_src, s_dec)))
+        assert _inbound_count(dec, "decision", "topic", inbound) == 1
+
+    def test_ambiguous_slash_counts_both_colliding_rows(self):
+        # design-kind fact keyed 'foo' AND decision keyed 'design/foo' both
+        # present. The genuinely-ambiguous ``design/foo`` ref counts toward
+        # BOTH — the honest rendering of the collision.
+        src = item({"topic": "r"}, refs=("design/foo",))
+        design_row = item({"topic": "foo"})       # design-kind, key 'foo'
+        dec_row = item({"topic": "design/foo"})   # decision, key 'design/foo'
+        st = state(sections=(
+            section(items=(src,), kind="observation", key_field="topic"),
+            section(items=(design_row,), kind="design", key_field="topic"),
+            section(items=(dec_row,), kind="decision", key_field="topic"),
+        ))
+        inbound = _compute_inbound_refs(st)
+        assert _inbound_count(design_row, "design", "topic", inbound) == 1
+        assert _inbound_count(dec_row, "decision", "topic", inbound) == 1
+
+    def test_colon_disambiguates_to_one_row(self):
+        # With the SAME collision, an explicit colon picks exactly one row.
+        design_row = item({"topic": "foo"})
+        dec_row = item({"topic": "design/foo"})
+        base = (
+            section(items=(design_row,), kind="design", key_field="topic"),
+            section(items=(dec_row,), kind="decision", key_field="topic"),
+        )
+        # design:foo -> design-kind row only
+        src_d = item({"topic": "r"}, refs=("design:foo",))
+        inbound = _compute_inbound_refs(state(sections=(
+            section(items=(src_d,), kind="observation", key_field="topic"), *base,
+        )))
+        assert _inbound_count(design_row, "design", "topic", inbound) == 1
+        assert _inbound_count(dec_row, "decision", "topic", inbound) == 0
+        # decision:design/foo -> decision row only
+        src_c = item({"topic": "r"}, refs=("decision:design/foo",))
+        inbound = _compute_inbound_refs(state(sections=(
+            section(items=(src_c,), kind="observation", key_field="topic"), *base,
+        )))
+        assert _inbound_count(design_row, "design", "topic", inbound) == 0
+        assert _inbound_count(dec_row, "decision", "topic", inbound) == 1
+
+
 # ---------------------------------------------------------------------------
 # _first_field / _group_by_namespace
 # ---------------------------------------------------------------------------

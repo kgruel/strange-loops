@@ -145,14 +145,17 @@ class Surface:
 # lenses/fold.py). Kept painted-free so every consumer can depend on it: the
 # built-in fold lens and the orient lenses (session_start / session_landing /
 # identity_prompt) all read the materialized Row scalars and carry no copies.
-# Matching is EXACT on ``atoms.Address(kind, key)``: the corpus is parsed into
-# ``Counter[Address]`` once, and an item's inbound is ``inbound[Address(kind,
-# key)] + inbound[Address('', key)]`` — its own kind-qualified count plus the
-# bare (separator-less, kind-unknown) fallback. This replaces the old three-form
-# suffix scan, whose kind-blindness aliased ``decision:X`` onto a ``thread``
-# keyed ``X`` (and vice versa). Legacy ``kind/key`` refs still match their own
-# kind (Address.parse splits on the first slash); only cross-kind aliasing is
-# removed.
+# Matching is over ``atoms.Address`` READINGS: the corpus is expanded into
+# ``Counter[Address]`` once (each address contributes all its readings), and an
+# item's inbound is ``inbound[Address(kind, key)] + inbound[Address('', key)]``
+# — its own kind-qualified count plus the bare (kind-unknown) fallback. A colon
+# address has ONE exact reading, so ``decision:X`` never counts toward a
+# ``thread`` keyed ``X`` (the cross-kind alias the old kind-blind suffix scan
+# produced is gone). A slash address ``x/y`` is genuinely ambiguous and carries
+# BOTH readings — legacy ``(x, y)`` AND bare ``('', 'x/y')`` — so a namespaced
+# ``design/foo`` ref still reaches a ``decision`` keyed ``design/foo`` without
+# resurrecting cross-kind colon aliasing (sol-P1). The eventual disambiguator is
+# a colon-form rewrite-at-rest migration, deferred (arbiter S1-F2).
 # ---------------------------------------------------------------------------
 
 
@@ -270,35 +273,37 @@ def promotion_candidates(
 
 
 def _compute_inbound_refs(data: FoldState) -> Counter:
-    """Count inbound references (ref + typed edges), keyed by parsed ``Address``.
+    """Count inbound references (ref + typed edges), keyed by ``Address`` reading.
 
-    Every corpus address is parsed once (colon / legacy-slash / bare); a bare
-    separator-less address lands under ``Address('', key)`` so an item can pick
-    it up through the bare fallback. Un-parseable addresses (empty / empty
-    half) name no target and are dropped. The resulting ``Counter[Address]``
-    gives ``_inbound_count`` an O(1) exact lookup.
+    Every corpus address contributes ALL its readings (``Address.readings``): a
+    colon address one exact reading; a slash address BOTH its legacy
+    kind-qualified reading AND its bare whole-key reading (the genuine
+    ambiguity); a bare address one ``Address('', key)`` reading. The resulting
+    ``Counter[Address]`` gives ``_inbound_count`` an O(1) lookup — a single ref
+    can never double-count one row (its two readings target distinct addresses),
+    so the sum stays honest.
     """
     inbound: Counter = Counter()
     for addr, _pred, _src in _edge_corpus(data):
-        parsed = Address.parse(addr)
-        if parsed is not None:
-            inbound[parsed] += 1
+        for reading in Address.readings(addr):
+            inbound[reading] += 1
     return inbound
 
 
 def _addr_matches(addr: str, kind: str, key: str) -> bool:
-    """Exact ``(kind, key)`` match over a raw corpus address, with bare fallback.
+    """Match a raw corpus address to a target ``(kind, key)`` under ANY reading.
 
-    Parses ``addr`` and matches when it is the target's own kind-qualified
-    address (``kind:key`` colon or the legacy ``kind/key`` slash both parse to
-    ``(kind, key)``) OR a bare separator-less address bearing the key. Replaces
-    the old kind-blind suffix matcher — a ``decision:X`` corpus address no
-    longer matches a ``thread`` keyed ``X``.
+    A colon address has a single exact reading (cross-kind aliases stay dead); a
+    slash address matches under EITHER its legacy kind-qualified reading OR its
+    bare whole-key reading (sol-P1 — ``design/foo`` still reaches a ``decision``
+    keyed ``design/foo``); a bare reading (``kind=''``) matches the key under any
+    kind. Counted at most once per (ref, row) — this is a boolean membership,
+    not a tally.
     """
-    a = Address.parse(addr)
-    if a is None:
-        return False
-    return (a.kind == kind and a.key == key) or (a.kind == "" and a.key == key)
+    for a in Address.readings(addr):
+        if a.key == key and (a.kind == kind or a.kind == ""):
+            return True
+    return False
 
 
 def _compute_inbound_edges(data: FoldState) -> dict[str, list[tuple[str, str]]]:
@@ -366,15 +371,18 @@ def _inbound_predicates(
 def _inbound_count(
     item: FoldItem, kind: str, key_field: str | None, inbound: Counter
 ) -> int:
-    """Look up an item's inbound ref count by EXACT ``(kind, key)`` address.
+    """Look up an item's inbound ref count over the reading-keyed corpus.
 
-    Returns the item's own kind-qualified count plus the bare (separator-less,
-    kind-unknown) fallback: ``inbound[Address(kind, key)] + inbound[Address('',
-    key)]``. Both the canonical ``kind:key`` colon form and the legacy
-    ``kind/key`` slash form parse to ``Address(kind, key)`` in the corpus, so
-    they land on the first term; only a bare address bearing the key falls
-    through the second. Cross-kind refs (``thread:X`` against a ``decision``
-    keyed ``X``) no longer count — the old kind-blind suffix scan aliased them.
+    Returns the item's own kind-qualified count plus the bare (kind-unknown)
+    fallback: ``inbound[Address(kind, key)] + inbound[Address('', key)]``. The
+    corpus counter is keyed by ``Address.readings`` (``_compute_inbound_refs``),
+    so a canonical ``kind:key`` colon ref lands ONLY on the first term (exact,
+    no alias); a legacy ``kind/key`` slash ref lands on the first term for its
+    own kind AND on the bare term when the WHOLE ``x/y`` string equals this
+    key (the namespaced-key reading — sol-P1). A single ref never hits both
+    terms for one row (its readings target distinct addresses), so the sum is
+    an honest per-ref count. Cross-kind colon refs (``thread:X`` against a
+    ``decision`` keyed ``X``) still never count.
     """
     if not key_field:
         return 0

@@ -293,16 +293,50 @@ class TestAcceptanceWalk:
         ]
 
     def test_event_axis_unchanged(self, tmp_path, capsys):
-        # "--facts (event history) is unchanged": the raw event axis is never
-        # hidden. `--match` switches to level="fact" rows, and the inactive
-        # entity's facts are fully searchable (the hide is fold-view only). The
-        # store itself is never rewritten — this is the honest-substrate proof.
+        # The raw event axis is never hidden. `--match` switches to level="fact"
+        # rows, and the inactive entity's facts are fully searchable (the hide is
+        # fold-view only). The store itself is never rewritten.
         vpath = _write_accept_vertex(tmp_path)
         _seed_and_deprecate(vpath)
         _, s = _json_read(capsys, str(vpath), "--match", "beta")
         found = {(r["kind"], r["key"]) for r in s["rows"] if r["level"] == "fact"}
         assert ("task", "beta") in found  # deprecated beta still searchable
         assert s["window"]["hidden"] == 0  # event axis carries no hide
+
+    def test_facts_route_bypasses_hide(self, tmp_path, capsys):
+        # ARBITER: `--facts` (event/lifecycle history) is a DIFFERENT read axis
+        # than the current-state fold view, so it bypasses the hide entirely —
+        # like --review. A corpus audit of terminal entities' transitions must
+        # see them WITHOUT --all, or it silently under-counts. The PAIRING with
+        # the default read below is the proof of the axis split.
+        vpath = _write_accept_vertex(tmp_path)
+        _seed_and_deprecate(vpath)
+
+        # --facts (with --kind narrowing): terminal beta present + its FULL
+        # transition history (open → done), and no hide applied.
+        _, facts = _json_read(capsys, str(vpath), "--kind", "task", "--facts")
+        assert facts["window"]["hidden"] == 0
+        assert facts["window"]["limited_by"] is None
+        task_keys = {r["key"] for r in facts["rows"] if r["level"] == "key"}
+        assert "beta" in task_keys  # deprecated entity NOT hidden on facts route
+        history = [f["status"] for f in facts["source_facts"]["task/beta"]]
+        assert history == ["open", "done"]  # the full lifecycle transition
+
+        # PAIRING: the default current-state fold view still hides beta.
+        _, default = _json_read(capsys, str(vpath), "--kind", "task")
+        assert "beta" not in {r["key"] for r in default["rows"] if r["level"] == "key"}
+        assert default["window"]["hidden"] == 1
+
+    def test_facts_route_json_and_text_both_unhidden(self, tmp_path, capsys):
+        # Both encoders bypass identically on the facts route (no text/json skew).
+        vpath = _write_accept_vertex(tmp_path)
+        _seed_and_deprecate(vpath)
+        capsys.readouterr()
+        rc = main(["read", str(vpath), "--facts", "--plain"])
+        out = capsys.readouterr().out
+        assert rc == 0
+        assert "beta" in out                     # terminal entity present in text
+        assert "inactive hidden" not in out       # no hide footer on facts route
 
     def test_8_review_is_canonical_full_projection(self, tmp_path, capsys):
         vpath = _write_accept_vertex(tmp_path)

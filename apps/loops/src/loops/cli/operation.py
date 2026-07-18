@@ -66,6 +66,11 @@ class SurfaceSpec:
     refs_active: bool = False         # --refs N (N>0) → a ref-graph read. Keeps
     # referenced inactive nodes reachable (the hide spares ref-graph targets, so
     # a deprecated node something points at stays present under --refs; S5).
+    facts_active: bool = False        # --facts → event/lifecycle-history route.
+    # Bypasses the lifecycle hide ENTIRELY (arbiter): a history read is a
+    # different axis than the current-state fold view — a corpus audit of
+    # resolved/rejected entities' transitions must see them without --all, or it
+    # silently under-counts (the exact silent-curation failure this wave kills).
 
 
 @dataclass(frozen=True)

@@ -186,7 +186,12 @@ def _project_surface(op: Operation, data):
     # an explicit predicate defeats per-kind (asking for a status shows it). The
     # hide lives ONLY here + budget() — it never reaches `--review`, which reads
     # fetch_fold directly (canonical full projection; arbiter S4).
-    if not spec.show_all:
+    #
+    # The `--facts` route bypasses the hide ENTIRELY (arbiter): the hide is a
+    # current-state FOLD-VIEW projection, and `--facts` is a different read axis
+    # — event/lifecycle history stays faithful always, so a corpus audit of
+    # terminal entities' transitions sees them without needing `--all`.
+    if not spec.show_all and not spec.facts_active:
         where_fields = {f for f, _ in spec.where} if spec.where else set()
         skip = frozenset(
             kind

@@ -134,7 +134,18 @@ loops read <vertex> --limit N                 # keep the top-N rows by salience
 loops read <vertex> --last N                  # keep the newest-N rows by timestamp
 loops read <vertex> --count                   # aggregate rows into counts
 loops read <vertex> --count --by kind         # one count row per group (--by row attr / payload field)
+loops read <vertex> --all                     # show inactive entities a kind's `lifecycle` decl hides (0.9.0)
 ```
+
+**Lifecycle hide (0.9.0):** a kind declaring `lifecycle "<field>" active="…"`
+(see the clause below) has entities whose status is outside the active set
+projected out of the DEFAULT fold view. The read discloses it honestly —
+`Window.limited_by="status"` + a hidden count (`--json`) and a
+`(N inactive hidden — --all to show)` footer (TTY SUMMARY+). Defeat it with
+`--all`, or with an explicit `<field>=value` predicate (asking for a status
+auto-shows it, per declaring kind). The hide is projection-only: inactive nodes
+keep their inbound salience, stay reachable under `--refs`, and are always
+present in the canonical `--review` cut — it is never an edge rewrite.
 
 ### Zoom flags
 
@@ -261,6 +272,30 @@ loops emit project decision topic=x stakeholder=              # empty = clear th
 old target loses the inbound edge). `ref=` remains the ONE union edge
 (attention-events accumulate). `loops read <v> --lens reconcile` surfaces
 undeclared address-bearing fields as edge-declaration candidates.
+
+### `lifecycle` — active-status whitelist (fold-view hide, 0.9.0)
+
+Declare which payload field carries a kind's status and which values are ACTIVE.
+Entities whose status falls outside the active set are hidden from the default
+fold view (a projection, not an edge rewrite):
+
+```kdl
+loops {
+  task {
+    fold { items "by" "name" }
+    lifecycle "status" active="open,in-progress"   # field + active whitelist
+  }
+}
+```
+
+Whitelist, not blacklist (domain-neutral): a `task status=done` is hidden;
+a task LACKING `status` is SHOWN (fail-open — no claim ≠ inactive). The default
+read discloses the cut (`--all` / an explicit `status=` predicate defeats it —
+see Read grammar above); `loops validate` warns on a visible entity whose
+edge/ref targets an entity folded inactive, and on missing-status facts under a
+lifecycle-declared kind. Store-canonical delta: an additive field on the
+`_decl.kind-defined` document (no protocol-version bump) —
+`docs/dev/lifecycle-spec-delta-090.md`.
 
 ---
 

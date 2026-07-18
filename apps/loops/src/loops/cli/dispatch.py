@@ -148,7 +148,15 @@ def _project_surface(op: Operation, data):
     semantic). Budgeting first would instead count only the head of the raw
     population — the count-row salience would never do its job.
     """
-    from loops.surface import budget, count, filter, project, search, select
+    from loops.surface import (
+        budget,
+        count,
+        filter,
+        hide_inactive,
+        project,
+        search,
+        select,
+    )
 
     spec = op.surface_spec
     if spec is None:
@@ -170,6 +178,30 @@ def _project_surface(op: Operation, data):
             where=where,
             observer=spec.observer,
         )
+
+    # Lifecycle hide (S5) — after filter (so an explicit `status=` predicate has
+    # already narrowed the rows and can auto-disable per kind), before
+    # select/count/budget (so `--count`/`--limit` operate on the visible set).
+    # `--all` defeats globally; a kind whose declared lifecycle field appears in
+    # an explicit predicate defeats per-kind (asking for a status shows it). The
+    # hide lives ONLY here + budget() — it never reaches `--review`, which reads
+    # fetch_fold directly (canonical full projection; arbiter S4).
+    if not spec.show_all:
+        where_fields = {f for f, _ in spec.where} if spec.where else set()
+        skip = frozenset(
+            kind
+            for kind, kv in surface.schema.items()
+            if kv.lifecycle is not None and kv.lifecycle[0] in where_fields
+        )
+        # Under a --refs walk, every ref-graph target is protected so a
+        # referenced inactive node stays reachable (edge-position invariant).
+        protect = (
+            frozenset(surface.inbound_edges.keys())
+            if spec.refs_active
+            else frozenset()
+        )
+        surface = hide_inactive(surface, skip_kinds=skip, protect=protect)
+
     if spec.fields:
         surface = select(surface, spec.fields)
     if spec.do_count:

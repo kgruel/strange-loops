@@ -527,16 +527,22 @@ def fold_view(
             blocks.append(Block.text("", Style(), width=width))
             blocks.append(walked_block)
 
-    # Footer: unfolded kinds
-    footer_parts: list[str] = []
+    # Footer: unfolded kinds + lifecycle-hide disclosure (S5). One line each,
+    # mirroring the S2 stale/unindexed search footer. The hidden count is honest
+    # (Window.hidden — inactive entities the default view projected out) and
+    # names the `--all` defeat, so hiding is never silent.
+    footer_lines: list[str] = []
     if data.unfolded:
         loose = ", ".join(f"{c} {k}" for k, c in sorted(data.unfolded.items()))
-        footer_parts.append(f"Unfolded: {loose}")
-    if footer_parts:
+        footer_lines.append(f"Unfolded: {loose}")
+    if data.window.hidden:
+        footer_lines.append(
+            f"({data.window.hidden} inactive hidden — --all to show)"
+        )
+    if footer_lines:
         blocks.append(Block.text("", Style(), width=width))
-        blocks.append(Block.text(
-            "  ".join(footer_parts), fp.unfolded, width=width,
-        ))
+        for line in footer_lines:
+            blocks.append(Block.text(line, fp.unfolded, width=width))
 
     # Rail legend — TTY only; the piped ledger spells tiers as words.
     if not is_piped:

@@ -3105,6 +3105,148 @@ loops {
 """)
 
 
+class TestLifecycleDecl:
+    """Per-kind `lifecycle` declaration parses into LoopDef.lifecycle (S5)."""
+
+    def test_well_formed(self):
+        from lang import LifecycleDecl
+        vertex = parse_vertex("""\
+name "v"
+loops {
+  task {
+    fold { items "by" "name" }
+    lifecycle "status" active="open,in-progress"
+  }
+}
+""")
+        assert vertex.loops["task"].lifecycle == LifecycleDecl(
+            field="status", active=("open", "in-progress"),
+        )
+
+    def test_single_active_value(self):
+        from lang import LifecycleDecl
+        vertex = parse_vertex("""\
+name "v"
+loops {
+  task {
+    fold { items "by" "name" }
+    lifecycle "phase" active="live"
+  }
+}
+""")
+        assert vertex.loops["task"].lifecycle == LifecycleDecl(
+            field="phase", active=("live",),
+        )
+
+    def test_active_whitespace_trimmed(self):
+        from lang import LifecycleDecl
+        vertex = parse_vertex("""\
+name "v"
+loops {
+  task {
+    fold { items "by" "name" }
+    lifecycle "status" active="open, in-progress ,  blocked"
+  }
+}
+""")
+        assert vertex.loops["task"].lifecycle == LifecycleDecl(
+            field="status", active=("open", "in-progress", "blocked"),
+        )
+
+    def test_default_none_when_undeclared(self):
+        vertex = parse_vertex("""\
+name "v"
+loops {
+  change { fold { items "collect" 20 } }
+}
+""")
+        assert vertex.loops["change"].lifecycle is None
+
+    def test_coexists_with_edge_preview_search(self):
+        from lang import LifecycleDecl
+        vertex = parse_vertex("""\
+name "v"
+loops {
+  task {
+    fold { items "by" "name" }
+    search "message"
+    preview "status" "message"
+    edge "owner" targets="person"
+    lifecycle "status" active="open,in-progress"
+  }
+}
+""")
+        loop = vertex.loops["task"]
+        assert loop.lifecycle == LifecycleDecl(
+            field="status", active=("open", "in-progress"),
+        )
+        assert loop.search == ("message",)
+        assert loop.preview_fields == ("status", "message")
+        assert loop.edges[0].field == "owner"
+
+    def test_missing_field_arg_rejected(self):
+        with pytest.raises(ParseError, match="lifecycle requires a field name"):
+            parse_vertex("""\
+name "v"
+loops {
+  task {
+    fold { items "by" "name" }
+    lifecycle active="open"
+  }
+}
+""")
+
+    def test_missing_active_rejected(self):
+        with pytest.raises(ParseError, match="requires active="):
+            parse_vertex("""\
+name "v"
+loops {
+  task {
+    fold { items "by" "name" }
+    lifecycle "status"
+  }
+}
+""")
+
+    def test_empty_active_rejected(self):
+        with pytest.raises(ParseError, match="active set is empty"):
+            parse_vertex("""\
+name "v"
+loops {
+  task {
+    fold { items "by" "name" }
+    lifecycle "status" active=" , "
+  }
+}
+""")
+
+    def test_duplicate_rejected(self):
+        with pytest.raises(ParseError, match="lifecycle declared more than once"):
+            parse_vertex("""\
+name "v"
+loops {
+  task {
+    fold { items "by" "name" }
+    lifecycle "status" active="open"
+    lifecycle "phase" active="live"
+  }
+}
+""")
+
+    def test_single_line_kind_form_fails_to_parse(self):
+        # The known KDL multi-line trap: sibling child nodes on ONE line inside
+        # a `kind { ... }` body don't parse — ckdl raises "Expected end of node".
+        # Multi-line separation is mandatory. Tested so the requirement is an
+        # invariant, not folklore.
+        with pytest.raises(ParseError, match="Expected end of node"):
+            parse_vertex(
+                'name "v"\n'
+                'loops {\n'
+                '  task { fold { items "by" "name" } lifecycle "status" active="open" }\n'
+                '}\n'
+            )
+
+
 class TestPreviewDecl:
     """Per-kind `preview` declaration parses into LoopDef.preview_fields."""
 

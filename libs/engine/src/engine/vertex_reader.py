@@ -961,6 +961,11 @@ def _raw_to_fold_state(
                     scalars[fold_op.target] = val
 
         preview_fields = loop_def.preview_fields if loop_def is not None else ()
+        lifecycle = (
+            (loop_def.lifecycle.field, loop_def.lifecycle.active)
+            if loop_def is not None and loop_def.lifecycle is not None
+            else None
+        )
 
         sections.append(FoldSection(
             kind=kind_name,
@@ -970,6 +975,7 @@ def _raw_to_fold_state(
             scalars=scalars,
             preview_fields=preview_fields,
             edge_fields=edge_specs,
+            lifecycle=lifecycle,
         ))
 
     return FoldState(

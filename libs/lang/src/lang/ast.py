@@ -499,6 +499,23 @@ class EdgeDecl:
 
 
 @dataclass(frozen=True)
+class LifecycleDecl:
+    """A kind-level lifecycle declaration: which payload field carries the
+    entity's status, and which of that field's values count as ACTIVE.
+
+    Whitelist semantics (arbiter S5-F1): a folded entity whose ``field`` value
+    is NOT in ``active`` is projected out of the DEFAULT fold view — a hide, not
+    an edge rewrite (inbound counts and ``--refs`` presence are untouched). A
+    fact LACKING ``field`` makes no lifecycle claim and is SHOWN (fail-open).
+    Domain-neutral: the field name and its active set are declared, not baked
+    in. The first tenant of design:rendering/status-aware-kind-budget.
+    """
+
+    field: str
+    active: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class LoopDef:
     """Loop definition within a .vertex file."""
 
@@ -508,6 +525,7 @@ class LoopDef:
     parse: tuple[ParseStep, ...] = ()  # per-kind parse pipeline
     preview_fields: tuple[str, ...] = ()  # render-time trailing-slot field order
     edges: tuple[EdgeDecl, ...] = ()  # declared typed edges (field → target kind)
+    lifecycle: LifecycleDecl | None = None  # active-status whitelist (fold-view hide)
 
 
 # -----------------------------------------------------------------------------

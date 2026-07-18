@@ -92,6 +92,14 @@ Each `EdgeDecl(field, target)` declares that a payload field carries an address
 to `target` kind. Grammar-only here — the read-time projection lives in engine
 (`_lift_edges`) and surface. See decision:architecture/typed-edges-overlay-default.
 
+**Lifecycle** (0.9.0): a `LoopDef` may carry `lifecycle: LifecycleDecl | None`
+from a `lifecycle "<field>" active="<v1,v2,…>"` child-node (sibling of
+`edge`/`search`/`preview`). `LifecycleDecl(field, active)` declares which payload
+field is the entity's status and which values are ACTIVE. Grammar-only here — the
+default-view hide of inactive entities lives in the engine FoldSection build and
+`loops.surface`. Additive field on the `_decl.kind-defined` document (no protocol
+bump); see `docs/dev/lifecycle-spec-delta-090.md`.
+
 **Don't reach for yet**: Population management, KDL text manipulation.
 
 ---

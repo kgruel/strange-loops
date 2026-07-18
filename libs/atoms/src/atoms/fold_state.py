@@ -121,6 +121,12 @@ class FoldSection:
     (lang-type-free so atoms stays portable). Read-time consumers use these to
     exclude declared edges when scanning for promotion candidates and to know
     each edge field's target kind. Empty when the kind declares no edges."""
+    lifecycle: tuple[str, tuple[str, ...]] | None = None
+    """Declared lifecycle for this kind: ``(status_field, active_values)``
+    (lang-type-free so atoms stays portable). The read-view hide projects out
+    folded entities whose ``status_field`` value is outside ``active_values``;
+    a fact lacking the field is shown (fail-open). ``None`` when the kind
+    declares no lifecycle. See the fold-view hide in ``loops.surface``."""
 
     @property
     def count(self) -> int:

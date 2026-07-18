@@ -105,6 +105,7 @@ from .ast import (
     GrantDecl,
     InlineSource,
     LensDecl,
+    LifecycleDecl,
     LoopDef,
     LStrip,
     ObserverDecl,
@@ -468,11 +469,21 @@ def _loop_def_to_payload(loop: LoopDef) -> dict[str, Any]:
         "parse": _parse_steps_to_json(loop.parse),
         "preview": list(loop.preview_fields),
         "edges": [{"field": e.field, "target": e.target} for e in loop.edges],
+        "lifecycle": (
+            {"field": loop.lifecycle.field, "active": list(loop.lifecycle.active)}
+            if loop.lifecycle is not None
+            else None
+        ),
     }
 
 
 def _loop_def_from_payload(p: dict[str, Any]) -> LoopDef:
     boundary = p.get("boundary")
+    # `.get()` default keeps §9.2 forward/backward compat: a kind-defined
+    # document minted before the lifecycle facet existed simply lacks the key
+    # and projects to `lifecycle=None`. DECLARATION_PROTOCOL_VERSION is unbumped
+    # (additive field — arbiter S5-F3).
+    lc = p.get("lifecycle")
     return LoopDef(
         folds=tuple(_fold_decl_from_json(f) for f in p.get("folds", ())),
         boundary=_boundary_from_json(boundary) if boundary is not None else None,
@@ -481,6 +492,11 @@ def _loop_def_from_payload(p: dict[str, Any]) -> LoopDef:
         preview_fields=tuple(p.get("preview", ())),
         edges=tuple(
             EdgeDecl(field=e["field"], target=e["target"]) for e in p.get("edges", ())
+        ),
+        lifecycle=(
+            LifecycleDecl(field=lc["field"], active=tuple(lc["active"]))
+            if lc is not None
+            else None
         ),
     )
 

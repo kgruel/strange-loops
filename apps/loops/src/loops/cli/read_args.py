@@ -178,3 +178,9 @@ def add_read_args(parser: argparse.ArgumentParser) -> None:
         "--by", default=None,
         help="Group --count by a row attribute / payload field",
     )
+    # --all defeats the S5 lifecycle hide (show inactive entities). dest is
+    # explicit so it never reads as the `all` builtin at the call site.
+    parser.add_argument(
+        "--all", action="store_true", dest="show_all", default=False,
+        help="Show inactive entities that a kind's lifecycle declaration hides",
+    )

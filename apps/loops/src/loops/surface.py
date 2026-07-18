@@ -59,6 +59,10 @@ class KindView:
     key_field: str | None = None
     fold_type: str = "collect"  # "by" | "collect"
     preview_fields: tuple[str, ...] = ()
+    lifecycle: tuple[str, tuple[str, ...]] | None = None
+    # (status_field, active_values) — the kind's declared lifecycle whitelist.
+    # Drives the default-view hide of inactive entities (see hide_inactive).
+    # None when the kind declares no lifecycle.
 
 
 @dataclass(frozen=True)
@@ -114,7 +118,7 @@ class Window:
 
     total: int = 0  # rows before budget
     shown: int = 0  # rows after
-    limited_by: str | None = None  # "limit" | "last" | "salience" | None
+    limited_by: str | None = None  # "limit" | "last" | "salience" | "status" | None
     query: str | None = None  # the search string if search() ran
     fields: tuple[str, ...] | None = None  # the projection if select() ran
     granularity: str = "headline"  # derived summary: "whole" | "headline" | "mixed"
@@ -130,6 +134,11 @@ class Window:
     truncated: bool = False  # True when the FTS query hit its result limit —
     # no-silent-caps disclosure (S2, friction:fts-match-limit-100-silent-cap).
     # The limit itself is unchanged; this only names the gap.
+    hidden: int = 0  # count of INACTIVE entities projected out of the default
+    # fold view by the lifecycle hide (S5). A distinct signal from limited_by
+    # (which names the dominant slice) — always present when the hide fired, so
+    # `--all` / an explicit `status=` predicate defeat is disclosed, never
+    # silent. Fail-open: rows lacking the status field are never counted here.
 
 
 @dataclass(frozen=True)
@@ -608,6 +617,7 @@ def project(
             key_field=kf,
             fold_type=section.fold_type,
             preview_fields=section.preview_fields,
+            lifecycle=section.lifecycle,
         )
         for item in section.items:
             key = _row_key(item, kf)
@@ -1012,6 +1022,77 @@ def budget(
     return replace(surface, rows=row_tuple, window=window)
 
 
+def hide_inactive(
+    surface: Surface,
+    *,
+    skip_kinds: frozenset[str] = frozenset(),
+    protect: frozenset[str] = frozenset(),
+) -> Surface:
+    """LIFECYCLE HIDE — drop primary rows whose status is outside their kind's
+    declared active set, recording the cut into the Window (S5).
+
+    A projection-only budget-stage row-drop, applied AFTER ``project()`` has
+    materialized salience/tiers/inbound over the FULL population — so an
+    inactive node's inbound edges keep counting toward its neighbours' salience
+    and the ``inbound_edges`` adjacency is untouched. The hide is never an edge
+    rewrite; ``retract`` stays the distinct correction tombstone.
+
+    Scope guards (all binding):
+      * ``depth == 0`` — only primary rows. Walked (``--refs``) rows keep their
+        place, so an inactive node explicitly walked-to stays reachable.
+      * ``level == "key"`` — only folded entities. Event rows (``--match`` /
+        ``--facts`` history) make no lifecycle claim and are never hidden.
+      * fail-open — a row LACKING the status field is SHOWN (a fact making no
+        lifecycle claim is not claiming inactivity; arbiter S5-F1).
+      * ``protect`` — addresses (``kind/key``) an inactive primary is spared at.
+        Under a ``--refs`` walk the caller passes every ref-graph target here, so
+        a referenced inactive node STAYS reachable (arbiter edge-position). The
+        walk dedups its walked rows against primaries, so a referenced primary
+        never gets a depth>0 twin — protecting the primary itself is what keeps
+        it present. Orphan inactive nodes (no inbound) still hide under ``--refs``.
+
+    ``skip_kinds`` disables the hide per-kind (the caller passes the kinds whose
+    lifecycle field appears in an explicit ``status=`` predicate — asking for a
+    status auto-defeats hiding it). ``--all`` defeats globally by not calling
+    this at all. Uniform across encoders: text and ``--json`` both go through
+    this transform via ``_project_surface``.
+    """
+    kept: list[Row] = []
+    hidden = 0
+    for r in surface.rows:
+        kv = surface.schema.get(r.kind)
+        lc = kv.lifecycle if kv is not None else None
+        if (
+            lc is not None
+            and r.depth == 0
+            and r.level == "key"
+            and r.kind not in skip_kinds
+            and r.address not in protect
+        ):
+            field_name, active = lc
+            value = r.payload.get(field_name)
+            if value is not None and value not in active:
+                hidden += 1
+                continue
+        kept.append(r)
+
+    if hidden == 0:
+        return surface  # byte-identical when nothing is hidden
+
+    row_tuple = tuple(kept)
+    window = replace(
+        surface.window,
+        shown=len(row_tuple),
+        # limited_by names the slice; keep a stronger prior cut (limit/last) if
+        # one already ran, else claim "status" so a bare `sl read` with a hide
+        # discloses the reason.
+        limited_by=surface.window.limited_by or "status",
+        hidden=surface.window.hidden + hidden,
+        granularity=_window_granularity(row_tuple),
+    )
+    return replace(surface, rows=row_tuple, window=window)
+
+
 def count(surface: Surface, *, by: str | None = None) -> Surface:
     """AGGREGATE — collapse rows into count-rows.
 
@@ -1111,6 +1192,7 @@ def _window_to_dict(window: Window) -> dict:
         "unindexed": list(window.unindexed),
         "stale": list(window.stale),
         "truncated": window.truncated,
+        "hidden": window.hidden,
     }
 
 
@@ -1128,6 +1210,11 @@ def to_dict(surface: Surface) -> dict:
                 "key_field": kv.key_field,
                 "fold_type": kv.fold_type,
                 "preview_fields": list(kv.preview_fields),
+                "lifecycle": (
+                    {"field": kv.lifecycle[0], "active": list(kv.lifecycle[1])}
+                    if kv.lifecycle is not None
+                    else None
+                ),
             }
             for kind, kv in surface.schema.items()
         },

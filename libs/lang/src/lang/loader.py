@@ -369,8 +369,9 @@ def _load_boundary_condition(node: ckdl.Node, path: Path | None) -> "BoundaryCon
 
 
 def _load_loop_def(node: ckdl.Node, path: Path | None) -> LoopDef:
-    """Load a loop definition (fold + boundary + search + parse + preview) from a node's children."""
-    from .ast import EdgeDecl
+    """Load a loop definition (fold + boundary + search + parse + preview +
+    edge + lifecycle) from a node's children."""
+    from .ast import EdgeDecl, LifecycleDecl
 
     folds: tuple[FoldDecl, ...] = ()
     boundary: Boundary | None = None
@@ -380,6 +381,7 @@ def _load_loop_def(node: ckdl.Node, path: Path | None) -> LoopDef:
     preview_seen = False
     edges: list[EdgeDecl] = []
     edge_fields_seen: set[str] = set()
+    lifecycle: LifecycleDecl | None = None
 
     for child in node.children:
         if child.name == "fold":
@@ -439,12 +441,44 @@ def _load_loop_def(node: ckdl.Node, path: Path | None) -> LoopDef:
                 )
             edge_fields_seen.add(field_name)
             edges.append(EdgeDecl(field=field_name, target=target))
+        elif child.name == "lifecycle":
+            # lifecycle "<field>" active="v1,v2,..."  — the ACTIVE-status
+            # whitelist (arbiter S5-F1). A folded entity whose <field> value is
+            # outside this set is projected out of the default fold view; a fact
+            # lacking <field> makes no claim and is shown (fail-open). Whitelist,
+            # not blacklist, for domain-neutrality (grammar-domain-neutrality).
+            if lifecycle is not None:
+                raise _error("lifecycle declared more than once", path)
+            if not child.args:
+                raise _error(
+                    'lifecycle requires a field name '
+                    '(lifecycle "status" active="open,in-progress")',
+                    path,
+                )
+            field_name = str(child.args[0])
+            if not field_name:
+                raise _error("lifecycle field name is empty", path)
+            active_raw = child.properties.get("active")
+            if active_raw is None:
+                raise _error(
+                    f'lifecycle "{field_name}" requires '
+                    'active="<comma-separated status set>"',
+                    path,
+                )
+            active = tuple(
+                v for v in (s.strip() for s in str(active_raw).split(",")) if v
+            )
+            if not active:
+                raise _error(
+                    f'lifecycle "{field_name}" active set is empty', path,
+                )
+            lifecycle = LifecycleDecl(field=field_name, active=active)
         else:
             raise _error(f"Unknown loop field: {child.name}", path)
 
     return LoopDef(
         folds=folds, boundary=boundary, search=search, parse=parse,
-        preview_fields=preview_fields, edges=tuple(edges),
+        preview_fields=preview_fields, edges=tuple(edges), lifecycle=lifecycle,
     )
 
 

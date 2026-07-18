@@ -50,7 +50,7 @@ loops rm reading lobsters
 ```
 
 Common flags: `-q` (minimal), `-v` (detailed), `-vv` (full), `--json`, `--plain`.
-Read-path grammar (S4–S7): `--match`/`--grep QUERY` (FTS5 content search, substring fallback), `--full` (force whole bodies), `--fields a,b` (project columns), `--limit N`, `--last N` (recency window), `--count` / `--by FIELD` (tally), comma-OR `--key a/,b/` (filter), and bare `field=value` predicates (eq + comma-OR).
+Read-path grammar (S4–S7): `--match`/`--grep QUERY` (FTS5 content search, substring fallback), `--full` (force whole bodies), `--fields a,b` (project columns), `--limit N`, `--last N` (recency window), `--count` / `--by FIELD` (tally), comma-OR `--key a/,b/` (filter), bare `field=value` predicates (eq + comma-OR), and `--all` (0.9.0 — show inactive entities a kind's `lifecycle` decl hides from the default fold view).
 
 **Don't reach for yet**: Vertex files, lenses, command internals.
 

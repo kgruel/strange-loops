@@ -809,6 +809,8 @@ def run(argv: list[str], ctx: Invocation) -> int:
         last=args.last,
         count_by=args.by,
         do_count=args.count,
+        show_all=args.show_all,
+        refs_active=refs_depth > 0,
     )
 
     mode = _resolve_mode(args, args.lens, is_tty=ctx.isatty)

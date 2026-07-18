@@ -348,10 +348,10 @@ def resolve_cut(vertex_path: Path) -> dict:
     """The default (head) read's honest seal-cut provenance dict.
 
     Wraps :func:`is_aggregate_vertex` + store-path resolution +
-    ``engine.witness.resolve_witness_position(store_path, "head")`` +
-    ``engine.vertex_summary(vertex_path)`` (tick count) into the JSON-safe
-    :class:`CutMeta` shape. NEVER raises — every failure mode (aggregate
-    vertex, no/uncreated store, a malformed ``.vertex`` file, any
+    ``engine.witness.resolve_cut_summary(store_path)`` (head position + tick
+    total + anchor ordinal, ONE read transaction — sol P1) into the
+    JSON-safe :class:`CutMeta` shape. NEVER raises — every failure mode
+    (aggregate vertex, no/uncreated store, a malformed ``.vertex`` file, any
     ``WitnessResolutionError``, or any other unexpected exception) degrades
     to ``available=False`` with a stated reason instead of propagating: a
     provenance-resolution failure must never abort the read itself (S6
@@ -360,6 +360,24 @@ def resolve_cut(vertex_path: Path) -> dict:
     even the FIRST step (``is_aggregate_vertex``, which parses the vertex
     file) can raise on a malformed declaration, a case a plain read must
     survive too.
+
+    CALLER CONTRACT (sol P1 — binds the claim to what's actually rendered):
+    this function does real store I/O and so must be called AFTER the fold
+    it accompanies has already been fetched, never before/concurrently with
+    it. The store is append-only (rowid never shrinks, no updates/deletes),
+    so resolving cut strictly after the fold fetch completes guarantees this
+    function's head position is equal-to-or-LATER than whatever the fold
+    actually witnessed — never earlier. That ordering is what makes
+    ``sealed_to_head``/``facts_beyond_seal`` safe to report alongside a fold
+    that may have been fetched a moment earlier: a concurrent append landing
+    in between can only make this answer MORE conservative (report MORE
+    unsealed tail than the render actually shows, or correctly refuse
+    ``sealed_to_head`` when the render's true extent is in fact still
+    sealed) — it can never flip a genuinely-unsealed render to a false
+    ``sealed_to_head=True`` claim. See ``cli.dispatch.dispatch`` (the
+    ``cut_resolver`` call site, invoked only after ``op.fn()`` returns) and
+    ``cli.views.fold.run`` (which hands a resolver closure rather than a
+    precomputed dict for exactly this reason).
     """
     try:
         return _resolve_cut_body(vertex_path)
@@ -390,10 +408,10 @@ def _resolve_cut_body(vertex_path: Path) -> dict:
             "unavailable", "this vertex's store has not been created yet",
         )
 
-    from engine.witness import WitnessResolutionError, resolve_witness_position
+    from engine.witness import WitnessResolutionError, resolve_cut_summary
 
     try:
-        position = resolve_witness_position(store_path, "head")
+        summary = resolve_cut_summary(store_path)
     except WitnessResolutionError as exc:
         return unavailable_cut("unavailable", str(exc))
     except Exception as exc:
@@ -405,38 +423,26 @@ def _resolve_cut_body(vertex_path: Path) -> dict:
         # (risk mitigation noted in the S6 brief).
         return unavailable_cut("unavailable", f"unexpected: {exc}")
 
-    # tick_total via the vertex-level read surface (engine.vertex_summary),
-    # not StoreReader directly — apps must not touch StoreReader (architecture
-    # ratchet, tests/test_architecture.py::test_apps_do_not_import_store_reader;
-    # this module isn't in that shrink-only exception list, nor should it be).
-    from engine import vertex_summary
-
-    try:
-        tick_total = vertex_summary(vertex_path)["ticks"]["total"]
-    except Exception as exc:
-        return unavailable_cut("unavailable", f"unexpected: {exc}")
-
+    position = summary.position
     anchor = position.anchor
     sealed_to_head = anchor is not None and anchor.fact_cursor == position.fact_id
     if anchor is None:
         # Nothing sealed yet — the whole store (by receipt count) is the
         # unsealed tail.
         facts_beyond_seal: int | None = position.seq
+    elif summary.anchor_seq is not None:
+        facts_beyond_seal = position.seq - summary.anchor_seq
     else:
-        try:
-            anchor_position = resolve_witness_position(store_path, anchor.fact_cursor)
-            facts_beyond_seal = position.seq - anchor_position.seq
-        except Exception:
-            # The derived tail count is best-effort supplementary info — a
-            # failure here degrades that ONE field, not the whole cut (the
-            # anchor/sealed_to_head answer above is already sound).
-            facts_beyond_seal = None
+        # resolve_cut_summary already degraded this ONE field on a failed
+        # anchor-ordinal lookup — the position/sealed_to_head answer above
+        # is still sound, so only facts_beyond_seal goes unknown.
+        facts_beyond_seal = None
 
     return CutMeta(
         available=True,
         mode="head",
         anchor=_anchor_to_dict(anchor),
         sealed_to_head=sealed_to_head,
-        tick_total=tick_total,
+        tick_total=summary.tick_total,
         facts_beyond_seal=facts_beyond_seal,
     ).to_dict()

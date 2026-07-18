@@ -272,6 +272,62 @@ def _resolve_anchor(conn: sqlite3.Connection, rowid: int) -> TickAnchor | None:
     return TickAnchor(name=row[0], ts=row[1], fact_cursor=row[2])
 
 
+def _resolve_witness_position_on_conn(
+    conn: sqlite3.Connection,
+    store_path: Path,
+    address: str,
+    *,
+    anchor: TickAnchor | None = None,
+    group_boundary: str = "refuse",
+) -> WitnessPosition:
+    """The body of :func:`resolve_witness_position`, operating on an
+    ALREADY-OPEN connection.
+
+    Extracted so a caller that needs MULTIPLE reads in one snapshot (e.g.
+    :func:`resolve_cut_summary`, 0.9.0 S6 sol P1) can share one connection/
+    transaction instead of paying ``resolve_witness_position``'s own
+    open-resolve-close per call — each such call is otherwise a separate
+    WAL snapshot, so a concurrent writer's commit landing between two calls
+    would make the second describe a LATER store state than the first, a
+    silent internal race. ``store_path`` is used only to stamp
+    ``WitnessPosition.store`` (the position's home store, read by
+    ``verify_position_for_store``'s cross-store guard) — no I/O against it
+    here; all reads go through ``conn``.
+    """
+    fact_id, rowid = _resolve_address_rowid(conn, address)
+    span = receipt_group_span(conn, rowid)
+    if span is not None:
+        if group_boundary == "floor":
+            # Snap OUT of the ceremony to the position just before its first
+            # row — the last complete state (M3). Floor forms land on solid
+            # ground rather than refusing.
+            rowid = span[0] - 1
+            fact_id = _id_at_rowid(conn, rowid)
+        else:  # "refuse" — an exact fact:/seq: form never silently snaps.
+            raise MidReceiptGroupPosition(
+                f"witness position {address!r} (rowid {rowid}) lands inside "
+                f"the atomic receipt group at rowids {span[0]}..{span[1]} — "
+                "a declaration edit ceremony is all-or-nothing. Address the "
+                f"position at-or-after rowid {span[1]} (the ceremony's last "
+                "row) to include the whole edit, or before its first row to "
+                "exclude it."
+            )
+    marker = _read_own_lineage(conn)
+    seq = conn.execute(
+        "SELECT COUNT(*) FROM facts WHERE rowid <= ?", (rowid,)
+    ).fetchone()[0]
+    resolved_anchor = anchor if anchor is not None else _resolve_anchor(conn, rowid)
+    return WitnessPosition(
+        fact_id=fact_id,
+        rowid=rowid,
+        seq=seq,
+        lineage=marker,
+        unadopted=marker is None,
+        anchor=resolved_anchor,
+        store=str(Path(store_path).resolve()),
+    )
+
+
 def resolve_witness_position(
     store_path: Path,
     address: str,
@@ -321,40 +377,84 @@ def resolve_witness_position(
             "position against it"
         )
     try:
-        fact_id, rowid = _resolve_address_rowid(conn, address)
-        span = receipt_group_span(conn, rowid)
-        if span is not None:
-            if group_boundary == "floor":
-                # Snap OUT of the ceremony to the position just before its first
-                # row — the last complete state (M3). Floor forms land on solid
-                # ground rather than refusing.
-                rowid = span[0] - 1
-                fact_id = _id_at_rowid(conn, rowid)
-            else:  # "refuse" — an exact fact:/seq: form never silently snaps.
-                raise MidReceiptGroupPosition(
-                    f"witness position {address!r} (rowid {rowid}) lands inside "
-                    f"the atomic receipt group at rowids {span[0]}..{span[1]} — "
-                    "a declaration edit ceremony is all-or-nothing. Address the "
-                    f"position at-or-after rowid {span[1]} (the ceremony's last "
-                    "row) to include the whole edit, or before its first row to "
-                    "exclude it."
-                )
-        marker = _read_own_lineage(conn)
-        seq = conn.execute(
-            "SELECT COUNT(*) FROM facts WHERE rowid <= ?", (rowid,)
-        ).fetchone()[0]
-        resolved_anchor = anchor if anchor is not None else _resolve_anchor(conn, rowid)
-        return WitnessPosition(
-            fact_id=fact_id,
-            rowid=rowid,
-            seq=seq,
-            lineage=marker,
-            unadopted=marker is None,
-            anchor=resolved_anchor,
-            store=str(Path(store_path).resolve()),
+        return _resolve_witness_position_on_conn(
+            conn, store_path, address, anchor=anchor, group_boundary=group_boundary,
         )
     finally:
         conn.close()
+
+
+@dataclass(frozen=True)
+class CutSummary:
+    """One-snapshot bundle of everything a seal-cut answer needs — head
+    witness position, store tick total, and (when sealed) the anchor tick's
+    own receipt ordinal — resolved within ONE read transaction (0.9.0 S6,
+    sol P1 review).
+
+    Three separate ``resolve_witness_position``/summary calls would each be
+    an independent WAL snapshot; a concurrent writer's commit landing
+    between two of them would make ``tick_total``/the anchor's ordinal
+    describe a LATER store state than the ``position`` they're reported
+    alongside — an internal race distinct from (and in addition to) the
+    caller-level TOCTOU between fetching a fold and resolving its cut
+    (``cli.witness_address.resolve_cut`` is called strictly AFTER its
+    caller's fold fetch completes for exactly that reason; see its
+    docstring). This dataclass is what makes the THREE READS themselves
+    atomic with each other.
+    """
+
+    position: WitnessPosition
+    tick_total: int
+    #: Receipt ordinal (WitnessPosition.seq) at the anchor tick's
+    #: fact_cursor, or None — either no anchor exists (nothing sealed yet)
+    #: or resolving the anchor's own ordinal failed (best-effort; degrades
+    #: this ONE field, not the whole summary). Distinct from 0, which would
+    #: claim "sealed at the very first row".
+    anchor_seq: int | None
+
+
+def resolve_cut_summary(store_path: Path, *, timeout: float = 5.0) -> CutSummary:
+    """Resolve head position + tick total + the sealed anchor's own receipt
+    ordinal, atomically, in one read transaction.
+
+    An explicit ``BEGIN``/``ROLLBACK`` — rather than relying on each bare
+    ``.execute()`` getting its own implicit auto-transaction, which is what
+    a connection with no active transaction gives you in SQLite (every
+    top-level statement, SELECT included, is its own mini-transaction
+    absent an explicit ``BEGIN``) — is what pins the WAL snapshot across
+    the position resolution, the tick count, and the anchor lookup below.
+    Without it, a commit from a concurrent writer landing between two of
+    those reads would silently advance one but not the other.
+    ``isolation_level = None`` hands transaction control to us explicitly
+    rather than the driver's own (DML-triggered, SELECT-blind) auto-BEGIN
+    heuristic.
+    """
+    conn = _open_readonly(store_path, timeout=timeout)
+    if conn is None:
+        raise WitnessResolutionError(
+            f"{store_path} is not a usable store — cannot resolve a cut "
+            "summary against it"
+        )
+    try:
+        conn.isolation_level = None
+        conn.execute("BEGIN")
+        try:
+            position = _resolve_witness_position_on_conn(conn, store_path, "head")
+            tick_total = conn.execute("SELECT COUNT(*) FROM ticks").fetchone()[0]
+            anchor_seq: int | None = None
+            if position.anchor is not None:
+                try:
+                    anchor_position = _resolve_witness_position_on_conn(
+                        conn, store_path, position.anchor.fact_cursor,
+                    )
+                    anchor_seq = anchor_position.seq
+                except WitnessResolutionError:
+                    anchor_seq = None
+        finally:
+            conn.execute("ROLLBACK")
+    finally:
+        conn.close()
+    return CutSummary(position=position, tick_total=tick_total, anchor_seq=anchor_seq)
 
 
 def verify_position_for_store(

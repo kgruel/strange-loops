@@ -1,17 +1,29 @@
 """Honest seal-cut provenance — the ``cut`` render_context/JSON contract
 (0.9.0 S6, friction:seal-provenance-not-passed-to-lenses).
 
-Two tiers, mirroring test_fold_view_cursor.py / test_fold_cursor_render.py:
+Tiers, mirroring test_fold_view_cursor.py / test_fold_cursor_render.py:
 
 - End-to-end (``TestResolveCutEndToEnd*``): drives the real ``read`` router
   through ``cli.witness_address.resolve_cut``/``cut_from_witness_position``
   against scratch stores with controlled fact/tick timestamps (raw sqlite
   appends — the same convention test_fold_view_cursor.py uses for precise
   rowid/ts control).
-- Dispatch-level (``TestJsonCutField``): the render_context["cut"] → JSON
-  merge, on both the gate-pass (Surface) and gate-fail (raw dump) branches,
-  against a hand-built FoldState — no store needed, purely the plumbing
-  test_fold_cursor_render.py already proves for "cursor".
+- Dispatch-level (``TestJsonCutField``): the render_context["cut_resolver"]
+  -> JSON merge, on both the gate-pass (Surface) and gate-fail (raw dump)
+  branches, against a hand-built FoldState — no store needed, purely the
+  plumbing test_fold_cursor_render.py already proves for "cursor" (a
+  precomputed "cut" dict is also honored as a back-compat fallback).
+- TOCTOU (``TestCutBoundAfterFetchTOCTOU``, sol P1 review): proves cut is
+  resolved strictly AFTER the fold fetch, so a concurrent append landing in
+  the gap can never leave a stale sealed_to_head=True claim standing over a
+  fold that actually contains an unsealed tail.
+- Live mode (``TestLiveModeCutRecompute``): proves the renderer closure
+  recomputes cut on every frame rather than caching a stream-start value,
+  and survives a resolver that raises mid-stream.
+
+The internal-snapshot fix for resolve_cut's own three reads (position +
+tick_total + anchor ordinal) lives at the engine layer and is tested there:
+libs/engine/tests/test_witness_position.py::TestResolveCutSummary.
 """
 
 from __future__ import annotations
@@ -416,3 +428,172 @@ class TestCutLine:
         text = block_to_text(cut_line(cut, None))
         assert "unsealed tail — no prior tick anchor" in text
         assert "sealed as of" not in text
+
+
+# ---------------------------------------------------------------------------
+# TOCTOU (sol P1 review): cut must be resolved AFTER the fold fetch, never
+# before/concurrently with it — a concurrent append landing in the gap must
+# never leave a false sealed_to_head=True claim standing over a fold that
+# actually contains an unsealed tail.
+# ---------------------------------------------------------------------------
+
+
+class TestCutBoundAfterFetchTOCTOU:
+    def test_cut_reflects_a_write_that_lands_during_fetch(self, cut_vertex):
+        """Simulates a concurrent writer as a side effect of the fetch
+        closure itself: by construction, the write happens WHILE fetch_data
+        is (nominally) running and completes before it returns. Since
+        dispatch resolves the cut_resolver strictly AFTER op.fn() returns
+        (the sol-P1 fix), the resolved cut must see that write — never echo
+        a pre-write sealed_to_head=True answer."""
+        vpath, store = cut_vertex
+        f1 = _append(store, "decision", 100, topic="a", message="alpha")
+        _append_tick(store, "cut", 150.0, fact_cursor=f1)
+        # Store is now exactly sealed_to_head=True.
+
+        from loops.commands.fetch import fetch_fold
+
+        def fetch_with_concurrent_write():
+            state = fetch_fold(vpath)
+            # The "concurrent writer" — a fact landing after the fetch
+            # itself has read the store, before dispatch ever asks for cut.
+            _append(store, "decision", 200, topic="b", message="beta")
+            return state
+
+        op = Operation(
+            verb="read", fn=fetch_with_concurrent_write, render_lens="fold",
+            format=Format.JSON,
+            render_context={
+                "piped": True,
+                "cut_resolver": lambda: witness_address.resolve_cut(vpath),
+            },
+            vertex_path=vpath,
+        )
+        reporter = BufferReporter()
+        rc = dispatch(op, reporter=reporter)
+        assert rc == 0
+        payload = json.loads(reporter.out_lines[0])
+        # The rendered fold (fetched first) does NOT contain "beta" — but the
+        # cut, resolved after, must NOT claim sealed_to_head=True either: it
+        # honestly reports the store as it stood at resolution time.
+        assert "beta" not in json.dumps(payload)
+        assert payload["cut"]["sealed_to_head"] is False
+        assert payload["cut"]["facts_beyond_seal"] == 1
+
+    def test_resolving_before_the_write_is_the_bug_this_fixes(self, cut_vertex):
+        """Documents the failure mode directly: resolving cut BEFORE a
+        concurrent write (the pre-sol-P1 ordering) produces a stale
+        sealed_to_head=True that a moment later is no longer true — proving
+        the regression test above exercises the actual defect class, not a
+        strawman."""
+        vpath, store = cut_vertex
+        f1 = _append(store, "decision", 100, topic="a", message="alpha")
+        _append_tick(store, "cut", 150.0, fact_cursor=f1)
+
+        stale_cut = witness_address.resolve_cut(vpath)
+        assert stale_cut["sealed_to_head"] is True  # true at THIS moment
+
+        _append(store, "decision", 200, topic="b", message="beta")
+
+        # By the time anything renders, the store (and any fold fetched
+        # after this point) has an unsealed fact — the earlier answer is
+        # now a lie if it were reused. A FRESH resolution catches it.
+        fresh_cut = witness_address.resolve_cut(vpath)
+        assert fresh_cut["sealed_to_head"] is False
+
+
+# ---------------------------------------------------------------------------
+# Live mode: cut is recomputed PER FRAME, not resolved once at stream-start.
+# ---------------------------------------------------------------------------
+
+
+class TestLiveModeCutRecompute:
+    def test_renderer_recomputes_cut_on_every_call(self, monkeypatch):
+        received: list[dict | None] = []
+
+        def fake_lens(data, zoom, width, *, cut=None):
+            received.append(cut)
+            return "ok"
+
+        import loops.cli.dispatch as dispatch_mod
+
+        monkeypatch.setattr(dispatch_mod, "_resolve_lens", lambda *a, **kw: fake_lens)
+
+        captured: dict = {}
+
+        def fake_run_cli(args, **kwargs):
+            captured["kwargs"] = kwargs
+            return 0
+
+        import painted
+
+        monkeypatch.setattr(painted, "run_cli", fake_run_cli)
+
+        calls = {"n": 0}
+
+        def resolver() -> dict:
+            calls["n"] += 1
+            return {"available": True, "mode": "head", "call": calls["n"]}
+
+        async def _stream():
+            yield {"sections": (), "vertex": "x"}
+
+        op = Operation(
+            verb="read", fn=lambda: None, render_lens="fold", mode="live",
+            stream_fn=lambda: _stream(),
+            render_context={"cut_resolver": resolver},
+        )
+        rc = dispatch(op, reporter=BufferReporter())
+        assert rc == 0
+
+        renderer = captured["kwargs"]["renderer"]
+        renderer({"sections": ()}, Fidelity(), 80)
+        renderer({"sections": ()}, Fidelity(), 80)
+
+        # Two renderer invocations, two DISTINCT resolver calls — proves the
+        # cut is recomputed per frame, never cached from stream-start.
+        assert len(received) == 2
+        assert received[0] == {"available": True, "mode": "head", "call": 1}
+        assert received[1] == {"available": True, "mode": "head", "call": 2}
+
+    def test_renderer_survives_a_resolver_that_raises(self, monkeypatch):
+        """A provenance-resolution hiccup mid-stream must not kill the live
+        session (S6 arbitration F1/F4) — the frame renders without a fresh
+        cut instead of propagating."""
+        received: list[dict | None] = []
+
+        def fake_lens(data, zoom, width, *, cut=None):
+            received.append(cut)
+            return "ok"
+
+        import loops.cli.dispatch as dispatch_mod
+
+        monkeypatch.setattr(dispatch_mod, "_resolve_lens", lambda *a, **kw: fake_lens)
+
+        captured: dict = {}
+
+        def fake_run_cli(args, **kwargs):
+            captured["kwargs"] = kwargs
+            return 0
+
+        import painted
+
+        monkeypatch.setattr(painted, "run_cli", fake_run_cli)
+
+        def flaky_resolver() -> dict:
+            raise RuntimeError("store hiccup")
+
+        async def _stream():
+            yield {"sections": (), "vertex": "x"}
+
+        op = Operation(
+            verb="read", fn=lambda: None, render_lens="fold", mode="live",
+            stream_fn=lambda: _stream(),
+            render_context={"cut_resolver": flaky_resolver},
+        )
+        rc = dispatch(op, reporter=BufferReporter())
+        assert rc == 0
+
+        renderer = captured["kwargs"]["renderer"]
+        renderer({"sections": ()}, Fidelity(), 80)  # must not raise
+        assert received == [None]

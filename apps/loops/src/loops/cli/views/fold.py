@@ -624,25 +624,36 @@ def run(argv: list[str], ctx: Invocation) -> int:
             ctx.reporter.err(f"read: {exc}")
             return 2
 
-    # Honest seal-cut provenance (0.9.0 S6, arbiter F1): computed
-    # UNCONDITIONALLY — unlike cursor_meta (only set for an explicit
-    # --at/--as-of), "unavailable" is itself a meaningful, honest value
-    # distinct from "key absent", so every read carries a `cut`. An active
-    # --at read reuses its ALREADY-resolved witness position (zero extra
-    # store I/O); --as-of has no witness-anchored cut by construction; the
-    # default (head) path resolves fresh. S4 (--review header/head-cursor)
-    # MUST reuse `witness_address.resolve_cut`/`cut_from_witness_position`
-    # rather than a second independent head-resolve (S6 arbitration F3).
+    # Honest seal-cut provenance (0.9.0 S6, arbiter F1 + sol P1 TOCTOU fix):
+    # a RESOLVER closure, not a precomputed dict. "unavailable" is itself a
+    # meaningful, honest value distinct from "key absent", so every read
+    # carries a `cut` — but the default (head) path's resolve_cut() does
+    # real store I/O, and resolving it HERE (before the fold is even
+    # fetched) would let a concurrent append land between cut-resolution and
+    # fetch, producing a fold with an unsealed tail while cut claims
+    # sealed_to_head=True — the exact defect class this slice exists to
+    # kill (sol P1). dispatch() calls this resolver AFTER op.fn() (the fold
+    # fetch) returns — for static reads exactly once, for live reads once
+    # per refreshed frame — so the store is append-only and a cut resolved
+    # after the fetch can only be equal-to-or-later than what the fold
+    # actually witnessed, never earlier (see resolve_cut's docstring for the
+    # full argument). An active --at read reuses its ALREADY-resolved
+    # witness position (zero extra store I/O, no race to begin with —
+    # cut_from_witness_position is pure computation over an immutable,
+    # already-resolved position); --as-of has no witness-anchored cut by
+    # construction. S4 (--review header/head-cursor) MUST reuse
+    # `witness_address.resolve_cut`/`cut_from_witness_position` rather than
+    # a second independent head-resolve (S6 arbitration F3).
     from loops.cli import witness_address
 
-    if at_position is not None:
-        cut_meta: dict = witness_address.cut_from_witness_position(at_position)
-    elif as_of_ts is not None:
-        cut_meta = witness_address.unavailable_cut(
-            "as_of", "event-time projection has no witness-anchored cut",
-        )
-    else:
-        cut_meta = witness_address.resolve_cut(vertex_path)
+    def _cut_resolver() -> dict:
+        if at_position is not None:
+            return witness_address.cut_from_witness_position(at_position)
+        if as_of_ts is not None:
+            return witness_address.unavailable_cut(
+                "as_of", "event-time projection has no witness-anchored cut",
+            )
+        return witness_address.resolve_cut(vertex_path)
 
     # Resolve the lens fetch ONCE here (rather than inside _build_fold_fetch)
     # so a cursor selector can be checked against it before anything runs:
@@ -791,15 +802,17 @@ def run(argv: list[str], ctx: Invocation) -> int:
         # headers, pipe = terse "## KIND (N)"), decoupled from width/truncation.
         # "cursor" (0.8.0, A11) carries the --at/--as-of mode/status/position
         # disclosure — read by the fold lens (mode-line) and by dispatch's
-        # JSON branch (merged into the structured payload). "cut" (0.9.0 S6)
-        # is the sibling seal-provenance disclosure — ALWAYS present (never
-        # gated the way "cursor" is): any lens (built-in or custom) that
-        # declares a `cut` kwarg receives it for free via call_lens's
-        # existing signature-filtered dispatch; dispatch's JSON branches
-        # merge it in unconditionally too.
+        # JSON branch (merged into the structured payload). "cut_resolver"
+        # (0.9.0 S6) is the sibling seal-provenance disclosure — a zero-arg
+        # callable, not a precomputed dict (sol P1: dispatch calls it AFTER
+        # the fold fetch, never before) — ALWAYS present (never gated the
+        # way "cursor" is): dispatch resolves it into a "cut" dict that any
+        # lens (built-in or custom) declaring a `cut` kwarg receives for
+        # free via call_lens's existing signature-filtered dispatch; the
+        # JSON branches merge the resolved dict in unconditionally too.
         render_context={
             "piped": not ctx.isatty,
-            "cut": cut_meta,
+            "cut_resolver": _cut_resolver,
             **({"cursor": cursor_meta} if cursor_meta is not None else {}),
         },
         vertex_path=vertex_path,

@@ -275,6 +275,33 @@ def dispatch(op: Operation, *, reporter: Reporter) -> int:
         reporter.err(f"Error: {exc}")
         return 1
 
+    # Seal-cut provenance (0.9.0 S6, sol P1 TOCTOU fix): resolved HERE —
+    # strictly AFTER the fetch above completes, never before/concurrently
+    # with it. render_context carries a zero-arg "cut_resolver" (not a
+    # precomputed dict) for exactly this reason: resolving cut before the
+    # fetch would let a concurrent append land in the gap, producing a fold
+    # that contains an unsealed tail while a pre-resolved cut still claims
+    # sealed_to_head=True — the defect class this slice exists to kill. The
+    # store is append-only, so a cut resolved after the fetch is always
+    # equal-to-or-later than what the fold actually witnessed (see
+    # cli.witness_address.resolve_cut's docstring for the argument). A
+    # caller that hands a precomputed "cut" dict directly (no resolver) is
+    # honored unchanged, for any render_context that predates this pattern.
+    cut_resolver = op.render_context.get("cut_resolver")
+    if cut_resolver is not None:
+        try:
+            cut_meta = cut_resolver()
+        except Exception:
+            # cli.witness_address.resolve_cut already swallows everything
+            # into an honest available=False dict — this is belt-and-
+            # suspenders for a future/custom resolver that isn't as careful:
+            # a provenance-resolution failure must never abort the read
+            # itself (S6 arbitration F1/F4), so degrade to "no cut key"
+            # rather than propagate.
+            cut_meta = None
+    else:
+        cut_meta = op.render_context.get("cut")
+
     # --- Surface interposition (S2) --------------------------------------
     # Route the DEFAULT fold path through the typed Surface so plain and
     # --json encode the SAME structured rows. Gate: the effective fold lens is
@@ -307,11 +334,9 @@ def dispatch(op: Operation, *, reporter: Reporter) -> int:
     # position, render_context carries its machine-readable mode/status/
     # position disclosure under "cursor" — merged into whichever JSON shape
     # answers below, so the mode is a structured field, never prose-only.
+    # ("cut_meta" was already resolved above, right after the fetch — see
+    # the sol-P1 comment there.)
     cursor_meta = op.render_context.get("cursor")
-    # Seal-cut provenance (0.9.0 S6): unlike "cursor", "cut" is present on
-    # EVERY fold-route read (unavailable is itself an honest value) — merged
-    # the same way so --json consumers always get it, never just for --at.
-    cut_meta = op.render_context.get("cut")
 
     if op.format is Format.JSON:
         if gate:
@@ -343,6 +368,12 @@ def dispatch(op: Operation, *, reporter: Reporter) -> int:
     # existing lenses accept. visible/chars/lines flow as kwargs; the lens
     # decides whether to honor them.
     extra: dict = dict(op.render_context)
+    # "cut_resolver" is a plumbing detail (no lens declares it) — drop it and
+    # substitute the already-resolved "cut" dict so a lens declaring a `cut`
+    # kwarg receives the real value, not the callable.
+    extra.pop("cut_resolver", None)
+    if cut_meta is not None:
+        extra["cut"] = cut_meta
     if op.fidelity is not None:
         extra.setdefault("visible", op.fidelity.visible)
         extra.setdefault("chars", op.fidelity.chars)
@@ -432,6 +463,14 @@ def _dispatch_live(op: Operation, reporter: Reporter) -> int:
     # never received.
     fidelity = op.fidelity
     extra = dict(op.render_context)
+    # "cut_resolver" (0.9.0 S6, sol P1) is resolved PER FRAME inside
+    # renderer() below, not once here — a live read keeps re-fetching, and a
+    # cut resolved once at stream-start would go stale (and could describe
+    # an EARLIER store state than a later-streamed frame, the same
+    # ordering hazard the static path fixes by resolving after its single
+    # fetch). Drop it from the static extras so it never leaks to a lens as
+    # the raw callable.
+    cut_resolver = extra.pop("cut_resolver", None)
     if op.fidelity is not None:
         extra.setdefault("visible", op.fidelity.visible)
         extra.setdefault("chars", op.fidelity.chars)
@@ -445,8 +484,21 @@ def _dispatch_live(op: Operation, reporter: Reporter) -> int:
     def renderer(data, runner_fidelity, width):
         # Preserve the operation's declared fidelity when present; this live
         # invocation has no display flags for painted itself to compile.
+        # Cut is recomputed HERE, per frame — always after THIS frame's
+        # data already exists (the stream's fetch_data() yielded it before
+        # run_cli ever calls renderer), so the same after-the-fetch ordering
+        # guarantee the static path relies on holds per refresh too.
+        frame_extra = extra
+        if cut_resolver is not None:
+            try:
+                frame_extra = {**extra, "cut": cut_resolver()}
+            except Exception:
+                # A provenance-resolution hiccup must not kill the whole
+                # live session (S6 arbitration F1/F4) — this frame just
+                # renders without a fresh cut, same as no resolver at all.
+                frame_extra = extra
         return call_lens(lens_fn, data, fidelity or runner_fidelity,
-                         normalize_width(width), **extra)
+                         normalize_width(width), **frame_extra)
 
     def fetch():
         # run_cli requires a static fetch; the live+stream path renders

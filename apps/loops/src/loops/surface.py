@@ -868,18 +868,32 @@ def search(surface: Surface, query: str, *, vertex_path=None) -> Surface:
         try:
             from engine import vertex_search
 
-            # Peek one past the limit to detect truncation (see _FTS_LIMIT).
-            # Coverage-gating above means every kind reaching this call has a
-            # live facts_fts table, so the OperationalError vertex_search
+            # kinds=fts_kinds restricts the SQL-level query BEFORE the limit
+            # applies (S2 sol P2) — a post-hoc filter here would be too
+            # late: if an untrustworthy (stale/unindexed-elsewhere) kind
+            # also happens to be indexed in this store, its many matches
+            # could crowd the newest-N window and silently push a
+            # trustworthy kind's genuine matches out before we ever got to
+            # filter them. Peek one past the limit to detect truncation (see
+            # _FTS_LIMIT) — now correct by construction, since it's computed
+            # over the already kind-restricted result.
+            #
+            # Coverage-gating above means every kind reaching this call has
+            # a live facts_fts table, so the OperationalError vertex_search
             # documents for a missing index is not expected here — this
             # except is a defensive backstop, not the mechanism this branch
             # relies on.
-            facts = vertex_search(vertex_path, query, limit=_FTS_LIMIT + 1)
+            facts = vertex_search(
+                vertex_path, query, kinds=fts_kinds, limit=_FTS_LIMIT + 1,
+            )
         except Exception:
             facts = []
         if len(facts) > _FTS_LIMIT:
             truncated = True
             facts = facts[:_FTS_LIMIT]
+        # Belt-and-braces, not the mechanism: kinds=fts_kinds above is what
+        # actually restricts the SQL result set. This guard only protects
+        # against a hypothetical future vertex_search that ignores kinds.
         rows.extend(_event_row(f) for f in facts if f.get("kind") in fts_kinds)
 
     # Substring path — over the projected rows of every kind NOT covered by a

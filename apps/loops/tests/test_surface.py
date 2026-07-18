@@ -700,6 +700,99 @@ def test_search_no_truncation_when_under_limit(tmp_path):
     assert found.window.truncated is False
 
 
+def test_search_stale_kind_crowd_does_not_bury_fresh_kind_match(tmp_path):
+    """S2 sol P2 regression: a STALE indexed kind with more matching facts
+    than the FTS limit must not silently push a FRESH kind's genuine match
+    out of the result set. Before the fix, surface.search() queried
+    vertex_search across every indexed kind (no SQL-level kind restriction)
+    and filtered to fts_kinds AFTER the LIMIT already applied — so a stale
+    kind's crowd of matches could consume the whole limit window before the
+    caller ever got to discard them, silently dropping the fresh kind's
+    result. Post-fix, kinds=fts_kinds restricts the SQL query BEFORE the
+    limit, so the crowd kind (excluded from fts_kinds because it's stale)
+    can never compete for the fresh kind's limit window at all."""
+    import json
+    import sqlite3
+
+    from engine import vertex_reindex
+    from engine.builder import fold_by, vertex
+    from loops.commands.fetch import fetch_fold
+
+    v = (
+        vertex("crowd")
+        .store("./crowd.db")
+        .loop("crowd_kind", fold_by("topic"), search=["topic", "message"])
+        .loop("target_kind", fold_by("topic"), search=["topic", "message"])
+    )
+    vpath = tmp_path / "crowd.vertex"
+    v.write(vpath)
+
+    db_path = tmp_path / "crowd.db"
+    conn = sqlite3.connect(str(db_path))
+    conn.executescript(
+        "CREATE TABLE IF NOT EXISTS facts ("
+        "    id TEXT NOT NULL PRIMARY KEY,"
+        "    kind TEXT NOT NULL,"
+        "    ts REAL NOT NULL,"
+        "    observer TEXT NOT NULL,"
+        "    origin TEXT NOT NULL DEFAULT '',"
+        "    payload TEXT NOT NULL"
+        ");"
+    )
+    # crowd_kind: 105 matching facts, all NEWER than target_kind's one match —
+    # in an unrestricted newest-first query these would fill the whole
+    # limit window before target_kind is ever reached.
+    for i in range(105):
+        conn.execute(
+            "INSERT INTO facts (id, kind, ts, observer, origin, payload) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (
+                f"CROWD{i:04d}", "crowd_kind", 5000.0 + i, "test", "",
+                json.dumps({"topic": f"crowd-{i}", "message": "needle"}),
+            ),
+        )
+    # target_kind: one older matching fact.
+    conn.execute(
+        "INSERT INTO facts (id, kind, ts, observer, origin, payload) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        (
+            "TARGET0001", "target_kind", 1.0, "test", "",
+            json.dumps({"topic": "target", "message": "needle"}),
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+    # Reindex once — both kinds are fresh.
+    vertex_reindex(vpath)
+
+    # Make crowd_kind STALE by writing one more fact under it, no reindex.
+    conn = sqlite3.connect(str(db_path))
+    conn.execute(
+        "INSERT INTO facts (id, kind, ts, observer, origin, payload) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        (
+            "CROWDSTALE", "crowd_kind", 6000.0, "test", "",
+            json.dumps({"topic": "crowd-stale", "message": "irrelevant"}),
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+    state = fetch_fold(vpath)
+    found = search(project(state), "needle", vertex_path=vpath)
+
+    kinds_found = {r.kind for r in found.rows}
+    assert "target_kind" in kinds_found  # the fresh kind's match survives
+    assert "crowd_kind" in kinds_found  # the stale kind still found via substring
+    assert "crowd_kind" in found.window.stale
+    assert "target_kind" not in found.window.stale
+    # Only target_kind ever reaches the FTS branch (1 match, well under the
+    # limit) — truncated must be False, not a false positive from the
+    # crowd kind's now-excluded matches.
+    assert found.window.truncated is False
+
+
 # ---------------------------------------------------------------------------
 # Encoders + source_facts carry
 # ---------------------------------------------------------------------------

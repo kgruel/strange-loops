@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from collections.abc import Iterable
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -541,6 +542,7 @@ class StoreReader:
         query: str,
         *,
         kind: str | None = None,
+        kinds: Iterable[str] | None = None,
         since: float | None = None,
         until: float | None = None,
         limit: int = 100,
@@ -550,6 +552,18 @@ class StoreReader:
         Requires facts_fts virtual table to exist (built only by the explicit
         vertex_reader.vertex_reindex — reads never create or update the index).
         Returns newest-first, same dict shape as facts_between.
+
+        ``kinds`` restricts the SQL-level result set to a SET of kinds
+        BEFORE ``limit`` is applied — distinct from ``kind`` (an exact
+        single-kind filter, which takes precedence if both are given). This
+        matters when a caller only trusts a SUBSET of what's actually
+        indexed (e.g. one indexed kind is stale, another is fresh): without
+        a SQL-level restriction, the stale kind's many old matches can crowd
+        the newest-``limit`` window and silently push out the fresh kind's
+        genuinely-matching rows before the caller ever gets a chance to
+        filter them out post-hoc (S2 sol P2 — the exact defect class this
+        slice exists to kill). An explicit empty ``kinds`` matches nothing,
+        by design (an empty allowlist is not "no restriction").
         """
         # Query-time internal exclusion (SPEC §9.4, defense in depth): internal
         # kinds get no search fields so they never ENTER the index, but a
@@ -562,6 +576,14 @@ class StoreReader:
             clauses.remove("fts.kind NOT GLOB '_decl.*'")
             clauses.append("fts.kind = ?")
             params.append(kind)
+        elif kinds is not None:
+            kinds = list(kinds)
+            if not kinds:
+                return []  # explicit empty allowlist matches nothing
+            clauses.remove("fts.kind NOT GLOB '_decl.*'")
+            placeholders = ",".join("?" for _ in kinds)
+            clauses.append(f"fts.kind IN ({placeholders})")
+            params.extend(kinds)
         if since is not None:
             clauses.append("f.ts >= ?")
             params.append(since)

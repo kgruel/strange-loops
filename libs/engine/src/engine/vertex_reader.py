@@ -16,6 +16,7 @@ import json
 import os
 import sqlite3
 import time as _time
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -710,6 +711,7 @@ def _combined_search(
     query: str,
     *,
     kind: str | None = None,
+    kinds: Iterable[str] | None = None,
     since: float | None = None,
     until: float | None = None,
     limit: int = 100,
@@ -723,6 +725,15 @@ def _combined_search(
     build-plan non-goal), but each child is a single store and MUST honor the
     cursor for its own ``search`` fields — ``as_of`` is a shared wall-clock
     ``ts``, so "as of T" resolves each child's declaration at T.
+
+    ``kinds`` is forwarded to each child's own ``vertex_search`` call
+    unchanged (S2 sol P2) — each child's SQL-level query is restricted to
+    the trustworthy kind set BEFORE that child's own ``limit`` applies, so a
+    stale kind in one child can't crowd out a fresh kind's matches within
+    that child's result window. The merge-then-relimit below (sort by ts,
+    slice to ``limit``) then operates on an ALREADY kind-filtered union
+    across children — no second instance of the crowding defect here, since
+    nothing untrustworthy ever enters ``all_results`` in the first place.
     """
     from lang import resolve_vertex
 
@@ -748,7 +759,7 @@ def _combined_search(
             continue
 
         child_results = vertex_search(
-            vpath, query, kind=kind, since=since, until=until,
+            vpath, query, kind=kind, kinds=kinds, since=since, until=until,
             limit=limit, observer=observer, as_of=as_of,
         )
         all_results.extend(child_results)
@@ -1862,6 +1873,7 @@ def vertex_search(
     query: str,
     *,
     kind: str | None = None,
+    kinds: Iterable[str] | None = None,
     since: float | None = None,
     until: float | None = None,
     limit: int = 100,
@@ -1889,7 +1901,17 @@ def vertex_search(
     Args:
         vertex_path: Path to the .vertex file.
         query: FTS5 query string (words, phrases, prefix, boolean).
-        kind: Filter by fact kind (exact match on FTS metadata).
+        kind: Filter by fact kind (exact match on FTS metadata). Takes
+            precedence over ``kinds`` if both are given.
+        kinds: Restrict the SQL-level query to this SET of kinds BEFORE
+            ``limit`` is applied (S2 sol P2) — distinct from ``kind``.
+            Callers that only trust a SUBSET of what's indexed (e.g.
+            ``surface.search`` excluding stale-index kinds) MUST pass this
+            rather than post-filtering the returned list: filtering after
+            the fact is too late — an untrusted kind's many matches can
+            already have consumed the ``limit`` window, silently pushing a
+            trusted kind's genuine matches out of the result set entirely.
+            An explicit empty iterable matches nothing (not "unrestricted").
         since: Only facts with ts >= since.
         until: Only facts with ts <= until.
         limit: Maximum results (default 100). Peek at ``limit + 1`` to
@@ -1920,8 +1942,8 @@ def vertex_search(
     if ast.combine is not None or ast.discover is not None:
         return _combined_search(
             ast, vertex_path, query,
-            kind=kind, since=since, until=until, limit=limit, observer=observer,
-            as_of=as_of,
+            kind=kind, kinds=kinds, since=since, until=until, limit=limit,
+            observer=observer, as_of=as_of,
         )
 
     if ast.store is None:
@@ -1943,7 +1965,7 @@ def vertex_search(
 
     with StoreReader(store_path) as reader:
         facts = reader.search_facts(
-            query, kind=kind, since=since, until=until, limit=limit
+            query, kind=kind, kinds=kinds, since=since, until=until, limit=limit
         )
         if observer:
             facts = [f for f in facts if observer_matches(f["observer"], observer)]

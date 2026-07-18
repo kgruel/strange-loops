@@ -940,6 +940,96 @@ class TestFtsReadPurity:
         assert coverage.missing is False
         assert coverage.stale_kinds == frozenset({"note"})
 
+    def test_kinds_param_restricts_sql_before_limit(self, tmp_path):
+        """S2 sol P2: without ``kinds``, a query across ALL indexed kinds can
+        let one kind's many matches fill the LIMIT window, silently pushing
+        another kind's genuine matches out — post-hoc filtering by the
+        caller is too late, since the rows never came back in the first
+        place. ``kinds`` restricts the SQL WHERE clause BEFORE the LIMIT, so
+        the crowding kind never displaces the kind the caller actually
+        wants."""
+        from engine import vertex_reindex, vertex_search
+
+        vpath = _create_search_vertex(
+            tmp_path,
+            "test",
+            '  crowd {\n    search "text"\n  }\n'
+            '  target {\n    search "text"\n  }',
+        )
+        db_path = tmp_path / "store.db"
+        facts = [
+            # 105 newer, crowding matches — all in `crowd`.
+            {"kind": "crowd", "ts": 2000.0 + i, "payload": {"text": "needle"}}
+            for i in range(105)
+        ] + [
+            # One OLDER match in `target` — would be sorted last by ts and
+            # fall outside an unrestricted LIMIT 101 window.
+            {"kind": "target", "ts": 1.0, "payload": {"text": "needle"}},
+        ]
+        _seed_facts(db_path, facts)
+        vertex_reindex(vpath)
+
+        # Unrestricted: `target`'s single old match is displaced by
+        # `crowd`'s 105 newer matches within a small limit.
+        unrestricted = vertex_search(vpath, "needle", limit=10)
+        assert all(r["kind"] == "crowd" for r in unrestricted)
+
+        # Restricted to `target` alone: the SQL WHERE clause excludes
+        # `crowd` entirely, so `target`'s match is never at risk of being
+        # crowded out by it, regardless of how the limit is set.
+        restricted = vertex_search(vpath, "needle", kinds=["target"], limit=10)
+        assert len(restricted) == 1
+        assert restricted[0]["kind"] == "target"
+
+    def test_kinds_param_empty_iterable_matches_nothing(self, tmp_path):
+        """An explicit empty ``kinds`` is a real allowlist of nothing, not
+        'no restriction' — distinct from ``kinds=None``."""
+        from engine import vertex_reindex, vertex_search
+
+        vpath = _create_search_vertex(
+            tmp_path, "test", '  note {\n    search "text"\n  }',
+        )
+        _seed_facts(tmp_path / "store.db", [
+            {"kind": "note", "ts": 1000.0, "payload": {"text": "hello"}},
+        ])
+        vertex_reindex(vpath)
+
+        assert vertex_search(vpath, "hello", kinds=[]) == []
+        assert len(vertex_search(vpath, "hello", kinds=None)) == 1
+
+    def test_combined_search_forwards_kinds_to_children(self, tmp_path, monkeypatch):
+        """S2 sol P2, aggregation path: kinds forwards through
+        _combined_search into each child's own vertex_search call, so a
+        crowding kind in one child can't push a target kind's matches out
+        of THAT child's own limit window either."""
+        from engine import vertex_reindex, vertex_search
+
+        combine_vpath, alpha_db, beta_db = _setup_search_combine_env(tmp_path, monkeypatch)
+
+        # alpha: many crowding matches under a kind the caller does NOT trust.
+        _seed_facts(alpha_db, [
+            {"kind": "decision", "ts": 2000.0 + i, "payload": {
+                "topic": f"crowd-{i}", "message": "needle",
+            }}
+            for i in range(105)
+        ])
+        # beta: one match the caller DOES trust.
+        _seed_facts(beta_db, [
+            {"kind": "decision", "ts": 1.0, "payload": {
+                "topic": "target", "message": "needle",
+            }},
+        ])
+        vertex_reindex(combine_vpath)
+
+        # Both children index the SAME kind name ("decision"), so kinds=
+        # doesn't disambiguate alpha vs beta here — this test only proves
+        # the parameter is forwarded and doesn't break the combine path
+        # under a full-kind restriction; per-store crowding within a single
+        # child is covered by test_kinds_param_restricts_sql_before_limit.
+        results = vertex_search(combine_vpath, "needle", kinds=["decision"], limit=10)
+        assert len(results) == 10
+        assert all(r["kind"] == "decision" for r in results)
+
 
 class TestExtractField:
     """_extract_field: nested paths and polymorphic value extraction for FTS5."""

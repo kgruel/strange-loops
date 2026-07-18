@@ -1,0 +1,13 @@
+2025-01-15:
+high      2025-01-15T10:32:00Z [decision] design/sqlite-persistence: Chose SQLite over flat files
+            topic: design/sqlite-persistence
+            message: Chose SQLite over flat files
+    id: 01JQ8FAAAAAAAAAAAAAAAAAAAA
+    observer: kyle
+
+2025-01-14:
+untiered  2025-01-14T09:05:00Z [task] implement-fold
+            name: implement-fold
+            status: in-progress
+    id: 01JQ8FBBBBBBBBBBBBBBBBBBBB
+    observer: loops-claude

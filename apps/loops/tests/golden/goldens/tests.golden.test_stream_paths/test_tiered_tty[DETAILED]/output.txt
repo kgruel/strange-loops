@@ -1,0 +1,12 @@
+╭─ demo · stream ──────────────────────────────────────────────────────────────╮
+│ 2 facts                                                                      │
+│ 2025-01-14 → 2025-01-15 · updated Jan 15                                     │
+╰──────────────────────────────────────────────────────────────────────────────╯
+2025-01-15:
+◆ 10:32 [decision] design/sqlite-persistence: Chose SQLite over flat files
+    message: Chose SQLite over flat files
+    id: 01JQ8FAA
+
+2025-01-14:
+  09:05 [task] implement-fold
+    id: 01JQ8FBB

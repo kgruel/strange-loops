@@ -1,0 +1,7 @@
+Tick #0 of 5 — session end
+  window: 2025-01-15T09:00:00+00:00 → 2025-01-15T10:00:00+00:00
+  2 facts
+
+2025-01-15:
+  10:00 [decision] design/sqlite: chose sqlite
+  09:30 [task] implement-fold

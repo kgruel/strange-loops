@@ -1,0 +1,12 @@
+2025-01-15:
+high      10:32 #0 session end (1h32m)
+           fold: 3 decision, 2 task
+
+2025-01-14:
+untiered  18:00 #1 demo (6h)
+           fold: 1 decision
+
+2025-01-13:
+untiered  08:00 #2 demo
+
+Drill down: loops read <vertex> --ticks <#>

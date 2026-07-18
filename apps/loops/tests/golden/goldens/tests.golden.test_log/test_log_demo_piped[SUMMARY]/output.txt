@@ -1,0 +1,7 @@
+2025-01-15:
+untiered  10:00 [decision] Use SQLite for persistence: Chose SQLite over filesystem for atomic writes.
+untiered  09:30 [task] implement fold: Wire up Spec.apply.
+
+2025-01-14:
+untiered  16:00 [change] Added boundary detection
+untiered  15:00 [thread] vertex-routing

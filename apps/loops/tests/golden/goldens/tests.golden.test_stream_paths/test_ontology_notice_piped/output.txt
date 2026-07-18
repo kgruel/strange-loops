@@ -1,0 +1,3 @@
+⚠ ontology: no declaration lineage — ontology is the current file
+2025-01-09:
+untiered  10:00 [decision] design/x: y

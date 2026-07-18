@@ -1,0 +1,13 @@
+local — cwd, verbs resolve these first
+  project   instance     128 facts   3 kinds  updated Jan 15  ⊃ decision · thread · task
+      ⊳ shadows ~/.config/loops/project/project.vertex
+      decision  80
+      thread    30
+      task      18
+config — ~/.config/loops
+  project   instance      12 facts   1 kinds  updated Jan 14  ⊃ note
+      note      12
+  meta      aggregation  combines 2           —
+  identity  hybrid        40 facts   2 kinds  updated Jan 15  ⊃ trait · peer
+      trait     25
+      peer      15

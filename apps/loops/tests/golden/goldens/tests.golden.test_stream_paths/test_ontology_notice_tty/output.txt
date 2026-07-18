@@ -1,0 +1,7 @@
+⚠ ontology: no declaration lineage — ontology is the current file
+╭─ demo · stream ──────────────────────────────────────────────────────────────╮
+│ 1 fact                                                                       │
+│ 2025-01-09 · updated Jan 9                                                   │
+╰──────────────────────────────────────────────────────────────────────────────╯
+2025-01-09:
+  10:00 [decision] design/x: y

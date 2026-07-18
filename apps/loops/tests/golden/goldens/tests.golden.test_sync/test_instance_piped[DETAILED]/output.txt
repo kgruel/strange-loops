@@ -1,0 +1,10 @@
+Ran: disk (3), memory (2), network-interface-diagnostics-and-telemetry-extended (7)
+  ⏭ network: fresh (last run 10m ago, cadence 1h)
+  ⏭ temp
+Errors: 1
+  sensor unavailable
+
+  [2025-01-15T12:00:00+00:00] tick: disk
+    fs: /dev/sda1
+
+--- 1 ticks ---

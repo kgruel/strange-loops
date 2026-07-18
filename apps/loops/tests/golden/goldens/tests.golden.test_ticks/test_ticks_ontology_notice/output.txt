@@ -1,0 +1,5 @@
+⚠ ontology: no declaration lineage — ontology is the current file
+2025-01-15:
+  10:32 #0 session end (1h32m)
+
+Drill down: loops read <vertex> --ticks <#>

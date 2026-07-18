@@ -1030,6 +1030,129 @@ class TestFtsReadPurity:
         assert len(results) == 10
         assert all(r["kind"] == "decision" for r in results)
 
+    def test_new_searchable_kind_marks_stale_with_zero_new_facts(self, tmp_path):
+        """Capstone sol P1: a declaration edit that adds a NEW searchable
+        kind, with no new facts written for it, still marks the index
+        stale — the rowid watermark alone can't see this, since nothing new
+        was ever written. The declaration fingerprint catches it."""
+        from engine import vertex_reindex, vertex_search_coverage
+
+        vpath = _create_search_vertex(
+            tmp_path, "test", '  note {\n    search "text"\n  }',
+        )
+        _seed_facts(tmp_path / "store.db", [
+            {"kind": "note", "ts": 1000.0, "payload": {"text": "hello"}},
+        ])
+        vertex_reindex(vpath)
+
+        coverage = vertex_search_coverage(vpath)
+        assert coverage.stale_kinds == frozenset()
+
+        # Edit the declaration — add a new searchable kind. Zero facts
+        # written for it; the rowid watermark does not move.
+        _create_search_vertex(
+            tmp_path, "test",
+            '  note {\n    search "text"\n  }\n'
+            '  extra {\n    search "text"\n  }',
+        )
+
+        coverage = vertex_search_coverage(vpath)
+        # Whole-declaration-set granularity (not per-kind): the fingerprint
+        # covers the whole decl, so EVERY currently-declared kind reports
+        # stale until the next reindex, including the pre-existing `note`.
+        assert coverage.stale_kinds == frozenset({"note", "extra"})
+
+        # Reindexing re-anchors the fingerprint and clears the staleness.
+        vertex_reindex(vpath)
+        coverage = vertex_search_coverage(vpath)
+        assert coverage.stale_kinds == frozenset()
+
+    def test_changed_search_fields_marks_stale_with_zero_new_facts(self, tmp_path):
+        """Capstone sol P1: changing WHICH fields an already-indexed kind
+        searches (same kind name, no new facts) also marks it stale — a
+        pure field-list edit moves no rowid either."""
+        from engine import vertex_reindex, vertex_search_coverage
+
+        vpath = _create_search_vertex(
+            tmp_path, "test",
+            '  exchange {\n    search "prompt"\n  }',
+        )
+        _seed_facts(tmp_path / "store.db", [
+            {"kind": "exchange", "ts": 1000.0, "payload": {
+                "prompt": "hello", "response": "world",
+            }},
+        ])
+        vertex_reindex(vpath)
+
+        coverage = vertex_search_coverage(vpath)
+        assert coverage.stale_kinds == frozenset()
+
+        # Same kind, DIFFERENT declared search fields — no new facts.
+        _create_search_vertex(
+            tmp_path, "test",
+            '  exchange {\n    search "prompt" "response"\n  }',
+        )
+
+        coverage = vertex_search_coverage(vpath)
+        assert coverage.stale_kinds == frozenset({"exchange"})
+
+    def test_unchanged_declaration_no_false_stale(self, tmp_path):
+        """The fingerprint check must not itself introduce false staleness:
+        re-probing an UNCHANGED declaration (fingerprint matches) proceeds
+        to the rowid check as before, reporting fresh."""
+        from engine import vertex_reindex, vertex_search_coverage
+
+        vpath = _create_search_vertex(
+            tmp_path, "test", '  note {\n    search "text"\n  }',
+        )
+        _seed_facts(tmp_path / "store.db", [
+            {"kind": "note", "ts": 1000.0, "payload": {"text": "hello"}},
+        ])
+        vertex_reindex(vpath)
+
+        # Re-probe several times with no edits at all.
+        for _ in range(3):
+            coverage = vertex_search_coverage(vpath)
+            assert coverage.missing is False
+            assert coverage.stale_kinds == frozenset()
+
+    def test_declaration_drift_search_finds_matches_via_fallback(self, tmp_path):
+        """End-to-end at the search() surface: a declaration edit with zero
+        new facts must not silently return nothing — the coverage probe's
+        fingerprint mismatch routes the affected kind through the
+        substring fallback, and the fact IS found."""
+        from engine import vertex_reindex, vertex_search
+
+        vpath = _create_search_vertex(
+            tmp_path, "test", '  note {\n    search "text"\n  }',
+        )
+        _seed_facts(tmp_path / "store.db", [
+            {"kind": "note", "ts": 1000.0, "payload": {"text": "hello driftword"}},
+        ])
+        vertex_reindex(vpath)
+
+        # Declaration edit, no new facts — the FTS index is now
+        # semantically stale even though the rowid watermark hasn't moved.
+        _create_search_vertex(
+            tmp_path, "test", '  note {\n    search "text" "extra"\n  }',
+        )
+
+        # A bare vertex_search (no coverage gating) still returns the OLD
+        # index's answer — this is why callers MUST consult the coverage
+        # probe first; vertex_search itself has no way to know the
+        # declaration moved.
+        stale_results = vertex_search(vpath, "driftword")
+        assert len(stale_results) == 1  # the old index still has this row
+
+        # But the coverage probe correctly flags it, so a caller that
+        # honors it (surface.search — exercised directly in
+        # apps/loops/tests/test_surface.py) will route through the
+        # substring fallback rather than trusting this index blindly.
+        from engine import vertex_search_coverage
+
+        coverage = vertex_search_coverage(vpath)
+        assert "note" in coverage.stale_kinds
+
 
 class TestExtractField:
     """_extract_field: nested paths and polymorphic value extraction for FTS5."""

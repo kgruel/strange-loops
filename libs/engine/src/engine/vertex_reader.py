@@ -22,7 +22,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from .declaration import load_declaration, load_declaration_status
+from .declaration import (
+    declaration_generation,
+    load_declaration,
+    load_declaration_status,
+)
 from .observer import observer_matches
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -1619,7 +1623,31 @@ def vertex_search_coverage(vertex_path: Path) -> FtsCoverage:
     query via FTS vs. must route through the substring fallback. Opens the
     store with ``PRAGMA query_only=ON`` — the same read-only discipline
     :class:`~engine.store_reader.StoreReader` uses — so a coverage probe can
-    never be the thing that mutates the canonical store.
+    never be the thing that mutates the canonical store. This function CAN
+    still raise (e.g. a corrupt or unreadable database) — it does not catch
+    every exception itself; callers MUST fail closed on any exception from
+    this probe (never treat "the probe broke" as "everything is fine" — see
+    ``surface.search``'s handling, capstone sol P2).
+
+    TWO staleness axes, checked in order:
+
+    1. DECLARATION drift (capstone sol P1). The rowid watermark only moves
+       when a FACT is written — a declaration edit with zero new facts (a
+       newly-searchable kind, or changed ``search`` fields on an
+       already-indexed kind) leaves it untouched, so the rowid probe alone
+       would report FRESH against a semantically stale index. Compare the
+       CURRENT declaration's fingerprint
+       (:func:`~engine.declaration.declaration_generation`'s
+       ``review_fingerprint`` — the SAME fingerprint S4's review surface
+       uses, not a second one invented here) against what
+       :func:`vertex_reindex` persisted into ``fts_state`` at rebuild time.
+       Absent stored fingerprint (a pre-this-fix reindex, or a fingerprint
+       that failed to compute) or a mismatch ⇒ conservatively treat EVERY
+       declared-searchable kind as stale — whole-declaration-set
+       granularity, not per-kind, because a decl change is rare and
+       whole-set-stale-until-reindex is cheap and honest.
+    2. The pre-existing per-kind ROWID watermark probe — only reached once
+       the fingerprint confirms the declaration hasn't drifted.
 
     Combine/discover vertices recurse per child and combine conservatively:
     ``missing`` ORs across children (any child never reindexed makes the
@@ -1655,6 +1683,15 @@ def vertex_search_coverage(vertex_path: Path) -> FtsCoverage:
     if not search_fields:
         return FtsCoverage(missing=True)
 
+    declared_kinds = tuple(search_fields.keys())
+
+    # Computed BEFORE opening the read-only connection below — same
+    # ordering rationale as vertex_reindex (a separate short-lived
+    # connection to the same store; no concurrency question either way,
+    # but keeping them sequential rather than nested is simplest to reason
+    # about).
+    current_fingerprint = declaration_generation(vertex_path)["review_fingerprint"]
+
     conn = sqlite3.connect(str(store_path))
     try:
         conn.execute("PRAGMA query_only=ON")
@@ -1664,12 +1701,27 @@ def vertex_search_coverage(vertex_path: Path) -> FtsCoverage:
         if table_row is None:
             return FtsCoverage(missing=True)
 
+        stored_row = conn.execute(
+            "SELECT value FROM fts_state WHERE key='decl_fingerprint'"
+        ).fetchone()
+        stored_fingerprint = stored_row[0] if stored_row else None
+
+        # Declaration drift check FIRST — a mismatch (or no stored
+        # fingerprint at all: pre-fix reindex, or the rare compute failure)
+        # makes the rowid probe moot; nothing declared is trustworthy until
+        # the next reindex re-anchors the fingerprint.
+        if (
+            stored_fingerprint is None
+            or current_fingerprint is None
+            or stored_fingerprint != current_fingerprint
+        ):
+            return FtsCoverage(missing=False, stale_kinds=frozenset(declared_kinds))
+
         state_row = conn.execute(
             "SELECT value FROM fts_state WHERE key='last_rowid'"
         ).fetchone()
         last_rowid = int(state_row[0]) if state_row else 0
 
-        declared_kinds = tuple(search_fields.keys())
         placeholders = ",".join("?" for _ in declared_kinds)
         stale_rows = conn.execute(
             "SELECT DISTINCT kind FROM facts WHERE rowid > ? "
@@ -1735,6 +1787,17 @@ def vertex_reindex(vertex_path: Path) -> dict[str, Any]:
     mutates anything OTHER than each child's own store — there is no
     aggregate-level store to write, and no read ever triggers this as a
     side effect.
+
+    Also persists the CURRENT declaration's
+    :func:`~engine.declaration.declaration_generation` ``review_fingerprint``
+    into ``fts_state`` (capstone sol P1). A DECLARATION change — a newly
+    searchable kind with zero new facts, or changed ``search`` fields on an
+    already-indexed kind — leaves the rowid watermark alone (no fact rowid
+    moved), so the rowid-only staleness probe would report FRESH while the
+    index no longer matches the current declaration. Reusing S4's existing
+    fingerprint (rather than inventing a second one) makes
+    :func:`vertex_search_coverage` detect that drift too: see its docstring
+    for the comparison contract.
     """
     ast = load_declaration(vertex_path)
 
@@ -1771,6 +1834,11 @@ def vertex_reindex(vertex_path: Path) -> dict[str, Any]:
             "reindexed": False,
             "reason": "no search fields declared",
         }
+
+    # Computed BEFORE opening the write connection below (declaration_generation
+    # opens its own short-lived read-only connection to the same store; doing
+    # this first avoids any concurrent-connection question entirely).
+    decl_fingerprint = declaration_generation(vertex_path)["review_fingerprint"]
 
     conn = sqlite3.connect(str(store_path))
     try:
@@ -1821,6 +1889,21 @@ def vertex_reindex(vertex_path: Path) -> dict[str, Any]:
             "INSERT OR REPLACE INTO fts_state(key, value) VALUES ('last_rowid', ?)",
             (str(max_rowid),),
         )
+        # Persist the declaration fingerprint this rebuild was built against
+        # (capstone sol P1) — ONLY when it computed cleanly. A None
+        # fingerprint (the rare malformed-but-parsed-declaration case
+        # declaration_generation's own docstring calls out) must not be
+        # written as a false "no drift possible" signal; leaving the row
+        # ABSENT (fts_state was just freshly created above, so there's
+        # nothing stale to clear) makes vertex_search_coverage treat this
+        # exactly like a pre-fix reindex — conservatively stale — which is
+        # the honest answer when freshness can't be judged at all.
+        if decl_fingerprint is not None:
+            conn.execute(
+                "INSERT OR REPLACE INTO fts_state(key, value) VALUES "
+                "('decl_fingerprint', ?)",
+                (decl_fingerprint,),
+            )
         conn.commit()
     finally:
         conn.close()
@@ -1832,6 +1915,7 @@ def vertex_reindex(vertex_path: Path) -> dict[str, Any]:
         "facts_indexed": facts_indexed,
         "kinds_indexed": sorted(kinds_indexed),
         "last_rowid": max_rowid,
+        "decl_fingerprint": decl_fingerprint,
     }
 
 

@@ -851,13 +851,30 @@ def search(surface: Surface, query: str, *, vertex_path=None) -> Surface:
     # facts postdate the last reindex.
     stale_kinds: set[str] = set()
     if vertex_path is not None and indexed:
+        coverage_failed = False
         try:
             from engine import vertex_search_coverage
 
             coverage = vertex_search_coverage(vertex_path)
         except Exception:
             coverage = None
-        if coverage is not None:
+            coverage_failed = True
+        if coverage_failed:
+            # FAIL CLOSED (capstone sol P2). A probe exception (corrupt
+            # fts_state, unreadable db, ...) must never be read as "every
+            # indexed kind is fine" — that was the old behavior (`coverage
+            # is None` left `stale_kinds` empty, so `trustworthy` stayed
+            # the FULL indexed set). The consequence was silent-empty
+            # results: the FTS branch's OWN exception guard would then
+            # swallow the same underlying failure into `facts = []`, and
+            # the substring fallback would skip these kinds too, because
+            # they were wrongly counted as `fts_kinds`. Marking every
+            # declared kind stale here routes them all through the
+            # substring fallback instead, with the gap named in
+            # Window.stale — the "no silent wrong answers" contract this
+            # slice exists to uphold, extended to cover probe failure too.
+            stale_kinds = set(indexed)
+        elif coverage is not None:
             stale_kinds = set(indexed) if coverage.missing else set(coverage.stale_kinds)
 
     # FTS covers present ∧ indexed ∧ fresh; substring covers everything else

@@ -793,6 +793,53 @@ def test_search_stale_kind_crowd_does_not_bury_fresh_kind_match(tmp_path):
     assert found.window.truncated is False
 
 
+def test_search_coverage_probe_failure_fails_closed(tmp_path, monkeypatch):
+    """Capstone sol P2: if vertex_search_coverage RAISES (corrupt fts_state,
+    unreadable db, ...), search() must fail CLOSED — treat every indexed
+    kind as untrustworthy, not silently promote them all to trustworthy.
+
+    A real root cause that breaks the coverage probe (corrupt db, I/O
+    error) breaks ``vertex_search`` the SAME way — both are mocked to raise
+    here, reproducing the exact silent-empty failure sol described: before
+    the fix, a probe exception left `stale_kinds` empty (the `coverage is
+    None` branch was a no-op), so EVERY indexed kind stayed "trustworthy";
+    the FTS branch then swallowed the SAME underlying failure into
+    `facts = []` via its own defensive except, and the substring fallback
+    skipped these kinds too (wrongly counted as fts_kinds) — a silent,
+    fully-empty result with NO disclosure at all.
+    """
+    import sqlite3
+
+    from loops.commands.fetch import fetch_fold
+
+    vpath = _search_vertex(tmp_path)  # reindexed by the fixture
+
+    def _boom(*_args, **_kwargs):
+        raise sqlite3.OperationalError("simulated: disk I/O error")
+
+    # search() does `from engine import vertex_search_coverage` / `vertex_search`
+    # INSIDE the function body (a fresh lookup on every call) — patch the
+    # attributes on the `engine` module itself so those lookups resolve to
+    # the failing stand-ins.
+    import engine
+
+    monkeypatch.setattr(engine, "vertex_search_coverage", _boom)
+    monkeypatch.setattr(engine, "vertex_search", _boom)
+
+    state = fetch_fold(vpath)
+    found = search(project(state), "JWT", vertex_path=vpath)
+
+    # Not silently empty: the fact is still found, via the substring
+    # fallback the fail-closed path routes it through — and vertex_search
+    # (also mocked to raise) is never even reached, because fail-closed
+    # means fts_kinds is empty and the FTS branch's guard short-circuits.
+    kinds_found = {r.kind for r in found.rows}
+    assert "decision" in kinds_found
+    # And the gap is disclosed, not hidden — a probe failure is treated
+    # exactly like "everything indexed is stale".
+    assert "decision" in found.window.stale
+
+
 # ---------------------------------------------------------------------------
 # Encoders + source_facts carry
 # ---------------------------------------------------------------------------

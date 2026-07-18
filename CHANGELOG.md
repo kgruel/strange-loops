@@ -1,10 +1,13 @@
 # Changelog
 
-## 0.8.0 — unreleased
+## 0.8.0 — 2026-07-18
 
-The **temporal-cursor wave** (`feat/temporal-cursor`, SPEC §9.3 session 1):
-a read-path cursor over witness order, plus the explicit event-time
-projection and a structural diff built on top of both.
+Two arcs from the overnight design wave: the **temporal cursor**
+(`feat/temporal-cursor`, SPEC §9.3 session 1) — a read-path cursor over
+witness order, plus the explicit event-time projection and a structural
+diff built on top of both — and **VertexHandle** (`feat/vertex-handle`),
+the daemon-shaped engine access primitive. A golden byte-coverage safety
+net for the upcoming TUI lens migration rode along (test-only).
 
 ### Added
 - **engine: `WitnessPosition` — the read-path temporal cursor.** A cursor
@@ -32,6 +35,18 @@ projection and a structural diff built on top of both.
   the id in the TARGET store's own append order, never reusing a source
   rowid). An unadopted store's position has no durable handle — durable
   serialization is refused rather than inventing a surrogate id.
+- **engine: `VertexHandle` — daemon-shaped access without a daemon.** An
+  in-process long-lived handle per consumer ("orchestration dissolves
+  daemon"): compiled ontology, store connections, an immutable fold
+  snapshot, and facts/ticks cursors held across operations.
+  `open()`/`snapshot()`/`refresh()` with atomic snapshot swap;
+  `receive()` writes through with operation-fresh credentials and no
+  ontology reload; `changes()` iterators with coalescing and idle wake;
+  transaction-free between probes (a parked handle holds no read txn).
+  Refresh is incremental via the rowid cursor, then a full `(ts, id)`
+  reconstruction per coalesced receipt group — the same replay contract
+  as a cold fold. Validated by a 10k-fact refresh benchmark; consumer
+  cutover rides a later checkpoint slice.
 - **`sl read VERTEX --at <address>`** — the witness-cursor read. Address
   grammar: `head`, `fact:ID` (exact or an unambiguous prefix, plus the
   durable `fact:<lineage>/<id>` form), `seq:N` (receipt ordinal), `tick:ID`,

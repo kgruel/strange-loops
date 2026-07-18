@@ -10,11 +10,23 @@ from __future__ import annotations
 
 from painted import Zoom
 
-from loops.commands.fetch import _longest_chains, _top_chains, fetch_graph
+from loops.cli.invocation import Invocation
+from loops.cli.output import BufferReporter
+from loops.cli.views import read as read_view
+from loops.commands.fetch import (
+    _longest_chains,
+    _strongly_connected,
+    _top_chains,
+    fetch_graph,
+)
 from loops.lenses.graph import graph_view
 
 from .helpers import block_to_text
 from .parity import assert_register_parity
+
+
+def _ctx(reporter=None) -> Invocation:
+    return Invocation(reporter=reporter or BufferReporter())
 
 _LAST = 1735733100.0
 
@@ -80,24 +92,27 @@ class TestTraversal:
         chains, _trunc, _exh = _longest_chains(_adj({
             "a": ["b"], "b": ["c", "e"], "c": ["d"], "d": [], "e": [],
         }))
-        assert chains["a"] == ["a", "b", "c", "d"]
-        assert chains["b"] == ["b", "c", "d"]
+        assert chains["a"][0] == ["a", "b", "c", "d"]
+        assert chains["b"][0] == ["b", "c", "d"]
+        # Predicates ride parallel to the path — head None, one label per hop.
+        assert chains["a"][1] == [None, "ref", "ref", "ref"]
 
     def test_cycle_does_not_hang(self):
         # a→b→c→a is a pure cycle — the per-path guard skips the back-edge.
         chains, _trunc, _exh = _longest_chains(_adj({"a": ["b"], "b": ["c"], "c": ["a"]}))
         # Terminates, bounded at the ring size, and never repeats a node.
         for node in ("a", "b", "c"):
-            assert 1 <= len(chains[node]) <= 3
-            assert len(set(chains[node])) == len(chains[node])  # no node twice
-        assert max(len(p) for p in chains.values()) == 3
+            path = chains[node][0]
+            assert 1 <= len(path) <= 3
+            assert len(set(path)) == len(path)  # no node twice
+        assert max(len(p) for p, _ in chains.values()) == 3
 
     def test_depth_cap(self):
         # A chain longer than the cap is truncated at `cap` nodes, not crashed.
         chain = {str(i): [str(i + 1)] for i in range(50)}
         chain["50"] = []
         chains, _trunc, _exh = _longest_chains(_adj(chain), cap=8)
-        assert max(len(p) for p in chains.values()) == 8
+        assert max(len(p) for p, _ in chains.values()) == 8
 
     def test_depth_cap_marks_truncated(self):
         # A 300-node path with the real cap reports a length-128 chain FLAGGED
@@ -105,11 +120,12 @@ class TestTraversal:
         chain = {str(i): [str(i + 1)] for i in range(300)}
         chain["300"] = []
         chains, truncated, _exh = _longest_chains(_adj(chain))
-        assert len(chains["0"]) == 128
+        assert len(chains["0"][0]) == 128
         assert "0" in truncated
         top = _top_chains(chains, truncated)
         assert top[0]["truncated"] is True
         assert len(top[0]["path"]) == 128
+        assert len(top[0]["predicates"]) == 128  # parallel to the path
 
     def test_cycle_memo_not_poisoned_by_visit_order(self):
         # Regression (finding 2): C is reached first via A→B→C (where C→B is a
@@ -121,7 +137,7 @@ class TestTraversal:
         for order in itertools.permutations(["A", "B", "C", "D"]):
             reordered = {k: adj[k] for k in order}
             chains, _trunc, _exh = _longest_chains(reordered)
-            assert chains["D"] == ["D", "C", "B"], f"order {order} -> {chains['D']}"
+            assert chains["D"][0] == ["D", "C", "B"], f"order {order} -> {chains['D']}"
 
     def test_reachable_longest_survives_visit_order(self):
         # X→N→A→B→C→D (length 6) must be found from X in ANY iteration order —
@@ -135,7 +151,7 @@ class TestTraversal:
         for order in itertools.permutations(["A", "B", "C", "N", "X", "D"]):
             reordered = {k: adj[k] for k in order}
             chains, _trunc, _exh = _longest_chains(reordered)
-            assert len(chains["X"]) == 6, f"order {order} -> {chains['X']}"
+            assert len(chains["X"][0]) == 6, f"order {order} -> {chains['X']}"
 
     def test_visit_budget_flags_approximate(self):
         # A tiny budget exhausts and flags the result approximate.
@@ -150,12 +166,74 @@ class TestTraversal:
             "a": ["b"], "b": ["c"], "c": ["d"], "d": [],
         }))
         top = _top_chains(chains, truncated)
-        assert top == [{"path": ["a", "b", "c", "d"], "truncated": False}]
+        assert top == [{
+            "path": ["a", "b", "c", "d"],
+            "predicates": [None, "ref", "ref", "ref"],
+            "truncated": False,
+        }]
 
     def test_top_chains_needs_an_edge(self):
         # Isolated nodes (len-1 paths) are not chains.
         chains, truncated, _exh = _longest_chains(_adj({"a": [], "b": []}))
         assert _top_chains(chains, truncated) == []
+
+    def test_predicate_retained_through_walk(self):
+        # (c) The predicate that entered each hop survives the DFS — mixed
+        # predicates along one chain are all recorded, parallel to the path.
+        adj = {
+            "a": [("b", "blocks")], "b": [("c", "ref")], "c": [("d", "owner")],
+            "d": [],
+        }
+        chains, _trunc, _exh = _longest_chains(adj)
+        assert chains["a"] == (
+            ["a", "b", "c", "d"], [None, "blocks", "ref", "owner"],
+        )
+
+    def test_predicate_hop_label_is_deterministic_when_parallel(self):
+        # A node reaching one target via >1 predicate labels the hop with the
+        # lexicographically smallest — a stable label, not a correctness axis.
+        adj = {"a": [("b", "ref"), ("b", "blocks")], "b": []}
+        chains, _trunc, _exh = _longest_chains(adj)
+        assert chains["a"] == (["a", "b"], [None, "blocks"])
+
+
+class TestSCC:
+    def test_pure_dag_reports_no_cycles(self):
+        sccs, self_loops = _strongly_connected(_adj({
+            "a": ["b"], "b": ["c"], "c": [],
+        }))
+        assert sccs == []
+        assert self_loops == []
+
+    def test_three_node_cycle_is_one_scc(self):
+        sccs, self_loops = _strongly_connected(_adj({
+            "a": ["b"], "b": ["c"], "c": ["a"],
+        }))
+        assert sccs == [["a", "b", "c"]]
+        assert self_loops == []
+
+    def test_self_loop_reported_distinctly(self):
+        # A self-edge is a size-1 SCC Tarjan would not surface — reported as a
+        # self-loop, kept OUT of the multi-node scc list.
+        sccs, self_loops = _strongly_connected(_adj({"a": ["a"], "b": []}))
+        assert sccs == []
+        assert self_loops == ["a"]
+
+    def test_scc_and_self_loop_coexist(self):
+        sccs, self_loops = _strongly_connected(_adj({
+            "a": ["b"], "b": ["a"], "c": ["c"], "d": [],
+        }))
+        assert sccs == [["a", "b"]]
+        assert self_loops == ["c"]
+
+    def test_large_cycle_is_iterative(self):
+        # A cycle far deeper than the recursion limit must not blow the stack
+        # (iterative Tarjan — same guarantee as the chain walk's depth cap).
+        ring = {str(i): [str((i + 1) % 5000)] for i in range(5000)}
+        sccs, self_loops = _strongly_connected(_adj(ring))
+        assert len(sccs) == 1
+        assert len(sccs[0]) == 5000
+        assert self_loops == []
 
 
 class TestFetch:
@@ -191,6 +269,7 @@ class TestFetch:
         assert data["typed_edges"] == 0
         assert data["chains"] == [{
             "path": ["decision/a", "decision/b", "decision/c"],
+            "predicates": [None, "ref", "ref"],
             "truncated": False,
         }]
         # b and c are inbound hubs; a is a pure source (inbound 0, has a ref
@@ -208,6 +287,7 @@ class TestFetch:
         assert data["edges"] == 1
         assert data["chains"] == [{
             "path": ["decision/design/rail", "thread/spine"],
+            "predicates": [None, "ref"],
             "truncated": False,
         }]
         hub = next(h for h in data["hubs"] if h["address"] == "thread/spine")
@@ -269,6 +349,222 @@ class TestFetch:
         # Inbound neighbor addresses are resolved node sources.
         assert hubs["decision/c"]["in_addrs"] == ["decision/b"]
         assert hubs["decision/b"]["in_addrs"] == ["decision/a"]
+
+    # --- build-2: key honoring + three-bucket partition -------------------
+    def _scoped_fixture(self, tmp_path):
+        """decision (by topic) + note (collect), engineered so that under
+        ``--key architecture/`` all three buckets are nonzero at once:
+
+        * dangling — ``decision:ghost`` resolves nowhere;
+        * filter_excluded — ``decision:design/out`` is a real node but out of
+          the ``architecture/`` scope;
+        * keyless — a collect note (kept in scope by a ``summary`` prefix that
+          matches ``--key``, yet still sourceless) refs an in-scope decision.
+        """
+        from atoms import Fact
+        from engine import load_vertex_program
+
+        vp = tmp_path / "s.vertex"
+        vp.write_text(
+            'name "s"\nstore "./s.db"\n\n'
+            "loops {\n"
+            '  decision { fold { items "by" "topic" } }\n'
+            '  note { fold { items "collect" 50 } }\n'
+            "}\n"
+        )
+        prog = load_vertex_program(vp)
+        t = 1735732800.0
+        prog.receive(Fact.of(
+            "decision", "kyle", ts=t, topic="architecture/base", message="x"))
+        prog.receive(Fact.of(
+            "decision", "kyle", ts=t + 1, topic="architecture/edge",
+            message="x", ref="decision:design/out"))
+        prog.receive(Fact.of(
+            "decision", "kyle", ts=t + 2, topic="design/out", message="x"))
+        prog.receive(Fact.of(
+            "decision", "kyle", ts=t + 3, topic="architecture/dead",
+            message="x", ref="decision:ghost"))
+        prog.receive(Fact.of(
+            "note", "kyle", ts=t + 4, message="see", summary="architecture/see",
+            ref="decision:architecture/base"))
+        return vp
+
+    def test_key_honored_narrows_nodes(self, tmp_path):
+        vp = self._scoped_fixture(tmp_path)
+        full = fetch_graph(vp)
+        scoped = fetch_graph(vp, key="architecture/")
+        assert full["nodes"] == 5
+        assert scoped["nodes"] < full["nodes"]  # --key honored, not dropped
+        assert "decision/design/out" not in {h["address"] for h in scoped["hubs"]}
+
+    def test_three_bucket_partition_simultaneously(self, tmp_path):
+        data = fetch_graph(self._scoped_fixture(tmp_path), key="architecture/")
+        assert data["dangling"] == 1
+        assert data["dangling_list"] == ["decision:ghost"]
+        assert data["filter_excluded"] == 1
+        assert data["filter_excluded_list"] == ["decision:design/out"]
+        assert data["unsourced_inbound"] >= 1  # keyless note → in-scope decision
+
+    def test_unfiltered_has_no_filter_excluded(self, tmp_path):
+        # Without a scope, global IS in-scope — filter_excluded is structurally
+        # zero and the honest dangling (the ghost alone) stands.
+        data = fetch_graph(self._scoped_fixture(tmp_path))
+        assert data["filter_excluded"] == 0
+        assert data["dangling"] == 1
+        assert data["dangling_list"] == ["decision:ghost"]
+
+    # --- build-2: --edge predicate selection ------------------------------
+    def _typed_edge_fixture(self, tmp_path):
+        from atoms import Fact
+        from engine import load_vertex_program
+
+        vp = tmp_path / "e.vertex"
+        vp.write_text(
+            'name "e"\nstore "./e.db"\n\n'
+            "loops {\n"
+            '  person { fold { items "by" "handle" } }\n'
+            "  decision {\n"
+            '    fold { items "by" "topic" }\n'
+            '    edge "stakeholder" targets="person"\n'
+            "  }\n"
+            "}\n"
+        )
+        prog = load_vertex_program(vp)
+        t = 1735732800.0
+        prog.receive(Fact.of("person", "kyle", ts=t, handle="alice", name="Alice"))
+        prog.receive(Fact.of(
+            "decision", "kyle", ts=t + 1, topic="a", message="x",
+            stakeholder="alice", ref="decision:b"))
+        prog.receive(Fact.of("decision", "kyle", ts=t + 2, topic="b", message="x"))
+        return vp
+
+    def test_edge_predicate_filter(self, tmp_path):
+        vp = self._typed_edge_fixture(tmp_path)
+        assert {c[0] for c in fetch_graph(vp)["census"]} == {"ref", "stakeholder"}
+
+        stake = fetch_graph(vp, edge="stakeholder")
+        assert {c[0] for c in stake["census"]} == {"stakeholder"}
+        stake_hubs = {h["address"] for h in stake["hubs"]}
+        assert "person/alice" in stake_hubs  # stakeholder sink survives
+        assert "decision/b" not in stake_hubs  # ref-only inbound excluded
+
+        refonly = fetch_graph(vp, edge="ref")
+        assert {c[0] for c in refonly["census"]} == {"ref"}
+        ref_hubs = {h["address"] for h in refonly["hubs"]}
+        assert "decision/b" in ref_hubs
+        assert "person/alice" not in ref_hubs
+
+    def test_edge_comma_or_keeps_both(self, tmp_path):
+        both = fetch_graph(self._typed_edge_fixture(tmp_path), edge="ref,stakeholder")
+        assert {c[0] for c in both["census"]} == {"ref", "stakeholder"}
+
+    # --- build-2: chain predicate retention (fetch level) -----------------
+    def test_chain_carries_mixed_predicate_labels(self, tmp_path):
+        from atoms import Fact
+        from engine import load_vertex_program
+
+        vp = tmp_path / "m.vertex"
+        vp.write_text(
+            'name "m"\nstore "./m.db"\n\n'
+            "loops {\n"
+            '  person { fold { items "by" "handle" } }\n'
+            "  decision {\n"
+            '    fold { items "by" "topic" }\n'
+            '    edge "stakeholder" targets="person"\n'
+            "  }\n"
+            "}\n"
+        )
+        prog = load_vertex_program(vp)
+        t = 1735732800.0
+        prog.receive(Fact.of("person", "kyle", ts=t, handle="alice", name="Alice"))
+        prog.receive(Fact.of(
+            "decision", "kyle", ts=t + 1, topic="y", message="x", stakeholder="alice"))
+        prog.receive(Fact.of(
+            "decision", "kyle", ts=t + 2, topic="x", message="x", ref="decision:y"))
+        # x --ref--> y --stakeholder--> alice: the predicate of each hop is kept.
+        assert fetch_graph(vp)["chains"] == [{
+            "path": ["decision/x", "decision/y", "person/alice"],
+            "predicates": [None, "ref", "stakeholder"],
+            "truncated": False,
+        }]
+
+    # --- build-2: cycle census over the resolved graph --------------------
+    def test_fetch_cycle_census(self, tmp_path):
+        from atoms import Fact
+        from engine import load_vertex_program
+
+        vp = tmp_path / "c.vertex"
+        vp.write_text(
+            'name "c"\nstore "./c.db"\n\n'
+            "loops {\n"
+            '  decision { fold { items "by" "topic" } }\n'
+            "}\n"
+        )
+        prog = load_vertex_program(vp)
+        t = 1735732800.0
+        # Mutual refs → a 2-node SCC. The chain walk must still terminate.
+        prog.receive(Fact.of(
+            "decision", "kyle", ts=t, topic="a", message="x", ref="decision:b"))
+        prog.receive(Fact.of(
+            "decision", "kyle", ts=t + 1, topic="b", message="x", ref="decision:a"))
+        data = fetch_graph(vp)
+        assert data["cycles"]["sccs"] == [["decision/a", "decision/b"]]
+        assert data["cycles"]["self_loops"] == []
+        # The near-DAG fixture reports empty cycles (the common case is clean).
+        clean = fetch_graph(self._dangling_fixture(tmp_path))
+        assert clean["cycles"] == {"sccs": [], "self_loops": []}
+
+
+class TestBuild2CLI:
+    def _vp(self, tmp_path):
+        from atoms import Fact
+        from engine import load_vertex_program
+
+        vp = tmp_path / "g.vertex"
+        vp.write_text(
+            'name "g"\nstore "./g.db"\n\n'
+            "loops {\n"
+            '  decision { fold { items "by" "topic" } }\n'
+            "}\n"
+        )
+        prog = load_vertex_program(vp)
+        prog.receive(Fact.of(
+            "decision", "kyle", ts=1735732800.0, topic="architecture/x", message="x"))
+        prog.receive(Fact.of(
+            "decision", "kyle", ts=1735732801.0, topic="design/y", message="x",
+            ref="decision:architecture/x"))
+        return vp
+
+    def test_edge_without_graph_lens_refuses(self, tmp_path):
+        reporter = BufferReporter()
+        rc = read_view.run([str(self._vp(tmp_path)), "--edge", "ref"], _ctx(reporter))
+        assert rc == 2
+        assert "--lens graph" in reporter.err_text  # teaching message, not silent
+
+    def test_edge_with_graph_lens_honored(self, tmp_path):
+        reporter = BufferReporter()
+        rc = read_view.run(
+            [str(self._vp(tmp_path)), "--lens", "graph", "--edge", "ref"],
+            _ctx(reporter),
+        )
+        assert rc == 0
+
+    def test_key_honored_on_graph_lens_via_cli(self, tmp_path):
+        # friction:graph-fetch-drops-key — --key used to be byte-identically
+        # dropped; the scoped JSON node count must now be strictly smaller.
+        import json
+
+        vp = self._vp(tmp_path)
+        r_full = BufferReporter()
+        read_view.run([str(vp), "--lens", "graph", "--json"], _ctx(r_full))
+        r_scoped = BufferReporter()
+        read_view.run(
+            [str(vp), "--lens", "graph", "--key", "architecture/", "--json"],
+            _ctx(r_scoped),
+        )
+        full = json.loads(r_full.out_text)
+        scoped = json.loads(r_scoped.out_text)
+        assert scoped["nodes"] < full["nodes"]
 
 
 class TestZooms:
@@ -500,4 +796,77 @@ class TestRegisters:
                 "thread/spine", "decision/design/rail", "blocks",
                 "3 nodes", "orphans",
             ],
+        )
+
+
+class TestBuild2Render:
+    def test_chain_predicate_labels_render_both_registers(self):
+        # A chain carrying predicates renders labelled hops (the box-draw glyph
+        # is decorative; the predicate WORD is the load-bearing part).
+        chain = {
+            "path": ["decision/x", "decision/y", "person/alice"],
+            "predicates": [None, "ref", "stakeholder"],
+            "truncated": False,
+        }
+        data = _data(hubs=[_hub("decision/x", 1)], chains=[chain])
+        expect = "decision/x ─ref→ decision/y ─stakeholder→ person/alice"
+        assert expect in _render(data, zoom=Zoom.FULL)
+        assert expect in _render(data, zoom=Zoom.FULL, piped=True)
+
+    def test_chain_without_predicates_stays_bare_arrow(self):
+        # A synthetic chain with no predicate data degrades to bare arrows — no
+        # spurious labels, and the existing ` → ` grammar is unchanged.
+        data = _data(
+            hubs=[_hub("k/a", 1)],
+            chains=[{"path": ["k/a", "k/b"], "truncated": False}],
+        )
+        text = _render(data)
+        assert "k/a → k/b" in text
+        assert "k/a ─" not in text  # no labelled hop when predicates absent
+
+    def test_filter_excluded_disclosed_both_registers(self):
+        data = _data(hubs=[_hub("decision/x", 1)])
+        data["dangling"] = 1
+        data["filter_excluded"] = 3
+        assert "3 out-of-scope refs" in _render(data, zoom=Zoom.DETAILED)
+        assert "filter_excluded: 3" in _render(data, piped=True)
+
+    def test_cycles_section_and_disclosure(self):
+        data = _data(hubs=[_hub("decision/a", 1)])
+        data["cycles"] = {
+            "sccs": [["decision/a", "decision/b"]],
+            "self_loops": ["decision/c"],
+        }
+        # SUMMARY discloses the count; -v lists members (SCCs and self-loops
+        # distinctly); the agent channel carries every member.
+        assert "2 cycles" in _render(data, zoom=Zoom.SUMMARY)
+        detailed = _render(data, zoom=Zoom.DETAILED)
+        assert "CYCLES" in detailed
+        assert "decision/a ↔ decision/b" in detailed
+        assert "decision/c ↺ self" in detailed
+        piped = _render(data, piped=True)
+        assert "cycles: 2" in piped
+        assert "scc: decision/a decision/b" in piped
+        assert "self-loop: decision/c" in piped
+
+    def test_clean_graph_hides_cycle_and_scope_disclosure(self):
+        # The common case (near-DAG, no filter) shows neither a cycle line nor
+        # a filter_excluded disclosure — zeros stay hidden, no new chrome.
+        data = _data(hubs=[_hub("decision/x", 1)])
+        text = _render(data, zoom=Zoom.DETAILED)
+        assert "cycle" not in text.lower()
+        assert "out-of-scope" not in text
+
+    def test_register_parity_predicate_chain(self):
+        data = _data(
+            hubs=[_hub("decision/x", 2, tier="high")],
+            chains=[{
+                "path": ["decision/x", "person/alice"],
+                "predicates": [None, "stakeholder"],
+                "truncated": False,
+            }],
+        )
+        assert_register_parity(
+            graph_view, data,
+            load_bearing=["decision/x", "person/alice", "stakeholder"],
         )

@@ -364,26 +364,34 @@ def _resolve_cursor(
 # --- Fetch closures --------------------------------------------------------
 
 
-def _lens_fetch_accepts_cursor(fetch_fn: Any, *, at: bool, as_of: bool) -> bool:
-    """True when a lens-declared fetch can honor the active cursor selector.
+def _fetch_accepts(fetch_fn: Any, name: str) -> bool:
+    """True when a lens-declared fetch would receive ``name`` if passed.
 
-    Mirrors ``call_lens_fetch``'s own signature-based dispatch (``**kwargs``
-    opts into everything; otherwise only named params are passed) so this
-    check and the actual call always agree on what "accepts" means. Called
-    by ``run()`` BEFORE dispatch — a lens fetch that doesn't declare the
-    active selector would silently answer at head while the render context
-    still carries witness/as_of metadata (review finding 2: a head answer
-    mislabeled as a historical one). ``at``/``as_of`` here are just "is this
-    selector active", not the resolved values.
+    Mirrors ``call_lens_fetch``'s signature-based dispatch: a ``**kwargs`` fetch
+    opts into everything; otherwise only explicitly-named params are passed. The
+    single check both the cursor guard and the ``--edge`` guard route through, so
+    "accepts" always means the same thing the actual call does.
     """
     import inspect
 
     params = inspect.signature(fetch_fn).parameters
     if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()):
         return True
-    if at and "at" not in params:
+    return name in params
+
+
+def _lens_fetch_accepts_cursor(fetch_fn: Any, *, at: bool, as_of: bool) -> bool:
+    """True when a lens-declared fetch can honor the active cursor selector.
+
+    Called by ``run()`` BEFORE dispatch — a lens fetch that doesn't declare the
+    active selector would silently answer at head while the render context
+    still carries witness/as_of metadata (review finding 2: a head answer
+    mislabeled as a historical one). ``at``/``as_of`` here are just "is this
+    selector active", not the resolved values.
+    """
+    if at and not _fetch_accepts(fetch_fn, "at"):
         return False
-    if as_of and "as_of" not in params:
+    if as_of and not _fetch_accepts(fetch_fn, "as_of"):
         return False
     return True
 
@@ -399,6 +407,7 @@ def _build_fold_fetch(
     *,
     at: Any = None,
     as_of: float | None = None,
+    edge: str | None = None,
 ) -> Any:
     """Return a zero-arg callable that produces the fold data.
 
@@ -425,6 +434,7 @@ def _build_fold_fetch(
                 retain_facts=want_facts,
                 refs_depth=refs_depth,
                 at=at, as_of=as_of,
+                edge=edge,
             )
         from loops.commands.fetch import fetch_fold
 
@@ -637,6 +647,20 @@ def run(argv: list[str], ctx: Invocation) -> int:
             )
             return 2
 
+    # --edge selects graph edge predicates and is honored only by a lens fetch
+    # that declares an `edge` param (the graph projection). Refuse rather than
+    # silently drop it on any other route — the same honor-or-refuse posture as
+    # the cursor guard above (184dfce), and silent no-op is the exact defect
+    # class this wave exists to kill (arbiter S3-F3).
+    if args.edge is not None and (
+        lens_fetch is None or not _fetch_accepts(lens_fetch, "edge")
+    ):
+        ctx.reporter.err(
+            "read: --edge selects graph edge predicates and is only honored "
+            "by --lens graph — add --lens graph, or drop --edge."
+        )
+        return 2
+
     fetch_data = _build_fold_fetch(
         vertex_path, ctx.observer,
         kind=kind, key=fetch_key,
@@ -645,6 +669,7 @@ def run(argv: list[str], ctx: Invocation) -> int:
         lens_fetch=lens_fetch,
         at=at_position,
         as_of=as_of_ts,
+        edge=args.edge,
     )
 
     # Format (JSON / PLAIN / AUTO) flows onto the Operation; dispatch forks on

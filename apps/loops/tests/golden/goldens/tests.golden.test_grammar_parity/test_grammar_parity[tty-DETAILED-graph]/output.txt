@@ -6,7 +6,7 @@ HUBS
     ← decision/design/rail
 
 CHAINS
-  decision/design/rail → thread/spine (leaf)
+  decision/design/rail ─ref→ thread/spine (leaf)
 
 ORPHANS (5)
   decision/architecture/tiers

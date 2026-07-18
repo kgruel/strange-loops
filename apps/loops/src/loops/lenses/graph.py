@@ -42,11 +42,16 @@ from ._grammar import (
 from ._grammar import block as _line
 
 
-def fetch(vertex_path, kind=None, observer=None):
-    """Lens-declared fetch — the ref/edge-graph projection."""
+def fetch(vertex_path, kind=None, key=None, edge=None, observer=None):
+    """Lens-declared fetch — the ref/edge-graph projection.
+
+    ``key`` narrows the node set (honor-or-refuse — declaring it here is what
+    stops ``--key`` being silently dropped, friction:graph-fetch-drops-key);
+    ``edge`` restricts the graph to one or more edge predicates.
+    """
     from loops.commands.fetch import fetch_graph
 
-    return fetch_graph(vertex_path, kind=kind, observer=observer)
+    return fetch_graph(vertex_path, kind=kind, key=key, edge=edge, observer=observer)
 
 
 def _counts_line(data: dict) -> str:
@@ -71,9 +76,28 @@ def _predicate_mix(predicates: list, top_n: int | None) -> str:
     return mix
 
 
-def _chain_line(chain: dict, width: int | None, *, leaf: bool = False) -> str:
-    """``a → b → c`` — shed middle segments to ``a → … → c`` before clipping.
+def _chain_hops(path: list, predicates: list | None) -> str:
+    """Join a chain path with per-hop predicate labels: ``a ─ref→ b ─blocks→ c``.
 
+    ``predicates[i]`` labels the edge ENTERING ``path[i]`` (``predicates[0]`` is
+    ``None`` — the head has no incoming edge). A missing or ``None`` predicate
+    degrades to a bare ``→`` so a chain that carries no predicate data (a
+    synthetic fixture, or older payloads) still renders.
+    """
+    if not path:
+        return ""
+    out = str(path[0])
+    for i in range(1, len(path)):
+        pred = predicates[i] if predicates and i < len(predicates) else None
+        out += (f" ─{pred}→ " if pred else " → ") + str(path[i])
+    return out
+
+
+def _chain_line(chain: dict, width: int | None, *, leaf: bool = False) -> str:
+    """``a ─ref→ b ─blocks→ c`` — shed middle segments to ``a → … → c`` before clip.
+
+    Each hop carries the predicate that entered it (retained through the DFS);
+    the width-shed fallback drops the labelled middle for a bare ``a → … → c``.
     A depth-cap-truncated chain gains a trailing ``⋯`` so the cut is disclosed,
     never silent. A chain that ENDS naturally (not truncated) gains a trailing
     ``(leaf)`` terminator when ``leaf`` is set (the -v disclosure) — the two are
@@ -86,7 +110,7 @@ def _chain_line(chain: dict, width: int | None, *, leaf: bool = False) -> str:
         tail = " (leaf)"
     else:
         tail = ""
-    full = " → ".join(path) + tail
+    full = _chain_hops(path, chain.get("predicates")) + tail
     if width is None or len(full) <= width or len(path) <= 2:
         return full
     return f"{path[0]} → … → {path[-1]}{tail}"
@@ -118,8 +142,13 @@ def graph_view(
     orphan_list = data.get("orphan_list", [])
     census = data.get("census", [])
     dangling = data.get("dangling", 0)
+    filter_excluded = data.get("filter_excluded", 0)
     unsourced = data.get("unsourced_inbound", 0)
     approximate = data.get("chains_approximate", False)
+    cycles = data.get("cycles", {}) or {}
+    sccs = cycles.get("sccs", [])
+    self_loops = cycles.get("self_loops", [])
+    n_cycles = len(sccs) + len(self_loops)
 
     if not nodes:
         return _line("No facts — no graph.", p.metadata, width)
@@ -184,9 +213,17 @@ def graph_view(
                     token = "  leaf"
                 else:
                     token = ""
-                rows.append(
-                    _line(f"  {' → '.join(c['path'])}{token}", Style(), None)
-                )
+                hops = _chain_hops(c["path"], c.get("predicates"))
+                rows.append(_line(f"  {hops}{token}", Style(), None))
+        if sccs or self_loops:
+            # Cycle census — the agent channel lists every member (SCCs and
+            # self-loops distinctly). Empty on today's near-DAG, so the section
+            # is absent unless batch-emit has introduced a real cycle.
+            rows.append(_line("cycles:", p.header, None))
+            for comp in sccs:
+                rows.append(_line(f"  scc: {' '.join(comp)}", Style(), None))
+            for addr in self_loops:
+                rows.append(_line(f"  self-loop: {addr}", Style(), None))
         if orphan_list:
             rows.append(_line("orphans:", p.header, None))
             for addr in orphan_list:
@@ -200,8 +237,12 @@ def graph_view(
                 )
         body = join_vertical(*rows)
         header_parts = [counts, f"{dangling} dangling"]
+        if filter_excluded:
+            header_parts.append(f"filter_excluded: {filter_excluded}")
         if unsourced:
             header_parts.append(f"unsourced_inbound: {unsourced}")
+        if n_cycles:
+            header_parts.append(f"cycles: {n_cycles}")
         if approximate:
             header_parts.append("chains approximate — traversal budget hit")
         header = rollup_line(vertex, header_parts)
@@ -301,16 +342,32 @@ def graph_view(
                 f"  {pred:<{pred_w}}  {count:>{cnt_w}}  {kind}", dim, width
             ))
 
+    if zoom >= Zoom.DETAILED and (sccs or self_loops):
+        # Cycle census — an SCC is a genuine multi-node cycle, a self-loop a
+        # node reffing itself; shown distinctly. Absent on today's near-DAG.
+        rows.append(_line("", Style(), width))
+        rows.append(_line("CYCLES", p.header, width))
+        for comp in sccs:
+            rows.append(_line(f"  {' ↔ '.join(comp)}", dim, width))
+        for addr in self_loops:
+            rows.append(_line(f"  {addr} ↺ self", dim, width))
+
     body = join_vertical(*rows)
 
     sublines = [counts]
-    if dangling or unsourced:
+    if dangling or filter_excluded or unsourced:
         parts = []
         if dangling:
             parts.append(f"{dangling} dangling refs")
+        if filter_excluded:
+            parts.append(f"{filter_excluded} out-of-scope refs")
         if unsourced:
             parts.append(f"{unsourced} inbound from unkeyed facts")
         sublines.append(" · ".join(parts))
+    if n_cycles:
+        sublines.append(
+            f"{n_cycles} cycle{'s' if n_cycles != 1 else ''} — see -v"
+        )
     if approximate:
         sublines.append("chains approximate — traversal budget hit")
     if any(c.get("truncated") for c in chains):

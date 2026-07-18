@@ -94,6 +94,16 @@ def add_read_args(parser: argparse.ArgumentParser) -> None:
         ),
         complete_lens,
     )
+    # --edge selects graph edge predicates (only honored by --lens graph;
+    # refused elsewhere). No completer stub this wave — shell completion glue
+    # for --edge is deferred (0.9.0 arbiter S3-F4).
+    parser.add_argument(
+        "--edge", default=None, metavar="PREDICATE",
+        help=(
+            "Restrict the graph to edges of this predicate — 'ref' or a "
+            "declared typed-edge field name (comma-OR). Only with --lens graph"
+        ),
+    )
     parser.add_argument(
         "--facts", action="store_true", default=False,
         help="Show raw fact stream instead of folded state",

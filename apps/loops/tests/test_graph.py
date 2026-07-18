@@ -8,6 +8,7 @@ harness; the cross-command grammar golden carries the byte-level surface.
 """
 from __future__ import annotations
 
+import pytest
 from painted import Zoom
 
 from loops.cli.invocation import Invocation
@@ -545,6 +546,37 @@ class TestBuild2CLI:
         reporter = BufferReporter()
         rc = read_view.run(
             [str(self._vp(tmp_path)), "--lens", "graph", "--edge", "ref"],
+            _ctx(reporter),
+        )
+        assert rc == 0
+
+    @pytest.mark.parametrize("empty", [",", " ", ",,", ""])
+    def test_empty_edge_selector_refuses(self, tmp_path, empty):
+        # An explicit selector that names no predicate is a user error, not a
+        # request for the whole graph — refuse (silent-full == silent-drop).
+        reporter = BufferReporter()
+        rc = read_view.run(
+            [str(self._vp(tmp_path)), "--lens", "graph", "--edge", empty],
+            _ctx(reporter),
+        )
+        assert rc == 2
+        assert "empty --edge selector" in reporter.err_text
+        assert "--edge ref" in reporter.err_text  # teaches the form
+
+    def test_empty_edge_refused_regardless_of_lens(self, tmp_path):
+        # The malformed value reports identically with or without --lens graph
+        # (value validation is route-independent — the empty check fires first).
+        reporter = BufferReporter()
+        rc = read_view.run([str(self._vp(tmp_path)), "--edge", ","], _ctx(reporter))
+        assert rc == 2
+        assert "empty --edge selector" in reporter.err_text
+
+    def test_multi_predicate_edge_still_filters(self, tmp_path):
+        # A well-formed comma-OR selector is honored (not caught by the empty
+        # guard) — regression pin against an over-broad refusal.
+        reporter = BufferReporter()
+        rc = read_view.run(
+            [str(self._vp(tmp_path)), "--lens", "graph", "--edge", "ref,cites"],
             _ctx(reporter),
         )
         assert rc == 0

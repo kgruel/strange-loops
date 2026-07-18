@@ -647,6 +647,23 @@ def run(argv: list[str], ctx: Invocation) -> int:
             )
             return 2
 
+    # An explicit --edge that names no predicate (',', whitespace, ',,') parses
+    # to an empty selector — which _pred_ok would read as "match everything".
+    # That is silent-full, the same defect class as silent-drop: a user who
+    # typed a selector made an error, not a request for the whole graph. Refuse
+    # with the value-teaching message, ahead of the route check so a malformed
+    # value reports identically regardless of lens (sol P2). The parse helper
+    # stays pure — the router owns the refusal.
+    if args.edge is not None:
+        from loops.commands.fetch import _parse_edge_set
+
+        if _parse_edge_set(args.edge) is None:
+            ctx.reporter.err(
+                "read: empty --edge selector — name at least one predicate "
+                "label (e.g. --edge ref)."
+            )
+            return 2
+
     # --edge selects graph edge predicates and is honored only by a lens fetch
     # that declares an `edge` param (the graph projection). Refuse rather than
     # silently drop it on any other route — the same honor-or-refuse posture as

@@ -624,6 +624,26 @@ def _decl_lineage_and_head(
     if conn is None:
         return None, None
     try:
+        return decl_lineage_and_head_on(conn, as_of=as_of, at=at)
+    finally:
+        conn.close()
+
+
+def decl_lineage_and_head_on(
+    conn: sqlite3.Connection,
+    *,
+    as_of: float | None = None,
+    at: WitnessPosition | None = None,
+) -> tuple[str | None, str | None]:
+    """``(lineage, decl_head)`` read on a CALLER-OWNED connection.
+
+    Split out of :func:`_decl_lineage_and_head` so a caller holding its own
+    read snapshot can observe the declaration head WITHIN that snapshot —
+    the FTS coverage probe needs the head it certifies against to come from
+    the same snapshot as the index state it reads (sol P2-a). The caller owns
+    the connection's lifetime; this never closes it.
+    """
+    try:
         lineage = _read_own_lineage(conn)
         if lineage is None:
             return None, None  # pre-genesis / unadopted — no self lineage
@@ -657,8 +677,8 @@ def _decl_lineage_and_head(
             except (json.JSONDecodeError, TypeError, AttributeError):
                 continue
         return lineage, None
-    finally:
-        conn.close()
+    except sqlite3.Error:
+        return None, None
 
 
 def load_declaration(

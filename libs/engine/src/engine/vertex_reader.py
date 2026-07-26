@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from .declaration import (
+    decl_lineage_and_head_on,
     declaration_generation,
     load_declaration,
     load_declaration_status,
@@ -1592,6 +1593,19 @@ def _extract_field(payload: dict, field: str) -> str:
     return str(value)
 
 
+class FtsGenerationChanged(Exception):
+    """The FTS index's declaration generation moved between certify and query.
+
+    ``vertex_search_coverage`` certifies freshness AGAINST a generation; if the
+    index is rebuilt under a new declaration before the query runs, the
+    certification no longer describes what is being queried. Raised (never
+    swallowed into an empty result) so the caller routes those kinds through
+    the substring fallback and DISCLOSES the gap — silently returning FTS hits
+    certified for a different generation is the wrong answer, and silently
+    returning none is the wrong answer twice (sol P2-a).
+    """
+
+
 @dataclass(frozen=True)
 class FtsCoverage:
     """Read-only staleness probe for a vertex's FTS derived index.
@@ -1613,6 +1627,13 @@ class FtsCoverage:
 
     missing: bool = False
     stale_kinds: frozenset[str] = field(default_factory=frozenset)
+    generation: str | None = None
+    """The declaration fingerprint this probe CERTIFIED against, when it
+    certified anything (``None`` when missing/all-stale, on aggregates, and
+    when the store carries no fingerprint). Callers pass it back to
+    :func:`vertex_search` as ``require_generation`` so the query runs under
+    the generation the freshness claim was made about — a certification is
+    about a generation, not about a store in the abstract (sol P2-a)."""
 
 
 def vertex_search_coverage(vertex_path: Path) -> FtsCoverage:
@@ -1685,16 +1706,27 @@ def vertex_search_coverage(vertex_path: Path) -> FtsCoverage:
 
     declared_kinds = tuple(search_fields.keys())
 
-    # Computed BEFORE opening the read-only connection below — same
-    # ordering rationale as vertex_reindex (a separate short-lived
-    # connection to the same store; no concurrency question either way,
-    # but keeping them sequential rather than nested is simplest to reason
-    # about).
-    current_fingerprint = declaration_generation(vertex_path)["review_fingerprint"]
-
+    # ONE snapshot for every fact this probe reasons about (sol P2-a). The
+    # fingerprint used to be read on its own connection, fts_state on a
+    # second, and the eventual query ran on a third — so a declaration event
+    # landing between them let a fingerprint from generation D1 certify an
+    # index built for D2, i.e. "fresh" over a stale index. The explicit read
+    # transaction below pins the store side; the AST-derived fingerprint is
+    # then bound to it by comparing the declaration head observed INSIDE the
+    # snapshot against the one ``declaration_generation`` reports. Different
+    # heads mean the declaration moved under the probe — refuse to certify.
     conn = sqlite3.connect(str(store_path))
     try:
         conn.execute("PRAGMA query_only=ON")
+        conn.execute("BEGIN")
+        snapshot_head = decl_lineage_and_head_on(conn)[1]
+        generation = declaration_generation(vertex_path)
+        current_fingerprint = generation["review_fingerprint"]
+        if generation["decl_head"] != snapshot_head:
+            return FtsCoverage(
+                missing=False, stale_kinds=frozenset(declared_kinds),
+            )
+
         table_row = conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table' AND name='facts_fts'"
         ).fetchone()
@@ -1732,7 +1764,9 @@ def vertex_search_coverage(vertex_path: Path) -> FtsCoverage:
     finally:
         conn.close()
 
-    return FtsCoverage(missing=False, stale_kinds=stale_kinds)
+    return FtsCoverage(
+        missing=False, stale_kinds=stale_kinds, generation=current_fingerprint,
+    )
 
 
 def _combined_coverage(ast: Any, vertex_path: Path) -> FtsCoverage:
@@ -1969,6 +2003,7 @@ def vertex_search(
     limit: int = 100,
     observer: str | None = None,
     as_of: float | None = None,
+    require_generation: str | None = None,
 ) -> list[dict]:
     """Search fact payloads in a vertex's store via FTS5. STRICTLY READ-ONLY.
 
@@ -2054,6 +2089,17 @@ def vertex_search(
         return []
 
     with StoreReader(store_path) as reader:
+        # Certify-then-query on ONE connection: the generation the caller was
+        # promised must still be the generation this index was built for, and
+        # the check has to share the query's connection or it is just a
+        # narrower race (sol P2-a).
+        if require_generation is not None:
+            current = reader.fts_generation()
+            if current != require_generation:
+                raise FtsGenerationChanged(
+                    f"FTS index generation changed since coverage was probed "
+                    f"(certified {require_generation}, store now {current})"
+                )
         facts = reader.search_facts(
             query, kind=kind, kinds=kinds, since=since, until=until, limit=limit
         )

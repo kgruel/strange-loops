@@ -850,6 +850,7 @@ def search(surface: Surface, query: str, *, vertex_path=None) -> Surface:
     # kind untrustworthy; `stale_kinds` narrows that to just the kinds whose
     # facts postdate the last reindex.
     stale_kinds: set[str] = set()
+    certified_generation: str | None = None
     if vertex_path is not None and indexed:
         coverage_failed = False
         try:
@@ -876,6 +877,7 @@ def search(surface: Surface, query: str, *, vertex_path=None) -> Surface:
             stale_kinds = set(indexed)
         elif coverage is not None:
             stale_kinds = set(indexed) if coverage.missing else set(coverage.stale_kinds)
+            certified_generation = coverage.generation
 
     # FTS covers present ∧ indexed ∧ fresh; substring covers everything else
     # present. Scoping to ``present`` respects the fetch-time --kind narrowing
@@ -893,7 +895,7 @@ def search(surface: Surface, query: str, *, vertex_path=None) -> Surface:
     # is both indexed and fresh.
     if vertex_path is not None and fts_kinds:
         try:
-            from engine import vertex_search
+            from engine import FtsGenerationChanged, vertex_search
 
             # kinds=fts_kinds restricts the SQL-level query BEFORE the limit
             # applies (S2 sol P2) — a post-hoc filter here would be too
@@ -912,7 +914,22 @@ def search(surface: Surface, query: str, *, vertex_path=None) -> Surface:
             # relies on.
             facts = vertex_search(
                 vertex_path, query, kinds=fts_kinds, limit=_FTS_LIMIT + 1,
+                require_generation=certified_generation,
             )
+        except FtsGenerationChanged:
+            # The index was rebuilt under a NEW declaration between the
+            # coverage probe and this query, so the freshness claim no longer
+            # describes what we would be reading. Fail closed exactly like a
+            # probe failure: drop the FTS branch entirely and let every kind
+            # fall to the substring path, with the gap named in Window.stale
+            # (sol P2-a). Swallowing this into `facts = []` would be the
+            # silent-empty defect — these kinds are excluded from the
+            # substring path precisely because they were counted trustworthy.
+            facts = []
+            stale_kinds |= fts_kinds
+            fts_kinds = set()
+            trustworthy = indexed - stale_kinds
+            stale = tuple(sorted((present & indexed) - trustworthy))
         except Exception:
             facts = []
         if len(facts) > _FTS_LIMIT:

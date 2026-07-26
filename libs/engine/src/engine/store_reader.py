@@ -537,6 +537,22 @@ class StoreReader:
         ).fetchall()
         return [self._fact_row_to_dict(r) for r in rows]
 
+    def fts_generation(self) -> str | None:
+        """The declaration fingerprint the FTS index was last built for.
+
+        ``None`` when the index or its state table doesn't exist, or when it
+        predates fingerprint recording. Read on THIS reader's connection so a
+        caller can certify and query without a connection boundary between
+        them (sol P2-a).
+        """
+        try:
+            row = self._conn.execute(
+                "SELECT value FROM fts_state WHERE key='decl_fingerprint'"
+            ).fetchone()
+        except sqlite3.Error:
+            return None
+        return row[0] if row else None
+
     def search_facts(
         self,
         query: str,

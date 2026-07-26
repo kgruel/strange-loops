@@ -2603,3 +2603,88 @@ class TestDiscoverVertexFold:
 
         result = vertex_fold(parent_vertex)
         assert result is not None
+
+
+class TestFtsGenerationBinding:
+    """sol P2-a: the certify→query path must not span declaration generations.
+
+    Coverage used to resolve the declaration fingerprint on one connection,
+    read ``fts_state`` on a second, and let the eventual ``vertex_search`` run
+    on a third — so a declaration event landing between them could let a
+    fingerprint from one generation certify an index built for another.
+    """
+
+    def _seeded(self, tmp_path):
+        from engine import vertex_reindex
+
+        vpath = _create_search_vertex(
+            tmp_path, "test", '  note {\n    search "text"\n  }',
+        )
+        _seed_facts(tmp_path / "store.db", [
+            {"kind": "note", "ts": 1000.0, "payload": {"text": "hello world"}},
+        ])
+        vertex_reindex(vpath)
+        return vpath
+
+    def test_coverage_reports_the_generation_it_certified(self, tmp_path):
+        from engine import declaration_generation, vertex_search_coverage
+
+        vpath = self._seeded(tmp_path)
+        coverage = vertex_search_coverage(vpath)
+        assert coverage.stale_kinds == frozenset()
+        assert coverage.generation is not None
+        # The certified generation IS the current declaration's fingerprint —
+        # not a second hash invented for this path.
+        assert coverage.generation == declaration_generation(
+            vpath)["review_fingerprint"]
+
+    def test_no_generation_certified_when_stale(self, tmp_path):
+        # A probe that certifies nothing must offer nothing to query under.
+        from engine import vertex_search_coverage
+
+        vpath = self._seeded(tmp_path)
+        _create_search_vertex(
+            tmp_path, "test",
+            '  note {\n    search "text"\n  }\n  extra {\n    search "text"\n  }',
+        )
+        coverage = vertex_search_coverage(vpath)
+        assert coverage.stale_kinds
+        assert coverage.generation is None
+
+    def test_search_refuses_a_generation_it_was_not_certified_for(self, tmp_path):
+        """The interleaving: certify, index rebuilt under a NEW declaration,
+        then query. The stale certification must not silently authorize it."""
+        from engine import (
+            FtsGenerationChanged,
+            vertex_reindex,
+            vertex_search,
+            vertex_search_coverage,
+        )
+
+        vpath = self._seeded(tmp_path)
+        coverage = vertex_search_coverage(vpath)
+        certified = coverage.generation
+        assert certified is not None
+
+        # --- concurrent declaration edit + reindex lands here ---
+        _create_search_vertex(
+            tmp_path, "test",
+            '  note {\n    search "text" "title"\n  }',
+        )
+        vertex_reindex(vpath)
+
+        with pytest.raises(FtsGenerationChanged):
+            vertex_search(vpath, "hello", require_generation=certified)
+
+        # Re-probing re-certifies against the new generation, and the query
+        # then runs — the refusal is about the SKEW, not a permanent block.
+        fresh = vertex_search_coverage(vpath).generation
+        assert fresh is not None and fresh != certified
+        assert vertex_search(vpath, "hello", require_generation=fresh)
+
+    def test_unrequested_generation_is_unchecked(self, tmp_path):
+        # Back-compat: callers that pass no generation are unaffected.
+        from engine import vertex_search
+
+        vpath = self._seeded(tmp_path)
+        assert vertex_search(vpath, "hello")

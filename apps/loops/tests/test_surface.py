@@ -840,6 +840,58 @@ def test_search_coverage_probe_failure_fails_closed(tmp_path, monkeypatch):
     assert "decision" in found.window.stale
 
 
+def test_search_generation_skew_fails_closed(tmp_path, monkeypatch):
+    """sol P2-a: the index is rebuilt under a NEW declaration between the
+    coverage probe and the query. The certification no longer describes what
+    would be read, so the FTS branch must drop out and the substring path must
+    cover those kinds — with the gap DISCLOSED, not swallowed into an empty
+    result (the certify-then-query race, same fail-closed posture as a probe
+    failure above).
+    """
+    import engine
+    from engine import FtsGenerationChanged
+    from loops.commands.fetch import fetch_fold
+
+    vpath = _search_vertex(tmp_path)  # reindexed by the fixture
+
+    def _skewed(*_args, **_kwargs):
+        raise FtsGenerationChanged("simulated: reindexed under a new declaration")
+
+    monkeypatch.setattr(engine, "vertex_search", _skewed)
+
+    state = fetch_fold(vpath)
+    found = search(project(state), "JWT", vertex_path=vpath)
+
+    # Still found — via the substring fallback the skew reroutes it through.
+    assert "decision" in {r.kind for r in found.rows}
+    # And named as untrustworthy rather than silently reported as fresh.
+    assert "decision" in found.window.stale
+
+
+def test_search_passes_the_certified_generation(tmp_path, monkeypatch):
+    """The query is issued UNDER the generation coverage certified — the
+    binding is a real argument, not a comment."""
+    import engine
+    from loops.commands.fetch import fetch_fold
+
+    vpath = _search_vertex(tmp_path)
+    certified = engine.vertex_search_coverage(vpath).generation
+    assert certified is not None
+
+    seen = {}
+    real = engine.vertex_search
+
+    def _spy(*args, **kwargs):
+        seen.update(kwargs)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(engine, "vertex_search", _spy)
+
+    state = fetch_fold(vpath)
+    search(project(state), "JWT", vertex_path=vpath)
+    assert seen.get("require_generation") == certified
+
+
 # ---------------------------------------------------------------------------
 # Encoders + source_facts carry
 # ---------------------------------------------------------------------------

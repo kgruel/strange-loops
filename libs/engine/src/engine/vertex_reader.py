@@ -2064,7 +2064,22 @@ def vertex_search(
 
     ast = load_declaration(vertex_path, as_of=as_of)
 
+    # EVERY path below that returns [] is a claim about the store, and a caller
+    # holding a certification is owed verification BEFORE any of them (sol P2-a
+    # round 2). The reported case: a new declaration removes the last `search`
+    # field, so `collect_search_fields` comes back empty and the old code
+    # returned [] — certified-fresh INCOMPLETENESS, indistinguishable from "no
+    # matches". Any condition that makes verification impossible is a mismatch,
+    # not a quiet empty list.
+    def _unverifiable(reason: str) -> None:
+        if require_generation is not None:
+            raise FtsGenerationChanged(
+                f"cannot verify the certified FTS generation "
+                f"({require_generation}): {reason}"
+            )
+
     if ast.combine is not None or ast.discover is not None:
+        _unverifiable("aggregate vertex — no single generation to verify")
         return _combined_search(
             ast, vertex_path, query,
             kind=kind, kinds=kinds, since=since, until=until, limit=limit,
@@ -2072,6 +2087,7 @@ def vertex_search(
         )
 
     if ast.store is None:
+        _unverifiable("vertex declares no store")
         return []
 
     store_path = ast.store
@@ -2079,30 +2095,68 @@ def vertex_search(
         store_path = (vertex_path.parent / store_path).resolve()
 
     if not store_path.exists():
+        _unverifiable("store does not exist")
         return []
 
     base_dir = vertex_path.parent
     from .compiler import collect_search_fields
 
-    search_fields = collect_search_fields(ast, base_dir)
-    if not search_fields:
-        return []
-
     with StoreReader(store_path) as reader:
-        # Certify-then-query on ONE connection: the generation the caller was
-        # promised must still be the generation this index was built for, and
-        # the check has to share the query's connection or it is just a
-        # narrower race (sol P2-a).
-        if require_generation is not None:
+        if require_generation is None:
+            search_fields = collect_search_fields(ast, base_dir)
+            if not search_fields:
+                return []
+            facts = reader.search_facts(
+                query, kind=kind, kinds=kinds, since=since, until=until,
+                limit=limit,
+            )
+            if observer:
+                facts = [
+                    f for f in facts if observer_matches(f["observer"], observer)
+                ]
+            return facts
+
+        # Certify and query inside ONE snapshot. Sharing a connection was not
+        # enough: StoreReader autocommits per statement, so a concurrent commit
+        # could still land between the fingerprint read and the query — same
+        # connection, two snapshots (sol P2-a round 2). BEGIN DEFERRED pins the
+        # snapshot at the first read below and holds it through the query.
+        with reader.snapshot():
+            # TWO things must still hold, because a certification is a claim
+            # about a declaration AND the index built for it, and either can
+            # move alone (sol P2-a round 2):
+            #   * the DECLARATION — a decl edit that removes a `search` field
+            #     changes which kinds are searchable while leaving the built
+            #     index's fingerprint untouched. Checking only the index would
+            #     let that edit shrink the result set silently.
+            #   * the INDEX — a reindex under a new declaration.
+            declared_now = declaration_generation(
+                vertex_path, as_of=as_of,
+            )["review_fingerprint"]
+            if declared_now != require_generation:
+                raise FtsGenerationChanged(
+                    f"declaration changed since coverage was probed "
+                    f"(certified {require_generation}, declaration now "
+                    f"{declared_now})"
+                )
             current = reader.fts_generation()
             if current != require_generation:
                 raise FtsGenerationChanged(
                     f"FTS index generation changed since coverage was probed "
                     f"(certified {require_generation}, store now {current})"
                 )
-        facts = reader.search_facts(
-            query, kind=kind, kinds=kinds, since=since, until=until, limit=limit
-        )
-        if observer:
-            facts = [f for f in facts if observer_matches(f["observer"], observer)]
-        return facts
+            # Resolved INSIDE the verified snapshot: which kinds are searchable
+            # is part of what the generation certifies, so an empty set here is
+            # a genuine property of the certified declaration, not drift.
+            search_fields = collect_search_fields(ast, base_dir)
+            if not search_fields:
+                return []
+            facts = reader.search_facts(
+                query, kind=kind, kinds=kinds, since=since, until=until,
+                limit=limit,
+            )
+            if observer:
+                facts = [
+                    f for f in facts if observer_matches(f["observer"], observer)
+                ]
+            return facts

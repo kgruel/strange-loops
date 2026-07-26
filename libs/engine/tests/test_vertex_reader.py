@@ -2682,6 +2682,107 @@ class TestFtsGenerationBinding:
         assert fresh is not None and fresh != certified
         assert vertex_search(vpath, "hello", require_generation=fresh)
 
+    def test_decl_removing_search_refuses_before_the_empty_return(self, tmp_path):
+        """sol round 2 (i): a new generation removes the last ``search``
+        declaration. ``collect_search_fields`` then comes back empty and the
+        old code returned [] BEFORE the generation check ever ran — certified
+        fresh, silently incomplete, indistinguishable from "no matches"."""
+        from engine import (
+            FtsGenerationChanged,
+            vertex_search,
+            vertex_search_coverage,
+        )
+
+        vpath = self._seeded(tmp_path)
+        certified = vertex_search_coverage(vpath).generation
+        assert certified is not None
+
+        # D2: the kind survives, its `search` declaration does not.
+        _create_search_vertex(
+            tmp_path, "test", '  note {\n    fold { items "by" "text" }\n  }',
+        )
+
+        with pytest.raises(FtsGenerationChanged):
+            vertex_search(vpath, "hello", require_generation=certified)
+
+    def test_unverifiable_conditions_refuse_rather_than_return_empty(
+        self, tmp_path,
+    ):
+        """Every other early return is the same claim: if the certification
+        cannot be checked, say so instead of returning []."""
+        from engine import FtsGenerationChanged, vertex_search
+
+        vpath = self._seeded(tmp_path)
+
+        # Store deleted out from under a live certification.
+        (tmp_path / "store.db").unlink()
+        with pytest.raises(FtsGenerationChanged):
+            vertex_search(vpath, "hello", require_generation="sha256:whatever")
+
+    def test_certify_and_query_share_one_snapshot(self, tmp_path):
+        """sol round 2 (ii): same connection is not the same snapshot.
+
+        A writer commits a new generation on ANOTHER connection in the window
+        between the fingerprint read and the query. With per-statement
+        autocommit that commit becomes visible mid-sequence; inside one
+        BEGIN DEFERRED transaction it cannot. Either outcome is acceptable —
+        refuse, or answer consistently with the certified generation — but a
+        silent empty result is not.
+        """
+        import sqlite3
+
+        from engine import (
+            FtsGenerationChanged,
+            vertex_search,
+            vertex_search_coverage,
+        )
+        from engine.store_reader import StoreReader
+
+        vpath = self._seeded(tmp_path)
+        db = tmp_path / "store.db"
+        certified = vertex_search_coverage(vpath).generation
+        assert certified is not None
+
+        # Land the competing commit exactly between certify and query.
+        real_fts_generation = StoreReader.fts_generation
+        landed = {"done": False}
+
+        def fts_generation_then_write(self):
+            value = real_fts_generation(self)
+            if not landed["done"]:
+                landed["done"] = True
+                w = sqlite3.connect(str(db), timeout=0.2)
+                try:
+                    w.execute(
+                        "UPDATE fts_state SET value = ? "
+                        "WHERE key = 'decl_fingerprint'",
+                        ("sha256:committed-by-a-concurrent-writer",),
+                    )
+                    w.commit()
+                except sqlite3.OperationalError:
+                    # The held read transaction locked the writer out — the
+                    # snapshot doing exactly its job. Nothing to observe.
+                    pass
+                finally:
+                    w.close()
+            return value
+
+        monkeypatch = pytest.MonkeyPatch()
+        monkeypatch.setattr(StoreReader, "fts_generation", fts_generation_then_write)
+        try:
+            try:
+                facts = vertex_search(vpath, "hello", require_generation=certified)
+            except FtsGenerationChanged:
+                return  # refused — honest
+            # Otherwise the snapshot held: the answer is the certified
+            # generation's, complete rather than silently empty.
+            assert facts, (
+                "queried under a snapshot that saw the concurrent commit and "
+                "returned nothing — the silent-empty defect"
+            )
+        finally:
+            monkeypatch.undo()
+
     def test_unrequested_generation_is_unchecked(self, tmp_path):
         # Back-compat: callers that pass no generation are unaffected.
         from engine import vertex_search

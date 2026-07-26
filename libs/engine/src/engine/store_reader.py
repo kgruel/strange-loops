@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from collections.abc import Iterable
+from contextlib import contextmanager
+from collections.abc import Iterable, Iterator
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -536,6 +537,24 @@ class StoreReader:
             (kind, n),
         ).fetchall()
         return [self._fact_row_to_dict(r) for r in rows]
+
+    @contextmanager
+    def snapshot(self) -> "Iterator[StoreReader]":
+        """Pin ONE read snapshot across several reads on this connection.
+
+        ``BEGIN DEFERRED`` takes the snapshot at the first read and holds it
+        until the transaction ends, so a certify-then-query pair observes a
+        single consistent state. Without it, sharing a connection is not
+        sharing a snapshot — each statement autocommits and a concurrent
+        writer can land between them (sol P2-a round 2). The reader is
+        query_only, so the transaction always ends in rollback; there is
+        nothing to commit.
+        """
+        self._conn.execute("BEGIN DEFERRED")
+        try:
+            yield self
+        finally:
+            self._conn.rollback()
 
     def fts_generation(self) -> str | None:
         """The declaration fingerprint the FTS index was last built for.

@@ -285,6 +285,9 @@ edge-declaration candidates. See decision:architecture/typed-edges-overlay-defau
 ## Conventions
 
 - Immutable by default — frozen dataclasses, pure functions
+- Review-established invariants become structural, construction-first —
+  see `docs/RATCHETS.md` (dissolve into the substrate before writing a
+  detection rule; detection only at ambient-authority boundaries)
 - Cross-lib imports follow the DAG in `tests/test_architecture.py`
   (`_LIB_ALLOWED_RUNTIME`) — engine→{lang,atoms}, store→{engine},
   custody→{sign,engine}; everything else is forbidden. The signing domain

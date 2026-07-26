@@ -471,3 +471,52 @@ def test_domain_constants_confined_to_custody():
         "import TICK_DOMAIN/FACT_DOMAIN from custody instead:\n"
         + "\n".join(violations)
     )
+
+
+# ---------------------------------------------------------------------------
+# Rule 9: every resolve_local_vertex caller handles the ambiguity refusal
+# ---------------------------------------------------------------------------
+
+#: Modules allowed to call ``resolve_local_vertex`` without translating
+#: ``AmbiguousLocalVertex`` into a user-facing refusal. SHRINK-ONLY: adding an
+#: entry means a verb-first path can resolve an ambiguous local tier without
+#: telling the user which store it picked — the exact defect
+#: friction:find-local-vertex-alphabetical-pick named. Each entry needs a reason.
+_AMBIGUITY_GATE_EXEMPT = {
+    # Definition site — it RAISES the error; nothing to translate.
+    "apps/loops/src/loops/commands/identity.py",
+}
+
+
+def test_resolve_local_vertex_callers_handle_ambiguity():
+    """A caller that accepts "no vertex named" must refuse, not guess.
+
+    ``resolve_local_vertex`` refuses by default (raises ``AmbiguousLocalVertex``)
+    so an unhandled caller fails loudly rather than writing to whichever store
+    sorts first. This ratchet pins the next layer: a module that calls it must
+    also NAME the refusal — either catching ``AmbiguousLocalVertex`` or
+    rendering ``ambiguous_local_vertex_refusal`` — so the user gets the
+    teaching message and the command's own exit code, not a traceback.
+    """
+    for rel in sorted(_AMBIGUITY_GATE_EXEMPT):
+        assert (REPO_ROOT / rel).exists(), f"Stale exception: {rel}"
+
+    violations = []
+    for py_file in _src_py_files(REPO_ROOT / "apps" / "loops"):
+        text = py_file.read_text()
+        if "resolve_local_vertex" not in text:
+            continue
+        if _rel(py_file) in _AMBIGUITY_GATE_EXEMPT:
+            continue
+        if "AmbiguousLocalVertex" in text or "ambiguous_local_vertex_refusal" in text:
+            continue
+        violations.append(
+            f"  {_rel(py_file)} — calls resolve_local_vertex without handling "
+            "AmbiguousLocalVertex"
+        )
+
+    assert not violations, (
+        "Ambiguous local-vertex resolution must refuse with a teaching "
+        "message, never guess (see _AMBIGUITY_GATE_EXEMPT):\n"
+        + "\n".join(violations)
+    )

@@ -34,6 +34,22 @@ def _run_stream(argv: list[str], *, vertex_path: Path | None = None, observer: s
     pre.add_argument("--id", default=None, dest="fact_id")
     known, rest = pre.parse_known_args(argv)
 
+    # Ambiguity gate BEFORE run_cli: fetch() resolves the local vertex lazily,
+    # deep inside the render loop where there is no rc to return, so the refusal
+    # has to happen here — reading the alphabetically-first store is the same
+    # silent mis-resolution as writing to it (sol P1-b).
+    if vertex_path is None:
+        from loops.commands.resolve import ambiguous_local_vertex_refusal
+
+        first = getattr(known, "vertex_name", None)
+        if first is None or _resolve_vertex_for_dispatch(first) is None:
+            refusal = ambiguous_local_vertex_refusal(
+                "read --facts", "sl read <vertex> --facts ..."
+            )
+            if refusal is not None:
+                _err(refusal)
+                return 2
+
     # Render function resolved lazily — vertex_path may not be known until fetch()
     resolved_render_fn = None
 

@@ -39,6 +39,28 @@ class VertexParseError(LoopsError):
         super().__init__(f"Invalid vertex {path}: {cause}")
 
 
+class AmbiguousLocalVertex(LoopsError):
+    """Local resolution would have to GUESS which instance vertex to use.
+
+    Raised by ``resolve_local_vertex`` — the shared no-vertex-named
+    chokepoint — when the local tier holds more than one instance vertex.
+    Refusing is the default so a verb added later inherits it: the worst
+    case for an unhandled caller is a loud error, never a silent write to
+    whichever store sorted first (friction:find-local-vertex-alphabetical-pick).
+
+    Callers translate it into their own rc-2 teaching message via
+    ``resolve.ambiguous_local_vertex_refusal(command, form)``.
+    """
+
+    def __init__(self, candidates: list[Path]):
+        self.candidates = candidates
+        names = ", ".join(p.stem or p.parent.name for p in candidates)
+        super().__init__(
+            f"{len(candidates)} local vertices and none named — refusing to "
+            f"guess ({names})"
+        )
+
+
 class ResolutionFailed(LoopsError):
     """A vertex name could not be resolved to any path."""
 

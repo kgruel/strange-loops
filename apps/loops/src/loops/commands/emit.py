@@ -1030,6 +1030,27 @@ def _build_emit_parser(*, prog: str, add_help: bool = True) -> argparse.Argument
     return parser
 
 
+def _close_local_vertex(rep) -> "Path | None":
+    """Local vertex for `sl close` with no vertex named, or None after refusing.
+
+    `sl close thread x` writes a resolution fact — an ambiguous local tier
+    would land it in whichever store sorts first (sol P1-b). FileNotFoundError
+    still propagates as before; only the ambiguity is translated here.
+    """
+    from loops.commands.identity import resolve_local_vertex
+    from loops.commands.resolve import ambiguous_local_vertex_refusal
+    from loops.errors import AmbiguousLocalVertex
+
+    try:
+        return resolve_local_vertex()
+    except AmbiguousLocalVertex:
+        rep.err(
+            ambiguous_local_vertex_refusal("close", "sl close <vertex> <kind> <name>")
+            or ""
+        )
+        return None
+
+
 def _run_close(
     argv: list[str],
     *,
@@ -1080,9 +1101,13 @@ def _run_close(
                     args.message = args.name
                 args.name = args.kind
                 args.kind = vname
-                vertex_path = resolve_local_vertex()
+                vertex_path = _close_local_vertex(rep)
+                if vertex_path is None:
+                    return 2
         else:
-            vertex_path = resolve_local_vertex()
+            vertex_path = _close_local_vertex(rep)
+            if vertex_path is None:
+                return 2
 
     # Reserved declaration namespace (SPEC §9.2): close emits a fact of
     # ``args.kind`` — refuse the ``_decl.*` namespace here too (after the

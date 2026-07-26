@@ -136,6 +136,59 @@ class TestRefusal:
         assert ambiguous_local_vertex_refusal("cite", "f") is None
 
 
+class TestSharedChokepoint:
+    """Verbs that reach the local tier through ``resolve_local_vertex``.
+
+    The first pass gated four call sites by hand and asserted these were
+    "gated upstream at their own verbs" — wrong: sol reproduced a wrong-store
+    write with `sl close thread x` (P1-b). The chokepoint now refuses by
+    default and each verb translates the refusal.
+    """
+
+    def test_resolve_local_vertex_raises(self, multi):
+        from loops.commands.identity import resolve_local_vertex
+        from loops.errors import AmbiguousLocalVertex
+
+        with pytest.raises(AmbiguousLocalVertex) as exc:
+            resolve_local_vertex()
+        assert len(exc.value.candidates) == 2
+
+    def test_close_refuses(self, multi, capsys):
+        # sol's repro: `sl close thread x` wrote its resolution fact into
+        # whichever store sorted first.
+        from loops.commands.emit import _run_close
+
+        rc = _run_close(["thread", "x"])
+        assert rc == 2
+        captured = capsys.readouterr()
+        assert "refusing to guess" in captured.out + captured.err
+        assert not list(multi.parent.glob("*.db"))
+
+    def test_facts_stream_refuses(self, multi, capsys):
+        from loops.commands.stream import _run_stream
+
+        rc = _run_stream([])
+        assert rc == 2
+        captured = capsys.readouterr()
+        assert "refusing to guess" in captured.out + captured.err
+
+    def test_ticks_refuses(self, multi, capsys):
+        from loops.commands.ticks import _run_ticks
+
+        rc = _run_ticks([])
+        assert rc == 2
+        captured = capsys.readouterr()
+        assert "refusing to guess" in captured.out + captured.err
+
+    def test_orient_refuses(self, multi):
+        from loops.cli.views import orient as orient_view
+
+        reporter = BufferReporter()
+        rc = orient_view.run([], _ctx(reporter))
+        assert rc == 2
+        assert "sl orient <vertex>" in reporter.err_text
+
+
 class TestUnchangedPaths:
     def test_single_vertex_cite_still_resolves(self, single):
         reporter = BufferReporter()
@@ -145,6 +198,11 @@ class TestUnchangedPaths:
     def test_single_vertex_read_still_folds(self, single):
         reporter = BufferReporter()
         assert read_view.run([], _ctx(reporter)) == 0
+
+    def test_single_vertex_close_still_resolves(self, single):
+        from loops.commands.identity import resolve_local_vertex
+
+        assert resolve_local_vertex() == single
 
     def test_explicit_vertex_bypasses(self, multi):
         # Naming the vertex removes the ambiguity — the write lands.

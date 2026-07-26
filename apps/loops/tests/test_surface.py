@@ -1019,6 +1019,56 @@ def test_dataclasses_are_frozen():
         row.salience = 99  # type: ignore
 
 
+class TestJudgmentVocabulary:
+    """The named cutoffs the read path shares, so a call site imports the
+    judgment instead of re-deriving it (010-wave fork consolidation)."""
+
+    def test_attended_is_the_boundary_budget_enforces(self):
+        from loops.surface import SALIENCE_ATTENDED_MIN, is_attended
+
+        assert SALIENCE_ATTENDED_MIN == 2
+        # salience = n + inbound, so 1 is a single bare emission: not attended.
+        assert not is_attended(0)
+        assert not is_attended(1)
+        assert is_attended(2)
+        assert is_attended(9)
+
+    def test_attended_agrees_with_budgets_salience_window(self):
+        """The predicate and the transform must not drift apart."""
+        from loops.surface import is_attended
+
+        surface = project(_byfold_state(
+            _decision("a", n=1), _decision("b", n=2), _decision("c", n=5),
+        ))
+        expected = {r.key for r in surface.rows if is_attended(r.salience)}
+        assert {r.key for r in budget(surface, salience_window=True).rows} == expected
+
+    def test_stale_after_a_week_exclusive_of_the_boundary(self):
+        from loops.surface import STALE_AFTER_SECS, is_stale
+
+        assert STALE_AFTER_SECS == 7 * 86400
+        now = 1_700_000_000.0
+        assert not is_stale(now, now)
+        assert not is_stale(now - 86400, now)
+        assert not is_stale(now - STALE_AFTER_SECS, now)   # exactly 7d: not yet
+        assert is_stale(now - STALE_AFTER_SECS - 1, now)
+        assert is_stale(now - 30 * 86400, now)
+
+    def test_missing_ts_is_not_stale(self):
+        """Absence of a timestamp is not evidence of age — both lens forks this
+        replaces skipped ts=None rather than counting them stale."""
+        from loops.surface import is_stale
+
+        assert not is_stale(None, 1_700_000_000.0)
+
+    def test_stale_reads_the_clock_the_caller_passes(self):
+        """No wall-clock read inside the predicate — surface stays pure."""
+        from loops.surface import is_stale
+
+        assert is_stale(0.0, 8 * 86400)
+        assert not is_stale(0.0, 6 * 86400)
+
+
 class TestTierAssignment:
     """Rail tiers — quantile buckets over the projected population
     (decision:design/salience-tier-scope-vertex, default dial 5a=A)."""

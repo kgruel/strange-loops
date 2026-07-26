@@ -16,6 +16,9 @@ Vocabulary contract (decision:design/spine-options-ratified):
 - ``stamp``      ``YYYY-MM-DD HH:MM`` — greppable absolute (piped/agent).
 - ``full_iso``   ISO seconds — FULL zoom and the piped ledger's ISO column.
 - ``duration``   ``45s`` / ``5m`` / ``2h30m`` / ``3d`` — window spans.
+- ``duration_secs`` the same form from a raw second count, for spans that
+                 arrive already computed (cadence intervals) with no two
+                 endpoints to pass.
 
 All accept the timestamp shapes that circulate in fetch dicts (ISO
 string, datetime, epoch int/float); naive datetimes are assumed UTC.
@@ -136,7 +139,17 @@ def full_iso(ts: object) -> str:
 
 def duration(start: datetime, end: datetime) -> str:
     """Human-readable span between two datetimes: 45s / 5m / 2h30m / 3d."""
-    secs = int((ensure_utc(end) - ensure_utc(start)).total_seconds())
+    return duration_secs((ensure_utc(end) - ensure_utc(start)).total_seconds())
+
+
+def duration_secs(seconds: float) -> str:
+    """The same span form from a raw second count — ``duration``'s core.
+
+    Spans that arrive already reduced (a declared cadence interval, an elapsed
+    counter) have no two endpoints to hand :func:`duration`; they get the one
+    vocabulary here instead of a local ladder.
+    """
+    secs = int(seconds)
     if secs < 60:
         return f"{secs}s"
     if secs < 3600:

@@ -1,6 +1,7 @@
 """Tests for commands/store.py helper functions."""
 
-from loops.commands.store import _bucket_timestamps, _sparkline_str
+from loops.commands.store import _bucket_timestamps
+from loops.lenses._statview import spark
 
 
 class TestBucketTimestamps:
@@ -28,19 +29,45 @@ class TestBucketTimestamps:
         assert sum(buckets) == 2
 
 
-class TestSparkline:
-    def test_basic(self):
-        result = _sparkline_str([0, 1, 2, 3, 4])
+class TestBucketedSpark:
+    """The store rollup's sparkline is ``_bucket_timestamps`` composed with the
+    canonical ``_statview.spark`` — store.py holds no glyph ladder of its own
+    (the deleted ``_sparkline_str`` fork). ``spark``'s own contract is asserted
+    in ``TestSpark`` below; these cover the seam, including the float bucket
+    counts spark has to accept from this caller."""
+
+    def test_bucketed_counts_render(self):
+        buckets = _bucket_timestamps([10.0, 20.0, 30.0, 40.0, 50.0], width=5)
+        result = spark(buckets)
         assert len(result) == 5
-        assert isinstance(result, str)
 
+    def test_empty_bucketing_renders_empty(self):
+        assert spark(_bucket_timestamps([], width=8)) == ""
+
+
+class TestSpark:
     def test_empty(self):
-        assert _sparkline_str([]) == ""
+        assert spark([]) == ""
 
-    def test_all_zeros(self):
-        result = _sparkline_str([0, 0, 0])
-        assert len(result) == 3
+    def test_all_zero_reads_as_dim_baseline(self):
+        assert spark([0, 0, 0]) == "···"
 
-    def test_uniform(self):
-        result = _sparkline_str([5, 5, 5])
-        assert len(result) == 3
+    def test_uniform_is_flat_at_max(self):
+        assert spark([5, 5, 5]) == "███"
+
+    def test_ascending_ends_at_max(self):
+        result = spark([0, 1, 2, 3])
+        assert len(result) == 4
+        assert result[0] == "·"      # zero → visible gap, not blank
+        assert result[-1] == "█"
+
+    def test_small_nonzero_bucket_is_never_blank(self):
+        """The property that made spark canonical: a bucket with real activity
+        renders as a glyph however small its share of the max."""
+        result = spark([1, 100])
+        assert result[0] not in (" ", "·")
+        assert " " not in result
+
+    def test_length_matches_input(self):
+        for n in (1, 5, 10, 20):
+            assert len(spark(list(range(n)))) == n

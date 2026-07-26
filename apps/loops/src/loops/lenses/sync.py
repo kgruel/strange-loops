@@ -1,34 +1,10 @@
 """Sync lens — render SyncResult showing ran, skipped, errors, and fact counts."""
 from __future__ import annotations
 
-import time
-
 from painted import Block, Style, Zoom, join_vertical
 
+from ._grammar import duration_secs, recency
 from .run import _run_ticks_view
-
-
-def _format_ago(epoch_ts: float) -> str:
-    """Format an epoch timestamp as a human-readable 'ago' string."""
-    delta = time.time() - epoch_ts
-    if delta < 60:
-        return f"{int(delta)}s ago"
-    if delta < 3600:
-        return f"{int(delta / 60)}m ago"
-    if delta < 86400:
-        return f"{int(delta / 3600)}h ago"
-    return f"{int(delta / 86400)}d ago"
-
-
-def _format_interval(seconds: float) -> str:
-    """Format a cadence interval as a compact human string."""
-    if seconds < 60:
-        return f"{int(seconds)}s"
-    if seconds < 3600:
-        return f"{int(seconds / 60)}m"
-    if seconds < 86400:
-        return f"{int(seconds / 3600)}h"
-    return f"{int(seconds / 86400)}d"
 
 
 def _format_skip(skip: dict) -> str:
@@ -38,9 +14,9 @@ def _format_skip(skip: dict) -> str:
     interval = skip.get("cadence_interval")
 
     if last_ts is not None and interval is not None:
-        return f"{kind}: fresh (last run {_format_ago(last_ts)}, cadence {_format_interval(interval)})"
+        return f"{kind}: fresh (last run {recency(last_ts)}, cadence {duration_secs(interval)})"
     if last_ts is not None:
-        return f"{kind}: fresh (last run {_format_ago(last_ts)})"
+        return f"{kind}: fresh (last run {recency(last_ts)})"
     return kind
 
 

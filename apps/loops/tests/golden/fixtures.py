@@ -636,10 +636,9 @@ SAMPLE_TICKS_ONTOLOGY_NOTICE = {
 }
 
 # ── sync: instance vertex (ran/skipped/errors/ticks) ─────────────────────────
-# _format_ago (loops.lenses.sync) reads time.time() directly with NO calendar
-# cutover (unlike _grammar.recency) — tests MUST freeze loops.lenses.sync.time
-# .time, unlike every other fixture in this module (old timestamps alone don't
-# make this one deterministic).
+# Skip lines render ages through _grammar.recency, which reads the wall clock —
+# tests MUST freeze loops.lenses._grammar.time.time, unlike every other fixture
+# in this module (old timestamps alone don't make this one deterministic).
 #
 # One `ran` kind is deliberately long enough that the rendered "Ran: ..." line
 # exceeds 80 columns: sync_view's rows use Block.text(..., width=width) with

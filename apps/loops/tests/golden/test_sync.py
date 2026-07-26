@@ -9,9 +9,11 @@ width=None already, per the run_cli offered-width ratchet in
 locked here so a future refactor can't silently reintroduce a hardcoded
 width for either register.
 
-``_format_ago`` (this lens, not ``_grammar``) reads ``time.time()`` directly
-with NO calendar cutover — unlike every other golden fixture in this suite,
-old timestamps alone do not make it deterministic. The clock is frozen here.
+Skip lines render ages through ``_grammar.recency``, which reads the wall
+clock, so old fixture timestamps alone do not make this deterministic — the
+clock is pinned below, at the same ``_grammar`` seam ``test_grammar_parity``
+pins. (Before the 010 fork consolidation the lens carried its own
+``_format_ago``/``_format_interval`` ladder and the pin was lens-local.)
 """
 from __future__ import annotations
 
@@ -29,13 +31,13 @@ from .fixtures import (
 from .helpers import block_to_text
 
 # A few minutes after the freshest "skipped" timestamp in the fixtures, so
-# _format_ago renders stable, small, positive "Nm ago" spans.
+# recency() renders stable, small, positive "Nm" spans.
 _FIXED_NOW = REF_TS + 300
 
 
 @pytest.fixture(autouse=True)
 def _pin_clock(monkeypatch):
-    monkeypatch.setattr("loops.lenses.sync.time.time", lambda: _FIXED_NOW)
+    monkeypatch.setattr("loops.lenses._grammar.time.time", lambda: _FIXED_NOW)
 
 
 @pytest.mark.parametrize("zoom", list(Zoom), ids=lambda z: z.name)

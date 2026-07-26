@@ -16,6 +16,7 @@ never on ``width`` (decision:design/presentation-register-keys-on-channel).
 """
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import datetime, timezone
 
 from painted import (
@@ -56,14 +57,20 @@ _BAR_EMPTY = "░"
 # ---------------------------------------------------------------------------
 
 
-def spark(values: list[int]) -> str:
+def spark(values: Sequence[float]) -> str:
     """8-level density sparkline over ``values`` (oldest→newest).
 
     Per-series normalized to its own max, so the glyph shows *shape* (recent
     momentum), not absolute volume. A bucket with zero activity renders as a
     dim baseline ``·`` so gaps stay visible; an all-zero series (a kind dormant
     in the window) reads as a flat ``·`` row — the honest "no recent activity"
-    signal.
+    signal. Every NON-zero bucket rounds *up* to at least ``▁``, so activity is
+    never rendered as blank — the property that made this the canonical form
+    over ``commands/store.py``'s deleted ``_sparkline_str``, whose floor over a
+    space-first alphabet painted small-but-real buckets as absence.
+
+    Counts arrive as ints from the ls descent and as floats from the store
+    tick bucketer; both are accepted rather than forcing a cast at one caller.
     """
     if not values:
         return ""

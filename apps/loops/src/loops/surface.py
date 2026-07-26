@@ -522,6 +522,63 @@ def _address(kind: str, key: str | None, item_id: str | None) -> str:
     return f"{kind}/"
 
 
+# ---------------------------------------------------------------------------
+# Judgment vocabulary — the named cutoffs the read path shares
+# ---------------------------------------------------------------------------
+# Bare comparisons against salience and against age were the two judgments most
+# often re-derived at a call site rather than imported (inventory:
+# docs/scratch/010-wave/primitives-grounding.md §4). They live here, beside the
+# tier quantiles, because tier belongs to the same family: all three answer
+# "does this row deserve the reader's attention", and surface.py is the leaf
+# every lens may import (the reverse is forbidden — see the module docstring).
+
+
+#: Salience floor for *attended* — re-emitted or cited at least once.
+#: ``salience = n + inbound`` (materialized in ``project``), so a single bare
+#: emission with no inbound refs scores exactly 1, and anything at or above 2
+#: has drawn attention beyond its own first emit. One cutoff, two consequences:
+#: ``budget(salience_window=True)`` DROPS the rows below it, while the session
+#: lenses withhold an item's BODY below it. Those two sites wrote the same
+#: integer boundary two ways (``> 1`` here, ``>= 2`` there) — not drifted
+#: values, one judgment spelled twice.
+SALIENCE_ATTENDED_MIN = 2
+
+
+def is_attended(salience: int) -> bool:
+    """Has this entity drawn attention beyond its own first emission?"""
+    return salience >= SALIENCE_ATTENDED_MIN
+
+
+#: Age past which an open work item reads as stale. Structural, not per-kind —
+#: any kind carrying a status field participates. Clock-derived: the same store
+#: read at a different time gives a different answer.
+#:
+#: INTERIM, and named as such. Per ``decision:design/grammar-domain-neutrality``
+#: the ⊘ overlay's end state is *aged-while-open per the kind's lifecycle
+#: declaration*, late-bound and retroactive — a declared cutoff, not a constant
+#: compiled into the read path. This is the pre-declaration form: one home for
+#: the hardcoded 7d instead of a literal per lens, so the declaration has a
+#: single site to replace.
+STALE_AFTER_SECS = 7 * 86400
+
+
+def is_stale(ts: float | None, now: float) -> bool:
+    """Is an item last touched at *ts* stale as of *now*? Epoch seconds both.
+
+    Epoch seconds is the shape ``FoldItem.ts`` and ``Row.ts`` already carry, so
+    no timestamp coercion belongs here — and surface.py is a leaf, so it cannot
+    reach ``lenses._grammar.coerce_dt`` even if it wanted to.
+
+    A missing ``ts`` is NOT stale: absence of a timestamp is not evidence of
+    age. Exactly ``STALE_AFTER_SECS`` old is not yet stale (strict ``>``).
+    Status is deliberately not an input — *which* statuses are eligible to go
+    stale is a separate, differently-configured judgment.
+    """
+    if ts is None:
+        return False
+    return (now - ts) > STALE_AFTER_SECS
+
+
 def _tier_thresholds(saliences: list[int]) -> tuple[int, int] | None:
     """Quantile thresholds (q90, q50) for rail-tier assignment.
 
@@ -1023,7 +1080,7 @@ def budget(
 
     - ``last=N``  → newest N by ts (the confirm primitive; ts-desc then take N).
     - ``limit=N`` → top N by salience (the agent's "just the head" primitive).
-    - ``salience_window`` → keep only salience>1 (fallback: top-1) — the
+    - ``salience_window`` → keep only *attended* rows (fallback: top-1) — the
       namespace-windowing policy, available explicitly to an agent.
 
     last and limit are mutually ordered: ``last`` wins (it reorders by recency);
@@ -1033,7 +1090,7 @@ def budget(
     limited_by = surface.window.limited_by
 
     if salience_window and len(rows) > 0:
-        kept = [r for r in rows if r.salience > 1]
+        kept = [r for r in rows if is_attended(r.salience)]
         rows = kept if kept else rows[:1]
         limited_by = "salience"
 

@@ -7,7 +7,7 @@ import pytest
 
 from painted import Zoom
 from painted.views import ListState
-from loops.commands.store import _bucket_timestamps, _sparkline_str
+from loops.commands.store import _bucket_timestamps
 from loops.lenses.store import store_view, stats_view, tick_chain_view
 from loops.lenses._grammar import recency
 from loops.tui.store_app import FidelityState, StoreExplorerState, _payload_one_liner
@@ -123,10 +123,12 @@ class TestRelativeTime:
         assert recency("not a datetime") == ""
 
 
-# ── Sparkline tests ─────────────────────────────────────────
+# ── Tick bucketing tests ─────────────────────────────────────────
+# The glyph mapping is _statview.spark's (canonical); only the bucketer is
+# store-local, so only the bucketer is tested here.
 
 
-class TestSparkline:
+class TestBucketTimestamps:
     def test_bucket_empty(self):
         assert _bucket_timestamps([], 8) == []
 
@@ -151,32 +153,6 @@ class TestSparkline:
 
     def test_bucket_zero_width(self):
         assert _bucket_timestamps([1.0, 2.0], 0) == []
-
-    def test_sparkline_empty(self):
-        assert _sparkline_str([]) == ""
-
-    def test_sparkline_all_zero(self):
-        result = _sparkline_str([0.0, 0.0, 0.0])
-        assert len(result) == 3
-        assert all(c == " " for c in result)
-
-    def test_sparkline_uniform(self):
-        result = _sparkline_str([5.0, 5.0, 5.0])
-        assert len(result) == 3
-        # All same value -> all max char
-        assert result[0] == result[1] == result[2]
-        assert result[0] == "█"
-
-    def test_sparkline_ascending(self):
-        result = _sparkline_str([0.0, 1.0, 2.0, 3.0])
-        assert len(result) == 4
-        # Should be ascending characters
-        assert result[-1] == "█"
-
-    def test_sparkline_length_matches_input(self):
-        for n in [1, 5, 10, 20]:
-            result = _sparkline_str([float(i) for i in range(n)])
-            assert len(result) == n
 
 
 # ── Fidelity drill tests ─────────────────────────────────────────

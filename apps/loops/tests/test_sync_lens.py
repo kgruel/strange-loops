@@ -2,24 +2,46 @@
 
 import time
 
+import pytest
 from painted import Zoom
 
-from loops.lenses.sync import _format_ago, _format_interval, _format_skip, sync_view
+from loops.lenses.sync import _format_skip, sync_view
 
 from .helpers import block_text as _text
 
 
-def test_format_ago():
-    assert _format_ago(time.time() - 30).endswith("s ago")
-    assert _format_ago(time.time() - 300).endswith("m ago")
-    assert _format_ago(time.time() - 7200).endswith("h ago")
-    assert _format_ago(time.time() - 172800).endswith("d ago")
+_NOW = 1_700_000_000.0
 
-def test_format_interval():
-    assert _format_interval(30) == "30s"
-    assert _format_interval(300) == "5m"
-    assert _format_interval(7200) == "2h"
-    assert _format_interval(172800) == "2d"
+
+@pytest.fixture
+def _pin_clock(monkeypatch):
+    """Pin the clock ``recency`` reads. Unpinned, the ages below land exactly ON
+    recency's band boundaries, where the microseconds between the test's
+    ``time.time()`` and recency's own read decide whether 7200s says "2h" or
+    "1h" — flaky by construction, not a property worth asserting."""
+    monkeypatch.setattr("loops.lenses._grammar.time.time", lambda: _NOW)
+
+
+def test_format_skip_speaks_the_shared_time_vocabulary(_pin_clock):
+    """Ages come from ``_grammar.recency``, cadences from ``duration_secs`` —
+    the lens holds no time ladder of its own."""
+    def skip(age, cadence=None):
+        d = {"kind": "m", "last_run_ts": _NOW - age}
+        if cadence is not None:
+            d["cadence_interval"] = cadence
+        return _format_skip(d)
+
+    assert skip(30) == "m: fresh (last run now)"
+    assert skip(300) == "m: fresh (last run 5m)"
+    assert skip(7200) == "m: fresh (last run 2h)"
+    assert skip(172800) == "m: fresh (last run 2d)"
+    # The calendar cutover the deleted lens-local ladder lacked (it said "197d ago").
+    assert skip(197 * 86400) == "m: fresh (last run May 1)"
+
+    assert skip(300, cadence=30) == "m: fresh (last run 5m, cadence 30s)"
+    assert skip(300, cadence=300) == "m: fresh (last run 5m, cadence 5m)"
+    assert skip(300, cadence=7200) == "m: fresh (last run 5m, cadence 2h)"
+    assert skip(300, cadence=172800) == "m: fresh (last run 5m, cadence 2d)"
 
 def test_format_skip_full():
     r = _format_skip({"kind": "metric", "last_run_ts": time.time() - 60, "cadence_interval": 300})

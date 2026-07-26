@@ -8,8 +8,6 @@ import sys
 from pathlib import Path
 from typing import Any
 
-_SPARK_CHARS = " ▁▂▃▄▅▆▇█"
-
 
 def _bucket_timestamps(timestamps: list[float], width: int) -> list[float]:
     """Bucket timestamps into equal-width time bins, return counts per bin.
@@ -33,19 +31,6 @@ def _bucket_timestamps(timestamps: list[float], width: int) -> list[float]:
         idx = max(0, min(idx, width - 1))
         buckets[idx] += 1.0
     return buckets
-
-
-def _sparkline_str(values: list[float]) -> str:
-    """Map bucket counts to sparkline characters."""
-    if not values:
-        return ""
-    mx = max(values)
-    if mx == 0:
-        return " " * len(values)
-    return "".join(
-        _SPARK_CHARS[int(v / mx * (len(_SPARK_CHARS) - 1))]
-        for v in values
-    )
 
 
 def resolve_store_path(file_path: Path) -> Path:
@@ -101,6 +86,8 @@ def make_fetcher(path: Path, zoom: int, *, kind: str | None = None):
     def fetch() -> dict:
         from engine.store_reader import StoreReader
 
+        from ..lenses._statview import spark
+
         store_path = resolve_store_path(path)
         with StoreReader(store_path) as reader:
             data = reader.summary(include_internal=kind is not None)
@@ -114,7 +101,7 @@ def make_fetcher(path: Path, zoom: int, *, kind: str | None = None):
                 for name, info in data["ticks"]["names"].items():
                     ts_list = reader.tick_timestamps(name, 50)
                     buckets = _bucket_timestamps(ts_list, 8)
-                    info["sparkline"] = _sparkline_str(buckets)
+                    info["sparkline"] = spark(buckets)
                     # Extract payload key names from latest tick
                     recent = reader.recent_ticks(name, 1)
                     info["payload_keys"] = (

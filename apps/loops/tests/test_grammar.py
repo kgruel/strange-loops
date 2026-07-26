@@ -12,6 +12,7 @@ from loops.lenses._grammar import (
     coerce_dt,
     date_key,
     duration,
+    duration_secs,
     full_iso,
     recency,
     short_date,
@@ -97,6 +98,22 @@ class TestDuration:
         assert duration(self.START, self.START + timedelta(hours=2)) == "2h"
         assert duration(self.START, self.START + timedelta(days=3, hours=4)) == "3d4h"
         assert duration(self.START, self.START + timedelta(days=2)) == "2d"
+
+    def test_secs_form_matches_the_two_endpoint_form(self):
+        """``duration`` delegates to ``duration_secs`` — one ladder, two entries."""
+        for secs in (0, 30, 59, 60, 300, 3600, 7200, 12600, 86400, 172800, 273600):
+            assert duration_secs(secs) == duration(
+                self.START, self.START + timedelta(seconds=secs),
+            )
+
+    def test_secs_ladder(self):
+        assert duration_secs(30) == "30s"
+        assert duration_secs(300) == "5m"
+        assert duration_secs(3600) == "1h"
+        assert duration_secs(5400) == "1h30m"
+        assert duration_secs(172800) == "2d"
+        # Fractional seconds truncate rather than round up into the next band.
+        assert duration_secs(59.9) == "59s"
 
 
 class TestDateGrouper:

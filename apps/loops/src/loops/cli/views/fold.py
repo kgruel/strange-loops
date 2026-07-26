@@ -1095,6 +1095,16 @@ def _fold_item_ids(sections) -> list[str]:
     return ids
 
 
+def _has_rows(state: Any) -> bool:
+    """Any folded item anywhere in the section tree."""
+    for section in state.sections:
+        if section.items:
+            return True
+        if section.sections and _has_rows(section):
+            return True
+    return False
+
+
 @dataclass(frozen=True)
 class ReviewEvidence:
     """Everything a ``--review`` header claims, captured with the rows it
@@ -1178,6 +1188,23 @@ def _gather_review_evidence(
         vertex_path, kind=kind, key=key, observer=obs,
         at=fold_at, as_of=as_of_ts,
     )
+
+    # UNPINNED head fetch that nonetheless produced rows: head resolution found
+    # no position (typically an uncreated store), but a writer created the
+    # store between that resolution and this fetch — so the review would render
+    # rows while its cut claims the store does not exist (sol P1-a round 2).
+    # Retry ONCE against the store that now exists. A second miss is impossible
+    # for an append-only store: having resolved a position, it cannot go back to
+    # having none, so this cannot spin.
+    if at_position is None and as_of_ts is None and fold_at is None and _has_rows(state):
+        position, review_cursor, cut = witness_address.resolve_review_head_position(
+            vertex_path,
+        )
+        if position is not None:
+            state = fetch_fold(
+                vertex_path, kind=kind, key=key, observer=obs,
+                at=position, as_of=as_of_ts,
+            )
 
     # Per-fact signatures — verbatim from the store column, the ONLY source
     # (the fold path drops them). None on a store-less / aggregate vertex.

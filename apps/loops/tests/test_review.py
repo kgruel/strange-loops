@@ -549,6 +549,88 @@ class TestReviewEvidenceBinding:
             "review_fingerprint"]
         assert header["declaration"]["decl_head"] == expected["decl_head"]
 
+    def test_store_created_mid_read_is_rendered_under_a_real_position(
+        self, tmp_path, monkeypatch
+    ):
+        """sol P1-a round 2: head resolution finds no position (store not yet
+        created), then a writer creates the store before the unpinned fetch —
+        so the review rendered rows while its cut claimed the store did not
+        exist. The retry re-resolves and re-folds pinned."""
+        v = vertex("late").store("./late.db").loop("decision", fold_by("topic"))
+        vpath = tmp_path / "late.vertex"
+        v.write(vpath)
+        db = tmp_path / "late.db"
+        # NB: no store on disk yet — head resolution will find no position.
+
+        import loops.commands.fetch as fetch_mod
+
+        real = fetch_mod.fetch_fold
+        created = {"done": False}
+
+        def fetch_creating_the_store(*args, **kwargs):
+            if not created["done"]:
+                created["done"] = True
+                _empty_store(db)
+                _append(db, "decision", 100.0, topic="a", message="alpha")
+            return real(*args, **kwargs)
+
+        monkeypatch.setattr(fetch_mod, "fetch_fold", fetch_creating_the_store)
+
+        out = _review(vpath)
+        header = out["review"]["header"]
+        facts = out["review"]["facts"]
+
+        assert facts, "precondition: the store was created mid-read and has rows"
+        # Rows rendered ⇒ the disclosure must describe a real position, never
+        # "this vertex's store has not been created yet".
+        assert header["cursor"] is not None, (
+                "rendered rows under a null cursor — the review claims the "
+                "store does not exist while showing its contents"
+            )
+        assert header["cut"]["available"] is True
+        assert max(f["id"] for f in facts) <= header["cursor"]["fact_id"]
+
+    def test_retry_is_bounded(self, tmp_path, monkeypatch):
+        """The retry fires at most once — an append-only store that has
+        resolved a position can never go back to having none, so there is no
+        spin to guard against beyond this."""
+        from loops.cli import witness_address
+        from loops.cli.views import fold as fold_view
+
+        v = vertex("late2").store("./late2.db").loop("decision", fold_by("topic"))
+        vpath = tmp_path / "late2.vertex"
+        v.write(vpath)
+        db = tmp_path / "late2.db"
+
+        calls = {"n": 0}
+        real_resolve = witness_address.resolve_review_head_position
+
+        def counting_resolve(*args, **kwargs):
+            calls["n"] += 1
+            return real_resolve(*args, **kwargs)
+
+        assert fold_view is not None  # the view under test imports this module
+        monkeypatch.setattr(
+            witness_address, "resolve_review_head_position", counting_resolve,
+        )
+
+        import loops.commands.fetch as fetch_mod
+
+        real = fetch_mod.fetch_fold
+        created = {"done": False}
+
+        def fetch_creating_the_store(*args, **kwargs):
+            if not created["done"]:
+                created["done"] = True
+                _empty_store(db)
+                _append(db, "decision", 100.0, topic="a", message="alpha")
+            return real(*args, **kwargs)
+
+        monkeypatch.setattr(fetch_mod, "fetch_fold", fetch_creating_the_store)
+
+        _review(vpath)
+        assert calls["n"] <= 2, f"head re-resolved {calls['n']} times"
+
     def test_evidence_object_carries_every_disclosed_field(self, sealed_vertex):
         """The renderer's header is a projection of ReviewEvidence and nothing
         else — the property Rule 10 enforces structurally."""

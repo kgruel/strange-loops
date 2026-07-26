@@ -675,10 +675,20 @@ def _module_level_aliases(tree: ast.Module) -> dict[str, set[str]]:
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
                 continue
             collected.append(node)
-            for field in ("body", "orelse", "finalbody"):
-                inner = getattr(node, field, None)
-                if isinstance(inner, list):
-                    walk(inner)
+            # Generic: recurse into EVERY statement-list field, including the
+            # bodies of wrapper nodes (ExceptHandler in Try.handlers,
+            # match_case in Match.cases). Enumerating field names by hand is
+            # how `import ... as dg` inside an `except:` escaped this walk
+            # (sol, round 3) — the fix is to stop enumerating.
+            for _field, value in ast.iter_fields(node):
+                if not isinstance(value, list):
+                    continue
+                stmts = [n for n in value if isinstance(n, ast.stmt)]
+                if stmts:
+                    walk(stmts)
+                for wrapper in value:
+                    if isinstance(wrapper, (ast.ExceptHandler, ast.match_case)):
+                        walk(wrapper.body)
 
     walk(tree.body)
     return _alias_bindings(collected)

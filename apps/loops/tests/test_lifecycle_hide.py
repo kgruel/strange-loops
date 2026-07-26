@@ -338,6 +338,37 @@ class TestAcceptanceWalk:
         assert "beta" in out                     # terminal entity present in text
         assert "inactive hidden" not in out       # no hide footer on facts route
 
+    def test_key_filter_preserves_lifecycle_and_edges(self, tmp_path, capsys):
+        # sol P2-b: fetch's --key branch rebuilt FoldSection field by field, so
+        # every field added to the dataclass after that code was written got
+        # dropped — first edge_fields, then lifecycle. Narrowing to the inactive
+        # entity therefore UN-HID it: `--kind task --key beta` returned beta as
+        # if it were active. The scoping flag must not change what the fold
+        # claims about an entity's status.
+        vpath = _write_accept_vertex(tmp_path)
+        _seed_and_deprecate(vpath)
+        _, s = _json_read(capsys, str(vpath), "--kind", "task", "--key", "beta")
+        assert "beta" not in _task_rows(s)
+        assert s["window"]["hidden"] == 1
+        assert s["window"]["limited_by"] == "status"
+        # The declaration survives the filter too — a blanked schema is the
+        # same bug one field over.
+        assert s["schema"]["task"]["lifecycle"] == {
+            "field": "status", "active": ["open", "in-progress"],
+        }
+
+    def test_key_filter_still_narrows(self, tmp_path, capsys):
+        # The filter itself is unaffected: --key alpha keeps alpha, drops the
+        # sibling task, and --all still defeats the hide under a key filter.
+        vpath = _write_accept_vertex(tmp_path)
+        _seed_and_deprecate(vpath)
+        _, s = _json_read(capsys, str(vpath), "--kind", "task", "--key", "alpha")
+        assert set(_task_rows(s)) == {"alpha"}
+        _, shown = _json_read(
+            capsys, str(vpath), "--kind", "task", "--key", "beta", "--all",
+        )
+        assert "beta" in _task_rows(shown)
+
     def test_8_review_is_canonical_full_projection(self, tmp_path, capsys):
         vpath = _write_accept_vertex(tmp_path)
         _seed_and_deprecate(vpath)

@@ -19,6 +19,7 @@ by exact key equality, not by this filter.
 from __future__ import annotations
 
 import re
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -143,7 +144,7 @@ def fetch_fold(
     render-context cursor metadata up front rather than threading a tuple
     return through here).
     """
-    from atoms import FoldSection, FoldState
+    from atoms import FoldSection
     from engine import vertex_fold
     from engine.witness import WitnessFold
 
@@ -170,15 +171,13 @@ def fetch_fold(
                 if _item_matches_key(item, section.key_field, key)
             )
             if matches:
-                filtered.append(FoldSection(
-                    kind=section.kind,
-                    items=matches,
-                    sections=section.sections,
-                    fold_type=section.fold_type,
-                    key_field=section.key_field,
-                    scalars=section.scalars,
-                    preview_fields=section.preview_fields,
-                ))
+                # dataclasses.replace, NOT a field-by-field rebuild: the rebuild
+                # silently dropped every field added to FoldSection after it was
+                # written (edge_fields, then lifecycle — so `--key` un-hid
+                # inactive entities and blanked the schema's edge declarations).
+                # replace() is the ratchet — a new field can never be dropped
+                # here again by omission (sol P2-b).
+                filtered.append(replace(section, items=matches))
                 if section.key_field:
                     for item in matches:
                         key_value = str(item.payload.get(section.key_field, ""))
@@ -193,9 +192,11 @@ def fetch_fold(
             if k in surviving_source_keys
         }
 
-        state = FoldState(
+        # Same reason as the section rebuild above: replace() so a FoldState
+        # field added later (unfolded, walked, …) survives the key filter.
+        state = replace(
+            state,
             sections=tuple(filtered),
-            vertex=state.vertex,
             source_facts=filtered_source_facts,
         )
 

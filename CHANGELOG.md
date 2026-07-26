@@ -1,5 +1,134 @@
 # Changelog
 
+## 0.9.0 — 2026-07-26
+
+The **consumer-evidence wave** (`feat/090-consumer-evidence-wave`): six
+slices scoped from reviewed foreign-observer facts — an external consumer's
+signed report of what this codebase actually did wrong — plus two riders and
+a three-round adversarial review. The through-line is *honor or refuse*: a
+read that cannot answer the question asked says so, rather than answering a
+narrower question silently. Several defects fixed here were the same shape
+in different clothes (a flag silently dropped, a cursor describing content it
+did not contain, a certification outliving what it certified), so the wave
+closes with structural ratchets rather than vigilance.
+
+### Added
+- **atoms: typed `Address(kind, key)` — one resolution contract.** Emit,
+  read, and matching converged on a single self-describing address type
+  instead of three ad-hoc parsers. `Address.readings` returns ALL valid
+  interpretations of an address, ordered primary-first: a colon form
+  (`decision:design/foo`) declares its kind unambiguously and yields one
+  exact reading, while a slash form (`design/foo`) yields two — the
+  kind-qualified reading AND the bare namespaced key — because that
+  ambiguity is genuine and must be preserved rather than guessed. Fixes
+  cross-kind aliasing, key mislifting, and bare-target skipping in one
+  place.
+- **`sl store reindex VERTEX`** — the SOLE writer of the FTS index anywhere
+  in the codebase. Reads never build or refresh it. A full drop+rebuild
+  against the current declaration set, so a newly declared `search` field is
+  fully searchable after one reindex including facts written before the
+  declaration existed. Aggregates recurse per child.
+- **`sl read VERTEX --review`** — the canonical review projection: a
+  deterministic, diffable JSON snapshot of folded state, rows sorted by
+  `(kind, key, id)`, each carrying only emit-derived fields plus its
+  verbatim signature. Read-time derived values (salience, rank) are excluded
+  by construction, so unchanged folded state serializes byte-identically.
+  The header discloses the read's resolved head cursor, seal cut, and
+  declaration generation (a `review_fingerprint` over the effective
+  declaration). Composes with `--kind`/`--key` and `--at`/`--as-of`; refuses
+  everything else by default. Stops short of SPEC §10 — no witness-ordered
+  every-row stream, no JCS byte determinism, no chain — which is gated on
+  GlobalReceiptPosition + loops-go.
+- **`sl read VERTEX --lens graph --edge PREDICATE`** — restrict the graph cut
+  to selected edge predicates (`ref`, any declared typed-edge field,
+  comma-OR). Honored only by the graph lens; refuses elsewhere rather than
+  silently dropping. Graph build-2 also honors `--key` (node projection is
+  sub-scope), carries per-hop predicate labels through chains
+  (`a ─ref→ b ─stakeholder→ c`), adds an SCC/self-loop census, and splits the
+  single `dangling` scalar into three named buckets — `dangling` (resolves
+  nowhere), `filter_excluded` (resolves globally, outside the current scope),
+  and `keyless` (source unaddressable). On the live store the old
+  ~324-conflated "dangling" resolves to 62 genuine plus 262 filter-excluded,
+  and the ref graph is NOT a near-DAG: 40 SCCs (largest 159 nodes) plus 13
+  self-loops.
+- **`lifecycle` declaration + `sl read --all`.** A kind may declare which
+  payload field carries its status and which values are ACTIVE
+  (`lifecycle "status" active="open,in-progress"`); entities outside that set
+  are projected out of the DEFAULT fold view. Whitelist, not blacklist, and
+  fail-open: an entity LACKING the status field is SHOWN, because no claim is
+  not the same as a terminal claim. The hide is projection-only — inactive
+  nodes keep their inbound salience, stay reachable under `--refs`, and are
+  always present in `--review`. `--all` or an explicit `status=` predicate
+  defeats it; `sl validate` warns when a visible entity's edge targets one
+  folded inactive.
+- **Cut provenance on the read path.** A read discloses the seal cut it was
+  taken against — whether the fold is sealed to head, how many facts lie
+  beyond the last seal, and the tick total — in both the rendered header and
+  `--json`.
+
+### Changed
+- **FTS search is strictly read-only.** `vertex_search` and
+  `vertex_search_coverage` never write; the index is built only by the
+  explicit reindex above (closes
+  friction:search-read-mutates-canonical-store, and the aggregation
+  aggravator where reading an aggregate mutated its children). Staleness is
+  DISCLOSED rather than papered over: coverage distinguishes "never declared"
+  from "declared but no index" from "declared, indexed, behind head", and a
+  declaration edit with zero new facts still marks the index stale (the rowid
+  watermark cannot see it; the declaration fingerprint can).
+- **`--refs` walks every ref the graph counts as an edge.** The walk had its
+  own colon-only parser, so a slash ref counted as a graph edge while the
+  walk reported nothing to traverse. It now resolves through
+  `Address.readings` like every other path, walking the union of readings
+  that resolve — the last unconverged resolution site.
+- **Ambiguous local-vertex resolution refuses instead of guessing.** With no
+  vertex named and more than one instance vertex present, `sl cite` / `emit`
+  / `read` / `close` / `seal` / `orient` / `store ticks` now refuse (exit 2)
+  with the candidates listed and the explicit form shown. The tie-break used
+  to be ALPHABETICAL: in this repo a bare `sl cite` wrote to
+  `agent-attestation` while `sl emit project cite` wrote to `project` — same
+  input, two stores, no signal. Single-vertex repos and explicitly named
+  vertices are unaffected.
+
+### Fixed
+- **`--review` disclosure describes the rows it renders.** The head cursor
+  and declaration fingerprint were resolved after the fold's snapshot closed,
+  each on its own connection, so a review could advertise a cursor newer than
+  its rows and pair a fingerprint from one generation with a head from
+  another. The position now resolves FIRST and the fold is taken AT it, so
+  the rows are the prefix the cursor names whatever lands concurrently.
+- **FTS freshness is certified and queried under one generation.** Coverage
+  read the fingerprint, the index state, and the query on three connections;
+  a declaration event in between let a stale index be certified fresh. The
+  probe now reads from one snapshot, and the query verifies the certified
+  generation on the same connection inside one transaction — a mismatch
+  refuses rather than returning rows or a silent empty list.
+- **`--key` no longer alters what the fold claims.** The filter rebuilt each
+  section field by field and silently dropped every field added since that
+  code was written, so narrowing to an inactive entity UN-HID it and blanked
+  the kind's edge declarations.
+- **`--facts` never hides.** The lifecycle hide is fold-view only, so
+  event/lifecycle history stays faithful without `--all`.
+- **`--review` refuses non-composing flags by default** (whitelist, not
+  blacklist — the blacklist form drifted within one wave), and `--edge`
+  refuses an explicit-but-empty selector rather than rendering the full
+  graph.
+- **FTS queries are constrained to trustworthy kinds before the limit
+  applies**, so an untrusted kind's matches cannot crowd a trusted kind's out
+  of the result window.
+- **A coverage probe failure fails closed** — every indexed kind is treated
+  as untrustworthy and routed to the substring fallback with the gap named,
+  rather than being promoted to trustworthy and silently returning nothing.
+
+### Architecture ratchets
+- **Rule 9** enumerates every call site licensed to break a multi-vertex tie
+  arbitrarily, against a shrink-only allowlist; the refusal lives in the
+  resolution primitive itself, so there is no ungated path to reach for.
+- **Rule 10** forbids store I/O anywhere on a disclosure render path,
+  resolving import aliases per lexical scope and walking every reachable
+  function — the shape check that replaces "remember to order the calls
+  correctly", which had already failed twice.
+
 ## 0.8.1 — 2026-07-18
 
 ### Fixed

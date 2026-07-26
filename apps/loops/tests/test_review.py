@@ -590,6 +590,55 @@ class TestReviewEvidenceBinding:
         assert header["cut"]["available"] is True
         assert max(f["id"] for f in facts) <= header["cursor"]["fact_id"]
 
+    def test_retry_rebinds_the_position_for_every_evidence_read(
+        self, tmp_path, monkeypatch
+    ):
+        """sol round 3: the retry pinned the RE-FETCH but not the declaration.
+
+        Observed as fetch_at=[None, POSITION] beside declaration_at=[None] —
+        rows from one position, fingerprint from another, which is the skew
+        P1-a exists to prevent, reintroduced by the fix for its own edge case.
+        Every evidence read must be taken at the same position as the rows.
+        """
+        import engine
+
+        import loops.commands.fetch as fetch_mod
+
+        v = vertex("late3").store("./late3.db").loop("decision", fold_by("topic"))
+        vpath = tmp_path / "late3.vertex"
+        v.write(vpath)
+        db = tmp_path / "late3.db"
+
+        fetch_at: list = []
+        declaration_at: list = []
+
+        real_fetch = fetch_mod.fetch_fold
+        created = {"done": False}
+
+        def recording_fetch(*args, **kwargs):
+            fetch_at.append(kwargs.get("at"))
+            if not created["done"]:
+                created["done"] = True
+                _empty_store(db)
+                _append(db, "decision", 100.0, topic="a", message="alpha")
+            return real_fetch(*args, **kwargs)
+
+        real_decl = engine.declaration_generation
+
+        def recording_decl(*args, **kwargs):
+            declaration_at.append(kwargs.get("at"))
+            return real_decl(*args, **kwargs)
+
+        monkeypatch.setattr(fetch_mod, "fetch_fold", recording_fetch)
+        monkeypatch.setattr(engine, "declaration_generation", recording_decl)
+
+        _review(vpath)
+
+        assert fetch_at[-1] is not None, "precondition: the retry pinned the fold"
+        assert declaration_at, "declaration evidence was never resolved"
+        # The declaration must be resolved at the position the rows came from.
+        assert declaration_at[-1] is fetch_at[-1]
+
     def test_retry_is_bounded(self, tmp_path, monkeypatch):
         """The retry fires at most once — an append-only store that has
         resolved a position can never go back to having none, so there is no

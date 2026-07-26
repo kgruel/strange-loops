@@ -1201,9 +1201,18 @@ def _gather_review_evidence(
             vertex_path,
         )
         if position is not None:
+            # Rebind the ONE variable every evidence read below is taken at.
+            # The first version passed the recovered position straight to the
+            # re-fetch and left `fold_at` at None, so the rows were pinned but
+            # the declaration was still resolved unpinned — fetch_at=POSITION
+            # beside declaration_at=None, which is the generation-skew half of
+            # P1-a reopened by the fix for its other half (sol round 3).
+            # Anything added here that takes `at=` must read `fold_at`, never a
+            # local: that is what keeps one position describing all of it.
+            fold_at = position
             state = fetch_fold(
                 vertex_path, kind=kind, key=key, observer=obs,
-                at=position, as_of=as_of_ts,
+                at=fold_at, as_of=as_of_ts,
             )
 
     # Per-fact signatures — verbatim from the store column, the ONLY source

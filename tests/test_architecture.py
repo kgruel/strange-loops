@@ -526,11 +526,24 @@ def test_resolve_local_vertex_callers_handle_ambiguity():
 # Rule 10: disclosure renderers do no store I/O
 # ---------------------------------------------------------------------------
 
-#: Functions that RENDER a disclosure: they may only consume evidence gathered
-#: elsewhere. Mapped to the gatherer that is allowed to do the I/O for them.
-_DISCLOSURE_RENDERERS = {
+#: The disclosure render paths this rule guards. ``entry`` is the renderer;
+#: ``licensed`` names the functions in that path that ARE allowed to touch the
+#: store — the evidence gatherers. SHRINK-ONLY: every addition to ``licensed``
+#: is one more place a disclosure anchor can be resolved away from the rows it
+#: describes, which is the defect this rule exists to prevent.
+#:
+#: Scope note (sol round 2): the walk covers EVERY function reachable from the
+#: entry point, not just the entry point itself — moving a store read one call
+#: deeper was a working evasion of the first version. What the rule cannot
+#: check is the licensed gatherer's own correctness: that its reads are pinned
+#: to the position it discloses is pinned by behavior instead, in
+#: ``test_review.TestReviewEvidenceBinding`` (cursor == rendered rows under a
+#: concurrent write). Structure guards the shape; those tests guard the
+#: content.
+_DISCLOSURE_RENDER_PATHS = {
     "apps/loops/src/loops/cli/views/fold.py": {
-        "_run_review": "_gather_review_evidence",
+        "entry": "_run_review",
+        "licensed": {"_gather_review_evidence"},
     },
 }
 
@@ -555,19 +568,83 @@ _STORE_IO_ANCHORS = {
 }
 
 
-class _CallNameCollector(ast.NodeVisitor):
-    """Every simple call name in a function body (``f()`` and ``m.f()``)."""
+class _ImportAliasCollector(ast.NodeVisitor):
+    """Local name → originally-imported symbol, across the whole module.
+
+    ``from engine import declaration_generation as dg`` records ``dg`` →
+    ``declaration_generation``. Without this, renaming at the import site was
+    enough to walk past the rule (sol round 2 evasion 1) — the check has to
+    match on what a name RESOLVES to, not how the call site spells it.
+    Function-local imports count: this module imports inside function bodies by
+    convention, which is exactly where such an alias would live.
+    """
 
     def __init__(self) -> None:
+        self.aliases: dict[str, str] = {}
+
+    def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
+        for a in node.names:
+            self.aliases[a.asname or a.name] = a.name
+        self.generic_visit(node)
+
+    def visit_Import(self, node: ast.Import) -> None:
+        for a in node.names:
+            if a.asname:
+                # `import engine.vertex_reader as vr` — the tail is what
+                # attribute calls off it would resolve against.
+                self.aliases[a.asname] = a.name.rsplit(".", 1)[-1]
+        self.generic_visit(node)
+
+
+class _CallNameCollector(ast.NodeVisitor):
+    """Call names in a function body, resolved through import aliases.
+
+    Collects ``f()`` and ``m.f()``. Each name is recorded BOTH as written and
+    as the symbol it was imported under, so an alias cannot hide an anchor.
+    """
+
+    def __init__(self, aliases: dict[str, str] | None = None) -> None:
         self.names: set[str] = set()
+        self._aliases = aliases or {}
+
+    def _record(self, name: str) -> None:
+        self.names.add(name)
+        origin = self._aliases.get(name)
+        if origin:
+            self.names.add(origin)
 
     def visit_Call(self, node: ast.Call) -> None:
         func = node.func
         if isinstance(func, ast.Name):
-            self.names.add(func.id)
+            self._record(func.id)
         elif isinstance(func, ast.Attribute):
-            self.names.add(func.attr)
+            self._record(func.attr)
         self.generic_visit(node)
+
+
+def _reachable_functions(
+    entry: str, by_name: dict[str, ast.FunctionDef], licensed: set[str],
+    aliases: dict[str, str],
+) -> list[str]:
+    """Same-module functions reachable from ``entry``, licensed ones excluded.
+
+    Traversal stops AT a licensed function (it is allowed store I/O, and so is
+    whatever it calls to do that job); every other function on the path is
+    walked, so a read cannot be hidden one call deeper.
+    """
+    seen: set[str] = set()
+    order: list[str] = []
+    stack = [entry]
+    while stack:
+        name = stack.pop()
+        if name in seen or name in licensed or name not in by_name:
+            continue
+        seen.add(name)
+        order.append(name)
+        collector = _CallNameCollector(aliases)
+        collector.visit(by_name[name])
+        stack.extend(n for n in collector.names if n in by_name)
+    return order
 
 
 def test_disclosure_renderers_do_no_store_io():
@@ -578,11 +655,15 @@ def test_disclosure_renderers_do_no_store_io():
     different moment — than the rows it renders: a cursor newer than the
     content, a fingerprint from one generation beside a head from another.
     Ordering the two calls narrows that window without closing it, so this
-    ratchet pins the shape instead: the renderer takes one evidence object and
-    can reach nothing else. A new field in the review header cannot bring its
-    own store read along with it.
+    ratchet pins the shape instead: everything on the render path consumes the
+    evidence the licensed gatherer produced, and can reach nothing else.
+
+    Two evasions of the first version are closed here: an aliased import
+    (``declaration_generation as dg``) and moving the read one call deeper than
+    the entry point. Names resolve through the module's import aliases, and the
+    walk covers every reachable function rather than just the entry.
     """
-    for rel, funcs in _DISCLOSURE_RENDERERS.items():
+    for rel, spec in _DISCLOSURE_RENDER_PATHS.items():
         path = REPO_ROOT / rel
         assert path.exists(), f"Stale exception: {rel} no longer exists"
         tree = ast.parse(path.read_text(), filename=str(path))
@@ -590,17 +671,29 @@ def test_disclosure_renderers_do_no_store_io():
             n.name: n for n in ast.walk(tree)
             if isinstance(n, ast.FunctionDef)
         }
-        for renderer, gatherer in funcs.items():
-            assert renderer in by_name, f"{rel}: no function named {renderer}"
-            assert gatherer in by_name, (
-                f"{rel}: {renderer}'s declared gatherer {gatherer} is missing"
+        alias_collector = _ImportAliasCollector()
+        alias_collector.visit(tree)
+        aliases = alias_collector.aliases
+
+        entry = spec["entry"]
+        licensed = set(spec["licensed"])
+        assert entry in by_name, f"{rel}: no function named {entry}"
+        for name in licensed:
+            assert name in by_name, (
+                f"{rel}: licensed gatherer {name} is missing — a stale "
+                "allowlist entry silently widens this rule"
             )
-            collector = _CallNameCollector()
-            collector.visit(by_name[renderer])
-            leaked = sorted(collector.names & _STORE_IO_ANCHORS)
-            assert not leaked, (
-                f"{rel}:{renderer} calls store I/O directly: "
-                f"{', '.join(leaked)}. Disclosure renderers consume the "
-                f"evidence {gatherer} gathered — resolving an anchor at render "
-                "time is the fetch-then-disclose defect (Rule 10)."
-            )
+
+        violations = []
+        for name in _reachable_functions(entry, by_name, licensed, aliases):
+            collector = _CallNameCollector(aliases)
+            collector.visit(by_name[name])
+            for leaked in sorted(collector.names & _STORE_IO_ANCHORS):
+                violations.append(f"  {rel}:{name} calls {leaked}")
+
+        assert not violations, (
+            "Disclosure render paths must not reach the store — resolving an "
+            "anchor at render time is the fetch-then-disclose defect "
+            f"(Rule 10). Licensed gatherers for this path: "
+            f"{', '.join(sorted(licensed))}.\n" + "\n".join(violations)
+        )

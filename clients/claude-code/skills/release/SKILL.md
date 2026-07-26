@@ -30,11 +30,16 @@ passes; do not announce until the PyPI install smokes.
   working tree is clean. Feature branches should already be deleted or be
   deletable (`git branch -D` is fine once content is merged to HEAD — the
   local branch is often ahead of its stale remote ref).
-- `CHANGELOG.md` may have an `## Unreleased` section maintained during the
-  wave — but do not treat its absence as a blocker. Both 0.9.0 and earlier
-  cuts found none and authored the whole section from step 2's sweep, which
-  works precisely because commit messages here are written to be quoted.
-  Budget for it: 0.9.0's section ran ~130 lines off 33 commits.
+- CHANGELOG authoring happens at cut time, from the log, via step 2's sweep —
+  that is the designed path, not a fallback (ruled 2026-07-26,
+  friction:changelog-unreleased-not-maintained-during-wave). An `## Unreleased`
+  section maintained during the wave is a hand-maintained enumeration mirroring
+  the commit log — the drift-by-omission shape docs/RATCHETS.md names — and it
+  goes stale across intervening releases (0.9.0 was built 07-18, shipped 07-26,
+  with 0.8.0/0.8.1 cut in between). If one exists, treat it as a draft to
+  verify against the log, never as authoritative. This works precisely because
+  commit messages here are written to be quoted. Budget for it: 0.9.0's
+  section ran ~130 lines off 33 commits.
 - **Sibling-release cap cross-check**: if a sibling package (painted, or any
   inter-dep) shipped since the last cut, confirm this release's dependency
   caps ADMIT the sibling's current version — or widen them in this cut.

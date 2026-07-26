@@ -24,8 +24,9 @@ from __future__ import annotations
 
 import textwrap
 from collections import defaultdict
+from collections.abc import Collection, Iterable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from painted import Block, Style, Zoom, budget_fields, join_horizontal, join_vertical
 
@@ -50,7 +51,6 @@ from ._grammar import short_date as _format_date
 from ._statview import palette_of
 
 if TYPE_CHECKING:
-    from atoms import FoldItem  # grouping-helper hints (duck-typed on .payload)
     from loops.surface import Row, Surface
 
 
@@ -1418,7 +1418,7 @@ def _render_item_line(
 
 _NAMESPACE_DEGENERATE_RATIO = 2  # ungrouped > ratio × grouped → fall back to flat
 
-def _should_group_by_namespace(items: tuple[FoldItem, ...], key_field: str) -> bool:
+def _should_group_by_namespace(items: Collection[Any], key_field: str) -> bool:
     """True when namespace grouping improves orientation over a flat list.
 
     Two conditions must both hold:
@@ -1448,10 +1448,16 @@ def _should_group_by_namespace(items: tuple[FoldItem, ...], key_field: str) -> b
 
 
 def _group_by_namespace(
-    items: tuple[FoldItem, ...], key_field: str
-) -> dict[str, list[FoldItem]]:
-    """Group items by namespace prefix (before first '/')."""
-    groups: dict[str, list[FoldItem]] = defaultdict(list)
+    items: Iterable[Any], key_field: str
+) -> dict[str, list[Any]]:
+    """Group items by namespace prefix (before first '/').
+
+    Duck-typed over anything carrying ``.payload`` (FoldItem here, surface
+    ``Row`` in the session lenses) — this grouper became cross-consumer
+    vocabulary in the 010 fork-consolidation, so the annotation states the
+    real contract: any iterable of payload-carrying items.
+    """
+    groups: dict[str, list[Any]] = defaultdict(list)
     for item in items:
         key = str(item.payload.get(key_field, ""))
         if "/" in key:

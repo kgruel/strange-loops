@@ -49,6 +49,8 @@ loops read <vertex> --diff seq:1..seq:2       # structural fold diff between two
 loops read <vertex> --lens prompt             # custom lens
 loops read <vertex> --lens confluence         # observer cut: who's active, kind mix, tier (--kind/--observer compose)
 loops read <vertex> --lens graph              # ref/edge cut: hubs, chains, orphans over Surface edges
+loops read <vertex> --lens graph --edge ref   # restrict the graph to one predicate (comma-OR; graph lens only)
+loops read <vertex> --review                  # canonical review projection — deterministic JSON snapshot (0.9.0)
 loops read <vertex> --lens horizon            # boundary cut: each armed loop's open window vs its next seal
 loops read <vertex> --facts --id <ulid>       # single fact lookup by ID/prefix
 loops read <vertex> --observer all            # peel identity scope (--observer NAME/all)
@@ -119,6 +121,44 @@ on `--facts`/`--ticks` above, which is unaffected.
   portable state, both as a prepended text line and as a `cursor` (or, for
   `--diff`, `interval`) key in `--json` output.
 
+### Graph edge selection — `--edge` under `--lens graph` (0.9.0)
+
+`--edge <predicate>` restricts the graph cut (hubs, chains, census) to selected
+edge predicates: `ref`, or any declared typed-edge field name, comma-OR
+(`--edge ref,stakeholder`).
+
+- Honored **only** by `--lens graph` — the sole fetch that declares an `edge`
+  param. On any other route it REFUSES (rc 2) rather than silently drop.
+- An explicit-but-empty selector (`--edge ','`, whitespace) also refuses:
+  silent-full is the same defect as silent-drop.
+- `--key` is honored by the graph fetch (node projection is sub-scope), and
+  unreachable targets split into three named buckets — `dangling` (resolves
+  nowhere), `filter_excluded` (resolves globally, outside the current scope),
+  and `keyless` (source unaddressable). Chains carry per-hop predicate labels
+  (`a ─ref→ b ─stakeholder→ c`); `cycles` reports the SCC / self-loop census.
+
+### Canonical review projection — `--review` (0.9.0)
+
+`sl read <vertex> --review` emits a deterministic, diffable JSON snapshot of
+folded state: rows sorted by `(kind, key, id)`, each carrying only the
+emit-derived fields plus its verbatim signature (read-time derived fields —
+salience, rank — are excluded by construction, so the same folded state always
+serializes byte-identically). JSON-only; zoom/format flags do not shape it.
+
+- **Header discloses the cut**: `cursor` (the resolved HEAD position — seq,
+  fact id, anchor, portability, honesty-ladder `status`), `cut` (seal state:
+  `sealed_to_head`, `facts_beyond_seal`, tick total), and `declaration`
+  (`decl_head`, `lineage`, and a `review_fingerprint` sha256 over the effective
+  declaration generation). `review_version` versions the shape itself.
+- **Composes with**: `--kind` / `--key` (narrow the snapshot), `--at` /
+  `--as-of` (a review AT a witnessed or event-time position), and the
+  quiet/verbose/plain/json flags.
+- **Refuses everything else by default** (rc 2) — `--facts`, `--ticks`,
+  `--why`, `--diff`, `--refs`, `--limit`, `--match`, `field=value` predicates,
+  and any flag added later. A narrowing flag it cannot honor is refused, never
+  silently dropped. `--all` is refused as redundant: the review cut always
+  shows everything, inactive entities included.
+
 ### Query & transform grammar
 
 These reshape the default fold render. **They are INERT on custom-lens vertices
@@ -145,7 +185,9 @@ projected out of the DEFAULT fold view. The read discloses it honestly —
 `--all`, or with an explicit `<field>=value` predicate (asking for a status
 auto-shows it, per declaring kind). The hide is projection-only: inactive nodes
 keep their inbound salience, stay reachable under `--refs`, and are always
-present in the canonical `--review` cut — it is never an edge rewrite.
+present in the canonical `--review` cut — it is never an edge rewrite. It is
+also **fold-view only**: `--facts` (the event stream) never hides anything, so
+history stays faithful regardless of an entity's current status.
 
 ### Zoom flags
 

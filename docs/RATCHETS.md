@@ -82,11 +82,20 @@ too. Only construction is a fixed point.
 
 ## Budget
 
-Detection ratchets are counted. As of 0.9.0 there are **two** (Rule 9:
+Detection ratchets are counted. There are **three** (Rule 9:
 `resolve_local_vertex` caller enumeration; Rule 10: disclosure renderers
-perform no store I/O), both at a genuine ambient-authority boundary. If the
-count grows faster than the number of such boundaries, the rule is
-over-firing and we are building a shadow linter — stop and dissolve instead.
+perform no store I/O; Rule 11: record-layer libs never import surfacing-layer
+libs), all at a genuine ambient-authority boundary. If the count grows faster
+than the number of such boundaries, the rule is over-firing and we are
+building a shadow linter — stop and dissolve instead.
+
+Rule 11 (added with the surfacing-layer charter) is the cheap case the budget
+is meant to allow: it is a new *rule* on the import boundary Rule 4 already
+walks, not a new matcher. Its hand-maintained input — the lib→layer mapping —
+is made safe by a completeness test over the filesystem-derived lib list, so
+an unassigned lib fails loudly instead of being exempt by omission. That
+completeness test is also what forced `LIBS` itself to stop being a
+hand-written tuple mirroring `libs/`.
 
 ## Cost accounting (why the lumpiness is fine)
 

@@ -517,10 +517,19 @@ class _OptOutCallCollector(ast.NodeVisitor):
             else None
         )
         if name in _AMBIGUITY_PRIMITIVES:
+            # ANY allow_ambiguous value that is not a literal False counts as
+            # an opt-out to be declared — a literal True, a variable, an
+            # expression, `1`. The rule must never be MORE permissive than the
+            # runtime: it used to recognize only literal True, so
+            # `allow_ambiguous=1` slipped past the ratchet while still opting
+            # out at runtime (sol round 3). The runtime now honors literal True
+            # only, and anything the rule cannot evaluate is flagged rather
+            # than assumed safe.
             opted_out = any(
                 kw.arg == "allow_ambiguous"
-                and isinstance(kw.value, ast.Constant)
-                and kw.value.value is True
+                and not (
+                    isinstance(kw.value, ast.Constant) and kw.value.value is False
+                )
                 for kw in node.keywords
             )
             scope = self._scope[-1] if self._scope else "<module>"
@@ -541,6 +550,14 @@ def test_ambiguous_vertex_opt_outs_are_enumerated():
     It is explicit at the call site precisely so this rule can count it, and
     every occurrence must be named in ``_AMBIGUITY_OPT_OUT`` with its reason.
     A plain call needs no entry — it refuses on its own.
+
+    The rule and the runtime are deliberately clamped to each other: the
+    runtime honors the LITERAL ``True`` only, and this rule flags any value
+    that is not a literal ``False``. Anything the rule cannot evaluate — a
+    variable, an expression, ``1`` — is treated as an undeclared opt-out rather
+    than assumed safe, so the two can never disagree about what an opt-out is
+    (sol round 3, where ``allow_ambiguous=1`` opted out at runtime while being
+    recorded here as safe).
     """
     for entry in sorted(_AMBIGUITY_OPT_OUT):
         rel, _, func = entry.partition("::")
@@ -562,7 +579,7 @@ def test_ambiguous_vertex_opt_outs_are_enumerated():
             key = f"{_rel(py_file)}::{scope}"
             if key not in _AMBIGUITY_OPT_OUT:
                 violations.append(
-                    f"  {key} calls {callee}(allow_ambiguous=True)"
+                    f"  {key} calls {callee} with a non-False allow_ambiguous"
                 )
 
     assert not violations, (

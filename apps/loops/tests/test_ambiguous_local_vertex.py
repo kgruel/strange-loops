@@ -162,6 +162,26 @@ class TestSharedChokepoint:
 
         assert _find_local_vertex(allow_ambiguous=True) is not None
 
+    @pytest.mark.parametrize("value", [1, "yes", [1], object()])
+    def test_truthy_non_true_still_refuses(self, multi, value):
+        """sol round 3: the runtime honored any truthy value while the ratchet
+        recognized only a literal True — so `allow_ambiguous=1` opted out AND
+        was recorded as safe. Only the literal opts out now, which is exactly
+        what Rule 9 can see."""
+        from loops.commands.resolve import _find_local_vertex
+        from loops.errors import AmbiguousLocalVertex
+
+        with pytest.raises(AmbiguousLocalVertex):
+            _find_local_vertex(allow_ambiguous=value)
+
+    def test_falsey_values_refuse_too(self, multi):
+        from loops.commands.resolve import _find_local_vertex
+        from loops.errors import AmbiguousLocalVertex
+
+        for value in (False, 0, None, ""):
+            with pytest.raises(AmbiguousLocalVertex):
+                _find_local_vertex(allow_ambiguous=value)
+
     def test_resolve_local_vertex_raises(self, multi):
         from loops.commands.identity import resolve_local_vertex
         from loops.errors import AmbiguousLocalVertex

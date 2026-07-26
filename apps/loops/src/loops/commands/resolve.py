@@ -79,14 +79,20 @@ def _find_local_vertex(*, allow_ambiguous: bool = False) -> Path | None:
     every new call site was one more chance to forget (sol P1-b round 2). There
     is now no ungated way to ask this question by accident.
 
-    ``allow_ambiguous=True`` opts a caller out, for the best-effort uses where
+    ``allow_ambiguous=True`` — the literal ``True``, nothing else is honored —
+    opts a caller out, for the best-effort uses where
     an arbitrary pick is harmless and an exception would be worse: shell
     completion (must never raise) and topology enumeration (which enumerates
     every candidate anyway, so the pick carries no weight). Every such call
     site is enumerated by Rule 9 in ``tests/test_architecture.py`` — the opt-out
     is explicit at the call site precisely so it can be counted.
     """
-    if not allow_ambiguous:
+    # `is True`, not truthiness: the ratchet in tests/test_architecture.py can
+    # only recognize a literal, so anything else it cannot see must not work
+    # here either. `allow_ambiguous=1` used to opt out at runtime while Rule 9
+    # recorded the call site as safe — runtime and ratchet disagreeing about
+    # what counts as an opt-out (sol round 3). They now agree by construction.
+    if allow_ambiguous is not True:
         ambiguous = _ambiguous_local_vertices()
         if ambiguous:
             from loops.errors import AmbiguousLocalVertex

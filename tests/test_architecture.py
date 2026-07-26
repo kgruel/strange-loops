@@ -618,50 +618,92 @@ _STORE_IO_ANCHORS = {
 }
 
 
-class _ImportAliasCollector(ast.NodeVisitor):
-    """Local name → originally-imported symbol, across the whole module.
+def _alias_bindings(nodes) -> dict[str, set[str]]:
+    """Local name → the set of symbols it has been bound to by imports.
 
-    ``from engine import declaration_generation as dg`` records ``dg`` →
-    ``declaration_generation``. Without this, renaming at the import site was
-    enough to walk past the rule (sol round 2 evasion 1) — the check has to
-    match on what a name RESOLVES to, not how the call site spells it.
-    Function-local imports count: this module imports inside function bodies by
-    convention, which is exactly where such an alias would live.
+    A SET, not a single name: two bindings of one alias must both count, since
+    the rule's job is to never MISS an anchor. Over-approximating what a name
+    might resolve to can only produce more matches, never fewer — the safe
+    direction for a guard.
     """
+    bindings: dict[str, set[str]] = {}
 
-    def __init__(self) -> None:
-        self.aliases: dict[str, str] = {}
+    def record(local: str, origin: str) -> None:
+        bindings.setdefault(local, set()).add(origin)
 
-    def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
-        for a in node.names:
-            self.aliases[a.asname or a.name] = a.name
-        self.generic_visit(node)
+    for node in nodes:
+        if isinstance(node, ast.ImportFrom):
+            for a in node.names:
+                record(a.asname or a.name, a.name)
+        elif isinstance(node, ast.Import):
+            for a in node.names:
+                if a.asname:
+                    # `import engine.vertex_reader as vr` — the tail is what
+                    # attribute calls off it resolve against.
+                    record(a.asname, a.name.rsplit(".", 1)[-1])
+    return bindings
 
-    def visit_Import(self, node: ast.Import) -> None:
-        for a in node.names:
-            if a.asname:
-                # `import engine.vertex_reader as vr` — the tail is what
-                # attribute calls off it would resolve against.
-                self.aliases[a.asname] = a.name.rsplit(".", 1)[-1]
-        self.generic_visit(node)
+
+def _module_level_aliases(tree: ast.Module) -> dict[str, set[str]]:
+    """Imports at module scope — the base every function inherits.
+
+    Walks top-level statements and their non-function nested blocks (``if
+    TYPE_CHECKING:`` and the like) but never descends into a function or class
+    body: those are separate scopes and are overlaid per-function below.
+    """
+    collected: list[ast.stmt] = []
+
+    def walk(body) -> None:
+        for node in body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                continue
+            collected.append(node)
+            for field in ("body", "orelse", "finalbody"):
+                inner = getattr(node, field, None)
+                if isinstance(inner, list):
+                    walk(inner)
+
+    walk(tree.body)
+    return _alias_bindings(collected)
+
+
+def _function_aliases(
+    fnode: ast.FunctionDef, base: dict[str, set[str]],
+) -> dict[str, set[str]]:
+    """Aliases visible INSIDE one function: module base + its own imports.
+
+    Scoping this per-function is the point (sol round 3). A single module-wide
+    last-import-wins dict let an unrelated function's local
+    ``from harmless import noop as dg`` overwrite the renderer's
+    ``dg -> declaration_generation`` binding, and the violation vanished. A
+    function's local imports must not reach outside it.
+
+    Imports inside NESTED functions are folded in deliberately: the call
+    collector walks nested bodies, so their aliases have to be visible here or
+    a call inside a closure would resolve against nothing.
+    """
+    local = _alias_bindings(list(ast.walk(fnode)))
+    merged = {k: set(v) for k, v in base.items()}
+    for name, origins in local.items():
+        merged.setdefault(name, set()).update(origins)
+    return merged
 
 
 class _CallNameCollector(ast.NodeVisitor):
-    """Call names in a function body, resolved through import aliases.
+    """Call names in a function body, resolved through the aliases in scope.
 
-    Collects ``f()`` and ``m.f()``. Each name is recorded BOTH as written and
-    as the symbol it was imported under, so an alias cannot hide an anchor.
+    Collects ``f()`` and ``m.f()``. Each name is recorded as written AND as
+    every symbol it has been bound to, so renaming at the import site cannot
+    hide an anchor.
     """
 
-    def __init__(self, aliases: dict[str, str] | None = None) -> None:
+    def __init__(self, aliases: dict[str, set[str]] | None = None) -> None:
         self.names: set[str] = set()
         self._aliases = aliases or {}
 
     def _record(self, name: str) -> None:
         self.names.add(name)
-        origin = self._aliases.get(name)
-        if origin:
-            self.names.add(origin)
+        self.names.update(self._aliases.get(name, ()))
 
     def visit_Call(self, node: ast.Call) -> None:
         func = node.func
@@ -674,7 +716,7 @@ class _CallNameCollector(ast.NodeVisitor):
 
 def _reachable_functions(
     entry: str, by_name: dict[str, ast.FunctionDef], licensed: set[str],
-    aliases: dict[str, str],
+    base_aliases: dict[str, set[str]],
 ) -> list[str]:
     """Same-module functions reachable from ``entry``, licensed ones excluded.
 
@@ -691,7 +733,9 @@ def _reachable_functions(
             continue
         seen.add(name)
         order.append(name)
-        collector = _CallNameCollector(aliases)
+        collector = _CallNameCollector(
+            _function_aliases(by_name[name], base_aliases)
+        )
         collector.visit(by_name[name])
         stack.extend(n for n in collector.names if n in by_name)
     return order
@@ -721,9 +765,7 @@ def test_disclosure_renderers_do_no_store_io():
             n.name: n for n in ast.walk(tree)
             if isinstance(n, ast.FunctionDef)
         }
-        alias_collector = _ImportAliasCollector()
-        alias_collector.visit(tree)
-        aliases = alias_collector.aliases
+        base_aliases = _module_level_aliases(tree)
 
         entry = spec["entry"]
         licensed = set(spec["licensed"])
@@ -735,8 +777,10 @@ def test_disclosure_renderers_do_no_store_io():
             )
 
         violations = []
-        for name in _reachable_functions(entry, by_name, licensed, aliases):
-            collector = _CallNameCollector(aliases)
+        for name in _reachable_functions(entry, by_name, licensed, base_aliases):
+            collector = _CallNameCollector(
+                _function_aliases(by_name[name], base_aliases)
+            )
             collector.visit(by_name[name])
             for leaked in sorted(collector.names & _STORE_IO_ANCHORS):
                 violations.append(f"  {rel}:{name} calls {leaked}")

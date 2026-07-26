@@ -510,13 +510,14 @@ def resolve_review_head(vertex_path: Path) -> tuple[dict | None, dict]:
     (and reason strings) as :func:`resolve_cut`, so the review header's cut is
     identical to what a plain read would disclose.
 
-    CALLER CONTRACT (sol P1 — same as :func:`resolve_cut`): this does real store
-    I/O, so a caller pairing the disclosure with a fold MUST call it AFTER that
-    fold has been fetched, never before/concurrently. The store is append-only,
-    so a head resolved strictly after the fetch is equal-to-or-NEWER than what
-    the fold witnessed — the disclosed cursor/cut can only over-report the
-    unsealed tail, never under-report it or claim a seal over content the fold
-    already moved past. See ``cli.views.fold._run_review`` for the ordered call.
+    CALLER CONTRACT (sol P1-a): the returned ``position`` is the binding handle.
+    A caller pairing this disclosure with a fold must FOLD AT that position
+    (``fetch_fold(at=position)``), not fold separately and hope the two agree.
+    The previous contract here — "resolve strictly AFTER the fetch, so the head
+    can only OVER-report" — was ordering-as-mitigation: it narrowed the window
+    but still let the review advertise a cursor newer than the rows it rendered.
+    Folding at the resolved position closes it by construction: the rows ARE the
+    prefix the cursor names, whatever concurrent writers do.
     """
     if is_aggregate_vertex(vertex_path):
         return None, unavailable_cut(
@@ -550,3 +551,49 @@ def resolve_review_head(vertex_path: Path) -> tuple[dict | None, dict]:
 
     cursor = _head_cursor_meta(vertex_path, summary.position)
     return cursor, _cut_from_summary(summary)
+
+
+def resolve_review_head_position(
+    vertex_path: Path,
+) -> tuple["WitnessPosition | None", dict | None, dict]:
+    """:func:`resolve_review_head` plus the POSITION the disclosure describes.
+
+    Returns ``(position | None, cursor_meta | None, cut_dict)``. The position is
+    what lets the caller fold at exactly what it disclosed (sol P1-a);
+    ``None`` on every degrade path (aggregate, store-less, uncreated store,
+    resolution failure), where there is no position to pin a fold to and the
+    caller folds at head unpinned, as before.
+    """
+    if is_aggregate_vertex(vertex_path):
+        return None, None, unavailable_cut(
+            "unavailable",
+            "aggregate vertex — no single witness cut across members",
+        )
+
+    from loops.commands.resolve import _resolve_vertex_store_path
+
+    try:
+        store_path = _resolve_vertex_store_path(vertex_path)
+    except Exception as exc:
+        return None, None, unavailable_cut(
+            "unavailable", f"vertex could not be resolved: {exc}")
+    if store_path is None:
+        return None, None, unavailable_cut(
+            "unavailable", "this vertex has no store configured — nothing to seal",
+        )
+    if not store_path.exists():
+        return None, None, unavailable_cut(
+            "unavailable", "this vertex's store has not been created yet",
+        )
+
+    from engine.witness import WitnessResolutionError, resolve_cut_summary
+
+    try:
+        summary = resolve_cut_summary(store_path)
+    except WitnessResolutionError as exc:
+        return None, None, unavailable_cut("unavailable", str(exc))
+    except Exception as exc:
+        return None, None, unavailable_cut("unavailable", f"unexpected: {exc}")
+
+    cursor = _head_cursor_meta(vertex_path, summary.position)
+    return summary.position, cursor, _cut_from_summary(summary)

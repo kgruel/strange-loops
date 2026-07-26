@@ -520,3 +520,87 @@ def test_resolve_local_vertex_callers_handle_ambiguity():
         "message, never guess (see _AMBIGUITY_GATE_EXEMPT):\n"
         + "\n".join(violations)
     )
+
+
+# ---------------------------------------------------------------------------
+# Rule 10: disclosure renderers do no store I/O
+# ---------------------------------------------------------------------------
+
+#: Functions that RENDER a disclosure: they may only consume evidence gathered
+#: elsewhere. Mapped to the gatherer that is allowed to do the I/O for them.
+_DISCLOSURE_RENDERERS = {
+    "apps/loops/src/loops/cli/views/fold.py": {
+        "_run_review": "_gather_review_evidence",
+    },
+}
+
+#: Store-I/O anchors a renderer must not call directly. Each one resolves state
+#: from the store on its own connection; calling any of them from a renderer
+#: reintroduces fetch-then-disclose — the pattern that has now shipped three
+#: times (observation:practice/fetch-then-disclose-recurrence): S6's cut
+#: provenance, S4's review head, and S4's declaration fingerprint. Ordering the
+#: calls was the fix twice and held neither time; the invariant that does hold
+#: is "the renderer cannot reach the store at all".
+_STORE_IO_ANCHORS = {
+    "fetch_fold",
+    "declaration_generation",
+    "fact_signatures",
+    "resolve_review_head",
+    "resolve_review_head_position",
+    "resolve_cut",
+    "resolve_cut_summary",
+    "fetch_graph",
+    "vertex_fold",
+    "vertex_facts",
+}
+
+
+class _CallNameCollector(ast.NodeVisitor):
+    """Every simple call name in a function body (``f()`` and ``m.f()``)."""
+
+    def __init__(self) -> None:
+        self.names: set[str] = set()
+
+    def visit_Call(self, node: ast.Call) -> None:
+        func = node.func
+        if isinstance(func, ast.Name):
+            self.names.add(func.id)
+        elif isinstance(func, ast.Attribute):
+            self.names.add(func.attr)
+        self.generic_visit(node)
+
+
+def test_disclosure_renderers_do_no_store_io():
+    """A renderer describes evidence; it must not go re-read the store.
+
+    The recurring defect (sol P1-a, and twice before it) is a disclosure whose
+    anchors are resolved on a different connection — and therefore at a
+    different moment — than the rows it renders: a cursor newer than the
+    content, a fingerprint from one generation beside a head from another.
+    Ordering the two calls narrows that window without closing it, so this
+    ratchet pins the shape instead: the renderer takes one evidence object and
+    can reach nothing else. A new field in the review header cannot bring its
+    own store read along with it.
+    """
+    for rel, funcs in _DISCLOSURE_RENDERERS.items():
+        path = REPO_ROOT / rel
+        assert path.exists(), f"Stale exception: {rel} no longer exists"
+        tree = ast.parse(path.read_text(), filename=str(path))
+        by_name = {
+            n.name: n for n in ast.walk(tree)
+            if isinstance(n, ast.FunctionDef)
+        }
+        for renderer, gatherer in funcs.items():
+            assert renderer in by_name, f"{rel}: no function named {renderer}"
+            assert gatherer in by_name, (
+                f"{rel}: {renderer}'s declared gatherer {gatherer} is missing"
+            )
+            collector = _CallNameCollector()
+            collector.visit(by_name[renderer])
+            leaked = sorted(collector.names & _STORE_IO_ANCHORS)
+            assert not leaked, (
+                f"{rel}:{renderer} calls store I/O directly: "
+                f"{', '.join(leaked)}. Disclosure renderers consume the "
+                f"evidence {gatherer} gathered — resolving an anchor at render "
+                "time is the fetch-then-disclose defect (Rule 10)."
+            )

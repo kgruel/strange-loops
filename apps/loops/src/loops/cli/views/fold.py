@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import argparse
 from collections.abc import AsyncIterator, Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -1094,6 +1095,116 @@ def _fold_item_ids(sections) -> list[str]:
     return ids
 
 
+@dataclass(frozen=True)
+class ReviewEvidence:
+    """Everything a ``--review`` header claims, captured with the rows it
+    describes — the disclosure's single source (sol P1-a).
+
+    The defect this shape exists to prevent: the fold used to be fetched and
+    its snapshot closed, and only THEN did the head cursor resolve and the
+    declaration fingerprint compute, each on its own connection. A review could
+    advertise a cursor newer than the rows it rendered, and pair fingerprint D1
+    with decl_head D2. Ordering the calls (fetch first, disclose second) only
+    narrowed the window; it could not close it.
+
+    The binding is positional, not temporal: for a head review the position is
+    resolved FIRST and the fold is then taken AT that position, so the rows ARE
+    the prefix the cursor names no matter what lands concurrently. The
+    declaration generation is resolved at the same position. A rewound
+    (``--at``/``--as-of``) review was never racy — its position is already
+    immutable — and takes the same path.
+
+    Disclosure code consumes this object and nothing else. Rule 10 in
+    ``tests/test_architecture.py`` enforces that structurally.
+    """
+
+    state: Any
+    vertex: str | None
+    cursor: dict | None
+    cut: dict
+    declaration: dict
+    signatures: dict
+
+
+def _gather_review_evidence(
+    ctx: Invocation,
+    vertex_path: Path,
+    kind: str | None,
+    key: str | None,
+    *,
+    at_position: Any,
+    as_of_ts: float | None,
+    cursor_meta: dict | None,
+) -> ReviewEvidence:
+    """Resolve position → fold AT it → describe it. The ONLY I/O for a review.
+
+    Head reads resolve the position before folding and pin the fold to it. When
+    no position can be resolved (aggregate, store-less, uncreated store,
+    resolution failure) there is nothing to pin to: the fold runs unpinned and
+    the cut already discloses ``available=False`` with the reason.
+    """
+    from engine import declaration_generation, fact_signatures
+
+    from loops.cli import witness_address
+    from loops.commands.fetch import fetch_fold
+    from loops.commands.resolve import (
+        _apply_vertex_scope,
+        _resolve_vertex_store_path,
+        _vertex_name,
+    )
+
+    obs = _apply_vertex_scope(ctx.observer, vertex_path) or None
+    _validate_kind_or_exit(kind, vertex_path)
+
+    fold_at = at_position
+    if at_position is not None:
+        review_cursor = cursor_meta
+        cut = witness_address.cut_from_witness_position(at_position)
+    elif as_of_ts is not None:
+        review_cursor = cursor_meta
+        cut = witness_address.unavailable_cut(
+            "as_of", "event-time projection has no witness-anchored cut",
+        )
+    else:
+        # Head: resolve the position FIRST, then fold at it (sol P1-a). S6's
+        # single-transaction resolve_cut_summary still supplies both the cursor
+        # and the cut from ONE head resolution (arbiter S4-F3).
+        position, review_cursor, cut = witness_address.resolve_review_head_position(
+            vertex_path,
+        )
+        fold_at = position
+
+    state = fetch_fold(
+        vertex_path, kind=kind, key=key, observer=obs,
+        at=fold_at, as_of=as_of_ts,
+    )
+
+    # Per-fact signatures — verbatim from the store column, the ONLY source
+    # (the fold path drops them). None on a store-less / aggregate vertex.
+    ids = _fold_item_ids(state.sections)
+    signatures: dict[str, str | None] = {}
+    if ids:
+        try:
+            store_path = _resolve_vertex_store_path(vertex_path)
+        except Exception:
+            store_path = None
+        if store_path is not None:
+            signatures = fact_signatures(store_path, ids)
+
+    # Resolved at the SAME position as the fold — a fingerprint from one
+    # generation must never be paired with rows folded under another.
+    decl_gen = declaration_generation(vertex_path, at=fold_at, as_of=as_of_ts)
+
+    return ReviewEvidence(
+        state=state,
+        vertex=_vertex_name(vertex_path),
+        cursor=review_cursor,
+        cut=cut,
+        declaration=decl_gen,
+        signatures=signatures,
+    )
+
+
 def _run_review(
     ctx: Invocation,
     vertex_path: Path,
@@ -1108,87 +1219,37 @@ def _run_review(
     diffable snapshot of folded state under a disclosed cursor + declaration
     generation + seal cut.
 
-    Strictly read-only (S2 read-purity is a precondition): the fold fetch, the
-    per-fact signature lookup, and the declaration-generation resolution all use
-    read-only connections; nothing here mutates the store. The projection stops
+    Rendering ONLY. Every fact this function discloses arrives in one
+    :class:`ReviewEvidence` object from :func:`_gather_review_evidence`; this
+    body performs no store I/O of its own, which is what keeps the header's
+    claims and the rendered rows describing the same moment (sol P1-a) — and is
+    enforced structurally by ``tests/test_architecture.py`` Rule 10.
+
+    Strictly read-only (S2 read-purity is a precondition). The projection stops
     short of SPEC §10 (no witness-ordered every-row stream, no JCS byte
     determinism, no rebuild round-trip, no chain) — that layer is gated on
     GlobalReceiptPosition + loops-go (arbiter S4-F4). See ``surface.to_review``
-    for the encoder and ``cli.witness_address.resolve_review_head`` for the
-    head resolution shared with S6.
+    for the encoder.
     """
     import json as _json
     import time as _time
 
-    from engine import declaration_generation, fact_signatures
-
-    from loops.cli import witness_address
-    from loops.commands.fetch import fetch_fold
-    from loops.commands.resolve import (
-        _apply_vertex_scope,
-        _resolve_vertex_store_path,
-        _vertex_name,
-    )
     from loops.surface import to_review
 
-    obs = _apply_vertex_scope(ctx.observer, vertex_path) or None
-    _validate_kind_or_exit(kind, vertex_path)
-
-    # Fetch the fold FIRST, then resolve the head disclosure — the SAME
-    # after-the-fetch ordering S6 established (sol P1 both times). A head
-    # review's cursor/cut come from resolve_review_head, which does real store
-    # I/O; resolving it before the fold opens its snapshot would let a
-    # concurrent append land in the gap, so the fold could contain facts BEYOND
-    # a cursor that predates them, or cut could claim sealed_to_head=True over a
-    # head that has since moved (the exact TOCTOU S6 fixed in a981221,
-    # reversed). The store is append-only (rowid never shrinks), so a head
-    # resolved strictly AFTER the fetch is equal-to-or-NEWER than what the fold
-    # witnessed: the disclosure can only OVER-report the unsealed tail, never
-    # under-report it or claim a seal over unsealed content. An active
-    # --at/--as-of read has no race — it reuses its already-resolved position
-    # (cut_from_witness_position/unavailable_cut are pure computation over an
-    # immutable position, zero store I/O) — so its cursor/cut can be bound
-    # either side of the fetch; they are bound here for symmetry.
-    state = fetch_fold(
-        vertex_path, kind=kind, key=key, observer=obs,
-        at=at_position, as_of=as_of_ts,
+    evidence = _gather_review_evidence(
+        ctx, vertex_path, kind, key,
+        at_position=at_position, as_of_ts=as_of_ts, cursor_meta=cursor_meta,
     )
 
-    if at_position is not None:
-        review_cursor = cursor_meta
-        cut = witness_address.cut_from_witness_position(at_position)
-    elif as_of_ts is not None:
-        review_cursor = cursor_meta
-        cut = witness_address.unavailable_cut(
-            "as_of", "event-time projection has no witness-anchored cut",
-        )
-    else:
-        # Head disclosure resolved AFTER the fetch above (sol P1) — and from
-        # S6's single-transaction resolve_cut_summary, never a second
-        # independent head-resolve (arbiter S4-F3).
-        review_cursor, cut = witness_address.resolve_review_head(vertex_path)
-
-    # Per-fact signatures — verbatim from the store column, the ONLY source
-    # (the fold path drops them). None on a store-less / aggregate vertex.
-    ids = _fold_item_ids(state.sections)
-    signatures: dict[str, str | None] = {}
-    if ids:
-        try:
-            store_path = _resolve_vertex_store_path(vertex_path)
-        except Exception:
-            store_path = None
-        if store_path is not None:
-            signatures = fact_signatures(store_path, ids)
-
-    decl_gen = declaration_generation(vertex_path, at=at_position, as_of=as_of_ts)
-
     header = {
-        "vertex": _vertex_name(vertex_path),
-        "cursor": review_cursor,
-        "declaration": decl_gen,
-        "cut": cut,
+        "vertex": evidence.vertex,
+        "cursor": evidence.cursor,
+        "declaration": evidence.declaration,
+        "cut": evidence.cut,
     }
-    review = to_review(state, header=header, signatures=signatures)
+    review = to_review(
+        evidence.state, header=header, signatures=evidence.signatures,
+    )
     # rendered_at is the SOLE render-time field — labeled and kept OUTSIDE the
     # deterministic `review` object so byte-identity of the projection itself
     # holds across repeated reads of unchanged folded state.

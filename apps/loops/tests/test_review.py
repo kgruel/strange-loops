@@ -25,6 +25,7 @@ property "same folded state -> same bytes", never interchange canonicalization.
 from __future__ import annotations
 
 import hashlib
+import dataclasses
 import json
 import sqlite3
 
@@ -456,12 +457,13 @@ class TestReadPurity:
 
 
 # ---------------------------------------------------------------------------
-# Head disclosure resolved AFTER the fetch (sol P1 TOCTOU) — mirrors S6's
-# TestCutBoundAfterFetchTOCTOU, applied to the review header.
+# Evidence binding (sol P1-a): header claims and rendered rows describe the
+# SAME position. Supersedes the earlier "resolve the disclosure after the
+# fetch" ordering, which narrowed the window but could not close it.
 # ---------------------------------------------------------------------------
 
 
-class TestReviewHeadBoundAfterFetchTOCTOU:
+class TestReviewEvidenceBinding:
     @pytest.fixture
     def sealed_vertex(self, tmp_path):
         v = vertex("seal").store("./seal.db").loop("decision", fold_by("topic"))
@@ -471,13 +473,17 @@ class TestReviewHeadBoundAfterFetchTOCTOU:
         _empty_store(db)
         return vpath, db
 
-    def test_header_reflects_a_write_that_lands_during_fetch(
+    def test_cursor_matches_the_rows_under_concurrent_write(
         self, sealed_vertex, monkeypatch
     ):
-        """A concurrent append as a side effect of the fetch: since the head
-        disclosure is resolved strictly AFTER fetch_fold returns (sol P1), the
-        header cursor/cut must SEE that write — never echo a pre-write
-        sealed_to_head=True answer over a head that has moved."""
+        """A fact lands while the review is being taken. The header must
+        describe the rows that were rendered — not a head that moved past them.
+
+        Under the old ordering the header reported seq=2 / sealed_to_head=False
+        for a fold containing only fact 1: a cursor advertising content the
+        projection did not include. The fold is now PINNED to the resolved
+        position, so the late write is outside both.
+        """
         vpath, db = sealed_vertex
         f1 = _append(db, "decision", 100.0, topic="a", message="alpha")
         _append_tick(db, "seal", 150.0, fact_cursor=f1)
@@ -489,8 +495,6 @@ class TestReviewHeadBoundAfterFetchTOCTOU:
 
         def fetch_with_concurrent_write(*args, **kwargs):
             state = real(*args, **kwargs)
-            # A fact lands after the fold read the store, before the review
-            # header is resolved.
             _append(db, "decision", 200.0, topic="b", message="beta")
             return state
 
@@ -500,35 +504,66 @@ class TestReviewHeadBoundAfterFetchTOCTOU:
         header = out["review"]["header"]
         facts = out["review"]["facts"]
 
-        # The fold (fetched first) does NOT contain the late fact...
+        # The late fact is in neither the rows nor the cursor — one moment,
+        # described once.
         assert not any(f["key"] == "b" for f in facts)
-        # ...but the header, resolved after, must NOT claim a stale seal: it
-        # honestly reports the store as it stood at resolution time (conservative
-        # bias — over-report tail, never a false seal).
-        assert header["cut"]["sealed_to_head"] is False
-        assert header["cut"]["facts_beyond_seal"] == 1
-        # The head cursor reflects the appended fact, not the pre-fetch head.
-        assert header["cursor"]["fact_id"] != f1
-        assert header["cursor"]["seq"] == 2
+        assert header["cursor"]["fact_id"] == f1
+        assert header["cursor"]["seq"] == 1
+        # And the seal claim is the one that was true AT that position.
+        assert header["cut"]["sealed_to_head"] is True
+        assert header["cut"]["facts_beyond_seal"] == 0
 
-    def test_pre_fetch_resolution_would_be_stale(self, sealed_vertex):
-        """Documents the defect directly: resolving the head disclosure BEFORE a
-        later append (the buggy ordering) yields sealed_to_head=True that a
-        moment later is false — proving the regression above exercises the real
-        defect class, not a strawman."""
+    def test_cursor_never_exceeds_the_rendered_rows(self, sealed_vertex):
+        """The invariant behind the case above, stated directly: no rendered
+        fact id may postdate the disclosed cursor, and the cursor must name a
+        position the projection actually reached."""
         vpath, db = sealed_vertex
         f1 = _append(db, "decision", 100.0, topic="a", message="alpha")
-        _append_tick(db, "seal", 150.0, fact_cursor=f1)
+        f2 = _append(db, "decision", 200.0, topic="b", message="beta")
+
+        out = _review(vpath)
+        header = out["review"]["header"]
+        rendered = {f["id"] for f in out["review"]["facts"]}
+
+        assert rendered == {f1, f2}
+        assert header["cursor"]["fact_id"] == f2  # head == newest rendered
+        assert max(rendered) <= header["cursor"]["fact_id"]
+
+    def test_declaration_resolves_at_the_folded_position(self, sealed_vertex):
+        """The fingerprint and decl_head come from the same position as the
+        rows — the second half of the P1-a split (fingerprint D1 with
+        decl_head D2)."""
+        from engine import declaration_generation
 
         from loops.cli import witness_address
 
-        _cursor, stale_cut = witness_address.resolve_review_head(vpath)
-        assert stale_cut["sealed_to_head"] is True  # true at THIS moment
+        vpath, db = sealed_vertex
+        _append(db, "decision", 100.0, topic="a", message="alpha")
 
-        _append(db, "decision", 200.0, topic="b", message="beta")
+        out = _review(vpath)
+        header = out["review"]["header"]
+        position, _cursor, _cut = witness_address.resolve_review_head_position(vpath)
+        expected = declaration_generation(vpath, at=position)
 
-        _cursor2, fresh_cut = witness_address.resolve_review_head(vpath)
-        assert fresh_cut["sealed_to_head"] is False
+        assert header["declaration"]["review_fingerprint"] == expected[
+            "review_fingerprint"]
+        assert header["declaration"]["decl_head"] == expected["decl_head"]
+
+    def test_evidence_object_carries_every_disclosed_field(self, sealed_vertex):
+        """The renderer's header is a projection of ReviewEvidence and nothing
+        else — the property Rule 10 enforces structurally."""
+        from loops.cli.views.fold import ReviewEvidence
+
+        vpath, db = sealed_vertex
+        _append(db, "decision", 100.0, topic="a", message="alpha")
+
+        out = _review(vpath)
+        fields = {f.name for f in dataclasses.fields(ReviewEvidence)}
+        for disclosed in out["review"]["header"]:
+            assert disclosed in fields, (
+                f"header key {disclosed!r} is not carried by ReviewEvidence — "
+                "it must be captured with the rows, not resolved at render time"
+            )
 
 
 # ---------------------------------------------------------------------------

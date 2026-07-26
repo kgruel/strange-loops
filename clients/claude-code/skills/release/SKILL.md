@@ -30,7 +30,11 @@ passes; do not announce until the PyPI install smokes.
   working tree is clean. Feature branches should already be deleted or be
   deletable (`git branch -D` is fine once content is merged to HEAD — the
   local branch is often ahead of its stale remote ref).
-- `CHANGELOG.md` has an `## Unreleased` section maintained during the wave.
+- `CHANGELOG.md` may have an `## Unreleased` section maintained during the
+  wave — but do not treat its absence as a blocker. Both 0.9.0 and earlier
+  cuts found none and authored the whole section from step 2's sweep, which
+  works precisely because commit messages here are written to be quoted.
+  Budget for it: 0.9.0's section ran ~130 lines off 33 commits.
 - **Sibling-release cap cross-check**: if a sibling package (painted, or any
   inter-dep) shipped since the last cut, confirm this release's dependency
   caps ADMIT the sibling's current version — or widen them in this cut.
@@ -44,21 +48,31 @@ passes; do not announce until the PyPI install smokes.
 
 ```bash
 uv sync
-uv run --package loops pytest apps/loops/tests -q
-for lib in $(ls libs); do
-  uv run --package "$lib" pytest "libs/$lib/tests" -q
+for pkg in libs/* apps/*; do
+  [ -d "$pkg/tests" ] || continue
+  name=$(basename "$pkg")
+  printf '%-10s ' "$name"
+  uv run --package "$name" pytest "$pkg/tests" -q 2>&1 | tail -1
 done
+./dev check          # root architecture rules — NOT part of any package suite
 ```
 
-The loop iterates `libs/` rather than naming packages — a hardcoded list
-goes stale the release after a new lib lands (the 0.7.0 cut had to notice
-`custody` was missing from this list and run it on initiative). Every
-`libs/<name>` directory is a workspace package whose name matches its
-directory.
+The loop iterates directories rather than naming packages — a hardcoded list
+goes stale the release after a new package lands (the 0.7.0 cut had to notice
+`custody` was missing; the 0.9.0 cut had to notice `apps/tasks` — 258 tests —
+and the root `./dev check` architecture rules were both outside the loop
+entirely). Every `libs/<name>` and `apps/<name>` directory is a workspace
+package whose name matches its directory; the `-d tests` guard skips the ones
+that have none (hlab today).
 
-Goldens ride in the suite. If the painted pin moved this wave, this run IS
-the bump gate — it must run against the exact wheel the pin resolves
-(`uv pip list | grep painted` to confirm).
+Goldens ride in the suite. **Re-gate against the NEWEST sibling version your
+caps admit, not just the locked one.** The workspace lock and the published
+wheel resolve differently by construction: at the 0.9.0 cut the lock held
+painted 0.12.1 while the wheel — and therefore every user — resolved 0.13.0
+under the `<0.14` cap. `uv run --with "painted==<newest-admitted>" --package
+loops pytest apps/loops/tests -q` re-runs the render-sensitive suite against
+what users will actually get. The older "only when the pin moved this wave"
+framing missed this: the pin does not have to move for the resolve to.
 
 ## 2. CHANGELOG completeness sweep
 
@@ -159,6 +173,10 @@ The release is not "done" until an install **from PyPI** reads a live store.
 - **painted/loops version collision** — the pinned painted range must have a
   published wheel; gating against a local painted checkout proves nothing
   about the PyPI resolve (re-gate when the pin's target ships).
+- **Gate and wheel resolve different sibling versions** — the lock pins one
+  version, the wheel takes the newest the cap admits. A green suite says
+  nothing about the version users install until you re-run it under that
+  version (step 1).
 - **Sibling release excludes sibling** — the inverse direction: the cap's
   UPPER bound must admit the sibling's latest published version, checked at
   cut time (step 0), not discovered by the first downstream consumer.

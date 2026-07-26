@@ -279,14 +279,9 @@ def resolve_local_vertex(start: Path | None = None) -> Path:
     (sol P1-b). Callers render the teaching message via
     ``resolve.ambiguous_local_vertex_refusal``.
     """
-    from loops.commands.resolve import _ambiguous_local_vertices, _find_local_vertex
-    from loops.errors import AmbiguousLocalVertex
+    from loops.commands.resolve import _find_local_vertex
 
-    ambiguous = _ambiguous_local_vertices()
-    if ambiguous:
-        raise AmbiguousLocalVertex(ambiguous)
-
-    # 1. Local vertex in cwd
+    # 1. Local vertex in cwd (_find_local_vertex refuses on ambiguity itself)
     local = _find_local_vertex()
     if local is not None:
         return local

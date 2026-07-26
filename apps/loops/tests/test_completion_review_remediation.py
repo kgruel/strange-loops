@@ -151,7 +151,8 @@ class TestReadClassifierParity:
 
         local = _scaffold_and_absorb(tmp_path)
         monkeypatch.setattr(
-            "loops.commands.resolve._find_local_vertex", lambda: local
+            "loops.commands.resolve._find_local_vertex",
+            lambda **_kw: local,
         )
         got = completers._vertex_path_on_line(_ctx(["decision/foo"]))
         assert got == local
@@ -164,7 +165,8 @@ class TestReadClassifierParity:
 
         local = _scaffold_and_absorb(tmp_path)
         monkeypatch.setattr(
-            "loops.commands.resolve._find_local_vertex", lambda: local
+            "loops.commands.resolve._find_local_vertex",
+            lambda **_kw: local,
         )
         for tokens in (["decision/foo"], ["a/b", "x"], [], ["status=open"]):
             vname, _entity, _w, _o = _classify_tokens(tokens, has_vertex_path=False)

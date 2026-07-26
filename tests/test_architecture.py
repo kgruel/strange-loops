@@ -477,48 +477,98 @@ def test_domain_constants_confined_to_custody():
 # Rule 9: every resolve_local_vertex caller handles the ambiguity refusal
 # ---------------------------------------------------------------------------
 
-#: Modules allowed to call ``resolve_local_vertex`` without translating
-#: ``AmbiguousLocalVertex`` into a user-facing refusal. SHRINK-ONLY: adding an
-#: entry means a verb-first path can resolve an ambiguous local tier without
-#: telling the user which store it picked — the exact defect
-#: friction:find-local-vertex-alphabetical-pick named. Each entry needs a reason.
-_AMBIGUITY_GATE_EXEMPT = {
-    # Definition site — it RAISES the error; nothing to translate.
-    "apps/loops/src/loops/commands/identity.py",
+#: Call sites licensed to break a multi-vertex tie ARBITRARILY — i.e. to pass
+#: ``allow_ambiguous=True`` to ``_find_local_vertex``. SHRINK-ONLY: each entry
+#: is a place the CLI may act on a vertex the user never named, which is the
+#: defect friction:find-local-vertex-alphabetical-pick recorded. Keyed
+#: ``module::function`` with the reason it is harmless there.
+_AMBIGUITY_OPT_OUT = {
+    # Completion is best-effort and must never raise mid-keystroke; it offers
+    # candidates, it never writes.
+    "apps/loops/src/loops/cli/completers.py::_vertex_path_on_line",
+    # Topology enumeration collects EVERY candidate anyway — the first-match
+    # pick carries no weight here.
+    "apps/loops/src/loops/commands/resolve.py::_candidate_topology_vertices",
+    "apps/loops/src/loops/commands/resolve.py::_topology_roots_for_emit",
 }
 
+#: The resolution primitives that refuse on ambiguity by default.
+_AMBIGUITY_PRIMITIVES = {"_find_local_vertex", "resolve_local_vertex"}
 
-def test_resolve_local_vertex_callers_handle_ambiguity():
-    """A caller that accepts "no vertex named" must refuse, not guess.
 
-    ``resolve_local_vertex`` refuses by default (raises ``AmbiguousLocalVertex``)
-    so an unhandled caller fails loudly rather than writing to whichever store
-    sorts first. This ratchet pins the next layer: a module that calls it must
-    also NAME the refusal — either catching ``AmbiguousLocalVertex`` or
-    rendering ``ambiguous_local_vertex_refusal`` — so the user gets the
-    teaching message and the command's own exit code, not a traceback.
+class _OptOutCallCollector(ast.NodeVisitor):
+    """Every call to an ambiguity primitive, with its enclosing function and
+    whether it passed ``allow_ambiguous=True``."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str, bool]] = []  # (func, callee, opted_out)
+        self._scope: list[str] = []
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        self._scope.append(node.name)
+        self.generic_visit(node)
+        self._scope.pop()
+
+    def visit_Call(self, node: ast.Call) -> None:
+        func = node.func
+        name = (
+            func.id if isinstance(func, ast.Name)
+            else func.attr if isinstance(func, ast.Attribute)
+            else None
+        )
+        if name in _AMBIGUITY_PRIMITIVES:
+            opted_out = any(
+                kw.arg == "allow_ambiguous"
+                and isinstance(kw.value, ast.Constant)
+                and kw.value.value is True
+                for kw in node.keywords
+            )
+            scope = self._scope[-1] if self._scope else "<module>"
+            self.calls.append((scope, name, opted_out))
+        self.generic_visit(node)
+
+
+def test_ambiguous_vertex_opt_outs_are_enumerated():
+    """Resolving an unnamed vertex must refuse on ambiguity, or be listed.
+
+    The refusal lives in ``_find_local_vertex`` itself, so the DEFAULT is safe
+    and there is no ungated primitive to reach for — the first version gated
+    callers by hand and left the primitive importable, which is a bypass one
+    import away, and its string-grep check passed a module that had one gated
+    call and one ungated one (sol P1-b round 2).
+
+    What remains checkable is the deliberate escape: ``allow_ambiguous=True``.
+    It is explicit at the call site precisely so this rule can count it, and
+    every occurrence must be named in ``_AMBIGUITY_OPT_OUT`` with its reason.
+    A plain call needs no entry — it refuses on its own.
     """
-    for rel in sorted(_AMBIGUITY_GATE_EXEMPT):
-        assert (REPO_ROOT / rel).exists(), f"Stale exception: {rel}"
+    for entry in sorted(_AMBIGUITY_OPT_OUT):
+        rel, _, func = entry.partition("::")
+        path = REPO_ROOT / rel
+        assert path.exists(), f"Stale exception: {rel} no longer exists"
+        tree = ast.parse(path.read_text(), filename=str(path))
+        assert any(
+            isinstance(n, ast.FunctionDef) and n.name == func
+            for n in ast.walk(tree)
+        ), f"Stale exception: {rel} has no function {func}"
 
     violations = []
     for py_file in _src_py_files(REPO_ROOT / "apps" / "loops"):
-        text = py_file.read_text()
-        if "resolve_local_vertex" not in text:
-            continue
-        if _rel(py_file) in _AMBIGUITY_GATE_EXEMPT:
-            continue
-        if "AmbiguousLocalVertex" in text or "ambiguous_local_vertex_refusal" in text:
-            continue
-        violations.append(
-            f"  {_rel(py_file)} — calls resolve_local_vertex without handling "
-            "AmbiguousLocalVertex"
-        )
+        collector = _OptOutCallCollector()
+        collector.visit(ast.parse(py_file.read_text(), filename=str(py_file)))
+        for scope, callee, opted_out in collector.calls:
+            if not opted_out:
+                continue  # default path — the primitive refuses
+            key = f"{_rel(py_file)}::{scope}"
+            if key not in _AMBIGUITY_OPT_OUT:
+                violations.append(
+                    f"  {key} calls {callee}(allow_ambiguous=True)"
+                )
 
     assert not violations, (
-        "Ambiguous local-vertex resolution must refuse with a teaching "
-        "message, never guess (see _AMBIGUITY_GATE_EXEMPT):\n"
-        + "\n".join(violations)
+        "Breaking a multi-vertex tie arbitrarily must be declared "
+        "(see _AMBIGUITY_OPT_OUT) — an unlisted opt-out lets the CLI act on a "
+        "vertex the user never named:\n" + "\n".join(violations)
     )
 
 

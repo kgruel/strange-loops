@@ -145,6 +145,23 @@ class TestSharedChokepoint:
     default and each verb translates the refusal.
     """
 
+    def test_the_primitive_itself_refuses(self, multi):
+        """sol P1-b round 2: gating callers left `_find_local_vertex` itself
+        importable as a bypass. The refusal lives in the primitive now, so the
+        default path is safe no matter who calls it."""
+        from loops.commands.resolve import _find_local_vertex
+        from loops.errors import AmbiguousLocalVertex
+
+        with pytest.raises(AmbiguousLocalVertex):
+            _find_local_vertex()
+
+    def test_explicit_opt_out_still_picks(self, multi):
+        """The declared escape works — and is the ONLY way past the refusal,
+        which is what makes the Rule 9 enumeration meaningful."""
+        from loops.commands.resolve import _find_local_vertex
+
+        assert _find_local_vertex(allow_ambiguous=True) is not None
+
     def test_resolve_local_vertex_raises(self, multi):
         from loops.commands.identity import resolve_local_vertex
         from loops.errors import AmbiguousLocalVertex

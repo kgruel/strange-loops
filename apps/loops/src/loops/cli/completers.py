@@ -310,7 +310,7 @@ def _vertex_path_on_line(ctx: CompletionContext):
 
     try:
         if first is None:
-            return _find_local_vertex()
+            return _find_local_vertex(allow_ambiguous=True)
         # Mirror fold._looks_like_vertex_path: absolute / ./ / ../ / .vertex
         if (
             first.startswith(("/", "./", "../"))
@@ -321,7 +321,7 @@ def _vertex_path_on_line(ctx: CompletionContext):
             p = Path(first)
             return p if p.is_file() else None
         if "/" in first:  # entity address → runtime reads the LOCAL vertex
-            return _find_local_vertex()
+            return _find_local_vertex(allow_ambiguous=True)
         return _resolve_vertex_for_dispatch(first)
     except Exception:
         return None

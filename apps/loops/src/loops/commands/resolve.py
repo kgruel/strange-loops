@@ -69,13 +69,29 @@ def loops_home() -> Path:
     return Path(xdg) / "loops"
 
 
-def _find_local_vertex() -> Path | None:
+def _find_local_vertex(*, allow_ambiguous: bool = False) -> Path | None:
     """Find a .vertex file in .loops/ or cwd. Returns first match or None.
 
-    The multi-vertex tie-break here is alphabetical and therefore arbitrary —
-    callers that accept "no vertex named" from a user must gate on
-    ``ambiguous_local_vertex_refusal`` first rather than let it guess.
+    REFUSES BY DEFAULT when the local tier holds more than one instance vertex:
+    raises :class:`~loops.errors.AmbiguousLocalVertex` rather than break the tie
+    alphabetically. The refusal lives HERE, in the primitive, because gating
+    each caller instead left the primitive itself importable as a bypass —
+    every new call site was one more chance to forget (sol P1-b round 2). There
+    is now no ungated way to ask this question by accident.
+
+    ``allow_ambiguous=True`` opts a caller out, for the best-effort uses where
+    an arbitrary pick is harmless and an exception would be worse: shell
+    completion (must never raise) and topology enumeration (which enumerates
+    every candidate anyway, so the pick carries no weight). Every such call
+    site is enumerated by Rule 9 in ``tests/test_architecture.py`` — the opt-out
+    is explicit at the call site precisely so it can be counted.
     """
+    if not allow_ambiguous:
+        ambiguous = _ambiguous_local_vertices()
+        if ambiguous:
+            from loops.errors import AmbiguousLocalVertex
+
+            raise AmbiguousLocalVertex(ambiguous)
     # Prefer .loops/.vertex (workspace root convention)
     loops_dir = Path.cwd() / ".loops"
     dotvertex = loops_dir / ".vertex"
@@ -756,7 +772,7 @@ def _candidate_topology_vertices() -> list[Path]:
         seen.add(resolved)
         candidates.append(resolved)
 
-    add(_find_local_vertex())
+    add(_find_local_vertex(allow_ambiguous=True))
 
     local_loops = Path.cwd() / ".loops"
     add(local_loops / ".vertex")
@@ -821,7 +837,7 @@ def _topology_roots_for_emit(
     if target is None:
         return [], []
 
-    local_root = _find_local_vertex()
+    local_root = _find_local_vertex(allow_ambiguous=True)
     if (
         local_root is not None
         and normalize(local_root) != target

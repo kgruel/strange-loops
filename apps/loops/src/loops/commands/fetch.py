@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from atoms import FoldItem, FoldState, TickWindow
+    from atoms import Address, FoldItem, FoldState, TickWindow
     from engine.witness import WitnessPosition
 
 
@@ -243,11 +243,25 @@ def _walk_refs(
     ``refs_depth=0`` (default), so the inner call doesn't loop. The recursive
     call lets us reuse the kind/key filtering logic unchanged.
     """
-    from atoms import FoldState, WalkedItem
+    from atoms import Address, FoldState, WalkedItem
 
-    # Build primary visited set + initial frontier
+    # Build primary visited set + initial frontier. A frontier entry carries the
+    # ref's READINGS (not one guessed kind/key), resolved in Address order.
     visited: set[str] = set()
-    frontier: list[tuple[str, str, str, int]] = []  # (via_anchor, target_kind, target_key, depth)
+    Entry = tuple[str, tuple[Address, ...], int]  # (via_anchor, readings, depth)
+    frontier: list[Entry] = []
+
+    def _enqueue(into: list[Entry], via: str, item, depth: int) -> None:
+        for ref in _outbound_addresses(item):
+            readings = Address.readings(ref)
+            if not readings:
+                continue
+            # Skip only when EVERY reading is already accounted for — a slash
+            # ref whose kind-qualified reading is visited may still resolve
+            # through its bare-key reading.
+            if all(_reading_addr(a) in visited for a in readings):
+                continue
+            into.append((via, readings, depth))
 
     for section in state.sections:
         kf = section.key_field
@@ -259,56 +273,60 @@ def _walk_refs(
                 continue
             anchor_addr = f"{section.kind}/{key_value}"
             visited.add(anchor_addr)
-            for ref in _outbound_addresses(item):
-                parsed = _parse_ref_to_kind_key(ref)
-                if parsed is None:
-                    continue
-                rk, rkey = parsed
-                target_addr = f"{rk}/{rkey}"
-                if target_addr in visited:
-                    continue
-                frontier.append((anchor_addr, rk, rkey, 1))
+            _enqueue(frontier, anchor_addr, item, 1)
 
     walked: list[WalkedItem] = []
     while frontier:
-        next_frontier: list[tuple[str, str, str, int]] = []
-        for via_anchor, target_kind, target_key, depth in frontier:
-            target_addr = f"{target_kind}/{target_key}"
-            if target_addr in visited:
-                continue
-            visited.add(target_addr)
-            # Fetch this entity (refs_depth=0 so inner call doesn't walk),
-            # at the SAME position as the primary fold (see docstring).
-            target_state = fetch_fold(
-                vertex_path, kind=target_kind, key=target_key,
-                observer=observer, at=at, as_of=as_of,
-            )
-            for tsection in target_state.sections:
-                tkf = tsection.key_field
-                if not tkf:
+        next_frontier: list[Entry] = []
+        for via_anchor, readings, depth in frontier:
+            # Readings are ordered primary-first; the FIRST that resolves to a
+            # real entity wins, so a slash ref's genuine ambiguity resolves the
+            # same way it does for matching and for the graph projection —
+            # kind-qualified if that entity exists, bare namespaced key if not.
+            for addr in readings:
+                reading_addr = _reading_addr(addr)
+                if reading_addr in visited:
                     continue
-                for titem in tsection.items:
-                    tkey = str(titem.payload.get(tkf, ""))
-                    this_addr = f"{tsection.kind}/{tkey}"
-                    # The fetched state may include other items (prefix match);
-                    # only add the one matching our exact target.
-                    if this_addr != target_addr:
+                # Fetch this entity (refs_depth=0 so inner call doesn't walk),
+                # at the SAME position as the primary fold (see docstring). A
+                # bare reading names no kind, so it fetches across kinds and
+                # matches on key alone.
+                target_state = fetch_fold(
+                    vertex_path,
+                    kind=addr.kind or None, key=addr.key,
+                    observer=observer, at=at, as_of=as_of,
+                )
+                hit = False
+                for tsection in target_state.sections:
+                    tkf = tsection.key_field
+                    if not tkf:
                         continue
-                    walked.append(WalkedItem(
-                        item=titem, section_kind=tsection.kind,
-                        key_field=tkf,
-                        via_anchor=via_anchor, depth=depth,
-                    ))
-                    if depth < refs_depth:
-                        for ref in _outbound_addresses(titem):
-                            parsed = _parse_ref_to_kind_key(ref)
-                            if parsed is None:
+                    for titem in tsection.items:
+                        tkey = str(titem.payload.get(tkf, ""))
+                        this_addr = f"{tsection.kind}/{tkey}"
+                        # The fetched state may include other items (prefix
+                        # match); only the EXACT target counts.
+                        if addr.kind:
+                            if this_addr != f"{addr.kind}/{addr.key}":
                                 continue
-                            rk, rkey = parsed
-                            new_addr = f"{rk}/{rkey}"
-                            if new_addr in visited:
-                                continue
-                            next_frontier.append((this_addr, rk, rkey, depth + 1))
+                        elif tkey != addr.key:
+                            continue
+                        if this_addr in visited:
+                            continue
+                        visited.add(this_addr)
+                        hit = True
+                        walked.append(WalkedItem(
+                            item=titem, section_kind=tsection.kind,
+                            key_field=tkf,
+                            via_anchor=via_anchor, depth=depth,
+                        ))
+                        if depth < refs_depth:
+                            _enqueue(next_frontier, this_addr, titem, depth + 1)
+                if hit:
+                    # This reading resolved — don't also walk the sibling
+                    # interpretation of the same ref.
+                    break
+                visited.add(reading_addr)
         frontier = next_frontier
 
     return FoldState(
@@ -332,24 +350,15 @@ def _outbound_addresses(item) -> "list[str]":
     return out
 
 
-def _parse_ref_to_kind_key(ref: str) -> "tuple[str, str] | None":
-    """Parse a ref string into (kind, key). Returns None if unparseable.
+def _reading_addr(addr: "Address") -> str:
+    """Visited-set handle for one reading of a ref.
 
-    Refs are stored in two forms in the wild:
-    * ``kind:key`` (newer runbook convention, fully qualified) — supported
-    * ``key`` only (legacy / same-kind-implied) — skipped (ambiguous)
-
-    Items expose their refs as pre-extracted strings; the address format
-    follows the ``kind:key`` discipline. Bare-key refs lose the cross-kind
-    dispatch info, so we can't safely walk them — the walk would have to
-    guess the kind.
+    Kind-qualified readings share the ``kind/key`` spelling the walk uses for
+    resolved entities, so a reading and the entity it resolves to dedup against
+    each other. A bare reading names no kind; ``*/key`` keeps it in the same
+    namespace without colliding with any real address.
     """
-    if not ref or ":" not in ref:
-        return None
-    k, v = ref.split(":", 1)
-    if not k or not v:
-        return None
-    return k, v
+    return f"{addr.kind}/{addr.key}" if addr.kind else f"*/{addr.key}"
 
 
 def _item_matches_key(item: "FoldItem", key_field: str | None, key: str) -> bool:

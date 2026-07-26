@@ -902,3 +902,61 @@ class TestBuild2Render:
             graph_view, data,
             load_bearing=["decision/x", "person/alice", "stakeholder"],
         )
+
+
+class TestGraphWalkAgreement:
+    """One store, one ref, two read paths — they must agree it is an edge.
+
+    sol P2-c: the graph projection interpreted refs through
+    ``atoms.Address.readings`` (S1's convergence) while ``--refs`` still used a
+    colon-only parser, so a slash ref counted as one graph edge and zero walked
+    entities. The invariant below is the contract, not the mechanism: if the
+    graph counts an edge, the walk must be able to traverse it.
+    """
+
+    def _vp(self, tmp_path, ref):
+        from atoms import Fact
+        from engine import load_vertex_program
+
+        vp = tmp_path / "w.vertex"
+        vp.write_text(
+            'name "w"\nstore "./w.db"\n\n'
+            "loops {\n"
+            '  decision { fold { items "by" "topic" } }\n'
+            '  thread { fold { items "by" "name" } }\n'
+            "}\n"
+        )
+        prog = load_vertex_program(vp)
+        prog.receive(Fact.of(
+            "decision", "kyle", ts=1735732800.0, topic="design/bar", message="target"))
+        prog.receive(Fact.of(
+            "thread", "kyle", ts=1735732801.0, name="my-arc", status="open"))
+        prog.receive(Fact.of(
+            "decision", "kyle", ts=1735732802.0, topic="design/foo", message="src",
+            ref=ref))
+        return vp
+
+    @pytest.mark.parametrize("ref", [
+        "decision:design/bar",   # colon — exact, always worked
+        "design/bar",            # slash — bare namespaced key (the P2-c case)
+        "thread/my-arc",         # slash — kind-qualified reading
+    ])
+    def test_graph_edge_implies_walkable(self, tmp_path, ref):
+        from loops.commands.fetch import fetch_fold, fetch_graph
+
+        vp = self._vp(tmp_path, ref)
+        graph = fetch_graph(vp)
+        assert graph["edges"] == 1, "precondition: the graph counts this ref"
+
+        state = fetch_fold(vp, kind="decision", key="design/foo", refs_depth=1)
+        assert state.walked, f"graph counts {ref} as an edge but --refs walks nothing"
+
+    def test_dangling_ref_is_neither(self, tmp_path):
+        # The converse holds too: a ref resolving nowhere is not an edge and
+        # not walkable — agreement in both directions, not just the positive.
+        from loops.commands.fetch import fetch_fold, fetch_graph
+
+        vp = self._vp(tmp_path, "nowhere/at-all")
+        assert fetch_graph(vp)["edges"] == 0
+        state = fetch_fold(vp, kind="decision", key="design/foo", refs_depth=1)
+        assert state.walked == ()

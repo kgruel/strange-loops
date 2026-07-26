@@ -719,8 +719,10 @@ class TestFetchFoldRefsWalk:
     connected entities up to N hops, with via_anchor preserving the chain
     and visited-set protecting against cycles.
 
-    Refs format follows the runbook convention: ``kind:key``. Refs without
-    ``:`` are skipped (consistent with _parse_ref_to_kind_key).
+    Refs are self-describing addresses: ``kind:key`` (exact) or ``kind/key``
+    (dual-reading — kind-qualified, else bare namespaced key), interpreted
+    through ``atoms.Address.readings`` exactly as matching and the graph
+    projection interpret them.
     """
 
     def test_depth_zero_means_no_walk(self, tmp_path):
@@ -799,19 +801,55 @@ class TestFetchFoldRefsWalk:
             f"Expected only design/bar walked once; got {topics}"
         )
 
-    def test_bare_ref_without_kind_prefix_is_skipped(self, tmp_path):
-        """Refs without ``kind:`` prefix are ambiguous — skip them.
+    def test_slash_ref_walks_through_its_bare_reading(self, tmp_path):
+        """A slash ref the GRAPH counts as an edge must also be WALKABLE.
 
-        Matches _parse_ref_to_kind_key behavior; the walker can't safely
-        cross kinds without knowing the target kind.
+        INVERTS the old ``test_bare_ref_without_kind_prefix_is_skipped``: the
+        walk used to skip anything without a colon, so `ref="design/bar"`
+        (naming a decision keyed ``design/bar``) counted as one graph edge
+        while ``--refs`` reported nothing to walk — two answers about one edge
+        from one store (sol P2-c). ``Address.readings`` supplies both
+        interpretations; the walk takes the first that resolves.
         """
         from loops.commands.fetch import fetch_fold
 
         vpath = _write_project_vertex(tmp_path)
-        # ref="design/bar" (no kind prefix) — should be skipped
         _emit(vpath, "decision", topic="design/foo", message="x",
               ref="design/bar")
         _emit(vpath, "decision", topic="design/bar", message="y")
+
+        state = fetch_fold(
+            vpath, kind="decision", key="design/foo", refs_depth=1,
+        )
+        assert [w.item.payload["topic"] for w in state.walked] == ["design/bar"]
+
+    def test_slash_ref_prefers_the_kind_qualified_reading(self, tmp_path):
+        """``thread/my-arc`` resolves to the THREAD, not a bare-keyed decision.
+
+        Readings are ordered primary-first, so the kind-qualified
+        interpretation wins whenever that entity exists — the bare reading is
+        the fallback, not a second walk of the same ref.
+        """
+        from loops.commands.fetch import fetch_fold
+
+        vpath = _write_project_vertex(tmp_path)
+        _emit(vpath, "decision", topic="design/foo", message="x",
+              ref="thread/my-arc")
+        _emit(vpath, "thread", name="my-arc", status="open", message="t")
+
+        state = fetch_fold(
+            vpath, kind="decision", key="design/foo", refs_depth=1,
+        )
+        assert len(state.walked) == 1
+        assert state.walked[0].section_kind == "thread"
+
+    def test_unresolvable_ref_walks_nothing(self, tmp_path):
+        """A ref naming no entity under ANY reading still walks nothing."""
+        from loops.commands.fetch import fetch_fold
+
+        vpath = _write_project_vertex(tmp_path)
+        _emit(vpath, "decision", topic="design/foo", message="x",
+              ref="nowhere/at-all")
 
         state = fetch_fold(
             vpath, kind="decision", key="design/foo", refs_depth=1,

@@ -272,11 +272,16 @@ def resolve_local_vertex(start: Path | None = None) -> Path:
     1. Local vertex in cwd (*.vertex)
     2. LOOPS_HOME/session/session.vertex
 
-    Raises FileNotFoundError if neither found.
+    Raises FileNotFoundError if neither found, and ``AmbiguousLocalVertex``
+    when step 1 would have to break a multi-instance tie alphabetically —
+    refuse-by-default at the chokepoint, so a verb added later inherits the
+    refusal instead of silently writing to whichever store sorts first
+    (sol P1-b). Callers render the teaching message via
+    ``resolve.ambiguous_local_vertex_refusal``.
     """
     from loops.commands.resolve import _find_local_vertex
 
-    # 1. Local vertex in cwd
+    # 1. Local vertex in cwd (_find_local_vertex refuses on ambiguity itself)
     local = _find_local_vertex()
     if local is not None:
         return local

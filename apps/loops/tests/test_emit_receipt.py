@@ -593,37 +593,6 @@ class TestInboundDeltaCliPath:
         assert "inbound edge via" not in err
 
 
-class TestAddressSplit:
-    """Pure-function guards for the colon-canonical address parser."""
-
-    def test_colon_splits_kind_from_namespaced_key(self):
-        from loops.commands.resolve import _split_addr
-        # Colon binds tighter than the namespace slash in the key.
-        assert _split_addr("decision:design/foo") == ("decision", "design/foo")
-        assert _split_addr("thread:arc-name") == ("thread", "arc-name")
-
-    def test_slash_form_back_compat(self):
-        from loops.commands.resolve import _split_addr
-        assert _split_addr("thread/arc") == ("thread", "arc")
-        assert _split_addr("decision/design/foo") == ("decision", "design/foo")
-
-    def test_no_separator_or_empty_side_is_none(self):
-        from loops.commands.resolve import _split_addr
-        assert _split_addr("barewords") is None
-        assert _split_addr(":key") is None
-        assert _split_addr("kind:") is None
-
-    def test_candidate_requires_separator_and_no_whitespace(self):
-        from loops.commands.resolve import _is_addr_candidate
-        assert _is_addr_candidate("decision:design/foo") is True
-        assert _is_addr_candidate("thread/arc") is True
-        # Free-text prose must not be misread as a ref (false-WARN guard).
-        assert _is_addr_candidate("note: see the foo") is False
-        assert _is_addr_candidate("plain text") is False
-        assert _is_addr_candidate("nosep") is False
-        assert _is_addr_candidate("") is False
-
-
 class TestDryRunWording:
     """Dry-run WARNs must not claim a write that did not happen."""
 

@@ -1,0 +1,148 @@
+{
+ "slice": "Slice 4 \u2014 canonical review projection + cursor/decl-generation disclosure",
+ "thesis": "Add a deterministic, diffable review projection of a vertex's folded state \u2014 sorted by (kind,key), whitelisted to only emit-derived fields, with each fact's signature carried verbatim from the store, under a header disclosing the read's cursor position and the declaration generation that interpreted the facts. This is a new read-only surface built entirely over the EXISTING fold fetch + declaration-status machinery; it deliberately stops short of the loops-go SPEC \u00a710 total-dump (witness-ordered every-row JSONL, JCS byte-determinism, rebuild round-trip, chain) which is gated on GlobalReceiptPosition. Two supporting disclosures ride along: extending the 0.8.0 cursor mode-line to HEAD reads (today only --at/--as-of emit it), and a declaration-generation fingerprint that exists nowhere today.",
+ "files": [
+  {
+   "path": "/Users/kaygee/Code/loops/apps/loops/src/loops/surface.py",
+   "role": "Home of the new canonical review encoder (to_review) + its deterministic (kind,key) sort and field whitelist. Sits beside the existing to_dict encoder (lines 1017-1040). Painted-free leaf; must stay so.",
+   "est_loc_delta": "+120"
+  },
+  {
+   "path": "/Users/kaygee/Code/loops/apps/loops/src/loops/cli/views/fold.py",
+   "role": "Add the --review short-circuit branch in run() (same pattern as --why at 581-594 and --diff at 599-600) that fetches the fold, resolves cursor (head or --at/--as-of), computes decl generation, and emits the canonical JSON. Also add head-cursor resolution for the default (no --at/--as-of) path via a small extension around lines 605-616.",
+   "est_loc_delta": "+95"
+  },
+  {
+   "path": "/Users/kaygee/Code/loops/apps/loops/src/loops/cli/read_args.py",
+   "role": "Declare the --review flag (store_true) alongside --at/--as-of/--diff (lines 109-133) so the fold parser and completion/-h see it.",
+   "est_loc_delta": "+6"
+  },
+  {
+   "path": "/Users/kaygee/Code/loops/libs/engine/src/engine/declaration.py",
+   "role": "New declaration_generation() helper (reuses resolve_declaration_documents at 219-431 and load_declaration_status at 445-515) returning the generation fingerprint + status + lineage. Honest across both the adopted-store and pre-genesis-file residences.",
+   "est_loc_delta": "+55"
+  },
+  {
+   "path": "/Users/kaygee/Code/loops/libs/engine/src/engine/store_reader.py",
+   "role": "New read-only fact_signatures(ids)->dict[id,str|None] helper (SELECT id, signature FROM facts WHERE id IN (...)); guarded on the signature column existing (mirror the PRAGMA probe at 211-224). Verbatim column read, never recompute.",
+   "est_loc_delta": "+30"
+  },
+  {
+   "path": "/Users/kaygee/Code/loops/libs/engine/src/engine/__init__.py",
+   "role": "Export declaration_generation and fact_signatures (or a store-path wrapper).",
+   "est_loc_delta": "+4"
+  },
+  {
+   "path": "/Users/kaygee/Code/loops/apps/loops/src/loops/cli/views/read.py",
+   "role": "Optionally refuse --review combined with --facts/--ticks/--diff (fold-route-only concern), mirroring the --at/--diff route-guard at 56-68.",
+   "est_loc_delta": "+8"
+  },
+  {
+   "path": "/Users/kaygee/Code/loops/apps/loops/tests/test_review.py",
+   "role": "New test file: determinism (byte-identical across two reads of unchanged state), whitelist enforcement (no salience/tier/inbound/window keys), signature-per-fact inclusion + null-on-unsigned, header cursor + decl-generation shape, aggregate/pre-genesis degradation.",
+   "est_loc_delta": "+160"
+  },
+  {
+   "path": "/Users/kaygee/Code/loops/apps/loops/tests/golden/",
+   "role": "If head-cursor disclosure is turned on for the DEFAULT TTY read (arbiter fork), the fold goldens churn and must be regenerated with --update-goldens.",
+   "est_loc_delta": "+0/regen"
+  }
+ ],
+ "current_behavior": "read --json (gate-pass path) emits surface.to_dict (surface.py:1017-1040): top-level keys {vertex, rows, schema, unfolded, source_facts, window} \u2014 verified empirically. Three concrete gaps vs a review artifact: (1) TRAVERSAL ORDER is fold order, not canonical \u2014 project() walks sections in vertex DECLARATION order (vertex_reader.py:892-898 'Declaration order from AST') and items within a by-fold in items_raw.values() = fold-state dict insertion / first-seen-key (emit) order (vertex_reader.py:927-928); surface.py:552-566 documents this as 'FAITHFUL FOLD ORDER'. Two stores with identical folded state but different emit order diff spuriously. (2) DIFF-NOISE fields: _row_to_dict (surface.py:977-1002) emits salience, tier, inbound, inbound_predicates, depth, via_anchor, granularity \u2014 all read-time DERIVED (inbound/salience change when OTHER facts emit refs; tier is a population quantile via _assign_tiers surface.py:532-542) \u2014 plus to_dict includes top-level window (a read-time slice artifact) and schema ranking hints. (3) OMITS SIGNATURE: _row_to_dict has no signature; atoms.FoldItem carries none (fold_state.py:37-82); signatures live ONLY in the store column facts.signature (sqlite_store.py:283-291, nullable), keyed by fact id, never threaded into the fold/Surface path (verified: read --json row has no 'signature' key; project store has 658/3123 signed facts). Cursor disclosure: fold.py:605-616 builds cursor_meta ONLY when args.at or args.as_of; dispatch merges it into JSON (dispatch.py:310-328) and the fold lens prepends cursor_mode_line (lenses/fold.py:226-245, wired at 414-421). A plain head read builds no cursor_meta, so no cursor line renders (verified: 0 cursor lines on `sl read project`). --at head DOES resolve a witness position even on a pre-genesis/unadopted store (verified: seq 3123, status file-pre-genesis, anchor present) via resolve_at_address(store,'head') -> resolve_witness_position (witness_address.py:178-179). Declaration generation: NOTHING today discloses which generation of declarations produced a read; load_declaration_status (declaration.py:445-515) returns only a coarse status label ('store'|'file-pre-genesis'|'unhistorized'|'aggregate-head', declaration.py:434-442). Project store is pre-genesis (0 _decl rows, no store_meta) \u2014 the dominant live case.",
+ "planned_changes": [
+  {
+   "step": "1. Confirm the SPEC \u00a710 boundary and encode it in the brief/docstrings",
+   "description": "Read loops-go/SPEC.md \u00a79 (927-1187) and \u00a710 (1189-1246). \u00a710.1 defines the DUMP as ONE JSONL stream of EVERY row (facts + declaration events + ticks) in WITNESS order (\u00a78.4); \u00a710.2 makes it JCS byte-deterministic; \u00a710.3 requires rebuild(dump(S)) chain-validity + dump(rebuild(dump(S))) byte-identity; \u00a710.4 adds per-vertex residence modes + transit receipts; \u00a710.5 sequences all \u00a710 vectors AFTER the _canonical_bytes->JCS migration (a hard constraint) and the whole layer is PROVISIONAL, gated on GlobalReceiptPosition (loops-go coordination batch). The BUILDABLE CORE STOPS SHORT of ALL of that: the review projection encodes FOLDED ENTITY state (one row per kind/key), sorted by (kind,key) for human diffability \u2014 NOT witness order, NOT every row, NO ticks, NO declaration-event rows, NO chain. Its determinism is 'same folded state -> same bytes' (a review property), explicitly NOT \u00a710.2 canonical-interchange bytes; it is NOT an encoding and is NOT rebuildable (\u00a710.3 does not apply). Building anything witness-ordered/rebuildable/JCS-canonical here would fork the interchange contract \u2014 refuse it. Docstrings must say 'review snapshot, not interchange dump'.",
+   "files": [
+    "/Users/kaygee/Code/loops-go/SPEC.md"
+   ]
+  },
+  {
+   "step": "2. Add engine helper: fact_signatures(store_path, ids) -> {id: signature|None}",
+   "description": "Read-only batched lookup of the facts.signature column by id. Open the store read-only (mode=ro, mirroring declaration._open_readonly at declaration.py:201-216 and the slice-2 read-purity posture); PRAGMA-probe the signature column (mirror store_reader.py:211-224) and return all-None if the column is absent (pre-signature store). CUSTODY: read the column verbatim, never recompute or re-sign (matches sqlite_store append signature_override posture at 492-520). This is the ONLY source of per-fact signatures for the projection \u2014 the fold path drops them entirely.",
+   "files": [
+    "/Users/kaygee/Code/loops/libs/engine/src/engine/store_reader.py",
+    "/Users/kaygee/Code/loops/libs/engine/src/engine/__init__.py"
+   ]
+  },
+  {
+   "step": "3. Add engine helper: declaration_generation(vertex_path, *, at=None, as_of=None) -> dict",
+   "description": "Reuse load_declaration_status (declaration.py:445-515) for the status label and residence detection, and resolve_declaration_documents (219-431) for the folded declaration document set on adopted stores. Return {status, lineage, generation, head?}. RECOMMENDED minimal mechanism (see open question): generation = a plain sha256 fingerprint over a deterministically-serialized projection of the resolved declaration (the document set on an adopted store; the file's parsed declaration content on a pre-genesis store) \u2014 ONE fingerprint honest in BOTH residences, answering 'did the ontology change between two reads'. Label it a REVIEW fingerprint, NOT \u00a710.2 JCS canonical bytes. On adopted stores ALSO surface head = id (ULID) of the latest-applied self-lineage _decl.* event within the cutoff (rebuild-stable, unlike rowid). On pre-genesis stores (0 _decl rows \u2014 the project store today) lineage=null, head=null, status='file-pre-genesis'. Aggregates report status='aggregate-head' (membership is current file state, declaration.py:482-492).",
+   "files": [
+    "/Users/kaygee/Code/loops/libs/engine/src/engine/declaration.py",
+    "/Users/kaygee/Code/loops/libs/engine/src/engine/__init__.py"
+   ]
+  },
+  {
+   "step": "4. Add surface.to_review(state, *, header) -> dict \u2014 the canonical encoder",
+   "description": "Operate on the fetched FoldState (NOT the derived Surface \u2014 the whitelist is exactly atoms.FoldItem's own fields, so no Surface scalars are needed). Iterate state.sections ONLY (ignore walked ref-graph reach \u2014 that's a read-time graph, not folded self-state). For each item build a row: {kind, key (the fold-key value or null), key_field, payload (with SORTED keys), id, ts, observer, origin, n, refs (sorted), edges [{predicate,address}], signature (verbatim from fact_signatures by item.id, or null)}. WHITELIST = FoldItem fields + address + signature; EXCLUDE every read-time derivation (salience, tier, inbound, inbound_predicates, depth, via_anchor, granularity) and the Surface window/schema-ranking. Sort rows deterministically by (kind, key or '', id) so keyless collect rows order by id. Emit {header, facts: [...]} with json.dumps(..., sort_keys=True) so two reads of unchanged state are byte-identical. Keep surface.py painted-free; the signature lookup is injected by the caller (pass signatures dict in) OR call the engine helper via a local import like _indexed_kinds does (surface.py:744-758) \u2014 prefer injecting the dict so surface stays a leaf.",
+   "files": [
+    "/Users/kaygee/Code/loops/apps/loops/src/loops/surface.py"
+   ]
+  },
+  {
+   "step": "5. Wire --review as a fold-route short-circuit in fold.py::run",
+   "description": "Declare --review in read_args.add_read_args (read_args.py:109-133). In fold.py::run, after cursor resolution, add a branch (patterned on _run_why 581-594 / _run_diff 599-600 which own their JSON) that: resolves the cursor (head when no --at/--as-of via step 6; else the already-resolved at_position/as_of_ts + cursor_meta), calls fetch_fold(vertex_path, kind=kind, key=fetch_key, at=at_position, as_of=as_of_ts) for the FoldState, batches signatures via engine.fact_signatures using every item.id, computes engine.declaration_generation(vertex_path, at=..., as_of=...), assembles header={vertex, cursor: cursor_meta, declaration: <gen>}, and prints surface.to_review(state, header=header). --review is JSON-only (a machine artifact); ignore/refuse TTY-render flags. In read.py refuse --review with --facts/--ticks/--diff (fold-route-only, mirror 56-68).",
+   "files": [
+    "/Users/kaygee/Code/loops/apps/loops/src/loops/cli/views/fold.py",
+    "/Users/kaygee/Code/loops/apps/loops/src/loops/cli/read_args.py",
+    "/Users/kaygee/Code/loops/apps/loops/src/loops/cli/views/read.py"
+   ]
+  },
+  {
+   "step": "6. Extend cursor disclosure to HEAD reads",
+   "description": "Add a helper in fold.py that, when neither --at nor --as-of is set AND the vertex is a single store (not aggregate \u2014 reuse witness_address.is_aggregate_vertex, witness_address.py:43-48), resolves the head position via resolve_at_address(store_path,'head') + load_declaration_status(vertex_path, at=head_pos) and builds a cursor_meta dict shaped like the --at path (fold.py:332-343) but flagged as head (e.g. address='head', add a 'head': true marker) so the mode-line can phrase 'at head' vs an explicit rewind. Verified this resolves even on pre-genesis/unadopted stores (durable_handle null, portable false, unadopted true \u2014 the existing honesty fields already carry the caveat). Aggregates: skip (no witness head) \u2014 emit no cursor or a mode='head' status='aggregate-head' with no position. For the --review header this head cursor_meta is ALWAYS populated (in scope, no golden churn \u2014 new surface). Whether to ALSO thread it into the DEFAULT TTY/JSON read (so `sl read project` grows a mode-line) is the arbiter fork below; if yes, thread cursor_meta into render_context exactly as fold.py:733-736 and regenerate fold goldens.",
+   "files": [
+    "/Users/kaygee/Code/loops/apps/loops/src/loops/cli/views/fold.py"
+   ]
+  }
+ ],
+ "test_plan": [
+  "Determinism: emit the same logical fold twice in different emit order into two temp stores (or reuse a fixture); assert to_review bytes are identical (sort_keys + (kind,key) sort). Contrast: assert to_dict rows differ in order for the same pair (documents the gap).",
+  "Whitelist: assert no row in --review output carries salience/tier/inbound/inbound_predicates/depth/via_anchor/granularity, and the top level carries no window/schema; assert it DOES carry payload/id/ts/observer/origin/n/refs/edges/signature.",
+  "Signature-per-fact: on a store with mixed signed/unsigned facts (project store has 658/3123), assert signed folded rows carry the verbatim column value and unsigned rows carry null; assert the signature equals a direct SELECT (no recomputation).",
+  "Header cursor at head: `sl read project --review` header.cursor.mode=='witness'/head marker, address=='head', status=='file-pre-genesis', unadopted true, portable false, anchor present \u2014 matches the empirically-confirmed --at head shape.",
+  "Header cursor with --at/--as-of: `--review --at seq:N` and `--review --as-of 30d` carry the corresponding cursor_meta; `--review --at X --as-of Y` refused (A8, read.py:124-130).",
+  "Declaration generation: pre-genesis store -> {status:'file-pre-genesis', lineage:null, generation:<hash>}; two reads of an unchanged store -> identical generation; editing the .vertex file changes the fingerprint. (If an adopted-store fixture exists, assert head = latest _decl id.)",
+  "Aggregate degradation: `--review` on a combine/discover vertex reports status 'aggregate-head' and no witness head position (no crash).",
+  "Head disclosure on default read (only if the arbiter turns it on): golden regeneration + a targeted test that `sl read project` (no flags) now prints a cursor mode-line and `--json` carries a cursor field.",
+  "Read-purity: assert --review opens stores read-only and does not mutate the store (file mtime / FTS unchanged) \u2014 consistent with slice-2 posture.",
+  "Router guard: `--review --facts`, `--review --ticks`, `--review --diff A..B` are refused with a teaching message.",
+  "Run the existing suites unchanged: uv run --package loops pytest apps/loops/tests (esp. test_surface.py, test_fold_view_cursor.py, golden/test_fold_surface_paths.py) and uv run --package engine pytest libs/engine/tests. After CLI changes, uv tool install . -e then exercise `sl read project --review` directly."
+ ],
+ "acceptance_criteria": [
+  "`sl read <vertex> --review` emits JSON {header, facts:[...]} where facts are sorted by (kind,key) and byte-identical across repeated reads of unchanged folded state.",
+  "Each fact row carries payload (sorted keys), id, ts, observer, origin, n, refs, edges, and signature (verbatim store column, or null when unsigned) \u2014 and carries NONE of salience/tier/inbound/inbound_predicates/depth/via_anchor/granularity/window/schema.",
+  "header.cursor discloses the read's position: head for a plain --review, or the resolved witness/event-time position for --at/--as-of, using the existing cursor_meta shape (status, unadopted, portable, anchor, durable_handle).",
+  "header.declaration discloses status + a generation fingerprint that is stable across unchanged reads and changes when the declaration changes, honest on both adopted-store and pre-genesis-file residences.",
+  "Signatures are read verbatim; no code path re-signs or recomputes a signature. No tick-chain fields are included. An unadopted store is disclosed as unadopted/non-portable, never silently adopted.",
+  "The projection is strictly read-only (stores opened mode=ro; no store mutation) and stops short of SPEC \u00a710: no witness-ordered every-row stream, no JCS byte-determinism claim, no rebuild round-trip, no chain \u2014 docstrings state this explicitly.",
+  "HEAD reads can emit the cursor disclosure (the mechanism exists and is wired into the review header); existing --at/--as-of behavior is unchanged.",
+  "Full existing test + golden suites pass (goldens regenerated only if the arbiter enables default-read head disclosure)."
+ ],
+ "risks": [
+  "Golden blast radius: if head-cursor disclosure is turned on for the DEFAULT read, every fold golden (the most-used command's output) churns \u2014 a large, reviewable-but-noisy diff. Mitigation: keep default-read head disclosure behind the arbiter fork; the review header carries head cursor with zero golden impact.",
+  "surface.py is a painted-free LEAF that the lens depends on; adding a signature lookup there could pull an engine import to module scope. Mitigation: inject the signatures dict from the caller (fold.py), keep the engine call out of surface.py, or use the same in-function local-import pattern as _indexed_kinds (surface.py:744-758).",
+  "Determinism traps: json.dumps default key order + float ts repr + payload nested dicts. Mitigation: sort_keys=True end to end, sort payload/refs, and a round-trip determinism test. Do NOT reach for JCS/RFC-8785 here \u2014 that is \u00a710.2 territory sequenced after the _canonical_bytes->JCS migration (SPEC \u00a710.5); a plain sorted sha256 fingerprint is sufficient and must be labeled review-only.",
+  "Declaration-generation semantics: a content hash over the file (pre-genesis) vs the document set (adopted) hashes two different spaces; a naive file hash (mtime/whitespace) would over- or under-report change. Mitigation: hash the PARSED declaration projection, not raw bytes, so cosmetic edits don't churn and semantic edits do.",
+  "FoldItem.id for a by-fold is the LATEST contributing fact (fold_state.py:51-54); its signature is the winning fact's authorship \u2014 correct for a folded-head review, but the impl agent must not assume it signs the whole key history.",
+  "Aggregate/storeless vertices have no witness head and no single store for signatures \u2014 the review path must degrade honestly (status aggregate-head, null signatures/generation) rather than crash, mirroring the existing --at aggregate refusal (witness_address.py:68-103)."
+ ],
+ "dependencies": [
+  "Slice 2 (FTS read-purity) is assumed landed: the review projection is a snapshot-for-review and must be strictly read-only. The encoder itself triggers no FTS (no --match), but its signature + declaration-generation lookups must use read-only connections consistent with slice-2's 'store reindex is the sole FTS writer / read-only vertex_search' posture.",
+  "Existing 0.8.0 temporal-cursor machinery: fold.py::_resolve_cursor (282-361), witness_address.resolve_at_address (151-246), engine.load_declaration_status / resolve_declaration_documents (declaration.py:219-515), lenses/fold.cursor_mode_line (226-245), dispatch cursor merge (310-328). Reused, not rebuilt.",
+  "Custody substrate already implemented: facts.signature column (sqlite_store.py:283-291), signature_override verbatim-preserve posture (492-520), witness adoption marker / durable_handle (witness.py, declaration._read_own_lineage 175-188).",
+  "GlobalReceiptPosition + the loops-go SPEC \u00a710 total-dump are a HARD NON-dependency: the buildable core must not depend on or anticipate them.",
+  "After CLI changes: uv tool install . -e, then exercise `sl read project --review` directly (per CLAUDE.md install-path discipline)."
+ ],
+ "open_questions": [
+  "Declaration-generation mechanism (the one genuine fork): (a) a content-hash fingerprint over the resolved declaration \u2014 works honestly in BOTH residences and gives a single comparable value, but introduces a new hashing contract that must be carefully kept distinct from SPEC \u00a710.2 JCS canonical bytes; vs (b) the decl-head event id (ULID of the latest-applied self-lineage _decl.* event) \u2014 simpler and rebuild-stable, but store-only, so pre-genesis (the dominant case today) has no comparable value and can only report a 'file' sentinel. Recommend (a) as the default (labeled a review fingerprint), with (b)'s head id ALSO surfaced on adopted stores. Needs arbiter sign-off because it defines a new disclosed contract field.",
+  "Head-cursor disclosure scope: should the head mode-line render on EVERY default read (`sl read project` gains a persistent cursor line \u2014 the design's symmetric-honesty aim per cursor_mode_line's docstring, but all fold goldens churn and the most-used command's output changes), or ONLY inside the --review header and --json cursor field (default TTY read visually unchanged, lower blast radius)? Recommend review-header + JSON disclosure now, and treat always-on TTY head disclosure as a separate opt-in the arbiter can flip."
+ ],
+ "measures": [
+  "Byte-determinism: two --review reads of unchanged folded state produce identical bytes (assert equality).",
+  "Whitelist coverage: count of forbidden keys (salience/tier/inbound/inbound_predicates/depth/via_anchor/granularity/window/schema) present in --review output == 0.",
+  "Signature coverage: for the project store, signed folded rows carrying a verbatim signature vs total (baseline 658/3123 facts signed) \u2014 signed rows must carry the column value, unsigned must carry null.",
+  "Declaration-generation stability: fingerprint unchanged across N repeated reads of an unedited store; changed after one .vertex edit."
+ ]
+}

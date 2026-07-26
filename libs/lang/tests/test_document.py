@@ -99,6 +99,7 @@ loops {
     preview "topic" "amount"
     edge "stakeholder" targets="person"
     edge "owner" targets="team"
+    lifecycle "status" active="open,in-progress"
     parse {
       skip "^#"
       split ","

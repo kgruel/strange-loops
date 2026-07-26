@@ -19,12 +19,13 @@ by exact key equality, not by this filter.
 from __future__ import annotations
 
 import re
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from atoms import FoldItem, FoldState, TickWindow
+    from atoms import Address, FoldItem, FoldState, TickWindow
     from engine.witness import WitnessPosition
 
 
@@ -143,7 +144,7 @@ def fetch_fold(
     render-context cursor metadata up front rather than threading a tuple
     return through here).
     """
-    from atoms import FoldSection, FoldState
+    from atoms import FoldSection
     from engine import vertex_fold
     from engine.witness import WitnessFold
 
@@ -170,15 +171,13 @@ def fetch_fold(
                 if _item_matches_key(item, section.key_field, key)
             )
             if matches:
-                filtered.append(FoldSection(
-                    kind=section.kind,
-                    items=matches,
-                    sections=section.sections,
-                    fold_type=section.fold_type,
-                    key_field=section.key_field,
-                    scalars=section.scalars,
-                    preview_fields=section.preview_fields,
-                ))
+                # dataclasses.replace, NOT a field-by-field rebuild: the rebuild
+                # silently dropped every field added to FoldSection after it was
+                # written (edge_fields, then lifecycle — so `--key` un-hid
+                # inactive entities and blanked the schema's edge declarations).
+                # replace() is the ratchet — a new field can never be dropped
+                # here again by omission (sol P2-b).
+                filtered.append(replace(section, items=matches))
                 if section.key_field:
                     for item in matches:
                         key_value = str(item.payload.get(section.key_field, ""))
@@ -193,9 +192,11 @@ def fetch_fold(
             if k in surviving_source_keys
         }
 
-        state = FoldState(
+        # Same reason as the section rebuild above: replace() so a FoldState
+        # field added later (unfolded, walked, …) survives the key filter.
+        state = replace(
+            state,
             sections=tuple(filtered),
-            vertex=state.vertex,
             source_facts=filtered_source_facts,
         )
 
@@ -242,11 +243,25 @@ def _walk_refs(
     ``refs_depth=0`` (default), so the inner call doesn't loop. The recursive
     call lets us reuse the kind/key filtering logic unchanged.
     """
-    from atoms import FoldState, WalkedItem
+    from atoms import Address, FoldState, WalkedItem
 
-    # Build primary visited set + initial frontier
+    # Build primary visited set + initial frontier. A frontier entry carries the
+    # ref's READINGS (not one guessed kind/key), resolved in Address order.
     visited: set[str] = set()
-    frontier: list[tuple[str, str, str, int]] = []  # (via_anchor, target_kind, target_key, depth)
+    Entry = tuple[str, tuple[Address, ...], int]  # (via_anchor, readings, depth)
+    frontier: list[Entry] = []
+
+    def _enqueue(into: list[Entry], via: str, item, depth: int) -> None:
+        for ref in _outbound_addresses(item):
+            readings = Address.readings(ref)
+            if not readings:
+                continue
+            # Skip only when EVERY reading is already accounted for — a slash
+            # ref whose kind-qualified reading is visited may still resolve
+            # through its bare-key reading.
+            if all(_reading_addr(a) in visited for a in readings):
+                continue
+            into.append((via, readings, depth))
 
     for section in state.sections:
         kf = section.key_field
@@ -258,56 +273,64 @@ def _walk_refs(
                 continue
             anchor_addr = f"{section.kind}/{key_value}"
             visited.add(anchor_addr)
-            for ref in _outbound_addresses(item):
-                parsed = _parse_ref_to_kind_key(ref)
-                if parsed is None:
-                    continue
-                rk, rkey = parsed
-                target_addr = f"{rk}/{rkey}"
-                if target_addr in visited:
-                    continue
-                frontier.append((anchor_addr, rk, rkey, 1))
+            _enqueue(frontier, anchor_addr, item, 1)
 
     walked: list[WalkedItem] = []
     while frontier:
-        next_frontier: list[tuple[str, str, str, int]] = []
-        for via_anchor, target_kind, target_key, depth in frontier:
-            target_addr = f"{target_kind}/{target_key}"
-            if target_addr in visited:
-                continue
-            visited.add(target_addr)
-            # Fetch this entity (refs_depth=0 so inner call doesn't walk),
-            # at the SAME position as the primary fold (see docstring).
-            target_state = fetch_fold(
-                vertex_path, kind=target_kind, key=target_key,
-                observer=observer, at=at, as_of=as_of,
-            )
-            for tsection in target_state.sections:
-                tkf = tsection.key_field
-                if not tkf:
+        next_frontier: list[Entry] = []
+        for via_anchor, readings, depth in frontier:
+            # EVERY reading that resolves is walked, not just the first. The
+            # graph projection counts one edge per resolving reading
+            # (``_resolves_to_node`` over the node index), so stopping at the
+            # first left a collision — a store holding BOTH a decision keyed
+            # ``design/bar`` and a ``design``-kind ``bar`` — reporting two graph
+            # edges and one walked entity for the same ref (sol P2-c round 2).
+            # Same store, same ref, two answers. Readings stay ordered
+            # primary-first, so the kind-qualified interpretation is walked
+            # first where both exist.
+            for addr in readings:
+                reading_addr = _reading_addr(addr)
+                if reading_addr in visited:
                     continue
-                for titem in tsection.items:
-                    tkey = str(titem.payload.get(tkf, ""))
-                    this_addr = f"{tsection.kind}/{tkey}"
-                    # The fetched state may include other items (prefix match);
-                    # only add the one matching our exact target.
-                    if this_addr != target_addr:
+                # Fetch this entity (refs_depth=0 so inner call doesn't walk),
+                # at the SAME position as the primary fold (see docstring). A
+                # bare reading names no kind, so it fetches across kinds and
+                # matches on key alone.
+                target_state = fetch_fold(
+                    vertex_path,
+                    kind=addr.kind or None, key=addr.key,
+                    observer=observer, at=at, as_of=as_of,
+                )
+                hit = False
+                for tsection in target_state.sections:
+                    tkf = tsection.key_field
+                    if not tkf:
                         continue
-                    walked.append(WalkedItem(
-                        item=titem, section_kind=tsection.kind,
-                        key_field=tkf,
-                        via_anchor=via_anchor, depth=depth,
-                    ))
-                    if depth < refs_depth:
-                        for ref in _outbound_addresses(titem):
-                            parsed = _parse_ref_to_kind_key(ref)
-                            if parsed is None:
+                    for titem in tsection.items:
+                        tkey = str(titem.payload.get(tkf, ""))
+                        this_addr = f"{tsection.kind}/{tkey}"
+                        # The fetched state may include other items (prefix
+                        # match); only the EXACT target counts.
+                        if addr.kind:
+                            if this_addr != f"{addr.kind}/{addr.key}":
                                 continue
-                            rk, rkey = parsed
-                            new_addr = f"{rk}/{rkey}"
-                            if new_addr in visited:
-                                continue
-                            next_frontier.append((this_addr, rk, rkey, depth + 1))
+                        elif tkey != addr.key:
+                            continue
+                        if this_addr in visited:
+                            continue
+                        visited.add(this_addr)
+                        hit = True
+                        walked.append(WalkedItem(
+                            item=titem, section_kind=tsection.kind,
+                            key_field=tkf,
+                            via_anchor=via_anchor, depth=depth,
+                        ))
+                        if depth < refs_depth:
+                            _enqueue(next_frontier, this_addr, titem, depth + 1)
+                if not hit:
+                    # Nothing under this reading: remember the dead end so a
+                    # repeated ref costs one fetch, not N.
+                    visited.add(reading_addr)
         frontier = next_frontier
 
     return FoldState(
@@ -331,24 +354,15 @@ def _outbound_addresses(item) -> "list[str]":
     return out
 
 
-def _parse_ref_to_kind_key(ref: str) -> "tuple[str, str] | None":
-    """Parse a ref string into (kind, key). Returns None if unparseable.
+def _reading_addr(addr: "Address") -> str:
+    """Visited-set handle for one reading of a ref.
 
-    Refs are stored in two forms in the wild:
-    * ``kind:key`` (newer runbook convention, fully qualified) — supported
-    * ``key`` only (legacy / same-kind-implied) — skipped (ambiguous)
-
-    Items expose their refs as pre-extracted strings; the address format
-    follows the ``kind:key`` discipline. Bare-key refs lose the cross-kind
-    dispatch info, so we can't safely walk them — the walk would have to
-    guess the kind.
+    Kind-qualified readings share the ``kind/key`` spelling the walk uses for
+    resolved entities, so a reading and the entity it resolves to dedup against
+    each other. A bare reading names no kind; ``*/key`` keeps it in the same
+    namespace without colliding with any real address.
     """
-    if not ref or ":" not in ref:
-        return None
-    k, v = ref.split(":", 1)
-    if not k or not v:
-        return None
-    return k, v
+    return f"{addr.kind}/{addr.key}" if addr.kind else f"*/{addr.key}"
 
 
 def _item_matches_key(item: "FoldItem", key_field: str | None, key: str) -> bool:
@@ -850,7 +864,7 @@ def _longest_chains(
     *,
     cap: int = _CHAIN_DEPTH_CAP,
     budget: int = _CHAIN_VISIT_BUDGET,
-) -> tuple[dict[str, list[str]], set[str], bool]:
+) -> tuple[dict[str, tuple[list[str], list[str | None]]], set[str], bool]:
     """Longest downstream chain starting at each node — taint-aware memoized DFS.
 
     ``adjacency`` maps source address → [(target address, predicate), ...] over
@@ -867,71 +881,89 @@ def _longest_chains(
     but never cached — it is recomputed per reaching path. Caching a tainted
     result is exactly the poisoning bug this guards against.
 
-    Returns ``(chains, truncated, exhausted)`` — ``chains`` maps node → its
-    longest chain (including the node); ``truncated`` is the set of start nodes
-    whose winning chain was cut by the depth cap; ``exhausted`` is True if the
-    visit budget ran out (results then approximate). Neighbours are walked in
-    sorted order and ties break lexicographically, so the result is
-    deterministic.
+    Returns ``(chains, truncated, exhausted)`` — ``chains`` maps node → a
+    ``(path, predicates)`` pair: ``path`` is its longest downstream chain
+    (including the node) and ``predicates`` is the PARALLEL per-hop edge label,
+    ``predicates[0]`` being ``None`` (the head node has no incoming edge) and
+    each later ``predicates[i]`` the predicate of the edge ``path[i-1] →
+    path[i]``. The predicate is carried through the walk rather than discarded at
+    the target-dedup boundary (build-2, so typed edges stay visible in a chain).
+    ``truncated`` is the set of start nodes whose winning chain was cut by the
+    depth cap; ``exhausted`` is True if the visit budget ran out (results then
+    approximate). Neighbours are walked in sorted target order and ties break on
+    the address path, so the result is deterministic; when one node reaches a
+    target via more than one predicate the hop label is the lexicographically
+    smallest of them (length depends only on the target, so the choice is a
+    stable label, not a correctness axis).
     """
-    memo: dict[str, tuple[list[str], bool]] = {}
+    memo: dict[str, tuple[list[str], list[str | None], bool]] = {}
     visits = 0
     exhausted = False
 
-    def dfs(node: str, stack: set[str]) -> tuple[list[str], bool, bool]:
-        """Return (best_path, truncated, clean) for ``node``.
+    def dfs(
+        node: str, stack: set[str]
+    ) -> tuple[list[str], list[str | None], bool, bool]:
+        """Return (best_path, best_predicates, truncated, clean) for ``node``.
 
         ``truncated`` marks the winning path as cut by the depth cap; ``clean``
         marks the whole subtree as free of back-edge skips AND truncation (i.e.
-        cacheable).
+        cacheable). ``best_predicates`` is parallel to ``best_path``.
         """
         nonlocal visits, exhausted
         if node in memo:
-            path, trunc = memo[node]
-            return path, trunc, True
+            path, preds, trunc = memo[node]
+            return path, preds, trunc, True
         visits += 1
         if visits > budget:
             exhausted = True
-            return [node], False, False  # tainted — not cached
+            return [node], [None], False, False  # tainted — not cached
         best: list[str] = [node]
+        best_preds: list[str | None] = [None]
         best_trunc = False
         clean = True
         hit_cap = False
         stack.add(node)
         if len(stack) < cap:
-            targets = sorted({t for t, _ in adjacency.get(node, ())})
-            for tgt in targets:
+            # Collapse parallel edges to one hop label per target (smallest
+            # predicate), deterministically — the target set drives length,
+            # the predicate is the retained label.
+            by_target: dict[str, str] = {}
+            for tgt, pred in adjacency.get(node, ()):
+                if tgt not in by_target or pred < by_target[tgt]:
+                    by_target[tgt] = pred
+            for tgt in sorted(by_target):
                 if tgt in stack:
                     clean = False  # back-edge skipped — result is path-dependent
                     continue
-                sub, sub_trunc, sub_clean = dfs(tgt, stack)
+                sub, sub_preds, sub_trunc, sub_clean = dfs(tgt, stack)
                 clean = clean and sub_clean
                 cand = [node, *sub]
                 if len(cand) > len(best) or (
                     len(cand) == len(best) and cand < best
                 ):
                     best = cand
+                    best_preds = [None, by_target[tgt], *sub_preds[1:]]
                     best_trunc = sub_trunc
         elif adjacency.get(node):
             hit_cap = True  # cap halted expansion at a node that HAS targets
         stack.discard(node)
         node_trunc = best_trunc or hit_cap
         if clean and not node_trunc:
-            memo[node] = (best, node_trunc)
-        return best, node_trunc, clean
+            memo[node] = (best, best_preds, node_trunc)
+        return best, best_preds, node_trunc, clean
 
-    chains: dict[str, list[str]] = {}
+    chains: dict[str, tuple[list[str], list[str | None]]] = {}
     truncated: set[str] = set()
     for n in adjacency:
-        path, trunc, _ = dfs(n, set())
-        chains[n] = path
+        path, preds, trunc, _ = dfs(n, set())
+        chains[n] = (path, preds)
         if trunc:
             truncated.add(n)
     return chains, truncated, exhausted
 
 
 def _top_chains(
-    chains: dict[str, list[str]],
+    chains: dict[str, tuple[list[str], list[str | None]]],
     truncated: set[str],
     *,
     limit: int = 10,
@@ -941,12 +973,19 @@ def _top_chains(
     A chain needs at least one edge (length ≥ 2). Candidates sort by
     ``(-len, path)``; a candidate that is a contiguous sub-path of an
     already-selected chain is dropped (it adds no new membership). Each pick is
-    returned as ``{"path": [...], "truncated": bool}`` — ``truncated`` is set
-    when the depth cap cut this start node's chain.
+    returned as ``{"path": [...], "predicates": [...], "truncated": bool}`` —
+    ``predicates`` is parallel to ``path`` (``predicates[0]`` is ``None``, each
+    later entry the label of the edge into that hop); ``truncated`` is set when
+    the depth cap cut this start node's chain. Sub-path dedup keys on the
+    ADDRESS path only — the predicates ride alongside.
     """
     cands = sorted(
-        ((node, p) for node, p in chains.items() if len(p) >= 2),
-        key=lambda np: (-len(np[1]), np[1]),
+        (
+            (node, path, preds)
+            for node, (path, preds) in chains.items()
+            if len(path) >= 2
+        ),
+        key=lambda x: (-len(x[1]), x[1]),
     )
 
     def _is_subpath(short: list[str], long: list[str]) -> bool:
@@ -954,27 +993,169 @@ def _top_chains(
         return any(long[i : i + n] == short for i in range(len(long) - n + 1))
 
     picked: list[dict] = []
-    for node, c in cands:
-        if any(_is_subpath(c, sel["path"]) for sel in picked):
+    for node, path, preds in cands:
+        if any(_is_subpath(path, sel["path"]) for sel in picked):
             continue
-        picked.append({"path": c, "truncated": node in truncated})
+        picked.append(
+            {"path": path, "predicates": preds, "truncated": node in truncated}
+        )
         if len(picked) >= limit:
             break
     return picked
+
+
+def _strongly_connected(
+    adjacency: dict[str, list[tuple[str, str]]],
+) -> tuple[list[list[str]], list[str]]:
+    """SCC / self-loop census over the RESOLVED node→node adjacency (iterative).
+
+    Returns ``(sccs, self_loops)``: ``sccs`` are the strongly-connected
+    components of size > 1 (each a sorted address list — a genuine multi-node
+    cycle); ``self_loops`` are addresses carrying an edge to themselves. The two
+    are reported distinctly (a self-loop is a size-1 component Tarjan would not
+    otherwise surface). Refs point temporally backward so today's store is a
+    near-DAG and both lists are empty — the census is forward-required: once
+    batch-emit makes cycles legal (thread:ref-graph-dag-assumption-audit) they
+    become visible here rather than silently distorting the chain walk. Iterative
+    Tarjan (an explicit work stack) so a 1300+-node graph never approaches
+    Python's recursion limit — the same reason ``_longest_chains`` caps depth.
+    """
+    succ: dict[str, list[str]] = {}
+    self_loops: set[str] = set()
+    nodes: set[str] = set(adjacency)
+    for src, tgts in adjacency.items():
+        seen: set[str] = set()
+        for tgt, _pred in tgts:
+            if tgt == src:
+                self_loops.add(src)
+            seen.add(tgt)
+            nodes.add(tgt)
+        succ[src] = sorted(seen)
+    for n in nodes:
+        succ.setdefault(n, [])
+
+    index: dict[str, int] = {}
+    lowlink: dict[str, int] = {}
+    on_stack: dict[str, bool] = {}
+    comp_stack: list[str] = []
+    sccs: list[list[str]] = []
+    counter = 0
+
+    for root in sorted(nodes):
+        if root in index:
+            continue
+        work: list[tuple[str, int]] = [(root, 0)]
+        while work:
+            node, next_i = work[-1]
+            if next_i == 0:
+                index[node] = lowlink[node] = counter
+                counter += 1
+                comp_stack.append(node)
+                on_stack[node] = True
+            recurse = False
+            neighbors = succ[node]
+            i = next_i
+            while i < len(neighbors):
+                w = neighbors[i]
+                if w not in index:
+                    work[-1] = (node, i + 1)
+                    work.append((w, 0))
+                    recurse = True
+                    break
+                if on_stack.get(w):
+                    lowlink[node] = min(lowlink[node], index[w])
+                i += 1
+            if recurse:
+                continue
+            if lowlink[node] == index[node]:
+                comp: list[str] = []
+                while True:
+                    w = comp_stack.pop()
+                    on_stack[w] = False
+                    comp.append(w)
+                    if w == node:
+                        break
+                if len(comp) > 1:
+                    sccs.append(sorted(comp))
+            work.pop()
+            if work:
+                parent = work[-1][0]
+                lowlink[parent] = min(lowlink[parent], lowlink[node])
+
+    return sorted(sccs), sorted(self_loops)
+
+
+def _parse_edge_set(edge: str | None) -> frozenset[str] | None:
+    """Parse an ``--edge`` selector (comma-OR) into a predicate set, or None."""
+    if edge is None:
+        return None
+    parts = [p.strip() for p in edge.split(",") if p.strip()]
+    return frozenset(parts) if parts else None
+
+
+def _outbound_refs(row) -> list[tuple[str, str]]:
+    """Every outbound ref+typed-edge on a Row as ``(raw_address, predicate)``.
+
+    Refs carry the grandfathered ``"ref"`` predicate; typed edges carry their
+    declared field name. The raw address is verbatim (colon / slash / bare) so
+    membership goes through ``Address`` matching, never a re-derived split.
+    """
+    out = [(ref, "ref") for ref in row.refs]
+    out.extend((e.address, e.predicate) for e in row.edges)
+    return out
+
+
+def _node_index(rows) -> tuple[set[tuple[str, str]], set[str]]:
+    """Index a node set for address matching — THE single membership chokepoint.
+
+    Returns ``(exact, bare)``: ``exact`` is the set of ``(kind, key)`` node
+    identities (the ``kind/key`` Row address split at its first slash — the
+    canonical node identity the resolved adjacency is keyed by); ``bare`` is the
+    set of node keys under any kind. A raw ref resolves to the set when — under
+    ANY ``atoms.Address`` reading — a kind-qualified reading equals some node's
+    ``(kind, key)`` OR a bare (kind-unknown) reading names some node's key. This
+    is ``surface._addr_matches`` lifted from a single ``(kind, key)`` to a whole
+    node set; both route through ``Address.readings``, so slice 1's typed-address
+    contract governs matching in exactly one place here.
+    """
+    exact: set[tuple[str, str]] = set()
+    bare: set[str] = set()
+    for r in rows:
+        nkind, _, nkey = r.address.partition("/")
+        exact.add((nkind, nkey))
+        bare.add(nkey)
+    return exact, bare
+
+
+def _resolves_to_node(
+    raw: str, index: tuple[set[tuple[str, str]], set[str]]
+) -> bool:
+    """True when ``raw`` (a self-describing ref) resolves to a node in ``index``."""
+    from atoms import Address
+
+    exact, bare = index
+    for a in Address.readings(raw):
+        if a.kind == "":
+            if a.key in bare:
+                return True
+        elif (a.kind, a.key) in exact:
+            return True
+    return False
 
 
 def fetch_graph(
     vertex_path: Path,
     *,
     kind: str | None = None,
+    key: str | None = None,
+    edge: str | None = None,
     observer: str | None = None,
 ) -> dict:
     """Ref/edge-graph projection — the store as a directed graph (Graph view).
 
     A pure projection over the entity ``Surface`` (``project(fetch_fold())``);
     zero engine SQL beyond the fold fetch. Nodes are folded entities, edges are
-    their outbound refs + typed edges RESOLVED to another node (dangling refs —
-    pointing at no node — are counted, not walked). Three cuts:
+    their outbound refs + typed edges RESOLVED to another node. Three cuts:
 
     * **hubs** — nodes by inbound count desc; the ``←N`` sinks. Each hub also
       carries its RESOLVED outbound degree ``→M`` + neighbor addresses on both
@@ -985,33 +1166,75 @@ def fetch_graph(
       decision:design/graph-build1-scope.
     * **chains** — longest directed ref paths (net-new traversal; taint-aware
       memoized DFS with a per-path cycle guard + depth cap 128 + visit budget).
+      Each chain carries per-hop predicate labels (build-2, retained through the
+      walk rather than discarded at the target-dedup boundary).
     * **orphans** — nodes with no inbound AND no outbound refs/edges (isolated).
 
-    ``edges`` counts node→node RESOLVED edges only; ``unsourced_inbound``
-    discloses how much of the hubs' summed ``←N`` arrives from keyless/sourceless
-    facts (refs with no node address to resolve a source edge from).
+    Build-2 selectors (honor-or-refuse — a dropped ``--key`` was the silent-drop
+    this closes, friction:graph-fetch-drops-key):
+
+    * ``kind`` / ``key`` narrow the node projection (sub-scope, matching shipped
+      ``--kind`` semantics — inbound counts, chains, and tiers compute over the
+      in-scope sub-graph, arbiter S3-F1). A full-vertex projection is loaded ONLY
+      to power the dangling-vs-filter_excluded classification below; it never
+      feeds ``←N``.
+    * ``edge`` restricts the whole projection to one or more edge PREDICATES
+      (``ref`` or a declared typed-edge field, comma-OR) — hubs re-rank by the
+      filtered inbound, chains follow filtered edges, the census lists only the
+      selected predicate(s).
+
+    Unresolved outbound refs partition into two edge-resolution buckets (arbiter
+    S3-F2): ``dangling`` — the target resolves NOWHERE in the full vertex (a dead
+    ref) — vs ``filter_excluded`` — it resolves globally but lies outside the
+    current ``kind``/``key`` scope. The third taxonomy bucket, ``keyless`` (the
+    source is unaddressable), stays disclosed inbound-side as ``unsourced_inbound``;
+    there is no outbound-keyless bucket. ``cycles`` reports the SCC / self-loop
+    census (empty on today's near-DAG; forward-required for batch-emit).
 
     Returns a JSON-clean dict (all counts/paths serializable; ``last`` is a
     float epoch like the confluence cut)::
 
         {"vertex", "nodes", "edges", "typed_edges", "orphans", "dangling",
-         "unsourced_inbound", "chains_approximate",
+         "filter_excluded", "unsourced_inbound", "chains_approximate", "edge",
          "hubs": [{address, kind, key, tier, inbound, outbound,
                    predicates:[[p,n]..], in_addrs:[addr..], out_addrs:[addr..],
                    last, observer}, ...],
          "orphan_list": [address, ...],
+         "dangling_list": [address, ...], "filter_excluded_list": [address, ...],
          "census": [[predicate, count, typed], ...],
-         "chains": [{"path": [address, ...], "truncated": bool}, ...]}
+         "cycles": {"sccs": [[address, ...], ...], "self_loops": [address, ...]},
+         "chains": [{"path": [address, ...], "predicates": [pred|None, ...],
+                     "truncated": bool}, ...]}
     """
     from loops.surface import project
 
-    surface = project(fetch_fold(vertex_path, kind=kind, observer=observer))
+    edge_set = _parse_edge_set(edge)
+
+    surface = project(fetch_fold(vertex_path, kind=kind, key=key, observer=observer))
     rows = surface.rows
     node_addrs = {r.address for r in rows}
+    node_index = _node_index(rows)
+
+    # Global node set powers the dangling-vs-filter_excluded split ONLY (arbiter
+    # S3-F1): inbound counts / chains / tiers stay sub-scope over the projection
+    # above; global membership never feeds ``←N``. Skip the second fold when no
+    # filter narrows scope — in-scope IS the whole vertex, so filter_excluded is
+    # structurally empty and dangling alone is honest.
+    filtered = kind is not None or key is not None
+    global_index = (
+        _node_index(project(fetch_fold(vertex_path, observer=observer)).rows)
+        if filtered
+        else node_index
+    )
+
+    def _pred_ok(pred: str) -> bool:
+        return edge_set is None or pred in edge_set
 
     # Reverse the materialized inbound adjacency into RESOLVED outbound edges:
     # target ← (source, predicate) becomes source → (target, predicate). Both
-    # endpoints are "kind/key" node addresses, so no re-matching is needed.
+    # endpoints are "kind/key" node addresses, so no re-matching is needed. The
+    # ``--edge`` predicate filter applies here (and to every count derived from
+    # this adjacency).
     outbound: dict[str, list[tuple[str, str]]] = {}
     resolved_edges = 0
     typed_edges = 0
@@ -1020,7 +1243,7 @@ def fetch_graph(
         if target not in node_addrs:
             continue
         for source, pred in sources:
-            if source not in node_addrs:
+            if source not in node_addrs or not _pred_ok(pred):
                 continue
             outbound.setdefault(source, []).append((target, pred))
             resolved_edges += 1
@@ -1028,24 +1251,52 @@ def fetch_graph(
             if pred != "ref":
                 typed_edges += 1
 
-    # Total outbound refs+edges across nodes; the shortfall vs resolved is the
-    # dangling count (refs pointing at no node in this vertex).
-    total_outbound = sum(len(r.refs) + len(r.edges) for r in rows)
-    dangling = max(0, total_outbound - resolved_edges)
+    # Classify each UNRESOLVED outbound ref: dangling (resolves nowhere, even in
+    # the full vertex) vs filter_excluded (resolves globally but out of scope).
+    # A ref resolving to ≥1 in-scope node is already an edge above. Per-raw-ref
+    # (each counted once) — distinct from ``edges``, which counts edge instances
+    # (a bare ref can resolve to several nodes).
+    dangling_list: list[str] = []
+    filter_excluded_list: list[str] = []
+    for r in rows:
+        for raw, pred in _outbound_refs(r):
+            if not _pred_ok(pred):
+                continue
+            if _resolves_to_node(raw, node_index):
+                continue
+            if filtered and _resolves_to_node(raw, global_index):
+                filter_excluded_list.append(raw)
+            else:
+                dangling_list.append(raw)
 
     # Per-node RESOLVED neighbor addresses (node→node only, dangling excluded —
     # symmetric with ``edges``/chains/orphans). Outbound reuses the reversed
-    # adjacency; inbound reuses the materialized ``inbound_edges``. Sorted +
-    # deduped so the -v neighbor lists are deterministic; the lens caps for TTY,
-    # piped carries them whole.
+    # adjacency; inbound reuses the materialized ``inbound_edges``. Both honor
+    # the ``--edge`` filter. Sorted + deduped so the -v neighbor lists are
+    # deterministic; the lens caps for TTY, piped carries them whole.
     out_neighbors = {
         src: sorted({t for t, _ in tgts}) for src, tgts in outbound.items()
     }
     in_neighbors = {
-        target: sorted({s for s, _ in sources if s in node_addrs})
+        target: sorted({
+            s for s, p in sources if s in node_addrs and _pred_ok(p)
+        })
         for target, sources in surface.inbound_edges.items()
         if target in node_addrs
     }
+
+    def _hub_inbound(r) -> int:
+        # Sub-scope ``←N`` (arbiter S3-F1); under ``--edge`` it narrows to the
+        # selected predicate(s) via the per-predicate breakdown (which sums to
+        # the total and includes keyless sources, so the filter stays honest).
+        if edge_set is None:
+            return r.inbound
+        return sum(n for p, n in r.inbound_predicates if p in edge_set)
+
+    def _hub_predicates(r):
+        if edge_set is None:
+            return r.inbound_predicates
+        return tuple((p, n) for p, n in r.inbound_predicates if p in edge_set)
 
     hubs = [
         {
@@ -1053,22 +1304,23 @@ def fetch_graph(
             "kind": r.kind,
             "key": r.key,
             "tier": r.tier,
-            "inbound": r.inbound,
+            "inbound": _hub_inbound(r),
             "outbound": len(outbound.get(r.address, [])),
-            "predicates": [[p, n] for p, n in r.inbound_predicates],
+            "predicates": [[p, n] for p, n in _hub_predicates(r)],
             "in_addrs": in_neighbors.get(r.address, []),
             "out_addrs": out_neighbors.get(r.address, []),
             "last": r.ts,
             "observer": r.observer,
         }
-        for r in sorted(rows, key=lambda r: (-r.inbound, r.address))
-        if r.inbound > 0
+        for r in sorted(rows, key=lambda r: (-_hub_inbound(r), r.address))
+        if _hub_inbound(r) > 0
     ]
 
     orphan_list = [
         r.address
         for r in rows
-        if r.inbound == 0 and not r.refs and not r.edges
+        if _hub_inbound(r) == 0
+        and not any(_pred_ok(p) for _, p in _outbound_refs(r))
     ]
 
     census_rows = sorted(
@@ -1078,13 +1330,18 @@ def fetch_graph(
 
     raw_chains, truncated_nodes, exhausted = _longest_chains(outbound)
     chains = _top_chains(raw_chains, truncated_nodes)
+    sccs, self_loops = _strongly_connected(outbound)
 
     # ``edges`` counts only node→node RESOLVED edges; a hub's ``←N`` sums
     # Surface Row.inbound, which also counts refs arriving from keyless/sourceless
     # facts (no node address to resolve a source edge from). The gap is disclosed,
-    # not redefined — ``←N`` stays the true attention count.
-    total_inbound = sum(r.inbound for r in rows)
-    sourced_inbound = sum(len(surface.inbound_edges.get(r.address, [])) for r in rows)
+    # not redefined — ``←N`` stays the true attention count. Under ``--edge`` both
+    # sides narrow to the selected predicate(s) so the reconciliation holds.
+    total_inbound = sum(_hub_inbound(r) for r in rows)
+    sourced_inbound = sum(
+        sum(1 for _s, p in surface.inbound_edges.get(r.address, []) if _pred_ok(p))
+        for r in rows
+    )
     unsourced_inbound = max(0, total_inbound - sourced_inbound)
 
     return {
@@ -1093,13 +1350,18 @@ def fetch_graph(
         "edges": resolved_edges,
         "typed_edges": typed_edges,
         "orphans": len(orphan_list),
-        "dangling": dangling,
+        "dangling": len(dangling_list),
+        "filter_excluded": len(filter_excluded_list),
         "unsourced_inbound": unsourced_inbound,
         "hubs": hubs,
         "orphan_list": orphan_list,
+        "dangling_list": dangling_list,
+        "filter_excluded_list": filter_excluded_list,
         "census": census_rows,
+        "cycles": {"sccs": sccs, "self_loops": self_loops},
         "chains": chains,
         "chains_approximate": exhausted,
+        "edge": edge,
     }
 
 

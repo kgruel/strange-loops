@@ -117,7 +117,8 @@ class TestReadIntegration:
         for svc in ["api-gateway", "web-frontend", "api-backend"]:
             _emit(vpath, "heartbeat", service=svc, status="up")
 
-        from engine import vertex_search
+        from engine import vertex_reindex, vertex_search
+        vertex_reindex(vpath)
         results = vertex_search(vpath, "api")
         assert len(results) >= 2
 

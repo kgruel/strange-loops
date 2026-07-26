@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import argparse
 from collections.abc import AsyncIterator, Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -364,26 +365,34 @@ def _resolve_cursor(
 # --- Fetch closures --------------------------------------------------------
 
 
-def _lens_fetch_accepts_cursor(fetch_fn: Any, *, at: bool, as_of: bool) -> bool:
-    """True when a lens-declared fetch can honor the active cursor selector.
+def _fetch_accepts(fetch_fn: Any, name: str) -> bool:
+    """True when a lens-declared fetch would receive ``name`` if passed.
 
-    Mirrors ``call_lens_fetch``'s own signature-based dispatch (``**kwargs``
-    opts into everything; otherwise only named params are passed) so this
-    check and the actual call always agree on what "accepts" means. Called
-    by ``run()`` BEFORE dispatch — a lens fetch that doesn't declare the
-    active selector would silently answer at head while the render context
-    still carries witness/as_of metadata (review finding 2: a head answer
-    mislabeled as a historical one). ``at``/``as_of`` here are just "is this
-    selector active", not the resolved values.
+    Mirrors ``call_lens_fetch``'s signature-based dispatch: a ``**kwargs`` fetch
+    opts into everything; otherwise only explicitly-named params are passed. The
+    single check both the cursor guard and the ``--edge`` guard route through, so
+    "accepts" always means the same thing the actual call does.
     """
     import inspect
 
     params = inspect.signature(fetch_fn).parameters
     if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()):
         return True
-    if at and "at" not in params:
+    return name in params
+
+
+def _lens_fetch_accepts_cursor(fetch_fn: Any, *, at: bool, as_of: bool) -> bool:
+    """True when a lens-declared fetch can honor the active cursor selector.
+
+    Called by ``run()`` BEFORE dispatch — a lens fetch that doesn't declare the
+    active selector would silently answer at head while the render context
+    still carries witness/as_of metadata (review finding 2: a head answer
+    mislabeled as a historical one). ``at``/``as_of`` here are just "is this
+    selector active", not the resolved values.
+    """
+    if at and not _fetch_accepts(fetch_fn, "at"):
         return False
-    if as_of and "as_of" not in params:
+    if as_of and not _fetch_accepts(fetch_fn, "as_of"):
         return False
     return True
 
@@ -399,6 +408,7 @@ def _build_fold_fetch(
     *,
     at: Any = None,
     as_of: float | None = None,
+    edge: str | None = None,
 ) -> Any:
     """Return a zero-arg callable that produces the fold data.
 
@@ -425,6 +435,7 @@ def _build_fold_fetch(
                 retain_facts=want_facts,
                 refs_depth=refs_depth,
                 at=at, as_of=as_of,
+                edge=edge,
             )
         from loops.commands.fetch import fetch_fold
 
@@ -515,6 +526,71 @@ def _resolve_key_grammar(
     return None, None, ()
 
 
+# --- Review compose-set (0.9.0 S4, anti-drift whitelist) -------------------
+
+#: Parsed-namespace dests whose non-default value COMPOSES with ``--review``.
+#: A whitelist, enumerated so the exception is legible and the guard is
+#: refuse-by-default: a read flag added in a FUTURE slice is refused under
+#: ``--review`` until it is deliberately added here, rather than silently
+#: passing through inert. (arbiter capstone P2 — the earlier blacklist form
+#: drifted WITHIN one wave: --last, --all (S5), --edge (S3) all leaked.)
+#:
+#: What composes and why:
+#:  - the addressing selectors ``--review`` actually consumes: kind/key/at/as_of;
+#:  - ``tokens`` — the vertex/entity positional (addressing, not reshaping); its
+#:    where/observer PREDICATES do filter, and are refused separately;
+#:  - output/display globals that never reshape the projection: json (review IS
+#:    json), plain, quiet, verbose, static (review IS a static one-shot),
+#:    no_input (a SUPPRESS'd painted no-op).
+#: Everything else refuses — reshaping transforms (limit/last/match/fields/
+#: count/by/full), selectors --review doesn't apply (lens/edge, and --refs which
+#: is pre-extracted), a different read (why/diff/facts), and a delivery mode it
+#: cannot honor (live/interactive).
+_REVIEW_COMPOSE = frozenset({
+    "review", "kind", "key", "at", "as_of", "tokens",
+    "json", "plain", "quiet", "verbose", "static", "no_input",
+})
+
+#: dest → user-facing flag, for the refusal message. Only dests whose flag name
+#: is not ``--<dest-with-dashes>`` need an entry (today: --all's dest show_all).
+_REVIEW_FLAG_OVERRIDE = {"show_all": "--all"}
+
+
+def _review_flag_label(dest: str) -> str:
+    return _REVIEW_FLAG_OVERRIDE.get(dest, "--" + dest.replace("_", "-"))
+
+
+def _review_incompatible_flag(
+    args: argparse.Namespace,
+    parser: argparse.ArgumentParser,
+    *,
+    refs_depth: int,
+    where: dict,
+    observer: str | None,
+) -> str | None:
+    """First flag/predicate on a ``--review`` read that ``--review`` does NOT
+    compose with, as a user-facing label — or ``None`` when the read is clean.
+
+    Structural whitelist (arbiter capstone P2): every parsed-namespace value is
+    compared against ``parser.get_default`` and refused unless its dest is in
+    :data:`_REVIEW_COMPOSE`, so "non-default" tracks the real parser and a flag
+    added later refuses by DEFAULT (never silently drops). ``--refs`` is
+    pre-extracted from argv (absent from the namespace) and the where/observer
+    predicates ride in the composed positional bucket while still filtering the
+    projection — all three are checked explicitly.
+    """
+    for name, value in vars(args).items():
+        if name not in _REVIEW_COMPOSE and value != parser.get_default(name):
+            return _review_flag_label(name)
+    if refs_depth > 0:
+        return "--refs"
+    if where:
+        return f"{next(iter(where))}=…"
+    if observer is not None:
+        return "observer=…"
+    return None
+
+
 # --- Entry point -----------------------------------------------------------
 
 
@@ -563,10 +639,49 @@ def run(argv: list[str], ctx: Invocation) -> int:
     kind, key_raw = _resolve_kind_key(entity, args.kind, args.key)
     fetch_key, queried_key, key_or = _resolve_key_grammar(key_raw)
 
+    # Bare `sl read` in a repo holding several instance vertices used to fold
+    # whichever sorted first — reading the wrong store is the same silent
+    # mis-resolution as writing to it (friction:find-local-vertex-alphabetical-pick).
+    if ctx.vertex_path is None and vname is None:
+        from loops.commands.resolve import ambiguous_local_vertex_refusal
+
+        refusal = ambiguous_local_vertex_refusal("read", "sl read <vertex> ...")
+        if refusal is not None:
+            ctx.reporter.err(refusal)
+            return 2
+
     vertex_path = _resolve_vertex_path(ctx, vname)
     if vertex_path is None:
         ctx.reporter.err("No vertex resolved — run `loops init` first.")
         return 1
+
+    # --review (0.9.0 S4) is a fold-route JSON projection of folded state that
+    # composes with a WHITELIST (_REVIEW_COMPOSE) and refuses everything else by
+    # default — silently ignoring a flag is the silent-inert defect class this
+    # wave kills (arbiter S4/S3-F3), and the earlier blacklist form of this
+    # guard drifted within one wave (arbiter capstone P2). The router already
+    # refuses --review with --facts+window / --ticks (routes that never reach
+    # this view); a bare --facts or any in-view flag reaches this parser, so the
+    # refuse-by-default guard lives here.
+    if args.review:
+        bad = _review_incompatible_flag(
+            args, parser,
+            refs_depth=refs_depth, where=where, observer=observer_filter,
+        )
+        if bad == "--all":
+            ctx.reporter.err(
+                "read --review: --all is redundant — the review projection "
+                "always shows everything, inactive entities included; no "
+                "lifecycle hide applies to it. Drop --all."
+            )
+            return 2
+        if bad is not None:
+            ctx.reporter.err(
+                f"read --review: {bad} is not honored — the review projection "
+                "is a full canonical snapshot of folded state. Narrow with "
+                "--kind/--key, or drop --review."
+            )
+            return 2
 
     # --why is an address-scoped provenance drill: it renders ONE folded
     # (kind, key) entry field by field, so it short-circuits the multi-section
@@ -614,6 +729,48 @@ def run(argv: list[str], ctx: Invocation) -> int:
             ctx.reporter.err(f"read: {exc}")
             return 2
 
+    # --review (0.9.0 S4): the canonical review projection short-circuits here,
+    # AFTER cursor resolution so it reuses the already-resolved --at/--as-of
+    # position (and, for a head read, S6's resolve_cut_summary — never a second
+    # head-resolve, arbiter S4-F3). JSON-only, own encoding — like --why/--diff
+    # it owns its fetch/render and never reaches the multi-section dispatch.
+    if args.review:
+        return _run_review(
+            ctx, vertex_path, kind, fetch_key,
+            at_position=at_position, as_of_ts=as_of_ts, cursor_meta=cursor_meta,
+        )
+
+    # Honest seal-cut provenance (0.9.0 S6, arbiter F1 + sol P1 TOCTOU fix):
+    # a RESOLVER closure, not a precomputed dict. "unavailable" is itself a
+    # meaningful, honest value distinct from "key absent", so every read
+    # carries a `cut` — but the default (head) path's resolve_cut() does
+    # real store I/O, and resolving it HERE (before the fold is even
+    # fetched) would let a concurrent append land between cut-resolution and
+    # fetch, producing a fold with an unsealed tail while cut claims
+    # sealed_to_head=True — the exact defect class this slice exists to
+    # kill (sol P1). dispatch() calls this resolver AFTER op.fn() (the fold
+    # fetch) returns — for static reads exactly once, for live reads once
+    # per refreshed frame — so the store is append-only and a cut resolved
+    # after the fetch can only be equal-to-or-later than what the fold
+    # actually witnessed, never earlier (see resolve_cut's docstring for the
+    # full argument). An active --at read reuses its ALREADY-resolved
+    # witness position (zero extra store I/O, no race to begin with —
+    # cut_from_witness_position is pure computation over an immutable,
+    # already-resolved position); --as-of has no witness-anchored cut by
+    # construction. S4 (--review header/head-cursor) MUST reuse
+    # `witness_address.resolve_cut`/`cut_from_witness_position` rather than
+    # a second independent head-resolve (S6 arbitration F3).
+    from loops.cli import witness_address
+
+    def _cut_resolver() -> dict:
+        if at_position is not None:
+            return witness_address.cut_from_witness_position(at_position)
+        if as_of_ts is not None:
+            return witness_address.unavailable_cut(
+                "as_of", "event-time projection has no witness-anchored cut",
+            )
+        return witness_address.resolve_cut(vertex_path)
+
     # Resolve the lens fetch ONCE here (rather than inside _build_fold_fetch)
     # so a cursor selector can be checked against it before anything runs:
     # a lens-declared fetch that doesn't accept at=/as_of= would otherwise
@@ -637,6 +794,37 @@ def run(argv: list[str], ctx: Invocation) -> int:
             )
             return 2
 
+    # An explicit --edge that names no predicate (',', whitespace, ',,') parses
+    # to an empty selector — which _pred_ok would read as "match everything".
+    # That is silent-full, the same defect class as silent-drop: a user who
+    # typed a selector made an error, not a request for the whole graph. Refuse
+    # with the value-teaching message, ahead of the route check so a malformed
+    # value reports identically regardless of lens (sol P2). The parse helper
+    # stays pure — the router owns the refusal.
+    if args.edge is not None:
+        from loops.commands.fetch import _parse_edge_set
+
+        if _parse_edge_set(args.edge) is None:
+            ctx.reporter.err(
+                "read: empty --edge selector — name at least one predicate "
+                "label (e.g. --edge ref)."
+            )
+            return 2
+
+    # --edge selects graph edge predicates and is honored only by a lens fetch
+    # that declares an `edge` param (the graph projection). Refuse rather than
+    # silently drop it on any other route — the same honor-or-refuse posture as
+    # the cursor guard above (184dfce), and silent no-op is the exact defect
+    # class this wave exists to kill (arbiter S3-F3).
+    if args.edge is not None and (
+        lens_fetch is None or not _fetch_accepts(lens_fetch, "edge")
+    ):
+        ctx.reporter.err(
+            "read: --edge selects graph edge predicates and is only honored "
+            "by --lens graph — add --lens graph, or drop --edge."
+        )
+        return 2
+
     fetch_data = _build_fold_fetch(
         vertex_path, ctx.observer,
         kind=kind, key=fetch_key,
@@ -645,6 +833,7 @@ def run(argv: list[str], ctx: Invocation) -> int:
         lens_fetch=lens_fetch,
         at=at_position,
         as_of=as_of_ts,
+        edge=args.edge,
     )
 
     # Format (JSON / PLAIN / AUTO) flows onto the Operation; dispatch forks on
@@ -680,6 +869,9 @@ def run(argv: list[str], ctx: Invocation) -> int:
         last=args.last,
         count_by=args.by,
         do_count=args.count,
+        show_all=args.show_all,
+        refs_active=refs_depth > 0,
+        facts_active=args.facts,
     )
 
     mode = _resolve_mode(args, args.lens, is_tty=ctx.isatty)
@@ -729,9 +921,17 @@ def run(argv: list[str], ctx: Invocation) -> int:
         # headers, pipe = terse "## KIND (N)"), decoupled from width/truncation.
         # "cursor" (0.8.0, A11) carries the --at/--as-of mode/status/position
         # disclosure — read by the fold lens (mode-line) and by dispatch's
-        # JSON branch (merged into the structured payload).
+        # JSON branch (merged into the structured payload). "cut_resolver"
+        # (0.9.0 S6) is the sibling seal-provenance disclosure — a zero-arg
+        # callable, not a precomputed dict (sol P1: dispatch calls it AFTER
+        # the fold fetch, never before) — ALWAYS present (never gated the
+        # way "cursor" is): dispatch resolves it into a "cut" dict that any
+        # lens (built-in or custom) declaring a `cut` kwarg receives for
+        # free via call_lens's existing signature-filtered dispatch; the
+        # JSON branches merge the resolved dict in unconditionally too.
         render_context={
             "piped": not ctx.isatty,
+            "cut_resolver": _cut_resolver,
             **({"cursor": cursor_meta} if cursor_meta is not None else {}),
         },
         vertex_path=vertex_path,
@@ -878,6 +1078,220 @@ def _collect_section_facts(state: Any, kind: str) -> list[dict]:
     return facts
 
 
+# --- Canonical review projection (0.9.0, S4) -------------------------------
+
+
+def _fold_item_ids(sections) -> list[str]:
+    """Every folded item's fact id across sections (nested included), for the
+    batched signature lookup. Keyless synthetic items (``id is None``) are
+    skipped — they carry no store row to sign."""
+    ids: list[str] = []
+    for section in sections:
+        for item in section.items:
+            if item.id is not None:
+                ids.append(item.id)
+        if section.sections:
+            ids.extend(_fold_item_ids(section.sections))
+    return ids
+
+
+def _has_rows(state: Any) -> bool:
+    """Any folded item anywhere in the section tree."""
+    for section in state.sections:
+        if section.items:
+            return True
+        if section.sections and _has_rows(section):
+            return True
+    return False
+
+
+@dataclass(frozen=True)
+class ReviewEvidence:
+    """Everything a ``--review`` header claims, captured with the rows it
+    describes — the disclosure's single source (sol P1-a).
+
+    The defect this shape exists to prevent: the fold used to be fetched and
+    its snapshot closed, and only THEN did the head cursor resolve and the
+    declaration fingerprint compute, each on its own connection. A review could
+    advertise a cursor newer than the rows it rendered, and pair fingerprint D1
+    with decl_head D2. Ordering the calls (fetch first, disclose second) only
+    narrowed the window; it could not close it.
+
+    The binding is positional, not temporal: for a head review the position is
+    resolved FIRST and the fold is then taken AT that position, so the rows ARE
+    the prefix the cursor names no matter what lands concurrently. The
+    declaration generation is resolved at the same position. A rewound
+    (``--at``/``--as-of``) review was never racy — its position is already
+    immutable — and takes the same path.
+
+    Disclosure code consumes this object and nothing else. Rule 10 in
+    ``tests/test_architecture.py`` enforces that structurally.
+    """
+
+    state: Any
+    vertex: str | None
+    cursor: dict | None
+    cut: dict
+    declaration: dict
+    signatures: dict
+
+
+def _gather_review_evidence(
+    ctx: Invocation,
+    vertex_path: Path,
+    kind: str | None,
+    key: str | None,
+    *,
+    at_position: Any,
+    as_of_ts: float | None,
+    cursor_meta: dict | None,
+) -> ReviewEvidence:
+    """Resolve position → fold AT it → describe it. The ONLY I/O for a review.
+
+    Head reads resolve the position before folding and pin the fold to it. When
+    no position can be resolved (aggregate, store-less, uncreated store,
+    resolution failure) there is nothing to pin to: the fold runs unpinned and
+    the cut already discloses ``available=False`` with the reason.
+    """
+    from engine import declaration_generation, fact_signatures
+
+    from loops.cli import witness_address
+    from loops.commands.fetch import fetch_fold
+    from loops.commands.resolve import (
+        _apply_vertex_scope,
+        _resolve_vertex_store_path,
+        _vertex_name,
+    )
+
+    obs = _apply_vertex_scope(ctx.observer, vertex_path) or None
+    _validate_kind_or_exit(kind, vertex_path)
+
+    fold_at = at_position
+    if at_position is not None:
+        review_cursor = cursor_meta
+        cut = witness_address.cut_from_witness_position(at_position)
+    elif as_of_ts is not None:
+        review_cursor = cursor_meta
+        cut = witness_address.unavailable_cut(
+            "as_of", "event-time projection has no witness-anchored cut",
+        )
+    else:
+        # Head: resolve the position FIRST, then fold at it (sol P1-a). S6's
+        # single-transaction resolve_cut_summary still supplies both the cursor
+        # and the cut from ONE head resolution (arbiter S4-F3).
+        position, review_cursor, cut = witness_address.resolve_review_head_position(
+            vertex_path,
+        )
+        fold_at = position
+
+    state = fetch_fold(
+        vertex_path, kind=kind, key=key, observer=obs,
+        at=fold_at, as_of=as_of_ts,
+    )
+
+    # UNPINNED head fetch that nonetheless produced rows: head resolution found
+    # no position (typically an uncreated store), but a writer created the
+    # store between that resolution and this fetch — so the review would render
+    # rows while its cut claims the store does not exist (sol P1-a round 2).
+    # Retry ONCE against the store that now exists. A second miss is impossible
+    # for an append-only store: having resolved a position, it cannot go back to
+    # having none, so this cannot spin.
+    if at_position is None and as_of_ts is None and fold_at is None and _has_rows(state):
+        position, review_cursor, cut = witness_address.resolve_review_head_position(
+            vertex_path,
+        )
+        if position is not None:
+            # Rebind the ONE variable every evidence read below is taken at.
+            # The first version passed the recovered position straight to the
+            # re-fetch and left `fold_at` at None, so the rows were pinned but
+            # the declaration was still resolved unpinned — fetch_at=POSITION
+            # beside declaration_at=None, which is the generation-skew half of
+            # P1-a reopened by the fix for its other half (sol round 3).
+            # Anything added here that takes `at=` must read `fold_at`, never a
+            # local: that is what keeps one position describing all of it.
+            fold_at = position
+            state = fetch_fold(
+                vertex_path, kind=kind, key=key, observer=obs,
+                at=fold_at, as_of=as_of_ts,
+            )
+
+    # Per-fact signatures — verbatim from the store column, the ONLY source
+    # (the fold path drops them). None on a store-less / aggregate vertex.
+    ids = _fold_item_ids(state.sections)
+    signatures: dict[str, str | None] = {}
+    if ids:
+        try:
+            store_path = _resolve_vertex_store_path(vertex_path)
+        except Exception:
+            store_path = None
+        if store_path is not None:
+            signatures = fact_signatures(store_path, ids)
+
+    # Resolved at the SAME position as the fold — a fingerprint from one
+    # generation must never be paired with rows folded under another.
+    decl_gen = declaration_generation(vertex_path, at=fold_at, as_of=as_of_ts)
+
+    return ReviewEvidence(
+        state=state,
+        vertex=_vertex_name(vertex_path),
+        cursor=review_cursor,
+        cut=cut,
+        declaration=decl_gen,
+        signatures=signatures,
+    )
+
+
+def _run_review(
+    ctx: Invocation,
+    vertex_path: Path,
+    kind: str | None,
+    key: str | None,
+    *,
+    at_position: Any,
+    as_of_ts: float | None,
+    cursor_meta: dict | None,
+) -> int:
+    """Emit the canonical review projection (JSON-only) — a deterministic,
+    diffable snapshot of folded state under a disclosed cursor + declaration
+    generation + seal cut.
+
+    Rendering ONLY. Every fact this function discloses arrives in one
+    :class:`ReviewEvidence` object from :func:`_gather_review_evidence`; this
+    body performs no store I/O of its own, which is what keeps the header's
+    claims and the rendered rows describing the same moment (sol P1-a) — and is
+    enforced structurally by ``tests/test_architecture.py`` Rule 10.
+
+    Strictly read-only (S2 read-purity is a precondition). The projection stops
+    short of SPEC §10 (no witness-ordered every-row stream, no JCS byte
+    determinism, no rebuild round-trip, no chain) — that layer is gated on
+    GlobalReceiptPosition + loops-go (arbiter S4-F4). See ``surface.to_review``
+    for the encoder.
+    """
+    import json as _json
+    import time as _time
+
+    from loops.surface import to_review
+
+    evidence = _gather_review_evidence(
+        ctx, vertex_path, kind, key,
+        at_position=at_position, as_of_ts=as_of_ts, cursor_meta=cursor_meta,
+    )
+
+    header = {
+        "vertex": evidence.vertex,
+        "cursor": evidence.cursor,
+        "declaration": evidence.declaration,
+        "cut": evidence.cut,
+    }
+    review = to_review(
+        evidence.state, header=header, signatures=evidence.signatures,
+    )
+    # rendered_at is the SOLE render-time field — labeled and kept OUTSIDE the
+    # deterministic `review` object so byte-identity of the projection itself
+    # holds across repeated reads of unchanged folded state.
+    out = {"review": review, "rendered_at": _time.time()}
+    ctx.reporter.msg(_json.dumps(out, sort_keys=True))
+    return 0
 
 
 # --- Structural diff (0.8.0, C2) -------------------------------------------

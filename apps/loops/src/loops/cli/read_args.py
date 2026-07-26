@@ -94,6 +94,16 @@ def add_read_args(parser: argparse.ArgumentParser) -> None:
         ),
         complete_lens,
     )
+    # --edge selects graph edge predicates (only honored by --lens graph;
+    # refused elsewhere). No completer stub this wave — shell completion glue
+    # for --edge is deferred (0.9.0 arbiter S3-F4).
+    parser.add_argument(
+        "--edge", default=None, metavar="PREDICATE",
+        help=(
+            "Restrict the graph to edges of this predicate — 'ref' or a "
+            "declared typed-edge field name (comma-OR). Only with --lens graph"
+        ),
+    )
     parser.add_argument(
         "--facts", action="store_true", default=False,
         help="Show raw fact stream instead of folded state",
@@ -127,6 +137,17 @@ def add_read_args(parser: argparse.ArgumentParser) -> None:
             "--at); or pair with --at A --diff B"
         ),
     )
+    # Canonical review projection (0.9.0 S4) — a deterministic, diffable JSON
+    # snapshot of folded state (kind-key-sorted, emit-derived whitelist, verbatim
+    # signatures) under a disclosed head/at cursor + declaration generation.
+    # JSON-only; honors --at/--as-of, refuses --facts/--ticks/--diff/--why.
+    parser.add_argument(
+        "--review", action="store_true", default=False,
+        help=(
+            "Canonical review projection — deterministic, diffable JSON "
+            "snapshot of folded state with cursor + declaration disclosure"
+        ),
+    )
     parser.add_argument(
         "--match", "--grep", default=None, metavar="QUERY", dest="match",
         help="Content search — FTS5 for indexed kinds, substring for the rest",
@@ -156,4 +177,10 @@ def add_read_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--by", default=None,
         help="Group --count by a row attribute / payload field",
+    )
+    # --all defeats the S5 lifecycle hide (show inactive entities). dest is
+    # explicit so it never reads as the `all` builtin at the call site.
+    parser.add_argument(
+        "--all", action="store_true", dest="show_all", default=False,
+        help="Show inactive entities that a kind's lifecycle declaration hides",
     )

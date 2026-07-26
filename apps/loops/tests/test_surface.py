@@ -35,7 +35,6 @@ from loops.surface import (
 from loops.surface import (
     _compute_inbound_refs,
     _inbound_count,
-    _salience,
 )
 
 
@@ -90,16 +89,19 @@ def test_surface_is_painted_free():
 
 
 def test_project_materializes_salience_parity():
-    """Every Row.salience/inbound equals the LENS helpers on the same FoldState.
+    """Every Row.salience/inbound equals recomputing on the same FoldState.
 
-    Uses refs so inbound varies, including the dual-form bare/kind-qualified
-    match (ref 'decision/design/b' AND bare 'design/b' both count toward
-    design/b's inbound). Non-circular: the reference is fold.py, not surface.py.
+    Exercises all three matching forms against ``cache``: a canonical
+    ``decision:cache`` colon ref AND a legacy ``decision/cache`` slash ref
+    both land on ``Address(decision, cache)`` (kind-exact), and a bare
+    separator-less ``cache`` ref lands on ``Address('', cache)`` (the bare
+    fallback). Non-circular: project() and _inbound_count are compared, and
+    the explicit counts pin the exact-match contract.
     """
     state = _byfold_state(
-        _decision("design/a", n=2, refs=("decision/design/b", "design/c")),
-        _decision("design/b", n=1, refs=()),
-        _decision("design/c", n=3, refs=("decision/design/b",)),
+        _decision("cache", n=2, refs=()),
+        _decision("auth", n=1, refs=("decision:cache", "decision/cache")),
+        _decision("db", n=3, refs=("cache",)),
     )
     inbound = _compute_inbound_refs(state)
     surface = project(state)
@@ -110,16 +112,17 @@ def test_project_materializes_salience_parity():
         for item in section.items:
             topic = item.payload["topic"]
             row = by_topic[topic]
-            assert row.inbound == _inbound_count(item, kf, inbound), topic
-            assert row.salience == _salience(item, kf, inbound), topic
+            assert row.inbound == _inbound_count(item, section.kind, kf, inbound), topic
+            assert row.salience == item.n + _inbound_count(
+                item, section.kind, kf, inbound
+            ), topic
 
-    # design/b is referenced by both a (kind-qualified) and c (kind-qualified)
-    # → inbound 2; plus n=1 → salience 3. design/c referenced by a via bare
-    # 'design/c' → inbound 1.
-    assert by_topic["design/b"].inbound == 2
-    assert by_topic["design/b"].salience == 3
-    assert by_topic["design/c"].inbound == 1
-    assert by_topic["design/c"].salience == 4
+    # cache: colon + legacy-slash both count kind-exact (2) + one bare ref (1)
+    # → inbound 3; plus n=2 → salience 5. auth/db reference out, not in.
+    assert by_topic["cache"].inbound == 3
+    assert by_topic["cache"].salience == 5
+    assert by_topic["auth"].inbound == 0
+    assert by_topic["db"].inbound == 0
 
 
 # ---------------------------------------------------------------------------
@@ -490,10 +493,15 @@ def test_search_orders_ts_desc():
 # --- S5: FTS5 + substring fallback + coverage signal -----------------------
 
 
-def _search_vertex(tmp_path):
+def _search_vertex(tmp_path, *, reindex: bool = True):
     """A two-kind vertex: ``decision`` FTS-indexed (search=), ``thread`` NOT.
 
-    Returns (vpath) after seeding one searchable fact in each kind.
+    Returns (vpath) after seeding one searchable fact in each kind. Calls
+    ``engine.vertex_reindex`` by default (S2: reads never build the index —
+    a caller that wants FTS-fresh results must reindex explicitly, same as
+    ``sl store reindex`` would). Pass ``reindex=False`` to get a vertex whose
+    index was NEVER built, for tests exercising the staleness/missing-index
+    fallback path itself.
     """
     import argparse
 
@@ -518,6 +526,12 @@ def _search_vertex(tmp_path):
 
     emit("decision", topic="design/auth", message="choose JWT over sessions")
     emit("thread", name="auth-arc", message="revisit JWT rotation later")
+
+    if reindex:
+        from engine import vertex_reindex
+
+        vertex_reindex(vpath)
+
     return vpath
 
 
@@ -543,6 +557,61 @@ def test_search_fts_finds_bodies_in_indexed_kind(tmp_path):
     assert "decision" in kinds
     assert "thread" in found.window.unindexed
     assert found.window.query == "JWT"
+    # Proves this genuinely went through FTS, not a silent substring
+    # degradation: search()'s substring branch is `kind not in fts_kinds`,
+    # so a hit for a kind that's neither unindexed NOR stale can only have
+    # come from the FTS branch — the fixture reindexed, so the index is
+    # fresh for `decision`.
+    assert found.window.stale == ()
+
+
+def test_search_never_reindexed_falls_back_with_disclosure(tmp_path):
+    """A search-declared kind whose index was NEVER built (no `sl store
+    reindex` ever ran) still finds matches — via the substring fallback, not
+    a crash and not a silently-empty result — with the gap named as
+    ``stale`` (distinct from ``unindexed``, which is a declaration-time
+    fact: this kind DOES declare search, the index just isn't there yet)."""
+    from loops.commands.fetch import fetch_fold
+
+    vpath = _search_vertex(tmp_path, reindex=False)
+    state = fetch_fold(vpath)
+    found = search(project(state), "JWT", vertex_path=vpath)
+    kinds = {r.kind for r in found.rows}
+    assert "decision" in kinds
+    assert "decision" in found.window.stale
+    assert "decision" not in found.window.unindexed
+
+
+def test_search_stale_after_edit_falls_back_with_disclosure(tmp_path):
+    """S2 phantom-symmetry re-derivation (design:fts-confirm-symmetry-is-
+    phantom): a fact emitted AFTER the last reindex is STILL found by the
+    very next ``--match`` — that property survives read-purity — but now via
+    the substring fallback rather than FTS auto-catch-up, with the gap named
+    honestly in ``Window.stale`` instead of silently riding on a read that
+    mutates the store."""
+    import argparse
+
+    from loops.commands.fetch import fetch_fold
+    from loops.main import cmd_emit
+
+    vpath = _search_vertex(tmp_path)  # reindexed once by the fixture
+
+    # Emit a NEW decision fact with no reindex afterward — the index is now
+    # behind head for `decision`.
+    cmd_emit(
+        argparse.Namespace(
+            vertex=None, kind="decision",
+            parts=["topic=design/late", "message=unreindexed uniquephrase"],
+            observer="", dry_run=False,
+        ),
+        vertex_path=vpath,
+    )
+
+    state = fetch_fold(vpath)
+    found = search(project(state), "uniquephrase", vertex_path=vpath)
+    kinds = {r.kind for r in found.rows}
+    assert "decision" in kinds  # found — not silently missing
+    assert "decision" in found.window.stale  # and the gap is disclosed
 
 
 def test_search_substring_fallback_for_undeclared_kind(tmp_path):
@@ -568,6 +637,259 @@ def test_search_fts_respects_kind_scoped_surface(tmp_path):
     assert {r.kind for r in found.rows} == {"decision"}
     # thread was filtered out at fetch → not present → not in the coverage gap.
     assert "thread" not in found.window.unindexed
+
+
+def test_search_fts_truncation_disclosed_in_window(tmp_path):
+    """S2 arbitration F2 (friction:fts-match-limit-100-silent-cap): when the
+    FTS query hits its result limit, ``Window.truncated`` names the gap
+    instead of silently capping with no signal. The default limit itself is
+    unchanged (still exactly 100 results surfaced) — disclosure only."""
+    import json
+    import sqlite3
+
+    from engine import vertex_reindex
+    from engine.builder import fold_by, vertex
+    from loops.commands.fetch import fetch_fold
+
+    v = (
+        vertex("trunc")
+        .store("./trunc.db")
+        .loop("decision", fold_by("topic"), search=["topic", "message"])
+    )
+    vpath = tmp_path / "trunc.vertex"
+    v.write(vpath)
+
+    db_path = tmp_path / "trunc.db"
+    conn = sqlite3.connect(str(db_path))
+    conn.executescript(
+        "CREATE TABLE IF NOT EXISTS facts ("
+        "    id TEXT NOT NULL PRIMARY KEY,"
+        "    kind TEXT NOT NULL,"
+        "    ts REAL NOT NULL,"
+        "    observer TEXT NOT NULL,"
+        "    origin TEXT NOT NULL DEFAULT '',"
+        "    payload TEXT NOT NULL"
+        ");"
+    )
+    for i in range(101):  # one past the default limit
+        conn.execute(
+            "INSERT INTO facts (id, kind, ts, observer, origin, payload) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (
+                f"TRUNC{i:04d}", "decision", float(i), "test", "",
+                json.dumps({"topic": f"topic-{i}", "message": "truncatetoken"}),
+            ),
+        )
+    conn.commit()
+    conn.close()
+
+    vertex_reindex(vpath)
+    state = fetch_fold(vpath)
+    found = search(project(state), "truncatetoken", vertex_path=vpath)
+    assert found.window.truncated is True
+    assert len([r for r in found.rows if r.kind == "decision"]) == 100
+
+
+def test_search_no_truncation_when_under_limit(tmp_path):
+    # Sanity converse: a result set under the limit is never flagged truncated.
+    from loops.commands.fetch import fetch_fold
+
+    vpath = _search_vertex(tmp_path)
+    state = fetch_fold(vpath)
+    found = search(project(state), "JWT", vertex_path=vpath)
+    assert found.window.truncated is False
+
+
+def test_search_stale_kind_crowd_does_not_bury_fresh_kind_match(tmp_path):
+    """S2 sol P2 regression: a STALE indexed kind with more matching facts
+    than the FTS limit must not silently push a FRESH kind's genuine match
+    out of the result set. Before the fix, surface.search() queried
+    vertex_search across every indexed kind (no SQL-level kind restriction)
+    and filtered to fts_kinds AFTER the LIMIT already applied — so a stale
+    kind's crowd of matches could consume the whole limit window before the
+    caller ever got to discard them, silently dropping the fresh kind's
+    result. Post-fix, kinds=fts_kinds restricts the SQL query BEFORE the
+    limit, so the crowd kind (excluded from fts_kinds because it's stale)
+    can never compete for the fresh kind's limit window at all."""
+    import json
+    import sqlite3
+
+    from engine import vertex_reindex
+    from engine.builder import fold_by, vertex
+    from loops.commands.fetch import fetch_fold
+
+    v = (
+        vertex("crowd")
+        .store("./crowd.db")
+        .loop("crowd_kind", fold_by("topic"), search=["topic", "message"])
+        .loop("target_kind", fold_by("topic"), search=["topic", "message"])
+    )
+    vpath = tmp_path / "crowd.vertex"
+    v.write(vpath)
+
+    db_path = tmp_path / "crowd.db"
+    conn = sqlite3.connect(str(db_path))
+    conn.executescript(
+        "CREATE TABLE IF NOT EXISTS facts ("
+        "    id TEXT NOT NULL PRIMARY KEY,"
+        "    kind TEXT NOT NULL,"
+        "    ts REAL NOT NULL,"
+        "    observer TEXT NOT NULL,"
+        "    origin TEXT NOT NULL DEFAULT '',"
+        "    payload TEXT NOT NULL"
+        ");"
+    )
+    # crowd_kind: 105 matching facts, all NEWER than target_kind's one match —
+    # in an unrestricted newest-first query these would fill the whole
+    # limit window before target_kind is ever reached.
+    for i in range(105):
+        conn.execute(
+            "INSERT INTO facts (id, kind, ts, observer, origin, payload) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (
+                f"CROWD{i:04d}", "crowd_kind", 5000.0 + i, "test", "",
+                json.dumps({"topic": f"crowd-{i}", "message": "needle"}),
+            ),
+        )
+    # target_kind: one older matching fact.
+    conn.execute(
+        "INSERT INTO facts (id, kind, ts, observer, origin, payload) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        (
+            "TARGET0001", "target_kind", 1.0, "test", "",
+            json.dumps({"topic": "target", "message": "needle"}),
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+    # Reindex once — both kinds are fresh.
+    vertex_reindex(vpath)
+
+    # Make crowd_kind STALE by writing one more fact under it, no reindex.
+    conn = sqlite3.connect(str(db_path))
+    conn.execute(
+        "INSERT INTO facts (id, kind, ts, observer, origin, payload) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        (
+            "CROWDSTALE", "crowd_kind", 6000.0, "test", "",
+            json.dumps({"topic": "crowd-stale", "message": "irrelevant"}),
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+    state = fetch_fold(vpath)
+    found = search(project(state), "needle", vertex_path=vpath)
+
+    kinds_found = {r.kind for r in found.rows}
+    assert "target_kind" in kinds_found  # the fresh kind's match survives
+    assert "crowd_kind" in kinds_found  # the stale kind still found via substring
+    assert "crowd_kind" in found.window.stale
+    assert "target_kind" not in found.window.stale
+    # Only target_kind ever reaches the FTS branch (1 match, well under the
+    # limit) — truncated must be False, not a false positive from the
+    # crowd kind's now-excluded matches.
+    assert found.window.truncated is False
+
+
+def test_search_coverage_probe_failure_fails_closed(tmp_path, monkeypatch):
+    """Capstone sol P2: if vertex_search_coverage RAISES (corrupt fts_state,
+    unreadable db, ...), search() must fail CLOSED — treat every indexed
+    kind as untrustworthy, not silently promote them all to trustworthy.
+
+    A real root cause that breaks the coverage probe (corrupt db, I/O
+    error) breaks ``vertex_search`` the SAME way — both are mocked to raise
+    here, reproducing the exact silent-empty failure sol described: before
+    the fix, a probe exception left `stale_kinds` empty (the `coverage is
+    None` branch was a no-op), so EVERY indexed kind stayed "trustworthy";
+    the FTS branch then swallowed the SAME underlying failure into
+    `facts = []` via its own defensive except, and the substring fallback
+    skipped these kinds too (wrongly counted as fts_kinds) — a silent,
+    fully-empty result with NO disclosure at all.
+    """
+    import sqlite3
+
+    from loops.commands.fetch import fetch_fold
+
+    vpath = _search_vertex(tmp_path)  # reindexed by the fixture
+
+    def _boom(*_args, **_kwargs):
+        raise sqlite3.OperationalError("simulated: disk I/O error")
+
+    # search() does `from engine import vertex_search_coverage` / `vertex_search`
+    # INSIDE the function body (a fresh lookup on every call) — patch the
+    # attributes on the `engine` module itself so those lookups resolve to
+    # the failing stand-ins.
+    import engine
+
+    monkeypatch.setattr(engine, "vertex_search_coverage", _boom)
+    monkeypatch.setattr(engine, "vertex_search", _boom)
+
+    state = fetch_fold(vpath)
+    found = search(project(state), "JWT", vertex_path=vpath)
+
+    # Not silently empty: the fact is still found, via the substring
+    # fallback the fail-closed path routes it through — and vertex_search
+    # (also mocked to raise) is never even reached, because fail-closed
+    # means fts_kinds is empty and the FTS branch's guard short-circuits.
+    kinds_found = {r.kind for r in found.rows}
+    assert "decision" in kinds_found
+    # And the gap is disclosed, not hidden — a probe failure is treated
+    # exactly like "everything indexed is stale".
+    assert "decision" in found.window.stale
+
+
+def test_search_generation_skew_fails_closed(tmp_path, monkeypatch):
+    """sol P2-a: the index is rebuilt under a NEW declaration between the
+    coverage probe and the query. The certification no longer describes what
+    would be read, so the FTS branch must drop out and the substring path must
+    cover those kinds — with the gap DISCLOSED, not swallowed into an empty
+    result (the certify-then-query race, same fail-closed posture as a probe
+    failure above).
+    """
+    import engine
+    from engine import FtsGenerationChanged
+    from loops.commands.fetch import fetch_fold
+
+    vpath = _search_vertex(tmp_path)  # reindexed by the fixture
+
+    def _skewed(*_args, **_kwargs):
+        raise FtsGenerationChanged("simulated: reindexed under a new declaration")
+
+    monkeypatch.setattr(engine, "vertex_search", _skewed)
+
+    state = fetch_fold(vpath)
+    found = search(project(state), "JWT", vertex_path=vpath)
+
+    # Still found — via the substring fallback the skew reroutes it through.
+    assert "decision" in {r.kind for r in found.rows}
+    # And named as untrustworthy rather than silently reported as fresh.
+    assert "decision" in found.window.stale
+
+
+def test_search_passes_the_certified_generation(tmp_path, monkeypatch):
+    """The query is issued UNDER the generation coverage certified — the
+    binding is a real argument, not a comment."""
+    import engine
+    from loops.commands.fetch import fetch_fold
+
+    vpath = _search_vertex(tmp_path)
+    certified = engine.vertex_search_coverage(vpath).generation
+    assert certified is not None
+
+    seen = {}
+    real = engine.vertex_search
+
+    def _spy(*args, **kwargs):
+        seen.update(kwargs)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(engine, "vertex_search", _spy)
+
+    state = fetch_fold(vpath)
+    search(project(state), "JWT", vertex_path=vpath)
+    assert seen.get("require_generation") == certified
 
 
 # ---------------------------------------------------------------------------

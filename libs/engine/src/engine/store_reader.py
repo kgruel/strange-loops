@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from contextlib import contextmanager
+from collections.abc import Iterable, Iterator
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -536,19 +538,67 @@ class StoreReader:
         ).fetchall()
         return [self._fact_row_to_dict(r) for r in rows]
 
+    @contextmanager
+    def snapshot(self) -> "Iterator[StoreReader]":
+        """Pin ONE read snapshot across several reads on this connection.
+
+        ``BEGIN DEFERRED`` takes the snapshot at the first read and holds it
+        until the transaction ends, so a certify-then-query pair observes a
+        single consistent state. Without it, sharing a connection is not
+        sharing a snapshot — each statement autocommits and a concurrent
+        writer can land between them (sol P2-a round 2). The reader is
+        query_only, so the transaction always ends in rollback; there is
+        nothing to commit.
+        """
+        self._conn.execute("BEGIN DEFERRED")
+        try:
+            yield self
+        finally:
+            self._conn.rollback()
+
+    def fts_generation(self) -> str | None:
+        """The declaration fingerprint the FTS index was last built for.
+
+        ``None`` when the index or its state table doesn't exist, or when it
+        predates fingerprint recording. Read on THIS reader's connection so a
+        caller can certify and query without a connection boundary between
+        them (sol P2-a).
+        """
+        try:
+            row = self._conn.execute(
+                "SELECT value FROM fts_state WHERE key='decl_fingerprint'"
+            ).fetchone()
+        except sqlite3.Error:
+            return None
+        return row[0] if row else None
+
     def search_facts(
         self,
         query: str,
         *,
         kind: str | None = None,
+        kinds: Iterable[str] | None = None,
         since: float | None = None,
         until: float | None = None,
         limit: int = 100,
     ) -> list[dict]:
         """FTS5 search over fact payloads.
 
-        Requires facts_fts virtual table to exist (see vertex_reader._ensure_fts).
+        Requires facts_fts virtual table to exist (built only by the explicit
+        vertex_reader.vertex_reindex — reads never create or update the index).
         Returns newest-first, same dict shape as facts_between.
+
+        ``kinds`` restricts the SQL-level result set to a SET of kinds
+        BEFORE ``limit`` is applied — distinct from ``kind`` (an exact
+        single-kind filter, which takes precedence if both are given). This
+        matters when a caller only trusts a SUBSET of what's actually
+        indexed (e.g. one indexed kind is stale, another is fresh): without
+        a SQL-level restriction, the stale kind's many old matches can crowd
+        the newest-``limit`` window and silently push out the fresh kind's
+        genuinely-matching rows before the caller ever gets a chance to
+        filter them out post-hoc (S2 sol P2 — the exact defect class this
+        slice exists to kill). An explicit empty ``kinds`` matches nothing,
+        by design (an empty allowlist is not "no restriction").
         """
         # Query-time internal exclusion (SPEC §9.4, defense in depth): internal
         # kinds get no search fields so they never ENTER the index, but a
@@ -561,6 +611,14 @@ class StoreReader:
             clauses.remove("fts.kind NOT GLOB '_decl.*'")
             clauses.append("fts.kind = ?")
             params.append(kind)
+        elif kinds is not None:
+            kinds = list(kinds)
+            if not kinds:
+                return []  # explicit empty allowlist matches nothing
+            clauses.remove("fts.kind NOT GLOB '_decl.*'")
+            placeholders = ",".join("?" for _ in kinds)
+            clauses.append(f"fts.kind IN ({placeholders})")
+            params.extend(kinds)
         if since is not None:
             clauses.append("f.ts >= ?")
             params.append(since)
@@ -593,3 +651,62 @@ class StoreReader:
 
     def __exit__(self, *args) -> None:
         self.close()
+
+
+def fact_signatures(
+    store_path: Path, ids: Iterable[str], *, timeout: float = 5.0
+) -> dict[str, str | None]:
+    """Read-only batched lookup of the ``facts.signature`` column by fact id.
+
+    The ONLY source of per-fact signatures for the canonical review projection
+    (0.9.0 S4): the fold/Surface path drops signatures entirely, so a review
+    that carries authorship must read the column directly.
+
+    Custody constraint: the column is read VERBATIM — a signature travels
+    exactly as stored, never recomputed or re-signed. Opens the store read-only
+    (URI ``mode=ro``, mirroring ``declaration._open_readonly``) so the lookup
+    never mutates it and is safe alongside a concurrent WAL writer, consistent
+    with the S2 read-purity posture.
+
+    PRAGMA-probes the ``signature`` column: on a pre-signature store (the column
+    is absent) EVERY requested id maps to ``None`` rather than raising
+    (``no such column``). An id with no matching row, or a stored NULL signature,
+    also maps to ``None``. The returned dict has exactly one entry per DISTINCT
+    requested id (insertion order preserved for determinism); passing no ids
+    returns ``{}``.
+
+    A module-level function, not a :class:`StoreReader` method, so the app layer
+    reaches per-fact signatures through the public ``engine`` surface without
+    importing ``StoreReader`` directly (the architecture ratchet).
+    """
+    wanted = list(dict.fromkeys(ids))  # de-dupe, preserve first-seen order
+    out: dict[str, str | None] = dict.fromkeys(wanted, None)
+    if not wanted:
+        return out
+    try:
+        conn = sqlite3.connect(
+            f"file:{store_path}?mode=ro", uri=True, timeout=timeout
+        )
+    except sqlite3.Error:
+        return out
+    try:
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(facts)")}
+        if "signature" not in cols:
+            return out
+        # Chunk the IN (...) set to stay well under SQLite's bound-variable
+        # ceiling (default 999) on a large fold.
+        for start in range(0, len(wanted), 500):
+            chunk = wanted[start : start + 500]
+            placeholders = ",".join("?" * len(chunk))
+            for fid, sig in conn.execute(
+                f"SELECT id, signature FROM facts WHERE id IN ({placeholders})",
+                chunk,
+            ):
+                out[fid] = sig
+    except sqlite3.Error:
+        # A malformed/locked store degrades to all-None rather than aborting a
+        # read-only review — same posture as declaration._open_readonly.
+        return out
+    finally:
+        conn.close()
+    return out

@@ -88,12 +88,19 @@ __all__ = [
     "vertex_fact_by_id",
     "vertex_facts",
     "vertex_search",
+    "vertex_search_coverage",
+    "FtsCoverage",
+    "FtsGenerationChanged",
+    "vertex_reindex",
     "vertex_ticks",
     "vertex_summary",
     # Declaration resolver (store-backed declaration seam)
     "load_declaration",
     "load_declaration_status",
     "resolve_declaration_documents",
+    "declaration_generation",
+    # Per-fact signature lookup (canonical review projection, 0.9.0 S4)
+    "fact_signatures",
     # Witness positions (read-path temporal cursor)
     "WitnessPosition",
     "WitnessFold",
@@ -216,6 +223,10 @@ _LAZY_IMPORTS: dict[str, tuple[str, str]] = {
     "vertex_tick_fold": ("engine.vertex_reader", "vertex_tick_fold"),
     "vertex_read": ("engine.vertex_reader", "vertex_read"),
     "vertex_search": ("engine.vertex_reader", "vertex_search"),
+    "vertex_search_coverage": ("engine.vertex_reader", "vertex_search_coverage"),
+    "FtsCoverage": ("engine.vertex_reader", "FtsCoverage"),
+    "FtsGenerationChanged": ("engine.vertex_reader", "FtsGenerationChanged"),
+    "vertex_reindex": ("engine.vertex_reader", "vertex_reindex"),
     "vertex_summary": ("engine.vertex_reader", "vertex_summary"),
     "vertex_ticks": ("engine.vertex_reader", "vertex_ticks"),
     # Declaration resolver
@@ -225,6 +236,8 @@ _LAZY_IMPORTS: dict[str, tuple[str, str]] = {
         "engine.declaration",
         "resolve_declaration_documents",
     ),
+    "declaration_generation": ("engine.declaration", "declaration_generation"),
+    "fact_signatures": ("engine.store_reader", "fact_signatures"),
     # Witness positions (read-path temporal cursor)
     "WitnessPosition": ("engine.witness", "WitnessPosition"),
     "WitnessFold": ("engine.witness", "WitnessFold"),

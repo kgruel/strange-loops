@@ -527,16 +527,22 @@ def fold_view(
             blocks.append(Block.text("", Style(), width=width))
             blocks.append(walked_block)
 
-    # Footer: unfolded kinds
-    footer_parts: list[str] = []
+    # Footer: unfolded kinds + lifecycle-hide disclosure (S5). One line each,
+    # mirroring the S2 stale/unindexed search footer. The hidden count is honest
+    # (Window.hidden — inactive entities the default view projected out) and
+    # names the `--all` defeat, so hiding is never silent.
+    footer_lines: list[str] = []
     if data.unfolded:
         loose = ", ".join(f"{c} {k}" for k, c in sorted(data.unfolded.items()))
-        footer_parts.append(f"Unfolded: {loose}")
-    if footer_parts:
+        footer_lines.append(f"Unfolded: {loose}")
+    if data.window.hidden:
+        footer_lines.append(
+            f"({data.window.hidden} inactive hidden — --all to show)"
+        )
+    if footer_lines:
         blocks.append(Block.text("", Style(), width=width))
-        blocks.append(Block.text(
-            "  ".join(footer_parts), fp.unfolded, width=width,
-        ))
+        for line in footer_lines:
+            blocks.append(Block.text(line, fp.unfolded, width=width))
 
     # Rail legend — TTY only; the piped ledger spells tiers as words.
     if not is_piped:
@@ -560,9 +566,13 @@ def _render_search(data: "Surface", zoom: Zoom, width: int | None) -> Block:
     """Event-axis render for ``--match`` — a flat ts-desc list of matching facts.
 
     Each row is one matching FACT (event axis), not a folded item, so there is
-    no kind-grouping; the read is chronological. The footer names the kinds that
-    lacked FTS coverage (``window.unindexed``) — the honesty signal that those
-    were substring-scanned, not FTS-searched.
+    no kind-grouping; the read is chronological. The footer names the kinds
+    that lacked FTS coverage — split into two honest, differently-fixed
+    signals (S2 arbitration F1): ``window.unindexed`` (never declared
+    searchable — a vertex-edit fix) vs ``window.stale`` (declared, but the
+    index is missing or behind head — an ``sl store reindex`` fix), plus
+    ``window.truncated`` when the FTS query itself hit its result limit
+    (friction:fts-match-limit-100-silent-cap — no-silent-caps disclosure).
     """
     from loops.lenses.gist import content_gist
 
@@ -575,6 +585,10 @@ def _render_search(data: "Surface", zoom: Zoom, width: int | None) -> Block:
         parts = [f"{n} match{'es' if n != 1 else ''} for {q!r}"]
         if data.window.unindexed:
             parts.append(f"{len(data.window.unindexed)} not indexed")
+        if data.window.stale:
+            parts.append(f"{len(data.window.stale)} index stale")
+        if data.window.truncated:
+            parts.append("truncated")
         return Block.text(rollup_line(data.vertex, parts), Style(), width=width)
 
     fmt = _format_ts_full if zoom == Zoom.FULL else _format_date
@@ -607,13 +621,26 @@ def _render_search(data: "Surface", zoom: Zoom, width: int | None) -> Block:
         hint = f" [+{fit.dropped}c]" if fit.dropped > 0 else ""
         blocks.append(Block.text(f"{prefix}{fit.text}{hint}", Style(), width=width))
 
+    footer_lines: list[str] = []
     if data.window.unindexed:
-        footer = (
+        footer_lines.append(
             f"({len(data.window.unindexed)} not indexed: "
             f"{', '.join(data.window.unindexed)})"
         )
+    if data.window.stale:
+        footer_lines.append(
+            f"({len(data.window.stale)} index stale — run `sl store reindex`: "
+            f"{', '.join(data.window.stale)})"
+        )
+    if data.window.truncated:
+        footer_lines.append(
+            "(FTS results capped by the search index limit — narrow the "
+            "query to see more)"
+        )
+    if footer_lines:
         blocks.append(Block.text("", Style(), width=width))
-        blocks.append(Block.text(footer, fp.unfolded, width=width))
+        for line in footer_lines:
+            blocks.append(Block.text(line, fp.unfolded, width=width))
 
     return join_vertical(*blocks)
 

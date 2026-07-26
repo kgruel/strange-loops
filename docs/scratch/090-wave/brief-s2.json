@@ -1,0 +1,162 @@
+{
+ "acceptance_criteria": [
+  "`sl store reindex <vertex>` exists, dispatches through `_run_store`, and is the ONLY code path that creates or writes `facts_fts`/`fts_state` anywhere in the codebase (grep for `CREATE VIRTUAL TABLE facts_fts` and `INSERT INTO facts_fts` \u2014 both must appear only inside the new reindex primitive).",
+  "A read (`sl read <vertex> --match Q`, or a direct `vertex_search()` call) never opens a write-mode SQLite connection to the canonical store \u2014 verified by a regression test that captures the store .db's bytes before and after a search and asserts equality, both when facts_fts already exists AND when it has never been built.",
+  "A newly-declared `search` field on a kind with pre-existing facts becomes fully searchable after one `sl store reindex` call, including facts emitted BEFORE the declaration existed (closes friction:fts-search-declaration-not-retroactive) \u2014 because reindex is a full drop+rebuild against the CURRENT declaration set, not an incremental watermark.",
+  "A stale or missing FTS index never produces a silently-incomplete answer: `sl read <vertex> --match Q` for a kind whose index doesn't cover its newest facts falls back to the existing substring scan for that kind, and `Window`'s disclosure names the gap (distinct from the existing 'kind has no search declaration' disclosure).",
+  "`sl store reindex <aggregate-vertex>` (a `combine` vertex) reindexes every child's own store \u2014 matching `_combined_search`'s existing per-child recursion \u2014 so the aggravator (one read against an aggregate mutating every child) has no analogue on the write side either: reindex is explicit per-child, never triggered by a read.",
+  "All ~29 existing tests that call `vertex_search()`/`search()` without an explicit reindex step (libs/engine/tests/test_vertex_reader.py: TestVertexSearch, TestFTS5NestedFields, TestCombinedVertexSearch; libs/engine/tests/test_ontology_as_of.py: test_vertex_search_head_equals_now; apps/loops/tests/test_surface.py: the four `_search_vertex`-based tests; apps/loops/tests/test_integration.py: test_read_search) pass after inserting the new explicit reindex call \u2014 none silently pass by accident (i.e. none are secretly exercising the substring fallback while claiming to test FTS).",
+  "`test_store_completion.py`'s `TestStoreSubcommandsParity` (source-order regex against `STORE_SUBCOMMANDS`) passes unmodified against the new 8-subcommand dispatch chain \u2014 this is the existing ratchet that would fail loudly if reindex were wired into `_run_store` without also appearing in `cli/store_args.STORE_SUBCOMMANDS` at the same relative position.",
+  "design:fts-confirm-symmetry-is-phantom's property (a just-emitted fact IS found by the very next `--match`) is explicitly re-derived, not silently dropped: post-fix it holds via the substring-fallback route for the just-emitted fact's kind (flagged stale/missing-index in Window), not via FTS auto-catch-up \u2014 this must be a named test, not just an emergent side effect.",
+  "`uv run --package engine pytest libs/engine/tests` and `uv run --package loops pytest apps/loops/tests` both pass."
+ ],
+ "current_behavior": "Every FTS content search writes to the canonical store before it reads. apps/loops/src/loops/surface.py:798 (`facts = vertex_search(vertex_path, query)` inside `search()`, def at 761-823) calls libs/engine/src/engine/vertex_reader.py's `vertex_search()` (def 1651-1726), which unconditionally calls `_ensure_fts(store_path, search_fields)` at line 1718 BEFORE running the actual FTS5 query. `_ensure_fts` (def 1585-1648) opens a plain read-write `sqlite3.connect(str(store_path))` (line 1593, no `PRAGMA query_only`), `CREATE TABLE IF NOT EXISTS`s `facts_fts`/`fts_state` (1597-1607), scans every fact with `rowid > fts_state.last_rowid` (1615-1619), inserts FTS rows for kinds with a declared `search` field, advances `last_rowid` to the last scanned rowid REGARDLESS of whether that kind was searchable (1622-1628, deliberately, per the docstring, so trailing non-searchable rows like `_decl.*` don't get rescanned forever), and `conn.commit()`s (1646) if anything advanced. This is the confirmed mutation (184320\u2192282624 bytes on a nominal read). AFTER this write, `vertex_search` opens a SEPARATE, genuinely-read-only `StoreReader` (libs/engine/src/engine/store_reader.py:13-31; `PRAGMA query_only=ON` at line 31) and calls `reader.search_facts(...)` (store_reader.py:539-583) \u2014 this second half is already read-only today; only `_ensure_fts`'s connection writes. For aggregation: `_combined_search` (vertex_reader.py, def 706-758) is entered when `ast.combine is not None` (checked inside `vertex_search` at line 1696-1701); it loops over `ast.combine` entries (742-748) and calls `vertex_search(vpath, query, ...)` RECURSIVELY per child at line 749 \u2014 each recursive call re-triggers `_ensure_fts` against that child's OWN store.db, confirming the aggravator (one aggregate read mutates every child). Retroactivity bug: because `_ensure_fts` advances `last_rowid` past EVERY scanned row including non-searchable ones, a fact whose kind had no `search` declaration at scan time is permanently skipped even if `search` is declared on that kind later \u2014 the watermark never revisits it (fts-search-declaration-not-retroactive). Coverage-gap disclosure exists today ONLY for the 'never declared' case: surface.py's `_indexed_kinds()` (744-758) parses the vertex file's `loops{}` block for kinds with a `search` field; `search()` computes `unindexed = present - indexed` (788) and substring-scans those rows (806-812); `Window.unindexed` (surface.py:106-119, field at 119) carries this tuple through to `to_dict`'s `_window_to_dict` (1005-1014, line 1013) and to the TTY footer in apps/loops/src/loops/lenses/fold.py's `_render_search` (559-618, footer at 610-616, MINIMAL-zoom count at 576-577). There is NO staleness axis today \u2014 a kind that IS declared searchable but whose newest facts postdate the last `_ensure_fts` scan is treated as fully covered (the write-on-read silently 'fixes' this on every call, which is exactly the mutation being removed). `vertex_search` has exactly one production caller (surface.py:798) plus its own recursive self-call (vertex_reader.py:749) \u2014 no other module imports it (verified by repo-wide grep), so its contract can change with a small, fully-enumerable blast radius. `sl store` has no `reindex` subcommand today; apps/loops/src/loops/commands/store.py's `_run_store` (1342-1445) dispatches on seven subcommands (`verify`/`rebirth`/`reanchor`/`absorb`/`adopt`/`ticks`/`stats`, if/elif chain at 1355-1368) and apps/loops/src/loops/cli/store_args.py's `STORE_SUBCOMMANDS` tuple (line ~41-42) lists exactly those seven; apps/loops/tests/test_store_completion.py's `TestStoreSubcommandsParity.test_matches_run_store_dispatch_chain` (lines 31-37) regex-extracts the dispatch chain from `_run_store`'s source IN ORDER and asserts it equals the tuple verbatim \u2014 a ratchet that will fail loudly (correctly) if reindex is wired into one without the other, or added out of relative order between them. Manually rebuilding the index today requires hand-dropping `facts_fts`/`fts_state` via raw `sqlite3` (no CLI surface), which is exactly what the friction fact 'fts-search-declaration-not-retroactive' hit live on 2026-07-11.",
+ "dependencies": [
+  "None from other 0.9.0 slices \u2014 this is self-contained within libs/engine + apps/loops/surface+lenses+commands+cli and their tests. It does not touch atoms, lang, custody, sign, or libs/store.",
+  "The `search-read-mutates-canonical-store` and `fts-search-declaration-not-retroactive` frictions and the `fts-confirm-symmetry-is-phantom`/`fts-match-limit-100-silent-cap` facts are already read (quoted verbatim above) \u2014 no further loops-store reads are required before starting.",
+  "Soft dependency, not blocking: whichever slice touches Slice 1 (typed-address) should not be mid-flight in surface.py's `search()`/`Window` at the same time \u2014 both slices edit apps/loops/src/loops/surface.py, so sequence or rebase to avoid a merge conflict on the `search()` function and the `Window` dataclass."
+ ],
+ "files": [
+  {
+   "path": "libs/engine/src/engine/vertex_reader.py",
+   "role": "Remove `_ensure_fts`'s call from the read path; add `vertex_reindex()` (the sole writer, full drop+rebuild) and a read-only `vertex_search_coverage()` staleness probe, both combine/discover-aware (mirror `_combined_search`'s recursion at 706-758). `vertex_search()` (1651-1726) loses the `_ensure_fts(store_path, search_fields)` call at line 1718 but is otherwise unchanged (its `StoreReader`-based query at 1720-1726 was already read-only).",
+   "est_loc_delta": "+150/-70"
+  },
+  {
+   "path": "libs/engine/src/engine/__init__.py",
+   "role": "Export `vertex_reindex` and `vertex_search_coverage` via the lazy-import map (mirror the `vertex_search` entry at line 218) and add both names to `__all__` (near line 90).",
+   "est_loc_delta": "+6/-0"
+  },
+  {
+   "path": "apps/loops/src/loops/surface.py",
+   "role": "`search()` (761-823): call the new coverage probe alongside `_indexed_kinds()`; route stale/missing-index kinds through the existing substring-fallback branch (806-812) instead of the FTS branch (794-801); fix or narrow the `except Exception: facts = []` swallow at 799-800 so it is a documented defensive backstop, not the mechanism that hides a missing-table case. `Window` (105-119): add a new field for index-staleness (recommended name: `stale`, keeping `unindexed` meaning unchanged \u2014 see planned_changes for rationale). `_window_to_dict` (1005-1014): serialize the new field.",
+   "est_loc_delta": "+35/-10"
+  },
+  {
+   "path": "apps/loops/src/loops/lenses/fold.py",
+   "role": "`_render_search` (559-618): extend the MINIMAL one-liner (576-577) and the footer (610-616) to disclose stale-index kinds distinctly from never-indexed kinds (e.g. '(K index stale \u2014 run `sl store reindex`)' vs '(K not indexed)').",
+   "est_loc_delta": "+15/-5"
+  },
+  {
+   "path": "apps/loops/src/loops/commands/store.py",
+   "role": "Add `_run_reindex(argv, *, vertex_path=None) -> int`, mirroring `_run_reanchor`'s shape (488-561: require a `.vertex` target, refuse `.db`/name-only with an actionable message, require the store to exist, call the engine primitive, render a one-line receipt or `--json`). Wire it into `_run_store`'s dispatch chain (1342-1445, elif block at 1355-1368) \u2014 append after the `stats` branch to keep `STORE_SUBCOMMANDS` order-parity trivial.",
+   "est_loc_delta": "+90/-2"
+  },
+  {
+   "path": "apps/loops/src/loops/cli/store_args.py",
+   "role": "Append `\"reindex\"` to `STORE_SUBCOMMANDS` (line ~41-42) in the SAME relative position as the new `_run_store` elif branch (parity test enforces exact source order), update the `subcommand` help string.",
+   "est_loc_delta": "+2/-1"
+  },
+  {
+   "path": "libs/engine/tests/test_vertex_reader.py",
+   "role": "TestVertexSearch (433-744, ~14 tests), TestFTS5NestedFields (807-886, 4 tests), TestCombinedVertexSearch (1420-1528, 6 tests): insert an explicit `vertex_reindex(vpath)` call before each `vertex_search(...)` assertion. Rewrite `test_incremental_catchup` (626-655) to assert the NEW contract (a fact added after the last reindex is NOT found until reindex runs again \u2014 rename to reflect that). `test_fts_watermark_advances_past_trailing_nonsearchable` (657-691): drive the watermark check through `vertex_reindex` instead of `vertex_search`. Add: a byte-identity regression test for `vertex_search` (with and without a pre-existing index) closing friction:search-read-mutates-canonical-store; a retroactive-indexing test closing friction:fts-search-declaration-not-retroactive (facts pre-dating a `search` declaration are found after one reindex); a per-child aggregate reindex test mirroring TestCombinedVertexSearch's `_setup_search_combine_env` fixture.",
+   "est_loc_delta": "+140/-25"
+  },
+  {
+   "path": "libs/engine/tests/test_ontology_as_of.py",
+   "role": "`test_vertex_search_head_equals_now` (215-224): insert `vertex_reindex(vpath)` before both `vertex_search` calls.",
+   "est_loc_delta": "+2/-0"
+  },
+  {
+   "path": "apps/loops/tests/test_surface.py",
+   "role": "`_search_vertex` fixture (493-521): call the new reindex primitive right after the two `emit(...)` calls so the four downstream tests (524-570) genuinely exercise FTS again instead of silently degrading to the substring fallback. Add: an unreindexed-vertex test asserting substring fallback + staleness disclosure (not a crash, not a silent empty result) \u2014 the direct test for FIX SHAPE point 4.",
+   "est_loc_delta": "+35/-3"
+  },
+  {
+   "path": "apps/loops/tests/test_integration.py",
+   "role": "`test_read_search` (115-122) and `test_search_empty_vertex` (415-423): insert the explicit reindex step where facts exist before the search assertion (the empty-vertex case needs no change \u2014 it returns `[]` before ever touching search fields).",
+   "est_loc_delta": "+4/-0"
+  },
+  {
+   "path": "apps/loops/tests/test_store_command.py",
+   "role": "Add a `TestStoreReindex` class mirroring `TestStoreVerify`/`TestStoreStats` (95-145, 311-364): happy path (fresh store \u2192 reindex \u2192 facts_fts exists and is queryable), `.db`-target refusal (mirror `test_reanchor_db_target_is_clean_error`, 383-393), no-facts-yet refusal, `--json` receipt shape, and an aggregate-vertex reindex that touches every child's own store.db.",
+   "est_loc_delta": "+80/-0"
+  },
+  {
+   "path": "docs/CLI-CHEATSHEET.md",
+   "role": "Update the FTS caveat (lines 78-81: 'FTS content search (--match) is a head-built index...') to describe the new explicit-reindex contract and the stale-index disclosure; mention `sl store reindex` near the `--match`/`--grep` grammar block (129-130).",
+   "est_loc_delta": "+8/-3"
+  }
+ ],
+ "measures": [
+  "Byte-for-byte (or at minimum: row-count / table-existence) identity of the store .db before and after a `--match` read, in both the pre-existing-index and never-indexed cases \u2014 the direct regression measure for the 184320\u2192282624-byte mutation.",
+  "Count of existing tests requiring an explicit-reindex insertion (target: the ~29 enumerated above, none silently mis-passing post-fix).",
+  "STORE_SUBCOMMANDS / `_run_store` dispatch-chain parity (existing ratchet in test_store_completion.py) stays green with zero modification to the test itself."
+ ],
+ "open_questions": [
+  "Window disclosure shape for the new staleness axis: reuse the existing `unindexed` tuple (folding 'never declared' and 'declared but stale' into one undifferentiated signal \u2014 the more literal reading of the friction fact's 'Window.unindexed disclosure extended to name index-staleness'), or add a new distinct field (recommended in this brief as `Window.stale`, keeping `unindexed` semantics unchanged) so the two reasons stay honestly distinguishable in both the TTY footer and the `--json` contract. This is a public-surface (JSON contract) decision, not pure implementation detail, and the friction fact's wording is genuinely ambiguous between the two readings \u2014 recommend the separate-field shape (consistent with Window's existing one-field-per-distinct-signal convention: `limited_by`, `granularity`, `unindexed` are already separate axes) but flagging since it changes what `--json` consumers see."
+ ],
+ "planned_changes": [
+  {
+   "step": "1. Engine: add `vertex_reindex(vertex_path: Path) -> dict`",
+   "description": "New function in libs/engine/src/engine/vertex_reader.py, placed near `_ensure_fts`'s old location. For a leaf (single-store) vertex: resolve `store_path` via the same logic `vertex_search` uses (1703-1711); if the store doesn't exist, return a no-op receipt (nothing to index yet \u2014 do NOT create the .db). `collect_search_fields(ast, base_dir)`; if empty, return a no-op receipt without touching the DB (nothing declared searchable). Otherwise open a plain read-write `sqlite3.connect`, `DROP TABLE IF EXISTS facts_fts; DROP TABLE IF EXISTS fts_state;` then recreate both with the SAME schema `_ensure_fts` used (1596-1607), scan ALL facts ordered by rowid (no `WHERE rowid > ?` \u2014 this is what fixes the retroactivity friction: every reindex re-evaluates every fact against the CURRENT declaration set), insert FTS rows for kinds present in `search_fields`, set `fts_state.last_rowid` to the max scanned rowid, commit, close. Return a receipt dict (vertex name, kinds indexed, facts scanned/indexed, last_rowid). For `ast.combine is not None`: recurse into each child exactly like `_combined_search` (706-758) does for search \u2014 resolve each child's vertex path via `lang.resolve_vertex`, call `vertex_reindex` on it, collect per-child receipts. For `ast.discover is not None`: match `_combined_search`'s existing gap (732-740, 'discover is not yet supported for search') \u2014 a documented no-op, not a regression to fix here.",
+   "files": [
+    "libs/engine/src/engine/vertex_reader.py"
+   ]
+  },
+  {
+   "step": "2. Engine: remove the write from `vertex_search()`, add a read-only staleness probe",
+   "description": "Delete the `_ensure_fts(store_path, search_fields)` call at line 1718 (and the `_ensure_fts` function itself, its logic having moved into `vertex_reindex`). Add `vertex_search_coverage(vertex_path: Path) -> FtsCoverage` (a small frozen dataclass or tuple: `missing: bool`, `stale_kinds: frozenset[str]`) \u2014 open a `StoreReader` (already read-only), check whether `facts_fts`/`fts_state` exist (`sqlite_master` lookup); if absent, `missing=True` and skip further probing. If present, read `fts_state.last_rowid`, then `SELECT DISTINCT kind FROM facts WHERE rowid > ? AND kind IN (declared searchable kinds)` to find `stale_kinds` \u2014 kinds with facts added since the last reindex. Recurse through `ast.combine`/`ast.discover` exactly like `_combined_search`/`vertex_reindex`, OR-ing `missing` and unioning `stale_kinds` across children (a query for text unique to one stale child must not be silently missed). `StoreReader.search_facts` (store_reader.py:539) will raise `sqlite3.OperationalError` if `facts_fts` doesn't exist \u2014 `vertex_search` itself does not need to guard this internally (callers use the coverage probe FIRST to decide whether to call it at all); document this contract clearly in `vertex_search`'s docstring (1662-1687) so it isn't rediscovered as a crash later. Export both new functions via `engine/__init__.py`'s lazy map + `__all__`.",
+   "files": [
+    "libs/engine/src/engine/vertex_reader.py",
+    "libs/engine/src/engine/__init__.py"
+   ]
+  },
+  {
+   "step": "3. Surface: consult the coverage probe, route stale kinds through the existing substring fallback wholesale",
+   "description": "In `search()` (surface.py 761-823): alongside the existing `_indexed_kinds(vertex_path)` call, call `engine.vertex_search_coverage(vertex_path)` (guard `vertex_path is not None`, same as today's guard at 794). Compute `trustworthy = indexed - coverage.stale_kinds` if not `coverage.missing`, else `trustworthy = set()`. `fts_kinds = present & trustworthy` (only call `vertex_search` for kinds proven fresh \u2014 this also means `vertex_search`'s own FTS query is never issued against a stale/missing index, so its exception-swallow at line 799-800 stops being load-bearing for this case). The substring branch's `unindexed` set (788, 806-812) grows to `(present - indexed) | (present & indexed & (coverage.stale_kinds if not coverage.missing else indexed))` \u2014 i.e. a WHOLESALE substring scan of the stale kind, not a partial merge of trusted-FTS-results-up-to-the-watermark plus substring-for-the-gap-only. Rationale for wholesale over partial: the substring fallback already operates on already-folded `surface.rows` (not raw per-fact rowid-stamped events \u2014 see the existing docstring at 770-773), so there is no clean way to isolate 'just the gap' at this layer without inventing new merge/dedup machinery; reusing the EXISTING fallback path verbatim (per the friction fact's own wording) for the whole kind is simpler, avoids double-counting, and is still fully honest since nothing is silently dropped. Resolve the open_questions item (Window.stale vs. reusing Window.unindexed) and thread the chosen field through `Window` (105-119), `_window_to_dict` (1005-1014), and `_render_search` (lenses/fold.py 559-618).",
+   "files": [
+    "apps/loops/src/loops/surface.py",
+    "apps/loops/src/loops/lenses/fold.py"
+   ]
+  },
+  {
+   "step": "4. CLI: add `sl store reindex`",
+   "description": "Add `_run_reindex(argv, *, vertex_path=None) -> int` to apps/loops/src/loops/commands/store.py, mirroring `_run_reanchor` (488-561) closely: argparse with an optional `file` positional (vertex name/path) when `vertex_path is None`, `--json`. Resolve via `_resolve_target`; refuse a `.db`-suffixed target with an actionable message ('reindex requires a .vertex target \u2014 search field declarations live in the vertex file, not the raw database'), same pattern as reanchor's guard (512-516) and absorb's (703-707). Require the store to exist (mirror reanchor's `db_path.exists()` check, 518-519) UNLESS the target is a combine/discover aggregate (which has no own store \u2014 delegate straight to `engine.vertex_reindex`, which handles the recursion). Call `engine.vertex_reindex(target_path)`, render either the JSON receipt or a one-line painted summary (kinds indexed, facts scanned, receipt/no-op distinction) in the style of reanchor's rendering block (550-560). Wire into `_run_store`'s dispatch (1342-1445): add `if argv and argv[0] == \"reindex\": return _run_reindex(argv[1:], vertex_path=vertex_path)` as the LAST branch (after `stats`, before the base-inspect fallthrough at 1370) to minimize churn on the existing chain. In apps/loops/src/loops/cli/store_args.py, append `\"reindex\"` to `STORE_SUBCOMMANDS` at the matching final position and extend the subcommand help string \u2014 the two must move together or `TestStoreSubcommandsParity` (test_store_completion.py:31-37) fails by design.",
+   "files": [
+    "apps/loops/src/loops/commands/store.py",
+    "apps/loops/src/loops/cli/store_args.py"
+   ]
+  },
+  {
+   "step": "5. Test migration: make every existing FTS test explicit about reindexing",
+   "description": "Mechanical but non-optional: every existing test that calls `vertex_search()` (directly or via `surface.search()`) without ever calling the new reindex primitive currently relies on the write-on-read behavior being removed. Walk libs/engine/tests/test_vertex_reader.py's TestVertexSearch (433-744), TestFTS5NestedFields (807-886), TestCombinedVertexSearch (1420-1528); libs/engine/tests/test_ontology_as_of.py's test_vertex_search_head_equals_now (215-224); apps/loops/tests/test_surface.py's `_search_vertex`-fixture tests (493-570); apps/loops/tests/test_integration.py's test_read_search (115-122). Insert `vertex_reindex(vpath)` (or the equivalent through the fixture) immediately before the first `vertex_search`/`search()` call each test makes. Rewrite `test_incremental_catchup` (626-655) to assert the NEW behavior (a fact added after the last reindex is invisible to a bare `vertex_search` until reindex runs again) rather than deleting it outright \u2014 this is the direct regression test for 'reject write-side reindex' from design:fts-confirm-symmetry-is-phantom.",
+   "files": [
+    "libs/engine/tests/test_vertex_reader.py",
+    "libs/engine/tests/test_ontology_as_of.py",
+    "apps/loops/tests/test_surface.py",
+    "apps/loops/tests/test_integration.py"
+   ]
+  },
+  {
+   "step": "6. New tests: the properties this fix is actually FOR",
+   "description": "Add tests that would fail on the OLD code and pass on the new: (a) byte-identity of the store .db across a `--match`/`vertex_search` call, both with a pre-built index and with none at all (closes friction:search-read-mutates-canonical-store \u2014 the literal 184320\u2192282624-byte regression); (b) retroactive indexing \u2014 emit facts under a kind with NO `search` declaration, declare `search` on that kind (rewrite the vertex file or point a second vertex file at the same store), run `vertex_reindex`, assert ALL pre-declaration facts are now found (closes friction:fts-search-declaration-not-retroactive); (c) stale-index disclosure \u2014 emit, reindex, emit again WITHOUT reindexing, `search()` and assert the new fact is found via substring fallback (not silently missing) AND the staleness is named in `Window` (closes the 'no silent wrong answers' requirement and re-derives design:fts-confirm-symmetry-is-phantom's emit-then-read property under the new mechanism); (d) `sl store reindex` on an aggregate vertex touches every child's own store.db (closes the aggravator on the write side, symmetric with the read-side fix); (e) CLI-level `TestStoreReindex` class in apps/loops/tests/test_store_command.py covering the reindex verb itself (happy path, `.db`-target refusal, no-facts-yet, `--json` shape) per the existing `TestStoreVerify`/`TestStoreStats` template.",
+   "files": [
+    "libs/engine/tests/test_vertex_reader.py",
+    "apps/loops/tests/test_surface.py",
+    "apps/loops/tests/test_store_command.py"
+   ]
+  }
+ ],
+ "risks": [
+  "The ~29-test migration (step 5) is mechanical but easy to under-count or half-do; a test that silently keeps passing post-fix without ever calling reindex would mean it degraded to testing the substring fallback while its docstring/name still claims to test FTS (exactly what would have happened to `test_search_fts_finds_bodies_in_indexed_kind` in apps/loops/tests/test_surface.py if the fixture weren't fixed) \u2014 a false-green that hides a real coverage gap. Mitigate by grepping for every `vertex_search(` and `search(project(` call site after the change and confirming each either follows a reindex call or is deliberately testing the NO-reindex/stale case.",
+  "The `except Exception: facts = []` at surface.py:799-800 currently masks ANY error from `vertex_search`, including a hypothetical bug in the new coverage-probe-gating logic (e.g. a kind incorrectly judged 'trustworthy' when the table is actually missing) \u2014 this could silently degrade to '0 results' instead of surfacing a real defect. Recommend narrowing the except or adding an explicit assertion/test that this branch is never hit in the fixed happy path.",
+  "Full drop+rebuild on `sl store reindex` is O(all facts) every time, unlike the old incremental catch-up. For this repo's current store sizes this is a non-issue (thousands of facts, sub-second), but it's a deliberate trade \u2014 worth a one-line comment at the call site explaining why full-rebuild was chosen over incremental-with-declaration-diffing (simplicity + it's what closes the retroactivity bug in the same primitive).",
+  "`vertex_search_coverage`'s combine/discover recursion must stay in lockstep with `_combined_search`'s and `vertex_reindex`'s recursion (three places now walk `ast.combine`/`ast.discover` similarly) \u2014 a future change to one (e.g. discover support landing) that isn't mirrored in the other two would silently reintroduce a coverage gap. Consider factoring the child-resolution loop (vertex_reader.py 742-748) into a shared helper if it doesn't already read cleanly duplicated three ways.",
+  "SQLite byte-identity assertions (step 6a) can be flaky if WAL-mode checkpointing or page-cache effects touch the file even with zero logical writes; if `SqliteStore`/`StoreReader` use WAL mode, prefer asserting on `facts_fts`/`fts_state` table absence + row counts rather than raw file bytes, or explicitly checkpoint before comparing."
+ ],
+ "slice": "FTS read-purity \u2014 sl store reindex as the sole index writer, read-only vertex_search, staleness disclosure",
+ "test_plan": [
+  "uv run --package engine pytest libs/engine/tests/test_vertex_reader.py -k 'Search or Fts or FTS or Combined' -v \u2014 the migrated + new engine-level tests.",
+  "uv run --package engine pytest libs/engine/tests/test_ontology_as_of.py -v",
+  "uv run --package engine pytest libs/engine/tests \u2014 full engine suite (nothing outside the FTS surface should be touched, but run it whole to catch DAG/import regressions from the __init__.py export additions).",
+  "uv run --package loops pytest apps/loops/tests/test_surface.py -k 'search or Search or unindexed or fts' -v",
+  "uv run --package loops pytest apps/loops/tests/test_store_command.py -k 'Reindex' -v \u2014 the new CLI-level tests.",
+  "uv run --package loops pytest apps/loops/tests/test_store_completion.py -v \u2014 MUST pass unmodified; if it fails, STORE_SUBCOMMANDS and _run_store's dispatch chain drifted out of lockstep.",
+  "uv run --package loops pytest apps/loops/tests \u2014 full app suite, including a golden-snapshot pass (apps/loops/tests/golden) to catch any incidental --match rendering drift.",
+  "Manual/exercise via the installed CLI (per this repo's CLAUDE.md \u2014 after `uv tool install . -e`): in a scratch vertex, emit a fact, run `sl read <v> --match <word>` and confirm 0 results + a 'not indexed'/'stale' disclosure (not silently 0-with-no-explanation); run `sl store reindex <v>`; re-run the same `--match` and confirm the fact is now found; `xxd`/`stat` the store .db before and after the `--match` re-run to confirm zero byte change.",
+  "Manual: run `sl store reindex <v>` twice in a row (idempotence check) and confirm identical results/no errors on the drop+recreate.",
+  "Manual: against the config-level `project` combine aggregate (~/.config/loops/project/project.vertex), run `sl read project --match <word>` before touching any child's reindex state, and confirm no child store.db's bytes change (the direct end-to-end check for the aggravator)."
+ ],
+ "thesis": "Make `sl store reindex <vertex>` the sole writer of the FTS5 derived index (facts_fts/fts_state), and make every read path (vertex_search, and its aggregation recursion through combine/discover children) strictly read-only. A read today silently mutates the canonical SQLite store on first `--match` (confirmed 184320\u2192282624 bytes) and, for aggregates, mutates every child store \u2014 a nominal query corrupting the very artifact it's supposed to be inspecting. The fix also incidentally closes the retroactivity friction (a newly-declared `search` field never backfills old facts) for free, because the new reindex primitive is a full drop+rebuild against the CURRENT declaration set rather than an incremental append-only watermark. The one thing this fix must not silently break is the property design:fts-confirm-symmetry-is-phantom established (a just-emitted fact is found by the very next --match) \u2014 it currently holds because the read writes; post-fix it must be re-derived through the existing substring-fallback path with an explicit staleness disclosure, not quietly dropped."
+}

@@ -11,9 +11,11 @@ the gate.
 from __future__ import annotations
 
 import pytest
+from atoms import FoldItem, FoldSection, FoldState
 from painted import Zoom
 
 from loops.lenses.fold import fold_view
+from loops.surface import hide_inactive, project
 
 from .fixtures import (
     SAMPLE_FOLD_FACTS,
@@ -26,6 +28,36 @@ from .helpers import block_to_text
 
 REFS = frozenset({"refs"})
 FACTS = frozenset({"facts"})
+
+
+def _lifecycle_hidden_surface():
+    """A lifecycle-declaring kind with one active + one inactive entity, run
+    through project → hide_inactive so the Window carries hidden=1 — the exact
+    input the built-in lens footer discloses (S5). Deterministic: fixed ISO ts."""
+    state = FoldState(
+        sections=(
+            FoldSection(
+                kind="task",
+                fold_type="by",
+                key_field="name",
+                lifecycle=("status", ("open", "in-progress")),
+                items=(
+                    FoldItem(
+                        payload={"name": "alpha", "status": "open",
+                                 "message": "active work"},
+                        ts="2025-01-15T10:00:00+00:00", n=1,
+                    ),
+                    FoldItem(
+                        payload={"name": "beta", "status": "done",
+                                 "message": "shipped"},
+                        ts="2025-01-15T11:00:00+00:00", n=1,
+                    ),
+                ),
+            ),
+        ),
+        vertex="session",
+    )
+    return hide_inactive(project(state))
 
 
 @pytest.mark.parametrize("zoom", list(Zoom), ids=lambda z: z.name)
@@ -66,4 +98,13 @@ def test_facts(golden, zoom):
 def test_unfolded(golden, zoom):
     """MINIMAL loose-render + 'Unfolded:' footer for undeclared kinds."""
     block = fold_view(SAMPLE_FOLD_UNFOLDED, zoom, width=80)
+    golden.assert_match(block_to_text(block), "output")
+
+
+@pytest.mark.parametrize("zoom", list(Zoom), ids=lambda z: z.name)
+def test_lifecycle_hidden_footer(golden, zoom):
+    """S5: the '(N inactive hidden — --all to show)' footer over a post-hide
+    Surface (active `alpha` shown, inactive `beta` projected out). The wave's
+    ONE licensed fold-golden move — every captured line hand-verified."""
+    block = fold_view(_lifecycle_hidden_surface(), zoom, width=80)
     golden.assert_match(block_to_text(block), "output")

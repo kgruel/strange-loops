@@ -16,11 +16,18 @@ import json
 import os
 import sqlite3
 import time as _time
+from collections.abc import Iterable
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from .declaration import load_declaration, load_declaration_status
+from .declaration import (
+    decl_lineage_and_head_on,
+    declaration_generation,
+    load_declaration,
+    load_declaration_status,
+)
 from .observer import observer_matches
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -709,6 +716,7 @@ def _combined_search(
     query: str,
     *,
     kind: str | None = None,
+    kinds: Iterable[str] | None = None,
     since: float | None = None,
     until: float | None = None,
     limit: int = 100,
@@ -722,6 +730,15 @@ def _combined_search(
     build-plan non-goal), but each child is a single store and MUST honor the
     cursor for its own ``search`` fields — ``as_of`` is a shared wall-clock
     ``ts``, so "as of T" resolves each child's declaration at T.
+
+    ``kinds`` is forwarded to each child's own ``vertex_search`` call
+    unchanged (S2 sol P2) — each child's SQL-level query is restricted to
+    the trustworthy kind set BEFORE that child's own ``limit`` applies, so a
+    stale kind in one child can't crowd out a fresh kind's matches within
+    that child's result window. The merge-then-relimit below (sort by ts,
+    slice to ``limit``) then operates on an ALREADY kind-filtered union
+    across children — no second instance of the crowding defect here, since
+    nothing untrustworthy ever enters ``all_results`` in the first place.
     """
     from lang import resolve_vertex
 
@@ -747,7 +764,7 @@ def _combined_search(
             continue
 
         child_results = vertex_search(
-            vpath, query, kind=kind, since=since, until=until,
+            vpath, query, kind=kind, kinds=kinds, since=since, until=until,
             limit=limit, observer=observer, as_of=as_of,
         )
         all_results.extend(child_results)
@@ -949,6 +966,11 @@ def _raw_to_fold_state(
                     scalars[fold_op.target] = val
 
         preview_fields = loop_def.preview_fields if loop_def is not None else ()
+        lifecycle = (
+            (loop_def.lifecycle.field, loop_def.lifecycle.active)
+            if loop_def is not None and loop_def.lifecycle is not None
+            else None
+        )
 
         sections.append(FoldSection(
             kind=kind_name,
@@ -958,6 +980,7 @@ def _raw_to_fold_state(
             scalars=scalars,
             preview_fields=preview_fields,
             edge_fields=edge_specs,
+            lifecycle=lifecycle,
         ))
 
     return FoldState(
@@ -1226,34 +1249,22 @@ def vertex_tick_fold(
     return _raw_to_fold_state(raw, ast, specs, kind=kind)
 
 
-def _normalize_edge_address(value: str, target_kind: str) -> str:
-    """Normalize a raw edge-field address to canonical ``kind:key`` form.
-
-    A value already carrying a ``:`` is kind-qualified — kept verbatim. A bare
-    value (``acme``, or a slashed key ``design/foo``) is qualified with the
-    declared target kind (``person:acme``) so it walks and matches inbound the
-    same way an explicit ``kind:key`` ref does. Empty parts are dropped.
-    """
-    v = value.strip()
-    if not v:
-        return ""
-    if ":" in v:
-        return v
-    return f"{target_kind}:{v}"
-
-
 def _lift_edges(payload: dict, edge_specs: tuple[tuple[str, str], ...]) -> tuple:
     """Lift declared edge fields from a folded payload into typed ``Edge``s.
 
     ``edge_specs`` are ``(field, target_kind)`` pairs from the kind's
     declaration. For each declared field present in the payload, the raw
     ADDRESS value (not the ``{field}_ref`` ULID pin) is comma-split and each
-    part normalized to ``kind:key``. Predicate = field name. This is the
-    read-time projection: overlay edges are the latest folded field value, so
-    they are retroactive (historical facts light up on declaration) and
-    emission-correctable (re-emit changes the value → the edge set changes).
+    part qualified into a canonical ``kind:key`` string via
+    :meth:`atoms.Address.for_edge` (the declaration-qualified constructor,
+    SHARED with the emit path — a bare/slashed value is qualified WHOLE with
+    the declared target, an explicit colon is kept verbatim). Predicate =
+    field name. This is the read-time projection: overlay edges are the latest
+    folded field value, so they are retroactive (historical facts light up on
+    declaration) and emission-correctable (re-emit changes the value → the
+    edge set changes).
     """
-    from atoms import Edge
+    from atoms import Address, Edge
 
     edges: list = []
     for field_name, target_kind in edge_specs:
@@ -1261,9 +1272,9 @@ def _lift_edges(payload: dict, edge_specs: tuple[tuple[str, str], ...]) -> tuple
         if not isinstance(raw, str) or not raw.strip():
             continue
         for part in raw.split(","):
-            addr = _normalize_edge_address(part, target_kind)
-            if addr:
-                edges.append(Edge(predicate=field_name, address=addr))
+            addr = Address.for_edge(part, target_kind)
+            if addr is not None:
+                edges.append(Edge(predicate=field_name, address=str(addr)))
     return tuple(edges)
 
 
@@ -1582,49 +1593,314 @@ def _extract_field(payload: dict, field: str) -> str:
     return str(value)
 
 
-def _ensure_fts(
-    store_path: Path, search_fields: dict[str, tuple[str, ...]]
-) -> None:
-    """Create/update FTS5 index from spec-declared search fields. Idempotent.
+class FtsGenerationChanged(Exception):
+    """The FTS index's declaration generation moved between certify and query.
 
-    Opens the database with write access to create/populate the FTS table,
-    then closes. The actual search runs read-only through StoreReader.
+    ``vertex_search_coverage`` certifies freshness AGAINST a generation; if the
+    index is rebuilt under a new declaration before the query runs, the
+    certification no longer describes what is being queried. Raised (never
+    swallowed into an empty result) so the caller routes those kinds through
+    the substring fallback and DISCLOSES the gap — silently returning FTS hits
+    certified for a different generation is the wrong answer, and silently
+    returning none is the wrong answer twice (sol P2-a).
     """
+
+
+@dataclass(frozen=True)
+class FtsCoverage:
+    """Read-only staleness probe for a vertex's FTS derived index.
+
+    ``missing`` — ``facts_fts``/``fts_state`` don't exist at all for this
+    store (never reindexed, or nothing declared searchable). When True, NO
+    kind in this vertex is trustworthy via FTS — callers must fall back to
+    substring scan wholesale, not just for the "missing" reason but because
+    there's no watermark to judge staleness against.
+
+    ``stale_kinds`` — kinds that DO have search declared and an index that
+    exists, but have facts written since the index's last rebuild (the
+    index exists but doesn't cover their newest rows). Distinct from
+    ``missing`` — "never declared" (``unindexed`` at the surface layer),
+    "declared but no index at all" (``missing`` here), and "declared,
+    indexed, but behind head" (``stale_kinds``) are three different claims
+    and must not collapse into one signal (S2 arbitration F1).
+    """
+
+    missing: bool = False
+    stale_kinds: frozenset[str] = field(default_factory=frozenset)
+    generation: str | None = None
+    """The declaration fingerprint this probe CERTIFIED against, when it
+    certified anything (``None`` when missing/all-stale, on aggregates, and
+    when the store carries no fingerprint). Callers pass it back to
+    :func:`vertex_search` as ``require_generation`` so the query runs under
+    the generation the freshness claim was made about — a certification is
+    about a generation, not about a store in the abstract (sol P2-a)."""
+
+
+def vertex_search_coverage(vertex_path: Path) -> FtsCoverage:
+    """Probe FTS index staleness WITHOUT writing anything.
+
+    Callers (``surface.search``) consult this BEFORE calling
+    :func:`vertex_search`, to decide which present kinds are trustworthy to
+    query via FTS vs. must route through the substring fallback. Opens the
+    store with ``PRAGMA query_only=ON`` — the same read-only discipline
+    :class:`~engine.store_reader.StoreReader` uses — so a coverage probe can
+    never be the thing that mutates the canonical store. This function CAN
+    still raise (e.g. a corrupt or unreadable database) — it does not catch
+    every exception itself; callers MUST fail closed on any exception from
+    this probe (never treat "the probe broke" as "everything is fine" — see
+    ``surface.search``'s handling, capstone sol P2).
+
+    TWO staleness axes, checked in order:
+
+    1. DECLARATION drift (capstone sol P1). The rowid watermark only moves
+       when a FACT is written — a declaration edit with zero new facts (a
+       newly-searchable kind, or changed ``search`` fields on an
+       already-indexed kind) leaves it untouched, so the rowid probe alone
+       would report FRESH against a semantically stale index. Compare the
+       CURRENT declaration's fingerprint
+       (:func:`~engine.declaration.declaration_generation`'s
+       ``review_fingerprint`` — the SAME fingerprint S4's review surface
+       uses, not a second one invented here) against what
+       :func:`vertex_reindex` persisted into ``fts_state`` at rebuild time.
+       Absent stored fingerprint (a pre-this-fix reindex, or a fingerprint
+       that failed to compute) or a mismatch ⇒ conservatively treat EVERY
+       declared-searchable kind as stale — whole-declaration-set
+       granularity, not per-kind, because a decl change is rare and
+       whole-set-stale-until-reindex is cheap and honest.
+    2. The pre-existing per-kind ROWID watermark probe — only reached once
+       the fingerprint confirms the declaration hasn't drifted.
+
+    Combine/discover vertices recurse per child and combine conservatively:
+    ``missing`` ORs across children (any child never reindexed makes the
+    WHOLE aggregate query untrustworthy for FTS, since a merged result set
+    can't tell which child a hit came from) and ``stale_kinds`` unions (a
+    kind stale in one child must not be silently trusted because another
+    child's copy is fresh).
+
+    LOCKSTEP NOTE: this recursion mirrors ``_combined_search``'s and
+    :func:`vertex_reindex`'s combine/discover walk — a change to one of the
+    three that isn't mirrored in the other two silently reintroduces a
+    coverage gap (S2 risk, flagged in the implementation brief).
+    """
+    ast = load_declaration(vertex_path)
+
+    if ast.combine is not None or ast.discover is not None:
+        return _combined_coverage(ast, vertex_path)
+
+    if ast.store is None:
+        return FtsCoverage(missing=True)
+
+    store_path = ast.store
+    if not store_path.is_absolute():
+        store_path = (vertex_path.parent / store_path).resolve()
+
+    if not store_path.exists():
+        return FtsCoverage(missing=True)
+
+    from .compiler import collect_search_fields
+
+    base_dir = vertex_path.parent
+    search_fields = collect_search_fields(ast, base_dir)
+    if not search_fields:
+        return FtsCoverage(missing=True)
+
+    declared_kinds = tuple(search_fields.keys())
+
+    # ONE snapshot for every fact this probe reasons about (sol P2-a). The
+    # fingerprint used to be read on its own connection, fts_state on a
+    # second, and the eventual query ran on a third — so a declaration event
+    # landing between them let a fingerprint from generation D1 certify an
+    # index built for D2, i.e. "fresh" over a stale index. The explicit read
+    # transaction below pins the store side; the AST-derived fingerprint is
+    # then bound to it by comparing the declaration head observed INSIDE the
+    # snapshot against the one ``declaration_generation`` reports. Different
+    # heads mean the declaration moved under the probe — refuse to certify.
+    conn = sqlite3.connect(str(store_path))
+    try:
+        conn.execute("PRAGMA query_only=ON")
+        conn.execute("BEGIN")
+        snapshot_head = decl_lineage_and_head_on(conn)[1]
+        generation = declaration_generation(vertex_path)
+        current_fingerprint = generation["review_fingerprint"]
+        if generation["decl_head"] != snapshot_head:
+            return FtsCoverage(
+                missing=False, stale_kinds=frozenset(declared_kinds),
+            )
+
+        table_row = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='facts_fts'"
+        ).fetchone()
+        if table_row is None:
+            return FtsCoverage(missing=True)
+
+        stored_row = conn.execute(
+            "SELECT value FROM fts_state WHERE key='decl_fingerprint'"
+        ).fetchone()
+        stored_fingerprint = stored_row[0] if stored_row else None
+
+        # Declaration drift check FIRST — a mismatch (or no stored
+        # fingerprint at all: pre-fix reindex, or the rare compute failure)
+        # makes the rowid probe moot; nothing declared is trustworthy until
+        # the next reindex re-anchors the fingerprint.
+        if (
+            stored_fingerprint is None
+            or current_fingerprint is None
+            or stored_fingerprint != current_fingerprint
+        ):
+            return FtsCoverage(missing=False, stale_kinds=frozenset(declared_kinds))
+
+        state_row = conn.execute(
+            "SELECT value FROM fts_state WHERE key='last_rowid'"
+        ).fetchone()
+        last_rowid = int(state_row[0]) if state_row else 0
+
+        placeholders = ",".join("?" for _ in declared_kinds)
+        stale_rows = conn.execute(
+            "SELECT DISTINCT kind FROM facts WHERE rowid > ? "
+            f"AND kind IN ({placeholders})",
+            (last_rowid, *declared_kinds),
+        ).fetchall()
+        stale_kinds = frozenset(r[0] for r in stale_rows)
+    finally:
+        conn.close()
+
+    return FtsCoverage(
+        missing=False, stale_kinds=stale_kinds, generation=current_fingerprint,
+    )
+
+
+def _combined_coverage(ast: Any, vertex_path: Path) -> FtsCoverage:
+    """``vertex_search_coverage`` recursion over combine/discover children."""
+    from lang import resolve_vertex
+
+    home = _loops_home()
+
+    entries = ast.combine or []
+    if not entries and ast.discover is not None:
+        # discover is not yet supported for search — matches _combined_search's
+        # and vertex_reindex's gap. Conservatively "missing": nothing to trust.
+        return FtsCoverage(missing=True)
+
+    missing = False
+    stale: set[str] = set()
+    for entry in entries:
+        vpath = resolve_vertex(entry.name, home)
+        if not vpath.is_absolute():
+            vpath = (vertex_path.parent / vpath).resolve()
+        if not vpath.exists():
+            continue
+        child_coverage = vertex_search_coverage(vpath)
+        missing = missing or child_coverage.missing
+        stale |= child_coverage.stale_kinds
+
+    return FtsCoverage(missing=missing, stale_kinds=frozenset(stale))
+
+
+def vertex_reindex(vertex_path: Path) -> dict[str, Any]:
+    """Drop and rebuild the FTS derived index (``facts_fts``/``fts_state``).
+
+    The SOLE writer of the FTS index anywhere in this codebase — no read
+    path (``vertex_search``, ``vertex_search_coverage``) ever opens a
+    write-mode connection to the canonical store
+    (closes friction:search-read-mutates-canonical-store).
+
+    Full drop+rebuild against the CURRENT declaration set — not an
+    incremental append-only watermark — is deliberate: it's what closes
+    friction:fts-search-declaration-not-retroactive for free. A newly
+    declared ``search`` field on an already-populated kind is fully
+    searchable after one reindex, including facts written before the
+    declaration existed, because every reindex re-evaluates every fact
+    against today's declarations rather than trusting a cursor that only
+    ever advanced past what was searchable at scan time. This is O(all
+    facts) every call; for this repo's store sizes that's a non-issue, and
+    simplicity here beats incremental-with-declaration-diffing.
+
+    Combine/discover vertices recurse per child (mirroring
+    ``_combined_search``'s read-side recursion — see the lockstep note on
+    :func:`vertex_search_coverage`), so reindexing an aggregate never
+    mutates anything OTHER than each child's own store — there is no
+    aggregate-level store to write, and no read ever triggers this as a
+    side effect.
+
+    Also persists the CURRENT declaration's
+    :func:`~engine.declaration.declaration_generation` ``review_fingerprint``
+    into ``fts_state`` (capstone sol P1). A DECLARATION change — a newly
+    searchable kind with zero new facts, or changed ``search`` fields on an
+    already-indexed kind — leaves the rowid watermark alone (no fact rowid
+    moved), so the rowid-only staleness probe would report FRESH while the
+    index no longer matches the current declaration. Reusing S4's existing
+    fingerprint (rather than inventing a second one) makes
+    :func:`vertex_search_coverage` detect that drift too: see its docstring
+    for the comparison contract.
+    """
+    ast = load_declaration(vertex_path)
+
+    if ast.combine is not None or ast.discover is not None:
+        return _reindex_aggregate(ast, vertex_path)
+
+    if ast.store is None:
+        return {
+            "vertex": vertex_path.stem,
+            "reindexed": False,
+            "reason": "no store configured",
+        }
+
+    store_path = ast.store
+    if not store_path.is_absolute():
+        store_path = (vertex_path.parent / store_path).resolve()
+
+    if not store_path.exists():
+        # Nothing to index yet — and do NOT create the .db as a side effect
+        # of a reindex call (a reindex is not a write-side genesis op).
+        return {
+            "vertex": vertex_path.stem,
+            "reindexed": False,
+            "reason": "store not yet materialized",
+        }
+
+    base_dir = vertex_path.parent
+    from .compiler import collect_search_fields
+
+    search_fields = collect_search_fields(ast, base_dir)
+    if not search_fields:
+        return {
+            "vertex": vertex_path.stem,
+            "reindexed": False,
+            "reason": "no search fields declared",
+        }
+
+    # Computed BEFORE opening the write connection below (declaration_generation
+    # opens its own short-lived read-only connection to the same store; doing
+    # this first avoids any concurrent-connection question entirely).
+    decl_fingerprint = declaration_generation(vertex_path)["review_fingerprint"]
+
     conn = sqlite3.connect(str(store_path))
     try:
         conn.executescript(
             """
-            CREATE VIRTUAL TABLE IF NOT EXISTS facts_fts USING fts5(
+            DROP TABLE IF EXISTS facts_fts;
+            DROP TABLE IF EXISTS fts_state;
+            CREATE VIRTUAL TABLE facts_fts USING fts5(
                 text_content,
                 fact_rowid UNINDEXED,
                 kind UNINDEXED,
                 observer UNINDEXED
             );
-            CREATE TABLE IF NOT EXISTS fts_state (
+            CREATE TABLE fts_state (
                 key TEXT PRIMARY KEY,
                 value TEXT
             );
             """
         )
 
-        row = conn.execute(
-            "SELECT value FROM fts_state WHERE key='last_rowid'"
-        ).fetchone()
-        last_rowid = int(row[0]) if row else 0
-
         rows = conn.execute(
-            "SELECT rowid, kind, observer, payload FROM facts "
-            "WHERE rowid > ? ORDER BY rowid",
-            (last_rowid,),
+            "SELECT rowid, kind, observer, payload FROM facts ORDER BY rowid"
         ).fetchall()
 
-        max_rowid = last_rowid
+        max_rowid = 0
+        kinds_indexed: set[str] = set()
+        facts_indexed = 0
         for rowid, kind, observer, payload_json in rows:
-            # Advance the watermark for EVERY scanned row (rows are ORDER BY
-            # rowid). A kind with no search declaration is still consumed — else
-            # trailing non-searchable rows (e.g. the reserved `_decl.*`
-            # declaration events an S4 re-absorb appends) sit above last_rowid
-            # and get rescanned on every single search.
             max_rowid = rowid
             fields = search_fields.get(kind)
             if not fields:
@@ -1637,15 +1913,83 @@ def _ensure_fts(
                     "VALUES (?, ?, ?, ?)",
                     (text, rowid, kind, observer),
                 )
+                kinds_indexed.add(kind)
+                facts_indexed += 1
 
-        if max_rowid > last_rowid:
+        # Set unconditionally (even on an empty store, max_rowid=0) — an
+        # explicit reindex always produces a defined watermark, matching
+        # the "run twice in a row is idempotent" contract.
+        conn.execute(
+            "INSERT OR REPLACE INTO fts_state(key, value) VALUES ('last_rowid', ?)",
+            (str(max_rowid),),
+        )
+        # Persist the declaration fingerprint this rebuild was built against
+        # (capstone sol P1) — ONLY when it computed cleanly. A None
+        # fingerprint (the rare malformed-but-parsed-declaration case
+        # declaration_generation's own docstring calls out) must not be
+        # written as a false "no drift possible" signal; leaving the row
+        # ABSENT (fts_state was just freshly created above, so there's
+        # nothing stale to clear) makes vertex_search_coverage treat this
+        # exactly like a pre-fix reindex — conservatively stale — which is
+        # the honest answer when freshness can't be judged at all.
+        if decl_fingerprint is not None:
             conn.execute(
-                "INSERT OR REPLACE INTO fts_state(key, value) VALUES ('last_rowid', ?)",
-                (str(max_rowid),),
+                "INSERT OR REPLACE INTO fts_state(key, value) VALUES "
+                "('decl_fingerprint', ?)",
+                (decl_fingerprint,),
             )
-            conn.commit()
+        conn.commit()
     finally:
         conn.close()
+
+    return {
+        "vertex": vertex_path.stem,
+        "reindexed": True,
+        "facts_scanned": len(rows),
+        "facts_indexed": facts_indexed,
+        "kinds_indexed": sorted(kinds_indexed),
+        "last_rowid": max_rowid,
+        "decl_fingerprint": decl_fingerprint,
+    }
+
+
+def _reindex_aggregate(ast: Any, vertex_path: Path) -> dict[str, Any]:
+    """``vertex_reindex`` recursion over combine/discover children.
+
+    Explicit per-child reindex, never triggered by a read — so the
+    aggravator (one read against an aggregate mutating every child) has no
+    analogue on the write side: a reindex on an aggregate is itself an
+    explicit, discoverable write, scoped to exactly the children it names.
+    """
+    from lang import resolve_vertex
+
+    home = _loops_home()
+
+    entries = ast.combine or []
+    if not entries and ast.discover is not None:
+        # discover is not yet supported for search — matches _combined_search's
+        # existing gap (a documented no-op, not a regression to fix here).
+        return {
+            "vertex": vertex_path.stem,
+            "reindexed": False,
+            "reason": "discover is not yet supported for search",
+        }
+
+    children: list[dict[str, Any]] = []
+    for entry in entries:
+        vpath = resolve_vertex(entry.name, home)
+        if not vpath.is_absolute():
+            vpath = (vertex_path.parent / vpath).resolve()
+        if not vpath.exists():
+            continue
+        children.append(vertex_reindex(vpath))
+
+    return {
+        "vertex": vertex_path.stem,
+        "reindexed": True,
+        "aggregate": True,
+        "children": children,
+    }
 
 
 def vertex_search(
@@ -1653,26 +1997,54 @@ def vertex_search(
     query: str,
     *,
     kind: str | None = None,
+    kinds: Iterable[str] | None = None,
     since: float | None = None,
     until: float | None = None,
     limit: int = 100,
     observer: str | None = None,
     as_of: float | None = None,
+    require_generation: str | None = None,
 ) -> list[dict]:
-    """Search fact payloads in a vertex's store via FTS5.
+    """Search fact payloads in a vertex's store via FTS5. STRICTLY READ-ONLY.
 
     Uses spec-declared search fields — only kinds with a ``search``
     declaration in the vertex file are indexed. Empty query returns nothing.
+
+    This function never writes. The FTS index (``facts_fts``/``fts_state``)
+    is built and rebuilt SOLELY by :func:`vertex_reindex` — call that
+    explicitly (or ``sl store reindex``) to build or refresh the index.
+    Callers that don't know whether the index exists or is current should
+    consult :func:`vertex_search_coverage` FIRST: if the index for the
+    kind(s) being searched is missing or stale, ``search_facts`` (via
+    :class:`~engine.store_reader.StoreReader`) raises
+    ``sqlite3.OperationalError`` because ``facts_fts`` doesn't exist yet —
+    this function does not internally guard that case, by design, so the
+    failure is loud rather than a silently-empty result.
 
     When *observer* is provided, only facts from that observer are returned.
 
     Args:
         vertex_path: Path to the .vertex file.
         query: FTS5 query string (words, phrases, prefix, boolean).
-        kind: Filter by fact kind (exact match on FTS metadata).
+        kind: Filter by fact kind (exact match on FTS metadata). Takes
+            precedence over ``kinds`` if both are given.
+        kinds: Restrict the SQL-level query to this SET of kinds BEFORE
+            ``limit`` is applied (S2 sol P2) — distinct from ``kind``.
+            Callers that only trust a SUBSET of what's indexed (e.g.
+            ``surface.search`` excluding stale-index kinds) MUST pass this
+            rather than post-filtering the returned list: filtering after
+            the fact is too late — an untrusted kind's many matches can
+            already have consumed the ``limit`` window, silently pushing a
+            trusted kind's genuine matches out of the result set entirely.
+            An explicit empty iterable matches nothing (not "unrestricted").
         since: Only facts with ts >= since.
         until: Only facts with ts <= until.
-        limit: Maximum results (default 100).
+        limit: Maximum results (default 100). Peek at ``limit + 1`` to
+            detect truncation without changing this default (S2,
+            friction:fts-match-limit-100-silent-cap) — the disclosure lives
+            at the caller (``surface.search``'s ``Window.truncated``), not
+            here, since this function has no channel for out-of-band
+            metadata.
         observer: Filter to facts from this observer.
         as_of: SPEC §9.3 ontology-as-of ``ts`` cutoff for declaration
             resolution — which ``search`` fields are indexed is the as-of
@@ -1688,19 +2060,34 @@ def vertex_search(
     if not query or not query.strip():
         return []
 
-    from .compiler import collect_search_fields
     from .store_reader import StoreReader
 
     ast = load_declaration(vertex_path, as_of=as_of)
 
+    # EVERY path below that returns [] is a claim about the store, and a caller
+    # holding a certification is owed verification BEFORE any of them (sol P2-a
+    # round 2). The reported case: a new declaration removes the last `search`
+    # field, so `collect_search_fields` comes back empty and the old code
+    # returned [] — certified-fresh INCOMPLETENESS, indistinguishable from "no
+    # matches". Any condition that makes verification impossible is a mismatch,
+    # not a quiet empty list.
+    def _unverifiable(reason: str) -> None:
+        if require_generation is not None:
+            raise FtsGenerationChanged(
+                f"cannot verify the certified FTS generation "
+                f"({require_generation}): {reason}"
+            )
+
     if ast.combine is not None or ast.discover is not None:
+        _unverifiable("aggregate vertex — no single generation to verify")
         return _combined_search(
             ast, vertex_path, query,
-            kind=kind, since=since, until=until, limit=limit, observer=observer,
-            as_of=as_of,
+            kind=kind, kinds=kinds, since=since, until=until, limit=limit,
+            observer=observer, as_of=as_of,
         )
 
     if ast.store is None:
+        _unverifiable("vertex declares no store")
         return []
 
     store_path = ast.store
@@ -1708,19 +2095,68 @@ def vertex_search(
         store_path = (vertex_path.parent / store_path).resolve()
 
     if not store_path.exists():
+        _unverifiable("store does not exist")
         return []
 
     base_dir = vertex_path.parent
-    search_fields = collect_search_fields(ast, base_dir)
-    if not search_fields:
-        return []
-
-    _ensure_fts(store_path, search_fields)
+    from .compiler import collect_search_fields
 
     with StoreReader(store_path) as reader:
-        facts = reader.search_facts(
-            query, kind=kind, since=since, until=until, limit=limit
-        )
-        if observer:
-            facts = [f for f in facts if observer_matches(f["observer"], observer)]
-        return facts
+        if require_generation is None:
+            search_fields = collect_search_fields(ast, base_dir)
+            if not search_fields:
+                return []
+            facts = reader.search_facts(
+                query, kind=kind, kinds=kinds, since=since, until=until,
+                limit=limit,
+            )
+            if observer:
+                facts = [
+                    f for f in facts if observer_matches(f["observer"], observer)
+                ]
+            return facts
+
+        # Certify and query inside ONE snapshot. Sharing a connection was not
+        # enough: StoreReader autocommits per statement, so a concurrent commit
+        # could still land between the fingerprint read and the query — same
+        # connection, two snapshots (sol P2-a round 2). BEGIN DEFERRED pins the
+        # snapshot at the first read below and holds it through the query.
+        with reader.snapshot():
+            # TWO things must still hold, because a certification is a claim
+            # about a declaration AND the index built for it, and either can
+            # move alone (sol P2-a round 2):
+            #   * the DECLARATION — a decl edit that removes a `search` field
+            #     changes which kinds are searchable while leaving the built
+            #     index's fingerprint untouched. Checking only the index would
+            #     let that edit shrink the result set silently.
+            #   * the INDEX — a reindex under a new declaration.
+            declared_now = declaration_generation(
+                vertex_path, as_of=as_of,
+            )["review_fingerprint"]
+            if declared_now != require_generation:
+                raise FtsGenerationChanged(
+                    f"declaration changed since coverage was probed "
+                    f"(certified {require_generation}, declaration now "
+                    f"{declared_now})"
+                )
+            current = reader.fts_generation()
+            if current != require_generation:
+                raise FtsGenerationChanged(
+                    f"FTS index generation changed since coverage was probed "
+                    f"(certified {require_generation}, store now {current})"
+                )
+            # Resolved INSIDE the verified snapshot: which kinds are searchable
+            # is part of what the generation certifies, so an empty set here is
+            # a genuine property of the certified declaration, not drift.
+            search_fields = collect_search_fields(ast, base_dir)
+            if not search_fields:
+                return []
+            facts = reader.search_facts(
+                query, kind=kind, kinds=kinds, since=since, until=until,
+                limit=limit,
+            )
+            if observer:
+                facts = [
+                    f for f in facts if observer_matches(f["observer"], observer)
+                ]
+            return facts

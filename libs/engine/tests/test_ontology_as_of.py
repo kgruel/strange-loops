@@ -213,11 +213,14 @@ class TestHeadEquivalence:
         assert all(not f["kind"].startswith("_decl.") for f in facts)
 
     def test_vertex_search_head_equals_now(self, tmp_path):
+        from engine import vertex_reindex
+
         vpath, store = _scaffold(tmp_path)
         _absorb(vpath, store)
         gts = _genesis_ts(store)
         _emit(store, "decision", gts + 1, topic="a", message="alpha uniquetoken")
         now = gts + 1000
+        vertex_reindex(vpath)
         head = vertex_search(vpath, "uniquetoken", as_of=None)
         at_now = vertex_search(vpath, "uniquetoken", until=now, as_of=now)
         assert [f["id"] for f in head] == [f["id"] for f in at_now]

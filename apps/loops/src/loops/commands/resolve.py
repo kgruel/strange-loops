@@ -25,6 +25,8 @@ from loops.errors import (
 if TYPE_CHECKING:
     from io import TextIO
 
+    from atoms import Address
+
 
 @dataclass(frozen=True)
 class EmitStatus:
@@ -67,8 +69,35 @@ def loops_home() -> Path:
     return Path(xdg) / "loops"
 
 
-def _find_local_vertex() -> Path | None:
-    """Find a .vertex file in .loops/ or cwd. Returns first match or None."""
+def _find_local_vertex(*, allow_ambiguous: bool = False) -> Path | None:
+    """Find a .vertex file in .loops/ or cwd. Returns first match or None.
+
+    REFUSES BY DEFAULT when the local tier holds more than one instance vertex:
+    raises :class:`~loops.errors.AmbiguousLocalVertex` rather than break the tie
+    alphabetically. The refusal lives HERE, in the primitive, because gating
+    each caller instead left the primitive itself importable as a bypass —
+    every new call site was one more chance to forget (sol P1-b round 2). There
+    is now no ungated way to ask this question by accident.
+
+    ``allow_ambiguous=True`` — the literal ``True``, nothing else is honored —
+    opts a caller out, for the best-effort uses where
+    an arbitrary pick is harmless and an exception would be worse: shell
+    completion (must never raise) and topology enumeration (which enumerates
+    every candidate anyway, so the pick carries no weight). Every such call
+    site is enumerated by Rule 9 in ``tests/test_architecture.py`` — the opt-out
+    is explicit at the call site precisely so it can be counted.
+    """
+    # `is True`, not truthiness: the ratchet in tests/test_architecture.py can
+    # only recognize a literal, so anything else it cannot see must not work
+    # here either. `allow_ambiguous=1` used to opt out at runtime while Rule 9
+    # recorded the call site as safe — runtime and ratchet disagreeing about
+    # what counts as an opt-out (sol round 3). They now agree by construction.
+    if allow_ambiguous is not True:
+        ambiguous = _ambiguous_local_vertices()
+        if ambiguous:
+            from loops.errors import AmbiguousLocalVertex
+
+            raise AmbiguousLocalVertex(ambiguous)
     # Prefer .loops/.vertex (workspace root convention)
     loops_dir = Path.cwd() / ".loops"
     dotvertex = loops_dir / ".vertex"
@@ -82,6 +111,48 @@ def _find_local_vertex() -> Path | None:
     # Fall back to cwd (existing projects)
     matches = sorted(Path.cwd().glob("*.vertex"))
     return matches[0] if matches else None
+
+
+def _ambiguous_local_vertices() -> list[Path]:
+    """The instance vertices local resolution would have to choose between.
+
+    ``_find_local_vertex`` breaks a multi-vertex tie ALPHABETICALLY, which
+    silently routes a verb-first write into whichever store sorts first —
+    a wrong-store write with no signal (friction:find-local-vertex-alphabetical-pick).
+    Callers that accept "no vertex named" use this to refuse instead of guess.
+
+    Empty (unambiguous) when: an explicit ``.loops/.vertex`` wins outright,
+    or the tier holds at most one instance vertex. Aggregation vertices are
+    excluded — they name a topology, not a writable store, so a repo with
+    one instance plus aggregations is not ambiguous.
+    """
+    loops_dir = Path.cwd() / ".loops"
+    if (loops_dir / ".vertex").exists():
+        return []
+    if loops_dir.is_dir():
+        matches = sorted(loops_dir.glob("*.vertex"))
+    else:
+        matches = sorted(Path.cwd().glob("*.vertex"))
+    instances = [p for p in matches if _describe_vertex(p) != "aggregation"]
+    return instances if len(instances) > 1 else []
+
+
+def ambiguous_local_vertex_refusal(command: str, form: str) -> str | None:
+    """Teaching refusal text when local resolution is ambiguous, else None.
+
+    ``form`` is the explicit spelling for THIS command (the fix is always
+    "name the vertex"), so the message teaches the real syntax rather than a
+    generic hint.
+    """
+    paths = _ambiguous_local_vertices()
+    if not paths:
+        return None
+    names = ", ".join(str(_vertex_name(p)) for p in paths)
+    return (
+        f"{command}: {len(paths)} local vertices and none named — refusing to "
+        f"guess ({names}).\n"
+        f"  name it explicitly: {form}"
+    )
 
 
 @dataclass(frozen=True)
@@ -375,29 +446,33 @@ def _kind_keys_from_ast(ast) -> dict[str, str]:
     return kind_keys
 
 
-def _extract_edge_fields(vertex_path: Path, kind: str | None = None) -> set[str]:
-    """Return the payload fields declared as typed edges for ``kind``.
+def _extract_edge_fields(vertex_path: Path, kind: str | None = None) -> dict[str, str]:
+    """Return ``{edge field: target kind}`` for ``kind``'s declared edges.
 
     A declared edge licenses comma-split at emit time (a multi-valued overlay
     edge is a set literal replaced atomically — ``stakeholder=acme,globex``),
     mirroring the read-time ``_lift_edges`` split so pins and the projected
-    edge set agree. Edge declarations are per-kind (the read-time projection
-    looks up ``ast.loops[kind].edges``), so the emit-side set must be scoped
-    the same way — a field declared as an edge on ``decision`` is NOT an edge
-    on ``task``. ``kind=None`` (or an undeclared kind) yields the empty set.
-    Best-effort: empty set on any vertex error.
+    edge set agree. The declared TARGET kind travels with each field so the
+    emit path can qualify a bare/slashed edge value the same way the read lift
+    does (``Address.for_edge`` — declaration licenses the bare key). Edge
+    declarations are per-kind (the read-time projection looks up
+    ``ast.loops[kind].edges``), so the emit-side map must be scoped the same
+    way — a field declared as an edge on ``decision`` is NOT an edge on
+    ``task``. ``kind=None`` (or an undeclared kind) yields ``{}``.
+    Best-effort: empty dict on any vertex error. Callers testing membership
+    (``field in edge_fields``) are unaffected — dict membership tests keys.
     """
     if kind is None:
-        return set()
+        return {}
     try:
         ast = _parse_vertex(vertex_path)
     except LoopsError:
-        return set()
+        return {}
 
     loop_def = ast.loops.get(kind)
     if loop_def is None:
-        return set()
-    return {edge.field for edge in getattr(loop_def, "edges", ())}
+        return {}
+    return {edge.field: edge.target for edge in getattr(loop_def, "edges", ())}
 
 
 def _completion_declaration(vertex_path: Path):
@@ -703,7 +778,7 @@ def _candidate_topology_vertices() -> list[Path]:
         seen.add(resolved)
         candidates.append(resolved)
 
-    add(_find_local_vertex())
+    add(_find_local_vertex(allow_ambiguous=True))
 
     local_loops = Path.cwd() / ".loops"
     add(local_loops / ".vertex")
@@ -768,7 +843,7 @@ def _topology_roots_for_emit(
     if target is None:
         return [], []
 
-    local_root = _find_local_vertex()
+    local_root = _find_local_vertex(allow_ambiguous=True)
     if (
         local_root is not None
         and normalize(local_root) != target
@@ -803,43 +878,6 @@ def _topology_roots_for_emit(
 # --- Entity reference resolution ---
 
 
-def _split_addr(addr: str) -> tuple[str, str] | None:
-    """Split an entity address into ``(kind, key)``.
-
-    Canonical form is ``kind:key`` (colon) — e.g. ``decision:design/foo``,
-    ``thread:arc-name``. The key itself may contain ``/`` (namespaced
-    topics), so the colon binds tighter: split on the FIRST ``:`` when one
-    is present. ``kind/key`` (slash) is accepted for back-compat with refs
-    emitted before the colon form was the documented convention. Returns
-    ``None`` when neither separator is present or either side is empty.
-    """
-    if ":" in addr:
-        kind, key = addr.split(":", 1)
-    elif "/" in addr:
-        kind, key = addr.split("/", 1)
-    else:
-        return None
-    if not kind or not key:
-        return None
-    return kind, key
-
-
-def _is_addr_candidate(value: str) -> bool:
-    """Whether a payload value is worth scanning as an entity address.
-
-    Must carry a separator (``:`` or ``/``) and contain no whitespace. The
-    whitespace guard keeps free-text prose (``"note: see the foo"``) from
-    being misread as a ref now that the colon separator is honored — without
-    it, a message beginning ``decision: ...`` would split to the declared
-    kind ``decision`` and surface a false unresolved-ref WARN.
-    """
-    return (
-        bool(value)
-        and not any(c.isspace() for c in value)
-        and (":" in value or "/" in value)
-    )
-
-
 def _resolve_entity_refs(
     vertex_path: Path,
     store_path: Path,
@@ -848,8 +886,10 @@ def _resolve_entity_refs(
 ) -> tuple[dict[str, str], list[UnresolvedRef], list[ResolvedRef]]:
     """Resolve entity addresses in payload values to ULIDs.
 
-    Scans payload values for entity addresses. Canonical form is ``kind:key``
-    (colon); the legacy ``kind/key`` (slash) form is also accepted (_split_addr).
+    Scans payload values for entity addresses via ``atoms.Address`` — the
+    self-describing ``Address.parse`` for ``ref``/general fields (canonical
+    ``kind:key`` colon, legacy ``kind/key`` slash) and the declaration-
+    qualified ``Address.for_edge`` for declared typed-edge fields.
     When a value matches a declared kind, looks up the most recent fact ULID
     for that entity — first in the local store, then across the scoped combine
     topology if the local store misses.
@@ -952,18 +992,22 @@ def _resolve_entity_refs(
         except Exception:
             return None
 
-    def _resolve_one(addr: str) -> tuple[str | None, bool]:
-        """Resolve a single ``kind/key`` address to a ULID.
+    def _resolve_one(address: Address) -> tuple[str | None, bool]:
+        """Resolve a pre-built :class:`atoms.Address` to a ULID.
 
         Returns ``(resolved_id_or_None, addr_kind_was_declared)``. The
         second bool tells the caller whether to surface this as an
         unresolved ref (declared kind but no match — likely a typo or
         stale ref) or silently skip (unknown kind — not an intended ref).
+
+        The scan builds the Address per field population (``Address.parse``
+        for self-describing refs, ``Address.for_edge`` for declaration-
+        qualified edge values), so both a bare and a colon edge value reach
+        here already qualified — this function is address-shape-agnostic.
         """
-        parts = _split_addr(addr)
-        if parts is None:
-            return None, False
-        addr_kind, addr_value = parts
+        addr_kind, addr_value = address.kind, address.key
+        if not addr_kind:
+            return None, False  # bare/unknown-kind address — not resolvable
 
         # Try local store first
         if addr_kind in local_kind_keys:
@@ -989,12 +1033,26 @@ def _resolve_entity_refs(
 
         return None, True  # declared kind, no match → caller surfaces as unresolved
 
-    # Scan payload values for entity addresses. Canonical form is ``kind:key``
-    # (colon); ``kind/key`` (slash) is accepted for back-compat — see
-    # ``_split_addr``. The ``ref`` field accumulates comma-separated addresses
-    # (parse-side convention in ``_parse_emit_parts``); resolve each one
-    # independently and concatenate the resolved IDs. All other fields are
-    # scanned as single addresses — preserves single-ref-on-any-field semantics.
+    # Scan payload values for entity addresses. Two populations, two parse
+    # rules (see ``atoms.Address``):
+    #   * ``ref`` (the union edge) and general fields are SELF-DESCRIBING —
+    #     ``Address.parse`` reads the kind off the value (``kind:key`` colon,
+    #     legacy ``kind/key`` slash, or a bare key). A separator is required
+    #     (the whitespace/prose guard keeps ``"note: see foo"`` from being
+    #     misread as a ref).
+    #   * a DECLARED typed-edge field is DECLARATION-QUALIFIED — the target
+    #     kind is known, so ``Address.for_edge`` licenses a bare or slashed
+    #     value and qualifies it WHOLE (``stakeholder=design/foo`` →
+    #     ``person:design/foo``), matching the read-time edge lift exactly. A
+    #     bare declared-edge value is now validated (defect c) and a slashed
+    #     one no longer disagrees with read (defect b).
+    # ``ref`` and declared-edge fields accumulate comma-separated addresses (a
+    # multi-valued overlay edge is a set literal); general fields are one
+    # address. The receipt/pin ``addr`` carries the QUALIFIED string for
+    # declared edges (so it reads person:acme, agreeing with the lifted edge)
+    # and the RAW string for self-describing refs (verbatim what was written).
+    from atoms import Address
+
     refs: dict[str, str] = {}
     unresolved_pins: list[dict[str, str]] = []
     unresolved: list[UnresolvedRef] = []
@@ -1004,33 +1062,40 @@ def _resolve_entity_refs(
             continue
         if field_name == self_key_field:
             continue  # fold-key field — self-identity, not a ref
-        # ``ref`` (the union edge) and any DECLARED typed-edge field carry
-        # comma-separated addresses — a multi-valued overlay edge is a set
-        # literal. All other fields are scanned as a single address.
+        is_edge_field = field_name in local_edge_fields
         addresses = (
             [a.strip() for a in value.split(",")]
-            if field_name == "ref" or field_name in local_edge_fields
+            if field_name == "ref" or is_edge_field
             else [value]
         )
         resolved_ids: list[str] = []
-        for addr in addresses:
-            if not _is_addr_candidate(addr):
+        for raw in addresses:
+            if not raw or any(c.isspace() for c in raw):
+                continue  # empty / prose — never an address
+            if is_edge_field:
+                # Declaration licenses a bare/slashed key — no separator needed.
+                address = Address.for_edge(raw, local_edge_fields[field_name])
+                display = str(address) if address is not None else raw
+            else:
+                # Self-describing ref — a separator (non-empty kind) is required.
+                address = Address.parse(raw)
+                if address is None or not address.kind:
+                    continue
+                display = raw
+            if address is None:
                 continue
-            rid, declared = _resolve_one(addr)
+            rid, declared = _resolve_one(address)
             if rid is not None:
                 resolved_ids.append(rid)
-                resolved.append(ResolvedRef(field=field_name, addr=addr, ref_id=rid))
+                resolved.append(ResolvedRef(field=field_name, addr=display, ref_id=rid))
             elif declared:
-                unresolved.append(UnresolvedRef(field=field_name, addr=addr))
-                parts = _split_addr(addr)
-                if parts is not None:
-                    addr_kind, addr_key = parts
-                    unresolved_pins.append({
-                        "field": field_name,
-                        "addr": addr,
-                        "kind": addr_kind,
-                        "key": addr_key,
-                    })
+                unresolved.append(UnresolvedRef(field=field_name, addr=display))
+                unresolved_pins.append({
+                    "field": field_name,
+                    "addr": display,
+                    "kind": address.kind,
+                    "key": address.key,
+                })
         if resolved_ids:
             refs[f"{field_name}_ref"] = ",".join(resolved_ids)
 

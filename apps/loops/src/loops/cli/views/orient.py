@@ -39,8 +39,17 @@ def run(argv: list[str], ctx: Invocation) -> int:
                     ctx.reporter.err(f"orient: no vertex named '{vertex_ref}' found")
                     return 1
         else:
+            from loops.commands.resolve import ambiguous_local_vertex_refusal
+            from loops.errors import AmbiguousLocalVertex
+
             try:
                 vertex_path = resolve_local_vertex()
+            except AmbiguousLocalVertex:
+                ctx.reporter.err(
+                    ambiguous_local_vertex_refusal("orient", "sl orient <vertex>")
+                    or ""
+                )
+                return 2
             except FileNotFoundError:
                 ctx.reporter.err(
                     "orient: no vertex specified and no local vertex found\n"

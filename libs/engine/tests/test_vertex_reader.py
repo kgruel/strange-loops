@@ -435,7 +435,7 @@ class TestVertexSearch:
 
     def test_basic_search(self, tmp_path):
         """Finds facts by keyword in declared search fields."""
-        from engine import vertex_search
+        from engine import vertex_reindex, vertex_search
 
         vpath = _create_search_vertex(
             tmp_path,
@@ -451,13 +451,14 @@ class TestVertexSearch:
             }},
         ])
 
+        vertex_reindex(vpath)
         results = vertex_search(vpath, "quantum")
         assert len(results) == 1
         assert results[0]["payload"]["prompt"] == "explain quantum computing"
 
     def test_word_boundary(self, tmp_path):
         """FTS5 tokenization means 'test' doesn't match 'greatest'."""
-        from engine import vertex_search
+        from engine import vertex_reindex, vertex_search
 
         vpath = _create_search_vertex(
             tmp_path, "test", '  note {\n    search "text"\n  }',
@@ -467,13 +468,14 @@ class TestVertexSearch:
             {"kind": "note", "ts": 2000.0, "payload": {"text": "the greatest achievement"}},
         ])
 
+        vertex_reindex(vpath)
         results = vertex_search(vpath, "test")
         assert len(results) == 1
         assert results[0]["payload"]["text"] == "this is a test"
 
     def test_kind_filter(self, tmp_path):
         """Kind parameter narrows search to specific kinds."""
-        from engine import vertex_search
+        from engine import vertex_reindex, vertex_search
 
         vpath = _create_search_vertex(
             tmp_path,
@@ -486,13 +488,14 @@ class TestVertexSearch:
             {"kind": "thread", "ts": 2000.0, "payload": {"name": "design", "notes": "vertex pattern review"}},
         ])
 
+        vertex_reindex(vpath)
         results = vertex_search(vpath, "vertex", kind="decision")
         assert len(results) == 1
         assert results[0]["kind"] == "decision"
 
     def test_time_range(self, tmp_path):
         """Since/until narrows search to time window."""
-        from engine import vertex_search
+        from engine import vertex_reindex, vertex_search
 
         vpath = _create_search_vertex(
             tmp_path, "test", '  note {\n    search "text"\n  }',
@@ -503,13 +506,14 @@ class TestVertexSearch:
             {"kind": "note", "ts": 3000.0, "payload": {"text": "late note about search"}},
         ])
 
+        vertex_reindex(vpath)
         results = vertex_search(vpath, "search", since=1500.0, until=2500.0)
         assert len(results) == 1
         assert results[0]["ts"].timestamp() == pytest.approx(2000.0, abs=1)
 
     def test_limit(self, tmp_path):
         """Limit caps result count."""
-        from engine import vertex_search
+        from engine import vertex_reindex, vertex_search
 
         vpath = _create_search_vertex(
             tmp_path, "test", '  note {\n    search "text"\n  }',
@@ -519,12 +523,13 @@ class TestVertexSearch:
             for i in range(1000, 1010)
         ])
 
+        vertex_reindex(vpath)
         results = vertex_search(vpath, "loops", limit=3)
         assert len(results) == 3
 
     def test_newest_first(self, tmp_path):
         """Results are ordered newest first."""
-        from engine import vertex_search
+        from engine import vertex_reindex, vertex_search
 
         vpath = _create_search_vertex(
             tmp_path, "test", '  note {\n    search "text"\n  }',
@@ -535,6 +540,7 @@ class TestVertexSearch:
             {"kind": "note", "ts": 3000.0, "payload": {"text": "third hello"}},
         ])
 
+        vertex_reindex(vpath)
         results = vertex_search(vpath, "hello")
         assert len(results) == 3
         timestamps = [r["ts"].timestamp() for r in results]
@@ -588,7 +594,7 @@ class TestVertexSearch:
 
     def test_undeclared_field_not_matched(self, tmp_path):
         """Only declared search fields are indexed — other fields ignored."""
-        from engine import vertex_search
+        from engine import vertex_reindex, vertex_search
 
         vpath = _create_search_vertex(
             tmp_path, "test",
@@ -600,6 +606,7 @@ class TestVertexSearch:
             }},
         ])
 
+        vertex_reindex(vpath)
         # "hello" is in the indexed prompt field
         assert len(vertex_search(vpath, "hello")) == 1
         # "greetings" is only in the non-indexed response field
@@ -607,7 +614,7 @@ class TestVertexSearch:
 
     def test_kind_without_search_skipped(self, tmp_path):
         """Facts of kinds without search declarations are not indexed."""
-        from engine import vertex_search
+        from engine import vertex_reindex, vertex_search
 
         vpath = _create_search_vertex(
             tmp_path, "test",
@@ -619,13 +626,20 @@ class TestVertexSearch:
             {"kind": "counter", "ts": 2000.0, "payload": {"value": 42, "label": "hello"}},
         ])
 
+        vertex_reindex(vpath)
         results = vertex_search(vpath, "hello")
         assert len(results) == 1
         assert results[0]["kind"] == "note"
 
     def test_incremental_catchup(self, tmp_path):
-        """New facts added after first search are indexed on subsequent search."""
-        from engine import vertex_search
+        """S2 (read-purity): a fact added after the last reindex is NOT found by
+        a bare vertex_search — the index only advances on an EXPLICIT
+        vertex_reindex call, never as a side effect of a read. This is the
+        direct regression test for rejecting write-side reindex
+        (design:fts-confirm-symmetry-is-phantom's property is re-derived via
+        the substring fallback at the surface layer, not via FTS auto-catch-up
+        — see apps/loops/tests/test_surface.py's staleness-disclosure test)."""
+        from engine import vertex_reindex, vertex_search
 
         vpath = _create_search_vertex(
             tmp_path, "test", '  note {\n    search "text"\n  }',
@@ -636,11 +650,12 @@ class TestVertexSearch:
             {"kind": "note", "ts": 1000.0, "payload": {"text": "first message"}},
         ])
 
-        # First search — builds FTS index
+        # Explicit reindex — builds the FTS index.
+        vertex_reindex(vpath)
         results = vertex_search(vpath, "first")
         assert len(results) == 1
 
-        # Add more facts directly to the store
+        # Add more facts directly to the store.
         conn = sqlite3.connect(str(db_path))
         conn.execute(
             "INSERT INTO facts (id, kind, ts, observer, origin, payload) VALUES (?, ?, ?, ?, ?, ?)",
@@ -649,17 +664,24 @@ class TestVertexSearch:
         conn.commit()
         conn.close()
 
-        # Second search — catches up on new facts
+        # A bare search does NOT catch up — the index is exactly as of the
+        # last reindex, not head. This is the point of read-purity.
+        results = vertex_search(vpath, "second")
+        assert results == []
+
+        # Only an explicit reindex makes the new fact findable.
+        vertex_reindex(vpath)
         results = vertex_search(vpath, "second")
         assert len(results) == 1
         assert results[0]["payload"]["text"] == "second message"
 
     def test_fts_watermark_advances_past_trailing_nonsearchable(self, tmp_path):
-        """The FTS catch-up watermark advances over EVERY scanned row, including
+        """The reindex watermark advances over EVERY scanned row, including
         kinds with no search declaration (e.g. the reserved `_decl.*` events an
-        S4 re-absorb appends). Otherwise trailing non-searchable rows sit above
-        `last_rowid` and are rescanned on every search."""
-        from engine import vertex_search
+        S4 re-absorb appends). Otherwise trailing non-searchable rows would sit
+        above `last_rowid`, which would matter once staleness is judged against
+        that watermark (engine.vertex_search_coverage)."""
+        from engine import vertex_reindex, vertex_search
 
         vpath = _create_search_vertex(
             tmp_path, "test", '  note {\n    search "text"\n  }',
@@ -673,11 +695,13 @@ class TestVertexSearch:
             {"kind": "_decl.kind-defined", "ts": 1200.0, "payload": {"subject": "counter"}},
         ])
 
+        vertex_reindex(vpath)
         results = vertex_search(vpath, "hello")
         assert len(results) == 1  # the note is indexed
 
         # The watermark must have advanced to the LAST (trailing) rowid, not
-        # stopped at the note — else the two _decl rows rescan on every search.
+        # stopped at the note — else the two _decl rows would read as "stale"
+        # on every coverage probe despite having nothing searchable in them.
         conn = sqlite3.connect(str(db_path))
         try:
             last_rowid = int(
@@ -692,7 +716,7 @@ class TestVertexSearch:
 
     def test_phrase_search(self, tmp_path):
         """FTS5 phrase search with double quotes."""
-        from engine import vertex_search
+        from engine import vertex_reindex, vertex_search
 
         vpath = _create_search_vertex(
             tmp_path, "test", '  note {\n    search "text"\n  }',
@@ -702,6 +726,7 @@ class TestVertexSearch:
             {"kind": "note", "ts": 2000.0, "payload": {"text": "quick and brown separately"}},
         ])
 
+        vertex_reindex(vpath)
         # Phrase match — only the exact sequence
         results = vertex_search(vpath, '"quick brown"')
         assert len(results) == 1
@@ -709,7 +734,7 @@ class TestVertexSearch:
 
     def test_search_without_fold(self, tmp_path):
         """A kind with search but no fold is valid and searchable."""
-        from engine import vertex_search
+        from engine import vertex_reindex, vertex_search
 
         vpath = _create_search_vertex(
             tmp_path, "test", '  ambient.text {\n    search "text" "source"\n  }',
@@ -718,12 +743,13 @@ class TestVertexSearch:
             {"kind": "ambient.text", "ts": 1000.0, "payload": {"text": "hello world", "source": "terminal"}},
         ])
 
+        vertex_reindex(vpath)
         results = vertex_search(vpath, "hello")
         assert len(results) == 1
 
     def test_result_shape_matches_vertex_facts(self, tmp_path):
         """Search results have the same dict shape as vertex_facts."""
-        from engine import vertex_facts, vertex_search
+        from engine import vertex_facts, vertex_reindex, vertex_search
 
         vpath = _create_search_vertex(
             tmp_path, "test", '  note {\n    search "text"\n  }',
@@ -732,6 +758,7 @@ class TestVertexSearch:
             {"kind": "note", "ts": 1000.0, "payload": {"text": "hello world"}},
         ])
 
+        vertex_reindex(vpath)
         search_result = vertex_search(vpath, "hello")[0]
         facts_result = vertex_facts(vpath, 0.0, 9999.0)[0]
 
@@ -740,6 +767,391 @@ class TestVertexSearch:
         # Same types
         assert type(search_result["ts"]) is type(facts_result["ts"])
         assert type(search_result["payload"]) is type(facts_result["payload"])
+
+
+class TestFtsReadPurity:
+    """S2: vertex_search / vertex_search_coverage never write; vertex_reindex
+    is the sole writer, and reindexing is a full rebuild (retroactive)."""
+
+    def test_search_byte_identity_with_prebuilt_index(self, tmp_path):
+        """A --match read against an ALREADY-reindexed store touches zero
+        bytes — closes friction:search-read-mutates-canonical-store."""
+        from engine import vertex_reindex, vertex_search
+
+        vpath = _create_search_vertex(
+            tmp_path, "test", '  note {\n    search "text"\n  }',
+        )
+        db_path = tmp_path / "store.db"
+        _seed_facts(db_path, [
+            {"kind": "note", "ts": 1000.0, "payload": {"text": "hello world"}},
+        ])
+        vertex_reindex(vpath)
+
+        before = db_path.read_bytes()
+        vertex_search(vpath, "hello")
+        vertex_search(vpath, "nonexistent")
+        after = db_path.read_bytes()
+        assert before == after
+
+    def test_search_byte_identity_without_index(self, tmp_path):
+        """A --match read against a store that was NEVER reindexed (no
+        facts_fts at all) also touches zero bytes — the old code built the
+        index lazily on this exact path (184320→282624 bytes observed
+        live); the fixed vertex_search must not create the table at all,
+        and instead let the caller's coverage probe route the query away
+        from vertex_search entirely."""
+        from engine import vertex_search, vertex_search_coverage
+
+        vpath = _create_search_vertex(
+            tmp_path, "test", '  note {\n    search "text"\n  }',
+        )
+        db_path = tmp_path / "store.db"
+        _seed_facts(db_path, [
+            {"kind": "note", "ts": 1000.0, "payload": {"text": "hello world"}},
+        ])
+
+        before = db_path.read_bytes()
+        # Coverage probe itself must not write either.
+        coverage = vertex_search_coverage(vpath)
+        assert coverage.missing is True
+        mid = db_path.read_bytes()
+        assert before == mid
+
+        # A direct vertex_search call on a missing index is a documented
+        # caller error (see vertex_search's docstring) — it raises rather
+        # than silently building the table. Confirm it raises AND that the
+        # raise itself left the store untouched.
+        import pytest
+
+        with pytest.raises(Exception):
+            vertex_search(vpath, "hello")
+        after = db_path.read_bytes()
+        assert before == after
+
+    def test_reindex_is_the_only_writer(self, tmp_path):
+        """facts_fts/fts_state appear ONLY after an explicit vertex_reindex
+        call — never as a side effect of vertex_search or
+        vertex_search_coverage."""
+        from engine import vertex_reindex, vertex_search_coverage
+
+        vpath = _create_search_vertex(
+            tmp_path, "test", '  note {\n    search "text"\n  }',
+        )
+        db_path = tmp_path / "store.db"
+        _seed_facts(db_path, [
+            {"kind": "note", "ts": 1000.0, "payload": {"text": "hello world"}},
+        ])
+
+        vertex_search_coverage(vpath)  # read-only probe — must not create tables
+
+        def _table_exists(name: str) -> bool:
+            conn = sqlite3.connect(str(db_path))
+            try:
+                row = conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+                    (name,),
+                ).fetchone()
+                return row is not None
+            finally:
+                conn.close()
+
+        assert _table_exists("facts_fts") is False
+
+        vertex_reindex(vpath)
+        assert _table_exists("facts_fts") is True
+
+    def test_retroactive_indexing_via_reindex(self, tmp_path):
+        """Closes friction:fts-search-declaration-not-retroactive: facts
+        written BEFORE a kind ever declared ``search`` become findable after
+        ONE reindex — reindex is a full rebuild against the CURRENT
+        declaration set, not an incremental watermark that only ever
+        advanced past what was searchable at scan time."""
+        from engine import vertex_reindex, vertex_search
+
+        # Kind `decision` has NO search declaration yet.
+        vpath = _create_vertex_file(
+            tmp_path, "test", '  decision { fold { items "by" "topic" } }',
+        )
+        db_path = tmp_path / "store.db"
+        _seed_facts(db_path, [
+            {"kind": "decision", "ts": 1000.0, "payload": {
+                "topic": "auth", "summary": "predates the search declaration",
+            }},
+        ])
+
+        # Declare search NOW, after the fact already exists (rewrite the
+        # vertex file in place — same store, new declaration).
+        vpath.write_text(
+            'name "test"\nstore "./store.db"\n\nloops {\n'
+            '  decision {\n    fold { items "by" "topic" }\n'
+            '    search "summary"\n  }\n}\n'
+        )
+
+        vertex_reindex(vpath)
+        results = vertex_search(vpath, "predates")
+        assert len(results) == 1
+        assert results[0]["payload"]["topic"] == "auth"
+
+    def test_reindex_twice_is_idempotent(self, tmp_path):
+        """Running reindex twice in a row produces identical, valid results
+        (drop+recreate is safe to repeat)."""
+        from engine import vertex_reindex, vertex_search
+
+        vpath = _create_search_vertex(
+            tmp_path, "test", '  note {\n    search "text"\n  }',
+        )
+        _seed_facts(tmp_path / "store.db", [
+            {"kind": "note", "ts": 1000.0, "payload": {"text": "hello world"}},
+        ])
+
+        first = vertex_reindex(vpath)
+        second = vertex_reindex(vpath)
+        assert first["facts_indexed"] == second["facts_indexed"] == 1
+        assert vertex_search(vpath, "hello") == vertex_search(vpath, "hello")
+
+    def test_coverage_stale_after_facts_added_past_last_reindex(self, tmp_path):
+        """vertex_search_coverage reports the kind as stale once a fact is
+        written after the last reindex — the read-side signal
+        surface.search consumes to decide FTS vs substring fallback."""
+        from engine import vertex_reindex, vertex_search_coverage
+
+        vpath = _create_search_vertex(
+            tmp_path, "test", '  note {\n    search "text"\n  }',
+        )
+        db_path = tmp_path / "store.db"
+        _seed_facts(db_path, [
+            {"kind": "note", "ts": 1000.0, "payload": {"text": "hello"}},
+        ])
+        vertex_reindex(vpath)
+
+        coverage = vertex_search_coverage(vpath)
+        assert coverage.missing is False
+        assert coverage.stale_kinds == frozenset()
+
+        conn = sqlite3.connect(str(db_path))
+        conn.execute(
+            "INSERT INTO facts (id, kind, ts, observer, origin, payload) VALUES (?, ?, ?, ?, ?, ?)",
+            ("TESTFACT_STALE", "note", 2000.0, "test", "", json.dumps({"text": "world"})),
+        )
+        conn.commit()
+        conn.close()
+
+        coverage = vertex_search_coverage(vpath)
+        assert coverage.missing is False
+        assert coverage.stale_kinds == frozenset({"note"})
+
+    def test_kinds_param_restricts_sql_before_limit(self, tmp_path):
+        """S2 sol P2: without ``kinds``, a query across ALL indexed kinds can
+        let one kind's many matches fill the LIMIT window, silently pushing
+        another kind's genuine matches out — post-hoc filtering by the
+        caller is too late, since the rows never came back in the first
+        place. ``kinds`` restricts the SQL WHERE clause BEFORE the LIMIT, so
+        the crowding kind never displaces the kind the caller actually
+        wants."""
+        from engine import vertex_reindex, vertex_search
+
+        vpath = _create_search_vertex(
+            tmp_path,
+            "test",
+            '  crowd {\n    search "text"\n  }\n'
+            '  target {\n    search "text"\n  }',
+        )
+        db_path = tmp_path / "store.db"
+        facts = [
+            # 105 newer, crowding matches — all in `crowd`.
+            {"kind": "crowd", "ts": 2000.0 + i, "payload": {"text": "needle"}}
+            for i in range(105)
+        ] + [
+            # One OLDER match in `target` — would be sorted last by ts and
+            # fall outside an unrestricted LIMIT 101 window.
+            {"kind": "target", "ts": 1.0, "payload": {"text": "needle"}},
+        ]
+        _seed_facts(db_path, facts)
+        vertex_reindex(vpath)
+
+        # Unrestricted: `target`'s single old match is displaced by
+        # `crowd`'s 105 newer matches within a small limit.
+        unrestricted = vertex_search(vpath, "needle", limit=10)
+        assert all(r["kind"] == "crowd" for r in unrestricted)
+
+        # Restricted to `target` alone: the SQL WHERE clause excludes
+        # `crowd` entirely, so `target`'s match is never at risk of being
+        # crowded out by it, regardless of how the limit is set.
+        restricted = vertex_search(vpath, "needle", kinds=["target"], limit=10)
+        assert len(restricted) == 1
+        assert restricted[0]["kind"] == "target"
+
+    def test_kinds_param_empty_iterable_matches_nothing(self, tmp_path):
+        """An explicit empty ``kinds`` is a real allowlist of nothing, not
+        'no restriction' — distinct from ``kinds=None``."""
+        from engine import vertex_reindex, vertex_search
+
+        vpath = _create_search_vertex(
+            tmp_path, "test", '  note {\n    search "text"\n  }',
+        )
+        _seed_facts(tmp_path / "store.db", [
+            {"kind": "note", "ts": 1000.0, "payload": {"text": "hello"}},
+        ])
+        vertex_reindex(vpath)
+
+        assert vertex_search(vpath, "hello", kinds=[]) == []
+        assert len(vertex_search(vpath, "hello", kinds=None)) == 1
+
+    def test_combined_search_forwards_kinds_to_children(self, tmp_path, monkeypatch):
+        """S2 sol P2, aggregation path: kinds forwards through
+        _combined_search into each child's own vertex_search call, so a
+        crowding kind in one child can't push a target kind's matches out
+        of THAT child's own limit window either."""
+        from engine import vertex_reindex, vertex_search
+
+        combine_vpath, alpha_db, beta_db = _setup_search_combine_env(tmp_path, monkeypatch)
+
+        # alpha: many crowding matches under a kind the caller does NOT trust.
+        _seed_facts(alpha_db, [
+            {"kind": "decision", "ts": 2000.0 + i, "payload": {
+                "topic": f"crowd-{i}", "message": "needle",
+            }}
+            for i in range(105)
+        ])
+        # beta: one match the caller DOES trust.
+        _seed_facts(beta_db, [
+            {"kind": "decision", "ts": 1.0, "payload": {
+                "topic": "target", "message": "needle",
+            }},
+        ])
+        vertex_reindex(combine_vpath)
+
+        # Both children index the SAME kind name ("decision"), so kinds=
+        # doesn't disambiguate alpha vs beta here — this test only proves
+        # the parameter is forwarded and doesn't break the combine path
+        # under a full-kind restriction; per-store crowding within a single
+        # child is covered by test_kinds_param_restricts_sql_before_limit.
+        results = vertex_search(combine_vpath, "needle", kinds=["decision"], limit=10)
+        assert len(results) == 10
+        assert all(r["kind"] == "decision" for r in results)
+
+    def test_new_searchable_kind_marks_stale_with_zero_new_facts(self, tmp_path):
+        """Capstone sol P1: a declaration edit that adds a NEW searchable
+        kind, with no new facts written for it, still marks the index
+        stale — the rowid watermark alone can't see this, since nothing new
+        was ever written. The declaration fingerprint catches it."""
+        from engine import vertex_reindex, vertex_search_coverage
+
+        vpath = _create_search_vertex(
+            tmp_path, "test", '  note {\n    search "text"\n  }',
+        )
+        _seed_facts(tmp_path / "store.db", [
+            {"kind": "note", "ts": 1000.0, "payload": {"text": "hello"}},
+        ])
+        vertex_reindex(vpath)
+
+        coverage = vertex_search_coverage(vpath)
+        assert coverage.stale_kinds == frozenset()
+
+        # Edit the declaration — add a new searchable kind. Zero facts
+        # written for it; the rowid watermark does not move.
+        _create_search_vertex(
+            tmp_path, "test",
+            '  note {\n    search "text"\n  }\n'
+            '  extra {\n    search "text"\n  }',
+        )
+
+        coverage = vertex_search_coverage(vpath)
+        # Whole-declaration-set granularity (not per-kind): the fingerprint
+        # covers the whole decl, so EVERY currently-declared kind reports
+        # stale until the next reindex, including the pre-existing `note`.
+        assert coverage.stale_kinds == frozenset({"note", "extra"})
+
+        # Reindexing re-anchors the fingerprint and clears the staleness.
+        vertex_reindex(vpath)
+        coverage = vertex_search_coverage(vpath)
+        assert coverage.stale_kinds == frozenset()
+
+    def test_changed_search_fields_marks_stale_with_zero_new_facts(self, tmp_path):
+        """Capstone sol P1: changing WHICH fields an already-indexed kind
+        searches (same kind name, no new facts) also marks it stale — a
+        pure field-list edit moves no rowid either."""
+        from engine import vertex_reindex, vertex_search_coverage
+
+        vpath = _create_search_vertex(
+            tmp_path, "test",
+            '  exchange {\n    search "prompt"\n  }',
+        )
+        _seed_facts(tmp_path / "store.db", [
+            {"kind": "exchange", "ts": 1000.0, "payload": {
+                "prompt": "hello", "response": "world",
+            }},
+        ])
+        vertex_reindex(vpath)
+
+        coverage = vertex_search_coverage(vpath)
+        assert coverage.stale_kinds == frozenset()
+
+        # Same kind, DIFFERENT declared search fields — no new facts.
+        _create_search_vertex(
+            tmp_path, "test",
+            '  exchange {\n    search "prompt" "response"\n  }',
+        )
+
+        coverage = vertex_search_coverage(vpath)
+        assert coverage.stale_kinds == frozenset({"exchange"})
+
+    def test_unchanged_declaration_no_false_stale(self, tmp_path):
+        """The fingerprint check must not itself introduce false staleness:
+        re-probing an UNCHANGED declaration (fingerprint matches) proceeds
+        to the rowid check as before, reporting fresh."""
+        from engine import vertex_reindex, vertex_search_coverage
+
+        vpath = _create_search_vertex(
+            tmp_path, "test", '  note {\n    search "text"\n  }',
+        )
+        _seed_facts(tmp_path / "store.db", [
+            {"kind": "note", "ts": 1000.0, "payload": {"text": "hello"}},
+        ])
+        vertex_reindex(vpath)
+
+        # Re-probe several times with no edits at all.
+        for _ in range(3):
+            coverage = vertex_search_coverage(vpath)
+            assert coverage.missing is False
+            assert coverage.stale_kinds == frozenset()
+
+    def test_declaration_drift_search_finds_matches_via_fallback(self, tmp_path):
+        """End-to-end at the search() surface: a declaration edit with zero
+        new facts must not silently return nothing — the coverage probe's
+        fingerprint mismatch routes the affected kind through the
+        substring fallback, and the fact IS found."""
+        from engine import vertex_reindex, vertex_search
+
+        vpath = _create_search_vertex(
+            tmp_path, "test", '  note {\n    search "text"\n  }',
+        )
+        _seed_facts(tmp_path / "store.db", [
+            {"kind": "note", "ts": 1000.0, "payload": {"text": "hello driftword"}},
+        ])
+        vertex_reindex(vpath)
+
+        # Declaration edit, no new facts — the FTS index is now
+        # semantically stale even though the rowid watermark hasn't moved.
+        _create_search_vertex(
+            tmp_path, "test", '  note {\n    search "text" "extra"\n  }',
+        )
+
+        # A bare vertex_search (no coverage gating) still returns the OLD
+        # index's answer — this is why callers MUST consult the coverage
+        # probe first; vertex_search itself has no way to know the
+        # declaration moved.
+        stale_results = vertex_search(vpath, "driftword")
+        assert len(stale_results) == 1  # the old index still has this row
+
+        # But the coverage probe correctly flags it, so a caller that
+        # honors it (surface.search — exercised directly in
+        # apps/loops/tests/test_surface.py) will route through the
+        # substring fallback rather than trusting this index blindly.
+        from engine import vertex_search_coverage
+
+        coverage = vertex_search_coverage(vpath)
+        assert "note" in coverage.stale_kinds
 
 
 class TestExtractField:
@@ -809,7 +1221,7 @@ class TestFTS5NestedFields:
 
     def test_dot_path_search(self, tmp_path):
         """search 'message.content' traverses nested dict."""
-        from engine import vertex_search
+        from engine import vertex_reindex, vertex_search
 
         vpath = _create_search_vertex(
             tmp_path, "test",
@@ -824,13 +1236,14 @@ class TestFTS5NestedFields:
             }},
         ])
 
+        vertex_reindex(vpath)
         results = vertex_search(vpath, "quantum")
         assert len(results) == 1
         assert results[0]["payload"]["message"]["content"] == "explain quantum computing"
 
     def test_content_blocks_search(self, tmp_path):
         """Array-of-objects with text fields — concatenated and searchable."""
-        from engine import vertex_search
+        from engine import vertex_reindex, vertex_search
 
         vpath = _create_search_vertex(
             tmp_path, "test",
@@ -845,6 +1258,7 @@ class TestFTS5NestedFields:
             }},
         ])
 
+        vertex_reindex(vpath)
         results = vertex_search(vpath, "qubits")
         assert len(results) == 1
 
@@ -853,7 +1267,7 @@ class TestFTS5NestedFields:
 
     def test_missing_nested_field_no_error(self, tmp_path):
         """Missing nested path produces empty string, not error."""
-        from engine import vertex_search
+        from engine import vertex_reindex, vertex_search
 
         vpath = _create_search_vertex(
             tmp_path, "test",
@@ -866,12 +1280,13 @@ class TestFTS5NestedFields:
             }},
         ])
 
+        vertex_reindex(vpath)
         results = vertex_search(vpath, "findable")
         assert len(results) == 1
 
     def test_flat_field_still_works(self, tmp_path):
         """Flat fields (no dot) still work — no regression."""
-        from engine import vertex_search
+        from engine import vertex_reindex, vertex_search
 
         vpath = _create_search_vertex(
             tmp_path, "test",
@@ -881,6 +1296,7 @@ class TestFTS5NestedFields:
             {"kind": "note", "ts": 1000.0, "payload": {"text": "hello world"}},
         ])
 
+        vertex_reindex(vpath)
         results = vertex_search(vpath, "hello")
         assert len(results) == 1
 
@@ -1420,9 +1836,33 @@ def _setup_search_combine_env(tmp_path: Path, monkeypatch):
 class TestCombinedVertexSearch:
     """vertex_search on combinatorial vertices — delegates to children."""
 
+    def test_aggregate_search_mutates_zero_child_stores(self, tmp_path, monkeypatch):
+        """S2 aggravator regression: a --match read against an aggregate must
+        not write to ANY child store — before this fix, vertex_search's
+        write-on-read recursed through _combined_search into every child,
+        so one aggregate read mutated every child's canonical .db."""
+        from engine import vertex_reindex, vertex_search
+
+        combine_vpath, alpha_db, beta_db = _setup_search_combine_env(tmp_path, monkeypatch)
+
+        _seed_facts(alpha_db, [
+            {"kind": "decision", "ts": 1000.0, "payload": {"topic": "auth", "message": "use JWT"}},
+        ])
+        _seed_facts(beta_db, [
+            {"kind": "decision", "ts": 2000.0, "payload": {"topic": "deploy", "message": "use JWT tokens"}},
+        ])
+        vertex_reindex(combine_vpath)
+
+        alpha_before = alpha_db.read_bytes()
+        beta_before = beta_db.read_bytes()
+        vertex_search(combine_vpath, "JWT")
+        vertex_search(combine_vpath, "nonexistent")
+        assert alpha_db.read_bytes() == alpha_before
+        assert beta_db.read_bytes() == beta_before
+
     def test_search_across_children(self, tmp_path, monkeypatch):
         """Search through aggregation vertex returns results from both child stores."""
-        from engine import vertex_search
+        from engine import vertex_reindex, vertex_search
 
         combine_vpath, alpha_db, beta_db = _setup_search_combine_env(tmp_path, monkeypatch)
 
@@ -1433,6 +1873,8 @@ class TestCombinedVertexSearch:
             {"kind": "decision", "ts": 2000.0, "payload": {"topic": "deploy", "message": "use JWT tokens"}},
         ])
 
+        # Reindexing the aggregate recurses into every child's own store.
+        vertex_reindex(combine_vpath)
         results = vertex_search(combine_vpath, "JWT")
         assert len(results) == 2
         # Newest first
@@ -1449,7 +1891,7 @@ class TestCombinedVertexSearch:
         cursor does not perturb the combined path (the forwarding itself is the
         fix; per-child rewind of search fields rides the Q2 FTS caveat).
         """
-        from engine import vertex_search
+        from engine import vertex_reindex, vertex_search
 
         combine_vpath, alpha_db, beta_db = _setup_search_combine_env(tmp_path, monkeypatch)
         _seed_facts(alpha_db, [
@@ -1459,6 +1901,7 @@ class TestCombinedVertexSearch:
             {"kind": "decision", "ts": 2000.0, "payload": {"topic": "deploy", "message": "JWT"}},
         ])
 
+        vertex_reindex(combine_vpath)
         head = vertex_search(combine_vpath, "JWT")
         at_future = vertex_search(combine_vpath, "JWT", as_of=9_999_999.0)
         assert [r["id"] for r in head] == [r["id"] for r in at_future]
@@ -1466,7 +1909,7 @@ class TestCombinedVertexSearch:
 
     def test_search_single_child_match(self, tmp_path, monkeypatch):
         """Search returns results only from the child that matches."""
-        from engine import vertex_search
+        from engine import vertex_reindex, vertex_search
 
         combine_vpath, alpha_db, beta_db = _setup_search_combine_env(tmp_path, monkeypatch)
 
@@ -1477,6 +1920,7 @@ class TestCombinedVertexSearch:
             {"kind": "decision", "ts": 2000.0, "payload": {"topic": "deploy", "message": "use containers"}},
         ])
 
+        vertex_reindex(combine_vpath)
         results = vertex_search(combine_vpath, "containers")
         assert len(results) == 1
         assert results[0]["payload"]["topic"] == "deploy"
@@ -1491,12 +1935,14 @@ class TestCombinedVertexSearch:
             {"kind": "decision", "ts": 1000.0, "payload": {"topic": "auth", "message": "use JWT"}},
         ])
 
+        # Empty query returns [] before ever touching the index — no reindex
+        # needed to prove this (it must hold with or without one).
         assert vertex_search(combine_vpath, "") == []
         assert vertex_search(combine_vpath, "  ") == []
 
     def test_search_respects_limit(self, tmp_path, monkeypatch):
         """Limit applies to merged results across children."""
-        from engine import vertex_search
+        from engine import vertex_reindex, vertex_search
 
         combine_vpath, alpha_db, beta_db = _setup_search_combine_env(tmp_path, monkeypatch)
 
@@ -1508,6 +1954,7 @@ class TestCombinedVertexSearch:
             {"kind": "decision", "ts": 2000.0, "payload": {"topic": "auth-b", "message": "token rotation"}},
         ])
 
+        vertex_reindex(combine_vpath)
         results = vertex_search(combine_vpath, "token", limit=2)
         assert len(results) == 2
         # Newest first, limit cuts the oldest
@@ -1516,7 +1963,7 @@ class TestCombinedVertexSearch:
 
     def test_search_no_results(self, tmp_path, monkeypatch):
         """No matches returns []."""
-        from engine import vertex_search
+        from engine import vertex_reindex, vertex_search
 
         combine_vpath, alpha_db, beta_db = _setup_search_combine_env(tmp_path, monkeypatch)
 
@@ -1524,7 +1971,45 @@ class TestCombinedVertexSearch:
             {"kind": "decision", "ts": 1000.0, "payload": {"topic": "auth", "message": "use JWT"}},
         ])
 
+        vertex_reindex(combine_vpath)
         assert vertex_search(combine_vpath, "nonexistent") == []
+
+    def test_reindex_aggregate_touches_every_child(self, tmp_path, monkeypatch):
+        """S2: reindexing an aggregate vertex reindexes EVERY child's own
+        store — mirrors _combined_search's per-child recursion on the write
+        side. Closes the write-side symmetry to the aggravator fix (a read
+        against an aggregate must never mutate a child; here, a reindex
+        against an aggregate must explicitly reach every child, not silently
+        skip one)."""
+        import sqlite3
+
+        from engine import vertex_reindex
+
+        combine_vpath, alpha_db, beta_db = _setup_search_combine_env(tmp_path, monkeypatch)
+
+        _seed_facts(alpha_db, [
+            {"kind": "decision", "ts": 1000.0, "payload": {"topic": "auth", "message": "alpha fact"}},
+        ])
+        _seed_facts(beta_db, [
+            {"kind": "decision", "ts": 2000.0, "payload": {"topic": "deploy", "message": "beta fact"}},
+        ])
+
+        receipt = vertex_reindex(combine_vpath)
+        assert receipt["aggregate"] is True
+        assert len(receipt["children"]) == 2
+        assert all(c["reindexed"] for c in receipt["children"])
+
+        for db_path in (alpha_db, beta_db):
+            conn = sqlite3.connect(str(db_path))
+            try:
+                row = conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name='facts_fts'"
+                ).fetchone()
+                assert row is not None
+                count = conn.execute("SELECT COUNT(*) FROM facts_fts").fetchone()[0]
+                assert count == 1
+            finally:
+                conn.close()
 
 
 class TestVertexSummary:
@@ -2118,3 +2603,189 @@ class TestDiscoverVertexFold:
 
         result = vertex_fold(parent_vertex)
         assert result is not None
+
+
+class TestFtsGenerationBinding:
+    """sol P2-a: the certify→query path must not span declaration generations.
+
+    Coverage used to resolve the declaration fingerprint on one connection,
+    read ``fts_state`` on a second, and let the eventual ``vertex_search`` run
+    on a third — so a declaration event landing between them could let a
+    fingerprint from one generation certify an index built for another.
+    """
+
+    def _seeded(self, tmp_path):
+        from engine import vertex_reindex
+
+        vpath = _create_search_vertex(
+            tmp_path, "test", '  note {\n    search "text"\n  }',
+        )
+        _seed_facts(tmp_path / "store.db", [
+            {"kind": "note", "ts": 1000.0, "payload": {"text": "hello world"}},
+        ])
+        vertex_reindex(vpath)
+        return vpath
+
+    def test_coverage_reports_the_generation_it_certified(self, tmp_path):
+        from engine import declaration_generation, vertex_search_coverage
+
+        vpath = self._seeded(tmp_path)
+        coverage = vertex_search_coverage(vpath)
+        assert coverage.stale_kinds == frozenset()
+        assert coverage.generation is not None
+        # The certified generation IS the current declaration's fingerprint —
+        # not a second hash invented for this path.
+        assert coverage.generation == declaration_generation(
+            vpath)["review_fingerprint"]
+
+    def test_no_generation_certified_when_stale(self, tmp_path):
+        # A probe that certifies nothing must offer nothing to query under.
+        from engine import vertex_search_coverage
+
+        vpath = self._seeded(tmp_path)
+        _create_search_vertex(
+            tmp_path, "test",
+            '  note {\n    search "text"\n  }\n  extra {\n    search "text"\n  }',
+        )
+        coverage = vertex_search_coverage(vpath)
+        assert coverage.stale_kinds
+        assert coverage.generation is None
+
+    def test_search_refuses_a_generation_it_was_not_certified_for(self, tmp_path):
+        """The interleaving: certify, index rebuilt under a NEW declaration,
+        then query. The stale certification must not silently authorize it."""
+        from engine import (
+            FtsGenerationChanged,
+            vertex_reindex,
+            vertex_search,
+            vertex_search_coverage,
+        )
+
+        vpath = self._seeded(tmp_path)
+        coverage = vertex_search_coverage(vpath)
+        certified = coverage.generation
+        assert certified is not None
+
+        # --- concurrent declaration edit + reindex lands here ---
+        _create_search_vertex(
+            tmp_path, "test",
+            '  note {\n    search "text" "title"\n  }',
+        )
+        vertex_reindex(vpath)
+
+        with pytest.raises(FtsGenerationChanged):
+            vertex_search(vpath, "hello", require_generation=certified)
+
+        # Re-probing re-certifies against the new generation, and the query
+        # then runs — the refusal is about the SKEW, not a permanent block.
+        fresh = vertex_search_coverage(vpath).generation
+        assert fresh is not None and fresh != certified
+        assert vertex_search(vpath, "hello", require_generation=fresh)
+
+    def test_decl_removing_search_refuses_before_the_empty_return(self, tmp_path):
+        """sol round 2 (i): a new generation removes the last ``search``
+        declaration. ``collect_search_fields`` then comes back empty and the
+        old code returned [] BEFORE the generation check ever ran — certified
+        fresh, silently incomplete, indistinguishable from "no matches"."""
+        from engine import (
+            FtsGenerationChanged,
+            vertex_search,
+            vertex_search_coverage,
+        )
+
+        vpath = self._seeded(tmp_path)
+        certified = vertex_search_coverage(vpath).generation
+        assert certified is not None
+
+        # D2: the kind survives, its `search` declaration does not.
+        _create_search_vertex(
+            tmp_path, "test", '  note {\n    fold { items "by" "text" }\n  }',
+        )
+
+        with pytest.raises(FtsGenerationChanged):
+            vertex_search(vpath, "hello", require_generation=certified)
+
+    def test_unverifiable_conditions_refuse_rather_than_return_empty(
+        self, tmp_path,
+    ):
+        """Every other early return is the same claim: if the certification
+        cannot be checked, say so instead of returning []."""
+        from engine import FtsGenerationChanged, vertex_search
+
+        vpath = self._seeded(tmp_path)
+
+        # Store deleted out from under a live certification.
+        (tmp_path / "store.db").unlink()
+        with pytest.raises(FtsGenerationChanged):
+            vertex_search(vpath, "hello", require_generation="sha256:whatever")
+
+    def test_certify_and_query_share_one_snapshot(self, tmp_path):
+        """sol round 2 (ii): same connection is not the same snapshot.
+
+        A writer commits a new generation on ANOTHER connection in the window
+        between the fingerprint read and the query. With per-statement
+        autocommit that commit becomes visible mid-sequence; inside one
+        BEGIN DEFERRED transaction it cannot. Either outcome is acceptable —
+        refuse, or answer consistently with the certified generation — but a
+        silent empty result is not.
+        """
+        import sqlite3
+
+        from engine import (
+            FtsGenerationChanged,
+            vertex_search,
+            vertex_search_coverage,
+        )
+        from engine.store_reader import StoreReader
+
+        vpath = self._seeded(tmp_path)
+        db = tmp_path / "store.db"
+        certified = vertex_search_coverage(vpath).generation
+        assert certified is not None
+
+        # Land the competing commit exactly between certify and query.
+        real_fts_generation = StoreReader.fts_generation
+        landed = {"done": False}
+
+        def fts_generation_then_write(self):
+            value = real_fts_generation(self)
+            if not landed["done"]:
+                landed["done"] = True
+                w = sqlite3.connect(str(db), timeout=0.2)
+                try:
+                    w.execute(
+                        "UPDATE fts_state SET value = ? "
+                        "WHERE key = 'decl_fingerprint'",
+                        ("sha256:committed-by-a-concurrent-writer",),
+                    )
+                    w.commit()
+                except sqlite3.OperationalError:
+                    # The held read transaction locked the writer out — the
+                    # snapshot doing exactly its job. Nothing to observe.
+                    pass
+                finally:
+                    w.close()
+            return value
+
+        monkeypatch = pytest.MonkeyPatch()
+        monkeypatch.setattr(StoreReader, "fts_generation", fts_generation_then_write)
+        try:
+            try:
+                facts = vertex_search(vpath, "hello", require_generation=certified)
+            except FtsGenerationChanged:
+                return  # refused — honest
+            # Otherwise the snapshot held: the answer is the certified
+            # generation's, complete rather than silently empty.
+            assert facts, (
+                "queried under a snapshot that saw the concurrent commit and "
+                "returned nothing — the silent-empty defect"
+            )
+        finally:
+            monkeypatch.undo()
+
+    def test_unrequested_generation_is_unchecked(self, tmp_path):
+        # Back-compat: callers that pass no generation are unaffected.
+        from engine import vertex_search
+
+        vpath = self._seeded(tmp_path)
+        assert vertex_search(vpath, "hello")

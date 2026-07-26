@@ -1,0 +1,11 @@
+╭─ session · fold ─────────────────────────────────────────────────────────────╮
+│ 1 keys · 1 kinds · 1 facts                                                   │
+│ updated Jan 15                                                               │
+╰──────────────────────────────────────────────────────────────────────────────╯
+Tasks (1):
+  │ Jan 15  alpha  open
+    message: active work
+    _ts: 2025-01-15T10:00:00+00:00
+
+(1 inactive hidden — --all to show)
+rail  ◆ high  │ mid  · tail  ⊘ stale

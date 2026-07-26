@@ -43,6 +43,7 @@ class TestStoreSubcommandsParity:
         for fn_name in (
             "_run_verify", "_run_rebirth", "_run_reanchor", "_run_absorb",
             "_run_adopt", "_run_store_ticks", "_run_store_stats",
+            "_run_reindex",
         ):
             monkeypatch.setattr(
                 store_mod, fn_name,

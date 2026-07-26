@@ -89,7 +89,21 @@ def _run_ticks(
             _try_index(known.index)
         if vertex_path is None:
             from loops.commands.identity import resolve_local_vertex as _rlv
-            vertex_path = _rlv()
+            from loops.commands.resolve import ambiguous_local_vertex_refusal
+            from loops.errors import AmbiguousLocalVertex
+
+            try:
+                vertex_path = _rlv()
+            except AmbiguousLocalVertex:
+                from loops.cli.output import err as _err
+
+                _err(
+                    ambiguous_local_vertex_refusal(
+                        "store ticks", "sl store ticks <vertex>"
+                    )
+                    or ""
+                )
+                return 2
     else:
         _try_index(known.index)
 

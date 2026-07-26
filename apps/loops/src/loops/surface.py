@@ -40,8 +40,10 @@ from collections import Counter
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
 
+from atoms import Address
+
 if TYPE_CHECKING:
-    from atoms import Edge, FoldItem, FoldState
+    from atoms import Edge, FoldItem, FoldSection, FoldState
 
 
 # ---------------------------------------------------------------------------
@@ -57,6 +59,10 @@ class KindView:
     key_field: str | None = None
     fold_type: str = "collect"  # "by" | "collect"
     preview_fields: tuple[str, ...] = ()
+    lifecycle: tuple[str, tuple[str, ...]] | None = None
+    # (status_field, active_values) — the kind's declared lifecycle whitelist.
+    # Drives the default-view hide of inactive entities (see hide_inactive).
+    # None when the kind declares no lifecycle.
 
 
 @dataclass(frozen=True)
@@ -91,7 +97,7 @@ class Row:
     inbound: int = 0  # MATERIALIZED (lifted from the lens) — was render-only
     inbound_predicates: tuple[tuple[str, int], ...] = ()  # ←N broken out by
     # predicate, e.g. (("stakeholder", 3), ("ref", 2)); sums to ``inbound``
-    salience: int = 0  # MATERIALIZED = n + inbound (lifted from _salience)
+    salience: int = 0  # MATERIALIZED = n + inbound (computed inline in project)
     depth: int = 0  # >0 for ref-walk rows
     via_anchor: str | None = None  # the anchor whose ref pulled a walked row in
     granularity: str = "headline"  # "whole" | "headline"
@@ -112,11 +118,27 @@ class Window:
 
     total: int = 0  # rows before budget
     shown: int = 0  # rows after
-    limited_by: str | None = None  # "limit" | "last" | "salience" | None
+    limited_by: str | None = None  # "limit" | "last" | "salience" | "status" | None
     query: str | None = None  # the search string if search() ran
     fields: tuple[str, ...] | None = None  # the projection if select() ran
     granularity: str = "headline"  # derived summary: "whole" | "headline" | "mixed"
-    unindexed: tuple[str, ...] = ()  # kinds with facts but no FTS coverage (S5)
+    unindexed: tuple[str, ...] = ()  # kinds with facts but NO search declaration
+    # at all (S5) — "never indexed", a declaration-time fact.
+    stale: tuple[str, ...] = ()  # kinds that DO declare search but whose FTS
+    # index is missing or behind head (S2) — "declared, but the index can't be
+    # trusted right now". Distinct signal from `unindexed` by design (S2
+    # arbitration F1: never-declared and declared-but-stale are different
+    # claims); both route through the same substring fallback, but the reason
+    # differs and the fix differs (`sl store reindex` heals `stale`, a vertex
+    # edit is needed for `unindexed`).
+    truncated: bool = False  # True when the FTS query hit its result limit —
+    # no-silent-caps disclosure (S2, friction:fts-match-limit-100-silent-cap).
+    # The limit itself is unchanged; this only names the gap.
+    hidden: int = 0  # count of INACTIVE entities projected out of the default
+    # fold view by the lifecycle hide (S5). A distinct signal from limited_by
+    # (which names the dominant slice) — always present when the hide fired, so
+    # `--all` / an explicit `status=` predicate defeat is disclosed, never
+    # silent. Fail-open: rows lacking the status field are never counted here.
 
 
 @dataclass(frozen=True)
@@ -143,9 +165,17 @@ class Surface:
 # lenses/fold.py). Kept painted-free so every consumer can depend on it: the
 # built-in fold lens and the orient lenses (session_start / session_landing /
 # identity_prompt) all read the materialized Row scalars and carry no copies.
-# The three-form match in _inbound_count (bare ``key`` / ``/key`` / ``:key``) is
-# load-bearing: dropping the bare-key branch silently halves salience for
-# namespaced keys, and dropping the colon branch drops the dominant ref form.
+# Matching is over ``atoms.Address`` READINGS: the corpus is expanded into
+# ``Counter[Address]`` once (each address contributes all its readings), and an
+# item's inbound is ``inbound[Address(kind, key)] + inbound[Address('', key)]``
+# — its own kind-qualified count plus the bare (kind-unknown) fallback. A colon
+# address has ONE exact reading, so ``decision:X`` never counts toward a
+# ``thread`` keyed ``X`` (the cross-kind alias the old kind-blind suffix scan
+# produced is gone). A slash address ``x/y`` is genuinely ambiguous and carries
+# BOTH readings — legacy ``(x, y)`` AND bare ``('', 'x/y')`` — so a namespaced
+# ``design/foo`` ref still reaches a ``decision`` keyed ``design/foo`` without
+# resurrecting cross-kind colon aliasing (sol-P1). The eventual disambiguator is
+# a colon-form rewrite-at-rest migration, deferred (arbiter S1-F2).
 # ---------------------------------------------------------------------------
 
 
@@ -200,20 +230,19 @@ class PromotionCandidate:
 def _candidate_addr_kind(value: object) -> str | None:
     """The addr-kind of an address-looking value, else None.
 
-    Mirrors resolve._is_addr_candidate + _split_addr (kept local so surface
-    stays a leaf): must be separator-bearing, whitespace-free; returns the
-    ``kind`` half of ``kind:key`` / ``kind/key``.
+    Must be separator-bearing and whitespace-free; returns the ``kind`` half
+    of a ``kind:key`` / ``kind/key`` address (``Address.parse``), or None for a
+    bare (kind-less) or non-address value. The whitespace guard is kept ahead
+    of the parse — ``Address.parse`` itself is separator-honest but would read
+    ``"note: see foo"`` as ``kind="note"``; the guard rejects prose first.
     """
     if not isinstance(value, str):
         return None
     v = value.strip()
     if not v or any(c.isspace() for c in v):
         return None
-    if ":" in v:
-        return v.split(":", 1)[0] or None
-    if "/" in v:
-        return v.split("/", 1)[0] or None
-    return None
+    parsed = Address.parse(v)
+    return parsed.kind or None if parsed is not None else None
 
 
 def promotion_candidates(
@@ -264,26 +293,50 @@ def promotion_candidates(
 
 
 def _compute_inbound_refs(data: FoldState) -> Counter:
-    """Count inbound references (ref + typed edges) across all sections."""
+    """Count inbound references (ref + typed edges), keyed by ``Address`` reading.
+
+    Every corpus address contributes ALL its readings (``Address.readings``): a
+    colon address one exact reading; a slash address BOTH its legacy
+    kind-qualified reading AND its bare whole-key reading (the genuine
+    ambiguity); a bare address one ``Address('', key)`` reading. The resulting
+    ``Counter[Address]`` gives ``_inbound_count`` an O(1) lookup — a single ref
+    can never double-count one row (its two readings target distinct addresses),
+    so the sum stays honest.
+    """
     inbound: Counter = Counter()
     for addr, _pred, _src in _edge_corpus(data):
-        inbound[addr] += 1
+        for reading in Address.readings(addr):
+            inbound[reading] += 1
     return inbound
 
 
-def _address_matches_key(addr: str, key: str) -> bool:
-    """Three-form match (bare / ``/key`` / ``:key``) — the ref/edge semantic."""
-    return addr == key or addr.endswith(f"/{key}") or addr.endswith(f":{key}")
+def _addr_matches(addr: str, kind: str, key: str) -> bool:
+    """Match a raw corpus address to a target ``(kind, key)`` under ANY reading.
+
+    A colon address has a single exact reading (cross-kind aliases stay dead); a
+    slash address matches under EITHER its legacy kind-qualified reading OR its
+    bare whole-key reading (sol-P1 — ``design/foo`` still reaches a ``decision``
+    keyed ``design/foo``); a bare reading (``kind=''``) matches the key under any
+    kind. Counted at most once per (ref, row) — this is a boolean membership,
+    not a tally.
+    """
+    for a in Address.readings(addr):
+        if a.key == key and (a.kind == kind or a.kind == ""):
+            return True
+    return False
 
 
 def _compute_inbound_edges(data: FoldState) -> dict[str, list[tuple[str, str]]]:
     """Build adjacency map: target ``kind/key`` → [(source, predicate), ...].
 
-    Uses the three-form match (``_address_matches_key``) so an edge in any ref
-    form — bare key, ``kind/key``, or the canonical ``kind:key`` — resolves to
-    the target row's address, and the ``←`` expansion agrees with the ``←N``
-    salience count (both read the same corpus + matcher). Typed edges carry
-    their declared field as the predicate; ref edges carry ``"ref"``.
+    Uses the exact ``(kind, key)`` match (``_addr_matches``) so an edge in any
+    ref form — the canonical ``kind:key``, the legacy ``kind/key``, or a bare
+    key — resolves to the target row of its OWN kind, and the ``←`` expansion
+    agrees with the ``←N`` salience count (both read the same corpus + matcher).
+    Targets stay keyed by the ``kind/key`` slash-form Row address — the graph
+    consumer contract in ``fetch.py`` — even though matching is now kind-exact.
+    Typed edges carry their declared field as the predicate; ref edges carry
+    ``"ref"``.
     """
     corpus = _edge_corpus(data)
     edges: dict[str, list[tuple[str, str]]] = {}
@@ -295,7 +348,7 @@ def _compute_inbound_edges(data: FoldState) -> dict[str, list[tuple[str, str]]]:
                 continue
             target = _address(section.kind, key, item.id)
             for addr, pred, source in corpus:
-                if source and _address_matches_key(addr, key):
+                if source and _addr_matches(addr, section.kind, key):
                     edges.setdefault(target, []).append((source, pred))
     return edges
 
@@ -310,66 +363,55 @@ def _item_full_key(item: FoldItem, key_field: str | None, kind: str = "") -> str
     return f"{kind}/{key}" if kind else str(key)
 
 
-def _salience(item: FoldItem, key_field: str | None, inbound: Counter) -> int:
-    """Salience = n + inbound ref count."""
-    return item.n + _inbound_count(item, key_field, inbound)
-
-
 def _inbound_predicates(
     item: FoldItem,
+    kind: str,
     key_field: str | None,
     corpus: list[tuple[str, str, str]],
 ) -> tuple[tuple[str, int], ...]:
     """Break an item's inbound count out by predicate, count-desc then name.
 
-    Scans the SAME corpus + three-form matcher as ``_inbound_count`` (which
-    keys off ``_compute_inbound_refs``), so the breakdown SUMS to the ``←N``
-    total — the render can show ``←5 (3 via stakeholder, 2 via ref)`` and the
-    parts always reconcile. Keyless (collect) sources contribute here exactly
-    as they contribute to the count, even though they cannot be named in the
-    ``← source`` adjacency expansion.
+    Scans the SAME corpus + exact ``(kind, key)`` matcher as ``_inbound_count``
+    (which keys off ``_compute_inbound_refs``), so the breakdown SUMS to the
+    ``←N`` total — the render can show ``←5 (3 via stakeholder, 2 via ref)`` and
+    the parts always reconcile. Keyless (collect) sources contribute here
+    exactly as they contribute to the count, even though they cannot be named
+    in the ``← source`` adjacency expansion.
     """
     key = _row_key(item, key_field)
     if not key:
         return ()
     counts: Counter = Counter()
     for addr, pred, _src in corpus:
-        if _address_matches_key(addr, key):
+        if _addr_matches(addr, kind, key):
             counts[pred] += 1
     return tuple(sorted(counts.items(), key=lambda kv: (-kv[1], kv[0])))
 
 
-def _inbound_count(item: FoldItem, key_field: str | None, inbound: Counter) -> int:
-    """Look up inbound ref count for this item.
+def _inbound_count(
+    item: FoldItem, kind: str, key_field: str | None, inbound: Counter
+) -> int:
+    """Look up an item's inbound ref count over the reading-keyed corpus.
 
-    Matches refs in three forms:
-    * Kind-qualified colon — ``<fact-kind>:<key>`` (CANONICAL — e.g.
-      ``decision:design/foo``, ``thread:arc-name``)
-    * Kind-qualified slash — ``<fact-kind>/<key>`` (legacy — e.g. ``decision/design/foo``)
-    * Bare — the key_field value itself (e.g. ``design/foo``)
-
-    The colon form is the documented ref convention; matching only the slash
-    and bare forms silently dropped EVERY ``kind:key`` inbound ref from
-    salience — the dominant form in practice (the read-side twin of the
-    emit-time colon-blindness fixed in resolve.py). The bare form matters when
-    the key contains a namespace slash: ``endswith("/foo")`` alone misses it.
+    Returns the item's own kind-qualified count plus the bare (kind-unknown)
+    fallback: ``inbound[Address(kind, key)] + inbound[Address('', key)]``. The
+    corpus counter is keyed by ``Address.readings`` (``_compute_inbound_refs``),
+    so a canonical ``kind:key`` colon ref lands ONLY on the first term (exact,
+    no alias); a legacy ``kind/key`` slash ref lands on the first term for its
+    own kind AND on the bare term when the WHOLE ``x/y`` string equals this
+    key (the namespaced-key reading — sol-P1). A single ref never hits both
+    terms for one row (its readings target distinct addresses), so the sum is
+    an honest per-ref count. Cross-kind colon refs (``thread:X`` against a
+    ``decision`` keyed ``X``) still never count.
     """
     if not key_field:
         return 0
     key = item.payload.get(key_field, "")
     if not key:
         return 0
-    count = 0
-    suffix_slash = f"/{key}"
-    suffix_colon = f":{key}"
-    for ref_key, ref_count in inbound.items():
-        if (
-            ref_key == key
-            or ref_key.endswith(suffix_slash)
-            or ref_key.endswith(suffix_colon)
-        ):
-            count += ref_count
-    return count
+    key = str(key)
+    own = inbound[Address(kind, key)] if kind else 0
+    return own + inbound[Address("", key)]
 
 
 # ---------------------------------------------------------------------------
@@ -575,10 +617,11 @@ def project(
             key_field=kf,
             fold_type=section.fold_type,
             preview_fields=section.preview_fields,
+            lifecycle=section.lifecycle,
         )
         for item in section.items:
             key = _row_key(item, kf)
-            inbound_count = _inbound_count(item, kf, inbound)
+            inbound_count = _inbound_count(item, section.kind, kf, inbound)
             payload = dict(item.payload)
             if fields:
                 payload = {k: payload[k] for k in fields if k in payload}
@@ -598,7 +641,7 @@ def project(
                     refs=tuple(item.refs),
                     edges=tuple(item.edges),
                     inbound=inbound_count,
-                    inbound_predicates=_inbound_predicates(item, kf, corpus),
+                    inbound_predicates=_inbound_predicates(item, section.kind, kf, corpus),
                     salience=item.n + inbound_count,
                     depth=0,
                     via_anchor=None,
@@ -611,7 +654,7 @@ def project(
         item = w.item
         kf = w.key_field
         key = _row_key(item, kf)
-        inbound_count = _inbound_count(item, kf, inbound)
+        inbound_count = _inbound_count(item, w.section_kind, kf, inbound)
         payload = dict(item.payload)
         if fields:
             payload = {k: payload[k] for k in fields if k in payload}
@@ -631,7 +674,7 @@ def project(
                 refs=tuple(item.refs),
                 edges=tuple(item.edges),
                 inbound=inbound_count,
-                inbound_predicates=_inbound_predicates(item, kf, corpus),
+                inbound_predicates=_inbound_predicates(item, w.section_kind, kf, corpus),
                 salience=item.n + inbound_count,
                 depth=w.depth,
                 via_anchor=w.via_anchor,
@@ -758,57 +801,154 @@ def _indexed_kinds(vertex_path) -> set[str]:
     return {kind for kind, ld in ast.loops.items() if getattr(ld, "search", ())}
 
 
+# The engine's own vertex_search default (kept unchanged per S2 arbitration
+# F2 — "no limit redesign"). Requesting one more than this lets the FTS path
+# detect truncation (len(facts) > _FTS_LIMIT) without silently changing what
+# "the limit" means to a caller — the extra row is trimmed back off below.
+_FTS_LIMIT = 100
+
+
 def search(surface: Surface, query: str, *, vertex_path=None) -> Surface:
-    """CONTENT-SEARCH → event-axis rows: FTS5 for indexed kinds, substring for
-    the rest, with a coverage signal for the gap.
+    """CONTENT-SEARCH → event-axis rows: FTS5 for trustworthy-indexed kinds,
+    substring for the rest, with coverage + staleness + truncation signals
+    for the gaps.
 
     Two disjoint sources, combined and ordered ts-desc:
 
-    * FTS path — ``engine.vertex_search`` over the kinds that declare ``search``
-      fields. These return RAW facts (the event axis: every matching write, not
-      the folded item), converted to event Rows.
-    * Substring path — for kinds with NO ``search`` declaration (which FTS can't
-      see), a case-insensitive substring scan over the already-projected rows,
-      re-tagged ``axis="event"``. Folded-granularity, but it covers undeclared
-      kinds at all.
+    * FTS path — ``engine.vertex_search`` over present kinds that declare
+      ``search`` fields AND whose index is fresh (per
+      ``engine.vertex_search_coverage``). These return RAW facts (the event
+      axis: every matching write, not the folded item), converted to event
+      Rows.
+    * Substring path — for every other present kind: those with NO ``search``
+      declaration at all (``Window.unindexed``), and those that declare
+      search but whose index is missing/behind head (``Window.stale``) — a
+      case-insensitive substring scan over the already-projected rows,
+      re-tagged ``axis="event"``. Folded-granularity, but it covers the gap
+      honestly instead of silently returning nothing.
 
-    ``Window.unindexed`` records every present kind that lacked FTS coverage (the
-    superset-of-``unfolded`` coverage-K), so the lens can footer ``(K not
-    indexed)`` — the honesty signal that those kinds were substring-scanned, not
-    FTS-searched. The two sets are disjoint by construction (a kind is indexed
-    XOR not), so no fact is double-counted.
+    ``Window.unindexed`` vs ``Window.stale`` are deliberately separate
+    signals (S2 arbitration F1): "never declared searchable" is a
+    declaration-time fact about the vertex; "declared but the index can't be
+    trusted right now" is fixed by ``sl store reindex`` and says nothing
+    about the declaration. Both route through the identical substring
+    fallback — the FIX differs, so the DISCLOSURE must too. The sets
+    (fts_kinds, unindexed, stale) partition ``present`` — no fact is
+    double-counted.
+
+    This function is strictly read-only: it never builds or touches
+    ``facts_fts``/``fts_state`` (that's ``sl store reindex``'s sole job —
+    closes friction:search-read-mutates-canonical-store, including its
+    aggregation aggravator, since the coverage probe recurses per child the
+    same read-only way ``vertex_search`` itself does).
     """
     indexed = _indexed_kinds(vertex_path)
     present = {r.kind for r in surface.rows}
-    # FTS covers present-AND-indexed; substring covers present-AND-not-indexed.
-    # Scoping to ``present`` respects the fetch-time --kind narrowing (which only
-    # shrank the surface, not vertex_search's view) — else FTS would leak hits
-    # from other indexed kinds the user filtered out.
-    fts_kinds = present & indexed
+
+    # Staleness probe — read-only, never writes. `missing` (no index built at
+    # all, or the vertex was never reindexed) makes EVERY declared-indexed
+    # kind untrustworthy; `stale_kinds` narrows that to just the kinds whose
+    # facts postdate the last reindex.
+    stale_kinds: set[str] = set()
+    certified_generation: str | None = None
+    if vertex_path is not None and indexed:
+        coverage_failed = False
+        try:
+            from engine import vertex_search_coverage
+
+            coverage = vertex_search_coverage(vertex_path)
+        except Exception:
+            coverage = None
+            coverage_failed = True
+        if coverage_failed:
+            # FAIL CLOSED (capstone sol P2). A probe exception (corrupt
+            # fts_state, unreadable db, ...) must never be read as "every
+            # indexed kind is fine" — that was the old behavior (`coverage
+            # is None` left `stale_kinds` empty, so `trustworthy` stayed
+            # the FULL indexed set). The consequence was silent-empty
+            # results: the FTS branch's OWN exception guard would then
+            # swallow the same underlying failure into `facts = []`, and
+            # the substring fallback would skip these kinds too, because
+            # they were wrongly counted as `fts_kinds`. Marking every
+            # declared kind stale here routes them all through the
+            # substring fallback instead, with the gap named in
+            # Window.stale — the "no silent wrong answers" contract this
+            # slice exists to uphold, extended to cover probe failure too.
+            stale_kinds = set(indexed)
+        elif coverage is not None:
+            stale_kinds = set(indexed) if coverage.missing else set(coverage.stale_kinds)
+            certified_generation = coverage.generation
+
+    # FTS covers present ∧ indexed ∧ fresh; substring covers everything else
+    # present. Scoping to ``present`` respects the fetch-time --kind narrowing
+    # (which only shrank the surface, not vertex_search's view) — else FTS
+    # would leak hits from other indexed kinds the user filtered out.
+    trustworthy = indexed - stale_kinds
+    fts_kinds = present & trustworthy
     unindexed = tuple(sorted(present - indexed))
+    stale = tuple(sorted((present & indexed) - trustworthy))
 
     rows: list[Row] = []
+    truncated = False
 
-    # FTS path — only meaningful when the vertex is known and a present kind is
-    # indexed.
+    # FTS path — only meaningful when the vertex is known and a present kind
+    # is both indexed and fresh.
     if vertex_path is not None and fts_kinds:
         try:
-            from engine import vertex_search
+            from engine import FtsGenerationChanged, vertex_search
 
-            facts = vertex_search(vertex_path, query)
+            # kinds=fts_kinds restricts the SQL-level query BEFORE the limit
+            # applies (S2 sol P2) — a post-hoc filter here would be too
+            # late: if an untrustworthy (stale/unindexed-elsewhere) kind
+            # also happens to be indexed in this store, its many matches
+            # could crowd the newest-N window and silently push a
+            # trustworthy kind's genuine matches out before we ever got to
+            # filter them. Peek one past the limit to detect truncation (see
+            # _FTS_LIMIT) — now correct by construction, since it's computed
+            # over the already kind-restricted result.
+            #
+            # Coverage-gating above means every kind reaching this call has
+            # a live facts_fts table, so the OperationalError vertex_search
+            # documents for a missing index is not expected here — this
+            # except is a defensive backstop, not the mechanism this branch
+            # relies on.
+            facts = vertex_search(
+                vertex_path, query, kinds=fts_kinds, limit=_FTS_LIMIT + 1,
+                require_generation=certified_generation,
+            )
+        except FtsGenerationChanged:
+            # The index was rebuilt under a NEW declaration between the
+            # coverage probe and this query, so the freshness claim no longer
+            # describes what we would be reading. Fail closed exactly like a
+            # probe failure: drop the FTS branch entirely and let every kind
+            # fall to the substring path, with the gap named in Window.stale
+            # (sol P2-a). Swallowing this into `facts = []` would be the
+            # silent-empty defect — these kinds are excluded from the
+            # substring path precisely because they were counted trustworthy.
+            facts = []
+            stale_kinds |= fts_kinds
+            fts_kinds = set()
+            trustworthy = indexed - stale_kinds
+            stale = tuple(sorted((present & indexed) - trustworthy))
         except Exception:
             facts = []
+        if len(facts) > _FTS_LIMIT:
+            truncated = True
+            facts = facts[:_FTS_LIMIT]
+        # Belt-and-braces, not the mechanism: kinds=fts_kinds above is what
+        # actually restricts the SQL result set. This guard only protects
+        # against a hypothetical future vertex_search that ignores kinds.
         rows.extend(_event_row(f) for f in facts if f.get("kind") in fts_kinds)
 
-    # Substring path — over the projected rows of UN-indexed kinds only (disjoint
-    # from the FTS set).
+    # Substring path — over the projected rows of every kind NOT covered by a
+    # trustworthy FTS index (unindexed ∪ stale, disjoint from fts_kinds).
     q = query.lower()
     rows.extend(
         # Match _event_row's grammar: event-axis rows are level="fact", even
         # when sourced from a projected key row (the substring fallback).
         replace(r, axis="event", level="fact")
         for r in surface.rows
-        if r.kind in unindexed and q in _payload_text(r.payload).lower()
+        if r.kind not in fts_kinds and q in _payload_text(r.payload).lower()
     )
 
     rows.sort(key=lambda r: (r.ts if r.ts is not None else 0.0), reverse=True)
@@ -819,6 +959,8 @@ def search(surface: Surface, query: str, *, vertex_path=None) -> Surface:
         total=len(row_tuple),
         shown=len(row_tuple),
         unindexed=unindexed,
+        stale=stale,
+        truncated=truncated,
     )
     return replace(surface, rows=row_tuple, window=window)
 
@@ -909,6 +1051,77 @@ def budget(
         surface.window,
         shown=len(row_tuple),
         limited_by=limited_by,
+        granularity=_window_granularity(row_tuple),
+    )
+    return replace(surface, rows=row_tuple, window=window)
+
+
+def hide_inactive(
+    surface: Surface,
+    *,
+    skip_kinds: frozenset[str] = frozenset(),
+    protect: frozenset[str] = frozenset(),
+) -> Surface:
+    """LIFECYCLE HIDE — drop primary rows whose status is outside their kind's
+    declared active set, recording the cut into the Window (S5).
+
+    A projection-only budget-stage row-drop, applied AFTER ``project()`` has
+    materialized salience/tiers/inbound over the FULL population — so an
+    inactive node's inbound edges keep counting toward its neighbours' salience
+    and the ``inbound_edges`` adjacency is untouched. The hide is never an edge
+    rewrite; ``retract`` stays the distinct correction tombstone.
+
+    Scope guards (all binding):
+      * ``depth == 0`` — only primary rows. Walked (``--refs``) rows keep their
+        place, so an inactive node explicitly walked-to stays reachable.
+      * ``level == "key"`` — only folded entities. Event rows (``--match`` /
+        ``--facts`` history) make no lifecycle claim and are never hidden.
+      * fail-open — a row LACKING the status field is SHOWN (a fact making no
+        lifecycle claim is not claiming inactivity; arbiter S5-F1).
+      * ``protect`` — addresses (``kind/key``) an inactive primary is spared at.
+        Under a ``--refs`` walk the caller passes every ref-graph target here, so
+        a referenced inactive node STAYS reachable (arbiter edge-position). The
+        walk dedups its walked rows against primaries, so a referenced primary
+        never gets a depth>0 twin — protecting the primary itself is what keeps
+        it present. Orphan inactive nodes (no inbound) still hide under ``--refs``.
+
+    ``skip_kinds`` disables the hide per-kind (the caller passes the kinds whose
+    lifecycle field appears in an explicit ``status=`` predicate — asking for a
+    status auto-defeats hiding it). ``--all`` defeats globally by not calling
+    this at all. Uniform across encoders: text and ``--json`` both go through
+    this transform via ``_project_surface``.
+    """
+    kept: list[Row] = []
+    hidden = 0
+    for r in surface.rows:
+        kv = surface.schema.get(r.kind)
+        lc = kv.lifecycle if kv is not None else None
+        if (
+            lc is not None
+            and r.depth == 0
+            and r.level == "key"
+            and r.kind not in skip_kinds
+            and r.address not in protect
+        ):
+            field_name, active = lc
+            value = r.payload.get(field_name)
+            if value is not None and value not in active:
+                hidden += 1
+                continue
+        kept.append(r)
+
+    if hidden == 0:
+        return surface  # byte-identical when nothing is hidden
+
+    row_tuple = tuple(kept)
+    window = replace(
+        surface.window,
+        shown=len(row_tuple),
+        # limited_by names the slice; keep a stronger prior cut (limit/last) if
+        # one already ran, else claim "status" so a bare `sl read` with a hide
+        # discloses the reason.
+        limited_by=surface.window.limited_by or "status",
+        hidden=surface.window.hidden + hidden,
         granularity=_window_granularity(row_tuple),
     )
     return replace(surface, rows=row_tuple, window=window)
@@ -1011,6 +1224,9 @@ def _window_to_dict(window: Window) -> dict:
         "fields": list(window.fields) if window.fields is not None else None,
         "granularity": window.granularity,
         "unindexed": list(window.unindexed),
+        "stale": list(window.stale),
+        "truncated": window.truncated,
+        "hidden": window.hidden,
     }
 
 
@@ -1028,6 +1244,11 @@ def to_dict(surface: Surface) -> dict:
                 "key_field": kv.key_field,
                 "fold_type": kv.fold_type,
                 "preview_fields": list(kv.preview_fields),
+                "lifecycle": (
+                    {"field": kv.lifecycle[0], "active": list(kv.lifecycle[1])}
+                    if kv.lifecycle is not None
+                    else None
+                ),
             }
             for kind, kv in surface.schema.items()
         },
@@ -1038,3 +1259,152 @@ def to_dict(surface: Surface) -> dict:
         },
         "window": _window_to_dict(surface.window),
     }
+
+
+# ---------------------------------------------------------------------------
+# to_review — the canonical review projection (--review, 0.9.0 S4).
+# ---------------------------------------------------------------------------
+#
+# A deterministic, diffable snapshot of the FOLDED entity state — one row per
+# (kind, key), sorted by (kind, key, id) so the ordering is stable across runs
+# and machines regardless of emit order. This is a REVIEW artifact, NOT a SPEC
+# §10 interchange dump: it is not witness-ordered, carries no ticks or
+# declaration-event rows and no chain, and makes no JCS byte-canonicalization or
+# rebuild-round-trip claim (that layer is gated on GlobalReceiptPosition +
+# loops-go, arbiter S4-F4). Its determinism is the review property "same folded
+# state → same bytes", not §10.2 canonical interchange bytes.
+#
+# The encoder is a painted-free leaf like ``to_dict``: per-fact signatures are
+# INJECTED by the caller (fold.py, via ``engine.fact_signatures``) so no engine
+# import is pulled to module scope here.
+#
+# Why plain ``read --json`` (``to_dict``) does NOT already cover review — three
+# concrete gaps, each closed here:
+#   1. TRAVERSAL ORDER is fold order (declaration order across sections, first-
+#      seen/emit order within a by-fold), so two stores with identical folded
+#      state but different emit order diff spuriously. ``to_review`` sorts by
+#      (kind, key, id) — stable across runs and machines.
+#   2. DIFF-NOISE FIELDS: ``to_dict`` emits salience/tier/inbound/
+#      inbound_predicates/depth/via_anchor/granularity (read-time DERIVED — they
+#      shift when OTHER facts emit, or are render choices) plus a read-time
+#      ``window`` slice and ``schema`` ranking hints. ``to_review`` carries only
+#      the emit-derived whitelist (REVIEW_EXCLUDED_FIELDS lists what it drops).
+#   3. MISSING SIGNATURES: the fold/Surface path drops per-fact signatures
+#      entirely (they live only in the store column, keyed by id). ``to_review``
+#      threads them back in verbatim from ``engine.fact_signatures``.
+
+#: The review projection's format version. Bump only on a shape change; a bump
+#: legitimately moves the bytes (a code change, not a store change), so it does
+#: not violate "unchanged folded state → identical bytes" for a fixed version.
+REVIEW_VERSION = 1
+
+#: Read-time DERIVED fields deliberately EXCLUDED from the review row — each
+#: changes without an emit to THIS fact, so including them would make every
+#: diff noisy (the exact defect the whitelist fights). ``salience``/``tier``/
+#: ``inbound``/``inbound_predicates`` shift when OTHER facts emit refs; ``depth``/
+#: ``via_anchor`` are ref-graph-walk artifacts; ``granularity`` is a render
+#: choice. The row is built by EXPLICITLY listing what to INCLUDE (additive by
+#: choice, in ``_review_row``), never by subtracting from a FoldItem — this
+#: tuple exists so the exclusion is legible and test-assertable, not as the
+#: mechanism of exclusion.
+REVIEW_EXCLUDED_FIELDS = (
+    "salience",
+    "tier",
+    "inbound",
+    "inbound_predicates",
+    "depth",
+    "via_anchor",
+    "granularity",
+    "window",
+    "schema",
+)
+
+
+def _review_row(
+    item: FoldItem, *, kind: str, key_field: str | None, signature: str | None
+) -> dict:
+    """One review row — the emit-derived whitelist only, keys sorted.
+
+    ``key`` is the fold-key VALUE (``item.payload[key_field]``) for a keyed
+    ("by") fold, or ``None`` for a keyless ("collect") item. ``signature`` is
+    the verbatim store column (or ``None`` when unsigned / unavailable). The
+    payload keys are pre-sorted here and ``json.dumps(sort_keys=True)`` at the
+    call site is the end-to-end determinism guarantee (nested dicts included).
+    """
+    key: str | None = None
+    if key_field is not None:
+        kv = item.payload.get(key_field)
+        if kv is not None:
+            key = str(kv)
+    return {
+        "kind": kind,
+        "key": key,
+        "key_field": key_field,
+        "payload": {k: item.payload[k] for k in sorted(item.payload)},
+        "id": item.id,
+        "ts": item.ts,
+        "observer": item.observer,
+        "origin": item.origin,
+        "n": item.n,
+        "refs": sorted(item.refs),
+        "edges": sorted(
+            ({"predicate": e.predicate, "address": e.address} for e in item.edges),
+            key=lambda d: (d["predicate"], d["address"]),
+        ),
+        "signature": signature,
+    }
+
+
+def _iter_fold_items(sections: tuple[FoldSection, ...]):
+    """Yield ``(kind, key_field, item)`` for every folded item, depth-first.
+
+    Recurses into nested sub-sections so an aggregation vertex degrades to its
+    folded items rather than crashing — each nested section carries its own
+    kind/key_field. A flat single-store vertex has no sub-sections.
+    """
+    for section in sections:
+        for item in section.items:
+            yield section.kind, section.key_field, item
+        if section.sections:
+            yield from _iter_fold_items(section.sections)
+
+
+def to_review(
+    state: FoldState,
+    *,
+    header: dict,
+    signatures: dict[str, str | None],
+) -> dict:
+    """The canonical review projection of a ``FoldState`` (--review, S4).
+
+    Returns ``{"review_version", "header", "facts"}`` — a fully DETERMINISTIC
+    object: two reads of unchanged folded state produce byte-identical output
+    once ``json.dumps(..., sort_keys=True)`` is applied at the call site. Every
+    field here is content-derived; there is no wall-clock inside this object
+    (the CLI adds a labeled ``rendered_at`` sibling OUTSIDE it, so the
+    determinism guarantee stays whole).
+
+    ``facts`` are sorted by ``(kind, key or "", id or "")`` — a keyless collect
+    row (no fold key) orders by its fact id, so the whole projection is stable
+    across emit order (contrast ``to_dict``, which preserves faithful FOLD
+    order and so diffs spuriously when two stores fold the same state in
+    different emit order). Each row carries only the emit-derived whitelist (see
+    ``_review_row`` / ``REVIEW_EXCLUDED_FIELDS``) plus its verbatim signature.
+
+    ``header`` is assembled by the caller (vertex name, cursor disclosure,
+    declaration generation, seal cut) and passed through verbatim.
+    ``signatures`` maps ``item.id → signature|None`` (from
+    ``engine.fact_signatures``); an id absent from the map (or a keyless
+    synthetic item with ``id=None``) yields ``None``.
+    """
+    rows = [
+        _review_row(
+            item,
+            kind=kind,
+            key_field=key_field,
+            signature=signatures.get(item.id) if item.id is not None else None,
+        )
+        for kind, key_field, item in _iter_fold_items(state.sections)
+    ]
+    rows.sort(key=lambda r: (r["kind"], r["key"] or "", r["id"] or ""))
+    return {"review_version": REVIEW_VERSION, "header": header, "facts": rows}

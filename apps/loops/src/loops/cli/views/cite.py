@@ -39,7 +39,16 @@ def run(argv: list[str], ctx: Invocation) -> int:
     # Never prepend a vertex name to emit_argv — the resolved ctx carries it.
     emit_ctx = ctx
     if ctx.vertex_path is None:
-        from loops.commands.resolve import _find_local_vertex, _vertex_name
+        from loops.commands.resolve import (
+            _find_local_vertex,
+            _vertex_name,
+            ambiguous_local_vertex_refusal,
+        )
+
+        refusal = ambiguous_local_vertex_refusal("cite", "sl <vertex> cite REF ...")
+        if refusal is not None:
+            ctx.reporter.err(refusal)
+            return 2
 
         local = _find_local_vertex()
         if local is None:

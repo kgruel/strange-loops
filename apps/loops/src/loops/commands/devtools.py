@@ -17,6 +17,118 @@ def _reporter(reporter: "Reporter | None") -> "Reporter":
     return reporter
 
 
+def _lifecycle_scan(vertex_path: Path) -> list[dict]:
+    """Minimal folded-state lifecycle scan for `loops validate` (arbiter S5-F2).
+
+    For a ``.vertex`` declaring ``lifecycle`` on any kind, fold its store and
+    collect non-fatal WARN rows:
+
+      * ``active-targets-inactive`` — a VISIBLE entity (anything not itself
+        folded inactive) carries an edge/ref to an entity folded INACTIVE
+        (status present but outside its kind's active set). A live reference to
+        something the default view hides.
+      * ``missing-status`` — an entity under a lifecycle-declared kind lacks the
+        status field entirely, so the fail-open SHOW (arbiter S5-F1) is visible
+        rather than silent.
+
+    Warns never change the exit code. Edge targets resolve through
+    ``atoms.Address`` readings (never string-splitting) — the SAME match
+    semantic inbound counting uses, so a colon address never cross-kind aliases.
+    This is the first-tenant precedent of the general folded-state constraint
+    surface (design:architecture/payload-constraints-in-declarations), not its
+    implementation — it scans exactly one edge class and never opens the wider
+    ``--store/--refs/--foreign-refs`` surface.
+    """
+    from atoms import Address
+    from lang import parse_vertex_file
+    from loops.commands.fetch import fetch_fold
+
+    try:
+        ast = parse_vertex_file(vertex_path)
+    except Exception:
+        return []  # a syntax error is already reported by the main pass
+    loops = ast.loops or {}
+    if not any(ld.lifecycle is not None for ld in loops.values()):
+        return []
+    if not ast.store:
+        return []
+    store_path = (vertex_path.parent / ast.store).resolve()
+    if not store_path.exists():
+        return []
+    try:
+        state = fetch_fold(vertex_path)
+    except Exception:
+        return []
+
+    warnings: list[dict] = []
+    # Every inactive entity is reachable by its (kind,key) reading AND the bare
+    # ('',key) fallback — an edge matches it iff the edge's readings intersect
+    # this set (mirrors _inbound_count's `inbound[(kind,key)] + inbound[('',key)]`).
+    inactive_receiving: set[Address] = set()
+    inactive_label: dict[Address, str] = {}
+    entities: list[dict] = []
+    for section in state.sections:
+        lc = section.lifecycle
+        kf = section.key_field
+        for item in section.items:
+            key = item.payload.get(kf) if kf else None
+            status_class = "none"
+            if lc is not None:
+                field_name, active = lc
+                value = item.payload.get(field_name)
+                if value is None:
+                    status_class = "missing"
+                    warnings.append({
+                        "kind": "missing-status",
+                        "source": f"{section.kind}:{key}" if key else section.kind,
+                        "field": field_name,
+                    })
+                elif value not in active:
+                    status_class = "inactive"
+                    if key is not None:
+                        a1 = Address(kind=section.kind, key=str(key))
+                        a2 = Address(kind="", key=str(key))
+                        inactive_receiving.add(a1)
+                        inactive_receiving.add(a2)
+                        inactive_label[a1] = f"{section.kind}:{key} (status={value})"
+                else:
+                    status_class = "active"
+            entities.append({
+                "kind": section.kind,
+                "key": key,
+                "status_class": status_class,
+                "refs": tuple(item.refs),
+                "edges": tuple(item.edges),
+            })
+
+    if not inactive_receiving:
+        return warnings
+
+    seen: set[tuple] = set()
+    for e in entities:
+        if e["status_class"] == "inactive":
+            continue  # no warn when the source is itself inactive
+        addrs = list(e["refs"]) + [edge.address for edge in e["edges"]]
+        src = f"{e['kind']}:{e['key']}" if e["key"] is not None else e["kind"]
+        for addr in addrs:
+            hit = set(Address.readings(addr)) & inactive_receiving
+            if not hit:
+                continue
+            target = next(
+                (inactive_label[a] for a in hit if a in inactive_label), addr,
+            )
+            row = ("active-targets-inactive", src, target)
+            if row in seen:
+                continue
+            seen.add(row)
+            warnings.append({
+                "kind": "active-targets-inactive",
+                "source": src,
+                "target": target,
+            })
+    return warnings
+
+
 def _run_validate(argv: list[str], *, reporter: "Reporter | None" = None) -> int:
     """Run validate command via painted CLI harness.
 
@@ -50,6 +162,7 @@ def _run_validate(argv: list[str], *, reporter: "Reporter | None" = None) -> int
         results = []
         checked = 0
         errors = 0
+        warnings: list[dict] = []
 
         for file in files:
             path = Path(file)
@@ -78,8 +191,20 @@ def _run_validate(argv: list[str], *, reporter: "Reporter | None" = None) -> int
             except Exception as e:
                 results.append({"path": str(path), "valid": False, "error": str(e)})
                 errors += 1
+                continue
 
-        data = {"results": results, "checked": checked, "errors": errors}
+            # Folded-state lifecycle scan (S5) — non-fatal WARNs only, over a
+            # valid .vertex whose store resolves. Never touches the exit code.
+            if path.suffix == ".vertex":
+                for w in _lifecycle_scan(path):
+                    warnings.append({**w, "path": str(path)})
+
+        data = {
+            "results": results,
+            "checked": checked,
+            "errors": errors,
+            "warnings": warnings,
+        }
         fetch_result.append(data)
         return data
 

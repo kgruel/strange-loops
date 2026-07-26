@@ -41,8 +41,10 @@ from engine.witness import (
     UnknownWitnessHandle,
     WitnessLineageMismatch,
     WitnessPosition,
+    WitnessResolutionError,
     durable_handle,
     receipt_group_span,
+    resolve_cut_summary,
     resolve_witness_position,
     verify_position_for_store,
 )
@@ -108,6 +110,22 @@ def _rowid_of(store: Path, fid: str) -> int:
     r = conn.execute("SELECT rowid FROM facts WHERE id = ?", (fid,)).fetchone()
     conn.close()
     return r[0]
+
+
+def _append_tick(store: Path, name: str, ts: float, *, fact_cursor: str | None) -> str:
+    """Append a tick sealing ``fact_cursor`` — a SEPARATE connection each
+    call, the same shape a real concurrent writer (a different process)
+    would use, rather than reusing whatever connection a caller has open."""
+    conn = sqlite3.connect(str(store))
+    tid = gen_id()
+    conn.execute(
+        "INSERT INTO ticks (id, name, ts, since, origin, payload, fact_cursor) "
+        "VALUES (?, ?, ?, 0.0, '', '{}', ?)",
+        (tid, name, ts, fact_cursor),
+    )
+    conn.commit()
+    conn.close()
+    return tid
 
 
 # ---------------------------------------------------------------------------
@@ -697,3 +715,122 @@ class TestGroupBoundarySnap:
         # Floor form — snaps to the position JUST BEFORE the ceremony's first row.
         snapped = resolve_witness_position(store, first_id, group_boundary="floor")
         assert snapped.rowid == rows[0] - 1
+
+
+# ---------------------------------------------------------------------------
+# resolve_cut_summary — one-transaction cut resolution (0.9.0 S6, sol P1)
+# ---------------------------------------------------------------------------
+
+
+class TestResolveCutSummary:
+    def test_no_seal_bundles_position_and_zero_tick_total(self, tmp_path):
+        vpath, store = _scaffold(tmp_path)
+        _fresh_store(store)
+        f1 = _append(store, "decision", 100, topic="a")
+        summary = resolve_cut_summary(store)
+        assert summary.position.fact_id == f1
+        assert summary.position.anchor is None
+        assert summary.tick_total == 0
+        assert summary.anchor_seq is None
+
+    def test_sealed_to_head_bundles_matching_anchor_seq(self, tmp_path):
+        vpath, store = _scaffold(tmp_path)
+        _fresh_store(store)
+        f1 = _append(store, "decision", 100, topic="a")
+        _append_tick(store, "t", 150.0, fact_cursor=f1)
+        summary = resolve_cut_summary(store)
+        assert summary.position.fact_id == f1
+        assert summary.position.anchor is not None
+        assert summary.tick_total == 1
+        # The anchor's own receipt ordinal equals the head position's — the
+        # anchor tick's fact_cursor IS head, so nothing lies beyond it.
+        assert summary.anchor_seq == summary.position.seq
+
+    def test_seal_plus_tail_reports_smaller_anchor_seq(self, tmp_path):
+        vpath, store = _scaffold(tmp_path)
+        _fresh_store(store)
+        f1 = _append(store, "decision", 100, topic="a")
+        _append_tick(store, "t", 150.0, fact_cursor=f1)
+        _append(store, "decision", 200, topic="b")
+        summary = resolve_cut_summary(store)
+        assert summary.tick_total == 1
+        assert summary.anchor_seq is not None
+        assert summary.position.seq - summary.anchor_seq == 1
+
+    def test_no_usable_store_raises(self, tmp_path):
+        with pytest.raises(WitnessResolutionError):
+            resolve_cut_summary(tmp_path / "nope.db")
+
+    def test_atomic_snapshot_ignores_write_landing_mid_resolution(
+        self, tmp_path, monkeypatch,
+    ):
+        """A write landing BETWEEN resolve_cut_summary's internal reads must
+        NOT be visible to that same call — proves the explicit BEGIN/ROLLBACK
+        pins one WAL snapshot across the position/tick_total/anchor reads
+        (sol P1: three independent connections could each observe a LATER
+        snapshot than the last, silently advancing tick_total past what the
+        returned position reflects).
+
+        The "concurrent writer" is a genuinely separate connection (a real
+        concurrent writer would be a different process), fired via a
+        monkeypatched hook right after the FIRST internal position
+        resolution (head) completes but before the tick_total read that
+        follows it in resolve_cut_summary's body.
+        """
+        vpath, store = _scaffold(tmp_path)
+        _fresh_store(store)
+        f1 = _append(store, "decision", 100, topic="a")
+        _append_tick(store, "t", 150.0, fact_cursor=f1)  # tick_total == 1 so far
+
+        import engine.witness as witness_mod
+
+        original = witness_mod._resolve_witness_position_on_conn
+        calls = {"n": 0}
+
+        def patched(conn, sp, address, **kwargs):
+            result = original(conn, sp, address, **kwargs)
+            calls["n"] += 1
+            if calls["n"] == 1:
+                # Fires after the head position is resolved, before
+                # resolve_cut_summary's own tick_total/anchor reads run.
+                _append_tick(store, "concurrent", 999.0, fact_cursor=f1)
+            return result
+
+        monkeypatch.setattr(witness_mod, "_resolve_witness_position_on_conn", patched)
+
+        summary = resolve_cut_summary(store)
+        # The snapshot taken at BEGIN must not see the tick committed by the
+        # separate connection mid-resolution — still 1, not 2.
+        assert summary.tick_total == 1
+        # A fresh, un-monkeypatched call (new snapshot) DOES see it — proving
+        # the write really landed and the store isn't just stale/broken.
+        assert resolve_cut_summary(store).tick_total == 2
+
+    def test_anchor_lookup_failure_degrades_only_that_field(
+        self, tmp_path, monkeypatch,
+    ):
+        """A failure resolving the anchor's own ordinal degrades ONLY
+        anchor_seq — the position/tick_total answer (already computed) is
+        still returned, never discarded wholesale."""
+        vpath, store = _scaffold(tmp_path)
+        _fresh_store(store)
+        f1 = _append(store, "decision", 100, topic="a")
+        _append_tick(store, "t", 150.0, fact_cursor=f1)
+
+        import engine.witness as witness_mod
+
+        original = witness_mod._resolve_witness_position_on_conn
+        calls = {"n": 0}
+
+        def patched(conn, sp, address, **kwargs):
+            calls["n"] += 1
+            if calls["n"] == 2:  # the anchor-ordinal lookup, not head itself
+                raise UnknownWitnessHandle("simulated failure")
+            return original(conn, sp, address, **kwargs)
+
+        monkeypatch.setattr(witness_mod, "_resolve_witness_position_on_conn", patched)
+
+        summary = resolve_cut_summary(store)
+        assert summary.position.fact_id == f1
+        assert summary.tick_total == 1
+        assert summary.anchor_seq is None

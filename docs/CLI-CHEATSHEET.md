@@ -49,6 +49,8 @@ loops read <vertex> --diff seq:1..seq:2       # structural fold diff between two
 loops read <vertex> --lens prompt             # custom lens
 loops read <vertex> --lens confluence         # observer cut: who's active, kind mix, tier (--kind/--observer compose)
 loops read <vertex> --lens graph              # ref/edge cut: hubs, chains, orphans over Surface edges
+loops read <vertex> --lens graph --edge ref   # restrict the graph to one predicate (comma-OR; graph lens only)
+loops read <vertex> --review                  # canonical review projection — deterministic JSON snapshot (0.9.0)
 loops read <vertex> --lens horizon            # boundary cut: each armed loop's open window vs its next seal
 loops read <vertex> --facts --id <ulid>       # single fact lookup by ID/prefix
 loops read <vertex> --observer all            # peel identity scope (--observer NAME/all)
@@ -119,6 +121,44 @@ on `--facts`/`--ticks` above, which is unaffected.
   portable state, both as a prepended text line and as a `cursor` (or, for
   `--diff`, `interval`) key in `--json` output.
 
+### Graph edge selection — `--edge` under `--lens graph` (0.9.0)
+
+`--edge <predicate>` restricts the graph cut (hubs, chains, census) to selected
+edge predicates: `ref`, or any declared typed-edge field name, comma-OR
+(`--edge ref,stakeholder`).
+
+- Honored **only** by `--lens graph` — the sole fetch that declares an `edge`
+  param. On any other route it REFUSES (rc 2) rather than silently drop.
+- An explicit-but-empty selector (`--edge ','`, whitespace) also refuses:
+  silent-full is the same defect as silent-drop.
+- `--key` is honored by the graph fetch (node projection is sub-scope), and
+  unreachable targets split into three named buckets — `dangling` (resolves
+  nowhere), `filter_excluded` (resolves globally, outside the current scope),
+  and `keyless` (source unaddressable). Chains carry per-hop predicate labels
+  (`a ─ref→ b ─stakeholder→ c`); `cycles` reports the SCC / self-loop census.
+
+### Canonical review projection — `--review` (0.9.0)
+
+`sl read <vertex> --review` emits a deterministic, diffable JSON snapshot of
+folded state: rows sorted by `(kind, key, id)`, each carrying only the
+emit-derived fields plus its verbatim signature (read-time derived fields —
+salience, rank — are excluded by construction, so the same folded state always
+serializes byte-identically). JSON-only; zoom/format flags do not shape it.
+
+- **Header discloses the cut**: `cursor` (the resolved HEAD position — seq,
+  fact id, anchor, portability, honesty-ladder `status`), `cut` (seal state:
+  `sealed_to_head`, `facts_beyond_seal`, tick total), and `declaration`
+  (`decl_head`, `lineage`, and a `review_fingerprint` sha256 over the effective
+  declaration generation). `review_version` versions the shape itself.
+- **Composes with**: `--kind` / `--key` (narrow the snapshot), `--at` /
+  `--as-of` (a review AT a witnessed or event-time position), and the
+  quiet/verbose/plain/json flags.
+- **Refuses everything else by default** (rc 2) — `--facts`, `--ticks`,
+  `--why`, `--diff`, `--refs`, `--limit`, `--match`, `field=value` predicates,
+  and any flag added later. A narrowing flag it cannot honor is refused, never
+  silently dropped. `--all` is refused as redundant: the review cut always
+  shows everything, inactive entities included.
+
 ### Query & transform grammar
 
 These reshape the default fold render. **They are INERT on custom-lens vertices
@@ -134,7 +174,20 @@ loops read <vertex> --limit N                 # keep the top-N rows by salience
 loops read <vertex> --last N                  # keep the newest-N rows by timestamp
 loops read <vertex> --count                   # aggregate rows into counts
 loops read <vertex> --count --by kind         # one count row per group (--by row attr / payload field)
+loops read <vertex> --all                     # show inactive entities a kind's `lifecycle` decl hides (0.9.0)
 ```
+
+**Lifecycle hide (0.9.0):** a kind declaring `lifecycle "<field>" active="…"`
+(see the clause below) has entities whose status is outside the active set
+projected out of the DEFAULT fold view. The read discloses it honestly —
+`Window.limited_by="status"` + a hidden count (`--json`) and a
+`(N inactive hidden — --all to show)` footer (TTY SUMMARY+). Defeat it with
+`--all`, or with an explicit `<field>=value` predicate (asking for a status
+auto-shows it, per declaring kind). The hide is projection-only: inactive nodes
+keep their inbound salience, stay reachable under `--refs`, and are always
+present in the canonical `--review` cut — it is never an edge rewrite. It is
+also **fold-view only**: `--facts` (the event stream) never hides anything, so
+history stays faithful regardless of an entity's current status.
 
 ### Zoom flags
 
@@ -262,6 +315,30 @@ old target loses the inbound edge). `ref=` remains the ONE union edge
 (attention-events accumulate). `loops read <v> --lens reconcile` surfaces
 undeclared address-bearing fields as edge-declaration candidates.
 
+### `lifecycle` — active-status whitelist (fold-view hide, 0.9.0)
+
+Declare which payload field carries a kind's status and which values are ACTIVE.
+Entities whose status falls outside the active set are hidden from the default
+fold view (a projection, not an edge rewrite):
+
+```kdl
+loops {
+  task {
+    fold { items "by" "name" }
+    lifecycle "status" active="open,in-progress"   # field + active whitelist
+  }
+}
+```
+
+Whitelist, not blacklist (domain-neutral): a `task status=done` is hidden;
+a task LACKING `status` is SHOWN (fail-open — no claim ≠ inactive). The default
+read discloses the cut (`--all` / an explicit `status=` predicate defeats it —
+see Read grammar above); `loops validate` warns on a visible entity whose
+edge/ref targets an entity folded inactive, and on missing-status facts under a
+lifecycle-declared kind. Store-canonical delta: an additive field on the
+`_decl.kind-defined` document (no protocol-version bump) —
+`docs/dev/lifecycle-spec-delta-090.md`.
+
 ---
 
 ## Close
@@ -343,6 +420,7 @@ loops store ticks <vertex>                    # tick series as attention windows
 loops store ticks <vertex> --chain            # per-tick attestation envelope (linkage/signature/cursor); requires .vertex, refused on combine aggregates
 loops store stats <vertex>                    # topline store totals (.db or .vertex)
 loops store stats <vertex> --by-kind          # count-descending per-kind tally
+loops store reindex <vertex>                  # (re)build the FTS search index — the SOLE index writer; reads never write. Aggregates recurse per child. Run after adding a `search` decl to an already-populated kind, or when --match discloses "index stale"
 ```
 
 ---

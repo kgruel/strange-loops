@@ -3,7 +3,7 @@ nodes:
   thread/spine  ←1 →0  high      ref 1  2025-01-01 12:05
     ← decision/design/rail
 chains:
-  decision/design/rail → thread/spine  leaf
+  decision/design/rail ─ref→ thread/spine  leaf
 orphans:
   decision/architecture/tiers
   thread/digest

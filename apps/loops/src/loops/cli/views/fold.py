@@ -638,6 +638,17 @@ def run(argv: list[str], ctx: Invocation) -> int:
     kind, key_raw = _resolve_kind_key(entity, args.kind, args.key)
     fetch_key, queried_key, key_or = _resolve_key_grammar(key_raw)
 
+    # Bare `sl read` in a repo holding several instance vertices used to fold
+    # whichever sorted first — reading the wrong store is the same silent
+    # mis-resolution as writing to it (friction:find-local-vertex-alphabetical-pick).
+    if ctx.vertex_path is None and vname is None:
+        from loops.commands.resolve import ambiguous_local_vertex_refusal
+
+        refusal = ambiguous_local_vertex_refusal("read", "sl read <vertex> ...")
+        if refusal is not None:
+            ctx.reporter.err(refusal)
+            return 2
+
     vertex_path = _resolve_vertex_path(ctx, vname)
     if vertex_path is None:
         ctx.reporter.err("No vertex resolved — run `loops init` first.")

@@ -70,7 +70,12 @@ def loops_home() -> Path:
 
 
 def _find_local_vertex() -> Path | None:
-    """Find a .vertex file in .loops/ or cwd. Returns first match or None."""
+    """Find a .vertex file in .loops/ or cwd. Returns first match or None.
+
+    The multi-vertex tie-break here is alphabetical and therefore arbitrary —
+    callers that accept "no vertex named" from a user must gate on
+    ``ambiguous_local_vertex_refusal`` first rather than let it guess.
+    """
     # Prefer .loops/.vertex (workspace root convention)
     loops_dir = Path.cwd() / ".loops"
     dotvertex = loops_dir / ".vertex"
@@ -84,6 +89,48 @@ def _find_local_vertex() -> Path | None:
     # Fall back to cwd (existing projects)
     matches = sorted(Path.cwd().glob("*.vertex"))
     return matches[0] if matches else None
+
+
+def _ambiguous_local_vertices() -> list[Path]:
+    """The instance vertices local resolution would have to choose between.
+
+    ``_find_local_vertex`` breaks a multi-vertex tie ALPHABETICALLY, which
+    silently routes a verb-first write into whichever store sorts first —
+    a wrong-store write with no signal (friction:find-local-vertex-alphabetical-pick).
+    Callers that accept "no vertex named" use this to refuse instead of guess.
+
+    Empty (unambiguous) when: an explicit ``.loops/.vertex`` wins outright,
+    or the tier holds at most one instance vertex. Aggregation vertices are
+    excluded — they name a topology, not a writable store, so a repo with
+    one instance plus aggregations is not ambiguous.
+    """
+    loops_dir = Path.cwd() / ".loops"
+    if (loops_dir / ".vertex").exists():
+        return []
+    if loops_dir.is_dir():
+        matches = sorted(loops_dir.glob("*.vertex"))
+    else:
+        matches = sorted(Path.cwd().glob("*.vertex"))
+    instances = [p for p in matches if _describe_vertex(p) != "aggregation"]
+    return instances if len(instances) > 1 else []
+
+
+def ambiguous_local_vertex_refusal(command: str, form: str) -> str | None:
+    """Teaching refusal text when local resolution is ambiguous, else None.
+
+    ``form`` is the explicit spelling for THIS command (the fix is always
+    "name the vertex"), so the message teaches the real syntax rather than a
+    generic hint.
+    """
+    paths = _ambiguous_local_vertices()
+    if not paths:
+        return None
+    names = ", ".join(str(_vertex_name(p)) for p in paths)
+    return (
+        f"{command}: {len(paths)} local vertices and none named — refusing to "
+        f"guess ({names}).\n"
+        f"  name it explicitly: {form}"
+    )
 
 
 @dataclass(frozen=True)

@@ -580,7 +580,16 @@ def cmd_emit(
                     return 1
 
         if vertex_ref is None:
-            # No vertex: try local
+            # No vertex: try local — but refuse rather than let the
+            # alphabetical tie-break pick a store the user never named.
+            from loops.commands.resolve import ambiguous_local_vertex_refusal
+
+            refusal = ambiguous_local_vertex_refusal(
+                "emit", "sl emit <vertex> <kind> field=value ..."
+            )
+            if refusal is not None:
+                _say(f"Error: {refusal}")
+                return 2
             local = _find_local_vertex()
             if local is not None:
                 vertex_path = local.resolve()

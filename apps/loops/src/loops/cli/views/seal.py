@@ -100,6 +100,7 @@ def run(argv: list[str], ctx: Invocation) -> int:
             _find_local_vertex,
             _resolve_vertex_for_dispatch,
             _vertex_name,
+            ambiguous_local_vertex_refusal,
         )
 
         name = getattr(args, "vertex", None)
@@ -109,6 +110,10 @@ def run(argv: list[str], ctx: Invocation) -> int:
                 ctx.reporter.err(f"seal: no vertex named '{name}' found")
                 return 1
         else:
+            refusal = ambiguous_local_vertex_refusal("seal", "sl seal <vertex>")
+            if refusal is not None:
+                ctx.reporter.err(refusal)
+                return 2
             vertex_path = _find_local_vertex()
             if vertex_path is None:
                 ctx.reporter.err(

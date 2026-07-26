@@ -951,6 +951,67 @@ class TestGraphWalkAgreement:
         state = fetch_fold(vp, kind="decision", key="design/foo", refs_depth=1)
         assert state.walked, f"graph counts {ref} as an edge but --refs walks nothing"
 
+    def _collision_vp(self, tmp_path):
+        """A store where ONE ref spelling has two real referents: a decision
+        keyed ``design/bar`` AND a ``design``-kind entity keyed ``bar``."""
+        from atoms import Fact
+        from engine import load_vertex_program
+
+        vp = tmp_path / "c.vertex"
+        vp.write_text(
+            'name "c"\nstore "./c.db"\n\n'
+            "loops {\n"
+            '  decision { fold { items "by" "topic" } }\n'
+            '  design { fold { items "by" "topic" } }\n'
+            "}\n"
+        )
+        prog = load_vertex_program(vp)
+        prog.receive(Fact.of(
+            "decision", "kyle", ts=1735732800.0, topic="design/bar",
+            message="bare namespaced key"))
+        prog.receive(Fact.of(
+            "design", "kyle", ts=1735732801.0, topic="bar",
+            message="kind-qualified"))
+        prog.receive(Fact.of(
+            "decision", "kyle", ts=1735732802.0, topic="design/foo",
+            message="src", ref="design/bar"))
+        return vp
+
+    def test_collision_walks_every_resolving_reading(self, tmp_path):
+        """Both readings of one ref resolve, so both are edges and both are
+        walked — the counts must agree, not merely both be non-zero.
+
+        The walker used to stop at the first resolving reading: two graph
+        edges, one walked entity, same ref (sol P2-c round 2).
+        """
+        from loops.commands.fetch import fetch_fold, fetch_graph
+
+        vp = self._collision_vp(tmp_path)
+        graph = fetch_graph(vp)
+        assert graph["edges"] == 2, "precondition: both readings are real nodes"
+
+        state = fetch_fold(vp, kind="decision", key="design/foo", refs_depth=1)
+        assert len(state.walked) == graph["edges"]
+        assert {(w.section_kind, w.item.payload["topic"]) for w in state.walked} == {
+            ("decision", "design/bar"),
+            ("design", "bar"),
+        }
+
+    @pytest.mark.parametrize("ref", [
+        "decision:design/bar",
+        "design/bar",
+        "thread/my-arc",
+    ])
+    def test_edge_count_equals_walked_count(self, tmp_path, ref):
+        """The agreement invariant at full strength: not "the walk found
+        something" but "the walk found exactly what the graph counted"."""
+        from loops.commands.fetch import fetch_fold, fetch_graph
+
+        vp = self._vp(tmp_path, ref)
+        graph = fetch_graph(vp)
+        state = fetch_fold(vp, kind="decision", key="design/foo", refs_depth=1)
+        assert len(state.walked) == graph["edges"]
+
     def test_dangling_ref_is_neither(self, tmp_path):
         # The converse holds too: a ref resolving nowhere is not an edge and
         # not walkable — agreement in both directions, not just the positive.

@@ -279,10 +279,15 @@ def _walk_refs(
     while frontier:
         next_frontier: list[Entry] = []
         for via_anchor, readings, depth in frontier:
-            # Readings are ordered primary-first; the FIRST that resolves to a
-            # real entity wins, so a slash ref's genuine ambiguity resolves the
-            # same way it does for matching and for the graph projection —
-            # kind-qualified if that entity exists, bare namespaced key if not.
+            # EVERY reading that resolves is walked, not just the first. The
+            # graph projection counts one edge per resolving reading
+            # (``_resolves_to_node`` over the node index), so stopping at the
+            # first left a collision — a store holding BOTH a decision keyed
+            # ``design/bar`` and a ``design``-kind ``bar`` — reporting two graph
+            # edges and one walked entity for the same ref (sol P2-c round 2).
+            # Same store, same ref, two answers. Readings stay ordered
+            # primary-first, so the kind-qualified interpretation is walked
+            # first where both exist.
             for addr in readings:
                 reading_addr = _reading_addr(addr)
                 if reading_addr in visited:
@@ -322,11 +327,10 @@ def _walk_refs(
                         ))
                         if depth < refs_depth:
                             _enqueue(next_frontier, this_addr, titem, depth + 1)
-                if hit:
-                    # This reading resolved — don't also walk the sibling
-                    # interpretation of the same ref.
-                    break
-                visited.add(reading_addr)
+                if not hit:
+                    # Nothing under this reading: remember the dead end so a
+                    # repeated ref costs one fetch, not N.
+                    visited.add(reading_addr)
         frontier = next_frontier
 
     return FoldState(

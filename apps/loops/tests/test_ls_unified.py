@@ -156,7 +156,7 @@ class TestDeclarationsLens:
 
         data = fetch_declarations("proj", filter_="kind")
         # Section-header text is the terse (piped) register contract.
-        text = block_text(declarations_view(data, Zoom.SUMMARY, 80, piped=True))
+        text = block_text(declarations_view(data, Zoom.SUMMARY, None))
         # Only KINDS section visible.
         assert "KINDS" in text
         assert "OBSERVERS" not in text

@@ -56,11 +56,13 @@ class TestLsRootParity:
             vertices_view, data, load_bearing=ls_root_tokens(data)
         )
 
-    def test_narrow_pipe_does_not_clip_preview(self):
-        # A long name + long preview: at a narrow piped width the TTY row would
-        # elide the ⊃ preview, but the piped register must force width=None and
-        # carry it in full. This is the exact shape of the shipped ls line-row
-        # break (ctx.width inherits COLUMNS≈80).
+    def test_pipe_does_not_clip_preview(self):
+        # A long name + long preview: the row a narrow TTY would elide must be
+        # carried whole on the pipe. This is the exact shape of the shipped ls
+        # line-row break (ctx.width inherited COLUMNS≈80 on a pipe). The
+        # ``piped_width=32`` knob this test used to pass is gone with the
+        # ``piped=`` kwarg — a piped render holding a concrete width is no
+        # longer a state the call can express.
         data = {
             "local_vertices": [
                 vrow("agent-attestation", facts=812, kind_count=9, mtime=_MTIME,
@@ -70,7 +72,6 @@ class TestLsRootParity:
         }
         assert_register_parity(
             vertices_view, data, load_bearing=ls_root_tokens(data),
-            piped_width=32,
         )
 
     def test_aggregation_row(self):

@@ -51,16 +51,16 @@ CHAIN_DATA = {
 
 class TestFoldCardFidelity:
     def test_card_present_at_summary_tty(self):
-        out = _text(fold_view(SAMPLE_FOLD, Zoom.SUMMARY, 80, piped=False))
+        out = _text(fold_view(SAMPLE_FOLD, Zoom.SUMMARY, 80))
         assert _CARD_TOP in out
         assert "session · fold" in out
 
     def test_card_absent_at_minimal(self):
-        out = _text(fold_view(SAMPLE_FOLD, Zoom.MINIMAL, 80, piped=False))
+        out = _text(fold_view(SAMPLE_FOLD, Zoom.MINIMAL, 80))
         assert _CARD_TOP not in out
 
     def test_card_absent_when_piped(self):
-        out = _text(fold_view(SAMPLE_FOLD, Zoom.SUMMARY, None, piped=True))
+        out = _text(fold_view(SAMPLE_FOLD, Zoom.SUMMARY, None))
         assert _CARD_TOP not in out
 
     def test_register_parity(self):
@@ -77,34 +77,34 @@ class TestFoldCardFidelity:
 
 class TestStreamCardFidelity:
     def test_card_present_at_summary_tty(self):
-        out = _text(stream_view(SAMPLE_STREAM, Zoom.SUMMARY, 80, piped=False))
+        out = _text(stream_view(SAMPLE_STREAM, Zoom.SUMMARY, 80))
         assert _CARD_TOP in out
         assert "session · stream" in out
 
     def test_card_absent_at_minimal(self):
-        out = _text(stream_view(SAMPLE_STREAM, Zoom.MINIMAL, 80, piped=False))
+        out = _text(stream_view(SAMPLE_STREAM, Zoom.MINIMAL, 80))
         assert _CARD_TOP not in out
 
     def test_card_absent_when_piped(self):
-        out = _text(stream_view(SAMPLE_STREAM, Zoom.SUMMARY, None, piped=True))
+        out = _text(stream_view(SAMPLE_STREAM, Zoom.SUMMARY, None))
         assert _CARD_TOP not in out
 
 
 class TestTickChainCardFidelity:
     def test_card_present_at_summary_tty(self):
-        out = _text(tick_chain_view(CHAIN_DATA, Zoom.SUMMARY, 80, piped=False))
+        out = _text(tick_chain_view(CHAIN_DATA, Zoom.SUMMARY, 80))
         assert _CARD_TOP in out
         assert "demo · ticks" in out
 
     def test_card_absent_at_minimal(self):
-        out = _text(tick_chain_view(CHAIN_DATA, Zoom.MINIMAL, 80, piped=False))
+        out = _text(tick_chain_view(CHAIN_DATA, Zoom.MINIMAL, 80))
         assert _CARD_TOP not in out
 
     def test_card_absent_when_piped(self):
-        out = _text(tick_chain_view(CHAIN_DATA, Zoom.SUMMARY, 80, piped=True))
+        out = _text(tick_chain_view(CHAIN_DATA, Zoom.SUMMARY, None))
         assert _CARD_TOP not in out
         # The rollup header still carries vertex + tick count on the pipe.
-        info = _text(tick_chain_view(CHAIN_DATA, Zoom.SUMMARY, 80, piped=True))
+        info = _text(tick_chain_view(CHAIN_DATA, Zoom.SUMMARY, None))
         assert "demo" in info and "1 ticks" in info
 
 

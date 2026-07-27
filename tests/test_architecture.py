@@ -939,3 +939,251 @@ def test_record_layer_does_not_import_surfacing():
         "See ARCHITECTURE.md's Layers table and _LIB_LAYER:\n"
         + "\n".join(violations)
     )
+
+
+# ---------------------------------------------------------------------------
+# Rule 12: the render register IS the offered width
+# ---------------------------------------------------------------------------
+
+# painted's ``run_cli`` offers exactly one width-computation seam
+# (``_offered_width``): geometry when stdout is a real viewport, ``None`` when
+# it is not (a pipe, a file redirect). Every call site on the ``renderer=``
+# contract — ``(data, fidelity, width) -> Block`` — gets that for free: painted
+# computes ``width``, the app never touches ``ctx``, and a viewportless channel
+# is *structurally incapable* of receiving a concrete width.
+#
+# The deprecated ``render=`` contract (``(ctx, data) -> Block``) has no such
+# guarantee: the callback reads ``ctx.width``/``ctx.is_tty`` itself, and
+# historically got it wrong (e8643a66 fixed store/store-stats renderers that
+# passed ``ctx.width`` unconditionally, clipping the agent channel to an
+# inherited ``COLUMNS``). The project store recorded that as "caller
+# discipline, not an invariant".
+#
+# 0.10.0 S1 made it an invariant in two moves, and this rule is the enumerable
+# half of both:
+#
+#   1. **No ``render=`` anywhere.** Migrating apps/tasks' seven sites onto
+#      ``renderer=`` (design:rendering/tui-shell-integration, session-3
+#      amendment 1) closed the last deprecated call sites in the repo. This
+#      walks every app and lib source tree — not just apps/loops, which was
+#      all the apps/loops-local predecessor of this rule could see — so a new
+#      app cannot reintroduce the shape in a corner no ratchet reaches.
+#
+#   2. **No second channel.** The ``piped=`` kwarg register-split lenses used
+#      to accept was deleted in the same slice; a lens now derives "am I
+#      piped" from ``width is None``. That deletion is the *construction* half
+#      (docs/RATCHETS.md): a render claiming the piped register while holding
+#      a concrete width is no longer a state any call can express. This rule
+#      detects only its residue — a ``piped`` parameter growing back onto a
+#      lens entry point, which would re-open the disagreement.
+#
+# Both enumerations are derived, never hand-listed (docs/RATCHETS.md — "never
+# hand-enumerate a mirrored structure"): source roots come from ``apps/*/src``
+# and ``libs/*/src`` on disk, and lens entry points from the ``lenses/``
+# packages plus whatever callables are actually bound at ``renderer=``.
+#
+# Known boundary, accepted: like every rule in this file the walk is AST-shaped,
+# not data-flow. ``getattr(painted, "run_cli")(...)``, a runner threaded through
+# a variable, and a ``renderer=`` bound to a name imported from another module
+# are not resolved. The anti-vacuity assertions below are what keep that from
+# degrading into a silently-empty walk.
+
+
+def _source_roots() -> list[Path]:
+    """Every app and lib ``src/`` tree, derived from the filesystem.
+
+    Same reasoning as ``_lib_names()``: a hand-written list of roots is a
+    silent pass for every app added after it was written.
+    """
+    roots: list[Path] = []
+    for parent in ("apps", "libs"):
+        base = REPO_ROOT / parent
+        if not base.exists():
+            continue
+        for d in sorted(base.iterdir()):
+            if d.is_dir() and not d.name.startswith((".", "_")) and (d / "src").is_dir():
+                roots.append(d / "src")
+    return roots
+
+
+def _all_source_files() -> list[Path]:
+    return [
+        p
+        for root in _source_roots()
+        for p in root.rglob("*.py")
+        if "__pycache__" not in p.parts
+    ]
+
+
+def _local_aliases_for(tree: ast.AST, imported_name: str) -> set[str]:
+    """Local names bound to ``imported_name`` by ``from X import name [as a]``.
+
+    So ``from painted import run_cli as rc`` still recognises ``rc(...)``.
+    Always includes the bare name (unaliased import, or no matching import at
+    all — module-attribute calls like ``painted.run_cli(...)`` are matched
+    separately on ``Attribute.attr``, which is alias-proof).
+    """
+    aliases = {imported_name}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            for alias in node.names:
+                if alias.name == imported_name:
+                    aliases.add(alias.asname or alias.name)
+    return aliases
+
+
+def _run_cli_calls(tree: ast.AST, aliases: set[str]) -> list[ast.Call]:
+    """Every ``run_cli(...)`` call in the tree, aliased forms included."""
+    out: list[ast.Call] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        fn = node.func
+        if (isinstance(fn, ast.Name) and fn.id in aliases) or (
+            isinstance(fn, ast.Attribute) and fn.attr == "run_cli"
+        ):
+            out.append(node)
+    return out
+
+
+def _functions_by_name(tree: ast.AST) -> dict:
+    """Every function def in the module, by name — nested defs included, since
+    the inline ``def renderer(data, fidelity, width)`` closures live inside the
+    command functions that bind them."""
+    out: dict = {}
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            out[node.name] = node
+    return out
+
+
+def _param_names(fn) -> set[str]:
+    """Every parameter name a function declares, in any position."""
+    a = fn.args
+    names = {p.arg for p in [*a.posonlyargs, *a.args, *a.kwonlyargs]}
+    if a.vararg:
+        names.add(a.vararg.arg)
+    if a.kwarg:
+        names.add(a.kwarg.arg)
+    return names
+
+
+# Shrink-only. Empty — every current run_cli() call site uses renderer= with no
+# **kwargs unpacking, and no lens entry point declares `piped`. A new entry owes
+# the justification e8643a6 records: painted's offered-width guarantee does not
+# cover the site, and the callback re-derives ctx.width/ctx.is_tty by hand.
+_RENDER_CONTRACT_EXCEPTIONS: set[str] = set()
+
+
+def test_run_cli_sites_use_renderer_not_render():
+    """No ``run_cli(`` call in any app or lib passes the deprecated
+    ``render=`` (ctx, data), and none unpacks ``**kwargs`` into the call
+    (the keys cannot be verified statically, so it must be allowlisted)."""
+    _check_exceptions(_RENDER_CONTRACT_EXCEPTIONS)
+
+    violations = []
+    seen_calls = 0
+    for py_file in _all_source_files():
+        rel = _rel(py_file)
+        if rel in _RENDER_CONTRACT_EXCEPTIONS:
+            continue
+        tree = ast.parse(py_file.read_text(), filename=str(py_file))
+        aliases = _local_aliases_for(tree, "run_cli")
+        for call in _run_cli_calls(tree, aliases):
+            seen_calls += 1
+            names = {kw.arg for kw in call.keywords if kw.arg is not None}
+            if "render" in names:
+                violations.append(
+                    f"  {rel}:{call.lineno} — run_cli(render=...) is the "
+                    "deprecated (ctx, data) contract; use "
+                    "renderer=(data, fidelity, width) so painted's "
+                    "offered-width guarantee applies"
+                )
+            elif any(kw.arg is None for kw in call.keywords):
+                violations.append(
+                    f"  {rel}:{call.lineno} — run_cli(**...) unpacks keywords; "
+                    "cannot statically verify render= isn't among them — "
+                    "allowlist if intentional"
+                )
+
+    assert seen_calls, (
+        "Rule 12 found no run_cli call sites at all — the walk went vacuous "
+        "(painted renamed, or the source roots moved). Fix the walk; a green "
+        "ratchet that inspects nothing is worse than no ratchet."
+    )
+    assert not violations, (
+        "run_cli() must bind renderer=, never the deprecated render= "
+        "(see the Rule 12 preamble — this is the piped ⇒ width=None net):\n"
+        + "\n".join(violations)
+    )
+
+
+def test_no_lens_entry_point_takes_a_piped_argument():
+    """No lens entry point accepts a ``piped`` parameter.
+
+    The presentation register is read off the offered width (``width is None``
+    IS the pipe). A ``piped`` parameter is a *second* channel that can
+    disagree with the first — exactly the state 0.10.0 S1 made unconstructible
+    by deleting the kwarg. Private helpers may still take a derived ``piped``
+    bool: they receive the answer, they are not a place to contradict it.
+
+    Two derived enumerations, deliberately over-approximating (extra matches
+    fail loudly, missed ones fail silently — so err wide):
+
+    * every PUBLIC function defined in a ``lenses/`` package under any app or
+      lib source tree;
+    * every callable bound at a ``renderer=`` keyword that resolves to a
+      function def in the same module (the inline closures and module-level
+      views painted actually calls).
+    """
+    violations = []
+    seen_lens_modules = 0
+    seen_renderer_bindings = 0
+
+    for py_file in _all_source_files():
+        rel = _rel(py_file)
+        tree = ast.parse(py_file.read_text(), filename=str(py_file))
+
+        if "lenses" in py_file.parts:
+            seen_lens_modules += 1
+            for node in tree.body:
+                if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    continue
+                if node.name.startswith("_"):
+                    continue  # private helper — receives the derived bool
+                if "piped" in _param_names(node):
+                    violations.append(
+                        f"  {rel}:{node.lineno} — lens entry point "
+                        f"{node.name}() declares a 'piped' parameter; derive "
+                        "it from `width is None` instead"
+                    )
+
+        defs = _functions_by_name(tree)
+        aliases = _local_aliases_for(tree, "run_cli")
+        for call in _run_cli_calls(tree, aliases):
+            for kw in call.keywords:
+                if kw.arg != "renderer" or not isinstance(kw.value, ast.Name):
+                    continue
+                target = defs.get(kw.value.id)
+                if target is None:
+                    continue  # bound elsewhere — outside this walk, see preamble
+                seen_renderer_bindings += 1
+                if "piped" in _param_names(target):
+                    violations.append(
+                        f"  {rel}:{target.lineno} — renderer {target.name}() "
+                        "declares a 'piped' parameter; the register is the "
+                        "offered width painted already passes"
+                    )
+
+    assert seen_lens_modules, (
+        "Rule 12 found no lenses/ modules — the walk went vacuous (packages "
+        "renamed or relocated). Fix the walk before trusting the green."
+    )
+    assert seen_renderer_bindings, (
+        "Rule 12 resolved no renderer= bindings — the walk went vacuous. "
+        "Fix the walk before trusting the green."
+    )
+    assert not violations, (
+        "The presentation register is the offered width, not a second "
+        "argument (see the Rule 12 preamble):\n" + "\n".join(violations)
+    )

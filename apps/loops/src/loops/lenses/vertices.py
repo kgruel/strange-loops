@@ -64,7 +64,7 @@ def _lead_kinds(v: dict[str, Any], limit: int = 3) -> str:
 
 
 def vertices_view(
-    data: dict[str, Any], zoom: Zoom, width: int | None, *, piped: bool | None = None
+    data: dict[str, Any], zoom: Zoom, width: int | None
 ) -> Block:
     """Render the stat-over-containment vertex listing.
 
@@ -79,18 +79,16 @@ def vertices_view(
     Zoom: MINIMAL = count line · SUMMARY = stat rows + preview · DETAILED =
     + per-loop detail · FULL = + store paths, combine, discover.
     """
-    piped = bool(piped or (piped is None and width is None))
+    # The piped/agent register is information-faithful: it never truncates or
+    # pads to a terminal edge. That is structural, not a rule this lens
+    # applies — painted offers a concrete width only at a real viewport, so
+    # the pipe arrives width-free and the ⊃ preview and stat payload are
+    # carried in full (decision:design/presentation-register-keys-on-channel).
+    piped = width is None
     vertices = data.get("vertices", [])
     local = data.get("local_vertices", [])
     expand_config = data.get("expand_config", False)
     terse = data.get("terse", False)
-
-    # The piped/agent register is information-faithful: never truncate or pad to
-    # a terminal edge (ctx.width may still be a number when a pipe inherits
-    # COLUMNS). Force width-free rendering so the ⊃ preview and stat payload are
-    # carried in full (decision:design/presentation-register-keys-on-channel).
-    if piped:
-        width = None
 
     if terse:
         names = [v["name"] for v in local] + [v["name"] for v in vertices]

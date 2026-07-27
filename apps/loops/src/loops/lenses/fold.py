@@ -306,7 +306,7 @@ def _diff_interval_block(interval: dict | None, width: int | None) -> Block | No
 
 def diff_view(
     meta1: dict, meta2: dict, rows: list[dict], width: int | None,
-    *, piped: bool = False, interval: dict | None = None,
+    *, interval: dict | None = None,
 ) -> Block:
     """Structural fold diff between two resolved positions (0.8.0, C2/M8).
 
@@ -381,7 +381,6 @@ def fold_view(
     *, vertex_name: str | None = None, vertex_path: str | None = None,
     visible: frozenset[str] = frozenset(),
     lines: int = 0, chars: int = 0,
-    piped: bool | None = None,
     cursor: dict | None = None,
 ) -> Block:
     """Render fold data at the given zoom level.
@@ -410,27 +409,23 @@ def fold_view(
     caller, so default renders are byte-identical) carries the resolved
     --at/--as-of mode/status/position; when present it prepends the mode-line
     disclosure above the fold body, in every register.
+
+    The presentation register IS the offered width. ``width=None`` means a
+    viewportless destination (pipe, file redirect) — the agent channel, which
+    never clips. There is no second argument that could disagree with it.
     """
     if cursor is not None:
         body = fold_view(
             data, zoom, width,
             vertex_name=vertex_name, vertex_path=vertex_path,
-            visible=visible, lines=lines, chars=chars, piped=piped,
+            visible=visible, lines=lines, chars=chars,
         )
-        line_width = None if (piped or (piped is None and width is None)) else width
-        return join_vertical(cursor_mode_line(cursor, line_width), body)
+        return join_vertical(cursor_mode_line(cursor, width), body)
 
     if isinstance(data, FoldState):
         data = project(data)
 
-    # Presentation register is the CHANNEL, not the width. An explicit
-    # piped=True forces width=None at the lens boundary — the agent channel
-    # never clips, even if a caller hands a concrete width alongside it.
-    # This must precede the search/MINIMAL early returns, which otherwise
-    # thread the concrete width through untouched.
-    is_piped = (width is None) if piped is None else piped
-    if is_piped:
-        width = None
+    is_piped = width is None
 
     # Content-search (--match) switches the lens to the event axis: a flat
     # ts-desc list of matching facts, with the (K not indexed) coverage footer.
@@ -462,8 +457,9 @@ def fold_view(
 
     blocks: list[Block] = []
 
-    # is_piped was resolved at the top of the lens (channel, not width;
-    # decision:design/drop-truncation-from-human-reads — presentation half).
+    # is_piped was resolved at the top of the lens, off the offered width —
+    # a viewportless destination is offered None, so the channel IS the width
+    # (decision:design/drop-truncation-from-human-reads — presentation half).
 
     # Tier-allocated disclosure engages only when the population HAS a tier
     # gradient (decision:design/tier-allocated-disclosure). A flat population

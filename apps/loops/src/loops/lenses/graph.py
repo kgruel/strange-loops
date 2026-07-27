@@ -121,17 +121,15 @@ def graph_view(
     zoom: Zoom,
     width: int | None,
     palette: LoopsPalette | None = None,
-    *,
-    piped: bool | None = None,
 ) -> Block:
     """Render the ref/edge-graph projection on both registers.
 
-    ``piped=True`` forces width=None — the agent channel never clips, and every
-    count (nodes/edges/typed/orphans/dangling), hub inbound/outbound (``←N →M``),
-    -v neighbor lists (uncapped), and full chain path is carried whole.
+    ``width=None`` IS the piped register — the agent channel never clips, and
+    every count (nodes/edges/typed/orphans/dangling), hub inbound/outbound
+    (``←N →M``), -v neighbor lists (uncapped), and full chain path is carried
+    whole.
     """
-    if piped:
-        width = None
+    piped = width is None
 
     p = palette or DEFAULT_PALETTE
     vertex = data.get("vertex", "")

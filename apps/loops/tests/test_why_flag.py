@@ -190,7 +190,7 @@ def test_narrow_tty_wraps_long_value_no_dropped_tail():
         kind="decision", key="design/a", key_field="topic",
     )
     width = 48
-    text = block_to_text(why_view(prov, Zoom.SUMMARY, width, piped=False),
+    text = block_to_text(why_view(prov, Zoom.SUMMARY, width),
                          use_ansi=False)
     lines = text.splitlines()
     assert all(len(ln) <= width for ln in lines), "a line overflowed the width"
@@ -214,7 +214,7 @@ def test_piped_why_keeps_long_value_on_one_line():
         Upsert(target="s", key="topic"), facts,
         kind="decision", key="design/a", key_field="topic",
     )
-    text = block_to_text(why_view(prov, Zoom.SUMMARY, None, piped=True),
+    text = block_to_text(why_view(prov, Zoom.SUMMARY, None),
                          use_ansi=False)
     # The value line is not wrapped: message value + attribution on one line.
     msg_line = next(ln for ln in text.splitlines() if "message =" in ln)
@@ -275,4 +275,4 @@ def test_why_view_degenerate_width_does_not_crash(why_vertex, capsys):
         key_field="topic",
     )
     for w in (0, 1, 5):
-        assert why_view(prov, Zoom.SUMMARY, w, piped=False) is not None
+        assert why_view(prov, Zoom.SUMMARY, w) is not None

@@ -88,15 +88,12 @@ def confluence_view(
     zoom: Zoom,
     width: int | None,
     palette: LoopsPalette | None = None,
-    *,
-    piped: bool | None = None,
 ) -> Block:
     """Render the observer-cut projection on both registers.
 
-    ``piped=True`` forces width=None — the agent channel never clips.
+    ``width=None`` IS the piped register — the agent channel never clips.
     """
-    if piped:
-        width = None
+    piped = width is None
 
     p = palette or DEFAULT_PALETTE
     vertex = data.get("vertex", "")

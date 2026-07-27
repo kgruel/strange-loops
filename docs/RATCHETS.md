@@ -82,12 +82,14 @@ too. Only construction is a fixed point.
 
 ## Budget
 
-Detection ratchets are counted. There are **three** (Rule 9:
+Detection ratchets are counted. There are **four** (Rule 9:
 `resolve_local_vertex` caller enumeration; Rule 10: disclosure renderers
 perform no store I/O; Rule 11: record-layer libs never import surfacing-layer
-libs), all at a genuine ambient-authority boundary. If the count grows faster
-than the number of such boundaries, the rule is over-firing and we are
-building a shadow linter — stop and dissolve instead.
+libs; Rule 12: `run_cli` sites bind `renderer=`, never the deprecated
+`render=`, and no lens entry point takes a `piped` argument), all at a genuine
+ambient-authority boundary. If the count grows faster than the number of such
+boundaries, the rule is over-firing and we are building a shadow linter —
+stop and dissolve instead.
 
 Rule 11 (added with the surfacing-layer charter) is the cheap case the budget
 is meant to allow: it is a new *rule* on the import boundary Rule 4 already
@@ -96,6 +98,21 @@ is made safe by a completeness test over the filesystem-derived lib list, so
 an unassigned lib fails loudly instead of being exempt by omission. That
 completeness test is also what forced `LIBS` itself to stop being a
 hand-written tuple mirroring `libs/`.
+
+Rule 12 (0.10.0 S1) is the ordering rule working as intended. The invariant —
+piped output implies `width=None` — was *dissolved*, not detected: deleting
+the `piped=` kwarg from every lens entry point left the register derivable
+only from the offered width, so a render claiming the pipe while holding a
+concrete width became inexpressible rather than merely untaken. Two test
+cases that asserted the old forcing behaviour were deleted with it: nothing
+left to assert. What the rule detects is the *residue* — a `piped` parameter
+growing back, or a `run_cli` site dropping to the deprecated `render=`
+contract that would let a callback fabricate a width by hand. Both ride one
+walk over filesystem-derived source roots, and both carry anti-vacuity
+assertions: a walk that finds no `run_cli` sites, no `lenses/` packages, or
+no resolvable `renderer=` bindings fails loudly rather than passing green on
+an empty enumeration. That guard is the one the 0.9.0 defect table did not
+have a column for, and it is cheap.
 
 ## Cost accounting (why the lumpiness is fine)
 

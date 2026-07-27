@@ -91,7 +91,11 @@ def _no_boundary(dir_path, name: str = "nb"):
 
 
 def _render(data, zoom=Zoom.SUMMARY, width=100, *, piped=False) -> str:
-    return block_to_text(horizon_view(data, zoom, width, piped=piped), use_ansi=False)
+    # The register IS the offered width — a pipe is offered None, so this
+    # helper's `piped` knob selects the width rather than riding beside it.
+    return block_to_text(
+        horizon_view(data, zoom, None if piped else width), use_ansi=False
+    )
 
 
 class TestOpenWindow:

@@ -20,7 +20,7 @@ not ratchet-complete: new, ordinary Python/data-shape evasions still pass.
 
 ### 1. `live_edge()` false-in-every-snapshot count — CLOSED
 
-Production: `libs/engine/src/engine/store_reader.py:245-310`  
+Production: `libs/engine/src/engine/store_reader.py:245-310`
 Regression tests: `libs/engine/tests/test_store_reader.py:668-761`
 
 The round-1 trace-callback interleaving now returns `(0, None)`, equal to a
@@ -74,7 +74,7 @@ reported race. Note the narrower limitation of the statement-count assertion.
 
 ### 2. Rule 12 `run_cli` assignment alias — PARTIAL (P2)
 
-Implementation: `tests/test_architecture.py:1149-1248`  
+Implementation: `tests/test_architecture.py:1149-1248`
 Regression tests: `tests/test_architecture.py:1611-1655`
 
 The exact round-1 form is caught:
@@ -121,8 +121,8 @@ the repository-wide contract rule.
 
 ### 3. Rule 12 renderer scope/import resolution — PARTIAL (P2)
 
-Implementation: `tests/test_architecture.py:1251-1502`  
-Allowlist use: `tests/test_architecture.py:1403-1407,1552-1574`  
+Implementation: `tests/test_architecture.py:1251-1502`
+Allowlist use: `tests/test_architecture.py:1403-1407,1552-1574`
 Regression tests: `tests/test_architecture.py:1676-1824`
 
 Both round-1 evasions are caught:
@@ -211,7 +211,7 @@ the resolver select a callable different from the one Python will call.
 
 ### 4. Window wire fidelity — PARTIAL (P2)
 
-Implementation: `apps/loops/src/loops/surface.py:1286-1300`  
+Implementation: `apps/loops/src/loops/surface.py:1286-1300`
 Ratchet: `apps/loops/tests/test_surface.py:1194-1282`
 
 The exact round-1 mutation is caught:
@@ -253,7 +253,7 @@ by plausible encoder transforms.
 
 ### 5. APPS derivation exclusion holes — PARTIAL (P2)
 
-Implementation: `tests/test_architecture.py:40-80`  
+Implementation: `tests/test_architecture.py:40-80`
 Regression tests: `tests/test_architecture.py:286-360`
 
 The exact round-1 namespace-package evasion is caught, as is a bare immediate

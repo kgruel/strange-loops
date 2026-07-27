@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import ast
 import sys
+import textwrap
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -36,24 +37,44 @@ def _lib_names() -> tuple[str, ...]:
 LIBS = _lib_names()
 
 
-def _app_names() -> tuple[str, ...]:
-    """Importable package names under ``apps/*/src/`` — derived, same reason
-    as :func:`_lib_names`: the hand-written ``APPS`` tuple this replaces was
-    a silent pass for every app added after it was written (the fifth sighting
-    of the hand-enumerated-mirror shape this repo has paid for; S1's Rule 12
-    derives its own roots and flagged this one on the way past). Package name,
+def _app_names(apps: Path | None = None) -> tuple[str, ...]:
+    """Top-level IMPORT names under ``apps/*/src/`` — derived, same reason as
+    :func:`_lib_names`: the hand-written ``APPS`` tuple this replaces was a
+    silent pass for every app added after it was written (the fifth sighting of
+    the hand-enumerated-mirror shape this repo has paid for; S1's Rule 12
+    derives its own roots and flagged this one on the way past). Import name,
     not directory name — ``apps/tasks`` ships ``strange_loops``.
+
+    Every immediate ``src`` entry counts, because every one of them is
+    importable once that ``src`` is on the path:
+
+    * package directories **with or without** ``__init__.py`` — the earlier
+      ``__init__.py`` requirement quietly dropped PEP 420 namespace packages
+      out of ``APPS`` entirely, which took them out of Rule 3's reach too
+      (sol HIGH r1: ``apps/evasion/src/nsapp/feature.py`` imported from a lib
+      and the rule stayed green);
+    * bare ``*.py`` modules — a single-module app is importable by its stem.
+
+    ``*.egg-info`` build residue and dot/underscore-prefixed entries are the
+    only exclusions, and they are exclusions by *shape*, not by convention:
+    neither is a name a lib could legally import.
     """
-    apps = REPO_ROOT / "apps"
-    return tuple(
-        sorted(
-            pkg.name
-            for app_dir in apps.iterdir()
-            if (app_dir / "src").is_dir()
-            for pkg in (app_dir / "src").iterdir()
-            if (pkg / "__init__.py").is_file()  # real package, not egg-info
-        )
-    )
+    base = REPO_ROOT / "apps" if apps is None else apps
+    if not base.is_dir():
+        return ()
+    names: set[str] = set()
+    for app_dir in base.iterdir():
+        src = app_dir / "src"
+        if not src.is_dir():
+            continue
+        for entry in src.iterdir():
+            if entry.name.startswith((".", "_")):
+                continue
+            if entry.is_dir() and not entry.name.endswith(".egg-info"):
+                names.add(entry.name)
+            elif entry.is_file() and entry.suffix == ".py":
+                names.add(entry.stem)
+    return tuple(sorted(names))
 
 
 APPS = _app_names()
@@ -256,9 +277,81 @@ def test_libs_do_not_import_apps():
                 for lineno in lines:
                     violations.append(f"  {_rel(py_file)}:{lineno} imports {app}")
 
+    assert APPS, (
+        "APPS derived empty — Rule 3 would pass vacuously against any lib. "
+        "Fix _app_names() before trusting the green."
+    )
     assert not violations, (
         "Libs must not import from apps:\n" + "\n".join(violations)
     )
+
+
+def _synthetic_apps_tree(tmp_path: Path, entries: dict[str, str]) -> Path:
+    """Write throwaway ``apps/`` content and return the ``apps`` directory."""
+    apps = tmp_path / "apps"
+    for rel, body in entries.items():
+        target = apps / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(body)
+    return apps
+
+
+def test_app_names_include_namespace_packages(tmp_path: Path):
+    """sol HIGH r1: a PEP 420 namespace package was invisible to ``APPS``.
+
+    ``apps/evasion/src/nsapp/feature.py`` with no ``nsapp/__init__.py`` is
+    importable the moment that ``src`` is on the path, but the old
+    ``(pkg / "__init__.py").is_file()`` filter dropped it from ``APPS`` — and
+    an app absent from ``APPS`` is an app Rule 3 cannot see, so a lib importing
+    it passed green. Missing ``__init__.py`` must cost visibility to nobody.
+    """
+    apps = _synthetic_apps_tree(
+        tmp_path, {"evasion/src/nsapp/feature.py": "VALUE = 1\n"}
+    )
+    assert "nsapp" in _app_names(apps)
+
+
+def test_app_names_include_single_module_apps(tmp_path: Path):
+    """The same hole one shape over: an app shipping a bare module, not a
+    package. ``import solo`` works; the old derivation never listed it."""
+    apps = _synthetic_apps_tree(tmp_path, {"tiny/src/solo.py": "VALUE = 1\n"})
+    assert "solo" in _app_names(apps)
+
+
+def test_app_names_exclude_build_residue(tmp_path: Path):
+    """Over-approximation still has to stop at things no lib could import:
+    ``*.egg-info`` build residue and dot/underscore entries."""
+    apps = _synthetic_apps_tree(
+        tmp_path,
+        {
+            "evasion/src/nsapp/feature.py": "VALUE = 1\n",
+            "evasion/src/nsapp.egg-info/PKG-INFO": "Name: nsapp\n",
+            "evasion/src/.hidden/x.py": "",
+            "evasion/src/__pycache__/x.py": "",
+        },
+    )
+    assert _app_names(apps) == ("nsapp",)
+
+
+def test_rule3_catches_a_lib_importing_a_namespace_package_app(tmp_path: Path):
+    """The evasion end to end: with ``nsapp`` restored to ``APPS``, the import
+    predicate Rule 3 applies to every lib source file now fires on sol's
+    ``libs/atoms/src/atoms/ratchet_evasion.py`` (``import nsapp.feature``)."""
+    apps = _synthetic_apps_tree(
+        tmp_path, {"evasion/src/nsapp/feature.py": "VALUE = 1\n"}
+    )
+    offender = tmp_path / "libs" / "atoms" / "src" / "atoms" / "ratchet_evasion.py"
+    offender.parent.mkdir(parents=True, exist_ok=True)
+    offender.write_text("import nsapp.feature\n")
+
+    names = _app_names(apps)
+    collector = _collect_imports(offender)
+    hits = [
+        (app, lineno)
+        for app in names
+        for lineno in _imports_module(collector.runtime_modules, app)
+    ]
+    assert hits == [("nsapp", 1)]
 
 
 # ---------------------------------------------------------------------------
@@ -1005,10 +1098,26 @@ def test_record_layer_does_not_import_surfacing():
 # packages plus whatever callables are actually bound at ``renderer=``.
 #
 # Known boundary, accepted: like every rule in this file the walk is AST-shaped,
-# not data-flow. ``getattr(painted, "run_cli")(...)``, a runner threaded through
-# a variable, and a ``renderer=`` bound to a name imported from another module
-# are not resolved. The anti-vacuity assertions below are what keep that from
-# degrading into a silently-empty walk.
+# not data-flow. ``getattr(painted, "run_cli")(...)`` and a runner reached
+# through a container/return value are not resolved. What IS resolved, after
+# sol's HIGH r1 round (three of static analysis's classic defect classes, all
+# from docs/RATCHETS.md's table, arriving on schedule):
+#
+#   * **aliasing** — ``runner = run_cli; runner(..., render=...)`` bypassed the
+#     walk entirely. Plain assignment aliases now propagate to a fixed point,
+#     deliberately WITHOUT reassignment invalidation: a name once bound to
+#     ``run_cli`` stays suspect forever in that module. Over-approximating is
+#     the rule (extra matches fail loudly, missed ones fail silently).
+#   * **scoping** — ``_functions_by_name`` kept one def per spelling, so the
+#     six sibling nested ``renderer`` closures in apps/tasks' CLI all collapsed
+#     onto whichever def overwrote the map. Bindings now resolve through a real
+#     lexical scope chain, nearest enclosing scope first.
+#   * **granularity** — a ``renderer=`` name imported from another repository
+#     module was skipped outright. Imports (absolute and relative) now resolve
+#     across the derived source roots, and an unresolved REPOSITORY-LOCAL
+#     binding fails closed rather than passing silently. Only a name that
+#     provably leaves the repository (painted, stdlib) is out of scope, and it
+#     is counted separately so the skip cannot go quiet.
 
 
 def _source_roots() -> list[Path]:
@@ -1037,10 +1146,60 @@ def _all_source_files() -> list[Path]:
     ]
 
 
-def _local_aliases_for(tree: ast.AST, imported_name: str) -> set[str]:
-    """Local names bound to ``imported_name`` by ``from X import name [as a]``.
+def _assign_target_names(target: ast.expr) -> list[str]:
+    """Every plain ``Name`` bound by an assignment target, tuples included."""
+    if isinstance(target, ast.Name):
+        return [target.id]
+    if isinstance(target, ast.Starred):
+        return _assign_target_names(target.value)
+    if isinstance(target, (ast.Tuple, ast.List)):
+        return [n for e in target.elts for n in _assign_target_names(e)]
+    return []  # Attribute/Subscript targets are not local names
 
-    So ``from painted import run_cli as rc`` still recognises ``rc(...)``.
+
+def _binds_callable(value: ast.expr, aliases: set[str], imported_name: str) -> bool:
+    """Does this RHS hand a *reference* to the runner (not its result) on?
+
+    ``Call`` is deliberately absent: ``rc = run_cli(argv)`` binds an exit code,
+    not the runner. Everything that can carry the reference through — tuple
+    unpacking, a conditional, a ``or`` fallback — is followed, because
+    over-approximating here costs a loud failure and under-approximating costs
+    a silent pass.
+    """
+    if isinstance(value, ast.Name):
+        return value.id in aliases
+    if isinstance(value, ast.Attribute):
+        return value.attr == imported_name
+    if isinstance(value, (ast.Tuple, ast.List, ast.Set)):
+        return any(_binds_callable(e, aliases, imported_name) for e in value.elts)
+    if isinstance(value, ast.IfExp):
+        return _binds_callable(value.body, aliases, imported_name) or _binds_callable(
+            value.orelse, aliases, imported_name
+        )
+    if isinstance(value, ast.BoolOp):
+        return any(_binds_callable(v, aliases, imported_name) for v in value.values)
+    return False
+
+
+def _local_aliases_for(tree: ast.AST, imported_name: str) -> set[str]:
+    """Local names that reach ``imported_name`` — imports AND assignments.
+
+    ``from painted import run_cli as rc`` was always recognised. What was not,
+    until sol's HIGH r1 constructed it, is one ordinary assignment::
+
+        from painted import run_cli
+        def deprecated_site(argv):
+            runner = run_cli                     # <- invisible to the old walk
+            return runner(argv, render=lambda ctx, data: None)
+
+    Plain ``Name``/``Attribute``-valued assignments (and walrus binds) now
+    propagate to a fixed point, so ``a = run_cli; b = a; b(...)`` is caught too.
+
+    NO reassignment invalidation, on purpose: a name once bound to the runner
+    stays suspect for the whole module. A later ``runner = something_else``
+    would make an evasion out of a scope trick otherwise, and this rule's
+    stated posture (docs/RATCHETS.md) is that false-loud beats silent-pass.
+
     Always includes the bare name (unaliased import, or no matching import at
     all — module-attribute calls like ``painted.run_cli(...)`` are matched
     separately on ``Attribute.attr``, which is alias-proof).
@@ -1051,6 +1210,27 @@ def _local_aliases_for(tree: ast.AST, imported_name: str) -> set[str]:
             for alias in node.names:
                 if alias.name == imported_name:
                     aliases.add(alias.asname or alias.name)
+
+    binds: list[tuple[list[str], ast.expr]] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign):
+            names = [n for t in node.targets for n in _assign_target_names(t)]
+            binds.append((names, node.value))
+        elif isinstance(node, ast.AnnAssign) and node.value is not None:
+            binds.append((_assign_target_names(node.target), node.value))
+        elif isinstance(node, ast.NamedExpr):
+            binds.append((_assign_target_names(node.target), node.value))
+
+    changed = True
+    while changed:  # fixed point — chained aliases (a = run_cli; b = a)
+        changed = False
+        for names, value in binds:
+            if not _binds_callable(value, aliases, imported_name):
+                continue
+            for name in names:
+                if name not in aliases:
+                    aliases.add(name)
+                    changed = True
     return aliases
 
 
@@ -1068,15 +1248,139 @@ def _run_cli_calls(tree: ast.AST, aliases: set[str]) -> list[ast.Call]:
     return out
 
 
-def _functions_by_name(tree: ast.AST) -> dict:
-    """Every function def in the module, by name — nested defs included, since
-    the inline ``def renderer(data, fidelity, width)`` closures live inside the
-    command functions that bind them."""
-    out: dict = {}
-    for node in ast.walk(tree):
+_SCOPE_NODES = (
+    ast.Module,
+    ast.FunctionDef,
+    ast.AsyncFunctionDef,
+    ast.ClassDef,
+    ast.Lambda,
+)
+
+
+def _lexical_defs(tree: ast.Module) -> tuple[dict, dict]:
+    """``(defs_per_scope, enclosing_scopes_per_node)`` — a real scope model.
+
+    This replaces a flat ``name -> def`` map over ``ast.walk``, which kept ONE
+    definition per spelling for the whole module. ``apps/tasks``' CLI defines
+    six sibling nested ``renderer`` closures, one per command, so every
+    ``renderer=`` binding in that module was checked against whichever def
+    happened to overwrite the map last — sol's HIGH r1 gave ``piped`` to the
+    first shipped renderer and the ratchet stayed green.
+
+    A ``def`` statement binds its name in the ENCLOSING scope, which is what
+    makes the six siblings resolve to six different definitions here.
+    """
+    defs: dict[int, dict[str, list]] = {id(tree): {}}
+    stacks: dict[int, tuple] = {id(tree): (tree,)}
+
+    def visit(node: ast.AST, stack: tuple) -> None:
+        stacks[id(node)] = stack
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            out[node.name] = node
-    return out
+            defs.setdefault(id(stack[-1]), {}).setdefault(node.name, []).append(node)
+        if isinstance(node, _SCOPE_NODES):
+            defs.setdefault(id(node), {})
+            stack = (*stack, node)
+        for child in ast.iter_child_nodes(node):
+            visit(child, stack)
+
+    for child in ast.iter_child_nodes(tree):
+        visit(child, (tree,))
+    return defs, stacks
+
+
+def _resolve_lexically(name: str, node: ast.AST, defs: dict, stacks: dict) -> list:
+    """Defs of ``name`` in the nearest enclosing scope of ``node`` that binds it.
+
+    ALL of that scope's definitions are returned, not the textually-last one:
+    a scope that rebinds a name is over-approximated rather than flow-analysed,
+    so a ``piped``-taking def cannot hide behind a later clean redefinition.
+    """
+    for scope in reversed(stacks.get(id(node), ())):
+        found = defs.get(id(scope), {}).get(name)
+        if found:
+            return list(found)
+    return []
+
+
+def _absolute_module(node: ast.ImportFrom, origin: Path, roots: list[Path]) -> str | None:
+    """Dotted module name for an ``ImportFrom``, resolving relative forms.
+
+    Relative imports are the common spelling inside these packages, so a walk
+    that only understood ``level == 0`` would leave most in-repo renderer
+    imports unresolved — and unresolved now fails closed.
+    """
+    if node.level == 0:
+        return node.module
+    root = next((r for r in roots if r in origin.parents), None)
+    if root is None:
+        return None
+    package = list(origin.relative_to(root).parts[:-1])
+    up = node.level - 1
+    if up > len(package):
+        return None
+    base = package[: len(package) - up]
+    return ".".join([*base, *([node.module] if node.module else [])]) or None
+
+
+def _module_file(dotted: str, roots: list[Path]) -> Path | None:
+    """Source file for a dotted module, if it lives in a repository source root."""
+    parts = dotted.split(".")
+    for root in roots:
+        module = root.joinpath(*parts[:-1], parts[-1] + ".py")
+        if module.is_file():
+            return module
+        package = root.joinpath(*parts, "__init__.py")
+        if package.is_file():
+            return package
+    return None
+
+
+_MAX_IMPORT_HOPS = 4
+
+
+def _resolve_callable(
+    name: str,
+    node: ast.AST | None,
+    tree: ast.Module,
+    origin: Path,
+    roots: list[Path],
+    hops: int = 0,
+) -> tuple[list, str | None]:
+    """``(function defs ``name`` can reach, reason it could not be resolved)``.
+
+    ``node`` scopes the lookup lexically; ``None`` means module scope only
+    (the re-export hop). ``from X import name`` is followed into other
+    repository source files, up to ``_MAX_IMPORT_HOPS`` re-exports.
+
+    A ``None`` reason with no candidates means the name provably LEAVES the
+    repository (painted, stdlib) — not inspectable, and counted separately by
+    the caller so the skip stays visible. Any other unresolved case returns a
+    reason and the caller fails closed on it.
+    """
+    defs, stacks = _lexical_defs(tree)
+    if node is not None:
+        found = _resolve_lexically(name, node, defs, stacks)
+    else:
+        found = list(defs.get(id(tree), {}).get(name, ()))
+    if found:
+        return found, None
+    if hops >= _MAX_IMPORT_HOPS:
+        return [], f"re-export chain for '{name}' exceeded {_MAX_IMPORT_HOPS} hops"
+
+    for imp in ast.walk(tree):
+        if not isinstance(imp, ast.ImportFrom):
+            continue
+        for alias in imp.names:
+            if (alias.asname or alias.name) != name:
+                continue
+            dotted = _absolute_module(imp, origin, roots)
+            target = _module_file(dotted, roots) if dotted else None
+            if target is None:
+                return [], None  # leaves the repository — not ours to inspect
+            sub = ast.parse(target.read_text(), filename=str(target))
+            return _resolve_callable(alias.name, None, sub, target, roots, hops + 1)
+
+    return [], f"'{name}' is neither a def, a lambda, nor an import in this module"
 
 
 def _param_names(fn) -> set[str]:
@@ -1096,6 +1400,107 @@ def _param_names(fn) -> set[str]:
 # cover the site, and the callback re-derives ctx.width/ctx.is_tty by hand.
 _RENDER_CONTRACT_EXCEPTIONS: set[str] = set()
 
+# Shrink-only, and expected to stay empty. An entry here says "this file binds
+# renderer= to something the walk cannot resolve, and that is intentional" —
+# i.e. it opts a file OUT of the fail-closed rule, so it owes the same
+# justification any other detection-ratchet opt-out owes.
+_RENDERER_BINDING_EXCEPTIONS: set[str] = set()
+
+
+def _render_contract_violations(tree: ast.Module, rel: str) -> tuple[list[str], int]:
+    """``(violations, run_cli call sites seen)`` for one parsed module."""
+    violations: list[str] = []
+    seen = 0
+    aliases = _local_aliases_for(tree, "run_cli")
+    for call in _run_cli_calls(tree, aliases):
+        seen += 1
+        names = {kw.arg for kw in call.keywords if kw.arg is not None}
+        if "render" in names:
+            violations.append(
+                f"  {rel}:{call.lineno} — run_cli(render=...) is the "
+                "deprecated (ctx, data) contract; use "
+                "renderer=(data, fidelity, width) so painted's "
+                "offered-width guarantee applies"
+            )
+        elif any(kw.arg is None for kw in call.keywords):
+            violations.append(
+                f"  {rel}:{call.lineno} — run_cli(**...) unpacks keywords; "
+                "cannot statically verify render= isn't among them — "
+                "allowlist if intentional"
+            )
+    return violations, seen
+
+
+def _lens_entry_piped_violations(tree: ast.Module, rel: str) -> list[str]:
+    """Public module-level functions in a ``lenses/`` module taking ``piped``."""
+    violations: list[str] = []
+    for node in tree.body:
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        if node.name.startswith("_"):
+            continue  # private helper — receives the derived bool
+        if "piped" in _param_names(node):
+            violations.append(
+                f"  {rel}:{node.lineno} — lens entry point "
+                f"{node.name}() declares a 'piped' parameter; derive "
+                "it from `width is None` instead"
+            )
+    return violations
+
+
+def _renderer_binding_violations(
+    tree: ast.Module, origin: Path, rel: str, roots: list[Path]
+) -> tuple[list[str], int, int]:
+    """``(violations, bindings resolved, bindings that leave the repository)``.
+
+    Every ``renderer=`` keyword on a ``run_cli`` call is resolved to the
+    function def(s) it can reach — lexically first (nearest enclosing scope,
+    so sibling nested closures stay distinct), then through repository-local
+    imports. An unresolved REPOSITORY-LOCAL binding is itself a violation:
+    the rule fails closed, because "skipped what it could not resolve" was
+    one of sol's HIGH r1 evasions, not an acceptable boundary.
+    """
+    violations: list[str] = []
+    resolved = external = 0
+    aliases = _local_aliases_for(tree, "run_cli")
+    for call in _run_cli_calls(tree, aliases):
+        for kw in call.keywords:
+            if kw.arg != "renderer":
+                continue
+            value = kw.value
+            if isinstance(value, ast.Lambda):
+                targets, reason = [value], None
+            elif isinstance(value, ast.Name):
+                targets, reason = _resolve_callable(
+                    value.id, value, tree, origin, roots
+                )
+            else:
+                targets, reason = [], f"a {type(value).__name__} expression"
+
+            if targets:
+                resolved += 1
+                for target in targets:
+                    if "piped" not in _param_names(target):
+                        continue
+                    name = getattr(target, "name", "<lambda>")
+                    violations.append(
+                        f"  {rel}:{target.lineno} — renderer {name}() "
+                        "declares a 'piped' parameter; the register is the "
+                        "offered width painted already passes "
+                        f"(bound at {rel}:{value.lineno})"
+                    )
+            elif reason is None:
+                external += 1  # painted/stdlib — outside every source root
+            else:
+                violations.append(
+                    f"  {rel}:{value.lineno} — renderer= binding could not be "
+                    f"resolved ({reason}); Rule 12 fails closed on "
+                    "repository-local bindings rather than skipping them — "
+                    "bind a def in this module, import one from a repository "
+                    "module, or allowlist the file"
+                )
+    return violations, resolved, external
+
 
 def test_run_cli_sites_use_renderer_not_render():
     """No ``run_cli(`` call in any app or lib passes the deprecated
@@ -1110,23 +1515,9 @@ def test_run_cli_sites_use_renderer_not_render():
         if rel in _RENDER_CONTRACT_EXCEPTIONS:
             continue
         tree = ast.parse(py_file.read_text(), filename=str(py_file))
-        aliases = _local_aliases_for(tree, "run_cli")
-        for call in _run_cli_calls(tree, aliases):
-            seen_calls += 1
-            names = {kw.arg for kw in call.keywords if kw.arg is not None}
-            if "render" in names:
-                violations.append(
-                    f"  {rel}:{call.lineno} — run_cli(render=...) is the "
-                    "deprecated (ctx, data) contract; use "
-                    "renderer=(data, fidelity, width) so painted's "
-                    "offered-width guarantee applies"
-                )
-            elif any(kw.arg is None for kw in call.keywords):
-                violations.append(
-                    f"  {rel}:{call.lineno} — run_cli(**...) unpacks keywords; "
-                    "cannot statically verify render= isn't among them — "
-                    "allowlist if intentional"
-                )
+        found, seen = _render_contract_violations(tree, rel)
+        violations.extend(found)
+        seen_calls += seen
 
     assert seen_calls, (
         "Rule 12 found no run_cli call sites at all — the walk went vacuous "
@@ -1154,13 +1545,17 @@ def test_no_lens_entry_point_takes_a_piped_argument():
 
     * every PUBLIC function defined in a ``lenses/`` package under any app or
       lib source tree;
-    * every callable bound at a ``renderer=`` keyword that resolves to a
-      function def in the same module (the inline closures and module-level
-      views painted actually calls).
+    * every callable bound at a ``renderer=`` keyword, resolved through the
+      lexical scope chain and then through repository-local imports — with
+      unresolved repository-local bindings failing closed.
     """
+    _check_exceptions(_RENDERER_BINDING_EXCEPTIONS)
+
+    roots = _source_roots()
     violations = []
     seen_lens_modules = 0
     seen_renderer_bindings = 0
+    left_repository = 0
 
     for py_file in _all_source_files():
         rel = _rel(py_file)
@@ -1168,44 +1563,262 @@ def test_no_lens_entry_point_takes_a_piped_argument():
 
         if "lenses" in py_file.parts:
             seen_lens_modules += 1
-            for node in tree.body:
-                if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                    continue
-                if node.name.startswith("_"):
-                    continue  # private helper — receives the derived bool
-                if "piped" in _param_names(node):
-                    violations.append(
-                        f"  {rel}:{node.lineno} — lens entry point "
-                        f"{node.name}() declares a 'piped' parameter; derive "
-                        "it from `width is None` instead"
-                    )
+            violations.extend(_lens_entry_piped_violations(tree, rel))
 
-        defs = _functions_by_name(tree)
-        aliases = _local_aliases_for(tree, "run_cli")
-        for call in _run_cli_calls(tree, aliases):
-            for kw in call.keywords:
-                if kw.arg != "renderer" or not isinstance(kw.value, ast.Name):
-                    continue
-                target = defs.get(kw.value.id)
-                if target is None:
-                    continue  # bound elsewhere — outside this walk, see preamble
-                seen_renderer_bindings += 1
-                if "piped" in _param_names(target):
-                    violations.append(
-                        f"  {rel}:{target.lineno} — renderer {target.name}() "
-                        "declares a 'piped' parameter; the register is the "
-                        "offered width painted already passes"
-                    )
+        found, resolved, external = _renderer_binding_violations(
+            tree, py_file, rel, roots
+        )
+        seen_renderer_bindings += resolved
+        left_repository += external
+        if rel not in _RENDERER_BINDING_EXCEPTIONS:
+            violations.extend(found)
 
     assert seen_lens_modules, (
         "Rule 12 found no lenses/ modules — the walk went vacuous (packages "
         "renamed or relocated). Fix the walk before trusting the green."
     )
     assert seen_renderer_bindings, (
-        "Rule 12 resolved no renderer= bindings — the walk went vacuous. "
-        "Fix the walk before trusting the green."
+        "Rule 12 resolved no renderer= bindings — the walk went vacuous "
+        f"({left_repository} left the repository unexamined). Fix the walk "
+        "before trusting the green."
     )
     assert not violations, (
         "The presentation register is the offered width, not a second "
         "argument (see the Rule 12 preamble):\n" + "\n".join(violations)
     )
+
+
+# ---------------------------------------------------------------------------
+# Rule 12 — the ratchet's own regression suite (sol HIGH r1 evasions)
+#
+# Every case below is an evasion that PASSED the pre-r1 walk. They run against
+# synthetic trees rather than the repository, which is the point: a ratchet
+# verified only against the repository as it happens to look today is a
+# regression test wearing a ratchet's name (docs/RATCHETS.md).
+# ---------------------------------------------------------------------------
+
+
+def _synthetic_app(tmp_path: Path, files: dict[str, str]) -> Path:
+    """Write a throwaway ``apps/<x>/src`` tree and return its src root."""
+    root = tmp_path / "apps" / "evasion" / "src"
+    for rel, body in files.items():
+        target = root / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(textwrap.dedent(body).lstrip())
+    return root
+
+
+def test_rule12_catches_an_assignment_aliased_runner():
+    """sol HIGH r1 evasion 1: ``runner = run_cli`` then ``runner(render=...)``.
+
+    Verbatim from the review. The pre-r1 alias collector followed only
+    ``from ... import run_cli as alias``, so this call site was invisible —
+    and the repository's existing direct calls kept anti-vacuity satisfied,
+    so nothing else noticed.
+    """
+    tree = ast.parse(
+        textwrap.dedent(
+            """
+            from painted import run_cli
+
+            def deprecated_site(argv):
+                runner = run_cli
+                return runner(argv, fetch=lambda: {},
+                              render=lambda ctx, data: None)
+            """
+        )
+    )
+    assert "runner" in _local_aliases_for(tree, "run_cli")
+    violations, seen = _render_contract_violations(tree, "evasion.py")
+    assert seen == 1, "the aliased call site was not walked at all"
+    assert violations and "render=" in violations[0]
+
+
+def test_rule12_follows_a_chain_of_assignment_aliases():
+    """The same evasion one hop deeper — the alias set is a fixed point, and
+    ``painted.run_cli`` on the right-hand side seeds it just as an import does."""
+    tree = ast.parse(
+        textwrap.dedent(
+            """
+            import painted
+
+            _runner = painted.run_cli
+            go = _runner
+
+            def site(argv):
+                return go(argv, fetch=lambda: {}, render=lambda ctx, d: None)
+            """
+        )
+    )
+    assert {"_runner", "go"} <= _local_aliases_for(tree, "run_cli")
+    violations, seen = _render_contract_violations(tree, "evasion.py")
+    assert seen == 1 and violations
+
+
+def test_rule12_does_not_alias_a_run_cli_return_value():
+    """Over-approximation has a floor: ``code = run_cli(...)`` binds an exit
+    status, not the runner, so calling ``code`` later is not a run_cli site."""
+    tree = ast.parse(
+        textwrap.dedent(
+            """
+            from painted import run_cli
+
+            def site(argv):
+                code = run_cli(argv, fetch=lambda: {},
+                               renderer=lambda d, f, w: None)
+                return code
+            """
+        )
+    )
+    assert "code" not in _local_aliases_for(tree, "run_cli")
+
+
+def test_rule12_resolves_the_nearest_nested_renderer(tmp_path: Path):
+    """sol HIGH r1 evasion 2: sibling nested ``renderer`` closures.
+
+    The shape of ``apps/tasks/src/strange_loops/cli.py``, which defines six of
+    them. The pre-r1 ``_functions_by_name`` kept one def per spelling, so both
+    bindings below resolved to ``cmd_two``'s clean definition and the ``piped``
+    on ``cmd_one``'s went unseen.
+    """
+    root = _synthetic_app(
+        tmp_path,
+        {
+            "evapp/cli.py": """
+                from painted import run_cli
+
+                def cmd_one(argv):
+                    def renderer(data, fidelity, width, *, piped=False):
+                        return None
+                    return run_cli(argv, fetch=lambda: {}, renderer=renderer)
+
+                def cmd_two(argv):
+                    def renderer(data, fidelity, width):
+                        return None
+                    return run_cli(argv, fetch=lambda: {}, renderer=renderer)
+            """,
+        },
+    )
+    cli = root / "evapp" / "cli.py"
+    violations, resolved, external = _renderer_binding_violations(
+        ast.parse(cli.read_text()), cli, "evapp/cli.py", [root]
+    )
+    assert (resolved, external) == (2, 0)
+    assert len(violations) == 1, violations
+    assert "piped" in violations[0]
+
+
+def test_rule12_inspects_a_renderer_imported_from_a_repository_module(
+    tmp_path: Path,
+):
+    """sol HIGH r1 evasion 3: ``renderer=`` imported from a non-``lenses/``
+    repository module. The pre-r1 walk skipped any binding it could not find
+    in the same module (``if target is None: continue``)."""
+    root = _synthetic_app(
+        tmp_path,
+        {
+            "evapp/__init__.py": "",
+            "evapp/views/__init__.py": "",
+            "evapp/views/cards.py": """
+                def card_view(data, fidelity, width, *, piped=False):
+                    return None
+            """,
+            "evapp/cli.py": """
+                from painted import run_cli
+                from evapp.views.cards import card_view
+
+                def main(argv):
+                    return run_cli(argv, fetch=lambda: {}, renderer=card_view)
+            """,
+        },
+    )
+    cli = root / "evapp" / "cli.py"
+    violations, resolved, external = _renderer_binding_violations(
+        ast.parse(cli.read_text()), cli, "evapp/cli.py", [root]
+    )
+    assert (resolved, external) == (1, 0)
+    assert violations and "card_view" in violations[0]
+
+
+def test_rule12_resolves_relative_and_re_exported_renderer_imports(
+    tmp_path: Path,
+):
+    """The spelling this repo actually uses: a relative import through a
+    package that re-exports the def. Both hops must resolve, or the previous
+    test is evaded by writing ``from . import`` instead."""
+    root = _synthetic_app(
+        tmp_path,
+        {
+            "evapp/__init__.py": "",
+            "evapp/views/__init__.py": "from .cards import card_view\n",
+            "evapp/views/cards.py": """
+                def card_view(data, fidelity, width, *, piped=False):
+                    return None
+            """,
+            "evapp/cli.py": """
+                from painted import run_cli
+                from .views import card_view
+
+                def main(argv):
+                    return run_cli(argv, fetch=lambda: {}, renderer=card_view)
+            """,
+        },
+    )
+    cli = root / "evapp" / "cli.py"
+    violations, resolved, external = _renderer_binding_violations(
+        ast.parse(cli.read_text()), cli, "evapp/cli.py", [root]
+    )
+    assert (resolved, external) == (1, 0)
+    assert violations and "card_view" in violations[0]
+
+
+def test_rule12_fails_closed_on_an_unresolvable_repository_binding(
+    tmp_path: Path,
+):
+    """"Could not resolve" must be loud. A renderer built at runtime is not
+    something the walk can inspect, so it is a violation until someone
+    allowlists the file — the opposite of the pre-r1 silent ``continue``."""
+    root = _synthetic_app(
+        tmp_path,
+        {
+            "evapp/cli.py": """
+                from painted import run_cli
+                from functools import partial
+
+                renderer = partial(print)
+
+                def main(argv):
+                    return run_cli(argv, fetch=lambda: {}, renderer=renderer)
+            """,
+        },
+    )
+    cli = root / "evapp" / "cli.py"
+    violations, resolved, external = _renderer_binding_violations(
+        ast.parse(cli.read_text()), cli, "evapp/cli.py", [root]
+    )
+    assert (resolved, external) == (0, 0)
+    assert violations and "fails closed" in violations[0]
+
+
+def test_rule12_counts_but_does_not_flag_renderers_outside_the_repository(
+    tmp_path: Path,
+):
+    """A renderer imported from painted cannot be inspected, and that is not a
+    violation — but it is counted apart from the resolved ones, so a walk that
+    resolves nothing and skips everything still trips anti-vacuity."""
+    root = _synthetic_app(
+        tmp_path,
+        {
+            "evapp/cli.py": """
+                from painted import run_cli, default_view
+
+                def main(argv):
+                    return run_cli(argv, fetch=lambda: {}, renderer=default_view)
+            """,
+        },
+    )
+    cli = root / "evapp" / "cli.py"
+    violations, resolved, external = _renderer_binding_violations(
+        ast.parse(cli.read_text()), cli, "evapp/cli.py", [root]
+    )
+    assert (violations, resolved, external) == ([], 0, 1)

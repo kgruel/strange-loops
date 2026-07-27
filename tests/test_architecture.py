@@ -2828,9 +2828,25 @@ def _non_production_roots(repo: Path | None = None) -> tuple[str, ...]:
     directory added after it was written (docs/RATCHETS.md). ``tools/`` arrived
     in this wave and would have needed remembering; the next one will not.
 
-    Excluded by shape only: dot- and dunder-prefixed entries (not importable as
-    top-level names), and the production dirs themselves. A directory with no
-    Python in it is no import root, so it is not a boundary worth naming.
+    Exclusions are by what is GENUINELY not an import root, which is a shorter
+    list than the first cut claimed:
+
+    * **dot-prefixed** — ``.venv``, ``.git``. A leading dot is not a legal
+      identifier, and ``import_module(".venv")`` is parsed as a *relative*
+      import, so these cannot be reached as top-level names by any spelling.
+    * **holds no Python** — ``data/``, ``dist/``. Nothing to import; naming
+      them would be noise in the failure message and walking them would be
+      slow. This is also what keeps ``__pycache__`` out: it holds ``.pyc``,
+      never ``.py``.
+    * the production dirs themselves, which the other derivations own.
+
+    A DUNDER PREFIX IS NOT AN EXCLUSION, and the r1 docstring's claim that it
+    was — "not importable as top-level names" — was simply false. sol MEDIUM r2
+    put ``__support__/helper.py`` at the repo root and ``import
+    __support__.helper`` in production, and all 52 tests stayed green:
+    ``__support__`` is a perfectly legal identifier and a perfectly good import
+    root. Only ``__pycache__`` ever motivated the filter, and the has-Python
+    test already handles that one on its actual property.
     """
     root = REPO_ROOT if repo is None else repo
     if not root.is_dir():
@@ -2840,7 +2856,7 @@ def _non_production_roots(repo: Path | None = None) -> tuple[str, ...]:
             entry.name
             for entry in root.iterdir()
             if entry.is_dir()
-            and not entry.name.startswith((".", "__"))
+            and not entry.name.startswith(".")
             and entry.name not in _PRODUCTION_DIRS
             and _has_python(entry)
         )
@@ -2861,18 +2877,188 @@ def _production_src_files(repo: Path | None = None) -> list[Path]:
     return files
 
 
+# Dynamic-import call names. `import_module` covers both spellings —
+# `importlib.import_module(...)` (Attribute) and the `from importlib import
+# import_module` form (Name) — because the match is on the call name, not on
+# how importlib was bound. `spec_from_file_location` is the path-based loader:
+# a different mechanism, never statically resolvable to a module name, and the
+# most powerful arbitrary-code-loading form there is, so it is classified
+# rather than left invisible.
+_DYNAMIC_IMPORT_CALLS = frozenset({"import_module", "__import__"})
+_DYNAMIC_LOADER_CALLS = frozenset({"spec_from_file_location"})
+
+
+def _static_module_name(node: ast.expr) -> str | None:
+    """The module name a dynamic-import argument determines, or None.
+
+    Two forms are honest static text and get resolved:
+
+    * a plain string constant — ``import_module("tools._conformance")``;
+    * an f-string whose LEADING literal already contains a ``.``, e.g.
+      ``f"loops.lenses.{name}"``. The placeholder cannot change the top-level
+      package once a dot has been passed, so the root is determined even though
+      the full name is not.
+
+    Everything else — a bare variable, a concatenation, an f-string that
+    interpolates before the first dot — is a computed name. This function does
+    not guess at those; the caller classifies and counts them.
+    """
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    if isinstance(node, ast.JoinedStr) and node.values:
+        first = node.values[0]
+        if isinstance(first, ast.Constant) and isinstance(first.value, str):
+            if "." in first.value:
+                return first.value
+    return None
+
+
+class _DynamicImportCollector(ast.NodeVisitor):
+    """Runtime dynamic-import calls, split by whether the target is static.
+
+    ``literal`` — the imported name is fixed by the source text, so the rule
+    can resolve it and MUST judge it. This is honest code: nothing about
+    ``importlib.import_module("tools._conformance")`` is obfuscated, and it was
+    invisible to the r1 rule only because :class:`_ImportCollector` implements
+    ``visit_Import``/``visit_ImportFrom`` and no call handling at all
+    (sol MEDIUM r2).
+
+    ``computed`` — the name is assembled at runtime. Following those means
+    evaluating strings, which is the "whole-program analysis wearing a test's
+    name" the arbiter convergence ruling forbids chasing. They are a CLASSIFIED
+    BOUNDARY: not chased, but enumerated and counted, exactly as Rule 12
+    handles container/getattr/partial forms.
+
+    TYPE_CHECKING blocks are exempt, matching :class:`_ImportCollector`: the
+    call never executes, so it creates no runtime dependency to invert.
+    """
+
+    def __init__(self) -> None:
+        self.literal: list[tuple[str, int]] = []  # (module, lineno)
+        self.computed: list[tuple[str, int]] = []  # (call description, lineno)
+        self._in_type_checking = False
+
+    def visit_If(self, node: ast.If) -> None:
+        test = node.test
+        is_tc = (isinstance(test, ast.Name) and test.id == "TYPE_CHECKING") or (
+            isinstance(test, ast.Attribute) and test.attr == "TYPE_CHECKING"
+        )
+        if is_tc:
+            prev = self._in_type_checking
+            self._in_type_checking = True
+            self.generic_visit(node)
+            self._in_type_checking = prev
+        else:
+            self.generic_visit(node)
+
+    @staticmethod
+    def _called_name(func: ast.expr) -> str | None:
+        if isinstance(func, ast.Name):
+            return func.id
+        if isinstance(func, ast.Attribute):
+            return func.attr
+        return None
+
+    def visit_Call(self, node: ast.Call) -> None:
+        if self._in_type_checking:
+            self.generic_visit(node)
+            return
+        name = self._called_name(node.func)
+
+        if name in _DYNAMIC_LOADER_CALLS:
+            self.computed.append((f"{name}() — path-based loader", node.lineno))
+            self.generic_visit(node)
+            return
+
+        if name in _DYNAMIC_IMPORT_CALLS:
+            arg = node.args[0] if node.args else None
+            module = _static_module_name(arg) if arg is not None else None
+            if module is None:
+                self.computed.append((f"{name}() — computed module name", node.lineno))
+            elif module.startswith("."):
+                # A relative dynamic import resolves against `package=`.
+                pkg = next(
+                    (kw.value for kw in node.keywords if kw.arg == "package"), None
+                )
+                anchor = _static_module_name(pkg) if pkg is not None else None
+                if anchor is None:
+                    self.computed.append(
+                        (f"{name}() — relative, computed anchor", node.lineno)
+                    )
+                else:
+                    self.literal.append((anchor, node.lineno))
+            else:
+                self.literal.append((module, node.lineno))
+
+        self.generic_visit(node)
+
+
+def _collect_dynamic_imports(path: Path) -> _DynamicImportCollector:
+    """Parse a file and return its dynamic-import collector."""
+    collector = _DynamicImportCollector()
+    collector.visit(ast.parse(path.read_text(), filename=str(path)))
+    return collector
+
+
+def _top_level(module: str) -> str:
+    """The root package of a dotted module name."""
+    return module.split(".", 1)[0]
+
+
 def _production_imports_of_non_production(repo: Path | None = None) -> list[str]:
-    """Runtime imports of a non-production root from shipped source."""
+    """Runtime imports of a non-production root from shipped source.
+
+    Covers both the static forms (``import x`` / ``from x import y``) and the
+    dynamic forms whose target is fixed by the source text.
+    """
     root = REPO_ROOT if repo is None else repo
     roots = _non_production_roots(root)
     violations: list[str] = []
     for py_file in _production_src_files(root):
+        rel = py_file.relative_to(root).as_posix()
         collector = _collect_imports(py_file)
         for name in roots:
             for lineno in _imports_module(collector.runtime_modules, name):
-                rel = py_file.relative_to(root).as_posix()
                 violations.append(f"  {rel}:{lineno} — imports non-production root {name!r}")
+        for module, lineno in _collect_dynamic_imports(py_file).literal:
+            name = _top_level(module)
+            if name in roots:
+                violations.append(
+                    f"  {rel}:{lineno} — dynamically imports non-production "
+                    f"root {name!r} ({module!r})"
+                )
     return sorted(violations)
+
+
+def _production_computed_dynamic_imports(repo: Path | None = None) -> list[str]:
+    """The classified boundary: dynamic imports whose target is not static."""
+    root = REPO_ROOT if repo is None else repo
+    out: list[str] = []
+    for py_file in _production_src_files(root):
+        rel = py_file.relative_to(root).as_posix()
+        for what, lineno in _collect_dynamic_imports(py_file).computed:
+            out.append(f"  {rel}:{lineno} — {what}; classified out of scope, not resolved")
+    return sorted(out)
+
+
+# The classified-boundary census, same doctrine as Rule 12's
+# _RUNNER_BOUNDARY_BASELINE: out-of-scope indirection is not chased, but the
+# population is COUNTED, because a boundary that grows silently is
+# indistinguishable from a rule that stopped working.
+#
+# Unlike Rule 12's, this baseline is NOT zero, and it cannot be: the repo has a
+# real, reviewed population of computed dynamic imports. All six were inspected
+# when this was set — five lazy-loader registries that resolve module paths out
+# of module-level tables of literal strings (atoms, engine and lang's __getattr__
+# shims; the CLI's main and cli.registry), plus lens_resolver's
+# spec_from_file_location, which loads a user lens by filesystem path. None
+# reaches a script tree. Resolving them would mean constant-folding a lookup
+# table, which is the dataflow analysis the arbiter ruling declines to build.
+#
+# Shrink-only. Raising this means a NEW computed dynamic import entered shipped
+# code: read it, satisfy yourself it cannot reach a non-production root, then
+# raise it deliberately.
+_DYNAMIC_IMPORT_BOUNDARY_BASELINE = 6
 
 
 def test_production_does_not_import_a_non_production_root():
@@ -2896,10 +3082,21 @@ def test_production_does_not_import_a_non_production_root():
     all 46 tests green. The relocation's containment claim rested on "imported
     by nothing" — a fact about today, not a ratchet. This is the ratchet.
 
+    **Dynamic imports count too, when they are honest.** r2 found that
+    ``importlib.import_module("tools._conformance")`` and
+    ``__import__("tools._conformance")`` both walked straight past the r1 rule.
+    Nothing about either is obfuscated — they are the ordinary spelling of a
+    lazy import — so a literal argument is judged exactly like a static
+    ``import``. A COMPUTED argument is a different thing: following it means
+    evaluating strings, so it is classified and counted instead (see
+    ``_DYNAMIC_IMPORT_BOUNDARY_BASELINE``), the same split Rule 12 draws
+    between modelled bindings and its container/getattr boundary.
+
     **No allowlist.** The correct number of production imports of a script tree
     is zero, and it is zero today, so there is nothing to grandfather. An
     exception here would be the shape docs/RATCHETS.md warns about: a baseline
-    that grows.
+    that grows. (The dynamic-import census is a different instrument — it
+    counts what the rule declines to resolve, not what it permits.)
     """
     roots = _non_production_roots()
     files = _production_src_files()
@@ -2917,6 +3114,19 @@ def test_production_does_not_import_a_non_production_root():
     assert files, (
         "no production source files walked — _production_src_files went empty, "
         "so this rule would pass against any import"
+    )
+
+    # The classified-boundary census, asserted BEFORE the violations so a
+    # silently growing boundary cannot hide behind a green violation list.
+    boundary = _production_computed_dynamic_imports()
+    assert len(boundary) <= _DYNAMIC_IMPORT_BOUNDARY_BASELINE, (
+        f"{len(boundary)} dynamic imports in shipped code now take a target "
+        "this rule cannot resolve statically (baseline "
+        f"{_DYNAMIC_IMPORT_BOUNDARY_BASELINE}). These are NOT automatically "
+        "violations — a computed module name is a classified boundary, not an "
+        "evasion — but the population may not grow unobserved. Read each, "
+        "confirm it cannot reach a non-production root, then raise the "
+        "baseline deliberately:\n" + "\n".join(boundary)
     )
 
     violations = _production_imports_of_non_production()
@@ -3032,3 +3242,186 @@ def test_rule13_sees_a_type_checking_import_as_exempt(tmp_path: Path):
         },
     )
     assert _production_imports_of_non_production(repo) == []
+
+
+def test_rule13_catches_sols_r2_dynamic_import_evasions(tmp_path: Path):
+    """sol MEDIUM r2, construction 1: both literal dynamic-import spellings.
+
+    ``importlib.import_module("tools._conformance")`` and
+    ``__import__("tools._conformance")`` each left all 52 tests green, because
+    ``_ImportCollector`` handles ``visit_Import``/``visit_ImportFrom`` and no
+    calls at all. Both are ordinary lazy-import code with a literal argument —
+    no computed string, no obfuscation — so both must go red.
+    """
+    repo = _synthetic_repo_tree(
+        tmp_path,
+        {
+            "tools/_conformance.py": "LOOPS_ROOT = 1\n",
+            "libs/engine/src/engine/witness.py": (
+                "import importlib\n"
+                '_c = importlib.import_module("tools._conformance")\n'
+            ),
+            "libs/engine/src/engine/other.py": '_c = __import__("tools._conformance")\n',
+        },
+    )
+    assert _production_imports_of_non_production(repo) == [
+        "  libs/engine/src/engine/other.py:1 — dynamically imports "
+        "non-production root 'tools' ('tools._conformance')",
+        "  libs/engine/src/engine/witness.py:2 — dynamically imports "
+        "non-production root 'tools' ('tools._conformance')",
+    ]
+    # Neither is a boundary member: both targets resolved.
+    assert _production_computed_dynamic_imports(repo) == []
+
+
+def test_rule13_catches_the_from_importlib_import_module_spelling(tmp_path: Path):
+    """The match is on the CALL name, not on how importlib was bound.
+
+    ``from importlib import import_module`` makes the call an ``ast.Name``
+    rather than an ``ast.Attribute``; the CLI uses this spelling, so a rule that
+    only understood the dotted form would miss the one already in the repo.
+    """
+    repo = _synthetic_repo_tree(
+        tmp_path,
+        {
+            "tools/gen.py": "\n",
+            "apps/loops/src/loops/main.py": (
+                "from importlib import import_module\n"
+                '_m = import_module("tools.gen")\n'
+            ),
+        },
+    )
+    assert _production_imports_of_non_production(repo) == [
+        "  apps/loops/src/loops/main.py:2 — dynamically imports "
+        "non-production root 'tools' ('tools.gen')"
+    ]
+
+
+def test_rule13_catches_sols_r2_importable_dunder_root(tmp_path: Path):
+    """sol MEDIUM r2, construction 2: ``__support__/helper.py`` at the repo top.
+
+    ``__support__`` is a legal identifier and a real import root; Python
+    imported it fine while all 52 tests passed, because the r1 derivation
+    excluded every ``__``-prefixed name on a rationale that was false.
+    """
+    repo = _synthetic_repo_tree(
+        tmp_path,
+        {
+            "__support__/helper.py": "VALUE = 1\n",
+            "libs/engine/src/engine/witness.py": "import __support__.helper\n",
+        },
+    )
+    assert _non_production_roots(repo) == ("__support__",)
+    assert _production_imports_of_non_production(repo) == [
+        "  libs/engine/src/engine/witness.py:1 — imports non-production root "
+        "'__support__'"
+    ]
+
+
+def test_rule13_pycache_is_not_a_false_positive(tmp_path: Path):
+    """Dropping the dunder filter must not resurrect ``__pycache__``.
+
+    It was the only directory that filter was ever really for. It is excluded
+    on its actual property instead — it holds ``.pyc``, never ``.py`` — which is
+    the same test that excludes ``data/`` and ``dist/``. Belt and braces: even a
+    stray ``.py`` inside one is skipped, because ``_has_python`` ignores any
+    path with ``__pycache__`` in it.
+    """
+    repo = _synthetic_repo_tree(
+        tmp_path,
+        {
+            "__pycache__/helper.cpython-313.pyc": "",
+            "tools/gen.py": "\n",
+            "libs/atoms/src/atoms/__init__.py": "\n",
+        },
+    )
+    assert _non_production_roots(repo) == ("tools",)
+
+    stray = _synthetic_repo_tree(
+        tmp_path / "stray", {"__pycache__/oops.py": "\n", "tools/gen.py": "\n"}
+    )
+    assert _non_production_roots(stray) == ("tools",)
+
+
+def test_rule13_computed_dynamic_import_is_classified_not_flagged(tmp_path: Path):
+    """A computed target is a boundary member, not a violation.
+
+    The rule declines to evaluate strings — that is the arbiter's ruling, not an
+    oversight — so this must neither be silently dropped nor reported as an
+    evasion. It lands in the census, where the population is counted.
+    """
+    repo = _synthetic_repo_tree(
+        tmp_path,
+        {
+            "tools/gen.py": "\n",
+            "libs/engine/src/engine/lazy.py": (
+                "import importlib\n"
+                "def load(path):\n"
+                "    return importlib.import_module(path)\n"
+            ),
+        },
+    )
+    assert _production_imports_of_non_production(repo) == []
+    assert _production_computed_dynamic_imports(repo) == [
+        "  libs/engine/src/engine/lazy.py:3 — import_module() — computed module "
+        "name; classified out of scope, not resolved"
+    ]
+
+
+def test_rule13_resolves_an_fstring_prefix_past_the_first_dot(tmp_path: Path):
+    """``f"loops.lenses.{name}"`` fixes its ROOT even though the full name floats.
+
+    A placeholder after the first dot cannot change the top-level package, so
+    this resolves rather than joining the census — which is what keeps the two
+    real lens_resolver call sites out of the baseline. The mirror case, where
+    interpolation happens BEFORE any dot, stays computed.
+    """
+    resolved = _synthetic_repo_tree(
+        tmp_path,
+        {
+            "tools/gen.py": "\n",
+            "libs/engine/src/engine/a.py": (
+                "import importlib\n"
+                'def f(n): return importlib.import_module(f"tools.sub.{n}")\n'
+            ),
+        },
+    )
+    assert _production_imports_of_non_production(resolved) == [
+        "  libs/engine/src/engine/a.py:2 — dynamically imports non-production "
+        "root 'tools' ('tools.sub.')"
+    ]
+    assert _production_computed_dynamic_imports(resolved) == []
+
+    floating = _synthetic_repo_tree(
+        tmp_path / "floating",
+        {
+            "tools/gen.py": "\n",
+            "libs/engine/src/engine/b.py": (
+                "import importlib\n"
+                'def f(p): return importlib.import_module(f"{p}.sub")\n'
+            ),
+        },
+    )
+    assert _production_imports_of_non_production(floating) == []
+    assert len(_production_computed_dynamic_imports(floating)) == 1
+
+
+def test_rule13_dynamic_import_in_type_checking_is_exempt(tmp_path: Path):
+    """Matches Rule 4, Rule 11 and the static half of this rule: a call that
+    never executes creates no runtime dependency, and is not a boundary member
+    either."""
+    repo = _synthetic_repo_tree(
+        tmp_path,
+        {
+            "tools/gen.py": "\n",
+            "libs/engine/src/engine/x.py": (
+                "import importlib\n"
+                "from typing import TYPE_CHECKING\n"
+                "if TYPE_CHECKING:\n"
+                '    _a = importlib.import_module("tools.gen")\n'
+                "    _b = importlib.import_module(SOMETHING)\n"
+            ),
+        },
+    )
+    assert _production_imports_of_non_production(repo) == []
+    assert _production_computed_dynamic_imports(repo) == []

@@ -33,7 +33,8 @@ from painted import Block, Style, Zoom, budget_fields, join_horizontal, join_ver
 from painted.palette import current_palette
 
 from atoms import FoldState  # runtime: the polymorphic fold_view front door
-from loops.surface import project  # runtime: FoldState → Surface (idempotent)
+from loops.surface import is_stale, project  # runtime: FoldState → Surface
+from . import _grammar  # module ref: `_grammar.time.time` is the pinnable clock
 
 from ._grammar import (
     RAIL_LEGEND,
@@ -447,6 +448,11 @@ def fold_view(
         if data.unfolded:
             loose = ", ".join(f"{c} {k}" for k, c in sorted(data.unfolded.items()))
             parts.append(f"unfolded: {loose}")
+        edge_days = _stale_edge_days(data.window)
+        if edge_days is not None:
+            parts.append(
+                f"edge stale: {data.window.edge_facts} unsealed, {edge_days}d"
+            )
         return Block.text(rollup_line(name, parts), Style(), width=width)
 
     # Edge adjacency + source facts come materialized off the Surface.
@@ -535,6 +541,12 @@ def fold_view(
         footer_lines.append(
             f"({data.window.hidden} inactive hidden — --all to show)"
         )
+    edge_days = _stale_edge_days(data.window)
+    if edge_days is not None:
+        footer_lines.append(
+            f"⚠ live edge: {data.window.edge_facts} facts unsealed, oldest "
+            f"{edge_days}d — seal wiring may be dead; run `sl seal {data.vertex}`"
+        )
     if footer_lines:
         blocks.append(Block.text("", Style(), width=width))
         for line in footer_lines:
@@ -556,6 +568,28 @@ def fold_view(
             return join_vertical(head, body)
 
     return body
+
+
+def _stale_edge_days(window: Any) -> int | None:
+    """Age in whole days of the oldest unsealed fact, or None when quiet.
+
+    The read-path half of the seal-wiring death sensor
+    (design:rendering/live-edge-staleness-on-read-path). Judgment reuses the
+    shared ``surface.is_stale`` dial; the anchor is the OLDEST edge fact, so
+    a dormant store (old tick, empty edge) stays quiet — accumulation without
+    a seal is the wiring-death signature. Both prior wiring deaths were
+    caught by a human squinting at a whisper; this line is the loud form,
+    rendered wherever anyone reads, independent of any harness config
+    surviving a migration. The clock is ``_grammar.time.time`` — the same
+    pinnable seam the recency grammar uses, so goldens/tests freeze one
+    clock for every clock-relative render in the lens layer.
+    """
+    if not window.edge_facts:
+        return None
+    now = _grammar.time.time()
+    if not is_stale(window.edge_since, now):
+        return None
+    return int((now - window.edge_since) // 86400)
 
 
 def _render_search(data: "Surface", zoom: Zoom, width: int | None) -> Block:

@@ -663,6 +663,103 @@ class TestLiveEdge:
         with StoreReader(path) as reader:
             assert reader.live_edge() == (0, None)
 
+    # -- snapshot coherence (sol HIGH r1) ---------------------------------
+
+    def test_live_edge_is_a_single_statement(self, tmp_path: Path):
+        """Construction pin: boundary + aggregate are ONE statement.
+
+        This is the ratchet, not the race test below — as long as the
+        boundary is resolved inside the aggregate's own statement, SQLite's
+        per-statement snapshot makes a boundary/count skew inexpressible.
+        Split them again and this fails immediately, before anyone has to
+        reproduce an interleaving.
+        """
+        path, store, Tick, datetime, timezone = self._chained_store(tmp_path)
+        store.append({"kind": "note", "ts": 50.0, "observer": "o", "payload": {}})
+        store.append_tick(
+            Tick(name="s", ts=datetime(2025, 6, 1, tzinfo=timezone.utc),
+                 payload={}, origin="v")
+        )
+        store.append({"kind": "note", "ts": 300.0, "observer": "o", "payload": {}})
+        store.close()
+
+        traced: list[str] = []
+        with StoreReader(path) as reader:
+            reader._conn.set_trace_callback(traced.append)
+            try:
+                assert reader.live_edge() == (1, 300.0)
+            finally:
+                reader._conn.set_trace_callback(None)
+
+        # PRAGMA is the documented exception: it can only ever err
+        # conservative (see live_edge's SNAPSHOT COHERENCE note).
+        statements = [s for s in traced if not s.lstrip().upper().startswith("PRAGMA")]
+        assert len(statements) == 1, (
+            "live_edge() issued more than one non-PRAGMA statement — the "
+            "boundary and the count no longer share a snapshot:\n"
+            + "\n".join(statements)
+        )
+
+    def test_concurrent_seal_cannot_produce_an_incoherent_count(
+        self, tmp_path: Path
+    ):
+        """sol HIGH r1 P2, verbatim interleaving.
+
+        A writer commits a fact AND the tick that seals it in the window
+        between the reader resolving its boundary and running its aggregate.
+        Under the old three-statement form this returned ``(1, <ts>)`` — a
+        count true in no coherent database snapshot, since the freshly
+        committed tick already covers the freshly committed fact. Now the
+        answer must equal a coherent read either side of the commit; both
+        sides agree on ``(0, None)`` here, so the race has no output of its
+        own left to produce.
+        """
+        path, store, Tick, datetime, timezone = self._chained_store(tmp_path)
+        store.append({"kind": "note", "ts": 50.0, "observer": "o", "payload": {}})
+        store.append_tick(
+            Tick(name="seal-1", ts=datetime(2025, 6, 1, tzinfo=timezone.utc),
+                 payload={}, origin="v")
+        )
+        store.close()
+
+        from engine.sqlite_store import SqliteStore
+
+        fired = False
+
+        def race(sql: str) -> None:
+            nonlocal fired
+            if fired or not sql.lstrip().startswith("SELECT COUNT(*), MIN(ts)"):
+                return
+            fired = True
+            writer = SqliteStore(
+                path=path, serialize=lambda e: e, deserialize=lambda d: d
+            )
+            writer.append(
+                {"kind": "note", "ts": 999.0, "observer": "o", "payload": {}}
+            )
+            writer.append_tick(
+                Tick(name="seal-2", ts=datetime(2025, 6, 2, tzinfo=timezone.utc),
+                     payload={}, origin="v")
+            )
+            writer.close()
+
+        with StoreReader(path) as reader:
+            reader._conn.set_trace_callback(race)
+            try:
+                raced = reader.live_edge()
+            finally:
+                reader._conn.set_trace_callback(None)
+
+        assert fired, "the interleaving never ran — the trace hook missed"
+        with StoreReader(path) as fresh_reader:
+            fresh = fresh_reader.live_edge()
+
+        assert fresh == (0, None)  # seal-2 covers the fact it committed with
+        assert raced == fresh, (
+            f"live_edge() straddled a concurrent seal: {raced} is not any "
+            f"coherent snapshot (pre-commit and post-commit both give {fresh})"
+        )
+
 
 def reader_total(path: Path) -> int:
     with StoreReader(path) as reader:

@@ -80,7 +80,7 @@ def test_ontology_notice_tty(golden):
     """SPEC §9.2/§9.5 honesty callout — rendered above the rows, TTY
     register."""
     block = stream_view(
-        SAMPLE_STREAM_ONTOLOGY_NOTICE, Zoom.SUMMARY, width=80, 
+        SAMPLE_STREAM_ONTOLOGY_NOTICE, Zoom.SUMMARY, width=80,
     )
     golden.assert_match(block_to_text(block), "output")
 
@@ -90,6 +90,6 @@ def test_ontology_notice_piped(golden):
     same code path regardless of ``piped``, but this exercises it rather
     than asserting it by comment."""
     block = stream_view(
-        SAMPLE_STREAM_ONTOLOGY_NOTICE, Zoom.SUMMARY, width=None, 
+        SAMPLE_STREAM_ONTOLOGY_NOTICE, Zoom.SUMMARY, width=None,
     )
     golden.assert_match(block_to_text(block), "output")

@@ -1191,24 +1191,92 @@ def test_project_defaults_empty_edge():
     assert surface.window.edge_since is None
 
 
-def test_window_wire_shape_covers_every_field():
+# One distinct, JSON-safe sentinel per Window field. Distinctness is the whole
+# mechanism: every value below is unequal to every other, so an encoder that
+# wires a key to the WRONG field (or to a constant) produces a mismatch rather
+# than a coincidence. A completeness assertion below forces a new Window field
+# to earn a sentinel here — the drop-by-omission ratchet, kept.
+_WINDOW_SENTINELS = {
+    "total": 101,
+    "shown": 102,
+    "limited_by": "limited-by-sentinel",
+    "query": "query-sentinel",
+    "fields": ("fields-sentinel",),
+    "granularity": "granularity-sentinel",
+    "unindexed": ("unindexed-sentinel",),
+    "stale": ("stale-sentinel",),
+    "truncated": True,
+    "hidden": 103,
+    "edge_facts": 104,
+    "edge_since": 105.5,
+}
+
+
+def test_window_wire_shape_carries_every_field_by_value():
     """Ratchet (iterate-the-structure): ``_window_to_dict`` is a deliberate
     field-by-field wire encoding (stable documented shape, not ``asdict``
-    reflection) — which is exactly the hand-enumeration silhouette that has
-    now dropped a new field three times elsewhere (FoldSection rebuild, Rule
-    9, Rule 10). This test iterates ``dataclasses.fields(Window)`` so a field
-    added to Window can never silently miss the JSON contract: the encoder
-    stays hand-written for wire stability, the COVERAGE claim is structural.
+    reflection) — exactly the hand-enumeration silhouette that has now dropped
+    a new field three times elsewhere (FoldSection rebuild, Rule 9, Rule 10).
+
+    Presence alone is not the claim. sol's HIGH r1 round showed the earlier
+    ``Window()``-only version proved nothing about FIDELITY: rewiring
+    ``"edge_since": window.edge_since`` to ``window.edge_facts`` kept every
+    key present and the test green, while the wire silently reported one
+    field's value under another's name. So this seeds every field with a
+    distinct sentinel and asserts the encoded VALUE, normalising only the
+    intentional tuple-to-list conversions the JSON contract requires.
     """
     import dataclasses
 
     from loops.surface import Window, _window_to_dict
 
-    encoded = _window_to_dict(Window())
-    missing = [
-        f.name for f in dataclasses.fields(Window) if f.name not in encoded
-    ]
+    names = [f.name for f in dataclasses.fields(Window)]
+    unseeded = [n for n in names if n not in _WINDOW_SENTINELS]
+    assert not unseeded, (
+        f"Window field(s) {unseeded} have no sentinel — add one to "
+        "_WINDOW_SENTINELS so the wire encoding is checked by value, not "
+        "just by key presence"
+    )
+    assert len(set(map(repr, _WINDOW_SENTINELS.values()))) == len(
+        _WINDOW_SENTINELS
+    ), "sentinels must be pairwise distinct or a cross-wired field can pass"
+
+    encoded = _window_to_dict(Window(**_WINDOW_SENTINELS))
+
+    missing = [n for n in names if n not in encoded]
     assert not missing, (
         f"_window_to_dict omits Window field(s) {missing} — the wire shape "
         "must name every field (drop-by-omission ratchet)"
     )
+    wrong = {
+        n: (encoded[n], _WINDOW_SENTINELS[n])
+        for n in names
+        # tuples serialise as lists; nothing else is converted
+        if encoded[n]
+        != (
+            list(_WINDOW_SENTINELS[n])
+            if isinstance(_WINDOW_SENTINELS[n], tuple)
+            else _WINDOW_SENTINELS[n]
+        )
+    }
+    assert not wrong, (
+        f"_window_to_dict mis-wires {sorted(wrong)} — got/expected {wrong}. "
+        "Each key must carry its OWN field's value; a key reading another "
+        "field is the failure this ratchet exists for"
+    )
+
+
+def test_window_wire_shape_preserves_the_none_branches():
+    """The sentinel pass above seeds every optional field, so it never
+    exercises the ``... if window.fields is not None else None`` arms. A
+    defaults pass does — the ``None``s must survive as ``None``, not collapse
+    to ``[]``."""
+    from loops.surface import Window, _window_to_dict
+
+    encoded = _window_to_dict(Window())
+    assert encoded["fields"] is None
+    assert encoded["limited_by"] is None
+    assert encoded["query"] is None
+    assert encoded["edge_since"] is None
+    assert encoded["unindexed"] == []
+    assert encoded["stale"] == []

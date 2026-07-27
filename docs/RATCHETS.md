@@ -91,6 +91,12 @@ ambient-authority boundary. If the count grows faster than the number of such
 boundaries, the rule is over-firing and we are building a shadow linter —
 stop and dissolve instead.
 
+The budget counts *rules*, not *matchers*, and the 0.10.0 round is why that
+distinction has to be enforced downward too: Rule 3's input (`APPS`) and Rule
+12's walk were both found evadable in the same review. Every derived
+enumeration owes an anti-vacuity assertion, and Rule 3 now carries one
+(`assert APPS`) for the same reason Rule 12 always did.
+
 Rule 11 (added with the surfacing-layer charter) is the cheap case the budget
 is meant to allow: it is a new *rule* on the import boundary Rule 4 already
 walks, not a new matcher. Its hand-maintained input — the lib→layer mapping —
@@ -113,6 +119,30 @@ assertions: a walk that finds no `run_cli` sites, no `lenses/` packages, or
 no resolvable `renderer=` bindings fails loudly rather than passing green on
 an empty enumeration. That guard is the one the 0.9.0 defect table did not
 have a column for, and it is cheap.
+
+**Rule 12's own adversarial round (sol HIGH, 0.10.0 r1).** The anti-vacuity
+guard held; the *matcher* did not. All three classic classes returned, in a
+walk written with the 0.9.0 table in hand:
+
+| Defect class | Instance | Fix |
+|---|---|---|
+| aliasing | `runner = run_cli; runner(…, render=…)` — imports were followed, plain assignment was not | assignment aliases propagate to a fixed point, no reassignment invalidation |
+| scoping | one def per spelling module-wide; apps/tasks' six sibling nested `renderer` closures all collapsed onto whichever overwrote the map | real lexical scope chain, nearest enclosing scope, all candidates in it |
+| granularity | a `renderer=` name imported from another repo module was `continue`d | imports (absolute + relative + one re-export hop) resolve across source roots; unresolved repo-local bindings **fail closed** |
+
+Two lessons the table generalises. First: **the walk's declared "known
+boundary" is where the next evasion lives.** Rule 12's preamble named
+variable-threaded runners and cross-module bindings as accepted limits, and
+those are precisely the two sol constructed — a documented limitation is an
+advertised hole, not a defence. Second: **skipping is a silent pass, so
+"cannot resolve" must be loud.** `if target is None: continue` reads as
+caution and behaves as an exemption; fail-closed with a shrink-only allowlist
+puts the same judgment on the record where it can be reviewed.
+
+Their regression suite is deliberately *synthetic* (`tests/test_architecture.py`,
+the Rule 12 evasion block): each case reconstructs the evading source rather
+than asserting against the repository as it currently looks, which is the only
+form that stays a ratchet after the repository changes.
 
 ## Cost accounting (why the lumpiness is fine)
 

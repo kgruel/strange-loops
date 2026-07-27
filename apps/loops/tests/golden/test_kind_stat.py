@@ -37,6 +37,6 @@ def test_kind_stat_drilled_tty(golden):
 
 def test_kind_stat_drilled_piped(golden):
     block = kind_stat_view(
-        SAMPLE_KIND_STAT_DRILLED, Zoom.SUMMARY, width=None, 
+        SAMPLE_KIND_STAT_DRILLED, Zoom.SUMMARY, width=None,
     )
     golden.assert_match(block_to_text(block), "output")

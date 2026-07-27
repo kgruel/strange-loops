@@ -22,12 +22,15 @@ lacks (there, ts and id both ascend with insertion, so all three orders
 coincide). One row sits at a lower `ts` but the HIGHEST id and the LAST rowid,
 pinning `ts` as primary and `id` as the tie-break rather than the sort key.
 
-    rowid   id      ts       pid  score  tag    (ts, id) replay position
-      1     TIEE  1000.0      z     50   z2            5
-      2     TIEC  1000.0      x     50   x             4
-      3     TIEB  1000.0      y     50   y             3
-      4     TIEA  1000.0      z     50   z             2
-      5     TIED   999.0      w     10   w             1
+    rowid   id slot   ts       pid  score  tag   (ts, id) replay position
+      1     0TBREAKE  1000.0    z     50   z2            5
+      2     0TBREAKC  1000.0    x     50   x             4
+      3     0TBREAKB  1000.0    y     50   y             3
+      4     0TBREAKA  1000.0    z     50   z             2
+      5     0TBREAKD   999.0    w     10   w             1
+
+(ids shown to their ordering character; each is padded with zeros to the
+26-char ULID width — see `_ID_PREFIX`.)
 
 Four folds read that order, each failing differently under a wrong one:
 
@@ -57,6 +60,7 @@ import json
 
 from _conformance import (
     add_destination_arg,
+    fixture_ulid,
     loops_commit,
     testdata_dir,
     unlink_store,
@@ -73,14 +77,22 @@ TS_TIED = 1000.0
 TS_EARLY = 999.0
 
 
+#: Crockford base32 excludes I, L, O and U, so "TIEBREAK" is unspellable as a
+#: ULID prefix — "TBREAK" is the closest legal reading. The leading "0" keeps
+#: the 48-bit millisecond timestamp in range (a "T…" prefix overflows it).
+#: `fixture_ulid` enforces both constraints; see its docstring for why this
+#: matters even though nothing in the current corpus validates ids.
+_ID_PREFIX = "0TBREAK"
+
+
 def _fid(slot: str) -> str:
-    """A 26-char deterministic id whose lexicographic rank is `slot`.
+    """A 26-char deterministic ULID whose lexicographic rank is `slot`.
 
     Ids are TEXT and both implementations order them as strings, so a single
     ordering letter is the whole tie-break signal — the rest is padding to the
     ULID width.
     """
-    return f"TIE{slot}{0:022d}"
+    return fixture_ulid(_ID_PREFIX, slot)
 
 
 # In ROWID (insertion) order. The `slot` letter fixes (ts, id) order; note it

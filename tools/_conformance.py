@@ -77,3 +77,41 @@ def unlink_store(path: Path) -> None:
     """Remove a SQLite store and its WAL sidecars, so a run starts clean."""
     for p in (path, Path(f"{path}-wal"), Path(f"{path}-shm")):
         p.unlink(missing_ok=True)
+
+
+def fixture_ulid(prefix: str, slot: str) -> str:
+    """A deterministic, VALID ULID whose lexicographic rank is `slot`.
+
+    loops-go SPEC §2.2 defines `facts.id` as a 26-character Crockford-base32
+    ULID. Crockford excludes `I`, `L`, `O` and `U`, so a readable prefix has to
+    be chosen against that alphabet — which is what the first tie fixture got
+    wrong (`TIE…` is 26 characters and is not a ULID; sol MEDIUM, 2026-07-27).
+    The Python writer accepts anything through `id_override` and the Go reader
+    treats ids as opaque strings, so nothing in the corpus caught it: a
+    conforming consumer that validates the stated store format would reject the
+    fixture before reaching the oracle.
+
+    Two constraints, both enforced here rather than left to the caller:
+
+    * every character in the Crockford alphabet — checked against `is_ulid`
+      imported from the reference implementation, not a re-derived alphabet;
+    * the first character must keep the 48-bit millisecond timestamp in range.
+      `T…` overflows ("Timestamp value is too large"), so prefixes start `0`.
+
+    The `slot` character carries the whole ordering signal; the rest is padding
+    to the ULID width. Callers pick slots so that lexicographic id order
+    constructs the order the fixture is about.
+    """
+    from store.rebirth import is_ulid
+    from ulid import ULID
+
+    fid = f"{prefix}{slot}".ljust(26, "0")
+    if len(fid) != 26 or not is_ulid(fid):
+        raise ValueError(
+            f"{fid!r} is not a valid ULID (SPEC §2.2: 26 chars, Crockford "
+            f"base32 — no I, L, O, U). Fix the prefix, not this check."
+        )
+    # `is_ulid` is a shape check; parsing catches the separate failure mode
+    # where every character is legal but the leading ones overflow the field.
+    ULID.from_str(fid)
+    return fid

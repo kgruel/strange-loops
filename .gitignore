@@ -33,7 +33,10 @@ experiments/coupling-kernels/runs/outputs/
 .mcp.json
 
 # Personal dev notes — essays, scratch, etc.
-docs/dev/
+docs/dev/*
+# ...except the loops-go coordination ledger, which loops-go's README, FINDINGS
+# and SPEC reference by path. An untracked file is a dangling cross-repo pointer.
+!docs/dev/loops-go-protocol-queue.md
 
 # Personal state — vertex declarations, lenses, hooks, agents, experiments.
 # Monorepo carries code + public docs; this is per-clone working state.

@@ -242,6 +242,52 @@ class StoreReader:
             for r in rows
         }
 
+    def live_edge(self) -> tuple[int, float | None]:
+        """Visible facts past the newest chained tick's window cursor.
+
+        Returns ``(count, oldest_ts)`` — the live edge and the ``ts`` of its
+        oldest fact (``None`` when the edge is empty). The boundary is the
+        same claim ``SqliteStore.verify_chain`` walks: the newest chained
+        tick's ``fact_cursor`` resolved to its rowid (witness/append order,
+        never ``ts`` — a backfilled fact with an old event time stays on the
+        edge until sealed; see the ORDERING AUTHORITY note in sqlite_store).
+
+        Boundary fallbacks, all conservative (larger edge, never smaller):
+        pre-chain schema (no ``window_hash`` column), no chained ticks, or an
+        unresolvable cursor fact all report from rowid 0 — every visible fact
+        is on the edge, matching ``verify_chain``'s ``covered=0`` for the
+        same stores.
+
+        Counts follow the read-surface contract (SPEC §9.4): ``_decl.*``
+        excluded. ``verify_chain``'s ``uncovered_facts`` is the forensic
+        surface and includes them — the two numbers answer different
+        questions and may differ by the control-receipt count.
+        """
+        cols = {
+            r[1] for r in self._conn.execute("PRAGMA table_info(ticks)")
+        }
+        boundary = 0
+        if "window_hash" in cols:
+            row = self._conn.execute(
+                "SELECT fact_cursor FROM ticks "
+                "WHERE window_hash IS NOT NULL ORDER BY rowid DESC LIMIT 1"
+            ).fetchone()
+            if row is not None:
+                cursor = row[0]
+                if cursor == "":
+                    boundary = 0  # start-of-store sentinel — empty window era
+                else:
+                    resolved = self._conn.execute(
+                        "SELECT rowid FROM facts WHERE id = ?", (cursor,)
+                    ).fetchone()
+                    boundary = resolved[0] if resolved else 0
+        count, oldest = self._conn.execute(
+            "SELECT COUNT(*), MIN(ts) FROM facts "
+            "WHERE rowid > ? AND kind NOT GLOB '_decl.*'",
+            (boundary,),
+        ).fetchone()
+        return count, oldest
+
     def summary(self, *, include_internal: bool = False) -> dict:
         """Aggregate store contents into a summary dict.
 

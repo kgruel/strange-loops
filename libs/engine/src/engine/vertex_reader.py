@@ -17,7 +17,7 @@ import os
 import sqlite3
 import time as _time
 from collections.abc import Iterable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -1071,6 +1071,8 @@ def vertex_fold(
     # Inline vertex_read logic — avoids redundant parse/compile
     unfolded: dict[str, int] = {}
     source_facts: dict[str, list[dict]] = {}
+    edge_facts: int = 0
+    edge_since: float | None = None
     if ast.combine is not None or ast.discover is not None:
         if retain_facts:
             raw, child_payloads = _combined_read(
@@ -1176,6 +1178,13 @@ def vertex_fold(
                         for k, v in store_kinds.items()
                         if k not in full_specs
                     }
+                    # Live-edge disclosure (same signal family as `unfolded`:
+                    # present but not yet surfaced — here, not yet sealed).
+                    # Head-only, same suppression rule as above: the edge is
+                    # a head-scoped claim and would leak at a historical
+                    # position. Aggregates stay at the defaults — the edge is
+                    # per-store (witness order is per-member, A1/A9).
+                    edge_facts, edge_since = reader.live_edge()
 
                 # Explicit --kind for a kind no vertex declares a loop for:
                 # fetch its raw facts directly rather than silently rendering
@@ -1203,6 +1212,13 @@ def vertex_fold(
         raw, ast, full_specs, kind=kind, unfolded=unfolded,
         source_facts=source_facts if retain_facts else None,
     )
+    if edge_facts or edge_since is not None:
+        # dataclasses.replace, not a rebuild (the P2-b ratchet applies here
+        # too) — stamp the live-edge disclosure without re-plumbing the
+        # constructor signature.
+        fold_state = replace(
+            fold_state, edge_facts=edge_facts, edge_since=edge_since,
+        )
     if at is None:
         return fold_state
     # Witness-mode read: wrap the fold in the machine-readable envelope so the

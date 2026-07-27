@@ -554,3 +554,116 @@ class TestInternalKindExclusion:
             fresh = reader.freshness
         assert fresh is not None
         assert fresh.timestamp() == 200.0  # newest DOMAIN fact, not the edit
+
+
+class TestLiveEdge:
+    """live_edge() — visible facts past the newest chained tick's cursor.
+
+    The read-path half of the seal-staleness sensor
+    (design:rendering/live-edge-staleness-on-read-path): the boundary is the
+    chain's own fact_cursor claim, resolved on the append axis, and the
+    oldest-edge-fact ts is the judgment anchor — a dormant store (old tick,
+    empty edge) must stay quiet.
+    """
+
+    def _chained_store(self, tmp_path: Path):
+        """A real SqliteStore (chain-era schema arrives on the write path)."""
+        from datetime import datetime, timezone
+
+        from engine import Tick
+        from engine.sqlite_store import SqliteStore
+
+        def ser(e: dict) -> dict:
+            return e
+
+        def deser(d: dict) -> dict:
+            return d
+
+        path = tmp_path / "chained.db"
+        store = SqliteStore(path=path, serialize=ser, deserialize=deser)
+        return path, store, Tick, datetime, timezone
+
+    def test_pre_chain_schema_reports_whole_store(self, populated_db: Path):
+        """Hand-rolled pre-chain schema (no window_hash column): every
+        visible fact is on the edge — matches verify's covered=0."""
+        with StoreReader(populated_db) as reader:
+            count, oldest = reader.live_edge()
+        assert count == reader_total(populated_db)
+        assert oldest == 100.0  # oldest fact ts in the fixture
+
+    def test_no_ticks_whole_store_on_edge(self, tmp_path: Path):
+        path, store, Tick, datetime, timezone = self._chained_store(tmp_path)
+        store.append({"kind": "note", "ts": 50.0, "observer": "o", "payload": {}})
+        store.append({"kind": "note", "ts": 150.0, "observer": "o", "payload": {}})
+        store.close()
+        with StoreReader(path) as reader:
+            assert reader.live_edge() == (2, 50.0)
+
+    def test_sealed_store_has_empty_edge(self, tmp_path: Path):
+        """Dormant store: chained tick covers everything → (0, None).
+        The sensor's quiet case — an old seal with nothing since is not
+        wiring death."""
+        path, store, Tick, datetime, timezone = self._chained_store(tmp_path)
+        store.append({"kind": "note", "ts": 50.0, "observer": "o", "payload": {}})
+        store.append_tick(
+            Tick(name="s", ts=datetime(2025, 6, 1, tzinfo=timezone.utc),
+                 payload={}, origin="v")
+        )
+        store.close()
+        with StoreReader(path) as reader:
+            assert reader.live_edge() == (0, None)
+
+    def test_edge_after_seal_counts_and_anchors_oldest(self, tmp_path: Path):
+        path, store, Tick, datetime, timezone = self._chained_store(tmp_path)
+        store.append({"kind": "note", "ts": 50.0, "observer": "o", "payload": {}})
+        store.append_tick(
+            Tick(name="s", ts=datetime(2025, 6, 1, tzinfo=timezone.utc),
+                 payload={}, origin="v")
+        )
+        store.append({"kind": "note", "ts": 300.0, "observer": "o", "payload": {}})
+        store.append({"kind": "note", "ts": 200.0, "observer": "o", "payload": {}})
+        store.close()
+        with StoreReader(path) as reader:
+            count, oldest = reader.live_edge()
+        # Both post-seal facts are on the edge; the anchor is MIN(ts) over
+        # the edge — 200.0 even though it was appended second (backfill-safe
+        # in the honest direction: an old-ts arrival ages the edge).
+        assert count == 2
+        assert oldest == 200.0
+
+    def test_backfilled_fact_stays_on_edge(self, tmp_path: Path):
+        """Append axis, never ts: a fact with ts OLDER than the seal still
+        lands on the edge — ts-comparison would silently drop it."""
+        path, store, Tick, datetime, timezone = self._chained_store(tmp_path)
+        store.append({"kind": "note", "ts": 100.0, "observer": "o", "payload": {}})
+        store.append_tick(
+            Tick(name="s", ts=datetime(2025, 6, 1, tzinfo=timezone.utc),
+                 payload={}, origin="v")
+        )
+        store.append({"kind": "note", "ts": 10.0, "observer": "o", "payload": {}})
+        store.close()
+        with StoreReader(path) as reader:
+            assert reader.live_edge() == (1, 10.0)
+
+    def test_edge_excludes_decl_namespace(self, tmp_path: Path):
+        """Read-surface contract (SPEC §9.4): _decl.* control receipts are
+        not counted — the disclosure number stays consistent with every
+        other read surface (verify's forensic count is the one that
+        includes them)."""
+        path, store, Tick, datetime, timezone = self._chained_store(tmp_path)
+        store.append({"kind": "note", "ts": 100.0, "observer": "o", "payload": {}})
+        store.append_tick(
+            Tick(name="s", ts=datetime(2025, 6, 1, tzinfo=timezone.utc),
+                 payload={}, origin="v")
+        )
+        store.append(
+            {"kind": "_decl.genesis", "ts": 500.0, "observer": "o", "payload": {}}
+        )
+        store.close()
+        with StoreReader(path) as reader:
+            assert reader.live_edge() == (0, None)
+
+
+def reader_total(path: Path) -> int:
+    with StoreReader(path) as reader:
+        return reader.fact_total

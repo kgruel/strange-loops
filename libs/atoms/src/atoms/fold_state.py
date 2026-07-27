@@ -198,6 +198,17 @@ class FoldState:
         walked: Entities reached via ref-graph walk from primaries (when
             ``fetch_fold(refs_depth>0)``). Empty by default — back-compat
             with consumers that don't render the walk. See WalkedItem.
+        edge_facts: Count of visible facts on the store's live edge — appended
+            after the newest chained tick's window cursor (append/witness
+            axis, never ``ts``, so a backfilled fact stays on the edge until
+            sealed). Same signal family as ``unfolded``: data exists but
+            isn't yet surfaced — here, not yet sealed under a tick. 0 for
+            aggregates and historical reads (``at``/``as_of``), where the
+            head-scoped edge would be a leak.
+        edge_since: ``ts`` of the OLDEST fact on the live edge (None when the
+            edge is empty). The judgment anchor for staleness disclosure:
+            a dormant store (old tick, nothing since) has an empty edge and
+            stays quiet; facts accumulating unsealed is the signal.
     """
 
     sections: tuple[FoldSection, ...]
@@ -207,6 +218,8 @@ class FoldState:
     """When retain_facts=True, maps ``kind/key`` to the source facts that
     were compressed into each fold item. Empty by default."""
     walked: tuple[WalkedItem, ...] = ()
+    edge_facts: int = 0
+    edge_since: float | None = None
 
     @property
     def is_empty(self) -> bool:

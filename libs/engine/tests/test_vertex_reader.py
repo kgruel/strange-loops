@@ -2789,3 +2789,53 @@ class TestFtsGenerationBinding:
 
         vpath = self._seeded(tmp_path)
         assert vertex_search(vpath, "hello")
+
+
+class TestFoldStateLiveEdge:
+    """vertex_fold stamps the live-edge disclosure onto FoldState.
+
+    Same signal family and same suppression rule as ``unfolded``: head-only
+    (a historical position must not leak the head edge), single-store only
+    (the edge is per-store — witness order is per-member, A1/A9).
+    """
+
+    def test_head_fold_carries_edge(self, tmp_path):
+        from engine import vertex_fold
+
+        vpath = _create_vertex_file(
+            tmp_path, "edgy", '  decision { fold { items "by" "topic" } }'
+        )
+        _seed_facts(tmp_path / "store.db", [
+            {"kind": "decision", "ts": 1000.0, "payload": {"topic": "a"}},
+            {"kind": "decision", "ts": 2000.0, "payload": {"topic": "b"}},
+        ])
+        state = vertex_fold(vpath)
+        # Pre-chain fixture schema: no chained tick → whole store on edge.
+        assert state.edge_facts == 2
+        assert state.edge_since == 1000.0
+
+    def test_as_of_suppresses_edge(self, tmp_path):
+        """Historical projection: edge stats are head-scoped and would leak —
+        same rule that already blanks ``unfolded`` under a cutoff."""
+        from engine import vertex_fold
+
+        vpath = _create_vertex_file(
+            tmp_path, "edgy2", '  decision { fold { items "by" "topic" } }'
+        )
+        _seed_facts(tmp_path / "store.db", [
+            {"kind": "decision", "ts": 1000.0, "payload": {"topic": "a"}},
+        ])
+        state = vertex_fold(vpath, as_of=1500.0)
+        assert state.edge_facts == 0
+        assert state.edge_since is None
+
+    def test_no_store_defaults(self, tmp_path):
+        from engine import vertex_fold
+
+        vpath = tmp_path / "nostore.vertex"
+        vpath.write_text(
+            'name "nostore"\n\nloops {\n  decision { fold { items "by" "topic" } }\n}\n'
+        )
+        state = vertex_fold(vpath)
+        assert state.edge_facts == 0
+        assert state.edge_since is None

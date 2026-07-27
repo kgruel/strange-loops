@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import ast
 import json
+from dataclasses import replace
 from pathlib import Path
 
 from atoms import FoldItem, FoldSection, FoldState, WalkedItem
@@ -1167,3 +1168,47 @@ class TestTierAssignment:
         after = {r.key: r.tier for r in narrowed.rows}
         for k, t in after.items():
             assert t == before[k]
+
+
+# ---------------------------------------------------------------------------
+# Live-edge disclosure threading (design:rendering/live-edge-staleness-on-
+# read-path) — project() copies FoldState.edge_* into Window verbatim; the
+# judgment (is_stale over edge_since) belongs to the render, not here.
+# ---------------------------------------------------------------------------
+
+
+def test_project_threads_live_edge_into_window():
+    state = _byfold_state(_decision("a"))
+    state = replace(state, edge_facts=7, edge_since=42.0)
+    surface = project(state)
+    assert surface.window.edge_facts == 7
+    assert surface.window.edge_since == 42.0
+
+
+def test_project_defaults_empty_edge():
+    surface = project(_byfold_state(_decision("a")))
+    assert surface.window.edge_facts == 0
+    assert surface.window.edge_since is None
+
+
+def test_window_wire_shape_covers_every_field():
+    """Ratchet (iterate-the-structure): ``_window_to_dict`` is a deliberate
+    field-by-field wire encoding (stable documented shape, not ``asdict``
+    reflection) — which is exactly the hand-enumeration silhouette that has
+    now dropped a new field three times elsewhere (FoldSection rebuild, Rule
+    9, Rule 10). This test iterates ``dataclasses.fields(Window)`` so a field
+    added to Window can never silently miss the JSON contract: the encoder
+    stays hand-written for wire stability, the COVERAGE claim is structural.
+    """
+    import dataclasses
+
+    from loops.surface import Window, _window_to_dict
+
+    encoded = _window_to_dict(Window())
+    missing = [
+        f.name for f in dataclasses.fields(Window) if f.name not in encoded
+    ]
+    assert not missing, (
+        f"_window_to_dict omits Window field(s) {missing} — the wire shape "
+        "must name every field (drop-by-omission ratchet)"
+    )

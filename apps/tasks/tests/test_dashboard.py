@@ -17,11 +17,11 @@ from strange_loops.commands.dashboard import (
     ProjectSummary,
     TaskRow,
     _changes_summary,
+    _dashboard_view,
     _fetch,
     _fetch_with_detail,
     _project_header,
     _relative_time,
-    _render,
     _render_detail_pane_block,
     _render_fact_row_block,
     _render_header_block,
@@ -248,7 +248,7 @@ class TestRender:
             height=24,
         )
         state = self._make_state()
-        block = _render(ctx, state)
+        block = _dashboard_view(state, ctx.fidelity, ctx.width)
         # Extract text from block rows
         text = "\n".join("".join(c.char for c in block.row(y)) for y in range(block.height))
         assert "t1" in text
@@ -269,7 +269,7 @@ class TestRender:
             height=24,
         )
         state = self._make_state()
-        block = _render(ctx, state)
+        block = _dashboard_view(state, ctx.fidelity, ctx.width)
         text = "".join(c.char for c in block.row(0))
         assert "2 tasks" in text
 
@@ -288,7 +288,7 @@ class TestRender:
         state = self._make_state(
             project=ProjectSummary(total=10, decisions=3, threads=2, plans=1),
         )
-        block = _render(ctx, state)
+        block = _dashboard_view(state, ctx.fidelity, ctx.width)
         text = "\n".join("".join(c.char for c in block.row(y)) for y in range(block.height))
         assert "Project" in text
         assert "10 facts" in text

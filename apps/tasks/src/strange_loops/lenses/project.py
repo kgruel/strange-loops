@@ -10,7 +10,7 @@ if TYPE_CHECKING:
     from painted.core.block import Block
 
 
-def project_status_view(data: dict, zoom: "Zoom", width: int) -> "Block":
+def project_status_view(data: dict, zoom: "Zoom", width: int | None) -> "Block":
     """Render project status data as a Block.
 
     data is {"total": N, "decisions": {...}, "threads": {...}, "plans": {...}, "completions": {...}}.
@@ -138,7 +138,7 @@ def _render_project_item(
     return lines
 
 
-def project_log_view(data: dict, zoom: "Zoom", width: int) -> "Block":
+def project_log_view(data: dict, zoom: "Zoom", width: int | None) -> "Block":
     """Render project log data as a Block.
 
     data is {"facts": [...]}.

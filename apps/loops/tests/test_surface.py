@@ -1191,25 +1191,105 @@ def test_project_defaults_empty_edge():
     assert surface.window.edge_since is None
 
 
-# One distinct, JSON-safe sentinel per Window field. Distinctness is the whole
-# mechanism: every value below is unequal to every other, so an encoder that
-# wires a key to the WRONG field (or to a constant) produces a mismatch rather
-# than a coincidence. A completeness assertion below forces a new Window field
-# to earn a sentinel here — the drop-by-omission ratchet, kept.
+# One distinct, JSON-safe, HOSTILE sentinel per Window field.
+#
+# Distinctness catches cross-wiring: every value is unequal to every other, so
+# a key reading the wrong field mismatches rather than coincides.
+#
+# Hostility catches the subtler class sol found in HIGH r2 §4 — a sentinel that
+# is a FIXED POINT of the transform an encoder applies. The r1 values were
+# already-stripped, already-lowercase, single-element, positive; so::
+#
+#     "query":  window.query.strip().lower()   # "query-sentinel" unchanged
+#     "fields": sorted(window.fields)          # one element, unchanged
+#
+# both stayed green while corrupting real values ("  MiXeD Query  " ->
+# "mixed query", ("z","a") -> ["a","z"]). So every sentinel is now chosen to be
+# moved by the plausible transforms:
+#
+#   strings  — mixed case AND surrounding spaces (strip/lower/upper/title move)
+#   tuples   — >=3 distinct elements in neither sorted nor reverse-sorted order,
+#              each element itself a hostile string (sort/dedupe/elementwise move)
+#   numerics — negative and away from 0/1 (abs/clamp/sign/identity-multiply move)
+#
+# ``truncated`` is the one exception with no room: a bool has two values and
+# both are meaningful. It carries distinctness only, and that is stated rather
+# than silently assumed.
+#
+# ``test_window_sentinels_are_hostile`` asserts these properties structurally,
+# so a future edit that softens a sentinel back toward a fixed point fails
+# loudly instead of quietly weakening the ratchet it feeds.
 _WINDOW_SENTINELS = {
-    "total": 101,
-    "shown": 102,
-    "limited_by": "limited-by-sentinel",
-    "query": "query-sentinel",
-    "fields": ("fields-sentinel",),
-    "granularity": "granularity-sentinel",
-    "unindexed": ("unindexed-sentinel",),
-    "stale": ("stale-sentinel",),
+    "total": -101,
+    "shown": -102,
+    "limited_by": "  MiXeD limited_BY  ",
+    "query": "  MiXeD Query STRING  ",
+    "fields": ("  mu Field  ", "  Zeta Field  ", "  alpha Field  "),
+    "granularity": "  MiXeD GRANULARITY  ",
+    "unindexed": ("  mu Unindexed  ", "  Zeta Unindexed  ", "  alpha Unindexed  "),
+    "stale": ("  mu Stale  ", "  Zeta Stale  ", "  alpha Stale  "),
     "truncated": True,
-    "hidden": 103,
-    "edge_facts": 104,
-    "edge_since": 105.5,
+    "hidden": -103,
+    "edge_facts": -104,
+    "edge_since": -105.5,
 }
+
+
+def _is_hostile_string(value: str) -> bool:
+    """Moved by strip, by lower, and by upper — no casing/whitespace fixed point."""
+    return (
+        value != value.strip()
+        and value != value.lower()
+        and value != value.upper()
+    )
+
+
+def test_window_sentinels_are_hostile():
+    """The ratchet's ratchet (sol HIGH r2 §4).
+
+    The value-fidelity test is only as strong as its vectors, and the r1
+    vectors were fixed points of ordinary normalising transforms. Asserting
+    hostility structurally means the strength cannot be edited away by someone
+    "tidying" a sentinel — the weakening fails here, at the place that explains
+    why the value was ugly on purpose.
+    """
+    import dataclasses
+
+    from loops.surface import Window
+
+    names = {f.name for f in dataclasses.fields(Window)}
+    assert set(_WINDOW_SENTINELS) == names, (
+        "sentinel map and Window fields have diverged: "
+        f"{set(_WINDOW_SENTINELS) ^ names}"
+    )
+    assert len({repr(v) for v in _WINDOW_SENTINELS.values()}) == len(
+        _WINDOW_SENTINELS
+    ), "sentinels must be pairwise distinct or a cross-wired field can pass"
+
+    for name, value in _WINDOW_SENTINELS.items():
+        if name == "truncated":
+            assert isinstance(value, bool)  # documented exception, see above
+            continue
+        if isinstance(value, str):
+            assert _is_hostile_string(value), (
+                f"{name}: {value!r} is a fixed point of strip/lower/upper — "
+                "an encoder applying one of those would stay green"
+            )
+        elif isinstance(value, tuple):
+            assert len(value) >= 3, f"{name}: needs >=3 elements to detect sorting"
+            assert len(set(value)) == len(value), f"{name}: elements must be distinct"
+            assert list(value) != sorted(value), f"{name}: already sorted"
+            assert list(value) != sorted(value, reverse=True), (
+                f"{name}: already reverse-sorted"
+            )
+            for element in value:
+                assert _is_hostile_string(element), f"{name}: element {element!r}"
+        else:
+            assert not isinstance(value, bool)
+            assert value not in (0, 1), f"{name}: 0/1 are fixed points of too much"
+            assert value != abs(value), (
+                f"{name}: {value} is unmoved by abs()/max(0, ...) clamping"
+            )
 
 
 def test_window_wire_shape_carries_every_field_by_value():

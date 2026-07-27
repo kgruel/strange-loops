@@ -666,13 +666,20 @@ class TestLiveEdge:
     # -- snapshot coherence (sol HIGH r1) ---------------------------------
 
     def test_live_edge_is_a_single_statement(self, tmp_path: Path):
-        """Construction pin: boundary + aggregate are ONE statement.
+        """Secondary pin: one non-PRAGMA statement on THIS connection.
 
-        This is the ratchet, not the race test below — as long as the
-        boundary is resolved inside the aggregate's own statement, SQLite's
-        per-statement snapshot makes a boundary/count skew inexpressible.
-        Split them again and this fails immediately, before anyone has to
-        reproduce an interleaving.
+        Scope, stated honestly (sol HIGH r2 §1 narrowed the r1 claim): this
+        proves one statement on one instrumented connection. It does NOT prove
+        that every read contributing to the answer uses that connection or
+        that snapshot — sol evaded exactly this by resolving the boundary on an
+        untraced second connection and running the aggregate on ``_conn``, and
+        the count came back 1.
+
+        So the PRIMARY guard is the behavioural concurrency regression below,
+        which caught that same implementation (``raced != fresh``). This test
+        earns its keep as the cheap, fast-failing companion: it turns a
+        re-split of the boundary into an immediate failure with a legible
+        message, instead of one that only shows up under an interleaving.
         """
         path, store, Tick, datetime, timezone = self._chained_store(tmp_path)
         store.append({"kind": "note", "ts": 50.0, "observer": "o", "payload": {}})

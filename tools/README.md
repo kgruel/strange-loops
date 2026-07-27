@@ -38,5 +38,14 @@ same shape as `benchmarks/`: run under the workspace env, imported by nothing.
 `_conformance.py` is shared plumbing for the four, resolved off the script
 directory the way `benchmarks/_profile.py` is.
 
+"Imported by nothing" is now a ratchet rather than a fact about today:
+`test_production_does_not_import_a_non_production_root` (Rule 13,
+`tests/test_architecture.py`) fails if anything under `libs/*/src` or
+`apps/*/src` imports a non-production root. The roots are derived from the tree,
+so a future script directory is covered without being remembered. It was added
+because sol MEDIUM (2026-07-27) put `import tools._conformance` into
+`libs/engine` and all 46 architecture tests stayed green — the containment claim
+had no enforcement behind it.
+
 The artifacts stay in loops-go, where the Go conformance suite reads them. What
 loops-go owes the protocol is tracked in `docs/dev/loops-go-protocol-queue.md`.

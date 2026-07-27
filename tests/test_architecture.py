@@ -2793,3 +2793,242 @@ def test_rule12_subscript_census_ignores_unrelated_assignments():
     )
     aliases = _local_aliases_for(tree, "run_cli")
     assert _boundary_runner_bindings(tree, "e.py", aliases, "run_cli") == []
+
+
+# ---------------------------------------------------------------------------
+# Rule 13: production code never imports a non-production root
+# ---------------------------------------------------------------------------
+
+#: The two top-level directories that hold shippable code. Everything else at
+#: the repo root that contains Python is a non-production root: script trees run
+#: under the workspace env (``benchmarks/``, ``tools/``), the repo-level test
+#: tree, docs helpers. They are importABLE — the repo root lands on ``sys.path``
+#: under pytest and under ``uv run python <script>`` — and nothing shipped may
+#: import them.
+_PRODUCTION_DIRS = ("libs", "apps")
+
+
+def _has_python(directory: Path) -> bool:
+    """Whether a directory holds any Python outside ``__pycache__``.
+
+    Short-circuits on the first hit — this walks trees like ``docs/`` and
+    ``experiments/`` that are large and mostly not Python.
+    """
+    for py in directory.rglob("*.py"):
+        if "__pycache__" not in py.parts:
+            return True
+    return False
+
+
+def _non_production_roots(repo: Path | None = None) -> tuple[str, ...]:
+    """Top-level import names that are NOT production, derived from the tree.
+
+    Derived rather than hand-listed, same reason as :func:`_lib_names` and
+    :func:`_app_names`: a hand-written mirror is a silent pass for every
+    directory added after it was written (docs/RATCHETS.md). ``tools/`` arrived
+    in this wave and would have needed remembering; the next one will not.
+
+    Excluded by shape only: dot- and dunder-prefixed entries (not importable as
+    top-level names), and the production dirs themselves. A directory with no
+    Python in it is no import root, so it is not a boundary worth naming.
+    """
+    root = REPO_ROOT if repo is None else repo
+    if not root.is_dir():
+        return ()
+    return tuple(
+        sorted(
+            entry.name
+            for entry in root.iterdir()
+            if entry.is_dir()
+            and not entry.name.startswith((".", "__"))
+            and entry.name not in _PRODUCTION_DIRS
+            and _has_python(entry)
+        )
+    )
+
+
+def _production_src_files(repo: Path | None = None) -> list[Path]:
+    """Every shipped source file — ``libs/*/src`` plus ``apps/*/src``."""
+    root = REPO_ROOT if repo is None else repo
+    files: list[Path] = []
+    for production in _PRODUCTION_DIRS:
+        base = root / production
+        if not base.is_dir():
+            continue
+        for package in sorted(base.iterdir()):
+            if package.is_dir() and not package.name.startswith("."):
+                files.extend(_src_py_files(package))
+    return files
+
+
+def _production_imports_of_non_production(repo: Path | None = None) -> list[str]:
+    """Runtime imports of a non-production root from shipped source."""
+    root = REPO_ROOT if repo is None else repo
+    roots = _non_production_roots(root)
+    violations: list[str] = []
+    for py_file in _production_src_files(root):
+        collector = _collect_imports(py_file)
+        for name in roots:
+            for lineno in _imports_module(collector.runtime_modules, name):
+                rel = py_file.relative_to(root).as_posix()
+                violations.append(f"  {rel}:{lineno} — imports non-production root {name!r}")
+    return sorted(violations)
+
+
+def test_production_does_not_import_a_non_production_root():
+    """Nothing shipped may import ``tools/``, ``benchmarks/``, ``tests/``, ….
+
+    **Why this is not folded into an existing rule.** Rule 4 (the lib DAG) and
+    Rule 3 (libs don't import apps) both enumerate their forbidden targets from
+    a *production* derivation — ``LIBS`` from ``libs/``, ``APPS`` from
+    ``apps/*/src`` — so a top-level ``tools/`` is not in either target set and
+    both stay green on an import of it. Widening Rule 4's target set covers only
+    half the hole: Rule 4's source set is libs, and apps must not import these
+    either, while apps have no allowlist concept for Rule 4 to hang the check on
+    (apps import libs freely by construction). The boundary is
+    production-vs-non-production, which is a different axis from both, so it
+    gets stated once here rather than bolted onto a rule that means something
+    else. Rule 11's docstring makes the same argument for coexisting with
+    Rule 4.
+
+    sol MEDIUM (2026-07-27) found this the way it had to be found: adding
+    ``import tools._conformance`` to ``libs/engine/src/engine/witness.py`` left
+    all 46 tests green. The relocation's containment claim rested on "imported
+    by nothing" — a fact about today, not a ratchet. This is the ratchet.
+
+    **No allowlist.** The correct number of production imports of a script tree
+    is zero, and it is zero today, so there is nothing to grandfather. An
+    exception here would be the shape docs/RATCHETS.md warns about: a baseline
+    that grows.
+    """
+    roots = _non_production_roots()
+    files = _production_src_files()
+
+    # Countable boundaries — a walk that finds nothing passes vacuously, which
+    # is how a derived rule dies quietly (Rule 12's lesson).
+    assert roots, (
+        "no non-production roots derived — either the repo layout changed or "
+        "_has_python stopped finding Python; this rule would pass vacuously"
+    )
+    assert "tools" in roots, (
+        f"'tools' missing from the derived non-production roots {roots} — that "
+        "is the boundary sol's evasion crossed; the derivation must see it"
+    )
+    assert files, (
+        "no production source files walked — _production_src_files went empty, "
+        "so this rule would pass against any import"
+    )
+
+    violations = _production_imports_of_non_production()
+    assert not violations, (
+        "Shipped code imports a non-production root. Those trees are dev "
+        f"tooling — {', '.join(roots)} — run under the workspace env and "
+        "excluded from the wheel (see [tool.hatch.build] only-include), so a "
+        "runtime import of one ships a dangling dependency. Move the code into "
+        "a lib or an app:\n" + "\n".join(violations)
+    )
+
+
+def _synthetic_repo_tree(tmp_path: Path, entries: dict[str, str]) -> Path:
+    """Write a throwaway repo root and return it."""
+    for rel, body in entries.items():
+        target = tmp_path / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(body)
+    return tmp_path
+
+
+def test_rule13_catches_sols_exact_evasion(tmp_path: Path):
+    """sol MEDIUM's construction verbatim: a lib importing ``tools``.
+
+    ``import tools._conformance`` from ``libs/engine`` — the import that passed
+    all 46 tests before this rule existed.
+    """
+    repo = _synthetic_repo_tree(
+        tmp_path,
+        {
+            "tools/_conformance.py": "LOOPS_ROOT = 1\n",
+            "libs/engine/src/engine/witness.py": "import tools._conformance\n",
+        },
+    )
+    assert _non_production_roots(repo) == ("tools",)
+    assert _production_imports_of_non_production(repo) == [
+        "  libs/engine/src/engine/witness.py:1 — imports non-production root 'tools'"
+    ]
+
+
+def test_rule13_catches_an_app_importing_a_script_tree(tmp_path: Path):
+    """The half a widened Rule 4 would have missed: the source is an app.
+
+    Rule 4's source set is libs only, so an app reaching into ``benchmarks/``
+    would stay green under any amount of target-set widening there.
+    """
+    repo = _synthetic_repo_tree(
+        tmp_path,
+        {
+            "benchmarks/_profile.py": "VALUE = 1\n",
+            "apps/loops/src/loops/main.py": "from benchmarks import _profile\n",
+        },
+    )
+    assert _non_production_roots(repo) == ("benchmarks",)
+    assert _production_imports_of_non_production(repo) == [
+        "  apps/loops/src/loops/main.py:1 — imports non-production root 'benchmarks'"
+    ]
+
+
+def test_rule13_derivation_ignores_python_free_and_hidden_dirs(tmp_path: Path):
+    """A directory is a boundary only if it is an import root.
+
+    ``data/`` holds no Python and cannot be imported; ``.venv/`` is not a legal
+    top-level name. Naming either would be noise in the failure message, and
+    walking ``.venv`` for the rest of the rule would be slow and wrong.
+    """
+    repo = _synthetic_repo_tree(
+        tmp_path,
+        {
+            "data/fixture.json": "{}\n",
+            ".venv/lib/site.py": "\n",
+            "__pycache__/junk.py": "\n",
+            "tools/gen.py": "\n",
+            "libs/atoms/src/atoms/__init__.py": "\n",
+        },
+    )
+    assert _non_production_roots(repo) == ("tools",)
+
+
+def test_rule13_ignores_test_trees_and_a_same_named_lib(tmp_path: Path):
+    """Two floors at once.
+
+    A lib's own ``tests/`` is not shipped source, so an import there is not a
+    production import — ``_production_src_files`` walks ``src`` only. And the
+    match is on the top-level import name, so a lib genuinely named ``tools``
+    would be matched by ``libs/``'s derivation, not this one: production dirs
+    are excluded from the roots before any comparison happens.
+    """
+    repo = _synthetic_repo_tree(
+        tmp_path,
+        {
+            "tools/gen.py": "\n",
+            "libs/engine/src/engine/store.py": "import atoms\n",
+            "libs/engine/tests/test_gen.py": "import tools.gen\n",
+        },
+    )
+    assert _non_production_roots(repo) == ("tools",)
+    assert _production_imports_of_non_production(repo) == []
+
+
+def test_rule13_sees_a_type_checking_import_as_exempt(tmp_path: Path):
+    """Matches Rule 4 and Rule 11 exactly: an annotation-only reference creates
+    no runtime dependency, and the collector records runtime imports only."""
+    repo = _synthetic_repo_tree(
+        tmp_path,
+        {
+            "tools/gen.py": "\n",
+            "libs/engine/src/engine/x.py": (
+                "from typing import TYPE_CHECKING\n"
+                "if TYPE_CHECKING:\n"
+                "    import tools.gen\n"
+            ),
+        },
+    )
+    assert _production_imports_of_non_production(repo) == []

@@ -7,12 +7,19 @@ thread, and the sole enumeration of the vector families sitting in a `.html`
 dashboard. That scatter is what let the batch be miscounted (§ Settled below).
 Grounding and receipts: `docs/scratch/010-wave/loops-go-grounding.md`.*
 
-This is a ledger, not a design. Nothing here resolves an open question; the
-design gate does that.
+This is a ledger, not a design. It resolves nothing that was open at the design
+gate — Q1, Q2, Q3 and Q5 are recorded here as questions and stay there. Q4 is
+the exception, and it is not a gate question being answered from the ledger: it
+was settled by the relocation this wave shipped, and is recorded below as
+settled rather than open.
 
-**Repo state.** loops-go is at `94f7987` (branch `r2-replay-conformance`),
-untouched since 2026-07-02. Nothing in this queue has partially landed — every
-item is either fully owed or fully resident on the Python side.
+**Repo state (as of 2026-07-27).** loops-go is at `76c8378` on
+`feat/track-b-batch`, branched from `r2-replay-conformance`/`94f7987` — which
+had been untouched since 2026-07-02, so this wave is the first movement on the
+Go side since the 0.8.0 design wave. One queue item has now partially landed:
+family 3 of item 3 is delivered (below). Every other item is still either fully
+owed or fully resident on the Python side, so there remains no half-shipped
+state to reconcile.
 
 ---
 
@@ -45,15 +52,17 @@ one to use; `morning-dashboard.html:86` is the only prose that enumerates them.
 | 4 | Mid-/split-group ceremony | §9.2, via A2 | witness-exposing reader **+** durable group id, or a decision to pin the heuristic (Q2) |
 | 5 | §10 dump / rebuild witness-order round-trip | `SPEC.md:1235-1245` | witness-exposing reader **+** GlobalReceiptPosition **+** a §10 implementation that does not exist |
 
-### The prerequisite the batch never named
+### The two prerequisites the batch never named
 
-Families 1, 2, 4, and 5 all need something no queue member lists: **a Go-side
-witness-exposing reader**. `loops-go/store/sqlite.go` selects
+Grounding §4 carries both; neither appears in any queue member. Families 1, 2, 4
+and 5 need them jointly.
+
+**(a) A Go-side witness-exposing reader.** `loops-go/store/sqlite.go` selects
 `kind, ts, observer, origin, payload, id ORDER BY ts, id` — no rowid in the
 projection, no cursor parameter anywhere in the package. A witness-axis vector
-cannot even be *consumed* until Go can (a) put `rowid` in the projection and
-(b) offer a prefix-select-then-replay path: select `WHERE rowid <= P`, then
-replay the selected set in `(ts, id)` order.
+cannot even be *consumed* until Go can put `rowid` in the projection and offer a
+prefix-select-then-replay path: select `WHERE rowid <= P`, then replay the
+selected set in `(ts, id)` order.
 
 That is **selection on one axis, ordering on the other** — the distinction the
 ratified design rests on (`libs/engine/src/engine/witness.py:1-15`) and the one a
@@ -61,6 +70,19 @@ naive implementation collapses. The corpus already documents the trap: replaying
 the merge fixtures in rowid order diverges from the pinned expectation in *both*
 directions, and the two rowid replays disagree with each other
 (`dossier-go-vectors.md:316-340`).
+
+**(b) A third artifact class.** The reader is necessary and not sufficient —
+there is also nothing to hand it. Today's two classes are the id-less vector
+JSON and the full-store-replay fixture; a witness-axis family needs **store
+fixture + a cursor + the expected fold state _at_ that cursor**, which neither
+can express. `dossier-go-vectors.md:293-296` states the gap directly: *"Fold
+state at a cursor is pinned by **nothing**. There is no replay-prefix vector, no
+windowed replay, no anchor-and-stop case anywhere."*
+
+This is a distinct prerequisite from Q1, which asks what *form* the cursor takes
+inside such an artifact. Q1 presumes the schema exists; the schema does not.
+Family 3 needed neither — it fits the existing store-fixture class, which is why
+it was the one family shippable now.
 
 ### Family 3, as delivered
 
@@ -77,9 +99,26 @@ with `id` as tie-break rather than sort key. The fixture ships both answers
 (`expected`, `expected_rowid_order`); the test asserts a match against the first
 and a mismatch against the second, so it cannot decay into a tautology.
 
+Its ids are real ULIDs — 26 characters *and* Crockford base32 (SPEC §2.2). The
+first cut was 26 characters of `TIE…`, which is not a ULID because Crockford
+excludes `I`; nothing caught it, because the Python writer accepts anything
+through `id_override` and the Go reader treats ids as opaque strings. A
+conforming consumer that validates the stated store format would have rejected
+the fixture before it reached the oracle. `tools/_conformance.py::fixture_ulid`
+now mints and validates them against `store.rebirth.is_ulid` plus a real ULID
+parse, so the shape cannot regress by choosing a readable prefix.
+
 **It surfaced a new design-gate item — see Q6.** The §4.6 `TopN` equal-`by`
 eviction rule is not implementable in Go under the current value model, which is
 why this family had gone unbuilt rather than merely unprioritized.
+
+**SPEC.md was touched, with no normative change.** No MUST/SHOULD rule was
+altered. The edits are not confined to status parentheticals, though: §4.6's
+italic parenthetical gained both a fixture-status update and a new design
+diagnosis (the Q6 impossibility), §6.2's parenthetical is a factual status update
+relocating the vector, and the conformance appendix expanded outside any
+parenthetical to register the merge and tie fixtures and their generators. The
+accurate claim is "no normative change," not "status parentheticals only."
 
 ---
 
@@ -203,6 +242,23 @@ current, and nothing asserts otherwise (loops-go FINDINGS I3 wants a
 `python_commit == loops HEAD` pin-guard; this is the same hole one layer down).
 Not fixed here: regenerating is a decision about what the fixtures should pin,
 not a side effect of moving the generators.
+
+**The other three fixtures carry invalid ULIDs.** Same defect the tie fixture was
+fixed for, pre-existing and corpus-wide: `proc.db`'s ids are `FIXTURE…` (`I` and
+`U` are both excluded from Crockford) and `merge_{ab,ba}.db`'s are `FIXA…` /
+`FIXB…` (`I`). Measured against `store.rebirth.is_ulid`: 5/5, 4/4 and 4/4 ids
+invalid. Nothing fails today for the same reason nothing failed on the tie
+fixture — the writer accepts `id_override` verbatim and the Go reader treats ids
+as opaque — but SPEC §2.2 says `facts.id` is a Crockford-base32 ULID, and a
+consumer that validates the store format rejects all three.
+
+Not fixed here, deliberately: their generators mint those prefixes, so correcting
+them changes the committed artifacts, which is the same regeneration decision the
+schema drift above is parked behind. Both should be settled together — one
+regeneration pass fixes ids, schema and provenance strings at once. `fixture_ulid`
+exists for that pass; `gen_store_fixture.py` and `gen_merge_fixture.py`
+deliberately do not call it yet, so their output stays byte-comparable to what is
+committed.
 
 **Migration ceremony** (123 dangling refs enumerated) is its own arc by the S1-F2
 ruling, not a queue member. **Digest design** remains at Kyle's gate.

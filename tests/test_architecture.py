@@ -346,58 +346,147 @@ def test_app_names_include_underscore_packages(tmp_path: Path):
     assert _app_names(apps) == ("_nsapp", "_solo")
 
 
-def _app_dirs_missing_src(apps: Path) -> list[str]:
-    """Apps that ship Python but do not use the ``src/`` layout."""
-    offenders = []
+# Top-level directories under an app that are allowed to contain Python.
+# `src` is the import root both derivations read; `tests` is never imported by
+# libs and is not walked as a source root.
+_APP_PYTHON_ROOTS = {"src", "tests"}
+
+# Shrink-only allowlist of ADDITIONAL top-level dirs that hold Python today.
+# Each is a real directory that is not an import root and not a test tree, so
+# it needs to be named rather than silently tolerated by a broad rule.
+_APP_PYTHON_ROOT_EXCEPTIONS: dict[str, str] = {
+    "apps/tasks/scripts": (
+        "standalone dev helper scripts (gen_cli_docs.py and lib/) — run "
+        "directly, never imported as a package, so absent from APPS by design"
+    ),
+}
+
+
+def _misplaced_app_python(apps: Path) -> list[str]:
+    """Python under an app that is outside every sanctioned top-level directory.
+
+    Containment, not existence. The predecessor only asked whether a directory
+    NAMED ``src`` was present, which sol's HIGH r3 §6 defeated with the most
+    ordinary partially-migrated state there is::
+
+        apps/mixed/src/README.md        # src exists...
+        apps/mixed/flatpkg/__init__.py  # ...but the Python is beside it
+        apps/mixed/flatpkg/main.py
+
+    ``_app_names`` returned ``()`` and the layout rule returned ``[]`` — the
+    package sat outside both APPS and ``_source_roots``, exempt from Rule 3 and
+    Rule 12, and the rule that existed to catch exactly that said nothing. An
+    empty or docs-only ``src`` beside misplaced Python is not smuggling; it is
+    what a half-finished migration looks like.
+    """
+    offenders: list[str] = []
     for app_dir in sorted(apps.iterdir()) if apps.is_dir() else []:
         if not app_dir.is_dir() or app_dir.name.startswith("."):
             continue
-        has_python = any(
-            p for p in app_dir.rglob("*.py") if "__pycache__" not in p.parts
-        )
-        if has_python and not (app_dir / "src").is_dir():
-            offenders.append(app_dir.name)
+        for py in sorted(app_dir.rglob("*.py")):
+            rel = py.relative_to(app_dir)
+            parts = rel.parts
+            # Excluded by shape, the same way _app_names excludes them: cache
+            # dirs and dot/underscore-prefixed trees are not package layout.
+            if any(p.startswith((".", "__")) for p in parts[:-1]):
+                continue
+            top = parts[0] if len(parts) > 1 else ""
+            if top in _APP_PYTHON_ROOTS:
+                continue
+            if f"apps/{app_dir.name}/{top}" in _APP_PYTHON_ROOT_EXCEPTIONS:
+                continue
+            offenders.append(f"{app_dir.name}/{rel.as_posix()}")
     return offenders
 
 
-def test_every_app_ships_python_under_src():
-    """The ``src/`` layout becomes a RULE, not a convention (sol HIGH r2 §5).
+def test_every_app_ships_python_under_a_sanctioned_root():
+    """The ``src/`` layout is a RULE, and it is about CONTAINMENT.
 
     ``_app_names`` and Rule 12's ``_source_roots`` both derive from
-    ``apps/*/src``. An app choosing a valid alternate layout — ``apps/x/nsapp/``
-    with the app dir as package root — is therefore invisible to BOTH: its
-    packages never enter ``APPS``, so Rule 3 cannot see a lib importing them,
-    and its sources are never walked for ``render=``/``piped``. Nothing
-    enforced the convention those derivations depend on, so opting out of the
-    layout silently opted out of two ratchets.
+    ``apps/*/src``. Python that lives anywhere else under an app is invisible
+    to both: its packages never enter ``APPS``, so Rule 3 cannot see a lib
+    importing them, and its sources are never walked for ``render=``/``piped``.
 
-    Making it loud is the cheap half of the fix, and the honest one: the
-    derivations keep their simple shape, and the assumption they rest on is now
-    stated where it fails.
+    r2 made the convention loud by requiring a ``src`` directory to EXIST;
+    r3 showed that proves nothing about where the Python actually is. This
+    asserts the property the derivations rely on — every ``.py`` under an app
+    sits beneath a sanctioned top-level directory — so a half-migrated tree
+    fails by naming the stray files rather than passing on the presence of an
+    empty ``src``.
     """
-    offenders = _app_dirs_missing_src(REPO_ROOT / "apps")
+    offenders = _misplaced_app_python(REPO_ROOT / "apps")
     assert not offenders, (
-        f"apps without a src/ layout: {offenders}. Both APPS (Rule 3) and "
-        "_source_roots (Rule 12) derive from apps/*/src — an app outside that "
-        "layout is exempt from both by accident. Move it under src/, or "
-        "generalise both derivations first."
+        f"app Python outside {sorted(_APP_PYTHON_ROOTS)} plus "
+        f"{sorted(_APP_PYTHON_ROOT_EXCEPTIONS)}: {offenders}. Both APPS "
+        "(Rule 3) and _source_roots (Rule 12) derive from apps/*/src — Python "
+        "outside it is exempt from both by accident. Move it under src/, or "
+        "add a reasoned exception if it is genuinely not an import root."
     )
 
 
+def test_app_python_root_exceptions_are_real_and_reasoned():
+    """The exception list is shrink-only in the same mechanical sense as the
+    renderer allowlist: every entry must be a directory that still exists and
+    must carry prose saying why it is not an import root."""
+    for path, reason in _APP_PYTHON_ROOT_EXCEPTIONS.items():
+        assert (REPO_ROOT / path).is_dir(), f"stale exception: {path}"
+        assert reason and reason.strip(), f"{path} has no reason"
+
+
+def test_src_layout_rule_catches_python_beside_an_existing_src(tmp_path: Path):
+    """sol HIGH r3 §6, his fixture exactly: a ``src`` that exists but holds no
+    Python, with a flat package beside it. The r2 existence check accepted this
+    and the package stayed outside both derivations."""
+    apps = _synthetic_apps_tree(
+        tmp_path,
+        {
+            "mixed/src/README.md": "docs only\n",
+            "mixed/flatpkg/__init__.py": "\n",
+            "mixed/flatpkg/main.py": "VALUE = 1\n",
+        },
+    )
+    assert _app_names(apps) == ()  # still invisible to the derivation
+    assert _misplaced_app_python(apps) == [
+        "mixed/flatpkg/__init__.py",
+        "mixed/flatpkg/main.py",
+    ]
+
+
 def test_src_layout_rule_catches_a_flat_app(tmp_path: Path):
-    """sol's flat-layout construction: ``apps/x/nsapp/__init__.py`` with no
-    ``src``. Previously invisible everywhere; now it fails the completeness
-    rule by name."""
+    """sol's r2 flat-layout construction, still caught: ``apps/x/nsapp/`` with
+    no ``src`` at all."""
     apps = _synthetic_apps_tree(tmp_path, {"x/nsapp/__init__.py": "\n"})
-    assert _app_names(apps) == ()          # still invisible to the derivation
-    assert _app_dirs_missing_src(apps) == ["x"]  # but no longer invisible
+    assert _app_names(apps) == ()
+    assert _misplaced_app_python(apps) == ["x/nsapp/__init__.py"]
+
+
+def test_src_layout_rule_catches_python_at_the_app_root(tmp_path: Path):
+    """A bare module at the app root has no containing directory at all —
+    the degenerate case the `len(parts) > 1` guard has to get right."""
+    apps = _synthetic_apps_tree(tmp_path, {"x/setup_helper.py": "\n"})
+    assert _misplaced_app_python(apps) == ["x/setup_helper.py"]
+
+
+def test_src_layout_rule_accepts_the_sanctioned_roots(tmp_path: Path):
+    """The floor. src/ and tests/ pass, and so do cache and dot-prefixed trees
+    excluded by shape — otherwise the rule would fire on every checkout."""
+    apps = _synthetic_apps_tree(
+        tmp_path,
+        {
+            "x/src/pkg/__init__.py": "\n",
+            "x/tests/test_pkg.py": "\n",
+            "x/src/pkg/__pycache__/pkg.cpython-313.py": "\n",
+            "x/.venv/lib/site.py": "\n",
+        },
+    )
+    assert _misplaced_app_python(apps) == []
 
 
 def test_src_layout_rule_ignores_apps_without_python(tmp_path: Path):
-    """The floor: a docs-only or asset-only directory under apps/ is not an
-    app skipping the layout, and must not be reported as one."""
+    """A docs-only or asset-only directory under apps/ is not an app skipping
+    the layout, and must not be reported as one."""
     apps = _synthetic_apps_tree(tmp_path, {"notes/README.md": "hi\n"})
-    assert _app_dirs_missing_src(apps) == []
+    assert _misplaced_app_python(apps) == []
 
 
 def test_app_names_include_single_module_apps(tmp_path: Path):
@@ -1408,8 +1497,40 @@ def _boundary_runner_bindings(
             value = node.value
         else:
             continue
-        if value is None or _binds_callable(value, aliases, imported_name):
-            continue  # modelled: a plain reference, already an alias
+        if value is None:
+            continue
+
+        # Assigning the runner INTO a container slot or attribute
+        # (`runners["go"] = run_cli`) is the ordinary incremental-registry
+        # spelling, and it fell through both halves of the machinery: the RHS
+        # is a plain reference so the census skipped it as "modelled", while
+        # `_assign_target_names` binds nothing from a Subscript/Attribute
+        # target so no alias was ever created and no call site was walked.
+        # Neither modelled NOR counted — which reported population zero and
+        # defeated the countability claim outright (sol HIGH r3 §3).
+        targets = (
+            node.targets
+            if isinstance(node, ast.Assign)
+            else [node.target]
+        )
+        slot = next(
+            (t for t in targets if isinstance(t, (ast.Subscript, ast.Attribute))),
+            None,
+        )
+        if slot is not None and _binds_callable(value, aliases, imported_name):
+            where = (
+                "container (subscript assignment)"
+                if isinstance(slot, ast.Subscript)
+                else "container (attribute assignment)"
+            )
+            out.append(
+                f"  {rel}:{node.lineno} — {imported_name} is stored into a "
+                f"{where}; classified out of scope, not walked"
+            )
+            continue
+
+        if _binds_callable(value, aliases, imported_name):
+            continue  # modelled: a plain reference to a plain name, already an alias
         if not _mentions_callable(value, aliases, imported_name):
             continue
         if isinstance(value, ast.Call) and _binds_callable(
@@ -1447,8 +1568,8 @@ _SCOPE_NODES = (
 )
 
 
-def _lexical_bindings(tree: ast.Module) -> tuple[dict, dict, dict]:
-    """``(defs_per_scope, shadows_per_scope, enclosing_scopes_per_node)``.
+def _lexical_bindings(tree: ast.Module) -> tuple[dict, dict, dict, dict]:
+    """``(defs, shadows, imports, enclosing_scopes)`` — all keyed per scope.
 
     A ``def`` statement binds its name in the ENCLOSING scope, which is what
     makes ``apps/tasks``' six sibling nested ``renderer`` closures resolve to
@@ -1477,9 +1598,30 @@ def _lexical_bindings(tree: ast.Module) -> tuple[dict, dict, dict]:
     ``nonlocal`` declarations (which we cannot follow, so they count as
     shadows). A shadow nearer than the def makes the binding UNRESOLVABLE,
     which routes it to the loud fail-closed path rather than to a wrong answer.
+
+    IMPORTS are the third category, and the one sol's HIGH r3 §2 found missing.
+    A function-local ``from evapp.views import bad as renderer`` is an ordinary
+    local binding — the normal "module ships a default renderer, one command
+    imports a specialised one under the same name" shape — and because the
+    scope model indexed no import bindings at all, the resolver walked straight
+    past it to the clean outer def and reported ``resolved=1, violations=0``:
+    the r2 false-green class, recreated by a spelling the r2 fix did not cover.
+
+    Imports are indexed SEPARATELY from shadows rather than lumped in with
+    them, because unlike an assignment they are followable — the machinery to
+    resolve an imported name across source roots already exists
+    (:func:`_resolve_callable`, absolute + relative, up to ``_MAX_IMPORT_HOPS``
+    re-exports). So a local import RESOLVES, catching the imported function's
+    ``piped`` directly, and only falls to the loud fail-closed path when
+    resolution genuinely fails on a repository-local module.
+
+    ``import x.y as renderer`` (plain ``Import``) is a shadow, not a resolvable
+    import: it binds a MODULE object, which is not a renderer and not something
+    this walk can inspect as one.
     """
     defs: dict[int, dict[str, list]] = {id(tree): {}}
     shadows: dict[int, dict[str, list[int]]] = {id(tree): {}}
+    imports: dict[int, dict[str, list]] = {id(tree): {}}
     stacks: dict[int, tuple] = {id(tree): (tree,)}
 
     def shadow(scope: ast.AST, name: str, lineno: int) -> None:
@@ -1491,6 +1633,17 @@ def _lexical_bindings(tree: ast.Module) -> tuple[dict, dict, dict]:
 
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             defs.setdefault(id(here), {}).setdefault(node.name, []).append(node)
+        elif isinstance(node, ast.ImportFrom):
+            for alias in node.names:
+                if alias.name == "*":
+                    continue  # a star import can bind anything; nothing to follow
+                imports.setdefault(id(here), {}).setdefault(
+                    alias.asname or alias.name, []
+                ).append((node, alias))
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                # Binds a module object, not a callable this walk can inspect.
+                shadow(here, alias.asname or alias.name.split(".")[0], node.lineno)
         elif isinstance(node, ast.ClassDef):
             # A class statement binds a name that is not a function def.
             shadow(here, node.name, node.lineno)
@@ -1523,43 +1676,60 @@ def _lexical_bindings(tree: ast.Module) -> tuple[dict, dict, dict]:
         if isinstance(node, _SCOPE_NODES):
             defs.setdefault(id(node), {})
             shadows.setdefault(id(node), {})
+            imports.setdefault(id(node), {})
             stack = (*stack, node)
         for child in ast.iter_child_nodes(node):
             visit(child, stack)
 
     for child in ast.iter_child_nodes(tree):
         visit(child, (tree,))
-    return defs, shadows, stacks
+    return defs, shadows, imports, stacks
 
 
 def _resolve_lexically(
-    name: str, node: ast.AST, defs: dict, shadows: dict, stacks: dict
-) -> tuple[list, str | None]:
-    """``(defs of name in its nearest binding scope, reason it is unresolvable)``.
+    name: str, node: ast.AST, defs: dict, shadows: dict, imports: dict, stacks: dict
+) -> tuple[list, list, str | None]:
+    """``(defs, import bindings to follow, reason it is unresolvable)``.
 
     The nearest enclosing scope that binds the name AT ALL decides the answer —
-    that is what lexical scoping means, and looking past it was the r2 defect.
-    If that scope's binding is (or includes) a non-``def`` binding, the name is
-    unresolvable: some object other than the visible def may be under it at
-    runtime, and guessing is exactly what produced a false green.
+    that is what lexical scoping means, and looking past it was the r2 defect
+    (assignments and parameters) and again the r3 defect (local imports).
 
-    ALL of a scope's definitions are returned, not the textually-last one: a
-    scope that rebinds a name is over-approximated rather than flow-analysed,
-    so a ``piped``-taking def cannot hide behind a later clean redefinition.
+    Three outcomes from that scope:
+
+    * a non-``def`` binding (or a mix) — UNRESOLVABLE, the loud path. Some
+      object other than the visible def may be under the name at runtime, and
+      guessing is exactly what produced the false green;
+    * ``from X import name`` — FOLLOWABLE, handed back for the caller to
+      resolve across source roots;
+    * ``def``s only — returned, ALL of them rather than the textually-last, so
+      a ``piped``-taking def cannot hide behind a later clean redefinition.
+
+    A scope holding both a def and an import of the same name is ambiguous
+    without flow analysis, so it takes the unresolvable path too.
     """
     for scope in reversed(stacks.get(id(node), ())):
         found = defs.get(id(scope), {}).get(name)
         shadowed = shadows.get(id(scope), {}).get(name)
+        imported = imports.get(id(scope), {}).get(name)
         if shadowed:
             where = ", ".join(f"line {n}" for n in sorted(set(shadowed)))
-            kind = "also rebound" if found else "bound by a non-def statement"
-            return [], (
+            kind = "also rebound" if (found or imported) else "bound by a non-def statement"
+            return [], [], (
                 f"'{name}' is {kind} in its nearest binding scope ({where}) — "
                 "the def a reader sees may not be the object Python calls"
             )
+        if imported and found:
+            return [], [], (
+                f"'{name}' is both defined and imported in its nearest binding "
+                f"scope (line {imported[0][0].lineno}) — which one runs depends "
+                "on order this walk does not model"
+            )
+        if imported:
+            return [], list(imported), None
         if found:
-            return list(found), None
-    return [], None
+            return list(found), [], None
+    return [], [], None
 
 
 def _absolute_module(node: ast.ImportFrom, origin: Path, roots: list[Path]) -> str | None:
@@ -1617,11 +1787,13 @@ def _resolve_callable(
     the caller so the skip stays visible. Any other unresolved case returns a
     reason and the caller fails closed on it.
     """
-    defs, shadows, stacks = _lexical_bindings(tree)
+    defs, shadows, imports, stacks = _lexical_bindings(tree)
     if node is not None:
-        found, shadow_reason = _resolve_lexically(name, node, defs, shadows, stacks)
-        if shadow_reason is not None:
-            return [], shadow_reason  # nearer non-def binding — fail closed
+        found, followable, reason = _resolve_lexically(
+            name, node, defs, shadows, imports, stacks
+        )
+        if reason is not None:
+            return [], reason  # nearer non-def binding, or ambiguous — fail closed
     else:
         # Re-export hop: module scope only. A module-level rebinding of the
         # same name is still a shadow, and still fails closed.
@@ -1631,25 +1803,25 @@ def _resolve_callable(
                 "the re-exported def may not be what the name reaches"
             )
         found = list(defs.get(id(tree), {}).get(name, ()))
+        followable = list(imports.get(id(tree), {}).get(name, ()))
     if found:
         return found, None
+    if not followable:
+        return [], f"'{name}' is neither a def, a lambda, nor an import in this module"
     if hops >= _MAX_IMPORT_HOPS:
         return [], f"re-export chain for '{name}' exceeded {_MAX_IMPORT_HOPS} hops"
 
-    for imp in ast.walk(tree):
-        if not isinstance(imp, ast.ImportFrom):
-            continue
-        for alias in imp.names:
-            if (alias.asname or alias.name) != name:
-                continue
-            dotted = _absolute_module(imp, origin, roots)
-            target = _module_file(dotted, roots) if dotted else None
-            if target is None:
-                return [], None  # leaves the repository — not ours to inspect
-            sub = ast.parse(target.read_text(), filename=str(target))
-            return _resolve_callable(alias.name, None, sub, target, roots, hops + 1)
-
-    return [], f"'{name}' is neither a def, a lambda, nor an import in this module"
+    # Follow the import binding that the SCOPE model chose. The predecessor
+    # scanned `ast.walk(tree)` for any matching ImportFrom anywhere in the
+    # module, which both ignored scope and could not see a local import as the
+    # binding it is (sol HIGH r3 §2).
+    imp, alias = followable[0]
+    dotted = _absolute_module(imp, origin, roots)
+    target = _module_file(dotted, roots) if dotted else None
+    if target is None:
+        return [], None  # leaves the repository — not ours to inspect
+    sub = ast.parse(target.read_text(), filename=str(target))
+    return _resolve_callable(alias.name, None, sub, target, roots, hops + 1)
 
 
 def _param_names(fn) -> set[str]:
@@ -2432,3 +2604,192 @@ def test_rule12_allowlist_entries_are_bounded_and_carry_reasons():
     assert isinstance(_RENDERER_BINDING_EXCEPTIONS, dict), (
         "a set cannot carry reasons — the allowlist is path -> why"
     )
+
+
+# ---------------------------------------------------------------------------
+# Rule 12 — sol HIGH r3 evasions
+# ---------------------------------------------------------------------------
+
+
+def test_rule12_resolves_a_function_local_import_binding(tmp_path: Path):
+    """sol HIGH r3 §2, his shape exactly.
+
+    A function-local import is an ordinary local binding — the everyday
+    "module ships a default renderer, one command imports a specialised one
+    under the same name" override. The r2 scope model indexed assignments,
+    parameters and comprehension targets as shadows but no import bindings at
+    all, so the resolver looked past the real binding to the clean outer def
+    and returned ``resolved=1, violations=0``.
+
+    Imports are followable, so the answer here is a RESOLUTION rather than a
+    fail-closed: the walk reaches ``bad`` across the source root and sees its
+    ``piped`` directly.
+    """
+    root = _synthetic_app(
+        tmp_path,
+        {
+            "evapp/__init__.py": "",
+            "evapp/views/__init__.py": "",
+            "evapp/views/cards.py": """
+                def bad(data, fidelity, width, *, piped=False):
+                    return None
+            """,
+            "evapp/cli.py": """
+                from painted import run_cli
+
+                def renderer(data, fidelity, width):
+                    return None
+
+                def site(argv):
+                    from evapp.views.cards import bad as renderer
+                    return run_cli(argv, fetch=lambda: {}, renderer=renderer)
+            """,
+        },
+    )
+    cli = root / "evapp" / "cli.py"
+    scan = _renderer_binding_violations(
+        ast.parse(cli.read_text()), cli, "evapp/cli.py", [root]
+    )
+    assert scan.resolved == 1 and scan.external == 0
+    assert len(scan.piped) == 1, scan
+    assert "bad()" in scan.piped[0], scan.piped
+
+
+def test_rule12_local_import_shadow_does_not_leak_to_a_sibling_scope(
+    tmp_path: Path,
+):
+    """The other half of scoping the import: a local import in ONE function
+    must not become the binding for a call site in another. The predecessor's
+    ``ast.walk`` scan for a matching ImportFrom was module-wide and would."""
+    root = _synthetic_app(
+        tmp_path,
+        {
+            "evapp/__init__.py": "",
+            "evapp/views.py": """
+                def bad(data, fidelity, width, *, piped=False):
+                    return None
+            """,
+            "evapp/cli.py": """
+                from painted import run_cli
+
+                def renderer(data, fidelity, width):
+                    return None
+
+                def elsewhere(argv):
+                    from evapp.views import bad as renderer
+                    return renderer
+
+                def site(argv):
+                    return run_cli(argv, fetch=lambda: {}, renderer=renderer)
+            """,
+        },
+    )
+    cli = root / "evapp" / "cli.py"
+    scan = _renderer_binding_violations(
+        ast.parse(cli.read_text()), cli, "evapp/cli.py", [root]
+    )
+    # site() sees the module-level def, which is clean.
+    assert (scan.resolved, scan.piped, scan.unresolvable) == (1, [], [])
+
+
+def test_rule12_fails_closed_on_a_local_module_import_binding(tmp_path: Path):
+    """``import x as renderer`` binds a MODULE, not a callable. There is
+    nothing to inspect, so it takes the loud path rather than resolving past
+    the outer def."""
+    root = _synthetic_app(
+        tmp_path,
+        {
+            "evapp/cli.py": """
+                from painted import run_cli
+
+                def renderer(data, fidelity, width):
+                    return None
+
+                def site(argv):
+                    import evapp.views as renderer
+                    return run_cli(argv, fetch=lambda: {}, renderer=renderer)
+            """,
+        },
+    )
+    cli = root / "evapp" / "cli.py"
+    scan = _renderer_binding_violations(
+        ast.parse(cli.read_text()), cli, "evapp/cli.py", [root]
+    )
+    assert scan.resolved == 0
+    assert len(scan.unresolvable) == 1 and "fails closed" in scan.unresolvable[0]
+
+
+def test_rule12_counts_a_subscript_registry_assignment(tmp_path: Path):
+    """sol HIGH r3 §3, his shape exactly::
+
+        runners = {}
+        runners["go"] = run_cli
+        runners["go"](..., render=...)
+
+    Neither modelled nor counted: the RHS is a plain reference so the census
+    skipped it as already-an-alias, while a Subscript target binds no name, so
+    no alias existed and no call site was walked. The census reported
+    population ZERO, which is worse than reporting a boundary — it defeated the
+    countability claim r3 had just added.
+    """
+    tree = ast.parse(
+        textwrap.dedent(
+            """
+            from painted import run_cli
+
+            runners = {}
+            runners["go"] = run_cli
+
+            def site(argv):
+                return runners["go"](argv, fetch=lambda: {},
+                                     render=lambda ctx, d: None)
+            """
+        )
+    )
+    aliases = _local_aliases_for(tree, "run_cli")
+    classified = _boundary_runner_bindings(tree, "evasion.py", aliases, "run_cli")
+    assert len(classified) == 1, classified
+    assert "container (subscript assignment)" in classified[0]
+    # Still honestly out of scope: the call through the subscript is not
+    # walked, and the census is what makes that position visible.
+    assert _run_cli_calls(tree, aliases) == []
+
+
+def test_rule12_counts_an_attribute_registry_assignment():
+    """The sibling spelling — ``registry.go = run_cli`` — has the same shape
+    and the same hole, so it is counted the same way."""
+    tree = ast.parse(
+        textwrap.dedent(
+            """
+            from painted import run_cli
+
+            class Registry:
+                pass
+
+            registry = Registry()
+            registry.go = run_cli
+            """
+        )
+    )
+    aliases = _local_aliases_for(tree, "run_cli")
+    classified = _boundary_runner_bindings(tree, "evasion.py", aliases, "run_cli")
+    assert len(classified) == 1, classified
+    assert "container (attribute assignment)" in classified[0]
+
+
+def test_rule12_subscript_census_ignores_unrelated_assignments():
+    """The floor: storing something that is NOT the runner into a container is
+    ordinary code and must not enter the census."""
+    tree = ast.parse(
+        textwrap.dedent(
+            """
+            from painted import run_cli
+
+            config = {}
+            config["width"] = 80
+            config["name"] = "loops"
+            """
+        )
+    )
+    aliases = _local_aliases_for(tree, "run_cli")
+    assert _boundary_runner_bindings(tree, "e.py", aliases, "run_cli") == []

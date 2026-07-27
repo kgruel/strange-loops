@@ -13,6 +13,7 @@ import ast
 import sys
 import textwrap
 from pathlib import Path
+from typing import NamedTuple
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -55,9 +56,23 @@ def _app_names(apps: Path | None = None) -> tuple[str, ...]:
       and the rule stayed green);
     * bare ``*.py`` modules — a single-module app is importable by its stem.
 
-    ``*.egg-info`` build residue and dot/underscore-prefixed entries are the
-    only exclusions, and they are exclusions by *shape*, not by convention:
-    neither is a name a lib could legally import.
+    Exclusions are by *shape*, and only where the shape makes the name
+    unimportable as a top level: dot-prefixed entries (not identifiers),
+    ``__dunder__`` entries (``__pycache__``, ``__init__``, ``__main__`` —
+    machinery, not top-level import names), and ``*.egg-info`` build residue.
+
+    A SINGLE leading underscore is NOT an exclusion. sol HIGH r2 §5 showed the
+    r1 docstring's claim — "not names a lib could legally import" — was simply
+    false: ``_nsapp`` is a legal identifier, ``import _nsapp.feature`` works,
+    and the exclusion took it out of ``APPS`` and therefore out of Rule 3's
+    reach. Privacy convention is not an import barrier.
+
+    Case sensitivity is a known, unclosed edge: matching against imports is
+    exact-case, so a package named ``Camel`` will not match ``import camel``.
+    That resolves on case-insensitive filesystems and fails on case-sensitive
+    ones, making it a platform-dependent packaging hazard rather than a
+    portable evasion. Noted, not coded around — a case-folding matcher would
+    create false positives on legitimately distinct names.
     """
     base = REPO_ROOT / "apps" if apps is None else apps
     if not base.is_dir():
@@ -68,12 +83,13 @@ def _app_names(apps: Path | None = None) -> tuple[str, ...]:
         if not src.is_dir():
             continue
         for entry in src.iterdir():
-            if entry.name.startswith((".", "_")):
+            name = entry.stem if entry.is_file() else entry.name
+            if entry.name.startswith(".") or name.startswith("__"):
                 continue
             if entry.is_dir() and not entry.name.endswith(".egg-info"):
                 names.add(entry.name)
             elif entry.is_file() and entry.suffix == ".py":
-                names.add(entry.stem)
+                names.add(name)
     return tuple(sorted(names))
 
 
@@ -309,6 +325,79 @@ def test_app_names_include_namespace_packages(tmp_path: Path):
         tmp_path, {"evasion/src/nsapp/feature.py": "VALUE = 1\n"}
     )
     assert "nsapp" in _app_names(apps)
+
+
+def test_app_names_include_underscore_packages(tmp_path: Path):
+    """sol HIGH r2 §5: a single leading underscore is a legal identifier.
+
+    ``apps/x/src/_nsapp/feature.py`` is importable as ``_nsapp.feature`` the
+    moment that ``src`` is on the path. The r1 filter dropped it on a privacy
+    convention that has no force at import time, taking the app out of Rule 3.
+    ``__dunder__`` entries stay excluded — those really are machinery.
+    """
+    apps = _synthetic_apps_tree(
+        tmp_path,
+        {
+            "x/src/_nsapp/feature.py": "VALUE = 1\n",
+            "x/src/_solo.py": "VALUE = 1\n",
+            "x/src/__pycache__/junk.py": "",
+        },
+    )
+    assert _app_names(apps) == ("_nsapp", "_solo")
+
+
+def _app_dirs_missing_src(apps: Path) -> list[str]:
+    """Apps that ship Python but do not use the ``src/`` layout."""
+    offenders = []
+    for app_dir in sorted(apps.iterdir()) if apps.is_dir() else []:
+        if not app_dir.is_dir() or app_dir.name.startswith("."):
+            continue
+        has_python = any(
+            p for p in app_dir.rglob("*.py") if "__pycache__" not in p.parts
+        )
+        if has_python and not (app_dir / "src").is_dir():
+            offenders.append(app_dir.name)
+    return offenders
+
+
+def test_every_app_ships_python_under_src():
+    """The ``src/`` layout becomes a RULE, not a convention (sol HIGH r2 §5).
+
+    ``_app_names`` and Rule 12's ``_source_roots`` both derive from
+    ``apps/*/src``. An app choosing a valid alternate layout — ``apps/x/nsapp/``
+    with the app dir as package root — is therefore invisible to BOTH: its
+    packages never enter ``APPS``, so Rule 3 cannot see a lib importing them,
+    and its sources are never walked for ``render=``/``piped``. Nothing
+    enforced the convention those derivations depend on, so opting out of the
+    layout silently opted out of two ratchets.
+
+    Making it loud is the cheap half of the fix, and the honest one: the
+    derivations keep their simple shape, and the assumption they rest on is now
+    stated where it fails.
+    """
+    offenders = _app_dirs_missing_src(REPO_ROOT / "apps")
+    assert not offenders, (
+        f"apps without a src/ layout: {offenders}. Both APPS (Rule 3) and "
+        "_source_roots (Rule 12) derive from apps/*/src — an app outside that "
+        "layout is exempt from both by accident. Move it under src/, or "
+        "generalise both derivations first."
+    )
+
+
+def test_src_layout_rule_catches_a_flat_app(tmp_path: Path):
+    """sol's flat-layout construction: ``apps/x/nsapp/__init__.py`` with no
+    ``src``. Previously invisible everywhere; now it fails the completeness
+    rule by name."""
+    apps = _synthetic_apps_tree(tmp_path, {"x/nsapp/__init__.py": "\n"})
+    assert _app_names(apps) == ()          # still invisible to the derivation
+    assert _app_dirs_missing_src(apps) == ["x"]  # but no longer invisible
+
+
+def test_src_layout_rule_ignores_apps_without_python(tmp_path: Path):
+    """The floor: a docs-only or asset-only directory under apps/ is not an
+    app skipping the layout, and must not be reported as one."""
+    apps = _synthetic_apps_tree(tmp_path, {"notes/README.md": "hi\n"})
+    assert _app_dirs_missing_src(apps) == []
 
 
 def test_app_names_include_single_module_apps(tmp_path: Path):
@@ -1248,58 +1337,229 @@ def _run_cli_calls(tree: ast.AST, aliases: set[str]) -> list[ast.Call]:
     return out
 
 
+def _mentions_callable(node: ast.AST, aliases: set[str], imported_name: str) -> bool:
+    """Does this expression subtree REACH the runner in any way at all?
+
+    Deliberately wider than :func:`_binds_callable` — this is the detector for
+    the forms the walk does not model, so it has to see them before it can
+    classify them. Includes the reflective spelling
+    ``getattr(painted, "run_cli")``, which mentions the runner only as a string.
+    """
+    for sub in ast.walk(node):
+        if isinstance(sub, ast.Name) and sub.id in aliases:
+            return True
+        if isinstance(sub, ast.Attribute) and sub.attr == imported_name:
+            return True
+        if (
+            isinstance(sub, ast.Call)
+            and isinstance(sub.func, ast.Name)
+            and sub.func.id == "getattr"
+            and len(sub.args) >= 2
+            and isinstance(sub.args[1], ast.Constant)
+            and sub.args[1].value == imported_name
+        ):
+            return True
+    return False
+
+
+def _classify_boundary(value: ast.expr) -> str:
+    """Name the indirection class an out-of-scope runner binding uses."""
+    if isinstance(value, ast.Call):
+        fn = value.func
+        if isinstance(fn, ast.Name) and fn.id == "getattr":
+            return "reflective (getattr)"
+        return "higher-order call (decorator/partial/factory)"
+    if isinstance(value, (ast.Dict, ast.DictComp)):
+        return "container (dict)"
+    if isinstance(value, (ast.ListComp, ast.SetComp, ast.GeneratorExp)):
+        return "container (comprehension)"
+    if isinstance(value, ast.Subscript):
+        return "container (subscript)"
+    return f"unmodelled {type(value).__name__} expression"
+
+
+# Arbiter convergence ruling (090 precedent), applied at 0.10.0 r3: unbounded
+# indirection is NOT chased. Containers, getattr, functools.partial and
+# decorator wrappers can carry a callable arbitrarily far from its definition,
+# and a walk that tried to follow them would be a whole-program dataflow
+# analysis wearing a test's name. They are CLASSIFIED BOUNDARIES.
+#
+# What changed in r3 is that a boundary is no longer an unobserved `continue`.
+# sol's refined doctrine: in-scope cannot-resolve fails loudly; out-of-scope
+# must be explicitly classified and COUNTABLE. So every binding that reaches
+# run_cli through an unmodelled form is enumerated, named by its indirection
+# class, and pinned to a baseline below — the population cannot grow without
+# someone seeing it, even though the rule declines to follow any member of it.
+_RUNNER_BOUNDARY_BASELINE = 0
+
+
+def _boundary_runner_bindings(
+    tree: ast.Module, rel: str, aliases: set[str], imported_name: str
+) -> list[str]:
+    """Bindings that REACH the runner through a form the walk does not model.
+
+    Not violations — classified out-of-scope observations. The census exists so
+    that "we don't follow this" is a counted, reviewable position rather than a
+    silent skip (sol HIGH r2 doctrine).
+    """
+    out: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Assign, ast.AnnAssign, ast.NamedExpr)):
+            value = node.value
+        else:
+            continue
+        if value is None or _binds_callable(value, aliases, imported_name):
+            continue  # modelled: a plain reference, already an alias
+        if not _mentions_callable(value, aliases, imported_name):
+            continue
+        if isinstance(value, ast.Call) and _binds_callable(
+            value.func, aliases, imported_name
+        ):
+            # `code = run_cli(...)` — a direct invocation, fully modelled. Its
+            # ARGUMENTS could still hand the runner onward, so only skip when
+            # they do not.
+            passed_on = [*value.args, *(kw.value for kw in value.keywords)]
+            if not any(
+                _mentions_callable(a, aliases, imported_name) for a in passed_on
+            ):
+                continue
+        out.append(
+            f"  {rel}:{node.lineno} — {imported_name} reaches a binding via "
+            f"{_classify_boundary(value)}; classified out of scope, not walked"
+        )
+    return out
+
+
 _SCOPE_NODES = (
     ast.Module,
     ast.FunctionDef,
     ast.AsyncFunctionDef,
     ast.ClassDef,
     ast.Lambda,
+    # Comprehensions carry their own scope in Python 3, and their `for`
+    # targets bind in it. Omitting them let sol's
+    # `[run_cli(..., renderer=renderer) for renderer in [bad]]` resolve to a
+    # clean outer def (HIGH r2 §3).
+    ast.ListComp,
+    ast.SetComp,
+    ast.DictComp,
+    ast.GeneratorExp,
 )
 
 
-def _lexical_defs(tree: ast.Module) -> tuple[dict, dict]:
-    """``(defs_per_scope, enclosing_scopes_per_node)`` — a real scope model.
-
-    This replaces a flat ``name -> def`` map over ``ast.walk``, which kept ONE
-    definition per spelling for the whole module. ``apps/tasks``' CLI defines
-    six sibling nested ``renderer`` closures, one per command, so every
-    ``renderer=`` binding in that module was checked against whichever def
-    happened to overwrite the map last — sol's HIGH r1 gave ``piped`` to the
-    first shipped renderer and the ratchet stayed green.
+def _lexical_bindings(tree: ast.Module) -> tuple[dict, dict, dict]:
+    """``(defs_per_scope, shadows_per_scope, enclosing_scopes_per_node)``.
 
     A ``def`` statement binds its name in the ENCLOSING scope, which is what
-    makes the six siblings resolve to six different definitions here.
+    makes ``apps/tasks``' six sibling nested ``renderer`` closures resolve to
+    six different definitions rather than collapsing onto one (HIGH r1).
+
+    But indexing ONLY ``def`` bindings is not a Python binding model, and sol's
+    HIGH r2 §3 walked straight through the gap: a clean outer
+    ``def renderer(...)`` masked a NEARER runtime binding of the same name, so
+    the resolver reported the callable Python would not call. Every one of
+    these returned ``resolved=1, violations=0``::
+
+        renderer = bad                  # assignment
+        def f(renderer=bad): ...        # parameter
+        renderer, other = bad, None     # tuple unpack
+        renderer = {"bad": bad}["bad"]  # subscript
+        renderer = getattr(Box, "bad")  # reflective
+        renderer = functools.partial(bad)
+        renderer = decorate(bad)
+        [... for renderer in [bad]]     # comprehension target
+        class C: renderer = bad         # class body
+
+    So SHADOWS are indexed too — every non-``def`` binding construct that can
+    put a different object under the name: assignment (plain, annotated,
+    augmented, walrus), function/lambda parameters, ``for``/``with``/``except``
+    targets, comprehension targets, class statements, and ``global``/
+    ``nonlocal`` declarations (which we cannot follow, so they count as
+    shadows). A shadow nearer than the def makes the binding UNRESOLVABLE,
+    which routes it to the loud fail-closed path rather than to a wrong answer.
     """
     defs: dict[int, dict[str, list]] = {id(tree): {}}
+    shadows: dict[int, dict[str, list[int]]] = {id(tree): {}}
     stacks: dict[int, tuple] = {id(tree): (tree,)}
+
+    def shadow(scope: ast.AST, name: str, lineno: int) -> None:
+        shadows.setdefault(id(scope), {}).setdefault(name, []).append(lineno)
 
     def visit(node: ast.AST, stack: tuple) -> None:
         stacks[id(node)] = stack
+        here = stack[-1]
+
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            defs.setdefault(id(stack[-1]), {}).setdefault(node.name, []).append(node)
+            defs.setdefault(id(here), {}).setdefault(node.name, []).append(node)
+        elif isinstance(node, ast.ClassDef):
+            # A class statement binds a name that is not a function def.
+            shadow(here, node.name, node.lineno)
+        elif isinstance(node, ast.arg):
+            # Parameters are children of the arguments node, so `here` is
+            # already the function/lambda whose own scope they bind in.
+            shadow(here, node.arg, node.lineno)
+        elif isinstance(node, ast.comprehension):
+            for name in _assign_target_names(node.target):
+                shadow(here, name, getattr(node.target, "lineno", 0))
+        elif isinstance(node, ast.ExceptHandler) and node.name:
+            shadow(here, node.name, node.lineno)
+        elif isinstance(node, (ast.Global, ast.Nonlocal)):
+            for name in node.names:
+                shadow(here, name, node.lineno)
+        elif isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign, ast.NamedExpr)):
+            targets = (
+                node.targets if isinstance(node, ast.Assign) else [node.target]
+            )
+            for target in targets:
+                for name in _assign_target_names(target):
+                    shadow(here, name, node.lineno)
+        elif isinstance(node, (ast.For, ast.AsyncFor)):
+            for name in _assign_target_names(node.target):
+                shadow(here, name, node.lineno)
+        elif isinstance(node, ast.withitem) and node.optional_vars is not None:
+            for name in _assign_target_names(node.optional_vars):
+                shadow(here, name, getattr(node.optional_vars, "lineno", 0))
+
         if isinstance(node, _SCOPE_NODES):
             defs.setdefault(id(node), {})
+            shadows.setdefault(id(node), {})
             stack = (*stack, node)
         for child in ast.iter_child_nodes(node):
             visit(child, stack)
 
     for child in ast.iter_child_nodes(tree):
         visit(child, (tree,))
-    return defs, stacks
+    return defs, shadows, stacks
 
 
-def _resolve_lexically(name: str, node: ast.AST, defs: dict, stacks: dict) -> list:
-    """Defs of ``name`` in the nearest enclosing scope of ``node`` that binds it.
+def _resolve_lexically(
+    name: str, node: ast.AST, defs: dict, shadows: dict, stacks: dict
+) -> tuple[list, str | None]:
+    """``(defs of name in its nearest binding scope, reason it is unresolvable)``.
 
-    ALL of that scope's definitions are returned, not the textually-last one:
-    a scope that rebinds a name is over-approximated rather than flow-analysed,
+    The nearest enclosing scope that binds the name AT ALL decides the answer —
+    that is what lexical scoping means, and looking past it was the r2 defect.
+    If that scope's binding is (or includes) a non-``def`` binding, the name is
+    unresolvable: some object other than the visible def may be under it at
+    runtime, and guessing is exactly what produced a false green.
+
+    ALL of a scope's definitions are returned, not the textually-last one: a
+    scope that rebinds a name is over-approximated rather than flow-analysed,
     so a ``piped``-taking def cannot hide behind a later clean redefinition.
     """
     for scope in reversed(stacks.get(id(node), ())):
         found = defs.get(id(scope), {}).get(name)
+        shadowed = shadows.get(id(scope), {}).get(name)
+        if shadowed:
+            where = ", ".join(f"line {n}" for n in sorted(set(shadowed)))
+            kind = "also rebound" if found else "bound by a non-def statement"
+            return [], (
+                f"'{name}' is {kind} in its nearest binding scope ({where}) — "
+                "the def a reader sees may not be the object Python calls"
+            )
         if found:
-            return list(found)
-    return []
+            return list(found), None
+    return [], None
 
 
 def _absolute_module(node: ast.ImportFrom, origin: Path, roots: list[Path]) -> str | None:
@@ -1357,10 +1617,19 @@ def _resolve_callable(
     the caller so the skip stays visible. Any other unresolved case returns a
     reason and the caller fails closed on it.
     """
-    defs, stacks = _lexical_defs(tree)
+    defs, shadows, stacks = _lexical_bindings(tree)
     if node is not None:
-        found = _resolve_lexically(name, node, defs, stacks)
+        found, shadow_reason = _resolve_lexically(name, node, defs, shadows, stacks)
+        if shadow_reason is not None:
+            return [], shadow_reason  # nearer non-def binding — fail closed
     else:
+        # Re-export hop: module scope only. A module-level rebinding of the
+        # same name is still a shadow, and still fails closed.
+        if shadows.get(id(tree), {}).get(name):
+            return [], (
+                f"'{name}' is rebound at module scope in {origin.name} — "
+                "the re-exported def may not be what the name reaches"
+            )
         found = list(defs.get(id(tree), {}).get(name, ()))
     if found:
         return found, None
@@ -1400,11 +1669,26 @@ def _param_names(fn) -> set[str]:
 # cover the site, and the callback re-derives ctx.width/ctx.is_tty by hand.
 _RENDER_CONTRACT_EXCEPTIONS: set[str] = set()
 
-# Shrink-only, and expected to stay empty. An entry here says "this file binds
-# renderer= to something the walk cannot resolve, and that is intentional" —
-# i.e. it opts a file OUT of the fail-closed rule, so it owes the same
-# justification any other detection-ratchet opt-out owes.
-_RENDERER_BINDING_EXCEPTIONS: set[str] = set()
+# Shrink-only, and mechanically so (sol HIGH r2 §3 found the r1 version was a
+# shrink-only *claim* with nothing enforcing it: `_check_exceptions` only
+# verified the paths existed, any source file could be added with no reason and
+# no cardinality bound, and one entry suppressed EVERY renderer finding in that
+# file — including a resolved renderer explicitly declaring `piped`).
+#
+# Three mechanics now back the claim:
+#   * path -> REASON, and the reason is required to be non-empty prose;
+#   * the baseline below pins the cardinality, so growth is a deliberate,
+#     reviewable edit to a number rather than a quiet append;
+#   * suppression is scoped to UNRESOLVABLE bindings only. A `piped`-taking
+#     renderer that RESOLVED is never suppressible by any entry — that is the
+#     invariant itself, not a limit of the walk.
+#
+# An entry says only: "this file binds renderer= to something the walk cannot
+# resolve, and that is intentional."
+_RENDERER_BINDING_EXCEPTIONS: dict[str, str] = {}
+
+# Shrink-only baseline. Raising this is the reviewable act.
+_RENDERER_BINDING_EXCEPTIONS_BASELINE = 0
 
 
 def _render_contract_violations(tree: ast.Module, rel: str) -> tuple[list[str], int]:
@@ -1448,19 +1732,34 @@ def _lens_entry_piped_violations(tree: ast.Module, rel: str) -> list[str]:
     return violations
 
 
+class _RendererScan(NamedTuple):
+    """One module's renderer= census.
+
+    ``piped`` and ``unresolvable`` are separate lists on purpose: the allowlist
+    may suppress ONLY the second. sol HIGH r2 §3 noted that a single combined
+    list let one allowlist entry silence a resolved renderer that explicitly
+    declares ``piped`` — a far broader exemption than the comment claimed.
+    """
+
+    piped: list[str]          # resolved to a def that takes `piped` — never suppressible
+    unresolvable: list[str]   # repo-local and unresolvable — suppressible, with a reason
+    resolved: int
+    external: int
+
+
 def _renderer_binding_violations(
     tree: ast.Module, origin: Path, rel: str, roots: list[Path]
-) -> tuple[list[str], int, int]:
-    """``(violations, bindings resolved, bindings that leave the repository)``.
+) -> _RendererScan:
+    """Resolve every ``renderer=`` keyword on a ``run_cli`` call.
 
-    Every ``renderer=`` keyword on a ``run_cli`` call is resolved to the
-    function def(s) it can reach — lexically first (nearest enclosing scope,
-    so sibling nested closures stay distinct), then through repository-local
-    imports. An unresolved REPOSITORY-LOCAL binding is itself a violation:
-    the rule fails closed, because "skipped what it could not resolve" was
-    one of sol's HIGH r1 evasions, not an acceptable boundary.
+    Lexically first (nearest BINDING scope, so sibling nested closures stay
+    distinct and a nearer non-def binding fails closed), then through
+    repository-local imports. An unresolved REPOSITORY-LOCAL binding is itself
+    a violation: the rule fails closed, because "skipped what it could not
+    resolve" was one of sol's HIGH r1 evasions, not an acceptable boundary.
     """
-    violations: list[str] = []
+    piped: list[str] = []
+    unresolvable: list[str] = []
     resolved = external = 0
     aliases = _local_aliases_for(tree, "run_cli")
     for call in _run_cli_calls(tree, aliases):
@@ -1483,7 +1782,7 @@ def _renderer_binding_violations(
                     if "piped" not in _param_names(target):
                         continue
                     name = getattr(target, "name", "<lambda>")
-                    violations.append(
+                    piped.append(
                         f"  {rel}:{target.lineno} — renderer {name}() "
                         "declares a 'piped' parameter; the register is the "
                         "offered width painted already passes "
@@ -1492,14 +1791,14 @@ def _renderer_binding_violations(
             elif reason is None:
                 external += 1  # painted/stdlib — outside every source root
             else:
-                violations.append(
+                unresolvable.append(
                     f"  {rel}:{value.lineno} — renderer= binding could not be "
                     f"resolved ({reason}); Rule 12 fails closed on "
                     "repository-local bindings rather than skipping them — "
                     "bind a def in this module, import one from a repository "
-                    "module, or allowlist the file"
+                    "module, or allowlist the file with a reason"
                 )
-    return violations, resolved, external
+    return _RendererScan(piped, unresolvable, resolved, external)
 
 
 def test_run_cli_sites_use_renderer_not_render():
@@ -1509,6 +1808,7 @@ def test_run_cli_sites_use_renderer_not_render():
     _check_exceptions(_RENDER_CONTRACT_EXCEPTIONS)
 
     violations = []
+    boundary = []
     seen_calls = 0
     for py_file in _all_source_files():
         rel = _rel(py_file)
@@ -1518,11 +1818,26 @@ def test_run_cli_sites_use_renderer_not_render():
         found, seen = _render_contract_violations(tree, rel)
         violations.extend(found)
         seen_calls += seen
+        aliases = _local_aliases_for(tree, "run_cli")
+        boundary.extend(_boundary_runner_bindings(tree, rel, aliases, "run_cli"))
 
     assert seen_calls, (
         "Rule 12 found no run_cli call sites at all — the walk went vacuous "
         "(painted renamed, or the source roots moved). Fix the walk; a green "
-        "ratchet that inspects nothing is worse than no ratchet."
+        f"ratchet that inspects nothing is worse than no ratchet. "
+        f"({len(boundary)} classified out-of-scope bindings seen.)"
+    )
+    # The classified-boundary census. Out-of-scope indirection is not chased
+    # (arbiter convergence ruling), but it is COUNTED — a boundary that grows
+    # silently is indistinguishable from a rule that stopped working.
+    assert len(boundary) <= _RUNNER_BOUNDARY_BASELINE, (
+        f"{len(boundary)} run_cli bindings now reach the runner through "
+        f"indirection the walk does not model (baseline "
+        f"{_RUNNER_BOUNDARY_BASELINE}). These are NOT automatically "
+        "violations — container/getattr/partial/decorator forms are a "
+        "classified boundary — but the population may not grow unobserved. "
+        "Review each, then raise the baseline deliberately:\n"
+        + "\n".join(boundary)
     )
     assert not violations, (
         "run_cli() must bind renderer=, never the deprecated render= "
@@ -1549,7 +1864,18 @@ def test_no_lens_entry_point_takes_a_piped_argument():
       lexical scope chain and then through repository-local imports — with
       unresolved repository-local bindings failing closed.
     """
-    _check_exceptions(_RENDERER_BINDING_EXCEPTIONS)
+    _check_exceptions(set(_RENDERER_BINDING_EXCEPTIONS))
+    assert len(_RENDERER_BINDING_EXCEPTIONS) <= _RENDERER_BINDING_EXCEPTIONS_BASELINE, (
+        f"_RENDERER_BINDING_EXCEPTIONS has {len(_RENDERER_BINDING_EXCEPTIONS)} "
+        f"entries, baseline {_RENDERER_BINDING_EXCEPTIONS_BASELINE}. The "
+        "allowlist is shrink-only: raising the baseline is the reviewable act, "
+        "appending is not."
+    )
+    for path, reason in _RENDERER_BINDING_EXCEPTIONS.items():
+        assert reason and reason.strip(), (
+            f"_RENDERER_BINDING_EXCEPTIONS[{path!r}] has no reason. An opt-out "
+            "from a fail-closed rule states why the binding cannot be resolved."
+        )
 
     roots = _source_roots()
     violations = []
@@ -1565,13 +1891,15 @@ def test_no_lens_entry_point_takes_a_piped_argument():
             seen_lens_modules += 1
             violations.extend(_lens_entry_piped_violations(tree, rel))
 
-        found, resolved, external = _renderer_binding_violations(
-            tree, py_file, rel, roots
-        )
-        seen_renderer_bindings += resolved
-        left_repository += external
+        scan = _renderer_binding_violations(tree, py_file, rel, roots)
+        seen_renderer_bindings += scan.resolved
+        left_repository += scan.external
+        # A resolved renderer that declares `piped` IS the invariant — no
+        # allowlist entry may suppress it (sol HIGH r2 §3). Only the
+        # cannot-resolve findings are suppressible.
+        violations.extend(scan.piped)
         if rel not in _RENDERER_BINDING_EXCEPTIONS:
-            violations.extend(found)
+            violations.extend(scan.unresolvable)
 
     assert seen_lens_modules, (
         "Rule 12 found no lenses/ modules — the walk went vacuous (packages "
@@ -1700,9 +2028,11 @@ def test_rule12_resolves_the_nearest_nested_renderer(tmp_path: Path):
         },
     )
     cli = root / "evapp" / "cli.py"
-    violations, resolved, external = _renderer_binding_violations(
+    scan = _renderer_binding_violations(
         ast.parse(cli.read_text()), cli, "evapp/cli.py", [root]
     )
+    violations = [*scan.piped, *scan.unresolvable]
+    resolved, external = scan.resolved, scan.external
     assert (resolved, external) == (2, 0)
     assert len(violations) == 1, violations
     assert "piped" in violations[0]
@@ -1733,9 +2063,11 @@ def test_rule12_inspects_a_renderer_imported_from_a_repository_module(
         },
     )
     cli = root / "evapp" / "cli.py"
-    violations, resolved, external = _renderer_binding_violations(
+    scan = _renderer_binding_violations(
         ast.parse(cli.read_text()), cli, "evapp/cli.py", [root]
     )
+    violations = [*scan.piped, *scan.unresolvable]
+    resolved, external = scan.resolved, scan.external
     assert (resolved, external) == (1, 0)
     assert violations and "card_view" in violations[0]
 
@@ -1765,9 +2097,11 @@ def test_rule12_resolves_relative_and_re_exported_renderer_imports(
         },
     )
     cli = root / "evapp" / "cli.py"
-    violations, resolved, external = _renderer_binding_violations(
+    scan = _renderer_binding_violations(
         ast.parse(cli.read_text()), cli, "evapp/cli.py", [root]
     )
+    violations = [*scan.piped, *scan.unresolvable]
+    resolved, external = scan.resolved, scan.external
     assert (resolved, external) == (1, 0)
     assert violations and "card_view" in violations[0]
 
@@ -1793,9 +2127,11 @@ def test_rule12_fails_closed_on_an_unresolvable_repository_binding(
         },
     )
     cli = root / "evapp" / "cli.py"
-    violations, resolved, external = _renderer_binding_violations(
+    scan = _renderer_binding_violations(
         ast.parse(cli.read_text()), cli, "evapp/cli.py", [root]
     )
+    violations = [*scan.piped, *scan.unresolvable]
+    resolved, external = scan.resolved, scan.external
     assert (resolved, external) == (0, 0)
     assert violations and "fails closed" in violations[0]
 
@@ -1818,7 +2154,281 @@ def test_rule12_counts_but_does_not_flag_renderers_outside_the_repository(
         },
     )
     cli = root / "evapp" / "cli.py"
-    violations, resolved, external = _renderer_binding_violations(
+    scan = _renderer_binding_violations(
         ast.parse(cli.read_text()), cli, "evapp/cli.py", [root]
     )
+    violations = [*scan.piped, *scan.unresolvable]
+    resolved, external = scan.resolved, scan.external
     assert (violations, resolved, external) == ([], 0, 1)
+
+
+# ---------------------------------------------------------------------------
+# Rule 12 — sol HIGH r2 evasions
+# ---------------------------------------------------------------------------
+
+# Sol's §3 table, verbatim in shape: in each case a clean outer
+# `def renderer(...)` decoy exists, and a NEARER non-def binding puts `bad`
+# (which takes `piped`) under the same name. All of these returned
+# `resolved=1, violations=0` against the r1 scope model — the resolver named a
+# callable Python would not call.
+_SHADOW_EVASIONS = {
+    "assignment": """
+        def by_assignment(argv):
+            renderer = bad
+            return run_cli(argv, fetch=lambda: {}, renderer=renderer)
+    """,
+    "parameter": """
+        def by_parameter(argv, renderer=bad):
+            return run_cli(argv, fetch=lambda: {}, renderer=renderer)
+    """,
+    "tuple_unpack": """
+        def by_tuple(argv):
+            renderer, other = bad, None
+            return run_cli(argv, fetch=lambda: {}, renderer=renderer)
+    """,
+    "dict_subscript": """
+        def by_dict(argv):
+            renderer = {"bad": bad}["bad"]
+            return run_cli(argv, fetch=lambda: {}, renderer=renderer)
+    """,
+    "getattr": """
+        def by_getattr(argv):
+            renderer = getattr(Box, "bad")
+            return run_cli(argv, fetch=lambda: {}, renderer=renderer)
+    """,
+    "partial": """
+        def by_partial(argv):
+            renderer = functools.partial(bad)
+            return run_cli(argv, fetch=lambda: {}, renderer=renderer)
+    """,
+    "decorator": """
+        def by_decorator(argv):
+            renderer = decorate(bad)
+            return run_cli(argv, fetch=lambda: {}, renderer=renderer)
+    """,
+    "for_loop": """
+        def by_for(argv):
+            for renderer in [bad]:
+                return run_cli(argv, fetch=lambda: {}, renderer=renderer)
+    """,
+    "with_target": """
+        def by_with(argv):
+            with opened() as renderer:
+                return run_cli(argv, fetch=lambda: {}, renderer=renderer)
+    """,
+    "comprehension": """
+        def by_comprehension(argv):
+            return [
+                run_cli(argv, fetch=lambda: {}, renderer=renderer)
+                for renderer in [bad]
+            ]
+    """,
+    "class_body": """
+        class C:
+            renderer = bad
+            result = run_cli([], fetch=lambda: {}, renderer=renderer)
+    """,
+    "global_decl": """
+        def by_global(argv):
+            global renderer
+            return run_cli(argv, fetch=lambda: {}, renderer=renderer)
+    """,
+}
+
+
+def _shadow_module(tmp_path: Path, body: str) -> tuple[ast.Module, Path, Path]:
+    """A module with a clean outer ``renderer`` decoy plus one evasion body."""
+    root = _synthetic_app(
+        tmp_path,
+        {
+            "evapp/cli.py": textwrap.dedent(
+                """
+                from painted import run_cli
+
+                def renderer(data, fidelity, width):
+                    return None
+
+                def bad(data, fidelity, width, *, piped=False):
+                    return None
+                """
+            ).lstrip()
+            + textwrap.dedent(body),
+        },
+    )
+    cli = root / "evapp" / "cli.py"
+    return ast.parse(cli.read_text()), cli, root
+
+
+def test_rule12_fails_closed_when_a_local_binding_shadows_the_renderer(
+    tmp_path: Path,
+):
+    """sol HIGH r2 §3: the r1 scope model indexed only ``def`` bindings.
+
+    A clean outer definition therefore masked a nearer runtime binding of the
+    same name, and the walk confidently reported the wrong callable — worse
+    than skipping, because it looked like a resolution. Every shape below must
+    now land on the loud fail-closed path instead.
+
+    Note this is deliberately NOT an attempt to follow the shadow to its real
+    target (that would be whole-program dataflow, which the arbiter ruling
+    declines). It is the honest answer: the name's nearest binding is not a
+    def, so what Python calls here is unknown, and unknown fails closed.
+    """
+    for label, body in _SHADOW_EVASIONS.items():
+        tree, cli, root = _shadow_module(tmp_path / label, body)
+        scan = _renderer_binding_violations(tree, cli, "evapp/cli.py", [root])
+        assert scan.resolved == 0, (
+            f"[{label}] resolved a def while a nearer non-def binding shadows "
+            "it — this is the r2 evasion, not a resolution"
+        )
+        assert scan.piped == []
+        assert len(scan.unresolvable) == 1, f"[{label}] {scan}"
+        assert "fails closed" in scan.unresolvable[0], f"[{label}] {scan}"
+
+
+def test_rule12_still_resolves_an_unshadowed_nested_renderer(tmp_path: Path):
+    """The floor for the test above: fail-closed must not swallow everything.
+
+    The repository's real shape — a nested ``def renderer`` with no competing
+    binding of that name in the same scope — must still RESOLVE, or the
+    shadowing fix would have silently converted the whole ratchet into a
+    uniform "cannot resolve" and the piped check would inspect nothing.
+    """
+    root = _synthetic_app(
+        tmp_path,
+        {
+            "evapp/cli.py": """
+                from painted import run_cli
+
+                def cmd(argv):
+                    def renderer(data, fidelity, width, *, piped=False):
+                        return None
+                    return run_cli(argv, fetch=lambda: {}, renderer=renderer)
+            """,
+        },
+    )
+    cli = root / "evapp" / "cli.py"
+    scan = _renderer_binding_violations(
+        ast.parse(cli.read_text()), cli, "evapp/cli.py", [root]
+    )
+    assert (scan.resolved, scan.unresolvable) == (1, [])
+    assert scan.piped and "piped" in scan.piped[0]
+
+
+def test_rule12_classifies_out_of_scope_runner_bindings():
+    """sol HIGH r2 doctrine: out-of-scope must be classified and countable.
+
+    The arbiter ruling declines to CHASE container/reflective/higher-order
+    aliases — following them is whole-program dataflow. What it does not
+    permit is an unobserved ``continue``. Each form below is recognised and
+    named, so the census in ``test_run_cli_sites_use_renderer_not_render``
+    fails when the population grows.
+    """
+    tree = ast.parse(
+        textwrap.dedent(
+            """
+            import functools
+
+            import painted
+            from painted import run_cli
+
+            registry = {"go": run_cli}
+            reflective = getattr(painted, "run_cli")
+            wrapped = decorate(run_cli)
+            partialed = functools.partial(run_cli)
+            """
+        )
+    )
+    aliases = _local_aliases_for(tree, "run_cli")
+    classified = _boundary_runner_bindings(tree, "evasion.py", aliases, "run_cli")
+    assert len(classified) == 4, classified
+    joined = "\n".join(classified)
+    assert "container (dict)" in joined
+    assert "reflective (getattr)" in joined
+    assert joined.count("higher-order call") == 2
+    # And none of them silently became an alias — that is the honest half:
+    # the walk does not claim to follow these.
+    assert {"registry", "reflective", "wrapped", "partialed"} & aliases == set()
+
+
+def test_rule12_boundary_census_ignores_a_direct_run_cli_invocation():
+    """The census must not cry wolf on ordinary calls. ``code = run_cli(...)``
+    mentions the runner but hands nothing onward, so it is neither an alias nor
+    a boundary. A call that DOES pass the runner into something else is."""
+    tree = ast.parse(
+        textwrap.dedent(
+            """
+            from painted import run_cli
+
+            def site(argv):
+                code = run_cli(argv, fetch=lambda: {},
+                               renderer=lambda d, f, w: None)
+                return code
+            """
+        )
+    )
+    aliases = _local_aliases_for(tree, "run_cli")
+    assert _boundary_runner_bindings(tree, "e.py", aliases, "run_cli") == []
+
+    leaky = ast.parse(
+        textwrap.dedent(
+            """
+            from painted import run_cli
+
+            handed_on = register(run_cli)
+            """
+        )
+    )
+    aliases = _local_aliases_for(leaky, "run_cli")
+    assert len(_boundary_runner_bindings(leaky, "e.py", aliases, "run_cli")) == 1
+
+
+def test_rule12_allowlist_cannot_suppress_a_resolved_piped_renderer(
+    tmp_path: Path,
+):
+    """sol HIGH r2 §3: one allowlist entry used to silence EVERY renderer
+    finding in a file, including a resolved def that declares ``piped`` — the
+    invariant itself. Suppression is now scoped to the unresolvable list, so an
+    entry cannot reach the finding it was never meant to cover."""
+    root = _synthetic_app(
+        tmp_path,
+        {
+            "evapp/cli.py": """
+                from painted import run_cli
+                from functools import partial
+
+                built = partial(print)
+
+                def cmd(argv):
+                    def renderer(data, fidelity, width, *, piped=False):
+                        return None
+                    return run_cli(argv, fetch=lambda: {}, renderer=renderer)
+
+                def other(argv):
+                    return run_cli(argv, fetch=lambda: {}, renderer=built)
+            """,
+        },
+    )
+    cli = root / "evapp" / "cli.py"
+    scan = _renderer_binding_violations(
+        ast.parse(cli.read_text()), cli, "evapp/cli.py", [root]
+    )
+    # Both findings are present, but they live in different buckets.
+    assert len(scan.piped) == 1 and "piped" in scan.piped[0]
+    assert len(scan.unresolvable) == 1 and "fails closed" in scan.unresolvable[0]
+    # An allowlist entry for this file suppresses only the second.
+    assert scan.piped, (
+        "the piped finding must survive any allowlist entry — it is the "
+        "invariant, not a limitation of the walk"
+    )
+
+
+def test_rule12_allowlist_entries_are_bounded_and_carry_reasons():
+    """The shrink-only claim, made mechanical. Empty today; the point is that
+    growing it is an edit to a pinned number plus a required justification,
+    not a quiet append."""
+    assert len(_RENDERER_BINDING_EXCEPTIONS) <= _RENDERER_BINDING_EXCEPTIONS_BASELINE
+    assert all(r and r.strip() for r in _RENDERER_BINDING_EXCEPTIONS.values())
+    assert isinstance(_RENDERER_BINDING_EXCEPTIONS, dict), (
+        "a set cannot carry reasons — the allowlist is path -> why"
+    )

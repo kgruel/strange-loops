@@ -130,19 +130,53 @@ walk written with the 0.9.0 table in hand:
 | scoping | one def per spelling module-wide; apps/tasks' six sibling nested `renderer` closures all collapsed onto whichever overwrote the map | real lexical scope chain, nearest enclosing scope, all candidates in it |
 | granularity | a `renderer=` name imported from another repo module was `continue`d | imports (absolute + relative + one re-export hop) resolve across source roots; unresolved repo-local bindings **fail closed** |
 
-Two lessons the table generalises. First: **the walk's declared "known
-boundary" is where the next evasion lives.** Rule 12's preamble named
-variable-threaded runners and cross-module bindings as accepted limits, and
-those are precisely the two sol constructed — a documented limitation is an
-advertised hole, not a defence. Second: **skipping is a silent pass, so
-"cannot resolve" must be loud.** `if target is None: continue` reads as
-caution and behaves as an exemption; fail-closed with a shrink-only allowlist
-puts the same judgment on the record where it can be reviewed.
-
 Their regression suite is deliberately *synthetic* (`tests/test_architecture.py`,
 the Rule 12 evasion block): each case reconstructs the evading source rather
 than asserting against the repository as it currently looks, which is the only
 form that stays a ratchet after the repository changes.
+
+**Round 2 (sol HIGH, 0.10.0 r2).** Every r1 repro stayed closed; four of the
+five fixes were regression-complete but not ratchet-complete, and the same
+three defect classes returned one level in. The pattern worth keeping is that
+each r2 evasion lived in the *fix's own new machinery*:
+
+| Defect class | r2 instance | Fix |
+|---|---|---|
+| scoping | the new scope model indexed only `def` bindings, so a clean outer `def renderer` masked a nearer assignment/parameter/comprehension/class-body binding — the walk named a callable Python would not call | shadows indexed too; nearest binding scope decides, and a non-`def` binding there is **unresolvable**, not a resolution |
+| granularity | one-vector sentinels were *fixed points* of plausible encoder transforms (`.strip().lower()` on an already-lowercase sentinel; `sorted()` on a one-element tuple) | hostile vectors: mixed case + spaces, ≥3 unsorted distinct elements, negatives away from 0/1 — plus a test asserting the hostility itself |
+| granularity | `APPS` excluded single-underscore packages on a privacy convention that has no force at import time; and nothing enforced the `src/` layout both derivations depend on | underscore packages included; a completeness rule fails any app that ships Python outside `src/` |
+| model/runtime drift | the "shrink-only" allowlist was a *claim* — no cardinality bound, no reasons, and one entry suppressed every finding in a file including the invariant itself | path→reason map, pinned baseline, suppression scoped to unresolvable bindings only |
+
+### Two generalizations, in their refined form
+
+Both of these were first written after r1 in a stronger form than they can
+carry. Sol's r2 qualifications are the versions to keep.
+
+**1. A documented boundary is an advertised attack surface — and becomes a
+hole when the invariant stays reachable through it.** The r1 phrasing ("a
+documented boundary IS a hole") is a useful adversarial reflex but false as
+doctrine. Rule 12's `getattr`/container boundaries were real holes: the
+forbidden `render=` contract was directly reachable through them. A boundary
+that is genuinely out of scope, separately enforced, or fails loudly is not.
+The test is reachability of the invariant, not the presence of a caveat.
+
+**2. In-scope cannot-resolve must fail loudly; out-of-scope must be
+explicitly classified and countable — never an unobserved `continue`.** The
+r1 phrasing ("cannot-resolve must be loud") is overbroad: Rule 12
+*intentionally* permits bindings proven to leave the repository, and always
+will. What cannot be permitted is an *unclassified* skip, which is
+indistinguishable from a pass and therefore cannot support the rule's claim.
+Hence the r3 shape: in-scope unresolvable → violation; out-of-scope →
+counted against a pinned baseline, so the boundary population cannot grow
+without someone seeing it.
+
+That second rule is also where the **arbiter convergence ruling** (090
+precedent) bites. Container, `getattr`, `functools.partial` and decorator
+aliases are *accepted* boundaries — chasing them is whole-program dataflow
+analysis wearing a test's name, and the budget above exists precisely to stop
+that. Converging means: stop widening the matcher, and make the declined
+territory countable instead. A ratchet is allowed to say "I do not follow
+this" — it is not allowed to say it silently.
 
 ## Cost accounting (why the lumpiness is fine)
 

@@ -1135,7 +1135,24 @@ def vertex_fold(
             from atoms.fold import Upsert
 
             at_rowid = at.rowid if at is not None else None
-            with StoreReader(store_path) as reader:
+            # ONE snapshot across every read that contributes to this fold
+            # (sol HIGH r2, confirmed P2). The per-kind reads, the kind stats,
+            # and live_edge() were separate autocommit statements: live_edge()
+            # became internally coherent in r1, but it was still not in the
+            # same snapshot as the rows it describes. A fact appended between
+            # the fold reads and the edge read produced a fold whose rows say
+            # one commit and whose edge disclosure says another — an answer
+            # true in NEITHER snapshot (reproduced: keys ["before"] with
+            # edge_facts 1, where the coherent readings are ["before"]/0 and
+            # ["before","after"]/1).
+            #
+            # Same defect class as the r1 finding, one level up: individually
+            # coherent statements assembled into an incoherent answer. The
+            # per-statement fix does not compose, so the fix has to be at the
+            # assembly boundary — which is what StoreReader.snapshot() already
+            # is (BEGIN DEFERRED, held to rollback; the reader is query_only
+            # so there is nothing to commit).
+            with StoreReader(store_path) as reader, reader.snapshot():
                 raw = {}
                 for k, spec in full_specs.items():
                     facts = reader.facts_by_kind(k, at_rowid=at_rowid, until_ts=as_of)

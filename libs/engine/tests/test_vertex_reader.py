@@ -2839,3 +2839,83 @@ class TestFoldStateLiveEdge:
         state = vertex_fold(vpath)
         assert state.edge_facts == 0
         assert state.edge_since is None
+
+    def test_fold_rows_and_edge_describe_one_commit(self, tmp_path, monkeypatch):
+        """sol HIGH r2, confirmed P2 — the neither-snapshot repro.
+
+        ``live_edge()`` became internally coherent in r1, but it ran as its own
+        autocommit statement, separate from the per-kind reads whose rows it
+        annotates. A fact appended between them yielded a fold describing one
+        commit and an edge disclosure describing another:
+
+            returned:              keys ["before"],            edge_facts 1
+            coherent pre-commit:   keys ["before"],            edge_facts 0
+            coherent post-commit:  keys ["before", "after"],   edge_facts 1
+
+        The returned pair is true in neither. vertex_fold now holds ONE
+        ``StoreReader.snapshot()`` across every contributing read, so whichever
+        commit it lands on, the rows and the edge agree about it.
+        """
+        from datetime import datetime, timezone
+
+        from engine import Tick, vertex_fold
+        from engine.sqlite_store import SqliteStore
+        from engine.store_reader import StoreReader
+
+        def _store(path):
+            return SqliteStore(
+                path=path, serialize=lambda e: e, deserialize=lambda d: d
+            )
+
+        vpath = _create_vertex_file(
+            tmp_path, "coherent", '  decision { fold { items "by" "topic" } }'
+        )
+        db = tmp_path / "store.db"
+
+        writer = _store(db)
+        writer.append({
+            "kind": "decision", "ts": 100.0, "observer": "o",
+            "payload": {"topic": "before"},
+        })
+        writer.append_tick(
+            Tick(name="seal", ts=datetime(2025, 6, 1, tzinfo=timezone.utc),
+                 payload={}, origin="v")
+        )
+        writer.close()
+
+        # Land the concurrent append exactly where sol did: after the per-kind
+        # fold reads, immediately before the edge read.
+        original = StoreReader.live_edge
+        fired = False
+
+        def racing_live_edge(self):
+            nonlocal fired
+            if not fired:
+                fired = True
+                concurrent = _store(db)
+                concurrent.append({
+                    "kind": "decision", "ts": 200.0, "observer": "o",
+                    "payload": {"topic": "after"},
+                })
+                concurrent.close()
+            return original(self)
+
+        monkeypatch.setattr(StoreReader, "live_edge", racing_live_edge)
+        state = vertex_fold(vpath)
+        monkeypatch.undo()
+
+        assert fired, "the interleaving never ran — the hook missed live_edge"
+
+        section = next(s for s in state.sections if s.kind == "decision")
+        keys = sorted(i.payload["topic"] for i in section.items)
+        pair = (keys, state.edge_facts)
+        assert pair in (
+            (["before"], 0),               # snapshot pinned before the commit
+            (["after", "before"], 1),      # snapshot pinned after the commit
+        ), (
+            f"vertex_fold returned rows {keys} with edge_facts "
+            f"{state.edge_facts} — true in neither coherent snapshot"
+        )
+        # Under a read transaction opened at the first per-kind read, the
+        # concurrent commit is invisible for the rest of the fold.
+        assert pair == (["before"], 0)

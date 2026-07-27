@@ -4,6 +4,5 @@
   "version": "0.1.0",
   "author": { "name": "Kyle Gruel" },
   "homepage": "https://github.com/kgruel/strange-loops",
-  "keywords": ["loops", "attention", "fold", "vertex", "dogfood"],
-  "hooks": "./hooks/hooks.json"
+  "keywords": ["loops", "attention", "fold", "vertex", "dogfood"]
 }

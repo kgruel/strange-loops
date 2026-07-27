@@ -34,7 +34,29 @@ def _lib_names() -> tuple[str, ...]:
 
 
 LIBS = _lib_names()
-APPS = ("loops", "hlab", "strange_loops")
+
+
+def _app_names() -> tuple[str, ...]:
+    """Importable package names under ``apps/*/src/`` — derived, same reason
+    as :func:`_lib_names`: the hand-written ``APPS`` tuple this replaces was
+    a silent pass for every app added after it was written (the fifth sighting
+    of the hand-enumerated-mirror shape this repo has paid for; S1's Rule 12
+    derives its own roots and flagged this one on the way past). Package name,
+    not directory name — ``apps/tasks`` ships ``strange_loops``.
+    """
+    apps = REPO_ROOT / "apps"
+    return tuple(
+        sorted(
+            pkg.name
+            for app_dir in apps.iterdir()
+            if (app_dir / "src").is_dir()
+            for pkg in (app_dir / "src").iterdir()
+            if (pkg / "__init__.py").is_file()  # real package, not egg-info
+        )
+    )
+
+
+APPS = _app_names()
 
 
 # ---------------------------------------------------------------------------

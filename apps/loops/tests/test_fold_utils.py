@@ -394,10 +394,20 @@ class TestShouldGroupByNamespace:
 # ---------------------------------------------------------------------------
 
 class TestPresentationRegister:
-    """The `piped` flag decouples the header register from width/truncation:
-    a human read (TTY) keeps the friendly 'Threads (N):' header even though
-    width=None (no truncation); a pipe gets terse '## KIND (N)'.
-    (decision:design/drop-truncation-from-human-reads — presentation half)"""
+    """The header register is read off the offered width: ``width=None`` is a
+    viewportless destination and gets terse ``## KIND (N)``; a concrete width
+    is a real viewport and keeps the friendly ``Threads (N):``.
+    (decision:design/drop-truncation-from-human-reads — presentation half)
+
+    0.10.0 S1 narrowed this. The register used to key on a separate ``piped``
+    kwarg, "decoupled from width/truncation", and this class carried a
+    ``test_piped_false_keeps_human_header_at_width_none`` case asserting a
+    human read AT ``width=None``. That combination is gone: painted offers a
+    concrete width at every real viewport, so at the CLI boundary the two bits
+    were already identical, and collapsing them is what makes a piped render
+    with a concrete width unconstructible. The one shape that genuinely
+    diverged — a TTY whose ``get_terminal_size`` raises, isatty-true but
+    width-None — now takes the terse register. Recorded, not silent."""
 
     def _text(self, block):
         return "\n".join("".join(c.char for c in row).rstrip() for row in block._rows)
@@ -407,22 +417,15 @@ class TestPresentationRegister:
                     key_field="name")
         return state(sections=(s,))
 
-    def test_piped_true_is_terse_markdown_header(self):
-        t = self._text(fold_view(self._state(), Zoom.SUMMARY, None, piped=True))
+    def test_width_none_is_terse_markdown_header(self):
+        t = self._text(fold_view(self._state(), Zoom.SUMMARY, None))
         assert "## THREAD (1)" in t
         assert "Threads (1):" not in t
 
-    def test_piped_false_keeps_human_header_at_width_none(self):
-        # The decoupled case: width=None (full body, no truncation) AND the
-        # human register — exactly what a TTY read now produces.
-        t = self._text(fold_view(self._state(), Zoom.SUMMARY, None, piped=False))
+    def test_concrete_width_keeps_human_header(self):
+        t = self._text(fold_view(self._state(), Zoom.SUMMARY, 80))
         assert "Threads (1):" in t
         assert "## THREAD" not in t
-
-    def test_default_falls_back_to_width_is_none_proxy(self):
-        st = self._state()
-        assert "## THREAD (1)" in self._text(fold_view(st, Zoom.SUMMARY, None))
-        assert "Threads (1):" in self._text(fold_view(st, Zoom.SUMMARY, 80))
 
 
 class TestNoSalienceWindow:

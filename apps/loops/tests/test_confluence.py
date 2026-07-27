@@ -42,8 +42,10 @@ def _data(observers):
 
 
 def _render(data, zoom=Zoom.SUMMARY, width=100, *, piped=False) -> str:
+    # The register IS the offered width — a pipe is offered None, so this
+    # helper's `piped` knob selects the width rather than riding beside it.
     return block_to_text(
-        confluence_view(data, zoom, width, piped=piped), use_ansi=False
+        confluence_view(data, zoom, None if piped else width), use_ansi=False
     )
 
 

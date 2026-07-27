@@ -647,13 +647,12 @@ class TestStoreViewPipedRegister:
         assert block is not None
         assert block_to_text(block).strip()
 
-    @pytest.mark.parametrize("zoom", [Zoom.MINIMAL, Zoom.SUMMARY, Zoom.DETAILED, Zoom.FULL])
-    def test_piped_ignores_concrete_width(self, zoom):
-        # piped=True forces width=None — a pipe that inherited COLUMNS=20
-        # must render identically to the width-free agent channel.
-        clipped = store_view(_make_summary(), zoom, 20, piped=True)
-        free = store_view(_make_summary(), zoom, None, piped=True)
-        assert block_to_text(clipped) == block_to_text(free)
+    # `test_piped_ignores_concrete_width` lived here: it passed
+    # `width=20, piped=True` and asserted the render matched the width-free
+    # one, i.e. that the kwarg won over the width. Deleted with the kwarg
+    # (0.10.0 S1) — the disagreement it guarded is now unconstructible, since
+    # the register IS the offered width. Rule 12 in tests/test_architecture.py
+    # keeps the second channel from coming back.
 
     def test_full_piped_drops_border_keeps_title(self):
         text = block_to_text(store_view(_make_summary(), Zoom.FULL, None))

@@ -20,5 +20,5 @@ def test_log_demo(golden, zoom):
 def test_log_demo_piped(golden, zoom):
     """The piped/agent register (width=None, piped=True) — S0 gap: the base
     goldens above only ever exercised the TTY register."""
-    block = stream_view(SAMPLE_STREAM, zoom, width=None, piped=True)
+    block = stream_view(SAMPLE_STREAM, zoom, width=None)
     golden.assert_match(block_to_text(block), "output")

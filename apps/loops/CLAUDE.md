@@ -165,10 +165,17 @@ uv run --package loops pytest apps/loops/tests
 uv run --package loops pytest apps/loops/tests/golden  # snapshot tests only
 ```
 
-**Register-split lenses need a parity test.** Any lens with a
-`(data, zoom, width, *, piped)` signature renders one fetch through two
-registers (terse/piped/agent vs rich/TTY). They keep shipping faithfulness
-bugs (piped dropping `signed`/`share`/`span`; `width` clipping the agent
-channel) because each register is tested in isolation. Add a
+**Register-split lenses need a parity test.** A lens that renders one fetch
+through two registers (terse/piped/agent vs rich/TTY) keeps shipping
+faithfulness bugs (piped dropping `signed`/`share`/`span`; `width` clipping
+the agent channel) because each register is tested in isolation. Add an
 `assert_register_parity(...)` test (~3 lines) — see `tests/README.md` and
 `tests/parity.py`.
+
+**The register IS the offered width.** `width=None` means a viewportless
+destination (pipe, file redirect) — the agent channel, which never clips; a
+concrete `width` means a real viewport. There is no `piped=` kwarg: it was
+deleted in 0.10.0 S1 so no second argument can disagree with the width.
+Derive `is_piped = width is None` at the top of the lens; private helpers may
+take the derived bool. Repo Rule 12 (`tests/test_architecture.py`) enforces
+this and the `renderer=`-not-`render=` contract it rests on.

@@ -14,11 +14,14 @@ For a lens rendered over **one** fetch, every *load-bearing token* — counts,
 entity names, relative timestamps, and numeric flags (signed ratio, share %,
 span) — must appear in the chrome-stripped text of **both** registers:
 
-- the **terse** register (`piped=True`, width-free / agent channel), and
-- the **rich** register (`piped=False`, styled, width-bounded / TTY).
+- the **terse** register (`width=None`, width-free / agent channel), and
+- the **rich** register (a concrete `width`, styled, width-bounded / TTY).
 
-Plus: the piped render must never truncate (no `…`), because the agent channel
-inherits `COLUMNS` and a width-driven clip silently drops information.
+The register IS the offered width. painted hands a lens geometry only at a
+real viewport, so `width is None` is the pipe — there is no `piped=` kwarg
+that could claim one register while the width says the other (0.10.0 S1;
+repo Rule 12). Plus: the piped render must never truncate (no `…`) — a
+width-driven clip on the agent channel silently drops information.
 
 It is **not** byte equality. The two registers may *encode* the same fact
 differently (type word `instance` vs glyph `◆`; `updated 2h ago` vs bare
@@ -29,8 +32,9 @@ what remains is comparable content.
 
 ### Adopting parity for a new register-split lens (~3 lines)
 
-A register-split lens has the signature
-`(data, zoom, width, *, piped: bool) -> Block`. To cover it:
+A register-split lens has the ordinary lens signature
+`(data, zoom, width) -> Block` and branches internally on `width is None`.
+To cover it:
 
 ```python
 from .parity import assert_register_parity

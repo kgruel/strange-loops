@@ -20,13 +20,13 @@ from .helpers import block_to_text
 
 @pytest.mark.parametrize("zoom", list(Zoom), ids=lambda z: z.name)
 def test_ticks_demo_tty(golden, zoom):
-    block = ticks_view(SAMPLE_TICKS_LISTING, zoom, width=80, piped=False)
+    block = ticks_view(SAMPLE_TICKS_LISTING, zoom, width=80)
     golden.assert_match(block_to_text(block), "output")
 
 
 @pytest.mark.parametrize("zoom", list(Zoom), ids=lambda z: z.name)
 def test_ticks_demo_piped(golden, zoom):
-    block = ticks_view(SAMPLE_TICKS_LISTING, zoom, width=None, piped=True)
+    block = ticks_view(SAMPLE_TICKS_LISTING, zoom, width=None)
     golden.assert_match(block_to_text(block), "output")
 
 

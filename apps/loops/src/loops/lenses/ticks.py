@@ -12,8 +12,7 @@ from ._grammar import duration as _format_duration
 from ._statview import palette_of
 
 
-def ticks_view(data: dict[str, Any], zoom: Zoom, width: int | None,
-               *, piped: bool | None = None) -> Block:
+def ticks_view(data: dict[str, Any], zoom: Zoom, width: int | None) -> Block:
     """Render tick history at the given zoom level.
 
     Accepts {"ticks": [...], "vertex": str}.
@@ -25,9 +24,7 @@ def ticks_view(data: dict[str, Any], zoom: Zoom, width: int | None,
     - DETAILED: + per-kind counts, window duration
     - FULL: + since/ts timestamps, origin, all payload keys
     """
-    is_piped = bool(piped or (piped is None and width is None))
-    if is_piped:
-        width = None  # piped register never clips (information-faithful)
+    is_piped = width is None
 
     # Honesty callout (SPEC §9.2/§9.5): a rewound listing whose ontology
     # could not resolve at the cursor says so above the rows.
@@ -38,7 +35,7 @@ def ticks_view(data: dict[str, Any], zoom: Zoom, width: int | None,
         rest = {k: v for k, v in data.items() if k != "ontology_notice"}
         return join_vertical(
             _block(f"⚠ ontology: {notice}", Style(dim=True), width),
-            ticks_view(rest, zoom, width, piped=piped),
+            ticks_view(rest, zoom, width),
         )
 
     ticks = data.get("ticks", [])

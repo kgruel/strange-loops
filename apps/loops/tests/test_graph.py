@@ -84,7 +84,11 @@ def _data(*, hubs=(), chains=(), orphan_list=(), census=(), nodes=None):
 
 
 def _render(data, zoom=Zoom.SUMMARY, width=100, *, piped=False) -> str:
-    return block_to_text(graph_view(data, zoom, width, piped=piped), use_ansi=False)
+    # The register IS the offered width — a pipe is offered None, so this
+    # helper's `piped` knob selects the width rather than riding beside it.
+    return block_to_text(
+        graph_view(data, zoom, None if piped else width), use_ansi=False
+    )
 
 
 class TestTraversal:

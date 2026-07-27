@@ -81,6 +81,15 @@ Kind prefix (`session.`, `task.`, `worker.`) namespaces within the task store.
 - `lenses/*.py`: `*_view(data, zoom, width) -> Block` (pure function)
 - `cli.py`: pre-dispatches display commands to `run_cli`
 
+Every `run_cli` site binds **`renderer=`** — painted's `(data, fidelity, width)`
+contract — and never the deprecated `render=` `(ctx, data)`. painted computes the
+offered width itself, so `width` arrives as terminal geometry at a real viewport
+and as `None` at a pipe or file redirect. A lens derives "am I piped" from
+`width is None`; it is never told separately, so the two cannot disagree. Repo
+Rule 12 (`tests/test_architecture.py`) enforces both halves.
+`lenses/zoom_from_fidelity` is the one `Fidelity` → `Zoom` seam — use it, don't
+re-clamp per call site.
+
 **Action commands** — require store → fold state → validate → act → emit fact → render.
 
 **Key concept mapping:**

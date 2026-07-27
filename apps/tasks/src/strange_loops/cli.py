@@ -109,25 +109,35 @@ def create_parser() -> argparse.ArgumentParser:
 
 
 # -- Display command wrappers (run_cli) --
+#
+# Every site binds ``renderer=`` — the (data, fidelity, width) contract — and
+# never the deprecated ``render=`` (ctx, data). The difference is not
+# stylistic: painted computes the offered width itself (``_offered_width``:
+# geometry at a real viewport, ``None`` at a pipe or file redirect), so a
+# renderer cannot be handed a fabricated width for a piped channel. A
+# ``render=`` callback reads ``ctx.width`` by hand and has historically got
+# that wrong. See the piped ⇒ width=None ratchet in tests/test_architecture.py
+# (Rule 12).
 
 
 def _run_session_status(argv: list[str]) -> int:
     from painted import run_cli
 
     from strange_loops.commands.session import fetch_session_status
+    from strange_loops.lenses import zoom_from_fidelity
     from strange_loops.lenses.session import session_status_view
     from strange_loops.lifecycle import tasks_vertex_path
 
     def fetch():
         return fetch_session_status(tasks_vertex_path())
 
-    def render(ctx, data):
-        return session_status_view(data, ctx.zoom, ctx.width)
+    def renderer(data, fidelity, width):
+        return session_status_view(data, zoom_from_fidelity(fidelity), width)
 
     return run_cli(
         argv,
         fetch=fetch,
-        render=render,
+        renderer=renderer,
         prog="strange-loops session status",
         description="Show session status",
     )
@@ -137,6 +147,7 @@ def _run_session_log(argv: list[str]) -> int:
     from painted import run_cli
 
     from strange_loops.commands.session import fetch_session_log
+    from strange_loops.lenses import zoom_from_fidelity
     from strange_loops.lenses.session import session_log_view
     from strange_loops.lifecycle import tasks_vertex_path
     from strange_loops.store import parse_duration
@@ -155,13 +166,13 @@ def _run_session_log(argv: list[str]) -> int:
     def fetch():
         return fetch_session_log(tasks_vertex_path(), duration_secs, known.kind)
 
-    def render(ctx, data):
-        return session_log_view(data, ctx.zoom, ctx.width)
+    def renderer(data, fidelity, width):
+        return session_log_view(data, zoom_from_fidelity(fidelity), width)
 
     return run_cli(
         rest,
         fetch=fetch,
-        render=render,
+        renderer=renderer,
         prog="strange-loops session log",
         description="Show session log",
     )
@@ -171,6 +182,7 @@ def _run_task_status(argv: list[str]) -> int:
     from painted import run_cli
 
     from strange_loops.commands.task import fetch_task_status
+    from strange_loops.lenses import zoom_from_fidelity
     from strange_loops.lenses.task import task_status_view
     from strange_loops.lifecycle import tasks_vertex_path
 
@@ -181,13 +193,13 @@ def _run_task_status(argv: list[str]) -> int:
     def fetch():
         return fetch_task_status(tasks_vertex_path(), known.name)
 
-    def render(ctx, data):
-        return task_status_view(data, ctx.zoom, ctx.width)
+    def renderer(data, fidelity, width):
+        return task_status_view(data, zoom_from_fidelity(fidelity), width)
 
     return run_cli(
         rest,
         fetch=fetch,
-        render=render,
+        renderer=renderer,
         prog="strange-loops task status",
         description="Show task status",
     )
@@ -230,18 +242,19 @@ def _run_task_log(argv: list[str]) -> int:
     from painted import run_cli
 
     from strange_loops.commands.task import fetch_task_log
+    from strange_loops.lenses import zoom_from_fidelity
     from strange_loops.lenses.task import task_log_view
 
     def fetch():
         return fetch_task_log(vp, known.name, duration_secs, known.kind)
 
-    def render(ctx, data):
-        return task_log_view(data, ctx.zoom, ctx.width)
+    def renderer(data, fidelity, width):
+        return task_log_view(data, zoom_from_fidelity(fidelity), width)
 
     return run_cli(
         rest,
         fetch=fetch,
-        render=render,
+        renderer=renderer,
         prog="strange-loops task log",
         description=f"Show log for task '{known.name}'",
     )
@@ -251,19 +264,20 @@ def _run_project_status(argv: list[str]) -> int:
     from painted import run_cli
 
     from strange_loops.commands.project import fetch_project_status
+    from strange_loops.lenses import zoom_from_fidelity
     from strange_loops.lenses.project import project_status_view
     from strange_loops.lifecycle import project_vertex_path
 
     def fetch():
         return fetch_project_status(project_vertex_path())
 
-    def render(ctx, data):
-        return project_status_view(data, ctx.zoom, ctx.width)
+    def renderer(data, fidelity, width):
+        return project_status_view(data, zoom_from_fidelity(fidelity), width)
 
     return run_cli(
         argv,
         fetch=fetch,
-        render=render,
+        renderer=renderer,
         prog="strange-loops project status",
         description="Show project status",
     )
@@ -286,19 +300,20 @@ def _run_project_log(argv: list[str]) -> int:
     from painted import run_cli
 
     from strange_loops.commands.project import fetch_project_log
+    from strange_loops.lenses import zoom_from_fidelity
     from strange_loops.lenses.project import project_log_view
     from strange_loops.lifecycle import project_vertex_path
 
     def fetch():
         return fetch_project_log(project_vertex_path(), duration_secs, known.kind)
 
-    def render(ctx, data):
-        return project_log_view(data, ctx.zoom, ctx.width)
+    def renderer(data, fidelity, width):
+        return project_log_view(data, zoom_from_fidelity(fidelity), width)
 
     return run_cli(
         rest,
         fetch=fetch,
-        render=render,
+        renderer=renderer,
         prog="strange-loops project log",
         description="Show project log",
     )

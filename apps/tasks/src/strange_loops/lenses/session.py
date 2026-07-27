@@ -9,7 +9,7 @@ if TYPE_CHECKING:
     from painted.core.block import Block
 
 
-def session_status_view(data: dict, zoom: "Zoom", width: int) -> "Block":
+def session_status_view(data: dict, zoom: "Zoom", width: int | None) -> "Block":
     """Render session status data as a Block.
 
     data is the dict from StoreReader.summary():
@@ -83,7 +83,7 @@ def session_status_view(data: dict, zoom: "Zoom", width: int) -> "Block":
     return join_vertical(*lines)
 
 
-def session_log_view(data: dict, zoom: "Zoom", width: int) -> "Block":
+def session_log_view(data: dict, zoom: "Zoom", width: int | None) -> "Block":
     """Render session log data as a Block.
 
     data is {"facts": [...], "ticks": [...]}.

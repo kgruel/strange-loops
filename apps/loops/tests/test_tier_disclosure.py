@@ -38,7 +38,7 @@ def _spread_state():
 def test_summary_tty_allocates_by_tier():
     """The orientation view: high body shown, tail body suppressed."""
     surface = project(_spread_state())
-    t = _text(fold_view(surface, Zoom.SUMMARY, 100, piped=False))
+    t = _text(fold_view(surface, Zoom.SUMMARY, 100))
     assert "body-9" in t          # high tier keeps its body
     assert "body-0" not in t      # tail tier goes bare (no body)
 
@@ -48,14 +48,14 @@ def test_exact_key_address_always_full_body():
     tier — the retrieval-path flip-invariant. k0 is tail, but addressed exactly
     it still shows its body at SUMMARY TTY."""
     surface = project(_spread_state(), queried_key="k0")
-    t = _text(fold_view(surface, Zoom.SUMMARY, 100, piped=False))
+    t = _text(fold_view(surface, Zoom.SUMMARY, 100))
     assert "body-0" in t
 
 
 def test_full_forces_uniform_bodies():
     """--full (whole granularity on every row) is tier-blind — all bodies."""
     surface = project(_spread_state(), full=True)
-    t = _text(fold_view(surface, Zoom.SUMMARY, 100, piped=False))
+    t = _text(fold_view(surface, Zoom.SUMMARY, 100))
     assert "body-0" in t and "body-9" in t
 
 
@@ -63,7 +63,7 @@ def test_detailed_and_full_zoom_are_tier_blind():
     """-v / -vv (DETAILED / FULL zoom) disclose uniformly — no allocation."""
     surface = project(_spread_state())
     for zoom in (Zoom.DETAILED, Zoom.FULL):
-        t = _text(fold_view(surface, zoom, 100, piped=False))
+        t = _text(fold_view(surface, zoom, 100))
         assert "body-0" in t and "body-9" in t
 
 
@@ -72,7 +72,7 @@ def test_piped_register_never_allocates():
     agent channel stays information-faithful, tier is a WORD column, not a
     disclosure gate."""
     surface = project(_spread_state())
-    t = _text(fold_view(surface, Zoom.SUMMARY, None, piped=True))
+    t = _text(fold_view(surface, Zoom.SUMMARY, None))
     assert "body-0" in t and "body-9" in t
 
 
@@ -88,16 +88,19 @@ def test_flat_population_shows_all_bodies():
                             ts=None, observer="o", id=None, n=1),),
             fold_type="by", key_field="topic"),),
     )
-    t = _text(fold_view(project(state), Zoom.SUMMARY, 100, piped=False))
+    t = _text(fold_view(project(state), Zoom.SUMMARY, 100))
     assert "only-body" in t
 
 
-def test_piped_flag_forces_width_none():
-    """Regression: fold_view(piped=True, width=N) clipped the piped ledger —
-    the explicit channel flag must force width=None at the lens boundary,
-    including on the search/MINIMAL early-return paths."""
+def test_piped_ledger_never_clips_at_any_zoom():
+    """The piped ledger is width-free on every path, including the
+    search/MINIMAL early returns.
+
+    Was ``test_piped_flag_forces_width_none``: it passed ``width=20,
+    piped=True`` and asserted the flag beat the width. The flag is gone
+    (0.10.0 S1) — the register IS the offered width, so the disagreement it
+    guarded cannot be written. What survives is the property that matters:
+    the width-free render carries its rows whole at every zoom."""
     surface = project(_spread_state())
     for zoom in (Zoom.MINIMAL, Zoom.SUMMARY, Zoom.DETAILED, Zoom.FULL):
-        clipped = _text(fold_view(surface, zoom, 20, piped=True))
-        free = _text(fold_view(surface, zoom, None, piped=True))
-        assert clipped == free
+        assert "…" not in _text(fold_view(surface, zoom, None))

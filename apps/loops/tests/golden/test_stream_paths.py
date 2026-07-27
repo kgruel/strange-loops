@@ -35,14 +35,14 @@ from .helpers import block_to_text
 @pytest.mark.parametrize("zoom", list(Zoom), ids=lambda z: z.name)
 def test_tiered_tty(golden, zoom):
     """Rail glyph gutter (◆ high-tier, blank untiered) on the TTY register."""
-    block = stream_view(SAMPLE_STREAM_TIERED, zoom, width=80, piped=False)
+    block = stream_view(SAMPLE_STREAM_TIERED, zoom, width=80)
     golden.assert_match(block_to_text(block), "output")
 
 
 @pytest.mark.parametrize("zoom", list(Zoom), ids=lambda z: z.name)
 def test_tiered_piped(golden, zoom):
     """Tier WORD column (``high``/``untiered``) on the piped ledger."""
-    block = stream_view(SAMPLE_STREAM_TIERED, zoom, width=None, piped=True)
+    block = stream_view(SAMPLE_STREAM_TIERED, zoom, width=None)
     golden.assert_match(block_to_text(block), "output")
 
 
@@ -80,7 +80,7 @@ def test_ontology_notice_tty(golden):
     """SPEC §9.2/§9.5 honesty callout — rendered above the rows, TTY
     register."""
     block = stream_view(
-        SAMPLE_STREAM_ONTOLOGY_NOTICE, Zoom.SUMMARY, width=80, piped=False,
+        SAMPLE_STREAM_ONTOLOGY_NOTICE, Zoom.SUMMARY, width=80, 
     )
     golden.assert_match(block_to_text(block), "output")
 
@@ -90,6 +90,6 @@ def test_ontology_notice_piped(golden):
     same code path regardless of ``piped``, but this exercises it rather
     than asserting it by comment."""
     block = stream_view(
-        SAMPLE_STREAM_ONTOLOGY_NOTICE, Zoom.SUMMARY, width=None, piped=True,
+        SAMPLE_STREAM_ONTOLOGY_NOTICE, Zoom.SUMMARY, width=None, 
     )
     golden.assert_match(block_to_text(block), "output")

@@ -21,6 +21,11 @@ place; only durability order is overridden.
 
 Write order (the receipt originates at the log)
 -----------------------------------------------
+0. reconcile: if the stamped offset and the log's size disagree, run
+   catch-up before anything else. A post-fsync failure leaves a durable
+   line the index has not consumed; appending over it would stamp the
+   offset past the orphan and bury it while reporting ``synced``. No
+   append may ever skip an unindexed durable line;
 1. serialize the row through the S1 codec — ``payload`` rides as the
    VERBATIM stored TEXT, never re-serialized, so every existing signature
    and commitment hash survives the round trip;
@@ -51,7 +56,8 @@ sqlite. On open:
 - ``offset == size`` — in sync, nothing to do.
 - ``offset < size`` — sqlite is behind (crash between step 2 and step 3, or
   an out-of-band append): tail forward, indexing the missed lines verbatim.
-- ``offset > size`` (log shrank), the byte at ``offset - 1`` is not a
+- ``offset`` outside ``0..size`` (log shrank, or negative metadata), the
+  byte at ``offset - 1`` is not a
   newline, or the last line ending at ``offset`` does not re-serialize to
   the sqlite row it names — full rebuild of the sqlite index from the log,
   logged loudly at WARNING. That last check is the "hash match": a
@@ -350,7 +356,10 @@ class JsonlStore(SqliteStore[T], Generic[T]):
         ``id_override``, any constraint) fails before a byte reaches the log,
         so a refused append can never orphan a line. Nothing is observable
         until the commit, which happens strictly after the fsync.
+
+        Reconcile first: see :meth:`_reconcile`.
         """
+        self._reconcile()
         try:
             self._conn.execute(sql, row)
             # The INSERT has taken sqlite's write lock, so the committed
@@ -373,6 +382,27 @@ class JsonlStore(SqliteStore[T], Generic[T]):
         except BaseException:
             self._conn.rollback()
             raise
+
+    def _reconcile(self) -> None:
+        """Refuse to stamp past a durable line the index has not consumed.
+
+        A failure *after* the fsync (sqlite error, power cut, the process
+        dying) rolls the transaction back, leaving the line durable and the
+        offset unstamped — that is the recoverable state, and the next open
+        tails it forward. But a long-lived handle never reopens: it would
+        append line N+1 and stamp the offset past *both*, burying the orphan
+        forever while reporting ``synced``. So every append reconciles first.
+
+        Cheap in the common case: one ``store_meta`` read and one ``stat``,
+        no scan, no lock. Only a disagreement pays for :meth:`catch_up`
+        (which also covers a shrunk log, a torn tail and untrustworthy
+        offset metadata). Two handles racing the same orphan line is a loud
+        failure, not a silent one: the loser's tail INSERT hits the primary
+        key, rolls back, and the line stays recoverable.
+        """
+        if self._read_offset() == self._log_size():
+            return
+        self.catch_up()
 
     def _write_fact_row(self, row: tuple) -> None:
         self._write(_FACT_INSERT, row, serialize_fact_row(row), True)
@@ -404,8 +434,11 @@ class JsonlStore(SqliteStore[T], Generic[T]):
         if offset is None:
             self._rebuild("no consumed-offset marker recorded")
             return "rebuilt"
-        if offset > size:
-            self._rebuild(f"log shrank: offset {offset} > size {size}")
+        if not 0 <= offset <= size:
+            # Outside the log's byte range in either direction. A negative
+            # offset is not a seek position to try — it is metadata that
+            # cannot be true, exactly as untrustworthy as one past the end.
+            self._rebuild(f"offset {offset} outside the log's 0..{size} byte range")
             return "rebuilt"
         if not self._prefix_intact(offset):
             self._rebuild(f"log content at offset {offset} does not match the index")

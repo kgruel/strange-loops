@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 from atoms import Fact
 
-from engine.jsonl_codec import deserialize_row
+from engine.jsonl_codec import deserialize_row, serialize_fact_row
 from engine.jsonl_store import JsonlCanonicalUnsupported, JsonlStore, log_path_for
 from engine.sqlite_store import (
     SqliteStore,
@@ -580,3 +580,89 @@ def test_rebuild_drops_the_rowid_keyed_fts_index(tmp_path):
         conn.close()
     assert "facts_fts" not in present
     assert "fts_state" not in present
+
+
+def test_post_fsync_failure_leaves_the_line_recoverable_on_the_same_handle(tmp_path):
+    """An append must never stamp the offset past an unindexed durable line.
+
+    The sqlite write can fail *after* the log line is fsynced (the stamp,
+    the commit, a disk error, the process dying). The line is durable and
+    the offset unstamped — recoverable. But a long-lived handle keeps
+    appending, and if it stamped the new offset it would bury the orphan
+    while every later open reported "synced". Three appends, the middle
+    one's index write failing: all three must survive with stable ids.
+    """
+    store = open_store(tmp_path)
+    first = store.append(fact(message="one"))
+
+    real_stamp = store._stamp
+    calls = {"n": 0}
+
+    def failing_stamp(*args):
+        calls["n"] += 1
+        raise RuntimeError("simulated sqlite failure after fsync")
+
+    store._stamp = failing_stamp
+    with pytest.raises(RuntimeError):
+        store.append(fact(message="two"))
+    store._stamp = real_stamp
+    assert calls["n"] == 1
+
+    # The line is durable; the index and the offset never saw it.
+    assert len(lines(tmp_path / "s.jsonl")) == 2
+    assert [r[0] for r in sqlite_facts(tmp_path / "s.db")] == [first]
+    assert offset_of(store) < (tmp_path / "s.jsonl").stat().st_size
+
+    # Same handle, next append: reconcile picks the orphan up first.
+    third = store.append(fact(message="three"))
+    store.close()
+
+    log_ids = [deserialize_row(ln)[1][0] for ln in lines(tmp_path / "s.jsonl")]
+    assert len(log_ids) == 3
+    assert log_ids[0] == first and log_ids[2] == third
+    assert [r[0] for r in sqlite_facts(tmp_path / "s.db")] == log_ids
+
+    reopened = open_store(tmp_path)
+    assert reopened.catch_up() == "synced"
+    assert [r[0] for r in sqlite_facts(tmp_path / "s.db")] == log_ids
+    reopened.close()
+
+
+def test_a_crashed_writers_durable_line_is_indexed_before_the_next_append(tmp_path):
+    """Writer A dies after fsync; long-lived writer B must not stamp past it.
+
+    B never reopens, so open-time catch-up cannot help — the reconcile has
+    to happen on the append itself.
+    """
+    b = open_store(tmp_path)
+    first = b.append(fact(message="one"))
+
+    # Writer A: line durable, index never told (the post-fsync crash window).
+    orphan = ("01CRASHEDA", "note", 2.0, "sol", "", json.dumps({"m": "two"}))
+    with (tmp_path / "s.jsonl").open("a", encoding="utf-8") as fh:
+        fh.write(serialize_fact_row(orphan) + "\n")
+
+    third = b.append(fact(message="three"))
+    b.close()
+
+    assert [r[0] for r in sqlite_facts(tmp_path / "s.db")] == [
+        first, "01CRASHEDA", third
+    ]
+
+
+def test_negative_offset_rebuilds_rather_than_seeking(tmp_path, caplog):
+    """A negative offset is untrustworthy metadata, not a seek position."""
+    store = open_store(tmp_path)
+    a, b = store.append(fact()), store.append(fact(message="two"))
+    store._conn.execute(
+        "INSERT OR REPLACE INTO store_meta (key, value) VALUES ('jsonl_offset', '-1')"
+    )
+    store._conn.commit()
+    store.close()
+
+    with caplog.at_level("WARNING"):
+        store = open_store(tmp_path)
+    assert "rebuilding sqlite index" in caplog.text
+    assert [r[0] for r in sqlite_facts(tmp_path / "s.db")] == [a, b]
+    assert offset_of(store) == (tmp_path / "s.jsonl").stat().st_size
+    store.close()

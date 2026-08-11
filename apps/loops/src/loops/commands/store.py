@@ -5,6 +5,7 @@ Pure data fetch, no rendering knowledge.
 from __future__ import annotations
 
 import sys
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -33,30 +34,42 @@ def _bucket_timestamps(timestamps: list[float], width: int) -> list[float]:
     return buckets
 
 
+def _refuse_store(msg: str, *, label: str | None = None) -> int:
+    """Render a refusal to stderr and return the refusal exit code (2).
+
+    A refusal is a store saying "this operation is not available here",
+    which is neither success nor a crash — every refusing path in this
+    module renders it the same way so the exit code cannot drift between
+    subcommands.
+    """
+    from painted import Block, Style, paint
+
+    head = f"✗ {label}: {msg}" if label else f"✗ {msg}"
+    paint(Block.text(head, Style()), file=sys.stderr)
+    return 2
+
+
 def resolve_store_path(file_path: Path) -> Path:
     """Resolve a .vertex or .db file to the actual store .db path.
 
-    A JSONL-canonical vertex (``store "….jsonl"``) resolves to its derived
-    sqlite index — see ``engine.residence``.
+    The read-side composition of the write-side resolution: the canonical
+    artifact, then its index. A JSONL-canonical vertex (``store "….jsonl"``)
+    resolves to its derived sqlite index — see ``engine.residence``.
 
-    Resolution *materializes*: it goes through ``resolved_index``, so a fresh
-    clone (log tracked, derived ``.db`` untracked) builds the index during
-    the resolve rather than reporting the store unmaterialized. With no log
-    to build from, the index stays absent and the not-yet-materialized
+    Resolution *materializes*: ``ensure_index`` builds the index a fresh
+    clone (log tracked, derived ``.db`` untracked) does not have, so the read
+    reports the store's contents rather than an unmaterialized store. With no
+    log to build from, the index stays absent and the not-yet-materialized
     contract below still speaks.
-    """
-    if file_path.suffix == ".vertex":
-        from engine.jsonl_store import resolved_index
-        from lang import parse_vertex_file
 
-        ast = parse_vertex_file(file_path)
-        if ast.store is None:
-            raise ValueError(f"No store configured in {file_path}")
-        return resolved_index(ast.store, file_path)
-    elif file_path.suffix == ".db":
-        return file_path.resolve()
-    else:
-        raise ValueError(f"Expected .vertex or .db file, got {file_path.suffix}")
+    Deriving it from :func:`resolve_canonical_path` rather than resolving
+    independently keeps one answer to "which artifact does this target name":
+    two resolvers that can disagree is how a writer and a reader end up on
+    different files.
+    """
+    from engine.jsonl_store import ensure_index
+
+    return ensure_index(resolve_canonical_path(file_path))
 
 
 def resolve_canonical_path(file_path: Path) -> Path:
@@ -638,10 +651,7 @@ def _run_reanchor(argv: list[str], *, vertex_path: Path | None = None) -> int:
         try:
             receipt = store.reanchor()
         except JsonlCanonicalUnsupported as exc:
-            from painted import Block, Style, paint
-
-            paint(Block.text(f"✗ {db_path.name}: {exc}", Style()), file=sys.stderr)
-            return 2
+            return _refuse_store(str(exc), label=db_path.name)
         verifier, _keys = tick_verifier_for(target_path)
         fact_verifier, _fkeys = fact_verifier_for(target_path)
         report = store.verify_chain(verifier=verifier)
@@ -914,10 +924,7 @@ def _absorb_genesis_mode(
         ]
         paint(join_vertical(*(Block.text(ln, Style(dim=False)) for ln in lines)))
 
-    def _refuse(msg: str) -> int:
-        from painted import Block, Style, paint
-        paint(Block.text(f"✗ {target_path.stem}: {msg}", Style()), file=sys.stderr)
-        return 2
+    _refuse = partial(_refuse_store, label=target_path.stem)
 
     if dry_run:
         # Preview only — a read-only projection of what the real (atomic) path
@@ -1039,10 +1046,7 @@ def _absorb_edit(
         resolve_declaration_documents,
     )
 
-    def _refuse(msg: str) -> int:
-        from painted import Block, Style, paint
-        paint(Block.text(f"✗ {target_path.stem}: {msg}", Style()), file=sys.stderr)
-        return 2
+    _refuse = partial(_refuse_store, label=target_path.stem)
 
     # The edited file's document set.
     new_docs = vertex_to_documents(ast)
@@ -1552,6 +1556,28 @@ def _run_reindex(argv: list[str], *, vertex_path: Path | None = None) -> int:
 
 
 def _run_store(
+    argv: list[str], *, vertex_path: Path | None = None, observer: str | None = None
+) -> int:
+    """Dispatch a store subcommand, converting a canonical-store refusal into
+    a rendered refusal rather than a traceback.
+
+    The refusals the subcommands raise themselves are caught locally, where
+    the message can be specific. This is the backstop for the ones raised by
+    the ``JsonlStore`` **constructor** — a derived index holding rows the log
+    never saw makes every open refuse, including the read-shaped
+    verify/stats/ticks/adopt paths that have no local catch because they do
+    not mutate history. Those printed a raw traceback; they now say what is
+    wrong with the store.
+    """
+    from engine.jsonl_store import JsonlCanonicalUnsupported
+
+    try:
+        return _dispatch_store(argv, vertex_path=vertex_path, observer=observer)
+    except JsonlCanonicalUnsupported as exc:
+        return _refuse_store(str(exc))
+
+
+def _dispatch_store(
     argv: list[str], *, vertex_path: Path | None = None, observer: str | None = None
 ) -> int:
     """Run store command via painted CLI harness.

@@ -1148,35 +1148,22 @@ def _resolve_vertex_store_path(vertex_path: Path) -> Path | None:
     ``store`` locator ending ``.jsonl``) that is the sibling ``.db``, which
     is what every read consumer connects to. See ``engine.residence``.
 
-    For combinatorial vertices (combine block, no store), follows the first
-    combine entry to find the writable store.
+    The canonical resolution plus ``ensure_index``, not an independent walk:
+    which constituent of a combine is the writable one must have exactly one
+    answer, and :func:`_resolve_vertex_canonical_store_path` (through
+    :func:`_resolve_writable_vertex`) is where it lives. ``ensure_index``
+    also materializes, so the fresh clone (log tracked, derived index not)
+    builds during resolution rather than being reported empty by the one
+    invocation that should have built it. Stat-only no-op once current.
 
     Raises:
         VertexNotFound: vertex_path doesn't exist
         VertexParseError: vertex_path has invalid syntax
     """
-    from lang.population import resolve_vertex
+    from engine.jsonl_store import ensure_index
 
-    ast = _parse_vertex(vertex_path)
-
-    if ast.store is not None:
-        # resolved_index, not resolve_store_path: the fresh clone (log
-        # tracked, derived index not) materializes as part of resolution, so
-        # no caller can evaluate `store_path.exists()` on the one invocation
-        # that should have built it. Stat-only no-op once the index exists.
-        from engine.jsonl_store import resolved_index
-
-        return resolved_index(ast.store, vertex_path)
-
-    # Follow combine → first entry's store
-    if ast.combine:
-        ref_path = resolve_vertex(ast.combine[0].name, loops_home())
-        if not ref_path.is_absolute():
-            ref_path = (vertex_path.parent / ref_path).resolve()
-        if ref_path.exists():
-            return _resolve_vertex_store_path(ref_path)
-
-    return None
+    canonical = _resolve_vertex_canonical_store_path(vertex_path)
+    return None if canonical is None else ensure_index(canonical)
 
 
 def _resolve_vertex_canonical_store_path(vertex_path: Path) -> Path | None:

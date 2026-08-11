@@ -702,6 +702,49 @@ class TestJsonlCanonicalStoreVerbRefusals:
         assert "jsonl-canonical" in capsys.readouterr().err
         assert (tmp_path / "x.jsonl").read_bytes() == before
 
+    @staticmethod
+    def _poison_index(vpath):
+        """Insert straight into the derived index, behind the log's back.
+
+        The state ``_refuse_out_of_band`` detects: every later open raises
+        JsonlCanonicalUnsupported from the JsonlStore CONSTRUCTOR, so the
+        read-shaped verbs — which have no local catch, having no history to
+        mutate — hit it before any of their own code runs.
+        """
+        import sqlite3
+
+        conn = sqlite3.connect(vpath.parent / "x.db")
+        conn.execute(
+            "INSERT INTO facts (id, kind, ts, observer, origin, payload) "
+            "VALUES ('OUT-OF-BAND-ROW', 'ping', 1.0, 'x', '', '{}')"
+        )
+        conn.commit()
+        conn.close()
+
+    def test_adopt_on_a_poisoned_store_refuses_instead_of_tracebacking(
+        self, tmp_path, capsys
+    ):
+        """The constructor-raised refusal reaches the user as a refusal.
+
+        ``adopt`` has no local catch — it mutates no history, so nothing
+        prompted one — and the raise happens inside ``JsonlStore.__init__``,
+        before any of its own code runs. Without the dispatcher backstop this
+        is a raw traceback. (``stats``/``ticks``/``verify`` read through
+        ``StoreReader``/``SqliteStore`` on the index and never construct a
+        ``JsonlStore``, so they answer from the poisoned index instead —
+        a separate gap, not this one.)
+        """
+        from loops.commands.store import _run_store
+
+        vpath = self._jsonl_vertex(tmp_path)
+        self._seed(vpath)
+        self._poison_index(vpath)
+
+        rc = _run_store(["adopt"], vertex_path=vpath)
+
+        assert rc == 2
+        assert "did not come through" in capsys.readouterr().err
+
     def test_absorb_genesis_refuses(self, tmp_path, capsys):
         from loops.commands.store import _run_absorb
 

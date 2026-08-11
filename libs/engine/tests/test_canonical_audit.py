@@ -251,16 +251,17 @@ def test_an_incomplete_tail_is_not_judged_as_content(tmp_path):
     assert "content" not in failed(deep)
 
 
-# --- lag is not tampering ---------------------------------------------------
+# --- index-behind is scoped, not exonerated ---------------------------------
 #
 # The writer fsyncs the log BEFORE committing the index rows and markers, so a
 # crash in that window (and a torn append) leaves a truthful index that is
-# merely BEHIND. The audit must report that once, as lag, and must not also
+# merely BEHIND. The audit must report that once, scoped to the unconsumed
+# suffix, and must not also
 # accuse the index of an out-of-band edit for bytes it never claimed to have
 # consumed.
 
 
-def test_the_crash_window_reports_lag_once_and_never_as_an_index_edit(tmp_path):
+def test_the_crash_window_reports_the_shortfall_once_never_as_an_index_edit(tmp_path):
     log, _db = seeded(tmp_path)
     orphan = ("01UNINDEXED", "note", time.time(), "sol", "",
               json.dumps({"m": "durable"}))
@@ -270,7 +271,7 @@ def test_the_crash_window_reports_lag_once_and_never_as_an_index_edit(tmp_path):
     report = audit_agreement(log)
     assert failed(report) == {"offset"}
     assert "out of band" not in report.summary()
-    assert report.lag_only
+    assert report.index_behind
     last = next(c for c in report.checks if c.name == "last-line")
     assert last.ok and "last consumed" in last.detail
 
@@ -282,11 +283,11 @@ def test_a_torn_tail_does_not_read_as_an_unreadable_final_line(tmp_path):
 
     report = audit_agreement(log)
     assert failed(report) == {"offset"}
-    assert report.lag_only
+    assert report.index_behind
     assert "incomplete or unreadable" not in report.summary()
 
 
-def test_deep_calls_an_unindexed_line_lag_not_tampering(tmp_path):
+def test_deep_scopes_an_unindexed_line_to_the_unconsumed_suffix(tmp_path):
     log, _db = seeded(tmp_path)
     orphan = ("01UNINDEXED", "note", time.time(), "sol", "",
               json.dumps({"m": "durable"}))
@@ -295,11 +296,11 @@ def test_deep_calls_an_unindexed_line_lag_not_tampering(tmp_path):
 
     deep = audit_deep(log)
     assert not deep.ok
-    assert deep.lag_only
+    assert deep.index_behind
     assert failed(deep) >= {"offset", "content"}
 
 
-def test_a_real_index_edit_is_still_tampering_not_lag(tmp_path):
+def test_a_real_index_edit_is_never_scoped_to_the_unconsumed_suffix(tmp_path):
     log, db = seeded(tmp_path)
     conn = sqlite3.connect(str(db))
     last = conn.execute("SELECT id FROM ticks ORDER BY rowid DESC").fetchone()[0]
@@ -309,11 +310,11 @@ def test_a_real_index_edit_is_still_tampering_not_lag(tmp_path):
 
     report = audit_agreement(log)
     assert "last-line" in failed(report)
-    assert not report.lag_only
+    assert not report.index_behind
     assert "edited out of band" in report.summary()
 
 
-def test_an_out_of_band_insert_is_never_lag(tmp_path):
+def test_an_out_of_band_insert_is_never_scoped_to_the_unconsumed_suffix(tmp_path):
     log, db = seeded(tmp_path)
     conn = sqlite3.connect(str(db))
     conn.execute(
@@ -324,15 +325,15 @@ def test_an_out_of_band_insert_is_never_lag(tmp_path):
     conn.close()
 
     report = audit_agreement(log)
-    assert not report.lag_only
+    assert not report.index_behind
 
 
-# --- lag is corroborated against the log, never taken from the marker -------
+# --- the scope is corroborated against the log, never taken from the marker -
 #
 # The offset marker lives inside the sqlite file this audit exists to judge.
-# If it alone decided `lag`, rewinding one integer would downgrade a tampered
+# If it alone decided the scope, rewinding one integer would move a tampered
 # index to "not tampering" — an affirmative innocence claim, attacker-written.
-# So lag holds only when the log suffix past the offset is really unindexed.
+# So the flag holds only when the suffix past the offset really starts unindexed.
 
 
 def _rewind_offset(db: Path, to: int) -> None:
@@ -352,7 +353,7 @@ def _line_ends(log: Path) -> list[int]:
     return ends
 
 
-def test_a_rewound_offset_over_indexed_rows_is_never_lag(tmp_path):
+def test_a_rewound_offset_over_indexed_rows_is_never_index_behind(tmp_path):
     """Finding 1's repro: edit an interior row, rewind the marker below it."""
     log, db = seeded(tmp_path)
     conn = sqlite3.connect(str(db))
@@ -365,16 +366,16 @@ def test_a_rewound_offset_over_indexed_rows_is_never_lag(tmp_path):
 
     report = audit_agreement(log)
     assert not report.ok
-    assert not report.lag_only, report.summary()
+    assert not report.index_behind, report.summary()
     assert "marker was moved" in report.summary()
 
 
-def test_deep_never_stamps_lag_on_a_line_behind_a_rewound_offset(tmp_path):
+def test_deep_never_stamps_beyond_offset_on_a_line_behind_a_rewound_offset(tmp_path):
     log, db = seeded(tmp_path)
     _rewind_offset(db, _line_ends(log)[0])
     deep = audit_deep(log)
-    assert not deep.lag_only
-    assert not any(c.lag for c in deep.checks), deep.as_dict()
+    assert not deep.index_behind
+    assert not any(c.beyond_offset for c in deep.checks), deep.as_dict()
 
 
 def test_a_pure_marker_rewind_with_no_tamper_is_still_not_the_crash_shape(tmp_path):
@@ -382,17 +383,17 @@ def test_a_pure_marker_rewind_with_no_tamper_is_still_not_the_crash_shape(tmp_pa
     _rewind_offset(db, _line_ends(log)[0])
     report = audit_agreement(log)
     assert "offset" in failed(report)
-    assert not report.lag_only
+    assert not report.index_behind
 
 
-def test_honest_lag_still_reads_as_lag_after_the_corroboration(tmp_path):
+def test_an_honest_shortfall_still_reads_as_index_behind_after_corroboration(tmp_path):
     """The case 49a1cd0 got right must not regress."""
     log, _db = seeded(tmp_path)
     orphan = ("01STILLLAG", "note", time.time(), "sol", "",
               json.dumps({"m": "durable"}))
     with log.open("a", encoding="utf-8") as fh:
         fh.write(serialize_fact_row(orphan) + "\n")
-    assert audit_agreement(log).lag_only
+    assert audit_agreement(log).index_behind
 
 
 def test_a_rewound_offset_heals_through_a_read_verb_instead_of_crashing(tmp_path):
@@ -412,3 +413,79 @@ def test_a_rewound_offset_heals_through_a_read_verb_instead_of_crashing(tmp_path
     healed = audit_agreement(log)
     assert healed.ok, healed.summary()
     assert audit_deep(log).ok
+
+
+# --- the deep walk does not starve after its first content divergence -------
+#
+# sol r4 finding 2. Breaking at the first mismatch left the chain walk fed
+# zero rows, so the report said "chain ok — 0 chained tick(s) re-derived"
+# about a store whose chain had never been examined. Overall rc stayed 1, so
+# this was diagnostic dishonesty rather than a false pass — but a verdict the
+# walk did not earn is the same failure mode this module exists to end.
+
+
+def test_deep_reports_every_content_divergence_not_only_the_first(tmp_path):
+    log, db = seeded(tmp_path)
+    conn = sqlite3.connect(str(db))
+    ids = [r[0] for r in conn.execute("SELECT id FROM facts ORDER BY rowid")]
+    for fid in (ids[0], ids[2]):
+        conn.execute("UPDATE facts SET payload = ? WHERE id = ?",
+                     (json.dumps({"m": "FORGED"}), fid))
+    conn.commit()
+    conn.close()
+
+    deep = audit_deep(log)
+    content = next(c for c in deep.checks if c.name == "content")
+    assert not content.ok
+    assert ids[0] in content.detail
+    assert ids[2] in content.detail, content.detail
+
+
+def test_deep_still_judges_the_chain_after_an_index_content_divergence(tmp_path):
+    """An edited FIRST fact must not silence the chain verdict.
+
+    The chain is re-derived from the LOG, so an index divergence says nothing
+    about it — the walk keeps feeding canonical rows and reaches a real
+    answer. Here the log is untouched, so that answer is: the chain holds.
+    """
+    log, db = seeded(tmp_path)
+    conn = sqlite3.connect(str(db))
+    first = conn.execute("SELECT id FROM facts ORDER BY rowid").fetchone()[0]
+    conn.execute("UPDATE facts SET payload = ? WHERE id = ?",
+                 (json.dumps({"m": "FORGED"}), first))
+    conn.commit()
+    conn.close()
+
+    deep = audit_deep(log)
+    assert not deep.ok
+    chain = next(c for c in deep.checks if c.name == "chain")
+    assert chain.ok and "0 chained" not in chain.detail, chain.detail
+
+
+def test_deep_says_the_chain_broke_when_the_log_itself_was_edited(tmp_path):
+    """The same walk over a poisoned LOG reaches the opposite real answer."""
+    log, _db = seeded(tmp_path)
+    raw = log.read_bytes().splitlines(keepends=True)
+    row = json.loads(raw[0].decode())
+    payload = json.loads(row["payload"])
+    payload["message"] = "ONE"  # same length — offsets and markers stay valid
+    row["payload"] = json.dumps(payload)
+    edited = (json.dumps(row, separators=(",", ":"), sort_keys=True) + "\n").encode()
+    assert len(edited) == len(raw[0])
+    log.write_bytes(edited + b"".join(raw[1:]))
+
+    deep = audit_deep(log)
+    chain = next(c for c in deep.checks if c.name == "chain")
+    assert not chain.ok
+    assert "window_hash mismatch" in chain.detail
+
+
+def test_deep_says_aborted_rather_than_ok_when_a_line_stops_decoding(tmp_path):
+    log, _db = seeded(tmp_path)
+    raw = log.read_bytes().splitlines(keepends=True)
+    log.write_bytes(raw[0] + b"{not json at all}\n" + b"".join(raw[1:]))
+
+    deep = audit_deep(log)
+    chain = next(c for c in deep.checks if c.name == "chain")
+    assert not chain.ok
+    assert "chain walk aborted at log line 2" in chain.detail

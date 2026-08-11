@@ -607,12 +607,15 @@ def follow_task_log(vp: Path, name: str, kind: str | None, use_json: bool) -> in
     """Follow task log — poll for new facts and ticks, print as they arrive."""
     from engine import vertex_facts, vertex_ticks
 
+    from strange_loops.lifecycle import workspace_store
+
+    sp = workspace_store(vp)
     last_ts = 0.0
 
     try:
         while True:
-            facts = vertex_facts(vp, last_ts, float("inf"), kind=kind)
-            ticks = vertex_ticks(vp, last_ts, float("inf"))
+            facts = vertex_facts(vp, last_ts, float("inf"), kind=kind, store=sp)
+            ticks = vertex_ticks(vp, last_ts, float("inf"), store=sp)
 
             facts = _filter_task_facts(facts, name)
             tick_dicts = [tick_to_dict(t) for t in ticks]

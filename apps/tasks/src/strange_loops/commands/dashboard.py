@@ -21,7 +21,12 @@ if TYPE_CHECKING:
     from painted import CliContext
     from painted.core.block import Block
 
-from strange_loops.lifecycle import fold_all_tasks, project_vertex_path, tasks_vertex_path
+from strange_loops.lifecycle import (
+    fold_all_tasks,
+    project_vertex_path,
+    tasks_vertex_path,
+    workspace_store,
+)
 from strange_loops.store import filter_task_facts
 
 # Column widths
@@ -208,9 +213,10 @@ def _fetch() -> DashboardState:
     from engine import vertex_facts, vertex_summary
 
     vp = tasks_vertex_path()
+    sp = workspace_store(vp)
     tasks = fold_all_tasks(vp)
-    all_facts = vertex_facts(vp, 0, float("inf"))
-    fact_total = vertex_summary(vp)["facts"]["total"]
+    all_facts = vertex_facts(vp, 0, float("inf"), store=sp)
+    fact_total = vertex_summary(vp, store=sp)["facts"]["total"]
 
     rows: list[TaskRow] = []
     for task in tasks:
@@ -239,9 +245,10 @@ def _fetch_with_detail(selected_name: str | None) -> DashboardState:
     from engine import vertex_facts, vertex_summary
 
     vp = tasks_vertex_path()
+    sp = workspace_store(vp)
     tasks = fold_all_tasks(vp)
-    all_facts = vertex_facts(vp, 0, float("inf"))
-    fact_total = vertex_summary(vp)["facts"]["total"]
+    all_facts = vertex_facts(vp, 0, float("inf"), store=sp)
+    fact_total = vertex_summary(vp, store=sp)["facts"]["total"]
 
     # Session status
     session_facts = [f for f in all_facts if f["kind"] in ("session.start", "session.end")]

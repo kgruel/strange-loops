@@ -87,9 +87,25 @@ class Check:
     name: str
     ok: bool
     detail: str = ""
+    lag: bool = False
+    """Is this divergence the writer's own documented recovery window?
+
+    ``JsonlStore`` fsyncs the log BEFORE it commits the index rows and the
+    markers (``jsonl_store.py``), so a crash in that window leaves a durable
+    log ahead of a truthful-but-behind index — and an interrupted append
+    leaves a torn final line the next open truncates. Both are *lag*, not
+    tampering: the index carries nothing the log does not, and the next open
+    catches it up. Every other divergence says the index holds something the
+    log never carried, which no writer produces.
+    """
 
     def as_dict(self) -> dict[str, Any]:
-        return {"check": self.name, "ok": self.ok, "detail": self.detail}
+        return {
+            "check": self.name,
+            "ok": self.ok,
+            "detail": self.detail,
+            "lag": self.lag,
+        }
 
 
 @dataclass(frozen=True)
@@ -108,6 +124,19 @@ class AgreementReport:
     def divergences(self) -> tuple[Check, ...]:
         return tuple(c for c in self.checks if not c.ok)
 
+    @property
+    def lag_only(self) -> bool:
+        """Diverged, but only in the writer's own crash-recovery window.
+
+        True when every divergence is a :attr:`Check.lag` — the index is
+        BEHIND the log and otherwise truthful. Callers still report and still
+        refuse (the log holds facts the index cannot serve), but they must
+        not call it tampering: the remedy is any read verb, which catches the
+        index up, not a forensic investigation.
+        """
+        d = self.divergences
+        return bool(d) and all(c.lag for c in d)
+
     def summary(self) -> str:
         """One line naming the failures — '' when everything agreed."""
         return "; ".join(f"{c.name}: {c.detail}" for c in self.divergences)
@@ -116,6 +145,7 @@ class AgreementReport:
         return {
             "ok": self.ok,
             "deep": self.deep,
+            "lag_only": self.lag_only,
             "checks": [c.as_dict() for c in self.checks],
             **({"counts": dict(self.counts)} if self.counts else {}),
         }
@@ -310,7 +340,7 @@ def audit_agreement(canonical: Path) -> AgreementReport:
         counts = _row_counts(conn)
         checks.append(_check_offset(offset, size))
         checks.append(_check_counts(conn, counts))
-        checks.append(_check_last_line(conn, canonical, size))
+        checks.append(_check_last_line(conn, canonical, size, offset))
         return AgreementReport(tuple(checks), counts=counts)
     finally:
         conn.close()
@@ -339,6 +369,7 @@ def _check_offset(offset: int | None, size: int) -> Check:
             "offset", False,
             f"log is ahead of the index: {size - offset} durable byte(s) "
             f"unindexed (offset {offset}, log {size})",
+            lag=True,
         )
     return Check(
         "offset", False,
@@ -378,26 +409,44 @@ def _check_counts(conn, counts: dict[str, int]) -> Check:
     )
 
 
-def _check_last_line(conn, canonical: Path, size: int) -> Check:
-    if size == 0:
-        return Check("last-line", True, "empty log")
-    line = _last_line(canonical, size)
+def _check_last_line(conn, canonical: Path, size: int, offset: int | None) -> Check:
+    """Judge the last line the index CONSUMED — not the last line on disk.
+
+    The bound is the stamped offset, because that is the only prefix of the
+    log the index ever claimed to account for. Judging the file's final line
+    instead accuses the index of an out-of-band edit every time the writer
+    crashes between the log's fsync and the index commit, or leaves a torn
+    tail — the two states the writer itself documents as normal, where the
+    unindexed bytes have no index row to match by construction. The offset
+    check already reports the lag once; reporting it again as tampering is a
+    false accusation inside the feature that exists to attest honestly.
+    """
+    bound = size if offset is None else min(offset, size)
+    scope = "final" if bound == size else "last consumed"
+    if bound == 0:
+        return Check(
+            "last-line", True,
+            "empty log" if size == 0 else "index has consumed no lines yet",
+        )
+    line = _last_line(canonical, bound)
     if line is None:
         return Check(
             "last-line", False,
-            "the log's final line is incomplete or unreadable",
+            f"the log's {scope} line is incomplete or unreadable",
         )
     try:
         t, row = deserialize_row(line)
     except (JsonlCodecError, UnicodeError) as exc:
-        return Check("last-line", False, f"final log line does not decode: {exc}")
+        return Check(
+            "last-line", False, f"{scope} log line does not decode: {exc}"
+        )
     if not row_matches(conn, t, row):
         return Check(
             "last-line", False,
-            f"final log {t} {row[0]} does not match the index row of the "
+            f"{scope} log {t} {row[0]} does not match the index row of the "
             "same id — the index was edited out of band",
         )
-    return Check("last-line", True, f"final log {t} {row[0]} matches the index")
+    return Check("last-line", True, f"{scope} log {t} {row[0]} matches the index")
 
 
 # --- --deep: line-by-line, and the chain from canonical content ------------
@@ -435,7 +484,10 @@ def audit_deep(canonical: Path) -> AgreementReport:
     if conn is None:  # pragma: no cover — audit_agreement just opened it
         return AgreementReport(base.checks, deep=True)
     try:
-        checks = [*base.checks, *_deep_checks(conn, canonical)]
+        checks = [
+            *base.checks,
+            *_deep_checks(conn, canonical, _meta_int(conn, OFFSET_KEY)),
+        ]
         return AgreementReport(tuple(checks), deep=True, counts=base.counts)
     finally:
         conn.close()
@@ -448,7 +500,19 @@ def _index_cursor(conn, table: str, columns: tuple[str, ...]):
     )
 
 
-def _deep_checks(conn, canonical: Path) -> list[Check]:
+def _deep_checks(conn, canonical: Path, offset: int | None) -> list[Check]:
+    """Compare every log line against the index, in order.
+
+    ``offset`` is the prefix the index claims to have consumed. A failure on
+    a line that ends BEYOND it is the writer's crash window, not tampering:
+    those bytes are durable in the log and were never meant to have an index
+    row yet (see :attr:`Check.lag`). Failures inside the consumed prefix are
+    the real thing and stay unflagged.
+    """
+
+    def beyond(end: int) -> bool:
+        return offset is not None and end > offset
+
     fact_arity, fact_rows = _index_cursor(conn, "facts", FACT_COLUMNS)
     tick_arity, tick_rows = _index_cursor(conn, "ticks", TICK_COLUMNS)
     cursors = {"fact": (fact_arity, fact_rows), "tick": (tick_arity, tick_rows)}
@@ -457,12 +521,13 @@ def _deep_checks(conn, canonical: Path) -> list[Check]:
     chain = _ChainWalk()
     content: Check | None = None
 
-    for lineno, _end, line in _iter_lines(canonical):
+    for lineno, end, line in _iter_lines(canonical):
         try:
             t, row = deserialize_row(line)
         except (JsonlCodecError, UnicodeError) as exc:
             content = content or Check(
-                "content", False, f"log line {lineno} does not decode: {exc}"
+                "content", False, f"log line {lineno} does not decode: {exc}",
+                lag=beyond(end),
             )
             break
         arity, rows = cursors[t]
@@ -473,6 +538,7 @@ def _deep_checks(conn, canonical: Path) -> list[Check]:
                 "content", False,
                 f"log line {lineno} ({t} {row[0]}) has no index row — the "
                 f"index holds only {seen[t] - 1} {t}(s)",
+                lag=beyond(end),
             )
             break
         if tuple(stored) != _trim(row, arity):

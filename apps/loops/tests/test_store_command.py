@@ -932,6 +932,125 @@ class TestCanonicalAgreementGate:
         assert rc == 1
         assert "unindexed" in out
         assert "chain intact" not in out
+        # …and it is named as lag, not as tampering.
+        assert "INDEX BEHIND THE LOG" in out
+        assert "CANONICAL DISAGREEMENT" not in out
+
+    def test_the_crash_window_is_not_reported_as_an_index_edit(
+        self, tmp_path, capsys
+    ):
+        """The writer's own recovery window must not read as an accusation.
+
+        `_check_last_line` used to judge the log's FINAL line, which after a
+        crash between the log's fsync and the index commit has no index row by
+        construction — so the honest-attestation feature printed "the index
+        was edited out of band" about an index nobody had touched, and
+        reported the same offset divergence twice.
+        """
+        import json
+        import time
+
+        from engine.jsonl_codec import serialize_fact_row
+        from loops.commands.store import _run_store
+
+        vpath = self._store(tmp_path)
+        with (tmp_path / "x.jsonl").open("a", encoding="utf-8") as fh:
+            fh.write(serialize_fact_row(
+                ("01UNINDEXED", "ping", time.time(), "sol", "",
+                 json.dumps({"message": "durable"}))
+            ) + "\n")
+
+        rc = _run_store(["verify"], vertex_path=vpath)
+        out = capsys.readouterr().out
+
+        assert rc == 1
+        assert "edited out of band" not in out
+        # The route out is named, and it is the repair the product already has.
+        assert "loops read x" in out
+
+    def test_a_torn_tail_is_lag_not_an_unreadable_final_line(
+        self, tmp_path, capsys
+    ):
+        from loops.commands.store import _run_store
+
+        vpath = self._store(tmp_path)
+        with (tmp_path / "x.jsonl").open("a", encoding="utf-8") as fh:
+            fh.write('{"t":"fact","id":"01TOR')
+
+        rc = _run_store(["verify"], vertex_path=vpath)
+        out = capsys.readouterr().out
+
+        assert rc == 1
+        assert "INDEX BEHIND THE LOG" in out
+        assert "incomplete or unreadable" not in out
+        assert "edited out of band" not in out
+
+    def test_the_lag_classification_rides_the_json_shape(self, tmp_path, capsys):
+        import json as _json
+        import time
+
+        from engine.jsonl_codec import serialize_fact_row
+        from loops.commands.store import _run_store
+
+        vpath = self._store(tmp_path)
+        with (tmp_path / "x.jsonl").open("a", encoding="utf-8") as fh:
+            fh.write(serialize_fact_row(
+                ("01UNINDEXED", "ping", time.time(), "sol", "",
+                 _json.dumps({"message": "durable"}))
+            ) + "\n")
+
+        rc = _run_store(["verify", "--json"], vertex_path=vpath)
+        payload = _json.loads(capsys.readouterr().out)
+
+        assert rc == 1
+        assert payload["canonical"]["lag_only"] is True
+        offset = next(c for c in payload["canonical"]["checks"]
+                      if c["check"] == "offset")
+        assert offset["lag"] is True
+
+    def test_a_forged_row_is_never_classified_as_lag(self, tmp_path, capsys):
+        import json as _json
+
+        from loops.commands.store import _run_store
+
+        vpath = self._store(tmp_path)
+        self._forge_row(tmp_path)
+
+        rc = _run_store(["verify", "--json"], vertex_path=vpath)
+        payload = _json.loads(capsys.readouterr().out)
+
+        assert rc == 1
+        assert payload["canonical"]["lag_only"] is False
+
+    def test_stats_and_ticks_name_the_repair_on_a_lagging_index(
+        self, tmp_path, capsys
+    ):
+        """Still refuses (the totals would undercount) — but says the way out.
+
+        The refusal used to read as poisoning and offer no remediation, while
+        `sl read` on the same store served the data and healed the index.
+        """
+        import json as _json
+        import time
+
+        from engine.jsonl_codec import serialize_fact_row
+        from loops.commands.store import _run_store
+
+        vpath = self._store(tmp_path)
+        with (tmp_path / "x.jsonl").open("a", encoding="utf-8") as fh:
+            fh.write(serialize_fact_row(
+                ("01UNINDEXED", "ping", time.time(), "sol", "",
+                 _json.dumps({"message": "durable"}))
+            ) + "\n")
+
+        for verb in ("stats", "ticks"):
+            rc = _run_store([verb], vertex_path=vpath)
+            out = capsys.readouterr()
+            text = out.out + out.err
+            assert rc == 1, verb
+            assert "index behind the log" in text, verb
+            assert "canonical disagreement" not in text, verb
+            assert "loops read x" in text, verb
 
     def test_deep_names_an_interior_index_edit_l1_cannot_see(self, tmp_path, capsys):
         import json

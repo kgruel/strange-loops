@@ -173,12 +173,26 @@ def _gate_read(target_path: Path) -> None:
     existing fetch-error path renders it at RC=1.
     """
     gated = canonical_agreement(target_path)
-    if gated is not None and not gated[1].ok:
+    if gated is None or gated[1].ok:
+        return
+    report = gated[1]
+    if report.lag_only:
+        # Recoverable, and the product already holds the repair: any read verb
+        # opens the store, which catches the index up. Refusing without naming
+        # that route made a crash window look like a dead end (and read the
+        # same as tampering, which it is not).
         raise ValueError(
-            f"canonical disagreement in '{target_path.stem}' — "
-            f"{gated[1].summary()}. Refusing to serve derived data the log "
-            f"does not support; run 'loops store verify' for the full report"
+            f"index behind the log in '{target_path.stem}' — "
+            f"{report.summary()}. Not tampering: this is the writer's "
+            f"crash-recovery window, and the totals here would undercount. "
+            f"Catch the index up with 'loops read {target_path.stem}', then "
+            f"re-run"
         )
+    raise ValueError(
+        f"canonical disagreement in '{target_path.stem}' — "
+        f"{report.summary()}. Refusing to serve derived data the log "
+        f"does not support; run 'loops store verify' for the full report"
+    )
 
 
 def make_fetcher(path: Path, zoom: int, *, kind: str | None = None):
@@ -367,13 +381,30 @@ def _run_verify(argv: list[str], *, vertex_path: Path | None = None) -> int:
         from painted import Block, Style, join_vertical, paint
         from painted.views import Severity, callout
 
-        blocks = [callout(
-            f"{db_path.name} — CANONICAL DISAGREEMENT",
-            severity=Severity.ERROR,
-            detail="the derived index does not agree with the canonical log; "
-                   "the tick chain was NOT walked (its verdict would attest "
-                   "to an index the log does not support)",
-        )]
+        if agreement.lag_only:
+            # The writer's own crash window, not tampering — see
+            # engine.canonical_audit.Check.lag. Still rc=1 and still no chain
+            # walk (the index cannot serve facts the log holds), but the words
+            # must name a recoverable state and the way out of it.
+            head = callout(
+                f"{db_path.name} — INDEX BEHIND THE LOG",
+                severity=Severity.WARNING,
+                detail="the derived index is behind the canonical log — the "
+                       "shape a crash between the log's fsync and the index "
+                       "commit leaves, not evidence of tampering; the tick "
+                       "chain was NOT walked (it would attest to a partial "
+                       f"index). Catch it up with any read verb, e.g. "
+                       f"'loops read {target_path.stem}', then verify again",
+            )
+        else:
+            head = callout(
+                f"{db_path.name} — CANONICAL DISAGREEMENT",
+                severity=Severity.ERROR,
+                detail="the derived index does not agree with the canonical "
+                       "log; the tick chain was NOT walked (its verdict would "
+                       "attest to an index the log does not support)",
+            )
+        blocks = [head]
         for check in agreement.checks:
             mark = "✓" if check.ok else "✗"
             blocks.append(Block.text(

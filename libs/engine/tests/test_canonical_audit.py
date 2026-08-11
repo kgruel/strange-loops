@@ -249,3 +249,79 @@ def test_an_incomplete_tail_is_not_judged_as_content(tmp_path):
     assert "offset" in failed(report)
     deep = audit_deep(log)
     assert "content" not in failed(deep)
+
+
+# --- lag is not tampering ---------------------------------------------------
+#
+# The writer fsyncs the log BEFORE committing the index rows and markers, so a
+# crash in that window (and a torn append) leaves a truthful index that is
+# merely BEHIND. The audit must report that once, as lag, and must not also
+# accuse the index of an out-of-band edit for bytes it never claimed to have
+# consumed.
+
+
+def test_the_crash_window_reports_lag_once_and_never_as_an_index_edit(tmp_path):
+    log, _db = seeded(tmp_path)
+    orphan = ("01UNINDEXED", "note", time.time(), "sol", "",
+              json.dumps({"m": "durable"}))
+    with log.open("a", encoding="utf-8") as fh:
+        fh.write(serialize_fact_row(orphan) + "\n")
+
+    report = audit_agreement(log)
+    assert failed(report) == {"offset"}
+    assert "out of band" not in report.summary()
+    assert report.lag_only
+    last = next(c for c in report.checks if c.name == "last-line")
+    assert last.ok and "last consumed" in last.detail
+
+
+def test_a_torn_tail_does_not_read_as_an_unreadable_final_line(tmp_path):
+    log, _db = seeded(tmp_path)
+    with log.open("a", encoding="utf-8") as fh:
+        fh.write('{"t":"fact","id":"01TOR')
+
+    report = audit_agreement(log)
+    assert failed(report) == {"offset"}
+    assert report.lag_only
+    assert "incomplete or unreadable" not in report.summary()
+
+
+def test_deep_calls_an_unindexed_line_lag_not_tampering(tmp_path):
+    log, _db = seeded(tmp_path)
+    orphan = ("01UNINDEXED", "note", time.time(), "sol", "",
+              json.dumps({"m": "durable"}))
+    with log.open("a", encoding="utf-8") as fh:
+        fh.write(serialize_fact_row(orphan) + "\n")
+
+    deep = audit_deep(log)
+    assert not deep.ok
+    assert deep.lag_only
+    assert failed(deep) >= {"offset", "content"}
+
+
+def test_a_real_index_edit_is_still_tampering_not_lag(tmp_path):
+    log, db = seeded(tmp_path)
+    conn = sqlite3.connect(str(db))
+    last = conn.execute("SELECT id FROM ticks ORDER BY rowid DESC").fetchone()[0]
+    conn.execute("UPDATE ticks SET name = 'renamed' WHERE id = ?", (last,))
+    conn.commit()
+    conn.close()
+
+    report = audit_agreement(log)
+    assert "last-line" in failed(report)
+    assert not report.lag_only
+    assert "edited out of band" in report.summary()
+
+
+def test_an_out_of_band_insert_is_never_lag(tmp_path):
+    log, db = seeded(tmp_path)
+    conn = sqlite3.connect(str(db))
+    conn.execute(
+        "INSERT INTO facts (id, kind, ts, observer, payload) "
+        "VALUES ('01GHOST', 'note', ?, 'sol', '{}')", (time.time(),)
+    )
+    conn.commit()
+    conn.close()
+
+    report = audit_agreement(log)
+    assert not report.lag_only

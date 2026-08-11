@@ -176,9 +176,7 @@ def test_emit_writes_the_log_when_the_locator_is_jsonl(tmp_path):
     assert canonical.exists()
     assert (tmp_path / "data" / "tasks.db").exists()  # the derived index
     records = [
-        deserialize_row(ln)
-        for ln in canonical.read_text(encoding="utf-8").splitlines()
-        if ln
+        deserialize_row(ln) for ln in canonical.read_text(encoding="utf-8").splitlines() if ln
     ]
     assert [t for t, _ in records] == ["fact", "tick"]
 
@@ -194,9 +192,7 @@ def test_emit_still_writes_sqlite_directly_for_a_db_locator(tmp_path):
     assert not (tmp_path / "data" / "tasks.jsonl").exists()
 
 
-def test_store_path_follows_a_jsonl_declaration_through_the_writers(
-    tmp_path, monkeypatch
-):
+def test_store_path_follows_a_jsonl_declaration_through_the_writers(tmp_path, monkeypatch):
     """The writers' path must carry the declaration's authority mode.
 
     ``store_path`` is what every task writer resolves. Hardcoding

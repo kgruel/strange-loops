@@ -189,3 +189,59 @@ def test_topology_writes_go_through_the_log_not_around_it(tmp_path):
     if log.exists() and log.read_text().strip():
         kinds = [json.loads(line)["kind"] for line in log.read_text().splitlines()]
         assert kinds and all(k == "_topology" for k in kinds)
+
+
+# ---- resolution materializes (the fresh-clone read) ------------------
+
+
+def test_resolved_index_materializes_so_no_reader_sees_the_gap(tmp_path):
+    """The fresh-clone first read must not answer 'empty' while rebuilding.
+
+    ``resolve_store_path`` is pure — it can only NAME the index — so a reader
+    that resolves and then checks ``exists()`` answers empty for exactly the
+    invocation that should have built it. Resolution and materialization are
+    one step.
+    """
+    from atoms import Fact
+    from engine import StoreReader
+    from engine.jsonl_store import resolved_index
+
+    vertex_path = _vertex(tmp_path, "p.jsonl")
+    vertex = _materialize(vertex_path)
+    try:
+        vertex.receive(Fact.of("note", "kyle", message="present"))
+    finally:
+        vertex.close()
+    (tmp_path / "p.db").unlink()
+
+    index = resolved_index("p.jsonl", vertex_path)
+
+    assert index == resolve_store_path("p.jsonl", vertex_path)
+    assert index.exists(), "resolution must leave the index materialized"
+    with StoreReader(index) as reader:
+        assert reader.summary()["facts"]["total"] == 1
+
+
+def test_resolved_index_is_resolve_store_path_for_a_sqlite_vertex(tmp_path):
+    vertex_path = _vertex(tmp_path, "p.db")
+    from engine.jsonl_store import resolved_index
+
+    assert resolved_index("p.db", vertex_path) == resolve_store_path("p.db", vertex_path)
+    assert not (tmp_path / "p.db").exists()
+
+
+def test_the_first_read_of_a_fresh_clone_sees_the_facts(tmp_path):
+    """End-to-end shape of the finding: read_vertex_state, no index on disk."""
+    from atoms import Fact
+    from engine.vertex_reader import vertex_read
+
+    vertex_path = _vertex(tmp_path, "p.jsonl")
+    vertex = _materialize(vertex_path)
+    try:
+        vertex.receive(Fact.of("note", "kyle", message="present"))
+    finally:
+        vertex.close()
+    (tmp_path / "p.db").unlink()
+
+    state = vertex_read(vertex_path)
+    assert state["note"]["items"], "first read after a clone must not answer empty"

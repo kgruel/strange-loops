@@ -630,11 +630,16 @@ def _maybe_emit_change(vertex_path: Path, payload: dict[str, str]) -> None:
 
     from datetime import datetime, timezone
     from atoms import Fact
-    from engine import SqliteStore
+    from engine.jsonl_store import open_canonical_store
     from loops.commands.identity import resolve_observer
-    from loops.commands.resolve import _resolve_vertex_store_path
+    from loops.commands.resolve import _resolve_vertex_canonical_store_path
 
-    store_path = _resolve_vertex_store_path(vertex_path.resolve())
+    # The CANONICAL locator, not the resolved index: under a JSONL-canonical
+    # vertex a direct SqliteStore write here lands in the derived index only,
+    # and the next open refuses (JsonlCanonicalUnsupported) because the log
+    # does not account for the row. open_canonical_store is the one place
+    # that answers which file is authoritative.
+    store_path = _resolve_vertex_canonical_store_path(vertex_path.resolve())
     if store_path is None:
         return
 
@@ -647,8 +652,8 @@ def _maybe_emit_change(vertex_path: Path, payload: dict[str, str]) -> None:
         origin="",
     )
     store_path.parent.mkdir(parents=True, exist_ok=True)
-    with SqliteStore(
-        path=store_path,
+    with open_canonical_store(
+        store_path,
         serialize=Fact.to_dict,
         deserialize=Fact.from_dict,
     ) as store:

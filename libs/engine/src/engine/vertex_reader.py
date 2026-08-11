@@ -29,7 +29,8 @@ from .declaration import (
     load_declaration_status,
 )
 from .observer import observer_matches
-from .residence import canonical_store_path, resolve_store_path
+from .jsonl_store import resolved_index
+from .residence import canonical_store_path
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from .witness import WitnessPosition
@@ -71,7 +72,7 @@ def _resolve_combine_stores(ast: Any, vertex_path: Path) -> list[Path]:
         if ref_ast.store is None:
             continue
 
-        sp = resolve_store_path(ref_ast.store, vpath)
+        sp = resolved_index(ref_ast.store, vpath)
         if sp.exists():
             store_paths.append(sp)
 
@@ -99,7 +100,7 @@ def _resolve_discover_stores(ast: Any, vertex_path: Path) -> list[Path]:
             continue
         if ref_ast.store is None:
             continue
-        sp = resolve_store_path(ref_ast.store, match)
+        sp = resolved_index(ref_ast.store, match)
         if sp.exists():
             store_paths.append(sp)
     return store_paths
@@ -127,7 +128,7 @@ def _child_topology_entry(ref_ast: Any, vpath: Path, base_dir: Path) -> dict:
 
     store_str = ""
     if ref_ast.store is not None:
-        sp = resolve_store_path(ref_ast.store, vpath)
+        sp = resolved_index(ref_ast.store, vpath)
         store_str = str(sp)
 
     try:
@@ -192,7 +193,7 @@ def emit_topology(vertex_path: Path) -> None:
     if ast.store is None:
         return
 
-    store_path = resolve_store_path(ast.store, vertex_path)
+    store_path = resolved_index(ast.store, vertex_path)
 
     children = _collect_topology_info(ast, vertex_path)
     if not children:
@@ -814,7 +815,7 @@ def vertex_read(
 
         # Aggregation with own store: overlay self-knowledge from own store
         if ast.store is not None:
-            own_store = resolve_store_path(ast.store, vertex_path)
+            own_store = resolved_index(ast.store, vertex_path)
             if own_store.exists():
                 with StoreReader(own_store) as reader:
                     for kind, spec in specs.items():
@@ -837,7 +838,7 @@ def vertex_read(
     if ast.store is None:
         return {kind: spec.initial_state() for kind, spec in specs.items()}
 
-    store_path = resolve_store_path(ast.store, vertex_path)
+    store_path = resolved_index(ast.store, vertex_path)
 
     if not store_path.exists():
         return {kind: spec.initial_state() for kind, spec in specs.items()}
@@ -1079,7 +1080,7 @@ def vertex_fold(
 
         # Aggregation with own store: overlay self-knowledge
         if ast.store is not None:
-            own_store = resolve_store_path(ast.store, vertex_path)
+            own_store = resolved_index(ast.store, vertex_path)
             if own_store.exists():
                 from .store_reader import StoreReader  # deferred: not needed for combine-only
 
@@ -1104,7 +1105,7 @@ def vertex_fold(
     elif ast.store is None:
         raw = {k: spec.initial_state() for k, spec in full_specs.items()}
     else:
-        store_path = resolve_store_path(ast.store, vertex_path)
+        store_path = resolved_index(ast.store, vertex_path)
 
         # A10: a witness position's rowid indexes THIS store's append order only.
         # verify_position_for_store returns the position to APPLY — unchanged for
@@ -1440,7 +1441,7 @@ def vertex_facts(
     elif ast.store is None:
         facts = []
     else:
-        store_path = resolve_store_path(ast.store, vertex_path)
+        store_path = resolved_index(ast.store, vertex_path)
 
         # A10: return the position to apply (re-resolved for a same-lineage
         # sibling store, refused if foreign) — same guard as vertex_fold
@@ -1505,7 +1506,7 @@ def vertex_ticks(
     if ast.store is None:
         return []
 
-    store_path = resolve_store_path(ast.store, vertex_path)
+    store_path = resolved_index(ast.store, vertex_path)
 
     if not store_path.exists():
         return []
@@ -1538,7 +1539,7 @@ def vertex_summary(vertex_path: Path, *, include_internal: bool = False) -> dict
     if ast.store is None:
         return {"facts": {"total": 0, "kinds": {}}, "ticks": {"total": 0, "names": {}}}
 
-    store_path = resolve_store_path(ast.store, vertex_path)
+    store_path = resolved_index(ast.store, vertex_path)
 
     if not store_path.exists():
         return {"facts": {"total": 0, "kinds": {}}, "ticks": {"total": 0, "names": {}}}
@@ -1558,7 +1559,7 @@ def _resolve_store(vertex_path: Path) -> tuple[Any, Path | None]:
     if ast.store is None:
         return ast, None
 
-    store_path = resolve_store_path(ast.store, vertex_path)
+    store_path = resolved_index(ast.store, vertex_path)
 
     if not store_path.exists():
         return ast, None
@@ -1703,7 +1704,7 @@ def vertex_search_coverage(vertex_path: Path) -> FtsCoverage:
     if ast.store is None:
         return FtsCoverage(missing=True)
 
-    store_path = resolve_store_path(ast.store, vertex_path)
+    store_path = resolved_index(ast.store, vertex_path)
 
     if not store_path.exists():
         return FtsCoverage(missing=True)
@@ -1856,7 +1857,7 @@ def vertex_reindex(vertex_path: Path) -> dict[str, Any]:
             "reason": "no store configured",
         }
 
-    store_path = resolve_store_path(ast.store, vertex_path)
+    store_path = resolved_index(ast.store, vertex_path)
 
     if not store_path.exists():
         # Nothing to index yet — and do NOT create the .db as a side effect
@@ -2099,7 +2100,7 @@ def vertex_search(
         _unverifiable("vertex declares no store")
         return []
 
-    store_path = resolve_store_path(ast.store, vertex_path)
+    store_path = resolved_index(ast.store, vertex_path)
 
     if not store_path.exists():
         _unverifiable("store does not exist")

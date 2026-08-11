@@ -651,3 +651,64 @@ class TestStoreReindex:
                 assert row is not None
             finally:
                 conn.close()
+
+
+class TestJsonlCanonicalStoreVerbRefusals:
+    """History-mutating store verbs must refuse a JSONL-canonical vertex.
+
+    The refusal lives on ``JsonlStore``; it only fires if the CLI constructs
+    the store through ``open_canonical_store`` on the CANONICAL locator.
+    Building a plain ``SqliteStore`` on the resolved index instead rewrites
+    (or appends to) the derived index while the log keeps the originals —
+    the index stops being a function of the log, and nothing says so.
+    """
+
+    @staticmethod
+    def _jsonl_vertex(tmp_path):
+        from engine.builder import fold_count, vertex
+
+        vpath = tmp_path / "x.vertex"
+        (vertex("x").store("./x.jsonl")
+            .loop("ping", fold_count("n"), boundary_every=1)
+            .write(vpath))
+        return vpath
+
+    @staticmethod
+    def _seed(vpath):
+        """One fact through the canonical path, so the store is materialized."""
+        from atoms import Fact
+        from engine.jsonl_store import open_canonical_store
+
+        store = open_canonical_store(
+            vpath.parent / "x.jsonl",
+            serialize=lambda f: f.to_dict(),
+            deserialize=Fact.from_dict,
+        )
+        try:
+            store.append(Fact.of("ping", "x"))
+        finally:
+            store.close()
+
+    def test_reanchor_refuses_instead_of_rewriting_the_index(self, tmp_path, capsys):
+        from loops.commands.store import _run_reanchor
+
+        vpath = self._jsonl_vertex(tmp_path)
+        self._seed(vpath)
+        before = (tmp_path / "x.jsonl").read_bytes()
+
+        rc = _run_reanchor([], vertex_path=vpath)
+
+        assert rc == 2
+        assert "jsonl-canonical" in capsys.readouterr().err
+        assert (tmp_path / "x.jsonl").read_bytes() == before
+
+    def test_absorb_genesis_refuses(self, tmp_path, capsys):
+        from loops.commands.store import _run_absorb
+
+        vpath = self._jsonl_vertex(tmp_path)
+        self._seed(vpath)
+
+        rc = _run_absorb(["--observer", "x"], vertex_path=vpath)
+
+        assert rc == 2
+        assert "jsonl-canonical" in capsys.readouterr().err

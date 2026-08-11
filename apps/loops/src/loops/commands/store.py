@@ -53,6 +53,34 @@ def resolve_store_path(file_path: Path) -> Path:
         raise ValueError(f"Expected .vertex or .db file, got {file_path.suffix}")
 
 
+def resolve_canonical_path(file_path: Path) -> Path:
+    """Resolve a ``.vertex`` (or ``.db``) to its **canonical** store artifact.
+
+    The write-side sibling of :func:`resolve_store_path`. A JSONL-canonical
+    vertex resolves to its ``….jsonl`` log; everything else to the same
+    sqlite path :func:`resolve_store_path` returns. Feed it to
+    ``open_canonical_store`` — constructing ``SqliteStore`` on the resolved
+    *index* of a JSONL-canonical vertex writes rows the log never sees, and
+    the ``JsonlCanonicalUnsupported`` refusals on the history-mutating ops
+    never fire because the subclass is never instantiated.
+
+    A direct ``.db`` target stays itself: the documented direct-db bypass is
+    detected on the next open, not prevented here.
+    """
+    if file_path.suffix == ".vertex":
+        from engine.residence import canonical_store_path
+        from lang import parse_vertex_file
+
+        ast = parse_vertex_file(file_path)
+        if ast.store is None:
+            raise ValueError(f"No store configured in {file_path}")
+        return canonical_store_path(ast.store, file_path)
+    elif file_path.suffix == ".db":
+        return file_path.resolve()
+    else:
+        raise ValueError(f"Expected .vertex or .db file, got {file_path.suffix}")
+
+
 def _require_materialized_store(target_path: Path) -> Path:
     """Resolve *target_path* to its store ``.db`` and require it exists.
 
@@ -588,17 +616,26 @@ def _run_reanchor(argv: list[str], *, vertex_path: Path | None = None) -> int:
     )
 
     from atoms import Fact
-    from engine.sqlite_store import SqliteStore
+    from engine.jsonl_store import JsonlCanonicalUnsupported, open_canonical_store
 
-    store = SqliteStore(
-        path=db_path,
+    # open_canonical_store, not SqliteStore on db_path: reanchor rewrites
+    # chain rows in place, which a JSONL-canonical store refuses — and the
+    # refusal only fires if the JsonlStore subclass is the one constructed.
+    store = open_canonical_store(
+        resolve_canonical_path(target_path),
         serialize=lambda f: f.to_dict(),
         deserialize=Fact.from_dict,
         tick_signer=tick_signer_for(target_path),
         fact_signer=fact_signer_for(target_path),
     )
     try:
-        receipt = store.reanchor()
+        try:
+            receipt = store.reanchor()
+        except JsonlCanonicalUnsupported as exc:
+            from painted import Block, Style, paint
+
+            paint(Block.text(f"✗ {db_path.name}: {exc}", Style()), file=sys.stderr)
+            return 2
         verifier, _keys = tick_verifier_for(target_path)
         fact_verifier, _fkeys = fact_verifier_for(target_path)
         report = store.verify_chain(verifier=verifier)
@@ -919,14 +956,16 @@ def _absorb_genesis_mode(
         )
 
     from atoms import Fact
-    from engine.sqlite_store import (
-        GenesisExists,
-        SqliteStore,
-        UnsignableGenesis,
-    )
+    from engine.jsonl_store import JsonlCanonicalUnsupported, open_canonical_store
+    from engine.sqlite_store import GenesisExists, UnsignableGenesis
 
-    store = SqliteStore(
-        path=db_path, serialize=lambda f: f.to_dict(), deserialize=Fact.from_dict
+    # open_canonical_store: absorb writes declaration facts, which under a
+    # JSONL-canonical vertex must either go through the log or refuse — a
+    # plain SqliteStore on the derived index does neither.
+    store = open_canonical_store(
+        resolve_canonical_path(target_path),
+        serialize=lambda f: f.to_dict(),
+        deserialize=Fact.from_dict,
     )
     try:
         receipt = store.absorb_genesis(
@@ -935,6 +974,8 @@ def _absorb_genesis_mode(
             origin="",
             fact_signer=fact_signer_for(target_path),
         )
+    except JsonlCanonicalUnsupported as exc:
+        return _refuse(str(exc))
     except GenesisExists:
         # TOCTOU: a concurrent absorb opened the lineage after the dispatcher's
         # mode check. The atomic primitive caught it — point at edit mode.
@@ -1005,10 +1046,12 @@ def _absorb_edit(
     # refuses (StaleDeclarationHead) instead of interleaving, and re-running
     # picks up the moved head. Capturing in this order fails conservative.
     from atoms import Fact
-    from engine.sqlite_store import SqliteStore
+    from engine.jsonl_store import JsonlCanonicalUnsupported, open_canonical_store
 
-    _cas_store = SqliteStore(
-        path=db_path, serialize=lambda f: f.to_dict(), deserialize=Fact.from_dict
+    _cas_store = open_canonical_store(
+        resolve_canonical_path(target_path),
+        serialize=lambda f: f.to_dict(),
+        deserialize=Fact.from_dict,
     )
     try:
         expected_head = _cas_store.declaration_head()
@@ -1111,8 +1154,10 @@ def _absorb_edit(
         UnsignableEdit,
     )
 
-    store = SqliteStore(
-        path=db_path, serialize=lambda f: f.to_dict(), deserialize=Fact.from_dict
+    store = open_canonical_store(
+        resolve_canonical_path(target_path),
+        serialize=lambda f: f.to_dict(),
+        deserialize=Fact.from_dict,
     )
     try:
         store.absorb_edit(
@@ -1122,6 +1167,8 @@ def _absorb_edit(
             fact_signer=fact_signer_for(target_path),
             expected_head=expected_head,
         )
+    except JsonlCanonicalUnsupported as exc:
+        return _refuse(str(exc))
     except StaleDeclarationHead as exc:
         return _refuse(f"{exc}")
     except UnsignableEdit:
@@ -1175,16 +1222,14 @@ def _run_adopt(argv: list[str], *, vertex_path: Path | None = None) -> int:
     db_path = _require_materialized_store(target_path)
 
     from atoms import Fact
-    from engine.sqlite_store import (
-        AmbiguousGenesis,
-        GenesisExists,
-        NoGenesis,
-        SqliteStore,
-    )
+    from engine.jsonl_store import open_canonical_store
+    from engine.sqlite_store import AmbiguousGenesis, GenesisExists, NoGenesis
     from painted import Block, Style, join_vertical, paint
 
-    store = SqliteStore(
-        path=db_path, serialize=lambda f: f.to_dict(), deserialize=Fact.from_dict
+    store = open_canonical_store(
+        resolve_canonical_path(target_path),
+        serialize=lambda f: f.to_dict(),
+        deserialize=Fact.from_dict,
     )
     try:
         receipt = store.adopt_lineage(args.lineage)

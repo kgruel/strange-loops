@@ -1160,16 +1160,13 @@ def _resolve_vertex_store_path(vertex_path: Path) -> Path | None:
     ast = _parse_vertex(vertex_path)
 
     if ast.store is not None:
-        store_path = resolve_store_path(ast.store, vertex_path)
-        if not store_path.exists():
-            # Fresh clone: the log is tracked, the derived index is not.
-            # Materialize it once, here, rather than letting readers open an
-            # empty db and report an empty store. Cheap no-op when the index
-            # already exists (the common case) — no store is constructed.
-            from engine.jsonl_store import ensure_index
+        # resolved_index, not resolve_store_path: the fresh clone (log
+        # tracked, derived index not) materializes as part of resolution, so
+        # no caller can evaluate `store_path.exists()` on the one invocation
+        # that should have built it. Stat-only no-op once the index exists.
+        from engine.jsonl_store import resolved_index
 
-            ensure_index(canonical_store_path(ast.store, vertex_path))
-        return store_path
+        return resolved_index(ast.store, vertex_path)
 
     # Follow combine → first entry's store
     if ast.combine:
@@ -1180,6 +1177,32 @@ def _resolve_vertex_store_path(vertex_path: Path) -> Path | None:
             return _resolve_vertex_store_path(ref_path)
 
     return None
+
+
+def _resolve_vertex_canonical_store_path(vertex_path: Path) -> Path | None:
+    """Resolve the **canonical** store locator for a vertex. None if unstored.
+
+    The write-side sibling of :func:`_resolve_vertex_store_path`. That one
+    answers "which sqlite file do I read from"; this one answers "which file
+    is authoritative", which is the only question a writer may ask. Feed the
+    result to :func:`engine.jsonl_store.open_canonical_store` — a resolved
+    index path cannot answer it, because a bare ``.db`` looks identical
+    whether it is canonical or derived.
+
+    Follows combine → the first constituent with a store, same as
+    :func:`_resolve_writable_vertex`.
+
+    Raises:
+        VertexNotFound: vertex_path doesn't exist
+        VertexParseError: vertex_path has invalid syntax
+    """
+    writable = _resolve_writable_vertex(vertex_path)
+    if writable is None:
+        return None
+    ast = _parse_vertex(writable)
+    if ast.store is None:
+        return None
+    return canonical_store_path(ast.store, writable)
 
 
 def _resolve_named_store(name: str) -> Path:

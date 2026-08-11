@@ -133,7 +133,14 @@ from .jsonl_codec import (
 )
 from .sqlite_store import SqliteStore
 
-__all__ = ["JsonlCanonicalUnsupported", "JsonlStore", "log_path_for"]
+__all__ = [
+    "JsonlCanonicalUnsupported",
+    "JsonlStore",
+    "ensure_index",
+    "log_path_for",
+    "open_canonical_store",
+    "resolved_index",
+]
 
 _log = logging.getLogger(__name__)
 
@@ -214,6 +221,24 @@ def ensure_index(canonical: Path) -> Path:
     )
     store.close()
     return index
+
+
+def resolved_index(declared: Path | str, vertex_path: Path | None = None) -> Path:
+    """:func:`engine.residence.resolve_store_path`, materializing on the way.
+
+    The read path's resolution seam. ``resolve_store_path`` is pure — it can
+    only *name* the sqlite index — so a fresh clone (log tracked, derived
+    index not) resolves to a path that does not exist, and every reader's
+    ``if not store_path.exists()`` answers "empty store" for the one
+    invocation that should have built it. Resolving through here makes
+    materialization part of resolution, so no reader can observe the gap.
+
+    Identical to ``resolve_store_path`` in every other case: the same path,
+    with :func:`ensure_index`'s stat-only no-op in front of it.
+    """
+    from .residence import canonical_store_path
+
+    return ensure_index(canonical_store_path(declared, vertex_path))
 
 
 class JsonlStore(SqliteStore[T], Generic[T]):

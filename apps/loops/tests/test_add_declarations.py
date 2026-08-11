@@ -492,3 +492,68 @@ class TestSequentialMutations:
 # Unused builder import keeps pytest happy when fixtures expand later.
 # ---------------------------------------------------------------------------
 _ = fold_count, fold_latest
+
+
+# ---------------------------------------------------------------------------
+# JSONL-canonical vertices: the change fact goes through the log
+# ---------------------------------------------------------------------------
+
+
+class TestChangeFactRoutesThroughTheLog:
+    """Under a JSONL-canonical vertex the log is authoritative.
+
+    A change fact written straight into the derived sqlite index is invisible
+    to the log, and the next open refuses (the index holds rows the log does
+    not account for) — the store is wedged. add/rm must resolve the CANONICAL
+    locator and go through ``open_canonical_store``.
+    """
+
+    @pytest.fixture
+    def jsonl_project(self, loops_env) -> Path:
+        vdir = loops_env / "project"
+        vdir.mkdir(parents=True, exist_ok=True)
+        vpath = vdir / "project.vertex"
+        (
+            vertex("project")
+            .store("./data/project.jsonl")
+            .loop("thread", fold_by("name"))
+            .loop("change", fold_collect("items", max_items=20))
+            .write(vpath)
+        )
+        return vpath
+
+    def _log_lines(self, vpath: Path) -> list[str]:
+        log = vpath.parent / "data" / "project.jsonl"
+        return log.read_text().splitlines() if log.exists() else []
+
+    def test_add_appends_the_change_fact_to_the_log(self, jsonl_project):
+        assert _run_add(["project", "kind", "note", "--collect", "20"]) == 0
+
+        lines = self._log_lines(jsonl_project)
+        assert len(lines) == 1, "the change fact must land in the canonical log"
+
+        import json
+
+        row = json.loads(lines[0])
+        assert row["t"] == "fact"
+        assert row["kind"] == "change"
+
+    def test_the_store_still_opens_after_add(self, jsonl_project):
+        """The wedge symptom: the next open refuses on a count-marker mismatch."""
+        from engine.jsonl_store import open_canonical_store
+
+        assert _run_add(["project", "kind", "note", "--collect", "20"]) == 0
+
+        canonical = jsonl_project.parent / "data" / "project.jsonl"
+        store = open_canonical_store(
+            canonical, serialize=lambda d: d, deserialize=lambda d: d
+        )
+        store.close()
+
+    def test_rm_appends_the_change_fact_to_the_log(self, jsonl_project):
+        from loops.commands.rm import _run_rm
+
+        assert _run_add(["project", "kind", "note", "--collect", "20"]) == 0
+        assert _run_rm(["project", "kind", "note"]) == 0
+
+        assert len(self._log_lines(jsonl_project)) == 2

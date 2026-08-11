@@ -1205,6 +1205,62 @@ def _resolve_vertex_canonical_store_path(vertex_path: Path) -> Path | None:
     return canonical_store_path(ast.store, writable)
 
 
+def emit_change_fact(vertex_path: Path, payload: dict[str, str]) -> None:
+    """Emit a `change` fact iff the vertex declares a change loop kind.
+
+    The declaration-mutating verbs (``add``/``rm``) all record their edit the
+    same way, so the recording lives here — beside
+    :func:`_resolve_vertex_canonical_store_path`, the resolution it turns on.
+    """
+    from lang import parse_vertex_file
+
+    try:
+        vf = parse_vertex_file(vertex_path)
+    except Exception:  # noqa: BLE001 — diagnostics fine, don't fail the mutation
+        return
+    if "change" not in (vf.loops or {}):
+        return
+
+    from datetime import datetime, timezone
+    from atoms import Fact
+    from engine.jsonl_store import open_canonical_store
+    from loops.commands.identity import resolve_observer
+
+    # The CANONICAL locator, not the resolved index: under a JSONL-canonical
+    # vertex a direct SqliteStore write here lands in the derived index only,
+    # and the next open refuses (JsonlCanonicalUnsupported) because the log
+    # does not account for the row. open_canonical_store is the one place
+    # that answers which file is authoritative.
+    # Never fail the mutation: the .vertex edit has already landed by the
+    # time we get here, so a store that refuses the append (a poisoned index
+    # raising JsonlCanonicalUnsupported from the JsonlStore constructor's
+    # catch-up, a missing key, a locked db) must degrade to a warning. The
+    # diagnostic is worth printing verbatim — its text is what tells the user
+    # their derived index has rows the log never saw.
+    try:
+        store_path = _resolve_vertex_canonical_store_path(vertex_path.resolve())
+        if store_path is None:
+            return
+
+        observer = resolve_observer()
+        fact = Fact(
+            kind="change",
+            observer=observer,
+            ts=datetime.now(timezone.utc).timestamp(),
+            payload=payload,
+            origin="",
+        )
+        store_path.parent.mkdir(parents=True, exist_ok=True)
+        with open_canonical_store(
+            store_path,
+            serialize=Fact.to_dict,
+            deserialize=Fact.from_dict,
+        ) as store:
+            store.append(fact)
+    except Exception as exc:  # noqa: BLE001 — diagnostics never fail the mutation
+        print(f"warning: change fact not emitted: {exc}", file=sys.stderr)
+
+
 def _resolve_named_store(name: str) -> Path:
     """Resolve a vertex name to its store path via resolve_vertex + store extraction.
 

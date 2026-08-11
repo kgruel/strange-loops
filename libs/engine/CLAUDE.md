@@ -175,6 +175,16 @@ plain `SqliteStore`. Never construct a store for a vertex by hand — go
 through `open_canonical_store`, or a direct sqlite write becomes an
 out-of-band insert the log doesn't account for.
 
+Open-time detection of such writes is cheap by design and correspondingly
+narrow: stamped row counts vs `COUNT(*)` catch **inserts**, the last-line
+integrity compare catches an edit to the **last consumed** row, and an
+untrustworthy offset (outside `0..size`), a shrunk log or a torn tail trigger
+a rebuild. An in-place edit to an **interior** row opens clean — content
+verification is `verify_chain`'s job, since a tick's window hash commits to
+the facts it sealed. A **live-edge** fact (not yet sealed by a boundary) has
+no such commitment, so editing it is undetectable until the next tick — the
+same custody boundary `verify_facts` documents for signature strips.
+
 **StoreReader** — read-only inspector:
 
 ```python

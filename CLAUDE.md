@@ -121,6 +121,26 @@ the `.db` directly (`store merge`/`receive`/`rebirth`/`compact`) are detected
 on the next open, not prevented: the store refuses to open rather than
 rebuild over rows the log never saw.
 
+**What open-time detection actually covers.** It is deliberately cheap — two
+checks, no content walk — so its scope is narrower than "direct sqlite writes
+are detected":
+
+| Out-of-band write | Caught on open by |
+|---|---|
+| rows inserted straight into `facts`/`ticks` | the stamped row counts vs `COUNT(*)` |
+| an edit to the last log-consumed row | the last-line integrity compare |
+| a shrunk log, a torn tail, an offset outside `0..size` | rebuild triggers |
+| an in-place edit to any **interior** row | **not caught** — see below |
+
+Interior content is `sl store verify`'s job, not the open path's: a fact
+sealed by a tick has its content committed in that tick's window hash, so the
+chain walk breaks on exactly the edit that opens clean. The remaining gap is
+the same custody boundary ticks already have — a **live-edge** fact (emitted,
+not yet sealed by a boundary) has no hash over its content, so a direct edit
+to it is undetectable until the next tick. Pinned by
+`test_interior_sqlite_tamper_of_a_sealed_fact_survives_open_but_fails_verify`
+and its unsealed sibling in `libs/engine/tests/test_jsonl_store.py`.
+
 ## Project knowledge (this repo's loops practice)
 
 This monorepo **dogfoods** loops. Architectural choices, open arcs, frictions,

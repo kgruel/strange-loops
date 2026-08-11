@@ -96,13 +96,34 @@ class), so it *detects* them: the offset stamp carries the fact/tick counts
 consumed from the log, and open compares them against ``COUNT(*)``. A
 mismatch refuses with :class:`JsonlCanonicalUnsupported` rather than
 rebuilding — rebuilding would silently destroy exactly the rows that were
-written out of band. Honest limit: counts catch out-of-band *inserts* on an
-otherwise normal open, not in-place *updates* (those are the last-line
-compare's job), and not a store that simultaneously trips a rebuild trigger
-— a cleared offset marker or a shrunk log makes the stamped counts exactly
-as untrustworthy as the offset, so the rebuild runs and out-of-band rows are
-lost with it. Checking counts *before* rebuilding would block legitimate
-recoveries; two abnormal events have to stack to reach that window.
+written out of band.
+
+What open-time detection covers, exactly — it is two cheap checks, never a
+content walk, so the scope is narrower than "direct sqlite writes are
+detected":
+
+- **inserts** — the stamped counts vs ``COUNT(*)``;
+- an edit to the **last log-consumed row** — the last-line integrity
+  compare (:meth:`_prefix_intact`);
+- an offset outside ``0..size``, a shrunk log, a torn tail — rebuild
+  triggers.
+
+An in-place update to any **interior** row opens clean, and deliberately so:
+catching it would cost an O(n) walk of the whole log on every open. That
+walk is ``sl store verify``'s job — a fact sealed by a tick has its content
+committed in that tick's window hash, so ``verify_chain`` breaks on exactly
+the edit this path lets through. The residue is the custody boundary ticks
+already have: a **live-edge** fact (emitted, not yet sealed) is committed to
+by nothing, so a direct edit to it is undetectable until the next boundary —
+the same limit :meth:`SqliteStore.verify_facts` documents for signature
+strips. Both halves are pinned in ``tests/test_jsonl_store.py``.
+
+The counts also do not survive a store that simultaneously trips a rebuild
+trigger — a cleared offset marker or a shrunk log makes the stamped counts
+exactly as untrustworthy as the offset, so the rebuild runs and out-of-band
+rows are lost with it. Checking counts *before* rebuilding would block
+legitimate recoveries; two abnormal events have to stack to reach that
+window.
 
 The counts are never cached per handle: every stamp derives them from the
 *committed* marker, read under the write lock the INSERT already took. Two
@@ -531,8 +552,9 @@ class JsonlStore(SqliteStore[T], Generic[T]):
         connection and INSERT straight into ``facts``/``ticks``. Those rows
         are invisible to the log, so the index is no longer a function of it.
         Refusing is the only non-destructive answer: rebuilding would delete
-        precisely the out-of-band rows. Catches inserts, not in-place
-        updates — those are the last-line compare's job.
+        precisely the out-of-band rows. Catches inserts only. An edit to the
+        last consumed row is the last-line compare's job; an edit to an
+        interior row is ``verify_chain``'s (module docstring).
         """
         facts, ticks = self._row_counts()
         if facts == expect_facts and ticks == expect_ticks:
@@ -605,6 +627,10 @@ class JsonlStore(SqliteStore[T], Generic[T]):
         ``offset`` must land just past a newline, and the last line before it
         must re-serialize byte-identically from the sqlite row it names — a
         commitment comparison over one line rather than the whole file.
+
+        One line, not the file: judging every row would make each open O(n)
+        over the log. So this catches an edit to the last consumed row and
+        nothing behind it — interior content is ``verify_chain``'s scope.
         """
         if offset == 0:
             return True

@@ -713,3 +713,88 @@ def test_ensure_index_is_a_no_op_when_the_index_is_current(tmp_path):
     finally:
         mod.JsonlStore = real
     assert calls["n"] == 0
+
+
+# --- what open-time detection covers, and what verify covers ---------------
+
+
+def test_interior_sqlite_tamper_of_a_sealed_fact_survives_open_but_fails_verify(
+    tmp_path,
+):
+    """The honest scope of the two layers, pinned.
+
+    Open-time detection is cheap on purpose: the last consumed line's
+    integrity compare plus the stamped row counts. Those catch out-of-band
+    *inserts* and an edit to the last-consumed row — not an in-place update
+    to an interior one. Full content verification is the chain walk's job:
+    a sealed fact's window hash commits to its content, so `store verify`
+    breaks on exactly the edit that opens clean.
+    """
+    import sqlite3
+
+    store = open_store(tmp_path)
+    store.append(fact(message="first"))
+    store.append(fact(message="second"))
+    store.append_tick(
+        Tick(name="seal", ts=datetime.now(UTC), payload={"n": 2}, origin="t")
+    )
+    assert store.verify_chain()["ok"]
+    store.close()
+
+    db = tmp_path / "s.db"
+    conn = sqlite3.connect(str(db))
+    fid, payload = conn.execute(
+        "SELECT id, payload FROM facts ORDER BY rowid"
+    ).fetchone()
+    conn.execute(
+        "UPDATE facts SET payload = ? WHERE id = ?",
+        (json.dumps({**json.loads(payload), "message": "TAMPERED"}), fid),
+    )
+    conn.commit()
+    conn.close()
+
+    store = open_store(tmp_path)
+    # Open-time detection does NOT see this — counts match and the tampered
+    # row is not the last consumed line. Documented, not claimed otherwise.
+    assert store.catch_up() == "synced"
+
+    report = store.verify_chain()
+    assert not report["ok"]
+    assert any("window_hash mismatch" in b["reason"] for b in report["breaks"])
+    store.close()
+
+
+def test_interior_tamper_of_an_unsealed_fact_is_caught_by_nothing(tmp_path):
+    """The custody boundary, stated as a test rather than left implied.
+
+    A fact not yet sealed by a tick has no hash committing to its content
+    (and, unsigned, no signature either), so a direct sqlite edit is
+    undetectable until the next boundary. Same limit verify_facts already
+    documents for signature strips. Pinned so the docs cannot quietly widen
+    into "verify catches interior tampering" without this failing.
+    """
+    import sqlite3
+
+    store = open_store(tmp_path)
+    store.append(fact(message="first"))
+    store.append_tick(
+        Tick(name="seal", ts=datetime.now(UTC), payload={"n": 1}, origin="t")
+    )
+    store.append(fact(message="live-edge"))
+    store.append(fact(message="last"))
+    store.close()
+
+    conn = sqlite3.connect(str(tmp_path / "s.db"))
+    edge = conn.execute("SELECT id FROM facts ORDER BY rowid").fetchall()[1][0]
+    conn.execute(
+        "UPDATE facts SET payload = ? WHERE id = ?",
+        (json.dumps({"message": "EDGE"}), edge),
+    )
+    conn.commit()
+    conn.close()
+
+    store = open_store(tmp_path)
+    assert store.catch_up() == "synced"
+    assert store.verify_chain()["ok"]
+    assert store.verify_facts()["ok"]
+    store.close()

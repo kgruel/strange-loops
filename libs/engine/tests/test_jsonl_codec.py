@@ -217,3 +217,29 @@ def test_deserialize_row_dispatches():
     assert deserialize_row(serialize_tick_row(TICK_SIGNED)) == (
         "tick", TICK_SIGNED
     )
+
+
+@pytest.mark.parametrize("literal", ["NaN", "Infinity", "-Infinity"])
+def test_non_json_literals_rejected(literal):
+    # allow_nan=False means these can never be emitted; they must not be
+    # admitted on read either — otherwise a corrupt line passes the codec
+    # gate and detonates inside the JCS commitment hashers.
+    line = (
+        '{"t":"fact","id":"i","kind":"k","ts":' + literal + ","
+        '"observer":"o","origin":"g","payload":"{}"}'
+    )
+    with pytest.raises(JsonlCodecError):
+        deserialize_fact_row(line)
+    with pytest.raises(JsonlCodecError):
+        deserialize_row(line)
+
+
+def test_non_json_literal_rejected_in_tick():
+    obj = json.loads(serialize_tick_row(TICK_SIGNED))
+    parts = [
+        f'"{k}":' + ("NaN" if k == "ts" else json.dumps(v))
+        for k, v in obj.items()
+    ]
+    line = "{" + ",".join(parts) + "}"
+    with pytest.raises(JsonlCodecError):
+        deserialize_tick_row(line)

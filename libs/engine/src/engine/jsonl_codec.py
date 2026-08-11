@@ -96,9 +96,20 @@ def serialize_tick_row(row: tuple) -> str:
     return _dump(_row_dict(row, _TICK_FIELDS, "tick"))
 
 
+def _reject_constant(name: str) -> None:
+    """Refuse the non-JSON literals ``NaN``/``Infinity``/``-Infinity``.
+
+    Serialization uses ``allow_nan=False``, so these can never be emitted;
+    admitting them on read would let a corrupt line past the codec gate and
+    detonate later inside the JCS commitment hashers (or land a NaN ``ts``
+    in sqlite). Reject at the boundary — explicit over implicit.
+    """
+    raise JsonlCodecError(f"non-JSON literal {name!r} is not permitted")
+
+
 def _load(line: str) -> dict:
     try:
-        obj = json.loads(line)
+        obj = json.loads(line, parse_constant=_reject_constant)
     except ValueError as exc:
         raise JsonlCodecError(f"not valid JSON: {exc}") from exc
     if not isinstance(obj, dict):

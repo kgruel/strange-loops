@@ -712,3 +712,61 @@ class TestJsonlCanonicalStoreVerbRefusals:
 
         assert rc == 2
         assert "jsonl-canonical" in capsys.readouterr().err
+
+
+class TestStoreVerbsOnAFreshClone:
+    """A JSONL-canonical vertex whose derived index was never cloned.
+
+    The log is tracked, the ``.db`` is not — so the store IS materialized,
+    it just has no index yet. Resolution must build it (``resolved_index``),
+    the same seam the read path already goes through; otherwise the verbs
+    claim "no facts emitted" for a store with facts, and ``verify`` dies
+    with an uncaught ``FileNotFoundError``.
+    """
+
+    @staticmethod
+    def _fresh_clone(tmp_path):
+        vpath = TestJsonlCanonicalStoreVerbRefusals._jsonl_vertex(tmp_path)
+        TestJsonlCanonicalStoreVerbRefusals._seed(vpath)
+        (tmp_path / "x.db").unlink()
+        return vpath
+
+    def test_ticks_materializes_the_index_instead_of_reporting_empty(
+        self, tmp_path, capsys
+    ):
+        from loops.commands.store import _run_store
+
+        vpath = self._fresh_clone(tmp_path)
+        rc = _run_store(["ticks"], vertex_path=vpath)
+        capsys.readouterr()
+
+        assert rc == 0
+        assert (tmp_path / "x.db").exists()
+
+    def test_stats_materializes_the_index(self, tmp_path, capsys):
+        from loops.commands.store import _run_store
+
+        vpath = self._fresh_clone(tmp_path)
+        rc = _run_store(["stats"], vertex_path=vpath)
+        capsys.readouterr()
+
+        assert rc == 0
+
+    def test_verify_does_not_traceback(self, tmp_path, capsys):
+        from loops.commands.store import _run_store
+
+        vpath = self._fresh_clone(tmp_path)
+        rc = _run_store(["verify"], vertex_path=vpath)
+        capsys.readouterr()
+
+        assert rc == 0
+
+    def test_a_never_emitted_store_is_still_unmaterialized(self, tmp_path, capsys):
+        """No log to build from ⇒ the not-yet-materialized contract still speaks."""
+        from loops.commands.store import _run_store
+
+        vpath = TestJsonlCanonicalStoreVerbRefusals._jsonl_vertex(tmp_path)
+
+        assert _run_store(["ticks"], vertex_path=vpath) == 1
+        captured = capsys.readouterr()
+        assert "not yet materialized" in captured.out + captured.err

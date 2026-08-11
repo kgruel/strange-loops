@@ -557,3 +557,53 @@ class TestChangeFactRoutesThroughTheLog:
         assert _run_rm(["project", "kind", "note"]) == 0
 
         assert len(self._log_lines(jsonl_project)) == 2
+
+    def _poison_index(self, vpath: Path) -> None:
+        """Insert a row straight into the derived index, behind the log's back.
+
+        Exactly the state ``_refuse_out_of_band`` exists to detect: the next
+        ``JsonlStore`` construction raises ``JsonlCanonicalUnsupported`` from
+        its catch-up, inside ``__init__``.
+        """
+        import sqlite3
+
+        db = vpath.parent / "data" / "project.db"
+        conn = sqlite3.connect(db)
+        cols = [r[1] for r in conn.execute("PRAGMA table_info(facts)")]
+        vals = {
+            "id": "OUT-OF-BAND-ROW",
+            "kind": "note",
+            "observer": "x",
+            "ts": 1.0,
+            "payload": "{}",
+            "origin": "",
+            "seq": 999,
+        }
+        used = [c for c in cols if c in vals]
+        conn.execute(
+            f"INSERT INTO facts ({', '.join(used)}) VALUES ({', '.join('?' * len(used))})",
+            [vals[c] for c in used],
+        )
+        conn.commit()
+        conn.close()
+
+    def test_a_refusing_store_warns_instead_of_killing_add(self, jsonl_project, capsys):
+        """The .vertex edit has already landed — the diagnostic must not raise."""
+        from loops.commands.add import _maybe_emit_change
+
+        assert _run_add(["project", "kind", "note", "--collect", "20"]) == 0
+        self._poison_index(jsonl_project)
+
+        _maybe_emit_change(jsonl_project, {"op": "add", "target": "kind note"})
+
+        assert "warning: change fact not emitted" in capsys.readouterr().err
+
+    def test_a_refusing_store_warns_instead_of_killing_rm(self, jsonl_project, capsys):
+        from loops.commands.rm import _maybe_emit_change
+
+        assert _run_add(["project", "kind", "note", "--collect", "20"]) == 0
+        self._poison_index(jsonl_project)
+
+        _maybe_emit_change(jsonl_project, {"op": "rm", "target": "kind note"})
+
+        assert "warning: change fact not emitted" in capsys.readouterr().err

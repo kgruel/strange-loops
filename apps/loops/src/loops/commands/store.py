@@ -38,15 +38,21 @@ def resolve_store_path(file_path: Path) -> Path:
 
     A JSONL-canonical vertex (``store "….jsonl"``) resolves to its derived
     sqlite index — see ``engine.residence``.
+
+    Resolution *materializes*: it goes through ``resolved_index``, so a fresh
+    clone (log tracked, derived ``.db`` untracked) builds the index during
+    the resolve rather than reporting the store unmaterialized. With no log
+    to build from, the index stays absent and the not-yet-materialized
+    contract below still speaks.
     """
     if file_path.suffix == ".vertex":
-        from engine.residence import resolve_store_path as _residence_path
+        from engine.jsonl_store import resolved_index
         from lang import parse_vertex_file
 
         ast = parse_vertex_file(file_path)
         if ast.store is None:
             raise ValueError(f"No store configured in {file_path}")
-        return _residence_path(ast.store, file_path)
+        return resolved_index(ast.store, file_path)
     elif file_path.suffix == ".db":
         return file_path.resolve()
     else:

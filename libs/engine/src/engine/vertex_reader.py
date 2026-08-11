@@ -774,8 +774,38 @@ def _combined_search(
 # ---------------------------------------------------------------------------
 
 
+def _override_index(ast: Any, vertex_path: Path, store: Path | str | None) -> Path | None:
+    """The sqlite index for an explicit ``store=`` override, or ``None``.
+
+    "Fold this vertex's declarations over THAT store." The declaration keeps
+    answering *what* — the folds, the kinds, and (via the locator's extension)
+    what kind of store this is; the override answers only *where*. That split
+    is what an app whose contract is one store per workspace needs: it cannot
+    put the store beside the packaged vertex file, but it must not fork the
+    declaration to say so.
+
+    ``store`` is a **canonical** locator, so a ``.jsonl`` override resolves
+    (and materializes/tails) its derived index exactly like a declared one —
+    reads are sqlite reads either way (``engine.residence``).
+
+    Refused on combine/discover vertices: an aggregate reads N stores and one
+    override cannot say which, so the caller must address a member store.
+    """
+    if store is None:
+        return None
+    if ast.combine is not None or ast.discover is not None:
+        raise ValueError(
+            "store override is per-store and cannot select over a "
+            "combine/discover aggregate — address a member store instead"
+        )
+    return resolved_index(store, vertex_path)
+
+
 def vertex_read(
-    vertex_path: Path, *, observer: str | None = None
+    vertex_path: Path,
+    *,
+    observer: str | None = None,
+    store: Path | str | None = None,
 ) -> dict[str, dict[str, Any]]:
     """Read fold state from a vertex's store.
 
@@ -794,12 +824,16 @@ def vertex_read(
 
     Combinatorial vertices (with a ``combine`` block) virtualize reads
     across multiple stores using SQLite ATTACH DATABASE.
+
+    ``store`` overrides *where* the facts come from while the declaration
+    still supplies the folds — see :func:`_override_index`.
     """
     from .compiler import compile_vertex
     from .store_reader import StoreReader
 
     ast = load_declaration(vertex_path)
     specs = compile_vertex(ast)
+    override = _override_index(ast, vertex_path, store)
 
     # Combinatorial or aggregation vertex: read across multiple stores.
     # Auto-inherit: source specs are the base, aggregation specs override.
@@ -832,11 +866,11 @@ def vertex_read(
 
         return result
 
-    # Resolve store path relative to vertex file
-    if ast.store is None:
+    # Resolve store path relative to vertex file (or to the explicit override)
+    if ast.store is None and override is None:
         return {kind: spec.initial_state() for kind, spec in specs.items()}
 
-    store_path = resolved_index(ast.store, vertex_path)
+    store_path = override if override is not None else resolved_index(ast.store, vertex_path)
 
     if not store_path.exists():
         return {kind: spec.initial_state() for kind, spec in specs.items()}
@@ -1385,6 +1419,7 @@ def vertex_facts(
     include_internal: bool = False,
     as_of: float | None = None,
     at: WitnessPosition | None = None,
+    store: Path | str | None = None,
 ) -> list[dict]:
     """Read raw facts from a vertex's store within a time range.
 
@@ -1422,6 +1457,7 @@ def vertex_facts(
         )
 
     ast = load_declaration(vertex_path, as_of=as_of, at=at)
+    override = _override_index(ast, vertex_path, store)
 
     if ast.combine is not None or ast.discover is not None:
         if at is not None:
@@ -1436,10 +1472,10 @@ def vertex_facts(
             ast, vertex_path, since_ts, until_ts, kind,
             include_internal=include_internal,
         )
-    elif ast.store is None:
+    elif ast.store is None and override is None:
         facts = []
     else:
-        store_path = resolved_index(ast.store, vertex_path)
+        store_path = override if override is not None else resolved_index(ast.store, vertex_path)
 
         # A10: return the position to apply (re-resolved for a same-lineage
         # sibling store, refused if foreign) — same guard as vertex_fold
@@ -1472,6 +1508,7 @@ def vertex_ticks(
     *,
     with_envelope: bool = False,
     as_of: float | None = None,
+    store: Path | str | None = None,
 ) -> list:
     """Read ticks from a vertex's store within a time range.
 
@@ -1493,6 +1530,7 @@ def vertex_ticks(
     from .store_reader import StoreReader
 
     ast = load_declaration(vertex_path, as_of=as_of)
+    override = _override_index(ast, vertex_path, store)
 
     if ast.combine is not None or ast.discover is not None:
         if not with_envelope:
@@ -1501,10 +1539,10 @@ def vertex_ticks(
             ast, vertex_path, since_ts, until_ts, name, with_envelope=True
         )
 
-    if ast.store is None:
+    if ast.store is None and override is None:
         return []
 
-    store_path = resolved_index(ast.store, vertex_path)
+    store_path = override if override is not None else resolved_index(ast.store, vertex_path)
 
     if not store_path.exists():
         return []
@@ -1515,7 +1553,12 @@ def vertex_ticks(
         )
 
 
-def vertex_summary(vertex_path: Path, *, include_internal: bool = False) -> dict:
+def vertex_summary(
+    vertex_path: Path,
+    *,
+    include_internal: bool = False,
+    store: Path | str | None = None,
+) -> dict:
     """Read store summary from a vertex — fact/tick counts and per-kind stats.
 
     Returns the same shape as StoreReader.summary():
@@ -1530,14 +1573,15 @@ def vertex_summary(vertex_path: Path, *, include_internal: bool = False) -> dict
     from .store_reader import StoreReader
 
     ast = load_declaration(vertex_path)
+    override = _override_index(ast, vertex_path, store)
 
     if ast.combine is not None or ast.discover is not None:
         return _combined_summary(ast, vertex_path, include_internal=include_internal)
 
-    if ast.store is None:
+    if ast.store is None and override is None:
         return {"facts": {"total": 0, "kinds": {}}, "ticks": {"total": 0, "names": {}}}
 
-    store_path = resolved_index(ast.store, vertex_path)
+    store_path = override if override is not None else resolved_index(ast.store, vertex_path)
 
     if not store_path.exists():
         return {"facts": {"total": 0, "kinds": {}}, "ticks": {"total": 0, "names": {}}}

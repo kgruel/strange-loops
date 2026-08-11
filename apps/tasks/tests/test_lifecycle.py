@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from atoms import Fact
 from engine import SqliteStore
 
@@ -13,6 +14,18 @@ from strange_loops.lifecycle import (
     fold_task_state,
     tasks_vertex_path,
 )
+
+
+@pytest.fixture(autouse=True)
+def _cwd_is_the_workspace(tmp_path: Path, monkeypatch):
+    """This app resolves its task store under the process cwd, on both sides.
+
+    One task store per workspace is the contract (``store.store_path``); the
+    reader half is ``lifecycle.workspace_store``. Tests that write a store in
+    ``tmp_path`` must therefore *be* in ``tmp_path`` — the earlier arrangement
+    only worked because reads went somewhere else entirely.
+    """
+    monkeypatch.chdir(tmp_path)
 
 
 def _emit(db: Path, kind: str, obs: str, payload: dict) -> None:
@@ -347,3 +360,65 @@ class TestFoldAllTasks:
         assert t1["harness"] == "shell"
         assert t2["status"] == "created"
         assert "harness" not in t2
+
+
+class TestReaderWritesResidenceSplit:
+    """friction:tasks-read-write-residence-split — readers follow the writers.
+
+    No module-state patching: the vertex is the packaged declaration, copied
+    where a packaged one would be (outside the workspace), and only the cwd
+    says which workspace this is.
+    """
+
+    def _packaged_vertex(self, tmp_path: Path, store_line: str | None = None) -> Path:
+        pkg = tmp_path / "pkg" / "loops"
+        pkg.mkdir(parents=True)
+        text = tasks_vertex_path().read_text()
+        if store_line is not None:
+            text = text.replace('store "data/tasks.db"', f'store "{store_line}"')
+            assert store_line in text
+        vertex = pkg / "tasks.vertex"
+        vertex.write_text(text)
+        return vertex
+
+    def test_db_declaration_reads_the_workspace_store(self, tmp_path: Path, monkeypatch):
+        from strange_loops.store import emit_fact, store_path
+
+        vertex = self._packaged_vertex(tmp_path)
+        ws = tmp_path / "workspace"
+        ws.mkdir()
+        monkeypatch.chdir(ws)
+        monkeypatch.setattr("strange_loops.store._PKG_ROOT", vertex.parent.parent)
+
+        sp = store_path()
+        assert sp == ws / "data" / "tasks.db"
+        emit_fact(
+            sp,
+            "task.created",
+            "a",
+            {"name": "in-workspace", "title": "W", "base_branch": "main", "description": ""},
+        )
+
+        assert [t["name"] for t in fold_all_tasks(vertex)] == ["in-workspace"]
+        assert fold_task_state(vertex, "in-workspace")["status"] == "created"
+
+    def test_jsonl_declaration_reads_the_derived_index(self, tmp_path: Path, monkeypatch):
+        from strange_loops.store import emit_fact, store_path
+
+        vertex = self._packaged_vertex(tmp_path, "data/tasks.jsonl")
+        ws = tmp_path / "workspace"
+        ws.mkdir()
+        monkeypatch.chdir(ws)
+        monkeypatch.setattr("strange_loops.store._PKG_ROOT", vertex.parent.parent)
+
+        sp = store_path()
+        assert sp == ws / "data" / "tasks.jsonl"
+        emit_fact(
+            sp,
+            "task.created",
+            "a",
+            {"name": "jsonl-task", "title": "J", "base_branch": "main", "description": ""},
+        )
+        assert sp.exists(), "the canonical log is what the writer produced"
+
+        assert [t["name"] for t in fold_all_tasks(vertex)] == ["jsonl-task"]

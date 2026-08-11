@@ -27,18 +27,23 @@ def fetch_session_status(vp: Path) -> dict:
     """Fetch session status data — summary from vertex."""
     from engine import vertex_summary
 
-    return vertex_summary(vp)
+    from strange_loops.lifecycle import workspace_store
+
+    return vertex_summary(vp, store=workspace_store(vp))
 
 
 def fetch_session_log(vp: Path, duration_secs: float, kind: str | None = None) -> dict:
     """Fetch session log — facts and ticks in a time range."""
     from engine import vertex_facts, vertex_ticks
 
+    from strange_loops.lifecycle import workspace_store
+
+    sp = workspace_store(vp)
     now = datetime.now(timezone.utc)
     since_ts = now.timestamp() - duration_secs
 
-    facts = vertex_facts(vp, since_ts, now.timestamp(), kind=kind)
-    ticks = vertex_ticks(vp, since_ts, now.timestamp())
+    facts = vertex_facts(vp, since_ts, now.timestamp(), kind=kind, store=sp)
+    ticks = vertex_ticks(vp, since_ts, now.timestamp(), store=sp)
 
     facts.sort(key=lambda f: f["ts"])
     tick_dicts = [tick_to_dict(t) for t in ticks]

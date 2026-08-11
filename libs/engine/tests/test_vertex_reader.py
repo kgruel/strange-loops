@@ -2919,3 +2919,76 @@ class TestFoldStateLiveEdge:
         # Under a read transaction opened at the first per-kind read, the
         # concurrent commit is invisible for the rest of the fold.
         assert pair == (["before"], 0)
+
+
+class TestStoreOverride:
+    """``store=``: fold this vertex's declarations over THAT store.
+
+    The declaration keeps answering *what* (folds, kinds, store kind); the
+    override answers only *where* — what an app with one store per workspace
+    needs when its vertex file ships inside the package.
+    """
+
+    def _vertex(self, tmp_path: Path) -> Path:
+        return _create_vertex_file(
+            tmp_path, "test", '  decision { fold { items "by" "topic" } }'
+        )
+
+    def test_db_override_reads_the_other_store(self, tmp_path):
+        from engine import vertex_facts, vertex_read, vertex_summary
+
+        vpath = self._vertex(tmp_path)
+        elsewhere = tmp_path / "elsewhere" / "store.db"
+        elsewhere.parent.mkdir()
+        _seed_facts(elsewhere, [
+            {"kind": "decision", "ts": 1000.0, "payload": {"topic": "auth", "message": "over there"}},
+        ])
+
+        # The declared store does not exist at all — only the override does.
+        assert vertex_read(vpath) == {"decision": {"items": {}}}
+
+        items = vertex_read(vpath, store=elsewhere)["decision"]["items"]
+        assert items["auth"]["message"] == "over there"
+        assert vertex_summary(vpath, store=elsewhere)["facts"]["total"] == 1
+        facts = vertex_facts(vpath, 0, 2000.0, store=elsewhere)
+        assert [f["payload"]["topic"] for f in facts] == ["auth"]
+
+    def test_jsonl_override_resolves_the_derived_index(self, tmp_path):
+        from atoms import Fact
+        from engine import vertex_read
+        from engine.jsonl_store import JsonlStore
+
+        vpath = self._vertex(tmp_path)
+        log = tmp_path / "elsewhere" / "store.jsonl"
+        log.parent.mkdir()
+        with JsonlStore(
+            path=log.with_suffix(".db"),
+            log_path=log,
+            serialize=Fact.to_dict,
+            deserialize=Fact.from_dict,
+        ) as store:
+            store.append(Fact.of("decision", "test", topic="auth", message="from the log"))
+
+        # The canonical locator is the log; the read resolves its index.
+        items = vertex_read(vpath, store=log)["decision"]["items"]
+        assert items["auth"]["message"] == "from the log"
+
+    def test_override_refused_on_aggregate(self, tmp_path, monkeypatch):
+        from engine import vertex_read
+
+        home = tmp_path / "home"
+        (home / "alpha").mkdir(parents=True)
+        (home / "alpha" / "alpha.vertex").write_text(
+            'name "alpha"\nstore "./store.db"\n'
+            'loops { decision { fold { items "by" "topic" } } }\n'
+        )
+        _seed_facts(home / "alpha" / "store.db", [])
+        agg = tmp_path / "agg.vertex"
+        agg.write_text(
+            'name "agg"\ncombine { vertex "alpha" }\n'
+            'loops { decision { fold { items "by" "topic" } } }\n'
+        )
+        monkeypatch.setenv("LOOPS_HOME", str(home))
+
+        with pytest.raises(ValueError, match="combine/discover aggregate"):
+            vertex_read(agg, store=home / "alpha" / "store.db")

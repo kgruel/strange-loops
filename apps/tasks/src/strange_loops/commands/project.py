@@ -189,7 +189,11 @@ def cmd_project_bridge(args: argparse.Namespace) -> int:
     project_vp = project_vertex_path()
 
     # 1. Read all task.tick ticks from tasks vertex
-    ticks = vertex_ticks(tasks_vp, 0, float("inf"), name="task.tick")
+    from strange_loops.lifecycle import workspace_store
+
+    ticks = vertex_ticks(
+        tasks_vp, 0, float("inf"), name="task.tick", store=workspace_store(tasks_vp)
+    )
 
     if not ticks:
         from painted import show

@@ -134,6 +134,12 @@ def _validate(obj: dict, fields: tuple[str, ...], allowed: frozenset[str],
                 f"{t} field {field!r} must be a string, got "
                 f"{type(value).__name__}"
             )
+    if _SIGNATURE in obj and obj[_SIGNATURE] is None:
+        # Absent IS the unsigned era; an explicit null is a second spelling
+        # of the same state, so serialize stays the unique canonical form.
+        raise JsonlCodecError(
+            f"{t} field 'signature' must be absent, not null, when unsigned"
+        )
     sig = obj.get(_SIGNATURE)
     if sig is not None and not isinstance(sig, str):
         raise JsonlCodecError(

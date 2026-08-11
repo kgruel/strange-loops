@@ -196,6 +196,15 @@ def test_tick_nullable_fields_accepted_facts_not_null():
         deserialize_tick_row(json.dumps(obj))
 
 
+def test_explicit_null_signature_rejected():
+    # serialize never emits it; accepting it would give one row two
+    # canonical spellings.
+    obj = json.loads(serialize_fact_row(FACT_V1))
+    obj["signature"] = None
+    with pytest.raises(JsonlCodecError, match="absent, not null"):
+        deserialize_fact_row(json.dumps(obj))
+
+
 def test_bad_arity_rejected():
     with pytest.raises(JsonlCodecError, match="fields"):
         serialize_fact_row(("id", "kind", 1.0))

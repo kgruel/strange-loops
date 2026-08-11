@@ -25,14 +25,40 @@ def observer(args: argparse.Namespace | None = None) -> str:
     return os.environ.get("STRANGE_LOOPS_OBSERVER", os.environ.get("LOOPS_OBSERVER", ""))
 
 
+def _declared_store(vertex_name: str) -> tuple[str, Path]:
+    """The raw ``store`` locator in ``loops/{name}.vertex``, and that file's path.
+
+    One reader for the declaration, so the locator's **extension** — which is
+    ``engine.residence``'s authority switch — reaches every caller. A second
+    spelling of "where the store is" is a second answer to "which file is
+    authoritative", which is exactly the bug this collapses.
+    """
+    from lang import parse_vertex_file
+
+    vertex_path = _PKG_ROOT / "loops" / f"{vertex_name}.vertex"
+    vertex = parse_vertex_file(vertex_path)
+    return vertex.store or f"data/{vertex_name}.db", vertex_path
+
+
 def store_path() -> Path:
-    """Task store path — constant until .vertex files arrive.
+    """The canonical task-store artifact for the current workspace.
 
     The **canonical artifact**, like every path this module hands out: it is
     what a writer must resolve. Reads go through ``engine.vertex_*``, which
     resolves the index itself.
+
+    The declaration answers *what kind* of store (``.db`` → sqlite-canonical,
+    ``.jsonl`` → JSONL-canonical, per ``engine.residence``); the process cwd
+    answers *where*. That second half deliberately departs from residence's
+    "resolve relative to the vertex file" rule, and only here: this app's
+    contract is one task store per workspace (a worker runs in its own
+    worktree and writes that worktree's store), so a package-relative path
+    would collapse every workspace onto the packaged one. ``store_path_for``
+    is the portable resolution, used for the declarations that are not
+    per-workspace.
     """
-    return Path.cwd() / "data" / "tasks.db"
+    declared = Path(_declared_store("tasks")[0])
+    return declared if declared.is_absolute() else Path.cwd() / declared
 
 
 def store_path_for(vertex_name: str) -> Path:
@@ -43,11 +69,8 @@ def store_path_for(vertex_name: str) -> Path:
     of the authority switch when a declaration flips to ``.jsonl``.
     """
     from engine.residence import canonical_store_path
-    from lang import parse_vertex_file
 
-    vertex_path = _PKG_ROOT / "loops" / f"{vertex_name}.vertex"
-    vertex = parse_vertex_file(vertex_path)
-    declared = vertex.store or f"data/{vertex_name}.db"
+    declared, vertex_path = _declared_store(vertex_name)
     return canonical_store_path(declared, vertex_path)
 
 

@@ -158,6 +158,7 @@ from .jsonl_codec import (
     serialize_fact_row,
     serialize_tick_row,
 )
+from .residence import log_path_for
 from .sqlite_store import (
     FACT_COLUMNS,
     FACT_INSERT_SQL,
@@ -170,7 +171,6 @@ __all__ = [
     "JsonlCanonicalUnsupported",
     "JsonlStore",
     "ensure_index",
-    "log_path_for",
     "open_canonical_store",
     "resolved_index",
 ]
@@ -196,9 +196,16 @@ class JsonlCanonicalUnsupported(NotImplementedError):
     """
 
 
-def log_path_for(db_path: Path) -> Path:
-    """The canonical log beside a store db: ``<name>.db`` → ``<name>.jsonl``."""
-    return Path(db_path).with_suffix(".jsonl")
+def _as_int(value: object) -> int | None:
+    """A store_meta value as an int, or None when it cannot be one.
+
+    A marker that is absent, NULL or not a number is not a position to trust;
+    every caller here treats "cannot be read" and "not recorded" the same way.
+    """
+    try:
+        return int(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
 
 
 def open_canonical_store(canonical: Path, **kwargs: Any) -> SqliteStore[Any]:
@@ -228,6 +235,8 @@ def _index_is_current(index: Path, canonical: Path) -> bool:
     """
     import sqlite3
 
+    from .declaration import _open_readonly
+
     try:
         size = canonical.stat().st_size
     except OSError:
@@ -238,9 +247,11 @@ def _index_is_current(index: Path, canonical: Path) -> bool:
         # about an empty log is a JsonlStore-open concern (it refuses), not
         # something a read-path resolve should provoke.
         return True
-    try:
-        conn = sqlite3.connect(f"file:{index}?mode=ro", uri=True)
-    except sqlite3.Error:
+    # A quarter-second, not _open_readonly's 5s default: this runs on every
+    # read resolve, and "a writer is holding the lock" is a fine reason to
+    # answer "not current" and let JsonlStore's catch-up decide.
+    conn = _open_readonly(index, timeout=0.25)
+    if conn is None:
         return False
     try:
         row = conn.execute(
@@ -250,12 +261,7 @@ def _index_is_current(index: Path, canonical: Path) -> bool:
         return False
     finally:
         conn.close()
-    if row is None:
-        return False
-    try:
-        return int(row[0]) == size
-    except (TypeError, ValueError):
-        return False
+    return row is not None and _as_int(row[0]) == size
 
 
 def ensure_index(canonical: Path) -> Path:
@@ -357,15 +363,7 @@ class JsonlStore(SqliteStore[T], Generic[T]):
     # ---- offset bookkeeping ------------------------------------------
 
     def _read_meta_int(self, key: str) -> int | None:
-        row = self._conn.execute(
-            "SELECT value FROM store_meta WHERE key = ?", (key,)
-        ).fetchone()
-        if row is None:
-            return None
-        try:
-            return int(row[0])
-        except (TypeError, ValueError):
-            return None
+        return _as_int(self._meta_get(key))
 
     def _read_offset(self) -> int | None:
         return self._read_meta_int(_OFFSET_KEY)
@@ -388,13 +386,12 @@ class JsonlStore(SqliteStore[T], Generic[T]):
 
     def _stamp(self, offset: int, facts: int, ticks: int) -> None:
         """Stage the offset + indexed-row-count marks (caller commits)."""
-        sql = "INSERT OR REPLACE INTO store_meta (key, value) VALUES (?, ?)"
         for key, value in (
             (_OFFSET_KEY, offset),
             (_FACT_COUNT_KEY, facts),
             (_TICK_COUNT_KEY, ticks),
         ):
-            self._conn.execute(sql, (key, str(value)))
+            self._meta_set(key, value)
 
     def _row_counts(self) -> tuple[int, int]:
         facts = self._conn.execute("SELECT COUNT(*) FROM facts").fetchone()[0]
@@ -421,7 +418,7 @@ class JsonlStore(SqliteStore[T], Generic[T]):
             fh.write(data)
             fh.flush()
             os.fsync(fh.fileno())
-        return self._log_size()
+            return fh.tell()
 
     def _write(self, sql: str, row: tuple, line: str, is_fact: bool) -> None:
         """Stage the INSERT, make the line durable, then stamp and commit.

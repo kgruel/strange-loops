@@ -193,8 +193,6 @@ def emit_topology(vertex_path: Path) -> None:
     if ast.store is None:
         return
 
-    store_path = resolved_index(ast.store, vertex_path)
-
     children = _collect_topology_info(ast, vertex_path)
     if not children:
         return

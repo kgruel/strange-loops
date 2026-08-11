@@ -700,8 +700,7 @@ class SqliteStore(Generic[T]):
                     )
 
                 conn.execute(
-                    "INSERT INTO facts (id, kind, ts, observer, origin, payload, signature) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    FACT_INSERT_SQL,
                     (lineage_id, DECL_GENESIS, ts, observer, origin, payload_text, signature),
                 )
                 conn.execute(
@@ -1027,6 +1026,26 @@ class SqliteStore(Generic[T]):
             "CREATE TABLE IF NOT EXISTS store_meta (key TEXT PRIMARY KEY, value TEXT)"
         )
         self._conn.commit()
+
+    def _meta_get(self, key: str) -> str | None:
+        """One ``store_meta`` value, or None. Never commits."""
+        row = self._conn.execute(
+            "SELECT value FROM store_meta WHERE key = ?", (key,)
+        ).fetchone()
+        return None if row is None else row[0]
+
+    def _meta_set(self, key: str, value: object) -> None:
+        """Stage one ``store_meta`` write — the caller owns the commit.
+
+        Staging, not committing: every meta write in this class is one part
+        of a larger atomic step (an offset stamp beside its index row, a
+        lineage claim inside a BEGIN IMMEDIATE), and a helper that committed
+        would split them.
+        """
+        self._conn.execute(
+            "INSERT OR REPLACE INTO store_meta (key, value) VALUES (?, ?)",
+            (key, str(value)),
+        )
 
     def _own_lineage_in_txn(self, conn: Any) -> str | None:
         """Resolve the store's own lineage id inside an open write transaction.

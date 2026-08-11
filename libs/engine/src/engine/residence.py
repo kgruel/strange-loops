@@ -13,13 +13,17 @@ artifact**, and its extension is the mode switch:
 
 Extension-as-switch is not new here: :func:`engine.compiler.materialize_vertex`
 already dispatched ``.db``/``.sqlite`` to ``SqliteStore`` and everything else
-to the flat ``EventStore``, and :func:`engine.jsonl_store.log_path_for` already
-encodes the ``.db``↔``.jsonl`` sibling pair. This module states the rule once
-and gives every caller the two paths it can want:
+to the flat ``EventStore``. This module states the rule once and gives every
+caller the paths it can want:
 
 - :func:`canonical_store_path` — the declared artifact, absolute.
 - :func:`index_path_for` — the sqlite file to *connect* to.
-- :func:`resolve_store_path` — both composed, the read path's workhorse.
+- :func:`log_path_for` — its inverse, the log beside a store db.
+- :func:`resolve_store_path` — declared → index composed, the read path's
+  workhorse.
+
+Both directions of the ``.db``↔``.jsonl`` sibling bijection live here: a
+naming rule stated in two modules is a naming rule that can disagree.
 
 Why the read path resolves to the index and not the canonical file: reads are
 sqlite reads (``StoreReader``, FTS, ``since``/``between``, direct
@@ -44,6 +48,7 @@ __all__ = [
     "canonical_store_path",
     "index_path_for",
     "is_jsonl_canonical",
+    "log_path_for",
     "resolve_store_path",
 ]
 
@@ -78,6 +83,14 @@ def index_path_for(canonical: Path | str) -> Path:
     if is_jsonl_canonical(path):
         return path.with_suffix(".db")
     return path
+
+
+def log_path_for(db_path: Path | str) -> Path:
+    """The canonical log beside a store db: ``<name>.db`` → ``<name>.jsonl``.
+
+    The inverse of :func:`index_path_for`, and equally idempotent.
+    """
+    return Path(db_path).with_suffix(CANONICAL_LOG_SUFFIX)
 
 
 def resolve_store_path(declared: Path | str, vertex_path: Path | None) -> Path:

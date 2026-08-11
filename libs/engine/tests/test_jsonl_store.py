@@ -15,7 +15,8 @@ import pytest
 from atoms import Fact
 
 from engine.jsonl_codec import deserialize_row, serialize_fact_row
-from engine.jsonl_store import JsonlCanonicalUnsupported, JsonlStore, log_path_for
+from engine.jsonl_store import JsonlCanonicalUnsupported, JsonlStore
+from engine.residence import log_path_for
 from engine.sqlite_store import (
     SqliteStore,
     _fact_commitment_hash,

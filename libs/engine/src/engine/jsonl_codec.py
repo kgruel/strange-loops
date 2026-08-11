@@ -22,7 +22,14 @@ fields / 11 tick fields) with ``None`` filled in.
 
 Unknown, missing, or mistyped fields are rejected loudly
 (:class:`JsonlCodecError`) — explicit over implicit. A store's canonical log
-is not a place for silent tolerance.
+is not a place for silent tolerance. So is a duplicate key: JSON's last-wins
+resolution would let one line carry two ids and a reader silently pick one.
+
+The rules run in **both** directions from one function. ``serialize`` holds
+its object to the same domain ``deserialize`` enforces, so ``serialize(x)``
+is always decodable — a wrongly typed field fails at the append site, where
+it is attributable, rather than becoming a durable line that bricks every
+later open.
 """
 
 from __future__ import annotations
@@ -81,7 +88,20 @@ def _dump(obj: dict) -> str:
                       separators=(",", ":"))
 
 
-def _row_dict(row: tuple, fields: tuple[str, ...], t: str) -> dict:
+def _row_dict(row: tuple, fields: tuple[str, ...], allowed: frozenset[str],
+              nullable: frozenset[str], t: str) -> dict:
+    """Build the line object for a row — and hold it to the decoder's rules.
+
+    ``serialize(x)`` must always be decodable. Checking arity alone let a
+    row with a *typed*-wrong field through: a fact carrying ``ts="1.0"``
+    (a string, which sqlite's REAL affinity accepts) got a durable JSONL
+    receipt, and then every subsequent open failed on decode — the store
+    bricked by a line its own serializer wrote. Running the decoder's
+    :func:`_validate` over the object before dumping makes the two
+    directions symmetric by construction rather than by parallel
+    maintenance, and puts the error at the append site, where it is
+    attributable to the caller that built the row.
+    """
     n = len(fields)
     if len(row) not in (n, n + 1):
         raise JsonlCodecError(
@@ -91,17 +111,18 @@ def _row_dict(row: tuple, fields: tuple[str, ...], t: str) -> dict:
     obj.update(zip(fields, row[:n], strict=True))
     if len(row) > n and row[n] is not None:
         obj[_SIGNATURE] = row[n]
+    _validate(obj, fields, allowed, nullable, t)
     return obj
 
 
 def serialize_fact_row(row: tuple) -> str:
     """Encode a fact row ``(id, kind, ts, observer, origin, payload[, signature])``."""
-    return _dump(_row_dict(row, _FACT_FIELDS, "fact"))
+    return _dump(_row_dict(row, _FACT_FIELDS, _FACT_KEYS, _FACT_NULLABLE, "fact"))
 
 
 def serialize_tick_row(row: tuple) -> str:
     """Encode a tick row (``_TICK_ROW_SQL`` order, signature optional)."""
-    return _dump(_row_dict(row, _TICK_FIELDS, "tick"))
+    return _dump(_row_dict(row, _TICK_FIELDS, _TICK_KEYS, _TICK_NULLABLE, "tick"))
 
 
 def _reject_constant(name: str) -> None:
@@ -115,9 +136,31 @@ def _reject_constant(name: str) -> None:
     raise JsonlCodecError(f"non-JSON literal {name!r} is not permitted")
 
 
+def _no_duplicate_keys(pairs: list[tuple[str, object]]) -> dict:
+    """Build the object, refusing a key spelled twice.
+
+    ``json.loads`` resolves duplicates last-wins, so ``"id":"A","id":"B"``
+    decodes as ``B`` — two different lines with two different meanings that
+    a reader silently collapses to one. A canonical log admits exactly one
+    spelling per record; ambiguity is corruption, not a parse detail.
+    """
+    obj: dict = {}
+    for key, value in pairs:
+        if key in obj:
+            raise JsonlCodecError(f"duplicate key {key!r} in line")
+        obj[key] = value
+    return obj
+
+
 def _load(line: str) -> dict:
     try:
-        obj = json.loads(line, parse_constant=_reject_constant)
+        obj = json.loads(
+            line, parse_constant=_reject_constant, object_pairs_hook=_no_duplicate_keys
+        )
+    except JsonlCodecError:
+        # Raised by our own hooks — already the right error, with the right
+        # message. Re-wrapping it as "not valid JSON" would bury the reason.
+        raise
     except ValueError as exc:
         raise JsonlCodecError(f"not valid JSON: {exc}") from exc
     if not isinstance(obj, dict):

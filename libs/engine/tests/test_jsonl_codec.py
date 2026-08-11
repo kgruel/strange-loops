@@ -289,3 +289,80 @@ def test_jcs_boundary_integers_accepted():
             '"observer":"o","origin":"g","payload":"{}"}'
         )
         assert deserialize_fact_row(line)[2] == int(number)
+
+
+# --- symmetry: what serialize emits, deserialize must accept ---------------
+
+
+def test_duplicate_keys_are_rejected_not_resolved_last_wins(tmp_path):
+    """One line, two ids is corruption — json's last-wins would hide it."""
+    line = (
+        '{"t":"fact","id":"A","id":"B","kind":"note","ts":1.0,'
+        '"observer":"kyle","origin":"","payload":"{}"}'
+    )
+    with pytest.raises(JsonlCodecError, match="duplicate key 'id'"):
+        deserialize_row(line)
+
+
+def test_duplicate_key_is_rejected_anywhere_in_the_line():
+    line = (
+        '{"t":"fact","id":"A","kind":"note","ts":1.0,'
+        '"observer":"kyle","origin":"","payload":"{}","payload":"{\\"x\\":1}"}'
+    )
+    with pytest.raises(JsonlCodecError, match="duplicate key 'payload'"):
+        deserialize_row(line)
+
+
+@pytest.mark.parametrize(
+    "row, match",
+    [
+        (("id", "note", "1.0", "kyle", "", "{}"), "must be a number"),
+        (("id", "note", True, "kyle", "", "{}"), "must be a number"),
+        (("id", 7, 1.0, "kyle", "", "{}"), "must be a string"),
+        (("id", "note", 1.0, "kyle", "", None), "must not be null"),
+        (("id", "note", float("inf"), "kyle", "", "{}"), "finite"),
+        (("id", "note", 2**53, "kyle", "", "{}"), "safe-integer"),
+    ],
+)
+def test_serialize_rejects_what_deserialize_would_refuse(row, match):
+    """Serialize is held to the decoder's domain, so the error lands at the
+    append site instead of as a durable line that bricks every later open."""
+    with pytest.raises(JsonlCodecError, match=match):
+        serialize_fact_row(row)
+
+
+def test_a_string_timestamp_cannot_become_a_durable_line(tmp_path):
+    """sol's scenario end to end: sqlite's REAL affinity accepts ts="1.0",
+    so nothing upstream objects — the codec is the gate that must."""
+    from atoms import Fact
+
+    from engine.jsonl_store import JsonlStore
+
+    store = JsonlStore(
+        path=tmp_path / "s.db",
+        serialize=lambda f: f.to_dict(),
+        deserialize=Fact.from_dict,
+    )
+    with pytest.raises(JsonlCodecError):
+        store._write_fact_row(("01BAD", "note", "1.0", "kyle", "", "{}"))
+    store.close()
+
+    # Nothing durable, nothing indexed — and the store still reopens.
+    assert not (tmp_path / "s.jsonl").exists() or (
+        tmp_path / "s.jsonl"
+    ).stat().st_size == 0
+    reopened = JsonlStore(
+        path=tmp_path / "s.db",
+        serialize=lambda f: f.to_dict(),
+        deserialize=Fact.from_dict,
+    )
+    reopened.append(Fact.of("note", "kyle", message="fine"))
+    reopened.close()
+
+
+def test_every_serialized_row_round_trips(tmp_path):
+    """The property the two directions exist to hold."""
+    fact_row = ("01F", "note", 1700000000.0, "kyle", "o", '{"m":"hi"}', "sig")
+    tick_row = ("01T", "n", 2.0, None, "o", "{}", None, None, None, None, None)
+    assert deserialize_row(serialize_fact_row(fact_row)) == ("fact", fact_row)
+    assert deserialize_row(serialize_tick_row(tick_row)) == ("tick", tick_row)

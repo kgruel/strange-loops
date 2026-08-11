@@ -160,20 +160,76 @@ def export_jsonl(source: Path, target: Path) -> ExportResult:
     )
 
 
+def _remove_partial(target: Path) -> None:
+    """Delete a half-built rebuild target and its sqlite sidecars.
+
+    Only ever called on a target this function just created (the
+    never-overwrite guard ran first), so nothing pre-existing is at risk.
+    Leaving the partial behind would make the natural retry fail on
+    ``FileExistsError`` instead — one failure turned into manual cleanup.
+    """
+    for path in (target, *(target.with_name(target.name + s) for s in ("-wal", "-shm"))):
+        path.unlink(missing_ok=True)
+
+
+def _validate_log(source: Path) -> None:
+    """Read-only pass: every line of ``source`` must decode, tail included.
+
+    A REBUILD source is **evidence**, and a different contract from a live
+    log. :class:`~engine.jsonl_store.JsonlStore` truncates a torn final line
+    because the next append would otherwise concatenate onto junk — repair is
+    right when the log is the store being written. Here the log is an input
+    someone handed us to read: a torn tail means the evidence is incomplete,
+    which is a fact to report, not damage to silently edit away. So this
+    validates first and mutates nothing, and construction below only ever
+    sees a log it has already proven clean.
+    """
+    from engine.jsonl_codec import deserialize_row
+
+    size = source.stat().st_size
+    with source.open("rb") as fh:
+        if size:
+            fh.seek(size - 1)
+            if fh.read(1) != b"\n":
+                raise ValueError(
+                    f"JSONL log has a torn final line (no trailing newline): "
+                    f"{source} — a rebuild source is evidence and is never "
+                    "repaired; recover or truncate it deliberately first"
+                )
+            fh.seek(0)
+        for raw in fh:
+            line = raw.decode("utf-8").strip()
+            if line:
+                deserialize_row(line)  # JsonlCodecError names the bad line
+
+
 def rebuild_jsonl(source: Path, target: Path) -> RebuildResult:
     """Rebuild a fresh sqlite store at ``target`` from the JSONL log ``source``.
 
     Rebuilding an index from its log is ``engine.jsonl_store``'s own job —
     it is what :class:`~engine.jsonl_store.JsonlStore` does on every open
     whose offset marker cannot be trusted, and it is where the recovery
-    rules (torn tail, verbatim insert, no re-mint) already live. This is the
-    migration-side wrapper around that: the guard that a rebuild never
-    overwrites an existing target, and the counts as a receipt.
+    rules (verbatim insert, no re-mint, the engine's own INSERT SQL) already
+    live. This is the migration-side wrapper around that, and it adds the
+    two guarantees the live path cannot make about a *migration* source:
+
+    - the source is **read-only evidence**. It is fully parsed first
+      (:func:`_validate_log`), and a torn tail is raised, not truncated —
+      see there for why the live log's repair semantics do not carry over.
+      Because validation has proven the log clean, the construction below
+      cannot reach the truncation path or fail mid-codec;
+    - a failed rebuild leaves **no target**. Partial sqlite bytes would make
+      the obvious retry hit the never-overwrite guard, turning one failure
+      into a manual cleanup.
 
     The rebuilt index comes out *stamped* — offset and row-count markers
     recorded — rather than in the rebuild-on-next-open state, because the
     engine path stamps what it consumed. Hashes and signatures are untouched:
     indexing is not re-emitting.
+
+    Raises ``FileNotFoundError`` (no source), ``FileExistsError`` (target
+    present), ``ValueError`` (torn tail) or ``engine.jsonl_codec
+    .JsonlCodecError`` (a line that does not decode).
     """
     from engine.jsonl_store import JsonlStore
 
@@ -183,11 +239,17 @@ def rebuild_jsonl(source: Path, target: Path) -> RebuildResult:
     if target.exists():
         raise FileExistsError(f"Rebuild target already exists: {target}")
 
+    _validate_log(source)
+
     target.parent.mkdir(parents=True, exist_ok=True)
-    JsonlStore(
-        path=target, log_path=source,
-        serialize=lambda d: d, deserialize=lambda d: d,
-    ).close()
+    try:
+        JsonlStore(
+            path=target, log_path=source,
+            serialize=lambda d: d, deserialize=lambda d: d,
+        ).close()
+    except BaseException:
+        _remove_partial(target)
+        raise
 
     conn = _open(target, read_only=True)
     try:

@@ -303,6 +303,96 @@ def test_rebuild_skips_blank_lines(full_store, tmp_path):
     assert result.facts == len(_fact_rows(full_store))
 
 
+def test_rebuild_leaves_the_index_stamped(full_store, tmp_path):
+    """The rebuilt index records what it consumed, not rebuild-on-next-open.
+
+    A property of delegating to JsonlStore — pinned so the read-only-source
+    reshape above cannot quietly cost it.
+    """
+    import sqlite3
+
+    log = tmp_path / "stamped.jsonl"
+    export_jsonl(full_store, log)
+    dst = tmp_path / "stamped.db"
+    rebuild_jsonl(log, dst)
+
+    conn = sqlite3.connect(str(dst))
+    try:
+        marks = dict(conn.execute("SELECT key, value FROM store_meta"))
+    finally:
+        conn.close()
+    assert int(marks["jsonl_offset"]) == log.stat().st_size
+    assert int(marks["jsonl_fact_count"]) == len(_fact_rows(full_store))
+    assert int(marks["jsonl_tick_count"]) == len(_tick_rows(full_store))
+
+
+def test_rebuild_reports_a_torn_tail_and_never_edits_the_source(full_store, tmp_path):
+    """A migration source is evidence: report the tear, don't repair it.
+
+    JsonlStore truncates a torn final line because the next append would
+    concatenate onto junk — right for a live log it owns. A rebuild source is
+    an input, and silently editing it destroys the very bytes someone would
+    need to recover the lost record.
+    """
+    log = tmp_path / "torn.jsonl"
+    export_jsonl(full_store, log)
+    log.write_bytes(log.read_bytes() + b'{"t":"fact","id":"01TR')
+    before = log.read_bytes()
+
+    dst = tmp_path / "torn.db"
+    with pytest.raises(ValueError, match="torn final line"):
+        rebuild_jsonl(log, dst)
+
+    assert log.read_bytes() == before
+    assert not dst.exists()
+
+
+def test_rebuild_rejects_an_undecodable_line_leaving_no_target(full_store, tmp_path):
+    """A codec error mid-log must not leave a partial db behind.
+
+    A partial target makes the obvious retry hit the never-overwrite guard,
+    turning one failure into manual cleanup.
+    """
+    from engine.jsonl_codec import JsonlCodecError
+
+    log = tmp_path / "bad.jsonl"
+    export_jsonl(full_store, log)
+    rows = log.read_text(encoding="utf-8").splitlines()
+    rows.insert(1, '{"t":"fact"}')  # decodes as JSON, not as a row
+    log.write_text("\n".join(rows) + "\n", encoding="utf-8")
+
+    dst = tmp_path / "bad.db"
+    with pytest.raises(JsonlCodecError):
+        rebuild_jsonl(log, dst)
+    assert not dst.exists()
+
+    # And the retry after fixing the log is an ordinary rebuild, not a
+    # FileExistsError from the failed attempt's residue.
+    del rows[1]
+    log.write_text("\n".join(rows) + "\n", encoding="utf-8")
+    assert rebuild_jsonl(log, dst).facts == len(_fact_rows(full_store))
+
+
+def test_rebuild_removes_the_target_when_construction_fails(full_store, tmp_path, monkeypatch):
+    """Any failure past validation still leaves no partial target."""
+    import engine.jsonl_store as js
+
+    log = tmp_path / "boom.jsonl"
+    export_jsonl(full_store, log)
+    dst = tmp_path / "boom.db"
+
+    real_init = js.JsonlStore.__init__
+
+    def exploding_init(self, **kwargs):
+        real_init(self, **kwargs)
+        raise RuntimeError("simulated failure mid-rebuild")
+
+    monkeypatch.setattr(js.JsonlStore, "__init__", exploding_init)
+    with pytest.raises(RuntimeError):
+        rebuild_jsonl(log, dst)
+    assert not dst.exists()
+
+
 def test_round_trip_of_empty_store(tmp_path):
     from engine import SqliteStore
 

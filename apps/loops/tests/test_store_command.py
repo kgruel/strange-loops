@@ -813,3 +813,261 @@ class TestStoreVerbsOnAFreshClone:
         assert _run_store(["ticks"], vertex_path=vpath) == 1
         captured = capsys.readouterr()
         assert "not yet materialized" in captured.out + captured.err
+
+
+class TestCanonicalAgreementGate:
+    """`store verify` must not attest to an index the canonical log disowns.
+
+    Before design/store/verify-canonical-agreement, every store verb read the
+    derived sqlite index alone: an out-of-band row rendered "✓ chain intact"
+    at rc=0, which is a false attestation of exactly the lie-class the chain
+    exists to prevent. These tests inject one disagreement each.
+    """
+
+    @staticmethod
+    def _store(tmp_path):
+        from atoms import Fact
+        from engine.jsonl_store import open_canonical_store
+        from engine.tick import Tick
+        from datetime import UTC, datetime
+
+        vpath = TestJsonlCanonicalStoreVerbRefusals._jsonl_vertex(tmp_path)
+        store = open_canonical_store(
+            tmp_path / "x.jsonl",
+            serialize=lambda f: f.to_dict(),
+            deserialize=Fact.from_dict,
+        )
+        try:
+            store.append(Fact.of("ping", "x", message="one"))
+            store.append(Fact.of("ping", "x", message="two"))
+            store.append_tick(Tick(name="seal", ts=datetime.now(UTC),
+                                   payload={"n": 1}, origin="t"))
+        finally:
+            store.close()
+        return vpath
+
+    @staticmethod
+    def _forge_row(tmp_path):
+        """A fact row the canonical log never carried."""
+        import json
+        import sqlite3
+        import time
+
+        conn = sqlite3.connect(str(tmp_path / "x.db"))
+        conn.execute(
+            "INSERT INTO facts (id, kind, ts, observer, origin, payload) "
+            "VALUES ('01FORGED', 'ping', ?, 'mallory', '', ?)",
+            (time.time(), json.dumps({"message": "forged"})),
+        )
+        conn.commit()
+        conn.close()
+
+    def test_a_clean_store_says_what_it_actually_checked(self, tmp_path, capsys):
+        from loops.commands.store import _run_store
+
+        vpath = self._store(tmp_path)
+        rc = _run_store(["verify"], vertex_path=vpath)
+        out = capsys.readouterr().out
+
+        assert rc == 0
+        assert "index chain intact; canonical parity checks pass (not deep)" in out
+        # The scope boundary is printed, not left in a docstring.
+        assert "live edge" in out
+
+    def test_an_out_of_band_row_breaks_verify_and_suppresses_chain_intact(
+        self, tmp_path, capsys
+    ):
+        from loops.commands.store import _run_store
+
+        vpath = self._store(tmp_path)
+        self._forge_row(tmp_path)
+
+        rc = _run_store(["verify"], vertex_path=vpath)
+        out = capsys.readouterr().out
+
+        assert rc == 1
+        assert "CANONICAL DISAGREEMENT" in out
+        assert "counts" in out
+        assert "chain intact" not in out
+
+    def test_the_divergence_names_which_check_failed_in_json(self, tmp_path, capsys):
+        import json as _json
+
+        from loops.commands.store import _run_store
+
+        vpath = self._store(tmp_path)
+        self._forge_row(tmp_path)
+
+        rc = _run_store(["verify", "--json"], vertex_path=vpath)
+        payload = _json.loads(capsys.readouterr().out)
+
+        assert rc == 1
+        assert payload["ok"] is False
+        failed = [c["check"] for c in payload["canonical"]["checks"] if not c["ok"]]
+        assert failed == ["counts"]
+
+    def test_a_durable_unindexed_line_fails_offset_parity(self, tmp_path, capsys):
+        """The gate must judge, not repair.
+
+        Resolution normally runs ``ensure_index``, which catches a stale index
+        up — and a caught-up index agrees by construction. If the gate ran
+        after that, this store would verify clean.
+        """
+        import json
+        import time
+
+        from engine.jsonl_codec import serialize_fact_row
+        from loops.commands.store import _run_store
+
+        vpath = self._store(tmp_path)
+        with (tmp_path / "x.jsonl").open("a", encoding="utf-8") as fh:
+            fh.write(serialize_fact_row(
+                ("01UNINDEXED", "ping", time.time(), "sol", "",
+                 json.dumps({"message": "durable"}))
+            ) + "\n")
+
+        rc = _run_store(["verify"], vertex_path=vpath)
+        out = capsys.readouterr().out
+
+        assert rc == 1
+        assert "unindexed" in out
+        assert "chain intact" not in out
+
+    def test_deep_names_an_interior_index_edit_l1_cannot_see(self, tmp_path, capsys):
+        import json
+        import sqlite3
+
+        from loops.commands.store import _run_store
+
+        from atoms import Fact
+        from engine.jsonl_store import open_canonical_store
+
+        vpath = self._store(tmp_path)
+        # Two more facts past the seal: the tampered one is then neither
+        # sealed (the index chain would catch it) nor last (L1's last-line
+        # check would). That interior band is exactly what --deep is for.
+        store = open_canonical_store(
+            tmp_path / "x.jsonl",
+            serialize=lambda f: f.to_dict(), deserialize=Fact.from_dict,
+        )
+        store.append(Fact.of("note", "x", message="three"))
+        store.append(Fact.of("note", "x", message="four"))
+        store.close()
+
+        conn = sqlite3.connect(str(tmp_path / "x.db"))
+        first = conn.execute(
+            "SELECT id FROM facts ORDER BY rowid"
+        ).fetchall()[2][0]
+        conn.execute("UPDATE facts SET payload = ? WHERE id = ?",
+                     (json.dumps({"message": "TAMPERED"}), first))
+        conn.commit()
+        conn.close()
+
+        assert _run_store(["verify"], vertex_path=vpath) == 0  # L1's blind spot
+        capsys.readouterr()
+
+        rc = _run_store(["verify", "--deep"], vertex_path=vpath)
+        out = capsys.readouterr().out
+
+        assert rc == 1
+        assert "log line 4" in out
+        assert first in out
+
+    def test_deep_success_is_labeled_as_deep(self, tmp_path, capsys):
+        from loops.commands.store import _run_store
+
+        vpath = self._store(tmp_path)
+        rc = _run_store(["verify", "--deep"], vertex_path=vpath)
+        out = capsys.readouterr().out
+
+        assert rc == 0
+        assert "chain re-derived from" in out
+        assert "not deep" not in out
+
+    def test_the_gate_leaves_both_artifacts_untouched(self, tmp_path, capsys):
+        """Verification is a pure reader — repair would destroy the evidence."""
+        from loops.commands.store import _run_store
+
+        vpath = self._store(tmp_path)
+        self._forge_row(tmp_path)
+        before = ((tmp_path / "x.jsonl").read_bytes(), (tmp_path / "x.db").read_bytes())
+
+        _run_store(["verify"], vertex_path=vpath)
+        capsys.readouterr()
+
+        assert ((tmp_path / "x.jsonl").read_bytes(),
+                (tmp_path / "x.db").read_bytes()) == before
+
+    def test_stats_refuses_rather_than_serving_poisoned_totals(
+        self, tmp_path, capsys
+    ):
+        from loops.commands.store import _run_store
+
+        vpath = self._store(tmp_path)
+        self._forge_row(tmp_path)
+
+        rc = _run_store(["stats"], vertex_path=vpath)
+        out = capsys.readouterr()
+
+        assert rc == 1
+        assert "canonical disagreement" in (out.out + out.err)
+
+    def test_ticks_refuses_rather_than_serving_a_poisoned_chain(
+        self, tmp_path, capsys
+    ):
+        from loops.commands.store import _run_store
+
+        vpath = self._store(tmp_path)
+        self._forge_row(tmp_path)
+
+        rc = _run_store(["ticks"], vertex_path=vpath)
+        out = capsys.readouterr()
+
+        assert rc == 1
+        assert "canonical disagreement" in (out.out + out.err)
+
+    def test_a_db_canonical_store_is_unchanged(self, tmp_path, capsys):
+        """One artifact, nothing to disagree with — the old words, the old rc."""
+        from atoms import Fact
+        from engine.builder import fold_count, vertex
+        from engine.sqlite_store import SqliteStore
+        from loops.commands.store import _run_store
+
+        vpath = tmp_path / "d.vertex"
+        (vertex("d").store("./d.db")
+            .loop("ping", fold_count("n"), boundary_every=1)
+            .write(vpath))
+        store = SqliteStore(path=tmp_path / "d.db",
+                            serialize=lambda f: f.to_dict(),
+                            deserialize=Fact.from_dict)
+        store.append(Fact.of("ping", "d"))
+        store.close()
+
+        rc = _run_store(["verify"], vertex_path=vpath)
+        out = capsys.readouterr().out
+
+        assert rc == 0
+        assert "chain intact" in out
+        assert "canonical" not in out
+
+    def test_deep_is_refused_on_a_db_canonical_store(self, tmp_path, capsys):
+        from atoms import Fact
+        from engine.builder import fold_count, vertex
+        from engine.sqlite_store import SqliteStore
+        from loops.commands.store import _run_store
+
+        vpath = tmp_path / "d.vertex"
+        (vertex("d").store("./d.db")
+            .loop("ping", fold_count("n"), boundary_every=1)
+            .write(vpath))
+        store = SqliteStore(path=tmp_path / "d.db",
+                            serialize=lambda f: f.to_dict(),
+                            deserialize=Fact.from_dict)
+        store.append(Fact.of("ping", "d"))
+        store.close()
+
+        rc = _run_store(["verify", "--deep"], vertex_path=vpath)
+        err = capsys.readouterr().err
+
+        assert rc == 2
+        assert "sqlite-canonical" in err

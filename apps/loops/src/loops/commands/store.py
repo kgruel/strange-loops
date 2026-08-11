@@ -119,6 +119,68 @@ def _require_materialized_store(target_path: Path) -> Path:
     return db_path
 
 
+def canonical_agreement(target_path: Path, *, deep: bool = False):
+    """Judge a JSONL-canonical target's index against its log — or ``None``.
+
+    The gate every store read verb runs BEFORE it reads (design/store/
+    verify-canonical-agreement). A ``.db``-canonical target has one artifact
+    and nothing to disagree with, so it returns ``None`` and the caller's
+    behavior is unchanged.
+
+    Deliberately resolved through :func:`resolve_canonical_path` and
+    ``index_path_for`` — both pure — rather than :func:`resolve_store_path`.
+    That path runs ``ensure_index``, which constructs a ``JsonlStore``
+    whenever the index is behind, and a ``JsonlStore`` constructor *repairs*:
+    it would catch the index up and then report agreement about a store whose
+    disagreement it had just erased. Verification and open-time recovery are
+    opposite contracts; this is the seam where they must not meet.
+
+    Returns ``(index_path, report)``. A non-materialized log raises the same
+    ``FileNotFoundError`` as :func:`_require_materialized_store`.
+    """
+    from engine.canonical_audit import audit_agreement, audit_deep
+    from engine.residence import index_path_for, is_jsonl_canonical
+
+    canonical = resolve_canonical_path(target_path)
+    if not is_jsonl_canonical(canonical):
+        return None
+    if not canonical.exists():
+        raise FileNotFoundError(
+            f"store for '{target_path.stem}' not yet materialized — "
+            f"no facts emitted (no canonical log at {canonical})"
+        )
+    index = index_path_for(canonical)
+    if not index.exists():
+        # Fresh clone: the log is tracked, the derived index is not. BUILDING
+        # an absent index from the log is not repair — there is no prior state
+        # to destroy and no divergence it could hide, so the store-verb
+        # existence contract keeps working. An index that DOES exist is
+        # evidence and is never materialized through here.
+        from engine.jsonl_store import ensure_index
+
+        ensure_index(canonical)
+    audit = audit_deep if deep else audit_agreement
+    return index, audit(canonical)
+
+
+def _gate_read(target_path: Path) -> None:
+    """Refuse a read verb on a store whose index is known to be poisoned.
+
+    ``stats``/``ticks`` render store-level claims — totals, chain counts —
+    straight off the derived index. Serving those from an index that provably
+    disagrees with the canonical log is the same false attestation ``verify``
+    was rendering, one surface over. Raised as ``ValueError`` so each verb's
+    existing fetch-error path renders it at RC=1.
+    """
+    gated = canonical_agreement(target_path)
+    if gated is not None and not gated[1].ok:
+        raise ValueError(
+            f"canonical disagreement in '{target_path.stem}' — "
+            f"{gated[1].summary()}. Refusing to serve derived data the log "
+            f"does not support; run 'loops store verify' for the full report"
+        )
+
+
 def make_fetcher(path: Path, zoom: int, *, kind: str | None = None):
     """Create a zero-arg fetcher for store data.
 
@@ -244,13 +306,34 @@ def _run_verify(argv: list[str], *, vertex_path: Path | None = None) -> int:
         help="Per-tick attestation rows for the chained era "
              "(signature status, window fact count, cursor target)",
     )
+    p.add_argument(
+        "--deep", action="store_true",
+        help="JSONL-canonical stores: stream every log line, compare it "
+             "field-for-field and in order against the index, and re-derive "
+             "the tick chain from canonical content (O(log), not O(1))",
+    )
     # -h/--help is owned by argparse (add_help=True): parse_args prints the
     # help built from this parser and exits 0 natively. No hand-rolled block.
     args = p.parse_args(argv)
 
     try:
         target_path = _resolve_target(getattr(args, "file", None), vertex_path).resolve()
-        db_path = _require_materialized_store(target_path)
+        # The agreement gate resolves the artifacts itself, purely — see
+        # canonical_agreement on why _require_materialized_store's resolve
+        # cannot run first on a JSONL-canonical target.
+        gated = canonical_agreement(target_path, deep=args.deep)
+        if gated is None:
+            if args.deep:
+                return _refuse_store(
+                    "--deep judges a canonical log against its derived index; "
+                    f"{target_path.name} is sqlite-canonical (one artifact, "
+                    "nothing to disagree with)",
+                    label="store verify",
+                )
+            db_path = _require_materialized_store(target_path)
+            agreement = None
+        else:
+            db_path, agreement = gated
     except (FileNotFoundError, ValueError) as exc:
         # F2 — three-verb --json parity: verify is hand-rolled and raises
         # before its --json branch, so without this an absent target / absent
@@ -263,6 +346,35 @@ def _run_verify(argv: list[str], *, vertex_path: Path | None = None) -> int:
             print(_json.dumps({"error": str(exc)}))  # noqa: T201 — machine output path
             return 1
         raise
+
+    if agreement is not None and not agreement.ok:
+        # Suppress the chain walk ENTIRELY. Walking a poisoned index and
+        # printing "chain intact" alongside a warning would still be the false
+        # attestation: the chain's verdict is only worth anything about an
+        # index the log supports. Name the check that failed instead.
+        if args.json:
+            import json as _json
+            print(_json.dumps(  # noqa: T201 — machine output path
+                {"ok": False, "canonical": agreement.as_dict()}, indent=2
+            ))
+            return 1
+        from painted import Block, Style, join_vertical, paint
+        from painted.views import Severity, callout
+
+        blocks = [callout(
+            f"{db_path.name} — CANONICAL DISAGREEMENT",
+            severity=Severity.ERROR,
+            detail="the derived index does not agree with the canonical log; "
+                   "the tick chain was NOT walked (its verdict would attest "
+                   "to an index the log does not support)",
+        )]
+        for check in agreement.checks:
+            mark = "✓" if check.ok else "✗"
+            blocks.append(Block.text(
+                f"  {mark} {check.name:<10} {check.detail}", Style(dim=check.ok)
+            ))
+        paint(join_vertical(*blocks))
+        return 1
 
     # Tick-signature verification composes here (injection, not import):
     # the observer-key registry lives in the .vertex, so a raw .db target
@@ -284,7 +396,10 @@ def _run_verify(argv: list[str], *, vertex_path: Path | None = None) -> int:
 
     if args.json:
         import json as _json
-        print(_json.dumps({**report, "fact_signatures": fact_report}, indent=2))  # noqa: T201 — machine output path
+        payload = {**report, "fact_signatures": fact_report}
+        if agreement is not None:
+            payload["canonical"] = agreement.as_dict()
+        print(_json.dumps(payload, indent=2))  # noqa: T201 — machine output path
         return 0 if report["ok"] and fact_report["ok"] else 1
 
     from painted import Block, Style, join_vertical, paint
@@ -296,8 +411,20 @@ def _run_verify(argv: list[str], *, vertex_path: Path | None = None) -> int:
         verdict, verdict_sev = "CHAIN BROKEN", Severity.ERROR
     elif not fact_report["ok"]:
         verdict, verdict_sev = "FACT SIGNATURES BROKEN", Severity.ERROR
-    else:
+    elif agreement is None:
         verdict, verdict_sev = "chain intact", Severity.SUCCESS
+    elif agreement.deep:
+        # Say what was actually checked. "chain intact" on a two-artifact
+        # store used to name the weaker claim with the stronger words.
+        verdict, verdict_sev = (
+            "canonical content verified line-by-line; chain re-derived from "
+            "the log", Severity.SUCCESS,
+        )
+    else:
+        verdict, verdict_sev = (
+            "index chain intact; canonical parity checks pass (not deep)",
+            Severity.SUCCESS,
+        )
 
     # Composed, never Block.text("\n".join(...)): painted 0.4.0 neutralizes a
     # raw \n to a space at the cell level, so multi-line must be real rows
@@ -344,6 +471,21 @@ def _run_verify(argv: list[str], *, vertex_path: Path | None = None) -> int:
         row(f"authorship   {fact_report['signed']}/{total_facts} facts signed · {checked}")
     elif fact_report["facts"]:
         row(f"authorship   0/{total_facts} facts signed (pre-signature era)")
+
+    if agreement is not None:
+        # A fourth axis, and the one that says how much of the log was read.
+        # The scope boundary is printed, not left in a docstring: a
+        # coordinated edit of an unsealed fact in BOTH artifacts is uncaught
+        # here by design, and the output must not imply otherwise.
+        if agreement.deep:
+            row("canonical    every log line matches the index in order · "
+                "chain re-derived from log content")
+        else:
+            row("canonical    offset · counts · last-line agree with the log "
+                "(interior rows unread — use --deep)")
+        row("             live edge: an unsealed fact edited in BOTH log and "
+            "index is out of scope (its witnesses are the fact signature and "
+            "the next seal)")
 
     # The strip-attack tripwires stay WARNING: a benign pre-signing store and a
     # malicious live-edge strip currently look identical here, and under-alarming
@@ -1326,6 +1468,10 @@ def _run_store_ticks(argv: list[str], *, vertex_path: Path | None = None) -> int
         # RC=1 with a surfaced message, matching stats/verify, not ticks'
         # prior silent RC=0-empty. (decision/design/
         # store-verb-existence-exit-code-parity)
+        # The gate runs FIRST: _require_materialized_store resolves through
+        # ensure_index, which repairs a stale index — and a repaired index
+        # agrees with the log by construction. Judge, then resolve.
+        _gate_read(target_path)
         _require_materialized_store(target_path)
 
         # --chain spans the full hash chain (all_names) to agree with
@@ -1412,6 +1558,7 @@ def _run_store_stats(argv: list[str], *, vertex_path: Path | None = None) -> int
     def fetch():
         from engine.store_reader import StoreReader
 
+        _gate_read(target_path)
         store_path = _require_materialized_store(target_path)
         with StoreReader(store_path) as reader:
             # Explicit --kind is the SPEC §9.4 escape hatch — it overrides

@@ -932,7 +932,7 @@ class TestCanonicalAgreementGate:
         assert rc == 1
         assert "unindexed" in out
         assert "chain intact" not in out
-        # …and it is named as lag, not as tampering.
+        # …and it is scoped to the unconsumed suffix, not called tampering.
         assert "INDEX BEHIND THE LOG" in out
         assert "CANONICAL DISAGREEMENT" not in out
 
@@ -1003,10 +1003,10 @@ class TestCanonicalAgreementGate:
         payload = _json.loads(capsys.readouterr().out)
 
         assert rc == 1
-        assert payload["canonical"]["lag_only"] is True
+        assert payload["canonical"]["index_behind"] is True
         offset = next(c for c in payload["canonical"]["checks"]
                       if c["check"] == "offset")
-        assert offset["lag"] is True
+        assert offset["beyond_offset"] is True
 
     def test_a_forged_row_is_never_classified_as_lag(self, tmp_path, capsys):
         import json as _json
@@ -1020,7 +1020,7 @@ class TestCanonicalAgreementGate:
         payload = _json.loads(capsys.readouterr().out)
 
         assert rc == 1
-        assert payload["canonical"]["lag_only"] is False
+        assert payload["canonical"]["index_behind"] is False
 
     def test_stats_and_ticks_name_the_repair_on_a_lagging_index(
         self, tmp_path, capsys
@@ -1046,13 +1046,16 @@ class TestCanonicalAgreementGate:
         for verb in ("stats", "ticks"):
             rc = _run_store([verb], vertex_path=vpath)
             out = capsys.readouterr()
-            text = out.out + out.err
+            # Terminal wrapping puts newlines mid-phrase; the claim under test
+            # is the wording, not where the renderer broke the line.
+            text = " ".join((out.out + out.err).split())
             assert rc == 1, verb
             assert "index behind the log" in text, verb
             assert "canonical disagreement" not in text, verb
             assert "loops read x" in text, verb
+            assert "--deep" in text, verb
 
-    def test_a_rewound_offset_over_a_tampered_row_is_not_downgraded_to_lag(
+    def test_a_rewound_offset_over_a_tampered_row_is_not_downgraded_to_index_behind(
         self, tmp_path, capsys
     ):
         """The lag label must not be attacker-writable.
@@ -1089,6 +1092,138 @@ class TestCanonicalAgreementGate:
         assert "CANONICAL DISAGREEMENT" in out
         assert "INDEX BEHIND THE LOG" not in out
         assert "not evidence of tampering" not in out
+
+    @staticmethod
+    def _wider_store(tmp_path):
+        """The `_store` shape plus two more indexed facts past the seal.
+
+        Five log lines gives an unconsumed suffix with an INTERIOR line —
+        which is what the sol r4 repros need: L1 corroborates only the first
+        line past the offset, so everything after it is where a doctored
+        suffix hides.
+        """
+        from atoms import Fact
+        from engine.jsonl_store import open_canonical_store
+
+        vpath = TestCanonicalAgreementGate._store(tmp_path)
+        store = open_canonical_store(
+            tmp_path / "x.jsonl",
+            serialize=lambda f: f.to_dict(), deserialize=Fact.from_dict,
+        )
+        try:
+            store.append(Fact.of("note", "x", message="three"))
+            store.append(Fact.of("note", "x", message="four"))
+        finally:
+            store.close()
+        return vpath
+
+    @staticmethod
+    def _line_ends(log):
+        ends, pos = [], 0
+        for raw in log.read_bytes().splitlines(keepends=True):
+            pos += len(raw)
+            ends.append(pos)
+        return ends
+
+    @staticmethod
+    def _assert_claims_no_innocence(out: str) -> None:
+        """L1 may say WHERE the disagreement is; never that it is benign.
+
+        `_suffix_unindexed` corroborates one line, so any wording that reads
+        as an acquittal is a claim the check did not earn — and sol bought
+        exactly that classification twice with single-artifact edits.
+        """
+        text = " ".join(out.split())
+        for phrase in (
+            "not evidence of tampering", "not tampering", "benign", "innocent",
+        ):
+            assert phrase not in text.lower(), phrase
+        assert "--deep" in text
+
+    def test_a_doctored_suffix_behind_a_rewound_marker_is_not_called_benign(
+        self, tmp_path, capsys
+    ):
+        """sol r4 finding 1, index-only repro.
+
+        Rewind the marker to just before the log's last two fact lines,
+        delete the index row for the FIRST of them (which is all L1
+        corroborates), fix the count marker to match, and poison the row for
+        the line after it. Every L1 check that can still speak passes;
+        the offset check reports a shortfall. rc=1 either way — the thing
+        under test is that the words stop short of exoneration.
+        """
+        import json
+        import sqlite3
+
+        from loops.commands.store import _run_store
+
+        vpath = self._wider_store(tmp_path)
+        ends = self._line_ends(tmp_path / "x.jsonl")
+        conn = sqlite3.connect(str(tmp_path / "x.db"))
+        ids = [r[0] for r in conn.execute("SELECT id FROM facts ORDER BY rowid")]
+        conn.execute("DELETE FROM facts WHERE id = ?", (ids[2],))
+        conn.execute("UPDATE facts SET payload = ? WHERE id = ?",
+                     (json.dumps({"message": "FORGED"}), ids[3]))
+        conn.execute(
+            "UPDATE store_meta SET value = ? WHERE key = 'jsonl_fact_count'",
+            (str(len(ids) - 1),),
+        )
+        conn.execute(
+            "UPDATE store_meta SET value = ? WHERE key = 'jsonl_offset'",
+            (str(ends[2]),),
+        )
+        conn.commit()
+        conn.close()
+
+        rc = _run_store(["verify"], vertex_path=vpath)
+        out = capsys.readouterr().out
+        assert rc == 1
+        self._assert_claims_no_innocence(out)
+
+        # …and the route it names does resolve the question.
+        assert _run_store(["verify", "--deep"], vertex_path=vpath) == 1
+        deep = capsys.readouterr().out
+        assert ids[3] in deep
+
+    def test_an_edited_line_under_an_appended_one_is_not_called_benign(
+        self, tmp_path, capsys
+    ):
+        """sol r4 finding 1, log-only repro.
+
+        A same-length interior payload edit keeps every byte offset intact, and
+        one well-formed appended row makes the whole disagreement land past the
+        stamped offset — so L1 sees a shortfall whose first unindexed line is
+        honest. It must not conclude the edit below it is honest too.
+        """
+        import json
+        import time
+
+        from engine.jsonl_codec import serialize_fact_row
+        from loops.commands.store import _run_store
+
+        vpath = self._wider_store(tmp_path)
+        log = tmp_path / "x.jsonl"
+        raw = log.read_bytes().splitlines(keepends=True)
+        first = json.loads(raw[0].decode())
+        payload = json.loads(first["payload"])
+        assert len(payload["message"]) == len("ONE")  # same length, same offsets
+        payload["message"] = "ONE"
+        first["payload"] = json.dumps(payload)
+        edited = (json.dumps(first, separators=(",", ":"), sort_keys=True)
+                  + "\n").encode()
+        assert len(edited) == len(raw[0])
+        log.write_bytes(edited + b"".join(raw[1:]) + (serialize_fact_row(
+            ("01APPENDED", "note", time.time(), "x", "",
+             json.dumps({"message": "durable"}))
+        ) + "\n").encode())
+
+        rc = _run_store(["verify"], vertex_path=vpath)
+        out = capsys.readouterr().out
+        assert rc == 1
+        self._assert_claims_no_innocence(out)
+
+        assert _run_store(["verify", "--deep"], vertex_path=vpath) == 1
+        assert "log line 1" in capsys.readouterr().out
 
     def test_the_advertised_repair_heals_a_rewound_store_instead_of_crashing(
         self, tmp_path, capsys

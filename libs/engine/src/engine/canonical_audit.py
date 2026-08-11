@@ -87,26 +87,29 @@ class Check:
     name: str
     ok: bool
     detail: str = ""
-    lag: bool = False
-    """Is this divergence the writer's own documented recovery window?
+    beyond_offset: bool = False
+    """Does this divergence lie past the prefix the index claims to have consumed?
 
-    ``JsonlStore`` fsyncs the log BEFORE it commits the index rows and the
-    markers (``jsonl_store.py``), so a crash in that window leaves a durable
-    log ahead of a truthful-but-behind index — and an interrupted append
-    leaves a torn final line the next open truncates. Both are *lag*, not
-    tampering: the index carries nothing the log does not, and the next open
-    catches it up. Every other divergence says the index holds something the
-    log never carried, which no writer produces.
+    A SCOPE STATEMENT, NOT AN INNOCENCE CLAIM. ``JsonlStore`` fsyncs the log
+    BEFORE it commits the index rows and the markers (``jsonl_store.py``), so
+    a crash in that window leaves a durable log ahead of a truthful-but-behind
+    index — and an interrupted append leaves a torn final line the next open
+    truncates. Both states put their divergence here. But so does an attacker
+    who rewinds the marker and then edits the suffix: L1 corroborates only the
+    FIRST line past the offset (:func:`_suffix_unindexed`), which is enough to
+    refuse the marker's bare word and no more. Full corroboration of an
+    unindexed suffix is definitionally :func:`audit_deep`'s job, so no caller
+    may turn this flag into "not tampering" — only into "the disagreement is
+    in bytes the index never claimed, which an interrupted append also
+    produces; run ``--deep`` to rule the rest out".
 
     NEVER decided by the offset marker alone. That marker lives inside the
     very sqlite file this audit exists to judge, so trusting it would let an
-    attacker downgrade tampering to "not tampering" by rewinding one integer
-    (rewind the marker below an edited interior row and every other L1 check
-    still passes). The claim is corroborated against the log instead: lag
-    holds only when the log suffix past the stamped offset is *genuinely
-    unindexed* — see :func:`_suffix_unindexed`. An index that already holds a
-    row for a line the marker calls unconsumed is not behind; its marker was
-    moved, and that is not the writer's shape.
+    attacker rewind one integer to move a divergence out of scope (rewind the
+    marker below an edited interior row and every other L1 check still
+    passes). An index that already holds a row for the first line the marker
+    calls unconsumed is not behind at all; its marker was moved, and that is
+    not the writer's shape — that detection is exact, and it stays.
     """
 
     def as_dict(self) -> dict[str, Any]:
@@ -114,7 +117,7 @@ class Check:
             "check": self.name,
             "ok": self.ok,
             "detail": self.detail,
-            "lag": self.lag,
+            "beyond_offset": self.beyond_offset,
         }
 
 
@@ -135,17 +138,19 @@ class AgreementReport:
         return tuple(c for c in self.checks if not c.ok)
 
     @property
-    def lag_only(self) -> bool:
-        """Diverged, but only in the writer's own crash-recovery window.
+    def index_behind(self) -> bool:
+        """Diverged, but only past the prefix the index claims to have consumed.
 
-        True when every divergence is a :attr:`Check.lag` — the index is
-        BEHIND the log and otherwise truthful. Callers still report and still
-        refuse (the log holds facts the index cannot serve), but they must
-        not call it tampering: the remedy is any read verb, which catches the
-        index up, not a forensic investigation.
+        True when every divergence is :attr:`Check.beyond_offset`. That is
+        what an interrupted append looks like — and it is ALSO what a rewound
+        marker plus a doctored suffix looks like to L1, which corroborates
+        only the first unindexed line. So this narrows where to look; it never
+        licenses "not tampering". Callers report it as "the index is behind
+        the log", offer ``loops read`` as the catch-up route, and point at
+        ``--deep`` for the ruling L1 cannot make.
         """
         d = self.divergences
-        return bool(d) and all(c.lag for c in d)
+        return bool(d) and all(c.beyond_offset for c in d)
 
     def summary(self) -> str:
         """One line naming the failures — '' when everything agreed."""
@@ -155,7 +160,7 @@ class AgreementReport:
         return {
             "ok": self.ok,
             "deep": self.deep,
-            "lag_only": self.lag_only,
+            "index_behind": self.index_behind,
             "checks": [c.as_dict() for c in self.checks],
             **({"counts": dict(self.counts)} if self.counts else {}),
         }
@@ -371,24 +376,27 @@ def _index_has_row(conn, t: str, row_id: str) -> bool:
                 f"SELECT EXISTS(SELECT 1 FROM {table} WHERE id = ?)", (row_id,)
             ).fetchone()[0]
         )
-    except Exception:  # noqa: BLE001 — an unreadable index cannot vouch for lag
+    except Exception:  # noqa: BLE001 — an unreadable index vouches for nothing
         return True
 
 
 def _suffix_unindexed(conn, canonical: Path, offset: int, size: int) -> bool:
-    """Is the log past ``offset`` genuinely unindexed — i.e. is this real lag?
+    """Does the log past ``offset`` START with a genuinely unindexed line?
 
-    The corroboration behind :attr:`Check.lag`. The writer's crash window has
-    exactly one shape: the log holds durable bytes the index has NOT consumed,
-    so the first line past the stamped offset has no row in the index. Reading
-    that one line is O(1) and turns "the suspect's own marker says so" into a
-    claim the log supports.
+    The corroboration behind :attr:`Check.beyond_offset`, and no more than
+    that. The writer's crash window has one shape: the log holds durable bytes
+    the index has NOT consumed, so the first line past the stamped offset has
+    no row in the index. Reading that one line is O(1) and turns "the
+    suspect's own marker says so" into a claim the log supports — but it says
+    NOTHING about the rest of the suffix, which is why no caller may read a
+    True here as innocence. Corroborating every suffix line is
+    :func:`audit_deep`'s scope, by construction: it already streams them.
 
-    False (do not call it lag) when the offset does not land on a line
-    boundary, when the line does not decode, or when the index already holds a
-    row for it — the marker was rewound below rows the index consumed, which no
-    writer produces.  True for a torn final line: those bytes were never
-    indexed, which is precisely the interrupted-append window.
+    False (the marker is not merely behind) when the offset does not land on a
+    line boundary, when the first line does not decode, or when the index
+    already holds a row for it — the marker was rewound below rows the index
+    consumed, which no writer produces. True for a torn final line: those
+    bytes were never indexed, which is precisely the interrupted-append window.
     """
     if not 0 <= offset < size:
         return False
@@ -430,9 +438,11 @@ def _check_offset(conn, canonical: Path, offset: int | None, size: int) -> Check
         if _suffix_unindexed(conn, canonical, offset, size):
             return Check(
                 "offset", False,
-                f"log is ahead of the index: {size - offset} durable byte(s) "
-                f"unindexed (offset {offset}, log {size})",
-                lag=True,
+                f"index is behind the log by {size - offset} byte(s) "
+                f"(offset {offset}, log {size}), and the first unindexed line "
+                "is genuinely unindexed — consistent with an interrupted "
+                "append; run --deep to judge the rest of that suffix",
+                beyond_offset=True,
             )
         return Check(
             "offset", False,
@@ -487,7 +497,7 @@ def _check_last_line(conn, canonical: Path, size: int, offset: int | None) -> Ch
     crashes between the log's fsync and the index commit, or leaves a torn
     tail — the two states the writer itself documents as normal, where the
     unindexed bytes have no index row to match by construction. The offset
-    check already reports the lag once; reporting it again as tampering is a
+    check already reports the shortfall once; reporting it again as tampering is a
     false accusation inside the feature that exists to attest honestly.
     """
     bound = size if offset is None else min(offset, size)
@@ -555,15 +565,16 @@ def audit_deep(canonical: Path) -> AgreementReport:
     try:
         offset = _meta_int(conn, OFFSET_KEY)
         # The same corroboration L1 made: a content failure is only excusable
-        # as lag when the log suffix past the offset is genuinely unindexed.
-        # Reading the flag off the marker alone would let a rewind stamp
-        # ``"lag": true`` onto a tampered line in ``--json``.
-        lag_window = offset is not None and _suffix_unindexed(
+        # as beyond-the-consumed-prefix when the log suffix past the offset
+        # really starts unindexed. Reading the flag off the marker alone would
+        # let a rewind stamp ``"beyond_offset": true`` onto a tampered line in
+        # ``--json``.
+        unconsumed = offset is not None and _suffix_unindexed(
             conn, canonical, offset, _log_size(canonical)
         )
         checks = [
             *base.checks,
-            *_deep_checks(conn, canonical, offset if lag_window else None),
+            *_deep_checks(conn, canonical, offset if unconsumed else None),
         ]
         return AgreementReport(tuple(checks), deep=True, counts=base.counts)
     finally:
@@ -582,11 +593,18 @@ def _deep_checks(conn, canonical: Path, offset: int | None) -> list[Check]:
 
     ``offset`` is the prefix the index claims to have consumed, passed in only
     when that claim was CORROBORATED against the log (:func:`_suffix_unindexed`
-    — a rewound marker arrives here as ``None``). A failure on
-    a line that ends BEYOND it is the writer's crash window, not tampering:
-    those bytes are durable in the log and were never meant to have an index
-    row yet (see :attr:`Check.lag`). Failures inside the consumed prefix are
-    the real thing and stay unflagged.
+    — a rewound marker arrives here as ``None``). A failure on a line that ends
+    BEYOND it is in bytes that were never meant to have an index row yet (see
+    :attr:`Check.beyond_offset`). Failures inside the consumed prefix are the
+    real thing and stay unflagged.
+
+    The walk does not stop at the first divergence. Every divergence is a fact
+    about a different line, and the chain verdict is derived from LOG content —
+    so stopping early would trade a real answer ("the chain re-derives" /
+    "these ticks broke") for a vacuous one over zero ticks. Divergences
+    accumulate (the reported list is capped; the count is not) and every
+    decodable canonical row keeps feeding the chain. Only an undecodable line
+    truly ends the walk, and then the chain says it ABORTED rather than ``ok``.
     """
 
     def beyond(end: int) -> bool:
@@ -598,31 +616,28 @@ def _deep_checks(conn, canonical: Path, offset: int | None) -> list[Check]:
     seen = {"fact": 0, "tick": 0}
 
     chain = _ChainWalk()
-    content: Check | None = None
+    diverged = _Divergences()
 
     for lineno, end, line in _iter_lines(canonical):
         try:
             t, row = deserialize_row(line)
         except (JsonlCodecError, UnicodeError) as exc:
-            content = content or Check(
-                "content", False, f"log line {lineno} does not decode: {exc}",
-                lag=beyond(end),
+            diverged.add(
+                f"log line {lineno} does not decode: {exc}", beyond(end)
             )
+            chain.abort(lineno)
             break
         arity, rows = cursors[t]
         stored = rows.fetchone()
         seen[t] += 1
         if stored is None:
-            content = content or Check(
-                "content", False,
+            diverged.add(
                 f"log line {lineno} ({t} {row[0]}) has no index row — the "
                 f"index holds only {seen[t] - 1} {t}(s)",
-                lag=beyond(end),
+                beyond(end),
             )
-            break
-        if tuple(stored) != _trim(row, arity):
-            content = content or Check(
-                "content", False,
+        elif tuple(stored) != _trim(row, arity):
+            diverged.add(
                 f"log line {lineno} ({t} {row[0]}) disagrees with index "
                 f"{t} {stored[0]} at the same position"
                 + (
@@ -630,11 +645,15 @@ def _deep_checks(conn, canonical: Path, offset: int | None) -> list[Check]:
                     if stored[0] == row[0]
                     else " — the index rows are out of log order"
                 ),
+                False,
             )
-            break
+        # The chain is re-derived from the LOG, so an index divergence on this
+        # line says nothing about whether the log's own chain holds. Feed it.
         chain.feed(lineno, t, row)
 
-    if content is None:
+    if diverged:
+        content = diverged.verdict()
+    else:
         extra = [
             f"{n} extra {t}(s)"
             for t, (_a, rows) in cursors.items()
@@ -655,6 +674,38 @@ def _deep_checks(conn, canonical: Path, offset: int | None) -> list[Check]:
     return [content, chain.verdict()]
 
 
+class _Divergences:
+    """Content divergences found by the deep walk — all of them, capped report.
+
+    Reporting only the first divergence made "one edited row" and "the whole
+    index rewritten" print identically. The count is exact; the enumerated
+    detail stops at :attr:`_CAP` so a wholesale divergence cannot flood a
+    terminal.
+    """
+
+    _CAP = 10
+
+    def __init__(self) -> None:
+        self._details: list[str] = []
+        self._n = 0
+        self._all_beyond = True
+
+    def __bool__(self) -> bool:
+        return self._n > 0
+
+    def add(self, detail: str, beyond_offset: bool) -> None:
+        self._n += 1
+        if len(self._details) < self._CAP:
+            self._details.append(detail)
+        self._all_beyond = self._all_beyond and beyond_offset
+
+    def verdict(self) -> Check:
+        detail = "; ".join(self._details)
+        if self._n > len(self._details):
+            detail += f"; (+{self._n - len(self._details)} more)"
+        return Check("content", False, detail, beyond_offset=self._all_beyond)
+
+
 class _ChainWalk:
     """Re-derives the tick chain from log content as the log streams by.
 
@@ -671,6 +722,15 @@ class _ChainWalk:
         self._last_cursor: str | None = None
         self._breaks: list[str] = []
         self._chained = 0
+        self._aborted: int | None = None
+
+    def abort(self, lineno: int) -> None:
+        """The log stopped being readable here — the chain verdict is unknown.
+
+        Saying ``ok`` after the walk was cut short would attest to ticks that
+        were never examined. An aborted walk fails and says where it stopped.
+        """
+        self._aborted = lineno
 
     def feed(self, lineno: int, t: str, row: tuple) -> None:
         if t == "fact":
@@ -733,6 +793,13 @@ class _ChainWalk:
     def verdict(self) -> Check:
         if self._breaks:
             return Check("chain", False, "; ".join(self._breaks))
+        if self._aborted is not None:
+            return Check(
+                "chain", False,
+                f"chain walk aborted at log line {self._aborted} — "
+                f"{self._chained} tick(s) re-derived before it, the rest of "
+                "the log was unreadable and is unjudged",
+            )
         return Check(
             "chain", True,
             f"{self._chained} chained tick(s) re-derived from canonical content",

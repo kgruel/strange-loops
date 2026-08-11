@@ -176,17 +176,17 @@ def _gate_read(target_path: Path) -> None:
     if gated is None or gated[1].ok:
         return
     report = gated[1]
-    if report.lag_only:
-        # Recoverable, and the product already holds the repair: any read verb
-        # opens the store, which catches the index up. Refusing without naming
-        # that route made a crash window look like a dead end (and read the
-        # same as tampering, which it is not).
+    if report.index_behind:
+        # Every divergence sits past the consumed prefix. That is the shape an
+        # interrupted append leaves, and the product already holds its repair:
+        # any read verb catches the index up. It is ALSO the shape a rewound
+        # marker plus a doctored suffix leaves, which L1 cannot tell apart —
+        # so name the state and both exits, and never call it innocent.
         raise ValueError(
             f"index behind the log in '{target_path.stem}' — "
-            f"{report.summary()}. Not tampering: this is the writer's "
-            f"crash-recovery window, and the totals here would undercount. "
-            f"Catch the index up with 'loops read {target_path.stem}', then "
-            f"re-run"
+            f"{report.summary()}. The totals here would undercount. Catch the "
+            f"index up with 'loops read {target_path.stem}', or rule out "
+            f"tampering with 'loops store verify --deep', then re-run"
         )
     raise ValueError(
         f"canonical disagreement in '{target_path.stem}' — "
@@ -381,20 +381,25 @@ def _run_verify(argv: list[str], *, vertex_path: Path | None = None) -> int:
         from painted import Block, Style, join_vertical, paint
         from painted.views import Severity, callout
 
-        if agreement.lag_only:
-            # The writer's own crash window, not tampering — see
-            # engine.canonical_audit.Check.lag. Still rc=1 and still no chain
-            # walk (the index cannot serve facts the log holds), but the words
-            # must name a recoverable state and the way out of it.
+        if agreement.index_behind:
+            # Every divergence is past the consumed prefix — see
+            # engine.canonical_audit.Check.beyond_offset. That is where an
+            # interrupted append lands, and also where a rewound marker plus a
+            # doctored suffix lands; L1 corroborates only the first unindexed
+            # line, so this says WHERE, never "benign". Still rc=1 and still no
+            # chain walk (it would attest to a partial index).
             head = callout(
                 f"{db_path.name} — INDEX BEHIND THE LOG",
                 severity=Severity.WARNING,
-                detail="the derived index is behind the canonical log — the "
-                       "shape a crash between the log's fsync and the index "
-                       "commit leaves, not evidence of tampering; the tick "
+                detail="the derived index is behind the canonical log, and "
+                       "every disagreement is in bytes the index never claimed "
+                       "to have consumed — consistent with a crash between the "
+                       "log's fsync and the index commit, which this check "
+                       "cannot tell apart from an edited suffix; the tick "
                        "chain was NOT walked (it would attest to a partial "
-                       f"index). Catch it up with any read verb, e.g. "
-                       f"'loops read {target_path.stem}', then verify again",
+                       f"index). Catch the index up with 'loops read "
+                       f"{target_path.stem}', or run 'loops store verify "
+                       "--deep' to rule out tampering",
             )
         else:
             head = callout(

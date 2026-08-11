@@ -324,12 +324,18 @@ def _run_verify(argv: list[str], *, vertex_path: Path | None = None) -> int:
         gated = canonical_agreement(target_path, deep=args.deep)
         if gated is None:
             if args.deep:
-                return _refuse_store(
+                msg = (
                     "--deep judges a canonical log against its derived index; "
                     f"{target_path.name} is sqlite-canonical (one artifact, "
-                    "nothing to disagree with)",
-                    label="store verify",
+                    "nothing to disagree with)"
                 )
+                if args.json:
+                    # Same F2 shape-parity rule as the error branch below: a
+                    # machine consumer gets {"error": ...}, never plain text.
+                    import json as _json
+                    print(_json.dumps({"error": msg}))  # noqa: T201 — machine output path
+                    return 2
+                return _refuse_store(msg, label="store verify")
             db_path = _require_materialized_store(target_path)
             agreement = None
         else:

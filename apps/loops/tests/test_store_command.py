@@ -1071,3 +1071,27 @@ class TestCanonicalAgreementGate:
 
         assert rc == 2
         assert "sqlite-canonical" in err
+
+    def test_the_deep_refusal_keeps_json_shape_parity(self, tmp_path, capsys):
+        """A machine consumer gets {"error": ...}, never plain text (F2)."""
+        import json as _json
+
+        from atoms import Fact
+        from engine.builder import fold_count, vertex
+        from engine.sqlite_store import SqliteStore
+        from loops.commands.store import _run_store
+
+        vpath = tmp_path / "d.vertex"
+        (vertex("d").store("./d.db")
+            .loop("ping", fold_count("n"), boundary_every=1)
+            .write(vpath))
+        store = SqliteStore(path=tmp_path / "d.db",
+                            serialize=lambda f: f.to_dict(),
+                            deserialize=Fact.from_dict)
+        store.append(Fact.of("ping", "d"))
+        store.close()
+
+        rc = _run_store(["verify", "--deep", "--json"], vertex_path=vpath)
+
+        assert rc == 2
+        assert "sqlite-canonical" in _json.loads(capsys.readouterr().out)["error"]

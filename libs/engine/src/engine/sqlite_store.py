@@ -526,13 +526,39 @@ class SqliteStore(Generic[T]):
             )
         else:
             signature = None
+        self._write_fact_row(
+            (fact_id, d["kind"], d["ts"], observer, origin, payload_text, signature)
+        )
+        return fact_id
+
+    # ------------------------------------------------------------------
+    # Row-write seam. Both append paths assemble the full persisted row —
+    # exactly the 7-field fact / 11-field tick shape the commitment hashers
+    # and engine.jsonl_codec take — and hand it to these hooks, which own the
+    # INSERT *and* the commit. Subclasses (engine.jsonl_store) override them
+    # to make a durable JSONL line the authoritative write and sqlite the
+    # derived index, without touching mint logic or the read surface.
+    # ------------------------------------------------------------------
+
+    def _write_fact_row(self, row: tuple) -> None:
+        """Persist one assembled fact row (id, kind, ts, observer, origin,
+        payload, signature)."""
         self._conn.execute(
             "INSERT INTO facts (id, kind, ts, observer, origin, payload, signature) "
             "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (fact_id, d["kind"], d["ts"], observer, origin, payload_text, signature),
+            row,
         )
         self._conn.commit()
-        return fact_id
+
+    def _write_tick_row(self, row: tuple) -> None:
+        """Persist one assembled tick row (_TICK_ROW_SQL order + signature)."""
+        self._conn.execute(
+            "INSERT INTO ticks (id, name, ts, since, origin, payload, "
+            "prev_hash, window_start, fact_cursor, window_hash, signature) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            row,
+        )
+        self._conn.commit()
 
     def current_chain_head(self) -> str | None:
         """The row-identity hash of the latest *chained* tick, or None.
@@ -1306,13 +1332,7 @@ class SqliteStore(Generic[T]):
                     "is available — minting would break chain era-monotonicity"
                 )
 
-        self._conn.execute(
-            "INSERT INTO ticks (id, name, ts, since, origin, payload, "
-            "prev_hash, window_start, fact_cursor, window_hash, signature) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (*row, signature),
-        )
-        self._conn.commit()
+        self._write_tick_row((*row, signature))
 
     def reanchor(self) -> dict[str, Any]:
         """Recompute every commitment under the CURRENT canonical encoding.

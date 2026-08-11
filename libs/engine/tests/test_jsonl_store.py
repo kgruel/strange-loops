@@ -666,3 +666,50 @@ def test_negative_offset_rebuilds_rather_than_seeking(tmp_path, caplog):
     assert [r[0] for r in sqlite_facts(tmp_path / "s.db")] == [a, b]
     assert offset_of(store) == (tmp_path / "s.jsonl").stat().st_size
     store.close()
+
+
+def test_resolved_index_tails_an_existing_index_that_is_behind(tmp_path):
+    """An existing .db is not evidence of a current one.
+
+    Read-only invocations never construct a JsonlStore, so if resolution
+    short-circuits on index.exists() a durable-but-unindexed line stays
+    invisible indefinitely — a canonical fact reported as absent.
+    """
+    from engine.jsonl_store import resolved_index
+
+    store = open_store(tmp_path)
+    first = store.append(fact(message="one"))
+    store.close()
+
+    orphan = ("01UNINDEXED", "note", 2.0, "sol", "", json.dumps({"m": "two"}))
+    with (tmp_path / "s.jsonl").open("a", encoding="utf-8") as fh:
+        fh.write(serialize_fact_row(orphan) + "\n")
+    assert [r[0] for r in sqlite_facts(tmp_path / "s.db")] == [first]
+
+    index = resolved_index(tmp_path / "s.jsonl")
+    assert index == tmp_path / "s.db"
+    assert [r[0] for r in sqlite_facts(index)] == [first, "01UNINDEXED"]
+
+
+def test_ensure_index_is_a_no_op_when_the_index_is_current(tmp_path):
+    """The common case must not construct a store or take the write lock."""
+    from engine import jsonl_store as mod
+
+    store = open_store(tmp_path)
+    store.append(fact())
+    store.close()
+
+    calls = {"n": 0}
+    real = mod.JsonlStore
+
+    class Counting(real):
+        def __init__(self, **kw):
+            calls["n"] += 1
+            super().__init__(**kw)
+
+    mod.JsonlStore = Counting
+    try:
+        assert mod.ensure_index(tmp_path / "s.jsonl") == tmp_path / "s.db"
+    finally:
+        mod.JsonlStore = real
+    assert calls["n"] == 0

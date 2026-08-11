@@ -199,8 +199,50 @@ def open_canonical_store(canonical: Path, **kwargs: Any) -> SqliteStore[Any]:
     return SqliteStore(path=canonical, **kwargs)
 
 
+def _index_is_current(index: Path, canonical: Path) -> bool:
+    """Whether ``index`` has consumed the whole log — cheaply, read-only.
+
+    One read-only sqlite connection for the stamped offset and one ``stat``
+    for the log's size; no scan, no lock, no store construction. Anything
+    that makes the answer unknowable (no index tables yet, no offset marker,
+    a value that isn't an integer, an unreadable db) answers "not current":
+    the honest response is to let :class:`JsonlStore`'s catch-up decide,
+    which is where every recovery rule already lives.
+    """
+    import sqlite3
+
+    try:
+        size = canonical.stat().st_size
+    except OSError:
+        return True  # no log to be behind
+    if size == 0:
+        # Nothing durable exists, so nothing durable can be unindexed. Says
+        # current without touching the db at all — an index that is wrong
+        # about an empty log is a JsonlStore-open concern (it refuses), not
+        # something a read-path resolve should provoke.
+        return True
+    try:
+        conn = sqlite3.connect(f"file:{index}?mode=ro", uri=True)
+    except sqlite3.Error:
+        return False
+    try:
+        row = conn.execute(
+            "SELECT value FROM store_meta WHERE key = ?", (_OFFSET_KEY,)
+        ).fetchone()
+    except sqlite3.Error:
+        return False
+    finally:
+        conn.close()
+    if row is None:
+        return False
+    try:
+        return int(row[0]) == size
+    except (TypeError, ValueError):
+        return False
+
+
 def ensure_index(canonical: Path) -> Path:
-    """Materialize the sqlite index for a JSONL-canonical log. Returns its path.
+    """Materialize — and catch up — the sqlite index for a JSONL-canonical log.
 
     The doctrine's fresh-clone case: the ``.jsonl`` is tracked in git, the
     derived ``.db`` is not, so the first read after a clone finds no index.
@@ -208,16 +250,27 @@ def ensure_index(canonical: Path) -> Path:
     non-empty log ⇒ full rebuild), which is exactly "materialize the index
     from the log". Closing immediately leaves no handle behind.
 
-    A no-op — no store constructed, no lock taken — when the index already
-    exists, or when ``canonical`` is not JSONL-canonical, or when the log
-    itself is missing (nothing to build from; let the caller's own
-    not-found handling speak). Read paths may call this on every resolve.
+    An *existing* index is not evidence of a current one. The log is the
+    store: a line can be durable and unindexed (the post-fsync crash
+    window, or another process's log write). Short-circuiting on
+    ``index.exists()`` left every read-only invocation — which never
+    constructs a ``JsonlStore`` — silently omitting canonical facts until
+    some writer happened along. So an existing index is checked for
+    staleness (:func:`_index_is_current`: one read-only meta read, one
+    stat) and opened only when it is behind.
+
+    A no-op — no store constructed, no lock taken — when ``canonical`` is
+    not JSONL-canonical, when the log itself is missing (nothing to build
+    from; let the caller's own not-found handling speak), or when the index
+    is already current. Read paths may call this on every resolve.
     """
     from .residence import index_path_for, is_jsonl_canonical
 
     canonical = Path(canonical)
     index = index_path_for(canonical)
-    if not is_jsonl_canonical(canonical) or index.exists() or not canonical.exists():
+    if not is_jsonl_canonical(canonical) or not canonical.exists():
+        return index
+    if index.exists() and _index_is_current(index, canonical):
         return index
     store: JsonlStore[Any] = JsonlStore(
         path=index,
@@ -239,8 +292,12 @@ def resolved_index(declared: Path | str, vertex_path: Path | None = None) -> Pat
     invocation that should have built it. Resolving through here makes
     materialization part of resolution, so no reader can observe the gap.
 
+    Materialization is not only the missing-index case: :func:`ensure_index`
+    also tails an existing index that is behind the log, so a read-only
+    invocation cannot report a durable fact as absent.
+
     Identical to ``resolve_store_path`` in every other case: the same path,
-    with :func:`ensure_index`'s stat-only no-op in front of it.
+    with :func:`ensure_index`'s two-read no-op in front of it.
     """
     from .residence import canonical_store_path
 

@@ -146,7 +146,9 @@ def test_the_derived_index_rebuilds_from_the_log_alone(tmp_path):
     assert (tmp_path / "p.jsonl").read_bytes() == before
 
 
-def test_ensure_index_is_a_no_op_when_the_index_already_exists(tmp_path):
+def test_ensure_index_is_a_no_op_when_there_is_no_log_content(tmp_path):
+    """An empty log holds nothing that could be unindexed, so resolution
+    leaves the index alone — it does not even open it."""
     from engine.jsonl_store import ensure_index
 
     (tmp_path / "p.jsonl").write_text("")

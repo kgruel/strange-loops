@@ -153,13 +153,22 @@ byte offset, or rebuilds the index if the offset can't be trusted.
 authoritative"):
 
 ```python
-from engine.residence import resolve_store_path, is_jsonl_canonical
-from engine.jsonl_store import open_canonical_store, ensure_index
+from engine.residence import canonical_store_path, is_jsonl_canonical
+from engine.jsonl_store import ensure_index, open_canonical_store, resolved_index
 
-resolve_store_path(ast.store, vertex_path)   # → sqlite path to READ from
+resolved_index(ast.store, vertex_path)       # → sqlite path to READ from
+canonical_store_path(ast.store, vertex_path) # → the authoritative artifact
 open_canonical_store(canonical, **kw)        # → JsonlStore or SqliteStore
 ensure_index(canonical)                      # → materialize a missing index
 ```
+
+`resolved_index` is `residence.resolve_store_path` with materialization
+folded in. Resolve reads through it, never through the pure function: the
+pure one can only *name* a missing index, so a fresh clone's first read
+evaluates `exists()` before anything builds it and answers "empty store"
+once. **Writers resolve `canonical_store_path`, never an index path** — a
+`.db` looks identical whether it is canonical or derived, so a resolved
+index cannot answer the only question a writer may ask.
 
 `store "….jsonl"` → `JsonlStore` over the sibling `….db`; `store "….db"` →
 plain `SqliteStore`. Never construct a store for a vertex by hand — go

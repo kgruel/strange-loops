@@ -157,6 +157,18 @@ import os
 from pathlib import Path
 from typing import Any, Generic, TypeVar
 
+from .canonical_audit import (
+    FACT_COUNT_KEY as _FACT_COUNT_KEY,
+)
+from .canonical_audit import (
+    OFFSET_KEY as _OFFSET_KEY,
+)
+from .canonical_audit import (
+    TICK_COUNT_KEY as _TICK_COUNT_KEY,
+)
+from .canonical_audit import (
+    row_matches,
+)
 from .jsonl_codec import (
     JsonlCodecError,
     deserialize_row,
@@ -165,9 +177,7 @@ from .jsonl_codec import (
 )
 from .residence import log_path_for
 from .sqlite_store import (
-    FACT_COLUMNS,
     FACT_INSERT_SQL,
-    TICK_COLUMNS,
     TICK_INSERT_SQL,
     SqliteStore,
 )
@@ -184,9 +194,8 @@ _log = logging.getLogger(__name__)
 
 T = TypeVar("T")
 
-_OFFSET_KEY = "jsonl_offset"
-_FACT_COUNT_KEY = "jsonl_fact_count"
-_TICK_COUNT_KEY = "jsonl_tick_count"
+# Marker keys live in engine.canonical_audit — one spelling for the writer
+# that stamps them and the auditor that reads them (imported above).
 
 _CHUNK = 64 * 1024
 
@@ -668,20 +677,14 @@ class JsonlStore(SqliteStore[T], Generic[T]):
         return self._row_matches(t, row)
 
     def _row_matches(self, t: str, row: tuple) -> bool:
-        table, columns = (
-            ("facts", FACT_COLUMNS) if t == "fact" else ("ticks", TICK_COLUMNS)
-        )
-        stored = self._conn.execute(
-            f"SELECT {', '.join(columns)} FROM {table} WHERE id = ?", (row[0],)
-        ).fetchone()
-        if stored is None:
-            return False
-        # Compare VALUES, not re-serialized text: sqlite's REAL affinity
-        # returns 1700000000.0 for a line carrying 1700000000, and
-        # re-serializing would make every integral ts/since look corrupt —
-        # a full rebuild on every open, drowning the real-corruption signal.
-        # Python's cross-type numeric equality normalizes that uniformly.
-        return tuple(stored) == tuple(row)
+        """Delegates to :func:`engine.canonical_audit.row_matches`.
+
+        Open-time reconciliation and out-of-band verification must share one
+        definition of "the same row" — value equality, never re-serialized
+        text (sqlite's REAL affinity would make every integral ts look
+        corrupt). Two copies of that rule is two answers about one store.
+        """
+        return row_matches(self._conn, t, row)
 
     def _read_lines(self, offset: int):
         """Yield ``(line, end_offset)`` for every COMPLETE line from offset."""

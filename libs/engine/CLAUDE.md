@@ -185,6 +185,19 @@ the facts it sealed. A **live-edge** fact (not yet sealed by a boundary) has
 no such commitment, so editing it is undetectable until the next tick — the
 same custody boundary `verify_facts` documents for signature strips.
 
+**Verification is `engine/canonical_audit.py`, and it never opens a store.**
+Open-time detection *repairs* (catch-up, truncate, rebuild); an auditor that
+repaired would erase the evidence it exists to inspect. So `audit_agreement`
+(offset parity, count parity, last-line agreement — the default gate every
+store read verb runs) and `audit_deep` (`sl store verify --deep`: every log
+line compared field-for-field and in order against the index, then the tick
+chain re-derived from canonical content) read the log with plain file IO
+through the codec and the index with a read-only connection. `row_matches`
+lives there and `JsonlStore._row_matches` delegates to it — one definition of
+"the same row" for both contracts. A **coordinated** edit of an unsealed fact
+in BOTH artifacts stays out of scope by design; its witnesses are the fact's
+signature and the next seal.
+
 **StoreReader** — read-only inspector:
 
 ```python

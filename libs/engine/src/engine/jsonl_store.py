@@ -98,6 +98,12 @@ as untrustworthy as the offset, so the rebuild runs and out-of-band rows are
 lost with it. Checking counts *before* rebuilding would block legitimate
 recoveries; two abnormal events have to stack to reach that window.
 
+The counts are never cached per handle: every stamp derives them from the
+*committed* marker, read under the write lock the INSERT already took. Two
+open handles on one store (a daemon plus an ``sl emit``) would otherwise each
+stamp their own stale idea of the total, and a perfectly consistent store
+would refuse to open, naming writers that never ran.
+
 Not yet wired (loud, not silent)
 --------------------------------
 History-mutating ops would rewrite rows sqlite-side while the log kept the
@@ -181,8 +187,6 @@ class JsonlStore(SqliteStore[T], Generic[T]):
         self._ensure_fact_signature_column()
         self._ensure_chain_columns()
         self._ensure_meta_table()
-        self._facts_indexed = 0
-        self._ticks_indexed = 0
         try:
             self.catch_up()
         except BaseException:
@@ -216,13 +220,29 @@ class JsonlStore(SqliteStore[T], Generic[T]):
     def _read_offset(self) -> int | None:
         return self._read_meta_int(_OFFSET_KEY)
 
-    def _stamp(self, offset: int) -> None:
+    def _marked_counts(self) -> tuple[int, int] | None:
+        """The committed (fact, tick) counts the log accounts for.
+
+        ``None`` for a store whose markers were never written (pre-marker
+        store): there is nothing to compare against, and inventing a
+        baseline from this handle's guesses is exactly the bug the markers
+        exist to avoid. Always read from the db, never cached per handle —
+        a second open handle would otherwise stamp its own stale idea of
+        the count over a concurrent writer's correct one.
+        """
+        facts = self._read_meta_int(_FACT_COUNT_KEY)
+        ticks = self._read_meta_int(_TICK_COUNT_KEY)
+        if facts is None or ticks is None:
+            return None
+        return facts, ticks
+
+    def _stamp(self, offset: int, facts: int, ticks: int) -> None:
         """Stage the offset + indexed-row-count marks (caller commits)."""
         sql = "INSERT OR REPLACE INTO store_meta (key, value) VALUES (?, ?)"
         for key, value in (
             (_OFFSET_KEY, offset),
-            (_FACT_COUNT_KEY, self._facts_indexed),
-            (_TICK_COUNT_KEY, self._ticks_indexed),
+            (_FACT_COUNT_KEY, facts),
+            (_TICK_COUNT_KEY, ticks),
         ):
             self._conn.execute(sql, (key, str(value)))
 
@@ -263,16 +283,25 @@ class JsonlStore(SqliteStore[T], Generic[T]):
         """
         try:
             self._conn.execute(sql, row)
-            offset = self._append_line(line)
-            if is_fact:
-                self._facts_indexed += 1
+            # The INSERT has taken sqlite's write lock, so the committed
+            # markers read here cannot be raced by another handle: whatever
+            # a concurrent writer stamped is already visible, and nothing
+            # further can land until we commit or roll back. Increment from
+            # that committed value — never from a per-handle cache, which
+            # would stamp a stale count over another writer's correct one
+            # and brick the store on the next open.
+            marked = self._marked_counts()
+            if marked is None:
+                facts, ticks = self._row_counts()  # pre-marker store: adopt
             else:
-                self._ticks_indexed += 1
-            self._stamp(offset)
+                facts, ticks = marked
+                facts += 1 if is_fact else 0
+                ticks += 0 if is_fact else 1
+            offset = self._append_line(line)
+            self._stamp(offset, facts, ticks)
             self._conn.commit()
         except BaseException:
             self._conn.rollback()
-            self._facts_indexed, self._ticks_indexed = self._row_counts()
             raise
 
     def _write_fact_row(self, row: tuple) -> None:
@@ -299,8 +328,7 @@ class JsonlStore(SqliteStore[T], Generic[T]):
                     f"{self._log_path} — export it first "
                     "(store.jsonl.export_jsonl), then open it JSONL-canonical"
                 )
-            self._facts_indexed = self._ticks_indexed = 0
-            self._index_offset(0)
+            self._index_offset(0, 0, 0)
             return "empty"
 
         if offset is None:
@@ -313,17 +341,30 @@ class JsonlStore(SqliteStore[T], Generic[T]):
             self._rebuild(f"log content at offset {offset} does not match the index")
             return "rebuilt"
 
-        self._facts_indexed = self._read_meta_int(_FACT_COUNT_KEY) or 0
-        self._ticks_indexed = self._read_meta_int(_TICK_COUNT_KEY) or 0
+        marked = self._marked_counts()
+        if marked is None:
+            # Pre-marker store: no baseline exists, so nothing can be judged
+            # out of band. Adopt the current row counts as the baseline so
+            # every later open has something honest to compare against.
+            base_facts, base_ticks = self._row_counts()
+            judge = False
+        else:
+            base_facts, base_ticks = marked
+            judge = True
+
         if offset == size:
-            self._refuse_out_of_band()
+            if judge:
+                self._refuse_out_of_band(base_facts, base_ticks)
+            else:
+                self._index_offset(offset, base_facts, base_ticks)
             return "synced"
 
-        self._tail_forward(offset)
-        self._refuse_out_of_band()
+        facts, ticks = self._tail_forward(offset, base_facts, base_ticks)
+        if judge:
+            self._refuse_out_of_band(facts, ticks)
         return "tailed"
 
-    def _refuse_out_of_band(self) -> None:
+    def _refuse_out_of_band(self, expect_facts: int, expect_ticks: int) -> None:
         """Refuse a db carrying rows that never came through the log.
 
         ``libs/store``'s merge/receive/rebirth/compact open their own
@@ -333,15 +374,13 @@ class JsonlStore(SqliteStore[T], Generic[T]):
         precisely the out-of-band rows. Catches inserts, not in-place
         updates — those are the last-line compare's job.
         """
-        if self._read_meta_int(_FACT_COUNT_KEY) is None:
-            return  # pre-count-marker store: nothing to compare against
         facts, ticks = self._row_counts()
-        if facts == self._facts_indexed and ticks == self._ticks_indexed:
+        if facts == expect_facts and ticks == expect_ticks:
             return
         raise JsonlCanonicalUnsupported(
             f"{self._path} holds rows that did not come through "
             f"{self._log_path}: sqlite has {facts} fact(s)/{ticks} tick(s), the "
-            f"log accounts for {self._facts_indexed}/{self._ticks_indexed}. "
+            f"log accounts for {expect_facts}/{expect_ticks}. "
             "Out-of-band writers (store.merge, store.receive, rebirth, "
             "compact) are not wired for a JSONL-canonical store. Recovery: "
             "open it as a plain SqliteStore and re-export the log "
@@ -354,8 +393,8 @@ class JsonlStore(SqliteStore[T], Generic[T]):
                 return True
         return False
 
-    def _index_offset(self, offset: int) -> None:
-        self._stamp(offset)
+    def _index_offset(self, offset: int, facts: int, ticks: int) -> None:
+        self._stamp(offset, facts, ticks)
         self._conn.commit()
 
     def _last_newline_before(self, fh, end: int) -> int:
@@ -464,9 +503,16 @@ class JsonlStore(SqliteStore[T], Generic[T]):
                 if line:
                     yield line, pos
 
-    def _index_lines(self, offset: int) -> tuple[int, int, int]:
+    def _index_lines(
+        self, offset: int, base_facts: int, base_ticks: int
+    ) -> tuple[int, int, int]:
         """Index every complete line from ``offset``. Verbatim: no mint
-        machinery, no signer, signatures ride as stored."""
+        machinery, no signer, signatures ride as stored.
+
+        Returns ``(new_facts, new_ticks, end_offset)`` and stamps
+        ``base + new`` — the marker is derived from the committed baseline
+        handed in, never from per-handle state.
+        """
         facts = ticks = 0
         end = offset
         for line, pos in self._read_lines(offset):
@@ -477,18 +523,19 @@ class JsonlStore(SqliteStore[T], Generic[T]):
             else:
                 ticks += 1
             end = pos
-        self._facts_indexed += facts
-        self._ticks_indexed += ticks
-        self._stamp(end)
+        self._stamp(end, base_facts + facts, base_ticks + ticks)
         self._conn.commit()
         return facts, ticks, end
 
-    def _tail_forward(self, offset: int) -> None:
-        facts, ticks, end = self._index_lines(offset)
+    def _tail_forward(
+        self, offset: int, base_facts: int, base_ticks: int
+    ) -> tuple[int, int]:
+        facts, ticks, end = self._index_lines(offset, base_facts, base_ticks)
         _log.info(
             "jsonl-canonical: %s behind %s — tailed %d fact(s), %d tick(s) to %d",
             self._path, self._log_path, facts, ticks, end,
         )
+        return base_facts + facts, base_ticks + ticks
 
     def _rebuild(self, reason: str) -> None:
         """Rebuild the whole sqlite index from the log.
@@ -496,6 +543,15 @@ class JsonlStore(SqliteStore[T], Generic[T]):
         Clears ``facts`` and ``ticks`` only: ``store_meta`` survives, because
         ``own_lineage`` (which ``_decl.genesis`` row is *self*) is identity,
         not fact — it is not in the log and cannot be re-derived from it.
+
+        The FTS index is dropped in the same transaction. ``facts`` has no
+        ``AUTOINCREMENT``, so ``DELETE FROM facts`` resets sqlite's rowid
+        counter and re-indexed rows take rowids that previously named other
+        facts. ``facts_fts.fact_rowid`` keys on exactly that rowid and
+        ``fts_state.last_rowid`` is the incremental watermark, so a surviving
+        FTS index would resolve stale text to new facts and skip every
+        re-indexed row. Dropping it makes search report ``missing`` (the
+        honest "run reindex" state) instead of answering wrongly.
         """
         _log.warning(
             "jsonl-canonical: rebuilding sqlite index %s from %s — %s",
@@ -503,8 +559,9 @@ class JsonlStore(SqliteStore[T], Generic[T]):
         )
         self._conn.execute("DELETE FROM facts")
         self._conn.execute("DELETE FROM ticks")
-        self._facts_indexed = self._ticks_indexed = 0
-        facts, ticks, end = self._index_lines(0)
+        self._conn.execute("DROP TABLE IF EXISTS facts_fts")
+        self._conn.execute("DROP TABLE IF EXISTS fts_state")
+        facts, ticks, end = self._index_lines(0, 0, 0)
         _log.warning(
             "jsonl-canonical: rebuilt %d fact(s), %d tick(s) from %s (offset %d)",
             facts, ticks, self._log_path, end,

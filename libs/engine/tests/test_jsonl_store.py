@@ -487,3 +487,96 @@ def test_long_line_still_gets_the_integrity_check(tmp_path):
     assert [r[3] for r in sqlite_facts(reopened._path)] == ["kyle"]
     assert reopened.catch_up() == "synced"
     reopened.close()
+
+
+def test_two_open_handles_do_not_brick_the_store(tmp_path):
+    """Regression: per-handle count caching bricked a consistent store.
+
+    Two handles open at once (a daemon plus an ``sl emit``), one append
+    through each. The log has both lines, sqlite has both rows, the offset
+    equals the file size — fully consistent. A cached per-handle counter
+    made the second committer stamp 1 against COUNT(*)=2, so the next open
+    refused, naming out-of-band writers that never ran.
+    """
+    a = open_store(tmp_path)
+    b = open_store(tmp_path)
+    a.append(fact(message="from-a"))
+    b.append(fact(message="from-b"))
+    a.close()
+    b.close()
+
+    assert len(lines(log_path_for(tmp_path / "s.db"))) == 2
+    assert len(sqlite_facts(tmp_path / "s.db")) == 2
+
+    reopened = open_store(tmp_path)  # must not raise
+    assert reopened.catch_up() == "synced"
+    reopened.close()
+
+
+def test_stale_handle_appending_after_another_wrote_stamps_the_truth(tmp_path):
+    """Sequential variant: a long-lived handle must not stamp a stale count."""
+    stale = open_store(tmp_path)  # opened when the store was empty
+    other = open_store(tmp_path)
+    for i in range(5):
+        other.append(fact(message=f"m{i}"))
+    other.close()
+
+    stale.append(fact(message="late"))
+    stale.close()
+
+    assert len(sqlite_facts(tmp_path / "s.db")) == 6
+    reopened = open_store(tmp_path)
+    assert reopened.catch_up() == "synced"
+    reopened.close()
+
+
+def test_rebuild_drops_the_rowid_keyed_fts_index(tmp_path):
+    """DELETE FROM facts resets rowids, so facts_fts/fts_state must go.
+
+    Surviving FTS rows key on facts.rowid and would resolve stale text to
+    freshly re-indexed facts, while fts_state.last_rowid would keep the
+    incremental path from ever indexing them.
+    """
+    import sqlite3
+
+    store = open_store(tmp_path)
+    for i in range(3):
+        store.append(fact(message=f"m{i}"))
+    store.close()
+
+    db = tmp_path / "s.db"
+    conn = sqlite3.connect(str(db))
+    conn.executescript(
+        "CREATE VIRTUAL TABLE facts_fts USING fts5("
+        "  text_content, fact_rowid UNINDEXED, kind UNINDEXED,"
+        "  observer UNINDEXED);"
+        "CREATE TABLE fts_state (key TEXT PRIMARY KEY, value TEXT);"
+    )
+    conn.execute(
+        "INSERT INTO facts_fts(text_content, fact_rowid, kind, observer) "
+        "VALUES ('m1', 2, 'note', 'kyle')"
+    )
+    conn.execute("INSERT INTO fts_state(key, value) VALUES ('last_rowid', '3')")
+    conn.commit()
+    conn.close()
+
+    log = log_path_for(db)
+    kept = lines(log)[0]
+    log.write_text(kept + "\n", encoding="utf-8")  # shrink → forces a rebuild
+
+    reopened = open_store(tmp_path)
+    assert len(sqlite_facts(db)) == 1
+    reopened.close()
+
+    conn = sqlite3.connect(str(db))
+    try:
+        present = {
+            r[0]
+            for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type IN ('table','view')"
+            )
+        }
+    finally:
+        conn.close()
+    assert "facts_fts" not in present
+    assert "fts_state" not in present

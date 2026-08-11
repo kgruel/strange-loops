@@ -90,8 +90,13 @@ class), so it *detects* them: the offset stamp carries the fact/tick counts
 consumed from the log, and open compares them against ``COUNT(*)``. A
 mismatch refuses with :class:`JsonlCanonicalUnsupported` rather than
 rebuilding — rebuilding would silently destroy exactly the rows that were
-written out of band. Honest limit: counts catch out-of-band *inserts*, not
-in-place *updates*; those are the last-line compare's job.
+written out of band. Honest limit: counts catch out-of-band *inserts* on an
+otherwise normal open, not in-place *updates* (those are the last-line
+compare's job), and not a store that simultaneously trips a rebuild trigger
+— a cleared offset marker or a shrunk log makes the stamped counts exactly
+as untrustworthy as the offset, so the rebuild runs and out-of-band rows are
+lost with it. Checking counts *before* rebuilding would block legitimate
+recoveries; two abnormal events have to stack to reach that window.
 
 Not yet wired (loud, not silent)
 --------------------------------

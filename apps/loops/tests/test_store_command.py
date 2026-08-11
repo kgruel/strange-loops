@@ -1052,6 +1052,75 @@ class TestCanonicalAgreementGate:
             assert "canonical disagreement" not in text, verb
             assert "loops read x" in text, verb
 
+    def test_a_rewound_offset_over_a_tampered_row_is_not_downgraded_to_lag(
+        self, tmp_path, capsys
+    ):
+        """The lag label must not be attacker-writable.
+
+        The offset marker lives in the very sqlite file the audit judges, so
+        deciding lag from it alone let one UPDATE to store_meta turn a
+        tampered index into a WARNING that says "not evidence of tampering".
+        Lag is corroborated against the log now: an index already holding a
+        row from beyond the offset is not behind, it was edited.
+        """
+        import sqlite3
+
+        from loops.commands.store import _run_store
+
+        vpath = self._store(tmp_path)
+        log = tmp_path / "x.jsonl"
+        first_line_end = len(log.read_bytes().splitlines(keepends=True)[0])
+        conn = sqlite3.connect(str(tmp_path / "x.db"))
+        fid = conn.execute("SELECT id FROM facts ORDER BY rowid").fetchall()[1][0]
+        conn.execute(
+            "UPDATE facts SET payload = ? WHERE id = ?",
+            ('{"message": "forged"}', fid),
+        )
+        conn.execute(
+            "UPDATE store_meta SET value = ? WHERE key = 'jsonl_offset'",
+            (str(first_line_end),),
+        )
+        conn.commit()
+        conn.close()
+
+        rc = _run_store(["verify"], vertex_path=vpath)
+        out = capsys.readouterr().out
+        assert rc == 1
+        assert "CANONICAL DISAGREEMENT" in out
+        assert "INDEX BEHIND THE LOG" not in out
+        assert "not evidence of tampering" not in out
+
+    def test_the_advertised_repair_heals_a_rewound_store_instead_of_crashing(
+        self, tmp_path, capsys
+    ):
+        """The remedy the gate names must actually be a remedy.
+
+        `loops read` on a rewound-marker store used to raise a raw
+        sqlite3.IntegrityError out of catch-up, so the state the gate called
+        recoverable was a permanent dead end.
+        """
+        import sqlite3
+
+        from engine.canonical_audit import audit_agreement
+        from engine.jsonl_store import ensure_index
+        from loops.commands.store import _run_store
+
+        vpath = self._store(tmp_path)
+        log = tmp_path / "x.jsonl"
+        first_line_end = len(log.read_bytes().splitlines(keepends=True)[0])
+        conn = sqlite3.connect(str(tmp_path / "x.db"))
+        conn.execute(
+            "UPDATE store_meta SET value = ? WHERE key = 'jsonl_offset'",
+            (str(first_line_end),),
+        )
+        conn.commit()
+        conn.close()
+
+        ensure_index(log)
+        assert audit_agreement(log).ok
+        assert _run_store(["verify"], vertex_path=vpath) == 0
+        capsys.readouterr()
+
     def test_deep_names_an_interior_index_edit_l1_cannot_see(self, tmp_path, capsys):
         import json
         import sqlite3

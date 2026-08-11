@@ -97,6 +97,16 @@ class Check:
     tampering: the index carries nothing the log does not, and the next open
     catches it up. Every other divergence says the index holds something the
     log never carried, which no writer produces.
+
+    NEVER decided by the offset marker alone. That marker lives inside the
+    very sqlite file this audit exists to judge, so trusting it would let an
+    attacker downgrade tampering to "not tampering" by rewinding one integer
+    (rewind the marker below an edited interior row and every other L1 check
+    still passes). The claim is corroborated against the log instead: lag
+    holds only when the log suffix past the stamped offset is *genuinely
+    unindexed* — see :func:`_suffix_unindexed`. An index that already holds a
+    row for a line the marker calls unconsumed is not behind; its marker was
+    moved, and that is not the writer's shape.
     """
 
     def as_dict(self) -> dict[str, Any]:
@@ -338,7 +348,7 @@ def audit_agreement(canonical: Path) -> AgreementReport:
         checks.append(Check("index", True, "derived index readable"))
         offset = _meta_int(conn, OFFSET_KEY)
         counts = _row_counts(conn)
-        checks.append(_check_offset(offset, size))
+        checks.append(_check_offset(conn, canonical, offset, size))
         checks.append(_check_counts(conn, counts))
         checks.append(_check_last_line(conn, canonical, size, offset))
         return AgreementReport(tuple(checks), counts=counts)
@@ -353,7 +363,59 @@ def _row_counts(conn) -> dict[str, int]:
     }
 
 
-def _check_offset(offset: int | None, size: int) -> Check:
+def _index_has_row(conn, t: str, row_id: str) -> bool:
+    table = "facts" if t == "fact" else "ticks"
+    try:
+        return bool(
+            conn.execute(
+                f"SELECT EXISTS(SELECT 1 FROM {table} WHERE id = ?)", (row_id,)
+            ).fetchone()[0]
+        )
+    except Exception:  # noqa: BLE001 — an unreadable index cannot vouch for lag
+        return True
+
+
+def _suffix_unindexed(conn, canonical: Path, offset: int, size: int) -> bool:
+    """Is the log past ``offset`` genuinely unindexed — i.e. is this real lag?
+
+    The corroboration behind :attr:`Check.lag`. The writer's crash window has
+    exactly one shape: the log holds durable bytes the index has NOT consumed,
+    so the first line past the stamped offset has no row in the index. Reading
+    that one line is O(1) and turns "the suspect's own marker says so" into a
+    claim the log supports.
+
+    False (do not call it lag) when the offset does not land on a line
+    boundary, when the line does not decode, or when the index already holds a
+    row for it — the marker was rewound below rows the index consumed, which no
+    writer produces.  True for a torn final line: those bytes were never
+    indexed, which is precisely the interrupted-append window.
+    """
+    if not 0 <= offset < size:
+        return False
+    if offset > 0:
+        with canonical.open("rb") as fh:
+            fh.seek(offset - 1)
+            if fh.read(1) != b"\n":
+                return False
+    with canonical.open("rb") as fh:
+        fh.seek(offset)
+        while True:
+            raw = fh.readline()
+            if not raw:
+                return False  # nothing but blank bytes past the offset
+            if not raw.endswith(b"\n"):
+                return True  # torn tail — never indexed, by construction
+            text = raw[:-1].decode("utf-8", "replace").strip()
+            if text:
+                break
+    try:
+        t, row = deserialize_row(text)
+    except (JsonlCodecError, UnicodeError):
+        return False  # garbage past the offset is not an innocence claim
+    return not _index_has_row(conn, t, row[0])
+
+
+def _check_offset(conn, canonical: Path, offset: int | None, size: int) -> Check:
     if offset is None:
         if size == 0:
             return Check("offset", True, "empty log, nothing to have consumed")
@@ -365,11 +427,18 @@ def _check_offset(offset: int | None, size: int) -> Check:
     if offset == size:
         return Check("offset", True, f"index has consumed all {size} byte(s)")
     if offset < size:
+        if _suffix_unindexed(conn, canonical, offset, size):
+            return Check(
+                "offset", False,
+                f"log is ahead of the index: {size - offset} durable byte(s) "
+                f"unindexed (offset {offset}, log {size})",
+                lag=True,
+            )
         return Check(
             "offset", False,
-            f"log is ahead of the index: {size - offset} durable byte(s) "
-            f"unindexed (offset {offset}, log {size})",
-            lag=True,
+            f"consumed-offset marker says {offset} of {size} byte(s) are "
+            "indexed, but the index already holds row(s) from beyond it — "
+            "the marker was moved, which no writer does",
         )
     return Check(
         "offset", False,
@@ -484,9 +553,17 @@ def audit_deep(canonical: Path) -> AgreementReport:
     if conn is None:  # pragma: no cover — audit_agreement just opened it
         return AgreementReport(base.checks, deep=True)
     try:
+        offset = _meta_int(conn, OFFSET_KEY)
+        # The same corroboration L1 made: a content failure is only excusable
+        # as lag when the log suffix past the offset is genuinely unindexed.
+        # Reading the flag off the marker alone would let a rewind stamp
+        # ``"lag": true`` onto a tampered line in ``--json``.
+        lag_window = offset is not None and _suffix_unindexed(
+            conn, canonical, offset, _log_size(canonical)
+        )
         checks = [
             *base.checks,
-            *_deep_checks(conn, canonical, _meta_int(conn, OFFSET_KEY)),
+            *_deep_checks(conn, canonical, offset if lag_window else None),
         ]
         return AgreementReport(tuple(checks), deep=True, counts=base.counts)
     finally:
@@ -503,7 +580,9 @@ def _index_cursor(conn, table: str, columns: tuple[str, ...]):
 def _deep_checks(conn, canonical: Path, offset: int | None) -> list[Check]:
     """Compare every log line against the index, in order.
 
-    ``offset`` is the prefix the index claims to have consumed. A failure on
+    ``offset`` is the prefix the index claims to have consumed, passed in only
+    when that claim was CORROBORATED against the log (:func:`_suffix_unindexed`
+    — a rewound marker arrives here as ``None``). A failure on
     a line that ends BEYOND it is the writer's crash window, not tampering:
     those bytes are durable in the log and were never meant to have an index
     row yet (see :attr:`Check.lag`). Failures inside the consumed prefix are

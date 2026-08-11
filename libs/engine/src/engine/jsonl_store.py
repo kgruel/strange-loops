@@ -154,6 +154,7 @@ from __future__ import annotations
 
 import logging
 import os
+import sqlite3
 from pathlib import Path
 from typing import Any, Generic, TypeVar
 
@@ -198,6 +199,14 @@ T = TypeVar("T")
 # that stamps them and the auditor that reads them (imported above).
 
 _CHUNK = 64 * 1024
+
+
+class _RowAlreadyIndexed(Exception):
+    """A tail-forward hit a row the index already carries.
+
+    Internal to :meth:`JsonlStore.catch_up`, which answers it with a rebuild.
+    Never escapes the module.
+    """
 
 
 class JsonlCanonicalUnsupported(NotImplementedError):
@@ -560,7 +569,11 @@ class JsonlStore(SqliteStore[T], Generic[T]):
                 self._index_offset(offset, base_facts, base_ticks)
             return "synced"
 
-        facts, ticks = self._tail_forward(offset, base_facts, base_ticks)
+        try:
+            facts, ticks = self._tail_forward(offset, base_facts, base_ticks)
+        except _RowAlreadyIndexed as collision:
+            self._rebuild(str(collision))
+            return "rebuilt"
         if judge:
             self._refuse_out_of_band(facts, ticks)
         return "tailed"
@@ -700,7 +713,7 @@ class JsonlStore(SqliteStore[T], Generic[T]):
                     yield line, pos
 
     def _index_lines(
-        self, offset: int, base_facts: int, base_ticks: int
+        self, offset: int, base_facts: int, base_ticks: int, *, rebuilding: bool = False
     ) -> tuple[int, int, int]:
         """Index every complete line from ``offset``. Verbatim: no mint
         machinery, no signer, signatures ride as stored.
@@ -713,7 +726,23 @@ class JsonlStore(SqliteStore[T], Generic[T]):
         end = offset
         for line, pos in self._read_lines(offset):
             t, row = deserialize_row(line)
-            self._conn.execute(FACT_INSERT_SQL if t == "fact" else TICK_INSERT_SQL, row)
+            try:
+                self._conn.execute(
+                    FACT_INSERT_SQL if t == "fact" else TICK_INSERT_SQL, row
+                )
+            except sqlite3.IntegrityError as exc:
+                if rebuilding:
+                    # The tables were just cleared, so a collision here means
+                    # the LOG carries the id twice. Rebuilding again would
+                    # recurse forever on a log that cannot index.
+                    raise JsonlCanonicalUnsupported(
+                        f"{self._log_path} carries {t} {row[0]} more than once "
+                        "— the canonical log cannot be indexed as written"
+                    ) from exc
+                raise _RowAlreadyIndexed(
+                    f"index already holds {t} {row[0]}, a row the "
+                    f"consumed-offset marker ({offset}) calls unindexed"
+                ) from exc
             if t == "fact":
                 facts += 1
             else:
@@ -726,7 +755,21 @@ class JsonlStore(SqliteStore[T], Generic[T]):
     def _tail_forward(
         self, offset: int, base_facts: int, base_ticks: int
     ) -> tuple[int, int]:
-        facts, ticks, end = self._index_lines(offset, base_facts, base_ticks)
+        try:
+            facts, ticks, end = self._index_lines(offset, base_facts, base_ticks)
+        except _RowAlreadyIndexed as collision:
+            # The marker understates what the index consumed: a line the offset
+            # calls unindexed already has its row. Same class as the
+            # ``_prefix_intact`` failure one line up in ``catch_up`` — the
+            # index is not a function of the log at the stamped offset — and
+            # the same answer, rebuild, because every colliding row IS
+            # reproducible from the canonical log (unlike the out-of-band rows
+            # ``_refuse_out_of_band`` protects). Raising instead would make the
+            # store a permanent dead end that the verify gate calls
+            # recoverable; before this, it surfaced as a raw sqlite
+            # IntegrityError traceback out of every read verb.
+            self._conn.rollback()
+            raise collision
         _log.info(
             "jsonl-canonical: %s behind %s — tailed %d fact(s), %d tick(s) to %d",
             self._path, self._log_path, facts, ticks, end,
@@ -757,7 +800,7 @@ class JsonlStore(SqliteStore[T], Generic[T]):
         self._conn.execute("DELETE FROM ticks")
         self._conn.execute("DROP TABLE IF EXISTS facts_fts")
         self._conn.execute("DROP TABLE IF EXISTS fts_state")
-        facts, ticks, end = self._index_lines(0, 0, 0)
+        facts, ticks, end = self._index_lines(0, 0, 0, rebuilding=True)
         _log.warning(
             "jsonl-canonical: rebuilt %d fact(s), %d tick(s) from %s (offset %d)",
             facts, ticks, self._log_path, end,

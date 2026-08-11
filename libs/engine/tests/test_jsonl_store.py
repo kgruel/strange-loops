@@ -406,6 +406,11 @@ def test_duplicate_line_in_log_does_not_brick_reopen(tmp_path):
     The old failure mode: a rebuild raised from __init__ with DELETE FROM
     facts uncommitted on a leaked connection, so every later open failed
     with 'database is locked' — one bad open bricked the store forever.
+
+    The refusal is now named (``JsonlCanonicalUnsupported``, "the canonical
+    log cannot be indexed as written") rather than a raw sqlite
+    IntegrityError: a duplicated id in the LOG is the one collision a rebuild
+    cannot resolve, so it says so instead of leaking the constraint.
     """
     import sqlite3
 
@@ -421,10 +426,10 @@ def test_duplicate_line_in_log_does_not_brick_reopen(tmp_path):
     conn.commit()
     conn.close()
 
-    with pytest.raises(sqlite3.IntegrityError):
+    with pytest.raises(JsonlCanonicalUnsupported, match="more than once"):
         open_store(tmp_path)
     # the db is not locked: a second attempt fails the same way, not worse
-    with pytest.raises(sqlite3.IntegrityError):
+    with pytest.raises(JsonlCanonicalUnsupported, match="more than once"):
         open_store(tmp_path)
 
 

@@ -325,3 +325,90 @@ def test_an_out_of_band_insert_is_never_lag(tmp_path):
 
     report = audit_agreement(log)
     assert not report.lag_only
+
+
+# --- lag is corroborated against the log, never taken from the marker -------
+#
+# The offset marker lives inside the sqlite file this audit exists to judge.
+# If it alone decided `lag`, rewinding one integer would downgrade a tampered
+# index to "not tampering" — an affirmative innocence claim, attacker-written.
+# So lag holds only when the log suffix past the offset is really unindexed.
+
+
+def _rewind_offset(db: Path, to: int) -> None:
+    conn = sqlite3.connect(str(db))
+    conn.execute(
+        "UPDATE store_meta SET value = ? WHERE key = 'jsonl_offset'", (str(to),)
+    )
+    conn.commit()
+    conn.close()
+
+
+def _line_ends(log: Path) -> list[int]:
+    ends, pos = [], 0
+    for raw in log.read_bytes().splitlines(keepends=True):
+        pos += len(raw)
+        ends.append(pos)
+    return ends
+
+
+def test_a_rewound_offset_over_indexed_rows_is_never_lag(tmp_path):
+    """Finding 1's repro: edit an interior row, rewind the marker below it."""
+    log, db = seeded(tmp_path)
+    conn = sqlite3.connect(str(db))
+    fid = conn.execute("SELECT id FROM facts ORDER BY rowid").fetchall()[1][0]
+    conn.execute("UPDATE facts SET payload = '{\"m\": \"forged\"}' WHERE id = ?",
+                 (fid,))
+    conn.commit()
+    conn.close()
+    _rewind_offset(db, _line_ends(log)[0])
+
+    report = audit_agreement(log)
+    assert not report.ok
+    assert not report.lag_only, report.summary()
+    assert "marker was moved" in report.summary()
+
+
+def test_deep_never_stamps_lag_on_a_line_behind_a_rewound_offset(tmp_path):
+    log, db = seeded(tmp_path)
+    _rewind_offset(db, _line_ends(log)[0])
+    deep = audit_deep(log)
+    assert not deep.lag_only
+    assert not any(c.lag for c in deep.checks), deep.as_dict()
+
+
+def test_a_pure_marker_rewind_with_no_tamper_is_still_not_the_crash_shape(tmp_path):
+    log, db = seeded(tmp_path)
+    _rewind_offset(db, _line_ends(log)[0])
+    report = audit_agreement(log)
+    assert "offset" in failed(report)
+    assert not report.lag_only
+
+
+def test_honest_lag_still_reads_as_lag_after_the_corroboration(tmp_path):
+    """The case 49a1cd0 got right must not regress."""
+    log, _db = seeded(tmp_path)
+    orphan = ("01STILLLAG", "note", time.time(), "sol", "",
+              json.dumps({"m": "durable"}))
+    with log.open("a", encoding="utf-8") as fh:
+        fh.write(serialize_fact_row(orphan) + "\n")
+    assert audit_agreement(log).lag_only
+
+
+def test_a_rewound_offset_heals_through_a_read_verb_instead_of_crashing(tmp_path):
+    """Finding 2's repro: the advertised remedy must not raise IntegrityError."""
+    from engine.jsonl_store import ensure_index
+
+    log, db = seeded(tmp_path)
+    conn = sqlite3.connect(str(db))
+    fid = conn.execute("SELECT id FROM facts ORDER BY rowid").fetchall()[1][0]
+    conn.execute("UPDATE facts SET payload = '{\"m\": \"forged\"}' WHERE id = ?",
+                 (fid,))
+    conn.commit()
+    conn.close()
+    _rewind_offset(db, _line_ends(log)[0])
+
+    ensure_index(log)  # was: sqlite3.IntegrityError: UNIQUE constraint failed
+    healed = audit_agreement(log)
+    assert healed.ok, healed.summary()
+    assert audit_deep(log).ok

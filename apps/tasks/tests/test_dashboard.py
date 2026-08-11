@@ -792,6 +792,9 @@ class TestDashboardReadsTheWorkspaceStore:
         state = _fetch()
         assert [r.name for r in state.tasks] == ["in-workspace"]
         assert state.fact_total == 1
+        # activity comes from _fetch's own vertex_facts call — a separate
+        # residence site from fold_all_tasks and vertex_summary.
+        assert state.tasks[0].activity is not None
 
     def test_fetch_with_detail_sees_the_workspace_facts(self, workspace: Path):
         from strange_loops.commands.dashboard import _fetch_with_detail
@@ -800,4 +803,5 @@ class TestDashboardReadsTheWorkspaceStore:
         state = _fetch_with_detail("in-workspace")
         assert [r.name for r in state.tasks] == ["in-workspace"]
         assert state.fact_total == 1
+        assert state.tasks[0].activity is not None
         assert [f["kind"] for f in state.detail_facts] == ["task.created"]

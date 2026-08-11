@@ -440,7 +440,7 @@ class TestFollowTaskLogReadsTheWorkspaceStore:
     def test_follow_prints_workspace_facts(self, tmp_path: Path, monkeypatch, capsys):
         from strange_loops.commands import task as task_mod
         from strange_loops.lifecycle import tasks_vertex_path
-        from strange_loops.store import emit_fact, store_path
+        from strange_loops.store import emit_fact, emit_tick, store_path
 
         pkg = tmp_path / "pkg" / "loops"
         pkg.mkdir(parents=True)
@@ -459,6 +459,10 @@ class TestFollowTaskLogReadsTheWorkspaceStore:
             {"name": "in-workspace", "title": "W", "base_branch": "main", "description": ""},
         )
 
+        # a tick as well as a fact — the poll loop reads ticks through a
+        # separate residence site from facts.
+        emit_tick(store_path(), "task.tick", {"task": "in-workspace"})
+
         def _stop(_secs):
             raise KeyboardInterrupt
 
@@ -467,3 +471,4 @@ class TestFollowTaskLogReadsTheWorkspaceStore:
         assert task_mod.follow_task_log(vertex, "in-workspace", None, True) == 0
         out = capsys.readouterr().out
         assert '"task.created"' in out
+        assert '"task.tick"' in out

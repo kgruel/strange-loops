@@ -1058,148 +1058,145 @@ def _absorb_edit(
     from atoms import Fact
     from engine.jsonl_store import JsonlCanonicalUnsupported, open_canonical_store
 
-    _cas_store = open_canonical_store(
-        resolve_canonical_path(target_path),
-        serialize=lambda f: f.to_dict(),
-        deserialize=Fact.from_dict,
-    )
-    try:
-        expected_head = _cas_store.declaration_head()
-    finally:
-        _cas_store.close()
-
-    # The fold head from the store. has_genesis was true at dispatch, so this is
-    # normally a list; a resolution failure (ambiguous lineage, unsupported
-    # protocol) or a non-list refuses cleanly rather than diffing against noise.
-    try:
-        head = resolve_declaration_documents(db_path)
-    except (AmbiguousLineage, UnsupportedProtocol) as exc:
-        return _refuse(str(exc))
-    if not isinstance(head, list):
-        return _refuse(
-            "store head unavailable — the lineage looks unopened or unhistorized; "
-            "cannot diff (nothing to reconcile against)"
-        )
-
-    # Diff. An inexpressible edit (singleton removal / identity rename) refuses.
-    try:
-        changes = diff_documents(head, new_docs)
-    except EditRefused as exc:
-        return _refuse(str(exc))
-
-    n_def = sum(1 for c in changes if c.payload is not None)
-    n_ret = len(changes) - n_def
-
-    def _emit_json(obj: dict) -> None:
-        import json as _json
-        print(_json.dumps(obj, indent=2))  # noqa: T201 — machine output path
-
-    # Idempotence: an unchanged file writes nothing.
-    if not changes:
-        if as_json:
-            _emit_json({
-                "vertex": target_path.stem, "mode": "edit",
-                "diverged": False, "defined": 0, "retired": 0, "changes": [],
-            })
-        else:
-            from painted import Block, Style, paint
-            paint(Block.text(
-                f"✓ {target_path.stem}: up to date — file matches store head",
-                Style(dim=False),
-            ))
-        return 0
-
-    change_rows = [
-        {"kind": c.kind, "subject": c.subject, "change": c.annotation}
-        for c in changes
-    ]
-
-    def _render_divergence(*, applied: bool) -> None:
-        if as_json:
-            _emit_json({
-                "vertex": target_path.stem, "mode": "edit",
-                "diverged": True, "applied": applied,
-                "defined": n_def, "retired": n_ret,
-                "observer": observer, "signed": applied,
-                "changes": change_rows,
-            })
-            return
-        from painted import Block, Style, join_vertical, paint
-        if applied:
-            head_line = (
-                f"✓ {target_path.stem}: reconciled — "
-                f"{n_def} re-emitted, {n_ret} retired"
-            )
-        else:
-            head_line = f"✎ {target_path.stem}: file diverges from store head"
-        lines = [head_line]
-        for c in changes:
-            mark = "−" if c.payload is None else ("+" if c.annotation == "added" else "~")
-            lines.append(f"  {mark} {_decl_short(c.kind)}:{c.subject} ({c.annotation})")
-        if applied:
-            lines.append(f"  observer: {observer} · signed")
-        else:
-            lines.append("  run `loops store absorb` to reconcile")
-        paint(join_vertical(*(Block.text(ln, Style(dim=False)) for ln in lines)))
-
-    # -n / --dry-run: the divergence surface. Read-only, exit 0.
-    if dry_run:
-        _render_divergence(applied=False)
-        return 0
-
-    # Real path — atomic, signed re-emit of the changed subjects.
-    if not observer:
-        return _refuse(
-            "cannot absorb — no observer resolved to sign as. A declaration "
-            "edit must be signed (it enters the attestation tier); set up "
-            "signing first (loops add <vertex> observer --keygen)."
-        )
-
-    from custody import fact_signer_for
-
-    from engine.sqlite_store import (
-        AmbiguousGenesis,
-        NoGenesis,
-        StaleDeclarationHead,
-        UnsignableEdit,
-    )
-
+    # ONE handle for the whole ceremony. The CAS token still comes first —
+    # that ordering is what makes a concurrent edit refuse (StaleDeclarationHead)
+    # rather than interleave — but the token, not the handle's lifetime, is what
+    # carries it, so there is no reason to open the store twice.
     store = open_canonical_store(
         resolve_canonical_path(target_path),
         serialize=lambda f: f.to_dict(),
         deserialize=Fact.from_dict,
     )
     try:
-        store.absorb_edit(
-            changes,
-            observer=observer,
-            origin="",
-            fact_signer=fact_signer_for(target_path),
-            expected_head=expected_head,
+        expected_head = store.declaration_head()
+
+        # The fold head from the store. has_genesis was true at dispatch, so this is
+        # normally a list; a resolution failure (ambiguous lineage, unsupported
+        # protocol) or a non-list refuses cleanly rather than diffing against noise.
+        try:
+            head = resolve_declaration_documents(db_path)
+        except (AmbiguousLineage, UnsupportedProtocol) as exc:
+            return _refuse(str(exc))
+        if not isinstance(head, list):
+            return _refuse(
+                "store head unavailable — the lineage looks unopened or unhistorized; "
+                "cannot diff (nothing to reconcile against)"
+            )
+
+        # Diff. An inexpressible edit (singleton removal / identity rename) refuses.
+        try:
+            changes = diff_documents(head, new_docs)
+        except EditRefused as exc:
+            return _refuse(str(exc))
+
+        n_def = sum(1 for c in changes if c.payload is not None)
+        n_ret = len(changes) - n_def
+
+        def _emit_json(obj: dict) -> None:
+            import json as _json
+            print(_json.dumps(obj, indent=2))  # noqa: T201 — machine output path
+
+        # Idempotence: an unchanged file writes nothing.
+        if not changes:
+            if as_json:
+                _emit_json({
+                    "vertex": target_path.stem, "mode": "edit",
+                    "diverged": False, "defined": 0, "retired": 0, "changes": [],
+                })
+            else:
+                from painted import Block, Style, paint
+                paint(Block.text(
+                    f"✓ {target_path.stem}: up to date — file matches store head",
+                    Style(dim=False),
+                ))
+            return 0
+
+        change_rows = [
+            {"kind": c.kind, "subject": c.subject, "change": c.annotation}
+            for c in changes
+        ]
+
+        def _render_divergence(*, applied: bool) -> None:
+            if as_json:
+                _emit_json({
+                    "vertex": target_path.stem, "mode": "edit",
+                    "diverged": True, "applied": applied,
+                    "defined": n_def, "retired": n_ret,
+                    "observer": observer, "signed": applied,
+                    "changes": change_rows,
+                })
+                return
+            from painted import Block, Style, join_vertical, paint
+            if applied:
+                head_line = (
+                    f"✓ {target_path.stem}: reconciled — "
+                    f"{n_def} re-emitted, {n_ret} retired"
+                )
+            else:
+                head_line = f"✎ {target_path.stem}: file diverges from store head"
+            lines = [head_line]
+            for c in changes:
+                mark = "−" if c.payload is None else ("+" if c.annotation == "added" else "~")
+                lines.append(f"  {mark} {_decl_short(c.kind)}:{c.subject} ({c.annotation})")
+            if applied:
+                lines.append(f"  observer: {observer} · signed")
+            else:
+                lines.append("  run `loops store absorb` to reconcile")
+            paint(join_vertical(*(Block.text(ln, Style(dim=False)) for ln in lines)))
+
+        # -n / --dry-run: the divergence surface. Read-only, exit 0.
+        if dry_run:
+            _render_divergence(applied=False)
+            return 0
+
+        # Real path — atomic, signed re-emit of the changed subjects.
+        if not observer:
+            return _refuse(
+                "cannot absorb — no observer resolved to sign as. A declaration "
+                "edit must be signed (it enters the attestation tier); set up "
+                "signing first (loops add <vertex> observer --keygen)."
+            )
+
+        from custody import fact_signer_for
+
+        from engine.sqlite_store import (
+            AmbiguousGenesis,
+            NoGenesis,
+            StaleDeclarationHead,
+            UnsignableEdit,
         )
-    except JsonlCanonicalUnsupported as exc:
-        return _refuse(str(exc))
-    except StaleDeclarationHead as exc:
-        return _refuse(f"{exc}")
-    except UnsignableEdit:
-        return _refuse(
-            f"cannot absorb — no signing key for observer '{observer}'. A "
-            "declaration edit must be signed; set up signing first "
-            "(loops add <vertex> observer --keygen)."
-        )
-    except NoGenesis:
-        # TOCTOU: the lineage vanished between dispatch and here (not reachable
-        # in practice — stores are append-only).
-        return _refuse(
-            "no genesis — the store's lineage is not open; run absorb to open it"
-        )
-    except AmbiguousGenesis as exc:
-        return _refuse(str(exc))
+
+        try:
+            store.absorb_edit(
+                changes,
+                observer=observer,
+                origin="",
+                fact_signer=fact_signer_for(target_path),
+                expected_head=expected_head,
+            )
+        except JsonlCanonicalUnsupported as exc:
+            return _refuse(str(exc))
+        except StaleDeclarationHead as exc:
+            return _refuse(f"{exc}")
+        except UnsignableEdit:
+            return _refuse(
+                f"cannot absorb — no signing key for observer '{observer}'. A "
+                "declaration edit must be signed; set up signing first "
+                "(loops add <vertex> observer --keygen)."
+            )
+        except NoGenesis:
+            # TOCTOU: the lineage vanished between dispatch and here (not reachable
+            # in practice — stores are append-only).
+            return _refuse(
+                "no genesis — the store's lineage is not open; run absorb to open it"
+            )
+        except AmbiguousGenesis as exc:
+            return _refuse(str(exc))
+
+        _render_divergence(applied=True)
+        return 0
     finally:
         store.close()
-
-    _render_divergence(applied=True)
-    return 0
 
 
 def _run_adopt(argv: list[str], *, vertex_path: Path | None = None) -> int:

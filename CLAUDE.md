@@ -82,6 +82,45 @@ templates, the loops CLI will guide you through declaring one.
 Personal Claude Code config (hooks, agents, settings) lives at `.claude/`
 and is gitignored — bring your own.
 
+### The store is a file, and the file is `.jsonl`
+
+`.loops/data/<name>.jsonl` **is** the store: one append-only interleaved log
+of facts and ticks, tracked in git. `.loops/data/<name>.db` is a *derived*
+sqlite index over it — gitignored, rebuildable, and materialized on first
+read. Nothing is lost by deleting a `.db`; deleting a `.jsonl` deletes the
+store.
+
+**Not yet true for `project.jsonl`**: at 111 MB it exceeds GitHub's 100 MiB
+per-file limit, so the log is intentionally left untracked for now — the
+`.gitignore` exception is in place, and it gets tracked once the fold-snapshot
+bloat is compacted. See `friction:jsonl-canonical-log-exceeds-git-limit`.
+Until then a fresh clone starts an empty project store, as before.
+
+The **store locator's extension is the switch** (`engine/residence.py`):
+
+| `store "…"` in the `.vertex` | Canonical artifact | sqlite |
+|------------------------------|--------------------|--------|
+| `….jsonl` | the log | derived index at the sibling `….db` |
+| `….db` / `….sqlite` | the db | *is* the store (pre-flip status quo) |
+
+No extra key, no mode flag — declare where the truth lives and the runtime
+follows. Read paths always resolve to the index (reads are sqlite reads,
+unchanged); only the write path asks which file is authoritative.
+
+After cloning, the first `sl read`/`sl emit` rebuilds the index from the log
+automatically. To force it:
+
+```bash
+rm .loops/data/project.db && sl read project    # index rebuilds from the log
+```
+
+**Consequence for history-mutating ops.** `absorb_edit`, `reanchor`, and
+`absorb_genesis` refuse on a JSONL-canonical store (`JsonlCanonicalUnsupported`) —
+they would rewrite sqlite rows the log doesn't account for. Ops that write
+the `.db` directly (`store merge`/`receive`/`rebirth`/`compact`) are detected
+on the next open, not prevented: the store refuses to open rather than
+rebuild over rows the log never saw.
+
 ## Project knowledge (this repo's loops practice)
 
 This monorepo **dogfoods** loops. Architectural choices, open arcs, frictions,
@@ -98,7 +137,10 @@ sl read project --facts --kind decision        # project decisions
 sl read meta --facts --kind decision --since 7d # recent cross-cutting decisions
 ```
 
-**Project store** (`.loops/project.vertex`): architecture, API design, lib boundaries.
+**Project store** (`.loops/project.vertex` → `.loops/data/project.jsonl`):
+architecture, API design, lib boundaries. JSONL-canonical since 0.10.0 S4 —
+the log is the store; `project.db` beside it is the derived index. Not yet
+tracked in git (size — see "The store is a file" above).
 
 **Meta store** (`~/Code/meta-discussion/meta.vertex`, external repo, read via the config-level `meta` aggregation): historical cross-cutting notes. **Deprecated as an emit destination** (decision:practice/meta-store-role-dissolved, 2026-07-13): process/practice lessons emit in the project where they're born, under `practice/`/`workflow/` prefixes — cross-cutting is a read-path property (aggregation over stores), not an authoring destination. Meta's original intent — a separate workspace recursing over all stores mining for patterns, storing separately — is deferred until multi-project store usage matures.
 

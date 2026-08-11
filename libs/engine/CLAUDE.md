@@ -137,8 +137,34 @@ The Store protocol is append-only: `append()`, `since(cursor)`, `between(start, 
 | Store | Backing | Use case |
 |-------|---------|----------|
 | `EventStore` | In-memory (optional JSONL) | Tests, ephemeral |
-| `SqliteStore` | SQLite (WAL mode) | Production, concurrent reads |
-| `FileStore` | JSONL file | Simple persistence |
+| `SqliteStore` | SQLite (WAL mode) | sqlite-canonical stores |
+| `JsonlStore` | Append-only JSONL log + derived SQLite index | **Production** — the canonical shape |
+| `FileStore` | JSONL file | Legacy, pre-Receipt. Do not build on it. |
+
+**`JsonlStore` is a `SqliteStore` subclass, not an alternative to it.** The
+log is canonical; sqlite is a rebuildable index over it. All reads
+(`since`/`between`/`StoreReader`/FTS) are inherited byte-for-byte unchanged —
+only durability order is overridden: one flushed+fsynced log line, then the
+index row commits. Catch-up on open tails the log forward from a persisted
+byte offset, or rebuilds the index if the offset can't be trusted.
+
+**Which store a vertex gets is the store locator's extension**
+(`engine/residence.py` — the one place that answers "which file is
+authoritative"):
+
+```python
+from engine.residence import resolve_store_path, is_jsonl_canonical
+from engine.jsonl_store import open_canonical_store, ensure_index
+
+resolve_store_path(ast.store, vertex_path)   # → sqlite path to READ from
+open_canonical_store(canonical, **kw)        # → JsonlStore or SqliteStore
+ensure_index(canonical)                      # → materialize a missing index
+```
+
+`store "….jsonl"` → `JsonlStore` over the sibling `….db`; `store "….db"` →
+plain `SqliteStore`. Never construct a store for a vertex by hand — go
+through `open_canonical_store`, or a direct sqlite write becomes an
+out-of-band insert the log doesn't account for.
 
 **StoreReader** — read-only inspector:
 

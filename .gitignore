@@ -41,6 +41,15 @@ docs/dev/*
 # Personal state — vertex declarations, lenses, hooks, agents, experiments.
 # Monorepo carries code + public docs; this is per-clone working state.
 .claude/
-.loops/
+# .loops/ is per-clone working state EXCEPT the canonical store log:
+# under jsonl-canonical (design/architecture/jsonl-canonical-store) the
+# .jsonl IS the store and is tracked; the .db is a derived index and
+# stays ignored. Directory re-entry is required — git never descends
+# into an ignored directory, so `!.loops/data/project.jsonl` alone is
+# dead. Everything not re-listed here stays ignored.
+.loops/*
+!.loops/data/
+.loops/data/*
+!.loops/data/project.jsonl
 experiments/
 meta-discussion/

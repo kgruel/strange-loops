@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from engine.residence import canonical_store_path, resolve_store_path
 from loops.errors import (
     LoopsError,
     VertexNotFound,
@@ -671,9 +672,7 @@ def _topology_kind_keys_and_stores(
 
     # Fast path: try _topology facts from root's own store
     if ast.store is not None:
-        own_store = ast.store
-        if not own_store.is_absolute():
-            own_store = (root_vertex_path.parent / own_store).resolve()
+        own_store = resolve_store_path(ast.store, root_vertex_path)
         if own_store.exists():
             result = _try_topology_from_store(own_store)
             if result is not None:
@@ -1145,6 +1144,10 @@ def _resolve_writable_vertex(vertex_path: Path) -> Path | None:
 def _resolve_vertex_store_path(vertex_path: Path) -> Path | None:
     """Resolve store path from a vertex file. Returns None if no store configured.
 
+    Returns the **sqlite index** path: for a JSONL-canonical vertex (a
+    ``store`` locator ending ``.jsonl``) that is the sibling ``.db``, which
+    is what every read consumer connects to. See ``engine.residence``.
+
     For combinatorial vertices (combine block, no store), follows the first
     combine entry to find the writable store.
 
@@ -1157,9 +1160,15 @@ def _resolve_vertex_store_path(vertex_path: Path) -> Path | None:
     ast = _parse_vertex(vertex_path)
 
     if ast.store is not None:
-        store_path = Path(ast.store)
-        if not store_path.is_absolute():
-            store_path = (vertex_path.parent / store_path).resolve()
+        store_path = resolve_store_path(ast.store, vertex_path)
+        if not store_path.exists():
+            # Fresh clone: the log is tracked, the derived index is not.
+            # Materialize it once, here, rather than letting readers open an
+            # empty db and report an empty store. Cheap no-op when the index
+            # already exists (the common case) — no store is constructed.
+            from engine.jsonl_store import ensure_index
+
+            ensure_index(canonical_store_path(ast.store, vertex_path))
         return store_path
 
     # Follow combine → first entry's store

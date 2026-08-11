@@ -171,6 +171,51 @@ def log_path_for(db_path: Path) -> Path:
     return Path(db_path).with_suffix(".jsonl")
 
 
+def open_canonical_store(canonical: Path, **kwargs: Any) -> SqliteStore[Any]:
+    """Open the right store class for a store locator (see ``engine.residence``).
+
+    ``.jsonl`` → :class:`JsonlStore` over the sibling index; anything else →
+    :class:`SqliteStore` at the path itself. One place to ask "which file is
+    authoritative here", so no write site can answer it differently.
+    """
+    from .residence import index_path_for, is_jsonl_canonical
+
+    canonical = Path(canonical)
+    if is_jsonl_canonical(canonical):
+        return JsonlStore(path=index_path_for(canonical), log_path=canonical, **kwargs)
+    return SqliteStore(path=canonical, **kwargs)
+
+
+def ensure_index(canonical: Path) -> Path:
+    """Materialize the sqlite index for a JSONL-canonical log. Returns its path.
+
+    The doctrine's fresh-clone case: the ``.jsonl`` is tracked in git, the
+    derived ``.db`` is not, so the first read after a clone finds no index.
+    Opening a :class:`JsonlStore` runs the S3 catch-up (offset absent + a
+    non-empty log ⇒ full rebuild), which is exactly "materialize the index
+    from the log". Closing immediately leaves no handle behind.
+
+    A no-op — no store constructed, no lock taken — when the index already
+    exists, or when ``canonical`` is not JSONL-canonical, or when the log
+    itself is missing (nothing to build from; let the caller's own
+    not-found handling speak). Read paths may call this on every resolve.
+    """
+    from .residence import index_path_for, is_jsonl_canonical
+
+    canonical = Path(canonical)
+    index = index_path_for(canonical)
+    if not is_jsonl_canonical(canonical) or index.exists() or not canonical.exists():
+        return index
+    store: JsonlStore[Any] = JsonlStore(
+        path=index,
+        log_path=canonical,
+        serialize=lambda d: d,
+        deserialize=lambda d: d,
+    )
+    store.close()
+    return index
+
+
 class JsonlStore(SqliteStore[T], Generic[T]):
     """A store whose canonical persistence is its JSONL log.
 

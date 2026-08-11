@@ -34,14 +34,19 @@ def _bucket_timestamps(timestamps: list[float], width: int) -> list[float]:
 
 
 def resolve_store_path(file_path: Path) -> Path:
-    """Resolve a .vertex or .db file to the actual store .db path."""
+    """Resolve a .vertex or .db file to the actual store .db path.
+
+    A JSONL-canonical vertex (``store "….jsonl"``) resolves to its derived
+    sqlite index — see ``engine.residence``.
+    """
     if file_path.suffix == ".vertex":
+        from engine.residence import resolve_store_path as _residence_path
         from lang import parse_vertex_file
 
         ast = parse_vertex_file(file_path)
         if ast.store is None:
             raise ValueError(f"No store configured in {file_path}")
-        return (file_path.parent / ast.store).resolve()
+        return _residence_path(ast.store, file_path)
     elif file_path.suffix == ".db":
         return file_path.resolve()
     else:

@@ -52,7 +52,9 @@ def _lifecycle_scan(vertex_path: Path) -> list[dict]:
         return []
     if not ast.store:
         return []
-    store_path = (vertex_path.parent / ast.store).resolve()
+    from engine.residence import resolve_store_path
+
+    store_path = resolve_store_path(ast.store, vertex_path)
     if not store_path.exists():
         return []
     try:

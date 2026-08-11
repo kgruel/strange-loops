@@ -91,6 +91,8 @@ from lang.document import (
     is_internal_kind,
 )
 
+from .residence import resolve_store_path
+
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from engine.witness import WitnessPosition
 
@@ -495,9 +497,7 @@ def load_declaration_status(
     if store_field is None:
         return _finish(file_ast, "file-pre-genesis")
 
-    store_path = store_field
-    if not store_path.is_absolute():
-        store_path = (vertex_path.parent / store_path).resolve()
+    store_path = resolve_store_path(store_field, vertex_path)
     if not store_path.exists():
         return _finish(file_ast, "file-pre-genesis")
 
@@ -615,9 +615,7 @@ def _decl_lineage_and_head(
     store_field = file_ast.store
     if store_field is None:
         return None, None
-    store_path = store_field
-    if not store_path.is_absolute():
-        store_path = (vertex_path.parent / store_path).resolve()
+    store_path = resolve_store_path(store_field, vertex_path)
     if not store_path.exists():
         return None, None
     conn = _open_readonly(store_path, timeout=timeout)
@@ -752,9 +750,7 @@ def verify_source_pins(vertex_path: Path) -> None:
     store_field = file_ast.store
     if store_field is None:
         return
-    store_path = store_field
-    if not store_path.is_absolute():
-        store_path = (vertex_path.parent / store_path).resolve()
+    store_path = resolve_store_path(store_field, vertex_path)
     if not store_path.exists():
         return
     docs = resolve_declaration_documents(store_path)

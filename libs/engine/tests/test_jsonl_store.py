@@ -846,3 +846,48 @@ def test_recovery_during_a_tick_leaves_the_chain_verifiable(tmp_path):
     assert reopened.catch_up() == "synced"
     assert reopened.verify_chain()["ok"]
     reopened.close()
+
+
+# ---------------------------------------------------------------------------
+# Locator residue: every store-locator resolution goes through residence
+# ---------------------------------------------------------------------------
+
+
+def _jsonl_vertex(tmp_path: Path) -> Path:
+    vpath = tmp_path / "t.vertex"
+    vpath.write_text(
+        'name "t"\nstore "./data/t.jsonl"\nloops {\n  note { fold { items "by" "message" } }\n}\n'
+    )
+    return vpath
+
+
+def test_declaration_status_resolves_to_the_index_not_the_log(tmp_path, monkeypatch):
+    """A .jsonl locator names the LOG; declaration reads sqlite.
+
+    Handing the log path to a sqlite open fails soft — the resolver answers
+    "no declaration here" and the vertex silently reports pre-genesis. The
+    resolution must go through residence, which knows the sibling .db is the
+    file to connect to.
+    """
+    import engine.declaration as decl
+
+    vpath = _jsonl_vertex(tmp_path)
+    log = tmp_path / "data" / "t.jsonl"
+    store = JsonlStore(
+        path=tmp_path / "data" / "t.db", log_path=log,
+        serialize=Fact.to_dict, deserialize=Fact.from_dict,
+    )
+    store.append(fact(message="one"))
+    store.close()
+
+    seen: list[Path] = []
+    real = decl.resolve_declaration_documents
+
+    def spy(store_path, **kw):
+        seen.append(Path(store_path))
+        return real(store_path, **kw)
+
+    monkeypatch.setattr(decl, "resolve_declaration_documents", spy)
+    decl.load_declaration_status(vpath)
+
+    assert seen == [tmp_path / "data" / "t.db"]

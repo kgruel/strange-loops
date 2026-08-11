@@ -38,8 +38,11 @@ Write order (the receipt originates at the log)
    line is durable *before* the id is anything anyone can observe;
 4. stamp the consumed byte offset and row counts and COMMIT — the index row
    becomes visible only after its line is durable, and row, offset and
-   counts can never disagree. Any failure rolls the whole transaction back,
-   leaving the log untouched;
+   counts can never disagree. Any failure rolls the whole transaction back.
+   Before step 3 that leaves the log untouched; *after* the fsync the line
+   is already durable and stays so — the rollback leaves it unindexed and
+   unstamped, which is the recoverable state step 0 (and catch-up on open)
+   exists to resolve;
 5. return the id. The id in the receipt is the id in the durable line.
 
 Staging the INSERT before the append inverts the literal "sqlite indexed
@@ -58,11 +61,13 @@ sqlite. On open:
   an out-of-band append): tail forward, indexing the missed lines verbatim.
 - ``offset`` outside ``0..size`` (log shrank, or negative metadata), the
   byte at ``offset - 1`` is not a
-  newline, or the last line ending at ``offset`` does not re-serialize to
-  the sqlite row it names — full rebuild of the sqlite index from the log,
-  logged loudly at WARNING. That last check is the "hash match": a
-  byte-compare of the codec's canonical line against the indexed row is
-  exactly a commitment comparison, done on one line rather than the file.
+  newline, or the last line ending at ``offset`` does not decode to the
+  sqlite row it names — full rebuild of the sqlite index from the log,
+  logged loudly at WARNING. That last check is a commitment comparison done
+  on one line rather than the file: the line is decoded through the codec
+  and its fields compared by VALUE against the indexed row (not by
+  re-serialized bytes — see :meth:`JsonlStore._row_matches` for why sqlite's
+  numeric affinity makes a byte-compare report false corruption).
 - **offset absent** with a non-empty log: a store that has never recorded a
   consumption point cannot claim any prefix is indexed, so it rebuilds
   (rather than tailing from 0 into PK conflicts). This is also the shape a
@@ -474,6 +479,19 @@ class JsonlStore(SqliteStore[T], Generic[T]):
         if self._read_offset() == self._log_size():
             return
         self.catch_up()
+
+    def _sync_derived_state(self) -> None:
+        """Reconcile before the mint reads chain state off the index.
+
+        ``_write``'s reconcile is too late for a tick: ``append_tick`` has by
+        then already derived ``prev_hash``, ``window_start`` and the fact
+        cursor from an index that may not have consumed a durable line. The
+        successor would link past the orphan, and that mis-linkage goes into
+        the canonical log itself — where no later catch-up or rebuild can
+        repair it. Reconciling in front of the derivation costs two syscalls
+        when the index is current.
+        """
+        self._reconcile()
 
     def _write_fact_row(self, row: tuple) -> None:
         self._write(FACT_INSERT_SQL, row, serialize_fact_row(row), True)

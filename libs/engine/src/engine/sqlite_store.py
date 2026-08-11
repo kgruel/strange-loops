@@ -555,6 +555,23 @@ class SqliteStore(Generic[T]):
     # derived index, without touching mint logic or the read surface.
     # ------------------------------------------------------------------
 
+    def _sync_derived_state(self) -> None:
+        """Seam: bring derived state up to date before reading chain state.
+
+        A no-op here — sqlite IS the state. A subclass whose sqlite is a
+        DERIVED index (engine.jsonl_store) must reconcile the index with its
+        canonical log *before* any mint reads chain state from it: a durable
+        but unindexed line would otherwise be invisible to the predecessor,
+        window-start and fact-cursor derivation, and the resulting mis-linked
+        tick lands in the canonical log where no rebuild can repair it.
+
+        Called at the top of ``append_tick``, before the ``prev_row`` read.
+        NOT called from ``current_chain_head``: its only production caller is
+        ``absorb_genesis``, which reads it inside ``BEGIN IMMEDIATE`` — a
+        reconcile there would commit mid-transaction. That path refuses
+        outright on a JSONL-canonical store, so the gap is closed already.
+        """
+
     def _write_fact_row(self, row: tuple) -> None:
         """Persist one assembled fact row (id, kind, ts, observer, origin,
         payload, signature)."""
@@ -1314,6 +1331,11 @@ class SqliteStore(Generic[T]):
         """
         self._ensure_sync()
         self._ensure_chain_columns()
+        # Every read below (prev_row, the fact cursor, the signed-era probe)
+        # derives chain state from sqlite. Where sqlite is a derived index,
+        # it must have consumed the whole canonical log first — see
+        # _sync_derived_state.
+        self._sync_derived_state()
         d = tick.to_dict()
         payload_text = json.dumps(d["payload"], default=_mapping_proxy_default)
 

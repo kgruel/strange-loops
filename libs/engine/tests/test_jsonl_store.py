@@ -802,16 +802,14 @@ def test_interior_tamper_of_an_unsealed_fact_is_caught_by_nothing(tmp_path):
 
 
 def test_recovery_during_a_tick_leaves_the_chain_verifiable(tmp_path):
-    """Reconcile runs after mint — the chain must survive that ordering.
+    """A durable-but-unindexed FACT is reconciled before the tick mints.
 
-    append_tick derives prev_hash/window_hash/fact_cursor from sqlite BEFORE
-    the row reaches _write, so a line recovered by the append-time reconcile
-    lands in the index after the in-flight tick has already committed to its
-    cursor. That is safe only because a tick's window is bounded by a fact
-    CURSOR, not a timestamp: the recovered row falls outside the sealed
-    window by construction and the next tick seals it. Pinned because the
-    alternative — a window hash that does not commit to a fact inside its
-    own window — would be corruption manufactured by the recovery path.
+    append_tick derives prev_hash/window_hash/fact_cursor from sqlite, so the
+    reconcile has to run in front of that derivation (_sync_derived_state),
+    not merely in front of the INSERT. With it there, a line another writer
+    left durable is indexed first and the tick seals it in its own window —
+    rather than minting a cursor that skips a fact already in the canonical
+    log.
     """
     import time
 
@@ -830,7 +828,7 @@ def test_recovery_during_a_tick_leaves_the_chain_verifiable(tmp_path):
     assert store.verify_chain()["ok"]
     assert [r[0] for r in sqlite_facts(tmp_path / "s.db")][-1] == "01CRASHEDA"
 
-    # The next boundary seals the recovered fact, and the chain still holds.
+    # A second boundary with nothing new to seal keeps the chain intact.
     store.append_tick(
         Tick(name="seal", ts=datetime.now(UTC), payload={"n": 2}, origin="t")
     )
@@ -839,12 +837,63 @@ def test_recovery_during_a_tick_leaves_the_chain_verifiable(tmp_path):
         r[0]
         for r in store._conn.execute("SELECT fact_cursor FROM ticks ORDER BY rowid")
     ]
-    assert cursors[1] == "01CRASHEDA"  # sealed by the second tick, not the first
+    assert cursors[0] == "01CRASHEDA"  # the FIRST tick seals the recovered fact
+    assert cursors[1] == "01CRASHEDA"
     store.close()
 
     reopened = open_store(tmp_path)
     assert reopened.catch_up() == "synced"
     assert reopened.verify_chain()["ok"]
+    reopened.close()
+
+
+def test_orphaned_tick_is_reconciled_before_the_next_tick_links(tmp_path):
+    """An unindexed durable TICK must not be skipped by its successor.
+
+    The corruption this closes is permanent, unlike the fact case: the mint
+    reads prev_hash/window_start off the index, so an orphaned tick 2 would
+    make tick 3 link back to tick 1 — and that broken linkage is written into
+    the canonical log, where no rebuild can repair it. Sol's injection: fail
+    _stamp once (the line is fsynced, the index rolled back), then mint the
+    next tick on the same handle.
+    """
+    store = open_store(tmp_path)
+    store.append(fact(message="one"))
+    store.append_tick(Tick(name="seal", ts=datetime.now(UTC), payload={"n": 1}, origin="t"))
+
+    real_stamp = store._stamp
+
+    def failing_stamp(*args):
+        raise RuntimeError("simulated sqlite failure after fsync")
+
+    store._stamp = failing_stamp
+    with pytest.raises(RuntimeError):
+        store.append_tick(
+            Tick(name="seal", ts=datetime.now(UTC), payload={"n": 2}, origin="t")
+        )
+    store._stamp = real_stamp
+
+    # Tick 2's line is durable; the index has not consumed it.
+    log = tmp_path / "s.jsonl"
+    assert sum(1 for ln in lines(log) if deserialize_row(ln)[0] == "tick") == 2
+    assert offset_of(store) < log.stat().st_size
+
+    store.append_tick(Tick(name="seal", ts=datetime.now(UTC), payload={"n": 3}, origin="t"))
+
+    log_ticks = [row for t, row in map(deserialize_row, lines(log)) if t == "tick"]
+    assert len(log_ticks) == 3
+    # Each tick's prev_hash names its true predecessor — no forked linkage.
+    assert log_ticks[1][6] == tick_row_hash(log_ticks[0])
+    assert log_ticks[2][6] == tick_row_hash(log_ticks[1])
+    assert store.verify_chain()["ok"]
+    store.close()
+
+    reopened = open_store(tmp_path)
+    assert reopened.catch_up() == "synced"
+    assert reopened.verify_chain()["ok"]
+    assert [r[0] for r in reopened._conn.execute("SELECT id FROM ticks ORDER BY rowid")] == [
+        row[0] for row in log_ticks
+    ]
     reopened.close()
 
 

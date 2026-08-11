@@ -38,11 +38,11 @@ import json
 import math
 
 __all__ = [
+    "FACT_FIELDS",
+    "TICK_FIELDS",
     "JsonlCodecError",
     "serialize_fact_row",
     "serialize_tick_row",
-    "deserialize_fact_row",
-    "deserialize_tick_row",
     "deserialize_row",
 ]
 
@@ -51,24 +51,44 @@ class JsonlCodecError(ValueError):
     """A JSONL line does not match the canonical schema."""
 
 
-# Column order — mirrors _FACT_ROW_SQL / _TICK_ROW_SQL in sqlite_store.
-_FACT_FIELDS = ("id", "kind", "ts", "observer", "origin", "payload")
-_TICK_FIELDS = (
+# Column order — the one spelling of it. ``engine.sqlite_store`` builds its
+# INSERT statements from these tuples, so a schema column and a log field can
+# never drift apart.
+FACT_FIELDS = ("id", "kind", "ts", "observer", "origin", "payload")
+TICK_FIELDS = (
     "id", "name", "ts", "since", "origin", "payload",
     "prev_hash", "window_start", "fact_cursor", "window_hash",
 )
 _SIGNATURE = "signature"
 
-_FACT_KEYS = frozenset((*_FACT_FIELDS, _SIGNATURE, "t"))
-_TICK_KEYS = frozenset((*_TICK_FIELDS, _SIGNATURE, "t"))
-
-# Nullable commitment fields, by record type.
-_FACT_NULLABLE: frozenset[str] = frozenset()
-_TICK_NULLABLE = frozenset(
-    ("since", "prev_hash", "window_start", "fact_cursor", "window_hash")
-)
-
 _NUMERIC = ("ts", "since")
+
+
+class _Spec:
+    """Everything the codec knows about one record type, keyed by ``"t"``.
+
+    Fact and tick differ only in their field tuple and which fields may be
+    null; both directions of both types then run one code path, so a rule
+    added here cannot apply to one type and be forgotten for the other.
+    """
+
+    __slots__ = ("t", "fields", "allowed", "nullable")
+
+    def __init__(self, t: str, fields: tuple[str, ...], nullable: frozenset[str]):
+        self.t = t
+        self.fields = fields
+        self.allowed = frozenset((*fields, _SIGNATURE, "t"))
+        self.nullable = nullable
+
+
+_SPEC = {
+    "fact": _Spec("fact", FACT_FIELDS, frozenset()),
+    "tick": _Spec(
+        "tick",
+        TICK_FIELDS,
+        frozenset(("since", "prev_hash", "window_start", "fact_cursor", "window_hash")),
+    ),
+}
 
 # JCS (RFC 8785) numeric domain — mirrors rfc8785._impl._INT_MIN/_INT_MAX.
 # Integers outside it, and non-finite floats, are not canonicalizable, so a
@@ -88,8 +108,7 @@ def _dump(obj: dict) -> str:
                       separators=(",", ":"))
 
 
-def _row_dict(row: tuple, fields: tuple[str, ...], allowed: frozenset[str],
-              nullable: frozenset[str], t: str) -> dict:
+def _encode(row: tuple, spec: _Spec) -> str:
     """Build the line object for a row — and hold it to the decoder's rules.
 
     ``serialize(x)`` must always be decodable. Checking arity alone let a
@@ -102,27 +121,27 @@ def _row_dict(row: tuple, fields: tuple[str, ...], allowed: frozenset[str],
     maintenance, and puts the error at the append site, where it is
     attributable to the caller that built the row.
     """
-    n = len(fields)
+    n = len(spec.fields)
     if len(row) not in (n, n + 1):
         raise JsonlCodecError(
-            f"{t} row must have {n} or {n + 1} fields, got {len(row)}"
+            f"{spec.t} row must have {n} or {n + 1} fields, got {len(row)}"
         )
-    obj: dict = {"t": t}
-    obj.update(zip(fields, row[:n], strict=True))
+    obj: dict = {"t": spec.t}
+    obj.update(zip(spec.fields, row[:n], strict=True))
     if len(row) > n and row[n] is not None:
         obj[_SIGNATURE] = row[n]
-    _validate(obj, fields, allowed, nullable, t)
-    return obj
+    _validate(obj, spec)
+    return _dump(obj)
 
 
 def serialize_fact_row(row: tuple) -> str:
     """Encode a fact row ``(id, kind, ts, observer, origin, payload[, signature])``."""
-    return _dump(_row_dict(row, _FACT_FIELDS, _FACT_KEYS, _FACT_NULLABLE, "fact"))
+    return _encode(row, _SPEC["fact"])
 
 
 def serialize_tick_row(row: tuple) -> str:
     """Encode a tick row (``_TICK_ROW_SQL`` order, signature optional)."""
-    return _dump(_row_dict(row, _TICK_FIELDS, _TICK_KEYS, _TICK_NULLABLE, "tick"))
+    return _encode(row, _SPEC["tick"])
 
 
 def _reject_constant(name: str) -> None:
@@ -170,18 +189,18 @@ def _load(line: str) -> dict:
     return obj
 
 
-def _validate(obj: dict, fields: tuple[str, ...], allowed: frozenset[str],
-              nullable: frozenset[str], t: str) -> None:
-    unknown = sorted(set(obj) - allowed)
+def _validate(obj: dict, spec: _Spec) -> None:
+    t = spec.t
+    unknown = sorted(set(obj) - spec.allowed)
     if unknown:
         raise JsonlCodecError(f"unknown field(s) in {t} line: {unknown}")
-    missing = [f for f in fields if f not in obj]
+    missing = [f for f in spec.fields if f not in obj]
     if missing:
         raise JsonlCodecError(f"missing field(s) in {t} line: {missing}")
-    for field in fields:
+    for field in spec.fields:
         value = obj[field]
         if value is None:
-            if field not in nullable:
+            if field not in spec.nullable:
                 raise JsonlCodecError(f"{t} field {field!r} must not be null")
             continue
         if field in _NUMERIC:
@@ -224,36 +243,13 @@ def _validate(obj: dict, fields: tuple[str, ...], allowed: frozenset[str],
         )
 
 
-def _row_tuple(obj: dict, fields: tuple[str, ...]) -> tuple:
-    return (*(obj[f] for f in fields), obj.get(_SIGNATURE))
-
-
-def deserialize_fact_row(line: str) -> tuple:
-    """Decode a ``"t":"fact"`` line to a 7-field row tuple (signature last)."""
-    obj = _load(line)
-    if obj.get("t") != "fact":
-        raise JsonlCodecError(f"expected t='fact', got {obj.get('t')!r}")
-    _validate(obj, _FACT_FIELDS, _FACT_KEYS, _FACT_NULLABLE, "fact")
-    return _row_tuple(obj, _FACT_FIELDS)
-
-
-def deserialize_tick_row(line: str) -> tuple:
-    """Decode a ``"t":"tick"`` line to an 11-field row tuple (signature last)."""
-    obj = _load(line)
-    if obj.get("t") != "tick":
-        raise JsonlCodecError(f"expected t='tick', got {obj.get('t')!r}")
-    _validate(obj, _TICK_FIELDS, _TICK_KEYS, _TICK_NULLABLE, "tick")
-    return _row_tuple(obj, _TICK_FIELDS)
-
-
 def deserialize_row(line: str) -> tuple[str, tuple]:
-    """Decode any line, dispatching on ``"t"``. Returns ``(t, row)``."""
+    """Decode any line, dispatching on ``"t"``. Returns ``(t, row)`` with the
+    row at full arity (7 fact fields / 11 tick fields, signature last)."""
     obj = _load(line)
     t = obj.get("t")
-    if t == "fact":
-        _validate(obj, _FACT_FIELDS, _FACT_KEYS, _FACT_NULLABLE, "fact")
-        return "fact", _row_tuple(obj, _FACT_FIELDS)
-    if t == "tick":
-        _validate(obj, _TICK_FIELDS, _TICK_KEYS, _TICK_NULLABLE, "tick")
-        return "tick", _row_tuple(obj, _TICK_FIELDS)
-    raise JsonlCodecError(f"unknown record discriminator t={t!r}")
+    spec = _SPEC.get(t) if isinstance(t, str) else None
+    if spec is None:
+        raise JsonlCodecError(f"unknown record discriminator t={t!r}")
+    _validate(obj, spec)
+    return spec.t, (*(obj[f] for f in spec.fields), obj.get(_SIGNATURE))

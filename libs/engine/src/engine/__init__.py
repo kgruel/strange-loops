@@ -43,8 +43,6 @@ __all__ = [
     "JsonlCodecError",
     "serialize_fact_row",
     "serialize_tick_row",
-    "deserialize_fact_row",
-    "deserialize_tick_row",
     "deserialize_row",
     # Utilities
     "Forward",
@@ -182,8 +180,6 @@ _LAZY_IMPORTS: dict[str, tuple[str, str]] = {
     "JsonlCodecError": ("engine.jsonl_codec", "JsonlCodecError"),
     "serialize_fact_row": ("engine.jsonl_codec", "serialize_fact_row"),
     "serialize_tick_row": ("engine.jsonl_codec", "serialize_tick_row"),
-    "deserialize_fact_row": ("engine.jsonl_codec", "deserialize_fact_row"),
-    "deserialize_tick_row": ("engine.jsonl_codec", "deserialize_tick_row"),
     "deserialize_row": ("engine.jsonl_codec", "deserialize_row"),
     "EventStore": ("engine.store", "EventStore"),
     "Store": ("engine.store", "Store"),

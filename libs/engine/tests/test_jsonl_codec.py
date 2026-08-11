@@ -12,9 +12,7 @@ import pytest
 
 from engine.jsonl_codec import (
     JsonlCodecError,
-    deserialize_fact_row,
     deserialize_row,
-    deserialize_tick_row,
     serialize_fact_row,
     serialize_tick_row,
 )
@@ -23,6 +21,20 @@ from engine.sqlite_store import (
     _fact_row_hash,
     _tick_row_hash,
 )
+
+def deserialize_fact_row(line):
+    """Decode, asserting the line declares itself a fact."""
+    t, row = deserialize_row(line)
+    assert t == "fact"
+    return row
+
+
+def deserialize_tick_row(line):
+    """Decode, asserting the line declares itself a tick."""
+    t, row = deserialize_row(line)
+    assert t == "tick"
+    return row
+
 
 # --- fixtures: rows of every era -------------------------------------------
 
@@ -161,9 +173,9 @@ def test_missing_field_rejected():
 
 
 def test_wrong_discriminator_rejected():
-    line = serialize_tick_row(TICK_SIGNED)
-    with pytest.raises(JsonlCodecError, match="expected t='fact'"):
-        deserialize_fact_row(line)
+    # A tick line decodes as a tick — the discriminator, not the caller's
+    # expectation, decides which spec validates it.
+    assert deserialize_row(serialize_tick_row(TICK_SIGNED))[0] == "tick"
     with pytest.raises(JsonlCodecError, match="discriminator"):
         deserialize_row(json.dumps({"t": "blob"}))
 

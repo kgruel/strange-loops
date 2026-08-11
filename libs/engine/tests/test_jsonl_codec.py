@@ -243,3 +243,49 @@ def test_non_json_literal_rejected_in_tick():
     line = "{" + ",".join(parts) + "}"
     with pytest.raises(JsonlCodecError):
         deserialize_tick_row(line)
+
+
+# Standards-valid JSON spellings that the literal parser never sees, but
+# that are outside the JCS numeric domain the commitment hashers require.
+_OUT_OF_DOMAIN = [
+    "1e999",            # overflows to inf
+    "-1e999",           # overflows to -inf
+    "9007199254740992",     # 2**53 — first unsafe integer
+    "-9007199254740992",
+    "1" + "0" * 400,        # 401-digit integer
+]
+
+
+@pytest.mark.parametrize("number", _OUT_OF_DOMAIN)
+def test_out_of_jcs_domain_numbers_rejected_in_fact(number):
+    line = (
+        '{"t":"fact","id":"i","kind":"k","ts":' + number + ","
+        '"observer":"o","origin":"g","payload":"{}"}'
+    )
+    with pytest.raises(JsonlCodecError):
+        deserialize_fact_row(line)
+    with pytest.raises(JsonlCodecError):
+        deserialize_row(line)
+
+
+@pytest.mark.parametrize("field", ["ts", "since"])
+@pytest.mark.parametrize("number", _OUT_OF_DOMAIN)
+def test_out_of_jcs_domain_numbers_rejected_in_tick(field, number):
+    obj = json.loads(serialize_tick_row(TICK_SIGNED))
+    parts = [
+        f'"{k}":' + (number if k == field else json.dumps(v))
+        for k, v in obj.items()
+    ]
+    line = "{" + ",".join(parts) + "}"
+    with pytest.raises(JsonlCodecError):
+        deserialize_tick_row(line)
+
+
+def test_jcs_boundary_integers_accepted():
+    # The bound itself is inside the domain — reject one past it, not it.
+    for number in ("9007199254740991", "-9007199254740991"):
+        line = (
+            '{"t":"fact","id":"i","kind":"k","ts":' + number + ","
+            '"observer":"o","origin":"g","payload":"{}"}'
+        )
+        assert deserialize_fact_row(line)[2] == int(number)

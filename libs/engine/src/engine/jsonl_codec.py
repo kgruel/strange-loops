@@ -28,6 +28,7 @@ is not a place for silent tolerance.
 from __future__ import annotations
 
 import json
+import math
 
 __all__ = [
     "JsonlCodecError",
@@ -61,6 +62,13 @@ _TICK_NULLABLE = frozenset(
 )
 
 _NUMERIC = ("ts", "since")
+
+# JCS (RFC 8785) numeric domain — mirrors rfc8785._impl._INT_MIN/_INT_MAX.
+# Integers outside it, and non-finite floats, are not canonicalizable, so a
+# line carrying one cannot be hashed: reject at the codec gate rather than
+# detonating inside the commitment hashers.
+_JCS_INT_MAX = 2**53 - 1
+_JCS_INT_MIN = -(2**53) + 1
 
 
 def _dump(obj: dict) -> str:
@@ -139,6 +147,21 @@ def _validate(obj: dict, fields: tuple[str, ...], allowed: frozenset[str],
                 raise JsonlCodecError(
                     f"{t} field {field!r} must be a number, got "
                     f"{type(value).__name__}"
+                )
+            # Standards-valid JSON can still spell a number outside the JCS
+            # domain (``1e999`` overflows to inf; a 400-digit integer exceeds
+            # the safe-integer bound). Range-check here — the literal parser
+            # only sees the NaN/Infinity spellings.
+            if isinstance(value, float):
+                if not math.isfinite(value):
+                    raise JsonlCodecError(
+                        f"{t} field {field!r} must be a finite number, got "
+                        f"{value!r}"
+                    )
+            elif not (_JCS_INT_MIN <= value <= _JCS_INT_MAX):
+                raise JsonlCodecError(
+                    f"{t} field {field!r} is outside the JCS safe-integer "
+                    f"domain: {value}"
                 )
         elif not isinstance(value, str):
             raise JsonlCodecError(

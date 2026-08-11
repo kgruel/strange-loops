@@ -393,6 +393,33 @@ def test_rebuild_removes_the_target_when_construction_fails(full_store, tmp_path
     assert not dst.exists()
 
 
+def test_rebuild_removes_the_target_when_the_receipt_read_fails(
+    full_store, tmp_path, monkeypatch
+):
+    """A failure AFTER construction (the count read) also leaves no target.
+
+    A fully-built target with no returned RebuildResult would turn the
+    natural retry into a FileExistsError (sol r3 finding 2).
+    """
+    import store.jsonl as sj
+
+    log = tmp_path / "receipt.jsonl"
+    export_jsonl(full_store, log)
+    dst = tmp_path / "receipt.db"
+
+    def exploding_open(*args, **kwargs):
+        raise OSError("simulated failure reading the rebuilt store")
+
+    monkeypatch.setattr(sj, "_open", exploding_open)
+    with pytest.raises(OSError):
+        rebuild_jsonl(log, dst)
+    assert not dst.exists()
+
+    monkeypatch.undo()
+    result = rebuild_jsonl(log, dst)  # the natural retry succeeds
+    assert result.facts > 0 and dst.exists()
+
+
 def test_round_trip_of_empty_store(tmp_path):
     from engine import SqliteStore
 

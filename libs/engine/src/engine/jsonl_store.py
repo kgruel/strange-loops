@@ -636,8 +636,10 @@ class JsonlStore(SqliteStore[T], Generic[T]):
         """Cheap integrity check on the consumed prefix.
 
         ``offset`` must land just past a newline, and the last line before it
-        must re-serialize byte-identically from the sqlite row it names — a
-        commitment comparison over one line rather than the whole file.
+        must decode to the same field values as the sqlite row it names
+        (value equality via ``_row_matches`` — sqlite's numeric affinity
+        makes byte comparison a false-mismatch trap) — a commitment
+        comparison over one line rather than the whole file.
 
         One line, not the file: judging every row would make each open O(n)
         over the log. So this catches an edit to the last consumed row and

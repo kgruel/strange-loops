@@ -247,15 +247,17 @@ def rebuild_jsonl(source: Path, target: Path) -> RebuildResult:
             path=target, log_path=source,
             serialize=lambda d: d, deserialize=lambda d: d,
         ).close()
+        conn = _open(target, read_only=True)
+        try:
+            facts = conn.execute("SELECT COUNT(*) FROM facts").fetchone()[0]
+            ticks = conn.execute("SELECT COUNT(*) FROM ticks").fetchone()[0]
+        finally:
+            conn.close()
     except BaseException:
+        # "A failed rebuild leaves no target" covers the receipt read too —
+        # a target that exists without a returned RebuildResult would turn
+        # the natural retry into a FileExistsError.
         _remove_partial(target)
         raise
-
-    conn = _open(target, read_only=True)
-    try:
-        facts = conn.execute("SELECT COUNT(*) FROM facts").fetchone()[0]
-        ticks = conn.execute("SELECT COUNT(*) FROM ticks").fetchone()[0]
-    finally:
-        conn.close()
 
     return RebuildResult(facts=int(facts), ticks=int(ticks), path=target)

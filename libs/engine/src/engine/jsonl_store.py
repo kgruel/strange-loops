@@ -24,11 +24,24 @@ Write order (the receipt originates at the log)
 1. serialize the row through the S1 codec — ``payload`` rides as the
    VERBATIM stored TEXT, never re-serialized, so every existing signature
    and commitment hash survives the round trip;
-2. append the line + ``\\n`` to the log, ``flush()`` + ``os.fsync()`` — the
+2. **stage** the sqlite INSERT in an open, uncommitted transaction. Nothing
+   is observable yet, but a rejected row (duplicate id via ``id_override``
+   on the transport/replay path, constraint violation) fails *here* — before
+   any byte reaches the log, so a refused write can never leave an orphan
+   line the index doesn't name;
+3. append the line + ``\\n`` to the log, ``flush()`` + ``os.fsync()`` — the
    line is durable *before* the id is anything anyone can observe;
-3. index into sqlite, and stamp the consumed byte offset, in ONE
-   transaction (row and offset can never disagree);
-4. return the id. The id in the receipt is the id in the durable line.
+4. stamp the consumed byte offset and row counts and COMMIT — the index row
+   becomes visible only after its line is durable, and row, offset and
+   counts can never disagree. Any failure rolls the whole transaction back,
+   leaving the log untouched;
+5. return the id. The id in the receipt is the id in the durable line.
+
+Staging the INSERT before the append inverts the literal "sqlite indexed
+after" ordering, but preserves the property that ordering exists for: an
+uncommitted row is invisible to every reader, and the commit lands strictly
+after the fsync. Crash between fsync and commit → the row is rolled back and
+the offset unstamped, so the next open tails the line forward.
 
 Catch-up on open
 ----------------
@@ -68,13 +81,25 @@ the class: ``Tailer`` ``json.loads``-es each line before handing it on,
 discarding the verbatim line text this layer needs for the integrity
 compare and for the era-exact codec decode.
 
+Out-of-band sqlite writers
+--------------------------
+``libs/store``'s ``merge``/``receive``/``rebirth``/``compact`` open their own
+connection to the ``.db`` and write ``facts``/``ticks`` directly, bypassing
+the log entirely. This layer cannot refuse them (they never touch this
+class), so it *detects* them: the offset stamp carries the fact/tick counts
+consumed from the log, and open compares them against ``COUNT(*)``. A
+mismatch refuses with :class:`JsonlCanonicalUnsupported` rather than
+rebuilding — rebuilding would silently destroy exactly the rows that were
+written out of band. Honest limit: counts catch out-of-band *inserts*, not
+in-place *updates*; those are the last-line compare's job.
+
 Not yet wired (loud, not silent)
 --------------------------------
 History-mutating ops would rewrite rows sqlite-side while the log kept the
 originals, making the index no longer a function of the log. Until the log
 rewrite ceremony is designed they refuse with :class:`JsonlCanonicalUnsupported`:
 ``absorb_edit`` and ``reanchor`` here; ``rebirth``/``compact`` live in
-``libs/store`` and are out of this slice's reach. ``absorb_genesis`` refuses
+``libs/store`` and are detected, not refused (above). ``absorb_genesis`` refuses
 too — the judgment call the slice allowed. It is append-shaped, not
 history-mutating, but its write is a ``BEGIN IMMEDIATE`` compare-and-swap
 that may roll back *after* the row is built; flush-first durability would
@@ -104,6 +129,10 @@ _log = logging.getLogger(__name__)
 T = TypeVar("T")
 
 _OFFSET_KEY = "jsonl_offset"
+_FACT_COUNT_KEY = "jsonl_fact_count"
+_TICK_COUNT_KEY = "jsonl_tick_count"
+
+_CHUNK = 64 * 1024
 
 _FACT_INSERT = (
     "INSERT INTO facts (id, kind, ts, observer, origin, payload, signature) "
@@ -147,7 +176,19 @@ class JsonlStore(SqliteStore[T], Generic[T]):
         self._ensure_fact_signature_column()
         self._ensure_chain_columns()
         self._ensure_meta_table()
-        self.catch_up()
+        self._facts_indexed = 0
+        self._ticks_indexed = 0
+        try:
+            self.catch_up()
+        except BaseException:
+            # A raise out of __init__ must leave the db reopenable: an
+            # uncommitted DELETE on a leaked connection locks the file
+            # forever, turning one bad open into a permanently bricked store.
+            try:
+                self._conn.rollback()
+            finally:
+                self._conn.close()
+            raise
 
     @property
     def log_path(self) -> Path:
@@ -156,9 +197,9 @@ class JsonlStore(SqliteStore[T], Generic[T]):
 
     # ---- offset bookkeeping ------------------------------------------
 
-    def _read_offset(self) -> int | None:
+    def _read_meta_int(self, key: str) -> int | None:
         row = self._conn.execute(
-            "SELECT value FROM store_meta WHERE key = ?", (_OFFSET_KEY,)
+            "SELECT value FROM store_meta WHERE key = ?", (key,)
         ).fetchone()
         if row is None:
             return None
@@ -167,11 +208,23 @@ class JsonlStore(SqliteStore[T], Generic[T]):
         except (TypeError, ValueError):
             return None
 
-    def _offset_stmt(self, offset: int) -> tuple[str, tuple]:
-        return (
-            "INSERT OR REPLACE INTO store_meta (key, value) VALUES (?, ?)",
-            (_OFFSET_KEY, str(offset)),
-        )
+    def _read_offset(self) -> int | None:
+        return self._read_meta_int(_OFFSET_KEY)
+
+    def _stamp(self, offset: int) -> None:
+        """Stage the offset + indexed-row-count marks (caller commits)."""
+        sql = "INSERT OR REPLACE INTO store_meta (key, value) VALUES (?, ?)"
+        for key, value in (
+            (_OFFSET_KEY, offset),
+            (_FACT_COUNT_KEY, self._facts_indexed),
+            (_TICK_COUNT_KEY, self._ticks_indexed),
+        ):
+            self._conn.execute(sql, (key, str(value)))
+
+    def _row_counts(self) -> tuple[int, int]:
+        facts = self._conn.execute("SELECT COUNT(*) FROM facts").fetchone()[0]
+        ticks = self._conn.execute("SELECT COUNT(*) FROM ticks").fetchone()[0]
+        return int(facts), int(ticks)
 
     def _log_size(self) -> int:
         try:
@@ -195,18 +248,33 @@ class JsonlStore(SqliteStore[T], Generic[T]):
             os.fsync(fh.fileno())
         return self._log_size()
 
-    def _index(self, sql: str, row: tuple, offset: int) -> None:
-        """Index one row and stamp the consumed offset — one transaction."""
-        stmt, params = self._offset_stmt(offset)
-        self._conn.execute(sql, row)
-        self._conn.execute(stmt, params)
-        self._conn.commit()
+    def _write(self, sql: str, row: tuple, line: str, is_fact: bool) -> None:
+        """Stage the INSERT, make the line durable, then stamp and commit.
+
+        The INSERT runs first, uncommitted: a rejected row (duplicate id from
+        ``id_override``, any constraint) fails before a byte reaches the log,
+        so a refused append can never orphan a line. Nothing is observable
+        until the commit, which happens strictly after the fsync.
+        """
+        try:
+            self._conn.execute(sql, row)
+            offset = self._append_line(line)
+            if is_fact:
+                self._facts_indexed += 1
+            else:
+                self._ticks_indexed += 1
+            self._stamp(offset)
+            self._conn.commit()
+        except BaseException:
+            self._conn.rollback()
+            self._facts_indexed, self._ticks_indexed = self._row_counts()
+            raise
 
     def _write_fact_row(self, row: tuple) -> None:
-        self._index(_FACT_INSERT, row, self._append_line(serialize_fact_row(row)))
+        self._write(_FACT_INSERT, row, serialize_fact_row(row), True)
 
     def _write_tick_row(self, row: tuple) -> None:
-        self._index(_TICK_INSERT, row, self._append_line(serialize_tick_row(row)))
+        self._write(_TICK_INSERT, row, serialize_tick_row(row), False)
 
     # ---- catch-up -----------------------------------------------------
 
@@ -226,6 +294,7 @@ class JsonlStore(SqliteStore[T], Generic[T]):
                     f"{self._log_path} — export it first "
                     "(store.jsonl.export_jsonl), then open it JSONL-canonical"
                 )
+            self._facts_indexed = self._ticks_indexed = 0
             self._index_offset(0)
             return "empty"
 
@@ -238,11 +307,41 @@ class JsonlStore(SqliteStore[T], Generic[T]):
         if not self._prefix_intact(offset):
             self._rebuild(f"log content at offset {offset} does not match the index")
             return "rebuilt"
+
+        self._facts_indexed = self._read_meta_int(_FACT_COUNT_KEY) or 0
+        self._ticks_indexed = self._read_meta_int(_TICK_COUNT_KEY) or 0
         if offset == size:
+            self._refuse_out_of_band()
             return "synced"
 
         self._tail_forward(offset)
+        self._refuse_out_of_band()
         return "tailed"
+
+    def _refuse_out_of_band(self) -> None:
+        """Refuse a db carrying rows that never came through the log.
+
+        ``libs/store``'s merge/receive/rebirth/compact open their own
+        connection and INSERT straight into ``facts``/``ticks``. Those rows
+        are invisible to the log, so the index is no longer a function of it.
+        Refusing is the only non-destructive answer: rebuilding would delete
+        precisely the out-of-band rows. Catches inserts, not in-place
+        updates — those are the last-line compare's job.
+        """
+        if self._read_meta_int(_FACT_COUNT_KEY) is None:
+            return  # pre-count-marker store: nothing to compare against
+        facts, ticks = self._row_counts()
+        if facts == self._facts_indexed and ticks == self._ticks_indexed:
+            return
+        raise JsonlCanonicalUnsupported(
+            f"{self._path} holds rows that did not come through "
+            f"{self._log_path}: sqlite has {facts} fact(s)/{ticks} tick(s), the "
+            f"log accounts for {self._facts_indexed}/{self._ticks_indexed}. "
+            "Out-of-band writers (store.merge, store.receive, rebirth, "
+            "compact) are not wired for a JSONL-canonical store. Recovery: "
+            "open it as a plain SqliteStore and re-export the log "
+            "(store.jsonl.export_jsonl) before reopening JSONL-canonical."
+        )
 
     def _has_rows(self) -> bool:
         for table in ("facts", "ticks"):
@@ -251,9 +350,26 @@ class JsonlStore(SqliteStore[T], Generic[T]):
         return False
 
     def _index_offset(self, offset: int) -> None:
-        stmt, params = self._offset_stmt(offset)
-        self._conn.execute(stmt, params)
+        self._stamp(offset)
         self._conn.commit()
+
+    def _last_newline_before(self, fh, end: int) -> int:
+        """Byte offset just past the last ``\\n`` strictly before ``end``.
+
+        Scans backwards in chunks — never loads the whole log, and never
+        gives up as a function of line length (a single 70KB payload must
+        not silently disable the integrity check). 0 when there is none.
+        """
+        pos = end
+        while pos > 0:
+            start = max(0, pos - _CHUNK)
+            fh.seek(start)
+            chunk = fh.read(pos - start)
+            idx = chunk.rfind(b"\n")
+            if idx != -1:
+                return start + idx + 1
+            pos = start
+        return 0
 
     def _truncate_torn_line(self) -> None:
         """Drop a trailing partial line (crash mid-write) from the log.
@@ -264,24 +380,12 @@ class JsonlStore(SqliteStore[T], Generic[T]):
         size = self._log_size()
         if size == 0:
             return
-        cut = 0
         with self._log_path.open("rb") as fh:
             fh.seek(size - 1)
             if fh.read(1) == b"\n":
                 return
-            # Scan backwards in chunks for the last newline — never load the
-            # whole log (live logs run to hundreds of megabytes).
-            pos = size
-            while pos > 0:
-                start = max(0, pos - 65536)
-                fh.seek(start)
-                chunk = fh.read(pos - start)
-                idx = chunk.rfind(b"\n")
-                if idx != -1:
-                    cut = start + idx + 1
-                    break
-                pos = start
-        # cut stays 0 when the whole file is one partial line.
+            cut = self._last_newline_before(fh, size)
+        # cut is 0 when the whole file is one partial line.
         _log.warning(
             "jsonl-canonical: torn final line in %s — truncating %d byte(s)",
             self._log_path, size - cut,
@@ -301,15 +405,19 @@ class JsonlStore(SqliteStore[T], Generic[T]):
         if offset == 0:
             return True
         with self._log_path.open("rb") as fh:
-            start = max(0, offset - 1024 * 64)
-            fh.seek(start)
-            chunk = fh.read(offset - start)
-        if not chunk.endswith(b"\n"):
+            fh.seek(offset - 1)
+            if fh.read(1) != b"\n":
+                return False
+            # Walk back to the true line start however long the line is —
+            # declining to judge past a fixed window would turn the check off
+            # as a function of payload size.
+            line_start = self._last_newline_before(fh, offset - 1)
+            fh.seek(line_start)
+            raw = fh.read(offset - 1 - line_start)
+        try:
+            line = raw.decode("utf-8")
+        except UnicodeError:
             return False
-        line_start = chunk.rfind(b"\n", 0, len(chunk) - 1) + 1
-        if line_start == 0 and start != 0:
-            return True  # one very long line; the cheap check declines to judge
-        line = chunk[line_start:-1].decode("utf-8", errors="replace")
         try:
             t, row = deserialize_row(line)
         except (JsonlCodecError, UnicodeError):
@@ -331,8 +439,12 @@ class JsonlStore(SqliteStore[T], Generic[T]):
         ).fetchone()
         if stored is None:
             return False
-        serialize = serialize_fact_row if t == "fact" else serialize_tick_row
-        return serialize(tuple(stored)) == serialize(row)
+        # Compare VALUES, not re-serialized text: sqlite's REAL affinity
+        # returns 1700000000.0 for a line carrying 1700000000, and
+        # re-serializing would make every integral ts/since look corrupt —
+        # a full rebuild on every open, drowning the real-corruption signal.
+        # Python's cross-type numeric equality normalizes that uniformly.
+        return tuple(stored) == tuple(row)
 
     def _read_lines(self, offset: int):
         """Yield ``(line, end_offset)`` for every COMPLETE line from offset."""
@@ -360,8 +472,9 @@ class JsonlStore(SqliteStore[T], Generic[T]):
             else:
                 ticks += 1
             end = pos
-        stmt, params = self._offset_stmt(end)
-        self._conn.execute(stmt, params)
+        self._facts_indexed += facts
+        self._ticks_indexed += ticks
+        self._stamp(end)
         self._conn.commit()
         return facts, ticks, end
 
@@ -385,6 +498,7 @@ class JsonlStore(SqliteStore[T], Generic[T]):
         )
         self._conn.execute("DELETE FROM facts")
         self._conn.execute("DELETE FROM ticks")
+        self._facts_indexed = self._ticks_indexed = 0
         facts, ticks, end = self._index_lines(0)
         _log.warning(
             "jsonl-canonical: rebuilt %d fact(s), %d tick(s) from %s (offset %d)",

@@ -366,3 +366,124 @@ def test_history_mutating_ops_refuse_loudly(tmp_path, op):
     with pytest.raises(JsonlCanonicalUnsupported, match="jsonl-canonical-store"):
         getattr(store, op)()
     store.close()
+
+
+# --- review regressions (S3 round 1) --------------------------------------
+
+
+def test_rejected_insert_never_orphans_a_line(tmp_path):
+    """A duplicate id must fail BEFORE the line is durable.
+
+    The INSERT is staged first precisely so a refused append cannot leave a
+    line the index doesn't name — otherwise the next successful append would
+    stamp the offset past the orphan and the index would stop being a
+    function of the log, silently.
+    """
+    import sqlite3
+
+    store = open_store(tmp_path)
+    log = log_path_for(store._path)
+    first = store.append(fact(message="one"))
+
+    with pytest.raises(sqlite3.IntegrityError):
+        store.append(fact(message="dup"), id_override=first)
+    assert len(lines(log)) == 1  # no orphan line
+
+    third = store.append(fact(message="three"))
+    assert offset_of(store) == log.stat().st_size
+    store.close()
+
+    reopened = open_store(tmp_path)
+    assert reopened.catch_up() == "synced"
+    assert [r[0] for r in sqlite_facts(reopened._path)] == [first, third]
+    reopened.close()
+
+
+def test_duplicate_line_in_log_does_not_brick_reopen(tmp_path):
+    """Even a hand-corrupted log must leave the store openable.
+
+    The old failure mode: a rebuild raised from __init__ with DELETE FROM
+    facts uncommitted on a leaked connection, so every later open failed
+    with 'database is locked' — one bad open bricked the store forever.
+    """
+    import sqlite3
+
+    store = open_store(tmp_path)
+    log = log_path_for(store._path)
+    store.append(fact(message="one"))
+    store.close()
+
+    with log.open("a", encoding="utf-8") as fh:  # duplicate the only line
+        fh.write(lines(log)[0] + "\n")
+    conn = sqlite3.connect(str(tmp_path / "s.db"))
+    conn.execute("DELETE FROM store_meta WHERE key = 'jsonl_offset'")
+    conn.commit()
+    conn.close()
+
+    with pytest.raises(sqlite3.IntegrityError):
+        open_store(tmp_path)
+    # the db is not locked: a second attempt fails the same way, not worse
+    with pytest.raises(sqlite3.IntegrityError):
+        open_store(tmp_path)
+
+
+def test_integral_timestamps_stay_synced_across_opens(tmp_path):
+    """sqlite REAL affinity must not read as corruption.
+
+    An int ts in the line comes back as a float from sqlite; comparing
+    re-serialized text made that look like divergence, so every open
+    rebuilt the entire index and the WARNING became the steady state.
+    """
+    store = open_store(tmp_path)
+    store.append(Fact.of("note", "kyle", ts=1700000000, message="int ts"))
+    store.close()
+
+    for _ in range(3):
+        s = open_store(tmp_path)
+        assert s.catch_up() == "synced"
+        s.close()
+
+
+def test_out_of_band_sqlite_rows_refuse_rather_than_vanish(tmp_path):
+    """store.merge/receive INSERT straight into the db, bypassing the log.
+
+    Accepting them as 'synced' meant the next rebuild deleted them with no
+    error. Refusing is the only non-destructive answer — the rows survive.
+    """
+    import sqlite3
+
+    store = open_store(tmp_path)
+    store.append(fact(message="one"))
+    store.close()
+
+    conn = sqlite3.connect(str(tmp_path / "s.db"))
+    conn.execute(
+        "INSERT OR IGNORE INTO facts (id, kind, ts, observer, origin, payload) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        ("MERGED", "note", 1.0, "peer", "", "{}"),
+    )
+    conn.commit()
+    conn.close()
+
+    with pytest.raises(JsonlCanonicalUnsupported, match="did not come through"):
+        open_store(tmp_path)
+    assert "MERGED" in [r[0] for r in sqlite_facts(tmp_path / "s.db")]
+
+
+def test_long_line_still_gets_the_integrity_check(tmp_path):
+    """The prefix check must not switch off as a function of payload size."""
+    import sqlite3
+
+    store = open_store(tmp_path)
+    store.append(fact(message="x" * 70_000))
+    store.close()
+
+    conn = sqlite3.connect(str(tmp_path / "s.db"))
+    conn.execute("UPDATE facts SET observer = 'TAMPERED', payload = '{}'")
+    conn.commit()
+    conn.close()
+
+    reopened = open_store(tmp_path)  # opening rebuilds: the tamper IS detected
+    assert [r[3] for r in sqlite_facts(reopened._path)] == ["kyle"]
+    assert reopened.catch_up() == "synced"
+    reopened.close()

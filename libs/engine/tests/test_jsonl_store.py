@@ -798,3 +798,50 @@ def test_interior_tamper_of_an_unsealed_fact_is_caught_by_nothing(tmp_path):
     assert store.verify_chain()["ok"]
     assert store.verify_facts()["ok"]
     store.close()
+
+
+def test_recovery_during_a_tick_leaves_the_chain_verifiable(tmp_path):
+    """Reconcile runs after mint — the chain must survive that ordering.
+
+    append_tick derives prev_hash/window_hash/fact_cursor from sqlite BEFORE
+    the row reaches _write, so a line recovered by the append-time reconcile
+    lands in the index after the in-flight tick has already committed to its
+    cursor. That is safe only because a tick's window is bounded by a fact
+    CURSOR, not a timestamp: the recovered row falls outside the sealed
+    window by construction and the next tick seals it. Pinned because the
+    alternative — a window hash that does not commit to a fact inside its
+    own window — would be corruption manufactured by the recovery path.
+    """
+    import time
+
+    store = open_store(tmp_path)
+    store.append(fact(message="one"))
+
+    # Writer A's line: durable, unindexed, timestamped inside the window the
+    # next tick would otherwise seal.
+    orphan = ("01CRASHEDA", "note", time.time(), "sol", "", json.dumps({"m": "two"}))
+    with (tmp_path / "s.jsonl").open("a", encoding="utf-8") as fh:
+        fh.write(serialize_fact_row(orphan) + "\n")
+
+    store.append_tick(
+        Tick(name="seal", ts=datetime.now(UTC), payload={"n": 1}, origin="t")
+    )
+    assert store.verify_chain()["ok"]
+    assert [r[0] for r in sqlite_facts(tmp_path / "s.db")][-1] == "01CRASHEDA"
+
+    # The next boundary seals the recovered fact, and the chain still holds.
+    store.append_tick(
+        Tick(name="seal", ts=datetime.now(UTC), payload={"n": 2}, origin="t")
+    )
+    assert store.verify_chain()["ok"]
+    cursors = [
+        r[0]
+        for r in store._conn.execute("SELECT fact_cursor FROM ticks ORDER BY rowid")
+    ]
+    assert cursors[1] == "01CRASHEDA"  # sealed by the second tick, not the first
+    store.close()
+
+    reopened = open_store(tmp_path)
+    assert reopened.catch_up() == "synced"
+    assert reopened.verify_chain()["ok"]
+    reopened.close()

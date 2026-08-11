@@ -2973,6 +2973,29 @@ class TestStoreOverride:
         items = vertex_read(vpath, store=log)["decision"]["items"]
         assert items["auth"]["message"] == "from the log"
 
+    def test_a_relative_override_is_refused_as_ambiguous(self, tmp_path, monkeypatch):
+        """sol r4 finding 3: two anchors, one silent pick.
+
+        A DECLARED ``store "./x.db"`` has only one anchor — the vertex file.
+        An override arrives from a caller with a cwd, and resolving it against
+        the vertex directory made a packaged vertex plus ``store="data/x.db"``
+        read the package-adjacent database instead of the workspace's. The
+        caller knows which it meant; make it say so.
+        """
+        from engine import vertex_facts, vertex_read, vertex_summary, vertex_ticks
+
+        vpath = self._vertex(tmp_path)
+        monkeypatch.chdir(tmp_path)
+
+        for call in (
+            lambda: vertex_read(vpath, store="data/store.db"),
+            lambda: vertex_summary(vpath, store="data/store.db"),
+            lambda: vertex_facts(vpath, 0, 2000.0, store="data/store.db"),
+            lambda: vertex_ticks(vpath, 0, 2000.0, store="data/store.db"),
+        ):
+            with pytest.raises(ValueError, match="must be an absolute path"):
+                call()
+
     def test_override_refused_on_aggregate(self, tmp_path, monkeypatch):
         from engine import vertex_read
 

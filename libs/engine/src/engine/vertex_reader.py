@@ -788,11 +788,26 @@ def _override_index(ast: Any, vertex_path: Path, store: Path | str | None) -> Pa
     (and materializes/tails) its derived index exactly like a declared one —
     reads are sqlite reads either way (``engine.residence``).
 
+    **Must be absolute.** A *declared* ``store "./x.db"`` is relative to the
+    vertex file, which is the only anchor a declaration has. An override
+    arrives from a caller who has a cwd, so a relative one has two plausible
+    anchors and silently picks the vertex's — a packaged vertex plus
+    ``store="data/tasks.db"`` reads the package-adjacent database instead of
+    the workspace's. Refusing is the explicit form: the caller knows which
+    anchor it meant and can say so in one ``.resolve()``.
+
     Refused on combine/discover vertices: an aggregate reads N stores and one
     override cannot say which, so the caller must address a member store.
     """
     if store is None:
         return None
+    if not Path(store).is_absolute():
+        raise ValueError(
+            f"store override must be an absolute path, got '{store}' — a "
+            "relative override is ambiguous between the vertex's directory "
+            f"({vertex_path.parent}) and the caller's cwd ({Path.cwd()}); "
+            "resolve it before passing it"
+        )
     if ast.combine is not None or ast.discover is not None:
         raise ValueError(
             "store override is per-store and cannot select over a "
@@ -826,7 +841,8 @@ def vertex_read(
     across multiple stores using SQLite ATTACH DATABASE.
 
     ``store`` overrides *where* the facts come from while the declaration
-    still supplies the folds — see :func:`_override_index`.
+    still supplies the folds — an ABSOLUTE canonical locator, see
+    :func:`_override_index`.
     """
     from .compiler import compile_vertex
     from .store_reader import StoreReader
@@ -1448,6 +1464,10 @@ def vertex_facts(
       per-member (A1/A9).
 
     ``None`` for both = head (identical to pre-S5 behavior).
+
+    ``store`` overrides *where* the rows come from while the declaration
+    still supplies the folds — an ABSOLUTE canonical locator (a relative
+    one is refused as ambiguous), see :func:`_override_index`.
     """
     from .store_reader import StoreReader
 
@@ -1526,6 +1546,10 @@ def vertex_ticks(
 
     ``as_of`` (SPEC §9.3) resolves the declaration at a historical ``ts``
     cutoff — equal-cursors default is ``as_of = until_ts``. ``None`` = head.
+
+    ``store`` overrides *where* the rows come from while the declaration
+    still supplies the folds — an ABSOLUTE canonical locator (a relative
+    one is refused as ambiguous), see :func:`_override_index`.
     """
     from .store_reader import StoreReader
 
@@ -1569,6 +1593,10 @@ def vertex_summary(
     Excludes the reserved ``_decl.*`` namespace from ``facts.kinds`` by
     default (SPEC §9.4); ``include_internal=True`` is the explicit escape
     hatch.
+
+    ``store`` overrides *where* the rows come from while the declaration
+    still supplies the folds — an ABSOLUTE canonical locator (a relative
+    one is refused as ambiguous), see :func:`_override_index`.
     """
     from .store_reader import StoreReader
 

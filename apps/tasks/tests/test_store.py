@@ -153,3 +153,51 @@ class TestFactLine:
         text = "".join(c.char for c in block.row(0))
         assert "decision" in text
         assert "()" not in text
+
+
+# -- authority switch: a .jsonl declaration must not get sqlite bytes -------
+
+
+def test_emit_writes_the_log_when_the_locator_is_jsonl(tmp_path):
+    """The dormant defect made live.
+
+    Task declarations are all `.db` today, so this app's writes look fine.
+    The day one flips to `.jsonl`, a hand-built SqliteStore would write
+    sqlite bytes straight into the declared canonical log. Routing through
+    engine's open_canonical_store is what keeps that from happening.
+    """
+    from engine.jsonl_codec import deserialize_row
+    from strange_loops.store import emit_fact, emit_tick
+
+    canonical = tmp_path / "data" / "tasks.jsonl"
+    emit_fact(canonical, "task.created", "kyle", {"name": "t1"})
+    emit_tick(canonical, "task.tick", {"task": "t1", "status": "completed"})
+
+    assert canonical.exists()
+    assert (tmp_path / "data" / "tasks.db").exists()  # the derived index
+    records = [
+        deserialize_row(ln)
+        for ln in canonical.read_text(encoding="utf-8").splitlines()
+        if ln
+    ]
+    assert [t for t, _ in records] == ["fact", "tick"]
+
+
+def test_emit_still_writes_sqlite_directly_for_a_db_locator(tmp_path):
+    """Every declaration this app has today — no behavior change."""
+    from strange_loops.store import emit_fact
+
+    canonical = tmp_path / "data" / "tasks.db"
+    emit_fact(canonical, "task.created", "kyle", {"name": "t1"})
+
+    assert canonical.exists()
+    assert not (tmp_path / "data" / "tasks.jsonl").exists()
+
+
+def test_store_path_for_resolves_through_residence():
+    """Relative locators resolve against the vertex file, not the cwd."""
+    from strange_loops.store import store_path_for
+
+    resolved = store_path_for("tasks")
+    assert resolved.is_absolute()
+    assert resolved.name == "tasks.db"

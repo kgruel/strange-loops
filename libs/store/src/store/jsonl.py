@@ -49,15 +49,14 @@ import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
+# Column order is the engine's to state — it owns the schema and the codec
+# that has to agree with it.
+from engine.sqlite_store import FACT_COLUMNS as _FACT_FIELDS
+from engine.sqlite_store import TICK_COLUMNS as _TICK_FIELDS
+
 from ._conn import _open
 
 __all__ = ["ExportResult", "RebuildResult", "export_jsonl", "rebuild_jsonl"]
-
-_FACT_COLS = "id, kind, ts, observer, origin, payload"
-_TICK_COLS = (
-    "id, name, ts, since, origin, payload, "
-    "prev_hash, window_start, fact_cursor, window_hash"
-)
 
 
 @dataclass(frozen=True)
@@ -77,10 +76,6 @@ class RebuildResult:
     facts: int
     ticks: int
     path: Path
-
-
-_FACT_FIELDS = (*_FACT_COLS.split(", "), "signature")
-_TICK_FIELDS = (*_TICK_COLS.split(", "), "signature")
 
 
 def _read_rows(conn: sqlite3.Connection) -> tuple[list, list]:
@@ -168,14 +163,19 @@ def export_jsonl(source: Path, target: Path) -> ExportResult:
 def rebuild_jsonl(source: Path, target: Path) -> RebuildResult:
     """Rebuild a fresh sqlite store at ``target`` from the JSONL log ``source``.
 
-    Schema comes from ``engine.SqliteStore``'s own creation path (the widest
-    canonical schema — chain columns AND both signature columns); rows are
-    then inserted verbatim in log order, so target rowid order reproduces the
-    receipt order the log carries. No append/mint machinery runs: this is an
-    index rebuild, not a re-emit — hashes and signatures must not change.
+    Rebuilding an index from its log is ``engine.jsonl_store``'s own job —
+    it is what :class:`~engine.jsonl_store.JsonlStore` does on every open
+    whose offset marker cannot be trusted, and it is where the recovery
+    rules (torn tail, verbatim insert, no re-mint) already live. This is the
+    migration-side wrapper around that: the guard that a rebuild never
+    overwrites an existing target, and the counts as a receipt.
+
+    The rebuilt index comes out *stamped* — offset and row-count markers
+    recorded — rather than in the rebuild-on-next-open state, because the
+    engine path stamps what it consumed. Hashes and signatures are untouched:
+    indexing is not re-emitting.
     """
-    from engine import SqliteStore
-    from engine.jsonl_codec import deserialize_row
+    from engine.jsonl_store import JsonlStore
 
     source, target = Path(source), Path(target)
     if not source.exists():
@@ -183,38 +183,17 @@ def rebuild_jsonl(source: Path, target: Path) -> RebuildResult:
     if target.exists():
         raise FileExistsError(f"Rebuild target already exists: {target}")
 
-    fact_rows: list[tuple] = []
-    tick_rows: list[tuple] = []
-    with source.open(encoding="utf-8") as fh:
-        for line in fh:
-            line = line.strip()
-            if not line:
-                continue
-            t, row = deserialize_row(line)
-            (fact_rows if t == "fact" else tick_rows).append(row)
-
     target.parent.mkdir(parents=True, exist_ok=True)
-    # Constructing the store creates the canonical schema; append() is never
-    # called, so the serializers are never invoked.
-    store = SqliteStore(path=target, serialize=lambda d: d,
-                        deserialize=lambda d: d)
-    store.close()
+    JsonlStore(
+        path=target, log_path=source,
+        serialize=lambda d: d, deserialize=lambda d: d,
+    ).close()
 
-    conn = _open(target)
+    conn = _open(target, read_only=True)
     try:
-        conn.executemany(
-            f"INSERT INTO facts ({_FACT_COLS}, signature) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            fact_rows,
-        )
-        conn.executemany(
-            f"INSERT INTO ticks ({_TICK_COLS}, signature) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            tick_rows,
-        )
-        conn.commit()
+        facts = conn.execute("SELECT COUNT(*) FROM facts").fetchone()[0]
+        ticks = conn.execute("SELECT COUNT(*) FROM ticks").fetchone()[0]
     finally:
         conn.close()
 
-    return RebuildResult(facts=len(fact_rows), ticks=len(tick_rows),
-                         path=target)
+    return RebuildResult(facts=int(facts), ticks=int(ticks), path=target)

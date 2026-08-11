@@ -28,6 +28,8 @@ import json
 import rfc8785
 import sqlite3
 
+from . import jsonl_codec
+
 from ulid import ULID
 
 # Pre-created decoder for faster JSON parsing in hot paths.
@@ -99,17 +101,30 @@ def gen_id() -> str:
 _CHAIN_COLUMNS = ("prev_hash", "window_start", "fact_cursor", "window_hash",
                   "signature")
 
-_TICK_ROW_SQL = (
-    "id, name, ts, since, origin, payload, "
-    "prev_hash, window_start, fact_cursor, window_hash, signature"
-)
+# Persisted column order — ONE spelling, derived from the codec's field
+# tuples. The schema, the INSERTs, the SELECTs and the JSONL line all order
+# their columns the same way by construction; a row assembled for one is the
+# row the others take. Spelling it a second time is how a fact ends up with
+# its observer in the origin column.
+FACT_COLUMNS = (*jsonl_codec.FACT_FIELDS, "signature")
+TICK_COLUMNS = (*jsonl_codec.TICK_FIELDS, "signature")
+
+
+def _insert_sql(table: str, columns: tuple[str, ...]) -> str:
+    return (
+        f"INSERT INTO {table} ({', '.join(columns)}) "
+        f"VALUES ({', '.join('?' * len(columns))})"
+    )
+
+
+FACT_INSERT_SQL = _insert_sql("facts", FACT_COLUMNS)
+TICK_INSERT_SQL = _insert_sql("ticks", TICK_COLUMNS)
+
+_TICK_ROW_SQL = ", ".join(TICK_COLUMNS)
 
 # Delta-1 column set — used by the read-only verify path against stores that
 # predate the signature column (verify never migrates schema).
-_TICK_ROW_SQL_V1 = (
-    "id, name, ts, since, origin, payload, "
-    "prev_hash, window_start, fact_cursor, window_hash"
-)
+_TICK_ROW_SQL_V1 = ", ".join(jsonl_codec.TICK_FIELDS)
 
 
 def _canonical_bytes(obj: object) -> bytes:
@@ -543,21 +558,12 @@ class SqliteStore(Generic[T]):
     def _write_fact_row(self, row: tuple) -> None:
         """Persist one assembled fact row (id, kind, ts, observer, origin,
         payload, signature)."""
-        self._conn.execute(
-            "INSERT INTO facts (id, kind, ts, observer, origin, payload, signature) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            row,
-        )
+        self._conn.execute(FACT_INSERT_SQL, row)
         self._conn.commit()
 
     def _write_tick_row(self, row: tuple) -> None:
         """Persist one assembled tick row (_TICK_ROW_SQL order + signature)."""
-        self._conn.execute(
-            "INSERT INTO ticks (id, name, ts, since, origin, payload, "
-            "prev_hash, window_start, fact_cursor, window_hash, signature) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            row,
-        )
+        self._conn.execute(TICK_INSERT_SQL, row)
         self._conn.commit()
 
     def current_chain_head(self) -> str | None:

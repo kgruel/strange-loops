@@ -158,7 +158,13 @@ from .jsonl_codec import (
     serialize_fact_row,
     serialize_tick_row,
 )
-from .sqlite_store import SqliteStore
+from .sqlite_store import (
+    FACT_COLUMNS,
+    FACT_INSERT_SQL,
+    TICK_COLUMNS,
+    TICK_INSERT_SQL,
+    SqliteStore,
+)
 
 __all__ = [
     "JsonlCanonicalUnsupported",
@@ -178,16 +184,6 @@ _FACT_COUNT_KEY = "jsonl_fact_count"
 _TICK_COUNT_KEY = "jsonl_tick_count"
 
 _CHUNK = 64 * 1024
-
-_FACT_INSERT = (
-    "INSERT INTO facts (id, kind, ts, observer, origin, payload, signature) "
-    "VALUES (?, ?, ?, ?, ?, ?, ?)"
-)
-_TICK_INSERT = (
-    "INSERT INTO ticks (id, name, ts, since, origin, payload, "
-    "prev_hash, window_start, fact_cursor, window_hash, signature) "
-    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-)
 
 
 class JsonlCanonicalUnsupported(NotImplementedError):
@@ -483,10 +479,10 @@ class JsonlStore(SqliteStore[T], Generic[T]):
         self.catch_up()
 
     def _write_fact_row(self, row: tuple) -> None:
-        self._write(_FACT_INSERT, row, serialize_fact_row(row), True)
+        self._write(FACT_INSERT_SQL, row, serialize_fact_row(row), True)
 
     def _write_tick_row(self, row: tuple) -> None:
-        self._write(_TICK_INSERT, row, serialize_tick_row(row), False)
+        self._write(TICK_INSERT_SQL, row, serialize_tick_row(row), False)
 
     # ---- catch-up -----------------------------------------------------
 
@@ -655,17 +651,11 @@ class JsonlStore(SqliteStore[T], Generic[T]):
         return self._row_matches(t, row)
 
     def _row_matches(self, t: str, row: tuple) -> bool:
-        table, cols = (
-            ("facts", "id, kind, ts, observer, origin, payload, signature")
-            if t == "fact"
-            else (
-                "ticks",
-                "id, name, ts, since, origin, payload, prev_hash, "
-                "window_start, fact_cursor, window_hash, signature",
-            )
+        table, columns = (
+            ("facts", FACT_COLUMNS) if t == "fact" else ("ticks", TICK_COLUMNS)
         )
         stored = self._conn.execute(
-            f"SELECT {cols} FROM {table} WHERE id = ?", (row[0],)
+            f"SELECT {', '.join(columns)} FROM {table} WHERE id = ?", (row[0],)
         ).fetchone()
         if stored is None:
             return False
@@ -703,7 +693,7 @@ class JsonlStore(SqliteStore[T], Generic[T]):
         end = offset
         for line, pos in self._read_lines(offset):
             t, row = deserialize_row(line)
-            self._conn.execute(_FACT_INSERT if t == "fact" else _TICK_INSERT, row)
+            self._conn.execute(FACT_INSERT_SQL if t == "fact" else TICK_INSERT_SQL, row)
             if t == "fact":
                 facts += 1
             else:

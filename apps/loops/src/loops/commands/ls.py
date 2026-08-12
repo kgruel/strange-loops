@@ -770,7 +770,10 @@ def _exit_on_fetch_error(data: dict[str, Any]) -> int | None:
     if missing is not None:
         from loops.commands.resolve import _unknown_vertex_message
 
-        _err(_unknown_vertex_message(missing))
+        # Plain multi-line print, exactly like read's _validate_kind_or_exit
+        # — painted's Block.text flattens newlines, which would collapse the
+        # three-line did-you-mean shape into one run-on line.
+        print(_unknown_vertex_message(missing), file=sys.stderr)
     else:
         _err(err)
     return 1

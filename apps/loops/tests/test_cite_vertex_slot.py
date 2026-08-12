@@ -195,6 +195,51 @@ class TestAllRefsDropError:
         assert len(facts) == 1
         assert facts[0]["payload"].get("ref_ref") is not None
 
+    def test_mixed_inert_pin_refusal_message_discloses_counts(self, sandbox, capsys):
+        # Arbiter ruling (finding:chw-s4-refusal-message-inert-pins):
+        # semantics STAND — all attempted (declared-kind) refs failing
+        # refuses even when an inert pin rides along — but the message must
+        # disclose attempted-vs-inert honestly, not claim "none resolved"
+        # about a pin that was never attempted.
+        vpath = _write_vertex(sandbox, "t")
+        ctx = _ctx()
+        # thread is declared (attempted, fails); "atoms" is not declared on
+        # this vertex or its topology → atoms/baz is an inert pin.
+        rc = cite_view.run(["t", "thread:absent", "atoms/baz"], ctx)
+        assert rc == 2
+        err = capsys.readouterr().err
+        assert "all 1 entity ref(s) failed to resolve" in err
+        assert "1 inert pin(s) dropped with the refusal" in err
+        assert "none of its refs resolved" not in err
+        assert _cite_facts(vpath) == []
+
+    def test_all_attempted_refusal_message_has_no_inert_clause(self, sandbox, capsys):
+        vpath = _write_vertex(sandbox, "t")
+        ctx = _ctx()
+        rc = cite_view.run(["t", "thread:absent", "thread:also-absent"], ctx)
+        assert rc == 2
+        err = capsys.readouterr().err
+        assert "all 2 entity ref(s) failed to resolve" in err
+        assert "inert pin" not in err
+        assert _cite_facts(vpath) == []
+
+    def test_all_inert_cite_stores_as_provenance_only(self, sandbox, capsys):
+        # No ref is attempted (no declared-kind address) → the gate never
+        # fires and the cite stores as a provenance-only signal: the raw
+        # addresses survive in payload, nothing resolved, nothing pinned.
+        vpath = _write_vertex(sandbox, "t")
+        ctx = _ctx()
+        rc = cite_view.run(["t", "atoms/baz", "atoms/qux"], ctx)
+        assert rc == 0
+        err = capsys.readouterr().err
+        assert "ERROR" not in err
+        facts = _cite_facts(vpath)
+        assert len(facts) == 1
+        payload = facts[0]["payload"]
+        assert payload["ref"] == "atoms/baz,atoms/qux"
+        assert payload.get("ref_ref") is None
+        assert payload.get("_unresolved_refs") is None
+
     def test_emit_path_gets_same_refusal(self, sandbox, capsys):
         # The refusal is kind-level (lives in cmd_emit), so the raw emit
         # spelling of a cite refuses identically.

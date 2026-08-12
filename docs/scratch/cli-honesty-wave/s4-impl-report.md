@@ -103,6 +103,32 @@ Agent: s4-impl. Branch: worktree-agent-a2bd6127c4f74d6a8 (worktree off 17783fd).
   4. `loops cite thread:arc` (no vertex, single `.loops/t.vertex`) → rc 0
   5. `loops cite t` (vertex, no refs) → rc 2, usage error
 
+## Integration round (coordinator findings, post-merge as 11bd3c3)
+
+- **finding:chw-s4-test-hermeticity** — five `TestCite` tests in
+  `test_emit.py` (`comma_joined_refs`, `context`, `message`,
+  `message_short_flag`, `message_and_context`) failed from a
+  `.loops`-bearing cwd: their fixture vertex is named `project`, so the
+  real `.loops/project.vertex` shadowed the LOOPS_HOME fixture via
+  local-first dispatch resolution, the real store's declared design/thread
+  kinds made ref resolution attempt (and fail) the refs, and the S4
+  refusal fired. Fix: `monkeypatch.chdir(tmp_path)` added to all five —
+  the suite's existing hermeticity idiom (already used by
+  `test_cite_persists_as_collect_fold_with_refs` and ~10 other tests in
+  the file). The refusal was NOT weakened.
+- **finding:chw-s4-refusal-message-inert-pins** — arbiter ruling:
+  semantics stand (mixed cite with all attempted refs failed refuses even
+  with an inert pin present; all-inert stores as provenance-only), but
+  "none of its refs resolved" overclaimed when an inert pin (undeclared
+  kind, never attempted) was present. Message now discloses counts:
+  `all N entity ref(s) failed to resolve; M inert pin(s) dropped with the
+  refusal` (inert clause omitted when M=0). Three new tests pin the mixed
+  message, the no-inert message, and the all-inert provenance-only store.
+- Cross-cwd verification: full suite **2459 passed / 1 xfailed** from the
+  worktree cwd, from `/tmp` (.loops-free), AND from a scratch
+  `.loops`-bearing cwd (project.vertex declaring design+thread+cite);
+  the five TestCite tests specifically pass from the .loops-bearing cwd.
+
 ## Deviations / notes
 
 - **Branch base is MAIN, not the wave branch.** The task said the

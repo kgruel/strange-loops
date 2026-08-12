@@ -738,10 +738,29 @@ def cmd_emit(
     if kind == "cite" and unresolved_refs and not resolved_refs:
         for u in unresolved_refs:
             _say(f"ERROR: ref '{getattr(u, 'addr', u)}' did not resolve")
+        # Honest counts (finding:chw-s4-refusal-message-inert-pins): only
+        # ENTITY refs (declared-kind addresses) are ever attempted; an inert
+        # pin (undeclared kind / non-address value) is never attempted, so
+        # "none of its refs resolved" would overclaim when one is present.
+        # The refusal drops the whole fact, inert pins included — disclose
+        # both counts. Semantics unchanged: all attempted refs failing
+        # refuses even with inert pins present; an ALL-inert cite never
+        # reaches this gate (unresolved_refs empty) and stores as
+        # provenance-only.
+        attempted = len(unresolved_refs)
+        ref_addrs = [
+            r.strip() for r in payload.get("ref", "").split(",") if r.strip()
+        ]
+        attempted_in_ref_field = sum(
+            1 for u in unresolved_refs if getattr(u, "field", "ref") == "ref"
+        )
+        inert = max(0, len(ref_addrs) - attempted_in_ref_field)
+        detail = f"all {attempted} entity ref(s) failed to resolve"
+        if inert:
+            detail += f"; {inert} inert pin(s) dropped with the refusal"
         _say(
-            "ERROR: cite refused — none of its refs resolved, and a cite "
-            "with zero resolved refs is an empty attention signal; "
-            "nothing stored"
+            f"ERROR: cite refused — {detail}; a cite with zero resolved "
+            "entity refs is an empty attention signal; nothing stored"
         )
         return 2
 

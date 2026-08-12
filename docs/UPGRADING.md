@@ -61,6 +61,17 @@ emit-parity local resolution.
   `no reconcile on record`.
 - The FTS staleness hint now names its target: `run \`sl store reindex
   <vertex>\`` — the bare form it used to suggest just refuses.
+- `sl read <unknown-vertex>` now gives the same did-you-mean suggestions `ls`
+  does (content parity; read renders it as one collapsed line). The bare
+  no-vertex case keeps the `loops init` guidance.
+- Falsy-but-valid fold keys (JSON numeric `0`, `false`) now surface as real
+  rows with real `kind/0`-style addresses — previously they were silently
+  keyless and invisible to `--key`/`--status`/`--refs`. `--why` on such items
+  now returns real attribution (was a plausible-empty `fields: []`). When a
+  native `0` and a string `"0"` coexist under one kind they remain two rows
+  sharing one displayed address, and `--why` deterministically explains the
+  string one — the deeper key-identity question is deliberately held open
+  (`thread:fold-key-identity-native-vs-string`).
 
 ---
 

@@ -1,0 +1,43 @@
+## Findings
+
+[R4-F1] **MEDIUM** — the parity ratchet’s excluded corner is reachable, and it changes a valid CLI exit.
+
+The test labels `key_field="custom", payload={"custom": 0}` unreachable ([test_key_predicate_parity.py](/Users/kaygee/Code/loops/apps/loops/tests/test_key_predicate_parity.py:20)), but the declared `by` fold accepts every non-`None` key, including numeric zero ([engine.py](/Users/kaygee/Code/loops/libs/atoms/src/atoms/engine.py:133)).
+
+Empirical reproduction with a real declared fold and stored JSON numeric key:
+
+```text
+_item_matches_key(..., "custom", "0") = True
+_row_matches_key(..., "0")           = False
+surface comma-OR survivors            = 0
+
+read ... --key 0,missing
+exit 0, "No data yet."
+
+read ... --key 0,missing --status open
+exit 2, statusless-kind refusal
+```
+
+`_row_key` nulls the falsy key ([surface.py](/Users/kaygee/Code/loops/apps/loops/src/loops/surface.py:507)), while the census predicate still scans the custom field ([fetch.py](/Users/kaygee/Code/loops/apps/loops/src/loops/commands/fetch.py:368)). Thus the census is not operating on the post-Surface row set as claimed ([dispatch.py](/Users/kaygee/Code/loops/apps/loops/src/loops/cli/dispatch.py:148)). The 15×20 matrix otherwise covers the per-token comma-OR predicate shape adequately—`any()` composition follows from cell parity—but deliberately omits the known reachable disagreement.
+
+## Claim-group verdicts
+
+1. **VERIFIED** — Tested `at`, `diff`, `review`, and `status` against facts `since`, `as-of`, `id`, and `ticks`: all 16 cells exited 2, emitted only stderr, and named the context plus both drop options. Review+diff and multi-flag priority also held. The five variants across the three in-view sites retained their prior wording.
+
+2. **VERIFIED** — Cite’s single-Invocation paths are equivalent; the five missing-root sites retain the exact message; `ls` preserved kind-before-key ordering. Bogus+key was byte-identical to bogus, while live undeclared `tick.foo --key x` reached the post-count collect-fold backstop at exit 1.
+
+3. **VERIFIED** — Full cite-gate battery passed: malformed, whitespace, Unicode separators, and trailing-comma shapes refused identically across normal/dry-run/JSON with no storage. Legacy slash refs, all-inert refs, and partial resolution still stored correctly. Verb-first, vertex-first, and raw-emit refusal stderr was byte-identical.
+
+4. **VERIFIED** — Backdated later arrival (`ts=100`) after a same-key `ts=200` fact produced the same 5-day reconcile age and byte-identical render as the former raw-fact calculation. Fold calls were exactly `thread` once and `friction` once. Zero-thread stores returned zero counts and “no reconcile on record.”
+
+5. **VERIFIED** — Census short-circuit semantics held; cite/ls/read first-slot completion tests passed; the parametrization and fixture dedup retained every substantive assertion and test count.
+
+6. **VERIFIED** — Named read misses exit 1 on stderr with suggestion/known-vertex content; bare no-vertex reads retain the initialization message and nonzero exit.
+
+7. **FAILED** — [R4-F1].
+
+Verification: **148 focused tests passed; full suite 2513 passed / 1 xfailed; `./dev check` 59 passed; `git diff --check` clean.** No repository changes made; the pre-existing untracked `.loops/` remains.
+
+## Overall: NOT CONVERGED
+
+The simplify delta is otherwise sound, but the new parity ratchet documents a production-reachable, exit-code-bearing divergence as unreachable.

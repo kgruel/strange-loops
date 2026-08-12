@@ -119,3 +119,42 @@ whitespace-normalized content and says so. Friction
     - custom lens: `read --status: a custom lens renders its own shape and
       does not apply the status filter — drop --status, or drop --lens
       autoresearch.`
+
+## Addendum — sol r4-f1 remediation (falsy-key truthiness)
+
+`finding:chw-sol-r4-f1-falsy-key-truthiness` (MEDIUM): the parity ratchet's
+"unreachable" excluded corner was ruled REACHABLE — the engine's fold
+acceptance is `is not None` (libs/atoms/src/atoms/engine.py fold_by), so a
+stored JSON numeric `0` key is legal, and `read --key 0,missing --status
+open` refused as statusless against a real status-bearing row.
+
+Fix (arbiter: substrate, not predicates), commit `108870ae` on the advanced
+tip `2db71e0a`:
+
+- `surface._row_key` gates on `is not None` (docstring now carries the
+  contract argument; `kind/0` hitting the edge/facts lookups is correct,
+  not spurious).
+- Parity matrix un-excluded: `custom=0` / `custom=False` shapes + `"0"` /
+  `"false"` patterns are cells; the predicates agree on them.
+- End-to-end pin of sol's repro: `TestFalsyKeyStatus` in
+  test_read_status.py — numeric-0 key (StorePopulator raw fact), comma-OR
+  `--key 0,missing`, `--status open` → exit 0 with the row, plus the
+  `decision/0` entity address.
+- **Collateral, FLAGGED (one inverted pin)**: exactly one test pinned the
+  old nulling — `tests/test_surface.py::test_falsy_fold_key_is_treated_as_
+  keyless` (asserted `Row.key is None`, address `thread/Z1`). It is the
+  unit pin of the ruled-away gate itself, so it was inverted (renamed
+  `test_falsy_but_valid_fold_key_survives_into_row_key`, asserts key
+  `"0"`, address `thread/0`) with the ruling cited — flagged to the
+  coordinator rather than flipped silently. No golden or render path
+  depended on the nulling (swept `_row_key` consumers, goldens, and
+  falsy-key constructs in tests). Residues left as-is and now pinned
+  explicitly: empty-string keys keep `Row.key == ""` but retain the
+  `kind/<id>` address fallback (`_address` truthiness, new sibling test);
+  `_item_full_key` (edge-corpus SOURCE side) keeps its own truthiness
+  gate, so a 0-keyed row *emitting* refs still contributes anonymously —
+  out of the ruling's scope, candidate follow-up.
+
+Verification: worktree suite **2516 passed / 1 xfailed** (2513 + 2
+end-to-end + 1 empty-string sibling; the inversion is count-neutral);
+scratch-cwd suite identical; `./dev check` exit 0.

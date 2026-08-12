@@ -132,7 +132,7 @@ def _spec_has_dropped_transforms(spec) -> bool:
 
 
 def _status_field_census(
-    data, key_or: tuple[str, ...] = (),
+    data, key_or: tuple[str, ...],
 ) -> tuple[list[str], bool]:
     """Which fetched kinds can a ``--status`` filter even match against?
 
@@ -164,20 +164,28 @@ def _status_field_census(
     def walk(sections) -> None:
         nonlocal any_bearing
         for section in sections:
-            items = section.items
-            if items and key_or:
-                items = [
-                    item for item in items
-                    if any(
-                        _item_matches_key(item, section.key_field, k)
-                        for k in key_or
-                    )
-                ]
-            if items:
-                if any("status" in item.payload for item in items):
-                    any_bearing = True
-                else:
-                    lacking.append(section.kind)
+            # Only "any surviving row?" / "any surviving row with status?"
+            # is asked, so short-circuit over a generator instead of
+            # materializing the key_or-filtered list. A kind whose rows are
+            # ALL filtered out stays neither lacking nor bearing — same
+            # empty-is-not-evidence rule as a zero-row kind.
+            survivors = (
+                item for item in section.items
+                if not key_or or any(
+                    _item_matches_key(item, section.key_field, k)
+                    for k in key_or
+                )
+            )
+            has_row = has_status = False
+            for item in survivors:
+                has_row = True
+                if "status" in item.payload:
+                    has_status = True
+                    break
+            if has_status:
+                any_bearing = True
+            elif has_row:
+                lacking.append(section.kind)
             if section.sections:
                 walk(section.sections)
 
@@ -207,7 +215,7 @@ def _refuse_or_note_statusless_kinds(op: Operation, data, reporter) -> int:
     spec = op.surface_spec
     if spec is None or spec.status is None:
         return 0
-    lacking, any_bearing = _status_field_census(data, key_or=spec.key_or or ())
+    lacking, any_bearing = _status_field_census(data, key_or=spec.key_or)
     if not lacking:
         return 0
     kinds_s = ", ".join(f"'{k}'" for k in lacking)
@@ -461,10 +469,12 @@ def dispatch(op: Operation, *, reporter: Reporter) -> int:
             f"--lens {op.lens_override}" if op.lens_override
             else "the vertex-declared lens"
         )
+        from .refusals import status_inert_refusal
+
         reporter.err(
-            f"read --status: a custom lens renders its own shape and does "
-            f"not apply the status filter — drop --status, or drop "
-            f"{dropped_flag}."
+            status_inert_refusal(
+                "a custom lens renders its own shape", dropped_flag,
+            )
         )
         return 2
 

@@ -95,16 +95,24 @@ def _fact_epoch(ts: object) -> float:
     return float("-inf")
 
 
-def _status_count(vertex_path: Path, kind: str, status: str) -> int:
+def _fold_items(vertex_path: Path, kind: str) -> list:
+    """All folded items of *kind* — ONE fetch serving every derived stat.
+
+    The thread fold feeds three numbers (open count, adopted count, newest
+    reconcile receipt); fetching it once here replaced two fold fetches
+    plus a full raw-fact scan (simplify pass, item 6).
+    """
     from loops.commands.fetch import fetch_fold
 
     state = fetch_fold(vertex_path, kind=kind)
-    total = 0
-    for section in state.sections:
-        for item in section.items:
-            if str(item.payload.get("status", "")).strip().lower() == status:
-                total += 1
-    return total
+    return [item for section in state.sections for item in section.items]
+
+
+def _status_count(items: list, status: str) -> int:
+    return sum(
+        1 for item in items
+        if str(item.payload.get("status", "")).strip().lower() == status
+    )
 
 
 def _seal_facts(vertex_path: Path, *, now_ts: float) -> tuple[dict, ...]:
@@ -146,30 +154,26 @@ def _undeclared_seal_warnings(
     )
 
 
-def _last_reconcile_ts(vertex_path: Path, *, now_ts: float) -> float | None:
-    """Epoch of the newest thread-kind fact named ``reconcile-*``, or None.
+def _reconcile_age_days(thread_items: list, *, now_ts: float) -> float | None:
+    """Days since the newest thread-fold item named ``reconcile-*``, or None.
 
-    Kind is exact (``thread`` only) and the name match is an anchored prefix
-    including the hyphen — a friction or decision carrying a ``reconcile-``
-    name does not count, nor does a thread named ``reconciliation-notes``.
+    Kind is exact (``thread`` only — the caller passes the thread fold) and
+    the name match is an anchored prefix including the hyphen — a friction
+    or decision carrying a ``reconcile-`` name does not count, nor does a
+    thread named ``reconciliation-notes``. Derived from the FOLD, not a raw
+    fact scan: the fold keeps the newest fact per name (last-wins), so the
+    max item ``ts`` over the prefix equals the max fact ``ts`` over the
+    prefix (verified equivalent on the live store; simplify pass, item 6).
     """
-    from engine import vertex_facts
-
     latest = float("-inf")
-    for fact in vertex_facts(vertex_path, 0.0, now_ts, kind="thread"):
-        payload = dict(fact.get("payload", {}) or {})
-        name = str(payload.get("name", ""))
+    for item in thread_items:
+        name = str(item.payload.get("name", ""))
         if not name.startswith(_RECONCILE_NAME_PREFIX):
             continue
-        latest = max(latest, _fact_epoch(fact.get("ts")))
-    return None if latest == float("-inf") else latest
-
-
-def _reconcile_age_days(vertex_path: Path, *, now_ts: float) -> float | None:
-    last = _last_reconcile_ts(vertex_path, now_ts=now_ts)
-    if last is None:
+        latest = max(latest, _fact_epoch(item.ts))
+    if latest == float("-inf"):
         return None
-    return max(0.0, (now_ts - last) / 86400.0)
+    return max(0.0, (now_ts - latest) / 86400.0)
 
 
 def build_orient_summary(
@@ -201,15 +205,18 @@ def build_orient_summary(
         for fact in moved_facts[:moved_limit]
     )
 
+    thread_items = _fold_items(vertex_path, "thread")
+    friction_items = _fold_items(vertex_path, "friction")
+
     return OrientSummary(
         last_seal=_last_seal(seals),
-        open_threads=_status_count(vertex_path, "thread", "open"),
-        open_frictions=_status_count(vertex_path, "friction", "open"),
-        adopted_threads=_status_count(vertex_path, "thread", "adopted"),
+        open_threads=_status_count(thread_items, "open"),
+        open_frictions=_status_count(friction_items, "open"),
+        adopted_threads=_status_count(thread_items, "adopted"),
         moved_window_days=moved_window_days,
         moved=moved,
         undeclared_seals=_undeclared_seal_warnings(vertex_path, seals),
-        reconcile_age_days=_reconcile_age_days(vertex_path, now_ts=now_ts),
+        reconcile_age_days=_reconcile_age_days(thread_items, now_ts=now_ts),
     )
 
 

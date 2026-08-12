@@ -74,7 +74,7 @@ def _build_receipt_lines(
             "stored as typed unresolved pin"
         )
         warn_lines.append((
-            f"WARN: ref '{getattr(u, 'addr', u)}' did not resolve — {pin_action}",
+            f"WARN: ref '{u.addr}' did not resolve — {pin_action}",
             "warn",
         ))
 
@@ -761,8 +761,13 @@ def cmd_emit(
         ref_tokens = [
             r.strip() for r in payload.get("ref", "").split(",") if r.strip()
         ]
-        ref_addrs = [t for t in ref_tokens if parse_ref_token(t) is not None]
-        malformed = [t for t in ref_tokens if parse_ref_token(t) is None]
+        ref_addrs: list[str] = []
+        malformed: list[str] = []
+        for t in ref_tokens:
+            if parse_ref_token(t) is not None:
+                ref_addrs.append(t)
+            else:
+                malformed.append(t)
         if not ref_addrs:
             if malformed:
                 for t in malformed:
@@ -783,15 +788,11 @@ def cmd_emit(
                     "nothing stored"
                 )
             return 2
-        cite_unresolved = [
-            u for u in unresolved_refs if getattr(u, "field", "ref") == "ref"
-        ]
-        cite_resolved = [
-            r for r in resolved_refs if getattr(r, "field", "ref") == "ref"
-        ]
+        cite_unresolved = [u for u in unresolved_refs if u.field == "ref"]
+        cite_resolved = [r for r in resolved_refs if r.field == "ref"]
         if cite_unresolved and not cite_resolved:
             for u in cite_unresolved:
-                _say(f"ERROR: ref '{getattr(u, 'addr', u)}' did not resolve")
+                _say(f"ERROR: ref '{u.addr}' did not resolve")
             # Honest counts (finding:chw-s4-refusal-message-inert-pins): only
             # ENTITY refs (declared-kind addresses) are ever attempted; an
             # inert pin (undeclared kind / non-address value) is never
@@ -799,7 +800,10 @@ def cmd_emit(
             # one is present. The refusal drops the whole fact, inert pins
             # included — disclose both counts.
             attempted = len(cite_unresolved)
-            inert = max(0, len(ref_addrs) - attempted)
+            # Never negative by construction: every attempted (unresolved
+            # entity) ref came from a parsed ref-field address, so
+            # cite_unresolved is a subset of ref_addrs.
+            inert = len(ref_addrs) - attempted
             detail = f"all {attempted} entity ref(s) failed to resolve"
             if inert:
                 detail += f"; {inert} inert pin(s) dropped with the refusal"

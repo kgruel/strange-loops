@@ -40,6 +40,7 @@ from ..dispatch import dispatch
 from ..invocation import Invocation
 from ..operation import Operation, SurfaceSpec
 from ..read_args import add_read_args
+from ..refusals import status_inert_refusal
 
 
 # --- Helpers (absorbed from main.py) --------------------------------------
@@ -675,7 +676,17 @@ def run(argv: list[str], ctx: Invocation) -> int:
 
     vertex_path = _resolve_vertex_path(ctx, vname)
     if vertex_path is None:
-        ctx.reporter.err("No vertex resolved — run `loops init` first.")
+        if vname is not None:
+            # A NAMED vertex that resolves nowhere gets the did-you-mean
+            # treatment — same message source as ls's miss
+            # (friction:read-vertex-not-found-lacks-suggestion); the bare
+            # "run init" line was a lie when vertices exist and the name is
+            # just misspelled.
+            from loops.commands.resolve import _unknown_vertex_message
+
+            ctx.reporter.err(_unknown_vertex_message(vname))
+        else:
+            ctx.reporter.err("No vertex resolved — run `loops init` first.")
         return 1
 
     # --review (0.9.0 S4) is a fold-route JSON projection of folded state that
@@ -714,8 +725,7 @@ def run(argv: list[str], ctx: Invocation) -> int:
     if args.status is not None and (args.why or args.diff):
         flag = "--why" if args.why else "--diff"
         ctx.reporter.err(
-            f"read --status: {flag} owns its own fetch and does not apply "
-            "the status filter — drop --status, or drop " + flag + "."
+            status_inert_refusal(f"{flag} owns its own fetch", flag)
         )
         return 2
 
@@ -928,8 +938,9 @@ def run(argv: list[str], ctx: Invocation) -> int:
     if args.status is not None and mode in ("live", "interactive"):
         dropped_flag = "-i" if mode == "interactive" else "--live"
         ctx.reporter.err(
-            f"read --status: {mode} mode renders the raw fold and does not "
-            f"apply the status filter — drop --status, or drop {dropped_flag}."
+            status_inert_refusal(
+                f"{mode} mode renders the raw fold", dropped_flag,
+            )
         )
         return 2
 

@@ -70,6 +70,17 @@ def loops_home() -> Path:
     return Path(xdg) / "loops"
 
 
+def missing_root_message(root: Path) -> str:
+    """The config-root-missing message — single source for every site.
+
+    Five sites report the absent ``<home>/.vertex`` root (raises in
+    vertices/store resolution, pre-flight refusals in ls/store, resolve's
+    default-path miss); byte-identity across them is by construction here,
+    not by five hand-kept copies (simplify pass, item 3).
+    """
+    return f"{root} not found. Run 'loops init' first."
+
+
 def _find_local_vertex(*, allow_ambiguous: bool = False) -> Path | None:
     """Find a .vertex file in .loops/ or cwd. Returns first match or None.
 
@@ -1518,7 +1529,7 @@ def _resolve_vertex_path(file_arg: str | None) -> Path | None:
     root = home / ".vertex"
     if root.exists():
         return root
-    _err(f"Error: {root} not found. Run 'loops init' first.")
+    _err(f"Error: {missing_root_message(root)}")
     return None
 
 

@@ -676,7 +676,17 @@ def run(argv: list[str], ctx: Invocation) -> int:
 
     vertex_path = _resolve_vertex_path(ctx, vname)
     if vertex_path is None:
-        ctx.reporter.err("No vertex resolved — run `loops init` first.")
+        if vname is not None:
+            # A NAMED vertex that resolves nowhere gets the did-you-mean
+            # treatment — same message source as ls's miss
+            # (friction:read-vertex-not-found-lacks-suggestion); the bare
+            # "run init" line was a lie when vertices exist and the name is
+            # just misspelled.
+            from loops.commands.resolve import _unknown_vertex_message
+
+            ctx.reporter.err(_unknown_vertex_message(vname))
+        else:
+            ctx.reporter.err("No vertex resolved — run `loops init` first.")
         return 1
 
     # --review (0.9.0 S4) is a fold-route JSON projection of folded state that

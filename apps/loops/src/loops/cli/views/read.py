@@ -43,6 +43,7 @@ def run(argv: list[str], ctx: Invocation) -> int:
     pre.add_argument("--at", default=None)
     pre.add_argument("--diff", default=None)
     pre.add_argument("--review", action="store_true", default=False)
+    pre.add_argument("--status", default=None)
     known, rest = pre.parse_known_args(argv)
 
     # --at/--diff are fold-route-only concerns (A9/A11). Resolve their
@@ -87,6 +88,25 @@ def run(argv: list[str], ctx: Invocation) -> int:
         ctx.reporter.err(
             f"read --review: the review projection is a fold-route snapshot — "
             f"{reason}. Drop it, or drop --review."
+        )
+        return 2
+
+    # --status filters FOLD rows by payload equality (S1, cli-honesty-wave).
+    # The event-history stream and tick routes don't apply it — refuse rather
+    # than route away and silently drop the filter (same honor-or-refuse
+    # posture as --at/--diff/--review above). A bare `--facts --status VALUE`
+    # (no window) falls through to the fold route below, honored.
+    if known.status is not None and routes_away_from_fold:
+        if known.ticks:
+            reason = "`--ticks` reads tick windows, not folded rows"
+        else:
+            reason = (
+                "`--facts` with a temporal window/anchor routes to the "
+                "event-history view, which doesn't apply it yet"
+            )
+        ctx.reporter.err(
+            f"read --status: the status filter applies to folded state — "
+            f"{reason}. Drop the window/--ticks, or drop --status."
         )
         return 2
 
@@ -165,6 +185,8 @@ def run(argv: list[str], ctx: Invocation) -> int:
         fold_rest += ["--diff", known.diff]
     if known.review:
         fold_rest.append("--review")
+    if known.status is not None:
+        fold_rest += ["--status", known.status]
     from . import fold as fold_view
 
     return fold_view.run(fold_rest, ctx)

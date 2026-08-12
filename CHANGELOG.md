@@ -1,5 +1,84 @@
 # Changelog
 
+## 0.10.0 — 2026-08-12
+
+The **surfacing wave's landed half** (`feat/010-surfacing`): three
+independently review-converged strata cut together. The headline is the
+JSONL-canonical store — the store is a file, and the file is the append-only
+log; sqlite becomes a derived, rebuildable index. Around it: a live-edge
+staleness sensor on the read path (a session's seal wiring can die silently;
+the sensor lives where death is detectable — at read time), the loops-go
+conformance tooling relocated into the workspace, and the TUI render-contract
+migration. The wave's recurring verdict-shape: when a detector overclaims,
+scope the claim (a location: "the index is behind here") instead of widening
+the detection (a verdict: "this is innocent").
+
+### Added
+- **JSONL-canonical store — the log is the store** (engine, store). Declare
+  `store "….jsonl"` and the JSONL log is the canonical artifact; the sibling
+  `….db` is a derived index, materialized at resolution and rebuilt from the
+  log whenever it can't be trusted. The store locator's extension is the
+  switch — no mode flag. Landed as four slices:
+  - **S1 — JSONL line codec**: symmetric by construction, refuses duplicate
+    keys, rejects NaN/Infinity literals and explicit `null` signatures,
+    range-checks numeric fields against the JCS domain.
+  - **S2 — JSONL export + rebuild migration oracle**: `rebuild_jsonl`
+    treats its source as read-only evidence.
+  - **S3 — the write path**: one flushed+fsynced log line, then the index
+    row commits; no append may stamp past an unindexed durable line; the
+    tick mint reconciles before reading chain state off the index, so an
+    orphan line can never mis-link the canonical chain.
+  - **S4 — the authority flip**: writers resolve the canonical locator at
+    every write site; reads tail an index that is behind the log;
+    history-mutating ops refuse on a JSONL-canonical store rather than
+    rewrite rows the log doesn't account for.
+- **canonical_audit** (engine): judges the derived index against the log and
+  never opens the store — open-time detection *repairs*, an auditor that
+  repaired would erase the evidence it exists to inspect. `sl store verify`
+  gates on canonical agreement with honest labels; `--deep` compares every
+  log line field-for-field, in order, then re-derives the tick chain from
+  canonical content. `sl store stats` and `sl store ticks` gate too.
+  Verdicts are location claims, not innocence claims: lag is not tampering —
+  the consumed prefix is judged, the lag verdict is corroborated against the
+  log, and a rewound marker heals.
+- **Live-edge staleness sensor** (read path): disclosure substrate (the data
+  half) plus a read-path footer (the render half) — store reads disclose how
+  stale the live edge is relative to the last seal, so dead seal wiring
+  surfaces at the next read instead of weeks later.
+- **`store=` read override** on the engine reader APIs — an absolute path is
+  required; a relative one refuses.
+- **loops-go conformance tooling** (`tools/`): the vector generators
+  relocated into the workspace (fold vectors, store/merge/tie fixtures),
+  plus the family-3 generator — same-ts id tie-break; tie fixture ids are
+  real ULIDs minted through one checked seam.
+
+### Changed
+- **tasks resolves the declared store, both directions**: writers route
+  through the authority switch and resolve the declared store locator (not a
+  hardcoded `.db`); readers — the dashboard and `log --follow` included —
+  resolve the workspace store, not the packaged one. Ratcheted structurally:
+  a dropped `store=` fails at the exact call site.
+- **TUI render-contract migration** (breaking for renderer authors):
+  apps/tasks migrated off the deprecated `render=(ctx, data)` contract.
+- absorb-edit holds one store handle, not two.
+- In-repo display forks consolidated onto their canonical homes, with a
+  shared judgment vocabulary (the 010 rider).
+
+### Fixed
+- `vertex_fold` holds one snapshot across every contributing read, and
+  `live_edge()` resolves its boundary inside the count's own snapshot —
+  same-connection is not same-snapshot.
+- Store verbs materialize a missing index at resolution; a change-fact never
+  fails the mutation it records.
+- `sl store verify --deep` refusal keeps the `--json` error shape.
+- plugin: dropped the redundant manifest `hooks` key — Claude Code
+  auto-loads `hooks/hooks.json` (the key made the manifest hard-fail and
+  silently unloaded the plugin).
+
+### Removed
+- The `piped=` render kwarg — the register IS the offered width. Renderers
+  that branched on `piped` read the offered width instead.
+
 ## 0.9.0 — 2026-07-26
 
 The **consumer-evidence wave** (`feat/090-consumer-evidence-wave`): six

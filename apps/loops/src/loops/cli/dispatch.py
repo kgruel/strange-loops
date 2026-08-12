@@ -446,6 +446,28 @@ def dispatch(op: Operation, *, reporter: Reporter) -> int:
 
     render_data = data
     gate = _surface_gate(op, data)
+
+    # --status on a gate-fail read REFUSES (finding:chw-sol-r1-s1-f2-custom-
+    # lens-inert, arbiter ruling): the Surface transforms never apply here, so
+    # an accepted-but-inert --status would render unfiltered rows at exit 0 —
+    # script-misreadable as "these matched". Same shape/wording family as the
+    # S1 live/interactive refusals in views/fold.py. Sits BEFORE the Format
+    # branch so `--status --json` cannot fall through to the raw dump either.
+    # Scoped to the explicit flag (spec.status) — the bareword `status=`
+    # predicate keeps its pre-S1 inert-note behavior below, unchanged.
+    spec_ = op.surface_spec
+    if not gate and spec_ is not None and spec_.status is not None:
+        dropped_flag = (
+            f"--lens {op.lens_override}" if op.lens_override
+            else "the vertex-declared lens"
+        )
+        reporter.err(
+            f"read --status: a custom lens renders its own shape and does "
+            f"not apply the status filter — drop --status, or drop "
+            f"{dropped_flag}."
+        )
+        return 2
+
     if not gate and _spec_has_dropped_transforms(op.surface_spec):
         # Interim signal (B3): the read grammar is inert on custom-lens /
         # --lens-override vertices — the gate keeps the raw FoldState so the
@@ -455,9 +477,11 @@ def dispatch(op: Operation, *, reporter: Reporter) -> int:
         # This note lives ON the gate-fail branch and is removed when the FF
         # routes custom lenses through the Surface (thread:gate-fail-ignores-
         # surface-transforms).
+        # --status is absent from this list: it refuses above (F2) instead of
+        # noting — it can never reach this note.
         vtx = op.vertex_path.stem if op.vertex_path else "this vertex"
         reporter.err(
-            f"note: read-grammar transforms (--match/--status/--limit/--last/"
+            f"note: read-grammar transforms (--match/--limit/--last/"
             f"--fields/--full/--count/comma-OR --key/field=value) are inert on "
             f"custom-lens vertex '{vtx}' — flags ignored "
             f"(--kind and single --key still apply)."

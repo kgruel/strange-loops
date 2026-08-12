@@ -8,15 +8,20 @@ against a parity test). Painted's ``run_app`` hangs cite's intercepted
 ``-h`` off this module too, and its shell-completion walk reads it for
 ``<TAB>`` candidates.
 
-Cite never takes a vertex positional — verb-first resolves the local
-vertex, and vertex-first dispatch pre-supplies ``ctx.vertex_path`` — so
-there is no vertex slot to hang ``complete_vertex`` on in this slice.
-Refs (``kind:key`` addresses) get no completer here either — a genuine
-design question, deferred.
+Cite's positional bucket carries ``[vertex] REF...`` (S4 — parity with
+emit's verb-first grammar): the view peels the first token as the vertex
+iff it resolves as one (``cli/views/cite.py``). The first empty slot
+completes vertex names via ``complete_cite_refs``; refs themselves
+(``kind:key`` addresses) get no completer — a genuine design question,
+deferred.
 """
 from __future__ import annotations
 
 import argparse
+
+from painted.cli import complete_via
+
+from .completers import complete_cite_refs
 
 
 def add_cite_args(parser: argparse.ArgumentParser) -> None:
@@ -26,9 +31,12 @@ def add_cite_args(parser: argparse.ArgumentParser) -> None:
     args — so it is safe both as the real runtime parser and for ``-h``/
     completion introspection.
     """
-    parser.add_argument(
-        "refs", nargs="+",
-        help="kind/key refs or bare ULIDs — the attention targets",
+    complete_via(
+        parser.add_argument(
+            "refs", nargs="+",
+            help="[vertex] then kind:key refs or bare ULIDs — the attention targets",
+        ),
+        complete_cite_refs,
     )
     parser.add_argument(
         "--context", default=None,

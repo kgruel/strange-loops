@@ -726,6 +726,25 @@ def cmd_emit(
             _emit_lines(primary_lines)
             return 2
 
+    # A cite whose refs ALL dropped is an empty attention signal — refuse
+    # rather than store it (S4, friction:cite-verb-first-lacks-vertex-slot).
+    # Narrow claim: only the all-drop case errors; a partial drop keeps the
+    # WARN + typed-pin behavior, and a cite emitted with no refs at all is
+    # out of this claim's scope. The gate reads resolution OUTPUT, so it
+    # naturally skips paths where resolution never ran (no store). Sits
+    # before the dry-run branch — like the strict refuse above — so a
+    # preview reports the same refusal the real emit would. Exit 2 matches
+    # the strict-refuse validation exit.
+    if kind == "cite" and unresolved_refs and not resolved_refs:
+        for u in unresolved_refs:
+            _say(f"ERROR: ref '{getattr(u, 'addr', u)}' did not resolve")
+        _say(
+            "ERROR: cite refused — none of its refs resolved, and a cite "
+            "with zero resolved refs is an empty attention signal; "
+            "nothing stored"
+        )
+        return 2
+
     ts = datetime.now(timezone.utc).timestamp()
     fact = Fact(
         kind=kind,

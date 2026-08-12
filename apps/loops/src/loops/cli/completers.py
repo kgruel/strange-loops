@@ -111,6 +111,24 @@ def complete_vertex(ctx: CompletionContext) -> list[Candidate]:
     return _vertex_candidates()
 
 
+def complete_cite_refs(ctx: CompletionContext) -> list[Candidate]:
+    """Complete cite's ``refs`` bucket — vertex names for the first slot only.
+
+    Cite's grammar (S4) is ``sl cite [vertex] REF...``: the first token is a
+    vertex iff it resolves as one, so the empty first slot offers vertex
+    candidates (mirroring ``complete_emit_tokens``' first slot). Later slots
+    are refs (``kind:key`` addresses), which have no completer yet — a
+    genuine design question, deferred — so this defers with ``[]``.
+    """
+    try:
+        refs = ctx.args.get("refs") or []
+    except Exception:
+        return []
+    if refs:
+        return []
+    return _vertex_candidates()
+
+
 def complete_ls_vertex(ctx: CompletionContext) -> list[Candidate]:
     """``complete_vertex`` for ``ls``'s single ``vertex`` positional.
 

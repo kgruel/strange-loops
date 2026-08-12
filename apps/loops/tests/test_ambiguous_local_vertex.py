@@ -87,7 +87,7 @@ class TestRefusal:
         assert "refusing to guess" in reporter.err_text
         assert "agent-attestation" in reporter.err_text
         assert "project" in reporter.err_text
-        assert "sl <vertex> cite REF ..." in reporter.err_text
+        assert "sl cite <vertex> REF ..." in reporter.err_text
 
     def test_read_refuses(self, multi):
         reporter = BufferReporter()
@@ -228,6 +228,9 @@ class TestSharedChokepoint:
 
 class TestUnchangedPaths:
     def test_single_vertex_cite_still_resolves(self, single):
+        # Seed the referent — since S4 a cite whose refs ALL drop refuses,
+        # and this test's subject is vertex resolution, not ref semantics.
+        assert _run_emit(["thread", "name=some-arc", "status=open"]) == 0
         reporter = BufferReporter()
         rc = cite_view.run(["thread:some-arc", "-m", "x", "--dry-run"], _ctx(reporter))
         assert rc == 0
@@ -247,6 +250,8 @@ class TestUnchangedPaths:
 
     def test_vertex_first_dispatch_bypasses(self, multi):
         # ctx.vertex_path set by vertex-first dispatch: never consults the tier.
+        # Referent seeded — since S4 a cite whose refs ALL drop refuses.
+        assert _run_emit(["project", "thread", "name=some-arc", "status=open"]) == 0
         reporter = BufferReporter()
         rc = cite_view.run(
             ["thread:some-arc", "-m", "x", "--dry-run"],

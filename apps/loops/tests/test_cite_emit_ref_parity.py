@@ -69,6 +69,8 @@ def _seed_thread(vpath, name):
 
 def _cite_facts(vpath):
     store = vpath.parent / "t.db"
+    if not store.exists():
+        return []  # nothing was ever stored — no store materialized
     with StoreReader(store) as reader:
         return reader.facts_by_kind("cite")
 
@@ -116,12 +118,31 @@ class TestResolvedRefParity:
 
 
 class TestUnresolvedRefParity:
-    def test_unresolved_ref_pins_identically(self, vpath):
-        # No matching thread seeded → both must produce the SAME typed pin,
-        # never one resolving and the other pinning.
-        cite_res, emit_res = _run_both(vpath, "thread:absent-thread")
+    def test_all_refs_dropped_refuses_identically(self, vpath):
+        # No matching thread seeded → ALL refs drop. Since S4 a cite whose
+        # refs all drop is an ERROR (empty attention signal), not a stored
+        # pin — and parity means BOTH views refuse identically: nonzero
+        # exit, nothing stored.
+        ctx = _ctx(vpath)
+        assert cite_view.run(["thread:absent-thread"], ctx) != 0
+        assert emit_view.run(["cite", "ref=thread:absent-thread"], ctx) != 0
+        assert _cite_facts(vpath) == []
+
+    def test_partial_drop_pins_identically(self, vpath):
+        # One resolvable + one absent ref → stored (partial information is
+        # still information), with the SAME typed pin from both views.
+        _seed_thread(vpath, "arc-name")
+        ctx = _ctx(vpath)
+        assert cite_view.run(["thread:arc-name", "thread:absent-thread"], ctx) == 0
+        assert emit_view.run(
+            ["cite", "ref=thread:arc-name", "ref=thread:absent-thread"], ctx
+        ) == 0
+        facts = _cite_facts(vpath)
+        assert len(facts) == 2, facts
+        cite_res = _resolution(facts[0]["payload"])
+        emit_res = _resolution(facts[1]["payload"])
         assert cite_res == emit_res
-        assert cite_res[1] is None  # nothing resolved
+        assert cite_res[1] is not None  # the resolvable ref resolved
         assert cite_res[2] == [
             {
                 "field": "ref",

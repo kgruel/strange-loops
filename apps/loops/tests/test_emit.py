@@ -967,6 +967,12 @@ class TestCiteVerbRegression:
         monkeypatch.delenv("LOOPS_OBSERVER", raising=False)
         # LOOPS_HOME not set — relies on local vertex discovery from cwd
 
+        # Seed the referents — since S4 a cite whose refs ALL drop refuses,
+        # and this test's subject is ref CAPTURE, not resolution failure.
+        assert main(["emit", "decision", "topic=design/foo", "seed"]) == 0
+        assert main(["emit", "thread", "name=open-arc", "status=open"]) == 0
+        capsys.readouterr()  # drop the seed receipts
+
         result = main([
             "cite",
             "decision:design/foo", "thread:open-arc",
@@ -997,6 +1003,10 @@ class TestCiteVerbRegression:
         )
         monkeypatch.setenv("LOOPS_HOME", str(home))
         monkeypatch.delenv("LOOPS_OBSERVER", raising=False)
+
+        # Seed the referent — since S4 a cite whose refs ALL drop refuses.
+        assert main(["emit", "project", "decision", "topic=design/bar", "seed"]) == 0
+        capsys.readouterr()  # drop the seed receipt
 
         result = main([
             "project", "cite",

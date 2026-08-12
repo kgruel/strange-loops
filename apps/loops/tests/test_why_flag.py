@@ -53,10 +53,13 @@ def _seed(vpath):
     assert _emit(vpath, "decision", topic="design/a", status="review",
                  observer="bob") == 0
     assert _emit(vpath, "decision", topic="design/a", status="open", label="") == 0
-    # a second key + a collect kind for the degrade path
+    # a second key + a collect kind for the degrade path. The cites carry a
+    # resolvable ref: a zero-address cite refuses since r1 remediation
+    # (finding:chw-s4-raw-emit-empty-cite).
     assert _emit(vpath, "decision", topic="design/b", message="beta") == 0
-    assert _emit(vpath, "cite", context="c1") == 0
-    assert _emit(vpath, "cite", context="c2", observer="bob") == 0
+    assert _emit(vpath, "cite", context="c1", ref="decision/design/a") == 0
+    assert _emit(vpath, "cite", context="c2", ref="decision/design/a",
+                 observer="bob") == 0
 
 
 def _why_json(capsys, vpath, *argv):

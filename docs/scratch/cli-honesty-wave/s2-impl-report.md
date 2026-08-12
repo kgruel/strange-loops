@@ -12,10 +12,15 @@ Commits: `2b3e837` (c), `548bbc2` (a + b + tests), report commit follows.
 error on **stderr**, plus did-you-mean:
 
 ```
-Error: vertex not found: projcets
+vertex not found: projcets
 Did you mean: projects, project?
 Known vertices: cli-completion, comms, ..., tasked, tasks
 ```
+
+(Plain multi-line `print` to stderr, exactly like read's validator —
+painted's `Block.text` flattens newlines, so `_err` would have collapsed
+the three-line shape into one run-on line. Other ls error dicts keep the
+single-line `Error: ...` painted render on stderr.)
 
 - `_unknown_vertex_message(name)` added in `commands/resolve.py` — the
   vertex-name sibling of `_validate_kind_or_exit`'s kind treatment (same

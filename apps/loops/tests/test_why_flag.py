@@ -69,6 +69,51 @@ def _why_json(capsys, vpath, *argv):
     return rc, json.loads(out)
 
 
+class TestNativeNumericKeyWhy:
+    """finding:chw-sol-r5-provenance-key-lookup (arbiter: unify the
+    stringification only). A native JSON numeric ``0`` fold key keys the
+    replayed fold STATE by int ``0`` while the CLI address carries ``"0"``
+    — the provenance lookup missed the entry and ``--why`` answered exit 0
+    with ``fields: []``. The shared projection (``loops.foldkey``) now
+    meets it. Engine fold semantics untouched; native-vs-string identity
+    is deliberately held at thread:fold-key-identity-native-vs-string."""
+
+    @pytest.fixture
+    def zero_why_vertex(self, tmp_path):
+        from .builders import StorePopulator
+
+        v = (
+            vertex("zerowhy")
+            .store("./zw.db")
+            .loop("decision", fold_by("topic"))
+        )
+        vpath = tmp_path / "zerowhy.vertex"
+        v.write(vpath)
+        (
+            StorePopulator(tmp_path / "zw.db", observer="alice")
+            .emit("decision", topic=0, status="open", message="zero body")
+            .emit("decision", topic=0, status="resolved")
+            .done()
+        )
+        return vpath
+
+    def test_why_on_native_zero_key_attributes_fields(
+        self, zero_why_vertex, capsys,
+    ):
+        # Sol's reproduction, inverted: fields and attribution come back.
+        rc, d = _why_json(capsys, zero_why_vertex, "decision/0")
+        assert rc == 0
+        assert d["mode"] == "upsert"
+        assert d["total_facts"] == 2
+        fields = {f["field"]: f for f in d["fields"]}
+        assert fields  # the defect answered fields: [] here
+        assert fields["message"]["value"] == "zero body"
+        assert fields["status"]["value"] == "resolved"
+        # supersession history survives the projection too
+        assert [p["value"] for p in fields["status"]["priors"]] == ["open"]
+        assert fields["status"]["setter"]["index"] == 2
+
+
 # --- Exact-address gate ----------------------------------------------------
 
 

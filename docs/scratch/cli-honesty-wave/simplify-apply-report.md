@@ -158,3 +158,31 @@ tip `2db71e0a`:
 Verification: worktree suite **2516 passed / 1 xfailed** (2513 + 2
 end-to-end + 1 empty-string sibling; the inversion is count-neutral);
 scratch-cwd suite identical; `./dev check` exit 0.
+
+## Addendum 2 — sol r5 remediation (provenance key lookup)
+
+`finding:chw-sol-r5-provenance-key-lookup` (HIGH): the r4 visibility
+exposed a lookup bug — the provenance replay folds the NATIVE payload
+(int `0` keys the fold state by int `0`) then looked up by the CLI STRING
+key, so `read <v> decision/0 --why` on a native-numeric-0 item exited 0
+with `fields: []` and empty `changed`.
+
+Fix (arbiter: unify the stringification only), commit `3bb55891` on tip
+`4d76fa3e`:
+
+- New leaf module `loops/foldkey.py` (imports nothing) owns the single
+  `project_fold_key(val)` str projection; `surface._row_key` delegates to
+  it; provenance's new `_entry_for_key` uses it at the lookup — direct
+  string hit first (also the tie-winner when native `0` and string `"0"`
+  coexist), projection scan otherwise. No cycles (both import a leaf).
+- Engine fold semantics untouched; native-vs-string identity NOT merged —
+  held at `thread:fold-key-identity-native-vs-string` per the ruling.
+- Pins: sol's repro inverted (`TestNativeNumericKeyWhy` in
+  test_why_flag.py — native-0 raw facts via StorePopulator, `--why --json`
+  returns field attributions including the status supersession history);
+  the DISCLOSED duality pinned in test_surface.py (native `0` + string
+  `"0"` in one kind = two rows, same displayed key `"0"` and `thread/0`
+  address, thread ref in the comment) so the suite documents it as known.
+
+Verification: worktree suite **2518 passed / 1 xfailed** (2516 + why pin
++ duality pin); scratch-cwd suite identical; `./dev check` exit 0.

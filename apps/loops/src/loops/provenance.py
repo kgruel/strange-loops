@@ -102,6 +102,33 @@ class Provenance:
 _META_PREFIX = "_"
 
 
+def _entry_for_key(bucket: dict, key: str) -> Any:
+    """The fold-state entry for a CLI string *key*, native-typed keys included.
+
+    The engine folds by the NATIVE payload value (``is not None`` acceptance
+    — a stored JSON numeric ``0`` keys the state by int ``0``), while the
+    address grammar, the source-fact buckets (``engine.vertex_reader``'s
+    ``f"{kind}/{key}"``), and ``surface._row_key`` all carry the STRING
+    form. Looking up by the string alone silently missed native-keyed
+    entries — ``--why`` on ``decision/0`` replayed the facts and attributed
+    nothing (finding:chw-sol-r5-provenance-key-lookup). Direct hit first
+    (the common case, and the tie-winner when a native ``0`` and a string
+    ``"0"`` coexist — that identity question is deliberately held at
+    thread:fold-key-identity-native-vs-string); otherwise match through the
+    SHARED projection (``loops.foldkey``), the same str() the Surface row
+    carries.
+    """
+    from loops.foldkey import project_fold_key
+
+    entry = bucket.get(key)
+    if entry is None:
+        entry = next(
+            (v for k, v in bucket.items() if project_fold_key(k) == key),
+            {},
+        )
+    return entry
+
+
 def _fact_ref(payload: dict, index: int, total: int) -> FactRef:
     return FactRef(
         index=index,
@@ -164,7 +191,7 @@ def replay_attribution(
 
     for i, payload in enumerate(facts, start=1):
         fold_fn(state, payload)
-        entry = state.get(target, {}).get(key, {})
+        entry = _entry_for_key(state.get(target, {}), key)
         if not isinstance(entry, dict):
             prev_entry = {}
             continue

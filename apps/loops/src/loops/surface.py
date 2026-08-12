@@ -521,13 +521,16 @@ def _row_key(item: FoldItem, key_field: str | None) -> str | None:
     yields ``Row.key == ""``, which downstream truthiness (``_address``'s
     ``kind/<id>`` fallback, ``if not key`` edge gates) still treats as
     keyless — same observable behavior as before for ``""``.
+
+    The str projection itself is the SHARED one (``loops.foldkey``), so the
+    provenance lookup meets native-keyed fold state by the same string
+    (finding:chw-sol-r5-provenance-key-lookup).
     """
+    from loops.foldkey import project_fold_key
+
     if not key_field:
         return None
-    val = item.payload.get(key_field)
-    if val is None:
-        return None
-    return str(val)
+    return project_fold_key(item.payload.get(key_field))
 
 
 def _address(kind: str, key: str | None, item_id: str | None) -> str:

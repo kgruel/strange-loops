@@ -93,57 +93,40 @@ def _vertex_candidates() -> list[Candidate]:
         return []
 
 
-def complete_vertex(ctx: CompletionContext) -> list[Candidate]:
-    """Complete the leading vertex positional with every resolvable name.
+def _first_slot_vertex_completer(bucket_name: str):
+    """Factory: vertex candidates for an EMPTY first slot, ``[]`` otherwise.
 
-    Scoped to the FIRST token only: once a bareword already occupies the
-    vertex slot (``ctx.args["tokens"]`` non-empty — the positional's
-    already-parsed prefix), this is completing a later slot (kind/key,
-    ``field=value``) that this slice doesn't offer candidates for, so it
-    defers by returning ``[]`` rather than guessing.
+    Three verbs hang the same completer shape off differently named argparse
+    buckets — the only variation is which ``ctx.args`` entry marks the slot
+    as already filled (simplify pass, item 8). Truthiness covers both bucket
+    shapes: a ``nargs='*'`` list (non-empty → filled) and ``ls``'s single
+    ``nargs='?'`` string. Once anything occupies the first slot, the later
+    slots (kind/key, ``field=value``, refs) are out of scope here, so the
+    completer defers with ``[]`` rather than guessing.
     """
-    try:
-        tokens = ctx.args.get("tokens") or []
-    except Exception:
-        return []
-    if tokens:
-        return []
-    return _vertex_candidates()
+
+    def completer(ctx: CompletionContext) -> list[Candidate]:
+        try:
+            filled = ctx.args.get(bucket_name)
+        except Exception:
+            return []
+        if filled:
+            return []
+        return _vertex_candidates()
+
+    return completer
 
 
-def complete_cite_refs(ctx: CompletionContext) -> list[Candidate]:
-    """Complete cite's ``refs`` bucket — vertex names for the first slot only.
+# The leading vertex positional for read/close/seal/sync (``tokens`` bucket).
+complete_vertex = _first_slot_vertex_completer("tokens")
 
-    Cite's grammar (S4) is ``sl cite [vertex] REF...``: the first token is a
-    vertex iff it resolves as one, so the empty first slot offers vertex
-    candidates (mirroring ``complete_emit_tokens``' first slot). Later slots
-    are refs (``kind:key`` addresses), which have no completer yet — a
-    genuine design question, deferred — so this defers with ``[]``.
-    """
-    try:
-        refs = ctx.args.get("refs") or []
-    except Exception:
-        return []
-    if refs:
-        return []
-    return _vertex_candidates()
+# Cite's ``refs`` bucket (S4 grammar: ``sl cite [vertex] REF...`` — the first
+# token is a vertex iff it resolves as one; later slots are refs, which have
+# no completer yet — a genuine design question, deferred).
+complete_cite_refs = _first_slot_vertex_completer("refs")
 
-
-def complete_ls_vertex(ctx: CompletionContext) -> list[Candidate]:
-    """``complete_vertex`` for ``ls``'s single ``vertex`` positional.
-
-    ``ls`` declares one true positional (``nargs='?'``), not a ``tokens``
-    bucket, so the already-filled check reads ``ctx.args["vertex"]``
-    directly rather than a list. Once a vertex is on the line this defers
-    with ``[]`` — same reasoning as ``complete_vertex``.
-    """
-    try:
-        vertex = ctx.args.get("vertex")
-    except Exception:
-        return []
-    if vertex:
-        return []
-    return _vertex_candidates()
+# ``ls``'s single ``vertex`` positional (``nargs='?'``, a string not a list).
+complete_ls_vertex = _first_slot_vertex_completer("vertex")
 
 
 def complete_read_vertex(ctx: CompletionContext) -> list[Candidate]:

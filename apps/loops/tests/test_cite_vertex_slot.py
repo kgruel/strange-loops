@@ -54,13 +54,22 @@ def _ctx(vertex_path=None, vertex_name=None):
     )
 
 
-def _seed_thread(vpath, name):
+def _emit(vpath, parts, *, kind="cite", **extra):
+    """Raw cmd_emit shell — shared by every raw-emit path in this module
+    (simplify pass, item 10b; was three per-class copies)."""
     ns = argparse.Namespace(
-        vertex=None, kind="thread",
-        parts=[f"name={name}", "status=open", "message=referent"],
-        observer="tester", dry_run=False,
+        vertex=None, kind=kind, parts=parts,
+        observer="tester", dry_run=False, **extra,
     )
-    assert cmd_emit(ns, vertex_path=vpath) == 0
+    return cmd_emit(ns, vertex_path=vpath)
+
+
+def _seed_thread(vpath, name):
+    rc = _emit(
+        vpath, [f"name={name}", "status=open", "message=referent"],
+        kind="thread",
+    )
+    assert rc == 0
 
 
 def _cite_facts(vpath):
@@ -79,9 +88,15 @@ def sandbox(tmp_path, monkeypatch):
     return tmp_path
 
 
+@pytest.fixture
+def vpath(sandbox):
+    """The module's stock vertex ("t") written into the sandbox — replaces
+    the per-test `vpath = _write_vertex(sandbox, "t")` line (item 10c)."""
+    return _write_vertex(sandbox, "t")
+
+
 class TestVertexSlot:
-    def test_cite_lands_in_named_vertex(self, sandbox):
-        vpath = _write_vertex(sandbox, "t")
+    def test_cite_lands_in_named_vertex(self, vpath):
         _seed_thread(vpath, "arc")
         ctx = _ctx()
         assert cite_view.run(["t", "thread:arc"], ctx) == 0
@@ -132,11 +147,10 @@ class TestVertexSlot:
         assert cite_view.run(["thread:arc"], ctx) == 1
         assert any("no local vertex found" in l for l in ctx.reporter.err_lines)
 
-    def test_vertex_first_dispatch_does_not_peel(self, sandbox):
+    def test_vertex_first_dispatch_does_not_peel(self, sandbox, vpath):
         # With ctx.vertex_path already resolved (sl <vertex> cite ...), the
         # first positional is a REF even when it happens to resolve as a
         # vertex name — no peel runs.
-        vpath = _write_vertex(sandbox, "t")
         decoy = _write_vertex(sandbox, "decoy")
         _seed_thread(vpath, "arc")
         ctx = _ctx(vertex_path=vpath.resolve(), vertex_name="t")
@@ -164,8 +178,7 @@ class TestVertexSlot:
 
 
 class TestAllRefsDropError:
-    def test_all_refs_drop_errors_and_stores_nothing(self, sandbox, capsys):
-        vpath = _write_vertex(sandbox, "t")
+    def test_all_refs_drop_errors_and_stores_nothing(self, vpath, capsys):
         ctx = _ctx()
         rc = cite_view.run(["t", "thread:absent"], ctx)
         assert rc == 2
@@ -174,16 +187,14 @@ class TestAllRefsDropError:
         assert "thread:absent" in err
         assert _cite_facts(vpath) == []
 
-    def test_all_refs_drop_dry_run_also_refuses(self, sandbox, capsys):
-        vpath = _write_vertex(sandbox, "t")
+    def test_all_refs_drop_dry_run_also_refuses(self, vpath, capsys):
         ctx = _ctx()
         rc = cite_view.run(["t", "thread:absent", "--dry-run"], ctx)
         assert rc == 2
         assert "ERROR" in capsys.readouterr().err
         assert _cite_facts(vpath) == []
 
-    def test_partial_drop_stores_with_warning(self, sandbox, capsys):
-        vpath = _write_vertex(sandbox, "t")
+    def test_partial_drop_stores_with_warning(self, vpath, capsys):
         _seed_thread(vpath, "arc")
         ctx = _ctx()
         rc = cite_view.run(["t", "thread:arc", "thread:absent"], ctx)
@@ -195,13 +206,12 @@ class TestAllRefsDropError:
         assert len(facts) == 1
         assert facts[0]["payload"].get("ref_ref") is not None
 
-    def test_mixed_inert_pin_refusal_message_discloses_counts(self, sandbox, capsys):
+    def test_mixed_inert_pin_refusal_message_discloses_counts(self, vpath, capsys):
         # Arbiter ruling (finding:chw-s4-refusal-message-inert-pins):
         # semantics STAND — all attempted (declared-kind) refs failing
         # refuses even when an inert pin rides along — but the message must
         # disclose attempted-vs-inert honestly, not claim "none resolved"
         # about a pin that was never attempted.
-        vpath = _write_vertex(sandbox, "t")
         ctx = _ctx()
         # thread is declared (attempted, fails); "atoms" is not declared on
         # this vertex or its topology → atoms/baz is an inert pin.
@@ -213,8 +223,7 @@ class TestAllRefsDropError:
         assert "none of its refs resolved" not in err
         assert _cite_facts(vpath) == []
 
-    def test_all_attempted_refusal_message_has_no_inert_clause(self, sandbox, capsys):
-        vpath = _write_vertex(sandbox, "t")
+    def test_all_attempted_refusal_message_has_no_inert_clause(self, vpath, capsys):
         ctx = _ctx()
         rc = cite_view.run(["t", "thread:absent", "thread:also-absent"], ctx)
         assert rc == 2
@@ -223,11 +232,10 @@ class TestAllRefsDropError:
         assert "inert pin" not in err
         assert _cite_facts(vpath) == []
 
-    def test_all_inert_cite_stores_as_provenance_only(self, sandbox, capsys):
+    def test_all_inert_cite_stores_as_provenance_only(self, vpath, capsys):
         # No ref is attempted (no declared-kind address) → the gate never
         # fires and the cite stores as a provenance-only signal: the raw
         # addresses survive in payload, nothing resolved, nothing pinned.
-        vpath = _write_vertex(sandbox, "t")
         ctx = _ctx()
         rc = cite_view.run(["t", "atoms/baz", "atoms/qux"], ctx)
         assert rc == 0
@@ -241,12 +249,11 @@ class TestAllRefsDropError:
         assert payload.get("_unresolved_refs") is None
 
     def test_resolving_nonref_field_address_does_not_rescue(
-        self, sandbox, capsys,
+        self, vpath, capsys,
     ):
         # finding:chw-sol-r1-s4-f1-nonref-field-bypass (arbiter ruling): the
         # gate counts ONLY field=="ref" resolutions. A resolvable address in
         # the message must not turn an all-drop cite into a store.
-        vpath = _write_vertex(sandbox, "t")
         _seed_thread(vpath, "other")
         ctx = _ctx()
         rc = cite_view.run(["t", "thread:absent", "-m", "thread:other"], ctx)
@@ -256,10 +263,9 @@ class TestAllRefsDropError:
         assert "nothing stored" in err
         assert _cite_facts(vpath) == []
 
-    def test_emit_path_gets_same_refusal(self, sandbox, capsys):
+    def test_emit_path_gets_same_refusal(self, vpath, capsys):
         # The refusal is kind-level (lives in cmd_emit), so the raw emit
         # spelling of a cite refuses identically.
-        vpath = _write_vertex(sandbox, "t")
         ns = argparse.Namespace(
             vertex=None, kind="cite", parts=["ref=thread:absent"],
             observer="tester", dry_run=False,
@@ -275,16 +281,8 @@ class TestZeroAddressCite:
     being cited. All-inert cites (addresses present, none attemptable as
     entities) still store as provenance-only."""
 
-    def _emit(self, vpath, parts):
-        ns = argparse.Namespace(
-            vertex=None, kind="cite", parts=parts,
-            observer="tester", dry_run=False,
-        )
-        return cmd_emit(ns, vertex_path=vpath)
-
-    def test_raw_emit_with_no_ref_field_refuses(self, sandbox, capsys):
-        vpath = _write_vertex(sandbox, "t")
-        rc = self._emit(vpath, ["message=x"])
+    def test_raw_emit_with_no_ref_field_refuses(self, vpath, capsys):
+        rc = _emit(vpath, ["message=x"])
         err = capsys.readouterr().err
         assert rc == 2
         assert "no ref addresses" in err
@@ -292,29 +290,26 @@ class TestZeroAddressCite:
         assert _cite_facts(vpath) == []
 
     def test_resolving_message_address_does_not_rescue_zero_refs(
-        self, sandbox, capsys,
+        self, vpath, capsys,
     ):
         # Composition with the ref-field-scoped gate: a resolvable address
         # in message does not manufacture a cite ref.
-        vpath = _write_vertex(sandbox, "t")
         _seed_thread(vpath, "other")
-        rc = self._emit(vpath, ["message=thread:other"])
+        rc = _emit(vpath, ["message=thread:other"])
         assert rc == 2
         assert "no ref addresses" in capsys.readouterr().err
         # only the seeded thread exists — no cite stored
         assert _cite_facts(vpath) == []
 
-    def test_empty_ref_field_refuses(self, sandbox, capsys):
-        vpath = _write_vertex(sandbox, "t")
-        rc = self._emit(vpath, ["ref=", "message=x"])
+    def test_empty_ref_field_refuses(self, vpath, capsys):
+        rc = _emit(vpath, ["ref=", "message=x"])
         assert rc == 2
         assert "no ref addresses" in capsys.readouterr().err
         assert _cite_facts(vpath) == []
 
-    def test_all_inert_raw_emit_still_stores(self, sandbox, capsys):
+    def test_all_inert_raw_emit_still_stores(self, vpath, capsys):
         # The ruling's explicit boundary: inert addresses ARE addresses.
-        vpath = _write_vertex(sandbox, "t")
-        rc = self._emit(vpath, ["ref=atoms/baz"])
+        rc = _emit(vpath, ["ref=atoms/baz"])
         err = capsys.readouterr().err
         assert rc == 0
         assert "ERROR" not in err
@@ -332,39 +327,29 @@ class TestMalformedTokenGate:
     like zero-address; a malformed token riding with a storing cite gets a
     per-token WARN and keeps its current storage behavior (raw in refs)."""
 
-    def _emit(self, vpath, parts, **extra):
-        ns = argparse.Namespace(
-            vertex=None, kind="cite", parts=parts,
-            observer="tester", dry_run=False, **extra,
-        )
-        return cmd_emit(ns, vertex_path=vpath)
-
     @pytest.mark.parametrize("token", [":x", "kind:", "not an address"])
-    def test_all_malformed_refuses(self, sandbox, capsys, token):
-        vpath = _write_vertex(sandbox, "t")
-        rc = self._emit(vpath, [f"ref={token}"])
+    def test_all_malformed_refuses(self, vpath, capsys, token):
+        rc = _emit(vpath, [f"ref={token}"])
         err = capsys.readouterr().err
         assert rc == 2
         assert f"ref '{token}' does not parse as an address" in err
         assert "nothing stored" in err
         assert _cite_facts(vpath) == []
 
-    def test_bare_separatorless_key_is_malformed(self, sandbox, capsys):
+    def test_bare_separatorless_key_is_malformed(self, vpath, capsys):
         # The resolver's ref-field acceptance requires a kind (self-
         # describing ref needs a separator) — a bare key never counts.
-        vpath = _write_vertex(sandbox, "t")
-        rc = self._emit(vpath, ["ref=barekey"])
+        rc = _emit(vpath, ["ref=barekey"])
         assert rc == 2
         assert "does not parse as an address" in capsys.readouterr().err
         assert _cite_facts(vpath) == []
 
     def test_malformed_with_inert_stores_with_warn_raw_kept(
-        self, sandbox, capsys,
+        self, vpath, capsys,
     ):
         # An inert (undeclared-kind) address is well-formed → the cite
         # stores; the malformed token WARNs and stays raw in the payload.
-        vpath = _write_vertex(sandbox, "t")
-        rc = self._emit(vpath, ["ref=:x,atoms/baz"])
+        rc = _emit(vpath, ["ref=:x,atoms/baz"])
         err = capsys.readouterr().err
         assert rc == 0
         assert "WARN: ref ':x' does not parse as an address" in err
@@ -373,10 +358,9 @@ class TestMalformedTokenGate:
         assert len(facts) == 1
         assert facts[0]["payload"]["ref"] == ":x,atoms/baz"
 
-    def test_malformed_with_valid_stores_with_warn(self, sandbox, capsys):
-        vpath = _write_vertex(sandbox, "t")
+    def test_malformed_with_valid_stores_with_warn(self, vpath, capsys):
         _seed_thread(vpath, "arc")
-        rc = self._emit(vpath, ["ref=:x,thread:arc"])
+        rc = _emit(vpath, ["ref=:x,thread:arc"])
         err = capsys.readouterr().err
         assert rc == 0
         assert "WARN: ref ':x' does not parse as an address" in err
@@ -385,8 +369,7 @@ class TestMalformedTokenGate:
         assert facts[0]["payload"].get("ref_ref") is not None
         assert facts[0]["payload"]["ref"] == ":x,thread:arc"
 
-    def test_dry_run_all_malformed_also_refuses(self, sandbox, capsys):
-        vpath = _write_vertex(sandbox, "t")
+    def test_dry_run_all_malformed_also_refuses(self, vpath, capsys):
         ns = argparse.Namespace(
             vertex=None, kind="cite", parts=["ref=:x"],
             observer="tester", dry_run=True,
@@ -399,11 +382,10 @@ class TestMalformedTokenGate:
         assert _cite_facts(vpath) == []
 
     def test_json_all_malformed_refuses_with_empty_stdout(
-        self, sandbox, capsys,
+        self, vpath, capsys,
     ):
         # --json's receipt only fires post-store; a refusal must leave
         # stdout empty (no structured receipt for a fact that never landed).
-        vpath = _write_vertex(sandbox, "t")
         ns = argparse.Namespace(
             vertex=None, kind="cite", parts=["ref=kind:"],
             observer="tester", dry_run=False, json=True,
@@ -415,8 +397,7 @@ class TestMalformedTokenGate:
         assert "does not parse as an address" in captured.err
         assert _cite_facts(vpath) == []
 
-    def test_verb_first_malformed_positional_refuses(self, sandbox, capsys):
-        vpath = _write_vertex(sandbox, "t")
+    def test_verb_first_malformed_positional_refuses(self, vpath, capsys):
         rc = cite_view.run(["t", ":x"], _ctx())
         assert rc == 2
         assert "does not parse as an address" in capsys.readouterr().err

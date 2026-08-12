@@ -274,40 +274,34 @@ class TestCustomLensStatusRefusal:
 
 
 class TestStatusErrorDiscipline:
-    def test_empty_value_refuses(self, status_vertex, capsys):
+    @pytest.mark.parametrize(
+        ("argv_tail", "expected"),
+        [
+            pytest.param(
+                ["--status", ","], "empty --status value",
+                id="empty-value",
+            ),
+            pytest.param(
+                ["status=open", "--status", "open"], "same filter",
+                id="conflict-with-bareword-predicate",
+            ),
+            pytest.param(
+                ["--facts", "--since", "7d", "--status", "open"],
+                "read --status",
+                id="windowed-facts-route",
+            ),
+            pytest.param(
+                ["--ticks", "--status", "open"], "read --status",
+                id="ticks-route",
+            ),
+        ],
+    )
+    def test_refuses(self, status_vertex, capsys, argv_tail, expected):
         _seed(status_vertex)
-        rc, s, err = _json_read(capsys, str(status_vertex), "--status", ",")
+        rc, s, err = _json_read(capsys, str(status_vertex), *argv_tail)
         assert rc == 2
         assert s is None
-        assert "empty --status value" in err
-
-    def test_conflict_with_bareword_predicate_refuses(self, status_vertex, capsys):
-        _seed(status_vertex)
-        rc, s, err = _json_read(
-            capsys, str(status_vertex), "status=open", "--status", "open",
-        )
-        assert rc == 2
-        assert s is None
-        assert "same filter" in err
-
-    def test_windowed_facts_route_refuses(self, status_vertex, capsys):
-        _seed(status_vertex)
-        rc, s, err = _json_read(
-            capsys, str(status_vertex),
-            "--facts", "--since", "7d", "--status", "open",
-        )
-        assert rc == 2
-        assert s is None
-        assert "read --status" in err
-
-    def test_ticks_route_refuses(self, status_vertex, capsys):
-        _seed(status_vertex)
-        rc, s, err = _json_read(
-            capsys, str(status_vertex), "--ticks", "--status", "open",
-        )
-        assert rc == 2
-        assert s is None
-        assert "read --status" in err
+        assert expected in err
 
     def test_why_refuses(self, status_vertex, capsys):
         _seed(status_vertex)

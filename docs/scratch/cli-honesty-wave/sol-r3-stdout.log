@@ -1,0 +1,28 @@
+## R2-F1: PASS
+
+Evidence:
+
+- `parse_ref_token` is the shared discriminator used by both the resolver and cite gate: [resolve.py](/Users/kaygee/Code/loops/apps/loops/src/loops/commands/resolve.py:880), [emit.py](/Users/kaygee/Code/loops/apps/loops/src/loops/commands/emit.py:759).
+- `ref=:x`, `ref=kind:`, and quoted prose each returned exit 2, empty stdout, and stored nothing in normal, dry-run, and `--json` modes.
+- ASCII/Unicode whitespace, Unicode separator lookalikes, empty-half slash forms, trailing commas, bare keys, and empty refs with `-m` all refused.
+- Legacy `thread/live` resolved successfully; undeclared colon/slash refs remained valid inert stores.
+- Bare/malformed tokens mixed with inert or resolved refs stored with WARN and retained raw payload text.
+- Partial resolution stored with both its resolved pin and typed unresolved pin.
+- Verb-first, vertex-first, and raw emit refusals were byte-identical.
+- Store census remained unchanged across every refusal.
+
+Verification:
+
+- Focused cite/parity tests: **34 passed**
+- Full suite: **2509 passed, 1 xfailed**
+- `./dev check`: **59 passed**
+- `git diff --check`: clean
+- No repository files changed; temporary review fixtures were removed.
+
+## New findings
+
+None.
+
+## Overall: CONVERGED
+
+The R2-F1 bypass is closed across the requested reproductions and evasions without disturbing inert-address storage, partial-resolution behavior, legacy slash compatibility, or route parity.

@@ -78,8 +78,8 @@ is a location claim, not a tamper verdict.
 
 ### Breaking: custom lenses no longer receive `piped`
 
-Affects only vertices declaring their own lens module (`lens { fold "…" }`,
-docs/LENSES.md). The CLI stopped passing the kwarg, so a lens with `piped: bool
+Affects only vertices declaring their own lens module (`lens { fold "…" }` —
+see `apps/loops/src/loops/lenses/CLAUDE.md` for the lens contract). The CLI stopped passing the kwarg, so a lens with `piped: bool
 = False` now always sees `False` and renders TTY-style into a pipe — it fails
 silently, not loudly.
 

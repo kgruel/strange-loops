@@ -1,8 +1,11 @@
 # ARCHITECTURE
 
-The implementation of [STRANGE-LOOPS](STRANGE-LOOPS.md) in Python. The paradigm
-is three shapes, four properties, one pattern. This document is how and why
-those are instantiated as software.
+The implementation of the strange-loops paradigm in Python. The paradigm is
+three shapes (Fact, Spec, Fold), four properties (append-only, participatory,
+boundary-driven, compositional), one pattern: facts flow in, folds accumulate,
+boundaries resolve, ticks flow out. This document is how and why those are
+instantiated as software. (Paradigm root statement:
+`observation:paradigm/strange-loops-root-statement` in the project store.)
 
 ## Loops as protocol
 
@@ -341,9 +344,10 @@ plane that works for everyone in the loop.
 Implemented in engine. The current shape (Peer-as-convenience-bundle with
 horizon/potential; Observer-as-string on Fact; Grant separated as policy at
 Vertex) is the result of the Jan 27–30 dissolution in the prism workspace
-that broke up the original bundled Peer atom. See [IDENTITY.md](docs/IDENTITY.md)
-for the full evolution and current model; [SCOPE-LATTICE.md](docs/SCOPE-LATTICE.md)
-for the operational algebra of delegation under chains.
+that broke up the original bundled Peer atom. The evolution and the delegation
+algebra are recorded in the project store
+(`observation:architecture/identity-peer-as-atom-history`,
+`observation:architecture/scope-lattice-narrowing-algebra`).
 
 **Observer** is a string on every Fact. Naming hierarchy encodes participation
 level by convention: `kyle` (direct), `kyle/claude-session-123` (delegated),
@@ -409,11 +413,14 @@ uv run --package <name> pytest apps/<name>/tests       # test one app
 
 | Doc | Scope |
 |-----|-------|
-| [STRANGE-LOOPS.md](STRANGE-LOOPS.md) | The paradigm — shapes, properties, pattern |
-| [VERTEX.md](docs/VERTEX.md) | Routing, folding, branching in the engine |
-| [TEMPORAL.md](docs/TEMPORAL.md) | Boundaries, nesting, semantic time |
-| [PERSISTENCE.md](docs/PERSISTENCE.md) | Durable state, replay, store protocol |
-| [IDENTITY.md](docs/IDENTITY.md) | Observer attribution, gating policy, cross-collab |
-| [SCOPE-LATTICE.md](docs/SCOPE-LATTICE.md) | Capability algebra at the substrate |
 | [RATCHETS.md](docs/RATCHETS.md) | Construction-vs-detection — how invariants become structural |
-| Lib CLAUDE.md files | Progressive API guides for each library |
+| [CLI-CHEATSHEET.md](docs/CLI-CHEATSHEET.md) | CLI syntax reference |
+| [UPGRADING.md](docs/UPGRADING.md) | Release-coupled upgrade notes |
+| Lib/app CLAUDE.md files | Progressive guides — the authoritative reference chain |
+
+The 2026-08-12 ground-up docs rebuild deleted the deep-dive corpus
+(VERTEX/TEMPORAL/PERSISTENCE/IDENTITY/SCOPE-LATTICE/CADENCE and the paradigm
+root); their durable rationale lives in the project store under
+`observation:architecture/*` and `observation:paradigm/strange-loops-root-statement`,
+full text in git history. New deep-dives are born only from a real reader-path
+(`decision:practice/docs-ground-up-rebuild`).

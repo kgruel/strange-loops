@@ -2,7 +2,11 @@
 
 The strange-loops monorepo. A system for focusing attention.
 
-See `STRANGE-LOOPS.md` for the paradigm — three shapes, four properties, one pattern.
+The paradigm: three shapes (Fact — something observed; Spec — something
+expected; Fold — how observations accumulate), four properties (append-only,
+participatory, boundary-driven, compositional), one pattern — facts flow in,
+folds accumulate, boundaries resolve, ticks flow out. Root statement:
+`observation:paradigm/strange-loops-root-statement` in the project store.
 See `ARCHITECTURE.md` for why it's built this way — libraries, persistence, rendering.
 
 ## Build & Test
@@ -39,7 +43,7 @@ apps/
   hlab/             Homelab monitoring — DSL-driven status, alerts, media
   tasks/            Task orchestration — tasks as loops, workers in worktrees
 
-docs/               Deep dives — VERTEX, TEMPORAL, PERSISTENCE, IDENTITY, etc.
+docs/               RATCHETS, CLI-CHEATSHEET, UPGRADING — reference termini; rationale lives in the store
 ```
 
 Rendering lives in [`painted`](https://github.com/kgruel/painted), consumed as a PyPI dependency.

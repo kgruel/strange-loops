@@ -284,11 +284,15 @@ uv run --package engine pytest libs/engine/tests/test_vertex.py  # single file
 
 ## Deep dives
 
-For design rationale and internal mechanics beyond what this CLAUDE.md covers:
+Design rationale beyond what this CLAUDE.md covers lives in the project store
+(the 2026-08-12 ground-up docs rebuild moved it there; full prior text in git
+history):
 
-| Doc | Focus |
-|-----|-------|
-| `docs/VERTEX.md` | Routing, folding, branching — the intersection point |
-| `docs/TEMPORAL.md` | Boundaries and nesting — how loops mark time |
-| `docs/PERSISTENCE.md` | Durable state, replay, fidelity traversal |
-| `docs/IDENTITY.md` | Observer and gating — who sees, who emits |
+| Fact | Focus |
+|------|-------|
+| `observation:architecture/vertex-routing-narrative` | Routing, folding, branching — why Vertex replaced Stream |
+| `observation:architecture/temporal-semantic-time` | Boundaries as semantic time, reset-vs-carry, nesting |
+| `observation:architecture/persistence-conceptual-spine` | Persistence is configuration; replay is folding |
+| `observation:architecture/identity-peer-as-atom-history` | Observer and gating — stance, naming, what's enforced |
+
+Read with `sl read project observation/architecture/<name> -v`.

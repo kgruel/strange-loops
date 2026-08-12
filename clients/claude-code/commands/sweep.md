@@ -9,7 +9,7 @@ where that raw capture gets triaged at review speed. Operate on the `project`
 vertex unless $ARGUMENTS names another.
 
 1. **Scan this session's reroutes and unresolved moments.**
-   `sl read project --kind log --plain --since 1d`
+   `sl read project --facts --kind log --since 1d --plain`
    Read what was logged at reflex speed.
 
 2. **Promote repeat patterns to friction.** A reroute that recurred — or names a

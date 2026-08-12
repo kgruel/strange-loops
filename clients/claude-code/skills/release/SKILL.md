@@ -174,7 +174,13 @@ The release is not "done" until an install **from PyPI** reads a live store.
 
 - **Missing union dep** — caught by step 4; the workspace runner never sees it.
 - **PyPI index lag** — step 7's JSON check may trail the green workflow;
-  retry before diagnosing.
+  retry before diagnosing. But if the simple index HAS the version
+  (`curl -s https://pypi.org/simple/strange-loops/ | grep X.Y.Z`) and uv
+  still says "no version", that is uv's *cached* index response from an
+  earlier failed attempt, not PyPI lag — install with
+  `--refresh-package strange-loops` instead of retrying (0.10.0 burned
+  ~3 min retrying a cache hit). Retry loops that create venvs need
+  `uv venv --clear`, or the leftover venv blocks every iteration.
 - **painted/loops version collision** — the pinned painted range must have a
   published wheel; gating against a local painted checkout proves nothing
   about the PyPI resolve (re-gate when the pin's target ships).

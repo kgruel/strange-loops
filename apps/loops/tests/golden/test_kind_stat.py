@@ -19,13 +19,13 @@ from .helpers import block_to_text
 
 @pytest.mark.parametrize("zoom", list(Zoom), ids=lambda z: z.name)
 def test_kind_stat_tty(golden, zoom):
-    block = kind_stat_view(SAMPLE_KIND_STAT, zoom, width=80, piped=False)
+    block = kind_stat_view(SAMPLE_KIND_STAT, zoom, width=80)
     golden.assert_match(block_to_text(block), "output")
 
 
 @pytest.mark.parametrize("zoom", list(Zoom), ids=lambda z: z.name)
 def test_kind_stat_piped(golden, zoom):
-    block = kind_stat_view(SAMPLE_KIND_STAT, zoom, width=None, piped=True)
+    block = kind_stat_view(SAMPLE_KIND_STAT, zoom, width=None)
     golden.assert_match(block_to_text(block), "output")
 
 
@@ -37,6 +37,6 @@ def test_kind_stat_drilled_tty(golden):
 
 def test_kind_stat_drilled_piped(golden):
     block = kind_stat_view(
-        SAMPLE_KIND_STAT_DRILLED, Zoom.SUMMARY, width=None, piped=True,
+        SAMPLE_KIND_STAT_DRILLED, Zoom.SUMMARY, width=None,
     )
     golden.assert_match(block_to_text(block), "output")

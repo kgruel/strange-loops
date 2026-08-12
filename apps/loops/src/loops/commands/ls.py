@@ -427,8 +427,12 @@ def fetch_kind_stat(
             "error": f"{vf.name} is an aggregation vertex — no own store to stat",
             "vertex_name": vf.name, "kind": kind,
         }
-    if not store.is_absolute():
-        store = (vertex_path.parent / store).resolve()
+    # resolved_index, not a hand-rolled relative-path join: under a
+    # JSONL-canonical locator the declared artifact is the LOG, and handing
+    # that to a sqlite open fails soft (an "empty store" answer).
+    from engine.jsonl_store import resolved_index
+
+    store = resolved_index(store, vertex_path)
 
     base = {
         "vertex_name": vf.name, "kind": kind, "fold_op": fold_op,
@@ -535,15 +539,14 @@ def _run_kind_stat(vertex: str, kind: str, rest: list[str]) -> int:
 
 def _vertex_stat(vf, vertex_path: Path) -> dict[str, Any]:
     """Vertex-level stat header + per-kind live stats (or empties if no store)."""
+    from engine.jsonl_store import resolved_index
     from loops.commands.vertices import _classify_kind, _store_stats
 
     vertex_kind = _classify_kind(vf)
     store = vf.store
     stats: dict[str, Any] | None = None
     if store is not None:
-        if not store.is_absolute():
-            store = (vertex_path.parent / store).resolve()
-        stats = _store_stats(store)
+        stats = _store_stats(resolved_index(store, vertex_path))
     if stats is None:
         return {
             "vertex_kind": vertex_kind,

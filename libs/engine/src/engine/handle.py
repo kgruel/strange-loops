@@ -61,6 +61,7 @@ from typing import TYPE_CHECKING, Protocol
 
 from engine.declaration import _read_own_lineage
 from engine.witness import GENESIS_SENTINEL, WitnessPosition
+from .jsonl_store import resolved_index
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from atoms import Fact
@@ -817,9 +818,7 @@ class VertexHandle:
         store_path = None
         probe = None
         if ast.store is not None:
-            store_path = ast.store
-            if not store_path.is_absolute():
-                store_path = (vertex_path.parent / store_path).resolve()
+            store_path = resolved_index(ast.store, vertex_path)
             if store_path.exists():
                 probe = StoreProbe(store_path)
 

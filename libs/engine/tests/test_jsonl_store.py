@@ -1,0 +1,947 @@
+"""JSONL-canonical store — the authority flip's write path.
+
+The claim under test: the durable JSONL line is the store, sqlite is an
+index derived from it. So the receipt must originate at the line (a crash
+between line and index loses nothing and changes no id), the log must never
+be left corrupt (torn line truncated), a lying offset must force a rebuild,
+and signatures must ride the whole path verbatim — never re-signed.
+"""
+
+import json
+from datetime import UTC, datetime
+from pathlib import Path
+
+import pytest
+from atoms import Fact
+
+from engine.jsonl_codec import deserialize_row, serialize_fact_row
+from engine.jsonl_store import JsonlCanonicalUnsupported, JsonlStore
+from engine.residence import log_path_for
+from engine.sqlite_store import (
+    SqliteStore,
+    _fact_commitment_hash,
+    tick_row_hash,
+)
+from engine.tick import Tick
+
+# --- helpers ---------------------------------------------------------------
+
+
+def open_store(tmp_path: Path, name: str = "s", **kw) -> JsonlStore:
+    return JsonlStore(
+        path=tmp_path / f"{name}.db",
+        serialize=lambda f: f.to_dict(),
+        deserialize=Fact.from_dict,
+        **kw,
+    )
+
+
+def fact(kind: str = "note", observer: str = "kyle", **payload) -> Fact:
+    return Fact.of(kind, observer, **(payload or {"message": "hi"}))
+
+
+def lines(path: Path) -> list[str]:
+    return [ln for ln in path.read_text(encoding="utf-8").split("\n") if ln]
+
+
+def sqlite_facts(path: Path) -> list[tuple]:
+    import sqlite3
+
+    conn = sqlite3.connect(str(path))
+    try:
+        return conn.execute(
+            "SELECT id, kind, ts, observer, origin, payload, signature "
+            "FROM facts ORDER BY rowid"
+        ).fetchall()
+    finally:
+        conn.close()
+
+
+def offset_of(store: JsonlStore) -> int:
+    return store._read_offset()
+
+
+# --- the basic contract ----------------------------------------------------
+
+
+def test_append_writes_log_first_and_receipt_matches_sqlite(tmp_path):
+    store = open_store(tmp_path)
+    fid = store.append(fact())
+    log = log_path_for(tmp_path / "s.db")
+
+    assert log.exists()
+    t, row = deserialize_row(lines(log)[0])
+    assert t == "fact"
+    assert row[0] == fid  # the receipt IS the id in the durable line
+    assert [r[0] for r in sqlite_facts(store._path)] == [fid]
+    assert offset_of(store) == log.stat().st_size
+    store.close()
+
+
+def test_log_path_defaults_beside_the_db(tmp_path):
+    store = open_store(tmp_path, "project")
+    assert store.log_path == tmp_path / "project.jsonl"
+    store.close()
+
+
+def test_tick_row_rides_the_log_and_rederives_its_hash(tmp_path):
+    store = open_store(tmp_path)
+    store.append(fact())
+    store.append_tick(Tick(name="s", ts=datetime.now(UTC), payload={"n": 1}, origin="t"))
+    store.close()
+
+    kinds = [deserialize_row(ln) for ln in lines(tmp_path / "s.jsonl")]
+    assert [t for t, _ in kinds] == ["fact", "tick"]
+    tick_row = kinds[1][1]
+
+    import sqlite3
+
+    conn = sqlite3.connect(str(tmp_path / "s.db"))
+    stored = conn.execute(
+        "SELECT id, name, ts, since, origin, payload, prev_hash, window_start, "
+        "fact_cursor, window_hash, signature FROM ticks"
+    ).fetchone()
+    conn.close()
+    assert tick_row_hash(tick_row) == tick_row_hash(stored)
+
+
+def test_reopen_is_synced_and_keeps_appending(tmp_path):
+    store = open_store(tmp_path)
+    first = store.append(fact())
+    store.close()
+
+    store = open_store(tmp_path)
+    assert store.catch_up() == "synced"
+    second = store.append(fact(message="two"))
+    store.close()
+
+    assert [r[0] for r in sqlite_facts(tmp_path / "s.db")] == [first, second]
+    assert len(lines(tmp_path / "s.jsonl")) == 2
+
+
+# --- crash window: log written, sqlite not ---------------------------------
+
+
+def test_crash_window_reopen_tails_forward_with_stable_receipt(tmp_path):
+    """The crash the flip exists to survive: the line is durable, the index
+    never got it. Reopening must recover the row with its id unchanged."""
+    store = open_store(tmp_path)
+    kept = store.append(fact(message="indexed"))
+
+    # Simulate: line flushed, process died before the sqlite transaction.
+    lost_row = ("01LOSTFACT", "note", 2.0, "kyle", "", json.dumps({"m": "lost"}))
+    from engine.jsonl_codec import serialize_fact_row
+
+    with (tmp_path / "s.jsonl").open("a", encoding="utf-8") as fh:
+        fh.write(serialize_fact_row(lost_row) + "\n")
+    store.close()
+
+    store = open_store(tmp_path)
+    assert store.catch_up() == "synced"  # the reopen already caught it up
+    ids = [r[0] for r in sqlite_facts(tmp_path / "s.db")]
+    assert ids == [kept, "01LOSTFACT"]
+    assert offset_of(store) == (tmp_path / "s.jsonl").stat().st_size
+    store.close()
+
+
+def test_catch_up_preserves_a_foreign_signature_verbatim(tmp_path):
+    """Indexing is not re-emitting: a signed line must land with its own
+    signature, even though this store has no signer at all."""
+    from engine.jsonl_codec import serialize_fact_row
+
+    store = open_store(tmp_path)
+    store.append(fact())
+    store.close()
+
+    row = ("01FOREIGN", "note", 3.0, "sol", "", json.dumps({"m": "signed"}),
+           "sig-from-another-observer")
+    with (tmp_path / "s.jsonl").open("a", encoding="utf-8") as fh:
+        fh.write(serialize_fact_row(row) + "\n")
+
+    store = open_store(tmp_path)
+    stored = [r for r in sqlite_facts(tmp_path / "s.db") if r[0] == "01FOREIGN"][0]
+    assert stored == row
+    store.close()
+
+
+def test_signing_era_survives_the_new_path(tmp_path):
+    """A signed fact appended through the JSONL path must verify: the
+    commitment is over the payload TEXT the log carries."""
+    signed: dict[str, str] = {}
+
+    def fact_signer(observer: str, commitment: str) -> str | None:
+        if observer != "kyle":
+            return None
+        signed[commitment] = f"sig::{commitment}"
+        return signed[commitment]
+
+    store = open_store(tmp_path, fact_signer=fact_signer)
+    fid = store.append(fact())
+    store.append(fact(observer="nokey"))
+    store.close()
+
+    rows = {r[0]: r for r in sqlite_facts(tmp_path / "s.db")}
+    row = rows[fid]
+    commitment = _fact_commitment_hash(row[1], row[2], row[3], row[4], row[5])
+    assert row[6] == f"sig::{commitment}"          # signed under the stored text
+    assert [r[6] for r in rows.values() if r[3] == "nokey"] == [None]
+
+    # …and the line re-derives the same commitment, so verification survives.
+    log_rows = [r for t, r in map(deserialize_row, lines(tmp_path / "s.jsonl"))]
+    line = [r for r in log_rows if r[0] == fid][0]
+    assert _fact_commitment_hash(line[1], line[2], line[3], line[4], line[5]) == commitment
+    assert line[6] == row[6]
+
+
+# --- torn line -------------------------------------------------------------
+
+
+def test_torn_final_line_is_truncated_not_just_skipped(tmp_path):
+    store = open_store(tmp_path)
+    good = store.append(fact())
+    store.close()
+    log = tmp_path / "s.jsonl"
+    intact = log.stat().st_size
+
+    with log.open("a", encoding="utf-8") as fh:
+        fh.write('{"t":"fact","id":"01TORN","kind":"no')  # crash mid-write
+
+    store = open_store(tmp_path)
+    assert log.stat().st_size == intact          # truncated, not left as junk
+    assert [r[0] for r in sqlite_facts(tmp_path / "s.db")] == [good]
+
+    # And the next append lands as its own well-formed line.
+    nxt = store.append(fact(message="after"))
+    store.close()
+    parsed = [deserialize_row(ln)[1][0] for ln in lines(log)]
+    assert parsed == [good, nxt]
+
+
+def test_torn_only_line_truncates_to_empty(tmp_path):
+    log = tmp_path / "s.jsonl"
+    log.write_text('{"t":"fact","id":"01TOR', encoding="utf-8")
+    store = open_store(tmp_path)
+    assert log.stat().st_size == 0
+    fid = store.append(fact())
+    store.close()
+    assert [deserialize_row(ln)[1][0] for ln in lines(log)] == [fid]
+
+
+# --- offset mismatch → rebuild ---------------------------------------------
+
+
+def test_offset_beyond_log_size_forces_rebuild(tmp_path, caplog):
+    store = open_store(tmp_path)
+    a, b = store.append(fact()), store.append(fact(message="two"))
+    store._conn.execute(
+        "INSERT OR REPLACE INTO store_meta (key, value) VALUES ('jsonl_offset', ?)",
+        (str(10**9),),
+    )
+    store._conn.commit()
+    store.close()
+
+    with caplog.at_level("WARNING"):
+        store = open_store(tmp_path)
+    assert "rebuilding sqlite index" in caplog.text
+    assert [r[0] for r in sqlite_facts(tmp_path / "s.db")] == [a, b]
+    assert offset_of(store) == (tmp_path / "s.jsonl").stat().st_size
+    store.close()
+
+
+def test_content_mismatch_at_offset_forces_rebuild(tmp_path, caplog):
+    """The cheap hash-match: the last consumed line must re-serialize from
+    the row it names. A tampered index row is a mismatch."""
+    store = open_store(tmp_path)
+    store.append(fact())
+    last = store.append(fact(message="two"))
+    store._conn.execute(
+        "UPDATE facts SET payload = ? WHERE id = ?",
+        (json.dumps({"message": "tampered"}), last),
+    )
+    store._conn.commit()
+    store.close()
+
+    with caplog.at_level("WARNING"):
+        store = open_store(tmp_path)
+    assert "does not match the index" in caplog.text
+    payloads = [json.loads(r[5])["message"] for r in sqlite_facts(tmp_path / "s.db")]
+    assert payloads == ["hi", "two"]  # the log won, as canon
+    store.close()
+
+
+def test_offset_not_on_a_line_boundary_forces_rebuild(tmp_path, caplog):
+    store = open_store(tmp_path)
+    store.append(fact())
+    store._conn.execute(
+        "INSERT OR REPLACE INTO store_meta (key, value) VALUES ('jsonl_offset', '3')"
+    )
+    store._conn.commit()
+    store.close()
+
+    with caplog.at_level("WARNING"):
+        store = open_store(tmp_path)
+    assert "rebuilding sqlite index" in caplog.text
+    store.close()
+
+
+def test_rebuild_preserves_own_lineage_identity(tmp_path):
+    """A rebuild clears the derived tables only: ``own_lineage`` is identity,
+    is not in the log, and cannot be re-derived from it."""
+    store = open_store(tmp_path)
+    store.append(fact())
+    store._conn.execute(
+        "INSERT OR REPLACE INTO store_meta (key, value) "
+        "VALUES ('own_lineage', 'LINEAGE-1')"
+    )
+    store._conn.execute(
+        "INSERT OR REPLACE INTO store_meta (key, value) VALUES ('jsonl_offset', '1')"
+    )
+    store._conn.commit()
+    store.close()
+
+    store = open_store(tmp_path)
+    kept = store._conn.execute(
+        "SELECT value FROM store_meta WHERE key = 'own_lineage'"
+    ).fetchone()
+    assert kept[0] == "LINEAGE-1"
+    assert len(sqlite_facts(tmp_path / "s.db")) == 1
+    store.close()
+
+
+def test_missing_offset_marker_rebuilds_rather_than_double_indexing(tmp_path):
+    """The post-export shape: a full log beside a full index, no consumption
+    point recorded. Rebuild (not tail-from-0) is the honest answer."""
+    plain = SqliteStore(
+        path=tmp_path / "s.db",
+        serialize=lambda f: f.to_dict(),
+        deserialize=Fact.from_dict,
+    )
+    a = plain.append(fact())
+    b = plain.append(fact(message="two"))
+    plain.close()
+
+    # The S2 export shape, written here directly: engine may not import the
+    # store lib (cross-lib DAG), so the fixture writes the log itself.
+    from engine.jsonl_codec import serialize_fact_row
+
+    (tmp_path / "s.jsonl").write_text(
+        "".join(serialize_fact_row(r) + "\n" for r in sqlite_facts(tmp_path / "s.db")),
+        encoding="utf-8",
+    )
+
+    store = open_store(tmp_path)
+    assert [r[0] for r in sqlite_facts(tmp_path / "s.db")] == [a, b]
+    assert offset_of(store) == (tmp_path / "s.jsonl").stat().st_size
+    store.close()
+
+
+def test_index_with_rows_but_no_log_refuses(tmp_path):
+    plain = SqliteStore(
+        path=tmp_path / "s.db",
+        serialize=lambda f: f.to_dict(),
+        deserialize=Fact.from_dict,
+    )
+    plain.append(fact())
+    plain.close()
+    with pytest.raises(JsonlCanonicalUnsupported, match="export it first"):
+        open_store(tmp_path)
+
+
+# --- read surface + refusals ----------------------------------------------
+
+
+def test_read_surface_is_untouched(tmp_path):
+    store = open_store(tmp_path)
+    store.append(fact(message="one"))
+    store.append(fact(message="two"))
+    assert store.total == 2
+    assert [f.payload["message"] for f in store.since(0)] == ["one", "two"]
+    assert [k for k, _ in store.since_raw(0)] == ["note", "note"]
+    store.close()
+
+
+@pytest.mark.parametrize("op", ["absorb_genesis", "absorb_edit", "reanchor"])
+def test_history_mutating_ops_refuse_loudly(tmp_path, op):
+    store = open_store(tmp_path)
+    store.append(fact())
+    with pytest.raises(JsonlCanonicalUnsupported, match="jsonl-canonical-store"):
+        getattr(store, op)()
+    store.close()
+
+
+# --- review regressions (S3 round 1) --------------------------------------
+
+
+def test_rejected_insert_never_orphans_a_line(tmp_path):
+    """A duplicate id must fail BEFORE the line is durable.
+
+    The INSERT is staged first precisely so a refused append cannot leave a
+    line the index doesn't name — otherwise the next successful append would
+    stamp the offset past the orphan and the index would stop being a
+    function of the log, silently.
+    """
+    import sqlite3
+
+    store = open_store(tmp_path)
+    log = log_path_for(store._path)
+    first = store.append(fact(message="one"))
+
+    with pytest.raises(sqlite3.IntegrityError):
+        store.append(fact(message="dup"), id_override=first)
+    assert len(lines(log)) == 1  # no orphan line
+
+    third = store.append(fact(message="three"))
+    assert offset_of(store) == log.stat().st_size
+    store.close()
+
+    reopened = open_store(tmp_path)
+    assert reopened.catch_up() == "synced"
+    assert [r[0] for r in sqlite_facts(reopened._path)] == [first, third]
+    reopened.close()
+
+
+def test_duplicate_line_in_log_does_not_brick_reopen(tmp_path):
+    """Even a hand-corrupted log must leave the store openable.
+
+    The old failure mode: a rebuild raised from __init__ with DELETE FROM
+    facts uncommitted on a leaked connection, so every later open failed
+    with 'database is locked' — one bad open bricked the store forever.
+
+    The refusal is now named (``JsonlCanonicalUnsupported``, "the canonical
+    log cannot be indexed as written") rather than a raw sqlite
+    IntegrityError: a duplicated id in the LOG is the one collision a rebuild
+    cannot resolve, so it says so instead of leaking the constraint.
+    """
+    import sqlite3
+
+    store = open_store(tmp_path)
+    log = log_path_for(store._path)
+    store.append(fact(message="one"))
+    store.close()
+
+    with log.open("a", encoding="utf-8") as fh:  # duplicate the only line
+        fh.write(lines(log)[0] + "\n")
+    conn = sqlite3.connect(str(tmp_path / "s.db"))
+    conn.execute("DELETE FROM store_meta WHERE key = 'jsonl_offset'")
+    conn.commit()
+    conn.close()
+
+    with pytest.raises(JsonlCanonicalUnsupported, match="more than once"):
+        open_store(tmp_path)
+    # the db is not locked: a second attempt fails the same way, not worse
+    with pytest.raises(JsonlCanonicalUnsupported, match="more than once"):
+        open_store(tmp_path)
+
+
+def test_integral_timestamps_stay_synced_across_opens(tmp_path):
+    """sqlite REAL affinity must not read as corruption.
+
+    An int ts in the line comes back as a float from sqlite; comparing
+    re-serialized text made that look like divergence, so every open
+    rebuilt the entire index and the WARNING became the steady state.
+    """
+    store = open_store(tmp_path)
+    store.append(Fact.of("note", "kyle", ts=1700000000, message="int ts"))
+    store.close()
+
+    for _ in range(3):
+        s = open_store(tmp_path)
+        assert s.catch_up() == "synced"
+        s.close()
+
+
+def test_out_of_band_sqlite_rows_refuse_rather_than_vanish(tmp_path):
+    """store.merge/receive INSERT straight into the db, bypassing the log.
+
+    Accepting them as 'synced' meant the next rebuild deleted them with no
+    error. Refusing is the only non-destructive answer — the rows survive.
+    """
+    import sqlite3
+
+    store = open_store(tmp_path)
+    store.append(fact(message="one"))
+    store.close()
+
+    conn = sqlite3.connect(str(tmp_path / "s.db"))
+    conn.execute(
+        "INSERT OR IGNORE INTO facts (id, kind, ts, observer, origin, payload) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        ("MERGED", "note", 1.0, "peer", "", "{}"),
+    )
+    conn.commit()
+    conn.close()
+
+    with pytest.raises(JsonlCanonicalUnsupported, match="did not come through"):
+        open_store(tmp_path)
+    assert "MERGED" in [r[0] for r in sqlite_facts(tmp_path / "s.db")]
+
+
+def test_long_line_still_gets_the_integrity_check(tmp_path):
+    """The prefix check must not switch off as a function of payload size."""
+    import sqlite3
+
+    store = open_store(tmp_path)
+    store.append(fact(message="x" * 70_000))
+    store.close()
+
+    conn = sqlite3.connect(str(tmp_path / "s.db"))
+    conn.execute("UPDATE facts SET observer = 'TAMPERED', payload = '{}'")
+    conn.commit()
+    conn.close()
+
+    reopened = open_store(tmp_path)  # opening rebuilds: the tamper IS detected
+    assert [r[3] for r in sqlite_facts(reopened._path)] == ["kyle"]
+    assert reopened.catch_up() == "synced"
+    reopened.close()
+
+
+def test_two_open_handles_do_not_brick_the_store(tmp_path):
+    """Regression: per-handle count caching bricked a consistent store.
+
+    Two handles open at once (a daemon plus an ``sl emit``), one append
+    through each. The log has both lines, sqlite has both rows, the offset
+    equals the file size — fully consistent. A cached per-handle counter
+    made the second committer stamp 1 against COUNT(*)=2, so the next open
+    refused, naming out-of-band writers that never ran.
+    """
+    a = open_store(tmp_path)
+    b = open_store(tmp_path)
+    a.append(fact(message="from-a"))
+    b.append(fact(message="from-b"))
+    a.close()
+    b.close()
+
+    assert len(lines(log_path_for(tmp_path / "s.db"))) == 2
+    assert len(sqlite_facts(tmp_path / "s.db")) == 2
+
+    reopened = open_store(tmp_path)  # must not raise
+    assert reopened.catch_up() == "synced"
+    reopened.close()
+
+
+def test_stale_handle_appending_after_another_wrote_stamps_the_truth(tmp_path):
+    """Sequential variant: a long-lived handle must not stamp a stale count."""
+    stale = open_store(tmp_path)  # opened when the store was empty
+    other = open_store(tmp_path)
+    for i in range(5):
+        other.append(fact(message=f"m{i}"))
+    other.close()
+
+    stale.append(fact(message="late"))
+    stale.close()
+
+    assert len(sqlite_facts(tmp_path / "s.db")) == 6
+    reopened = open_store(tmp_path)
+    assert reopened.catch_up() == "synced"
+    reopened.close()
+
+
+def test_rebuild_drops_the_rowid_keyed_fts_index(tmp_path):
+    """DELETE FROM facts resets rowids, so facts_fts/fts_state must go.
+
+    Surviving FTS rows key on facts.rowid and would resolve stale text to
+    freshly re-indexed facts, while fts_state.last_rowid would keep the
+    incremental path from ever indexing them.
+    """
+    import sqlite3
+
+    store = open_store(tmp_path)
+    for i in range(3):
+        store.append(fact(message=f"m{i}"))
+    store.close()
+
+    db = tmp_path / "s.db"
+    conn = sqlite3.connect(str(db))
+    conn.executescript(
+        "CREATE VIRTUAL TABLE facts_fts USING fts5("
+        "  text_content, fact_rowid UNINDEXED, kind UNINDEXED,"
+        "  observer UNINDEXED);"
+        "CREATE TABLE fts_state (key TEXT PRIMARY KEY, value TEXT);"
+    )
+    conn.execute(
+        "INSERT INTO facts_fts(text_content, fact_rowid, kind, observer) "
+        "VALUES ('m1', 2, 'note', 'kyle')"
+    )
+    conn.execute("INSERT INTO fts_state(key, value) VALUES ('last_rowid', '3')")
+    conn.commit()
+    conn.close()
+
+    log = log_path_for(db)
+    kept = lines(log)[0]
+    log.write_text(kept + "\n", encoding="utf-8")  # shrink → forces a rebuild
+
+    reopened = open_store(tmp_path)
+    assert len(sqlite_facts(db)) == 1
+    reopened.close()
+
+    conn = sqlite3.connect(str(db))
+    try:
+        present = {
+            r[0]
+            for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type IN ('table','view')"
+            )
+        }
+    finally:
+        conn.close()
+    assert "facts_fts" not in present
+    assert "fts_state" not in present
+
+
+def test_post_fsync_failure_leaves_the_line_recoverable_on_the_same_handle(tmp_path):
+    """An append must never stamp the offset past an unindexed durable line.
+
+    The sqlite write can fail *after* the log line is fsynced (the stamp,
+    the commit, a disk error, the process dying). The line is durable and
+    the offset unstamped — recoverable. But a long-lived handle keeps
+    appending, and if it stamped the new offset it would bury the orphan
+    while every later open reported "synced". Three appends, the middle
+    one's index write failing: all three must survive with stable ids.
+    """
+    store = open_store(tmp_path)
+    first = store.append(fact(message="one"))
+
+    real_stamp = store._stamp
+    calls = {"n": 0}
+
+    def failing_stamp(*args):
+        calls["n"] += 1
+        raise RuntimeError("simulated sqlite failure after fsync")
+
+    store._stamp = failing_stamp
+    with pytest.raises(RuntimeError):
+        store.append(fact(message="two"))
+    store._stamp = real_stamp
+    assert calls["n"] == 1
+
+    # The line is durable; the index and the offset never saw it.
+    assert len(lines(tmp_path / "s.jsonl")) == 2
+    assert [r[0] for r in sqlite_facts(tmp_path / "s.db")] == [first]
+    assert offset_of(store) < (tmp_path / "s.jsonl").stat().st_size
+
+    # Same handle, next append: reconcile picks the orphan up first.
+    third = store.append(fact(message="three"))
+    store.close()
+
+    log_ids = [deserialize_row(ln)[1][0] for ln in lines(tmp_path / "s.jsonl")]
+    assert len(log_ids) == 3
+    assert log_ids[0] == first and log_ids[2] == third
+    assert [r[0] for r in sqlite_facts(tmp_path / "s.db")] == log_ids
+
+    reopened = open_store(tmp_path)
+    assert reopened.catch_up() == "synced"
+    assert [r[0] for r in sqlite_facts(tmp_path / "s.db")] == log_ids
+    reopened.close()
+
+
+def test_a_crashed_writers_durable_line_is_indexed_before_the_next_append(tmp_path):
+    """Writer A dies after fsync; long-lived writer B must not stamp past it.
+
+    B never reopens, so open-time catch-up cannot help — the reconcile has
+    to happen on the append itself.
+    """
+    b = open_store(tmp_path)
+    first = b.append(fact(message="one"))
+
+    # Writer A: line durable, index never told (the post-fsync crash window).
+    orphan = ("01CRASHEDA", "note", 2.0, "sol", "", json.dumps({"m": "two"}))
+    with (tmp_path / "s.jsonl").open("a", encoding="utf-8") as fh:
+        fh.write(serialize_fact_row(orphan) + "\n")
+
+    third = b.append(fact(message="three"))
+    b.close()
+
+    assert [r[0] for r in sqlite_facts(tmp_path / "s.db")] == [
+        first, "01CRASHEDA", third
+    ]
+
+
+def test_negative_offset_rebuilds_rather_than_seeking(tmp_path, caplog):
+    """A negative offset is untrustworthy metadata, not a seek position."""
+    store = open_store(tmp_path)
+    a, b = store.append(fact()), store.append(fact(message="two"))
+    store._conn.execute(
+        "INSERT OR REPLACE INTO store_meta (key, value) VALUES ('jsonl_offset', '-1')"
+    )
+    store._conn.commit()
+    store.close()
+
+    with caplog.at_level("WARNING"):
+        store = open_store(tmp_path)
+    assert "rebuilding sqlite index" in caplog.text
+    assert [r[0] for r in sqlite_facts(tmp_path / "s.db")] == [a, b]
+    assert offset_of(store) == (tmp_path / "s.jsonl").stat().st_size
+    store.close()
+
+
+def test_resolved_index_tails_an_existing_index_that_is_behind(tmp_path):
+    """An existing .db is not evidence of a current one.
+
+    Read-only invocations never construct a JsonlStore, so if resolution
+    short-circuits on index.exists() a durable-but-unindexed line stays
+    invisible indefinitely — a canonical fact reported as absent.
+    """
+    from engine.jsonl_store import resolved_index
+
+    store = open_store(tmp_path)
+    first = store.append(fact(message="one"))
+    store.close()
+
+    orphan = ("01UNINDEXED", "note", 2.0, "sol", "", json.dumps({"m": "two"}))
+    with (tmp_path / "s.jsonl").open("a", encoding="utf-8") as fh:
+        fh.write(serialize_fact_row(orphan) + "\n")
+    assert [r[0] for r in sqlite_facts(tmp_path / "s.db")] == [first]
+
+    index = resolved_index(tmp_path / "s.jsonl")
+    assert index == tmp_path / "s.db"
+    assert [r[0] for r in sqlite_facts(index)] == [first, "01UNINDEXED"]
+
+
+def test_ensure_index_is_a_no_op_when_the_index_is_current(tmp_path):
+    """The common case must not construct a store or take the write lock."""
+    from engine import jsonl_store as mod
+
+    store = open_store(tmp_path)
+    store.append(fact())
+    store.close()
+
+    calls = {"n": 0}
+    real = mod.JsonlStore
+
+    class Counting(real):
+        def __init__(self, **kw):
+            calls["n"] += 1
+            super().__init__(**kw)
+
+    mod.JsonlStore = Counting
+    try:
+        assert mod.ensure_index(tmp_path / "s.jsonl") == tmp_path / "s.db"
+    finally:
+        mod.JsonlStore = real
+    assert calls["n"] == 0
+
+
+# --- what open-time detection covers, and what verify covers ---------------
+
+
+def test_interior_sqlite_tamper_of_a_sealed_fact_survives_open_but_fails_verify(
+    tmp_path,
+):
+    """The honest scope of the two layers, pinned.
+
+    Open-time detection is cheap on purpose: the last consumed line's
+    integrity compare plus the stamped row counts. Those catch out-of-band
+    *inserts* and an edit to the last-consumed row — not an in-place update
+    to an interior one. Full content verification is the chain walk's job:
+    a sealed fact's window hash commits to its content, so `store verify`
+    breaks on exactly the edit that opens clean.
+    """
+    import sqlite3
+
+    store = open_store(tmp_path)
+    store.append(fact(message="first"))
+    store.append(fact(message="second"))
+    store.append_tick(
+        Tick(name="seal", ts=datetime.now(UTC), payload={"n": 2}, origin="t")
+    )
+    assert store.verify_chain()["ok"]
+    store.close()
+
+    db = tmp_path / "s.db"
+    conn = sqlite3.connect(str(db))
+    fid, payload = conn.execute(
+        "SELECT id, payload FROM facts ORDER BY rowid"
+    ).fetchone()
+    conn.execute(
+        "UPDATE facts SET payload = ? WHERE id = ?",
+        (json.dumps({**json.loads(payload), "message": "TAMPERED"}), fid),
+    )
+    conn.commit()
+    conn.close()
+
+    store = open_store(tmp_path)
+    # Open-time detection does NOT see this — counts match and the tampered
+    # row is not the last consumed line. Documented, not claimed otherwise.
+    assert store.catch_up() == "synced"
+
+    report = store.verify_chain()
+    assert not report["ok"]
+    assert any("window_hash mismatch" in b["reason"] for b in report["breaks"])
+    store.close()
+
+
+def test_interior_tamper_of_an_unsealed_fact_is_caught_by_nothing(tmp_path):
+    """The custody boundary, stated as a test rather than left implied.
+
+    A fact not yet sealed by a tick has no hash committing to its content
+    (and, unsigned, no signature either), so a direct sqlite edit is
+    undetectable until the next boundary. Same limit verify_facts already
+    documents for signature strips. Pinned so the docs cannot quietly widen
+    into "verify catches interior tampering" without this failing.
+    """
+    import sqlite3
+
+    store = open_store(tmp_path)
+    store.append(fact(message="first"))
+    store.append_tick(
+        Tick(name="seal", ts=datetime.now(UTC), payload={"n": 1}, origin="t")
+    )
+    store.append(fact(message="live-edge"))
+    store.append(fact(message="last"))
+    store.close()
+
+    conn = sqlite3.connect(str(tmp_path / "s.db"))
+    edge = conn.execute("SELECT id FROM facts ORDER BY rowid").fetchall()[1][0]
+    conn.execute(
+        "UPDATE facts SET payload = ? WHERE id = ?",
+        (json.dumps({"message": "EDGE"}), edge),
+    )
+    conn.commit()
+    conn.close()
+
+    store = open_store(tmp_path)
+    assert store.catch_up() == "synced"
+    assert store.verify_chain()["ok"]
+    assert store.verify_facts()["ok"]
+    store.close()
+
+
+def test_recovery_during_a_tick_leaves_the_chain_verifiable(tmp_path):
+    """A durable-but-unindexed FACT is reconciled before the tick mints.
+
+    append_tick derives prev_hash/window_hash/fact_cursor from sqlite, so the
+    reconcile has to run in front of that derivation (_sync_derived_state),
+    not merely in front of the INSERT. With it there, a line another writer
+    left durable is indexed first and the tick seals it in its own window —
+    rather than minting a cursor that skips a fact already in the canonical
+    log.
+    """
+    import time
+
+    store = open_store(tmp_path)
+    store.append(fact(message="one"))
+
+    # Writer A's line: durable, unindexed, timestamped inside the window the
+    # next tick would otherwise seal.
+    orphan = ("01CRASHEDA", "note", time.time(), "sol", "", json.dumps({"m": "two"}))
+    with (tmp_path / "s.jsonl").open("a", encoding="utf-8") as fh:
+        fh.write(serialize_fact_row(orphan) + "\n")
+
+    store.append_tick(
+        Tick(name="seal", ts=datetime.now(UTC), payload={"n": 1}, origin="t")
+    )
+    assert store.verify_chain()["ok"]
+    assert [r[0] for r in sqlite_facts(tmp_path / "s.db")][-1] == "01CRASHEDA"
+
+    # A second boundary with nothing new to seal keeps the chain intact.
+    store.append_tick(
+        Tick(name="seal", ts=datetime.now(UTC), payload={"n": 2}, origin="t")
+    )
+    assert store.verify_chain()["ok"]
+    cursors = [
+        r[0]
+        for r in store._conn.execute("SELECT fact_cursor FROM ticks ORDER BY rowid")
+    ]
+    assert cursors[0] == "01CRASHEDA"  # the FIRST tick seals the recovered fact
+    assert cursors[1] == "01CRASHEDA"
+    store.close()
+
+    reopened = open_store(tmp_path)
+    assert reopened.catch_up() == "synced"
+    assert reopened.verify_chain()["ok"]
+    reopened.close()
+
+
+def test_orphaned_tick_is_reconciled_before_the_next_tick_links(tmp_path):
+    """An unindexed durable TICK must not be skipped by its successor.
+
+    The corruption this closes is permanent, unlike the fact case: the mint
+    reads prev_hash/window_start off the index, so an orphaned tick 2 would
+    make tick 3 link back to tick 1 — and that broken linkage is written into
+    the canonical log, where no rebuild can repair it. Sol's injection: fail
+    _stamp once (the line is fsynced, the index rolled back), then mint the
+    next tick on the same handle.
+    """
+    store = open_store(tmp_path)
+    store.append(fact(message="one"))
+    store.append_tick(Tick(name="seal", ts=datetime.now(UTC), payload={"n": 1}, origin="t"))
+
+    real_stamp = store._stamp
+
+    def failing_stamp(*args):
+        raise RuntimeError("simulated sqlite failure after fsync")
+
+    store._stamp = failing_stamp
+    with pytest.raises(RuntimeError):
+        store.append_tick(
+            Tick(name="seal", ts=datetime.now(UTC), payload={"n": 2}, origin="t")
+        )
+    store._stamp = real_stamp
+
+    # Tick 2's line is durable; the index has not consumed it.
+    log = tmp_path / "s.jsonl"
+    assert sum(1 for ln in lines(log) if deserialize_row(ln)[0] == "tick") == 2
+    assert offset_of(store) < log.stat().st_size
+
+    store.append_tick(Tick(name="seal", ts=datetime.now(UTC), payload={"n": 3}, origin="t"))
+
+    log_ticks = [row for t, row in map(deserialize_row, lines(log)) if t == "tick"]
+    assert len(log_ticks) == 3
+    # Each tick's prev_hash names its true predecessor — no forked linkage.
+    assert log_ticks[1][6] == tick_row_hash(log_ticks[0])
+    assert log_ticks[2][6] == tick_row_hash(log_ticks[1])
+    assert store.verify_chain()["ok"]
+    store.close()
+
+    reopened = open_store(tmp_path)
+    assert reopened.catch_up() == "synced"
+    assert reopened.verify_chain()["ok"]
+    assert [r[0] for r in reopened._conn.execute("SELECT id FROM ticks ORDER BY rowid")] == [
+        row[0] for row in log_ticks
+    ]
+    reopened.close()
+
+
+# ---------------------------------------------------------------------------
+# Locator residue: every store-locator resolution goes through residence
+# ---------------------------------------------------------------------------
+
+
+def _jsonl_vertex(tmp_path: Path) -> Path:
+    vpath = tmp_path / "t.vertex"
+    vpath.write_text(
+        'name "t"\nstore "./data/t.jsonl"\nloops {\n  note { fold { items "by" "message" } }\n}\n'
+    )
+    return vpath
+
+
+def test_declaration_status_resolves_to_the_index_not_the_log(tmp_path, monkeypatch):
+    """A .jsonl locator names the LOG; declaration reads sqlite.
+
+    Handing the log path to a sqlite open fails soft — the resolver answers
+    "no declaration here" and the vertex silently reports pre-genesis. The
+    resolution must go through residence, which knows the sibling .db is the
+    file to connect to.
+    """
+    import engine.declaration as decl
+
+    vpath = _jsonl_vertex(tmp_path)
+    log = tmp_path / "data" / "t.jsonl"
+    store = JsonlStore(
+        path=tmp_path / "data" / "t.db", log_path=log,
+        serialize=Fact.to_dict, deserialize=Fact.from_dict,
+    )
+    store.append(fact(message="one"))
+    store.close()
+
+    seen: list[Path] = []
+    real = decl.resolve_declaration_documents
+
+    def spy(store_path, **kw):
+        seen.append(Path(store_path))
+        return real(store_path, **kw)
+
+    monkeypatch.setattr(decl, "resolve_declaration_documents", spy)
+    decl.load_declaration_status(vpath)
+
+    assert seen == [tmp_path / "data" / "t.db"]

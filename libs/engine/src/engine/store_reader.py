@@ -242,6 +242,76 @@ class StoreReader:
             for r in rows
         }
 
+    def live_edge(self) -> tuple[int, float | None]:
+        """Visible facts past the newest chained tick's window cursor.
+
+        Returns ``(count, oldest_ts)`` — the live edge and the ``ts`` of its
+        oldest fact (``None`` when the edge is empty). The boundary is the
+        same claim ``SqliteStore.verify_chain`` walks: the newest chained
+        tick's ``fact_cursor`` resolved to its rowid (witness/append order,
+        never ``ts`` — a backfilled fact with an old event time stays on the
+        edge until sealed; see the ORDERING AUTHORITY note in sqlite_store).
+
+        Boundary fallbacks, all conservative (larger edge, never smaller):
+        pre-chain schema (no ``window_hash`` column), no chained ticks, or an
+        unresolvable cursor fact all report from rowid 0 — every visible fact
+        is on the edge, matching ``verify_chain``'s ``covered=0`` for the
+        same stores.
+
+        Counts follow the read-surface contract (SPEC §9.4): ``_decl.*``
+        excluded. ``verify_chain``'s ``uncovered_facts`` is the forensic
+        surface and includes them — the two numbers answer different
+        questions and may differ by the control-receipt count.
+
+        SNAPSHOT COHERENCE (sol HIGH r1, 0.10.0): boundary resolution and the
+        aggregate are ONE statement, not three. ``StoreReader`` holds no read
+        transaction, so a boundary read and a count read taken as separate
+        statements straddle any concurrent commit — and sealing is *exactly*
+        the concurrent operation that turns a live fact into a covered one.
+        The old three-statement form could observe tick N's boundary and
+        tick N+1's facts, reporting a count true in no coherent snapshot
+        (reproduced: a sealed store answering ``(1, ts)`` instead of
+        ``(0, None)``). SQLite runs a single statement against a single
+        snapshot, so collapsing them makes the skew inexpressible rather
+        than merely unlikely — the boundary CTE and the aggregate now always
+        see the same commit, whichever one that is.
+
+        The ``PRAGMA table_info`` schema gate stays a separate statement, and
+        that is safe in the only direction it can drift: a migration that adds
+        ``window_hash`` between the probe and the aggregate makes this read
+        fall back to boundary 0 — the whole store on the edge, the same
+        conservative answer every other fallback gives. There is no
+        interleaving in which the gate makes the edge look *smaller* than a
+        coherent snapshot would.
+        """
+        cols = {
+            r[1] for r in self._conn.execute("PRAGMA table_info(ticks)")
+        }
+        # All four documented fallbacks live inside the one statement:
+        #   pre-chain schema        -> the literal 0 boundary below
+        #   no chained tick         -> inner SELECT yields no row -> COALESCE 0
+        #   "" cursor sentinel      -> no fact has id '' -> COALESCE 0
+        #   unresolvable cursor     -> no id match -> COALESCE 0
+        # No parameters are interpolated — `boundary` is one of two literal
+        # SQL fragments chosen by the schema probe.
+        boundary = (
+            """COALESCE((
+                SELECT f.rowid FROM facts f
+                 WHERE f.id = (
+                     SELECT fact_cursor FROM ticks
+                      WHERE window_hash IS NOT NULL
+                      ORDER BY rowid DESC LIMIT 1
+                 )
+            ), 0)"""
+            if "window_hash" in cols
+            else "0"
+        )
+        count, oldest = self._conn.execute(
+            "SELECT COUNT(*), MIN(ts) FROM facts "
+            f"WHERE rowid > {boundary} AND kind NOT GLOB '_decl.*'"
+        ).fetchone()
+        return count, oldest
+
     def summary(self, *, include_internal: bool = False) -> dict:
         """Aggregate store contents into a summary dict.
 

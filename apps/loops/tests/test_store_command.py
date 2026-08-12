@@ -651,3 +651,770 @@ class TestStoreReindex:
                 assert row is not None
             finally:
                 conn.close()
+
+
+class TestJsonlCanonicalStoreVerbRefusals:
+    """History-mutating store verbs must refuse a JSONL-canonical vertex.
+
+    The refusal lives on ``JsonlStore``; it only fires if the CLI constructs
+    the store through ``open_canonical_store`` on the CANONICAL locator.
+    Building a plain ``SqliteStore`` on the resolved index instead rewrites
+    (or appends to) the derived index while the log keeps the originals —
+    the index stops being a function of the log, and nothing says so.
+    """
+
+    @staticmethod
+    def _jsonl_vertex(tmp_path):
+        from engine.builder import fold_count, vertex
+
+        vpath = tmp_path / "x.vertex"
+        (vertex("x").store("./x.jsonl")
+            .loop("ping", fold_count("n"), boundary_every=1)
+            .write(vpath))
+        return vpath
+
+    @staticmethod
+    def _seed(vpath):
+        """One fact through the canonical path, so the store is materialized."""
+        from atoms import Fact
+        from engine.jsonl_store import open_canonical_store
+
+        store = open_canonical_store(
+            vpath.parent / "x.jsonl",
+            serialize=lambda f: f.to_dict(),
+            deserialize=Fact.from_dict,
+        )
+        try:
+            store.append(Fact.of("ping", "x"))
+        finally:
+            store.close()
+
+    def test_reanchor_refuses_instead_of_rewriting_the_index(self, tmp_path, capsys):
+        from loops.commands.store import _run_reanchor
+
+        vpath = self._jsonl_vertex(tmp_path)
+        self._seed(vpath)
+        before = (tmp_path / "x.jsonl").read_bytes()
+
+        rc = _run_reanchor([], vertex_path=vpath)
+
+        assert rc == 2
+        assert "jsonl-canonical" in capsys.readouterr().err
+        assert (tmp_path / "x.jsonl").read_bytes() == before
+
+    @staticmethod
+    def _poison_index(vpath):
+        """Insert straight into the derived index, behind the log's back.
+
+        The state ``_refuse_out_of_band`` detects: every later open raises
+        JsonlCanonicalUnsupported from the JsonlStore CONSTRUCTOR, so the
+        read-shaped verbs — which have no local catch, having no history to
+        mutate — hit it before any of their own code runs.
+        """
+        import sqlite3
+
+        conn = sqlite3.connect(vpath.parent / "x.db")
+        conn.execute(
+            "INSERT INTO facts (id, kind, ts, observer, origin, payload) "
+            "VALUES ('OUT-OF-BAND-ROW', 'ping', 1.0, 'x', '', '{}')"
+        )
+        conn.commit()
+        conn.close()
+
+    def test_adopt_on_a_poisoned_store_refuses_instead_of_tracebacking(
+        self, tmp_path, capsys
+    ):
+        """The constructor-raised refusal reaches the user as a refusal.
+
+        ``adopt`` has no local catch — it mutates no history, so nothing
+        prompted one — and the raise happens inside ``JsonlStore.__init__``,
+        before any of its own code runs. Without the dispatcher backstop this
+        is a raw traceback. (``stats``/``ticks``/``verify`` read through
+        ``StoreReader``/``SqliteStore`` on the index and never construct a
+        ``JsonlStore``, so they answer from the poisoned index instead —
+        a separate gap, not this one.)
+        """
+        from loops.commands.store import _run_store
+
+        vpath = self._jsonl_vertex(tmp_path)
+        self._seed(vpath)
+        self._poison_index(vpath)
+
+        rc = _run_store(["adopt"], vertex_path=vpath)
+
+        assert rc == 2
+        assert "did not come through" in capsys.readouterr().err
+
+    def test_absorb_genesis_refuses(self, tmp_path, capsys):
+        from loops.commands.store import _run_absorb
+
+        vpath = self._jsonl_vertex(tmp_path)
+        self._seed(vpath)
+
+        rc = _run_absorb(["--observer", "x"], vertex_path=vpath)
+
+        assert rc == 2
+        assert "jsonl-canonical" in capsys.readouterr().err
+
+
+class TestStoreVerbsOnAFreshClone:
+    """A JSONL-canonical vertex whose derived index was never cloned.
+
+    The log is tracked, the ``.db`` is not — so the store IS materialized,
+    it just has no index yet. Resolution must build it (``resolved_index``),
+    the same seam the read path already goes through; otherwise the verbs
+    claim "no facts emitted" for a store with facts, and ``verify`` dies
+    with an uncaught ``FileNotFoundError``.
+    """
+
+    @staticmethod
+    def _fresh_clone(tmp_path):
+        vpath = TestJsonlCanonicalStoreVerbRefusals._jsonl_vertex(tmp_path)
+        TestJsonlCanonicalStoreVerbRefusals._seed(vpath)
+        (tmp_path / "x.db").unlink()
+        return vpath
+
+    def test_ticks_materializes_the_index_instead_of_reporting_empty(
+        self, tmp_path, capsys
+    ):
+        from loops.commands.store import _run_store
+
+        vpath = self._fresh_clone(tmp_path)
+        rc = _run_store(["ticks"], vertex_path=vpath)
+        capsys.readouterr()
+
+        assert rc == 0
+        assert (tmp_path / "x.db").exists()
+
+    def test_stats_materializes_the_index(self, tmp_path, capsys):
+        from loops.commands.store import _run_store
+
+        vpath = self._fresh_clone(tmp_path)
+        rc = _run_store(["stats"], vertex_path=vpath)
+        capsys.readouterr()
+
+        assert rc == 0
+
+    def test_verify_does_not_traceback(self, tmp_path, capsys):
+        from loops.commands.store import _run_store
+
+        vpath = self._fresh_clone(tmp_path)
+        rc = _run_store(["verify"], vertex_path=vpath)
+        capsys.readouterr()
+
+        assert rc == 0
+
+    def test_a_never_emitted_store_is_still_unmaterialized(self, tmp_path, capsys):
+        """No log to build from ⇒ the not-yet-materialized contract still speaks."""
+        from loops.commands.store import _run_store
+
+        vpath = TestJsonlCanonicalStoreVerbRefusals._jsonl_vertex(tmp_path)
+
+        assert _run_store(["ticks"], vertex_path=vpath) == 1
+        captured = capsys.readouterr()
+        assert "not yet materialized" in captured.out + captured.err
+
+
+class TestCanonicalAgreementGate:
+    """`store verify` must not attest to an index the canonical log disowns.
+
+    Before design/store/verify-canonical-agreement, every store verb read the
+    derived sqlite index alone: an out-of-band row rendered "✓ chain intact"
+    at rc=0, which is a false attestation of exactly the lie-class the chain
+    exists to prevent. These tests inject one disagreement each.
+    """
+
+    @staticmethod
+    def _store(tmp_path):
+        from atoms import Fact
+        from engine.jsonl_store import open_canonical_store
+        from engine.tick import Tick
+        from datetime import UTC, datetime
+
+        vpath = TestJsonlCanonicalStoreVerbRefusals._jsonl_vertex(tmp_path)
+        store = open_canonical_store(
+            tmp_path / "x.jsonl",
+            serialize=lambda f: f.to_dict(),
+            deserialize=Fact.from_dict,
+        )
+        try:
+            store.append(Fact.of("ping", "x", message="one"))
+            store.append(Fact.of("ping", "x", message="two"))
+            store.append_tick(Tick(name="seal", ts=datetime.now(UTC),
+                                   payload={"n": 1}, origin="t"))
+        finally:
+            store.close()
+        return vpath
+
+    @staticmethod
+    def _forge_row(tmp_path):
+        """A fact row the canonical log never carried."""
+        import json
+        import sqlite3
+        import time
+
+        conn = sqlite3.connect(str(tmp_path / "x.db"))
+        conn.execute(
+            "INSERT INTO facts (id, kind, ts, observer, origin, payload) "
+            "VALUES ('01FORGED', 'ping', ?, 'mallory', '', ?)",
+            (time.time(), json.dumps({"message": "forged"})),
+        )
+        conn.commit()
+        conn.close()
+
+    def test_a_clean_store_says_what_it_actually_checked(self, tmp_path, capsys):
+        from loops.commands.store import _run_store
+
+        vpath = self._store(tmp_path)
+        rc = _run_store(["verify"], vertex_path=vpath)
+        out = capsys.readouterr().out
+
+        assert rc == 0
+        assert "index chain intact; canonical parity checks pass (not deep)" in out
+        # The scope boundary is printed, not left in a docstring.
+        assert "live edge" in out
+
+    def test_an_out_of_band_row_breaks_verify_and_suppresses_chain_intact(
+        self, tmp_path, capsys
+    ):
+        from loops.commands.store import _run_store
+
+        vpath = self._store(tmp_path)
+        self._forge_row(tmp_path)
+
+        rc = _run_store(["verify"], vertex_path=vpath)
+        out = capsys.readouterr().out
+
+        assert rc == 1
+        assert "CANONICAL DISAGREEMENT" in out
+        assert "counts" in out
+        assert "chain intact" not in out
+
+    def test_the_divergence_names_which_check_failed_in_json(self, tmp_path, capsys):
+        import json as _json
+
+        from loops.commands.store import _run_store
+
+        vpath = self._store(tmp_path)
+        self._forge_row(tmp_path)
+
+        rc = _run_store(["verify", "--json"], vertex_path=vpath)
+        payload = _json.loads(capsys.readouterr().out)
+
+        assert rc == 1
+        assert payload["ok"] is False
+        failed = [c["check"] for c in payload["canonical"]["checks"] if not c["ok"]]
+        assert failed == ["counts"]
+
+    def test_a_durable_unindexed_line_fails_offset_parity(self, tmp_path, capsys):
+        """The gate must judge, not repair.
+
+        Resolution normally runs ``ensure_index``, which catches a stale index
+        up — and a caught-up index agrees by construction. If the gate ran
+        after that, this store would verify clean.
+        """
+        import json
+        import time
+
+        from engine.jsonl_codec import serialize_fact_row
+        from loops.commands.store import _run_store
+
+        vpath = self._store(tmp_path)
+        with (tmp_path / "x.jsonl").open("a", encoding="utf-8") as fh:
+            fh.write(serialize_fact_row(
+                ("01UNINDEXED", "ping", time.time(), "sol", "",
+                 json.dumps({"message": "durable"}))
+            ) + "\n")
+
+        rc = _run_store(["verify"], vertex_path=vpath)
+        out = capsys.readouterr().out
+
+        assert rc == 1
+        assert "unindexed" in out
+        assert "chain intact" not in out
+        # …and it is scoped to the unconsumed suffix, not called tampering.
+        assert "INDEX BEHIND THE LOG" in out
+        assert "CANONICAL DISAGREEMENT" not in out
+
+    def test_the_crash_window_is_not_reported_as_an_index_edit(
+        self, tmp_path, capsys
+    ):
+        """The writer's own recovery window must not read as an accusation.
+
+        `_check_last_line` used to judge the log's FINAL line, which after a
+        crash between the log's fsync and the index commit has no index row by
+        construction — so the honest-attestation feature printed "the index
+        was edited out of band" about an index nobody had touched, and
+        reported the same offset divergence twice.
+        """
+        import json
+        import time
+
+        from engine.jsonl_codec import serialize_fact_row
+        from loops.commands.store import _run_store
+
+        vpath = self._store(tmp_path)
+        with (tmp_path / "x.jsonl").open("a", encoding="utf-8") as fh:
+            fh.write(serialize_fact_row(
+                ("01UNINDEXED", "ping", time.time(), "sol", "",
+                 json.dumps({"message": "durable"}))
+            ) + "\n")
+
+        rc = _run_store(["verify"], vertex_path=vpath)
+        out = capsys.readouterr().out
+
+        assert rc == 1
+        assert "edited out of band" not in out
+        # The route out is named, and it is the repair the product already has.
+        assert "loops read x" in out
+
+    def test_a_torn_tail_is_lag_not_an_unreadable_final_line(
+        self, tmp_path, capsys
+    ):
+        from loops.commands.store import _run_store
+
+        vpath = self._store(tmp_path)
+        with (tmp_path / "x.jsonl").open("a", encoding="utf-8") as fh:
+            fh.write('{"t":"fact","id":"01TOR')
+
+        rc = _run_store(["verify"], vertex_path=vpath)
+        out = capsys.readouterr().out
+
+        assert rc == 1
+        assert "INDEX BEHIND THE LOG" in out
+        assert "incomplete or unreadable" not in out
+        assert "edited out of band" not in out
+
+    def test_the_lag_classification_rides_the_json_shape(self, tmp_path, capsys):
+        import json as _json
+        import time
+
+        from engine.jsonl_codec import serialize_fact_row
+        from loops.commands.store import _run_store
+
+        vpath = self._store(tmp_path)
+        with (tmp_path / "x.jsonl").open("a", encoding="utf-8") as fh:
+            fh.write(serialize_fact_row(
+                ("01UNINDEXED", "ping", time.time(), "sol", "",
+                 _json.dumps({"message": "durable"}))
+            ) + "\n")
+
+        rc = _run_store(["verify", "--json"], vertex_path=vpath)
+        payload = _json.loads(capsys.readouterr().out)
+
+        assert rc == 1
+        assert payload["canonical"]["index_behind"] is True
+        offset = next(c for c in payload["canonical"]["checks"]
+                      if c["check"] == "offset")
+        assert offset["beyond_offset"] is True
+
+    def test_a_forged_row_is_never_classified_as_lag(self, tmp_path, capsys):
+        import json as _json
+
+        from loops.commands.store import _run_store
+
+        vpath = self._store(tmp_path)
+        self._forge_row(tmp_path)
+
+        rc = _run_store(["verify", "--json"], vertex_path=vpath)
+        payload = _json.loads(capsys.readouterr().out)
+
+        assert rc == 1
+        assert payload["canonical"]["index_behind"] is False
+
+    def test_stats_and_ticks_name_the_repair_on_a_lagging_index(
+        self, tmp_path, capsys
+    ):
+        """Still refuses (the totals would undercount) — but says the way out.
+
+        The refusal used to read as poisoning and offer no remediation, while
+        `sl read` on the same store served the data and healed the index.
+        """
+        import json as _json
+        import time
+
+        from engine.jsonl_codec import serialize_fact_row
+        from loops.commands.store import _run_store
+
+        vpath = self._store(tmp_path)
+        with (tmp_path / "x.jsonl").open("a", encoding="utf-8") as fh:
+            fh.write(serialize_fact_row(
+                ("01UNINDEXED", "ping", time.time(), "sol", "",
+                 _json.dumps({"message": "durable"}))
+            ) + "\n")
+
+        for verb in ("stats", "ticks"):
+            rc = _run_store([verb], vertex_path=vpath)
+            out = capsys.readouterr()
+            # Terminal wrapping puts newlines mid-phrase; the claim under test
+            # is the wording, not where the renderer broke the line.
+            text = " ".join((out.out + out.err).split())
+            assert rc == 1, verb
+            assert "index behind the log" in text, verb
+            assert "canonical disagreement" not in text, verb
+            assert "loops read x" in text, verb
+            assert "--deep" in text, verb
+
+    def test_a_rewound_offset_over_a_tampered_row_is_not_downgraded_to_index_behind(
+        self, tmp_path, capsys
+    ):
+        """The lag label must not be attacker-writable.
+
+        The offset marker lives in the very sqlite file the audit judges, so
+        deciding lag from it alone let one UPDATE to store_meta turn a
+        tampered index into a WARNING that says "not evidence of tampering".
+        Lag is corroborated against the log now: an index already holding a
+        row from beyond the offset is not behind, it was edited.
+        """
+        import sqlite3
+
+        from loops.commands.store import _run_store
+
+        vpath = self._store(tmp_path)
+        log = tmp_path / "x.jsonl"
+        first_line_end = len(log.read_bytes().splitlines(keepends=True)[0])
+        conn = sqlite3.connect(str(tmp_path / "x.db"))
+        fid = conn.execute("SELECT id FROM facts ORDER BY rowid").fetchall()[1][0]
+        conn.execute(
+            "UPDATE facts SET payload = ? WHERE id = ?",
+            ('{"message": "forged"}', fid),
+        )
+        conn.execute(
+            "UPDATE store_meta SET value = ? WHERE key = 'jsonl_offset'",
+            (str(first_line_end),),
+        )
+        conn.commit()
+        conn.close()
+
+        rc = _run_store(["verify"], vertex_path=vpath)
+        out = capsys.readouterr().out
+        assert rc == 1
+        assert "CANONICAL DISAGREEMENT" in out
+        assert "INDEX BEHIND THE LOG" not in out
+        assert "not evidence of tampering" not in out
+
+    @staticmethod
+    def _wider_store(tmp_path):
+        """The `_store` shape plus two more indexed facts past the seal.
+
+        Five log lines gives an unconsumed suffix with an INTERIOR line —
+        which is what the sol r4 repros need: L1 corroborates only the first
+        line past the offset, so everything after it is where a doctored
+        suffix hides.
+        """
+        from atoms import Fact
+        from engine.jsonl_store import open_canonical_store
+
+        vpath = TestCanonicalAgreementGate._store(tmp_path)
+        store = open_canonical_store(
+            tmp_path / "x.jsonl",
+            serialize=lambda f: f.to_dict(), deserialize=Fact.from_dict,
+        )
+        try:
+            store.append(Fact.of("note", "x", message="three"))
+            store.append(Fact.of("note", "x", message="four"))
+        finally:
+            store.close()
+        return vpath
+
+    @staticmethod
+    def _line_ends(log):
+        ends, pos = [], 0
+        for raw in log.read_bytes().splitlines(keepends=True):
+            pos += len(raw)
+            ends.append(pos)
+        return ends
+
+    @staticmethod
+    def _assert_claims_no_innocence(out: str) -> None:
+        """L1 may say WHERE the disagreement is; never that it is benign.
+
+        `_suffix_unindexed` corroborates one line, so any wording that reads
+        as an acquittal is a claim the check did not earn — and sol bought
+        exactly that classification twice with single-artifact edits.
+        """
+        text = " ".join(out.split())
+        for phrase in (
+            "not evidence of tampering", "not tampering", "benign", "innocent",
+        ):
+            assert phrase not in text.lower(), phrase
+        assert "--deep" in text
+
+    def test_a_doctored_suffix_behind_a_rewound_marker_is_not_called_benign(
+        self, tmp_path, capsys
+    ):
+        """sol r4 finding 1, index-only repro.
+
+        Rewind the marker to just before the log's last two fact lines,
+        delete the index row for the FIRST of them (which is all L1
+        corroborates), fix the count marker to match, and poison the row for
+        the line after it. Every L1 check that can still speak passes;
+        the offset check reports a shortfall. rc=1 either way — the thing
+        under test is that the words stop short of exoneration.
+        """
+        import json
+        import sqlite3
+
+        from loops.commands.store import _run_store
+
+        vpath = self._wider_store(tmp_path)
+        ends = self._line_ends(tmp_path / "x.jsonl")
+        conn = sqlite3.connect(str(tmp_path / "x.db"))
+        ids = [r[0] for r in conn.execute("SELECT id FROM facts ORDER BY rowid")]
+        conn.execute("DELETE FROM facts WHERE id = ?", (ids[2],))
+        conn.execute("UPDATE facts SET payload = ? WHERE id = ?",
+                     (json.dumps({"message": "FORGED"}), ids[3]))
+        conn.execute(
+            "UPDATE store_meta SET value = ? WHERE key = 'jsonl_fact_count'",
+            (str(len(ids) - 1),),
+        )
+        conn.execute(
+            "UPDATE store_meta SET value = ? WHERE key = 'jsonl_offset'",
+            (str(ends[2]),),
+        )
+        conn.commit()
+        conn.close()
+
+        rc = _run_store(["verify"], vertex_path=vpath)
+        out = capsys.readouterr().out
+        assert rc == 1
+        self._assert_claims_no_innocence(out)
+
+        # …and the route it names does resolve the question.
+        assert _run_store(["verify", "--deep"], vertex_path=vpath) == 1
+        deep = capsys.readouterr().out
+        assert ids[3] in deep
+
+    def test_an_edited_line_under_an_appended_one_is_not_called_benign(
+        self, tmp_path, capsys
+    ):
+        """sol r4 finding 1, log-only repro.
+
+        A same-length interior payload edit keeps every byte offset intact, and
+        one well-formed appended row makes the whole disagreement land past the
+        stamped offset — so L1 sees a shortfall whose first unindexed line is
+        honest. It must not conclude the edit below it is honest too.
+        """
+        import json
+        import time
+
+        from engine.jsonl_codec import serialize_fact_row
+        from loops.commands.store import _run_store
+
+        vpath = self._wider_store(tmp_path)
+        log = tmp_path / "x.jsonl"
+        raw = log.read_bytes().splitlines(keepends=True)
+        first = json.loads(raw[0].decode())
+        payload = json.loads(first["payload"])
+        assert len(payload["message"]) == len("ONE")  # same length, same offsets
+        payload["message"] = "ONE"
+        first["payload"] = json.dumps(payload)
+        edited = (json.dumps(first, separators=(",", ":"), sort_keys=True)
+                  + "\n").encode()
+        assert len(edited) == len(raw[0])
+        log.write_bytes(edited + b"".join(raw[1:]) + (serialize_fact_row(
+            ("01APPENDED", "note", time.time(), "x", "",
+             json.dumps({"message": "durable"}))
+        ) + "\n").encode())
+
+        rc = _run_store(["verify"], vertex_path=vpath)
+        out = capsys.readouterr().out
+        assert rc == 1
+        self._assert_claims_no_innocence(out)
+
+        assert _run_store(["verify", "--deep"], vertex_path=vpath) == 1
+        assert "log line 1" in capsys.readouterr().out
+
+    def test_the_advertised_repair_heals_a_rewound_store_instead_of_crashing(
+        self, tmp_path, capsys
+    ):
+        """The remedy the gate names must actually be a remedy.
+
+        `loops read` on a rewound-marker store used to raise a raw
+        sqlite3.IntegrityError out of catch-up, so the state the gate called
+        recoverable was a permanent dead end.
+        """
+        import sqlite3
+
+        from engine.canonical_audit import audit_agreement
+        from engine.jsonl_store import ensure_index
+        from loops.commands.store import _run_store
+
+        vpath = self._store(tmp_path)
+        log = tmp_path / "x.jsonl"
+        first_line_end = len(log.read_bytes().splitlines(keepends=True)[0])
+        conn = sqlite3.connect(str(tmp_path / "x.db"))
+        conn.execute(
+            "UPDATE store_meta SET value = ? WHERE key = 'jsonl_offset'",
+            (str(first_line_end),),
+        )
+        conn.commit()
+        conn.close()
+
+        ensure_index(log)
+        assert audit_agreement(log).ok
+        assert _run_store(["verify"], vertex_path=vpath) == 0
+        capsys.readouterr()
+
+    def test_deep_names_an_interior_index_edit_l1_cannot_see(self, tmp_path, capsys):
+        import json
+        import sqlite3
+
+        from loops.commands.store import _run_store
+
+        from atoms import Fact
+        from engine.jsonl_store import open_canonical_store
+
+        vpath = self._store(tmp_path)
+        # Two more facts past the seal: the tampered one is then neither
+        # sealed (the index chain would catch it) nor last (L1's last-line
+        # check would). That interior band is exactly what --deep is for.
+        store = open_canonical_store(
+            tmp_path / "x.jsonl",
+            serialize=lambda f: f.to_dict(), deserialize=Fact.from_dict,
+        )
+        store.append(Fact.of("note", "x", message="three"))
+        store.append(Fact.of("note", "x", message="four"))
+        store.close()
+
+        conn = sqlite3.connect(str(tmp_path / "x.db"))
+        first = conn.execute(
+            "SELECT id FROM facts ORDER BY rowid"
+        ).fetchall()[2][0]
+        conn.execute("UPDATE facts SET payload = ? WHERE id = ?",
+                     (json.dumps({"message": "TAMPERED"}), first))
+        conn.commit()
+        conn.close()
+
+        assert _run_store(["verify"], vertex_path=vpath) == 0  # L1's blind spot
+        capsys.readouterr()
+
+        rc = _run_store(["verify", "--deep"], vertex_path=vpath)
+        out = capsys.readouterr().out
+
+        assert rc == 1
+        assert "log line 4" in out
+        assert first in out
+
+    def test_deep_success_is_labeled_as_deep(self, tmp_path, capsys):
+        from loops.commands.store import _run_store
+
+        vpath = self._store(tmp_path)
+        rc = _run_store(["verify", "--deep"], vertex_path=vpath)
+        out = capsys.readouterr().out
+
+        assert rc == 0
+        assert "chain re-derived from" in out
+        assert "not deep" not in out
+
+    def test_the_gate_leaves_both_artifacts_untouched(self, tmp_path, capsys):
+        """Verification is a pure reader — repair would destroy the evidence."""
+        from loops.commands.store import _run_store
+
+        vpath = self._store(tmp_path)
+        self._forge_row(tmp_path)
+        before = ((tmp_path / "x.jsonl").read_bytes(), (tmp_path / "x.db").read_bytes())
+
+        _run_store(["verify"], vertex_path=vpath)
+        capsys.readouterr()
+
+        assert ((tmp_path / "x.jsonl").read_bytes(),
+                (tmp_path / "x.db").read_bytes()) == before
+
+    def test_stats_refuses_rather_than_serving_poisoned_totals(
+        self, tmp_path, capsys
+    ):
+        from loops.commands.store import _run_store
+
+        vpath = self._store(tmp_path)
+        self._forge_row(tmp_path)
+
+        rc = _run_store(["stats"], vertex_path=vpath)
+        out = capsys.readouterr()
+
+        assert rc == 1
+        assert "canonical disagreement" in (out.out + out.err)
+
+    def test_ticks_refuses_rather_than_serving_a_poisoned_chain(
+        self, tmp_path, capsys
+    ):
+        from loops.commands.store import _run_store
+
+        vpath = self._store(tmp_path)
+        self._forge_row(tmp_path)
+
+        rc = _run_store(["ticks"], vertex_path=vpath)
+        out = capsys.readouterr()
+
+        assert rc == 1
+        assert "canonical disagreement" in (out.out + out.err)
+
+    def test_a_db_canonical_store_is_unchanged(self, tmp_path, capsys):
+        """One artifact, nothing to disagree with — the old words, the old rc."""
+        from atoms import Fact
+        from engine.builder import fold_count, vertex
+        from engine.sqlite_store import SqliteStore
+        from loops.commands.store import _run_store
+
+        vpath = tmp_path / "d.vertex"
+        (vertex("d").store("./d.db")
+            .loop("ping", fold_count("n"), boundary_every=1)
+            .write(vpath))
+        store = SqliteStore(path=tmp_path / "d.db",
+                            serialize=lambda f: f.to_dict(),
+                            deserialize=Fact.from_dict)
+        store.append(Fact.of("ping", "d"))
+        store.close()
+
+        rc = _run_store(["verify"], vertex_path=vpath)
+        out = capsys.readouterr().out
+
+        assert rc == 0
+        assert "chain intact" in out
+        assert "canonical" not in out
+
+    def test_deep_is_refused_on_a_db_canonical_store(self, tmp_path, capsys):
+        from atoms import Fact
+        from engine.builder import fold_count, vertex
+        from engine.sqlite_store import SqliteStore
+        from loops.commands.store import _run_store
+
+        vpath = tmp_path / "d.vertex"
+        (vertex("d").store("./d.db")
+            .loop("ping", fold_count("n"), boundary_every=1)
+            .write(vpath))
+        store = SqliteStore(path=tmp_path / "d.db",
+                            serialize=lambda f: f.to_dict(),
+                            deserialize=Fact.from_dict)
+        store.append(Fact.of("ping", "d"))
+        store.close()
+
+        rc = _run_store(["verify", "--deep"], vertex_path=vpath)
+        err = capsys.readouterr().err
+
+        assert rc == 2
+        assert "sqlite-canonical" in err
+
+    def test_the_deep_refusal_keeps_json_shape_parity(self, tmp_path, capsys):
+        """A machine consumer gets {"error": ...}, never plain text (F2)."""
+        import json as _json
+
+        from atoms import Fact
+        from engine.builder import fold_count, vertex
+        from engine.sqlite_store import SqliteStore
+        from loops.commands.store import _run_store
+
+        vpath = tmp_path / "d.vertex"
+        (vertex("d").store("./d.db")
+            .loop("ping", fold_count("n"), boundary_every=1)
+            .write(vpath))
+        store = SqliteStore(path=tmp_path / "d.db",
+                            serialize=lambda f: f.to_dict(),
+                            deserialize=Fact.from_dict)
+        store.append(Fact.of("ping", "d"))
+        store.close()
+
+        rc = _run_store(["verify", "--deep", "--json"], vertex_path=vpath)
+
+        assert rc == 2
+        assert "sqlite-canonical" in _json.loads(capsys.readouterr().out)["error"]

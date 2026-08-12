@@ -139,6 +139,15 @@ class Window:
     # (which names the dominant slice) — always present when the hide fired, so
     # `--all` / an explicit `status=` predicate defeat is disclosed, never
     # silent. Fail-open: rows lacking the status field are never counted here.
+    edge_facts: int = 0  # visible facts on the store's live edge (appended
+    # after the newest chained tick's cursor — witness axis). Same signal
+    # family as `unfolded`: present but not surfaced — here, not yet sealed.
+    edge_since: float | None = None  # ts of the OLDEST edge fact (None =
+    # empty edge). The staleness-judgment anchor: a dormant store has an
+    # empty edge and stays quiet; accumulation-without-seal is the signal
+    # (design:rendering/live-edge-staleness-on-read-path — both occurrences
+    # of seal-wiring death were only caught by human noticing; the sensor
+    # lives on the read path because it cannot live in the wiring it watches).
 
 
 @dataclass(frozen=True)
@@ -747,6 +756,8 @@ def project(
         query=None,
         fields=tuple(fields) if fields else None,
         granularity=_window_granularity(row_tuple),
+        edge_facts=state.edge_facts,
+        edge_since=state.edge_since,
     )
     return Surface(
         rows=row_tuple,
@@ -1284,6 +1295,8 @@ def _window_to_dict(window: Window) -> dict:
         "stale": list(window.stale),
         "truncated": window.truncated,
         "hidden": window.hidden,
+        "edge_facts": window.edge_facts,
+        "edge_since": window.edge_since,
     }
 
 

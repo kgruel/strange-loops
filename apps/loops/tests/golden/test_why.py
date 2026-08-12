@@ -43,35 +43,35 @@ WHY_COLLECT = replay_attribution(
 
 
 def test_why_default_tty(golden):
-    block = why_view(WHY_UPSERT, Zoom.SUMMARY, width=80, piped=False)
+    block = why_view(WHY_UPSERT, Zoom.SUMMARY, width=80)
     golden.assert_match(block_to_text(block), "output")
 
 
 def test_why_default_piped(golden):
-    block = why_view(WHY_UPSERT, Zoom.SUMMARY, width=None, piped=True)
+    block = why_view(WHY_UPSERT, Zoom.SUMMARY, width=None)
     golden.assert_match(block_to_text(block), "output")
 
 
 def test_why_verbose_tty(golden):
-    block = why_view(WHY_UPSERT, Zoom.DETAILED, width=80, piped=False)
+    block = why_view(WHY_UPSERT, Zoom.DETAILED, width=80)
     golden.assert_match(block_to_text(block), "output")
 
 
 def test_why_verbose_piped(golden):
-    block = why_view(WHY_UPSERT, Zoom.DETAILED, width=None, piped=True)
+    block = why_view(WHY_UPSERT, Zoom.DETAILED, width=None)
     golden.assert_match(block_to_text(block), "output")
 
 
 def test_why_full_tty(golden):
-    block = why_view(WHY_UPSERT, Zoom.FULL, width=80, piped=False)
+    block = why_view(WHY_UPSERT, Zoom.FULL, width=80)
     golden.assert_match(block_to_text(block), "output")
 
 
 def test_why_full_piped(golden):
-    block = why_view(WHY_UPSERT, Zoom.FULL, width=None, piped=True)
+    block = why_view(WHY_UPSERT, Zoom.FULL, width=None)
     golden.assert_match(block_to_text(block), "output")
 
 
 def test_why_collect_piped(golden):
-    block = why_view(WHY_COLLECT, Zoom.SUMMARY, width=None, piped=True)
+    block = why_view(WHY_COLLECT, Zoom.SUMMARY, width=None)
     golden.assert_match(block_to_text(block), "output")

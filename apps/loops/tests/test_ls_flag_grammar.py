@@ -150,7 +150,7 @@ class TestLensNarrowing:
         data = fetch_declarations("proj", filters=["kind"])
         # The "KINDS" section-header text is the terse (piped) register contract;
         # the TTY register renders the kind table instead (golden-locked).
-        text = block_text(declarations_view(data, Zoom.SUMMARY, 80, piped=True))
+        text = block_text(declarations_view(data, Zoom.SUMMARY, None))
         assert "KINDS" in text
         assert "OBSERVERS" not in text
 
@@ -160,7 +160,7 @@ class TestLensNarrowing:
         from loops.lenses.declarations import declarations_view
 
         data = fetch_declarations("proj", filters=["kind", "observer"])
-        text = block_text(declarations_view(data, Zoom.SUMMARY, 80, piped=True))
+        text = block_text(declarations_view(data, Zoom.SUMMARY, None))
         assert "KINDS" in text
         assert "OBSERVERS" in text
         assert "COMBINE" not in text  # not selected
@@ -189,7 +189,7 @@ class TestLensNarrowing:
         data = fetch_declarations(
             "proj", filters=["kind"], narrows={"kind": "nonexistent"}
         )
-        text = block_text(declarations_view(data, Zoom.SUMMARY, 80, piped=True))
+        text = block_text(declarations_view(data, Zoom.SUMMARY, None))
         # Section header present with zero count, no real declarations.
         assert "KINDS (—)" in text or "KINDS (0)" in text
         assert "decision" not in text
@@ -663,7 +663,7 @@ class TestPreviewFieldsSurfaced:
         data = fetch_declarations("prev", filters=["kind"])
         # preview= decl detail surfaces in the terse (piped) register; the TTY
         # register's kind table doesn't carry per-kind declaration sublines.
-        text = block_text(declarations_view(data, Zoom.DETAILED, 80, piped=True))
+        text = block_text(declarations_view(data, Zoom.DETAILED, None))
         assert "preview=message,status" in text
 
     def test_render_omits_preview_at_summary(self, proj_with_preview):
@@ -674,3 +674,52 @@ class TestPreviewFieldsSurfaced:
         data = fetch_declarations("prev", filters=["kind"])
         text = block_text(declarations_view(data, Zoom.SUMMARY, 80))
         assert "preview=" not in text
+
+
+# ---------------------------------------------------------------------------
+# Locator residue: stat resolves the index, never the canonical log
+# ---------------------------------------------------------------------------
+
+
+class TestJsonlCanonicalStat:
+    """A ``store "….jsonl"`` locator names the LOG. Stat reads sqlite.
+
+    Joining the locator to the vertex dir by hand — the idiom
+    ``engine.residence`` replaced — hands the log path to a sqlite open,
+    which fails soft: the vertex reports no facts at all.
+    """
+
+    @pytest.fixture
+    def jsonl_vertex(self, loops_env) -> Path:
+        vdir = loops_env / "jproj"
+        vdir.mkdir(parents=True, exist_ok=True)
+        vpath = vdir / "jproj.vertex"
+        (
+            vertex("jproj")
+            .store("./data/jproj.jsonl")
+            .loop("thread", fold_by("name"))
+            .write(vpath)
+        )
+        from atoms import Fact
+        from engine.jsonl_store import open_canonical_store
+
+        with open_canonical_store(
+            vdir / "data" / "jproj.jsonl",
+            serialize=Fact.to_dict, deserialize=Fact.from_dict,
+        ) as store:
+            store.append(Fact.of("thread", "kyle", name="arc", status="open"))
+        return vpath
+
+    def test_vertex_stat_counts_the_facts_in_the_index(self, jsonl_vertex):
+        from lang import parse_vertex_file
+        from loops.commands.ls import _vertex_stat
+
+        stat = _vertex_stat(parse_vertex_file(jsonl_vertex), jsonl_vertex)
+        assert stat["facts"] == 1
+
+    def test_kind_stat_counts_the_facts_in_the_index(self, jsonl_vertex):
+        from loops.commands.ls import fetch_kind_stat
+
+        stat = fetch_kind_stat("jproj", "thread")
+        assert "error" not in stat
+        assert stat["count"] == 1

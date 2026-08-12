@@ -1,0 +1,2903 @@
+Reading prompt from stdin...
+2026-07-27T15:08:42.181383Z ERROR rmcp::transport::worker: worker quit with fatal: Transport channel closed, when Client(HttpRequest(HttpRequest("http/request failed: error sending request for url (https://comms.gruel.network/mcp)")))
+OpenAI Codex v0.145.0
+--------
+workdir: /Users/kaygee/Code/loops
+model: gpt-5.6-sol
+provider: openai
+approval: never
+sandbox: workspace-write [workdir, /tmp, $TMPDIR]
+reasoning effort: medium
+reasoning summaries: none
+session id: 019fa41e-fcb0-7613-998f-17930487bd38
+--------
+user
+# sol MEDIUM review — Track B round 3 (pure replay close)
+
+/Users/kaygee/Code/loops, feat/010-surfacing. Verify the Rule 13 r2 fix:
+`git diff f59eed2...ae0911e` (single commit ae0911e, tests/test_architecture.py
+only; ce06ed5/5012e24 are arbiter receipts — ignore). Your r2 report:
+docs/scratch/010-wave/sol-review-track-b-r2.md. loops-go unchanged this round
+(feat/track-b-batch @ 590e70f).
+
+PURE REPLAY: re-run your two r2 constructions exactly —
+(1) `importlib.import_module("tools._conformance")` and
+`__import__("tools._conformance")` in libs/engine/src/engine/witness.py;
+(2) `__support__/helper.py` at repo top + `import __support__.helper` in the
+same file. Verdict each CLOSED / NOT-CLOSED. Revert everything; confirm 59
+passed at committed state.
+
+No new evasion construction this round — the arbiter's convergence criterion
+stands and r2's contact round is complete. Note (without chasing) anything that
+jumps out. Two spot-checks while you're in the diff, since they're new since
+your contact:
+
+- The computed-import census: baseline constant is 6, arbiter-ratified as a
+  measured population (Rule 12's zero was a genuinely-zero population; this one
+  is not). Verify the six enumerated members exist at the cited sites, that the
+  census asserts BEFORE the violation list, and that the f-string
+  leading-literal refinement resolves the two lens_resolver sites OUT of the
+  census (a placeholder past the first dot cannot change the top-level
+  package) — flag if any member is misclassified.
+- __pycache__ non-false-positive claim, including the stray-.py belt-and-braces
+  case.
+
+Then give the final convergence verdict for the Track B batch as a whole.
+
+SANDBOX: writes = loops workdir + /tmp. Perturb witness.py in place and REVERT
+(you did this in r2), or work in a /tmp copy — your call; leave the tree clean.
+
+Write docs/scratch/010-wave/sol-review-track-b-r3.md (no trailing whitespace),
+print a summary, confirm `uv run pytest tests/ -q` green at close, change
+nothing else.
+
+2026-07-27T15:08:42.437532Z ERROR rmcp::transport::worker: worker quit with fatal: Transport channel closed, when Client(HttpRequest(HttpRequest("http/request failed: error sending request for url (https://comms.gruel.network/mcp)")))
+2026-07-27T15:08:43.442683Z ERROR rmcp::transport::worker: worker quit with fatal: Transport channel closed, when Client(HttpRequest(HttpRequest("http/request failed: error sending request for url (https://comms.gruel.network/mcp)")))
+codex
+I’ll replay only the two specified r2 constructions, inspect the new census and `__pycache__` assertions, restore the committed state, run the full test suite, and write the r3 convergence report.
+  → Inspect r2 report and ae0911e architecture-test diff
+  • Replay both specified witness.py constructions and record verdicts
+  • Verify census ordering/classification and __pycache__ cases
+  • Restore tree, run 59-test suite, and write r3 report
+exec
+/bin/zsh -lc "git status --short && git diff --stat f59eed2...ae0911e && git diff -- tests/test_architecture.py f59eed2...ae0911e && sed -n '1,240p' docs/scratch/010-wave/sol-review-track-b-r2.md" in /Users/kaygee/Code/loops
+ succeeded in 0ms:
+?? docs/scratch/010-wave/sol-review-brief-track-b-r3.md
+?? docs/scratch/010-wave/sol-track-b-r2-stdout.log
+?? docs/scratch/010-wave/sol-track-b-r3-stdout.log
+?? docs/scratch/010-wave/sol-track-b-stdout.log
+ .../010-wave/sol-review-brief-track-b-r2.md        |  61 +++
+ docs/scratch/010-wave/sol-review-brief-track-b.md  |  80 ++++
+ docs/scratch/010-wave/sol-review-track-b-r2.md     | 207 +++++++++++
+ docs/scratch/010-wave/sol-review-track-b.md        | 234 ++++++++++++
+ docs/scratch/010-wave/track-b-impl-report.md       | 283 ++++++++++++++
+ tests/test_architecture.py                         | 407 ++++++++++++++++++++-
+ 6 files changed, 1265 insertions(+), 7 deletions(-)
+# sol MEDIUM review — Track B round 2
+
+Review date: 2026-07-27
+
+Reviewed:
+
+- loops `92451e0...f59eed2` (`5012e24` ignored as arbiter documentation)
+- loops-go `76c8378...590e70f`
+
+## Overall verdict
+
+**FIX-ROUND-NEEDED.**
+
+All four r1 findings are closed. The regenerated tie fixture preserves the
+negative control, the original `tools/` evasion is now caught, and the ledger
+corrections match the r1 wording.
+
+The new-rule contact nevertheless found two honest-code evasions in Rule 13.
+A production module can dynamically import a literal non-production module, or
+statically import from an importable dunder-named top-level root, while all 52
+architecture tests stay green. The new ratchet therefore does not yet enforce
+its stated boundary.
+
+## Closings
+
+### 1. P2 ULID — CLOSED
+
+The five ids in the committed regenerated `tie.db`, in rowid order, are:
+
+```text
+0TBREAKE000000000000000000
+0TBREAKC000000000000000000
+0TBREAKB000000000000000000
+0TBREAKA000000000000000000
+0TBREAKD000000000000000000
+```
+
+All five return `True` from the reference
+`store.rebirth.is_ulid`. All five also parse with
+`ulid.ULID.from_str` and round-trip to the same string. This checks both the
+Crockford shape and the parser's timestamp-range constraint.
+
+Canonicalized JSON comparison of `expected` and `expected_rowid_order` between
+the r1 cut (`76c8378`) and the regenerated fixture (`590e70f`) is empty. The
+derived state is unchanged; only ids and provenance changed.
+
+The four reader perturbations in `/tmp/tb2-scratch` reproduce the r1 profile:
+
+| Reader order | Result against `TestSameTSIDTieBreak` |
+|---|---|
+| `ORDER BY rowid` | red: `entities`, `log`, and `tags` fail |
+| `ORDER BY id` | red: `log` and `tags` fail; `entities` passes |
+| `ORDER BY ts` | red: `entities`, `log`, and `tags` fail |
+| `ORDER BY ts, id` | green: all three facets pass |
+
+The replacement ids therefore remain valid ULIDs without weakening or changing
+the fixture's discriminating behavior.
+
+### 2. P2 `tools/` hole — CLOSED
+
+I replanted the r1 construction verbatim in
+`libs/engine/src/engine/witness.py`:
+
+```python
+import tools._conformance
+```
+
+The suite went red with Rule 13 naming
+`libs/engine/src/engine/witness.py:50`; the result was 1 failed and 51 passed.
+After reverting only that import, the suite returned to 52 passed. This closes
+the exact r1 finding. The broader new-rule contact below is a separate finding.
+
+### 3. P3 ledger — CLOSED
+
+The ledger now satisfies the r1 wording:
+
+- repo state is explicitly dated and scoped to the reviewed tips, naming
+  loops-go `76c8378` on `feat/track-b-batch` and family 3 as the one partially
+  landed item;
+- the framing no longer says that nothing is resolved while recording Q4 as
+  settled: Q1/Q2/Q3/Q5 remain open, while Q4 is correctly described as settled
+  by the shipped relocation and merely recorded by the ledger;
+- the missing third artifact-class prerequisite is restored as
+  **store fixture + cursor + expected fold state at that cursor**, jointly
+  required with a witness-exposing reader for families 1/2/4/5;
+- that schema prerequisite is explicitly distinguished from Q1, which asks for
+  the cursor's form inside the artifact and therefore presumes that the
+  artifact class already exists.
+
+This directly resolves the stale-state, Q4-framing, and dropped-prerequisite
+issues in the r1 report.
+
+### 4. P3 claim wording — CLOSED
+
+The ledger adopts the accurate claim, **"no normative change."** It also states
+why the old "status parentheticals only" description was false: §4.6 gained a
+design diagnosis as well as a status update, §6.2 gained a factual relocation
+update, and the conformance appendix expanded outside a parenthetical. This is
+the SPEC-diff description requested by r1.
+
+## New-rule contact — Rule 13
+
+**EVASION-FOUND.**
+
+### Construction 1: literal dynamic imports
+
+In the production witness module, each of these ordinary runtime forms was
+accepted:
+
+```python
+import importlib
+_conformance = importlib.import_module("tools._conformance")
+```
+
+```python
+_conformance = __import__("tools._conformance")
+```
+
+The first construction left both `tests/test_architecture.py` and the full
+suite at 52 passed. The second left all 52 architecture tests green. Both use a
+literal module name; there is no computed string or deliberate obfuscation.
+
+The cause is direct: `_ImportCollector` implements `visit_Import` and
+`visit_ImportFrom`, but no call handling for `importlib.import_module` or
+`__import__`. Rule 13 therefore sees neither dynamic dependency.
+
+### Construction 2: an excluded but importable root
+
+I added a top-level Python package:
+
+```text
+__support__/helper.py
+```
+
+and a production import:
+
+```python
+import __support__.helper
+```
+
+Python imported it successfully, while all 52 architecture tests passed.
+`_non_production_roots` excludes every name beginning with `__`, but
+`__support__` is a valid top-level Python identifier and import root. The
+helper's statement that dunder-prefixed entries are not importable as
+top-level names is therefore incorrect.
+
+The other suggested angles do not expose an additional hole:
+
+- `from tools import x` and `import tools.x` are both represented in the
+  collector's runtime-module list; the exact static import is empirically red,
+  and a regression test already exercises the `from root import x` form.
+- An ordinary newly added, visible top-level directory containing a `.py` file
+  is found by the shape derivation.
+- A relative import cannot honestly traverse from a shipped package to an
+  unrelated repo-top package; an import beyond the package root is invalid.
+- The rule asserts that roots, `tools`, and production files are all nonempty,
+  so total vacuity is guarded. The dunder construction shows that the root
+  derivation can still be selectively incomplete.
+
+## New-finding audit — legacy fixture ULIDs
+
+The reported count is correct:
+
+| Store | Facts | Invalid by `store.rebirth.is_ulid` |
+|---|---:|---:|
+| `proc.db` | 5 | 5 |
+| `merge_ab.db` | 4 | 4 |
+| `merge_ba.db` | 4 | 4 |
+| **Total** | **13** | **13** |
+
+`proc.db` uses `FIXTURE...` ids; the merge stores use `FIXA...` and
+`FIXB...`. These contain Crockford-excluded characters. The deliberate-non-call
+claim is also correct: `gen_store_fixture.py` and `gen_merge_fixture.py` still
+construct those strings directly and contain no reference to `fixture_ulid`;
+only `gen_tie_fixture.py` calls the new seam.
+
+**Bundling verdict: no test is lying about validity.** `TestM1StoreReplayParity`
+asserts read/replay parity and explicitly says its result is ULID-independent.
+`TestMergeCommutativity` asserts preservation of `(ts, id)` ordering and equal
+derived state; it does not assert Crockford validity. Corpus and test searches
+found no validity assertion over these three databases. Parking their id,
+schema, and provenance regeneration together therefore leaves a documented
+SPEC-format defect, but it does not leave a suite claiming that these ids are
+valid.
+
+## Committed-state suites
+
+Fresh runs before closing:
+
+```text
+loops:
+  UV_CACHE_DIR=/tmp/uv-cache uv run pytest tests/ -q
+  52 passed in 1.98s
+
+loops-go:
+  GOCACHE=/tmp/gocache go test ./internal/conform/ -count=1 -v
+  PASS; 8 top-level tests pass, 1 documented TopN test skips
+```
+
+## Batch convergence
+
+**FIX-ROUND-NEEDED.**
+
+The fix round closes every r1 item, but Rule 13's required adversarial contact
+finds live, non-obfuscated production-to-non-production import paths. Closing
+those contacts, with regression tests for literal dynamic imports and an
+importable dunder-named root, is the remaining batch work.
+
+exec
+/bin/zsh -lc 'git diff f59eed2...ae0911e -- tests/test_architecture.py && rg -n "computed|dynamic|__pycache__|stray|Rule 13|non_production|leading|lens_resolver|import_module|__import__" tests/test_architecture.py' in /Users/kaygee/Code/loops
+ succeeded in 0ms:
+diff --git a/tests/test_architecture.py b/tests/test_architecture.py
+index 548529c..6c49522 100644
+--- a/tests/test_architecture.py
++++ b/tests/test_architecture.py
+@@ -2828,9 +2828,25 @@ def _non_production_roots(repo: Path | None = None) -> tuple[str, ...]:
+     directory added after it was written (docs/RATCHETS.md). ``tools/`` arrived
+     in this wave and would have needed remembering; the next one will not.
+ 
+-    Excluded by shape only: dot- and dunder-prefixed entries (not importable as
+-    top-level names), and the production dirs themselves. A directory with no
+-    Python in it is no import root, so it is not a boundary worth naming.
++    Exclusions are by what is GENUINELY not an import root, which is a shorter
++    list than the first cut claimed:
++
++    * **dot-prefixed** — ``.venv``, ``.git``. A leading dot is not a legal
++      identifier, and ``import_module(".venv")`` is parsed as a *relative*
++      import, so these cannot be reached as top-level names by any spelling.
++    * **holds no Python** — ``data/``, ``dist/``. Nothing to import; naming
++      them would be noise in the failure message and walking them would be
++      slow. This is also what keeps ``__pycache__`` out: it holds ``.pyc``,
++      never ``.py``.
++    * the production dirs themselves, which the other derivations own.
++
++    A DUNDER PREFIX IS NOT AN EXCLUSION, and the r1 docstring's claim that it
++    was — "not importable as top-level names" — was simply false. sol MEDIUM r2
++    put ``__support__/helper.py`` at the repo root and ``import
++    __support__.helper`` in production, and all 52 tests stayed green:
++    ``__support__`` is a perfectly legal identifier and a perfectly good import
++    root. Only ``__pycache__`` ever motivated the filter, and the has-Python
++    test already handles that one on its actual property.
+     """
+     root = REPO_ROOT if repo is None else repo
+     if not root.is_dir():
+@@ -2840,7 +2856,7 @@ def _non_production_roots(repo: Path | None = None) -> tuple[str, ...]:
+             entry.name
+             for entry in root.iterdir()
+             if entry.is_dir()
+-            and not entry.name.startswith((".", "__"))
++            and not entry.name.startswith(".")
+             and entry.name not in _PRODUCTION_DIRS
+             and _has_python(entry)
+         )
+@@ -2861,20 +2877,190 @@ def _production_src_files(repo: Path | None = None) -> list[Path]:
+     return files
+ 
+ 
++# Dynamic-import call names. `import_module` covers both spellings —
++# `importlib.import_module(...)` (Attribute) and the `from importlib import
++# import_module` form (Name) — because the match is on the call name, not on
++# how importlib was bound. `spec_from_file_location` is the path-based loader:
++# a different mechanism, never statically resolvable to a module name, and the
++# most powerful arbitrary-code-loading form there is, so it is classified
++# rather than left invisible.
++_DYNAMIC_IMPORT_CALLS = frozenset({"import_module", "__import__"})
++_DYNAMIC_LOADER_CALLS = frozenset({"spec_from_file_location"})
++
++
++def _static_module_name(node: ast.expr) -> str | None:
++    """The module name a dynamic-import argument determines, or None.
++
++    Two forms are honest static text and get resolved:
++
++    * a plain string constant — ``import_module("tools._conformance")``;
++    * an f-string whose LEADING literal already contains a ``.``, e.g.
++      ``f"loops.lenses.{name}"``. The placeholder cannot change the top-level
++      package once a dot has been passed, so the root is determined even though
++      the full name is not.
++
++    Everything else — a bare variable, a concatenation, an f-string that
++    interpolates before the first dot — is a computed name. This function does
++    not guess at those; the caller classifies and counts them.
++    """
++    if isinstance(node, ast.Constant) and isinstance(node.value, str):
++        return node.value
++    if isinstance(node, ast.JoinedStr) and node.values:
++        first = node.values[0]
++        if isinstance(first, ast.Constant) and isinstance(first.value, str):
++            if "." in first.value:
++                return first.value
++    return None
++
++
++class _DynamicImportCollector(ast.NodeVisitor):
++    """Runtime dynamic-import calls, split by whether the target is static.
++
++    ``literal`` — the imported name is fixed by the source text, so the rule
++    can resolve it and MUST judge it. This is honest code: nothing about
++    ``importlib.import_module("tools._conformance")`` is obfuscated, and it was
++    invisible to the r1 rule only because :class:`_ImportCollector` implements
++    ``visit_Import``/``visit_ImportFrom`` and no call handling at all
++    (sol MEDIUM r2).
++
++    ``computed`` — the name is assembled at runtime. Following those means
++    evaluating strings, which is the "whole-program analysis wearing a test's
++    name" the arbiter convergence ruling forbids chasing. They are a CLASSIFIED
++    BOUNDARY: not chased, but enumerated and counted, exactly as Rule 12
++    handles container/getattr/partial forms.
++
++    TYPE_CHECKING blocks are exempt, matching :class:`_ImportCollector`: the
++    call never executes, so it creates no runtime dependency to invert.
++    """
++
++    def __init__(self) -> None:
++        self.literal: list[tuple[str, int]] = []  # (module, lineno)
++        self.computed: list[tuple[str, int]] = []  # (call description, lineno)
++        self._in_type_checking = False
++
++    def visit_If(self, node: ast.If) -> None:
++        test = node.test
++        is_tc = (isinstance(test, ast.Name) and test.id == "TYPE_CHECKING") or (
++            isinstance(test, ast.Attribute) and test.attr == "TYPE_CHECKING"
++        )
++        if is_tc:
++            prev = self._in_type_checking
++            self._in_type_checking = True
++            self.generic_visit(node)
++            self._in_type_checking = prev
++        else:
++            self.generic_visit(node)
++
++    @staticmethod
++    def _called_name(func: ast.expr) -> str | None:
++        if isinstance(func, ast.Name):
++            return func.id
++        if isinstance(func, ast.Attribute):
++            return func.attr
++        return None
++
++    def visit_Call(self, node: ast.Call) -> None:
++        if self._in_type_checking:
++            self.generic_visit(node)
++            return
++        name = self._called_name(node.func)
++
++        if name in _DYNAMIC_LOADER_CALLS:
++            self.computed.append((f"{name}() — path-based loader", node.lineno))
++            self.generic_visit(node)
++            return
++
++        if name in _DYNAMIC_IMPORT_CALLS:
++            arg = node.args[0] if node.args else None
++            module = _static_module_name(arg) if arg is not None else None
++            if module is None:
++                self.computed.append((f"{name}() — computed module name", node.lineno))
++            elif module.startswith("."):
++                # A relative dynamic import resolves against `package=`.
++                pkg = next(
++                    (kw.value for kw in node.keywords if kw.arg == "package"), None
++                )
++                anchor = _static_module_name(pkg) if pkg is not None else None
++                if anchor is None:
++                    self.computed.append(
++                        (f"{name}() — relative, computed anchor", node.lineno)
++                    )
++                else:
++                    self.literal.append((anchor, node.lineno))
++            else:
++                self.literal.append((module, node.lineno))
++
++        self.generic_visit(node)
++
++
++def _collect_dynamic_imports(path: Path) -> _DynamicImportCollector:
++    """Parse a file and return its dynamic-import collector."""
++    collector = _DynamicImportCollector()
++    collector.visit(ast.parse(path.read_text(), filename=str(path)))
++    return collector
++
++
++def _top_level(module: str) -> str:
++    """The root package of a dotted module name."""
++    return module.split(".", 1)[0]
++
++
+ def _production_imports_of_non_production(repo: Path | None = None) -> list[str]:
+-    """Runtime imports of a non-production root from shipped source."""
++    """Runtime imports of a non-production root from shipped source.
++
++    Covers both the static forms (``import x`` / ``from x import y``) and the
++    dynamic forms whose target is fixed by the source text.
++    """
+     root = REPO_ROOT if repo is None else repo
+     roots = _non_production_roots(root)
+     violations: list[str] = []
+     for py_file in _production_src_files(root):
++        rel = py_file.relative_to(root).as_posix()
+         collector = _collect_imports(py_file)
+         for name in roots:
+             for lineno in _imports_module(collector.runtime_modules, name):
+-                rel = py_file.relative_to(root).as_posix()
+                 violations.append(f"  {rel}:{lineno} — imports non-production root {name!r}")
++        for module, lineno in _collect_dynamic_imports(py_file).literal:
++            name = _top_level(module)
++            if name in roots:
++                violations.append(
++                    f"  {rel}:{lineno} — dynamically imports non-production "
++                    f"root {name!r} ({module!r})"
++                )
+     return sorted(violations)
+ 
+ 
++def _production_computed_dynamic_imports(repo: Path | None = None) -> list[str]:
++    """The classified boundary: dynamic imports whose target is not static."""
++    root = REPO_ROOT if repo is None else repo
++    out: list[str] = []
++    for py_file in _production_src_files(root):
++        rel = py_file.relative_to(root).as_posix()
++        for what, lineno in _collect_dynamic_imports(py_file).computed:
++            out.append(f"  {rel}:{lineno} — {what}; classified out of scope, not resolved")
++    return sorted(out)
++
++
++# The classified-boundary census, same doctrine as Rule 12's
++# _RUNNER_BOUNDARY_BASELINE: out-of-scope indirection is not chased, but the
++# population is COUNTED, because a boundary that grows silently is
++# indistinguishable from a rule that stopped working.
++#
++# Unlike Rule 12's, this baseline is NOT zero, and it cannot be: the repo has a
++# real, reviewed population of computed dynamic imports. All six were inspected
++# when this was set — five lazy-loader registries that resolve module paths out
++# of module-level tables of literal strings (atoms, engine and lang's __getattr__
++# shims; the CLI's main and cli.registry), plus lens_resolver's
++# spec_from_file_location, which loads a user lens by filesystem path. None
++# reaches a script tree. Resolving them would mean constant-folding a lookup
++# table, which is the dataflow analysis the arbiter ruling declines to build.
++#
++# Shrink-only. Raising this means a NEW computed dynamic import entered shipped
++# code: read it, satisfy yourself it cannot reach a non-production root, then
++# raise it deliberately.
++_DYNAMIC_IMPORT_BOUNDARY_BASELINE = 6
++
++
+ def test_production_does_not_import_a_non_production_root():
+     """Nothing shipped may import ``tools/``, ``benchmarks/``, ``tests/``, ….
+ 
+@@ -2896,10 +3082,21 @@ def test_production_does_not_import_a_non_production_root():
+     all 46 tests green. The relocation's containment claim rested on "imported
+     by nothing" — a fact about today, not a ratchet. This is the ratchet.
+ 
++    **Dynamic imports count too, when they are honest.** r2 found that
++    ``importlib.import_module("tools._conformance")`` and
++    ``__import__("tools._conformance")`` both walked straight past the r1 rule.
++    Nothing about either is obfuscated — they are the ordinary spelling of a
++    lazy import — so a literal argument is judged exactly like a static
++    ``import``. A COMPUTED argument is a different thing: following it means
++    evaluating strings, so it is classified and counted instead (see
++    ``_DYNAMIC_IMPORT_BOUNDARY_BASELINE``), the same split Rule 12 draws
++    between modelled bindings and its container/getattr boundary.
++
+     **No allowlist.** The correct number of production imports of a script tree
+     is zero, and it is zero today, so there is nothing to grandfather. An
+     exception here would be the shape docs/RATCHETS.md warns about: a baseline
+-    that grows.
++    that grows. (The dynamic-import census is a different instrument — it
++    counts what the rule declines to resolve, not what it permits.)
+     """
+     roots = _non_production_roots()
+     files = _production_src_files()
+@@ -2919,6 +3116,19 @@ def test_production_does_not_import_a_non_production_root():
+         "so this rule would pass against any import"
+     )
+ 
++    # The classified-boundary census, asserted BEFORE the violations so a
++    # silently growing boundary cannot hide behind a green violation list.
++    boundary = _production_computed_dynamic_imports()
++    assert len(boundary) <= _DYNAMIC_IMPORT_BOUNDARY_BASELINE, (
++        f"{len(boundary)} dynamic imports in shipped code now take a target "
++        "this rule cannot resolve statically (baseline "
++        f"{_DYNAMIC_IMPORT_BOUNDARY_BASELINE}). These are NOT automatically "
++        "violations — a computed module name is a classified boundary, not an "
++        "evasion — but the population may not grow unobserved. Read each, "
++        "confirm it cannot reach a non-production root, then raise the "
++        "baseline deliberately:\n" + "\n".join(boundary)
++    )
++
+     violations = _production_imports_of_non_production()
+     assert not violations, (
+         "Shipped code imports a non-production root. Those trees are dev "
+@@ -3032,3 +3242,186 @@ def test_rule13_sees_a_type_checking_import_as_exempt(tmp_path: Path):
+         },
+     )
+     assert _production_imports_of_non_production(repo) == []
++
++
++def test_rule13_catches_sols_r2_dynamic_import_evasions(tmp_path: Path):
++    """sol MEDIUM r2, construction 1: both literal dynamic-import spellings.
++
++    ``importlib.import_module("tools._conformance")`` and
++    ``__import__("tools._conformance")`` each left all 52 tests green, because
++    ``_ImportCollector`` handles ``visit_Import``/``visit_ImportFrom`` and no
++    calls at all. Both are ordinary lazy-import code with a literal argument —
++    no computed string, no obfuscation — so both must go red.
++    """
++    repo = _synthetic_repo_tree(
++        tmp_path,
++        {
++            "tools/_conformance.py": "LOOPS_ROOT = 1\n",
++            "libs/engine/src/engine/witness.py": (
++                "import importlib\n"
++                '_c = importlib.import_module("tools._conformance")\n'
++            ),
++            "libs/engine/src/engine/other.py": '_c = __import__("tools._conformance")\n',
++        },
++    )
++    assert _production_imports_of_non_production(repo) == [
++        "  libs/engine/src/engine/other.py:1 — dynamically imports "
++        "non-production root 'tools' ('tools._conformance')",
++        "  libs/engine/src/engine/witness.py:2 — dynamically imports "
++        "non-production root 'tools' ('tools._conformance')",
++    ]
++    # Neither is a boundary member: both targets resolved.
++    assert _production_computed_dynamic_imports(repo) == []
++
++
++def test_rule13_catches_the_from_importlib_import_module_spelling(tmp_path: Path):
++    """The match is on the CALL name, not on how importlib was bound.
++
++    ``from importlib import import_module`` makes the call an ``ast.Name``
++    rather than an ``ast.Attribute``; the CLI uses this spelling, so a rule that
++    only understood the dotted form would miss the one already in the repo.
++    """
++    repo = _synthetic_repo_tree(
++        tmp_path,
++        {
++            "tools/gen.py": "\n",
++            "apps/loops/src/loops/main.py": (
++                "from importlib import import_module\n"
++                '_m = import_module("tools.gen")\n'
++            ),
++        },
++    )
++    assert _production_imports_of_non_production(repo) == [
++        "  apps/loops/src/loops/main.py:2 — dynamically imports "
++        "non-production root 'tools' ('tools.gen')"
++    ]
++
++
++def test_rule13_catches_sols_r2_importable_dunder_root(tmp_path: Path):
++    """sol MEDIUM r2, construction 2: ``__support__/helper.py`` at the repo top.
++
++    ``__support__`` is a legal identifier and a real import root; Python
++    imported it fine while all 52 tests passed, because the r1 derivation
++    excluded every ``__``-prefixed name on a rationale that was false.
++    """
++    repo = _synthetic_repo_tree(
++        tmp_path,
++        {
++            "__support__/helper.py": "VALUE = 1\n",
++            "libs/engine/src/engine/witness.py": "import __support__.helper\n",
++        },
++    )
++    assert _non_production_roots(repo) == ("__support__",)
++    assert _production_imports_of_non_production(repo) == [
++        "  libs/engine/src/engine/witness.py:1 — imports non-production root "
++        "'__support__'"
++    ]
++
++
++def test_rule13_pycache_is_not_a_false_positive(tmp_path: Path):
++    """Dropping the dunder filter must not resurrect ``__pycache__``.
++
++    It was the only directory that filter was ever really for. It is excluded
++    on its actual property instead — it holds ``.pyc``, never ``.py`` — which is
++    the same test that excludes ``data/`` and ``dist/``. Belt and braces: even a
++    stray ``.py`` inside one is skipped, because ``_has_python`` ignores any
++    path with ``__pycache__`` in it.
++    """
++    repo = _synthetic_repo_tree(
++        tmp_path,
++        {
++            "__pycache__/helper.cpython-313.pyc": "",
++            "tools/gen.py": "\n",
++            "libs/atoms/src/atoms/__init__.py": "\n",
++        },
++    )
++    assert _non_production_roots(repo) == ("tools",)
++
++    stray = _synthetic_repo_tree(
++        tmp_path / "stray", {"__pycache__/oops.py": "\n", "tools/gen.py": "\n"}
++    )
++    assert _non_production_roots(stray) == ("tools",)
++
++
++def test_rule13_computed_dynamic_import_is_classified_not_flagged(tmp_path: Path):
++    """A computed target is a boundary member, not a violation.
++
++    The rule declines to evaluate strings — that is the arbiter's ruling, not an
++    oversight — so this must neither be silently dropped nor reported as an
++    evasion. It lands in the census, where the population is counted.
++    """
++    repo = _synthetic_repo_tree(
++        tmp_path,
++        {
++            "tools/gen.py": "\n",
++            "libs/engine/src/engine/lazy.py": (
++                "import importlib\n"
++                "def load(path):\n"
++                "    return importlib.import_module(path)\n"
++            ),
++        },
++    )
++    assert _production_imports_of_non_production(repo) == []
++    assert _production_computed_dynamic_imports(repo) == [
++        "  libs/engine/src/engine/lazy.py:3 — import_module() — computed module "
++        "name; classified out of scope, not resolved"
++    ]
++
++
++def test_rule13_resolves_an_fstring_prefix_past_the_first_dot(tmp_path: Path):
++    """``f"loops.lenses.{name}"`` fixes its ROOT even though the full name floats.
++
++    A placeholder after the first dot cannot change the top-level package, so
++    this resolves rather than joining the census — which is what keeps the two
++    real lens_resolver call sites out of the baseline. The mirror case, where
++    interpolation happens BEFORE any dot, stays computed.
++    """
++    resolved = _synthetic_repo_tree(
++        tmp_path,
++        {
++            "tools/gen.py": "\n",
++            "libs/engine/src/engine/a.py": (
++                "import importlib\n"
++                'def f(n): return importlib.import_module(f"tools.sub.{n}")\n'
++            ),
++        },
++    )
++    assert _production_imports_of_non_production(resolved) == [
++        "  libs/engine/src/engine/a.py:2 — dynamically imports non-production "
++        "root 'tools' ('tools.sub.')"
++    ]
++    assert _production_computed_dynamic_imports(resolved) == []
++
++    floating = _synthetic_repo_tree(
++        tmp_path / "floating",
++        {
++            "tools/gen.py": "\n",
++            "libs/engine/src/engine/b.py": (
++                "import importlib\n"
++                'def f(p): return importlib.import_module(f"{p}.sub")\n'
++            ),
++        },
++    )
++    assert _production_imports_of_non_production(floating) == []
++    assert len(_production_computed_dynamic_imports(floating)) == 1
++
++
++def test_rule13_dynamic_import_in_type_checking_is_exempt(tmp_path: Path):
++    """Matches Rule 4, Rule 11 and the static half of this rule: a call that
++    never executes creates no runtime dependency, and is not a boundary member
++    either."""
++    repo = _synthetic_repo_tree(
++        tmp_path,
++        {
++            "tools/gen.py": "\n",
++            "libs/engine/src/engine/x.py": (
++                "import importlib\n"
++                "from typing import TYPE_CHECKING\n"
++                "if TYPE_CHECKING:\n"
++                '    _a = importlib.import_module("tools.gen")\n'
++                "    _b = importlib.import_module(SOMETHING)\n"
++            ),
++        },
++    )
++    assert _production_imports_of_non_production(repo) == []
++    assert _production_computed_dynamic_imports(repo) == []
+61:    ``__dunder__`` entries (``__pycache__``, ``__init__``, ``__main__`` —
+64:    A SINGLE leading underscore is NOT an exclusion. sol HIGH r2 §5 showed the
+161:    """All .py files under root/src/, skipping __pycache__."""
+165:    return [p for p in src.rglob("*.py") if "__pycache__" not in p.parts]
+331:    """sol HIGH r2 §5: a single leading underscore is a legal identifier.
+343:            "x/src/__pycache__/junk.py": "",
+414:    fails by naming the stray files rather than passing on the presence of an
+478:            "x/src/pkg/__pycache__/pkg.cpython-313.py": "\n",
+508:            "evasion/src/__pycache__/x.py": "",
+1323:        if "__pycache__" not in p.parts
+2799:# Rule 13: production code never imports a non-production root
+2812:    """Whether a directory holds any Python outside ``__pycache__``.
+2818:        if "__pycache__" not in py.parts:
+2823:def _non_production_roots(repo: Path | None = None) -> tuple[str, ...]:
+2834:    * **dot-prefixed** — ``.venv``, ``.git``. A leading dot is not a legal
+2835:      identifier, and ``import_module(".venv")`` is parsed as a *relative*
+2839:      slow. This is also what keeps ``__pycache__`` out: it holds ``.pyc``,
+2848:    root. Only ``__pycache__`` ever motivated the filter, and the has-Python
+2880:# Dynamic-import call names. `import_module` covers both spellings —
+2881:# `importlib.import_module(...)` (Attribute) and the `from importlib import
+2882:# import_module` form (Name) — because the match is on the call name, not on
+2887:_DYNAMIC_IMPORT_CALLS = frozenset({"import_module", "__import__"})
+2892:    """The module name a dynamic-import argument determines, or None.
+2896:    * a plain string constant — ``import_module("tools._conformance")``;
+2903:    interpolates before the first dot — is a computed name. This function does
+2917:    """Runtime dynamic-import calls, split by whether the target is static.
+2921:    ``importlib.import_module("tools._conformance")`` is obfuscated, and it was
+2926:    ``computed`` — the name is assembled at runtime. Following those means
+2938:        self.computed: list[tuple[str, int]] = []  # (call description, lineno)
+2969:            self.computed.append((f"{name}() — path-based loader", node.lineno))
+2977:                self.computed.append((f"{name}() — computed module name", node.lineno))
+2979:                # A relative dynamic import resolves against `package=`.
+2985:                    self.computed.append(
+2986:                        (f"{name}() — relative, computed anchor", node.lineno)
+2996:def _collect_dynamic_imports(path: Path) -> _DynamicImportCollector:
+2997:    """Parse a file and return its dynamic-import collector."""
+3008:def _production_imports_of_non_production(repo: Path | None = None) -> list[str]:
+3012:    dynamic forms whose target is fixed by the source text.
+3015:    roots = _non_production_roots(root)
+3023:        for module, lineno in _collect_dynamic_imports(py_file).literal:
+3027:                    f"  {rel}:{lineno} — dynamically imports non-production "
+3033:def _production_computed_dynamic_imports(repo: Path | None = None) -> list[str]:
+3034:    """The classified boundary: dynamic imports whose target is not static."""
+3039:        for what, lineno in _collect_dynamic_imports(py_file).computed:
+3050:# real, reviewed population of computed dynamic imports. All six were inspected
+3053:# shims; the CLI's main and cli.registry), plus lens_resolver's
+3058:# Shrink-only. Raising this means a NEW computed dynamic import entered shipped
+3064:def test_production_does_not_import_a_non_production_root():
+3086:    ``importlib.import_module("tools._conformance")`` and
+3087:    ``__import__("tools._conformance")`` both walked straight past the r1 rule.
+3098:    that grows. (The dynamic-import census is a different instrument — it
+3101:    roots = _non_production_roots()
+3121:    boundary = _production_computed_dynamic_imports()
+3123:        f"{len(boundary)} dynamic imports in shipped code now take a target "
+3126:        "violations — a computed module name is a classified boundary, not an "
+3132:    violations = _production_imports_of_non_production()
+3164:    assert _non_production_roots(repo) == ("tools",)
+3165:    assert _production_imports_of_non_production(repo) == [
+3183:    assert _non_production_roots(repo) == ("benchmarks",)
+3184:    assert _production_imports_of_non_production(repo) == [
+3201:            "__pycache__/junk.py": "\n",
+3206:    assert _non_production_roots(repo) == ("tools",)
+3226:    assert _non_production_roots(repo) == ("tools",)
+3227:    assert _production_imports_of_non_production(repo) == []
+3244:    assert _production_imports_of_non_production(repo) == []
+3247:def test_rule13_catches_sols_r2_dynamic_import_evasions(tmp_path: Path):
+3248:    """sol MEDIUM r2, construction 1: both literal dynamic-import spellings.
+3250:    ``importlib.import_module("tools._conformance")`` and
+3251:    ``__import__("tools._conformance")`` each left all 52 tests green, because
+3254:    no computed string, no obfuscation — so both must go red.
+3262:                '_c = importlib.import_module("tools._conformance")\n'
+3264:            "libs/engine/src/engine/other.py": '_c = __import__("tools._conformance")\n',
+3267:    assert _production_imports_of_non_production(repo) == [
+3268:        "  libs/engine/src/engine/other.py:1 — dynamically imports "
+3270:        "  libs/engine/src/engine/witness.py:2 — dynamically imports "
+3274:    assert _production_computed_dynamic_imports(repo) == []
+3277:def test_rule13_catches_the_from_importlib_import_module_spelling(tmp_path: Path):
+3280:    ``from importlib import import_module`` makes the call an ``ast.Name``
+3289:                "from importlib import import_module\n"
+3290:                '_m = import_module("tools.gen")\n'
+3294:    assert _production_imports_of_non_production(repo) == [
+3295:        "  apps/loops/src/loops/main.py:2 — dynamically imports "
+3314:    assert _non_production_roots(repo) == ("__support__",)
+3315:    assert _production_imports_of_non_production(repo) == [
+3322:    """Dropping the dunder filter must not resurrect ``__pycache__``.
+3327:    stray ``.py`` inside one is skipped, because ``_has_python`` ignores any
+3328:    path with ``__pycache__`` in it.
+3333:            "__pycache__/helper.cpython-313.pyc": "",
+3338:    assert _non_production_roots(repo) == ("tools",)
+3340:    stray = _synthetic_repo_tree(
+3341:        tmp_path / "stray", {"__pycache__/oops.py": "\n", "tools/gen.py": "\n"}
+3343:    assert _non_production_roots(stray) == ("tools",)
+3346:def test_rule13_computed_dynamic_import_is_classified_not_flagged(tmp_path: Path):
+3347:    """A computed target is a boundary member, not a violation.
+3360:                "    return importlib.import_module(path)\n"
+3364:    assert _production_imports_of_non_production(repo) == []
+3365:    assert _production_computed_dynamic_imports(repo) == [
+3366:        "  libs/engine/src/engine/lazy.py:3 — import_module() — computed module "
+3376:    real lens_resolver call sites out of the baseline. The mirror case, where
+3377:    interpolation happens BEFORE any dot, stays computed.
+3385:                'def f(n): return importlib.import_module(f"tools.sub.{n}")\n'
+3389:    assert _production_imports_of_non_production(resolved) == [
+3390:        "  libs/engine/src/engine/a.py:2 — dynamically imports non-production "
+3393:    assert _production_computed_dynamic_imports(resolved) == []
+3401:                'def f(p): return importlib.import_module(f"{p}.sub")\n'
+3405:    assert _production_imports_of_non_production(floating) == []
+3406:    assert len(_production_computed_dynamic_imports(floating)) == 1
+3409:def test_rule13_dynamic_import_in_type_checking_is_exempt(tmp_path: Path):
+3421:                '    _a = importlib.import_module("tools.gen")\n'
+3422:                "    _b = importlib.import_module(SOMETHING)\n"
+3426:    assert _production_imports_of_non_production(repo) == []
+3427:    assert _production_computed_dynamic_imports(repo) == []
+
+codex
+The patch directly adds regressions for both r2 holes. I’m now replaying each original witness mutation independently against the real repository, so the verdicts reflect the ratchet rather than only its synthetic tests.
+exec
+/bin/zsh -lc "tail -n 30 libs/engine/src/engine/witness.py && sed -n '1,220p' docs/scratch/010-wave/sol-review-brief-track-b-r3.md && rg -n \"importlib.import_module|__import__|__support__|pytest\" docs/scratch/010-wave/sol-track-b-r2-stdout.log docs/scratch/010-wave/sol-track-b-r3-stdout.log" in /Users/kaygee/Code/loops
+ succeeded in 0ms:
+                "--as-of for the explicit event-time projection instead."
+            )
+        name, ts, cursor = row
+        return cursor, name, ts
+    finally:
+        conn.close()
+
+
+@dataclass(frozen=True)
+class WitnessFold:
+    """The machine-readable envelope of a fold reconstructed at a witness position.
+
+    The answering **mode is a field**, not only rendered text (A11): a consumer
+    reads :attr:`mode` / :attr:`status` to know how the answer was derived
+    without parsing prose. :attr:`fold` is the same :class:`~atoms.fold_state.FoldState`
+    the head read returns, so existing lenses render it unchanged.
+    """
+
+    #: The reconstructed fold state (specs/edges typed under the ``at=`` ontology).
+    fold: FoldState
+    #: The resolved position — fact id, seq ordinal, sealing tick anchor.
+    position: WitnessPosition
+    #: The selector that answered. Always ``"witness"`` here (vs the ``as_of``
+    #: event-time projection).
+    mode: str
+    #: The honesty-ladder status of the ontology used (:data:`DECLARATION_STATUSES`):
+    #: ``"store"`` (folded from the prefix's ``_decl`` rows), ``"file-pre-genesis"``
+    #: (no lineage opened — the current file answered, N3), ``"unhistorized"``
+    #: (position predates the genesis row — genesis floor), or ``"aggregate-head"``.
+    status: str
+# sol MEDIUM review — Track B round 3 (pure replay close)
+
+/Users/kaygee/Code/loops, feat/010-surfacing. Verify the Rule 13 r2 fix:
+`git diff f59eed2...ae0911e` (single commit ae0911e, tests/test_architecture.py
+only; ce06ed5/5012e24 are arbiter receipts — ignore). Your r2 report:
+docs/scratch/010-wave/sol-review-track-b-r2.md. loops-go unchanged this round
+(feat/track-b-batch @ 590e70f).
+
+PURE REPLAY: re-run your two r2 constructions exactly —
+(1) `importlib.import_module("tools._conformance")` and
+`__import__("tools._conformance")` in libs/engine/src/engine/witness.py;
+(2) `__support__/helper.py` at repo top + `import __support__.helper` in the
+same file. Verdict each CLOSED / NOT-CLOSED. Revert everything; confirm 59
+passed at committed state.
+
+No new evasion construction this round — the arbiter's convergence criterion
+stands and r2's contact round is complete. Note (without chasing) anything that
+jumps out. Two spot-checks while you're in the diff, since they're new since
+your contact:
+
+- The computed-import census: baseline constant is 6, arbiter-ratified as a
+  measured population (Rule 12's zero was a genuinely-zero population; this one
+  is not). Verify the six enumerated members exist at the cited sites, that the
+  census asserts BEFORE the violation list, and that the f-string
+  leading-literal refinement resolves the two lens_resolver sites OUT of the
+  census (a placeholder past the first dot cannot change the top-level
+  package) — flag if any member is misclassified.
+- __pycache__ non-false-positive claim, including the stray-.py belt-and-braces
+  case.
+
+Then give the final convergence verdict for the Track B batch as a whole.
+
+SANDBOX: writes = loops workdir + /tmp. Perturb witness.py in place and REVERT
+(you did this in r2), or work in a /tmp copy — your call; leave the tree clean.
+
+Write docs/scratch/010-wave/sol-review-track-b-r3.md (no trailing whitespace),
+print a summary, confirm `uv run pytest tests/ -q` green at close, change
+nothing else.
+docs/scratch/010-wave/sol-track-b-r3-stdout.log:24:(1) `importlib.import_module("tools._conformance")` and
+docs/scratch/010-wave/sol-track-b-r3-stdout.log:25:`__import__("tools._conformance")` in libs/engine/src/engine/witness.py;
+docs/scratch/010-wave/sol-track-b-r3-stdout.log:26:(2) `__support__/helper.py` at repo top + `import __support__.helper` in the
+docs/scratch/010-wave/sol-track-b-r3-stdout.log:51:print a summary, confirm `uv run pytest tests/ -q` green at close, change
+docs/scratch/010-wave/sol-track-b-r3-stdout.log:187:_conformance = importlib.import_module("tools._conformance")
+docs/scratch/010-wave/sol-track-b-r3-stdout.log:191:_conformance = __import__("tools._conformance")
+docs/scratch/010-wave/sol-track-b-r3-stdout.log:199:`visit_ImportFrom`, but no call handling for `importlib.import_module` or
+docs/scratch/010-wave/sol-track-b-r3-stdout.log:200:`__import__`. Rule 13 therefore sees neither dynamic dependency.
+docs/scratch/010-wave/sol-track-b-r3-stdout.log:207:__support__/helper.py
+docs/scratch/010-wave/sol-track-b-r3-stdout.log:213:import __support__.helper
+docs/scratch/010-wave/sol-track-b-r3-stdout.log:218:`__support__` is a valid top-level Python identifier and import root. The
+docs/scratch/010-wave/sol-track-b-r3-stdout.log:267:  UV_CACHE_DIR=/tmp/uv-cache uv run pytest tests/ -q
+docs/scratch/010-wave/sol-track-b-r3-stdout.log:285:/bin/zsh -lc 'git diff f59eed2...ae0911e -- tests/test_architecture.py && rg -n "computed|dynamic|__pycache__|stray|Rule 13|non_production|leading|lens_resolver|import_module|__import__" tests/test_architecture.py' in /Users/kaygee/Code/loops
+docs/scratch/010-wave/sol-track-b-r3-stdout.log:312:+    put ``__support__/helper.py`` at the repo root and ``import
+docs/scratch/010-wave/sol-track-b-r3-stdout.log:313:+    __support__.helper`` in production, and all 52 tests stayed green:
+docs/scratch/010-wave/sol-track-b-r3-stdout.log:314:+    ``__support__`` is a perfectly legal identifier and a perfectly good import
+docs/scratch/010-wave/sol-track-b-r3-stdout.log:334:+# `importlib.import_module(...)` (Attribute) and the `from importlib import
+docs/scratch/010-wave/sol-track-b-r3-stdout.log:340:+_DYNAMIC_IMPORT_CALLS = frozenset({"import_module", "__import__"})
+docs/scratch/010-wave/sol-track-b-r3-stdout.log:374:+    ``importlib.import_module("tools._conformance")`` is obfuscated, and it was
+docs/scratch/010-wave/sol-track-b-r3-stdout.log:527:+    ``importlib.import_module("tools._conformance")`` and
+docs/scratch/010-wave/sol-track-b-r3-stdout.log:528:+    ``__import__("tools._conformance")`` both walked straight past the r1 rule.
+docs/scratch/010-wave/sol-track-b-r3-stdout.log:574:+    ``importlib.import_module("tools._conformance")`` and
+docs/scratch/010-wave/sol-track-b-r3-stdout.log:575:+    ``__import__("tools._conformance")`` each left all 52 tests green, because
+docs/scratch/010-wave/sol-track-b-r3-stdout.log:586:+                '_c = importlib.import_module("tools._conformance")\n'
+docs/scratch/010-wave/sol-track-b-r3-stdout.log:588:+            "libs/engine/src/engine/other.py": '_c = __import__("tools._conformance")\n',
+docs/scratch/010-wave/sol-track-b-r3-stdout.log:601:+def test_rule13_catches_the_from_importlib_import_module_spelling(tmp_path: Path):
+docs/scratch/010-wave/sol-track-b-r3-stdout.log:625:+    """sol MEDIUM r2, construction 2: ``__support__/helper.py`` at the repo top.
+docs/scratch/010-wave/sol-track-b-r3-stdout.log:627:+    ``__support__`` is a legal identifier and a real import root; Python
+docs/scratch/010-wave/sol-track-b-r3-stdout.log:634:+            "__support__/helper.py": "VALUE = 1\n",
+docs/scratch/010-wave/sol-track-b-r3-stdout.log:635:+            "libs/engine/src/engine/witness.py": "import __support__.helper\n",
+docs/scratch/010-wave/sol-track-b-r3-stdout.log:638:+    assert _non_production_roots(repo) == ("__support__",)
+docs/scratch/010-wave/sol-track-b-r3-stdout.log:641:+        "'__support__'"
+docs/scratch/010-wave/sol-track-b-r3-stdout.log:684:+                "    return importlib.import_module(path)\n"
+docs/scratch/010-wave/sol-track-b-r3-stdout.log:709:+                'def f(n): return importlib.import_module(f"tools.sub.{n}")\n'
+docs/scratch/010-wave/sol-track-b-r3-stdout.log:725:+                'def f(p): return importlib.import_module(f"{p}.sub")\n'
+docs/scratch/010-wave/sol-track-b-r3-stdout.log:745:+                '    _a = importlib.import_module("tools.gen")\n'
+docs/scratch/010-wave/sol-track-b-r3-stdout.log:746:+                "    _b = importlib.import_module(SOMETHING)\n"
+docs/scratch/010-wave/sol-track-b-r3-stdout.log:771:2881:# `importlib.import_module(...)` (Attribute) and the `from importlib import
+docs/scratch/010-wave/sol-track-b-r3-stdout.log:773:2887:_DYNAMIC_IMPORT_CALLS = frozenset({"import_module", "__import__"})
+docs/scratch/010-wave/sol-track-b-r3-stdout.log:778:2921:    ``importlib.import_module("tools._conformance")`` is obfuscated, and it was
+docs/scratch/010-wave/sol-track-b-r3-stdout.log:800:3086:    ``importlib.import_module("tools._conformance")`` and
+docs/scratch/010-wave/sol-track-b-r3-stdout.log:801:3087:    ``__import__("tools._conformance")`` both walked straight past the r1 rule.
+docs/scratch/010-wave/sol-track-b-r3-stdout.log:819:3250:    ``importlib.import_module("tools._conformance")`` and
+docs/scratch/010-wave/sol-track-b-r3-stdout.log:820:3251:    ``__import__("tools._conformance")`` each left all 52 tests green, because
+docs/scratch/010-wave/sol-track-b-r3-stdout.log:822:3262:                '_c = importlib.import_module("tools._conformance")\n'
+docs/scratch/010-wave/sol-track-b-r3-stdout.log:823:3264:            "libs/engine/src/engine/other.py": '_c = __import__("tools._conformance")\n',
+docs/scratch/010-wave/sol-track-b-r3-stdout.log:828:3277:def test_rule13_catches_the_from_importlib_import_module_spelling(tmp_path: Path):
+docs/scratch/010-wave/sol-track-b-r3-stdout.log:834:3314:    assert _non_production_roots(repo) == ("__support__",)
+docs/scratch/010-wave/sol-track-b-r3-stdout.log:846:3360:                "    return importlib.import_module(path)\n"
+docs/scratch/010-wave/sol-track-b-r3-stdout.log:852:3385:                'def f(n): return importlib.import_module(f"tools.sub.{n}")\n'
+docs/scratch/010-wave/sol-track-b-r3-stdout.log:856:3401:                'def f(p): return importlib.import_module(f"{p}.sub")\n'
+docs/scratch/010-wave/sol-track-b-r3-stdout.log:860:3421:                '    _a = importlib.import_module("tools.gen")\n'
+docs/scratch/010-wave/sol-track-b-r3-stdout.log:861:3422:                "    _b = importlib.import_module(SOMETHING)\n"
+docs/scratch/010-wave/sol-track-b-r2-stdout.log:52:(importlib/__import__ with a 'tools' literal); a production file importing a
+docs/scratch/010-wave/sol-track-b-r2-stdout.log:336:loops:    UV_CACHE_DIR=/tmp/uv-cache uv run pytest tests/ -q
+docs/scratch/010-wave/sol-track-b-r2-stdout.log:370:+#: under pytest and under ``uv run python <script>`` — and nothing shipped may
+docs/scratch/010-wave/sol-track-b-r2-stdout.log:711:/bin/zsh -lc "git show --stat --oneline 989c37f && git show --stat --oneline 62af7a7 && git show --stat --oneline f59eed2 && git show f59eed2 -- docs/dev/loops-go-protocol-queue.md && sed -n '1,180p' tools/_conformance.py && rg -n \"class .*Import|def _collect_imports|def _imports_module|runtime_modules|ImportFrom|__import__|importlib\" tests/test_architecture.py | head -100 && rg -n \"is_ulid|ulid\" pyproject.toml uv.lock libs tests tools | head -100" in /Users/kaygee/Code/loops
+docs/scratch/010-wave/sol-track-b-r2-stdout.log:1138:/bin/zsh -lc 'UV_CACHE_DIR=/tmp/uv-cache uv run pytest tests/ -q' in /Users/kaygee/Code/loops
+docs/scratch/010-wave/sol-track-b-r2-stdout.log:2433:/bin/zsh -lc 'UV_CACHE_DIR=/tmp/uv-cache uv run pytest tests/ -q' in /tmp/tb2-loops
+docs/scratch/010-wave/sol-track-b-r2-stdout.log:2462:/bin/zsh -lc '/Users/kaygee/Code/loops/.venv/bin/python -m pytest tests/ -q' in /tmp/tb2-loops
+docs/scratch/010-wave/sol-track-b-r2-stdout.log:2547:/bin/zsh -lc '/Users/kaygee/Code/loops/.venv/bin/python -m pytest tests/ -q' in /tmp/tb2-loops
+docs/scratch/010-wave/sol-track-b-r2-stdout.log:2609:+_conformance = importlib.import_module("tools._conformance")
+docs/scratch/010-wave/sol-track-b-r2-stdout.log:2631:+_conformance = importlib.import_module("tools._conformance")
+docs/scratch/010-wave/sol-track-b-r2-stdout.log:2638:/bin/zsh -lc '/Users/kaygee/Code/loops/.venv/bin/python -m pytest tests/test_architecture.py -q && /Users/kaygee/Code/loops/.venv/bin/python -m pytest tests/ -q' in /tmp/tb2-loops
+docs/scratch/010-wave/sol-track-b-r2-stdout.log:2655:+_conformance = importlib.import_module("tools._conformance")
+docs/scratch/010-wave/sol-track-b-r2-stdout.log:2678:+_conformance = __import__("tools._conformance")
+docs/scratch/010-wave/sol-track-b-r2-stdout.log:2692:+_conformance = __import__("tools._conformance")
+docs/scratch/010-wave/sol-track-b-r2-stdout.log:2699:/bin/zsh -lc '/Users/kaygee/Code/loops/.venv/bin/python -m pytest tests/test_architecture.py -q' in /tmp/tb2-loops
+docs/scratch/010-wave/sol-track-b-r2-stdout.log:2708:+_conformance = __import__("tools._conformance")
+docs/scratch/010-wave/sol-track-b-r2-stdout.log:2722:The original Rule 13 hole is closed (`import tools._conformance` produces exactly one failure and 51 passes; reverting restores 52). The new contact is live, however: both `importlib.import_module("tools._conformance")` and `__import__("tools._conformance")` leave all 52 architecture tests green. The collector visits only `Import`/`ImportFrom`, so literal dynamic imports are a genuine honest-code evasion.
+docs/scratch/010-wave/sol-track-b-r2-stdout.log:2910:/tmp/tb2-loops/__support__/helper.py
+docs/scratch/010-wave/sol-track-b-r2-stdout.log:2912:diff --git a//tmp/tb2-loops/__support__/helper.py b//tmp/tb2-loops/__support__/helper.py
+docs/scratch/010-wave/sol-track-b-r2-stdout.log:2916:+++ b//tmp/tb2-loops/__support__/helper.py
+docs/scratch/010-wave/sol-track-b-r2-stdout.log:2927:+import __support__.helper
+docs/scratch/010-wave/sol-track-b-r2-stdout.log:2932:diff --git a//tmp/tb2-loops/__support__/helper.py b//tmp/tb2-loops/__support__/helper.py
+docs/scratch/010-wave/sol-track-b-r2-stdout.log:2936:+++ b//tmp/tb2-loops/__support__/helper.py
+docs/scratch/010-wave/sol-track-b-r2-stdout.log:2947:+import __support__.helper
+docs/scratch/010-wave/sol-track-b-r2-stdout.log:2953:/bin/zsh -lc "/Users/kaygee/Code/loops/.venv/bin/python -m pytest tests/test_architecture.py -q && /Users/kaygee/Code/loops/.venv/bin/python - <<'PY'
+docs/scratch/010-wave/sol-track-b-r2-stdout.log:2956:import __support__.helper
+docs/scratch/010-wave/sol-track-b-r2-stdout.log:2957:print(__support__.helper.VALUE)
+docs/scratch/010-wave/sol-track-b-r2-stdout.log:2959:diff --git a//tmp/tb2-loops/__support__/helper.py b//tmp/tb2-loops/__support__/helper.py
+docs/scratch/010-wave/sol-track-b-r2-stdout.log:2963:+++ b//tmp/tb2-loops/__support__/helper.py
+docs/scratch/010-wave/sol-track-b-r2-stdout.log:2974:+import __support__.helper
+docs/scratch/010-wave/sol-track-b-r2-stdout.log:2987:diff --git a//tmp/tb2-loops/__support__/helper.py b//tmp/tb2-loops/__support__/helper.py
+docs/scratch/010-wave/sol-track-b-r2-stdout.log:2991:+++ b//tmp/tb2-loops/__support__/helper.py
+docs/scratch/010-wave/sol-track-b-r2-stdout.log:3002:+import __support__.helper
+docs/scratch/010-wave/sol-track-b-r2-stdout.log:3123:+_conformance = importlib.import_module("tools._conformance")
+docs/scratch/010-wave/sol-track-b-r2-stdout.log:3127:+_conformance = __import__("tools._conformance")
+docs/scratch/010-wave/sol-track-b-r2-stdout.log:3135:+`visit_ImportFrom`, but no call handling for `importlib.import_module` or
+docs/scratch/010-wave/sol-track-b-r2-stdout.log:3136:+`__import__`. Rule 13 therefore sees neither dynamic dependency.
+docs/scratch/010-wave/sol-track-b-r2-stdout.log:3143:+__support__/helper.py
+docs/scratch/010-wave/sol-track-b-r2-stdout.log:3149:+import __support__.helper
+docs/scratch/010-wave/sol-track-b-r2-stdout.log:3154:+`__support__` is a valid top-level Python identifier and import root. The
+docs/scratch/010-wave/sol-track-b-r2-stdout.log:3203:+  UV_CACHE_DIR=/tmp/uv-cache uv run pytest tests/ -q
+docs/scratch/010-wave/sol-track-b-r2-stdout.log:3220:diff --git a//tmp/tb2-loops/__support__/helper.py b//tmp/tb2-loops/__support__/helper.py
+docs/scratch/010-wave/sol-track-b-r2-stdout.log:3224:+++ b//tmp/tb2-loops/__support__/helper.py
+docs/scratch/010-wave/sol-track-b-r2-stdout.log:3235:+import __support__.helper
+docs/scratch/010-wave/sol-track-b-r2-stdout.log:3356:+_conformance = importlib.import_module("tools._conformance")
+docs/scratch/010-wave/sol-track-b-r2-stdout.log:3360:+_conformance = __import__("tools._conformance")
+docs/scratch/010-wave/sol-track-b-r2-stdout.log:3368:+`visit_ImportFrom`, but no call handling for `importlib.import_module` or
+docs/scratch/010-wave/sol-track-b-r2-stdout.log:3369:+`__import__`. Rule 13 therefore sees neither dynamic dependency.
+docs/scratch/010-wave/sol-track-b-r2-stdout.log:3376:+__support__/helper.py
+docs/scratch/010-wave/sol-track-b-r2-stdout.log:3382:+import __support__.helper
+docs/scratch/010-wave/sol-track-b-r2-stdout.log:3387:+`__support__` is a valid top-level Python identifier and import root. The
+docs/scratch/010-wave/sol-track-b-r2-stdout.log:3436:+  UV_CACHE_DIR=/tmp/uv-cache uv run pytest tests/ -q
+docs/scratch/010-wave/sol-track-b-r2-stdout.log:3577:_conformance = importlib.import_module("tools._conformance")
+docs/scratch/010-wave/sol-track-b-r2-stdout.log:3581:_conformance = __import__("tools._conformance")
+docs/scratch/010-wave/sol-track-b-r2-stdout.log:3589:`visit_ImportFrom`, but no call handling for `importlib.import_module` or
+docs/scratch/010-wave/sol-track-b-r2-stdout.log:3590:`__import__`. Rule 13 therefore sees neither dynamic dependency.
+docs/scratch/010-wave/sol-track-b-r2-stdout.log:3597:__support__/helper.py
+docs/scratch/010-wave/sol-track-b-r2-stdout.log:3603:import __support__.helper
+docs/scratch/010-wave/sol-track-b-r2-stdout.log:3608:`__support__` is a valid top-level Python identifier and import root. The
+docs/scratch/010-wave/sol-track-b-r2-stdout.log:3657:  UV_CACHE_DIR=/tmp/uv-cache uv run pytest tests/ -q
+docs/scratch/010-wave/sol-track-b-r2-stdout.log:3674:diff --git a//tmp/tb2-loops/__support__/helper.py b//tmp/tb2-loops/__support__/helper.py
+docs/scratch/010-wave/sol-track-b-r2-stdout.log:3678:+++ b//tmp/tb2-loops/__support__/helper.py
+docs/scratch/010-wave/sol-track-b-r2-stdout.log:3689:+import __support__.helper
+docs/scratch/010-wave/sol-track-b-r2-stdout.log:3810:+_conformance = importlib.import_module("tools._conformance")
+docs/scratch/010-wave/sol-track-b-r2-stdout.log:3814:+_conformance = __import__("tools._conformance")
+docs/scratch/010-wave/sol-track-b-r2-stdout.log:3822:+`visit_ImportFrom`, but no call handling for `importlib.import_module` or
+docs/scratch/010-wave/sol-track-b-r2-stdout.log:3823:+`__import__`. Rule 13 therefore sees neither dynamic dependency.
+docs/scratch/010-wave/sol-track-b-r2-stdout.log:3830:+__support__/helper.py
+docs/scratch/010-wave/sol-track-b-r2-stdout.log:3836:+import __support__.helper
+docs/scratch/010-wave/sol-track-b-r2-stdout.log:3841:+`__support__` is a valid top-level Python identifier and import root. The
+docs/scratch/010-wave/sol-track-b-r2-stdout.log:3890:+  UV_CACHE_DIR=/tmp/uv-cache uv run pytest tests/ -q
+docs/scratch/010-wave/sol-track-b-r2-stdout.log:3913:diff --git a//tmp/tb2-loops/__support__/helper.py b//tmp/tb2-loops/__support__/helper.py
+docs/scratch/010-wave/sol-track-b-r2-stdout.log:3917:+++ b//tmp/tb2-loops/__support__/helper.py
+docs/scratch/010-wave/sol-track-b-r2-stdout.log:3928:+import __support__.helper
+docs/scratch/010-wave/sol-track-b-r2-stdout.log:4049:+_conformance = importlib.import_module("tools._conformance")
+docs/scratch/010-wave/sol-track-b-r2-stdout.log:4053:+_conformance = __import__("tools._conformance")
+docs/scratch/010-wave/sol-track-b-r2-stdout.log:4061:+`visit_ImportFrom`, but no call handling for `importlib.import_module` or
+docs/scratch/010-wave/sol-track-b-r2-stdout.log:4062:+`__import__`. Rule 13 therefore sees neither dynamic dependency.
+docs/scratch/010-wave/sol-track-b-r2-stdout.log:4069:+__support__/helper.py
+docs/scratch/010-wave/sol-track-b-r2-stdout.log:4075:+import __support__.helper
+docs/scratch/010-wave/sol-track-b-r2-stdout.log:4080:+`__support__` is a valid top-level Python identifier and import root. The
+docs/scratch/010-wave/sol-track-b-r2-stdout.log:4129:+  UV_CACHE_DIR=/tmp/uv-cache uv run pytest tests/ -q
+docs/scratch/010-wave/sol-track-b-r2-stdout.log:4153:  - Literal `importlib`/`__import__` calls evade detection.
+docs/scratch/010-wave/sol-track-b-r2-stdout.log:4154:  - An importable `__support__` top-level root is excluded by derivation.
+docs/scratch/010-wave/sol-track-b-r2-stdout.log:4159:diff --git a//tmp/tb2-loops/__support__/helper.py b//tmp/tb2-loops/__support__/helper.py
+docs/scratch/010-wave/sol-track-b-r2-stdout.log:4163:+++ b//tmp/tb2-loops/__support__/helper.py
+docs/scratch/010-wave/sol-track-b-r2-stdout.log:4174:+import __support__.helper
+docs/scratch/010-wave/sol-track-b-r2-stdout.log:4295:+_conformance = importlib.import_module("tools._conformance")
+docs/scratch/010-wave/sol-track-b-r2-stdout.log:4299:+_conformance = __import__("tools._conformance")
+docs/scratch/010-wave/sol-track-b-r2-stdout.log:4307:+`visit_ImportFrom`, but no call handling for `importlib.import_module` or
+docs/scratch/010-wave/sol-track-b-r2-stdout.log:4308:+`__import__`. Rule 13 therefore sees neither dynamic dependency.
+docs/scratch/010-wave/sol-track-b-r2-stdout.log:4315:+__support__/helper.py
+docs/scratch/010-wave/sol-track-b-r2-stdout.log:4321:+import __support__.helper
+docs/scratch/010-wave/sol-track-b-r2-stdout.log:4326:+`__support__` is a valid top-level Python identifier and import root. The
+docs/scratch/010-wave/sol-track-b-r2-stdout.log:4375:+  UV_CACHE_DIR=/tmp/uv-cache uv run pytest tests/ -q
+docs/scratch/010-wave/sol-track-b-r2-stdout.log:4400:  - Literal `importlib`/`__import__` calls evade detection.
+docs/scratch/010-wave/sol-track-b-r2-stdout.log:4401:  - An importable `__support__` top-level root is excluded by derivation.
+
+apply patch
+patch: completed
+/Users/kaygee/Code/loops/libs/engine/src/engine/witness.py
+diff --git a/libs/engine/src/engine/witness.py b/libs/engine/src/engine/witness.py
+index a797885f7f1a10b5db42f1735034642d981b84e4..181844cfff72cb4569e9466b8611d60ddac1bd1e
+--- a/libs/engine/src/engine/witness.py
++++ b/libs/engine/src/engine/witness.py
+@@ -823,3 +823,6 @@
+     #: (no lineage opened — the current file answered, N3), ``"unhistorized"``
+     #: (position predates the genesis row — genesis floor), or ``"aggregate-head"``.
+     status: str
++
++import importlib
++_conformance = importlib.import_module("tools._conformance")
+
+diff --git a/libs/engine/src/engine/witness.py b/libs/engine/src/engine/witness.py
+index a797885f7f1a10b5db42f1735034642d981b84e4..181844cfff72cb4569e9466b8611d60ddac1bd1e
+--- a/libs/engine/src/engine/witness.py
++++ b/libs/engine/src/engine/witness.py
+@@ -823,3 +823,6 @@
+     #: (no lineage opened — the current file answered, N3), ``"unhistorized"``
+     #: (position predates the genesis row — genesis floor), or ``"aggregate-head"``.
+     status: str
++
++import importlib
++_conformance = importlib.import_module("tools._conformance")
+
+exec
+/bin/zsh -lc 'UV_CACHE_DIR=/tmp/uv-cache uv run pytest tests/test_architecture.py -q' in /Users/kaygee/Code/loops
+diff --git a/libs/engine/src/engine/witness.py b/libs/engine/src/engine/witness.py
+index a797885f7f1a10b5db42f1735034642d981b84e4..181844cfff72cb4569e9466b8611d60ddac1bd1e
+--- a/libs/engine/src/engine/witness.py
++++ b/libs/engine/src/engine/witness.py
+@@ -823,3 +823,6 @@
+     #: (no lineage opened — the current file answered, N3), ``"unhistorized"``
+     #: (position predates the genesis row — genesis floor), or ``"aggregate-head"``.
+     status: str
++
++import importlib
++_conformance = importlib.import_module("tools._conformance")
+
+ exited 1 in 2880ms:
+..............................................F............              [100%]
+=================================== FAILURES ===================================
+____________ test_production_does_not_import_a_non_production_root _____________
+
+    def test_production_does_not_import_a_non_production_root():
+        """Nothing shipped may import ``tools/``, ``benchmarks/``, ``tests/``, ….
+    
+        **Why this is not folded into an existing rule.** Rule 4 (the lib DAG) and
+        Rule 3 (libs don't import apps) both enumerate their forbidden targets from
+        a *production* derivation — ``LIBS`` from ``libs/``, ``APPS`` from
+        ``apps/*/src`` — so a top-level ``tools/`` is not in either target set and
+        both stay green on an import of it. Widening Rule 4's target set covers only
+        half the hole: Rule 4's source set is libs, and apps must not import these
+        either, while apps have no allowlist concept for Rule 4 to hang the check on
+        (apps import libs freely by construction). The boundary is
+        production-vs-non-production, which is a different axis from both, so it
+        gets stated once here rather than bolted onto a rule that means something
+        else. Rule 11's docstring makes the same argument for coexisting with
+        Rule 4.
+    
+        sol MEDIUM (2026-07-27) found this the way it had to be found: adding
+        ``import tools._conformance`` to ``libs/engine/src/engine/witness.py`` left
+        all 46 tests green. The relocation's containment claim rested on "imported
+        by nothing" — a fact about today, not a ratchet. This is the ratchet.
+    
+        **Dynamic imports count too, when they are honest.** r2 found that
+        ``importlib.import_module("tools._conformance")`` and
+        ``__import__("tools._conformance")`` both walked straight past the r1 rule.
+        Nothing about either is obfuscated — they are the ordinary spelling of a
+        lazy import — so a literal argument is judged exactly like a static
+        ``import``. A COMPUTED argument is a different thing: following it means
+        evaluating strings, so it is classified and counted instead (see
+        ``_DYNAMIC_IMPORT_BOUNDARY_BASELINE``), the same split Rule 12 draws
+        between modelled bindings and its container/getattr boundary.
+    
+        **No allowlist.** The correct number of production imports of a script tree
+        is zero, and it is zero today, so there is nothing to grandfather. An
+        exception here would be the shape docs/RATCHETS.md warns about: a baseline
+        that grows. (The dynamic-import census is a different instrument — it
+        counts what the rule declines to resolve, not what it permits.)
+        """
+        roots = _non_production_roots()
+        files = _production_src_files()
+    
+        # Countable boundaries — a walk that finds nothing passes vacuously, which
+        # is how a derived rule dies quietly (Rule 12's lesson).
+        assert roots, (
+            "no non-production roots derived — either the repo layout changed or "
+            "_has_python stopped finding Python; this rule would pass vacuously"
+        )
+        assert "tools" in roots, (
+            f"'tools' missing from the derived non-production roots {roots} — that "
+            "is the boundary sol's evasion crossed; the derivation must see it"
+        )
+        assert files, (
+            "no production source files walked — _production_src_files went empty, "
+            "so this rule would pass against any import"
+        )
+    
+        # The classified-boundary census, asserted BEFORE the violations so a
+        # silently growing boundary cannot hide behind a green violation list.
+        boundary = _production_computed_dynamic_imports()
+        assert len(boundary) <= _DYNAMIC_IMPORT_BOUNDARY_BASELINE, (
+            f"{len(boundary)} dynamic imports in shipped code now take a target "
+            "this rule cannot resolve statically (baseline "
+            f"{_DYNAMIC_IMPORT_BOUNDARY_BASELINE}). These are NOT automatically "
+            "violations — a computed module name is a classified boundary, not an "
+            "evasion — but the population may not grow unobserved. Read each, "
+            "confirm it cannot reach a non-production root, then raise the "
+            "baseline deliberately:\n" + "\n".join(boundary)
+        )
+    
+        violations = _production_imports_of_non_production()
+>       assert not violations, (
+            "Shipped code imports a non-production root. Those trees are dev "
+            f"tooling — {', '.join(roots)} — run under the workspace env and "
+            "excluded from the wheel (see [tool.hatch.build] only-include), so a "
+            "runtime import of one ships a dangling dependency. Move the code into "
+            "a lib or an app:\n" + "\n".join(violations)
+        )
+E       AssertionError: Shipped code imports a non-production root. Those trees are dev tooling — benchmarks, clients, docs, tests, tools — run under the workspace env and excluded from the wheel (see [tool.hatch.build] only-include), so a runtime import of one ships a dangling dependency. Move the code into a lib or an app:
+E           libs/engine/src/engine/witness.py:828 — dynamically imports non-production root 'tools' ('tools._conformance')
+E       assert not ["  libs/engine/src/engine/witness.py:828 — dynamically imports non-production root 'tools' ('tools._conformance')"]
+
+tests/test_architecture.py:3133: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_architecture.py::test_production_does_not_import_a_non_production_root
+1 failed, 58 passed in 2.52s
+
+apply patch
+patch: completed
+/Users/kaygee/Code/loops/libs/engine/src/engine/witness.py
+apply patch
+patch: completed
+/Users/kaygee/Code/loops/libs/engine/src/engine/witness.py
+diff --git a/libs/engine/src/engine/witness.py b/libs/engine/src/engine/witness.py
+index a797885f7f1a10b5db42f1735034642d981b84e4..62e0613147dd8ce718d321e5374090419c1e2a13
+--- a/libs/engine/src/engine/witness.py
++++ b/libs/engine/src/engine/witness.py
+@@ -823,3 +823,5 @@
+     #: (no lineage opened — the current file answered, N3), ``"unhistorized"``
+     #: (position predates the genesis row — genesis floor), or ``"aggregate-head"``.
+     status: str
++
++_conformance = __import__("tools._conformance")
+
+diff --git a/libs/engine/src/engine/witness.py b/libs/engine/src/engine/witness.py
+index a797885f7f1a10b5db42f1735034642d981b84e4..62e0613147dd8ce718d321e5374090419c1e2a13
+--- a/libs/engine/src/engine/witness.py
++++ b/libs/engine/src/engine/witness.py
+@@ -823,3 +823,5 @@
+     #: (no lineage opened — the current file answered, N3), ``"unhistorized"``
+     #: (position predates the genesis row — genesis floor), or ``"aggregate-head"``.
+     status: str
++
++_conformance = __import__("tools._conformance")
+
+exec
+/bin/zsh -lc 'UV_CACHE_DIR=/tmp/uv-cache uv run pytest tests/test_architecture.py -q' in /Users/kaygee/Code/loops
+diff --git a/libs/engine/src/engine/witness.py b/libs/engine/src/engine/witness.py
+index a797885f7f1a10b5db42f1735034642d981b84e4..62e0613147dd8ce718d321e5374090419c1e2a13
+--- a/libs/engine/src/engine/witness.py
++++ b/libs/engine/src/engine/witness.py
+@@ -823,3 +823,5 @@
+     #: (no lineage opened — the current file answered, N3), ``"unhistorized"``
+     #: (position predates the genesis row — genesis floor), or ``"aggregate-head"``.
+     status: str
++
++_conformance = __import__("tools._conformance")
+
+ exited 1 in 2647ms:
+..............................................F............              [100%]
+=================================== FAILURES ===================================
+____________ test_production_does_not_import_a_non_production_root _____________
+
+    def test_production_does_not_import_a_non_production_root():
+        """Nothing shipped may import ``tools/``, ``benchmarks/``, ``tests/``, ….
+    
+        **Why this is not folded into an existing rule.** Rule 4 (the lib DAG) and
+        Rule 3 (libs don't import apps) both enumerate their forbidden targets from
+        a *production* derivation — ``LIBS`` from ``libs/``, ``APPS`` from
+        ``apps/*/src`` — so a top-level ``tools/`` is not in either target set and
+        both stay green on an import of it. Widening Rule 4's target set covers only
+        half the hole: Rule 4's source set is libs, and apps must not import these
+        either, while apps have no allowlist concept for Rule 4 to hang the check on
+        (apps import libs freely by construction). The boundary is
+        production-vs-non-production, which is a different axis from both, so it
+        gets stated once here rather than bolted onto a rule that means something
+        else. Rule 11's docstring makes the same argument for coexisting with
+        Rule 4.
+    
+        sol MEDIUM (2026-07-27) found this the way it had to be found: adding
+        ``import tools._conformance`` to ``libs/engine/src/engine/witness.py`` left
+        all 46 tests green. The relocation's containment claim rested on "imported
+        by nothing" — a fact about today, not a ratchet. This is the ratchet.
+    
+        **Dynamic imports count too, when they are honest.** r2 found that
+        ``importlib.import_module("tools._conformance")`` and
+        ``__import__("tools._conformance")`` both walked straight past the r1 rule.
+        Nothing about either is obfuscated — they are the ordinary spelling of a
+        lazy import — so a literal argument is judged exactly like a static
+        ``import``. A COMPUTED argument is a different thing: following it means
+        evaluating strings, so it is classified and counted instead (see
+        ``_DYNAMIC_IMPORT_BOUNDARY_BASELINE``), the same split Rule 12 draws
+        between modelled bindings and its container/getattr boundary.
+    
+        **No allowlist.** The correct number of production imports of a script tree
+        is zero, and it is zero today, so there is nothing to grandfather. An
+        exception here would be the shape docs/RATCHETS.md warns about: a baseline
+        that grows. (The dynamic-import census is a different instrument — it
+        counts what the rule declines to resolve, not what it permits.)
+        """
+        roots = _non_production_roots()
+        files = _production_src_files()
+    
+        # Countable boundaries — a walk that finds nothing passes vacuously, which
+        # is how a derived rule dies quietly (Rule 12's lesson).
+        assert roots, (
+            "no non-production roots derived — either the repo layout changed or "
+            "_has_python stopped finding Python; this rule would pass vacuously"
+        )
+        assert "tools" in roots, (
+            f"'tools' missing from the derived non-production roots {roots} — that "
+            "is the boundary sol's evasion crossed; the derivation must see it"
+        )
+        assert files, (
+            "no production source files walked — _production_src_files went empty, "
+            "so this rule would pass against any import"
+        )
+    
+        # The classified-boundary census, asserted BEFORE the violations so a
+        # silently growing boundary cannot hide behind a green violation list.
+        boundary = _production_computed_dynamic_imports()
+        assert len(boundary) <= _DYNAMIC_IMPORT_BOUNDARY_BASELINE, (
+            f"{len(boundary)} dynamic imports in shipped code now take a target "
+            "this rule cannot resolve statically (baseline "
+            f"{_DYNAMIC_IMPORT_BOUNDARY_BASELINE}). These are NOT automatically "
+            "violations — a computed module name is a classified boundary, not an "
+            "evasion — but the population may not grow unobserved. Read each, "
+            "confirm it cannot reach a non-production root, then raise the "
+            "baseline deliberately:\n" + "\n".join(boundary)
+        )
+    
+        violations = _production_imports_of_non_production()
+>       assert not violations, (
+            "Shipped code imports a non-production root. Those trees are dev "
+            f"tooling — {', '.join(roots)} — run under the workspace env and "
+            "excluded from the wheel (see [tool.hatch.build] only-include), so a "
+            "runtime import of one ships a dangling dependency. Move the code into "
+            "a lib or an app:\n" + "\n".join(violations)
+        )
+E       AssertionError: Shipped code imports a non-production root. Those trees are dev tooling — benchmarks, clients, docs, tests, tools — run under the workspace env and excluded from the wheel (see [tool.hatch.build] only-include), so a runtime import of one ships a dangling dependency. Move the code into a lib or an app:
+E           libs/engine/src/engine/witness.py:827 — dynamically imports non-production root 'tools' ('tools._conformance')
+E       assert not ["  libs/engine/src/engine/witness.py:827 — dynamically imports non-production root 'tools' ('tools._conformance')"]
+
+tests/test_architecture.py:3133: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_architecture.py::test_production_does_not_import_a_non_production_root
+1 failed, 58 passed in 2.44s
+
+apply patch
+patch: completed
+/Users/kaygee/Code/loops/__support__/helper.py
+/Users/kaygee/Code/loops/libs/engine/src/engine/witness.py
+diff --git a/__support__/helper.py b/__support__/helper.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..b15b1b0797d64623135bb2d04a67bae078fa44c2
+--- /dev/null
++++ b/__support__/helper.py
+@@ -0,0 +1 @@
++VALUE = 1
+
+diff --git a/__support__/helper.py b/__support__/helper.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..b15b1b0797d64623135bb2d04a67bae078fa44c2
+--- /dev/null
++++ b/__support__/helper.py
+@@ -0,0 +1 @@
++VALUE = 1
+
+apply patch
+patch: completed
+/Users/kaygee/Code/loops/libs/engine/src/engine/witness.py
+diff --git a/__support__/helper.py b/__support__/helper.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..b15b1b0797d64623135bb2d04a67bae078fa44c2
+--- /dev/null
++++ b/__support__/helper.py
+@@ -0,0 +1 @@
++VALUE = 1
+diff --git a/libs/engine/src/engine/witness.py b/libs/engine/src/engine/witness.py
+index a797885f7f1a10b5db42f1735034642d981b84e4..8b0cb7f0eba610c8621e95bbd52cfa496a57c03c
+--- a/libs/engine/src/engine/witness.py
++++ b/libs/engine/src/engine/witness.py
+@@ -823,3 +823,5 @@
+     #: (no lineage opened — the current file answered, N3), ``"unhistorized"``
+     #: (position predates the genesis row — genesis floor), or ``"aggregate-head"``.
+     status: str
++
++import __support__.helper
+
+diff --git a/__support__/helper.py b/__support__/helper.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..b15b1b0797d64623135bb2d04a67bae078fa44c2
+--- /dev/null
++++ b/__support__/helper.py
+@@ -0,0 +1 @@
++VALUE = 1
+diff --git a/libs/engine/src/engine/witness.py b/libs/engine/src/engine/witness.py
+index a797885f7f1a10b5db42f1735034642d981b84e4..8b0cb7f0eba610c8621e95bbd52cfa496a57c03c
+--- a/libs/engine/src/engine/witness.py
++++ b/libs/engine/src/engine/witness.py
+@@ -823,3 +823,5 @@
+     #: (no lineage opened — the current file answered, N3), ``"unhistorized"``
+     #: (position predates the genesis row — genesis floor), or ``"aggregate-head"``.
+     status: str
++
++import __support__.helper
+
+exec
+/bin/zsh -lc "UV_CACHE_DIR=/tmp/uv-cache uv run pytest tests/test_architecture.py -q; /Users/kaygee/Code/loops/.venv/bin/python -c 'import __support__.helper; print(__support__.helper.VALUE)'" in /Users/kaygee/Code/loops
+diff --git a/__support__/helper.py b/__support__/helper.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..b15b1b0797d64623135bb2d04a67bae078fa44c2
+--- /dev/null
++++ b/__support__/helper.py
+@@ -0,0 +1 @@
++VALUE = 1
+diff --git a/libs/engine/src/engine/witness.py b/libs/engine/src/engine/witness.py
+index a797885f7f1a10b5db42f1735034642d981b84e4..8b0cb7f0eba610c8621e95bbd52cfa496a57c03c
+--- a/libs/engine/src/engine/witness.py
++++ b/libs/engine/src/engine/witness.py
+@@ -823,3 +823,5 @@
+     #: (no lineage opened — the current file answered, N3), ``"unhistorized"``
+     #: (position predates the genesis row — genesis floor), or ``"aggregate-head"``.
+     status: str
++
++import __support__.helper
+
+ succeeded in 2746ms:
+..............................................F............              [100%]
+=================================== FAILURES ===================================
+____________ test_production_does_not_import_a_non_production_root _____________
+
+    def test_production_does_not_import_a_non_production_root():
+        """Nothing shipped may import ``tools/``, ``benchmarks/``, ``tests/``, ….
+    
+        **Why this is not folded into an existing rule.** Rule 4 (the lib DAG) and
+        Rule 3 (libs don't import apps) both enumerate their forbidden targets from
+        a *production* derivation — ``LIBS`` from ``libs/``, ``APPS`` from
+        ``apps/*/src`` — so a top-level ``tools/`` is not in either target set and
+        both stay green on an import of it. Widening Rule 4's target set covers only
+        half the hole: Rule 4's source set is libs, and apps must not import these
+        either, while apps have no allowlist concept for Rule 4 to hang the check on
+        (apps import libs freely by construction). The boundary is
+        production-vs-non-production, which is a different axis from both, so it
+        gets stated once here rather than bolted onto a rule that means something
+        else. Rule 11's docstring makes the same argument for coexisting with
+        Rule 4.
+    
+        sol MEDIUM (2026-07-27) found this the way it had to be found: adding
+        ``import tools._conformance`` to ``libs/engine/src/engine/witness.py`` left
+        all 46 tests green. The relocation's containment claim rested on "imported
+        by nothing" — a fact about today, not a ratchet. This is the ratchet.
+    
+        **Dynamic imports count too, when they are honest.** r2 found that
+        ``importlib.import_module("tools._conformance")`` and
+        ``__import__("tools._conformance")`` both walked straight past the r1 rule.
+        Nothing about either is obfuscated — they are the ordinary spelling of a
+        lazy import — so a literal argument is judged exactly like a static
+        ``import``. A COMPUTED argument is a different thing: following it means
+        evaluating strings, so it is classified and counted instead (see
+        ``_DYNAMIC_IMPORT_BOUNDARY_BASELINE``), the same split Rule 12 draws
+        between modelled bindings and its container/getattr boundary.
+    
+        **No allowlist.** The correct number of production imports of a script tree
+        is zero, and it is zero today, so there is nothing to grandfather. An
+        exception here would be the shape docs/RATCHETS.md warns about: a baseline
+        that grows. (The dynamic-import census is a different instrument — it
+        counts what the rule declines to resolve, not what it permits.)
+        """
+        roots = _non_production_roots()
+        files = _production_src_files()
+    
+        # Countable boundaries — a walk that finds nothing passes vacuously, which
+        # is how a derived rule dies quietly (Rule 12's lesson).
+        assert roots, (
+            "no non-production roots derived — either the repo layout changed or "
+            "_has_python stopped finding Python; this rule would pass vacuously"
+        )
+        assert "tools" in roots, (
+            f"'tools' missing from the derived non-production roots {roots} — that "
+            "is the boundary sol's evasion crossed; the derivation must see it"
+        )
+        assert files, (
+            "no production source files walked — _production_src_files went empty, "
+            "so this rule would pass against any import"
+        )
+    
+        # The classified-boundary census, asserted BEFORE the violations so a
+        # silently growing boundary cannot hide behind a green violation list.
+        boundary = _production_computed_dynamic_imports()
+        assert len(boundary) <= _DYNAMIC_IMPORT_BOUNDARY_BASELINE, (
+            f"{len(boundary)} dynamic imports in shipped code now take a target "
+            "this rule cannot resolve statically (baseline "
+            f"{_DYNAMIC_IMPORT_BOUNDARY_BASELINE}). These are NOT automatically "
+            "violations — a computed module name is a classified boundary, not an "
+            "evasion — but the population may not grow unobserved. Read each, "
+            "confirm it cannot reach a non-production root, then raise the "
+            "baseline deliberately:\n" + "\n".join(boundary)
+        )
+    
+        violations = _production_imports_of_non_production()
+>       assert not violations, (
+            "Shipped code imports a non-production root. Those trees are dev "
+            f"tooling — {', '.join(roots)} — run under the workspace env and "
+            "excluded from the wheel (see [tool.hatch.build] only-include), so a "
+            "runtime import of one ships a dangling dependency. Move the code into "
+            "a lib or an app:\n" + "\n".join(violations)
+        )
+E       AssertionError: Shipped code imports a non-production root. Those trees are dev tooling — __support__, benchmarks, clients, docs, tests, tools — run under the workspace env and excluded from the wheel (see [tool.hatch.build] only-include), so a runtime import of one ships a dangling dependency. Move the code into a lib or an app:
+E           libs/engine/src/engine/witness.py:827 — imports non-production root '__support__'
+E       assert not ["  libs/engine/src/engine/witness.py:827 — imports non-production root '__support__'"]
+
+tests/test_architecture.py:3133: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_architecture.py::test_production_does_not_import_a_non_production_root
+1 failed, 58 passed in 2.44s
+1
+
+codex
+Both dynamic spellings and the importable dunder root now produce the intended Rule 13 failure (`1 failed, 58 passed` each); the dunder package also remains genuinely importable. I’m restoring those temporary files before auditing the six-member census.
+apply patch
+patch: completed
+/Users/kaygee/Code/loops/__support__/helper.py
+/Users/kaygee/Code/loops/libs/engine/src/engine/witness.py
+exec
+/bin/zsh -lc 'find __support__ -maxdepth 3 -type f -print 2>/dev/null || true && git diff -- libs/engine/src/engine/witness.py && git status --short' in /Users/kaygee/Code/loops
+ succeeded in 0ms:
+__support__/__pycache__/helper.cpython-313.pyc
+?? docs/scratch/010-wave/sol-review-brief-track-b-r3.md
+?? docs/scratch/010-wave/sol-track-b-r2-stdout.log
+?? docs/scratch/010-wave/sol-track-b-r3-stdout.log
+?? docs/scratch/010-wave/sol-track-b-stdout.log
+
+exec
+/bin/zsh -lc 'rm __support__/__pycache__/helper.cpython-313.pyc && rmdir __support__/__pycache__ __support__ && git status --short' in /Users/kaygee/Code/loops
+ succeeded in 0ms:
+?? docs/scratch/010-wave/sol-review-brief-track-b-r3.md
+?? docs/scratch/010-wave/sol-track-b-r2-stdout.log
+?? docs/scratch/010-wave/sol-track-b-r3-stdout.log
+?? docs/scratch/010-wave/sol-track-b-stdout.log
+
+exec
+/bin/zsh -lc "UV_CACHE_DIR=/tmp/uv-cache uv run python - <<'PY'
+import importlib.util
+from pathlib import Path
+p = Path('tests/test_architecture.py')
+spec = importlib.util.spec_from_file_location('arch', p)
+m = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(m)
+print('BASELINE', m._DYNAMIC_IMPORT_BOUNDARY_BASELINE)
+print('BOUNDARY')
+for item in m._production_computed_dynamic_imports():
+    print(item)
+print('LENS RESOLVED')
+for path in m._production_src_files():
+    if path.name == 'lens_resolver.py':
+        c = m._collect_dynamic_imports(path)
+        print(path.relative_to(m.REPO_ROOT), 'literal=', c.literal, 'computed=', c.computed)
+PY
+rg -n -C 3 \"import_module|spec_from_file_location\" apps libs --glob '*.py'" in /Users/kaygee/Code/loops
+ succeeded in 434ms:
+BASELINE 6
+BOUNDARY
+  apps/loops/src/loops/cli/registry.py:107 — import_module() — computed module name; classified out of scope, not resolved
+  apps/loops/src/loops/lens_resolver.py:408 — spec_from_file_location() — path-based loader; classified out of scope, not resolved
+  apps/loops/src/loops/main.py:73 — import_module() — computed module name; classified out of scope, not resolved
+  libs/atoms/src/atoms/__init__.py:133 — import_module() — computed module name; classified out of scope, not resolved
+  libs/engine/src/engine/__init__.py:302 — import_module() — computed module name; classified out of scope, not resolved
+  libs/lang/src/lang/__init__.py:147 — import_module() — computed module name; classified out of scope, not resolved
+LENS RESOLVED
+apps/loops/src/loops/lens_resolver.py literal= [('loops.lenses.', 161), ('loops.lenses.', 440)] computed= [('spec_from_file_location() — path-based loader', 408)]
+libs/lang/src/lang/__init__.py-144-    if name in _LAZY_IMPORTS:
+libs/lang/src/lang/__init__.py-145-        module_path, attr_name = _LAZY_IMPORTS[name]
+libs/lang/src/lang/__init__.py-146-        import importlib
+libs/lang/src/lang/__init__.py:147:        module = importlib.import_module(module_path)
+libs/lang/src/lang/__init__.py-148-        value = getattr(module, attr_name)
+libs/lang/src/lang/__init__.py-149-        globals()[name] = value
+libs/lang/src/lang/__init__.py-150-        return value
+--
+libs/atoms/src/atoms/__init__.py-130-    if name in _LAZY_IMPORTS:
+libs/atoms/src/atoms/__init__.py-131-        module_path, attr_name = _LAZY_IMPORTS[name]
+libs/atoms/src/atoms/__init__.py-132-        import importlib
+libs/atoms/src/atoms/__init__.py:133:        module = importlib.import_module(module_path)
+libs/atoms/src/atoms/__init__.py-134-        value = getattr(module, attr_name)
+libs/atoms/src/atoms/__init__.py-135-        # Cache on the module for subsequent access
+libs/atoms/src/atoms/__init__.py-136-        globals()[name] = value
+--
+apps/loops/src/loops/lens_resolver.py-158-
+apps/loops/src/loops/lens_resolver.py-159-    # Built-in fallback
+apps/loops/src/loops/lens_resolver.py-160-    try:
+apps/loops/src/loops/lens_resolver.py:161:        mod = importlib.import_module(f"loops.lenses.{name}")
+apps/loops/src/loops/lens_resolver.py-162-    except (ImportError, ModuleNotFoundError):
+apps/loops/src/loops/lens_resolver.py-163-        return None
+apps/loops/src/loops/lens_resolver.py-164-    return getattr(mod, "fetch", None)
+--
+apps/loops/src/loops/lens_resolver.py-405-    """
+apps/loops/src/loops/lens_resolver.py-406-    module_name = f"_loops_lens_{path.stem}_{id(path)}"
+apps/loops/src/loops/lens_resolver.py-407-
+apps/loops/src/loops/lens_resolver.py:408:    spec = importlib.util.spec_from_file_location(module_name, path)
+apps/loops/src/loops/lens_resolver.py-409-    if spec is None or spec.loader is None:
+apps/loops/src/loops/lens_resolver.py-410-        return None
+apps/loops/src/loops/lens_resolver.py-411-
+--
+apps/loops/src/loops/lens_resolver.py-437-def _load_builtin(name: str, candidates: tuple[str, ...]) -> LensRenderFn | None:
+apps/loops/src/loops/lens_resolver.py-438-    """Try loading from the built-in lenses package."""
+apps/loops/src/loops/lens_resolver.py-439-    try:
+apps/loops/src/loops/lens_resolver.py:440:        mod = importlib.import_module(f"loops.lenses.{name}")
+apps/loops/src/loops/lens_resolver.py-441-    except (ImportError, ModuleNotFoundError):
+apps/loops/src/loops/lens_resolver.py-442-        return None
+apps/loops/src/loops/lens_resolver.py-443-    return _extract_view(mod, candidates)
+--
+apps/loops/src/loops/main.py-16-
+apps/loops/src/loops/main.py-17-import os
+apps/loops/src/loops/main.py-18-import sys
+apps/loops/src/loops/main.py:19:from importlib import import_module
+apps/loops/src/loops/main.py-20-
+apps/loops/src/loops/main.py-21-# Back-compat re-export table: public-through-loops.main name → home module.
+apps/loops/src/loops/main.py-22-# Resolved on first attribute access, never at import.
+--
+apps/loops/src/loops/main.py-70-    mod = _REEXPORTS.get(name)
+apps/loops/src/loops/main.py-71-    if mod is None:
+apps/loops/src/loops/main.py-72-        raise AttributeError(f"module 'loops.main' has no attribute {name!r}")
+apps/loops/src/loops/main.py:73:    value = getattr(import_module(mod), name)
+apps/loops/src/loops/main.py-74-    globals()[name] = value  # cache: subsequent access skips __getattr__
+apps/loops/src/loops/main.py-75-    return value
+apps/loops/src/loops/main.py-76-
+--
+apps/loops/src/loops/cli/registry.py-102-    """
+apps/loops/src/loops/cli/registry.py-103-
+apps/loops/src/loops/cli/registry.py-104-    def view(argv: list[str], ctx: "Invocation") -> int:
+apps/loops/src/loops/cli/registry.py:105:        from importlib import import_module
+apps/loops/src/loops/cli/registry.py-106-
+apps/loops/src/loops/cli/registry.py:107:        mod = import_module(module_path)
+apps/loops/src/loops/cli/registry.py-108-        return getattr(mod, fn_name)(argv, ctx)
+apps/loops/src/loops/cli/registry.py-109-
+apps/loops/src/loops/cli/registry.py-110-    return view
+--
+libs/engine/src/engine/__init__.py-299-    if name in _LAZY_IMPORTS:
+libs/engine/src/engine/__init__.py-300-        module_path, attr_name = _LAZY_IMPORTS[name]
+libs/engine/src/engine/__init__.py-301-        import importlib
+libs/engine/src/engine/__init__.py:302:        module = importlib.import_module(module_path)
+libs/engine/src/engine/__init__.py-303-        value = getattr(module, attr_name)
+libs/engine/src/engine/__init__.py-304-        globals()[name] = value
+libs/engine/src/engine/__init__.py-305-        return value
+
+exec
+/bin/zsh -lc "sed -n '1,125p' apps/loops/src/loops/main.py; sed -n '1,125p' apps/loops/src/loops/cli/registry.py; sed -n '100,155p' libs/atoms/src/atoms/__init__.py; sed -n '270,320p' libs/engine/src/engine/__init__.py; sed -n '115,155p' libs/lang/src/lang/__init__.py; sed -n '380,420p' apps/loops/src/loops/lens_resolver.py; sed -n '2805,2865p' tests/test_architecture.py; sed -n '3105,3140p' tests/test_architecture.py" in /Users/kaygee/Code/loops
+ succeeded in 0ms:
+"""loops CLI — entry point and back-compat re-export surface.
+
+Verb-first dispatch: loops <verb> [vertex] [args]
+Verbs: read, emit, close, sync, cite
+Commands: test, compile, validate, store, init, ls, whoami
+
+Behaviour is owned by ``loops.cli.app``. This module re-exports all
+symbols that tests and internal callers address via ``loops.main`` —
+LAZILY, via module ``__getattr__``: the eager form imported the whole
+command/view surface (and through it painted's renderer) before painted's
+``_PAINTED_COMPLETE`` completion gate could run, breaking the render-free
+TAB guarantee for the real ``python -m loops`` / console-script entry
+(Sol review review/completion-t3 round 2 #1).
+"""
+from __future__ import annotations
+
+import os
+import sys
+from importlib import import_module
+
+# Back-compat re-export table: public-through-loops.main name → home module.
+# Resolved on first attribute access, never at import.
+_REEXPORTS: dict[str, str] = {}
+for _mod, _names in {
+    "loops.errors": ("LoopsError",),
+    "loops.commands.resolve": (
+        "loops_home", "_find_local_vertex", "_warn_missing_fold_key",
+        "_extract_kind_keys", "_try_topology_from_store",
+        "_topology_kind_keys_and_stores", "_resolve_entity_refs",
+        "_resolve_writable_vertex", "_resolve_vertex_store_path",
+        "_resolve_named_store", "_resolve_named_vertex",
+        "_resolve_combine_child", "_resolve_vertex_for_dispatch",
+        "_resolve_observer_flag", "_apply_vertex_scope", "_parse_vars",
+        "_resolve_vertex_path", "_vertex_name", "_declared_kinds",
+        "_validate_kind_or_exit",
+    ),
+    "loops.commands.init": (
+        "_ROOT_VERTEX", "_MINIMAL_INSTANCE", "_extract_block_text",
+        "_extract_loops_text", "_find_source_vertex", "_init_local_vertex",
+        "_register_with_aggregator", "_seed_config_facts",
+        "_scaffold_artifacts", "cmd_init", "_run_init",
+    ),
+    "loops.commands.store": ("_run_store",),
+    "loops.commands.population": (
+        "_run_ls", "_run_ls_root", "_run_add", "_run_rm", "_run_export",
+    ),
+    "loops.commands.devtools": ("_run_validate", "_run_test", "_run_compile"),
+    "loops.commands.sync": (
+        "_resolve_combine_vertex_paths", "_execute_boundary_run",
+        "_run_sync_aggregate", "_run_sync",
+    ),
+    "loops.commands.emit": (
+        "_parse_emit_parts", "cmd_emit", "_run_emit", "_run_close",
+        "_add_produced",
+    ),
+    "loops.commands.stream": ("_run_stream",),
+    "loops.cli.views.fold": ("_extract_refs_depth", "_looks_like_vertex_path"),
+    "loops.commands.whoami": ("_run_whoami", "_whoami_from_identity_store"),
+    "loops.commands.ticks": ("_tick_drill_header", "_run_ticks"),
+    "loops.cli.lens": (
+        "_get_vertex_lens_decl", "_exit_lens_not_found",
+        "_effective_lens_name", "_resolve_render_fn", "_resolve_lens_fetch",
+    ),
+}.items():
+    for _n in _names:
+        _REEXPORTS[_n] = _mod
+
+
+def __getattr__(name: str):
+    mod = _REEXPORTS.get(name)
+    if mod is None:
+        raise AttributeError(f"module 'loops.main' has no attribute {name!r}")
+    value = getattr(import_module(mod), name)
+    globals()[name] = value  # cache: subsequent access skips __getattr__
+    return value
+
+
+def __dir__() -> list[str]:
+    return sorted(set(globals()) | set(_REEXPORTS))
+
+
+# Star-import compatibility: with a module __getattr__, ``from loops.main
+# import *`` resolves names through __all__ (each triggering __getattr__) —
+# without it, star-import silently exports only eagerly-bound globals
+# (Sol review review/completion-t3 round 3 #5).
+__all__ = sorted(
+    set(_REEXPORTS)
+    | {"main", "_VERBS", "_DEV_COMMANDS", "_SETUP_COMMANDS", "_COMMANDS", "_VERTEX_OPS"}
+)
+
+
+_VERBS = frozenset({"read", "emit", "close", "sync", "cite"})
+_DEV_COMMANDS = frozenset({"test", "compile", "validate", "store"})
+_SETUP_COMMANDS = frozenset({"init", "orient", "whoami", "ls", "add", "rm", "export"})
+_COMMANDS = _DEV_COMMANDS | _SETUP_COMMANDS
+_VERTEX_OPS = frozenset({"read", "emit", "close", "sync", "store", "cite", "ls", "add", "rm", "export"})
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Entry point — delegates to ``cli.app.main``."""
+    from loops.cli.app import main as _cli_main
+    try:
+        return _cli_main(argv if argv is not None else sys.argv[1:])
+    except BrokenPipeError:
+        # Downstream pipe reader (head, grep -m) closed early — normal, not an
+        # error. Point stdout at devnull so the interpreter's exit-time flush
+        # doesn't raise again, and exit with the conventional SIGPIPE status.
+        try:
+            os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
+        except (OSError, ValueError, AttributeError):
+            pass  # stdout isn't a real fd (tests, embedding) — nothing to flush
+
+        return 128 + 13
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+"""Verb / command registry — maps names to view callables.
+
+Two tables:
+
+  VERBS: the five primary vertex verbs (read, emit, sync, close, cite)
+    plus the data-access verbs that share the verb-first dispatch shape
+    (store). Each entry is a ``View`` — ``(argv, ctx) -> int``.
+
+  COMMANDS: the dev-tool and setup commands (test, compile, validate,
+    init, ls, add, rm, export, whoami). Same View shape.
+
+  POPULATION_OPS: the per-vertex template-population helpers
+    (ls / add / rm / export) reached via ``loops <vertex> <op>``.
+
+Current state (refactor paused after the Operation IR pilot):
+
+  VERBS mixes two shapes. Entries pointing at ``cli/views/<name>.py``
+  via ``_view(...)`` are on the new shape — ``read``, ``emit``, ``cite``,
+  ``store``. The ``read`` and ``cite`` views are thin routers; only
+  ``fold`` (reached via ``read``) and ``emit`` exercise the full
+  ``argparse → Operation → dispatch`` IR. ``close`` and ``sync`` still
+  use ``_legacy_view`` to call ``loops.main._run_*`` directly.
+
+  COMMANDS is mostly ``_legacy_view_argv_only`` pointing at
+  ``loops.main._run_*`` (which re-exports from ``loops.commands.*``).
+  Two entries — the top-level population helpers — point at
+  ``cli/views/population.py`` via ``_view``.
+
+  The registry seam is the migration boundary: each remaining surface
+  can convert to the IR shape independently if a touch-point justifies
+  the work. No registry sweep is required to land a new IR view.
+
+The registry is intentionally lazy: each entry resolves its target
+function on first call via ``importlib``. Keeps ``cli.app`` importable
+without dragging the whole CLI surface in.
+
+Design anchor: decision/design/cli-refactor-option-2-siftd-shape;
+decision/operation-ir-adoption.
+"""
+from __future__ import annotations
+
+from collections.abc import Callable
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .invocation import Invocation
+
+
+# A view is a callable that takes argv + context and returns an exit code.
+View = Callable[[list[str], "Invocation"], int]
+
+
+def _legacy_view(
+    fn_name: str,
+    *,
+    takes_observer: bool = True,
+) -> View:
+    """Wrap a legacy ``loops.main._run_*`` symbol into View shape.
+
+    Resolves ``fn_name`` against ``loops.main`` on each call (lazy lookup
+    — the symbol may be a re-export that swaps target during migration).
+    Passes ``vertex_path`` always; passes ``observer`` only for verbs
+    that accept it (``sync`` and ``store`` don't).
+    """
+
+    def view(argv: list[str], ctx: "Invocation") -> int:
+        import loops.main as main_mod
+
+        fn = getattr(main_mod, fn_name)
+        kwargs: dict = {"vertex_path": ctx.vertex_path}
+        if takes_observer:
+            kwargs["observer"] = ctx.observer
+        return fn(argv, **kwargs)
+
+    return view
+
+
+def _legacy_view_argv_only(fn_name: str) -> View:
+    """Wrap a legacy function that takes just ``argv`` (no vertex/observer).
+
+    Used by dev/setup commands whose entrypoints don't accept the
+    vertex_path/observer kwargs (test, compile, validate, init, whoami,
+    ls/add/rm/export — which take vertex embedded in argv).
+    """
+
+    def view(argv: list[str], ctx: "Invocation") -> int:  # noqa: ARG001 — ctx reserved
+        import loops.main as main_mod
+
+        fn = getattr(main_mod, fn_name)
+        return fn(argv)
+
+    return view
+
+
+def _view(module_path: str, fn_name: str = "run") -> View:
+    """Wrap a new cli.views module's ``run`` (or named) function as a View.
+
+    Resolves lazily on first call to avoid pulling argparse + downstream
+    imports at registry-build time. The optional ``fn_name`` lets a
+    single view module expose several entries (cli.views.population
+    re-uses one module for ls/add/rm/export).
+    """
+
+    def view(argv: list[str], ctx: "Invocation") -> int:
+        from importlib import import_module
+
+        mod = import_module(module_path)
+        return getattr(mod, fn_name)(argv, ctx)
+
+    return view
+
+
+# Primary vertex verbs — used by both verb-first and vertex-first dispatch.
+# As individual views migrate to cli/views/* they swap from _legacy_view
+# (which wraps loops.main._run_*) to _view (which calls the new run()).
+VERBS: dict[str, View] = {
+    "read": _view("loops.cli.views.read"),
+    "emit": _view("loops.cli.views.emit"),
+    "close": _legacy_view("_run_close"),
+    "sync": _legacy_view("_run_sync", takes_observer=False),
+    "cite": _view("loops.cli.views.cite"),
+    "seal": _view("loops.cli.views.seal"),
+    "store": _view("loops.cli.views.store"),
+}
+
+    "FoldSection": ("atoms.fold_state", "FoldSection"),
+    "FoldState": ("atoms.fold_state", "FoldState"),
+    "WalkedItem": ("atoms.fold_state", "WalkedItem"),
+    "TickWindow": ("atoms.ticks", "TickWindow"),
+    # Parse vocabulary
+    "Coerce": ("atoms.parse", "Coerce"),
+    "Explode": ("atoms.parse", "Explode"),
+    "Flatten": ("atoms.parse", "Flatten"),
+    "Pick": ("atoms.parse", "Pick"),
+    "Project": ("atoms.parse", "Project"),
+    "Rename": ("atoms.parse", "Rename"),
+    "Select": ("atoms.parse", "Select"),
+    "Skip": ("atoms.parse", "Skip"),
+    "Split": ("atoms.parse", "Split"),
+    "Transform": ("atoms.parse", "Transform"),
+    "Where": ("atoms.parse", "Where"),
+    "has_explode": ("atoms.parse", "has_explode"),
+    "resolve_path": ("atoms.parse", "resolve_path"),
+    "run_parse": ("atoms.parse", "run_parse"),
+    "run_parse_many": ("atoms.parse", "run_parse_many"),
+    # Ingress
+    "Source": ("atoms.source", "Source"),
+    "SourceError": ("atoms.source", "SourceError"),
+    "CommandSource": ("atoms.source", "CommandSource"),
+    "SequentialSource": ("atoms.sequential", "SequentialSource"),
+    "SourceProtocol": ("atoms.protocol", "SourceProtocol"),
+}
+
+
+def __getattr__(name: str):
+    if name in _LAZY_IMPORTS:
+        module_path, attr_name = _LAZY_IMPORTS[name]
+        import importlib
+        module = importlib.import_module(module_path)
+        value = getattr(module, attr_name)
+        # Cache on the module for subsequent access
+        globals()[name] = value
+        return value
+    raise AttributeError(f"module 'atoms' has no attribute {name!r}")
+    "VertexSnapshot": ("engine.handle", "VertexSnapshot"),
+    "ChangeBatch": ("engine.handle", "ChangeBatch"),
+    "ReceiptEvent": ("engine.handle", "ReceiptEvent"),
+    "TickEvent": ("engine.handle", "TickEvent"),
+    "RowChange": ("engine.handle", "RowChange"),
+    "FoldAddress": ("engine.handle", "FoldAddress"),
+    "StoreProbe": ("engine.handle", "StoreProbe"),
+    "FactHead": ("engine.handle", "FactHead"),
+    "TickHead": ("engine.handle", "TickHead"),
+    "StoredFact": ("engine.handle", "StoredFact"),
+    "StoredTick": ("engine.handle", "StoredTick"),
+    "StoreIdentity": ("engine.handle", "StoreIdentity"),
+    "CredentialProvider": ("engine.handle", "CredentialProvider"),
+    "WriteCredentials": ("engine.handle", "WriteCredentials"),
+    "ReceiveResult": ("engine.handle", "ReceiveResult"),
+    "HandleError": ("engine.handle", "HandleError"),
+    "HandleClosed": ("engine.handle", "HandleClosed"),
+    "HandleInvalidated": ("engine.handle", "HandleInvalidated"),
+    "StoreBusy": ("engine.handle", "StoreBusy"),
+    "StoreReplaced": ("engine.handle", "StoreReplaced"),
+    "CursorInvalidated": ("engine.handle", "CursorInvalidated"),
+    "AggregateHandleUnsupported": ("engine.handle", "AggregateHandleUnsupported"),
+    "ReadOnlyAggregate": ("engine.handle", "ReadOnlyAggregate"),
+    "ConditionalEmitUnsupported": ("engine.handle", "ConditionalEmitUnsupported"),
+    "ReceiveCommittedError": ("engine.handle", "ReceiveCommittedError"),
+}
+
+
+def __getattr__(name: str):
+    if name in _LAZY_IMPORTS:
+        module_path, attr_name = _LAZY_IMPORTS[name]
+        import importlib
+        module = importlib.import_module(module_path)
+        value = getattr(module, attr_name)
+        globals()[name] = value
+        return value
+    raise AttributeError(f"module 'engine' has no attribute {name!r}")
+    "Pick", "Project", "Replace", "RStrip", "Skip",
+    "SourceEntry", "SourceParams", "SourcesBlock", "Split", "Strip",
+    "TemplateSource", "Transform", "TransformOp", "Trigger", "VertexFile", "Where",
+]
+for _n in _AST_NAMES:
+    _LAZY_IMPORTS[_n] = ("lang.ast", _n)
+
+# Errors
+for _n in ["DSLError", "LexError", "Location", "ParseError", "ValidationError"]:
+    _LAZY_IMPORTS[_n] = ("lang.errors", _n)
+
+# Population
+for _n in ["PopulationInfo", "PopulationRow", "read_population", "resolve_template", "resolve_vertex", "template_name"]:
+    _LAZY_IMPORTS[_n] = ("lang.population", _n)
+
+# Validator
+for _n in ["validate", "validate_loop", "validate_vertex"]:
+    _LAZY_IMPORTS[_n] = ("lang.validator", _n)
+
+# Declaration document form
+for _n in [
+    "Document", "vertex_to_documents", "documents_to_vertex", "genesis_payload",
+    "is_internal_kind", "DECL_PREFIX", "DECLARATION_PROTOCOL_VERSION",
+    "DEFINED_TO_TOMBSTONE", "Change", "EditRefused", "diff_documents", "apply_changes",
+]:
+    _LAZY_IMPORTS[_n] = ("lang.document", _n)
+
+
+def __getattr__(name: str):
+    if name in _LAZY_IMPORTS:
+        module_path, attr_name = _LAZY_IMPORTS[name]
+        import importlib
+        module = importlib.import_module(module_path)
+        value = getattr(module, attr_name)
+        globals()[name] = value
+        return value
+    raise AttributeError(f"module 'lang' has no attribute {name!r}")
+    ``vertex_dir``. Name-style searches the standard lens hierarchy.
+    """
+    if name.startswith((".", "/")):
+        if vertex_dir is not None:
+            target = (vertex_dir / name).resolve()
+        else:
+            target = Path(name).resolve()
+        return target if target.is_file() else None
+
+    for search_dir in _build_search_path(vertex_dir):
+        candidate = search_dir / f"{name}.py"
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def _load_lens_module(path: Path):
+    """Dynamically import a Python file. Returns the module, or None on failure.
+
+    A module-body failure is REPORTED to stderr before returning None: a lens
+    file that raises at import is a user error the user must be able to read —
+    swallowing it leaves ``--lens`` reporting a generic "not found" for a lens
+    that visibly exists (and that completion legitimately offered, since
+    enumeration projects the declared surface — Sol review review/completion-t3
+    round 3 #6).
+    """
+    module_name = f"_loops_lens_{path.stem}_{id(path)}"
+
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    if spec is None or spec.loader is None:
+        return None
+
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = mod
+    try:
+        spec.loader.exec_module(mod)
+    except Exception as e:
+        del sys.modules[module_name]
+        # Once per path per process: resolve_lens runs for both the fetch
+        # and the view of one command — the same broken file must not
+        # report twice (review round 4 #4).
+#: tree, docs helpers. They are importABLE — the repo root lands on ``sys.path``
+#: under pytest and under ``uv run python <script>`` — and nothing shipped may
+#: import them.
+_PRODUCTION_DIRS = ("libs", "apps")
+
+
+def _has_python(directory: Path) -> bool:
+    """Whether a directory holds any Python outside ``__pycache__``.
+
+    Short-circuits on the first hit — this walks trees like ``docs/`` and
+    ``experiments/`` that are large and mostly not Python.
+    """
+    for py in directory.rglob("*.py"):
+        if "__pycache__" not in py.parts:
+            return True
+    return False
+
+
+def _non_production_roots(repo: Path | None = None) -> tuple[str, ...]:
+    """Top-level import names that are NOT production, derived from the tree.
+
+    Derived rather than hand-listed, same reason as :func:`_lib_names` and
+    :func:`_app_names`: a hand-written mirror is a silent pass for every
+    directory added after it was written (docs/RATCHETS.md). ``tools/`` arrived
+    in this wave and would have needed remembering; the next one will not.
+
+    Exclusions are by what is GENUINELY not an import root, which is a shorter
+    list than the first cut claimed:
+
+    * **dot-prefixed** — ``.venv``, ``.git``. A leading dot is not a legal
+      identifier, and ``import_module(".venv")`` is parsed as a *relative*
+      import, so these cannot be reached as top-level names by any spelling.
+    * **holds no Python** — ``data/``, ``dist/``. Nothing to import; naming
+      them would be noise in the failure message and walking them would be
+      slow. This is also what keeps ``__pycache__`` out: it holds ``.pyc``,
+      never ``.py``.
+    * the production dirs themselves, which the other derivations own.
+
+    A DUNDER PREFIX IS NOT AN EXCLUSION, and the r1 docstring's claim that it
+    was — "not importable as top-level names" — was simply false. sol MEDIUM r2
+    put ``__support__/helper.py`` at the repo root and ``import
+    __support__.helper`` in production, and all 52 tests stayed green:
+    ``__support__`` is a perfectly legal identifier and a perfectly good import
+    root. Only ``__pycache__`` ever motivated the filter, and the has-Python
+    test already handles that one on its actual property.
+    """
+    root = REPO_ROOT if repo is None else repo
+    if not root.is_dir():
+        return ()
+    return tuple(
+        sorted(
+            entry.name
+            for entry in root.iterdir()
+            if entry.is_dir()
+            and not entry.name.startswith(".")
+            and entry.name not in _PRODUCTION_DIRS
+            and _has_python(entry)
+        )
+    )
+
+
+    # is how a derived rule dies quietly (Rule 12's lesson).
+    assert roots, (
+        "no non-production roots derived — either the repo layout changed or "
+        "_has_python stopped finding Python; this rule would pass vacuously"
+    )
+    assert "tools" in roots, (
+        f"'tools' missing from the derived non-production roots {roots} — that "
+        "is the boundary sol's evasion crossed; the derivation must see it"
+    )
+    assert files, (
+        "no production source files walked — _production_src_files went empty, "
+        "so this rule would pass against any import"
+    )
+
+    # The classified-boundary census, asserted BEFORE the violations so a
+    # silently growing boundary cannot hide behind a green violation list.
+    boundary = _production_computed_dynamic_imports()
+    assert len(boundary) <= _DYNAMIC_IMPORT_BOUNDARY_BASELINE, (
+        f"{len(boundary)} dynamic imports in shipped code now take a target "
+        "this rule cannot resolve statically (baseline "
+        f"{_DYNAMIC_IMPORT_BOUNDARY_BASELINE}). These are NOT automatically "
+        "violations — a computed module name is a classified boundary, not an "
+        "evasion — but the population may not grow unobserved. Read each, "
+        "confirm it cannot reach a non-production root, then raise the "
+        "baseline deliberately:\n" + "\n".join(boundary)
+    )
+
+    violations = _production_imports_of_non_production()
+    assert not violations, (
+        "Shipped code imports a non-production root. Those trees are dev "
+        f"tooling — {', '.join(roots)} — run under the workspace env and "
+        "excluded from the wheel (see [tool.hatch.build] only-include), so a "
+        "runtime import of one ships a dangling dependency. Move the code into "
+        "a lib or an app:\n" + "\n".join(violations)
+    )
+
+
+exec
+/bin/zsh -lc 'git rev-parse --abbrev-ref HEAD && git rev-parse HEAD && git log -3 --oneline && UV_CACHE_DIR=/tmp/uv-cache uv run pytest tests/test_architecture.py::test_rule13_pycache_is_not_a_false_positive tests/test_architecture.py::test_rule13_resolves_an_fstring_prefix_past_the_first_dot tests/test_architecture.py::test_rule13_catches_sols_r2_dynamic_import_evasions tests/test_architecture.py::test_rule13_catches_sols_r2_importable_dunder_root -q' in /Users/kaygee/Code/loops
+ succeeded in 344ms:
+....                                                                     [100%]
+4 passed in 0.01s
+
+Both required constructions are closed. The census reports exactly six ratified members, the two f-string lens imports resolve outside it, and the focused dunder/cache regressions pass.
+  ✓ Inspect r2 report and ae0911e architecture-test diff
+  ✓ Replay both specified witness.py constructions and record verdicts
+  ✓ Verify census ordering/classification and __pycache__ cases
+  → Restore tree, run 59-test suite, and write r3 report
+codex
+The census is exactly six: five table/parameter-driven `import_module` calls and one path-based lens loader. Both `lens_resolver` f-strings are correctly resolved as `loops.lenses.` literals and excluded; the census assertion precedes violation evaluation. The focused cache, f-string, and replay regressions are green. One non-blocking wording slip jumped out: a collector docstring says the literal call “is obfuscated,” contradicting the implementation and surrounding text (“not obfuscated”).
+exec
+/bin/zsh -lc 'UV_CACHE_DIR=/tmp/uv-cache uv run pytest tests/ -q' in /Users/kaygee/Code/loops
+ succeeded in 2773ms:
+...........................................................              [100%]
+59 passed in 2.44s
+
+apply patch
+patch: completed
+/Users/kaygee/Code/loops/docs/scratch/010-wave/sol-review-track-b-r3.md
+diff --git a/docs/scratch/010-wave/sol-review-track-b-r3.md b/docs/scratch/010-wave/sol-review-track-b-r3.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..1e1467eae9bcd8ec7de53dc86ccc47c9915ee5d9
+--- /dev/null
++++ b/docs/scratch/010-wave/sol-review-track-b-r3.md
+@@ -0,0 +1,132 @@
++# sol MEDIUM review — Track B round 3
++
++Review date: 2026-07-27
++
++Reviewed:
++
++- loops `f59eed2...ae0911e` (single implementation commit `ae0911e`;
++  `ce06ed5` and `5012e24` ignored as arbiter receipts)
++- loops-go unchanged at `590e70f` on `feat/track-b-batch`
++
++## Overall verdict
++
++**PASS — TRACK B CONVERGED.**
++
++Both Rule 13 constructions from r2 are closed under exact replay. The new
++computed-import census has the ratified population of six, its members and
++ordering are correct, the two `lens_resolver` f-string imports resolve outside
++the census, and the `__pycache__` exclusion remains non-vacuous without
++reintroducing the dunder-root hole.
++
++## Pure replay
++
++### 1. Literal dynamic imports — CLOSED
++
++I independently appended each r2 construction to
++`libs/engine/src/engine/witness.py`.
++
++With:
++
++```python
++import importlib
++_conformance = importlib.import_module("tools._conformance")
++```
++
++the architecture suite went red with Rule 13 naming
++`libs/engine/src/engine/witness.py:828` as dynamically importing the
++non-production root `tools`. Result: **1 failed, 58 passed**.
++
++After reverting that construction, with:
++
++```python
++_conformance = __import__("tools._conformance")
++```
++
++the same rule went red and named
++`libs/engine/src/engine/witness.py:827`. Result:
++**1 failed, 58 passed**.
++
++Both literal dynamic-import spellings are therefore judged like their static
++equivalent, and neither enters the computed-import boundary.
++
++### 2. Importable dunder root — CLOSED
++
++I recreated the r2 package and production import:
++
++```text
++__support__/helper.py
++libs/engine/src/engine/witness.py: import __support__.helper
++```
++
++Python imported the helper successfully and printed its sentinel value. The
++architecture suite nevertheless went red with Rule 13 deriving `__support__`
++as a non-production root and naming the witness import. Result:
++**1 failed, 58 passed**.
++
++The temporary import, helper, generated `.pyc`, and directories were removed.
++`witness.py` has no remaining diff.
++
++## Computed-import census
++
++The committed census reports exactly the ratified baseline of six:
++
++| Member | Classification check |
++|---|---|
++| `apps/loops/src/loops/cli/registry.py:107` | computed `import_module(module_path)`; the callers populate it with production view-module strings |
++| `apps/loops/src/loops/lens_resolver.py:408` | `spec_from_file_location(module_name, path)`; intentionally path-based user-lens loading |
++| `apps/loops/src/loops/main.py:73` | computed `import_module(mod)` from the production-only `_REEXPORTS` table |
++| `libs/atoms/src/atoms/__init__.py:133` | computed `import_module(module_path)` from `_LAZY_IMPORTS` |
++| `libs/engine/src/engine/__init__.py:302` | computed `import_module(module_path)` from `_LAZY_IMPORTS` |
++| `libs/lang/src/lang/__init__.py:147` | computed `import_module(module_path)` from `_LAZY_IMPORTS` |
++
++All six calls exist at the cited sites and match the ratified classification;
++no member is misclassified.
++
++The boundary-length assertion is evaluated before
++`_production_imports_of_non_production()` builds and asserts the violation
++list, so growth cannot hide behind an otherwise empty violation result.
++
++The two calls at `apps/loops/src/loops/lens_resolver.py:161` and `:440` use
++`f"loops.lenses.{name}"`. `_static_module_name` returns the leading literal
++`loops.lenses.`, whose first dot fixes the top-level package as `loops`.
++Collector inspection showed both in `literal` and neither in `computed`; only
++the path loader at line 408 remains a census member. This refinement is
++correct.
++
++## `__pycache__` spot-check
++
++The dunder-name filter is gone. `_has_python` instead ignores every `.py` path
++whose parts contain `__pycache__`, which excludes both the ordinary
++`.pyc`-only directory and the belt-and-braces synthetic case containing a
++stray `__pycache__/oops.py`.
++
++The focused regression
++`test_rule13_pycache_is_not_a_false_positive` passed, as did the f-string and
++both replay regression tests: **4 passed**.
++
++## Non-blocking note
++
++One wording slip jumps out without affecting behavior: the
++`_DynamicImportCollector` docstring says the literal
++`importlib.import_module("tools._conformance")` call “is obfuscated.” The test
++docstrings, Rule 13 explanation, and implementation correctly treat it as
++**not** obfuscated. This is editorial and does not block convergence.
++
++## Committed-state close
++
++After all perturbations were reverted:
++
++```text
++UV_CACHE_DIR=/tmp/uv-cache uv run pytest tests/ -q
++59 passed in 2.44s
++```
++
++No loops-go rerun was needed because it is unchanged this round.
++
++## Final convergence verdict
++
++**PASS — TRACK B BATCH CONVERGED.**
++
++The r2 contact round's two remaining Rule 13 findings are closed, the requested
++new assertions are correctly classified and exercised, and the committed
++loops suite is green.
+
+diff --git a/docs/scratch/010-wave/sol-review-track-b-r3.md b/docs/scratch/010-wave/sol-review-track-b-r3.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..1e1467eae9bcd8ec7de53dc86ccc47c9915ee5d9
+--- /dev/null
++++ b/docs/scratch/010-wave/sol-review-track-b-r3.md
+@@ -0,0 +1,132 @@
++# sol MEDIUM review — Track B round 3
++
++Review date: 2026-07-27
++
++Reviewed:
++
++- loops `f59eed2...ae0911e` (single implementation commit `ae0911e`;
++  `ce06ed5` and `5012e24` ignored as arbiter receipts)
++- loops-go unchanged at `590e70f` on `feat/track-b-batch`
++
++## Overall verdict
++
++**PASS — TRACK B CONVERGED.**
++
++Both Rule 13 constructions from r2 are closed under exact replay. The new
++computed-import census has the ratified population of six, its members and
++ordering are correct, the two `lens_resolver` f-string imports resolve outside
++the census, and the `__pycache__` exclusion remains non-vacuous without
++reintroducing the dunder-root hole.
++
++## Pure replay
++
++### 1. Literal dynamic imports — CLOSED
++
++I independently appended each r2 construction to
++`libs/engine/src/engine/witness.py`.
++
++With:
++
++```python
++import importlib
++_conformance = importlib.import_module("tools._conformance")
++```
++
++the architecture suite went red with Rule 13 naming
++`libs/engine/src/engine/witness.py:828` as dynamically importing the
++non-production root `tools`. Result: **1 failed, 58 passed**.
++
++After reverting that construction, with:
++
++```python
++_conformance = __import__("tools._conformance")
++```
++
++the same rule went red and named
++`libs/engine/src/engine/witness.py:827`. Result:
++**1 failed, 58 passed**.
++
++Both literal dynamic-import spellings are therefore judged like their static
++equivalent, and neither enters the computed-import boundary.
++
++### 2. Importable dunder root — CLOSED
++
++I recreated the r2 package and production import:
++
++```text
++__support__/helper.py
++libs/engine/src/engine/witness.py: import __support__.helper
++```
++
++Python imported the helper successfully and printed its sentinel value. The
++architecture suite nevertheless went red with Rule 13 deriving `__support__`
++as a non-production root and naming the witness import. Result:
++**1 failed, 58 passed**.
++
++The temporary import, helper, generated `.pyc`, and directories were removed.
++`witness.py` has no remaining diff.
++
++## Computed-import census
++
++The committed census reports exactly the ratified baseline of six:
++
++| Member | Classification check |
++|---|---|
++| `apps/loops/src/loops/cli/registry.py:107` | computed `import_module(module_path)`; the callers populate it with production view-module strings |
++| `apps/loops/src/loops/lens_resolver.py:408` | `spec_from_file_location(module_name, path)`; intentionally path-based user-lens loading |
++| `apps/loops/src/loops/main.py:73` | computed `import_module(mod)` from the production-only `_REEXPORTS` table |
++| `libs/atoms/src/atoms/__init__.py:133` | computed `import_module(module_path)` from `_LAZY_IMPORTS` |
++| `libs/engine/src/engine/__init__.py:302` | computed `import_module(module_path)` from `_LAZY_IMPORTS` |
++| `libs/lang/src/lang/__init__.py:147` | computed `import_module(module_path)` from `_LAZY_IMPORTS` |
++
++All six calls exist at the cited sites and match the ratified classification;
++no member is misclassified.
++
++The boundary-length assertion is evaluated before
++`_production_imports_of_non_production()` builds and asserts the violation
++list, so growth cannot hide behind an otherwise empty violation result.
++
++The two calls at `apps/loops/src/loops/lens_resolver.py:161` and `:440` use
++`f"loops.lenses.{name}"`. `_static_module_name` returns the leading literal
++`loops.lenses.`, whose first dot fixes the top-level package as `loops`.
++Collector inspection showed both in `literal` and neither in `computed`; only
++the path loader at line 408 remains a census member. This refinement is
++correct.
++
++## `__pycache__` spot-check
++
++The dunder-name filter is gone. `_has_python` instead ignores every `.py` path
++whose parts contain `__pycache__`, which excludes both the ordinary
++`.pyc`-only directory and the belt-and-braces synthetic case containing a
++stray `__pycache__/oops.py`.
++
++The focused regression
++`test_rule13_pycache_is_not_a_false_positive` passed, as did the f-string and
++both replay regression tests: **4 passed**.
++
++## Non-blocking note
++
++One wording slip jumps out without affecting behavior: the
++`_DynamicImportCollector` docstring says the literal
++`importlib.import_module("tools._conformance")` call “is obfuscated.” The test
++docstrings, Rule 13 explanation, and implementation correctly treat it as
++**not** obfuscated. This is editorial and does not block convergence.
++
++## Committed-state close
++
++After all perturbations were reverted:
++
++```text
++UV_CACHE_DIR=/tmp/uv-cache uv run pytest tests/ -q
++59 passed in 2.44s
++```
++
++No loops-go rerun was needed because it is unchanged this round.
++
++## Final convergence verdict
++
++**PASS — TRACK B BATCH CONVERGED.**
++
++The r2 contact round's two remaining Rule 13 findings are closed, the requested
++new assertions are correctly classified and exercised, and the committed
++loops suite is green.
+
+exec
+/bin/zsh -lc "if rg -n '[[:blank:]]+"'$'"' docs/scratch/010-wave/sol-review-track-b-r3.md; then exit 1; fi
+git diff --exit-code -- libs/engine/src/engine/witness.py tests/test_architecture.py
+git status --short" in /Users/kaygee/Code/loops
+ succeeded in 0ms:
+?? docs/scratch/010-wave/sol-review-brief-track-b-r3.md
+?? docs/scratch/010-wave/sol-review-track-b-r3.md
+?? docs/scratch/010-wave/sol-track-b-r2-stdout.log
+?? docs/scratch/010-wave/sol-track-b-r3-stdout.log
+?? docs/scratch/010-wave/sol-track-b-stdout.log
+
+diff --git a/docs/scratch/010-wave/sol-review-track-b-r3.md b/docs/scratch/010-wave/sol-review-track-b-r3.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..1e1467eae9bcd8ec7de53dc86ccc47c9915ee5d9
+--- /dev/null
++++ b/docs/scratch/010-wave/sol-review-track-b-r3.md
+@@ -0,0 +1,132 @@
++# sol MEDIUM review — Track B round 3
++
++Review date: 2026-07-27
++
++Reviewed:
++
++- loops `f59eed2...ae0911e` (single implementation commit `ae0911e`;
++  `ce06ed5` and `5012e24` ignored as arbiter receipts)
++- loops-go unchanged at `590e70f` on `feat/track-b-batch`
++
++## Overall verdict
++
++**PASS — TRACK B CONVERGED.**
++
++Both Rule 13 constructions from r2 are closed under exact replay. The new
++computed-import census has the ratified population of six, its members and
++ordering are correct, the two `lens_resolver` f-string imports resolve outside
++the census, and the `__pycache__` exclusion remains non-vacuous without
++reintroducing the dunder-root hole.
++
++## Pure replay
++
++### 1. Literal dynamic imports — CLOSED
++
++I independently appended each r2 construction to
++`libs/engine/src/engine/witness.py`.
++
++With:
++
++```python
++import importlib
++_conformance = importlib.import_module("tools._conformance")
++```
++
++the architecture suite went red with Rule 13 naming
++`libs/engine/src/engine/witness.py:828` as dynamically importing the
++non-production root `tools`. Result: **1 failed, 58 passed**.
++
++After reverting that construction, with:
++
++```python
++_conformance = __import__("tools._conformance")
++```
++
++the same rule went red and named
++`libs/engine/src/engine/witness.py:827`. Result:
++**1 failed, 58 passed**.
++
++Both literal dynamic-import spellings are therefore judged like their static
++equivalent, and neither enters the computed-import boundary.
++
++### 2. Importable dunder root — CLOSED
++
++I recreated the r2 package and production import:
++
++```text
++__support__/helper.py
++libs/engine/src/engine/witness.py: import __support__.helper
++```
++
++Python imported the helper successfully and printed its sentinel value. The
++architecture suite nevertheless went red with Rule 13 deriving `__support__`
++as a non-production root and naming the witness import. Result:
++**1 failed, 58 passed**.
++
++The temporary import, helper, generated `.pyc`, and directories were removed.
++`witness.py` has no remaining diff.
++
++## Computed-import census
++
++The committed census reports exactly the ratified baseline of six:
++
++| Member | Classification check |
++|---|---|
++| `apps/loops/src/loops/cli/registry.py:107` | computed `import_module(module_path)`; the callers populate it with production view-module strings |
++| `apps/loops/src/loops/lens_resolver.py:408` | `spec_from_file_location(module_name, path)`; intentionally path-based user-lens loading |
++| `apps/loops/src/loops/main.py:73` | computed `import_module(mod)` from the production-only `_REEXPORTS` table |
++| `libs/atoms/src/atoms/__init__.py:133` | computed `import_module(module_path)` from `_LAZY_IMPORTS` |
++| `libs/engine/src/engine/__init__.py:302` | computed `import_module(module_path)` from `_LAZY_IMPORTS` |
++| `libs/lang/src/lang/__init__.py:147` | computed `import_module(module_path)` from `_LAZY_IMPORTS` |
++
++All six calls exist at the cited sites and match the ratified classification;
++no member is misclassified.
++
++The boundary-length assertion is evaluated before
++`_production_imports_of_non_production()` builds and asserts the violation
++list, so growth cannot hide behind an otherwise empty violation result.
++
++The two calls at `apps/loops/src/loops/lens_resolver.py:161` and `:440` use
++`f"loops.lenses.{name}"`. `_static_module_name` returns the leading literal
++`loops.lenses.`, whose first dot fixes the top-level package as `loops`.
++Collector inspection showed both in `literal` and neither in `computed`; only
++the path loader at line 408 remains a census member. This refinement is
++correct.
++
++## `__pycache__` spot-check
++
++The dunder-name filter is gone. `_has_python` instead ignores every `.py` path
++whose parts contain `__pycache__`, which excludes both the ordinary
++`.pyc`-only directory and the belt-and-braces synthetic case containing a
++stray `__pycache__/oops.py`.
++
++The focused regression
++`test_rule13_pycache_is_not_a_false_positive` passed, as did the f-string and
++both replay regression tests: **4 passed**.
++
++## Non-blocking note
++
++One wording slip jumps out without affecting behavior: the
++`_DynamicImportCollector` docstring says the literal
++`importlib.import_module("tools._conformance")` call “is obfuscated.” The test
++docstrings, Rule 13 explanation, and implementation correctly treat it as
++**not** obfuscated. This is editorial and does not block convergence.
++
++## Committed-state close
++
++After all perturbations were reverted:
++
++```text
++UV_CACHE_DIR=/tmp/uv-cache uv run pytest tests/ -q
++59 passed in 2.44s
++```
++
++No loops-go rerun was needed because it is unchanged this round.
++
++## Final convergence verdict
++
++**PASS — TRACK B BATCH CONVERGED.**
++
++The r2 contact round's two remaining Rule 13 findings are closed, the requested
++new assertions are correctly classified and exercised, and the committed
++loops suite is green.
+
+  ✓ Inspect r2 report and ae0911e architecture-test diff
+  ✓ Replay both specified witness.py constructions and record verdicts
+  ✓ Verify census ordering/classification and __pycache__ cases
+  ✓ Restore tree, run 59-test suite, and write r3 report
+diff --git a/docs/scratch/010-wave/sol-review-track-b-r3.md b/docs/scratch/010-wave/sol-review-track-b-r3.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..1e1467eae9bcd8ec7de53dc86ccc47c9915ee5d9
+--- /dev/null
++++ b/docs/scratch/010-wave/sol-review-track-b-r3.md
+@@ -0,0 +1,132 @@
++# sol MEDIUM review — Track B round 3
++
++Review date: 2026-07-27
++
++Reviewed:
++
++- loops `f59eed2...ae0911e` (single implementation commit `ae0911e`;
++  `ce06ed5` and `5012e24` ignored as arbiter receipts)
++- loops-go unchanged at `590e70f` on `feat/track-b-batch`
++
++## Overall verdict
++
++**PASS — TRACK B CONVERGED.**
++
++Both Rule 13 constructions from r2 are closed under exact replay. The new
++computed-import census has the ratified population of six, its members and
++ordering are correct, the two `lens_resolver` f-string imports resolve outside
++the census, and the `__pycache__` exclusion remains non-vacuous without
++reintroducing the dunder-root hole.
++
++## Pure replay
++
++### 1. Literal dynamic imports — CLOSED
++
++I independently appended each r2 construction to
++`libs/engine/src/engine/witness.py`.
++
++With:
++
++```python
++import importlib
++_conformance = importlib.import_module("tools._conformance")
++```
++
++the architecture suite went red with Rule 13 naming
++`libs/engine/src/engine/witness.py:828` as dynamically importing the
++non-production root `tools`. Result: **1 failed, 58 passed**.
++
++After reverting that construction, with:
++
++```python
++_conformance = __import__("tools._conformance")
++```
++
++the same rule went red and named
++`libs/engine/src/engine/witness.py:827`. Result:
++**1 failed, 58 passed**.
++
++Both literal dynamic-import spellings are therefore judged like their static
++equivalent, and neither enters the computed-import boundary.
++
++### 2. Importable dunder root — CLOSED
++
++I recreated the r2 package and production import:
++
++```text
++__support__/helper.py
++libs/engine/src/engine/witness.py: import __support__.helper
++```
++
++Python imported the helper successfully and printed its sentinel value. The
++architecture suite nevertheless went red with Rule 13 deriving `__support__`
++as a non-production root and naming the witness import. Result:
++**1 failed, 58 passed**.
++
++The temporary import, helper, generated `.pyc`, and directories were removed.
++`witness.py` has no remaining diff.
++
++## Computed-import census
++
++The committed census reports exactly the ratified baseline of six:
++
++| Member | Classification check |
++|---|---|
++| `apps/loops/src/loops/cli/registry.py:107` | computed `import_module(module_path)`; the callers populate it with production view-module strings |
++| `apps/loops/src/loops/lens_resolver.py:408` | `spec_from_file_location(module_name, path)`; intentionally path-based user-lens loading |
++| `apps/loops/src/loops/main.py:73` | computed `import_module(mod)` from the production-only `_REEXPORTS` table |
++| `libs/atoms/src/atoms/__init__.py:133` | computed `import_module(module_path)` from `_LAZY_IMPORTS` |
++| `libs/engine/src/engine/__init__.py:302` | computed `import_module(module_path)` from `_LAZY_IMPORTS` |
++| `libs/lang/src/lang/__init__.py:147` | computed `import_module(module_path)` from `_LAZY_IMPORTS` |
++
++All six calls exist at the cited sites and match the ratified classification;
++no member is misclassified.
++
++The boundary-length assertion is evaluated before
++`_production_imports_of_non_production()` builds and asserts the violation
++list, so growth cannot hide behind an otherwise empty violation result.
++
++The two calls at `apps/loops/src/loops/lens_resolver.py:161` and `:440` use
++`f"loops.lenses.{name}"`. `_static_module_name` returns the leading literal
++`loops.lenses.`, whose first dot fixes the top-level package as `loops`.
++Collector inspection showed both in `literal` and neither in `computed`; only
++the path loader at line 408 remains a census member. This refinement is
++correct.
++
++## `__pycache__` spot-check
++
++The dunder-name filter is gone. `_has_python` instead ignores every `.py` path
++whose parts contain `__pycache__`, which excludes both the ordinary
++`.pyc`-only directory and the belt-and-braces synthetic case containing a
++stray `__pycache__/oops.py`.
++
++The focused regression
++`test_rule13_pycache_is_not_a_false_positive` passed, as did the f-string and
++both replay regression tests: **4 passed**.
++
++## Non-blocking note
++
++One wording slip jumps out without affecting behavior: the
++`_DynamicImportCollector` docstring says the literal
++`importlib.import_module("tools._conformance")` call “is obfuscated.” The test
++docstrings, Rule 13 explanation, and implementation correctly treat it as
++**not** obfuscated. This is editorial and does not block convergence.
++
++## Committed-state close
++
++After all perturbations were reverted:
++
++```text
++UV_CACHE_DIR=/tmp/uv-cache uv run pytest tests/ -q
++59 passed in 2.44s
++```
++
++No loops-go rerun was needed because it is unchanged this round.
++
++## Final convergence verdict
++
++**PASS — TRACK B BATCH CONVERGED.**
++
++The r2 contact round's two remaining Rule 13 findings are closed, the requested
++new assertions are correctly classified and exercised, and the committed
++loops suite is green.
+
+codex
+Track B is **PASS — CONVERGED**.
+
+- Both literal dynamic-import constructions: **CLOSED**
+- Importable `__support__` root construction: **CLOSED**
+- Computed-import census: exactly six, correctly classified and ordered
+- `lens_resolver` f-strings correctly excluded from the census
+- `__pycache__` and stray-`.py` checks pass
+- Final suite: **59 passed in 2.44s**
+- Temporary perturbations fully reverted; only the requested report was added
+- Noted one non-blocking docstring wording slip
+
+Report: [sol-review-track-b-r3.md](/Users/kaygee/Code/loops/docs/scratch/010-wave/sol-review-track-b-r3.md)
+diff --git a/docs/scratch/010-wave/sol-review-track-b-r3.md b/docs/scratch/010-wave/sol-review-track-b-r3.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..1e1467eae9bcd8ec7de53dc86ccc47c9915ee5d9
+--- /dev/null
++++ b/docs/scratch/010-wave/sol-review-track-b-r3.md
+@@ -0,0 +1,132 @@
++# sol MEDIUM review — Track B round 3
++
++Review date: 2026-07-27
++
++Reviewed:
++
++- loops `f59eed2...ae0911e` (single implementation commit `ae0911e`;
++  `ce06ed5` and `5012e24` ignored as arbiter receipts)
++- loops-go unchanged at `590e70f` on `feat/track-b-batch`
++
++## Overall verdict
++
++**PASS — TRACK B CONVERGED.**
++
++Both Rule 13 constructions from r2 are closed under exact replay. The new
++computed-import census has the ratified population of six, its members and
++ordering are correct, the two `lens_resolver` f-string imports resolve outside
++the census, and the `__pycache__` exclusion remains non-vacuous without
++reintroducing the dunder-root hole.
++
++## Pure replay
++
++### 1. Literal dynamic imports — CLOSED
++
++I independently appended each r2 construction to
++`libs/engine/src/engine/witness.py`.
++
++With:
++
++```python
++import importlib
++_conformance = importlib.import_module("tools._conformance")
++```
++
++the architecture suite went red with Rule 13 naming
++`libs/engine/src/engine/witness.py:828` as dynamically importing the
++non-production root `tools`. Result: **1 failed, 58 passed**.
++
++After reverting that construction, with:
++
++```python
++_conformance = __import__("tools._conformance")
++```
++
++the same rule went red and named
++`libs/engine/src/engine/witness.py:827`. Result:
++**1 failed, 58 passed**.
++
++Both literal dynamic-import spellings are therefore judged like their static
++equivalent, and neither enters the computed-import boundary.
++
++### 2. Importable dunder root — CLOSED
++
++I recreated the r2 package and production import:
++
++```text
++__support__/helper.py
++libs/engine/src/engine/witness.py: import __support__.helper
++```
++
++Python imported the helper successfully and printed its sentinel value. The
++architecture suite nevertheless went red with Rule 13 deriving `__support__`
++as a non-production root and naming the witness import. Result:
++**1 failed, 58 passed**.
++
++The temporary import, helper, generated `.pyc`, and directories were removed.
++`witness.py` has no remaining diff.
++
++## Computed-import census
++
++The committed census reports exactly the ratified baseline of six:
++
++| Member | Classification check |
++|---|---|
++| `apps/loops/src/loops/cli/registry.py:107` | computed `import_module(module_path)`; the callers populate it with production view-module strings |
++| `apps/loops/src/loops/lens_resolver.py:408` | `spec_from_file_location(module_name, path)`; intentionally path-based user-lens loading |
++| `apps/loops/src/loops/main.py:73` | computed `import_module(mod)` from the production-only `_REEXPORTS` table |
++| `libs/atoms/src/atoms/__init__.py:133` | computed `import_module(module_path)` from `_LAZY_IMPORTS` |
++| `libs/engine/src/engine/__init__.py:302` | computed `import_module(module_path)` from `_LAZY_IMPORTS` |
++| `libs/lang/src/lang/__init__.py:147` | computed `import_module(module_path)` from `_LAZY_IMPORTS` |
++
++All six calls exist at the cited sites and match the ratified classification;
++no member is misclassified.
++
++The boundary-length assertion is evaluated before
++`_production_imports_of_non_production()` builds and asserts the violation
++list, so growth cannot hide behind an otherwise empty violation result.
++
++The two calls at `apps/loops/src/loops/lens_resolver.py:161` and `:440` use
++`f"loops.lenses.{name}"`. `_static_module_name` returns the leading literal
++`loops.lenses.`, whose first dot fixes the top-level package as `loops`.
++Collector inspection showed both in `literal` and neither in `computed`; only
++the path loader at line 408 remains a census member. This refinement is
++correct.
++
++## `__pycache__` spot-check
++
++The dunder-name filter is gone. `_has_python` instead ignores every `.py` path
++whose parts contain `__pycache__`, which excludes both the ordinary
++`.pyc`-only directory and the belt-and-braces synthetic case containing a
++stray `__pycache__/oops.py`.
++
++The focused regression
++`test_rule13_pycache_is_not_a_false_positive` passed, as did the f-string and
++both replay regression tests: **4 passed**.
++
++## Non-blocking note
++
++One wording slip jumps out without affecting behavior: the
++`_DynamicImportCollector` docstring says the literal
++`importlib.import_module("tools._conformance")` call “is obfuscated.” The test
++docstrings, Rule 13 explanation, and implementation correctly treat it as
++**not** obfuscated. This is editorial and does not block convergence.
++
++## Committed-state close
++
++After all perturbations were reverted:
++
++```text
++UV_CACHE_DIR=/tmp/uv-cache uv run pytest tests/ -q
++59 passed in 2.44s
++```
++
++No loops-go rerun was needed because it is unchanged this round.
++
++## Final convergence verdict
++
++**PASS — TRACK B BATCH CONVERGED.**
++
++The r2 contact round's two remaining Rule 13 findings are closed, the requested
++new assertions are correctly classified and exercised, and the committed
++loops suite is green.
+
+tokens used
+104,151
+Track B is **PASS — CONVERGED**.
+
+- Both literal dynamic-import constructions: **CLOSED**
+- Importable `__support__` root construction: **CLOSED**
+- Computed-import census: exactly six, correctly classified and ordered
+- `lens_resolver` f-strings correctly excluded from the census
+- `__pycache__` and stray-`.py` checks pass
+- Final suite: **59 passed in 2.44s**
+- Temporary perturbations fully reverted; only the requested report was added
+- Noted one non-blocking docstring wording slip
+
+Report: [sol-review-track-b-r3.md](/Users/kaygee/Code/loops/docs/scratch/010-wave/sol-review-track-b-r3.md)

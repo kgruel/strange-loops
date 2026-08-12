@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from pathlib import Path
+
+from engine.residence import resolve_store_path
 from typing import Any
 
 
@@ -134,9 +136,7 @@ def _extract_vertex_info(vpath: Path, ast: Any) -> dict[str, Any]:
     }
 
     if ast.store is not None:
-        store = ast.store
-        if not store.is_absolute():
-            store = (vpath.parent / store).resolve()
+        store = resolve_store_path(ast.store, vpath)
         info["store"] = str(store)
 
     if ast.combine is not None:
@@ -234,9 +234,7 @@ def _aggregation_mtime(info: dict[str, Any], home: Path) -> float | None:
             continue
         if cast.store is None:
             continue
-        cstore = cast.store
-        if not cstore.is_absolute():
-            cstore = (cpath.parent / cstore).resolve()
+        cstore = resolve_store_path(cast.store, cpath)
         stats = _store_stats(cstore)
         if stats and stats.get("mtime") is not None:
             newest = stats["mtime"] if newest is None else max(newest, stats["mtime"])

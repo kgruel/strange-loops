@@ -30,9 +30,11 @@ from loops.cli.store_args import STORE_SUBCOMMANDS
 
 class TestStoreSubcommandsParity:
     def test_matches_run_store_dispatch_chain(self):
-        from loops.commands.store import _run_store
+        # _dispatch_store, not _run_store: the latter is the refusal-rendering
+        # wrapper around it, and the dispatch chain lives inside.
+        from loops.commands.store import _dispatch_store
 
-        source = inspect.getsource(_run_store)
+        source = inspect.getsource(_dispatch_store)
         dispatched = tuple(re.findall(r'argv\[0\] == "(\w+)"', source))
         assert dispatched == STORE_SUBCOMMANDS
 
@@ -41,7 +43,8 @@ class TestStoreSubcommandsParity:
 
         seen = []
         for fn_name in (
-            "_run_verify", "_run_rebirth", "_run_reanchor", "_run_absorb",
+            "_run_verify", "_run_rebirth", "_run_reanchor", "_run_export",
+            "_run_absorb",
             "_run_adopt", "_run_store_ticks", "_run_store_stats",
             "_run_reindex",
         ):

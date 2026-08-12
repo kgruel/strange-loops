@@ -25,7 +25,7 @@ from ._statview import palette_of
 
 def stream_view(
     data: dict[str, Any] | list[dict[str, Any]], zoom: Zoom, width: int | None,
-    *, piped: bool | None = None, vertex_name: str | None = None,
+    *, vertex_name: str | None = None,
 ) -> Block:
     """Render event stream at the given zoom level.
 
@@ -36,9 +36,9 @@ def stream_view(
     Uses fold_meta key_field for summary labels when available,
     falls back to heuristic scan. No per-kind if-elif branches.
 
-    ``piped`` keys the presentation register on the channel (not width) —
-    accepted now so callers key the register explicitly; the registers
-    diverge structurally in the Surface-staging slice (G4).
+    ``width=None`` IS the piped register: painted offers a concrete width
+    only at a real viewport, so the pipe arrives width-free and the register
+    is read off the offer, never told separately.
 
     Zoom levels:
     - MINIMAL: counts by kind
@@ -46,21 +46,17 @@ def stream_view(
     - DETAILED: + secondary fields on next line
     - FULL: all payload fields
     """
-    # Piped register is information-faithful: force width=None so an
-    # inherited COLUMNS never clips the agent channel (observation
-    # rendering/piped-faithfulness-forces-width-none).
-    is_piped = bool(piped or (piped is None and width is None))
-    if is_piped:
-        width = None
+    # Piped register is information-faithful: width=None is the offer at a
+    # pipe, so an inherited COLUMNS can never clip the agent channel
+    # (observation rendering/piped-faithfulness-forces-width-none).
+    is_piped = width is None
 
     # Honesty callout (SPEC §9.2/§9.5): a rewound read whose ontology could
     # not resolve at the cursor says so above the rows, in every register.
     if isinstance(data, dict) and data.get("ontology_notice"):
         notice = data["ontology_notice"]
         rest = {k: v for k, v in data.items() if k != "ontology_notice"}
-        body = stream_view(
-            rest, zoom, width, piped=piped, vertex_name=vertex_name
-        )
+        body = stream_view(rest, zoom, width, vertex_name=vertex_name)
         return join_vertical(
             _block(f"⚠ ontology: {notice}", Style(dim=True), width), body
         )

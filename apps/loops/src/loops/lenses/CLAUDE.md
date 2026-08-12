@@ -61,6 +61,8 @@ Every lens renders at four zoom levels. The lens decides what each means:
 
 `width=None` means piped (no truncation/padding). Respect it — piped output feeds system prompts, other tools.
 
+Width is not just a budget, it is the **channel**: painted offers geometry only at a real viewport, so `width is None` IS the pipe. A register-split lens derives `is_piped = width is None` at the top and branches on it; there is no `piped=` kwarg (deleted in 0.10.0 S1 so no second argument can disagree with the width). Repo Rule 12 in `tests/test_architecture.py` keeps it from coming back.
+
 ## Resolution Chain
 
 Lenses resolve through a 4-tier search (first match wins):

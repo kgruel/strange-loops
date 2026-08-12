@@ -930,15 +930,23 @@ def materialize_vertex(
     if compiled.store is not None:
         from atoms import Fact
 
-        store_path = compiled.store
-        if not store_path.is_absolute() and compiled.path is not None:
-            store_path = compiled.path.parent / store_path
+        from .residence import (
+            SQLITE_SUFFIXES,
+            canonical_store_path,
+            is_jsonl_canonical,
+        )
 
-        if store_path.suffix in ('.db', '.sqlite'):
-            from .sqlite_store import SqliteStore
+        store_path = canonical_store_path(compiled.store, compiled.path)
 
-            store = SqliteStore(
-                path=store_path,
+        if is_jsonl_canonical(store_path) or store_path.suffix in SQLITE_SUFFIXES:
+            # JSONL-canonical (.jsonl) → JsonlStore over the sibling index;
+            # sqlite-canonical (.db/.sqlite) → SqliteStore. The .jsonl case
+            # must be caught here and not fall through to EventStore below,
+            # which would write its own flat format into the canonical log.
+            from .jsonl_store import open_canonical_store
+
+            store = open_canonical_store(
+                store_path,
                 serialize=Fact.to_dict,
                 deserialize=Fact.from_dict,
                 tick_signer=tick_signer,

@@ -9,7 +9,7 @@ if TYPE_CHECKING:
     from painted.core.block import Block
 
 
-def task_status_view(data: dict | list[dict], zoom: "Zoom", width: int) -> "Block":
+def task_status_view(data: dict | list[dict], zoom: "Zoom", width: int | None) -> "Block":
     """Render task status data as a Block.
 
     data is a single task state dict or a list of task state dicts.
@@ -22,7 +22,7 @@ def task_status_view(data: dict | list[dict], zoom: "Zoom", width: int) -> "Bloc
     return render_task(data, zoom)
 
 
-def task_log_view(data: dict, zoom: "Zoom", width: int) -> "Block":
+def task_log_view(data: dict, zoom: "Zoom", width: int | None) -> "Block":
     """Render task log data as a Block.
 
     data is {"facts": [...], "ticks": [...]}.

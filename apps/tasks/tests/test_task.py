@@ -432,3 +432,43 @@ class TestTaskStop:
         rc = main(["task", "stop", "status-test"])
         assert rc == 1
         assert "not running" in capsys.readouterr().err.lower()
+
+
+class TestFollowTaskLogReadsTheWorkspaceStore:
+    """``task log --follow`` must tail the same store the non-follow path reads."""
+
+    def test_follow_prints_workspace_facts(self, tmp_path: Path, monkeypatch, capsys):
+        from strange_loops.commands import task as task_mod
+        from strange_loops.lifecycle import tasks_vertex_path
+        from strange_loops.store import emit_fact, emit_tick, store_path
+
+        pkg = tmp_path / "pkg" / "loops"
+        pkg.mkdir(parents=True)
+        vertex = pkg / "tasks.vertex"
+        vertex.write_text(tasks_vertex_path().read_text())
+
+        ws = tmp_path / "workspace"
+        ws.mkdir()
+        monkeypatch.chdir(ws)
+        monkeypatch.setattr("strange_loops.store._PKG_ROOT", pkg.parent)
+
+        emit_fact(
+            store_path(),
+            "task.created",
+            "a",
+            {"name": "in-workspace", "title": "W", "base_branch": "main", "description": ""},
+        )
+
+        # a tick as well as a fact — the poll loop reads ticks through a
+        # separate residence site from facts.
+        emit_tick(store_path(), "task.tick", {"task": "in-workspace"})
+
+        def _stop(_secs):
+            raise KeyboardInterrupt
+
+        monkeypatch.setattr(task_mod.time, "sleep", _stop)
+
+        assert task_mod.follow_task_log(vertex, "in-workspace", None, True) == 0
+        out = capsys.readouterr().out
+        assert '"task.created"' in out
+        assert '"task.tick"' in out

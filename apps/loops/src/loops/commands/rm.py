@@ -321,40 +321,9 @@ def _strip_empty_optional_parent(text: str, parent: list[str]) -> str:
 
 def _maybe_emit_change(vertex_path: Path, payload: dict[str, str]) -> None:
     """Emit a `change` fact iff the vertex declares a change loop kind."""
-    from lang import parse_vertex_file
+    from loops.commands.resolve import emit_change_fact
 
-    try:
-        vf = parse_vertex_file(vertex_path)
-    except Exception:  # noqa: BLE001 — diagnostics only, don't fail the mutation
-        return
-    if "change" not in (vf.loops or {}):
-        return
-
-    from datetime import datetime, timezone
-    from atoms import Fact
-    from engine import SqliteStore
-    from loops.commands.identity import resolve_observer
-    from loops.commands.resolve import _resolve_vertex_store_path
-
-    store_path = _resolve_vertex_store_path(vertex_path.resolve())
-    if store_path is None:
-        return
-
-    observer = resolve_observer()
-    fact = Fact(
-        kind="change",
-        observer=observer,
-        ts=datetime.now(timezone.utc).timestamp(),
-        payload=payload,
-        origin="",
-    )
-    store_path.parent.mkdir(parents=True, exist_ok=True)
-    with SqliteStore(
-        path=store_path,
-        serialize=Fact.to_dict,
-        deserialize=Fact.from_dict,
-    ) as store:
-        store.append(fact)
+    emit_change_fact(vertex_path, payload)
 
 
 # ---------------------------------------------------------------------------

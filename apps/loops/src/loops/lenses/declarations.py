@@ -55,26 +55,23 @@ _SECTION_NAME_FIELD = {
 
 
 def declarations_view(
-    data: dict[str, Any], zoom: Zoom, width: int | None, *, piped: bool | None = None
+    data: dict[str, Any], zoom: Zoom, width: int | None
 ) -> Block:
     """Render the vertex's containment listing.
 
     Two registers (decision:design/presentation-register-keys-on-channel):
-    the TTY/human path (``piped=False``) draws a rounded stat card over a clean
-    columnar table with a share meter, density sparkline, and freshness-graded
-    "updated" column; the pipe/agent path (``piped=True``) stays terse aligned
-    text, monochrome, with no visual-only columns. Colour strips at the writer
-    regardless of ``piped``; the *structural* divergence is keyed here.
+    the TTY/human path (a concrete ``width``) draws a rounded stat card over a
+    clean columnar table with a share meter, density sparkline, and
+    freshness-graded "updated" column; the pipe/agent path (``width=None``)
+    stays terse aligned text, monochrome, with no visual-only columns. Colour
+    strips at the writer regardless; the *structural* divergence is keyed on
+    the offered width, which IS the channel — a viewportless destination
+    cannot be handed a concrete width, so no stat cell can be clipped
+    (e.g. "115d ago" → "115d ag").
     """
-    piped = bool(piped or (piped is None and width is None))
+    piped = width is None
     if "error" in data:
         return Block.text(f"Error: {data['error']}", Style(), width=width)
-
-    # The piped/agent register is information-faithful — never truncate to a
-    # terminal edge (ctx.width may inherit COLUMNS even on a pipe). Render
-    # width-free so no stat cell is clipped (e.g. "115d ago" → "115d ag").
-    if piped:
-        width = None
 
     # Prefer the new (filters/narrows) shape; fall back to legacy (filter).
     filters = data.get("filters")
@@ -508,7 +505,7 @@ def _entry_table(
 
 
 def kind_stat_view(
-    data: dict[str, Any], zoom: Zoom, width: int | None, *, piped: bool | None = None
+    data: dict[str, Any], zoom: Zoom, width: int | None
 ) -> Block:
     """Render ``ls <vertex> --kind <K>`` — the kind's stat header over its
     entries one containment level down (namespaces / leaf keys / observers).
@@ -517,11 +514,9 @@ def kind_stat_view(
     if "error" in data:
         return Block.text(f"Error: {data['error']}", Style(), width=width)
 
-    # Piped/agent register is information-faithful — render width-free so no
-    # entry row is clipped (see declarations_view).
-    piped = bool(piped or (piped is None and width is None))
-    if piped:
-        width = None
+    # Piped/agent register is information-faithful — the pipe's offer IS
+    # width-free, so no entry row can be clipped (see declarations_view).
+    piped = width is None
 
     kind = data.get("kind", "?")
     fold_op = (data.get("fold_op") or "").replace('"', "")

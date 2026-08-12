@@ -213,7 +213,12 @@ class TestProjectLog:
 
 @pytest.fixture
 def task_store(tmp_path: Path, monkeypatch):
-    """Temp task vertex + store for bridge testing."""
+    """Temp task vertex + store for bridge testing.
+
+    ``chdir`` because the task store is per-workspace on both sides now
+    (``lifecycle.workspace_store``): the store lives under the cwd.
+    """
+    monkeypatch.chdir(tmp_path)
     db = tmp_path / "data" / "tasks.db"
     vertex = tmp_path / "tasks.vertex"
     real = _PKG_ROOT / "loops" / "tasks.vertex"

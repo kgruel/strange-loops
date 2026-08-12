@@ -17,7 +17,7 @@ import os
 import sqlite3
 import time as _time
 from collections.abc import Iterable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -29,6 +29,8 @@ from .declaration import (
     load_declaration_status,
 )
 from .observer import observer_matches
+from .jsonl_store import resolved_index
+from .residence import canonical_store_path
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from .witness import WitnessPosition
@@ -70,9 +72,7 @@ def _resolve_combine_stores(ast: Any, vertex_path: Path) -> list[Path]:
         if ref_ast.store is None:
             continue
 
-        sp = ref_ast.store
-        if not sp.is_absolute():
-            sp = (vpath.parent / sp).resolve()
+        sp = resolved_index(ref_ast.store, vpath)
         if sp.exists():
             store_paths.append(sp)
 
@@ -100,9 +100,7 @@ def _resolve_discover_stores(ast: Any, vertex_path: Path) -> list[Path]:
             continue
         if ref_ast.store is None:
             continue
-        sp = ref_ast.store
-        if not sp.is_absolute():
-            sp = (match.parent / sp).resolve()
+        sp = resolved_index(ref_ast.store, match)
         if sp.exists():
             store_paths.append(sp)
     return store_paths
@@ -130,9 +128,7 @@ def _child_topology_entry(ref_ast: Any, vpath: Path, base_dir: Path) -> dict:
 
     store_str = ""
     if ref_ast.store is not None:
-        sp = ref_ast.store
-        if not sp.is_absolute():
-            sp = (vpath.parent / sp).resolve()
+        sp = resolved_index(ref_ast.store, vpath)
         store_str = str(sp)
 
     try:
@@ -197,18 +193,17 @@ def emit_topology(vertex_path: Path) -> None:
     if ast.store is None:
         return
 
-    store_path = ast.store
-    if not store_path.is_absolute():
-        store_path = (vertex_path.parent / store_path).resolve()
-
     children = _collect_topology_info(ast, vertex_path)
     if not children:
         return
 
-    from .sqlite_store import SqliteStore
+    # open_canonical_store, not SqliteStore: under a JSONL-canonical vertex a
+    # direct sqlite write here would be an out-of-band insert, invisible to
+    # the log and caught (loudly) by the next open's count check.
+    from .jsonl_store import open_canonical_store
 
-    store = SqliteStore(
-        path=store_path,
+    store = open_canonical_store(
+        canonical_store_path(ast.store, vertex_path),
         serialize=lambda d: d,
         deserialize=lambda d: d,
     )
@@ -779,8 +774,53 @@ def _combined_search(
 # ---------------------------------------------------------------------------
 
 
+def _override_index(ast: Any, vertex_path: Path, store: Path | str | None) -> Path | None:
+    """The sqlite index for an explicit ``store=`` override, or ``None``.
+
+    "Fold this vertex's declarations over THAT store." The declaration keeps
+    answering *what* — the folds, the kinds, and (via the locator's extension)
+    what kind of store this is; the override answers only *where*. That split
+    is what an app whose contract is one store per workspace needs: it cannot
+    put the store beside the packaged vertex file, but it must not fork the
+    declaration to say so.
+
+    ``store`` is a **canonical** locator, so a ``.jsonl`` override resolves
+    (and materializes/tails) its derived index exactly like a declared one —
+    reads are sqlite reads either way (``engine.residence``).
+
+    **Must be absolute.** A *declared* ``store "./x.db"`` is relative to the
+    vertex file, which is the only anchor a declaration has. An override
+    arrives from a caller who has a cwd, so a relative one has two plausible
+    anchors and silently picks the vertex's — a packaged vertex plus
+    ``store="data/tasks.db"`` reads the package-adjacent database instead of
+    the workspace's. Refusing is the explicit form: the caller knows which
+    anchor it meant and can say so in one ``.resolve()``.
+
+    Refused on combine/discover vertices: an aggregate reads N stores and one
+    override cannot say which, so the caller must address a member store.
+    """
+    if store is None:
+        return None
+    if not Path(store).is_absolute():
+        raise ValueError(
+            f"store override must be an absolute path, got '{store}' — a "
+            "relative override is ambiguous between the vertex's directory "
+            f"({vertex_path.parent}) and the caller's cwd ({Path.cwd()}); "
+            "resolve it before passing it"
+        )
+    if ast.combine is not None or ast.discover is not None:
+        raise ValueError(
+            "store override is per-store and cannot select over a "
+            "combine/discover aggregate — address a member store instead"
+        )
+    return resolved_index(store, vertex_path)
+
+
 def vertex_read(
-    vertex_path: Path, *, observer: str | None = None
+    vertex_path: Path,
+    *,
+    observer: str | None = None,
+    store: Path | str | None = None,
 ) -> dict[str, dict[str, Any]]:
     """Read fold state from a vertex's store.
 
@@ -799,12 +839,17 @@ def vertex_read(
 
     Combinatorial vertices (with a ``combine`` block) virtualize reads
     across multiple stores using SQLite ATTACH DATABASE.
+
+    ``store`` overrides *where* the facts come from while the declaration
+    still supplies the folds — an ABSOLUTE canonical locator, see
+    :func:`_override_index`.
     """
     from .compiler import compile_vertex
     from .store_reader import StoreReader
 
     ast = load_declaration(vertex_path)
     specs = compile_vertex(ast)
+    override = _override_index(ast, vertex_path, store)
 
     # Combinatorial or aggregation vertex: read across multiple stores.
     # Auto-inherit: source specs are the base, aggregation specs override.
@@ -818,9 +863,7 @@ def vertex_read(
 
         # Aggregation with own store: overlay self-knowledge from own store
         if ast.store is not None:
-            own_store = ast.store
-            if not own_store.is_absolute():
-                own_store = (vertex_path.parent / own_store).resolve()
+            own_store = resolved_index(ast.store, vertex_path)
             if own_store.exists():
                 with StoreReader(own_store) as reader:
                     for kind, spec in specs.items():
@@ -839,13 +882,11 @@ def vertex_read(
 
         return result
 
-    # Resolve store path relative to vertex file
-    if ast.store is None:
+    # Resolve store path relative to vertex file (or to the explicit override)
+    if ast.store is None and override is None:
         return {kind: spec.initial_state() for kind, spec in specs.items()}
 
-    store_path = ast.store
-    if not store_path.is_absolute():
-        store_path = (vertex_path.parent / store_path).resolve()
+    store_path = override if override is not None else resolved_index(ast.store, vertex_path)
 
     if not store_path.exists():
         return {kind: spec.initial_state() for kind, spec in specs.items()}
@@ -1071,6 +1112,8 @@ def vertex_fold(
     # Inline vertex_read logic — avoids redundant parse/compile
     unfolded: dict[str, int] = {}
     source_facts: dict[str, list[dict]] = {}
+    edge_facts: int = 0
+    edge_since: float | None = None
     if ast.combine is not None or ast.discover is not None:
         if retain_facts:
             raw, child_payloads = _combined_read(
@@ -1085,9 +1128,7 @@ def vertex_fold(
 
         # Aggregation with own store: overlay self-knowledge
         if ast.store is not None:
-            own_store = ast.store
-            if not own_store.is_absolute():
-                own_store = (vertex_path.parent / own_store).resolve()
+            own_store = resolved_index(ast.store, vertex_path)
             if own_store.exists():
                 from .store_reader import StoreReader  # deferred: not needed for combine-only
 
@@ -1112,9 +1153,7 @@ def vertex_fold(
     elif ast.store is None:
         raw = {k: spec.initial_state() for k, spec in full_specs.items()}
     else:
-        store_path = ast.store
-        if not store_path.is_absolute():
-            store_path = (vertex_path.parent / store_path).resolve()
+        store_path = resolved_index(ast.store, vertex_path)
 
         # A10: a witness position's rowid indexes THIS store's append order only.
         # verify_position_for_store returns the position to APPLY — unchanged for
@@ -1133,7 +1172,24 @@ def vertex_fold(
             from atoms.fold import Upsert
 
             at_rowid = at.rowid if at is not None else None
-            with StoreReader(store_path) as reader:
+            # ONE snapshot across every read that contributes to this fold
+            # (sol HIGH r2, confirmed P2). The per-kind reads, the kind stats,
+            # and live_edge() were separate autocommit statements: live_edge()
+            # became internally coherent in r1, but it was still not in the
+            # same snapshot as the rows it describes. A fact appended between
+            # the fold reads and the edge read produced a fold whose rows say
+            # one commit and whose edge disclosure says another — an answer
+            # true in NEITHER snapshot (reproduced: keys ["before"] with
+            # edge_facts 1, where the coherent readings are ["before"]/0 and
+            # ["before","after"]/1).
+            #
+            # Same defect class as the r1 finding, one level up: individually
+            # coherent statements assembled into an incoherent answer. The
+            # per-statement fix does not compose, so the fix has to be at the
+            # assembly boundary — which is what StoreReader.snapshot() already
+            # is (BEGIN DEFERRED, held to rollback; the reader is query_only
+            # so there is nothing to commit).
+            with StoreReader(store_path) as reader, reader.snapshot():
                 raw = {}
                 for k, spec in full_specs.items():
                     facts = reader.facts_by_kind(k, at_rowid=at_rowid, until_ts=as_of)
@@ -1176,6 +1232,13 @@ def vertex_fold(
                         for k, v in store_kinds.items()
                         if k not in full_specs
                     }
+                    # Live-edge disclosure (same signal family as `unfolded`:
+                    # present but not yet surfaced — here, not yet sealed).
+                    # Head-only, same suppression rule as above: the edge is
+                    # a head-scoped claim and would leak at a historical
+                    # position. Aggregates stay at the defaults — the edge is
+                    # per-store (witness order is per-member, A1/A9).
+                    edge_facts, edge_since = reader.live_edge()
 
                 # Explicit --kind for a kind no vertex declares a loop for:
                 # fetch its raw facts directly rather than silently rendering
@@ -1203,6 +1266,13 @@ def vertex_fold(
         raw, ast, full_specs, kind=kind, unfolded=unfolded,
         source_facts=source_facts if retain_facts else None,
     )
+    if edge_facts or edge_since is not None:
+        # dataclasses.replace, not a rebuild (the P2-b ratchet applies here
+        # too) — stamp the live-edge disclosure without re-plumbing the
+        # constructor signature.
+        fold_state = replace(
+            fold_state, edge_facts=edge_facts, edge_since=edge_since,
+        )
     if at is None:
         return fold_state
     # Witness-mode read: wrap the fold in the machine-readable envelope so the
@@ -1365,6 +1435,7 @@ def vertex_facts(
     include_internal: bool = False,
     as_of: float | None = None,
     at: WitnessPosition | None = None,
+    store: Path | str | None = None,
 ) -> list[dict]:
     """Read raw facts from a vertex's store within a time range.
 
@@ -1393,6 +1464,10 @@ def vertex_facts(
       per-member (A1/A9).
 
     ``None`` for both = head (identical to pre-S5 behavior).
+
+    ``store`` overrides *where* the rows come from while the declaration
+    still supplies the folds — an ABSOLUTE canonical locator (a relative
+    one is refused as ambiguous), see :func:`_override_index`.
     """
     from .store_reader import StoreReader
 
@@ -1402,6 +1477,7 @@ def vertex_facts(
         )
 
     ast = load_declaration(vertex_path, as_of=as_of, at=at)
+    override = _override_index(ast, vertex_path, store)
 
     if ast.combine is not None or ast.discover is not None:
         if at is not None:
@@ -1416,12 +1492,10 @@ def vertex_facts(
             ast, vertex_path, since_ts, until_ts, kind,
             include_internal=include_internal,
         )
-    elif ast.store is None:
+    elif ast.store is None and override is None:
         facts = []
     else:
-        store_path = ast.store
-        if not store_path.is_absolute():
-            store_path = (vertex_path.parent / store_path).resolve()
+        store_path = override if override is not None else resolved_index(ast.store, vertex_path)
 
         # A10: return the position to apply (re-resolved for a same-lineage
         # sibling store, refused if foreign) — same guard as vertex_fold
@@ -1454,6 +1528,7 @@ def vertex_ticks(
     *,
     with_envelope: bool = False,
     as_of: float | None = None,
+    store: Path | str | None = None,
 ) -> list:
     """Read ticks from a vertex's store within a time range.
 
@@ -1471,10 +1546,15 @@ def vertex_ticks(
 
     ``as_of`` (SPEC §9.3) resolves the declaration at a historical ``ts``
     cutoff — equal-cursors default is ``as_of = until_ts``. ``None`` = head.
+
+    ``store`` overrides *where* the rows come from while the declaration
+    still supplies the folds — an ABSOLUTE canonical locator (a relative
+    one is refused as ambiguous), see :func:`_override_index`.
     """
     from .store_reader import StoreReader
 
     ast = load_declaration(vertex_path, as_of=as_of)
+    override = _override_index(ast, vertex_path, store)
 
     if ast.combine is not None or ast.discover is not None:
         if not with_envelope:
@@ -1483,12 +1563,10 @@ def vertex_ticks(
             ast, vertex_path, since_ts, until_ts, name, with_envelope=True
         )
 
-    if ast.store is None:
+    if ast.store is None and override is None:
         return []
 
-    store_path = ast.store
-    if not store_path.is_absolute():
-        store_path = (vertex_path.parent / store_path).resolve()
+    store_path = override if override is not None else resolved_index(ast.store, vertex_path)
 
     if not store_path.exists():
         return []
@@ -1499,7 +1577,12 @@ def vertex_ticks(
         )
 
 
-def vertex_summary(vertex_path: Path, *, include_internal: bool = False) -> dict:
+def vertex_summary(
+    vertex_path: Path,
+    *,
+    include_internal: bool = False,
+    store: Path | str | None = None,
+) -> dict:
     """Read store summary from a vertex — fact/tick counts and per-kind stats.
 
     Returns the same shape as StoreReader.summary():
@@ -1510,20 +1593,23 @@ def vertex_summary(vertex_path: Path, *, include_internal: bool = False) -> dict
     Excludes the reserved ``_decl.*`` namespace from ``facts.kinds`` by
     default (SPEC §9.4); ``include_internal=True`` is the explicit escape
     hatch.
+
+    ``store`` overrides *where* the rows come from while the declaration
+    still supplies the folds — an ABSOLUTE canonical locator (a relative
+    one is refused as ambiguous), see :func:`_override_index`.
     """
     from .store_reader import StoreReader
 
     ast = load_declaration(vertex_path)
+    override = _override_index(ast, vertex_path, store)
 
     if ast.combine is not None or ast.discover is not None:
         return _combined_summary(ast, vertex_path, include_internal=include_internal)
 
-    if ast.store is None:
+    if ast.store is None and override is None:
         return {"facts": {"total": 0, "kinds": {}}, "ticks": {"total": 0, "names": {}}}
 
-    store_path = ast.store
-    if not store_path.is_absolute():
-        store_path = (vertex_path.parent / store_path).resolve()
+    store_path = override if override is not None else resolved_index(ast.store, vertex_path)
 
     if not store_path.exists():
         return {"facts": {"total": 0, "kinds": {}}, "ticks": {"total": 0, "names": {}}}
@@ -1543,9 +1629,7 @@ def _resolve_store(vertex_path: Path) -> tuple[Any, Path | None]:
     if ast.store is None:
         return ast, None
 
-    store_path = ast.store
-    if not store_path.is_absolute():
-        store_path = (vertex_path.parent / store_path).resolve()
+    store_path = resolved_index(ast.store, vertex_path)
 
     if not store_path.exists():
         return ast, None
@@ -1690,9 +1774,7 @@ def vertex_search_coverage(vertex_path: Path) -> FtsCoverage:
     if ast.store is None:
         return FtsCoverage(missing=True)
 
-    store_path = ast.store
-    if not store_path.is_absolute():
-        store_path = (vertex_path.parent / store_path).resolve()
+    store_path = resolved_index(ast.store, vertex_path)
 
     if not store_path.exists():
         return FtsCoverage(missing=True)
@@ -1845,9 +1927,7 @@ def vertex_reindex(vertex_path: Path) -> dict[str, Any]:
             "reason": "no store configured",
         }
 
-    store_path = ast.store
-    if not store_path.is_absolute():
-        store_path = (vertex_path.parent / store_path).resolve()
+    store_path = resolved_index(ast.store, vertex_path)
 
     if not store_path.exists():
         # Nothing to index yet — and do NOT create the .db as a side effect
@@ -2090,9 +2170,7 @@ def vertex_search(
         _unverifiable("vertex declares no store")
         return []
 
-    store_path = ast.store
-    if not store_path.is_absolute():
-        store_path = (vertex_path.parent / store_path).resolve()
+    store_path = resolved_index(ast.store, vertex_path)
 
     if not store_path.exists():
         _unverifiable("store does not exist")

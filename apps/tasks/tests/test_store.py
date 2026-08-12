@@ -153,3 +153,82 @@ class TestFactLine:
         text = "".join(c.char for c in block.row(0))
         assert "decision" in text
         assert "()" not in text
+
+
+# -- authority switch: a .jsonl declaration must not get sqlite bytes -------
+
+
+def test_emit_writes_the_log_when_the_locator_is_jsonl(tmp_path):
+    """The dormant defect made live.
+
+    Task declarations are all `.db` today, so this app's writes look fine.
+    The day one flips to `.jsonl`, a hand-built SqliteStore would write
+    sqlite bytes straight into the declared canonical log. Routing through
+    engine's open_canonical_store is what keeps that from happening.
+    """
+    from engine.jsonl_codec import deserialize_row
+    from strange_loops.store import emit_fact, emit_tick
+
+    canonical = tmp_path / "data" / "tasks.jsonl"
+    emit_fact(canonical, "task.created", "kyle", {"name": "t1"})
+    emit_tick(canonical, "task.tick", {"task": "t1", "status": "completed"})
+
+    assert canonical.exists()
+    assert (tmp_path / "data" / "tasks.db").exists()  # the derived index
+    records = [
+        deserialize_row(ln) for ln in canonical.read_text(encoding="utf-8").splitlines() if ln
+    ]
+    assert [t for t, _ in records] == ["fact", "tick"]
+
+
+def test_emit_still_writes_sqlite_directly_for_a_db_locator(tmp_path):
+    """Every declaration this app has today — no behavior change."""
+    from strange_loops.store import emit_fact
+
+    canonical = tmp_path / "data" / "tasks.db"
+    emit_fact(canonical, "task.created", "kyle", {"name": "t1"})
+
+    assert canonical.exists()
+    assert not (tmp_path / "data" / "tasks.jsonl").exists()
+
+
+def test_store_path_follows_a_jsonl_declaration_through_the_writers(tmp_path, monkeypatch):
+    """The writers' path must carry the declaration's authority mode.
+
+    ``store_path`` is what every task writer resolves. Hardcoding
+    ``data/tasks.db`` there made the corrected ``_open_store`` unreachable:
+    a declaration flipped to ``.jsonl`` would still hand a ``.db`` locator
+    to the writers and get a plain sqlite store, writing rows the canonical
+    log never accounts for. cwd stays the *location* (one store per
+    workspace); the declaration decides the *kind*.
+    """
+    import strange_loops.store as store_mod
+    from strange_loops.store import emit_fact, store_path
+
+    loops = tmp_path / "pkg" / "loops"
+    loops.mkdir(parents=True)
+    (loops / "tasks.vertex").write_text(
+        'name "tasks"\nstore "data/tasks.jsonl"\n'
+        'loops {\n  task.created { fold { items "by" "name" } }\n}\n'
+    )
+    monkeypatch.setattr(store_mod, "_PKG_ROOT", tmp_path / "pkg")
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    monkeypatch.chdir(workspace)
+
+    sp = store_path()
+    assert sp == workspace / "data" / "tasks.jsonl"  # cwd for where, decl for what
+
+    emit_fact(sp, "task.created", "kyle", {"name": "t1"})
+    assert sp.exists()  # the canonical log, not sqlite bytes at the log path
+    assert sp.read_text(encoding="utf-8").startswith("{")
+    assert (workspace / "data" / "tasks.db").exists()  # the derived index
+
+
+def test_store_path_for_resolves_through_residence():
+    """Relative locators resolve against the vertex file, not the cwd."""
+    from strange_loops.store import store_path_for
+
+    resolved = store_path_for("tasks")
+    assert resolved.is_absolute()
+    assert resolved.name == "tasks.db"

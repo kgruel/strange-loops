@@ -33,7 +33,8 @@ from painted import Block, Style, Zoom, budget_fields, join_horizontal, join_ver
 from painted.palette import current_palette
 
 from atoms import FoldState  # runtime: the polymorphic fold_view front door
-from loops.surface import project  # runtime: FoldState → Surface (idempotent)
+from loops.surface import is_stale, project  # runtime: FoldState → Surface
+from . import _grammar  # module ref: `_grammar.time.time` is the pinnable clock
 
 from ._grammar import (
     RAIL_LEGEND,
@@ -306,7 +307,7 @@ def _diff_interval_block(interval: dict | None, width: int | None) -> Block | No
 
 def diff_view(
     meta1: dict, meta2: dict, rows: list[dict], width: int | None,
-    *, piped: bool = False, interval: dict | None = None,
+    *, interval: dict | None = None,
 ) -> Block:
     """Structural fold diff between two resolved positions (0.8.0, C2/M8).
 
@@ -381,7 +382,6 @@ def fold_view(
     *, vertex_name: str | None = None, vertex_path: str | None = None,
     visible: frozenset[str] = frozenset(),
     lines: int = 0, chars: int = 0,
-    piped: bool | None = None,
     cursor: dict | None = None,
 ) -> Block:
     """Render fold data at the given zoom level.
@@ -410,27 +410,23 @@ def fold_view(
     caller, so default renders are byte-identical) carries the resolved
     --at/--as-of mode/status/position; when present it prepends the mode-line
     disclosure above the fold body, in every register.
+
+    The presentation register IS the offered width. ``width=None`` means a
+    viewportless destination (pipe, file redirect) — the agent channel, which
+    never clips. There is no second argument that could disagree with it.
     """
     if cursor is not None:
         body = fold_view(
             data, zoom, width,
             vertex_name=vertex_name, vertex_path=vertex_path,
-            visible=visible, lines=lines, chars=chars, piped=piped,
+            visible=visible, lines=lines, chars=chars,
         )
-        line_width = None if (piped or (piped is None and width is None)) else width
-        return join_vertical(cursor_mode_line(cursor, line_width), body)
+        return join_vertical(cursor_mode_line(cursor, width), body)
 
     if isinstance(data, FoldState):
         data = project(data)
 
-    # Presentation register is the CHANNEL, not the width. An explicit
-    # piped=True forces width=None at the lens boundary — the agent channel
-    # never clips, even if a caller hands a concrete width alongside it.
-    # This must precede the search/MINIMAL early returns, which otherwise
-    # thread the concrete width through untouched.
-    is_piped = (width is None) if piped is None else piped
-    if is_piped:
-        width = None
+    is_piped = width is None
 
     # Content-search (--match) switches the lens to the event axis: a flat
     # ts-desc list of matching facts, with the (K not indexed) coverage footer.
@@ -452,6 +448,11 @@ def fold_view(
         if data.unfolded:
             loose = ", ".join(f"{c} {k}" for k, c in sorted(data.unfolded.items()))
             parts.append(f"unfolded: {loose}")
+        edge_days = _stale_edge_days(data.window)
+        if edge_days is not None:
+            parts.append(
+                f"edge stale: {data.window.edge_facts} unsealed, {edge_days}d"
+            )
         return Block.text(rollup_line(name, parts), Style(), width=width)
 
     # Edge adjacency + source facts come materialized off the Surface.
@@ -462,8 +463,9 @@ def fold_view(
 
     blocks: list[Block] = []
 
-    # is_piped was resolved at the top of the lens (channel, not width;
-    # decision:design/drop-truncation-from-human-reads — presentation half).
+    # is_piped was resolved at the top of the lens, off the offered width —
+    # a viewportless destination is offered None, so the channel IS the width
+    # (decision:design/drop-truncation-from-human-reads — presentation half).
 
     # Tier-allocated disclosure engages only when the population HAS a tier
     # gradient (decision:design/tier-allocated-disclosure). A flat population
@@ -539,6 +541,12 @@ def fold_view(
         footer_lines.append(
             f"({data.window.hidden} inactive hidden — --all to show)"
         )
+    edge_days = _stale_edge_days(data.window)
+    if edge_days is not None:
+        footer_lines.append(
+            f"⚠ live edge: {data.window.edge_facts} facts unsealed, oldest "
+            f"{edge_days}d — seal wiring may be dead; run `sl seal {data.vertex}`"
+        )
     if footer_lines:
         blocks.append(Block.text("", Style(), width=width))
         for line in footer_lines:
@@ -560,6 +568,28 @@ def fold_view(
             return join_vertical(head, body)
 
     return body
+
+
+def _stale_edge_days(window: Any) -> int | None:
+    """Age in whole days of the oldest unsealed fact, or None when quiet.
+
+    The read-path half of the seal-wiring death sensor
+    (design:rendering/live-edge-staleness-on-read-path). Judgment reuses the
+    shared ``surface.is_stale`` dial; the anchor is the OLDEST edge fact, so
+    a dormant store (old tick, empty edge) stays quiet — accumulation without
+    a seal is the wiring-death signature. Both prior wiring deaths were
+    caught by a human squinting at a whisper; this line is the loud form,
+    rendered wherever anyone reads, independent of any harness config
+    surviving a migration. The clock is ``_grammar.time.time`` — the same
+    pinnable seam the recency grammar uses, so goldens/tests freeze one
+    clock for every clock-relative render in the lens layer.
+    """
+    if not window.edge_facts:
+        return None
+    now = _grammar.time.time()
+    if not is_stale(window.edge_since, now):
+        return None
+    return int((now - window.edge_since) // 86400)
 
 
 def _render_search(data: "Surface", zoom: Zoom, width: int | None) -> Block:

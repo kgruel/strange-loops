@@ -25,37 +25,84 @@ def observer(args: argparse.Namespace | None = None) -> str:
     return os.environ.get("STRANGE_LOOPS_OBSERVER", os.environ.get("LOOPS_OBSERVER", ""))
 
 
-def store_path() -> Path:
-    """Task store path — constant until .vertex files arrive."""
-    return Path.cwd() / "data" / "tasks.db"
+def _declared_store(vertex_name: str) -> tuple[str, Path]:
+    """The raw ``store`` locator in ``loops/{name}.vertex``, and that file's path.
 
-
-def store_path_for(vertex_name: str) -> Path:
-    """Resolve store path from loops/{name}.vertex declaration."""
+    One reader for the declaration, so the locator's **extension** — which is
+    ``engine.residence``'s authority switch — reaches every caller. A second
+    spelling of "where the store is" is a second answer to "which file is
+    authoritative", which is exactly the bug this collapses.
+    """
     from lang import parse_vertex_file
 
     vertex_path = _PKG_ROOT / "loops" / f"{vertex_name}.vertex"
     vertex = parse_vertex_file(vertex_path)
-    store = Path(vertex.store) if vertex.store else Path(f"data/{vertex_name}.db")
-    if not store.is_absolute():
-        store = _PKG_ROOT / store
-    return store
+    return vertex.store or f"data/{vertex_name}.db", vertex_path
+
+
+def store_path() -> Path:
+    """The canonical task-store artifact for the current workspace.
+
+    The **canonical artifact**, like every path this module hands out: it is
+    what a writer must resolve. Reads go through ``engine.vertex_*``, which
+    resolves the index itself.
+
+    The declaration answers *what kind* of store (``.db`` → sqlite-canonical,
+    ``.jsonl`` → JSONL-canonical, per ``engine.residence``); the process cwd
+    answers *where*. That second half deliberately departs from residence's
+    "resolve relative to the vertex file" rule, and only here: this app's
+    contract is one task store per workspace (a worker runs in its own
+    worktree and writes that worktree's store), so a package-relative path
+    would collapse every workspace onto the packaged one. ``store_path_for``
+    is the portable resolution, used for the declarations that are not
+    per-workspace.
+    """
+    declared = Path(_declared_store("tasks")[0])
+    return declared if declared.is_absolute() else Path.cwd() / declared
+
+
+def store_path_for(vertex_name: str) -> Path:
+    """The canonical store artifact declared by ``loops/{name}.vertex``.
+
+    ``engine.residence`` owns the "which file is authoritative" rule; asking
+    it rather than re-deriving here is what keeps this app on the right side
+    of the authority switch when a declaration flips to ``.jsonl``.
+    """
+    from engine.residence import canonical_store_path
+
+    declared, vertex_path = _declared_store(vertex_name)
+    return canonical_store_path(declared, vertex_path)
+
+
+def _open_store(path: Path, serialize, deserialize):
+    """Open the right store class for a canonical locator.
+
+    Never ``SqliteStore(path=...)`` directly: a ``.db`` looks identical
+    whether it is canonical or a derived index, so constructing one by hand
+    would write sqlite bytes straight into a declared canonical log the day
+    a declaration flips to ``.jsonl`` — an out-of-band insert the log never
+    accounts for. ``open_canonical_store`` is the one place that answers the
+    question, and it returns a plain ``SqliteStore`` for a ``.db`` locator,
+    which is every declaration this app has today.
+    """
+    from engine.jsonl_store import open_canonical_store
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return open_canonical_store(path, serialize=serialize, deserialize=deserialize)
 
 
 def emit_fact(path: Path, kind: str, obs: str, payload: dict) -> None:
     """Emit a fact into a store."""
     from atoms import Fact
-    from engine import SqliteStore
 
     fact = Fact.of(kind, obs, **payload)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with SqliteStore(path=path, serialize=Fact.to_dict, deserialize=Fact.from_dict) as store:
+    with _open_store(path, Fact.to_dict, Fact.from_dict) as store:
         store.append(fact)
 
 
 def emit_tick(path: Path, name: str, payload: dict, origin: str = "") -> None:
     """Emit a tick into a store."""
-    from engine import SqliteStore, Tick
+    from engine import Tick
 
     tick = Tick(
         name=name,
@@ -63,8 +110,7 @@ def emit_tick(path: Path, name: str, payload: dict, origin: str = "") -> None:
         payload=payload,
         origin=origin,
     )
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with SqliteStore(path=path, serialize=lambda x: x, deserialize=lambda x: x) as store:
+    with _open_store(path, lambda x: x, lambda x: x) as store:
         store.append_tick(tick)
 
 

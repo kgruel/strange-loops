@@ -97,19 +97,24 @@ def test_piped_detailed_width_none_does_not_crash():
     v = _instance("p", 50, 3, lead=("alpha", "beta", "gamma"),
                   shadows=True, shadows_path="/home/u/.config/loops/p/p.vertex")
     block = vertices_view({"local_vertices": [v], "vertices": []},
-                          Zoom.FULL, None, piped=True)
+                          Zoom.FULL, None)
     t = _text(block)
     assert "alpha" in t and "⊳ shadows" in t  # census + shadow line both rendered
 
 
 def test_piped_register_is_information_faithful():
-    """Piped output is never truncated to a terminal edge — even when a width
-    is passed (e.g. COLUMNS-inherited pipe), the full ⊃ preview survives."""
+    """Piped output is never truncated to a terminal edge — the full ⊃ preview
+    survives.
+
+    The original form of this test passed ``width=80, piped=True`` to model a
+    pipe that inherited COLUMNS. That state no longer exists: the register IS
+    the offered width, so a piped render is ``width=None`` by construction and
+    a COLUMNS-inherited clip is unconstructible rather than merely untaken.
+    """
     from loops.lenses.vertices import vertices_view
     v = _instance("project", 2800, 21, lead=("decision", "thread", "session"))
-    # width 80 would have clipped the preview before the faithfulness fix.
     t = _text(vertices_view({"local_vertices": [v], "vertices": []},
-                            Zoom.SUMMARY, 80, piped=True))
+                            Zoom.SUMMARY, None))
     assert "⊃ decision · thread · session" in t  # full, no ellipsis
     assert "…" not in t
 

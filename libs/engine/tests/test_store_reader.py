@@ -554,3 +554,220 @@ class TestInternalKindExclusion:
             fresh = reader.freshness
         assert fresh is not None
         assert fresh.timestamp() == 200.0  # newest DOMAIN fact, not the edit
+
+
+class TestLiveEdge:
+    """live_edge() — visible facts past the newest chained tick's cursor.
+
+    The read-path half of the seal-staleness sensor
+    (design:rendering/live-edge-staleness-on-read-path): the boundary is the
+    chain's own fact_cursor claim, resolved on the append axis, and the
+    oldest-edge-fact ts is the judgment anchor — a dormant store (old tick,
+    empty edge) must stay quiet.
+    """
+
+    def _chained_store(self, tmp_path: Path):
+        """A real SqliteStore (chain-era schema arrives on the write path)."""
+        from datetime import datetime, timezone
+
+        from engine import Tick
+        from engine.sqlite_store import SqliteStore
+
+        def ser(e: dict) -> dict:
+            return e
+
+        def deser(d: dict) -> dict:
+            return d
+
+        path = tmp_path / "chained.db"
+        store = SqliteStore(path=path, serialize=ser, deserialize=deser)
+        return path, store, Tick, datetime, timezone
+
+    def test_pre_chain_schema_reports_whole_store(self, populated_db: Path):
+        """Hand-rolled pre-chain schema (no window_hash column): every
+        visible fact is on the edge — matches verify's covered=0."""
+        with StoreReader(populated_db) as reader:
+            count, oldest = reader.live_edge()
+        assert count == reader_total(populated_db)
+        assert oldest == 100.0  # oldest fact ts in the fixture
+
+    def test_no_ticks_whole_store_on_edge(self, tmp_path: Path):
+        path, store, Tick, datetime, timezone = self._chained_store(tmp_path)
+        store.append({"kind": "note", "ts": 50.0, "observer": "o", "payload": {}})
+        store.append({"kind": "note", "ts": 150.0, "observer": "o", "payload": {}})
+        store.close()
+        with StoreReader(path) as reader:
+            assert reader.live_edge() == (2, 50.0)
+
+    def test_sealed_store_has_empty_edge(self, tmp_path: Path):
+        """Dormant store: chained tick covers everything → (0, None).
+        The sensor's quiet case — an old seal with nothing since is not
+        wiring death."""
+        path, store, Tick, datetime, timezone = self._chained_store(tmp_path)
+        store.append({"kind": "note", "ts": 50.0, "observer": "o", "payload": {}})
+        store.append_tick(
+            Tick(name="s", ts=datetime(2025, 6, 1, tzinfo=timezone.utc),
+                 payload={}, origin="v")
+        )
+        store.close()
+        with StoreReader(path) as reader:
+            assert reader.live_edge() == (0, None)
+
+    def test_edge_after_seal_counts_and_anchors_oldest(self, tmp_path: Path):
+        path, store, Tick, datetime, timezone = self._chained_store(tmp_path)
+        store.append({"kind": "note", "ts": 50.0, "observer": "o", "payload": {}})
+        store.append_tick(
+            Tick(name="s", ts=datetime(2025, 6, 1, tzinfo=timezone.utc),
+                 payload={}, origin="v")
+        )
+        store.append({"kind": "note", "ts": 300.0, "observer": "o", "payload": {}})
+        store.append({"kind": "note", "ts": 200.0, "observer": "o", "payload": {}})
+        store.close()
+        with StoreReader(path) as reader:
+            count, oldest = reader.live_edge()
+        # Both post-seal facts are on the edge; the anchor is MIN(ts) over
+        # the edge — 200.0 even though it was appended second (backfill-safe
+        # in the honest direction: an old-ts arrival ages the edge).
+        assert count == 2
+        assert oldest == 200.0
+
+    def test_backfilled_fact_stays_on_edge(self, tmp_path: Path):
+        """Append axis, never ts: a fact with ts OLDER than the seal still
+        lands on the edge — ts-comparison would silently drop it."""
+        path, store, Tick, datetime, timezone = self._chained_store(tmp_path)
+        store.append({"kind": "note", "ts": 100.0, "observer": "o", "payload": {}})
+        store.append_tick(
+            Tick(name="s", ts=datetime(2025, 6, 1, tzinfo=timezone.utc),
+                 payload={}, origin="v")
+        )
+        store.append({"kind": "note", "ts": 10.0, "observer": "o", "payload": {}})
+        store.close()
+        with StoreReader(path) as reader:
+            assert reader.live_edge() == (1, 10.0)
+
+    def test_edge_excludes_decl_namespace(self, tmp_path: Path):
+        """Read-surface contract (SPEC §9.4): _decl.* control receipts are
+        not counted — the disclosure number stays consistent with every
+        other read surface (verify's forensic count is the one that
+        includes them)."""
+        path, store, Tick, datetime, timezone = self._chained_store(tmp_path)
+        store.append({"kind": "note", "ts": 100.0, "observer": "o", "payload": {}})
+        store.append_tick(
+            Tick(name="s", ts=datetime(2025, 6, 1, tzinfo=timezone.utc),
+                 payload={}, origin="v")
+        )
+        store.append(
+            {"kind": "_decl.genesis", "ts": 500.0, "observer": "o", "payload": {}}
+        )
+        store.close()
+        with StoreReader(path) as reader:
+            assert reader.live_edge() == (0, None)
+
+    # -- snapshot coherence (sol HIGH r1) ---------------------------------
+
+    def test_live_edge_is_a_single_statement(self, tmp_path: Path):
+        """Secondary pin: one non-PRAGMA statement on THIS connection.
+
+        Scope, stated honestly (sol HIGH r2 §1 narrowed the r1 claim): this
+        proves one statement on one instrumented connection. It does NOT prove
+        that every read contributing to the answer uses that connection or
+        that snapshot — sol evaded exactly this by resolving the boundary on an
+        untraced second connection and running the aggregate on ``_conn``, and
+        the count came back 1.
+
+        So the PRIMARY guard is the behavioural concurrency regression below,
+        which caught that same implementation (``raced != fresh``). This test
+        earns its keep as the cheap, fast-failing companion: it turns a
+        re-split of the boundary into an immediate failure with a legible
+        message, instead of one that only shows up under an interleaving.
+        """
+        path, store, Tick, datetime, timezone = self._chained_store(tmp_path)
+        store.append({"kind": "note", "ts": 50.0, "observer": "o", "payload": {}})
+        store.append_tick(
+            Tick(name="s", ts=datetime(2025, 6, 1, tzinfo=timezone.utc),
+                 payload={}, origin="v")
+        )
+        store.append({"kind": "note", "ts": 300.0, "observer": "o", "payload": {}})
+        store.close()
+
+        traced: list[str] = []
+        with StoreReader(path) as reader:
+            reader._conn.set_trace_callback(traced.append)
+            try:
+                assert reader.live_edge() == (1, 300.0)
+            finally:
+                reader._conn.set_trace_callback(None)
+
+        # PRAGMA is the documented exception: it can only ever err
+        # conservative (see live_edge's SNAPSHOT COHERENCE note).
+        statements = [s for s in traced if not s.lstrip().upper().startswith("PRAGMA")]
+        assert len(statements) == 1, (
+            "live_edge() issued more than one non-PRAGMA statement — the "
+            "boundary and the count no longer share a snapshot:\n"
+            + "\n".join(statements)
+        )
+
+    def test_concurrent_seal_cannot_produce_an_incoherent_count(
+        self, tmp_path: Path
+    ):
+        """sol HIGH r1 P2, verbatim interleaving.
+
+        A writer commits a fact AND the tick that seals it in the window
+        between the reader resolving its boundary and running its aggregate.
+        Under the old three-statement form this returned ``(1, <ts>)`` — a
+        count true in no coherent database snapshot, since the freshly
+        committed tick already covers the freshly committed fact. Now the
+        answer must equal a coherent read either side of the commit; both
+        sides agree on ``(0, None)`` here, so the race has no output of its
+        own left to produce.
+        """
+        path, store, Tick, datetime, timezone = self._chained_store(tmp_path)
+        store.append({"kind": "note", "ts": 50.0, "observer": "o", "payload": {}})
+        store.append_tick(
+            Tick(name="seal-1", ts=datetime(2025, 6, 1, tzinfo=timezone.utc),
+                 payload={}, origin="v")
+        )
+        store.close()
+
+        from engine.sqlite_store import SqliteStore
+
+        fired = False
+
+        def race(sql: str) -> None:
+            nonlocal fired
+            if fired or not sql.lstrip().startswith("SELECT COUNT(*), MIN(ts)"):
+                return
+            fired = True
+            writer = SqliteStore(
+                path=path, serialize=lambda e: e, deserialize=lambda d: d
+            )
+            writer.append(
+                {"kind": "note", "ts": 999.0, "observer": "o", "payload": {}}
+            )
+            writer.append_tick(
+                Tick(name="seal-2", ts=datetime(2025, 6, 2, tzinfo=timezone.utc),
+                     payload={}, origin="v")
+            )
+            writer.close()
+
+        with StoreReader(path) as reader:
+            reader._conn.set_trace_callback(race)
+            try:
+                raced = reader.live_edge()
+            finally:
+                reader._conn.set_trace_callback(None)
+
+        assert fired, "the interleaving never ran — the trace hook missed"
+        with StoreReader(path) as fresh_reader:
+            fresh = fresh_reader.live_edge()
+
+        assert fresh == (0, None)  # seal-2 covers the fact it committed with
+        assert raced == fresh, (
+            f"live_edge() straddled a concurrent seal: {raced} is not any "
+            f"coherent snapshot (pre-commit and post-commit both give {fresh})"
+        )
+
+
+def reader_total(path: Path) -> int:
+    with StoreReader(path) as reader:
+        return reader.fact_total

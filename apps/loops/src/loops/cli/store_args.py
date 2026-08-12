@@ -4,10 +4,10 @@ Mirrors ``cli/read_args.py`` (see that module's header for the pattern this
 copies): the single source painted's ``run_app`` walks for ``store``'s
 intercepted ``-h`` and for shell ``<TAB>`` completion. It is NOT the parser
 that actually runs on ``loops store ...`` — that stays
-``commands.store._run_store`` and its eight per-subcommand parsers
-(``_run_verify``/``_run_rebirth``/``_run_reanchor``/``_run_absorb``/
-``_run_adopt``/``_run_store_ticks``/``_run_store_stats``/``_run_reindex``,
-each its own ``argparse.ArgumentParser``).
+``commands.store._run_store`` and its nine per-subcommand parsers
+(``_run_verify``/``_run_rebirth``/``_run_reanchor``/``_run_export``/
+``_run_absorb``/``_run_adopt``/``_run_store_ticks``/``_run_store_stats``/
+``_run_reindex``, each its own ``argparse.ArgumentParser``).
 
 **Subparsers are not walkable here — verified empirically.** painted's parser
 walk (``painted.cli._argwalk.walk_args``) reads ``parser._actions`` flat; it
@@ -18,7 +18,7 @@ on one flat parser would offer e.g. ``--rule`` while completing
 ``store verify ...``, which verify's real parser rejects — a completion
 dishonesty the flat walk can't structurally prevent.
 
-Given that, this module takes the documented fallback: complete the eight
+Given that, this module takes the documented fallback: complete the nine
 subcommand names as static ``choices`` on the first positional, and stop
 there. Per-subcommand flags and the ``rebirth``-only second positional
 (``target``) are out of scope for this slice.
@@ -41,8 +41,8 @@ import argparse
 # tuple against that dispatcher so a new subcommand doesn't silently go
 # uncompleted.
 STORE_SUBCOMMANDS = (
-    "verify", "rebirth", "reanchor", "absorb", "adopt", "ticks", "stats",
-    "reindex",
+    "verify", "rebirth", "reanchor", "export", "absorb", "adopt", "ticks",
+    "stats", "reindex",
 )
 
 
@@ -53,8 +53,8 @@ def add_store_args(parser: argparse.ArgumentParser) -> None:
     """
     parser.add_argument(
         "subcommand", nargs="?", default=None, choices=STORE_SUBCOMMANDS,
-        help="verify | rebirth | reanchor | absorb | adopt | ticks | stats "
-             "| reindex (omit for the base inspect view)",
+        help="verify | rebirth | reanchor | export | absorb | adopt | ticks "
+             "| stats | reindex (omit for the base inspect view)",
     )
     parser.add_argument(
         "file", nargs="?", default=None,

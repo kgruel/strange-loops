@@ -22,13 +22,13 @@ from .helpers import block_to_text
 @pytest.mark.parametrize("zoom", list(Zoom), ids=lambda z: z.name)
 def test_ls_root_tty(golden, zoom):
     """Default: local layer stat'd, config collapsed to a count-line hint."""
-    block = vertices_view(SAMPLE_LS_ROOT, zoom, width=80, piped=False)
+    block = vertices_view(SAMPLE_LS_ROOT, zoom, width=80)
     golden.assert_match(block_to_text(block), "output")
 
 
 @pytest.mark.parametrize("zoom", list(Zoom), ids=lambda z: z.name)
 def test_ls_root_piped(golden, zoom):
-    block = vertices_view(SAMPLE_LS_ROOT, zoom, width=None, piped=True)
+    block = vertices_view(SAMPLE_LS_ROOT, zoom, width=None)
     golden.assert_match(block_to_text(block), "output")
 
 
@@ -41,7 +41,7 @@ def test_ls_root_expanded_tty(golden):
 
 def test_ls_root_expanded_piped(golden):
     data = {**SAMPLE_LS_ROOT, "expand_config": True}
-    block = vertices_view(data, Zoom.DETAILED, width=None, piped=True)
+    block = vertices_view(data, Zoom.DETAILED, width=None)
     golden.assert_match(block_to_text(block), "output")
 
 

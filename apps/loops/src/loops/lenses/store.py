@@ -38,17 +38,12 @@ def store_view(
     zoom: Zoom,
     width: int | None,
     palette: LoopsPalette | None = None,
-    *,
-    piped: bool | None = None,
 ) -> Block:
     """Render store summary at the given fidelity level.
 
-    ``piped=True`` forces width=None — the agent channel never clips.
+    ``width=None`` IS the piped register — the agent channel never clips.
     """
-    piped = bool(piped or (piped is None and width is None))
     p = palette or DEFAULT_PALETTE
-    if piped:
-        width = None  # piped register never clips (information-faithful)
     if zoom == Zoom.MINIMAL:
         return _render_minimal(data, width, p)
     if zoom == Zoom.SUMMARY:
@@ -295,12 +290,10 @@ def tick_chain_view(
     zoom: Zoom,
     width: int | None,
     palette: LoopsPalette | None = None,
-    *,
-    piped: bool | None = None,
 ) -> Block:
     """Render a store's tick series, newest-first.
 
-    ``piped=True`` forces width=None — the agent channel never clips.
+    ``width=None`` IS the piped register — the agent channel never clips.
 
     Default projection (plain ``store ticks``) is density — items, facts,
     and per-window delta. ``--chain`` switches to the attestation
@@ -313,9 +306,7 @@ def tick_chain_view(
     ``data`` shape: ``{vertex, chain_mode: bool, chain: {ticks, chained,
     signed, legacy}, since: str | None, windows: [TickWindow-as-dict, ...]}``.
     """
-    piped = bool(piped or (piped is None and width is None))
-    if piped:
-        width = None  # piped register never clips (information-faithful)
+    piped = width is None
 
     p = palette or DEFAULT_PALETTE
     vertex = data.get("vertex", "")
@@ -475,8 +466,6 @@ def stats_view(
     zoom: Zoom,
     width: int | None,
     palette: LoopsPalette | None = None,
-    *,
-    piped: bool | None = None,
 ) -> Block:
     """Render store statistics — topline totals, and (``--by-kind``) a
     count-descending per-kind tally.
@@ -486,12 +475,9 @@ def stats_view(
     per-kind table is gated on ``--by-kind`` (honesty rule: the flag is
     what adds the table).
 
-    ``piped=True`` forces width=None — the agent channel never clips.
+    ``width=None`` IS the piped register — the agent channel never clips.
     """
-    piped = bool(piped or (piped is None and width is None))
     p = palette or DEFAULT_PALETTE
-    if piped:
-        width = None  # piped register never clips (information-faithful)
     vertex = data.get("vertex", "")
     total_facts = data.get("total_facts", 0)
     total_ticks = data.get("total_ticks", 0)

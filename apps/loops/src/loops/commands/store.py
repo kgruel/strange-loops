@@ -5,6 +5,7 @@ Pure data fetch, no rendering knowledge.
 from __future__ import annotations
 
 import sys
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -33,15 +34,66 @@ def _bucket_timestamps(timestamps: list[float], width: int) -> list[float]:
     return buckets
 
 
+def _refuse_store(msg: str, *, label: str | None = None) -> int:
+    """Render a refusal to stderr and return the refusal exit code (2).
+
+    A refusal is a store saying "this operation is not available here",
+    which is neither success nor a crash — every refusing path in this
+    module renders it the same way so the exit code cannot drift between
+    subcommands.
+    """
+    from painted import Block, Style, paint
+
+    head = f"✗ {label}: {msg}" if label else f"✗ {msg}"
+    paint(Block.text(head, Style()), file=sys.stderr)
+    return 2
+
+
 def resolve_store_path(file_path: Path) -> Path:
-    """Resolve a .vertex or .db file to the actual store .db path."""
+    """Resolve a .vertex or .db file to the actual store .db path.
+
+    The read-side composition of the write-side resolution: the canonical
+    artifact, then its index. A JSONL-canonical vertex (``store "….jsonl"``)
+    resolves to its derived sqlite index — see ``engine.residence``.
+
+    Resolution *materializes*: ``ensure_index`` builds the index a fresh
+    clone (log tracked, derived ``.db`` untracked) does not have, so the read
+    reports the store's contents rather than an unmaterialized store. With no
+    log to build from, the index stays absent and the not-yet-materialized
+    contract below still speaks.
+
+    Deriving it from :func:`resolve_canonical_path` rather than resolving
+    independently keeps one answer to "which artifact does this target name":
+    two resolvers that can disagree is how a writer and a reader end up on
+    different files.
+    """
+    from engine.jsonl_store import ensure_index
+
+    return ensure_index(resolve_canonical_path(file_path))
+
+
+def resolve_canonical_path(file_path: Path) -> Path:
+    """Resolve a ``.vertex`` (or ``.db``) to its **canonical** store artifact.
+
+    The write-side sibling of :func:`resolve_store_path`. A JSONL-canonical
+    vertex resolves to its ``….jsonl`` log; everything else to the same
+    sqlite path :func:`resolve_store_path` returns. Feed it to
+    ``open_canonical_store`` — constructing ``SqliteStore`` on the resolved
+    *index* of a JSONL-canonical vertex writes rows the log never sees, and
+    the ``JsonlCanonicalUnsupported`` refusals on the history-mutating ops
+    never fire because the subclass is never instantiated.
+
+    A direct ``.db`` target stays itself: the documented direct-db bypass is
+    detected on the next open, not prevented here.
+    """
     if file_path.suffix == ".vertex":
+        from engine.residence import canonical_store_path
         from lang import parse_vertex_file
 
         ast = parse_vertex_file(file_path)
         if ast.store is None:
             raise ValueError(f"No store configured in {file_path}")
-        return (file_path.parent / ast.store).resolve()
+        return canonical_store_path(ast.store, file_path)
     elif file_path.suffix == ".db":
         return file_path.resolve()
     else:
@@ -65,6 +117,82 @@ def _require_materialized_store(target_path: Path) -> Path:
             f"no facts emitted (no database at {db_path})"
         )
     return db_path
+
+
+def canonical_agreement(target_path: Path, *, deep: bool = False):
+    """Judge a JSONL-canonical target's index against its log — or ``None``.
+
+    The gate every store read verb runs BEFORE it reads (design/store/
+    verify-canonical-agreement). A ``.db``-canonical target has one artifact
+    and nothing to disagree with, so it returns ``None`` and the caller's
+    behavior is unchanged.
+
+    Deliberately resolved through :func:`resolve_canonical_path` and
+    ``index_path_for`` — both pure — rather than :func:`resolve_store_path`.
+    That path runs ``ensure_index``, which constructs a ``JsonlStore``
+    whenever the index is behind, and a ``JsonlStore`` constructor *repairs*:
+    it would catch the index up and then report agreement about a store whose
+    disagreement it had just erased. Verification and open-time recovery are
+    opposite contracts; this is the seam where they must not meet.
+
+    Returns ``(index_path, report)``. A non-materialized log raises the same
+    ``FileNotFoundError`` as :func:`_require_materialized_store`.
+    """
+    from engine.canonical_audit import audit_agreement, audit_deep
+    from engine.residence import index_path_for, is_jsonl_canonical
+
+    canonical = resolve_canonical_path(target_path)
+    if not is_jsonl_canonical(canonical):
+        return None
+    if not canonical.exists():
+        raise FileNotFoundError(
+            f"store for '{target_path.stem}' not yet materialized — "
+            f"no facts emitted (no canonical log at {canonical})"
+        )
+    index = index_path_for(canonical)
+    if not index.exists():
+        # Fresh clone: the log is tracked, the derived index is not. BUILDING
+        # an absent index from the log is not repair — there is no prior state
+        # to destroy and no divergence it could hide, so the store-verb
+        # existence contract keeps working. An index that DOES exist is
+        # evidence and is never materialized through here.
+        from engine.jsonl_store import ensure_index
+
+        ensure_index(canonical)
+    audit = audit_deep if deep else audit_agreement
+    return index, audit(canonical)
+
+
+def _gate_read(target_path: Path) -> None:
+    """Refuse a read verb on a store whose index is known to be poisoned.
+
+    ``stats``/``ticks`` render store-level claims — totals, chain counts —
+    straight off the derived index. Serving those from an index that provably
+    disagrees with the canonical log is the same false attestation ``verify``
+    was rendering, one surface over. Raised as ``ValueError`` so each verb's
+    existing fetch-error path renders it at RC=1.
+    """
+    gated = canonical_agreement(target_path)
+    if gated is None or gated[1].ok:
+        return
+    report = gated[1]
+    if report.index_behind:
+        # Every divergence sits past the consumed prefix. That is the shape an
+        # interrupted append leaves, and the product already holds its repair:
+        # any read verb catches the index up. It is ALSO the shape a rewound
+        # marker plus a doctored suffix leaves, which L1 cannot tell apart —
+        # so name the state and both exits, and never call it innocent.
+        raise ValueError(
+            f"index behind the log in '{target_path.stem}' — "
+            f"{report.summary()}. The totals here would undercount. Catch the "
+            f"index up with 'loops read {target_path.stem}', or rule out "
+            f"tampering with 'loops store verify --deep', then re-run"
+        )
+    raise ValueError(
+        f"canonical disagreement in '{target_path.stem}' — "
+        f"{report.summary()}. Refusing to serve derived data the log "
+        f"does not support; run 'loops store verify' for the full report"
+    )
 
 
 def make_fetcher(path: Path, zoom: int, *, kind: str | None = None):
@@ -192,13 +320,40 @@ def _run_verify(argv: list[str], *, vertex_path: Path | None = None) -> int:
         help="Per-tick attestation rows for the chained era "
              "(signature status, window fact count, cursor target)",
     )
+    p.add_argument(
+        "--deep", action="store_true",
+        help="JSONL-canonical stores: stream every log line, compare it "
+             "field-for-field and in order against the index, and re-derive "
+             "the tick chain from canonical content (O(log), not O(1))",
+    )
     # -h/--help is owned by argparse (add_help=True): parse_args prints the
     # help built from this parser and exits 0 natively. No hand-rolled block.
     args = p.parse_args(argv)
 
     try:
         target_path = _resolve_target(getattr(args, "file", None), vertex_path).resolve()
-        db_path = _require_materialized_store(target_path)
+        # The agreement gate resolves the artifacts itself, purely — see
+        # canonical_agreement on why _require_materialized_store's resolve
+        # cannot run first on a JSONL-canonical target.
+        gated = canonical_agreement(target_path, deep=args.deep)
+        if gated is None:
+            if args.deep:
+                msg = (
+                    "--deep judges a canonical log against its derived index; "
+                    f"{target_path.name} is sqlite-canonical (one artifact, "
+                    "nothing to disagree with)"
+                )
+                if args.json:
+                    # Same F2 shape-parity rule as the error branch below: a
+                    # machine consumer gets {"error": ...}, never plain text.
+                    import json as _json
+                    print(_json.dumps({"error": msg}))  # noqa: T201 — machine output path
+                    return 2
+                return _refuse_store(msg, label="store verify")
+            db_path = _require_materialized_store(target_path)
+            agreement = None
+        else:
+            db_path, agreement = gated
     except (FileNotFoundError, ValueError) as exc:
         # F2 — three-verb --json parity: verify is hand-rolled and raises
         # before its --json branch, so without this an absent target / absent
@@ -211,6 +366,57 @@ def _run_verify(argv: list[str], *, vertex_path: Path | None = None) -> int:
             print(_json.dumps({"error": str(exc)}))  # noqa: T201 — machine output path
             return 1
         raise
+
+    if agreement is not None and not agreement.ok:
+        # Suppress the chain walk ENTIRELY. Walking a poisoned index and
+        # printing "chain intact" alongside a warning would still be the false
+        # attestation: the chain's verdict is only worth anything about an
+        # index the log supports. Name the check that failed instead.
+        if args.json:
+            import json as _json
+            print(_json.dumps(  # noqa: T201 — machine output path
+                {"ok": False, "canonical": agreement.as_dict()}, indent=2
+            ))
+            return 1
+        from painted import Block, Style, join_vertical, paint
+        from painted.views import Severity, callout
+
+        if agreement.index_behind:
+            # Every divergence is past the consumed prefix — see
+            # engine.canonical_audit.Check.beyond_offset. That is where an
+            # interrupted append lands, and also where a rewound marker plus a
+            # doctored suffix lands; L1 corroborates only the first unindexed
+            # line, so this says WHERE, never "benign". Still rc=1 and still no
+            # chain walk (it would attest to a partial index).
+            head = callout(
+                f"{db_path.name} — INDEX BEHIND THE LOG",
+                severity=Severity.WARNING,
+                detail="the derived index is behind the canonical log, and "
+                       "every disagreement is in bytes the index never claimed "
+                       "to have consumed — consistent with a crash between the "
+                       "log's fsync and the index commit, which this check "
+                       "cannot tell apart from an edited suffix; the tick "
+                       "chain was NOT walked (it would attest to a partial "
+                       f"index). Catch the index up with 'loops read "
+                       f"{target_path.stem}', or run 'loops store verify "
+                       "--deep' to rule out tampering",
+            )
+        else:
+            head = callout(
+                f"{db_path.name} — CANONICAL DISAGREEMENT",
+                severity=Severity.ERROR,
+                detail="the derived index does not agree with the canonical "
+                       "log; the tick chain was NOT walked (its verdict would "
+                       "attest to an index the log does not support)",
+            )
+        blocks = [head]
+        for check in agreement.checks:
+            mark = "✓" if check.ok else "✗"
+            blocks.append(Block.text(
+                f"  {mark} {check.name:<10} {check.detail}", Style(dim=check.ok)
+            ))
+        paint(join_vertical(*blocks))
+        return 1
 
     # Tick-signature verification composes here (injection, not import):
     # the observer-key registry lives in the .vertex, so a raw .db target
@@ -232,7 +438,10 @@ def _run_verify(argv: list[str], *, vertex_path: Path | None = None) -> int:
 
     if args.json:
         import json as _json
-        print(_json.dumps({**report, "fact_signatures": fact_report}, indent=2))  # noqa: T201 — machine output path
+        payload = {**report, "fact_signatures": fact_report}
+        if agreement is not None:
+            payload["canonical"] = agreement.as_dict()
+        print(_json.dumps(payload, indent=2))  # noqa: T201 — machine output path
         return 0 if report["ok"] and fact_report["ok"] else 1
 
     from painted import Block, Style, join_vertical, paint
@@ -244,8 +453,20 @@ def _run_verify(argv: list[str], *, vertex_path: Path | None = None) -> int:
         verdict, verdict_sev = "CHAIN BROKEN", Severity.ERROR
     elif not fact_report["ok"]:
         verdict, verdict_sev = "FACT SIGNATURES BROKEN", Severity.ERROR
-    else:
+    elif agreement is None:
         verdict, verdict_sev = "chain intact", Severity.SUCCESS
+    elif agreement.deep:
+        # Say what was actually checked. "chain intact" on a two-artifact
+        # store used to name the weaker claim with the stronger words.
+        verdict, verdict_sev = (
+            "canonical content verified line-by-line; chain re-derived from "
+            "the log", Severity.SUCCESS,
+        )
+    else:
+        verdict, verdict_sev = (
+            "index chain intact; canonical parity checks pass (not deep)",
+            Severity.SUCCESS,
+        )
 
     # Composed, never Block.text("\n".join(...)): painted 0.4.0 neutralizes a
     # raw \n to a space at the cell level, so multi-line must be real rows
@@ -292,6 +513,21 @@ def _run_verify(argv: list[str], *, vertex_path: Path | None = None) -> int:
         row(f"authorship   {fact_report['signed']}/{total_facts} facts signed · {checked}")
     elif fact_report["facts"]:
         row(f"authorship   0/{total_facts} facts signed (pre-signature era)")
+
+    if agreement is not None:
+        # A fourth axis, and the one that says how much of the log was read.
+        # The scope boundary is printed, not left in a docstring: a
+        # coordinated edit of an unsealed fact in BOTH artifacts is uncaught
+        # here by design, and the output must not imply otherwise.
+        if agreement.deep:
+            row("canonical    every log line matches the index in order · "
+                "chain re-derived from log content")
+        else:
+            row("canonical    offset · counts · last-line agree with the log "
+                "(interior rows unread — use --deep)")
+        row("             live edge: an unsealed fact edited in BOTH log and "
+            "index is out of scope (its witnesses are the fact signature and "
+            "the next seal)")
 
     # The strip-attack tripwires stay WARNING: a benign pre-signing store and a
     # malicious live-edge strip currently look identical here, and under-alarming
@@ -472,6 +708,79 @@ def _run_rebirth(argv: list[str], *, vertex_path: Path | None = None) -> int:
     return 0 if verification.ok else 1
 
 
+def _run_export(argv: list[str], *, vertex_path: Path | None = None) -> int:
+    """Export a store to the canonical interleaved JSONL log.
+
+    Facts and ticks are written as one append-only log in GLOBAL RECEIPT
+    ORDER (each tick after the fact rows of its window — see the ordering
+    rule in ``store.jsonl``), every field verbatim, payload included, so a
+    rebuild re-derives byte-identical row hashes and signatures. Read-only
+    on the source: this is a migration read, not a store operation.
+
+    ``--rebuild PATH`` additionally rebuilds a fresh sqlite index from the
+    log just written — the round-trip oracle, on demand.
+    """
+    import argparse
+
+    p = argparse.ArgumentParser(
+        prog="loops store export",
+        description="Export a store's facts and ticks to canonical JSONL "
+                    "in global receipt order.",
+    )
+    if vertex_path is None:
+        p.add_argument("source", help="Source store .db or .vertex file, or vertex name")
+    p.add_argument(
+        "target", nargs="?", default=None,
+        help="Path for the .jsonl log (default: <store>.jsonl beside the store)",
+    )
+    p.add_argument(
+        "--rebuild", default=None, metavar="PATH",
+        help="Also rebuild a fresh sqlite store from the log just written",
+    )
+    p.add_argument("--json", action="store_true", help="JSON report")
+    args = p.parse_args(argv)
+
+    src_target = _resolve_target(getattr(args, "source", None), vertex_path).resolve()
+    src_db = resolve_store_path(src_target)
+    if not src_db.exists():
+        raise FileNotFoundError(f"{src_db} does not exist")
+    target = Path(args.target) if args.target else src_db.with_suffix(".jsonl")
+
+    from store import export_jsonl, rebuild_jsonl
+
+    result = export_jsonl(src_db, target)
+    rebuilt = rebuild_jsonl(target, Path(args.rebuild)) if args.rebuild else None
+
+    if args.json:
+        import json as _json
+
+        report = {
+            "source": str(src_db), "log": str(result.path),
+            "facts": result.facts, "ticks": result.ticks, "lines": result.lines,
+        }
+        if rebuilt is not None:
+            report["rebuild"] = {
+                "path": str(rebuilt.path),
+                "facts": rebuilt.facts, "ticks": rebuilt.ticks,
+            }
+        print(_json.dumps(report, indent=2))  # noqa: T201 — machine output path
+        return 0
+
+    from painted import Block, Style, join_vertical, paint
+
+    lines = [
+        f"✓ {src_db.name} → {result.path.name}: "
+        f"{result.lines} lines ({result.facts} facts, {result.ticks} ticks)"
+    ]
+    if rebuilt is not None:
+        lines.append(
+            f"  rebuilt {rebuilt.path.name}: "
+            f"{rebuilt.facts} facts, {rebuilt.ticks} ticks"
+        )
+    paint(join_vertical(*(Block.text(ln, Style(dim=False)) for ln in lines)))
+    return 0
+
+
 def _run_reanchor(argv: list[str], *, vertex_path: Path | None = None) -> int:
     """Re-anchor a store's attestation layer under the current canonical
     encoding (SPEC §8.1: canon migrations re-anchor, never grandfather).
@@ -510,17 +819,23 @@ def _run_reanchor(argv: list[str], *, vertex_path: Path | None = None) -> int:
     )
 
     from atoms import Fact
-    from engine.sqlite_store import SqliteStore
+    from engine.jsonl_store import JsonlCanonicalUnsupported, open_canonical_store
 
-    store = SqliteStore(
-        path=db_path,
+    # open_canonical_store, not SqliteStore on db_path: reanchor rewrites
+    # chain rows in place, which a JSONL-canonical store refuses — and the
+    # refusal only fires if the JsonlStore subclass is the one constructed.
+    store = open_canonical_store(
+        resolve_canonical_path(target_path),
         serialize=lambda f: f.to_dict(),
         deserialize=Fact.from_dict,
         tick_signer=tick_signer_for(target_path),
         fact_signer=fact_signer_for(target_path),
     )
     try:
-        receipt = store.reanchor()
+        try:
+            receipt = store.reanchor()
+        except JsonlCanonicalUnsupported as exc:
+            return _refuse_store(str(exc), label=db_path.name)
         verifier, _keys = tick_verifier_for(target_path)
         fact_verifier, _fkeys = fact_verifier_for(target_path)
         report = store.verify_chain(verifier=verifier)
@@ -793,10 +1108,7 @@ def _absorb_genesis_mode(
         ]
         paint(join_vertical(*(Block.text(ln, Style(dim=False)) for ln in lines)))
 
-    def _refuse(msg: str) -> int:
-        from painted import Block, Style, paint
-        paint(Block.text(f"✗ {target_path.stem}: {msg}", Style()), file=sys.stderr)
-        return 2
+    _refuse = partial(_refuse_store, label=target_path.stem)
 
     if dry_run:
         # Preview only — a read-only projection of what the real (atomic) path
@@ -841,14 +1153,16 @@ def _absorb_genesis_mode(
         )
 
     from atoms import Fact
-    from engine.sqlite_store import (
-        GenesisExists,
-        SqliteStore,
-        UnsignableGenesis,
-    )
+    from engine.jsonl_store import JsonlCanonicalUnsupported, open_canonical_store
+    from engine.sqlite_store import GenesisExists, UnsignableGenesis
 
-    store = SqliteStore(
-        path=db_path, serialize=lambda f: f.to_dict(), deserialize=Fact.from_dict
+    # open_canonical_store: absorb writes declaration facts, which under a
+    # JSONL-canonical vertex must either go through the log or refuse — a
+    # plain SqliteStore on the derived index does neither.
+    store = open_canonical_store(
+        resolve_canonical_path(target_path),
+        serialize=lambda f: f.to_dict(),
+        deserialize=Fact.from_dict,
     )
     try:
         receipt = store.absorb_genesis(
@@ -857,6 +1171,8 @@ def _absorb_genesis_mode(
             origin="",
             fact_signer=fact_signer_for(target_path),
         )
+    except JsonlCanonicalUnsupported as exc:
+        return _refuse(str(exc))
     except GenesisExists:
         # TOCTOU: a concurrent absorb opened the lineage after the dispatcher's
         # mode check. The atomic primitive caught it — point at edit mode.
@@ -914,10 +1230,7 @@ def _absorb_edit(
         resolve_declaration_documents,
     )
 
-    def _refuse(msg: str) -> int:
-        from painted import Block, Style, paint
-        paint(Block.text(f"✗ {target_path.stem}: {msg}", Style()), file=sys.stderr)
-        return 2
+    _refuse = partial(_refuse_store, label=target_path.stem)
 
     # The edited file's document set.
     new_docs = vertex_to_documents(ast)
@@ -927,144 +1240,147 @@ def _absorb_edit(
     # refuses (StaleDeclarationHead) instead of interleaving, and re-running
     # picks up the moved head. Capturing in this order fails conservative.
     from atoms import Fact
-    from engine.sqlite_store import SqliteStore
+    from engine.jsonl_store import JsonlCanonicalUnsupported, open_canonical_store
 
-    _cas_store = SqliteStore(
-        path=db_path, serialize=lambda f: f.to_dict(), deserialize=Fact.from_dict
+    # ONE handle for the whole ceremony. The CAS token still comes first —
+    # that ordering is what makes a concurrent edit refuse (StaleDeclarationHead)
+    # rather than interleave — but the token, not the handle's lifetime, is what
+    # carries it, so there is no reason to open the store twice.
+    store = open_canonical_store(
+        resolve_canonical_path(target_path),
+        serialize=lambda f: f.to_dict(),
+        deserialize=Fact.from_dict,
     )
     try:
-        expected_head = _cas_store.declaration_head()
-    finally:
-        _cas_store.close()
+        expected_head = store.declaration_head()
 
-    # The fold head from the store. has_genesis was true at dispatch, so this is
-    # normally a list; a resolution failure (ambiguous lineage, unsupported
-    # protocol) or a non-list refuses cleanly rather than diffing against noise.
-    try:
-        head = resolve_declaration_documents(db_path)
-    except (AmbiguousLineage, UnsupportedProtocol) as exc:
-        return _refuse(str(exc))
-    if not isinstance(head, list):
-        return _refuse(
-            "store head unavailable — the lineage looks unopened or unhistorized; "
-            "cannot diff (nothing to reconcile against)"
-        )
-
-    # Diff. An inexpressible edit (singleton removal / identity rename) refuses.
-    try:
-        changes = diff_documents(head, new_docs)
-    except EditRefused as exc:
-        return _refuse(str(exc))
-
-    n_def = sum(1 for c in changes if c.payload is not None)
-    n_ret = len(changes) - n_def
-
-    def _emit_json(obj: dict) -> None:
-        import json as _json
-        print(_json.dumps(obj, indent=2))  # noqa: T201 — machine output path
-
-    # Idempotence: an unchanged file writes nothing.
-    if not changes:
-        if as_json:
-            _emit_json({
-                "vertex": target_path.stem, "mode": "edit",
-                "diverged": False, "defined": 0, "retired": 0, "changes": [],
-            })
-        else:
-            from painted import Block, Style, paint
-            paint(Block.text(
-                f"✓ {target_path.stem}: up to date — file matches store head",
-                Style(dim=False),
-            ))
-        return 0
-
-    change_rows = [
-        {"kind": c.kind, "subject": c.subject, "change": c.annotation}
-        for c in changes
-    ]
-
-    def _render_divergence(*, applied: bool) -> None:
-        if as_json:
-            _emit_json({
-                "vertex": target_path.stem, "mode": "edit",
-                "diverged": True, "applied": applied,
-                "defined": n_def, "retired": n_ret,
-                "observer": observer, "signed": applied,
-                "changes": change_rows,
-            })
-            return
-        from painted import Block, Style, join_vertical, paint
-        if applied:
-            head_line = (
-                f"✓ {target_path.stem}: reconciled — "
-                f"{n_def} re-emitted, {n_ret} retired"
+        # The fold head from the store. has_genesis was true at dispatch, so this is
+        # normally a list; a resolution failure (ambiguous lineage, unsupported
+        # protocol) or a non-list refuses cleanly rather than diffing against noise.
+        try:
+            head = resolve_declaration_documents(db_path)
+        except (AmbiguousLineage, UnsupportedProtocol) as exc:
+            return _refuse(str(exc))
+        if not isinstance(head, list):
+            return _refuse(
+                "store head unavailable — the lineage looks unopened or unhistorized; "
+                "cannot diff (nothing to reconcile against)"
             )
-        else:
-            head_line = f"✎ {target_path.stem}: file diverges from store head"
-        lines = [head_line]
-        for c in changes:
-            mark = "−" if c.payload is None else ("+" if c.annotation == "added" else "~")
-            lines.append(f"  {mark} {_decl_short(c.kind)}:{c.subject} ({c.annotation})")
-        if applied:
-            lines.append(f"  observer: {observer} · signed")
-        else:
-            lines.append("  run `loops store absorb` to reconcile")
-        paint(join_vertical(*(Block.text(ln, Style(dim=False)) for ln in lines)))
 
-    # -n / --dry-run: the divergence surface. Read-only, exit 0.
-    if dry_run:
-        _render_divergence(applied=False)
+        # Diff. An inexpressible edit (singleton removal / identity rename) refuses.
+        try:
+            changes = diff_documents(head, new_docs)
+        except EditRefused as exc:
+            return _refuse(str(exc))
+
+        n_def = sum(1 for c in changes if c.payload is not None)
+        n_ret = len(changes) - n_def
+
+        def _emit_json(obj: dict) -> None:
+            import json as _json
+            print(_json.dumps(obj, indent=2))  # noqa: T201 — machine output path
+
+        # Idempotence: an unchanged file writes nothing.
+        if not changes:
+            if as_json:
+                _emit_json({
+                    "vertex": target_path.stem, "mode": "edit",
+                    "diverged": False, "defined": 0, "retired": 0, "changes": [],
+                })
+            else:
+                from painted import Block, Style, paint
+                paint(Block.text(
+                    f"✓ {target_path.stem}: up to date — file matches store head",
+                    Style(dim=False),
+                ))
+            return 0
+
+        change_rows = [
+            {"kind": c.kind, "subject": c.subject, "change": c.annotation}
+            for c in changes
+        ]
+
+        def _render_divergence(*, applied: bool) -> None:
+            if as_json:
+                _emit_json({
+                    "vertex": target_path.stem, "mode": "edit",
+                    "diverged": True, "applied": applied,
+                    "defined": n_def, "retired": n_ret,
+                    "observer": observer, "signed": applied,
+                    "changes": change_rows,
+                })
+                return
+            from painted import Block, Style, join_vertical, paint
+            if applied:
+                head_line = (
+                    f"✓ {target_path.stem}: reconciled — "
+                    f"{n_def} re-emitted, {n_ret} retired"
+                )
+            else:
+                head_line = f"✎ {target_path.stem}: file diverges from store head"
+            lines = [head_line]
+            for c in changes:
+                mark = "−" if c.payload is None else ("+" if c.annotation == "added" else "~")
+                lines.append(f"  {mark} {_decl_short(c.kind)}:{c.subject} ({c.annotation})")
+            if applied:
+                lines.append(f"  observer: {observer} · signed")
+            else:
+                lines.append("  run `loops store absorb` to reconcile")
+            paint(join_vertical(*(Block.text(ln, Style(dim=False)) for ln in lines)))
+
+        # -n / --dry-run: the divergence surface. Read-only, exit 0.
+        if dry_run:
+            _render_divergence(applied=False)
+            return 0
+
+        # Real path — atomic, signed re-emit of the changed subjects.
+        if not observer:
+            return _refuse(
+                "cannot absorb — no observer resolved to sign as. A declaration "
+                "edit must be signed (it enters the attestation tier); set up "
+                "signing first (loops add <vertex> observer --keygen)."
+            )
+
+        from custody import fact_signer_for
+
+        from engine.sqlite_store import (
+            AmbiguousGenesis,
+            NoGenesis,
+            StaleDeclarationHead,
+            UnsignableEdit,
+        )
+
+        try:
+            store.absorb_edit(
+                changes,
+                observer=observer,
+                origin="",
+                fact_signer=fact_signer_for(target_path),
+                expected_head=expected_head,
+            )
+        except JsonlCanonicalUnsupported as exc:
+            return _refuse(str(exc))
+        except StaleDeclarationHead as exc:
+            return _refuse(f"{exc}")
+        except UnsignableEdit:
+            return _refuse(
+                f"cannot absorb — no signing key for observer '{observer}'. A "
+                "declaration edit must be signed; set up signing first "
+                "(loops add <vertex> observer --keygen)."
+            )
+        except NoGenesis:
+            # TOCTOU: the lineage vanished between dispatch and here (not reachable
+            # in practice — stores are append-only).
+            return _refuse(
+                "no genesis — the store's lineage is not open; run absorb to open it"
+            )
+        except AmbiguousGenesis as exc:
+            return _refuse(str(exc))
+
+        _render_divergence(applied=True)
         return 0
-
-    # Real path — atomic, signed re-emit of the changed subjects.
-    if not observer:
-        return _refuse(
-            "cannot absorb — no observer resolved to sign as. A declaration "
-            "edit must be signed (it enters the attestation tier); set up "
-            "signing first (loops add <vertex> observer --keygen)."
-        )
-
-    from custody import fact_signer_for
-
-    from engine.sqlite_store import (
-        AmbiguousGenesis,
-        NoGenesis,
-        StaleDeclarationHead,
-        UnsignableEdit,
-    )
-
-    store = SqliteStore(
-        path=db_path, serialize=lambda f: f.to_dict(), deserialize=Fact.from_dict
-    )
-    try:
-        store.absorb_edit(
-            changes,
-            observer=observer,
-            origin="",
-            fact_signer=fact_signer_for(target_path),
-            expected_head=expected_head,
-        )
-    except StaleDeclarationHead as exc:
-        return _refuse(f"{exc}")
-    except UnsignableEdit:
-        return _refuse(
-            f"cannot absorb — no signing key for observer '{observer}'. A "
-            "declaration edit must be signed; set up signing first "
-            "(loops add <vertex> observer --keygen)."
-        )
-    except NoGenesis:
-        # TOCTOU: the lineage vanished between dispatch and here (not reachable
-        # in practice — stores are append-only).
-        return _refuse(
-            "no genesis — the store's lineage is not open; run absorb to open it"
-        )
-    except AmbiguousGenesis as exc:
-        return _refuse(str(exc))
     finally:
         store.close()
-
-    _render_divergence(applied=True)
-    return 0
 
 
 def _run_adopt(argv: list[str], *, vertex_path: Path | None = None) -> int:
@@ -1097,16 +1413,14 @@ def _run_adopt(argv: list[str], *, vertex_path: Path | None = None) -> int:
     db_path = _require_materialized_store(target_path)
 
     from atoms import Fact
-    from engine.sqlite_store import (
-        AmbiguousGenesis,
-        GenesisExists,
-        NoGenesis,
-        SqliteStore,
-    )
+    from engine.jsonl_store import open_canonical_store
+    from engine.sqlite_store import AmbiguousGenesis, GenesisExists, NoGenesis
     from painted import Block, Style, join_vertical, paint
 
-    store = SqliteStore(
-        path=db_path, serialize=lambda f: f.to_dict(), deserialize=Fact.from_dict
+    store = open_canonical_store(
+        resolve_canonical_path(target_path),
+        serialize=lambda f: f.to_dict(),
+        deserialize=Fact.from_dict,
     )
     try:
         receipt = store.adopt_lineage(args.lineage)
@@ -1196,6 +1510,10 @@ def _run_store_ticks(argv: list[str], *, vertex_path: Path | None = None) -> int
         # RC=1 with a surfaced message, matching stats/verify, not ticks'
         # prior silent RC=0-empty. (decision/design/
         # store-verb-existence-exit-code-parity)
+        # The gate runs FIRST: _require_materialized_store resolves through
+        # ensure_index, which repairs a stale index — and a repaired index
+        # agrees with the log by construction. Judge, then resolve.
+        _gate_read(target_path)
         _require_materialized_store(target_path)
 
         # --chain spans the full hash chain (all_names) to agree with
@@ -1282,6 +1600,7 @@ def _run_store_stats(argv: list[str], *, vertex_path: Path | None = None) -> int
     def fetch():
         from engine.store_reader import StoreReader
 
+        _gate_read(target_path)
         store_path = _require_materialized_store(target_path)
         with StoreReader(store_path) as reader:
             # Explicit --kind is the SPEC §9.4 escape hatch — it overrides
@@ -1425,6 +1744,28 @@ def _run_reindex(argv: list[str], *, vertex_path: Path | None = None) -> int:
 def _run_store(
     argv: list[str], *, vertex_path: Path | None = None, observer: str | None = None
 ) -> int:
+    """Dispatch a store subcommand, converting a canonical-store refusal into
+    a rendered refusal rather than a traceback.
+
+    The refusals the subcommands raise themselves are caught locally, where
+    the message can be specific. This is the backstop for the ones raised by
+    the ``JsonlStore`` **constructor** — a derived index holding rows the log
+    never saw makes every open refuse, including the read-shaped
+    verify/stats/ticks/adopt paths that have no local catch because they do
+    not mutate history. Those printed a raw traceback; they now say what is
+    wrong with the store.
+    """
+    from engine.jsonl_store import JsonlCanonicalUnsupported
+
+    try:
+        return _dispatch_store(argv, vertex_path=vertex_path, observer=observer)
+    except JsonlCanonicalUnsupported as exc:
+        return _refuse_store(str(exc))
+
+
+def _dispatch_store(
+    argv: list[str], *, vertex_path: Path | None = None, observer: str | None = None
+) -> int:
     """Run store command via painted CLI harness.
 
     ``observer`` is the invocation-level identity (the global ``--observer``
@@ -1441,6 +1782,8 @@ def _run_store(
         return _run_rebirth(argv[1:], vertex_path=vertex_path)
     if argv and argv[0] == "reanchor":
         return _run_reanchor(argv[1:], vertex_path=vertex_path)
+    if argv and argv[0] == "export":
+        return _run_export(argv[1:], vertex_path=vertex_path)
     if argv and argv[0] == "absorb":
         return _run_absorb(argv[1:], vertex_path=vertex_path, observer=observer)
     if argv and argv[0] == "adopt":

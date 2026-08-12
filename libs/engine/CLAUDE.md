@@ -137,8 +137,66 @@ The Store protocol is append-only: `append()`, `since(cursor)`, `between(start, 
 | Store | Backing | Use case |
 |-------|---------|----------|
 | `EventStore` | In-memory (optional JSONL) | Tests, ephemeral |
-| `SqliteStore` | SQLite (WAL mode) | Production, concurrent reads |
-| `FileStore` | JSONL file | Simple persistence |
+| `SqliteStore` | SQLite (WAL mode) | sqlite-canonical stores |
+| `JsonlStore` | Append-only JSONL log + derived SQLite index | **Production** — the canonical shape |
+| `FileStore` | JSONL file | Legacy, pre-Receipt. Do not build on it. |
+
+**`JsonlStore` is a `SqliteStore` subclass, not an alternative to it.** The
+log is canonical; sqlite is a rebuildable index over it. All reads
+(`since`/`between`/`StoreReader`/FTS) are inherited byte-for-byte unchanged —
+only durability order is overridden: one flushed+fsynced log line, then the
+index row commits. Catch-up on open tails the log forward from a persisted
+byte offset, or rebuilds the index if the offset can't be trusted.
+
+**Which store a vertex gets is the store locator's extension**
+(`engine/residence.py` — the one place that answers "which file is
+authoritative"):
+
+```python
+from engine.residence import canonical_store_path, is_jsonl_canonical
+from engine.jsonl_store import ensure_index, open_canonical_store, resolved_index
+
+resolved_index(ast.store, vertex_path)       # → sqlite path to READ from
+canonical_store_path(ast.store, vertex_path) # → the authoritative artifact
+open_canonical_store(canonical, **kw)        # → JsonlStore or SqliteStore
+ensure_index(canonical)                      # → materialize a missing index
+```
+
+`resolved_index` is `residence.resolve_store_path` with materialization
+folded in. Resolve reads through it, never through the pure function: the
+pure one can only *name* a missing index, so a fresh clone's first read
+evaluates `exists()` before anything builds it and answers "empty store"
+once. **Writers resolve `canonical_store_path`, never an index path** — a
+`.db` looks identical whether it is canonical or derived, so a resolved
+index cannot answer the only question a writer may ask.
+
+`store "….jsonl"` → `JsonlStore` over the sibling `….db`; `store "….db"` →
+plain `SqliteStore`. Never construct a store for a vertex by hand — go
+through `open_canonical_store`, or a direct sqlite write becomes an
+out-of-band insert the log doesn't account for.
+
+Open-time detection of such writes is cheap by design and correspondingly
+narrow: stamped row counts vs `COUNT(*)` catch **inserts**, the last-line
+integrity compare catches an edit to the **last consumed** row, and an
+untrustworthy offset (outside `0..size`), a shrunk log or a torn tail trigger
+a rebuild. An in-place edit to an **interior** row opens clean — content
+verification is `verify_chain`'s job, since a tick's window hash commits to
+the facts it sealed. A **live-edge** fact (not yet sealed by a boundary) has
+no such commitment, so editing it is undetectable until the next tick — the
+same custody boundary `verify_facts` documents for signature strips.
+
+**Verification is `engine/canonical_audit.py`, and it never opens a store.**
+Open-time detection *repairs* (catch-up, truncate, rebuild); an auditor that
+repaired would erase the evidence it exists to inspect. So `audit_agreement`
+(offset parity, count parity, last-line agreement — the default gate every
+store read verb runs) and `audit_deep` (`sl store verify --deep`: every log
+line compared field-for-field and in order against the index, then the tick
+chain re-derived from canonical content) read the log with plain file IO
+through the codec and the index with a read-only connection. `row_matches`
+lives there and `JsonlStore._row_matches` delegates to it — one definition of
+"the same row" for both contracts. A **coordinated** edit of an unsealed fact
+in BOTH artifacts stays out of scope by design; its witnesses are the fact's
+signature and the next seal.
 
 **StoreReader** — read-only inspector:
 

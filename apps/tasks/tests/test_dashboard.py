@@ -17,11 +17,11 @@ from strange_loops.commands.dashboard import (
     ProjectSummary,
     TaskRow,
     _changes_summary,
+    _dashboard_view,
     _fetch,
     _fetch_with_detail,
     _project_header,
     _relative_time,
-    _render,
     _render_detail_pane_block,
     _render_fact_row_block,
     _render_header_block,
@@ -248,7 +248,7 @@ class TestRender:
             height=24,
         )
         state = self._make_state()
-        block = _render(ctx, state)
+        block = _dashboard_view(state, ctx.fidelity, ctx.width)
         # Extract text from block rows
         text = "\n".join("".join(c.char for c in block.row(y)) for y in range(block.height))
         assert "t1" in text
@@ -269,7 +269,7 @@ class TestRender:
             height=24,
         )
         state = self._make_state()
-        block = _render(ctx, state)
+        block = _dashboard_view(state, ctx.fidelity, ctx.width)
         text = "".join(c.char for c in block.row(0))
         assert "2 tasks" in text
 
@@ -288,7 +288,7 @@ class TestRender:
         state = self._make_state(
             project=ProjectSummary(total=10, decisions=3, threads=2, plans=1),
         )
-        block = _render(ctx, state)
+        block = _dashboard_view(state, ctx.fidelity, ctx.width)
         text = "\n".join("".join(c.char for c in block.row(y)) for y in range(block.height))
         assert "Project" in text
         assert "10 facts" in text
@@ -747,3 +747,61 @@ class TestDashboardSurfaceState:
         assert surface._selected == 1  # clamped
         surface._move_selection(1)  # still clamped
         assert surface._selected == 1
+
+
+class TestDashboardReadsTheWorkspaceStore:
+    """friction:tasks-read-write-residence-split — the dashboard's own fetches.
+
+    The task list (``fold_all_tasks``) and the fact counts beside it must read
+    the same store: a packaged vertex, a workspace named only by the cwd.
+    """
+
+    def _packaged_vertex(self, tmp_path: Path) -> Path:
+        from strange_loops.lifecycle import tasks_vertex_path
+
+        pkg = tmp_path / "pkg" / "loops"
+        pkg.mkdir(parents=True)
+        vertex = pkg / "tasks.vertex"
+        vertex.write_text(tasks_vertex_path().read_text())
+        return vertex
+
+    @pytest.fixture
+    def workspace(self, tmp_path: Path, monkeypatch) -> Path:
+        vertex = self._packaged_vertex(tmp_path)
+        ws = tmp_path / "workspace"
+        ws.mkdir()
+        monkeypatch.chdir(ws)
+        monkeypatch.setattr("strange_loops.store._PKG_ROOT", vertex.parent.parent)
+        monkeypatch.setattr("strange_loops.lifecycle._TASKS_VERTEX", vertex)
+        return ws
+
+    def _emit(self) -> None:
+        from strange_loops.store import emit_fact, store_path
+
+        emit_fact(
+            store_path(),
+            "task.created",
+            "a",
+            {"name": "in-workspace", "title": "W", "base_branch": "main", "description": ""},
+        )
+
+    def test_fetch_counts_the_workspace_facts(self, workspace: Path):
+        from strange_loops.commands.dashboard import _fetch
+
+        self._emit()
+        state = _fetch()
+        assert [r.name for r in state.tasks] == ["in-workspace"]
+        assert state.fact_total == 1
+        # activity comes from _fetch's own vertex_facts call — a separate
+        # residence site from fold_all_tasks and vertex_summary.
+        assert state.tasks[0].activity is not None
+
+    def test_fetch_with_detail_sees_the_workspace_facts(self, workspace: Path):
+        from strange_loops.commands.dashboard import _fetch_with_detail
+
+        self._emit()
+        state = _fetch_with_detail("in-workspace")
+        assert [r.name for r in state.tasks] == ["in-workspace"]
+        assert state.fact_total == 1
+        assert state.tasks[0].activity is not None
+        assert [f["kind"] for f in state.detail_facts] == ["task.created"]

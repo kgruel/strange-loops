@@ -99,8 +99,8 @@ class TestStreamParity:
         its own channel: the ◆ rail glyph on TTY, the ``high`` word piped."""
         from .parity import information_text, raw_text
 
-        tty = stream_view(STREAM_DATA, Zoom.SUMMARY, 100, piped=False)
-        piped = stream_view(STREAM_DATA, Zoom.SUMMARY, 40, piped=True)
+        tty = stream_view(STREAM_DATA, Zoom.SUMMARY, 100)
+        piped = stream_view(STREAM_DATA, Zoom.SUMMARY, None)
         assert "◆" in raw_text(tty)  # high-tier rail glyph in the gutter
         assert "high" in information_text(piped)  # tier word in the ledger
         # The untiered task fact (no tier key) never invents a mid glyph.
@@ -120,8 +120,8 @@ class TestTicksParity:
         invents a mid glyph."""
         from .parity import information_text, raw_text
 
-        tty = ticks_view(TICKS_DATA, Zoom.SUMMARY, 100, piped=False)
-        piped = ticks_view(TICKS_DATA, Zoom.SUMMARY, 40, piped=True)
+        tty = ticks_view(TICKS_DATA, Zoom.SUMMARY, 100)
+        piped = ticks_view(TICKS_DATA, Zoom.SUMMARY, None)
         assert "◆" in raw_text(tty)
         assert "high" in information_text(piped)
         assert "untiered" in information_text(piped)

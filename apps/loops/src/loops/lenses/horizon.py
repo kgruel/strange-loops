@@ -276,17 +276,13 @@ def horizon_view(
     zoom: Zoom,
     width: int | None,
     palette: LoopsPalette | None = None,
-    *,
-    piped: bool | None = None,
 ) -> Block:
     """Render the open-window-against-boundary projection on both registers.
 
-    ``piped=True`` forces width=None — the agent channel never clips; every
+    ``width=None`` IS the piped register — the agent channel never clips; every
     count, boundary shape, condition, and absolute seal stamp is carried whole.
     """
-    piped = bool(piped)  # normalize None → False (the type says bool | None)
-    if piped:
-        width = None
+    piped = width is None
 
     p = palette or DEFAULT_PALETTE
     vertex = data.get("vertex", "")

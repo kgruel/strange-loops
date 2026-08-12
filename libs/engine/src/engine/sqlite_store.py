@@ -28,6 +28,8 @@ import json
 import rfc8785
 import sqlite3
 
+from . import jsonl_codec
+
 from ulid import ULID
 
 # Pre-created decoder for faster JSON parsing in hot paths.
@@ -99,17 +101,30 @@ def gen_id() -> str:
 _CHAIN_COLUMNS = ("prev_hash", "window_start", "fact_cursor", "window_hash",
                   "signature")
 
-_TICK_ROW_SQL = (
-    "id, name, ts, since, origin, payload, "
-    "prev_hash, window_start, fact_cursor, window_hash, signature"
-)
+# Persisted column order — ONE spelling, derived from the codec's field
+# tuples. The schema, the INSERTs, the SELECTs and the JSONL line all order
+# their columns the same way by construction; a row assembled for one is the
+# row the others take. Spelling it a second time is how a fact ends up with
+# its observer in the origin column.
+FACT_COLUMNS = (*jsonl_codec.FACT_FIELDS, "signature")
+TICK_COLUMNS = (*jsonl_codec.TICK_FIELDS, "signature")
+
+
+def _insert_sql(table: str, columns: tuple[str, ...]) -> str:
+    return (
+        f"INSERT INTO {table} ({', '.join(columns)}) "
+        f"VALUES ({', '.join('?' * len(columns))})"
+    )
+
+
+FACT_INSERT_SQL = _insert_sql("facts", FACT_COLUMNS)
+TICK_INSERT_SQL = _insert_sql("ticks", TICK_COLUMNS)
+
+_TICK_ROW_SQL = ", ".join(TICK_COLUMNS)
 
 # Delta-1 column set — used by the read-only verify path against stores that
 # predate the signature column (verify never migrates schema).
-_TICK_ROW_SQL_V1 = (
-    "id, name, ts, since, origin, payload, "
-    "prev_hash, window_start, fact_cursor, window_hash"
-)
+_TICK_ROW_SQL_V1 = ", ".join(jsonl_codec.TICK_FIELDS)
 
 
 def _canonical_bytes(obj: object) -> bytes:
@@ -526,13 +541,47 @@ class SqliteStore(Generic[T]):
             )
         else:
             signature = None
-        self._conn.execute(
-            "INSERT INTO facts (id, kind, ts, observer, origin, payload, signature) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (fact_id, d["kind"], d["ts"], observer, origin, payload_text, signature),
+        self._write_fact_row(
+            (fact_id, d["kind"], d["ts"], observer, origin, payload_text, signature)
         )
-        self._conn.commit()
         return fact_id
+
+    # ------------------------------------------------------------------
+    # Row-write seam. Both append paths assemble the full persisted row —
+    # exactly the 7-field fact / 11-field tick shape the commitment hashers
+    # and engine.jsonl_codec take — and hand it to these hooks, which own the
+    # INSERT *and* the commit. Subclasses (engine.jsonl_store) override them
+    # to make a durable JSONL line the authoritative write and sqlite the
+    # derived index, without touching mint logic or the read surface.
+    # ------------------------------------------------------------------
+
+    def _sync_derived_state(self) -> None:
+        """Seam: bring derived state up to date before reading chain state.
+
+        A no-op here — sqlite IS the state. A subclass whose sqlite is a
+        DERIVED index (engine.jsonl_store) must reconcile the index with its
+        canonical log *before* any mint reads chain state from it: a durable
+        but unindexed line would otherwise be invisible to the predecessor,
+        window-start and fact-cursor derivation, and the resulting mis-linked
+        tick lands in the canonical log where no rebuild can repair it.
+
+        Called at the top of ``append_tick``, before the ``prev_row`` read.
+        NOT called from ``current_chain_head``: its only production caller is
+        ``absorb_genesis``, which reads it inside ``BEGIN IMMEDIATE`` — a
+        reconcile there would commit mid-transaction. That path refuses
+        outright on a JSONL-canonical store, so the gap is closed already.
+        """
+
+    def _write_fact_row(self, row: tuple) -> None:
+        """Persist one assembled fact row (id, kind, ts, observer, origin,
+        payload, signature)."""
+        self._conn.execute(FACT_INSERT_SQL, row)
+        self._conn.commit()
+
+    def _write_tick_row(self, row: tuple) -> None:
+        """Persist one assembled tick row (_TICK_ROW_SQL order + signature)."""
+        self._conn.execute(TICK_INSERT_SQL, row)
+        self._conn.commit()
 
     def current_chain_head(self) -> str | None:
         """The row-identity hash of the latest *chained* tick, or None.
@@ -668,8 +717,7 @@ class SqliteStore(Generic[T]):
                     )
 
                 conn.execute(
-                    "INSERT INTO facts (id, kind, ts, observer, origin, payload, signature) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    FACT_INSERT_SQL,
                     (lineage_id, DECL_GENESIS, ts, observer, origin, payload_text, signature),
                 )
                 conn.execute(
@@ -996,6 +1044,26 @@ class SqliteStore(Generic[T]):
         )
         self._conn.commit()
 
+    def _meta_get(self, key: str) -> str | None:
+        """One ``store_meta`` value, or None. Never commits."""
+        row = self._conn.execute(
+            "SELECT value FROM store_meta WHERE key = ?", (key,)
+        ).fetchone()
+        return None if row is None else row[0]
+
+    def _meta_set(self, key: str, value: object) -> None:
+        """Stage one ``store_meta`` write — the caller owns the commit.
+
+        Staging, not committing: every meta write in this class is one part
+        of a larger atomic step (an offset stamp beside its index row, a
+        lineage claim inside a BEGIN IMMEDIATE), and a helper that committed
+        would split them.
+        """
+        self._conn.execute(
+            "INSERT OR REPLACE INTO store_meta (key, value) VALUES (?, ?)",
+            (key, str(value)),
+        )
+
     def _own_lineage_in_txn(self, conn: Any) -> str | None:
         """Resolve the store's own lineage id inside an open write transaction.
 
@@ -1263,6 +1331,11 @@ class SqliteStore(Generic[T]):
         """
         self._ensure_sync()
         self._ensure_chain_columns()
+        # Every read below (prev_row, the fact cursor, the signed-era probe)
+        # derives chain state from sqlite. Where sqlite is a derived index,
+        # it must have consumed the whole canonical log first — see
+        # _sync_derived_state.
+        self._sync_derived_state()
         d = tick.to_dict()
         payload_text = json.dumps(d["payload"], default=_mapping_proxy_default)
 
@@ -1306,13 +1379,7 @@ class SqliteStore(Generic[T]):
                     "is available — minting would break chain era-monotonicity"
                 )
 
-        self._conn.execute(
-            "INSERT INTO ticks (id, name, ts, since, origin, payload, "
-            "prev_hash, window_start, fact_cursor, window_hash, signature) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (*row, signature),
-        )
-        self._conn.commit()
+        self._write_tick_row((*row, signature))
 
     def reanchor(self) -> dict[str, Any]:
         """Recompute every commitment under the CURRENT canonical encoding.

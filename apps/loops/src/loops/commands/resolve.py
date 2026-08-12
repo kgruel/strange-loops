@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from engine.residence import canonical_store_path, resolve_store_path
 from loops.errors import (
     LoopsError,
     VertexNotFound,
@@ -671,9 +672,7 @@ def _topology_kind_keys_and_stores(
 
     # Fast path: try _topology facts from root's own store
     if ast.store is not None:
-        own_store = ast.store
-        if not own_store.is_absolute():
-            own_store = (root_vertex_path.parent / own_store).resolve()
+        own_store = resolve_store_path(ast.store, root_vertex_path)
         if own_store.exists():
             result = _try_topology_from_store(own_store)
             if result is not None:
@@ -1145,32 +1144,108 @@ def _resolve_writable_vertex(vertex_path: Path) -> Path | None:
 def _resolve_vertex_store_path(vertex_path: Path) -> Path | None:
     """Resolve store path from a vertex file. Returns None if no store configured.
 
-    For combinatorial vertices (combine block, no store), follows the first
-    combine entry to find the writable store.
+    Returns the **sqlite index** path: for a JSONL-canonical vertex (a
+    ``store`` locator ending ``.jsonl``) that is the sibling ``.db``, which
+    is what every read consumer connects to. See ``engine.residence``.
+
+    The canonical resolution plus ``ensure_index``, not an independent walk:
+    which constituent of a combine is the writable one must have exactly one
+    answer, and :func:`_resolve_vertex_canonical_store_path` (through
+    :func:`_resolve_writable_vertex`) is where it lives. ``ensure_index``
+    also materializes, so the fresh clone (log tracked, derived index not)
+    builds during resolution rather than being reported empty by the one
+    invocation that should have built it. Stat-only no-op once current.
 
     Raises:
         VertexNotFound: vertex_path doesn't exist
         VertexParseError: vertex_path has invalid syntax
     """
-    from lang.population import resolve_vertex
+    from engine.jsonl_store import ensure_index
 
-    ast = _parse_vertex(vertex_path)
+    canonical = _resolve_vertex_canonical_store_path(vertex_path)
+    return None if canonical is None else ensure_index(canonical)
 
-    if ast.store is not None:
-        store_path = Path(ast.store)
-        if not store_path.is_absolute():
-            store_path = (vertex_path.parent / store_path).resolve()
-        return store_path
 
-    # Follow combine → first entry's store
-    if ast.combine:
-        ref_path = resolve_vertex(ast.combine[0].name, loops_home())
-        if not ref_path.is_absolute():
-            ref_path = (vertex_path.parent / ref_path).resolve()
-        if ref_path.exists():
-            return _resolve_vertex_store_path(ref_path)
+def _resolve_vertex_canonical_store_path(vertex_path: Path) -> Path | None:
+    """Resolve the **canonical** store locator for a vertex. None if unstored.
 
-    return None
+    The write-side sibling of :func:`_resolve_vertex_store_path`. That one
+    answers "which sqlite file do I read from"; this one answers "which file
+    is authoritative", which is the only question a writer may ask. Feed the
+    result to :func:`engine.jsonl_store.open_canonical_store` — a resolved
+    index path cannot answer it, because a bare ``.db`` looks identical
+    whether it is canonical or derived.
+
+    Follows combine → the first constituent with a store, same as
+    :func:`_resolve_writable_vertex`.
+
+    Raises:
+        VertexNotFound: vertex_path doesn't exist
+        VertexParseError: vertex_path has invalid syntax
+    """
+    writable = _resolve_writable_vertex(vertex_path)
+    if writable is None:
+        return None
+    ast = _parse_vertex(writable)
+    if ast.store is None:
+        return None
+    return canonical_store_path(ast.store, writable)
+
+
+def emit_change_fact(vertex_path: Path, payload: dict[str, str]) -> None:
+    """Emit a `change` fact iff the vertex declares a change loop kind.
+
+    The declaration-mutating verbs (``add``/``rm``) all record their edit the
+    same way, so the recording lives here — beside
+    :func:`_resolve_vertex_canonical_store_path`, the resolution it turns on.
+    """
+    from lang import parse_vertex_file
+
+    try:
+        vf = parse_vertex_file(vertex_path)
+    except Exception:  # noqa: BLE001 — diagnostics fine, don't fail the mutation
+        return
+    if "change" not in (vf.loops or {}):
+        return
+
+    from datetime import datetime, timezone
+    from atoms import Fact
+    from engine.jsonl_store import open_canonical_store
+    from loops.commands.identity import resolve_observer
+
+    # The CANONICAL locator, not the resolved index: under a JSONL-canonical
+    # vertex a direct SqliteStore write here lands in the derived index only,
+    # and the next open refuses (JsonlCanonicalUnsupported) because the log
+    # does not account for the row. open_canonical_store is the one place
+    # that answers which file is authoritative.
+    # Never fail the mutation: the .vertex edit has already landed by the
+    # time we get here, so a store that refuses the append (a poisoned index
+    # raising JsonlCanonicalUnsupported from the JsonlStore constructor's
+    # catch-up, a missing key, a locked db) must degrade to a warning. The
+    # diagnostic is worth printing verbatim — its text is what tells the user
+    # their derived index has rows the log never saw.
+    try:
+        store_path = _resolve_vertex_canonical_store_path(vertex_path.resolve())
+        if store_path is None:
+            return
+
+        observer = resolve_observer()
+        fact = Fact(
+            kind="change",
+            observer=observer,
+            ts=datetime.now(timezone.utc).timestamp(),
+            payload=payload,
+            origin="",
+        )
+        store_path.parent.mkdir(parents=True, exist_ok=True)
+        with open_canonical_store(
+            store_path,
+            serialize=Fact.to_dict,
+            deserialize=Fact.from_dict,
+        ) as store:
+            store.append(fact)
+    except Exception as exc:  # noqa: BLE001 — diagnostics never fail the mutation
+        print(f"warning: change fact not emitted: {exc}", file=sys.stderr)
 
 
 def _resolve_named_store(name: str) -> Path:

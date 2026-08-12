@@ -6,10 +6,15 @@ surfaces assert the same truth with no parity check between them, so the green
 suite passes because each surface is tested in isolation.
 
 The pattern here checks the opposite: render ONE fetched ``data`` dict through
-BOTH registers of a register-split lens (``piped=True`` terse/agent, and
-``piped=False`` rich/TTY) and assert both carry the same *load-bearing
+BOTH registers of a register-split lens (``width=None`` terse/agent, and a
+concrete ``width`` rich/TTY) and assert both carry the same *load-bearing
 information content* — after chrome (ANSI, box-drawing, meters, sparklines,
 containment glyphs, alignment padding) is stripped.
+
+The register is the offered width, not a separate argument. painted offers a
+concrete width only at a real viewport, so ``width=None`` IS the pipe; there
+is no ``piped=`` kwarg that could claim one register while the width says the
+other (0.10.0 S1 — Rule 12, tests/test_architecture.py).
 
 The invariant (precisely)
 --------------------------
@@ -18,8 +23,7 @@ names, relative timestamps, and numeric flags (signed ratio, share %, span)
 derived from the fetch — must appear in the chrome-stripped text of BOTH the
 terse (piped, width-free) render and the rich (TTY, styled, width-bounded)
 render. Additionally the piped render must never truncate (no ``…`` ellipsis
-marker), because the agent channel inherits ``COLUMNS`` and a width-driven clip
-silently drops information.
+marker) — a width-driven clip on the agent channel silently drops information.
 
 It is deliberately NOT byte equality: the two registers may *encode* the same
 fact differently (type word ``instance`` vs glyph ``◆``; ``updated 2h ago`` vs
@@ -86,7 +90,7 @@ def raw_text(block: Block) -> str:
 # The parity assertion
 # ---------------------------------------------------------------------------
 
-# A register-split lens: (data, zoom, width, *, piped) -> Block
+# A register-split lens: (data, zoom, width) -> Block
 Lens = Callable[..., Block]
 
 
@@ -101,21 +105,22 @@ def assert_register_parity(
     load_bearing: Iterable[str],
     zoom: Zoom = Zoom.SUMMARY,
     tty_width: int = 100,
-    piped_width: int = 40,
 ) -> None:
     """Assert both registers of ``lens`` carry every load-bearing token.
 
-    - Renders ``lens(data, zoom, tty_width, piped=False)`` (rich TTY) and
-      ``lens(data, zoom, piped_width, piped=True)`` (terse agent channel).
-    - ``piped_width`` is intentionally NARROW to simulate a pipe that inherited
-      ``COLUMNS``: a faithful piped register forces ``width=None`` internally
-      and renders untruncated regardless.
+    - Renders ``lens(data, zoom, tty_width)`` (rich TTY) and
+      ``lens(data, zoom, None)`` (terse agent channel).
     - Every ``load_bearing`` token must appear in the chrome-stripped text of
       BOTH renders.
     - The piped render must contain no ``…`` (truncation would drop info).
+
+    There is no ``piped_width`` knob any more. It existed to simulate a pipe
+    that inherited ``COLUMNS`` — a lens claiming the piped register while
+    holding a concrete width. That state is now unreachable: the register IS
+    the width, so a narrow-piped render cannot be constructed to test.
     """
-    tty = lens(data, zoom, tty_width, piped=False)
-    piped = lens(data, zoom, piped_width, piped=True)
+    tty = lens(data, zoom, tty_width)
+    piped = lens(data, zoom, None)
 
     tty_info = information_text(tty)
     piped_info = information_text(piped)
@@ -125,9 +130,8 @@ def assert_register_parity(
     miss_tty = _missing(tokens, tty_info)
 
     assert "…" not in raw_text(piped), (
-        "piped register truncated (found '…') at width="
-        f"{piped_width} — the agent channel must force width=None.\n"
-        f"piped:\n{raw_text(piped)}"
+        "piped register truncated (found '…') at width=None — the agent "
+        f"channel must never clip.\npiped:\n{raw_text(piped)}"
     )
     assert not miss_piped, (
         f"terse/piped register dropped load-bearing tokens {miss_piped}.\n"
@@ -145,20 +149,16 @@ def assert_render_carries(
     *,
     load_bearing: Iterable[str],
     zoom: Zoom = Zoom.SUMMARY,
-    width: int = 100,
-    piped: bool | None = None,
+    width: int | None = 100,
 ) -> None:
     """Single-channel variant — assert one render carries the load-bearing set.
 
     Use for plain-vs-``--json`` parity: ``--json`` faithfully serialises the
     fetch ``data`` by construction, so the check reduces to "the plain render
-    also carries these dict-derived tokens." ``piped=None`` renders lenses that
-    take no ``piped`` kwarg (store/stats/ticks views).
+    also carries these dict-derived tokens." Pass ``width=None`` to check the
+    agent channel; a concrete ``width`` checks the TTY register.
     """
-    if piped is None:
-        block = lens(data, zoom, width)
-    else:
-        block = lens(data, zoom, width, piped=piped)
+    block = lens(data, zoom, width)
     miss = _missing(load_bearing, information_text(block))
     assert not miss, (
         f"render dropped load-bearing tokens {miss}.\n"

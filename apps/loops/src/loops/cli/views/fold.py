@@ -917,8 +917,11 @@ def run(argv: list[str], ctx: Invocation) -> int:
         fidelity=fidelity,
         format=fmt_format,
         surface_spec=surface_spec,
-        # Presentation register keys on the channel (TTY = human "Threads (N):"
-        # headers, pipe = terse "## KIND (N)"), decoupled from width/truncation.
+        # The presentation register (TTY = human "Threads (N):" headers, pipe
+        # = terse "## KIND (N)") is NOT carried here. It is read off the
+        # offered width at the lens: a viewportless destination is offered
+        # None, so `width is None` IS the channel and no second key can
+        # disagree with it (Rule 12, tests/test_architecture.py).
         # "cursor" (0.8.0, A11) carries the --at/--as-of mode/status/position
         # disclosure — read by the fold lens (mode-line) and by dispatch's
         # JSON branch (merged into the structured payload). "cut_resolver"
@@ -930,7 +933,6 @@ def run(argv: list[str], ctx: Invocation) -> int:
         # free via call_lens's existing signature-filtered dispatch; the
         # JSON branches merge the resolved dict in unconditionally too.
         render_context={
-            "piped": not ctx.isatty,
             "cut_resolver": _cut_resolver,
             **({"cursor": cursor_meta} if cursor_meta is not None else {}),
         },
@@ -1020,7 +1022,7 @@ def _run_why(
     from loops.lenses.provenance import why_view
 
     width = shutil.get_terminal_size().columns if ctx.isatty else None
-    block = why_view(prov, zoom, width, piped=not ctx.isatty)
+    block = why_view(prov, zoom, width)
     ctx.reporter.print_block(block)
     return 0
 
@@ -1489,7 +1491,7 @@ def _run_diff(
 
     width = shutil.get_terminal_size().columns if ctx.isatty else None
     block = diff_view(
-        meta1, meta2, rows, width, piped=not ctx.isatty, interval=interval,
+        meta1, meta2, rows, width, interval=interval,
     )
     ctx.reporter.print_block(block)
     return 0

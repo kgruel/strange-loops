@@ -2789,3 +2789,229 @@ class TestFtsGenerationBinding:
 
         vpath = self._seeded(tmp_path)
         assert vertex_search(vpath, "hello")
+
+
+class TestFoldStateLiveEdge:
+    """vertex_fold stamps the live-edge disclosure onto FoldState.
+
+    Same signal family and same suppression rule as ``unfolded``: head-only
+    (a historical position must not leak the head edge), single-store only
+    (the edge is per-store — witness order is per-member, A1/A9).
+    """
+
+    def test_head_fold_carries_edge(self, tmp_path):
+        from engine import vertex_fold
+
+        vpath = _create_vertex_file(
+            tmp_path, "edgy", '  decision { fold { items "by" "topic" } }'
+        )
+        _seed_facts(tmp_path / "store.db", [
+            {"kind": "decision", "ts": 1000.0, "payload": {"topic": "a"}},
+            {"kind": "decision", "ts": 2000.0, "payload": {"topic": "b"}},
+        ])
+        state = vertex_fold(vpath)
+        # Pre-chain fixture schema: no chained tick → whole store on edge.
+        assert state.edge_facts == 2
+        assert state.edge_since == 1000.0
+
+    def test_as_of_suppresses_edge(self, tmp_path):
+        """Historical projection: edge stats are head-scoped and would leak —
+        same rule that already blanks ``unfolded`` under a cutoff."""
+        from engine import vertex_fold
+
+        vpath = _create_vertex_file(
+            tmp_path, "edgy2", '  decision { fold { items "by" "topic" } }'
+        )
+        _seed_facts(tmp_path / "store.db", [
+            {"kind": "decision", "ts": 1000.0, "payload": {"topic": "a"}},
+        ])
+        state = vertex_fold(vpath, as_of=1500.0)
+        assert state.edge_facts == 0
+        assert state.edge_since is None
+
+    def test_no_store_defaults(self, tmp_path):
+        from engine import vertex_fold
+
+        vpath = tmp_path / "nostore.vertex"
+        vpath.write_text(
+            'name "nostore"\n\nloops {\n  decision { fold { items "by" "topic" } }\n}\n'
+        )
+        state = vertex_fold(vpath)
+        assert state.edge_facts == 0
+        assert state.edge_since is None
+
+    def test_fold_rows_and_edge_describe_one_commit(self, tmp_path, monkeypatch):
+        """sol HIGH r2, confirmed P2 — the neither-snapshot repro.
+
+        ``live_edge()`` became internally coherent in r1, but it ran as its own
+        autocommit statement, separate from the per-kind reads whose rows it
+        annotates. A fact appended between them yielded a fold describing one
+        commit and an edge disclosure describing another:
+
+            returned:              keys ["before"],            edge_facts 1
+            coherent pre-commit:   keys ["before"],            edge_facts 0
+            coherent post-commit:  keys ["before", "after"],   edge_facts 1
+
+        The returned pair is true in neither. vertex_fold now holds ONE
+        ``StoreReader.snapshot()`` across every contributing read, so whichever
+        commit it lands on, the rows and the edge agree about it.
+        """
+        from datetime import datetime, timezone
+
+        from engine import Tick, vertex_fold
+        from engine.sqlite_store import SqliteStore
+        from engine.store_reader import StoreReader
+
+        def _store(path):
+            return SqliteStore(
+                path=path, serialize=lambda e: e, deserialize=lambda d: d
+            )
+
+        vpath = _create_vertex_file(
+            tmp_path, "coherent", '  decision { fold { items "by" "topic" } }'
+        )
+        db = tmp_path / "store.db"
+
+        writer = _store(db)
+        writer.append({
+            "kind": "decision", "ts": 100.0, "observer": "o",
+            "payload": {"topic": "before"},
+        })
+        writer.append_tick(
+            Tick(name="seal", ts=datetime(2025, 6, 1, tzinfo=timezone.utc),
+                 payload={}, origin="v")
+        )
+        writer.close()
+
+        # Land the concurrent append exactly where sol did: after the per-kind
+        # fold reads, immediately before the edge read.
+        original = StoreReader.live_edge
+        fired = False
+
+        def racing_live_edge(self):
+            nonlocal fired
+            if not fired:
+                fired = True
+                concurrent = _store(db)
+                concurrent.append({
+                    "kind": "decision", "ts": 200.0, "observer": "o",
+                    "payload": {"topic": "after"},
+                })
+                concurrent.close()
+            return original(self)
+
+        monkeypatch.setattr(StoreReader, "live_edge", racing_live_edge)
+        state = vertex_fold(vpath)
+        monkeypatch.undo()
+
+        assert fired, "the interleaving never ran — the hook missed live_edge"
+
+        section = next(s for s in state.sections if s.kind == "decision")
+        keys = sorted(i.payload["topic"] for i in section.items)
+        pair = (keys, state.edge_facts)
+        assert pair in (
+            (["before"], 0),               # snapshot pinned before the commit
+            (["after", "before"], 1),      # snapshot pinned after the commit
+        ), (
+            f"vertex_fold returned rows {keys} with edge_facts "
+            f"{state.edge_facts} — true in neither coherent snapshot"
+        )
+        # Under a read transaction opened at the first per-kind read, the
+        # concurrent commit is invisible for the rest of the fold.
+        assert pair == (["before"], 0)
+
+
+class TestStoreOverride:
+    """``store=``: fold this vertex's declarations over THAT store.
+
+    The declaration keeps answering *what* (folds, kinds, store kind); the
+    override answers only *where* — what an app with one store per workspace
+    needs when its vertex file ships inside the package.
+    """
+
+    def _vertex(self, tmp_path: Path) -> Path:
+        return _create_vertex_file(
+            tmp_path, "test", '  decision { fold { items "by" "topic" } }'
+        )
+
+    def test_db_override_reads_the_other_store(self, tmp_path):
+        from engine import vertex_facts, vertex_read, vertex_summary
+
+        vpath = self._vertex(tmp_path)
+        elsewhere = tmp_path / "elsewhere" / "store.db"
+        elsewhere.parent.mkdir()
+        _seed_facts(elsewhere, [
+            {"kind": "decision", "ts": 1000.0, "payload": {"topic": "auth", "message": "over there"}},
+        ])
+
+        # The declared store does not exist at all — only the override does.
+        assert vertex_read(vpath) == {"decision": {"items": {}}}
+
+        items = vertex_read(vpath, store=elsewhere)["decision"]["items"]
+        assert items["auth"]["message"] == "over there"
+        assert vertex_summary(vpath, store=elsewhere)["facts"]["total"] == 1
+        facts = vertex_facts(vpath, 0, 2000.0, store=elsewhere)
+        assert [f["payload"]["topic"] for f in facts] == ["auth"]
+
+    def test_jsonl_override_resolves_the_derived_index(self, tmp_path):
+        from atoms import Fact
+        from engine import vertex_read
+        from engine.jsonl_store import JsonlStore
+
+        vpath = self._vertex(tmp_path)
+        log = tmp_path / "elsewhere" / "store.jsonl"
+        log.parent.mkdir()
+        with JsonlStore(
+            path=log.with_suffix(".db"),
+            log_path=log,
+            serialize=Fact.to_dict,
+            deserialize=Fact.from_dict,
+        ) as store:
+            store.append(Fact.of("decision", "test", topic="auth", message="from the log"))
+
+        # The canonical locator is the log; the read resolves its index.
+        items = vertex_read(vpath, store=log)["decision"]["items"]
+        assert items["auth"]["message"] == "from the log"
+
+    def test_a_relative_override_is_refused_as_ambiguous(self, tmp_path, monkeypatch):
+        """sol r4 finding 3: two anchors, one silent pick.
+
+        A DECLARED ``store "./x.db"`` has only one anchor — the vertex file.
+        An override arrives from a caller with a cwd, and resolving it against
+        the vertex directory made a packaged vertex plus ``store="data/x.db"``
+        read the package-adjacent database instead of the workspace's. The
+        caller knows which it meant; make it say so.
+        """
+        from engine import vertex_facts, vertex_read, vertex_summary, vertex_ticks
+
+        vpath = self._vertex(tmp_path)
+        monkeypatch.chdir(tmp_path)
+
+        for call in (
+            lambda: vertex_read(vpath, store="data/store.db"),
+            lambda: vertex_summary(vpath, store="data/store.db"),
+            lambda: vertex_facts(vpath, 0, 2000.0, store="data/store.db"),
+            lambda: vertex_ticks(vpath, 0, 2000.0, store="data/store.db"),
+        ):
+            with pytest.raises(ValueError, match="must be an absolute path"):
+                call()
+
+    def test_override_refused_on_aggregate(self, tmp_path, monkeypatch):
+        from engine import vertex_read
+
+        home = tmp_path / "home"
+        (home / "alpha").mkdir(parents=True)
+        (home / "alpha" / "alpha.vertex").write_text(
+            'name "alpha"\nstore "./store.db"\n'
+            'loops { decision { fold { items "by" "topic" } } }\n'
+        )
+        _seed_facts(home / "alpha" / "store.db", [])
+        agg = tmp_path / "agg.vertex"
+        agg.write_text(
+            'name "agg"\ncombine { vertex "alpha" }\n'
+            'loops { decision { fold { items "by" "topic" } } }\n'
+        )
+        monkeypatch.setenv("LOOPS_HOME", str(home))
+
+        with pytest.raises(ValueError, match="combine/discover aggregate"):
+            vertex_read(agg, store=home / "alpha" / "store.db")

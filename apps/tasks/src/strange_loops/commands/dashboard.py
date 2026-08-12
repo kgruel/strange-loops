@@ -21,7 +21,12 @@ if TYPE_CHECKING:
     from painted import CliContext
     from painted.core.block import Block
 
-from strange_loops.lifecycle import fold_all_tasks, project_vertex_path, tasks_vertex_path
+from strange_loops.lifecycle import (
+    fold_all_tasks,
+    project_vertex_path,
+    tasks_vertex_path,
+    workspace_store,
+)
 from strange_loops.store import filter_task_facts
 
 # Column widths
@@ -208,9 +213,10 @@ def _fetch() -> DashboardState:
     from engine import vertex_facts, vertex_summary
 
     vp = tasks_vertex_path()
+    sp = workspace_store(vp)
     tasks = fold_all_tasks(vp)
-    all_facts = vertex_facts(vp, 0, float("inf"))
-    fact_total = vertex_summary(vp)["facts"]["total"]
+    all_facts = vertex_facts(vp, 0, float("inf"), store=sp)
+    fact_total = vertex_summary(vp, store=sp)["facts"]["total"]
 
     rows: list[TaskRow] = []
     for task in tasks:
@@ -239,9 +245,10 @@ def _fetch_with_detail(selected_name: str | None) -> DashboardState:
     from engine import vertex_facts, vertex_summary
 
     vp = tasks_vertex_path()
+    sp = workspace_store(vp)
     tasks = fold_all_tasks(vp)
-    all_facts = vertex_facts(vp, 0, float("inf"))
-    fact_total = vertex_summary(vp)["facts"]["total"]
+    all_facts = vertex_facts(vp, 0, float("inf"), store=sp)
+    fact_total = vertex_summary(vp, store=sp)["facts"]["total"]
 
     # Session status
     session_facts = [f for f in all_facts if f["kind"] in ("session.start", "session.end")]
@@ -296,20 +303,29 @@ async def _fetch_stream() -> AsyncIterator[DashboardState]:
 # -- Render --
 
 
-def _render(ctx: CliContext, state: DashboardState) -> Block:
-    """Render dashboard state to Block — zoom-aware."""
+def _dashboard_view(state: DashboardState, fidelity, width: int | None) -> Block:
+    """Render dashboard state to Block — the (data, fidelity, width) contract.
+
+    ``width`` is painted's offered allocation: terminal geometry at a real
+    viewport, ``None`` at a pipe or a file redirect. "Am I piped" is derived
+    from ``width is None``; the renderer is never told separately, so the two
+    can never disagree.
+    """
     from painted import Zoom
 
-    if ctx.zoom == Zoom.MINIMAL:
-        return _render_minimal(state, ctx.width)
-    if ctx.zoom == Zoom.SUMMARY:
-        return _render_summary(state, ctx.width)
-    if ctx.zoom == Zoom.DETAILED:
-        return _render_detailed(state, ctx.width)
-    return _render_full(state, ctx.width)
+    from strange_loops.lenses import zoom_from_fidelity
+
+    zoom = zoom_from_fidelity(fidelity)
+    if zoom == Zoom.MINIMAL:
+        return _render_minimal(state, width)
+    if zoom == Zoom.SUMMARY:
+        return _render_summary(state, width)
+    if zoom == Zoom.DETAILED:
+        return _render_detailed(state, width)
+    return _render_full(state, width)
 
 
-def _render_minimal(state: DashboardState, width: int) -> Block:
+def _render_minimal(state: DashboardState, width: int | None) -> Block:
     """Zoom 0: one-line status counts."""
     from painted import truncate
     from painted.core.block import Block
@@ -324,7 +340,11 @@ def _render_minimal(state: DashboardState, width: int) -> Block:
     for status, n in sorted(counts.items()):
         parts.append(f"{n} {status}")
 
-    return truncate(Block.text(", ".join(parts), p.muted), width)
+    line = Block.text(", ".join(parts), p.muted)
+    # width=None is the pipe: render at natural width, never clip. The status
+    # counts are the whole payload here — truncating them on the agent channel
+    # would drop information the consumer came for.
+    return line if width is None else truncate(line, width)
 
 
 _CLOSED_STATUSES = {"closed"}
@@ -397,7 +417,7 @@ def _render_task_table(
             blocks.append(Block.text("", p.muted, width=1))
 
 
-def _render_summary(state: DashboardState, width: int) -> Block:
+def _render_summary(state: DashboardState, width: int | None) -> Block:
     """Zoom 1 (default): table for visible tasks, closed collapsed."""
     from painted.core.block import Block
     from painted.core.compose import join_vertical
@@ -426,7 +446,7 @@ def _render_summary(state: DashboardState, width: int) -> Block:
     return join_vertical(*blocks)
 
 
-def _render_detailed(state: DashboardState, width: int) -> Block:
+def _render_detailed(state: DashboardState, width: int | None) -> Block:
     """Zoom 2 (-v): table with metadata, closed listed individually."""
     from painted.core.block import Block
     from painted.core.compose import join_horizontal, join_vertical
@@ -461,7 +481,7 @@ def _render_detailed(state: DashboardState, width: int) -> Block:
     return join_vertical(*blocks)
 
 
-def _render_full(state: DashboardState, width: int) -> Block:
+def _render_full(state: DashboardState, width: int | None) -> Block:
     """Zoom 3 (-vv): all tasks in table with metadata + store stats."""
     from painted.core.block import Block
     from painted.core.compose import join_vertical
@@ -932,7 +952,7 @@ def run_dashboard(argv: list[str]) -> int:
 
     return run_cli(
         effective,
-        render=_render,
+        renderer=_dashboard_view,
         fetch=_fetch,
         fetch_stream=_fetch_stream,
         handlers={OutputMode.INTERACTIVE: _run_interactive},

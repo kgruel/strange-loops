@@ -83,7 +83,12 @@ def _root_data(vp) -> dict:
 
 def _render(command: str, vp, zoom: Zoom, *, piped: bool):
     """Render one command over the fixture on one channel — the real fetch+lens
-    path each CLI verb uses, minus the run_cli plumbing."""
+    path each CLI verb uses, minus the run_cli plumbing.
+
+    The channel IS the offered width: painted offers geometry only at a real
+    viewport, so the piped channel is exactly ``width=None``. No lens is told
+    the channel separately.
+    """
     width = None if piped else _TTY_WIDTH
 
     if command == "read":
@@ -91,49 +96,49 @@ def _render(command: str, vp, zoom: Zoom, *, piped: bool):
         from loops.lenses.fold import fold_view
         from loops.surface import project
 
-        return fold_view(project(fetch_fold(vp)), zoom, width, piped=piped)
+        return fold_view(project(fetch_fold(vp)), zoom, width)
 
     if command == "stream":
         from loops.commands.fetch import fetch_stream
         from loops.lenses.stream import stream_view
 
-        return stream_view(fetch_stream(vp, since="3650d"), zoom, width, piped=piped)
+        return stream_view(fetch_stream(vp, since="3650d"), zoom, width)
 
     if command in ("ticks", "ticks-chain"):
         from loops.lenses.store import tick_chain_view
 
         data = _ticks_data(vp, chain=command == "ticks-chain")
-        return tick_chain_view(data, zoom, width, piped=piped)
+        return tick_chain_view(data, zoom, width)
 
     if command == "ls-root":
         from loops.lenses.vertices import vertices_view
 
-        return vertices_view(_root_data(vp), zoom, width, piped=piped)
+        return vertices_view(_root_data(vp), zoom, width)
 
     if command == "confluence":
         from loops.commands.fetch import fetch_confluence
         from loops.lenses.confluence import confluence_view
 
-        return confluence_view(fetch_confluence(vp), zoom, width, piped=piped)
+        return confluence_view(fetch_confluence(vp), zoom, width)
 
     if command == "graph":
         from loops.commands.fetch import fetch_graph
         from loops.lenses.graph import graph_view
 
-        return graph_view(fetch_graph(vp), zoom, width, piped=piped)
+        return graph_view(fetch_graph(vp), zoom, width)
 
     if command == "horizon":
         from loops.commands.fetch import fetch_horizon
         from loops.lenses.horizon import horizon_view
 
-        return horizon_view(fetch_horizon(vp), zoom, width, piped=piped)
+        return horizon_view(fetch_horizon(vp), zoom, width)
 
     if command == "ls-kind":
         from loops.commands.ls import fetch_kind_stat
         from loops.lenses.declarations import kind_stat_view
 
         data = fetch_kind_stat(str(vp), "decision")
-        return kind_stat_view(data, zoom, width, piped=piped)
+        return kind_stat_view(data, zoom, width)
 
     raise AssertionError(f"unknown command {command}")
 

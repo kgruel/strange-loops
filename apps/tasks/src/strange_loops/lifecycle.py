@@ -25,6 +25,27 @@ def project_vertex_path() -> Path:
     return _PROJECT_VERTEX
 
 
+def workspace_store(vp: Path) -> Path:
+    """The canonical task store a read of *vp* must resolve, for this workspace.
+
+    The reader half of the split ``store.store_path`` documents for writers:
+    the declaration answers *what kind* of store (``.db`` → sqlite-canonical,
+    ``.jsonl`` → JSONL-canonical, per ``engine.residence``); the process cwd
+    answers *where*. Reads went through ``engine.vertex_*`` with the vertex
+    file alone, which resolves package-relative — so a worker wrote its
+    worktree's store and read the packaged one, and saw zero tasks. Passing
+    this as ``store=`` restores the same contract on both sides: one task
+    store per workspace.
+
+    Canonical, not the index: ``engine``'s readers resolve (and materialize)
+    the derived index for a ``.jsonl`` locator themselves.
+    """
+    from lang import parse_vertex_file
+
+    declared = Path(parse_vertex_file(vp).store or "data/tasks.db")
+    return declared if declared.is_absolute() else Path.cwd() / declared
+
+
 def _extract_task(states: dict[str, dict], name: str) -> dict | None:
     """Extract a single task's state from folded specs."""
     created = states.get("task.created", {}).get("items", {}).get(name)
@@ -74,12 +95,12 @@ def _extract_task(states: dict[str, dict], name: str) -> dict | None:
 
 def fold_task_state(vp: Path, name: str) -> dict | None:
     """Fold task facts into current state for one task via vertex_read."""
-    states = vertex_read(vp)
+    states = vertex_read(vp, store=workspace_store(vp))
     return _extract_task(states, name)
 
 
 def fold_all_tasks(vp: Path) -> list[dict]:
     """Fold all tasks from the vertex store via vertex_read."""
-    states = vertex_read(vp)
+    states = vertex_read(vp, store=workspace_store(vp))
     names = sorted(states.get("task.created", {}).get("items", {}).keys())
     return [s for name in names if (s := _extract_task(states, name)) is not None]

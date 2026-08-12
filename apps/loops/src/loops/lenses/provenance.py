@@ -57,16 +57,16 @@ def why_view(
     zoom: Zoom,
     width: int | None,
     *,
-    piped: bool | None = None,
     palette: LoopsPalette | None = None,
 ) -> Block:
-    """Render a Provenance ledger at the given fidelity."""
+    """Render a Provenance ledger at the given fidelity.
+
+    ``width=None`` IS the agent channel: painted offers a concrete width only
+    at a real viewport, so a pipe that inherited COLUMNS can never truncate
+    the ledger (parity.py's contract).
+    """
     p = palette or DEFAULT_PALETTE
-    is_piped = (width is None) if piped is None else piped
-    # The agent channel is information-faithful: force width=None so a pipe that
-    # inherited COLUMNS never truncates the ledger (parity.py's contract).
-    if is_piped:
-        width = None
+    is_piped = width is None
     address = f"{data.kind}/{data.key}"
 
     if data.mode == "empty":

@@ -200,3 +200,67 @@ at exit 0.
 
 Tests: `TestZeroAddressCite` (4: no-ref-field refusal, resolving-message
 composition with #4, empty `ref=` refusal, all-inert still stores).
+
+## Round 2 addendum — chw-sol-r2-f1-malformed-token-evades-gate (HIGH) — `a52017d`
+
+Sol r2 verified the six r1 fixes PASS across evasion variants but found the
+cite gate's `ref_addrs` counted every non-empty comma token, so malformed
+tokens (`ref=:x`, `ref=kind:`, quoted prose) evaded the zero-address refusal:
+the canonical resolver rejects those shapes, so zero real addresses produced
+neither resolved nor unresolved entries and read as "all inert" — empty cites
+stored at exit 0.
+
+Files: `apps/loops/src/loops/commands/resolve.py`,
+`apps/loops/src/loops/commands/emit.py`,
+`apps/loops/tests/test_cite_vertex_slot.py`.
+
+Fix per ruling (reuse, don't re-validate): the resolver's ref-field token
+acceptance is extracted as `resolve.parse_ref_token` — non-empty, no internal
+whitespace (prose), `Address.parse` succeeding WITH a kind —
+`_resolve_entity_refs`' loop now calls it, and the cite gate counts only
+tokens it accepts. One spelling of the discriminator, shared by both call
+sites. Semantics: valid-address-but-undeclared-kind stays inert
+(provenance-worthy, counts and stores); an unparseable token never counts;
+ALL tokens malformed refuses exit 2 like zero-address; a malformed token
+riding a storing cite gets a per-token WARN on stderr with storage unchanged
+(the raw token stays in the ref payload — verified in the store:
+`ref=":x,nosuchkind:zzz"` stores payload ref `":x,nosuchkind:zzz"`).
+
+Before (all exit 0, silent store):
+```
+$ loops emit citev cite 'ref=:x'              → stored: cite/<no-fold> @ …
+$ loops emit citev cite 'ref=kind:'           → stored
+$ loops emit citev cite 'ref=not an address'  → stored
+```
+After:
+```
+$ loops emit citev cite 'ref=:x'
+exit=2  stderr: ERROR: ref ':x' does not parse as an address (kind:key) /
+ERROR: cite refused — none of its 1 ref token parses as an address; …
+nothing stored
+```
+`kind:` and prose identical. Mixed cases store with WARN:
+```
+$ loops emit citev cite 'ref=:x,nosuchkind:zzz'   # inert rescues
+exit=0  stderr: WARN: ref ':x' does not parse as an address (kind:key) —
+kept as raw text, not a ref / stored: …
+$ loops emit citev cite 'ref=:x,thread:other'     # valid rescues
+exit=0  WARN + stored (refs: 1 resolved)
+```
+Dry-run refuses (exit 2, no fact-JSON preview); `--json` refuses with empty
+stdout (the structured receipt only fires post-store); verb-first
+`cite t :x` refuses identically. r1 regressions held: all-inert
+`ref=nosuchkind:zzz` still stores; valid cites store with resolution.
+
+**Boundary consequence flagged for the arbiter**: the reused acceptance
+requires a kind (a self-describing ref needs a separator), so a bare
+separator-less token (`ref=barekey`) is malformed and now refuses when
+alone — previously it stored silently as dead text (never attempted, never
+pinned). Chosen because the alternative (bare `Address.parse` non-None)
+would count quoted prose as an address — prose parses as a bare key — and
+contradict the finding; a subset rule would have been a new validator.
+Pinned as `test_bare_separatorless_key_is_malformed`.
+
+Suite after: **2509 passed, 1 xfailed** from the worktree AND the
+`.loops`-bearing cwd (prior 2500 + 9 new tests in
+`TestMalformedTokenGate`). `./dev check` (architecture ratchet) 59 passed.

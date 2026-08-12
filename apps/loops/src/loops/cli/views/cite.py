@@ -69,14 +69,7 @@ def run(argv: list[str], ctx: Invocation) -> int:
                 )
                 return 2
             args.refs = args.refs[1:]
-            emit_ctx = Invocation(
-                reporter=ctx.reporter,
-                vertex_path=named,
-                vertex_name=_vertex_name(named),
-                observer=ctx.observer,
-                loops_home=ctx.loops_home,
-                isatty=ctx.isatty,
-            )
+            chosen = named
         else:
             refusal = ambiguous_local_vertex_refusal("cite", "sl cite <vertex> REF ...")
             if refusal is not None:
@@ -90,14 +83,15 @@ def run(argv: list[str], ctx: Invocation) -> int:
                     "  hint: use `sl cite <vertex> REF ...` or run from a vertex directory"
                 )
                 return 1
-            emit_ctx = Invocation(
-                reporter=ctx.reporter,
-                vertex_path=local.resolve(),
-                vertex_name=_vertex_name(local),
-                observer=ctx.observer,
-                loops_home=ctx.loops_home,
-                isatty=ctx.isatty,
-            )
+            chosen = local.resolve()
+        emit_ctx = Invocation(
+            reporter=ctx.reporter,
+            vertex_path=chosen,
+            vertex_name=_vertex_name(chosen),
+            observer=ctx.observer,
+            loops_home=ctx.loops_home,
+            isatty=ctx.isatty,
+        )
 
     emit_argv: list[str] = ["cite"]
     for r in args.refs:

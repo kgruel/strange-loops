@@ -186,3 +186,37 @@ Fix (arbiter: unify the stringification only), commit `3bb55891` on tip
 
 Verification: worktree suite **2518 passed / 1 xfailed** (2516 + why pin
 + duality pin); scratch-cwd suite identical; `./dev check` exit 0.
+
+## Addendum 3 — sol r6 remediation (replay identity switch)
+
+`finding:chw-sol-r6-f1-replay-identity-switch` (MEDIUM): on
+native-0/string-"0" coexistence the r5 per-step lookup attributed the
+native entry early, switched to the direct string hit once it appeared,
+and never cleared the earlier change log — `--why` mixed fields/history
+from BOTH engine items, dependent on emission order.
+
+Fix (arbiter: resolve the winning identity exactly once, string-wins),
+commit `586d1626` on tip `edc283a5`:
+
+- `_entry_for_key` DISSOLVES into `_winning_state_key(facts, key_field,
+  key)`: the winner is resolved once, before the replay loop, from the
+  chronology's raw key values — the exact string when present (the rule
+  `loops.foldkey` already documents), else the native value projecting to
+  the address, else the string itself (honest empty). The loop then reads
+  only `state[target].get(winner)`; the losing item contributes nothing
+  to fields/changed (its facts still appear in the shared chronology and
+  produce empty-`changed` applies — it is a different engine item sharing
+  a projected address; identity held at
+  `thread:fold-key-identity-native-vs-string`).
+- Contract sentence in the docstring: `--why` explains exactly the row
+  read renders.
+- Pins (`TestReplayIdentityNoSwitch`, test_why_flag.py): both emission
+  orders yield the string item's fields only — no `native_only` residue,
+  no native value smuggled in as a prior — and attribution CONTENT
+  (field → value → prior chain) is order-invariant (setter indexes track
+  chronology position, so content, not indexes, is the invariant). The r5
+  native-only pin (`TestNativeNumericKeyWhy`) stays green unchanged — a
+  lone native item is the winner and fully attributes.
+
+Verification: worktree suite **2521 passed / 1 xfailed** (2518 + 3 r6
+pins); scratch-cwd suite identical; `./dev check` exit 0.

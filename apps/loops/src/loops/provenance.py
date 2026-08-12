@@ -102,31 +102,45 @@ class Provenance:
 _META_PREFIX = "_"
 
 
-def _entry_for_key(bucket: dict, key: str) -> Any:
-    """The fold-state entry for a CLI string *key*, native-typed keys included.
+def _winning_state_key(facts: list[dict], key_field: str | None, key: str) -> Any:
+    """Resolve the ONE engine item this ``--why`` explains, BEFORE the replay.
 
-    The engine folds by the NATIVE payload value (``is not None`` acceptance
-    — a stored JSON numeric ``0`` keys the state by int ``0``), while the
-    address grammar, the source-fact buckets (``engine.vertex_reader``'s
-    ``f"{kind}/{key}"``), and ``surface._row_key`` all carry the STRING
-    form. Looking up by the string alone silently missed native-keyed
-    entries — ``--why`` on ``decision/0`` replayed the facts and attributed
-    nothing (finding:chw-sol-r5-provenance-key-lookup). Direct hit first
-    (the common case, and the tie-winner when a native ``0`` and a string
-    ``"0"`` coexist — that identity question is deliberately held at
-    thread:fold-key-identity-native-vs-string); otherwise match through the
-    SHARED projection (``loops.foldkey``), the same str() the Surface row
-    carries.
+    Contract: ``--why`` explains exactly the row read renders — one item,
+    for the whole replay. The engine folds by the NATIVE payload value
+    (``is not None`` acceptance — a stored JSON numeric ``0`` keys the
+    state by int ``0``), while the address grammar, the source-fact buckets
+    (``engine.vertex_reader``'s ``f"{kind}/{key}"``), and
+    ``surface._row_key`` all carry the STRING form
+    (finding:chw-sol-r5-provenance-key-lookup). When a native ``0`` and a
+    string ``"0"`` coexist, STRING WINS — the same tie rule the r5 lookup
+    documented — and the losing item contributes NOTHING to
+    fields/changed: it is a different engine item that happens to share a
+    projected address (identity held at
+    thread:fold-key-identity-native-vs-string). Resolving once here, from
+    the chronology's raw key values, is what makes that hold: the r6
+    defect (finding:chw-sol-r6-f1-replay-identity-switch) was a per-step
+    lookup that attributed the native entry early, switched to the string
+    entry when it appeared, and never cleared the earlier change log —
+    mixed-item output that depended on emission order.
+
+    Returns the raw payload key value whose fold-state entry the replay
+    attributes (the exact string when present; else the native value
+    projecting to it; else the string itself, yielding an honest empty).
     """
     from loops.foldkey import project_fold_key
 
-    entry = bucket.get(key)
-    if entry is None:
-        entry = next(
-            (v for k, v in bucket.items() if project_fold_key(k) == key),
-            {},
-        )
-    return entry
+    if not key_field:
+        return key
+    candidates: list[Any] = []
+    for payload in facts:
+        val = payload.get(key_field)
+        if val is None or project_fold_key(val) != key:
+            continue
+        if not any(v is val or v == val for v in candidates):
+            candidates.append(val)
+    if any(isinstance(v, str) and v == key for v in candidates):
+        return key
+    return candidates[0] if candidates else key
 
 
 def _fact_ref(payload: dict, index: int, total: int) -> FactRef:
@@ -177,6 +191,12 @@ def replay_attribution(
     fold_fn = build_fold_fn(fold_op)
     target = fold_op.target
     skip = {key_field or "", ""}
+    # The winning identity is fixed ONCE, before the replay — no mid-replay
+    # switching, no residual change log from a projected-address sibling
+    # (finding:chw-sol-r6-f1-replay-identity-switch; see _winning_state_key).
+    # The engine keys the replayed state by fold_op.key's raw payload value,
+    # so the winner resolves over that field.
+    winner = _winning_state_key(facts, fold_op.key, key)
 
     # Per-field change log: ordered list of (value, FactRef) for each field, in
     # the order the field's value actually changed. First appearance order of
@@ -191,7 +211,7 @@ def replay_attribution(
 
     for i, payload in enumerate(facts, start=1):
         fold_fn(state, payload)
-        entry = _entry_for_key(state.get(target, {}), key)
+        entry = state.get(target, {}).get(winner, {})
         if not isinstance(entry, dict):
             prev_entry = {}
             continue

@@ -309,13 +309,14 @@ class TestRunLsGrammar:
         assert rc == 2
         assert "don't mix" in err
 
-    def test_unknown_name_renders_empty(self, proj, capsys):
-        """Consistent with read: unknown kind name → empty section, rc=0."""
-        rc, out, _ = _capture_run_ls(["proj", "--kind", "nonexistent"], capsys)
-        assert rc == 0
-        # Section header present with empty/zero count.
-        assert "KINDS" in out
-        assert "nonexistent" not in out
+    def test_unknown_name_exits_2_like_read(self, proj, capsys):
+        """Consistent with read: unknown kind name → the same validator read
+        runs (exit 2, stderr, did-you-mean) — never a plausible 0-entries
+        render (friction:ls-kind-flag-no-validation, S2 exit discipline)."""
+        with pytest.raises(SystemExit) as exc:
+            _capture_run_ls(["proj", "--kind", "nonexistent"], capsys)
+        assert exc.value.code == 2
+        assert "does not declare kind 'nonexistent'" in capsys.readouterr().err
 
 
 # ---------------------------------------------------------------------------

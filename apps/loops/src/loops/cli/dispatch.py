@@ -131,6 +131,77 @@ def _spec_has_dropped_transforms(spec) -> bool:
     )
 
 
+def _status_field_census(data) -> tuple[list[str], bool]:
+    """Which fetched kinds can a ``--status`` filter even match against?
+
+    Walks the FoldState's sections (nested included) and returns
+    ``(lacking, any_bearing)``: *lacking* is the kinds that HAVE folded rows
+    but where no row carries a ``status`` payload field (the filter is
+    guaranteed to drop every one of them — a plausible-empty in the making);
+    *any_bearing* is True when at least one rowful kind carries a status
+    field somewhere. Kinds with zero rows are neither — an empty kind is an
+    honest empty, not evidence about its fields
+    (friction:read-status-filter-missing).
+    """
+    lacking: list[str] = []
+    any_bearing = False
+
+    def walk(sections) -> None:
+        nonlocal any_bearing
+        for section in sections:
+            if section.items:
+                if any("status" in item.payload for item in section.items):
+                    any_bearing = True
+                else:
+                    lacking.append(section.kind)
+            if section.sections:
+                walk(section.sections)
+
+    walk(data.sections)
+    return sorted(set(lacking)), any_bearing
+
+
+def _refuse_or_note_statusless_kinds(op: Operation, data, reporter) -> int:
+    """The ``--status`` honesty layer (cli-honesty-wave S1).
+
+    Runs only on the gate-pass path (*data* is a FoldState, the Surface
+    transforms will actually apply) when the read carried an explicit
+    ``--status``. Payload equality on a row that has no ``status`` field
+    can never match, so a kind whose rows all lack the field would return
+    a plausible-empty — indistinguishable from "nothing is open", the
+    exact silent loss the driving friction records. Two outcomes:
+
+    - EVERY rowful fetched kind lacks the field → the query is unanswerable
+      as posed: refuse (exit 2, stderr) before rendering anything.
+    - a mix → filter normally, but note each statusless kind on stderr so
+      its absence from the result reads as "can't match", never "none open".
+
+    A kind whose rows DO carry status but none match the value stays a
+    silent, honest empty (exit 0) — that is the r2 gate's load-bearing
+    read (``--kind finding --status open`` with all findings fixed).
+    """
+    spec = op.surface_spec
+    if spec is None or spec.status is None:
+        return 0
+    lacking, any_bearing = _status_field_census(data)
+    if not lacking:
+        return 0
+    kinds_s = ", ".join(f"'{k}'" for k in lacking)
+    if not any_bearing:
+        noun = "kind" if len(lacking) == 1 else "kinds"
+        reporter.err(
+            f"read --status: {noun} {kinds_s} has no status field — no folded "
+            f"row carries one, so --status {spec.status} cannot match "
+            "anything. Drop --status, or target a status-bearing kind."
+        )
+        return 2
+    for k in lacking:
+        reporter.err(
+            f"note: kind '{k}' has no status field — --status cannot match it"
+        )
+    return 0
+
+
 def _project_surface(op: Operation, data):
     """Project a FoldState into the Surface to encode, applying the read-grammar
     transforms carried on ``op.surface_spec`` in a FIXED canonical order.
@@ -362,11 +433,21 @@ def dispatch(op: Operation, *, reporter: Reporter) -> int:
         # surface-transforms).
         vtx = op.vertex_path.stem if op.vertex_path else "this vertex"
         reporter.err(
-            f"note: read-grammar transforms (--match/--limit/--last/--fields/"
-            f"--full/--count/comma-OR --key/field=value) are inert on "
+            f"note: read-grammar transforms (--match/--status/--limit/--last/"
+            f"--fields/--full/--count/comma-OR --key/field=value) are inert on "
             f"custom-lens vertex '{vtx}' — flags ignored "
             f"(--kind and single --key still apply)."
         )
+
+    # --status honesty (cli-honesty-wave S1): gate-pass only — on gate-fail
+    # the filter is inert and the note above already says so. Refuses (exit 2)
+    # when no fetched rowful kind carries a status field; notes per-kind on a
+    # mixed fetch. Runs BEFORE either encoder so a refusal emits nothing on
+    # stdout.
+    if gate:
+        rc = _refuse_or_note_statusless_kinds(op, data, reporter)
+        if rc:
+            return rc
     # Temporal cursor (0.8.0, A11): when the view resolved an --at/--as-of
     # position, render_context carries its machine-readable mode/status/
     # position disclosure under "cursor" — merged into whichever JSON shape

@@ -639,6 +639,29 @@ def run(argv: list[str], ctx: Invocation) -> int:
     kind, key_raw = _resolve_kind_key(entity, args.kind, args.key)
     fetch_key, queried_key, key_or = _resolve_key_grammar(key_raw)
 
+    # --status (S1, cli-honesty-wave): sugar over the `status=VALUE` bareword
+    # predicate — merged into `where` so filtering, the per-kind lifecycle-hide
+    # defeat, and the gate-fail inert note all ride the existing predicate
+    # machinery unchanged. The honesty layer (an explicit report for kinds
+    # whose rows carry no status field, instead of a plausible-empty) lives in
+    # dispatch, keyed off SurfaceSpec.status
+    # (friction:read-status-filter-missing).
+    if args.status is not None:
+        status_values = tuple(v for v in args.status.split(",") if v)
+        if not status_values:
+            ctx.reporter.err(
+                "read: empty --status value — name at least one status "
+                "(e.g. --status open, or comma-OR --status open,in_progress)."
+            )
+            return 2
+        if "status" in where:
+            ctx.reporter.err(
+                "read: --status and a status= predicate are the same filter — "
+                "give one, not both."
+            )
+            return 2
+        where["status"] = status_values
+
     # Bare `sl read` in a repo holding several instance vertices used to fold
     # whichever sorted first — reading the wrong store is the same silent
     # mis-resolution as writing to it (friction:find-local-vertex-alphabetical-pick).
@@ -682,6 +705,19 @@ def run(argv: list[str], ctx: Invocation) -> int:
                 "--kind/--key, or drop --review."
             )
             return 2
+
+    # --status filters the multi-section fold projection; --why and --diff own
+    # their fetch/render and never apply the SurfaceSpec, so the filter would
+    # silently vanish — refuse rather than drop (the same honor-or-refuse
+    # posture as the cursor guards below; silent-inert is the defect class the
+    # cli-honesty-wave exists to kill).
+    if args.status is not None and (args.why or args.diff):
+        flag = "--why" if args.why else "--diff"
+        ctx.reporter.err(
+            f"read --status: {flag} owns its own fetch and does not apply "
+            "the status filter — drop --status, or drop " + flag + "."
+        )
+        return 2
 
     # --why is an address-scoped provenance drill: it renders ONE folded
     # (kind, key) entry field by field, so it short-circuits the multi-section
@@ -872,6 +908,7 @@ def run(argv: list[str], ctx: Invocation) -> int:
         show_all=args.show_all,
         refs_active=refs_depth > 0,
         facts_active=args.facts,
+        status=args.status,
     )
 
     mode = _resolve_mode(args, args.lens, is_tty=ctx.isatty)
@@ -882,6 +919,19 @@ def run(argv: list[str], ctx: Invocation) -> int:
     # say so rather than silently swallowing the request.
     elif args.live and not ctx.isatty:
         ctx.reporter.err("live mode needs a TTY; rendering static instead")
+
+    # Live/interactive render the raw fold through the lens front door and
+    # never apply the SurfaceSpec transforms — an accepted-but-inert --status
+    # would be the exact silent-drop this flag exists to end. Refuse. (The
+    # bareword `status=` predicate shares this inertness pre-S1; widening the
+    # refusal to it is deliberately out of scope — scope the claim.)
+    if args.status is not None and mode in ("live", "interactive"):
+        dropped_flag = "-i" if mode == "interactive" else "--live"
+        ctx.reporter.err(
+            f"read --status: {mode} mode renders the raw fold and does not "
+            f"apply the status filter — drop --status, or drop {dropped_flag}."
+        )
+        return 2
 
     # Interactive dispatch (autoresearch TUI) is head-only in 0.8.0: the
     # cursor was already resolved above into at_position/as_of_ts/cursor_meta,

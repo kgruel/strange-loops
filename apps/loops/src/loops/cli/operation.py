@@ -54,6 +54,13 @@ class SurfaceSpec:
     key_or: tuple[str, ...] = ()     # comma-OR --key (len>1) → filter(key_or=)
     # field=value predicates (eq + comma-OR), as (field, allowed-values) pairs
     where: tuple[tuple[str, tuple[str, ...]], ...] = ()
+    # --status VALUE (cli-honesty-wave S1). The FILTER itself rides `where`
+    # (the view merges --status in as a status predicate, so filtering, the
+    # per-kind lifecycle-hide defeat, and the gate-fail inert note all come
+    # for free); this field is the honesty marker — dispatch reads it to
+    # report kinds whose rows carry no status field instead of returning a
+    # plausible-empty (friction:read-status-filter-missing).
+    status: str | None = None
     observer: str | None = None      # observer= bareword row filter
     fields: tuple[str, ...] | None = None  # --fields → select()
     limit: int | None = None         # --limit → budget(limit=)

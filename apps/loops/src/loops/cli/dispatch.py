@@ -461,10 +461,12 @@ def dispatch(op: Operation, *, reporter: Reporter) -> int:
             f"--lens {op.lens_override}" if op.lens_override
             else "the vertex-declared lens"
         )
+        from .refusals import status_inert_refusal
+
         reporter.err(
-            f"read --status: a custom lens renders its own shape and does "
-            f"not apply the status filter — drop --status, or drop "
-            f"{dropped_flag}."
+            status_inert_refusal(
+                "a custom lens renders its own shape", dropped_flag,
+            )
         )
         return 2
 

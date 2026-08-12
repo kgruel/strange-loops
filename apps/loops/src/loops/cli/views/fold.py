@@ -40,6 +40,7 @@ from ..dispatch import dispatch
 from ..invocation import Invocation
 from ..operation import Operation, SurfaceSpec
 from ..read_args import add_read_args
+from ..refusals import status_inert_refusal
 
 
 # --- Helpers (absorbed from main.py) --------------------------------------
@@ -714,8 +715,7 @@ def run(argv: list[str], ctx: Invocation) -> int:
     if args.status is not None and (args.why or args.diff):
         flag = "--why" if args.why else "--diff"
         ctx.reporter.err(
-            f"read --status: {flag} owns its own fetch and does not apply "
-            "the status filter — drop --status, or drop " + flag + "."
+            status_inert_refusal(f"{flag} owns its own fetch", flag)
         )
         return 2
 
@@ -928,8 +928,9 @@ def run(argv: list[str], ctx: Invocation) -> int:
     if args.status is not None and mode in ("live", "interactive"):
         dropped_flag = "-i" if mode == "interactive" else "--live"
         ctx.reporter.err(
-            f"read --status: {mode} mode renders the raw fold and does not "
-            f"apply the status filter — drop --status, or drop {dropped_flag}."
+            status_inert_refusal(
+                f"{mode} mode renders the raw fold", dropped_flag,
+            )
         )
         return 2
 

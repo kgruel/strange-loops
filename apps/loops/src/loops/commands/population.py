@@ -33,7 +33,7 @@ def _run_ls_root(argv: list[str]) -> int:
     from pathlib import Path
 
     from painted import run_cli
-    from .resolve import _err, loops_home
+    from .resolve import _err, loops_home, missing_root_message
     from .vertices import fetch_vertices, fetch_vertices_local
     from ..lenses.vertices import vertices_view
 
@@ -48,7 +48,7 @@ def _run_ls_root(argv: list[str]) -> int:
     # normal path free of the extra local walk.
     root_path = home / ".vertex"
     if not root_path.exists() and not fetch_vertices_local(with_stats=False):
-        _err(f"{root_path} not found. Run 'loops init' first.")
+        _err(missing_root_message(root_path))
         return 1
 
     pre = argparse.ArgumentParser(add_help=False)

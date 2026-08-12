@@ -295,9 +295,9 @@ def fetch_vertices(home: Path, *, with_stats: bool = False) -> dict[str, Any]:
     """
     root_path = home / ".vertex"
     if not root_path.exists():
-        raise FileNotFoundError(
-            f"{root_path} not found. Run 'loops init' first."
-        )
+        from .resolve import missing_root_message
+
+        raise FileNotFoundError(missing_root_message(root_path))
 
     vertices = _walk_root(root_path, home, with_stats=with_stats)
     return {"vertices": vertices}

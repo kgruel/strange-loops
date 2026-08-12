@@ -131,7 +131,9 @@ def _spec_has_dropped_transforms(spec) -> bool:
     )
 
 
-def _status_field_census(data) -> tuple[list[str], bool]:
+def _status_field_census(
+    data, key_or: tuple[str, ...] = (),
+) -> tuple[list[str], bool]:
     """Which fetched kinds can a ``--status`` filter even match against?
 
     Walks the FoldState's sections (nested included) and returns
@@ -142,15 +144,37 @@ def _status_field_census(data) -> tuple[list[str], bool]:
     field somewhere. Kinds with zero rows are neither — an empty kind is an
     honest empty, not evidence about its fields
     (friction:read-status-filter-missing).
+
+    ``key_or`` narrows the census input to the rows a comma-OR ``--key``
+    actually selects (finding:chw-sol-r1-s1-f1-comma-key-census): a single
+    ``--key`` is applied at fetch time so the FoldState arrives pre-narrowed,
+    but the comma spelling is only applied later by the Surface — censusing
+    the un-narrowed fetch let an unrelated status-bearing kind flip a
+    refusal into a plausible-empty exit 0. The narrowing reuses fetch's
+    ``_item_matches_key`` (the same predicate ``surface.filter`` mirrors via
+    ``_row_matches_key``), so the census input IS the post-key_or set — no
+    second detection layer. A kind with no surviving rows counts as empty
+    (not evidence), same as the zero-row rule above.
     """
+    from loops.commands.fetch import _item_matches_key
+
     lacking: list[str] = []
     any_bearing = False
 
     def walk(sections) -> None:
         nonlocal any_bearing
         for section in sections:
-            if section.items:
-                if any("status" in item.payload for item in section.items):
+            items = section.items
+            if items and key_or:
+                items = [
+                    item for item in items
+                    if any(
+                        _item_matches_key(item, section.key_field, k)
+                        for k in key_or
+                    )
+                ]
+            if items:
+                if any("status" in item.payload for item in items):
                     any_bearing = True
                 else:
                     lacking.append(section.kind)
@@ -183,7 +207,7 @@ def _refuse_or_note_statusless_kinds(op: Operation, data, reporter) -> int:
     spec = op.surface_spec
     if spec is None or spec.status is None:
         return 0
-    lacking, any_bearing = _status_field_census(data)
+    lacking, any_bearing = _status_field_census(data, key_or=spec.key_or or ())
     if not lacking:
         return 0
     kinds_s = ", ".join(f"'{k}'" for k in lacking)
@@ -422,6 +446,28 @@ def dispatch(op: Operation, *, reporter: Reporter) -> int:
 
     render_data = data
     gate = _surface_gate(op, data)
+
+    # --status on a gate-fail read REFUSES (finding:chw-sol-r1-s1-f2-custom-
+    # lens-inert, arbiter ruling): the Surface transforms never apply here, so
+    # an accepted-but-inert --status would render unfiltered rows at exit 0 —
+    # script-misreadable as "these matched". Same shape/wording family as the
+    # S1 live/interactive refusals in views/fold.py. Sits BEFORE the Format
+    # branch so `--status --json` cannot fall through to the raw dump either.
+    # Scoped to the explicit flag (spec.status) — the bareword `status=`
+    # predicate keeps its pre-S1 inert-note behavior below, unchanged.
+    spec_ = op.surface_spec
+    if not gate and spec_ is not None and spec_.status is not None:
+        dropped_flag = (
+            f"--lens {op.lens_override}" if op.lens_override
+            else "the vertex-declared lens"
+        )
+        reporter.err(
+            f"read --status: a custom lens renders its own shape and does "
+            f"not apply the status filter — drop --status, or drop "
+            f"{dropped_flag}."
+        )
+        return 2
+
     if not gate and _spec_has_dropped_transforms(op.surface_spec):
         # Interim signal (B3): the read grammar is inert on custom-lens /
         # --lens-override vertices — the gate keeps the raw FoldState so the
@@ -431,9 +477,11 @@ def dispatch(op: Operation, *, reporter: Reporter) -> int:
         # This note lives ON the gate-fail branch and is removed when the FF
         # routes custom lenses through the Surface (thread:gate-fail-ignores-
         # surface-transforms).
+        # --status is absent from this list: it refuses above (F2) instead of
+        # noting — it can never reach this note.
         vtx = op.vertex_path.stem if op.vertex_path else "this vertex"
         reporter.err(
-            f"note: read-grammar transforms (--match/--status/--limit/--last/"
+            f"note: read-grammar transforms (--match/--limit/--last/"
             f"--fields/--full/--count/comma-OR --key/field=value) are inert on "
             f"custom-lens vertex '{vtx}' — flags ignored "
             f"(--kind and single --key still apply)."

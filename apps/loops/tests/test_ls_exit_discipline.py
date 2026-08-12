@@ -102,6 +102,45 @@ class TestBogusKind:
         assert exc.value.code == 2
         assert "does not declare kind 'decsion'" in capsys.readouterr().err
 
+    def test_bogus_kind_with_key_is_byte_identical_to_without(
+        self, proj, capsys,
+    ):
+        # finding:chw-sol-r1-s2-f1-key-before-kind (arbiter ruling): kind
+        # validation runs before key-applicability — --key must not flip the
+        # undeclared-kind error into a collect-fold key error.
+        with pytest.raises(SystemExit) as exc_control:
+            _run_kind_stat("project", "bogus", [])
+        control = capsys.readouterr()
+        with pytest.raises(SystemExit) as exc_key:
+            _run_kind_stat("project", "bogus", ["--key", "x"])
+        keyed = capsys.readouterr()
+        assert exc_control.value.code == 2
+        assert exc_key.value.code == 2
+        assert keyed.out == control.out == ""
+        assert keyed.err == control.err
+        assert "does not declare kind 'bogus'" in keyed.err
+
+    def test_declared_collect_kind_with_key_still_errors(self, proj, capsys):
+        # Regression guard for the declared-gate: a DECLARED keyless kind
+        # keeps the collect-fold --key refusal (exit 1) — only undeclared
+        # kinds defer to the validator.
+        from engine.builder import fold_collect
+
+        vpath = proj
+        (
+            vertex("project")
+            .store("./data/project.db")
+            .loop("decision", fold_by("topic"))
+            .loop("thread", fold_by("name"))
+            .loop("log", fold_collect("items", max_items=100))
+            .write(vpath)
+        )
+        code = _run_kind_stat("project", "log", ["--key", "x"])
+        captured = capsys.readouterr()
+        assert code == 1
+        assert captured.out == ""
+        assert "collect-fold (no fold key)" in captured.err
+
     def test_declared_but_empty_kind_still_renders(self, proj, capsys):
         # thread is declared with zero facts — that's a valid 0-entries view,
         # not a typo (same stance as read's validator).

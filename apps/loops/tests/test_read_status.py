@@ -152,6 +152,124 @@ class TestStatuslessKindHonesty:
         assert "has no status field" not in err
 
 
+# --- r1 remediation: census on the post-key_or set --------------------------
+# finding:chw-sol-r1-s1-f1-comma-key-census — a single --key narrows at fetch,
+# but comma-OR --key is applied by the Surface AFTER the census ran; censusing
+# the un-narrowed fetch let an unrelated status-bearing kind flip the
+# statusless refusal into a plausible-empty exit 0.
+
+
+class TestCommaKeyCensus:
+    def test_comma_key_selecting_only_statusless_rows_refuses(
+        self, status_vertex, capsys,
+    ):
+        _seed(status_vertex)
+        rc, s, err = _json_read(
+            capsys, str(status_vertex),
+            "--key", "design/a,missing", "--status", "open",
+        )
+        assert rc == 2
+        assert s is None
+        assert "kind 'decision' has no status field" in err
+
+    def test_comma_key_parity_with_single_key(self, status_vertex, capsys):
+        """The comma spelling of the same selection answers identically."""
+        _seed(status_vertex)
+        rc1, s1, err1 = _json_read(
+            capsys, str(status_vertex), "--key", "design/a", "--status", "open",
+        )
+        rc2, s2, err2 = _json_read(
+            capsys, str(status_vertex),
+            "--key", "design/a,missing", "--status", "open",
+        )
+        assert (rc1, s1) == (2, None)
+        assert (rc2, s2) == (2, None)
+        assert err1 == err2
+
+    def test_comma_key_all_prefixes_miss_is_honest_empty(
+        self, status_vertex, capsys,
+    ):
+        """No surviving rows anywhere: nothing to claim a missing field from
+        — honest empty at exit 0, parity with a single missing --key."""
+        _seed(status_vertex)
+        rc, s, err = _json_read(
+            capsys, str(status_vertex),
+            "--key", "nope1,nope2", "--status", "open",
+        )
+        assert rc == 0
+        assert s["rows"] == []
+        assert "has no status field" not in err
+
+    def test_comma_key_reaching_status_rows_filters_with_note(
+        self, status_vertex, capsys,
+    ):
+        """Mixed post-key_or set: statusless decision noted, threads filter."""
+        _seed(status_vertex)
+        rc, s, err = _json_read(
+            capsys, str(status_vertex),
+            "--key", "design/a,t-", "--status", "open",
+        )
+        assert rc == 0
+        assert _keys(s) == ["t-also-open", "t-open"]
+        assert "note: kind 'decision' has no status field" in err
+
+
+# --- r1 remediation: custom-lens --status refuses ---------------------------
+# finding:chw-sol-r1-s1-f2-custom-lens-inert (arbiter ruling: REFUSE) — a
+# gate-fail static read never applies the Surface transforms, so an accepted
+# --status rendering unfiltered rows at exit 0 was script-misreadable. The
+# prior inert-note-and-continue behavior for --status is overturned; the note
+# survives only for the other transforms (and the bareword predicate).
+
+
+class TestCustomLensStatusRefusal:
+    def test_lens_override_with_status_refuses(self, status_vertex, capsys):
+        _seed(status_vertex)
+        capsys.readouterr()
+        rc = main([
+            "read", str(status_vertex), "--kind", "decision",
+            "--status", "open", "--lens", "autoresearch", "--plain",
+        ])
+        captured = capsys.readouterr()
+        assert rc == 2
+        assert captured.out == ""
+        assert "read --status" in captured.err
+        assert "custom lens" in captured.err
+        assert "does not apply the status filter" in captured.err
+        assert "--lens autoresearch" in captured.err
+
+    def test_lens_override_with_status_json_also_refuses(
+        self, status_vertex, capsys,
+    ):
+        """The refusal sits before the Format branch — --json cannot fall
+        through to the raw dump."""
+        _seed(status_vertex)
+        rc, s, err = _json_read(
+            capsys, str(status_vertex), "--kind", "decision",
+            "--status", "open", "--lens", "autoresearch",
+        )
+        assert rc == 2
+        assert s is None
+        assert "read --status" in err
+
+    def test_bareword_status_predicate_keeps_inert_note(
+        self, status_vertex, capsys,
+    ):
+        """S1 scoped the honesty layer to the explicit flag — the bareword
+        ``status=`` predicate keeps its pre-S1 note-and-render behavior, and
+        the note no longer lists --status (it refuses instead)."""
+        _seed(status_vertex)
+        capsys.readouterr()
+        rc = main([
+            "read", str(status_vertex), "--kind", "decision",
+            "status=open", "--lens", "autoresearch", "--plain",
+        ])
+        captured = capsys.readouterr()
+        assert rc == 0
+        assert "note: read-grammar transforms" in captured.err
+        assert "--status" not in captured.err
+
+
 # --- Error discipline (nonzero exit, error on stderr) ----------------------
 
 

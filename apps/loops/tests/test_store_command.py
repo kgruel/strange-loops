@@ -1418,3 +1418,26 @@ class TestCanonicalAgreementGate:
 
         assert rc == 2
         assert "sqlite-canonical" in _json.loads(capsys.readouterr().out)["error"]
+
+
+class TestBareStoreEmptyHome:
+    """finding:chw-r2-sibling-store-error-to-stdout — bare ``loops store``
+    with no config root refuses on stderr at exit 1, byte-identical message,
+    mirroring the R2 ls fix (finding:chw-r2-bare-ls-error-to-stdout)."""
+
+    def test_missing_root_exits_nonzero_with_stderr(
+        self, loops_home, monkeypatch, tmp_path, capsys
+    ):
+        from loops.commands.store import _run_store
+
+        empty = tmp_path / "empty-cwd"
+        empty.mkdir()
+        monkeypatch.chdir(empty)
+        code = _run_store(["--plain"])
+        captured = capsys.readouterr()
+        assert code == 1
+        assert captured.out == ""
+        assert (
+            f"{loops_home / '.vertex'} not found. Run 'loops init' first."
+            in captured.err
+        )

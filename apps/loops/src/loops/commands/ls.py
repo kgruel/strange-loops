@@ -425,15 +425,25 @@ def fetch_kind_stat(
         }
 
     fold_op = ""
+    declared = False
     for k in _summarize_kinds(vf):
         if k["name"] == kind:
             fold_op = k["fold_op"]
+            declared = True
             break
     key_field = _get_key_field(vertex_path, kind)
 
     # A collect-fold has no fold key, so --key has nothing to scope — reject it
     # rather than silently ignore it while the header claims "under <prefix>".
-    if key_prefix and key_field is None:
+    # DECLARED kinds only (finding:chw-sol-r1-s2-f1-key-before-kind): an
+    # undeclared kind also has no key_field, but classifying it as a
+    # collect-fold here would pre-empt the kind validator in _run_kind_stat —
+    # kind validation runs before key-applicability, so an undeclared kind
+    # falls through to the count==0 validator and gets the exact same exit-2
+    # message as `ls --kind <bogus>` without --key. Live undeclared kinds
+    # (tick.*, _sync.*) pass the validator on their row count and hit the
+    # key-applicability backstop in _run_kind_stat instead.
+    if key_prefix and key_field is None and declared:
         return {
             "error": (
                 f"kind '{kind}' is a collect-fold (no fold key) — "
@@ -557,6 +567,18 @@ def _run_kind_stat(vertex: str, kind: str, rest: list[str]) -> int:
         from loops.commands.resolve import _validate_kind_or_exit
 
         _validate_kind_or_exit(kind, Path(data["vertex_path"]))
+
+    # Key-applicability backstop, strictly AFTER kind validation (finding:
+    # chw-sol-r1-s2-f1-key-before-kind). fetch_kind_stat only raises the
+    # collect-fold refusal for DECLARED kinds; a live undeclared kind (tick.*)
+    # passes the validator on its row count and lands here — same message,
+    # same exit 1, so --key on a keyless kind never silently no-ops.
+    if known.key and data.get("key_field") is None:
+        _err(
+            f"kind '{kind}' is a collect-fold (no fold key) — "
+            "--key doesn't apply; it lists by observer"
+        )
+        return 1
 
     from painted import run_cli
 

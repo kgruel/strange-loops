@@ -287,6 +287,34 @@ def test_falsy_but_valid_fold_key_survives_into_row_key():
     assert row.address == "thread/0"  # the entity address, not the id fallback
 
 
+def test_native_and_string_zero_keys_are_two_rows_same_displayed_key():
+    """DISCLOSED DUALITY (known, deliberate — not a defect this suite hides):
+    a native JSON numeric ``0`` and a string ``"0"`` under one kind are two
+    distinct fold entries, and they surface as TWO rows whose displayed key
+    is the same ``"0"`` (and the same ``kind/0`` address). Whether they
+    should be one identity is deliberately held open at
+    thread:fold-key-identity-native-vs-string — the r5 fix unified only the
+    STRINGIFICATION (lookup projection), not fold identity. This pin makes
+    the duality visible in the suite instead of silent."""
+    state = FoldState(
+        sections=(
+            FoldSection(
+                kind="thread", fold_type="by", key_field="name",
+                items=(
+                    FoldItem(payload={"name": 0, "status": "native"}, ts=1.0, id="N1"),
+                    FoldItem(payload={"name": "0", "status": "string"}, ts=2.0, id="S1"),
+                ),
+            ),
+        ),
+        vertex="t",
+    )
+    rows = project(state).rows
+    assert len(rows) == 2  # two entities, not merged
+    assert [r.key for r in rows] == ["0", "0"]  # same displayed key
+    assert [r.address for r in rows] == ["thread/0", "thread/0"]
+    assert {r.payload["status"] for r in rows} == {"native", "string"}
+
+
 def test_empty_string_fold_key_keeps_id_address_fallback():
     """The one falsy key whose ADDRESS behavior is unchanged: ``""`` is
     non-None so Row.key keeps it (as ``""``), but ``_address``'s own

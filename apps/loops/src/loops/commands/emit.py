@@ -726,43 +726,63 @@ def cmd_emit(
             _emit_lines(primary_lines)
             return 2
 
-    # A cite whose refs ALL dropped is an empty attention signal — refuse
-    # rather than store it (S4, friction:cite-verb-first-lacks-vertex-slot).
-    # Narrow claim: only the all-drop case errors; a partial drop keeps the
-    # WARN + typed-pin behavior, and a cite emitted with no refs at all is
-    # out of this claim's scope. The gate reads resolution OUTPUT, so it
-    # naturally skips paths where resolution never ran (no store). Sits
-    # before the dry-run branch — like the strict refuse above — so a
-    # preview reports the same refusal the real emit would. Exit 2 matches
+    # Cite refusal gate (S4 + r1 remediation). ONE coherent condition: a cite
+    # stores only when its `ref` FIELD carries at least one address AND not
+    # every attempted ref-field entity resolution failed. Spelled out:
+    #
+    #   1. zero ref-field addresses → refuse (finding:chw-s4-raw-emit-empty-
+    #      cite): there is literally nothing being cited.
+    #   2. ref-field entity resolutions were attempted and ALL failed →
+    #      refuse (S4 all-drop, scoped per finding:chw-sol-r1-s4-f1-nonref-
+    #      field-bypass): the gate counts ONLY field == "ref" resolutions —
+    #      an address in any other payload field (message, context, …) keeps
+    #      its normal typed-pin/sibling-_ref behavior but can neither rescue
+    #      nor doom a cite.
+    #   3. otherwise store — including the ALL-INERT cite (ref addresses
+    #      present, none attemptable as entities): provenance-only, per the
+    #      arbiter ruling.
+    #
+    # Branch 2 reads resolution OUTPUT, so it naturally skips paths where
+    # resolution never ran (no store); branch 1 is resolution-independent.
+    # Both sit before the dry-run branch — like the strict refuse above — so
+    # a preview reports the same refusal the real emit would. Exit 2 matches
     # the strict-refuse validation exit.
-    if kind == "cite" and unresolved_refs and not resolved_refs:
-        for u in unresolved_refs:
-            _say(f"ERROR: ref '{getattr(u, 'addr', u)}' did not resolve")
-        # Honest counts (finding:chw-s4-refusal-message-inert-pins): only
-        # ENTITY refs (declared-kind addresses) are ever attempted; an inert
-        # pin (undeclared kind / non-address value) is never attempted, so
-        # "none of its refs resolved" would overclaim when one is present.
-        # The refusal drops the whole fact, inert pins included — disclose
-        # both counts. Semantics unchanged: all attempted refs failing
-        # refuses even with inert pins present; an ALL-inert cite never
-        # reaches this gate (unresolved_refs empty) and stores as
-        # provenance-only.
-        attempted = len(unresolved_refs)
+    if kind == "cite":
         ref_addrs = [
             r.strip() for r in payload.get("ref", "").split(",") if r.strip()
         ]
-        attempted_in_ref_field = sum(
-            1 for u in unresolved_refs if getattr(u, "field", "ref") == "ref"
-        )
-        inert = max(0, len(ref_addrs) - attempted_in_ref_field)
-        detail = f"all {attempted} entity ref(s) failed to resolve"
-        if inert:
-            detail += f"; {inert} inert pin(s) dropped with the refusal"
-        _say(
-            f"ERROR: cite refused — {detail}; a cite with zero resolved "
-            "entity refs is an empty attention signal; nothing stored"
-        )
-        return 2
+        if not ref_addrs:
+            _say(
+                "ERROR: cite refused — no ref addresses in the payload; a "
+                "cite is an attention signal and needs at least one ref; "
+                "nothing stored"
+            )
+            return 2
+        cite_unresolved = [
+            u for u in unresolved_refs if getattr(u, "field", "ref") == "ref"
+        ]
+        cite_resolved = [
+            r for r in resolved_refs if getattr(r, "field", "ref") == "ref"
+        ]
+        if cite_unresolved and not cite_resolved:
+            for u in cite_unresolved:
+                _say(f"ERROR: ref '{getattr(u, 'addr', u)}' did not resolve")
+            # Honest counts (finding:chw-s4-refusal-message-inert-pins): only
+            # ENTITY refs (declared-kind addresses) are ever attempted; an
+            # inert pin (undeclared kind / non-address value) is never
+            # attempted, so "none of its refs resolved" would overclaim when
+            # one is present. The refusal drops the whole fact, inert pins
+            # included — disclose both counts.
+            attempted = len(cite_unresolved)
+            inert = max(0, len(ref_addrs) - attempted)
+            detail = f"all {attempted} entity ref(s) failed to resolve"
+            if inert:
+                detail += f"; {inert} inert pin(s) dropped with the refusal"
+            _say(
+                f"ERROR: cite refused — {detail}; a cite with zero resolved "
+                "entity refs is an empty attention signal; nothing stored"
+            )
+            return 2
 
     ts = datetime.now(timezone.utc).timestamp()
     fact = Fact(

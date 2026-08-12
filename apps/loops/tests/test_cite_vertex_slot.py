@@ -240,6 +240,22 @@ class TestAllRefsDropError:
         assert payload.get("ref_ref") is None
         assert payload.get("_unresolved_refs") is None
 
+    def test_resolving_nonref_field_address_does_not_rescue(
+        self, sandbox, capsys,
+    ):
+        # finding:chw-sol-r1-s4-f1-nonref-field-bypass (arbiter ruling): the
+        # gate counts ONLY field=="ref" resolutions. A resolvable address in
+        # the message must not turn an all-drop cite into a store.
+        vpath = _write_vertex(sandbox, "t")
+        _seed_thread(vpath, "other")
+        ctx = _ctx()
+        rc = cite_view.run(["t", "thread:absent", "-m", "thread:other"], ctx)
+        assert rc == 2
+        err = capsys.readouterr().err
+        assert "thread:absent" in err
+        assert "nothing stored" in err
+        assert _cite_facts(vpath) == []
+
     def test_emit_path_gets_same_refusal(self, sandbox, capsys):
         # The refusal is kind-level (lives in cmd_emit), so the raw emit
         # spelling of a cite refuses identically.
@@ -251,3 +267,57 @@ class TestAllRefsDropError:
         assert cmd_emit(ns, vertex_path=vpath) == 2
         assert "ERROR" in capsys.readouterr().err
         assert _cite_facts(vpath) == []
+
+
+class TestZeroAddressCite:
+    """finding:chw-s4-raw-emit-empty-cite (arbiter ruling): a cite whose
+    payload carries literally NO ref addresses refuses — there is nothing
+    being cited. All-inert cites (addresses present, none attemptable as
+    entities) still store as provenance-only."""
+
+    def _emit(self, vpath, parts):
+        ns = argparse.Namespace(
+            vertex=None, kind="cite", parts=parts,
+            observer="tester", dry_run=False,
+        )
+        return cmd_emit(ns, vertex_path=vpath)
+
+    def test_raw_emit_with_no_ref_field_refuses(self, sandbox, capsys):
+        vpath = _write_vertex(sandbox, "t")
+        rc = self._emit(vpath, ["message=x"])
+        err = capsys.readouterr().err
+        assert rc == 2
+        assert "no ref addresses" in err
+        assert "nothing stored" in err
+        assert _cite_facts(vpath) == []
+
+    def test_resolving_message_address_does_not_rescue_zero_refs(
+        self, sandbox, capsys,
+    ):
+        # Composition with the ref-field-scoped gate: a resolvable address
+        # in message does not manufacture a cite ref.
+        vpath = _write_vertex(sandbox, "t")
+        _seed_thread(vpath, "other")
+        rc = self._emit(vpath, ["message=thread:other"])
+        assert rc == 2
+        assert "no ref addresses" in capsys.readouterr().err
+        # only the seeded thread exists — no cite stored
+        assert _cite_facts(vpath) == []
+
+    def test_empty_ref_field_refuses(self, sandbox, capsys):
+        vpath = _write_vertex(sandbox, "t")
+        rc = self._emit(vpath, ["ref=", "message=x"])
+        assert rc == 2
+        assert "no ref addresses" in capsys.readouterr().err
+        assert _cite_facts(vpath) == []
+
+    def test_all_inert_raw_emit_still_stores(self, sandbox, capsys):
+        # The ruling's explicit boundary: inert addresses ARE addresses.
+        vpath = _write_vertex(sandbox, "t")
+        rc = self._emit(vpath, ["ref=atoms/baz"])
+        err = capsys.readouterr().err
+        assert rc == 0
+        assert "ERROR" not in err
+        facts = _cite_facts(vpath)
+        assert len(facts) == 1
+        assert facts[0]["payload"]["ref"] == "atoms/baz"

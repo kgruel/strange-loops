@@ -105,9 +105,19 @@ Agent: s4-impl. Branch: worktree-agent-a2bd6127c4f74d6a8 (worktree off 17783fd).
 
 ## Deviations / notes
 
-- **Suite-count mismatch vs. task prompt**: prompt cited baseline
-  2467 passed; this worktree's actual baseline is 2442 (measured by
-  stash-and-run). Delta is upstream of S4 — flagging, not chasing.
+- **Branch base is MAIN, not the wave branch.** The task said the
+  worktree was branched from `cli-honesty-wave` (S1-S3 beneath); in fact
+  `merge-base HEAD cli-honesty-wave` = 17783fd — this branch sits on
+  main's tip, and S1-S3 live only on `cli-honesty-wave` (which also
+  bases at 17783fd). That explains the prompt's 2467 baseline vs. this
+  branch's measured 2442 (S1-S3's tests are on the wave branch). Not
+  rebased: the behaviors S4 depends on (ambiguity refusal,
+  `.loops/`-aware `_find_local_vertex`) are already in main, and the
+  wave's diff vs. 17783fd touches NO file S4 touches (wave: resolve.py,
+  ls/read/fold/orient + their tests; S4: cite/emit/completers + cite
+  tests) — so merging S4 onto the wave should be conflict-free
+  (`docs/scratch/cli-honesty-wave/` is shared but files are distinct).
+  Integrator should merge these commits into `cli-honesty-wave`.
 - **Template-qualifier residue**: emit's `vertex/template` split
   (`parent/native` → vertex + template_qualifier, handled in cmd_emit's
   config fallback) is not replicated in cite's peel;

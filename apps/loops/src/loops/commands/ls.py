@@ -141,6 +141,21 @@ def detect_kind_descent(argv: list[str]) -> tuple[str, str, list[str]] | None:
     return None
 
 
+def _validate_kind(data: dict[str, Any], kind: str) -> None:
+    """Validate *kind* against the fetched vertex, deferring to read's
+    validator for the miss (exits 2 on an undeclared kind).
+
+    Shared by the section-flag narrow and the kind-stat descent (simplify
+    pass, item 4) — each caller keeps its own gate deciding WHEN to
+    validate; this only owns the how (path coercion + delegate).
+    """
+    from pathlib import Path
+
+    from loops.commands.resolve import _validate_kind_or_exit
+
+    _validate_kind_or_exit(kind, Path(data["vertex_path"]))
+
+
 def _run_ls(argv: list[str]) -> int:
     """Dispatch ``loops ls`` — root listing or per-vertex unified view.
 
@@ -209,11 +224,7 @@ def _run_ls(argv: list[str]) -> int:
     if narrow_kind is not None and narrow_kind not in {
         k["name"] for k in data["kinds"]
     }:
-        from pathlib import Path
-
-        from loops.commands.resolve import _validate_kind_or_exit
-
-        _validate_kind_or_exit(narrow_kind, Path(data["vertex_path"]))
+        _validate_kind(data, narrow_kind)
 
     # Render through painted's run_cli for zoom/width handling.
     from painted import run_cli
@@ -562,11 +573,7 @@ def _run_kind_stat(vertex: str, kind: str, rest: list[str]) -> int:
     # gate here. A declared-but-empty kind passes the validator silently
     # (kind IS declared) and keeps its honest 0-entries render.
     if data["count"] == 0 and not data["entries"]:
-        from pathlib import Path
-
-        from loops.commands.resolve import _validate_kind_or_exit
-
-        _validate_kind_or_exit(kind, Path(data["vertex_path"]))
+        _validate_kind(data, kind)
 
     # Key-applicability backstop, strictly AFTER kind validation (finding:
     # chw-sol-r1-s2-f1-key-before-kind). fetch_kind_stat only raises the

@@ -114,6 +114,86 @@ class TestNativeNumericKeyWhy:
         assert fields["status"]["setter"]["index"] == 2
 
 
+class TestReplayIdentityNoSwitch:
+    """finding:chw-sol-r6-f1-replay-identity-switch (arbiter ruling): when a
+    native ``0`` and a string ``"0"`` coexist, the WINNING identity (string
+    wins — the rule loops.foldkey documents) is resolved exactly ONCE,
+    before the replay; the losing item contributes nothing to
+    fields/changed. The defect: a per-step lookup attributed the native
+    entry early, switched to the string entry when it appeared, and kept
+    the earlier change log — mixed-item output that depended on emission
+    order. Contract: --why explains exactly the row read renders."""
+
+    def _vertex_with(self, tmp_path, emit_order):
+        from .builders import StorePopulator
+
+        tmp_path.mkdir(parents=True, exist_ok=True)
+        v = (
+            vertex("dual")
+            .store("./d.db")
+            .loop("decision", fold_by("topic"))
+        )
+        vpath = tmp_path / "dual.vertex"
+        v.write(vpath)
+        pop = StorePopulator(tmp_path / "d.db", observer="alice")
+        for which in emit_order:
+            if which == "native":
+                pop.emit(
+                    "decision", topic=0,
+                    status="native-open", native_only="N",
+                )
+            else:
+                pop.emit("decision", topic="0", status="s-open",
+                         message="string body")
+                pop.emit("decision", topic="0", status="s-done")
+        pop.done()
+        return vpath
+
+    def _fields(self, capsys, vpath):
+        rc, d = _why_json(capsys, vpath, "decision/0")
+        assert rc == 0
+        return {f["field"]: f for f in d["fields"]}
+
+    @pytest.mark.parametrize(
+        "emit_order",
+        [("native", "string"), ("string", "native")],
+        ids=["native-first", "string-first"],
+    )
+    def test_string_item_wins_whole_replay_either_order(
+        self, tmp_path, capsys, emit_order,
+    ):
+        fields = self._fields(capsys, self._vertex_with(tmp_path, emit_order))
+        # The string item's fields, whole and pure...
+        assert fields["message"]["value"] == "string body"
+        assert fields["status"]["value"] == "s-done"
+        assert [p["value"] for p in fields["status"]["priors"]] == ["s-open"]
+        # ...and NOTHING from the losing native item: no residual field, no
+        # native value smuggled in as a prior (the mid-replay switch used to
+        # retain both).
+        assert "native_only" not in fields
+        assert "native-open" not in {
+            p["value"] for f in fields.values() for p in f["priors"]
+        }
+
+    def test_both_orders_attribute_identical_content(self, tmp_path, capsys):
+        # Emission order must not change WHAT --why attributes (field →
+        # value → prior chain). Setter indexes track chronology position
+        # (the facts list legitimately reorders), so compare content.
+        def content(fields):
+            return {
+                name: (f["value"], tuple(p["value"] for p in f["priors"]))
+                for name, f in fields.items()
+            }
+
+        a = content(self._fields(
+            capsys, self._vertex_with(tmp_path / "a", ("native", "string")),
+        ))
+        b = content(self._fields(
+            capsys, self._vertex_with(tmp_path / "b", ("string", "native")),
+        ))
+        assert a == b
+
+
 # --- Exact-address gate ----------------------------------------------------
 
 

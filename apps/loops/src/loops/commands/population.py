@@ -33,11 +33,23 @@ def _run_ls_root(argv: list[str]) -> int:
     from pathlib import Path
 
     from painted import run_cli
-    from .resolve import loops_home
+    from .resolve import _err, loops_home
     from .vertices import fetch_vertices, fetch_vertices_local
     from ..lenses.vertices import vertices_view
 
     home = loops_home()
+
+    # Pre-flight the empty-home case (finding:chw-r2-bare-ls-error-to-stdout):
+    # with no config root and no local layer, fetch() raises FileNotFoundError
+    # inside painted's run_cli, whose fetch-error path prints to STDOUT by
+    # framework design. Refuse here instead — same message, stderr, exit 1 —
+    # matching the S2 validate-then-refuse pattern (error paths exit nonzero
+    # with the error on stderr). The `.exists()` short-circuit keeps the
+    # normal path free of the extra local walk.
+    root_path = home / ".vertex"
+    if not root_path.exists() and not fetch_vertices_local(with_stats=False):
+        _err(f"{root_path} not found. Run 'loops init' first.")
+        return 1
 
     pre = argparse.ArgumentParser(add_help=False)
     pre.add_argument("--all", "-a", dest="all_", action="store_true", default=False)

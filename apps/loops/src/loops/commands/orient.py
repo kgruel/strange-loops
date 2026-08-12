@@ -41,9 +41,19 @@ class OrientSummary:
     moved_window_days: int
     moved: tuple[OrientMove, ...]
     undeclared_seals: tuple[OrientWarning, ...]
+    reconcile_age_days: float | None = None
+    """Days since the last reconcile receipt, or None if none is on record."""
 
 
 _MOVED_KINDS = frozenset({"thread", "decision", "friction"})
+
+# Reconcile receipts are thread-kind facts whose fold key (name) carries the
+# `reconcile-` prefix — the convention already receipted in the live store
+# (e.g. thread:reconcile-2026-08-12). The sensor derives cadence staleness
+# from the store at the read path, independent of anyone remembering
+# (friction:reconcile-cadence-has-no-sensor).
+_RECONCILE_NAME_PREFIX = "reconcile-"
+_RECONCILE_OVERDUE_DAYS = 10.0
 _DEEPER = (
     "deeper: sl read project --lens reconcile (staleness) · --ticks (windows) · "
     "--kind log --plain (reroutes) · --kind friction --plain (backlog)"
@@ -136,6 +146,32 @@ def _undeclared_seal_warnings(
     )
 
 
+def _last_reconcile_ts(vertex_path: Path, *, now_ts: float) -> float | None:
+    """Epoch of the newest thread-kind fact named ``reconcile-*``, or None.
+
+    Kind is exact (``thread`` only) and the name match is an anchored prefix
+    including the hyphen — a friction or decision carrying a ``reconcile-``
+    name does not count, nor does a thread named ``reconciliation-notes``.
+    """
+    from engine import vertex_facts
+
+    latest = float("-inf")
+    for fact in vertex_facts(vertex_path, 0.0, now_ts, kind="thread"):
+        payload = dict(fact.get("payload", {}) or {})
+        name = str(payload.get("name", ""))
+        if not name.startswith(_RECONCILE_NAME_PREFIX):
+            continue
+        latest = max(latest, _fact_epoch(fact.get("ts")))
+    return None if latest == float("-inf") else latest
+
+
+def _reconcile_age_days(vertex_path: Path, *, now_ts: float) -> float | None:
+    last = _last_reconcile_ts(vertex_path, now_ts=now_ts)
+    if last is None:
+        return None
+    return max(0.0, (now_ts - last) / 86400.0)
+
+
 def build_orient_summary(
     vertex_path: Path,
     *,
@@ -173,7 +209,17 @@ def build_orient_summary(
         moved_window_days=moved_window_days,
         moved=moved,
         undeclared_seals=_undeclared_seal_warnings(vertex_path, seals),
+        reconcile_age_days=_reconcile_age_days(vertex_path, now_ts=now_ts),
     )
+
+
+def _render_reconcile_line(age_days: float | None) -> str:
+    if age_days is None:
+        return "no reconcile on record"
+    line = f"last reconcile: {int(age_days)}d ago"
+    if age_days > _RECONCILE_OVERDUE_DAYS:
+        line += " — RECONCILE OVERDUE"
+    return line
 
 
 def render_orient(summary: OrientSummary) -> str:
@@ -187,6 +233,7 @@ def render_orient(summary: OrientSummary) -> str:
             f"{summary.open_frictions} frictions · "
             f"{summary.adopted_threads} adopted-practices"
         ),
+        _render_reconcile_line(summary.reconcile_age_days),
     ]
     for warning in summary.undeclared_seals:
         noun = "seal" if warning.count == 1 else "seals"

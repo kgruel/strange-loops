@@ -507,17 +507,25 @@ def _row_group(row: Row, by: str) -> str:
 def _row_key(item: FoldItem, key_field: str | None) -> str | None:
     """The fold-key value for an item, or None for collect/keyless items.
 
-    Uses TRUTHINESS (``if not val``) to gate emptiness, byte-matching the lens's
-    old ``_item_full_key`` / ``_inbound_count`` (``if not key``): a falsy fold
-    value (None, "", 0, False) is treated as no-key, so Row.key is None and the
-    address falls back to ``kind/<id>``. Gating only on ``None``/``""`` would
-    make a key of int ``0`` resolve to ``kind/0`` and spuriously hit the
-    edge/facts lookups the old lens skipped.
+    Gates on ``is not None`` — the ENGINE's fold acceptance
+    (``atoms.engine`` fold_by: ``if key_value is not None``) is the
+    contract, so a falsy-but-valid stored key (numeric ``0``, ``False``)
+    survives into ``Row.key`` as its str form. The previous TRUTHINESS gate
+    (a byte-match of the pre-Surface lens) nulled those keys, splitting
+    this predicate from ``fetch._item_matches_key`` and turning a real
+    status-bearing row into a statusless refusal
+    (finding:chw-sol-r4-f1-falsy-key-truthiness; arbiter: fix the
+    substrate, not the predicates). ``kind/0`` addresses hitting the
+    edge/facts lookups is CORRECT under that contract, not spurious — a
+    ref to the entity keyed ``0`` should land on it. An empty-string key
+    yields ``Row.key == ""``, which downstream truthiness (``_address``'s
+    ``kind/<id>`` fallback, ``if not key`` edge gates) still treats as
+    keyless — same observable behavior as before for ``""``.
     """
     if not key_field:
         return None
     val = item.payload.get(key_field)
-    if not val:
+    if val is None:
         return None
     return str(val)
 

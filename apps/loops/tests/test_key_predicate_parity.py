@@ -17,13 +17,12 @@ Scope note: both callers split comma-OR into single patterns BEFORE calling
 the predicate (`--key a/,b/` becomes two calls), so a comma inside a
 pattern here is a LITERAL key character, not an OR at this level.
 
-Known out-of-matrix corner (documented, deliberately excluded): a FALSY
-non-string fold-key value under a key_field that is NOT one of the label
-fields (e.g. key_field="custom", payload={"custom": 0}) diverges today —
-``_row_key``'s truthiness gate nulls Row.key while ``_item_matches_key``
-still scans the field. Unreachable through the declared-fold pipeline the
-census and Surface both ride; widening the matrix there means first
-deciding which predicate is right, not just pinning agreement.
+The falsy-but-valid corner (numeric ``0`` / ``False`` fold keys) is IN the
+matrix: it was excluded at first as a documented divergence, then ruled
+reachable (finding:chw-sol-r4-f1-falsy-key-truthiness — the engine's fold
+acceptance is ``is not None``, so a stored JSON numeric ``0`` key is
+legal). The arbiter's substrate fix (``_row_key`` gates on ``is not
+None``) brings the predicates into agreement there; these cells now pin it.
 """
 from atoms.fold_state import FoldItem
 
@@ -45,6 +44,9 @@ _ROW_SHAPES = [
     ("topic", {"topic": 0, "name": "zero-key"}),           # falsy non-string
     ("topic", {"topic": 42}),                              # non-string key
     ("custom", {"custom": "custom-keyed", "title": "t"}),  # non-label key field
+    ("custom", {"custom": 0}),                             # falsy-but-valid key,
+    #   non-label key field — the chw-sol-r4-f1 corner
+    ("custom", {"custom": False}),                         # falsy bool key
     (None, {"name": "collect-labeled"}),                   # collect-fold
     (None, {"message": "no label fields at all"}),
     ("topic", {"topic": "καλημέρα/κόσμε"}),                # unicode
@@ -67,6 +69,8 @@ _KEY_PATTERNS = [
     "empty",
     "zero",
     "4",
+    "0",
+    "false",
     "custom-",
     "collect",
     "no label",

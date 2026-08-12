@@ -314,3 +314,64 @@ class TestStatusErrorDiscipline:
         assert rc == 2
         assert captured.out == ""
         assert "--why" in captured.err
+
+
+# --- Falsy-but-valid fold keys (chw-sol-r4-f1) ------------------------------
+
+
+class TestFalsyKeyStatus:
+    """finding:chw-sol-r4-f1-falsy-key-truthiness (arbiter: fix the
+    substrate). The engine's fold acceptance is ``is not None``
+    (atoms.engine fold_by), so a stored JSON numeric ``0`` key is a legal
+    entity key. ``surface._row_key``'s old truthiness gate nulled it,
+    splitting the Surface --key filter from the census's
+    ``_item_matches_key`` — ``--key 0,missing --status open`` refused as
+    statusless against a real status-bearing row. Post-fix: the correct
+    answer, not a refusal."""
+
+    @pytest.fixture
+    def zero_key_vertex(self, tmp_path):
+        from .builders import StorePopulator
+
+        v = (
+            vertex("zerov")
+            .store("./z.db")
+            .loop("decision", fold_by("topic"))
+        )
+        vpath = tmp_path / "zerov.vertex"
+        v.write(vpath)
+        (
+            StorePopulator(tmp_path / "z.db")
+            .emit("decision", topic=0, status="open", message="zero-keyed")
+            .emit("decision", topic="design/a", status="resolved", message="a")
+            .done()
+        )
+        return vpath
+
+    def test_comma_or_key_zero_with_status_answers(
+        self, zero_key_vertex, capsys,
+    ):
+        # Sol's end-to-end reproduction: numeric-0 key, comma-OR --key,
+        # --status — must answer with the matching row (exit 0), never the
+        # statusless refusal.
+        rc, s, err = _json_read(
+            capsys, str(zero_key_vertex), "--kind", "decision",
+            "--key", "0,missing", "--status", "open",
+        )
+        assert rc == 0
+        assert "no status field" not in err
+        assert s is not None
+        rows = s["rows"]
+        assert len(rows) == 1
+        assert rows[0]["key"] == "0"
+        assert rows[0]["payload"]["message"] == "zero-keyed"
+
+    def test_zero_key_row_carries_entity_address(self, zero_key_vertex, capsys):
+        # The fixed gate also gives the row its real kind/key address
+        # instead of the kind/<id> keyless fallback.
+        rc, s, err = _json_read(
+            capsys, str(zero_key_vertex), "--kind", "decision",
+        )
+        assert rc == 0
+        addresses = {r["address"] for r in s["rows"]}
+        assert "decision/0" in addresses

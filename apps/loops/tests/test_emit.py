@@ -814,6 +814,10 @@ class TestCite:
         self._write_cite_vertex(home)
         monkeypatch.setenv("LOOPS_HOME", str(home))
         monkeypatch.delenv("LOOPS_OBSERVER", raising=False)
+        # Hermeticity: a .loops-bearing cwd (e.g. the real checkout) would
+        # shadow the LOOPS_HOME fixture vertex via local-first dispatch
+        # resolution (finding:chw-s4-test-hermeticity).
+        monkeypatch.chdir(tmp_path)
 
         result = main([
             "project", "cite",
@@ -835,6 +839,10 @@ class TestCite:
         self._write_cite_vertex(home)
         monkeypatch.setenv("LOOPS_HOME", str(home))
         monkeypatch.delenv("LOOPS_OBSERVER", raising=False)
+        # Hermeticity: a .loops-bearing cwd (e.g. the real checkout) would
+        # shadow the LOOPS_HOME fixture vertex via local-first dispatch
+        # resolution (finding:chw-s4-test-hermeticity).
+        monkeypatch.chdir(tmp_path)
 
         result = main([
             "project", "cite", "design/foo",
@@ -854,6 +862,10 @@ class TestCite:
         self._write_cite_vertex(home)
         monkeypatch.setenv("LOOPS_HOME", str(home))
         monkeypatch.delenv("LOOPS_OBSERVER", raising=False)
+        # Hermeticity: a .loops-bearing cwd (e.g. the real checkout) would
+        # shadow the LOOPS_HOME fixture vertex via local-first dispatch
+        # resolution (finding:chw-s4-test-hermeticity).
+        monkeypatch.chdir(tmp_path)
 
         result = main([
             "project", "cite", "design/foo",
@@ -873,6 +885,10 @@ class TestCite:
         self._write_cite_vertex(home)
         monkeypatch.setenv("LOOPS_HOME", str(home))
         monkeypatch.delenv("LOOPS_OBSERVER", raising=False)
+        # Hermeticity: a .loops-bearing cwd (e.g. the real checkout) would
+        # shadow the LOOPS_HOME fixture vertex via local-first dispatch
+        # resolution (finding:chw-s4-test-hermeticity).
+        monkeypatch.chdir(tmp_path)
 
         result = main([
             "project", "cite", "design/foo",
@@ -891,6 +907,10 @@ class TestCite:
         self._write_cite_vertex(home)
         monkeypatch.setenv("LOOPS_HOME", str(home))
         monkeypatch.delenv("LOOPS_OBSERVER", raising=False)
+        # Hermeticity: a .loops-bearing cwd (e.g. the real checkout) would
+        # shadow the LOOPS_HOME fixture vertex via local-first dispatch
+        # resolution (finding:chw-s4-test-hermeticity).
+        monkeypatch.chdir(tmp_path)
 
         result = main([
             "project", "cite", "design/foo",

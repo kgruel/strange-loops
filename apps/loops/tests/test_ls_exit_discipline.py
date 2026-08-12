@@ -133,6 +133,31 @@ class TestValidInvocationsExitZero:
 
 
 # ---------------------------------------------------------------------------
+# (d) bare ls with no config root and no local layer — stderr, nonzero
+#     (finding:chw-r2-bare-ls-error-to-stdout)
+# ---------------------------------------------------------------------------
+
+
+class TestBareLsEmptyHome:
+    def test_missing_root_exits_nonzero_with_stderr(
+        self, loops_home, monkeypatch, tmp_path, capsys
+    ):
+        # loops_home exists but has no .vertex root; cwd pinned to an empty
+        # dir so fetch_vertices_local finds no local layer either.
+        empty = tmp_path / "empty-cwd"
+        empty.mkdir()
+        monkeypatch.chdir(empty)
+        code = _run_ls(["--plain"])
+        captured = capsys.readouterr()
+        assert code == 1
+        assert captured.out == ""
+        assert (
+            f"{loops_home / '.vertex'} not found. Run 'loops init' first."
+            in captured.err
+        )
+
+
+# ---------------------------------------------------------------------------
 # (c) staleness hint names the vertex
 # ---------------------------------------------------------------------------
 

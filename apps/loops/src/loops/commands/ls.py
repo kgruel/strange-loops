@@ -191,15 +191,34 @@ def _run_ls(argv: list[str]) -> int:
         filters = flag_filters or None  # None = all sections visible
         narrows = flag_narrows
 
+    # Fetch up-front so error paths exit nonzero with the error on STDERR
+    # (friction:ls-vertex-not-found-exits-zero) instead of rendering an
+    # error line to stdout at exit 0 through the lens.
+    data = fetch_declarations(
+        target, filters=filters, narrows=narrows, extra_argv=rest,
+    )
+    code = _exit_on_fetch_error(data)
+    if code is not None:
+        return code
+
+    # A --kind narrow composed with other section flags bypasses the descent
+    # path (`_run_kind_stat`) — validate it here against the merged
+    # (declared ∪ live) kind set ls itself lists, deferring to read's
+    # validator for the miss (friction:ls-kind-flag-no-validation).
+    narrow_kind = narrows.get("kind")
+    if narrow_kind is not None and narrow_kind not in {
+        k["name"] for k in data["kinds"]
+    }:
+        from pathlib import Path
+
+        from loops.commands.resolve import _validate_kind_or_exit
+
+        _validate_kind_or_exit(narrow_kind, Path(data["vertex_path"]))
+
     # Render through painted's run_cli for zoom/width handling.
     from painted import run_cli
 
     from loops.lenses.declarations import declarations_view
-
-    def fetch():
-        return fetch_declarations(
-            target, filters=filters, narrows=narrows, extra_argv=rest,
-        )
 
     def renderer(data, fidelity, width):
         from loops.lens_resolver import zoom_from_fidelity
@@ -209,7 +228,7 @@ def _run_ls(argv: list[str]) -> int:
 
     return run_cli(
         rest,
-        fetch=fetch,
+        fetch=lambda: data,
         renderer=renderer,
         prog=f"loops ls {target}",
         description="List vertex declarations",
@@ -262,6 +281,7 @@ def fetch_declarations(
         missing = resolve_vertex(vertex_ref, loops_home())
         return {
             "error": f"vertex not found: {missing}",
+            "missing_vertex": vertex_ref,
             "vertex_name": vertex_ref,
             "filter": legacy_filter,
             "filters": filters,
@@ -393,6 +413,7 @@ def fetch_kind_stat(
     if vertex_path is None:
         return {
             "error": f"vertex not found: {resolve_vertex(target, loops_home())}",
+            "missing_vertex": target,
             "vertex_name": target, "kind": kind,
         }
     try:
@@ -435,7 +456,8 @@ def fetch_kind_stat(
     store = resolved_index(store, vertex_path)
 
     base = {
-        "vertex_name": vf.name, "kind": kind, "fold_op": fold_op,
+        "vertex_name": vf.name, "vertex_path": str(vertex_path),
+        "kind": kind, "fold_op": fold_op,
         "key_field": key_field, "key_prefix": key_prefix,
         "by": "key" if key_field else "observer",
     }
@@ -517,12 +539,28 @@ def _run_kind_stat(vertex: str, kind: str, rest: list[str]) -> int:
     kp.add_argument("--key", default=None)
     known, leftover = kp.parse_known_args(rest)
 
+    data = fetch_kind_stat(vertex, kind, key_prefix=known.key)
+    code = _exit_on_fetch_error(data)
+    if code is not None:
+        return code
+
+    # Kind validation, same validator as read (friction:ls-kind-flag-no-
+    # validation) — but gated on "the kind produced nothing live". ls lists
+    # live undeclared kinds (tick.*, _sync.*) as containment entries, so an
+    # unconditional declared-kinds check would refuse descent into rows ls
+    # itself just listed; read has no such live listing, hence the extra
+    # gate here. A declared-but-empty kind passes the validator silently
+    # (kind IS declared) and keeps its honest 0-entries render.
+    if data["count"] == 0 and not data["entries"]:
+        from pathlib import Path
+
+        from loops.commands.resolve import _validate_kind_or_exit
+
+        _validate_kind_or_exit(kind, Path(data["vertex_path"]))
+
     from painted import run_cli
 
     from loops.lenses.declarations import kind_stat_view
-
-    def fetch():
-        return fetch_kind_stat(vertex, kind, key_prefix=known.key)
 
     def renderer(data, fidelity, width):
         from loops.lens_resolver import zoom_from_fidelity
@@ -531,7 +569,7 @@ def _run_kind_stat(vertex: str, kind: str, rest: list[str]) -> int:
         )
 
     return run_cli(
-        leftover, fetch=fetch, renderer=renderer,
+        leftover, fetch=lambda: data, renderer=renderer,
         prog=f"loops ls {vertex} --kind {kind}",
         description=f"Stat view of kind '{kind}' in {vertex}",
     )
@@ -713,3 +751,26 @@ def _err(msg: str) -> None:
     from painted.palette import current_palette
 
     paint(Block.text(f"Error: {msg}", current_palette().error), file=sys.stderr)
+
+
+def _exit_on_fetch_error(data: dict[str, Any]) -> int | None:
+    """Turn a fetch-error dict into a stderr line + nonzero exit code.
+
+    ``None`` means no error — proceed to render. Every ls error path exits
+    nonzero with the error on stderr (friction:ls-vertex-not-found-exits-zero;
+    the S2 exit-discipline contract) — the lens keeps its inline error render
+    only for direct data-API callers. An unresolvable vertex name gets the
+    did-you-mean treatment (``_unknown_vertex_message``), exit 1 — the same
+    code read uses for an unresolvable vertex.
+    """
+    err = data.get("error")
+    if err is None:
+        return None
+    missing = data.get("missing_vertex")
+    if missing is not None:
+        from loops.commands.resolve import _unknown_vertex_message
+
+        _err(_unknown_vertex_message(missing))
+    else:
+        _err(err)
+    return 1

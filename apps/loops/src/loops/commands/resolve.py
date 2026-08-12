@@ -1518,6 +1518,27 @@ def _declared_kinds(vertex_path: Path) -> set[str]:
         return set()
 
 
+def _unknown_vertex_message(name: str) -> str:
+    """Error message for a vertex name that resolves nowhere, with did-you-mean.
+
+    The vertex-name sibling of ``_validate_kind_or_exit``'s kind treatment
+    (friction:ls-vertex-not-found-exits-zero): same three-line shape —
+    the miss, close matches over what actually exists, then the full list.
+    Candidates come from ``enumerate_vertices()`` — exactly the names the
+    bare ``sl ls`` root listing shows, reused rather than re-detected.
+    """
+    import difflib
+
+    names = [v.name for v in enumerate_vertices()]
+    lines = [f"vertex not found: {name}"]
+    suggestions = difflib.get_close_matches(name, names, n=3, cutoff=0.5)
+    if suggestions:
+        lines.append(f"Did you mean: {', '.join(suggestions)}?")
+    if names:
+        lines.append(f"Known vertices: {', '.join(names)}")
+    return "\n".join(lines)
+
+
 def _validate_kind_or_exit(kind: str | None, vertex_path: Path | None) -> None:
     """If ``--kind X`` is set and X is not declared by the vertex, exit 2.
 

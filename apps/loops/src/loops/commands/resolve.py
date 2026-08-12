@@ -877,6 +877,37 @@ def _topology_roots_for_emit(
 # --- Entity reference resolution ---
 
 
+def parse_ref_token(tok: str):
+    """Parse one ``ref``-field token under the canonical self-describing
+    address grammar, or return ``None``.
+
+    THE single source of "is this token a ref address" — the exact acceptance
+    ``_resolve_entity_refs`` applies to ``ref``-field tokens (its loop calls
+    this), reused by ``cmd_emit``'s cite gate
+    (finding:chw-sol-r2-f1-malformed-token-evades-gate; dissolution — the
+    discriminator already existed here, the gate must not grow its own):
+
+      * non-empty, no internal whitespace (prose is never an address);
+      * ``Address.parse`` succeeds — rejects empty-half separators
+        (``:key`` / ``kind:`` / ``/key`` / ``kind/``);
+      * the parsed kind is non-empty — a self-describing ref requires a
+        separator; a bare separator-less key names nothing citable.
+
+    Returns the parsed ``atoms.Address`` (kind-qualified) or ``None``.
+    Whether the address's kind is DECLARED anywhere is deliberately not this
+    function's question — an undeclared-kind address is well-formed (an inert
+    provenance pin), not malformed.
+    """
+    from atoms import Address
+
+    if not tok or any(c.isspace() for c in tok):
+        return None
+    address = Address.parse(tok)
+    if address is None or not address.kind:
+        return None
+    return address
+
+
 def _resolve_entity_refs(
     vertex_path: Path,
     store_path: Path,
@@ -1076,9 +1107,11 @@ def _resolve_entity_refs(
                 address = Address.for_edge(raw, local_edge_fields[field_name])
                 display = str(address) if address is not None else raw
             else:
-                # Self-describing ref — a separator (non-empty kind) is required.
-                address = Address.parse(raw)
-                if address is None or not address.kind:
+                # Self-describing ref — parse_ref_token is the single source
+                # of this acceptance (shared with cmd_emit's cite gate,
+                # finding:chw-sol-r2-f1-malformed-token-evades-gate).
+                address = parse_ref_token(raw)
+                if address is None:
                     continue
                 display = raw
             if address is None:

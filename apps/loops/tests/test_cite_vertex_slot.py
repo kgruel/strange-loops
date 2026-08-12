@@ -321,3 +321,103 @@ class TestZeroAddressCite:
         facts = _cite_facts(vpath)
         assert len(facts) == 1
         assert facts[0]["payload"]["ref"] == "atoms/baz"
+
+
+class TestMalformedTokenGate:
+    """finding:chw-sol-r2-f1-malformed-token-evades-gate (arbiter ruling):
+    ref_addrs counts only tokens that PARSE under the canonical address
+    grammar — resolve.parse_ref_token, the exact acceptance
+    _resolve_entity_refs applies to ref-field tokens (dissolution: the
+    discriminator already existed; no new validator). All-malformed refuses
+    like zero-address; a malformed token riding with a storing cite gets a
+    per-token WARN and keeps its current storage behavior (raw in refs)."""
+
+    def _emit(self, vpath, parts, **extra):
+        ns = argparse.Namespace(
+            vertex=None, kind="cite", parts=parts,
+            observer="tester", dry_run=False, **extra,
+        )
+        return cmd_emit(ns, vertex_path=vpath)
+
+    @pytest.mark.parametrize("token", [":x", "kind:", "not an address"])
+    def test_all_malformed_refuses(self, sandbox, capsys, token):
+        vpath = _write_vertex(sandbox, "t")
+        rc = self._emit(vpath, [f"ref={token}"])
+        err = capsys.readouterr().err
+        assert rc == 2
+        assert f"ref '{token}' does not parse as an address" in err
+        assert "nothing stored" in err
+        assert _cite_facts(vpath) == []
+
+    def test_bare_separatorless_key_is_malformed(self, sandbox, capsys):
+        # The resolver's ref-field acceptance requires a kind (self-
+        # describing ref needs a separator) — a bare key never counts.
+        vpath = _write_vertex(sandbox, "t")
+        rc = self._emit(vpath, ["ref=barekey"])
+        assert rc == 2
+        assert "does not parse as an address" in capsys.readouterr().err
+        assert _cite_facts(vpath) == []
+
+    def test_malformed_with_inert_stores_with_warn_raw_kept(
+        self, sandbox, capsys,
+    ):
+        # An inert (undeclared-kind) address is well-formed → the cite
+        # stores; the malformed token WARNs and stays raw in the payload.
+        vpath = _write_vertex(sandbox, "t")
+        rc = self._emit(vpath, ["ref=:x,atoms/baz"])
+        err = capsys.readouterr().err
+        assert rc == 0
+        assert "WARN: ref ':x' does not parse as an address" in err
+        assert "ERROR" not in err
+        facts = _cite_facts(vpath)
+        assert len(facts) == 1
+        assert facts[0]["payload"]["ref"] == ":x,atoms/baz"
+
+    def test_malformed_with_valid_stores_with_warn(self, sandbox, capsys):
+        vpath = _write_vertex(sandbox, "t")
+        _seed_thread(vpath, "arc")
+        rc = self._emit(vpath, ["ref=:x,thread:arc"])
+        err = capsys.readouterr().err
+        assert rc == 0
+        assert "WARN: ref ':x' does not parse as an address" in err
+        facts = _cite_facts(vpath)
+        assert len(facts) == 1
+        assert facts[0]["payload"].get("ref_ref") is not None
+        assert facts[0]["payload"]["ref"] == ":x,thread:arc"
+
+    def test_dry_run_all_malformed_also_refuses(self, sandbox, capsys):
+        vpath = _write_vertex(sandbox, "t")
+        ns = argparse.Namespace(
+            vertex=None, kind="cite", parts=["ref=:x"],
+            observer="tester", dry_run=True,
+        )
+        rc = cmd_emit(ns, vertex_path=vpath)
+        captured = capsys.readouterr()
+        assert rc == 2
+        assert captured.out == ""  # no fact-JSON preview on a refusal
+        assert "does not parse as an address" in captured.err
+        assert _cite_facts(vpath) == []
+
+    def test_json_all_malformed_refuses_with_empty_stdout(
+        self, sandbox, capsys,
+    ):
+        # --json's receipt only fires post-store; a refusal must leave
+        # stdout empty (no structured receipt for a fact that never landed).
+        vpath = _write_vertex(sandbox, "t")
+        ns = argparse.Namespace(
+            vertex=None, kind="cite", parts=["ref=kind:"],
+            observer="tester", dry_run=False, json=True,
+        )
+        rc = cmd_emit(ns, vertex_path=vpath)
+        captured = capsys.readouterr()
+        assert rc == 2
+        assert captured.out == ""
+        assert "does not parse as an address" in captured.err
+        assert _cite_facts(vpath) == []
+
+    def test_verb_first_malformed_positional_refuses(self, sandbox, capsys):
+        vpath = _write_vertex(sandbox, "t")
+        rc = cite_view.run(["t", ":x"], _ctx())
+        assert rc == 2
+        assert "does not parse as an address" in capsys.readouterr().err
+        assert _cite_facts(vpath) == []

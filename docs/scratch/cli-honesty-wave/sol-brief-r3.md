@@ -6,10 +6,17 @@ it disturbed, and re-call convergence.
 
 ## 1. Anchor
 - Repo: /Users/kaygee/Code/loops — branch `cli-honesty-wave`
-- Full-wave diff: `git diff 17783fd...HEAD`
-- This round's primary target: commit `a52017d` (+ merge b7888f8b) — the
-  ONLY code change since your r2 review. Everything else you have already
-  verified; do not re-litigate PASSed dispositions without new evidence.
+- REBASE NOTICE: the branch was rebased onto the new main (`17ffde6c`,
+  a docs-only sweep) after your r2 run. Wave commit hashes changed; the
+  code content you reviewed did not (post-rebase suite identical:
+  2509 passed / 1 xfailed). Old→new mapping is receipted in the store as
+  `observation:ops/chw-rebase-provenance-discontinuity` if you need it.
+- Full-wave diff: `git diff 17ffde6c...HEAD` — docs-sweep commits at/below
+  the base are NOT wave work; ignore them.
+- This round's primary target: commit `a52017db` (+ merge `b7888f8b`) —
+  both hashes still valid (they ride the merge's second parent). The ONLY
+  code change since your r2 review. Do not re-litigate PASSed dispositions
+  without new evidence.
 - Receipts: sol-r2-stdout.log, r1-remediation-report.md (R2-F1 addendum)
 
 ## 2. R2-F1 fix under review, with its ratified ruling

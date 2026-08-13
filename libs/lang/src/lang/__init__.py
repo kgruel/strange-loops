@@ -83,6 +83,11 @@ __all__ = [
     "resolve_template",
     "template_name",
     "read_population",
+    # Vertex-kind mutation (KDL text splice)
+    "add_vertex_kind",
+    "edit_vertex_kind",
+    "remove_vertex_kind",
+    "loop_def_to_kdl",
     # Validator
     "validate",
     "validate_loop",
@@ -126,6 +131,10 @@ for _n in ["DSLError", "LexError", "Location", "ParseError", "ValidationError"]:
 # Population
 for _n in ["PopulationInfo", "PopulationRow", "read_population", "resolve_template", "resolve_vertex", "template_name"]:
     _LAZY_IMPORTS[_n] = ("lang.population", _n)
+
+# Vertex-kind mutation
+for _n in ["add_vertex_kind", "edit_vertex_kind", "loop_def_to_kdl", "remove_vertex_kind"]:
+    _LAZY_IMPORTS[_n] = ("lang.vertex_mutation", _n)
 
 # Validator
 for _n in ["validate", "validate_loop", "validate_vertex"]:

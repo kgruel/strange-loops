@@ -6,10 +6,38 @@ import json
 import sqlite3
 from contextlib import contextmanager
 from collections.abc import Iterable, Iterator
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from .tick import Tick
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from .witness import WitnessPosition
+
+
+@dataclass(frozen=True)
+class FactPage:
+    """One bounded page of a generic fact query (:meth:`StoreReader.query_facts`).
+
+    ``next`` is a 0.8.0 :class:`~engine.witness.WitnessPosition` — the SAME
+    cursor type every other temporal seam uses, not a second cursor species.
+    It marks the LAST item of this page on the witness (append/rowid) axis;
+    hand it back as ``before`` (order ``"newest"``) or ``after`` (order
+    ``"oldest"``) to fetch the next page. ``None`` means the walk is complete
+    (equivalently: ``truncated`` is False).
+
+    ``truncated`` is True when more matching rows existed beyond ``limit`` in
+    the SAME read snapshot the items came from.
+    """
+
+    items: list[dict]
+    next: "WitnessPosition | None"
+    truncated: bool
+    #: The order the page was walked in — echoed so a consumer holding only
+    #: the page knows which parameter ``next`` feeds.
+    order: str
 
 
 class StoreReader:
@@ -607,6 +635,138 @@ class StoreReader:
             (kind, n),
         ).fetchall()
         return [self._fact_row_to_dict(r) for r in rows]
+
+    def query_facts(
+        self,
+        *,
+        limit: int = 100,
+        before: "WitnessPosition | None" = None,
+        after: "WitnessPosition | None" = None,
+        kind: str | None = None,
+        observer: str | None = None,
+        include_internal: bool = False,
+        order: str = "newest",
+    ) -> FactPage:
+        """Bounded, cursor-bearing generic fact query — one page per call.
+
+        The generic listing seam a CLI ``read --facts --limit N`` needs:
+        no time window, no per-kind restriction required, never an unbounded
+        scan. Ordering authority is the WITNESS AXIS (``rowid``, append
+        order) — the same contract every 0.8.0 temporal seam uses. Fact ids
+        are NEVER ordered or compared (A3): the corpus mixes uuid4-era and
+        ULID-era ids, and even pure-ULID stores are not within-millisecond
+        monotonic. ``order="newest"`` walks ``rowid DESC``; ``"oldest"``
+        walks ``rowid ASC``. (Note this is receipt order, not event-time
+        ``ts`` order — a merged/backdated fact lists where it was RECEIVED,
+        the same honesty the witness prefix gives ``at=`` reads.)
+
+        Cursors are 0.8.0 :class:`~engine.witness.WitnessPosition` values —
+        no second cursor type. ``before`` selects ``rowid < before.rowid``,
+        ``after`` selects ``rowid > after.rowid`` (both exclusive; they
+        compose into a window). Each is A10-verified against THIS store via
+        :func:`~engine.witness.verify_position_for_store` before its rowid
+        is applied — a foreign position is re-resolved (same lineage) or
+        refused (:class:`~engine.witness.WitnessLineageMismatch`), never
+        silently applied.
+
+        Filters: ``kind`` matches the kind and its dotted subtree (same
+        ``kind = ? OR kind LIKE 'kind.%'`` rule as :meth:`facts_between`);
+        ``observer`` matches with :func:`engine.observer.observer_matches`
+        namespacing semantics (``kyle/loops-claude`` matches bare
+        ``loops-claude`` and vice versa), applied IN SQL so ``limit``
+        bounds the matching rows, not a pre-filter superset; ``_decl.*``
+        is excluded unless ``include_internal=True`` (SPEC §9.4).
+
+        SNAPSHOT: the page SELECT and the ``next``-cursor resolution run
+        inside ONE ``BEGIN DEFERRED`` read transaction (opened here, or
+        joined if the caller already holds :meth:`snapshot` — same
+        connection is NOT same snapshot without it), so ``items``,
+        ``truncated``, and ``next`` all describe a single store state. A
+        caller paginating across calls who needs full-walk consistency
+        against concurrent writers wraps the whole walk in
+        :meth:`snapshot`; without it, each page is internally consistent
+        and the cursor arithmetic still guarantees no duplicates for
+        ``newest`` walks (new rows land at higher rowids than any
+        ``before`` cursor) while an ``oldest`` walk tails new appends —
+        the honest append-only reading.
+
+        Truncation is probed by over-fetching one row: ``truncated`` is
+        True iff a ``limit+1``-th matching row existed in this snapshot,
+        and then ``next`` is the :class:`WitnessPosition` of the page's
+        last item (resolved with ``group_boundary="allow"`` — a page
+        boundary is a read-progress token, not a fold cut, so the A2
+        mid-ceremony refusal does not apply). Feed ``next`` back as
+        ``before`` for ``"newest"`` or ``after`` for ``"oldest"``.
+        """
+        from .witness import (
+            _resolve_witness_position_on_conn,
+            verify_position_for_store,
+        )
+
+        if order not in ("newest", "oldest"):
+            raise ValueError(
+                f"query_facts: order must be 'newest' or 'oldest', got {order!r}"
+            )
+        if limit < 1:
+            raise ValueError(f"query_facts: limit must be >= 1, got {limit}")
+
+        clauses: list[str] = []
+        params: list = []
+        if before is not None:
+            before = verify_position_for_store(before, self._path)
+            clauses.append("rowid < ?")
+            params.append(before.rowid)
+        if after is not None:
+            after = verify_position_for_store(after, self._path)
+            clauses.append("rowid > ?")
+            params.append(after.rowid)
+        if kind is not None:
+            clauses.append("(kind = ? OR kind LIKE ?)")
+            params.extend([kind, kind + ".%"])
+        if observer is not None:
+            # observer_matches semantics in SQL: exact, or one side bare
+            # matching the other's namespace tail. No LIKE/GLOB wildcards —
+            # the tail test is a suffix compare, immune to metacharacters
+            # in observer names.
+            if "/" in observer:
+                clauses.append("(observer = ? OR observer = ?)")
+                params.extend([observer, observer.rsplit("/", 1)[1]])
+            else:
+                clauses.append(
+                    "(observer = ? OR substr(observer, -?, ?) = ?)"
+                )
+                tail = "/" + observer
+                params.extend([observer, len(tail), len(tail), tail])
+        if not include_internal:
+            clauses.append("kind NOT GLOB '_decl.*'")
+        where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+        direction = "DESC" if order == "newest" else "ASC"
+
+        own_txn = not self._conn.in_transaction
+        if own_txn:
+            self._conn.execute("BEGIN DEFERRED")
+        try:
+            rows = self._conn.execute(
+                "SELECT id, kind, ts, observer, origin, payload FROM facts "
+                f"{where} ORDER BY rowid {direction} LIMIT ?",
+                (*params, limit + 1),
+            ).fetchall()
+            truncated = len(rows) > limit
+            rows = rows[:limit]
+            next_pos = None
+            if truncated:
+                next_pos = _resolve_witness_position_on_conn(
+                    self._conn, self._path, rows[-1][0], group_boundary="allow",
+                )
+        finally:
+            if own_txn:
+                self._conn.rollback()
+        return FactPage(
+            items=[self._fact_row_to_dict(r) for r in rows],
+            next=next_pos,
+            truncated=truncated,
+            order=order,
+        )
 
     @contextmanager
     def snapshot(self) -> "Iterator[StoreReader]":

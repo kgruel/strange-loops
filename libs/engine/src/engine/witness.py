@@ -295,7 +295,7 @@ def _resolve_witness_position_on_conn(
     here; all reads go through ``conn``.
     """
     fact_id, rowid = _resolve_address_rowid(conn, address)
-    span = receipt_group_span(conn, rowid)
+    span = None if group_boundary == "allow" else receipt_group_span(conn, rowid)
     if span is not None:
         if group_boundary == "floor":
             # Snap OUT of the ceremony to the position just before its first
@@ -368,7 +368,12 @@ def resolve_witness_position(
     forms — ``tick:``/wall-clock, chosen by the CLI resolver per address form)
     **snaps** to the position just before the ceremony's first row — the last
     complete ontology state — rather than refusing (M3). ``head`` never lands
-    mid-group (a completed ceremony committed atomically).
+    mid-group (a completed ceremony committed atomically). ``"allow"`` skips
+    the guard entirely — reserved for READ-PROGRESS tokens (a pagination
+    page boundary, ``StoreReader.query_facts``) where the position marks how
+    far a listing walked, never a fold cut: refusing or snapping there would
+    make some pages unaddressable and break the no-dups/no-gaps pagination
+    contract. Never use ``"allow"`` for a position that will select a fold.
     """
     conn = _open_readonly(store_path, timeout=timeout)
     if conn is None:

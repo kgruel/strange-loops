@@ -33,6 +33,7 @@ from .jsonl_store import resolved_index
 from .residence import canonical_store_path
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
+    from .store_reader import FactPage
     from .witness import WitnessPosition
 
 
@@ -1518,6 +1519,71 @@ def vertex_facts(
     if observer:
         facts = [f for f in facts if observer_matches(f["observer"], observer)]
     return facts
+
+
+def vertex_query_facts(
+    vertex_path: Path,
+    *,
+    limit: int = 100,
+    before: "WitnessPosition | None" = None,
+    after: "WitnessPosition | None" = None,
+    kind: str | None = None,
+    observer: str | None = None,
+    include_internal: bool = False,
+    order: str = "newest",
+    store: Path | str | None = None,
+) -> "FactPage":
+    """Bounded, cursor-bearing generic fact query through a vertex.
+
+    The vertex-addressed seam over :meth:`engine.store_reader.StoreReader.query_facts`
+    — resolves the declaration, locates the store, and returns a
+    :class:`~engine.store_reader.FactPage` (items + ``next`` cursor +
+    truncation) from ONE read snapshot. Cursors are 0.8.0
+    :class:`~engine.witness.WitnessPosition` values; ordering is the witness
+    (append/rowid) axis — ids are never ordered (A3).
+
+    Combine/discover aggregates are REFUSED with the typed
+    :class:`~engine.witness.WitnessAggregateUnsupported`: witness order is
+    per-member (A1/A9) — no shared append axis exists across members, and no
+    meaningful aggregate cursor shipped in 0.8.0 (aggregate ``at=`` reads
+    refuse identically). Address a member store directly.
+
+    A declared-but-absent (or storeless) vertex answers the empty page —
+    the same "empty store" answer :func:`vertex_facts` gives.
+
+    ``store`` overrides *where* the rows come from (ABSOLUTE canonical
+    locator, see :func:`_override_index`); cursor verification (A10) then
+    runs against the override path.
+    """
+    from .store_reader import FactPage, StoreReader
+
+    ast = load_declaration(vertex_path)
+    override = _override_index(ast, vertex_path, store)
+
+    if ast.combine is not None or ast.discover is not None:
+        from .witness import WitnessAggregateUnsupported
+
+        raise WitnessAggregateUnsupported(
+            "vertex_query_facts: a witness cursor is per-store and cannot "
+            "page over a combine/discover aggregate — no shared witness "
+            "order exists across members (A1/A9). Address a member store "
+            "directly."
+        )
+    if ast.store is None and override is None:
+        return FactPage(items=[], next=None, truncated=False, order=order)
+    store_path = override if override is not None else resolved_index(ast.store, vertex_path)
+    if not store_path.exists():
+        return FactPage(items=[], next=None, truncated=False, order=order)
+    with StoreReader(store_path) as reader:
+        return reader.query_facts(
+            limit=limit,
+            before=before,
+            after=after,
+            kind=kind,
+            observer=observer,
+            include_internal=include_internal,
+            order=order,
+        )
 
 
 def vertex_ticks(

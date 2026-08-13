@@ -24,3 +24,26 @@ helpers). The impl report (f3a15d64) was treated as target, not authority.
 Gate matrix script: 74 checks, sole deviation the in-carve-out WAL churn above.
 Findings for the wave (non-blocking): item 5 adoption hazard, item 7 annotation
 tightening, item 1a flake-framing correction.
+
+---
+
+## Seam re-check after S1b merge (libs-handoff-wave @ debb2e6e)
+
+Deferred per the wave plan: S1b landed the `"t":"batch"` codec record
+(multi-row ceremonies) with batch expansion in `_index_lines`/
+`_prefix_intact`/`audit_deep`. Re-ran on ceremony-bearing fixtures built via
+`absorb_genesis` + multi-change `absorb_edit` (one genesis fact line + one
+batch line + a post-ceremony fact).
+
+| Item | Verdict | Evidence |
+|------|---------|----------|
+| 1a. probe on log CONTAINING a batch line | **PASS** | `probe_target` on the ceremony log: `jsonl_log`, `index_current=True`, no corroboration mis-note (genesis fact line is first; `deserialize_row` decodes it fine). Byte-hash unchanged. |
+| 1b. probe on log whose FIRST line is a batch | **FAIL — real seam defect, located** | Constructed a log whose first line is the ceremony batch line. `probe_target` reason gains "; content does not decode as loops log rows" — a mis-note on a valid log. Cause: `probe._log_content_note` (probe.py, `_log_content_note`) corroborates via `jsonl_codec.deserialize_row`, which S1b taught to REFUSE batch lines ("decode with deserialize_records"). This is exactly touchpoint 1 predicted in s7-impl-report's "S1 seam" section. One-line fix: corroborate via `deserialize_records`. Impact bounded: `reason` string only (no field is wrong, nothing raises), and genesis-is-always-first makes the shape unreachable in practice — but the probe claims to classify arbitrary locations, so the mis-note stands as a defect. Gate did not fix. |
+| 2a. preflight, all 3 modes, clean ceremony store | **PASS** | audit-only `ok`; audit-then-open `ok`+opened; recover-then-open `ok`, no recovery. Fresh-clone shape (index deleted): RTO → `recovered`, post-report ok, and the rebuilt index has the SAME fact count as before deletion — batch expansion inherited correctly by rebuild (4 facts incl. the 2 inner batch rows). |
+| 2b. damaged variant: index-side edit to one inner batch row | **PASS at the correct layer; expectation re-scoped** | `audit_deep` detects it (`ok=False`) — S1b's batch expansion in the deep walk works. `read_preflight` reports `ok` in every mode because it composes `audit_agreement` (the CHEAP gate: counts/offset/last-line), and an in-place UPDATE moves no counts. NOT a batch regression: the identical edit to a plain non-batch row also passes `audit_agreement` (verified side-by-side) — interior in-place edits have always been the deep audit / `store verify` layer's claim (CLAUDE.md's documented custody boundary). If the wave wants interior-edit detection in preflight, that is a design question (a `deep=` option on `read_preflight`), not S1b damage. Location claim only. |
+| 3. byte-hash purity sweep on ceremony fixtures | **PASS** | Every probe and every audit-mode preflight on ceremony-bearing fixtures: all artifacts byte-identical, no new non-WAL files. |
+
+Overall seam verdict: substrate inheritance is correct (rebuild, deep audit,
+agreement all expand batches properly); one located cosmetic defect in probe
+corroboration (1b) for the wave to fix (`_log_content_note` →
+`deserialize_records`).

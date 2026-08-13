@@ -28,3 +28,14 @@ that justifies touching shipped 0.8.0 witness machinery is not pinned by any
 committed test (5d). Follow-up before wave merge: add a multi-row `_decl`
 ceremony fixture to `test_query_facts.py` whose include_internal walk lands a
 page boundary strictly inside the group, so the mutation dies.
+
+## Addendum — blocking follow-up CLEARED (03f4d36f)
+
+s5-impl's `test_page_boundary_strictly_inside_decl_ceremony_does_not_refuse`
+independently re-verified by the gate: fixture asserts its middle `_decl` row
+is genuinely mid-group (`receipt_group_span` non-None); with the witness.py
+allow change reverted, exactly this test fails (`MidReceiptGroupPosition`),
+24 others green; with it restored, full engine suite passes (1310 + the same
+4 environmental topology failures). Item 5d flips to PASS.
+
+**Final overall verdict: PASS, unconditional.**

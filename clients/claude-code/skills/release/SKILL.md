@@ -203,10 +203,16 @@ The release is not "done" until an install **from PyPI** reads a live store.
   retry before diagnosing. But if the simple index HAS the version
   (`curl -s https://pypi.org/simple/strange-loops/ | grep X.Y.Z`) and uv
   still says "no version", that is uv's *cached* index response from an
-  earlier failed attempt, not PyPI lag — install with
-  `--refresh-package strange-loops` instead of retrying (0.10.0 burned
-  ~3 min retrying a cache hit). Retry loops that create venvs need
-  `uv venv --clear`, or the leftover venv blocks every iteration.
+  earlier failed attempt, not PyPI lag. `--refresh-package strange-loops`
+  is the first move, but it is NOT always sufficient (0.11.0: still
+  resolved the stale index through it), and `uv cache clean` needs the
+  shared `~/.cache/uv` lock — which any long-running `uv run <server>`
+  process on the machine holds for its lifetime (0.11.0: a 300s lock
+  timeout from an unrelated dev server). The move that solves both at
+  once: `UV_CACHE_DIR=/tmp/uv-cache-smoke` on the verification commands —
+  isolated cache, guaranteed-fresh index, no lock contention, `rm -rf` it
+  after. Retry loops that create venvs need `uv venv --clear`, or the
+  leftover venv blocks every iteration.
 - **painted/loops version collision** — the pinned painted range must have a
   published wheel; gating against a local painted checkout proves nothing
   about the PyPI resolve (re-gate when the pin's target ships).

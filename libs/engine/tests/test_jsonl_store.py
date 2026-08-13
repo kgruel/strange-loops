@@ -360,12 +360,15 @@ def test_read_surface_is_untouched(tmp_path):
     store.close()
 
 
-@pytest.mark.parametrize("op", ["absorb_genesis", "absorb_edit", "reanchor"])
-def test_history_mutating_ops_refuse_loudly(tmp_path, op):
+def test_reanchor_still_refuses_loudly(tmp_path):
+    """Scope pin (S1b oracle #10): the append-shaped ceremonies
+    (absorb_genesis/absorb_edit) are wired through the _ceremony_persist
+    seam, but reanchor is history-mutating and stays refused until the
+    log-rewrite ceremony is designed."""
     store = open_store(tmp_path)
     store.append(fact())
     with pytest.raises(JsonlCanonicalUnsupported, match="jsonl-canonical-store"):
-        getattr(store, op)()
+        store.reanchor()
     store.close()
 
 

@@ -229,7 +229,10 @@ class Executor:
             total_facts=fact_count[0],
             duration_ms=duration_ms,
         )
-        tick = self.vertex.receive(sync_fact, grant)
+        # Engine's own lifecycle observation — not client ingress, so it
+        # bypasses strict admission explicitly (a strict vertex never
+        # declares `_sync`; sync must still record itself).
+        tick = self.vertex.receive(sync_fact, grant, admit_undeclared=True)
         if tick is not None:
             ticks.append(tick)
 
@@ -283,7 +286,11 @@ class Executor:
         )
         if fact_count is not None:
             fact_count[0] += 1
-        tick = self.vertex.receive(sync_fact, grant)
+        # Engine-internal lifecycle fact — explicit strict bypass (see the
+        # `_sync` emit in sync_async). Source-produced facts above do NOT
+        # bypass: strict applies to ingress, and a raise there is captured
+        # as a source error.
+        tick = self.vertex.receive(sync_fact, grant, admit_undeclared=True)
         if tick is not None:
             ticks.append(tick)
 

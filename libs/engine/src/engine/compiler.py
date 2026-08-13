@@ -629,7 +629,8 @@ class CompiledVertex:
     """
 
     __slots__ = ("name", "specs", "children", "routes", "store", "path",
-                 "sources", "template_specs", "boundary", "parse_pipelines")
+                 "sources", "template_specs", "boundary", "parse_pipelines",
+                 "strict")
 
     def __init__(self, name: str, specs: dict[str, Spec],
                  children: dict[str, CompiledVertex],
@@ -638,7 +639,8 @@ class CompiledVertex:
                  sources: list | None = None,
                  template_specs: dict | None = None,
                  boundary=(),
-                 parse_pipelines=None):
+                 parse_pipelines=None,
+                 strict: bool = False):
         self.name = name
         self.specs = specs
         self.children = children
@@ -649,6 +651,7 @@ class CompiledVertex:
         self.template_specs = template_specs
         self.boundary = boundary
         self.parse_pipelines = parse_pipelines
+        self.strict = strict
 
     def __repr__(self):
         return (f"CompiledVertex(name={self.name!r}, specs={self.specs!r}, "
@@ -793,6 +796,7 @@ def compile_vertex_recursive(
         template_specs=own_template_specs or None,
         boundary=vertex_boundaries,
         parse_pipelines=parse_pipes,
+        strict=vertex.strict,
     )
 
 
@@ -961,7 +965,7 @@ def materialize_vertex(
                 deserialize=Fact.from_dict,
             )
 
-    vertex = Vertex(compiled.name, store=store)
+    vertex = Vertex(compiled.name, store=store, strict=compiled.strict)
     overrides = fold_overrides or {}
 
     # Set pattern-based routes if specified

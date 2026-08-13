@@ -181,8 +181,16 @@ class Vertex:
     become facts that re-enter the parent.
     """
 
-    def __init__(self, name: str = "", *, store: Store | None = None) -> None:
+    def __init__(
+        self, name: str = "", *, store: Store | None = None,
+        strict: bool = False,
+    ) -> None:
         self._name = name
+        # Declared strict admission: when True, receive() refuses undeclared
+        # kinds with a typed UndeclaredKind BEFORE storage (bypass only via
+        # the explicit admit_undeclared parameter). See
+        # decision:design/strict-enforcement-at-engine-receive.
+        self._strict = strict
         self._loops: dict[str, Loop] = {}
         self._boundary_map: dict[str, str] = {}  # boundary_kind → fold_kind
         self._has_loop_boundaries = False
@@ -443,6 +451,7 @@ class Vertex:
         *,
         _from_child: str | None = None,
         id_override: str | None = None,
+        admit_undeclared: bool = False,
     ) -> Tick | None:
         """Tick projection of :meth:`receive_receipt`.
 
@@ -455,7 +464,8 @@ class Vertex:
         so the projections cannot drift.
         """
         return self.receive_receipt(
-            fact, grant, _from_child=_from_child, id_override=id_override
+            fact, grant, _from_child=_from_child, id_override=id_override,
+            admit_undeclared=admit_undeclared,
         ).tick
 
     def receive_receipt(
@@ -465,6 +475,7 @@ class Vertex:
         *,
         _from_child: str | None = None,
         id_override: str | None = None,
+        admit_undeclared: bool = False,
     ) -> Receipt:
         """Route a fact to the appropriate fold engine, gated by optional grant.
 
@@ -498,6 +509,16 @@ class Vertex:
             id_override: Pre-generated fact id to store under (rare —
                 replay/transport-shaped callers; ordinary writers let the
                 store mint and read the id off the Receipt)
+            admit_undeclared: Explicit bypass of declared strict admission.
+                On a strict vertex an undeclared kind raises
+                :class:`~engine.admission.UndeclaredKind` before storage;
+                pass True to store it anyway (the bypass is this named
+                parameter, never an omission). No effect on non-strict
+                vertices.
+
+        Raises:
+            UndeclaredKind: strict vertex, undeclared kind, no bypass —
+                refused before storage.
         """
         kind = fact.kind
         payload = fact.payload
@@ -520,6 +541,24 @@ class Vertex:
         # gating on an attached store, so replay re-ingest (storeless vertex)
         # and the production ``Vertex.replay`` (sets store=None, bypasses
         # receive) fold historical declaration rows without tripping this.
+        # Strict admission (decision:design/strict-enforcement-at-engine-receive):
+        # when the declaration says strict, an undeclared kind is refused with
+        # a typed error BEFORE storage. "Declared" is accepts() — loop kinds,
+        # boundary kinds, routes, and kinds any child accepts. Child-tick
+        # re-entry (_from_child) is engine-internal, not client ingress, and
+        # is exempt. Observer-state kinds (focus.*/scroll.*/selection.*) get
+        # no special case: undeclared is undeclared. Bypass is the explicit
+        # admit_undeclared parameter only.
+        if (
+            self._strict
+            and not admit_undeclared
+            and _from_child is None
+            and not self.accepts(kind)
+        ):
+            from .admission import UndeclaredKind
+
+            raise UndeclaredKind(kind, self._name)
+
         if self._store is not None and is_internal_kind(kind):
             raise ReservedKindError(
                 f"kind '{kind}' is in the reserved declaration namespace "

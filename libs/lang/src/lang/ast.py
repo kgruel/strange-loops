@@ -714,7 +714,10 @@ class VertexFile:
     lens: LensDecl | None = None
     boundary: tuple[Boundary, ...] = ()  # vertex-level boundaries (each fires all loops)
     observer_scoped: bool = False  # fold defaults to current observer when True
-    strict: bool = False  # when True, emit refuses on validation failures (no override)
+    strict: bool = False  # when True, engine receive refuses undeclared kinds
+    # (typed UndeclaredKind, before storage; bypass only via explicit
+    # admit_undeclared) — decision:design/strict-enforcement-at-engine-receive.
+    # The CLI additionally refuses on validation failures when strict.
 
     # Source location for error reporting
     path: Path | None = None

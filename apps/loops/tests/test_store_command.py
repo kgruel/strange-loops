@@ -745,16 +745,27 @@ class TestJsonlCanonicalStoreVerbRefusals:
         assert rc == 2
         assert "did not come through" in capsys.readouterr().err
 
-    def test_absorb_genesis_refuses(self, tmp_path, capsys):
+    def test_absorb_genesis_runs_the_ceremony_not_the_blanket_refusal(
+        self, tmp_path, capsys
+    ):
+        """S1b: absorb is append-shaped and wired for JSONL-canonical stores
+        (design:architecture/jsonl-declaration-ceremony-encoding), so the
+        blanket JsonlCanonicalUnsupported refusal is gone. With no signing
+        key the ceremony refuses at its own signing gate — before any log
+        byte, log byte-identical."""
         from loops.commands.store import _run_absorb
 
         vpath = self._jsonl_vertex(tmp_path)
         self._seed(vpath)
+        before = (tmp_path / "x.jsonl").read_bytes()
 
         rc = _run_absorb(["--observer", "x"], vertex_path=vpath)
 
         assert rc == 2
-        assert "jsonl-canonical" in capsys.readouterr().err
+        err = capsys.readouterr().err
+        assert "jsonl-canonical" not in err
+        assert "signing" in err
+        assert (tmp_path / "x.jsonl").read_bytes() == before
 
 
 class TestStoreVerbsOnAFreshClone:

@@ -118,9 +118,14 @@ automatically. To force it:
 rm .loops/data/project.db && sl read project    # index rebuilds from the log
 ```
 
-**Consequence for history-mutating ops.** `absorb_edit`, `reanchor`, and
-`absorb_genesis` refuse on a JSONL-canonical store (`JsonlCanonicalUnsupported`) —
-they would rewrite sqlite rows the log doesn't account for. Ops that write
+**Consequence for history-mutating ops.** The append-shaped declaration
+ceremonies run natively: `absorb_genesis` lands as one plain `_decl.genesis`
+fact line, and a multi-row `absorb_edit` as one `"t":"batch"` line (the log's
+atomicity unit), with every refusal firing before any log byte
+(design:architecture/jsonl-declaration-ceremony-encoding). `reanchor` is
+genuinely history-mutating and still refuses on a JSONL-canonical store
+(`JsonlCanonicalUnsupported`) —
+it would rewrite sqlite rows the log doesn't account for. Ops that write
 the `.db` directly (`store merge`/`receive`/`rebirth`/`compact`) are detected
 on the next open, not prevented: the store refuses to open rather than
 rebuild over rows the log never saw.

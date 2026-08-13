@@ -304,7 +304,32 @@ def _recover_then_open(
 def _sqlite_preflight(
     canonical: Path, mode: PreflightMode, open_kwargs: dict[str, Any]
 ) -> PreflightResult:
-    """Sqlite-canonical: no log/index pair, so agreement is vacuous."""
+    """Sqlite-canonical: no log/index pair, so agreement is vacuous.
+
+    A MISSING db is ``unreadable`` in every mode — ``SqliteStore.__init__``
+    creates a missing file, and a *read* preflight never creates. Even
+    RECOVER_THEN_OPEN refuses: recovery rebuilds derived state from a
+    canonical artifact; with no artifact there is nothing to recover FROM
+    (the sqlite mirror of "recovery never invents a log"). Store creation
+    is a different verb.
+    """
+    if not canonical.exists():
+        return PreflightResult(
+            mode=mode,
+            canonical_path=canonical,
+            index_path=canonical,
+            status="unreadable",
+            report=None,
+            post_report=None,
+            agreed=False,
+            opened=False,
+            recovered=False,
+            store=None,
+            reason=(
+                f"no sqlite-canonical store at {canonical} — a read "
+                "preflight never creates a store"
+            ),
+        )
     reason = (
         "sqlite-canonical store — no derived index to audit; agreement is "
         "vacuous (chain verification is verify_chain's scope)"

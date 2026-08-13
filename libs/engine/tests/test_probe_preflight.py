@@ -399,3 +399,19 @@ def test_index_behind_maps_to_its_own_status(tmp_path):
     r = read_preflight(log, PreflightMode.AUDIT_ONLY)
     assert r.status == "index-behind"
     assert r.report.index_behind
+
+
+def test_preflight_never_creates_a_missing_sqlite_store(tmp_path):
+    """A read preflight of a missing sqlite-canonical db creates nothing.
+
+    SqliteStore.__init__ creates a missing file, so an unconditional open
+    would turn preflight into store creation — in every mode.
+    """
+    ghost = tmp_path / "ghost.db"
+    for mode in PreflightMode:
+        r = read_preflight(ghost, mode)
+        assert (r.status, r.opened, r.recovered, r.store) == (
+            "unreadable", False, False, None,
+        )
+        assert "never creates" in r.reason
+    assert list(tmp_path.iterdir()) == []

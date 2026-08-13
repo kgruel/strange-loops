@@ -2,7 +2,7 @@
 
 Branch: `slice/s7-probe-preflight` (off `libs-handoff-wave` @ a39028e8)
 Worktree: `/Users/kaygee/Code/loops/.claude/worktrees/agent-a29c3a4966637d51a`
-Commit: 57f2bf8f
+Commits: 57f2bf8f (impl), f3a15d64 (report), + missing-sqlite fix commit
 
 ## What was built
 
@@ -50,7 +50,11 @@ Commit: 57f2bf8f
   probe to its canonical sibling — nobody audits "the index against
   itself"), or a `TargetInfo` (seats the P2 contract that maintenance
   APIs take `TargetInfo`). Sqlite-canonical: agreement is vacuous
-  (`agreed=True`, `report=None`, reason says so), open modes open.
+  (`agreed=True`, `report=None`, reason says so), open modes open — but
+  a MISSING sqlite db is `unreadable` in every mode: `SqliteStore.__init__`
+  creates a missing file, and a read preflight never creates (advisor
+  finding, fixed pre-merge; pinned by
+  `test_preflight_never_creates_a_missing_sqlite_store`).
 - Both exported from `engine` (`__all__` + lazy map).
 
 ## Oracle results

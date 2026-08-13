@@ -169,6 +169,10 @@ class TestProgramReceiveAs:
         with load_vertex_program(agg) as p:
             with pytest.raises(AggregateAdmissionUnsupported):
                 p.receive_as(_fact("decision", topic="x"))
+            # Bypass side: the raw receive entry point never consults
+            # admission — no raise (storeless parent: folds, stored=False).
+            r = p.receive(_fact("decision", topic="x"))
+            assert not r.stored
 
     def test_program_without_declaration_refuses_receive_as(self, tmp_path):
         from engine.program import VertexProgram

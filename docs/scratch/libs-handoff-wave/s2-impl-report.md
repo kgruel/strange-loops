@@ -84,7 +84,8 @@ oracle in `libs/engine/tests/test_ceremony_orchestration.py`.
    — presentation policy stays app-injected, per the contract's option.
 4. **CLI not migrated.** `apps/loops` `_absorb_*` still assembles the
    protocol itself (its output is golden-locked); migrating it onto this
-   API is a follow-up slice. The loops suite passes untouched.
+   API is the intended forcing-consumer follow-up slice — sequenced scope,
+   not dropped scope. The loops suite passes untouched.
 5. Unadopted-store edge: a store with genesis rows but no marker plans as
    `genesis` mode and refuses at apply (`AmbiguousGenesis` → `refused`,
    adopt first) — plan never infers identity.
@@ -102,9 +103,12 @@ Parametrized over BOTH backends (`jsonl` / `sqlite` canonical) throughout:
 
 ## Gates
 
-- `uv run --package engine pytest libs/engine/tests` — 1398+29 passed; the
-  4 `test_topology.py::TestTopologyCacheResolution` failures are
-  **pre-existing on the wave base** (pinned as such in the S1b report).
+- `uv run --package engine pytest libs/engine/tests` — **1402 passed, 1
+  skipped, 0 failed** on the committed tree. (The 4
+  `test_topology.py::TestTopologyCacheResolution` failures the S1b report
+  pinned as pre-existing turned out to be a stale-install artifact — they
+  pass here after a workspace reinstall.)
+- `uv run --package store pytest libs/store/tests` — 111 passed (untouched).
 - `uv run --package loops pytest apps/loops/tests` — 2521 passed, 1 xfailed.
 - root `uv run pytest tests` (architecture DAG) — 59 passed.
 - `ruff check` over all touched files — clean.

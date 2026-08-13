@@ -1,8 +1,9 @@
 """jsonl_codec — the line codec for the canonical JSONL store.
 
 One interleaved append-only log per store (``.loops/data/<name>.jsonl``);
-each line is a JSON object carrying a ``"t"`` discriminator (``"fact"`` or
-``"tick"``) plus the persisted row fields, in sqlite column order.
+each line is a JSON object carrying a ``"t"`` discriminator (``"fact"``,
+``"tick"``, or the ``"batch"`` envelope for multi-row ceremonies) plus the
+persisted row fields, in sqlite column order.
 
 The load-bearing invariant (design/architecture/jsonl-canonical-store):
 **payload rides as the VERBATIM stored TEXT string** — a JSON string value,
@@ -43,7 +44,9 @@ __all__ = [
     "JsonlCodecError",
     "serialize_fact_row",
     "serialize_tick_row",
+    "serialize_batch",
     "deserialize_row",
+    "deserialize_records",
 ]
 
 
@@ -90,6 +93,25 @@ _SPEC = {
     ),
 }
 
+# The third record type is STRUCTURAL, not field-shaped, so it does not fit
+# _Spec: a ``"t":"batch"`` envelope carries ``rows`` — an array of ≥ 2
+# ordinary fact record objects, each validated against ``_SPEC["fact"]`` in
+# full (verbatim payload TEXT per row, so signatures and commitment hashes
+# survive round-trip unchanged). One line is the log's atomicity unit, so a
+# batch is how a multi-row ceremony (absorb_edit) lands atomically.
+# Structural rules (design:architecture/jsonl-declaration-ceremony-encoding):
+# no ticks inside (ticks are minted one-at-a-time and chain-linked), no
+# nested batches, no duplicate id within one batch (otherwise a dup only
+# surfaces three layers away as a rebuild-time PK collision), no envelope
+# key besides t/rows. Same-ts across rows is deliberately NOT a codec rule
+# (D1): it is the declaration ceremony's invariant, enforced by absorb_edit
+# and asserted by audit_deep — baking it in here would block future
+# batch-emit reuse with distinct ts.
+_BATCH = "batch"
+_ROWS = "rows"
+_BATCH_KEYS = frozenset(("t", _ROWS))
+_MIN_BATCH_ROWS = 2
+
 # JCS (RFC 8785) numeric domain — mirrors rfc8785._impl._INT_MIN/_INT_MAX.
 # Integers outside it, and non-finite floats, are not canonicalizable, so a
 # line carrying one cannot be hashed: reject at the codec gate rather than
@@ -108,7 +130,7 @@ def _dump(obj: dict) -> str:
                       separators=(",", ":"))
 
 
-def _encode(row: tuple, spec: _Spec) -> str:
+def _encode_obj(row: tuple, spec: _Spec) -> dict:
     """Build the line object for a row — and hold it to the decoder's rules.
 
     ``serialize(x)`` must always be decodable. Checking arity alone let a
@@ -131,17 +153,38 @@ def _encode(row: tuple, spec: _Spec) -> str:
     if len(row) > n and row[n] is not None:
         obj[_SIGNATURE] = row[n]
     _validate(obj, spec)
-    return _dump(obj)
+    return obj
 
 
 def serialize_fact_row(row: tuple) -> str:
     """Encode a fact row ``(id, kind, ts, observer, origin, payload[, signature])``."""
-    return _encode(row, _SPEC["fact"])
+    return _dump(_encode_obj(row, _SPEC["fact"]))
 
 
 def serialize_tick_row(row: tuple) -> str:
     """Encode a tick row (``_TICK_ROW_SQL`` order, signature optional)."""
-    return _encode(row, _SPEC["tick"])
+    return _dump(_encode_obj(row, _SPEC["tick"]))
+
+
+def serialize_batch(rows: list[tuple]) -> str:
+    """Encode a multi-row ceremony as ONE atomic line.
+
+    ``rows`` are fact row tuples in emission order. One row collapses to a
+    plain fact line — a 1-row batch would be a second spelling of the same
+    record (the "signature must be absent, not null" ethos), so the envelope
+    exists only where multi-row atomicity does. Zero rows is a caller bug.
+
+    Same both-directions symmetry as the scalar serializers: the built
+    envelope is held to :func:`_validate_batch` before dumping, so a bad row
+    fails at the append site instead of bricking every later open.
+    """
+    if not rows:
+        raise JsonlCodecError("batch requires at least one fact row")
+    if len(rows) == 1:
+        return serialize_fact_row(rows[0])
+    obj = {"t": _BATCH, "rows": [_encode_obj(r, _SPEC["fact"]) for r in rows]}
+    _validate_batch(obj)
+    return _dump(obj)
 
 
 def _reject_constant(name: str) -> None:
@@ -243,13 +286,87 @@ def _validate(obj: dict, spec: _Spec) -> None:
         )
 
 
+def _validate_batch(obj: dict) -> None:
+    """Hold a batch envelope to the structural rules — both directions."""
+    unknown = sorted(set(obj) - _BATCH_KEYS)
+    if unknown:
+        raise JsonlCodecError(f"unknown field(s) in batch line: {unknown}")
+    rows = obj.get(_ROWS)
+    if not isinstance(rows, list):
+        raise JsonlCodecError(
+            "batch field 'rows' must be an array of fact records, got "
+            f"{type(rows).__name__}"
+        )
+    if len(rows) < _MIN_BATCH_ROWS:
+        raise JsonlCodecError(
+            f"batch must carry at least {_MIN_BATCH_ROWS} rows, got "
+            f"{len(rows)} — a 1-row batch is a second spelling of a plain "
+            "fact line, and an empty one encodes nothing"
+        )
+    seen_ids: set = set()
+    for i, elem in enumerate(rows):
+        if not isinstance(elem, dict):
+            raise JsonlCodecError(
+                f"batch row {i} must be a JSON object, got {type(elem).__name__}"
+            )
+        t = elem.get("t")
+        if t == _BATCH:
+            raise JsonlCodecError(f"batch row {i} is a nested batch — batches do not nest")
+        if t == "tick":
+            raise JsonlCodecError(
+                f"batch row {i} is a tick record — ticks are minted "
+                "one-at-a-time and chain-linked, never batched"
+            )
+        if t != "fact":
+            raise JsonlCodecError(f"batch row {i} has unknown record discriminator t={t!r}")
+        _validate(elem, _SPEC["fact"])
+        row_id = elem["id"]
+        if row_id in seen_ids:
+            raise JsonlCodecError(f"duplicate id {row_id!r} within one batch")
+        seen_ids.add(row_id)
+
+
+def _row_of(obj: dict, spec: _Spec) -> tuple:
+    """A VALIDATED record object as its full-arity row tuple."""
+    return (*(obj[f] for f in spec.fields), obj.get(_SIGNATURE))
+
+
 def deserialize_row(line: str) -> tuple[str, tuple]:
-    """Decode any line, dispatching on ``"t"``. Returns ``(t, row)`` with the
-    row at full arity (7 fact fields / 11 tick fields, signature last)."""
+    """Decode a SINGLE-record line, dispatching on ``"t"``. Returns
+    ``(t, row)`` with the row at full arity (7 fact fields / 11 tick fields,
+    signature last). A ``"t":"batch"`` line carries several records and is
+    refused here — decode it with :func:`deserialize_records`."""
     obj = _load(line)
     t = obj.get("t")
+    if t == _BATCH:
+        raise JsonlCodecError(
+            "batch line carries multiple records — decode with "
+            "deserialize_records, not deserialize_row"
+        )
     spec = _SPEC.get(t) if isinstance(t, str) else None
     if spec is None:
         raise JsonlCodecError(f"unknown record discriminator t={t!r}")
     _validate(obj, spec)
-    return spec.t, (*(obj[f] for f in spec.fields), obj.get(_SIGNATURE))
+    return spec.t, _row_of(obj, spec)
+
+
+def deserialize_records(line: str) -> list[tuple[str, tuple]]:
+    """Decode ANY line into its record sequence, in on-the-wire order.
+
+    A plain fact/tick line yields one ``(t, row)``; a batch line yields its
+    inner rows expanded in array order (always ≥ 2 — so ``len > 1`` is
+    exactly "this line was a batch"). This is the decode every log consumer
+    (replay, catch-up, rebuild, audit) reads through, so batch expansion has
+    one spelling.
+    """
+    obj = _load(line)
+    t = obj.get("t")
+    if t == _BATCH:
+        _validate_batch(obj)
+        fact = _SPEC["fact"]
+        return [("fact", _row_of(elem, fact)) for elem in obj[_ROWS]]
+    spec = _SPEC.get(t) if isinstance(t, str) else None
+    if spec is None:
+        raise JsonlCodecError(f"unknown record discriminator t={t!r}")
+    _validate(obj, spec)
+    return [(spec.t, _row_of(obj, spec))]

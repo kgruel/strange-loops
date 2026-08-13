@@ -7,6 +7,10 @@ build/
 .uv-cache/
 uv.lock
 *.jsonl
+# EXCEPT the committed golden/negative log fixtures — the cross-language
+# contract for batch ceremonies (S1b; consumed by the Go conformance
+# oracle). Scoped to the fixtures dir only; store logs stay ignored.
+!libs/engine/tests/fixtures/jsonl/*.jsonl
 .coverage
 .pytest_cache/
 .subtask/

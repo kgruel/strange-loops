@@ -565,11 +565,28 @@ class SqliteStore(Generic[T]):
         window-start and fact-cursor derivation, and the resulting mis-linked
         tick lands in the canonical log where no rebuild can repair it.
 
-        Called at the top of ``append_tick``, before the ``prev_row`` read.
-        NOT called from ``current_chain_head``: its only production caller is
-        ``absorb_genesis``, which reads it inside ``BEGIN IMMEDIATE`` — a
-        reconcile there would commit mid-transaction. That path refuses
-        outright on a JSONL-canonical store, so the gap is closed already.
+        Called at the top of ``append_tick`` (before the ``prev_row`` read)
+        and at the top of ``absorb_genesis``/``absorb_edit`` — strictly
+        BEFORE their ``BEGIN IMMEDIATE``, because a reconcile commits and
+        would split the ceremony transaction. The chain-head, fact-cursor and
+        declaration-head reads inside those transactions therefore see an
+        index that has consumed every durable line.
+        """
+
+    def _ceremony_persist(self, rows: list[tuple]) -> None:
+        """Seam: make a declaration ceremony's rows canonical, pre-commit.
+
+        Called inside the open ``BEGIN IMMEDIATE`` transaction, after every
+        CAS check has passed and all fact-row INSERTs (and meta stamps) are
+        staged, immediately before COMMIT. ``rows`` are the full 7-field
+        persisted fact rows, in emission order.
+
+        A no-op here — sqlite IS the store, and the staged INSERTs commit.
+        ``engine.jsonl_store`` overrides it to append the ceremony as ONE
+        durable log line (a plain fact line for one row, a ``batch`` envelope
+        for several) and stamp the consumed offset/counts, preserving
+        ``_write``'s ordering: refusals before any log byte, fsync before the
+        index row is observable.
         """
 
     def _write_fact_row(self, row: tuple) -> None:
@@ -626,13 +643,14 @@ class SqliteStore(Generic[T]):
         Steps, all inside the transaction:
 
         1. Refuse (``GenesisExists``) if the store's OWN lineage is already
-           open: the ``store_meta.own_lineage`` marker exists, or (pre-marker
-           compat) exactly one ``_decl.genesis`` row exists — that row is
-           adopted as self and the marker backfilled before refusing. Foreign
-           genesis rows (marker present, ids differ) do NOT block: merge
-           legitimately carries them as inert citizens (§9.2 Lineage), and a
-           store that received one must still be able to mint its own
-           identity. No marker + several genesis rows refuses as ambiguous.
+           open — the ``store_meta.own_lineage`` marker exists. An unmarked
+           store with ANY ``_decl.genesis`` rows refuses as ambiguous:
+           identity is claimed only by the explicit :meth:`adopt_lineage`
+           ceremony, never inferred from facts (the singleton heuristic was
+           a hijack vector — closing re-review #1). Foreign genesis rows
+           (marker present, ids differ) do NOT block: merge legitimately
+           carries them as inert citizens (§9.2 Lineage), and a store that
+           received one must still be able to mint its own identity.
         2. Read the era pins — chain head (latest chained tick's row hash) and
            fact cursor (newest fact by WITNESS order / rowid) — so
            "everything before me predates historization" is verifiable.
@@ -669,6 +687,11 @@ class SqliteStore(Generic[T]):
         self._ensure_fact_signature_column()
         self._ensure_chain_columns()
         self._ensure_meta_table()
+        # Reconcile derived state BEFORE the transaction (a reconcile commits):
+        # the chain-head and fact-cursor pins read below must not miss a
+        # durable-but-unindexed line — a mis-pin lands in the canonical log
+        # where no rebuild can repair it. No-op when sqlite is the store.
+        self._sync_derived_state()
 
         conn = self._conn
         prev_iso = conn.isolation_level
@@ -716,15 +739,17 @@ class SqliteStore(Generic[T]):
                         "attestation root); set up signing first"
                     )
 
-                conn.execute(
-                    FACT_INSERT_SQL,
-                    (lineage_id, DECL_GENESIS, ts, observer, origin, payload_text, signature),
+                row = (
+                    lineage_id, DECL_GENESIS, ts, observer, origin,
+                    payload_text, signature,
                 )
+                conn.execute(FACT_INSERT_SQL, row)
                 conn.execute(
                     "INSERT OR REPLACE INTO store_meta (key, value) "
                     "VALUES ('own_lineage', ?)",
                     (lineage_id,),
                 )
+                self._ceremony_persist([row])
                 conn.execute("COMMIT")
             except Exception:
                 if conn.in_transaction:
@@ -767,9 +792,9 @@ class SqliteStore(Generic[T]):
         mid-flight) and the lineage id is read consistently:
 
         1. Resolve the store's OWN lineage: the ``store_meta.own_lineage``
-           marker, or (pre-marker compat) a single genesis row adopted as self
-           with the marker backfilled in this transaction. None →
-           :class:`NoGenesis`; unmarked + several → :class:`AmbiguousGenesis`.
+           marker. No marker + no genesis rows → :class:`NoGenesis`;
+           unmarked + genesis rows → :class:`AmbiguousGenesis` (identity is
+           claimed by :meth:`adopt_lineage`, never inferred).
         2. If ``expected_head`` is given, compare it against the store's
            current declaration head — the ``(ts, id)`` of the newest
            self-lineage ``_decl.*`` row (genesis included). A mismatch raises
@@ -818,6 +843,10 @@ class SqliteStore(Generic[T]):
         self._ensure_sync()
         self._ensure_fact_signature_column()
         self._ensure_meta_table()
+        # Reconcile derived state BEFORE the transaction (same rule as
+        # absorb_genesis): the declaration-head CAS read must see every
+        # durable line. No-op when sqlite is the store.
+        self._sync_derived_state()
 
         if not changes:
             return {
@@ -857,6 +886,7 @@ class SqliteStore(Generic[T]):
                 # ONE effective ts for the whole ceremony (step 3).
                 ts = datetime.now(_UTC).timestamp()
 
+                rows: list[tuple] = []
                 for ch in changes:
                     kind = ch.kind
                     subject = ch.subject
@@ -899,12 +929,18 @@ class SqliteStore(Generic[T]):
                             "a declaration edit must be signed (it enters the "
                             "attestation tier); set up signing first"
                         )
+                    row = (
+                        fact_id, kind, ts, observer, origin,
+                        payload_text, signature,
+                    )
                     conn.execute(
                         "INSERT INTO facts "
                         "(id, kind, ts, observer, origin, payload, signature) "
                         "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                        (fact_id, kind, ts, observer, origin, payload_text, signature),
+                        row,
                     )
+                    rows.append(row)
+                self._ceremony_persist(rows)
                 conn.execute("COMMIT")
             except Exception:
                 if conn.in_transaction:

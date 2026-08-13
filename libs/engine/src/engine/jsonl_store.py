@@ -136,18 +136,26 @@ open handles on one store (a daemon plus an ``sl emit``) would otherwise each
 stamp their own stale idea of the total, and a perfectly consistent store
 would refuse to open, naming writers that never ran.
 
-Not yet wired (loud, not silent)
---------------------------------
-History-mutating ops would rewrite rows sqlite-side while the log kept the
-originals, making the index no longer a function of the log. Until the log
-rewrite ceremony is designed they refuse with :class:`JsonlCanonicalUnsupported`:
-``absorb_edit`` and ``reanchor`` here; ``rebirth``/``compact`` live in
-``libs/store`` and are detected, not refused (above). ``absorb_genesis`` refuses
-too — the judgment call the slice allowed. It is append-shaped, not
-history-mutating, but its write is a ``BEGIN IMMEDIATE`` compare-and-swap
-that may roll back *after* the row is built; flush-first durability would
-make a rolled-back genesis real in the log. Reconciling the two orderings is
-design work, not a small wiring, so it fails loudly here.
+Declaration ceremonies (wired) and what still refuses
+-----------------------------------------------------
+``absorb_genesis`` and ``absorb_edit`` are append-shaped and run here per
+design:architecture/jsonl-declaration-ceremony-encoding: the base ceremonies
+reconcile first (``_sync_derived_state``), run every compare-and-swap check
+inside ``BEGIN IMMEDIATE`` *before* any log byte, then hand the assembled
+rows to the ``_ceremony_persist`` seam — which this class overrides to append
+the ceremony as ONE durable line (a plain fact line for one row, a
+``"t":"batch"`` envelope for several; one line is the log's atomicity unit,
+so a torn ceremony is truncated whole and recovery can never expose a partial
+one), fsync, and stamp offset + counts before the commit. A refusal
+(``GenesisExists``/``NoGenesis``/``AmbiguousGenesis``/``StaleDeclarationHead``/
+``ReservedKindViolation``/signing failures) rolls back with the log
+byte-identical to its pre-call state.
+
+``reanchor`` is genuinely history-mutating — it rewrites sqlite rows the log
+keeps the originals of — and still refuses with
+:class:`JsonlCanonicalUnsupported` until the log-rewrite ceremony is
+designed. ``rebirth``/``compact`` live in ``libs/store`` and are detected,
+not refused (above).
 """
 
 from __future__ import annotations
@@ -172,7 +180,8 @@ from .canonical_audit import (
 )
 from .jsonl_codec import (
     JsonlCodecError,
-    deserialize_row,
+    deserialize_records,
+    serialize_batch,
     serialize_fact_row,
     serialize_tick_row,
 )
@@ -511,6 +520,33 @@ class JsonlStore(SqliteStore[T], Generic[T]):
         """
         self._reconcile()
 
+    def _ceremony_persist(self, rows: list[tuple]) -> None:
+        """Make a declaration ceremony canonical: one durable line, stamped.
+
+        Runs inside the ceremony's open ``BEGIN IMMEDIATE`` transaction,
+        after every CAS check passed and the fact INSERTs (+ meta stamps)
+        are staged, immediately before the caller's COMMIT — the same shape
+        as :meth:`_write` steps 3–4. One row serializes as a plain fact
+        line; several as one ``batch`` envelope line (the log's atomicity
+        unit), so recovery can never expose a partial ceremony. Any failure
+        after the fsync rolls the index back and leaves the line durable
+        and unindexed — the standard recoverable state the next
+        open/reconcile tails forward, all N rows atomically.
+        """
+        line = serialize_batch(rows) if len(rows) > 1 else serialize_fact_row(rows[0])
+        # Same committed-marker discipline as _write: the staged INSERTs
+        # hold sqlite's write lock, so the marker read here cannot be raced.
+        marked = self._marked_counts()
+        if marked is None:
+            # Pre-marker store: adopt. _row_counts() already includes the
+            # ceremony's staged rows on this connection.
+            facts, ticks = self._row_counts()
+        else:
+            facts, ticks = marked
+            facts += len(rows)
+        offset = self._append_line(line)
+        self._stamp(offset, facts, ticks)
+
     def _write_fact_row(self, row: tuple) -> None:
         self._write(FACT_INSERT_SQL, row, serialize_fact_row(row), True)
 
@@ -684,10 +720,13 @@ class JsonlStore(SqliteStore[T], Generic[T]):
         except UnicodeError:
             return False
         try:
-            t, row = deserialize_row(line)
+            records = deserialize_records(line)
         except (JsonlCodecError, UnicodeError):
             return False
-        return self._row_matches(t, row)
+        # A batch line expands to N rows; every one must match its index row.
+        # Cost is bounded by ceremony size, never log size — the "one line,
+        # not the file" posture holds.
+        return all(self._row_matches(t, row) for t, row in records)
 
     def _row_matches(self, t: str, row: tuple) -> bool:
         """Delegates to :func:`engine.canonical_audit.row_matches`.
@@ -725,28 +764,33 @@ class JsonlStore(SqliteStore[T], Generic[T]):
         facts = ticks = 0
         end = offset
         for line, pos in self._read_lines(offset):
-            t, row = deserialize_row(line)
-            try:
-                self._conn.execute(
-                    FACT_INSERT_SQL if t == "fact" else TICK_INSERT_SQL, row
-                )
-            except sqlite3.IntegrityError as exc:
-                if rebuilding:
-                    # The tables were just cleared, so a collision here means
-                    # the LOG carries the id twice. Rebuilding again would
-                    # recurse forever on a log that cannot index.
-                    raise JsonlCanonicalUnsupported(
-                        f"{self._log_path} carries {t} {row[0]} more than once "
-                        "— the canonical log cannot be indexed as written"
+            # A batch line expands to its inner rows in array order — the
+            # line is indexed entirely or (torn) truncated entirely, so a
+            # ceremony can never index as a subset. facts += N; the offset
+            # stamps at the line's end as for any line.
+            for t, row in deserialize_records(line):
+                try:
+                    self._conn.execute(
+                        FACT_INSERT_SQL if t == "fact" else TICK_INSERT_SQL, row
+                    )
+                except sqlite3.IntegrityError as exc:
+                    if rebuilding:
+                        # The tables were just cleared, so a collision here
+                        # means the LOG carries the id twice. Rebuilding again
+                        # would recurse forever on a log that cannot index.
+                        raise JsonlCanonicalUnsupported(
+                            f"{self._log_path} carries {t} {row[0]} more than "
+                            "once — the canonical log cannot be indexed as "
+                            "written"
+                        ) from exc
+                    raise _RowAlreadyIndexed(
+                        f"index already holds {t} {row[0]}, a row the "
+                        f"consumed-offset marker ({offset}) calls unindexed"
                     ) from exc
-                raise _RowAlreadyIndexed(
-                    f"index already holds {t} {row[0]}, a row the "
-                    f"consumed-offset marker ({offset}) calls unindexed"
-                ) from exc
-            if t == "fact":
-                facts += 1
-            else:
-                ticks += 1
+                if t == "fact":
+                    facts += 1
+                else:
+                    ticks += 1
             end = pos
         self._stamp(end, base_facts + facts, base_ticks + ticks)
         self._conn.commit()
@@ -808,20 +852,15 @@ class JsonlStore(SqliteStore[T], Generic[T]):
 
     # ---- refusals ------------------------------------------------------
 
-    def _refuse(self, op: str) -> None:
+    def reanchor(self, *args: Any, **kwargs: Any):  # noqa: D102
+        # Scope pin: reanchor is history-mutating, not append-shaped — it
+        # belongs to the (undesigned) log-rewrite ceremony. The append-shaped
+        # ceremonies (absorb_genesis/absorb_edit) are inherited and land
+        # through the _ceremony_persist seam.
         raise JsonlCanonicalUnsupported(
-            f"{op} is not wired for a JSONL-canonical store: it would rewrite "
-            "sqlite rows while the canonical log kept the originals, so the "
-            "index would stop being a function of the log. See "
+            "reanchor is not wired for a JSONL-canonical store: it would "
+            "rewrite sqlite rows while the canonical log kept the originals, "
+            "so the index would stop being a function of the log. See "
             "design/architecture/jsonl-canonical-store — the log-rewrite "
             "ceremony is a later slice."
         )
-
-    def absorb_genesis(self, *args: Any, **kwargs: Any):  # noqa: D102
-        self._refuse("absorb_genesis")
-
-    def absorb_edit(self, *args: Any, **kwargs: Any):  # noqa: D102
-        self._refuse("absorb_edit")
-
-    def reanchor(self, *args: Any, **kwargs: Any):  # noqa: D102
-        self._refuse("reanchor")

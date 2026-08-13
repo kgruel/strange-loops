@@ -356,10 +356,10 @@ def _log_content_note(path: Path) -> str:
         return ""
     if not raw.endswith(b"\n"):
         return "; first line incomplete (torn or still being written)"
-    from .jsonl_codec import JsonlCodecError, deserialize_row
+    from .jsonl_codec import JsonlCodecError, deserialize_records
 
     try:
-        deserialize_row(raw[:-1].decode("utf-8").strip())
+        deserialize_records(raw[:-1].decode("utf-8").strip())
     except (JsonlCodecError, UnicodeError):
         return "; content does not decode as loops log rows"
     return ""

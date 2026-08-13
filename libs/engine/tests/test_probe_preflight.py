@@ -254,6 +254,24 @@ def test_probe_content_corroboration_notes_suffix_lies(tmp_path):
     assert "not a sqlite database" in probed_unchanged(tmp_path, fake_db).reason
 
 
+def test_probe_content_corroboration_accepts_batch_first_line(tmp_path):
+    """S1b seam pin: a log whose first complete line is a ceremony batch is a
+    valid loops log — the corroboration note must stay silent (S7 re-gate
+    finding 1b: deserialize_row refuses batch lines; probe must decode via
+    deserialize_records)."""
+    from engine.jsonl_codec import serialize_batch
+
+    rows = [
+        ("b1", "_decl.kind-defined", 9.0, "kyle", "", "{}", None),
+        ("b2", "_decl.kind-retired", 9.0, "kyle", "", "{}", None),
+    ]
+    log = tmp_path / "ceremony.jsonl"
+    log.write_text(serialize_batch(rows) + "\n")
+    info = probed_unchanged(tmp_path, log)
+    assert info.target_type == "jsonl_log"
+    assert "does not decode" not in info.reason
+
+
 def test_probe_never_creates_sqlite_siblings_for_missing_targets(tmp_path):
     """The bare-connect trap: probing missing paths must create nothing."""
     for name in ("a.jsonl", "b.db", "c.sqlite", "d.vertex", "e.whatever"):

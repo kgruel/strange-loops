@@ -166,6 +166,16 @@ __all__ = [
     "PreflightResult",
     "PREFLIGHT_STATUSES",
     "read_preflight",
+    # Declaration-update orchestration (libs-handoff S2)
+    "plan_declaration_update",
+    "apply_declaration_update",
+    "recover_declaration_update",
+    "intent_path_for",
+    "DeclarationUpdatePreview",
+    "DeclarationUpdateResult",
+    "RecoveryOutcome",
+    "CeremonyError",
+    "IntentCorrupt",
 ]
 
 _LAZY_IMPORTS: dict[str, tuple[str, str]] = {
@@ -326,6 +336,16 @@ _LAZY_IMPORTS: dict[str, tuple[str, str]] = {
     "ReadOnlyAggregate": ("engine.handle", "ReadOnlyAggregate"),
     "ConditionalEmitUnsupported": ("engine.handle", "ConditionalEmitUnsupported"),
     "ReceiveCommittedError": ("engine.handle", "ReceiveCommittedError"),
+    # Declaration-update orchestration (libs-handoff S2)
+    "plan_declaration_update": ("engine.ceremony", "plan_declaration_update"),
+    "apply_declaration_update": ("engine.ceremony", "apply_declaration_update"),
+    "recover_declaration_update": ("engine.ceremony", "recover_declaration_update"),
+    "intent_path_for": ("engine.ceremony", "intent_path_for"),
+    "DeclarationUpdatePreview": ("engine.ceremony", "DeclarationUpdatePreview"),
+    "DeclarationUpdateResult": ("engine.ceremony", "DeclarationUpdateResult"),
+    "RecoveryOutcome": ("engine.ceremony", "RecoveryOutcome"),
+    "CeremonyError": ("engine.ceremony", "CeremonyError"),
+    "IntentCorrupt": ("engine.ceremony", "IntentCorrupt"),
 }
 
 

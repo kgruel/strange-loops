@@ -1,0 +1,1 @@
+{"t":"batch","rows":[{"t":"fact","id":"01JNEG00000000000000000001","kind":"_decl.kind-defined","ts":1721359123.5,"observer":"neg","origin":"","payload":"{}","signature":"sig"},{"t":"fact","id":"01JNEG00000000000000000002","kind":"_decl.kind-defined","ts":1721359999.0,"observer":"neg","origin":"","payload":"{}","signature":"sig"}]}

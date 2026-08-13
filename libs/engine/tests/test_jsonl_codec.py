@@ -378,3 +378,93 @@ def test_every_serialized_row_round_trips(tmp_path):
     tick_row = ("01T", "n", 2.0, None, "o", "{}", None, None, None, None, None)
     assert deserialize_row(serialize_fact_row(fact_row)) == ("fact", fact_row)
     assert deserialize_row(serialize_tick_row(tick_row)) == ("tick", tick_row)
+
+
+# --- batch envelope (S1b — declaration ceremony encoding) ------------------
+
+
+from engine.jsonl_codec import deserialize_records, serialize_batch  # noqa: E402
+
+FACT_B = ("01JFACTB", "note", TS, "kyle", "loops", TRICKY_PAYLOAD, "sig-b")
+
+
+class TestBatch:
+    def test_round_trip_preserves_order_and_payload_verbatim(self):
+        line = serialize_batch([FACT_SIGNED, FACT_B])
+        assert "\n" not in line
+        records = deserialize_records(line)
+        assert [t for t, _ in records] == ["fact", "fact"]
+        assert records[0][1] == FACT_SIGNED
+        assert records[1][1] == FACT_B
+        # commitment hashes survive per inner row
+        assert _fact_row_hash(records[0][1]) == _fact_row_hash(FACT_SIGNED)
+
+    def test_single_row_collapses_to_plain_fact_line(self):
+        line = serialize_batch([FACT_SIGNED])
+        assert deserialize_row(line) == ("fact", FACT_SIGNED)
+
+    def test_empty_rows_refused(self):
+        with pytest.raises(JsonlCodecError, match="at least one fact row"):
+            serialize_batch([])
+        with pytest.raises(JsonlCodecError, match="at least 2 rows"):
+            deserialize_records('{"t":"batch","rows":[]}')
+
+    def test_one_row_batch_line_refused_on_read(self):
+        inner = serialize_fact_row(FACT_SIGNED)
+        with pytest.raises(JsonlCodecError, match="at least 2 rows"):
+            deserialize_records('{"t":"batch","rows":[%s]}' % inner)
+
+    def test_nested_batch_refused(self):
+        inner = serialize_fact_row(FACT_SIGNED)
+        line = '{"t":"batch","rows":[{"t":"batch","rows":[]},%s]}' % inner
+        with pytest.raises(JsonlCodecError, match="nested batch"):
+            deserialize_records(line)
+
+    def test_tick_in_batch_refused(self):
+        tick = serialize_tick_row(TICK_SIGNED)
+        fact = serialize_fact_row(FACT_SIGNED)
+        with pytest.raises(JsonlCodecError, match="tick record"):
+            deserialize_records('{"t":"batch","rows":[%s,%s]}' % (fact, tick))
+        # serialize-side: rows are encoded as facts, so a tick-arity tuple
+        # already fails the fact arity gate — no second spelling to guard.
+        with pytest.raises(JsonlCodecError, match="fields"):
+            serialize_batch([FACT_SIGNED, TICK_SIGNED])
+
+    def test_duplicate_id_within_batch_refused(self):
+        fact = serialize_fact_row(FACT_SIGNED)
+        with pytest.raises(JsonlCodecError, match="duplicate id"):
+            deserialize_records('{"t":"batch","rows":[%s,%s]}' % (fact, fact))
+        with pytest.raises(JsonlCodecError, match="duplicate id"):
+            serialize_batch([FACT_SIGNED, FACT_SIGNED])
+
+    def test_unknown_envelope_key_refused(self):
+        f1, f2 = serialize_fact_row(FACT_SIGNED), serialize_fact_row(FACT_B)
+        line = '{"t":"batch","rows":[%s,%s],"extra":1}' % (f1, f2)
+        with pytest.raises(JsonlCodecError, match="unknown field"):
+            deserialize_records(line)
+
+    def test_invalid_inner_row_refused(self):
+        f1 = serialize_fact_row(FACT_SIGNED)
+        bad = '{"t":"fact","id":"X","kind":"k","ts":"1.0","observer":"o","origin":"","payload":"{}"}'
+        with pytest.raises(JsonlCodecError, match="must be a number"):
+            deserialize_records('{"t":"batch","rows":[%s,%s]}' % (f1, bad))
+
+    def test_mixed_ts_is_NOT_a_codec_rule(self):
+        # D1: same-ts is the ceremony's invariant (absorb_edit stamps it,
+        # audit_deep asserts it) — the transport stays structural.
+        other_ts = (*FACT_B[:2], TS + 5, *FACT_B[3:])
+        records = deserialize_records(serialize_batch([FACT_SIGNED, other_ts]))
+        assert len(records) == 2
+
+    def test_deserialize_row_refuses_batch_lines(self):
+        line = serialize_batch([FACT_SIGNED, FACT_B])
+        with pytest.raises(JsonlCodecError, match="deserialize_records"):
+            deserialize_row(line)
+
+    def test_plain_lines_decode_through_deserialize_records(self):
+        assert deserialize_records(serialize_fact_row(FACT_SIGNED)) == [
+            ("fact", FACT_SIGNED)
+        ]
+        assert deserialize_records(serialize_tick_row(TICK_SIGNED)) == [
+            ("tick", TICK_SIGNED)
+        ]

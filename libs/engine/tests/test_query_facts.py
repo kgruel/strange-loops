@@ -205,6 +205,43 @@ def test_internal_pagination_equivalence(db):
     assert paged == full == [_mixed_era_id(i) for i in range(N)]
 
 
+def test_page_boundary_strictly_inside_decl_ceremony_does_not_refuse(tmp_path):
+    """MUTATION KILLER for group_boundary='allow' (gate finding).
+
+    The main fixture's ``_decl.*`` rows are singletons — never mid-group — so
+    reverting the witness.py allow-mode change leaves the other tests green.
+    This store carries a REAL contiguous receipt group (3 adjacent ``_decl``
+    rows, one shared ts, one shared lineage — the ``receipt_group_span``
+    heuristic's exact signature), and an include_internal limit=1 walk puts a
+    page boundary strictly INSIDE the span (first <= rowid < last). With the
+    allow mode reverted, next-cursor resolution raises
+    MidReceiptGroupPosition there; with it, the walk completes losslessly —
+    a page mark is read progress, not a fold cut.
+    """
+    path = tmp_path / "ceremony.db"
+    store = _open_store(path)
+    ids = [store.append(Fact.of("decision", "kyle", ts=1.0 + i, topic=f"t{i}"))
+           for i in range(2)]
+    for j in range(3):  # contiguous ceremony: same ts, same lineage, adjacent rowids
+        ids.append(store.append(Fact.of(
+            "_decl.kind_defined", "kyle", ts=99.0, lineage="L-ceremony", seq=j,
+        )))
+    ids.append(store.append(Fact.of("thread", "kyle", ts=200.0, name="after")))
+    store.close()
+
+    from engine.witness import receipt_group_span
+    import sqlite3
+    conn = sqlite3.connect(str(path))
+    # Prove the fixture is adversarial: the middle ceremony row IS mid-group.
+    mid_rowid = conn.execute("SELECT rowid FROM facts WHERE id = ?", (ids[3],)).fetchone()[0]
+    assert receipt_group_span(conn, mid_rowid) is not None
+    conn.close()
+
+    with StoreReader(path) as reader:
+        paged = _walk(reader, "oldest", 1, include_internal=True)
+    assert [f["id"] for f in paged] == ids
+
+
 def test_exact_limit_boundary_not_truncated(db):
     with StoreReader(db) as reader:
         total = len(reader.query_facts(limit=1000).items)

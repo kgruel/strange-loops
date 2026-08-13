@@ -12,10 +12,10 @@ uv tool upgrade strange-loops     # or: pip install -U strange-loops
 
 ---
 
-## Unreleased — CLI honesty wave
+## 0.11.0 (2026-08-12) — CLI honesty
 
-*(Version header stamped at release. Behavior deltas below are deliberate
-breaking changes: every one replaces a lying success with an honest failure.)*
+*(The behavior deltas below are deliberate breaking changes: every one
+replaces a lying success with an honest failure.)*
 
 ### Breaking: error paths now exit nonzero with errors on stderr
 

@@ -1,5 +1,67 @@
 # Changelog
 
+## 0.11.0 — 2026-08-12 (CLI honesty)
+
+**What this release means for you:** commands that hit an error now say so
+the way every other Unix tool does — nonzero exit code, message on stderr —
+where several used to print the error to stdout and exit 0, or render a
+plausible empty result. If you script against `sl`, some invocations that
+"succeeded" before will now visibly fail; that is the fix, not a regression.
+You also get a new `--status` filter on `sl read`, a vertex argument on
+`sl cite`, and a reconcile-staleness reminder in `sl orient`. Breaking
+details and migration notes: [docs/UPGRADING.md](docs/UPGRADING.md).
+
+### Breaking — error handling is now honest
+
+Affected: scripts that parse stdout or check `$?` on the invocations below.
+
+- `sl ls <vertex>` with an unknown vertex name — **was:** error text on
+  stdout, exit 0. **Now:** exit 1, message on stderr, with "did you mean"
+  suggestions (the same treatment `sl read` gives unknown kinds).
+- `sl ls <vertex> --kind <undeclared-kind>` — **was:** a plausible empty
+  section, exit 0. **Now:** exit 2 with the same undeclared-kind error
+  `sl read` gives, listing the declared kinds. Adding `--key` no longer
+  changes the answer.
+- Bare `sl ls` / `sl store` with no config root — **was:** error on stdout.
+  **Now:** same message, stderr (exit code was already 1).
+- `sl cite` (and `sl emit <vertex> cite`) with refs that all fail to
+  resolve — **was:** a warning, then an empty cite stored anyway, exit 0.
+  **Now:** exit 2 and **nothing is stored**. This covers cites with no refs
+  at all, malformed ref tokens (`ref=:x`, `ref=kind:`, prose, bare keys),
+  and refs supplied through other fields. Cites whose refs are
+  valid-but-undeclared addresses still store (they can resolve later if the
+  kind is declared); malformed tokens alongside a valid cite warn on stderr.
+  See [UPGRADING → cite refusals](docs/UPGRADING.md).
+
+### Added
+
+- **`sl read <vertex> --status <value>`** — filter fold rows by their
+  `status` field: `--status open`, or comma-OR `--status open,parked`.
+  Composes with `--kind` and `--key`. Honest at the edges: if none of the
+  kinds you selected even have a status field, the command refuses (exit 2)
+  instead of showing an empty result; mixed selections note the status-less
+  kinds on stderr. Routes that can't apply the filter (`--ticks`, windowed
+  `--facts`, custom lenses, live mode) refuse it rather than silently
+  ignoring it.
+- **`sl cite [vertex] REF...`** — `cite` now takes an optional vertex as its
+  first argument, like `emit`: `sl cite project decision:design/foo -m "…"`.
+  Without a vertex it resolves your local `.loops/` vertex as `emit` does.
+- **`sl orient` reconcile reminder** — a `last reconcile: Nd ago` line,
+  turning into `RECONCILE OVERDUE` past 10 days (derived from the newest
+  `reconcile-*` thread in the store), or `no reconcile on record`.
+
+### Fixed
+
+- The index-staleness hint now names its target — `run \`sl store reindex
+  <vertex>\`` — instead of suggesting a bare form that refuses to run.
+- `sl read <vertex> --why` on items whose fold key is a JSON number
+  (e.g. `0`) now returns real attribution; it used to return an empty
+  field list while exiting 0. Such keys also now appear as normal rows
+  with normal addresses — previously they were invisible to `--key`,
+  `--status`, and `--refs`.
+- `sl orient` is faster at session start: one store pass now serves the
+  counts and the reconcile line (previously three).
+
 ## 0.10.0 — 2026-08-12
 
 The **surfacing wave's landed half** (`feat/010-surfacing`): three

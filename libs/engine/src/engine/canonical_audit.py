@@ -47,7 +47,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from .jsonl_codec import JsonlCodecError, deserialize_row
+from .jsonl_codec import JsonlCodecError, deserialize_records
 from .sqlite_store import (
     FACT_COLUMNS,
     TICK_COLUMNS,
@@ -417,9 +417,13 @@ def _suffix_unindexed(conn, canonical: Path, offset: int, size: int) -> bool:
             if text:
                 break
     try:
-        t, row = deserialize_row(text)
+        records = deserialize_records(text)
     except (JsonlCodecError, UnicodeError):
         return False  # garbage past the offset is not an innocence claim
+    # A batch line is judged by its first inner row — the writer's crash
+    # window leaves the WHOLE ceremony line unindexed, so one probe is the
+    # same O(1) corroboration a plain line gets.
+    t, row = records[0]
     return not _index_has_row(conn, t, row[0])
 
 
@@ -514,18 +518,28 @@ def _check_last_line(conn, canonical: Path, size: int, offset: int | None) -> Ch
             f"the log's {scope} line is incomplete or unreadable",
         )
     try:
-        t, row = deserialize_row(line)
+        records = deserialize_records(line)
     except (JsonlCodecError, UnicodeError) as exc:
         return Check(
             "last-line", False, f"{scope} log line does not decode: {exc}"
         )
-    if not row_matches(conn, t, row):
-        return Check(
-            "last-line", False,
-            f"{scope} log {t} {row[0]} does not match the index row of the "
-            "same id — the index was edited out of band",
-        )
-    return Check("last-line", True, f"{scope} log {t} {row[0]} matches the index")
+    # A batch line expands to N rows; EVERY one must match its index row, so
+    # an index-side edit to any row of the last ceremony is detected. Cost is
+    # bounded by ceremony size, not log size.
+    for t, row in records:
+        if not row_matches(conn, t, row):
+            return Check(
+                "last-line", False,
+                f"{scope} log {t} {row[0]} does not match the index row of "
+                "the same id — the index was edited out of band",
+            )
+    t, row = records[0]
+    label = (
+        f"{scope} log batch of {len(records)} fact(s)"
+        if len(records) > 1
+        else f"{scope} log {t} {row[0]}"
+    )
+    return Check("last-line", True, f"{label} matches the index")
 
 
 # --- --deep: line-by-line, and the chain from canonical content ------------
@@ -620,36 +634,52 @@ def _deep_checks(conn, canonical: Path, offset: int | None) -> list[Check]:
 
     for lineno, end, line in _iter_lines(canonical):
         try:
-            t, row = deserialize_row(line)
+            records = deserialize_records(line)
         except (JsonlCodecError, UnicodeError) as exc:
             diverged.add(
                 f"log line {lineno} does not decode: {exc}", beyond(end)
             )
             chain.abort(lineno)
             break
-        arity, rows = cursors[t]
-        stored = rows.fetchone()
-        seen[t] += 1
-        if stored is None:
-            diverged.add(
-                f"log line {lineno} ({t} {row[0]}) has no index row — the "
-                f"index holds only {seen[t] - 1} {t}(s)",
-                beyond(end),
-            )
-        elif tuple(stored) != _trim(row, arity):
-            diverged.add(
-                f"log line {lineno} ({t} {row[0]}) disagrees with index "
-                f"{t} {stored[0]} at the same position"
-                + (
-                    ""
-                    if stored[0] == row[0]
-                    else " — the index rows are out of log order"
-                ),
-                False,
-            )
-        # The chain is re-derived from the LOG, so an index divergence on this
-        # line says nothing about whether the log's own chain holds. Feed it.
-        chain.feed(lineno, t, row)
+        # D1 boundary: same-ts across a batch is the declaration ceremony's
+        # invariant, not a codec rule. absorb_edit stamps one ts; a batch
+        # whose rows are all _decl.* kinds but carry mixed ts is therefore an
+        # audit divergence here — never a decode error at the codec gate.
+        if len(records) > 1 and all(
+            row[1].startswith("_decl.") for _t, row in records
+        ):
+            stamps = {row[2] for _t, row in records}
+            if len(stamps) > 1:
+                diverged.add(
+                    f"log line {lineno}: declaration batch carries "
+                    f"{len(stamps)} distinct ts — a ceremony is a single "
+                    "ontology transition and stamps one effective timestamp",
+                    False,
+                )
+        for t, row in records:
+            arity, rows = cursors[t]
+            stored = rows.fetchone()
+            seen[t] += 1
+            if stored is None:
+                diverged.add(
+                    f"log line {lineno} ({t} {row[0]}) has no index row — the "
+                    f"index holds only {seen[t] - 1} {t}(s)",
+                    beyond(end),
+                )
+            elif tuple(stored) != _trim(row, arity):
+                diverged.add(
+                    f"log line {lineno} ({t} {row[0]}) disagrees with index "
+                    f"{t} {stored[0]} at the same position"
+                    + (
+                        ""
+                        if stored[0] == row[0]
+                        else " — the index rows are out of log order"
+                    ),
+                    False,
+                )
+            # The chain is re-derived from the LOG, so an index divergence on
+            # this line says nothing about whether the log's own chain holds.
+            chain.feed(lineno, t, row)
 
     if diverged:
         content = diverged.verdict()

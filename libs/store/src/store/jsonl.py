@@ -184,7 +184,7 @@ def _validate_log(source: Path) -> None:
     validates first and mutates nothing, and construction below only ever
     sees a log it has already proven clean.
     """
-    from engine.jsonl_codec import deserialize_row
+    from engine.jsonl_codec import deserialize_records
 
     size = source.stat().st_size
     with source.open("rb") as fh:
@@ -200,7 +200,9 @@ def _validate_log(source: Path) -> None:
         for raw in fh:
             line = raw.decode("utf-8").strip()
             if line:
-                deserialize_row(line)  # JsonlCodecError names the bad line
+                # JsonlCodecError names the bad line; batch ceremony lines
+                # decode through the same gate as plain records.
+                deserialize_records(line)
 
 
 def rebuild_jsonl(source: Path, target: Path) -> RebuildResult:

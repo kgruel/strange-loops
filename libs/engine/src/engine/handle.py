@@ -1283,8 +1283,15 @@ class VertexHandle:
         *,
         expect: object | None = None,
         id_override: str | None = None,
+        admit_undeclared: bool = False,
     ) -> ReceiveResult:
         """Write a fact through the held handle, without a full reload (S3).
+
+        Applies only the caller-supplied ``grant`` — declared observer
+        admission policy is NOT resolved here (that is :meth:`receive_as`);
+        this entry is the explicit bypass. Strict-mode kind admission is
+        still enforced by the underlying engine receive;
+        ``admit_undeclared=True`` is its explicit bypass.
 
         Sequence: catch the handle up (so the write sees external commits),
         fetch operation-fresh signers from the :class:`CredentialProvider` at the
@@ -1359,7 +1366,10 @@ class VertexHandle:
 
             # 4. The live receive path — exactly once, under our preselected id.
             try:
-                receipt = writer.receive(fact, grant, id_override=write_id)
+                receipt = writer.receive(
+                    fact, grant, id_override=write_id,
+                    admit_undeclared=admit_undeclared,
+                )
             except Exception as exc:
                 # Did OUR exact id land? A primary-key hit distinguishes our
                 # committed fact from a racing external one.
@@ -1386,6 +1396,37 @@ class VertexHandle:
                     receipt.fact_id or write_id, None, exc
                 ) from exc
             return ReceiveResult(receipt=receipt, change=change)
+
+    def receive_as(
+        self,
+        fact: Fact,
+        *,
+        expect: object | None = None,
+        id_override: str | None = None,
+        admit_undeclared: bool = False,
+    ) -> ReceiveResult:
+        """Write a fact under the vertex's DECLARED admission policy (S3).
+
+        Resolves ``fact.observer`` against this handle's declaration via
+        :func:`engine.admission.grant_for_observer` and delegates to
+        :meth:`receive` with the resolved grant — same semantics as
+        ``VertexProgram.receive_as`` (unknown observer raises
+        :class:`~engine.admission.UnknownObserver`; no observers block or a
+        grantless declared observer is unrestricted; a declared potential
+        gates the kind as a normal grant rejection). Aggregates are already
+        refused at ``open_vertex``. The raw :meth:`receive` remains the
+        explicit bypass of declared observer policy; ``admit_undeclared``
+        is the explicit strict-mode bypass.
+        """
+        from engine.admission import grant_for_observer
+
+        with self._lock:
+            self._ensure_usable()
+            grant = grant_for_observer(self._ast, fact.observer)
+        return self.receive(
+            fact, grant, expect=expect, id_override=id_override,
+            admit_undeclared=admit_undeclared,
+        )
 
     # -- change iteration (S2) ---------------------------------------------
 

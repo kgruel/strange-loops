@@ -62,6 +62,12 @@ __all__ = [
     "grant_of",
     "expand_grant",
     "restrict_grant",
+    # Declared admission policy
+    "AdmissionError",
+    "UnknownObserver",
+    "UndeclaredKind",
+    "AggregateAdmissionUnsupported",
+    "grant_for_observer",
     # Cadence
     "Cadence",
     # Compiler (DSL → runtime)
@@ -215,6 +221,12 @@ _LAZY_IMPORTS: dict[str, tuple[str, str]] = {
     "grant_of": ("engine.peer", "grant_of"),
     "restrict": ("engine.peer", "restrict"),
     "restrict_grant": ("engine.peer", "restrict_grant"),
+    # Declared admission policy
+    "AdmissionError": ("engine.admission", "AdmissionError"),
+    "UnknownObserver": ("engine.admission", "UnknownObserver"),
+    "UndeclaredKind": ("engine.admission", "UndeclaredKind"),
+    "AggregateAdmissionUnsupported": ("engine.admission", "AggregateAdmissionUnsupported"),
+    "grant_for_observer": ("engine.admission", "grant_for_observer"),
     # Cadence
     "Cadence": ("engine.cadence", "Cadence"),
     # Compiler

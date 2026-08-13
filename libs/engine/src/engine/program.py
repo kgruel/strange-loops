@@ -37,7 +37,8 @@ class VertexProgram:
     they're born — no longer the caller's responsibility to remember.
     """
 
-    __slots__ = ("vertex", "sources", "expected_ticks", "path", "run_dispatcher")
+    __slots__ = ("vertex", "sources", "expected_ticks", "path", "run_dispatcher",
+                 "declaration")
 
     def __init__(
         self,
@@ -47,12 +48,14 @@ class VertexProgram:
         *,
         path: Path | None = None,
         run_dispatcher: Callable[[str, str, Path], None] | None = None,
+        declaration: VertexFile | None = None,
     ):
         object.__setattr__(self, "vertex", vertex)
         object.__setattr__(self, "sources", sources)
         object.__setattr__(self, "expected_ticks", expected_ticks)
         object.__setattr__(self, "path", path)
         object.__setattr__(self, "run_dispatcher", run_dispatcher)
+        object.__setattr__(self, "declaration", declaration)
 
     def __setattr__(self, name, value):
         raise AttributeError(f"cannot assign to field '{name}'")
@@ -84,12 +87,22 @@ class VertexProgram:
         grant: Any = None,
         *,
         id_override: str | None = None,
+        admit_undeclared: bool = False,
     ) -> Receipt:
         """Route a fact through the vertex; dispatch run-clause if the resulting tick has one.
 
         Single-fact entry that consolidates ``vertex.receive(fact)`` with
         run-clause dispatch. Use this in place of ``program.vertex.receive(fact)``
         from CLI/app code so any registered dispatcher fires automatically.
+
+        **This is the raw entry point: it applies only the caller-supplied
+        ``grant`` and BYPASSES the vertex's declared observer admission
+        policy** (``observers { grant { ... } }``). Callers that want the
+        declaration enforced use :meth:`receive_as`, which resolves the
+        observer's declared grant automatically. Strict admission
+        (``strict true``) is still enforced here — that floor lives in
+        ``Vertex.receive_receipt``; ``admit_undeclared=True`` is its
+        explicit bypass.
 
         Returns the write :class:`~engine.vertex.Receipt` — ``fact_id``
         is the id the store assigned (no pre-minting needed), ``tick``
@@ -103,10 +116,60 @@ class VertexProgram:
         shaped callers; ordinary writers read the minted id off the Receipt.
         Only honored by stores that track IDs (SqliteStore).
         """
-        receipt = self.vertex.receive_receipt(fact, grant, id_override=id_override)
+        receipt = self.vertex.receive_receipt(
+            fact, grant, id_override=id_override,
+            admit_undeclared=admit_undeclared,
+        )
         if receipt.tick is not None:
             self._dispatch_tick(receipt.tick)
         return receipt
+
+    def receive_as(
+        self,
+        fact: Fact,
+        *,
+        id_override: str | None = None,
+        admit_undeclared: bool = False,
+    ) -> Receipt:
+        """Receive a fact under the vertex's DECLARED admission policy.
+
+        Resolves ``fact.observer`` against the declaration's ``observers``
+        block via :func:`engine.admission.grant_for_observer` and applies
+        the resolved grant — the safe client entry: declared policy cannot
+        be bypassed by omission. Contract behavior (LIBS_CHANGES P1):
+
+        * no observers block → unrestricted (grant ``None``);
+        * unknown observer → raises
+          :class:`~engine.admission.UnknownObserver`;
+        * declared observer without a grant → unrestricted;
+        * declared observer with a potential set → that potential gates the
+          kind (rejection = ``Receipt(stored=False)``, as with any grant);
+        * aggregate vertex → raises
+          :class:`~engine.admission.AggregateAdmissionUnsupported`.
+
+        Bypassing declared policy is the explicit raw :meth:`receive`
+        entry point (caller-supplied grant). ``admit_undeclared`` is the
+        separate explicit bypass for strict-mode kind admission.
+
+        Raises:
+            AdmissionError: if the program was constructed without a
+                declaration (nothing to resolve against).
+        """
+        if self.declaration is None:
+            from .admission import AdmissionError
+
+            raise AdmissionError(
+                f"program for vertex {self.name!r} carries no declaration — "
+                "declared admission policy cannot be resolved; use the raw "
+                "receive() with an explicit grant"
+            )
+        from .admission import grant_for_observer
+
+        grant = grant_for_observer(self.declaration, fact.observer)
+        return self.receive(
+            fact, grant, id_override=id_override,
+            admit_undeclared=admit_undeclared,
+        )
 
     def close(self) -> None:
         """Release the program's store resources (idempotent).
@@ -294,4 +357,5 @@ def load_vertex_program(
         expected_ticks=expected_ticks,
         path=vertex_path,
         run_dispatcher=run_dispatcher,
+        declaration=ast,
     )

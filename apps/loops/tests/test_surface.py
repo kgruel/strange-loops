@@ -262,11 +262,15 @@ def test_collect_section_preserves_fold_order():
     assert [r.payload["message"] for r in surface.rows] == ["first", "second", "third"]
 
 
-def test_falsy_fold_key_is_treated_as_keyless():
-    """A falsy fold value (int 0, False, "") is no-key — byte-matching the lens's
-    old _item_full_key/_inbound_count truthiness gate. Row.key is None so the
-    address falls back to kind/<id> and the edge/facts lookups (keyed by
-    address-when-key-not-None) correctly skip it, as the old lens did."""
+def test_falsy_but_valid_fold_key_survives_into_row_key():
+    """INVERTED PIN (finding:chw-sol-r4-f1-falsy-key-truthiness, arbiter:
+    fix the substrate). This test used to assert the OPPOSITE — that a falsy
+    fold value (0, False, "") nulled Row.key, byte-matching the pre-Surface
+    lens. The engine's fold acceptance (``is not None``) is the contract:
+    numeric ``0`` / ``False`` are legal entity keys, so ``_row_key`` keeps
+    them and the row gets its real ``kind/key`` address — nulling them split
+    the Surface --key filter from the census's ``_item_matches_key`` and
+    turned a real status-bearing row into a statusless refusal."""
     state = FoldState(
         sections=(
             FoldSection(
@@ -279,8 +283,58 @@ def test_falsy_fold_key_is_treated_as_keyless():
         vertex="t",
     )
     row = project(state).rows[0]
-    assert row.key is None
-    assert row.address == "thread/Z1"  # not "thread/0"
+    assert row.key == "0"
+    assert row.address == "thread/0"  # the entity address, not the id fallback
+
+
+def test_native_and_string_zero_keys_are_two_rows_same_displayed_key():
+    """DISCLOSED DUALITY (known, deliberate — not a defect this suite hides):
+    a native JSON numeric ``0`` and a string ``"0"`` under one kind are two
+    distinct fold entries, and they surface as TWO rows whose displayed key
+    is the same ``"0"`` (and the same ``kind/0`` address). Whether they
+    should be one identity is deliberately held open at
+    thread:fold-key-identity-native-vs-string — the r5 fix unified only the
+    STRINGIFICATION (lookup projection), not fold identity. This pin makes
+    the duality visible in the suite instead of silent."""
+    state = FoldState(
+        sections=(
+            FoldSection(
+                kind="thread", fold_type="by", key_field="name",
+                items=(
+                    FoldItem(payload={"name": 0, "status": "native"}, ts=1.0, id="N1"),
+                    FoldItem(payload={"name": "0", "status": "string"}, ts=2.0, id="S1"),
+                ),
+            ),
+        ),
+        vertex="t",
+    )
+    rows = project(state).rows
+    assert len(rows) == 2  # two entities, not merged
+    assert [r.key for r in rows] == ["0", "0"]  # same displayed key
+    assert [r.address for r in rows] == ["thread/0", "thread/0"]
+    assert {r.payload["status"] for r in rows} == {"native", "string"}
+
+
+def test_empty_string_fold_key_keeps_id_address_fallback():
+    """The one falsy key whose ADDRESS behavior is unchanged: ``""`` is
+    non-None so Row.key keeps it (as ``""``), but ``_address``'s own
+    truthiness still falls back to ``kind/<id>`` — an empty-string key has
+    no printable entity address. Pins the residue explicitly so the r4 fix
+    is not mistaken for changing it."""
+    state = FoldState(
+        sections=(
+            FoldSection(
+                kind="thread", fold_type="by", key_field="name",
+                items=(
+                    FoldItem(payload={"name": "", "status": "s"}, ts=1.0, id="E1"),
+                ),
+            ),
+        ),
+        vertex="t",
+    )
+    row = project(state).rows[0]
+    assert row.key == ""
+    assert row.address == "thread/E1"
 
 
 def test_collect_row_address_uses_id():

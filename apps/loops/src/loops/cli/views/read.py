@@ -30,6 +30,7 @@ from __future__ import annotations
 import argparse
 
 from ..invocation import Invocation
+from ..refusals import status_inert_refusal
 
 
 def run(argv: list[str], ctx: Invocation) -> int:
@@ -43,51 +44,68 @@ def run(argv: list[str], ctx: Invocation) -> int:
     pre.add_argument("--at", default=None)
     pre.add_argument("--diff", default=None)
     pre.add_argument("--review", action="store_true", default=False)
+    pre.add_argument("--status", default=None)
     known, rest = pre.parse_known_args(argv)
 
-    # --at/--diff are fold-route-only concerns (A9/A11). Resolve their
-    # incompatibility with every route that would otherwise consume argv
-    # BEFORE any route is selected — the stream branch immediately below
-    # used to run first and silently swallow --at/--diff whenever --facts
-    # combined with --since/--as-of/--id (or --ticks) triggered it, so
-    # e.g. `--facts --at head --as-of 30d` ran the event-time stream query
-    # with --at discarded, never refused (review finding 1). A bare
-    # `--facts --at ADDRESS` (no since/as-of/id) is unaffected — that
-    # legitimately falls through to the fold route below, unchanged.
+    # Fold-route-only guards (table-driven, simplify item 1b). --at/--diff
+    # (cursor addressing, A9/A11), --review (folded-state projection) and
+    # --status (folded-row filter, S1 cli-honesty-wave) are honored only by
+    # the fold view. Resolve their incompatibility with every route that
+    # would otherwise consume argv BEFORE any route is selected — the stream
+    # branch below used to run first and silently swallow --at/--diff
+    # whenever --facts combined with --since/--as-of/--id (or --ticks)
+    # triggered it (review finding 1); refuse rather than route away and
+    # silently drop (honor-or-refuse; silent-inert is the defect class the
+    # cli-honesty-wave kills). Bare fold-route combinations (`--facts --at
+    # ADDRESS`, bare --review, `--facts --status VALUE` without a window)
+    # legitimately fall through to the fold route below, honored. --review
+    # additionally refuses with --diff (a separate two-position operation)
+    # even ON the fold route; --at/--diff wins that collision by table order,
+    # exactly as the sequential guards did.
     routes_away_from_fold = (
         known.facts and (known.since or known.as_of or known.fact_id)
     ) or known.ticks
-    if routes_away_from_fold and (known.at or known.diff):
-        if known.ticks:
-            reason = "`--ticks` does not support cursor addressing yet"
-        else:
-            reason = (
-                "`--facts` with a temporal window/anchor routes to the "
-                "event-history view, not the fold read"
-            )
-        ctx.reporter.err(f"read: --at/--diff address the fold route only — {reason}.")
-        return 2
-
-    # --review is a fold-route-only projection of FOLDED state — it has no
-    # meaning on the event-history (--facts+window) or tick (--ticks) routes,
-    # and --diff is a distinct two-position operation. Refuse the combination
-    # here (same honor-or-refuse posture as the --at/--diff guard above) rather
-    # than route away and silently drop --review. A bare --review (or with
-    # --at/--as-of) falls through to the fold route below, honored.
-    if known.review and (routes_away_from_fold or known.diff):
-        if known.diff:
-            reason = "`--diff` is a separate two-position operation"
-        elif known.ticks:
-            reason = "`--ticks` reads tick windows, not folded state"
-        else:
-            reason = (
-                "`--facts` with a temporal window/anchor reads the event "
-                "history, not folded state"
-            )
-        ctx.reporter.err(
-            f"read --review: the review projection is a fold-route snapshot — "
-            f"{reason}. Drop it, or drop --review."
+    if known.ticks:
+        off_route = ("`--ticks` reads tick windows, not folded state", "--ticks")
+    elif routes_away_from_fold:
+        off_route = (
+            "`--facts` with a temporal window/anchor routes to the "
+            "event-history view, not the fold read",
+            "the window",
         )
+    else:
+        off_route = None
+
+    fold_only_flags = (
+        # (flag label, flag active?, what it does, --diff also conflicts?)
+        ("--at/--diff", bool(known.at or known.diff),
+         "address the fold route only", False),
+        ("--review", known.review,
+         "is a fold-route projection of folded state", True),
+        ("--status", known.status is not None,
+         "filters folded state", False),
+    )
+    for flag_label, active, what_it_does, diff_conflicts in fold_only_flags:
+        if not active:
+            continue
+        if off_route is not None:
+            reason, drop = off_route
+        elif diff_conflicts and known.diff:
+            reason, drop = (
+                "`--diff` is a separate two-position operation", "--diff",
+            )
+        else:
+            continue
+        if flag_label == "--status":
+            # The unified --status-inert sentence — same builder as the
+            # in-view refusal sites (item 1a).
+            msg = status_inert_refusal(reason, drop)
+        else:
+            msg = (
+                f"read: {flag_label} {what_it_does} — {reason}. "
+                f"Drop {drop}, or drop {flag_label}."
+            )
+        ctx.reporter.err(msg)
         return 2
 
     # Temporal facts query → stream (re-injects --since / --as-of / --id).
@@ -165,6 +183,8 @@ def run(argv: list[str], ctx: Invocation) -> int:
         fold_rest += ["--diff", known.diff]
     if known.review:
         fold_rest.append("--review")
+    if known.status is not None:
+        fold_rest += ["--status", known.status]
     from . import fold as fold_view
 
     return fold_view.run(fold_rest, ctx)

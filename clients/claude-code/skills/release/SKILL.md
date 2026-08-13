@@ -88,9 +88,35 @@ git log v<PREV>.. --oneline
 Every **user-facing** commit gets an entry under Added / Changed / Fixed /
 Removed — including merges that landed on `main` outside the wave branch
 (the easy misses: a feature merged separately, dep bumps, fixes that rode
-review passes). Docs-only, test-only, and skill/plugin commits skip. Write
-entries from the commit messages' own vocabulary; they were written to be
-quoted.
+review passes). Docs-only, test-only, and skill/plugin commits skip. The
+log is the COMPLETENESS source; it is not the VOICE — see below.
+
+### Audience rule (ruled by Kyle 2026-08-12, after 0.10.0 read as noise)
+
+The CHANGELOG's reader is a user who was not in the room. They do not know
+what a wave, slice, arc, ratchet, or finding is, and "surfacing wave,
+landed half" tells them nothing. Rules:
+
+- **Lead the section with 2–4 plain sentences of "what this release means
+  for you"** — what you can now do, what will now fail that used to
+  silently succeed, what you must change. No project-narrative in the body;
+  the wave name may survive only in the section title as provenance.
+- **Every entry states the user-visible delta first**, in command/flag
+  vocabulary: "`sl ls <unknown-vertex>` now exits 1 with suggestions on
+  stderr" — never the internal motion that produced it ("exit-discipline
+  pass over the ls family").
+- **Translate, don't quote.** Commit messages are written for maintainers;
+  entries are written for users. The log tells you WHAT to cover, the
+  entry re-says it for someone with zero repo context.
+- **Link the docs that exist**: breaking changes point at their
+  `docs/UPGRADING.md` section; features point at the cheatsheet/deep-dive
+  that documents them (`docs/CLI-CHEATSHEET.md`, etc.). A reader who is
+  lost should always have exactly one link to follow. Do not invent docs
+  to link; if nothing documents a feature, that's a gap to note at cut
+  time, not a reason to fake a link.
+- **Breaking changes get their own subsection, first**, each entry naming
+  the old behavior, the new behavior, and who is affected ("scripts that
+  parse stdout or check `$?` on ...").
 
 ## 3. Stamp
 

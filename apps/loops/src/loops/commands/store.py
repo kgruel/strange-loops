@@ -297,7 +297,9 @@ def _resolve_target(file_arg: str | None, vertex_path: Path | None) -> Path:
     root = home / ".vertex"
     if root.exists():
         return root
-    raise FileNotFoundError(f"{root} not found. Run 'loops init' first.")
+    from .resolve import missing_root_message
+
+    raise FileNotFoundError(missing_root_message(root))
 
 
 def _run_verify(argv: list[str], *, vertex_path: Path | None = None) -> int:
@@ -1807,6 +1809,22 @@ def _dispatch_store(
     )
     known, rest = pre.parse_known_args(argv)
     file_arg = getattr(known, "file", None)
+
+    # Pre-flight the empty-home case (finding:chw-r2-sibling-store-error-to-
+    # stdout): bare `loops store` with no config root resolves to
+    # `<home>/.vertex` inside fetch(), whose FileNotFoundError painted's
+    # run_cli prints to STDOUT by framework design. Refuse here instead —
+    # byte-identical message, stderr, exit 1 — mirroring the R2 ls fix
+    # (commands/population.py, finding:chw-r2-bare-ls-error-to-stdout). No
+    # local-layer clause: unlike ls, _resolve_target's bare path has no
+    # local-vertex fallback, so the root's absence alone decides.
+    if vertex_path is None and file_arg is None:
+        from .resolve import _err, loops_home, missing_root_message
+
+        root_path = loops_home() / ".vertex"
+        if not root_path.exists():
+            _err(missing_root_message(root_path))
+            return 1
 
     help_args = (
         [HelpArg("file", "Store .db or .vertex file, or vertex name",

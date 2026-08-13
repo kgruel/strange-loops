@@ -1,0 +1,33 @@
+## Findings
+
+[R5-F1] **MEDIUM** — non-string fold keys lose type identity across addresses and provenance.
+
+`_row_key` correctly retains accepted keys but stringifies them ([surface.py](/Users/kaygee/Code/loops/apps/loops/src/loops/surface.py:527)). Source-fact buckets likewise use string addresses ([vertex_reader.py](/Users/kaygee/Code/loops/libs/engine/src/engine/vertex_reader.py:455)), while provenance replay folds the native payload and then looks it up using the CLI string key ([provenance.py](/Users/kaygee/Code/loops/apps/loops/src/loops/provenance.py:165)).
+
+Observed consequences:
+
+- Numeric `0`: `decision/0 --why --json` exited 0 with `total_facts: 1`, but `fields: []` and an empty `changed` list.
+- Boolean `False` reproduces the same empty attribution; string `"0"` works normally.
+- Numeric `0` and string `"0"` in the same kind remain two engine-folded items but project to duplicate `decision/0` rows, while their source facts combine into one `decision/0` bucket.
+
+This is silent provenance/identity loss for keys the ruling explicitly declares valid.
+
+## R4-F1: PASS
+
+Evidence:
+
+- Exact reproduction, numeric `0` with `--key 0,missing --status open`: exit 0, one row with key `"0"` and message `zero-keyed`, no stderr/statusless refusal.
+- Parity matrix includes numeric `0` and `False`; targeted parity/regression run: **5 passed**.
+- Independent evasions:
+  - `False` → key `"False"`, address `flag/False`.
+  - Numeric `0` and string `"0"` both survive plain `--key 0`.
+  - Both survive `--key 0,missing --status open`, exit 0.
+- Fold rendering lists the numeric-zero row as key `0`.
+- `--refs` resolves and renders an inbound `decision:0` edge correctly.
+- Merge tip introduces no extra source/test delta beyond `108870ae`.
+
+Verification: **2516 passed, 1 xfailed**; `./dev check`: **59 passed**; `git diff --check` clean. No repository changes made; the pre-existing `.loops/` remains untouched.
+
+## Overall: NOT CONVERGED
+
+R4-F1 itself is fixed, but accepted non-string keys still cross an inconsistent native-value/string-address boundary. The resulting duplicate identities and plausible-but-empty `--why` output are an honesty defect, so closing the wave would leave a newly demonstrated valid-key path silently misrepresented.

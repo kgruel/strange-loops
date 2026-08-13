@@ -600,7 +600,7 @@ def _render_search(data: "Surface", zoom: Zoom, width: int | None) -> Block:
     that lacked FTS coverage — split into two honest, differently-fixed
     signals (S2 arbitration F1): ``window.unindexed`` (never declared
     searchable — a vertex-edit fix) vs ``window.stale`` (declared, but the
-    index is missing or behind head — an ``sl store reindex`` fix), plus
+    index is missing or behind head — an ``sl store reindex <vertex>`` fix), plus
     ``window.truncated`` when the FTS query itself hit its result limit
     (friction:fts-match-limit-100-silent-cap — no-silent-caps disclosure).
     """
@@ -658,8 +658,13 @@ def _render_search(data: "Surface", zoom: Zoom, width: int | None) -> Block:
             f"{', '.join(data.window.unindexed)})"
         )
     if data.window.stale:
+        # The hint names the vertex it is rendering inside — the bare
+        # `sl store reindex` form refuses without a target, so recommending
+        # it sent the reader to a refusal
+        # (friction:reindex-hint-omits-vertex-target).
         footer_lines.append(
-            f"({len(data.window.stale)} index stale — run `sl store reindex`: "
+            f"({len(data.window.stale)} index stale — run "
+            f"`sl store reindex {data.vertex}`: "
             f"{', '.join(data.window.stale)})"
         )
     if data.window.truncated:

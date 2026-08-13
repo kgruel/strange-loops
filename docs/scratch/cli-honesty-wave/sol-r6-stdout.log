@@ -1,0 +1,13 @@
+## Findings
+
+[R6-F1] **MEDIUM** — coexistence yields cross-entity, order-dependent provenance.
+
+With native `0` emitted before string `"0"`, `decision/0 --why --json` selects the string row but incorrectly retains `native_only: "N"` and reports native status as a prior. Reversing emission order returns only the string row’s fields. The projected source bucket combines both identities ([vertex_reader.py](/Users/kaygee/Code/loops/libs/engine/src/engine/vertex_reader.py:455)); replay initially attributes the native entry, later switches to the direct string hit, but never clears the earlier change log ([provenance.py](/Users/kaygee/Code/loops/apps/loops/src/loops/provenance.py:192)). Thus the documented “string wins” rule is not fully honored.
+
+## Closing call
+
+**NOT CONVERGED.** The original native-`0` reproduction, False-key lookup, and ordinary string-key lookup pass. The disclosure pin correctly asserts two rows sharing one address and cites `thread:fold-key-identity-native-vs-string` ([test_surface.py](/Users/kaygee/Code/loops/apps/loops/tests/test_surface.py:290)); that receipt is sufficient for holding the underlying identity decision. It does not cover the claimed coexistence `--why` behavior, which remains incorrect without requiring engine identities to be merged.
+
+Verification: **2518 passed, 1 xfailed**; `./dev check`: **59 passed**; `git diff --check` clean.
+
+Residual risk: until attribution selects one stable native identity for the entire replay, any native/string projection collision can produce plausible provenance containing fields and history from the wrong engine item. The duplicate-address ambiguity is disclosed, but the resulting cross-item attribution is not, so consumers cannot safely treat `--why` as explaining the deterministic string winner.

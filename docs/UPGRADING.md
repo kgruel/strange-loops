@@ -12,6 +12,69 @@ uv tool upgrade strange-loops     # or: pip install -U strange-loops
 
 ---
 
+## Unreleased — CLI honesty wave
+
+*(Version header stamped at release. Behavior deltas below are deliberate
+breaking changes: every one replaces a lying success with an honest failure.)*
+
+### Breaking: error paths now exit nonzero with errors on stderr
+
+If a script parses stdout or checks `$?` on these invocations, it was being
+lied to before and will now see the failure:
+
+- `sl ls <unknown-vertex>` — was: error text on **stdout**, exit **0**. Now:
+  error + did-you-mean suggestions on stderr, exit 1.
+- `sl ls <vertex> --kind <undeclared>` — was: a plausible empty section, exit
+  0. Now: the same undeclared-kind error `sl read` gives (byte-identical),
+  exit 2. `--key` no longer changes the answer.
+- Bare `sl ls` / `sl store` with no config root — was: error on stdout, exit
+  1. Now: same message, **stderr**, exit 1.
+- `sl cite` / `sl emit <v> cite` with refs that all fail to resolve — was:
+  WARN + an empty cite stored, exit 0. Now: refuses with exit 2, **nothing
+  stored**. This includes zero-address cites (`message=` only), malformed
+  tokens (`ref=:x`, `ref=kind:`, prose, bare separator-less keys), and
+  addresses supplied in non-ref fields (a resolvable address in `-m` no
+  longer rescues a cite). Cites whose refs are valid-but-undeclared addresses
+  (inert pins, e.g. `nosuchkind:zzz`) still store as provenance-only;
+  malformed tokens alongside a storing cite WARN and stay raw in the payload.
+
+### New: `sl read --status <value>`
+
+Payload-equality filter on the fold row (`--status open`, comma-OR
+`--status open,parked`), composable with `--kind`/`--key`. Honesty rules:
+if **no** fetched kind carries a status field the command refuses (exit 2)
+rather than rendering a plausible empty; mixed fetches note the statusless
+kinds on stderr and filter the rest; a status-bearing kind with no matching
+rows is an honest empty at exit 0. Custom-lens, live/interactive, windowed
+`--facts`, and `--ticks` reads refuse the flag rather than ignoring it.
+
+### New: `sl cite [vertex] REF...`
+
+Verb-first cite gains a vertex slot (parity with `emit`): first positional is
+the vertex iff it resolves as one. The no-vertex form keeps working with
+emit-parity local resolution.
+
+### Also
+
+- `sl orient` gains a reconcile-staleness line: `last reconcile: Nd ago`
+  (`— RECONCILE OVERDUE` past 10d, from the newest `reconcile-*` thread), or
+  `no reconcile on record`.
+- The FTS staleness hint now names its target: `run \`sl store reindex
+  <vertex>\`` — the bare form it used to suggest just refuses.
+- `sl read <unknown-vertex>` now gives the same did-you-mean suggestions `ls`
+  does (content parity; read renders it as one collapsed line). The bare
+  no-vertex case keeps the `loops init` guidance.
+- Falsy-but-valid fold keys (JSON numeric `0`, `false`) now surface as real
+  rows with real `kind/0`-style addresses — previously they were silently
+  keyless and invisible to `--key`/`--status`/`--refs`. `--why` on such items
+  now returns real attribution (was a plausible-empty `fields: []`). When a
+  native `0` and a string `"0"` coexist under one kind they remain two rows
+  sharing one displayed address, and `--why` deterministically explains the
+  string one — the deeper key-identity question is deliberately held open
+  (`thread:fold-key-identity-native-vs-string`).
+
+---
+
 ## 0.10.0 (2026-08-12) — JSONL-canonical store
 
 ### You don't have to migrate

@@ -70,6 +70,17 @@ def loops_home() -> Path:
     return Path(xdg) / "loops"
 
 
+def missing_root_message(root: Path) -> str:
+    """The config-root-missing message — single source for every site.
+
+    Five sites report the absent ``<home>/.vertex`` root (raises in
+    vertices/store resolution, pre-flight refusals in ls/store, resolve's
+    default-path miss); byte-identity across them is by construction here,
+    not by five hand-kept copies (simplify pass, item 3).
+    """
+    return f"{root} not found. Run 'loops init' first."
+
+
 def _find_local_vertex(*, allow_ambiguous: bool = False) -> Path | None:
     """Find a .vertex file in .loops/ or cwd. Returns first match or None.
 
@@ -877,6 +888,37 @@ def _topology_roots_for_emit(
 # --- Entity reference resolution ---
 
 
+def parse_ref_token(tok: str):
+    """Parse one ``ref``-field token under the canonical self-describing
+    address grammar, or return ``None``.
+
+    THE single source of "is this token a ref address" — the exact acceptance
+    ``_resolve_entity_refs`` applies to ``ref``-field tokens (its loop calls
+    this), reused by ``cmd_emit``'s cite gate
+    (finding:chw-sol-r2-f1-malformed-token-evades-gate; dissolution — the
+    discriminator already existed here, the gate must not grow its own):
+
+      * non-empty, no internal whitespace (prose is never an address);
+      * ``Address.parse`` succeeds — rejects empty-half separators
+        (``:key`` / ``kind:`` / ``/key`` / ``kind/``);
+      * the parsed kind is non-empty — a self-describing ref requires a
+        separator; a bare separator-less key names nothing citable.
+
+    Returns the parsed ``atoms.Address`` (kind-qualified) or ``None``.
+    Whether the address's kind is DECLARED anywhere is deliberately not this
+    function's question — an undeclared-kind address is well-formed (an inert
+    provenance pin), not malformed.
+    """
+    from atoms import Address
+
+    if not tok or any(c.isspace() for c in tok):
+        return None
+    address = Address.parse(tok)
+    if address is None or not address.kind:
+        return None
+    return address
+
+
 def _resolve_entity_refs(
     vertex_path: Path,
     store_path: Path,
@@ -1076,9 +1118,11 @@ def _resolve_entity_refs(
                 address = Address.for_edge(raw, local_edge_fields[field_name])
                 display = str(address) if address is not None else raw
             else:
-                # Self-describing ref — a separator (non-empty kind) is required.
-                address = Address.parse(raw)
-                if address is None or not address.kind:
+                # Self-describing ref — parse_ref_token is the single source
+                # of this acceptance (shared with cmd_emit's cite gate,
+                # finding:chw-sol-r2-f1-malformed-token-evades-gate).
+                address = parse_ref_token(raw)
+                if address is None:
                     continue
                 display = raw
             if address is None:
@@ -1485,7 +1529,7 @@ def _resolve_vertex_path(file_arg: str | None) -> Path | None:
     root = home / ".vertex"
     if root.exists():
         return root
-    _err(f"Error: {root} not found. Run 'loops init' first.")
+    _err(f"Error: {missing_root_message(root)}")
     return None
 
 
@@ -1516,6 +1560,27 @@ def _declared_kinds(vertex_path: Path) -> set[str]:
         return set(specs.keys())
     except Exception:
         return set()
+
+
+def _unknown_vertex_message(name: str) -> str:
+    """Error message for a vertex name that resolves nowhere, with did-you-mean.
+
+    The vertex-name sibling of ``_validate_kind_or_exit``'s kind treatment
+    (friction:ls-vertex-not-found-exits-zero): same three-line shape —
+    the miss, close matches over what actually exists, then the full list.
+    Candidates come from ``enumerate_vertices()`` — exactly the names the
+    bare ``sl ls`` root listing shows, reused rather than re-detected.
+    """
+    import difflib
+
+    names = [v.name for v in enumerate_vertices()]
+    lines = [f"vertex not found: {name}"]
+    suggestions = difflib.get_close_matches(name, names, n=3, cutoff=0.5)
+    if suggestions:
+        lines.append(f"Did you mean: {', '.join(suggestions)}?")
+    if names:
+        lines.append(f"Known vertices: {', '.join(names)}")
+    return "\n".join(lines)
 
 
 def _validate_kind_or_exit(kind: str | None, vertex_path: Path | None) -> None:

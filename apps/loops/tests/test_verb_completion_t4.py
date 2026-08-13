@@ -138,16 +138,26 @@ class TestSyncCompletionEndToEnd:
         assert "project" in {c.value for c in cands}
 
 
-class TestCiteHasNoVertexPositional:
-    def test_loops_cite_offers_no_vertex_candidates(self, isolated):
-        # cite always resolves the local/vertex-first vertex — verb-first
-        # `sl cite <TAB>` completes the first ref, not a vertex name.
+class TestCiteVertexSlotCompletion:
+    def test_loops_cite_offers_vertex_names_first_slot(self, isolated):
+        # S4: cite's grammar is `sl cite [vertex] REF...` — the empty first
+        # slot offers vertex names (parity with emit's first slot).
         from loops.cli.app import _build_commands
         from painted.cli import complete_app
 
         _write_instance(Path.cwd() / ".loops", "project")
         cmds = _build_commands()
         cands = complete_app(cmds, ["cite"], "", prog="loops")
+        assert "project" in {c.value for c in cands}
+
+    def test_loops_cite_defers_after_first_token(self, isolated):
+        # Later slots are refs — no completer yet (deferred design question).
+        from loops.cli.app import _build_commands
+        from painted.cli import complete_app
+
+        _write_instance(Path.cwd() / ".loops", "project")
+        cmds = _build_commands()
+        cands = complete_app(cmds, ["cite", "project"], "", prog="loops")
         assert "project" not in {c.value for c in cands}
 
 

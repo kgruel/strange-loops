@@ -53,10 +53,13 @@ def _seed(vpath):
     assert _emit(vpath, "decision", topic="design/a", status="review",
                  observer="bob") == 0
     assert _emit(vpath, "decision", topic="design/a", status="open", label="") == 0
-    # a second key + a collect kind for the degrade path
+    # a second key + a collect kind for the degrade path. The cites carry a
+    # resolvable ref: a zero-address cite refuses since r1 remediation
+    # (finding:chw-s4-raw-emit-empty-cite).
     assert _emit(vpath, "decision", topic="design/b", message="beta") == 0
-    assert _emit(vpath, "cite", context="c1") == 0
-    assert _emit(vpath, "cite", context="c2", observer="bob") == 0
+    assert _emit(vpath, "cite", context="c1", ref="decision/design/a") == 0
+    assert _emit(vpath, "cite", context="c2", ref="decision/design/a",
+                 observer="bob") == 0
 
 
 def _why_json(capsys, vpath, *argv):
@@ -64,6 +67,131 @@ def _why_json(capsys, vpath, *argv):
     rc = main(["read", str(vpath), *argv, "--why", "--json"])
     out = capsys.readouterr().out
     return rc, json.loads(out)
+
+
+class TestNativeNumericKeyWhy:
+    """finding:chw-sol-r5-provenance-key-lookup (arbiter: unify the
+    stringification only). A native JSON numeric ``0`` fold key keys the
+    replayed fold STATE by int ``0`` while the CLI address carries ``"0"``
+    — the provenance lookup missed the entry and ``--why`` answered exit 0
+    with ``fields: []``. The shared projection (``loops.foldkey``) now
+    meets it. Engine fold semantics untouched; native-vs-string identity
+    is deliberately held at thread:fold-key-identity-native-vs-string."""
+
+    @pytest.fixture
+    def zero_why_vertex(self, tmp_path):
+        from .builders import StorePopulator
+
+        v = (
+            vertex("zerowhy")
+            .store("./zw.db")
+            .loop("decision", fold_by("topic"))
+        )
+        vpath = tmp_path / "zerowhy.vertex"
+        v.write(vpath)
+        (
+            StorePopulator(tmp_path / "zw.db", observer="alice")
+            .emit("decision", topic=0, status="open", message="zero body")
+            .emit("decision", topic=0, status="resolved")
+            .done()
+        )
+        return vpath
+
+    def test_why_on_native_zero_key_attributes_fields(
+        self, zero_why_vertex, capsys,
+    ):
+        # Sol's reproduction, inverted: fields and attribution come back.
+        rc, d = _why_json(capsys, zero_why_vertex, "decision/0")
+        assert rc == 0
+        assert d["mode"] == "upsert"
+        assert d["total_facts"] == 2
+        fields = {f["field"]: f for f in d["fields"]}
+        assert fields  # the defect answered fields: [] here
+        assert fields["message"]["value"] == "zero body"
+        assert fields["status"]["value"] == "resolved"
+        # supersession history survives the projection too
+        assert [p["value"] for p in fields["status"]["priors"]] == ["open"]
+        assert fields["status"]["setter"]["index"] == 2
+
+
+class TestReplayIdentityNoSwitch:
+    """finding:chw-sol-r6-f1-replay-identity-switch (arbiter ruling): when a
+    native ``0`` and a string ``"0"`` coexist, the WINNING identity (string
+    wins — the rule loops.foldkey documents) is resolved exactly ONCE,
+    before the replay; the losing item contributes nothing to
+    fields/changed. The defect: a per-step lookup attributed the native
+    entry early, switched to the string entry when it appeared, and kept
+    the earlier change log — mixed-item output that depended on emission
+    order. Contract: --why explains exactly the row read renders."""
+
+    def _vertex_with(self, tmp_path, emit_order):
+        from .builders import StorePopulator
+
+        tmp_path.mkdir(parents=True, exist_ok=True)
+        v = (
+            vertex("dual")
+            .store("./d.db")
+            .loop("decision", fold_by("topic"))
+        )
+        vpath = tmp_path / "dual.vertex"
+        v.write(vpath)
+        pop = StorePopulator(tmp_path / "d.db", observer="alice")
+        for which in emit_order:
+            if which == "native":
+                pop.emit(
+                    "decision", topic=0,
+                    status="native-open", native_only="N",
+                )
+            else:
+                pop.emit("decision", topic="0", status="s-open",
+                         message="string body")
+                pop.emit("decision", topic="0", status="s-done")
+        pop.done()
+        return vpath
+
+    def _fields(self, capsys, vpath):
+        rc, d = _why_json(capsys, vpath, "decision/0")
+        assert rc == 0
+        return {f["field"]: f for f in d["fields"]}
+
+    @pytest.mark.parametrize(
+        "emit_order",
+        [("native", "string"), ("string", "native")],
+        ids=["native-first", "string-first"],
+    )
+    def test_string_item_wins_whole_replay_either_order(
+        self, tmp_path, capsys, emit_order,
+    ):
+        fields = self._fields(capsys, self._vertex_with(tmp_path, emit_order))
+        # The string item's fields, whole and pure...
+        assert fields["message"]["value"] == "string body"
+        assert fields["status"]["value"] == "s-done"
+        assert [p["value"] for p in fields["status"]["priors"]] == ["s-open"]
+        # ...and NOTHING from the losing native item: no residual field, no
+        # native value smuggled in as a prior (the mid-replay switch used to
+        # retain both).
+        assert "native_only" not in fields
+        assert "native-open" not in {
+            p["value"] for f in fields.values() for p in f["priors"]
+        }
+
+    def test_both_orders_attribute_identical_content(self, tmp_path, capsys):
+        # Emission order must not change WHAT --why attributes (field →
+        # value → prior chain). Setter indexes track chronology position
+        # (the facts list legitimately reorders), so compare content.
+        def content(fields):
+            return {
+                name: (f["value"], tuple(p["value"] for p in f["priors"]))
+                for name, f in fields.items()
+            }
+
+        a = content(self._fields(
+            capsys, self._vertex_with(tmp_path / "a", ("native", "string")),
+        ))
+        b = content(self._fields(
+            capsys, self._vertex_with(tmp_path / "b", ("string", "native")),
+        ))
+        assert a == b
 
 
 # --- Exact-address gate ----------------------------------------------------

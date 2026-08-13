@@ -74,7 +74,7 @@ def _build_receipt_lines(
             "stored as typed unresolved pin"
         )
         warn_lines.append((
-            f"WARN: ref '{getattr(u, 'addr', u)}' did not resolve — {pin_action}",
+            f"WARN: ref '{u.addr}' did not resolve — {pin_action}",
             "warn",
         ))
 
@@ -725,6 +725,105 @@ def cmd_emit(
             )
             _emit_lines(primary_lines)
             return 2
+
+    # Cite refusal gate (S4 + r1 remediation). ONE coherent condition: a cite
+    # stores only when its `ref` FIELD carries at least one address AND not
+    # every attempted ref-field entity resolution failed. Spelled out:
+    #
+    #   1. zero ref-field addresses → refuse (finding:chw-s4-raw-emit-empty-
+    #      cite): there is literally nothing being cited. An address is a
+    #      token that PARSES under the canonical self-describing grammar —
+    #      resolve.parse_ref_token, the exact acceptance _resolve_entity_refs
+    #      applies (finding:chw-sol-r2-f1-malformed-token-evades-gate): a
+    #      malformed token (`:x`, `kind:`, prose, bare separator-less key)
+    #      never counts toward the gate; ALL tokens malformed refuses like
+    #      zero-address; a malformed token riding along with a cite that
+    #      stores gets a per-token WARN but keeps its current storage
+    #      behavior (raw in the ref payload).
+    #   2. ref-field entity resolutions were attempted and ALL failed →
+    #      refuse (S4 all-drop, scoped per finding:chw-sol-r1-s4-f1-nonref-
+    #      field-bypass): the gate counts ONLY field == "ref" resolutions —
+    #      an address in any other payload field (message, context, …) keeps
+    #      its normal typed-pin/sibling-_ref behavior but can neither rescue
+    #      nor doom a cite.
+    #   3. otherwise store — including the ALL-INERT cite (ref addresses
+    #      present, none attemptable as entities): provenance-only, per the
+    #      arbiter ruling.
+    #
+    # Branch 2 reads resolution OUTPUT, so it naturally skips paths where
+    # resolution never ran (no store); branch 1 is resolution-independent.
+    # Both sit before the dry-run branch — like the strict refuse above — so
+    # a preview reports the same refusal the real emit would. Exit 2 matches
+    # the strict-refuse validation exit.
+    if kind == "cite":
+        from loops.commands.resolve import parse_ref_token
+
+        ref_tokens = [
+            r.strip() for r in payload.get("ref", "").split(",") if r.strip()
+        ]
+        ref_addrs: list[str] = []
+        malformed: list[str] = []
+        for t in ref_tokens:
+            if parse_ref_token(t) is not None:
+                ref_addrs.append(t)
+            else:
+                malformed.append(t)
+        if not ref_addrs:
+            if malformed:
+                for t in malformed:
+                    _say(
+                        f"ERROR: ref '{t}' does not parse as an address "
+                        "(kind:key)"
+                    )
+                noun = "token" if len(malformed) == 1 else "tokens"
+                _say(
+                    f"ERROR: cite refused — none of its {len(malformed)} ref "
+                    f"{noun} parses as an address; a cite is an attention "
+                    "signal and needs at least one ref; nothing stored"
+                )
+            else:
+                _say(
+                    "ERROR: cite refused — no ref addresses in the payload; a "
+                    "cite is an attention signal and needs at least one ref; "
+                    "nothing stored"
+                )
+            return 2
+        cite_unresolved = [u for u in unresolved_refs if u.field == "ref"]
+        cite_resolved = [r for r in resolved_refs if r.field == "ref"]
+        if cite_unresolved and not cite_resolved:
+            for u in cite_unresolved:
+                _say(f"ERROR: ref '{u.addr}' did not resolve")
+            # Honest counts (finding:chw-s4-refusal-message-inert-pins): only
+            # ENTITY refs (declared-kind addresses) are ever attempted; an
+            # inert pin (undeclared kind / non-address value) is never
+            # attempted, so "none of its refs resolved" would overclaim when
+            # one is present. The refusal drops the whole fact, inert pins
+            # included — disclose both counts.
+            attempted = len(cite_unresolved)
+            # Never negative by construction: every attempted (unresolved
+            # entity) ref came from a parsed ref-field address, so
+            # cite_unresolved is a subset of ref_addrs.
+            inert = len(ref_addrs) - attempted
+            detail = f"all {attempted} entity ref(s) failed to resolve"
+            if inert:
+                detail += f"; {inert} inert pin(s) dropped with the refusal"
+            _say(
+                f"ERROR: cite refused — {detail}; a cite with zero resolved "
+                "entity refs is an empty attention signal; nothing stored"
+            )
+            return 2
+        # Malformed tokens riding along with a cite that stores: WARN per
+        # token, storage unchanged — the raw token stays in the ref payload
+        # (finding:chw-sol-r2-f1-malformed-token-evades-gate; the gate change
+        # + WARN is the ruling's scope, not a storage change).
+        _emit_lines([
+            (
+                f"WARN: ref '{t}' does not parse as an address (kind:key) — "
+                "kept as raw text, not a ref",
+                "warn",
+            )
+            for t in malformed
+        ])
 
     ts = datetime.now(timezone.utc).timestamp()
     fact = Fact(

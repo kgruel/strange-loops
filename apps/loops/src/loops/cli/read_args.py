@@ -148,6 +148,19 @@ def add_read_args(parser: argparse.ArgumentParser) -> None:
             "snapshot of folded state with cursor + declaration disclosure"
         ),
     )
+    # --status (cli-honesty-wave S1) — payload-field equality on the fold row
+    # (comma-OR), sugar over the `status=VALUE` bareword predicate with an
+    # honesty layer: a targeted kind whose rows carry no status field is
+    # reported explicitly instead of yielding a plausible-empty result
+    # (friction:read-status-filter-missing). No completer this slice — status
+    # vocabularies live in payload values, same deferral as --edge.
+    parser.add_argument(
+        "--status", default=None, metavar="VALUE",
+        help=(
+            "Filter fold rows by payload status equality (comma-OR, e.g. "
+            "open,in_progress); honest note when a kind has no status field"
+        ),
+    )
     parser.add_argument(
         "--match", "--grep", default=None, metavar="QUERY", dest="match",
         help="Content search — FTS5 for indexed kinds, substring for the rest",

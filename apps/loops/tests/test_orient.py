@@ -91,3 +91,61 @@ def test_orient_combined_vertex_uses_combined_seal_history(tmp_path):
     assert "last seal: beta seal" in text
     assert "open: 1 threads · 1 frictions · 0 adopted-practices" in text
     assert "warning: 1 seal by undeclared observer carol" in text
+
+
+def _reconcile_render(vertex_path: Path, *, days_after_newest: float) -> str:
+    from engine import vertex_facts
+    from loops.commands.orient import build_orient_summary, render_orient
+
+    last_ts = max(fact["ts"].timestamp() for fact in vertex_facts(vertex_path, 0.0, 4102444800.0))
+    return render_orient(build_orient_summary(vertex_path, now_ts=last_ts + days_after_newest * 86400.0))
+
+
+def test_orient_reconcile_fresh_has_no_overdue_marker(tmp_path):
+    vertex_path = _write_vertex(tmp_path)
+    assert main(["emit", str(vertex_path), "thread", "name=reconcile-2026-08-12", "status=resolved", "message=reconcile pass", "--observer", "alice"]) == 0
+
+    text = _reconcile_render(vertex_path, days_after_newest=3.0)
+
+    assert "last reconcile: 3d ago" in text
+    assert "RECONCILE OVERDUE" not in text
+    assert "no reconcile on record" not in text
+
+
+def test_orient_reconcile_stale_past_ten_days_renders_overdue(tmp_path):
+    vertex_path = _write_vertex(tmp_path)
+    assert main(["emit", str(vertex_path), "thread", "name=reconcile-2026-06-12", "status=resolved", "message=old reconcile", "--observer", "alice"]) == 0
+
+    text = _reconcile_render(vertex_path, days_after_newest=12.0)
+
+    assert "last reconcile: 12d ago — RECONCILE OVERDUE" in text
+
+
+def test_orient_reconcile_no_record_renders_honest_line(tmp_path):
+    vertex_path = _write_vertex(tmp_path)
+    assert main(["emit", str(vertex_path), "thread", "name=t1", "status=open", "message=unrelated", "--observer", "alice"]) == 0
+
+    text = _reconcile_render(vertex_path, days_after_newest=1.0)
+
+    assert "no reconcile on record" in text
+    assert "last reconcile:" not in text
+
+
+def test_orient_reconcile_matches_thread_kind_and_exact_prefix_only(tmp_path):
+    vertex_path = _write_vertex(tmp_path)
+    # Right prefix, wrong kind: a friction named reconcile-* must not count.
+    assert main(["emit", str(vertex_path), "friction", "name=reconcile-2099-01-01", "status=open", "message=not a receipt", "--observer", "alice"]) == 0
+    # Right kind, wrong prefix: hyphen is part of the anchored prefix.
+    assert main(["emit", str(vertex_path), "thread", "name=reconciliation-notes", "status=open", "message=not a receipt", "--observer", "alice"]) == 0
+    assert main(["emit", str(vertex_path), "thread", "name=pre-reconcile-plan", "status=open", "message=not a receipt", "--observer", "alice"]) == 0
+
+    text = _reconcile_render(vertex_path, days_after_newest=1.0)
+
+    assert "no reconcile on record" in text
+    assert "last reconcile:" not in text
+
+    # A genuine receipt among the decoys is found.
+    assert main(["emit", str(vertex_path), "thread", "name=reconcile-2026-08-12", "status=resolved", "message=real receipt", "--observer", "alice"]) == 0
+    text = _reconcile_render(vertex_path, days_after_newest=2.0)
+    assert "last reconcile: 2d ago" in text
+    assert "RECONCILE OVERDUE" not in text

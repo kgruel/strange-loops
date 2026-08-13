@@ -141,6 +141,21 @@ def detect_kind_descent(argv: list[str]) -> tuple[str, str, list[str]] | None:
     return None
 
 
+def _validate_kind(data: dict[str, Any], kind: str) -> None:
+    """Validate *kind* against the fetched vertex, deferring to read's
+    validator for the miss (exits 2 on an undeclared kind).
+
+    Shared by the section-flag narrow and the kind-stat descent (simplify
+    pass, item 4) — each caller keeps its own gate deciding WHEN to
+    validate; this only owns the how (path coercion + delegate).
+    """
+    from pathlib import Path
+
+    from loops.commands.resolve import _validate_kind_or_exit
+
+    _validate_kind_or_exit(kind, Path(data["vertex_path"]))
+
+
 def _run_ls(argv: list[str]) -> int:
     """Dispatch ``loops ls`` — root listing or per-vertex unified view.
 
@@ -191,15 +206,30 @@ def _run_ls(argv: list[str]) -> int:
         filters = flag_filters or None  # None = all sections visible
         narrows = flag_narrows
 
+    # Fetch up-front so error paths exit nonzero with the error on STDERR
+    # (friction:ls-vertex-not-found-exits-zero) instead of rendering an
+    # error line to stdout at exit 0 through the lens.
+    data = fetch_declarations(
+        target, filters=filters, narrows=narrows, extra_argv=rest,
+    )
+    code = _exit_on_fetch_error(data)
+    if code is not None:
+        return code
+
+    # A --kind narrow composed with other section flags bypasses the descent
+    # path (`_run_kind_stat`) — validate it here against the merged
+    # (declared ∪ live) kind set ls itself lists, deferring to read's
+    # validator for the miss (friction:ls-kind-flag-no-validation).
+    narrow_kind = narrows.get("kind")
+    if narrow_kind is not None and narrow_kind not in {
+        k["name"] for k in data["kinds"]
+    }:
+        _validate_kind(data, narrow_kind)
+
     # Render through painted's run_cli for zoom/width handling.
     from painted import run_cli
 
     from loops.lenses.declarations import declarations_view
-
-    def fetch():
-        return fetch_declarations(
-            target, filters=filters, narrows=narrows, extra_argv=rest,
-        )
 
     def renderer(data, fidelity, width):
         from loops.lens_resolver import zoom_from_fidelity
@@ -209,7 +239,7 @@ def _run_ls(argv: list[str]) -> int:
 
     return run_cli(
         rest,
-        fetch=fetch,
+        fetch=lambda: data,
         renderer=renderer,
         prog=f"loops ls {target}",
         description="List vertex declarations",
@@ -262,6 +292,7 @@ def fetch_declarations(
         missing = resolve_vertex(vertex_ref, loops_home())
         return {
             "error": f"vertex not found: {missing}",
+            "missing_vertex": vertex_ref,
             "vertex_name": vertex_ref,
             "filter": legacy_filter,
             "filters": filters,
@@ -393,6 +424,7 @@ def fetch_kind_stat(
     if vertex_path is None:
         return {
             "error": f"vertex not found: {resolve_vertex(target, loops_home())}",
+            "missing_vertex": target,
             "vertex_name": target, "kind": kind,
         }
     try:
@@ -404,15 +436,25 @@ def fetch_kind_stat(
         }
 
     fold_op = ""
+    declared = False
     for k in _summarize_kinds(vf):
         if k["name"] == kind:
             fold_op = k["fold_op"]
+            declared = True
             break
     key_field = _get_key_field(vertex_path, kind)
 
     # A collect-fold has no fold key, so --key has nothing to scope — reject it
     # rather than silently ignore it while the header claims "under <prefix>".
-    if key_prefix and key_field is None:
+    # DECLARED kinds only (finding:chw-sol-r1-s2-f1-key-before-kind): an
+    # undeclared kind also has no key_field, but classifying it as a
+    # collect-fold here would pre-empt the kind validator in _run_kind_stat —
+    # kind validation runs before key-applicability, so an undeclared kind
+    # falls through to the count==0 validator and gets the exact same exit-2
+    # message as `ls --kind <bogus>` without --key. Live undeclared kinds
+    # (tick.*, _sync.*) pass the validator on their row count and hit the
+    # key-applicability backstop in _run_kind_stat instead.
+    if key_prefix and key_field is None and declared:
         return {
             "error": (
                 f"kind '{kind}' is a collect-fold (no fold key) — "
@@ -435,7 +477,8 @@ def fetch_kind_stat(
     store = resolved_index(store, vertex_path)
 
     base = {
-        "vertex_name": vf.name, "kind": kind, "fold_op": fold_op,
+        "vertex_name": vf.name, "vertex_path": str(vertex_path),
+        "kind": kind, "fold_op": fold_op,
         "key_field": key_field, "key_prefix": key_prefix,
         "by": "key" if key_field else "observer",
     }
@@ -517,12 +560,36 @@ def _run_kind_stat(vertex: str, kind: str, rest: list[str]) -> int:
     kp.add_argument("--key", default=None)
     known, leftover = kp.parse_known_args(rest)
 
+    data = fetch_kind_stat(vertex, kind, key_prefix=known.key)
+    code = _exit_on_fetch_error(data)
+    if code is not None:
+        return code
+
+    # Kind validation, same validator as read (friction:ls-kind-flag-no-
+    # validation) — but gated on "the kind produced nothing live". ls lists
+    # live undeclared kinds (tick.*, _sync.*) as containment entries, so an
+    # unconditional declared-kinds check would refuse descent into rows ls
+    # itself just listed; read has no such live listing, hence the extra
+    # gate here. A declared-but-empty kind passes the validator silently
+    # (kind IS declared) and keeps its honest 0-entries render.
+    if data["count"] == 0 and not data["entries"]:
+        _validate_kind(data, kind)
+
+    # Key-applicability backstop, strictly AFTER kind validation (finding:
+    # chw-sol-r1-s2-f1-key-before-kind). fetch_kind_stat only raises the
+    # collect-fold refusal for DECLARED kinds; a live undeclared kind (tick.*)
+    # passes the validator on its row count and lands here — same message,
+    # same exit 1, so --key on a keyless kind never silently no-ops.
+    if known.key and data.get("key_field") is None:
+        _err(
+            f"kind '{kind}' is a collect-fold (no fold key) — "
+            "--key doesn't apply; it lists by observer"
+        )
+        return 1
+
     from painted import run_cli
 
     from loops.lenses.declarations import kind_stat_view
-
-    def fetch():
-        return fetch_kind_stat(vertex, kind, key_prefix=known.key)
 
     def renderer(data, fidelity, width):
         from loops.lens_resolver import zoom_from_fidelity
@@ -531,7 +598,7 @@ def _run_kind_stat(vertex: str, kind: str, rest: list[str]) -> int:
         )
 
     return run_cli(
-        leftover, fetch=fetch, renderer=renderer,
+        leftover, fetch=lambda: data, renderer=renderer,
         prog=f"loops ls {vertex} --kind {kind}",
         description=f"Stat view of kind '{kind}' in {vertex}",
     )
@@ -713,3 +780,29 @@ def _err(msg: str) -> None:
     from painted.palette import current_palette
 
     paint(Block.text(f"Error: {msg}", current_palette().error), file=sys.stderr)
+
+
+def _exit_on_fetch_error(data: dict[str, Any]) -> int | None:
+    """Turn a fetch-error dict into a stderr line + nonzero exit code.
+
+    ``None`` means no error — proceed to render. Every ls error path exits
+    nonzero with the error on stderr (friction:ls-vertex-not-found-exits-zero;
+    the S2 exit-discipline contract) — the lens keeps its inline error render
+    only for direct data-API callers. An unresolvable vertex name gets the
+    did-you-mean treatment (``_unknown_vertex_message``), exit 1 — the same
+    code read uses for an unresolvable vertex.
+    """
+    err = data.get("error")
+    if err is None:
+        return None
+    missing = data.get("missing_vertex")
+    if missing is not None:
+        from loops.commands.resolve import _unknown_vertex_message
+
+        # Plain multi-line print, exactly like read's _validate_kind_or_exit
+        # — painted's Block.text flattens newlines, which would collapse the
+        # three-line did-you-mean shape into one run-on line.
+        print(_unknown_vertex_message(missing), file=sys.stderr)
+    else:
+        _err(err)
+    return 1

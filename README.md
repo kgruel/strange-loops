@@ -10,11 +10,15 @@ the data shifts, the conclusion is wrong shape, and you migrate.
 
 This system stores the evidence and derives the conclusions.
 
+For the longer treatment — the three loops, the kinds of time, what is
+protected — see the [conceptual model](./CONCEPTUAL_MODEL.md).
+
 ## The truths
 
 **Time is fundamental.** The past happened. Facts are observations of what
-occurred, in the order they were received. You are always in the present,
-observing an ordered past.
+occurred. A fact carries when its observer says it happened; a store
+witnesses the order it received them in. You are always in the present,
+observing an ordered past — ordered twice: as claimed, and as witnessed.
 
 **The observer is first-class.** A fact exists because someone witnessed it
 and cared enough to record it. Who observed is part of what the observation
@@ -28,18 +32,21 @@ written plain — a kind, a time, a payload, an observer — and everything they
 they relate, what surfaces. Declare a new relationship today and facts from
 months ago participate in it. Writes never migrate. Meaning re-binds.
 
-**Witnessing travels.** Facts are signed by their observer and sealed in
-chained windows. The guarantees live in the data, not the deployment: a fact
-signed here verifies anywhere, so history can cross store boundaries — to a
-collaborator, an agent, another machine — without a central authority to
-vouch for it. The chain attests receipt, not chronology: it proves what an
+**Witnessing travels.** A fact can be signed by its observer, and
+boundaries seal the record into chained windows. The guarantees are honest
+about their edges: an era before a key existed stays legibly unsigned
+rather than retro-claimed, and a fact on the live edge — emitted, not yet
+sealed — is exactly as covered as it says it is: not yet. The guarantees
+live in the data, not the deployment: a fact signed here verifies
+anywhere, so history can cross store boundaries — to a collaborator, an
+agent, another machine — without a central authority to vouch for it. The chain attests receipt, not chronology: it proves what an
 observer had witnessed by each boundary, and proves the record was not
 rewritten after.
 
 **Everything is loops.** Observations flow in, accumulate into state,
-boundaries resolve, ticks flow out — and a tick is itself a fact, free to
-enter another loop. There are no endpoints. Depth is not designed; it
-emerges from resolutions feeding forward.
+boundaries resolve, ticks flow out — and a tick is itself fact-shaped,
+free to enter another loop. There are no endpoints. Depth is not
+designed; it emerges from resolutions feeding forward.
 
 **Scale is residence.** A store is a stance, not a place. Facts carry
 identity that is safe to merge from anywhere, so combining stores is an
@@ -67,15 +74,27 @@ accumulates, when accumulation resolves. It is the contract for attention,
 not a schema for storage — the facts beneath it never change shape to
 satisfy it.
 
-A **Fold** is a pure function from state and fact to new state. State is
-always derived, never stored: replay the facts through the folds and it
-reconstructs. Your morning's read joins a week of reads; the fold holds
-what the week is becoming.
+A **Fold** is a pure function from state and fact to new state. Live state
+is always derived, never stored: replay the facts through the folds and it
+reconstructs. What *is* stored is the conclusion a boundary published — a
+tick deliberately preserves the folded state of its moment, which is
+exactly what makes it evidence later. Your morning's read joins a week of
+reads; the fold holds what the week is becoming.
 
 When a boundary resolves, accumulated state seals into a **tick** — what a
 period became, signed, chaining the window of facts it witnessed. The week
 of reading closes: one tick, holding its residue, sealing its evidence.
-And a tick is a fact. It can flow into another vertex and accumulate there.
+And a tick is fact-shaped: an explicit bridge turns it into a fact, and it
+flows into another vertex to accumulate there. The types stay distinct so
+the record can always tell a resolved conclusion from a raw observation —
+the loop is closed on purpose, never by confusion.
+
+Why is Fold a shape and Tick not? Because the three shapes are what you
+*declare*; a tick is what execution *produces*. Fact, Spec, and Fold are
+the complete vocabulary of intent — something observed, something expected,
+how observation accumulates. A tick is the resolved output of running that
+vocabulary, and the bridge back to Fact is what closes the loop. Count the
+declarations, not the products.
 
 ## The pattern
 
@@ -138,9 +157,10 @@ practice rather than enforced at write. Domains that need writes that
 cannot be nonsense — a payments ledger, an inventory count — want their
 schema at write, and should keep it.
 
-It is human-scale by construction. One store is one observer's experienced
-reality, sized to a life. Anything larger is topology: more stores, more
-observers, signed facts crossing between them.
+It is human-scale by construction. One store is one situated stance — an
+experienced reality assembled for whoever reads it, sized to a life.
+Anything larger is topology: more stores, more observers, signed facts
+crossing between them.
 
 ## Lineage
 
@@ -156,9 +176,11 @@ verified because it never learns what its facts mean. The layers were
 separated in the code before the correspondence was noticed.
 
 **Uexküll's umwelt.** No organism inhabits "the world"; each lives in the
-world it can perceive. A store is an umwelt — one observer's experienced
-reality, not a fragment of some shared one. Combining stores does not
-approximate the world; it composes a richer umwelt for whoever is looking.
+world it can perceive. A store is an umwelt — a situated experienced
+reality, belonging to whoever it is assembled for, not a fragment of some
+shared one. Its authors can be many; its stance is one. Combining stores
+does not approximate the world; it composes a richer umwelt for whoever is
+looking.
 
 **Hofstadter's strange loop** is the exception — it was there from the
 start, in the name: a system whose levels fold back through themselves,

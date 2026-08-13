@@ -157,6 +157,13 @@ __all__ = [
     "ReadOnlyAggregate",
     "ConditionalEmitUnsupported",
     "ReceiveCommittedError",
+    # Target probe + read preflight (libs-handoff S7)
+    "TargetInfo",
+    "probe_target",
+    "PreflightMode",
+    "PreflightResult",
+    "PREFLIGHT_STATUSES",
+    "read_preflight",
 ]
 
 _LAZY_IMPORTS: dict[str, tuple[str, str]] = {
@@ -253,6 +260,13 @@ _LAZY_IMPORTS: dict[str, tuple[str, str]] = {
         "resolve_declaration_documents",
     ),
     "declaration_generation": ("engine.declaration", "declaration_generation"),
+    # Target probe + read preflight (libs-handoff S7)
+    "TargetInfo": ("engine.probe", "TargetInfo"),
+    "probe_target": ("engine.probe", "probe_target"),
+    "PreflightMode": ("engine.preflight", "PreflightMode"),
+    "PreflightResult": ("engine.preflight", "PreflightResult"),
+    "PREFLIGHT_STATUSES": ("engine.preflight", "PREFLIGHT_STATUSES"),
+    "read_preflight": ("engine.preflight", "read_preflight"),
     "fact_signatures": ("engine.store_reader", "fact_signatures"),
     # Witness positions (read-path temporal cursor)
     "WitnessPosition": ("engine.witness", "WitnessPosition"),

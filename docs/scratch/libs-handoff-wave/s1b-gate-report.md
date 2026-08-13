@@ -8,7 +8,22 @@ bc7f91c5 — confirmed). Verified in an isolated worktree via pointer branch
 `gate_oracle.py` (scratchpad; 44 checks, 0 failures) — written from the
 proposal, not from the slice's tests.
 
-## Overall verdict: **FAIL** — one narrow blocker (golden fixtures never committed); everything else PASSES
+## Overall verdict: **PASS** (re-gate after b451761f)
+
+Original verdict was FAIL on one blocker: golden fixtures gitignored, never
+committed. Fixed by the impl agent in `b451761f` on the slice branch —
+re-gated below. Original findings preserved for the record.
+
+**Re-gate verification (this gate, after rebasing onto b451761f):** deleted
+all locally generated fixture files first, so the working tree holds only
+git's bytes; `git ls-files` shows all 9 `.jsonl` + 2 generators tracked; the
+gitignore exception is scoped (`!libs/engine/tests/fixtures/jsonl/*.jsonl`
+directly under the root `*.jsonl` — store-log ignore not weakened); full
+engine suite against the committed bytes: **1324 passed, 0 failed**. The
+byte contract for the Go conformance oracle now exists in git. Blocker
+cleared; every other item already passed independently (below).
+
+## Original verdict (pre-fix, for the record): FAIL — golden fixtures never committed; everything else PASSES
 
 ## Verdict table
 

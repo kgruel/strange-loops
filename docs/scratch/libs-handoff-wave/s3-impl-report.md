@@ -8,6 +8,9 @@ Worktree: `/Users/kaygee/Code/loops/.claude/worktrees/agent-a44e80294771901a1`
 1. `9a78e2d6` feat(engine): grant_for_observer + receive_as (observer-grant resolution, LIBS_CHANGES P1)
 2. `ac54ff94` feat(engine): strict enforcement at engine receive — typed UndeclaredKind before storage
 3. `e3ede343` test(engine): admission contract tests (`libs/engine/tests/test_admission.py`, 21 tests)
+4. `c4e42854` docs: this report; `96630217` test: aggregate case bypass-side assertion (raw receive on an aggregate program never consults admission)
+
+Note: `VertexHandle._recompile` reassigns `self._ast`, so `receive_as` grant resolution stays fresh across ontology epochs (verified).
 
 ## A — observer-grant resolution
 

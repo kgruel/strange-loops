@@ -947,6 +947,32 @@ class TestScannerWhitelistAddendum:
         with pytest.raises(ValueError, match="cannot prove safe"):
             remove_vertex_kind(doc, "decision")
 
+    def test_vt_inside_plain_string_refuses(self):
+        """SOL-R7-01: KDL counts VT (U+000B) as a newline; a VT inside a
+        plain string must refuse like any other in-string newline."""
+        doc = (
+            'name "be\x0bfore"\n'
+            "loops {\n"
+            '  decision { fold { items "by" "topic" } }\n'
+            "}\n"
+        )
+        with pytest.raises(ValueError, match="cannot prove safe"):
+            remove_vertex_kind(doc, "decision")
+
+    def test_vt_inside_line_comment_refuses(self):
+        """SOL-R7-01: VT is a KDL newline, so it would END a // comment for
+        the parser while the scanner's line_comment state would swallow the
+        rest of the physical line — refuse it."""
+        doc = (
+            "name \"t\"\n"
+            "// comment\x0b decision-lookalike\n"
+            "loops {\n"
+            '  decision { fold { items "by" "topic" } }\n'
+            "}\n"
+        )
+        with pytest.raises(ValueError, match="cannot prove safe"):
+            remove_vertex_kind(doc, "decision")
+
     def test_non_ascii_inside_string_stays_allowed(self):
         doc = (
             'name "té“st"\n'

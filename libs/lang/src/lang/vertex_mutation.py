@@ -305,7 +305,7 @@ def _parse_vertex_or_raise(text: str, context: str):
 # desyncs the line-based splice/guard accounting (splitlines() splits on
 # them; the scanners assume LF), so they refuse outright — including inside
 # strings and comments.
-_NON_LF_NEWLINES = "\r\f\u0085\u2028\u2029"
+_NON_LF_NEWLINES = "\r\x0b\f\u0085\u2028\u2029"  # SOL-R7-01: KDL counts VT (U+000B) as a newline
 
 
 def _refuse(context: str, what: str) -> ValueError:

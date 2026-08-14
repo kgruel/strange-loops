@@ -1,0 +1,61 @@
+{
+  "name": "fold-key-string-projection-distinct-types",
+  "description": "Pins decision:design/fold-key-string-projection: keys 0, 0.0, and False project to three distinct string keys '0', '0.0', and 'False'.",
+  "input": {
+    "spec": {
+      "name": "fold_key_distinct",
+      "state_fields": [
+        {
+          "name": "items",
+          "kind": "dict"
+        }
+      ],
+      "folds": [
+        {
+          "op": "upsert",
+          "target": "items",
+          "key": "id"
+        }
+      ]
+    },
+    "payloads": [
+      {
+        "_ts": 100.0,
+        "id": 0,
+        "tag": "int-zero"
+      },
+      {
+        "_ts": 101.0,
+        "id": 0.0,
+        "tag": "float-zero"
+      },
+      {
+        "_ts": 102.0,
+        "id": false,
+        "tag": "bool-false"
+      }
+    ]
+  },
+  "expected": {
+    "items": {
+      "0": {
+        "_ts": 100.0,
+        "id": 0,
+        "tag": "int-zero",
+        "_n": 1
+      },
+      "0.0": {
+        "_ts": 101.0,
+        "id": 0.0,
+        "tag": "float-zero",
+        "_n": 1
+      },
+      "False": {
+        "_ts": 102.0,
+        "id": false,
+        "tag": "bool-false",
+        "_n": 1
+      }
+    }
+  }
+}

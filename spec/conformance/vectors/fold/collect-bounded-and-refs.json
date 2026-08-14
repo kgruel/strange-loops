@@ -1,0 +1,54 @@
+{
+  "name": "collect-bounded-and-refs",
+  "description": "Pins Collect fold bounded history: keeps up to max items dropping oldest, and parses ref into sorted _refs.",
+  "input": {
+    "spec": {
+      "name": "collect_spec",
+      "state_fields": [
+        {
+          "name": "history",
+          "kind": "list"
+        }
+      ],
+      "folds": [
+        {
+          "op": "collect",
+          "target": "history",
+          "max": 2
+        }
+      ]
+    },
+    "payloads": [
+      {
+        "_ts": 1.0,
+        "msg": "first",
+        "ref": "r1"
+      },
+      {
+        "_ts": 2.0,
+        "msg": "second"
+      },
+      {
+        "_ts": 3.0,
+        "msg": "third",
+        "ref": "r2, r1"
+      }
+    ]
+  },
+  "expected": {
+    "history": [
+      {
+        "_ts": 2.0,
+        "msg": "second"
+      },
+      {
+        "_ts": 3.0,
+        "msg": "third",
+        "_refs": [
+          "r1",
+          "r2"
+        ]
+      }
+    ]
+  }
+}

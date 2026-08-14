@@ -1,0 +1,99 @@
+{
+  "name": "composed-inventory-spec",
+  "description": "Pins realistic multi-fold composition: combining Count, Latest, Sum, and Upsert over an inventory event sequence.",
+  "input": {
+    "spec": {
+      "name": "inventory_tracker",
+      "state_fields": [
+        {
+          "name": "transactions",
+          "kind": "int"
+        },
+        {
+          "name": "last_ts",
+          "kind": "float"
+        },
+        {
+          "name": "total_qty",
+          "kind": "int"
+        },
+        {
+          "name": "items",
+          "kind": "dict"
+        }
+      ],
+      "folds": [
+        {
+          "op": "count",
+          "target": "transactions"
+        },
+        {
+          "op": "latest",
+          "target": "last_ts"
+        },
+        {
+          "op": "sum",
+          "target": "total_qty",
+          "field": "qty"
+        },
+        {
+          "op": "upsert",
+          "target": "items",
+          "key": "sku"
+        }
+      ]
+    },
+    "payloads": [
+      {
+        "_ts": 1000.0,
+        "sku": "SKU-A",
+        "name": "Widget",
+        "qty": 5,
+        "ref": "po-1"
+      },
+      {
+        "_ts": 1005.0,
+        "sku": "SKU-B",
+        "name": "Gadget",
+        "qty": 10,
+        "ref": "po-2"
+      },
+      {
+        "_ts": 1010.0,
+        "sku": "SKU-A",
+        "price": 19.99,
+        "qty": 3,
+        "ref": "po-3"
+      }
+    ]
+  },
+  "expected": {
+    "transactions": 3,
+    "last_ts": 1010.0,
+    "total_qty": 18,
+    "items": {
+      "SKU-A": {
+        "_ts": 1010.0,
+        "sku": "SKU-A",
+        "name": "Widget",
+        "qty": 3,
+        "_n": 2,
+        "_refs": [
+          "po-1",
+          "po-3"
+        ],
+        "price": 19.99
+      },
+      "SKU-B": {
+        "_ts": 1005.0,
+        "sku": "SKU-B",
+        "name": "Gadget",
+        "qty": 10,
+        "_n": 1,
+        "_refs": [
+          "po-2"
+        ]
+      }
+    }
+  }
+}

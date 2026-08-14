@@ -1,0 +1,52 @@
+{
+  "name": "upsert-last-write-wins-and-merge",
+  "description": "Pins decision:design/fold-merge-default: successive upserts for the same key overlay new fields, preserve unmentioned prior fields, accumulate _n, and merge refs.",
+  "input": {
+    "spec": {
+      "name": "upsert_merge_spec",
+      "state_fields": [
+        {
+          "name": "users",
+          "kind": "dict"
+        }
+      ],
+      "folds": [
+        {
+          "op": "upsert",
+          "target": "users",
+          "key": "id"
+        }
+      ]
+    },
+    "payloads": [
+      {
+        "_ts": 10.0,
+        "id": "u1",
+        "name": "Alice",
+        "role": "engineer",
+        "ref": "doc-1"
+      },
+      {
+        "_ts": 11.0,
+        "id": "u1",
+        "role": "lead",
+        "ref": "doc-2, doc-1"
+      }
+    ]
+  },
+  "expected": {
+    "users": {
+      "u1": {
+        "_ts": 11.0,
+        "id": "u1",
+        "name": "Alice",
+        "role": "lead",
+        "_n": 2,
+        "_refs": [
+          "doc-1",
+          "doc-2"
+        ]
+      }
+    }
+  }
+}

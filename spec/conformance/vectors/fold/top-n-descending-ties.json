@@ -1,0 +1,50 @@
+{
+  "name": "top-n-descending-ties",
+  "description": "Pins TopN fold descending sort and tie-breaking: retains top n items by score, preserving insertion order on ties.",
+  "input": {
+    "spec": {
+      "name": "top_n_spec",
+      "state_fields": [
+        {
+          "name": "leaders",
+          "kind": "dict"
+        }
+      ],
+      "folds": [
+        {
+          "op": "top_n",
+          "target": "leaders",
+          "key": "name",
+          "by": "score",
+          "n": 2
+        }
+      ]
+    },
+    "payloads": [
+      {
+        "name": "alice",
+        "score": 100
+      },
+      {
+        "name": "bob",
+        "score": 100
+      },
+      {
+        "name": "charlie",
+        "score": 100
+      }
+    ]
+  },
+  "expected": {
+    "leaders": {
+      "alice": {
+        "name": "alice",
+        "score": 100
+      },
+      "bob": {
+        "name": "bob",
+        "score": 100
+      }
+    }
+  }
+}

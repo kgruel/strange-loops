@@ -1,0 +1,38 @@
+{
+  "name": "latest-timestamp-tracking",
+  "description": "Pins Latest fold: captures _ts timestamp deterministically without wall clock and rejects payloads lacking _ts.",
+  "input": {
+    "spec": {
+      "name": "latest_spec",
+      "state_fields": [
+        {
+          "name": "last_seen",
+          "kind": "float"
+        }
+      ],
+      "folds": [
+        {
+          "op": "latest",
+          "target": "last_seen"
+        }
+      ]
+    },
+    "payloads": [
+      {
+        "_ts": 100.0,
+        "event": "start"
+      },
+      {
+        "event": "no_ts"
+      },
+      {
+        "_ts": 250.5,
+        "event": "update"
+      }
+    ]
+  },
+  "expected": {
+    "last_seen": 250.5,
+    "last_seen_rejected": 1
+  }
+}

@@ -1,0 +1,44 @@
+{
+  "name": "upsert-null-key-skipped",
+  "description": "Pins null fold key semantics: an Upsert payload with explicit null key value is ignored without mutating state.",
+  "input": {
+    "spec": {
+      "name": "null_key_spec",
+      "state_fields": [
+        {
+          "name": "entries",
+          "kind": "dict"
+        }
+      ],
+      "folds": [
+        {
+          "op": "upsert",
+          "target": "entries",
+          "key": "id"
+        }
+      ]
+    },
+    "payloads": [
+      {
+        "_ts": 1.0,
+        "id": null,
+        "val": "ignored"
+      },
+      {
+        "_ts": 2.0,
+        "id": "valid",
+        "val": "kept"
+      }
+    ]
+  },
+  "expected": {
+    "entries": {
+      "valid": {
+        "_ts": 2.0,
+        "id": "valid",
+        "val": "kept",
+        "_n": 1
+      }
+    }
+  }
+}

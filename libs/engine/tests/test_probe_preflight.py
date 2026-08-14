@@ -367,6 +367,36 @@ def test_recover_then_open_still_refuses_out_of_band_rows(tmp_path):
     assert r.report is not None and not r.report.ok
 
 
+@pytest.mark.parametrize(
+    "suffix",
+    [
+        pytest.param(b"this is not json at all\n", id="corrupt-suffix"),
+        pytest.param(b'\xff\xfe not utf-8 \x80\n', id="invalid-utf8"),
+        pytest.param(b'{"t":"unknown"}\n', id="unknown-discriminator"),
+    ],
+)
+def test_recover_then_open_types_canonical_corruption_as_unreadable(
+    tmp_path, suffix
+):
+    """SOL-R1-03: corruption recovery cannot fix must come back as a typed
+    ``unreadable`` PreflightResult with the pre-recovery audit attached —
+    never a raw JsonlCodecError/UnicodeDecodeError escaping the mode.
+
+    The corrupt suffix is newline-terminated on purpose: a torn tail
+    (no trailing newline) is legitimately repaired by open-time recovery,
+    which is not the behavior under test.
+    """
+    log, _db = seeded_jsonl(tmp_path)
+    with log.open("ab") as fh:
+        fh.write(suffix)
+    r = read_preflight(log, PreflightMode.RECOVER_THEN_OPEN)
+    assert r.status == "unreadable"
+    assert (r.opened, r.recovered, r.store, r.post_report) == (
+        False, False, None, None,
+    )
+    assert r.report is not None  # pre-recovery evidence kept
+
+
 def test_recover_then_open_on_a_clean_store_reports_no_recovery(tmp_path):
     log, _ = seeded_jsonl(tmp_path)
     r = read_preflight(log, PreflightMode.RECOVER_THEN_OPEN)

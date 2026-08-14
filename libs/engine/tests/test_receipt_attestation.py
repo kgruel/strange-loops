@@ -192,3 +192,116 @@ class TestTickAttestation:
         receipt = v.receive_receipt(Fact.of("note", "alice", n=1))
         assert receipt.tick is None
         assert receipt.tick_attestation is None
+
+
+# ---------------------------------------------------------------------------
+# SOL-R4-02 / SOL-R4-03 — committed-row EXISTENCE honesty
+# ---------------------------------------------------------------------------
+
+
+class TestCommittedRowExistence:
+    """SOL-R4-02: read-back must distinguish row-with-NULL-signature from
+    ROW ABSENT. A store that eats the row (AFTER INSERT delete trigger)
+    must roll back and raise a typed refusal — never mint a stored=True
+    receipt for no committed row. Facts AND ticks, sqlite AND jsonl."""
+
+    @staticmethod
+    def _delete_trigger(store, table: str):
+        store._conn.execute(
+            f"CREATE TRIGGER eat_{table} AFTER INSERT ON {table} "
+            f"BEGIN DELETE FROM {table} WHERE id = NEW.id; END"
+        )
+
+    def test_fact_delete_trigger_refuses_typed(self, tmp_path, canonical):
+        from engine.sqlite_store import CommittedRowMissing
+
+        store = _store(tmp_path, canonical)
+        self._delete_trigger(store, "facts")
+        with pytest.raises(CommittedRowMissing):
+            store.append_attested(Fact.of("note", "kyle", n=1))
+        count = store._conn.execute("SELECT COUNT(*) FROM facts").fetchone()[0]
+        assert count == 0
+        if canonical == "jsonl":
+            # Refusal before any log byte — the canonical log is untouched.
+            assert not (tmp_path / "v.jsonl").exists() or (
+                tmp_path / "v.jsonl"
+            ).stat().st_size == 0
+        store.close()
+
+    def test_tick_delete_trigger_refuses_typed(self, tmp_path, canonical):
+        from datetime import datetime, timezone
+
+        from engine import Tick
+        from engine.sqlite_store import CommittedRowMissing
+
+        store = _store(tmp_path, canonical)
+        self._delete_trigger(store, "ticks")
+        tick = Tick(
+            name="t", ts=datetime.now(timezone.utc), payload={}, origin="v"
+        )
+        with pytest.raises(CommittedRowMissing):
+            store.append_tick(tick)
+        count = store._conn.execute("SELECT COUNT(*) FROM ticks").fetchone()[0]
+        assert count == 0
+        if canonical == "jsonl":
+            assert not (tmp_path / "v.jsonl").exists() or (
+                tmp_path / "v.jsonl"
+            ).stat().st_size == 0
+        store.close()
+
+    def test_store_still_usable_after_refusal(self, tmp_path, canonical):
+        from engine.sqlite_store import CommittedRowMissing
+
+        store = _store(tmp_path, canonical)
+        self._delete_trigger(store, "facts")
+        with pytest.raises(CommittedRowMissing):
+            store.append_attested(Fact.of("note", "kyle", n=1))
+        store._conn.execute("DROP TRIGGER eat_facts")
+        fact_id, sig = store.append_attested(Fact.of("note", "kyle", n=2))
+        assert store.fact_signature(fact_id) is None is sig
+        store.close()
+
+
+class TestJsonlLogDerivesFromCommittedIndex:
+    """SOL-R4-03: the JSONL log must serialize the COMMITTED index row —
+    a trigger-mutated row may not diverge from what enters the log."""
+
+    def test_signature_nulling_trigger_log_matches_index(self, tmp_path):
+        import json as _json
+
+        from engine.canonical_audit import audit_agreement
+
+        store = _store(tmp_path, "jsonl")
+        store._ensure_fact_signature_column()
+        store._conn.execute(
+            "CREATE TRIGGER strip_sig AFTER INSERT ON facts "
+            "BEGIN UPDATE facts SET signature = NULL WHERE id = NEW.id; END"
+        )
+        fact_id, committed = store.append_attested(
+            Fact.of("note", "kyle", n=1), signature_override="sig:forced"
+        )
+        # Receipt reports the committed row (already true since R3)...
+        assert committed is None
+        assert store.fact_signature(fact_id) is None
+        # ...and the canonical log now derive-matches the index: the line
+        # carries no signature either (codec: absent, not null).
+        last = (tmp_path / "v.jsonl").read_text().splitlines()[-1]
+        assert _json.loads(last).get("signature") is None
+        store.close()
+        report = audit_agreement(tmp_path / "v.jsonl")
+        assert report.ok, report
+
+    def test_untriggered_append_still_logs_signature(self, tmp_path):
+        import json as _json
+
+        from engine.canonical_audit import audit_agreement
+
+        store = _store(
+            tmp_path, "jsonl", fact_signer=_fake_signer_for({"kyle"})
+        )
+        fact_id, committed = store.append_attested(Fact.of("note", "kyle", n=1))
+        assert committed is not None
+        last = (tmp_path / "v.jsonl").read_text().splitlines()[-1]
+        assert _json.loads(last)["signature"] == committed
+        store.close()
+        assert audit_agreement(tmp_path / "v.jsonl").ok

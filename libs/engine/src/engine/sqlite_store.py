@@ -38,6 +38,17 @@ from ulid import ULID
 _raw_decode = json.JSONDecoder().raw_decode
 
 
+class CommittedRowMissing(RuntimeError):
+    """The row just INSERTed is absent at pre-commit read-back.
+
+    Something inside the same transaction (an AFTER INSERT trigger, a
+    schema-level rewrite) deleted the row between the staged INSERT and the
+    read-back. The write rolls back and raises — a store that eats rows
+    must never hand out a stored=True receipt (SOL-R4-02). On a
+    JSONL-canonical store the refusal fires before any log byte.
+    """
+
+
 def gen_id() -> str:
     """Generate a unique ID for store records.
 
@@ -674,34 +685,64 @@ class SqliteStore(Generic[T]):
         index row is observable.
         """
 
-    def _committed_signature(self, table: str, row_id: str) -> str | None:
-        """The signature column as it stands post-INSERT, pre-commit.
+    def _committed_row_state(self, table: str, row_id: str) -> tuple[bool, str | None]:
+        """(exists, signature) of the row as it stands post-INSERT, pre-commit.
 
-        The one read-back per write (SOL-R3-02): executed after the INSERT
-        — so any AFTER triggers have already fired — and before the commit,
-        it reads exactly what will be committed. ``table`` is an internal
-        constant (``facts``/``ticks``), never caller input.
+        Existence and signature are separate answers (SOL-R4-02): a NULL
+        signature on a committed row and a row an AFTER trigger deleted are
+        different facts, and conflating them once minted a stored=True
+        receipt for no row. ``table`` is an internal constant
+        (``facts``/``ticks``), never caller input.
         """
         r = self._conn.execute(
             f"SELECT signature FROM {table} WHERE id = ?", (row_id,)  # noqa: S608
         ).fetchone()
-        return r[0] if r is not None else None
+        return (r is not None, r[0] if r is not None else None)
+
+    def _committed_signature(self, table: str, row_id: str) -> str | None:
+        """The COMMITTED signature; raises if the row itself is gone.
+
+        The one read-back per write (SOL-R3-02): executed after the INSERT
+        — so any AFTER triggers have already fired — and before the commit,
+        it reads exactly what will be committed. An ABSENT row (something
+        deleted it out from under the staged INSERT) is a typed refusal
+        (SOL-R4-02): callers roll back — a store that eats rows must not
+        get a stored=True receipt.
+        """
+        exists, signature = self._committed_row_state(table, row_id)
+        if not exists:
+            raise CommittedRowMissing(
+                f"the inserted {table} row {row_id} is ABSENT at pre-commit "
+                "read-back (a schema-level rewrite, e.g. an AFTER INSERT "
+                "trigger, deleted it) — rolling back; refusing to mint a "
+                "stored receipt for a row the store did not keep"
+            )
+        return signature
 
     def _write_fact_row(self, row: tuple) -> str | None:
         """Persist one assembled fact row (id, kind, ts, observer, origin,
         payload, signature). Returns the COMMITTED signature (read back
-        inside the transaction, after triggers, before commit)."""
-        self._conn.execute(FACT_INSERT_SQL, row)
-        committed = self._committed_signature("facts", row[0])
-        self._conn.commit()
+        inside the transaction, after triggers, before commit); raises
+        CommittedRowMissing — after rollback — if the row is gone."""
+        try:
+            self._conn.execute(FACT_INSERT_SQL, row)
+            committed = self._committed_signature("facts", row[0])
+            self._conn.commit()
+        except BaseException:
+            self._conn.rollback()
+            raise
         return committed
 
     def _write_tick_row(self, row: tuple) -> str | None:
         """Persist one assembled tick row (_TICK_ROW_SQL order + signature).
-        Returns the COMMITTED signature (same read-back as facts)."""
-        self._conn.execute(TICK_INSERT_SQL, row)
-        committed = self._committed_signature("ticks", row[0])
-        self._conn.commit()
+        Same read-back + rollback-on-absence contract as facts."""
+        try:
+            self._conn.execute(TICK_INSERT_SQL, row)
+            committed = self._committed_signature("ticks", row[0])
+            self._conn.commit()
+        except BaseException:
+            self._conn.rollback()
+            raise
         return committed
 
     def current_chain_head(self) -> str | None:

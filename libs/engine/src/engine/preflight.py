@@ -108,8 +108,10 @@ class PreflightResult:
     only for a sqlite-canonical target, where agreement is vacuous."""
 
     post_report: AgreementReport | None
-    """RECOVER_THEN_OPEN only: the audit re-run after recovery, so the
-    caller can see what recovery left behind. ``None`` in other modes."""
+    """RECOVER_THEN_OPEN only, and only when recovery actually ran: the
+    audit re-run after recovery, so the caller can see what recovery left
+    behind. ``None`` in other modes and on a clean pass (the pre-open
+    ``report`` already IS the current picture there)."""
 
     agreed: bool
     """Did the pre-open audit pass (vacuously True for sqlite-canonical)?"""
@@ -178,22 +180,51 @@ def read_preflight(
 # --- mode bodies ------------------------------------------------------------
 
 
-def _audit_only_result(
-    canonical: Path, index: Path, report: AgreementReport
+def _result(
+    mode: PreflightMode,
+    canonical: Path,
+    index: Path,
+    status: str,
+    *,
+    report: AgreementReport | None = None,
+    post_report: AgreementReport | None = None,
+    agreed: bool | None = None,
+    opened: bool = False,
+    recovered: bool = False,
+    store: Any | None = None,
+    reason: str = "",
 ) -> PreflightResult:
-    status, reason = _verdict(canonical, report)
+    """The one PreflightResult constructor — defaults carry the convention.
+
+    ``agreed`` is the PRE-OPEN audit's own verdict: ``report.ok`` whenever an
+    agreement report exists, and never anything else. Only the sqlite-canonical
+    branch (no report — agreement is vacuous) sets it explicitly. ``post_report``
+    is the post-recovery picture and rides only results where recovery ran.
+    """
+    if agreed is None:
+        agreed = report.ok if report is not None else False
     return PreflightResult(
-        mode=PreflightMode.AUDIT_ONLY,
+        mode=mode,
         canonical_path=canonical,
         index_path=index,
         status=status,
         report=report,
-        post_report=None,
-        agreed=report.ok,
-        opened=False,
-        recovered=False,
-        store=None,
+        post_report=post_report,
+        agreed=agreed,
+        opened=opened,
+        recovered=recovered,
+        store=store,
         reason=reason,
+    )
+
+
+def _audit_only_result(
+    canonical: Path, index: Path, report: AgreementReport
+) -> PreflightResult:
+    status, reason = _verdict(canonical, report)
+    return _result(
+        PreflightMode.AUDIT_ONLY, canonical, index, status,
+        report=report, reason=reason,
     )
 
 
@@ -205,34 +236,19 @@ def _audit_then_open(
 ) -> PreflightResult:
     if not report.ok:
         status, why = _verdict(canonical, report)
-        return PreflightResult(
-            mode=PreflightMode.AUDIT_THEN_OPEN,
-            canonical_path=canonical,
-            index_path=index,
-            status="refused" if status not in ("unreadable",) else status,
+        return _result(
+            PreflightMode.AUDIT_THEN_OPEN, canonical, index,
+            status if status == "unreadable" else "refused",
             report=report,
-            post_report=None,
-            agreed=False,
-            opened=False,
-            recovered=False,
-            store=None,
             reason=(
                 f"refusing to open: {why} — audit-then-open never repairs; "
                 "recover-then-open is the sanctioned repair-and-open path"
             ),
         )
     store = _open(canonical, open_kwargs)
-    return PreflightResult(
-        mode=PreflightMode.AUDIT_THEN_OPEN,
-        canonical_path=canonical,
-        index_path=index,
-        status="ok",
-        report=report,
-        post_report=None,
-        agreed=True,
-        opened=True,
-        recovered=False,
-        store=store,
+    return _result(
+        PreflightMode.AUDIT_THEN_OPEN, canonical, index, "ok",
+        report=report, opened=True, store=store,
         reason="agreement audit passed; store opened",
     )
 
@@ -249,18 +265,10 @@ def _recover_then_open(
     from .jsonl_codec import JsonlCodecError
     from .jsonl_store import JsonlCanonicalUnsupported
 
+    mode = PreflightMode.RECOVER_THEN_OPEN
     if not canonical.exists():
-        return PreflightResult(
-            mode=PreflightMode.RECOVER_THEN_OPEN,
-            canonical_path=canonical,
-            index_path=index,
-            status="unreadable",
-            report=report,
-            post_report=None,
-            agreed=False,
-            opened=False,
-            recovered=False,
-            store=None,
+        return _result(
+            mode, canonical, index, "unreadable", report=report,
             reason=(
                 f"no canonical log at {canonical} — recovery rebuilds an "
                 "index FROM the log; it never invents a log"
@@ -273,17 +281,8 @@ def _recover_then_open(
         # sqlite3.Error means that rebuild itself failed.
         store = _open(canonical, open_kwargs)
     except JsonlCanonicalUnsupported as exc:
-        return PreflightResult(
-            mode=PreflightMode.RECOVER_THEN_OPEN,
-            canonical_path=canonical,
-            index_path=index,
-            status="refused",
-            report=report,
-            post_report=None,
-            agreed=report.ok,
-            opened=False,
-            recovered=False,
-            store=None,
+        return _result(
+            mode, canonical, index, "refused", report=report,
             reason=f"recovery refused: {exc}",
         )
     except (JsonlCodecError, UnicodeDecodeError) as exc:
@@ -291,34 +290,16 @@ def _recover_then_open(
         # not decode (bad JSON, unknown discriminator, invalid UTF-8).
         # Typed as ``unreadable`` — the canonical artifact cannot be read
         # — with the pre-recovery audit evidence attached.
-        return PreflightResult(
-            mode=PreflightMode.RECOVER_THEN_OPEN,
-            canonical_path=canonical,
-            index_path=index,
-            status="unreadable",
-            report=report,
-            post_report=None,
-            agreed=report.ok,
-            opened=False,
-            recovered=False,
-            store=None,
+        return _result(
+            mode, canonical, index, "unreadable", report=report,
             reason=(
                 f"canonical log does not decode — corruption recovery "
                 f"cannot repair: {exc}"
             ),
         )
     except sqlite3.Error as exc:
-        return PreflightResult(
-            mode=PreflightMode.RECOVER_THEN_OPEN,
-            canonical_path=canonical,
-            index_path=index,
-            status="unreadable",
-            report=report,
-            post_report=None,
-            agreed=report.ok,
-            opened=False,
-            recovered=False,
-            store=None,
+        return _result(
+            mode, canonical, index, "unreadable", report=report,
             reason=(
                 f"derived index unusable and rebuilding it from the log "
                 f"also failed: {exc}"
@@ -327,32 +308,16 @@ def _recover_then_open(
     except OSError as exc:
         # Environmental open failure (permissions, IO). The artifact may
         # be fine; this process cannot read it — still ``unreadable``.
-        return PreflightResult(
-            mode=PreflightMode.RECOVER_THEN_OPEN,
-            canonical_path=canonical,
-            index_path=index,
-            status="unreadable",
-            report=report,
-            post_report=None,
-            agreed=report.ok,
-            opened=False,
-            recovered=False,
-            store=None,
+        return _result(
+            mode, canonical, index, "unreadable", report=report,
             reason=f"cannot open canonical store: {exc}",
         )
-    post = audit_agreement(canonical)
     recovered = not report.ok
-    return PreflightResult(
-        mode=PreflightMode.RECOVER_THEN_OPEN,
-        canonical_path=canonical,
-        index_path=index,
-        status="recovered" if recovered else "ok",
+    return _result(
+        mode, canonical, index, "recovered" if recovered else "ok",
         report=report,
-        post_report=post,
-        agreed=report.ok,
-        opened=True,
-        recovered=recovered,
-        store=store,
+        post_report=audit_agreement(canonical) if recovered else None,
+        opened=True, recovered=recovered, store=store,
         reason=(
             "store recovered and opened; pre-recovery evidence in report, "
             "post-recovery state in post_report"
@@ -375,17 +340,8 @@ def _sqlite_preflight(
     is a different verb.
     """
     if not canonical.exists():
-        return PreflightResult(
-            mode=mode,
-            canonical_path=canonical,
-            index_path=canonical,
-            status="unreadable",
-            report=None,
-            post_report=None,
-            agreed=False,
-            opened=False,
-            recovered=False,
-            store=None,
+        return _result(
+            mode, canonical, canonical, "unreadable",
             reason=(
                 f"no sqlite-canonical store at {canonical} — a read "
                 "preflight never creates a store"
@@ -396,32 +352,13 @@ def _sqlite_preflight(
         "vacuous (chain verification is verify_chain's scope)"
     )
     if mode is PreflightMode.AUDIT_ONLY:
-        return PreflightResult(
-            mode=mode,
-            canonical_path=canonical,
-            index_path=canonical,
-            status="ok",
-            report=None,
-            post_report=None,
-            agreed=True,
-            opened=False,
-            recovered=False,
-            store=None,
-            reason=reason,
+        return _result(
+            mode, canonical, canonical, "ok", agreed=True, reason=reason,
         )
     store = _open(canonical, open_kwargs)
-    return PreflightResult(
-        mode=mode,
-        canonical_path=canonical,
-        index_path=canonical,
-        status="ok",
-        report=None,
-        post_report=None,
-        agreed=True,
-        opened=True,
-        recovered=False,
-        store=store,
-        reason=reason + "; store opened",
+    return _result(
+        mode, canonical, canonical, "ok", agreed=True, opened=True,
+        store=store, reason=reason + "; store opened",
     )
 
 

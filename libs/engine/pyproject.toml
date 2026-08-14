@@ -19,6 +19,7 @@ lang = { workspace = true }
 [dependency-groups]
 dev = [
     "hypothesis>=6.100",
+    "mutmut>=3.2",
     "pytest>=8.0",
     "pytest-asyncio>=0.24",
     "pytest-cov>=6.0",
@@ -59,3 +60,8 @@ select = ["E", "F", "I", "UP", "B", "SIM", "PTH"]
 
 [tool.ty.environment]
 python-version = "3.11"
+
+[tool.mutmut]
+paths_to_mutate = ["src/engine/admission.py"]
+tests_dir = ["tests/test_admission.py"]
+also_copy = ["src"]

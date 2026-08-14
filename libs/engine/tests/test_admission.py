@@ -24,6 +24,7 @@ from pathlib import Path
 
 import pytest
 from atoms import Fact
+from lang import parse_vertex
 
 from engine.admission import (
     AdmissionError,
@@ -34,7 +35,6 @@ from engine.admission import (
 )
 from engine.peer import Grant
 from engine.program import load_vertex_program
-from lang import parse_vertex
 
 
 def _fact(kind: str, observer: str = "kyle", **payload) -> Fact:
@@ -77,6 +77,7 @@ class TestGrantForObserver:
         with pytest.raises(UnknownObserver) as ei:
             grant_for_observer(ast, "mallory")
         assert ei.value.observer == "mallory"
+        assert ei.value.vertex == "t"
         assert isinstance(ei.value, AdmissionError)
 
     def test_declared_observer_without_grant_is_unrestricted(self):
@@ -98,8 +99,73 @@ class TestGrantForObserver:
 
     def test_aggregate_vertex_refused(self, tmp_path):
         ast = parse_vertex('name "agg"\ndiscover "*.vertex"')
-        with pytest.raises(AggregateAdmissionUnsupported):
+        with pytest.raises(AggregateAdmissionUnsupported) as ei:
             grant_for_observer(ast, "kyle")
+        assert ei.value.vertex == "agg"
+
+    def test_combine_aggregate_vertex_refused(self):
+        ast = parse_vertex('name "comb"\ncombine { vertex "a.vertex" }')
+        with pytest.raises(AggregateAdmissionUnsupported) as ei:
+            grant_for_observer(ast, "kyle")
+        assert ei.value.vertex == "comb"
+
+
+# ---------------------------------------------------------------------------
+# Mutation-killing coverage for admission exceptions and vertex propagation
+# ---------------------------------------------------------------------------
+
+
+class TestAdmissionMutationCoverage:
+    def test_unknown_observer_exception_attributes_and_message(self):
+        """Kills mutant at admission.py:44 (super().__init__ message None) and
+        admission.py:51 (self.vertex = None in UnknownObserver.__init__)."""
+        exc = UnknownObserver("mallory", "my_vertex")
+        assert exc.observer == "mallory"
+        assert exc.vertex == "my_vertex"
+        assert isinstance(exc, AdmissionError)
+        msg = str(exc)
+        assert "observer 'mallory' is not declared in vertex 'my_vertex'" in msg
+        assert "declared admission policy admits only declared observers" in msg
+
+    def test_undeclared_kind_exception_attributes_and_message(self):
+        """Kills mutant at admission.py:63 (super().__init__ message None) and
+        admission.py:70 (self.vertex = None in UndeclaredKind.__init__)."""
+        exc = UndeclaredKind("bad_kind", "strict_vertex")
+        assert exc.kind == "bad_kind"
+        assert exc.vertex == "strict_vertex"
+        assert isinstance(exc, AdmissionError)
+        msg = str(exc)
+        assert "vertex 'strict_vertex' declares strict — kind 'bad_kind' is not declared" in msg
+        assert "pass admit_undeclared=True" in msg
+
+    def test_aggregate_unsupported_exception_attributes_and_message(self):
+        """Kills mutant at admission.py:83 (super().__init__ message None) and
+        admission.py:88 (self.vertex = None in AggregateAdmissionUnsupported.__init__)."""
+        exc = AggregateAdmissionUnsupported("agg_vertex")
+        assert exc.vertex == "agg_vertex"
+        assert isinstance(exc, AdmissionError)
+        msg = str(exc)
+        assert "vertex 'agg_vertex' is a combine/discover aggregate" in msg
+        assert "Write to the member vertex directly" in msg
+
+    def test_grant_for_observer_propagates_vertex_name_to_aggregate_exception(self):
+        """Kills mutant at admission.py:112 (AggregateAdmissionUnsupported(ast.name) -> None)."""
+        ast = parse_vertex('name "my_agg"\ndiscover "*.vertex"')
+        with pytest.raises(AggregateAdmissionUnsupported) as ei:
+            grant_for_observer(ast, "kyle")
+        assert ei.value.vertex == "my_agg"
+
+    def test_grant_for_observer_propagates_vertex_name_to_unknown_observer_exception(self):
+        """Kills mutant at admission.py:125 (UnknownObserver(observer, ast.name) -> None)."""
+        ast = parse_vertex(
+            'name "my_v"\nobservers { alice { } }\n'
+            'loops { a { fold { items "collect" 5 } } }'
+        )
+        with pytest.raises(UnknownObserver) as ei:
+            grant_for_observer(ast, "mallory")
+        assert ei.value.observer == "mallory"
+        assert ei.value.vertex == "my_v"
+
 
 
 # ---------------------------------------------------------------------------
@@ -228,9 +294,8 @@ class TestStrictEnforcement:
         # focus.* passes the ownership gate but is still an undeclared kind:
         # strict applies — undeclared is undeclared (deliberate choice).
         vpath = _write_vertex(tmp_path, _STRICT_VERTEX)
-        with load_vertex_program(vpath) as p:
-            with pytest.raises(UndeclaredKind):
-                p.receive(_fact("focus.kyle", observer="kyle", target="x"))
+        with load_vertex_program(vpath) as p, pytest.raises(UndeclaredKind):
+            p.receive(_fact("focus.kyle", observer="kyle", target="x"))
 
     def test_strict_store_with_historical_undeclared_fact_still_loads(self, tmp_path):
         vpath = _write_vertex(tmp_path, _STRICT_VERTEX)

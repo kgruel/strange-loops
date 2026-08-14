@@ -62,15 +62,15 @@ class FactAttestation:
     - ``signed`` — the committed row carries an authorship signature.
     - ``observer`` — the observer the row was committed under (the
       authorship claim's subject).
-    - ``signature_present`` — the row-level flag; at write time this
-      coincides with ``signed`` (both read off the same committed column),
-      kept distinct so the shape can carry verification-grade claims
-      without renaming.
+
+    ``signed`` is a presence claim, not a verification claim; a distinct
+    ``verified`` field arrives when verification-grade read-back exists
+    (the former ``signature_present`` twin was provably identical and
+    dissolved).
     """
 
     signed: bool
     observer: str
-    signature_present: bool
 
 
 @dataclass(frozen=True)
@@ -80,15 +80,14 @@ class TickAttestation:
     Read back from the tick row the store committed when the boundary
     fired — never inferred from whether a tick signer was wired.
 
-    - ``signed`` / ``signature_present`` — the committed row carries an
-      Ed25519 signature over its commitment hash (same coincidence note
-      as :class:`FactAttestation`).
+    - ``signed`` — the committed row carries an Ed25519 signature over
+      its commitment hash (presence, not verification — same note as
+      :class:`FactAttestation`).
     - ``chained`` — the row carries the chain fields (``window_hash``
       et al.); ``False`` marks a pre-chain-era row.
     """
 
     signed: bool
-    signature_present: bool
     chained: bool
 
 
@@ -1183,9 +1182,8 @@ class Vertex:
         reader = getattr(self._store, "fact_signature", None)
         if reader is None:
             return None
-        present = reader(fact_id) is not None
         return FactAttestation(
-            signed=present, observer=observer, signature_present=present,
+            signed=reader(fact_id) is not None, observer=observer,
         )
 
     def _tick_attestation(self, tick_row_id: str | None) -> TickAttestation | None:
@@ -1204,10 +1202,7 @@ class Vertex:
         if state is None:
             return None
         signature, chained = state
-        present = signature is not None
-        return TickAttestation(
-            signed=present, signature_present=present, chained=chained,
-        )
+        return TickAttestation(signed=signature is not None, chained=chained)
 
     def _tick_to_fact(self, tick: Tick, child_name: str) -> Fact:
         """Convert a child's Tick to a Fact for re-entry.

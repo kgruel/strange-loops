@@ -77,7 +77,7 @@ class TestFactAttestation:
 
         assert receipt.stored
         assert receipt.attestation == FactAttestation(
-            signed=True, observer="alice", signature_present=True,
+            signed=True, observer="alice"
         )
         report = store.verify_facts(verifier=_fake_verifier)
         assert report["ok"] is True
@@ -102,7 +102,7 @@ class TestFactAttestation:
 
         assert r_alice.attestation.signed is True
         assert r_bob.attestation == FactAttestation(
-            signed=False, observer="bob", signature_present=False,
+            signed=False, observer="bob"
         )
         # The committed rows agree — attestation mirrors the store, both ways.
         assert store.fact_signature(r_alice.fact_id) is not None
@@ -115,7 +115,7 @@ class TestFactAttestation:
         v = _vertex(store)
         receipt = v.receive_receipt(Fact.of("note", "alice", n=1))
         assert receipt.attestation == FactAttestation(
-            signed=False, observer="alice", signature_present=False,
+            signed=False, observer="alice"
         )
 
     def test_storeless_vertex_attestation_is_none(self):
@@ -164,7 +164,7 @@ class TestTickAttestation:
 
         assert receipt.tick is not None
         assert receipt.tick_attestation == TickAttestation(
-            signed=True, signature_present=True, chained=True,
+            signed=True, chained=True,
         )
         # Cross-check against the verify machinery walking committed rows.
         report = store.verify_chain(
@@ -183,7 +183,7 @@ class TestTickAttestation:
 
         assert receipt.tick is not None
         assert receipt.tick_attestation == TickAttestation(
-            signed=False, signature_present=False, chained=True,
+            signed=False, chained=True,
         )
 
     def test_no_tick_no_tick_attestation(self, tmp_path, canonical):

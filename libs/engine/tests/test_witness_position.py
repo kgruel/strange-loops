@@ -169,11 +169,17 @@ class TestResolveAddress:
         assert pos.seq == 1
 
     def test_unknown_handle_refuses(self, tmp_path):
+        """Kills mutant replacing UnknownWitnessHandle error message with None at witness.py:534."""
         vpath, store = _scaffold(tmp_path)
         _fresh_store(store)
         _append(store, "decision", 100, topic="a")
-        with pytest.raises(UnknownWitnessHandle):
+        with pytest.raises(UnknownWitnessHandle, match="no fact with id '01NONEXISTENTIDNOTHERE00000' in this store"):
             resolve_witness_position(store, "01NONEXISTENTIDNOTHERE00000")
+
+    def test_resolve_witness_position_invalid_store_raises(self, tmp_path):
+        """Kills mutant replacing invalid store error message with None in resolve_witness_position at witness.py:380."""
+        with pytest.raises(WitnessResolutionError, match="is not a usable store — cannot resolve a witness position"):
+            resolve_witness_position(tmp_path / "nope.db", "head")
 
     def test_seq_counts_decl_rows_too(self, tmp_path):
         # seq is a receipt ordinal over ALL rows (incl _decl) — the seq:N form.
@@ -236,9 +242,11 @@ class TestAnchor:
         # Position at head (f2) — the anchor is the tick sealing f1.
         pos = resolve_witness_position(store, "head")
         assert pos.anchor is not None
-        assert pos.anchor.fact_cursor == f1 and pos.anchor.name == "t"
+        assert pos.anchor.fact_cursor == f1 and pos.anchor.name == "t" and pos.anchor.ts == 150.0
         # Position AT f1 — still anchored (f1 rowid <= position rowid).
-        assert resolve_witness_position(store, f1).anchor is not None
+        at_f1 = resolve_witness_position(store, f1)
+        assert at_f1.anchor is not None
+        assert at_f1.anchor.ts == 150.0 and at_f1.anchor.name == "t"
         # Position at the empty prefix — no sealed tick precedes it.
         assert resolve_witness_position(store, GENESIS_SENTINEL).anchor is None
 
@@ -309,6 +317,7 @@ class TestReceiptGroupGuard:
             conn.close()
 
     def test_resolve_at_mid_group_refuses(self, tmp_path):
+        """Kills mutant replacing span[0] with span[1] in MidReceiptGroupPosition error message at witness.py:309."""
         _vpath, store, rows = self._ceremony_store(tmp_path)
         conn = sqlite3.connect(str(store))
         first_id = conn.execute(
@@ -319,12 +328,71 @@ class TestReceiptGroupGuard:
         ).fetchone()[0]
         conn.close()
         # Naming the FIRST ceremony row = mid-group → refuse with teaching.
-        with pytest.raises(MidReceiptGroupPosition):
+        with pytest.raises(
+            MidReceiptGroupPosition,
+            match=f"rowids {rows[0]}\\.\\.{rows[1]}",
+        ):
             resolve_witness_position(store, first_id)
         # Naming the LAST row = complete ceremony → resolves fine (head snaps
         # after a completed ceremony only).
         pos = resolve_witness_position(store, last_id)
         assert pos.rowid == rows[1]
+
+    def test_receipt_group_span_requires_contiguous_rowids_and_matching_ts(self, tmp_path):
+        """Kills 'and' -> 'or' mutant at witness.py:234 in receipt_group_span."""
+        store = tmp_path / "span_test.db"
+        _fresh_store(store)
+        # Row 1: _decl at ts 100
+        _append(store, DECL_KIND_DEFINED, 100.0, lineage="L", subject="a", payload={"folds": [], "order": 0})
+        # Row 2: regular fact at ts 100
+        _append(store, "decision", 100.0, topic="mid")
+        # Row 3: _decl at ts 100 (non-contiguous rowids 1 and 3)
+        _append(store, DECL_KIND_DEFINED, 100.0, lineage="L", subject="b", payload={"folds": [], "order": 1})
+
+        conn = sqlite3.connect(str(store))
+        try:
+            # Non-contiguous _decl rows must not be grouped together
+            assert receipt_group_span(conn, 1) is None
+        finally:
+            conn.close()
+
+        # Now test contiguous rowids but different timestamps
+        store2 = tmp_path / "span_test2.db"
+        _fresh_store(store2)
+        _append(store2, DECL_KIND_DEFINED, 100.0, lineage="L", subject="a", payload={"folds": [], "order": 0})
+        _append(store2, DECL_KIND_DEFINED, 200.0, lineage="L", subject="b", payload={"folds": [], "order": 1})
+        conn2 = sqlite3.connect(str(store2))
+        try:
+            # Different ts must not be grouped together
+            assert receipt_group_span(conn2, 1) is None
+        finally:
+            conn2.close()
+
+    def test_receipt_group_span_extracts_and_distinguishes_lineages(self, tmp_path):
+        """Kills mutants replacing 'lineage' key in _lineage_of at witness.py:200."""
+        store = tmp_path / "lineage_span.db"
+        _fresh_store(store)
+        # Two contiguous _decl rows at same ts but DIFFERENT lineages
+        _append(store, DECL_KIND_DEFINED, 100.0, lineage="L1", subject="a", payload={"lineage": "L1", "folds": [], "order": 0})
+        _append(store, DECL_KIND_DEFINED, 100.0, lineage="L2", subject="b", payload={"lineage": "L2", "folds": [], "order": 1})
+
+        conn = sqlite3.connect(str(store))
+        try:
+            # Different lineages -> no span
+            assert receipt_group_span(conn, 1) is None
+        finally:
+            conn.close()
+
+        # Two contiguous _decl rows at same ts and SAME lineage
+        store2 = tmp_path / "lineage_span2.db"
+        _fresh_store(store2)
+        _append(store2, DECL_KIND_DEFINED, 100.0, lineage="L1", subject="a", payload={"lineage": "L1", "folds": [], "order": 0})
+        _append(store2, DECL_KIND_DEFINED, 100.0, lineage="L1", subject="b", payload={"lineage": "L1", "folds": [], "order": 1})
+        conn2 = sqlite3.connect(str(store2))
+        try:
+            assert receipt_group_span(conn2, 1) == (1, 2)
+        finally:
+            conn2.close()
 
     def test_ontology_seam_reguards_a_handbuilt_position(self, tmp_path):
         # A raw mid-group WitnessPosition that bypasses the address resolver must
@@ -466,8 +534,7 @@ class TestLineageQualification:
         verify_position_for_store(pos, store)  # no raise
 
     def test_unadopted_position_refused_on_a_different_store(self, tmp_path):
-        # An unadopted (pre-genesis) handle is session-local to its own store —
-        # its rowid means nothing elsewhere (N1). vertex_fold(at=) must refuse.
+        """Kills mutant replacing unadopted mismatch error message with None at witness.py:494."""
         va = tmp_path / "a.vertex"
         sa = tmp_path / "a.db"
         va.write_text(_VERTEX_KDL.format(store=sa))
@@ -481,11 +548,11 @@ class TestLineageQualification:
         _fresh_store(sb)
         _append(sb, "decision", 100, topic="b")
 
-        with pytest.raises(WitnessLineageMismatch):
+        with pytest.raises(WitnessLineageMismatch, match="an UNADOPTED handle is session-local to its own store"):
             vertex_fold(vb, at=pos_a)
 
     def test_adopted_position_refused_on_a_different_lineage(self, tmp_path):
-        # Two adopted stores with DIFFERENT lineages: A's handle is rejected on B.
+        """Kills mutant replacing lineage mismatch error message with None at witness.py:506."""
         va = tmp_path / "a.vertex"
         sa = tmp_path / "a.db"
         va.write_text(_VERTEX_KDL.format(store=sa))
@@ -500,7 +567,7 @@ class TestLineageQualification:
         _absorb(vb, sb)  # a DIFFERENT genesis → different lineage
         _append(sb, "decision", 100, topic="b")
 
-        with pytest.raises(WitnessLineageMismatch):
+        with pytest.raises(WitnessLineageMismatch, match="does not match this store's lineage"):
             vertex_fold(vb, at=pos_a)
 
     def test_vertex_facts_also_verifies(self, tmp_path):
@@ -596,6 +663,19 @@ class TestDurableHandle:
         vpath, store = _scaffold(tmp_path)
         _absorb(vpath, store)
         pos = resolve_witness_position(store, GENESIS_SENTINEL)
+        assert durable_handle(pos) is None
+
+    def test_unadopted_flag_with_non_none_lineage_refuses_durable_handle(self, tmp_path):
+        """Kills 'or' -> 'and' mutant on unadopted flag check in durable_handle at witness.py:564."""
+        pos = WitnessPosition(
+            fact_id="f1",
+            rowid=1,
+            seq=1,
+            lineage="some-lineage",
+            unadopted=True,
+            anchor=None,
+            store="/dummy/path",
+        )
         assert durable_handle(pos) is None
 
 
@@ -703,10 +783,14 @@ class TestGroupBoundarySnap:
         return TestReceiptGroupGuard()._ceremony_store(tmp_path)
 
     def test_refuse_is_default_floor_snaps_before_first_row(self, tmp_path):
+        """Kills mutants replacing fact_id with None and rowid <= 0 with rowid <= 1 at witness.py:305."""
         _vpath, store, rows = self._ceremony(tmp_path)
         conn = sqlite3.connect(str(store))
         first_id = conn.execute(
             "SELECT id FROM facts WHERE rowid = ?", (rows[0],)
+        ).fetchone()[0]
+        genesis_id = conn.execute(
+            "SELECT id FROM facts WHERE rowid = ?", (rows[0] - 1,)
         ).fetchone()[0]
         conn.close()
         # Exact form (default refuse) — a mid-group position errors.
@@ -715,6 +799,20 @@ class TestGroupBoundarySnap:
         # Floor form — snaps to the position JUST BEFORE the ceremony's first row.
         snapped = resolve_witness_position(store, first_id, group_boundary="floor")
         assert snapped.rowid == rows[0] - 1
+        assert snapped.fact_id == genesis_id
+        assert snapped.fact_id != "" and snapped.fact_id is not None
+
+    def test_allow_group_boundary_skips_guard(self, tmp_path):
+        """Kills mutant replacing 'allow' with 'XXallowXX' at witness.py:298."""
+        _vpath, store, rows = self._ceremony(tmp_path)
+        conn = sqlite3.connect(str(store))
+        first_id = conn.execute(
+            "SELECT id FROM facts WHERE rowid = ?", (rows[0],)
+        ).fetchone()[0]
+        conn.close()
+        pos = resolve_witness_position(store, first_id, group_boundary="allow")
+        assert pos.rowid == rows[0]
+        assert pos.fact_id == first_id
 
 
 # ---------------------------------------------------------------------------
@@ -758,7 +856,8 @@ class TestResolveCutSummary:
         assert summary.position.seq - summary.anchor_seq == 1
 
     def test_no_usable_store_raises(self, tmp_path):
-        with pytest.raises(WitnessResolutionError):
+        """Kills mutant replacing invalid store message with None in resolve_cut_summary at witness.py:440."""
+        with pytest.raises(WitnessResolutionError, match="is not a usable store — cannot resolve a cut summary"):
             resolve_cut_summary(tmp_path / "nope.db")
 
     def test_atomic_snapshot_ignores_write_landing_mid_resolution(

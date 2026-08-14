@@ -28,6 +28,7 @@ from engine.witness import (
     TickAnchor,
     UnknownTickHandle,
     UnknownWitnessHandle,
+    WitnessResolutionError,
     expand_fact_prefix,
     resolve_seq,
     resolve_tick_cursor,
@@ -104,6 +105,11 @@ class TestResolveSeq:
         with pytest.raises(SeqOutOfRange, match="has 1 receipt"):
             resolve_seq(store, 5)
 
+    def test_resolve_seq_invalid_store_raises(self, tmp_path):
+        """Kills mutant replacing invalid store message with None in resolve_seq at witness.py:680."""
+        with pytest.raises(WitnessResolutionError, match="is not a usable store — cannot resolve seq:1"):
+            resolve_seq(tmp_path / "nope.db", 1)
+
 
 class TestResolveTickCursor:
     def test_resolves_fact_cursor_of_named_tick(self, tmp_path):
@@ -115,19 +121,56 @@ class TestResolveTickCursor:
         assert cursor == f1 and name == "project" and ts == 150.0
 
     def test_unknown_tick_id_refuses(self, tmp_path):
+        """Kills mutant replacing UnknownTickHandle message with None at witness.py:744."""
         store = tmp_path / "t.db"
         _fresh_store(store)
         _append(store, "decision", 100, topic="a")
-        with pytest.raises(UnknownTickHandle):
+        with pytest.raises(UnknownTickHandle, match="no tick with id '01NONEXISTENTTICKID00000000' in this store"):
             resolve_tick_cursor(store, "01NONEXISTENTTICKID00000000")
 
     def test_tick_with_no_cursor_has_no_anchor(self, tmp_path):
+        """Kills mutant replacing NoWitnessAnchor message with None on unchained tick at witness.py:747."""
         store = tmp_path / "t.db"
         _fresh_store(store)
         _append(store, "decision", 100, topic="a")
         tid = _append_tick(store, "project", 150.0, fact_cursor=None)
-        with pytest.raises(NoWitnessAnchor):
+        with pytest.raises(NoWitnessAnchor, match="has no witness anchor — a pre-chain tick was never bound to a fact_cursor"):
             resolve_tick_cursor(store, tid)
+
+    def test_resolve_tick_cursor_invalid_store_raises(self, tmp_path):
+        """Kills mutant replacing invalid store message with None in resolve_tick_cursor at witness.py:720."""
+        with pytest.raises(WitnessResolutionError, match="is not a usable store — cannot resolve tick:t1"):
+            resolve_tick_cursor(tmp_path / "nope.db", "t1")
+
+    def test_pre_chain_schema_tick_raises_no_witness_anchor(self, tmp_path):
+        """Kills mutants in pre-chain schema branch without fact_cursor column in resolve_tick_cursor at witness.py:726-738."""
+        store = tmp_path / "legacy.db"
+        conn = sqlite3.connect(str(store))
+        conn.execute(
+            "CREATE TABLE ticks (id TEXT PRIMARY KEY, name TEXT, ts REAL, since REAL, origin TEXT, payload TEXT)"
+        )
+        conn.execute(
+            "INSERT INTO ticks (id, name, ts, since, origin, payload) VALUES ('t1', 'old_tick', 100.0, 0.0, '', '{}')"
+        )
+        conn.commit()
+        conn.close()
+        with pytest.raises(
+            NoWitnessAnchor,
+            match="tick:t1 \\(old_tick @ 100\\.0\\) predates the witness-chain era \\(no fact_cursor column\\)",
+        ):
+            resolve_tick_cursor(store, "t1")
+
+    def test_pre_chain_schema_unknown_tick_raises_unknown_tick_handle(self, tmp_path):
+        """Kills mutant replacing UnknownTickHandle message with None on pre-chain schema at witness.py:730."""
+        store = tmp_path / "legacy.db"
+        conn = sqlite3.connect(str(store))
+        conn.execute(
+            "CREATE TABLE ticks (id TEXT PRIMARY KEY, name TEXT, ts REAL, since REAL, origin TEXT, payload TEXT)"
+        )
+        conn.commit()
+        conn.close()
+        with pytest.raises(UnknownTickHandle, match="no tick with id 't_missing' in this store"):
+            resolve_tick_cursor(store, "t_missing")
 
 
 class TestResolveTickFloor:
@@ -148,11 +191,12 @@ class TestResolveTickFloor:
         assert cursor2 == f2 and ts2 == 250.0
 
     def test_no_tick_before_mark_refuses(self, tmp_path):
+        """Kills mutant replacing NoWitnessAnchor message with None in resolve_tick_floor at witness.py:798."""
         store = tmp_path / "t.db"
         _fresh_store(store)
         f1 = _append(store, "decision", 100, topic="a")
         _append_tick(store, "project", 150.0, fact_cursor=f1)
-        with pytest.raises(NoWitnessAnchor):
+        with pytest.raises(NoWitnessAnchor, match="no witness-time anchor — no sealed tick at or before this mark"):
             resolve_tick_floor(store, 50.0)  # before the only tick
 
     def test_no_ticks_at_all_refuses(self, tmp_path):
@@ -196,6 +240,11 @@ class TestResolveTickFloor:
         cursor, name, ts = resolve_tick_floor(store, 200.0)
         assert cursor == f1 and name == "good" and ts == 120.0
 
+    def test_resolve_tick_floor_invalid_store_raises(self, tmp_path):
+        """Kills mutant replacing invalid store message with None in resolve_tick_floor at witness.py:780."""
+        with pytest.raises(WitnessResolutionError, match="is not a usable store — cannot resolve a wall-clock address"):
+            resolve_tick_floor(tmp_path / "nope.db", 100.0)
+
 
 class TestExpandFactPrefix:
     # The engine-owned fact:prefix resolver — the app must not touch StoreReader
@@ -215,10 +264,11 @@ class TestExpandFactPrefix:
         assert expand_fact_prefix(store, "01KDECL") == did
 
     def test_no_match_raises_unknown_handle(self, tmp_path):
+        """Kills mutant replacing UnknownWitnessHandle message with None at witness.py:658."""
         store = tmp_path / "t.db"
         _fresh_store(store)
         _append(store, "decision", 100, topic="a")
-        with pytest.raises(UnknownWitnessHandle):
+        with pytest.raises(UnknownWitnessHandle, match="no fact matches 'ZZZNONEXISTENT' in this store"):
             expand_fact_prefix(store, "ZZZNONEXISTENT")
 
     def test_ambiguous_prefix_raises_value_error(self, tmp_path):

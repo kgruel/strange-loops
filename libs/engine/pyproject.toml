@@ -62,6 +62,11 @@ select = ["E", "F", "I", "UP", "B", "SIM", "PTH"]
 python-version = "3.11"
 
 [tool.mutmut]
-paths_to_mutate = ["src/engine/admission.py"]
-tests_dir = ["tests/test_admission.py"]
+paths_to_mutate = ["src/engine/witness.py"]
+tests_dir = [
+    "tests/test_witness_position.py",
+    "tests/test_witness_address_helpers.py",
+    "tests/test_diff_interval_report.py",
+    "tests/test_fold_at.py",
+]
 also_copy = ["src"]

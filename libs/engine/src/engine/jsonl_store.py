@@ -187,6 +187,7 @@ from .jsonl_codec import (
     serialize_tick_row,
 )
 from .residence import log_path_for
+from .sql_util import sqlite_busy
 from .sqlite_store import (
     FACT_COLUMNS,
     FACT_INSERT_SQL,
@@ -388,11 +389,12 @@ class JsonlStore(SqliteStore[T], Generic[T]):
             # route around). The index is DERIVED and the canonical log is
             # the store, so discarding and rebuilding it from the log is this
             # layer's own recovery, same class as the _rebuild triggers. Two
-            # guards keep the unlink honest: a transient lock is not
-            # corruption (re-raise — another handle owns a live index), and
+            # guards keep the unlink honest: a transient BUSY/LOCKED is not
+            # corruption (re-raise — another handle owns a live index; the
+            # code-aware predicate is shared with preflight, SOL-R4-04), and
             # with no canonical log on disk the db is the only artifact
             # (re-raise — never destroy what cannot be re-derived).
-            if "database is locked" in str(exc) or not self._log_path.is_file():
+            if sqlite_busy(exc) or not self._log_path.is_file():
                 raise
             self._recover_index(kwargs, exc)
 
@@ -426,7 +428,7 @@ class JsonlStore(SqliteStore[T], Generic[T]):
                 self._open_index()
                 return
             except sqlite3.Error as retry_exc:
-                if "database is locked" in str(retry_exc):
+                if sqlite_busy(retry_exc):
                     raise  # a live handle owns the index — not corruption
             _log.warning(
                 "jsonl-canonical: derived index %s unusable (%s) — "

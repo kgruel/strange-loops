@@ -154,6 +154,33 @@ def _default_file_write(vertex_path: Path, proposed_text: str | None) -> None:
     _atomic_write(vertex_path, proposed_text)
 
 
+def _backend_not_writable(canonical_path: Path) -> str | None:
+    """Reason the backend WRITE SURFACE is not writable, or ``None``.
+
+    SOL-R2-04: the ceremony's store step writes more than the canonical
+    artifact — a JSONL-canonical open also writes the derived sqlite index,
+    and any sqlite open needs the containing directory for its WAL/SHM
+    siblings. Probing only the log let a writable log inside a read-only
+    directory plan as applicable and then fail raw at apply. ``_writable``
+    walks to the nearest existing ancestor, so a missing index counts as
+    creatable when its directory is writable.
+    """
+    from .probe import _writable
+    from .residence import index_path_for
+
+    if not _writable(canonical_path):
+        return f"canonical store not writable: {canonical_path}"
+    index = index_path_for(canonical_path)  # idempotent on a .db
+    if not _writable(index):
+        return f"derived index not writable: {index}"
+    if not _writable(canonical_path.parent):
+        return (
+            f"store directory not writable: {canonical_path.parent} — "
+            "sqlite needs it for WAL/SHM siblings"
+        )
+    return None
+
+
 def _open_store(canonical_path: Path):
     from atoms import Fact
 
@@ -206,9 +233,11 @@ class DeclarationUpdateResult:
     """``apply``'s typed outcome. ``status`` ∈ ``applied`` / ``noop`` /
     ``stale`` / ``pending-intent`` / ``refused`` / ``needs-recovery``.
 
-    ``needs-recovery`` is the typed recovery state: the store ceremony
-    COMMITTED but the file step failed — the intent is left in place
-    (``intent_path``) and :func:`recover_declaration_update` finishes."""
+    ``needs-recovery`` is the typed recovery state: either the store
+    ceremony COMMITTED but the file step failed, or a backend error hit
+    mid-absorb and commit state is ambiguous (JSONL log commits before the
+    index). The intent is left in place (``intent_path``) and
+    :func:`recover_declaration_update` classifies and finishes."""
 
     status: str
     reason: str
@@ -345,16 +374,21 @@ def plan_declaration_update(
             ),
         )
 
-    # Applicability spans BOTH artifacts the ceremony writes: the vertex
-    # file (info.writable — the probed path) and the canonical store
-    # (info.canonical_writable — SOL-R1-04: plan must not report a plan as
-    # applicable that apply's store step cannot execute).
-    store_writable = info.canonical_writable is not False
+    # Applicability spans EVERYTHING the ceremony writes: the vertex file
+    # (info.writable — the probed path) and the canonical store's full
+    # backend write surface (SOL-R1-04 + SOL-R2-04: log, derived index,
+    # and the directory sqlite needs for WAL/SHM siblings — plan must not
+    # report a plan as applicable that apply's store step cannot execute).
+    surface_reason = _backend_not_writable(info.canonical_path)
+    store_writable = info.canonical_writable is not False and surface_reason is None
     writable = info.writable and store_writable
     not_writable_reason = (
         info.reason
         if not info.writable
-        else f"canonical store not writable: {info.canonical_path}"
+        else (
+            surface_reason
+            or f"canonical store not writable: {info.canonical_path}"
+        )
     )
 
     if generation["lineage"] is None:
@@ -504,19 +538,15 @@ def apply_declaration_update(
             status="noop", reason="file matches store head — nothing to apply"
         )
 
-    # Canonical-store writability gate (SOL-R1-04): a typed refusal BEFORE
-    # any intent lands — and before the edit-mode currency pre-check, whose
-    # store open could itself fail raw on an unwritable file. An unwritable
-    # store must leave zero residue.
-    from .probe import _writable
-
-    if not _writable(preview.canonical_path):
+    # Canonical-store write-surface gate (SOL-R1-04 + SOL-R2-04): a typed
+    # refusal BEFORE any intent lands — and before the edit-mode currency
+    # pre-check, whose store open could itself fail raw on an unwritable
+    # backend. An unwritable store must leave zero residue.
+    surface_reason = _backend_not_writable(preview.canonical_path)
+    if surface_reason is not None:
         return DeclarationUpdateResult(
             status="refused",
-            reason=(
-                f"canonical store not writable: {preview.canonical_path} — "
-                "refusing before intent creation"
-            ),
+            reason=f"{surface_reason} — refusing before intent creation",
         )
 
     fact_signer = None
@@ -527,7 +557,18 @@ def apply_declaration_update(
     # inside absorb_edit remains the atomic guard; this only avoids intent
     # churn on an already-known-stale preview.
     if preview.mode == "edit":
-        store = _open_store(preview.canonical_path)
+        import sqlite3
+
+        try:
+            store = _open_store(preview.canonical_path)
+        except (sqlite3.Error, OSError) as exc:
+            return DeclarationUpdateResult(
+                status="refused",
+                reason=(
+                    f"canonical store backend refused the open: {exc} — "
+                    "refusing before intent creation"
+                ),
+            )
         try:
             head_now = store.declaration_head()
         finally:
@@ -544,7 +585,27 @@ def apply_declaration_update(
 
     intent_path = _write_intent(preview, observer)
 
-    store = _open_store(preview.canonical_path)
+    # The writability probe cannot eliminate races (permissions can change
+    # between gate and open) — so expected backend failures during the store
+    # step are translated into typed outcomes (SOL-R2-04: the typed-catch is
+    # the floor). Two scopes with different guarantees: a failure at the
+    # OPEN provably mutated nothing (no log byte written) — the pre-commit
+    # intent is removed and the result is `refused`; a failure DURING the
+    # absorb is ambiguous on a JSONL-canonical store (log commits before
+    # index) — the intent stays and the result is `needs-recovery`.
+    import sqlite3
+
+    try:
+        store = _open_store(preview.canonical_path)
+    except (sqlite3.Error, OSError) as exc:
+        _remove_intent(intent_path)
+        return DeclarationUpdateResult(
+            status="refused",
+            reason=(
+                f"canonical store backend refused the open: {exc} — "
+                "intent removed, nothing mutated"
+            ),
+        )
     try:
         if preview.mode == "genesis":
             try:
@@ -563,6 +624,21 @@ def apply_declaration_update(
             except (AmbiguousGenesis, UnsignableGenesis) as exc:
                 _remove_intent(intent_path)
                 return DeclarationUpdateResult(status="refused", reason=str(exc))
+            except (sqlite3.Error, OSError) as exc:
+                # A backend failure DURING the absorb is ambiguous on a
+                # JSONL-canonical store: the log line (the store) commits
+                # before the index row, so the ceremony may already be
+                # live. The intent stays — recover_declaration_update
+                # classifies not-applied vs applied from the log.
+                return DeclarationUpdateResult(
+                    status="needs-recovery",
+                    reason=(
+                        f"store step failed mid-ceremony ({exc}) — run "
+                        "recover_declaration_update; it classifies "
+                        "not-applied vs applied from the canonical store"
+                    ),
+                    intent_path=intent_path,
+                )
         else:
             try:
                 receipt = store.absorb_edit(
@@ -583,6 +659,19 @@ def apply_declaration_update(
             ) as exc:
                 _remove_intent(intent_path)
                 return DeclarationUpdateResult(status="refused", reason=str(exc))
+            except (sqlite3.Error, OSError) as exc:
+                # Same ambiguity as the genesis branch: the log may have
+                # committed before the index failed. Leave the intent for
+                # recovery's log-anchored classification.
+                return DeclarationUpdateResult(
+                    status="needs-recovery",
+                    reason=(
+                        f"store step failed mid-ceremony ({exc}) — run "
+                        "recover_declaration_update; it classifies "
+                        "not-applied vs applied from the canonical store"
+                    ),
+                    intent_path=intent_path,
+                )
     finally:
         store.close()
 

@@ -244,6 +244,8 @@ def _recover_then_open(
     open_kwargs: dict[str, Any],
 ) -> PreflightResult:
     """Evidence first, then the store's own recovery, then the after-picture."""
+    import sqlite3
+
     from .jsonl_codec import JsonlCodecError
     from .jsonl_store import JsonlCanonicalUnsupported
 
@@ -264,8 +266,37 @@ def _recover_then_open(
                 "index FROM the log; it never invents a log"
             ),
         )
+    index_rebuilt = False
     try:
-        store = _open(canonical, open_kwargs)
+        try:
+            store = _open(canonical, open_kwargs)
+        except sqlite3.Error as exc:
+            # SOL-R2-03: the derived index itself does not open as sqlite
+            # (non-sqlite bytes, truncated header, low-level corruption the
+            # store's own catch-up cannot route around). The index is DERIVED
+            # and the canonical log is the store — deleting and rebuilding the
+            # index from the log IS this mode's job, not repair-conflation.
+            _discard_index(index)
+            try:
+                store = _open(canonical, open_kwargs)
+            except sqlite3.Error as exc2:
+                return PreflightResult(
+                    mode=PreflightMode.RECOVER_THEN_OPEN,
+                    canonical_path=canonical,
+                    index_path=index,
+                    status="unreadable",
+                    report=report,
+                    post_report=None,
+                    agreed=report.ok,
+                    opened=False,
+                    recovered=False,
+                    store=None,
+                    reason=(
+                        f"derived index unusable ({exc}) and rebuilding it "
+                        f"from the log also failed: {exc2}"
+                    ),
+                )
+            index_rebuilt = True
     except JsonlCanonicalUnsupported as exc:
         return PreflightResult(
             mode=PreflightMode.RECOVER_THEN_OPEN,
@@ -318,7 +349,7 @@ def _recover_then_open(
             reason=f"cannot open canonical store: {exc}",
         )
     post = audit_agreement(canonical)
-    recovered = not report.ok
+    recovered = not report.ok or index_rebuilt
     return PreflightResult(
         mode=PreflightMode.RECOVER_THEN_OPEN,
         canonical_path=canonical,
@@ -403,6 +434,19 @@ def _sqlite_preflight(
 
 
 # --- helpers ----------------------------------------------------------------
+
+
+def _discard_index(index: Path) -> None:
+    """Delete a derived index (and its WAL/SHM siblings) ahead of a rebuild.
+
+    RECOVER_THEN_OPEN-only, jsonl-canonical-only: the index is rebuildable
+    state; the canonical log is never touched here.
+    """
+    import contextlib
+
+    for suffix in ("", "-wal", "-shm"):
+        with contextlib.suppress(FileNotFoundError):
+            Path(str(index) + suffix).unlink()
 
 
 def _verdict(canonical: Path, report: AgreementReport) -> tuple[str, str]:

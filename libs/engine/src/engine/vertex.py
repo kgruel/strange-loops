@@ -631,10 +631,10 @@ class Vertex:
         if self._store is not None:
             appender = getattr(self._store, "append_attested", None)
             if appender is not None:
-                # The write's own result: the store assembled the row it
-                # committed, so its returned signature IS the committed
-                # column — no read-back SELECT (LIBS_CHANGES P1's "or the
-                # write operation's actual result" clause).
+                # The returned signature IS the committed column: the store
+                # reads it back inside the write transaction, post-INSERT,
+                # pre-commit (SOL-R3-02; LIBS_CHANGES P1's "the committed
+                # row" clause).
                 fact_id, signature = appender(fact, id_override=id_override)
                 attestation = FactAttestation(
                     signed=signature is not None, observer=observer,
@@ -1171,8 +1171,8 @@ class Vertex:
         only re-mint paths (rebirth/slice) opt out explicitly.
 
         Returns the committed tick row's attestation for the write receipt —
-        from the write's own result (``append_tick_attested``: the store
-        assembled the committed row, always chained) when the store offers
+        from ``append_tick_attested`` (which reads the committed signature
+        back inside the write transaction; SOL-R3-02) when the store offers
         it, else the ``tick_signature_state`` read-back; None when the store
         doesn't persist ticks or doesn't report attestation.
         """

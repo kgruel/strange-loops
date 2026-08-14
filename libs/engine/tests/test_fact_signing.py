@@ -325,3 +325,31 @@ class TestCommittedRowAttestationHonesty:
             "SELECT COUNT(*) FROM facts"
         ).fetchone()
         assert row[0] == 0
+
+    def test_trigger_nulled_edit_refuses_rather_than_lie(self, tmp_db):
+        from types import SimpleNamespace
+
+        from lang.document import DECL_VERTEX_DEFINED
+
+        from engine.sqlite_store import UnsignableEdit
+
+        store = make_store(tmp_db, keys=KEYS)
+        store.absorb_genesis(
+            [{"subject": "vertex", "kind": DECL_VERTEX_DEFINED}],
+            observer="kyle",
+            fact_signer=fake_fact_signer(KEYS),
+        )
+        before = store._conn.execute("SELECT COUNT(*) FROM facts").fetchone()[0]
+        store._conn.execute(self.NULLING_TRIGGER)
+        change = SimpleNamespace(
+            kind=DECL_VERTEX_DEFINED,
+            subject="vertex",
+            payload={"name": "t2"},
+            annotation="modified",
+        )
+        with pytest.raises(UnsignableEdit, match="committed"):
+            store.absorb_edit(
+                [change], observer="kyle", fact_signer=fake_fact_signer(KEYS)
+            )
+        after = store._conn.execute("SELECT COUNT(*) FROM facts").fetchone()[0]
+        assert after == before  # rolled back, no ceremony row committed

@@ -338,8 +338,15 @@ class TestRemoveVertexKind:
             remove_vertex_kind(text, "decision")
 
     def test_remove_single_line_loops_block_unsupported(self):
+        # `decision { } task { }` without a `;` is not valid KDL — since the
+        # SOL-R2-01 parser-oracle change, the pre-mutation parse refuses it
+        # up front (previously the splice layer's single-line refusal fired).
         text = 'name "t"\nloops { decision { } task { } }\n'
-        with pytest.raises(ValueError, match="single-line"):
+        with pytest.raises(ValueError, match="not a parseable vertex"):
+            remove_vertex_kind(text, "decision")
+        # The parseable single-line form still refuses without kind loss.
+        text = 'name "t"\nloops { decision { }; task { } }\n'
+        with pytest.raises(ValueError, match="sibling|single-line"):
             remove_vertex_kind(text, "decision")
 
 
@@ -418,3 +425,115 @@ def test_corpus_serializer_reparse_equivalence(vertex_file: Path):
         assert _reparse_def(kind, definition) == definition, (
             f"serializer inequivalence for {kind} in {vertex_file}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Parser-as-oracle postcondition (SOL-R2-01) — lexical evasion classes
+# ---------------------------------------------------------------------------
+
+RAW_STRING_DOC = (
+    'name "t"\n'
+    'loops { decision { boundary after=1 { '
+    'run ##"echo "quoted"; } { "# still raw"## } }; '
+    'task { fold { items "by" "name" } } }\n'
+)
+ESCAPED_QUOTE_DOC = (
+    'name "t"\n'
+    'loops { decision { boundary when="x\\"; } { y" }; '
+    'task { fold { items "by" "name" } } }\n'
+)
+
+
+class TestParserOraclePostcondition:
+    """No lexical evasion class may silently lose a kind (SOL-R2-01).
+
+    Contract (arbiter ruling): every mutation either succeeds with FULL
+    preservation of all untouched kinds (definition-equal under reparse) or
+    refuses with ValueError, leaving the caller's original text as the only
+    text. The lexical splice layer carries no safety claim — the parser is
+    the oracle.
+    """
+
+    @staticmethod
+    def _assert_preserved_or_refused(op, before_text, expected_kinds):
+        before = parse_vertex(before_text)
+        try:
+            out = op(before_text)
+        except ValueError:
+            return  # clean refusal — the original text stands
+        after = parse_vertex(out)
+        assert set(after.loops) == expected_kinds
+        for k in (set(before.loops) & expected_kinds) - {"decision"}:
+            assert after.loops[k] == before.loops[k], k
+
+    def test_raw_string_doc_parses_with_both_kinds(self):
+        assert set(parse_vertex(RAW_STRING_DOC).loops) == {"decision", "task"}
+
+    @pytest.mark.parametrize("doc", [RAW_STRING_DOC, ESCAPED_QUOTE_DOC])
+    def test_add_never_loses_a_kind(self, doc):
+        self._assert_preserved_or_refused(
+            lambda t: add_vertex_kind(t, "marker", BASIC),
+            doc,
+            {"decision", "task", "marker"},
+        )
+
+    @pytest.mark.parametrize("doc", [RAW_STRING_DOC, ESCAPED_QUOTE_DOC])
+    def test_edit_never_loses_a_sibling(self, doc):
+        # Sol's R2 repro: edit of `decision` silently deleted `task`.
+        self._assert_preserved_or_refused(
+            lambda t: edit_vertex_kind(t, "decision", BASIC),
+            doc,
+            {"decision", "task"},
+        )
+
+    @pytest.mark.parametrize("doc", [RAW_STRING_DOC, ESCAPED_QUOTE_DOC])
+    def test_remove_never_loses_a_sibling(self, doc):
+        # Sol's R2 repro: remove of `decision` also removed `task`.
+        self._assert_preserved_or_refused(
+            lambda t: remove_vertex_kind(t, "decision"),
+            doc,
+            {"task"},
+        )
+
+    @pytest.mark.parametrize("doc", [RAW_STRING_DOC, ESCAPED_QUOTE_DOC])
+    def test_full_sequence_never_loses_task(self, doc):
+        # add -> edit -> remove; any step may refuse, none may lose `task`.
+        text = doc
+        for step in (
+            lambda t: add_vertex_kind(t, "marker", BASIC),
+            lambda t: edit_vertex_kind(t, "decision", BASIC),
+            lambda t: remove_vertex_kind(t, "decision"),
+        ):
+            try:
+                text = step(text)
+            except ValueError:
+                break
+        assert "task" in parse_vertex(text).loops
+
+    def test_comment_on_shared_line_never_loses_a_sibling(self):
+        doc = (
+            'name "t"\n'
+            "loops {\n"
+            '  decision { fold { items "by" "topic" } } // trailing } { note\n'
+            '  task { fold { items "by" "name" } }\n'
+            "}\n"
+        )
+        self._assert_preserved_or_refused(
+            lambda t: remove_vertex_kind(t, "decision"), doc, {"task"}
+        )
+        self._assert_preserved_or_refused(
+            lambda t: edit_vertex_kind(t, "decision", BASIC),
+            doc,
+            {"decision", "task"},
+        )
+
+    def test_non_kind_content_change_refuses(self):
+        # The oracle also covers non-loop vertex content: a splice that
+        # altered e.g. the store declaration must refuse. The normal splice
+        # path cannot construct that mangle, so exercise _verified directly.
+        from lang.vertex_mutation import _verified
+
+        before = parse_vertex(MULTI)
+        mangled = MULTI.replace("./data/test.db", "./else.db")
+        with pytest.raises(ValueError, match="non-kind vertex content"):
+            _verified(before, mangled, "test")

@@ -11,7 +11,13 @@ usage, scope-the-claim). Built on
 whitespace, and ordering of unrelated content are preserved.
 
 Guarantees:
-- Every mutation parses and validates the result before returning.
+- Every mutation parses and validates the result before returning, and the
+  PARSER is the safety oracle: the pre-mutation and post-mutation parses
+  are compared and only the exact requested delta is admissible — sibling
+  kinds and non-kind content must be definition-equal or the mutation
+  raises and the original text stands (SOL-R2-01 arbiter ruling:
+  construction over detection; the lexical splice layer is best-effort
+  transformation only and carries no safety claim).
 - Insert-then-remove round-trips to byte-identical text when the ``loops``
   block already exists across multiple lines.
 
@@ -259,25 +265,87 @@ def loop_def_to_kdl(kind: str, definition: LoopDef, indent: str = "  ") -> str:
 # ---------------------------------------------------------------------------
 
 
-def _validated(text: str, context: str) -> str:
-    """Parse + validate mutated vertex text; return it unchanged on success."""
+def _parse_vertex_or_raise(text: str, context: str):
+    """Parse vertex text, wrapping parser errors as a clear ValueError."""
     from .loader import parse_vertex
+
+    try:
+        return parse_vertex(text)
+    except Exception as exc:
+        raise ValueError(
+            f"{context}: input is not a parseable vertex: {exc}"
+        ) from exc
+
+
+def _verified(
+    before,
+    result: str,
+    context: str,
+    *,
+    added: str | None = None,
+    edited: str | None = None,
+    removed: str | None = None,
+) -> str:
+    """Parse + validate mutated text AND assert the exact expected delta.
+
+    The PARSER is the safety oracle (arbiter ruling, SOL-R2-01): the
+    line/lexeme-based splice layer is best-effort transformation only, so
+    every mutation re-parses the result and compares it against the
+    pre-mutation parse. The only admissible delta is the requested one —
+    add: original kind set plus the new kind, every original definition
+    equal; edit: same kind set, only the target changed; remove: set minus
+    the target, every other definition equal. Non-loop content (sources,
+    routes, store, …) must be untouched in all three. Any mismatch raises
+    ValueError naming the preserved-content violation, and the caller's
+    original text is never replaced. This makes silent sibling loss
+    inexpressible regardless of lexical evasion class (raw strings,
+    escaped quotes, comments).
+    """
     from .validator import validate_vertex
 
     try:
-        vf = parse_vertex(text)
-        validate_vertex(vf)
+        after = _parse_vertex_or_raise(result, context)
+        validate_vertex(after)
     except Exception as exc:
         raise ValueError(
             f"{context} produced an invalid vertex: {exc}"
         ) from exc
-    return text
 
-
-def _kind_exists(text: str, kind: str) -> bool:
-    from .loader import parse_vertex
-
-    return kind in parse_vertex(text).loops
+    before_kinds = set(before.loops)
+    expected = set(before_kinds)
+    if added is not None:
+        expected.add(added)
+    if removed is not None:
+        expected.discard(removed)
+    after_kinds = set(after.loops)
+    if after_kinds != expected:
+        lost = sorted(expected - after_kinds)
+        gained = sorted(after_kinds - expected)
+        raise ValueError(
+            f"{context} violated content preservation: resulting kind set "
+            f"differs from the expected delta (lost: {lost}, unexpected: "
+            f"{gained}) — refusing; the original text is unchanged"
+        )
+    mutated = {added, edited, removed} - {None}
+    for k in before_kinds - mutated:
+        if before.loops[k] != after.loops[k]:
+            raise ValueError(
+                f"{context} violated content preservation: sibling kind "
+                f"{k!r} was altered by the text splice — refusing; the "
+                "original text is unchanged"
+            )
+    # Non-kind vertex content (store, sources, routes, …) must be untouched.
+    # VertexFile fields are exposed via __match_args__ (the frozen-AST shim).
+    for f in type(before).__match_args__:
+        if f == "loops":
+            continue
+        if getattr(before, f) != getattr(after, f):
+            raise ValueError(
+                f"{context} violated content preservation: non-kind vertex "
+                f"content changed (field {f!r}) — refusing; the original "
+                "text is unchanged"
+            )
+    return result
 
 
 def _reject_shared_line(text: str, kind: str, verb: str) -> None:
@@ -313,7 +381,8 @@ def add_vertex_kind(text: str, kind: str, definition: LoopDef) -> str:
     lines by the insert.
     """
     _validate_kind_name(kind)
-    if _kind_exists(text, kind):
+    before = _parse_vertex_or_raise(text, f"add_vertex_kind({kind!r})")
+    if kind in before.loops:
         raise ValueError(f"kind {kind!r} already exists; use edit_vertex_kind")
 
     child = loop_def_to_kdl(kind, definition)
@@ -333,7 +402,7 @@ def add_vertex_kind(text: str, kind: str, definition: LoopDef) -> str:
         if text and not text.endswith("\n"):
             text += "\n"
         result = text + block
-    return _validated(result, f"add_vertex_kind({kind!r})")
+    return _verified(before, result, f"add_vertex_kind({kind!r})", added=kind)
 
 
 def edit_vertex_kind(text: str, kind: str, definition: LoopDef) -> str:
@@ -344,6 +413,7 @@ def edit_vertex_kind(text: str, kind: str, definition: LoopDef) -> str:
     documented expand-on-insert limitation is one-way).
     """
     _validate_kind_name(kind)
+    before = _parse_vertex_or_raise(text, f"edit_vertex_kind({kind!r})")
     _reject_shared_line(text, kind, "edit")
     try:
         start, end = kdl_find_block(text, ["loops", kind])
@@ -364,7 +434,7 @@ def edit_vertex_kind(text: str, kind: str, definition: LoopDef) -> str:
     result = "\n".join(lines)
     if text.endswith("\n"):
         result += "\n"
-    return _validated(result, f"edit_vertex_kind({kind!r})")
+    return _verified(before, result, f"edit_vertex_kind({kind!r})", edited=kind)
 
 
 def remove_vertex_kind(text: str, kind: str) -> str:
@@ -375,6 +445,7 @@ def remove_vertex_kind(text: str, kind: str) -> str:
     removing the last kind of a vertex with no other sources.
     """
     _validate_kind_name(kind)
+    before = _parse_vertex_or_raise(text, f"remove_vertex_kind({kind!r})")
     _reject_shared_line(text, kind, "remove")
     try:
         result = kdl_remove_child(text, ["loops"], kind)
@@ -384,4 +455,6 @@ def remove_vertex_kind(text: str, kind: str) -> str:
             "blocks cannot be mutated in place — expand across lines first): "
             f"{exc}"
         ) from exc
-    return _validated(result, f"remove_vertex_kind({kind!r})")
+    return _verified(
+        before, result, f"remove_vertex_kind({kind!r})", removed=kind
+    )

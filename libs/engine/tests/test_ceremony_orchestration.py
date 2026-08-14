@@ -616,3 +616,54 @@ def test_intent_write_failure_closes_store_and_refuses_typed(world, monkeypatch)
     assert opened, "the pre-intent open must have happened"
     assert opened[0]._conn is None, "store handle leaked"
     assert not intent_path_for(world["vertex"]).exists()
+
+
+# --- intent-gate TOCTOU (thread:intent-gate-toctou, S2 gate finding) -------
+
+
+def test_intent_create_is_exclusive_gate(world):
+    """The create IS the gate: an existing intent makes _write_intent raise
+    FileExistsError with the winner's bytes untouched — no tempfile+rename
+    clobber window."""
+    from engine.ceremony import _write_intent
+
+    preview = plan_declaration_update(world["vertex"])
+    path = intent_path_for(world["vertex"])
+    path.write_text('{"v": 1, "winner": true}\n', encoding="utf-8")
+    winner = path.read_bytes()
+    with pytest.raises(FileExistsError):
+        _write_intent(preview, "obs")
+    assert path.read_bytes() == winner
+
+
+def test_two_apply_race_second_refuses_winner_intent_untouched(
+    world, monkeypatch,
+):
+    """Deterministic two-apply race: the loser's exists()-check reports
+    clear (the TOCTOU window), the winner's intent lands, and the loser's
+    create must refuse typed pending-intent — never clobber the winner's
+    intent evidence."""
+    import engine.ceremony as ceremony
+
+    preview = plan_declaration_update(world["vertex"])
+    real_intent_path_for = ceremony.intent_path_for
+
+    class _RacyPath(type(Path())):
+        # Simulates the race window: the pre-create existence check says
+        # clear even though the winner's intent is about to be (or is) there.
+        def exists(self) -> bool:
+            return False
+
+    monkeypatch.setattr(
+        ceremony, "intent_path_for",
+        lambda p: _RacyPath(real_intent_path_for(p)),
+    )
+    winner_path = real_intent_path_for(world["vertex"])
+    winner_path.write_text('{"v": 1, "winner": true}\n', encoding="utf-8")
+    winner = winner_path.read_bytes()
+
+    result = apply_declaration_update(
+        preview, observer="obs", credentials=Creds()
+    )
+    assert result.status == "pending-intent", (result.status, result.reason)
+    assert winner_path.read_bytes() == winner  # evidence never clobbered

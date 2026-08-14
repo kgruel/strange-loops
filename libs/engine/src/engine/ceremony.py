@@ -23,7 +23,8 @@ Protocol rules owned here
   machinery) → atomic file replace → intent removal. Every prefix of that
   sequence is recoverable.
 - **Durable intent** (P0.3) lives as a SIBLING of the ``.vertex`` file —
-  ``<name>.vertex.intent`` — written atomically (tempfile + fsync + rename)
+  ``<name>.vertex.intent`` — created exclusively (O_CREAT|O_EXCL + fsync;
+  the create IS the concurrency gate)
   BEFORE anything mutates. Sibling, not store-adjacent, because (a) the
   vertex path is the one handle plan, apply, and recover all share; (b) a
   JSONL-canonical store has TWO adjacent artifacts (log + index) and no
@@ -438,7 +439,28 @@ def _write_intent(preview: DeclarationUpdatePreview, observer: str) -> Path:
         "proposed_text": preview.proposed_text,
     }
     path = intent_path_for(preview.vertex_path)
-    _atomic_write(path, json.dumps(intent, indent=2) + "\n")
+    # The CREATE is the gate (thread:intent-gate-toctou): O_CREAT|O_EXCL
+    # makes intent creation atomic-by-construction — a racing second apply
+    # gets FileExistsError here instead of a tempfile+rename that would
+    # clobber the winner's intent evidence. The exists() pre-check upstream
+    # stays as the fast path; this is the authoritative one, race-free.
+    # fsync discipline kept; a crash mid-write leaves a partial intent,
+    # which recovery classifies loudly as IntentCorrupt (refuse, not
+    # guess). The sibling no-parent-dir-fsync limitation stays as-is
+    # (shared with JsonlStore, documented).
+    fd = os.open(str(path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(json.dumps(intent, indent=2) + "\n")
+            fh.flush()
+            os.fsync(fh.fileno())
+    except BaseException:
+        # The create won the gate but the bytes never became durable —
+        # remove the partial file so the failed apply leaves zero residue
+        # (the OSError path upstream reports "nothing mutated").
+        with contextlib.suppress(OSError):
+            path.unlink()
+        raise
     return path
 
 
@@ -460,7 +482,8 @@ def apply_declaration_update(
 
     1. open the canonical store — a failure here provably mutated nothing
        and no intent exists yet, so it refuses typed with zero residue;
-    2. durable intent (sibling ``.vertex.intent``, tempfile+fsync+rename) —
+    2. durable intent (sibling ``.vertex.intent``, exclusive O_CREAT|O_EXCL
+       create + fsync — the create is the race-free gate) —
        a write failure here is a typed pre-ceremony ``refused`` (nothing
        mutated), and the store handle from (1) is closed either way;
     3. the S1b store ceremony — ``absorb_genesis`` or
@@ -601,6 +624,20 @@ def apply_declaration_update(
         # is a typed pre-ceremony refusal — nothing mutated, no residue.
         try:
             intent_path = _write_intent(preview, observer)
+        except FileExistsError:
+            # The exclusive create lost a race the exists() fast path could
+            # not see (TOCTOU window): another apply's intent landed between
+            # the check and the create. Same typed outcome as the fast path,
+            # and the winner's intent bytes are untouched.
+            return DeclarationUpdateResult(
+                status="pending-intent",
+                reason=(
+                    f"pending declaration-update intent at {pending} — "
+                    "another apply won the intent gate; run "
+                    "recover_declaration_update first"
+                ),
+                intent_path=pending,
+            )
         except OSError as exc:
             return DeclarationUpdateResult(
                 status="refused",

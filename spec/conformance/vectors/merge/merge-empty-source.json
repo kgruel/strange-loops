@@ -1,0 +1,71 @@
+{
+  "name": "merge-empty-source",
+  "description": "Pins empty source merge boundary: merging an empty source store into a populated target adds 0 facts, skips 0 facts, and leaves target store contents unchanged.",
+  "input": {
+    "target": [
+      [
+        "01TARGET000000000000000001",
+        {
+          "kind": "note",
+          "ts": 100.0,
+          "payload": {
+            "text": "hello"
+          },
+          "observer": "alice",
+          "origin": ""
+        }
+      ],
+      [
+        "01TARGET000000000000000002",
+        {
+          "kind": "note",
+          "ts": 200.0,
+          "payload": {
+            "text": "world"
+          },
+          "observer": "alice",
+          "origin": ""
+        }
+      ]
+    ],
+    "source": []
+  },
+  "expected": {
+    "result": {
+      "facts_added": 0,
+      "facts_skipped": 0,
+      "ticks_added": 0,
+      "ticks_skipped": 0
+    },
+    "post_merge_ids": [
+      "01TARGET000000000000000001",
+      "01TARGET000000000000000002"
+    ],
+    "post_merge_facts": [
+      [
+        "01TARGET000000000000000001",
+        {
+          "kind": "note",
+          "ts": 100.0,
+          "payload": {
+            "text": "hello"
+          },
+          "observer": "alice",
+          "origin": ""
+        }
+      ],
+      [
+        "01TARGET000000000000000002",
+        {
+          "kind": "note",
+          "ts": 200.0,
+          "payload": {
+            "text": "world"
+          },
+          "observer": "alice",
+          "origin": ""
+        }
+      ]
+    ]
+  }
+}

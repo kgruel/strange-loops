@@ -284,3 +284,36 @@ A witness position denotes an inclusive prefix of rows received by the store: `r
 
 An object mapping each cursor label defined in `input.cursors` to its exact expected fold state dictionary evaluated at that witness position.
 
+---
+
+## 8. Area: `merge`
+
+The `merge` area pins store-level merge semantics (`store.merge_store`): combining two stores with primary-key deduplication on fact IDs.
+Given a target store initialized with an append-ordered sequence of `target` facts and a source store initialized with an append-ordered sequence of `source` facts (or self-merge on target), executing `merge_store` combines the stores:
+1. Deduplication operates via `INSERT OR IGNORE` on the fact `id` primary key.
+2. Facts from the source store are inserted ordered by `(ts ASC, id ASC)`.
+3. New source facts land with new rowids appended AFTER target's existing rows.
+4. For facts with shared IDs between target and source, target's existing rowid position and content are preserved; source duplicates are skipped.
+5. On divergent collisions (same fact ID, different payload content), target's content is preserved and source's is skipped (decision: `friction:merge-divergent-collision-invisible`).
+
+### `input` Schema
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `target` | array of `[fact_id, Fact Object]` | Yes | Sequence of facts initially in the target store in APPEND order. |
+| `source` | array of `[fact_id, Fact Object]` | No | Sequence of facts in the source store in APPEND order (default: `[]`). Omitted/ignored when `self_merge` is true. |
+| `self_merge` | boolean | No | Whether the merge operation merges target into itself (default: `false`). |
+| `spec` | Spec Object | No | Spec definition defining state fields and fold operations (required if `cursors` is specified). |
+| `cursors` | object | No | Key-value mapping of cursor labels to cursor addresses evaluated on target after merge. |
+
+### `expected` Schema
+
+An object containing:
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `result` | object | Yes | MergeResult counters: `facts_added` (int), `facts_skipped` (int), `ticks_added` (int), `ticks_skipped` (int). |
+| `post_merge_ids` | array of strings | Yes | Ordered array of fact IDs in target store post-merge rowid order (`SELECT id FROM facts ORDER BY rowid ASC`). |
+| `post_merge_facts` | array of `[fact_id, Fact Object]` | No | Full post-merge facts in target store in rowid order. |
+| `witness_folds` | object | No | Fold state dictionary for each cursor label defined in `input.cursors` evaluated on target after merge. |
+

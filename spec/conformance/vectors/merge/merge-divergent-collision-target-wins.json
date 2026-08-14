@@ -1,0 +1,62 @@
+{
+  "name": "merge-divergent-collision-target-wins",
+  "description": "Pins decision:friction:merge-divergent-collision-invisible: on primary-key ID collision with divergent payload content, target's version survives, source's version is silently dropped, and MergeResult counts it as skipped; this vector documents CURRENT behavior and will be edited deliberately when facts_divergent lands.",
+  "input": {
+    "target": [
+      [
+        "01COLLISION0000000000000001",
+        {
+          "kind": "config",
+          "ts": 100.0,
+          "payload": {
+            "setting": "mode",
+            "val": "target_active"
+          },
+          "observer": "alice",
+          "origin": ""
+        }
+      ]
+    ],
+    "source": [
+      [
+        "01COLLISION0000000000000001",
+        {
+          "kind": "config",
+          "ts": 100.0,
+          "payload": {
+            "setting": "mode",
+            "val": "source_divergent_override"
+          },
+          "observer": "bob",
+          "origin": ""
+        }
+      ]
+    ]
+  },
+  "expected": {
+    "result": {
+      "facts_added": 0,
+      "facts_skipped": 1,
+      "ticks_added": 0,
+      "ticks_skipped": 0
+    },
+    "post_merge_ids": [
+      "01COLLISION0000000000000001"
+    ],
+    "post_merge_facts": [
+      [
+        "01COLLISION0000000000000001",
+        {
+          "kind": "config",
+          "ts": 100.0,
+          "payload": {
+            "setting": "mode",
+            "val": "target_active"
+          },
+          "observer": "alice",
+          "origin": ""
+        }
+      ]
+    ]
+  }
+}

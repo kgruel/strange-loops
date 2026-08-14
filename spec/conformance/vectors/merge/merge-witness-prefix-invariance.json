@@ -1,0 +1,228 @@
+{
+  "name": "merge-witness-prefix-invariance",
+  "description": "Pins witness prefix invariance under merge (SPEC \u00a79.3): merging backdated source facts into a target with an existing witness cursor P leaves the fold state at P unchanged because witness boundaries are append-order (rowid), not event-time (ts).",
+  "input": {
+    "target": [
+      [
+        "01TARGET000000000000000001",
+        {
+          "kind": "account",
+          "ts": 100.0,
+          "payload": {
+            "amount": 500.0,
+            "desc": "init"
+          },
+          "observer": "bank",
+          "origin": ""
+        }
+      ],
+      [
+        "01TARGET000000000000000002",
+        {
+          "kind": "account",
+          "ts": 200.0,
+          "payload": {
+            "amount": -100.0,
+            "desc": "atm"
+          },
+          "observer": "bank",
+          "origin": ""
+        }
+      ]
+    ],
+    "source": [
+      [
+        "01SOURCE000000000000000001",
+        {
+          "kind": "account",
+          "ts": 50.0,
+          "payload": {
+            "amount": 25.0,
+            "desc": "backdated_interest"
+          },
+          "observer": "bank",
+          "origin": ""
+        }
+      ],
+      [
+        "01SOURCE000000000000000002",
+        {
+          "kind": "account",
+          "ts": 300.0,
+          "payload": {
+            "amount": 200.0,
+            "desc": "salary"
+          },
+          "observer": "bank",
+          "origin": ""
+        }
+      ]
+    ],
+    "spec": {
+      "name": "account",
+      "state_fields": [
+        {
+          "name": "balance",
+          "kind": "float"
+        },
+        {
+          "name": "count",
+          "kind": "int"
+        },
+        {
+          "name": "history",
+          "kind": "list"
+        }
+      ],
+      "folds": [
+        {
+          "op": "sum",
+          "target": "balance",
+          "field": "amount"
+        },
+        {
+          "op": "count",
+          "target": "count"
+        },
+        {
+          "op": "collect",
+          "target": "history"
+        }
+      ]
+    },
+    "cursors": {
+      "p_cursor": "01TARGET000000000000000002",
+      "head": "head"
+    }
+  },
+  "expected": {
+    "result": {
+      "facts_added": 2,
+      "facts_skipped": 0,
+      "ticks_added": 0,
+      "ticks_skipped": 0
+    },
+    "post_merge_ids": [
+      "01TARGET000000000000000001",
+      "01TARGET000000000000000002",
+      "01SOURCE000000000000000001",
+      "01SOURCE000000000000000002"
+    ],
+    "post_merge_facts": [
+      [
+        "01TARGET000000000000000001",
+        {
+          "kind": "account",
+          "ts": 100.0,
+          "payload": {
+            "amount": 500.0,
+            "desc": "init"
+          },
+          "observer": "bank",
+          "origin": ""
+        }
+      ],
+      [
+        "01TARGET000000000000000002",
+        {
+          "kind": "account",
+          "ts": 200.0,
+          "payload": {
+            "amount": -100.0,
+            "desc": "atm"
+          },
+          "observer": "bank",
+          "origin": ""
+        }
+      ],
+      [
+        "01SOURCE000000000000000001",
+        {
+          "kind": "account",
+          "ts": 50.0,
+          "payload": {
+            "amount": 25.0,
+            "desc": "backdated_interest"
+          },
+          "observer": "bank",
+          "origin": ""
+        }
+      ],
+      [
+        "01SOURCE000000000000000002",
+        {
+          "kind": "account",
+          "ts": 300.0,
+          "payload": {
+            "amount": 200.0,
+            "desc": "salary"
+          },
+          "observer": "bank",
+          "origin": ""
+        }
+      ]
+    ],
+    "witness_folds": {
+      "p_cursor": {
+        "balance": 400.0,
+        "count": 2,
+        "history": [
+          {
+            "amount": 500.0,
+            "desc": "init",
+            "_ts": 100.0,
+            "_observer": "bank",
+            "_origin": "",
+            "_id": "01TARGET000000000000000001"
+          },
+          {
+            "amount": -100.0,
+            "desc": "atm",
+            "_ts": 200.0,
+            "_observer": "bank",
+            "_origin": "",
+            "_id": "01TARGET000000000000000002"
+          }
+        ]
+      },
+      "head": {
+        "balance": 625.0,
+        "count": 4,
+        "history": [
+          {
+            "amount": 25.0,
+            "desc": "backdated_interest",
+            "_ts": 50.0,
+            "_observer": "bank",
+            "_origin": "",
+            "_id": "01SOURCE000000000000000001"
+          },
+          {
+            "amount": 500.0,
+            "desc": "init",
+            "_ts": 100.0,
+            "_observer": "bank",
+            "_origin": "",
+            "_id": "01TARGET000000000000000001"
+          },
+          {
+            "amount": -100.0,
+            "desc": "atm",
+            "_ts": 200.0,
+            "_observer": "bank",
+            "_origin": "",
+            "_id": "01TARGET000000000000000002"
+          },
+          {
+            "amount": 200.0,
+            "desc": "salary",
+            "_ts": 300.0,
+            "_observer": "bank",
+            "_origin": "",
+            "_id": "01SOURCE000000000000000002"
+          }
+        ]
+      }
+    }
+  }
+}

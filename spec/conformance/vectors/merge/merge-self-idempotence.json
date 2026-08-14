@@ -1,0 +1,71 @@
+{
+  "name": "merge-self-idempotence",
+  "description": "Pins self-merge idempotence edge case: merging a store into itself adds 0 facts, skips all existing facts as duplicates, and leaves store contents unchanged.",
+  "input": {
+    "target": [
+      [
+        "01SELF00000000000000000001",
+        {
+          "kind": "ping",
+          "ts": 100.0,
+          "payload": {
+            "seq": 1
+          },
+          "observer": "alice",
+          "origin": ""
+        }
+      ],
+      [
+        "01SELF00000000000000000002",
+        {
+          "kind": "ping",
+          "ts": 200.0,
+          "payload": {
+            "seq": 2
+          },
+          "observer": "alice",
+          "origin": ""
+        }
+      ]
+    ],
+    "self_merge": true
+  },
+  "expected": {
+    "result": {
+      "facts_added": 0,
+      "facts_skipped": 2,
+      "ticks_added": 0,
+      "ticks_skipped": 0
+    },
+    "post_merge_ids": [
+      "01SELF00000000000000000001",
+      "01SELF00000000000000000002"
+    ],
+    "post_merge_facts": [
+      [
+        "01SELF00000000000000000001",
+        {
+          "kind": "ping",
+          "ts": 100.0,
+          "payload": {
+            "seq": 1
+          },
+          "observer": "alice",
+          "origin": ""
+        }
+      ],
+      [
+        "01SELF00000000000000000002",
+        {
+          "kind": "ping",
+          "ts": 200.0,
+          "payload": {
+            "seq": 2
+          },
+          "observer": "alice",
+          "origin": ""
+        }
+      ]
+    ]
+  }
+}

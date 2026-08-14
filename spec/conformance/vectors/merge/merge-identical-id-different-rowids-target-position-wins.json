@@ -1,0 +1,134 @@
+{
+  "name": "merge-identical-id-different-rowids-target-position-wins",
+  "description": "Pins merge deduplication position authority: when an identical fact exists at different rowid positions in target and source, target's receipt rowid position wins and the source instance is skipped.",
+  "input": {
+    "target": [
+      [
+        "01TARGET000000000000000001",
+        {
+          "kind": "log",
+          "ts": 100.0,
+          "payload": {
+            "msg": "t_first"
+          },
+          "observer": "alice",
+          "origin": ""
+        }
+      ],
+      [
+        "01SHARED00000000000000000X",
+        {
+          "kind": "log",
+          "ts": 200.0,
+          "payload": {
+            "msg": "shared_mid"
+          },
+          "observer": "alice",
+          "origin": ""
+        }
+      ],
+      [
+        "01TARGET000000000000000002",
+        {
+          "kind": "log",
+          "ts": 300.0,
+          "payload": {
+            "msg": "t_last"
+          },
+          "observer": "alice",
+          "origin": ""
+        }
+      ]
+    ],
+    "source": [
+      [
+        "01SHARED00000000000000000X",
+        {
+          "kind": "log",
+          "ts": 200.0,
+          "payload": {
+            "msg": "shared_mid"
+          },
+          "observer": "alice",
+          "origin": ""
+        }
+      ],
+      [
+        "01SOURCE000000000000000001",
+        {
+          "kind": "log",
+          "ts": 400.0,
+          "payload": {
+            "msg": "s_new"
+          },
+          "observer": "bob",
+          "origin": ""
+        }
+      ]
+    ]
+  },
+  "expected": {
+    "result": {
+      "facts_added": 1,
+      "facts_skipped": 1,
+      "ticks_added": 0,
+      "ticks_skipped": 0
+    },
+    "post_merge_ids": [
+      "01TARGET000000000000000001",
+      "01SHARED00000000000000000X",
+      "01TARGET000000000000000002",
+      "01SOURCE000000000000000001"
+    ],
+    "post_merge_facts": [
+      [
+        "01TARGET000000000000000001",
+        {
+          "kind": "log",
+          "ts": 100.0,
+          "payload": {
+            "msg": "t_first"
+          },
+          "observer": "alice",
+          "origin": ""
+        }
+      ],
+      [
+        "01SHARED00000000000000000X",
+        {
+          "kind": "log",
+          "ts": 200.0,
+          "payload": {
+            "msg": "shared_mid"
+          },
+          "observer": "alice",
+          "origin": ""
+        }
+      ],
+      [
+        "01TARGET000000000000000002",
+        {
+          "kind": "log",
+          "ts": 300.0,
+          "payload": {
+            "msg": "t_last"
+          },
+          "observer": "alice",
+          "origin": ""
+        }
+      ],
+      [
+        "01SOURCE000000000000000001",
+        {
+          "kind": "log",
+          "ts": 400.0,
+          "payload": {
+            "msg": "s_new"
+          },
+          "observer": "bob",
+          "origin": ""
+        }
+      ]
+    ]
+  }
+}

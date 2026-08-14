@@ -107,3 +107,104 @@ def test_emit_fact_nonexistent_vertex_raises_target_not_found(tmp_path: Path) ->
             {"body": "test"},
             observer="tester",
         )
+
+
+def test_custody_credential_provider_for_write(sample_vertex: Path) -> None:
+    """CustodyCredentialProvider returns valid WriteCredentials with signers."""
+    from client.emit import CustodyCredentialProvider
+
+    # Without keys, signers are None
+    provider = CustodyCredentialProvider()
+    creds_empty = provider.for_write(sample_vertex)
+    assert creds_empty.fact_signer is None
+    assert creds_empty.tick_signer is None
+
+    # After creating vertex and observer signing keys, signers become callable
+    ensure_signing_key(sample_vertex)
+    ensure_signing_key(sample_vertex, "admin")
+    creds_with_key = provider.for_write(sample_vertex)
+    assert callable(creds_with_key.fact_signer)
+    assert callable(creds_with_key.tick_signer)
+
+
+def test_emit_fact_preserves_custom_origin_and_ts(sample_vertex: Path) -> None:
+    """emit_fact correctly forwards origin and ts to the stored fact."""
+    fixed_ts = 1712345678.0
+    custom_origin = "agent-alpha-9"
+
+    receipt = emit_fact(
+        sample_vertex,
+        "note",
+        {"title": "Provenance test"},
+        observer="alice",
+        origin=custom_origin,
+        ts=fixed_ts,
+    )
+    assert receipt.stored is True
+
+    page = read_facts(sample_vertex, limit=1)
+    fact = page.items[0]
+    assert fact["id"] == receipt.id
+    assert fact["origin"] == custom_origin
+    assert fact["ts"].timestamp() == fixed_ts
+
+
+def test_emit_fact_default_ts_is_utc_now(sample_vertex: Path) -> None:
+    """emit_fact with ts=None defaults to current UTC timestamp."""
+    from datetime import UTC, datetime
+
+    before = datetime.now(UTC).timestamp()
+    receipt = emit_fact(
+        sample_vertex,
+        "note",
+        {"title": "Timestamp test"},
+        observer="alice",
+    )
+    after = datetime.now(UTC).timestamp()
+
+    page = read_facts(sample_vertex, limit=1)
+    fact_ts = page.items[0]["ts"].timestamp()
+    assert before <= fact_ts <= after + 1.0
+
+
+def test_emit_fact_custom_credentials_provider(sample_vertex: Path) -> None:
+    """emit_fact respects custom CredentialProvider instances."""
+    from engine.handle import CredentialProvider, WriteCredentials
+
+    called = False
+
+    class MockProvider(CredentialProvider):
+        def for_write(self, vertex: Path) -> WriteCredentials:
+            nonlocal called
+            called = True
+            return WriteCredentials(
+                tick_signer=lambda data, dt=None: None,
+                fact_signer=lambda obs, hash_bytes: None,
+            )
+
+    receipt = emit_fact(
+        sample_vertex,
+        "note",
+        {"title": "Custom cred test"},
+        observer="alice",
+        credentials=MockProvider(),
+    )
+    assert called is True
+    assert receipt.stored is True
+
+
+def test_emit_fact_corrupt_vertex_raises_emission_failed(tmp_path: Path) -> None:
+    """emit_fact raises EmissionFailed if vertex cannot be opened."""
+    from client import EmissionFailed
+
+    corrupt_vertex = tmp_path / "corrupt.vertex"
+    corrupt_vertex.write_text("invalid { [ unclosed", encoding="utf-8")
+
+    with pytest.raises(EmissionFailed) as exc_info:
+        emit_fact(
+            corrupt_vertex,
+            "note",
+            {"body": "test"},
+            observer="tester",
+        )
+    assert "could not open vertex" in str(exc_info.value)

@@ -24,9 +24,16 @@ store = { workspace = true }
 
 [dependency-groups]
 dev = [
+    "hypothesis>=6.100",
+    "mutmut>=3.2",
     "pytest>=8.0",
     "pytest-cov>=6.0",
+    "ruff>=0.8",
 ]
+
+[tool.mutmut]
+source_paths = ["src/client/"]
+also_copy = ["src"]
 
 [build-system]
 requires = ["hatchling"]
@@ -37,3 +44,22 @@ packages = ["src/client"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.coverage.run]
+source = ["src/client"]
+branch = true
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "@overload",
+    "\\.\\.\\.",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "PTH"]

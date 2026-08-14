@@ -131,3 +131,61 @@ def test_kind_operations_target_not_found(tmp_path: Path) -> None:
 
     with pytest.raises(TargetNotFound):
         add_kind(missing, "test", observer="admin")
+
+    with pytest.raises(TargetNotFound):
+        edit_kind(missing, "test", LoopDef(folds=()), observer="admin")
+
+    with pytest.raises(TargetNotFound):
+        remove_kind(missing, "test", observer="admin")
+
+
+def test_default_loop_def() -> None:
+    """_default_loop_def provides items collect 100."""
+    from client.kind import _default_loop_def
+
+    default_def = _default_loop_def()
+    assert len(default_def.folds) == 1
+    fold = default_def.folds[0]
+    assert fold.target == "items"
+    assert isinstance(fold.op, FoldCollect)
+    assert fold.op.max_items == 100
+
+
+def test_add_kind_duplicate_raises_ceremony_failed(sample_vertex: Path) -> None:
+    """add_kind for an already existing kind raises CeremonyFailed."""
+    ensure_signing_key(sample_vertex, "admin")
+
+    with pytest.raises(CeremonyFailed) as exc_info:
+        add_kind(sample_vertex, "note", observer="admin")
+    assert "could not generate kind mutation" in str(exc_info.value) or "already exists" in str(exc_info.value)
+
+
+def test_edit_kind_nonexistent_raises_ceremony_failed(sample_vertex: Path) -> None:
+    """edit_kind for a non-existent kind raises CeremonyFailed."""
+    ensure_signing_key(sample_vertex, "admin")
+
+    with pytest.raises(CeremonyFailed) as exc_info:
+        edit_kind(sample_vertex, "ghost_kind", LoopDef(folds=()), observer="admin")
+    assert "could not generate kind mutation" in str(exc_info.value) or "does not exist" in str(exc_info.value)
+
+
+def test_remove_kind_nonexistent_raises_ceremony_failed(sample_vertex: Path) -> None:
+    """remove_kind for a non-existent kind raises CeremonyFailed."""
+    ensure_signing_key(sample_vertex, "admin")
+
+    with pytest.raises(CeremonyFailed) as exc_info:
+        remove_kind(sample_vertex, "ghost_kind", observer="admin")
+    assert "could not generate kind mutation" in str(exc_info.value) or "does not exist" in str(exc_info.value)
+
+
+def test_recover_ceremony_nonexistent(tmp_path: Path) -> None:
+    """recover_ceremony handles non-existent intent file cleanly."""
+    from client import recover_ceremony
+
+    missing_intent = tmp_path / "test.vertex.intent"
+    outcome = recover_ceremony(missing_intent)
+    assert isinstance(outcome, dict)
+    assert "classification" in outcome
+    assert "finished" in outcome
+    assert "reason" in outcome
+    assert outcome["intent_path"] == str(missing_intent)

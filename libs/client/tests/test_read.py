@@ -245,3 +245,92 @@ def test_read_fact_by_id(populated_vertex: tuple[Path, list[EmitReceipt]]) -> No
     with pytest.raises(ValueError) as exc_info:
         read_fact_by_id(vertex_path, short_prefix)
     assert "Ambiguous ID prefix" in str(exc_info.value)
+
+
+# =============================================================================
+# 5. Missing Store & Serialization Unit Tests
+# =============================================================================
+
+
+def test_read_operations_missing_store(tmp_path: Path) -> None:
+    """Read operations against non-existent stores return empty/default structures."""
+    missing_store = tmp_path / "absent.jsonl"
+    missing_store.touch()  # exists so target resolves, then remove to simulate missing canonical
+    missing_store.unlink()
+
+    # Create a vertex pointing to absent store
+    vertex_path = tmp_path / "absent.vertex"
+    vertex_path.write_text('name "absent"\nstore ".loops/data/missing.db"\nloops { item { fold { items "collect" 10 } } }\n', encoding="utf-8")
+
+    # read_summary on storeless/absent vertex
+    summary = read_summary(vertex_path)
+    assert summary.target_type == "vertex"
+    assert summary.fact_total == 0
+
+    # read_facts
+    page = read_facts(vertex_path)
+    assert page.items == []
+    assert page.truncated is False
+
+    # read_ticks
+    ticks = read_ticks(vertex_path)
+    assert ticks == []
+
+    # read_fact_by_id
+    fact = read_fact_by_id(vertex_path, "any_id")
+    assert fact is None
+
+
+def test_fold_serialization_helpers() -> None:
+    """_serialize_fold_item and _serialize_fold_section preserve edge and scalar shapes."""
+    from types import SimpleNamespace
+    from client.read import _serialize_fold_item, _serialize_fold_section
+
+    mock_edge = SimpleNamespace(predicate="relates_to", address="other/123")
+    mock_item = SimpleNamespace(
+        payload={"k": "v"},
+        ts=1700000000.0,
+        observer="tester",
+        origin="cli",
+        id="01M01",
+        n=1,
+        refs=["ref1", "ref2"],
+        edges=[mock_edge],
+    )
+
+    serialized_item = _serialize_fold_item(mock_item)
+    assert serialized_item["payload"] == {"k": "v"}
+    assert serialized_item["ts"] == 1700000000.0
+    assert serialized_item["refs"] == ["ref1", "ref2"]
+    assert serialized_item["edges"] == [{"predicate": "relates_to", "address": "other/123"}]
+
+    mock_sub_section = SimpleNamespace(
+        kind="sub",
+        fold_type="collect",
+        key_field="id",
+        count=0,
+        scalars={},
+        preview_fields=[],
+        items=[],
+        sections=[],
+    )
+
+    mock_section = SimpleNamespace(
+        kind="main",
+        fold_type="collect",
+        key_field="id",
+        count=1,
+        scalars={"total": 10},
+        preview_fields=["title"],
+        items=[mock_item],
+        sections=[mock_sub_section],
+    )
+
+    serialized_section = _serialize_fold_section(mock_section)
+    assert serialized_section["kind"] == "main"
+    assert serialized_section["count"] == 1
+    assert serialized_section["scalars"] == {"total": 10}
+    assert serialized_section["preview_fields"] == ["title"]
+    assert len(serialized_section["items"]) == 1
+    assert len(serialized_section["sections"]) == 1
+    assert serialized_section["sections"][0]["kind"] == "sub"

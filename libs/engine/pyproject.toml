@@ -18,6 +18,7 @@ lang = { workspace = true }
 
 [dependency-groups]
 dev = [
+    "hypothesis>=6.100",
     "pytest>=8.0",
     "pytest-asyncio>=0.24",
     "pytest-cov>=6.0",

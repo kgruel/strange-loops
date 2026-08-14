@@ -33,7 +33,17 @@ info = resolve_target("path/to/target.vertex")
 ### 2. Read Operations
 
 ```python
-from client import read_summary, read_facts, read_state, read_ticks, read_fact_by_id
+from client import (
+    read_summary,
+    read_facts,
+    read_state,
+    read_ticks,
+    read_fact_by_id,
+    search_facts,
+    resolve_entity,
+    read_timeline,
+    sync_target,
+)
 
 # Target statistical summary & kind inventory
 summary = read_summary("target.vertex")
@@ -47,6 +57,19 @@ page = read_facts("target.vertex", limit=10, order="newest")
 state = read_state("target.vertex", kind="note")
 # -> FoldStateResult(vertex_name='target', sections={'note': {'count': 10, 'items': [...]}})
 
+# Full-text search across observation payloads
+search_res = search_facts("target.vertex", query="refactor auth", limit=10)
+# -> SearchResult(query='refactor auth', matches=[...], total_matches=1)
+
+# Domain entity fold-key resolution
+fact_id = resolve_entity("target.vertex", kind="task", key="task_id", value="T-100")
+
+# Interleaved chronological timeline (facts + ticks)
+timeline = read_timeline("target.vertex", limit=50)
+
+# Explicit index and FTS synchronization
+sync_res = sync_target("target.vertex")
+
 # Tick records
 ticks = read_ticks("target.vertex", name="default")
 
@@ -59,7 +82,7 @@ fact = read_fact_by_id("target.vertex", "01M01...")
 ### 3. Fact Emission
 
 ```python
-from client import emit_fact, EmitReceipt
+from client import emit_fact, preview_emission, emit_batch, EmitReceipt
 from atoms import Fact
 
 # Emitting by kind and payload
@@ -74,7 +97,6 @@ receipt = emit_fact(
 preview = preview_emission("target.vertex", "note", {"title": "Test"}, observer="alice")
 
 # Batch emission
-from client import emit_batch
 receipts = emit_batch("target.vertex", [fact, ("note", {"title": "Batch item"})], observer="alice")
 ```
 
@@ -122,6 +144,9 @@ All models are frozen, immutable dataclasses providing `.as_dict()` conversion:
 | **`ReadSummary`** | `loops.cli/read-summary/v1` | Domain-neutral inventory of facts, ticks, kinds, and storage agreement. |
 | **`FactPageResult`** | `loops.cli/facts-page/v1` | Bounded page of facts with pagination cursors (`before`/`after`). |
 | **`FoldStateResult`** | `loops.cli/fold-state/v1` | Replayed fold state across declared vertex sections. |
+| **`SearchResult`** | `loops.cli/search-result/v1` | Full-text search matches, snippets, and rankings. |
+| **`TimelineResult`** | `loops.cli/timeline-result/v1` | Interleaved chronological stream of facts and tick seals. |
+| **`SyncResult`** | `loops.cli/sync-result/v1` | Index reconciliation and FTS synchronization status. |
 | **`EmitReceipt`** | `loops.cli/emit-receipt/v1` | Stored fact attestation, tick mark, state change, affected sections, and delta count. |
 | **`EmitPreviewResult`** | `loops.cli/emit-preview/v1` | Preflight simulation of admission, fold keys, and storage predictions. |
 | **`KindMutationResult`** | `loops.cli/kind-mutation/v1` | Outcome of a declaration update ceremony and generation diffs. |
@@ -138,15 +163,20 @@ graph TD
     TargetError --> TargetNotWritable
     ClientError --> AdmissionFailed
     ClientError --> EmissionFailed
+    ClientError --> ClientValueError
+    ClientValueError --> InvalidEmissionRequest
+    EmissionFailed --> InvalidEmissionRequest
     EmissionFailed --> CommittedEmissionError
     ClientError --> CeremonyFailed
 ```
 
 - **`ClientError`**: Base class for all high-level client exceptions.
+- **`ClientValueError`**: Base class for client parameter and validation errors (inherits from `ValueError`).
 - **`TargetNotFound`**: Target path does not exist on disk.
 - **`TargetUnsupported`**: Path exists but is not a recognized Loops artifact.
 - **`TargetNotWritable`**: Target or derived index cannot be written to.
 - **`AdmissionFailed`**: Declared admission policy (strict kinds or observer grants) refused the operation.
 - **`EmissionFailed`**: Fact emission failed prior to committing.
+- **`InvalidEmissionRequest`**: Invalid emission parameters (missing required observer or invalid shape).
 - **`CommittedEmissionError`**: Fact was written to storage, but a post-commit task failed (carries `.fact_id`).
 - **`CeremonyFailed`**: Declaration update AST generation or ceremony apply was refused.

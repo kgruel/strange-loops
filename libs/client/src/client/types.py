@@ -99,6 +99,8 @@ class ReadSummary:
     agreement: bool | None = None
     declaration_status: str | None = None
     unfolded_kinds: list[str] = field(default_factory=list)
+    signed_count: int | None = None
+    unsigned_count: int | None = None
 
     def as_dict(self) -> dict[str, Any]:
         d = asdict(self)
@@ -174,6 +176,92 @@ class EmitPreviewResult:
     strict: bool = False
     would_store: bool = True
     would_fold: bool = True
+
+    def as_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class SearchResultItem:
+    """Individual match within a full-text search query."""
+
+    id: str
+    kind: str
+    ts: float
+    observer: str
+    origin: str
+    payload: dict[str, Any]
+    rank: float = 0.0
+    snippet: str = ""
+
+    def as_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class SearchResult:
+    """Full-text search query result."""
+
+    schema: str = "loops.cli/search-result/v1"
+    query: str = ""
+    matches: list[SearchResultItem] = field(default_factory=list)
+    total_matches: int = 0
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "schema": self.schema,
+            "query": self.query,
+            "matches": [m.as_dict() for m in self.matches],
+            "total_matches": self.total_matches,
+        }
+
+
+@dataclass(frozen=True)
+class TimelineEvent:
+    """Chronological event (fact or tick) in an interleaved timeline stream."""
+
+    event_type: str = "fact"
+    id: str = ""
+    kind_or_name: str = ""
+    ts: float = 0.0
+    observer: str = ""
+    origin: str = ""
+    payload: dict[str, Any] = field(default_factory=dict)
+
+    def as_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class TimelineResult:
+    """Interleaved chronological stream of facts and tick seals."""
+
+    schema: str = "loops.cli/timeline-result/v1"
+    events: list[TimelineEvent] = field(default_factory=list)
+    start_ts: float | None = None
+    end_ts: float | None = None
+    total_events: int = 0
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "schema": self.schema,
+            "events": [e.as_dict() for e in self.events],
+            "start_ts": self.start_ts,
+            "end_ts": self.end_ts,
+            "total_events": self.total_events,
+        }
+
+
+@dataclass(frozen=True)
+class SyncResult:
+    """Result of an index synchronization or reindex operation."""
+
+    schema: str = "loops.cli/sync-result/v1"
+    target_path: str = ""
+    status: str = "synced"
+    indexed_facts: int = 0
+    agreement: bool = True
+    duration_ms: float = 0.0
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)

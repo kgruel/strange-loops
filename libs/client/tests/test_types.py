@@ -254,3 +254,81 @@ def test_kind_mutation_result_model() -> None:
     assert d["mode"] == "clean"
     assert d["file_written"] is True
     assert d["generation_after"] == {"generation": 2}
+
+
+def test_search_result_models() -> None:
+    """SearchResult and SearchResultItem defaults, immutability, and serialization."""
+    from client import SearchResult, SearchResultItem
+
+    item = SearchResultItem(
+        id="01FACT00000000000000000001",
+        kind="task",
+        ts=1700000000.0,
+        observer="alice",
+        origin="cli",
+        payload={"title": "Test task"},
+        rank=-1.25,
+        snippet="Test <b>task</b>",
+    )
+    with pytest.raises(FrozenInstanceError):
+        item.rank = 0.0  # type: ignore[misc]
+
+    res = SearchResult(query="task", matches=[item], total_matches=1)
+    with pytest.raises(FrozenInstanceError):
+        res.total_matches = 2  # type: ignore[misc]
+
+    d = res.as_dict()
+    assert d["schema"] == "loops.cli/search-result/v1"
+    assert d["query"] == "task"
+    assert d["total_matches"] == 1
+    assert len(d["matches"]) == 1
+    assert d["matches"][0]["id"] == "01FACT00000000000000000001"
+
+
+def test_timeline_result_models() -> None:
+    """TimelineResult and TimelineEvent defaults, immutability, and serialization."""
+    from client import TimelineEvent, TimelineResult
+
+    evt = TimelineEvent(
+        event_type="fact",
+        id="01FACT00000000000000000001",
+        kind_or_name="task",
+        ts=1700000000.0,
+        observer="alice",
+        origin="cli",
+        payload={"title": "Test task"},
+    )
+    with pytest.raises(FrozenInstanceError):
+        evt.ts = 0.0  # type: ignore[misc]
+
+    res = TimelineResult(events=[evt], start_ts=1700000000.0, end_ts=1700000100.0, total_events=1)
+    with pytest.raises(FrozenInstanceError):
+        res.total_events = 2  # type: ignore[misc]
+
+    d = res.as_dict()
+    assert d["schema"] == "loops.cli/timeline-result/v1"
+    assert d["start_ts"] == 1700000000.0
+    assert d["total_events"] == 1
+    assert len(d["events"]) == 1
+
+
+def test_sync_result_model() -> None:
+    """SyncResult defaults, immutability, and serialization."""
+    from client import SyncResult
+
+    res = SyncResult(
+        target_path="/tmp/test.vertex",
+        status="synced",
+        indexed_facts=42,
+        agreement=True,
+        duration_ms=12.5,
+    )
+    with pytest.raises(FrozenInstanceError):
+        res.status = "failed"  # type: ignore[misc]
+
+    d = res.as_dict()
+    assert d["schema"] == "loops.cli/sync-result/v1"
+    assert d["target_path"] == "/tmp/test.vertex"
+    assert d["status"] == "synced"
+    assert d["indexed_facts"] == 42
+    assert d["agreement"] is True

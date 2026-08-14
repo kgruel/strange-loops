@@ -13,6 +13,10 @@ from .read import (
     read_state,
     read_summary,
     read_ticks,
+    read_timeline,
+    resolve_entity,
+    search_facts,
+    sync_target,
 )
 from .target import TargetInfo, resolve_target
 from .types import (
@@ -29,10 +33,15 @@ from .types import (
     InvalidEmissionRequest,
     KindMutationResult,
     ReadSummary,
+    SearchResult,
+    SearchResultItem,
+    SyncResult,
     TargetError,
     TargetNotFound,
     TargetNotWritable,
     TargetUnsupported,
+    TimelineEvent,
+    TimelineResult,
 )
 
 __all__ = [
@@ -43,6 +52,10 @@ __all__ = [
     "read_state",
     "read_ticks",
     "read_fact_by_id",
+    "search_facts",
+    "resolve_entity",
+    "read_timeline",
+    "sync_target",
     "emit_fact",
     "emit_batch",
     "preview_emission",
@@ -59,6 +72,11 @@ __all__ = [
     "FoldStateResult",
     "EmitReceipt",
     "EmitPreviewResult",
+    "SearchResult",
+    "SearchResultItem",
+    "TimelineResult",
+    "TimelineEvent",
+    "SyncResult",
     "KindMutationResult",
     # Exceptions
     "ClientError",

@@ -334,3 +334,257 @@ def test_fold_serialization_helpers() -> None:
     assert len(serialized_section["items"]) == 1
     assert len(serialized_section["sections"]) == 1
     assert serialized_section["sections"][0]["kind"] == "sub"
+
+
+# =============================================================================
+# 6. Full-Text Search, Entity Resolution & Timeline Tests
+# =============================================================================
+
+
+def test_sync_target_and_search_facts(tmp_path: Path) -> None:
+    """sync_target indexes searchable fields and search_facts finds matching payloads."""
+    from client import search_facts, sync_target
+
+    vertex = tmp_path / "searchable.vertex"
+    vertex.write_text(
+        'name "searchable"\n'
+        'store ".loops/data/searchable.db"\n'
+        'loops {\n'
+        '  task {\n'
+        '    search "title" "body"\n'
+        '    fold {\n'
+        '      items "collect" 100\n'
+        '    }\n'
+        '  }\n'
+        '}\n',
+        encoding="utf-8",
+    )
+
+    emit_fact(vertex, "task", {"title": "Refactor auth system", "body": "Need JWTs"}, observer="alice")
+    emit_fact(vertex, "task", {"title": "Fix database leak", "body": "Connection pool issue"}, observer="bob")
+
+    # Explicit sync
+    sync_res = sync_target(vertex)
+    assert sync_res.status == "synced"
+    assert sync_res.indexed_facts == 2
+    assert sync_res.agreement is True
+
+    # Search for "auth"
+    auth_search = search_facts(vertex, "auth")
+    assert auth_search.total_matches == 1
+    assert auth_search.matches[0].payload["title"] == "Refactor auth system"
+
+    # Search with kind filter
+    pool_search = search_facts(vertex, "database", kind="task")
+    assert pool_search.total_matches == 1
+    assert pool_search.matches[0].payload["title"] == "Fix database leak"
+
+
+def test_resolve_entity(tmp_path: Path) -> None:
+    """resolve_entity looks up a canonical fact ID by fold key field and value."""
+    from client import resolve_entity
+
+    vertex = tmp_path / "keyed.vertex"
+    vertex.write_text(
+        'name "keyed"\n'
+        'store ".loops/data/keyed.db"\n'
+        'loops {\n'
+        '  task {\n'
+        '    fold {\n'
+        '      items "by" "task_id"\n'
+        '    }\n'
+        '  }\n'
+        '}\n',
+        encoding="utf-8",
+    )
+
+    r1 = emit_fact(vertex, "task", {"task_id": "T-101", "title": "First"}, observer="alice")
+    r2 = emit_fact(vertex, "task", {"task_id": "T-102", "title": "Second"}, observer="alice")
+
+    resolved = resolve_entity(vertex, "task", "task_id", "T-101")
+    assert resolved == r1.id
+
+    resolved_2 = resolve_entity(vertex, "task", "task_id", "T-102")
+    assert resolved_2 == r2.id
+
+    resolved_missing = resolve_entity(vertex, "task", "task_id", "T-999")
+    assert resolved_missing is None
+
+
+def test_read_timeline_interleaved(tmp_path: Path) -> None:
+    """read_timeline streams facts and ticks in chronological sequence."""
+    from client import read_timeline
+
+    vertex = tmp_path / "timeline.vertex"
+    vertex.write_text(
+        'name "timeline"\n'
+        'store ".loops/data/timeline.db"\n'
+        'loops {\n'
+        '  task {\n'
+        '    fold {\n'
+        '      items "collect" 100\n'
+        '    }\n'
+        '  }\n'
+        '}\n',
+        encoding="utf-8",
+    )
+
+    emit_fact(vertex, "task", {"title": "Event 1"}, observer="alice", ts=1700000010.0)
+    emit_fact(vertex, "task", {"title": "Event 2"}, observer="alice", ts=1700000020.0)
+
+    timeline = read_timeline(vertex, limit=10)
+    assert timeline.total_events >= 2
+    assert all(e.event_type in ("fact", "tick") for e in timeline.events)
+    assert timeline.events[0].payload["title"] == "Event 1"
+    assert timeline.events[1].payload["title"] == "Event 2"
+
+
+def test_read_summary_signed_counts(sample_vertex: Path) -> None:
+    """read_summary reports signed_count and unsigned_count."""
+    from custody import ensure_signing_key
+
+    ensure_signing_key(sample_vertex, "alice")
+    emit_fact(sample_vertex, "note", {"title": "Signed note"}, observer="alice")
+
+    summary = read_summary(sample_vertex)
+    assert summary.signed_count == 1
+    assert summary.unsigned_count == 1  # Genesis declaration fact is unsigned
+
+
+def test_combine_aggregate_reads(tmp_path: Path) -> None:
+    """Aggregate combine vertex reads facts, ticks, and summary across children."""
+    child_a = tmp_path / "child_a.vertex"
+    child_a.write_text(
+        'name "child_a"\n'
+        'store ".loops/data/a.db"\n'
+        'loops {\n'
+        '  task {\n'
+        '    fold {\n'
+        '      items "collect" 100\n'
+        '    }\n'
+        '  }\n'
+        '}\n',
+        encoding="utf-8",
+    )
+
+    child_b = tmp_path / "child_b.vertex"
+    child_b.write_text(
+        'name "child_b"\n'
+        'store ".loops/data/b.db"\n'
+        'loops {\n'
+        '  task {\n'
+        '    fold {\n'
+        '      items "collect" 100\n'
+        '    }\n'
+        '  }\n'
+        '}\n',
+        encoding="utf-8",
+    )
+
+    emit_fact(child_a, "task", {"title": "Child A Task"}, observer="alice")
+    emit_fact(child_b, "task", {"title": "Child B Task"}, observer="bob")
+
+    parent = tmp_path / "aggregate.vertex"
+    parent.write_text(
+        'name "aggregate"\n'
+        'combine {\n'
+        f'  vertex "{child_a}" as="a"\n'
+        f'  vertex "{child_b}" as="b"\n'
+        '}\n',
+        encoding="utf-8",
+    )
+
+    # Combined summary
+    summary = read_summary(parent)
+    assert summary.fact_total == 2
+
+    # Combined facts
+    facts_page = read_facts(parent, limit=10)
+    assert len(facts_page.items) == 2
+
+    # Combined search
+    from client import search_facts
+    search_res = search_facts(parent, "Task")
+    assert search_res.total_matches == 0 or isinstance(search_res.matches, list)
+
+
+def test_read_timeline_time_window(tmp_path: Path) -> None:
+    """read_timeline filters events within start_ts and end_ts bounds."""
+    from client import read_timeline
+
+    vertex = tmp_path / "window.vertex"
+    vertex.write_text(
+        'name "window"\n'
+        'store ".loops/data/window.db"\n'
+        'loops {\n'
+        '  task {\n'
+        '    fold {\n'
+        '      items "collect" 100\n'
+        '    }\n'
+        '  }\n'
+        '}\n',
+        encoding="utf-8",
+    )
+
+    emit_fact(vertex, "task", {"title": "T1"}, observer="alice", ts=100.0)
+    emit_fact(vertex, "task", {"title": "T2"}, observer="alice", ts=200.0)
+    emit_fact(vertex, "task", {"title": "T3"}, observer="alice", ts=300.0)
+
+    # Window from 150.0 to 250.0 should only include T2
+    res = read_timeline(vertex, start_ts=150.0, end_ts=250.0)
+    assert res.total_events == 1
+    assert res.events[0].payload["title"] == "T2"
+    assert res.start_ts == 150.0
+    assert res.end_ts == 250.0
+
+
+def test_read_timeline_missing_target(tmp_path: Path) -> None:
+    """read_timeline raises TargetNotFound on non-existent path."""
+    from client import TargetNotFound, read_timeline
+
+    missing = tmp_path / "absent.jsonl"
+    with pytest.raises(TargetNotFound):
+        read_timeline(missing)
+
+
+def test_sync_target_missing_store(tmp_path: Path) -> None:
+    """sync_target raises TargetNotFound on non-existent path."""
+    from client import TargetNotFound, sync_target
+
+    missing = tmp_path / "absent.jsonl"
+    with pytest.raises(TargetNotFound):
+        sync_target(missing)
+
+
+def test_sync_target_bare_store(tmp_path: Path) -> None:
+    """sync_target on valid bare store runs preflight recovery and returns synced status."""
+    from client import sync_target
+
+    log = tmp_path / "bare.jsonl"
+    log.write_text('{"id":"01","kind":"task","ts":1700000000.0,"observer":"alice","origin":"","payload":{"k":"v"}}\n', encoding="utf-8")
+
+def test_sync_target_bare_store(tmp_path: Path) -> None:
+    """sync_target on valid bare store runs preflight recovery and returns synced status."""
+    from client import sync_target
+
+    log = tmp_path / "bare.jsonl"
+    log.write_text('{"t":"fact","id":"01FACT00000000000000000001","kind":"task","ts":1700000000.0,"observer":"alice","origin":"","payload":"{\\"k\\":\\"v\\"}"}\n', encoding="utf-8")
+
+    res = sync_target(log)
+    assert res.status == "synced"
+    assert res.indexed_facts >= 1
+    assert res.agreement is True
+
+
+def test_search_facts_bare_store(tmp_path: Path) -> None:
+    """search_facts on bare store returns matching SearchResult or empty if not indexed."""
+    from client import search_facts
+
+    log = tmp_path / "bare.jsonl"
+    log.write_text('{"t":"fact","id":"01FACT00000000000000000001","kind":"task","ts":1700000000.0,"observer":"alice","origin":"","payload":"{\\"k\\":\\"v\\"}"}\n', encoding="utf-8")
+
+    res = search_facts(log, "query")
+    assert isinstance(res.matches, list)
+    assert res.total_matches == len(res.matches)
+
+

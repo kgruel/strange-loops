@@ -5,8 +5,17 @@ Provides high-level, transport-agnostic read, emit, and kind mutation operations
 returning typed result models.
 """
 
+from .declare import init_vertex, inspect_declaration
 from .emit import CustodyCredentialProvider, emit_batch, emit_fact, preview_emission
-from .kind import add_kind, edit_kind, recover_ceremony, remove_kind
+from .kind import (
+    add_kind,
+    edit_kind,
+    grant_observer,
+    plan_kind_mutation,
+    recover_ceremony,
+    remove_kind,
+    revoke_observer,
+)
 from .read import (
     read_fact_by_id,
     read_facts,
@@ -18,18 +27,21 @@ from .read import (
     search_facts,
     sync_target,
 )
-from .target import TargetInfo, resolve_target
+from .target import TargetInfo, discover_targets, resolve_target
 from .types import (
     AdmissionFailed,
     CeremonyFailed,
     ClientError,
     ClientValueError,
     CommittedEmissionError,
+    DeclarationInspectionResult,
+    DeclarationPlanResult,
     EmissionFailed,
     EmitPreviewResult,
     EmitReceipt,
     FactPageResult,
     FoldStateResult,
+    InitVertexResult,
     InvalidEmissionRequest,
     KindMutationResult,
     ReadSummary,
@@ -47,6 +59,9 @@ from .types import (
 __all__ = [
     # Operations
     "resolve_target",
+    "discover_targets",
+    "init_vertex",
+    "inspect_declaration",
     "read_summary",
     "read_facts",
     "read_state",
@@ -62,11 +77,17 @@ __all__ = [
     "add_kind",
     "edit_kind",
     "remove_kind",
+    "grant_observer",
+    "revoke_observer",
+    "plan_kind_mutation",
     "recover_ceremony",
     # Providers
     "CustodyCredentialProvider",
     # Models
     "TargetInfo",
+    "InitVertexResult",
+    "DeclarationInspectionResult",
+    "DeclarationPlanResult",
     "ReadSummary",
     "FactPageResult",
     "FoldStateResult",

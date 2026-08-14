@@ -332,3 +332,75 @@ def test_sync_result_model() -> None:
     assert d["status"] == "synced"
     assert d["indexed_facts"] == 42
     assert d["agreement"] is True
+
+
+def test_init_vertex_result_model() -> None:
+    """InitVertexResult defaults, immutability, and serialization."""
+    from client import InitVertexResult
+
+    res = InitVertexResult(
+        target_path="/tmp/app.vertex",
+        name="app",
+        store_path=".loops/data/app.db",
+        store_type="sqlite",
+        is_root=False,
+        file_written=True,
+    )
+    with pytest.raises(FrozenInstanceError):
+        res.name = "other"  # type: ignore[misc]
+
+    d = res.as_dict()
+    assert d["schema"] == "loops.cli/init-vertex/v1"
+    assert d["name"] == "app"
+    assert d["store_type"] == "sqlite"
+    assert d["file_written"] is True
+
+
+def test_declaration_inspection_result_model() -> None:
+    """DeclarationInspectionResult defaults, immutability, and serialization."""
+    from client import DeclarationInspectionResult
+
+    res = DeclarationInspectionResult(
+        target_path="/tmp/app.vertex",
+        name="app",
+        status="active",
+        store_mode="sqlite",
+        store_path=".loops/data/app.db",
+        declared_kinds=["note", "task"],
+        declared_observers=["alice"],
+        cadence_ticks=["daily"],
+        strict=True,
+        is_aggregate=False,
+        syntax_valid=True,
+        errors=[],
+    )
+    with pytest.raises(FrozenInstanceError):
+        res.strict = False  # type: ignore[misc]
+
+    d = res.as_dict()
+    assert d["schema"] == "loops.cli/declaration-inspection/v1"
+    assert d["declared_kinds"] == ["note", "task"]
+    assert d["strict"] is True
+    assert d["syntax_valid"] is True
+
+
+def test_declaration_plan_result_model() -> None:
+    """DeclarationPlanResult defaults, immutability, and serialization."""
+    from client import DeclarationPlanResult
+
+    res = DeclarationPlanResult(
+        applicable=True,
+        reason="",
+        mode="clean",
+        vertex_path="/tmp/app.vertex",
+        generation_before={"generation": 1},
+        changes=[{"op": "add", "kind": "task"}],
+    )
+    with pytest.raises(FrozenInstanceError):
+        res.applicable = False  # type: ignore[misc]
+
+    d = res.as_dict()
+    assert d["schema"] == "loops.cli/declaration-plan/v1"
+    assert d["applicable"] is True
+    assert d["mode"] == "clean"
+    assert len(d["changes"]) == 1

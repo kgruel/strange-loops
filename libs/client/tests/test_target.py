@@ -125,3 +125,28 @@ def test_resolve_target_accepts_str_and_path(tmp_path: Path) -> None:
     info_path = resolve_target(vertex_path)
     info_str = resolve_target(str(vertex_path))
     assert info_path == info_str
+
+
+def test_discover_targets_tree(tmp_path: Path) -> None:
+    """discover_targets scans directories and finds vertices and stores."""
+    from client import discover_targets
+
+    # Create workspace tree
+    sub1 = tmp_path / "apps" / "frontend"
+    sub1.mkdir(parents=True)
+    (sub1 / "ui.vertex").write_text('name "ui"\nstore ".loops/data/ui.db"\nloops { e { fold { items "collect" 10 } } }\n', encoding="utf-8")
+
+    sub2 = tmp_path / "apps" / "backend"
+    sub2.mkdir(parents=True)
+    (sub2 / "api.vertex").write_text('name "api"\nstore ".loops/data/api.db"\nloops { e { fold { items "collect" 10 } } }\n', encoding="utf-8")
+
+    # Hidden dir should be ignored
+    hidden = tmp_path / ".venv" / "ignore.vertex"
+    hidden.parent.mkdir(parents=True)
+    hidden.write_text('name "ignore"\n', encoding="utf-8")
+
+    targets = discover_targets(tmp_path, recursive=True)
+    assert len(targets) == 2
+    names = {t.canonical_path.name for t in targets if t.canonical_path}
+    assert "ui.db" in names
+    assert "api.db" in names

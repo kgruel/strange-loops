@@ -16,17 +16,23 @@
 
 ## API Reference
 
-### 1. Target Resolution
+### 1. Target Resolution & Discovery
 
 ```python
-from client import resolve_target, TargetInfo
+from client import resolve_target, discover_targets, TargetInfo
 
+# Single target probe
 info = resolve_target("path/to/target.vertex")
 # -> TargetInfo(target_type='vertex', canonical_mode='sqlite', canonical_path=..., index_path=..., exists=True, ...)
+
+# Multi-target workspace discovery
+targets = discover_targets(".", recursive=True)
 ```
 
 - **`resolve_target(target: Path | str) -> TargetInfo`**:
   Probes target type (`vertex`, `jsonl_log`, `derived_index`, `sqlite_store`) without opening connections or creating files. Raises `TargetNotFound` or `TargetUnsupported`.
+- **`discover_targets(root_path=".", *, recursive=True, include_bare=True) -> list[TargetInfo]`**:
+  Discovers all Loops vertices and bare stores in a directory tree.
 
 ---
 
@@ -109,11 +115,30 @@ receipts = emit_batch("target.vertex", [fact, ("note", {"title": "Batch item"})]
 
 ---
 
-### 4. Declaration Mutations
+### 4. Declaration, Scaffolding & Ceremonies
 
 ```python
-from client import add_kind, edit_kind, remove_kind, recover_ceremony
+from client import (
+    init_vertex,
+    inspect_declaration,
+    add_kind,
+    edit_kind,
+    remove_kind,
+    grant_observer,
+    revoke_observer,
+    plan_kind_mutation,
+    recover_ceremony,
+)
 from lang.ast import LoopDef, FoldDecl, FoldCollect
+
+# Scaffold a new vertex declaration
+init_res = init_vertex("target.vertex", name="my_app", store_type="sqlite")
+
+# Deep structural inspection & syntax validation
+info = inspect_declaration("target.vertex")
+
+# Plan declaration update (dry-run diff)
+plan = plan_kind_mutation("target.vertex", "add", "todo")
 
 # Add new loop kind with default 'items collect 100'
 result = add_kind("target.vertex", "todo", observer="admin")
@@ -129,6 +154,10 @@ result = edit_kind(
 # Remove kind definition
 result = remove_kind("target.vertex", "deprecated_kind", observer="admin")
 
+# Manage observer admission grants
+grant_observer("target.vertex", "alice", grants=["todo", "note"], observer="admin")
+revoke_observer("target.vertex", "alice", observer="admin")
+
 # Recover interrupted ceremony
 recovery = recover_ceremony("target.vertex.intent")
 ```
@@ -141,6 +170,9 @@ All models are frozen, immutable dataclasses providing `.as_dict()` conversion:
 
 | Model | Schema | Purpose |
 | :--- | :--- | :--- |
+| **`InitVertexResult`** | `loops.cli/init-vertex/v1` | Outcome of vertex scaffolding operation. |
+| **`DeclarationInspectionResult`** | `loops.cli/declaration-inspection/v1` | Deep structural inspection of a `.vertex` file. |
+| **`DeclarationPlanResult`** | `loops.cli/declaration-plan/v1` | Dry-run preview of a proposed declaration update. |
 | **`ReadSummary`** | `loops.cli/read-summary/v1` | Domain-neutral inventory of facts, ticks, kinds, and storage agreement. |
 | **`FactPageResult`** | `loops.cli/facts-page/v1` | Bounded page of facts with pagination cursors (`before`/`after`). |
 | **`FoldStateResult`** | `loops.cli/fold-state/v1` | Replayed fold state across declared vertex sections. |

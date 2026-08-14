@@ -283,3 +283,57 @@ class KindMutationResult:
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+@dataclass(frozen=True)
+class InitVertexResult:
+    """Outcome of vertex scaffolding operation."""
+
+    schema: str = "loops.cli/init-vertex/v1"
+    target_path: str = ""
+    name: str = ""
+    store_path: str | None = None
+    store_type: str = "sqlite"
+    is_root: bool = False
+    file_written: bool = True
+
+    def as_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class DeclarationInspectionResult:
+    """Deep structural inspection of a .vertex file."""
+
+    schema: str = "loops.cli/declaration-inspection/v1"
+    target_path: str = ""
+    name: str = ""
+    status: str = ""
+    store_mode: str | None = None
+    store_path: str | None = None
+    declared_kinds: list[str] = field(default_factory=list)
+    declared_observers: list[str] = field(default_factory=list)
+    cadence_ticks: list[str] = field(default_factory=list)
+    strict: bool = False
+    is_aggregate: bool = False
+    syntax_valid: bool = True
+    errors: list[str] = field(default_factory=list)
+
+    def as_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class DeclarationPlanResult:
+    """Dry-run preview of a proposed declaration update ceremony."""
+
+    schema: str = "loops.cli/declaration-plan/v1"
+    applicable: bool = True
+    reason: str = ""
+    mode: str = ""
+    vertex_path: str = ""
+    generation_before: dict[str, Any] | None = None
+    changes: list[dict[str, Any]] = field(default_factory=list)
+
+    def as_dict(self) -> dict[str, Any]:
+        return asdict(self)

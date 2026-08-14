@@ -189,3 +189,46 @@ def test_recover_ceremony_nonexistent(tmp_path: Path) -> None:
     assert "finished" in outcome
     assert "reason" in outcome
     assert outcome["intent_path"] == str(missing_intent)
+
+
+def test_plan_kind_mutation_preview(sample_vertex: Path) -> None:
+    """plan_kind_mutation performs preflight ceremony planning without disk mutation."""
+    from client import DeclarationPlanResult, plan_kind_mutation
+
+    original_text = sample_vertex.read_text(encoding="utf-8")
+
+    plan = plan_kind_mutation(sample_vertex, "add", "planned_kind")
+    assert isinstance(plan, DeclarationPlanResult)
+    assert plan.applicable is True
+    assert plan.mode in ("genesis", "clean")
+    assert plan.schema == "loops.cli/declaration-plan/v1"
+
+    # Disk text was not modified
+    assert sample_vertex.read_text(encoding="utf-8") == original_text
+
+
+def test_grant_and_revoke_observer(sample_vertex: Path) -> None:
+    """grant_observer and revoke_observer manage the declared admission block."""
+    from client import grant_observer, inspect_declaration, revoke_observer
+
+    ensure_signing_key(sample_vertex, "admin")
+
+    # Grant 'alice' with task and note capabilities
+    res = grant_observer(
+        sample_vertex,
+        "alice",
+        grants=["task", "note"],
+        observer="admin",
+    )
+    assert res.status in ("applied", "noop")
+
+    # Check via inspection
+    info = inspect_declaration(sample_vertex)
+    assert "alice" in info.declared_observers
+
+    # Revoke 'alice'
+    revoke_res = revoke_observer(sample_vertex, "alice", observer="admin")
+    assert revoke_res.status in ("applied", "noop")
+
+    info_after = inspect_declaration(sample_vertex)
+    assert "alice" not in info_after.declared_observers

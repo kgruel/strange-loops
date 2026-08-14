@@ -17,6 +17,7 @@ from lang.ast import FoldBy
 from .target import resolve_target
 from .types import (
     AdmissionFailed,
+    ClientValueError,
     CommittedEmissionError,
     EmissionFailed,
     EmitPreviewResult,
@@ -270,7 +271,7 @@ def emit_fact(
         raise AdmissionFailed(str(exc), observer=obs, kind=k, vertex=v) from exc
     except ReceiveCommittedError as exc:
         raise CommittedEmissionError(str(exc), fact_id=exc.fact_id) from exc
-    except ValueError:
+    except ClientValueError:
         raise
     except Exception as exc:
         raise EmissionFailed(f"fact emission failed: {exc}") from exc
@@ -381,7 +382,7 @@ def emit_batch(
         raise AdmissionFailed(str(exc), observer=obs, kind=k, vertex=v) from exc
     except ReceiveCommittedError as exc:
         raise CommittedEmissionError(str(exc), fact_id=exc.fact_id) from exc
-    except ValueError:
+    except ClientValueError:
         raise
     except Exception as exc:
         raise EmissionFailed(f"batch emission failed: {exc}") from exc

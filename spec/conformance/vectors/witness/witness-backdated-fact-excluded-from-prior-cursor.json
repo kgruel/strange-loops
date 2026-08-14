@@ -1,0 +1,147 @@
+{
+  "name": "witness-backdated-fact-excluded-from-prior-cursor",
+  "description": "Pins append-order witness prefix invariance: a backdated fact appended AFTER cursor P is excluded from fold-at-P even though replay order sorts it earlier than existing rows; the cursor boundary is append-order (rowid), not event-time (ts).",
+  "input": {
+    "spec": {
+      "name": "state",
+      "state_fields": [
+        {
+          "name": "summary",
+          "kind": "dict"
+        },
+        {
+          "name": "history",
+          "kind": "list"
+        }
+      ],
+      "folds": [
+        {
+          "op": "upsert",
+          "target": "summary",
+          "key": "key"
+        },
+        {
+          "op": "collect",
+          "target": "history"
+        }
+      ]
+    },
+    "facts": [
+      [
+        "01FACT00000000000000000001",
+        {
+          "kind": "state",
+          "ts": 100.0,
+          "payload": {
+            "key": "k1",
+            "val": "v1"
+          },
+          "observer": "kyle",
+          "origin": ""
+        }
+      ],
+      [
+        "01FACT00000000000000000002",
+        {
+          "kind": "state",
+          "ts": 200.0,
+          "payload": {
+            "key": "k1",
+            "val": "v2"
+          },
+          "observer": "kyle",
+          "origin": ""
+        }
+      ],
+      [
+        "01FACT00000000000000000003",
+        {
+          "kind": "state",
+          "ts": 50.0,
+          "payload": {
+            "key": "k1",
+            "val": "backdated_v0"
+          },
+          "observer": "kyle",
+          "origin": ""
+        }
+      ]
+    ],
+    "cursors": {
+      "at_p": "01FACT00000000000000000002",
+      "head": "head"
+    }
+  },
+  "expected": {
+    "at_p": {
+      "summary": {
+        "k1": {
+          "key": "k1",
+          "val": "v2",
+          "_ts": 200.0,
+          "_observer": "kyle",
+          "_origin": "",
+          "_id": "01FACT00000000000000000002",
+          "_n": 2
+        }
+      },
+      "history": [
+        {
+          "key": "k1",
+          "val": "v1",
+          "_ts": 100.0,
+          "_observer": "kyle",
+          "_origin": "",
+          "_id": "01FACT00000000000000000001"
+        },
+        {
+          "key": "k1",
+          "val": "v2",
+          "_ts": 200.0,
+          "_observer": "kyle",
+          "_origin": "",
+          "_id": "01FACT00000000000000000002"
+        }
+      ]
+    },
+    "head": {
+      "summary": {
+        "k1": {
+          "key": "k1",
+          "val": "v2",
+          "_ts": 200.0,
+          "_observer": "kyle",
+          "_origin": "",
+          "_id": "01FACT00000000000000000002",
+          "_n": 3
+        }
+      },
+      "history": [
+        {
+          "key": "k1",
+          "val": "backdated_v0",
+          "_ts": 50.0,
+          "_observer": "kyle",
+          "_origin": "",
+          "_id": "01FACT00000000000000000003"
+        },
+        {
+          "key": "k1",
+          "val": "v1",
+          "_ts": 100.0,
+          "_observer": "kyle",
+          "_origin": "",
+          "_id": "01FACT00000000000000000001"
+        },
+        {
+          "key": "k1",
+          "val": "v2",
+          "_ts": 200.0,
+          "_observer": "kyle",
+          "_origin": "",
+          "_id": "01FACT00000000000000000002"
+        }
+      ]
+    }
+  }
+}

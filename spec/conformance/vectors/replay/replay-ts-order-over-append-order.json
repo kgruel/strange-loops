@@ -1,0 +1,110 @@
+{
+  "name": "replay-ts-order-over-append-order",
+  "description": "Pins decision:design/replay-total-order: replay order is determined by (ts, id) ascending, not append order; facts appended with out-of-order timestamps are replayed in timestamp sequence.",
+  "input": {
+    "spec": {
+      "name": "item",
+      "state_fields": [
+        {
+          "name": "latest_entry",
+          "kind": "dict"
+        },
+        {
+          "name": "history",
+          "kind": "list"
+        }
+      ],
+      "folds": [
+        {
+          "op": "upsert",
+          "target": "latest_entry",
+          "key": "id"
+        },
+        {
+          "op": "collect",
+          "target": "history"
+        }
+      ]
+    },
+    "facts": [
+      [
+        "01TESTULID0000000000000001",
+        {
+          "kind": "item",
+          "ts": 300.0,
+          "payload": {
+            "id": "entity_1",
+            "val": "ts_300"
+          },
+          "observer": "alice",
+          "origin": ""
+        }
+      ],
+      [
+        "01TESTULID0000000000000002",
+        {
+          "kind": "item",
+          "ts": 100.0,
+          "payload": {
+            "id": "entity_1",
+            "val": "ts_100"
+          },
+          "observer": "alice",
+          "origin": ""
+        }
+      ],
+      [
+        "01TESTULID0000000000000003",
+        {
+          "kind": "item",
+          "ts": 200.0,
+          "payload": {
+            "id": "entity_1",
+            "val": "ts_200"
+          },
+          "observer": "alice",
+          "origin": ""
+        }
+      ]
+    ]
+  },
+  "expected": {
+    "latest_entry": {
+      "entity_1": {
+        "id": "entity_1",
+        "val": "ts_300",
+        "_ts": 300.0,
+        "_observer": "alice",
+        "_origin": "",
+        "_id": "01TESTULID0000000000000001",
+        "_n": 3
+      }
+    },
+    "history": [
+      {
+        "id": "entity_1",
+        "val": "ts_100",
+        "_ts": 100.0,
+        "_observer": "alice",
+        "_origin": "",
+        "_id": "01TESTULID0000000000000002"
+      },
+      {
+        "id": "entity_1",
+        "val": "ts_200",
+        "_ts": 200.0,
+        "_observer": "alice",
+        "_origin": "",
+        "_id": "01TESTULID0000000000000003"
+      },
+      {
+        "id": "entity_1",
+        "val": "ts_300",
+        "_ts": 300.0,
+        "_observer": "alice",
+        "_origin": "",
+        "_id": "01TESTULID0000000000000001"
+      }
+    ]
+  }
+}

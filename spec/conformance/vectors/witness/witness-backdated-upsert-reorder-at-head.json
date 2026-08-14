@@ -1,0 +1,171 @@
+{
+  "name": "witness-backdated-upsert-reorder-at-head",
+  "description": "Pins backdated upsert replay semantics: a backdated fact with a timestamp between rowid 1 and rowid 2 is excluded at cursor rowid 1, and at head is replayed in (ts, id) order between rowids 1 and 2.",
+  "input": {
+    "spec": {
+      "name": "config",
+      "state_fields": [
+        {
+          "name": "values",
+          "kind": "dict"
+        },
+        {
+          "name": "updates",
+          "kind": "list"
+        }
+      ],
+      "folds": [
+        {
+          "op": "upsert",
+          "target": "values",
+          "key": "setting"
+        },
+        {
+          "op": "collect",
+          "target": "updates"
+        }
+      ]
+    },
+    "facts": [
+      [
+        "01FACT00000000000000000001",
+        {
+          "kind": "config",
+          "ts": 10.0,
+          "payload": {
+            "setting": "theme",
+            "color": "blue"
+          },
+          "observer": "kyle",
+          "origin": ""
+        }
+      ],
+      [
+        "01FACT00000000000000000002",
+        {
+          "kind": "config",
+          "ts": 30.0,
+          "payload": {
+            "setting": "theme",
+            "color": "dark"
+          },
+          "observer": "kyle",
+          "origin": ""
+        }
+      ],
+      [
+        "01FACT00000000000000000003",
+        {
+          "kind": "config",
+          "ts": 20.0,
+          "payload": {
+            "setting": "theme",
+            "color": "green"
+          },
+          "observer": "kyle",
+          "origin": ""
+        }
+      ]
+    ],
+    "cursors": {
+      "after_fact_1": "01FACT00000000000000000001",
+      "after_fact_2": "01FACT00000000000000000002",
+      "head": "head"
+    }
+  },
+  "expected": {
+    "after_fact_1": {
+      "values": {
+        "theme": {
+          "setting": "theme",
+          "color": "blue",
+          "_ts": 10.0,
+          "_observer": "kyle",
+          "_origin": "",
+          "_id": "01FACT00000000000000000001",
+          "_n": 1
+        }
+      },
+      "updates": [
+        {
+          "setting": "theme",
+          "color": "blue",
+          "_ts": 10.0,
+          "_observer": "kyle",
+          "_origin": "",
+          "_id": "01FACT00000000000000000001"
+        }
+      ]
+    },
+    "after_fact_2": {
+      "values": {
+        "theme": {
+          "setting": "theme",
+          "color": "dark",
+          "_ts": 30.0,
+          "_observer": "kyle",
+          "_origin": "",
+          "_id": "01FACT00000000000000000002",
+          "_n": 2
+        }
+      },
+      "updates": [
+        {
+          "setting": "theme",
+          "color": "blue",
+          "_ts": 10.0,
+          "_observer": "kyle",
+          "_origin": "",
+          "_id": "01FACT00000000000000000001"
+        },
+        {
+          "setting": "theme",
+          "color": "dark",
+          "_ts": 30.0,
+          "_observer": "kyle",
+          "_origin": "",
+          "_id": "01FACT00000000000000000002"
+        }
+      ]
+    },
+    "head": {
+      "values": {
+        "theme": {
+          "setting": "theme",
+          "color": "dark",
+          "_ts": 30.0,
+          "_observer": "kyle",
+          "_origin": "",
+          "_id": "01FACT00000000000000000002",
+          "_n": 3
+        }
+      },
+      "updates": [
+        {
+          "setting": "theme",
+          "color": "blue",
+          "_ts": 10.0,
+          "_observer": "kyle",
+          "_origin": "",
+          "_id": "01FACT00000000000000000001"
+        },
+        {
+          "setting": "theme",
+          "color": "green",
+          "_ts": 20.0,
+          "_observer": "kyle",
+          "_origin": "",
+          "_id": "01FACT00000000000000000003"
+        },
+        {
+          "setting": "theme",
+          "color": "dark",
+          "_ts": 30.0,
+          "_observer": "kyle",
+          "_origin": "",
+          "_id": "01FACT00000000000000000002"
+        }
+      ]
+    }
+  }
+}

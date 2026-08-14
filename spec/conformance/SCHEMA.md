@@ -216,3 +216,71 @@ Sliding FIFO window of field values in `{target}` (list).
   "size": 10
 }
 ```
+
+---
+
+## 5. Fact Encoding
+
+A `Fact` is an intentional observation with a routing kind, timestamp, payload, observer, and origin. In `replay` and `witness` vectors, facts are provided in append order as `[fact_id, Fact Object]` pairs.
+
+### `[fact_id, Fact Object]` Pair
+
+A 2-element JSON array: `[string, object]`
+- Index 0: `fact_id` (string) — 26-character canonical identifier (e.g. Crockford ULID).
+- Index 1: Fact Object (object) — serialized representation of the fact.
+
+### Fact Object
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `kind` | string | Yes | Routing key matching the target spec (e.g. `"decision"`, `"item"`). |
+| `ts` | float | Yes | Unix epoch timestamp in seconds. Sub-millisecond precision is preserved. |
+| `payload` | object | Yes | Domain application payload dictionary. |
+| `observer` | string | No | Identifier of the producing observer (default: `""`). |
+| `origin` | string | No | Origin loop or vertex identifier (default: `""`). |
+
+---
+
+## 6. Area: `replay`
+
+The `replay` area pins store-level total replay ordering and tie-breaking semantics on top of pure Spec folds.
+Given an append-ordered sequence of stored facts (which assign internal receipt ordinals / rowids), a conforming store replays facts filtered by kind strictly ordered by `(ts ASC, id ASC)`. Each fact payload is augmented with system metadata fields (`_ts`, `_id`, `_observer`, `_origin`) and folded into the spec.
+
+### `input` Schema
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `spec` | Spec Object | Yes | The spec definition defining state fields and fold operations. |
+| `facts` | array of `[fact_id, Fact Object]` | Yes | Sequence of facts in APPEND order (store insertion order). |
+
+### `expected` Schema
+
+An object representing the final accumulated state dictionary after full replay in `(ts ASC, id ASC)` order.
+
+---
+
+## 7. Area: `witness`
+
+The `witness` area pins temporal witness cursor prefix isolation (SPEC §9.3).
+A witness position denotes an inclusive prefix of rows received by the store: `rowid <= cursor_rowid`. The selected prefix is replayed in `(ts ASC, id ASC)` order through the spec. Late-arriving or backdated facts appended after a witness position cannot alter the fold state observed at that position.
+
+### `input` Schema
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `spec` | Spec Object | Yes | The spec definition defining state fields and fold operations. |
+| `facts` | array of `[fact_id, Fact Object]` | Yes | Sequence of facts in APPEND order (store insertion order). |
+| `cursors` | object | Yes | Key-value mapping of cursor labels to cursor addresses. |
+
+#### Cursor Addresses
+
+| Address Form | Description |
+|---|---|
+| `""` | Genesis sentinel: the empty / start-of-store position (`rowid <= 0`). Yields initial spec state. |
+| `"head"` | Store head: newest row currently received in the store (`rowid <= max_rowid`). |
+| `"<fact_id>"` | Canonical fact ID: point lookup resolving to the exact receipt rowid of that fact. |
+
+### `expected` Schema
+
+An object mapping each cursor label defined in `input.cursors` to its exact expected fold state dictionary evaluated at that witness position.
+

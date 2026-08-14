@@ -1,0 +1,99 @@
+{
+  "name": "witness-cursor-head-matches-full-fold",
+  "description": "Pins witness head cursor equivalence: fold at cursor 'head' evaluates the complete append prefix and matches the full unwitnessed store replay exactly.",
+  "input": {
+    "spec": {
+      "name": "session",
+      "state_fields": [
+        {
+          "name": "active",
+          "kind": "dict"
+        },
+        {
+          "name": "count",
+          "kind": "int"
+        }
+      ],
+      "folds": [
+        {
+          "op": "upsert",
+          "target": "active",
+          "key": "user"
+        },
+        {
+          "op": "count",
+          "target": "count"
+        }
+      ]
+    },
+    "facts": [
+      [
+        "01TESTULID0000000000000001",
+        {
+          "kind": "session",
+          "ts": 10.0,
+          "payload": {
+            "user": "alice",
+            "status": "online"
+          },
+          "observer": "auth",
+          "origin": ""
+        }
+      ],
+      [
+        "01TESTULID0000000000000002",
+        {
+          "kind": "session",
+          "ts": 20.0,
+          "payload": {
+            "user": "bob",
+            "status": "online"
+          },
+          "observer": "auth",
+          "origin": ""
+        }
+      ],
+      [
+        "01TESTULID0000000000000003",
+        {
+          "kind": "session",
+          "ts": 30.0,
+          "payload": {
+            "user": "alice",
+            "status": "offline"
+          },
+          "observer": "auth",
+          "origin": ""
+        }
+      ]
+    ],
+    "cursors": {
+      "head": "head"
+    }
+  },
+  "expected": {
+    "head": {
+      "active": {
+        "alice": {
+          "user": "alice",
+          "status": "offline",
+          "_ts": 30.0,
+          "_observer": "auth",
+          "_origin": "",
+          "_id": "01TESTULID0000000000000003",
+          "_n": 2
+        },
+        "bob": {
+          "user": "bob",
+          "status": "online",
+          "_ts": 20.0,
+          "_observer": "auth",
+          "_origin": "",
+          "_id": "01TESTULID0000000000000002",
+          "_n": 1
+        }
+      },
+      "count": 3
+    }
+  }
+}

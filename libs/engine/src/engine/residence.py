@@ -50,6 +50,7 @@ __all__ = [
     "is_jsonl_canonical",
     "log_path_for",
     "resolve_store_path",
+    "sqlite_sidecars",
 ]
 
 CANONICAL_LOG_SUFFIX = ".jsonl"
@@ -91,6 +92,17 @@ def log_path_for(db_path: Path | str) -> Path:
     The inverse of :func:`index_path_for`, and equally idempotent.
     """
     return Path(db_path).with_suffix(CANONICAL_LOG_SUFFIX)
+
+
+def sqlite_sidecars(path: Path | str) -> tuple[Path, ...]:
+    """The WAL/SHM sidecar paths sqlite may keep beside a db file.
+
+    The db itself is NOT included — callers that delete or size a store
+    spell it ``(path, *sqlite_sidecars(path))``. Pure path arithmetic, no
+    existence check: one spelling of the ``-wal``/``-shm`` naming rule.
+    """
+    path = Path(path)
+    return tuple(path.parent / (path.name + s) for s in ("-wal", "-shm"))
 
 
 def resolve_store_path(declared: Path | str, vertex_path: Path | None) -> Path:

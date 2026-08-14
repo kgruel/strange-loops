@@ -10,11 +10,13 @@ from client import (
     AdmissionFailed,
     CeremonyFailed,
     ClientError,
+    ClientValueError,
     CommittedEmissionError,
     EmissionFailed,
     EmitReceipt,
     FactPageResult,
     FoldStateResult,
+    InvalidEmissionRequest,
     KindMutationResult,
     ReadSummary,
     TargetError,
@@ -40,6 +42,10 @@ def test_exception_hierarchy() -> None:
     # Emission & Admission errors
     assert issubclass(AdmissionFailed, ClientError)
     assert issubclass(EmissionFailed, ClientError)
+    assert issubclass(ClientValueError, ClientError)
+    assert issubclass(ClientValueError, ValueError)
+    assert issubclass(InvalidEmissionRequest, ClientValueError)
+    assert issubclass(InvalidEmissionRequest, EmissionFailed)
     assert issubclass(CommittedEmissionError, EmissionFailed)
 
     # Ceremony errors

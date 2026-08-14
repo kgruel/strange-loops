@@ -89,10 +89,13 @@ def test_emit_fact_with_id_override(sample_vertex: Path) -> None:
 
 
 def test_emit_fact_missing_observer_raises_value_error(sample_vertex: Path) -> None:
-    """Emitting by kind string without observer raises ValueError."""
-    with pytest.raises(ValueError) as exc_info:
+    """Emitting by kind string without observer raises InvalidEmissionRequest (a ValueError & ClientError)."""
+    from client import InvalidEmissionRequest
+
+    with pytest.raises(InvalidEmissionRequest) as exc_info:
         emit_fact(sample_vertex, "note", {"title": "No observer"})
     assert "observer is required" in str(exc_info.value)
+    assert isinstance(exc_info.value, ValueError)
 
 
 def test_emit_fact_admit_undeclared_override(sample_vertex: Path) -> None:
@@ -366,3 +369,179 @@ def test_emit_fact_delta_metadata(sample_vertex: Path) -> None:
     assert isinstance(receipt.affected_sections, list)
     assert receipt.delta_count >= 1
     assert "note" in receipt.affected_sections
+
+
+def test_preview_emission_with_fact_atom(sample_vertex: Path) -> None:
+    """preview_emission accepts Fact atom and extracts properties."""
+    from atoms import Fact
+    from client import preview_emission
+
+    fact = Fact.of("note", "alice", origin="preview-prov", title="Atom preview")
+    preview = preview_emission(sample_vertex, fact)
+
+    assert preview.kind == "note"
+    assert preview.observer == "alice"
+    assert preview.origin == "preview-prov"
+    assert preview.payload["title"] == "Atom preview"
+    assert preview.admitted is True
+
+
+def test_preview_emission_fold_by_matching(tmp_path: Path) -> None:
+    """preview_emission detects FoldBy key presence and missing status."""
+    from client import preview_emission
+
+    vertex = tmp_path / "keyed.vertex"
+    vertex.write_text(
+        'name "keyed"\n'
+        'loops {\n'
+        '  task {\n'
+        '    fold {\n'
+        '      items "by" "task_id"\n'
+        '    }\n'
+        '  }\n'
+        '}\n',
+        encoding="utf-8",
+    )
+
+    # Key present -> would_fold True
+    preview_ok = preview_emission(
+        vertex, "task", {"task_id": "T-100", "title": "Keyed"}, observer="alice"
+    )
+    assert preview_ok.fold_key_field == "task_id"
+    assert preview_ok.fold_key_present is True
+    assert preview_ok.fold_key_value == "T-100"
+    assert preview_ok.would_fold is True
+
+    # Key missing -> would_fold False
+    preview_missing = preview_emission(
+        vertex, "task", {"title": "Missing key"}, observer="alice"
+    )
+    assert preview_missing.fold_key_field == "task_id"
+    assert preview_missing.fold_key_present is False
+    assert preview_missing.fold_key_value is None
+    assert preview_missing.would_fold is False
+
+
+def test_preview_emission_target_unsupported(tmp_path: Path) -> None:
+    """preview_emission raises TargetUnsupported on non-vertex."""
+    from client import preview_emission
+
+    log = tmp_path / "bare.jsonl"
+    log.write_text("{}\n", encoding="utf-8")
+    with pytest.raises(TargetUnsupported) as exc_info:
+        preview_emission(log, "note", observer="alice")
+    assert "preview_emission requires a .vertex target" in str(exc_info.value)
+
+
+def test_preview_emission_missing_observer_raises_value_error(sample_vertex: Path) -> None:
+    """preview_emission requires observer when kind string is given."""
+    from client import InvalidEmissionRequest, preview_emission
+
+    with pytest.raises(InvalidEmissionRequest) as exc_info:
+        preview_emission(sample_vertex, "note")
+    assert "observer is required" in str(exc_info.value)
+    assert isinstance(exc_info.value, ValueError)
+
+
+def test_preview_emission_corrupt_vertex_raises_emission_failed(tmp_path: Path) -> None:
+    """preview_emission raises EmissionFailed on corrupt vertex declaration."""
+    from client import EmissionFailed, preview_emission
+
+    corrupt = tmp_path / "corrupt.vertex"
+    corrupt.write_text("invalid [ { kdl", encoding="utf-8")
+
+    with pytest.raises(EmissionFailed) as exc_info:
+        preview_emission(corrupt, "note", observer="alice")
+    assert "could not load vertex declaration" in str(exc_info.value)
+
+
+def test_emit_batch_target_unsupported(tmp_path: Path) -> None:
+    """emit_batch raises TargetUnsupported on non-vertex."""
+    from client import emit_batch
+
+    log = tmp_path / "bare.jsonl"
+    log.write_text("{}\n", encoding="utf-8")
+    with pytest.raises(TargetUnsupported) as exc_info:
+        emit_batch(log, [("note", {})], observer="alice")
+    assert "emit_batch requires a .vertex target" in str(exc_info.value)
+
+
+def test_emit_batch_corrupt_vertex_raises_emission_failed(tmp_path: Path) -> None:
+    """emit_batch raises EmissionFailed on corrupt vertex."""
+    from client import EmissionFailed, emit_batch
+
+    corrupt = tmp_path / "corrupt.vertex"
+    corrupt.write_text("invalid [ { kdl", encoding="utf-8")
+
+    with pytest.raises(EmissionFailed) as exc_info:
+        emit_batch(corrupt, [("note", {})], observer="alice")
+    assert "could not open vertex" in str(exc_info.value)
+
+
+def test_emit_batch_missing_observer_tuple_raises_value_error(sample_vertex: Path) -> None:
+    """emit_batch with tuples requires default observer."""
+    from client import InvalidEmissionRequest, emit_batch
+
+    with pytest.raises(InvalidEmissionRequest) as exc_info:
+        emit_batch(sample_vertex, [("note", {"title": "No obs"})])
+    assert "observer is required when passing (kind, payload) tuples" in str(exc_info.value)
+    assert isinstance(exc_info.value, ValueError)
+
+
+def test_emit_batch_missing_observer_dict_raises_value_error(sample_vertex: Path) -> None:
+    """emit_batch with dict item requires observer in dict or default."""
+    from client import InvalidEmissionRequest, emit_batch
+
+    with pytest.raises(InvalidEmissionRequest) as exc_info:
+        emit_batch(sample_vertex, [{"kind": "note", "payload": {"title": "No obs"}}])
+    assert "observer is required for dict fact" in str(exc_info.value)
+    assert isinstance(exc_info.value, ValueError)
+
+
+def test_emit_batch_unsupported_shape_raises_value_error(sample_vertex: Path) -> None:
+    """emit_batch rejects invalid item shapes."""
+    from client import InvalidEmissionRequest, emit_batch
+
+    with pytest.raises(InvalidEmissionRequest) as exc_info:
+        emit_batch(sample_vertex, [12345])  # type: ignore[list-item]
+    assert "unsupported batch fact item shape" in str(exc_info.value)
+    assert isinstance(exc_info.value, ValueError)
+
+
+def test_emit_batch_dict_custom_id_and_ts(sample_vertex: Path) -> None:
+    """emit_batch supports dict items with custom id, origin, and ts."""
+    from client import emit_batch
+
+    custom_id = "01M01BATCHCUSTOMID00000001"
+    items = [
+        {
+            "kind": "note",
+            "payload": {"title": "Custom dict fact"},
+            "observer": "agent-z",
+            "origin": "batch-importer",
+            "ts": 1712345678.0,
+            "id": custom_id,
+        }
+    ]
+
+    receipts = emit_batch(sample_vertex, items)
+    assert len(receipts) == 1
+    receipt = receipts[0]
+    assert receipt.id == custom_id
+    assert receipt.observer == "agent-z"
+
+    fact = read_facts(sample_vertex, limit=1).items[0]
+    assert fact["id"] == custom_id
+    assert fact["observer"] == "agent-z"
+    assert fact["origin"] == "batch-importer"
+    assert fact["ts"].timestamp() == 1712345678.0
+
+
+def test_emit_batch_strict_rejection_raises_admission_failed(strict_vertex: Path) -> None:
+    """emit_batch raises AdmissionFailed when strict vertex rejects kind."""
+    from client import emit_batch
+
+    items = [("undeclared_kind", {"key": "val"})]
+    with pytest.raises(AdmissionFailed) as exc_info:
+        emit_batch(strict_vertex, items, observer="alice")
+    assert "undeclared" in str(exc_info.value).lower() or "strict" in str(exc_info.value).lower()

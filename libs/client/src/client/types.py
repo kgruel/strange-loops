@@ -53,6 +53,14 @@ class EmissionFailed(ClientError):
     """Fact emission failed before committing to the store."""
 
 
+class ClientValueError(ClientError, ValueError):
+    """Invalid input parameter or missing required argument for a client operation."""
+
+
+class InvalidEmissionRequest(ClientValueError, EmissionFailed):
+    """Invalid parameters supplied for fact emission (e.g. missing observer or unsupported batch shape)."""
+
+
 class CommittedEmissionError(EmissionFailed):
     """The fact was successfully committed to the canonical store, but a
     compound post-commit operation (e.g. tick computation or index sync) failed.

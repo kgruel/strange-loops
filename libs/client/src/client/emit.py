@@ -21,6 +21,7 @@ from .types import (
     EmissionFailed,
     EmitPreviewResult,
     EmitReceipt,
+    InvalidEmissionRequest,
     TargetUnsupported,
 )
 
@@ -81,7 +82,7 @@ def preview_emission(
         actual_payload = dict(fact.payload) if fact.payload else {}
     else:
         if observer is None:
-            raise ValueError("observer is required when previewing by kind name")
+            raise InvalidEmissionRequest("observer is required when previewing by kind name")
         actual_kind = kind_or_fact
         actual_observer = observer
         actual_origin = origin
@@ -212,7 +213,7 @@ def emit_fact(
         actual_observer = fact.observer
     else:
         if observer is None:
-            raise ValueError("observer is required when emitting by kind name")
+            raise InvalidEmissionRequest("observer is required when emitting by kind name")
         if ts is None:
             ts = datetime.now(UTC).timestamp()
         actual_payload = payload if payload is not None else {}
@@ -269,6 +270,8 @@ def emit_fact(
         raise AdmissionFailed(str(exc), observer=obs, kind=k, vertex=v) from exc
     except ReceiveCommittedError as exc:
         raise CommittedEmissionError(str(exc), fact_id=exc.fact_id) from exc
+    except ValueError:
+        raise
     except Exception as exc:
         raise EmissionFailed(f"fact emission failed: {exc}") from exc
     finally:
@@ -320,7 +323,7 @@ def emit_batch(
             elif isinstance(item, tuple) and len(item) == 2:
                 k, p = item
                 if observer is None:
-                    raise ValueError("observer is required when passing (kind, payload) tuples in emit_batch")
+                    raise InvalidEmissionRequest("observer is required when passing (kind, payload) tuples in emit_batch")
                 f = Fact.of(k, observer, origin=origin, **p)
                 actual_obs = observer
             elif isinstance(item, dict):
@@ -328,13 +331,13 @@ def emit_batch(
                 p = item.get("payload", {})
                 actual_obs = item.get("observer", observer)
                 if actual_obs is None:
-                    raise ValueError("observer is required for dict fact in emit_batch")
+                    raise InvalidEmissionRequest("observer is required for dict fact in emit_batch")
                 item_origin = item.get("origin", origin)
                 item_ts = item.get("ts") or datetime.now(UTC).timestamp()
                 item_id_override = item.get("id") or item.get("id_override")
                 f = Fact.of(k, actual_obs, origin=item_origin, ts=item_ts, **p)
             else:
-                raise ValueError(f"unsupported batch fact item shape: {type(item)}")
+                raise InvalidEmissionRequest(f"unsupported batch fact item shape: {type(item)}")
 
             result = handle.receive_as(
                 f,
@@ -378,6 +381,8 @@ def emit_batch(
         raise AdmissionFailed(str(exc), observer=obs, kind=k, vertex=v) from exc
     except ReceiveCommittedError as exc:
         raise CommittedEmissionError(str(exc), fact_id=exc.fact_id) from exc
+    except ValueError:
+        raise
     except Exception as exc:
         raise EmissionFailed(f"batch emission failed: {exc}") from exc
     finally:

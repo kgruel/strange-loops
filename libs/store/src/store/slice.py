@@ -141,10 +141,16 @@ def _build_where(
         params.append(before)
 
     if kinds:
+        # Binary equality / substr prefix — same predicate as the three
+        # engine sites (store_reader/vertex_reader). LIKE is wrong twice
+        # here (SOL-R2-02): `_`/`%` are wildcards, and LIKE compares ASCII
+        # case-insensitively — substr is an exact binary compare.
         kind_clauses = []
         for kind in kinds:
-            kind_clauses.append("(kind = ? OR kind LIKE ? || '.%')")
-            params.extend([kind, kind])
+            kind_clauses.append(
+                "(kind = ? OR substr(kind, 1, length(?) + 1) = ? || '.')"
+            )
+            params.extend([kind, kind, kind])
         clauses.append("(" + " OR ".join(kind_clauses) + ")")
 
     if observers:

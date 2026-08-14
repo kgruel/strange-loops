@@ -223,6 +223,39 @@ class TestSliceKinds:
         facts = _read_facts(tgt)
         assert {f["kind"] for f in facts} == {"ui.key", "ui.action"}
 
+    def test_kind_filter_is_not_a_like_pattern(self, tmp_path):
+        """SOL-R2-02: `_`/`%` in a kind are literals, not LIKE wildcards."""
+        src = tmp_path / "source.db"
+        tgt = tmp_path / "target.db"
+        _make_store(src, facts=[
+            {"kind": k, "ts": _BASE_TS + i, "observer": "o", "origin": "x",
+             "payload": {}}
+            for i, k in enumerate(
+                ["a_b", "a_b.child", "axb.child", "a%b.child", "axxb.child"]
+            )
+        ])
+
+        result = slice_store(src, tgt, kinds=["a_b"])
+
+        assert result.facts == 2
+        assert {f["kind"] for f in _read_facts(tgt)} == {"a_b", "a_b.child"}
+
+    def test_kind_filter_is_case_sensitive(self, tmp_path):
+        """SOL-R2-02: binary compare — LIKE's ASCII case-folding must not leak."""
+        src = tmp_path / "source.db"
+        tgt = tmp_path / "target.db"
+        _make_store(src, facts=[
+            {"kind": "a_b.child", "ts": _BASE_TS + 1, "observer": "o",
+             "origin": "x", "payload": {}},
+            {"kind": "A_B.child", "ts": _BASE_TS + 2, "observer": "o",
+             "origin": "x", "payload": {}},
+        ])
+
+        result = slice_store(src, tgt, kinds=["a_b"])
+
+        assert result.facts == 1
+        assert {f["kind"] for f in _read_facts(tgt)} == {"a_b.child"}
+
     def test_multiple_kinds(self, tmp_path):
         src = tmp_path / "source.db"
         tgt = tmp_path / "target.db"

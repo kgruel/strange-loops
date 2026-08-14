@@ -154,33 +154,6 @@ def _default_file_write(vertex_path: Path, proposed_text: str | None) -> None:
     _atomic_write(vertex_path, proposed_text)
 
 
-def _backend_not_writable(canonical_path: Path) -> str | None:
-    """Reason the backend WRITE SURFACE is not writable, or ``None``.
-
-    SOL-R2-04: the ceremony's store step writes more than the canonical
-    artifact — a JSONL-canonical open also writes the derived sqlite index,
-    and any sqlite open needs the containing directory for its WAL/SHM
-    siblings. Probing only the log let a writable log inside a read-only
-    directory plan as applicable and then fail raw at apply. ``_writable``
-    walks to the nearest existing ancestor, so a missing index counts as
-    creatable when its directory is writable.
-    """
-    from .probe import _writable
-    from .residence import index_path_for
-
-    if not _writable(canonical_path):
-        return f"canonical store not writable: {canonical_path}"
-    index = index_path_for(canonical_path)  # idempotent on a .db
-    if not _writable(index):
-        return f"derived index not writable: {index}"
-    if not _writable(canonical_path.parent):
-        return (
-            f"store directory not writable: {canonical_path.parent} — "
-            "sqlite needs it for WAL/SHM siblings"
-        )
-    return None
-
-
 def _open_store(canonical_path: Path):
     from atoms import Fact
 
@@ -300,7 +273,7 @@ def plan_declaration_update(
         declaration_generation,
         resolve_declaration_documents,
     )
-    from .probe import probe_target
+    from .probe import probe_target, write_surface_reason
 
     vertex_path = Path(vertex_path).resolve()
 
@@ -379,17 +352,11 @@ def plan_declaration_update(
     # backend write surface (SOL-R1-04 + SOL-R2-04: log, derived index,
     # and the directory sqlite needs for WAL/SHM siblings — plan must not
     # report a plan as applicable that apply's store step cannot execute).
-    surface_reason = _backend_not_writable(info.canonical_path)
-    store_writable = info.canonical_writable is not False and surface_reason is None
-    writable = info.writable and store_writable
-    not_writable_reason = (
-        info.reason
-        if not info.writable
-        else (
-            surface_reason
-            or f"canonical store not writable: {info.canonical_path}"
-        )
-    )
+    # probe's canonical_writable already carries the full-surface verdict;
+    # write_surface_reason re-derives the reason line for a False.
+    surface_reason = write_surface_reason(info.canonical_path)
+    writable = info.writable and surface_reason is None
+    not_writable_reason = info.reason if not info.writable else surface_reason
 
     if generation["lineage"] is None:
         # Pre-genesis (or unadopted): the file is authoritative; the ceremony
@@ -539,10 +506,12 @@ def apply_declaration_update(
         )
 
     # Canonical-store write-surface gate (SOL-R1-04 + SOL-R2-04): a typed
-    # refusal BEFORE any intent lands — and before the edit-mode currency
-    # pre-check, whose store open could itself fail raw on an unwritable
-    # backend. An unwritable store must leave zero residue.
-    surface_reason = _backend_not_writable(preview.canonical_path)
+    # refusal BEFORE any intent lands — the pre-intent re-check of the
+    # probe-level verdict plan consumed. An unwritable store must leave
+    # zero residue.
+    from .probe import write_surface_reason
+
+    surface_reason = write_surface_reason(preview.canonical_path)
     if surface_reason is not None:
         return DeclarationUpdateResult(
             status="refused",

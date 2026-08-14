@@ -60,6 +60,7 @@ __all__ = [
     "VERTEX_SUFFIX",
     "TargetInfo",
     "probe_target",
+    "write_surface_reason",
 ]
 
 VERTEX_SUFFIX = ".vertex"
@@ -143,8 +144,11 @@ class TargetInfo:
     """
 
     canonical_writable: bool | None
-    """Is the CANONICAL store artifact writable — the same ``os.access``
-    inspection as :attr:`writable`, evaluated on :attr:`canonical_path`.
+    """Is the canonical store's FULL WRITE SURFACE writable — the canonical
+    artifact itself, the derived index (writable, or creatable when absent),
+    AND the containing directory sqlite needs for its WAL/SHM siblings —
+    all by the same ``os.access`` inspection as :attr:`writable`
+    (:func:`write_surface_reason`; SOL-R1-04 + SOL-R2-04).
 
     A location-scoped filesystem claim, not an open-success promise. For a
     ``vertex`` target this is the dimension a store-writing ceremony must
@@ -268,7 +272,7 @@ def _probe_vertex(path: Path) -> TargetInfo:
         index_current=_currency(canonical) if mode == "jsonl" else None,
         declaration_status=status,
         writable=_writable(path),
-        canonical_writable=_writable(canonical),
+        canonical_writable=write_surface_reason(canonical) is None,
         reason=f"vertex declaring a {mode}-canonical store at {canonical}",
     )
 
@@ -285,7 +289,7 @@ def _probe_log(path: Path) -> TargetInfo:
         index_current=_currency(path) if exists else None,
         declaration_status=None,
         writable=_writable(path),
-        canonical_writable=_writable(path),
+        canonical_writable=write_surface_reason(path) is None,
         reason=(
             "JSONL-canonical log — the log is the store; the sibling .db "
             "is a derived, rebuildable index" + corroboration
@@ -309,7 +313,7 @@ def _probe_sqlite(path: Path) -> TargetInfo:
             index_current=_currency(sibling_log),
             declaration_status=None,
             writable=False,
-            canonical_writable=_writable(sibling_log),
+            canonical_writable=write_surface_reason(sibling_log) is None,
             reason=(
                 f"derived index over the JSONL-canonical log at "
                 f"{sibling_log} — NOT a write target: writing here is an "
@@ -327,7 +331,7 @@ def _probe_sqlite(path: Path) -> TargetInfo:
         index_current=None,
         declaration_status=None,
         writable=_writable(path),
-        canonical_writable=_writable(path),
+        canonical_writable=write_surface_reason(path) is None,
         reason=(
             "sqlite-canonical store — no sibling canonical log; the db is "
             "the store" + corroboration
@@ -355,6 +359,31 @@ def _currency(canonical: Path) -> bool | None:
     if not index.is_file():
         return False
     return _index_is_current(index, canonical)
+
+
+def write_surface_reason(canonical_path: Path | str) -> str | None:
+    """Reason the canonical store's FULL write surface is unwritable, or None.
+
+    The surface a store-writing ceremony touches is wider than the canonical
+    artifact (SOL-R1-04 + SOL-R2-04): a JSONL-canonical open also writes the
+    derived sqlite index, and any sqlite open needs the containing directory
+    for its WAL/SHM siblings. Pure ``os.access`` inspection — ``_writable``
+    walks to the nearest existing ancestor, so a missing index counts as
+    creatable when its directory is writable. A location-scoped claim, never
+    an open-success promise. Idempotent on a ``.db`` (index == canonical).
+    """
+    canonical_path = Path(canonical_path)
+    if not _writable(canonical_path):
+        return f"canonical store not writable: {canonical_path}"
+    index = index_path_for(canonical_path)
+    if not _writable(index):
+        return f"derived index not writable: {index}"
+    if not _writable(canonical_path.parent):
+        return (
+            f"store directory not writable: {canonical_path.parent} — "
+            "sqlite needs it for WAL/SHM siblings"
+        )
+    return None
 
 
 def _writable(path: Path) -> bool:

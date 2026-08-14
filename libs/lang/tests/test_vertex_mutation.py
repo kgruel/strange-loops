@@ -716,3 +716,89 @@ class TestScannerProvableDomain:
         assert set(parse_vertex(out).loops) == {"decision", "task"}
         out2 = remove_vertex_kind(doc, "decision")
         assert set(parse_vertex(out2).loops) == {"task"}
+
+
+class TestScannerProvableDomainR5:
+    """Sol r5: two parser-accepted spellings evaded the r4 refused set —
+    the zero-hash raw-string opener ``r"…"`` and a plain string containing
+    a LITERAL NEWLINE. Both are outside the provable domain and must
+    refuse. Multi-hash raw strings stay pinned refused; plain strings that
+    merely END in the letter r ("system-monitor") stay allowed."""
+
+    ZERO_HASH_RAW_DOC = (
+        'name "t"\n'
+        "loops {\n"
+        '  decision { boundary after=1 { run r"echo \\" } }; '
+        'task { fold { items "by" "name" } }\n'
+        '  task { fold { items "by" "name" } }\n'
+        "}\n"
+    )
+
+    NEWLINE_IN_STRING_DOC = (
+        'name "t"\n'
+        "loops {\n"
+        '  decision { boundary after=1 { run "echo\n'
+        ' quoted" } }; task { fold { items "by" "name" } }\n'
+        '  task { fold { items "by" "name" } }\n'
+        "}\n"
+    )
+
+    @pytest.mark.parametrize(
+        "doc", [ZERO_HASH_RAW_DOC, NEWLINE_IN_STRING_DOC],
+        ids=["zero-hash-raw", "newline-in-string"],
+    )
+    def test_repro_docs_parse(self, doc):
+        assert "task" in parse_vertex(doc).loops
+
+    @pytest.mark.parametrize(
+        "doc", [ZERO_HASH_RAW_DOC, NEWLINE_IN_STRING_DOC],
+        ids=["zero-hash-raw", "newline-in-string"],
+    )
+    def test_edit_refuses(self, doc):
+        with pytest.raises(ValueError, match="cannot prove safe"):
+            edit_vertex_kind(doc, "decision", BASIC)
+
+    @pytest.mark.parametrize(
+        "doc", [ZERO_HASH_RAW_DOC, NEWLINE_IN_STRING_DOC],
+        ids=["zero-hash-raw", "newline-in-string"],
+    )
+    def test_remove_refuses(self, doc):
+        with pytest.raises(ValueError, match="cannot prove safe"):
+            remove_vertex_kind(doc, "decision")
+
+    @pytest.mark.parametrize(
+        "doc", [ZERO_HASH_RAW_DOC, NEWLINE_IN_STRING_DOC],
+        ids=["zero-hash-raw", "newline-in-string"],
+    )
+    def test_add_refuses(self, doc):
+        with pytest.raises(ValueError, match="cannot prove safe"):
+            add_vertex_kind(doc, "marker", BASIC)
+
+    @pytest.mark.parametrize("hashes", list(range(1, 9)))
+    def test_multi_hash_raw_strings_stay_refused(self, hashes):
+        h = "#" * hashes
+        doc = (
+            'name "t"\n'
+            "loops {\n"
+            f'  decision {{ boundary after=1 {{ run {h}"echo"{h} }} }}\n'
+            '  task { fold { items "by" "name" } }\n'
+            "}\n"
+        )
+        with pytest.raises(ValueError, match="cannot prove safe"):
+            edit_vertex_kind(doc, "decision", BASIC)
+
+    def test_string_ending_in_letter_r_stays_allowed(self):
+        # "system-monitor" contains the two characters r" at its closing
+        # quote — the in-string spelling is real corpus content and must
+        # NOT refuse; only the OUT-of-string r" (raw opener) is refused.
+        doc = (
+            'name "system-monitor"\n'
+            "loops {\n"
+            '  decision { fold { items "by" "topic" } }\n'
+            '  task { fold { items "by" "name" } }\n'
+            "}\n"
+        )
+        out = edit_vertex_kind(doc, "decision", BASIC)
+        assert set(parse_vertex(out).loops) == {"decision", "task"}
+        out2 = remove_vertex_kind(doc, "decision")
+        assert set(parse_vertex(out2).loops) == {"task"}

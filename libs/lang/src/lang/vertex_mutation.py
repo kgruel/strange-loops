@@ -29,9 +29,11 @@ does) or reformat by hand.
 
 PROVABLE DOMAIN (SOL-R4-01 arbiter ruling): the lexical guards — sibling
 multiplicity (``_loops_block_child_names``) and comment detection
-(``_has_comment_outside_strings``) — are quote-aware scans over plain
-``"…"`` KDL strings only. KDL raw strings (``#"…"#`` / ``##"…"##``) and
-multi-line strings (``\"\"\"``) are OUTSIDE that domain: the scanners
+(``_has_comment_outside_strings``) — are quote-aware scans over
+SINGLE-LINE plain ``"…"`` KDL strings only. KDL raw strings of every hash
+depth INCLUDING zero (``r"…"``, ``#"…"#``, ``##"…"##``), multi-line
+strings (``\"\"\"``), and plain strings spanning a literal newline are
+OUTSIDE that domain: the scanners
 cannot track them, and the parser oracle is structurally blind to the
 physical multiplicity and trivia they can hide. Rather than grow a KDL
 lexer, every mutation refuses up front when the vertex text contains any
@@ -315,6 +317,50 @@ def _assert_scanner_provable_domain(text: str, context: str) -> None:
                 "scanner cannot prove safe to splice over (its guards "
                 'track plain "…" strings only); edit the file by hand'
             )
+    # Sol r5: two parser-accepted spellings the substring set misses — the
+    # ZERO-HASH raw-string opener ``r"…"`` and a plain string containing a
+    # LITERAL NEWLINE. One escape-aware left-to-right scan catches both.
+    # The scan is sound exactly because every construct that could poison
+    # its quote tracking (any hashed raw-string form, ``\"\"\"``) was
+    # already refused above, and it refuses AT the first occurrence of the
+    # two remaining unprovables — tracking is never trusted past one.
+    # ``r"`` is refused position-aware (letter r immediately before an
+    # OPENING quote), not as a bare substring: a plain string merely ending
+    # in the letter r (``"system-monitor"``, real corpus content) contains
+    # the two characters r" at its closing quote and is fine.
+    in_str = esc = False
+    prev = ""
+    for ch in text:
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+            elif ch == "\n":
+                raise ValueError(
+                    f"{context}: the vertex text contains a quoted string "
+                    "spanning a literal newline — syntax the line-based "
+                    "mutation scanner cannot prove safe to splice over; "
+                    "edit the file by hand"
+                )
+        elif ch == '"':
+            if prev == "r":
+                raise ValueError(
+                    f"{context}: the vertex text contains r\" — the "
+                    "zero-hash KDL raw-string opener, syntax the mutation "
+                    "scanner cannot prove safe to splice over; edit the "
+                    "file by hand"
+                )
+            in_str = True
+        prev = ch
+    if in_str:
+        raise ValueError(
+            f"{context}: the vertex text ends inside an unterminated "
+            "quoted string — the mutation scanner cannot prove any splice "
+            "safe; edit the file by hand"
+        )
 
 
 def _loops_block_child_names(text: str) -> list[str]:

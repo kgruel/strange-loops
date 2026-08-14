@@ -584,3 +584,35 @@ def test_apply_over_out_of_band_index_rows_refuses_typed_pre_intent(tmp_path):
     assert result.status == "refused"
     assert "log" in result.reason
     assert not intent_path_for(vertex).exists()
+
+
+def test_intent_write_failure_closes_store_and_refuses_typed(world, monkeypatch):
+    """SOL-R3-06: the store now opens BEFORE the intent lands, so a failing
+    intent write must (a) close the already-open handle and (b) come back as
+    a typed pre-ceremony refusal, not a raw OSError."""
+    import engine.ceremony as cer
+
+    _apply_genesis(world)
+    preview = plan_declaration_update(world["vertex"], proposed_text=world["edit"])
+
+    opened = []
+    real_open = cer._open_store
+
+    def spy_open(path):
+        s = real_open(path)
+        opened.append(s)
+        return s
+
+    monkeypatch.setattr(cer, "_open_store", spy_open)
+
+    def boom_intent(preview, observer):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(cer, "_write_intent", boom_intent)
+
+    result = apply_declaration_update(preview, observer="obs", credentials=Creds())
+    assert result.status == "refused"
+    assert "intent" in result.reason
+    assert opened, "the pre-intent open must have happened"
+    assert opened[0]._conn is None, "store handle leaked"
+    assert not intent_path_for(world["vertex"]).exists()

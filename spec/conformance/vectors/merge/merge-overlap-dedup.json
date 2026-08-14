@@ -1,0 +1,116 @@
+{
+  "name": "merge-overlap-dedup",
+  "description": "Pins merge primary-key deduplication: shared fact IDs between target and source are skipped via INSERT OR IGNORE, preserving target row positions and updating MergeResult counters.",
+  "input": {
+    "target": [
+      [
+        "01SHARED000000000000000001",
+        {
+          "kind": "metric",
+          "ts": 10.0,
+          "payload": {
+            "m": "cpu",
+            "v": 10
+          },
+          "observer": "alice",
+          "origin": ""
+        }
+      ],
+      [
+        "01SHARED000000000000000002",
+        {
+          "kind": "metric",
+          "ts": 20.0,
+          "payload": {
+            "m": "mem",
+            "v": 20
+          },
+          "observer": "alice",
+          "origin": ""
+        }
+      ]
+    ],
+    "source": [
+      [
+        "01SHARED000000000000000002",
+        {
+          "kind": "metric",
+          "ts": 20.0,
+          "payload": {
+            "m": "mem",
+            "v": 20
+          },
+          "observer": "alice",
+          "origin": ""
+        }
+      ],
+      [
+        "01SOURCE000000000000000003",
+        {
+          "kind": "metric",
+          "ts": 30.0,
+          "payload": {
+            "m": "disk",
+            "v": 30
+          },
+          "observer": "bob",
+          "origin": ""
+        }
+      ]
+    ]
+  },
+  "expected": {
+    "result": {
+      "facts_added": 1,
+      "facts_skipped": 1,
+      "ticks_added": 0,
+      "ticks_skipped": 0
+    },
+    "post_merge_ids": [
+      "01SHARED000000000000000001",
+      "01SHARED000000000000000002",
+      "01SOURCE000000000000000003"
+    ],
+    "post_merge_facts": [
+      [
+        "01SHARED000000000000000001",
+        {
+          "kind": "metric",
+          "ts": 10.0,
+          "payload": {
+            "m": "cpu",
+            "v": 10
+          },
+          "observer": "alice",
+          "origin": ""
+        }
+      ],
+      [
+        "01SHARED000000000000000002",
+        {
+          "kind": "metric",
+          "ts": 20.0,
+          "payload": {
+            "m": "mem",
+            "v": 20
+          },
+          "observer": "alice",
+          "origin": ""
+        }
+      ],
+      [
+        "01SOURCE000000000000000003",
+        {
+          "kind": "metric",
+          "ts": 30.0,
+          "payload": {
+            "m": "disk",
+            "v": 30
+          },
+          "observer": "bob",
+          "origin": ""
+        }
+      ]
+    ]
+  }
+}

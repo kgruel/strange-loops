@@ -1,0 +1,33 @@
+{
+  "name": "sum-float-precision",
+  "description": "Pins Sum fold float arithmetic semantics: adding 0.1 and 0.2 produces exact IEEE-754 representation 0.30000000000000004.",
+  "input": {
+    "spec": {
+      "name": "sum_float_spec",
+      "state_fields": [
+        {
+          "name": "total",
+          "kind": "float"
+        }
+      ],
+      "folds": [
+        {
+          "op": "sum",
+          "target": "total",
+          "field": "amount"
+        }
+      ]
+    },
+    "payloads": [
+      {
+        "amount": 0.1
+      },
+      {
+        "amount": 0.2
+      }
+    ]
+  },
+  "expected": {
+    "total": 0.30000000000000004
+  }
+}

@@ -1,0 +1,122 @@
+{
+  "name": "merge-disjoint-append-order",
+  "description": "Pins disjoint store merge: target gains source rows appended after its existing rows in source (ts, id) order; expected pins the complete post-merge rowid sequence.",
+  "input": {
+    "target": [
+      [
+        "01TARGET000000000000000001",
+        {
+          "kind": "event",
+          "ts": 100.0,
+          "payload": {
+            "k": "t1"
+          },
+          "observer": "alice",
+          "origin": ""
+        }
+      ],
+      [
+        "01TARGET000000000000000002",
+        {
+          "kind": "event",
+          "ts": 200.0,
+          "payload": {
+            "k": "t2"
+          },
+          "observer": "alice",
+          "origin": ""
+        }
+      ]
+    ],
+    "source": [
+      [
+        "01SOURCE000000000000000001",
+        {
+          "kind": "event",
+          "ts": 150.0,
+          "payload": {
+            "k": "s1"
+          },
+          "observer": "bob",
+          "origin": ""
+        }
+      ],
+      [
+        "01SOURCE000000000000000002",
+        {
+          "kind": "event",
+          "ts": 250.0,
+          "payload": {
+            "k": "s2"
+          },
+          "observer": "bob",
+          "origin": ""
+        }
+      ]
+    ]
+  },
+  "expected": {
+    "result": {
+      "facts_added": 2,
+      "facts_skipped": 0,
+      "ticks_added": 0,
+      "ticks_skipped": 0
+    },
+    "post_merge_ids": [
+      "01TARGET000000000000000001",
+      "01TARGET000000000000000002",
+      "01SOURCE000000000000000001",
+      "01SOURCE000000000000000002"
+    ],
+    "post_merge_facts": [
+      [
+        "01TARGET000000000000000001",
+        {
+          "kind": "event",
+          "ts": 100.0,
+          "payload": {
+            "k": "t1"
+          },
+          "observer": "alice",
+          "origin": ""
+        }
+      ],
+      [
+        "01TARGET000000000000000002",
+        {
+          "kind": "event",
+          "ts": 200.0,
+          "payload": {
+            "k": "t2"
+          },
+          "observer": "alice",
+          "origin": ""
+        }
+      ],
+      [
+        "01SOURCE000000000000000001",
+        {
+          "kind": "event",
+          "ts": 150.0,
+          "payload": {
+            "k": "s1"
+          },
+          "observer": "bob",
+          "origin": ""
+        }
+      ],
+      [
+        "01SOURCE000000000000000002",
+        {
+          "kind": "event",
+          "ts": 250.0,
+          "payload": {
+            "k": "s2"
+          },
+          "observer": "bob",
+          "origin": ""
+        }
+      ]
+    ]
+  }
+}

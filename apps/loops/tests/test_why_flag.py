@@ -114,15 +114,15 @@ class TestNativeNumericKeyWhy:
         assert fields["status"]["setter"]["index"] == 2
 
 
-class TestReplayIdentityNoSwitch:
-    """finding:chw-sol-r6-f1-replay-identity-switch (arbiter ruling): when a
-    native ``0`` and a string ``"0"`` coexist, the WINNING identity (string
-    wins — the rule loops.foldkey documents) is resolved exactly ONCE,
-    before the replay; the losing item contributes nothing to
-    fields/changed. The defect: a per-step lookup attributed the native
-    entry early, switched to the string entry when it appeared, and kept
-    the earlier change log — mixed-item output that depended on emission
-    order. Contract: --why explains exactly the row read renders."""
+class TestMergedIdentityReplay:
+    """decision:design/fold-key-string-projection (supersedes the r6 tie
+    rule finding:chw-sol-r6-f1-replay-identity-switch): a fold key's
+    identity is its string projection, applied by the ENGINE at the fold
+    boundary. Native ``0`` and string ``"0"`` are therefore ONE entry —
+    there is no winning/losing item and no tie to resolve. Every fact
+    projecting to the address contributes; per-field last-write-wins, so
+    emission order legitimately shapes values and prior chains. Contract
+    unchanged: --why explains exactly the row read renders."""
 
     def _vertex_with(self, tmp_path, emit_order):
         from .builders import StorePopulator
@@ -149,49 +149,40 @@ class TestReplayIdentityNoSwitch:
         pop.done()
         return vpath
 
-    def _fields(self, capsys, vpath):
+    def _why(self, capsys, vpath):
         rc, d = _why_json(capsys, vpath, "decision/0")
         assert rc == 0
-        return {f["field"]: f for f in d["fields"]}
+        return d
 
-    @pytest.mark.parametrize(
-        "emit_order",
-        [("native", "string"), ("string", "native")],
-        ids=["native-first", "string-first"],
-    )
-    def test_string_item_wins_whole_replay_either_order(
-        self, tmp_path, capsys, emit_order,
+    def test_native_and_string_fold_into_one_entry_all_facts_attributed(
+        self, tmp_path, capsys,
     ):
-        fields = self._fields(capsys, self._vertex_with(tmp_path, emit_order))
-        # The string item's fields, whole and pure...
+        d = self._why(capsys, self._vertex_with(tmp_path, ("native", "string")))
+        # All three facts fold into the single string-projected entry.
+        assert d["total_facts"] == 3
+        fields = {f["field"]: f for f in d["fields"]}
+        # Both items' fields coexist on the merged entry...
+        assert fields["native_only"]["value"] == "N"
         assert fields["message"]["value"] == "string body"
+        # ...and the shared field carries the full supersession chain.
         assert fields["status"]["value"] == "s-done"
-        assert [p["value"] for p in fields["status"]["priors"]] == ["s-open"]
-        # ...and NOTHING from the losing native item: no residual field, no
-        # native value smuggled in as a prior (the mid-replay switch used to
-        # retain both).
-        assert "native_only" not in fields
-        assert "native-open" not in {
-            p["value"] for f in fields.values() for p in f["priors"]
-        }
+        assert [p["value"] for p in fields["status"]["priors"]] == [
+            "s-open", "native-open",
+        ]
 
-    def test_both_orders_attribute_identical_content(self, tmp_path, capsys):
-        # Emission order must not change WHAT --why attributes (field →
-        # value → prior chain). Setter indexes track chronology position
-        # (the facts list legitimately reorders), so compare content.
-        def content(fields):
-            return {
-                name: (f["value"], tuple(p["value"] for p in f["priors"]))
-                for name, f in fields.items()
-            }
-
-        a = content(self._fields(
-            capsys, self._vertex_with(tmp_path / "a", ("native", "string")),
-        ))
-        b = content(self._fields(
-            capsys, self._vertex_with(tmp_path / "b", ("string", "native")),
-        ))
-        assert a == b
+    def test_last_write_wins_follows_emission_order(self, tmp_path, capsys):
+        d = self._why(capsys, self._vertex_with(tmp_path, ("string", "native")))
+        assert d["total_facts"] == 3
+        fields = {f["field"]: f for f in d["fields"]}
+        # Reversed order, reversed outcome for the shared field — order is
+        # semantic under last-write-wins, not an attribution defect.
+        assert fields["status"]["value"] == "native-open"
+        assert [p["value"] for p in fields["status"]["priors"]] == [
+            "s-done", "s-open",
+        ]
+        # Fields only one item carries are order-independent.
+        assert fields["native_only"]["value"] == "N"
+        assert fields["message"]["value"] == "string body"
 
 
 # --- Exact-address gate ----------------------------------------------------

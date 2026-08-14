@@ -1,0 +1,81 @@
+{
+  "name": "missing-source-fields-skipped",
+  "description": "Pins missing source field semantics: numeric folds (Sum, Min, Max, Avg) and Window/Upsert silently skip payloads lacking the field.",
+  "input": {
+    "spec": {
+      "name": "missing_fields_spec",
+      "state_fields": [
+        {
+          "name": "total",
+          "kind": "float"
+        },
+        {
+          "name": "lo",
+          "kind": "float"
+        },
+        {
+          "name": "hi",
+          "kind": "float"
+        },
+        {
+          "name": "mean",
+          "kind": "float"
+        },
+        {
+          "name": "buf",
+          "kind": "list"
+        },
+        {
+          "name": "tab",
+          "kind": "dict"
+        }
+      ],
+      "folds": [
+        {
+          "op": "sum",
+          "target": "total",
+          "field": "v"
+        },
+        {
+          "op": "min",
+          "target": "lo",
+          "field": "v"
+        },
+        {
+          "op": "max",
+          "target": "hi",
+          "field": "v"
+        },
+        {
+          "op": "avg",
+          "target": "mean",
+          "field": "v"
+        },
+        {
+          "op": "window",
+          "target": "buf",
+          "field": "v",
+          "size": 3
+        },
+        {
+          "op": "upsert",
+          "target": "tab",
+          "key": "k"
+        }
+      ]
+    },
+    "payloads": [
+      {
+        "other": 123
+      }
+    ]
+  },
+  "expected": {
+    "total": 0,
+    "lo": 0,
+    "hi": 0,
+    "mean": 0,
+    "buf": [],
+    "tab": {}
+  }
+}

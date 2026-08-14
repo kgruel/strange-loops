@@ -1,0 +1,44 @@
+{
+  "name": "fold-key-string-projection-merge",
+  "description": "Pins decision:design/fold-key-string-projection: integer 0 and string '0' project to the identical string key '0' and merge into one entry with _n=2.",
+  "input": {
+    "spec": {
+      "name": "fold_key_merge",
+      "state_fields": [
+        {
+          "name": "items",
+          "kind": "dict"
+        }
+      ],
+      "folds": [
+        {
+          "op": "upsert",
+          "target": "items",
+          "key": "id"
+        }
+      ]
+    },
+    "payloads": [
+      {
+        "_ts": 100.0,
+        "id": 0,
+        "val": "first"
+      },
+      {
+        "_ts": 101.0,
+        "id": "0",
+        "val": "second"
+      }
+    ]
+  },
+  "expected": {
+    "items": {
+      "0": {
+        "_ts": 101.0,
+        "id": "0",
+        "val": "second",
+        "_n": 2
+      }
+    }
+  }
+}

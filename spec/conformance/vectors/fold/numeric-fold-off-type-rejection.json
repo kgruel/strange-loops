@@ -1,0 +1,75 @@
+{
+  "name": "numeric-fold-off-type-rejection",
+  "description": "Pins decision:design/fold-off-type-skip-with-counter: non-numeric values including bool are skipped and increment target_rejected counter without mutating state or bumping Avg denominator.",
+  "input": {
+    "spec": {
+      "name": "rejection_spec",
+      "state_fields": [
+        {
+          "name": "sum_val",
+          "kind": "float"
+        },
+        {
+          "name": "avg_val",
+          "kind": "float"
+        },
+        {
+          "name": "min_val",
+          "kind": "float"
+        },
+        {
+          "name": "max_val",
+          "kind": "float"
+        }
+      ],
+      "folds": [
+        {
+          "op": "sum",
+          "target": "sum_val",
+          "field": "v"
+        },
+        {
+          "op": "avg",
+          "target": "avg_val",
+          "field": "v"
+        },
+        {
+          "op": "min",
+          "target": "min_val",
+          "field": "v"
+        },
+        {
+          "op": "max",
+          "target": "max_val",
+          "field": "v"
+        }
+      ]
+    },
+    "payloads": [
+      {
+        "v": 10
+      },
+      {
+        "v": "invalid"
+      },
+      {
+        "v": true
+      },
+      {
+        "v": 20
+      }
+    ]
+  },
+  "expected": {
+    "sum_val": 30,
+    "avg_val": 15.0,
+    "min_val": 0,
+    "max_val": 20,
+    "avg_val_sum": 30.0,
+    "avg_val_count": 2,
+    "sum_val_rejected": 2,
+    "avg_val_rejected": 2,
+    "min_val_rejected": 2,
+    "max_val_rejected": 2
+  }
+}

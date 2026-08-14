@@ -454,7 +454,9 @@ def _populate_source_facts(
         if not isinstance(fold_op, Upsert):
             continue
         for p in payloads_by_kind.get(kind, []):
-            fk = f"{kind}/{p.get(fold_op.key, '')}"
+            val = p.get(fold_op.key)
+            key_str = "" if val is None else str(val)
+            fk = f"{kind}/{key_str}"
             source_facts.setdefault(fk, []).append(p)
 
 
@@ -1213,7 +1215,9 @@ def vertex_fold(
                         fold_op = spec.folds[0]
                         if isinstance(fold_op, Upsert):
                             for p in payloads:
-                                fk = f"{k}/{p.get(fold_op.key, '')}"
+                                val = p.get(fold_op.key)
+                                key_str = "" if val is None else str(val)
+                                fk = f"{k}/{key_str}"
                                 source_facts.setdefault(fk, []).append(p)
 
                     raw[k] = spec.replay(payloads)

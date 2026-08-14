@@ -1,0 +1,112 @@
+{
+  "name": "replay-multiple-interleaved-timestamp-id-ties",
+  "description": "Pins composite replay ordering: multi-row sequence combining identical timestamps, reverse-ordered IDs, and out-of-order timestamps.",
+  "input": {
+    "spec": {
+      "name": "audit",
+      "state_fields": [
+        {
+          "name": "trail",
+          "kind": "list"
+        },
+        {
+          "name": "total",
+          "kind": "int"
+        }
+      ],
+      "folds": [
+        {
+          "op": "collect",
+          "target": "trail"
+        },
+        {
+          "op": "count",
+          "target": "total"
+        }
+      ]
+    },
+    "facts": [
+      [
+        "01TESTULID000000000000000Z",
+        {
+          "kind": "audit",
+          "ts": 200.0,
+          "payload": {
+            "step": "C"
+          },
+          "observer": "sys",
+          "origin": ""
+        }
+      ],
+      [
+        "01TESTULID000000000000000B",
+        {
+          "kind": "audit",
+          "ts": 100.0,
+          "payload": {
+            "step": "B"
+          },
+          "observer": "sys",
+          "origin": ""
+        }
+      ],
+      [
+        "01TESTULID000000000000000A",
+        {
+          "kind": "audit",
+          "ts": 100.0,
+          "payload": {
+            "step": "A"
+          },
+          "observer": "sys",
+          "origin": ""
+        }
+      ],
+      [
+        "01TESTULID0000000000000001",
+        {
+          "kind": "audit",
+          "ts": 300.0,
+          "payload": {
+            "step": "D"
+          },
+          "observer": "sys",
+          "origin": ""
+        }
+      ]
+    ]
+  },
+  "expected": {
+    "trail": [
+      {
+        "step": "A",
+        "_ts": 100.0,
+        "_observer": "sys",
+        "_origin": "",
+        "_id": "01TESTULID000000000000000A"
+      },
+      {
+        "step": "B",
+        "_ts": 100.0,
+        "_observer": "sys",
+        "_origin": "",
+        "_id": "01TESTULID000000000000000B"
+      },
+      {
+        "step": "C",
+        "_ts": 200.0,
+        "_observer": "sys",
+        "_origin": "",
+        "_id": "01TESTULID000000000000000Z"
+      },
+      {
+        "step": "D",
+        "_ts": 300.0,
+        "_observer": "sys",
+        "_origin": "",
+        "_id": "01TESTULID0000000000000001"
+      }
+    ],
+    "total": 4
+  }
+}

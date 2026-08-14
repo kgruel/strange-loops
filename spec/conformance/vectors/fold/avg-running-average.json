@@ -1,0 +1,38 @@
+{
+  "name": "avg-running-average",
+  "description": "Pins Avg fold running average: maintains target_sum and target_count in state alongside running mean.",
+  "input": {
+    "spec": {
+      "name": "avg_spec",
+      "state_fields": [
+        {
+          "name": "latency",
+          "kind": "float"
+        }
+      ],
+      "folds": [
+        {
+          "op": "avg",
+          "target": "latency",
+          "field": "ms"
+        }
+      ]
+    },
+    "payloads": [
+      {
+        "ms": 10.0
+      },
+      {
+        "ms": 20.0
+      },
+      {
+        "ms": 60.0
+      }
+    ]
+  },
+  "expected": {
+    "latency": 30.0,
+    "latency_sum": 90.0,
+    "latency_count": 3
+  }
+}

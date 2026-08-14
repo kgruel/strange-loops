@@ -1,0 +1,215 @@
+{
+  "name": "merge-interleaved-timestamps-replay-total-order",
+  "description": "Pins post-merge rowid append sequence vs replay total order: target retains initial rows at rowids 1-2 and appends source rows at rowids 3-5 in source (ts, id) order, while full store replay orders all 5 facts by (ts ASC, id ASC).",
+  "input": {
+    "target": [
+      [
+        "01TARGET000000000000000001",
+        {
+          "kind": "event_stream",
+          "ts": 100.0,
+          "payload": {
+            "step": "T1"
+          },
+          "observer": "alice",
+          "origin": ""
+        }
+      ],
+      [
+        "01TARGET000000000000000002",
+        {
+          "kind": "event_stream",
+          "ts": 300.0,
+          "payload": {
+            "step": "T2"
+          },
+          "observer": "alice",
+          "origin": ""
+        }
+      ]
+    ],
+    "source": [
+      [
+        "01SOURCE000000000000000001",
+        {
+          "kind": "event_stream",
+          "ts": 50.0,
+          "payload": {
+            "step": "S1"
+          },
+          "observer": "bob",
+          "origin": ""
+        }
+      ],
+      [
+        "01SOURCE000000000000000002",
+        {
+          "kind": "event_stream",
+          "ts": 200.0,
+          "payload": {
+            "step": "S2"
+          },
+          "observer": "bob",
+          "origin": ""
+        }
+      ],
+      [
+        "01SOURCE000000000000000003",
+        {
+          "kind": "event_stream",
+          "ts": 400.0,
+          "payload": {
+            "step": "S3"
+          },
+          "observer": "bob",
+          "origin": ""
+        }
+      ]
+    ],
+    "spec": {
+      "name": "event_stream",
+      "state_fields": [
+        {
+          "name": "events",
+          "kind": "list"
+        },
+        {
+          "name": "count",
+          "kind": "int"
+        }
+      ],
+      "folds": [
+        {
+          "op": "collect",
+          "target": "events"
+        },
+        {
+          "op": "count",
+          "target": "count"
+        }
+      ]
+    },
+    "cursors": {
+      "head": "head"
+    }
+  },
+  "expected": {
+    "result": {
+      "facts_added": 3,
+      "facts_skipped": 0,
+      "ticks_added": 0,
+      "ticks_skipped": 0
+    },
+    "post_merge_ids": [
+      "01TARGET000000000000000001",
+      "01TARGET000000000000000002",
+      "01SOURCE000000000000000001",
+      "01SOURCE000000000000000002",
+      "01SOURCE000000000000000003"
+    ],
+    "post_merge_facts": [
+      [
+        "01TARGET000000000000000001",
+        {
+          "kind": "event_stream",
+          "ts": 100.0,
+          "payload": {
+            "step": "T1"
+          },
+          "observer": "alice",
+          "origin": ""
+        }
+      ],
+      [
+        "01TARGET000000000000000002",
+        {
+          "kind": "event_stream",
+          "ts": 300.0,
+          "payload": {
+            "step": "T2"
+          },
+          "observer": "alice",
+          "origin": ""
+        }
+      ],
+      [
+        "01SOURCE000000000000000001",
+        {
+          "kind": "event_stream",
+          "ts": 50.0,
+          "payload": {
+            "step": "S1"
+          },
+          "observer": "bob",
+          "origin": ""
+        }
+      ],
+      [
+        "01SOURCE000000000000000002",
+        {
+          "kind": "event_stream",
+          "ts": 200.0,
+          "payload": {
+            "step": "S2"
+          },
+          "observer": "bob",
+          "origin": ""
+        }
+      ],
+      [
+        "01SOURCE000000000000000003",
+        {
+          "kind": "event_stream",
+          "ts": 400.0,
+          "payload": {
+            "step": "S3"
+          },
+          "observer": "bob",
+          "origin": ""
+        }
+      ]
+    ],
+    "witness_folds": {
+      "head": {
+        "events": [
+          {
+            "step": "S1",
+            "_ts": 50.0,
+            "_observer": "bob",
+            "_origin": "",
+            "_id": "01SOURCE000000000000000001"
+          },
+          {
+            "step": "T1",
+            "_ts": 100.0,
+            "_observer": "alice",
+            "_origin": "",
+            "_id": "01TARGET000000000000000001"
+          },
+          {
+            "step": "S2",
+            "_ts": 200.0,
+            "_observer": "bob",
+            "_origin": "",
+            "_id": "01SOURCE000000000000000002"
+          },
+          {
+            "step": "T2",
+            "_ts": 300.0,
+            "_observer": "alice",
+            "_origin": "",
+            "_id": "01TARGET000000000000000002"
+          },
+          {
+            "step": "S3",
+            "_ts": 400.0,
+            "_observer": "bob",
+            "_origin": "",
+            "_id": "01SOURCE000000000000000003"
+          }
+        ],
+        "count": 5
+      }
+    }
+  }
+}

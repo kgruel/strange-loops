@@ -14,10 +14,16 @@ import json
 import sqlite3
 from pathlib import Path
 
+import pytest
 from atoms import Fact
 
 from engine.sqlite_store import SqliteStore, gen_id
-from engine.witness import diff_interval_report, resolve_witness_position
+from engine.witness import (
+    GENESIS_SENTINEL,
+    WitnessResolutionError,
+    diff_interval_report,
+    resolve_witness_position,
+)
 
 
 def _fresh_store(store: Path) -> None:
@@ -48,8 +54,28 @@ class TestNoInterval:
         report = diff_interval_report(store, pos, pos)
         assert report == {"late_arrivals": [], "declaration_changed": False}
 
+    def test_invalid_store_raises(self, tmp_path):
+        """Kills mutant replacing invalid store message with None in diff_interval_report at witness.py:604."""
+        store = tmp_path / "t.db"
+        _fresh_store(store)
+        _append(store, "decision", 100, topic="a")
+        pos = resolve_witness_position(store, "head")
+        with pytest.raises(WitnessResolutionError, match="is not a usable store — cannot compute a diff interval report"):
+            diff_interval_report(tmp_path / "nope.db", pos, pos)
+
 
 class TestLateArrivals:
+    def test_diff_from_empty_prefix_returns_empty_list_for_late_arrivals(self, tmp_path):
+        """Kills mutant replacing late_arrivals: list[dict] = [] with None at witness.py:617."""
+        store = tmp_path / "t.db"
+        _fresh_store(store)
+        pos1 = resolve_witness_position(store, GENESIS_SENTINEL)
+        _append(store, "decision", 100, topic="a")
+        pos2 = resolve_witness_position(store, "head")
+        report = diff_interval_report(store, pos1, pos2)
+        assert report["late_arrivals"] == []
+        assert isinstance(report["late_arrivals"], list)
+
     def test_backdated_arrival_in_interval_is_reported(self, tmp_path):
         store = tmp_path / "t.db"
         _fresh_store(store)

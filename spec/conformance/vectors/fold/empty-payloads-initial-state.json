@@ -1,0 +1,59 @@
+{
+  "name": "empty-payloads-initial-state",
+  "description": "Pins empty replay semantics: zero payloads replayed on a spec yields initial state exactly.",
+  "input": {
+    "spec": {
+      "name": "empty_spec",
+      "state_fields": [
+        {
+          "name": "str_f",
+          "kind": "str"
+        },
+        {
+          "name": "int_f",
+          "kind": "int"
+        },
+        {
+          "name": "float_f",
+          "kind": "float"
+        },
+        {
+          "name": "bool_f",
+          "kind": "bool"
+        },
+        {
+          "name": "dict_f",
+          "kind": "dict"
+        },
+        {
+          "name": "list_f",
+          "kind": "list"
+        }
+      ],
+      "folds": [
+        {
+          "op": "count",
+          "target": "int_f"
+        },
+        {
+          "op": "upsert",
+          "target": "dict_f",
+          "key": "k"
+        },
+        {
+          "op": "collect",
+          "target": "list_f"
+        }
+      ]
+    },
+    "payloads": []
+  },
+  "expected": {
+    "str_f": "",
+    "int_f": 0,
+    "float_f": 0,
+    "bool_f": false,
+    "dict_f": {},
+    "list_f": []
+  }
+}

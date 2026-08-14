@@ -1,0 +1,35 @@
+{
+  "name": "count-basic",
+  "description": "Pins Count fold: increments counter once per payload regardless of payload content.",
+  "input": {
+    "spec": {
+      "name": "count_spec",
+      "state_fields": [
+        {
+          "name": "events",
+          "kind": "int"
+        }
+      ],
+      "folds": [
+        {
+          "op": "count",
+          "target": "events"
+        }
+      ]
+    },
+    "payloads": [
+      {
+        "_ts": 1.0,
+        "kind": "A"
+      },
+      {
+        "_ts": 2.0,
+        "kind": "B"
+      },
+      {}
+    ]
+  },
+  "expected": {
+    "events": 3
+  }
+}

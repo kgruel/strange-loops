@@ -1,0 +1,86 @@
+{
+  "name": "witness-genesis-sentinel-initial-state",
+  "description": "Pins witness genesis boundary: cursor at the genesis sentinel (empty string \"\") selects an empty prefix (rowid <= 0) and returns the spec's exact initial state.",
+  "input": {
+    "spec": {
+      "name": "system",
+      "state_fields": [
+        {
+          "name": "events",
+          "kind": "int"
+        },
+        {
+          "name": "entities",
+          "kind": "dict"
+        },
+        {
+          "name": "log",
+          "kind": "list"
+        },
+        {
+          "name": "total",
+          "kind": "float"
+        }
+      ],
+      "folds": [
+        {
+          "op": "count",
+          "target": "events"
+        },
+        {
+          "op": "upsert",
+          "target": "entities",
+          "key": "id"
+        },
+        {
+          "op": "collect",
+          "target": "log"
+        },
+        {
+          "op": "sum",
+          "target": "total",
+          "field": "val"
+        }
+      ]
+    },
+    "facts": [
+      [
+        "01TESTULID0000000000000001",
+        {
+          "kind": "system",
+          "ts": 100.0,
+          "payload": {
+            "id": "node1",
+            "val": 42.0
+          },
+          "observer": "sys",
+          "origin": ""
+        }
+      ],
+      [
+        "01TESTULID0000000000000002",
+        {
+          "kind": "system",
+          "ts": 101.0,
+          "payload": {
+            "id": "node2",
+            "val": 58.0
+          },
+          "observer": "sys",
+          "origin": ""
+        }
+      ]
+    ],
+    "cursors": {
+      "genesis": ""
+    }
+  },
+  "expected": {
+    "genesis": {
+      "events": 0,
+      "entities": {},
+      "log": [],
+      "total": 0
+    }
+  }
+}

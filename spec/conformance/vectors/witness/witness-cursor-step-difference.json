@@ -1,0 +1,137 @@
+{
+  "name": "witness-cursor-step-difference",
+  "description": "Pins witness prefix isolation: fold state at cursor P vs cursor P-1 differs by exactly the contribution of the fact at rowid P.",
+  "input": {
+    "spec": {
+      "name": "tx",
+      "state_fields": [
+        {
+          "name": "balance",
+          "kind": "float"
+        },
+        {
+          "name": "count",
+          "kind": "int"
+        },
+        {
+          "name": "history",
+          "kind": "list"
+        }
+      ],
+      "folds": [
+        {
+          "op": "sum",
+          "target": "balance",
+          "field": "amount"
+        },
+        {
+          "op": "count",
+          "target": "count"
+        },
+        {
+          "op": "collect",
+          "target": "history"
+        }
+      ]
+    },
+    "facts": [
+      [
+        "01TESTULID0000000000000001",
+        {
+          "kind": "tx",
+          "ts": 10.0,
+          "payload": {
+            "amount": 100.0,
+            "desc": "deposit"
+          },
+          "observer": "bank",
+          "origin": ""
+        }
+      ],
+      [
+        "01TESTULID0000000000000002",
+        {
+          "kind": "tx",
+          "ts": 20.0,
+          "payload": {
+            "amount": -30.0,
+            "desc": "withdrawal"
+          },
+          "observer": "bank",
+          "origin": ""
+        }
+      ],
+      [
+        "01TESTULID0000000000000003",
+        {
+          "kind": "tx",
+          "ts": 30.0,
+          "payload": {
+            "amount": 50.0,
+            "desc": "bonus"
+          },
+          "observer": "bank",
+          "origin": ""
+        }
+      ]
+    ],
+    "cursors": {
+      "p_minus_1": "01TESTULID0000000000000002",
+      "p": "01TESTULID0000000000000003"
+    }
+  },
+  "expected": {
+    "p_minus_1": {
+      "balance": 70.0,
+      "count": 2,
+      "history": [
+        {
+          "amount": 100.0,
+          "desc": "deposit",
+          "_ts": 10.0,
+          "_observer": "bank",
+          "_origin": "",
+          "_id": "01TESTULID0000000000000001"
+        },
+        {
+          "amount": -30.0,
+          "desc": "withdrawal",
+          "_ts": 20.0,
+          "_observer": "bank",
+          "_origin": "",
+          "_id": "01TESTULID0000000000000002"
+        }
+      ]
+    },
+    "p": {
+      "balance": 120.0,
+      "count": 3,
+      "history": [
+        {
+          "amount": 100.0,
+          "desc": "deposit",
+          "_ts": 10.0,
+          "_observer": "bank",
+          "_origin": "",
+          "_id": "01TESTULID0000000000000001"
+        },
+        {
+          "amount": -30.0,
+          "desc": "withdrawal",
+          "_ts": 20.0,
+          "_observer": "bank",
+          "_origin": "",
+          "_id": "01TESTULID0000000000000002"
+        },
+        {
+          "amount": 50.0,
+          "desc": "bonus",
+          "_ts": 30.0,
+          "_observer": "bank",
+          "_origin": "",
+          "_id": "01TESTULID0000000000000003"
+        }
+      ]
+    }
+  }
+}

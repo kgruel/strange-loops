@@ -1,0 +1,44 @@
+{
+  "name": "window-size-boundary",
+  "description": "Pins Window fold boundary behavior: buffers field values up to size and drops oldest when exceeded.",
+  "input": {
+    "spec": {
+      "name": "window_spec",
+      "state_fields": [
+        {
+          "name": "intervals",
+          "kind": "list"
+        }
+      ],
+      "folds": [
+        {
+          "op": "window",
+          "target": "intervals",
+          "field": "val",
+          "size": 3
+        }
+      ]
+    },
+    "payloads": [
+      {
+        "val": 10
+      },
+      {
+        "val": 20
+      },
+      {
+        "val": 30
+      },
+      {
+        "val": 40
+      }
+    ]
+  },
+  "expected": {
+    "intervals": [
+      20,
+      30,
+      40
+    ]
+  }
+}

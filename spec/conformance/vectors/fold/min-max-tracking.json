@@ -1,0 +1,49 @@
+{
+  "name": "min-max-tracking",
+  "description": "Pins Min and Max fold operations: correctly replaces initial None and tracks running minimum and maximum values.",
+  "input": {
+    "spec": {
+      "name": "min_max_spec",
+      "state_fields": [
+        {
+          "name": "min_temp",
+          "kind": "float"
+        },
+        {
+          "name": "max_temp",
+          "kind": "float"
+        }
+      ],
+      "folds": [
+        {
+          "op": "min",
+          "target": "min_temp",
+          "field": "temp"
+        },
+        {
+          "op": "max",
+          "target": "max_temp",
+          "field": "temp"
+        }
+      ]
+    },
+    "payloads": [
+      {
+        "temp": 15.5
+      },
+      {
+        "temp": -3.2
+      },
+      {
+        "temp": 42.0
+      },
+      {
+        "temp": 0.0
+      }
+    ]
+  },
+  "expected": {
+    "min_temp": -3.2,
+    "max_temp": 42.0
+  }
+}

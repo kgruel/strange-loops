@@ -63,3 +63,25 @@ from `_tick_signer`.
 - engine suite: 1410 passed (6.41s). loops suite: 2521 passed, 1 xfailed (10.69s).
 - Post-mutation-revert: `test_receipt_attestation.py` 15 passed; working tree
   clean of the mutant before this report.
+
+## Addendum — 5c re-check at 3daaf563: PASS. Overall verdict revised to PASS.
+
+s4-impl's fix (3daaf563 on slice/s4-receipt-attestation) re-verified
+independently:
+
+- **Repro re-driven**: the gate's own EventStore repro (store `./x.log` +
+  declared Ed25519 key, boundary fires) now prints
+  `tick: ping (1 fields) · unattested` — not `signed`.
+- **No inference path remains**: grep of `emit.py` shows `_tick_signer`
+  capture dissolved (inlined into `load_vertex_program`); the mark logic
+  consults only `receipt.tick_attestation`, with `"unattested"` on None.
+- **Signed/unsigned marks unregressed**: gate 4-case CLI driver
+  (signed/unsigned × sqlite/jsonl, marks cross-checked against the committed
+  tick row's signature column) still green.
+- **Pinning test + gate mutation**: `TestTickMarkTriState` passes; gate
+  re-introduced the config-inference fallback
+  (`"signed" if tick_signer_for(path) is not None`) — the pinned test
+  **failed** under the mutant; revert → green.
+- **Suite**: loops 2522 passed, 1 xfailed at 3daaf563.
+
+Overall: **PASS** — all 8 items green with 5c resolved.

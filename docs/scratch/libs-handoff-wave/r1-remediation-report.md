@@ -21,10 +21,11 @@ carries a regression test observed FAILING against the pre-fix source
 | `uv run --package loops pytest apps/loops/tests` | 2522 passed, 1 xfailed |
 | `uv run pytest tests/` | 59 passed |
 
-Note: `uv run --package engine pytest libs/engine/tests` shows 4
-`test_topology.py::TestTopologyCacheResolution` errors that are an
-environment artifact only — those tests import `loops.main`, absent from
-the engine-only package env; they pass in the workspace env (above) and
-pre-date this branch.
+Note for verifiers: the prescribed form `uv run --package engine pytest
+libs/engine/tests` shows 4 `test_topology.py::TestTopologyCacheResolution`
+failures that are an environment artifact — those tests import
+`loops.main`, which is absent from the engine-only package env. The
+workspace-env run (`uv run pytest libs/engine/tests`, above) is the one
+that must pass, and does.
 
 No arbiter-stops: all five findings fit inside their remediation fences.

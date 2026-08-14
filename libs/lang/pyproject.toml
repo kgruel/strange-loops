@@ -9,6 +9,7 @@ dependencies = ["ckdl>=1.0"]
 
 [dependency-groups]
 dev = [
+    "hypothesis>=6.100",
     "pytest>=8.0",
     "pytest-cov>=6.0",
     "ruff>=0.8",

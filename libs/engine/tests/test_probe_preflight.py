@@ -356,6 +356,41 @@ def test_recover_then_open_repairs_a_stale_index_and_reports_both_sides(tmp_path
     assert db.exists()
 
 
+def test_recover_then_open_rebuilds_a_non_sqlite_index(tmp_path):
+    """SOL-R2-03: corrupt derived index (non-sqlite bytes) must not leak a
+    raw sqlite3.DatabaseError — the index is derived, the log is valid, so
+    recovery deletes and rebuilds the index from the log."""
+    log, db = seeded_jsonl(tmp_path)
+    db.write_bytes(b"this is definitely not a sqlite database\n" * 20)
+    for side in ("-wal", "-shm"):
+        p = Path(str(db) + side)
+        if p.exists():
+            p.unlink()
+    r = read_preflight(log, PreflightMode.RECOVER_THEN_OPEN)
+    assert (r.status, r.opened, r.recovered) == ("recovered", True, True)
+    assert r.report is not None  # pre-recovery evidence kept
+    assert r.post_report is not None and r.post_report.ok
+    assert isinstance(r.store, JsonlStore)
+    r.store.close()
+    with sqlite3.connect(db) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM facts").fetchone()[0] == 3
+        assert conn.execute("SELECT COUNT(*) FROM ticks").fetchone()[0] == 1
+
+
+def test_recover_then_open_rebuilds_a_truncated_sqlite_header(tmp_path):
+    """SOL-R2-03 variant: index truncated mid-header."""
+    log, db = seeded_jsonl(tmp_path)
+    db.write_bytes(b"SQLite format 3\x00"[:9])
+    for side in ("-wal", "-shm"):
+        p = Path(str(db) + side)
+        if p.exists():
+            p.unlink()
+    r = read_preflight(log, PreflightMode.RECOVER_THEN_OPEN)
+    assert (r.status, r.opened, r.recovered) == ("recovered", True, True)
+    assert r.post_report is not None and r.post_report.ok
+    r.store.close()
+
+
 def test_recover_then_open_still_refuses_out_of_band_rows(tmp_path):
     """Unrecoverable damage: the log cannot account for injected rows."""
     log, db = seeded_jsonl(tmp_path)

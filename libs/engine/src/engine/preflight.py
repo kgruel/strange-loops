@@ -298,6 +298,18 @@ def _recover_then_open(
             ),
         )
     except sqlite3.Error as exc:
+        if _sqlite_busy(exc):
+            # SOL-R3-05: a transient BUSY/LOCKED is not failed corruption
+            # recovery — no rebuild ran and the canonical log reads fine.
+            # ``refused`` is the honest class for try-again-later (the
+            # closed vocabulary holds).
+            return _result(
+                mode, canonical, index, "refused", report=report,
+                reason=(
+                    f"store is busy — another handle holds the sqlite "
+                    f"write lock ({exc}); nothing was discarded, try again"
+                ),
+            )
         return _result(
             mode, canonical, index, "unreadable", report=report,
             reason=(
@@ -363,6 +375,19 @@ def _sqlite_preflight(
 
 
 # --- helpers ----------------------------------------------------------------
+
+
+def _sqlite_busy(exc: BaseException) -> bool:
+    """Is this sqlite error a transient BUSY/LOCKED, not damage?
+
+    Primary evidence is the error code (``SQLITE_BUSY`` 5 / ``SQLITE_LOCKED``
+    6, low byte of any extended code); the message substring is the fallback
+    for wrappers that lose the code.
+    """
+    code = getattr(exc, "sqlite_errorcode", None)
+    if code is not None:
+        return (code & 0xFF) in (5, 6)
+    return "database is locked" in str(exc) or "database table is locked" in str(exc)
 
 
 def _verdict(canonical: Path, report: AgreementReport) -> tuple[str, str]:

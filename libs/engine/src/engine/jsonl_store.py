@@ -372,10 +372,38 @@ class JsonlStore(SqliteStore[T], Generic[T]):
         self._log_path = (
             Path(log_path) if log_path is not None else log_path_for(self._path)
         )
-        self._ensure_fact_signature_column()
-        self._ensure_chain_columns()
-        self._ensure_meta_table()
         try:
+            self._open_index()
+        except sqlite3.Error as exc:
+            # The derived index itself does not open as sqlite (non-sqlite
+            # bytes, truncated header — low-level corruption catch-up cannot
+            # route around). The index is DERIVED and the canonical log is
+            # the store, so discarding and rebuilding it from the log is this
+            # layer's own recovery, same class as the _rebuild triggers. Two
+            # guards keep the unlink honest: a transient lock is not
+            # corruption (re-raise — another handle owns a live index), and
+            # with no canonical log on disk the db is the only artifact
+            # (re-raise — never destroy what cannot be re-derived).
+            if "database is locked" in str(exc) or not self._log_path.is_file():
+                raise
+            from .residence import sqlite_sidecars
+
+            _log.warning(
+                "jsonl-canonical: derived index %s unusable (%s) — "
+                "discarding and rebuilding from %s",
+                self._path, exc, self._log_path,
+            )
+            for stale in (self._path, *sqlite_sidecars(self._path)):
+                stale.unlink(missing_ok=True)
+            super().__init__(**kwargs)  # fresh empty index at the same path
+            self._open_index()  # offset absent + non-empty log ⇒ rebuild
+
+    def _open_index(self) -> None:
+        """Schema prep + catch-up, leaving the db reopenable on failure."""
+        try:
+            self._ensure_fact_signature_column()
+            self._ensure_chain_columns()
+            self._ensure_meta_table()
             self.catch_up()
         except BaseException:
             # A raise out of __init__ must leave the db reopenable: an

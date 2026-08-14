@@ -498,3 +498,20 @@ def test_preflight_never_creates_a_missing_sqlite_store(tmp_path):
         )
         assert "never creates" in r.reason
     assert list(tmp_path.iterdir()) == []
+
+
+def test_audit_then_open_still_refuses_an_unopenable_index(tmp_path):
+    """Pin (simplify item 2): store-open now self-recovers a corrupt index,
+    but AUDIT_THEN_OPEN must still refuse — audit_agreement reports an
+    unopenable index as a failing check, and this mode never repairs."""
+    log, db = seeded_jsonl(tmp_path)
+    db.write_bytes(b"this is definitely not a sqlite database\n" * 20)
+    for side in ("-wal", "-shm"):
+        p = Path(str(db) + side)
+        if p.exists():
+            p.unlink()
+    corrupt = db.read_bytes()
+    r = read_preflight(log, PreflightMode.AUDIT_THEN_OPEN)
+    assert (r.status, r.opened, r.store) == ("refused", False, None)
+    assert r.report is not None and not r.report.ok
+    assert db.read_bytes() == corrupt, "audit-then-open repaired the index"

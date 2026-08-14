@@ -948,3 +948,62 @@ def test_declaration_status_resolves_to_the_index_not_the_log(tmp_path, monkeypa
     decl.load_declaration_status(vpath)
 
     assert seen == [tmp_path / "data" / "t.db"]
+
+
+class TestCorruptIndexRecoversAtOpen:
+    """SOL-R2-03, moved into the store's own open (simplify item 2): a
+    derived index that does not open as sqlite is discarded and rebuilt
+    from the log by JsonlStore.__init__ itself — every open path
+    (ensure_index, open_canonical_store, direct construction) survives."""
+
+    def _corrupt(self, tmp_path):
+        store = open_store(tmp_path)
+        a, b = store.append(fact(message="one")), store.append(fact(message="two"))
+        store.close()
+        db = tmp_path / "s.db"
+        db.write_bytes(b"this is definitely not a sqlite database\n" * 20)
+        for side in ("-wal", "-shm"):
+            p = Path(str(db) + side)
+            if p.exists():
+                p.unlink()
+        return a, b
+
+    def test_direct_open_rebuilds_from_the_log(self, tmp_path, caplog):
+        a, b = self._corrupt(tmp_path)
+        with caplog.at_level("WARNING"):
+            store = open_store(tmp_path)
+        assert "discarding and rebuilding" in caplog.text
+        assert [r[0] for r in sqlite_facts(tmp_path / "s.db")] == [a, b]
+        assert store.append(fact(message="three"))  # store is live, log intact
+        store.close()
+
+    def test_open_canonical_store_survives_a_corrupt_index(self, tmp_path):
+        from engine.jsonl_store import open_canonical_store
+
+        a, b = self._corrupt(tmp_path)
+        log_before = (tmp_path / "s.jsonl").read_bytes()
+        store = open_canonical_store(
+            tmp_path / "s.jsonl",
+            serialize=lambda f: f.to_dict(),
+            deserialize=Fact.from_dict,
+        )
+        store.close()
+        assert (tmp_path / "s.jsonl").read_bytes() == log_before
+        assert [r[0] for r in sqlite_facts(tmp_path / "s.db")] == [a, b]
+
+    def test_ensure_index_survives_a_corrupt_index(self, tmp_path):
+        from engine.jsonl_store import ensure_index
+
+        a, b = self._corrupt(tmp_path)
+        index = ensure_index(tmp_path / "s.jsonl")
+        assert [r[0] for r in sqlite_facts(index)] == [a, b]
+
+    def test_corrupt_db_with_no_log_still_refuses(self, tmp_path):
+        """With no canonical log the db is the only artifact — never unlink."""
+        import sqlite3 as _sq
+
+        self._corrupt(tmp_path)
+        (tmp_path / "s.jsonl").unlink()
+        with pytest.raises(_sq.Error):
+            open_store(tmp_path)
+        assert (tmp_path / "s.db").exists(), "the only artifact was destroyed"

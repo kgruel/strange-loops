@@ -141,16 +141,13 @@ def _build_where(
         params.append(before)
 
     if kinds:
-        # Binary equality / substr prefix — same predicate as the three
-        # engine sites (store_reader/vertex_reader). LIKE is wrong twice
-        # here (SOL-R2-02): `_`/`%` are wildcards, and LIKE compares ASCII
-        # case-insensitively — substr is an exact binary compare.
+        from engine.sql_util import kind_subtree_predicate
+
         kind_clauses = []
         for kind in kinds:
-            kind_clauses.append(
-                "(kind = ? OR substr(kind, 1, length(?) + 1) = ? || '.')"
-            )
-            params.extend([kind, kind, kind])
+            kind_sql, kind_params = kind_subtree_predicate(kind)
+            kind_clauses.append(kind_sql)
+            params.extend(kind_params)
         clauses.append("(" + " OR ".join(kind_clauses) + ")")
 
     if observers:

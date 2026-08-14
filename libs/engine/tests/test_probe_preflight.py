@@ -498,3 +498,64 @@ def test_preflight_never_creates_a_missing_sqlite_store(tmp_path):
         )
         assert "never creates" in r.reason
     assert list(tmp_path.iterdir()) == []
+
+
+def test_audit_then_open_still_refuses_an_unopenable_index(tmp_path):
+    """Pin (simplify item 2): store-open now self-recovers a corrupt index,
+    but AUDIT_THEN_OPEN must still refuse — audit_agreement reports an
+    unopenable index as a failing check, and this mode never repairs."""
+    log, db = seeded_jsonl(tmp_path)
+    db.write_bytes(b"this is definitely not a sqlite database\n" * 20)
+    for side in ("-wal", "-shm"):
+        p = Path(str(db) + side)
+        if p.exists():
+            p.unlink()
+    corrupt = db.read_bytes()
+    r = read_preflight(log, PreflightMode.AUDIT_THEN_OPEN)
+    assert (r.status, r.opened, r.store) == ("refused", False, None)
+    assert r.report is not None and not r.report.ok
+    assert db.read_bytes() == corrupt, "audit-then-open repaired the index"
+
+
+def test_vertex_canonical_writable_is_the_full_write_surface(tmp_path):
+    """Simplify item 1: canonical_writable now answers for the FULL write
+    surface (canonical + derived index + containing dir for WAL/SHM). A
+    writable log inside a read-only directory is canonical_writable=False —
+    the ceremony's store step could not execute there."""
+    import os
+
+    if os.geteuid() == 0:
+        pytest.skip("root ignores permission bits")
+    data = tmp_path / "data"
+    data.mkdir()
+    log = data / "t.jsonl"
+    log.write_text("")
+    vpath = tmp_path / "t.vertex"
+    vpath.write_text(_VERTEX_KDL.format(store="data/t.jsonl"))
+    try:
+        info = probe_target(vpath)
+        assert info.canonical_writable is True
+        data.chmod(0o555)  # dir read-only; the log keeps its write bit
+        info = probe_target(vpath)
+        assert info.writable is True  # the .vertex file itself is fine
+        assert info.canonical_writable is False
+    finally:
+        data.chmod(0o755)
+
+
+def test_write_surface_reason_names_the_unwritable_piece(tmp_path):
+    import os
+
+    from engine.probe import write_surface_reason
+
+    if os.geteuid() == 0:
+        pytest.skip("root ignores permission bits")
+    log = tmp_path / "s.jsonl"
+    log.write_text("")
+    (tmp_path / "s.db").write_text("")  # index present, keeps its write bit
+    assert write_surface_reason(log) is None
+    try:
+        tmp_path.chmod(0o555)
+        assert "store directory not writable" in write_surface_reason(log)
+    finally:
+        tmp_path.chmod(0o755)

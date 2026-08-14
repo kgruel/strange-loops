@@ -168,7 +168,9 @@ def _remove_partial(target: Path) -> None:
     Leaving the partial behind would make the natural retry fail on
     ``FileExistsError`` instead — one failure turned into manual cleanup.
     """
-    for path in (target, *(target.with_name(target.name + s) for s in ("-wal", "-shm"))):
+    from engine.residence import sqlite_sidecars
+
+    for path in (target, *sqlite_sidecars(target)):
         path.unlink(missing_ok=True)
 
 

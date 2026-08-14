@@ -58,9 +58,10 @@ def compact_store(path: Path) -> CompactResult:
 
 def _total_size(path: Path) -> int:
     """Sum the size of the DB file plus any WAL/SHM sidecars."""
+    from engine.residence import sqlite_sidecars
+
     total = path.stat().st_size
-    for suffix in ("-wal", "-shm"):
-        sidecar = path.parent / (path.name + suffix)
+    for sidecar in sqlite_sidecars(path):
         if sidecar.exists():
             total += sidecar.stat().st_size
     return total

@@ -328,8 +328,11 @@ class TestRemoveVertexKind:
             remove_vertex_kind(MULTI, "decision")
 
     def test_remove_kind_sharing_a_line_with_siblings_fails_loud(self):
-        # SOL-R1-01 fail-loud guard: removal of a kind whose physical line
-        # carries siblings must refuse, not take the siblings with it.
+        # SOL-R1-01 fail-loud property, now held by the parser oracle alone
+        # (simplify item 5 — the lexical pre-guard dissolved): removal of a
+        # kind whose physical line carries siblings must refuse, not take
+        # the siblings with it. Here the splice mangles the text and the
+        # post-mutation parse/verify refuses; the original text stands.
         text = (
             'name "t"\n'
             "loops {\n"
@@ -337,7 +340,7 @@ class TestRemoveVertexKind:
             'task { fold { items "by" "name" } }\n'
             "}\n"
         )
-        with pytest.raises(ValueError, match="sibling"):
+        with pytest.raises(ValueError, match="invalid vertex|preservation"):
             remove_vertex_kind(text, "decision")
 
     def test_remove_single_line_loops_block_unsupported(self):

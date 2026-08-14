@@ -55,6 +55,21 @@ def test_committed_emission_error_preserves_fact_id() -> None:
     assert isinstance(err, ClientError)
 
 
+def test_admission_failed_attributes() -> None:
+    """AdmissionFailed preserves observer, kind, and vertex attributes."""
+    err = AdmissionFailed(
+        "Strict policy refusal",
+        observer="alice",
+        kind="unregistered_kind",
+        vertex="main_vertex",
+    )
+    assert str(err) == "Strict policy refusal"
+    assert err.observer == "alice"
+    assert err.kind == "unregistered_kind"
+    assert err.vertex == "main_vertex"
+    assert isinstance(err, ClientError)
+
+
 # =============================================================================
 # 2. Model Immutability & Serialization Contracts
 # =============================================================================

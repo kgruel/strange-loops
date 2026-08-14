@@ -60,18 +60,23 @@ fact = read_fact_by_id("target.vertex", "01M01...")
 
 ```python
 from client import emit_fact, EmitReceipt
+from atoms import Fact
 
+# Emitting by kind and payload
 receipt = emit_fact(
     "target.vertex",
-    kind="note",
+    kind_or_fact="note",
     payload={"title": "Meeting Notes", "body": "Discussed client API"},
     observer="alice",
 )
-# -> EmitReceipt(id='01M0...', stored=True, signed=True, observer='alice', state_change=True)
+
+# Or emitting a pre-constructed Fact atom directly
+fact = Fact.of("note", "alice", title="Meeting Notes")
+receipt = emit_fact("target.vertex", fact)
 ```
 
-- **`emit_fact(target, kind, payload, *, observer, origin="", ts=None, credentials=None, admit_undeclared=False) -> EmitReceipt`**:
-  Emits a fact under declared admission rules. Bypassing strict kind admission requires `admit_undeclared=True`.
+- **`emit_fact(target, kind_or_fact, payload=None, *, observer=None, origin="", ts=None, id_override=None, credentials=None, admit_undeclared=False) -> EmitReceipt`**:
+  Emits a fact (or `Fact` atom) under declared admission rules. Bypassing strict kind admission requires `admit_undeclared=True`. Deterministic IDs can be specified with `id_override`.
 
 ---
 

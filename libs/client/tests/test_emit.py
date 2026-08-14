@@ -48,7 +48,51 @@ def test_emit_fact_undeclared_kind_rejected_by_default(strict_vertex: Path) -> N
             {"key": "value"},
             observer="alice",
         )
+    assert exc_info.value.kind == "undeclared_custom_kind"
+    assert exc_info.value.vertex == "strict"
     assert "undeclared" in str(exc_info.value).lower() or "admission" in str(exc_info.value).lower()
+
+
+def test_emit_fact_accepts_fact_atom_directly(sample_vertex: Path) -> None:
+    """emit_fact accepts a pre-constructed Fact atom directly."""
+    from atoms import Fact
+
+    fact = Fact.of("note", "bob", origin="agent-direct", title="Direct Fact")
+    receipt = emit_fact(sample_vertex, fact)
+
+    assert receipt.stored is True
+    assert receipt.observer == "bob"
+
+    page = read_facts(sample_vertex, limit=1)
+    stored_fact = page.items[0]
+    assert stored_fact["id"] == receipt.id
+    assert stored_fact["observer"] == "bob"
+    assert stored_fact["origin"] == "agent-direct"
+    assert stored_fact["payload"]["title"] == "Direct Fact"
+
+
+def test_emit_fact_with_id_override(sample_vertex: Path) -> None:
+    """emit_fact respects deterministic id_override."""
+    custom_id = "01M01DETERMINISTIC00000001"
+    receipt = emit_fact(
+        sample_vertex,
+        "note",
+        {"title": "Custom ID test"},
+        observer="alice",
+        id_override=custom_id,
+    )
+    assert receipt.stored is True
+    assert receipt.id == custom_id
+
+    fact = read_facts(sample_vertex, limit=1).items[0]
+    assert fact["id"] == custom_id
+
+
+def test_emit_fact_missing_observer_raises_value_error(sample_vertex: Path) -> None:
+    """Emitting by kind string without observer raises ValueError."""
+    with pytest.raises(ValueError) as exc_info:
+        emit_fact(sample_vertex, "note", {"title": "No observer"})
+    assert "observer is required" in str(exc_info.value)
 
 
 def test_emit_fact_admit_undeclared_override(sample_vertex: Path) -> None:

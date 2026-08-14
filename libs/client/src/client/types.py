@@ -35,6 +35,19 @@ class TargetNotWritable(TargetError):
 class AdmissionFailed(ClientError):
     """Declared admission policy rejected the operation."""
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        observer: str | None = None,
+        kind: str | None = None,
+        vertex: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.observer = observer
+        self.kind = kind
+        self.vertex = vertex
+
 
 class EmissionFailed(ClientError):
     """Fact emission failed before committing to the store."""

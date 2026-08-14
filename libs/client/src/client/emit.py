@@ -29,12 +29,13 @@ class CustodyCredentialProvider:
 
 def emit_fact(
     target: Path | str,
-    kind: str,
-    payload: dict[str, Any],
+    kind_or_fact: str | Fact,
+    payload: dict[str, Any] | None = None,
     *,
-    observer: str,
+    observer: str | None = None,
     origin: str = "",
     ts: float | None = None,
+    id_override: str | None = None,
     credentials: CredentialProvider | None = None,
     admit_undeclared: bool = False,
 ) -> EmitReceipt:
@@ -42,11 +43,12 @@ def emit_fact(
 
     Parameters:
         target: Path to the target .vertex file.
-        kind: The fact kind name.
-        payload: The JSON-serializable fact payload dictionary.
-        observer: Authorship identity name.
+        kind_or_fact: Either a fact kind string (with payload dict) or a pre-instantiated Fact atom.
+        payload: The JSON-serializable fact payload dictionary (optional when passing a Fact).
+        observer: Authorship identity name (required when passing kind string).
         origin: Optional origin string.
         ts: Event timestamp (defaults to current UTC timestamp).
+        id_override: Optional deterministic fact ID.
         credentials: Key provider (defaults to CustodyCredentialProvider).
         admit_undeclared: If True, bypasses strict declared-kind rejection.
 
@@ -58,10 +60,19 @@ def emit_fact(
         raise TargetUnsupported(f"emit_fact requires a .vertex target, got {info.target_type}")
 
     target_path = Path(target).resolve()
-    if ts is None:
-        ts = datetime.now(UTC).timestamp()
 
-    fact = Fact.of(kind, observer, origin=origin, ts=ts, **payload)
+    if isinstance(kind_or_fact, Fact):
+        fact = kind_or_fact
+        actual_observer = fact.observer
+    else:
+        if observer is None:
+            raise ValueError("observer is required when emitting by kind name")
+        if ts is None:
+            ts = datetime.now(UTC).timestamp()
+        actual_payload = payload if payload is not None else {}
+        fact = Fact.of(kind_or_fact, observer, origin=origin, ts=ts, **actual_payload)
+        actual_observer = observer
+
     cred_provider = credentials or CustodyCredentialProvider()
 
     try:
@@ -70,7 +81,11 @@ def emit_fact(
         raise EmissionFailed(f"could not open vertex {target_path}: {exc}") from exc
 
     try:
-        result = handle.receive_as(fact, admit_undeclared=admit_undeclared)
+        result = handle.receive_as(
+            fact,
+            id_override=id_override,
+            admit_undeclared=admit_undeclared,
+        )
         receipt = result.receipt
 
         # Extract attestation
@@ -83,13 +98,16 @@ def emit_fact(
             id=receipt.fact_id or "",
             stored=receipt.stored,
             signed=signed,
-            observer=observer,
+            observer=actual_observer,
             tick_mark=tick_mark,
             tick_id=tick_id,
             state_change=state_change,
         )
     except AdmissionError as exc:
-        raise AdmissionFailed(str(exc)) from exc
+        obs = getattr(exc, "observer", actual_observer)
+        k = getattr(exc, "kind", getattr(fact, "kind", None))
+        v = getattr(exc, "vertex", None)
+        raise AdmissionFailed(str(exc), observer=obs, kind=k, vertex=v) from exc
     except ReceiveCommittedError as exc:
         raise CommittedEmissionError(str(exc), fact_id=exc.fact_id) from exc
     except Exception as exc:

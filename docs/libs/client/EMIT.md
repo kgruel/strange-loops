@@ -13,10 +13,16 @@ from client import emit_fact, EmitReceipt
 
 receipt = emit_fact(
     "path/to/project.vertex",
-    kind="task",
+    kind_or_fact="task",
     payload={"title": "Design client emission API", "priority": 1},
     observer="alice",
 )
+
+# Or emitting a pre-constructed Fact atom directly:
+from atoms import Fact
+
+fact = Fact.of("task", "alice", title="Design client emission API", priority=1)
+receipt = emit_fact("path/to/project.vertex", fact)
 ```
 
 ### Signature
@@ -24,12 +30,13 @@ receipt = emit_fact(
 ```python
 def emit_fact(
     target: Path | str,
-    kind: str,
-    payload: dict[str, Any],
+    kind_or_fact: str | Fact,
+    payload: dict[str, Any] | None = None,
     *,
-    observer: str,
+    observer: str | None = None,
     origin: str = "",
     ts: float | None = None,
+    id_override: str | None = None,
     credentials: CredentialProvider | None = None,
     admit_undeclared: bool = False,
 ) -> EmitReceipt:
@@ -40,11 +47,12 @@ def emit_fact(
 | Parameter | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
 | **`target`** | `Path \| str` | *required* | Path to the target `.vertex` declaration file. |
-| **`kind`** | `str` | *required* | Domain routing key (e.g. `"task"`, `"note"`, `"metric"`). |
-| **`payload`** | `dict[str, Any]` | *required* | JSON-serializable dictionary containing observation data. |
-| **`observer`** | `str` | *required* | Authorship identity attributing the fact (e.g. `"alice"`, `"claude"`). |
+| **`kind_or_fact`** | `str \| Fact` | *required* | Domain routing key string, or a pre-instantiated `Fact` atom. |
+| **`payload`** | `dict[str, Any] \| None` | `None` | Observation data dict (optional when passing a `Fact` atom). |
+| **`observer`** | `str \| None` | `None` | Authorship identity attributing the fact (required when passing kind string). |
 | **`origin`** | `str` | `""` | Optional origin or upstream provenance string (e.g. `"agent-session-42"`). |
 | **`ts`** | `float \| None` | `None` | Unix timestamp in seconds. Defaults to `datetime.now(UTC).timestamp()`. |
+| **`id_override`** | `str \| None` | `None` | Optional deterministic ULID/UUID (for replay, migrations, and test vectors). |
 | **`credentials`** | `CredentialProvider \| None` | `None` | Key provider. Defaults to `CustodyCredentialProvider` (loading keys from `keys/`). |
 | **`admit_undeclared`** | `bool` | `False` | When `True`, overrides strict-mode kind admission refusal. |
 

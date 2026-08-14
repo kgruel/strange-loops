@@ -14,8 +14,7 @@ uv.lock
 .coverage
 .pytest_cache/
 .subtask/
-.tadpole/
-.claude/todos/
+.claude/
 .obsidian/
 .DS_Store
 /data/
@@ -29,34 +28,15 @@ session.vertex
 !experiments/**/session.vertex
 !experiments/**/check.vertex
 .ruff_cache/
-
-# coupling-kernels structure-reveal scratch (embeddings + run outputs)
-experiments/coupling-kernels/cache/
-experiments/coupling-kernels/runs/outputs/
 # Per-machine MCP server config (contains auth tokens)
 .mcp.json
 
 # Personal dev notes — essays, scratch, etc.
-docs/dev/*
-# ...except the loops-go coordination ledger, which loops-go's README, FINDINGS
-# and SPEC reference by path. An untracked file is a dangling cross-repo pointer.
-!docs/dev/loops-go-protocol-queue.md
-
-# Personal state — vertex declarations, lenses, hooks, agents, experiments.
-# Monorepo carries code + public docs; this is per-clone working state.
+docs/dev/
+tools/
 .claude/
-# .loops/ is per-clone working state EXCEPT the canonical store log:
-# under jsonl-canonical (design/architecture/jsonl-canonical-store) the
-# .jsonl IS the store and is tracked; the .db is a derived index and
-# stays ignored. Directory re-entry is required — git never descends
-# into an ignored directory, so `!.loops/data/project.jsonl` alone is
-# dead. Everything not re-listed here stays ignored.
-.loops/*
-!.loops/data/
-.loops/data/*
-!.loops/data/project.jsonl
+.loops/
 experiments/
-meta-discussion/
 
 # corrupt-index recovery residue (SOL-R3-04): quarantined indexes and the
 # recovery lock file beside a derived .db

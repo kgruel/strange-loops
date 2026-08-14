@@ -1,1 +1,0 @@
-3 facts, 1 decisions, 1 threads, 1 plans

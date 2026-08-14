@@ -351,15 +351,7 @@ def test_app_names_include_underscore_packages(tmp_path: Path):
 # libs and is not walked as a source root.
 _APP_PYTHON_ROOTS = {"src", "tests"}
 
-# Shrink-only allowlist of ADDITIONAL top-level dirs that hold Python today.
-# Each is a real directory that is not an import root and not a test tree, so
-# it needs to be named rather than silently tolerated by a broad rule.
-_APP_PYTHON_ROOT_EXCEPTIONS: dict[str, str] = {
-    "apps/tasks/scripts": (
-        "standalone dev helper scripts (gen_cli_docs.py and lib/) — run "
-        "directly, never imported as a package, so absent from APPS by design"
-    ),
-}
+_APP_PYTHON_ROOT_EXCEPTIONS: dict[str, str] = {}
 
 
 def _misplaced_app_python(apps: Path) -> list[str]:
@@ -3107,9 +3099,9 @@ def test_production_does_not_import_a_non_production_root():
         "no non-production roots derived — either the repo layout changed or "
         "_has_python stopped finding Python; this rule would pass vacuously"
     )
-    assert "tools" in roots, (
-        f"'tools' missing from the derived non-production roots {roots} — that "
-        "is the boundary sol's evasion crossed; the derivation must see it"
+    assert "experiments" in roots, (
+        f"'experiments' missing from the derived non-production roots {roots} — "
+        "non-production script and experiment trees must be seen by the derivation"
     )
     assert files, (
         "no production source files walked — _production_src_files went empty, "

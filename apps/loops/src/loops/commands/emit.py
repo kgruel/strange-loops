@@ -904,9 +904,16 @@ def cmd_emit(
             tick = receipt.tick
             if tick is not None:
                 # Boundary fired — a tick was produced. Disclose its signing
-                # outcome (signed iff a key was wired, matching the engine's
-                # mint) so an unsigned tick can never masquerade as attested.
-                mark = "signed" if _tick_signer is not None else "unsigned"
+                # outcome from the COMMITTED tick row's attestation on the
+                # receipt (S4: write-receipt-vs-temporal-query) so an unsigned
+                # tick can never masquerade as attested. Fall back to the old
+                # key-wired inference only when the store reports no
+                # attestation (tri-state None).
+                ta = receipt.tick_attestation
+                if ta is not None:
+                    mark = "signed" if ta.signed else "unsigned"
+                else:
+                    mark = "signed" if _tick_signer is not None else "unsigned"
                 # STDERR: this is a receipt diagnostic. On stdout it would
                 # prepend a non-JSON line to the --json Surface dict and corrupt
                 # the machine-readable contract.

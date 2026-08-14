@@ -59,9 +59,10 @@ sqlite + jsonl-canonical (15 tests, all pass).
    failed in both parametrizations (2 failed); reverted → green. KILLED.
 
 Suites: `libs/engine/tests` 1410 passed; `apps/loops/tests` 2521 passed,
-1 xfailed. (One transient `test_topology` ModuleNotFoundError('loops') flake
-appeared once, reproduced at baseline behavior only intermittently, and
-passes on re-run at both baseline and with changes — env race, not this
+1 xfailed. (A transient `test_topology` ModuleNotFoundError('loops') flake
+appeared twice in full-suite runs; it passes deterministically on re-run
+at both baseline and with changes, and a missing `loops` module in
+engine's env cannot be produced by this diff — env race, not this
 slice.)
 
 ## Deviations / scope notes

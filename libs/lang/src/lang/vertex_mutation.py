@@ -26,6 +26,18 @@ single-line ``loops { ... }`` block expands it across lines (semantically
 equivalent, not byte-identical). Editing or removing a kind inside a
 single-line ``loops`` block is not supported — expand it first (any insert
 does) or reformat by hand.
+
+PROVABLE DOMAIN (SOL-R4-01 arbiter ruling): the lexical guards — sibling
+multiplicity (``_loops_block_child_names``) and comment detection
+(``_has_comment_outside_strings``) — are quote-aware scans over plain
+``"…"`` KDL strings only. KDL raw strings (``#"…"#`` / ``##"…"##``) and
+multi-line strings (``\"\"\"``) are OUTSIDE that domain: the scanners
+cannot track them, and the parser oracle is structurally blind to the
+physical multiplicity and trivia they can hide. Rather than grow a KDL
+lexer, every mutation refuses up front when the vertex text contains any
+of those delimiters (``_assert_scanner_provable_domain``) — a permanent,
+conservative refusal; edit such files by hand. The parser oracle
+(``_verified``) remains the post-condition backstop inside the domain.
 """
 
 from __future__ import annotations
@@ -278,6 +290,33 @@ def _parse_vertex_or_raise(text: str, context: str):
         ) from exc
 
 
+# Delimiters of KDL string syntax the lexical scanners cannot track.
+# ``#"`` opens (and ``"#`` closes) a raw string of any hash depth — matching
+# either substring anywhere (even inside a plain string) is deliberately
+# over-broad: refusal is the cheap, permanent answer (zero raw strings in the
+# .vertex corpus). ``\"\"\"`` is a KDL multi-line string opener, equally
+# untrackable by the single-line quote scan.
+_UNPROVABLE_DELIMITERS = ('#"', '"#', '"""')
+
+
+def _assert_scanner_provable_domain(text: str, context: str) -> None:
+    """Refuse mutation over syntax the lexical scanners cannot prove safe.
+
+    See the module docstring's PROVABLE DOMAIN contract (SOL-R4-01). The
+    scan covers the WHOLE vertex text, not just the ``loops`` block: the
+    block span itself is found by the same raw-string-blind line scan, so a
+    raw string outside the block could corrupt the span the guards inspect.
+    """
+    for delim in _UNPROVABLE_DELIMITERS:
+        if delim in text:
+            raise ValueError(
+                f"{context}: the vertex text contains {delim!r} — KDL "
+                "raw-string / multi-line-string syntax the mutation "
+                "scanner cannot prove safe to splice over (its guards "
+                'track plain "…" strings only); edit the file by hand'
+            )
+
+
 def _loops_block_child_names(text: str) -> list[str]:
     """First tokens of every depth-0 child node in the ``loops`` block.
 
@@ -461,6 +500,7 @@ def add_vertex_kind(text: str, kind: str, definition: LoopDef) -> str:
     """
     _validate_kind_name(kind)
     before = _parse_vertex_or_raise(text, f"add_vertex_kind({kind!r})")
+    _assert_scanner_provable_domain(text, f"add_vertex_kind({kind!r})")
     _assert_unique_kind_nodes(text, f"add_vertex_kind({kind!r})")
     if kind in before.loops:
         raise ValueError(f"kind {kind!r} already exists; use edit_vertex_kind")
@@ -497,6 +537,7 @@ def edit_vertex_kind(text: str, kind: str, definition: LoopDef) -> str:
     """
     _validate_kind_name(kind)
     before = _parse_vertex_or_raise(text, f"edit_vertex_kind({kind!r})")
+    _assert_scanner_provable_domain(text, f"edit_vertex_kind({kind!r})")
     _assert_unique_kind_nodes(text, f"edit_vertex_kind({kind!r})")
     try:
         start, end = kdl_find_block(text, ["loops", kind])
@@ -550,6 +591,7 @@ def remove_vertex_kind(text: str, kind: str) -> str:
     """
     _validate_kind_name(kind)
     before = _parse_vertex_or_raise(text, f"remove_vertex_kind({kind!r})")
+    _assert_scanner_provable_domain(text, f"remove_vertex_kind({kind!r})")
     _assert_unique_kind_nodes(text, f"remove_vertex_kind({kind!r})")
     try:
         result = kdl_remove_child(text, ["loops"], kind)

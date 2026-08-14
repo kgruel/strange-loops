@@ -638,3 +638,81 @@ class TestParserOraclePostcondition:
         mangled = MULTI.replace("./data/test.db", "./else.db")
         with pytest.raises(ValueError, match="non-kind vertex content"):
             _verified(before, mangled, "test")
+
+
+class TestScannerProvableDomain:
+    """SOL-R4-01 arbiter ruling: end the lexical arms race with refusal.
+
+    KDL raw strings (``#"…"#`` / ``##"…"##``) are outside the quote-aware
+    scanner's PROVABLE DOMAIN. Mutations over vertex text containing
+    raw-string syntax must REFUSE with a typed, actionable ValueError —
+    never succeed with silent lexical loss.
+    """
+
+    # Sol's r4 repro 1: a raw string hides the same-line `task` sibling
+    # from _loops_block_child_names; with a second identical `task` later,
+    # edit/remove succeeded while the physical count fell 2 -> 1.
+    DUP_HIDDEN_BY_RAW = (
+        'name "t"\n'
+        "loops {\n"
+        '  decision { boundary after=1 { run #"echo " quoted"# } }; '
+        'task { fold { items "by" "name" } }\n'
+        '  task { fold { items "by" "name" } }\n'
+        "}\n"
+    )
+
+    # Sol's r4 repro 2: `run #"echo " quoted"#` followed by `// KEEP` —
+    # _has_comment_outside_strings returned False and the edit silently
+    # deleted the comment.
+    COMMENT_AFTER_RAW = (
+        'name "t"\n'
+        "loops {\n"
+        "  decision {\n"
+        '    boundary after=1 { run #"echo " quoted"# } // KEEP\n'
+        "  }\n"
+        '  task { fold { items "by" "name" } }\n'
+        "}\n"
+    )
+
+    def test_repro_docs_parse(self):
+        assert set(parse_vertex(self.DUP_HIDDEN_BY_RAW).loops) >= {
+            "decision", "task",
+        }
+        assert set(parse_vertex(self.COMMENT_AFTER_RAW).loops) == {
+            "decision", "task",
+        }
+
+    @pytest.mark.parametrize(
+        "doc", [DUP_HIDDEN_BY_RAW, COMMENT_AFTER_RAW],
+        ids=["dup-hidden-by-raw", "comment-after-raw"],
+    )
+    def test_edit_refuses_outside_provable_domain(self, doc):
+        with pytest.raises(ValueError, match="cannot prove safe"):
+            edit_vertex_kind(doc, "decision", BASIC)
+
+    @pytest.mark.parametrize(
+        "doc", [DUP_HIDDEN_BY_RAW, COMMENT_AFTER_RAW],
+        ids=["dup-hidden-by-raw", "comment-after-raw"],
+    )
+    def test_remove_refuses_outside_provable_domain(self, doc):
+        with pytest.raises(ValueError, match="cannot prove safe"):
+            remove_vertex_kind(doc, "decision")
+
+    def test_add_refuses_outside_provable_domain(self):
+        # add's duplicate-multiplicity precondition rides the same blind
+        # scanner, so add refuses over raw-string syntax too.
+        with pytest.raises(ValueError, match="cannot prove safe"):
+            add_vertex_kind(self.DUP_HIDDEN_BY_RAW, "marker", BASIC)
+
+    def test_no_raw_string_happy_path_unchanged(self):
+        doc = (
+            'name "t"\n'
+            "loops {\n"
+            '  decision { fold { items "by" "topic" } }\n'
+            '  task { fold { items "by" "name" } }\n'
+            "}\n"
+        )
+        out = edit_vertex_kind(doc, "decision", BASIC)
+        assert set(parse_vertex(out).loops) == {"decision", "task"}
+        out2 = remove_vertex_kind(doc, "decision")
+        assert set(parse_vertex(out2).loops) == {"task"}

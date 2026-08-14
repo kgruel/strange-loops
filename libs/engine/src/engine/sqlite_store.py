@@ -546,6 +546,49 @@ class SqliteStore(Generic[T]):
         )
         return fact_id
 
+    def fact_signature(self, fact_id: str) -> str | None:
+        """Signature column of the COMMITTED fact row, or None.
+
+        The read-back half of the write-receipt attestation contract
+        (LIBS_CHANGES P1): the committed row is the authority on whether a
+        write was signed — never "keys exist locally" inference. Returns
+        None for an unsigned row, a pre-signature-column schema, or an
+        unknown id (callers that need to distinguish absence hold the id
+        ``append`` just returned). Read-only: never migrates schema.
+        """
+        if self._conn is None:
+            raise RuntimeError(f"store closed: {self._path}")
+        if not self._facts_have_signature_column():
+            return None
+        row = self._conn.execute(
+            "SELECT signature FROM facts WHERE id = ?", (fact_id,)
+        ).fetchone()
+        return row[0] if row is not None else None
+
+    def tick_signature_state(self, tick_id: str) -> tuple[str | None, bool] | None:
+        """(signature, chained) of the COMMITTED tick row; None if unknown id.
+
+        Same committed-row authority as :meth:`fact_signature`, for the
+        ticks axis: ``signature`` is the row's persisted Ed25519 signature
+        (None in the pre-signature era), ``chained`` whether the row
+        carries chain fields (``window_hash`` non-NULL). Read-only: never
+        migrates schema — pre-chain/pre-signature schemas report
+        ``(None, False)`` for a known id.
+        """
+        if self._conn is None:
+            raise RuntimeError(f"store closed: {self._path}")
+        cols = {r[1] for r in self._conn.execute("PRAGMA table_info(ticks)")}
+        select = ", ".join(
+            c if c in cols else f"NULL AS {c}"
+            for c in ("signature", "window_hash")
+        )
+        row = self._conn.execute(
+            f"SELECT {select} FROM ticks WHERE id = ?", (tick_id,)
+        ).fetchone()
+        if row is None:
+            return None
+        return (row[0], row[1] is not None)
+
     # ------------------------------------------------------------------
     # Row-write seam. Both append paths assemble the full persisted row —
     # exactly the 7-field fact / 11-field tick shape the commitment hashers
@@ -1335,8 +1378,11 @@ class SqliteStore(Generic[T]):
             h.update(_fact_row_hash(row).encode())
         return h.hexdigest()
 
-    def append_tick(self, tick: Tick, *, enforce_floor: bool = True) -> None:
+    def append_tick(self, tick: Tick, *, enforce_floor: bool = True) -> str:
         """Append a tick to the ticks table, extending the hash chain.
+        Returns the tick row id assigned (so a receipt can read the
+        committed row back — ``tick_signature_state``); historical callers
+        ignored the previous ``None`` return, so the change is additive.
 
         ``enforce_floor`` (the tick-signing floor, decision design/tick-signing
         -era-is-a-floor) is ON BY DEFAULT: when no signature was produced AND
@@ -1416,6 +1462,7 @@ class SqliteStore(Generic[T]):
                 )
 
         self._write_tick_row((*row, signature))
+        return row[0]
 
     def reanchor(self) -> dict[str, Any]:
         """Recompute every commitment under the CURRENT canonical encoding.

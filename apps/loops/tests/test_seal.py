@@ -26,13 +26,14 @@ from loops.main import main
 
 
 def _write_vertex(home: Path, *, boundary: str | None = 'boundary when="seal"',
-                  name: str = "project") -> Path:
+                  name: str = "project",
+                  store: str = "./data/project.db") -> Path:
     vdir = home / name
     vdir.mkdir(parents=True)
     vertex_path = vdir / f"{name}.vertex"
     lines = [
         f'name "{name}"',
-        'store "./data/project.db"',
+        f'store "{store}"',
         "loops {",
         '  decision { fold { items "by" "topic" } }',
         '  session  { fold { items "by" "name" } }',
@@ -249,3 +250,29 @@ class TestSealEraGuard:
         assert main(["seal", "project", "-m", "preview", "--dry-run"]) == 0
         d = json.loads(capsys.readouterr().out)
         assert d["kind"] == "seal"
+
+
+class TestTickMarkTriState:
+    """S4 gate 5c: when the receipt's tick_attestation is None (the store
+    reported nothing about a committed tick row), the CLI mark must be
+    honest about not knowing — '· unattested' — NEVER inferred from local
+    key configuration. Mutation pin: restoring the old
+    ``"signed" if _tick_signer is not None`` fallback prints '· signed'
+    here (a key IS wired) and fails this test.
+    """
+
+    def test_eventstore_tick_mark_unattested_despite_wired_key(
+        self, loops_env, capsys,
+    ):
+        from custody import ensure_signing_key
+
+        # A non-.jsonl/non-sqlite store suffix compiles to EventStore —
+        # boundaries fire but ticks are NEVER persisted or signed.
+        vpath = _write_vertex(loops_env, store="./data/project.log")
+        ensure_signing_key(vpath)  # config says "key wired"
+        assert main(["emit", "project", "seal", "message=fire"]) == 0
+        out = capsys.readouterr()
+        combined = out.out + out.err
+        assert "· unattested" in combined
+        assert "· signed" not in combined
+        assert "· unsigned" not in combined

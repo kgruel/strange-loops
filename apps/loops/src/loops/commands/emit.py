@@ -869,15 +869,14 @@ def cmd_emit(
         store_path.parent.mkdir(parents=True, exist_ok=True)
         from custody import fact_signer_for, tick_signer_for
         from loops.commands.sync import _execute_boundary_run
-        # Capture the tick signer so the boundary receipt can disclose the
-        # signing outcome: a minted tick is signed iff a key was available
-        # (the engine signs iff tick_signer is non-None). Silence on this is
-        # what let an unsigned tick masquerade as attested
+        # The boundary receipt discloses the signing outcome from the
+        # COMMITTED tick row's attestation (S4), never from whether a key
+        # was wired here — silence/inference is what let an unsigned tick
+        # masquerade as attested
         # (observation:implementation/seal-no-era-guard-silent-unsigned).
-        _tick_signer = tick_signer_for(writable_path)
         program = load_vertex_program(
             writable_path, validate_ast=False, run_dispatcher=_execute_boundary_run,
-            tick_signer=_tick_signer,
+            tick_signer=tick_signer_for(writable_path),
             fact_signer=fact_signer_for(writable_path),
         )
 
@@ -904,9 +903,19 @@ def cmd_emit(
             tick = receipt.tick
             if tick is not None:
                 # Boundary fired — a tick was produced. Disclose its signing
-                # outcome (signed iff a key was wired, matching the engine's
-                # mint) so an unsigned tick can never masquerade as attested.
-                mark = "signed" if _tick_signer is not None else "unsigned"
+                # outcome from the COMMITTED tick row's attestation on the
+                # receipt (S4: write-receipt-vs-temporal-query) so an unsigned
+                # tick can never masquerade as attested. Tri-state None means
+                # the store reported NOTHING about a committed tick row (e.g.
+                # EventStore fall-through persists no ticks at all) — the mark
+                # is then honest about not knowing ("unattested"), NEVER
+                # inferred from local key configuration (S4 gate 5c: a wired
+                # key must not let an unpersisted tick print '· signed').
+                ta = receipt.tick_attestation
+                if ta is not None:
+                    mark = "signed" if ta.signed else "unsigned"
+                else:
+                    mark = "unattested"
                 # STDERR: this is a receipt diagnostic. On stdout it would
                 # prepend a non-JSON line to the --json Surface dict and corrupt
                 # the machine-readable contract.

@@ -51,6 +51,48 @@ _OBSERVER_STATE_PATTERN = re.compile(r"^(focus|scroll|selection)\.(.+)$")
 
 
 @dataclass(frozen=True)
+class FactAttestation:
+    """Persisted signature state of the COMMITTED fact row.
+
+    Populated by reading the row the store actually committed (never from
+    "keys exist locally" inference — a per-observer signer that returns
+    ``None`` yields ``signed=False`` even when signing is configured;
+    write-receipt-vs-temporal-query, LIBS_CHANGES P1).
+
+    - ``signed`` — the committed row carries an authorship signature.
+    - ``observer`` — the observer the row was committed under (the
+      authorship claim's subject).
+    - ``signature_present`` — the row-level flag; at write time this
+      coincides with ``signed`` (both read off the same committed column),
+      kept distinct so the shape can carry verification-grade claims
+      without renaming.
+    """
+
+    signed: bool
+    observer: str
+    signature_present: bool
+
+
+@dataclass(frozen=True)
+class TickAttestation:
+    """Persisted chain/signature state of the COMMITTED tick row.
+
+    Read back from the tick row the store committed when the boundary
+    fired — never inferred from whether a tick signer was wired.
+
+    - ``signed`` / ``signature_present`` — the committed row carries an
+      Ed25519 signature over its commitment hash (same coincidence note
+      as :class:`FactAttestation`).
+    - ``chained`` — the row carries the chain fields (``window_hash``
+      et al.); ``False`` marks a pre-chain-era row.
+    """
+
+    signed: bool
+    signature_present: bool
+    chained: bool
+
+
+@dataclass(frozen=True)
 class Receipt:
     """The write receipt — identity of your write, not current state.
 
@@ -72,6 +114,17 @@ class Receipt:
     forwarded to a nested child with its own store is appended there
     under the child's own bookkeeping, not reflected here.
 
+    - ``attestation`` — the committed fact row's persisted signature
+      state (:class:`FactAttestation`), read back from the store after
+      the append. **Tri-state**: ``None`` means the store doesn't report
+      attestation (EventStore/FileStore, storeless vertices, gate
+      rejection) — NOT "unsigned". ``FactAttestation(signed=False)`` is
+      a positive claim from a committed row; clients must not print
+      ``signed: false`` for a ``None`` attestation.
+    - ``tick_attestation`` — same honesty for the boundary tick, when
+      one fired AND its committed row is reportable
+      (:class:`TickAttestation`); ``None`` otherwise.
+
     Deliberately carries no fold state: a write returns a stable handle
     to itself; "current state" is a separate racy read
     (write-receipt-vs-temporal-query).
@@ -80,6 +133,8 @@ class Receipt:
     fact_id: str | None
     tick: Tick | None
     stored: bool
+    attestation: FactAttestation | None = None
+    tick_attestation: TickAttestation | None = None
 
 
 class ReservedKindError(Exception):
@@ -573,9 +628,11 @@ class Vertex:
         # minted id off the Receipt instead of pre-generating.
         fact_id: str | None = None
         stored = False
+        attestation: FactAttestation | None = None
         if self._store is not None:
             fact_id = self._store.append(fact, id_override=id_override)
             stored = True
+            attestation = self._fact_attestation(fact_id, observer)
 
         # Convert fact timestamp for Loop routing
         fact_ts = datetime.fromtimestamp(fact.ts, tz=timezone.utc)
@@ -599,7 +656,8 @@ class Vertex:
                 # consistent with source-level parse where None means
                 # "drop the record." Fact is already stored for audit —
                 # the receipt says so honestly (stored, no tick).
-                return Receipt(fact_id=fact_id, tick=None, stored=stored)
+                return Receipt(fact_id=fact_id, tick=None, stored=stored,
+                               attestation=attestation)
 
         # Route to Loop — Loop tracks its own period_start internally
         # Loop.receive() returns True if a count-based boundary should fire
@@ -628,12 +686,15 @@ class Vertex:
 
         # Phase: boundary (live only — replay bypasses receive entirely)
         if self._replaying:
-            return Receipt(fact_id=fact_id, tick=None, stored=stored)
+            return Receipt(fact_id=fact_id, tick=None, stored=stored,
+                           attestation=attestation)
 
-        tick = self._fire_live_boundaries(
+        tick, tick_row_id = self._fire_live_boundaries(
             kind, routed_kind, payload, loop, count_boundary_fire, fact_ts,
         )
-        return Receipt(fact_id=fact_id, tick=tick, stored=stored)
+        return Receipt(fact_id=fact_id, tick=tick, stored=stored,
+                       attestation=attestation,
+                       tick_attestation=self._tick_attestation(tick_row_id))
 
     def _fire_live_boundaries(
         self,
@@ -643,8 +704,13 @@ class Vertex:
         loop: Loop | None,
         count_boundary_fire: bool,
         fact_ts: datetime,
-    ) -> Tick | None:
+    ) -> tuple[Tick | None, str | None]:
         """Fire boundaries after a live fact fold.
+
+        Returns ``(tick, tick_row_id)`` — the fired Tick (or None) and the
+        id the store committed its row under (None when no tick fired or
+        the store doesn't persist ticks), so the receipt can read the
+        committed tick row's attestation back.
 
         Handles count-based, vertex-level, and loop-level boundary triggers.
         Only called on the live path — replay reconstructs fold state without
@@ -659,11 +725,10 @@ class Vertex:
         # Count-based boundary trigger (Loop returned True during fold)
         if count_boundary_fire and loop is not None:
             tick = loop.fire(fact_ts, origin=self._name)
-            self._store_tick(tick)
-            return tick
+            return tick, self._store_tick(tick)
 
         if not self._has_vertex_boundary and not self._has_loop_boundaries:
-            return None
+            return None, None
 
         # Vertex-level boundary (fires all loops). A vertex may declare several;
         # they are evaluated in declaration order and the first a fact satisfies
@@ -676,29 +741,27 @@ class Vertex:
                 tick = self._fire_vertex_boundary(
                     fact_ts, payload, run=spec.run,
                 )
-                self._store_tick(tick)
-                return tick
+                return tick, self._store_tick(tick)
 
         # Loop-level kind-based boundary trigger
         fold_kind = self._boundary_map.get(kind)
         if fold_kind is None:
-            return None
+            return None, None
 
         match = self._boundary_match.get(kind, ())
         if match and not all(payload.get(k) == v for k, v in match):
-            return None
+            return None, None
 
         conditions = self._boundary_conditions.get(kind, ())
         if conditions:
             target_loop = self._loops[fold_kind]
             if not _eval_conditions(target_loop.state, conditions):
-                return None
+                return None, None
 
         target_loop = self._loops[fold_kind]
         tick = target_loop.fire(fact_ts, origin=self._name,
                                 boundary_payload=payload)
-        self._store_tick(tick)
-        return tick
+        return tick, self._store_tick(tick)
 
     def _fire_vertex_boundary(
         self, ts: datetime, boundary_payload: dict, run: str | None = None,
@@ -1089,7 +1152,7 @@ class Vertex:
             origin=tick.origin,
         )
 
-    def _store_tick(self, tick: Tick) -> None:
+    def _store_tick(self, tick: Tick) -> str | None:
         """Persist tick to store if it supports tick persistence.
 
         A live boundary mint — every tick from a fired boundary (seal, count,
@@ -1097,9 +1160,54 @@ class Vertex:
         -signing-era-is-a-floor) is enforced BY DEFAULT on append_tick, so a
         keyless mint in the signed era is refused without this path opting in;
         only re-mint paths (rebirth/slice) opt out explicitly.
+
+        Returns the committed tick row id (``append_tick``'s return) so the
+        write receipt can read the committed row's attestation back; None
+        when the store doesn't persist ticks or reports no id.
         """
         if self._store is not None and hasattr(self._store, 'append_tick'):
-            self._store.append_tick(tick)
+            return self._store.append_tick(tick)
+        return None
+
+    def _fact_attestation(self, fact_id: str | None,
+                          observer: str) -> FactAttestation | None:
+        """Persisted signature state of the just-committed fact row.
+
+        Read back from the store (``fact_signature``) — the committed row is
+        the authority, never local key configuration. None when the store
+        doesn't report attestation (no ``fact_signature`` read-back, or the
+        store doesn't track ids) — a tri-state, not "unsigned".
+        """
+        if fact_id is None:
+            return None
+        reader = getattr(self._store, "fact_signature", None)
+        if reader is None:
+            return None
+        present = reader(fact_id) is not None
+        return FactAttestation(
+            signed=present, observer=observer, signature_present=present,
+        )
+
+    def _tick_attestation(self, tick_row_id: str | None) -> TickAttestation | None:
+        """Persisted chain/signature state of the just-committed tick row.
+
+        Same committed-row authority as :meth:`_fact_attestation`, for the
+        boundary tick a receive fired. None when no tick row was committed
+        or the store has no ``tick_signature_state`` read-back.
+        """
+        if tick_row_id is None:
+            return None
+        reader = getattr(self._store, "tick_signature_state", None)
+        if reader is None:
+            return None
+        state = reader(tick_row_id)
+        if state is None:
+            return None
+        signature, chained = state
+        present = signature is not None
+        return TickAttestation(
+            signed=present, signature_present=present, chained=chained,
+        )
 
     def _tick_to_fact(self, tick: Tick, child_name: str) -> Fact:
         """Convert a child's Tick to a Fact for re-entry.

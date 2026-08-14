@@ -22,6 +22,8 @@ __all__ = [
     "Tick",
     # Core
     "Receipt",
+    "FactAttestation",
+    "TickAttestation",
     "Vertex",
     "Loop",
     "Stream",
@@ -183,6 +185,8 @@ _LAZY_IMPORTS: dict[str, tuple[str, str]] = {
     "Tap": ("engine.stream", "Tap"),
     "Consumer": ("engine.stream", "Consumer"),
     "Receipt": ("engine.vertex", "Receipt"),
+    "FactAttestation": ("engine.vertex", "FactAttestation"),
+    "TickAttestation": ("engine.vertex", "TickAttestation"),
     "Vertex": ("engine.vertex", "Vertex"),
     # Persistence
     "FileStore": ("engine.file_store", "FileStore"),

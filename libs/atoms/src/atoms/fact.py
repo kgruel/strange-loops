@@ -41,6 +41,28 @@ class _LazyDataclassFields:
         return fields
 
 
+def _freeze(val):
+    if isinstance(val, (dict, MappingProxyType)):
+        try:
+            return tuple(sorted((k, _freeze(v)) for k, v in val.items()))
+        except TypeError:
+            return tuple(sorted(
+                ((k, _freeze(v)) for k, v in val.items()),
+                key=lambda item: (type(item[0]).__name__, repr(item[0])),
+            ))
+    elif isinstance(val, (list, tuple)):
+        return tuple(_freeze(v) for v in val)
+    elif isinstance(val, set):
+        try:
+            return tuple(sorted(_freeze(v) for v in val))
+        except TypeError:
+            return tuple(sorted(
+                (_freeze(v) for v in val),
+                key=lambda item: (type(item).__name__, repr(item)),
+            ))
+    return val
+
+
 class Fact:
     """An intentional observation — something that happened at a specific time.
 
@@ -88,10 +110,7 @@ class Fact:
                (other.kind, other.ts, other.payload, other.observer, other.origin)
 
     def __hash__(self):
-        try:
-            return hash((self.kind, self.ts, self.payload, self.observer, self.origin))
-        except TypeError:
-            return hash((self.kind, self.ts, id(self.payload), self.observer, self.origin))
+        return hash((self.kind, self.ts, _freeze(self.payload), self.observer, self.origin))
 
     def __repr__(self):
         return (f"Fact(kind={self.kind!r}, ts={self.ts!r}, payload={self.payload!r}, "

@@ -133,13 +133,14 @@ def _make_upsert(target: str, key_field: str) -> Callable[[dict, dict], None]:
     def fold(state: dict, payload: dict) -> None:
         key_value = payload.get(key_field)
         if key_value is not None:
+            key_value = str(key_value)
             existing = state[target].get(key_value)
             n = (existing.get("_n", 0) if existing else 0) + 1
             # Accumulate refs across upserts
             prev_refs = set(existing.get("_refs", ())) if existing else set()
             new_ref = payload.get("ref", "")
             if new_ref:
-                for r in new_ref.split(","):
+                for r in str(new_ref).split(","):
                     r = r.strip()
                     if r:
                         prev_refs.add(r)
@@ -173,6 +174,7 @@ def _make_top_n(
             _reject(state, target)
             return
 
+        key_value = str(key_value)
         items = state[target]
         # Convert to dict in case payload is MappingProxyType
         items[key_value] = dict(payload)

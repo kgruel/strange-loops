@@ -6,7 +6,6 @@ import copy
 from types import MappingProxyType
 from typing import Any
 
-import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
@@ -26,10 +25,15 @@ from atoms import (
     Upsert,
     Window,
 )
+
 from tests.strategies import (
     fact_lists,
     facts,
     fold_ops,
+    json_primitives,
+    kinds,
+    observers,
+    origins,
     payloads,
     timestamps,
 )
@@ -74,13 +78,6 @@ class TestFactProperties:
         assert replaced.observer == fact.observer
         assert replaced.origin == fact.origin
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason=(
-            "FINDING: Fact.__hash__ hashes id(payload) on dict payloads, "
-            "violating hash equality for equal facts"
-        ),
-    )
     @settings(max_examples=200)
     @given(fact=facts())
     def test_fact_hash_equality_consistency(self, fact: Fact) -> None:
@@ -89,6 +86,28 @@ class TestFactProperties:
         twin = Fact.from_dict(d)
         assert hash(fact) == hash(twin)
         assert len({fact, twin}) == 1
+
+    @settings(max_examples=200)
+    @given(
+        kind=kinds(),
+        ts=timestamps(),
+        obs=observers(),
+        origin=origins(),
+        items=st.lists(json_primitives(), max_size=10),
+    )
+    def test_fact_with_list_payload_is_hashable_and_equal(
+        self,
+        kind: str,
+        ts: float,
+        obs: str,
+        origin: str,
+        items: list[Any],
+    ) -> None:
+        """Facts with list payload fields are hashable and hash-equal to their roundtrip twin."""
+        f1 = Fact(kind=kind, ts=ts, payload={"items": items}, observer=obs, origin=origin)
+        f2 = Fact.from_dict(f1.to_dict())
+        assert hash(f1) == hash(f2)
+        assert len({f1, f2}) == 1
 
 
 # =============================================================================
@@ -178,7 +197,7 @@ class TestFoldDeterminismProperties:
 
 
 class TestFoldKeySensitivityProperties:
-    """Probe tests documenting the engine's fold-key type sensitivity."""
+    """Tests asserting the ratified fold-key string projection behavior."""
 
     @settings(max_examples=200)
     @given(
@@ -187,14 +206,14 @@ class TestFoldKeySensitivityProperties:
         ts1=timestamps(),
         ts2=timestamps(),
     )
-    def test_fold_key_sensitivity_zero_vs_string_zero_distinct_keys(
+    def test_fold_key_sensitivity_zero_vs_string_zero_fold_together(
         self,
         val_zero: dict[str, Any],
         val_str_zero: dict[str, Any],
         ts1: float,
         ts2: float,
     ) -> None:
-        """Keyed upsert folds treat integer 0 and string '0' as different keys in fold state."""
+        """Keyed upsert folds project keys to string, folding integer 0 and '0' into one entry."""
         spec = Spec(
             name="key_probe",
             state_fields=(Field(name="entities", kind="dict"),),
@@ -206,14 +225,9 @@ class TestFoldKeySensitivityProperties:
 
         state = spec.replay([p1, p2])
 
-        # Observed behavior: int 0 and str "0" do not collide in state dict
-        assert 0 in state["entities"]
-        assert "0" in state["entities"]
-        assert len(state["entities"]) == 2
-        assert state["entities"][0]["id"] == 0
-        assert state["entities"]["0"]["id"] == "0"
-        assert state["entities"][0]["_n"] == 1
-        assert state["entities"]["0"]["_n"] == 1
+        assert list(state["entities"].keys()) == ["0"]
+        assert len(state["entities"]) == 1
+        assert state["entities"]["0"]["_n"] == 2
 
     @settings(max_examples=200)
     @given(
@@ -221,13 +235,13 @@ class TestFoldKeySensitivityProperties:
         val_float=st.text(max_size=10),
         val_bool=st.text(max_size=10),
     )
-    def test_fold_key_numeric_and_bool_zero_collide(
+    def test_fold_key_numeric_and_bool_zero_distinct_entries(
         self,
         val_int: str,
         val_float: str,
         val_bool: str,
     ) -> None:
-        """Keyed upsert folds treat 0, 0.0, and False as same key under Python dict semantics."""
+        """Keyed upsert folds project keys to string, yielding distinct '0', '0.0', 'False'."""
         spec = Spec(
             name="numeric_key_probe",
             state_fields=(Field(name="entities", kind="dict"),),
@@ -240,6 +254,8 @@ class TestFoldKeySensitivityProperties:
 
         state = spec.replay([p1, p2, p3])
 
-        # Observed behavior: 0, 0.0, False share the same dict bucket in Python
-        assert len(state["entities"]) == 1
-        assert state["entities"][0]["_n"] == 3
+        assert set(state["entities"].keys()) == {"0", "0.0", "False"}
+        assert len(state["entities"]) == 3
+        assert state["entities"]["0"]["_n"] == 1
+        assert state["entities"]["0.0"]["_n"] == 1
+        assert state["entities"]["False"]["_n"] == 1

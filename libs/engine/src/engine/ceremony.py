@@ -345,6 +345,18 @@ def plan_declaration_update(
             ),
         )
 
+    # Applicability spans BOTH artifacts the ceremony writes: the vertex
+    # file (info.writable — the probed path) and the canonical store
+    # (info.canonical_writable — SOL-R1-04: plan must not report a plan as
+    # applicable that apply's store step cannot execute).
+    store_writable = info.canonical_writable is not False
+    writable = info.writable and store_writable
+    not_writable_reason = (
+        info.reason
+        if not info.writable
+        else f"canonical store not writable: {info.canonical_path}"
+    )
+
     if generation["lineage"] is None:
         # Pre-genesis (or unadopted): the file is authoritative; the ceremony
         # is genesis. An unadopted store with genesis rows will refuse at
@@ -353,10 +365,10 @@ def plan_declaration_update(
         return _preview(
             mode="genesis",
             authority="file",
-            applicable=info.writable,
+            applicable=writable,
             reason="lineage not open — genesis ceremony"
-            if info.writable
-            else info.reason,
+            if writable
+            else not_writable_reason,
         )
 
     # Edit mode. CAS token FIRST, then the fold head for the diff.
@@ -386,15 +398,15 @@ def plan_declaration_update(
         expected_head=expected_head,
         old_store_fingerprint=_fingerprint_documents(head_docs),
         authority="store",
-        applicable=info.writable,
+        applicable=writable,
         reason=(
             (
                 f"{len(changes)} changed subject(s)"
                 if changes
                 else "file matches store head — nothing to apply"
             )
-            if info.writable
-            else info.reason
+            if writable
+            else not_writable_reason
         ),
     )
 
@@ -490,6 +502,21 @@ def apply_declaration_update(
     if preview.mode == "edit" and not preview.changes:
         return DeclarationUpdateResult(
             status="noop", reason="file matches store head — nothing to apply"
+        )
+
+    # Canonical-store writability gate (SOL-R1-04): a typed refusal BEFORE
+    # any intent lands — and before the edit-mode currency pre-check, whose
+    # store open could itself fail raw on an unwritable file. An unwritable
+    # store must leave zero residue.
+    from .probe import _writable
+
+    if not _writable(preview.canonical_path):
+        return DeclarationUpdateResult(
+            status="refused",
+            reason=(
+                f"canonical store not writable: {preview.canonical_path} — "
+                "refusing before intent creation"
+            ),
         )
 
     fact_signer = None

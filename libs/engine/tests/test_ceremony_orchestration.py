@@ -359,6 +359,61 @@ def test_recover_after_index_loss_classifies_from_the_log(world):
     _audit_ok(world)
 
 
+# --- canonical-store writability (SOL-R1-04) --------------------------------
+
+
+def _chmod_canonical_readonly(world) -> Path:
+    canonical = world["log"] if world["mode"] == "jsonl" else world["index"]
+    canonical.chmod(0o444)
+    return canonical
+
+
+def test_plan_on_readonly_canonical_store_is_not_applicable(world):
+    """SOL-R1-04: applicability must evaluate the CANONICAL store's
+    writability, not just the vertex file's — on both backends."""
+    import os
+
+    _apply_genesis(world)
+    canonical = _chmod_canonical_readonly(world)
+    if os.access(canonical, os.W_OK):
+        pytest.skip("cannot make file read-only here (running as root?)")
+    try:
+        preview = plan_declaration_update(
+            world["vertex"], proposed_text=world["edit"]
+        )
+        assert preview.applicable is False
+        assert "not writable" in preview.reason
+        assert str(canonical) in preview.reason
+    finally:
+        canonical.chmod(0o644)
+
+
+def test_forced_apply_on_readonly_store_refuses_typed_with_no_intent(world):
+    """SOL-R1-04: a forced apply (preview.applicable overridden) must be a
+    typed refusal BEFORE intent creation — no intent residue, no raw
+    OperationalError."""
+    import dataclasses
+    import os
+
+    _apply_genesis(world)
+    good_preview = plan_declaration_update(
+        world["vertex"], proposed_text=world["edit"]
+    )
+    canonical = _chmod_canonical_readonly(world)
+    if os.access(canonical, os.W_OK):
+        pytest.skip("cannot make file read-only here (running as root?)")
+    try:
+        forced = dataclasses.replace(good_preview, applicable=True)
+        result = apply_declaration_update(
+            forced, observer="obs", credentials=Creds()
+        )
+        assert result.status == "refused"
+        assert "not writable" in result.reason
+        assert not intent_path_for(world["vertex"]).exists()
+    finally:
+        canonical.chmod(0o644)
+
+
 # --- intent record shape ----------------------------------------------------
 
 

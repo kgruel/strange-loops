@@ -372,14 +372,16 @@ def plan_declaration_update(
             else not_writable_reason,
         )
 
-    # Edit mode. CAS token FIRST, then the fold head for the diff.
+    # Edit mode. CAS token FIRST, then the fold head for the diff — one
+    # store handle spans both reads: the open has already reconciled the
+    # derived index, so the resolve reads that same materialized state
+    # without a second open/catch-up pass.
     store = _open_store(info.canonical_path)
     try:
         expected_head = store.declaration_head()
+        head_docs = resolve_declaration_documents(info.index_path)
     finally:
         store.close()
-
-    head_docs = resolve_declaration_documents(info.index_path)
     if not isinstance(head_docs, list):
         return _preview(
             mode="edit",

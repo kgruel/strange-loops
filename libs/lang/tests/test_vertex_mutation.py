@@ -802,3 +802,158 @@ class TestScannerProvableDomainR5:
         assert set(parse_vertex(out).loops) == {"decision", "task"}
         out2 = remove_vertex_kind(doc, "decision")
         assert set(parse_vertex(out2).loops) == {"task"}
+
+
+class TestScannerProvableDomainR6:
+    """Sol r6 + arbiter ruling: the domain check inverts from a blacklist
+    of refused substrings to a WHITELIST enforced by a three-state machine
+    (code / plain_string / line_comment). Refused here: non-LF newline
+    characters anywhere (R6-01 — they desync line accounting), and block
+    comment / slashdash openers in code state (R6-02 — a quote inside
+    /* " */ poisoned the flat quote tracker, letting a following r"
+    masquerade as a closing quote). Quotes inside // comments are inert;
+    /* inside a plain string stays legal (glob patterns)."""
+
+    NON_LF_NEWLINES = ["\r", "\f", "\u0085", "\u2028", "\u2029"]
+
+    @pytest.mark.parametrize(
+        "ch", NON_LF_NEWLINES,
+        ids=["CR", "FF", "NEL", "LS", "PS"],
+    )
+    def test_non_lf_newline_refuses(self, ch):
+        # R6-01: a non-LF newline INSIDE a string evaded the literal-newline
+        # refusal (which matched only \n).
+        doc = (
+            'name "t"\n'
+            "loops {\n"
+            f'  decision {{ boundary after=1 {{ run "echo{ch} quoted" }} }}\n'
+            '  task { fold { items "by" "name" } }\n'
+            "}\n"
+        )
+        with pytest.raises(ValueError, match="cannot prove safe"):
+            edit_vertex_kind(doc, "decision", BASIC)
+
+    def test_block_comment_quote_concealment_refuses(self):
+        # R6-02: the quote inside /* " */ flipped the flat tracker's in_str,
+        # so the following r" read as a closing quote instead of a raw
+        # opener. Block comments in code state now refuse outright.
+        doc = (
+            'name "t"\n'
+            "loops {\n"
+            '  decision { boundary after=1 { run r"echo \\" } } /* " */ ; '
+            'task { fold { items "by" "name" } }\n'
+            '  task { fold { items "by" "name" } }\n'
+            "}\n"
+        )
+        with pytest.raises(ValueError, match="cannot prove safe"):
+            edit_vertex_kind(doc, "decision", BASIC)
+
+    def test_plain_block_comment_refuses(self):
+        doc = (
+            'name "t"\n'
+            "loops {\n"
+            '  decision { fold { items "by" "topic" } } /* note */\n'
+            '  task { fold { items "by" "name" } }\n'
+            "}\n"
+        )
+        with pytest.raises(ValueError, match="cannot prove safe"):
+            remove_vertex_kind(doc, "decision")
+
+    def test_slashdash_refuses(self):
+        doc = (
+            'name "t"\n'
+            "loops {\n"
+            '  decision { fold { items "by" "topic" } }\n'
+            '  /-retired { fold { items "by" "name" } }\n'
+            '  task { fold { items "by" "name" } }\n'
+            "}\n"
+        )
+        with pytest.raises(ValueError, match="cannot prove safe"):
+            remove_vertex_kind(doc, "decision")
+
+    def test_glob_pattern_inside_string_stays_allowed(self):
+        # /* INSIDE a plain string is legal corpus content — the reason
+        # this is a state machine, not substring search.
+        doc = (
+            'name "t"\n'
+            'discover "./**/*.loop"\n'
+            "loops {\n"
+            '  decision { fold { items "by" "topic" } }\n'
+            '  task { fold { items "by" "name" } }\n'
+            "}\n"
+        )
+        out = edit_vertex_kind(doc, "decision", BASIC)
+        assert set(parse_vertex(out).loops) == {"decision", "task"}
+
+    def test_quote_inside_line_comment_is_inert(self):
+        doc = (
+            'name "t"\n'
+            "loops {\n"
+            '  // a stray " quote in a line comment must not poison tracking\n'
+            '  decision { fold { items "by" "topic" } }\n'
+            '  task { fold { items "by" "name" } }\n'
+            "}\n"
+        )
+        out = remove_vertex_kind(doc, "decision")
+        assert set(parse_vertex(out).loops) == {"task"}
+
+
+class TestScannerWhitelistAddendum:
+    """Arbiter addendum to the whitelist ruling: (a) only \\\\ and \\"
+    escapes are whitelisted inside plain strings — every other escape
+    form refuses (0 backslashes of ANY kind in the .vertex corpus);
+    (b) non-ASCII and control characters in CODE state refuse wholesale
+    (BOM, unicode quote lookalikes), while staying legal inside strings."""
+
+    @pytest.mark.parametrize(
+        "escape", ["\\n", "\\t", "\\u{0041}", "\\s"],
+        ids=["esc-n", "esc-t", "esc-unicode", "esc-space"],
+    )
+    def test_non_whitelisted_escape_refuses(self, escape):
+        doc = (
+            'name "t"\n'
+            "loops {\n"
+            f'  decision {{ boundary after=1 {{ run "echo{escape}x" }} }}\n'
+            '  task { fold { items "by" "name" } }\n'
+            "}\n"
+        )
+        with pytest.raises(ValueError, match="cannot prove safe"):
+            edit_vertex_kind(doc, "decision", BASIC)
+
+    def test_whitelisted_escapes_stay_allowed(self):
+        doc = (
+            'name "t"\n'
+            "loops {\n"
+            '  decision { boundary when="a\\\\b \\"q\\"" }\n'
+            '  task { fold { items "by" "name" } }\n'
+            "}\n"
+        )
+        out = remove_vertex_kind(doc, "decision")
+        assert set(parse_vertex(out).loops) == {"task"}
+
+    @pytest.mark.parametrize(
+        "ch", ["﻿", "“", "”", " ", "\x00", "\x0b"],
+        ids=["BOM", "left-curly-quote", "right-curly-quote", "nbsp",
+             "NUL", "VT"],
+    )
+    def test_non_ascii_or_control_in_code_refuses(self, ch):
+        doc = (
+            f'{ch}name "t"\n'
+            "loops {\n"
+            '  decision { fold { items "by" "topic" } }\n'
+            '  task { fold { items "by" "name" } }\n'
+            "}\n"
+        )
+        with pytest.raises(ValueError, match="cannot prove safe"):
+            remove_vertex_kind(doc, "decision")
+
+    def test_non_ascii_inside_string_stays_allowed(self):
+        doc = (
+            'name "té“st"\n'
+            "loops {\n"
+            '  decision { fold { items "by" "topic" } }\n'
+            '  task { fold { items "by" "name" } }\n'
+            "}\n"
+        )
+        out = remove_vertex_kind(doc, "decision")
+        assert set(parse_vertex(out).loops) == {"task"}

@@ -481,18 +481,20 @@ def _combined_facts(
         internal_clause = "" if include_internal else " AND kind NOT GLOB '_decl.*'"
         # See _combined_read for ts-tie ordering note.
         if kind is not None:
+            from .sql_util import kind_subtree_predicate
+
+            kind_sql, kind_params = kind_subtree_predicate(kind)
             selects = [
                 f"SELECT id, kind, ts, observer, origin, payload "
                 f"FROM {'[' + a + '].' if a != 'main' else ''}facts "
-                f"WHERE ts >= ? AND ts <= ? AND "
-                f"(kind = ? OR substr(kind, 1, length(?) + 1) = ? || '.')"
+                f"WHERE ts >= ? AND ts <= ? AND {kind_sql}"
                 f"{internal_clause}"
                 for a in aliases
             ]
             sql = " UNION ALL ".join(selects) + " ORDER BY ts, id"
             params: list[Any] = []
             for _ in aliases:
-                params.extend([since_ts, until_ts, kind, kind, kind])
+                params.extend([since_ts, until_ts, *kind_params])
         else:
             selects = [
                 f"SELECT id, kind, ts, observer, origin, payload "

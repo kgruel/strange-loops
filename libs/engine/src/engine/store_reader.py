@@ -552,12 +552,14 @@ class StoreReader:
         rowid_clause = " AND rowid <= ?" if at_rowid is not None else ""
         rowid_param: tuple = (at_rowid,) if at_rowid is not None else ()
         if kind is not None:
+            from .sql_util import kind_subtree_predicate
+
+            kind_sql, kind_params = kind_subtree_predicate(kind)
             rows = self._conn.execute(
                 "SELECT id, kind, ts, observer, origin, payload FROM facts "
-                "WHERE ts >= ? AND ts <= ? AND "
-                "(kind = ? OR substr(kind, 1, length(?) + 1) = ? || '.')"
+                f"WHERE ts >= ? AND ts <= ? AND {kind_sql}"
                 f"{internal_clause}{rowid_clause} ORDER BY ts",
-                (since_ts, until_ts, kind, kind, kind, *rowid_param),
+                (since_ts, until_ts, *kind_params, *rowid_param),
             ).fetchall()
         else:
             rows = self._conn.execute(
@@ -724,11 +726,11 @@ class StoreReader:
             clauses.append("rowid > ?")
             params.append(after.rowid)
         if kind is not None:
-            # Exact kind, or binary '.'-prefix subtree. No LIKE: `_`/`%`
-            # are LIKE wildcards (and valid kind chars), and LIKE compares
-            # ASCII case-insensitively — substr is an exact binary compare.
-            clauses.append("(kind = ? OR substr(kind, 1, length(?) + 1) = ? || '.')")
-            params.extend([kind, kind, kind])
+            from .sql_util import kind_subtree_predicate
+
+            kind_sql, kind_params = kind_subtree_predicate(kind)
+            clauses.append(kind_sql)
+            params.extend(kind_params)
         if observer is not None:
             # observer_matches semantics in SQL: exact, or one side bare
             # matching the other's namespace tail. No LIKE/GLOB wildcards —

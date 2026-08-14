@@ -521,6 +521,27 @@ class SqliteStore(Generic[T]):
         another observer's fact under a local key would be forgery; the
         override bypasses the signer entirely).
         """
+        return self.append_attested(
+            event, id_override=id_override, signature_override=signature_override
+        )[0]
+
+    def append_attested(
+        self,
+        event: T,
+        *,
+        id_override: str | None = None,
+        signature_override: str | None = None,
+    ) -> tuple[str, str | None]:
+        """:meth:`append`, also returning the committed row's signature.
+
+        The write's OWN result satisfies the write-receipt attestation
+        contract (LIBS_CHANGES P1 — "the committed row, or the write
+        operation's actual result"): this method assembled the exact row it
+        inserted, so the signature it hands back IS the committed column,
+        with no read-back SELECT. ``signature_override`` flows through
+        verbatim. :meth:`fact_signature` remains the public read-back API
+        for cross-checks.
+        """
         if self._conn is None:
             # close() is part of the public lifecycle now — use-after-close
             # gets a named error, not AttributeError on a None connection.
@@ -544,7 +565,7 @@ class SqliteStore(Generic[T]):
         self._write_fact_row(
             (fact_id, d["kind"], d["ts"], observer, origin, payload_text, signature)
         )
-        return fact_id
+        return fact_id, signature
 
     def fact_signature(self, fact_id: str) -> str | None:
         """Signature column of the COMMITTED fact row, or None.
@@ -577,17 +598,36 @@ class SqliteStore(Generic[T]):
         """
         if self._conn is None:
             raise RuntimeError(f"store closed: {self._path}")
-        cols = {r[1] for r in self._conn.execute("PRAGMA table_info(ticks)")}
-        select = ", ".join(
-            c if c in cols else f"NULL AS {c}"
-            for c in ("signature", "window_hash")
-        )
+        if self._ticks_have_chain_columns():
+            select = "signature, window_hash"
+        else:
+            cols = {r[1] for r in self._conn.execute("PRAGMA table_info(ticks)")}
+            select = ", ".join(
+                c if c in cols else f"NULL AS {c}"
+                for c in ("signature", "window_hash")
+            )
         row = self._conn.execute(
             f"SELECT {select} FROM ticks WHERE id = ?", (tick_id,)
         ).fetchone()
         if row is None:
             return None
         return (row[0], row[1] is not None)
+
+    def _ticks_have_chain_columns(self) -> bool:
+        """Cached read-only probe for the ticks chain/signature columns.
+
+        Same posture as ``_fact_sig_ready`` / ``_facts_have_signature_column``:
+        the positive result is cached (adopting ``_chain_ready``, which then
+        correctly no-ops ``_ensure_chain_columns``); a legacy schema re-probes.
+        Never migrates.
+        """
+        if self._chain_ready:
+            return True
+        cols = {r[1] for r in self._conn.execute("PRAGMA table_info(ticks)")}
+        if all(c in cols for c in _CHAIN_COLUMNS):
+            self._chain_ready = True
+            return True
+        return False
 
     # ------------------------------------------------------------------
     # Row-write seam. Both append paths assemble the full persisted row —
@@ -1411,6 +1451,19 @@ class SqliteStore(Generic[T]):
         - signature (delta 2): when a tick_signer was injected, signs the
           commitment hash of the new row; NULL otherwise (pre-signature era).
         """
+        return self.append_tick_attested(tick, enforce_floor=enforce_floor)[0]
+
+    def append_tick_attested(
+        self, tick: Tick, *, enforce_floor: bool = True
+    ) -> tuple[str, str | None]:
+        """:meth:`append_tick`, also returning the committed row's signature.
+
+        Same write's-own-result posture as :meth:`append_attested`: the row
+        this method assembled IS the committed row (always chained — every
+        row minted here carries the window fields), so no per-tick read-back
+        is needed. :meth:`tick_signature_state` remains the public read-back
+        API for cross-checks.
+        """
         self._ensure_sync()
         self._ensure_chain_columns()
         # Every read below (prev_row, the fact cursor, the signed-era probe)
@@ -1462,7 +1515,7 @@ class SqliteStore(Generic[T]):
                 )
 
         self._write_tick_row((*row, signature))
-        return row[0]
+        return row[0], signature
 
     def reanchor(self) -> dict[str, Any]:
         """Recompute every commitment under the CURRENT canonical encoding.

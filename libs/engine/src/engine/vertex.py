@@ -629,9 +629,20 @@ class Vertex:
         stored = False
         attestation: FactAttestation | None = None
         if self._store is not None:
-            fact_id = self._store.append(fact, id_override=id_override)
+            appender = getattr(self._store, "append_attested", None)
+            if appender is not None:
+                # The write's own result: the store assembled the row it
+                # committed, so its returned signature IS the committed
+                # column — no read-back SELECT (LIBS_CHANGES P1's "or the
+                # write operation's actual result" clause).
+                fact_id, signature = appender(fact, id_override=id_override)
+                attestation = FactAttestation(
+                    signed=signature is not None, observer=observer,
+                )
+            else:
+                fact_id = self._store.append(fact, id_override=id_override)
+                attestation = self._fact_attestation(fact_id, observer)
             stored = True
-            attestation = self._fact_attestation(fact_id, observer)
 
         # Convert fact timestamp for Loop routing
         fact_ts = datetime.fromtimestamp(fact.ts, tz=timezone.utc)
@@ -688,12 +699,12 @@ class Vertex:
             return Receipt(fact_id=fact_id, tick=None, stored=stored,
                            attestation=attestation)
 
-        tick, tick_row_id = self._fire_live_boundaries(
+        tick, tick_attestation = self._fire_live_boundaries(
             kind, routed_kind, payload, loop, count_boundary_fire, fact_ts,
         )
         return Receipt(fact_id=fact_id, tick=tick, stored=stored,
                        attestation=attestation,
-                       tick_attestation=self._tick_attestation(tick_row_id))
+                       tick_attestation=tick_attestation)
 
     def _fire_live_boundaries(
         self,
@@ -703,13 +714,12 @@ class Vertex:
         loop: Loop | None,
         count_boundary_fire: bool,
         fact_ts: datetime,
-    ) -> tuple[Tick | None, str | None]:
+    ) -> tuple[Tick | None, TickAttestation | None]:
         """Fire boundaries after a live fact fold.
 
-        Returns ``(tick, tick_row_id)`` — the fired Tick (or None) and the
-        id the store committed its row under (None when no tick fired or
-        the store doesn't persist ticks), so the receipt can read the
-        committed tick row's attestation back.
+        Returns ``(tick, tick_attestation)`` — the fired Tick (or None) and
+        the committed tick row's persisted signature state (None when no
+        tick fired or the store doesn't report attestation).
 
         Handles count-based, vertex-level, and loop-level boundary triggers.
         Only called on the live path — replay reconstructs fold state without
@@ -1151,7 +1161,7 @@ class Vertex:
             origin=tick.origin,
         )
 
-    def _store_tick(self, tick: Tick) -> str | None:
+    def _store_tick(self, tick: Tick) -> TickAttestation | None:
         """Persist tick to store if it supports tick persistence.
 
         A live boundary mint — every tick from a fired boundary (seal, count,
@@ -1160,13 +1170,19 @@ class Vertex:
         keyless mint in the signed era is refused without this path opting in;
         only re-mint paths (rebirth/slice) opt out explicitly.
 
-        Returns the committed tick row id (``append_tick``'s return) so the
-        write receipt can read the committed row's attestation back; None
-        when the store doesn't persist ticks or reports no id.
+        Returns the committed tick row's attestation for the write receipt —
+        from the write's own result (``append_tick_attested``: the store
+        assembled the committed row, always chained) when the store offers
+        it, else the ``tick_signature_state`` read-back; None when the store
+        doesn't persist ticks or doesn't report attestation.
         """
-        if self._store is not None and hasattr(self._store, 'append_tick'):
-            return self._store.append_tick(tick)
-        return None
+        if self._store is None or not hasattr(self._store, 'append_tick'):
+            return None
+        appender = getattr(self._store, "append_tick_attested", None)
+        if appender is not None:
+            _, signature = appender(tick)
+            return TickAttestation(signed=signature is not None, chained=True)
+        return self._tick_attestation(self._store.append_tick(tick))
 
     def _fact_attestation(self, fact_id: str | None,
                           observer: str) -> FactAttestation | None:

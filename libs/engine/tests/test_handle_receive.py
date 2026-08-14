@@ -227,7 +227,8 @@ class TestCommittedFactError:
         def boom_tick(self, tick, *, enforce_floor=True):
             raise RuntimeError("synthetic tick-persist failure")
 
-        monkeypatch.setattr(ss.SqliteStore, "append_tick", boom_tick)
+        # append_tick_attested is the live mint seam Vertex persists through
+        monkeypatch.setattr(ss.SqliteStore, "append_tick_attested", boom_tick)
 
         with pytest.raises(ReceiveCommittedError) as ei:
             # event.close fires the "event" boundary → a tick is minted → boom
@@ -283,7 +284,7 @@ class TestCommittedFactError:
             _append(store, "event.close", 999, topic="external")
             raise RuntimeError("tick failure after an external race")
 
-        monkeypatch.setattr(ss.SqliteStore, "append_tick", boom_after_external)
+        monkeypatch.setattr(ss.SqliteStore, "append_tick_attested", boom_after_external)
         with pytest.raises(ReceiveCommittedError) as ei:
             h.receive(Fact.of("event.close", "kyle", v=1), id_override="OURID")
         # names OUR id, not the external fact now at head

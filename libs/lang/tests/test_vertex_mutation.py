@@ -546,6 +546,88 @@ class TestParserOraclePostcondition:
         assert set(parse_vertex(out).loops) == {"decision", "task", "marker"}
         assert "// keep this loops comment" in out
 
+    def test_duplicate_sibling_kind_rejected_on_remove(self):
+        # SOL-R3-01 repro 1: removing `decision` from a line also carrying
+        # `task`, with an identical duplicate `task` later, used to succeed —
+        # the physical task declarations fell 2 -> 1 while the parses stayed
+        # definition-equal (last-wins collapse blinded the oracle). Duplicate
+        # loop-kind nodes are now a typed pre-condition refusal.
+        doc = (
+            'name "t"\n'
+            "loops {\n"
+            '  decision { fold { items "by" "topic" } }; '
+            'task { fold { items "by" "name" } }\n'
+            '  task { fold { items "by" "name" } }\n'
+            "}\n"
+        )
+        with pytest.raises(ValueError, match="duplicate"):
+            remove_vertex_kind(doc, "decision")
+
+    def test_duplicate_target_kind_rejected_on_edit(self):
+        # SOL-R3-01 repro 2: with duplicate `decision` declarations, edit
+        # changed the SHADOWED one and reported success while
+        # after.loops["decision"] != requested. Duplicates refuse up front.
+        doc = (
+            'name "t"\n'
+            "loops {\n"
+            '  decision { fold { items "by" "topic" } }\n'
+            '  decision { fold { items "by" "name" } }\n'
+            "}\n"
+        )
+        new = LoopDef(folds=(FoldDecl("items", FoldBy("status")),))
+        with pytest.raises(ValueError, match="duplicate"):
+            edit_vertex_kind(doc, "decision", new)
+        with pytest.raises(ValueError, match="duplicate"):
+            add_vertex_kind(doc, "marker", BASIC)
+
+    def test_edit_preserves_trailing_comment(self):
+        # SOL-R3-01 repro 3: editing a declaration followed by a trailing
+        # comment silently removed the comment. The suffix after the block's
+        # closing brace must survive the splice.
+        doc = (
+            'name "t"\n'
+            "loops {\n"
+            '  decision { fold { items "by" "topic" } } '
+            "// KEEP: operational rationale\n"
+            '  task { fold { items "by" "name" } }\n'
+            "}\n"
+        )
+        new = LoopDef(folds=(FoldDecl("items", FoldBy("status")),))
+        out = edit_vertex_kind(doc, "decision", new)
+        assert "// KEEP: operational rationale" in out
+        assert parse_vertex(out).loops["decision"] == new
+
+    def test_edit_refuses_rather_than_drop_interior_comment(self):
+        # A comment INSIDE the replaced span cannot be carried through the
+        # regenerated block — the honest answer is a typed refusal, never a
+        # silent drop (_verified claims preservation, so it must be honest).
+        doc = (
+            'name "t"\n'
+            "loops {\n"
+            "  decision {\n"
+            "    // KEEP: interior rationale\n"
+            '    fold { items "by" "topic" }\n'
+            "  }\n"
+            '  task { fold { items "by" "name" } }\n'
+            "}\n"
+        )
+        with pytest.raises(ValueError, match="comment"):
+            edit_vertex_kind(doc, "decision", BASIC)
+
+    def test_verified_asserts_target_equals_requested_definition(self):
+        # SOL-R3-01 part (b), belt-and-braces under the duplicate refusal:
+        # the post-mutation parse of the target kind must EQUAL the requested
+        # LoopDef, or _verified refuses.
+        from lang.vertex_mutation import _verified
+
+        before = parse_vertex(MULTI)
+        requested = LoopDef(folds=(FoldDecl("items", FoldBy("status")),))
+        # MULTI unchanged: decision still folds by topic, not the requested.
+        with pytest.raises(ValueError, match="requested definition"):
+            _verified(
+                before, MULTI, "test", edited="decision", definition=requested
+            )
+
     def test_non_kind_content_change_refuses(self):
         # The oracle also covers non-loop vertex content: a splice that
         # altered e.g. the store declaration must refuse. The normal splice

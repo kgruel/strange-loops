@@ -534,13 +534,15 @@ class SqliteStore(Generic[T]):
     ) -> tuple[str, str | None]:
         """:meth:`append`, also returning the committed row's signature.
 
-        The write's OWN result satisfies the write-receipt attestation
-        contract (LIBS_CHANGES P1 — "the committed row, or the write
-        operation's actual result"): this method assembled the exact row it
-        inserted, so the signature it hands back IS the committed column,
-        with no read-back SELECT. ``signature_override`` flows through
-        verbatim. :meth:`fact_signature` remains the public read-back API
-        for cross-checks.
+        The signature handed back is the COMMITTED column, read back inside
+        the write transaction after the INSERT (any AFTER triggers have
+        fired) and before the commit — the write-receipt attestation
+        contract (LIBS_CHANGES P1: "the committed row, or the write
+        operation's actual result"). Assembly state is not enough: an AFTER
+        INSERT trigger can rewrite the row between the two, and the receipt
+        follows the row (SOL-R3-02). ``signature_override`` flows through
+        the assembly verbatim. :meth:`fact_signature` remains the public
+        read-back API for cross-checks.
         """
         if self._conn is None:
             # close() is part of the public lifecycle now — use-after-close
@@ -562,10 +564,10 @@ class SqliteStore(Generic[T]):
             )
         else:
             signature = None
-        self._write_fact_row(
+        committed = self._write_fact_row(
             (fact_id, d["kind"], d["ts"], observer, origin, payload_text, signature)
         )
-        return fact_id, signature
+        return fact_id, committed
 
     def fact_signature(self, fact_id: str) -> str | None:
         """Signature column of the COMMITTED fact row, or None.
@@ -672,16 +674,35 @@ class SqliteStore(Generic[T]):
         index row is observable.
         """
 
-    def _write_fact_row(self, row: tuple) -> None:
-        """Persist one assembled fact row (id, kind, ts, observer, origin,
-        payload, signature)."""
-        self._conn.execute(FACT_INSERT_SQL, row)
-        self._conn.commit()
+    def _committed_signature(self, table: str, row_id: str) -> str | None:
+        """The signature column as it stands post-INSERT, pre-commit.
 
-    def _write_tick_row(self, row: tuple) -> None:
-        """Persist one assembled tick row (_TICK_ROW_SQL order + signature)."""
-        self._conn.execute(TICK_INSERT_SQL, row)
+        The one read-back per write (SOL-R3-02): executed after the INSERT
+        — so any AFTER triggers have already fired — and before the commit,
+        it reads exactly what will be committed. ``table`` is an internal
+        constant (``facts``/``ticks``), never caller input.
+        """
+        r = self._conn.execute(
+            f"SELECT signature FROM {table} WHERE id = ?", (row_id,)  # noqa: S608
+        ).fetchone()
+        return r[0] if r is not None else None
+
+    def _write_fact_row(self, row: tuple) -> str | None:
+        """Persist one assembled fact row (id, kind, ts, observer, origin,
+        payload, signature). Returns the COMMITTED signature (read back
+        inside the transaction, after triggers, before commit)."""
+        self._conn.execute(FACT_INSERT_SQL, row)
+        committed = self._committed_signature("facts", row[0])
         self._conn.commit()
+        return committed
+
+    def _write_tick_row(self, row: tuple) -> str | None:
+        """Persist one assembled tick row (_TICK_ROW_SQL order + signature).
+        Returns the COMMITTED signature (same read-back as facts)."""
+        self._conn.execute(TICK_INSERT_SQL, row)
+        committed = self._committed_signature("ticks", row[0])
+        self._conn.commit()
+        return committed
 
     def current_chain_head(self) -> str | None:
         """The row-identity hash of the latest *chained* tick, or None.
@@ -827,6 +848,18 @@ class SqliteStore(Generic[T]):
                     payload_text, signature,
                 )
                 conn.execute(FACT_INSERT_SQL, row)
+                # Committed-row honesty (SOL-R3-02): read the signature back
+                # after the INSERT (AFTER triggers fired), before any log
+                # byte and before COMMIT. A genesis must commit signed, so a
+                # row rewritten out from under the assembly refuses.
+                committed = self._committed_signature("facts", lineage_id)
+                if committed != signature:
+                    raise UnsignableGenesis(
+                        "the committed genesis row's signature does not match "
+                        "the assembled attestation (a schema-level rewrite, "
+                        "e.g. an AFTER INSERT trigger, altered the row) — "
+                        "refusing to commit an unsigned genesis"
+                    )
                 conn.execute(
                     "INSERT OR REPLACE INTO store_meta (key, value) "
                     "VALUES ('own_lineage', ?)",
@@ -1023,6 +1056,18 @@ class SqliteStore(Generic[T]):
                         row,
                     )
                     rows.append(row)
+                # Committed-row honesty (SOL-R3-02): every ceremony row must
+                # commit with the signature it was assembled with — read back
+                # post-INSERT (triggers fired), pre-log, pre-COMMIT.
+                for r in rows:
+                    if self._committed_signature("facts", r[0]) != r[6]:
+                        raise UnsignableEdit(
+                            f"the committed declaration row {r[0]} does not "
+                            "carry the assembled signature (a schema-level "
+                            "rewrite, e.g. an AFTER INSERT trigger, altered "
+                            "the row) — refusing to commit an edit ceremony "
+                            "whose attestation would lie"
+                        )
                 self._ceremony_persist(rows)
                 conn.execute("COMMIT")
             except Exception:
@@ -1458,11 +1503,11 @@ class SqliteStore(Generic[T]):
     ) -> tuple[str, str | None]:
         """:meth:`append_tick`, also returning the committed row's signature.
 
-        Same write's-own-result posture as :meth:`append_attested`: the row
-        this method assembled IS the committed row (always chained — every
-        row minted here carries the window fields), so no per-tick read-back
-        is needed. :meth:`tick_signature_state` remains the public read-back
-        API for cross-checks.
+        Same committed-row posture as :meth:`append_attested`: the signature
+        is read back inside the write transaction, after the INSERT (AFTER
+        triggers fired), before the commit (SOL-R3-02).
+        :meth:`tick_signature_state` remains the public read-back API for
+        cross-checks.
         """
         self._ensure_sync()
         self._ensure_chain_columns()
@@ -1514,8 +1559,8 @@ class SqliteStore(Generic[T]):
                     "is available — minting would break chain era-monotonicity"
                 )
 
-        self._write_tick_row((*row, signature))
-        return row[0], signature
+        committed = self._write_tick_row((*row, signature))
+        return row[0], committed
 
     def reanchor(self) -> dict[str, Any]:
         """Recompute every commitment under the CURRENT canonical encoding.

@@ -57,3 +57,8 @@ docs/dev/*
 !.loops/data/project.jsonl
 experiments/
 meta-discussion/
+
+# corrupt-index recovery residue (SOL-R3-04): quarantined indexes and the
+# recovery lock file beside a derived .db
+*.db.corrupt.*
+*.db.recovery-lock

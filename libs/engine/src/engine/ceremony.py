@@ -460,7 +460,9 @@ def apply_declaration_update(
 
     1. open the canonical store — a failure here provably mutated nothing
        and no intent exists yet, so it refuses typed with zero residue;
-    2. durable intent (sibling ``.vertex.intent``, tempfile+fsync+rename);
+    2. durable intent (sibling ``.vertex.intent``, tempfile+fsync+rename) —
+       a write failure here is a typed pre-ceremony ``refused`` (nothing
+       mutated), and the store handle from (1) is closed either way;
     3. the S1b store ceremony — ``absorb_genesis`` or
        ``absorb_edit(expected_head=preview.expected_head)`` — which holds the
        identity check, CAS, sign-final-payload, and append in ONE
@@ -535,9 +537,23 @@ def apply_declaration_update(
     # between gate and open), so the typed catch here is the floor.
     import sqlite3
 
+    from .jsonl_codec import JsonlCodecError
+    from .jsonl_store import JsonlCanonicalUnsupported
+
     try:
         store = _open_store(preview.canonical_path)
-    except (sqlite3.Error, OSError) as exc:
+    except (
+        sqlite3.Error,
+        OSError,
+        # The store-open exception taxonomy is wider than backend errors
+        # (SOL-R3-03b): a JSONL-canonical open can refuse typed on its own
+        # terms (out-of-band index rows, a log that does not decode). All
+        # of it is pre-intent — nothing mutated, zero residue — so all of
+        # it translates to the typed refusal.
+        JsonlCanonicalUnsupported,
+        JsonlCodecError,
+        UnicodeDecodeError,
+    ) as exc:
         return DeclarationUpdateResult(
             status="refused",
             reason=(
@@ -578,8 +594,21 @@ def apply_declaration_update(
             AmbiguousGenesis, NoGenesis, ReservedKindViolation, UnsignableEdit,
         )
 
-    intent_path = _write_intent(preview, observer)
     try:
+        # Intent creation lives INSIDE the store-lifetime try/finally
+        # (SOL-R3-06): the open now precedes the intent, so a failing
+        # intent write must not leak the handle. An expected write failure
+        # is a typed pre-ceremony refusal — nothing mutated, no residue.
+        try:
+            intent_path = _write_intent(preview, observer)
+        except OSError as exc:
+            return DeclarationUpdateResult(
+                status="refused",
+                reason=(
+                    f"could not persist the declaration-update intent "
+                    f"({exc}) — refusing before the ceremony; nothing mutated"
+                ),
+            )
         receipt = ceremony()
     except stale_exc as exc:
         _remove_intent(intent_path)

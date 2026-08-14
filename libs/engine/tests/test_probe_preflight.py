@@ -559,3 +559,75 @@ def test_write_surface_reason_names_the_unwritable_piece(tmp_path):
         assert "store directory not writable" in write_surface_reason(log)
     finally:
         tmp_path.chmod(0o755)
+
+
+def test_write_surface_reason_total_over_non_searchable_dir(tmp_path):
+    """SOL-R3-03a: an unreadable/non-searchable (0222) store directory is a
+    not-writable ANSWER with a reason — never a raw PermissionError."""
+    import os
+
+    from engine.probe import write_surface_reason
+
+    storedir = tmp_path / "store"
+    storedir.mkdir()
+    log = storedir / "s.jsonl"
+    log.write_text("", encoding="utf-8")
+    storedir.chmod(0o222)
+    try:
+        if os.access(log, os.R_OK):
+            pytest.skip("cannot make dir non-searchable here (running as root?)")
+        reason = write_surface_reason(log)  # must not raise
+        assert reason is not None
+        assert "not writable" in reason
+    finally:
+        storedir.chmod(0o755)
+
+
+def test_recover_then_open_reports_busy_as_refused_not_unreadable(tmp_path):
+    """SOL-R3-05: a transient sqlite BUSY/LOCKED during RECOVER_THEN_OPEN is
+    a 'refused' (try again later), never 'unreadable' ('rebuilding from the
+    log also failed' — no rebuild ran, the log reads fine). The index is not
+    discarded and the log is untouched."""
+    import sqlite3
+
+    from atoms import Fact
+    from engine.jsonl_codec import serialize_fact_row
+    from engine.jsonl_store import JsonlStore
+    from engine.preflight import PreflightMode, read_preflight
+
+    db = tmp_path / "s.db"
+    log = tmp_path / "s.jsonl"
+    store: JsonlStore = JsonlStore(
+        path=db,
+        serialize=lambda f: f.to_dict(),
+        deserialize=Fact.from_dict,
+    )
+    store.append(Fact.of("note", "kyle", message="one"))
+    store.close()
+
+    # Make the index BEHIND: one durable line the index has not consumed —
+    # the open must write (tail forward), which the held lock blocks.
+    line = serialize_fact_row(
+        ("zz-out-of-band", "note", 1.0, "kyle", "", '{"message": "two"}', None)
+    )
+    with log.open("a", encoding="utf-8") as fh:
+        fh.write(line + "\n")
+
+    index_bytes_before = db.stat().st_ino
+    log_before = log.read_bytes()
+
+    holder = sqlite3.connect(str(db))
+    try:
+        holder.execute("BEGIN IMMEDIATE")
+        result = read_preflight(log, PreflightMode.RECOVER_THEN_OPEN)
+    finally:
+        holder.rollback()
+        holder.close()
+
+    assert result.status == "refused"
+    assert "busy" in result.reason or "locked" in result.reason
+    assert result.store is None
+    # Nothing destroyed: same index inode, no quarantine, log untouched.
+    assert db.stat().st_ino == index_bytes_before
+    assert not list(tmp_path.glob("*.corrupt.*"))
+    assert log.read_bytes() == log_before

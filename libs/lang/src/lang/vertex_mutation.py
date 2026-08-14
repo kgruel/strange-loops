@@ -50,6 +50,7 @@ from .population import (
     kdl_find_block,
     kdl_insert_child,
     kdl_remove_child,
+    kdl_split_top_level_nodes,
 )
 
 if TYPE_CHECKING:
@@ -277,6 +278,97 @@ def _parse_vertex_or_raise(text: str, context: str):
         ) from exc
 
 
+def _loops_block_child_names(text: str) -> list[str]:
+    """First tokens of every depth-0 child node in the ``loops`` block.
+
+    Raw-text multiplicity view — the one thing the parser oracle cannot see
+    (duplicate kind nodes collapse last-wins in the parse). Line-based and
+    brace-counted like the splice layer; comment tokens are skipped. Empty
+    when there is no ``loops`` block.
+    """
+    try:
+        start, end = kdl_find_block(text, ["loops"])
+    except ValueError:
+        return []
+    lines = text.splitlines()
+    names: list[str] = []
+
+    def _collect_line_nodes(segment: str) -> None:
+        for node in kdl_split_top_level_nodes(segment):
+            tok = node.split(None, 1)[0].split("{", 1)[0]
+            if tok and not tok.startswith("/"):
+                names.append(tok)
+
+    if start == end:
+        line = lines[start]
+        _collect_line_nodes(line[line.index("{") + 1 : line.rindex("}")])
+        return names
+
+    i = start + 1
+    while i < end:
+        stripped = lines[i].strip()
+        if not stripped or stripped.startswith("//"):
+            i += 1
+            continue
+        opens = stripped.count("{") - stripped.count("}")
+        if opens > 0:
+            tok = stripped.split(None, 1)[0].split("{", 1)[0]
+            if tok and not tok.startswith("/"):
+                names.append(tok)
+            depth = opens
+            i += 1
+            while i < end and depth > 0:
+                depth += lines[i].count("{") - lines[i].count("}")
+                i += 1
+            continue
+        _collect_line_nodes(stripped)
+        i += 1
+    return names
+
+
+def _assert_unique_kind_nodes(text: str, context: str) -> None:
+    """Refuse duplicate loop-kind nodes in the INPUT (SOL-R3-01 part a).
+
+    The parser collapses duplicate kind names last-wins, so the parser
+    oracle is structurally blind to them: a splice that loses one physical
+    duplicate parses definition-equal. Duplicates in the input are
+    pathological — a pre-condition refusal on the raw text, not a safety
+    detector; the parser oracle remains the post-condition authority.
+    """
+    from collections import Counter
+
+    counted = Counter(
+        n for n in _loops_block_child_names(text)
+        if n not in _RESERVED_KIND_NAMES
+    )
+    dupes = sorted(n for n, c in counted.items() if c > 1)
+    if dupes:
+        raise ValueError(
+            f"{context}: duplicate loop-kind declaration(s) {dupes} in the "
+            "loops block — the parser resolves duplicates last-wins, so a "
+            "text mutation over them cannot be verified; deduplicate the "
+            "vertex by hand first"
+        )
+
+
+def _has_comment_outside_strings(s: str) -> bool:
+    """Quote-aware scan for KDL comment openers (``//``, ``/*``, ``/-``)."""
+    in_str = esc = False
+    for i, ch in enumerate(s):
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+        elif ch == '"':
+            in_str = True
+        elif ch == "/" and i + 1 < len(s) and s[i + 1] in "/*-":
+            return True
+    return False
+
+
 def _verified(
     before,
     result: str,
@@ -285,6 +377,7 @@ def _verified(
     added: str | None = None,
     edited: str | None = None,
     removed: str | None = None,
+    definition=None,
 ) -> str:
     """Parse + validate mutated text AND assert the exact expected delta.
 
@@ -328,6 +421,14 @@ def _verified(
             "kind shares its physical line with siblings, split each kind "
             "onto its own line first"
         )
+    target = added if added is not None else edited
+    if target is not None and definition is not None:
+        if after.loops.get(target) != definition:
+            raise ValueError(
+                f"{context} violated content preservation: kind {target!r} "
+                "parses back different from the requested definition — "
+                "refusing; the original text is unchanged"
+            )
     mutated = {added, edited, removed} - {None}
     for k in before_kinds - mutated:
         if before.loops[k] != after.loops[k]:
@@ -360,6 +461,7 @@ def add_vertex_kind(text: str, kind: str, definition: LoopDef) -> str:
     """
     _validate_kind_name(kind)
     before = _parse_vertex_or_raise(text, f"add_vertex_kind({kind!r})")
+    _assert_unique_kind_nodes(text, f"add_vertex_kind({kind!r})")
     if kind in before.loops:
         raise ValueError(f"kind {kind!r} already exists; use edit_vertex_kind")
 
@@ -380,7 +482,10 @@ def add_vertex_kind(text: str, kind: str, definition: LoopDef) -> str:
         if text and not text.endswith("\n"):
             text += "\n"
         result = text + block
-    return _verified(before, result, f"add_vertex_kind({kind!r})", added=kind)
+    return _verified(
+        before, result, f"add_vertex_kind({kind!r})",
+        added=kind, definition=definition,
+    )
 
 
 def edit_vertex_kind(text: str, kind: str, definition: LoopDef) -> str:
@@ -392,6 +497,7 @@ def edit_vertex_kind(text: str, kind: str, definition: LoopDef) -> str:
     """
     _validate_kind_name(kind)
     before = _parse_vertex_or_raise(text, f"edit_vertex_kind({kind!r})")
+    _assert_unique_kind_nodes(text, f"edit_vertex_kind({kind!r})")
     try:
         start, end = kdl_find_block(text, ["loops", kind])
     except ValueError as exc:
@@ -402,16 +508,37 @@ def edit_vertex_kind(text: str, kind: str, definition: LoopDef) -> str:
         ) from exc
 
     lines = text.splitlines()
+    # Trailing-trivia honesty (SOL-R3-01 part c): the splice regenerates the
+    # whole block, so it can carry through exactly ONE piece of trivia — the
+    # suffix after the block's final close (`} // note`). Anything comment-
+    # shaped INSIDE the replaced span would be silently dropped by the
+    # regeneration; _verified claims preservation, so that is a refusal.
+    end_line = lines[end]
+    close_idx = end_line.rindex("}")
+    suffix = end_line[close_idx + 1 :].rstrip()
+    interior = "\n".join([*lines[start:end], end_line[: close_idx + 1]])
+    if _has_comment_outside_strings(interior):
+        raise ValueError(
+            f"edit_vertex_kind({kind!r}): the {kind!r} block carries a "
+            "comment the regenerated definition cannot preserve — move the "
+            "comment outside the block (or edit the file by hand) and retry"
+        )
     kind_indent = lines[start][: len(lines[start]) - len(lines[start].lstrip())]
     child = loop_def_to_kdl(kind, definition)
     new_lines = [
         (kind_indent + ln) if ln.strip() else ln for ln in child.splitlines()
     ]
+    if suffix:
+        sep = "" if suffix.startswith((" ", "\t")) else " "
+        new_lines[-1] += sep + suffix
     lines[start : end + 1] = new_lines
     result = "\n".join(lines)
     if text.endswith("\n"):
         result += "\n"
-    return _verified(before, result, f"edit_vertex_kind({kind!r})", edited=kind)
+    return _verified(
+        before, result, f"edit_vertex_kind({kind!r})",
+        edited=kind, definition=definition,
+    )
 
 
 def remove_vertex_kind(text: str, kind: str) -> str:
@@ -423,6 +550,7 @@ def remove_vertex_kind(text: str, kind: str) -> str:
     """
     _validate_kind_name(kind)
     before = _parse_vertex_or_raise(text, f"remove_vertex_kind({kind!r})")
+    _assert_unique_kind_nodes(text, f"remove_vertex_kind({kind!r})")
     try:
         result = kdl_remove_child(text, ["loops"], kind)
     except ValueError as exc:

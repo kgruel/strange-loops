@@ -254,3 +254,102 @@ class TestEraAwareWindowHash:
         report = signed.verify_chain()
         assert report["ok"] is True
         assert signed.verify_facts(verifier=fake_fact_verifier(KEYS))["ok"] is True
+
+
+class TestCommittedRowAttestationHonesty:
+    """SOL-R3-02: append_attested must report the COMMITTED row's signature.
+
+    An AFTER INSERT trigger mutating the row is the empirical probe: the
+    assembly state and the committed row diverge, and the receipt must
+    follow the row. Construction-grade honesty — one read-back SELECT
+    inside the write transaction, after the INSERT (triggers fired),
+    before commit — never trigger-schema rejection (detection at an
+    ambient boundary).
+    """
+
+    NULLING_TRIGGER = (
+        "CREATE TRIGGER null_sig AFTER INSERT ON facts BEGIN "
+        "UPDATE facts SET signature = NULL WHERE id = NEW.id; END"
+    )
+
+    def test_trigger_nulled_fact_attestation_matches_read_back(self, tmp_db):
+        store = make_store(tmp_db, keys=KEYS)
+        store._conn.execute(self.NULLING_TRIGGER)
+        fact_id, signature = store.append_attested(
+            Fact.of("health", "kyle", status="ok")
+        )
+        assert signature == store.fact_signature(fact_id)
+        assert signature is None
+
+    def test_signed_fact_attestation_matches_read_back(self, tmp_db):
+        store = make_store(tmp_db, keys=KEYS)
+        fact_id, signature = store.append_attested(
+            Fact.of("health", "kyle", status="ok")
+        )
+        assert signature is not None
+        assert signature == store.fact_signature(fact_id)
+
+    def test_trigger_nulled_tick_attestation_matches_read_back(self, tmp_db):
+        store = make_store(
+            tmp_db, keys=KEYS,
+            tick_signer=lambda digest: "tick-sig-" + digest[:8],
+        )
+        store._conn.execute(
+            "CREATE TRIGGER null_tick_sig AFTER INSERT ON ticks BEGIN "
+            "UPDATE ticks SET signature = NULL WHERE id = NEW.id; END"
+        )
+        tick = Tick(
+            name="t", ts=datetime.now(UTC), payload={}, origin="test"
+        )
+        tick_id, signature = store.append_tick_attested(
+            tick, enforce_floor=False
+        )
+        assert signature is None
+        committed = store.tick_signature_state(tick_id)
+        assert committed is not None and committed[0] is None
+
+    def test_trigger_nulled_genesis_refuses_rather_than_lie(self, tmp_db):
+        from engine.sqlite_store import UnsignableGenesis
+
+        store = make_store(tmp_db, keys=KEYS)
+        store._ensure_fact_signature_column()
+        store._conn.execute(self.NULLING_TRIGGER)
+        with pytest.raises(UnsignableGenesis, match="committed"):
+            store.absorb_genesis(
+                [{"subject": "vertex", "kind": "_decl.vertex-defined"}],
+                observer="kyle",
+                fact_signer=fake_fact_signer(KEYS),
+            )
+        # Rolled back: no genesis row, no lineage marker.
+        row = store._conn.execute(
+            "SELECT COUNT(*) FROM facts"
+        ).fetchone()
+        assert row[0] == 0
+
+    def test_trigger_nulled_edit_refuses_rather_than_lie(self, tmp_db):
+        from types import SimpleNamespace
+
+        from lang.document import DECL_VERTEX_DEFINED
+
+        from engine.sqlite_store import UnsignableEdit
+
+        store = make_store(tmp_db, keys=KEYS)
+        store.absorb_genesis(
+            [{"subject": "vertex", "kind": DECL_VERTEX_DEFINED}],
+            observer="kyle",
+            fact_signer=fake_fact_signer(KEYS),
+        )
+        before = store._conn.execute("SELECT COUNT(*) FROM facts").fetchone()[0]
+        store._conn.execute(self.NULLING_TRIGGER)
+        change = SimpleNamespace(
+            kind=DECL_VERTEX_DEFINED,
+            subject="vertex",
+            payload={"name": "t2"},
+            annotation="modified",
+        )
+        with pytest.raises(UnsignableEdit, match="committed"):
+            store.absorb_edit(
+                [change], observer="kyle", fact_signer=fake_fact_signer(KEYS)
+            )
+        after = store._conn.execute("SELECT COUNT(*) FROM facts").fetchone()[0]
+        assert after == before  # rolled back, no ceremony row committed

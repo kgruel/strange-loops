@@ -53,8 +53,8 @@ from pathlib import Path
 from typing import Any
 
 from .canonical_audit import AgreementReport, audit_agreement
-from .sql_util import sqlite_busy
 from .residence import index_path_for, is_jsonl_canonical
+from .sql_util import sqlite_busy
 
 __all__ = [
     "PREFLIGHT_STATUSES",

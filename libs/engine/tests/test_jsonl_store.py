@@ -1007,3 +1007,120 @@ class TestCorruptIndexRecoversAtOpen:
         with pytest.raises(_sq.Error):
             open_store(tmp_path)
         assert (tmp_path / "s.db").exists(), "the only artifact was destroyed"
+
+
+class TestConcurrentCorruptIndexRecovery:
+    """SOL-R3-04: the discard/rebuild of a corrupt index must be serialized
+    across concurrent openers (interprocess recovery lock). Without it, two
+    openers could each unlink-and-recreate, ending on DIFFERENT inodes:
+    one live handle then reads a store the other's appends never reach.
+    """
+
+    def test_two_synchronized_openers_converge_on_one_inode(
+        self, tmp_path, monkeypatch
+    ):
+        import os as _os
+        import sqlite3 as _sq
+        import threading
+
+        import engine.residence as residence
+        from engine.jsonl_store import JsonlStore as JS
+
+        # A valid log with one fact, beside a corrupt index.
+        store = open_store(tmp_path)
+        store.append(fact(message="one"))
+        store.close()
+        db = tmp_path / "s.db"
+        db.write_bytes(b"this is definitely not a sqlite database\n" * 20)
+        for side in ("-wal", "-shm"):
+            p = Path(str(db) + side)
+            if p.exists():
+                p.unlink()
+
+        # Sync point 1: both openers must OBSERVE the corruption before
+        # either starts recovering (first corruption-failure per thread).
+        barrier = threading.Barrier(2)
+        failed_once: set[int] = set()
+        real_open_index = JS._open_index
+
+        def synced_open_index(self):
+            try:
+                return real_open_index(self)
+            except _sq.Error:
+                me = threading.get_ident()
+                if me not in failed_once:
+                    failed_once.add(me)
+                    try:
+                        barrier.wait(timeout=5)
+                    except threading.BrokenBarrierError:
+                        pass
+                raise
+
+        monkeypatch.setattr(JS, "_open_index", synced_open_index)
+
+        # Sync point 2: the second thread to reach the destructive step
+        # waits until the first opener has FINISHED constructing — the
+        # delayed-second-unlink interleaving from sol's harness. With the
+        # recovery lock in place the loser re-checks under the lock, finds
+        # the winner's rebuilt index, and never reaches this step.
+        order = threading.Lock()
+        first_done = threading.Event()
+        destructive_calls: list[int] = []
+        real_sidecars = residence.sqlite_sidecars
+
+        def coordinated_sidecars(path):
+            with order:
+                destructive_calls.append(threading.get_ident())
+                n = len(destructive_calls)
+            if n > 1:
+                first_done.wait(5)
+            return real_sidecars(path)
+
+        monkeypatch.setattr(residence, "sqlite_sidecars", coordinated_sidecars)
+
+        # sqlite handles are thread-affine: each thread opens, records its
+        # connection's inode, then runs its half of the divergence probe.
+        results: dict[str, Any] = {}
+        errors: list[BaseException] = []
+        both_open = threading.Barrier(2)
+        a_appended = threading.Event()
+
+        def conn_inode(s):
+            row = s._conn.execute("PRAGMA database_list").fetchone()
+            return _os.stat(row[2]).st_ino
+
+        def count(s):
+            return s._conn.execute("SELECT COUNT(*) FROM facts").fetchone()[0]
+
+        def opener(tag: str):
+            try:
+                s = open_store(tmp_path)
+                first_done.set()
+                results[f"{tag}_inode"] = conn_inode(s)
+                both_open.wait(timeout=10)
+                if tag == "a":
+                    s.append(fact(message="two"))
+                    results["a_count"] = count(s)
+                    a_appended.set()
+                else:
+                    assert a_appended.wait(10)
+                    results["b_count"] = count(s)
+                s.close()
+            except BaseException as exc:  # noqa: BLE001
+                errors.append(exc)
+                first_done.set()
+                a_appended.set()
+
+        t1 = threading.Thread(target=opener, args=("a",))
+        t2 = threading.Thread(target=opener, args=("b",))
+        t1.start(); t2.start()
+        t1.join(20); t2.join(20)
+        assert not errors, errors
+
+        # Both live handles were bound to ONE inode — the file at the path —
+        # and the append through one was visible to the other (no divergent
+        # reads).
+        path_inode = _os.stat(db).st_ino
+        assert results["a_inode"] == path_inode
+        assert results["b_inode"] == path_inode
+        assert (results["a_count"], results["b_count"]) == (2, 2)

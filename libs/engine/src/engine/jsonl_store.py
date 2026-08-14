@@ -160,6 +160,7 @@ not refused (above).
 
 from __future__ import annotations
 
+import itertools
 import logging
 import os
 import sqlite3
@@ -201,6 +202,10 @@ __all__ = [
 ]
 
 _log = logging.getLogger(__name__)
+
+# Quarantine-name sequence for corrupt-index renames: pid + counter, no
+# wall clock (SOL-R3-04 — deterministic, collision-free within a process).
+_QUARANTINE_SEQ = itertools.count(1)
 
 T = TypeVar("T")
 
@@ -386,14 +391,53 @@ class JsonlStore(SqliteStore[T], Generic[T]):
             # (re-raise — never destroy what cannot be re-derived).
             if "database is locked" in str(exc) or not self._log_path.is_file():
                 raise
-            from .residence import sqlite_sidecars
+            self._recover_index(kwargs, exc)
 
+    def _recover_index(self, kwargs: dict[str, Any], exc: BaseException) -> None:
+        """Discard-and-rebuild a corrupt derived index — serialized (SOL-R3-04).
+
+        Concurrent openers racing the destructive discard could each
+        unlink-and-recreate, ending on different inodes with divergent
+        reads. Recovery therefore runs under an interprocess lock FILE
+        beside the index (``flock`` on its own fd — which also serializes
+        threads, the lock being per-fd): sqlite cannot provide the lock,
+        its file is the casualty. Under the lock a would-be loser first
+        RE-OPENS at the path — re-checking corruption and binding whatever
+        inode now lives there (the winner's rebuilt index) — and only a
+        still-corrupt index is quarantined (atomic rename to
+        ``<name>.corrupt.<pid>-<seq>``, never a blind unlink) and rebuilt
+        from the log.
+        """
+        import fcntl
+
+        from .residence import sqlite_sidecars
+
+        lock_path = self._path.with_name(self._path.name + ".recovery-lock")
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        with lock_path.open("ab") as lock_fh:
+            fcntl.flock(lock_fh.fileno(), fcntl.LOCK_EX)
+            try:
+                # Loser path: a winner may already have recovered — re-check
+                # under the lock by reopening the current file at the path.
+                super().__init__(**kwargs)
+                self._open_index()
+                return
+            except sqlite3.Error as retry_exc:
+                if "database is locked" in str(retry_exc):
+                    raise  # a live handle owns the index — not corruption
             _log.warning(
                 "jsonl-canonical: derived index %s unusable (%s) — "
                 "discarding and rebuilding from %s",
                 self._path, exc, self._log_path,
             )
-            for stale in (self._path, *sqlite_sidecars(self._path)):
+            quarantine = self._path.with_name(
+                f"{self._path.name}.corrupt.{os.getpid()}-{next(_QUARANTINE_SEQ)}"
+            )
+            try:
+                self._path.replace(quarantine)  # atomic, evidence preserved
+            except FileNotFoundError:
+                pass
+            for stale in sqlite_sidecars(self._path):
                 stale.unlink(missing_ok=True)
             super().__init__(**kwargs)  # fresh empty index at the same path
             self._open_index()  # offset absent + non-empty log ⇒ rebuild

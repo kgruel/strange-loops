@@ -233,9 +233,11 @@ class DeclarationUpdateResult:
     """``apply``'s typed outcome. ``status`` ∈ ``applied`` / ``noop`` /
     ``stale`` / ``pending-intent`` / ``refused`` / ``needs-recovery``.
 
-    ``needs-recovery`` is the typed recovery state: the store ceremony
-    COMMITTED but the file step failed — the intent is left in place
-    (``intent_path``) and :func:`recover_declaration_update` finishes."""
+    ``needs-recovery`` is the typed recovery state: either the store
+    ceremony COMMITTED but the file step failed, or a backend error hit
+    mid-absorb and commit state is ambiguous (JSONL log commits before the
+    index). The intent is left in place (``intent_path``) and
+    :func:`recover_declaration_update` classifies and finishes."""
 
     status: str
     reason: str
@@ -585,10 +587,12 @@ def apply_declaration_update(
 
     # The writability probe cannot eliminate races (permissions can change
     # between gate and open) — so expected backend failures during the store
-    # step are translated into a typed refusal that removes the pre-commit
-    # intent (SOL-R2-04: the typed-catch is the floor). Scope: from the open
-    # through the absorb; absorb either commits-and-returns or raises with
-    # the log untouched, so a caught error here means nothing mutated.
+    # step are translated into typed outcomes (SOL-R2-04: the typed-catch is
+    # the floor). Two scopes with different guarantees: a failure at the
+    # OPEN provably mutated nothing (no log byte written) — the pre-commit
+    # intent is removed and the result is `refused`; a failure DURING the
+    # absorb is ambiguous on a JSONL-canonical store (log commits before
+    # index) — the intent stays and the result is `needs-recovery`.
     import sqlite3
 
     try:
@@ -621,13 +625,19 @@ def apply_declaration_update(
                 _remove_intent(intent_path)
                 return DeclarationUpdateResult(status="refused", reason=str(exc))
             except (sqlite3.Error, OSError) as exc:
-                _remove_intent(intent_path)
+                # A backend failure DURING the absorb is ambiguous on a
+                # JSONL-canonical store: the log line (the store) commits
+                # before the index row, so the ceremony may already be
+                # live. The intent stays — recover_declaration_update
+                # classifies not-applied vs applied from the log.
                 return DeclarationUpdateResult(
-                    status="refused",
+                    status="needs-recovery",
                     reason=(
-                        f"store backend failed during genesis: {exc} — "
-                        "intent removed, nothing committed"
+                        f"store step failed mid-ceremony ({exc}) — run "
+                        "recover_declaration_update; it classifies "
+                        "not-applied vs applied from the canonical store"
                     ),
+                    intent_path=intent_path,
                 )
         else:
             try:
@@ -650,13 +660,17 @@ def apply_declaration_update(
                 _remove_intent(intent_path)
                 return DeclarationUpdateResult(status="refused", reason=str(exc))
             except (sqlite3.Error, OSError) as exc:
-                _remove_intent(intent_path)
+                # Same ambiguity as the genesis branch: the log may have
+                # committed before the index failed. Leave the intent for
+                # recovery's log-anchored classification.
                 return DeclarationUpdateResult(
-                    status="refused",
+                    status="needs-recovery",
                     reason=(
-                        f"store backend failed during edit: {exc} — "
-                        "intent removed, nothing committed"
+                        f"store step failed mid-ceremony ({exc}) — run "
+                        "recover_declaration_update; it classifies "
+                        "not-applied vs applied from the canonical store"
                     ),
+                    intent_path=intent_path,
                 )
     finally:
         store.close()

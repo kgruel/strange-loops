@@ -167,6 +167,8 @@ def test_emit_receipt_model() -> None:
         tick_mark="v1",
         tick_id="tick-01",
         state_change=True,
+        affected_sections=["note"],
+        delta_count=1,
     )
 
     # Immutability
@@ -183,6 +185,42 @@ def test_emit_receipt_model() -> None:
     assert d["tick_mark"] == "v1"
     assert d["tick_id"] == "tick-01"
     assert d["state_change"] is True
+    assert d["affected_sections"] == ["note"]
+    assert d["delta_count"] == 1
+
+
+def test_emit_preview_result_model() -> None:
+    """EmitPreviewResult defaults, frozenness, and as_dict conversion."""
+    from client import EmitPreviewResult
+
+    preview = EmitPreviewResult(
+        target="/tmp/test.vertex",
+        kind="task",
+        observer="alice",
+        origin="agent-session",
+        ts=1700000000.0,
+        payload={"title": "Preview Task"},
+        kind_declared=True,
+        fold_key_field="id",
+        fold_key_present=True,
+        fold_key_value="task-1",
+        admitted=True,
+        strict=False,
+        would_store=True,
+        would_fold=True,
+    )
+
+    # Immutability
+    with pytest.raises(FrozenInstanceError):
+        preview.admitted = False  # type: ignore[misc]
+
+    # Serialization
+    d = preview.as_dict()
+    assert d["schema"] == "loops.cli/emit-preview/v1"
+    assert d["target"] == "/tmp/test.vertex"
+    assert d["kind"] == "task"
+    assert d["kind_declared"] is True
+    assert d["would_fold"] is True
 
 
 def test_kind_mutation_result_model() -> None:

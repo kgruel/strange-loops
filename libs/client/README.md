@@ -70,13 +70,20 @@ receipt = emit_fact(
     observer="alice",
 )
 
-# Or emitting a pre-constructed Fact atom directly
-fact = Fact.of("note", "alice", title="Meeting Notes")
-receipt = emit_fact("target.vertex", fact)
+# Or preflight dry-run simulation
+preview = preview_emission("target.vertex", "note", {"title": "Test"}, observer="alice")
+
+# Batch emission
+from client import emit_batch
+receipts = emit_batch("target.vertex", [fact, ("note", {"title": "Batch item"})], observer="alice")
 ```
 
-- **`emit_fact(target, kind_or_fact, payload=None, *, observer=None, origin="", ts=None, id_override=None, credentials=None, admit_undeclared=False) -> EmitReceipt`**:
-  Emits a fact (or `Fact` atom) under declared admission rules. Bypassing strict kind admission requires `admit_undeclared=True`. Deterministic IDs can be specified with `id_override`.
+- **`emit_fact(target, kind_or_fact, payload=None, *, observer=None, origin="", ts=None, id_override=None, credentials=None, admit_undeclared=False, dry_run=False) -> EmitReceipt`**:
+  Emits a fact (or `Fact` atom) under declared admission rules. Bypassing strict kind admission requires `admit_undeclared=True`. Deterministic IDs can be specified with `id_override`. `dry_run=True` simulates emission without storage.
+- **`preview_emission(target, kind_or_fact, payload=None, *, observer=None, origin="", ts=None, admit_undeclared=False) -> EmitPreviewResult`**:
+  Simulates emission against declared policies, checking fold key requirements without disk side effects.
+- **`emit_batch(target, facts, *, observer=None, origin="", credentials=None, admit_undeclared=False) -> list[EmitReceipt]`**:
+  Emits a sequence of facts under a single vertex handle session.
 
 ---
 
@@ -115,7 +122,8 @@ All models are frozen, immutable dataclasses providing `.as_dict()` conversion:
 | **`ReadSummary`** | `loops.cli/read-summary/v1` | Domain-neutral inventory of facts, ticks, kinds, and storage agreement. |
 | **`FactPageResult`** | `loops.cli/facts-page/v1` | Bounded page of facts with pagination cursors (`before`/`after`). |
 | **`FoldStateResult`** | `loops.cli/fold-state/v1` | Replayed fold state across declared vertex sections. |
-| **`EmitReceipt`** | `loops.cli/emit-receipt/v1` | Stored fact attestation, tick mark, and state change indicator. |
+| **`EmitReceipt`** | `loops.cli/emit-receipt/v1` | Stored fact attestation, tick mark, state change, affected sections, and delta count. |
+| **`EmitPreviewResult`** | `loops.cli/emit-preview/v1` | Preflight simulation of admission, fold keys, and storage predictions. |
 | **`KindMutationResult`** | `loops.cli/kind-mutation/v1` | Outcome of a declaration update ceremony and generation diffs. |
 
 ---

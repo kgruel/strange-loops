@@ -58,9 +58,10 @@ def emit_fact(
 
 ---
 
-## 2. Result Model: `EmitReceipt`
+## 2. Result Models: `EmitReceipt` & `EmitPreviewResult`
 
-Every emission returns an immutable `EmitReceipt` dataclass:
+### `EmitReceipt`
+Every live emission returns an immutable `EmitReceipt` dataclass:
 
 ```python
 @dataclass(frozen=True)
@@ -73,13 +74,91 @@ class EmitReceipt:
     tick_mark: str | None = None# Name of tick mark if sealed (e.g. "default")
     tick_id: str | None = None  # Tick ID if a tick was closed during write
     state_change: bool = False  # True if this fact mutated the folded state
+    affected_sections: list[str] = field(default_factory=list) # Fold sections updated
+    delta_count: int = 0        # Number of structural row changes in the fold
+
+    def as_dict(self) -> dict[str, Any]: ...
+```
+
+### `EmitPreviewResult`
+Preflight dry-run simulations return an `EmitPreviewResult`:
+
+```python
+@dataclass(frozen=True)
+class EmitPreviewResult:
+    schema: str = "loops.cli/emit-preview/v1"
+    target: str = ""
+    kind: str = ""
+    observer: str = ""
+    origin: str = ""
+    ts: float = 0.0
+    payload: dict[str, Any] = field(default_factory=dict)
+    kind_declared: bool = False
+    fold_key_field: str | None = None
+    fold_key_present: bool = True
+    fold_key_value: Any | None = None
+    admitted: bool = True
+    strict: bool = False
+    would_store: bool = True
+    would_fold: bool = True
 
     def as_dict(self) -> dict[str, Any]: ...
 ```
 
 ---
 
-## 3. Declared Admission Policy
+## 3. Preflight & Dry-Run Simulation
+
+Simulate whether a fact would be admitted, whether required fold keys are present, and whether state would mutate without writing to disk:
+
+```python
+from client import preview_emission, emit_fact
+
+# Dedicated preflight inspection
+preview = preview_emission(
+    "project.vertex",
+    kind_or_fact="task",
+    payload={"title": "Test task"},
+    observer="alice",
+)
+assert preview.admitted is True
+assert preview.would_fold is True
+
+# Or via emit_fact(..., dry_run=True)
+uncommitted_receipt = emit_fact(
+    "project.vertex",
+    kind_or_fact="task",
+    payload={"title": "Test task"},
+    observer="alice",
+    dry_run=True,
+)
+assert uncommitted_receipt.stored is False
+```
+
+---
+
+## 4. Batch Fact Emission
+
+Emit multiple facts sequentially under a single vertex handle session:
+
+```python
+from client import emit_batch
+from atoms import Fact
+
+items = [
+    Fact.of("task", "alice", title="Task 1"),
+    ("note", {"title": "Note 2"}),
+    {"kind": "task", "payload": {"title": "Task 3"}, "observer": "bob"},
+]
+
+receipts = emit_batch("project.vertex", items, observer="alice")
+assert len(receipts) == 3
+assert all(r.stored for r in receipts)
+```
+
+---
+
+## 5. Declared Admission Policy
 
 Loops vertices can declare admission rules governing what facts are permitted:
 
@@ -93,6 +172,7 @@ try:
     emit_fact("strict_app.vertex", "custom_kind", {"data": 123}, observer="alice")
 except AdmissionFailed as err:
     print(f"Emission rejected by strict policy: {err}")
+    print(f"Rejected kind: {err.kind}, vertex: {err.vertex}")
 
 # Explicit bypass when intentional:
 receipt = emit_fact(
@@ -109,7 +189,7 @@ When a vertex declares an `observers { ... }` block, only declared observers wit
 
 ---
 
-## 4. Cryptographic Attestation & Key Custody
+## 6. Cryptographic Attestation & Key Custody
 
 When signing keys exist in the vertex's `keys/` directory, `emit_fact` automatically signs the committed row using Ed25519:
 
@@ -127,16 +207,16 @@ assert receipt.signed is True
 
 ---
 
-## 5. Error Taxonomy & Exception Handling
+## 7. Error Taxonomy & Exception Handling
 
 ```text
 ClientError
  ├── TargetError
  │    ├── TargetNotFound       # .vertex file does not exist on disk
  │    └── TargetUnsupported    # Target is not a recognized .vertex file
- ├── AdmissionFailed           # Refused by strict mode or observer grants
+ ├── AdmissionFailed           # Refused by strict mode or observer grants (carries .observer, .kind, .vertex)
  └── EmissionFailed
-      └── CommittedEmissionError # Stored to disk, but post-commit task failed
+      └── CommittedEmissionError # Stored to disk, but post-commit task failed (carries .fact_id)
 ```
 
 ### Committed Error Honesty
@@ -151,14 +231,3 @@ except CommittedEmissionError as exc:
     print(f"Fact committed with ID {exc.fact_id}, but post-commit hook failed: {exc}")
     # Do NOT retry with a new ID; the fact is already durably recorded!
 ```
-
----
-
-## 6. Emission Extension Roadmap
-
-The following capabilities are planned for upcoming iterative slices:
-
-1. **Deterministic IDs & `Fact` Object Overloads**: Accept pre-instantiated `atoms.Fact` objects and `id_override` parameter.
-2. **Preflight Dry-Run (`preview_emission` / `dry_run=True`)**: Simulate admission, fold-key presence, and state diffs without disk mutations.
-3. **Atomic Batch Emission (`emit_batch`)**: Commit multiple facts under a single transaction.
-4. **Rich State Delta Receipts**: Surface affected fold sections and entity keys in `EmitReceipt`.

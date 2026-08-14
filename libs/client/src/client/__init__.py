@@ -5,7 +5,7 @@ Provides high-level, transport-agnostic read, emit, and kind mutation operations
 returning typed result models.
 """
 
-from .emit import CustodyCredentialProvider, emit_fact
+from .emit import CustodyCredentialProvider, emit_batch, emit_fact, preview_emission
 from .kind import add_kind, edit_kind, recover_ceremony, remove_kind
 from .read import (
     read_fact_by_id,
@@ -21,6 +21,7 @@ from .types import (
     ClientError,
     CommittedEmissionError,
     EmissionFailed,
+    EmitPreviewResult,
     EmitReceipt,
     FactPageResult,
     FoldStateResult,
@@ -41,6 +42,8 @@ __all__ = [
     "read_ticks",
     "read_fact_by_id",
     "emit_fact",
+    "emit_batch",
+    "preview_emission",
     "add_kind",
     "edit_kind",
     "remove_kind",
@@ -53,6 +56,7 @@ __all__ = [
     "FactPageResult",
     "FoldStateResult",
     "EmitReceipt",
+    "EmitPreviewResult",
     "KindMutationResult",
     # Exceptions
     "ClientError",

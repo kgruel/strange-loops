@@ -140,6 +140,32 @@ class EmitReceipt:
     tick_mark: str | None = None
     tick_id: str | None = None
     state_change: bool = False
+    affected_sections: list[str] = field(default_factory=list)
+    delta_count: int = 0
+
+    def as_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class EmitPreviewResult:
+    """Preflight simulation of fact emission without disk side-effects."""
+
+    schema: str = "loops.cli/emit-preview/v1"
+    target: str = ""
+    kind: str = ""
+    observer: str = ""
+    origin: str = ""
+    ts: float = 0.0
+    payload: dict[str, Any] = field(default_factory=dict)
+    kind_declared: bool = False
+    fold_key_field: str | None = None
+    fold_key_present: bool = True
+    fold_key_value: Any | None = None
+    admitted: bool = True
+    strict: bool = False
+    would_store: bool = True
+    would_fold: bool = True
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)

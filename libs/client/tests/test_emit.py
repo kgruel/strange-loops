@@ -252,3 +252,117 @@ def test_emit_fact_corrupt_vertex_raises_emission_failed(tmp_path: Path) -> None
             observer="tester",
         )
     assert "could not open vertex" in str(exc_info.value)
+
+
+# =============================================================================
+# 2. Preview & Dry-Run Tests
+# =============================================================================
+
+
+def test_preview_emission_declared_kind(sample_vertex: Path) -> None:
+    """preview_emission evaluates declared kind and fold key without disk writes."""
+    from client import EmitPreviewResult, preview_emission
+
+    preview = preview_emission(
+        sample_vertex,
+        "note",
+        {"title": "Preview Note", "body": "Not saved"},
+        observer="alice",
+    )
+
+    assert isinstance(preview, EmitPreviewResult)
+    assert preview.kind == "note"
+    assert preview.observer == "alice"
+    assert preview.kind_declared is True
+    assert preview.admitted is True
+    assert preview.would_store is True
+    assert preview.would_fold is True
+
+    # Prove store remains completely empty
+    summary = read_summary(sample_vertex)
+    assert summary.fact_total == 0
+
+
+def test_preview_emission_strict_rejection(strict_vertex: Path) -> None:
+    """preview_emission raises AdmissionFailed when strict vertex rejects kind."""
+    from client import preview_emission
+
+    with pytest.raises(AdmissionFailed) as exc_info:
+        preview_emission(
+            strict_vertex,
+            "unregistered_kind",
+            {"k": "v"},
+            observer="alice",
+        )
+    assert exc_info.value.kind == "unregistered_kind"
+    assert exc_info.value.vertex == "strict"
+
+
+def test_emit_fact_dry_run_returns_uncommitted_receipt(sample_vertex: Path) -> None:
+    """emit_fact with dry_run=True performs preflight without storing facts."""
+    receipt = emit_fact(
+        sample_vertex,
+        "note",
+        {"title": "Dry run note"},
+        observer="alice",
+        dry_run=True,
+    )
+
+    assert receipt.stored is False
+    assert receipt.id == ""
+    assert receipt.signed is None
+    assert receipt.observer == "alice"
+    assert receipt.state_change is True
+    assert "note" in receipt.affected_sections
+
+    # Store remains empty
+    summary = read_summary(sample_vertex)
+    assert summary.fact_total == 0
+
+
+# =============================================================================
+# 3. Batch Emission & Delta Metadata Tests
+# =============================================================================
+
+
+def test_emit_batch_multiple_shapes(sample_vertex: Path) -> None:
+    """emit_batch commits a sequence of facts under a single handle session."""
+    from atoms import Fact
+    from client import emit_batch
+
+    items = [
+        Fact.of("note", "alice", title="First batch note"),
+        ("note", {"title": "Second batch note"}),
+        {"kind": "note", "payload": {"title": "Third batch note"}, "observer": "bob"},
+    ]
+
+    receipts = emit_batch(sample_vertex, items, observer="alice")
+
+    assert len(receipts) == 3
+    assert all(r.stored for r in receipts)
+    assert receipts[0].observer == "alice"
+    assert receipts[1].observer == "alice"
+    assert receipts[2].observer == "bob"
+
+    # All three are in store
+    page = read_facts(sample_vertex, limit=10, order="oldest")
+    assert len(page.items) == 3
+    assert page.items[0]["payload"]["title"] == "First batch note"
+    assert page.items[1]["payload"]["title"] == "Second batch note"
+    assert page.items[2]["payload"]["title"] == "Third batch note"
+
+
+def test_emit_fact_delta_metadata(sample_vertex: Path) -> None:
+    """EmitReceipt includes affected_sections and delta_count on state changes."""
+    receipt = emit_fact(
+        sample_vertex,
+        "note",
+        {"title": "Delta test note"},
+        observer="alice",
+    )
+
+    assert receipt.stored is True
+    assert receipt.state_change is True
+    assert isinstance(receipt.affected_sections, list)
+    assert receipt.delta_count >= 1
+    assert "note" in receipt.affected_sections

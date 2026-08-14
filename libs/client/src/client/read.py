@@ -68,8 +68,9 @@ def read_summary(target: Path | str) -> ReadSummary:
                     latest_ts = ts
 
             # Compare declared kinds with observed kinds
-            gen = declaration_generation(target_path)
-            declared_kinds = set(gen.get("kinds", ()))
+            from engine.declaration import load_declaration_status
+            decl_ast, _ = load_declaration_status(target_path)
+            declared_kinds = set(decl_ast.loops.keys()) if decl_ast and hasattr(decl_ast, "loops") else set()
             observed_kinds = set(kind_stats.keys())
             unfolded = sorted(observed_kinds - declared_kinds)
 
@@ -178,7 +179,7 @@ def read_facts(
         )
         return FactPageResult(
             items=page.items,
-            next_cursor=page.next.to_dict() if page.next is not None else None,
+            next_cursor=page.next,
             truncated=page.truncated,
             order=page.order,
         )
@@ -251,10 +252,7 @@ def read_ticks(target: Path | str, *, name: str | None = None) -> list[dict[str,
 
     reader, _ = _ensure_reader(info.canonical_path, info.index_path)
     try:
-        if name is not None:
-            ticks = reader.ticks_for_name(name)
-        else:
-            ticks = reader.ticks()
+        ticks = reader.ticks_between(0.0, float("inf"), name=name)
         return [t.to_dict() for t in ticks]
     finally:
         reader.close()

@@ -189,11 +189,8 @@ from .jsonl_codec import (
 from .residence import log_path_for
 from .sql_util import sqlite_busy
 from .sqlite_store import (
-    FACT_COLUMNS,
     FACT_INSERT_SQL,
-    TICK_COLUMNS,
     TICK_INSERT_SQL,
-    CommittedRowMissing,
     SqliteStore,
 )
 
@@ -528,30 +525,6 @@ class JsonlStore(SqliteStore[T], Generic[T]):
             fh.flush()
             os.fsync(fh.fileno())
             return fh.tell()
-
-    def _committed_full_row(self, table: str, row_id: str) -> tuple:
-        """The COMPLETE inserted row, post-INSERT pre-commit, or refuse.
-
-        The canonical log is a pure derivation of the committed index
-        (SOL-R4-03), so the bytes that go into the log must come from what
-        the index will actually commit — read back after any AFTER
-        triggers fired, in persisted column order. An absent row is the
-        SOL-R4-02 typed refusal: rollback, no log byte.
-        """
-        columns = FACT_COLUMNS if table == "facts" else TICK_COLUMNS
-        r = self._conn.execute(
-            f"SELECT {', '.join(columns)} FROM {table} "  # noqa: S608
-            "WHERE id = ?", (row_id,)
-        ).fetchone()
-        if r is None:
-            raise CommittedRowMissing(
-                f"the inserted {table} row {row_id} is ABSENT at pre-commit "
-                "read-back (a schema-level rewrite, e.g. an AFTER INSERT "
-                "trigger, deleted it) — rolling back before any log byte; "
-                "refusing to mint a stored receipt for a row the store did "
-                "not keep"
-            )
-        return tuple(r)
 
     def _write(
         self, sql: str, row: tuple, serialize_row, is_fact: bool

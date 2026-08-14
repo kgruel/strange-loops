@@ -699,6 +699,30 @@ class SqliteStore(Generic[T]):
         ).fetchone()
         return (r is not None, r[0] if r is not None else None)
 
+    def _committed_full_row(self, table: str, row_id: str) -> tuple:
+        """The COMPLETE inserted row, post-INSERT pre-commit, or refuse.
+
+        Read back after any AFTER triggers fired, in persisted column
+        order — what the store will actually commit. An absent row is the
+        SOL-R4-02 typed refusal. Used wherever the caller must compare or
+        persist the committed truth, not the assembled intent: the JSONL
+        log derivation (SOL-R4-03) and the ceremony full-row equality
+        check (R4 arbiter follow-up).
+        """
+        columns = FACT_COLUMNS if table == "facts" else TICK_COLUMNS
+        r = self._conn.execute(
+            f"SELECT {', '.join(columns)} FROM {table} "  # noqa: S608
+            "WHERE id = ?", (row_id,)
+        ).fetchone()
+        if r is None:
+            raise CommittedRowMissing(
+                f"the inserted {table} row {row_id} is ABSENT at pre-commit "
+                "read-back (a schema-level rewrite, e.g. an AFTER INSERT "
+                "trigger, deleted it) — rolling back; refusing to mint a "
+                "stored receipt for a row the store did not keep"
+            )
+        return tuple(r)
+
     def _committed_signature(self, table: str, row_id: str) -> str | None:
         """The COMMITTED signature; raises if the row itself is gone.
 
@@ -889,17 +913,21 @@ class SqliteStore(Generic[T]):
                     payload_text, signature,
                 )
                 conn.execute(FACT_INSERT_SQL, row)
-                # Committed-row honesty (SOL-R3-02): read the signature back
-                # after the INSERT (AFTER triggers fired), before any log
-                # byte and before COMMIT. A genesis must commit signed, so a
-                # row rewritten out from under the assembly refuses.
-                committed = self._committed_signature("facts", lineage_id)
-                if committed != signature:
+                # Committed-row honesty (SOL-R3-02 + R4 arbiter follow-up):
+                # read the WHOLE row back after the INSERT (AFTER triggers
+                # fired), before any log byte and before COMMIT, and refuse
+                # on ANY divergence — the signature covers the final
+                # persisted payload (ratified encoding contract), so a
+                # rewritten non-signature field leaves a signature that no
+                # longer verifies against its row; persisting either the
+                # assembled or the mutated row would be a verification lie.
+                if self._committed_full_row("facts", lineage_id) != row:
                     raise UnsignableGenesis(
-                        "the committed genesis row's signature does not match "
-                        "the assembled attestation (a schema-level rewrite, "
-                        "e.g. an AFTER INSERT trigger, altered the row) — "
-                        "refusing to commit an unsigned genesis"
+                        "the committed genesis row does not match the "
+                        "assembled, signed row (a schema-level rewrite, "
+                        "e.g. an AFTER INSERT trigger, altered it) — its "
+                        "signature would no longer verify against what the "
+                        "store holds; refusing to commit"
                     )
                 conn.execute(
                     "INSERT OR REPLACE INTO store_meta (key, value) "
@@ -1097,16 +1125,20 @@ class SqliteStore(Generic[T]):
                         row,
                     )
                     rows.append(row)
-                # Committed-row honesty (SOL-R3-02): every ceremony row must
-                # commit with the signature it was assembled with — read back
-                # post-INSERT (triggers fired), pre-log, pre-COMMIT.
+                # Committed-row honesty (SOL-R3-02 + R4 arbiter follow-up):
+                # every ceremony row must commit EXACTLY as assembled and
+                # signed — full-row read-back post-INSERT (triggers fired),
+                # pre-log, pre-COMMIT. The signature covers the final
+                # persisted payload, so a rewritten non-signature field
+                # leaves an attestation that no longer verifies against its
+                # row; any divergence refuses.
                 for r in rows:
-                    if self._committed_signature("facts", r[0]) != r[6]:
+                    if self._committed_full_row("facts", r[0]) != r:
                         raise UnsignableEdit(
                             f"the committed declaration row {r[0]} does not "
-                            "carry the assembled signature (a schema-level "
+                            "match the assembled, signed row (a schema-level "
                             "rewrite, e.g. an AFTER INSERT trigger, altered "
-                            "the row) — refusing to commit an edit ceremony "
+                            "it) — refusing to commit an edit ceremony "
                             "whose attestation would lie"
                         )
                 self._ceremony_persist(rows)

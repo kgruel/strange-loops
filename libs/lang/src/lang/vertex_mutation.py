@@ -1,7 +1,12 @@
 """Public vertex-kind mutation API over the generic KDL splice layer.
 
 Text-level add/edit/remove of loop-kind definitions in `.vertex` files,
-plus a supported LoopDef-to-KDL serializer. Built on
+plus a LoopDef-to-KDL serializer whose supported domain is the declarative
+kind surface: ``fold``, ``boundary``, ``search``, ``preview``, ``edge``,
+and ``lifecycle``. Per-kind ``parse`` pipelines are OUTSIDE that domain by
+contract — serializing a ``LoopDef`` with a parse pipeline raises
+``ValueError`` (a documented refusal, not a round-trip gap; zero corpus
+usage, scope-the-claim). Built on
 ``population.kdl_insert_child`` / ``kdl_remove_child`` — comments,
 whitespace, and ordering of unrelated content are preserved.
 
@@ -178,15 +183,23 @@ def _boundary_kdl(boundary: Boundary, indent: str) -> list[str]:
 def loop_def_to_kdl(kind: str, definition: LoopDef, indent: str = "  ") -> str:
     """Serialize a LoopDef as the KDL block ``<kind> { ... }``.
 
-    The output re-parses (via the lang loader) to an equivalent LoopDef.
-    Raises ValueError for names or values KDL cannot represent safely here,
-    and for per-kind ``parse`` pipelines, which this serializer does not
-    support.
+    Supported domain (the declarative kind surface): ``fold``, ``boundary``,
+    ``search``, ``preview``, ``edge``, and ``lifecycle``. Within that
+    domain, the output re-parses (via the lang loader) to an equivalent
+    LoopDef.
+
+    Per-kind ``parse`` pipelines are OUTSIDE the supported domain by
+    contract: passing a LoopDef with a parse pipeline raises ValueError.
+    This is a documented refusal, not a round-trip gap — no full-LoopDef
+    round-trip is claimed. Also raises ValueError for names or values KDL
+    cannot represent safely here.
     """
     _validate_kind_name(kind)
     if definition.parse:
         raise ValueError(
-            "per-kind parse pipelines are not supported by loop_def_to_kdl; "
+            "loop_def_to_kdl serializes the declarative kind surface only "
+            "(fold/boundary/search/preview/edge/lifecycle); per-kind parse "
+            "pipelines are outside its supported domain by contract — "
             "author the parse block by hand"
         )
 

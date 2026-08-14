@@ -132,6 +132,26 @@ class TestSerializer:
         with pytest.raises(ValueError, match="parse pipelines"):
             loop_def_to_kdl("k", d)
 
+    def test_parse_pipeline_refusal_is_the_documented_contract(self):
+        """SOL-R1-05 (arbiter ruling: narrow the claim, not the serializer).
+
+        The serializer's supported domain is the declarative kind surface
+        — fold/boundary/search/preview/edge/lifecycle. Per-kind parse
+        pipelines are OUTSIDE that domain by contract (zero corpus usage);
+        the refusal must name the narrowed contract, and no full-LoopDef
+        round-trip is claimed.
+        """
+        d = LoopDef(folds=BASIC.folds, parse=(Split(),))
+        with pytest.raises(
+            ValueError,
+            match=r"declarative kind surface.*outside its supported domain",
+        ):
+            loop_def_to_kdl("k", d)
+        # The docstring states the domain and disclaims full round-trip.
+        doc = loop_def_to_kdl.__doc__
+        assert "fold" in doc and "lifecycle" in doc
+        assert "no full-LoopDef" in doc.replace("\n", " ").replace("    ", " ")
+
     def test_rejects_control_chars_in_values(self):
         d = LoopDef(folds=(FoldDecl("items", FoldBy(key_field="a\nb")),))
         with pytest.raises(ValueError, match="control characters"):

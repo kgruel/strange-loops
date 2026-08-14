@@ -414,6 +414,90 @@ def test_forced_apply_on_readonly_store_refuses_typed_with_no_intent(world):
         canonical.chmod(0o644)
 
 
+# --- backend write surface (SOL-R2-04) --------------------------------------
+
+
+@pytest.fixture(params=["jsonl", "sqlite"])
+def split_world(request, tmp_path: Path):
+    """Vertex in a writable dir; the store in its OWN subdirectory — so the
+    store directory can go read-only while the canonical file stays
+    writable (sol's SOL-R2-04 repro shape)."""
+    storedir = tmp_path / "store"
+    storedir.mkdir()
+    locator = "./store/x.jsonl" if request.param == "jsonl" else "./store/x.db"
+    vertex = tmp_path / "x.vertex"
+    vertex.write_text(BASE.format(store=f'store "{locator}"'), encoding="utf-8")
+    return {
+        "mode": request.param,
+        "vertex": vertex,
+        "base": BASE.format(store=f'store "{locator}"'),
+        "edit": EDIT.format(store=f'store "{locator}"'),
+        "log": storedir / "x.jsonl",
+        "index": storedir / "x.db",
+        "storedir": storedir,
+    }
+
+
+def _freeze_store_dir(split_world) -> Path:
+    """Read-only store DIRECTORY, canonical file itself still writable."""
+    import os
+
+    storedir = split_world["storedir"]
+    storedir.chmod(0o555)
+    canonical = (
+        split_world["log"]
+        if split_world["mode"] == "jsonl"
+        else split_world["index"]
+    )
+    assert os.access(canonical, os.W_OK), "repro needs a writable canonical"
+    return storedir
+
+
+def test_plan_on_readonly_store_dir_is_not_applicable(split_world):
+    """SOL-R2-04: a writable canonical inside a read-only store directory
+    must plan as not-applicable — the backend also writes the derived index
+    and the dir-level WAL/SHM siblings."""
+    import os
+
+    _apply_genesis(split_world)
+    storedir = _freeze_store_dir(split_world)
+    if os.access(storedir, os.W_OK):
+        pytest.skip("cannot make dir read-only here (running as root?)")
+    try:
+        preview = plan_declaration_update(
+            split_world["vertex"], proposed_text=split_world["edit"]
+        )
+        assert preview.applicable is False
+        assert "not writable" in preview.reason
+    finally:
+        storedir.chmod(0o755)
+
+
+def test_forced_apply_on_readonly_store_dir_is_typed_with_no_intent(split_world):
+    """SOL-R2-04: forcing the apply past the gate must yield a typed
+    refusal — never a raw sqlite3.OperationalError — and remove any
+    pre-commit intent (zero residue)."""
+    import dataclasses
+    import os
+
+    _apply_genesis(split_world)
+    good_preview = plan_declaration_update(
+        split_world["vertex"], proposed_text=split_world["edit"]
+    )
+    storedir = _freeze_store_dir(split_world)
+    if os.access(storedir, os.W_OK):
+        pytest.skip("cannot make dir read-only here (running as root?)")
+    try:
+        forced = dataclasses.replace(good_preview, applicable=True)
+        result = apply_declaration_update(
+            forced, observer="obs", credentials=Creds()
+        )
+        assert result.status == "refused"
+        assert not intent_path_for(split_world["vertex"]).exists()
+    finally:
+        storedir.chmod(0o755)
+
+
 # --- intent record shape ----------------------------------------------------
 
 

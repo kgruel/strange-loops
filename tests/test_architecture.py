@@ -547,6 +547,14 @@ _LIB_ALLOWED_RUNTIME: dict[str, set[str]] = {
         "sign",    # Ed25519 primitives
         "engine",  # load_declaration — store-canonical observer-key registry
     },
+    "client": {
+        "atoms",
+        "custody",
+        "engine",
+        "lang",
+        "sign",
+        "store",
+    },
 }
 
 
@@ -1147,6 +1155,7 @@ _LIB_LAYER: dict[str, str] = {
     "store": "record",
     "sign": "surfacing",
     "custody": "surfacing",
+    "client": "surfacing",
 }
 
 #: The chartered layer names. ``view`` (painted, external) and ``relevance``

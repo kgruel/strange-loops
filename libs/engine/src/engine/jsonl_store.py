@@ -480,7 +480,7 @@ class JsonlStore(SqliteStore[T], Generic[T]):
             os.fsync(fh.fileno())
             return fh.tell()
 
-    def _write(self, sql: str, row: tuple, line: str, is_fact: bool) -> None:
+    def _write(self, sql: str, row: tuple, line: str, is_fact: bool) -> str | None:
         """Stage the INSERT, make the line durable, then stamp and commit.
 
         The INSERT runs first, uncommitted: a rejected row (duplicate id from
@@ -493,6 +493,12 @@ class JsonlStore(SqliteStore[T], Generic[T]):
         self._reconcile()
         try:
             self._conn.execute(sql, row)
+            # Committed-row honesty (SOL-R3-02): read the signature back
+            # after the INSERT (AFTER triggers fired), before commit — the
+            # receipt reports what the index will actually hold.
+            committed = self._committed_signature(
+                "facts" if is_fact else "ticks", row[0]
+            )
             # The INSERT has taken sqlite's write lock, so the committed
             # markers read here cannot be raced by another handle: whatever
             # a concurrent writer stamped is already visible, and nothing
@@ -510,6 +516,7 @@ class JsonlStore(SqliteStore[T], Generic[T]):
             offset = self._append_line(line)
             self._stamp(offset, facts, ticks)
             self._conn.commit()
+            return committed
         except BaseException:
             self._conn.rollback()
             raise
@@ -575,11 +582,11 @@ class JsonlStore(SqliteStore[T], Generic[T]):
         offset = self._append_line(line)
         self._stamp(offset, facts, ticks)
 
-    def _write_fact_row(self, row: tuple) -> None:
-        self._write(FACT_INSERT_SQL, row, serialize_fact_row(row), True)
+    def _write_fact_row(self, row: tuple) -> str | None:
+        return self._write(FACT_INSERT_SQL, row, serialize_fact_row(row), True)
 
-    def _write_tick_row(self, row: tuple) -> None:
-        self._write(TICK_INSERT_SQL, row, serialize_tick_row(row), False)
+    def _write_tick_row(self, row: tuple) -> str | None:
+        return self._write(TICK_INSERT_SQL, row, serialize_tick_row(row), False)
 
     # ---- catch-up -----------------------------------------------------
 

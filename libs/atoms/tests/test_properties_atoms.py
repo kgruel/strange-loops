@@ -25,7 +25,6 @@ from atoms import (
     Upsert,
     Window,
 )
-
 from tests.strategies import (
     fact_lists,
     facts,

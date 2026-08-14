@@ -19,7 +19,6 @@ from lang import (
     remove_vertex_kind,
 )
 from lang.ast import LoopDef
-
 from tests.strategies_kdl import (
     kdl_documents,
     loop_definitions,

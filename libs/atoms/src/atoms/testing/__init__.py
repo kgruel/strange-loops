@@ -1,6 +1,6 @@
-"""Re-export of shared testing strategies from atoms.testing.strategies."""
+"""Testing utilities and Hypothesis strategies for atoms and dependent packages."""
 
-from atoms.testing.strategies import (
+from .strategies import (
     EDGE_FACT_IDS,
     EDGE_TIMESTAMPS,
     FOLD_KEY_EDGE_VALUES,

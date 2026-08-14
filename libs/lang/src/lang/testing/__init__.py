@@ -1,6 +1,6 @@
-"""Re-export of KDL testing strategies from lang.testing.strategies."""
+"""Testing utilities and Hypothesis strategies for lang."""
 
-from lang.testing.strategies import (
+from .strategies import (
     BARE_ID_CHARS,
     FOLD_FIELDS,
     FOLD_KEYS,

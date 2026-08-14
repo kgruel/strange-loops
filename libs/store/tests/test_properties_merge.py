@@ -35,7 +35,6 @@ from store import (
     push_store,
     rebuild_jsonl,
 )
-
 from tests.strategies import (
     fact_and_id_lists,
     payloads,

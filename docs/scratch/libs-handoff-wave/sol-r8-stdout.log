@@ -1,0 +1,877 @@
+Reading prompt from stdin...
+OpenAI Codex v0.147.0
+--------
+workdir: /Users/kaygee/Code/loops
+model: gpt-5.6-sol
+provider: openai
+approval: never
+sandbox: workspace-write [workdir, /tmp, $TMPDIR]
+reasoning effort: high
+reasoning summaries: none
+session id: 019ffe58-bd80-7040-8d57-f046c9fd9df3
+--------
+user
+# Sol — libs-handoff-wave r8, micro-round: verify SOL-R7-01 fix only
+
+Scope: ONE commit, ffd06447 — your prescribed fix applied verbatim by the
+arbiter (VT added to _NON_LF_NEWLINES; pins for VT in plain_string and
+line_comment, mutation-verified locally).
+
+1. Read the ffd06447 diff.
+2. Run: UV_CACHE_DIR=/private/tmp/loops-uv-cache uv run --package lang pytest
+   libs/lang/tests — report counts; confirm the two new pins are collected
+   and pass.
+3. Confirm your r7 per-construct table's one gap (VT row) is now closed and
+   the table has no remaining neither-handled-nor-refused rows.
+4. Verdict: CONVERGED / NOT CONVERGED.
+
+codex
+I’ll inspect only commit `ffd06447`, run the exact language test command, then verify the two VT cases and the r7 coverage gap against the relevant parser/tests.
+exec
+/bin/zsh -lc 'git show --stat --oneline --decorate=no ffd06447 && git show --format=fuller --no-ext-diff --find-renames ffd06447' in /Users/kaygee/Code/loops
+ succeeded in 0ms:
+ffd06447 fix(lang): SOL-R7-01 — VT (U+000B) is a KDL newline; add to _NON_LF_NEWLINES
+ libs/lang/src/lang/vertex_mutation.py   |  2 +-
+ libs/lang/tests/test_vertex_mutation.py | 26 ++++++++++++++++++++++++++
+ 2 files changed, 27 insertions(+), 1 deletion(-)
+commit ffd06447b83730035d738140b477dc61d2868efd
+Author:     Kyle Gruel <kylegruel@gmail.com>
+AuthorDate: Thu Aug 13 22:37:18 2026 -0500
+Commit:     Kyle Gruel <kylegruel@gmail.com>
+CommitDate: Thu Aug 13 22:37:18 2026 -0500
+
+    fix(lang): SOL-R7-01 — VT (U+000B) is a KDL newline; add to _NON_LF_NEWLINES
+    
+    One-character gap in the whitelist state machine: KDL 2.0 counts vertical
+    tab as a newline, but _NON_LF_NEWLINES omitted it, so VT was refused in
+    code state (generic control-char check) yet neither handled nor refused
+    inside plain strings and line comments — a comment-swallowing desync per
+    sol's r7 per-construct audit. Pins for both states, mutation-verified
+    (fix reverted → both fail).
+    
+    Arbiter-applied fix at the round tail (090 b7d623c precedent).
+    
+    Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
+    Claude-Session: https://claude.ai/code/session_01C9MfGCNdAoSqKQ34mKevuF
+
+diff --git a/libs/lang/src/lang/vertex_mutation.py b/libs/lang/src/lang/vertex_mutation.py
+index aab9bbe0..6df97de6 100644
+--- a/libs/lang/src/lang/vertex_mutation.py
++++ b/libs/lang/src/lang/vertex_mutation.py
+@@ -305,7 +305,7 @@ def _parse_vertex_or_raise(text: str, context: str):
+ # desyncs the line-based splice/guard accounting (splitlines() splits on
+ # them; the scanners assume LF), so they refuse outright — including inside
+ # strings and comments.
+-_NON_LF_NEWLINES = "\r\f\u0085\u2028\u2029"
++_NON_LF_NEWLINES = "\r\x0b\f\u0085\u2028\u2029"  # SOL-R7-01: KDL counts VT (U+000B) as a newline
+ 
+ 
+ def _refuse(context: str, what: str) -> ValueError:
+diff --git a/libs/lang/tests/test_vertex_mutation.py b/libs/lang/tests/test_vertex_mutation.py
+index 59610596..a95ab85b 100644
+--- a/libs/lang/tests/test_vertex_mutation.py
++++ b/libs/lang/tests/test_vertex_mutation.py
+@@ -947,6 +947,32 @@ class TestScannerWhitelistAddendum:
+         with pytest.raises(ValueError, match="cannot prove safe"):
+             remove_vertex_kind(doc, "decision")
+ 
++    def test_vt_inside_plain_string_refuses(self):
++        """SOL-R7-01: KDL counts VT (U+000B) as a newline; a VT inside a
++        plain string must refuse like any other in-string newline."""
++        doc = (
++            'name "be\x0bfore"\n'
++            "loops {\n"
++            '  decision { fold { items "by" "topic" } }\n'
++            "}\n"
++        )
++        with pytest.raises(ValueError, match="cannot prove safe"):
++            remove_vertex_kind(doc, "decision")
++
++    def test_vt_inside_line_comment_refuses(self):
++        """SOL-R7-01: VT is a KDL newline, so it would END a // comment for
++        the parser while the scanner's line_comment state would swallow the
++        rest of the physical line — refuse it."""
++        doc = (
++            "name \"t\"\n"
++            "// comment\x0b decision-lookalike\n"
++            "loops {\n"
++            '  decision { fold { items "by" "topic" } }\n'
++            "}\n"
++        )
++        with pytest.raises(ValueError, match="cannot prove safe"):
++            remove_vertex_kind(doc, "decision")
++
+     def test_non_ascii_inside_string_stays_allowed(self):
+         doc = (
+             'name "té“st"\n'
+
+codex
+The diff matches the prescribed change exactly: VT was added to `_NON_LF_NEWLINES`, with one refusal pin each for `plain_string` and `line_comment`. I’m running the full requested suite now and will separately verify collection/results for those exact node IDs.
+exec
+/bin/zsh -lc 'UV_CACHE_DIR=/private/tmp/loops-uv-cache uv run --package lang pytest libs/lang/tests' in /Users/kaygee/Code/loops
+ succeeded in 2852ms:
+============================= test session starts ==============================
+platform darwin -- Python 3.13.11, pytest-9.0.2, pluggy-1.6.0
+rootdir: /Users/kaygee/Code/loops/libs/lang
+configfile: pyproject.toml
+plugins: asyncio-1.3.0, cov-7.0.0
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 1815 items
+
+libs/lang/tests/test_document.py ....................................... [  2%]
+........................................................................ [  6%]
+......                                                                   [  6%]
+libs/lang/tests/test_kdl_splice.py ..................................... [  8%]
+........................................................................ [ 12%]
+........................................................................ [ 16%]
+........................................................................ [ 20%]
+........................................................................ [ 24%]
+........................................................................ [ 28%]
+............................................                             [ 30%]
+libs/lang/tests/test_loader.py ......................................... [ 33%]
+........................................................................ [ 36%]
+........................................................................ [ 40%]
+.............................................                            [ 43%]
+libs/lang/tests/test_population.py ..................................... [ 45%]
+......................                                                   [ 46%]
+libs/lang/tests/test_validator.py ...................................... [ 48%]
+............                                                             [ 49%]
+libs/lang/tests/test_vertex_mutation.py ................................ [ 51%]
+........................................................................ [ 55%]
+........................................................................ [ 59%]
+........................................................................ [ 63%]
+........................................................................ [ 67%]
+........................................................................ [ 71%]
+...................................................sss............sss... [ 74%]
+.........sss............sss............sss............sss............sss [ 78%]
+............sss............sss............sss............sss............ [ 82%]
+sss............sss............sss............sss............sss......... [ 86%]
+...sss............sss............sss............sss............sss...... [ 90%]
+......sss............sss............sss............sss............sss... [ 94%]
+............sss......................................................... [ 98%]
+......................                                                   [100%]
+
+======================= 1734 passed, 81 skipped in 2.24s =======================
+
+codex
+The requested suite is green: 1,815 collected; 1,734 passed and 81 skipped. I’m now checking the two named pins explicitly and locating the r7 per-construct audit/table so the closure claim is evidence-based rather than inferred only from the commit message.
+exec
+/bin/zsh -lc "rg -n \"SOL-R7-01|per-construct|neither.handled|VT row|vertical tab|U\\+000B|plain_string|line_comment\" . --glob '"'!**/.git/**'"'" in /Users/kaygee/Code/loops
+ succeeded in 0ms:
+./libs/lang/src/lang/vertex_mutation.py:34:whitelist a three-state machine (code / plain_string / line_comment) can
+./libs/lang/src/lang/vertex_mutation.py:308:_NON_LF_NEWLINES = "\r\x0b\f\u0085\u2028\u2029"  # SOL-R7-01: KDL counts VT (U+000B) as a newline
+./libs/lang/src/lang/vertex_mutation.py:324:    States: ``code`` / ``plain_string`` / ``line_comment``. Everything the
+./libs/lang/src/lang/vertex_mutation.py:332:      ``//`` enters line_comment, where quotes are inert;
+./libs/lang/src/lang/vertex_mutation.py:336:      plain_string state, so ``"system-monitor"`` stays allowed) and ``#``
+./libs/lang/src/lang/vertex_mutation.py:340:    - inside plain_string: a literal newline (R5), with ``\\\\`` and
+./libs/lang/tests/test_vertex_mutation.py:810:    (code / plain_string / line_comment). Refused here: non-LF newline
+./libs/lang/tests/test_vertex_mutation.py:888:    def test_quote_inside_line_comment_is_inert(self):
+./libs/lang/tests/test_vertex_mutation.py:950:    def test_vt_inside_plain_string_refuses(self):
+./libs/lang/tests/test_vertex_mutation.py:951:        """SOL-R7-01: KDL counts VT (U+000B) as a newline; a VT inside a
+./libs/lang/tests/test_vertex_mutation.py:962:    def test_vt_inside_line_comment_refuses(self):
+./libs/lang/tests/test_vertex_mutation.py:963:        """SOL-R7-01: VT is a KDL newline, so it would END a // comment for
+./libs/lang/tests/test_vertex_mutation.py:964:        the parser while the scanner's line_comment state would swallow the
+./libs/lang/tests/test_loader.py:619:    def test_line_comments(self):
+./docs/scratch/libs-handoff-wave/sol-brief-r8.md:1:# Sol — libs-handoff-wave r8, micro-round: verify SOL-R7-01 fix only
+./docs/scratch/libs-handoff-wave/sol-brief-r8.md:4:arbiter (VT added to _NON_LF_NEWLINES; pins for VT in plain_string and
+./docs/scratch/libs-handoff-wave/sol-brief-r8.md:5:line_comment, mutation-verified locally).
+./docs/scratch/libs-handoff-wave/sol-brief-r8.md:11:3. Confirm your r7 per-construct table's one gap (VT row) is now closed and
+./docs/scratch/libs-handoff-wave/sol-brief-r8.md:12:   the table has no remaining neither-handled-nor-refused rows.
+./docs/scratch/libs-handoff-wave/sol-brief-r7.md:13:   is refusal-only with states {code, plain_string, line_comment}. The
+./docs/scratch/libs-handoff-wave/sol-brief-r7.md:16:   misclassified? Enumerate the construct list and give a per-construct
+./docs/scratch/libs-handoff-wave/sol-brief-r7.md:17:   verdict. Note any construct neither handled nor refused.
+./libs/engine/tests/test_vertex_reader.py:1211:    def test_plain_string_value(self):
+
+exec
+/bin/zsh -lc "sed -n '1,220p' docs/scratch/libs-handoff-wave/sol-brief-r7.md && sed -n '1,420p' libs/lang/src/lang/vertex_mutation.py && sed -n '780,990p' libs/lang/tests/test_vertex_mutation.py" in /Users/kaygee/Code/loops
+ succeeded in 0ms:
+# Sol — libs-handoff-wave r7, final convergence audit (static + committed tests only)
+
+Do not author test inputs during this run — the red-first repros are all
+committed; execute and audit them.
+
+Scope: two commits since your r6 static review — ead3906d (whitelist state
+machine, answers SOL-R6-01/02) and cb385220 (intent-create O_CREAT|O_EXCL,
+closes a previously-deferred S2-gate finding).
+
+1. AUDIT THE STATE MACHINE (lang/vertex_mutation.py, _assert_scanner_provable_domain)
+   against the KDL spec's construct list (strings: plain/raw/multiline;
+   comments: //, /*, /-; newline set; escape forms; identifiers). The machine
+   is refusal-only with states {code, plain_string, line_comment}. The
+   convergence question is finite now: is every KDL construct either
+   (a) handled by a state transition or (b) refused before it can be
+   misclassified? Enumerate the construct list and give a per-construct
+   verdict. Note any construct neither handled nor refused.
+2. Run: UV_CACHE_DIR=/private/tmp/loops-uv-cache uv run --package lang pytest
+   libs/lang/tests — includes TestScannerProvableDomainR6 +
+   TestScannerWhitelistAddendum (18 red-first pins) and the corpus round-trip.
+   Report counts.
+3. Read the cb385220 diff (engine/ceremony.py): O_EXCL create as the pending-
+   intent gate. Verify by reading: FileExistsError → typed refusal; failed
+   post-create write unlinks; recovery still classifies partial intents as
+   IntentCorrupt. Run: UV_CACHE_DIR=/private/tmp/loops-uv-cache uv run pytest
+   libs/engine/tests — report counts.
+4. Verdict: SOL-R7-NN findings if any; CONVERGED / NOT CONVERGED for the wave.
+"""Public vertex-kind mutation API over the generic KDL splice layer.
+
+Text-level add/edit/remove of loop-kind definitions in `.vertex` files,
+plus a LoopDef-to-KDL serializer whose supported domain is the declarative
+kind surface: ``fold``, ``boundary``, ``search``, ``preview``, ``edge``,
+and ``lifecycle``. Per-kind ``parse`` pipelines are OUTSIDE that domain by
+contract — serializing a ``LoopDef`` with a parse pipeline raises
+``ValueError`` (a documented refusal, not a round-trip gap; zero corpus
+usage, scope-the-claim). Built on
+``population.kdl_insert_child`` / ``kdl_remove_child`` — comments,
+whitespace, and ordering of unrelated content are preserved.
+
+Guarantees:
+- Every mutation parses and validates the result before returning, and the
+  PARSER is the safety oracle: the pre-mutation and post-mutation parses
+  are compared and only the exact requested delta is admissible — sibling
+  kinds and non-kind content must be definition-equal or the mutation
+  raises and the original text stands (SOL-R2-01 arbiter ruling:
+  construction over detection; the lexical splice layer is best-effort
+  transformation only and carries no safety claim).
+- Insert-then-remove round-trips to byte-identical text when the ``loops``
+  block already exists across multiple lines.
+
+Documented one-way limitation (expand-on-insert): adding a kind to a
+single-line ``loops { ... }`` block expands it across lines (semantically
+equivalent, not byte-identical). Editing or removing a kind inside a
+single-line ``loops`` block is not supported — expand it first (any insert
+does) or reformat by hand.
+
+PROVABLE DOMAIN (SOL-R4-01 arbiter ruling, WHITELIST form since SOL-R6):
+the lexical guards — sibling multiplicity (``_loops_block_child_names``)
+and comment detection (``_has_comment_outside_strings``) — are line-based,
+quote-aware scans, so every mutation first holds the vertex text to the
+whitelist a three-state machine (code / plain_string / line_comment) can
+PROVE, refusing everything else up front
+(``_assert_scanner_provable_domain``):
+
+- LF-only documents (no ``\\r \\f U+0085 U+2028 U+2029`` anywhere);
+- plain ``"…"`` strings whose only escapes are ``\\\\`` and ``\\\"`` and
+  which never span a newline;
+- ``//`` line comments (their content is inert);
+- printable-ASCII code outside strings and comments (plus ``\\n``/``\\t``).
+
+Everything else — raw strings of any hash depth including ``r"…"``,
+multi-line ``\"\"\"`` strings, ``/*`` block comments and ``/-`` slashdash
+(legal INSIDE strings: glob patterns), other string escapes, non-ASCII or
+control characters in code position, unterminated strings — refuses with
+an actionable ValueError; edit such files by hand. Not the KDL lexer we
+declined: the smallest machine whose states make the whitelist provable.
+The parser oracle (``_verified``) remains the post-condition backstop
+inside the domain.
+"""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+from .ast import (
+    BoundaryAfter,
+    BoundaryEvery,
+    BoundaryWhen,
+    FoldAvg,
+    FoldBy,
+    FoldCollect,
+    FoldCount,
+    FoldLatest,
+    FoldMax,
+    FoldMin,
+    FoldSum,
+    FoldWindow,
+)
+from .population import (
+    kdl_find_block,
+    kdl_insert_child,
+    kdl_remove_child,
+    kdl_split_top_level_nodes,
+)
+
+if TYPE_CHECKING:
+    from .ast import Boundary, BoundaryCondition, LoopDef
+
+__all__ = [
+    "add_vertex_kind",
+    "edit_vertex_kind",
+    "loop_def_to_kdl",
+    "remove_vertex_kind",
+]
+
+
+# ---------------------------------------------------------------------------
+# Names and string values
+# ---------------------------------------------------------------------------
+
+# Conservative bare-identifier subset of KDL. The splice layer matches
+# children by first token, so quoted node names are not representable —
+# names outside this set are rejected rather than escaped.
+_BARE_NAME_CHARS = frozenset(
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-"
+)
+
+# Node names the loops block treats specially (never kind definitions).
+_RESERVED_KIND_NAMES = frozenset({"boundary"})
+
+
+def _validate_kind_name(kind: str) -> None:
+    if not kind:
+        raise ValueError("kind name is empty")
+    if kind in _RESERVED_KIND_NAMES:
+        raise ValueError(f"kind name {kind!r} is reserved inside the loops block")
+    if kind[0].isdigit() or kind[0] in ".-":
+        raise ValueError(
+            f"kind name {kind!r} must start with a letter or underscore"
+        )
+    bad = set(kind) - _BARE_NAME_CHARS
+    if bad:
+        raise ValueError(
+            f"kind name {kind!r} contains characters KDL cannot represent "
+            f"safely here: {sorted(bad)!r} (allowed: letters, digits, _ . -)"
+        )
+
+
+def _q(value: str, *, what: str) -> str:
+    """Quote a string as a KDL string literal.
+
+    Escapes backslash and double-quote; rejects control characters and
+    newlines rather than escaping them (they cannot survive the line-based
+    splice layer).
+    """
+    if any(ord(c) < 0x20 or ord(c) == 0x7F for c in value):
+        raise ValueError(
+            f"{what} {value!r} contains control characters or newlines, "
+            "which are not representable in a single-line KDL value here"
+        )
+    return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def _num(value: float) -> str:
+    """Emit a float as a KDL number, dropping a trailing .0 when integral."""
+    if float(value).is_integer():
+        return str(int(value))
+    return repr(float(value))
+
+
+# ---------------------------------------------------------------------------
+# LoopDef -> KDL serializer
+# ---------------------------------------------------------------------------
+
+
+def _fold_op_kdl(target: str, op) -> str:
+    t = _q(target, what="fold target") if set(target) - _BARE_NAME_CHARS else target
+    if isinstance(op, FoldCount):
+        return f'{t} "count"'
+    if isinstance(op, FoldLatest):
+        return f'{t} "latest"'
+    if isinstance(op, FoldBy):
+        return f'{t} "by" {_q(op.key_field, what="fold key_field")}'
+    if isinstance(op, FoldSum):
+        return f'{t} "sum" {_q(op.field, what="fold field")}'
+    if isinstance(op, FoldMax):
+        return f'{t} "max" {_q(op.field, what="fold field")}'
+    if isinstance(op, FoldMin):
+        return f'{t} "min" {_q(op.field, what="fold field")}'
+    if isinstance(op, FoldAvg):
+        return f'{t} "avg" {_q(op.field, what="fold field")}'
+    if isinstance(op, FoldCollect):
+        return f'{t} "collect" {int(op.max_items)}'
+    if isinstance(op, FoldWindow):
+        return f'{t} "window" {int(op.size)} {_q(op.field, what="fold field")}'
+    raise ValueError(f"Unknown fold op: {op!r}")
+
+
+def _condition_kdl(cond: BoundaryCondition) -> str:
+    value = (
+        _num(cond.value)
+        if isinstance(cond.value, (int, float))
+        else _q(str(cond.value), what="condition value")
+    )
+    return (
+        f'condition {_q(cond.target, what="condition target")} '
+        f'{_q(cond.op, what="condition op")} {value}'
+    )
+
+
+def _boundary_kdl(boundary: Boundary, indent: str) -> list[str]:
+    children: list[str] = []
+    if isinstance(boundary, BoundaryWhen):
+        head = f'boundary when={_q(boundary.kind, what="boundary kind")}'
+        for k, v in boundary.match:
+            if set(k) - _BARE_NAME_CHARS:
+                raise ValueError(
+                    f"boundary match field {k!r} is not a bare KDL identifier"
+                )
+            head += f' {k}={_q(v, what="boundary match value")}'
+        children.extend(_condition_kdl(c) for c in boundary.conditions)
+    elif isinstance(boundary, BoundaryAfter):
+        head = f"boundary after={int(boundary.count)}"
+    elif isinstance(boundary, BoundaryEvery):
+        head = f"boundary every={int(boundary.count)}"
+    else:
+        raise ValueError(f"Unknown boundary: {boundary!r}")
+
+    if boundary.run is not None:
+        children.append(f'run {_q(boundary.run, what="boundary run command")}')
+
+    if not children:
+        return [head]
+    lines = [head + " {"]
+    lines.extend(indent + c for c in children)
+    lines.append("}")
+    return lines
+
+
+def loop_def_to_kdl(kind: str, definition: LoopDef, indent: str = "  ") -> str:
+    """Serialize a LoopDef as the KDL block ``<kind> { ... }``.
+
+    Supported domain (the declarative kind surface): ``fold``, ``boundary``,
+    ``search``, ``preview``, ``edge``, and ``lifecycle``. Within that
+    domain, the output re-parses (via the lang loader) to an equivalent
+    LoopDef.
+
+    Per-kind ``parse`` pipelines are OUTSIDE the supported domain by
+    contract: passing a LoopDef with a parse pipeline raises ValueError.
+    This is a documented refusal, not a round-trip gap — no full-LoopDef
+    round-trip is claimed. Also raises ValueError for names or values KDL
+    cannot represent safely here.
+    """
+    _validate_kind_name(kind)
+    if definition.parse:
+        raise ValueError(
+            "loop_def_to_kdl serializes the declarative kind surface only "
+            "(fold/boundary/search/preview/edge/lifecycle); per-kind parse "
+            "pipelines are outside its supported domain by contract — "
+            "author the parse block by hand"
+        )
+
+    body: list[str] = []
+
+    if definition.folds:
+        body.append("fold {")
+        for decl in definition.folds:
+            body.append(indent + _fold_op_kdl(decl.target, decl.op))
+        body.append("}")
+
+    if definition.boundary is not None:
+        body.extend(_boundary_kdl(definition.boundary, indent))
+
+    if definition.search:
+        body.append(
+            "search "
+            + " ".join(_q(f, what="search field") for f in definition.search)
+        )
+
+    if definition.preview_fields:
+        body.append(
+            "preview "
+            + " ".join(_q(f, what="preview field") for f in definition.preview_fields)
+        )
+
+    for edge in definition.edges:
+        body.append(
+            f'edge {_q(edge.field, what="edge field")} '
+            f'targets={_q(edge.target, what="edge target")}'
+        )
+
+    if definition.lifecycle is not None:
+        lc = definition.lifecycle
+        for v in lc.active:
+            if "," in v or v != v.strip() or not v:
+                raise ValueError(
+                    f"lifecycle active value {v!r} cannot round-trip through "
+                    "the comma-separated active= property"
+                )
+        active = ",".join(lc.active)
+        body.append(
+            f'lifecycle {_q(lc.field, what="lifecycle field")} '
+            f'active={_q(active, what="lifecycle active set")}'
+        )
+
+    if not body:
+        return f"{kind} {{ }}"
+    lines = [f"{kind} {{"]
+    lines.extend(indent + ln for ln in body)
+    lines.append("}")
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Mutations
+# ---------------------------------------------------------------------------
+
+
+def _parse_vertex_or_raise(text: str, context: str):
+    """Parse vertex text, wrapping parser errors as a clear ValueError."""
+    from .loader import parse_vertex
+
+    try:
+        return parse_vertex(text)
+    except Exception as exc:
+        raise ValueError(
+            f"{context}: input is not a parseable vertex: {exc}"
+        ) from exc
+
+
+# The full KDL newline set MINUS \n. Any of these anywhere in the document
+# desyncs the line-based splice/guard accounting (splitlines() splits on
+# them; the scanners assume LF), so they refuse outright — including inside
+# strings and comments.
+_NON_LF_NEWLINES = "\r\x0b\f\u0085\u2028\u2029"  # SOL-R7-01: KDL counts VT (U+000B) as a newline
+
+
+def _refuse(context: str, what: str) -> ValueError:
+    return ValueError(
+        f"{context}: the vertex text contains {what} — syntax the "
+        "mutation scanner cannot prove safe to splice over (the provable "
+        'whitelist is: LF-only documents, plain "…" strings with only '
+        '\\\\ and \\" escapes, // line comments, printable-ASCII code); '
+        "edit the file by hand"
+    )
+
+
+def _assert_scanner_provable_domain(text: str, context: str) -> None:
+    """WHITELIST the provable domain via a three-state machine (SOL-R6).
+
+    States: ``code`` / ``plain_string`` / ``line_comment``. Everything the
+    machine cannot prove is refused AT its first occurrence, so the
+    tracking is never trusted past an unprovable construct:
+
+    - non-LF newline characters (``\\r \\f U+0085 U+2028 U+2029``),
+      anywhere — checked up front (R6-01);
+    - in code state: ``/*`` (block comment — a quote inside ``/* " */``
+      would poison flat quote tracking, R6-02) and ``/-`` (slashdash);
+      ``//`` enters line_comment, where quotes are inert;
+    - in code state, at an opening quote: ``\"\"\"`` (multi-line string),
+      ``r`` immediately before it (zero-hash raw opener — trivially
+      position-aware here: a closing quote after the letter r is
+      plain_string state, so ``"system-monitor"`` stays allowed) and ``#``
+      immediately before it (hashed raw opener);
+    - in code state, ``#`` immediately after a closing quote (``"#``,
+      hashed raw closer);
+    - inside plain_string: a literal newline (R5), with ``\\\\`` and
+      ``\\\"`` escape-aware;
+    - an unterminated string at EOF.
+
+    ``/*`` INSIDE a plain string is legal corpus content (glob patterns
+    like ``"./**/*.loop"``) — exactly why this is a state machine, not a
+    substring search. Not the KDL lexer we declined: it is the smallest
+    machine whose states make the whitelist provable.
+    """
+    for nl in _NON_LF_NEWLINES:
+        if nl in text:
+            raise _refuse(
+                context,
+                f"a non-LF newline character ({nl!r}), which the "
+                "line-based scanners cannot prove safe to account for; "
+                "it falls",
+            )
+
+    _CODE, _STRING, _COMMENT = 0, 1, 2
+    state = _CODE
+    esc = False
+    i = 0
+    n = len(text)
+    while i < n:
+        ch = text[i]
+        prev = text[i - 1] if i else ""
+        if state == _STRING:
+            if esc:
+                if ch not in ('\\', '"'):
+                    raise _refuse(
+                        context,
+                        f"the string escape backslash-{ch!r} — only \\\\ "
+                        'and \\" are whitelisted (every escape form '
+                        "handled instead of refused is new unproven "
+                        "surface)",
+                    )
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                state = _CODE
+            elif ch == "\n":
+                raise _refuse(
+                    context, "a quoted string spanning a literal newline"
+                )
+        elif state == _COMMENT:
+            if ch == "\n":
+                state = _CODE
+        elif ch == "/":
+            nxt = text[i + 1 : i + 2]
+            if nxt == "/":
+                state = _COMMENT
+                i += 2
+                continue
+            if nxt == "*":
+                raise _refuse(context, "'/*' (a block comment opener)")
+            if nxt == "-":
+                raise _refuse(context, "'/-' (a slashdash comment)")
+        elif ch == '"':
+            if text[i : i + 3] == '"""':
+                raise _refuse(context, "'\"\"\"' (a multi-line string)")
+            if prev == "r":
+                raise _refuse(
+                    context, "r\" (the zero-hash KDL raw-string opener)"
+                )
+            if prev == "#":
+                raise _refuse(
+                    context, "#\" (a hashed KDL raw-string opener)"
+                )
+            state = _STRING
+            esc = False
+        elif ch == "#" and prev == '"':
+            raise _refuse(context, "\"# (a hashed KDL raw-string closer)")
+        elif ch not in ("\n", "\t") and not (" " <= ch <= "~"):
+            # Non-ASCII / control characters in CODE state: BOMs, unicode
+            # quote lookalikes and friends refuse wholesale. Inside plain
+            # strings (and // comments) they stay legal content.
+            raise _refuse(
+                context,
+                f"the non-ASCII or control character {ch!r} in code "
+                "position (only inside quoted strings is it provable "
+        doc = (
+            'name "t"\n'
+            "loops {\n"
+            f'  decision {{ boundary after=1 {{ run {h}"echo"{h} }} }}\n'
+            '  task { fold { items "by" "name" } }\n'
+            "}\n"
+        )
+        with pytest.raises(ValueError, match="cannot prove safe"):
+            edit_vertex_kind(doc, "decision", BASIC)
+
+    def test_string_ending_in_letter_r_stays_allowed(self):
+        # "system-monitor" contains the two characters r" at its closing
+        # quote — the in-string spelling is real corpus content and must
+        # NOT refuse; only the OUT-of-string r" (raw opener) is refused.
+        doc = (
+            'name "system-monitor"\n'
+            "loops {\n"
+            '  decision { fold { items "by" "topic" } }\n'
+            '  task { fold { items "by" "name" } }\n'
+            "}\n"
+        )
+        out = edit_vertex_kind(doc, "decision", BASIC)
+        assert set(parse_vertex(out).loops) == {"decision", "task"}
+        out2 = remove_vertex_kind(doc, "decision")
+        assert set(parse_vertex(out2).loops) == {"task"}
+
+
+class TestScannerProvableDomainR6:
+    """Sol r6 + arbiter ruling: the domain check inverts from a blacklist
+    of refused substrings to a WHITELIST enforced by a three-state machine
+    (code / plain_string / line_comment). Refused here: non-LF newline
+    characters anywhere (R6-01 — they desync line accounting), and block
+    comment / slashdash openers in code state (R6-02 — a quote inside
+    /* " */ poisoned the flat quote tracker, letting a following r"
+    masquerade as a closing quote). Quotes inside // comments are inert;
+    /* inside a plain string stays legal (glob patterns)."""
+
+    NON_LF_NEWLINES = ["\r", "\f", "\u0085", "\u2028", "\u2029"]
+
+    @pytest.mark.parametrize(
+        "ch", NON_LF_NEWLINES,
+        ids=["CR", "FF", "NEL", "LS", "PS"],
+    )
+    def test_non_lf_newline_refuses(self, ch):
+        # R6-01: a non-LF newline INSIDE a string evaded the literal-newline
+        # refusal (which matched only \n).
+        doc = (
+            'name "t"\n'
+            "loops {\n"
+            f'  decision {{ boundary after=1 {{ run "echo{ch} quoted" }} }}\n'
+            '  task { fold { items "by" "name" } }\n'
+            "}\n"
+        )
+        with pytest.raises(ValueError, match="cannot prove safe"):
+            edit_vertex_kind(doc, "decision", BASIC)
+
+    def test_block_comment_quote_concealment_refuses(self):
+        # R6-02: the quote inside /* " */ flipped the flat tracker's in_str,
+        # so the following r" read as a closing quote instead of a raw
+        # opener. Block comments in code state now refuse outright.
+        doc = (
+            'name "t"\n'
+            "loops {\n"
+            '  decision { boundary after=1 { run r"echo \\" } } /* " */ ; '
+            'task { fold { items "by" "name" } }\n'
+            '  task { fold { items "by" "name" } }\n'
+            "}\n"
+        )
+        with pytest.raises(ValueError, match="cannot prove safe"):
+            edit_vertex_kind(doc, "decision", BASIC)
+
+    def test_plain_block_comment_refuses(self):
+        doc = (
+            'name "t"\n'
+            "loops {\n"
+            '  decision { fold { items "by" "topic" } } /* note */\n'
+            '  task { fold { items "by" "name" } }\n'
+            "}\n"
+        )
+        with pytest.raises(ValueError, match="cannot prove safe"):
+            remove_vertex_kind(doc, "decision")
+
+    def test_slashdash_refuses(self):
+        doc = (
+            'name "t"\n'
+            "loops {\n"
+            '  decision { fold { items "by" "topic" } }\n'
+            '  /-retired { fold { items "by" "name" } }\n'
+            '  task { fold { items "by" "name" } }\n'
+            "}\n"
+        )
+        with pytest.raises(ValueError, match="cannot prove safe"):
+            remove_vertex_kind(doc, "decision")
+
+    def test_glob_pattern_inside_string_stays_allowed(self):
+        # /* INSIDE a plain string is legal corpus content — the reason
+        # this is a state machine, not substring search.
+        doc = (
+            'name "t"\n'
+            'discover "./**/*.loop"\n'
+            "loops {\n"
+            '  decision { fold { items "by" "topic" } }\n'
+            '  task { fold { items "by" "name" } }\n'
+            "}\n"
+        )
+        out = edit_vertex_kind(doc, "decision", BASIC)
+        assert set(parse_vertex(out).loops) == {"decision", "task"}
+
+    def test_quote_inside_line_comment_is_inert(self):
+        doc = (
+            'name "t"\n'
+            "loops {\n"
+            '  // a stray " quote in a line comment must not poison tracking\n'
+            '  decision { fold { items "by" "topic" } }\n'
+            '  task { fold { items "by" "name" } }\n'
+            "}\n"
+        )
+        out = remove_vertex_kind(doc, "decision")
+        assert set(parse_vertex(out).loops) == {"task"}
+
+
+class TestScannerWhitelistAddendum:
+    """Arbiter addendum to the whitelist ruling: (a) only \\\\ and \\"
+    escapes are whitelisted inside plain strings — every other escape
+    form refuses (0 backslashes of ANY kind in the .vertex corpus);
+    (b) non-ASCII and control characters in CODE state refuse wholesale
+    (BOM, unicode quote lookalikes), while staying legal inside strings."""
+
+    @pytest.mark.parametrize(
+        "escape", ["\\n", "\\t", "\\u{0041}", "\\s"],
+        ids=["esc-n", "esc-t", "esc-unicode", "esc-space"],
+    )
+    def test_non_whitelisted_escape_refuses(self, escape):
+        doc = (
+            'name "t"\n'
+            "loops {\n"
+            f'  decision {{ boundary after=1 {{ run "echo{escape}x" }} }}\n'
+            '  task { fold { items "by" "name" } }\n'
+            "}\n"
+        )
+        with pytest.raises(ValueError, match="cannot prove safe"):
+            edit_vertex_kind(doc, "decision", BASIC)
+
+    def test_whitelisted_escapes_stay_allowed(self):
+        doc = (
+            'name "t"\n'
+            "loops {\n"
+            '  decision { boundary when="a\\\\b \\"q\\"" }\n'
+            '  task { fold { items "by" "name" } }\n'
+            "}\n"
+        )
+        out = remove_vertex_kind(doc, "decision")
+        assert set(parse_vertex(out).loops) == {"task"}
+
+    @pytest.mark.parametrize(
+        "ch", ["﻿", "“", "”", " ", "\x00", "\x0b"],
+        ids=["BOM", "left-curly-quote", "right-curly-quote", "nbsp",
+             "NUL", "VT"],
+    )
+    def test_non_ascii_or_control_in_code_refuses(self, ch):
+        doc = (
+            f'{ch}name "t"\n'
+            "loops {\n"
+            '  decision { fold { items "by" "topic" } }\n'
+            '  task { fold { items "by" "name" } }\n'
+            "}\n"
+        )
+        with pytest.raises(ValueError, match="cannot prove safe"):
+            remove_vertex_kind(doc, "decision")
+
+    def test_vt_inside_plain_string_refuses(self):
+        """SOL-R7-01: KDL counts VT (U+000B) as a newline; a VT inside a
+        plain string must refuse like any other in-string newline."""
+        doc = (
+            'name "be\x0bfore"\n'
+            "loops {\n"
+            '  decision { fold { items "by" "topic" } }\n'
+            "}\n"
+        )
+        with pytest.raises(ValueError, match="cannot prove safe"):
+            remove_vertex_kind(doc, "decision")
+
+    def test_vt_inside_line_comment_refuses(self):
+        """SOL-R7-01: VT is a KDL newline, so it would END a // comment for
+        the parser while the scanner's line_comment state would swallow the
+        rest of the physical line — refuse it."""
+        doc = (
+            "name \"t\"\n"
+            "// comment\x0b decision-lookalike\n"
+            "loops {\n"
+            '  decision { fold { items "by" "topic" } }\n'
+            "}\n"
+        )
+        with pytest.raises(ValueError, match="cannot prove safe"):
+            remove_vertex_kind(doc, "decision")
+
+    def test_non_ascii_inside_string_stays_allowed(self):
+        doc = (
+            'name "té“st"\n'
+            "loops {\n"
+            '  decision { fold { items "by" "topic" } }\n'
+            '  task { fold { items "by" "name" } }\n'
+            "}\n"
+        )
+        out = remove_vertex_kind(doc, "decision")
+        assert set(parse_vertex(out).loops) == {"task"}
+
+exec
+/bin/zsh -lc "sed -n '315,430p' libs/lang/src/lang/vertex_mutation.py && UV_CACHE_DIR=/private/tmp/loops-uv-cache uv run --package lang pytest -vv libs/lang/tests/test_vertex_mutation.py::TestScannerWhitelistAddendum::test_vt_inside_plain_string_refuses libs/lang/tests/test_vertex_mutation.py::TestScannerWhitelistAddendum::test_vt_inside_line_comment_refuses" in /Users/kaygee/Code/loops
+ succeeded in 1843ms:
+============================= test session starts ==============================
+platform darwin -- Python 3.13.11, pytest-9.0.2, pluggy-1.6.0 -- /Users/kaygee/Code/loops/.venv/bin/python3
+cachedir: .pytest_cache
+rootdir: /Users/kaygee/Code/loops/libs/lang
+configfile: pyproject.toml
+plugins: asyncio-1.3.0, cov-7.0.0
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 2 items
+
+libs/lang/tests/test_vertex_mutation.py::TestScannerWhitelistAddendum::test_vt_inside_plain_string_refuses PASSED [ 50%]
+libs/lang/tests/test_vertex_mutation.py::TestScannerWhitelistAddendum::test_vt_inside_line_comment_refuses PASSED [100%]
+
+============================== 2 passed in 1.79s ===============================
+
+codex
+**Verdict: CONVERGED.**
+
+- Commit `ffd06447` matches the prescribed fix: VT (`U+000B`) was added to `_NON_LF_NEWLINES` in [vertex_mutation.py](/Users/kaygee/Code/loops/libs/lang/src/lang/vertex_mutation.py:308).
+- Full suite: **1,815 collected — 1,734 passed, 81 skipped**.
+- Explicit VT pins: **2 collected, 2 passed**:
+  - `test_vt_inside_plain_string_refuses`
+  - `test_vt_inside_line_comment_refuses`
+- The r7 table’s sole gap is closed: VT is now refused globally before state scanning, including inside plain strings and line comments. All constructs are now either handled or explicitly refused; no neither-handled-nor-refused rows remain.
+tokens used
+29,214
+**Verdict: CONVERGED.**
+
+- Commit `ffd06447` matches the prescribed fix: VT (`U+000B`) was added to `_NON_LF_NEWLINES` in [vertex_mutation.py](/Users/kaygee/Code/loops/libs/lang/src/lang/vertex_mutation.py:308).
+- Full suite: **1,815 collected — 1,734 passed, 81 skipped**.
+- Explicit VT pins: **2 collected, 2 passed**:
+  - `test_vt_inside_plain_string_refuses`
+  - `test_vt_inside_line_comment_refuses`
+- The r7 table’s sole gap is closed: VT is now refused globally before state scanning, including inside plain strings and line comments. All constructs are now either handled or explicitly refused; no neither-handled-nor-refused rows remain.

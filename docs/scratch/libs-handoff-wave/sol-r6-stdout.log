@@ -1,0 +1,1702 @@
+Reading prompt from stdin...
+OpenAI Codex v0.147.0
+--------
+workdir: /Users/kaygee/Code/loops
+model: gpt-5.6-sol
+provider: openai
+approval: never
+sandbox: workspace-write [workdir, /tmp, $TMPDIR]
+reasoning effort: high
+reasoning summaries: none
+session id: 019ffe3a-5737-7020-8998-1dfe51614419
+--------
+user
+# Sol review brief — libs-handoff-wave, round 6 (SCOPED convergence check)
+
+## 1. Anchor & scope
+
+- Repo: this checkout, branch `libs-handoff-wave`.
+- Since r5: ONE commit — ee652ba6 (merged), answering SOL-R5-01 only.
+- SCOPED ROUND: your r5 verdict verified everything else (R4-02/03/04 +
+  ceremony full-row honesty sound; all r1–r3 standing). Re-verify ONLY the
+  R5-01 fix, then make the convergence call. Do not re-open verified
+  dispositions; a full re-sweep is not requested.
+
+## 2. The fix under review (ee652ba6, lang/vertex_mutation.py)
+
+Claim: one escape-aware left-to-right scan added to the provable-domain
+refusal — refuses (a) zero-hash raw opener r" (position-aware: r before an
+OPENING quote refuses; r before a CLOSING quote — real corpus content like
+"system-monitor" — stays allowed), (b) literal newline inside a quoted
+string, (c) unterminated string at EOF. Soundness argument: the pre-existing
+substring set (#", "#, """) refuses every construct that could poison the
+quote tracking first, and the scan refuses AT the first unprovable — the
+tracker is never trusted past one. Multi-hash 1–8 refusals stay pinned.
+
+## 3. What to do
+
+1. Re-run your two r5 repros (r" opener; literal-newline string) — all three
+   verbs must refuse typed.
+2. Probe the position-aware allowance: construct inputs where an r-before-
+   closing-quote coexists with hostile syntax — can the allowance be leveraged
+   so the tracker mis-classifies a later opener? The soundness argument says
+   no (first-unprovable halt); try to break it.
+3. Any OTHER parser-accepted string spelling outside the refused set (multi-
+   line raw forms, escape tricks, BOM/unicode quotes if the parser accepts
+   them) that still permits silent sibling loss.
+4. Verdict: SOL-R6-NN findings if any; then CONVERGED / NOT CONVERGED for the
+   wave (R5-01 resolved + nothing new at blocker/major).
+
+codex
+I’ll keep this strictly scoped to `ee652ba6`: inspect the refusal scan and its tests, rerun the two r5 repros across all three verbs, then stress only the new position-aware/string-spelling boundary before making the convergence call.
+exec
+/bin/zsh -lc "pwd && rg --files -g 'AGENTS.md' -g '"'!vendor'"' -g '"'!node_modules'"' .. | head -50 && git status --short --branch && git log -3 --oneline --decorate" in /Users/kaygee/Code/loops
+ succeeded in 0ms:
+/Users/kaygee/Code/loops
+../idp-eval/AGENTS.md
+../topstep-mig/AGENTS.md
+../topstep/AGENTS.md
+../forks/SillyBunny/AGENTS.md
+../forks/HVM4/AGENTS.md
+../archive/python/jeeves/AGENTS.md
+## libs-handoff-wave
+?? .loops/
+2c922729 (HEAD -> libs-handoff-wave) docs(libs-handoff): sol r6 brief — scoped convergence check
+ec2bb70a merge: R5 fix — refused-domain widened (zero-hash raw opener, newline-in-string)
+ee652ba6 (fix/libs-handoff-r4) fix(lang): SOL-R5 — widen the refused domain: zero-hash r"…" openers and newline-spanning strings
+
+exec
+/bin/zsh -lc "git show --stat --oneline ee652ba6 && git show --format=fuller --find-renames ee652ba6 -- lang/vertex_mutation.py && rg -n \"SOL-R5|r\\\" opener|literal.newline|vertex_mutation\" . --glob '"'!*.pyc'"' --glob '"'!node_modules/**'"'" in /Users/kaygee/Code/loops
+ succeeded in 0ms:
+ee652ba6 fix(lang): SOL-R5 — widen the refused domain: zero-hash r"…" openers and newline-spanning strings
+ libs/lang/src/lang/vertex_mutation.py   | 52 ++++++++++++++++++--
+ libs/lang/tests/test_vertex_mutation.py | 86 +++++++++++++++++++++++++++++++++
+ 2 files changed, 135 insertions(+), 3 deletions(-)
+commit ee652ba68fbbd7946769c0175a9ad4eb340f00f5
+Author:     Kyle Gruel <kylegruel@gmail.com>
+AuthorDate: Thu Aug 13 22:03:26 2026 -0500
+Commit:     Kyle Gruel <kylegruel@gmail.com>
+CommitDate: Thu Aug 13 22:03:26 2026 -0500
+
+    fix(lang): SOL-R5 — widen the refused domain: zero-hash r"…" openers and newline-spanning strings
+    
+    Two parser-accepted spellings evaded the r4 substring set: the
+    zero-hash KDL raw-string opener r"…" (no #"/"#/""" present) and a
+    plain quoted string containing a LITERAL NEWLINE. One escape-aware
+    left-to-right scan now refuses both, plus unterminated strings at EOF.
+    The scan is sound because every construct that could poison its quote
+    tracking (hashed raw strings, """) is refused by the substring set
+    first, and it refuses AT the first remaining unprovable — tracking is
+    never trusted past one. Scanner not deepened; still refusal-only.
+    
+    Deliberate deviation from the naive bare-substring r" rule: a plain
+    string merely ENDING in the letter r contains r" at its closing quote —
+    'name "system-monitor"' is real corpus content (3 fixture vertices),
+    and the bare rule turns the corpus roundtrip suite red. The refusal is
+    therefore position-aware (r immediately before an OPENING quote,
+    outside any tracked string) — stated in the docstring; under-refusal is
+    still impossible since the tracker halts at the first unprovable.
+    
+    Regressions (red-first): sol's two r5 repros refuse for add/edit/remove;
+    multi-hash raw strings 1-8 pinned refused; string-ending-in-r happy
+    path pinned allowed.
+    
+    Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
+    Claude-Session: https://claude.ai/code/session_01C9MfGCNdAoSqKQ34mKevuF
+./docs/scratch/libs-handoff-wave/sol-brief-r5.md:28:Per finding: id (SOL-R5-NN), file:line, severity, claim, empirical evidence,
+./docs/scratch/libs-handoff-wave/sol-brief-r6.md:6:- Since r5: ONE commit — ee652ba6 (merged), answering SOL-R5-01 only.
+./docs/scratch/libs-handoff-wave/sol-brief-r6.md:12:## 2. The fix under review (ee652ba6, lang/vertex_mutation.py)
+./docs/scratch/libs-handoff-wave/sol-brief-r6.md:17:"system-monitor" — stays allowed), (b) literal newline inside a quoted
+./docs/scratch/libs-handoff-wave/sol-brief-r6.md:25:1. Re-run your two r5 repros (r" opener; literal-newline string) — all three
+./libs/lang/tests/test_vertex_mutation.py:1:"""Tests for the public vertex-kind mutation API (lang.vertex_mutation).
+./libs/lang/tests/test_vertex_mutation.py:621:        from lang.vertex_mutation import _verified
+./libs/lang/tests/test_vertex_mutation.py:635:        from lang.vertex_mutation import _verified
+./docs/scratch/libs-handoff-wave/sol-brief-r2.md:33:  ceremony.py, vertex_mutation.py).
+./docs/scratch/libs-handoff-wave/r2-remediation-report.md:11:| SOL-R2-01 raw strings evade splitter + guard → silent sibling deletion | blocker | **fixed (arbiter ruling: construction over detection)** | The PARSER is now the safety oracle: `add/edit/remove_vertex_kind` parse before mutation, re-parse after, and admit only the exact requested delta — kind-set delta, definition-equality (`__eq__` on the frozen AST) of every untouched kind, and equality of all non-kind vertex fields. Any mismatch raises `ValueError` naming the preserved-content violation; the original text is never replaced. The lexical splitter/shared-line guard remain best-effort transformation with no safety claim. Sibling loss is inexpressible regardless of lexical evasion class. | `fix(lang): SOL-R2-01` | `TestParserOraclePostcondition` in `libs/lang/tests/test_vertex_mutation.py`: sol's exact `##"…"##` repro (add→edit→remove sequence, `test_full_sequence_never_loses_task`), escaped-quote variant, comment-on-shared-line variant, non-kind-content refusal. Each op must fully preserve or refuse cleanly. |
+./libs/lang/src/lang/__init__.py:137:    _LAZY_IMPORTS[_n] = ("lang.vertex_mutation", _n)
+./docs/scratch/libs-handoff-wave/r3-remediation-report.md:8:| SOL-R3-01 (vertex_mutation.py) | blocker | **fixed** (arbiter ruling, 3 parts) | 5c4ae34a | (a) duplicate loop-kind nodes in the input refuse typed before mutation — raw-text multiplicity check at the splitter layer (`_loops_block_child_names` / `_assert_unique_kind_nodes`; a pre-condition, not a detector; parser oracle stays the post-condition authority). (b) `_verified` gains `definition=`: after add/edit the target kind's parse must EQUAL the requested LoopDef (belt-and-braces). (c) edit carries the suffix after the block's final close through the splice; a comment INSIDE the replaced span refuses with an actionable message (quote-aware scan) — `_verified`'s preservation claim is now honest. | sol's three repros verbatim + direct `_verified` mismatch test (`test_vertex_mutation.py`, 6 tests) |
+./docs/scratch/libs-handoff-wave/s6-impl-report.md:8:New module `libs/lang/src/lang/vertex_mutation.py`, exported from `lang`
+./docs/scratch/libs-handoff-wave/s6-impl-report.md:49:`libs/lang/tests/test_vertex_mutation.py` (30 tests + 2 corpus
+./libs/lang/src/lang/vertex_mutation.py:35:strings (``\"\"\"``), and plain strings spanning a literal newline are
+./libs/lang/src/lang/vertex_mutation.py:344:                    "spanning a literal newline — syntax the line-based "
+./docs/scratch/libs-handoff-wave/s6-gate-report.md:15:| 5. DAG check | PASS | `uv run pytest tests/` (repo-root architecture tests): **59 passed**. vertex_mutation.py imports only lang-internal modules (.ast, .population, .loader, .validator) — no engine symbols. |
+./docs/scratch/libs-handoff-wave/r4-remediation-report.md:10:| SOL-R4-01 | blocker | **fixed** (arbiter ruling: conservative refusal) | e8839257 | The scanner's PROVABLE DOMAIN is now explicit in the `vertex_mutation` module docstring: plain `"…"` KDL strings only. `add`/`edit`/`remove_vertex_kind` refuse with a typed, actionable ValueError ("…cannot prove safe to splice over…; edit the file by hand") when the vertex text contains `#"`, `"#`, or `"""`. Whole-text scan, not just the loops-block span — the span finder itself is raw-string-blind. No KDL lexer built. Corpus verification (all three refused delimiters, all 15 `.vertex` files): `#"` **0**, `"#` **0**, `"""` **0** — the repo's 10 raw-string hits are all `.loop` source lines (a different file type, outside the mutation domain), so refusal costs nothing real. Parser oracle retained as in-domain backstop. |
+./docs/scratch/libs-handoff-wave/r4-remediation-report.md:17:- `libs/lang/tests/test_vertex_mutation.py::TestScannerProvableDomain` — sol's two repros (raw string hiding a same-line duplicate `task`; `run #"echo " quoted"#` + `// KEEP`) now REFUSE for edit/remove, add's multiplicity precondition refuses too; no-raw-string happy path pinned unchanged.
+
+exec
+/bin/zsh -lc "git show --format= --find-renames ee652ba6 -- libs/lang/src/lang/vertex_mutation.py libs/lang/tests/test_vertex_mutation.py && sed -n '1,220p' docs/scratch/libs-handoff-wave/sol-brief-r5.md && sed -n '1,430p' libs/lang/src/lang/vertex_mutation.py" in /Users/kaygee/Code/loops
+ succeeded in 0ms:
+diff --git a/libs/lang/src/lang/vertex_mutation.py b/libs/lang/src/lang/vertex_mutation.py
+index 8716ebbf..d132e626 100644
+--- a/libs/lang/src/lang/vertex_mutation.py
++++ b/libs/lang/src/lang/vertex_mutation.py
+@@ -29,9 +29,11 @@ does) or reformat by hand.
+ 
+ PROVABLE DOMAIN (SOL-R4-01 arbiter ruling): the lexical guards — sibling
+ multiplicity (``_loops_block_child_names``) and comment detection
+-(``_has_comment_outside_strings``) — are quote-aware scans over plain
+-``"…"`` KDL strings only. KDL raw strings (``#"…"#`` / ``##"…"##``) and
+-multi-line strings (``\"\"\"``) are OUTSIDE that domain: the scanners
++(``_has_comment_outside_strings``) — are quote-aware scans over
++SINGLE-LINE plain ``"…"`` KDL strings only. KDL raw strings of every hash
++depth INCLUDING zero (``r"…"``, ``#"…"#``, ``##"…"##``), multi-line
++strings (``\"\"\"``), and plain strings spanning a literal newline are
++OUTSIDE that domain: the scanners
+ cannot track them, and the parser oracle is structurally blind to the
+ physical multiplicity and trivia they can hide. Rather than grow a KDL
+ lexer, every mutation refuses up front when the vertex text contains any
+@@ -315,6 +317,50 @@ def _assert_scanner_provable_domain(text: str, context: str) -> None:
+                 "scanner cannot prove safe to splice over (its guards "
+                 'track plain "…" strings only); edit the file by hand'
+             )
++    # Sol r5: two parser-accepted spellings the substring set misses — the
++    # ZERO-HASH raw-string opener ``r"…"`` and a plain string containing a
++    # LITERAL NEWLINE. One escape-aware left-to-right scan catches both.
++    # The scan is sound exactly because every construct that could poison
++    # its quote tracking (any hashed raw-string form, ``\"\"\"``) was
++    # already refused above, and it refuses AT the first occurrence of the
++    # two remaining unprovables — tracking is never trusted past one.
++    # ``r"`` is refused position-aware (letter r immediately before an
++    # OPENING quote), not as a bare substring: a plain string merely ending
++    # in the letter r (``"system-monitor"``, real corpus content) contains
++    # the two characters r" at its closing quote and is fine.
++    in_str = esc = False
++    prev = ""
++    for ch in text:
++        if in_str:
++            if esc:
++                esc = False
++            elif ch == "\\":
++                esc = True
++            elif ch == '"':
++                in_str = False
++            elif ch == "\n":
++                raise ValueError(
++                    f"{context}: the vertex text contains a quoted string "
++                    "spanning a literal newline — syntax the line-based "
++                    "mutation scanner cannot prove safe to splice over; "
++                    "edit the file by hand"
++                )
++        elif ch == '"':
++            if prev == "r":
++                raise ValueError(
++                    f"{context}: the vertex text contains r\" — the "
++                    "zero-hash KDL raw-string opener, syntax the mutation "
++                    "scanner cannot prove safe to splice over; edit the "
++                    "file by hand"
++                )
++            in_str = True
++        prev = ch
++    if in_str:
++        raise ValueError(
++            f"{context}: the vertex text ends inside an unterminated "
++            "quoted string — the mutation scanner cannot prove any splice "
++            "safe; edit the file by hand"
++        )
+ 
+ 
+ def _loops_block_child_names(text: str) -> list[str]:
+diff --git a/libs/lang/tests/test_vertex_mutation.py b/libs/lang/tests/test_vertex_mutation.py
+index 907a76c9..3f4ddf06 100644
+--- a/libs/lang/tests/test_vertex_mutation.py
++++ b/libs/lang/tests/test_vertex_mutation.py
+@@ -716,3 +716,89 @@ class TestScannerProvableDomain:
+         assert set(parse_vertex(out).loops) == {"decision", "task"}
+         out2 = remove_vertex_kind(doc, "decision")
+         assert set(parse_vertex(out2).loops) == {"task"}
++
++
++class TestScannerProvableDomainR5:
++    """Sol r5: two parser-accepted spellings evaded the r4 refused set —
++    the zero-hash raw-string opener ``r"…"`` and a plain string containing
++    a LITERAL NEWLINE. Both are outside the provable domain and must
++    refuse. Multi-hash raw strings stay pinned refused; plain strings that
++    merely END in the letter r ("system-monitor") stay allowed."""
++
++    ZERO_HASH_RAW_DOC = (
++        'name "t"\n'
++        "loops {\n"
++        '  decision { boundary after=1 { run r"echo \\" } }; '
++        'task { fold { items "by" "name" } }\n'
++        '  task { fold { items "by" "name" } }\n'
++        "}\n"
++    )
++
++    NEWLINE_IN_STRING_DOC = (
++        'name "t"\n'
++        "loops {\n"
++        '  decision { boundary after=1 { run "echo\n'
++        ' quoted" } }; task { fold { items "by" "name" } }\n'
++        '  task { fold { items "by" "name" } }\n'
++        "}\n"
++    )
++
++    @pytest.mark.parametrize(
++        "doc", [ZERO_HASH_RAW_DOC, NEWLINE_IN_STRING_DOC],
++        ids=["zero-hash-raw", "newline-in-string"],
++    )
++    def test_repro_docs_parse(self, doc):
++        assert "task" in parse_vertex(doc).loops
++
++    @pytest.mark.parametrize(
++        "doc", [ZERO_HASH_RAW_DOC, NEWLINE_IN_STRING_DOC],
++        ids=["zero-hash-raw", "newline-in-string"],
++    )
++    def test_edit_refuses(self, doc):
++        with pytest.raises(ValueError, match="cannot prove safe"):
++            edit_vertex_kind(doc, "decision", BASIC)
++
++    @pytest.mark.parametrize(
++        "doc", [ZERO_HASH_RAW_DOC, NEWLINE_IN_STRING_DOC],
++        ids=["zero-hash-raw", "newline-in-string"],
++    )
++    def test_remove_refuses(self, doc):
++        with pytest.raises(ValueError, match="cannot prove safe"):
++            remove_vertex_kind(doc, "decision")
++
++    @pytest.mark.parametrize(
++        "doc", [ZERO_HASH_RAW_DOC, NEWLINE_IN_STRING_DOC],
++        ids=["zero-hash-raw", "newline-in-string"],
++    )
++    def test_add_refuses(self, doc):
++        with pytest.raises(ValueError, match="cannot prove safe"):
++            add_vertex_kind(doc, "marker", BASIC)
++
++    @pytest.mark.parametrize("hashes", list(range(1, 9)))
++    def test_multi_hash_raw_strings_stay_refused(self, hashes):
++        h = "#" * hashes
++        doc = (
++            'name "t"\n'
++            "loops {\n"
++            f'  decision {{ boundary after=1 {{ run {h}"echo"{h} }} }}\n'
++            '  task { fold { items "by" "name" } }\n'
++            "}\n"
++        )
++        with pytest.raises(ValueError, match="cannot prove safe"):
++            edit_vertex_kind(doc, "decision", BASIC)
++
++    def test_string_ending_in_letter_r_stays_allowed(self):
++        # "system-monitor" contains the two characters r" at its closing
++        # quote — the in-string spelling is real corpus content and must
++        # NOT refuse; only the OUT-of-string r" (raw opener) is refused.
++        doc = (
++            'name "system-monitor"\n'
++            "loops {\n"
++            '  decision { fold { items "by" "topic" } }\n'
++            '  task { fold { items "by" "name" } }\n'
++            "}\n"
++        )
++        out = edit_vertex_kind(doc, "decision", BASIC)
++        assert set(parse_vertex(out).loops) == {"decision", "task"}
++        out2 = remove_vertex_kind(doc, "decision")
++        assert set(parse_vertex(out2).loops) == {"task"}
+# Sol review brief — libs-handoff-wave, round 5 (convergence candidate #2)
+
+## 1. Anchor
+
+- Repo: this checkout, branch `libs-handoff-wave`.
+- Since r4: ONE remediation merge (fix/libs-handoff-r4, 6 commits): e8839257,
+  e6aa268b, 0663c705, 3e5e6067 (+645af05e fixup), 010a97b9.
+- Verify the five dispositions below, hunt evasions of these fixes, make the call.
+
+## 2. R4 disposition table (verify each)
+
+| Finding | Fix | Claim |
+|---|---|---|
+| R4-01 blocker (raw-string-blind guards) | e8839257 | ARBITER-RULED conservative refusal: provable domain = plain "…" strings only, stated in module docstring; all three mutation verbs refuse typed on #" / "# / """ ANYWHERE in the vertex text (whole-text scan deliberately — span-scoping would reopen the arms race). No KDL lexer. Corpus: 0 raw-string hits in .vertex files. Your two r4 repros must now REFUSE. Do not re-litigate the refusal ruling itself; DO probe for delimiter spellings outside the refused set that still evade the scanner (multi-# raw strings ####"..."####?) — if one exists, the refused-set must widen, not the scanner deepen. |
+| R4-02 (row-absent conflation) | e6aa268b | _committed_row_state returns existence + signature separately; absent id → rollback + typed CommittedRowMissing. Facts and ticks, both stores. |
+| R4-03 (log/index divergence) | 0663c705 | JsonlStore._write serializes EXACTLY the read-back committed row into the log; codec pre-flight on the assembled row retained pre-INSERT. Your signature-nulling repro: log derive-matches index, audit_agreement passes. |
+| R4-04 (text-match locked guard) | 3e5e6067 | sql_util.sqlite_busy (one spelling, code-aware 5/6 low-byte) at preflight + BOTH jsonl recovery guards. Authentic SQLITE_LOCKED: no quarantine, same inode, preflight refused. |
+| Ceremony full-row honesty (your r4 residue, arbiter-ratified) | 010a97b9 | absorb_genesis/edit compare the COMPLETE committed row; ANY mismatch → UnsignableGenesis/Edit + rollback before any log byte (rationale: a rewritten non-signature field leaves an attestation that no longer verifies — persisting either row is a verification lie). |
+
+## 3. Standing dispositions (do not re-litigate)
+
+All r1–r3 dispositions verified in prior rounds; genesis-refusal and
+conservative-refusal rulings are ratified store facts; CLI-migration residue is
+sequenced forcing-consumer work.
+
+## 4. Verdict format
+
+Per finding: id (SOL-R5-NN), file:line, severity, claim, empirical evidence,
+fix direction. End with CONVERGED / NOT CONVERGED. CONVERGED = all five r4
+dispositions sound, zero new blocker/major, branch honors the r1 contracts.
+"""Public vertex-kind mutation API over the generic KDL splice layer.
+
+Text-level add/edit/remove of loop-kind definitions in `.vertex` files,
+plus a LoopDef-to-KDL serializer whose supported domain is the declarative
+kind surface: ``fold``, ``boundary``, ``search``, ``preview``, ``edge``,
+and ``lifecycle``. Per-kind ``parse`` pipelines are OUTSIDE that domain by
+contract — serializing a ``LoopDef`` with a parse pipeline raises
+``ValueError`` (a documented refusal, not a round-trip gap; zero corpus
+usage, scope-the-claim). Built on
+``population.kdl_insert_child`` / ``kdl_remove_child`` — comments,
+whitespace, and ordering of unrelated content are preserved.
+
+Guarantees:
+- Every mutation parses and validates the result before returning, and the
+  PARSER is the safety oracle: the pre-mutation and post-mutation parses
+  are compared and only the exact requested delta is admissible — sibling
+  kinds and non-kind content must be definition-equal or the mutation
+  raises and the original text stands (SOL-R2-01 arbiter ruling:
+  construction over detection; the lexical splice layer is best-effort
+  transformation only and carries no safety claim).
+- Insert-then-remove round-trips to byte-identical text when the ``loops``
+  block already exists across multiple lines.
+
+Documented one-way limitation (expand-on-insert): adding a kind to a
+single-line ``loops { ... }`` block expands it across lines (semantically
+equivalent, not byte-identical). Editing or removing a kind inside a
+single-line ``loops`` block is not supported — expand it first (any insert
+does) or reformat by hand.
+
+PROVABLE DOMAIN (SOL-R4-01 arbiter ruling): the lexical guards — sibling
+multiplicity (``_loops_block_child_names``) and comment detection
+(``_has_comment_outside_strings``) — are quote-aware scans over
+SINGLE-LINE plain ``"…"`` KDL strings only. KDL raw strings of every hash
+depth INCLUDING zero (``r"…"``, ``#"…"#``, ``##"…"##``), multi-line
+strings (``\"\"\"``), and plain strings spanning a literal newline are
+OUTSIDE that domain: the scanners
+cannot track them, and the parser oracle is structurally blind to the
+physical multiplicity and trivia they can hide. Rather than grow a KDL
+lexer, every mutation refuses up front when the vertex text contains any
+of those delimiters (``_assert_scanner_provable_domain``) — a permanent,
+conservative refusal; edit such files by hand. The parser oracle
+(``_verified``) remains the post-condition backstop inside the domain.
+"""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+from .ast import (
+    BoundaryAfter,
+    BoundaryEvery,
+    BoundaryWhen,
+    FoldAvg,
+    FoldBy,
+    FoldCollect,
+    FoldCount,
+    FoldLatest,
+    FoldMax,
+    FoldMin,
+    FoldSum,
+    FoldWindow,
+)
+from .population import (
+    kdl_find_block,
+    kdl_insert_child,
+    kdl_remove_child,
+    kdl_split_top_level_nodes,
+)
+
+if TYPE_CHECKING:
+    from .ast import Boundary, BoundaryCondition, LoopDef
+
+__all__ = [
+    "add_vertex_kind",
+    "edit_vertex_kind",
+    "loop_def_to_kdl",
+    "remove_vertex_kind",
+]
+
+
+# ---------------------------------------------------------------------------
+# Names and string values
+# ---------------------------------------------------------------------------
+
+# Conservative bare-identifier subset of KDL. The splice layer matches
+# children by first token, so quoted node names are not representable —
+# names outside this set are rejected rather than escaped.
+_BARE_NAME_CHARS = frozenset(
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-"
+)
+
+# Node names the loops block treats specially (never kind definitions).
+_RESERVED_KIND_NAMES = frozenset({"boundary"})
+
+
+def _validate_kind_name(kind: str) -> None:
+    if not kind:
+        raise ValueError("kind name is empty")
+    if kind in _RESERVED_KIND_NAMES:
+        raise ValueError(f"kind name {kind!r} is reserved inside the loops block")
+    if kind[0].isdigit() or kind[0] in ".-":
+        raise ValueError(
+            f"kind name {kind!r} must start with a letter or underscore"
+        )
+    bad = set(kind) - _BARE_NAME_CHARS
+    if bad:
+        raise ValueError(
+            f"kind name {kind!r} contains characters KDL cannot represent "
+            f"safely here: {sorted(bad)!r} (allowed: letters, digits, _ . -)"
+        )
+
+
+def _q(value: str, *, what: str) -> str:
+    """Quote a string as a KDL string literal.
+
+    Escapes backslash and double-quote; rejects control characters and
+    newlines rather than escaping them (they cannot survive the line-based
+    splice layer).
+    """
+    if any(ord(c) < 0x20 or ord(c) == 0x7F for c in value):
+        raise ValueError(
+            f"{what} {value!r} contains control characters or newlines, "
+            "which are not representable in a single-line KDL value here"
+        )
+    return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def _num(value: float) -> str:
+    """Emit a float as a KDL number, dropping a trailing .0 when integral."""
+    if float(value).is_integer():
+        return str(int(value))
+    return repr(float(value))
+
+
+# ---------------------------------------------------------------------------
+# LoopDef -> KDL serializer
+# ---------------------------------------------------------------------------
+
+
+def _fold_op_kdl(target: str, op) -> str:
+    t = _q(target, what="fold target") if set(target) - _BARE_NAME_CHARS else target
+    if isinstance(op, FoldCount):
+        return f'{t} "count"'
+    if isinstance(op, FoldLatest):
+        return f'{t} "latest"'
+    if isinstance(op, FoldBy):
+        return f'{t} "by" {_q(op.key_field, what="fold key_field")}'
+    if isinstance(op, FoldSum):
+        return f'{t} "sum" {_q(op.field, what="fold field")}'
+    if isinstance(op, FoldMax):
+        return f'{t} "max" {_q(op.field, what="fold field")}'
+    if isinstance(op, FoldMin):
+        return f'{t} "min" {_q(op.field, what="fold field")}'
+    if isinstance(op, FoldAvg):
+        return f'{t} "avg" {_q(op.field, what="fold field")}'
+    if isinstance(op, FoldCollect):
+        return f'{t} "collect" {int(op.max_items)}'
+    if isinstance(op, FoldWindow):
+        return f'{t} "window" {int(op.size)} {_q(op.field, what="fold field")}'
+    raise ValueError(f"Unknown fold op: {op!r}")
+
+
+def _condition_kdl(cond: BoundaryCondition) -> str:
+    value = (
+        _num(cond.value)
+        if isinstance(cond.value, (int, float))
+        else _q(str(cond.value), what="condition value")
+    )
+    return (
+        f'condition {_q(cond.target, what="condition target")} '
+        f'{_q(cond.op, what="condition op")} {value}'
+    )
+
+
+def _boundary_kdl(boundary: Boundary, indent: str) -> list[str]:
+    children: list[str] = []
+    if isinstance(boundary, BoundaryWhen):
+        head = f'boundary when={_q(boundary.kind, what="boundary kind")}'
+        for k, v in boundary.match:
+            if set(k) - _BARE_NAME_CHARS:
+                raise ValueError(
+                    f"boundary match field {k!r} is not a bare KDL identifier"
+                )
+            head += f' {k}={_q(v, what="boundary match value")}'
+        children.extend(_condition_kdl(c) for c in boundary.conditions)
+    elif isinstance(boundary, BoundaryAfter):
+        head = f"boundary after={int(boundary.count)}"
+    elif isinstance(boundary, BoundaryEvery):
+        head = f"boundary every={int(boundary.count)}"
+    else:
+        raise ValueError(f"Unknown boundary: {boundary!r}")
+
+    if boundary.run is not None:
+        children.append(f'run {_q(boundary.run, what="boundary run command")}')
+
+    if not children:
+        return [head]
+    lines = [head + " {"]
+    lines.extend(indent + c for c in children)
+    lines.append("}")
+    return lines
+
+
+def loop_def_to_kdl(kind: str, definition: LoopDef, indent: str = "  ") -> str:
+    """Serialize a LoopDef as the KDL block ``<kind> { ... }``.
+
+    Supported domain (the declarative kind surface): ``fold``, ``boundary``,
+    ``search``, ``preview``, ``edge``, and ``lifecycle``. Within that
+    domain, the output re-parses (via the lang loader) to an equivalent
+    LoopDef.
+
+    Per-kind ``parse`` pipelines are OUTSIDE the supported domain by
+    contract: passing a LoopDef with a parse pipeline raises ValueError.
+    This is a documented refusal, not a round-trip gap — no full-LoopDef
+    round-trip is claimed. Also raises ValueError for names or values KDL
+    cannot represent safely here.
+    """
+    _validate_kind_name(kind)
+    if definition.parse:
+        raise ValueError(
+            "loop_def_to_kdl serializes the declarative kind surface only "
+            "(fold/boundary/search/preview/edge/lifecycle); per-kind parse "
+            "pipelines are outside its supported domain by contract — "
+            "author the parse block by hand"
+        )
+
+    body: list[str] = []
+
+    if definition.folds:
+        body.append("fold {")
+        for decl in definition.folds:
+            body.append(indent + _fold_op_kdl(decl.target, decl.op))
+        body.append("}")
+
+    if definition.boundary is not None:
+        body.extend(_boundary_kdl(definition.boundary, indent))
+
+    if definition.search:
+        body.append(
+            "search "
+            + " ".join(_q(f, what="search field") for f in definition.search)
+        )
+
+    if definition.preview_fields:
+        body.append(
+            "preview "
+            + " ".join(_q(f, what="preview field") for f in definition.preview_fields)
+        )
+
+    for edge in definition.edges:
+        body.append(
+            f'edge {_q(edge.field, what="edge field")} '
+            f'targets={_q(edge.target, what="edge target")}'
+        )
+
+    if definition.lifecycle is not None:
+        lc = definition.lifecycle
+        for v in lc.active:
+            if "," in v or v != v.strip() or not v:
+                raise ValueError(
+                    f"lifecycle active value {v!r} cannot round-trip through "
+                    "the comma-separated active= property"
+                )
+        active = ",".join(lc.active)
+        body.append(
+            f'lifecycle {_q(lc.field, what="lifecycle field")} '
+            f'active={_q(active, what="lifecycle active set")}'
+        )
+
+    if not body:
+        return f"{kind} {{ }}"
+    lines = [f"{kind} {{"]
+    lines.extend(indent + ln for ln in body)
+    lines.append("}")
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Mutations
+# ---------------------------------------------------------------------------
+
+
+def _parse_vertex_or_raise(text: str, context: str):
+    """Parse vertex text, wrapping parser errors as a clear ValueError."""
+    from .loader import parse_vertex
+
+    try:
+        return parse_vertex(text)
+    except Exception as exc:
+        raise ValueError(
+            f"{context}: input is not a parseable vertex: {exc}"
+        ) from exc
+
+
+# Delimiters of KDL string syntax the lexical scanners cannot track.
+# ``#"`` opens (and ``"#`` closes) a raw string of any hash depth — matching
+# either substring anywhere (even inside a plain string) is deliberately
+# over-broad: refusal is the cheap, permanent answer (zero raw strings in the
+# .vertex corpus). ``\"\"\"`` is a KDL multi-line string opener, equally
+# untrackable by the single-line quote scan.
+_UNPROVABLE_DELIMITERS = ('#"', '"#', '"""')
+
+
+def _assert_scanner_provable_domain(text: str, context: str) -> None:
+    """Refuse mutation over syntax the lexical scanners cannot prove safe.
+
+    See the module docstring's PROVABLE DOMAIN contract (SOL-R4-01). The
+    scan covers the WHOLE vertex text, not just the ``loops`` block: the
+    block span itself is found by the same raw-string-blind line scan, so a
+    raw string outside the block could corrupt the span the guards inspect.
+    """
+    for delim in _UNPROVABLE_DELIMITERS:
+        if delim in text:
+            raise ValueError(
+                f"{context}: the vertex text contains {delim!r} — KDL "
+                "raw-string / multi-line-string syntax the mutation "
+                "scanner cannot prove safe to splice over (its guards "
+                'track plain "…" strings only); edit the file by hand'
+            )
+    # Sol r5: two parser-accepted spellings the substring set misses — the
+    # ZERO-HASH raw-string opener ``r"…"`` and a plain string containing a
+    # LITERAL NEWLINE. One escape-aware left-to-right scan catches both.
+    # The scan is sound exactly because every construct that could poison
+    # its quote tracking (any hashed raw-string form, ``\"\"\"``) was
+    # already refused above, and it refuses AT the first occurrence of the
+    # two remaining unprovables — tracking is never trusted past one.
+    # ``r"`` is refused position-aware (letter r immediately before an
+    # OPENING quote), not as a bare substring: a plain string merely ending
+    # in the letter r (``"system-monitor"``, real corpus content) contains
+    # the two characters r" at its closing quote and is fine.
+    in_str = esc = False
+    prev = ""
+    for ch in text:
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+            elif ch == "\n":
+                raise ValueError(
+                    f"{context}: the vertex text contains a quoted string "
+                    "spanning a literal newline — syntax the line-based "
+                    "mutation scanner cannot prove safe to splice over; "
+                    "edit the file by hand"
+                )
+        elif ch == '"':
+            if prev == "r":
+                raise ValueError(
+                    f"{context}: the vertex text contains r\" — the "
+                    "zero-hash KDL raw-string opener, syntax the mutation "
+                    "scanner cannot prove safe to splice over; edit the "
+                    "file by hand"
+                )
+            in_str = True
+        prev = ch
+    if in_str:
+        raise ValueError(
+            f"{context}: the vertex text ends inside an unterminated "
+            "quoted string — the mutation scanner cannot prove any splice "
+            "safe; edit the file by hand"
+        )
+
+
+def _loops_block_child_names(text: str) -> list[str]:
+    """First tokens of every depth-0 child node in the ``loops`` block.
+
+    Raw-text multiplicity view — the one thing the parser oracle cannot see
+    (duplicate kind nodes collapse last-wins in the parse). Line-based and
+    brace-counted like the splice layer; comment tokens are skipped. Empty
+    when there is no ``loops`` block.
+    """
+    try:
+        start, end = kdl_find_block(text, ["loops"])
+    except ValueError:
+        return []
+    lines = text.splitlines()
+    names: list[str] = []
+
+    def _collect_line_nodes(segment: str) -> None:
+        for node in kdl_split_top_level_nodes(segment):
+            tok = node.split(None, 1)[0].split("{", 1)[0]
+            if tok and not tok.startswith("/"):
+                names.append(tok)
+
+    if start == end:
+        line = lines[start]
+        _collect_line_nodes(line[line.index("{") + 1 : line.rindex("}")])
+        return names
+
+    i = start + 1
+    while i < end:
+        stripped = lines[i].strip()
+        if not stripped or stripped.startswith("//"):
+            i += 1
+            continue
+        opens = stripped.count("{") - stripped.count("}")
+        if opens > 0:
+            tok = stripped.split(None, 1)[0].split("{", 1)[0]
+            if tok and not tok.startswith("/"):
+                names.append(tok)
+            depth = opens
+            i += 1
+            while i < end and depth > 0:
+                depth += lines[i].count("{") - lines[i].count("}")
+                i += 1
+            continue
+        _collect_line_nodes(stripped)
+        i += 1
+    return names
+
+
+def _assert_unique_kind_nodes(text: str, context: str) -> None:
+    """Refuse duplicate loop-kind nodes in the INPUT (SOL-R3-01 part a).
+
+    The parser collapses duplicate kind names last-wins, so the parser
+    oracle is structurally blind to them: a splice that loses one physical
+    duplicate parses definition-equal. Duplicates in the input are
+    pathological — a pre-condition refusal on the raw text, not a safety
+    detector; the parser oracle remains the post-condition authority.
+    """
+    from collections import Counter
+
+    counted = Counter(
+        n for n in _loops_block_child_names(text)
+        if n not in _RESERVED_KIND_NAMES
+    )
+    dupes = sorted(n for n, c in counted.items() if c > 1)
+    if dupes:
+
+codex
+The commit adds exactly the claimed whole-text precondition, and the regression tests cover both original repros plus hashes 1–8. I’m now probing the scanner’s key assumption: which quote/raw/multiline spellings the actual parser accepts, especially cases where `r` precedes a closing quote and hostile syntax follows.
+exec
+/bin/zsh -lc "rg -n \"raw|string|multiline|triple|quote|BOM|unicode|parse_value|ESCAPE|r#|#r\" libs/lang/src libs/lang/tests pyproject.toml uv.lock --glob '*.py' --glob '*.lark' --glob '*.toml' | head -300 && rg -n \"kdl\" pyproject.toml libs/lang/pyproject.toml uv.lock | head -100 && sed -n '430,820p' libs/lang/src/lang/vertex_mutation.py" in /Users/kaygee/Code/loops
+ succeeded in 0ms:
+libs/lang/tests/test_kdl_splice.py:4:- kdl_find_block path semantics (bare-name, quoted-key, nested, single-line)
+libs/lang/tests/test_kdl_splice.py:43:    def test_quoted_positional_key(self):
+libs/lang/tests/test_kdl_splice.py:49:    def test_quoted_key_path_normalization(self):
+libs/lang/tests/test_kdl_splice.py:186:    def test_insert_multiline_block(self):
+libs/lang/tests/test_kdl_splice.py:246:    def test_remove_multiline_block_child(self):
+libs/lang/tests/test_validator.py:22:    def test_skip_preserves_string(self):
+libs/lang/tests/test_validator.py:23:        """Skip keeps string shape."""
+libs/lang/tests/test_validator.py:161:        """Skip requires string input."""
+libs/lang/tests/test_validator.py:171:        with pytest.raises(ValidationError, match="skip.*requires string input"):
+libs/lang/tests/test_validator.py:201:        """JSON format doesn't allow split (dict input, not string)."""
+libs/lang/tests/test_validator.py:211:        with pytest.raises(ValidationError, match="split.*requires string input"):
+libs/lang/tests/test_validator.py:215:        """JSON format doesn't allow skip (dict input, not string)."""
+libs/lang/tests/test_validator.py:225:        with pytest.raises(ValidationError, match="skip.*requires string input"):
+libs/lang/tests/test_validator.py:578:        """Split requires string input but vertex parse starts as dict."""
+libs/lang/tests/test_validator.py:590:        with pytest.raises(ValidationError, match="split.*requires string input"):
+libs/lang/tests/test_validator.py:594:        """Skip requires string input but vertex parse starts as dict."""
+libs/lang/tests/test_validator.py:606:        with pytest.raises(ValidationError, match="skip.*requires string input"):
+libs/lang/tests/test_validator.py:645:        """where step on string input → validation error."""
+libs/lang/tests/test_validator.py:701:        """project step on string input → validation error (L212)."""
+libs/lang/tests/test_vertex_mutation.py:8:  production module docstring).
+libs/lang/tests/test_vertex_mutation.py:9:- add/edit/remove_vertex_kind: absent, single-line, and multiline loops
+libs/lang/tests/test_vertex_mutation.py:12:  every in-repo .vertex with a multiline loops block; serializer output
+libs/lang/tests/test_vertex_mutation.py:127:    def test_string_escaping_in_values(self):
+libs/lang/tests/test_vertex_mutation.py:153:        # The docstring states the domain and disclaims full round-trip.
+libs/lang/tests/test_vertex_mutation.py:195:    def test_add_into_multiline_block(self):
+libs/lang/tests/test_vertex_mutation.py:211:        assert end > start  # created multiline
+libs/lang/tests/test_vertex_mutation.py:400:        multiline = end > start
+libs/lang/tests/test_vertex_mutation.py:402:        multiline = False  # loops block absent — created by add
+libs/lang/tests/test_vertex_mutation.py:404:    if not multiline:
+libs/lang/tests/test_vertex_mutation.py:443:    'run ##"echo "quoted"; } { "# still raw"## } }; '
+libs/lang/tests/test_vertex_mutation.py:446:ESCAPED_QUOTE_DOC = (
+libs/lang/tests/test_vertex_mutation.py:475:    def test_raw_string_doc_parses_with_both_kinds(self):
+libs/lang/tests/test_vertex_mutation.py:478:    @pytest.mark.parametrize("doc", [RAW_STRING_DOC, ESCAPED_QUOTE_DOC])
+libs/lang/tests/test_vertex_mutation.py:486:    @pytest.mark.parametrize("doc", [RAW_STRING_DOC, ESCAPED_QUOTE_DOC])
+libs/lang/tests/test_vertex_mutation.py:495:    @pytest.mark.parametrize("doc", [RAW_STRING_DOC, ESCAPED_QUOTE_DOC])
+libs/lang/tests/test_vertex_mutation.py:504:    @pytest.mark.parametrize("doc", [RAW_STRING_DOC, ESCAPED_QUOTE_DOC])
+libs/lang/tests/test_vertex_mutation.py:646:    KDL raw strings (``#"…"#`` / ``##"…"##``) are outside the quote-aware
+libs/lang/tests/test_vertex_mutation.py:648:    raw-string syntax must REFUSE with a typed, actionable ValueError —
+libs/lang/tests/test_vertex_mutation.py:652:    # Sol's r4 repro 1: a raw string hides the same-line `task` sibling
+libs/lang/tests/test_vertex_mutation.py:658:        '  decision { boundary after=1 { run #"echo " quoted"# } }; '
+libs/lang/tests/test_vertex_mutation.py:664:    # Sol's r4 repro 2: `run #"echo " quoted"#` followed by `// KEEP` —
+libs/lang/tests/test_vertex_mutation.py:665:    # _has_comment_outside_strings returned False and the edit silently
+libs/lang/tests/test_vertex_mutation.py:671:        '    boundary after=1 { run #"echo " quoted"# } // KEEP\n'
+libs/lang/tests/test_vertex_mutation.py:687:        ids=["dup-hidden-by-raw", "comment-after-raw"],
+libs/lang/tests/test_vertex_mutation.py:695:        ids=["dup-hidden-by-raw", "comment-after-raw"],
+libs/lang/tests/test_vertex_mutation.py:703:        # scanner, so add refuses over raw-string syntax too.
+libs/lang/tests/test_vertex_mutation.py:707:    def test_no_raw_string_happy_path_unchanged(self):
+libs/lang/tests/test_vertex_mutation.py:723:    the zero-hash raw-string opener ``r"…"`` and a plain string containing
+libs/lang/tests/test_vertex_mutation.py:725:    refuse. Multi-hash raw strings stay pinned refused; plain strings that
+libs/lang/tests/test_vertex_mutation.py:741:        ' quoted" } }; task { fold { items "by" "name" } }\n'
+libs/lang/tests/test_vertex_mutation.py:748:        ids=["zero-hash-raw", "newline-in-string"],
+libs/lang/tests/test_vertex_mutation.py:755:        ids=["zero-hash-raw", "newline-in-string"],
+libs/lang/tests/test_vertex_mutation.py:763:        ids=["zero-hash-raw", "newline-in-string"],
+libs/lang/tests/test_vertex_mutation.py:771:        ids=["zero-hash-raw", "newline-in-string"],
+libs/lang/tests/test_vertex_mutation.py:778:    def test_multi_hash_raw_strings_stay_refused(self, hashes):
+libs/lang/tests/test_vertex_mutation.py:790:    def test_string_ending_in_letter_r_stays_allowed(self):
+libs/lang/tests/test_vertex_mutation.py:792:        # quote — the in-string spelling is real corpus content and must
+libs/lang/tests/test_vertex_mutation.py:793:        # NOT refuse; only the OUT-of-string r" (raw opener) is refused.
+libs/lang/src/lang/loader.py:69:    """Get a required string argument from a node."""
+libs/lang/src/lang/loader.py:127:            old=_require_arg(node, 0, "old string", path),
+libs/lang/src/lang/loader.py:128:            new=_require_arg(node, 1, "new string", path),
+libs/lang/src/lang/loader.py:357:    raw_value = args[2]
+libs/lang/src/lang/loader.py:358:    # Coerce to float if possible, otherwise keep as string
+libs/lang/src/lang/loader.py:360:        value: float | str = float(raw_value)
+libs/lang/src/lang/loader.py:362:        value = str(raw_value)
+libs/lang/src/lang/loader.py:473:            active_raw = child.properties.get("active")
+libs/lang/src/lang/loader.py:474:            if active_raw is None:
+libs/lang/src/lang/loader.py:481:                v for v in (s.strip() for s in str(active_raw).split(",")) if v
+libs/lang/src/lang/loader.py:570:            fields["kind"] = _require_arg(node, 0, "kind string", path)
+libs/lang/src/lang/loader.py:572:            fields["observer"] = _require_arg(node, 0, "observer string", path)
+libs/lang/src/lang/loader.py:584:            fields["format"] = _require_arg(node, 0, "format string", path)
+libs/lang/src/lang/loader.py:586:            fields["origin"] = _require_arg(node, 0, "origin string", path)
+libs/lang/src/lang/loader.py:787:            name = _require_arg(node, 0, "name string", path)
+libs/lang/src/lang/loader.py:793:            # ckdl returns Python bool for unquoted true/false; _require_arg
+libs/lang/src/lang/loader.py:794:            # may stringify it. Accept either bool or the literal string.
+libs/lang/src/lang/loader.py:797:            raw = node.args[0]
+libs/lang/src/lang/loader.py:798:            if raw is True or (isinstance(raw, str) and raw.lower() == "true"):
+libs/lang/src/lang/loader.py:800:            elif raw is False or (isinstance(raw, str) and raw.lower() == "false"):
+libs/lang/src/lang/loader.py:804:                    f"strict requires a boolean (true/false), got {raw!r}", path
+libs/lang/src/lang/loader.py:809:            emit = _require_arg(node, 0, "emit string", path)
+libs/lang/src/lang/ast.py:5:# pathlib deferred — Path only used in annotations (strings with __future__)
+libs/lang/src/lang/ast.py:251:    """Replace substring."""
+libs/lang/src/lang/ast.py:424:    Match checks payload equality (cheap, string); conditions check fold
+libs/lang/src/lang/ast.py:670:    key: str | None = None  # Ed25519 public key, raw-32-byte base64
+libs/lang/src/lang/document.py:590:    Content capture as a portable document form is deferred — embedding raw
+libs/lang/src/lang/document.py:708:    position) and a subject deduplicated per kind (see module docstring:
+libs/lang/src/lang/document.py:829:def _as_triple(item: Any) -> tuple[str, str, dict[str, Any]]:
+libs/lang/src/lang/document.py:931:        kind, subject, payload = _as_triple(item)
+libs/lang/src/lang/document.py:1044:# meaning" (see module docstring).
+libs/lang/src/lang/document.py:1109:        k, s, p = _as_triple(item)
+libs/lang/src/lang/document.py:1115:        k, s, p = _as_triple(item)
+libs/lang/src/lang/document.py:1167:        k, s, p = _as_triple(item)
+libs/lang/src/lang/population.py:175:    for raw in lines:
+libs/lang/src/lang/population.py:176:        line = raw.strip()
+libs/lang/src/lang/population.py:200:    for raw in path.read_text().splitlines():
+libs/lang/src/lang/population.py:201:        line = raw.strip()
+libs/lang/src/lang/population.py:330:# block, optionally including its first quoted positional arg.
+libs/lang/src/lang/population.py:344:    """Parse a path segment into (name, optional_quoted_key).
+libs/lang/src/lang/population.py:365:    # match 'loopstest'). The next char must be space, brace, or quote.
+libs/lang/src/lang/population.py:388:    - + child_key (no key_field): match first quoted positional arg via Path()
+libs/lang/src/lang/population.py:389:    - + child_key + key_field: match `key_field="child_key"` property substring
+libs/lang/src/lang/population.py:400:    # Positional first-quoted-arg match (Path-style)
+libs/lang/src/lang/population.py:413:    a block discriminated by its first quoted positional arg. Walks brace
+libs/lang/src/lang/population.py:503:    Content inside strings or nested braces is never split.
+libs/lang/src/lang/population.py:662:    - + child_key (no key_field): match first quoted positional arg
+libs/lang/src/lang/population.py:751:    """[back-compat] Find template block by quoted path arg.
+libs/lang/src/lang/validator.py:43:    STRING = auto()  # raw string (line)
+libs/lang/src/lang/validator.py:44:    LIST = auto()  # list of strings (after split)
+libs/lang/src/lang/validator.py:68:    def string(cls) -> Shape:
+libs/lang/src/lang/validator.py:69:        """Initial shape: raw string."""
+libs/lang/src/lang/validator.py:74:        """After split: list of strings."""
+libs/lang/src/lang/validator.py:142:    shape = initial_shape if initial_shape is not None else Shape.string()
+libs/lang/src/lang/validator.py:150:                    f"skip (step {step_num}) requires string input, got {shape.kind.name.lower()}",
+libs/lang/src/lang/validator.py:158:                    f"split (step {step_num}) requires string input, got {shape.kind.name.lower()}",
+libs/lang/src/lang/validator.py:270:        # JSON/ndjson formats start as dict, not string
+libs/lang/src/lang/validator.py:274:            initial = None  # default: string
+libs/lang/src/lang/validator.py:361:        # Validate per-kind parse pipeline — vertex receives dicts, not raw lines
+libs/lang/tests/test_loader.py:91:    def test_source_raw_string(self):
+libs/lang/tests/test_loader.py:1545:        # Combine vertices don't require loops — they can just merge raw facts/ticks
+libs/lang/tests/test_loader.py:2198:        """_require_arg converts non-string args to string."""
+libs/lang/tests/test_loader.py:2847:    def test_boundary_condition_string_value(self):
+libs/lang/src/lang/vertex_mutation.py:32:(``_has_comment_outside_strings``) — are quote-aware scans over
+libs/lang/src/lang/vertex_mutation.py:33:SINGLE-LINE plain ``"…"`` KDL strings only. KDL raw strings of every hash
+libs/lang/src/lang/vertex_mutation.py:35:strings (``\"\"\"``), and plain strings spanning a literal newline are
+libs/lang/src/lang/vertex_mutation.py:82:# Names and string values
+libs/lang/src/lang/vertex_mutation.py:86:# children by first token, so quoted node names are not representable —
+libs/lang/src/lang/vertex_mutation.py:114:    """Quote a string as a KDL string literal.
+libs/lang/src/lang/vertex_mutation.py:116:    Escapes backslash and double-quote; rejects control characters and
+libs/lang/src/lang/vertex_mutation.py:295:# Delimiters of KDL string syntax the lexical scanners cannot track.
+libs/lang/src/lang/vertex_mutation.py:296:# ``#"`` opens (and ``"#`` closes) a raw string of any hash depth — matching
+libs/lang/src/lang/vertex_mutation.py:297:# either substring anywhere (even inside a plain string) is deliberately
+libs/lang/src/lang/vertex_mutation.py:298:# over-broad: refusal is the cheap, permanent answer (zero raw strings in the
+libs/lang/src/lang/vertex_mutation.py:299:# .vertex corpus). ``\"\"\"`` is a KDL multi-line string opener, equally
+libs/lang/src/lang/vertex_mutation.py:300:# untrackable by the single-line quote scan.
+libs/lang/src/lang/vertex_mutation.py:307:    See the module docstring's PROVABLE DOMAIN contract (SOL-R4-01). The
+libs/lang/src/lang/vertex_mutation.py:309:    block span itself is found by the same raw-string-blind line scan, so a
+libs/lang/src/lang/vertex_mutation.py:310:    raw string outside the block could corrupt the span the guards inspect.
+libs/lang/src/lang/vertex_mutation.py:316:                "raw-string / multi-line-string syntax the mutation "
+libs/lang/src/lang/vertex_mutation.py:318:                'track plain "…" strings only); edit the file by hand'
+libs/lang/src/lang/vertex_mutation.py:320:    # Sol r5: two parser-accepted spellings the substring set misses — the
+libs/lang/src/lang/vertex_mutation.py:321:    # ZERO-HASH raw-string opener ``r"…"`` and a plain string containing a
+libs/lang/src/lang/vertex_mutation.py:324:    # its quote tracking (any hashed raw-string form, ``\"\"\"``) was
+libs/lang/src/lang/vertex_mutation.py:328:    # OPENING quote), not as a bare substring: a plain string merely ending
+libs/lang/src/lang/vertex_mutation.py:330:    # the two characters r" at its closing quote and is fine.
+libs/lang/src/lang/vertex_mutation.py:343:                    f"{context}: the vertex text contains a quoted string "
+libs/lang/src/lang/vertex_mutation.py:352:                    "zero-hash KDL raw-string opener, syntax the mutation "
+libs/lang/src/lang/vertex_mutation.py:361:            "quoted string — the mutation scanner cannot prove any splice "
+libs/lang/src/lang/vertex_mutation.py:420:    pathological — a pre-condition refusal on the raw text, not a safety
+libs/lang/src/lang/vertex_mutation.py:439:def _has_comment_outside_strings(s: str) -> bool:
+libs/lang/src/lang/vertex_mutation.py:479:    inexpressible regardless of lexical evasion class (raw strings,
+libs/lang/src/lang/vertex_mutation.py:480:    escaped quotes, comments).
+libs/lang/src/lang/vertex_mutation.py:607:    if _has_comment_outside_strings(interior):
+pyproject.toml:18:    "ckdl>=1.0",
+uv.lock:139:name = "ckdl"
+uv.lock:142:sdist = { url = "https://files.pythonhosted.org/packages/4c/20/8de5ece1f086f96bd6fde5e05c49efb4f725ff6bf060ae24507d6d99ab7a/ckdl-1.0.tar.gz", hash = "sha256:e37546ea9cfe12ed0033c9a03833c0405409d9209802d728755f978dd025eacb", size = 93438, upload-time = "2024-12-21T19:43:22.91Z" }
+uv.lock:144:    { url = "https://files.pythonhosted.org/packages/04/2c/1db554a8194263611834062a81d7353a7ddbbd4c545c8a8f7c3bae446655/ckdl-1.0-cp311-cp311-macosx_10_9_x86_64.whl", hash = "sha256:2dd55a45558b80434d7d52055b009519e76e3044041863d5dc08450e168fa61e", size = 114406, upload-time = "2024-12-21T19:41:31.837Z" },
+uv.lock:145:    { url = "https://files.pythonhosted.org/packages/13/68/b12ae682ada2fcb6450c078ede69b5988c24c8b404e6a4de2742d324e6a3/ckdl-1.0-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:5c88608114d2c204095ebd077d226b372c6e4c029bd3787cc2f501272d5490e2", size = 105555, upload-time = "2024-12-21T19:41:34.339Z" },
+uv.lock:146:    { url = "https://files.pythonhosted.org/packages/d8/25/f1251c709f64ba133e69e29b989f088d5a2d344146de4ad6d92c0ab94247/ckdl-1.0-cp311-cp311-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:b584c8cf9a4514d544434f9f5137b5b17e627f4f37936bc84e0c23e4521efa76", size = 105472, upload-time = "2025-11-07T20:15:41.46Z" },
+uv.lock:147:    { url = "https://files.pythonhosted.org/packages/c7/91/7e7ce0250a1260e96804bfb2d47ad56bb4b981d38d9cfff6f5d2dca3ccf6/ckdl-1.0-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:00d1dde1a24f4fbd460657df851866366ad18867c893fdc1123ee8aa9c7a7daa", size = 110646, upload-time = "2025-11-07T20:15:42.76Z" },
+uv.lock:148:    { url = "https://files.pythonhosted.org/packages/2b/54/1f5a8045c77f419fe9657dc156ebbc464587f5579df0e2fef085b7479383/ckdl-1.0-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:9fde696a62ab7db7935db89bd8e3396dea10f2edc5b759bd68d920557c97c663", size = 137239, upload-time = "2024-12-21T19:41:36.882Z" },
+uv.lock:149:    { url = "https://files.pythonhosted.org/packages/f7/ca/cc951f2a24f867ca299d22b79ab2bf6b2b1ea1c6fb2b962c5fc25e29b962/ckdl-1.0-cp311-cp311-manylinux_2_5_i686.manylinux1_i686.manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:c227a8f8fe2ea537feeadb2740d73485e6940386b7e6444cae1cec615de4446a", size = 141996, upload-time = "2024-12-21T19:41:39.629Z" },
+uv.lock:150:    { url = "https://files.pythonhosted.org/packages/c5/0c/5ac32aa0b4fcd82eb2c4817ce7944f19cf0cafcb04c9f23b82da4ebd75c6/ckdl-1.0-cp311-cp311-musllinux_1_2_aarch64.whl", hash = "sha256:e6a96ca254650ae716f1213f4f42b1ef12eec1e063807781854396860d4ca2b7", size = 107119, upload-time = "2025-11-07T20:15:43.912Z" },
+uv.lock:151:    { url = "https://files.pythonhosted.org/packages/ce/c1/a6883e1d0319df1c63209fca92b96b58968a6189b4fe095cf81c90eec0bf/ckdl-1.0-cp311-cp311-musllinux_1_2_i686.whl", hash = "sha256:be3c1bf77a26347f2cb9516a0ccfba7157b15df8af2d0409653c6b29833da3eb", size = 146213, upload-time = "2024-12-21T19:41:41.192Z" },
+uv.lock:152:    { url = "https://files.pythonhosted.org/packages/2f/03/53976b2fc04e0c567e3dbf0fe50be0032e6b93a48fd30d419085c2adfc82/ckdl-1.0-cp311-cp311-musllinux_1_2_x86_64.whl", hash = "sha256:87effb4933b1b2e032a0abbbaffb73be9c3b3921594fcf9815bc0902693ebf7c", size = 139274, upload-time = "2024-12-21T19:41:42.506Z" },
+uv.lock:153:    { url = "https://files.pythonhosted.org/packages/0c/b8/eb74e2290e8aaa7ffc14abe00fc70092f0b623deb3f2cb401b5f47028e67/ckdl-1.0-cp311-cp311-win32.whl", hash = "sha256:a4f803268bae3fb17293fcd3374d0fb757909e71d0a96b8f877066026abcf894", size = 92143, upload-time = "2024-12-21T19:41:43.811Z" },
+uv.lock:154:    { url = "https://files.pythonhosted.org/packages/bd/80/aa26c95a89824377cdb7f00a1b6dedead02f91eef4d735e699bdbaec9594/ckdl-1.0-cp311-cp311-win_amd64.whl", hash = "sha256:bca9808a366aeb0750731c07918e0381d439a626f10be6222d4b1c4f3ddb3d96", size = 106669, upload-time = "2024-12-21T19:41:45.146Z" },
+uv.lock:155:    { url = "https://files.pythonhosted.org/packages/8c/0b/ab64f3e78eb66d476a91870d6dd20c166ef43586b79cc610e2e7b5811c86/ckdl-1.0-cp311-cp311-win_arm64.whl", hash = "sha256:408b4fe1d89fb966eec276156a509c4056d0a96c6b57083e999a549d3a4430c7", size = 77099, upload-time = "2025-11-07T20:15:45.36Z" },
+uv.lock:156:    { url = "https://files.pythonhosted.org/packages/ce/9f/912ed9e35f9f5117996bfc83a6fb3ff022a81c79bccd85745ae239912a27/ckdl-1.0-cp312-cp312-macosx_10_13_x86_64.whl", hash = "sha256:6242d0b7f83c64de5e7979d522cebef29ff233d0b1ed3de606e822a3c373cf6c", size = 114577, upload-time = "2024-12-21T19:41:47.679Z" },
+uv.lock:157:    { url = "https://files.pythonhosted.org/packages/35/ca/6a17a6a1c48f9cfdfe32cccf7132103ccd5c839ac18f865aeee2b14c2722/ckdl-1.0-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:6727bed18e0acbdb40d4906bd1aa784de88686135eea908c33c86b40a6542728", size = 105860, upload-time = "2024-12-21T19:41:49.123Z" },
+uv.lock:158:    { url = "https://files.pythonhosted.org/packages/52/40/591a4f69584503ba933421a780085d17c78c05a7e416611588b0000c08f7/ckdl-1.0-cp312-cp312-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:5f8d4e40c321b17a5d7f8d62f511bc81daf22f3c0184c9e6fd5fa1906376d5ba", size = 101701, upload-time = "2025-11-07T20:15:46.457Z" },
+uv.lock:159:    { url = "https://files.pythonhosted.org/packages/77/aa/5a42e68eebd72810312e700c7a0605ee7f1dc38ac04fd99a515e5e6ddbe9/ckdl-1.0-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:f00c221e3f810e66831631824b95f0aa9a98c510f93a8d20a868d1b81019f3a1", size = 107502, upload-time = "2025-11-07T20:15:48.058Z" },
+uv.lock:160:    { url = "https://files.pythonhosted.org/packages/a3/c4/82706d09e2360a5755866f78aeeb0abb01b65892d7fb84e8d62d26072510/ckdl-1.0-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:22c9c2fd1f988cf5a18566e1cdb4681b46e88e449d043941a4d09e62616a56c2", size = 132331, upload-time = "2024-12-21T19:41:53.193Z" },
+uv.lock:161:    { url = "https://files.pythonhosted.org/packages/15/ba/f7ea2de8a4970a3c500cdc02060365beaee7522d89c74ff49258832b1f8b/ckdl-1.0-cp312-cp312-manylinux_2_5_i686.manylinux1_i686.manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:c8bdac99986b8a9ca26237ccddd8bbd2fd5c4f3f70caf63d5b71f5bec3fa6ba1", size = 141460, upload-time = "2024-12-21T19:41:55.667Z" },
+uv.lock:162:    { url = "https://files.pythonhosted.org/packages/e6/b3/b5c87c1571168307e10a50d301ed07a03f64361727bc1a6aae59acc0987e/ckdl-1.0-cp312-cp312-musllinux_1_2_aarch64.whl", hash = "sha256:3d80cbc41d34fcf88e5b833b5104efde87b1b4134612b5c4404bd07b2275a3af", size = 103192, upload-time = "2025-11-07T20:15:49.483Z" },
+uv.lock:163:    { url = "https://files.pythonhosted.org/packages/5b/59/12cbd5cb44e50e994da2d00949e907646d94d2cb918041a5fdfe76e6dc8b/ckdl-1.0-cp312-cp312-musllinux_1_2_i686.whl", hash = "sha256:5f395c6c9f7d023024c1c06f567009f1f6456121ade277a3fb812530c5cd83e7", size = 141544, upload-time = "2024-12-21T19:41:58.211Z" },
+uv.lock:164:    { url = "https://files.pythonhosted.org/packages/a0/b0/e993528ece17f2c35d4c6b1de0323860655dcdd7bf4c9ee2497f368cb42e/ckdl-1.0-cp312-cp312-musllinux_1_2_x86_64.whl", hash = "sha256:9c0820a7a0b93297700b1e6bfb966c00774e3510db57adaac99c1a5e2907156c", size = 133745, upload-time = "2024-12-21T19:41:59.537Z" },
+uv.lock:165:    { url = "https://files.pythonhosted.org/packages/f8/ed/2298e46711907d540a4390745b3930f7d6b70e8a890a6234e168acce171c/ckdl-1.0-cp312-cp312-win32.whl", hash = "sha256:f29d5983b4d3d5e7fa4620ecc02ded52a58810021b0907d772b549432eab1725", size = 89365, upload-time = "2024-12-21T19:42:00.811Z" },
+uv.lock:166:    { url = "https://files.pythonhosted.org/packages/21/fd/2bf63fa6bd27e478c39a07c6e4e229d77114e5dadcf739e660526ac4a67b/ckdl-1.0-cp312-cp312-win_amd64.whl", hash = "sha256:bcf373877f51ad89beb0ce17abd916b89f08a5e80900ebbdf50fc17501c69b2e", size = 104291, upload-time = "2024-12-21T19:42:02.155Z" },
+uv.lock:167:    { url = "https://files.pythonhosted.org/packages/8c/1b/d3b17c32b41aff09842baee3f6e1e3a13375b4889585843a51436b88d5d0/ckdl-1.0-cp312-cp312-win_arm64.whl", hash = "sha256:31f0eb91a59ee7612a30c9f5805b9b6481c76d93ea79d2ce79c9a0b2e0f56988", size = 75535, upload-time = "2025-11-07T20:15:50.893Z" },
+uv.lock:168:    { url = "https://files.pythonhosted.org/packages/2e/84/1126be26aa8b6ae73eb3e89972c18eb339500d1b7a8ad8a8fbcf8ce80247/ckdl-1.0-cp313-cp313-macosx_10_13_x86_64.whl", hash = "sha256:dbf171e80cb3ba4c78c43b41913054c36a50645b48278426df7123244f8129a8", size = 112621, upload-time = "2024-12-21T19:42:04.246Z" },
+uv.lock:169:    { url = "https://files.pythonhosted.org/packages/eb/bc/436070148e6f40befb7fdc1901349e4942b92177dc9860e49e7ed360aefb/ckdl-1.0-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:7546cee3f6ab1edd0c28a7160a7b07f72943e3e781daa0f96214d4a948c5c5aa", size = 104718, upload-time = "2024-12-21T19:42:06.807Z" },
+uv.lock:170:    { url = "https://files.pythonhosted.org/packages/44/94/8a82d149eab7d84523996680bbdec67aa99b979264beae610a27031eff0e/ckdl-1.0-cp313-cp313-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:3d7a260ba0ec4997283eeb24c105943bc5d6d8356dfaa16e8afa92b863cf843b", size = 101524, upload-time = "2025-11-07T20:15:51.976Z" },
+uv.lock:171:    { url = "https://files.pythonhosted.org/packages/08/46/41c2785511257f8df84a07c00182a1d10ba7868b5333dbff302d14b83eb5/ckdl-1.0-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:f0db90c16da04ab5a1b2ae9101903ddd3e16d94e8ba7eb360224bb12013c2622", size = 107351, upload-time = "2025-11-07T20:15:53.108Z" },
+uv.lock:172:    { url = "https://files.pythonhosted.org/packages/43/52/73d6dd877d3591dad1d0f78d29ebd7de41bb5f5258599093a55b079de377/ckdl-1.0-cp313-cp313-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:6d1680b2d0a20704a52b02e02146c4f9e0b250747e6260f8b95e1f612c11f333", size = 133387, upload-time = "2024-12-21T19:42:09.343Z" },
+uv.lock:173:    { url = "https://files.pythonhosted.org/packages/6a/bb/bd0ec0b14f7ea44bbaf58511f52681826ad9885558d4624f577bc8f724f9/ckdl-1.0-cp313-cp313-manylinux_2_5_i686.manylinux1_i686.manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:5b84102837be3cd78b9301bde2780ee8e400db323666d9d13a24d6fa34884340", size = 140320, upload-time = "2024-12-21T19:42:11.796Z" },
+uv.lock:174:    { url = "https://files.pythonhosted.org/packages/71/64/a78f3c927f0e7b3b54af3830fba46aebe97ea976af7cb0e90dc53e95cc05/ckdl-1.0-cp313-cp313-musllinux_1_2_aarch64.whl", hash = "sha256:8faa16ba4871a0a5cc8139c8373a018487936f6277569147ef81d29a4f859d16", size = 103347, upload-time = "2025-11-07T20:15:54.231Z" },
+uv.lock:175:    { url = "https://files.pythonhosted.org/packages/6a/5d/7d3e9cfa2739904a60ba13a3eec75a1e3dc846163835ddbc4f8e4999cb33/ckdl-1.0-cp313-cp313-musllinux_1_2_i686.whl", hash = "sha256:738598cba5c13f30fd1f892c4652e5180aa09b4895a8bc33bc76cc2a3663e642", size = 141465, upload-time = "2024-12-21T19:42:13.269Z" },
+uv.lock:176:    { url = "https://files.pythonhosted.org/packages/85/7f/566f6c421e0729c1e32473960aa1dda718270cab5207974bf03bb95b038a/ckdl-1.0-cp313-cp313-musllinux_1_2_x86_64.whl", hash = "sha256:da67f139b70439f0012aa66d2cc225cd226656957a068f77db602b5b628cb55f", size = 133591, upload-time = "2024-12-21T19:42:14.577Z" },
+uv.lock:177:    { url = "https://files.pythonhosted.org/packages/c3/37/b0da0b7e8bddcb4099f8b0ac7314210c77b584729001fd1e68033a0405fa/ckdl-1.0-cp313-cp313-win32.whl", hash = "sha256:21b0c8ddffafb11cdc48fd99cc20e632ab3dadb1842db55821328b8fd757d49e", size = 89435, upload-time = "2024-12-21T19:42:16.976Z" },
+uv.lock:178:    { url = "https://files.pythonhosted.org/packages/26/b6/bfaae4f465b942d6f978a4ed555118d160cc493c805f2bc2cf63a463df29/ckdl-1.0-cp313-cp313-win_amd64.whl", hash = "sha256:fe64d62943a26260b4892a5803403e374bb926561feee34cbe3f112f1a64f78d", size = 104300, upload-time = "2024-12-21T19:42:19.518Z" },
+uv.lock:179:    { url = "https://files.pythonhosted.org/packages/3f/4b/d765e52603be7b2a2e72bc10e5a1f869a68371e58e9f81e70f89aa51583b/ckdl-1.0-cp313-cp313-win_arm64.whl", hash = "sha256:c55a370c7159a01d124f21d87da88ac0db580e11423f16104802eb0e4e028a2b", size = 75114, upload-time = "2025-11-07T20:15:55.456Z" },
+uv.lock:180:    { url = "https://files.pythonhosted.org/packages/2a/e0/70f51b2e8ef33512a2e96b17a2d1bb0e48ee9ebcc33aab308c2da816d1d5/ckdl-1.0-cp314-cp314-macosx_10_15_x86_64.whl", hash = "sha256:c682594b27f585a2f453244db0f60d74385444a86d600f8e77222da6ca7ca622", size = 93958, upload-time = "2025-11-07T20:15:56.822Z" },
+uv.lock:181:    { url = "https://files.pythonhosted.org/packages/ae/40/01d56949873271bbaeec96e5e06fcce7f19e42728ba2aa0daccd2c950e89/ckdl-1.0-cp314-cp314-macosx_11_0_arm64.whl", hash = "sha256:b9951429285b9d0a55876f22031bb92d197a4f21f0cc639e29848a13f47965d4", size = 84748, upload-time = "2025-11-07T20:15:57.947Z" },
+uv.lock:182:    { url = "https://files.pythonhosted.org/packages/37/87/c0a2a5712435bc020c7c111ae8c41da80762cc6057847a39d8aff449104c/ckdl-1.0-cp314-cp314-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:29d13057e7f9c9079e7a02797310dde57c4112aeb0327033cd63c71c5990f0bf", size = 103106, upload-time = "2025-11-07T20:15:59.022Z" },
+uv.lock:183:    { url = "https://files.pythonhosted.org/packages/60/da/4b4e9dec43eb87463bcd2e334091c802a3f07ac759bb9aa089695c608a87/ckdl-1.0-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:6f1f2bfe641e7a7c5d53124430d410c79e2f57775fc2cf3bf5ea07fe621a5570", size = 108337, upload-time = "2025-11-07T20:16:00.157Z" },
+uv.lock:184:    { url = "https://files.pythonhosted.org/packages/14/55/c0eec3230db8038c176301d22d3385f0ee4742a34f90330b92865dcd7e65/ckdl-1.0-cp314-cp314-musllinux_1_2_aarch64.whl", hash = "sha256:5e46eb7c5a39ee396000514584cc2a241dcff0f99a366082697c72e06c757b88", size = 105019, upload-time = "2025-11-07T20:16:01.291Z" },
+uv.lock:185:    { url = "https://files.pythonhosted.org/packages/2f/81/7f42907f46638efb51a468492112ffdaa5de8d0047e90721f5ae2d24c719/ckdl-1.0-cp314-cp314-musllinux_1_2_x86_64.whl", hash = "sha256:ab3ec80c15253d8f947c282d9ee3771e160c2ccc88ab4a57acd0d88337b5c701", size = 109417, upload-time = "2025-11-07T20:16:04.223Z" },
+uv.lock:186:    { url = "https://files.pythonhosted.org/packages/31/b3/b2dca1583e7a415310003b554c014a357e3e65179610483aadd0a9514079/ckdl-1.0-cp314-cp314-win32.whl", hash = "sha256:ef7c9758c2762ab79f338712e11a28397765711f5b7535133c4670b99161c4eb", size = 74053, upload-time = "2025-11-07T20:16:05.218Z" },
+uv.lock:187:    { url = "https://files.pythonhosted.org/packages/fa/7e/01603230ebcdeed57ae316b4a6d7ea3067ab16b3b0f7a905cc7829272458/ckdl-1.0-cp314-cp314-win_amd64.whl", hash = "sha256:ceb54df2d1dd26d7120989188b9ea81d194daf1e4ec9fbbb0727764d488663fd", size = 87423, upload-time = "2025-11-07T20:16:06.681Z" },
+uv.lock:188:    { url = "https://files.pythonhosted.org/packages/28/04/bffaeb72bea273d91dd0c167b679486f2893a50f289c28a9b15ce3a0b58c/ckdl-1.0-cp314-cp314-win_arm64.whl", hash = "sha256:8f50917d36d1c5a4554aa4b66bd3f1a76c557a231290a38fc247dddb68ecb376", size = 78389, upload-time = "2025-11-07T20:16:07.719Z" },
+uv.lock:508:    { name = "ckdl" },
+uv.lock:520:requires-dist = [{ name = "ckdl", specifier = ">=1.0" }]
+uv.lock:875:    { name = "ckdl" },
+uv.lock:886:    { name = "ckdl", specifier = ">=1.0" },
+libs/lang/pyproject.toml:8:dependencies = ["ckdl>=1.0"]
+    if dupes:
+        raise ValueError(
+            f"{context}: duplicate loop-kind declaration(s) {dupes} in the "
+            "loops block — the parser resolves duplicates last-wins, so a "
+            "text mutation over them cannot be verified; deduplicate the "
+            "vertex by hand first"
+        )
+
+
+def _has_comment_outside_strings(s: str) -> bool:
+    """Quote-aware scan for KDL comment openers (``//``, ``/*``, ``/-``)."""
+    in_str = esc = False
+    for i, ch in enumerate(s):
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+        elif ch == '"':
+            in_str = True
+        elif ch == "/" and i + 1 < len(s) and s[i + 1] in "/*-":
+            return True
+    return False
+
+
+def _verified(
+    before,
+    result: str,
+    context: str,
+    *,
+    added: str | None = None,
+    edited: str | None = None,
+    removed: str | None = None,
+    definition=None,
+) -> str:
+    """Parse + validate mutated text AND assert the exact expected delta.
+
+    The PARSER is the safety oracle (arbiter ruling, SOL-R2-01): the
+    line/lexeme-based splice layer is best-effort transformation only, so
+    every mutation re-parses the result and compares it against the
+    pre-mutation parse. The only admissible delta is the requested one —
+    add: original kind set plus the new kind, every original definition
+    equal; edit: same kind set, only the target changed; remove: set minus
+    the target, every other definition equal. Non-loop content (sources,
+    routes, store, …) must be untouched in all three. Any mismatch raises
+    ValueError naming the preserved-content violation, and the caller's
+    original text is never replaced. This makes silent sibling loss
+    inexpressible regardless of lexical evasion class (raw strings,
+    escaped quotes, comments).
+    """
+    from .validator import validate_vertex
+
+    try:
+        after = _parse_vertex_or_raise(result, context)
+        validate_vertex(after)
+    except Exception as exc:
+        raise ValueError(
+            f"{context} produced an invalid vertex: {exc}"
+        ) from exc
+
+    before_kinds = set(before.loops)
+    expected = set(before_kinds)
+    if added is not None:
+        expected.add(added)
+    if removed is not None:
+        expected.discard(removed)
+    after_kinds = set(after.loops)
+    if after_kinds != expected:
+        lost = sorted(expected - after_kinds)
+        gained = sorted(after_kinds - expected)
+        raise ValueError(
+            f"{context} violated content preservation: resulting kind set "
+            f"differs from the expected delta (lost: {lost}, unexpected: "
+            f"{gained}) — refusing; the original text is unchanged. If the "
+            "kind shares its physical line with siblings, split each kind "
+            "onto its own line first"
+        )
+    target = added if added is not None else edited
+    if target is not None and definition is not None:
+        if after.loops.get(target) != definition:
+            raise ValueError(
+                f"{context} violated content preservation: kind {target!r} "
+                "parses back different from the requested definition — "
+                "refusing; the original text is unchanged"
+            )
+    mutated = {added, edited, removed} - {None}
+    for k in before_kinds - mutated:
+        if before.loops[k] != after.loops[k]:
+            raise ValueError(
+                f"{context} violated content preservation: sibling kind "
+                f"{k!r} was altered by the text splice — refusing; the "
+                "original text is unchanged"
+            )
+    # Non-kind vertex content (store, sources, routes, …) must be untouched.
+    # VertexFile fields are exposed via __match_args__ (the frozen-AST shim).
+    for f in type(before).__match_args__:
+        if f == "loops":
+            continue
+        if getattr(before, f) != getattr(after, f):
+            raise ValueError(
+                f"{context} violated content preservation: non-kind vertex "
+                f"content changed (field {f!r}) — refusing; the original "
+                "text is unchanged"
+            )
+    return result
+
+
+def add_vertex_kind(text: str, kind: str, definition: LoopDef) -> str:
+    """Add a loop-kind definition to vertex text; returns the new text.
+
+    Creates the ``loops`` block (appended at end of file) when absent.
+    Refuses if the kind already exists. Note the one-way expand-on-insert
+    limitation: a single-line ``loops { ... }`` block is expanded across
+    lines by the insert.
+    """
+    _validate_kind_name(kind)
+    before = _parse_vertex_or_raise(text, f"add_vertex_kind({kind!r})")
+    _assert_scanner_provable_domain(text, f"add_vertex_kind({kind!r})")
+    _assert_unique_kind_nodes(text, f"add_vertex_kind({kind!r})")
+    if kind in before.loops:
+        raise ValueError(f"kind {kind!r} already exists; use edit_vertex_kind")
+
+    child = loop_def_to_kdl(kind, definition)
+    try:
+        kdl_find_block(text, ["loops"])
+        has_loops = True
+    except ValueError:
+        has_loops = False
+    if has_loops:
+        result = kdl_insert_child(text, ["loops"], child)
+    else:
+        # No loops block — create one at end of file.
+        indented = "\n".join(
+            ("  " + ln) if ln.strip() else ln for ln in child.splitlines()
+        )
+        block = f"loops {{\n{indented}\n}}\n"
+        if text and not text.endswith("\n"):
+            text += "\n"
+        result = text + block
+    return _verified(
+        before, result, f"add_vertex_kind({kind!r})",
+        added=kind, definition=definition,
+    )
+
+
+def edit_vertex_kind(text: str, kind: str, definition: LoopDef) -> str:
+    """Replace an existing kind's definition in place; returns the new text.
+
+    Preserves the kind's position and all surrounding content. Not
+    supported when the whole ``loops`` block is a single line (the
+    documented expand-on-insert limitation is one-way).
+    """
+    _validate_kind_name(kind)
+    before = _parse_vertex_or_raise(text, f"edit_vertex_kind({kind!r})")
+    _assert_scanner_provable_domain(text, f"edit_vertex_kind({kind!r})")
+    _assert_unique_kind_nodes(text, f"edit_vertex_kind({kind!r})")
+    try:
+        start, end = kdl_find_block(text, ["loops", kind])
+    except ValueError as exc:
+        raise ValueError(
+            f"kind {kind!r} not found in loops block (single-line loops "
+            "blocks cannot be edited in place — expand across lines first): "
+            f"{exc}"
+        ) from exc
+
+    lines = text.splitlines()
+    # Trailing-trivia honesty (SOL-R3-01 part c): the splice regenerates the
+    # whole block, so it can carry through exactly ONE piece of trivia — the
+    # suffix after the block's final close (`} // note`). Anything comment-
+    # shaped INSIDE the replaced span would be silently dropped by the
+    # regeneration; _verified claims preservation, so that is a refusal.
+    end_line = lines[end]
+    close_idx = end_line.rindex("}")
+    suffix = end_line[close_idx + 1 :].rstrip()
+    interior = "\n".join([*lines[start:end], end_line[: close_idx + 1]])
+    if _has_comment_outside_strings(interior):
+        raise ValueError(
+            f"edit_vertex_kind({kind!r}): the {kind!r} block carries a "
+            "comment the regenerated definition cannot preserve — move the "
+            "comment outside the block (or edit the file by hand) and retry"
+        )
+    kind_indent = lines[start][: len(lines[start]) - len(lines[start].lstrip())]
+    child = loop_def_to_kdl(kind, definition)
+    new_lines = [
+        (kind_indent + ln) if ln.strip() else ln for ln in child.splitlines()
+    ]
+    if suffix:
+        sep = "" if suffix.startswith((" ", "\t")) else " "
+        new_lines[-1] += sep + suffix
+    lines[start : end + 1] = new_lines
+    result = "\n".join(lines)
+    if text.endswith("\n"):
+        result += "\n"
+    return _verified(
+        before, result, f"edit_vertex_kind({kind!r})",
+        edited=kind, definition=definition,
+    )
+
+
+def remove_vertex_kind(text: str, kind: str) -> str:
+    """Remove a kind's definition from vertex text; returns the new text.
+
+    Not supported when the whole ``loops`` block is a single line. Refuses
+    (via post-validation) when removal would leave an invalid vertex, e.g.
+    removing the last kind of a vertex with no other sources.
+    """
+    _validate_kind_name(kind)
+    before = _parse_vertex_or_raise(text, f"remove_vertex_kind({kind!r})")
+    _assert_scanner_provable_domain(text, f"remove_vertex_kind({kind!r})")
+    _assert_unique_kind_nodes(text, f"remove_vertex_kind({kind!r})")
+    try:
+        result = kdl_remove_child(text, ["loops"], kind)
+    except ValueError as exc:
+        raise ValueError(
+            f"kind {kind!r} not found in loops block (single-line loops "
+            "blocks cannot be mutated in place — expand across lines first): "
+            f"{exc}"
+        ) from exc
+    return _verified(
+        before, result, f"remove_vertex_kind({kind!r})", removed=kind
+    )
+
+exec
+/bin/zsh -lc 'uv run pytest -q libs/lang/tests/test_vertex_mutation.py::TestScannerProvableDomainR5' in /Users/kaygee/Code/loops
+ succeeded in 1802ms:
+.................                                                        [100%]
+17 passed in 1.75s
+
+exec
+/bin/zsh -lc "ls -ld .venv .venv/bin/python 2>/dev/null || true && .venv/bin/python -c 'import ckdl; print(ckdl); print(ckdl.__file__); print(dir(ckdl))' && sed -n '1,120p' libs/lang/src/lang/loader.py" in /Users/kaygee/Code/loops
+ succeeded in 0ms:
+drwxr-xr-x@ 9 kaygee  staff  288 May 10 18:21 .venv
+lrwxr-xr-x@ 1 kaygee  staff   86 Mar 14 17:49 .venv/bin/python -> /Users/kaygee/.local/share/uv/python/cpython-3.13.11-macos-aarch64-none/bin/python3.13
+<module 'ckdl' from '/Users/kaygee/Code/loops/.venv/lib/python3.13/site-packages/ckdl/__init__.py'>
+/Users/kaygee/Code/loops/.venv/lib/python3.13/site-packages/ckdl/__init__.py
+['Document', 'EmitterError', 'EmitterOptions', 'EscapeMode', 'FloatMode', 'IdentifierMode', 'KdlVersion', 'Node', 'ParseError', 'Value', '__builtins__', '__cached__', '__doc__', '__file__', '__loader__', '__name__', '__package__', '__path__', '__spec__', '_ckdl', 'ascii_identifiers', 'ascii_mode', 'control', 'default', 'kdl_1', 'kdl_2', 'minimal', 'newline', 'parse', 'prefer_bare_identifiers', 'quote_all_identifiers', 'tab']
+"""KDL-based loader for .loop and .vertex files.
+
+Parses KDL text via ckdl, maps nodes to AST dataclasses.
+"""
+
+from __future__ import annotations
+
+# ckdl deferred to parse functions to avoid loading enum (~3ms) at import time
+ckdl = None
+
+from .ast import (
+    BoundaryAfter,
+    BoundaryEvery,
+    BoundaryWhen,
+    Coerce,
+    CombineEntry,
+    Explode,
+    FoldAvg,
+    FoldBy,
+    FoldCollect,
+    FoldCount,
+    FoldDecl,
+    FoldLatest,
+    FoldMax,
+    FoldMin,
+    FoldSum,
+    FoldWindow,
+    Flatten,
+    FromFile,
+    GrantDecl,
+    InlineSource,
+    LensDecl,
+    LoopDef,
+    LoopFile,
+    LStrip,
+    ObserverDecl,
+    Pick,
+    Project,
+    Replace,
+    RStrip,
+    Select,
+    Skip,
+    SourceParams,
+    SourcesBlock,
+    Split,
+    Strip,
+    TemplateSource,
+    Transform,
+    Trigger,
+    VertexFile,
+    Where,
+)
+from .errors import Location, ParseError
+
+if False:  # TYPE_CHECKING — avoid importing typing (~1.4ms)
+    from .ast import Boundary, FoldOp, ParseStep, SourceEntry, TransformOp
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _error(msg: str, path: Path | None = None) -> ParseError:
+    return ParseError(msg, Location(path, 1))
+
+
+def _require_arg(node: ckdl.Node, index: int, label: str, path: Path | None = None) -> str:
+    """Get a required string argument from a node."""
+    if index >= len(node.args):
+        raise _error(f"{node.name}: missing required {label}", path)
+    val = node.args[index]
+    if not isinstance(val, str):
+        return str(val)
+    return val
+
+
+def _node_map(nodes: list[ckdl.Node]) -> dict[str, ckdl.Node]:
+    """Build name→node dict. For nodes that appear once (top-level keys)."""
+    result: dict[str, ckdl.Node] = {}
+    for node in nodes:
+        result[node.name] = node
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Parse step loaders
+# ---------------------------------------------------------------------------
+
+
+def _load_skip(node: ckdl.Node, path: Path | None) -> Skip:
+    return Skip(pattern=_require_arg(node, 0, "pattern", path))
+
+
+def _load_split(node: ckdl.Node, path: Path | None) -> Split:
+    delimiter = node.args[0] if node.args else None
+    return Split(delimiter=delimiter)
+
+
+def _load_pick(node: ckdl.Node, path: Path | None) -> Pick:
+    indices = tuple(int(a) for a in node.args)
+    names = None
+    for child in node.children:
+        if child.name == "names":
+            names = tuple(str(a) for a in child.args)
+            if len(names) != len(indices):
+                raise _error(f"pick: {len(indices)} indices but {len(names)} names", path)
+    return Pick(indices=indices, names=names)
+
+
+def _load_select(node: ckdl.Node, path: Path | None) -> Select:
+    if not node.args:
+        raise _error("select requires at least one field name", path)
+    return Select(fields=tuple(str(a) for a in node.args))
+
+
+def _load_transform_op(node: ckdl.Node, path: Path | None) -> TransformOp:
+    name = node.name
+    if name == "strip":
+        return Strip(chars=_require_arg(node, 0, "chars", path))
+
+exec
+/bin/zsh -lc "find .venv/lib/python3.13/site-packages/ckdl -maxdepth 2 -type f -print && .venv/bin/python -c 'import ckdl; print(ckdl.parse.__doc__)'" in /Users/kaygee/Code/loops
+ succeeded in 0ms:
+.venv/lib/python3.13/site-packages/ckdl/__init__.py
+.venv/lib/python3.13/site-packages/ckdl/_ckdl.cpython-313-darwin.so
+.venv/lib/python3.13/site-packages/ckdl/__pycache__/__init__.cpython-313.pyc
+
+    parse(kdl_text)
+
+    Parse a KDL document (must be a str) and return a Document.
+
+    Pass a ``version`` argument to specify the KDL version (default: 1)
+
+    parse(kdl_text, version=1)
+    parse(kdl_text, version=2)
+    parse(kdl_text, version="any")
+    
+
+exec
+/bin/zsh -lc "rg -n \"ckdl.parse|version=\" libs/lang/src/lang/loader.py && sed -n '820,900p' libs/lang/src/lang/loader.py && .venv/bin/python - <<'PY'
+import ckdl
+cases = {
+    'plain': 'n \"x\"',
+    'zero_raw': 'n r\"x\"',
+    'hash_raw': 'n #\"x\"#',
+    'r_hash_raw': 'n r#\"x\"#',
+    'triple': 'n \"\"\"x\"\"\"',
+    'r_triple': 'n r\"\"\"x\"\"\"',
+    'hash_triple': 'n #\"\"\"x\"\"\"#',
+    'r_hash_triple': 'n r#\"\"\"x\"\"\"#',
+    'newline': 'n \"x\\ny\"',
+    'bs_newline': 'n \"x\\\\\\ny\"',
+    'cr': 'n \"x\\ry\"',
+    'crlf': 'n \"x\\r\\ny\"',
+    'unicode_quotes': 'n “x”',
+    'escaped_quote': 'n \"x\\\\\"y\"',
+    'bom_prefix': '\\ufeffn \"x\"',
+    'bom_before_quote': 'n \\ufeff\"x\"',
+}
+for name, text in cases.items():
+    for ver in (1, 2, 'any'):
+        try:
+            d=ckdl.parse(text, version=ver)
+            val=d.nodes[0].args[0] if d.nodes and d.nodes[0].args else None
+            out=f'OK {val"'!r}'"'
+        except Exception as e:
+            out=f'ERR {type(e).__name__}: {str(e).splitlines()[0]}'
+        print(f'{name:18} v={ver"'!s:3} {out}'"')
+PY" in /Users/kaygee/Code/loops
+ succeeded in 0ms:
+913:        doc = ckdl.parse(text)
+923:        doc = ckdl.parse(text)
+            for child in node.children:
+                if child.name == "boundary":
+                    # Vertex-level boundary — sibling of loop definitions.
+                    # Multiple boundaries ACCUMULATE (a vertex may declare more
+                    # than one trigger, e.g. `session closed` and `seal`); each
+                    # fires the vertex independently. Historically only the last
+                    # survived (friction:vertex-boundary-last-declaration-wins).
+                    vertex_boundaries.append(_load_boundary(child, path))
+                else:
+                    loops[child.name] = _load_loop_def(child, path)
+        elif key == "routes":
+            routes = {}
+            for child in node.children:
+                # Each child node: name is the kind, first arg is the loop target
+                route_target = _require_arg(child, 0, "route target", path)
+                routes[child.name] = route_target
+        elif key == "combine":
+            combine = _load_combine_block(node, path)
+        elif key == "observers":
+            observers = _load_observers_block(node, path)
+        elif key == "lens":
+            lens = _load_lens_block(node, path)
+        elif key == "scope":
+            scope_val = _require_arg(node, 0, "scope value", path)
+            if scope_val == "observer":
+                observer_scoped = True
+            else:
+                raise _error(f"Unknown scope value: {scope_val!r} (expected 'observer')", path)
+        else:
+            raise _error(f"Unknown config key: {key}", path)
+
+    # Validate required fields — .vertex (bare dotfile) defaults name to "root"
+    if name is None:
+        if path is not None and path.name == ".vertex":
+            name = "root"
+        else:
+            raise _error("Missing required field: name", path)
+
+    # Validate combine mutual exclusion
+    if combine is not None:
+        if store is not None:
+            raise _error("combine is mutually exclusive with store", path)
+        if discover is not None:
+            raise _error("combine is mutually exclusive with discover", path)
+        if sources is not None:
+            raise _error("combine is mutually exclusive with sources", path)
+        if sources_blocks:
+            raise _error("combine is mutually exclusive with sources blocks", path)
+    else:
+        has_template_loop_specs = sources and any(
+            isinstance(s, TemplateSource) and s.loop is not None for s in sources
+        )
+        has_children = discover is not None or vertices is not None
+        has_sources_blocks = bool(sources_blocks)
+        if not loops and not has_template_loop_specs and not has_children and not has_sources_blocks:
+            raise _error("Missing required field: loops", path)
+
+    return VertexFile(
+        name=name,
+        loops=loops,
+        store=store,
+        discover=discover,
+        sources=sources,
+        vertices=vertices,
+        routes=routes,
+        emit=emit,
+        combine=combine,
+        sources_blocks=tuple(sources_blocks) if sources_blocks else None,
+        observers=observers,
+        lens=lens,
+        boundary=tuple(vertex_boundaries),
+        observer_scoped=observer_scoped,
+        strict=strict,
+        path=path,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
+
+plain              v=1   OK 'x'
+plain              v=2   OK 'x'
+plain              v=any OK 'x'
+zero_raw           v=1   OK 'x'
+zero_raw           v=2   ERR ParseError: Error parsing property or argument
+zero_raw           v=any OK 'x'
+hash_raw           v=1   ERR ParseError: Error parsing property or argument
+hash_raw           v=2   OK 'x'
+hash_raw           v=any OK 'x'
+r_hash_raw         v=1   OK 'x'
+r_hash_raw         v=2   ERR ParseError: Error parsing property or argument
+r_hash_raw         v=any OK 'x'
+triple             v=1   ERR ParseError: Error parsing property or argument
+triple             v=2   ERR ParseError: Error parsing property or argument
+triple             v=any ERR ParseError: Error parsing property or argument
+r_triple           v=1   ERR ParseError: Whitespace required before argument or property
+r_triple           v=2   ERR ParseError: Error parsing property or argument
+r_triple           v=any ERR ParseError: Whitespace required before argument or property
+hash_triple        v=1   ERR ParseError: Error parsing property or argument
+hash_triple        v=2   ERR ParseError: Error parsing property or argument
+hash_triple        v=any ERR ParseError: Error parsing property or argument
+r_hash_triple      v=1   OK '""x""'
+r_hash_triple      v=2   ERR ParseError: Error parsing property or argument
+r_hash_triple      v=any OK '""x""'
+newline            v=1   OK 'x\ny'
+newline            v=2   ERR ParseError: Error parsing property or argument
+newline            v=any OK 'x\ny'
+bs_newline         v=1   ERR ParseError: Error parsing property or argument
+bs_newline         v=2   OK 'xy'
+bs_newline         v=any OK 'xy'
+cr                 v=1   OK 'x\ry'
+cr                 v=2   ERR ParseError: Error parsing property or argument
+cr                 v=any OK 'x\ry'
+crlf               v=1   OK 'x\r\ny'
+crlf               v=2   ERR ParseError: Error parsing property or argument
+crlf               v=any OK 'x\r\ny'
+unicode_quotes     v=1   ERR ParseError: Bare identifier not allowed here
+unicode_quotes     v=2   OK '“x”'
+unicode_quotes     v=any OK '“x”'
+escaped_quote      v=1   OK 'x"y'
+escaped_quote      v=2   OK 'x"y'
+escaped_quote      v=any OK 'x"y'
+bom_prefix         v=1   OK 'x'
+bom_prefix         v=2   OK 'x'
+bom_prefix         v=any OK 'x'
+bom_before_quote   v=1   OK 'x'
+bom_before_quote   v=2   ERR ParseError: Parse error
+bom_before_quote   v=any OK 'x'
+
+exec
+/bin/zsh -lc "sed -n '1,190p' libs/lang/tests/test_vertex_mutation.py" in /Users/kaygee/Code/loops
+ succeeded in 0ms:
+"""Tests for the public vertex-kind mutation API (lang.vertex_mutation).
+
+Covers:
+- loop_def_to_kdl serializer: reparse-equivalence for every supported
+  declarative feature (fold/boundary/search/preview/edge/lifecycle), plus
+  rejection of unrepresentable input. Per-kind parse pipelines are OUTSIDE
+  the serializer's domain by contract — it refuses them (see the
+  production module docstring).
+- add/edit/remove_vertex_kind: absent, single-line, and multiline loops
+  blocks; validation-before-return; preservation of unrelated content.
+- Corpus oracle: add-then-remove is byte-identical to the original for
+  every in-repo .vertex with a multiline loops block; serializer output
+  reparses to an equivalent LoopDef for every kind in the corpus.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+from lang import (
+    add_vertex_kind,
+    edit_vertex_kind,
+    loop_def_to_kdl,
+    parse_vertex,
+    remove_vertex_kind,
+)
+from lang.ast import (
+    BoundaryAfter,
+    BoundaryCondition,
+    BoundaryEvery,
+    BoundaryWhen,
+    EdgeDecl,
+    FoldAvg,
+    FoldBy,
+    FoldCollect,
+    FoldCount,
+    FoldDecl,
+    FoldLatest,
+    FoldMax,
+    FoldMin,
+    FoldSum,
+    FoldWindow,
+    LifecycleDecl,
+    LoopDef,
+    Split,
+)
+from lang.population import kdl_find_block
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _reparse_def(kind: str, definition: LoopDef) -> LoopDef:
+    """Serializer output wrapped in a minimal vertex, reparsed."""
+    text = 'name "t"\nloops {\n'
+    text += "\n".join(
+        "  " + ln for ln in loop_def_to_kdl(kind, definition).splitlines()
+    )
+    text += "\n}\n"
+    vf = parse_vertex(text)
+    assert kind in vf.loops
+    return vf.loops[kind]
+
+
+BASIC = LoopDef(folds=(FoldDecl(target="items", op=FoldBy(key_field="topic")),))
+
+
+# ---------------------------------------------------------------------------
+# Serializer — reparse equivalence
+# ---------------------------------------------------------------------------
+
+
+class TestSerializer:
+    def test_all_fold_ops_roundtrip(self):
+        d = LoopDef(
+            folds=(
+                FoldDecl("items", FoldBy(key_field="topic")),
+                FoldDecl("n", FoldCount()),
+                FoldDecl("last", FoldLatest()),
+                FoldDecl("total", FoldSum(field="amount")),
+                FoldDecl("hi", FoldMax(field="value")),
+                FoldDecl("lo", FoldMin(field="value")),
+                FoldDecl("mean", FoldAvg(field="value")),
+                FoldDecl("recent", FoldCollect(max_items=50)),
+                FoldDecl("buf", FoldWindow(field="value", size=5)),
+            )
+        )
+        assert _reparse_def("metrics", d) == d
+
+    def test_boundary_when_with_match_conditions_run(self):
+        d = LoopDef(
+            folds=BASIC.folds,
+            boundary=BoundaryWhen(
+                kind="session",
+                match=(("status", "closed"), ("mode", "full")),
+                conditions=(
+                    BoundaryCondition(target="high", op=">=", value=80.0),
+                    BoundaryCondition(target="state", op="==", value=2.5),
+                ),
+                run="scripts/dispatch.sh",
+            ),
+        )
+        assert _reparse_def("session", d) == d
+
+    def test_boundary_after_and_every(self):
+        for b in (BoundaryAfter(count=5), BoundaryEvery(count=10, run="do.sh")):
+            d = LoopDef(folds=BASIC.folds, boundary=b)
+            assert _reparse_def("k", d) == d
+
+    def test_search_preview_edges_lifecycle(self):
+        d = LoopDef(
+            folds=BASIC.folds,
+            search=("message", "topic"),
+            preview_fields=("status", "message"),
+            edges=(EdgeDecl(field="stakeholder", target="person"),),
+            lifecycle=LifecycleDecl(field="status", active=("open", "in-progress")),
+        )
+        assert _reparse_def("thread", d) == d
+
+    def test_empty_def(self):
+        d = LoopDef(folds=())
+        assert _reparse_def("bare", d) == d
+
+    def test_string_escaping_in_values(self):
+        d = LoopDef(
+            folds=(FoldDecl("items", FoldBy(key_field='we"ird\\key')),)
+        )
+        assert _reparse_def("k", d) == d
+
+    def test_rejects_parse_pipeline(self):
+        d = LoopDef(folds=BASIC.folds, parse=(Split(),))
+        with pytest.raises(ValueError, match="parse pipelines"):
+            loop_def_to_kdl("k", d)
+
+    def test_parse_pipeline_refusal_is_the_documented_contract(self):
+        """SOL-R1-05 (arbiter ruling: narrow the claim, not the serializer).
+
+        The serializer's supported domain is the declarative kind surface
+        — fold/boundary/search/preview/edge/lifecycle. Per-kind parse
+        pipelines are OUTSIDE that domain by contract (zero corpus usage);
+        the refusal must name the narrowed contract, and no full-LoopDef
+        round-trip is claimed.
+        """
+        d = LoopDef(folds=BASIC.folds, parse=(Split(),))
+        with pytest.raises(
+            ValueError,
+            match=r"declarative kind surface.*outside its supported domain",
+        ):
+            loop_def_to_kdl("k", d)
+        # The docstring states the domain and disclaims full round-trip.
+        doc = loop_def_to_kdl.__doc__
+        assert "fold" in doc and "lifecycle" in doc
+        assert "no full-LoopDef" in doc.replace("\n", " ").replace("    ", " ")
+
+    def test_rejects_control_chars_in_values(self):
+        d = LoopDef(folds=(FoldDecl("items", FoldBy(key_field="a\nb")),))
+        with pytest.raises(ValueError, match="control characters"):
+            loop_def_to_kdl("k", d)
+
+    def test_rejects_comma_in_lifecycle_active(self):
+        d = LoopDef(
+            folds=BASIC.folds,
+            lifecycle=LifecycleDecl(field="status", active=("a,b",)),
+        )
+        with pytest.raises(ValueError, match="lifecycle active"):
+            loop_def_to_kdl("k", d)
+
+    @pytest.mark.parametrize(
+        "bad", ["", "has space", 'quo"te', "1leading", "-lead", "boundary", "a{b"]
+    )
+    def test_rejects_unsafe_kind_names(self, bad):
+        with pytest.raises(ValueError):
+            loop_def_to_kdl(bad, BASIC)
+
+
+# ---------------------------------------------------------------------------
+# add / edit / remove
+# ---------------------------------------------------------------------------
+
+MULTI = (
+    'name "test"\n'
+    "// header comment\n"
+    "loops {\n"
+    "  // decisions matter\n"
+    '  decision { fold { items "by" "topic" } }\n'
+    "}\n"
+    'store "./data/test.db"\n'
+
+ERROR: This content was flagged for possible cybersecurity risk. If this seems wrong, try rephrasing your request. To get authorized for security work, join the Trusted Access for Cyber program: https://chatgpt.com/cyber
+ERROR: This content was flagged for possible cybersecurity risk. If this seems wrong, try rephrasing your request. To get authorized for security work, join the Trusted Access for Cyber program: https://chatgpt.com/cyber
+tokens used
+40,121

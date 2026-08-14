@@ -183,7 +183,10 @@ def serialize_batch(rows: list[tuple]) -> str:
     if len(rows) == 1:
         return serialize_fact_row(rows[0])
     obj = {"t": _BATCH, "rows": [_encode_obj(r, _SPEC["fact"]) for r in rows]}
-    _validate_batch(obj)
+    # Structural half only: every row object just came out of _encode_obj,
+    # which already ran the field-level _validate — re-running it per row
+    # would be the same check twice on the same object.
+    _validate_batch(obj, validate_rows=False)
     return _dump(obj)
 
 
@@ -286,8 +289,16 @@ def _validate(obj: dict, spec: _Spec) -> None:
         )
 
 
-def _validate_batch(obj: dict) -> None:
-    """Hold a batch envelope to the structural rules — both directions."""
+def _validate_batch(obj: dict, *, validate_rows: bool = True) -> None:
+    """Hold a batch envelope to the structural rules — both directions.
+
+    Two halves: the STRUCTURAL rules (envelope keys, ≥ 2 rows, fact records
+    only — no nesting, no ticks — and no duplicate id) always run; the
+    per-row FIELD validation (``_validate``) runs only when
+    ``validate_rows`` — the deserialize path keeps it, the serialize path
+    skips it because its row objects were just built (and validated) by
+    ``_encode_obj``.
+    """
     unknown = sorted(set(obj) - _BATCH_KEYS)
     if unknown:
         raise JsonlCodecError(f"unknown field(s) in batch line: {unknown}")
@@ -319,7 +330,8 @@ def _validate_batch(obj: dict) -> None:
             )
         if t != "fact":
             raise JsonlCodecError(f"batch row {i} has unknown record discriminator t={t!r}")
-        _validate(elem, _SPEC["fact"])
+        if validate_rows:
+            _validate(elem, _SPEC["fact"])
         row_id = elem["id"]
         if row_id in seen_ids:
             raise JsonlCodecError(f"duplicate id {row_id!r} within one batch")

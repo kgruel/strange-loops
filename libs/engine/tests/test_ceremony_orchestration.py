@@ -519,3 +519,68 @@ def test_intent_is_a_discoverable_sibling_with_pinned_fields(world):
     assert record["mode"] == "edit"
     assert record["old_decl_head"] == list(preview.expected_head)
     recover_declaration_update(intent)  # leave the world clean
+
+
+# --- pre-intent typed floor completeness (SOL-R3-03) -------------------------
+
+
+def test_apply_on_non_searchable_store_dir_refuses_typed_no_intent(split_world):
+    """SOL-R3-03a: plan while writable, then flip the store directory to
+    write-only/non-searchable (0222) — apply must return a typed refusal
+    with zero intent residue, never a raw PermissionError."""
+    import os
+
+    _apply_genesis(split_world)
+    good_preview = plan_declaration_update(
+        split_world["vertex"], proposed_text=split_world["edit"]
+    )
+    storedir = split_world["storedir"]
+    storedir.chmod(0o222)
+    try:
+        if os.access(split_world["index"], os.R_OK):
+            pytest.skip("cannot make dir non-searchable here (running as root?)")
+        result = apply_declaration_update(
+            good_preview, observer="obs", credentials=Creds()
+        )
+        assert result.status == "refused"
+        assert not intent_path_for(split_world["vertex"]).exists()
+    finally:
+        storedir.chmod(0o755)
+
+
+def test_apply_over_out_of_band_index_rows_refuses_typed_pre_intent(tmp_path):
+    """SOL-R3-03b: an empty canonical log beside an index carrying
+    out-of-band rows makes the pre-intent open raise
+    JsonlCanonicalUnsupported — that must be a typed 'refused' with no
+    intent residue, not a raw exception."""
+    import dataclasses
+
+    from atoms import Fact
+    from engine.sqlite_store import SqliteStore
+
+    locator = "./store/x.jsonl"
+    storedir = tmp_path / "store"
+    storedir.mkdir()
+    vertex = tmp_path / "x.vertex"
+    vertex.write_text(BASE.format(store=f'store "{locator}"'), encoding="utf-8")
+
+    preview = plan_declaration_update(vertex)
+    assert preview.mode == "genesis"
+
+    # Out-of-band shape: rows straight into the index, log left EMPTY.
+    oob: SqliteStore = SqliteStore(
+        path=storedir / "x.db",
+        serialize=lambda f: f.to_dict(),
+        deserialize=Fact.from_dict,
+    )
+    oob.append(Fact.of("note", "obs", n=1))
+    oob.close()
+    (storedir / "x.jsonl").write_text("", encoding="utf-8")
+
+    forced = dataclasses.replace(preview, applicable=True)
+    result = apply_declaration_update(
+        forced, observer="obs", credentials=Creds()
+    )
+    assert result.status == "refused"
+    assert "log" in result.reason
+    assert not intent_path_for(vertex).exists()

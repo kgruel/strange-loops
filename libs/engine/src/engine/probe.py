@@ -387,14 +387,23 @@ def write_surface_reason(canonical_path: Path | str) -> str | None:
 
 
 def _writable(path: Path) -> bool:
-    """Filesystem writability of ``path``, or of its nearest existing ancestor."""
+    """Filesystem writability of ``path``, or of its nearest existing ancestor.
+
+    TOTAL over inaccessible paths (SOL-R3-03a): a path this process cannot
+    even stat (e.g. inside a non-searchable ``0222`` directory) is a
+    not-writable ANSWER, never an exception — the caller is asking a yes/no
+    question about a write surface.
+    """
     probe = path
-    while not probe.exists():
-        parent = probe.parent
-        if parent == probe:
-            return False
-        probe = parent
-    return os.access(probe, os.W_OK)
+    try:
+        while not probe.exists():
+            parent = probe.parent
+            if parent == probe:
+                return False
+            probe = parent
+        return os.access(probe, os.W_OK)
+    except OSError:
+        return False
 
 
 def _log_content_note(path: Path) -> str:

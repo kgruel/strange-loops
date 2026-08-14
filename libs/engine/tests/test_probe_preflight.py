@@ -559,3 +559,25 @@ def test_write_surface_reason_names_the_unwritable_piece(tmp_path):
         assert "store directory not writable" in write_surface_reason(log)
     finally:
         tmp_path.chmod(0o755)
+
+
+def test_write_surface_reason_total_over_non_searchable_dir(tmp_path):
+    """SOL-R3-03a: an unreadable/non-searchable (0222) store directory is a
+    not-writable ANSWER with a reason — never a raw PermissionError."""
+    import os
+
+    from engine.probe import write_surface_reason
+
+    storedir = tmp_path / "store"
+    storedir.mkdir()
+    log = storedir / "s.jsonl"
+    log.write_text("", encoding="utf-8")
+    storedir.chmod(0o222)
+    try:
+        if os.access(log, os.R_OK):
+            pytest.skip("cannot make dir non-searchable here (running as root?)")
+        reason = write_surface_reason(log)  # must not raise
+        assert reason is not None
+        assert "not writable" in reason
+    finally:
+        storedir.chmod(0o755)

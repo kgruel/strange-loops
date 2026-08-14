@@ -535,9 +535,23 @@ def apply_declaration_update(
     # between gate and open), so the typed catch here is the floor.
     import sqlite3
 
+    from .jsonl_codec import JsonlCodecError
+    from .jsonl_store import JsonlCanonicalUnsupported
+
     try:
         store = _open_store(preview.canonical_path)
-    except (sqlite3.Error, OSError) as exc:
+    except (
+        sqlite3.Error,
+        OSError,
+        # The store-open exception taxonomy is wider than backend errors
+        # (SOL-R3-03b): a JSONL-canonical open can refuse typed on its own
+        # terms (out-of-band index rows, a log that does not decode). All
+        # of it is pre-intent — nothing mutated, zero residue — so all of
+        # it translates to the typed refusal.
+        JsonlCanonicalUnsupported,
+        JsonlCodecError,
+        UnicodeDecodeError,
+    ) as exc:
         return DeclarationUpdateResult(
             status="refused",
             reason=(

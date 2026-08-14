@@ -136,7 +136,21 @@ class TargetInfo:
     the authority claim AND an ``os.access`` writability check on the file
     (or its nearest existing ancestor when the file is absent). It does not
     promise a later open will succeed; it reports what inspection can see.
+
+    NOTE this is a claim about the PROBED path (for a vertex target, the
+    ``.vertex`` file itself) — the canonical store's writability is the
+    separate :attr:`canonical_writable` dimension.
     """
+
+    canonical_writable: bool | None
+    """Is the CANONICAL store artifact writable — the same ``os.access``
+    inspection as :attr:`writable`, evaluated on :attr:`canonical_path`.
+
+    A location-scoped filesystem claim, not an open-success promise. For a
+    ``vertex`` target this is the dimension a store-writing ceremony must
+    consult; :attr:`writable` there speaks only for the declaration file.
+    ``None`` exactly when :attr:`canonical_path` is ``None`` (nothing to
+    evaluate)."""
 
     reason: str
     """One human-readable line explaining the classification — and carrying
@@ -155,6 +169,7 @@ class TargetInfo:
             "index_current": self.index_current,
             "declaration_status": self.declaration_status,
             "writable": self.writable,
+            "canonical_writable": self.canonical_writable,
             "reason": self.reason,
         }
 
@@ -185,6 +200,7 @@ def probe_target(path: Path | str) -> TargetInfo:
         index_current=None,
         declaration_status=None,
         writable=False,
+        canonical_writable=None,
         reason=(
             f"unrecognized suffix {suffix or '(none)'} — not a vertex "
             "declaration, canonical log, or sqlite store locator"
@@ -207,6 +223,7 @@ def _probe_vertex(path: Path) -> TargetInfo:
             index_current=None,
             declaration_status=None,
             writable=_writable(path),
+            canonical_writable=None,
             reason="vertex declaration does not exist",
         )
     try:
@@ -223,6 +240,7 @@ def _probe_vertex(path: Path) -> TargetInfo:
             index_current=None,
             declaration_status=None,
             writable=_writable(path),
+            canonical_writable=None,
             reason=f"vertex declaration does not resolve: {exc}",
         )
     store_field = getattr(ast, "store", None)
@@ -236,6 +254,7 @@ def _probe_vertex(path: Path) -> TargetInfo:
             index_current=None,
             declaration_status=status,
             writable=_writable(path),
+            canonical_writable=None,
             reason="vertex declares no store — declaration only",
         )
     canonical = canonical_store_path(store_field, path)
@@ -249,6 +268,7 @@ def _probe_vertex(path: Path) -> TargetInfo:
         index_current=_currency(canonical) if mode == "jsonl" else None,
         declaration_status=status,
         writable=_writable(path),
+        canonical_writable=_writable(canonical),
         reason=f"vertex declaring a {mode}-canonical store at {canonical}",
     )
 
@@ -265,6 +285,7 @@ def _probe_log(path: Path) -> TargetInfo:
         index_current=_currency(path) if exists else None,
         declaration_status=None,
         writable=_writable(path),
+        canonical_writable=_writable(path),
         reason=(
             "JSONL-canonical log — the log is the store; the sibling .db "
             "is a derived, rebuildable index" + corroboration
@@ -288,6 +309,7 @@ def _probe_sqlite(path: Path) -> TargetInfo:
             index_current=_currency(sibling_log),
             declaration_status=None,
             writable=False,
+            canonical_writable=_writable(sibling_log),
             reason=(
                 f"derived index over the JSONL-canonical log at "
                 f"{sibling_log} — NOT a write target: writing here is an "
@@ -305,6 +327,7 @@ def _probe_sqlite(path: Path) -> TargetInfo:
         index_current=None,
         declaration_status=None,
         writable=_writable(path),
+        canonical_writable=_writable(path),
         reason=(
             "sqlite-canonical store — no sibling canonical log; the db is "
             "the store" + corroboration

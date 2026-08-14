@@ -244,6 +244,7 @@ def _recover_then_open(
     open_kwargs: dict[str, Any],
 ) -> PreflightResult:
     """Evidence first, then the store's own recovery, then the after-picture."""
+    from .jsonl_codec import JsonlCodecError
     from .jsonl_store import JsonlCanonicalUnsupported
 
     if not canonical.exists():
@@ -278,6 +279,43 @@ def _recover_then_open(
             recovered=False,
             store=None,
             reason=f"recovery refused: {exc}",
+        )
+    except (JsonlCodecError, UnicodeDecodeError) as exc:
+        # Canonical corruption recovery cannot fix: the log itself does
+        # not decode (bad JSON, unknown discriminator, invalid UTF-8).
+        # Typed as ``unreadable`` — the canonical artifact cannot be read
+        # — with the pre-recovery audit evidence attached.
+        return PreflightResult(
+            mode=PreflightMode.RECOVER_THEN_OPEN,
+            canonical_path=canonical,
+            index_path=index,
+            status="unreadable",
+            report=report,
+            post_report=None,
+            agreed=report.ok,
+            opened=False,
+            recovered=False,
+            store=None,
+            reason=(
+                f"canonical log does not decode — corruption recovery "
+                f"cannot repair: {exc}"
+            ),
+        )
+    except OSError as exc:
+        # Environmental open failure (permissions, IO). The artifact may
+        # be fine; this process cannot read it — still ``unreadable``.
+        return PreflightResult(
+            mode=PreflightMode.RECOVER_THEN_OPEN,
+            canonical_path=canonical,
+            index_path=index,
+            status="unreadable",
+            report=report,
+            post_report=None,
+            agreed=report.ok,
+            opened=False,
+            recovered=False,
+            store=None,
+            reason=f"cannot open canonical store: {exc}",
         )
     post = audit_agreement(canonical)
     recovered = not report.ok

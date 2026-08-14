@@ -1594,6 +1594,27 @@ class TestCombinedVertexFacts:
         assert len(facts) == 1
         assert facts[0]["payload"]["topic"] == "mid"
 
+    def test_kind_filter_is_exact_not_like(self, tmp_path, monkeypatch):
+        """SOL-R1-02 sibling site: the combined UNION ALL SQL must use the
+        same exact binary compare — `_` is not a wildcard and matching is
+        case-sensitive."""
+        from engine import vertex_facts
+
+        combine_vpath, alpha_db, beta_db = _setup_combine_env(tmp_path, monkeypatch)
+
+        _seed_facts(alpha_db, [
+            {"kind": "a_b", "ts": 1000.0, "payload": {"topic": "keep"}},
+            {"kind": "axb", "ts": 1100.0, "payload": {"topic": "leak"}},
+        ])
+        _seed_facts(beta_db, [
+            {"kind": "A_B.child", "ts": 1200.0, "payload": {"topic": "case-leak"}},
+            {"kind": "axb.child", "ts": 1250.0, "payload": {"topic": "wild-leak"}},
+            {"kind": "a_b.child", "ts": 1300.0, "payload": {"topic": "subtree"}},
+        ])
+
+        facts = vertex_facts(combine_vpath, 0.0, 9999.0, kind="a_b")
+        assert {f["kind"] for f in facts} == {"a_b", "a_b.child"}
+
     def test_excludes_decl_kinds_by_default(self, tmp_path, monkeypatch):
         """_combined_facts had its own raw UNION ALL SQL with no filter — a
         leak site beyond the single-store StoreReader.facts_between path."""

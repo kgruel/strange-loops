@@ -484,14 +484,15 @@ def _combined_facts(
             selects = [
                 f"SELECT id, kind, ts, observer, origin, payload "
                 f"FROM {'[' + a + '].' if a != 'main' else ''}facts "
-                f"WHERE ts >= ? AND ts <= ? AND (kind = ? OR kind LIKE ? || '.%')"
+                f"WHERE ts >= ? AND ts <= ? AND "
+                f"(kind = ? OR substr(kind, 1, length(?) + 1) = ? || '.')"
                 f"{internal_clause}"
                 for a in aliases
             ]
             sql = " UNION ALL ".join(selects) + " ORDER BY ts, id"
             params: list[Any] = []
             for _ in aliases:
-                params.extend([since_ts, until_ts, kind, kind])
+                params.extend([since_ts, until_ts, kind, kind, kind])
         else:
             selects = [
                 f"SELECT id, kind, ts, observer, origin, payload "

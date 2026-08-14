@@ -132,6 +132,26 @@ class TestSerializer:
         with pytest.raises(ValueError, match="parse pipelines"):
             loop_def_to_kdl("k", d)
 
+    def test_parse_pipeline_refusal_is_the_documented_contract(self):
+        """SOL-R1-05 (arbiter ruling: narrow the claim, not the serializer).
+
+        The serializer's supported domain is the declarative kind surface
+        — fold/boundary/search/preview/edge/lifecycle. Per-kind parse
+        pipelines are OUTSIDE that domain by contract (zero corpus usage);
+        the refusal must name the narrowed contract, and no full-LoopDef
+        round-trip is claimed.
+        """
+        d = LoopDef(folds=BASIC.folds, parse=(Split(),))
+        with pytest.raises(
+            ValueError,
+            match=r"declarative kind surface.*outside its supported domain",
+        ):
+            loop_def_to_kdl("k", d)
+        # The docstring states the domain and disclaims full round-trip.
+        doc = loop_def_to_kdl.__doc__
+        assert "fold" in doc and "lifecycle" in doc
+        assert "no full-LoopDef" in doc.replace("\n", " ").replace("    ", " ")
+
     def test_rejects_control_chars_in_values(self):
         d = LoopDef(folds=(FoldDecl("items", FoldBy(key_field="a\nb")),))
         with pytest.raises(ValueError, match="control characters"):
@@ -193,6 +213,50 @@ class TestAddVertexKind:
         vf = parse_vertex(out)
         assert set(vf.loops) == {"decision", "task"}
 
+    def test_add_expansion_splits_every_sibling_onto_its_own_line(self):
+        # SOL-R1-01 root cause: expansion must not leave siblings sharing
+        # one physical line — later line-based edit/remove of one would
+        # silently delete the rest.
+        text = (
+            'name "t"\n'
+            'loops { decision { fold { items "by" "topic" } }; '
+            'task { fold { items "by" "name" } } }\n'
+        )
+        out = add_vertex_kind(text, "marker", BASIC)
+        assert set(parse_vertex(out).loops) == {"decision", "task", "marker"}
+        loops_body = out[out.index("loops {") :]
+        # Each kind opens on its own physical line.
+        for kind in ("decision", "task", "marker"):
+            opening_lines = [
+                ln for ln in loops_body.splitlines()
+                if ln.strip().startswith(kind)
+            ]
+            assert len(opening_lines) == 1, kind
+        # No line carries two kind declarations.
+        for ln in loops_body.splitlines():
+            assert not ("decision" in ln and "task" in ln), ln
+
+    def test_add_then_edit_then_remove_preserves_unrelated_kinds(self):
+        # SOL-R1-01 regression: the full add -> edit -> remove sequence on
+        # a multi-child single-line block must never lose unrelated kinds.
+        text = (
+            'name "t"\n'
+            'loops { decision { fold { items "by" "topic" } }; '
+            'task { fold { items "by" "name" } } }\n'
+        )
+        out = add_vertex_kind(text, "marker", BASIC)
+        out = edit_vertex_kind(
+            out,
+            "decision",
+            LoopDef(
+                folds=(FoldDecl("items", FoldBy("topic")),),
+                search=("message",),
+            ),
+        )
+        assert set(parse_vertex(out).loops) == {"decision", "task", "marker"}
+        out = remove_vertex_kind(out, "decision")
+        assert set(parse_vertex(out).loops) == {"task", "marker"}
+
     def test_add_duplicate_refuses(self):
         with pytest.raises(ValueError, match="already exists"):
             add_vertex_kind(MULTI, "decision", BASIC)
@@ -227,6 +291,19 @@ class TestEditVertexKind:
         with pytest.raises(ValueError, match="not found"):
             edit_vertex_kind(MULTI, "ghost", BASIC)
 
+    def test_edit_kind_sharing_a_line_with_siblings_fails_loud(self):
+        # SOL-R1-01 fail-loud guard: hand-authored shared line — editing
+        # the first kind must refuse, not silently delete its siblings.
+        text = (
+            'name "t"\n'
+            "loops {\n"
+            '  decision { fold { items "by" "topic" } }; '
+            'task { fold { items "by" "name" } }\n'
+            "}\n"
+        )
+        with pytest.raises(ValueError, match="sibling"):
+            edit_vertex_kind(text, "decision", BASIC)
+
     def test_edit_single_line_loops_block_unsupported(self):
         text = 'name "t"\nloops { decision { fold { items "by" "topic" } } }\n'
         with pytest.raises(ValueError, match="single-line"):
@@ -246,6 +323,19 @@ class TestRemoveVertexKind:
     def test_remove_last_kind_of_loops_only_vertex_refuses(self):
         with pytest.raises(ValueError, match="invalid vertex"):
             remove_vertex_kind(MULTI, "decision")
+
+    def test_remove_kind_sharing_a_line_with_siblings_fails_loud(self):
+        # SOL-R1-01 fail-loud guard: removal of a kind whose physical line
+        # carries siblings must refuse, not take the siblings with it.
+        text = (
+            'name "t"\n'
+            "loops {\n"
+            '  decision { fold { items "by" "topic" } }; '
+            'task { fold { items "by" "name" } }\n'
+            "}\n"
+        )
+        with pytest.raises(ValueError, match="sibling"):
+            remove_vertex_kind(text, "decision")
 
     def test_remove_single_line_loops_block_unsupported(self):
         text = 'name "t"\nloops { decision { } task { } }\n'

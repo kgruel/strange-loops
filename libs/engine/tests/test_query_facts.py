@@ -300,3 +300,50 @@ def test_vertex_query_facts_missing_store_answers_empty_page(tmp_path):
     )
     page = vertex_query_facts(v)
     assert page.items == [] and page.next is None and not page.truncated
+
+
+class TestKindFilterExactness:
+    """SOL-R1-02: kind filtering is an exact binary compare, never LIKE.
+
+    ``_`` and ``%`` are valid kind characters but LIKE wildcards, and LIKE
+    compares ASCII case-insensitively — a LIKE-based subtree filter leaks
+    unrelated kinds into filtered pages.
+    """
+
+    def _store_with_kinds(self, tmp_path: Path, kinds: list[str]) -> Path:
+        path = tmp_path / "kinds.db"
+        store = _open_store(path)
+        for i, kind in enumerate(kinds):
+            store.append(Fact.of(kind, "kyle", ts=1000.0 + i, seq=i))
+        store.close()
+        return path
+
+    def _kinds_for(self, path: Path, kind: str) -> set[str]:
+        with StoreReader(path) as reader:
+            page = reader.query_facts(kind=kind, limit=50)
+        return {item["kind"] for item in page.items}
+
+    def test_underscore_is_not_a_wildcard(self, tmp_path: Path):
+        path = self._store_with_kinds(
+            tmp_path, ["a_b", "axb", "a_b.child", "axb.child"]
+        )
+        assert self._kinds_for(path, "a_b") == {"a_b", "a_b.child"}
+
+    def test_percent_is_not_a_wildcard(self, tmp_path: Path):
+        path = self._store_with_kinds(
+            tmp_path, ["a%b", "aXXb", "a%b.child", "aXXb.child"]
+        )
+        assert self._kinds_for(path, "a%b") == {"a%b", "a%b.child"}
+
+    def test_kind_match_is_case_sensitive(self, tmp_path: Path):
+        path = self._store_with_kinds(tmp_path, ["a_b", "A_B", "A_B.child"])
+        assert self._kinds_for(path, "a_b") == {"a_b"}
+        assert self._kinds_for(path, "A_B") == {"A_B", "A_B.child"}
+
+    def test_facts_between_uses_the_same_exact_rule(self, tmp_path: Path):
+        path = self._store_with_kinds(
+            tmp_path, ["a_b", "axb", "a_b.child", "axb.child", "A_B.child"]
+        )
+        with StoreReader(path) as reader:
+            rows = reader.facts_between(0.0, 2000.0, kind="a_b")
+        assert {r["kind"] for r in rows} == {"a_b", "a_b.child"}

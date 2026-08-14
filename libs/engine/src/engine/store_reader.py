@@ -554,9 +554,10 @@ class StoreReader:
         if kind is not None:
             rows = self._conn.execute(
                 "SELECT id, kind, ts, observer, origin, payload FROM facts "
-                "WHERE ts >= ? AND ts <= ? AND (kind = ? OR kind LIKE ?)"
+                "WHERE ts >= ? AND ts <= ? AND "
+                "(kind = ? OR substr(kind, 1, length(?) + 1) = ? || '.')"
                 f"{internal_clause}{rowid_clause} ORDER BY ts",
-                (since_ts, until_ts, kind, kind + ".%", *rowid_param),
+                (since_ts, until_ts, kind, kind, kind, *rowid_param),
             ).fetchall()
         else:
             rows = self._conn.execute(
@@ -669,8 +670,10 @@ class StoreReader:
         refused (:class:`~engine.witness.WitnessLineageMismatch`), never
         silently applied.
 
-        Filters: ``kind`` matches the kind and its dotted subtree (same
-        ``kind = ? OR kind LIKE 'kind.%'`` rule as :meth:`facts_between`);
+        Filters: ``kind`` matches the kind and its dotted subtree by exact
+        binary compare — equality or a ``substr``-based ``'kind.'`` prefix,
+        never ``LIKE`` (``_``/``%`` are LIKE wildcards and LIKE is ASCII
+        case-insensitive) — same rule as :meth:`facts_between`;
         ``observer`` matches with :func:`engine.observer.observer_matches`
         namespacing semantics (``kyle/loops-claude`` matches bare
         ``loops-claude`` and vice versa), applied IN SQL so ``limit``
@@ -721,8 +724,11 @@ class StoreReader:
             clauses.append("rowid > ?")
             params.append(after.rowid)
         if kind is not None:
-            clauses.append("(kind = ? OR kind LIKE ?)")
-            params.extend([kind, kind + ".%"])
+            # Exact kind, or binary '.'-prefix subtree. No LIKE: `_`/`%`
+            # are LIKE wildcards (and valid kind chars), and LIKE compares
+            # ASCII case-insensitively — substr is an exact binary compare.
+            clauses.append("(kind = ? OR substr(kind, 1, length(?) + 1) = ? || '.')")
+            params.extend([kind, kind, kind])
         if observer is not None:
             # observer_matches semantics in SQL: exact, or one side bare
             # matching the other's namespace tail. No LIKE/GLOB wildcards —

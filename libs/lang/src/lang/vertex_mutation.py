@@ -1,7 +1,12 @@
 """Public vertex-kind mutation API over the generic KDL splice layer.
 
 Text-level add/edit/remove of loop-kind definitions in `.vertex` files,
-plus a supported LoopDef-to-KDL serializer. Built on
+plus a LoopDef-to-KDL serializer whose supported domain is the declarative
+kind surface: ``fold``, ``boundary``, ``search``, ``preview``, ``edge``,
+and ``lifecycle``. Per-kind ``parse`` pipelines are OUTSIDE that domain by
+contract — serializing a ``LoopDef`` with a parse pipeline raises
+``ValueError`` (a documented refusal, not a round-trip gap; zero corpus
+usage, scope-the-claim). Built on
 ``population.kdl_insert_child`` / ``kdl_remove_child`` — comments,
 whitespace, and ordering of unrelated content are preserved.
 
@@ -35,7 +40,12 @@ from .ast import (
     FoldSum,
     FoldWindow,
 )
-from .population import kdl_find_block, kdl_insert_child, kdl_remove_child
+from .population import (
+    kdl_find_block,
+    kdl_insert_child,
+    kdl_remove_child,
+    kdl_split_top_level_nodes,
+)
 
 if TYPE_CHECKING:
     from .ast import Boundary, BoundaryCondition, LoopDef
@@ -173,15 +183,23 @@ def _boundary_kdl(boundary: Boundary, indent: str) -> list[str]:
 def loop_def_to_kdl(kind: str, definition: LoopDef, indent: str = "  ") -> str:
     """Serialize a LoopDef as the KDL block ``<kind> { ... }``.
 
-    The output re-parses (via the lang loader) to an equivalent LoopDef.
-    Raises ValueError for names or values KDL cannot represent safely here,
-    and for per-kind ``parse`` pipelines, which this serializer does not
-    support.
+    Supported domain (the declarative kind surface): ``fold``, ``boundary``,
+    ``search``, ``preview``, ``edge``, and ``lifecycle``. Within that
+    domain, the output re-parses (via the lang loader) to an equivalent
+    LoopDef.
+
+    Per-kind ``parse`` pipelines are OUTSIDE the supported domain by
+    contract: passing a LoopDef with a parse pipeline raises ValueError.
+    This is a documented refusal, not a round-trip gap — no full-LoopDef
+    round-trip is claimed. Also raises ValueError for names or values KDL
+    cannot represent safely here.
     """
     _validate_kind_name(kind)
     if definition.parse:
         raise ValueError(
-            "per-kind parse pipelines are not supported by loop_def_to_kdl; "
+            "loop_def_to_kdl serializes the declarative kind surface only "
+            "(fold/boundary/search/preview/edge/lifecycle); per-kind parse "
+            "pipelines are outside its supported domain by contract — "
             "author the parse block by hand"
         )
 
@@ -262,6 +280,30 @@ def _kind_exists(text: str, kind: str) -> bool:
     return kind in parse_vertex(text).loops
 
 
+def _reject_shared_line(text: str, kind: str, verb: str) -> None:
+    """Fail loud when ``kind``'s physical line carries sibling nodes.
+
+    Line-based edit/remove operates on whole physical lines; a kind sharing
+    its line with siblings would silently take them with it. Refuse instead
+    (matching the documented reject-over-support posture for single-line
+    blocks). No-op when the kind is absent — the caller's own not-found
+    path reports that.
+    """
+    try:
+        start, end = kdl_find_block(text, ["loops", kind])
+    except ValueError:
+        return  # absent kind: caller reports not-found
+    if start != end:
+        return  # multi-line kind block: the span is unambiguous
+    line = text.splitlines()[start].strip()
+    if len(kdl_split_top_level_nodes(line)) > 1:
+        raise ValueError(
+            f"cannot {verb} kind {kind!r}: its line holds sibling "
+            "declarations too — a line-based mutation would silently "
+            "remove them; split each kind onto its own line first"
+        )
+
+
 def add_vertex_kind(text: str, kind: str, definition: LoopDef) -> str:
     """Add a loop-kind definition to vertex text; returns the new text.
 
@@ -302,6 +344,7 @@ def edit_vertex_kind(text: str, kind: str, definition: LoopDef) -> str:
     documented expand-on-insert limitation is one-way).
     """
     _validate_kind_name(kind)
+    _reject_shared_line(text, kind, "edit")
     try:
         start, end = kdl_find_block(text, ["loops", kind])
     except ValueError as exc:
@@ -332,6 +375,7 @@ def remove_vertex_kind(text: str, kind: str) -> str:
     removing the last kind of a vertex with no other sources.
     """
     _validate_kind_name(kind)
+    _reject_shared_line(text, kind, "remove")
     try:
         result = kdl_remove_child(text, ["loops"], kind)
     except ValueError as exc:

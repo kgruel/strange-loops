@@ -8,6 +8,8 @@ and signatures must ride the whole path verbatim — never re-signed.
 """
 
 import json
+import os
+import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -1124,3 +1126,98 @@ class TestConcurrentCorruptIndexRecovery:
         assert results["a_inode"] == path_inode
         assert results["b_inode"] == path_inode
         assert (results["a_count"], results["b_count"]) == (2, 2)
+
+
+# ---------------------------------------------------------------------------
+# SOL-R4-04 — code-aware BUSY/LOCKED predicate at the recovery guards
+# ---------------------------------------------------------------------------
+
+
+class TestRecoveryGuardsAreCodeAware:
+    """SOL-R4-04: authentic SQLITE_LOCKED (code 6, message 'database table
+    is locked') is transient, not corruption. Both destructive-recovery
+    guards (initial open + under-lock recheck) must re-raise it — never
+    quarantine a healthy index — using the same code-aware predicate
+    preflight classifies with."""
+
+    @staticmethod
+    def _healthy_store(tmp_path):
+        from atoms import Fact
+
+        store = JsonlStore(
+            path=tmp_path / "v.db", log_path=tmp_path / "v.jsonl",
+            serialize=lambda f: f.to_dict(), deserialize=Fact.from_dict,
+        )
+        store.append(Fact.of("note", "kyle", n=1))
+        store.close()
+        return tmp_path / "v.db"
+
+    @staticmethod
+    def _locked_error():
+        exc = sqlite3.OperationalError("database table is locked")
+        exc.sqlite_errorcode = 6  # authentic SQLITE_LOCKED
+        return exc
+
+    @staticmethod
+    def _reopen(tmp_path):
+        from atoms import Fact
+
+        return JsonlStore(
+            path=tmp_path / "v.db", log_path=tmp_path / "v.jsonl",
+            serialize=lambda f: f.to_dict(), deserialize=Fact.from_dict,
+        )
+
+    def test_locked_at_initial_open_never_quarantines(
+        self, tmp_path, monkeypatch
+    ):
+        db = self._healthy_store(tmp_path)
+        inode = os.stat(db).st_ino
+
+        def boom(self):
+            raise TestRecoveryGuardsAreCodeAware._locked_error()
+
+        monkeypatch.setattr(JsonlStore, "_open_index", boom)
+        with pytest.raises(sqlite3.OperationalError):
+            self._reopen(tmp_path)
+        assert not list(tmp_path.glob("*.corrupt.*")), "healthy index quarantined"
+        assert os.stat(db).st_ino == inode, "index replaced under LOCKED"
+
+    def test_locked_at_under_lock_recheck_never_quarantines(
+        self, tmp_path, monkeypatch
+    ):
+        db = self._healthy_store(tmp_path)
+        inode = os.stat(db).st_ino
+        calls = {"n": 0}
+
+        def boom(self):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                # First open: genuine-looking corruption, routes into
+                # _recover_index...
+                raise sqlite3.DatabaseError("file is not a database")
+            # ...where the under-lock recheck hits authentic SQLITE_LOCKED.
+            raise TestRecoveryGuardsAreCodeAware._locked_error()
+
+        monkeypatch.setattr(JsonlStore, "_open_index", boom)
+        with pytest.raises(sqlite3.OperationalError):
+            self._reopen(tmp_path)
+        assert calls["n"] == 2
+        assert not list(tmp_path.glob("*.corrupt.*")), "healthy index quarantined"
+        assert os.stat(db).st_ino == inode, "index replaced under LOCKED"
+
+    def test_preflight_classifies_injected_locked_as_refused(
+        self, tmp_path, monkeypatch
+    ):
+        from engine.preflight import PreflightMode, read_preflight
+
+        db = self._healthy_store(tmp_path)
+        inode = os.stat(db).st_ino
+
+        def boom(self):
+            raise TestRecoveryGuardsAreCodeAware._locked_error()
+
+        monkeypatch.setattr(JsonlStore, "_open_index", boom)
+        r = read_preflight(tmp_path / "v.jsonl", PreflightMode.RECOVER_THEN_OPEN)
+        assert r.status == "refused", (r.status, r.reason)
+        assert not list(tmp_path.glob("*.corrupt.*"))
+        assert os.stat(db).st_ino == inode

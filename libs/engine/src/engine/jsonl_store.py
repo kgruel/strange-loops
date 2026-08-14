@@ -187,6 +187,7 @@ from .jsonl_codec import (
     serialize_tick_row,
 )
 from .residence import log_path_for
+from .sql_util import sqlite_busy
 from .sqlite_store import (
     FACT_INSERT_SQL,
     TICK_INSERT_SQL,
@@ -385,11 +386,12 @@ class JsonlStore(SqliteStore[T], Generic[T]):
             # route around). The index is DERIVED and the canonical log is
             # the store, so discarding and rebuilding it from the log is this
             # layer's own recovery, same class as the _rebuild triggers. Two
-            # guards keep the unlink honest: a transient lock is not
-            # corruption (re-raise — another handle owns a live index), and
+            # guards keep the unlink honest: a transient BUSY/LOCKED is not
+            # corruption (re-raise — another handle owns a live index; the
+            # code-aware predicate is shared with preflight, SOL-R4-04), and
             # with no canonical log on disk the db is the only artifact
             # (re-raise — never destroy what cannot be re-derived).
-            if "database is locked" in str(exc) or not self._log_path.is_file():
+            if sqlite_busy(exc) or not self._log_path.is_file():
                 raise
             self._recover_index(kwargs, exc)
 
@@ -423,7 +425,7 @@ class JsonlStore(SqliteStore[T], Generic[T]):
                 self._open_index()
                 return
             except sqlite3.Error as retry_exc:
-                if "database is locked" in str(retry_exc):
+                if sqlite_busy(retry_exc):
                     raise  # a live handle owns the index — not corruption
             _log.warning(
                 "jsonl-canonical: derived index %s unusable (%s) — "
@@ -524,7 +526,9 @@ class JsonlStore(SqliteStore[T], Generic[T]):
             os.fsync(fh.fileno())
             return fh.tell()
 
-    def _write(self, sql: str, row: tuple, line: str, is_fact: bool) -> str | None:
+    def _write(
+        self, sql: str, row: tuple, serialize_row, is_fact: bool
+    ) -> str | None:
         """Stage the INSERT, make the line durable, then stamp and commit.
 
         The INSERT runs first, uncommitted: a rejected row (duplicate id from
@@ -532,17 +536,34 @@ class JsonlStore(SqliteStore[T], Generic[T]):
         so a refused append can never orphan a line. Nothing is observable
         until the commit, which happens strictly after the fsync.
 
+        The log line serializes the COMMITTED read-back row, not the
+        caller-assembled one (SOL-R4-03): an AFTER trigger that rewrites
+        the row would otherwise put one truth in the index and another in
+        the canonical log — instant derivation divergence
+        (``audit_agreement`` fails on the very next check). The index is
+        what was committed; the log must derive-match it byte-for-byte.
+
         Reconcile first: see :meth:`_reconcile`.
         """
         self._reconcile()
+        # Codec pre-flight on the ASSEMBLED row: a row the codec refuses
+        # (string timestamp, non-JSON constant) must fail before sqlite's
+        # column affinity can coerce it into something committable — the
+        # early-refusal gate the codec has always been. The actual log
+        # bytes still come from the read-back row below.
+        serialize_row(row)
         try:
             self._conn.execute(sql, row)
-            # Committed-row honesty (SOL-R3-02): read the signature back
-            # after the INSERT (AFTER triggers fired), before commit — the
-            # receipt reports what the index will actually hold.
-            committed = self._committed_signature(
+            # Committed-row honesty (SOL-R3-02 + SOL-R4-02/03): read the
+            # COMPLETE row back after the INSERT (AFTER triggers fired),
+            # before any log byte and before commit — the receipt AND the
+            # log line both report what the index will actually hold; an
+            # absent row refuses.
+            committed_row = self._committed_full_row(
                 "facts" if is_fact else "ticks", row[0]
             )
+            committed = committed_row[-1]  # signature is the last column
+            line = serialize_row(committed_row)
             # The INSERT has taken sqlite's write lock, so the committed
             # markers read here cannot be raced by another handle: whatever
             # a concurrent writer stamped is already visible, and nothing
@@ -627,10 +648,10 @@ class JsonlStore(SqliteStore[T], Generic[T]):
         self._stamp(offset, facts, ticks)
 
     def _write_fact_row(self, row: tuple) -> str | None:
-        return self._write(FACT_INSERT_SQL, row, serialize_fact_row(row), True)
+        return self._write(FACT_INSERT_SQL, row, serialize_fact_row, True)
 
     def _write_tick_row(self, row: tuple) -> str | None:
-        return self._write(TICK_INSERT_SQL, row, serialize_tick_row(row), False)
+        return self._write(TICK_INSERT_SQL, row, serialize_tick_row, False)
 
     # ---- catch-up -----------------------------------------------------
 

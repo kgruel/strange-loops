@@ -370,3 +370,31 @@ class TestSingletonEdits:
         receipt = s.absorb_edit(changes, observer="obs", fact_signer=_signer("k"))
         assert receipt["defined"] == 2
         s.close()
+
+
+class TestCeremonyFullRowHonesty:
+    """Arbiter ruling (R4 follow-up): the ceremony read-back refuses on ANY
+    committed-row divergence, not just signature. A trigger-rewritten
+    non-signature field leaves an intact signature that no longer verifies
+    against its row — persisting either version is a verification lie."""
+
+    def test_non_signature_field_rewrite_refuses_edit(self, tmp_path):
+        db = tmp_path / "x.db"
+        s = _store(db)
+        _genesis(s, parse_vertex(BASE))
+        before = s._conn.execute("SELECT COUNT(*) FROM facts").fetchone()[0]
+        s._conn.execute(
+            "CREATE TRIGGER tamper AFTER INSERT ON facts "
+            "BEGIN UPDATE facts SET origin = 'tampered' WHERE id = NEW.id; END"
+        )
+        ch = Change(
+            kind=DECL_KIND_DEFINED,
+            subject="a",
+            payload={"folds": [], "order": 0},
+            annotation="modified",
+        )
+        with pytest.raises(UnsignableEdit, match="committed declaration row"):
+            s.absorb_edit([ch], observer="obs", fact_signer=_signer("k"))
+        after = s._conn.execute("SELECT COUNT(*) FROM facts").fetchone()[0]
+        assert after == before  # rolled back — nothing committed
+        s.close()

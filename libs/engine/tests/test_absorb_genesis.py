@@ -140,3 +140,23 @@ class TestReservedKindIngestGuard:
         v.receive(Fact(kind=DECL_GENESIS, ts=1.0, payload={}, observer="x"), grant=None)
         v.receive(Fact(kind="ping", ts=2.0, payload={}, observer="x"), grant=None)
         assert v.state("ping") == 1  # ping folded; genesis passed through
+
+
+class TestCeremonyFullRowHonesty:
+    """Arbiter ruling (R4 follow-up): the ceremony read-back refuses on ANY
+    committed-row divergence, not just signature. A trigger-rewritten
+    non-signature field leaves an intact signature that no longer verifies
+    against its row — persisting either version is a verification lie."""
+
+    def test_non_signature_field_rewrite_refuses_genesis(self, tmp_path):
+        db = tmp_path / "x.db"
+        s = _store(db)
+        s._conn.execute(
+            "CREATE TRIGGER tamper AFTER INSERT ON facts "
+            "BEGIN UPDATE facts SET origin = 'tampered' WHERE id = NEW.id; END"
+        )
+        with pytest.raises(UnsignableGenesis, match="committed genesis row"):
+            s.absorb_genesis(_DOCS, observer="x", fact_signer=_signer("k"))
+        count = s._conn.execute("SELECT COUNT(*) FROM facts").fetchone()[0]
+        assert count == 0  # rolled back — nothing committed
+        s.close()

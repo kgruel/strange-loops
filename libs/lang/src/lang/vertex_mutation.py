@@ -27,19 +27,28 @@ equivalent, not byte-identical). Editing or removing a kind inside a
 single-line ``loops`` block is not supported — expand it first (any insert
 does) or reformat by hand.
 
-PROVABLE DOMAIN (SOL-R4-01 arbiter ruling): the lexical guards — sibling
-multiplicity (``_loops_block_child_names``) and comment detection
-(``_has_comment_outside_strings``) — are quote-aware scans over
-SINGLE-LINE plain ``"…"`` KDL strings only. KDL raw strings of every hash
-depth INCLUDING zero (``r"…"``, ``#"…"#``, ``##"…"##``), multi-line
-strings (``\"\"\"``), and plain strings spanning a literal newline are
-OUTSIDE that domain: the scanners
-cannot track them, and the parser oracle is structurally blind to the
-physical multiplicity and trivia they can hide. Rather than grow a KDL
-lexer, every mutation refuses up front when the vertex text contains any
-of those delimiters (``_assert_scanner_provable_domain``) — a permanent,
-conservative refusal; edit such files by hand. The parser oracle
-(``_verified``) remains the post-condition backstop inside the domain.
+PROVABLE DOMAIN (SOL-R4-01 arbiter ruling, WHITELIST form since SOL-R6):
+the lexical guards — sibling multiplicity (``_loops_block_child_names``)
+and comment detection (``_has_comment_outside_strings``) — are line-based,
+quote-aware scans, so every mutation first holds the vertex text to the
+whitelist a three-state machine (code / plain_string / line_comment) can
+PROVE, refusing everything else up front
+(``_assert_scanner_provable_domain``):
+
+- LF-only documents (no ``\\r \\f U+0085 U+2028 U+2029`` anywhere);
+- plain ``"…"`` strings whose only escapes are ``\\\\`` and ``\\\"`` and
+  which never span a newline;
+- ``//`` line comments (their content is inert);
+- printable-ASCII code outside strings and comments (plus ``\\n``/``\\t``).
+
+Everything else — raw strings of any hash depth including ``r"…"``,
+multi-line ``\"\"\"`` strings, ``/*`` block comments and ``/-`` slashdash
+(legal INSIDE strings: glob patterns), other string escapes, non-ASCII or
+control characters in code position, unterminated strings — refuses with
+an actionable ValueError; edit such files by hand. Not the KDL lexer we
+declined: the smallest machine whose states make the whitelist provable.
+The parser oracle (``_verified``) remains the post-condition backstop
+inside the domain.
 """
 
 from __future__ import annotations
@@ -292,74 +301,129 @@ def _parse_vertex_or_raise(text: str, context: str):
         ) from exc
 
 
-# Delimiters of KDL string syntax the lexical scanners cannot track.
-# ``#"`` opens (and ``"#`` closes) a raw string of any hash depth — matching
-# either substring anywhere (even inside a plain string) is deliberately
-# over-broad: refusal is the cheap, permanent answer (zero raw strings in the
-# .vertex corpus). ``\"\"\"`` is a KDL multi-line string opener, equally
-# untrackable by the single-line quote scan.
-_UNPROVABLE_DELIMITERS = ('#"', '"#', '"""')
+# The full KDL newline set MINUS \n. Any of these anywhere in the document
+# desyncs the line-based splice/guard accounting (splitlines() splits on
+# them; the scanners assume LF), so they refuse outright — including inside
+# strings and comments.
+_NON_LF_NEWLINES = "\r\f\u0085\u2028\u2029"
+
+
+def _refuse(context: str, what: str) -> ValueError:
+    return ValueError(
+        f"{context}: the vertex text contains {what} — syntax the "
+        "mutation scanner cannot prove safe to splice over (the provable "
+        'whitelist is: LF-only documents, plain "…" strings with only '
+        '\\\\ and \\" escapes, // line comments, printable-ASCII code); '
+        "edit the file by hand"
+    )
 
 
 def _assert_scanner_provable_domain(text: str, context: str) -> None:
-    """Refuse mutation over syntax the lexical scanners cannot prove safe.
+    """WHITELIST the provable domain via a three-state machine (SOL-R6).
 
-    See the module docstring's PROVABLE DOMAIN contract (SOL-R4-01). The
-    scan covers the WHOLE vertex text, not just the ``loops`` block: the
-    block span itself is found by the same raw-string-blind line scan, so a
-    raw string outside the block could corrupt the span the guards inspect.
+    States: ``code`` / ``plain_string`` / ``line_comment``. Everything the
+    machine cannot prove is refused AT its first occurrence, so the
+    tracking is never trusted past an unprovable construct:
+
+    - non-LF newline characters (``\\r \\f U+0085 U+2028 U+2029``),
+      anywhere — checked up front (R6-01);
+    - in code state: ``/*`` (block comment — a quote inside ``/* " */``
+      would poison flat quote tracking, R6-02) and ``/-`` (slashdash);
+      ``//`` enters line_comment, where quotes are inert;
+    - in code state, at an opening quote: ``\"\"\"`` (multi-line string),
+      ``r`` immediately before it (zero-hash raw opener — trivially
+      position-aware here: a closing quote after the letter r is
+      plain_string state, so ``"system-monitor"`` stays allowed) and ``#``
+      immediately before it (hashed raw opener);
+    - in code state, ``#`` immediately after a closing quote (``"#``,
+      hashed raw closer);
+    - inside plain_string: a literal newline (R5), with ``\\\\`` and
+      ``\\\"`` escape-aware;
+    - an unterminated string at EOF.
+
+    ``/*`` INSIDE a plain string is legal corpus content (glob patterns
+    like ``"./**/*.loop"``) — exactly why this is a state machine, not a
+    substring search. Not the KDL lexer we declined: it is the smallest
+    machine whose states make the whitelist provable.
     """
-    for delim in _UNPROVABLE_DELIMITERS:
-        if delim in text:
-            raise ValueError(
-                f"{context}: the vertex text contains {delim!r} — KDL "
-                "raw-string / multi-line-string syntax the mutation "
-                "scanner cannot prove safe to splice over (its guards "
-                'track plain "…" strings only); edit the file by hand'
+    for nl in _NON_LF_NEWLINES:
+        if nl in text:
+            raise _refuse(
+                context,
+                f"a non-LF newline character ({nl!r}), which the "
+                "line-based scanners cannot prove safe to account for; "
+                "it falls",
             )
-    # Sol r5: two parser-accepted spellings the substring set misses — the
-    # ZERO-HASH raw-string opener ``r"…"`` and a plain string containing a
-    # LITERAL NEWLINE. One escape-aware left-to-right scan catches both.
-    # The scan is sound exactly because every construct that could poison
-    # its quote tracking (any hashed raw-string form, ``\"\"\"``) was
-    # already refused above, and it refuses AT the first occurrence of the
-    # two remaining unprovables — tracking is never trusted past one.
-    # ``r"`` is refused position-aware (letter r immediately before an
-    # OPENING quote), not as a bare substring: a plain string merely ending
-    # in the letter r (``"system-monitor"``, real corpus content) contains
-    # the two characters r" at its closing quote and is fine.
-    in_str = esc = False
-    prev = ""
-    for ch in text:
-        if in_str:
+
+    _CODE, _STRING, _COMMENT = 0, 1, 2
+    state = _CODE
+    esc = False
+    i = 0
+    n = len(text)
+    while i < n:
+        ch = text[i]
+        prev = text[i - 1] if i else ""
+        if state == _STRING:
             if esc:
+                if ch not in ('\\', '"'):
+                    raise _refuse(
+                        context,
+                        f"the string escape backslash-{ch!r} — only \\\\ "
+                        'and \\" are whitelisted (every escape form '
+                        "handled instead of refused is new unproven "
+                        "surface)",
+                    )
                 esc = False
             elif ch == "\\":
                 esc = True
             elif ch == '"':
-                in_str = False
+                state = _CODE
             elif ch == "\n":
-                raise ValueError(
-                    f"{context}: the vertex text contains a quoted string "
-                    "spanning a literal newline — syntax the line-based "
-                    "mutation scanner cannot prove safe to splice over; "
-                    "edit the file by hand"
+                raise _refuse(
+                    context, "a quoted string spanning a literal newline"
                 )
+        elif state == _COMMENT:
+            if ch == "\n":
+                state = _CODE
+        elif ch == "/":
+            nxt = text[i + 1 : i + 2]
+            if nxt == "/":
+                state = _COMMENT
+                i += 2
+                continue
+            if nxt == "*":
+                raise _refuse(context, "'/*' (a block comment opener)")
+            if nxt == "-":
+                raise _refuse(context, "'/-' (a slashdash comment)")
         elif ch == '"':
+            if text[i : i + 3] == '"""':
+                raise _refuse(context, "'\"\"\"' (a multi-line string)")
             if prev == "r":
-                raise ValueError(
-                    f"{context}: the vertex text contains r\" — the "
-                    "zero-hash KDL raw-string opener, syntax the mutation "
-                    "scanner cannot prove safe to splice over; edit the "
-                    "file by hand"
+                raise _refuse(
+                    context, "r\" (the zero-hash KDL raw-string opener)"
                 )
-            in_str = True
-        prev = ch
-    if in_str:
-        raise ValueError(
-            f"{context}: the vertex text ends inside an unterminated "
-            "quoted string — the mutation scanner cannot prove any splice "
-            "safe; edit the file by hand"
+            if prev == "#":
+                raise _refuse(
+                    context, "#\" (a hashed KDL raw-string opener)"
+                )
+            state = _STRING
+            esc = False
+        elif ch == "#" and prev == '"':
+            raise _refuse(context, "\"# (a hashed KDL raw-string closer)")
+        elif ch not in ("\n", "\t") and not (" " <= ch <= "~"):
+            # Non-ASCII / control characters in CODE state: BOMs, unicode
+            # quote lookalikes and friends refuse wholesale. Inside plain
+            # strings (and // comments) they stay legal content.
+            raise _refuse(
+                context,
+                f"the non-ASCII or control character {ch!r} in code "
+                "position (only inside quoted strings is it provable "
+                "content)",
+            )
+        i += 1
+    if state == _STRING:
+        raise _refuse(
+            context, "an unterminated quoted string at end of file"
         )
 
 
@@ -545,8 +609,8 @@ def add_vertex_kind(text: str, kind: str, definition: LoopDef) -> str:
     lines by the insert.
     """
     _validate_kind_name(kind)
-    before = _parse_vertex_or_raise(text, f"add_vertex_kind({kind!r})")
     _assert_scanner_provable_domain(text, f"add_vertex_kind({kind!r})")
+    before = _parse_vertex_or_raise(text, f"add_vertex_kind({kind!r})")
     _assert_unique_kind_nodes(text, f"add_vertex_kind({kind!r})")
     if kind in before.loops:
         raise ValueError(f"kind {kind!r} already exists; use edit_vertex_kind")
@@ -582,8 +646,8 @@ def edit_vertex_kind(text: str, kind: str, definition: LoopDef) -> str:
     documented expand-on-insert limitation is one-way).
     """
     _validate_kind_name(kind)
-    before = _parse_vertex_or_raise(text, f"edit_vertex_kind({kind!r})")
     _assert_scanner_provable_domain(text, f"edit_vertex_kind({kind!r})")
+    before = _parse_vertex_or_raise(text, f"edit_vertex_kind({kind!r})")
     _assert_unique_kind_nodes(text, f"edit_vertex_kind({kind!r})")
     try:
         start, end = kdl_find_block(text, ["loops", kind])
@@ -636,8 +700,8 @@ def remove_vertex_kind(text: str, kind: str) -> str:
     removing the last kind of a vertex with no other sources.
     """
     _validate_kind_name(kind)
-    before = _parse_vertex_or_raise(text, f"remove_vertex_kind({kind!r})")
     _assert_scanner_provable_domain(text, f"remove_vertex_kind({kind!r})")
+    before = _parse_vertex_or_raise(text, f"remove_vertex_kind({kind!r})")
     _assert_unique_kind_nodes(text, f"remove_vertex_kind({kind!r})")
     try:
         result = kdl_remove_child(text, ["loops"], kind)

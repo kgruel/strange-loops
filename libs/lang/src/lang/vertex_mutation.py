@@ -70,7 +70,9 @@ __all__ = [
 # Conservative bare-identifier subset of KDL. The splice layer matches
 # children by first token, so quoted node names are not representable —
 # names outside this set are rejected rather than escaped.
-_BARE_NAME_CHARS = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-"
+_BARE_NAME_CHARS = frozenset(
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-"
+)
 
 # Node names the loops block treats specially (never kind definitions).
 _RESERVED_KIND_NAMES = frozenset({"boundary"})
@@ -85,7 +87,7 @@ def _validate_kind_name(kind: str) -> None:
         raise ValueError(
             f"kind name {kind!r} must start with a letter or underscore"
         )
-    bad = set(kind) - set(_BARE_NAME_CHARS)
+    bad = set(kind) - _BARE_NAME_CHARS
     if bad:
         raise ValueError(
             f"kind name {kind!r} contains characters KDL cannot represent "
@@ -121,26 +123,25 @@ def _num(value: float) -> str:
 
 
 def _fold_op_kdl(target: str, op) -> str:
-    q = _q
-    t = _q(target, what="fold target") if set(target) - set(_BARE_NAME_CHARS) else target
+    t = _q(target, what="fold target") if set(target) - _BARE_NAME_CHARS else target
     if isinstance(op, FoldCount):
         return f'{t} "count"'
     if isinstance(op, FoldLatest):
         return f'{t} "latest"'
     if isinstance(op, FoldBy):
-        return f'{t} "by" {q(op.key_field, what="fold key_field")}'
+        return f'{t} "by" {_q(op.key_field, what="fold key_field")}'
     if isinstance(op, FoldSum):
-        return f'{t} "sum" {q(op.field, what="fold field")}'
+        return f'{t} "sum" {_q(op.field, what="fold field")}'
     if isinstance(op, FoldMax):
-        return f'{t} "max" {q(op.field, what="fold field")}'
+        return f'{t} "max" {_q(op.field, what="fold field")}'
     if isinstance(op, FoldMin):
-        return f'{t} "min" {q(op.field, what="fold field")}'
+        return f'{t} "min" {_q(op.field, what="fold field")}'
     if isinstance(op, FoldAvg):
-        return f'{t} "avg" {q(op.field, what="fold field")}'
+        return f'{t} "avg" {_q(op.field, what="fold field")}'
     if isinstance(op, FoldCollect):
         return f'{t} "collect" {int(op.max_items)}'
     if isinstance(op, FoldWindow):
-        return f'{t} "window" {int(op.size)} {q(op.field, what="fold field")}'
+        return f'{t} "window" {int(op.size)} {_q(op.field, what="fold field")}'
     raise ValueError(f"Unknown fold op: {op!r}")
 
 
@@ -161,7 +162,7 @@ def _boundary_kdl(boundary: Boundary, indent: str) -> list[str]:
     if isinstance(boundary, BoundaryWhen):
         head = f'boundary when={_q(boundary.kind, what="boundary kind")}'
         for k, v in boundary.match:
-            if set(k) - set(_BARE_NAME_CHARS):
+            if set(k) - _BARE_NAME_CHARS:
                 raise ValueError(
                     f"boundary match field {k!r} is not a bare KDL identifier"
                 )

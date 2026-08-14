@@ -335,19 +335,18 @@ def deserialize_row(line: str) -> tuple[str, tuple]:
     """Decode a SINGLE-record line, dispatching on ``"t"``. Returns
     ``(t, row)`` with the row at full arity (7 fact fields / 11 tick fields,
     signature last). A ``"t":"batch"`` line carries several records and is
-    refused here — decode it with :func:`deserialize_records`."""
-    obj = _load(line)
-    t = obj.get("t")
-    if t == _BATCH:
+    refused here — decode it with :func:`deserialize_records`.
+
+    Defined AS :func:`deserialize_records` plus the multi-record refusal
+    (a valid batch always expands to ≥ 2 rows), so decoding has exactly
+    one dispatch."""
+    records = deserialize_records(line)
+    if len(records) > 1:
         raise JsonlCodecError(
             "batch line carries multiple records — decode with "
             "deserialize_records, not deserialize_row"
         )
-    spec = _SPEC.get(t) if isinstance(t, str) else None
-    if spec is None:
-        raise JsonlCodecError(f"unknown record discriminator t={t!r}")
-    _validate(obj, spec)
-    return spec.t, _row_of(obj, spec)
+    return records[0]
 
 
 def deserialize_records(line: str) -> list[tuple[str, tuple]]:

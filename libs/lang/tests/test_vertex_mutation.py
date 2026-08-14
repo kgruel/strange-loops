@@ -193,6 +193,50 @@ class TestAddVertexKind:
         vf = parse_vertex(out)
         assert set(vf.loops) == {"decision", "task"}
 
+    def test_add_expansion_splits_every_sibling_onto_its_own_line(self):
+        # SOL-R1-01 root cause: expansion must not leave siblings sharing
+        # one physical line — later line-based edit/remove of one would
+        # silently delete the rest.
+        text = (
+            'name "t"\n'
+            'loops { decision { fold { items "by" "topic" } }; '
+            'task { fold { items "by" "name" } } }\n'
+        )
+        out = add_vertex_kind(text, "marker", BASIC)
+        assert set(parse_vertex(out).loops) == {"decision", "task", "marker"}
+        loops_body = out[out.index("loops {") :]
+        # Each kind opens on its own physical line.
+        for kind in ("decision", "task", "marker"):
+            opening_lines = [
+                ln for ln in loops_body.splitlines()
+                if ln.strip().startswith(kind)
+            ]
+            assert len(opening_lines) == 1, kind
+        # No line carries two kind declarations.
+        for ln in loops_body.splitlines():
+            assert not ("decision" in ln and "task" in ln), ln
+
+    def test_add_then_edit_then_remove_preserves_unrelated_kinds(self):
+        # SOL-R1-01 regression: the full add -> edit -> remove sequence on
+        # a multi-child single-line block must never lose unrelated kinds.
+        text = (
+            'name "t"\n'
+            'loops { decision { fold { items "by" "topic" } }; '
+            'task { fold { items "by" "name" } } }\n'
+        )
+        out = add_vertex_kind(text, "marker", BASIC)
+        out = edit_vertex_kind(
+            out,
+            "decision",
+            LoopDef(
+                folds=(FoldDecl("items", FoldBy("topic")),),
+                search=("message",),
+            ),
+        )
+        assert set(parse_vertex(out).loops) == {"decision", "task", "marker"}
+        out = remove_vertex_kind(out, "decision")
+        assert set(parse_vertex(out).loops) == {"task", "marker"}
+
     def test_add_duplicate_refuses(self):
         with pytest.raises(ValueError, match="already exists"):
             add_vertex_kind(MULTI, "decision", BASIC)
@@ -227,6 +271,19 @@ class TestEditVertexKind:
         with pytest.raises(ValueError, match="not found"):
             edit_vertex_kind(MULTI, "ghost", BASIC)
 
+    def test_edit_kind_sharing_a_line_with_siblings_fails_loud(self):
+        # SOL-R1-01 fail-loud guard: hand-authored shared line — editing
+        # the first kind must refuse, not silently delete its siblings.
+        text = (
+            'name "t"\n'
+            "loops {\n"
+            '  decision { fold { items "by" "topic" } }; '
+            'task { fold { items "by" "name" } }\n'
+            "}\n"
+        )
+        with pytest.raises(ValueError, match="sibling"):
+            edit_vertex_kind(text, "decision", BASIC)
+
     def test_edit_single_line_loops_block_unsupported(self):
         text = 'name "t"\nloops { decision { fold { items "by" "topic" } } }\n'
         with pytest.raises(ValueError, match="single-line"):
@@ -246,6 +303,19 @@ class TestRemoveVertexKind:
     def test_remove_last_kind_of_loops_only_vertex_refuses(self):
         with pytest.raises(ValueError, match="invalid vertex"):
             remove_vertex_kind(MULTI, "decision")
+
+    def test_remove_kind_sharing_a_line_with_siblings_fails_loud(self):
+        # SOL-R1-01 fail-loud guard: removal of a kind whose physical line
+        # carries siblings must refuse, not take the siblings with it.
+        text = (
+            'name "t"\n'
+            "loops {\n"
+            '  decision { fold { items "by" "topic" } }; '
+            'task { fold { items "by" "name" } }\n'
+            "}\n"
+        )
+        with pytest.raises(ValueError, match="sibling"):
+            remove_vertex_kind(text, "decision")
 
     def test_remove_single_line_loops_block_unsupported(self):
         text = 'name "t"\nloops { decision { } task { } }\n'

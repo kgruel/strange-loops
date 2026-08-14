@@ -35,7 +35,12 @@ from .ast import (
     FoldSum,
     FoldWindow,
 )
-from .population import kdl_find_block, kdl_insert_child, kdl_remove_child
+from .population import (
+    kdl_find_block,
+    kdl_insert_child,
+    kdl_remove_child,
+    kdl_split_top_level_nodes,
+)
 
 if TYPE_CHECKING:
     from .ast import Boundary, BoundaryCondition, LoopDef
@@ -262,6 +267,30 @@ def _kind_exists(text: str, kind: str) -> bool:
     return kind in parse_vertex(text).loops
 
 
+def _reject_shared_line(text: str, kind: str, verb: str) -> None:
+    """Fail loud when ``kind``'s physical line carries sibling nodes.
+
+    Line-based edit/remove operates on whole physical lines; a kind sharing
+    its line with siblings would silently take them with it. Refuse instead
+    (matching the documented reject-over-support posture for single-line
+    blocks). No-op when the kind is absent — the caller's own not-found
+    path reports that.
+    """
+    try:
+        start, end = kdl_find_block(text, ["loops", kind])
+    except ValueError:
+        return  # absent kind: caller reports not-found
+    if start != end:
+        return  # multi-line kind block: the span is unambiguous
+    line = text.splitlines()[start].strip()
+    if len(kdl_split_top_level_nodes(line)) > 1:
+        raise ValueError(
+            f"cannot {verb} kind {kind!r}: its line holds sibling "
+            "declarations too — a line-based mutation would silently "
+            "remove them; split each kind onto its own line first"
+        )
+
+
 def add_vertex_kind(text: str, kind: str, definition: LoopDef) -> str:
     """Add a loop-kind definition to vertex text; returns the new text.
 
@@ -302,6 +331,7 @@ def edit_vertex_kind(text: str, kind: str, definition: LoopDef) -> str:
     documented expand-on-insert limitation is one-way).
     """
     _validate_kind_name(kind)
+    _reject_shared_line(text, kind, "edit")
     try:
         start, end = kdl_find_block(text, ["loops", kind])
     except ValueError as exc:
@@ -332,6 +362,7 @@ def remove_vertex_kind(text: str, kind: str) -> str:
     removing the last kind of a vertex with no other sources.
     """
     _validate_kind_name(kind)
+    _reject_shared_line(text, kind, "remove")
     try:
         result = kdl_remove_child(text, ["loops"], kind)
     except ValueError as exc:

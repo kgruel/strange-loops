@@ -494,6 +494,64 @@ def _detect_indent(lines: list[str], start: int, end: int) -> str:
     return parent_indent + "  "
 
 
+def kdl_split_top_level_nodes(inner: str) -> list[str]:
+    """Split single-line KDL children into their top-level nodes.
+
+    Quote-aware (including ``\\"`` escapes) and brace-depth-aware: splits at
+    depth-0 ``;`` separators, and at the boundary after a depth-0 ``}`` when
+    the next node starts without a ``;`` (``decision { } task { }``).
+    Content inside strings or nested braces is never split.
+    """
+    nodes: list[str] = []
+    buf: list[str] = []
+    depth = 0
+    in_str = False
+    esc = False
+    node_closed = False  # buf holds a balanced node ended by a depth-0 '}'
+
+    def _flush() -> None:
+        nonlocal buf, node_closed
+        s = "".join(buf).strip()
+        if s:
+            nodes.append(s)
+        buf = []
+        node_closed = False
+
+    for ch in inner:
+        if in_str:
+            buf.append(ch)
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if node_closed and not ch.isspace():
+            if ch == ";":
+                _flush()
+                continue
+            _flush()
+        if ch == '"':
+            in_str = True
+            buf.append(ch)
+            continue
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                buf.append(ch)
+                node_closed = True
+                continue
+        elif ch == ";" and depth == 0:
+            _flush()
+            continue
+        buf.append(ch)
+    _flush()
+    return nodes
+
+
 def kdl_insert_child(
     text: str,
     parent_path: list[str],
@@ -565,7 +623,13 @@ def kdl_insert_child(
         child_indent = closing_indent + "  "
         new_lines = [opening]
         if inner:
-            new_lines.append(child_indent + inner)
+            # Genuinely split every existing top-level child onto its own
+            # line — leaving siblings sharing one physical line would make
+            # a later line-based edit/remove of one silently take the rest.
+            new_lines.extend(
+                child_indent + node
+                for node in kdl_split_top_level_nodes(inner)
+            )
         new_lines.extend(
             (child_indent + ln) if ln.strip() else ln
             for ln in body.splitlines()

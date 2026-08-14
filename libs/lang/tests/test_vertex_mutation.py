@@ -1,8 +1,11 @@
 """Tests for the public vertex-kind mutation API (lang.vertex_mutation).
 
 Covers:
-- loop_def_to_kdl serializer: reparse-equivalence for every feature the
-  grammar carries, plus rejection of unrepresentable input.
+- loop_def_to_kdl serializer: reparse-equivalence for every supported
+  declarative feature (fold/boundary/search/preview/edge/lifecycle), plus
+  rejection of unrepresentable input. Per-kind parse pipelines are OUTSIDE
+  the serializer's domain by contract — it refuses them (see the
+  production module docstring).
 - add/edit/remove_vertex_kind: absent, single-line, and multiline loops
   blocks; validation-before-return; preservation of unrelated content.
 - Corpus oracle: add-then-remove is byte-identical to the original for

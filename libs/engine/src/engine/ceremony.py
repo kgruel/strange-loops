@@ -456,21 +456,25 @@ def apply_declaration_update(
 
     Sequence (store-first, every prefix recoverable):
 
-    1. durable intent (sibling ``.vertex.intent``, tempfile+fsync+rename);
-    2. the S1b store ceremony — ``absorb_genesis`` or
+    1. open the canonical store — a failure here provably mutated nothing
+       and no intent exists yet, so it refuses typed with zero residue;
+    2. durable intent (sibling ``.vertex.intent``, tempfile+fsync+rename);
+    3. the S1b store ceremony — ``absorb_genesis`` or
        ``absorb_edit(expected_head=preview.expected_head)`` — which holds the
        identity check, CAS, sign-final-payload, and append in ONE
        transaction; a stale preview refuses INSIDE that transaction with the
        canonical log byte-identical;
-    3. the file-cache replace (``write_file`` injectable; the shipped default
+    4. the file-cache replace (``write_file`` injectable; the shipped default
        atomically writes ``preview.proposed_text``);
-    4. intent removal.
+    5. intent removal.
 
-    A failure in (2) removes the intent (nothing mutated) and returns
-    ``stale``/``refused``. A failure in (3) — including process death,
-    which simply never reaches (4) — leaves the intent for
-    :func:`recover_declaration_update` and, when the process survives to
-    report it, returns the typed ``needs-recovery`` state.
+    A typed refusal in (3) removes the intent (nothing mutated) and returns
+    ``stale``/``refused``; a raw backend failure there is ambiguous (the log
+    commits before the index) and leaves the intent as ``needs-recovery``.
+    A failure in (4) — including process death, which simply never reaches
+    (5) — leaves the intent for :func:`recover_declaration_update` and, when
+    the process survives to report it, returns the typed ``needs-recovery``
+    state.
 
     ``credentials`` supplies the operation-fresh fact signer
     (:class:`~engine.handle.CredentialProvider`, the ratified S3 shape);
@@ -522,125 +526,82 @@ def apply_declaration_update(
     if credentials is not None:
         fact_signer = credentials.for_write(vertex_path).fact_signer
 
-    # Cheap currency pre-check (edit mode) before the intent lands — the CAS
-    # inside absorb_edit remains the atomic guard; this only avoids intent
-    # churn on an already-known-stale preview.
-    if preview.mode == "edit":
-        import sqlite3
-
-        try:
-            store = _open_store(preview.canonical_path)
-        except (sqlite3.Error, OSError) as exc:
-            return DeclarationUpdateResult(
-                status="refused",
-                reason=(
-                    f"canonical store backend refused the open: {exc} — "
-                    "refusing before intent creation"
-                ),
-            )
-        try:
-            head_now = store.declaration_head()
-        finally:
-            store.close()
-        if head_now != preview.expected_head:
-            return DeclarationUpdateResult(
-                status="stale",
-                reason=(
-                    f"declaration head moved: preview captured "
-                    f"{preview.expected_head}, store is at {head_now} — "
-                    "re-plan against the current head"
-                ),
-            )
-
-    intent_path = _write_intent(preview, observer)
-
+    # ONE store open, BEFORE the intent lands (SOL-R2-04 two-scope floor):
+    # a failure at the open provably mutated nothing — no log byte written,
+    # and no intent exists yet to clean up — so it is a plain `refused`.
     # The writability probe cannot eliminate races (permissions can change
-    # between gate and open) — so expected backend failures during the store
-    # step are translated into typed outcomes (SOL-R2-04: the typed-catch is
-    # the floor). Two scopes with different guarantees: a failure at the
-    # OPEN provably mutated nothing (no log byte written) — the pre-commit
-    # intent is removed and the result is `refused`; a failure DURING the
-    # absorb is ambiguous on a JSONL-canonical store (log commits before
-    # index) — the intent stays and the result is `needs-recovery`.
+    # between gate and open), so the typed catch here is the floor.
     import sqlite3
 
     try:
         store = _open_store(preview.canonical_path)
     except (sqlite3.Error, OSError) as exc:
-        _remove_intent(intent_path)
         return DeclarationUpdateResult(
             status="refused",
             reason=(
                 f"canonical store backend refused the open: {exc} — "
-                "intent removed, nothing mutated"
+                "refusing before intent creation"
             ),
         )
+
+    # Per-mode ceremony table. Staleness is the store's own CAS (module
+    # docstring): GenesisExists / StaleDeclarationHead refuse inside the
+    # absorb transaction with the log byte-identical — there is no separate
+    # currency pre-check to race against.
+    if preview.mode == "genesis":
+        def ceremony() -> dict[str, Any]:
+            return store.absorb_genesis(
+                list(preview.documents),
+                observer=observer,
+                origin="",
+                fact_signer=fact_signer,
+            )
+
+        stale_exc: tuple = (GenesisExists,)
+        stale_reason = "lineage opened since plan: {exc}"
+        refuse_exc: tuple = (AmbiguousGenesis, UnsignableGenesis)
+    else:
+        def ceremony() -> dict[str, Any]:
+            return store.absorb_edit(
+                list(preview.changes),
+                observer=observer,
+                origin="",
+                fact_signer=fact_signer,
+                expected_head=preview.expected_head,
+            )
+
+        stale_exc = (StaleDeclarationHead,)
+        stale_reason = "{exc}"
+        refuse_exc = (
+            AmbiguousGenesis, NoGenesis, ReservedKindViolation, UnsignableEdit,
+        )
+
+    intent_path = _write_intent(preview, observer)
     try:
-        if preview.mode == "genesis":
-            try:
-                receipt = store.absorb_genesis(
-                    list(preview.documents),
-                    observer=observer,
-                    origin="",
-                    fact_signer=fact_signer,
-                )
-            except GenesisExists as exc:
-                _remove_intent(intent_path)
-                return DeclarationUpdateResult(
-                    status="stale",
-                    reason=f"lineage opened since plan: {exc}",
-                )
-            except (AmbiguousGenesis, UnsignableGenesis) as exc:
-                _remove_intent(intent_path)
-                return DeclarationUpdateResult(status="refused", reason=str(exc))
-            except (sqlite3.Error, OSError) as exc:
-                # A backend failure DURING the absorb is ambiguous on a
-                # JSONL-canonical store: the log line (the store) commits
-                # before the index row, so the ceremony may already be
-                # live. The intent stays — recover_declaration_update
-                # classifies not-applied vs applied from the log.
-                return DeclarationUpdateResult(
-                    status="needs-recovery",
-                    reason=(
-                        f"store step failed mid-ceremony ({exc}) — run "
-                        "recover_declaration_update; it classifies "
-                        "not-applied vs applied from the canonical store"
-                    ),
-                    intent_path=intent_path,
-                )
-        else:
-            try:
-                receipt = store.absorb_edit(
-                    list(preview.changes),
-                    observer=observer,
-                    origin="",
-                    fact_signer=fact_signer,
-                    expected_head=preview.expected_head,
-                )
-            except StaleDeclarationHead as exc:
-                _remove_intent(intent_path)
-                return DeclarationUpdateResult(status="stale", reason=str(exc))
-            except (
-                AmbiguousGenesis,
-                NoGenesis,
-                ReservedKindViolation,
-                UnsignableEdit,
-            ) as exc:
-                _remove_intent(intent_path)
-                return DeclarationUpdateResult(status="refused", reason=str(exc))
-            except (sqlite3.Error, OSError) as exc:
-                # Same ambiguity as the genesis branch: the log may have
-                # committed before the index failed. Leave the intent for
-                # recovery's log-anchored classification.
-                return DeclarationUpdateResult(
-                    status="needs-recovery",
-                    reason=(
-                        f"store step failed mid-ceremony ({exc}) — run "
-                        "recover_declaration_update; it classifies "
-                        "not-applied vs applied from the canonical store"
-                    ),
-                    intent_path=intent_path,
-                )
+        receipt = ceremony()
+    except stale_exc as exc:
+        _remove_intent(intent_path)
+        return DeclarationUpdateResult(
+            status="stale", reason=stale_reason.format(exc=exc)
+        )
+    except refuse_exc as exc:
+        _remove_intent(intent_path)
+        return DeclarationUpdateResult(status="refused", reason=str(exc))
+    except (sqlite3.Error, OSError) as exc:
+        # A backend failure DURING the absorb is ambiguous on a
+        # JSONL-canonical store: the log line (the store) commits before
+        # the index row, so the ceremony may already be live. The intent
+        # stays — recover_declaration_update classifies not-applied vs
+        # applied from the log.
+        return DeclarationUpdateResult(
+            status="needs-recovery",
+            reason=(
+                f"store step failed mid-ceremony ({exc}) — run "
+                "recover_declaration_update; it classifies "
+                "not-applied vs applied from the canonical store"
+            ),
+            intent_path=intent_path,
+        )
     finally:
         store.close()
 

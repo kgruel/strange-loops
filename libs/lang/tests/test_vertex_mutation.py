@@ -527,6 +527,19 @@ class TestParserOraclePostcondition:
             {"decision", "task"},
         )
 
+    def test_single_line_expansion_preserves_trailing_comment(self):
+        # SOL-R2-05: expansion of a single-line loops block must keep the
+        # complete suffix after the matching close — the trailing comment.
+        text = (
+            'name "t"\n'
+            'loops { decision { fold { items "by" "topic" } }; '
+            'task { fold { items "by" "name" } } } '
+            "// keep this loops comment\n"
+        )
+        out = add_vertex_kind(text, "marker", BASIC)
+        assert set(parse_vertex(out).loops) == {"decision", "task", "marker"}
+        assert "// keep this loops comment" in out
+
     def test_non_kind_content_change_refuses(self):
         # The oracle also covers non-loop vertex content: a splice that
         # altered e.g. the store declaration must refuse. The normal splice

@@ -619,7 +619,9 @@ def kdl_insert_child(
         opening = line[: open_idx + 1].rstrip()
         inner = line[open_idx + 1 : close_idx].strip()
         closing_indent = line[: len(line) - len(line.lstrip())]
-        closing = closing_indent + "}"
+        # Preserve the COMPLETE suffix after the matching close — a trailing
+        # comment (`} // note`) must survive the expansion (SOL-R2-05).
+        closing = closing_indent + "}" + line[close_idx + 1 :].rstrip()
         child_indent = closing_indent + "  "
         new_lines = [opening]
         if inner:

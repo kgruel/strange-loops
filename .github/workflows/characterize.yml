@@ -1,0 +1,70 @@
+name: Characterize
+
+# Records what the core costs, at every commit that lands on main. This is a
+# RECORDER, NOT A GATE — it never fails the build on a slow number.
+#
+# Why not a gate: hosted runners vary between runs by more than this instrument
+# can resolve, so a threshold here would fire on noise and get muted, which is
+# worse than having no gate at all. What survives runner noise is complexity
+# class and large factors — an operation that grows with store depth when it
+# should be flat — and that is exactly what the depth sweep reports.
+#
+# The value is the series. One arm per commit on main, each stamped with its
+# SHA, means the progression before and after a merge is a matter of record
+# rather than of memory. Read them with benchmarks/characterize.py --compare,
+# and read benchmarks/LEDGER.md first for what this instrument cannot see.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  characterize:
+    name: Record cost curves (not a gate)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # git describe needs history for the arm's provenance
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Record arm
+        run: |
+          uv run python benchmarks/characterize.py \
+            --label "ci-${GITHUB_SHA::12}" \
+            --record "arm-${GITHUB_SHA::12}.json" \
+            | tee characterize-output.txt
+
+      - name: Publish curves to the run summary
+        if: always()
+        run: |
+          {
+            echo "## Cost curves — \`${GITHUB_SHA::12}\`"
+            echo ""
+            echo "Recorded on a hosted runner. Read for **complexity class and large"
+            echo "factors only** — runner variance exceeds what this can resolve for"
+            echo "small deltas. See \`benchmarks/LEDGER.md\`."
+            echo ""
+            echo '```'
+            cat characterize-output.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload arm
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: characterization-arm-${{ github.sha }}
+          path: arm-*.json
+          retention-days: 90

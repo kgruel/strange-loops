@@ -1,4 +1,4 @@
-"""Contract and unit tests for client types, models, and exceptions."""
+"""Contract and unit tests for SDK types, models, and exceptions."""
 
 from __future__ import annotations
 
@@ -7,11 +7,9 @@ from datetime import UTC, datetime
 
 import pytest
 
-from client import (
+from sdk import (
     AdmissionFailed,
     CeremonyFailed,
-    ClientError,
-    ClientValueError,
     CommittedEmissionError,
     EmissionFailed,
     EmitReceipt,
@@ -20,6 +18,8 @@ from client import (
     InvalidEmissionRequest,
     KindMutationResult,
     ReadSummary,
+    SdkError,
+    SdkValueError,
     TargetError,
     TargetNotFound,
     TargetNotWritable,
@@ -32,24 +32,24 @@ from client import (
 
 
 def test_exception_hierarchy() -> None:
-    """Exception classes follow strict inheritance under ClientError."""
+    """Exception classes follow strict inheritance under SdkError."""
     # Target errors
-    assert issubclass(TargetError, ClientError)
+    assert issubclass(TargetError, SdkError)
     assert issubclass(TargetNotFound, TargetError)
     assert issubclass(TargetUnsupported, TargetError)
     assert issubclass(TargetNotWritable, TargetError)
 
     # Emission & Admission errors
-    assert issubclass(AdmissionFailed, ClientError)
-    assert issubclass(EmissionFailed, ClientError)
-    assert issubclass(ClientValueError, ClientError)
-    assert issubclass(ClientValueError, ValueError)
-    assert issubclass(InvalidEmissionRequest, ClientValueError)
+    assert issubclass(AdmissionFailed, SdkError)
+    assert issubclass(EmissionFailed, SdkError)
+    assert issubclass(SdkValueError, SdkError)
+    assert issubclass(SdkValueError, ValueError)
+    assert issubclass(InvalidEmissionRequest, SdkValueError)
     assert issubclass(InvalidEmissionRequest, EmissionFailed)
     assert issubclass(CommittedEmissionError, EmissionFailed)
 
     # Ceremony errors
-    assert issubclass(CeremonyFailed, ClientError)
+    assert issubclass(CeremonyFailed, SdkError)
 
 
 def test_committed_emission_error_preserves_fact_id() -> None:
@@ -58,7 +58,7 @@ def test_committed_emission_error_preserves_fact_id() -> None:
     assert str(err) == "Post-commit hook failed"
     assert err.fact_id == "fact-0123456789"
     assert isinstance(err, EmissionFailed)
-    assert isinstance(err, ClientError)
+    assert isinstance(err, SdkError)
 
 
 def test_admission_failed_attributes() -> None:
@@ -73,7 +73,7 @@ def test_admission_failed_attributes() -> None:
     assert err.observer == "alice"
     assert err.kind == "unregistered_kind"
     assert err.vertex == "main_vertex"
-    assert isinstance(err, ClientError)
+    assert isinstance(err, SdkError)
 
 
 # =============================================================================
@@ -108,7 +108,7 @@ def test_read_summary_model() -> None:
 
     # Serialization
     d = summary.as_dict()
-    assert d["schema"] == "loops.cli/read-summary/v1"
+    assert d["schema"] == "loops.sdk/read-summary/v1"
     assert d["target_type"] == "vertex"
     assert d["target_path"] == "/tmp/test.vertex"
     assert d["canonical_mode"] == "sqlite"
@@ -140,7 +140,7 @@ def test_fact_page_result_model() -> None:
 
     # Serialization
     d = page.as_dict()
-    assert d["schema"] == "loops.cli/facts-page/v1"
+    assert d["schema"] == "loops.sdk/facts-page/v1"
     assert len(d["items"]) == 1
     assert d["next_cursor"] == "cursor_token"
     assert d["truncated"] is True
@@ -163,7 +163,7 @@ def test_fold_state_result_model() -> None:
 
     # Serialization
     d = state.as_dict()
-    assert d["schema"] == "loops.cli/fold-state/v1"
+    assert d["schema"] == "loops.sdk/fold-state/v1"
     assert d["vertex_name"] == "my_vertex"
     assert d["declaration_status"] == "store"
     assert d["sections"]["note"]["count"] == 5
@@ -189,7 +189,7 @@ def test_emit_receipt_model() -> None:
 
     # Serialization
     d = receipt.as_dict()
-    assert d["schema"] == "loops.cli/emit-receipt/v1"
+    assert d["schema"] == "loops.sdk/emit-receipt/v1"
     assert d["id"] == "01JABCD12345"
     assert d["stored"] is True
     assert d["signed"] is True
@@ -203,7 +203,7 @@ def test_emit_receipt_model() -> None:
 
 def test_emit_preview_result_model() -> None:
     """EmitPreviewResult defaults, frozenness, and as_dict conversion."""
-    from client import EmitPreviewResult
+    from sdk import EmitPreviewResult
 
     preview = EmitPreviewResult(
         target="/tmp/test.vertex",
@@ -228,7 +228,7 @@ def test_emit_preview_result_model() -> None:
 
     # Serialization
     d = preview.as_dict()
-    assert d["schema"] == "loops.cli/emit-preview/v1"
+    assert d["schema"] == "loops.sdk/emit-preview/v1"
     assert d["target"] == "/tmp/test.vertex"
     assert d["kind"] == "task"
     assert d["kind_declared"] is True
@@ -254,7 +254,7 @@ def test_kind_mutation_result_model() -> None:
 
     # Serialization
     d = result.as_dict()
-    assert d["schema"] == "loops.cli/kind-mutation/v1"
+    assert d["schema"] == "loops.sdk/kind-mutation/v1"
     assert d["status"] == "applied"
     assert d["reason"] == "ok"
     assert d["mode"] == "clean"
@@ -264,7 +264,7 @@ def test_kind_mutation_result_model() -> None:
 
 def test_search_result_models() -> None:
     """SearchResult and SearchResultItem defaults, immutability, and serialization."""
-    from client import SearchResult, SearchResultItem
+    from sdk import SearchResult, SearchResultItem
 
     item = SearchResultItem(
         id="01FACT00000000000000000001",
@@ -284,7 +284,7 @@ def test_search_result_models() -> None:
         res.total_matches = 2  # type: ignore[misc]
 
     d = res.as_dict()
-    assert d["schema"] == "loops.cli/search-result/v1"
+    assert d["schema"] == "loops.sdk/search-result/v1"
     assert d["query"] == "task"
     assert d["total_matches"] == 1
     assert len(d["matches"]) == 1
@@ -293,7 +293,7 @@ def test_search_result_models() -> None:
 
 def test_timeline_result_models() -> None:
     """TimelineResult and TimelineEvent defaults, immutability, and serialization."""
-    from client import TimelineEvent, TimelineResult
+    from sdk import TimelineEvent, TimelineResult
 
     evt = TimelineEvent(
         event_type="fact",
@@ -312,7 +312,7 @@ def test_timeline_result_models() -> None:
         res.total_events = 2  # type: ignore[misc]
 
     d = res.as_dict()
-    assert d["schema"] == "loops.cli/timeline-result/v1"
+    assert d["schema"] == "loops.sdk/timeline-result/v1"
     assert d["start_ts"] == 1700000000.0
     assert d["total_events"] == 1
     assert len(d["events"]) == 1
@@ -320,7 +320,7 @@ def test_timeline_result_models() -> None:
 
 def test_sync_result_model() -> None:
     """SyncResult defaults, immutability, and serialization."""
-    from client import SyncResult
+    from sdk import SyncResult
 
     res = SyncResult(
         target_path="/tmp/test.vertex",
@@ -333,7 +333,7 @@ def test_sync_result_model() -> None:
         res.status = "failed"  # type: ignore[misc]
 
     d = res.as_dict()
-    assert d["schema"] == "loops.cli/sync-result/v1"
+    assert d["schema"] == "loops.sdk/sync-result/v1"
     assert d["target_path"] == "/tmp/test.vertex"
     assert d["status"] == "synced"
     assert d["indexed_facts"] == 42
@@ -342,7 +342,7 @@ def test_sync_result_model() -> None:
 
 def test_init_vertex_result_model() -> None:
     """InitVertexResult defaults, immutability, and serialization."""
-    from client import InitVertexResult
+    from sdk import InitVertexResult
 
     res = InitVertexResult(
         target_path="/tmp/app.vertex",
@@ -356,7 +356,7 @@ def test_init_vertex_result_model() -> None:
         res.name = "other"  # type: ignore[misc]
 
     d = res.as_dict()
-    assert d["schema"] == "loops.cli/init-vertex/v1"
+    assert d["schema"] == "loops.sdk/init-vertex/v1"
     assert d["name"] == "app"
     assert d["store_type"] == "sqlite"
     assert d["file_written"] is True
@@ -364,7 +364,7 @@ def test_init_vertex_result_model() -> None:
 
 def test_declaration_inspection_result_model() -> None:
     """DeclarationInspectionResult defaults, immutability, and serialization."""
-    from client import DeclarationInspectionResult
+    from sdk import DeclarationInspectionResult
 
     res = DeclarationInspectionResult(
         target_path="/tmp/app.vertex",
@@ -384,7 +384,7 @@ def test_declaration_inspection_result_model() -> None:
         res.strict = False  # type: ignore[misc]
 
     d = res.as_dict()
-    assert d["schema"] == "loops.cli/declaration-inspection/v1"
+    assert d["schema"] == "loops.sdk/declaration-inspection/v1"
     assert d["declared_kinds"] == ["note", "task"]
     assert d["strict"] is True
     assert d["syntax_valid"] is True
@@ -392,7 +392,7 @@ def test_declaration_inspection_result_model() -> None:
 
 def test_declaration_plan_result_model() -> None:
     """DeclarationPlanResult defaults, immutability, and serialization."""
-    from client import DeclarationPlanResult
+    from sdk import DeclarationPlanResult
 
     res = DeclarationPlanResult(
         applicable=True,
@@ -406,7 +406,7 @@ def test_declaration_plan_result_model() -> None:
         res.applicable = False  # type: ignore[misc]
 
     d = res.as_dict()
-    assert d["schema"] == "loops.cli/declaration-plan/v1"
+    assert d["schema"] == "loops.sdk/declaration-plan/v1"
     assert d["applicable"] is True
     assert d["mode"] == "clean"
     assert len(d["changes"]) == 1

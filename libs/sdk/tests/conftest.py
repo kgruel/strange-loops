@@ -1,4 +1,4 @@
-"""Test configuration and fixtures for libs/client tests."""
+"""Test configuration and fixtures for libs/sdk tests."""
 
 from __future__ import annotations
 

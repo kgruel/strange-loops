@@ -1,4 +1,4 @@
-"""client — Loops apex composition library.
+"""sdk — Loops apex composition library.
 
 The single headless composition layer over engine, custody, lang, store, atoms, and sign.
 Provides high-level, transport-agnostic read, emit, and kind mutation operations
@@ -31,8 +31,6 @@ from .target import TargetInfo, discover_targets, resolve_target
 from .types import (
     AdmissionFailed,
     CeremonyFailed,
-    ClientError,
-    ClientValueError,
     CommittedEmissionError,
     DeclarationInspectionResult,
     DeclarationPlanResult,
@@ -45,6 +43,8 @@ from .types import (
     InvalidEmissionRequest,
     KindMutationResult,
     ReadSummary,
+    SdkError,
+    SdkValueError,
     SearchResult,
     SearchResultItem,
     SyncResult,
@@ -100,8 +100,8 @@ __all__ = [
     "SyncResult",
     "KindMutationResult",
     # Exceptions
-    "ClientError",
-    "ClientValueError",
+    "SdkError",
+    "SdkValueError",
     "TargetError",
     "TargetNotFound",
     "TargetUnsupported",

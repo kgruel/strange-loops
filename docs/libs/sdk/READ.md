@@ -1,6 +1,6 @@
 # Read and Query Operations in Loops
 
-The `libs/client` library provides headless, non-destructive read operations over Loops artifacts. It operates uniformly over `.vertex` declarations, standalone `.jsonl` append-logs, `.db` SQLite stores, and multi-store aggregate compositions (`combine`, `discover`).
+The `libs/sdk` library provides headless, non-destructive read operations over Loops artifacts. It operates uniformly over `.vertex` declarations, standalone `.jsonl` append-logs, `.db` SQLite stores, and multi-store aggregate compositions (`combine`, `discover`).
 
 All reads are point-in-time consistent and automatically verify derived index agreement via non-blocking preflight recovery.
 
@@ -9,7 +9,7 @@ All reads are point-in-time consistent and automatically verify derived index ag
 ## 1. API Reference Overview
 
 ```python
-from client import (
+from sdk import (
     read_summary,
     read_facts,
     read_state,
@@ -42,7 +42,7 @@ from client import (
 Returns high-level storage metrics, kind distribution, attestation counts, and index agreement:
 
 ```python
-from client import read_summary
+from sdk import read_summary
 
 summary = read_summary("project.vertex")
 print(f"Total facts: {summary.fact_total}, Total ticks: {summary.tick_total}")
@@ -58,7 +58,7 @@ for kind, stats in summary.kinds.items():
 Queries facts using stable witness cursors (`WitnessPosition`):
 
 ```python
-from client import read_facts
+from sdk import read_facts
 
 # Read first page (newest first)
 page1 = read_facts("project.vertex", limit=20, kind="task", order="newest")
@@ -80,7 +80,7 @@ if page1.next_cursor:
 Replays the declared vertex folds into live materialized state:
 
 ```python
-from client import read_state
+from sdk import read_state
 
 state = read_state("project.vertex")
 for kind, section in state.sections.items():
@@ -95,7 +95,7 @@ for kind, section in state.sections.items():
 Performs indexed full-text search against observation payloads:
 
 ```python
-from client import search_facts
+from sdk import search_facts
 
 results = search_facts("project.vertex", query="architecture refactor", limit=10)
 for match in results.matches:
@@ -108,7 +108,7 @@ for match in results.matches:
 Resolves a domain entity fold-key to its canonical fact ULID:
 
 ```python
-from client import resolve_entity
+from sdk import resolve_entity
 
 fact_id = resolve_entity("project.vertex", kind="task", key="task_id", value="TASK-42")
 if fact_id:
@@ -121,7 +121,7 @@ if fact_id:
 Reads an interleaved, chronological stream of both facts and sealed ticks:
 
 ```python
-from client import read_timeline
+from sdk import read_timeline
 
 timeline = read_timeline("project.vertex", start_ts=1700000000.0, limit=50)
 for event in timeline.events:
@@ -137,7 +137,7 @@ for event in timeline.events:
 Synchronizes derived SQLite indices and FTS5 search tables:
 
 ```python
-from client import sync_target
+from sdk import sync_target
 
 sync = sync_target("project.vertex")
 print(f"Index status: {sync.status}, indexed {sync.indexed_facts} facts in {sync.duration_ms:.2f}ms")
@@ -147,7 +147,7 @@ print(f"Index status: {sync.status}, indexed {sync.indexed_facts} facts in {sync
 
 ### `read_ticks(target, *, name=None)` & `read_fact_by_id(target, fact_id)`
 ```python
-from client import read_ticks, read_fact_by_id
+from sdk import read_ticks, read_fact_by_id
 
 # Retrieve all ticks or filter by cadence mark name
 ticks = read_ticks("project.vertex", name="daily")

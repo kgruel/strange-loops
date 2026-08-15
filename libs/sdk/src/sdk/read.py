@@ -30,11 +30,11 @@ from engine.witness import resolve_witness_position
 
 from .target import resolve_target
 from .types import (
-    ClientError,
-    ClientValueError,
     FactPageResult,
     FoldStateResult,
     ReadSummary,
+    SdkError,
+    SdkValueError,
     SearchResult,
     SearchResultItem,
     SyncResult,
@@ -265,7 +265,7 @@ def read_facts(
         FactPageResult containing deserialized fact items and pagination metadata.
     """
     if order not in ("newest", "oldest"):
-        raise ClientValueError(f"invalid order '{order}': expected 'newest' or 'oldest'")
+        raise SdkValueError(f"invalid order '{order}': expected 'newest' or 'oldest'")
 
     info = resolve_target(target)
     target_path = Path(target).resolve()
@@ -588,7 +588,7 @@ def search_facts(
                 total_matches=len(matches),
             )
         except Exception as exc:
-            raise ClientError(f"full-text search failed on {target_path}: {exc}") from exc
+            raise SdkError(f"full-text search failed on {target_path}: {exc}") from exc
 
     canonical = info.canonical_path or target_path
     index_path = info.index_path or canonical
@@ -631,7 +631,7 @@ def search_facts(
             total_matches=len(matches),
         )
     except Exception as exc:
-        raise ClientError(f"full-text search failed on {target_path}: {exc}") from exc
+        raise SdkError(f"full-text search failed on {target_path}: {exc}") from exc
     finally:
         reader.close()
 
@@ -703,7 +703,7 @@ def read_timeline(
         TimelineResult containing merged events with honest total counts and truncation markers.
     """
     if order not in ("oldest", "newest"):
-        raise ClientValueError(f"invalid order '{order}': expected 'oldest' or 'newest'")
+        raise SdkValueError(f"invalid order '{order}': expected 'oldest' or 'newest'")
 
     info = resolve_target(target)
     target_path = Path(target).resolve()

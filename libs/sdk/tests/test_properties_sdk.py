@@ -1,4 +1,4 @@
-"""Property-based invariant tests for client operations using Hypothesis."""
+"""Property-based invariant tests for SDK operations using Hypothesis."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from atoms.testing.strategies import payloads
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from client import (
+from sdk import (
     emit_fact,
     read_fact_by_id,
     read_facts,
@@ -31,7 +31,7 @@ def test_property_emission_and_pagination_invariants(
     fact_items: list[tuple[str, dict]],
 ) -> None:
     """Property: Paginating facts partitions the store completely without duplicates or loss."""
-    tmp_path = tmp_path_factory.mktemp("prop_client")
+    tmp_path = tmp_path_factory.mktemp("prop_sdk")
     vertex_path = tmp_path / "prop.vertex"
     vertex_path.write_text(
         'name "prop"\nstore ".loops/data/prop.db"\n'

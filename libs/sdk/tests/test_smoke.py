@@ -1,4 +1,4 @@
-"""End-to-end smoke tests for client operations (read, emit, kind mutations)."""
+"""End-to-end smoke tests for SDK operations (read, emit, kind mutations)."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from client import (
+from sdk import (
     EmitReceipt,
     FactPageResult,
     FoldStateResult,
@@ -51,7 +51,7 @@ def test_emit_and_read_roundtrip(sample_vertex: Path):
     receipt = emit_fact(
         sample_vertex,
         "note",
-        {"title": "First Note", "body": "Testing client emit"},
+        {"title": "First Note", "body": "Testing sdk emit"},
         observer="tester",
     )
     assert isinstance(receipt, EmitReceipt)

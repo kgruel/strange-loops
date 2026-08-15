@@ -1,4 +1,4 @@
-"""Contract and unit tests for client target resolution."""
+"""Contract and unit tests for SDK target resolution."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from client import (
+from sdk import (
     TargetInfo,
     TargetNotFound,
     TargetUnsupported,
@@ -132,7 +132,7 @@ def test_resolve_target_accepts_str_and_path(tmp_path: Path) -> None:
 
 def test_discover_targets_tree(tmp_path: Path) -> None:
     """discover_targets scans directories and finds vertices and stores."""
-    from client import discover_targets
+    from sdk import discover_targets
 
     # Create workspace tree
     sub1 = tmp_path / "apps" / "frontend"

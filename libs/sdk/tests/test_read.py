@@ -1,4 +1,4 @@
-"""Integration and contract tests for client read operations."""
+"""Integration and contract tests for SDK read operations."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from client import (
+from sdk import (
     EmitReceipt,
     FactPageResult,
     FoldStateResult,
@@ -289,7 +289,7 @@ def test_fold_serialization_helpers() -> None:
     """_serialize_fold_item and _serialize_fold_section preserve edge and scalar shapes."""
     from types import SimpleNamespace
 
-    from client.read import _serialize_fold_item, _serialize_fold_section
+    from sdk.read import _serialize_fold_item, _serialize_fold_section
 
     mock_edge = SimpleNamespace(predicate="relates_to", address="other/123")
     mock_item = SimpleNamespace(
@@ -348,7 +348,7 @@ def test_fold_serialization_helpers() -> None:
 
 def test_sync_target_and_search_facts(tmp_path: Path) -> None:
     """sync_target indexes searchable fields and search_facts finds matching payloads."""
-    from client import search_facts, sync_target
+    from sdk import search_facts, sync_target
 
     vertex = tmp_path / "searchable.vertex"
     vertex.write_text(
@@ -394,7 +394,7 @@ def test_sync_target_and_search_facts(tmp_path: Path) -> None:
 
 def test_resolve_entity(tmp_path: Path) -> None:
     """resolve_entity looks up a canonical fact ID by fold key field and value."""
-    from client import resolve_entity
+    from sdk import resolve_entity
 
     vertex = tmp_path / "keyed.vertex"
     vertex.write_text(
@@ -425,7 +425,7 @@ def test_resolve_entity(tmp_path: Path) -> None:
 
 def test_read_timeline_interleaved(tmp_path: Path) -> None:
     """read_timeline streams facts and ticks in chronological sequence."""
-    from client import read_timeline
+    from sdk import read_timeline
 
     vertex = tmp_path / "timeline.vertex"
     vertex.write_text(
@@ -515,7 +515,7 @@ def test_combine_aggregate_reads(tmp_path: Path) -> None:
     assert len(facts_page.items) == 2
 
     # Combined search
-    from client import search_facts
+    from sdk import search_facts
 
     search_res = search_facts(parent, "Task")
     assert search_res.total_matches == 0 or isinstance(search_res.matches, list)
@@ -523,7 +523,7 @@ def test_combine_aggregate_reads(tmp_path: Path) -> None:
 
 def test_read_timeline_time_window(tmp_path: Path) -> None:
     """read_timeline filters events within start_ts and end_ts bounds."""
-    from client import read_timeline
+    from sdk import read_timeline
 
     vertex = tmp_path / "window.vertex"
     vertex.write_text(
@@ -553,7 +553,7 @@ def test_read_timeline_time_window(tmp_path: Path) -> None:
 
 def test_read_timeline_missing_target(tmp_path: Path) -> None:
     """read_timeline raises TargetNotFound on non-existent path."""
-    from client import TargetNotFound, read_timeline
+    from sdk import TargetNotFound, read_timeline
 
     missing = tmp_path / "absent.jsonl"
     with pytest.raises(TargetNotFound):
@@ -562,7 +562,7 @@ def test_read_timeline_missing_target(tmp_path: Path) -> None:
 
 def test_sync_target_missing_store(tmp_path: Path) -> None:
     """sync_target raises TargetNotFound on non-existent path."""
-    from client import TargetNotFound, sync_target
+    from sdk import TargetNotFound, sync_target
 
     missing = tmp_path / "absent.jsonl"
     with pytest.raises(TargetNotFound):
@@ -571,7 +571,7 @@ def test_sync_target_missing_store(tmp_path: Path) -> None:
 
 def test_sync_target_bare_store(tmp_path: Path) -> None:
     """sync_target on valid bare store runs preflight recovery and returns synced status."""
-    from client import sync_target
+    from sdk import sync_target
 
     log = tmp_path / "bare.jsonl"
     log.write_text(
@@ -591,7 +591,7 @@ def test_sync_target_bare_store(tmp_path: Path) -> None:
 
 def test_search_facts_bare_store(tmp_path: Path) -> None:
     """search_facts on bare store returns matching SearchResult or empty if not indexed."""
-    from client import search_facts
+    from sdk import search_facts
 
     log = tmp_path / "bare.jsonl"
     log.write_text(

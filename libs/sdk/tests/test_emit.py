@@ -1,4 +1,4 @@
-"""Integration and contract tests for client fact emission operations."""
+"""Integration and contract tests for SDK fact emission operations."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from custody import ensure_signing_key
 
-from client import (
+from sdk import (
     AdmissionFailed,
     EmitReceipt,
     TargetNotFound,
@@ -91,7 +91,7 @@ def test_emit_fact_with_id_override(sample_vertex: Path) -> None:
 
 def test_emit_fact_missing_observer_raises_value_error(sample_vertex: Path) -> None:
     """Emitting by kind without observer raises InvalidEmissionRequest."""
-    from client import InvalidEmissionRequest
+    from sdk import InvalidEmissionRequest
 
     with pytest.raises(InvalidEmissionRequest) as exc_info:
         emit_fact(sample_vertex, "note", {"title": "No observer"})
@@ -159,7 +159,7 @@ def test_emit_fact_nonexistent_vertex_raises_target_not_found(tmp_path: Path) ->
 
 def test_custody_credential_provider_for_write(sample_vertex: Path) -> None:
     """CustodyCredentialProvider returns valid WriteCredentials with signers."""
-    from client.emit import CustodyCredentialProvider
+    from sdk.emit import CustodyCredentialProvider
 
     # Without keys, signers are None
     provider = CustodyCredentialProvider()
@@ -243,7 +243,7 @@ def test_emit_fact_custom_credentials_provider(sample_vertex: Path) -> None:
 
 def test_emit_fact_corrupt_vertex_raises_emission_failed(tmp_path: Path) -> None:
     """emit_fact raises EmissionFailed if vertex cannot be opened."""
-    from client import EmissionFailed
+    from sdk import EmissionFailed
 
     corrupt_vertex = tmp_path / "corrupt.vertex"
     corrupt_vertex.write_text("invalid { [ unclosed", encoding="utf-8")
@@ -265,7 +265,7 @@ def test_emit_fact_corrupt_vertex_raises_emission_failed(tmp_path: Path) -> None
 
 def test_preview_emission_declared_kind(sample_vertex: Path) -> None:
     """preview_emission evaluates declared kind and fold key without disk writes."""
-    from client import EmitPreviewResult, preview_emission
+    from sdk import EmitPreviewResult, preview_emission
 
     preview = preview_emission(
         sample_vertex,
@@ -289,7 +289,7 @@ def test_preview_emission_declared_kind(sample_vertex: Path) -> None:
 
 def test_preview_emission_strict_rejection(strict_vertex: Path) -> None:
     """preview_emission returns admitted=False when strict vertex rejects kind."""
-    from client import preview_emission
+    from sdk import preview_emission
 
     preview = preview_emission(
         strict_vertex,
@@ -334,7 +334,7 @@ def test_emit_batch_multiple_shapes(sample_vertex: Path) -> None:
     """emit_batch commits a sequence of facts under a single handle session."""
     from atoms import Fact
 
-    from client import emit_batch
+    from sdk import emit_batch
 
     items = [
         Fact.of("note", "alice", title="First batch note"),
@@ -378,7 +378,7 @@ def test_preview_emission_with_fact_atom(sample_vertex: Path) -> None:
     """preview_emission accepts Fact atom and extracts properties."""
     from atoms import Fact
 
-    from client import preview_emission
+    from sdk import preview_emission
 
     fact = Fact.of("note", "alice", origin="preview-prov", title="Atom preview")
     preview = preview_emission(sample_vertex, fact)
@@ -392,7 +392,7 @@ def test_preview_emission_with_fact_atom(sample_vertex: Path) -> None:
 
 def test_preview_emission_fold_by_matching(tmp_path: Path) -> None:
     """preview_emission detects FoldBy key presence and missing status."""
-    from client import preview_emission
+    from sdk import preview_emission
 
     vertex = tmp_path / "keyed.vertex"
     vertex.write_text(
@@ -419,7 +419,7 @@ def test_preview_emission_fold_by_matching(tmp_path: Path) -> None:
 
 def test_preview_emission_target_unsupported(tmp_path: Path) -> None:
     """preview_emission raises TargetUnsupported on non-vertex."""
-    from client import preview_emission
+    from sdk import preview_emission
 
     log = tmp_path / "bare.jsonl"
     log.write_text("{}\n", encoding="utf-8")
@@ -430,7 +430,7 @@ def test_preview_emission_target_unsupported(tmp_path: Path) -> None:
 
 def test_preview_emission_missing_observer_raises_value_error(sample_vertex: Path) -> None:
     """preview_emission requires observer when kind string is given."""
-    from client import InvalidEmissionRequest, preview_emission
+    from sdk import InvalidEmissionRequest, preview_emission
 
     with pytest.raises(InvalidEmissionRequest) as exc_info:
         preview_emission(sample_vertex, "note")
@@ -440,7 +440,7 @@ def test_preview_emission_missing_observer_raises_value_error(sample_vertex: Pat
 
 def test_preview_emission_corrupt_vertex_raises_emission_failed(tmp_path: Path) -> None:
     """preview_emission raises EmissionFailed on corrupt vertex declaration."""
-    from client import EmissionFailed, preview_emission
+    from sdk import EmissionFailed, preview_emission
 
     corrupt = tmp_path / "corrupt.vertex"
     corrupt.write_text("invalid [ { kdl", encoding="utf-8")
@@ -452,7 +452,7 @@ def test_preview_emission_corrupt_vertex_raises_emission_failed(tmp_path: Path) 
 
 def test_emit_batch_target_unsupported(tmp_path: Path) -> None:
     """emit_batch raises TargetUnsupported on non-vertex."""
-    from client import emit_batch
+    from sdk import emit_batch
 
     log = tmp_path / "bare.jsonl"
     log.write_text("{}\n", encoding="utf-8")
@@ -463,7 +463,7 @@ def test_emit_batch_target_unsupported(tmp_path: Path) -> None:
 
 def test_emit_batch_corrupt_vertex_raises_emission_failed(tmp_path: Path) -> None:
     """emit_batch raises EmissionFailed on corrupt vertex."""
-    from client import EmissionFailed, emit_batch
+    from sdk import EmissionFailed, emit_batch
 
     corrupt = tmp_path / "corrupt.vertex"
     corrupt.write_text("invalid [ { kdl", encoding="utf-8")
@@ -475,7 +475,7 @@ def test_emit_batch_corrupt_vertex_raises_emission_failed(tmp_path: Path) -> Non
 
 def test_emit_batch_missing_observer_tuple_raises_value_error(sample_vertex: Path) -> None:
     """emit_batch with tuples requires default observer."""
-    from client import InvalidEmissionRequest, emit_batch
+    from sdk import InvalidEmissionRequest, emit_batch
 
     with pytest.raises(InvalidEmissionRequest) as exc_info:
         emit_batch(sample_vertex, [("note", {"title": "No obs"})])
@@ -485,7 +485,7 @@ def test_emit_batch_missing_observer_tuple_raises_value_error(sample_vertex: Pat
 
 def test_emit_batch_missing_observer_dict_raises_value_error(sample_vertex: Path) -> None:
     """emit_batch with dict item requires observer in dict or default."""
-    from client import InvalidEmissionRequest, emit_batch
+    from sdk import InvalidEmissionRequest, emit_batch
 
     with pytest.raises(InvalidEmissionRequest) as exc_info:
         emit_batch(sample_vertex, [{"kind": "note", "payload": {"title": "No obs"}}])
@@ -495,7 +495,7 @@ def test_emit_batch_missing_observer_dict_raises_value_error(sample_vertex: Path
 
 def test_emit_batch_unsupported_shape_raises_value_error(sample_vertex: Path) -> None:
     """emit_batch rejects invalid item shapes."""
-    from client import InvalidEmissionRequest, emit_batch
+    from sdk import InvalidEmissionRequest, emit_batch
 
     with pytest.raises(InvalidEmissionRequest) as exc_info:
         emit_batch(sample_vertex, [12345])  # type: ignore[list-item]
@@ -505,7 +505,7 @@ def test_emit_batch_unsupported_shape_raises_value_error(sample_vertex: Path) ->
 
 def test_emit_batch_dict_custom_id_and_ts(sample_vertex: Path) -> None:
     """emit_batch supports dict items with custom id, origin, and ts."""
-    from client import emit_batch
+    from sdk import emit_batch
 
     custom_id = "01M01BATCHCUSTOMID00000001"
     items = [
@@ -534,7 +534,7 @@ def test_emit_batch_dict_custom_id_and_ts(sample_vertex: Path) -> None:
 
 def test_emit_batch_strict_rejection_raises_admission_failed(strict_vertex: Path) -> None:
     """emit_batch raises AdmissionFailed when strict vertex rejects kind."""
-    from client import emit_batch
+    from sdk import emit_batch
 
     items = [("undeclared_kind", {"key": "val"})]
     with pytest.raises(AdmissionFailed) as exc_info:

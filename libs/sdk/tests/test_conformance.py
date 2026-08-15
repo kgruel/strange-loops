@@ -1,6 +1,6 @@
-"""Conformance runner for client operations against all 35 golden vectors.
+"""Conformance runner for SDK operations against all 35 golden vectors.
 
-Validates that `libs/client` read, replay, fold, and witness pagination
+Validates that `libs/sdk` read, replay, fold, and witness pagination
 conform 100% to the specification vectors:
 - spec/conformance/vectors/fold/*.json (10 vectors)
 - spec/conformance/vectors/replay/*.json (10 vectors)
@@ -35,7 +35,7 @@ from engine.sqlite_store import SqliteStore
 from engine.store_reader import StoreReader
 from engine.witness import resolve_witness_position
 
-from client import (
+from sdk import (
     read_facts,
     read_summary,
 )
@@ -121,7 +121,7 @@ def _decode_fact(data: dict[str, Any]) -> Fact:
     _find_vectors(FOLD_VECTORS_DIR),
     ids=lambda p: p.stem,
 )
-def test_client_conformance_fold(vector_path: Path) -> None:
+def test_sdk_conformance_fold(vector_path: Path) -> None:
     """Validate fold conformance vectors match Spec.replay output."""
     with vector_path.open(encoding="utf-8") as f:
         vector = json.load(f)
@@ -143,8 +143,8 @@ def test_client_conformance_fold(vector_path: Path) -> None:
     _find_vectors(REPLAY_VECTORS_DIR),
     ids=lambda p: p.stem,
 )
-def test_client_conformance_replay(vector_path: Path, tmp_path: Path) -> None:
-    """Validate client read_facts and timeline over replay conformance vectors."""
+def test_sdk_conformance_replay(vector_path: Path, tmp_path: Path) -> None:
+    """Validate sdk read_facts and timeline over replay conformance vectors."""
     with vector_path.open(encoding="utf-8") as f:
         vector = json.load(f)
 
@@ -162,7 +162,7 @@ def test_client_conformance_replay(vector_path: Path, tmp_path: Path) -> None:
         store.append(_decode_fact(fact_dict), id_override=fid)
     store.close()
 
-    # Read using client API
+    # Read using sdk API
     summary = read_summary(db_path)
     assert summary.fact_total == len(raw_facts)
 
@@ -191,8 +191,8 @@ def test_client_conformance_replay(vector_path: Path, tmp_path: Path) -> None:
     _find_vectors(WITNESS_VECTORS_DIR),
     ids=lambda p: p.stem,
 )
-def test_client_conformance_witness(vector_path: Path, tmp_path: Path) -> None:
-    """Validate client witness cursor pagination against witness conformance vectors."""
+def test_sdk_conformance_witness(vector_path: Path, tmp_path: Path) -> None:
+    """Validate sdk witness cursor pagination against witness conformance vectors."""
     with vector_path.open(encoding="utf-8") as f:
         vector = json.load(f)
 
@@ -238,8 +238,8 @@ def test_client_conformance_witness(vector_path: Path, tmp_path: Path) -> None:
     _find_vectors(MERGE_VECTORS_DIR),
     ids=lambda p: p.stem,
 )
-def test_client_conformance_merge(vector_path: Path, tmp_path: Path) -> None:
-    """Validate merge conformance vector inputs stored and readable via client."""
+def test_sdk_conformance_merge(vector_path: Path, tmp_path: Path) -> None:
+    """Validate merge conformance vector inputs stored and readable via sdk."""
     with vector_path.open(encoding="utf-8") as f:
         vector = json.load(f)
 
@@ -267,7 +267,7 @@ def test_client_conformance_merge(vector_path: Path, tmp_path: Path) -> None:
         source_store.append(_decode_fact(fact_dict), id_override=fid)
     source_store.close()
 
-    # Verify both stores are readable via client
+    # Verify both stores are readable via sdk
     target_sum = read_summary(target_db)
     source_sum = read_summary(source_db)
     assert target_sum.fact_total == len(target_facts)

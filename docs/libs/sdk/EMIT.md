@@ -2,26 +2,26 @@
 
 In the Loops paradigm, a **Fact** is an intentional observation produced by an **Observer** at a specific point in time. Emitting a fact appends it to an immutable, append-only store, evaluates it against declared admission policies, attaches cryptographic signatures via key custody, and folds it into living state.
 
-The `libs/client` library provides headless, transport-agnostic emission APIs for CLI commands, agents, TUI interfaces, and automated services.
+The `libs/sdk` library provides headless, transport-agnostic emission APIs for CLI commands, agents, TUI interfaces, and automated services.
 
 ---
 
 ## 1. Core Emission API
 
 ```python
-from client import emit_fact, EmitReceipt
+from sdk import emit_fact, EmitReceipt
 
 receipt = emit_fact(
     "path/to/project.vertex",
     kind_or_fact="task",
-    payload={"title": "Design client emission API", "priority": 1},
+    payload={"title": "Design SDK emission API", "priority": 1},
     observer="alice",
 )
 
 # Or emitting a pre-constructed Fact atom directly:
 from atoms import Fact
 
-fact = Fact.of("task", "alice", title="Design client emission API", priority=1)
+fact = Fact.of("task", "alice", title="Design SDK emission API", priority=1)
 receipt = emit_fact("path/to/project.vertex", fact)
 ```
 
@@ -112,7 +112,7 @@ class EmitPreviewResult:
 Simulate whether a fact would be admitted, whether required fold keys are present, and whether state would mutate without writing to disk:
 
 ```python
-from client import preview_emission, emit_fact
+from sdk import preview_emission, emit_fact
 
 # Dedicated preflight inspection
 preview = preview_emission(
@@ -142,7 +142,7 @@ assert uncommitted_receipt.stored is False
 Emit multiple facts sequentially under a single vertex handle session:
 
 ```python
-from client import emit_batch
+from sdk import emit_batch
 from atoms import Fact
 
 items = [
@@ -166,7 +166,7 @@ Loops vertices can declare admission rules governing what facts are permitted:
 When a vertex declares `strict true`, any fact whose `kind` is not declared in the vertex's `loops { ... }` block is rejected before storage:
 
 ```python
-from client import emit_fact, AdmissionFailed
+from sdk import emit_fact, AdmissionFailed
 
 try:
     emit_fact("strict_app.vertex", "custom_kind", {"data": 123}, observer="alice")
@@ -195,7 +195,7 @@ When signing keys exist in the vertex's `keys/` directory, `emit_fact` automatic
 
 ```python
 from custody import ensure_signing_key
-from client import emit_fact
+from sdk import emit_fact
 
 # Ensure custody keypair exists for 'alice'
 ensure_signing_key("project.vertex", "alice")
@@ -223,7 +223,7 @@ ClientError
 If a fact is successfully appended to the canonical store but a post-commit operation (such as index update or notification hook) raises an error, `CommittedEmissionError` is raised with `.fact_id` populated:
 
 ```python
-from client import CommittedEmissionError, emit_fact
+from sdk import CommittedEmissionError, emit_fact
 
 try:
     receipt = emit_fact("project.vertex", "task", {"title": "Test"}, observer="alice")

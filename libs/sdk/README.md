@@ -1,6 +1,6 @@
-# client — Loops Apex Composition Library
+# sdk — Loops Apex Composition Library
 
-`client` is the headless composition layer uniting `engine`, `custody`, `lang`, `store`, `atoms`, and `sign` into unified, typed operations. It serves as the single foundation for presentation layers (`apps/loops`, TUI, external agents, Python scripts) without leaking presentation logic into the core substrate.
+`sdk` is the headless composition layer uniting `engine`, `custody`, `lang`, `store`, `atoms`, and `sign` into unified, typed operations. It serves as the single foundation for presentation layers (`apps/loops`, TUI, external agents, Python scripts) without leaking presentation logic into the core substrate.
 
 ---
 
@@ -19,7 +19,7 @@
 ### 1. Target Resolution & Discovery
 
 ```python
-from client import resolve_target, discover_targets, TargetInfo
+from sdk import resolve_target, discover_targets, TargetInfo
 
 # Single target probe
 info = resolve_target("path/to/target.vertex")
@@ -39,7 +39,7 @@ targets = discover_targets(".", recursive=True)
 ### 2. Read Operations
 
 ```python
-from client import (
+from sdk import (
     read_summary,
     read_facts,
     read_state,
@@ -88,14 +88,14 @@ fact = read_fact_by_id("target.vertex", "01M01...")
 ### 3. Fact Emission
 
 ```python
-from client import emit_fact, preview_emission, emit_batch, EmitReceipt
+from sdk import emit_fact, preview_emission, emit_batch, EmitReceipt
 from atoms import Fact
 
 # Emitting by kind and payload
 receipt = emit_fact(
     "target.vertex",
     kind_or_fact="note",
-    payload={"title": "Meeting Notes", "body": "Discussed client API"},
+    payload={"title": "Meeting Notes", "body": "Discussed SDK API"},
     observer="alice",
 )
 
@@ -118,7 +118,7 @@ receipts = emit_batch("target.vertex", [fact, ("note", {"title": "Batch item"})]
 ### 4. Declaration, Scaffolding & Ceremonies
 
 ```python
-from client import (
+from sdk import (
     init_vertex,
     inspect_declaration,
     add_kind,
@@ -170,18 +170,18 @@ All models are frozen, immutable dataclasses providing `.as_dict()` conversion:
 
 | Model | Schema | Purpose |
 | :--- | :--- | :--- |
-| **`InitVertexResult`** | `loops.cli/init-vertex/v1` | Outcome of vertex scaffolding operation. |
-| **`DeclarationInspectionResult`** | `loops.cli/declaration-inspection/v1` | Deep structural inspection of a `.vertex` file. |
-| **`DeclarationPlanResult`** | `loops.cli/declaration-plan/v1` | Dry-run preview of a proposed declaration update. |
-| **`ReadSummary`** | `loops.cli/read-summary/v1` | Domain-neutral inventory of facts, ticks, kinds, and storage agreement. |
-| **`FactPageResult`** | `loops.cli/facts-page/v1` | Bounded page of facts with pagination cursors (`before`/`after`). |
-| **`FoldStateResult`** | `loops.cli/fold-state/v1` | Replayed fold state across declared vertex sections. |
-| **`SearchResult`** | `loops.cli/search-result/v1` | Full-text search matches, snippets, and rankings. |
-| **`TimelineResult`** | `loops.cli/timeline-result/v1` | Interleaved chronological stream of facts and tick seals. |
-| **`SyncResult`** | `loops.cli/sync-result/v1` | Index reconciliation and FTS synchronization status. |
-| **`EmitReceipt`** | `loops.cli/emit-receipt/v1` | Stored fact attestation, tick mark, state change, affected sections, and delta count. |
-| **`EmitPreviewResult`** | `loops.cli/emit-preview/v1` | Preflight simulation of admission, fold keys, and storage predictions. |
-| **`KindMutationResult`** | `loops.cli/kind-mutation/v1` | Outcome of a declaration update ceremony and generation diffs. |
+| **`InitVertexResult`** | `loops.sdk/init-vertex/v1` | Outcome of vertex scaffolding operation. |
+| **`DeclarationInspectionResult`** | `loops.sdk/declaration-inspection/v1` | Deep structural inspection of a `.vertex` file. |
+| **`DeclarationPlanResult`** | `loops.sdk/declaration-plan/v1` | Dry-run preview of a proposed declaration update. |
+| **`ReadSummary`** | `loops.sdk/read-summary/v1` | Domain-neutral inventory of facts, ticks, kinds, and storage agreement. |
+| **`FactPageResult`** | `loops.sdk/facts-page/v1` | Bounded page of facts with pagination cursors (`before`/`after`). |
+| **`FoldStateResult`** | `loops.sdk/fold-state/v1` | Replayed fold state across declared vertex sections. |
+| **`SearchResult`** | `loops.sdk/search-result/v1` | Full-text search matches, snippets, and rankings. |
+| **`TimelineResult`** | `loops.sdk/timeline-result/v1` | Interleaved chronological stream of facts and tick seals. |
+| **`SyncResult`** | `loops.sdk/sync-result/v1` | Index reconciliation and FTS synchronization status. |
+| **`EmitReceipt`** | `loops.sdk/emit-receipt/v1` | Stored fact attestation, tick mark, state change, affected sections, and delta count. |
+| **`EmitPreviewResult`** | `loops.sdk/emit-preview/v1` | Preflight simulation of admission, fold keys, and storage predictions. |
+| **`KindMutationResult`** | `loops.sdk/kind-mutation/v1` | Outcome of a declaration update ceremony and generation diffs. |
 
 ---
 
@@ -189,21 +189,21 @@ All models are frozen, immutable dataclasses providing `.as_dict()` conversion:
 
 ```mermaid
 graph TD
-    ClientError --> TargetError
+    SdkError --> TargetError
     TargetError --> TargetNotFound
     TargetError --> TargetUnsupported
     TargetError --> TargetNotWritable
-    ClientError --> AdmissionFailed
-    ClientError --> EmissionFailed
-    ClientError --> ClientValueError
-    ClientValueError --> InvalidEmissionRequest
+    SdkError --> AdmissionFailed
+    SdkError --> EmissionFailed
+    SdkError --> SdkValueError
+    SdkValueError --> InvalidEmissionRequest
     EmissionFailed --> InvalidEmissionRequest
     EmissionFailed --> CommittedEmissionError
-    ClientError --> CeremonyFailed
+    SdkError --> CeremonyFailed
 ```
 
-- **`ClientError`**: Base class for all high-level client exceptions.
-- **`ClientValueError`**: Base class for client parameter and validation errors (inherits from `ValueError`).
+- **`SdkError`**: Base class for all high-level SDK exceptions.
+- **`SdkValueError`**: Base class for SDK parameter and validation errors (inherits from `ValueError`).
 - **`TargetNotFound`**: Target path does not exist on disk.
 - **`TargetUnsupported`**: Path exists but is not a recognized Loops artifact.
 - **`TargetNotWritable`**: Target or derived index cannot be written to.

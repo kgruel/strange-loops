@@ -22,9 +22,9 @@ from .emit import CustodyCredentialProvider
 from .target import resolve_target
 from .types import (
     CeremonyFailed,
-    ClientValueError,
     DeclarationPlanResult,
     KindMutationResult,
+    SdkValueError,
     TargetUnsupported,
 )
 
@@ -83,9 +83,7 @@ def plan_kind_mutation(
     elif op == "remove":
         new_text = remove_vertex_kind(current_text, kind_name)
     else:
-        raise ClientValueError(
-            f"unsupported mutation op '{op}', expected 'add', 'edit', or 'remove'"
-        )
+        raise SdkValueError(f"unsupported mutation op '{op}', expected 'add', 'edit', or 'remove'")
 
     preview = plan_declaration_update(vertex_path, proposed_text=new_text)
     return DeclarationPlanResult(

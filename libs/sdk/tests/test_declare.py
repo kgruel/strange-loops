@@ -6,10 +6,10 @@ from pathlib import Path
 
 import pytest
 
-from client import (
-    ClientValueError,
+from sdk import (
     DeclarationInspectionResult,
     InitVertexResult,
+    SdkValueError,
     TargetError,
     TargetNotFound,
     init_vertex,
@@ -72,11 +72,11 @@ def test_init_vertex_already_exists_raises_target_error(tmp_path: Path) -> None:
 
 
 def test_inspect_declaration_non_vertex_raises(tmp_path: Path) -> None:
-    """inspect_declaration raises ClientValueError on non-vertex."""
+    """inspect_declaration raises SdkValueError on non-vertex."""
     log = tmp_path / "data.jsonl"
     log.write_text("{}\n", encoding="utf-8")
 
-    with pytest.raises(ClientValueError) as exc_info:
+    with pytest.raises(SdkValueError) as exc_info:
         inspect_declaration(log)
     assert "requires a .vertex target" in str(exc_info.value)
 

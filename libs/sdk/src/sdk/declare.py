@@ -9,9 +9,9 @@ from engine.probe import probe_target
 from lang.loader import parse_vertex_file
 
 from .types import (
-    ClientValueError,
     DeclarationInspectionResult,
     InitVertexResult,
+    SdkValueError,
     TargetError,
     TargetNotFound,
 )
@@ -119,7 +119,7 @@ def inspect_declaration(target: Path | str) -> DeclarationInspectionResult:
 
     probe = probe_target(path)
     if probe.target_type != "vertex":
-        raise ClientValueError(
+        raise SdkValueError(
             f"inspect_declaration requires a .vertex target, got {probe.target_type}"
         )
 

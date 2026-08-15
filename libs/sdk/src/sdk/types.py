@@ -1,4 +1,4 @@
-"""Client types, models, and exceptions for the Loops composition library."""
+"""SDK types, models, and exceptions for the Loops composition library."""
 
 from __future__ import annotations
 
@@ -11,11 +11,11 @@ from typing import Any
 # ---------------------------------------------------------------------------
 
 
-class ClientError(Exception):
-    """Base exception for all high-level client operations."""
+class SdkError(Exception):
+    """Base exception for all high-level SDK operations."""
 
 
-class TargetError(ClientError):
+class TargetError(SdkError):
     """Target resolution or probe error."""
 
 
@@ -31,7 +31,7 @@ class TargetNotWritable(TargetError):
     """The target or its store is not writable for the requested operation."""
 
 
-class AdmissionFailed(ClientError):
+class AdmissionFailed(SdkError):
     """Declared admission policy rejected the operation."""
 
     def __init__(
@@ -48,15 +48,15 @@ class AdmissionFailed(ClientError):
         self.vertex = vertex
 
 
-class EmissionFailed(ClientError):
+class EmissionFailed(SdkError):
     """Fact emission failed before committing to the store."""
 
 
-class ClientValueError(ClientError, ValueError):
-    """Invalid input parameter or missing required argument for a client operation."""
+class SdkValueError(SdkError, ValueError):
+    """Invalid input parameter or missing required argument for an SDK operation."""
 
 
-class InvalidEmissionRequest(ClientValueError, EmissionFailed):
+class InvalidEmissionRequest(SdkValueError, EmissionFailed):
     """Invalid parameters supplied for fact emission (e.g. missing observer)."""
 
 
@@ -72,7 +72,7 @@ class CommittedEmissionError(EmissionFailed):
         self.fact_id = fact_id
 
 
-class CeremonyFailed(ClientError):
+class CeremonyFailed(SdkError):
     """Declaration update ceremony failed."""
 
 
@@ -85,7 +85,7 @@ class CeremonyFailed(ClientError):
 class ReadSummary:
     """Statistical summary of a target artifact (inventory view)."""
 
-    schema: str = "loops.cli/read-summary/v1"
+    schema: str = "loops.sdk/read-summary/v1"
     target_type: str = ""
     target_path: str = ""
     canonical_mode: str | None = None
@@ -113,7 +113,7 @@ class ReadSummary:
 class FactPageResult:
     """Bounded, cursor-bearing page of facts."""
 
-    schema: str = "loops.cli/facts-page/v1"
+    schema: str = "loops.sdk/facts-page/v1"
     items: list[dict[str, Any]] = field(default_factory=list)
     next_cursor: str | None = None
     prev_cursor: str | None = None
@@ -128,7 +128,7 @@ class FactPageResult:
 class FoldStateResult:
     """Declared folded state of a vertex."""
 
-    schema: str = "loops.cli/fold-state/v1"
+    schema: str = "loops.sdk/fold-state/v1"
     vertex_name: str = ""
     target_path: str = ""
     declaration_status: str = ""
@@ -143,7 +143,7 @@ class FoldStateResult:
 class EmitReceipt:
     """Persisted receipt for an emitted fact."""
 
-    schema: str = "loops.cli/emit-receipt/v1"
+    schema: str = "loops.sdk/emit-receipt/v1"
     id: str = ""
     stored: bool = True
     signed: bool | None = None
@@ -162,7 +162,7 @@ class EmitReceipt:
 class EmitPreviewResult:
     """Preflight simulation of an emission request."""
 
-    schema: str = "loops.cli/emit-preview/v1"
+    schema: str = "loops.sdk/emit-preview/v1"
     target: str = ""
     kind: str = ""
     observer: str = ""
@@ -204,7 +204,7 @@ class SearchResultItem:
 class SearchResult:
     """Full-text search query result."""
 
-    schema: str = "loops.cli/search-result/v1"
+    schema: str = "loops.sdk/search-result/v1"
     query: str = ""
     matches: list[SearchResultItem] = field(default_factory=list)
     total_matches: int = 0
@@ -238,7 +238,7 @@ class TimelineEvent:
 class TimelineResult:
     """Interleaved chronological stream of facts and tick seals."""
 
-    schema: str = "loops.cli/timeline-result/v1"
+    schema: str = "loops.sdk/timeline-result/v1"
     events: list[TimelineEvent] = field(default_factory=list)
     start_ts: float | None = None
     end_ts: float | None = None
@@ -262,7 +262,7 @@ class TimelineResult:
 class SyncResult:
     """Result of an index synchronization or reindex operation."""
 
-    schema: str = "loops.cli/sync-result/v1"
+    schema: str = "loops.sdk/sync-result/v1"
     target_path: str = ""
     status: str = "synced"
     indexed_facts: int = 0
@@ -277,7 +277,7 @@ class SyncResult:
 class KindMutationResult:
     """Result of a declaration update / kind mutation ceremony."""
 
-    schema: str = "loops.cli/kind-mutation/v1"
+    schema: str = "loops.sdk/kind-mutation/v1"
     status: str = ""
     reason: str = ""
     mode: str = ""
@@ -295,7 +295,7 @@ class KindMutationResult:
 class InitVertexResult:
     """Outcome of vertex scaffolding operation."""
 
-    schema: str = "loops.cli/init-vertex/v1"
+    schema: str = "loops.sdk/init-vertex/v1"
     target_path: str = ""
     name: str = ""
     store_path: str | None = None
@@ -311,7 +311,7 @@ class InitVertexResult:
 class DeclarationInspectionResult:
     """Deep structural inspection of a .vertex file."""
 
-    schema: str = "loops.cli/declaration-inspection/v1"
+    schema: str = "loops.sdk/declaration-inspection/v1"
     target_path: str = ""
     name: str = ""
     status: str = ""
@@ -333,7 +333,7 @@ class DeclarationInspectionResult:
 class DeclarationPlanResult:
     """Dry-run preview of a proposed declaration update ceremony."""
 
-    schema: str = "loops.cli/declaration-plan/v1"
+    schema: str = "loops.sdk/declaration-plan/v1"
     applicable: bool = True
     reason: str = ""
     mode: str = ""

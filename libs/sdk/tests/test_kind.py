@@ -8,7 +8,7 @@ import pytest
 from custody import ensure_signing_key
 from lang.ast import FoldCollect, FoldCount, FoldDecl, LoopDef
 
-from client import (
+from sdk import (
     CeremonyFailed,
     KindMutationResult,
     TargetNotFound,
@@ -140,7 +140,7 @@ def test_kind_operations_target_not_found(tmp_path: Path) -> None:
 
 def test_default_loop_def() -> None:
     """_default_loop_def provides items collect 100."""
-    from client.kind import _default_loop_def
+    from sdk.kind import _default_loop_def
 
     default_def = _default_loop_def()
     assert len(default_def.folds) == 1
@@ -185,7 +185,7 @@ def test_remove_kind_nonexistent_raises_ceremony_failed(sample_vertex: Path) -> 
 
 def test_recover_ceremony_nonexistent(tmp_path: Path) -> None:
     """recover_ceremony handles non-existent intent file cleanly."""
-    from client import recover_ceremony
+    from sdk import recover_ceremony
 
     missing_intent = tmp_path / "test.vertex.intent"
     outcome = recover_ceremony(missing_intent)
@@ -198,7 +198,7 @@ def test_recover_ceremony_nonexistent(tmp_path: Path) -> None:
 
 def test_plan_kind_mutation_preview(sample_vertex: Path) -> None:
     """plan_kind_mutation performs preflight ceremony planning without disk mutation."""
-    from client import DeclarationPlanResult, plan_kind_mutation
+    from sdk import DeclarationPlanResult, plan_kind_mutation
 
     original_text = sample_vertex.read_text(encoding="utf-8")
 
@@ -206,7 +206,7 @@ def test_plan_kind_mutation_preview(sample_vertex: Path) -> None:
     assert isinstance(plan, DeclarationPlanResult)
     assert plan.applicable is True
     assert plan.mode in ("genesis", "clean")
-    assert plan.schema == "loops.cli/declaration-plan/v1"
+    assert plan.schema == "loops.sdk/declaration-plan/v1"
 
     # Disk text was not modified
     assert sample_vertex.read_text(encoding="utf-8") == original_text
@@ -214,7 +214,7 @@ def test_plan_kind_mutation_preview(sample_vertex: Path) -> None:
 
 def test_grant_and_revoke_observer(sample_vertex: Path) -> None:
     """grant_observer and revoke_observer manage the declared admission block."""
-    from client import grant_observer, inspect_declaration, revoke_observer
+    from sdk import grant_observer, inspect_declaration, revoke_observer
 
     ensure_signing_key(sample_vertex, "admin")
 

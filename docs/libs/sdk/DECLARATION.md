@@ -1,6 +1,6 @@
 # Declaration, Scaffolding and Target Discovery in Loops
 
-The `libs/client` library provides headless operations to scaffold, inspect, mutate, and discover Loops vertices and targets.
+The `libs/sdk` library provides headless operations to scaffold, inspect, mutate, and discover Loops vertices and targets.
 
 Every declaration mutation is orchestrated through a two-phase atomic ceremony that generates deterministic AST diffs, persists intent logs, commits signed genesis/declaration facts, and updates generation fingerprints.
 
@@ -9,7 +9,7 @@ Every declaration mutation is orchestrated through a two-phase atomic ceremony t
 ## 1. API Reference Overview
 
 ```python
-from client import (
+from sdk import (
     init_vertex,
     inspect_declaration,
     discover_targets,
@@ -41,7 +41,7 @@ from client import (
 Initialize a standalone vertex or an aggregate root discovery vertex:
 
 ```python
-from client import init_vertex
+from sdk import init_vertex
 
 # Scaffolding a standalone vertex with SQLite backing store
 res = init_vertex("app.vertex", name="my_app", store_type="sqlite", observer="alice")
@@ -59,7 +59,7 @@ print(f"Created root discovery vertex: {root_res.target_path}")
 Examine declared stream kinds, admission rules, and observer permissions:
 
 ```python
-from client import inspect_declaration
+from sdk import inspect_declaration
 
 info = inspect_declaration("app.vertex")
 print(f"Vertex: {info.name} (status: {info.status})")
@@ -76,7 +76,7 @@ print(f"Strict mode: {info.strict}")
 Find all Loops targets within a repository:
 
 ```python
-from client import discover_targets
+from sdk import discover_targets
 
 targets = discover_targets(".", recursive=True)
 for t in targets:
@@ -91,7 +91,7 @@ All declaration mutations use atomic, signed ceremonies:
 
 ### Adding and Editing Kinds
 ```python
-from client import add_kind, edit_kind, remove_kind
+from sdk import add_kind, edit_kind, remove_kind
 from lang.ast import LoopDef, FoldDecl, FoldCollect
 
 # Add new kind with default 'collect 100'
@@ -111,7 +111,7 @@ remove_kind("app.vertex", "task", observer="admin")
 
 ### Managing Observer Grants
 ```python
-from client import grant_observer, revoke_observer
+from sdk import grant_observer, revoke_observer
 
 # Grant 'alice' permission to emit 'task' and 'note' kinds
 grant_observer("app.vertex", "alice", grants=["task", "note"], observer="admin")

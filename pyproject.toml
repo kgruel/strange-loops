@@ -37,10 +37,10 @@ build-backend = "hatchling.build"
 [tool.hatch.build]
 only-include = [
     "libs/atoms/src/atoms",
-    "libs/client/src/client",
     "libs/custody/src/custody",
     "libs/engine/src/engine",
     "libs/lang/src/lang",
+    "libs/sdk/src/sdk",
     "libs/sign/src/sign",
     "libs/store/src/store",
     "apps/loops/src/loops",
@@ -51,10 +51,10 @@ only-include = [
 [tool.hatch.build.targets.wheel]
 packages = [
     "libs/atoms/src/atoms",
-    "libs/client/src/client",
     "libs/custody/src/custody",
     "libs/engine/src/engine",
     "libs/lang/src/lang",
+    "libs/sdk/src/sdk",
     "libs/sign/src/sign",
     "libs/store/src/store",
     "apps/loops/src/loops",
@@ -63,10 +63,10 @@ packages = [
 [tool.uv.workspace]
 members = [
     "libs/atoms",
-    "libs/client",
     "libs/custody",
     "libs/engine",
     "libs/lang",
+    "libs/sdk",
     "libs/sign",
     "libs/store",
     "apps/loops",

@@ -47,7 +47,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from atoms import Fact
-from engine import open_vertex, vertex_read
+from engine import open_vertex, vertex_read, vertex_reindex
 from engine.handle import WriteCredentials
 from engine.sqlite_store import SqliteStore
 from engine.store_reader import StoreReader
@@ -147,12 +147,19 @@ def _fact(index: int) -> Fact:
 
 
 def _write_vertex_file(vertex_path: Path, store_path: Path, name: str) -> None:
+    """A vertex declaring one folded, searchable kind.
+
+    ``search "content"`` is load-bearing: FTS covers only kinds the declaration
+    marks searchable, so without it every search probe would scan an empty index
+    and report a very fast nothing.
+    """
     vertex_path.write_text(
         f'name "{name}"\n'
         f'store "{store_path}"\n'
         f"loops {{\n"
         f"  note {{\n"
         f'    fold {{ items "collect" 100 }}\n'
+        f'    search "content"\n'
         f"  }}\n"
         f"}}\n"
     )
@@ -251,6 +258,18 @@ def probe_vertex_layers(depth: int, include_sdk: bool) -> list[Sample]:
                 "engine",
                 depth,
                 lambda: _open_and_close(vertex_path, credentials),
+            )
+        )
+
+        # Full drop+rebuild of the derived FTS index. Writes no facts, so it
+        # leaves depth intact — but it must run before any search probe, since
+        # receive does not maintain FTS and reindex is its only writer.
+        samples.append(
+            measure(
+                "engine_reindex_fts",
+                "engine",
+                depth,
+                lambda: vertex_reindex(vertex_path),
             )
         )
 

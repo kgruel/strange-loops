@@ -11,7 +11,7 @@ the data shifts, the conclusion is wrong shape, and you migrate.
 This system stores the evidence and derives the conclusions.
 
 For the longer treatment — the three loops, the kinds of time, what is
-protected — see the [conceptual model](.docs/CONCEPTUAL_MODEL.md).
+protected — see the [conceptual model](./docs/CONCEPTUAL_MODEL.md).
 
 ## The truths
 

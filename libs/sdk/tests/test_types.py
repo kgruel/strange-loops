@@ -181,6 +181,7 @@ def test_emit_receipt_model() -> None:
         state_change=True,
         affected_sections=["note"],
         delta_count=1,
+        predicted_state_change=False,
     )
 
     # Immutability
@@ -199,6 +200,27 @@ def test_emit_receipt_model() -> None:
     assert d["state_change"] is True
     assert d["affected_sections"] == ["note"]
     assert d["delta_count"] == 1
+    assert d["predicted_state_change"] is False
+
+    # Dry-run receipt uncommitted shape
+    dry_receipt = EmitReceipt(
+        id="",
+        stored=False,
+        signed=None,
+        observer="tester",
+        tick_mark=None,
+        tick_id=None,
+        state_change=False,
+        affected_sections=["note"],
+        delta_count=0,
+        predicted_state_change=True,
+    )
+    d_dry = dry_receipt.as_dict()
+    assert d_dry["stored"] is False
+    assert d_dry["state_change"] is False
+    assert d_dry["predicted_state_change"] is True
+    assert d_dry["delta_count"] == 0
+    assert d_dry["id"] == ""
 
 
 def test_emit_preview_result_model() -> None:

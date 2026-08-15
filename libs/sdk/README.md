@@ -179,7 +179,7 @@ All models are frozen, immutable dataclasses providing `.as_dict()` conversion:
 | **`SearchResult`** | `loops.sdk/search-result/v1` | Full-text search matches, snippets, and rankings. |
 | **`TimelineResult`** | `loops.sdk/timeline-result/v1` | Interleaved chronological stream of facts and tick seals. |
 | **`SyncResult`** | `loops.sdk/sync-result/v1` | Index reconciliation and FTS synchronization status. |
-| **`EmitReceipt`** | `loops.sdk/emit-receipt/v1` | Stored fact attestation, tick mark, state change, affected sections, and delta count. |
+| **`EmitReceipt`** | `loops.sdk/emit-receipt/v1` | Stored fact attestation, tick mark, state change, affected sections, delta count, and predicted state change. |
 | **`EmitPreviewResult`** | `loops.sdk/emit-preview/v1` | Preflight simulation of admission, fold keys, and storage predictions. |
 | **`KindMutationResult`** | `loops.sdk/kind-mutation/v1` | Outcome of a declaration update ceremony and generation diffs. |
 

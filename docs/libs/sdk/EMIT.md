@@ -61,21 +61,22 @@ def emit_fact(
 ## 2. Result Models: `EmitReceipt` & `EmitPreviewResult`
 
 ### `EmitReceipt`
-Every live emission returns an immutable `EmitReceipt` dataclass:
+Every emission returns an immutable `EmitReceipt` dataclass:
 
 ```python
 @dataclass(frozen=True)
 class EmitReceipt:
-    schema: str = "loops.cli/emit-receipt/v1"
+    schema: str = "loops.sdk/emit-receipt/v1"
     id: str = ""                # Canonical ULID assigned to the persisted fact
-    stored: bool = True         # True when successfully committed to the log
+    stored: bool = True         # True when successfully committed to the log (False on dry-run)
     signed: bool | None = None  # True if signed with an Ed25519 custody key
     observer: str = ""          # Producing observer identity
     tick_mark: str | None = None# Name of tick mark if sealed (e.g. "default")
     tick_id: str | None = None  # Tick ID if a tick was closed during write
-    state_change: bool = False  # True if this fact mutated the folded state
-    affected_sections: list[str] = field(default_factory=list) # Fold sections updated
-    delta_count: int = 0        # Number of structural row changes in the fold
+    state_change: bool = False  # True only if this fact was committed and mutated folded state
+    affected_sections: list[str] = field(default_factory=list) # Fold sections updated or predicted
+    delta_count: int = 0        # Number of structural row changes committed in the fold
+    predicted_state_change: bool = False # Predicted fold mutation on dry-run simulation
 
     def as_dict(self) -> dict[str, Any]: ...
 ```
@@ -86,7 +87,7 @@ Preflight dry-run simulations return an `EmitPreviewResult`:
 ```python
 @dataclass(frozen=True)
 class EmitPreviewResult:
-    schema: str = "loops.cli/emit-preview/v1"
+    schema: str = "loops.sdk/emit-preview/v1"
     target: str = ""
     kind: str = ""
     observer: str = ""
@@ -133,6 +134,8 @@ uncommitted_receipt = emit_fact(
     dry_run=True,
 )
 assert uncommitted_receipt.stored is False
+assert uncommitted_receipt.state_change is False
+assert uncommitted_receipt.predicted_state_change is True
 ```
 
 ---

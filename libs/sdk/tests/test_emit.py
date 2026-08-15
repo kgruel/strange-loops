@@ -317,10 +317,65 @@ def test_emit_fact_dry_run_returns_uncommitted_receipt(sample_vertex: Path) -> N
     assert receipt.id == ""
     assert receipt.signed is None
     assert receipt.observer == "alice"
-    assert receipt.state_change is True
+    assert receipt.state_change is False
+    assert receipt.predicted_state_change is True
     assert "note" in receipt.affected_sections
+    assert receipt.delta_count == 0
 
     # Store remains empty
+    summary = read_summary(sample_vertex)
+    assert summary.fact_total == 0
+
+
+def test_emit_fact_dry_run_never_claims_stored_or_committed_state_change(
+    sample_vertex: Path,
+) -> None:
+    """Dry-run emissions must never claim stored=True or committed state_change=True."""
+    # Case 1: Declared kind that would fold
+    receipt_folding = emit_fact(
+        sample_vertex,
+        "note",
+        {"title": "Folding dry run"},
+        observer="alice",
+        dry_run=True,
+    )
+    assert receipt_folding.stored is False
+    assert receipt_folding.state_change is False
+    assert receipt_folding.predicted_state_change is True
+    assert receipt_folding.delta_count == 0
+    assert "note" in receipt_folding.affected_sections
+
+    # Case 2: Undeclared kind with admit_undeclared=True (not declared in loops, does not fold)
+    receipt_non_folding = emit_fact(
+        sample_vertex,
+        "custom_unfolded",
+        {"data": "Unfolded dry run"},
+        observer="alice",
+        admit_undeclared=True,
+        dry_run=True,
+    )
+    assert receipt_non_folding.stored is False
+    assert receipt_non_folding.state_change is False
+    assert receipt_non_folding.predicted_state_change is False
+    assert receipt_non_folding.delta_count == 0
+    assert receipt_non_folding.affected_sections == []
+
+    # Case 3: Dry run with explicit id_override and timestamp
+    receipt_custom = emit_fact(
+        sample_vertex,
+        "note",
+        {"title": "Custom ID dry run"},
+        observer="alice",
+        id_override="01M01DETERMINISTIC00000001",
+        ts=1700000000.0,
+        dry_run=True,
+    )
+    assert receipt_custom.stored is False
+    assert receipt_custom.state_change is False
+    assert receipt_custom.predicted_state_change is True
+    assert receipt_custom.id == ""
+
+    # Ensure store remains completely empty across all dry-run executions
     summary = read_summary(sample_vertex)
     assert summary.fact_total == 0
 

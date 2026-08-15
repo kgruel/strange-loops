@@ -254,9 +254,10 @@ def emit_fact(
             observer=actual_observer,
             tick_mark=None,
             tick_id=None,
-            state_change=preview.would_fold,
+            state_change=False,
             affected_sections=[preview.kind] if preview.would_fold else [],
             delta_count=0,
+            predicted_state_change=preview.would_fold,
         )
 
     cred_provider = credentials or CustodyCredentialProvider()
@@ -300,6 +301,7 @@ def emit_fact(
             state_change=state_change,
             affected_sections=affected_sections,
             delta_count=delta_count,
+            predicted_state_change=False,
         )
     except AdmissionError as exc:
         obs = getattr(exc, "observer", actual_observer)
@@ -451,6 +453,7 @@ def emit_batch(
                     state_change=state_change,
                     affected_sections=affected_sections,
                     delta_count=delta_count,
+                    predicted_state_change=False,
                 )
             )
         return receipts

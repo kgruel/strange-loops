@@ -141,7 +141,7 @@ class FoldStateResult:
 
 @dataclass(frozen=True)
 class EmitReceipt:
-    """Persisted receipt for an emitted fact."""
+    """Persisted receipt for an emitted fact or dry-run simulation."""
 
     schema: str = "loops.sdk/emit-receipt/v1"
     id: str = ""
@@ -153,6 +153,7 @@ class EmitReceipt:
     state_change: bool = False
     affected_sections: list[str] = field(default_factory=list)
     delta_count: int = 0
+    predicted_state_change: bool = False
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)

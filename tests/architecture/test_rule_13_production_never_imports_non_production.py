@@ -165,8 +165,8 @@ def test_production_does_not_import_a_non_production_root():
         "no non-production roots derived — either the repo layout changed or "
         "_has_python stopped finding Python; this rule would pass vacuously"
     )
-    assert "experiments" in roots, (
-        f"'experiments' missing from the derived non-production roots {roots} — "
+    assert "benchmarks" in roots, (
+        f"'benchmarks' missing from the derived non-production roots {roots} — "
         "non-production script and experiment trees must be seen by the derivation"
     )
     assert files, (

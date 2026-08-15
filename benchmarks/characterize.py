@@ -348,9 +348,10 @@ def _assert_page(page: Any, expected: int) -> None:
 
 def _assert_hits(result: Any) -> None:
     """A search that matches nothing would otherwise look like a very fast search."""
-    hits = getattr(result, "items", result)
-    if len(hits) == 0:
-        raise ProbeError("sdk search matched zero facts — probe is measuring an empty scan")
+    if len(result.matches) == 0:
+        raise ProbeError(
+            f"sdk search for {result.query!r} matched zero facts — measuring an empty scan"
+        )
 
 
 # --------------------------------------------------------------------------

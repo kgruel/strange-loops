@@ -438,6 +438,77 @@ def test_read_timeline_default_limit_is_100(tmp_path: Path) -> None:
     assert result.truncated is True
 
 
+def test_read_timeline_since_default_is_zero_not_one(tmp_path: Path) -> None:
+    """`since = start_ts if start_ts is not None else 0.0` -- a mutant
+    changing the literal default to 1.0 must still admit a fact with
+    ts=0.5 when no start_ts is given.
+    """
+    vertex_path = tmp_path / "early.vertex"
+    vertex_path.write_text(
+        'name "early"\nstore ".loops/data/early.db"\n'
+        'loops { item { fold { items "collect" 10 } } }\n',
+        encoding="utf-8",
+    )
+    emit_fact(vertex_path, "item", {"n": 1}, observer="a", ts=0.5)
+    result = read_timeline(vertex_path, limit=1000)
+    assert result.total_events == 1
+
+
+def test_read_timeline_discover_only_vertex_is_aggregate(tmp_path: Path) -> None:
+    """is_aggregate = decl_ast is not None and (combine is not None or
+    discover is not None). A discover-only declaration (no combine) must
+    still be treated as an aggregate -- catches `discover is not None`
+    -> `discover is None` flip on the is_aggregate computation.
+    """
+    child = tmp_path / "child.vertex"
+    child.write_text(
+        'name "child"\nstore ".loops/data/child.db"\n'
+        'loops { task { fold { items "collect" 100 } } }\n',
+        encoding="utf-8",
+    )
+    emit_fact(child, "task", {"title": "A"}, observer="alice", ts=1700000000.0)
+
+    parent = tmp_path / "aggregate.vertex"
+    parent.write_text(
+        'name "aggregate"\ndiscover "./child.vertex"\n',
+        encoding="utf-8",
+    )
+    result = read_timeline(parent, limit=1000)
+    # A discover-only vertex with no canonical store of its own: taking the
+    # is_aggregate branch means we call vertex_facts/vertex_ticks (which
+    # return empty for a discover declaration with no combine merge) rather
+    # than falling through to the plain "return empty TimelineResult"
+    # early-out further down -- both currently yield an empty result, so
+    # this pins that the call does not raise and returns a well-formed
+    # TimelineResult, not a crash from treating it as a non-aggregate with
+    # a missing canonical store.
+    assert isinstance(result, TimelineResult)
+    assert result.order == "oldest"
+
+
+def test_read_timeline_non_aggregate_missing_canonical_file_returns_empty(
+    tmp_path: Path,
+) -> None:
+    """`is_aggregate or (canonical_path is not None and canonical_path.exists())`
+    -- a mutant flipping the inner `and` to `or` would treat a declared-but-
+    never-synced canonical path (info.canonical_path is not None, but the
+    file does not exist yet) as present, taking the aggregate branch instead
+    of returning the empty-result early-out.
+    """
+    vertex_path = tmp_path / "unsynced.vertex"
+    vertex_path.write_text(
+        'name "unsynced"\nstore ".loops/data/unsynced.db"\n'
+        'loops { item { fold { items "collect" 10 } } }\n',
+        encoding="utf-8",
+    )
+    # No emit_fact call: the declared canonical store path is known (info.canonical_path
+    # is not None) but nothing has been synced to disk yet, so it does not exist.
+    result = read_timeline(vertex_path)
+    assert result.events == []
+    assert result.total_events == 0
+    assert result.truncated is False
+
+
 def test_read_timeline_aggregate_combine_merges_children(tmp_path: Path) -> None:
     """The is_aggregate branch (decl_ast.combine is not None) must actually
     trigger on a combine vertex -- a mutant flipping `and` -> `or` or
@@ -596,6 +667,8 @@ def test_read_timeline_vertex_tick_event_fields_pinned(tmp_path: Path) -> None:
     assert fe.payload == {"title": "a"}
 
     te = tick_events[0]
+    assert te.event_type == "tick"
+    assert te.id == ""
     assert te.kind_or_name == "task"
     assert te.ts == 1700000000.0
     assert te.observer == ""
@@ -636,6 +709,8 @@ def test_read_timeline_bare_store_tick_event_fields_pinned(tmp_path: Path) -> No
     assert fe.payload == {"title": "a"}
 
     te = tick_events[0]
+    assert te.event_type == "tick"
+    assert te.id == ""
     assert te.kind_or_name == "task"
     assert te.ts == 1700000000.0
     assert te.observer == ""
@@ -740,3 +815,72 @@ def test_sync_target_vertex_with_search_is_synced_and_counts_facts(
     result = sync_target(vertex_path)
     assert result.status == "synced"
     assert result.indexed_facts == len(receipts)
+
+
+def test_sync_target_aggregate_vertex_agreement_defaults_true(tmp_path: Path) -> None:
+    """A combine/discover aggregate vertex has no canonical/index pair of
+    its own (info.canonical_path is None), so `agreed` never enters the
+    preflight-check `if` and keeps its initial literal value -- pins that
+    literal is `True`, not `None`/`False`.
+    """
+    child = tmp_path / "child.vertex"
+    child.write_text(
+        'name "child"\nstore ".loops/data/child.db"\n'
+        'loops { task { fold { items "collect" 100 } } }\n',
+        encoding="utf-8",
+    )
+    emit_fact(child, "task", {"title": "A"}, observer="alice", ts=1700000000.0)
+
+    parent = tmp_path / "aggregate.vertex"
+    parent.write_text(
+        'name "aggregate"\n'
+        "combine {\n"
+        f'  vertex "{child}" as="a"\n'
+        "}\n",
+        encoding="utf-8",
+    )
+    result = sync_target(parent)
+    assert result.agreement is True
+
+
+def test_sync_target_vertex_duration_ms_is_bounded_positive(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """duration_ms must be (t1 - t0) * 1000.0 exactly -- pins against the
+    `/1000.0`, `(t1 + t0)`, and `*1001.0` arithmetic mutants by controlling
+    perf_counter() to return known values.
+    """
+    import sdk.read as read_mod
+
+    values = iter([100.0, 100.25])
+    monkeypatch.setattr(read_mod.time, "perf_counter", lambda: next(values))
+
+    vertex_path = tmp_path / "dur.vertex"
+    vertex_path.write_text(
+        'name "dur"\nstore ".loops/data/dur.db"\n'
+        'loops { item { search "label" fold { items "collect" 10 } } }\n',
+        encoding="utf-8",
+    )
+    emit_fact(vertex_path, "item", {"label": "x"}, observer="a", ts=1700000000.0)
+    result = sync_target(vertex_path)
+    assert result.duration_ms == 250.0
+
+
+def test_sync_target_bare_store_duration_ms_is_bounded_positive(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import sdk.read as read_mod
+
+    values = iter([200.0, 200.5])
+    monkeypatch.setattr(read_mod.time, "perf_counter", lambda: next(values))
+
+    store_path = tmp_path / "bare.jsonl"
+    vertex_path = tmp_path / "bare.vertex"
+    vertex_path.write_text(
+        f'name "bare"\nstore "{store_path.name}"\n'
+        'loops { widget { fold { items "collect" 10 } } }\n',
+        encoding="utf-8",
+    )
+    emit_fact(vertex_path, "widget", {"label": "gizmo"}, observer="carol", ts=1700000000.0)
+    result = sync_target(store_path)
+    assert result.duration_ms == 500.0

@@ -275,6 +275,27 @@ def test_search_facts_bare_store_no_fts_generation_returns_empty(tmp_path: Path)
     assert result.query == "anything"
 
 
+def test_search_facts_bare_store_limit_is_forwarded_not_dropped(tmp_path: Path) -> None:
+    """limit= must reach reader.search_facts on the bare (non-vertex) branch,
+    not be silently dropped from the forwarded kwargs.
+    """
+    store_path = tmp_path / "many.jsonl"
+    vertex_path = tmp_path / "many.vertex"
+    vertex_path.write_text(
+        f'name "many"\nstore "{store_path.name}"\n'
+        'loops { widget { search "label" fold { items "collect" 10 } } }\n',
+        encoding="utf-8",
+    )
+    for i in range(3):
+        emit_fact(
+            vertex_path, "widget", {"label": "shared term"}, observer="x", ts=1700000000.0 + i
+        )
+    sync_target(vertex_path)
+    result = search_facts(store_path, "shared", limit=1)
+    assert len(result.matches) == 1
+    assert result.total_matches == 1
+
+
 # =============================================================================
 # resolve_entity
 # =============================================================================

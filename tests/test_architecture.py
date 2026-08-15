@@ -3448,6 +3448,7 @@ _MUTATION_SURVIVOR_CEILINGS = {
     "libs/engine/tests/MUTATION-admission.md": 0,
     "libs/engine/tests/MUTATION-witness.md": 110,
     "libs/lang/tests/MUTATION-vertex_mutation.md": 130,
+    "libs/sdk/tests/MUTATION.md": 583,
 }
 
 _SURVIVORS_LINE = re.compile(r"^SURVIVORS: (\d+) \(all equivalent/finding\)$")

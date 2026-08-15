@@ -1412,3 +1412,33 @@ def test_read_facts_cursor_pagination_on_jsonl_canonical_vertex(tmp_path: Path) 
 
     page2 = read_facts(vertex_path, limit=2, after=page.next_cursor)
     assert len(page2.items) >= 1
+
+
+# =============================================================================
+# _ensure_reader: mode kwarg pin
+# =============================================================================
+
+
+def test_ensure_reader_passes_recover_then_open_mode(
+    monkeypatch: pytest.MonkeyPatch, sample_vertex: Path
+) -> None:
+    """_ensure_reader must request RECOVER_THEN_OPEN explicitly, not rely on
+    read_preflight's own AUDIT_ONLY default (mode=None would dispatch
+    differently from the sanctioned repair-and-open path).
+    """
+    from engine.preflight import PreflightMode
+
+    import sdk.read as read_mod
+
+    emit_fact(sample_vertex, "note", {"body": "hi"}, observer="alice")
+
+    seen: dict[str, object] = {}
+    real_preflight = read_mod.read_preflight
+
+    def spy(canonical_path, mode=None, **kw):
+        seen["mode"] = mode
+        return real_preflight(canonical_path, mode=mode, **kw)
+
+    monkeypatch.setattr(read_mod, "read_preflight", spy)
+    read_summary(sample_vertex)
+    assert seen["mode"] is PreflightMode.RECOVER_THEN_OPEN

@@ -53,6 +53,7 @@ inside the domain.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
 from .ast import (
@@ -68,6 +69,8 @@ from .ast import (
     FoldMin,
     FoldSum,
     FoldWindow,
+    GrantDecl,
+    ObserverDecl,
 )
 from .population import (
     kdl_find_block,
@@ -83,7 +86,10 @@ __all__ = [
     "add_vertex_kind",
     "edit_vertex_kind",
     "loop_def_to_kdl",
+    "observer_to_kdl",
     "remove_vertex_kind",
+    "remove_vertex_observer",
+    "upsert_vertex_observer",
 ]
 
 
@@ -571,13 +577,16 @@ def _verified(
             "onto its own line first"
         )
     target = added if added is not None else edited
-    if target is not None and definition is not None:
-        if after.loops.get(target) != definition:
-            raise ValueError(
-                f"{context} violated content preservation: kind {target!r} "
-                "parses back different from the requested definition — "
-                "refusing; the original text is unchanged"
-            )
+    if (
+        target is not None
+        and definition is not None
+        and after.loops.get(target) != definition
+    ):
+        raise ValueError(
+            f"{context} violated content preservation: kind {target!r} "
+            "parses back different from the requested definition — "
+            "refusing; the original text is unchanged"
+        )
     mutated = {added, edited, removed} - {None}
     for k in before_kinds - mutated:
         if before.loops[k] != after.loops[k]:
@@ -714,3 +723,363 @@ def remove_vertex_kind(text: str, kind: str) -> str:
     return _verified(
         before, result, f"remove_vertex_kind({kind!r})", removed=kind
     )
+
+
+# ---------------------------------------------------------------------------
+# Observer Serializer & Mutations
+# ---------------------------------------------------------------------------
+
+
+def observer_to_kdl(
+    name: str,
+    *,
+    identity: str | None = None,
+    key: str | None = None,
+    grants: Sequence[str] = (),
+    indent: str = "  ",
+) -> str:
+    """Serialize an observer declaration to KDL text."""
+    if not name:
+        raise ValueError("observer name is empty")
+    node_name = _q(name, what="observer name") if not name.isalnum() else name
+    body: list[str] = []
+    if identity is not None:
+        body.append(f"identity {_q(identity, what='observer identity')}")
+    if key is not None:
+        body.append(f"key {_q(key, what='observer key')}")
+    if grants:
+        grants_str = " ".join(_q(g, what="grant kind") for g in grants)
+        body.append("grant {")
+        body.append(f"{indent}potential {grants_str}")
+        body.append("}")
+    if not body:
+        return f"{node_name} {{ }}"
+    lines = [f"{node_name} {{"]
+    lines.extend(indent + ln for ln in body)
+    lines.append("}")
+    return "\n".join(lines)
+
+
+def _extract_node_name(line: str) -> str:
+    """Extract node name from beginning of a stripped line (handles quotes and bare names)."""
+    if not line or line.startswith("/"):
+        return ""
+    if line.startswith('"'):
+        in_str = False
+        esc = False
+        buf: list[str] = []
+        for ch in line:
+            if in_str:
+                if esc:
+                    buf.append(ch)
+                    esc = False
+                elif ch == "\\":
+                    esc = True
+                elif ch == '"':
+                    break
+                else:
+                    buf.append(ch)
+            elif ch == '"':
+                in_str = True
+        return "".join(buf)
+    tok = line.split(None, 1)[0]
+    return tok.split("{", 1)[0].split(";", 1)[0].strip()
+
+
+def _observers_block_child_names(text: str) -> list[str]:
+    """Names of every depth-0 child node in the observers block."""
+    try:
+        start, end = kdl_find_block(text, ["observers"])
+    except ValueError:
+        return []
+    lines = text.splitlines()
+    names: list[str] = []
+
+    if start == end:
+        line = lines[start]
+        inner = line[line.index("{") + 1 : line.rindex("}")]
+        for node in kdl_split_top_level_nodes(inner):
+            name = _extract_node_name(node)
+            if name:
+                names.append(name)
+        return names
+
+    i = start + 1
+    depth = 0
+    while i < end:
+        stripped = lines[i].strip()
+        if not stripped or stripped.startswith("//"):
+            i += 1
+            continue
+        if depth == 0:
+            name = _extract_node_name(stripped)
+            if name:
+                names.append(name)
+        depth += stripped.count("{") - stripped.count("}")
+        i += 1
+    return names
+
+
+def _assert_unique_observer_nodes(text: str, context: str) -> None:
+    """Refuse duplicate observer nodes in the INPUT."""
+    from collections import Counter
+
+    counted = Counter(_observers_block_child_names(text))
+    dupes = sorted(n for n, c in counted.items() if c > 1)
+    if dupes:
+        raise ValueError(
+            f"{context}: duplicate observer declaration(s) {dupes} in the "
+            "observers block — the parser resolves duplicates last-wins, so a "
+            "text mutation over them cannot be verified; deduplicate the "
+            "vertex by hand first"
+        )
+
+
+def _find_observer_span(
+    text: str, target_name: str, start: int, end: int
+) -> tuple[int, int] | None:
+    """Find line range (start_line, end_line) inclusive of a named observer child."""
+    lines = text.splitlines()
+    if start == end:
+        return None
+    i = start + 1
+    depth = 0
+    while i < end:
+        stripped = lines[i].strip()
+        if not stripped or stripped.startswith("//"):
+            i += 1
+            continue
+        if depth == 0:
+            curr_name = _extract_node_name(stripped)
+            if curr_name == target_name:
+                opens = stripped.count("{") - stripped.count("}")
+                if opens <= 0:
+                    return i, i
+                d = opens
+                j = i + 1
+                while j < end and d > 0:
+                    d += lines[j].count("{") - lines[j].count("}")
+                    j += 1
+                return i, j - 1
+        depth += stripped.count("{") - stripped.count("}")
+        i += 1
+    return None
+
+
+def _verified_observer(
+    before,
+    result: str,
+    context: str,
+    *,
+    upserted: ObserverDecl | None = None,
+    removed: str | None = None,
+) -> str:
+    """Parse + validate mutated text AND assert the exact expected observer delta."""
+    from .validator import validate_vertex
+
+    try:
+        after = _parse_vertex_or_raise(result, context)
+        validate_vertex(after)
+    except Exception as exc:
+        raise ValueError(
+            f"{context} produced an invalid vertex: {exc}"
+        ) from exc
+
+    before_obs_map = {o.name: o for o in (before.observers or ())}
+    after_obs_map = {o.name: o for o in (after.observers or ())}
+
+    if upserted is not None:
+        expected_names = set(before_obs_map.keys()) | {upserted.name}
+        after_names = set(after_obs_map.keys())
+        if after_names != expected_names:
+            lost = sorted(expected_names - after_names)
+            gained = sorted(after_names - expected_names)
+            raise ValueError(
+                f"{context} violated content preservation: resulting observer set "
+                f"differs from the expected delta (lost: {lost}, unexpected: "
+                f"{gained}) — refusing; the original text is unchanged"
+            )
+        if after_obs_map.get(upserted.name) != upserted:
+            raise ValueError(
+                f"{context} violated content preservation: observer {upserted.name!r} "
+                "parses back different from the requested definition — "
+                "refusing; the original text is unchanged"
+            )
+        for name, obs in before_obs_map.items():
+            if name != upserted.name and after_obs_map.get(name) != obs:
+                raise ValueError(
+                    f"{context} violated content preservation: sibling observer "
+                    f"{name!r} was altered by the text splice — refusing; the "
+                    "original text is unchanged"
+                )
+
+    if removed is not None:
+        expected_names = set(before_obs_map.keys()) - {removed}
+        after_names = set(after_obs_map.keys())
+        if after_names != expected_names:
+            lost = sorted(expected_names - after_names)
+            gained = sorted(after_names - expected_names)
+            raise ValueError(
+                f"{context} violated content preservation: resulting observer set "
+                f"differs from the expected delta (lost: {lost}, unexpected: "
+                f"{gained}) — refusing; the original text is unchanged"
+            )
+        for name, obs in after_obs_map.items():
+            if before_obs_map.get(name) != obs:
+                raise ValueError(
+                    f"{context} violated content preservation: sibling observer "
+                    f"{name!r} was altered by the text splice — refusing; the "
+                    "original text is unchanged"
+                )
+
+    # Non-observer vertex content (store, sources, routes, loops, …) must be untouched.
+    for f in type(before).__match_args__:
+        if f == "observers":
+            continue
+        if getattr(before, f) != getattr(after, f):
+            raise ValueError(
+                f"{context} violated content preservation: non-observer vertex "
+                f"content changed (field {f!r}) — refusing; the original "
+                "text is unchanged"
+            )
+    return result
+
+
+def upsert_vertex_observer(
+    text: str,
+    name: str,
+    *,
+    identity: str | None = None,
+    key: str | None = None,
+    grants: Sequence[str] = (),
+) -> str:
+    """Add or replace an observer declaration in vertex text; returns the new text.
+
+    Creates the ``observers`` block when absent. If an observer of the same
+    name already exists, replaces it in place. All values are quoted safely
+    using KDL rules.
+    """
+    if not name:
+        raise ValueError("observer name is empty")
+    context = f"upsert_vertex_observer({name!r})"
+    _assert_scanner_provable_domain(text, context)
+    before = _parse_vertex_or_raise(text, context)
+    _assert_unique_observer_nodes(text, context)
+
+    child_kdl = observer_to_kdl(
+        name, identity=identity, key=key, grants=grants
+    )
+
+    try:
+        start, end = kdl_find_block(text, ["observers"])
+        has_observers = True
+    except ValueError:
+        has_observers = False
+
+    expected_grant = (
+        GrantDecl(potential=frozenset(grants)) if grants else None
+    )
+    expected_decl = ObserverDecl(
+        name=name, identity=identity, key=key, grant=expected_grant
+    )
+
+    if not has_observers:
+        indented = "\n".join(
+            ("  " + ln) if ln.strip() else ln for ln in child_kdl.splitlines()
+        )
+        block = f"observers {{\n{indented}\n}}\n"
+        if text and not text.endswith("\n"):
+            text += "\n"
+        result = text + block
+        return _verified_observer(
+            before, result, context, upserted=expected_decl
+        )
+
+    # Observers block exists. Check if this observer is already present.
+    existing_span = _find_observer_span(text, name, start, end)
+    if existing_span is not None:
+        obs_start, obs_end = existing_span
+        lines = text.splitlines()
+        obs_indent = lines[obs_start][: len(lines[obs_start]) - len(lines[obs_start].lstrip())]
+        new_child_lines = [
+            (obs_indent + ln) if ln.strip() else ln
+            for ln in child_kdl.splitlines()
+        ]
+        end_line = lines[obs_end]
+        if "}" in end_line:
+            close_idx = end_line.rindex("}")
+            suffix = end_line[close_idx + 1 :].rstrip()
+            if suffix:
+                sep = "" if suffix.startswith((" ", "\t")) else " "
+                new_child_lines[-1] += sep + suffix
+        lines[obs_start : obs_end + 1] = new_child_lines
+        result = "\n".join(lines)
+        if text.endswith("\n"):
+            result += "\n"
+    else:
+        result = kdl_insert_child(text, ["observers"], child_kdl)
+
+    return _verified_observer(
+        before, result, context, upserted=expected_decl
+    )
+
+
+def remove_vertex_observer(text: str, name: str) -> str:
+    """Remove a named observer declaration from vertex text; returns the new text.
+
+    Raises ValueError (refusal style) if the observer does not exist.
+    If the observers block becomes empty after removal, the block is cleaned up.
+    """
+    if not name:
+        raise ValueError("observer name is empty")
+    context = f"remove_vertex_observer({name!r})"
+    _assert_scanner_provable_domain(text, context)
+    before = _parse_vertex_or_raise(text, context)
+    _assert_unique_observer_nodes(text, context)
+
+    existing_names = {o.name for o in (before.observers or ())}
+    if name not in existing_names:
+        raise ValueError(f"observer {name!r} not found in observers block")
+
+    try:
+        start, end = kdl_find_block(text, ["observers"])
+    except ValueError as exc:
+        raise ValueError(
+            f"observer {name!r} not found in observers block: {exc}"
+        ) from exc
+
+    if start == end:
+        raise ValueError(
+            f"observer {name!r} cannot be removed from a single-line observers block "
+            "— expand across lines first"
+        )
+
+    span = _find_observer_span(text, name, start, end)
+    if span is None:
+        raise ValueError(f"observer {name!r} not found in observers block")
+
+    obs_start, obs_end = span
+    lines = text.splitlines()
+    del lines[obs_start : obs_end + 1]
+
+    # After deleting observer lines, determine if the observers block is now empty
+    new_end = end - (obs_end - obs_start + 1)
+    has_remaining = False
+    for line_idx in range(start + 1, new_end):
+        st = lines[line_idx].strip()
+        if st and not st.startswith("//"):
+            has_remaining = True
+            break
+
+    if not has_remaining:
+        # Clean up empty observers block
+        del lines[start : new_end + 1]
+
+    result = "\n".join(lines)
+    if text.endswith("\n") and not result.endswith("\n"):
+        result += "\n"
+    if not text.endswith("\n") and result.endswith("\n"):
+        result = result.rstrip("\n")
+
+    return _verified_observer(before, result, context, removed=name)
+

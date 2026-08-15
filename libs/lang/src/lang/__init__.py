@@ -6,6 +6,7 @@ Uses lazy imports via __getattr__ so that importing a single symbol
 
 # Eagerly import only the loader (lightweight after ast.py optimization)
 from .loader import parse_loop, parse_loop_file, parse_vertex, parse_vertex_file
+
 # validator deferred — imported on first access via __getattr__
 
 __all__ = [
@@ -88,6 +89,9 @@ __all__ = [
     "edit_vertex_kind",
     "remove_vertex_kind",
     "loop_def_to_kdl",
+    "observer_to_kdl",
+    "upsert_vertex_observer",
+    "remove_vertex_observer",
     # Validator
     "validate",
     "validate_loop",
@@ -129,11 +133,26 @@ for _n in ["DSLError", "LexError", "Location", "ParseError", "ValidationError"]:
     _LAZY_IMPORTS[_n] = ("lang.errors", _n)
 
 # Population
-for _n in ["PopulationInfo", "PopulationRow", "read_population", "resolve_template", "resolve_vertex", "template_name"]:
+for _n in [
+    "PopulationInfo",
+    "PopulationRow",
+    "read_population",
+    "resolve_template",
+    "resolve_vertex",
+    "template_name",
+]:
     _LAZY_IMPORTS[_n] = ("lang.population", _n)
 
 # Vertex-kind mutation
-for _n in ["add_vertex_kind", "edit_vertex_kind", "loop_def_to_kdl", "remove_vertex_kind"]:
+for _n in [
+    "add_vertex_kind",
+    "edit_vertex_kind",
+    "loop_def_to_kdl",
+    "observer_to_kdl",
+    "remove_vertex_kind",
+    "remove_vertex_observer",
+    "upsert_vertex_observer",
+]:
     _LAZY_IMPORTS[_n] = ("lang.vertex_mutation", _n)
 
 # Validator

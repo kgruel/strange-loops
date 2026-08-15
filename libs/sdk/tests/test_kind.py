@@ -231,9 +231,47 @@ def test_grant_and_revoke_observer(sample_vertex: Path) -> None:
     info = inspect_declaration(sample_vertex)
     assert "alice" in info.declared_observers
 
+    # Update 'alice' grants
+    res_update = grant_observer(
+        sample_vertex,
+        "alice",
+        grants=["task"],
+        observer="admin",
+    )
+    assert res_update.status in ("applied", "noop")
+
+    # Grant non-alphanumeric observer name
+    res_special = grant_observer(
+        sample_vertex,
+        "kyle/loops-claude",
+        grants=["task"],
+        observer="admin",
+    )
+    assert res_special.status in ("applied", "noop")
+    info_special = inspect_declaration(sample_vertex)
+    assert "kyle/loops-claude" in info_special.declared_observers
+
+    # Revoke 'kyle/loops-claude'
+    revoke_special = revoke_observer(sample_vertex, "kyle/loops-claude", observer="admin")
+    assert revoke_special.status in ("applied", "noop")
+    info_after_special = inspect_declaration(sample_vertex)
+    assert "kyle/loops-claude" not in info_after_special.declared_observers
+
     # Revoke 'alice'
     revoke_res = revoke_observer(sample_vertex, "alice", observer="admin")
     assert revoke_res.status in ("applied", "noop")
 
     info_after = inspect_declaration(sample_vertex)
     assert "alice" not in info_after.declared_observers
+
+
+def test_revoke_nonexistent_observer_raises_ceremony_failed(sample_vertex: Path) -> None:
+    """revoke_observer for a non-existent observer raises CeremonyFailed."""
+    from sdk import CeremonyFailed, revoke_observer
+
+    ensure_signing_key(sample_vertex, "admin")
+
+    with pytest.raises(CeremonyFailed) as exc_info:
+        revoke_observer(sample_vertex, "ghost_observer", observer="admin")
+    assert "could not remove observer 'ghost_observer'" in str(exc_info.value)
+

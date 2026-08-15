@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import json
-import re
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
@@ -15,8 +13,13 @@ from engine.ceremony import (
 )
 from engine.handle import CredentialProvider
 from lang.ast import FoldCollect, FoldDecl, LoopDef
-from lang.population import kdl_insert_child, kdl_remove_child
-from lang.vertex_mutation import add_vertex_kind, edit_vertex_kind, remove_vertex_kind
+from lang.vertex_mutation import (
+    add_vertex_kind,
+    edit_vertex_kind,
+    remove_vertex_kind,
+    remove_vertex_observer,
+    upsert_vertex_observer,
+)
 
 from .emit import CustodyCredentialProvider
 from .target import resolve_target
@@ -42,11 +45,6 @@ __all__ = [
 def _default_loop_def() -> LoopDef:
     """Least presumptive default: items collect 100."""
     return LoopDef(folds=(FoldDecl("items", FoldCollect(100)),))
-
-
-def _kdl_quote(val: str) -> str:
-    """Return a safely quoted JSON/KDL string literal."""
-    return json.dumps(val)
 
 
 def plan_kind_mutation(
@@ -284,33 +282,15 @@ def grant_observer(
     else:
         pub_key = key
 
-    # Safely format observer node name
-    node_name = _kdl_quote(observer_name) if not observer_name.isalnum() else observer_name
-
-    obs_lines = [f"{node_name} {{"]
-    if identity:
-        obs_lines.append(f"  identity {_kdl_quote(identity)}")
-    if pub_key:
-        obs_lines.append(f"  key {_kdl_quote(pub_key)}")
-    if grants:
-        grants_str = " ".join(_kdl_quote(g) for g in grants)
-        obs_lines.append("  grant {")
-        obs_lines.append(f"    potential {grants_str}")
-        obs_lines.append("  }")
-    obs_lines.append("}")
-    obs_kdl = "\n".join(obs_lines)
-
-    import contextlib
-
     current_text = vertex_path.read_text(encoding="utf-8")
-    if "observers {" not in current_text:
-        current_text = current_text + "\nobservers {\n}\n"
-
-    with contextlib.suppress(Exception):
-        current_text = kdl_remove_child(current_text, ["observers"], observer_name)
-
     try:
-        new_text = kdl_insert_child(current_text, ["observers"], obs_kdl)
+        new_text = upsert_vertex_observer(
+            current_text,
+            observer_name,
+            identity=identity,
+            key=pub_key,
+            grants=tuple(grants) if grants else (),
+        )
     except Exception as exc:
         raise CeremonyFailed(f"could not splice observer grant: {exc}") from exc
 
@@ -357,12 +337,9 @@ def revoke_observer(
 
     current_text = vertex_path.read_text(encoding="utf-8")
     try:
-        new_text = kdl_remove_child(current_text, ["observers"], observer_name)
-    except Exception as exc:
+        new_text = remove_vertex_observer(current_text, observer_name)
+    except ValueError as exc:
         raise CeremonyFailed(f"could not remove observer '{observer_name}': {exc}") from exc
-
-    # If observers block is now empty, clean up the block
-    new_text = re.sub(r"observers\s*\{\s*\}\n?", "", new_text)
 
     preview = plan_declaration_update(vertex_path, proposed_text=new_text)
     if not preview.applicable:

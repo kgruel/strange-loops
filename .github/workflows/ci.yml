@@ -45,13 +45,9 @@ jobs:
       - name: Run Chaos Tests
         run: ./dev chaos
 
-  test-libraries:
-    name: Test Libs (${{ matrix.package }})
+  lint:
+    name: Lint (libs/custody, libs/sign)
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        package: [atoms, custody, engine, lang, sign, store]
     steps:
       - uses: actions/checkout@v4
 
@@ -65,8 +61,47 @@ jobs:
         with:
           python-version: "3.13"
 
-      - name: Run Library Tests
+      - name: Run Ruff Check
+        run: uv run ruff check libs/custody libs/sign
+
+  discover:
+    name: Discover Packages
+    runs-on: ubuntu-latest
+    outputs:
+      packages: ${{ steps.discover.outputs.packages }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Discover packages with tests
+        id: discover
         run: |
-          if [ -d "libs/${{ matrix.package }}" ]; then
-            uv run --package ${{ matrix.package }} pytest libs/${{ matrix.package }}/tests -q
-          fi
+          pkgs=$(python3 -c 'import json, sys; print(json.dumps(sys.argv[1:]))' $(for dir in libs/*/ apps/*/; do [ -d "${dir}tests" ] && basename "$dir"; done))
+          echo "packages=$pkgs" >> "$GITHUB_OUTPUT"
+
+  test-packages:
+    name: Test (${{ matrix.package }})
+    needs: discover
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        package: ${{ fromJson(needs.discover.outputs.packages) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Run Package Tests
+        run: |
+          for dir in "libs/${{ matrix.package }}/tests" "apps/${{ matrix.package }}/tests"; do
+            if [ -d "$dir" ]; then
+              uv run --package ${{ matrix.package }} pytest "$dir" -q
+            fi
+          done

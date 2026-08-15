@@ -230,6 +230,64 @@ def measure_cli_cold_invocation(runs: int = 5) -> dict[str, float]:
     }
 
 
+def measure_sdk_operations(n_facts: int = 500) -> dict[str, float]:
+    """Measure sdk.emit_fact, sdk.read_facts, and sdk.read_summary apex composition latency."""
+    try:
+        from sdk import emit_fact, init_vertex, read_facts, read_summary, search_facts
+    except ImportError:
+        return {}
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        vertex_path = Path(tmpdir) / "bench_sdk.vertex"
+        init_vertex(vertex_path, name="bench_sdk", store_type="sqlite")
+
+        # Measure sdk.emit_fact throughput (500 facts)
+        start = time.perf_counter()
+        for i in range(n_facts):
+            emit_fact(
+                vertex_path,
+                kind_or_fact="note",
+                payload={"index": i, "content": f"SDK Fact {i}"},
+                observer="bench",
+                admit_undeclared=True,
+            )
+        emit_elapsed = time.perf_counter() - start
+        sdk_emit_ms_per_op = (emit_elapsed / n_facts) * 1000
+        sdk_emit_ops_sec = n_facts / emit_elapsed if emit_elapsed > 0 else 0
+
+        # Measure sdk.read_summary latency (10 runs)
+        summary_times = []
+        for _ in range(10):
+            t0 = time.perf_counter()
+            summary = read_summary(vertex_path)
+            summary_times.append((time.perf_counter() - t0) * 1000)
+            assert summary.fact_total == n_facts
+
+        # Measure sdk.read_facts pagination latency (10 runs)
+        read_times = []
+        for _ in range(10):
+            t0 = time.perf_counter()
+            page = read_facts(vertex_path, limit=100)
+            read_times.append((time.perf_counter() - t0) * 1000)
+            assert len(page.items) == 100
+
+        # Measure sdk.search_facts latency (10 runs)
+        search_times = []
+        for _ in range(10):
+            t0 = time.perf_counter()
+            s_res = search_facts(vertex_path, query="Fact 42")
+            search_times.append((time.perf_counter() - t0) * 1000)
+
+        return {
+            "sdk_emit_total_ms": round(emit_elapsed * 1000, 2),
+            "sdk_emit_ms_per_op": round(sdk_emit_ms_per_op, 4),
+            "sdk_emit_ops_per_sec": round(sdk_emit_ops_sec, 1),
+            "sdk_summary_ms": round(statistics.median(summary_times), 3),
+            "sdk_read_page_100_ms": round(statistics.median(read_times), 3),
+            "sdk_search_ms": round(statistics.median(search_times), 3),
+        }
+
+
 def run_all_benchmarks() -> dict[str, Any]:
     """Run all benchmark suites and compile metrics."""
     metrics: dict[str, Any] = {
@@ -251,6 +309,11 @@ def run_all_benchmarks() -> dict[str, Any]:
 
     print("Running CLI Cold Invocation Benchmark (5 runs)...")
     metrics.update(measure_cli_cold_invocation(5))
+
+    sdk_metrics = measure_sdk_operations(500)
+    if sdk_metrics:
+        print("Running SDK Apex Composition Benchmarks (500 facts)...")
+        metrics.update(sdk_metrics)
 
     return metrics
 

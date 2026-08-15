@@ -210,13 +210,17 @@ assert receipt.signed is True
 ## 7. Error Taxonomy & Exception Handling
 
 ```text
-ClientError
+SdkError
  ├── TargetError
  │    ├── TargetNotFound       # .vertex file does not exist on disk
- │    └── TargetUnsupported    # Target is not a recognized .vertex file
+ │    ├── TargetUnsupported    # Target is not a recognized .vertex file
+ │    └── TargetNotWritable    # Target or derived index cannot be written
  ├── AdmissionFailed           # Refused by strict mode or observer grants (carries .observer, .kind, .vertex)
- └── EmissionFailed
-      └── CommittedEmissionError # Stored to disk, but post-commit task failed (carries .fact_id)
+ ├── EmissionFailed
+ │    ├── InvalidEmissionRequest # Invalid emission parameters or missing observer
+ │    └── CommittedEmissionError # Stored to disk, but post-commit task failed (carries .fact_id)
+ └── SdkValueError
+      └── InvalidEmissionRequest # Inherits both SdkValueError and EmissionFailed (and ValueError)
 ```
 
 ### Committed Error Honesty

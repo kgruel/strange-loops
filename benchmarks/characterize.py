@@ -47,10 +47,11 @@ import subprocess
 import sys
 import tempfile
 import time
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from atoms import Fact
 from engine import open_vertex, vertex_read, vertex_reindex
@@ -79,6 +80,14 @@ MIN_SAMPLES = 3
 # stronger than `candidate`. One repeat estimates a probe's spread from a single
 # pair of numbers and demonstrably produces false positives — see compare_arms.
 MIN_BRACKETS_FOR_VERDICT = 2
+
+# A delta must clear BOTH the measured floor and this absolute minimum before it
+# is worth a second look. Measured, not guessed: in a same-runner A/B with two
+# reference repeats, `store_append` — byte-identical code in both arms, so a
+# guaranteed control — came out at -2.9% against a ±2.4% floor and would have
+# been reported. Sub-5% movement on this instrument is not a signal, however
+# tight the floor happens to look on a given run.
+MIN_MEANINGFUL_DELTA_PCT = 5.0
 
 SEARCH_TOKEN = "zarquon"
 
@@ -111,7 +120,7 @@ class Sample:
 def _percentile(values: list[float], pct: float) -> float:
     """Nearest-rank percentile — no interpolation, honest for small n."""
     ordered = sorted(values)
-    rank = max(1, min(len(ordered), int(round(pct / 100.0 * len(ordered)))))
+    rank = max(1, min(len(ordered), round(pct / 100.0 * len(ordered))))
     return ordered[rank - 1]
 
 
@@ -402,6 +411,7 @@ def probe_cli() -> list[Sample]:
             ["uv", "run", "loops", "--version"],
             capture_output=True,
             text=True,
+            check=False,
         )
         if result.returncode != 0:
             raise ProbeError(
@@ -418,7 +428,9 @@ def probe_cli() -> list[Sample]:
 
 def _shell(command: list[str]) -> str | None:
     try:
-        result = subprocess.run(command, capture_output=True, text=True, timeout=10)
+        result = subprocess.run(
+            command, capture_output=True, text=True, timeout=10, check=False
+        )
     except (OSError, subprocess.SubprocessError):
         return None
     return result.stdout.strip() if result.returncode == 0 else None
@@ -449,7 +461,7 @@ def capture_environment() -> dict[str, Any]:
     fingerprint = hashlib.sha256(identity.encode()).hexdigest()[:12]
 
     return {
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
         "machine_fingerprint": fingerprint,
         "platform": platform.platform(),
         "power_source": power or "unknown",
@@ -678,7 +690,7 @@ def compare_arms(
         if floor is None:
             verdict = "no floor"
             floor_cell = "unmeasured"
-        elif abs(delta) <= max(floor, 1.0):
+        elif abs(delta) <= max(floor, MIN_MEANINGFUL_DELTA_PCT):
             verdict = "within noise"
             floor_cell = f"±{floor:.1f}%"
         else:

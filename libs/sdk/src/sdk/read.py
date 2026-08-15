@@ -883,12 +883,22 @@ def sync_target(target: Path | str) -> SyncResult:
 
     if info.target_type == "vertex":
         res = vertex_reindex(target_path)
+        # Same agreement check as the bare-store branch below — the old
+        # hardcoded agreement=True silently hid canonical/index drift.
+        # Aggregates carry no canonical/index pair, so there the claim is
+        # vacuously true.
+        agreed = True
+        if info.canonical_path is not None and info.canonical_path.exists():
+            preflight = read_preflight(info.canonical_path, mode=PreflightMode.RECOVER_THEN_OPEN)
+            if preflight.store is not None:
+                preflight.store.close()
+            agreed = preflight.agreed
         t1 = time.perf_counter()
         return SyncResult(
             target_path=str(target_path),
             status="synced" if res.get("reindexed", False) else "unindexed",
             indexed_facts=res.get("facts_indexed", 0),
-            agreement=True,
+            agreement=agreed,
             duration_ms=(t1 - t0) * 1000.0,
         )
 

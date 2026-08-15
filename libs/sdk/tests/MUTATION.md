@@ -1,23 +1,29 @@
 # Mutation Testing Report: `libs/sdk`
 
 - **Target Package**: `libs/sdk/src/sdk` (`declare.py`, `target.py`, `types.py`, `read.py`, `emit.py`, `kind.py`)
-- **Test Suite**: `libs/sdk/tests/` (138 passing unit, contract, integration, property, and conformance tests)
-- **Status**: Hardened across all operations (`declare`, `read`, `emit`, `kind`, `target`, `types`)
+- **Test Suite**: `libs/sdk/tests/` — per-mutant net is the unit/contract/integration/property/conformance layers; the stateful suite (`test_stateful_sdk.py`) self-excludes under `MUTANT_UNDER_TEST` (sequence-level complement, not a per-mutant killer).
+- **Last full run**: 2026-08-14, mutmut 3.x, 3088 mutants.
 
----
+## Results (2026-08-14)
 
-## Module-by-Module Breakdown
+| Module | Mutants surviving | Notes |
+| :--- | ---: | :--- |
+| `types.py` | 0 | Fully killed. |
+| `target.py` | 32 | |
+| `declare.py` | 90 | |
+| `kind.py` | 209 | |
+| `emit.py` | 244 | |
+| `read.py` | 1183 | Largest module, weakest kill net. Sample confirmed-real survivor: `read_summary`'s `include_internal=False` default flips to `True` unnoticed — no test pins default exclusion of internal kinds. |
 
-| Module | Status | Notes |
-| :--- | :--- | :--- |
-| **`target.py`** | **Hardened** | Complete coverage of path existence, target types, unsupported format rejections, and directory-tree `discover_targets`. |
-| **`types.py`** | **100% Killed** (0 survivors) | Complete coverage of dataclass fields, frozen immutability, `as_dict()` transforms, `SdkValueError`, and exception hierarchies. |
-| **`declare.py`** | **Hardened** | Covers `init_vertex` (standalone, strict, observer, root discovery) and `inspect_declaration` (healthy, corrupt, non-vertex diagnostics). |
-| **`emit.py`** | **Hardened** | Covers `emit_fact`, `emit_batch`, `preview_emission`, `dry_run`, `id_override`, admission policy enforcement, custody signing, and `InvalidEmissionRequest` / `CommittedEmissionError` error wrapping. |
-| **`kind.py`** | **Hardened** | Covers default `LoopDef`, AST mutation splices, ceremony plan/apply, generation diffing, observer grant/revoke ceremonies (`grant_observer`, `revoke_observer`), `plan_kind_mutation`, and recovery. |
-| **`read.py`** | **Hardened** | Covers `read_summary` (with attestation counts), `read_facts`, `read_state`, `read_ticks`, `read_fact_by_id`, `search_facts` (FTS5), `resolve_entity`, `read_timeline`, `sync_target`, and aggregate vertices (`combine`, `discover`). |
+Timeouts: 6. Total survived: 1752 of 3088 (57%).
 
----
+**Status: NOT hardened.** A prior version of this report claimed "Hardened" per
+module in prose, with no numbers; the 2026-08-14 run falsified that for every
+module except `types.py`. Survivors are UNCLASSIFIED (not triaged into
+equivalent/finding), so this report deliberately does not end with the
+`SURVIVORS: N (all equivalent/finding)` line and carries no Rule 14 ceiling
+entry yet — adding one requires classifying survivors first, not asserting
+them away. Survivor burn-down is tracked in thread:sdk-coverage-arc.
 
 ## Running Mutation Tests
 
@@ -25,4 +31,5 @@
 cd libs/sdk
 uv run mutmut run
 uv run mutmut results
+uv run mutmut show <mutant-id>
 ```

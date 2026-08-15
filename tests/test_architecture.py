@@ -547,6 +547,14 @@ _LIB_ALLOWED_RUNTIME: dict[str, set[str]] = {
         "sign",    # Ed25519 primitives
         "engine",  # load_declaration — store-canonical observer-key registry
     },
+    "sdk": {
+        "atoms",
+        "custody",
+        "engine",
+        "lang",
+        "sign",
+        "store",
+    },
 }
 
 
@@ -1147,6 +1155,7 @@ _LIB_LAYER: dict[str, str] = {
     "store": "record",
     "sign": "surfacing",
     "custody": "surfacing",
+    "sdk": "surfacing",
 }
 
 #: The chartered layer names. ``view`` (painted, external) and ``relevance``
@@ -3441,6 +3450,7 @@ _MUTATION_SURVIVOR_CEILINGS = {
     "libs/engine/tests/MUTATION-admission.md": 0,
     "libs/engine/tests/MUTATION-witness.md": 110,
     "libs/lang/tests/MUTATION-vertex_mutation.md": 130,
+    "libs/sdk/tests/MUTATION.md": 583,
 }
 
 _SURVIVORS_LINE = re.compile(r"^SURVIVORS: (\d+) \(all equivalent/finding\)$")
@@ -3469,4 +3479,138 @@ def test_mutation_survivor_ratchet():
         "mutation survivors must never grow (shrink the tests' kill set only "
         "by killing more mutants; update the ceiling downward when they do):\n"
         + "\n".join(violations)
+    )
+
+
+# ---------------------------------------------------------------------------
+# Rule 15: Apps may import only sdk + painted
+# ---------------------------------------------------------------------------
+
+
+def test_apps_import_only_sdk_and_painted():
+    """Apps must only import from sdk and painted among the internal lib universe.
+
+    The substrate libraries (atoms, lang, engine, store, sign, custody) must
+    be composed through the sdk layer. Direct imports of substrate libraries
+    by presentation applications are forbidden.
+
+    EXCEPTIONS is a shrink-only allowlist of legacy CLI v1 modules in
+    apps/loops that predate libs/sdk. As CLI v2 replaces CLI v1, this list
+    shrinks to empty.
+    """
+    EXCEPTIONS = {
+        "apps/loops/src/loops/cli/dispatch.py",
+        "apps/loops/src/loops/cli/lens.py",
+        "apps/loops/src/loops/cli/views/fold.py",
+        "apps/loops/src/loops/cli/views/seal.py",
+        "apps/loops/src/loops/cli/witness_address.py",
+        "apps/loops/src/loops/commands/add.py",
+        "apps/loops/src/loops/commands/devtools.py",
+        "apps/loops/src/loops/commands/emit.py",
+        "apps/loops/src/loops/commands/fetch.py",
+        "apps/loops/src/loops/commands/identity.py",
+        "apps/loops/src/loops/commands/init.py",
+        "apps/loops/src/loops/commands/ls.py",
+        "apps/loops/src/loops/commands/orient.py",
+        "apps/loops/src/loops/commands/resolve.py",
+        "apps/loops/src/loops/commands/rm.py",
+        "apps/loops/src/loops/commands/store.py",
+        "apps/loops/src/loops/commands/stream.py",
+        "apps/loops/src/loops/commands/sync.py",
+        "apps/loops/src/loops/commands/vertices.py",
+        "apps/loops/src/loops/lenses/_helpers.py",
+        "apps/loops/src/loops/lenses/declarations.py",
+        "apps/loops/src/loops/lenses/fold.py",
+        "apps/loops/src/loops/lenses/vertices.py",
+        "apps/loops/src/loops/provenance.py",
+        "apps/loops/src/loops/surface.py",
+        "apps/loops/src/loops/tui/autoresearch_app.py",
+    }
+    _check_exceptions(EXCEPTIONS)
+
+    forbidden_libs = set(LIBS) - {"sdk"}
+
+    violations = []
+    for app_dir in (REPO_ROOT / "apps").iterdir():
+        if not app_dir.is_dir():
+            continue
+        for py_file in _src_py_files(app_dir):
+            rel = _rel(py_file)
+            if rel in EXCEPTIONS:
+                continue
+            collector = _collect_imports(py_file)
+            for lib in sorted(forbidden_libs):
+                for lineno in _imports_module(collector.runtime_modules, lib):
+                    violations.append(
+                        f"  {rel}:{lineno} — imports substrate lib {lib!r} directly; "
+                        "apps must import only sdk + painted"
+                    )
+
+    assert not violations, (
+        "Apps must import only sdk + painted (no direct substrate lib imports):\n"
+        + "\n".join(violations)
+    )
+
+
+# ---------------------------------------------------------------------------
+# Rule 16: hot-path libs keep their import footprint (lazy-import ratchet)
+# ---------------------------------------------------------------------------
+
+# The cold-start libs on sl's hot path deliberately defer typing/pathlib/ckdl
+# behind __getattr__ tables and TYPE_CHECKING-shaped tricks (`if False:`,
+# `TYPE_CHECKING = False`). The wins are measured, not aesthetic: the
+# autoresearch lazy-imports run cut `import lang` from 4.7ms to 3.5ms, with
+# `typing` alone worth ~1.4ms — and sl pays that cost on every CLI invocation.
+# The idiom is exactly what a well-meaning cleanup pass "fixes" (one such pass
+# was caught and reverted 2026-08-14), so the invariant lives here instead of
+# in review vigilance. Allowlists are SHRINK-ONLY: removing a module is
+# progress, adding one means an eager import leaked into the hot path — defer
+# it instead, or (with a measurement justifying it) grow the entry in the same
+# change that documents why.
+_IMPORT_FOOTPRINT_ALLOWLIST: dict[str, set[str]] = {
+    "atoms": {"__future__", "types"},
+    "engine": set(),
+    "lang": {"__future__"},
+}
+
+
+def test_hot_path_libs_import_footprint():
+    """Bare `import <lib>` must load nothing outside the lib but its allowlist.
+
+    Runs each import in a fresh subprocess (this process has long since loaded
+    typing) and diffs sys.modules, reporting top-level module names only.
+    """
+    import json as _json
+    import subprocess
+
+    prog = textwrap.dedent(
+        """
+        import json, sys
+        lib = sys.argv[1]
+        base = set(sys.modules)
+        __import__(lib)
+        new = {m.split(".")[0] for m in set(sys.modules) - base}
+        new -= {lib}
+        print(json.dumps(sorted(new)))
+        """
+    )
+    violations = []
+    for lib, allowed in sorted(_IMPORT_FOOTPRINT_ALLOWLIST.items()):
+        proc = subprocess.run(
+            [sys.executable, "-c", prog, lib],
+            capture_output=True,
+            text=True,
+            cwd=REPO_ROOT,
+        )
+        assert proc.returncode == 0, f"import {lib} failed:\n{proc.stderr}"
+        loaded = set(_json.loads(proc.stdout))
+        extra = loaded - allowed
+        if extra:
+            violations.append(
+                f"  {lib}: imports {sorted(extra)} eagerly (allowlist: {sorted(allowed)})"
+            )
+    assert not violations, (
+        "hot-path libs must not grow their import-time footprint (defer the "
+        "import, or grow the allowlist only with a measurement in the same "
+        "change):\n" + "\n".join(violations)
     )

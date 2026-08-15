@@ -839,9 +839,10 @@ class VertexHandle:
         if self._probe is None:
             # Storeless / nonexistent store: bare head reconstruction.
             fold, status = self._reconstruct(None)
+            store_str = str(self._store_path) if self._store_path is not None else str(self._vertex_path)
             position = WitnessPosition(
                 fact_id=GENESIS_SENTINEL, rowid=0, seq=0, lineage=None,
-                unadopted=True, anchor=None,
+                unadopted=True, anchor=None, store=store_str,
             )
             snap = VertexSnapshot(
                 position=position, fold=fold, generation=0,

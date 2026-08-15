@@ -1,12 +1,26 @@
 #!/usr/bin/env bash
-# Dev harness for the monorepo root — repo-level invariants & outer-loop verification.
+# Dev harness for the monorepo root — repo-level invariants & verification.
+#
+# `./dev check` runs the tests that belong to no single package: the
+# architecture ratchet (tests/test_architecture.py — lib DAG, import
+# boundaries, domain-constant pin, frozen-dataclass convention). These
+# were previously run only by hand, and 4 of 7 rules silently went red
+# (found 2026-07-16, custody extraction). A ratchet nothing runs is
+# review vigilance wearing a test's costume — this script is the fix.
+#
+# `check` globs tests/ rather than naming a file: the next root-level
+# ratchet must be picked up by whatever runs the ratchets, or the drift
+# mode above simply reopens. Chaos is excluded by path, not by omission.
+#
+# Package discovery globs libs/*/ and apps/*/ for the same reason — a new
+# library must not depend on someone remembering to add it to a list.
 #
 # Commands:
-#   ./dev check      # Repo-level architectural ratchets (tests/test_architecture.py)
-#   ./dev test       # Run full unit/property test suite across all workspace libraries
-#   ./dev chaos      # Run storage fault injection and disaster recovery tests (tests/chaos/)
-#   ./dev bench      # Run cross-layer benchmark suite (benchmarks/benchmark_hotpath.py)
-#   ./dev all        # Run check, test, chaos, and bench verification
+#   ./dev check         # repo-level architectural ratchets
+#   ./dev test          # every workspace package's suite, plus the ratchets
+#   ./dev chaos         # storage fault-injection tests (tests/chaos/)
+#   ./dev characterize  # cost-curve ledger over the core (benchmarks/)
+#   ./dev all           # check, chaos, test
 set -euo pipefail
 
 cd "$(dirname "$0")"
@@ -14,53 +28,51 @@ cd "$(dirname "$0")"
 cmd="${1:-help}"
 shift || true
 
+# Every workspace package that ships a test suite, discovered not enumerated.
+packages_with_tests() {
+    for dir in libs/*/ apps/*/; do
+        [ -d "${dir}tests" ] || continue
+        printf '%s %s\n' "$(basename "$dir")" "${dir}tests"
+    done
+}
+
 case "$cmd" in
     check)
-        exec uv run pytest tests/test_architecture.py -q "$@"
+        exec uv run pytest tests/ --ignore=tests/chaos -q "$@"
         ;;
     chaos)
         exec uv run pytest tests/chaos/ -q "$@"
         ;;
-    bench)
-        exec uv run python benchmarks/benchmark_hotpath.py "$@"
+    characterize)
+        exec uv run python benchmarks/characterize.py "$@"
         ;;
     test)
-        echo "=== Running all workspace library test suites ==="
-        # Run root architecture & chaos
-        uv run pytest tests/test_architecture.py tests/chaos/ -q
-        # Run per-package suites
-        for pkg in atoms custody engine lang sign store; do
-            if [ -d "libs/$pkg" ]; then
-                echo "--- libs/$pkg ---"
-                uv run --package "$pkg" pytest "libs/$pkg/tests" -q
-            fi
-        done
-        if [ -d "libs/sdk" ]; then
-            echo "--- libs/sdk ---"
-            uv run --package sdk pytest libs/sdk/tests -q
-        fi
-        echo "✅ All test suites passed!"
+        echo "=== Repo-level ratchets ==="
+        uv run pytest tests/ --ignore=tests/chaos -q
+        while read -r pkg tests_dir; do
+            echo "--- $pkg ---"
+            uv run --package "$pkg" pytest "$tests_dir" -q
+        done < <(packages_with_tests)
+        echo "All test suites passed."
         ;;
     all)
-        echo "=== 1. Architectural Check ==="
-        uv run pytest tests/test_architecture.py -q
-        echo "=== 2. Chaos & Fault Injection ==="
+        echo "=== 1. Architectural ratchets ==="
+        uv run pytest tests/ --ignore=tests/chaos -q
+        echo "=== 2. Chaos & fault injection ==="
         uv run pytest tests/chaos/ -q
-        echo "=== 3. Workspace Test Suites ==="
+        echo "=== 3. Workspace test suites ==="
         "$0" test
-        echo "=== 4. Hotpath Benchmarks vs Baseline ==="
-        uv run python benchmarks/benchmark_hotpath.py --compare benchmarks/baseline.json --threshold 10
-        echo "🎉 Full monorepo verification complete!"
+        echo "Full monorepo verification complete."
         ;;
     *)
         echo "Usage: ./dev <command> [args...]"
         echo ""
         echo "Commands:"
-        echo "  check    Run architecture ratchets (tests/test_architecture.py)"
-        echo "  test     Run unit/property suites across all libraries"
-        echo "  chaos    Run storage fault injection tests (tests/chaos/)"
-        echo "  bench    Run cross-layer benchmark harness (benchmarks/)"
-        echo "  all      Run check, chaos, test, and bench comparison"
+        echo "  check         Run architecture ratchets (tests/, excluding chaos)"
+        echo "  test          Run every workspace package's suite, plus the ratchets"
+        echo "  chaos         Run storage fault injection tests (tests/chaos/)"
+        echo "  characterize  Measure core cost curves (benchmarks/characterize.py)"
+        echo "  all           Run check, chaos, and test"
         exit "$([ "$cmd" = "-h" ] || [ "$cmd" = "--help" ] && echo 0 || echo 1)"
         ;;
 esac

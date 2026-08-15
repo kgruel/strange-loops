@@ -460,7 +460,9 @@ def test_read_summary_signed_counts(sample_vertex: Path) -> None:
 
     summary = read_summary(sample_vertex)
     assert summary.signed_count == 1
-    assert summary.unsigned_count == 1  # Genesis declaration fact is unsigned
+    # _decl.* rows are excluded from signed_counts (SPEC §9.4); the one
+    # emitted fact is signed, so nothing is unsigned.
+    assert summary.unsigned_count == 0
 
 
 def test_combine_aggregate_reads(tmp_path: Path) -> None:

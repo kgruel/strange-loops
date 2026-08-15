@@ -185,8 +185,9 @@ def read_summary(
                 for k in kinds
                 if decl_ast is not None and k not in decl_ast.loops and not k.startswith("_decl.")
             ]
+            # signed_counts is (signed, TOTAL) — unsigned is the difference
             signed_count = signed_counts[0] if signed_counts else 0
-            unsigned_count = signed_counts[1] if signed_counts else 0
+            unsigned_count = (signed_counts[1] - signed_counts[0]) if signed_counts else 0
 
             return ReadSummary(
                 target_type="vertex",
@@ -215,8 +216,9 @@ def read_summary(
         fact_total, tick_total, latest_ts, kinds, signed_counts = _compute_summary_stats(
             reader, include_internal=include_internal
         )
+        # signed_counts is (signed, TOTAL) — unsigned is the difference
         signed_count = signed_counts[0] if signed_counts else 0
-        unsigned_count = signed_counts[1] if signed_counts else 0
+        unsigned_count = (signed_counts[1] - signed_counts[0]) if signed_counts else 0
 
         return ReadSummary(
             target_type=info.target_type,
@@ -370,6 +372,18 @@ def read_facts(
         reader.close()
 
 
+def _tick_as_dict(t: Any) -> dict[str, Any]:
+    """Serialize a tick record: engine's Tick exposes to_dict(), not as_dict().
+
+    The old ``dict(t)`` fallback raised TypeError on every real fired Tick.
+    """
+    if hasattr(t, "as_dict"):
+        return t.as_dict()
+    if hasattr(t, "to_dict"):
+        return t.to_dict()
+    return dict(t)
+
+
 def _serialize_fold_item(item: Any) -> Any:
     """Serialize fold state item values cleanly."""
     if hasattr(item, "predicate") and hasattr(item, "address"):
@@ -480,7 +494,7 @@ def read_ticks(
         )
         if is_aggregate:
             ticks = vertex_ticks(target_path, 0.0, float("inf"), name=name)
-            return [t.as_dict() if hasattr(t, "as_dict") else dict(t) for t in ticks]
+            return [_tick_as_dict(t) for t in ticks]
 
         if info.canonical_path is None or not info.canonical_path.exists():
             return []
@@ -490,7 +504,7 @@ def read_ticks(
     reader, _ = _ensure_reader(canonical, index_path)
     try:
         ticks = reader.ticks_between(0.0, float("inf"), name=name)
-        return [t.as_dict() if hasattr(t, "as_dict") else dict(t) for t in ticks]
+        return [_tick_as_dict(t) for t in ticks]
     finally:
         reader.close()
 

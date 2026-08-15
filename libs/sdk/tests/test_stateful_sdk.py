@@ -782,24 +782,15 @@ TestSdkStateMachine = SdkStateMachine.TestCase
 
 
 # -----------------------------------------------------------------------------
-# Suspected Bug Regression Tests (XFAIL)
+# Boundary Regression Tests
 # -----------------------------------------------------------------------------
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "plan_kind_mutation leaks raw builtins.ValueError from lang.vertex_mutation "
-        "instead of raising SdkError/SdkValueError or returning DeclarationPlanResult"
-    ),
-)
-def test_plan_kind_mutation_invalid_mutation_raises_sdk_error(sample_vertex: Path) -> None:
-    """Suspected bug: plan_kind_mutation raises raw ValueError instead of SdkError."""
-    # 'note' is already declared in sample_vertex, so 'add' should raise SdkError or return plan
-    try:
-        plan_kind_mutation(sample_vertex, "add", "note")
-    except SdkError:
-        pass  # Expected behavior under invariant (8)
-    except ValueError as exc:
-        if not isinstance(exc, SdkError):
-            raise AssertionError(
-                f"plan_kind_mutation raised raw builtins.ValueError {exc!r} instead of SdkError"
-            ) from exc
+def test_plan_kind_mutation_refused_mutation_returns_inapplicable_plan(
+    sample_vertex: Path,
+) -> None:
+    """A lang-refused mutation is a non-applicable plan, never a raw ValueError."""
+    # 'note' is already declared in sample_vertex, so 'add' is a refused mutation.
+    plan = plan_kind_mutation(sample_vertex, "add", "note")
+    assert plan.applicable is False
+    assert plan.mode == "refused"
+    assert plan.reason != ""
+    assert plan.changes == []

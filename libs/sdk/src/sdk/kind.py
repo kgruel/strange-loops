@@ -74,14 +74,31 @@ def plan_kind_mutation(
     current_text = vertex_path.read_text(encoding="utf-8")
     loop_def = definition or _default_loop_def()
 
-    if op == "add":
-        new_text = add_vertex_kind(current_text, kind_name, loop_def)
-    elif op == "edit":
-        new_text = edit_vertex_kind(current_text, kind_name, loop_def)
-    elif op == "remove":
-        new_text = remove_vertex_kind(current_text, kind_name)
-    else:
-        raise SdkValueError(f"unsupported mutation op '{op}', expected 'add', 'edit', or 'remove'")
+    try:
+        if op == "add":
+            new_text = add_vertex_kind(current_text, kind_name, loop_def)
+        elif op == "edit":
+            new_text = edit_vertex_kind(current_text, kind_name, loop_def)
+        elif op == "remove":
+            new_text = remove_vertex_kind(current_text, kind_name)
+        else:
+            raise SdkValueError(
+                f"unsupported mutation op '{op}', expected 'add', 'edit', or 'remove'"
+            )
+    except SdkValueError:
+        raise
+    except ValueError as exc:
+        # lang refused the mutation (duplicate add, missing edit/remove target, ...).
+        # A plan is a preview of applicability, so a describable refusal is a
+        # non-applicable plan, not an exception — the apply paths raise CeremonyFailed.
+        return DeclarationPlanResult(
+            applicable=False,
+            reason=str(exc),
+            mode="refused",
+            vertex_path=str(vertex_path),
+            generation_before=None,
+            changes=[],
+        )
 
     preview = plan_declaration_update(vertex_path, proposed_text=new_text)
     return DeclarationPlanResult(

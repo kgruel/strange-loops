@@ -40,6 +40,7 @@ only-include = [
     "libs/custody/src/custody",
     "libs/engine/src/engine",
     "libs/lang/src/lang",
+    "libs/sdk/src/sdk",
     "libs/sign/src/sign",
     "libs/store/src/store",
     "apps/loops/src/loops",
@@ -53,9 +54,23 @@ packages = [
     "libs/custody/src/custody",
     "libs/engine/src/engine",
     "libs/lang/src/lang",
+    "libs/sdk/src/sdk",
     "libs/sign/src/sign",
     "libs/store/src/store",
     "apps/loops/src/loops",
+]
+
+# The root runs the tests that belong to no single package — the architecture
+# ratchets and tests/chaos — so it needs the same dev tooling every member
+# already declares. Without this, `uv run pytest` at the root resolves only the
+# flat wheel's runtime deps and dies with "Failed to spawn: pytest" on any
+# machine whose .venv was not already dirty from an earlier run. uv.lock is
+# gitignored, so CI resolves fresh every time and hit exactly that.
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=6.0",
+    "ruff>=0.8",
 ]
 
 [tool.uv.workspace]
@@ -64,6 +79,7 @@ members = [
     "libs/custody",
     "libs/engine",
     "libs/lang",
+    "libs/sdk",
     "libs/sign",
     "libs/store",
     "apps/loops",

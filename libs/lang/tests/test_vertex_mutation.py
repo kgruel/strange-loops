@@ -20,11 +20,17 @@ from pathlib import Path
 import pytest
 
 from lang import (
+    GrantDecl,
+    ObserverDecl,
     add_vertex_kind,
     edit_vertex_kind,
     loop_def_to_kdl,
+    observer_to_kdl,
     parse_vertex,
+    parse_vertex_file,
     remove_vertex_kind,
+    remove_vertex_observer,
+    upsert_vertex_observer,
 )
 from lang.ast import (
     BoundaryAfter,
@@ -999,7 +1005,10 @@ class TestVertexMutationTestingCoverage:
         """Kills mutant removing error message on reserved kind name."""
         from lang.vertex_mutation import _validate_kind_name
 
-        with pytest.raises(ValueError, match=r"^kind name 'boundary' is reserved inside the loops block$"):
+        with pytest.raises(
+            ValueError,
+            match=r"^kind name 'boundary' is reserved inside the loops block$",
+        ):
             _validate_kind_name("boundary")
 
     def test_validate_kind_name_invalid_start_chars(self):
@@ -1007,14 +1016,19 @@ class TestVertexMutationTestingCoverage:
         from lang.vertex_mutation import _validate_kind_name
 
         for invalid in ["1kind", ".kind", "-kind"]:
-            with pytest.raises(ValueError, match=r"must start with a letter or underscore"):
+            with pytest.raises(
+                ValueError, match=r"must start with a letter or underscore"
+            ):
                 _validate_kind_name(invalid)
 
     def test_validate_kind_name_invalid_chars(self):
         """Kills mutant removing error message on characters outside _BARE_NAME_CHARS."""
         from lang.vertex_mutation import _validate_kind_name
 
-        with pytest.raises(ValueError, match=r"contains characters KDL cannot represent safely here"):
+        with pytest.raises(
+            ValueError,
+            match=r"contains characters KDL cannot represent safely here",
+        ):
             _validate_kind_name("kind with space")
 
     def test_q_space_and_del_boundaries(self):
@@ -1025,12 +1039,17 @@ class TestVertexMutationTestingCoverage:
         assert _q("hello world", what="topic") == '"hello world"'
 
         # DEL (0x7F = 127) is not allowed and must raise
-        with pytest.raises(ValueError, match=r"topic .* contains control characters or newlines"):
+        with pytest.raises(
+            ValueError, match=r"topic .* contains control characters or newlines"
+        ):
             _q("hello\x7fworld", what="topic")
 
         # Control characters and newlines must raise with the exact context
         for ctrl in ["\n", "\r", "\t", "\x00", "\x1f"]:
-            with pytest.raises(ValueError, match=r"custom_field .* contains control characters or newlines"):
+            with pytest.raises(
+                ValueError,
+                match=r"custom_field .* contains control characters or newlines",
+            ):
                 _q(f"val{ctrl}", what="custom_field")
 
     def test_fold_op_kdl_quoting_and_all_variants(self):
@@ -1079,7 +1098,10 @@ class TestVertexMutationTestingCoverage:
 
         assert _condition_kdl(BoundaryCondition("tgt", "==", 5)) == 'condition "tgt" "==" 5'
         assert _condition_kdl(BoundaryCondition("tgt", ">=", 2.5)) == 'condition "tgt" ">=" 2.5'
-        assert _condition_kdl(BoundaryCondition("tgt", "!=", "closed")) == 'condition "tgt" "!=" "closed"'
+        assert (
+            _condition_kdl(BoundaryCondition("tgt", "!=", "closed"))
+            == 'condition "tgt" "!=" "closed"'
+        )
 
         with pytest.raises(ValueError, match=r"condition target"):
             _condition_kdl(BoundaryCondition("tgt\n", "==", 1))
@@ -1097,7 +1119,10 @@ class TestVertexMutationTestingCoverage:
             _boundary_kdl(object(), "  ")
 
         # Non-bare match field
-        with pytest.raises(ValueError, match=r"boundary match field 'bad field' is not a bare KDL identifier"):
+        with pytest.raises(
+            ValueError,
+            match=r"boundary match field 'bad field' is not a bare KDL identifier",
+        ):
             _boundary_kdl(BoundaryWhen("k", match=(("bad field", "v"),)), "  ")
 
         # Control characters in boundary parts
@@ -1129,21 +1154,45 @@ class TestVertexMutationTestingCoverage:
 
         # Edge field and target with control chars
         with pytest.raises(ValueError, match=r"edge field"):
-            loop_def_to_kdl("k", LoopDef(folds=(), edges=(EdgeDecl(field="f\n", target="t"),)))
+            loop_def_to_kdl(
+                "k", LoopDef(folds=(), edges=(EdgeDecl(field="f\n", target="t"),))
+            )
         with pytest.raises(ValueError, match=r"edge target"):
-            loop_def_to_kdl("k", LoopDef(folds=(), edges=(EdgeDecl(field="f", target="t\n"),)))
+            loop_def_to_kdl(
+                "k", LoopDef(folds=(), edges=(EdgeDecl(field="f", target="t\n"),))
+            )
 
         # Lifecycle active validations
-        with pytest.raises(ValueError, match=r"lifecycle active value '' cannot round-trip"):
-            loop_def_to_kdl("k", LoopDef(folds=(), lifecycle=LifecycleDecl(field="st", active=("",))))
-        with pytest.raises(ValueError, match=r"lifecycle active value ' open' cannot round-trip"):
-            loop_def_to_kdl("k", LoopDef(folds=(), lifecycle=LifecycleDecl(field="st", active=(" open",))))
-        with pytest.raises(ValueError, match=r"lifecycle active value 'a,b' cannot round-trip"):
-            loop_def_to_kdl("k", LoopDef(folds=(), lifecycle=LifecycleDecl(field="st", active=("a,b",))))
+        with pytest.raises(
+            ValueError, match=r"lifecycle active value '' cannot round-trip"
+        ):
+            loop_def_to_kdl(
+                "k", LoopDef(folds=(), lifecycle=LifecycleDecl(field="st", active=("",)))
+            )
+        with pytest.raises(
+            ValueError, match=r"lifecycle active value ' open' cannot round-trip"
+        ):
+            loop_def_to_kdl(
+                "k", LoopDef(folds=(), lifecycle=LifecycleDecl(field="st", active=(" open",)))
+            )
+        with pytest.raises(
+            ValueError, match=r"lifecycle active value 'a,b' cannot round-trip"
+        ):
+            loop_def_to_kdl(
+                "k", LoopDef(folds=(), lifecycle=LifecycleDecl(field="st", active=("a,b",)))
+            )
         with pytest.raises(ValueError, match=r"lifecycle field"):
-            loop_def_to_kdl("k", LoopDef(folds=(), lifecycle=LifecycleDecl(field="st\n", active=("open",))))
+            loop_def_to_kdl(
+                "k", LoopDef(folds=(), lifecycle=LifecycleDecl(field="st\n", active=("open",)))
+            )
         with pytest.raises(ValueError, match=r"lifecycle active set"):
-            loop_def_to_kdl("k", LoopDef(folds=(), lifecycle=LifecycleDecl(field="st", active=("open\x00close",))))
+            loop_def_to_kdl(
+                "k",
+                LoopDef(
+                    folds=(),
+                    lifecycle=LifecycleDecl(field="st", active=("open\x00close",)),
+                ),
+            )
 
     def test_assert_scanner_provable_domain_detailed(self):
         """Kills mutants in _assert_scanner_provable_domain states and transitions."""
@@ -1151,50 +1200,97 @@ class TestVertexMutationTestingCoverage:
 
         # Non-LF newline checks
         for nl in ["\r", "\x0b", "\f", "\u0085", "\u2028", "\u2029"]:
-            with pytest.raises(ValueError, match=r"^ctx: the vertex text contains a non-LF newline character"):
-                _assert_scanner_provable_domain(f'name "t"\nloops {{\n  task {{ fold {{ items "by" "{nl}" }} }}\n}}\n', "ctx")
+            with pytest.raises(
+                ValueError,
+                match=r"^ctx: the vertex text contains a non-LF newline character",
+            ):
+                _assert_scanner_provable_domain(
+                    f'name "t"\nloops {{\n  task {{ fold {{ items "by" "{nl}" }} }}\n}}\n',
+                    "ctx",
+                )
 
         # Escapes in strings
-        with pytest.raises(ValueError, match=r"^ctx: the vertex text contains the string escape backslash-'n'"):
+        with pytest.raises(
+            ValueError,
+            match=r"^ctx: the vertex text contains the string escape backslash-'n'",
+        ):
             _assert_scanner_provable_domain('name "t\\n"\n', "ctx")
-        with pytest.raises(ValueError, match=r"^ctx: the vertex text contains the string escape backslash-'t'"):
+        with pytest.raises(
+            ValueError,
+            match=r"^ctx: the vertex text contains the string escape backslash-'t'",
+        ):
             _assert_scanner_provable_domain('name "t\\t"\n', "ctx")
-        with pytest.raises(ValueError, match=r"^ctx: the vertex text contains the string escape backslash-'a'"):
+        with pytest.raises(
+            ValueError,
+            match=r"^ctx: the vertex text contains the string escape backslash-'a'",
+        ):
             _assert_scanner_provable_domain('name "t\\a"\n', "ctx")
 
         # Whitelisted escapes
         _assert_scanner_provable_domain('name "t\\\\ \\""\n', "ctx")
 
         # Quoted string spanning literal newline
-        with pytest.raises(ValueError, match=r"^ctx: the vertex text contains a quoted string spanning a literal newline"):
+        with pytest.raises(
+            ValueError,
+            match=r"^ctx: the vertex text contains a quoted string spanning a literal newline",
+        ):
             _assert_scanner_provable_domain('name "multiline\nstring"\n', "ctx")
 
         # Unterminated quoted string at EOF
-        with pytest.raises(ValueError, match=r"^ctx: the vertex text contains an unterminated quoted string at end of file"):
+        with pytest.raises(
+            ValueError,
+            match=r"^ctx: the vertex text contains an unterminated quoted string at end of file",
+        ):
             _assert_scanner_provable_domain('name "unterminated', "ctx")
 
         # Comments and raw strings in code
-        with pytest.raises(ValueError, match=r"^ctx: the vertex text contains '/\*' \(a block comment opener\)"):
+        with pytest.raises(
+            ValueError, match=r"^ctx: the vertex text contains '/\*' \(a block comment opener\)"
+        ):
             _assert_scanner_provable_domain('/* comment */ name "t"\n', "ctx")
-        with pytest.raises(ValueError, match=r"^ctx: the vertex text contains '/-' \(a slashdash comment\)"):
+        with pytest.raises(
+            ValueError, match=r"^ctx: the vertex text contains '/-' \(a slashdash comment\)"
+        ):
             _assert_scanner_provable_domain('/- name "t"\n', "ctx")
-        with pytest.raises(ValueError, match=r"^ctx: the vertex text contains '\"\"\"' \(a multi-line string\)"):
+        with pytest.raises(
+            ValueError, match=r"^ctx: the vertex text contains '\"\"\"' \(a multi-line string\)"
+        ):
             _assert_scanner_provable_domain('name """t"""\n', "ctx")
-        with pytest.raises(ValueError, match=r'^ctx: the vertex text contains r" \(the zero-hash KDL raw-string opener\)'):
+        with pytest.raises(
+            ValueError,
+            match=r'^ctx: the vertex text contains r" \(the zero-hash KDL raw-string opener\)',
+        ):
             _assert_scanner_provable_domain('name r"t"\n', "ctx")
-        with pytest.raises(ValueError, match=r'^ctx: the vertex text contains #" \(a hashed KDL raw-string opener\)'):
+        with pytest.raises(
+            ValueError,
+            match=r'^ctx: the vertex text contains #" \(a hashed KDL raw-string opener\)',
+        ):
             _assert_scanner_provable_domain('name #"t"#\n', "ctx")
-        with pytest.raises(ValueError, match=r'^ctx: the vertex text contains "# \(a hashed KDL raw-string closer\)'):
+        with pytest.raises(
+            ValueError,
+            match=r'^ctx: the vertex text contains "# \(a hashed KDL raw-string closer\)',
+        ):
             _assert_scanner_provable_domain('name "t"#\n', "ctx")
 
         # Code state characters: tabs, newlines, tildes, spaces, and non-ascii/control
-        _assert_scanner_provable_domain('name\t"t"\nloops {\n  task { fold { items "by" "name" } }\n}\n', "ctx")
+        _assert_scanner_provable_domain(
+            'name\t"t"\nloops {\n  task { fold { items "by" "name" } }\n}\n', "ctx"
+        )
         _assert_scanner_provable_domain('name "t" ~ foo\n', "ctx")
-        with pytest.raises(ValueError, match=r"^ctx: the vertex text contains the non-ASCII or control character '\\x01' in code position"):
+        with pytest.raises(
+            ValueError,
+            match=r"^ctx: the vertex text contains the non-ASCII or control character '\\x01'",
+        ):
             _assert_scanner_provable_domain('name "t"\x01\n', "ctx")
-        with pytest.raises(ValueError, match=r"^ctx: the vertex text contains the non-ASCII or control character '\\x7f' in code position"):
+        with pytest.raises(
+            ValueError,
+            match=r"^ctx: the vertex text contains the non-ASCII or control character '\\x7f'",
+        ):
             _assert_scanner_provable_domain('name "t"\x7f\n', "ctx")
-        with pytest.raises(ValueError, match=r"^ctx: the vertex text contains the non-ASCII or control character '“' in code position"):
+        with pytest.raises(
+            ValueError,
+            match=r"^ctx: the vertex text contains the non-ASCII or control character '“'",
+        ):
             _assert_scanner_provable_domain('name "t" \u201c\n', "ctx")
 
     def test_loops_block_child_names_parsing(self):
@@ -1205,8 +1301,13 @@ class TestVertexMutationTestingCoverage:
         assert _loops_block_child_names('name "t"\n') == []
 
         # Single-line loops block
-        assert _loops_block_child_names('loops { decision; task; }\n') == ["decision", "task"]
-        assert _loops_block_child_names('loops { decision { }; task { fold { } } }\n') == ["decision", "task"]
+        assert _loops_block_child_names("loops { decision; task; }\n") == [
+            "decision",
+            "task",
+        ]
+        assert _loops_block_child_names(
+            "loops { decision { }; task { fold { } } }\n"
+        ) == ["decision", "task"]
 
         # Multiline loops block with blank lines, no-space brace, and attribute
         doc = (
@@ -1252,11 +1353,16 @@ class TestVertexMutationTestingCoverage:
 
         # Duplicate kind
         doc = "loops {\n  task {\n  }\n  task {\n  }\n}\n"
-        with pytest.raises(ValueError, match=r"duplicate loop-kind declaration\(s\) \['task'\] in the loops block"):
+        with pytest.raises(
+            ValueError,
+            match=r"duplicate loop-kind declaration\(s\) \['task'\] in the loops block",
+        ):
             _assert_unique_kind_nodes(doc, "ctx")
 
         # Duplicate reserved boundary node is allowed
-        doc_reserved = "loops {\n  boundary every=1\n  boundary after=2\n  task {\n  }\n}\n"
+        doc_reserved = (
+            "loops {\n  boundary every=1\n  boundary after=2\n  task {\n  }\n}\n"
+        )
         _assert_unique_kind_nodes(doc_reserved, "ctx")
 
     def test_has_comment_outside_strings_scenarios(self):
@@ -1283,41 +1389,98 @@ class TestVertexMutationTestingCoverage:
         """Kills content preservation checks and error message handling in _verified."""
         from lang.vertex_mutation import _verified
 
-        before = parse_vertex('name "t"\nloops {\n  decision {\n    fold { items "by" "topic" }\n  }\n  task {\n    fold { items "by" "name" }\n  }\n}\n')
+        before = parse_vertex(
+            'name "t"\nloops {\n  decision {\n'
+            '    fold { items "by" "topic" }\n  }\n'
+            '  task {\n    fold { items "by" "name" }\n  }\n}\n'
+        )
 
         # Invalid vertex produced
         with pytest.raises(ValueError, match=r"ctx produced an invalid vertex"):
             _verified(before, "invalid kdl text {{{", "ctx")
 
         # Resulting kind set mismatch (lost kind)
-        with pytest.raises(ValueError, match=r"violated content preservation: resulting kind set differs from the expected delta \(lost: \['extra'\], unexpected: \[\]\)"):
-            _verified(before, 'name "t"\nloops {\n  decision {\n    fold { items "by" "topic" }\n  }\n  task {\n    fold { items "by" "name" }\n  }\n}\n', "ctx", added="extra", definition=BASIC)
+        with pytest.raises(
+            ValueError,
+            match=r"violated content preservation: resulting kind set differs",
+        ):
+            _verified(
+                before,
+                'name "t"\nloops {\n  decision {\n'
+                '    fold { items "by" "topic" }\n  }\n'
+                '  task {\n    fold { items "by" "name" }\n  }\n}\n',
+                "ctx",
+                added="extra",
+                definition=BASIC,
+            )
 
         # Resulting kind set mismatch (unexpected kind)
-        with pytest.raises(ValueError, match=r"violated content preservation: resulting kind set differs from the expected delta \(lost: \[\], unexpected: \['surprise'\]\)"):
-            _verified(before, 'name "t"\nloops {\n  decision { fold { items "by" "topic" } }\n  task { fold { items "by" "name" } }\n  surprise { fold { items "by" "name" } }\n}\n', "ctx", edited="decision", definition=BASIC)
+        with pytest.raises(
+            ValueError,
+            match=r"violated content preservation: resulting kind set differs",
+        ):
+            _verified(
+                before,
+                'name "t"\nloops {\n  decision { fold { items "by" "topic" } }\n'
+                '  task { fold { items "by" "name" } }\n'
+                '  surprise { fold { items "by" "name" } }\n}\n',
+                "ctx",
+                edited="decision",
+                definition=BASIC,
+            )
 
         # Definition mismatch
         diff_def = LoopDef(folds=(FoldDecl("items", FoldBy("other")),))
-        with pytest.raises(ValueError, match=r"violated content preservation: kind 'decision' parses back different"):
-            _verified(before, 'name "t"\nloops {\n  decision {\n    fold { items "by" "topic" }\n  }\n  task {\n    fold { items "by" "name" }\n  }\n}\n', "ctx", edited="decision", definition=diff_def)
+        with pytest.raises(
+            ValueError,
+            match=r"violated content preservation: kind 'decision' parses back different",
+        ):
+            _verified(
+                before,
+                'name "t"\nloops {\n  decision {\n'
+                '    fold { items "by" "topic" }\n  }\n'
+                '  task {\n    fold { items "by" "name" }\n  }\n}\n',
+                "ctx",
+                edited="decision",
+                definition=diff_def,
+            )
 
         # Passing definition=None when target was added succeeds without definition check
-        valid_add = 'name "t"\nloops {\n  decision {\n    fold { items "by" "topic" }\n  }\n  task {\n    fold { items "by" "name" }\n  }\n  extra {\n    fold { items "by" "topic" }\n  }\n}\n'
+        valid_add = (
+            'name "t"\nloops {\n  decision {\n'
+            '    fold { items "by" "topic" }\n  }\n'
+            '  task {\n    fold { items "by" "name" }\n  }\n'
+            '  extra {\n    fold { items "by" "topic" }\n  }\n}\n'
+        )
         assert _verified(before, valid_add, "ctx", added="extra", definition=None) == valid_add
 
         # Sibling kind altered
-        altered_sibling = 'name "t"\nloops {\n  decision {\n    fold { items "by" "topic" }\n  }\n  task {\n    fold { items "by" "altered" }\n  }\n  extra {\n    fold { items "by" "topic" }\n  }\n}\n'
-        with pytest.raises(ValueError, match=r"violated content preservation: sibling kind 'task' was altered"):
+        altered_sibling = (
+            'name "t"\nloops {\n  decision {\n'
+            '    fold { items "by" "topic" }\n  }\n'
+            '  task {\n    fold { items "by" "altered" }\n  }\n'
+            '  extra {\n    fold { items "by" "topic" }\n  }\n}\n'
+        )
+        with pytest.raises(
+            ValueError,
+            match=r"violated content preservation: sibling kind 'task' was altered",
+        ):
             _verified(before, altered_sibling, "ctx", added="extra", definition=BASIC)
 
         # Non-kind field altered (e.g. name or discover)
-        altered_non_kind = 'name "altered"\nloops {\n  decision {\n    fold { items "by" "topic" }\n  }\n  task {\n    fold { items "by" "name" }\n  }\n}\n'
-        with pytest.raises(ValueError, match=r"violated content preservation: non-kind vertex content changed \(field 'name'\)"):
+        altered_non_kind = (
+            'name "altered"\nloops {\n  decision {\n'
+            '    fold { items "by" "topic" }\n  }\n'
+            '  task {\n    fold { items "by" "name" }\n  }\n}\n'
+        )
+        with pytest.raises(
+            ValueError,
+            match=r"violated content preservation: non-kind vertex content changed",
+        ):
             _verified(before, altered_non_kind, "ctx", edited="decision", definition=BASIC)
 
     def test_add_vertex_kind_formatting_and_errors(self):
-        """Kills formatting on text without trailing newline and duplicate kind refusal in add_vertex_kind."""
+        """Kills formatting on text without trailing newline and duplicate kind refusal."""
         # Text without trailing newline and without loops block (has discover so valid vertex)
         out_no_nl = add_vertex_kind('discover "./*.loop"\nname "t"', "task", BASIC)
         assert out_no_nl.endswith("\n")
@@ -1331,17 +1494,23 @@ class TestVertexMutationTestingCoverage:
         assert set(parse_vertex(out_nl).loops) == {"task"}
 
         # Kind already exists
-        with pytest.raises(ValueError, match=r"^kind 'task' already exists; use edit_vertex_kind$"):
+        with pytest.raises(
+            ValueError, match=r"^kind 'task' already exists; use edit_vertex_kind$"
+        ):
             add_vertex_kind(out_nl, "task", BASIC)
 
     def test_edit_vertex_kind_trivia_tabs_and_comments(self):
         """Kills suffix whitespace handling and interior comments in edit_vertex_kind."""
         # Single-line loops block refuses
-        with pytest.raises(ValueError, match=r"single-line loops blocks cannot be edited in place"):
+        with pytest.raises(
+            ValueError, match=r"single-line loops blocks cannot be edited in place"
+        ):
             edit_vertex_kind('name "t"\nloops { decision { } }\n', "decision", BASIC)
 
         # Kind not found
-        with pytest.raises(ValueError, match=r"kind 'unknown' not found in loops block"):
+        with pytest.raises(
+            ValueError, match=r"kind 'unknown' not found in loops block"
+        ):
             edit_vertex_kind('name "t"\nloops {\n  decision { }\n}\n', "unknown", BASIC)
 
         # Interior comment in edited kind refuses
@@ -1354,7 +1523,10 @@ class TestVertexMutationTestingCoverage:
             "  }\n"
             "}\n"
         )
-        with pytest.raises(ValueError, match=r"carries a comment the regenerated definition cannot preserve"):
+        with pytest.raises(
+            ValueError,
+            match=r"carries a comment the regenerated definition cannot preserve",
+        ):
             edit_vertex_kind(doc_interior, "decision", BASIC)
 
         # Trailing comment with space suffix preserved exactly on the final line of multiline block
@@ -1405,12 +1577,333 @@ class TestVertexMutationTestingCoverage:
     def test_remove_vertex_kind_errors(self):
         """Kills single line and missing kind errors in remove_vertex_kind."""
         # Single line loops block
-        with pytest.raises(ValueError, match=r"single-line loops blocks cannot be mutated in place"):
-            remove_vertex_kind('name "t"\nloops { decision { } }\n', "decision")
+        with pytest.raises(
+            ValueError,
+            match=r"single-line loops blocks cannot be mutated in place",
+        ):
+            remove_vertex_kind(
+                'name "t"\nloops { decision { } }\n', "decision"
+            )
 
         # Kind not found
-        with pytest.raises(ValueError, match=r"kind 'unknown' not found in loops block"):
-            remove_vertex_kind('name "t"\nloops {\n  decision { }\n  task { }\n}\n', "unknown")
+        with pytest.raises(
+            ValueError, match=r"kind 'unknown' not found in loops block"
+        ):
+            remove_vertex_kind(
+                'name "t"\nloops {\n  decision { }\n  task { }\n}\n', "unknown"
+            )
+
+
+# ---------------------------------------------------------------------------
+# Observer Mutations
+# ---------------------------------------------------------------------------
+
+
+class TestObserverMutation:
+    def test_insert_into_missing_observers_block(self):
+        """upsert_vertex_observer creates observers block when absent."""
+        text = 'name "t"\nloops {\n  task {\n    fold { items "by" "topic" }\n  }\n}\n'
+        out = upsert_vertex_observer(
+            text,
+            "alice",
+            identity="users",
+            key="key123",
+            grants=["task", "note"],
+        )
+        assert "observers {" in out
+        vf = parse_vertex(out)
+        assert vf.observers is not None
+        assert len(vf.observers) == 1
+        obs = vf.observers[0]
+        assert obs == ObserverDecl(
+            name="alice",
+            identity="users",
+            key="key123",
+            grant=GrantDecl(potential=frozenset({"task", "note"})),
+        )
+        assert vf.loops["task"] == BASIC
+
+    def test_insert_into_existing_observers_block(self):
+        """upsert_vertex_observer inserts into existing observers block with siblings."""
+        text = (
+            'name "t"\n'
+            "loops {\n"
+            "  task { fold { items \"by\" \"topic\" } }\n"
+            "}\n"
+            "observers {\n"
+            "  alice {\n"
+            '    identity "users"\n'
+            "  }\n"
+            "}\n"
+        )
+        out = upsert_vertex_observer(text, "bob", key="key456")
+        vf = parse_vertex(out)
+        assert vf.observers is not None
+        assert len(vf.observers) == 2
+        assert vf.observers[0] == ObserverDecl(name="alice", identity="users")
+        assert vf.observers[1] == ObserverDecl(name="bob", key="key456")
+
+    def test_unparseable_input_refusal(self):
+        """upsert_vertex_observer and remove_vertex_observer refuse unparseable vertex text."""
+        bad_text = "not a valid kdl document { { {"
+        with pytest.raises(ValueError, match=r"input is not a parseable vertex"):
+            upsert_vertex_observer(bad_text, "alice")
+        with pytest.raises(ValueError, match=r"input is not a parseable vertex"):
+            remove_vertex_observer(bad_text, "alice")
+
+        # Empty observers block is unparseable per grammar contract
+        empty_obs_text = 'name "t"\nloops { task { } }\nobservers {\n}\n'
+        with pytest.raises(ValueError, match=r"input is not a parseable vertex"):
+            upsert_vertex_observer(empty_obs_text, "alice")
+
+    def test_replace_existing_observer_idempotence(self):
+        """Replacing an existing observer updates it in place; repeated upsert is idempotent."""
+        text = (
+            'name "t"\n'
+            "loops {\n"
+            "  task { fold { items \"by\" \"topic\" } }\n"
+            "}\n"
+            "observers {\n"
+            "  alice {\n"
+            '    identity "old_id"\n'
+            '    key "k1"\n'
+            "    grant {\n"
+            '      potential "task"\n'
+            "    }\n"
+            "  }\n"
+            "}\n"
+        )
+        out1 = upsert_vertex_observer(
+            text,
+            "alice",
+            identity="new_id",
+            key="k2",
+            grants=["decision"],
+        )
+        vf1 = parse_vertex(out1)
+        assert vf1.observers is not None
+        assert len(vf1.observers) == 1
+        assert vf1.observers[0] == ObserverDecl(
+            name="alice",
+            identity="new_id",
+            key="k2",
+            grant=GrantDecl(potential=frozenset({"decision"})),
+        )
+        # Idempotence: calling again with identical arguments produces byte-identical output
+        out2 = upsert_vertex_observer(
+            out1,
+            "alice",
+            identity="new_id",
+            key="k2",
+            grants=["decision"],
+        )
+        assert out2 == out1
+
+    def test_quoting_non_alphanumeric_names_identities_keys(self):
+        """Non-alphanumeric observer names, identities, keys, and grants are quoted."""
+        text = 'name "t"\nloops {\n  task { fold { items "by" "topic" } }\n}\n'
+        out = upsert_vertex_observer(
+            text,
+            "kyle/loops-claude",
+            identity="ident-store.v1",
+            key="YWxpY2Uta2V5LTEyMw==",
+            grants=["task-kind", "note.kind"],
+        )
+        assert '"kyle/loops-claude" {' in out
+        assert 'identity "ident-store.v1"' in out
+        assert 'key "YWxpY2Uta2V5LTEyMw=="' in out
+        assert 'potential "task-kind" "note.kind"' in out
+
+        vf = parse_vertex(out)
+        assert vf.observers is not None
+        assert vf.observers[0] == ObserverDecl(
+            name="kyle/loops-claude",
+            identity="ident-store.v1",
+            key="YWxpY2Uta2V5LTEyMw==",
+            grant=GrantDecl(potential=frozenset({"task-kind", "note.kind"})),
+        )
+
+    def test_grants_block_rendering(self):
+        """Grants block is omitted when empty, rendered with potential kinds when non-empty."""
+        text = 'name "t"\nloops {\n  task { fold { items "by" "topic" } }\n}\n'
+        # No grants
+        out_no_grants = upsert_vertex_observer(text, "alice")
+        assert "grant {" not in out_no_grants
+        assert parse_vertex(out_no_grants).observers[0].grant is None
+
+        # Multiple grants
+        out_grants = upsert_vertex_observer(
+            text, "alice", grants=["alpha", "beta", "gamma"]
+        )
+        assert 'potential "alpha" "beta" "gamma"' in out_grants
+        assert parse_vertex(out_grants).observers[0].grant == GrantDecl(
+            potential=frozenset({"alpha", "beta", "gamma"})
+        )
+
+    def test_remove_observer_multiple_present(self):
+        """Removing one observer leaves sibling observers intact."""
+        text = (
+            'name "t"\n'
+            "loops {\n"
+            "  task { fold { items \"by\" \"topic\" } }\n"
+            "}\n"
+            "observers {\n"
+            "  alice {\n"
+            '    identity "users"\n'
+            "  }\n"
+            "  bob {\n"
+            '    key "xyz"\n'
+            "  }\n"
+            "}\n"
+        )
+        out = remove_vertex_observer(text, "alice")
+        assert "alice" not in out
+        assert "bob" in out
+        vf = parse_vertex(out)
+        assert vf.observers is not None
+        assert len(vf.observers) == 1
+        assert vf.observers[0] == ObserverDecl(name="bob", key="xyz")
+
+    def test_remove_last_observer_cleans_up_block(self):
+        """Removing the sole observer removes the empty observers block."""
+        text = (
+            'name "t"\n'
+            "loops {\n"
+            "  task { fold { items \"by\" \"topic\" } }\n"
+            "}\n"
+            "observers {\n"
+            "  alice {\n"
+            '    identity "users"\n'
+            "  }\n"
+            "}\n"
+        )
+        out = remove_vertex_observer(text, "alice")
+        assert "observers" not in out
+        vf = parse_vertex(out)
+        assert vf.observers is None
+        assert vf.loops["task"] == BASIC
+
+    def test_remove_missing_observer_refusal(self):
+        """Refuses to remove an observer that does not exist."""
+        # Observers block missing
+        text_no_obs = 'name "t"\nloops {\n  task { fold { items "by" "topic" } }\n}\n'
+        with pytest.raises(
+            ValueError,
+            match=r"observer 'ghost' not found in observers block",
+        ):
+            remove_vertex_observer(text_no_obs, "ghost")
+
+        # Observers block present but missing name
+        text_with_obs = (
+            'name "t"\n'
+            "loops {\n"
+            "  task { fold { items \"by\" \"topic\" } }\n"
+            "}\n"
+            "observers {\n"
+            "  alice { }\n"
+            "}\n"
+        )
+        with pytest.raises(
+            ValueError,
+            match=r"observer 'ghost' not found in observers block",
+        ):
+            remove_vertex_observer(text_with_obs, "ghost")
+
+    def test_remove_single_line_observers_block_refusal(self):
+        """Refuses to remove an observer from a single-line observers block."""
+        text = 'name "t"\nloops { task { } }\nobservers { alice { } }\n'
+        with pytest.raises(
+            ValueError,
+            match=r"cannot be removed from a single-line observers block",
+        ):
+            remove_vertex_observer(text, "alice")
+
+    def test_round_trip_parse_validity_via_parse_vertex_file(self, tmp_path):
+        """Mutated text parses via parse_vertex_file and preserves validity."""
+        vertex_file = tmp_path / "app.vertex"
+        vertex_file.write_text(
+            'name "app"\n'
+            "loops {\n"
+            "  task { fold { items \"by\" \"topic\" } }\n"
+            "}\n",
+            encoding="utf-8",
+        )
+        initial_text = vertex_file.read_text(encoding="utf-8")
+        upserted_text = upsert_vertex_observer(
+            initial_text,
+            "admin-user",
+            identity="auth-store",
+            key="base64key==",
+            grants=["task"],
+        )
+        vertex_file.write_text(upserted_text, encoding="utf-8")
+
+        vf = parse_vertex_file(vertex_file)
+        assert vf.name == "app"
+        assert vf.observers is not None
+        assert len(vf.observers) == 1
+        assert vf.observers[0] == ObserverDecl(
+            name="admin-user",
+            identity="auth-store",
+            key="base64key==",
+            grant=GrantDecl(potential=frozenset({"task"})),
+        )
+
+        removed_text = remove_vertex_observer(upserted_text, "admin-user")
+        vertex_file.write_text(removed_text, encoding="utf-8")
+        vf_after = parse_vertex_file(vertex_file)
+        assert vf_after.observers is None
+        assert "task" in vf_after.loops
+
+    def test_provable_domain_refusal(self):
+        """Rejects unprovable domain text (carriage returns, raw strings, block comments)."""
+        # Non-LF newline
+        cr_text = 'name "t"\r\nloops {\n  task { }\n}\n'
+        with pytest.raises(ValueError, match=r"non-LF newline"):
+            upsert_vertex_observer(cr_text, "alice")
+        with pytest.raises(ValueError, match=r"non-LF newline"):
+            remove_vertex_observer(cr_text, "alice")
+
+        # Raw string
+        raw_text = 'name r"t"\nloops {\n  task { }\n}\n'
+        with pytest.raises(ValueError, match=r"raw-string"):
+            upsert_vertex_observer(raw_text, "alice")
+
+        # Block comment
+        comment_text = 'name "t"\n/* comment */\nloops {\n  task { }\n}\n'
+        with pytest.raises(ValueError, match=r"block comment"):
+            upsert_vertex_observer(comment_text, "alice")
+
+    def test_duplicate_observer_in_input_refusal(self):
+        """Refuses text containing duplicate observer declarations in observers block."""
+        text = (
+            'name "t"\n'
+            "loops {\n"
+            "  task { }\n"
+            "}\n"
+            "observers {\n"
+            "  alice { }\n"
+            "  alice { }\n"
+            "}\n"
+        )
+        with pytest.raises(
+            ValueError, match=r"duplicate observer declaration\(s\)"
+        ):
+            upsert_vertex_observer(text, "bob")
+        with pytest.raises(
+            ValueError, match=r"duplicate observer declaration\(s\)"
+        ):
+            remove_vertex_observer(text, "alice")
+
+    def test_observer_to_kdl_validation(self):
+        """observer_to_kdl rejects empty name and control characters."""
+        with pytest.raises(ValueError, match=r"observer name is empty"):
+            observer_to_kdl("")
+        with pytest.raises(ValueError, match=r"contains control characters"):
+            observer_to_kdl("bad\nname")
+        with pytest.raises(ValueError, match=r"contains control characters"):
+            observer_to_kdl("ok", identity="bad\x00identity")
+
 
 
 

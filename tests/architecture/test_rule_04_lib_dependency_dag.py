@@ -29,6 +29,14 @@ _LIB_ALLOWED_RUNTIME: dict[str, set[str]] = {
         "sign",    # Ed25519 primitives
         "engine",  # load_declaration — store-canonical observer-key registry
     },
+    "sdk": {
+        "atoms",
+        "custody",
+        "engine",
+        "lang",
+        "sign",
+        "store",
+    },
 }
 
 

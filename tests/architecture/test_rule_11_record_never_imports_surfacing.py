@@ -23,6 +23,7 @@ _LIB_LAYER: dict[str, str] = {
     "store": "record",
     "sign": "surfacing",
     "custody": "surfacing",
+    "sdk": "surfacing",
 }
 
 #: The chartered layer names. ``view`` (painted, external) and ``relevance``

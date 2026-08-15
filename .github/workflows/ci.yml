@@ -45,13 +45,51 @@ jobs:
       - name: Run Chaos Tests
         run: ./dev chaos
 
-  test-libraries:
-    name: Test Libs (${{ matrix.package }})
+  lint:
+    name: Lint (libs/custody, libs/sign)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Run Ruff Check
+        run: uv run ruff check libs/custody libs/sign
+
+  discover:
+    name: Discover Packages
+    runs-on: ubuntu-latest
+    outputs:
+      packages: ${{ steps.discover.outputs.packages }}
+    steps:
+      - uses: actions/checkout@v4
+      # libs only, deliberately. apps/* is out of scope for CI: apps/loops is
+      # slated for replacement, and the focus is the core libraries it will be
+      # rebuilt on. Discovery is still a glob rather than a list, so a new
+      # library reaches CI without editing this file — the point was never to
+      # enumerate, it was to stop enumerating.
+      - name: Discover libraries with tests
+        id: discover
+        run: |
+          pkgs=$(python3 -c 'import json, sys; print(json.dumps(sys.argv[1:]))' $(for dir in libs/*/; do [ -d "${dir}tests" ] && basename "$dir"; done))
+          echo "packages=$pkgs" >> "$GITHUB_OUTPUT"
+
+  test-packages:
+    name: Test (${{ matrix.package }})
+    needs: discover
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        package: [atoms, custody, engine, lang, sign, store]
+        package: ${{ fromJson(needs.discover.outputs.packages) }}
     steps:
       - uses: actions/checkout@v4
 
@@ -67,6 +105,8 @@ jobs:
 
       - name: Run Library Tests
         run: |
-          if [ -d "libs/${{ matrix.package }}" ]; then
-            uv run --package ${{ matrix.package }} pytest libs/${{ matrix.package }}/tests -q
-          fi
+          for dir in "libs/${{ matrix.package }}/tests"; do
+            if [ -d "$dir" ]; then
+              uv run --package ${{ matrix.package }} pytest "$dir" -q
+            fi
+          done

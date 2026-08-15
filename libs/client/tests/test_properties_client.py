@@ -2,18 +2,15 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
+from atoms.testing.strategies import payloads
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from atoms.testing.strategies import json_primitives, payloads
 from client import (
     emit_fact,
     read_fact_by_id,
     read_facts,
-    read_state,
     read_summary,
 )
 
@@ -37,7 +34,8 @@ def test_property_emission_and_pagination_invariants(
     tmp_path = tmp_path_factory.mktemp("prop_client")
     vertex_path = tmp_path / "prop.vertex"
     vertex_path.write_text(
-        'name "prop"\nstore ".loops/data/prop.db"\nloops { item { fold { items "collect" 100 } } }\n',
+        'name "prop"\nstore ".loops/data/prop.db"\n'
+        'loops { item { fold { items "collect" 100 } } }\n',
         encoding="utf-8",
     )
 

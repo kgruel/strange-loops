@@ -2,12 +2,20 @@
 
 from __future__ import annotations
 
+import json
+import re
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
-from engine.ceremony import apply_declaration_update, plan_declaration_update, recover_declaration_update
+from engine.ceremony import (
+    apply_declaration_update,
+    plan_declaration_update,
+    recover_declaration_update,
+)
 from engine.handle import CredentialProvider
 from lang.ast import FoldCollect, FoldDecl, LoopDef
+from lang.population import kdl_insert_child, kdl_remove_child
 from lang.vertex_mutation import add_vertex_kind, edit_vertex_kind, remove_vertex_kind
 
 from .emit import CustodyCredentialProvider
@@ -36,6 +44,11 @@ def _default_loop_def() -> LoopDef:
     return LoopDef(folds=(FoldDecl("items", FoldCollect(100)),))
 
 
+def _kdl_quote(val: str) -> str:
+    """Return a safely quoted JSON/KDL string literal."""
+    return json.dumps(val)
+
+
 def plan_kind_mutation(
     target: Path | str,
     op: str,
@@ -55,7 +68,9 @@ def plan_kind_mutation(
     """
     info = resolve_target(target)
     if info.target_type != "vertex":
-        raise TargetUnsupported(f"plan_kind_mutation requires a .vertex target, got {info.target_type}")
+        raise TargetUnsupported(
+            f"plan_kind_mutation requires a .vertex target, got {info.target_type}"
+        )
 
     vertex_path = Path(target).resolve()
     current_text = vertex_path.read_text(encoding="utf-8")
@@ -68,7 +83,9 @@ def plan_kind_mutation(
     elif op == "remove":
         new_text = remove_vertex_kind(current_text, kind_name)
     else:
-        raise ClientValueError(f"unsupported mutation op '{op}', expected 'add', 'edit', or 'remove'")
+        raise ClientValueError(
+            f"unsupported mutation op '{op}', expected 'add', 'edit', or 'remove'"
+        )
 
     preview = plan_declaration_update(vertex_path, proposed_text=new_text)
     return DeclarationPlanResult(
@@ -123,8 +140,8 @@ def add_kind(
     if result.status not in ("applied", "noop"):
         raise CeremonyFailed(f"declaration update failed ({result.status}): {result.reason}")
 
-    # Re-read generation after successful apply
     from engine.declaration import declaration_generation
+
     gen_after = declaration_generation(vertex_path)
 
     return KindMutationResult(
@@ -170,6 +187,7 @@ def edit_kind(
         raise CeremonyFailed(f"declaration update failed ({result.status}): {result.reason}")
 
     from engine.declaration import declaration_generation
+
     gen_after = declaration_generation(vertex_path)
 
     return KindMutationResult(
@@ -214,6 +232,7 @@ def remove_kind(
         raise CeremonyFailed(f"declaration update failed ({result.status}): {result.reason}")
 
     from engine.declaration import declaration_generation
+
     gen_after = declaration_generation(vertex_path)
 
     return KindMutationResult(
@@ -261,34 +280,36 @@ def grant_observer(
 
     if key is None:
         from custody import ensure_signing_key
+
         keypair = ensure_signing_key(vertex_path, observer=observer_name)
         pub_key = keypair.public_b64
     else:
         pub_key = key
 
-    obs_lines = [f"{observer_name} {{"]
+    # Safely format observer node name
+    node_name = _kdl_quote(observer_name) if not observer_name.isalnum() else observer_name
+
+    obs_lines = [f"{node_name} {{"]
     if identity:
-        obs_lines.append(f'  identity "{identity}"')
+        obs_lines.append(f"  identity {_kdl_quote(identity)}")
     if pub_key:
-        obs_lines.append(f'  key "{pub_key}"')
+        obs_lines.append(f"  key {_kdl_quote(pub_key)}")
     if grants:
-        grants_str = " ".join(f'"{g}"' for g in grants)
+        grants_str = " ".join(_kdl_quote(g) for g in grants)
         obs_lines.append("  grant {")
         obs_lines.append(f"    potential {grants_str}")
         obs_lines.append("  }")
     obs_lines.append("}")
     obs_kdl = "\n".join(obs_lines)
 
-    from lang.population import kdl_insert_child, kdl_remove_child
+    import contextlib
 
     current_text = vertex_path.read_text(encoding="utf-8")
     if "observers {" not in current_text:
         current_text = current_text + "\nobservers {\n}\n"
 
-    try:
+    with contextlib.suppress(Exception):
         current_text = kdl_remove_child(current_text, ["observers"], observer_name)
-    except Exception:
-        pass
 
     try:
         new_text = kdl_insert_child(current_text, ["observers"], obs_kdl)
@@ -304,6 +325,7 @@ def grant_observer(
         raise CeremonyFailed(f"declaration update failed ({result.status}): {result.reason}")
 
     from engine.declaration import declaration_generation
+
     gen_after = declaration_generation(vertex_path)
 
     return KindMutationResult(
@@ -328,12 +350,12 @@ def revoke_observer(
     """Remove an observer from the vertex's declared admission block via ceremony."""
     info = resolve_target(target)
     if info.target_type != "vertex":
-        raise TargetUnsupported(f"revoke_observer requires a .vertex target, got {info.target_type}")
+        raise TargetUnsupported(
+            f"revoke_observer requires a .vertex target, got {info.target_type}"
+        )
 
     vertex_path = Path(target).resolve()
     cred_provider = credentials or CustodyCredentialProvider()
-
-    from lang.population import kdl_remove_child
 
     current_text = vertex_path.read_text(encoding="utf-8")
     try:
@@ -341,8 +363,8 @@ def revoke_observer(
     except Exception as exc:
         raise CeremonyFailed(f"could not remove observer '{observer_name}': {exc}") from exc
 
-    import re
-    new_text = re.sub(r'observers\s*\{\s*\}\n?', '', new_text)
+    # If observers block is now empty, clean up the block
+    new_text = re.sub(r"observers\s*\{\s*\}\n?", "", new_text)
 
     preview = plan_declaration_update(vertex_path, proposed_text=new_text)
     if not preview.applicable:
@@ -353,6 +375,7 @@ def revoke_observer(
         raise CeremonyFailed(f"declaration update failed ({result.status}): {result.reason}")
 
     from engine.declaration import declaration_generation
+
     gen_after = declaration_generation(vertex_path)
 
     return KindMutationResult(

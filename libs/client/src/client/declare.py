@@ -52,7 +52,11 @@ def init_vertex(
     v_name = name or vertex_path.stem
 
     if is_root:
-        content = f'name "{v_name}"\n// Root vertex — discovers all .vertex files under this directory\ndiscover "./**/*.vertex"\n'
+        content = (
+            f'name "{v_name}"\n'
+            "// Root vertex — discovers all .vertex files under this directory\n"
+            'discover "./**/*.vertex"\n'
+        )
         resolved_store = None
     else:
         ext = ".jsonl" if store_type.lower() == "jsonl" else ".db"
@@ -67,6 +71,7 @@ def init_vertex(
         if observer:
             # Ensure keypair exists for initial observer
             from custody import ensure_signing_key
+
             keypair = ensure_signing_key(vertex_path, observer=observer)
             lines.append("observers {")
             lines.append(f"  {observer} {{")
@@ -114,7 +119,9 @@ def inspect_declaration(target: Path | str) -> DeclarationInspectionResult:
 
     probe = probe_target(path)
     if probe.target_type != "vertex":
-        raise ClientValueError(f"inspect_declaration requires a .vertex target, got {probe.target_type}")
+        raise ClientValueError(
+            f"inspect_declaration requires a .vertex target, got {probe.target_type}"
+        )
 
     errors: list[str] = []
     syntax_valid = True

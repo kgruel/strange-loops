@@ -5,6 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from custody import ensure_signing_key
+
 from client import (
     AdmissionFailed,
     EmitReceipt,
@@ -14,7 +16,6 @@ from client import (
     read_facts,
     read_summary,
 )
-from custody import ensure_signing_key
 
 
 def test_emit_fact_declared_kind(sample_vertex: Path) -> None:
@@ -40,7 +41,7 @@ def test_emit_fact_declared_kind(sample_vertex: Path) -> None:
 
 
 def test_emit_fact_undeclared_kind_rejected_by_default(strict_vertex: Path) -> None:
-    """Emitting an undeclared kind on a strict vertex without admit_undeclared raises AdmissionFailed."""
+    """Emitting an undeclared kind on a strict vertex raises AdmissionFailed."""
     with pytest.raises(AdmissionFailed) as exc_info:
         emit_fact(
             strict_vertex,
@@ -89,7 +90,7 @@ def test_emit_fact_with_id_override(sample_vertex: Path) -> None:
 
 
 def test_emit_fact_missing_observer_raises_value_error(sample_vertex: Path) -> None:
-    """Emitting by kind string without observer raises InvalidEmissionRequest (a ValueError & ClientError)."""
+    """Emitting by kind without observer raises InvalidEmissionRequest."""
     from client import InvalidEmissionRequest
 
     with pytest.raises(InvalidEmissionRequest) as exc_info:
@@ -201,7 +202,7 @@ def test_emit_fact_default_ts_is_utc_now(sample_vertex: Path) -> None:
     from datetime import UTC, datetime
 
     before = datetime.now(UTC).timestamp()
-    receipt = emit_fact(
+    emit_fact(
         sample_vertex,
         "note",
         {"title": "Timestamp test"},
@@ -287,18 +288,19 @@ def test_preview_emission_declared_kind(sample_vertex: Path) -> None:
 
 
 def test_preview_emission_strict_rejection(strict_vertex: Path) -> None:
-    """preview_emission raises AdmissionFailed when strict vertex rejects kind."""
+    """preview_emission returns admitted=False when strict vertex rejects kind."""
     from client import preview_emission
 
-    with pytest.raises(AdmissionFailed) as exc_info:
-        preview_emission(
-            strict_vertex,
-            "unregistered_kind",
-            {"k": "v"},
-            observer="alice",
-        )
-    assert exc_info.value.kind == "unregistered_kind"
-    assert exc_info.value.vertex == "strict"
+    preview = preview_emission(
+        strict_vertex,
+        "unregistered_kind",
+        {"k": "v"},
+        observer="alice",
+    )
+    assert preview.admitted is False
+    assert preview.kind == "unregistered_kind"
+    assert preview.would_store is False
+    assert "strict" in (preview.reason or "")
 
 
 def test_emit_fact_dry_run_returns_uncommitted_receipt(sample_vertex: Path) -> None:
@@ -331,6 +333,7 @@ def test_emit_fact_dry_run_returns_uncommitted_receipt(sample_vertex: Path) -> N
 def test_emit_batch_multiple_shapes(sample_vertex: Path) -> None:
     """emit_batch commits a sequence of facts under a single handle session."""
     from atoms import Fact
+
     from client import emit_batch
 
     items = [
@@ -374,6 +377,7 @@ def test_emit_fact_delta_metadata(sample_vertex: Path) -> None:
 def test_preview_emission_with_fact_atom(sample_vertex: Path) -> None:
     """preview_emission accepts Fact atom and extracts properties."""
     from atoms import Fact
+
     from client import preview_emission
 
     fact = Fact.of("note", "alice", origin="preview-prov", title="Atom preview")
@@ -392,14 +396,7 @@ def test_preview_emission_fold_by_matching(tmp_path: Path) -> None:
 
     vertex = tmp_path / "keyed.vertex"
     vertex.write_text(
-        'name "keyed"\n'
-        'loops {\n'
-        '  task {\n'
-        '    fold {\n'
-        '      items "by" "task_id"\n'
-        '    }\n'
-        '  }\n'
-        '}\n',
+        'name "keyed"\nloops {\n  task {\n    fold {\n      items "by" "task_id"\n    }\n  }\n}\n',
         encoding="utf-8",
     )
 
@@ -413,9 +410,7 @@ def test_preview_emission_fold_by_matching(tmp_path: Path) -> None:
     assert preview_ok.would_fold is True
 
     # Key missing -> would_fold False
-    preview_missing = preview_emission(
-        vertex, "task", {"title": "Missing key"}, observer="alice"
-    )
+    preview_missing = preview_emission(vertex, "task", {"title": "Missing key"}, observer="alice")
     assert preview_missing.fold_key_field == "task_id"
     assert preview_missing.fold_key_present is False
     assert preview_missing.fold_key_value is None

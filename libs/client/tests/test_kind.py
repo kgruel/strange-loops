@@ -5,6 +5,9 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from custody import ensure_signing_key
+from lang.ast import FoldCollect, FoldCount, FoldDecl, LoopDef
+
 from client import (
     CeremonyFailed,
     KindMutationResult,
@@ -16,8 +19,6 @@ from client import (
     read_state,
     remove_kind,
 )
-from custody import ensure_signing_key
-from lang.ast import FoldCollect, FoldCount, FoldDecl, LoopDef
 
 
 def test_add_kind_default_and_emit(sample_vertex: Path) -> None:
@@ -78,9 +79,7 @@ def test_edit_kind(sample_vertex: Path) -> None:
     """edit_kind modifies an existing kind definition."""
     ensure_signing_key(sample_vertex, "admin")
 
-    new_def = LoopDef(
-        folds=(FoldDecl("items", FoldCollect(10)),)
-    )
+    new_def = LoopDef(folds=(FoldDecl("items", FoldCollect(10)),))
 
     result = edit_kind(
         sample_vertex,
@@ -157,7 +156,9 @@ def test_add_kind_duplicate_raises_ceremony_failed(sample_vertex: Path) -> None:
 
     with pytest.raises(CeremonyFailed) as exc_info:
         add_kind(sample_vertex, "note", observer="admin")
-    assert "could not generate kind mutation" in str(exc_info.value) or "already exists" in str(exc_info.value)
+    assert "could not generate kind mutation" in str(exc_info.value) or "already exists" in str(
+        exc_info.value
+    )
 
 
 def test_edit_kind_nonexistent_raises_ceremony_failed(sample_vertex: Path) -> None:
@@ -166,7 +167,9 @@ def test_edit_kind_nonexistent_raises_ceremony_failed(sample_vertex: Path) -> No
 
     with pytest.raises(CeremonyFailed) as exc_info:
         edit_kind(sample_vertex, "ghost_kind", LoopDef(folds=()), observer="admin")
-    assert "could not generate kind mutation" in str(exc_info.value) or "does not exist" in str(exc_info.value)
+    assert "could not generate kind mutation" in str(exc_info.value) or "does not exist" in str(
+        exc_info.value
+    )
 
 
 def test_remove_kind_nonexistent_raises_ceremony_failed(sample_vertex: Path) -> None:
@@ -175,7 +178,9 @@ def test_remove_kind_nonexistent_raises_ceremony_failed(sample_vertex: Path) -> 
 
     with pytest.raises(CeremonyFailed) as exc_info:
         remove_kind(sample_vertex, "ghost_kind", observer="admin")
-    assert "could not generate kind mutation" in str(exc_info.value) or "does not exist" in str(exc_info.value)
+    assert "could not generate kind mutation" in str(exc_info.value) or "does not exist" in str(
+        exc_info.value
+    )
 
 
 def test_recover_ceremony_nonexistent(tmp_path: Path) -> None:

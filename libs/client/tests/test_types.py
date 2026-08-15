@@ -6,6 +6,7 @@ from dataclasses import FrozenInstanceError
 from datetime import UTC, datetime
 
 import pytest
+
 from client import (
     AdmissionFailed,
     CeremonyFailed,
@@ -24,7 +25,6 @@ from client import (
     TargetNotWritable,
     TargetUnsupported,
 )
-
 
 # =============================================================================
 # 1. Exception Hierarchy Contracts
@@ -92,7 +92,13 @@ def test_read_summary_model() -> None:
         fact_total=10,
         tick_total=2,
         latest_ts=1700000000.0,
-        kinds={"note": {"count": 10, "earliest": "2023-11-14T22:13:20+00:00", "latest": "2023-11-14T22:13:20+00:00"}},
+        kinds={
+            "note": {
+                "count": 10,
+                "earliest": "2023-11-14T22:13:20+00:00",
+                "latest": "2023-11-14T22:13:20+00:00",
+            }
+        },
         agreement=True,
     )
 

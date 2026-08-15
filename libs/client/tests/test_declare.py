@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+
 from client import (
     ClientValueError,
     DeclarationInspectionResult,
@@ -13,7 +14,6 @@ from client import (
     TargetNotFound,
     init_vertex,
     inspect_declaration,
-    read_summary,
 )
 
 

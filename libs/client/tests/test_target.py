@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+
 from client import (
     TargetInfo,
     TargetNotFound,
@@ -36,7 +37,8 @@ def test_resolve_target_vertex_jsonl(tmp_path: Path) -> None:
     """A .vertex target pointing to JSONL log resolves to vertex with jsonl mode."""
     vertex_path = tmp_path / "journal.vertex"
     vertex_path.write_text(
-        'name "journal"\nstore ".loops/data/journal.jsonl"\nloops { entry { fold { items "collect" 10 } } }\n',
+        'name "journal"\nstore ".loops/data/journal.jsonl"\n'
+        'loops { entry { fold { items "collect" 10 } } }\n',
         encoding="utf-8",
     )
 
@@ -118,7 +120,8 @@ def test_resolve_target_accepts_str_and_path(tmp_path: Path) -> None:
     """Both str and Path representations of a path resolve identically."""
     vertex_path = tmp_path / "str_test.vertex"
     vertex_path.write_text(
-        'name "str_test"\nstore ".loops/data/str.db"\nloops { item { fold { items "collect" 5 } } }\n',
+        'name "str_test"\nstore ".loops/data/str.db"\n'
+        'loops { item { fold { items "collect" 5 } } }\n',
         encoding="utf-8",
     )
 
@@ -134,11 +137,17 @@ def test_discover_targets_tree(tmp_path: Path) -> None:
     # Create workspace tree
     sub1 = tmp_path / "apps" / "frontend"
     sub1.mkdir(parents=True)
-    (sub1 / "ui.vertex").write_text('name "ui"\nstore ".loops/data/ui.db"\nloops { e { fold { items "collect" 10 } } }\n', encoding="utf-8")
+    (sub1 / "ui.vertex").write_text(
+        'name "ui"\nstore ".loops/data/ui.db"\nloops { e { fold { items "collect" 10 } } }\n',
+        encoding="utf-8",
+    )
 
     sub2 = tmp_path / "apps" / "backend"
     sub2.mkdir(parents=True)
-    (sub2 / "api.vertex").write_text('name "api"\nstore ".loops/data/api.db"\nloops { e { fold { items "collect" 10 } } }\n', encoding="utf-8")
+    (sub2 / "api.vertex").write_text(
+        'name "api"\nstore ".loops/data/api.db"\nloops { e { fold { items "collect" 10 } } }\n',
+        encoding="utf-8",
+    )
 
     # Hidden dir should be ignored
     hidden = tmp_path / ".venv" / "ignore.vertex"

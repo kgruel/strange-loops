@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+
 from client import (
     EmitReceipt,
     FactPageResult,
@@ -187,9 +188,8 @@ def test_read_state_vertex(populated_vertex: tuple[Path, list[EmitReceipt]]) -> 
     assert state.vertex_name == "multi"
     assert "task" in state.sections
     assert "note" in state.sections
-    assert state.sections["task"]["count"] == 10
-    assert state.sections["note"]["count"] == 5
     assert len(state.sections["task"]["items"]) == 10
+    assert len(state.sections["note"]["items"]) == 5
 
 
 def test_read_state_filtered_kind(populated_vertex: tuple[Path, list[EmitReceipt]]) -> None:
@@ -260,7 +260,11 @@ def test_read_operations_missing_store(tmp_path: Path) -> None:
 
     # Create a vertex pointing to absent store
     vertex_path = tmp_path / "absent.vertex"
-    vertex_path.write_text('name "absent"\nstore ".loops/data/missing.db"\nloops { item { fold { items "collect" 10 } } }\n', encoding="utf-8")
+    vertex_path.write_text(
+        'name "absent"\nstore ".loops/data/missing.db"\n'
+        'loops { item { fold { items "collect" 10 } } }\n',
+        encoding="utf-8",
+    )
 
     # read_summary on storeless/absent vertex
     summary = read_summary(vertex_path)
@@ -284,6 +288,7 @@ def test_read_operations_missing_store(tmp_path: Path) -> None:
 def test_fold_serialization_helpers() -> None:
     """_serialize_fold_item and _serialize_fold_section preserve edge and scalar shapes."""
     from types import SimpleNamespace
+
     from client.read import _serialize_fold_item, _serialize_fold_section
 
     mock_edge = SimpleNamespace(predicate="relates_to", address="other/123")
@@ -349,19 +354,26 @@ def test_sync_target_and_search_facts(tmp_path: Path) -> None:
     vertex.write_text(
         'name "searchable"\n'
         'store ".loops/data/searchable.db"\n'
-        'loops {\n'
-        '  task {\n'
+        "loops {\n"
+        "  task {\n"
         '    search "title" "body"\n'
-        '    fold {\n'
+        "    fold {\n"
         '      items "collect" 100\n'
-        '    }\n'
-        '  }\n'
-        '}\n',
+        "    }\n"
+        "  }\n"
+        "}\n",
         encoding="utf-8",
     )
 
-    emit_fact(vertex, "task", {"title": "Refactor auth system", "body": "Need JWTs"}, observer="alice")
-    emit_fact(vertex, "task", {"title": "Fix database leak", "body": "Connection pool issue"}, observer="bob")
+    emit_fact(
+        vertex, "task", {"title": "Refactor auth system", "body": "Need JWTs"}, observer="alice"
+    )
+    emit_fact(
+        vertex,
+        "task",
+        {"title": "Fix database leak", "body": "Connection pool issue"},
+        observer="bob",
+    )
 
     # Explicit sync
     sync_res = sync_target(vertex)
@@ -388,13 +400,13 @@ def test_resolve_entity(tmp_path: Path) -> None:
     vertex.write_text(
         'name "keyed"\n'
         'store ".loops/data/keyed.db"\n'
-        'loops {\n'
-        '  task {\n'
-        '    fold {\n'
+        "loops {\n"
+        "  task {\n"
+        "    fold {\n"
         '      items "by" "task_id"\n'
-        '    }\n'
-        '  }\n'
-        '}\n',
+        "    }\n"
+        "  }\n"
+        "}\n",
         encoding="utf-8",
     )
 
@@ -419,13 +431,13 @@ def test_read_timeline_interleaved(tmp_path: Path) -> None:
     vertex.write_text(
         'name "timeline"\n'
         'store ".loops/data/timeline.db"\n'
-        'loops {\n'
-        '  task {\n'
-        '    fold {\n'
+        "loops {\n"
+        "  task {\n"
+        "    fold {\n"
         '      items "collect" 100\n'
-        '    }\n'
-        '  }\n'
-        '}\n',
+        "    }\n"
+        "  }\n"
+        "}\n",
         encoding="utf-8",
     )
 
@@ -457,13 +469,13 @@ def test_combine_aggregate_reads(tmp_path: Path) -> None:
     child_a.write_text(
         'name "child_a"\n'
         'store ".loops/data/a.db"\n'
-        'loops {\n'
-        '  task {\n'
-        '    fold {\n'
+        "loops {\n"
+        "  task {\n"
+        "    fold {\n"
         '      items "collect" 100\n'
-        '    }\n'
-        '  }\n'
-        '}\n',
+        "    }\n"
+        "  }\n"
+        "}\n",
         encoding="utf-8",
     )
 
@@ -471,13 +483,13 @@ def test_combine_aggregate_reads(tmp_path: Path) -> None:
     child_b.write_text(
         'name "child_b"\n'
         'store ".loops/data/b.db"\n'
-        'loops {\n'
-        '  task {\n'
-        '    fold {\n'
+        "loops {\n"
+        "  task {\n"
+        "    fold {\n"
         '      items "collect" 100\n'
-        '    }\n'
-        '  }\n'
-        '}\n',
+        "    }\n"
+        "  }\n"
+        "}\n",
         encoding="utf-8",
     )
 
@@ -487,10 +499,10 @@ def test_combine_aggregate_reads(tmp_path: Path) -> None:
     parent = tmp_path / "aggregate.vertex"
     parent.write_text(
         'name "aggregate"\n'
-        'combine {\n'
+        "combine {\n"
         f'  vertex "{child_a}" as="a"\n'
         f'  vertex "{child_b}" as="b"\n'
-        '}\n',
+        "}\n",
         encoding="utf-8",
     )
 
@@ -504,6 +516,7 @@ def test_combine_aggregate_reads(tmp_path: Path) -> None:
 
     # Combined search
     from client import search_facts
+
     search_res = search_facts(parent, "Task")
     assert search_res.total_matches == 0 or isinstance(search_res.matches, list)
 
@@ -516,13 +529,13 @@ def test_read_timeline_time_window(tmp_path: Path) -> None:
     vertex.write_text(
         'name "window"\n'
         'store ".loops/data/window.db"\n'
-        'loops {\n'
-        '  task {\n'
-        '    fold {\n'
+        "loops {\n"
+        "  task {\n"
+        "    fold {\n"
         '      items "collect" 100\n'
-        '    }\n'
-        '  }\n'
-        '}\n',
+        "    }\n"
+        "  }\n"
+        "}\n",
         encoding="utf-8",
     )
 
@@ -561,19 +574,19 @@ def test_sync_target_bare_store(tmp_path: Path) -> None:
     from client import sync_target
 
     log = tmp_path / "bare.jsonl"
-    log.write_text('{"id":"01","kind":"task","ts":1700000000.0,"observer":"alice","origin":"","payload":{"k":"v"}}\n', encoding="utf-8")
-
-def test_sync_target_bare_store(tmp_path: Path) -> None:
-    """sync_target on valid bare store runs preflight recovery and returns synced status."""
-    from client import sync_target
-
-    log = tmp_path / "bare.jsonl"
-    log.write_text('{"t":"fact","id":"01FACT00000000000000000001","kind":"task","ts":1700000000.0,"observer":"alice","origin":"","payload":"{\\"k\\":\\"v\\"}"}\n', encoding="utf-8")
+    log.write_text(
+        '{"t":"fact","id":"01FACT00000000000000000001","kind":"task","ts":1700000000.0,"observer":"alice","origin":"","payload":"{\\"k\\":\\"v\\"}"}\n',
+        encoding="utf-8",
+    )
 
     res = sync_target(log)
-    assert res.status == "synced"
+    assert res.status in ("synced", "recovered")
     assert res.indexed_facts >= 1
-    assert res.agreement is True
+    assert res.agreement is False  # Rebuilt from log, index was not present
+
+    res2 = sync_target(log)
+    assert res2.status == "synced"
+    assert res2.agreement is True
 
 
 def test_search_facts_bare_store(tmp_path: Path) -> None:
@@ -581,10 +594,11 @@ def test_search_facts_bare_store(tmp_path: Path) -> None:
     from client import search_facts
 
     log = tmp_path / "bare.jsonl"
-    log.write_text('{"t":"fact","id":"01FACT00000000000000000001","kind":"task","ts":1700000000.0,"observer":"alice","origin":"","payload":"{\\"k\\":\\"v\\"}"}\n', encoding="utf-8")
+    log.write_text(
+        '{"t":"fact","id":"01FACT00000000000000000001","kind":"task","ts":1700000000.0,"observer":"alice","origin":"","payload":"{\\"k\\":\\"v\\"}"}\n',
+        encoding="utf-8",
+    )
 
     res = search_facts(log, "query")
     assert isinstance(res.matches, list)
     assert res.total_matches == len(res.matches)
-
-

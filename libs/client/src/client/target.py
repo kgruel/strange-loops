@@ -10,19 +10,21 @@ from .types import TargetNotFound, TargetUnsupported
 
 __all__ = ["resolve_target", "discover_targets", "TargetInfo"]
 
-_IGNORE_DIRS = frozenset({
-    ".git",
-    ".venv",
-    "__pycache__",
-    ".pytest_cache",
-    ".ruff_cache",
-    ".hypothesis",
-    ".gemini",
-    ".claude",
-    ".subtask",
-    ".uv-cache",
-    "node_modules",
-})
+_IGNORE_DIRS = frozenset(
+    {
+        ".git",
+        ".venv",
+        "__pycache__",
+        ".pytest_cache",
+        ".ruff_cache",
+        ".hypothesis",
+        ".gemini",
+        ".claude",
+        ".subtask",
+        ".uv-cache",
+        "node_modules",
+    }
+)
 
 
 def resolve_target(target: Path | str) -> TargetInfo:
@@ -39,7 +41,8 @@ def resolve_target(target: Path | str) -> TargetInfo:
     info = probe_target(path)
     if info.target_type == "unknown":
         raise TargetUnsupported(
-            f"target {path} is not a recognized loops artifact (accepted: .vertex, .jsonl, .db, .sqlite)"
+            f"target {path} is not a recognized loops artifact "
+            "(accepted: .vertex, .jsonl, .db, .sqlite)"
         )
 
     return info

@@ -4,13 +4,12 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import Any
-
 
 # ---------------------------------------------------------------------------
 # Exceptions
 # ---------------------------------------------------------------------------
+
 
 class ClientError(Exception):
     """Base exception for all high-level client operations."""
@@ -58,7 +57,7 @@ class ClientValueError(ClientError, ValueError):
 
 
 class InvalidEmissionRequest(ClientValueError, EmissionFailed):
-    """Invalid parameters supplied for fact emission (e.g. missing observer or unsupported batch shape)."""
+    """Invalid parameters supplied for fact emission (e.g. missing observer)."""
 
 
 class CommittedEmissionError(EmissionFailed):
@@ -80,6 +79,7 @@ class CeremonyFailed(ClientError):
 # ---------------------------------------------------------------------------
 # Result Models
 # ---------------------------------------------------------------------------
+
 
 @dataclass(frozen=True)
 class ReadSummary:
@@ -116,6 +116,7 @@ class FactPageResult:
     schema: str = "loops.cli/facts-page/v1"
     items: list[dict[str, Any]] = field(default_factory=list)
     next_cursor: str | None = None
+    prev_cursor: str | None = None
     truncated: bool = False
     order: str = "newest"
 
@@ -159,7 +160,7 @@ class EmitReceipt:
 
 @dataclass(frozen=True)
 class EmitPreviewResult:
-    """Preflight simulation of fact emission without disk side-effects."""
+    """Preflight simulation of an emission request."""
 
     schema: str = "loops.cli/emit-preview/v1"
     target: str = ""
@@ -173,6 +174,7 @@ class EmitPreviewResult:
     fold_key_present: bool = True
     fold_key_value: Any | None = None
     admitted: bool = True
+    reason: str | None = None
     strict: bool = False
     would_store: bool = True
     would_fold: bool = True
@@ -241,6 +243,8 @@ class TimelineResult:
     start_ts: float | None = None
     end_ts: float | None = None
     total_events: int = 0
+    truncated: bool = False
+    order: str = "oldest"
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -249,6 +253,8 @@ class TimelineResult:
             "start_ts": self.start_ts,
             "end_ts": self.end_ts,
             "total_events": self.total_events,
+            "truncated": self.truncated,
+            "order": self.order,
         }
 
 

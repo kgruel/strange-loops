@@ -36,7 +36,9 @@ sitting. The comparison path enforces the first and warns loudly on the second.
 """
 
 import argparse
+import hashlib
 import json
+import os
 import platform
 import shutil
 import socket
@@ -423,7 +425,16 @@ def _shell(command: list[str]) -> str | None:
 
 
 def capture_environment() -> dict[str, Any]:
-    """Everything a future reader needs to know whether their run is comparable."""
+    """Everything a future reader needs to know whether their run is comparable.
+
+    The comparison needs to answer one question about the machine — "is this the
+    same one?" — and that is answered by an opaque fingerprint just as well as by
+    a hostname and a CPU model. Arms are committed to the repository, so the
+    identifying strings are deliberately hashed rather than stored: the check
+    keeps working, and the record carries no machine identity. `platform` stays
+    in the clear because OS and architecture explain results without naming a
+    machine.
+    """
     cpu = None
     power = None
     if sys.platform == "darwin":
@@ -434,13 +445,16 @@ def capture_environment() -> dict[str, Any]:
     elif sys.platform.startswith("linux"):
         cpu = _shell(["bash", "-lc", "grep -m1 'model name' /proc/cpuinfo | cut -d: -f2"])
 
+    identity = f"{socket.gethostname()}|{cpu or platform.processor()}|{platform.machine()}"
+    fingerprint = hashlib.sha256(identity.encode()).hexdigest()[:12]
+
     return {
         "timestamp": datetime.now(timezone.utc).isoformat(),
-        "hostname": socket.gethostname(),
+        "machine_fingerprint": fingerprint,
         "platform": platform.platform(),
-        "cpu": cpu or platform.processor() or "unknown",
         "power_source": power or "unknown",
         "python": sys.version.split()[0],
+        "ci": bool(os.environ.get("CI")),
         "git_commit": _shell(["git", "rev-parse", "HEAD"]),
         "git_describe": _shell(["git", "describe", "--always", "--dirty"]),
         "git_branch": _shell(["git", "rev-parse", "--abbrev-ref", "HEAD"]),
@@ -600,12 +614,23 @@ def compare_arms(
         )
 
     ref_env, cand_env = reference["environment"], candidate["environment"]
-    for field in ("hostname", "cpu", "python"):
+    if ref_env.get("machine_fingerprint") != cand_env.get("machine_fingerprint"):
+        warnings.append(
+            "arms were measured on different machines "
+            f"({ref_env.get('machine_fingerprint')} vs {cand_env.get('machine_fingerprint')}) "
+            "— absolute comparison across machines is not meaningful"
+        )
+    for field in ("platform", "python"):
         if ref_env.get(field) != cand_env.get(field):
             warnings.append(
-                f"{field} differs between arms ({ref_env.get(field)!r} vs {cand_env.get(field)!r}) "
-                f"— absolute comparison across machines is not meaningful"
+                f"{field} differs between arms ({ref_env.get(field)!r} vs {cand_env.get(field)!r})"
             )
+    if ref_env.get("ci") or cand_env.get("ci"):
+        warnings.append(
+            "at least one arm was measured on a CI runner — hosted runners vary between runs "
+            "by more than this instrument can resolve, so read these arms for complexity class "
+            "and large factors only, never for a small delta"
+        )
     if "unknown" in (ref_env.get("power_source"), cand_env.get("power_source")):
         warnings.append("power source unknown for at least one arm — thermal state unverified")
 

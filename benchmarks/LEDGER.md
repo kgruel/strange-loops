@@ -230,6 +230,24 @@ per-operator rather than global.
 
 ---
 
+## The CI series
+
+`.github/workflows/characterize.yml` records one arm per commit that lands on
+main, stamped with its SHA, published to the run summary and kept as an artifact
+for 90 days. It is a **recorder, not a gate** — it never fails a build on a slow
+number, because a threshold on a hosted runner fires on noise and then gets
+muted, which is worse than no gate at all.
+
+What that series is good for is the progression across a merge: the core before
+a layer lands and the core after. What survives runner variance is complexity
+class and large factors, which is precisely the resolution this instrument
+claims. Do not read a small delta between two CI arms — the comparison warns
+when either arm carries `ci: true` for exactly this reason.
+
+Arms committed here carry an opaque `machine_fingerprint` rather than a hostname
+and CPU model. The comparison only ever needed to answer "same machine?", and a
+hash answers it without putting machine identity in a public repository.
+
 ## Reproduce
 
 ```bash

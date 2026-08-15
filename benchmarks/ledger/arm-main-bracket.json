@@ -9,11 +9,11 @@
   ],
   "environment": {
     "timestamp": "2026-08-15T17:43:29.383904+00:00",
-    "hostname": "Kyles-MacBook-Air.local",
+    "machine_fingerprint": "63196ac3e66d",
     "platform": "macOS-26.4.1-arm64-arm-64bit-Mach-O",
-    "cpu": "Apple M4",
     "power_source": "AC",
     "python": "3.13.11",
+    "ci": false,
     "git_commit": "66a0cc7937ba5d8b08edd0ffd422debc7e9f3d1c",
     "git_describe": "v0.11.0-158-g66a0cc79",
     "git_branch": "perf/characterization-ledger"

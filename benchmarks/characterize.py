@@ -12,11 +12,15 @@ Two design commitments, both learned the hard way:
     the ledger reports the curve. What foot-guns you later is complexity class,
     not a constant factor.
 
-2.  **The instrument states its own resolution.** Absolute numbers from a laptop
-    cannot honestly resolve a 10% drift. Run the reference arm twice around the
-    candidate (``--bracket``) and the comparison computes the session's *measured*
-    noise floor, then refuses to call a delta real unless it clears that floor.
-    A resolution that is measured beats one that is asserted.
+2.  **The instrument states its own resolution, and measures it.** Absolute
+    numbers from a laptop cannot honestly resolve a 10% drift. Re-measure the
+    reference arm around the candidate (``--bracket``, repeatable) and the
+    comparison ranks every delta against the spread those repeats actually
+    showed. The verdict column reports a *location* — "this cleared the observed
+    spread" — never a conclusion that the candidate changed something. With one
+    repeat it will not say even that much: deltas are `candidate`, meaning go
+    re-measure. This is not caution for its own sake; the first run produced a
+    +14.5% delta against a ±0.6% floor that reproduced at +2.6%.
 
 Usage::
 
@@ -68,6 +72,11 @@ DEFAULT_DEPTHS = (1_000, 5_000, 20_000)
 EXPENSIVE_SAMPLE_MS = 50.0
 DEFAULT_SAMPLES = 25
 MIN_SAMPLES = 3
+
+# Reference repeats required before a delta above the floor is called anything
+# stronger than `candidate`. One repeat estimates a probe's spread from a single
+# pair of numbers and demonstrably produces false positives — see compare_arms.
+MIN_BRACKETS_FOR_VERDICT = 2
 
 SEARCH_TOKEN = "zarquon"
 
@@ -559,13 +568,28 @@ def render_curves(arm: dict[str, Any]) -> str:
 def compare_arms(
     reference: dict[str, Any],
     candidate: dict[str, Any],
-    bracket: dict[str, Any] | None,
+    brackets: list[dict[str, Any]],
 ) -> tuple[str, list[str]]:
-    """Compare two arms, resolving deltas only above the session's measured noise.
+    """Compare two arms, ranking deltas against the session's *measured* noise.
 
-    Without a bracket the comparison still prints, but every delta is reported as
-    UNRESOLVED — the instrument has no evidence about its own noise floor, so it
-    is not entitled to call anything a change.
+    The verdict column states a location, never a conclusion. `above noise` means
+    exactly "this delta exceeded the spread observed across the reference
+    repeats" — it does not mean the candidate changed anything. Confirming that
+    requires re-measuring the probe directly, and the first time this was tried
+    the largest `above noise` delta in the table (cli_cold_version, +14.5%
+    against a ±0.6% floor) did not reproduce at all: +2.6% on direct
+    re-measurement, with identical import cost in both arms.
+
+    That failure is structural, not bad luck. One repeat estimates a probe's
+    spread from a single pair of numbers, which is far too thin for a probe whose
+    own dispersion is wide. Two probes with byte-identical code in both arms
+    (`store_append`, `store_scan_all`) also landed `above noise`, which is a
+    direct read on the false-positive rate: they cannot have changed.
+
+    So: pass several `--bracket` arms and the floor becomes the full observed
+    spread across all of them. With fewer than MIN_BRACKETS_FOR_VERDICT repeats,
+    every delta is labelled `candidate` — worth re-measuring, never worth
+    quoting.
     """
     warnings: list[str] = []
 
@@ -588,16 +612,30 @@ def compare_arms(
     ref_samples = _samples_of(reference)
     cand_samples = _samples_of(candidate)
 
+    # Floor = the widest deviation any reference repeat showed from the reference
+    # itself. More repeats widen it toward the probe's true spread.
     noise: dict[str, float] = {}
-    if bracket is not None:
-        for key, repeat in _samples_of(bracket).items():
+    for repeat_arm in brackets:
+        for key, repeat in _samples_of(repeat_arm).items():
             original = ref_samples.get(key)
             if original and original["median"] > 0:
-                noise[key] = abs(repeat["median"] - original["median"]) / original["median"] * 100.0
-    else:
+                deviation = (
+                    abs(repeat["median"] - original["median"]) / original["median"] * 100.0
+                )
+                noise[key] = max(noise.get(key, 0.0), deviation)
+
+    verdicts_allowed = len(brackets) >= MIN_BRACKETS_FOR_VERDICT
+    if not brackets:
         warnings.append(
-            "no --bracket arm supplied — the session noise floor is unmeasured, so every "
-            "delta below is UNRESOLVED regardless of size"
+            "no --bracket arm supplied — this session's noise is unmeasured, so no delta "
+            "below carries any information about the candidate"
+        )
+    elif not verdicts_allowed:
+        warnings.append(
+            f"only {len(brackets)} reference repeat supplied; {MIN_BRACKETS_FOR_VERDICT} are "
+            f"needed before a delta is worth more than a re-measurement. Deltas above the "
+            f"floor are labelled `candidate` — a location to go look, not a finding. "
+            f"(Measured precedent: a +14.5% delta against a ±0.6% floor reproduced at +2.6%.)"
         )
 
     lines = [
@@ -613,11 +651,15 @@ def compare_arms(
         delta = (cand["median"] - ref["median"]) / ref["median"] * 100.0
         floor = noise.get(key)
         if floor is None:
-            verdict = "UNRESOLVED"
+            verdict = "no floor"
             floor_cell = "unmeasured"
-        else:
+        elif abs(delta) <= max(floor, 1.0):
+            verdict = "within noise"
             floor_cell = f"±{floor:.1f}%"
-            verdict = "resolved" if abs(delta) > max(floor, 1.0) else "within noise"
+        else:
+            # Location, not conclusion: this delta cleared the observed spread.
+            verdict = "above noise" if verdicts_allowed else "candidate"
+            floor_cell = f"±{floor:.1f}%"
         lines.append(
             f"| `{key}` | {ref['median']:.3f} | {cand['median']:.3f} | "
             f"{delta:+.1f}% | {floor_cell} | {verdict} |"
@@ -657,14 +699,20 @@ def main() -> None:
     parser.add_argument(
         "--bracket",
         metavar="REFERENCE_REPEAT",
-        help="a second measurement of the reference arm; establishes the session noise floor",
+        action="append",
+        default=[],
+        help=(
+            "a repeat measurement of the reference arm; establishes the session noise "
+            f"floor. Repeatable, and {MIN_BRACKETS_FOR_VERDICT} are needed before a delta "
+            "is called anything stronger than `candidate`"
+        ),
     )
     args = parser.parse_args()
 
     if args.compare:
         reference, candidate = (_load(p) for p in args.compare)
-        bracket = _load(args.bracket) if args.bracket else None
-        report, warnings = compare_arms(reference, candidate, bracket)
+        brackets = [_load(p) for p in args.bracket]
+        report, warnings = compare_arms(reference, candidate, brackets)
         print(f"=== {reference['label']} → {candidate['label']} ===\n")
         print(report)
         if warnings:

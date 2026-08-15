@@ -238,11 +238,38 @@ for 90 days. It is a **recorder, not a gate** — it never fails a build on a sl
 number, because a threshold on a hosted runner fires on noise and then gets
 muted, which is worse than no gate at all.
 
-What that series is good for is the progression across a merge: the core before
-a layer lands and the core after. What survives runner variance is complexity
-class and large factors, which is precisely the resolution this instrument
-claims. Do not read a small delta between two CI arms — the comparison warns
-when either arm carries `ci: true` for exactly this reason.
+What that series is good for is **shape** — the growth column, which is a ratio
+within one arm on one machine and therefore machine-independent.
+
+What it is *not* good for is comparing one arm against another, and the first
+two arms proved it. `121b709f` and `0b558c43` landed on different runners
+(fingerprints `c5bf9b955fce` and `7d7b461e7e2a`), and `store_append` — O(1),
+byte-identical code, untouched by the merge between them — read 0.047 ms on one
+and 0.024 ms on the other. Every engine probe moved −41% to −51%, which is that
+same ~2.1x machine difference and nothing else. A per-commit series cannot show
+progression, because every push gets a fresh machine.
+
+### Progression comes from `characterize-ab.yml`
+
+That workflow measures the merge base and the head of a pull request **on one
+runner, in one job**, ordered A B A B A so that both arms average the same
+position and linear thermal drift cancels. The head's instrument is copied into
+the base worktree and diffed before anything runs, so a PR that edits the
+instrument cannot end up comparing two different instruments.
+
+The difference is stark. The same base/head pair, measured across two runners,
+showed deltas of −41% to −55%; measured in one job, −3.4% to +1.8%.
+
+That run also calibrated the instrument's floor. With two reference repeats,
+`store_append` — a guaranteed control — still came out at −2.9% against a ±2.4%
+floor and would have been reported. `MIN_MEANINGFUL_DELTA_PCT` is 5.0 because of
+that measurement: a delta must clear both the measured floor and 5% before it is
+worth a second look. Sub-5% movement on this instrument is not a signal, however
+tight a given run's floor happens to look.
+
+The A/B reports; it does not gate. Its false-positive rate on real changes is
+still unmeasured, and the honest order is to accumulate runs first and gate
+second.
 
 Arms committed here carry an opaque `machine_fingerprint` rather than a hostname
 and CPU model. The comparison only ever needed to answer "same machine?", and a

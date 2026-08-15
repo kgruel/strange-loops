@@ -310,9 +310,12 @@ def read_facts(
                 order=order,
             )
 
-        canonical = info.canonical_path
-        before_pos = resolve_witness_position(canonical, before) if before else None
-        after_pos = resolve_witness_position(canonical, after) if after else None
+        # Witness resolution reads the sqlite index, not the (possibly jsonl)
+        # canonical log — passing the canonical raised DatabaseError on
+        # jsonl-canonical vertices.
+        witness_store = info.index_path or info.canonical_path
+        before_pos = resolve_witness_position(witness_store, before) if before else None
+        after_pos = resolve_witness_position(witness_store, after) if after else None
 
         page = vertex_query_facts(
             target_path,
@@ -340,11 +343,14 @@ def read_facts(
 
     canonical = info.canonical_path or target_path
     index_path = info.index_path or canonical
-    before_pos = resolve_witness_position(canonical, before) if before else None
-    after_pos = resolve_witness_position(canonical, after) if after else None
 
     reader, _ = _ensure_reader(canonical, index_path)
     try:
+        # Same as the vertex branch: witness cursors resolve against the sqlite
+        # index — after _ensure_reader, which builds it for bare jsonl targets.
+        before_pos = resolve_witness_position(index_path, before) if before else None
+        after_pos = resolve_witness_position(index_path, after) if after else None
+
         page = reader.query_facts(
             limit=limit,
             before=before_pos,

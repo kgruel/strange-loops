@@ -1,0 +1,243 @@
+{
+  "instrument_version": "1",
+  "label": "main-prior-to-sdk-repeat",
+  "sdk_present": false,
+  "depths": [
+    1000,
+    5000,
+    20000
+  ],
+  "environment": {
+    "timestamp": "2026-08-15T17:43:29.383904+00:00",
+    "hostname": "Kyles-MacBook-Air.local",
+    "platform": "macOS-26.4.1-arm64-arm-64bit-Mach-O",
+    "cpu": "Apple M4",
+    "power_source": "AC",
+    "python": "3.13.11",
+    "git_commit": "66a0cc7937ba5d8b08edd0ffd422debc7e9f3d1c",
+    "git_describe": "v0.11.0-158-g66a0cc79",
+    "git_branch": "perf/characterization-ledger"
+  },
+  "samples": [
+    {
+      "probe": "cli_cold_version",
+      "layer": "cli",
+      "depth": 0,
+      "unit": "ms",
+      "n": 3,
+      "median": 60.9392,
+      "minimum": 59.5976,
+      "p95": 73.141
+    },
+    {
+      "probe": "store_scan_all",
+      "layer": "store",
+      "depth": 1000,
+      "unit": "ms",
+      "n": 25,
+      "median": 1.2178,
+      "minimum": 1.209,
+      "p95": 1.5946
+    },
+    {
+      "probe": "store_append",
+      "layer": "store",
+      "depth": 1000,
+      "unit": "ms",
+      "n": 25,
+      "median": 0.0198,
+      "minimum": 0.0193,
+      "p95": 0.0368
+    },
+    {
+      "probe": "engine_summary",
+      "layer": "engine",
+      "depth": 1000,
+      "unit": "ms",
+      "n": 25,
+      "median": 0.1024,
+      "minimum": 0.0999,
+      "p95": 0.1115
+    },
+    {
+      "probe": "engine_replay_fold",
+      "layer": "engine",
+      "depth": 1000,
+      "unit": "ms",
+      "n": 25,
+      "median": 1.8399,
+      "minimum": 1.8272,
+      "p95": 2.064
+    },
+    {
+      "probe": "engine_open_vertex_cold",
+      "layer": "engine",
+      "depth": 1000,
+      "unit": "ms",
+      "n": 25,
+      "median": 2.7914,
+      "minimum": 2.7652,
+      "p95": 2.9673
+    },
+    {
+      "probe": "engine_reindex_fts",
+      "layer": "engine",
+      "depth": 1000,
+      "unit": "ms",
+      "n": 25,
+      "median": 3.6988,
+      "minimum": 3.4845,
+      "p95": 4.0712
+    },
+    {
+      "probe": "engine_receive_held",
+      "layer": "engine",
+      "depth": 1000,
+      "unit": "ms",
+      "n": 25,
+      "median": 2.996,
+      "minimum": 2.926,
+      "p95": 3.2547
+    },
+    {
+      "probe": "store_scan_all",
+      "layer": "store",
+      "depth": 5000,
+      "unit": "ms",
+      "n": 25,
+      "median": 6.7279,
+      "minimum": 6.4367,
+      "p95": 9.4857
+    },
+    {
+      "probe": "store_append",
+      "layer": "store",
+      "depth": 5000,
+      "unit": "ms",
+      "n": 25,
+      "median": 0.0233,
+      "minimum": 0.0215,
+      "p95": 0.1257
+    },
+    {
+      "probe": "engine_summary",
+      "layer": "engine",
+      "depth": 5000,
+      "unit": "ms",
+      "n": 25,
+      "median": 0.4791,
+      "minimum": 0.4769,
+      "p95": 0.5087
+    },
+    {
+      "probe": "engine_replay_fold",
+      "layer": "engine",
+      "depth": 5000,
+      "unit": "ms",
+      "n": 25,
+      "median": 8.9164,
+      "minimum": 8.7475,
+      "p95": 11.1733
+    },
+    {
+      "probe": "engine_open_vertex_cold",
+      "layer": "engine",
+      "depth": 5000,
+      "unit": "ms",
+      "n": 25,
+      "median": 11.0118,
+      "minimum": 10.1113,
+      "p95": 11.7743
+    },
+    {
+      "probe": "engine_reindex_fts",
+      "layer": "engine",
+      "depth": 5000,
+      "unit": "ms",
+      "n": 25,
+      "median": 14.647,
+      "minimum": 13.789,
+      "p95": 16.132
+    },
+    {
+      "probe": "engine_receive_held",
+      "layer": "engine",
+      "depth": 5000,
+      "unit": "ms",
+      "n": 25,
+      "median": 10.4063,
+      "minimum": 10.1372,
+      "p95": 13.0991
+    },
+    {
+      "probe": "store_scan_all",
+      "layer": "store",
+      "depth": 20000,
+      "unit": "ms",
+      "n": 25,
+      "median": 28.327,
+      "minimum": 26.9467,
+      "p95": 31.8515
+    },
+    {
+      "probe": "store_append",
+      "layer": "store",
+      "depth": 20000,
+      "unit": "ms",
+      "n": 25,
+      "median": 0.0225,
+      "minimum": 0.0215,
+      "p95": 0.0394
+    },
+    {
+      "probe": "engine_summary",
+      "layer": "engine",
+      "depth": 20000,
+      "unit": "ms",
+      "n": 25,
+      "median": 2.0614,
+      "minimum": 2.0467,
+      "p95": 2.1294
+    },
+    {
+      "probe": "engine_replay_fold",
+      "layer": "engine",
+      "depth": 20000,
+      "unit": "ms",
+      "n": 25,
+      "median": 40.6731,
+      "minimum": 39.6136,
+      "p95": 44.3608
+    },
+    {
+      "probe": "engine_open_vertex_cold",
+      "layer": "engine",
+      "depth": 20000,
+      "unit": "ms",
+      "n": 25,
+      "median": 43.2075,
+      "minimum": 41.1989,
+      "p95": 48.8808
+    },
+    {
+      "probe": "engine_reindex_fts",
+      "layer": "engine",
+      "depth": 20000,
+      "unit": "ms",
+      "n": 3,
+      "median": 55.9933,
+      "minimum": 53.9108,
+      "p95": 58.2657
+    },
+    {
+      "probe": "engine_receive_held",
+      "layer": "engine",
+      "depth": 20000,
+      "unit": "ms",
+      "n": 3,
+      "median": 44.4298,
+      "minimum": 42.8195,
+      "p95": 70.601
+    }
+  ]
+}

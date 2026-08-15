@@ -34,6 +34,24 @@ __all__ = [
 ]
 
 
+def _tick_fields(tick: Any, change: Any) -> tuple[str | None, str | None]:
+    """Resolve (tick_mark, tick_id) for a receipt whose write fired a boundary.
+
+    The in-memory engine ``Tick`` carries no id — the store assigns one on the
+    tick row, surfaced as ``TickEvent.tick_id`` in the post-write ``ChangeBatch``.
+    Reading ``tick.id`` off the Tick object was an AttributeError on every
+    boundary-firing emission.
+    """
+    if tick is None:
+        return None, None
+    tick_id: str | None = None
+    if change is not None and change.ticks:
+        matching = [ev for ev in change.ticks if ev.name == tick.name]
+        if matching:
+            tick_id = matching[-1].tick_id
+    return tick.name, tick_id
+
+
 class CustodyCredentialProvider:
     """Bridge custody's disk keypair management to engine's CredentialProvider interface."""
 
@@ -278,8 +296,7 @@ def emit_fact(
         receipt = result.receipt
 
         signed = receipt.attestation.signed if receipt.attestation is not None else None
-        tick_id = receipt.tick.id if receipt.tick is not None else None
-        tick_mark = receipt.tick.name if receipt.tick is not None else None
+        tick_mark, tick_id = _tick_fields(receipt.tick, result.change)
 
         delta_count = 0
         affected_sections: list[str] = []
@@ -429,8 +446,7 @@ def emit_batch(
             )
             r = result.receipt
             signed = r.attestation.signed if r.attestation is not None else None
-            tick_id = r.tick.id if r.tick is not None else None
-            tick_mark = r.tick.name if r.tick is not None else None
+            tick_mark, tick_id = _tick_fields(r.tick, result.change)
 
             delta_count = 0
             affected_sections: list[str] = []

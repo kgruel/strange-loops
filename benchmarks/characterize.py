@@ -453,30 +453,55 @@ def sdk_available() -> bool:
     return True
 
 
-def run_arm(depths: tuple[int, ...], label: str | None) -> dict[str, Any]:
-    """Measure every layer across the depth sweep, returning one recordable arm."""
+def run_arm(
+    depths: tuple[int, ...], label: str | None, record: Path | None = None
+) -> dict[str, Any]:
+    """Measure every layer across the depth sweep, returning one recordable arm.
+
+    A deep sweep is dominated by fill time and runs for tens of minutes. The arm
+    is flushed to `record` after every depth, so a failure in the 100k band still
+    leaves the 1k and 10k bands on disk — the depths already measured are the
+    part of the curve you can still trust.
+    """
     include_sdk = sdk_available()
     samples: list[Sample] = []
+    environment = capture_environment()
 
-    print(f"Instrument v{INSTRUMENT_VERSION} · depths {list(depths)} · sdk={'yes' if include_sdk else 'ABSENT'}")
+    print(
+        f"Instrument v{INSTRUMENT_VERSION} · depths {list(depths)} · "
+        f"sdk={'yes' if include_sdk else 'ABSENT'} · {environment['git_describe']}"
+    )
+
+    def arm(completed: list[int]) -> dict[str, Any]:
+        return {
+            "instrument_version": INSTRUMENT_VERSION,
+            "label": label or (environment["git_branch"] or "unlabelled"),
+            "sdk_present": include_sdk,
+            "depths": completed,
+            "environment": environment,
+            "samples": [asdict(s) for s in samples],
+        }
+
+    def flush(completed: list[int]) -> None:
+        if record is not None:
+            record.parent.mkdir(parents=True, exist_ok=True)
+            record.write_text(json.dumps(arm(completed), indent=2) + "\n")
 
     print("  cli cold start ...", flush=True)
     samples.extend(probe_cli())
 
+    completed: list[int] = []
     for depth in depths:
+        started = time.perf_counter()
         print(f"  store layer @ depth {depth:,} ...", flush=True)
         samples.extend(probe_store(depth))
         print(f"  engine{'+sdk' if include_sdk else ''} layers @ depth {depth:,} ...", flush=True)
         samples.extend(probe_vertex_layers(depth, include_sdk))
+        completed.append(depth)
+        flush(completed)
+        print(f"    depth {depth:,} done in {time.perf_counter() - started:.1f}s", flush=True)
 
-    return {
-        "instrument_version": INSTRUMENT_VERSION,
-        "label": label or (capture_environment()["git_branch"] or "unlabelled"),
-        "sdk_present": include_sdk,
-        "depths": list(depths),
-        "environment": capture_environment(),
-        "samples": [asdict(s) for s in samples],
-    }
+    return arm(completed)
 
 
 # --------------------------------------------------------------------------
@@ -647,16 +672,14 @@ def main() -> None:
         raise SystemExit("uv not found on PATH — the cli probe needs it")
 
     depths = tuple(int(d.strip()) for d in args.depths.split(",") if d.strip())
-    arm = run_arm(depths, args.label)
+    record = Path(args.record) if args.record else None
+    arm = run_arm(depths, args.label, record)
 
     print(f"\n=== Cost curves: {arm['label']} ===\n")
     print(render_curves(arm))
 
-    if args.record:
-        out_path = Path(args.record)
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        out_path.write_text(json.dumps(arm, indent=2) + "\n")
-        print(f"\nRecorded arm → {out_path}")
+    if record is not None:
+        print(f"\nRecorded arm → {record}")
 
 
 if __name__ == "__main__":

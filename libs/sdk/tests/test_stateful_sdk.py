@@ -7,6 +7,7 @@ and query operations (summary, pagination, ID lookup, fold state, search, ticks)
 
 from __future__ import annotations
 
+import os
 import tempfile
 from collections import defaultdict
 from collections.abc import Callable
@@ -16,6 +17,13 @@ from typing import Any, TypeVar
 
 import hypothesis.errors
 import pytest
+
+# The stateful machine is a sequence-level complement to the fast unit/property/
+# conformance layers, not a per-mutant kill net: under mutmut it multiplies every
+# mutant by ~10s of Hypothesis exploration and produces timeout noise. mutmut
+# sets MUTANT_UNDER_TEST for each mutant run; skip there, run everywhere else.
+if os.environ.get("MUTANT_UNDER_TEST"):
+    pytest.skip("stateful suite excluded from per-mutant runs", allow_module_level=True)
 from hypothesis import settings
 from hypothesis import strategies as st
 from hypothesis.stateful import RuleBasedStateMachine, invariant, rule

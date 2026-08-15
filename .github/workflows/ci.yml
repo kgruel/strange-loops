@@ -71,10 +71,15 @@ jobs:
       packages: ${{ steps.discover.outputs.packages }}
     steps:
       - uses: actions/checkout@v4
-      - name: Discover packages with tests
+      # libs only, deliberately. apps/* is out of scope for CI: apps/loops is
+      # slated for replacement, and the focus is the core libraries it will be
+      # rebuilt on. Discovery is still a glob rather than a list, so a new
+      # library reaches CI without editing this file — the point was never to
+      # enumerate, it was to stop enumerating.
+      - name: Discover libraries with tests
         id: discover
         run: |
-          pkgs=$(python3 -c 'import json, sys; print(json.dumps(sys.argv[1:]))' $(for dir in libs/*/ apps/*/; do [ -d "${dir}tests" ] && basename "$dir"; done))
+          pkgs=$(python3 -c 'import json, sys; print(json.dumps(sys.argv[1:]))' $(for dir in libs/*/; do [ -d "${dir}tests" ] && basename "$dir"; done))
           echo "packages=$pkgs" >> "$GITHUB_OUTPUT"
 
   test-packages:
@@ -98,9 +103,9 @@ jobs:
         with:
           python-version: "3.13"
 
-      - name: Run Package Tests
+      - name: Run Library Tests
         run: |
-          for dir in "libs/${{ matrix.package }}/tests" "apps/${{ matrix.package }}/tests"; do
+          for dir in "libs/${{ matrix.package }}/tests"; do
             if [ -d "$dir" ]; then
               uv run --package ${{ matrix.package }} pytest "$dir" -q
             fi

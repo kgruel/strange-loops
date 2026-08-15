@@ -234,6 +234,40 @@ def test_emit_fact_default_ts_is_utc_now(sample_vertex: Path) -> None:
     assert before <= fact_ts <= after + 1.0
 
 
+def test_default_ts_call_sites_pass_utc_explicitly(
+    sample_vertex: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Every default-ts call site (preview_emission, emit_fact, emit_batch) must call
+    datetime.now(UTC) — not the tz-naive datetime.now(), which anchors to local time
+    and would silently corrupt fact ordering / cross-vertex comparability off-UTC."""
+    import sdk.emit as emit_mod
+
+    real_now = datetime.now
+    seen_tz_args: list[Any] = []
+
+    class SpyDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            seen_tz_args.append(tz)
+            return real_now(tz)
+
+    monkeypatch.setattr(emit_mod, "datetime", SpyDatetime)
+
+    preview_emission(sample_vertex, "note", {"title": "x"}, observer="alice")
+    emit_fact(sample_vertex, "note", {"title": "y"}, observer="alice")
+    emit_batch(sample_vertex, [("note", {"title": "z"})], observer="alice")
+    emit_batch(
+        sample_vertex,
+        [{"kind": "note", "payload": {"title": "dict-shaped, no ts"}, "observer": "alice"}],
+        observer="alice",
+    )
+
+    assert seen_tz_args, "expected at least one datetime.now() call to be observed"
+    assert all(tz is UTC for tz in seen_tz_args), (
+        f"expected every default-ts datetime.now() call to pass UTC, got {seen_tz_args}"
+    )
+
+
 def test_emit_fact_custom_credentials_provider(sample_vertex: Path) -> None:
     """emit_fact respects custom CredentialProvider instances."""
     from engine.handle import WriteCredentials

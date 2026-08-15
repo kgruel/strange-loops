@@ -74,6 +74,11 @@ def test_init_vertex_root_discovery(tmp_path: Path) -> None:
     assert info.is_aggregate is True
     assert info.declared_kinds == []
 
+    # The generated discovery comment is fixed content (case, wording) — pin it so
+    # a corruption of the scaffold text doesn't silently drift unnoticed.
+    written = target.read_text(encoding="utf-8")
+    assert "// Root vertex — discovers all .vertex files under this directory\n" in written
+
 
 def test_init_vertex_already_exists_raises_target_error(tmp_path: Path) -> None:
     """init_vertex raises TargetError when target already exists and overwrite is False."""

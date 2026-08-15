@@ -56,7 +56,12 @@ from engine.store_reader import StoreReader
 # Arms recorded under different instrument versions are not comparable.
 INSTRUMENT_VERSION = "1"
 
-DEFAULT_DEPTHS = (1_000, 10_000, 100_000)
+# Filling a vertex is quadratic, because `receive` is linear in the number of
+# facts of a declared kind (see LEDGER.md). A 100k band costs roughly two and a
+# half hours to fill per arm, so the default sweep stops where it stops being
+# affordable and the ledger extrapolates the rest, labelled as extrapolation.
+# Raise it with --depths when you are prepared to wait.
+DEFAULT_DEPTHS = (1_000, 5_000, 20_000)
 
 # A probe that takes longer than this per sample drops to MIN_SAMPLES so a deep
 # sweep still finishes. Recorded in the output as the actual `n`.

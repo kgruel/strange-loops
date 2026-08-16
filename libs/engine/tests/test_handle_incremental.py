@@ -106,7 +106,7 @@ _appends = st.lists(
 )
 
 
-@settings(max_examples=60, deadline=None)
+@settings(max_examples=200, deadline=None)
 @given(appends=_appends)
 def test_incremental_fold_equals_cold_fold_at_every_position(tmp_path_factory, appends):
     tmp_path = tmp_path_factory.mktemp("inc")

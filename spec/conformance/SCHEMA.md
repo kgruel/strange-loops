@@ -244,7 +244,7 @@ A 2-element JSON array: `[string, object]`
 ## 6. Area: `replay`
 
 The `replay` area pins store-level replay ordering on top of pure Spec folds.
-Given an append-ordered sequence of stored facts (which assign internal receipt ordinals / rowids), a conforming store replays facts filtered by kind strictly in **receipt order** (`rowid ASC`) — the order in which that store received them. The ULID `id` is stable identity only and `ts` is event-time metadata; neither orders the fold. `(ts, id)` survives only as an explicit read-path lens (see §N, Area `lens`). Each fact payload is augmented with system metadata fields (`_ts`, `_id`, `_observer`, `_origin`) and folded into the spec.
+Given an append-ordered sequence of stored facts (which assign internal receipt ordinals / rowids), a conforming store replays facts filtered by kind strictly in **receipt order** (`rowid ASC`) — the order in which that store received them. The ULID `id` is stable identity only and `ts` is event-time metadata; neither orders the fold. `(ts, id)` survives only as an explicit read-path lens (see §9, Area `lens`). Each fact payload is augmented with system metadata fields (`_ts`, `_id`, `_observer`, `_origin`) and folded into the spec.
 
 ### `input` Schema
 
@@ -317,3 +317,24 @@ An object containing:
 | `post_merge_facts` | array of `[fact_id, Fact Object]` | No | Full post-merge facts in target store in rowid order. |
 | `witness_folds` | object | No | Fold state dictionary for each cursor label defined in `input.cursors` evaluated on target after merge. |
 
+
+---
+
+## 9. Area: `lens`
+
+The `lens` area pins the explicit `(ts ASC, id ASC)` **read lens** — the event-time projection that survives now that fold replay is receipt order (§6).
+
+Fold replay orders by `rowid`, which is a per-store axis. A combine vertex reads across several member stores, where no shared receipt axis exists, so those reads fall back to the `(ts, id)` lens. That fallback is the only remaining place where timestamp tie-breaking and sub-millisecond timestamp precision carry ordering force, and it is what this area pins. A conforming implementation returns facts across member stores ordered by `ts` ascending, tie-broken by fact `id` ascending, independent of which member holds a fact and of the order each member received it.
+
+### `input` Schema
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `kind` | string | Yes | The fact kind to read. |
+| `members` | object | Yes | Mapping of member store label to an array of `[fact_id, Fact Object]` in that member's APPEND order. |
+
+### `expected` Schema
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `lens_order` | array of strings | Yes | Ordered array of fact IDs as returned by the combined read, in `(ts ASC, id ASC)` order. |

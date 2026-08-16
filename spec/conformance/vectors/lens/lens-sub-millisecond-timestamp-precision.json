@@ -1,0 +1,59 @@
+{
+  "name": "lens-sub-millisecond-timestamp-precision",
+  "description": "Pins sub-millisecond precision through the (ts, id) read lens: timestamps differing by microsecond deltas survive store serialization and still order the lens, even when the facts were appended in a different order and live in different member stores.",
+  "input": {
+    "kind": "sensor_readings",
+    "members": {
+      "a": [
+        [
+          "01TESTULID0000000000000001",
+          {
+            "kind": "sensor_readings",
+            "ts": 1736942400.0005,
+            "payload": {
+              "sensor": "s1",
+              "reading": "500us"
+            },
+            "observer": "sensor",
+            "origin": ""
+          }
+        ],
+        [
+          "01TESTULID0000000000000003",
+          {
+            "kind": "sensor_readings",
+            "ts": 1736942400.0001,
+            "payload": {
+              "sensor": "s1",
+              "reading": "100us"
+            },
+            "observer": "sensor",
+            "origin": ""
+          }
+        ]
+      ],
+      "b": [
+        [
+          "01TESTULID0000000000000002",
+          {
+            "kind": "sensor_readings",
+            "ts": 1736942400.000001,
+            "payload": {
+              "sensor": "s1",
+              "reading": "1us"
+            },
+            "observer": "sensor",
+            "origin": ""
+          }
+        ]
+      ]
+    }
+  },
+  "expected": {
+    "lens_order": [
+      "01TESTULID0000000000000002",
+      "01TESTULID0000000000000003",
+      "01TESTULID0000000000000001"
+    ]
+  }
+}

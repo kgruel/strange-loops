@@ -108,6 +108,86 @@ class TestAsOfSelectsByTimestamp:
         assert {i.payload["topic"] for i in _section(state, "decision").items} == {"x"}
 
 
+def _ordering_candidates(store: Path, kind: str) -> tuple[list[str], list[str]]:
+    """The kind's messages under (receipt order, (ts, id) order).
+
+    Read straight from sqlite rather than through the engine: this is the
+    fixture's own oracle, and it must not be able to agree with the code under
+    test by construction.
+    """
+    conn = sqlite3.connect(str(store))
+    try:
+        rows = conn.execute(
+            "SELECT rowid, id, ts, payload FROM facts WHERE kind = ? ORDER BY rowid",
+            (kind,),
+        ).fetchall()
+    finally:
+        conn.close()
+    by_receipt = [json.loads(r[3])["message"] for r in sorted(rows, key=lambda r: r[0])]
+    by_ts = [json.loads(r[3])["message"] for r in sorted(rows, key=lambda r: (r[2], r[1]))]
+    return by_receipt, by_ts
+
+
+class TestAsOfFoldsInReceiptOrder:
+    """``as_of`` is a SELECTOR, not a lens (decision:design/as-of-is-a-selector-
+    not-a-lens).
+
+    It narrows WHICH facts fold — ``ts <= as_of`` — and never how they order.
+    The rows it selects fold in receipt order like every other fold. Without
+    these, ``as_of``'s ORDER is unpinned: reversing the ``until_ts`` path to
+    ``(ts, id)`` leaves the rest of the suite green, because every other
+    ``as_of`` test asserts only membership.
+    """
+
+    def test_backdated_fact_inside_the_cutoff_wins_at_its_receipt_position(
+        self, tmp_path
+    ):
+        vpath, store = _scaffold(tmp_path)
+        _fresh_store(store)
+        # One fold key, two writers. The second one received is BACKDATED
+        # (ts=50 < ts=100), and both sit inside the cutoff — so selection
+        # cannot decide this, only ordering can.
+        _append(store, "decision", 100, topic="x", message="received-first")
+        _append(store, "decision", 50, topic="x", message="received-second")
+
+        by_receipt, by_ts = _ordering_candidates(store, "decision")
+        # The fixture is only meaningful if the two candidate orderings
+        # disagree. Assert that BEFORE asserting which one the fold follows,
+        # so a future edit that makes them agree fails loudly instead of
+        # passing vacuously.
+        assert by_receipt == ["received-first", "received-second"]
+        assert by_ts == ["received-second", "received-first"]
+        assert by_receipt != by_ts
+
+        state = vertex_fold(vpath, as_of=200.0)
+        items = _section(state, "decision").items
+        assert len(items) == 1  # one fold key
+        # Receipt order wins: the backdated fact folded LAST because it
+        # arrived last, not early because its ts says so.
+        assert items[0].payload["message"] == by_receipt[-1] == "received-second"
+
+    def test_cutoff_still_excludes_later_ts_even_though_it_is_last_received(
+        self, tmp_path
+    ):
+        """Selector and order are independent, and both must hold.
+
+        The last-received fact is also the one outside the cutoff, so a fold
+        that honored receipt order but ignored ``as_of`` would answer with it.
+        """
+        vpath, store = _scaffold(tmp_path)
+        _fresh_store(store)
+        _append(store, "decision", 100, topic="x", message="inside-first")
+        _append(store, "decision", 50, topic="x", message="inside-backdated")
+        _append(store, "decision", 300, topic="x", message="outside-cutoff")
+
+        state = vertex_fold(vpath, as_of=200.0)
+        items = _section(state, "decision").items
+        assert len(items) == 1
+        # Excluded by the ts selector despite being last in receipt order;
+        # among what SURVIVES selection, receipt order still decides.
+        assert items[0].payload["message"] == "inside-backdated"
+
+
 class TestAsOfOntologyEqualCursors:
     def test_ontology_resolves_at_the_same_cutoff(self, tmp_path):
         vpath, store = _scaffold(tmp_path)

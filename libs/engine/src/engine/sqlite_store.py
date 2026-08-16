@@ -960,7 +960,7 @@ class SqliteStore(Generic[T]):
         observer: str,
         origin: str = "",
         fact_signer: Callable[[str, str], str | None] | None,
-        expected_head: tuple[float, str] | None = None,
+        expected_head: tuple[int, str] | None = None,
     ) -> dict[str, Any]:
         """Re-emit changed declaration subjects over an open lineage (S4).
 
@@ -1168,7 +1168,7 @@ class SqliteStore(Generic[T]):
         cursor=0 returns all events (rowid starts at 1 in SQLite).
         """
         rows = self._conn.execute(
-            "SELECT kind, ts, observer, origin, payload FROM facts WHERE rowid > ? ORDER BY ts, id",
+            "SELECT kind, ts, observer, origin, payload FROM facts WHERE rowid > ? ORDER BY rowid",
             (cursor,),
         ).fetchall()
         loads = _raw_decode
@@ -1197,14 +1197,14 @@ class SqliteStore(Generic[T]):
         is injected as ``_ts`` (Latest folds consume it — replay must never
         consult the wall clock).
 
-        FOLD REPLAY ORDER is (ts, id) — event order, deterministic across
-        custody contexts, so merge(A,B) and merge(B,A) re-fold to the same
-        state. Witness order (rowid) remains the chain/window authority;
-        the two orders answer different questions (see ORDERING AUTHORITY
-        on append_tick).
+        FOLD REPLAY ORDER is receipt order (rowid) — the order this store
+        received the facts. Receipt order is the chain/window authority and
+        the fold authority alike: a fact's fold position is where it landed.
+        Event order ``(ts, id)`` is a read lens layered on top, never the
+        replay axis (see ORDERING AUTHORITY on append_tick).
         """
         rows = self._conn.execute(
-            "SELECT kind, ts, payload FROM facts WHERE rowid > ? ORDER BY ts, id",
+            "SELECT kind, ts, payload FROM facts WHERE rowid > ? ORDER BY rowid",
             (cursor,),
         ).fetchall()
         loads = _raw_decode
@@ -1221,12 +1221,12 @@ class SqliteStore(Generic[T]):
         No intermediate list allocation — rows are decoded and yielded
         one at a time. The caller handles fold dispatch; the store just
         provides data. This keeps fold logic in the Projection layer
-        where it belongs. Same (ts, id) fold-replay order and ``_ts``
+        where it belongs. Same receipt-order (rowid) fold replay and ``_ts``
         injection as since_raw.
         """
         loads = _raw_decode
         for r in self._conn.execute(
-            "SELECT kind, ts, payload FROM facts WHERE rowid > ? ORDER BY ts, id",
+            "SELECT kind, ts, payload FROM facts WHERE rowid > ? ORDER BY rowid",
             (cursor,),
         ):
             payload = loads(r[2])[0]
@@ -1410,19 +1410,19 @@ class SqliteStore(Generic[T]):
 
     def _declaration_head_in_txn(
         self, conn: Any, lineage_id: str
-    ) -> tuple[float, str] | None:
-        """The ``(ts, id)`` of the newest self-lineage declaration row.
+    ) -> tuple[int, str] | None:
+        """The ``(rowid, id)`` of the newest self-lineage declaration row.
 
         Genesis included; foreign-lineage ``_decl.*`` rows excluded (their
         payload stamps a different lineage). This is the CAS token
-        ``absorb_edit`` compares ``expected_head`` against — replay-ordered
-        ``(ts, id)``, the same axis the resolver folds on.
+        ``absorb_edit`` compares ``expected_head`` against — receipt-ordered
+        by rowid, the same axis the resolver folds on.
         """
-        best: tuple[float, str] | None = None
+        best: tuple[int, str] | None = None
         rows = conn.execute(
-            "SELECT id, kind, ts, payload FROM facts WHERE kind GLOB '_decl.*'"
+            "SELECT id, kind, rowid, payload FROM facts WHERE kind GLOB '_decl.*'"
         ).fetchall()
-        for fact_id, kind, ts, payload_text in rows:
+        for fact_id, kind, rowid, payload_text in rows:
             if fact_id == lineage_id:
                 pass  # own genesis participates
             else:
@@ -1432,12 +1432,12 @@ class SqliteStore(Generic[T]):
                     continue
                 if payload.get("lineage") != lineage_id:
                     continue
-            candidate = (ts, fact_id)
+            candidate = (rowid, fact_id)
             if best is None or candidate > best:
                 best = candidate
         return best
 
-    def declaration_head(self) -> tuple[float, str] | None:
+    def declaration_head(self) -> tuple[int, str] | None:
         """Public read of the self-lineage declaration head (CAS token).
 
         Captured by the CLI at diff time and passed back as ``absorb_edit``'s

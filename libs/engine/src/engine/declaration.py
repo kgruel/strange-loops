@@ -297,7 +297,7 @@ def resolve_declaration_documents(
         try:
             genesis_rows = conn.execute(
                 "SELECT id, rowid, ts, payload FROM facts WHERE kind = ? "
-                "ORDER BY ts, id",
+                "ORDER BY rowid",
                 (DECL_GENESIS,),
             ).fetchall()
         except sqlite3.Error as e:
@@ -388,7 +388,7 @@ def resolve_declaration_documents(
         # where step 1 already returned None.
         overlay_rows = conn.execute(
             "SELECT id, rowid, kind, ts, payload FROM facts "
-            "WHERE kind GLOB '_decl.*' AND kind <> ? ORDER BY ts, id",
+            "WHERE kind GLOB '_decl.*' AND kind <> ? ORDER BY rowid",
             (DECL_GENESIS,),
         ).fetchall()
 
@@ -653,7 +653,9 @@ def decl_lineage_and_head_on(
         elif as_of is not None:
             cutoff = " AND ts <= ?"
             params.append(as_of)
-        # Newest-first by replay order; the first row that is self-lineage
+        # Newest-first by replay order (receipt order, rowid DESC — the
+        # ``at`` rowid cutoff and the ``as_of`` ts cutoff stay independent
+        # selectors); the first row that is self-lineage
         # (the genesis itself, id == lineage, or an overlay whose payload
         # lineage matches) is the declaration head. Foreign _decl rows sort
         # in but are skipped — they never participate in this store's fold.
@@ -661,7 +663,7 @@ def decl_lineage_and_head_on(
             rows = conn.execute(
                 "SELECT id, payload FROM facts WHERE kind GLOB '_decl.*'"
                 + cutoff
-                + " ORDER BY ts DESC, id DESC",
+                + " ORDER BY rowid DESC",
                 params,
             ).fetchall()
         except sqlite3.Error:

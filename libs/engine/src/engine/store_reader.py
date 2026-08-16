@@ -577,13 +577,17 @@ class StoreReader:
         at_rowid: int | None = None,
         until_ts: float | None = None,
     ) -> list[dict]:
-        """All facts for a kind, ordered by insertion (rowid ASC).
+        """All facts for a kind in receipt order (rowid ASC).
 
-        Used for fold replay — facts must be in causal order.
+        This is THE fold replay order: a fact's fold position is the position
+        at which this store received it. The ULID ``id`` is stable identity
+        only, and ``ts`` is event-time metadata — neither orders the fold.
+        ``(ts, id)`` survives only as an explicit read-path lens.
 
         ``at_rowid`` caps to the witness prefix (``rowid <= at_rowid``): the fold
-        reconstructs from the rows the store had received at that position, still
-        replayed in ``(ts, id)`` order (0.8.0 fold-at). ``None`` is a head read.
+        reconstructs from the rows the store had received at that position,
+        replayed in that same receipt order (0.8.0 fold-at). ``None`` is a head
+        read.
 
         ``until_ts`` caps to ``ts <= until_ts`` — the event-time projection
         sibling (0.8.0 fold-state-``as_of``, A8): facts are selected by
@@ -597,7 +601,7 @@ class StoreReader:
         ts_param: tuple = (until_ts,) if until_ts is not None else ()
         rows = self._conn.execute(
             "SELECT id, kind, ts, observer, origin, payload FROM facts "
-            f"WHERE kind = ?{rowid_clause}{ts_clause} ORDER BY ts, id",
+            f"WHERE kind = ?{rowid_clause}{ts_clause} ORDER BY rowid",
             (kind, *rowid_param, *ts_param),
         ).fetchall()
         return [

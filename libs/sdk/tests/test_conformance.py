@@ -177,7 +177,14 @@ def test_sdk_conformance_replay(vector_path: Path, tmp_path: Path) -> None:
         p["_id"] = f.get("id")
         payloads.append(p)
 
-    payloads.sort(key=lambda p: (p["_ts"], p["_id"]))
+    # No re-sort: the sdk page is already in receipt order, which IS fold
+    # order. Pin that rather than re-imposing a (ts, id) sort — the sort
+    # would mask the read path disagreeing with the fold path.
+    appended_ids = [
+        fid for fid, fact_dict in raw_facts if fact_dict["kind"] == spec.name
+    ]
+    assert [p["_id"] for p in payloads] == appended_ids
+
     actual_state = spec.replay(payloads)
     actual_json = json.loads(json.dumps(actual_state))
     assert actual_json == expected

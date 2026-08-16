@@ -2,9 +2,10 @@
 
 Proves the full-reconstruction fold-at: the prefix `rowid <= at.rowid` is
 selected, ontology resolves from the SAME prefix (equal cursors), replay is
-`(ts, id)` (never append order — a backdated arrival inserts early), and the
-result is a machine-readable `WitnessFold` envelope (fold + position + mode +
-honesty status, A11). Aggregates are refused — witness order is per-member.
+receipt order (`rowid` — a backdated arrival folds where it landed, not where
+its timestamp says it belongs), and the result is a machine-readable
+`WitnessFold` envelope (fold + position + mode + honesty status, A11).
+Aggregates are refused — witness order is per-member.
 
 Scratch stores in tmp_path only; never touches a live store.
 """
@@ -136,11 +137,11 @@ class TestPrefixReconstruction:
         assert topics_at_pos == {"x"}  # the later 'y' was not yet received
         assert topics_at_head == {"x", "y"}
 
-    def test_backdated_arrival_replayed_by_ts_id_not_append_order(self, tmp_path):
+    def test_backdated_arrival_replayed_in_append_order_not_by_ts(self, tmp_path):
         # A: topic x, ts=100, message alpha (rowid 1).
         # B: topic x, ts=50 (backdated), message beta, appended LATER (rowid 2).
-        # At head both are in the prefix (n=2) but (ts,id) replay puts B first,
-        # so A (higher ts) wins Latest — append order would have made B win.
+        # At head both are in the prefix (n=2) and receipt-order replay puts B
+        # LAST, so the backdated B wins Latest — its low ts does not demote it.
         vpath, store = _scaffold(tmp_path)
         _fresh_store(store)
         _append(store, "decision", 100, topic="x", message="alpha")
@@ -158,8 +159,8 @@ class TestPrefixReconstruction:
         assert item_early.payload["message"] == "alpha" and item_early.n == 1
         # B is genuinely in the prefix at head (upsert count 2)...
         assert item_head.n == 2
-        # ...but replay is (ts, id): A (ts 100) wins over the backdated B (ts 50).
-        assert item_head.payload["message"] == "alpha"
+        # ...and replay is receipt order: B arrived last, so B wins despite ts 50.
+        assert item_head.payload["message"] == "beta"
 
 
 # ---------------------------------------------------------------------------

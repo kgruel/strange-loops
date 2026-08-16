@@ -413,13 +413,18 @@ class TestMergeViaProductionEmitPath:
 
 
 class TestMergeFoldCommutativity:
-    """merge(A,B) and merge(B,A) must re-fold to the same state.
+    """merge(A,B) and merge(B,A) contain the same facts in different orders.
 
-    Fold replay orders by (ts, id) — a store-independent total order — so
-    the direction of a merge changes the witness history (rowid) but never
-    the semantics. Pinned against the loops-go oracle finding that scan-
-    order insertion + rowid replay made merge non-commutative for
-    order-sensitive folds (thread:python-bugs-from-go-oracle).
+    Fold replay is receipt order (rowid), so a merged store is a NEW store
+    whose fold order is its own append order: the target's existing rows,
+    then the source's rows inserted by the deterministic (ts, id) insertion
+    convention. Merge direction therefore DOES change the fold order of
+    order-sensitive folds — that is inherent to receipt order, not a bug.
+    What merge still guarantees is content equality and determinism.
+
+    This inverts the earlier pin (thread:python-bugs-from-go-oracle), which
+    treated rowid-ordered replay after merge as the defect; the ratified
+    semantic makes it the definition.
     """
 
     @staticmethod
@@ -449,7 +454,7 @@ class TestMergeFoldCommutativity:
                          deserialize=lambda d: d) as store:
             return [p for _, p in store.since_raw(0)]
 
-    def test_merge_direction_does_not_change_fold_order(self, tmp_path):
+    def test_merge_direction_sets_fold_order_by_receipt(self, tmp_path):
         a_facts = [(_BASE_TS + 0, {"n": "a0"}), (_BASE_TS + 2, {"n": "a1"})]
         b_facts = [(_BASE_TS + 1, {"n": "b0"}), (_BASE_TS + 3, {"n": "b1"})]
 
@@ -465,7 +470,28 @@ class TestMergeFoldCommutativity:
 
         order_ab = [p["n"] for p in self._replayed(a1)]
         order_ba = [p["n"] for p in self._replayed(b2)]
-        assert order_ab == order_ba == ["a0", "b0", "a1", "b1"]
+
+        # Each merged store folds in ITS OWN receipt order: the target's rows
+        # first, then the source's rows in (ts, id) insertion order.
+        assert order_ab == ["a0", "a1", "b0", "b1"]
+        assert order_ba == ["b0", "b1", "a0", "a1"]
+        # Content is direction-independent; only the order differs.
+        assert sorted(order_ab) == sorted(order_ba)
+
+    def test_merge_direction_is_deterministic(self, tmp_path):
+        """Re-running the same merge reproduces the same receipt order."""
+        a_facts = [(_BASE_TS + 0, {"n": "a0"}), (_BASE_TS + 2, {"n": "a1"})]
+        b_facts = [(_BASE_TS + 1, {"n": "b0"}), (_BASE_TS + 3, {"n": "b1"})]
+
+        orders = []
+        for trial in range(3):
+            a, b = tmp_path / f"a{trial}.db", tmp_path / f"b{trial}.db"
+            self._emit(a, a_facts)
+            self._emit(b, b_facts)
+            merge_store(a, b)
+            orders.append([p["n"] for p in self._replayed(a)])
+
+        assert orders[0] == orders[1] == orders[2]
 
 
 class TestSliceMergeRoundTrip:

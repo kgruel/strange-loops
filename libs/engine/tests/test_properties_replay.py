@@ -1,8 +1,8 @@
-"""Property-based tests for engine replay total-order, fold determinism, and witness invariance.
+"""Property-based tests for engine replay order, fold determinism, and witness invariance.
 
 Validates invariants from SPEC §9.3:
-- Replay total-order determinism under arbitrary permutation of ingested facts.
-- Fold determinism across permutation orders.
+- Replay follows receipt order (append order) and never re-sorts by (ts, id).
+- Fold determinism given a fixed append sequence.
 - Witness prefix invariance under direct append of backdated facts.
 - Witness prefix invariance under merge-ingested backdated facts.
 """
@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import random
 import sqlite3
 import tempfile
 from pathlib import Path
@@ -122,38 +121,39 @@ def _extract_fold_items(res: Any) -> dict[str, list[dict[str, Any]]]:
 
 
 # =============================================================================
-# 1. Replay Total-Order Determinism
+# 1. Replay Receipt-Order Determinism
 # =============================================================================
 
 
-class TestReplayTotalOrderProperties:
-    """Property tests asserting total-order replay determinism per SPEC §9.3."""
+class TestReplayReceiptOrderProperties:
+    """Property tests asserting receipt-order replay determinism per SPEC §9.3.
+
+    Replay order IS append order (``facts.rowid`` ASC). Permutation
+    invariance is definitionally false: ingest order is fold order. What
+    survives is determinism GIVEN an append sequence — the same sequence
+    always replays to the same ordered list — plus the guarantee that
+    replay is a faithful reading of the append sequence, never a re-sort
+    by ``ts`` or ``id``.
+    """
 
     @settings(max_examples=200, deadline=None)
     @given(fact_pairs=fact_and_id_lists(min_size=2, max_size=15))
-    def test_replay_total_order_independent_of_ingest_permutation(
+    def test_replay_deterministic_given_append_sequence(
         self, fact_pairs: list[tuple[str, Fact]]
     ) -> None:
-        """Replay produces a total order by (ts, id) regardless of ingest order (SPEC §9.3)."""
-        n_permutations = 5
-        permutations: list[list[tuple[str, Fact]]] = []
-        for seed in range(n_permutations):
-            rng = random.Random(seed)
-            perm = list(fact_pairs)
-            rng.shuffle(perm)
-            permutations.append(perm)
-
+        """The same append sequence always replays to the same ordered list."""
+        n_trials = 5
         replayed_results: list[list[tuple[float, str, str, dict]]] = []
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             tmp_path = Path(tmp_dir)
-            for i, perm in enumerate(permutations):
+            for i in range(n_trials):
                 db_path = tmp_path / f"store_{i}.db"
                 _init_store(db_path)
-                _ingest_facts(db_path, perm)
+                _ingest_facts(db_path, fact_pairs)
 
                 with StoreReader(db_path) as reader:
-                    kinds = sorted({f.kind for _, f in perm})
+                    kinds = sorted({f.kind for _, f in fact_pairs})
                     store_replay: list[tuple[float, str, str, dict]] = []
                     for kind in kinds:
                         for row in reader.facts_by_kind(kind):
@@ -162,10 +162,26 @@ class TestReplayTotalOrderProperties:
                             )
                     replayed_results.append(store_replay)
 
-        # Assert all N permutations replayed to the exact same ordered list
         first_replay = replayed_results[0]
         for idx, other_replay in enumerate(replayed_results[1:], start=1):
-            assert other_replay == first_replay, f"Permutation {idx} replayed in different order"
+            assert other_replay == first_replay, f"Trial {idx} replayed in different order"
+
+    @settings(max_examples=200, deadline=None)
+    @given(fact_pairs=fact_and_id_lists(min_size=2, max_size=15))
+    def test_replay_follows_append_sequence_per_kind(
+        self, fact_pairs: list[tuple[str, Fact]]
+    ) -> None:
+        """Replay returns each kind's facts in the order they were appended."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            db_path = Path(tmp_dir) / "store.db"
+            _init_store(db_path)
+            _ingest_facts(db_path, fact_pairs)
+
+            with StoreReader(db_path) as reader:
+                for kind in sorted({f.kind for _, f in fact_pairs}):
+                    appended = [fid for fid, f in fact_pairs if f.kind == kind]
+                    replayed = [row["id"] for row in reader.facts_by_kind(kind)]
+                    assert replayed == appended
 
     @settings(max_examples=200, deadline=None)
     @given(
@@ -173,8 +189,8 @@ class TestReplayTotalOrderProperties:
         id_a=st.sampled_from(["01TESTULID0000000000000001", "01ARZ3NDEKTSV4RRFFQ69G5FA0"]),
         id_b=st.sampled_from(["01TESTULID0000000000000002", "01ARZ3NDEKTSV4RRFFQ69G5FA1"]),
     )
-    def test_replay_tie_breaking_by_fact_id(self, ts: float, id_a: str, id_b: str) -> None:
-        """Ties on timestamp are ordered by fact ID lexicographically in replay (SPEC §9.3)."""
+    def test_replay_does_not_tie_break_by_fact_id(self, ts: float, id_a: str, id_b: str) -> None:
+        """Timestamp ties replay in append order — the ULID never re-sorts them."""
         if id_a == id_b:
             id_b = id_a + "Z"
 
@@ -183,7 +199,7 @@ class TestReplayTotalOrderProperties:
         fact_min = Fact(kind="decision", ts=ts, payload={"topic": "min"}, observer="kyle")
         fact_max = Fact(kind="decision", ts=ts, payload={"topic": "max"}, observer="kyle")
 
-        # Ingest in reverse order (max_id first, then min_id)
+        # Append the HIGHER id first: under receipt order it stays first.
         with tempfile.TemporaryDirectory() as tmp_dir:
             db_path = Path(tmp_dir) / "store.db"
             _init_store(db_path)
@@ -192,8 +208,8 @@ class TestReplayTotalOrderProperties:
             with StoreReader(db_path) as reader:
                 rows = reader.facts_by_kind("decision")
                 assert len(rows) == 2
-                assert rows[0]["id"] == min_id
-                assert rows[1]["id"] == max_id
+                assert rows[0]["id"] == max_id
+                assert rows[1]["id"] == min_id
 
 
 # =============================================================================
@@ -206,35 +222,33 @@ class TestFoldDeterminismProperties:
 
     @settings(max_examples=200, deadline=None)
     @given(fact_pairs=fact_and_id_lists(min_size=2, max_size=15))
-    def test_fold_state_deterministic_across_ingest_permutations(
+    def test_fold_state_deterministic_given_append_sequence(
         self, fact_pairs: list[tuple[str, Fact]]
     ) -> None:
-        """Ingesting the same facts in different order yields identical fold state (SPEC §9.3)."""
-        n_permutations = 5
-        permutations: list[list[tuple[str, Fact]]] = []
-        for seed in range(n_permutations):
-            rng = random.Random(seed)
-            perm = list(fact_pairs)
-            rng.shuffle(perm)
-            permutations.append(perm)
+        """The same append sequence always folds to the same state (SPEC §9.3).
 
+        Under receipt order the ingest permutation IS the fold order, so
+        cross-permutation invariance no longer holds. Determinism given a
+        fixed append sequence is what replaces it.
+        """
+        n_trials = 5
         fold_states: list[dict[str, Any]] = []
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             tmp_path = Path(tmp_dir)
-            for i, perm in enumerate(permutations):
+            for i in range(n_trials):
                 sub_dir = tmp_path / f"trial_{i}"
                 sub_dir.mkdir()
                 vpath, store_path = _scaffold_vertex(sub_dir)
                 _init_store(store_path)
-                _ingest_facts(store_path, perm)
+                _ingest_facts(store_path, fact_pairs)
 
                 res = vertex_fold(vpath)
                 fold_states.append(_extract_fold_items(res))
 
         first_state = fold_states[0]
         for idx, other_state in enumerate(fold_states[1:], start=1):
-            assert other_state == first_state, f"Permutation {idx} produced different fold state"
+            assert other_state == first_state, f"Trial {idx} produced different fold state"
 
 
 # =============================================================================

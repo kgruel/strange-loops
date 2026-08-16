@@ -125,9 +125,9 @@ class TestWriteThrough:
             cold = vertex_fold(vpath)
             live = _sections(h.snapshot.fold)["decision"].items
             assert live == _sections(cold)["decision"].items
-            # (ts,id) replay, not live-tail order: later-ts "late" wins the
-            # topic 'a' upsert even though "early" was appended after it
-            assert live[0].payload["position"] == "late"
+            # receipt-order replay: "early" was appended last, so it wins the
+            # topic 'a' upsert even though its ts is older
+            assert live[0].payload["position"] == "early"
 
     def test_racing_external_write_appears_exactly_once(self, tmp_path):
         vpath, store = _scaffold(tmp_path)
@@ -137,7 +137,7 @@ class TestWriteThrough:
             # it up (as its own batch) then appends the local fact.
             ext = _append(store, "decision", 100, topic="x", message="ext")
             local = h.receive(Fact.of("decision", "kyle", topic="y", position="loc"))
-            # Reconstruction is a fresh (ts,id) replay, not an incremental
+            # Reconstruction is a fresh receipt-order replay, not an incremental
             # tail-fold — so both facts appear exactly once, none double-applied.
             items = _sections(h.snapshot.fold)["decision"].items
             topics = sorted(i.payload["topic"] for i in items)

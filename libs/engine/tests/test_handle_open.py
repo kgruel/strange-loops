@@ -262,10 +262,13 @@ class TestInvalidation:
         # Force reconstruction to raise.
         import engine.handle as handle_mod
 
-        def boom(self, position):
+        def boom(self, fact_id):
             raise RuntimeError("synthetic reconstruction failure")
 
-        monkeypatch.setattr(handle_mod.VertexHandle, "_reconstruct", boom)
+        # Patched at position resolution, shared by the full and the
+        # fold-in-place advance paths (S2), so the no-partial-state guarantee
+        # is tested on whichever path this refresh takes.
+        monkeypatch.setattr(handle_mod.VertexHandle, "_resolve_position", boom)
         with pytest.raises(HandleInvalidated):
             h.refresh()
         # State did not advance; last-good retained for diagnostics only.

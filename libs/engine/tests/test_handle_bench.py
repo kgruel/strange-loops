@@ -85,11 +85,15 @@ def test_refresh_after_one_append_under_gate_at_10k(tmp_path):
             t0 = time.perf_counter()
             batch = h.refresh()
             times.append((time.perf_counter() - t0) * 1000.0)
-            assert batch is not None and batch.replay_mode == "full"
+            assert batch is not None
+            # S2: the first refresh seeds the checkpoint (a full replay, and
+            # honestly labelled so); every one after it folds the suffix in
+            # place.
+            assert batch.replay_mode == ("full" if i == 0 else "checkpoint-suffix")
         times.sort()
         p95 = times[int(len(times) * 0.95)]  # real p95 over 30 samples
-        # Full-reconstruction path (no checkpoint rung 4) at 10k is ~24ms p95;
-        # a wide margin proves the 250ms ordinary-refresh gate holds here.
+        # Fold-in-place refreshes at 10k are sub-millisecond; the gate is kept
+        # at the pre-S2 value so the margin itself is the evidence.
         assert p95 < 250.0, f"refresh p95={p95:.1f}ms exceeded the 250ms gate"
 
 

@@ -254,10 +254,13 @@ class TestCommittedFactError:
 
         import engine.handle as hm
 
-        def boom(self, position):  # fails only the post-write refresh (pre-write
+        def boom(self, fact_id):  # fails only the post-write refresh (pre-write
             raise RuntimeError("post-write reconstruction failure")  # is a no-op)
 
-        monkeypatch.setattr(hm.VertexHandle, "_reconstruct", boom)
+        # Patched at position resolution, not at _reconstruct: since S2 the
+        # post-write refresh may fold in place instead of reconstructing, and
+        # this guard must hold on BOTH advance paths. Both resolve the position.
+        monkeypatch.setattr(hm.VertexHandle, "_resolve_position", boom)
         with pytest.raises(ReceiveCommittedError) as ei:
             h.receive(Fact.of("decision", "kyle", topic="a"))
         assert ei.value.fact_id is not None

@@ -623,13 +623,19 @@ class StoreReader:
         (kind + fold key field + fold key value), resolve it to the ULID
         of the most recent fact contributing to that entity's fold state.
 
+        "Most recent" is the FOLD-FINAL fact — the one the fold last
+        applied — so this rides receipt order (``rowid DESC``), the same
+        axis the fold replays on. Ordering by ``ts`` here would hand back a
+        loser: a backdated arrival wins the fold precisely because it was
+        received last, and an event-time query would skip over it.
+
         Returns None if no matching fact exists.
         """
         path = "$." + key
         row = self._conn.execute(
             "SELECT id FROM facts "
             "WHERE kind = ? AND json_extract(payload, ?) = ? "
-            "ORDER BY ts DESC, id DESC LIMIT 1",
+            "ORDER BY rowid DESC LIMIT 1",
             (kind, path, value),
         ).fetchone()
         return row[0] if row else None

@@ -285,6 +285,38 @@ class TestResolveEntityId:
         with StoreReader(populated_db) as reader:
             assert reader.resolve_entity_id("page", "url", "missing") is None
 
+    def test_resolves_the_fold_final_fact_not_the_latest_ts(self, tmp_db: Path):
+        """The resolved id is the fact the FOLD last applied.
+
+        Under receipt order a backdated re-assertion wins the fold because
+        it was received last. An event-time query would hand back the row
+        it superseded, so the two axes are made to disagree here.
+        """
+        conn = sqlite3.connect(str(tmp_db))
+        conn.execute(
+            "INSERT INTO facts (id, kind, ts, observer, payload) VALUES (?, ?, ?, ?, ?)",
+            ("01FACT_EARLY_ROWID", "page", 500.0, "scraper", '{"url": "z"}'),
+        )
+        # Backdated re-assertion: highest rowid, LOWEST ts.
+        conn.execute(
+            "INSERT INTO facts (id, kind, ts, observer, payload) VALUES (?, ?, ?, ?, ?)",
+            ("01FACT_LATE_ROWID", "page", 10.0, "scraper", '{"url": "z"}'),
+        )
+        conn.commit()
+        by_rowid, by_ts = conn.execute(
+            "SELECT (SELECT id FROM facts WHERE json_extract(payload, '$.url') = 'z' "
+            "        ORDER BY rowid DESC LIMIT 1), "
+            "       (SELECT id FROM facts WHERE json_extract(payload, '$.url') = 'z' "
+            "        ORDER BY ts DESC, id DESC LIMIT 1)"
+        ).fetchone()
+        conn.close()
+        # The axes genuinely disagree, so the assertion below discriminates.
+        assert by_rowid == "01FACT_LATE_ROWID"
+        assert by_ts == "01FACT_EARLY_ROWID"
+
+        with StoreReader(tmp_db) as reader:
+            assert reader.resolve_entity_id("page", "url", "z") == "01FACT_LATE_ROWID"
+
 
 # ---------------------------------------------------------------------------
 # Containment-stat queries (ls-as-stat-over-containment) — fact_key_stats,

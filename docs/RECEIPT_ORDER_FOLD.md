@@ -103,16 +103,43 @@ the resolver must move together or optimistic concurrency compares two different
 notions of "head".
 
 The `at` (`rowid <=`) / `as_of` (`ts <=`) **selector duality** is untouched by
-all of this. `as_of` remains an event-time projection; it is a lens, and it is
-allowed to be.
+all of this. Both are selectors, and neither is a lens — see the ruling below.
+
+### `as_of` is a selector, not a lens
+
+`decision:design/as-of-is-a-selector-not-a-lens`.
+
+`as_of` is an **event-time selector over the receipt-order fold**. It decides
+WHICH facts fold — `ts <= T` — and never how they order. The rows it selects
+fold in receipt order, exactly like every other fold; `at` differs from it only
+in where the cutoff is drawn (`rowid <=` versus `ts <=`), not in what happens
+after.
+
+The code was already right: `StoreReader.facts_by_kind` applies `until_ts` as a
+`WHERE` clause and orders by `rowid` regardless. It was this record that
+overclaimed, by filing `as_of` under the read lens.
+
+The distinction matters because it is the whole point of the change. A lens
+re-**orders**; a selector re-**scopes**. Calling `as_of` a lens smuggles the
+superseded model back in — it implies that asking an event-time question gets
+you an event-time *ordering*, which is exactly what receipt order removed. A
+backdated fact inside the cutoff folds at its receipt position, last, the same
+as it would at head. Pinned by
+`libs/engine/tests/test_fold_as_of.py::TestAsOfFoldsInReceiptOrder`.
+
+Event-time **ordering** lives on the lens surface only — the `(ts, id)` read
+lens, timelines, combined reads.
 
 ## What follows for prose
 
 The load-bearing distinction, and the one the ratchet enforces:
 
 - **Fold / replay order** — receipt order, `rowid`, store-local. Never `(ts, id)`.
-- **Read lens** — `(ts, id)`, `as_of`, `until_ts`, timelines, combined reads.
-  Explicitly a projection. Must say so.
+- **Selector** — `at` (`rowid <=`) and `as_of` / `until_ts` (`ts <=`). These
+  choose which facts fold. They do not order anything; what they select folds
+  in receipt order. Never call a selector a lens.
+- **Read lens** — `(ts, id)`, timelines, combined reads. This is the only place
+  event-time ORDERING lives. Explicitly a projection. Must say so.
 
 "Late arrival" is now a **lens-level observation**, not a fold warning. A fact
 that arrives out of event-time order folds last, like any other arrival, and

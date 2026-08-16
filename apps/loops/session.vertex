@@ -1,0 +1,9 @@
+name "session"
+store "./data/session.db"
+
+loops {
+  decision { fold { items "by" "topic" } }
+  thread   { fold { items "by" "name" } }
+  change   { fold { items "collect" 20 } }
+  task     { fold { items "by" "name" } }
+}

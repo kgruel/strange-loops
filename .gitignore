@@ -25,11 +25,8 @@ mutants/
 *.db-wal
 *.gif
 *.tape
-check.vertex
-session.vertex
-!experiments/**/session.vertex
-!experiments/**/check.vertex
 .ruff_cache/
+.hypothesis/
 # Per-machine MCP server config (contains auth tokens)
 .mcp.json
 

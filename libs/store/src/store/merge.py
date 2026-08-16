@@ -82,10 +82,13 @@ def merge_store(
         # what its fold will follow. So the insertion order is not incidental
         # — it is the ceremony that DEFINES the merged store's receipt order,
         # and it is deterministic for given source content (never scan-order).
-        # Commutativity is therefore a property of merge, not a free
-        # consequence of the fold axis: merge(A,B) and merge(B,A) each lay
-        # down a deterministic sequence over the rows they add. The
-        # witness histories still differ — they ARE different custody events.
+        # What that costs: merge(A,B) and merge(B,A) no longer re-fold
+        # identically — each appends the source after the target's rows, so
+        # the fold SEQUENCES differ by direction (test_merge.py::
+        # test_merge_direction_sets_fold_order_by_receipt). What survives is
+        # determinism per direction and equality of CONTENT (same fact set,
+        # same ids). Do not claim identical folds. The two merges ARE
+        # different custody events, and receipt order says so.
         #
         # The fact SIGNATURE travels (design/fact-signature-at-store-column):
         # it is a per-observer authorship claim over content only — unlike

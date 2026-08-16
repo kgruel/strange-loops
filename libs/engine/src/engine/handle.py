@@ -1041,12 +1041,26 @@ class VertexHandle:
         (or a changed vertex-file stamp) forces re-resolution + recompile +
         invalidation of the compiled epoch before reconstruction.
 
-        Three fact-bearing dispatches, reported in ``ChangeBatch.replay_mode``:
-        ``tick-only`` (no new facts), ``checkpoint-suffix`` (the eligible warm
-        path — fold the newly-received rows onto the held checkpoint, sound
-        because receipt order makes them a suffix of the fold), and ``full``
-        (cold open, ``force``, ontology change, store replacement, rowid
-        regression, or no checkpoint held).
+        Three ``ChangeBatch``-returning dispatches, reported in
+        ``ChangeBatch.replay_mode``:
+
+        * ``tick-only`` — ticks moved, no new facts; ``tick_seq`` and the tick
+          query advance and nothing is refolded.
+        * ``checkpoint-suffix`` — the eligible warm path: fold the
+          newly-received rows onto the held checkpoint. Sound because receipt
+          order makes them a suffix of the fold, not an insertion into it.
+        * ``full`` — ``force``, an ontology change, or no checkpoint held (the
+          first fact-bearing refresh after open seeds one and honestly reports
+          ``full``).
+
+        Store replacement and rowid regression are NOT a dispatch: they mean the
+        held cursor no longer indexes the store it was resolved against, so they
+        RAISE :class:`StoreReplaced` and invalidate the handle. Reopen — the old
+        cursor is never reinterpreted against new bytes.
+
+        ``open()`` is outside this enumeration entirely: it initializes through
+        :meth:`_reconstruct` and publishes generation 0 without producing a
+        ``ChangeBatch`` at all.
         """
         with self._lock:
             if self._state == _CLOSED:

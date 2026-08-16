@@ -50,13 +50,33 @@ is not an incidental scan order to be documented away; it is the ceremony that
 defines what the merged store folds. `(ts, id)` is chosen because it is
 deterministic for given source content.
 
-Commutativity therefore becomes a **property of merge**, not a free consequence
-of the fold axis. Under the old decision `merge(A,B)` and `merge(B,A)` re-folded
-identically because both fed the same store-independent sort into the fold; now
-they do so because merge lays down a deterministic sequence over the rows it
-adds. The guarantee is the same shape and it is claimed in a different place —
-prove it about merge, not about fold. The witness histories still differ; they
-are genuinely different custody events.
+What survives of commutativity is **narrower than it was, and it must be stated
+narrowly.** Under the old decision `merge(A,B)` and `merge(B,A)` re-folded
+identically, because both fed the same store-independent sort into the fold.
+That is **no longer true and must not be claimed**. A merge appends the source's
+rows after the target's existing rowids, so the two directions produce different
+receipt orders and therefore different fold sequences: merging B into A folds
+A's rows then B's; merging A into B folds B's rows then A's.
+`libs/store/tests/test_merge.py::test_merge_direction_sets_fold_order_by_receipt`
+pins exactly this.
+
+That is not a defect. It is receipt order being honest: the two merges *are*
+different custody events, and a store folds what it received in the order it
+received it.
+
+What merge still guarantees, and what R1 is actually about:
+
+- **Determinism per direction.** For given source content, `merge(A,B)` lays
+  down one specific rowid sequence, every time — never a scan order. This is
+  what the `(ts, id)` insertion convention buys, and it is why the convention is
+  load-bearing rather than incidental.
+- **Content equality across directions.** Both results hold the same fact set
+  with the same ids (dedup is on the id primary key). They disagree on fold
+  *sequence*, not on what was merged.
+
+Fold-state equality across directions therefore holds only for order-insensitive
+fold ops, and is not a merge guarantee. Code and prose must claim determinism
+and content equality — never identical fold sequences.
 
 ### R2 — combined reads use the `(ts, id)` lens (named interim state)
 

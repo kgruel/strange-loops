@@ -125,10 +125,10 @@ class WitnessCase:
 # =============================================================================
 
 REPLAY_CASES: list[ReplayCase] = [
-    # 1. Replay is ts-then-id ordered, not append ordered
+    # 1. Replay is append ordered, not ts-then-id ordered
     ReplayCase(
-        name="replay-ts-order-over-append-order",
-        description="Pins decision:design/replay-total-order: replay order is determined by (ts, id) ascending, not append order; facts appended with out-of-order timestamps are replayed in timestamp sequence.",
+        name="replay-append-order-over-ts-order",
+        description="Pins decision:design/replay-receipt-order: replay order is receipt order (rowid ascending), not (ts, id); facts appended with out-of-order timestamps are replayed in the order the store received them.",
         spec=Spec(
             name="item",
             state_fields=(
@@ -254,7 +254,7 @@ REPLAY_CASES: list[ReplayCase] = [
     # 4. Composite replay ordering: multiple ties and interleaved timestamps
     ReplayCase(
         name="replay-multiple-interleaved-timestamp-id-ties",
-        description="Pins composite replay ordering: multi-row sequence combining identical timestamps, reverse-ordered IDs, and out-of-order timestamps.",
+        description="Pins composite replay ordering under receipt order: a multi-row sequence combining identical timestamps, reverse-ordered IDs, and out-of-order timestamps replays strictly in append order — none of those axes perturb it.",
         spec=Spec(
             name="audit",
             state_fields=(
@@ -458,7 +458,7 @@ WITNESS_CASES: list[WitnessCase] = [
     # 8. Backdated fact appended AFTER cursor P excluded from fold-at-P
     WitnessCase(
         name="witness-backdated-fact-excluded-from-prior-cursor",
-        description="Pins append-order witness prefix invariance: a backdated fact appended AFTER cursor P is excluded from fold-at-P even though replay order sorts it earlier than existing rows; the cursor boundary is append-order (rowid), not event-time (ts).",
+        description="Pins append-order witness prefix invariance: a backdated fact appended AFTER cursor P is excluded from fold-at-P, and at head it folds LAST — receipt order, so its older timestamp neither pulls it into the prefix nor demotes it at head.",
         spec=Spec(
             name="state",
             state_fields=(
@@ -504,10 +504,10 @@ WITNESS_CASES: list[WitnessCase] = [
             "head": "head",
         },
     ),
-    # 9. Backdated upsert reordering at head
+    # 9. Backdated upsert folds at its receipt position, not its timestamp
     WitnessCase(
-        name="witness-backdated-upsert-reorder-at-head",
-        description="Pins backdated upsert replay semantics: a backdated fact with a timestamp between rowid 1 and rowid 2 is excluded at cursor rowid 1, and at head is replayed in (ts, id) order between rowids 1 and 2.",
+        name="witness-backdated-upsert-at-receipt-position",
+        description="Pins backdated upsert replay semantics: a fact whose timestamp falls between rowid 1 and rowid 2 is excluded at cursor rowid 1, and at head folds at its own receipt position (last) rather than being re-sorted between rowids 1 and 2.",
         spec=Spec(
             name="config",
             state_fields=(

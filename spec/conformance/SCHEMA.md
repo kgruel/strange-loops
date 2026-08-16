@@ -243,8 +243,8 @@ A 2-element JSON array: `[string, object]`
 
 ## 6. Area: `replay`
 
-The `replay` area pins store-level total replay ordering and tie-breaking semantics on top of pure Spec folds.
-Given an append-ordered sequence of stored facts (which assign internal receipt ordinals / rowids), a conforming store replays facts filtered by kind strictly ordered by `(ts ASC, id ASC)`. Each fact payload is augmented with system metadata fields (`_ts`, `_id`, `_observer`, `_origin`) and folded into the spec.
+The `replay` area pins store-level replay ordering on top of pure Spec folds.
+Given an append-ordered sequence of stored facts (which assign internal receipt ordinals / rowids), a conforming store replays facts filtered by kind strictly in **receipt order** (`rowid ASC`) — the order in which that store received them. The ULID `id` is stable identity only and `ts` is event-time metadata; neither orders the fold. `(ts, id)` survives only as an explicit read-path lens (see §N, Area `lens`). Each fact payload is augmented with system metadata fields (`_ts`, `_id`, `_observer`, `_origin`) and folded into the spec.
 
 ### `input` Schema
 
@@ -255,14 +255,14 @@ Given an append-ordered sequence of stored facts (which assign internal receipt 
 
 ### `expected` Schema
 
-An object representing the final accumulated state dictionary after full replay in `(ts ASC, id ASC)` order.
+An object representing the final accumulated state dictionary after full replay in receipt order (`rowid ASC`).
 
 ---
 
 ## 7. Area: `witness`
 
 The `witness` area pins temporal witness cursor prefix isolation (SPEC §9.3).
-A witness position denotes an inclusive prefix of rows received by the store: `rowid <= cursor_rowid`. The selected prefix is replayed in `(ts ASC, id ASC)` order through the spec. Late-arriving or backdated facts appended after a witness position cannot alter the fold state observed at that position.
+A witness position denotes an inclusive prefix of rows received by the store: `rowid <= cursor_rowid`. The selected prefix is replayed in receipt order (`rowid ASC`) through the spec — prefix selection and replay now share one axis. Late-arriving or backdated facts appended after a witness position cannot alter the fold state observed at that position; at head such a fact folds at its own receipt position (last), not at the position its timestamp would suggest.
 
 ### `input` Schema
 

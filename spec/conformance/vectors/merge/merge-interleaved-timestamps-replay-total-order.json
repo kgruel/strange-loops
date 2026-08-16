@@ -1,6 +1,6 @@
 {
   "name": "merge-interleaved-timestamps-replay-total-order",
-  "description": "Pins post-merge rowid append sequence vs replay total order: target retains initial rows at rowids 1-2 and appends source rows at rowids 3-5 in source (ts, id) order, while full store replay orders all 5 facts by (ts ASC, id ASC).",
+  "description": "Pins that the post-merge rowid sequence IS the merged store's replay order: target retains initial rows at rowids 1-2 and appends source rows at rowids 3-5 in source (ts, id) insertion order, and full store replay then follows that receipt sequence rather than re-sorting by timestamp.",
   "input": {
     "target": [
       [
@@ -173,13 +173,6 @@
       "head": {
         "events": [
           {
-            "step": "S1",
-            "_ts": 50.0,
-            "_observer": "bob",
-            "_origin": "",
-            "_id": "01SOURCE000000000000000001"
-          },
-          {
             "step": "T1",
             "_ts": 100.0,
             "_observer": "alice",
@@ -187,18 +180,25 @@
             "_id": "01TARGET000000000000000001"
           },
           {
-            "step": "S2",
-            "_ts": 200.0,
-            "_observer": "bob",
-            "_origin": "",
-            "_id": "01SOURCE000000000000000002"
-          },
-          {
             "step": "T2",
             "_ts": 300.0,
             "_observer": "alice",
             "_origin": "",
             "_id": "01TARGET000000000000000002"
+          },
+          {
+            "step": "S1",
+            "_ts": 50.0,
+            "_observer": "bob",
+            "_origin": "",
+            "_id": "01SOURCE000000000000000001"
+          },
+          {
+            "step": "S2",
+            "_ts": 200.0,
+            "_observer": "bob",
+            "_origin": "",
+            "_id": "01SOURCE000000000000000002"
           },
           {
             "step": "S3",

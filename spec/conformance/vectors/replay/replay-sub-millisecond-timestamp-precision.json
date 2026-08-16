@@ -72,6 +72,14 @@
     "events": [
       {
         "sensor": "s1",
+        "reading": "500us",
+        "_ts": 1736942400.0005,
+        "_observer": "sensor",
+        "_origin": "",
+        "_id": "01TESTULID0000000000000001"
+      },
+      {
+        "sensor": "s1",
         "reading": "1us",
         "_ts": 1736942400.000001,
         "_observer": "sensor",
@@ -85,24 +93,16 @@
         "_observer": "sensor",
         "_origin": "",
         "_id": "01TESTULID0000000000000003"
-      },
-      {
-        "sensor": "s1",
-        "reading": "500us",
-        "_ts": 1736942400.0005,
-        "_observer": "sensor",
-        "_origin": "",
-        "_id": "01TESTULID0000000000000001"
       }
     ],
     "last": {
       "s1": {
         "sensor": "s1",
-        "reading": "500us",
-        "_ts": 1736942400.0005,
+        "reading": "100us",
+        "_ts": 1736942400.0001,
         "_observer": "sensor",
         "_origin": "",
-        "_id": "01TESTULID0000000000000001",
+        "_id": "01TESTULID0000000000000003",
         "_n": 3
       }
     }

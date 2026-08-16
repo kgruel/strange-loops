@@ -1,6 +1,6 @@
 {
-  "name": "replay-ts-order-over-append-order",
-  "description": "Pins decision:design/replay-total-order: replay order is determined by (ts, id) ascending, not append order; facts appended with out-of-order timestamps are replayed in timestamp sequence.",
+  "name": "replay-append-order-over-ts-order",
+  "description": "Pins decision:design/replay-receipt-order: replay order is receipt order (rowid ascending), not (ts, id); facts appended with out-of-order timestamps are replayed in the order the store received them.",
   "input": {
     "spec": {
       "name": "item",
@@ -72,15 +72,23 @@
     "latest_entry": {
       "entity_1": {
         "id": "entity_1",
-        "val": "ts_300",
-        "_ts": 300.0,
+        "val": "ts_200",
+        "_ts": 200.0,
         "_observer": "alice",
         "_origin": "",
-        "_id": "01TESTULID0000000000000001",
+        "_id": "01TESTULID0000000000000003",
         "_n": 3
       }
     },
     "history": [
+      {
+        "id": "entity_1",
+        "val": "ts_300",
+        "_ts": 300.0,
+        "_observer": "alice",
+        "_origin": "",
+        "_id": "01TESTULID0000000000000001"
+      },
       {
         "id": "entity_1",
         "val": "ts_100",
@@ -96,14 +104,6 @@
         "_observer": "alice",
         "_origin": "",
         "_id": "01TESTULID0000000000000003"
-      },
-      {
-        "id": "entity_1",
-        "val": "ts_300",
-        "_ts": 300.0,
-        "_observer": "alice",
-        "_origin": "",
-        "_id": "01TESTULID0000000000000001"
       }
     ]
   }

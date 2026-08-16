@@ -59,23 +59,15 @@
     "items": {
       "same_key": {
         "k": "same_key",
-        "val": "from_higher_id",
-        "_ts": 1000.0,
-        "_observer": "kyle",
-        "_origin": "",
-        "_id": "01TESTULID0000000000000002",
-        "_n": 2
-      }
-    },
-    "history": [
-      {
-        "k": "same_key",
         "val": "from_lower_id",
         "_ts": 1000.0,
         "_observer": "kyle",
         "_origin": "",
-        "_id": "01TESTULID0000000000000001"
-      },
+        "_id": "01TESTULID0000000000000001",
+        "_n": 2
+      }
+    },
+    "history": [
       {
         "k": "same_key",
         "val": "from_higher_id",
@@ -83,6 +75,14 @@
         "_observer": "kyle",
         "_origin": "",
         "_id": "01TESTULID0000000000000002"
+      },
+      {
+        "k": "same_key",
+        "val": "from_lower_id",
+        "_ts": 1000.0,
+        "_observer": "kyle",
+        "_origin": "",
+        "_id": "01TESTULID0000000000000001"
       }
     ]
   }

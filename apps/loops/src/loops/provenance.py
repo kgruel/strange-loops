@@ -1,15 +1,16 @@
 """Diff-replay provenance — per-field attribution for a single fold key.
 
 The read-side answer to "why does this folded entry look the way it does?"
-For an exact ``(kind, key)`` address, replay the key's source facts through
-the kind's REAL fold op in order and diff the folded payload after each step.
+For an exact ``(kind, key)`` address, replay the key's source facts through the
+kind's REAL fold op in the order the engine bucketed them — receipt order, the
+fold axis — and diff the folded payload after each step.
 Every field is attributed to the fact that last changed it; superseded values
 carry the fact that set them.
 
 Faithful by construction: it drives the actual ``Spec``/fold op (no parallel
 mirror to drift). ``source_facts`` is populated only for Upsert-fold kinds
 (engine gates it there), so an Upsert replay is the live case; any other fold
-op degrades to chronology-is-the-provenance (the fold order already IS the
+op degrades to receipt-order-is-the-provenance (the fold order already IS the
 answer). O(facts x fields) — fine for a single-key drill.
 """
 

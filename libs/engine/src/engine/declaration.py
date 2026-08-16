@@ -43,8 +43,9 @@ Resolution contract (SPEC §9.2 Lineage, §9.5):
 
 - **Overlay is Latest per (kind, subject), replay-ordered.** Non-genesis
   ``_decl.*-defined`` rows overlay the genesis document set; the store's replay
-  order is ``ORDER BY ts, id`` (see ``SqliteStore.since``), so later-by-(ts, id)
-  wins. ``_decl.*-retired``/``-removed`` rows are subject tombstones. Unknown
+  order is receipt order, ``ORDER BY rowid`` (see ``SqliteStore.since``), so the
+  row this store received *later* wins regardless of its ``ts``.
+  ``_decl.*-retired``/``-removed`` rows are subject tombstones. Unknown
   ``_decl.*`` kinds (receipts, future protocol) are skipped safely.
 
 - **Same-``ts`` tie-break: an edit is in force at its own ``ts``, inclusive.**
@@ -62,8 +63,9 @@ Resolution contract (SPEC §9.2 Lineage, §9.5):
   SPEC §9.4 grounds fact-residence on is now live: pass a
   :class:`~engine.witness.WitnessPosition` as ``at=`` (mutually exclusive with
   ``as_of``) and the cutoff is the receipt prefix ``rowid <= at.rowid`` rather
-  than ``ts <= as_of``. Selection is by witness order; the ``(ts, id)`` replay
-  order and this tie-break are unchanged within the selected prefix. The
+  than ``ts <= as_of``. Selection and replay now share one axis — the prefix is
+  chosen by rowid and replayed by rowid — so ``at`` no longer has to reconcile
+  two orderings; the ``as_of`` ts tie-break above governs that selector only. The
   position is A10-verified against this store before its rowid is applied
   (:func:`~engine.witness.verify_position_for_store`).
 
@@ -235,8 +237,9 @@ def resolve_declaration_documents(
       is unchanged (module docstring).
     - ``at`` — a **witness prefix** (:class:`~engine.witness.WitnessPosition`):
       the ``_decl`` rows this store had *received* at that position
-      (``rowid <= at.rowid``), replayed in ``(ts, id)`` order. Late arrivals do
-      not rewrite an earlier position; this is the §9.3 cursor default. A
+      (``rowid <= at.rowid``), replayed in receipt order (``rowid`` ascending) —
+      the same axis the prefix is selected on. Late arrivals do not rewrite an
+      earlier position; this is the §9.3 cursor default. A
       position strictly inside an atomic receipt group is refused
       (:class:`~engine.witness.MidReceiptGroupPosition`) — the guard runs at this
       engine selector, not only in CLI address parsing.
@@ -253,7 +256,7 @@ def resolve_declaration_documents(
     - ``list[dict]`` — the folded documents (``{"kind", "subject", "payload"}``
       each), ready for :func:`~lang.document.documents_to_vertex`.
 
-    Fold (all inside the store, replay-ordered ``ORDER BY ts, id``):
+    Fold (all inside the store, replay-ordered ``ORDER BY rowid``):
 
     1. Locate the OWN genesis: the ``store_meta.own_lineage`` marker selects it
        by id (foreign genesis rows are inert regardless of count); a marker
@@ -402,9 +405,10 @@ def resolve_declaration_documents(
             if as_of is not None and _ts > as_of:
                 continue
             # Witness cutoff: the row must be WITHIN the received prefix
-            # (rowid <= position). Selection is by witness order; replay order
-            # stays (ts, id) — the SELECT above. A backdated edit that arrived
-            # after the position sorts early here but is excluded by its rowid.
+            # (rowid <= position). Selection and replay ride the same rowid axis
+            # (the SELECT above), so this is a suffix trim, not a second sort: a
+            # backdated edit that arrived after the position sorts last and is
+            # excluded by its rowid.
             if at is not None and _rowid > at.rowid:
                 continue
             try:
@@ -602,7 +606,7 @@ def _decl_lineage_and_head(
     None)``.
 
     ``lineage`` is the store's ``own_lineage`` marker (the genesis id).
-    ``decl_head`` is the ULID of the newest-by-``(ts, id)`` self-lineage
+    ``decl_head`` is the ULID of the newest-by-receipt (``rowid``) self-lineage
     ``_decl.*`` row within the cutoff — the last declaration event that would
     win under replay. Pre-genesis / unadopted / aggregate / store-less all
     resolve to ``(None, None)`` — there is no declaration lineage to head.

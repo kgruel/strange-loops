@@ -173,9 +173,9 @@ class TestDeclarationGeneration:
     def test_adopted_decl_head_advances_to_latest_self_overlay(self, tmp_path):
         vpath, store = _scaffold(tmp_path)
         lineage = _absorb(vpath, store)
-        # Overlay rows must post-date the genesis in replay (ts, id) order to
-        # be the newer declaration head — the genesis is stamped at absorb-time
-        # (wall clock), so use timestamps comfortably beyond it.
+        # Overlay rows are appended after the genesis, so they are later in
+        # receipt order and win the declaration head. The far-future timestamps
+        # are belt-and-braces for the `as_of` lens, not what decides the head.
         _append(
             store, DECL_KIND_DEFINED, 2_000_000_000.0, fid="OVERLAY1",
             lineage=lineage, subject="decision", payload={"order": 0},

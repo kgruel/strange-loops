@@ -1,13 +1,14 @@
 """VertexHandle — performance gate on a generated 10k-fact store.
 
-Establishes the honest S0-S3 numbers. Checkpoint rung 4 (previous-head-as-
-checkpoint tail append) is the S5 slice and is NOT implemented here: every
-refresh does a FULL (ts,id) reconstruction via vertex_fold at=. At 10k facts
-that full path already sits well under the 250ms ordinary-refresh gate; rung 4
-is required for the 100k CUTOVER headroom (panel: 100k forced-full 269-510ms),
-not for S0-S3 at realistic sizes.
+`open` cold-reconstructs via `vertex_fold at=`; the first refresh after it seeds
+the checkpoint (`replay_mode="full"`) and every later one folds the newly
+received suffix onto it (`replay_mode="checkpoint-suffix"`) — the refresh gate
+asserts that dispatch as well as the timing, so the numbers below and the path
+that produced them cannot drift apart silently.
 
-Measured on this checkout (reference only, not asserted tightly):
+Measured on this checkout before the checkpoint-suffix path landed, i.e. with
+every refresh on the full path (reference only, not asserted tightly — the
+current warm path is at or under these):
   open (10k cold reconstruct):            ~39 ms
   refresh-after-one-append (full, 10k):   p95 ~24 ms  (real p95 over 30 samples)
   no-change refresh:                      ~0.26 ms  (mean over 50)

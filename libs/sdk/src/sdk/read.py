@@ -258,7 +258,11 @@ def read_facts(
         limit: Maximum number of facts to return.
         kind: Optional kind filter.
         observer: Optional observer identity filter.
-        order: Sort order ('newest' for descending rowid, 'oldest' for ascending rowid).
+        order: Sort order. For a single-store vertex this is receipt order —
+            'oldest' is ascending rowid (the fold axis), 'newest' descending.
+            An aggregate vertex has no shared receipt axis across members, so
+            its pages come back on the ``(ts, id)`` read lens instead, reversed
+            for 'newest'.
         before: Cursor token to fetch rows before (older than) the cursor in newest order.
         after: Cursor token to fetch rows after (newer than) the cursor in oldest order.
         include_internal: Whether to include internal `_decl.*` facts.
@@ -719,6 +723,11 @@ def read_timeline(
         limit: Maximum number of events to return.
         order: Sort order ('oldest' for chronological, 'newest' for reverse chronological).
 
+    Ordering is by event time (``ts``) — facts and ticks are interleaved on the
+    only axis they share, so the timeline is an event-time read lens, not the
+    store's fold order. A backdated fact appears where its ``ts`` puts it here
+    and folds last; ``read_facts`` is the receipt-ordered view.
+
     Returns:
         TimelineResult containing merged events with honest total counts and truncation markers.
     """
@@ -781,6 +790,7 @@ def read_timeline(
                     )
                 )
 
+            # Event-time lens: ts is the only axis facts and ticks share.
             events.sort(key=lambda e: e.ts, reverse=(order == "newest"))
             total_events = len(events)
             capped = events[:limit]
@@ -851,6 +861,7 @@ def read_timeline(
                 )
             )
 
+        # Event-time lens: ts is the only axis facts and ticks share.
         events.sort(key=lambda e: e.ts, reverse=(order == "newest"))
         total_events = len(events)
         capped = events[:limit]

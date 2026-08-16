@@ -2,12 +2,13 @@
 
 A cursor denotes the **inclusive witness prefix** of rows a store had received at
 a position: ``WHERE rowid <= resolved``. The selected prefix — domain facts and
-self-lineage ``_decl.*`` rows alike — is then replayed in ``(ts, id)`` order, and
-ontology resolves from the ``_decl`` rows *in the same prefix* (equal cursors ⇒
-same position for selection and ontology). This is the "what a reader at P could
-have seen" honesty of §9.3: late arrivals (merge / import / backdate) do not
-rewrite what an earlier position shows, because a backdated fact lands at a
-*later* witness position even though it sorts early under ``(ts, id)`` replay.
+self-lineage ``_decl.*`` rows alike — is then replayed in receipt order
+(``rowid`` ascending, the same axis the prefix was cut on), and ontology
+resolves from the ``_decl`` rows *in the same prefix* (equal cursors ⇒ same
+position for selection and ontology). This is the "what a reader at P could
+have seen" honesty of §9.3, and under receipt-order replay it is close to
+tautological: a backdated fact lands at a *later* witness position, and folds
+there too, so it cannot reach back into what an earlier position showed.
 
 Contrast with the shipped ``as_of`` event-time projection (``ts <= T``): that is
 an explicitly-requested analytical mode, never the cursor default. The two
@@ -581,11 +582,14 @@ def diff_interval_report(
     a payload-level diff cannot see:
 
     - ``late_arrivals``: facts received in the interval between the two
-      positions whose ``ts`` is EARLIER than the newest ts already visible
-      at the earlier position — an arrival that inserts itself BEFORE facts
-      the earlier position already replayed in ``(ts, id)`` order (the same
-      phenomenon ``_n`` in ``_diff_snapshot`` surfaces at the per-key level,
-      reported here store-wide). Each entry is ``{"id", "kind", "ts"}``,
+      positions whose ``ts`` is EARLIER than the newest ts already visible at
+      the earlier position — i.e. facts that **arrived out of event-time
+      order**. This is a lens-level observation, not a fold warning: under
+      receipt-order replay such a fact folds last, like any other arrival, and
+      perturbs nothing the earlier position showed. What it tells the reader is
+      that the ``(ts, id)`` read lens over this interval will order these rows
+      differently from the fold, so a lens-ordered view of the window is not
+      the fold's history. Each entry is ``{"id", "kind", "ts"}``,
       newest-received first. ``_decl.*`` rows are excluded (domain facts
       only — a declaration change is reported separately below).
     - ``declaration_changed``: True when any ``_decl.*`` row falls in the

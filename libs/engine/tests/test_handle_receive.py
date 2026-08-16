@@ -1,8 +1,8 @@
 """VertexHandle S3 — write-through, operation-fresh credentials, CAS seam.
 
 Proves: receive() catches up, writes through the held handle exactly once, and
-reconstructs the canonical (ts,id) snapshot without a full reload; a backdated
-local fact matches cold replay on return; a racing external write appears
+publishes the canonical receipt-order snapshot without a full reload; a
+backdated local fact matches cold replay on return; a racing external write appears
 exactly once; signer creation/rotation within one handle lifetime works
 (operation-fresh, never frozen); gate rejection has no batch; the CAS seam
 (expect=) is refused, not faked; a post-fact tick failure raises a named
@@ -137,8 +137,9 @@ class TestWriteThrough:
             # it up (as its own batch) then appends the local fact.
             ext = _append(store, "decision", 100, topic="x", message="ext")
             local = h.receive(Fact.of("decision", "kyle", topic="y", position="loc"))
-            # Reconstruction is a fresh receipt-order replay, not an incremental
-            # tail-fold — so both facts appear exactly once, none double-applied.
+            # The catch-up and the local write are two distinct receipt ranges,
+            # each folded once — so both facts appear exactly once, none
+            # double-applied, whichever dispatch path the refresh took.
             items = _sections(h.snapshot.fold)["decision"].items
             topics = sorted(i.payload["topic"] for i in items)
             assert topics == ["x", "y"]

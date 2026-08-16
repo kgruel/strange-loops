@@ -1079,9 +1079,10 @@ def vertex_fold(
       fold-state-as-of) reconstructs the fold at a witness position: the
       prefix ``rowid <= at.rowid`` is selected, ontology is resolved **from
       the same prefix** (equal cursors ⇒ one position for selection and
-      ontology), and facts are replayed in ``(ts, id)`` order — a full
-      reconstruction, never incremental application of an interval (a
-      backdated arrival inserts early in replay). Returns a
+      ontology), and facts are replayed in receipt order (``rowid`` ascending).
+      This is the reference full reconstruction — the oracle the handle's
+      incremental path is checked against — never an incremental application of
+      an interval. Returns a
       :class:`~engine.witness.WitnessFold` envelope (fold + resolved position
       + ``mode='witness'`` + honesty status) instead of a bare ``FoldState``,
       so the answering mode is machine-readable (A11). Per-store only:

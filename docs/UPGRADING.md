@@ -515,7 +515,9 @@ Keep `.loops/keys/ed25519.key` present, or re-seal once keyed.
 Only if your store predates the ULID revert (ids emitted roughly 2026-03-15 to
 05-16 are hex uuid4 and sort above every ULID). 0.4.0 already fixed the
 practical symptoms by ordering folds and reads by `(ts, id)` and walking the
-chain in append order, so skipping this is safe.
+chain in append order, so skipping this is safe. (Fold order has since moved to
+receipt order — see [receipt-order fold](RECEIPT_ORDER_FOLD.md) — which only
+makes skipping the migration safer: nothing folds on id.)
 
 ```bash
 sl store rebirth <source> <target> --rule ulid-migration
@@ -540,6 +542,8 @@ sl store rebirth <source> <target> --check       # verify the reconstruction
 - Folds are now deterministic and merge-order-independent: rows order by
   `(ts, id)`, canonical bytes are JCS/RFC 8785, and wall-clock fallbacks are
   gone — `merge(A,B)` and `merge(B,A)` re-fold identically.
+  **Superseded:** fold replay order is now receipt order (`rowid`), and
+  `(ts, id)` is a read lens. See [receipt-order fold](RECEIPT_ORDER_FOLD.md).
 - Malformed payloads are counted, not coerced or crashed: they land in a
   `{target}_rejected` counter visible in the fold. CLI-emitted facts are
   unaffected.

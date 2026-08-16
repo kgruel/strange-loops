@@ -1395,11 +1395,11 @@ def _diff_snapshot(state: Any) -> dict[str, dict[str, dict]]:
 
     Keyed (``by``-fold) sections diff at the key level. Each key's payload
     carries a synthetic ``_n`` (revision count) alongside the visible
-    fields — a backdated arrival that loses the ``(ts, id)`` replay to an
-    earlier-received-but-later-ts fact leaves the VISIBLE payload unchanged
-    (the winner didn't change) while still advancing the receipt count; `_n`
-    is what makes that witnessed event honestly visible in the diff instead
-    of two positions that "look" identical.
+    fields — an arrival can leave the VISIBLE payload unchanged (a re-emission
+    of the same values, or an upsert that writes what was already there) while
+    still advancing the receipt count; ``_n`` is what makes that witnessed
+    event honestly visible in the diff instead of two positions that "look"
+    identical.
 
     Keyless (``collect``) sections have no stable per-item identity to diff
     against, so they reduce to a single synthetic ``"_count"`` entry — an
@@ -1467,9 +1467,12 @@ def _run_diff(
 ) -> int:
     """``--diff A..B``: two full reconstructions + a structural fold diff.
 
-    Never incremental — a backdated arrival inserts early in ``(ts, id)``
-    replay and can change order-sensitive state, so each endpoint is folded
-    independently from scratch (the same discipline ``--at`` uses). Each
+    Never incremental — each endpoint is folded independently from scratch
+    (the same discipline ``--at`` uses), because the two positions may straddle
+    an ontology change and each must resolve its declaration from its own
+    prefix. Now that fold order is receipt order, applying the interval to the
+    earlier fold would give the same answer whenever the ontology is unchanged;
+    that is an open optimization, not the current behavior. Each
     endpoint resolves through the same address grammar and aggregate
     refusal as a bare ``--at`` (``_resolve_cursor``). Mixed axis (one
     endpoint witness, one event-time) is refused — same-axis endpoints only

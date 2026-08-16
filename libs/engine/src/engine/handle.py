@@ -37,14 +37,15 @@ heads and the new rows from one snapshot — is met by a short explicit
 ``BEGIN``/``COMMIT`` read transaction that is always closed before returning
 (:meth:`StoreProbe.reading`). See ``test_handle_probe.py`` for the exit test.
 
-**Reconstruction (S1+).** WAL-incremental means incremental *discovery*, not
-blindly incremental *folding*. The facts rowid is the detection cursor; the
-delivered state is a **full reconstruction** of the selected prefix in
-``(ts, id)`` order (A7) — equal to a cold replay. In 0.8.0 the handle delegates
-that reconstruction to the proven :func:`~engine.vertex_reader.vertex_fold`
-``at=`` path (witness-position fold-state-as-of); insertion-aware checkpoints
-that make the common case sublinear without changing the answer are the S5
-ladder, not this slice.
+**Reconstruction.** The facts rowid is both the detection cursor and the fold
+axis: replay order is receipt order, so the rows discovered after the held
+position are exactly the rows still to fold, in the order to fold them. A7 —
+the delivered state equals a cold replay of the same prefix — is unchanged; what
+changed is how cheaply it can be met. The cold path still delegates to the
+proven :func:`~engine.vertex_reader.vertex_fold` ``at=`` reconstruction, and the
+warm path folds the newly-received suffix onto the held checkpoint
+(``replay_mode="checkpoint-suffix"``), which is the same answer because
+appending to a prefix is what receipt order means.
 """
 
 from __future__ import annotations
@@ -217,7 +218,8 @@ class TickHead:
 class StoredFact:
     """A fact row with its ``rowid`` retained — the row identity the existing
     ``since()``/``since_raw()`` reads discard. ``rowid`` is the witness/detection
-    axis; ``(ts, fact_id)`` is the replay order."""
+    axis AND the replay order; ``ts``/``fact_id`` are event-time metadata and
+    stable identity, carried for the read lens, never for the fold."""
 
     rowid: int
     fact_id: str
@@ -373,9 +375,10 @@ class StoreProbe:
     ) -> list[StoredFact]:
         """Facts with ``after < rowid <= through``, in append (rowid) order.
 
-        Selection is by ``rowid`` alone (the detection cursor). Reconstruction
-        re-orders these by ``(ts, id)`` — this read is the *receipt* stream, not
-        the fold-replay order.
+        Selection is by ``rowid`` alone, which is also the fold axis: the
+        receipt stream and the fold-replay order are one and the same, so the
+        incremental path consumes this list as its fold input directly rather
+        than re-sorting it.
         """
         c = conn or self._live()
         rows = c.execute(
@@ -1037,6 +1040,13 @@ class VertexHandle:
         returns a ``tick-only`` batch without refolding. Any ``_decl.*`` receipt
         (or a changed vertex-file stamp) forces re-resolution + recompile +
         invalidation of the compiled epoch before reconstruction.
+
+        Three fact-bearing dispatches, reported in ``ChangeBatch.replay_mode``:
+        ``tick-only`` (no new facts), ``checkpoint-suffix`` (the eligible warm
+        path — fold the newly-received rows onto the held checkpoint, sound
+        because receipt order makes them a suffix of the fold), and ``full``
+        (cold open, ``force``, ontology change, store replacement, rowid
+        regression, or no checkpoint held).
         """
         with self._lock:
             if self._state == _CLOSED:
@@ -1450,10 +1460,11 @@ class VertexHandle:
         fetch operation-fresh signers from the :class:`CredentialProvider` at the
         moment of the write, call the live receive path **exactly once** (the
         writer is the only party that fires and persists a boundary), then
-        reconstruct the canonical ``(ts, id)`` snapshot at the new head and
-        return a :class:`ReceiveResult`. A locally backdated fact therefore
-        cannot leave the published state in live-tail order — it folds at its
-        ``(ts, id)`` position on reconstruction.
+        refresh to the canonical snapshot at the new head and return a
+        :class:`ReceiveResult`. A locally backdated fact folds at its receipt
+        position (last, as of this write), which is what the published state
+        shows — the refresh exists to publish the new head, not to relocate the
+        fact to where its ``ts`` would put it.
 
         **Post-write reconstruction canonicalizes STATE, not ADMISSION.** A
         pre-refresh does not make the boundary/admission decision serializable:

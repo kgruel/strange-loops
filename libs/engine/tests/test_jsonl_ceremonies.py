@@ -215,7 +215,7 @@ def test_stale_head_refuses_with_log_byte_identical(tmp_path):
             changes,
             observer="obs",
             fact_signer=_signer("k"),
-            expected_head=(0.0, "01BOGUS"),
+            expected_head=(0, "01BOGUS"),
         )
     assert log.read_bytes() == before
     store.close()
@@ -243,7 +243,7 @@ def test_stale_head_allows_lawful_pre_cas_index_catch_up(tmp_path):
             changes,
             observer="obs",
             fact_signer=_signer("k"),
-            expected_head=(0.0, "01BOGUS"),
+            expected_head=(0, "01BOGUS"),
         )
     # LOG byte-identical; the index converged to a pure function of it.
     assert log.read_bytes() == before

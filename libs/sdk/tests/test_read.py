@@ -423,6 +423,98 @@ def test_resolve_entity(tmp_path: Path) -> None:
     assert resolved_missing is None
 
 
+def _aggregate_with_backdated_reassertion(
+    root: Path, n_members: int
+) -> tuple[Path, str, str]:
+    """Build an n-member combine vertex holding a backdated re-assertion.
+
+    Returns (parent_vertex, receipt_last_id, ts_latest_id). The two ids
+    differ by construction, so an assertion against either one
+    discriminates the receipt axis from the (ts, id) lens.
+    """
+    from atoms import Fact
+    from engine.sqlite_store import SqliteStore
+
+    loops = (
+        "loops {\n  task {\n    fold {\n      items \"by\" \"name\"\n    }\n  }\n}\n"
+    )
+    members = []
+    for i in range(n_members):
+        store = root / f"m{i}.db"
+        vpath = root / f"m{i}.vertex"
+        vpath.write_text(f'name "m{i}"\nstore "{store}"\n' + loops, encoding="utf-8")
+        members.append((vpath, store))
+
+    # Both keyed facts land in member 0 so the single- and multi-member
+    # fixtures differ only in member COUNT, never in fact placement.
+    s = SqliteStore(
+        path=members[0][1], serialize=lambda f: f.to_dict(), deserialize=Fact.from_dict
+    )
+    s.append(
+        Fact(kind="task", ts=500.0, payload={"name": "z", "msg": "alpha"}, observer="o"),
+        id_override="01AAAAAAAAAAAAAAAAAAAAAAAA",
+    )
+    # Backdated re-assertion: appended LAST, oldest ts.
+    s.append(
+        Fact(kind="task", ts=10.0, payload={"name": "z", "msg": "beta"}, observer="o"),
+        id_override="01BBBBBBBBBBBBBBBBBBBBBBBB",
+    )
+    s.close()
+
+    for _vpath, store in members[1:]:
+        SqliteStore(
+            path=store, serialize=lambda f: f.to_dict(), deserialize=Fact.from_dict
+        ).close()
+
+    parent = root / "parent.vertex"
+    refs = "\n".join(f'  vertex "{v}"' for v, _ in members)
+    parent.write_text(
+        f'name "parent"\ncombine {{\n{refs}\n}}\n' + loops, encoding="utf-8"
+    )
+    # receipt-last is the backdated row; ts-latest is the one it superseded.
+    return parent, "01BBBBBBBBBBBBBBBBBBBBBBBB", "01AAAAAAAAAAAAAAAAAAAAAAAA"
+
+
+def test_resolve_entity_single_member_aggregate_rides_receipt_order(
+    tmp_path: Path,
+) -> None:
+    """A 1-member aggregate resolves to the fold-final fact.
+
+    One member means the aggregate HAS a receipt axis (that member's
+    rowid), so vertex_fold replays in receipt order. Entity resolution
+    must agree or the fold's winner and the resolved id disagree.
+    """
+    from engine.vertex_reader import vertex_fold
+    from sdk import resolve_entity
+
+    parent, receipt_last, ts_latest = _aggregate_with_backdated_reassertion(
+        tmp_path, n_members=1
+    )
+    assert receipt_last != ts_latest  # the axes disagree, so this discriminates
+
+    # The fold itself picks the receipt-last fact...
+    section = next(s for s in vertex_fold(parent).sections if s.kind == "task")
+    assert section.items[0].payload["msg"] == "beta"
+
+    # ...and resolution agrees with it.
+    assert resolve_entity(parent, "task", "name", "z") == receipt_last
+
+
+def test_resolve_entity_multi_member_aggregate_keeps_the_lens(tmp_path: Path) -> None:
+    """A 2-member aggregate keeps the (ts, id) lens answer.
+
+    With more than one member, rowid is per-store and no shared receipt
+    axis exists, so the fold is itself a lens projection and resolution
+    stays on the lens. Pins the other side of the member-count boundary.
+    """
+    from sdk import resolve_entity
+
+    parent, receipt_last, ts_latest = _aggregate_with_backdated_reassertion(
+        tmp_path, n_members=2
+    )
+    assert resolve_entity(parent, "task", "name", "z") == ts_latest
+
+
 def test_read_timeline_interleaved(tmp_path: Path) -> None:
     """read_timeline streams facts and ticks in chronological sequence."""
     from sdk import read_timeline

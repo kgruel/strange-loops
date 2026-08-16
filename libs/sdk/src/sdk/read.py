@@ -17,6 +17,7 @@ from engine.declaration import load_declaration_status
 from engine.preflight import PreflightMode, read_preflight
 from engine.store_reader import StoreReader
 from engine.vertex_reader import (
+    _resolve_stores,
     vertex_fact_by_id,
     vertex_facts,
     vertex_query_facts,
@@ -686,7 +687,26 @@ def resolve_entity(
             decl_ast.combine is not None or decl_ast.discover is not None
         )
         if is_aggregate:
-            # Aggregate entity resolution over all combined member stores
+            # Entity resolution must agree with the fold, so it mirrors
+            # _combined_read's member-count branch via the same helper.
+            #
+            # ONE member: that member's rowid IS the aggregate's receipt
+            # axis, so the fold replays in receipt order and resolution
+            # must too — a backdated re-assertion wins the fold, and the
+            # lens walk below would hand back the row it superseded.
+            #
+            # TWO OR MORE: rowid is per-store, so no shared receipt axis
+            # exists. The combined read falls back to the event-time lens
+            # and every other combined surface reads through that same
+            # lens, so the lens walk below is the coherent answer.
+            store_paths = _resolve_stores(decl_ast, target_path)
+            if len(store_paths) == 1 and store_paths[0].exists():
+                member_reader = StoreReader(store_paths[0])
+                try:
+                    return member_reader.resolve_entity_id(kind, key, value)
+                finally:
+                    member_reader.close()
+
             all_facts = vertex_facts(target_path, since_ts=0.0, until_ts=float("inf"), kind=kind)
             for f in reversed(all_facts):
                 p = f.get("payload", {})

@@ -190,14 +190,6 @@
         "count": 4,
         "history": [
           {
-            "amount": 25.0,
-            "desc": "backdated_interest",
-            "_ts": 50.0,
-            "_observer": "bank",
-            "_origin": "",
-            "_id": "01SOURCE000000000000000001"
-          },
-          {
             "amount": 500.0,
             "desc": "init",
             "_ts": 100.0,
@@ -212,6 +204,14 @@
             "_observer": "bank",
             "_origin": "",
             "_id": "01TARGET000000000000000002"
+          },
+          {
+            "amount": 25.0,
+            "desc": "backdated_interest",
+            "_ts": 50.0,
+            "_observer": "bank",
+            "_origin": "",
+            "_id": "01SOURCE000000000000000001"
           },
           {
             "amount": 200.0,

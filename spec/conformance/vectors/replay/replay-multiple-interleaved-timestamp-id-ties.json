@@ -1,6 +1,6 @@
 {
   "name": "replay-multiple-interleaved-timestamp-id-ties",
-  "description": "Pins composite replay ordering: multi-row sequence combining identical timestamps, reverse-ordered IDs, and out-of-order timestamps.",
+  "description": "Pins composite replay ordering under receipt order: a multi-row sequence combining identical timestamps, reverse-ordered IDs, and out-of-order timestamps replays strictly in append order \u2014 none of those axes perturb it.",
   "input": {
     "spec": {
       "name": "audit",
@@ -79,11 +79,11 @@
   "expected": {
     "trail": [
       {
-        "step": "A",
-        "_ts": 100.0,
+        "step": "C",
+        "_ts": 200.0,
         "_observer": "sys",
         "_origin": "",
-        "_id": "01TESTULID000000000000000A"
+        "_id": "01TESTULID000000000000000Z"
       },
       {
         "step": "B",
@@ -93,11 +93,11 @@
         "_id": "01TESTULID000000000000000B"
       },
       {
-        "step": "C",
-        "_ts": 200.0,
+        "step": "A",
+        "_ts": 100.0,
         "_observer": "sys",
         "_origin": "",
-        "_id": "01TESTULID000000000000000Z"
+        "_id": "01TESTULID000000000000000A"
       },
       {
         "step": "D",

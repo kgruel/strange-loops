@@ -163,7 +163,8 @@ class TestRefresh:
 
     def test_refresh_equals_cold_after_backdated_arrival(self, tmp_path):
         """A backdated arrival (new rowid, old ts) must reconstruct to a cold
-        replay — full (ts,id) reconstruction, never incremental tail-fold."""
+        replay. Under receipt order the arrival folds at its rowid, so it wins
+        the upsert regardless of its older timestamp."""
         vpath, store = _scaffold(tmp_path)
         _append(store, "decision", 200, topic="a", message="late-ts-first")
         with open_vertex(vpath) as h:
@@ -174,8 +175,8 @@ class TestRefresh:
             cold = vertex_fold(vpath)
             live_item = _sections(h.snapshot.fold)["decision"].items
             assert live_item == _sections(cold)["decision"].items
-            # (ts,id) replay: the later-ts row wins the upsert for topic 'a'
-            assert live_item[0].payload["message"] == "late-ts-first"
+            # receipt-order replay: the last-received row wins the upsert
+            assert live_item[0].payload["message"] == "earlier-ts"
 
     def test_force_rebuilds_unconditionally(self, tmp_path):
         vpath, store = _scaffold(tmp_path)
@@ -261,10 +262,13 @@ class TestInvalidation:
         # Force reconstruction to raise.
         import engine.handle as handle_mod
 
-        def boom(self, position):
+        def boom(self, fact_id):
             raise RuntimeError("synthetic reconstruction failure")
 
-        monkeypatch.setattr(handle_mod.VertexHandle, "_reconstruct", boom)
+        # Patched at position resolution, shared by the full and the
+        # fold-in-place advance paths (S2), so the no-partial-state guarantee
+        # is tested on whichever path this refresh takes.
+        monkeypatch.setattr(handle_mod.VertexHandle, "_resolve_position", boom)
         with pytest.raises(HandleInvalidated):
             h.refresh()
         # State did not advance; last-good retained for diagnostics only.

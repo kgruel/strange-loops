@@ -1,8 +1,8 @@
 """VertexHandle S3 — write-through, operation-fresh credentials, CAS seam.
 
 Proves: receive() catches up, writes through the held handle exactly once, and
-reconstructs the canonical (ts,id) snapshot without a full reload; a backdated
-local fact matches cold replay on return; a racing external write appears
+publishes the canonical receipt-order snapshot without a full reload; a
+backdated local fact matches cold replay on return; a racing external write appears
 exactly once; signer creation/rotation within one handle lifetime works
 (operation-fresh, never frozen); gate rejection has no batch; the CAS seam
 (expect=) is refused, not faked; a post-fact tick failure raises a named
@@ -125,9 +125,9 @@ class TestWriteThrough:
             cold = vertex_fold(vpath)
             live = _sections(h.snapshot.fold)["decision"].items
             assert live == _sections(cold)["decision"].items
-            # (ts,id) replay, not live-tail order: later-ts "late" wins the
-            # topic 'a' upsert even though "early" was appended after it
-            assert live[0].payload["position"] == "late"
+            # receipt-order replay: "early" was appended last, so it wins the
+            # topic 'a' upsert even though its ts is older
+            assert live[0].payload["position"] == "early"
 
     def test_racing_external_write_appears_exactly_once(self, tmp_path):
         vpath, store = _scaffold(tmp_path)
@@ -137,8 +137,9 @@ class TestWriteThrough:
             # it up (as its own batch) then appends the local fact.
             ext = _append(store, "decision", 100, topic="x", message="ext")
             local = h.receive(Fact.of("decision", "kyle", topic="y", position="loc"))
-            # Reconstruction is a fresh (ts,id) replay, not an incremental
-            # tail-fold — so both facts appear exactly once, none double-applied.
+            # The catch-up and the local write are two distinct receipt ranges,
+            # each folded once — so both facts appear exactly once, none
+            # double-applied, whichever dispatch path the refresh took.
             items = _sections(h.snapshot.fold)["decision"].items
             topics = sorted(i.payload["topic"] for i in items)
             assert topics == ["x", "y"]
@@ -254,10 +255,13 @@ class TestCommittedFactError:
 
         import engine.handle as hm
 
-        def boom(self, position):  # fails only the post-write refresh (pre-write
+        def boom(self, fact_id):  # fails only the post-write refresh (pre-write
             raise RuntimeError("post-write reconstruction failure")  # is a no-op)
 
-        monkeypatch.setattr(hm.VertexHandle, "_reconstruct", boom)
+        # Patched at position resolution, not at _reconstruct: since S2 the
+        # post-write refresh may fold in place instead of reconstructing, and
+        # this guard must hold on BOTH advance paths. Both resolve the position.
+        monkeypatch.setattr(hm.VertexHandle, "_resolve_position", boom)
         with pytest.raises(ReceiveCommittedError) as ei:
             h.receive(Fact.of("decision", "kyle", topic="a"))
         assert ei.value.fact_id is not None

@@ -7,7 +7,7 @@ Builds golden vectors pinning:
 - Divergent collision behavior (target survives, source silently dropped; friction:merge-divergent-collision-invisible)
 - Witness prefix invariance under merge (SPEC §9.3)
 - Boundary edge cases: empty source, empty target, self-merge, both empty
-- Post-merge rowid sequence vs (ts, id) replay total order
+- Post-merge rowid sequence, which IS the merged store's replay order
 
 Run once to generate/regenerate frozen vector files:
     uv run python spec/conformance/generate_merge.py
@@ -439,10 +439,10 @@ MERGE_CASES: list[MergeCase] = [
         target_facts=[],
         source_facts=[],
     ),
-    # 10. Interleaved timestamps: rowid append sequence vs (ts, id) replay total order
+    # 10. Interleaved timestamps: the post-merge rowid sequence IS the replay order
     MergeCase(
         name="merge-interleaved-timestamps-replay-total-order",
-        description="Pins post-merge rowid append sequence vs replay total order: target retains initial rows at rowids 1-2 and appends source rows at rowids 3-5 in source (ts, id) order, while full store replay orders all 5 facts by (ts ASC, id ASC).",
+        description="Pins that the post-merge rowid sequence IS the merged store's replay order: target retains initial rows at rowids 1-2 and appends source rows at rowids 3-5 in source (ts, id) insertion order, and full store replay then follows that receipt sequence rather than re-sorting by timestamp.",
         spec=Spec(
             name="event_stream",
             state_fields=(

@@ -143,6 +143,40 @@ never have matched anything.
 The rebuild is linear: `engine_reindex_fts` runs 3.588 → 13.872 → 59.746 ms
 across the sweep (16.7x over 20x depth).
 
+### 6. Receipt-order fold-in-place collapsed the held-handle write path — findings 1 and 2 are superseded there, and only there
+
+Measured by `characterize-ab.yml` on PR #8 (`e017c0e8` → `72b318f7`, same
+runner, A B A B A, arms committed under `ledger/ab-receipt-order-pr8/`).
+`decision:design/replay-receipt-order` made fold order = receipt order, so a
+new fact is a fold *suffix* and `VertexHandle` folds it onto a held checkpoint
+instead of replaying history (`docs/RECEIPT_ORDER_FOLD.md`).
+
+| Probe @ depth | base | head | delta | verdict |
+| :--- | ---: | ---: | ---: | :--- |
+| `engine_receive_held@1000` | 7.708 ms | 2.376 ms | **−69.2%** | above noise |
+| `engine_receive_held@5000` | 29.048 ms | 3.929 ms | **−86.5%** | above noise |
+
+The growth class is the finding: base held-receive grew 3.8x across the 5x
+depth sweep (finding 2's quadratic signature); head grows 1.65x. The residue is
+not the fold — it is `visible_domain_count`'s `COUNT(*)` and the witness
+position resolve, both still linear-ish per refresh and named at implementation
+time, not discovered after.
+
+Two boundaries, stated as plainly as the win:
+
+- **`sdk_emit_fact` did not move** (+1.3% / +4.7%, within or near noise). The
+  SDK emit path cold-opens per call (finding 4), and a cold open's *seeding*
+  replay is still the full prefix. Fold-in-place fixes every consumer that
+  holds a handle; a process-per-emit consumer still pays O(n) per emit and
+  O(n²) per fill. The fix for that shape is a persisted checkpoint or a
+  held-session consumer — a design decision for the SDK-facing CLI rebuild,
+  not a missing line in the engine.
+- **`store_scan_all` improved −13% above noise**, which disqualifies it as the
+  negative control it was cast as: `since()` moved from `ORDER BY ts, id` to
+  `ORDER BY rowid` (natural table order, sort eliminated), so the movement has
+  a mechanism and is expected. `store_append` stayed flat (−3.7% / +6.0%),
+  and remains the honest control.
+
 ---
 
 ## Cost curves

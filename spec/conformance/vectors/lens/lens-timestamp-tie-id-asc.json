@@ -1,0 +1,45 @@
+{
+  "name": "lens-timestamp-tie-id-asc",
+  "description": "Pins the (ts, id) read lens tie-break: two facts sharing a timestamp are returned id ASC across member stores, regardless of which member holds them or the order each member received them.",
+  "input": {
+    "kind": "record",
+    "members": {
+      "a": [
+        [
+          "01TESTULID0000000000000002",
+          {
+            "kind": "record",
+            "ts": 1000.0,
+            "payload": {
+              "k": "same_key",
+              "val": "from_higher_id"
+            },
+            "observer": "kyle",
+            "origin": ""
+          }
+        ]
+      ],
+      "b": [
+        [
+          "01TESTULID0000000000000001",
+          {
+            "kind": "record",
+            "ts": 1000.0,
+            "payload": {
+              "k": "same_key",
+              "val": "from_lower_id"
+            },
+            "observer": "kyle",
+            "origin": ""
+          }
+        ]
+      ]
+    }
+  },
+  "expected": {
+    "lens_order": [
+      "01TESTULID0000000000000001",
+      "01TESTULID0000000000000002"
+    ]
+  }
+}

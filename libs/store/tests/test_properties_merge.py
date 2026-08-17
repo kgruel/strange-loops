@@ -108,7 +108,13 @@ def _populate_store(store_path: Path, fact_pairs: list[tuple[str, Fact]]) -> Non
 
 
 def _read_all_facts(store_path: Path) -> list[dict[str, Any]]:
-    """Read all stored facts in deterministic (ts, id) replay order."""
+    """All stored facts under the deterministic (ts, id) READ LENS.
+
+    A content comparison across two differently-merged stores needs a
+    store-independent order; receipt order (rowid) is per-store and would make
+    equal content compare unequal. The lens is the comparison key here, not a
+    claim about fold order.
+    """
     with StoreReader(store_path) as reader:
         stats = reader.fact_kind_stats()
         kinds = sorted(stats.keys())

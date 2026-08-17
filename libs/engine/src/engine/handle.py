@@ -37,14 +37,15 @@ heads and the new rows from one snapshot — is met by a short explicit
 ``BEGIN``/``COMMIT`` read transaction that is always closed before returning
 (:meth:`StoreProbe.reading`). See ``test_handle_probe.py`` for the exit test.
 
-**Reconstruction (S1+).** WAL-incremental means incremental *discovery*, not
-blindly incremental *folding*. The facts rowid is the detection cursor; the
-delivered state is a **full reconstruction** of the selected prefix in
-``(ts, id)`` order (A7) — equal to a cold replay. In 0.8.0 the handle delegates
-that reconstruction to the proven :func:`~engine.vertex_reader.vertex_fold`
-``at=`` path (witness-position fold-state-as-of); insertion-aware checkpoints
-that make the common case sublinear without changing the answer are the S5
-ladder, not this slice.
+**Reconstruction.** The facts rowid is both the detection cursor and the fold
+axis: replay order is receipt order, so the rows discovered after the held
+position are exactly the rows still to fold, in the order to fold them. A7 —
+the delivered state equals a cold replay of the same prefix — is unchanged; what
+changed is how cheaply it can be met. The cold path still delegates to the
+proven :func:`~engine.vertex_reader.vertex_fold` ``at=`` reconstruction, and the
+warm path folds the newly-received suffix onto the held checkpoint
+(``replay_mode="checkpoint-suffix"``), which is the same answer because
+appending to a prefix is what receipt order means.
 """
 
 from __future__ import annotations
@@ -57,7 +58,7 @@ from contextlib import contextmanager, suppress
 from dataclasses import dataclass, replace
 from pathlib import Path
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 from engine.declaration import _read_own_lineage
 from engine.witness import GENESIS_SENTINEL, WitnessPosition
@@ -217,7 +218,8 @@ class TickHead:
 class StoredFact:
     """A fact row with its ``rowid`` retained — the row identity the existing
     ``since()``/``since_raw()`` reads discard. ``rowid`` is the witness/detection
-    axis; ``(ts, fact_id)`` is the replay order."""
+    axis AND the replay order; ``ts``/``fact_id`` are event-time metadata and
+    stable identity, carried for the read lens, never for the fold."""
 
     rowid: int
     fact_id: str
@@ -373,9 +375,10 @@ class StoreProbe:
     ) -> list[StoredFact]:
         """Facts with ``after < rowid <= through``, in append (rowid) order.
 
-        Selection is by ``rowid`` alone (the detection cursor). Reconstruction
-        re-orders these by ``(ts, id)`` — this read is the *receipt* stream, not
-        the fold-replay order.
+        Selection is by ``rowid`` alone, which is also the fold axis: the
+        receipt stream and the fold-replay order are one and the same, so the
+        incremental path consumes this list as its fold input directly rather
+        than re-sorting it.
         """
         c = conn or self._live()
         rows = c.execute(
@@ -781,6 +784,12 @@ class VertexHandle:
         self._tick_query: dict[str, StoredTick] = {}
         self._identity: StoreIdentity | None = None
         self._iterating = False
+        # S2 fold-in-place checkpoint: the RAW per-kind fold states behind
+        # ``self._snapshot.fold``, at exactly ``self._fact_cursor``. ``None``
+        # means "not held" — the next eligible refresh seeds it from the
+        # prefix. Dropped by every full-reconstruction path (a full replay
+        # rebuilds from the store, and an epoch turn invalidates the states).
+        self._raw_fold: dict[str, Any] | None = None
         # S3 lazily-built writer
         self._writer = None
         # Test seam (default off): fires inside _refresh_locked right after the
@@ -911,7 +920,9 @@ class VertexHandle:
         """Full reconstruction of the fold at ``position`` → ``(fold, status)``.
 
         Delegates to the proven ``vertex_fold`` ``at=`` path (A7: full replay in
-        ``(ts, id)`` order, ontology resolved from the same prefix). ``None`` /
+        receipt order, ontology resolved from the same prefix). Conditional
+        since S2: the fold-in-place path skips it and folds the suffix onto the
+        held checkpoint instead; this stays the reference reconstruction. ``None`` /
         storeless → a bare head read.
         """
         from engine.vertex_reader import load_declaration_status, vertex_fold
@@ -1029,6 +1040,27 @@ class VertexHandle:
         returns a ``tick-only`` batch without refolding. Any ``_decl.*`` receipt
         (or a changed vertex-file stamp) forces re-resolution + recompile +
         invalidation of the compiled epoch before reconstruction.
+
+        Three ``ChangeBatch``-returning dispatches, reported in
+        ``ChangeBatch.replay_mode``:
+
+        * ``tick-only`` — ticks moved, no new facts; ``tick_seq`` and the tick
+          query advance and nothing is refolded.
+        * ``checkpoint-suffix`` — the eligible warm path: fold the
+          newly-received rows onto the held checkpoint. Sound because receipt
+          order makes them a suffix of the fold, not an insertion into it.
+        * ``full`` — ``force``, an ontology change, or no checkpoint held (the
+          first fact-bearing refresh after open seeds one and honestly reports
+          ``full``).
+
+        Store replacement and rowid regression are NOT a dispatch: they mean the
+        held cursor no longer indexes the store it was resolved against, so they
+        RAISE :class:`StoreReplaced` and invalidate the handle. Reopen — the old
+        cursor is never reinterpreted against new bytes.
+
+        ``open()`` is outside this enumeration entirely: it initializes through
+        :meth:`_reconstruct` and publishes generation 0 without producing a
+        ``ChangeBatch`` at all.
         """
         with self._lock:
             if self._state == _CLOSED:
@@ -1071,6 +1103,22 @@ class VertexHandle:
                 new_ticks = self._probe.ticks_after(self._tick_cursor, thead.rowid, conn)
                 vdc = self._probe.visible_domain_count(fhead.rowid, conn)
                 decl_head = self._decl_head_id(conn)
+                # S2: when the incremental branch is plausibly eligible but no
+                # raw checkpoint is held, seed it from the prefix INSIDE this
+                # same snapshot — the suffix and the prefix it folds onto must
+                # come from one reading, never a post-hoc live-connection
+                # lookup. `file_changed` is not known yet, so on an epoch turn
+                # this read is discarded; that costs one scan on the rare
+                # refresh that was going to full-reconstruct anyway.
+                prefix_facts: list[StoredFact] | None = None
+                if (
+                    self._raw_fold is None
+                    and self._snapshot is not None
+                    and not force
+                    and new_facts
+                    and not any(_is_control(f.kind) for f in new_facts)
+                ):
+                    prefix_facts = self._probe.facts_after(0, self._fact_cursor, conn)
         except sqlite3.OperationalError as exc:
             raise StoreBusy(f"store busy during refresh: {exc}") from exc
 
@@ -1093,10 +1141,26 @@ class VertexHandle:
         if not force and not has_new_facts and not file_changed and has_new_ticks:
             return self._advance_tick_only(new_ticks, thead, vdc)
 
-        # Full path — reconstruct at the new head.
         ontology_changed = force or file_changed or any(
             _is_control(f.kind) for f in new_facts
         )
+
+        # Fold-in-place path (S2). Under receipt-order replay, fold order IS
+        # append order, so the facts after the checkpoint are a suffix that can
+        # be folded onto the checkpoint's state instead of re-replaying all of
+        # history. Never across an epoch boundary: an ontology change (control
+        # fact, changed vertex file, or force) recompiles, which invalidates the
+        # raw states the suffix would be folded onto. Store-replacement and
+        # rowid-regression already raised above, so reaching here means the
+        # cursor is still interpretable against these bytes.
+        if not ontology_changed and self._snapshot is not None and (
+            self._raw_fold is not None or prefix_facts is not None
+        ):
+            return self._advance_incremental(
+                fhead, thead, new_facts, new_ticks, vdc, decl_head, prefix_facts,
+            )
+
+        # Full path — reconstruct at the new head.
         return self._advance_full(
             fhead, thead, new_facts, new_ticks, vdc, decl_head,
             new_file_stamp, ontology_changed,
@@ -1124,6 +1188,110 @@ class VertexHandle:
             ontology_changed=False, tick_arrived=True, visible_domain_count=vdc,
             replay_mode="tick-only", catching_up=False, oversized_group=False,
             generation=snap.generation,
+        )
+
+    @staticmethod
+    def _fold_payloads(facts: list[StoredFact]) -> list[dict]:
+        """StoredFact rows → replay payloads, in the receipt order given.
+
+        Same recipe as the reconstruction path in ``vertex_reader.vertex_fold``
+        — the two must build identical payloads or the incremental fold and its
+        cold oracle disagree on metadata fields.
+        """
+        out = []
+        for f in facts:
+            p = dict(f.payload)
+            p["_ts"] = f.ts
+            p["_observer"] = f.observer
+            p["_origin"] = f.origin
+            p["_id"] = f.fact_id
+            out.append(p)
+        return out
+
+    def _by_declared_kind(
+        self, facts: list[StoredFact]
+    ) -> dict[str, list[StoredFact]]:
+        """Group receipt-ordered facts by kind, keeping only declared kinds.
+
+        Undeclared kinds are not folded — they surface as ``unfolded``, which a
+        positioned read reports as empty anyway.
+        """
+        grouped: dict[str, list[StoredFact]] = {}
+        for f in facts:
+            if f.kind in self._specs:
+                grouped.setdefault(f.kind, []).append(f)
+        return grouped
+
+    def _advance_incremental(
+        self, fhead, thead, new_facts, new_ticks, vdc, decl_head, prefix_facts,
+    ) -> ChangeBatch:
+        """Fold the new facts onto the held checkpoint rather than re-replaying.
+
+        The seeding refresh (no checkpoint held yet) replays the whole prefix to
+        build one, and honestly reports ``replay_mode="full"``; every eligible
+        refresh after it is a genuine ``"checkpoint-suffix"``.
+        """
+        from engine.vertex_reader import _raw_to_fold_state
+
+        before_pos = self._snapshot.position
+        before_fold = self._snapshot.fold
+        seeding = self._raw_fold is None
+        try:
+            if seeding:
+                prefix_by_kind = self._by_declared_kind(prefix_facts or [])
+                raw = {
+                    k: spec.replay(self._fold_payloads(prefix_by_kind.get(k, [])))
+                    for k, spec in self._specs.items()
+                }
+            else:
+                raw = dict(self._raw_fold)
+
+            for kind, facts in self._by_declared_kind(new_facts).items():
+                spec = self._specs[kind]
+                raw[kind] = spec.replay_from(
+                    raw.get(kind, spec.initial_state()),
+                    self._fold_payloads(facts),
+                )
+
+            position = self._resolve_position(fhead.fact_id)
+            fold = _freeze_fold(_raw_to_fold_state(
+                raw, self._ast, self._specs, unfolded={},
+            ))
+        except HandleError:
+            self._state = _INVALIDATED
+            raise
+        except Exception as exc:
+            self._state = _INVALIDATED
+            raise HandleInvalidated(
+                f"incremental fold failed on {self._store_path}: {exc!r} — "
+                "handle invalidated; last-good snapshot retained for diagnostics"
+            ) from exc
+
+        rows = _diff_folds(before_fold, fold)
+        receipts = self._receipt_events(new_facts)
+        tick_events = self._tick_events(new_ticks)
+        new_tick_query = self._extended_tick_query(new_ticks)
+        receipt_ranges: tuple[tuple[str, int, int], ...] = ()
+        if receipts:
+            receipt_ranges = ((self._member_id(), receipts[0].seq, receipts[-1].seq),)
+
+        snap = VertexSnapshot(
+            position=position, fold=fold, generation=self._generation + 1,
+            ontology_epoch=self._compute_epoch(decl_head), tick_seq=thead.rowid,
+            visible_domain_count=vdc, status=self._snapshot.status,
+        )
+        self._raw_fold = raw
+        self._publish(
+            snap, fact_cursor=fhead.rowid, tick_cursor=thead.rowid,
+            tick_query=new_tick_query,
+        )
+        return ChangeBatch(
+            before=before_pos, after=position, receipt_ranges=receipt_ranges,
+            receipts=receipts, ticks=tick_events, rows=rows,
+            ontology_changed=False, tick_arrived=bool(new_ticks),
+            visible_domain_count=vdc,
+            replay_mode="full" if seeding else "checkpoint-suffix",
+            catching_up=False, oversized_group=False, generation=snap.generation,
         )
 
     def _advance_full(
@@ -1160,6 +1328,10 @@ class VertexHandle:
             ontology_epoch=self._compute_epoch(decl_head), tick_seq=thead.rowid,
             visible_domain_count=vdc, status=status,
         )
+        # This fold came from a full reconstruction, not from the checkpoint —
+        # drop the raw states rather than carry ones that may predate an epoch
+        # turn. The next eligible refresh reseeds.
+        self._raw_fold = None
         self._file_stamp = new_file_stamp
         self._publish(
             snap, fact_cursor=fhead.rowid, tick_cursor=thead.rowid,
@@ -1188,6 +1360,7 @@ class VertexHandle:
                 f"storeless reconstruction failed for {self._vertex_path}: {exc!r}"
             ) from exc
         rows = _diff_folds(before_fold, fold)
+        self._raw_fold = None
         snap = VertexSnapshot(
             position=before_pos, fold=fold, generation=self._generation + 1,
             ontology_epoch=self._compute_epoch(None), tick_seq=0,
@@ -1211,6 +1384,9 @@ class VertexHandle:
         verify_source_pins(self._vertex_path)
         self._ast = ast
         self._specs = compile_vertex(ast)
+        # An epoch turn changes the fold contracts — states folded under the
+        # old ontology can never be a checkpoint for the new one.
+        self._raw_fold = None
         self._file_stamp = new_file_stamp
         # The held writer's compiled runtime is stale under a new ontology —
         # discard it so the next receive() rebuilds against the current epoch.
@@ -1298,10 +1474,11 @@ class VertexHandle:
         fetch operation-fresh signers from the :class:`CredentialProvider` at the
         moment of the write, call the live receive path **exactly once** (the
         writer is the only party that fires and persists a boundary), then
-        reconstruct the canonical ``(ts, id)`` snapshot at the new head and
-        return a :class:`ReceiveResult`. A locally backdated fact therefore
-        cannot leave the published state in live-tail order — it folds at its
-        ``(ts, id)`` position on reconstruction.
+        refresh to the canonical snapshot at the new head and return a
+        :class:`ReceiveResult`. A locally backdated fact folds at its receipt
+        position (last, as of this write), which is what the published state
+        shows — the refresh exists to publish the new head, not to relocate the
+        fact to where its ``ts`` would put it.
 
         **Post-write reconstruction canonicalizes STATE, not ADMISSION.** A
         pre-refresh does not make the boundary/admission decision serializable:

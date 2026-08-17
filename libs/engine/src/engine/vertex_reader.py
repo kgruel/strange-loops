@@ -375,14 +375,22 @@ def _combined_read(
 
     conn, aliases = _open_combined(store_paths)
     try:
-        # Single query for all facts, fold-replay-ordered by (ts, id) —
-        # event order with the ULID as deterministic tie-break, the same
-        # total order the engine replay paths use. Store- and merge-order
-        # independent, so combined reads re-fold identically regardless of
-        # which store a fact lives in.
+        # Single query for all facts, fold-replay-ordered.
+        #
+        # Single store: receipt order (rowid ASC) — the ratified fold axis,
+        # matching StoreReader.facts_by_kind.
+        #
+        # Multiple stores: rowid is PER-STORE, so a combined view has no
+        # receipt axis to fold on. These reads fall back to the explicit
+        # (ts, id) READ LENS ordering — same rule as facts_in_range below.
+        # A combined fold is therefore a lens projection, not a receipt
+        # replay, and may disagree with a single-store fold of the same
+        # facts. Named interim state pending the multi-store receipt-order
+        # ruling.
+        single_store = len(aliases) == 1
         ts_clause = " WHERE ts <= ?" if until_ts is not None else ""
         selects = [
-            f"SELECT id, kind, ts, observer, origin, payload "
+            f"SELECT id, kind, ts, observer, origin, payload, rowid "
             f"FROM {'[' + a + '].' if a != 'main' else ''}facts{ts_clause}"
             for a in aliases
         ]
@@ -390,9 +398,12 @@ def _combined_read(
         params = (until_ts,) * len(aliases) if until_ts is not None else ()
 
         rows = conn.execute(sql, params).fetchall()
-        # Sort in Python — avoids SQLite index scan for ORDER BY ts
+        # Sort in Python — avoids a SQLite index scan for the ORDER BY,
         # which causes random I/O (~14ms vs ~1ms for unsorted read).
-        rows.sort(key=lambda r: (r[2], r[0]))
+        if single_store:
+            rows.sort(key=lambda r: r[6])
+        else:
+            rows.sort(key=lambda r: (r[2], r[0]))
 
         # Build kind → spec lookup, including sub-kind (dot-prefix) routing.
         # "thread.foo" → "thread" if "thread" is a spec kind.
@@ -481,7 +492,9 @@ def _combined_facts(
     conn, aliases = _open_combined(store_paths)
     try:
         internal_clause = "" if include_internal else " AND kind NOT GLOB '_decl.*'"
-        # See _combined_read for ts-tie ordering note.
+        # ORDER BY ts, id here is the explicit (ts, id) READ LENS ordering,
+        # not fold order: a combined view has no receipt axis, because rowid
+        # is per-store. See _combined_read.
         if kind is not None:
             from .sql_util import kind_subtree_predicate
 
@@ -493,7 +506,7 @@ def _combined_facts(
                 f"{internal_clause}"
                 for a in aliases
             ]
-            sql = " UNION ALL ".join(selects) + " ORDER BY ts, id"
+            sql = " UNION ALL ".join(selects) + " ORDER BY ts, id"  # (ts,id) read lens — no receipt axis across members
             params: list[Any] = []
             for _ in aliases:
                 params.extend([since_ts, until_ts, *kind_params])
@@ -504,7 +517,7 @@ def _combined_facts(
                 f"WHERE ts >= ? AND ts <= ?{internal_clause}"
                 for a in aliases
             ]
-            sql = " UNION ALL ".join(selects) + " ORDER BY ts, id"
+            sql = " UNION ALL ".join(selects) + " ORDER BY ts, id"  # (ts,id) read lens — no receipt axis across members
             params = []
             for _ in aliases:
                 params.extend([since_ts, until_ts])
@@ -1066,9 +1079,10 @@ def vertex_fold(
       fold-state-as-of) reconstructs the fold at a witness position: the
       prefix ``rowid <= at.rowid`` is selected, ontology is resolved **from
       the same prefix** (equal cursors ⇒ one position for selection and
-      ontology), and facts are replayed in ``(ts, id)`` order — a full
-      reconstruction, never incremental application of an interval (a
-      backdated arrival inserts early in replay). Returns a
+      ontology), and facts are replayed in receipt order (``rowid`` ascending).
+      This is the reference full reconstruction — the oracle the handle's
+      incremental path is checked against — never an incremental application of
+      an interval. Returns a
       :class:`~engine.witness.WitnessFold` envelope (fold + resolved position
       + ``mode='witness'`` + honesty status) instead of a bare ``FoldState``,
       so the answering mode is machine-readable (A11). Per-store only:

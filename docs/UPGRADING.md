@@ -12,6 +12,51 @@ uv tool upgrade strange-loops     # or: pip install -U strange-loops
 
 ---
 
+## Unreleased — fold replay order is receipt order
+
+### One-time, deterministic change to fold state
+
+Fold replay order changed from event time — the `ts` field, tie-broken by `id` —
+to **receipt order**, the order your store received each fact. See
+[the decision record](RECEIPT_ORDER_FOLD.md) for why.
+
+**If your store contains backdated facts** — any fact whose `ts` is earlier than
+a fact already received before it, which is what merges, imports, and
+`--ts`-overridden emits produce — then replaying it under this version yields a
+**different fold state** than prior versions did. A backdated fact used to fold
+at the position its timestamp claimed; it now folds where it actually arrived,
+which for a late arrival is last. Under a `by`-fold that means it can now win a
+key it previously lost.
+
+This is a one-time change and it is deterministic: the same store replays to the
+same new state every time, on every reader. There is no migration to run, no
+flag to set, and nothing to re-emit. Read your vertex once and what you see is
+the new answer.
+
+**A store with no backdated facts is completely unaffected** — if every fact's
+`ts` ascends with its arrival, the two orders are the same order.
+
+### What is NOT affected
+
+None of the following are functions of fold state, so none of them move:
+
+- **Stored bytes.** No row is rewritten, reordered, or re-identified. Fold order
+  is a read-path property; the log is untouched.
+- **Fact and tick signatures.** A fact signature is an authorship claim over
+  that fact's content. It never covered fold state.
+- **`window_hash` / `prev_hash` tick chains.** These hash the stored fact rows in
+  a `rowid`-ordered window (`SqliteStore._window_hash`, and the log-side
+  re-derivation in `canonical_audit`). They attest *which rows this store
+  received, in what order* — receipt order, the thing that did not change.
+- **Seals.** Sealed windows verify exactly as before.
+
+Concretely: `sl store verify` (including `--deep`) and every tick-chain
+verification give the same verdicts on the same store as they did before this
+version. If you see a verification failure after upgrading, it is not this
+change — investigate it as a real one.
+
+---
+
 ## 0.11.0 (2026-08-12) — CLI honesty
 
 *(The behavior deltas below are deliberate breaking changes: every one
@@ -515,7 +560,9 @@ Keep `.loops/keys/ed25519.key` present, or re-seal once keyed.
 Only if your store predates the ULID revert (ids emitted roughly 2026-03-15 to
 05-16 are hex uuid4 and sort above every ULID). 0.4.0 already fixed the
 practical symptoms by ordering folds and reads by `(ts, id)` and walking the
-chain in append order, so skipping this is safe.
+chain in append order, so skipping this is safe. (Fold order has since moved to
+receipt order — see [receipt-order fold](RECEIPT_ORDER_FOLD.md) — which only
+makes skipping the migration safer: nothing folds on id.)
 
 ```bash
 sl store rebirth <source> <target> --rule ulid-migration
@@ -540,6 +587,8 @@ sl store rebirth <source> <target> --check       # verify the reconstruction
 - Folds are now deterministic and merge-order-independent: rows order by
   `(ts, id)`, canonical bytes are JCS/RFC 8785, and wall-clock fallbacks are
   gone — `merge(A,B)` and `merge(B,A)` re-fold identically.
+  **Superseded:** fold replay order is now receipt order (`rowid`), and
+  `(ts, id)` is a read lens. See [receipt-order fold](RECEIPT_ORDER_FOLD.md).
 - Malformed payloads are counted, not coerced or crashed: they land in a
   `{target}_rejected` counter visible in the fold. CLI-emitted facts are
   unaffected.

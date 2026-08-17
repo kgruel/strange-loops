@@ -139,9 +139,11 @@ def ulid_migration() -> Transform:
     - canonical ULIDs (python-ulid): pass through untouched — merge
       dedup and external citations key on them.
 
-    Migrated id: ``ULID(ms(fact.ts) || sha256(old_id)[:10])`` —
-    event-time sortable, so ORDER BY id finally approximates event
-    order across the whole store.
+    Migrated id: ``ULID(ms(fact.ts) || sha256(old_id)[:10])`` — event-time
+    sortable, so an id-ordered read finally approximates event order across
+    the whole store. That is a read-lens property; the rebirth walks and
+    rewrites rows in receipt order (rowid), which is what the reborn store
+    folds on and what this migration preserves.
     """
 
     def map_fact(row: FactRow) -> FactRow:

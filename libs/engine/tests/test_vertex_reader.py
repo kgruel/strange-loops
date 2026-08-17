@@ -2495,7 +2495,9 @@ class TestVertexFoldCombine:
         # design/x has both emits (lifecycle visible)
         x_facts = result.source_facts["decision/design/x"]
         assert len(x_facts) == 2
-        # ASC by ts (the SQL ORDER BY ts sort produces this)
+        # ASC by ts — this is a COMBINE vertex, and a combined read has no
+        # shared receipt axis across members, so it comes back on the (ts, id)
+        # read lens rather than in fold order.
         assert x_facts[0]["message"] == "v1"
         assert x_facts[1]["message"] == "v2"
 

@@ -125,6 +125,28 @@ class Spec:
                 fn(state, payload)
         return state
 
+    def replay_from(
+        self, state: dict[str, Any], payloads: Iterable[dict[str, Any]]
+    ) -> dict[str, Any]:
+        """Suffix replay: continue folding from an existing ``state``.
+
+        Copies ``state`` ONCE (deep, as ``apply()`` does) and then mutates that
+        copy across every payload — the per-payload cost of ``replay()`` with
+        the input-purity of ``apply()``. Valid only when the fold replay order
+        is append order, so that a suffix of the receipt stream can be applied
+        to the state folded from its prefix.
+
+        The single deep copy is load-bearing for callers that keep a long-lived
+        checkpoint (``engine.handle``): the input ``state`` is never mutated, so
+        it may stay shared with an already-published snapshot.
+        """
+        fns = self._cached_fold_fns
+        new = copy.deepcopy(state)
+        for payload in payloads:
+            for fn in fns:
+                fn(new, payload)
+        return new
+
 
 # Backward compatibility alias (deprecated)
 Shape = Spec

@@ -194,7 +194,7 @@ class DeclarationUpdatePreview:
     documents: tuple  # proposed projection, Document.as_json dicts
     proposed_fingerprint: str
     old_store_fingerprint: str | None  # store projection at plan; None pre-genesis
-    expected_head: tuple[float, str] | None  # CAS token; None in genesis mode
+    expected_head: tuple[int, str] | None  # CAS token; None in genesis mode
     authority: str  # "file" | "store"
     applicable: bool
     reason: str
@@ -301,7 +301,7 @@ def plan_declaration_update(
         *,
         mode: str,
         changes: tuple = (),
-        expected_head: tuple[float, str] | None = None,
+        expected_head: tuple[int, str] | None = None,
         old_store_fingerprint: str | None = None,
         authority: str,
         applicable: bool,

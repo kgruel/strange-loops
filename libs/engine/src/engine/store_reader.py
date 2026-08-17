@@ -577,13 +577,17 @@ class StoreReader:
         at_rowid: int | None = None,
         until_ts: float | None = None,
     ) -> list[dict]:
-        """All facts for a kind, ordered by insertion (rowid ASC).
+        """All facts for a kind in receipt order (rowid ASC).
 
-        Used for fold replay — facts must be in causal order.
+        This is THE fold replay order: a fact's fold position is the position
+        at which this store received it. The ULID ``id`` is stable identity
+        only, and ``ts`` is event-time metadata — neither orders the fold.
+        ``(ts, id)`` survives only as an explicit read-path lens.
 
         ``at_rowid`` caps to the witness prefix (``rowid <= at_rowid``): the fold
-        reconstructs from the rows the store had received at that position, still
-        replayed in ``(ts, id)`` order (0.8.0 fold-at). ``None`` is a head read.
+        reconstructs from the rows the store had received at that position,
+        replayed in that same receipt order (0.8.0 fold-at). ``None`` is a head
+        read.
 
         ``until_ts`` caps to ``ts <= until_ts`` — the event-time projection
         sibling (0.8.0 fold-state-``as_of``, A8): facts are selected by
@@ -597,7 +601,7 @@ class StoreReader:
         ts_param: tuple = (until_ts,) if until_ts is not None else ()
         rows = self._conn.execute(
             "SELECT id, kind, ts, observer, origin, payload FROM facts "
-            f"WHERE kind = ?{rowid_clause}{ts_clause} ORDER BY ts, id",
+            f"WHERE kind = ?{rowid_clause}{ts_clause} ORDER BY rowid",
             (kind, *rowid_param, *ts_param),
         ).fetchall()
         return [
@@ -619,13 +623,19 @@ class StoreReader:
         (kind + fold key field + fold key value), resolve it to the ULID
         of the most recent fact contributing to that entity's fold state.
 
+        "Most recent" is the FOLD-FINAL fact — the one the fold last
+        applied — so this rides receipt order (``rowid DESC``), the same
+        axis the fold replays on. Ordering by ``ts`` here would hand back a
+        loser: a backdated arrival wins the fold precisely because it was
+        received last, and an event-time query would skip over it.
+
         Returns None if no matching fact exists.
         """
         path = "$." + key
         row = self._conn.execute(
             "SELECT id FROM facts "
             "WHERE kind = ? AND json_extract(payload, ?) = ? "
-            "ORDER BY ts DESC, id DESC LIMIT 1",
+            "ORDER BY rowid DESC LIMIT 1",
             (kind, path, value),
         ).fetchone()
         return row[0] if row else None

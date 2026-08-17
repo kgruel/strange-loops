@@ -153,18 +153,20 @@ class TestBackdatedArrivalDiff:
     def test_witness_positions_differ_via_revision_count(self, diff_vertex):
         """Two witness positions can differ (a receipt happened) even when
         the VISIBLE winning payload is identical — a later-received fact
-        with an EARLIER ts loses (ts, id) replay to the fact already there,
-        so the rendered value never changes, but the receipt count (`_n`)
-        does. This is exactly why the cursor axis is witness order, not a
-        ts-projection: something happened between these two positions that
-        a ts-only view could never distinguish."""
+        that re-asserts the value already there leaves the rendered value
+        alone but bumps the receipt count (`_n`). This is exactly why the
+        cursor axis is witness order, not a ts-projection: something
+        happened between these two positions that a ts-only view could
+        never distinguish."""
         vpath, store = diff_vertex
-        # A: ts=100 (rowid 1) — the eventual (ts,id) winner.
+        # A: ts=100 (rowid 1).
         _append(store, "decision", 100, topic="x", message="alpha")
         rc1, _ = _run(vpath, ["--at", "head"])
         assert rc1 == 0
-        # B: backdated ts=50 (rowid 2) — loses to A under (ts, id) replay.
-        _append(store, "decision", 50, topic="x", message="beta")
+        # B: backdated ts=50 (rowid 2) re-asserting the SAME message. Under
+        # receipt order B wins the upsert, but it wins with A's own value,
+        # so only the receipt count moves.
+        _append(store, "decision", 50, topic="x", message="alpha")
 
         r = BufferReporter()
         rc = read_view.run(
@@ -175,23 +177,24 @@ class TestBackdatedArrivalDiff:
         section = next(s for s in payload["sections"] if s["kind"] == "decision")
         assert [c["key"] for c in section["changed"]] == ["x"]
         changed = section["changed"][0]
-        # The visible winning field never changed — A (ts=100) wins both times.
+        # The visible winning field never changed — B re-asserted A's value.
         assert changed["before"]["message"] == "alpha"
         assert changed["after"]["message"] == "alpha"
         # ...but the receipt count did: seq:2 has RECEIVED both rows.
         assert changed["before"]["_n"] == 1
         assert changed["after"]["_n"] == 2
 
-    def test_head_render_unaffected_by_the_backdated_loser(self, diff_vertex):
-        # Confirms the *rendered* fold state at head also shows A winning —
-        # the diff's "_n only" finding isn't a diff-layer artifact.
+    def test_head_render_shows_the_backdated_arrival_winning(self, diff_vertex):
+        # Confirms the *rendered* fold state at head follows receipt order:
+        # the backdated arrival was received last, so it wins despite its
+        # older ts. Not a diff-layer artifact — the head render agrees.
         vpath, store = diff_vertex
         _append(store, "decision", 100, topic="x", message="alpha")
         _append(store, "decision", 50, topic="x", message="beta")
         rc, r = _run(vpath, ["--at", "head"])
         assert rc == 0
         text = block_to_text(r.blocks[0])
-        assert "alpha" in text and "beta" not in text
+        assert "beta" in text and "alpha" not in text
 
 
 class TestDiffRefusals:

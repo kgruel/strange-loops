@@ -1,6 +1,6 @@
 {
   "name": "witness-backdated-fact-excluded-from-prior-cursor",
-  "description": "Pins append-order witness prefix invariance: a backdated fact appended AFTER cursor P is excluded from fold-at-P even though replay order sorts it earlier than existing rows; the cursor boundary is append-order (rowid), not event-time (ts).",
+  "description": "Pins append-order witness prefix invariance: a backdated fact appended AFTER cursor P is excluded from fold-at-P, and at head it folds LAST \u2014 receipt order, so its older timestamp neither pulls it into the prefix nor demotes it at head.",
   "input": {
     "spec": {
       "name": "state",
@@ -108,23 +108,15 @@
       "summary": {
         "k1": {
           "key": "k1",
-          "val": "v2",
-          "_ts": 200.0,
-          "_observer": "kyle",
-          "_origin": "",
-          "_id": "01FACT00000000000000000002",
-          "_n": 3
-        }
-      },
-      "history": [
-        {
-          "key": "k1",
           "val": "backdated_v0",
           "_ts": 50.0,
           "_observer": "kyle",
           "_origin": "",
-          "_id": "01FACT00000000000000000003"
-        },
+          "_id": "01FACT00000000000000000003",
+          "_n": 3
+        }
+      },
+      "history": [
         {
           "key": "k1",
           "val": "v1",
@@ -140,6 +132,14 @@
           "_observer": "kyle",
           "_origin": "",
           "_id": "01FACT00000000000000000002"
+        },
+        {
+          "key": "k1",
+          "val": "backdated_v0",
+          "_ts": 50.0,
+          "_observer": "kyle",
+          "_origin": "",
+          "_id": "01FACT00000000000000000003"
         }
       ]
     }

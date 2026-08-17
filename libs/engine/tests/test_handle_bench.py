@@ -1,13 +1,14 @@
 """VertexHandle — performance gate on a generated 10k-fact store.
 
-Establishes the honest S0-S3 numbers. Checkpoint rung 4 (previous-head-as-
-checkpoint tail append) is the S5 slice and is NOT implemented here: every
-refresh does a FULL (ts,id) reconstruction via vertex_fold at=. At 10k facts
-that full path already sits well under the 250ms ordinary-refresh gate; rung 4
-is required for the 100k CUTOVER headroom (panel: 100k forced-full 269-510ms),
-not for S0-S3 at realistic sizes.
+`open` cold-reconstructs via `vertex_fold at=`; the first refresh after it seeds
+the checkpoint (`replay_mode="full"`) and every later one folds the newly
+received suffix onto it (`replay_mode="checkpoint-suffix"`) — the refresh gate
+asserts that dispatch as well as the timing, so the numbers below and the path
+that produced them cannot drift apart silently.
 
-Measured on this checkout (reference only, not asserted tightly):
+Measured on this checkout before the checkpoint-suffix path landed, i.e. with
+every refresh on the full path (reference only, not asserted tightly — the
+current warm path is at or under these):
   open (10k cold reconstruct):            ~39 ms
   refresh-after-one-append (full, 10k):   p95 ~24 ms  (real p95 over 30 samples)
   no-change refresh:                      ~0.26 ms  (mean over 50)
@@ -85,11 +86,15 @@ def test_refresh_after_one_append_under_gate_at_10k(tmp_path):
             t0 = time.perf_counter()
             batch = h.refresh()
             times.append((time.perf_counter() - t0) * 1000.0)
-            assert batch is not None and batch.replay_mode == "full"
+            assert batch is not None
+            # S2: the first refresh seeds the checkpoint (a full replay, and
+            # honestly labelled so); every one after it folds the suffix in
+            # place.
+            assert batch.replay_mode == ("full" if i == 0 else "checkpoint-suffix")
         times.sort()
         p95 = times[int(len(times) * 0.95)]  # real p95 over 30 samples
-        # Full-reconstruction path (no checkpoint rung 4) at 10k is ~24ms p95;
-        # a wide margin proves the 250ms ordinary-refresh gate holds here.
+        # Fold-in-place refreshes at 10k are sub-millisecond; the gate is kept
+        # at the pre-S2 value so the margin itself is the evidence.
         assert p95 < 250.0, f"refresh p95={p95:.1f}ms exceeded the 250ms gate"
 
 

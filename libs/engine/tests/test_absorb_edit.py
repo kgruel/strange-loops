@@ -218,6 +218,73 @@ class TestAbsorbEditPrimitive:
         )
         s.close()
 
+    def test_cas_token_rides_the_receipt_axis(self, tmp_path):
+        """The CAS token is (rowid, id), not (ts, id).
+
+        A backdated declaration row — appended LAST but stamped with an
+        OLDER ts than the row before it — is the head under receipt order
+        and is NOT the head under (ts, id). Pinning the two axes apart is
+        the only way to prove the token tracks the axis the resolver
+        actually folds on.
+        """
+        from engine.sqlite_store import StaleDeclarationHead
+
+        db = tmp_path / "x.db"
+        s = _store(db)
+        lineage = _genesis(s, parse_vertex(BASE))
+        s.absorb_edit(
+            [Change(kind=DECL_KIND_DEFINED, subject="a", payload={"order": 0},
+                    annotation="modified")],
+            observer="obs", fact_signer=_signer("k"),
+        )
+        head_before = s.declaration_head()
+        assert head_before is not None
+        s.close()
+
+        # Append a self-lineage decl row with a ts far in the PAST at the
+        # highest rowid. Under (ts, id) it would be invisible as head.
+        conn = sqlite3.connect(str(db))
+        conn.execute(
+            "INSERT INTO facts (id, kind, ts, observer, origin, payload, signature) "
+            "VALUES (?, ?, ?, ?, ?, ?, NULL)",
+            ("01BACKDATED0000000000000A", DECL_KIND_DEFINED, 1.0, "obs", "",
+             json.dumps({"lineage": lineage, "subject": "b", "order": 1})),
+        )
+        conn.commit()
+        max_rowid, max_ts_id = conn.execute(
+            "SELECT (SELECT id FROM facts WHERE kind GLOB '_decl.*' "
+            "        ORDER BY rowid DESC LIMIT 1), "
+            "       (SELECT id FROM facts WHERE kind GLOB '_decl.*' "
+            "        ORDER BY ts DESC, id DESC LIMIT 1)"
+        ).fetchone()
+        conn.close()
+        # The two axes genuinely disagree, so the assertions below discriminate.
+        assert max_rowid == "01BACKDATED0000000000000A"
+        assert max_ts_id != max_rowid
+
+        s = _store(db)
+        head_now = s.declaration_head()
+        assert head_now is not None
+        # rowid axis: an int ordinal, and it names the backdated row.
+        assert isinstance(head_now[0], int)
+        assert head_now[1] == "01BACKDATED0000000000000A"
+        assert head_now[0] > head_before[0]
+
+        # The pre-backdate token is now stale and is refused...
+        with pytest.raises(StaleDeclarationHead):
+            s.absorb_edit(
+                [Change(kind=DECL_KIND_DEFINED, subject="c", payload={"order": 2},
+                        annotation="modified")],
+                observer="obs", fact_signer=_signer("k"), expected_head=head_before,
+            )
+        # ...while the fresh receipt-axis token is accepted.
+        s.absorb_edit(
+            [Change(kind=DECL_KIND_DEFINED, subject="c", payload={"order": 2},
+                    annotation="modified")],
+            observer="obs", fact_signer=_signer("k"), expected_head=head_now,
+        )
+        s.close()
+
     def test_non_vocabulary_kind_refuses(self, tmp_path):
         from engine.sqlite_store import ReservedKindViolation
 

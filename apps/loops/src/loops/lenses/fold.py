@@ -311,10 +311,9 @@ def diff_view(
 ) -> Block:
     """Structural fold diff between two resolved positions (0.8.0, C2/M8).
 
-    Two independent full reconstructions (never incremental — a backdated
-    arrival can reorder ``(ts, id)`` replay, so an interval-application diff
-    would be dishonest); this renders their KEY-LEVEL difference per kind
-    section. Plain and textual — no colors beyond the fold lens's existing
+    Two independent full reconstructions (never incremental — the endpoints may
+    straddle an ontology change, so each resolves its declaration from its own
+    prefix); this renders their KEY-LEVEL difference per kind section. Plain and textual — no colors beyond the fold lens's existing
     dim/bold conventions, on either register.
 
     ``rows`` is ``_compute_diff``'s output: each entry either

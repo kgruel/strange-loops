@@ -1,7 +1,7 @@
 """Generator for replay and witness conformance vectors.
 
 Builds golden vectors pinning:
-- Store replay total order (ts ASC, id ASC tie-breaking, sub-ms timestamp precision)
+- Store replay receipt order (rowid ASC — ts and id never reorder the fold)
 - Witness temporal prefix isolation (SPEC §9.3, genesis sentinel, head fold, append-order invariance against backdated arrivals)
 
 Run once to generate/regenerate frozen vector files:
@@ -125,10 +125,10 @@ class WitnessCase:
 # =============================================================================
 
 REPLAY_CASES: list[ReplayCase] = [
-    # 1. Replay is ts-then-id ordered, not append ordered
+    # 1. Replay is append ordered, not ts-then-id ordered
     ReplayCase(
-        name="replay-ts-order-over-append-order",
-        description="Pins decision:design/replay-total-order: replay order is determined by (ts, id) ascending, not append order; facts appended with out-of-order timestamps are replayed in timestamp sequence.",
+        name="replay-append-order-over-ts-order",
+        description="Pins decision:design/replay-receipt-order: replay order is receipt order (rowid ascending), not (ts, id); facts appended with out-of-order timestamps are replayed in the order the store received them.",
         spec=Spec(
             name="item",
             state_fields=(
@@ -170,91 +170,10 @@ REPLAY_CASES: list[ReplayCase] = [
             ),
         ],
     ),
-    # 2. Timestamp tie -> id ASC tie-breaking
-    ReplayCase(
-        name="replay-timestamp-tie-id-asc",
-        description="Pins decision:design/replay-total-order: when two facts share identical timestamps, replay tie-breaks by fact ID ascending (id ASC), regardless of append order.",
-        spec=Spec(
-            name="record",
-            state_fields=(
-                Field(name="items", kind="dict"),
-                Field(name="history", kind="list"),
-            ),
-            folds=(
-                Collect(target="history"),
-                Upsert(target="items", key="k"),
-            ),
-        ),
-        facts=[
-            (
-                "01TESTULID0000000000000002",
-                Fact(
-                    kind="record",
-                    ts=1000.0,
-                    payload={"k": "same_key", "val": "from_higher_id"},
-                    observer="kyle",
-                ),
-            ),
-            (
-                "01TESTULID0000000000000001",
-                Fact(
-                    kind="record",
-                    ts=1000.0,
-                    payload={"k": "same_key", "val": "from_lower_id"},
-                    observer="kyle",
-                ),
-            ),
-        ],
-    ),
-    # 3. Sub-millisecond ts distinctions survive storage
-    ReplayCase(
-        name="replay-sub-millisecond-timestamp-precision",
-        description="Pins sub-millisecond timestamp precision: timestamps differing by microsecond deltas preserve distinct ordering through store serialization and replay.",
-        spec=Spec(
-            name="sensor_readings",
-            state_fields=(
-                Field(name="events", kind="list"),
-                Field(name="last", kind="dict"),
-            ),
-            folds=(
-                Collect(target="events"),
-                Upsert(target="last", key="sensor"),
-            ),
-        ),
-        facts=[
-            (
-                "01TESTULID0000000000000001",
-                Fact(
-                    kind="sensor_readings",
-                    ts=1736942400.000500,
-                    payload={"sensor": "s1", "reading": "500us"},
-                    observer="sensor",
-                ),
-            ),
-            (
-                "01TESTULID0000000000000002",
-                Fact(
-                    kind="sensor_readings",
-                    ts=1736942400.000001,
-                    payload={"sensor": "s1", "reading": "1us"},
-                    observer="sensor",
-                ),
-            ),
-            (
-                "01TESTULID0000000000000003",
-                Fact(
-                    kind="sensor_readings",
-                    ts=1736942400.000100,
-                    payload={"sensor": "s1", "reading": "100us"},
-                    observer="sensor",
-                ),
-            ),
-        ],
-    ),
-    # 4. Composite replay ordering: multiple ties and interleaved timestamps
+    # 2. Composite replay ordering: multiple ties and interleaved timestamps
     ReplayCase(
         name="replay-multiple-interleaved-timestamp-id-ties",
-        description="Pins composite replay ordering: multi-row sequence combining identical timestamps, reverse-ordered IDs, and out-of-order timestamps.",
+        description="Pins composite replay ordering under receipt order: a multi-row sequence combining identical timestamps, reverse-ordered IDs, and out-of-order timestamps replays strictly in append order — none of those axes perturb it.",
         spec=Spec(
             name="audit",
             state_fields=(
@@ -313,7 +232,7 @@ REPLAY_CASES: list[ReplayCase] = [
 # =============================================================================
 
 WITNESS_CASES: list[WitnessCase] = [
-    # 5. Fold at cursor P vs P-1 differs by exactly the fact at rowid P
+    # 3. Fold at cursor P vs P-1 differs by exactly the fact at rowid P
     WitnessCase(
         name="witness-cursor-step-difference",
         description="Pins witness prefix isolation: fold state at cursor P vs cursor P-1 differs by exactly the contribution of the fact at rowid P.",
@@ -364,7 +283,7 @@ WITNESS_CASES: list[WitnessCase] = [
             "p": "01TESTULID0000000000000003",
         },
     ),
-    # 6. Cursor at genesis sentinel -> initial state exactly
+    # 4. Cursor at genesis sentinel -> initial state exactly
     WitnessCase(
         name="witness-genesis-sentinel-initial-state",
         description="Pins witness genesis boundary: cursor at the genesis sentinel (empty string \"\") selects an empty prefix (rowid <= 0) and returns the spec's exact initial state.",
@@ -407,7 +326,7 @@ WITNESS_CASES: list[WitnessCase] = [
             "genesis": "",
         },
     ),
-    # 7. Cursor at head == unwitnessed full fold
+    # 5. Cursor at head == unwitnessed full fold
     WitnessCase(
         name="witness-cursor-head-matches-full-fold",
         description="Pins witness head cursor equivalence: fold at cursor 'head' evaluates the complete append prefix and matches the full unwitnessed store replay exactly.",
@@ -455,10 +374,10 @@ WITNESS_CASES: list[WitnessCase] = [
             "head": "head",
         },
     ),
-    # 8. Backdated fact appended AFTER cursor P excluded from fold-at-P
+    # 6. Backdated fact appended AFTER cursor P excluded from fold-at-P
     WitnessCase(
         name="witness-backdated-fact-excluded-from-prior-cursor",
-        description="Pins append-order witness prefix invariance: a backdated fact appended AFTER cursor P is excluded from fold-at-P even though replay order sorts it earlier than existing rows; the cursor boundary is append-order (rowid), not event-time (ts).",
+        description="Pins append-order witness prefix invariance: a backdated fact appended AFTER cursor P is excluded from fold-at-P, and at head it folds LAST — receipt order, so its older timestamp neither pulls it into the prefix nor demotes it at head.",
         spec=Spec(
             name="state",
             state_fields=(
@@ -504,10 +423,10 @@ WITNESS_CASES: list[WitnessCase] = [
             "head": "head",
         },
     ),
-    # 9. Backdated upsert reordering at head
+    # 7. Backdated upsert folds at its receipt position, not its timestamp
     WitnessCase(
-        name="witness-backdated-upsert-reorder-at-head",
-        description="Pins backdated upsert replay semantics: a backdated fact with a timestamp between rowid 1 and rowid 2 is excluded at cursor rowid 1, and at head is replayed in (ts, id) order between rowids 1 and 2.",
+        name="witness-backdated-upsert-at-receipt-position",
+        description="Pins backdated upsert replay semantics: a fact whose timestamp falls between rowid 1 and rowid 2 is excluded at cursor rowid 1, and at head folds at its own receipt position (last) rather than being re-sorted between rowids 1 and 2.",
         spec=Spec(
             name="config",
             state_fields=(

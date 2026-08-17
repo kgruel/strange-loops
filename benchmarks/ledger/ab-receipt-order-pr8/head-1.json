@@ -1,0 +1,252 @@
+{
+  "instrument_version": "1",
+  "label": "head-1",
+  "sdk_present": true,
+  "depths": [
+    1000,
+    5000
+  ],
+  "environment": {
+    "timestamp": "2026-08-16T03:36:03.109713+00:00",
+    "machine_fingerprint": "c5bf9b955fce",
+    "platform": "Linux-6.17.0-1022-azure-x86_64-with-glibc2.39",
+    "power_source": "unknown",
+    "python": "3.13.15",
+    "ci": true,
+    "git_commit": "72b318f78449db8e787593c0cd43888d3861ac0e",
+    "git_describe": "v0.11.0-238-g72b318f7",
+    "git_branch": "HEAD"
+  },
+  "samples": [
+    {
+      "probe": "cli_cold_version",
+      "layer": "cli",
+      "depth": 0,
+      "unit": "ms",
+      "n": 3,
+      "median": 126.0832,
+      "minimum": 123.738,
+      "p95": 222.9199
+    },
+    {
+      "probe": "store_scan_all",
+      "layer": "store",
+      "depth": 1000,
+      "unit": "ms",
+      "n": 25,
+      "median": 3.2358,
+      "minimum": 3.2061,
+      "p95": 4.0994
+    },
+    {
+      "probe": "store_append",
+      "layer": "store",
+      "depth": 1000,
+      "unit": "ms",
+      "n": 25,
+      "median": 0.0468,
+      "minimum": 0.0453,
+      "p95": 0.0967
+    },
+    {
+      "probe": "engine_summary",
+      "layer": "engine",
+      "depth": 1000,
+      "unit": "ms",
+      "n": 25,
+      "median": 0.3062,
+      "minimum": 0.3026,
+      "p95": 0.3372
+    },
+    {
+      "probe": "engine_replay_fold",
+      "layer": "engine",
+      "depth": 1000,
+      "unit": "ms",
+      "n": 25,
+      "median": 4.7542,
+      "minimum": 4.6728,
+      "p95": 5.1354
+    },
+    {
+      "probe": "engine_open_vertex_cold",
+      "layer": "engine",
+      "depth": 1000,
+      "unit": "ms",
+      "n": 25,
+      "median": 7.6878,
+      "minimum": 7.5968,
+      "p95": 7.8561
+    },
+    {
+      "probe": "engine_reindex_fts",
+      "layer": "engine",
+      "depth": 1000,
+      "unit": "ms",
+      "n": 25,
+      "median": 10.9494,
+      "minimum": 9.9909,
+      "p95": 11.5453
+    },
+    {
+      "probe": "sdk_read_summary",
+      "layer": "sdk",
+      "depth": 1000,
+      "unit": "ms",
+      "n": 25,
+      "median": 1.6925,
+      "minimum": 1.6622,
+      "p95": 1.7763
+    },
+    {
+      "probe": "sdk_read_page_100",
+      "layer": "sdk",
+      "depth": 1000,
+      "unit": "ms",
+      "n": 25,
+      "median": 1.9131,
+      "minimum": 1.8798,
+      "p95": 2.0143
+    },
+    {
+      "probe": "sdk_search",
+      "layer": "sdk",
+      "depth": 1000,
+      "unit": "ms",
+      "n": 25,
+      "median": 2.8866,
+      "minimum": 2.8617,
+      "p95": 2.9338
+    },
+    {
+      "probe": "engine_receive_held",
+      "layer": "engine",
+      "depth": 1000,
+      "unit": "ms",
+      "n": 25,
+      "median": 2.3761,
+      "minimum": 2.3499,
+      "p95": 2.466
+    },
+    {
+      "probe": "sdk_emit_fact",
+      "layer": "sdk",
+      "depth": 1000,
+      "unit": "ms",
+      "n": 25,
+      "median": 21.9133,
+      "minimum": 21.5174,
+      "p95": 23.6244
+    },
+    {
+      "probe": "store_scan_all",
+      "layer": "store",
+      "depth": 5000,
+      "unit": "ms",
+      "n": 25,
+      "median": 17.6125,
+      "minimum": 16.5703,
+      "p95": 19.4092
+    },
+    {
+      "probe": "store_append",
+      "layer": "store",
+      "depth": 5000,
+      "unit": "ms",
+      "n": 25,
+      "median": 0.0561,
+      "minimum": 0.0477,
+      "p95": 0.2345
+    },
+    {
+      "probe": "engine_summary",
+      "layer": "engine",
+      "depth": 5000,
+      "unit": "ms",
+      "n": 25,
+      "median": 1.4326,
+      "minimum": 1.4165,
+      "p95": 1.461
+    },
+    {
+      "probe": "engine_replay_fold",
+      "layer": "engine",
+      "depth": 5000,
+      "unit": "ms",
+      "n": 25,
+      "median": 22.3476,
+      "minimum": 21.9162,
+      "p95": 28.3191
+    },
+    {
+      "probe": "engine_open_vertex_cold",
+      "layer": "engine",
+      "depth": 5000,
+      "unit": "ms",
+      "n": 25,
+      "median": 26.951,
+      "minimum": 26.2864,
+      "p95": 27.6356
+    },
+    {
+      "probe": "engine_reindex_fts",
+      "layer": "engine",
+      "depth": 5000,
+      "unit": "ms",
+      "n": 25,
+      "median": 40.7166,
+      "minimum": 39.8854,
+      "p95": 42.0509
+    },
+    {
+      "probe": "sdk_read_summary",
+      "layer": "sdk",
+      "depth": 5000,
+      "unit": "ms",
+      "n": 25,
+      "median": 3.4494,
+      "minimum": 3.41,
+      "p95": 3.5104
+    },
+    {
+      "probe": "sdk_read_page_100",
+      "layer": "sdk",
+      "depth": 5000,
+      "unit": "ms",
+      "n": 25,
+      "median": 2.4003,
+      "minimum": 2.3743,
+      "p95": 2.4219
+    },
+    {
+      "probe": "sdk_search",
+      "layer": "sdk",
+      "depth": 5000,
+      "unit": "ms",
+      "n": 25,
+      "median": 8.5818,
+      "minimum": 8.5511,
+      "p95": 8.6698
+    },
+    {
+      "probe": "engine_receive_held",
+      "layer": "engine",
+      "depth": 5000,
+      "unit": "ms",
+      "n": 3,
+      "median": 3.9292,
+      "minimum": 3.9278,
+      "p95": 51.5146
+    },
+    {
+      "probe": "sdk_emit_fact",
+      "layer": "sdk",
+      "depth": 5000,
+      "unit": "ms",
+      "n": 3,
+      "median": 79.4402,
+      "minimum": 79.197,
+      "p95": 80.097
+    }
+  ]
+}

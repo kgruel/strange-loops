@@ -17,6 +17,7 @@ from engine.declaration import load_declaration_status
 from engine.preflight import PreflightMode, read_preflight
 from engine.store_reader import StoreReader
 from engine.vertex_reader import (
+    _resolve_stores,
     vertex_fact_by_id,
     vertex_facts,
     vertex_query_facts,
@@ -258,7 +259,11 @@ def read_facts(
         limit: Maximum number of facts to return.
         kind: Optional kind filter.
         observer: Optional observer identity filter.
-        order: Sort order ('newest' for descending rowid, 'oldest' for ascending rowid).
+        order: Sort order. For a single-store vertex this is receipt order —
+            'oldest' is ascending rowid (the fold axis), 'newest' descending.
+            An aggregate vertex has no shared receipt axis across members, so
+            its pages come back on the ``(ts, id)`` read lens instead, reversed
+            for 'newest'.
         before: Cursor token to fetch rows before (older than) the cursor in newest order.
         after: Cursor token to fetch rows after (newer than) the cursor in oldest order.
         include_internal: Whether to include internal `_decl.*` facts.
@@ -682,7 +687,26 @@ def resolve_entity(
             decl_ast.combine is not None or decl_ast.discover is not None
         )
         if is_aggregate:
-            # Aggregate entity resolution over all combined member stores
+            # Entity resolution must agree with the fold, so it mirrors
+            # _combined_read's member-count branch via the same helper.
+            #
+            # ONE member: that member's rowid IS the aggregate's receipt
+            # axis, so the fold replays in receipt order and resolution
+            # must too — a backdated re-assertion wins the fold, and the
+            # lens walk below would hand back the row it superseded.
+            #
+            # TWO OR MORE: rowid is per-store, so no shared receipt axis
+            # exists. The combined read falls back to the event-time lens
+            # and every other combined surface reads through that same
+            # lens, so the lens walk below is the coherent answer.
+            store_paths = _resolve_stores(decl_ast, target_path)
+            if len(store_paths) == 1 and store_paths[0].exists():
+                member_reader = StoreReader(store_paths[0])
+                try:
+                    return member_reader.resolve_entity_id(kind, key, value)
+                finally:
+                    member_reader.close()
+
             all_facts = vertex_facts(target_path, since_ts=0.0, until_ts=float("inf"), kind=kind)
             for f in reversed(all_facts):
                 p = f.get("payload", {})
@@ -718,6 +742,11 @@ def read_timeline(
         end_ts: Optional upper timestamp bound (inclusive).
         limit: Maximum number of events to return.
         order: Sort order ('oldest' for chronological, 'newest' for reverse chronological).
+
+    Ordering is by event time (``ts``) — facts and ticks are interleaved on the
+    only axis they share, so the timeline is an event-time read lens, not the
+    store's fold order. A backdated fact appears where its ``ts`` puts it here
+    and folds last; ``read_facts`` is the receipt-ordered view.
 
     Returns:
         TimelineResult containing merged events with honest total counts and truncation markers.
@@ -781,6 +810,7 @@ def read_timeline(
                     )
                 )
 
+            # Event-time lens: ts is the only axis facts and ticks share.
             events.sort(key=lambda e: e.ts, reverse=(order == "newest"))
             total_events = len(events)
             capped = events[:limit]
@@ -851,6 +881,7 @@ def read_timeline(
                 )
             )
 
+        # Event-time lens: ts is the only axis facts and ticks share.
         events.sort(key=lambda e: e.ts, reverse=(order == "newest"))
         total_events = len(events)
         capped = events[:limit]

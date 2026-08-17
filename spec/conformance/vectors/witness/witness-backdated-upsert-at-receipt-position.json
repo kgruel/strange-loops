@@ -1,6 +1,6 @@
 {
-  "name": "witness-backdated-upsert-reorder-at-head",
-  "description": "Pins backdated upsert replay semantics: a backdated fact with a timestamp between rowid 1 and rowid 2 is excluded at cursor rowid 1, and at head is replayed in (ts, id) order between rowids 1 and 2.",
+  "name": "witness-backdated-upsert-at-receipt-position",
+  "description": "Pins backdated upsert replay semantics: a fact whose timestamp falls between rowid 1 and rowid 2 is excluded at cursor rowid 1, and at head folds at its own receipt position (last) rather than being re-sorted between rowids 1 and 2.",
   "input": {
     "spec": {
       "name": "config",
@@ -132,11 +132,11 @@
       "values": {
         "theme": {
           "setting": "theme",
-          "color": "dark",
-          "_ts": 30.0,
+          "color": "green",
+          "_ts": 20.0,
           "_observer": "kyle",
           "_origin": "",
-          "_id": "01FACT00000000000000000002",
+          "_id": "01FACT00000000000000000003",
           "_n": 3
         }
       },
@@ -151,19 +151,19 @@
         },
         {
           "setting": "theme",
-          "color": "green",
-          "_ts": 20.0,
-          "_observer": "kyle",
-          "_origin": "",
-          "_id": "01FACT00000000000000000003"
-        },
-        {
-          "setting": "theme",
           "color": "dark",
           "_ts": 30.0,
           "_observer": "kyle",
           "_origin": "",
           "_id": "01FACT00000000000000000002"
+        },
+        {
+          "setting": "theme",
+          "color": "green",
+          "_ts": 20.0,
+          "_observer": "kyle",
+          "_origin": "",
+          "_id": "01FACT00000000000000000003"
         }
       ]
     }

@@ -722,21 +722,9 @@ class ArrivalLog:
         """
         try:
             with self.path.open("rb") as fh:
-                return self._genesis_from(fh)
+                return self._validated_genesis(fh.readline())
         except FileNotFoundError as exc:
             raise GenesisRefused(f"{self.path} does not exist") from exc
-
-    def _genesis_from(self, fh) -> dict:
-        """Read and validate ordinal 0 from an ALREADY-OPEN handle.
-
-        Split out so :meth:`_tail_record` can reach the genesis through the
-        handle already open for the tail, rather than opening the same file
-        twice on every append. Seeks to 0 first: the caller may have the
-        handle positioned anywhere, and a genesis read that depended on
-        where someone else left the cursor would be a trap.
-        """
-        fh.seek(0)
-        return self._validated_genesis(fh.readline())
 
     def _lineage_from(self, fh) -> str:
         """The validated lineage, memoized on the genesis LINE BYTES.
@@ -828,43 +816,59 @@ class ArrivalLog:
         """
         if not self.path.exists():
             return
-        lineage: str | None = None
-        expected = 0
-        prev: str | None = None
         with self.path.open("rb") as fh:
-            for raw in fh:
-                if not raw.endswith(b"\n"):
-                    return  # in flight, or torn — either way not the reader's to judge
-                try:
-                    record = decode_record(raw[:-1])
-                except ArrivalGrammarError as exc:
-                    raise ArrivalCorrupt(str(exc), expected) from exc
-                fault = _placement_fault(record, expected)
-                if fault is not None:
-                    raise ArrivalCorrupt(fault, expected)
-                if expected == 0:
-                    lineage = record["lin"]
-                elif record["lin"] != lineage:
-                    raise ArrivalCorrupt(
-                        f"record claims lineage {record['lin']!r}, "
-                        f"but this log's lineage is {lineage!r}",
-                        expected,
-                    )
-                if record["ord"] != expected:
-                    raise ArrivalCorrupt(
-                        f"ordinal succession broken: found ord {record['ord']!r} "
-                        f"where {expected} was due",
-                        expected,
-                    )
-                if record["prev"] != prev:
-                    raise ArrivalCorrupt(
-                        f"prev names {record['prev']!r}, "
-                        f"but the preceding record's rh is {prev!r}",
-                        expected,
-                    )
-                yield record
-                expected += 1
-                prev = record[_RH]
+            # lineage=None means "not established yet" — the record at
+            # ordinal 0 names it, and every record after is held to it.
+            yield from self._verify_from(fh, expected=0, prev=None, lineage=None)
+
+    def _verify_from(
+        self, fh, *, expected: int, prev: str | None, lineage: str | None
+    ) -> Iterator[dict]:
+        """The per-record verification loop — the one home for it.
+
+        :meth:`walk` and :meth:`_walk_tail` differ only in where they start
+        and how the lineage is established; every rule applied to a record
+        is the same, and it lives here so it cannot be added to one path and
+        forgotten on the other. It was duplicated for two review rounds, and
+        both rounds had to patch the same check twice.
+
+        ``lineage`` is None only for a walk from ordinal 0, where the
+        genesis names it. A resume passes the genesis's lineage in, so the
+        anchor cannot decide what the rest of the file is checked against.
+        """
+        for raw in fh:
+            if not raw.endswith(b"\n"):
+                return  # in flight, or torn — either way not the reader's to judge
+            try:
+                record = decode_record(raw[:-1])
+            except ArrivalGrammarError as exc:
+                raise ArrivalCorrupt(str(exc), expected) from exc
+            fault = _placement_fault(record, expected)
+            if fault is not None:
+                raise ArrivalCorrupt(fault, expected)
+            if lineage is None:
+                lineage = record["lin"]
+            elif record["lin"] != lineage:
+                raise ArrivalCorrupt(
+                    f"record claims lineage {record['lin']!r}, "
+                    f"but this log's lineage is {lineage!r}",
+                    expected,
+                )
+            if record["ord"] != expected:
+                raise ArrivalCorrupt(
+                    f"ordinal succession broken: found ord {record['ord']!r} "
+                    f"where {expected} was due",
+                    expected,
+                )
+            if record["prev"] != prev:
+                raise ArrivalCorrupt(
+                    f"prev names {record['prev']!r}, "
+                    f"but the preceding record's rh is {prev!r}",
+                    expected,
+                )
+            yield record
+            expected += 1
+            prev = record[_RH]
 
     def read(self, ordinal: int) -> dict:
         """The record at ``ordinal``, reached by a verified walk.
@@ -1041,45 +1045,17 @@ class ArrivalLog:
     def _walk_tail(self, offset: int, anchor: dict, lineage: str) -> Iterator[dict]:
         """:meth:`walk`'s verification, started from a validated anchor.
 
-        ``lineage`` is the log's, established from its genesis by the caller.
-        The same per-record rules as :meth:`walk` — placement, lineage,
-        density, chain — with only the starting point moved.
+        Literally the same rules, not merely the same list of them: both
+        paths run :meth:`_verify_from`, and only the starting point differs.
+        ``lineage`` is the log's, established from its genesis by the
+        caller, so the anchor never decides what the rest is checked
+        against.
         """
-        expected = anchor["ord"] + 1
-        prev = anchor[_RH]
         with self.path.open("rb") as fh:
             fh.seek(offset)
-            for raw in fh:
-                if not raw.endswith(b"\n"):
-                    return
-                try:
-                    record = decode_record(raw[:-1])
-                except ArrivalGrammarError as exc:
-                    raise ArrivalCorrupt(str(exc), expected) from exc
-                fault = _placement_fault(record, expected)
-                if fault is not None:
-                    raise ArrivalCorrupt(fault, expected)
-                if record["lin"] != lineage:
-                    raise ArrivalCorrupt(
-                        f"record claims lineage {record['lin']!r}, "
-                        f"but this log's lineage is {lineage!r}",
-                        expected,
-                    )
-                if record["ord"] != expected:
-                    raise ArrivalCorrupt(
-                        f"ordinal succession broken: found ord {record['ord']!r} "
-                        f"where {expected} was due",
-                        expected,
-                    )
-                if record["prev"] != prev:
-                    raise ArrivalCorrupt(
-                        f"prev names {record['prev']!r}, "
-                        f"but the preceding record's rh is {prev!r}",
-                        expected,
-                    )
-                yield record
-                expected += 1
-                prev = record[_RH]
+            yield from self._verify_from(
+                fh, expected=anchor["ord"] + 1, prev=anchor[_RH], lineage=lineage
+            )
 
     # -- appending -----------------------------------------------------
 

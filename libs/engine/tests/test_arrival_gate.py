@@ -24,10 +24,12 @@ import time
 import pytest
 
 from engine.arrival import (
+    AppendRejected,
     ArrivalCorrupt,
     ArrivalLog,
     GenesisRefused,
     ResumeMark,
+    build_record,
     encode_record,
     record_hash,
 )
@@ -339,6 +341,158 @@ def test_gate_a_foreign_lineage_in_the_interior_refuses(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# 3b. Placement — the genesis kind belongs at ordinal 0 and nowhere else
+#
+# Review round 1, findings F1 and F2. Both were asymmetries rather than
+# missing ideas: the genesis rules existed but only on the `genesis()` path,
+# and the "a lineage is opened once" rule existed only in `mint`'s O_EXCL. A
+# forged file walked clean, and a second genesis could be appended into the
+# interior of a real one. The rule now lives in one validator that every
+# path calls.
+# ---------------------------------------------------------------------------
+
+
+def _forge(path, records: list[dict]) -> ArrivalLog:
+    """Write a log byte by byte, bypassing every append-side check.
+
+    Forging is the point: these tests are about what a reader does with a
+    file the writer never produced.
+    """
+    path.write_bytes(b"".join(encode_record(r).encode() + b"\n" for r in records))
+    return ArrivalLog(path)
+
+
+def _genesis_record(lin: str = "FORGED-LINEAGE", *, sig: str | None = "sig:x", **over) -> dict:
+    fields = {
+        "lin": lin, "ordinal": 0, "prev": None, "k": "genesis",
+        "body": {"protocol": 1, "lineage": lin}, "observer": "kyle",
+        "origin": "", "at": 1.0, "sig": sig,
+    }
+    fields.update(over)
+    return build_record(**fields)
+
+
+def test_walk_refuses_an_unsigned_genesis(tmp_path):
+    """F1. A signature is what makes genesis the lineage's attestation root;
+    a walk that trusted position 0 without judging it read a forged one
+    clean."""
+    log = _forge(tmp_path / "forged.arrival", [_genesis_record(sig=None)])
+    with pytest.raises(ArrivalCorrupt) as caught:
+        list(log.walk())
+    assert caught.value.ordinal == 0
+    assert "no signature" in str(caught.value)
+
+
+def test_walk_refuses_a_genesis_that_is_not_self_naming(tmp_path):
+    """F1. The lineage a genesis opens is the one its own coordinate carries;
+    a body claiming a different one is a hijack attempt, not a typo."""
+    log = _forge(
+        tmp_path / "forged.arrival",
+        [_genesis_record("MINE", body={"protocol": 1, "lineage": "THEIRS"})],
+    )
+    with pytest.raises(ArrivalCorrupt) as caught:
+        list(log.walk())
+    assert caught.value.ordinal == 0
+    assert "not self-naming" in str(caught.value)
+
+
+def test_read_and_head_inherit_the_genesis_rules(tmp_path):
+    """Both reach their answer through the walk, so neither needs its own
+    copy of the rule — but both must actually refuse."""
+    log = _forge(tmp_path / "forged.arrival", [_genesis_record(sig=None)])
+    with pytest.raises(ArrivalCorrupt, match="no signature"):
+        log.read(0)
+    with pytest.raises(ArrivalCorrupt, match="no signature"):
+        log.head()
+
+
+def test_append_refuses_the_genesis_kind_at_an_interior_ordinal(tmp_path):
+    """F2. A lineage is opened once. `mint`'s O_EXCL says so for the file;
+    this says so for the records inside it."""
+    log = _mint(tmp_path)
+    before = log.path.read_bytes()
+    with pytest.raises(AppendRejected, match="belongs at ordinal 0"):
+        log.append("genesis", {"protocol": 1, "lineage": log.lineage()},
+                   observer="kyle", signer=_sign)
+    assert log.path.read_bytes() == before, "a rejected append must write nothing"
+
+
+def test_append_record_refuses_the_genesis_kind_at_an_interior_ordinal(tmp_path):
+    """F2. Both append paths funnel through one check, so neither is a way
+    around the other."""
+    log = _mint(tmp_path)
+    head = log.head()
+    candidate = build_record(
+        lin=head["lin"], ordinal=1, prev=head["rh"], k="genesis",
+        body={"protocol": 1, "lineage": head["lin"]}, observer="kyle", sig="sig:x",
+    )
+    with pytest.raises(AppendRejected, match="belongs at ordinal 0"):
+        log.append_record(candidate)
+
+
+def test_walk_refuses_a_hand_written_interior_genesis(tmp_path):
+    """F2, the other direction: the append check catches a caller, this
+    catches a file someone wrote around the append path entirely."""
+    log = _seeded(tmp_path)
+
+    def to_genesis(line: bytes) -> bytes:
+        record = json.loads(line)
+        record["k"] = "genesis"
+        record["rh"] = record_hash(record)
+        return encode_record(record).encode()
+
+    _rewrite(log, 2, to_genesis)
+    with pytest.raises(ArrivalCorrupt) as caught:
+        list(log.walk())
+    assert caught.value.ordinal == 2
+    assert "belongs at ordinal 0" in str(caught.value)
+
+
+def test_the_resume_path_also_refuses_an_interior_genesis(tmp_path):
+    """F2. The tail walk enforces the same placement rule as the full walk —
+    otherwise resuming past the forgery is a way around it."""
+    log = _seeded(tmp_path)
+
+    def to_genesis(line: bytes) -> bytes:
+        record = json.loads(line)
+        record["k"] = "genesis"
+        record["rh"] = record_hash(record)
+        return encode_record(record).encode()
+
+    # Re-chain ordinals 2..4 so ONLY the kind is wrong — the forgery must not
+    # be caught by the prev check standing in for the placement check.
+    _rechain_from(log, 2, {2: to_genesis})
+    mark = _mark_after(log, 1)
+    _ordinal, records = log.walk_from(mark)
+    with pytest.raises(ArrivalCorrupt) as caught:
+        list(records)
+    assert caught.value.ordinal == 2
+    assert "belongs at ordinal 0" in str(caught.value)
+
+
+def _rechain_from(log: ArrivalLog, start: int, mutations: dict) -> None:
+    """Rewrite ordinals ``start``.. with ``mutations`` applied, re-linking
+    ``prev`` and ``rh`` so the chain stays internally consistent.
+
+    Without this a forged record is caught by the broken ``prev`` it leaves
+    behind, and the test would pass whether or not the check it names
+    exists.
+    """
+    lines = log.path.read_bytes()[:-1].split(b"\n")
+    prev = json.loads(lines[start - 1])["rh"]
+    for ordinal in range(start, len(lines)):
+        raw = lines[ordinal]
+        if ordinal in mutations:
+            raw = mutations[ordinal](raw)
+        record = json.loads(raw)
+        record["prev"] = prev
+        record["rh"] = record_hash(record)
+        lines[ordinal] = encode_record(record).encode()
+        prev = record["rh"]
+    log.path.write_bytes(b"\n".join(lines) + b"\n")
+
+
+# ---------------------------------------------------------------------------
 # 4. Genesis race
 # ---------------------------------------------------------------------------
 
@@ -437,6 +591,45 @@ def test_gate_an_invalid_resume_mark_is_rejected_and_the_reader_restarts(
     ordinal, records = log.walk_from(bad)
     assert ordinal == 0
     assert [r["ord"] for r in records] == [0, 1, 2, 3, 4]
+
+
+def test_gate_an_anchor_carrying_a_foreign_lineage_is_rejected(tmp_path):
+    """F4, the sharpest of round 1.
+
+    The mark's own lineage was checked against the genesis, but the RECORD
+    the mark points at was not — and the tail walk then took its lineage
+    expectation from that record. So a crafted interior record carrying a
+    foreign lineage, with a recomputing ``rh`` so it decodes clean, became
+    the authority for verifying everything after it: the attacker's lineage
+    substituted for the log's, silently, on the resume path only.
+
+    Here ordinals 2..4 are re-chained onto a foreign lineage, which is what
+    a spliced tail actually looks like. The mark is honest about the log's
+    lineage and honest about the ordinal — only the anchor is foreign.
+    """
+    log = _seeded(tmp_path)
+    real = log.lineage()
+    foreign = "SOMEONE-ELSES-LINEAGE"
+
+    def relineage(line: bytes) -> bytes:
+        record = json.loads(line)
+        record["lin"] = foreign
+        return encode_record(dict(record, rh=record_hash(record))).encode()
+
+    _rechain_from(log, 2, dict.fromkeys((2, 3, 4), relineage))
+    mark = _mark_after(log, 2)
+    assert mark.arrival_lineage == real  # the mark itself is not the forgery
+    assert json.loads(log.path.read_bytes().split(b"\n")[2])["lin"] == foreign
+
+    # The mark is discarded and the reader restarts from 0 ...
+    assert log.resume_offset(mark) == 0
+    ordinal, records = log.walk_from(mark)
+    assert ordinal == 0
+    # ... where the honest walk surfaces the splice instead of resuming past it.
+    with pytest.raises(ArrivalCorrupt) as caught:
+        list(records)
+    assert caught.value.ordinal == 2
+    assert foreign in str(caught.value)
 
 
 def test_no_mark_at_all_starts_from_ordinal_zero(tmp_path):

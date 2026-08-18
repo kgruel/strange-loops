@@ -205,6 +205,13 @@ class ArrivalStore(SqliteStore[T], Generic[T]):
         ``"empty"``. Refuses (:class:`ArrivalCanonicalUnsupported`) whenever
         honesty would require discarding index rows — that is projection
         re-derivation, the next cut's verb.
+
+        Runs on every open, so "there is nothing to do" is the case that has
+        to be cheap: it answers from ``store_meta`` reads and one stat,
+        taking no lock at all. Everything past that fast path takes the
+        sqlite write lock —
+        see the comment at the escalation for why the mark is re-read inside
+        it, and why the fast path cannot weaken that.
         """
         mark = self._read_mark()
         if self._log.size() == 0:
@@ -229,6 +236,30 @@ class ArrivalStore(SqliteStore[T], Generic[T]):
                 "store"
             )
 
+        # NOTHING TO DO — the lock-free common case. Catch-up runs on every
+        # open, so an index that is already current must not take the write
+        # lock: doing so would serialize every opener behind every other.
+        # Both halves of the conjunct are load-bearing, because both are
+        # things this method does: nothing to CONSUME (the mark names the
+        # log's exact end, the same predicate :meth:`_reconcile` already
+        # short-circuits on) and nothing to RESTORE (a present ``own_lineage``
+        # is exactly the condition under which :meth:`_restore_own_lineage`
+        # returns without staging). Drop the marker half and the ceremony
+        # crash window stops recovering at the next open.
+        #
+        # A writer landing a record between the size() read and the return
+        # makes this "synced" momentarily stale. That is the SAME staleness
+        # _reconcile has always accepted on the same predicate, and it is
+        # benign for the same reason: the position is re-read on every
+        # append, and an append whose own coordinate does not follow the
+        # reconciled one rolls back and consumes everything forward.
+        if (
+            mark is not None
+            and mark.arrival_offset == self._log.size()
+            and self._meta_get("own_lineage") is not None
+        ):
+            return "synced"
+
         # Everything above is a read. Consuming is a WRITE, and the mark it
         # decides from must be read under the same lock that the INSERTs
         # take — otherwise two processes catching the same index up both
@@ -240,12 +271,11 @@ class ArrivalStore(SqliteStore[T], Generic[T]):
         # mark re-read inside it. The loser then blocks, sees the winner's
         # stamp, and consumes nothing.
         #
-        # Escalated HERE and not at the top so the common case — an index
-        # already current — stays a lock-free read; catch-up runs on every
-        # open, and taking the write lock there would serialize every
-        # opener behind every other. The arrival APPEND lock is never taken:
-        # blocking every writer in the system to build a projection is what
-        # this design refuses.
+        # The escalation costs nothing in the common case because the fast
+        # path above already returned; every opener that reaches here has
+        # real work. The arrival APPEND lock is never taken: blocking every
+        # writer in the system to build a projection is what this design
+        # refuses.
         self._db.execute("BEGIN IMMEDIATE")
         try:
             mark = self._read_mark()

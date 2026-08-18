@@ -51,14 +51,17 @@ a property the mark already provides.
 
 from __future__ import annotations
 
+import hashlib
+import json
+import os
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 from typing import NoReturn
 
 from .arrival import GENESIS_KIND, KEY_INTRODUCTION_KIND, ArrivalLog, ResumeMark
-from .jsonl_codec import records_from_object
-from .residence import index_path_for
+from .jsonl_codec import records_from_object, serialize_object
+from .residence import canonical_for, index_path_for
 from .sqlite_store import (
     _SCHEMA_STMTS,
     FACT_INSERT_SQL,
@@ -66,10 +69,18 @@ from .sqlite_store import (
 )
 
 __all__ = [
+    "DerivedLogAgreement",
+    "sort_key",
     "Rederivation",
+    "audit_derived_log",
+    "canonical_line",
+    "derived_log_path_for",
+    "derived_lines",
     "has_rows",
+    "line_of_record",
     "rederive_projections",
     "rows_of_record",
+    "write_derived_log",
 ]
 
 # Record classes that expand to index rows, and the structural kinds that
@@ -136,6 +147,214 @@ def rows_of_record(record: dict) -> list[tuple[str, tuple]]:
             "silently dropping it"
         )
     return records_from_object(record["body"])
+
+
+# --- the derived .jsonl log --------------------------------------------------
+
+
+def derived_log_path_for(canonical: Path) -> Path:
+    """Where an arrival log's derived ``.jsonl`` projection lives.
+
+    ``<name>.jsonl`` beside the ``<name>.arrival`` — NO new suffix. This is
+    the shape :func:`engine.probe.probe_target` already classifies as
+    ``derived_log`` ("custody is the arrival log's, so this file is a
+    projection, not a store"). Cut A named the half-migrated shape; cut B is
+    what makes it deliberate rather than transitional, and a
+    ``.derived.jsonl`` spelling would strand the classification and break
+    every last-0.x reader the projection exists for.
+    """
+    return canonical_for(index_path_for(canonical), "jsonl")
+
+
+def line_of_record(record: dict) -> str | None:
+    """The derived log's line for one arrival record, or None for no line.
+
+    Row-class records (fact/tick/batch) each emit ONE line — the codec
+    encoding of that record's ``body`` and of nothing else. Because the body
+    IS the codec's object for the committed row, re-encoding it is an
+    identity round trip and the payload keeps riding as verbatim stored
+    TEXT. A batch record's body emits as one ``batch`` line, unchanged.
+
+    **NON-NEGOTIABLE: structural records (genesis, key introduction) have no
+    derived-log line**, exactly as the index skips them — their bodies are
+    not codec objects at all. Their content is not lost: it lives in the
+    arrival log, which is the store.
+
+    Same arms and the same refusal as :func:`rows_of_record`, from the same
+    two constants, so the index and the derived log can never disagree about
+    which records project.
+    """
+    kind = record["k"]
+    if kind in _STRUCTURAL_KINDS:
+        return None
+    if kind not in _ROW_KINDS:
+        _unsupported(
+            f"record kind {kind!r} at ordinal {record['ord']} is not one "
+            "this projection knows how to derive — refusing rather than "
+            "silently dropping it"
+        )
+    return serialize_object(record["body"])
+
+
+def canonical_line(line: str) -> str:
+    """One derived-log line in its canonical form, validated.
+
+    The grammar and the sort key have ONE home. A consumer that rewrites a
+    derived log — the git merge driver is the only one — imports this rather
+    than re-spelling "decode, validate, re-encode in field order", so driver
+    output and a fresh derivation cannot drift.
+    """
+    return serialize_object(json.loads(line))
+
+
+def sort_key(line: str) -> bytes:
+    """The derived log's ordering: byte-lexicographic over the encoded line.
+
+    Spelled as a function because the ORDER IS A RULE, not an incidental
+    ``sorted()`` call — the merge driver must sort by exactly what a fresh
+    derivation sorts by.
+    """
+    return line.encode("utf-8")
+
+
+def derived_lines(log: ArrivalLog) -> list[str]:
+    """Every derived-log line for an arrival log, byte-lexicographically sorted.
+
+    **NON-NEGOTIABLE: line order carries no meaning, and no reader may
+    attribute one to it.** Byte sort is the only order that is a pure
+    function of the SET: it needs no field semantics, is reproducible by
+    ``sort(1)`` in any language, and is what lets the git merge driver
+    produce the same bytes a fresh derivation produces without knowing any
+    ordinal.
+
+    Two consequences, stated here rather than left to be found:
+
+    1. **The derived log is not a chain-verification surface.** Tick chain
+       order is not file order — a chain walk over a byte-sorted projection
+       would report breaks on a healthy store. Chain verification reads the
+       arrival log.
+    2. **A last-0.x reader rebuilding from this file folds in byte order.**
+       That is a real interim hazard for the migration sidecar, and it is
+       named here for that design; the sidecar's own answer is to consume
+       the ``.arrival``, which carries the ordinal.
+
+    **NON-NEGOTIABLE: derived from the arrival log alone, never from the
+    index.** Deriving it from sqlite would make it a projection of a
+    projection, and a poisoned index would launder itself into a second
+    artifact.
+    """
+    lines = set()
+    for record in log.walk():
+        line = line_of_record(record)
+        if line is not None:
+            lines.add(line)
+    return sorted(lines, key=sort_key)
+
+
+def write_derived_log(canonical: Path) -> int:
+    """Materialize the derived ``.jsonl`` projection. Returns the line count.
+
+    **NON-NEGOTIABLE: on demand only, never on the append path.** Appending
+    to a byte-sorted file is not an append, and regenerating it per emit is
+    O(n) per write — the O(n^2) ingest shape this arc already paid for once.
+    A lagging derived log is NOT an error: nothing in ``libs/`` reads it,
+    because reads execute through the index in every mode (arrival law 1).
+
+    Written through a temp file and renamed, so a crash mid-derivation
+    leaves the previous projection rather than a truncated one.
+    """
+    canonical = Path(canonical)
+    target = derived_log_path_for(canonical)
+    lines = derived_lines(ArrivalLog(canonical))
+    tmp = target.with_name(target.name + ".tmp")
+    payload = "".join(line + "\n" for line in lines)
+    with tmp.open("w", encoding="utf-8") as fh:
+        fh.write(payload)
+        fh.flush()
+        os.fsync(fh.fileno())
+    tmp.replace(target)
+    return len(lines)
+
+
+@dataclass(frozen=True)
+class DerivedLogAgreement:
+    """Whether the derived log and the arrival log hold the same set.
+
+    There is **no staleness marker**. The offset/count triple does not get a
+    third sibling: the derived log's currency is a SET question, and the
+    honest answer to a set question is a set comparison, not a stamp. A
+    marker would also reintroduce offset custody inside the mutable artifact
+    being judged.
+    """
+
+    ok: bool
+    missing: int
+    """Row-class records the arrival log carries and the file does not.
+
+    Structural records are outside the projection, so a healthy store is
+    never reported as missing its genesis.
+    """
+    extra: int
+    """Lines the arrival log never carried."""
+    detail: str
+
+
+def audit_derived_log(canonical: Path) -> DerivedLogAgreement:
+    """Re-derive and diff. An operation, not a promise.
+
+    The repo's established contract for derived artifacts (``verify_rebirth``
+    is the precedent). Each side's lines are hashed to 32 bytes and two set
+    differences taken, so memory is bounded by RECORD COUNT and never by
+    payload size — the same posture the chain walk documents.
+    """
+    canonical = Path(canonical)
+    target = derived_log_path_for(canonical)
+    derived = {_digest(line) for line in derived_lines(ArrivalLog(canonical))}
+
+    if not target.exists():
+        return DerivedLogAgreement(
+            ok=not derived,
+            missing=len(derived),
+            extra=0,
+            detail=(
+                f"no derived log at {target}"
+                + ("" if not derived else f"; the arrival log projects {len(derived)} line(s)")
+            ),
+        )
+
+    present = set()
+    with target.open("rb") as fh:
+        for raw in fh:
+            if raw.endswith(b"\n"):
+                present.add(hashlib.sha256(raw[:-1]).digest())
+            elif raw:
+                # A torn tail is not a line: it was never terminated, so it
+                # never claimed to be a record. Counting it as `extra` would
+                # report a crashed derivation as a disagreement about
+                # content; the honest reading is that the file is short.
+                pass
+
+    missing = len(derived - present)
+    extra = len(present - derived)
+    ok = not missing and not extra
+    return DerivedLogAgreement(
+        ok=ok,
+        missing=missing,
+        extra=extra,
+        detail=(
+            f"{target} agrees with {canonical}"
+            if ok
+            else (
+                f"{target} disagrees with {canonical}: {missing} record(s) the "
+                f"arrival log carries are absent, {extra} line(s) it never "
+                "carried are present"
+            )
+        ),
+    )
+
+
+def _digest(line: str) -> bytes:
+    return hashlib.sha256(line.encode("utf-8")).digest()
 
 
 def licensed_own_lineage(conn: sqlite3.Connection, lineage: str) -> str | None:
@@ -255,6 +474,12 @@ def rederive_projections(
     finally:
         conn.close()
 
+    if derived_log:
+        # Derived from the arrival log, in its own pass, AFTER the index
+        # transaction closed — never from the rows just written. A
+        # projection of a projection would let a poisoned index launder
+        # itself into a second artifact.
+        write_derived_log(canonical)
     projections = ("index", "derived-log") if derived_log else ("index",)
     return Rederivation(
         lineage=lineage,

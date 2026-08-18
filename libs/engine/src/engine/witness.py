@@ -589,7 +589,10 @@ def diff_interval_report(
       perturbs nothing the earlier position showed. What it tells the reader is
       that the ``(ts, id)`` read lens over this interval will order these rows
       differently from the fold, so a lens-ordered view of the window is not
-      the fold's history. Each entry is ``{"id", "kind", "ts"}``,
+      the fold's history. ("Arrival" here is the witness-time sense — when a
+      fact reached this store relative to event time — not the custody
+      coordinate the ``.arrival`` log names.) Each entry is
+      ``{"id", "kind", "ts"}``,
       newest-received first. ``_decl.*`` rows are excluded (domain facts
       only — a declaration change is reported separately below).
     - ``declaration_changed``: True when any ``_decl.*`` row falls in the

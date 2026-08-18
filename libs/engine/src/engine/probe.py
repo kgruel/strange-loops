@@ -497,7 +497,7 @@ def write_surface_reason(canonical_path: Path | str) -> str | None:
     """Reason the canonical store's FULL write surface is unwritable, or None.
 
     The surface a store-writing ceremony touches is wider than the canonical
-    artifact (SOL-R1-04 + SOL-R2-04): a JSONL-canonical open also writes the
+    artifact (SOL-R1-04 + SOL-R2-04): a log-mode open also writes the
     derived sqlite index, and any sqlite open needs the containing directory
     for its WAL/SHM siblings. Pure ``os.access`` inspection — ``_writable``
     walks to the nearest existing ancestor, so a missing index counts as

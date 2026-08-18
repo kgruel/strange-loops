@@ -62,7 +62,6 @@ way: everything the gate asks answers from the log alone.
 
 from __future__ import annotations
 
-import json
 import sqlite3
 from pathlib import Path
 from typing import Any, Generic, TypeVar
@@ -74,9 +73,9 @@ from .arrival import (
 )
 from .arrival_projection import has_rows, licensed_own_lineage, rows_of_record
 from .jsonl_codec import (
-    serialize_batch,
-    serialize_fact_row,
-    serialize_tick_row,
+    object_of_batch,
+    object_of_fact_row,
+    object_of_tick_row,
 )
 from .jsonl_store import _as_int, _stamped_offset_current
 from .residence import canonical_for, index_path_for
@@ -363,13 +362,13 @@ class ArrivalStore(SqliteStore[T], Generic[T]):
 
     # ---- the write path --------------------------------------------------
 
-    def _write(self, sql: str, row: tuple, serialize_row, is_fact: bool) -> str | None:
+    def _write(self, sql: str, row: tuple, encode_row, is_fact: bool) -> str | None:
         """Stage the INSERT, make the record durable in the log, stamp, commit.
 
         The INSERT runs first, uncommitted, so a rejected row fails before a
         byte reaches the log and a refused write can never orphan a record.
-        The record serializes the COMMITTED read-back row — the index and
-        the log must derive-match. The record's arrival signature comes from
+        The record's body is the codec's object for the COMMITTED read-back
+        row — the index and the log must derive-match. The record's arrival signature comes from
         the injected ``fact_signer`` over the arrival commitment; the same
         callable, a different digest, and the composing layer's
         domain-separation prefix already binds both to this store family.
@@ -387,17 +386,17 @@ class ArrivalStore(SqliteStore[T], Generic[T]):
         consumed = self._reconcile()
         # Codec pre-flight on the ASSEMBLED row, NOT dead work: sqlite's
         # column affinity coerces (e.g. a string ts commits as REAL), so the
-        # committed-row serialize below would ACCEPT a row the codec refuses
+        # committed-row encode below would ACCEPT a row the codec refuses
         # — this is the gate that fails at the append site, where it is
         # attributable, instead of laundering the value.
-        serialize_row(row)
+        encode_row(row)
         try:
             self._db.execute(sql, row)
             committed_row = self._committed_full_row(
                 "facts" if is_fact else "ticks", row[0]
             )
             committed = committed_row[-1]  # signature is the last column
-            body = json.loads(serialize_row(committed_row))
+            body = encode_row(committed_row)
             record, mark = self._log.append_marked(
                 "fact" if is_fact else "tick",
                 body,
@@ -424,10 +423,10 @@ class ArrivalStore(SqliteStore[T], Generic[T]):
             raise
 
     def _write_fact_row(self, row: tuple) -> str | None:
-        return self._write(FACT_INSERT_SQL, row, serialize_fact_row, True)
+        return self._write(FACT_INSERT_SQL, row, object_of_fact_row, True)
 
     def _write_tick_row(self, row: tuple) -> str | None:
-        return self._write(TICK_INSERT_SQL, row, serialize_tick_row, False)
+        return self._write(TICK_INSERT_SQL, row, object_of_tick_row, False)
 
     def _ceremony_persist(self, rows: list[tuple]) -> None:
         """Make a declaration ceremony canonical: ONE arrival record, stamped.
@@ -447,13 +446,13 @@ class ArrivalStore(SqliteStore[T], Generic[T]):
         have made durable is the ceremony itself.
         """
         if len(rows) > 1:
-            k, line = "batch", serialize_batch(rows)
+            k, body = "batch", object_of_batch(rows)
         else:
-            k, line = "fact", serialize_fact_row(rows[0])
+            k, body = "fact", object_of_fact_row(rows[0])
         consumed = self._reconciled_mark
         _, mark = self._log.append_marked(
             k,
-            json.loads(line),
+            body,
             observer=rows[0][3],
             origin=rows[0][4],
             at=rows[0][2],

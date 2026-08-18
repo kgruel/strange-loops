@@ -41,7 +41,6 @@ deliberately not routed through any event-time sort.
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -370,13 +369,11 @@ def _read_index_source(source: Path) -> _SourceRows:
     groups: list[tuple[str, list[tuple[str, tuple]]]] = [
         ("fact", [("fact", tuple(row))]) for row in fact_rows
     ]
-    groups.extend(
-        # Full tick arity with the chain columns already absent — this source
-        # shape carries no chain to strip, because chain state is store-local
-        # and a transport slice never brought it.
-        ("tick", [("tick", (*row, None, None, None, None, None))])
-        for row in tick_rows
-    )
+    # The tick rows ride at BASE arity, chainless — this source shape has no
+    # chain to carry, because chain state is store-local and a transport
+    # slice never brought it. Padding to full arity here would be undone
+    # immediately: _entry_for strips the chain off every tick it sees.
+    groups.extend(("tick", [("tick", tuple(row))]) for row in tick_rows)
     return _SourceRows(
         groups=groups, fact_count=len(fact_rows), tick_count=len(tick_rows)
     )
@@ -444,17 +441,26 @@ def _entry_for(kind: str, rows: list[tuple[str, tuple]]):
     """
     from engine.arrival import Entry
     from engine.jsonl_codec import (
-        serialize_batch,
-        serialize_fact_row,
-        serialize_tick_row,
+        TICK_CHAIN_FIELDS,
+        TICK_FIELDS,
+        object_of_batch,
+        object_of_fact_row,
+        object_of_tick_row,
     )
 
     if kind == "tick":
         _t, row = rows[0]
-        stripped = (*row[:6], None, None, None, None, None)
+        # Nulling the chain is THIS module's decision (see above); how many
+        # columns that is, and where they sit, is the codec's — so the width
+        # is derived from its field tuples rather than counted here. The
+        # slice reads Nones back in, the source arrival row has them
+        # overwritten; both land at the codec's tick arity, signature
+        # dropped by riding one short of it.
+        base = len(TICK_FIELDS) - len(TICK_CHAIN_FIELDS)
+        stripped = (*row[:base], *(None,) * len(TICK_CHAIN_FIELDS))
         return Entry(
             k="tick",
-            body=json.loads(serialize_tick_row(stripped)),
+            body=object_of_tick_row(stripped),
             observer=stripped[1],
             origin=stripped[4],
             at=stripped[2],
@@ -462,12 +468,8 @@ def _entry_for(kind: str, rows: list[tuple[str, tuple]]):
 
     fact_rows = [row for _t, row in rows]
     first = fact_rows[0]
-    if len(fact_rows) > 1:
-        body = json.loads(serialize_batch(fact_rows))
-        k = "batch"
-    else:
-        body = json.loads(serialize_fact_row(first))
-        k = "fact"
+    k = "batch" if len(fact_rows) > 1 else "fact"
+    body = object_of_batch(fact_rows) if k == "batch" else object_of_fact_row(first)
     return Entry(
         k=k, body=body, observer=first[3], origin=first[4], at=first[2]
     )

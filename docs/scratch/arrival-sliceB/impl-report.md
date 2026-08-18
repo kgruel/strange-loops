@@ -936,3 +936,145 @@ is the obvious next form; I did not do it here because it changes the
 behaviour of a shared primitive for every caller at once, which is a decision
 worth making deliberately rather than as the tail of a remediation. Named,
 not fixed.
+
+---
+
+# Review round r1 (agy-r1) — two findings fixed
+
+Cross-family review returned CONVERGED with two findings. Base `bb9a8f74`;
+new head **`98f721ca`**. `feat/arrival-libs` has since merged this branch at
+`2f2ca0c4`; I did NOT reset onto it — work continued on
+`slice/arrival-projections-s1` for the lead to merge forward.
+
+| Suite | Before r1 | After r1 |
+|---|---|---|
+| `libs/store/tests` | 174 passed | **175 passed** |
+| `libs/engine/tests` | 1738 passed, 1 skipped, 1 failed | **1738 passed, 1 skipped, 1 failed** |
+| `tests/architecture` | 98 passed | **98 passed** |
+
+The engine failure is still the same pre-existing hypothesis case documented
+at the top of this report.
+
+## r1-F1 — the audit materialized what it promised to stream
+
+Q2 and this module's own docstring promised lines hashed to 32 bytes with
+"memory bounded by RECORD COUNT and never by payload size". The
+implementation called `derived_lines`, which materializes and SORTS every
+line, and only then hashed — so the promise was prose, not behaviour.
+
+`derived_lines` has to materialize: it sorts, and a sort needs its input.
+The audit does not sort, so borrowing it bought a cost with no use. The new
+`_derived_digests` walks the log, hashes each line as produced, and drops it.
+
+**Measured, by reverting only this fix:**
+
+```
+--- BEFORE (materializing both sides) ---
+Scaling the RECORD COUNT at fixed 1MB payload:
+    5 records x 1MB (total   5MB) -> peak  11.01 MB
+   10 records x 1MB (total  10MB) -> peak  21.01 MB
+   20 records x 1MB (total  20MB) -> peak  41.01 MB
+   40 records x 1MB (total  40MB) -> peak  81.02 MB
+Scaling the RECORD SIZE at fixed count:
+    5 records x 1MB -> peak  11.01 MB
+    5 records x 2MB -> peak  22.01 MB
+    5 records x 4MB -> peak  44.01 MB
+
+--- AFTER (streaming digests) ---
+Scaling the RECORD COUNT at fixed 1MB payload:
+    5 records x 1MB (total   5MB) -> peak   7.02 MB
+   10 records x 1MB (total  10MB) -> peak   7.02 MB
+   20 records x 1MB (total  20MB) -> peak   7.02 MB
+   40 records x 1MB (total  40MB) -> peak   7.02 MB
+Scaling the RECORD SIZE at fixed count:
+    5 records x 1MB -> peak   7.01 MB
+    5 records x 2MB -> peak  14.01 MB
+    5 records x 4MB -> peak  28.01 MB
+```
+
+The reviewer's own probe (10 × 1 MB) goes **21.01 MB → 7.02 MB**. I ran the
+scaling variant as well, because the single-point number does not show the
+thing that matters: **before, peak was linear in record count; after, it is
+flat.** Forty megabytes of store audits at the same peak as five.
+
+I did NOT claim more than that. Peak is still linear in the size of the
+LARGEST single record (one 4 MB record peaks at 28 MB) because a record must
+be decoded, re-encoded and hashed to be judged. The docstring now states the
+measured shape instead of the loose phrase — the loose phrase is precisely
+what let the implementation drift from it.
+
+Counts survive digest-only sets (a set difference over digests has the same
+cardinality as one over the lines). Nothing in `DerivedLogAgreement` echoes
+line content, so no detail string needed bounding.
+
+### Power proofs
+
+```
+### PROOF r1f1-a: the streaming digest set is live (drop a record from it)
+FAILED ...::test_an_added_line_reports_extra
+FAILED ...::test_a_missing_file_is_reported_as_every_record_missing
+FAILED ...::test_a_healthy_store_is_never_reported_as_missing_its_genesis
+FAILED ...::test_a_torn_tail_is_short_rather_than_a_content_disagreement
+6 failed, 14 passed in 0.53s
+
+### PROOF r1f1-b: the two set differences neutered (missing AND extra undetected)
+FAILED ...::test_a_deleted_line_reports_missing
+FAILED ...::test_an_added_line_reports_extra
+FAILED ...::test_a_torn_tail_is_short_rather_than_a_content_disagreement
+FAILED ...::test_a_lagging_derived_log_is_not_an_error
+4 failed, 16 passed in 0.27s
+RESTORED (empty diff above)
+```
+
+Both directions still pinned against the NEW implementation.
+
+## r1-F2 — the no-arrival-driver rule now has a behavioural arm
+
+`test_there_is_no_merge_driver_for_the_arrival_log` asserted a literal string
+appeared in the driver's own source. That pins PROSE — it breaks on any
+rewording that improves it — and it never once ran the driver.
+
+**Chosen: the prose assertion is DROPPED, not kept.** The design's
+requirement is that the rule be stated so nobody defaults it, and the module
+docstring states it; but a `"literal" in source` test does not verify a rule,
+it freezes a sentence. What survives is the structural half, split into its
+own test: no `arrival_merge.py` exists, so nobody wires a second driver up by
+reaching for the obvious name.
+
+The new behavioural test points the driver at two real `.arrival` logs —
+arrival records carrying `k`/`lin`/`ord` and no `t` discriminator, structural
+genesis at ordinal 0 included, **asserted to be so rather than assumed** —
+and pins three things the old test could not:
+
+1. it raises;
+2. it raises something OTHER than `DerivedLogMergeConflict` — an arrival log
+   is not a derived log with a conflict in it, it is the wrong grammar
+   entirely, and the refusal must say so;
+3. the target file comes back **byte-identical**, so no partial union was
+   written.
+
+The git-facing `-m` entry is exercised too: non-zero exit, a named refusal on
+stderr, target still untouched.
+
+### Power proof
+
+```
+### PROOF r1f2: the driver made to tolerate a foreign grammar instead of refusing
+FAILED ...::test_the_driver_refuses_arrival_records_rather_than_unioning_them
+1 failed, 15 passed in 0.84s
+RESTORED (empty diff above)
+```
+
+That mutation makes the driver fall back to treating an unparseable line as
+its own key — i.e. quietly unioning arrival records. **The old prose test
+would have passed it.** That is the whole reason the finding was worth
+raising.
+
+## Residue after r1
+
+- `derived_lines` still materializes, and must: it sorts. Only the audit
+  path was streaming-shaped, and only the audit path was changed.
+- Peak remains linear in the largest single record. Reducing that means
+  hashing a line without ever building it whole, which would restructure the
+  codec's return contract. Named, not done.
+- Everything in the original "could not verify" list still stands.

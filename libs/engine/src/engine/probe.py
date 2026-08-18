@@ -278,12 +278,7 @@ def _probe_vertex(path: Path) -> TargetInfo:
         )
     canonical = canonical_store_path(store_field, path)
     mode = canonical_mode(canonical)
-    if mode == "arrival":
-        currency = _arrival_currency(canonical)
-    elif mode == "jsonl":
-        currency = _currency(canonical)
-    else:
-        currency = None
+    currency = _currency(canonical, mode) if mode != "sqlite" else None
     return TargetInfo(
         target_type="vertex",
         canonical_mode=mode,
@@ -307,7 +302,7 @@ def _probe_arrival(path: Path) -> TargetInfo:
         canonical_path=path,
         index_path=index_path_for(path),
         exists=exists,
-        index_current=_arrival_currency(path) if exists else None,
+        index_current=_currency(path, "arrival") if exists else None,
         declaration_status=None,
         writable=_writable(path),
         canonical_writable=write_surface_reason(path) is None,
@@ -333,7 +328,7 @@ def _probe_log(path: Path) -> TargetInfo:
             canonical_path=sibling_arrival,
             index_path=index_path_for(path),
             exists=exists,
-            index_current=_arrival_currency(sibling_arrival),
+            index_current=_currency(sibling_arrival, "arrival"),
             declaration_status=None,
             writable=False,
             canonical_writable=write_surface_reason(sibling_arrival) is None,
@@ -350,7 +345,7 @@ def _probe_log(path: Path) -> TargetInfo:
         canonical_path=path,
         index_path=index_path_for(path),
         exists=exists,
-        index_current=_currency(path) if exists else None,
+        index_current=_currency(path, "jsonl") if exists else None,
         declaration_status=None,
         writable=_writable(path),
         canonical_writable=write_surface_reason(path) is None,
@@ -379,7 +374,7 @@ def _probe_sqlite(path: Path) -> TargetInfo:
             canonical_path=sibling_arrival,
             index_path=path,
             exists=exists,
-            index_current=_arrival_currency(sibling_arrival),
+            index_current=_currency(sibling_arrival, "arrival"),
             declaration_status=None,
             writable=False,
             canonical_writable=write_surface_reason(sibling_arrival) is None,
@@ -404,7 +399,7 @@ def _probe_sqlite(path: Path) -> TargetInfo:
             canonical_path=sibling_log,
             index_path=path,
             exists=exists,
-            index_current=_currency(sibling_log),
+            index_current=_currency(sibling_log, "jsonl"),
             declaration_status=None,
             writable=False,
             canonical_writable=write_surface_reason(sibling_log) is None,
@@ -438,59 +433,27 @@ def _probe_sqlite(path: Path) -> TargetInfo:
 # --- inspection helpers (all read-only) -------------------------------------
 
 
-def _currency(canonical: Path) -> bool | None:
+def _currency(canonical: Path, mode: str) -> bool | None:
     """Offset parity of the derived index, or None when unanswerable.
 
-    Composes ``jsonl_store._index_is_current`` (one read-only sqlite meta
-    read + one stat — it never constructs a store) but refuses to answer
-    for a missing index: "current" and "absent" must not collapse.
+    Composes ``jsonl_store._stamped_offset_current`` (one read-only sqlite
+    meta read + one stat — it never constructs a store), keyed on the
+    mode's cursor family, but refuses to answer for a missing index:
+    "current" and "absent" must not collapse.
     """
-    from .jsonl_store import _index_is_current
+    from .canonical_audit import OFFSET_KEY
+    from .jsonl_store import _stamped_offset_current
 
     if not canonical.is_file():
         return None
     index = index_path_for(canonical)
     if not index.is_file():
         return False
-    return _index_is_current(index, canonical)
-
-
-def _arrival_currency(canonical: Path) -> bool | None:
-    """The arrival-mode spelling of :func:`_currency` — same scope, same
-    refusals, composed over the arrival resume mark's offset field."""
-    from .arrival_store import _arrival_index_is_current
-
-    if not canonical.is_file():
-        return None
-    index = index_path_for(canonical)
-    if not index.is_file():
-        return False
-    return _arrival_index_is_current(index, canonical)
-
-
-def _arrival_content_note(path: Path) -> str:
-    """Corroborate an ``.arrival`` suffix against its first complete line.
-
-    Plain ``open('rb')`` and the pure :func:`engine.arrival.decode_record`
-    — never an :class:`engine.arrival.ArrivalLog` method, so no future
-    change to that class can smuggle a lock or a repair into a probe.
-    """
-    try:
-        with path.open("rb") as fh:
-            raw = fh.readline()
-    except OSError as exc:
-        return f"; content unreadable: {exc}"
-    if not raw.strip():
-        return "; file is empty"
-    if not raw.endswith(b"\n"):
-        return "; first line incomplete (torn or still being written)"
-    from .arrival import ArrivalGrammarError, decode_record
-
-    try:
-        decode_record(raw[:-1])
-    except ArrivalGrammarError:
-        return "; content does not decode as arrival records"
-    return ""
+    if mode == "arrival":
+        from .arrival_store import ARRIVAL_OFFSET_KEY as offset_key
+    else:
+        offset_key = OFFSET_KEY
+    return _stamped_offset_current(index, canonical, offset_key)
 
 
 def write_surface_reason(canonical_path: Path | str) -> str | None:
@@ -538,24 +501,55 @@ def _writable(path: Path) -> bool:
         return False
 
 
-def _log_content_note(path: Path) -> str:
-    """Corroborate a ``.jsonl`` suffix against its first complete line."""
+def _first_line_note(path: Path, decode, bad_note: str, empty_note: str) -> str:
+    """Corroborate a log suffix against its first complete line.
+
+    The one scaffold for every line-framed log family: read the first line
+    with plain ``open('rb')``, note unreadable content, an empty file, or a
+    torn/in-flight first line, and hand a complete line to ``decode`` —
+    a pure callable that raises ``ValueError`` (both codecs' error families
+    are ``ValueError`` subclasses) when the content is not the family's.
+    Never a store class or an :class:`engine.arrival.ArrivalLog` method, so
+    no future change to those can smuggle a lock or a repair into a probe.
+    """
     try:
         with path.open("rb") as fh:
             raw = fh.readline()
     except OSError as exc:
         return f"; content unreadable: {exc}"
     if not raw.strip():
-        return ""
+        return empty_note
     if not raw.endswith(b"\n"):
         return "; first line incomplete (torn or still being written)"
-    from .jsonl_codec import JsonlCodecError, deserialize_records
-
     try:
-        deserialize_records(raw[:-1].decode("utf-8").strip())
-    except (JsonlCodecError, UnicodeError):
-        return "; content does not decode as loops log rows"
+        decode(raw[:-1])
+    except ValueError:
+        return bad_note
     return ""
+
+
+def _log_content_note(path: Path) -> str:
+    """Corroborate a ``.jsonl`` suffix against its first complete line."""
+    from .jsonl_codec import deserialize_records
+
+    return _first_line_note(
+        path,
+        lambda line: deserialize_records(line.decode("utf-8").strip()),
+        "; content does not decode as loops log rows",
+        "",
+    )
+
+
+def _arrival_content_note(path: Path) -> str:
+    """Corroborate an ``.arrival`` suffix against its first complete line."""
+    from .arrival import decode_record
+
+    return _first_line_note(
+        path,
+        decode_record,
+        "; content does not decode as arrival records",
+        "; file is empty",
+    )
 
 
 def _sqlite_content_note(path: Path) -> str:

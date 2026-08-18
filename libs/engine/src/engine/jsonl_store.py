@@ -271,39 +271,41 @@ def open_canonical_store(canonical: Path, **kwargs: Any) -> SqliteStore[Any]:
     return SqliteStore(path=canonical, **kwargs)
 
 
-def _index_is_current(index: Path, canonical: Path) -> bool:
+def _stamped_offset_current(index: Path, log: Path, offset_key: str) -> bool:
     """Whether ``index`` has consumed the whole log — cheaply, read-only.
 
     One read-only sqlite connection for the stamped offset and one ``stat``
-    for the log's size; no scan, no lock, no store construction. Anything
-    that makes the answer unknowable (no index tables yet, no offset marker,
-    a value that isn't an integer, an unreadable db) answers "not current":
-    the honest response is to let :class:`JsonlStore`'s catch-up decide,
-    which is where every recovery rule already lives.
+    for the log's size; no scan, no lock, no store construction. The one
+    currency rule for every log-canonical mode — ``offset_key`` names which
+    cursor family the store stamps. Anything that makes the answer
+    unknowable (no index tables yet, no offset marker, a value that isn't
+    an integer, an unreadable db) answers "not current": the honest
+    response is to let the store's own catch-up decide, which is where
+    every recovery rule already lives.
     """
     import sqlite3
 
     from .declaration import _open_readonly
 
     try:
-        size = canonical.stat().st_size
+        size = log.stat().st_size
     except OSError:
         return True  # no log to be behind
     if size == 0:
         # Nothing durable exists, so nothing durable can be unindexed. Says
         # current without touching the db at all — an index that is wrong
-        # about an empty log is a JsonlStore-open concern (it refuses), not
-        # something a read-path resolve should provoke.
+        # about an empty log is an open-time concern (the store refuses),
+        # not something a read-path resolve should provoke.
         return True
     # A quarter-second, not _open_readonly's 5s default: this runs on every
     # read resolve, and "a writer is holding the lock" is a fine reason to
-    # answer "not current" and let JsonlStore's catch-up decide.
+    # answer "not current" and let the store's catch-up decide.
     conn = _open_readonly(index, timeout=0.25)
     if conn is None:
         return False
     try:
         row = conn.execute(
-            "SELECT value FROM store_meta WHERE key = ?", (_OFFSET_KEY,)
+            "SELECT value FROM store_meta WHERE key = ?", (offset_key,)
         ).fetchone()
     except sqlite3.Error:
         return False
@@ -327,8 +329,8 @@ def ensure_index(canonical: Path) -> Path:
     ``index.exists()`` left every read-only invocation — which never
     constructs a ``JsonlStore`` — silently omitting canonical facts until
     some writer happened along. So an existing index is checked for
-    staleness (:func:`_index_is_current`: one read-only meta read, one
-    stat) and opened only when it is behind.
+    staleness (:func:`_stamped_offset_current`: one read-only meta read,
+    one stat) and opened only when it is behind.
 
     A no-op — no store constructed, no lock taken — when ``canonical`` is
     sqlite-canonical (there is no separate index to materialize), when the
@@ -347,7 +349,7 @@ def ensure_index(canonical: Path) -> Path:
         from .arrival_store import ensure_arrival_index
 
         return ensure_arrival_index(canonical)
-    if index.exists() and _index_is_current(index, canonical):
+    if index.exists() and _stamped_offset_current(index, canonical, _OFFSET_KEY):
         return index
     store: JsonlStore[Any] = JsonlStore(
         path=index,

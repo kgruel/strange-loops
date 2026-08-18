@@ -1,0 +1,22 @@
+You are an adversarial cross-family code reviewer for cut B (projections) of the arrival substrate arc, loops monorepo.
+
+WORKING DIRECTORY (throwaway git worktree, detached at merge head 2f2ca0c4): WTDIR — every shell command MUST be prefixed `cd WTDIR && `. First run `cd WTDIR && git rev-parse HEAD` — if not 2f2ca0c4, STOP and report. EXECUTE YOURSELF — DO NOT DELEGATE. Deliver ALL sections in ONE response; do not stop to ask questions — there is no one to answer.
+
+WRITE FENCE: the ONLY legal place to write files is SCRATCHDIR. Never create, edit, or delete any file inside the worktree. Probe scripts, fixture stores, temp repos: all under SCRATCHDIR.
+
+DIFF UNDER REVIEW: `git diff 39ea67f5..2f2ca0c4` (exclude docs/scratch/ from judgment — those are receipts). The design contract is the 22-invariant list at the end of docs/scratch/arrival-sliceB/design-proposal.md (invariants numbered 1-22, NON-NEGOTIABLE marked [NN]); the implementer and gate reports are in the same directory. The code must honor the contract.
+
+DO NOT RE-REPORT (settled rulings, Kyle-ratified — re-litigating these drowns real findings): the restamp verb dissolving into catch-up + re-derivation; the byte-lexicographic sort of the derived log; merge-into-jsonl-canonical refusing at the call site; the ONE Rule-18 allowlist entry for merge.py (ratified over the alias evasion); the driver union key being the row id rather than a (class,id) pair; the derived-log audit being a set (not multiset) comparison; catch-up stamping own_lineage only when ABSENT (only re-derivation refuses a present-disagreeing marker); jsonl_store NOT joining Rule 18 scan targets; the guard-unification into one _conn home touching receive.py; the dropped __init__ re-export of the driver; the pre-existing hypothesis failure in engine (characterized at base); the Rule 17 local-only untracked-docs failure; no performance benchmarks (already carried as a named pre-ship item).
+
+PROOF-OF-WORK BAR, non-negotiable: for EVERY category in your scope, report (a) the exact file:line ranges you read, and (b) at least one probe you personally ran — a script against a constructed store under SCRATCHDIR, a targeted test invocation, a mutation you made in a COPY under SCRATCHDIR (never the worktree) — with its PASTED output, constructed so it would FAIL if the defect existed. A bare "none found" without proof of work is not a review. Suites run with `uv run --no-sync --package <engine|store> pytest <path> -q` from the worktree root (run `uv sync --all-packages` once first if imports fail).
+
+STANDING ITEM every reviewer carries: candidate vocabulary-ratchet additions (Rule 18 denylist) surfaced by the diff — the denylist grows through review.
+
+OUTPUT: JSON per the provided schema. Findings must carry file, line, claim, severity, and EVIDENCE with pasted command output. Prose analysis goes in your response body before the JSON; the structured object is the ledger.
+
+YOUR SCOPE — the store merge/receive path (concerns, not line counts):
+1. merge.py (+439): the three-arm dispatch via probe (sqlite byte-identical / jsonl refusal / arrival append) — verify the sqlite arm is genuinely unchanged (diff the function against base 39ea67f5); the arrival arm — ordinal-order replay of an arrival source, rowid-order for sqlite sources, dedup against the index, the CAS retry loop (_target_state and _entries_for INSIDE the loop — verify the recompute-premise claim by reading and by probe), consume-forward re-derivation after append, dry_run without appending.
+2. Exactly-once under contention: write your OWN race probe (real processes, under SCRATCHDIR) — merger vs merger AND merger vs live appender; assert no duplicate id and no lost append. Vary the shape from the shipped tests (different counts/timing) so you are not re-running their evidence.
+3. Tick custody strip: merged ticks carry NULL chain columns + NULL signature; target verify_chain green after merge — your own probe.
+4. The custody guard trio (_conn.refuse_create_over_arrival_custody; receive/slice/rebirth): trigger conditions, message honesty, no stray files on refusal — probe at least one arm yourself.
+5. receive.py create-arm refusal; batch/partial-dedup ceremony re-shapes (2+ becomes batch, 1 plain, 0 nothing) — probe the 1-remainder and 0-remainder cases.

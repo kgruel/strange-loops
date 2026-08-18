@@ -34,14 +34,32 @@ from ._helpers import REPO_ROOT
 # glossary. GROW as arrival slices land; never shrink to make a failure go
 # away. Cut A moved custody into the funnel (residence, probe) and built the
 # arrival write path (arrival_store — a new module born on the arrival
-# surface, so it joins at birth); jsonl_store and the rest of the sweep list
-# do NOT join until their own cuts move custody out of them.
+# surface, so it joins at birth).
+#
+# Cut B adds four. `arrival_projection` and `derived_log_merge` are NEW and
+# born on the arrival surface, so they join at birth. `store/merge.py` and
+# `store/receive.py` join because CUSTODY MOVED INTO THEM: they stopped being
+# direct index writers and became arrival appenders, which is this rule's own
+# stated trigger.
+#
+# `jsonl_store.py` does NOT join, departing from
+# `plan:arrival-vocabulary-ratchet`'s "jsonl_store until cut B". Custody has
+# not left it: it remains the write path for `.jsonl`-canonical stores, which
+# survive until the sidecar/CLI-rebuild tail, and its `jsonl_offset` /
+# `jsonl_fact_count` / `jsonl_tick_count` names are that mode's HONEST keys.
+# Adding it here would produce a standing failure resolvable only by a large
+# allowlist — the outcome the scope note below warns against. Its cut is the
+# one that retires `JsonlStore`.
 _SCAN_TARGETS = (
     "libs/engine/src/engine/arrival.py",
+    "libs/engine/src/engine/arrival_projection.py",
     "libs/engine/src/engine/arrival_store.py",
     "libs/engine/src/engine/probe.py",
     "libs/engine/src/engine/residence.py",
     "libs/sdk/src",
+    "libs/store/src/store/derived_log_merge.py",
+    "libs/store/src/store/merge.py",
+    "libs/store/src/store/receive.py",
 )
 
 # The seed denylist, §4.2, spelled in canonical snake_case (see _denied_term).
@@ -51,6 +69,12 @@ _DENIED = {
     "jsonl_fact_count": "the retired count meta key",
     "jsonl_tick_count": "the retired count meta key",
     "receipt_order": "ordering is by ordinal, not by an order concept",
+    # Added at cut B, which retires the R1 doctrine whose vocabulary was "the
+    # merged store's fold order". After B the ordering claim is the arrival
+    # ordinal, so `fold_order` as an identifier on the arrival surface is the
+    # retired model coming back. Unambiguous and single-concept, so it
+    # mechanizes exactly the way `receipt_order` already does.
+    "fold_order": "the ordering claim is the arrival ordinal, not a fold order",
     "receipt_mode": "there is no mode — custody is structural, not configured",
     "reanchor": "not an operation in the arrival model",
     "rewind": "not an operation in the arrival model",
@@ -157,6 +181,14 @@ _ALLOWED: set[tuple[str, str]] = {
     # legacy METHOD name or it overrides nothing — the name here IS the
     # refusal surface. Falls away when the base method retires.
     ("libs/engine/src/engine/arrival_store.py", "def reanchor"),
+    # The legacy mode's own exception family, raised where a merge into a
+    # `.jsonl`-canonical target is refused. The name IS that mode's honest
+    # name — the same reasoning that keeps its three meta keys unrenamed —
+    # and merge.py must NAME the class to raise it. Aliasing the import
+    # would silence this rule while changing nothing, which is precisely the
+    # evasion the probes below exist to catch. Falls away when `JsonlStore`
+    # retires and the refusal has nothing left to point at.
+    ("libs/store/src/store/merge.py", "raise jsonl_store.JsonlCanonicalUnsupported("),
 }
 
 

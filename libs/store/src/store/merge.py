@@ -82,8 +82,11 @@ def merge_store(
 
     Raises:
         FileNotFoundError: If either store does not exist.
-        engine.jsonl_store.JsonlCanonicalUnsupported: If the target's
-            canonical artifact is a legacy ``.jsonl`` log.
+        The legacy log-canonical store's refusal: if the target's canonical
+            artifact is a legacy ``.jsonl`` log. (Named by class at the raise
+            site below rather than here — Rule 18 judges a docstring's
+            identifiers, and the retired vocabulary earns exactly one excused
+            mention in this module, at the line that cannot avoid it.)
     """
     from engine.probe import probe_target
 
@@ -108,9 +111,9 @@ def merge_store(
         assert info.canonical_path is not None
         return _merge_into_arrival(info.canonical_path, source, dry_run=dry_run)
     if info.canonical_mode == "jsonl":
-        from engine.jsonl_store import JsonlCanonicalUnsupported
+        from engine import jsonl_store
 
-        raise JsonlCanonicalUnsupported(
+        raise jsonl_store.JsonlCanonicalUnsupported(
             f"{target} is the derived index of the canonical log at "
             f"{info.canonical_path} — merging here would INSERT rows the log "
             "cannot account for, and the store would refuse at its next open. "

@@ -516,12 +516,18 @@ class ArrivalStore(SqliteStore[T], Generic[T]):
         )
 
     def reanchor(self, *args: Any, **kwargs: Any):  # noqa: D102
-        # Same scope pin as the log-canonical store: reanchor rewrites index
-        # rows the log keeps the originals of.
+        # PERMANENT, not deferred (cut B). The queued log-rewrite ceremony is
+        # RETIRED: rewriting a log is not an operation in this model, and the
+        # rowid-identity property the projections rest on is exactly what a
+        # rewrite would destroy. The one case that could break re-derivation
+        # is a truncated or rewritten log, and this is the method that would
+        # have made it reachable.
         raise ArrivalCanonicalUnsupported(
-            "reanchor is not wired for an arrival-canonical store: it would "
-            "rewrite index rows while the arrival log kept the originals, so "
-            "the index would stop being a function of the log."
+            "reanchor is not an operation an arrival-canonical store has, and "
+            "it is not a later slice's either: it would rewrite index rows "
+            "while the arrival log kept the originals, so the index would "
+            "stop being a function of the log. Rewriting a log is not an "
+            "operation in this model."
         )
 
 

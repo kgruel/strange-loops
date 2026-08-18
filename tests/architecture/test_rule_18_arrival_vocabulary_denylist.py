@@ -32,9 +32,15 @@ from ._helpers import REPO_ROOT
 
 # Paths, relative to the repo root, whose names are held to the arrival
 # glossary. GROW as arrival slices land; never shrink to make a failure go
-# away.
+# away. Cut A moved custody into the funnel (residence, probe) and built the
+# arrival write path (arrival_store — a new module born on the arrival
+# surface, so it joins at birth); jsonl_store and the rest of the sweep list
+# do NOT join until their own cuts move custody out of them.
 _SCAN_TARGETS = (
     "libs/engine/src/engine/arrival.py",
+    "libs/engine/src/engine/arrival_store.py",
+    "libs/engine/src/engine/probe.py",
+    "libs/engine/src/engine/residence.py",
     "libs/sdk/src",
 )
 
@@ -138,7 +144,20 @@ def _denied_term(text: str, mode: str = NAME) -> str | None:
 # re-admitting a moved claim. Empty today, and an entry added here needs a
 # comment saying why the term is unavoidable at that site.
 # ---------------------------------------------------------------------------
-_ALLOWED: set[tuple[str, str]] = set()
+_ALLOWED: set[tuple[str, str]] = {
+    # The retired canonical-store boolean survives as an unexported shim for
+    # ONE caller: apps/loops/src/loops/commands/store.py:142 lazy-imports it
+    # before its mode check, and apps/ is diff-empty for the whole arrival
+    # wave, so the caller cannot move until the CLI-surface cut. The shim is
+    # not in residence.__all__, nothing else in libs names it, and
+    # tests/engine's tripwire pins the pairing — delete this entry together
+    # with the shim and the apps import.
+    ("libs/engine/src/engine/residence.py", "def is_jsonl_canonical"),
+    # The refusing override of the legacy history-mutating op must carry the
+    # legacy METHOD name or it overrides nothing — the name here IS the
+    # refusal surface. Falls away when the base method retires.
+    ("libs/engine/src/engine/arrival_store.py", "def reanchor"),
+}
 
 
 def _files() -> list:

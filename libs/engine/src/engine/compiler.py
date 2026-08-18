@@ -936,17 +936,21 @@ def materialize_vertex(
 
         from .residence import (
             SQLITE_SUFFIXES,
+            canonical_mode,
             canonical_store_path,
-            is_jsonl_canonical,
         )
 
         store_path = canonical_store_path(compiled.store, compiled.path)
 
-        if is_jsonl_canonical(store_path) or store_path.suffix in SQLITE_SUFFIXES:
-            # JSONL-canonical (.jsonl) → JsonlStore over the sibling index;
-            # sqlite-canonical (.db/.sqlite) → SqliteStore. The .jsonl case
-            # must be caught here and not fall through to EventStore below,
-            # which would write its own flat format into the canonical log.
+        if (
+            canonical_mode(store_path) != "sqlite"
+            or store_path.suffix in SQLITE_SUFFIXES
+        ):
+            # A log mode (.arrival/.jsonl) → its store class over the
+            # sibling index; sqlite-canonical (.db/.sqlite) → SqliteStore.
+            # The log modes must be caught here and not fall through to
+            # EventStore below, which would write its own flat format into
+            # the canonical log.
             from .jsonl_store import open_canonical_store
 
             store = open_canonical_store(

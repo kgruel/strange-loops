@@ -8,11 +8,15 @@ that file — its **ordinal** — is its identity coordinate, paired with the
 **lineage** the genesis record opens. Everything derived from the log is a
 projection and is never authoritative.
 
-What slice 0 delivers: the record grammar, genesis minting, append under an
+What slice 0 delivered: the record grammar, genesis minting, append under an
 interprocess lock, read by ordinal, the walk with density and chain
 verification, torn-tail truncation, corrupt-interior refusal, and the resume
-mark. Authority, projection re-derivation, declared projection orders, and
-audit re-basing are later slices and are not here.
+mark. Cut A (decision:design/arrival-sliceA-authority) added the authority
+half: the genesis carries the founding public key, self-signed at ordinal 0,
+and :func:`verify_authorship` resolves every verifying key from a
+``(lineage, ordinal)`` coordinate in the log — never from any artifact
+outside it. Projection re-derivation, declared projection orders, and audit
+re-basing are later slices and are not here.
 
 Two postures carry over from the existing store and are load-bearing:
 
@@ -36,6 +40,8 @@ network mount is out of contract.
 
 from __future__ import annotations
 
+import base64
+import binascii
 import contextlib
 import fcntl
 import hashlib
@@ -57,15 +63,20 @@ __all__ = [
     "TMP_SUFFIX",
     "GRAMMAR_VERSION",
     "GENESIS_KIND",
+    "KEY_INTRODUCTION_KIND",
     "RECORD_FIELDS",
     "ArrivalError",
     "ArrivalGrammarError",
     "ArrivalCorrupt",
     "GenesisRefused",
     "AppendRejected",
+    "AuthorshipUnverified",
     "ArrivalLog",
+    "KeyResolution",
     "ResumeMark",
+    "Verify",
     "build_record",
+    "verify_authorship",
     "arrival_path_for",
     "lock_path_for",
     "tmp_path_for",
@@ -82,6 +93,12 @@ TMP_SUFFIX = ".tmp"
 
 GRAMMAR_VERSION = 1
 GENESIS_KIND = "genesis"
+
+# The kind that introduces a key into the log's own registry. Its body names
+# the observer the key speaks for and the key itself; the record must be
+# signed by a key that is ALREADY valid at its ordinal, which is what makes
+# the registry a chain of custody rather than a mutable table.
+KEY_INTRODUCTION_KIND = "key"
 
 # Emitted key order. Transport encoding, not canonicalization — the same
 # posture ``jsonl_codec._dump`` documents; canonicalization for hashing is JCS
@@ -110,6 +127,19 @@ _HEX = frozenset("0123456789abcdef")
 # Shape matches the store's ``fact_signer`` — (observer, commitment digest
 # hex) -> signature, or None when that observer has no key.
 Signer = Callable[[str, str], "str | None"]
+
+# Verification is injected under the same posture. Shape: (public key in the
+# ratified wire format, signature, commitment digest hex) -> bool. The
+# composing layer supplies the algorithm and the domain-separation prefix;
+# this module supplies WHICH key may speak at WHICH position, and nothing
+# about how a signature is checked.
+Verify = Callable[[str, str, str], bool]
+
+# The ratified key wire format: an Ed25519 public key as raw-32-byte base64,
+# copy-identical to the composing layer's on-disk public-key file. The
+# grammar pins the shape (so a malformed key is refused at the append site);
+# the algorithm stays the injected verifier's business.
+_KEY_RAW_LEN = 32
 
 
 # ---------------------------------------------------------------------------
@@ -162,6 +192,25 @@ class GenesisRefused(ArrivalError):
     read out of content: position 0 is structural and cannot be forged into
     existence by appending.
     """
+
+
+class AuthorshipUnverified(ArrivalError):
+    """A signed record's authorship cannot be established from the log.
+
+    Raised by :func:`verify_authorship` when a signature fails to verify
+    under every key that is valid for its observer at its position — the
+    ruled rule: a key is valid at position N iff it was introduced at a
+    position < N, or N is the genesis position and the record is
+    self-certifying. A failure is evidence of a forged signature, a key
+    introduction that never happened, or a self-certification attempted
+    above ordinal 0 — never a state this module's own writers can produce.
+
+    ``ordinal`` names the record whose authorship failed.
+    """
+
+    def __init__(self, message: str, ordinal: int) -> None:
+        super().__init__(f"authorship unverified at ordinal {ordinal}: {message}")
+        self.ordinal = ordinal
 
 
 class AppendRejected(ArrivalError):
@@ -352,12 +401,42 @@ def _validate(record: object, *, require_rh: bool) -> None:
         _check_hex(record[_RH], "rh")
 
 
+def _key_shape_fault(value: object) -> str | None:
+    """Why ``value`` is not a well-formed public key, or None when it is.
+
+    Shape only — raw-32-byte base64, the ratified wire format. Whether a
+    signature actually verifies under it is the injected verifier's answer
+    (:func:`verify_authorship`); the grammar refuses what could never be a
+    key so a malformed one fails at the append site rather than bricking
+    verification later.
+    """
+    if not isinstance(value, str) or not value:
+        return f"key must be a non-empty string, got {type(value).__name__}"
+    try:
+        raw = base64.b64decode(value, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        return f"key is not valid base64: {exc}"
+    if len(raw) != _KEY_RAW_LEN:
+        return f"key must decode to {_KEY_RAW_LEN} bytes, got {len(raw)}"
+    return None
+
+
 def _placement_fault(record: dict, ordinal: int) -> str | None:
     """Why ``record`` may not sit at ``ordinal``, or None when it may.
 
     One rule stated once, in both directions: **the genesis kind belongs at
     ordinal 0 and nowhere else.** At 0 a record must satisfy every genesis
-    rule; above 0 it must not claim to be a genesis at all.
+    rule; above 0 it must not claim to be a genesis at all. A key
+    introduction (:data:`KEY_INTRODUCTION_KIND`) is held to its structural
+    rules at any ordinal it appears: signed, and a body naming an observer
+    and a well-formed key.
+
+    Structural rules only, deliberately: whether the genesis signature
+    verifies against ``body["key"]`` — self-certification — and whether an
+    introduction's signer was valid at its position are cryptographic
+    questions, answered by :func:`verify_authorship` with an injected
+    verifier. This function stays pure so every caller (walk, append, open)
+    can run it without carrying one.
 
     This exists as one function because the two directions were previously
     checked in four places with three different sets of rules, and the gaps
@@ -387,12 +466,33 @@ def _placement_fault(record: dict, ordinal: int) -> str | None:
                 f"genesis is not self-naming — body claims lineage {claimed!r} "
                 f"but the coordinate says {record['lin']!r}"
             )
+        key_fault = _key_shape_fault(record["body"].get("key"))
+        if key_fault is not None:
+            return (
+                f"genesis carries no well-formed founding key ({key_fault}) — "
+                "a live-store genesis introduces the founding public key at "
+                "ordinal 0; a keyless genesis belongs to the migration "
+                "sidecar, not to this grammar"
+            )
         return None
     if record["k"] == GENESIS_KIND:
         return (
             f"a genesis at ordinal {ordinal} — the genesis kind belongs at "
             "ordinal 0 and nowhere else, and a lineage is opened once"
         )
+    if record["k"] == KEY_INTRODUCTION_KIND:
+        if _SIG not in record:
+            return (
+                "a key introduction carries no signature — an introduction "
+                "is vouched for by a key that is already valid, never "
+                "self-certifying above ordinal 0"
+            )
+        named = record["body"].get("observer")
+        if not isinstance(named, str) or not named:
+            return "a key introduction's body must name the observer the key speaks for"
+        key_fault = _key_shape_fault(record["body"].get("key"))
+        if key_fault is not None:
+            return f"a key introduction's body carries no well-formed key: {key_fault}"
     return None
 
 
@@ -624,6 +724,7 @@ class ArrivalLog:
         *,
         observer: str,
         signer: Signer,
+        key: str,
         origin: str = "",
         lineage: str | None = None,
         at: float | None = None,
@@ -634,9 +735,19 @@ class ArrivalLog:
         one its own coordinate ``(lin, 0)`` opens — and it must be signed:
         genesis is the lineage's attestation root, and the signature is over
         the ACTUAL final body, so the body is assembled first and signed
-        second. The body itself is minimal on purpose: the protocol version
-        and the lineage claim. Documents and any migration pins belong to the
-        slice that has history behind a genesis; a fresh log has none.
+        second. The body is ``{protocol, lineage, key}`` and nothing else
+        (decision:design/arrival-sliceA-authority §2.3): ``key`` is the
+        founding PUBLIC key in the ratified wire format, self-signed at
+        ordinal 0 — the anchor every later authorship answer resolves back
+        to. The document set is movement 2, records at ordinal >= 1; era
+        pins dissolve under the dense ordinal; containment claims belong to
+        the migration sidecar's genesis, never to a live store's.
+
+        ``key`` and ``signer`` must correspond — the grammar checks the
+        key's shape here, and :func:`verify_authorship` is where the
+        self-certification is cryptographically established. A mint whose
+        signer does not hold ``key`` produces a log the verifier refuses at
+        ordinal 0.
 
         Staging wins ``O_EXCL`` on ``<name>.arrival.tmp`` FIRST and only then
         checks for an existing log. That order is what makes minting a race
@@ -655,8 +766,14 @@ class ArrivalLog:
         log = cls(path)
         log.path.parent.mkdir(parents=True, exist_ok=True)
 
+        key_fault = _key_shape_fault(key)
+        if key_fault is not None:
+            raise GenesisRefused(
+                f"genesis founding key is malformed ({key_fault}) — the "
+                "ratified wire format is a raw-32-byte base64 public key"
+            )
         lin = mint_lineage() if lineage is None else lineage
-        body = {"protocol": GRAMMAR_VERSION, "lineage": lin}
+        body = {"protocol": GRAMMAR_VERSION, "lineage": lin, "key": key}
         at = time.time() if at is None else at
         sig = signer(observer, content_commitment(GENESIS_KIND, at, observer, origin, body))
         if not sig:
@@ -819,11 +936,12 @@ class ArrivalLog:
         with self.path.open("rb") as fh:
             # lineage=None means "not established yet" — the record at
             # ordinal 0 names it, and every record after is held to it.
-            yield from self._verify_from(fh, expected=0, prev=None, lineage=None)
+            for record, _ in self._verify_from(fh, expected=0, prev=None, lineage=None):
+                yield record
 
     def _verify_from(
         self, fh, *, expected: int, prev: str | None, lineage: str | None
-    ) -> Iterator[dict]:
+    ) -> Iterator[tuple[dict, int]]:
         """The per-record verification loop — the one home for it.
 
         :meth:`walk` and :meth:`_walk_tail` differ only in where they start
@@ -835,10 +953,17 @@ class ArrivalLog:
         ``lineage`` is None only for a walk from ordinal 0, where the
         genesis names it. A resume passes the genesis's lineage in, so the
         anchor cannot decide what the rest of the file is checked against.
+
+        Yields ``(record, end_offset)`` — the byte just past each record's
+        newline, tracked from the handle's position at entry so a consumer
+        (:meth:`walk_marked`) can persist an exact resume mark. The public
+        walks project the record out.
         """
+        offset = fh.tell()
         for raw in fh:
             if not raw.endswith(b"\n"):
                 return  # in flight, or torn — either way not the reader's to judge
+            offset += len(raw)
             try:
                 record = decode_record(raw[:-1])
             except ArrivalGrammarError as exc:
@@ -866,7 +991,7 @@ class ArrivalLog:
                     f"but the preceding record's rh is {prev!r}",
                     expected,
                 )
-            yield record
+            yield record, offset
             expected += 1
             prev = record[_RH]
 
@@ -1040,9 +1165,49 @@ class ArrivalLog:
         # anchor is a record found at a byte offset a caller supplied, and
         # letting it name the lineage would let it decide what the rest of
         # the walk is checked against.
-        return anchor["ord"] + 1, self._walk_tail(offset, anchor, lineage)
+        return (
+            anchor["ord"] + 1,
+            (record for record, _ in self._walk_tail(offset, anchor, lineage)),
+        )
 
-    def _walk_tail(self, offset: int, anchor: dict, lineage: str) -> Iterator[dict]:
+    def walk_marked(
+        self, mark: ResumeMark | None
+    ) -> tuple[int, Iterator[tuple[dict, ResumeMark]]]:
+        """:meth:`walk_from`, yielding each record WITH its resume mark.
+
+        For the consumer that indexes what it reads and must persist how far
+        it got: the mark beside each record is the one that licenses
+        resuming just past it, exact to the byte because the verification
+        loop tracked it. ``(0, ...)`` means the walk starts over — either no
+        mark was offered or the offered one was rejected, and the caller
+        that persists progress must treat its prior state accordingly.
+        """
+        adopted = self._anchor_for(mark)
+        if adopted is None:
+            resumed, pairs = 0, self._walk_marked_from_zero()
+        else:
+            offset, anchor, lineage = adopted
+            resumed, pairs = anchor["ord"] + 1, self._walk_tail(offset, anchor, lineage)
+
+        def marked() -> Iterator[tuple[dict, ResumeMark]]:
+            for record, end in pairs:
+                yield record, ResumeMark(
+                    arrival_lineage=record["lin"],
+                    arrival_offset=end,
+                    arrival_ordinal=record["ord"],
+                )
+
+        return resumed, marked()
+
+    def _walk_marked_from_zero(self) -> Iterator[tuple[dict, int]]:
+        if not self.path.exists():
+            return
+        with self.path.open("rb") as fh:
+            yield from self._verify_from(fh, expected=0, prev=None, lineage=None)
+
+    def _walk_tail(
+        self, offset: int, anchor: dict, lineage: str
+    ) -> Iterator[tuple[dict, int]]:
         """:meth:`walk`'s verification, started from a validated anchor.
 
         Literally the same rules, not merely the same list of them: both
@@ -1077,7 +1242,44 @@ class ArrivalLog:
         genesis must carry a signature.
         """
 
+        return self.append_marked(
+            k, body, observer=observer, origin=origin, at=at, signer=signer
+        )[0]
+
+    def append_marked(
+        self,
+        k: str,
+        body: dict,
+        *,
+        observer: str,
+        origin: str = "",
+        at: float | None = None,
+        signer: Signer | None = None,
+        following: int | None = None,
+    ) -> tuple[dict, ResumeMark]:
+        """:meth:`append`, also returning the mark that resumes just past it.
+
+        The mark's offset is read under the append lock — the byte just past
+        this record's newline, exact by construction rather than a size read
+        that a concurrent append could land inside. A consumer that indexes
+        the record it just wrote persists this mark and later resumes
+        through :meth:`walk_from`, which re-validates the anchor at the
+        adoption site.
+
+        ``following`` names the head ordinal the caller expects. Checked
+        under the lock, so a record that landed since the caller last
+        looked refuses (:class:`AppendRejected`) BEFORE any byte is
+        written — the compare-and-swap shape for a consumer whose staged
+        state must not silently skip an interloper.
+        """
+
         def build(headr: dict) -> dict:
+            if following is not None and headr["ord"] != following:
+                raise AppendRejected(
+                    f"the log's head is at ordinal {headr['ord']}, not the "
+                    f"expected {following} — records arrived since the "
+                    "caller reconciled"
+                )
             at_ = time.time() if at is None else at
             sig = (
                 signer(observer, content_commitment(k, at_, observer, origin, body))
@@ -1090,7 +1292,12 @@ class ArrivalLog:
                 sig=sig or None,
             )
 
-        return self._append_under_lock(build)
+        record, offset = self._append_under_lock(build)
+        return record, ResumeMark(
+            arrival_lineage=record["lin"],
+            arrival_offset=offset,
+            arrival_ordinal=record["ord"],
+        )
 
     def append_record(self, record: dict) -> dict:
         """Append a record that already carries its coordinate.
@@ -1111,10 +1318,11 @@ class ArrivalLog:
                 candidate[_RH] = record_hash(candidate)
             return candidate
 
-        return self._append_under_lock(build)
+        return self._append_under_lock(build)[0]
 
-    def _append_under_lock(self, build: Callable[[dict], dict]) -> dict:
-        """The whole write sequence, indivisible.
+    def _append_under_lock(self, build: Callable[[dict], dict]) -> tuple[dict, int]:
+        """The whole write sequence, indivisible. Returns the record and the
+        byte offset just past its newline, both read under the lock.
 
         Acquire, truncate any torn tail, read the head, build, validate,
         encode, write, fsync, release. Truncation lives here and only here:
@@ -1138,7 +1346,7 @@ class ArrivalLog:
                 fh.write((line + "\n").encode("utf-8"))
                 fh.flush()
                 os.fsync(fh.fileno())
-            return record
+                return record, fh.tell()
 
     @staticmethod
     def _check_follows(record: dict, head: dict) -> None:
@@ -1203,6 +1411,163 @@ class ArrivalLog:
         with self.lock_path.open("ab") as lock_fh:
             fcntl.flock(lock_fh.fileno(), fcntl.LOCK_EX)
             return self._truncate_torn_tail()
+
+
+# ---------------------------------------------------------------------------
+# Authorship — the first verifier
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class KeyResolution:
+    """Where one verified signature's key came from — a coordinate, always.
+
+    One row per verified signature, and the row IS the exclusivity claim
+    made checkable: ``key`` was resolved from ``(introduced_lineage,
+    introduced_ordinal)`` in the log, and from nowhere else. ``ordinal`` is
+    the record whose signature the key verified; ``observer`` is who the
+    log says that key speaks for.
+    """
+
+    ordinal: int
+    observer: str
+    key: str
+    introduced_lineage: str
+    introduced_ordinal: int
+
+
+def verify_authorship(log: ArrivalLog, verify: Verify) -> tuple[KeyResolution, ...]:
+    """Verify every signature in the log, resolving keys from the log alone.
+
+    The ruled rule, implemented verbatim (decision:design/arrival-sliceA-
+    authority): **a key is valid at position N iff it was introduced at a
+    position < N, or N is the genesis position and the record is
+    self-certifying.** Self-certification is legal at ordinal 0 and nowhere
+    else — the genesis signature must verify against its own
+    ``body["key"]``, which is what turns a self-naming genesis into a
+    self-certifying one. A key introduction at ordinal >= 1
+    (:data:`KEY_INTRODUCTION_KIND`) is a record whose body names an
+    observer and a key, signed by a key already valid for the INTRODUCING
+    record's observer; only after that signature verifies does the named
+    key join the registry, at the introduction's own ordinal.
+
+    Keys are bound to observers, not free-floating (an instantiation
+    decision recorded in the slice-A design fact): the genesis key speaks
+    for the genesis record's observer, an introduced key for the observer
+    its body names. A record's signature is tried against every key valid
+    for that record's OWN observer at its position — observer-agnostic
+    resolution would let one observer's record verify under another's key,
+    and authorship would stop being an answer.
+
+    Resolution consults the log and nothing else — no registry file, no
+    projection, no artifact beside the log (the ruled exclusivity claim).
+    ``verify`` is injected, never imported, same posture as :data:`Signer`.
+
+    Walks the whole log via :meth:`ArrivalLog.walk`, so structural
+    integrity is established for free; this is an O(n) surface where the
+    whole file is the question. Unsigned non-genesis records make no
+    authorship claim and produce no row. Returns one
+    :class:`KeyResolution` per verified signature, in log order; raises
+    :class:`AuthorshipUnverified` on the first signature that no valid key
+    verifies.
+    """
+    # observer -> [(key, introduced_ordinal)] in introduction order.
+    registry: dict[str, list[tuple[str, int]]] = {}
+    rows: list[KeyResolution] = []
+
+    for record in log.walk():
+        ordinal = record["ord"]
+        # The walk holds every record to the genesis's lineage, so this is
+        # one value for the whole loop; re-read per record for simplicity.
+        lineage = record["lin"]
+
+        if ordinal == 0:
+            # Genesis: self-certifying, and only here. The walk already held
+            # it to every structural genesis rule, key shape included.
+            key = record["body"]["key"]
+            digest = _commitment_of(record)
+            if not verify(key, record[_SIG], digest):
+                raise AuthorshipUnverified(
+                    "genesis signature does not verify against the founding "
+                    "key its own body carries — the log is not "
+                    "self-certifying",
+                    0,
+                )
+            registry[record["observer"]] = [(key, 0)]
+            rows.append(
+                KeyResolution(
+                    ordinal=0,
+                    observer=record["observer"],
+                    key=key,
+                    introduced_lineage=record["lin"],
+                    introduced_ordinal=0,
+                )
+            )
+            continue
+
+        if _SIG in record:
+            rows.append(_resolve(record, registry, lineage, verify))
+        if record["k"] == KEY_INTRODUCTION_KIND:
+            # The signature just verified under an already-valid key (the
+            # placement rules make an unsigned introduction unspellable),
+            # so the named key joins the registry at THIS ordinal: valid
+            # strictly after it, per the ruled clause.
+            named = record["body"]["observer"]
+            registry.setdefault(named, []).append((record["body"]["key"], ordinal))
+
+    return tuple(rows)
+
+
+def _resolve(
+    record: dict,
+    registry: dict[str, list[tuple[str, int]]],
+    lineage: str,
+    verify: Verify,
+) -> KeyResolution:
+    """Resolve the key that verifies ``record``'s signature, or refuse.
+
+    Tries, in introduction order, every key the log introduced for this
+    record's observer at a position strictly before the record's own. The
+    record's own body is deliberately never consulted — that would be
+    self-certification above ordinal 0, which the ruled rule forbids.
+    """
+    ordinal = record["ord"]
+    digest = _commitment_of(record)
+    candidates = [
+        (key, introduced)
+        for key, introduced in registry.get(record["observer"], [])
+        if introduced < ordinal
+    ]
+    for key, introduced in candidates:
+        if verify(key, record[_SIG], digest):
+            return KeyResolution(
+                ordinal=ordinal,
+                observer=record["observer"],
+                key=key,
+                introduced_lineage=lineage,
+                introduced_ordinal=introduced,
+            )
+    if not candidates:
+        raise AuthorshipUnverified(
+            f"no key valid for observer {record['observer']!r} at this "
+            "position — a key is valid at N only when introduced at a "
+            "position strictly before N",
+            ordinal,
+        )
+    raise AuthorshipUnverified(
+        f"signature verifies under none of the {len(candidates)} key(s) the "
+        f"log introduced for observer {record['observer']!r} before this "
+        "position",
+        ordinal,
+    )
+
+
+def _commitment_of(record: dict) -> str:
+    """The content commitment a record's signature covers."""
+    return content_commitment(
+        record["k"], record["at"], record["observer"], record["origin"],
+        record["body"],
+    )
 
 
 # ---------------------------------------------------------------------------

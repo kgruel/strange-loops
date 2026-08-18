@@ -187,7 +187,7 @@ class DeclarationUpdatePreview:
     mode: str  # "genesis" | "edit"
     declaration_status: str  # load_declaration_status label at plan time
     generation: dict[str, Any]  # declaration_generation() disclosure
-    canonical_mode: str  # "jsonl" | "sqlite"
+    canonical_mode: str  # engine.residence.canonical_mode's vocabulary
     canonical_path: Path
     index_path: Path
     changes: tuple  # lang.document.Change rows; () in genesis mode

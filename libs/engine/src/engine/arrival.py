@@ -64,6 +64,7 @@ __all__ = [
     "AppendRejected",
     "ArrivalLog",
     "ResumeMark",
+    "build_record",
     "arrival_path_for",
     "lock_path_for",
     "tmp_path_for",
@@ -90,14 +91,6 @@ RECORD_FIELDS = ("v", "lin", "ord", "prev", "at", "k", "observer", "origin", "bo
 _SIG = "sig"
 _RH = "rh"
 _ALLOWED = frozenset((*RECORD_FIELDS, _SIG, _RH))
-
-# The five content fields a signature covers (§2.8). Field-for-field the
-# existing fact content commitment — ``{kind, ts, observer, origin, payload}``
-# in ``sqlite_store._fact_commitment_hash`` — with the arrival names. The
-# coordinate is deliberately outside it: custody context, not authored
-# content, which is what keeps a signature verifying after a record is
-# carried into another store.
-_COMMITMENT_FIELDS = ("k", "at", "observer", "origin", "body")
 
 # JCS (RFC 8785) numeric domain — mirrors the guard ``jsonl_codec`` puts at
 # its own gate. An integer outside it is not canonicalizable, so a record

@@ -355,6 +355,31 @@ def test_a_record_landing_between_reconcile_and_append_is_never_skipped(
     assert [r["ord"] for r in records_of(tmp_path / "s.arrival")] == [0, 1, 2, 3]
 
 
+def test_a_mint_landing_inside_the_gap_is_consumed_not_crashed(
+    tmp_path, keys, signer, monkeypatch
+):
+    """The None-mark interleave, pinned as HANDLED: the log was empty when
+    this handle reconciled, and another process minted the genesis inside
+    the reconcile->append gap. Legal interleave is refuse-or-consume, never
+    crash — the append takes the gap path and catch-up consumes the fresh
+    genesis alongside our record."""
+    store = open_store(tmp_path)
+    try:
+        # Freeze reconciliation at the pre-mint answer: no log, no mark.
+        monkeypatch.setattr(store, "_reconcile", lambda: None)
+        log = mint(tmp_path, keys, signer)  # another process's movement 1
+        store.append(fact(message="raced-past-a-mint"))
+        ids = [
+            r[0] for r in store._db.execute("SELECT id FROM facts ORDER BY rowid")
+        ]
+        assert len(ids) == 1
+        offset = meta_int(store, ARRIVAL_OFFSET_KEY)
+        assert offset == (tmp_path / "s.arrival").stat().st_size
+    finally:
+        store.close()
+    assert [r["ord"] for r in records_of(log.path)] == [0, 1]
+
+
 def test_a_ceremony_racing_an_interloper_refuses_before_any_byte(
     tmp_path, keys, signer, monkeypatch
 ):

@@ -378,14 +378,13 @@ class ArrivalStore(SqliteStore[T], Generic[T]):
                 at=committed_row[2],
                 signer=self._fact_signer if is_fact else None,
             )
-            # A successful append implies the log held a head, and a log
-            # with a head implies the reconcile above stamped a mark — an
-            # empty log refuses the append (GenesisRefused) before this
-            # line. (A mint landing inside the reconcile->append gap is the
-            # one way this could trip; it surfaces here loudly rather than
-            # as a silent skip.)
-            assert consumed is not None, "append succeeded with no reconciled mark"
-            if record["ord"] != consumed.arrival_ordinal + 1:
+            # consumed is None on one REACHABLE interleave: the log was
+            # empty at reconcile time and another process minted the
+            # genesis inside the reconcile->append gap. Legal interleave is
+            # refuse-or-consume, never crash — so a missing reconciled mark
+            # takes the same gap path as a stale one: roll back and consume
+            # everything forward, the fresh genesis included.
+            if consumed is None or record["ord"] != consumed.arrival_ordinal + 1:
                 self._db.rollback()
                 self.catch_up()
                 return committed

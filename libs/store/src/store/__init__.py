@@ -7,6 +7,11 @@ This library maintains them.
 
 from ._transport_local import LocalTransport
 from .compact import CompactResult, compact_store
+from .derived_log_merge import (
+    DerivedLogMergeConflict,
+    DerivedLogMergeResult,
+    merge_derived_log,
+)
 from .merge import MergeResult, merge_store
 from .rebirth import (
     FactRow,
@@ -27,6 +32,9 @@ from .transport import PullResult, PushResult, Transport, pull_store, push_store
 __all__ = [
     "CompactResult",
     "compact_store",
+    "DerivedLogMergeConflict",
+    "DerivedLogMergeResult",
+    "merge_derived_log",
     "ExportResult",
     "export_jsonl",
     "FactRow",

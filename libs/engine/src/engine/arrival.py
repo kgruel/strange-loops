@@ -341,6 +341,50 @@ def _validate(record: dict, *, require_rh: bool) -> None:
         _check_hex(record[_RH], "rh")
 
 
+def _placement_fault(record: dict, ordinal: int) -> str | None:
+    """Why ``record`` may not sit at ``ordinal``, or None when it may.
+
+    One rule stated once, in both directions: **the genesis kind belongs at
+    ordinal 0 and nowhere else.** At 0 a record must satisfy every genesis
+    rule; above 0 it must not claim to be a genesis at all.
+
+    This exists as one function because the two directions were previously
+    checked in four places with three different sets of rules, and the gaps
+    between them were exactly the holes: a forged unsigned genesis walked
+    clean because only :meth:`ArrivalLog.genesis` demanded a signature, and
+    a second genesis could be appended at an interior ordinal because
+    nothing checked the kind on the way in. Callers differ only in the error
+    class they raise — opening a file that is not an arrival log, walking one
+    that has been tampered with, and refusing an append are three different
+    conversations about the same rule.
+    """
+    if ordinal == 0:
+        if record["k"] != GENESIS_KIND:
+            return f"first record has kind {record['k']!r}, not a genesis"
+        if record["ord"] != 0:
+            return f"first record carries ord {record['ord']!r}, not 0"
+        if record["prev"] is not None:
+            return "first record carries a prev — genesis opens the chain"
+        if _SIG not in record:
+            return (
+                "genesis carries no signature — genesis is the lineage's "
+                "attestation root"
+            )
+        claimed = record["body"].get("lineage")
+        if claimed != record["lin"]:
+            return (
+                f"genesis is not self-naming — body claims lineage {claimed!r} "
+                f"but the coordinate says {record['lin']!r}"
+            )
+        return None
+    if record["k"] == GENESIS_KIND:
+        return (
+            f"a genesis at ordinal {ordinal} — the genesis kind belongs at "
+            "ordinal 0 and nowhere else, and a lineage is opened once"
+        )
+    return None
+
+
 def content_commitment(
     k: str, at: float, observer: str, origin: str, body: dict
 ) -> str:
@@ -639,18 +683,9 @@ class ArrivalLog:
             record = decode_record(raw[:-1])
         except ArrivalGrammarError as exc:
             raise GenesisRefused(f"{self.path}: first record is not readable: {exc}") from exc
-        if record["ord"] != 0 or record["k"] != GENESIS_KIND or record["prev"] is not None:
-            raise GenesisRefused(
-                f"{self.path}: first record is not a genesis "
-                f"(ord={record['ord']!r}, k={record['k']!r})"
-            )
-        if _SIG not in record:
-            raise GenesisRefused(f"{self.path}: genesis carries no signature")
-        if record["body"].get("lineage") != record["lin"]:
-            raise GenesisRefused(
-                f"{self.path}: genesis is not self-naming — body claims lineage "
-                f"{record['body'].get('lineage')!r} but the coordinate says {record['lin']!r}"
-            )
+        fault = _placement_fault(record, 0)
+        if fault is not None:
+            raise GenesisRefused(f"{self.path}: {fault}")
         return record
 
     def lineage(self) -> str:
@@ -661,12 +696,19 @@ class ArrivalLog:
         """Every complete record in order, fully verified.
 
         Verifies, per record: that it decodes, that its ``rh`` recomputes
-        (inside :func:`decode_record`), that its lineage matches the
-        genesis's, that its ordinal is the next one — dense and ascending
-        from 0, so a gap or a repeat is caught — and that its ``prev`` names
-        its predecessor's ``rh``. Any failure raises
-        :class:`ArrivalCorrupt` naming the ordinal. Nothing is skipped and
-        nothing is truncated.
+        (inside :func:`decode_record`), that it may sit where it sits — the
+        full genesis rules at ordinal 0 and no genesis kind above it, via
+        :func:`_placement_fault` — that its lineage matches the genesis's,
+        that its ordinal is the next one — dense and ascending from 0, so a
+        gap or a repeat is caught — and that its ``prev`` names its
+        predecessor's ``rh``. Any failure raises :class:`ArrivalCorrupt`
+        naming the ordinal. Nothing is skipped and nothing is truncated.
+
+        The genesis rules are enforced HERE and not only in
+        :meth:`genesis`, because a walk that trusted position 0 without
+        judging it would read a forged unsigned genesis clean — and
+        :meth:`read` and :meth:`head` both reach their answer through this
+        walk, so the check has to live on the path they share.
 
         A trailing line with no ``\\n`` ends the walk without complaint. The
         reader holds no lock, so it cannot tell an interrupted append from
@@ -686,11 +728,10 @@ class ArrivalLog:
                     record = decode_record(raw[:-1])
                 except ArrivalGrammarError as exc:
                     raise ArrivalCorrupt(str(exc), expected) from exc
+                fault = _placement_fault(record, expected)
+                if fault is not None:
+                    raise ArrivalCorrupt(fault, expected)
                 if expected == 0:
-                    if record["k"] != GENESIS_KIND:
-                        raise ArrivalCorrupt(
-                            f"first record has kind {record['k']!r}, not a genesis", 0
-                        )
                     lineage = record["lin"]
                 elif record["lin"] != lineage:
                     raise ArrivalCorrupt(
@@ -769,13 +810,24 @@ class ArrivalLog:
     def resume_offset(self, mark: ResumeMark | None) -> int:
         """The byte offset ``mark`` licenses, or 0 when it does not.
 
-        Three checks, all of which must hold. The lineage must be this log's
-        — a mark from another lineage is not stale, it is a mark about a
-        different file, and pointing it here is meaningless. The offset must
-        land strictly on a record boundary and inside ``0..size``; a negative
-        offset is not a seek position to try, it is metadata that cannot be
-        true. And the record ending at the offset must carry the ordinal the
-        mark claims.
+        Four checks, all of which must hold. The mark's lineage must be this
+        log's — a mark from another lineage is not stale, it is a mark about
+        a different file, and pointing it here is meaningless. The offset
+        must land strictly on a record boundary and inside ``0..size``; a
+        negative offset is not a seek position to try, it is metadata that
+        cannot be true. The record ending at the offset must carry the
+        ordinal the mark claims. And that record's OWN ``lin`` must be the
+        genesis's: without it, a crafted interior record carrying a foreign
+        lineage — with a perfectly recomputing ``rh``, so it decodes clean —
+        becomes the anchor, and the tail walk that follows would take its
+        lineage expectation from the anchor and verify the rest of the file
+        against the attacker's lineage instead of the log's.
+
+        What these four do NOT establish, stated so the claim stays scoped:
+        that the anchor chains back to genesis. Verifying that is a walk of
+        the whole prefix, which is the cost the resume mark exists to avoid.
+        The mark is a cheap boundary check; :meth:`walk` is the integrity
+        statement.
 
         Rejection is not an error. The reader restarts from ordinal 0.
         """
@@ -798,6 +850,8 @@ class ArrivalLog:
             return 0
         record = self._record_ending_at(mark.arrival_offset)
         if record is None or record["ord"] != mark.arrival_ordinal:
+            return 0
+        if record["lin"] != lineage:
             return 0
         return mark.arrival_offset
 
@@ -829,13 +883,21 @@ class ArrivalLog:
         assert mark is not None  # offset > 0 only comes from a validated mark
         anchor = self._record_ending_at(offset)
         assert anchor is not None
-        return mark.arrival_ordinal + 1, self._walk_tail(offset, anchor)
+        # The lineage comes from the GENESIS, never from the anchor. An
+        # anchor is a record found at a byte offset a caller supplied, and
+        # letting it name the lineage would let it decide what the rest of
+        # the walk is checked against.
+        return mark.arrival_ordinal + 1, self._walk_tail(offset, anchor, self.lineage())
 
-    def _walk_tail(self, offset: int, anchor: dict) -> Iterator[dict]:
-        """:meth:`walk`'s verification, started from a validated anchor."""
+    def _walk_tail(self, offset: int, anchor: dict, lineage: str) -> Iterator[dict]:
+        """:meth:`walk`'s verification, started from a validated anchor.
+
+        ``lineage`` is the log's, established from its genesis by the caller.
+        The same per-record rules as :meth:`walk` — placement, lineage,
+        density, chain — with only the starting point moved.
+        """
         expected = anchor["ord"] + 1
         prev = anchor[_RH]
-        lineage = anchor["lin"]
         with self.path.open("rb") as fh:
             fh.seek(offset)
             for raw in fh:
@@ -845,6 +907,9 @@ class ArrivalLog:
                     record = decode_record(raw[:-1])
                 except ArrivalGrammarError as exc:
                     raise ArrivalCorrupt(str(exc), expected) from exc
+                fault = _placement_fault(record, expected)
+                if fault is not None:
+                    raise ArrivalCorrupt(fault, expected)
                 if record["lin"] != lineage:
                     raise ArrivalCorrupt(
                         f"record claims lineage {record['lin']!r}, "
@@ -952,7 +1017,14 @@ class ArrivalLog:
 
     @staticmethod
     def _check_follows(record: dict, head: dict) -> None:
-        """The three head checks. Refuse before a byte is written."""
+        """The head checks, plus placement. Refuse before a byte is written.
+
+        Placement is checked on the way IN as well as on the way out
+        (:meth:`walk`) because the two catch different things: the walk
+        catches a file someone hand-wrote, and this catches a caller — every
+        append funnels through here, so ``append`` and ``append_record``
+        are both covered.
+        """
         if record["lin"] != head["lin"]:
             raise AppendRejected(
                 f"candidate claims lineage {record['lin']!r}, "
@@ -968,6 +1040,9 @@ class ArrivalLog:
                 f"candidate's prev names {record['prev']!r}, "
                 f"but the head's rh is {head[_RH]!r}"
             )
+        fault = _placement_fault(record, record["ord"])
+        if fault is not None:
+            raise AppendRejected(f"candidate refused: {fault}")
 
     def _truncate_torn_tail(self) -> int:
         """Drop an unterminated final record. Returns the bytes cut.

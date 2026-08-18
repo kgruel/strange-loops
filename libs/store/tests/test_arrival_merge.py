@@ -616,6 +616,10 @@ def test_rederivation_reproduces_every_rowid_over_a_merged_store(tmp_path):
 # --- concurrent merges -------------------------------------------------------
 
 
+# Three mergers over a 60-record source: enough of an append phase that the
+# compare-and-swap window is genuinely contended rather than theoretical.
+_MERGERS = 3
+
 _MERGE_WORKER = """
     import sys
     import time
@@ -645,7 +649,7 @@ def test_concurrent_merges_never_double_append(tmp_path):
     _, source_db = arrival_store(
         tmp_path,
         "s",
-        facts=[_fact_body(f"01S{n}", f"s{n}") for n in range(12)],
+        facts=[_fact_body(f"01S{n:03d}", f"s{n}") for n in range(60)],
     )
 
     script = tmp_path / "merge_worker.py"
@@ -659,7 +663,7 @@ def test_concurrent_merges_never_double_append(tmp_path):
             stderr=subprocess.PIPE,
             text=True,
         )
-        for _ in range(2)
+        for _ in range(_MERGERS)
     ]
     for worker in workers:
         assert worker.stdout is not None
@@ -676,7 +680,7 @@ def test_concurrent_merges_never_double_append(tmp_path):
     assert len(body_ids) == len(set(body_ids)), (
         f"the log carries a row id twice: {body_ids}"
     )
-    assert sorted(body_ids) == sorted(["01T0", *(f"01S{n}" for n in range(12))])
+    assert sorted(body_ids) == sorted(["01T0", *(f"01S{n:03d}" for n in range(60))])
 
     # The index agrees, and the whole log is accounted for.
     from engine.jsonl_store import open_canonical_store

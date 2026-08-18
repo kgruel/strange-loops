@@ -85,6 +85,13 @@ def records_of(log_path: Path) -> list[dict]:
     return list(ArrivalLog(log_path).walk())
 
 
+def meta_int(store: ArrivalStore, key: str) -> int:
+    """A store_meta value the test KNOWS was stamped, as an int."""
+    value = store._meta_get(key)
+    assert value is not None, f"expected {key} to be stamped"
+    return int(value)
+
+
 # --- open + write path ------------------------------------------------------
 
 
@@ -146,8 +153,8 @@ def test_the_stamped_mark_is_the_ratified_three_fields_and_exact(
     try:
         store.append(fact())
         lineage = store._meta_get(ARRIVAL_LINEAGE_KEY)
-        offset = int(store._meta_get(ARRIVAL_OFFSET_KEY))
-        ordinal = int(store._meta_get(ARRIVAL_ORDINAL_KEY))
+        offset = meta_int(store, ARRIVAL_OFFSET_KEY)
+        ordinal = meta_int(store, ARRIVAL_ORDINAL_KEY)
     finally:
         store.close()
     assert lineage == log.lineage()
@@ -353,7 +360,7 @@ def test_a_record_landing_between_reconcile_and_append_is_never_skipped(
         ]
         assert "01RACE0000000000000000000A" in ids
         assert len(ids) == 3
-        offset = int(store._meta_get(ARRIVAL_OFFSET_KEY))
+        offset = meta_int(store, ARRIVAL_OFFSET_KEY)
         assert offset == (tmp_path / "s.arrival").stat().st_size
     finally:
         store.close()
@@ -480,7 +487,9 @@ def test_legacy_absorb_payload_is_untouched(tmp_path):
             observer="obs",
             fact_signer=lambda o, d: hashlib.sha256(f"{o}{d}".encode()).hexdigest(),
         )
-        row = store._conn.execute(
+        conn = store._conn
+        assert conn is not None
+        row = conn.execute(
             "SELECT id, payload FROM facts WHERE kind = ?", (DECL_GENESIS,)
         ).fetchone()
         payload = json.loads(row[1])

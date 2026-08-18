@@ -256,3 +256,8 @@ inside legacy modules (`sqlite_store.py`, `jsonl_store.py`, `preflight.py`,
 `compiler.py`, `ceremony.py`) carry pre-existing diagnostics (repo CI lints
 only `libs/custody` + `libs/sign`); my edits added none — the touched-file
 ruff total went 83 → 82 (one pre-existing SIM105 fixed in passing).
+
+**Erratum (r1, gate finding N1):** the pyright-clean claim above overstated —
+`libs/engine/tests/test_arrival_store.py` carried 7 errors under the repo
+config (unnarrowed `_meta_get`/`_conn` optionals). Fixed on
+`slice/arrival-authority-r1`; the file now checks at 0.

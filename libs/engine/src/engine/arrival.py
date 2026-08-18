@@ -49,7 +49,7 @@ import json
 import math
 import os
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import NoReturn, TypeGuard
@@ -72,6 +72,7 @@ __all__ = [
     "AppendRejected",
     "AuthorshipUnverified",
     "ArrivalLog",
+    "Entry",
     "KeyResolution",
     "ResumeMark",
     "Verify",
@@ -679,6 +680,29 @@ class ResumeMark:
     arrival_lineage: str
     arrival_offset: int
     arrival_ordinal: int
+
+
+@dataclass(frozen=True)
+class Entry:
+    """One record a batched append will assemble, minus its coordinate.
+
+    The coordinate — lineage, ordinal, ``prev`` — is the LOG's to assign, and
+    it can only be assigned under the lock, which is exactly why a caller
+    with several records to land hands over the parts it owns and lets
+    :meth:`ArrivalLog.append_marked_many` chain them.
+
+    There is deliberately no signer field. The one consumer is
+    :func:`store.merge_store`, which takes no signer and never will: the
+    target's operator holds no key for a foreign observer, and the grammar
+    makes record signatures optional above ordinal 0. A signer here would be
+    a parameter with no caller and an invitation to fabricate authorship.
+    """
+
+    k: str
+    body: dict
+    observer: str
+    origin: str = ""
+    at: float | None = None
 
 
 def _records_only(pairs: Iterator[tuple[dict, object]]) -> Iterator[dict]:
@@ -1310,6 +1334,81 @@ class ArrivalLog:
             arrival_lineage=record["lin"],
             arrival_offset=offset,
             arrival_ordinal=record["ord"],
+        )
+
+    def append_marked_many(
+        self, entries: Sequence[Entry], *, following: int | None = None
+    ) -> tuple[list[dict], ResumeMark]:
+        """Append several records under ONE lock acquisition, ONE fsync.
+
+        Not an optimization — a correctness primitive. :meth:`append_marked`
+        takes the flock per call, so two processes replaying the same source
+        into one target would both pass their dedup pass against the
+        pre-merge snapshot and both append row X: the log would carry one id
+        twice, and every verb in this design refuses such a log. That is the
+        worst artifact this cut could mint, so the whole append phase holds
+        the lock.
+
+        An outer lock plus per-record :meth:`append_marked` DEADLOCKS instead
+        of helping: ``_append_under_lock`` opens a second descriptor on the
+        same lock file, and ``flock`` is per open-file-description, so it
+        blocks within one process. Hence a primitive rather than a wrapper.
+
+        ``following`` is the compare-and-swap pin, checked under the lock
+        before any byte is written: it names the head ordinal the caller
+        deduped against, so a record that landed since then REFUSES
+        (:class:`AppendRejected`) rather than letting a stale dedup decide
+        what to append. A caller that sees the refusal re-reads and retries.
+
+        ONE trailing fsync is sound: a crash loses only an un-fsynced
+        suffix, or leaves one torn tail line that the truncate-under-lock
+        rule removes. Recovery is "re-run the merge" — dedup makes it
+        idempotent, which is the whole story to tell an operator about an
+        interrupted merge.
+        """
+        if not entries:
+            raise ArrivalError(
+                "append_marked_many was handed no entries — an empty append "
+                "is a caller bug, not a no-op to absorb"
+            )
+
+        self.lock_path.parent.mkdir(parents=True, exist_ok=True)
+        with self.lock_path.open("ab") as lock_fh:
+            fcntl.flock(lock_fh.fileno(), fcntl.LOCK_EX)
+            self._truncate_torn_tail()
+            head = self._tail_record()
+            if following is not None and head["ord"] != following:
+                raise AppendRejected(
+                    f"the log's head is at ordinal {head['ord']}, not the "
+                    f"expected {following} — records arrived since the "
+                    "caller reconciled"
+                )
+            records: list[dict] = []
+            encoded: list[str] = []
+            for entry in entries:
+                at_ = time.time() if entry.at is None else entry.at
+                record = build_record(
+                    lin=head["lin"], ordinal=head["ord"] + 1, prev=head[_RH],
+                    k=entry.k, body=entry.body, observer=entry.observer,
+                    origin=entry.origin, at=at_, sig=None,
+                )
+                # Every record is held to the same head checks a single
+                # append is, against the record before it — the chain is
+                # built here, so it is validated here.
+                self._check_follows(record, head)
+                encoded.append(encode_record(record) + "\n")
+                records.append(record)
+                head = record
+            with self.path.open("ab") as fh:
+                fh.write("".join(encoded).encode("utf-8"))
+                fh.flush()
+                os.fsync(fh.fileno())
+                offset = fh.tell()
+        last = records[-1]
+        return records, ResumeMark(
+            arrival_lineage=last["lin"],
+            arrival_offset=offset,
+            arrival_ordinal=last["ord"],
         )
 
     def append_record(self, record: dict) -> dict:

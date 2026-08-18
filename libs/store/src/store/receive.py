@@ -2,6 +2,14 @@
 
 The "other end" of push: validates the source is a SQLite database,
 then either copies it as a new store or merges into an existing one.
+
+The merge arm delegates to :func:`store.merge_store`, so it inherits that
+function's dispatch on the target's custody for free. The CREATE arm refuses
+when the target's ``.arrival`` sibling exists: copying a ``.db`` over a live
+arrival log's index would mint a second custody holder beside it — the one
+hazard the half-migrated shape names. Everything else is unchanged, because
+transport slices produce plain ``.db`` files and receiving one into a
+non-existent target still creates a plain sqlite store.
 """
 
 from __future__ import annotations
@@ -44,6 +52,8 @@ def receive_store(target: Path, source: Path) -> ReceiveResult:
     Raises:
         FileNotFoundError: If source does not exist.
         ValueError: If source is not a valid SQLite database.
+        engine.arrival_store.ArrivalCanonicalUnsupported: If the target does
+            not exist but its ``.arrival`` sibling does.
     """
     source = Path(source)
     target = Path(target)
@@ -52,6 +62,9 @@ def receive_store(target: Path, source: Path) -> ReceiveResult:
         raise FileNotFoundError(f"Source store not found: {source}")
 
     _validate_sqlite(source)
+
+    if not target.exists():
+        _refuse_copy_over_arrival_custody(target)
 
     if target.exists():
         result = merge_store(target, source)
@@ -75,6 +88,37 @@ def receive_store(target: Path, source: Path) -> ReceiveResult:
             conn.close()
 
         return ReceiveResult(status="created", facts=facts, ticks=ticks)
+
+
+def _refuse_copy_over_arrival_custody(target: Path) -> None:
+    """NON-NEGOTIABLE: never create a store by copy beside a live arrival log.
+
+    The target ``.db`` is absent, so the create arm would ``shutil.copy2``
+    the source over it — but if an ``.arrival`` sits beside it, that ``.db``
+    is not a store location at all: it is the derived index of a log that
+    holds custody. Copying there mints a second custody holder, and the
+    resulting index carries rows the log cannot account for. The store is
+    NOT absent; only its projection is, and a projection is built from its
+    log, never copied from a stranger.
+    """
+    from engine.probe import probe_target
+
+    info = probe_target(target)
+    if (
+        info.canonical_mode != "arrival"
+        or info.canonical_path is None
+        or not info.canonical_path.is_file()
+    ):
+        return
+    from engine.arrival_store import ArrivalCanonicalUnsupported
+
+    raise ArrivalCanonicalUnsupported(
+        f"{target} is the derived index of the arrival log at "
+        f"{info.canonical_path}, not an absent store — copying a foreign db "
+        "there would mint a second custody holder beside a live log. The "
+        "index is absent, not the store: open the log to build it, then "
+        "receive into it as a merge."
+    )
 
 
 def _validate_sqlite(path: Path) -> None:

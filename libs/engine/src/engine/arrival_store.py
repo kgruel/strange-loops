@@ -230,33 +230,51 @@ class ArrivalStore(SqliteStore[T], Generic[T]):
                 "store"
             )
 
-        resumed, records = self._log.walk_marked(mark)
-        if mark is not None and resumed == 0:
-            raise ArrivalCanonicalUnsupported(
-                f"{self._path} carries an arrival resume mark the log at "
-                f"{self._log.path} rejects — the index cannot be consumed "
-                "forward. Run engine.arrival_projection."
-                f"rederive_projections({str(self._log.path)!r}) to discard "
-                "the projection and rebuild it from the log"
-            )
-
-        consumed = 0
-        last_mark: ResumeMark | None = None
+        # Everything above is a read. Consuming is a WRITE, and the mark it
+        # decides from must be read under the same lock that the INSERTs
+        # take — otherwise two processes catching the same index up both
+        # read the pre-consume mark, both replay the same records, and the
+        # loser's INSERT collides on the primary key and is misreported as
+        # "the index holds state the log does not account for". Two
+        # concurrent opens of a behind store are ordinary (a merge does two
+        # of them), so the window is escalated to BEGIN IMMEDIATE and the
+        # mark re-read inside it. The loser then blocks, sees the winner's
+        # stamp, and consumes nothing.
+        #
+        # Escalated HERE and not at the top so the common case — an index
+        # already current — stays a lock-free read; catch-up runs on every
+        # open, and taking the write lock there would serialize every
+        # opener behind every other. The arrival APPEND lock is never taken:
+        # blocking every writer in the system to build a projection is what
+        # this design refuses.
+        self._db.execute("BEGIN IMMEDIATE")
         try:
+            mark = self._read_mark()
+            resumed, records = self._log.walk_marked(mark)
+            if mark is not None and resumed == 0:
+                raise ArrivalCanonicalUnsupported(
+                    f"{self._path} carries an arrival resume mark the log at "
+                    f"{self._log.path} rejects — the index cannot be consumed "
+                    "forward. Run engine.arrival_projection."
+                    f"rederive_projections({str(self._log.path)!r}) to discard "
+                    "the projection and rebuild it from the log"
+                )
+            last_mark: ResumeMark | None = None
             for record, record_mark in records:
                 self._index_record(record)
-                consumed += 1
                 last_mark = record_mark
+            self._restore_own_lineage()
+            if last_mark is not None:
+                self._stamp_mark(last_mark)
         except BaseException:
             self._db.rollback()
             raise
-        restored = self._restore_own_lineage()
-        if last_mark is None:
-            if restored:
-                self._db.commit()
-            return "synced"
-        self._stamp_mark(last_mark)
+        # Always closed, even when nothing was staged: BEGIN IMMEDIATE holds
+        # the write lock until the transaction ends, and a return that left
+        # it open would wedge every other writer.
         self._db.commit()
+        if last_mark is None:
+            return "synced"
         return "built" if mark is None else "tailed"
 
     def _restore_own_lineage(self) -> bool:
@@ -309,8 +327,9 @@ class ArrivalStore(SqliteStore[T], Generic[T]):
                 raise ArrivalCanonicalUnsupported(
                     f"the index at {self._path} refuses {t} {row[0]!r} from "
                     f"ordinal {record['ord']} ({exc}) — it holds state the "
-                    "log does not account for, and resolving that is "
-                    "projection re-derivation, a later cut"
+                    "log does not account for. Run engine.arrival_projection."
+                    f"rederive_projections({str(self._log.path)!r}) to "
+                    "discard the projection and rebuild it from the log"
                 ) from exc
 
     def _reconcile(self) -> ResumeMark | None:

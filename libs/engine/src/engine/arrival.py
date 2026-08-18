@@ -46,6 +46,7 @@ import time
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
+from typing import NoReturn, TypeGuard
 
 import rfc8785
 from ulid import ULID
@@ -221,7 +222,7 @@ def mint_lineage() -> str:
 # ---------------------------------------------------------------------------
 
 
-def _canonical_bytes(obj: object) -> bytes:
+def _canonical_bytes(obj: dict) -> bytes:
     """Canonical encoding for hashing: JCS, RFC 8785.
 
     The same canonicalization every commitment in this codebase hashes
@@ -232,11 +233,15 @@ def _canonical_bytes(obj: object) -> bytes:
     return rfc8785.dumps(obj)
 
 
-def _bad(message: str) -> None:
+def _bad(message: str) -> NoReturn:
+    """Refuse a record. ``NoReturn`` is load-bearing, not decoration: the
+    validators below call this instead of raising inline, and without it a
+    reader — human or type checker — cannot see that the checks are total,
+    so every subsequent use of the value looks conditional."""
     raise ArrivalGrammarError(message)
 
 
-def _is_int(value: object) -> bool:
+def _is_int(value: object) -> TypeGuard[int]:
     """A JSON integer. ``bool`` is excluded: ``True`` is an ``int`` in Python
     and would silently pass an ordinal check while encoding as ``true``."""
     return isinstance(value, int) and not isinstance(value, bool)
@@ -283,11 +288,17 @@ def _check_body(body: object) -> None:
         _bad(f"body is not canonicalizable under JCS: {exc}")
 
 
-def _validate(record: dict, *, require_rh: bool) -> None:
+def _validate(record: object, *, require_rh: bool) -> None:
     """The one grammar validator, run in both directions.
 
     ``require_rh`` is False while building a record (``rh`` is computed from
     the validated object) and True for anything read back off disk.
+
+    Takes ``object``, not ``dict``, and the annotation is doing real work:
+    :func:`decode_record` hands this whatever ``json.loads`` produced, which
+    may be a list or a string, and the first check below is what refuses
+    those. Narrowing the signature to ``dict`` would make that check look
+    dead to a reader and to a type checker while it stayed live at runtime.
     """
     if not isinstance(record, dict):
         _bad(f"a record must be a JSON object, got {type(record).__name__}")
@@ -301,7 +312,7 @@ def _validate(record: dict, *, require_rh: bool) -> None:
     if require_rh and _RH not in record:
         _bad("missing record field: rh")
 
-    if record["v"] != GRAMMAR_VERSION or not _is_int(record["v"]):
+    if not _is_int(record["v"]) or record["v"] != GRAMMAR_VERSION:
         _bad(f"unsupported grammar version {record['v']!r} (this build writes {GRAMMAR_VERSION})")
 
     if not isinstance(record["lin"], str) or not record["lin"]:
@@ -600,6 +611,9 @@ class ArrivalLog:
         self.path = Path(path)
         self.lock_path = lock_path_for(self.path)
         self.tmp_path = tmp_path_for(self.path)
+        # Memo for :meth:`_lineage_from`, keyed on the genesis line's bytes.
+        self._genesis_line: bytes | None = None
+        self._genesis_lineage: str | None = None
 
     # -- minting -------------------------------------------------------
 
@@ -706,10 +720,64 @@ class ArrivalLog:
         its rows was a hijack vector, and here the hazard dissolves rather
         than being defended against, because position 0 is structural.
         """
-        if not self.path.exists():
-            raise GenesisRefused(f"{self.path} does not exist")
-        with self.path.open("rb") as fh:
-            raw = fh.readline()
+        try:
+            with self.path.open("rb") as fh:
+                return self._genesis_from(fh)
+        except FileNotFoundError as exc:
+            raise GenesisRefused(f"{self.path} does not exist") from exc
+
+    def _genesis_from(self, fh) -> dict:
+        """Read and validate ordinal 0 from an ALREADY-OPEN handle.
+
+        Split out so :meth:`_tail_record` can reach the genesis through the
+        handle already open for the tail, rather than opening the same file
+        twice on every append. Seeks to 0 first: the caller may have the
+        handle positioned anywhere, and a genesis read that depended on
+        where someone else left the cursor would be a trap.
+        """
+        fh.seek(0)
+        return self._validated_genesis(fh.readline())
+
+    def _lineage_from(self, fh) -> str:
+        """The validated lineage, memoized on the genesis LINE BYTES.
+
+        The append path needs the lineage on every write, and re-deriving it
+        costs a JSON decode, an ``rh`` recompute and the genesis checks —
+        about a tenth of an append, which is worth not paying twice for the
+        same bytes.
+
+        **A cache hit is not a skipped validation.** The key is the exact
+        line the validated answer was derived from, so a hit means "these
+        bytes already passed, and validating them again is a pure function
+        returning the same result". That is the only cache shape allowed
+        here: the standing lesson of this module is that an adopted
+        authority gets validated at the adoption site, and a cache keyed on
+        anything weaker than the content — a path, an inode, an mtime —
+        would be a way to skip that. Reading the line to compare it costs
+        about 0.1 µs against the 15 µs it saves, so the strong key is also
+        the cheap one.
+
+        Staleness therefore cannot bite: the instance may outlive a
+        truncation, a re-mint at the same path, or a foreign edit, and every
+        one of those changes the bytes, misses, and revalidates. A
+        replacement whose genesis is byte-identical opens the same lineage,
+        so the cached answer is still the right one.
+        """
+        fh.seek(0)
+        raw = fh.readline()
+        # Snapshot both fields before comparing: a torn read across threads
+        # then misses and revalidates rather than pairing one entry's key
+        # with another's value.
+        cached_line, cached_lineage = self._genesis_line, self._genesis_lineage
+        if raw == cached_line and cached_lineage is not None:
+            return cached_lineage
+        lineage = self._validated_genesis(raw)["lin"]
+        self._genesis_lineage = lineage
+        self._genesis_line = raw  # published last, so the key implies the value
+        return lineage
+
+    def _validated_genesis(self, raw: bytes) -> dict:
+        """Decode one raw line and hold it to every genesis rule."""
         if not raw.endswith(b"\n"):
             raise GenesisRefused(
                 f"{self.path} holds no complete first record — not an arrival log"
@@ -843,8 +911,12 @@ class ArrivalLog:
         size = self._size()
         if size == 0:
             raise GenesisRefused(f"{self.path} is empty — mint a genesis first")
-        lineage = self.genesis()["lin"]  # refuses a file that is not an arrival log
         with self.path.open("rb") as fh:
+            # One handle for both reads. The genesis is validated on every
+            # append — see the docstring above for why it is not cached —
+            # and doing it through the handle already open for the tail
+            # keeps that check off the syscall budget.
+            lineage = self._lineage_from(fh)
             fh.seek(size - 1)
             if fh.read(1) != b"\n":
                 raise ArrivalError(
@@ -867,32 +939,9 @@ class ArrivalLog:
     def resume_offset(self, mark: ResumeMark | None) -> int:
         """The byte offset ``mark`` licenses, or 0 when it does not.
 
-        Four checks, all of which must hold. The mark's lineage must be this
-        log's — a mark from another lineage is not stale, it is a mark about
-        a different file, and pointing it here is meaningless. The offset
-        must land strictly on a record boundary and inside ``0..size``; a
-        negative offset is not a seek position to try, it is metadata that
-        cannot be true. The record ending at the offset must carry the
-        ordinal the mark claims. And that record's OWN ``lin`` must be the
-        genesis's: without it, a crafted interior record carrying a foreign
-        lineage — with a perfectly recomputing ``rh``, so it decodes clean —
-        becomes the anchor, and the tail walk that follows would take its
-        lineage expectation from the anchor and verify the rest of the file
-        against the attacker's lineage instead of the log's.
-
-        Fifth: the anchor must be allowed to sit where it claims to sit. A
-        record the full walk refuses — an interior genesis, say — must not
-        become a legal place to resume from, or the resume path consumes
-        straight past corruption the read path stops at.
-
-        What these checks do NOT establish, stated so the claim stays
-        scoped: that the anchor chains back to genesis, or that its claimed
-        ordinal is its physical position. Verifying either is a walk of the
-        whole prefix, which is the cost the resume mark exists to avoid. The
-        mark is a cheap boundary check; :meth:`walk` is the integrity
-        statement.
-
-        Rejection is not an error. The reader restarts from ordinal 0.
+        The checks live in :meth:`_anchor_for`, which is where the anchor is
+        actually adopted; this is the offset-only view of its answer.
+        Rejection is not an error — the reader restarts from ordinal 0.
         """
         adopted = self._anchor_for(mark)
         return 0 if adopted is None else adopted[0]
@@ -904,8 +953,32 @@ class ArrivalLog:
         once and applies every check, and both :meth:`resume_offset` and
         :meth:`walk_from` consume its answer. They used to validate and
         re-read separately, which meant the place where the anchor actually
-        became an authority was not the place the checks lived — the same
-        proxy shape that made this a review finding twice.
+        became an authority was not the place the checks lived — the proxy
+        shape behind two rounds of findings.
+
+        Five checks, all of which must hold:
+
+        1. The mark's lineage is this log's. A mark from another lineage is
+           not stale, it is a mark about a different file, and pointing it
+           here is meaningless.
+        2. The offset is an integer inside ``0..size``. A negative offset is
+           not a seek position to try, it is metadata that cannot be true.
+        3. It lands strictly on a record boundary.
+        4. The record ending there carries the ordinal the mark claims.
+        5. That record may be adopted as an authority
+           (:func:`_authority_fault`) — its own lineage is the genesis's,
+           and it may sit where it claims to sit. Without the first half, a
+           crafted interior record with a foreign lineage and a recomputing
+           ``rh`` becomes the anchor and the tail walk verifies the rest of
+           the file against the attacker's lineage. Without the second, a
+           record the full walk refuses becomes a legal place to resume
+           from, and the resume path consumes straight past corruption the
+           read path stops at.
+
+        What these do NOT establish is in :func:`_authority_fault`: the
+        anchor is checked for self-consistency, never for chaining back to
+        genesis. The mark is a cheap boundary check; :meth:`walk` is the
+        integrity statement.
 
         Returns ``(offset, anchor, lineage)``, the lineage always the
         genesis's and never the anchor's.
@@ -1048,8 +1121,8 @@ class ArrivalLog:
 
         The primitive the grammar describes: append VALIDATES, it never
         assigns. A candidate assembled elsewhere — carried in from another
-        store, replayed, rebuilt — passes through exactly the same three
-        checks against the head that :meth:`append` does. ``rh`` may be
+        store, replayed, rebuilt — passes through exactly the same head
+        checks that :meth:`append` does. ``rh`` may be
         omitted and is then computed over the validated object; supplied, it
         must match, so a candidate carried in with its own digest is checked
         rather than trusted.

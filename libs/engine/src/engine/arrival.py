@@ -1372,11 +1372,7 @@ class ArrivalLog:
                 "is a caller bug, not a no-op to absorb"
             )
 
-        self.lock_path.parent.mkdir(parents=True, exist_ok=True)
-        with self.lock_path.open("ab") as lock_fh:
-            fcntl.flock(lock_fh.fileno(), fcntl.LOCK_EX)
-            self._truncate_torn_tail()
-            head = self._tail_record()
+        with self._locked_head() as head:
             if following is not None and head["ord"] != following:
                 raise AppendRejected(
                     f"the log's head is at ordinal {head['ord']}, not the "
@@ -1432,25 +1428,36 @@ class ArrivalLog:
 
         return self._append_under_lock(build)[0]
 
-    def _append_under_lock(self, build: Callable[[dict], dict]) -> tuple[dict, int]:
-        """The whole write sequence, indivisible. Returns the record and the
-        byte offset just past its newline, both read under the lock.
+    @contextlib.contextmanager
+    def _locked_head(self) -> Iterator[dict]:
+        """Hold the append lock and yield the head record.
 
-        Acquire, truncate any torn tail, read the head, build, validate,
-        encode, write, fsync, release. Truncation lives here and only here:
-        the lock is what makes "no append is in progress" knowable, and it is
-        the only condition under which an unterminated tail can be called
-        torn instead of in flight.
-
-        fsync and not merely flush: the record must outlive a power cut, not
-        merely a process crash. That was strong reasoning when the line was
-        one of two copies; it is not optional now that it is the only one.
+        Every append opens this way: acquire, truncate any torn tail, read
+        the head. Truncation lives here and only here — the lock is what
+        makes "no append is in progress" knowable, and it is the only
+        condition under which an unterminated tail can be called torn
+        instead of in flight. The lock is per open-file-description, so it
+        releases exactly when this ``with`` closes the descriptor; every
+        byte a caller writes must land inside the block.
         """
         self.lock_path.parent.mkdir(parents=True, exist_ok=True)
         with self.lock_path.open("ab") as lock_fh:
             fcntl.flock(lock_fh.fileno(), fcntl.LOCK_EX)
             self._truncate_torn_tail()
-            head = self._tail_record()
+            yield self._tail_record()
+
+    def _append_under_lock(self, build: Callable[[dict], dict]) -> tuple[dict, int]:
+        """The whole write sequence, indivisible. Returns the record and the
+        byte offset just past its newline, both read under the lock.
+
+        Acquire and read the head (:meth:`_locked_head`), then build,
+        validate, encode, write, fsync, release.
+
+        fsync and not merely flush: the record must outlive a power cut, not
+        merely a process crash. That was strong reasoning when the line was
+        one of two copies; it is not optional now that it is the only one.
+        """
+        with self._locked_head() as head:
             record = build(head)
             self._check_follows(record, head)
             line = encode_record(record)  # the grammar gate, rh included

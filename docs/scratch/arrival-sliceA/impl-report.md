@@ -26,8 +26,8 @@ the reason string says the `.jsonl` is a projection), and probing the
 `.jsonl` itself in that configuration classifies as the new `derived_log`
 type — a projection, not a store, `writable=False`. `_probe_vertex` computes
 mode through `residence.canonical_mode`, removing the second spelling of the
-switch. Tests: `test_probe_arrival_matrix.py` (14 tests, all three entry
-points).
+switch. Tests: `test_probe_arrival_matrix.py` (13 tests, all three entry
+points, plus a whole-matrix "exactly one custody holder" pin).
 
 **§9.2 — residence.** `canonical_mode(declared) -> "arrival"|"jsonl"|"sqlite"`
 replaces the deleted boolean; `index_path_for` gains the arrival arm
@@ -188,6 +188,9 @@ restored and the suite re-run green:
   same pin-shedding test.
 - **Store — structural-kind skip removed from `_index_record`**: 16
   failures across the store suite and both G2 tests.
+- **Probe — the half-migrated tie broken the wrong way** (arrival-sibling
+  checks conditioned on no legacy log): 4 failures, including all three
+  half-migrated pins and the one-custody-holder matrix pin.
 - **Ratchet — Rule 18 growth bites**: `JSONL_OFFSET_PROBE = 1` appended to
   residence.py fails the denylist scan; removed, green.
 
@@ -195,7 +198,7 @@ restored and the suite re-run green:
 
 | suite | baseline (pre-change) | final |
 | --- | --- | --- |
-| `libs/engine/tests` | 1621 passed, 1 skipped | **1663 passed, 1 skipped** |
+| `libs/engine/tests` | 1621 passed, 1 skipped | **1676 passed, 1 skipped** |
 | `tests/architecture` | 98 passed | **98 passed** |
 | `libs/sdk/tests` | — | 313 passed |
 | `libs/store/tests` | — | 131 passed |

@@ -62,6 +62,43 @@ def _open(path: Path, *, read_only: bool = False) -> sqlite3.Connection:
     return conn
 
 
+def refuse_create_over_arrival_custody(target: Path, action: str) -> None:
+    """Refuse to create a store where an arrival log already holds custody.
+
+    NON-NEGOTIABLE (decision:design/arrival-sliceB-projections, invariant
+    15). The target ``.db`` is absent, so a create arm would happily mint a
+    store there — but if an ``.arrival`` sits beside it, that path is not a
+    store location at all: it is the derived index of a log that holds
+    custody. Writing there mints a SECOND custody holder, and the resulting
+    index carries rows the log cannot account for.
+
+    The store is not absent; only its projection is. A projection is built
+    from its log, never written by a stranger.
+
+    ``action`` names what the caller was about to do, so the refusal reads
+    as a sentence at each site. One home for the rule because two create
+    arms need it and a second spelling is a second thing to get wrong.
+    """
+    from engine.probe import probe_target
+
+    info = probe_target(target)
+    if (
+        info.canonical_mode != "arrival"
+        or info.canonical_path is None
+        or not info.canonical_path.is_file()
+    ):
+        return
+    from engine.arrival_store import ArrivalCanonicalUnsupported
+
+    raise ArrivalCanonicalUnsupported(
+        f"{target} is the derived index of the arrival log at "
+        f"{info.canonical_path}, not an absent store — {action} there would "
+        "mint a second custody holder beside a live log. The index is "
+        "absent, not the store: open the log to build its index, or choose "
+        "a target that is not an arrival log's derived index."
+    )
+
+
 def _create(path: Path) -> sqlite3.Connection:
     """Create a fresh store with canonical schema.
 

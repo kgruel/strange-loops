@@ -11,6 +11,7 @@ gated.
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import os
@@ -37,13 +38,20 @@ from engine.arrival import (
 WRITERS = 4
 APPENDS = 250
 
+# A shape-valid founding key (the wire format is raw-32-byte base64). The
+# stand-in signer below is not a real algorithm, so nothing here verifies
+# against it — verification is test_arrival_authority's subject.
+_KEY = base64.b64encode(b"k" * 32).decode()
+
 
 def _sign(observer: str, commitment: str) -> str:
     return "sig:" + hashlib.sha256(f"{observer}/{commitment}".encode()).hexdigest()
 
 
 def _mint(tmp_path, name: str = "alcove") -> ArrivalLog:
-    return ArrivalLog.mint(tmp_path / f"{name}.arrival", observer="kyle", signer=_sign)
+    return ArrivalLog.mint(
+        tmp_path / f"{name}.arrival", observer="kyle", signer=_sign, key=_KEY
+    )
 
 
 def _run(script: str, *args: str, tmp_path, name: str = "worker") -> subprocess.Popen:
@@ -508,14 +516,16 @@ def _rechain_from(log: ArrivalLog, start: int, mutations: dict) -> None:
 # ---------------------------------------------------------------------------
 
 _GENESIS_WORKER = """
-    import hashlib, sys
+    import base64, hashlib, sys
     from engine.arrival import ArrivalLog, GenesisRefused
 
     def sign(observer, commitment):
         return "sig:" + hashlib.sha256(f"{observer}/{commitment}".encode()).hexdigest()
 
+    KEY = base64.b64encode(b"k" * 32).decode()
+
     try:
-        ArrivalLog.mint(sys.argv[1], observer="kyle", signer=sign)
+        ArrivalLog.mint(sys.argv[1], observer="kyle", signer=sign, key=KEY)
     except GenesisRefused as exc:
         print("REFUSED", exc)
         sys.exit(3)
@@ -543,7 +553,9 @@ def test_gate_two_processes_racing_genesis_produce_exactly_one_log(tmp_path):
 
 def test_a_failed_mint_leaves_no_staging_behind(tmp_path):
     with pytest.raises(GenesisRefused):
-        ArrivalLog.mint(tmp_path / "s.arrival", observer="kyle", signer=lambda o, c: None)
+        ArrivalLog.mint(
+            tmp_path / "s.arrival", observer="kyle", signer=lambda o, c: None, key=_KEY
+        )
     assert list(tmp_path.iterdir()) == []
 
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 
@@ -30,6 +31,11 @@ from engine.arrival import (
 def _sign(observer: str, commitment: str) -> str:
     """A deterministic stand-in signer with the store's injected shape."""
     return "sig:" + hashlib.sha256(f"{observer}/{commitment}".encode()).hexdigest()
+
+
+# A shape-valid founding key (raw-32-byte base64 wire format). Grammar tests
+# only need the shape; cryptographic verification is the authority suite's.
+_KEY = base64.b64encode(b"k" * 32).decode()
 
 
 def _record(**over) -> dict:
@@ -222,10 +228,14 @@ def test_decode_refuses_a_future_grammar_version():
 
 
 def test_genesis_is_signed_at_ordinal_zero_and_self_naming(tmp_path):
-    log = ArrivalLog.mint(tmp_path / "alcove.arrival", observer="kyle", signer=_sign)
+    log = ArrivalLog.mint(tmp_path / "alcove.arrival", observer="kyle", signer=_sign, key=_KEY)
     genesis = log.genesis()
     assert (genesis["ord"], genesis["prev"], genesis["k"]) == (0, None, GENESIS_KIND)
-    assert genesis["body"] == {"protocol": GRAMMAR_VERSION, "lineage": genesis["lin"]}
+    assert genesis["body"] == {
+        "protocol": GRAMMAR_VERSION,
+        "lineage": genesis["lin"],
+        "key": _KEY,
+    }
     assert genesis["sig"] == _sign(
         "kyle",
         content_commitment(
@@ -234,29 +244,58 @@ def test_genesis_is_signed_at_ordinal_zero_and_self_naming(tmp_path):
     )
 
 
-def test_genesis_body_is_minimal():
-    """Documents and migration pins belong to the slice that has history
-    behind a genesis; a fresh log has none."""
-    log_body_keys = {"protocol", "lineage"}
+def test_genesis_body_is_the_ratified_three_fields():
+    """The adoption genesis body is {protocol, lineage, key} and nothing
+    else (decision:design/arrival-sliceA-authority §2.3): the document set
+    is movement 2 at ordinal >= 1, era pins dissolve under the dense
+    ordinal, and containment claims belong to the migration sidecar."""
     import tempfile
     from pathlib import Path
 
     with tempfile.TemporaryDirectory() as d:
-        log = ArrivalLog.mint(Path(d) / "s.arrival", observer="kyle", signer=_sign)
-        assert set(log.genesis()["body"]) == log_body_keys
+        log = ArrivalLog.mint(
+            Path(d) / "s.arrival", observer="kyle", signer=_sign, key=_KEY
+        )
+        assert set(log.genesis()["body"]) == {"protocol", "lineage", "key"}
+
+
+def test_a_keyless_genesis_is_refused(tmp_path):
+    """The founding key is required at ordinal 0 for a live-store genesis;
+    the keyless variant is the migration sidecar's open question, not this
+    grammar's."""
+    body = {"protocol": GRAMMAR_VERSION, "lineage": "LIN"}
+    record = build_record(
+        lin="LIN", ordinal=0, prev=None, k=GENESIS_KIND, body=body,
+        observer="kyle", origin="", at=1.0, sig="sig:x",
+    )
+    path = tmp_path / "s.arrival"
+    path.write_text(encode_record(record) + "\n")
+    with pytest.raises(GenesisRefused, match="founding key"):
+        ArrivalLog(path).genesis()
+
+
+@pytest.mark.parametrize(
+    "bad", ["", "not-base64!!", base64.b64encode(b"short").decode()]
+)
+def test_a_malformed_founding_key_is_refused_at_mint(tmp_path, bad):
+    with pytest.raises(GenesisRefused, match="malformed"):
+        ArrivalLog.mint(tmp_path / "s.arrival", observer="kyle", signer=_sign, key=bad)
+    assert not (tmp_path / "s.arrival").exists()
 
 
 def test_an_unsigned_genesis_is_refused(tmp_path):
     with pytest.raises(GenesisRefused, match="unsigned"):
-        ArrivalLog.mint(tmp_path / "s.arrival", observer="kyle", signer=lambda o, c: None)
+        ArrivalLog.mint(
+            tmp_path / "s.arrival", observer="kyle", signer=lambda o, c: None, key=_KEY
+        )
     assert not (tmp_path / "s.arrival").exists()
     assert not (tmp_path / "s.arrival.tmp").exists()
 
 
 def test_minting_over_an_existing_log_is_refused(tmp_path):
-    ArrivalLog.mint(tmp_path / "s.arrival", observer="kyle", signer=_sign)
+    ArrivalLog.mint(tmp_path / "s.arrival", observer="kyle", signer=_sign, key=_KEY)
     with pytest.raises(GenesisRefused, match="already exists"):
-        ArrivalLog.mint(tmp_path / "s.arrival", observer="kyle", signer=_sign)
+        ArrivalLog.mint(tmp_path / "s.arrival", observer="kyle", signer=_sign, key=_KEY)
     assert not (tmp_path / "s.arrival.tmp").exists()
 
 
@@ -282,7 +321,7 @@ def test_a_genesis_that_is_not_self_naming_is_refused(tmp_path):
 
 
 def test_append_writes_the_coordinate_into_the_record(tmp_path):
-    log = ArrivalLog.mint(tmp_path / "s.arrival", observer="kyle", signer=_sign)
+    log = ArrivalLog.mint(tmp_path / "s.arrival", observer="kyle", signer=_sign, key=_KEY)
     lin = log.lineage()
     records = [log.append("note", {"i": i}, observer="kyle") for i in range(3)]
     assert [r["ord"] for r in records] == [1, 2, 3]
@@ -291,7 +330,7 @@ def test_append_writes_the_coordinate_into_the_record(tmp_path):
 
 
 def test_prev_chains_from_record_zero(tmp_path):
-    log = ArrivalLog.mint(tmp_path / "s.arrival", observer="kyle", signer=_sign)
+    log = ArrivalLog.mint(tmp_path / "s.arrival", observer="kyle", signer=_sign, key=_KEY)
     for i in range(4):
         log.append("note", {"i": i}, observer="kyle")
     walked = list(log.walk())
@@ -300,7 +339,7 @@ def test_prev_chains_from_record_zero(tmp_path):
 
 
 def test_ordinary_records_may_be_unsigned_and_may_be_signed(tmp_path):
-    log = ArrivalLog.mint(tmp_path / "s.arrival", observer="kyle", signer=_sign)
+    log = ArrivalLog.mint(tmp_path / "s.arrival", observer="kyle", signer=_sign, key=_KEY)
     assert "sig" not in log.append("note", {}, observer="kyle")
     assert "sig" in log.append("note", {}, observer="kyle", signer=_sign)
 
@@ -318,7 +357,7 @@ def test_append_record_refuses_a_candidate_that_does_not_follow_the_head(
 ):
     from engine.arrival import AppendRejected
 
-    log = ArrivalLog.mint(tmp_path / "s.arrival", observer="kyle", signer=_sign)
+    log = ArrivalLog.mint(tmp_path / "s.arrival", observer="kyle", signer=_sign, key=_KEY)
     head = log.head()
     fields = {
         "lin": head["lin"], "ordinal": head["ord"] + 1, "prev": head["rh"],
@@ -332,7 +371,7 @@ def test_append_record_refuses_a_candidate_that_does_not_follow_the_head(
 
 
 def test_append_record_accepts_a_well_placed_candidate(tmp_path):
-    log = ArrivalLog.mint(tmp_path / "s.arrival", observer="kyle", signer=_sign)
+    log = ArrivalLog.mint(tmp_path / "s.arrival", observer="kyle", signer=_sign, key=_KEY)
     head = log.head()
     log.append_record(
         build_record(
@@ -344,7 +383,7 @@ def test_append_record_accepts_a_well_placed_candidate(tmp_path):
 
 
 def test_read_by_ordinal_and_head(tmp_path):
-    log = ArrivalLog.mint(tmp_path / "s.arrival", observer="kyle", signer=_sign)
+    log = ArrivalLog.mint(tmp_path / "s.arrival", observer="kyle", signer=_sign, key=_KEY)
     for i in range(3):
         log.append("note", {"i": i}, observer="kyle")
     assert log.read(2)["body"] == {"i": 1}

@@ -385,6 +385,41 @@ def _placement_fault(record: dict, ordinal: int) -> str | None:
     return None
 
 
+def _authority_fault(record: dict, lineage: str) -> str | None:
+    """Why ``record`` may not be ADOPTED AS AN AUTHORITY, or None when it may.
+
+    An authority is an existing on-disk record the code takes as a starting
+    point and derives from: the head an append chains onto, the anchor a
+    resume walk continues from. Reading a record forward and adopting one as
+    a premise are different acts, and only the first was ever checked —
+    twice, review found the same residual shape, because a rule enforced on
+    the way past a record says nothing about a record you never walked to.
+
+    So: validate at every adoption site, not at a proxy for it. A record may
+    be adopted when it decodes and its ``rh`` recomputes (the caller's
+    :func:`decode_record` established that), when it may sit at the ordinal
+    it claims (:func:`_placement_fault`), and when it belongs to this log's
+    lineage.
+
+    What adoption does NOT establish, and deliberately: that the record
+    chains back to genesis, or that its claimed ordinal matches its physical
+    position in the file. Both need a walk of the whole prefix, which is the
+    O(n) cost these O(1) paths exist to avoid. The residual is narrow —
+    density is re-checked from the adopted record onward, so a hostile
+    coordinate is refused one record later — and :meth:`ArrivalLog.walk` is
+    the integrity statement whenever the whole file is the question.
+    """
+    fault = _placement_fault(record, record["ord"])
+    if fault is not None:
+        return fault
+    if record["lin"] != lineage:
+        return (
+            f"record claims lineage {record['lin']!r}, "
+            f"but this log's lineage is {lineage!r}"
+        )
+    return None
+
+
 def content_commitment(
     k: str, at: float, observer: str, origin: str, body: dict
 ) -> str:
@@ -714,6 +749,14 @@ class ArrivalLog:
         reader holds no lock, so it cannot tell an interrupted append from
         one that is in flight this instant, and it must assume the kinder of
         the two.
+
+        **This is a generator: calling it validates nothing.** Every check
+        above runs as records are pulled, so ``log.walk()`` on its own is
+        not an integrity test and must not be used as one — ``list(...)``
+        it, or iterate it to the end. The laziness is deliberate (a caller
+        reading the first ten records of a large log should not pay for the
+        rest), and it is worth naming because "I called walk and it did not
+        raise" is a natural and wrong way to read this code.
         """
         if not self.path.exists():
             return
@@ -787,10 +830,20 @@ class ArrivalLog:
         quadratic. The record's own ``rh`` still recomputes here, so a tail
         that has been edited is caught; whole-log density and chain
         verification stay :meth:`walk`'s job.
+
+        The head is ADOPTED AS AN AUTHORITY — the next record's coordinate
+        and ``prev`` are derived from it — so it is validated as one
+        (:func:`_authority_fault`), and the genesis is read first to
+        establish what this log's lineage actually is. Without that, a log
+        whose ordinal-0 record is an unsigned or foreign genesis kept
+        accepting appends and growing, which is worse than a refused write:
+        honest-looking records accumulating on top of a tampered one is
+        exactly what makes the tamper hard to see later.
         """
         size = self._size()
         if size == 0:
             raise GenesisRefused(f"{self.path} is empty — mint a genesis first")
+        lineage = self.genesis()["lin"]  # refuses a file that is not an arrival log
         with self.path.open("rb") as fh:
             fh.seek(size - 1)
             if fh.read(1) != b"\n":
@@ -801,9 +854,13 @@ class ArrivalLog:
             fh.seek(start)
             raw = fh.read(size - 1 - start)
         try:
-            return decode_record(raw)
+            record = decode_record(raw)
         except ArrivalGrammarError as exc:
             raise ArrivalCorrupt(str(exc), -1) from exc
+        fault = _authority_fault(record, lineage)
+        if fault is not None:
+            raise ArrivalCorrupt(f"cannot append onto this head: {fault}", record["ord"])
+        return record
 
     # -- resume --------------------------------------------------------
 
@@ -823,37 +880,58 @@ class ArrivalLog:
         lineage expectation from the anchor and verify the rest of the file
         against the attacker's lineage instead of the log's.
 
-        What these four do NOT establish, stated so the claim stays scoped:
-        that the anchor chains back to genesis. Verifying that is a walk of
-        the whole prefix, which is the cost the resume mark exists to avoid.
-        The mark is a cheap boundary check; :meth:`walk` is the integrity
+        Fifth: the anchor must be allowed to sit where it claims to sit. A
+        record the full walk refuses — an interior genesis, say — must not
+        become a legal place to resume from, or the resume path consumes
+        straight past corruption the read path stops at.
+
+        What these checks do NOT establish, stated so the claim stays
+        scoped: that the anchor chains back to genesis, or that its claimed
+        ordinal is its physical position. Verifying either is a walk of the
+        whole prefix, which is the cost the resume mark exists to avoid. The
+        mark is a cheap boundary check; :meth:`walk` is the integrity
         statement.
 
         Rejection is not an error. The reader restarts from ordinal 0.
         """
+        adopted = self._anchor_for(mark)
+        return 0 if adopted is None else adopted[0]
+
+    def _anchor_for(self, mark: ResumeMark | None) -> tuple[int, dict, str] | None:
+        """Adopt ``mark``'s anchor, or None when the mark cannot be trusted.
+
+        The single adoption site for the resume path: it reads the anchor
+        once and applies every check, and both :meth:`resume_offset` and
+        :meth:`walk_from` consume its answer. They used to validate and
+        re-read separately, which meant the place where the anchor actually
+        became an authority was not the place the checks lived — the same
+        proxy shape that made this a review finding twice.
+
+        Returns ``(offset, anchor, lineage)``, the lineage always the
+        genesis's and never the anchor's.
+        """
         if mark is None:
-            return 0
+            return None
         if not self.path.exists():
-            return 0
+            return None
         try:
             lineage = self.lineage()
         except (GenesisRefused, ArrivalError):
-            return 0
+            return None
         if mark.arrival_lineage != lineage:
-            return 0
+            return None
         if not _is_int(mark.arrival_offset) or not _is_int(mark.arrival_ordinal):
-            return 0
+            return None
         if mark.arrival_offset == 0:
-            return 0  # nothing consumed; identical to a fresh start
-        size = self._size()
-        if not 0 <= mark.arrival_offset <= size:
-            return 0
-        record = self._record_ending_at(mark.arrival_offset)
-        if record is None or record["ord"] != mark.arrival_ordinal:
-            return 0
-        if record["lin"] != lineage:
-            return 0
-        return mark.arrival_offset
+            return None  # nothing consumed; identical to a fresh start
+        if not 0 <= mark.arrival_offset <= self._size():
+            return None
+        anchor = self._record_ending_at(mark.arrival_offset)
+        if anchor is None or anchor["ord"] != mark.arrival_ordinal:
+            return None
+        if _authority_fault(anchor, lineage) is not None:
+            return None
+        return mark.arrival_offset, anchor, lineage
 
     def _record_ending_at(self, offset: int) -> dict | None:
         """The record whose ``\\n`` is the byte before ``offset``, or None
@@ -877,17 +955,15 @@ class ArrivalLog:
         that persists progress learns it is starting over instead of
         discovering it by ordinal.
         """
-        offset = self.resume_offset(mark)
-        if offset == 0:
+        adopted = self._anchor_for(mark)
+        if adopted is None:
             return 0, self.walk()
-        assert mark is not None  # offset > 0 only comes from a validated mark
-        anchor = self._record_ending_at(offset)
-        assert anchor is not None
+        offset, anchor, lineage = adopted
         # The lineage comes from the GENESIS, never from the anchor. An
         # anchor is a record found at a byte offset a caller supplied, and
         # letting it name the lineage would let it decide what the rest of
         # the walk is checked against.
-        return mark.arrival_ordinal + 1, self._walk_tail(offset, anchor, self.lineage())
+        return anchor["ord"] + 1, self._walk_tail(offset, anchor, lineage)
 
     def _walk_tail(self, offset: int, anchor: dict, lineage: str) -> Iterator[dict]:
         """:meth:`walk`'s verification, started from a validated anchor.

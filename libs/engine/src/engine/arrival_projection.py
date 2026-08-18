@@ -124,6 +124,32 @@ def has_rows(conn: sqlite3.Connection) -> bool:
     return False
 
 
+def _projects(record: dict) -> bool:
+    """Does this record project at all — and is it a record we may project?
+
+    The classification BOTH projections make, spelled once. It is the same
+    question in both directions (an index row and a derived-log line are two
+    encodings of one row-class body), and the two projections answering it
+    separately is how they would come to disagree about a store.
+
+    ``False`` is the structural class — genesis, key introductions. Their
+    bodies are not codec objects at all (the codec refuses them on unknown
+    fields), and skipping them loses nothing: their content lives in the
+    arrival log, which is the store. An unrecognized kind is neither class
+    and refuses here, once, for both callers.
+    """
+    kind = record["k"]
+    if kind in _STRUCTURAL_KINDS:
+        return False
+    if kind not in _ROW_KINDS:
+        _unsupported(
+            f"record kind {kind!r} at ordinal {record['ord']} is not one "
+            "this store's projections know how to derive — refusing rather "
+            "than silently dropping it"
+        )
+    return True
+
+
 def rows_of_record(record: dict) -> list[tuple[str, tuple]]:
     """The index rows one arrival record expands to, in order.
 
@@ -132,20 +158,11 @@ def rows_of_record(record: dict) -> list[tuple[str, tuple]]:
     and the re-deriver end up disagreeing about a store, which is the one
     disagreement this cut cannot tolerate.
 
-    Structural records — genesis, key introductions — expand to **no rows**.
-    Their bodies are not codec objects (the codec would refuse them on
-    unknown fields), and their content is not lost by being skipped: it
-    lives in the arrival log, which is the store.
+    Structural records expand to **no rows** — see :func:`_projects`, which
+    is also where an unknown kind is refused.
     """
-    kind = record["k"]
-    if kind in _STRUCTURAL_KINDS:
+    if not _projects(record):
         return []
-    if kind not in _ROW_KINDS:
-        _unsupported(
-            f"record kind {kind!r} at ordinal {record['ord']} is not one "
-            "this index knows how to consume — refusing rather than "
-            "silently dropping it"
-        )
     return records_from_object(record["body"])
 
 
@@ -180,19 +197,13 @@ def line_of_record(record: dict) -> str | None:
     not codec objects at all. Their content is not lost: it lives in the
     arrival log, which is the store.
 
-    Same arms and the same refusal as :func:`rows_of_record`, from the same
-    two constants, so the index and the derived log can never disagree about
-    which records project.
+    Not "the same arms as :func:`rows_of_record`" but literally the same
+    call: both wrap :func:`_projects` and differ only in the terminal codec
+    encoding, so the index and the derived log cannot disagree about which
+    records project.
     """
-    kind = record["k"]
-    if kind in _STRUCTURAL_KINDS:
+    if not _projects(record):
         return None
-    if kind not in _ROW_KINDS:
-        _unsupported(
-            f"record kind {kind!r} at ordinal {record['ord']} is not one "
-            "this projection knows how to derive — refusing rather than "
-            "silently dropping it"
-        )
     return serialize_object(record["body"])
 
 

@@ -9,18 +9,12 @@ available answer, so it is pinned here from all three entry points: the
 
 from __future__ import annotations
 
-import base64
-import hashlib
 from pathlib import Path
 
 from engine.arrival import ArrivalLog
 from engine.probe import probe_target
-
-_KEY = base64.b64encode(b"k" * 32).decode()
-
-
-def _sign(observer: str, commitment: str) -> str:
-    return "sig:" + hashlib.sha256(f"{observer}/{commitment}".encode()).hexdigest()
+from tests.conftest import STUB_KEY as _KEY
+from tests.conftest import stub_sign as _sign
 
 
 def _mint(tmp_path: Path) -> Path:

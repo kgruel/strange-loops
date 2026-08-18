@@ -886,3 +886,53 @@ tests still pass (`3 passed, 12 deselected`).
   that file but not that function.
 - Everything in the "could not verify" list above still stands unverified.
   In particular there is still no performance measurement.
+
+## F1 follow-up — `slice.py` joins the guard
+
+Arbiter-ruled under the rationale Kyle ratified for F1 (keep the invariant
+whole rather than store-by-store). This closes the residue named above.
+
+New head after this fix: **`b2a55154`**. `libs/store/tests` **174 passed**
+(from 172), `tests/architecture` **98 passed**.
+
+`slice_store` was the third and last `_create` caller without the guard.
+Slicing makes the hazard worse than receive or rebirth do: a slice writes a
+FILTERED subset, so a minted index at a live log's derived-index location
+would disagree with the log about **content** as well as about custody — a
+store that looks populated and is quietly missing rows. The check runs before
+the schema is written, so a refusal leaves no file and no WAL/SHM sidecar,
+which the test asserts rather than assumes.
+
+Written refusal-first: the test was added before the guard and failed with
+`DID NOT RAISE ArrivalCanonicalUnsupported`, then went green with the guard
+in place.
+
+### Power proofs
+
+```
+### PROOF F1s-a: the guard's call site removed from slice
+FAILED test_slice.py::TestSliceArrivalCustody::test_slice_refuses_to_write_over_a_live_arrival_logs_index
+1 failed, 20 passed in 0.14s
+
+### PROOF F1s-b: the guard neutered at its one home — ALL THREE call sites go red in one run
+FAILED test_arrival_merge.py::test_receive_refuses_to_copy_over_a_live_arrival_logs_index
+FAILED test_rebirth.py::test_rebirth_refuses_to_write_over_a_live_arrival_logs_index
+FAILED test_slice.py::TestSliceArrivalCustody::test_slice_refuses_to_write_over_a_live_arrival_logs_index
+3 failed, 171 passed in 10.70s
+RESTORED (empty diff above)
+```
+
+F1s-b is the exhibit the unified guard earns: one function, three call arms,
+and a single mutation takes all three down. That is what "the invariant is
+whole" means operationally — there is no fourth spelling left to drift.
+
+### Residue after this fix
+
+`_conn._create` now has **no unguarded caller in `libs/store`** (`slice`,
+`rebirth`, `receive`). The guard is still a call each arm makes rather than
+something `_create` enforces — so a FUTURE create arm would have to remember
+it. Folding the check into `_create` itself would close that permanently and
+is the obvious next form; I did not do it here because it changes the
+behaviour of a shared primitive for every caller at once, which is a decision
+worth making deliberately rather than as the tail of a remediation. Named,
+not fixed.

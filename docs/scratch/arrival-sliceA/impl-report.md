@@ -11,7 +11,9 @@ Implementer: sliceA-impl. Date: 2026-08-18.
 2. `d9a1686a` feat(engine): residence grows the arrival answer; probe's .arrival arm
 3. `f345fb7b` feat(engine): ArrivalStore — rows land in the log first; ceremonies re-point
 4. `1b920fc1` test(arch): Rule 18 judges the funnel; the two unavoidable names carry entries
-5. (this report's commit)
+5. `083eb0c1` docs(scratch): cut-A implementation report
+6. `2d862367` test(engine): the probe classification matrix under the arrival mode
+7. fix(engine): the reconcile→append race (this report's final commit)
 
 ## What was built, per doc §9
 
@@ -167,6 +169,33 @@ custody coordinate.
    C2 residual (which is about `_authority_fault`, and stays at its
    confirmed width — no chain-to-genesis proof was added to any O(1) path).
 
+## Post-review fix: the reconcile→append race
+
+Advisor review before close found a real gap: `_write` reconciled without a
+lock, so a fact/tick-kind record another writer landed in the log between
+the reconcile and the append would be skipped forever — the stamped mark
+claiming consumption it never performed, silently. Fixed two ways, matched
+to what each path can afford:
+
+- `_write` detects the gap by the append's own coordinate (not the
+  reconciled ordinal + 1 ⇒ an interloper landed), rolls the staged INSERT
+  back — our record is already durable in the log — and catch-up consumes
+  everything forward, interloper included. No data loss, no retry needed.
+- `_ceremony_persist` cannot resolve a gap after the fact (the record it
+  would strand is the ceremony itself), so it pins the append to the
+  reconciled head via `append_marked(..., following=)` — a new
+  compare-and-swap arm checked UNDER the log's lock — and a race refuses
+  (`AppendRejected`) before any byte is written: the ceremony rolls back
+  with the log byte-identical and is retryable.
+
+Known residual crash window, stated for cut B to inherit rather than
+rediscover: a crash between the arrival-mode ceremony's log fsync and its
+sqlite COMMIT leaves the `_decl.genesis` record durable with the
+`own_lineage` marker unstamped; catch-up tails the row in, after which
+`_own_lineage_in_txn` answers AmbiguousGenesis and `adopt_lineage` refuses
+— a dead end until cut B's restamp verb. The correct refusal posture for
+this cut, but a real state.
+
 ## Mutation-verification demonstrations
 
 Each invariant test was shown to fail under a targeted break, then the code
@@ -191,6 +220,10 @@ restored and the suite re-run green:
 - **Probe — the half-migrated tie broken the wrong way** (arrival-sibling
   checks conditioned on no legacy log): 4 failures, including all three
   half-migrated pins and the one-custody-holder matrix pin.
+- **Store — write gap guard removed** (`if False:`): fails
+  `test_a_record_landing_between_reconcile_and_append_is_never_skipped`.
+- **Store — ceremony `following=` pin dropped**: fails
+  `test_a_ceremony_racing_an_interloper_refuses_before_any_byte`.
 - **Ratchet — Rule 18 growth bites**: `JSONL_OFFSET_PROBE = 1` appended to
   residence.py fails the denylist scan; removed, green.
 
@@ -198,7 +231,7 @@ restored and the suite re-run green:
 
 | suite | baseline (pre-change) | final |
 | --- | --- | --- |
-| `libs/engine/tests` | 1621 passed, 1 skipped | **1676 passed, 1 skipped** |
+| `libs/engine/tests` | 1621 passed, 1 skipped | **1678 passed, 1 skipped** |
 | `tests/architecture` | 98 passed | **98 passed** |
 | `libs/sdk/tests` | — | 313 passed |
 | `libs/store/tests` | — | 131 passed |

@@ -1255,6 +1255,7 @@ class ArrivalLog:
         origin: str = "",
         at: float | None = None,
         signer: Signer | None = None,
+        following: int | None = None,
     ) -> tuple[dict, ResumeMark]:
         """:meth:`append`, also returning the mark that resumes just past it.
 
@@ -1264,9 +1265,21 @@ class ArrivalLog:
         the record it just wrote persists this mark and later resumes
         through :meth:`walk_from`, which re-validates the anchor at the
         adoption site.
+
+        ``following`` names the head ordinal the caller expects. Checked
+        under the lock, so a record that landed since the caller last
+        looked refuses (:class:`AppendRejected`) BEFORE any byte is
+        written — the compare-and-swap shape for a consumer whose staged
+        state must not silently skip an interloper.
         """
 
         def build(headr: dict) -> dict:
+            if following is not None and headr["ord"] != following:
+                raise AppendRejected(
+                    f"the log's head is at ordinal {headr['ord']}, not the "
+                    f"expected {following} — records arrived since the "
+                    "caller reconciled"
+                )
             at_ = time.time() if at is None else at
             sig = (
                 signer(observer, content_commitment(k, at_, observer, origin, body))

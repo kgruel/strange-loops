@@ -314,6 +314,84 @@ def test_an_index_without_its_log_refuses(tmp_path, keys, signer):
         open_store(tmp_path)
 
 
+# --- the reconcile->append race ----------------------------------------------
+
+
+def _interloper(log: ArrivalLog, message: str, ident: str) -> dict:
+    """A fact-kind record appended straight to the log by another writer."""
+    return log.append(
+        "fact",
+        {
+            "t": "fact",
+            "id": ident,
+            "kind": "note",
+            "ts": 2.0,
+            "observer": "kyle",
+            "origin": "",
+            "payload": json.dumps({"message": message}),
+        },
+        observer="kyle",
+    )
+
+
+def test_a_record_landing_between_reconcile_and_append_is_never_skipped(
+    tmp_path, keys, signer, monkeypatch
+):
+    """The mark must never claim consumption it did not perform: a record
+    another writer lands in the gap rolls the staged INSERT back and
+    catch-up consumes everything forward, interloper included."""
+    log = mint(tmp_path, keys, signer)
+    store = open_store(tmp_path)
+    try:
+        store.append(fact(message="one"))
+        # Freeze reconciliation, then land an interloper in the gap.
+        monkeypatch.setattr(store, "_reconcile", lambda: None)
+        _interloper(log, "raced", "01RACE0000000000000000000A")
+        store.append(fact(message="two"))
+        ids = [
+            r[0] for r in store._db.execute("SELECT id FROM facts ORDER BY rowid")
+        ]
+        assert "01RACE0000000000000000000A" in ids
+        assert len(ids) == 3
+        offset = int(store._meta_get(ARRIVAL_OFFSET_KEY))
+        assert offset == (tmp_path / "s.arrival").stat().st_size
+    finally:
+        store.close()
+    # And the log holds all four records, densely.
+    assert [r["ord"] for r in records_of(tmp_path / "s.arrival")] == [0, 1, 2, 3]
+
+
+def test_a_ceremony_racing_an_interloper_refuses_before_any_byte(
+    tmp_path, keys, signer, monkeypatch
+):
+    from engine.arrival import AppendRejected
+
+    log = mint(tmp_path, keys, signer)
+    store = open_store(tmp_path, fact_signer=signer)
+    try:
+        store.append(fact(message="one"))
+        monkeypatch.setattr(store, "_sync_derived_state", lambda: None)
+        monkeypatch.setattr(store, "_reconcile", lambda: None)
+        _interloper(log, "raced", "01RACE0000000000000000000B")
+        before = (tmp_path / "s.arrival").read_bytes()
+        with pytest.raises(AppendRejected, match="arrived since"):
+            store.absorb_genesis(_docs(), observer="kyle", fact_signer=signer)
+        # zero residue: the log is byte-identical and sqlite rolled back
+        assert (tmp_path / "s.arrival").read_bytes() == before
+        assert store._db.execute(
+            "SELECT COUNT(*) FROM facts WHERE kind = ?", (DECL_GENESIS,)
+        ).fetchone()[0] == 0
+        assert store._db.execute(
+            "SELECT value FROM store_meta WHERE key = 'own_lineage'"
+        ).fetchone() is None
+        monkeypatch.undo()
+        # retryable: reconcile consumes the interloper, the absorb lands
+        receipt = store.absorb_genesis(_docs(), observer="kyle", fact_signer=signer)
+        assert receipt["lineage"] == log.lineage()
+    finally:
+        store.close()
+
+
 # --- ceremonies --------------------------------------------------------------
 
 

@@ -318,8 +318,19 @@ class ArrivalStore(SqliteStore[T], Generic[T]):
         the injected ``fact_signer`` over the arrival commitment; the same
         callable, a different digest, and the composing layer's
         domain-separation prefix already binds both to this store family.
+
+        A record another writer lands in the log between the reconcile and
+        the append would otherwise be skipped forever: our record arrives
+        one ordinal later and the stamped mark would claim consumption it
+        never performed. The append's own coordinate is the tell — when it
+        is not the reconciled ordinal plus one, the staged INSERT rolls
+        back (our record is already durable in the log) and catch-up
+        consumes everything forward instead, the interloper included. The
+        returned signature is the committed row's either way: catch-up
+        re-inserts the identical row verbatim from the record's body.
         """
         self._reconcile()
+        consumed = self._read_mark()
         serialize_row(row)  # codec pre-flight on the assembled row
         try:
             self._db.execute(sql, row)
@@ -328,7 +339,7 @@ class ArrivalStore(SqliteStore[T], Generic[T]):
             )
             committed = committed_row[-1]  # signature is the last column
             body = json.loads(serialize_row(committed_row))
-            _, mark = self._log.append_marked(
+            record, mark = self._log.append_marked(
                 "fact" if is_fact else "tick",
                 body,
                 observer=committed_row[3] if is_fact else committed_row[1],
@@ -336,6 +347,10 @@ class ArrivalStore(SqliteStore[T], Generic[T]):
                 at=committed_row[2],
                 signer=self._fact_signer if is_fact else None,
             )
+            if consumed is None or record["ord"] != consumed.arrival_ordinal + 1:
+                self._db.rollback()
+                self.catch_up()
+                return committed
             self._stamp_mark(mark)
             self._db.commit()
             return committed
@@ -357,11 +372,20 @@ class ArrivalStore(SqliteStore[T], Generic[T]):
         ``fact`` record; several as one ``batch`` record — one record is the
         log's atomicity unit, so recovery can never expose a partial
         ceremony.
+
+        ``following`` pins the append to the head the ceremony reconciled
+        against: a record another writer lands mid-ceremony REFUSES the
+        append before any byte is written (``AppendRejected``), the
+        caller's transaction rolls back with the log byte-identical, and
+        the ceremony is simply retryable — unlike :meth:`_write`, this path
+        cannot resolve a gap after the fact, because the record it would
+        have made durable is the ceremony itself.
         """
         if len(rows) > 1:
             k, line = "batch", serialize_batch(rows)
         else:
             k, line = "fact", serialize_fact_row(rows[0])
+        consumed = self._read_mark()
         _, mark = self._log.append_marked(
             k,
             json.loads(line),
@@ -369,6 +393,7 @@ class ArrivalStore(SqliteStore[T], Generic[T]):
             origin=rows[0][4],
             at=rows[0][2],
             signer=self._fact_signer,
+            following=None if consumed is None else consumed.arrival_ordinal,
         )
         self._stamp_mark(mark)
 

@@ -766,3 +766,123 @@ refusal, and unconditional derived-log regeneration after a merge.
 8. **The driver is not registered anywhere**, by design (wave 2). So its
    real-world behaviour is exercised only by the fixture repo, never by this
    repo's own git.
+
+---
+
+# Post-gate remediation (2026-08-18)
+
+Gate verdict: findings NON-BLOCKING. Kyle ratified deviation #9 — the Rule 18
+`+1` allowlist entry **stands as shipped** — and ordered two scoped fixes.
+Nothing above this section was amended; the counts and hashes in it remain
+true of the state they describe.
+
+Base for this work: `ef1022be`. New head: **`7fdc7bbd`**.
+
+| Suite | Before remediation | After |
+|---|---|---|
+| `libs/store/tests` | 170 passed | **172 passed** |
+| `tests/architecture` | 98 passed | **98 passed** |
+
+## F1 — `rebirth_store` lacked the invariant-15 guard
+
+`store/rebirth.py`'s create arm went straight to `_conn._create`, which
+refuses a target that EXISTS but will happily mint a plain sqlite store at a
+path whose `.db` is absent while its `.arrival` sibling is present. That path
+is not an absent store — it is the derived index of a log that holds custody,
+so writing there puts a second custody holder beside a live log and the
+resulting index carries rows the log cannot account for. Exactly the hazard
+`receive_store` was guarded against at B6.
+
+The guard runs **before any work**, so a refused rebirth costs no transform
+pass.
+
+### Judgment call inside this fix, flagged
+
+I gave the refusal **one home** rather than a second copy:
+`_conn.refuse_create_over_arrival_custody(target, action)`, with `action`
+naming what the caller was about to do so the message reads as a sentence at
+each site. `receive.py`'s private `_refuse_copy_over_arrival_custody` is gone
+in favour of it.
+
+That touches `receive.py`, which the remediation order did not name — but two
+create arms disagreeing about when a store location is really a projection is
+precisely the confusion invariant 15 exists to prevent, and a duplicated
+custody refusal is a second thing to get wrong. Proof F1-b below is what makes
+the shared home worth it: neutering the single guard turns **both** call sites
+red in one run.
+
+`slice.py` also calls `_create` and is **not** guarded. I did not extend the
+fix there: the order scoped this to rebirth, and slicing into an arrival log's
+index location is the same hazard but a separate call with its own tests. It
+is named here rather than silently left.
+
+### Power proofs
+
+```
+### PROOF F1-a: the guard's call site removed from rebirth
+FAILED libs/store/tests/test_rebirth.py::test_rebirth_refuses_to_write_over_a_live_arrival_logs_index
+1 failed, 21 passed in 0.15s
+
+### PROOF F1-b: the guard neutered at its one home (both call sites go red)
+FAILED libs/store/tests/test_arrival_merge.py::test_receive_refuses_to_copy_over_a_live_arrival_logs_index
+FAILED libs/store/tests/test_rebirth.py::test_rebirth_refuses_to_write_over_a_live_arrival_logs_index
+2 failed, 170 passed in 9.85s
+RESTORED (empty diff above)
+```
+
+The asymmetric pair is `test_rebirth_refuses_to_write_over_a_live_arrival_logs_index`
+(refusal, written first — and asserting no `.db` and no `-wal` sidecar are
+left behind) and `test_rebirth_into_a_plain_target_is_unaffected` (the happy
+path, asserted unchanged).
+
+## F2 — the driver's stderr carried a RuntimeWarning
+
+Before:
+
+```
+$ python -m store.derived_log_merge
+<frozen runpy>:128: RuntimeWarning: 'store.derived_log_merge' found in sys.modules
+after import of package 'store', but prior to execution of 'store.derived_log_merge';
+this may result in unpredictable behaviour
+usage: python -m store.derived_log_merge %O %A %B
+```
+
+The cause was mine at B5: re-exporting the driver from `store/__init__.py`
+makes `-m` load the module twice — once through the package, once as
+`__main__`. git relays driver stderr, so this reached a user on every merge,
+on the one surface whose whole job is to say clearly why a merge was refused.
+
+Fixed by **dropping the re-export** rather than by splitting out a CLI module.
+Smaller, and more honest: the driver is tooling over store artifacts, not part
+of this lib's runtime API, and its interface is the `python -m` entry. Nothing
+outside `__init__.py` used the top-level name. A comment now states why the
+export is absent, so the next person to notice the gap does not close it and
+re-introduce the warning.
+
+This also resolves the fence-adjacent edit flagged in the B5 section: the
+export surface is back to base. (`__init__.py` is not byte-identical to base —
+it carries that comment — so the deliberate absence has a reason attached.)
+
+After:
+
+```
+$ uv run --no-sync --package store python -m store.derived_log_merge   # stderr only
+usage: python -m store.derived_log_merge %O %A %B
+
+$ uv run --no-sync --package store python -m store.derived_log_merge base.jsonl a.jsonl b.jsonl
+exit=0
+stderr bytes:        0
+merged lines:        2
+```
+
+Zero bytes on stderr for a successful run. The three `git merge` subprocess
+tests still pass (`3 passed, 12 deselected`).
+
+## What this remediation did NOT do
+
+- No re-litigation of any ratified deviation; #9 stands as shipped.
+- `slice.py`'s unguarded `_create` — named above, deliberately not fixed.
+- The pre-existing ruff PTH123 in `receive.py:96` is still there; I edited
+  that file but not that function.
+- Everything in the "could not verify" list above still stands unverified.
+  In particular there is still no performance measurement.

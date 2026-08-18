@@ -461,7 +461,22 @@ def test_the_resume_mark_is_checkable_against_the_log_alone(tmp_path):
 
 def test_gate_a_reader_never_sees_a_partial_record_and_never_truncates(tmp_path):
     """Reads take no lock, so the reader must treat an unterminated tail as
-    possibly in flight rather than torn."""
+    possibly in flight rather than torn.
+
+    What this test can and cannot show, stated rather than assumed. Because
+    an append reaches disk in one write syscall (see
+    :func:`test_a_real_sigkill_cannot_tear_an_append`), a concurrent reader
+    on this platform never actually observes a partial record — so the
+    "never sees a partial record" half is confirmed here rather than
+    stressed. What this test does exercise for real is that an unlocked
+    reader running against live writers always sees a dense, intact prefix
+    and never shortens the file.
+
+    The other half — that a reader handed an unterminated tail leaves it
+    alone instead of consuming or cutting it — is deterministic and lives in
+    :func:`test_the_read_path_leaves_a_torn_tail_alone`, which plants the
+    partial bytes rather than hoping to catch them.
+    """
     log = _mint(tmp_path)
     writers = [
         _run(_APPEND_WORKER, str(log.path), "120", f"w{n}",

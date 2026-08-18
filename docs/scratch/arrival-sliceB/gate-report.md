@@ -32,8 +32,9 @@ Both as briefed. `feat/arrival-libs` is itself at `39ea67f5`, so
 ### The slice's own tests
 
 ```
-$ uv run --no-sync --package engine pytest libs/engine/tests/test_arrival_rederivation_rowids.py -q
-5 passed
+$ uv run --no-sync --package engine pytest libs/engine/tests/test_arrival_rederivation_rowids.py -q -p no:randomly
+.....                                                                    [100%]
+5 passed in 0.26s
 ```
 
 ### The gate's own probe (`gate_oracle.py`, written here, not by the implementer)
@@ -103,8 +104,9 @@ one this cut's merge rewrite establishes.
 ### The slice's subprocess tests
 
 ```
-$ uv run --no-sync --package store pytest libs/store/tests/test_derived_log_merge.py -q
-15 passed
+$ uv run --no-sync --package store pytest libs/store/tests/test_derived_log_merge.py -q -p no:randomly
+...............                                                          [100%]
+15 passed in 0.75s
 ```
 
 ### The gate's own fixture repo

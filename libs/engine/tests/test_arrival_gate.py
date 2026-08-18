@@ -11,8 +11,6 @@ gated.
 
 from __future__ import annotations
 
-import base64
-import hashlib
 import json
 import os
 import signal
@@ -34,18 +32,15 @@ from engine.arrival import (
     encode_record,
     record_hash,
 )
+from tests.conftest import STUB_KEY, stub_sign
 
 WRITERS = 4
 APPENDS = 250
 
-# A shape-valid founding key (the wire format is raw-32-byte base64). The
-# stand-in signer below is not a real algorithm, so nothing here verifies
-# against it — verification is test_arrival_authority's subject.
-_KEY = base64.b64encode(b"k" * 32).decode()
-
-
-def _sign(observer: str, commitment: str) -> str:
-    return "sig:" + hashlib.sha256(f"{observer}/{commitment}".encode()).hexdigest()
+# Shape-valid key + stand-in signer from the shared kit; nothing here
+# verifies a signature — verification is test_arrival_authority's subject.
+_KEY = STUB_KEY
+_sign = stub_sign
 
 
 def _mint(tmp_path, name: str = "alcove") -> ArrivalLog:

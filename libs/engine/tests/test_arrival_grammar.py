@@ -27,15 +27,10 @@ from engine.arrival import (
     tmp_path_for,
 )
 
-
-def _sign(observer: str, commitment: str) -> str:
-    """A deterministic stand-in signer with the store's injected shape."""
-    return "sig:" + hashlib.sha256(f"{observer}/{commitment}".encode()).hexdigest()
-
-
-# A shape-valid founding key (raw-32-byte base64 wire format). Grammar tests
-# only need the shape; cryptographic verification is the authority suite's.
-_KEY = base64.b64encode(b"k" * 32).decode()
+# Grammar tests only need a shape-valid key and a stand-in signer;
+# cryptographic verification is the authority suite's subject.
+from tests.conftest import STUB_KEY as _KEY
+from tests.conftest import stub_sign as _sign
 
 
 def _record(**over) -> dict:

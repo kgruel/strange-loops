@@ -67,15 +67,21 @@ import sqlite3
 from pathlib import Path
 from typing import Any, Generic, TypeVar
 
-from .arrival import ArrivalLog, GenesisRefused, ResumeMark
+from .arrival import (
+    GENESIS_KIND,
+    KEY_INTRODUCTION_KIND,
+    ArrivalLog,
+    GenesisRefused,
+    ResumeMark,
+)
 from .jsonl_codec import (
     deserialize_records,
     serialize_batch,
     serialize_fact_row,
     serialize_tick_row,
 )
-from .jsonl_store import _as_int
-from .residence import canonical_for
+from .jsonl_store import _as_int, _stamped_offset_current
+from .residence import canonical_for, index_path_for
 from .sqlite_store import (
     FACT_INSERT_SQL,
     TICK_INSERT_SQL,
@@ -101,9 +107,11 @@ ARRIVAL_ORDINAL_KEY = "arrival_ordinal"
 
 # Record classes this index consumes into rows, and the structural kinds it
 # walks past. Anything else refuses: a kind this indexer does not know is
-# not a kind it may silently drop.
+# not a kind it may silently drop. The row-class literals mirror the line
+# codec's "t" discriminators (its sibling idiom); the structural kinds are
+# the grammar's own constants.
 _ROW_KINDS = frozenset(("fact", "tick", "batch"))
-_STRUCTURAL_KINDS = frozenset(("genesis", "key"))
+_STRUCTURAL_KINDS = frozenset((GENESIS_KIND, KEY_INTRODUCTION_KIND))
 
 T = TypeVar("T")
 
@@ -134,12 +142,14 @@ class ArrivalStore(SqliteStore[T], Generic[T]):
 
     def __init__(self, *, log_path: Path | None = None, **kwargs: Any) -> None:
         super().__init__(**kwargs)
-        self._log_path = (
+        self._log = ArrivalLog(
             Path(log_path)
             if log_path is not None
             else canonical_for(self._path, "arrival")
         )
-        self._log = ArrivalLog(self._log_path)
+        # The mark the last ceremony-path reconcile verified — see
+        # _sync_derived_state / _ceremony_persist.
+        self._reconciled_mark: ResumeMark | None = None
         try:
             self._ensure_fact_signature_column()
             self._ensure_chain_columns()
@@ -158,7 +168,7 @@ class ArrivalStore(SqliteStore[T], Generic[T]):
     @property
     def log_path(self) -> Path:
         """The arrival log this store's sqlite index derives from."""
-        return self._log_path
+        return self._log.path
 
     @property
     def _db(self) -> sqlite3.Connection:
@@ -199,7 +209,7 @@ class ArrivalStore(SqliteStore[T], Generic[T]):
 
     def _log_size(self) -> int:
         try:
-            return self._log_path.stat().st_size
+            return self._log.path.stat().st_size
         except OSError:
             return 0
 
@@ -226,7 +236,7 @@ class ArrivalStore(SqliteStore[T], Generic[T]):
             if self._has_rows() or mark is not None:
                 raise ArrivalCanonicalUnsupported(
                     f"{self._path} carries index state but there is no "
-                    f"arrival log at {self._log_path} — an index without its "
+                    f"arrival log at {self._log.path} — an index without its "
                     "log cannot be reconciled; restore the log or open the "
                     "db as a plain sqlite store"
                 )
@@ -244,7 +254,7 @@ class ArrivalStore(SqliteStore[T], Generic[T]):
         if mark is not None and resumed == 0:
             raise ArrivalCanonicalUnsupported(
                 f"{self._path} carries an arrival resume mark the log at "
-                f"{self._log_path} rejects — the index cannot be consumed "
+                f"{self._log.path} rejects — the index cannot be consumed "
                 "forward, and re-deriving it is projection re-derivation, a "
                 "later cut"
             )
@@ -277,6 +287,10 @@ class ArrivalStore(SqliteStore[T], Generic[T]):
                 "this index knows how to consume — refusing rather than "
                 "silently dropping it"
             )
+        # dumps->deserialize is a deliberate round-trip: the codec's only
+        # entry is a line string, and growing it a decoded-dict entry is a
+        # cross-lib API change deferred to the cut where rebuild is the
+        # subject (arbiter-receipted at the s1 simplify pass).
         for t, row in deserialize_records(json.dumps(record["body"])):
             try:
                 self._db.execute(
@@ -290,21 +304,34 @@ class ArrivalStore(SqliteStore[T], Generic[T]):
                     "projection re-derivation, a later cut"
                 ) from exc
 
-    def _reconcile(self) -> None:
+    def _reconcile(self) -> ResumeMark | None:
         """Refuse to stamp past a durable record the index has not consumed.
 
         Same posture as the log-canonical store: a long-lived handle never
         reopens, so every append reconciles first. Cheap in the common case
         — one meta read and one stat.
+
+        Returns the mark this reconcile verified or (via catch-up) stamped,
+        so the write paths consume the reconciled position instead of
+        re-reading ``store_meta`` — the interloper checks are DEFINED
+        against exactly this pre-append mark. ``None`` only when the log is
+        empty, where no append can succeed anyway.
         """
         mark = self._read_mark()
         if mark is not None and mark.arrival_offset == self._log_size():
-            return
+            return mark
         self.catch_up()
+        return self._read_mark()
 
     def _sync_derived_state(self) -> None:
-        """Reconcile before mint logic reads chain state off the index."""
-        self._reconcile()
+        """Reconcile before mint logic reads chain state off the index.
+
+        The reconciled mark is kept for :meth:`_ceremony_persist`, which
+        runs later inside the same ceremony transaction and must pin its
+        append to the head the CEREMONY reconciled against — not to
+        whatever the mark says by the time it runs.
+        """
+        self._reconciled_mark = self._reconcile()
 
     # ---- the write path --------------------------------------------------
 
@@ -329,9 +356,13 @@ class ArrivalStore(SqliteStore[T], Generic[T]):
         returned signature is the committed row's either way: catch-up
         re-inserts the identical row verbatim from the record's body.
         """
-        self._reconcile()
-        consumed = self._read_mark()
-        serialize_row(row)  # codec pre-flight on the assembled row
+        consumed = self._reconcile()
+        # Codec pre-flight on the ASSEMBLED row, NOT dead work: sqlite's
+        # column affinity coerces (e.g. a string ts commits as REAL), so the
+        # committed-row serialize below would ACCEPT a row the codec refuses
+        # — this is the gate that fails at the append site, where it is
+        # attributable, instead of laundering the value.
+        serialize_row(row)
         try:
             self._db.execute(sql, row)
             committed_row = self._committed_full_row(
@@ -347,6 +378,12 @@ class ArrivalStore(SqliteStore[T], Generic[T]):
                 at=committed_row[2],
                 signer=self._fact_signer if is_fact else None,
             )
+            # consumed is None on one REACHABLE interleave: the log was
+            # empty at reconcile time and another process minted the
+            # genesis inside the reconcile->append gap. Legal interleave is
+            # refuse-or-consume, never crash — so a missing reconciled mark
+            # takes the same gap path as a stale one: roll back and consume
+            # everything forward, the fresh genesis included.
             if consumed is None or record["ord"] != consumed.arrival_ordinal + 1:
                 self._db.rollback()
                 self.catch_up()
@@ -385,7 +422,7 @@ class ArrivalStore(SqliteStore[T], Generic[T]):
             k, line = "batch", serialize_batch(rows)
         else:
             k, line = "fact", serialize_fact_row(rows[0])
-        consumed = self._read_mark()
+        consumed = self._reconciled_mark
         _, mark = self._log.append_marked(
             k,
             json.loads(line),
@@ -413,7 +450,7 @@ class ArrivalStore(SqliteStore[T], Generic[T]):
             return self._log.lineage()
         except GenesisRefused as exc:
             raise GenesisRefused(
-                f"{self._log_path} has no arrival genesis — the declaration "
+                f"{self._log.path} has no arrival genesis — the declaration "
                 "absorb is movement 2; mint the arrival genesis (movement 1, "
                 "with the founding key) first"
             ) from exc
@@ -457,37 +494,6 @@ class ArrivalStore(SqliteStore[T], Generic[T]):
         )
 
 
-def _arrival_index_is_current(index: Path, log: Path) -> bool:
-    """Whether ``index`` has consumed the whole log — cheaply, read-only.
-
-    One read-only meta read against one ``stat``. Anything unknowable
-    answers "not current" and lets the store's own catch-up decide, which is
-    where every consume-or-refuse rule lives.
-    """
-    import sqlite3
-
-    from .declaration import _open_readonly
-
-    try:
-        size = log.stat().st_size
-    except OSError:
-        return True  # no log to be behind
-    if size == 0:
-        return True
-    conn = _open_readonly(index, timeout=0.25)
-    if conn is None:
-        return False
-    try:
-        row = conn.execute(
-            "SELECT value FROM store_meta WHERE key = ?", (ARRIVAL_OFFSET_KEY,)
-        ).fetchone()
-    except sqlite3.Error:
-        return False
-    finally:
-        conn.close()
-    return row is not None and _as_int(row[0]) == size
-
-
 def ensure_arrival_index(canonical: Path) -> Path:
     """Materialize — and catch up — the sqlite index for an arrival log.
 
@@ -495,15 +501,15 @@ def ensure_arrival_index(canonical: Path) -> Path:
     tracked, so the first read finds no index. Opening an
     :class:`ArrivalStore` runs catch-up (an absent index builds forward from
     ordinal 0); closing immediately leaves no handle behind. A no-op when
-    the log is missing or the index is already current.
+    the log is missing or the index is already current
+    (:func:`engine.jsonl_store._stamped_offset_current`, keyed on the
+    arrival cursor).
     """
-    from .residence import index_path_for
-
     canonical = Path(canonical)
     index = index_path_for(canonical)
     if not canonical.exists():
         return index
-    if index.exists() and _arrival_index_is_current(index, canonical):
+    if index.exists() and _stamped_offset_current(index, canonical, ARRIVAL_OFFSET_KEY):
         return index
     store: ArrivalStore[Any] = ArrivalStore(
         path=index,

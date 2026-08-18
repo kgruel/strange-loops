@@ -25,7 +25,6 @@ import pytest
 from atoms import Fact
 from lang import parse_vertex
 from lang.document import DECL_GENESIS, vertex_to_documents
-from sign import ed25519
 
 from engine.arrival import (
     KEY_INTRODUCTION_KIND,
@@ -35,31 +34,9 @@ from engine.arrival import (
 from engine.arrival_store import ArrivalStore
 from engine.residence import sqlite_sidecars
 from engine.tick import Tick
-
-_DOMAIN = "test-arrival-v1"
-
-BASE = (
-    'name "x"\nstore "./x.arrival"\nloops {\n'
-    '  a { fold { n "inc" } }\n}\n'
-)
-
-
-class _Custodian:
-    def __init__(self, tmp_path: Path, name: str) -> None:
-        self.name = name
-        self.keypair = ed25519.load_or_generate(tmp_path / "keys" / name)
-        self.public = self.keypair.public_b64
-
-    def signer(self, observer: str, digest: str) -> str | None:
-        return ed25519.sign(self.keypair, digest.encode(), domain=_DOMAIN)
-
-
-def _verify(key_b64: str, signature: str, digest: str) -> bool:
-    try:
-        public = ed25519.public_key_from_b64(key_b64)
-    except ValueError:
-        return False
-    return ed25519.verify(public, signature, digest.encode(), domain=_DOMAIN)
+from tests.conftest import ARRIVAL_VERTEX_SRC as BASE
+from tests.conftest import Custodian as _Custodian
+from tests.conftest import ed25519_verify as _verify
 
 
 def _build_exercised_store(tmp_path: Path) -> tuple[Path, _Custodian, _Custodian, int]:

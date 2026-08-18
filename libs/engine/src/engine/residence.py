@@ -89,10 +89,13 @@ def canonical_mode(declared: Path | str) -> str:
     callers compare. A family of per-mode booleans is how a two-mode
     architecture creeps back in, so there isn't one.
 
-    Any suffix that is not a log suffix answers ``"sqlite"``: that matches
-    what every opener does with such a path (connect to it as sqlite), and
-    "is this a loops artifact at all" is :func:`engine.probe.probe_target`'s
-    question, not a path function's.
+    Any suffix that is not a log suffix answers ``"sqlite"``: that is what
+    ``open_canonical_store`` does with such a path (connect to it as
+    sqlite) — with one named exception, ``engine.compiler``'s flat
+    ``EventStore`` fallback for suffixes outside the store family, which
+    checks the suffix itself before consulting this switch. "Is this a
+    loops artifact at all" is :func:`engine.probe.probe_target`'s question,
+    not a path function's.
     """
     suffix = Path(declared).suffix
     if suffix == ARRIVAL_SUFFIX:

@@ -264,7 +264,9 @@ def test_rows_without_a_mark_refuse_rather_than_rebuild(tmp_path, keys, signer):
     finally:
         conn.close()
 
-    with pytest.raises(ArrivalCanonicalUnsupported, match="re-deriv"):
+    # The refusal NAMES the verb now that cut B built it: a dead end became
+    # a refusal with a recovery.
+    with pytest.raises(ArrivalCanonicalUnsupported, match="rederive_projections"):
         open_store(tmp_path)
 
 

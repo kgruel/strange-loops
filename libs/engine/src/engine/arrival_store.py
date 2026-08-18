@@ -68,15 +68,12 @@ from pathlib import Path
 from typing import Any, Generic, TypeVar
 
 from .arrival import (
-    GENESIS_KIND,
-    KEY_INTRODUCTION_KIND,
     ArrivalLog,
     GenesisRefused,
     ResumeMark,
 )
-from .arrival_projection import has_rows
+from .arrival_projection import has_rows, licensed_own_lineage, rows_of_record
 from .jsonl_codec import (
-    records_from_object,
     serialize_batch,
     serialize_fact_row,
     serialize_tick_row,
@@ -105,14 +102,6 @@ __all__ = [
 ARRIVAL_LINEAGE_KEY = "arrival_lineage"
 ARRIVAL_OFFSET_KEY = "arrival_offset"
 ARRIVAL_ORDINAL_KEY = "arrival_ordinal"
-
-# Record classes this index consumes into rows, and the structural kinds it
-# walks past. Anything else refuses: a kind this indexer does not know is
-# not a kind it may silently drop. The row-class literals mirror the line
-# codec's "t" discriminators (its sibling idiom); the structural kinds are
-# the grammar's own constants.
-_ROW_KINDS = frozenset(("fact", "tick", "batch"))
-_STRUCTURAL_KINDS = frozenset((GENESIS_KIND, KEY_INTRODUCTION_KIND))
 
 T = TypeVar("T")
 
@@ -224,17 +213,21 @@ class ArrivalStore(SqliteStore[T], Generic[T]):
                 raise ArrivalCanonicalUnsupported(
                     f"{self._path} carries index state but there is no "
                     f"arrival log at {self._log.path} — an index without its "
-                    "log cannot be reconciled; restore the log or open the "
-                    "db as a plain sqlite store"
+                    "log cannot be reconciled, and re-derivation cannot "
+                    "manufacture a log: offering it here would name an "
+                    "operation that destroys the only surviving artifact. "
+                    "Restore the log, or open the db as a plain sqlite store"
                 )
             return "empty"
 
         if mark is None and has_rows(self._db):
             raise ArrivalCanonicalUnsupported(
-                f"{self._path} holds rows but no arrival resume mark — "
-                "re-deriving an existing index from the log is projection "
-                "re-derivation, a later cut; open the db as a plain sqlite "
-                "store, or start from an absent index"
+                f"{self._path} holds rows but no arrival resume mark — an "
+                "index that carries state cannot be consumed forward. Run "
+                "engine.arrival_projection.rederive_projections("
+                f"{str(self._log.path)!r}) to discard the projection and "
+                "rebuild it from the log, or open the db as a plain sqlite "
+                "store"
             )
 
         resumed, records = self._log.walk_marked(mark)
@@ -242,8 +235,9 @@ class ArrivalStore(SqliteStore[T], Generic[T]):
             raise ArrivalCanonicalUnsupported(
                 f"{self._path} carries an arrival resume mark the log at "
                 f"{self._log.path} rejects — the index cannot be consumed "
-                "forward, and re-deriving it is projection re-derivation, a "
-                "later cut"
+                "forward. Run engine.arrival_projection."
+                f"rederive_projections({str(self._log.path)!r}) to discard "
+                "the projection and rebuild it from the log"
             )
 
         consumed = 0
@@ -256,25 +250,57 @@ class ArrivalStore(SqliteStore[T], Generic[T]):
         except BaseException:
             self._db.rollback()
             raise
+        restored = self._restore_own_lineage()
         if last_mark is None:
+            if restored:
+                self._db.commit()
             return "synced"
         self._stamp_mark(last_mark)
         self._db.commit()
         return "built" if mark is None else "tailed"
 
+    def _restore_own_lineage(self) -> bool:
+        """Stage the ``own_lineage`` projection when it is ABSENT.
+
+        The one residue of the ceremony crash window. ``_ceremony_persist``
+        makes the genesis record durable and stages the marker; a crash
+        before the caller's COMMIT rolls back the ``_decl.genesis`` INSERT,
+        the marker and the mark together. Catch-up tails the record forward
+        and the ROW recovers itself — the marker does not, because it is
+        not in the log's rows. Restoring it here is a pure projection
+        restore, and it is legal automatically for the same reason building
+        an absent index is: absent→present destroys nothing.
+
+        A PRESENT marker is never touched, so this path can never overwrite
+        an identity claim. Judging a present, disagreeing marker is
+        :func:`engine.arrival_projection.rederive_projections`'s, where the
+        stamp would be destructive.
+
+        Returns whether it staged a write, so the caller knows whether a
+        commit is owed on the otherwise-no-op path.
+        """
+        if self._meta_get("own_lineage") is not None:
+            return False
+        try:
+            lineage = self._log.lineage()
+        except GenesisRefused:
+            return False
+        own = licensed_own_lineage(self._db, lineage)
+        if own is None:
+            return False
+        self._meta_set("own_lineage", own)
+        return True
+
     def _index_record(self, record: dict) -> None:
         """Stage one record's rows into the index — verbatim, no mint
-        machinery, no signer; signatures ride as stored in the body."""
-        kind = record["k"]
-        if kind in _STRUCTURAL_KINDS:
-            return
-        if kind not in _ROW_KINDS:
-            raise ArrivalCanonicalUnsupported(
-                f"record kind {kind!r} at ordinal {record['ord']} is not one "
-                "this index knows how to consume — refusing rather than "
-                "silently dropping it"
-            )
-        for t, row in records_from_object(record["body"]):
+        machinery, no signer; signatures ride as stored in the body.
+
+        What a record expands to is :func:`engine.arrival_projection.
+        rows_of_record`'s answer and not a second copy of it: the indexer
+        and the re-deriver disagreeing about a record is the one
+        disagreement this design cannot tolerate.
+        """
+        for t, row in rows_of_record(record):
             try:
                 self._db.execute(
                     FACT_INSERT_SQL if t == "fact" else TICK_INSERT_SQL, row
@@ -456,15 +482,18 @@ class ArrivalStore(SqliteStore[T], Generic[T]):
         There is nothing to adopt — the log's genesis IS the identity, and
         foreign genesis records cannot exist above ordinal 0. Restamping the
         ``own_lineage`` projection marker from the log is projection repair,
-        a later cut's verb; deleting this ceremony would break the legacy
-        modes that still need it. Refusal now keeps both doors open.
+        which :meth:`catch_up` does when the marker is absent and
+        :func:`engine.arrival_projection.rederive_projections` does when it
+        re-derives everything; deleting this ceremony would break the legacy
+        modes that still need it. Refusal keeps both doors open.
         """
         raise ArrivalCanonicalUnsupported(
             "adopt is not a ceremony an arrival-canonical store has: "
             "identity is the arrival genesis at ordinal 0, structurally — "
             "there is nothing to choose between. If the own_lineage marker "
-            "is missing, restoring it from the log is projection repair, a "
-            "later cut."
+            "is missing, reopening the store restores it from the log "
+            "(catch-up), and engine.arrival_projection.rederive_projections "
+            "restores it alongside every other projection row."
         )
 
     def reanchor(self, *args: Any, **kwargs: Any):  # noqa: D102

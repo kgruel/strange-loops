@@ -74,8 +74,9 @@ from .arrival import (
     GenesisRefused,
     ResumeMark,
 )
+from .arrival_projection import has_rows
 from .jsonl_codec import (
-    deserialize_records,
+    records_from_object,
     serialize_batch,
     serialize_fact_row,
     serialize_tick_row,
@@ -207,20 +208,6 @@ class ArrivalStore(SqliteStore[T], Generic[T]):
         self._meta_set(ARRIVAL_OFFSET_KEY, mark.arrival_offset)
         self._meta_set(ARRIVAL_ORDINAL_KEY, mark.arrival_ordinal)
 
-    def _log_size(self) -> int:
-        try:
-            return self._log.path.stat().st_size
-        except OSError:
-            return 0
-
-    def _has_rows(self) -> bool:
-        for table in ("facts", "ticks"):
-            if self._db.execute(
-                f"SELECT EXISTS(SELECT 1 FROM {table})"
-            ).fetchone()[0]:
-                return True
-        return False
-
     # ---- catch-up --------------------------------------------------------
 
     def catch_up(self) -> str:
@@ -232,8 +219,8 @@ class ArrivalStore(SqliteStore[T], Generic[T]):
         re-derivation, the next cut's verb.
         """
         mark = self._read_mark()
-        if self._log_size() == 0:
-            if self._has_rows() or mark is not None:
+        if self._log.size() == 0:
+            if has_rows(self._db) or mark is not None:
                 raise ArrivalCanonicalUnsupported(
                     f"{self._path} carries index state but there is no "
                     f"arrival log at {self._log.path} — an index without its "
@@ -242,7 +229,7 @@ class ArrivalStore(SqliteStore[T], Generic[T]):
                 )
             return "empty"
 
-        if mark is None and self._has_rows():
+        if mark is None and has_rows(self._db):
             raise ArrivalCanonicalUnsupported(
                 f"{self._path} holds rows but no arrival resume mark — "
                 "re-deriving an existing index from the log is projection "
@@ -287,11 +274,7 @@ class ArrivalStore(SqliteStore[T], Generic[T]):
                 "this index knows how to consume — refusing rather than "
                 "silently dropping it"
             )
-        # dumps->deserialize is a deliberate round-trip: the codec's only
-        # entry is a line string, and growing it a decoded-dict entry is a
-        # cross-lib API change deferred to the cut where rebuild is the
-        # subject (arbiter-receipted at the s1 simplify pass).
-        for t, row in deserialize_records(json.dumps(record["body"])):
+        for t, row in records_from_object(record["body"]):
             try:
                 self._db.execute(
                     FACT_INSERT_SQL if t == "fact" else TICK_INSERT_SQL, row
@@ -318,7 +301,7 @@ class ArrivalStore(SqliteStore[T], Generic[T]):
         empty, where no append can succeed anyway.
         """
         mark = self._read_mark()
-        if mark is not None and mark.arrival_offset == self._log_size():
+        if mark is not None and mark.arrival_offset == self._log.size():
             return mark
         self.catch_up()
         return self._read_mark()

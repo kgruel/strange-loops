@@ -45,8 +45,10 @@ __all__ = [
     "serialize_fact_row",
     "serialize_tick_row",
     "serialize_batch",
+    "serialize_object",
     "deserialize_row",
     "deserialize_records",
+    "records_from_object",
 ]
 
 
@@ -343,6 +345,23 @@ def _row_of(obj: dict, spec: _Spec) -> tuple:
     return (*(obj[f] for f in spec.fields), obj.get(_SIGNATURE))
 
 
+def _ordered(obj: dict, spec: _Spec) -> dict:
+    """A VALIDATED record object, rebuilt in canonical field order.
+
+    Same shape :func:`_encode_obj` builds from a row tuple — discriminator,
+    then the spec's fields in sqlite column order, then ``signature`` when
+    the row carries one. Rebuilt rather than re-dumped as-received because
+    key order in a decoded object is whatever its producer happened to use,
+    and :func:`serialize_object` promises the bytes the row serializers
+    produce.
+    """
+    out: dict = {"t": spec.t}
+    out.update((field, obj[field]) for field in spec.fields)
+    if obj.get(_SIGNATURE) is not None:
+        out[_SIGNATURE] = obj[_SIGNATURE]
+    return out
+
+
 def deserialize_row(line: str) -> tuple[str, tuple]:
     """Decode a SINGLE-record line, dispatching on ``"t"``. Returns
     ``(t, row)`` with the row at full arity (7 fact fields / 11 tick fields,
@@ -369,8 +388,30 @@ def deserialize_records(line: str) -> list[tuple[str, tuple]]:
     exactly "this line was a batch"). This is the decode every log consumer
     (replay, catch-up, rebuild, audit) reads through, so batch expansion has
     one spelling.
+
+    Defined as the line decode composed with :func:`records_from_object`,
+    so decoding still has exactly one dispatch.
     """
-    obj = _load(line)
+    return records_from_object(_load(line))
+
+
+def records_from_object(obj: dict) -> list[tuple[str, tuple]]:
+    """:func:`deserialize_records` on an ALREADY-DECODED object.
+
+    An arrival record's ``body`` IS this codec's object for the row it
+    carries, so a consumer holding one has nothing to parse — before this
+    entry existed, ``arrival_store`` re-encoded the body just to hand a
+    string back to the line decoder.
+
+    The SAME validator runs: an object handed in is held to exactly the
+    domain a line is held to. What a line has and an object cannot is a
+    duplicate key, which the decode hook catches; everything downstream of
+    that hook is shared.
+    """
+    if not isinstance(obj, dict):
+        raise JsonlCodecError(
+            f"record must be a JSON object, got {type(obj).__name__}"
+        )
     t = obj.get("t")
     if t == _BATCH:
         _validate_batch(obj)
@@ -381,3 +422,21 @@ def deserialize_records(line: str) -> list[tuple[str, tuple]]:
         raise JsonlCodecError(f"unknown record discriminator t={t!r}")
     _validate(obj, spec)
     return [(spec.t, _row_of(obj, spec))]
+
+
+def serialize_object(obj: dict) -> str:
+    """Encode an ALREADY-DECODED record object as one canonical line.
+
+    Validated through :func:`records_from_object` — the same domain a line
+    is held to — then dumped in canonical field order, so the result is
+    byte-identical to the ``serialize_*`` call that produced the object.
+    Field order is REBUILT rather than inherited: a decoded object's key
+    order is its producer's, and this function's contract is about the
+    codec's bytes, not the caller's dict.
+    """
+    records_from_object(obj)
+    t = obj["t"]
+    if t == _BATCH:
+        fact = _SPEC["fact"]
+        return _dump({"t": _BATCH, _ROWS: [_ordered(e, fact) for e in obj[_ROWS]]})
+    return _dump(_ordered(obj, _SPEC[t]))

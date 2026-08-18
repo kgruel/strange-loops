@@ -831,7 +831,13 @@ class ArrivalLog:
     def exists(self) -> bool:
         return self.path.exists()
 
-    def _size(self) -> int:
+    def size(self) -> int:
+        """The log's size in bytes; 0 when there is no file.
+
+        Public because a consumer holding the log object must not
+        re-implement the stat — the resume mark's offset is compared
+        against this number, so "how big is the log" needs one spelling.
+        """
         try:
             return self.path.stat().st_size
         except OSError:
@@ -1049,7 +1055,7 @@ class ArrivalLog:
         honest-looking records accumulating on top of a tampered one is
         exactly what makes the tamper hard to see later.
         """
-        size = self._size()
+        size = self.size()
         if size == 0:
             raise GenesisRefused(f"{self.path} is empty — mint a genesis first")
         with self.path.open("rb") as fh:
@@ -1138,7 +1144,7 @@ class ArrivalLog:
             return None
         if mark.arrival_offset == 0:
             return None  # nothing consumed; identical to a fresh start
-        if not 0 <= mark.arrival_offset <= self._size():
+        if not 0 <= mark.arrival_offset <= self.size():
             return None
         anchor = self._record_ending_at(mark.arrival_offset)
         if anchor is None or anchor["ord"] != mark.arrival_ordinal:
@@ -1392,7 +1398,7 @@ class ArrivalLog:
         left at the tail would be concatenated onto by the next append, and
         the result would be a corrupt interior that refuses forever.
         """
-        size = self._size()
+        size = self.size()
         if size == 0:
             return 0
         with self.path.open("rb") as fh:

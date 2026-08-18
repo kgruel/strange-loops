@@ -365,13 +365,21 @@ def test_read_surface_is_untouched(tmp_path):
 def test_reanchor_still_refuses_loudly(tmp_path):
     """Scope pin (S1b oracle #10): the append-shaped ceremonies
     (absorb_genesis/absorb_edit) are wired through the _ceremony_persist
-    seam, but reanchor is history-mutating and stays refused until the
-    log-rewrite ceremony is designed."""
+    seam, but reanchor is history-mutating and refused.
+
+    PERMANENT at cut B: the refusal no longer promises a later log-rewrite
+    ceremony, because rewriting a log is not an operation in this model.
+    """
     store = open_store(tmp_path)
     store.append(fact())
-    with pytest.raises(JsonlCanonicalUnsupported, match="jsonl-canonical-store"):
+    with pytest.raises(JsonlCanonicalUnsupported) as exc:
         store.reanchor()
     store.close()
+    message = str(exc.value)
+    assert "not an operation in this model" in message
+    # It denies deferral outright rather than promising a later ceremony.
+    assert "not a later slice's either" in message
+    assert "is a later slice" not in message
 
 
 # --- review regressions (S3 round 1) --------------------------------------

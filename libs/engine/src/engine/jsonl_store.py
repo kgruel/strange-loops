@@ -168,6 +168,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any, Generic, TypeVar
 
+from .arrival_projection import has_rows
 from .canonical_audit import (
     FACT_COUNT_KEY as _FACT_COUNT_KEY,
 )
@@ -681,7 +682,7 @@ class JsonlStore(SqliteStore[T], Generic[T]):
         if size == 0:
             # No log yet. An index with rows but no log is not a
             # JSONL-canonical store — refuse rather than invent a log.
-            if self._has_rows():
+            if has_rows(self._conn):
                 raise JsonlCanonicalUnsupported(
                     f"{self._path} has indexed rows but no canonical log at "
                     f"{self._log_path} — export it first "
@@ -753,12 +754,6 @@ class JsonlStore(SqliteStore[T], Generic[T]):
             "open it as a plain SqliteStore and re-export the log "
             "(store.jsonl.export_jsonl) before reopening JSONL-canonical."
         )
-
-    def _has_rows(self) -> bool:
-        for table in ("facts", "ticks"):
-            if self._conn.execute(f"SELECT EXISTS(SELECT 1 FROM {table})").fetchone()[0]:
-                return True
-        return False
 
     def _index_offset(self, offset: int, facts: int, ticks: int) -> None:
         self._stamp(offset, facts, ticks)
@@ -969,14 +964,14 @@ class JsonlStore(SqliteStore[T], Generic[T]):
     # ---- refusals ------------------------------------------------------
 
     def reanchor(self, *args: Any, **kwargs: Any):  # noqa: D102
-        # Scope pin: reanchor is history-mutating, not append-shaped — it
-        # belongs to the (undesigned) log-rewrite ceremony. The append-shaped
-        # ceremonies (absorb_genesis/absorb_edit) are inherited and land
-        # through the _ceremony_persist seam.
+        # PERMANENT, not deferred (cut B): the queued log-rewrite ceremony is
+        # RETIRED rather than pending. The append-shaped ceremonies
+        # (absorb_genesis/absorb_edit) are inherited and land through the
+        # _ceremony_persist seam; nothing history-mutating joins them.
         raise JsonlCanonicalUnsupported(
-            "reanchor is not wired for a JSONL-canonical store: it would "
-            "rewrite sqlite rows while the canonical log kept the originals, "
-            "so the index would stop being a function of the log. See "
-            "design/architecture/jsonl-canonical-store — the log-rewrite "
-            "ceremony is a later slice."
+            "reanchor is not an operation a jsonl-canonical store has, and "
+            "it is not a later slice's either: it would rewrite sqlite rows "
+            "while the canonical log kept the originals, so the index would "
+            "stop being a function of the log. Rewriting a log is not an "
+            "operation in this model."
         )

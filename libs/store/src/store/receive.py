@@ -2,6 +2,14 @@
 
 The "other end" of push: validates the source is a SQLite database,
 then either copies it as a new store or merges into an existing one.
+
+The merge arm delegates to :func:`store.merge_store`, so it inherits that
+function's dispatch on the target's custody for free. The CREATE arm refuses
+when the target's ``.arrival`` sibling exists: copying a ``.db`` over a live
+arrival log's index would mint a second custody holder beside it — the one
+hazard the half-migrated shape names. Everything else is unchanged, because
+transport slices produce plain ``.db`` files and receiving one into a
+non-existent target still creates a plain sqlite store.
 """
 
 from __future__ import annotations
@@ -11,6 +19,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
+from ._conn import refuse_create_over_arrival_custody
 from .merge import merge_store
 
 # First 16 bytes of every SQLite database file.
@@ -44,6 +53,8 @@ def receive_store(target: Path, source: Path) -> ReceiveResult:
     Raises:
         FileNotFoundError: If source does not exist.
         ValueError: If source is not a valid SQLite database.
+        engine.arrival_store.ArrivalCanonicalUnsupported: If the target does
+            not exist but its ``.arrival`` sibling does.
     """
     source = Path(source)
     target = Path(target)
@@ -52,6 +63,9 @@ def receive_store(target: Path, source: Path) -> ReceiveResult:
         raise FileNotFoundError(f"Source store not found: {source}")
 
     _validate_sqlite(source)
+
+    if not target.exists():
+        refuse_create_over_arrival_custody(target, "copying a foreign db")
 
     if target.exists():
         result = merge_store(target, source)

@@ -52,7 +52,7 @@ from pathlib import Path
 
 from ulid import ULID
 
-from ._conn import _create, _open
+from ._conn import _create, _open, refuse_create_over_arrival_custody
 
 _CROCKFORD = frozenset("0123456789ABCDEFGHJKMNPQRSTVWXYZ")
 
@@ -363,11 +363,20 @@ def rebirth_store(
     Raises:
         FileNotFoundError: If source does not exist.
         FileExistsError: If target already exists.
+        engine.arrival_store.ArrivalCanonicalUnsupported: If the target does
+            not exist but its ``.arrival`` sibling does — see below.
     """
     source = Path(source)
     target = Path(target)
     if not source.exists():
         raise FileNotFoundError(f"Source store not found: {source}")
+    # Before ANY work: a target whose .arrival sibling exists is not an
+    # absent store, it is a live log's derived index. `_create` refuses an
+    # existing file but would happily mint a plain sqlite store at that
+    # path, which is exactly the second-custody-holder hazard invariant 15
+    # names. Checked here rather than at the write, so a refused rebirth
+    # costs no transform pass.
+    refuse_create_over_arrival_custody(target, "writing a reborn store")
     transform = transform if transform is not None else identity()
     name = source_name or source.stem
 

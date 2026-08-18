@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from ._conn import _create, _open
+from ._conn import _create, _open, refuse_create_over_arrival_custody
 
 
 @dataclass(frozen=True)
@@ -54,12 +54,22 @@ def slice_store(
     Raises:
         FileNotFoundError: If source database does not exist.
         FileExistsError: If target already exists.
+        engine.arrival_store.ArrivalCanonicalUnsupported: If the target does
+            not exist but its ``.arrival`` sibling does — see below.
     """
     source = Path(source)
     target = Path(target)
 
     if not source.exists():
         raise FileNotFoundError(f"Source store not found: {source}")
+    # The third create arm (cut B, invariant 15). `_create` refuses a target
+    # that EXISTS, which is not the hazard: a target whose .db is absent
+    # while its .arrival sibling is present is a live log's derived index,
+    # and slicing a subset into it would mint a second custody holder — with
+    # a PARTIAL row set, so the index would disagree with the log about
+    # content as well as about custody. Checked before the schema is
+    # written, so a refusal leaves no file and no WAL sidecar behind.
+    refuse_create_over_arrival_custody(target, "writing a sliced subset")
 
     # Create target with canonical schema
     target_conn = _create(target)

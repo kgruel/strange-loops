@@ -76,13 +76,6 @@ _ALLOWLIST: set[tuple[str, str]] = {
         "libs/sdk/src/sdk/read.py",
         "its pages come back on the ``(ts, id)`` read lens instead",
     ),
-    # The merge ceremony (R1). Insertion by (ts, id) is what DEFINES the merged
-    # store's receipt order; the prose says exactly that and says commutativity
-    # is a merge property, not a fold-axis consequence.
-    (
-        "libs/store/src/store/merge.py",
-        "ORDER BY (ts, id) is the merge INSERTION order, not a fold order",
-    ),
     # The witness interval diagnostic reports arrivals that are out of
     # EVENT-TIME order, and explains that the consequence is a lens/fold
     # divergence in the view — not a perturbed fold.

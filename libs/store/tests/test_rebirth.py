@@ -413,3 +413,63 @@ def test_factrow_transform_contract():
     assert mapped.id != row.id and is_ulid(mapped.id)
     assert (mapped.kind, mapped.ts, mapped.observer, mapped.payload) == \
            (row.kind, row.ts, row.observer, row.payload)
+
+
+# ---------------------------------------------------------------------------
+# Arrival custody (cut B, invariant 15)
+# ---------------------------------------------------------------------------
+
+
+def _mint_arrival(path):
+    """A minted arrival log — the shape whose .db sibling is NOT a store
+    location but a derived index."""
+    import base64
+    import hashlib
+
+    from engine.arrival import ArrivalLog
+
+    def sign(observer: str, commitment: str) -> str:
+        return "sig:" + hashlib.sha256(
+            f"{observer}/{commitment}".encode()
+        ).hexdigest()
+
+    return ArrivalLog.mint(
+        path,
+        observer="kyle",
+        signer=sign,
+        key=base64.b64encode(b"k" * 32).decode(),
+    )
+
+
+def test_rebirth_refuses_to_write_over_a_live_arrival_logs_index(tmp_path):
+    """NON-NEGOTIABLE (invariant 15): a target whose ``.arrival`` sibling
+    exists is not an absent store — it is the derived index of a log that
+    holds custody, and minting a plain sqlite store there would put a second
+    custody holder beside a live log."""
+    from engine.arrival_store import ArrivalCanonicalUnsupported
+
+    src = tmp_path / "source.db"
+    _make_source(src)
+    _mint_arrival(tmp_path / "reborn.arrival")
+    dst = tmp_path / "reborn.db"
+    assert not dst.exists()
+
+    with pytest.raises(ArrivalCanonicalUnsupported, match="second custody holder"):
+        rebirth_store(src, dst)
+
+    # Refused before any byte: no store, no sidecars, and the log untouched.
+    assert not dst.exists()
+    assert not (tmp_path / "reborn.db-wal").exists()
+
+
+def test_rebirth_into_a_plain_target_is_unaffected(tmp_path):
+    """The happy path stays exactly as it was — the guard fires only on the
+    one shape that carries the hazard."""
+    src = tmp_path / "source.db"
+    _make_source(src)
+    dst = tmp_path / "reborn.db"
+
+    result = rebirth_store(src, dst)
+
+    assert result.facts_in == 5 and result.facts_out == 5
+    assert dst.exists()

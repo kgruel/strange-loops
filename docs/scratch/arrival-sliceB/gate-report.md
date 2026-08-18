@@ -727,3 +727,222 @@ $ git diff -- tests/
 ```
 
 Every mutation the gate made was restored exactly.
+
+---
+
+# RE-CHECK ROUND — the three remediation commits
+
+Scope: **only** the failed/new items. Nothing previously passed is
+re-litigated. Deviation #9 was ratified by Kyle, so the referral is
+answered and the +1 allowlist entry stands as shipped.
+
+Merged into the gate branch with `git merge slice/arrival-projections-s1`
+(gate report history preserved), giving `61e4a968`. Commits under review:
+`9ddda266` (F1 guard), `7fdc7bbd` (F2 stderr), `b2a55154` (slice.py joins).
+
+**RE-CHECK VERDICT: CLEAN.**
+
+## 1. F1 + slice — the guard, and the all-three-red exhibit. **PASS**
+
+The three refusal tests, green, in one run:
+
+```
+$ uv run --no-sync --package store pytest \
+    libs/store/tests/test_arrival_merge.py libs/store/tests/test_slice.py \
+    libs/store/tests/test_rebirth.py -q -p no:randomly \
+    -k "refuses_to_copy_over_a_live_arrival or refuses_to_write_over_a_live_arrival"
+3 passed, 65 deselected in 0.40s
+```
+
+**The gate's own mutation, at the guard's ONE home.** `return` inserted at
+the top of `_conn.refuse_create_over_arrival_custody`, before the probe:
+
+```
+FAILED libs/store/tests/test_arrival_merge.py::test_receive_refuses_to_copy_over_a_live_arrival_logs_index
+FAILED libs/store/tests/test_slice.py::TestSliceArrivalCustody::test_slice_refuses_to_write_over_a_live_arrival_logs_index
+FAILED libs/store/tests/test_rebirth.py::test_rebirth_refuses_to_write_over_a_live_arrival_logs_index
+3 failed, 65 deselected in 0.18s
+```
+
+All three call sites red from ONE edit at ONE home, in ONE run. That is the
+claimed exhibit, reproduced independently — and it is the proof that the
+unification is real rather than three copies that happen to agree. Restored:
+
+```
+$ git checkout -- libs/store/src/store/_conn.py
+$ git diff --stat -- libs/
+(empty)
+3 passed, 65 deselected in 0.49s
+```
+
+**The scope call (unifying into `_conn`) is justified.** Three create arms
+need the same rule; the mutation above is the evidence that they share one
+implementation rather than three. `_conn` is the right home — it already
+owns `_create`/`_open`, the other two things every create arm touches. The
+`action` parameter keeps each site's refusal a sentence without duplicating
+the predicate.
+
+**Stray-file spot-check, done BY HAND** rather than through the tests' own
+assertions. Each arm was driven into the hazard state (live `.arrival`, `.db`
+deleted along with its sidecars) and the directory listed after the refusal:
+
+```
+receive_store   -> REFUSED; stray t.db* files: NONE -> PASS
+slice_store     -> REFUSED; stray t.db* files: NONE -> PASS
+rebirth_store   -> REFUSED; stray t.db* files: NONE -> PASS
+
+STRAY-FILE SPOT-CHECK: PASS — every refusal leaves the directory clean
+```
+
+No `.db`, no `-wal`, no `-shm`. The guard runs before any file is opened in
+all three arms, which is what makes that true rather than lucky. The tests
+also carry happy-path controls (`test_rebirth_into_a_plain_target_is_unaffected`
+and its slice twin), so the guard is pinned to fire only on the hazard shape.
+
+## 2. The `receive.py` switch — invariant 15 unchanged in substance. **PASS**
+
+Diffed against base. **Trigger: identical.** Still `if not target.exists():`
+followed by the same three probe conditions (`canonical_mode == "arrival"`,
+`canonical_path is not None`, `canonical_path.is_file()`), and a silent
+return otherwise. **Exception class: identical** —
+`engine.arrival_store.ArrivalCanonicalUnsupported`. **Message class:
+identical**, and the load-bearing clause the test matches
+(`"second custody holder"`) is unchanged.
+
+One prose difference, recorded so it is not discovered later as a surprise
+rather than flagged as a defect: unification generalized the recovery tail.
+Receive's own version ended "open the log to build it, **then receive into it
+as a merge**"; the shared one ends "open the log to build its index, **or
+choose a target that is not an arrival log's derived index**". Strictly more
+general and correct at all three sites, marginally less actionable at the
+receive site specifically. That is the ordinary cost of one home for one
+rule, and it is the right trade at three call sites. Not a finding.
+
+## 3. F2 — the driver's stderr. **PASS**
+
+**Export surface matches base exactly.** `__all__` was extracted from both
+revisions and compared: **identical, no diff**. The whole `__init__.py` delta
+is the seven-line comment explaining why `derived_log_merge` is deliberately
+not re-exported. The stated reason is right: it is a git merge driver —
+tooling over artifacts, not this lib's runtime API — and `python -m` is its
+interface. (This reverses my earlier G3 ruling, which read the export as
+making the driver a first-class maintenance operation. The remediation picked
+the other resolution of my own F2 and picked the better one: the export
+bought nothing that `store.derived_log_merge.merge_derived_log` does not,
+and it cost a warning on every user-visible merge.)
+
+**Bare invocation:**
+
+```
+$ .venv/bin/python -m store.derived_log_merge
+rc=2
+--- stderr ---
+usage: python -m store.derived_log_merge %O %A %B
+--- warning count: 0 ---
+```
+
+**A real three-file case**, built from actual derived logs of a real arrival
+store (base 2 lines, ours 3, theirs 3 — a genuine divergence above a shared
+base):
+
+```
+$ .venv/bin/python -m store.derived_log_merge base.jsonl ours.jsonl theirs.jsonl
+rc=0
+--- stderr (must be EMPTY) ---
+--- bytes of stderr:        0 ---
+--- merged (%A) now has        4 lines ---
+```
+
+Zero bytes of stderr, and the union is correct (2 base + 1 ours + 1 theirs).
+The `RuntimeWarning` I reported in F2 is gone. The three driver subprocess
+tests are green:
+
+```
+$ ... pytest libs/store/tests/test_derived_log_merge.py -k "git_merge"
+3 passed, 12 deselected in 0.71s
+```
+
+No stale `from store import merge_derived_log` was left anywhere in `libs/`,
+`apps/`, `tests/` or `spec/`.
+
+## 4. Counts at tip. **PASS**
+
+| Suite | Gate @ `61e4a968` | Expected |
+|---|---|---|
+| `libs/store/tests` | **174 passed** | 174 |
+| `tests/architecture` | **98 passed** | 98 |
+| `libs/engine/tests` | **1739 passed, 1 skipped** | 1738/1s/1f |
+| `apps/` diff vs `feat/arrival-libs` | **empty** | empty |
+| `spec/` diff vs `feat/arrival-libs` | **empty** | empty |
+
+Store and arch match exactly. Engine reads 1739/0f for the same reason
+documented in G4 — the single pre-existing failure is hypothesis-corpus
+dependent and does not reproduce in a worktree without the saved example.
+Same total, same single test, and engine is untouched by all three
+remediation commits (no engine file appears in the diff), so this is the
+unchanged baseline rather than a new result.
+
+## 5. Diff read — nothing outside the three orders
+
+The remediation touches eight files and no others:
+
+```
+docs/scratch/arrival-sliceB/impl-report.md   (report sections)
+libs/store/src/store/__init__.py             (comment only; __all__ identical to base)
+libs/store/src/store/_conn.py                (+37: the guard, one home)
+libs/store/src/store/rebirth.py              (import + one guarded call + docstring)
+libs/store/src/store/receive.py              (local function deleted, shared call substituted)
+libs/store/src/store/slice.py                (import + one guarded call + docstring)
+libs/store/tests/test_rebirth.py             (+60: refusal + happy-path control)
+libs/store/tests/test_slice.py               (+58: refusal + happy-path control)
+```
+
+All three production call sites are the same three lines: import, one guard
+call before any work, one docstring `Raises:` entry. No behaviour is changed
+on any path that is not the hazard shape. Nothing outside the three orders,
+and `engine`, `apps/`, `spec/` are untouched.
+
+## The named residue — assessed as a location claim, and it is accurate
+
+The implementer names it: `_create` does not self-enforce the guard, so the
+invariant rests on call-site discipline. Verified:
+
+```
+=== every _create call site ===
+libs/store/src/store/slice.py:75:    target_conn = _create(target)
+libs/store/src/store/rebirth.py:423:  dst = _create(target)
+
+=== does _create itself call the guard? ===
+0
+```
+
+Both `_create` call sites are guarded, and `receive` (which copies rather
+than creating) is guarded too. So **all three create arms are covered
+today** and the invariant holds across the surface as it now stands. The
+residue is exactly and only what was claimed: a *future* fourth arm calling
+`_create` would not inherit the guard. That is an honest location claim, it
+is receipted for a later ruling, and it is not this gate's to fix or to
+widen. Worth noting for whoever rules on it: pushing the guard into `_create`
+would cover `slice` and `rebirth` but still not `receive`, which never calls
+`_create` — so "make `_create` enforce it" is not by itself the whole answer.
+
+## Re-check verdict
+
+**CLEAN.** All three orders are satisfied and independently verified:
+
+- The guard has one home, and the gate's own single mutation turns all three
+  call sites red in one run — the unification is real.
+- Every refusal happens before any byte is written; hand-checked, no strays.
+- `receive.py`'s refusal is unchanged in trigger, exception class and matched
+  clause; only the recovery prose generalized, appropriately.
+- The driver's stderr is byte-empty on a real merge, and the export surface
+  is identical to base.
+- Counts land where expected, with engine's one deviation already explained.
+- Nothing outside the three orders.
+
+```
+$ git diff -- libs/ tests/
+(empty)
+```
+
+Every mutation the gate made in this round was restored exactly.

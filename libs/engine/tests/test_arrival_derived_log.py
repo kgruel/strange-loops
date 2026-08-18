@@ -13,7 +13,6 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 
-import pytest
 from atoms import Fact
 from lang import parse_vertex
 from lang.document import DECL_GENESIS, vertex_to_documents
@@ -34,17 +33,6 @@ from engine.jsonl_codec import deserialize_records
 from engine.probe import probe_target
 from engine.tick import Tick
 from tests.conftest import ARRIVAL_VERTEX_SRC as BASE
-from tests.conftest import Custodian
-
-
-@pytest.fixture
-def keys(tmp_path):
-    return Custodian(tmp_path, "kyle")
-
-
-@pytest.fixture
-def signer(keys):
-    return keys.signer
 
 
 def build(tmp_path, keys, signer):

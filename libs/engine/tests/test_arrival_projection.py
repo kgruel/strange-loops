@@ -30,17 +30,6 @@ from engine.arrival_store import (
 )
 from engine.tick import Tick
 from tests.conftest import ARRIVAL_VERTEX_SRC as BASE
-from tests.conftest import Custodian
-
-
-@pytest.fixture
-def keys(tmp_path):
-    return Custodian(tmp_path, "kyle")
-
-
-@pytest.fixture
-def signer(keys):
-    return keys.signer
 
 
 def mint(tmp_path, keys, signer, name: str = "s") -> ArrivalLog:

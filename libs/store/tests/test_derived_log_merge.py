@@ -26,18 +26,7 @@ from store.derived_log_merge import (
     DerivedLogMergeConflict,
     merge_derived_log,
 )
-
-# Shape-valid founding key + a deterministic stand-in signer. Nothing in this
-# suite verifies a signature — mint checks the key's SHAPE only, so the store
-# lib's tests need no crypto dependency.
-_STUB_KEY = __import__("base64").b64encode(b"k" * 32).decode()
-
-
-def _sign(observer: str, commitment: str) -> str:
-    import hashlib
-
-    return "sig:" + hashlib.sha256(f"{observer}/{commitment}".encode()).hexdigest()
-
+from tests.conftest import STUB_KEY, stub_sign
 
 def _fact(ident: str, message: str) -> dict:
     return {
@@ -52,7 +41,7 @@ def _fact(ident: str, message: str) -> dict:
 
 
 def _mint(path: Path) -> ArrivalLog:
-    return ArrivalLog.mint(path, observer="kyle", signer=_sign, key=_STUB_KEY)
+    return ArrivalLog.mint(path, observer="kyle", signer=stub_sign, key=STUB_KEY)
 
 
 def _store_with(path: Path, facts: list[tuple[str, str]]) -> Path:

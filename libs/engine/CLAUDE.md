@@ -139,6 +139,7 @@ The Store protocol is append-only: `append()`, `since(cursor)`, `between(start, 
 | `EventStore` | In-memory (optional JSONL) | Tests, ephemeral |
 | `SqliteStore` | SQLite (WAL mode) | sqlite-canonical stores |
 | `JsonlStore` | Append-only JSONL log + derived SQLite index | **Production** — the canonical shape |
+| `ArrivalStore` | Arrival log + derived SQLite index | arrival-canonical stores (`.arrival` — custody with ordinals, chained hashes, in-log keys) |
 | `FileStore` | JSONL file | Legacy, pre-Receipt. Do not build on it. |
 
 **`JsonlStore` is a `SqliteStore` subclass, not an alternative to it.** The
@@ -153,14 +154,22 @@ byte offset, or rebuilds the index if the offset can't be trusted.
 authoritative"):
 
 ```python
-from engine.residence import canonical_store_path, is_jsonl_canonical
+from engine.residence import canonical_for, canonical_mode, canonical_store_path
 from engine.jsonl_store import ensure_index, open_canonical_store, resolved_index
 
 resolved_index(ast.store, vertex_path)       # → sqlite path to READ from
 canonical_store_path(ast.store, vertex_path) # → the authoritative artifact
-open_canonical_store(canonical, **kw)        # → JsonlStore or SqliteStore
+canonical_mode(declared)                     # → "arrival" | "jsonl" | "sqlite"
+canonical_for(index_path, mode)              # → canonical sibling, mode explicit
+open_canonical_store(canonical, **kw)        # → Arrival/Jsonl/SqliteStore
 ensure_index(canonical)                      # → materialize a missing index
 ```
+
+`canonical_mode` is the one switch — three arms, callers compare; there is
+no per-mode boolean family. The db→log inverse needs the mode spelled out
+(`canonical_for`): with three modes a `.db` has two possible canonical
+siblings, and existence-based disambiguation belongs to `engine/probe.py`,
+where existence checks are legal.
 
 `resolved_index` is `residence.resolve_store_path` with materialization
 folded in. Resolve reads through it, never through the pure function: the
@@ -170,10 +179,11 @@ once. **Writers resolve `canonical_store_path`, never an index path** — a
 `.db` looks identical whether it is canonical or derived, so a resolved
 index cannot answer the only question a writer may ask.
 
-`store "….jsonl"` → `JsonlStore` over the sibling `….db`; `store "….db"` →
-plain `SqliteStore`. Never construct a store for a vertex by hand — go
-through `open_canonical_store`, or a direct sqlite write becomes an
-out-of-band insert the log doesn't account for.
+`store "….arrival"` → `ArrivalStore` over the sibling `….db`; `store
+"….jsonl"` → `JsonlStore` over the sibling `….db`; `store "….db"` → plain
+`SqliteStore`. Never construct a store for a vertex by hand — go through
+`open_canonical_store`, or a direct sqlite write becomes an out-of-band
+insert the log doesn't account for.
 
 Open-time detection of such writes is cheap by design and correspondingly
 narrow: stamped row counts vs `COUNT(*)` catch **inserts**, the last-line

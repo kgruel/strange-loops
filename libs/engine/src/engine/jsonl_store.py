@@ -160,6 +160,7 @@ not refused (above).
 
 from __future__ import annotations
 
+import contextlib
 import itertools
 import logging
 import os
@@ -186,7 +187,7 @@ from .jsonl_codec import (
     serialize_fact_row,
     serialize_tick_row,
 )
-from .residence import log_path_for
+from .residence import canonical_for
 from .sql_util import sqlite_busy
 from .sqlite_store import (
     FACT_INSERT_SQL,
@@ -249,14 +250,23 @@ def _as_int(value: object) -> int | None:
 def open_canonical_store(canonical: Path, **kwargs: Any) -> SqliteStore[Any]:
     """Open the right store class for a store locator (see ``engine.residence``).
 
-    ``.jsonl`` → :class:`JsonlStore` over the sibling index; anything else →
-    :class:`SqliteStore` at the path itself. One place to ask "which file is
-    authoritative here", so no write site can answer it differently.
+    ``.arrival`` → :class:`engine.arrival_store.ArrivalStore` over the
+    sibling index; ``.jsonl`` → :class:`JsonlStore` over the sibling index;
+    anything else → :class:`SqliteStore` at the path itself. One place to
+    ask "which file is authoritative here", so no write site can answer it
+    differently.
     """
-    from .residence import index_path_for, is_jsonl_canonical
+    from .residence import canonical_mode, index_path_for
 
     canonical = Path(canonical)
-    if is_jsonl_canonical(canonical):
+    mode = canonical_mode(canonical)
+    if mode == "arrival":
+        from .arrival_store import ArrivalStore
+
+        return ArrivalStore(
+            path=index_path_for(canonical), log_path=canonical, **kwargs
+        )
+    if mode == "jsonl":
         return JsonlStore(path=index_path_for(canonical), log_path=canonical, **kwargs)
     return SqliteStore(path=canonical, **kwargs)
 
@@ -321,16 +331,22 @@ def ensure_index(canonical: Path) -> Path:
     stat) and opened only when it is behind.
 
     A no-op — no store constructed, no lock taken — when ``canonical`` is
-    not JSONL-canonical, when the log itself is missing (nothing to build
-    from; let the caller's own not-found handling speak), or when the index
-    is already current. Read paths may call this on every resolve.
+    sqlite-canonical (there is no separate index to materialize), when the
+    log itself is missing (nothing to build from; let the caller's own
+    not-found handling speak), or when the index is already current. Read
+    paths may call this on every resolve.
     """
-    from .residence import index_path_for, is_jsonl_canonical
+    from .residence import canonical_mode, index_path_for
 
     canonical = Path(canonical)
     index = index_path_for(canonical)
-    if not is_jsonl_canonical(canonical) or not canonical.exists():
+    mode = canonical_mode(canonical)
+    if mode == "sqlite" or not canonical.exists():
         return index
+    if mode == "arrival":
+        from .arrival_store import ensure_arrival_index
+
+        return ensure_arrival_index(canonical)
     if index.exists() and _index_is_current(index, canonical):
         return index
     store: JsonlStore[Any] = JsonlStore(
@@ -376,7 +392,7 @@ class JsonlStore(SqliteStore[T], Generic[T]):
     def __init__(self, *, log_path: Path | None = None, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self._log_path = (
-            Path(log_path) if log_path is not None else log_path_for(self._path)
+            Path(log_path) if log_path is not None else canonical_for(self._path, "jsonl")
         )
         try:
             self._open_index()
@@ -435,10 +451,8 @@ class JsonlStore(SqliteStore[T], Generic[T]):
             quarantine = self._path.with_name(
                 f"{self._path.name}.corrupt.{os.getpid()}-{next(_QUARANTINE_SEQ)}"
             )
-            try:
+            with contextlib.suppress(FileNotFoundError):
                 self._path.replace(quarantine)  # atomic, evidence preserved
-            except FileNotFoundError:
-                pass
             for stale in sqlite_sidecars(self._path):
                 stale.unlink(missing_ok=True)
             super().__init__(**kwargs)  # fresh empty index at the same path

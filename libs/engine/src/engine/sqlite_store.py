@@ -791,6 +791,40 @@ class SqliteStore(Generic[T]):
         # schema yields 10 — pad the signature slot NULL.
         return _tick_row_hash(row if len(row) > 10 else (*row, None))
 
+    def _genesis_payload(self, protocol: int, documents: list) -> dict[str, Any]:
+        """The ``_decl.genesis`` payload — the era pins live HERE, and only
+        here.
+
+        A seam, not a convenience: an arrival-canonical store overrides this
+        because its era boundary is the dense ordinal (``ord < N`` is
+        structural) and a tick-row hash frozen into a signed immutable
+        record would rest an integrity claim on a projection. Legacy modes
+        keep the pins byte-identical. MUST be called inside the ceremony's
+        open transaction — the pins are read against the same snapshot the
+        append lands in.
+        """
+        chain_head = self.current_chain_head()
+        frow = self._conn.execute(
+            "SELECT id FROM facts ORDER BY rowid DESC LIMIT 1"
+        ).fetchone()
+        return {
+            "protocol": protocol,
+            "documents": list(documents),
+            "chain_head": chain_head,
+            "fact_cursor": frow[0] if frow else None,
+        }
+
+    def _genesis_lineage_id(self) -> str:
+        """The id the ``_decl.genesis`` row is minted under — which IS the
+        declaration lineage id (§9.2).
+
+        A seam for the same reason as :meth:`_genesis_payload`: an
+        arrival-canonical store's identity is its arrival genesis, so the
+        declaration genesis row projects that lineage instead of minting a
+        fresh one. Legacy modes mint here, unchanged.
+        """
+        return gen_id()
+
     def absorb_genesis(
         self,
         documents: list,
@@ -876,20 +910,11 @@ class SqliteStore(Generic[T]):
                         "ceremony (no --force)"
                     )
 
-                chain_head = self.current_chain_head()
-                frow = conn.execute(
-                    "SELECT id FROM facts ORDER BY rowid DESC LIMIT 1"
-                ).fetchone()
-                fact_cursor = frow[0] if frow else None
-
-                payload = {
-                    "protocol": protocol,
-                    "documents": list(documents),
-                    "chain_head": chain_head,
-                    "fact_cursor": fact_cursor,
-                }
+                payload = self._genesis_payload(protocol, documents)
+                chain_head = payload.get("chain_head")
+                fact_cursor = payload.get("fact_cursor")
                 ts = datetime.now(_UTC).timestamp()
-                lineage_id = gen_id()
+                lineage_id = self._genesis_lineage_id()
                 payload_text = json.dumps(payload)
                 signature = (
                     fact_signer(

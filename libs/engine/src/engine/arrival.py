@@ -936,11 +936,12 @@ class ArrivalLog:
         with self.path.open("rb") as fh:
             # lineage=None means "not established yet" — the record at
             # ordinal 0 names it, and every record after is held to it.
-            yield from self._verify_from(fh, expected=0, prev=None, lineage=None)
+            for record, _ in self._verify_from(fh, expected=0, prev=None, lineage=None):
+                yield record
 
     def _verify_from(
         self, fh, *, expected: int, prev: str | None, lineage: str | None
-    ) -> Iterator[dict]:
+    ) -> Iterator[tuple[dict, int]]:
         """The per-record verification loop — the one home for it.
 
         :meth:`walk` and :meth:`_walk_tail` differ only in where they start
@@ -952,10 +953,17 @@ class ArrivalLog:
         ``lineage`` is None only for a walk from ordinal 0, where the
         genesis names it. A resume passes the genesis's lineage in, so the
         anchor cannot decide what the rest of the file is checked against.
+
+        Yields ``(record, end_offset)`` — the byte just past each record's
+        newline, tracked from the handle's position at entry so a consumer
+        (:meth:`walk_marked`) can persist an exact resume mark. The public
+        walks project the record out.
         """
+        offset = fh.tell()
         for raw in fh:
             if not raw.endswith(b"\n"):
                 return  # in flight, or torn — either way not the reader's to judge
+            offset += len(raw)
             try:
                 record = decode_record(raw[:-1])
             except ArrivalGrammarError as exc:
@@ -983,7 +991,7 @@ class ArrivalLog:
                     f"but the preceding record's rh is {prev!r}",
                     expected,
                 )
-            yield record
+            yield record, offset
             expected += 1
             prev = record[_RH]
 
@@ -1157,9 +1165,49 @@ class ArrivalLog:
         # anchor is a record found at a byte offset a caller supplied, and
         # letting it name the lineage would let it decide what the rest of
         # the walk is checked against.
-        return anchor["ord"] + 1, self._walk_tail(offset, anchor, lineage)
+        return (
+            anchor["ord"] + 1,
+            (record for record, _ in self._walk_tail(offset, anchor, lineage)),
+        )
 
-    def _walk_tail(self, offset: int, anchor: dict, lineage: str) -> Iterator[dict]:
+    def walk_marked(
+        self, mark: ResumeMark | None
+    ) -> tuple[int, Iterator[tuple[dict, ResumeMark]]]:
+        """:meth:`walk_from`, yielding each record WITH its resume mark.
+
+        For the consumer that indexes what it reads and must persist how far
+        it got: the mark beside each record is the one that licenses
+        resuming just past it, exact to the byte because the verification
+        loop tracked it. ``(0, ...)`` means the walk starts over — either no
+        mark was offered or the offered one was rejected, and the caller
+        that persists progress must treat its prior state accordingly.
+        """
+        adopted = self._anchor_for(mark)
+        if adopted is None:
+            resumed, pairs = 0, self._walk_marked_from_zero()
+        else:
+            offset, anchor, lineage = adopted
+            resumed, pairs = anchor["ord"] + 1, self._walk_tail(offset, anchor, lineage)
+
+        def marked() -> Iterator[tuple[dict, ResumeMark]]:
+            for record, end in pairs:
+                yield record, ResumeMark(
+                    arrival_lineage=record["lin"],
+                    arrival_offset=end,
+                    arrival_ordinal=record["ord"],
+                )
+
+        return resumed, marked()
+
+    def _walk_marked_from_zero(self) -> Iterator[tuple[dict, int]]:
+        if not self.path.exists():
+            return
+        with self.path.open("rb") as fh:
+            yield from self._verify_from(fh, expected=0, prev=None, lineage=None)
+
+    def _walk_tail(
+        self, offset: int, anchor: dict, lineage: str
+    ) -> Iterator[tuple[dict, int]]:
         """:meth:`walk`'s verification, started from a validated anchor.
 
         Literally the same rules, not merely the same list of them: both

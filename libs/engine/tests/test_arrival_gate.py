@@ -632,6 +632,125 @@ def test_gate_an_anchor_carrying_a_foreign_lineage_is_rejected(tmp_path):
     assert foreign in str(caught.value)
 
 
+# ---------------------------------------------------------------------------
+# 5b. Adopting a record as an AUTHORITY
+#
+# Review round 2. Round 1 fixed "the anchor's LINEAGE is trusted without
+# checking"; round 2 found the same residual shape twice more — the anchor's
+# PLACEMENT and the head's placement, both trusted without checking. The
+# defect was never that the walk is broken: the consumed walk refuses all of
+# these files correctly. It is that the eager O(1) paths, which adopt an
+# existing on-disk record as a premise and derive from it, skipped the
+# validation the read path performs on the way past. These tests build the
+# hostile file and drive the real entry point, rather than unit-testing the
+# validator.
+# ---------------------------------------------------------------------------
+
+
+def test_a_mark_anchored_on_an_interior_genesis_is_discarded(tmp_path):
+    """F1-R2. A record the walk refuses must not be a legal place to resume
+    from, or the resume path consumes straight past the corruption."""
+    log = _seeded(tmp_path)
+
+    def to_genesis(line: bytes) -> bytes:
+        record = json.loads(line)
+        record["k"] = "genesis"
+        record["rh"] = record_hash(record)
+        return encode_record(record).encode()
+
+    _rechain_from(log, 1, {1: to_genesis})
+    mark = _mark_after(log, 1)  # anchored ON the forged record
+
+    # The consumed walk refuses it — the read path was never the defect.
+    with pytest.raises(ArrivalCorrupt) as walked:
+        list(log.walk())
+    assert walked.value.ordinal == 1
+
+    # And the resume path no longer offers a way around that refusal.
+    assert log.resume_offset(mark) == 0
+    ordinal, records = log.walk_from(mark)
+    assert ordinal == 0
+    with pytest.raises(ArrivalCorrupt) as caught:
+        list(records)
+    assert caught.value.ordinal == 1
+    assert "belongs at ordinal 0" in str(caught.value)
+
+
+def test_append_refuses_a_log_whose_genesis_is_unsigned(tmp_path):
+    """F2-R2. A tampered log that keeps accepting appends is worse than a
+    refused write: honest-looking records piling onto a forged genesis is
+    what makes the forgery hard to see later."""
+    log = _forge(tmp_path / "forged.arrival", [_genesis_record("FORGED", sig=None)])
+    before = log.path.read_bytes()
+    with pytest.raises(GenesisRefused, match="no signature"):
+        log.append("note", {"i": 0}, observer="kyle")
+    assert log.path.read_bytes() == before, "a refused append must write nothing"
+
+
+def test_append_refuses_a_log_whose_genesis_is_not_self_naming(tmp_path):
+    """F2-R2, same adoption site: the head is validated against a genesis
+    that must itself be valid."""
+    log = _forge(
+        tmp_path / "forged.arrival",
+        [_genesis_record("MINE", body={"protocol": 1, "lineage": "THEIRS"})],
+    )
+    before = log.path.read_bytes()
+    with pytest.raises(GenesisRefused, match="not self-naming"):
+        log.append("note", {"i": 0}, observer="kyle")
+    assert log.path.read_bytes() == before
+
+
+def test_append_refuses_a_tail_re_chained_onto_a_foreign_lineage(tmp_path):
+    """The append-side sibling of round 1's F4, found by the general form
+    rather than by review.
+
+    The candidate copies its lineage FROM the head, and `_check_follows`
+    compares the candidate to the head — so a head that had been re-chained
+    onto a foreign lineage was never compared to the genesis, and the log
+    would happily keep growing under the attacker's lineage.
+    """
+    log = _seeded(tmp_path)
+    foreign = "SOMEONE-ELSES-LINEAGE"
+
+    def relineage(line: bytes) -> bytes:
+        record = json.loads(line)
+        record["lin"] = foreign
+        return encode_record(dict(record, rh=record_hash(record))).encode()
+
+    _rechain_from(log, 3, dict.fromkeys((3, 4), relineage))
+    before = log.path.read_bytes()
+    with pytest.raises(ArrivalCorrupt) as caught:
+        log.append("note", {"i": 99}, observer="kyle")
+    assert foreign in str(caught.value)
+    assert log.path.read_bytes() == before, "a refused append must write nothing"
+
+
+def test_append_refuses_a_tail_that_claims_to_be_a_genesis(tmp_path):
+    """The head is held to the same placement rule as everything else."""
+    log = _seeded(tmp_path)
+
+    def to_genesis(line: bytes) -> bytes:
+        record = json.loads(line)
+        record["k"] = "genesis"
+        return encode_record(dict(record, rh=record_hash(record))).encode()
+
+    _rechain_from(log, 4, {4: to_genesis})
+    before = log.path.read_bytes()
+    with pytest.raises(ArrivalCorrupt, match="belongs at ordinal 0"):
+        log.append("note", {"i": 99}, observer="kyle")
+    assert log.path.read_bytes() == before
+
+
+def test_walk_is_a_generator_and_validates_nothing_until_consumed(tmp_path):
+    """Pinned because "I called walk and it did not raise" is a natural and
+    wrong way to read this code — it is why one round-2 probe first looked
+    like a walk defect when the walk was correct."""
+    log = _forge(tmp_path / "forged.arrival", [_genesis_record(sig=None)])
+    log.walk()  # no exception: nothing has been pulled yet
+    with pytest.raises(ArrivalCorrupt):
+        list(log.walk())
+
+
 def test_no_mark_at_all_starts_from_ordinal_zero(tmp_path):
     log = _seeded(tmp_path)
     ordinal, records = log.walk_from(None)

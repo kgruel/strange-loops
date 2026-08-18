@@ -56,6 +56,17 @@ def _run(script: str, *args: str, tmp_path, name: str = "worker") -> subprocess.
     )
 
 
+def _await_line(worker: subprocess.Popen, expected: str) -> None:
+    """Block until ``worker`` prints its handshake line.
+
+    One home for the two places a test synchronizes with a real process, and
+    the place the piped-stdout assumption is stated once instead of being
+    implied twice.
+    """
+    assert worker.stdout is not None, "_run always pipes stdout"
+    assert worker.stdout.readline().strip() == expected
+
+
 def _verify_by_hand(log: ArrivalLog, expected_count: int) -> None:
     """Re-derive every invariant from the bytes, without using ``walk``.
 
@@ -224,7 +235,7 @@ def test_a_real_sigkill_cannot_tear_an_append(tmp_path):
     for attempt in range(8):
         worker = _run(_SIGKILL_WORKER, str(log.path), tmp_path=tmp_path,
                       name=f"sigkill{attempt}")
-        assert worker.stdout.readline().strip() == "READY"
+        _await_line(worker, "READY")
         time.sleep(0.005 + 0.004 * attempt)
         worker.send_signal(signal.SIGKILL)
         worker.wait(timeout=60)
@@ -741,6 +752,30 @@ def test_append_refuses_a_tail_that_claims_to_be_a_genesis(tmp_path):
     assert log.path.read_bytes() == before
 
 
+def test_the_lineage_memo_cannot_launder_a_tampered_genesis(tmp_path):
+    """The append path memoizes the genesis lineage, keyed on the genesis
+    line's bytes. This is the test that keeps the key honest: an instance
+    that has already appended once — so its memo is warm — must still refuse
+    the moment those bytes change underneath it.
+
+    A cache keyed on the path, the inode or the mtime would pass every other
+    test in this file and fail this one.
+    """
+    log = _mint(tmp_path)
+    log.append("note", {"i": 0}, observer="kyle")  # warms the memo
+
+    lines = log.path.read_bytes()[:-1].split(b"\n")
+    genesis = json.loads(lines[0])
+    del genesis["sig"]
+    lines[0] = encode_record(dict(genesis, rh=record_hash(genesis))).encode()
+    log.path.write_bytes(b"\n".join(lines) + b"\n")
+
+    before = log.path.read_bytes()
+    with pytest.raises(GenesisRefused, match="no signature"):
+        log.append("note", {"i": 1}, observer="kyle")
+    assert log.path.read_bytes() == before
+
+
 def test_walk_is_a_generator_and_validates_nothing_until_consumed(tmp_path):
     """Pinned because "I called walk and it did not raise" is a natural and
     wrong way to read this code — it is why one round-2 probe first looked
@@ -854,7 +889,7 @@ def test_the_lock_lives_beside_the_log_and_survives_a_crashed_holder(tmp_path):
         """,
         str(log.lock_path), tmp_path=tmp_path, name="holder",
     )
-    assert holder.stdout.readline().strip() == "HELD"
+    _await_line(holder, "HELD")
     os.kill(holder.pid, signal.SIGKILL)
     holder.wait(timeout=30)
 

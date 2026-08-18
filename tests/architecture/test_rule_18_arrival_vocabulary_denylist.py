@@ -208,6 +208,15 @@ def _named(tree: ast.AST) -> list[tuple[int, str, str]]:
     which is the whole-program analysis a ratchet must not become. A repo
     that starts building exports that way needs this list grown, and the
     scan-target test is what will surface it.
+
+    Known-unscanned node types, listed so a future reader can see they were
+    considered rather than missed: dict-comprehension keys, ``except ... as``
+    names, and ``match`` capture patterns. Each could in principle carry a
+    denied name. None is widened for now because the shipped code does not
+    use those forms for retired vocabulary, and growing a detector without a
+    forcing case is the move this repo's practice warns against — the
+    detector would gain surface with nothing holding it honest. Any of them
+    becomes worth adding the day a real usage appears.
     """
     judged: list[tuple[int, str, str]] = []
 

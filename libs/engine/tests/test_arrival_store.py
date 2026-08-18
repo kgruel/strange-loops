@@ -17,7 +17,6 @@ import pytest
 from atoms import Fact
 from lang import parse_vertex
 from lang.document import DECL_GENESIS, vertex_to_documents
-from sign import ed25519
 
 from engine.arrival import ArrivalLog, GenesisRefused
 from engine.arrival_store import (
@@ -29,34 +28,18 @@ from engine.arrival_store import (
     ensure_arrival_index,
 )
 from engine.tick import Tick
-
-_DOMAIN = "test-arrival-v1"
-
-BASE = (
-    'name "x"\nstore "./x.arrival"\nloops {\n'
-    '  a { fold { n "inc" } }\n}\n'
-)
+from tests.conftest import ARRIVAL_VERTEX_SRC as BASE
+from tests.conftest import Custodian
 
 
 @pytest.fixture
 def keys(tmp_path):
-    return ed25519.load_or_generate(tmp_path / "keys")
+    return Custodian(tmp_path, "kyle")
 
 
 @pytest.fixture
 def signer(keys):
-    def sign(observer: str, digest: str) -> str | None:
-        return ed25519.sign(keys, digest.encode(), domain=_DOMAIN)
-
-    return sign
-
-
-def _verify(key_b64: str, signature: str, digest: str) -> bool:
-    try:
-        public = ed25519.public_key_from_b64(key_b64)
-    except ValueError:
-        return False
-    return ed25519.verify(public, signature, digest.encode(), domain=_DOMAIN)
+    return keys.signer
 
 
 def mint(tmp_path, keys, signer, name: str = "s") -> ArrivalLog:
@@ -64,7 +47,7 @@ def mint(tmp_path, keys, signer, name: str = "s") -> ArrivalLog:
         tmp_path / f"{name}.arrival",
         observer="kyle",
         signer=signer,
-        key=keys.public_b64,
+        key=keys.public,
     )
 
 
@@ -351,8 +334,12 @@ def test_a_record_landing_between_reconcile_and_append_is_never_skipped(
     store = open_store(tmp_path)
     try:
         store.append(fact(message="one"))
-        # Freeze reconciliation, then land an interloper in the gap.
-        monkeypatch.setattr(store, "_reconcile", lambda: None)
+        # Freeze reconciliation at the pre-race mark — the reconcile "ran"
+        # and returned an answer that the interloper then invalidates. This
+        # is also the plumbing pin: a _reconcile whose returned mark went
+        # stale must be caught by the append's own coordinate.
+        stale = store._read_mark()
+        monkeypatch.setattr(store, "_reconcile", lambda: stale)
         _interloper(log, "raced", "01RACE0000000000000000000A")
         store.append(fact(message="two"))
         ids = [
@@ -377,8 +364,14 @@ def test_a_ceremony_racing_an_interloper_refuses_before_any_byte(
     store = open_store(tmp_path, fact_signer=signer)
     try:
         store.append(fact(message="one"))
-        monkeypatch.setattr(store, "_sync_derived_state", lambda: None)
-        monkeypatch.setattr(store, "_reconcile", lambda: None)
+        # The ceremony's reconcile "ran" and pinned the pre-race head; the
+        # interloper lands after it — exactly the mid-ceremony race.
+        stale = store._read_mark()
+        monkeypatch.setattr(
+            store,
+            "_sync_derived_state",
+            lambda: setattr(store, "_reconciled_mark", stale),
+        )
         _interloper(log, "raced", "01RACE0000000000000000000B")
         before = (tmp_path / "s.arrival").read_bytes()
         with pytest.raises(AppendRejected, match="arrived since"):
@@ -415,7 +408,10 @@ def test_absorb_projects_the_arrival_lineage_and_sheds_the_pins(
         store.append(fact(observer="kyle"))
         receipt = store.absorb_genesis(_docs(), observer="kyle", fact_signer=signer)
         assert receipt["lineage"] == log.lineage()
-        assert receipt["chain_head"] is None and receipt["fact_cursor"] is None
+        # The pins DISSOLVED for this mode: their receipt keys are absent,
+        # never faked as None — "no pins" and "pins read empty" must not
+        # collapse.
+        assert "chain_head" not in receipt and "fact_cursor" not in receipt
 
         row = store._db.execute(
             "SELECT id, payload FROM facts WHERE kind = ?", (DECL_GENESIS,)
@@ -495,5 +491,12 @@ def test_legacy_absorb_payload_is_untouched(tmp_path):
         payload = json.loads(row[1])
         assert set(payload) == {"protocol", "documents", "chain_head", "fact_cursor"}
         assert receipt["lineage"] == row[0] != ""
+        # The legacy receipt shape, key order included — S3's byte-identity
+        # law, and the pin the receipt-extras seam is mutation-verified
+        # against.
+        assert list(receipt) == [
+            "lineage", "protocol", "documents", "chain_head", "fact_cursor",
+            "observer", "signed",
+        ]
     finally:
         store.close()

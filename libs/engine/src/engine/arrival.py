@@ -681,6 +681,15 @@ class ResumeMark:
     arrival_ordinal: int
 
 
+def _records_only(pairs: Iterator[tuple[dict, object]]) -> Iterator[dict]:
+    """Project the record out of a ``(record, position)`` pair stream.
+
+    The one mark-stripping spelling: every public walk is a projection of
+    the position-carrying verification loop, never a second copy of it.
+    """
+    return (record for record, _ in pairs)
+
+
 # ---------------------------------------------------------------------------
 # The log
 # ---------------------------------------------------------------------------
@@ -711,9 +720,9 @@ class ArrivalLog:
         self.path = Path(path)
         self.lock_path = lock_path_for(self.path)
         self.tmp_path = tmp_path_for(self.path)
-        # Memo for :meth:`_lineage_from`, keyed on the genesis line's bytes.
+        # Memo for :meth:`_genesis_from`, keyed on the genesis line's bytes.
         self._genesis_line: bytes | None = None
-        self._genesis_lineage: str | None = None
+        self._genesis_record: dict | None = None
 
     # -- minting -------------------------------------------------------
 
@@ -836,15 +845,20 @@ class ArrivalLog:
         content: the singleton heuristic that guessed a store's lineage from
         its rows was a hijack vector, and here the hazard dissolves rather
         than being defended against, because position 0 is structural.
+
+        Routes through the content-keyed memo (:meth:`_genesis_from`), so a
+        ceremony that asks for the genesis twice pays for one validation.
+        The returned dict is the memoized record — treat it as immutable,
+        the way every record this module yields is.
         """
         try:
             with self.path.open("rb") as fh:
-                return self._validated_genesis(fh.readline())
+                return self._genesis_from(fh)
         except FileNotFoundError as exc:
             raise GenesisRefused(f"{self.path} does not exist") from exc
 
-    def _lineage_from(self, fh) -> str:
-        """The validated lineage, memoized on the genesis LINE BYTES.
+    def _genesis_from(self, fh) -> dict:
+        """The validated genesis record, memoized on the genesis LINE BYTES.
 
         The append path needs the lineage on every write, and re-deriving it
         costs a JSON decode, an ``rh`` recompute and the genesis checks —
@@ -873,13 +887,17 @@ class ArrivalLog:
         # Snapshot both fields before comparing: a torn read across threads
         # then misses and revalidates rather than pairing one entry's key
         # with another's value.
-        cached_line, cached_lineage = self._genesis_line, self._genesis_lineage
-        if raw == cached_line and cached_lineage is not None:
-            return cached_lineage
-        lineage = self._validated_genesis(raw)["lin"]
-        self._genesis_lineage = lineage
+        cached_line, cached_record = self._genesis_line, self._genesis_record
+        if raw == cached_line and cached_record is not None:
+            return cached_record
+        record = self._validated_genesis(raw)
+        self._genesis_record = record
         self._genesis_line = raw  # published last, so the key implies the value
-        return lineage
+        return record
+
+    def _lineage_from(self, fh) -> str:
+        """The validated lineage — the memo's hot-path projection."""
+        return self._genesis_from(fh)["lin"]
 
     def _validated_genesis(self, raw: bytes) -> dict:
         """Decode one raw line and hold it to every genesis rule."""
@@ -931,13 +949,7 @@ class ArrivalLog:
         rest), and it is worth naming because "I called walk and it did not
         raise" is a natural and wrong way to read this code.
         """
-        if not self.path.exists():
-            return
-        with self.path.open("rb") as fh:
-            # lineage=None means "not established yet" — the record at
-            # ordinal 0 names it, and every record after is held to it.
-            for record, _ in self._verify_from(fh, expected=0, prev=None, lineage=None):
-                yield record
+        yield from _records_only(self._walk_marked_from_zero())
 
     def _verify_from(
         self, fh, *, expected: int, prev: str | None, lineage: str | None
@@ -1153,22 +1165,13 @@ class ArrivalLog:
     def walk_from(self, mark: ResumeMark | None) -> tuple[int, Iterator[dict]]:
         """Resume a consumption: the ordinal resumed at, and the records after.
 
-        Returns ``(0, walk())`` whenever the mark is rejected, so a caller
-        that persists progress learns it is starting over instead of
-        discovering it by ordinal.
+        :meth:`walk_marked` minus the marks — one adoption/verification
+        path, two projections of it. Returns ``(0, ...)`` whenever the mark
+        is rejected, so a caller that persists progress learns it is
+        starting over instead of discovering it by ordinal.
         """
-        adopted = self._anchor_for(mark)
-        if adopted is None:
-            return 0, self.walk()
-        offset, anchor, lineage = adopted
-        # The lineage comes from the GENESIS, never from the anchor. An
-        # anchor is a record found at a byte offset a caller supplied, and
-        # letting it name the lineage would let it decide what the rest of
-        # the walk is checked against.
-        return (
-            anchor["ord"] + 1,
-            (record for record, _ in self._walk_tail(offset, anchor, lineage)),
-        )
+        resumed, pairs = self.walk_marked(mark)
+        return resumed, _records_only(pairs)
 
     def walk_marked(
         self, mark: ResumeMark | None
@@ -1187,6 +1190,10 @@ class ArrivalLog:
             resumed, pairs = 0, self._walk_marked_from_zero()
         else:
             offset, anchor, lineage = adopted
+            # The lineage comes from the GENESIS, never from the anchor: an
+            # anchor is a record found at a byte offset a caller supplied,
+            # and letting it name the lineage would let it decide what the
+            # rest of the walk is checked against.
             resumed, pairs = anchor["ord"] + 1, self._walk_tail(offset, anchor, lineage)
 
         def marked() -> Iterator[tuple[dict, ResumeMark]]:

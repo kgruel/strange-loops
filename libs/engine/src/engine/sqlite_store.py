@@ -868,15 +868,21 @@ class SqliteStore(Generic[T]):
            The genesis row's own id IS the lineage id (§9.2), returned in the
            receipt.
 
-        This is protocol surface the Go conformance oracle mirrors: the payload
-        shape (``protocol``, ``documents``, ``chain_head``, ``fact_cursor``),
-        the witness-order cursor, and the sign-final-payload rule are the
-        contract. ``documents`` are the subject-scoped declaration documents
-        (from ``lang.document.vertex_to_documents``); this method stamps the
-        protocol and pins around them.
+        This is protocol surface the Go conformance oracle mirrors FOR THE
+        LEGACY MODES: the payload shape (``protocol``, ``documents``,
+        ``chain_head``, ``fact_cursor``), the witness-order cursor, and the
+        sign-final-payload rule are that contract. The payload shape is
+        per-mode through the :meth:`_genesis_payload` seam — an
+        arrival-canonical store's payload sheds both pins, and its receipt
+        carries no pin keys at all (absent, not None). The
+        sign-final-payload rule holds in every mode. ``documents`` are the
+        subject-scoped declaration documents (from
+        ``lang.document.vertex_to_documents``).
 
-        Returns a receipt dict: ``{lineage, protocol, documents, chain_head,
-        fact_cursor, observer, signed}``.
+        Returns a receipt dict: ``{lineage, protocol, documents,
+        <the mode's payload keys beyond protocol/documents>, observer,
+        signed}`` — for legacy modes exactly ``{lineage, protocol,
+        documents, chain_head, fact_cursor, observer, signed}``.
         """
         from lang.document import DECL_GENESIS, DECLARATION_PROTOCOL_VERSION
 
@@ -911,8 +917,15 @@ class SqliteStore(Generic[T]):
                     )
 
                 payload = self._genesis_payload(protocol, documents)
-                chain_head = payload.get("chain_head")
-                fact_cursor = payload.get("fact_cursor")
+                # Receipt pin-extras come from the seam: whatever keys the
+                # mode's payload carries beyond {protocol, documents} are
+                # reported, and ONLY those — a mode that dissolved its pins
+                # must not fake them as None in the receipt.
+                extras = {
+                    key: value
+                    for key, value in payload.items()
+                    if key not in ("protocol", "documents")
+                }
                 ts = datetime.now(_UTC).timestamp()
                 lineage_id = self._genesis_lineage_id()
                 payload_text = json.dumps(payload)
@@ -972,8 +985,7 @@ class SqliteStore(Generic[T]):
             "lineage": lineage_id,
             "protocol": protocol,
             "documents": len(payload["documents"]),
-            "chain_head": chain_head,
-            "fact_cursor": fact_cursor,
+            **extras,
             "observer": observer,
             "signed": True,
         }

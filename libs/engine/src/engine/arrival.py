@@ -916,10 +916,10 @@ class ArrivalLog:
         if size == 0:
             raise GenesisRefused(f"{self.path} is empty — mint a genesis first")
         with self.path.open("rb") as fh:
-            # One handle for both reads. The genesis is validated on every
-            # append — see the docstring above for why it is not cached —
-            # and doing it through the handle already open for the tail
-            # keeps that check off the syscall budget.
+            # One handle for both reads. The genesis line is read on every
+            # append through the handle already open for the tail, and its
+            # validation is memoized on those bytes (:meth:`_lineage_from`)
+            # — so the check still runs against what is on disk right now.
             lineage = self._lineage_from(fh)
             fh.seek(size - 1)
             if fh.read(1) != b"\n":

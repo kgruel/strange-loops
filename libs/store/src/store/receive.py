@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
+from ._conn import refuse_create_over_arrival_custody
 from .merge import merge_store
 
 # First 16 bytes of every SQLite database file.
@@ -64,7 +65,7 @@ def receive_store(target: Path, source: Path) -> ReceiveResult:
     _validate_sqlite(source)
 
     if not target.exists():
-        _refuse_copy_over_arrival_custody(target)
+        refuse_create_over_arrival_custody(target, "copying a foreign db")
 
     if target.exists():
         result = merge_store(target, source)
@@ -88,37 +89,6 @@ def receive_store(target: Path, source: Path) -> ReceiveResult:
             conn.close()
 
         return ReceiveResult(status="created", facts=facts, ticks=ticks)
-
-
-def _refuse_copy_over_arrival_custody(target: Path) -> None:
-    """NON-NEGOTIABLE: never create a store by copy beside a live arrival log.
-
-    The target ``.db`` is absent, so the create arm would ``shutil.copy2``
-    the source over it — but if an ``.arrival`` sits beside it, that ``.db``
-    is not a store location at all: it is the derived index of a log that
-    holds custody. Copying there mints a second custody holder, and the
-    resulting index carries rows the log cannot account for. The store is
-    NOT absent; only its projection is, and a projection is built from its
-    log, never copied from a stranger.
-    """
-    from engine.probe import probe_target
-
-    info = probe_target(target)
-    if (
-        info.canonical_mode != "arrival"
-        or info.canonical_path is None
-        or not info.canonical_path.is_file()
-    ):
-        return
-    from engine.arrival_store import ArrivalCanonicalUnsupported
-
-    raise ArrivalCanonicalUnsupported(
-        f"{target} is the derived index of the arrival log at "
-        f"{info.canonical_path}, not an absent store — copying a foreign db "
-        "there would mint a second custody holder beside a live log. The "
-        "index is absent, not the store: open the log to build it, then "
-        "receive into it as a merge."
-    )
 
 
 def _validate_sqlite(path: Path) -> None:

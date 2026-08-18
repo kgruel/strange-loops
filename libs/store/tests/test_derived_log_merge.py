@@ -415,13 +415,58 @@ def test_no_repo_root_gitattributes_or_gitignore_change_ships():
     )
 
 
-def test_there_is_no_merge_driver_for_the_arrival_log():
-    """Stated so nobody defaults it. Two arrival logs cannot be merged
-    textually — every record after the divergence carries a ``prev`` chained
-    to a different predecessor, so a textual union produces a file that
-    refuses to walk. Combining lineages is ``merge_store``."""
+def test_the_driver_refuses_arrival_records_rather_than_unioning_them(tmp_path):
+    """There is no textual merge driver for ``.arrival``, and pointing THIS
+    one at arrival logs must fail loudly rather than half-work.
+
+    Two arrival logs cannot be merged textually: every record after the
+    divergence carries a ``prev`` chained to a different predecessor, so a
+    textual union produces a file that refuses to walk. Combining lineages
+    is a custody ceremony called ``merge_store``.
+
+    The lines here are arrival RECORDS — the structural genesis at ordinal 0
+    included — not codec fact/tick lines. They carry ``k``/``lin``/``ord``
+    and no ``t`` discriminator, so the line grammar refuses them, and the
+    refusal is what stops a union from being written.
+    """
+    ours = _store_with(tmp_path / "a.arrival", [("01A", "a")])
+    theirs = _store_with(tmp_path / "b.arrival", [("01B", "b")])
+    # Point the driver at the ARRIVAL LOGS themselves, not their projections.
+    ours_arrival = tmp_path / "a.arrival"
+    theirs_arrival = tmp_path / "b.arrival"
+    before = ours_arrival.read_bytes()
+    # Not vacuous: these really are arrival records, genesis first.
+    first = json.loads(before.splitlines()[0])
+    assert first["k"] == "genesis" and first["ord"] == 0 and "t" not in first
+
+    with pytest.raises(Exception) as exc:
+        merge_derived_log(tmp_path / "no-base", ours_arrival, theirs_arrival)
+    assert not isinstance(exc.value, DerivedLogMergeConflict), (
+        "an arrival log is not a derived log with a conflict in it — it is "
+        "the wrong grammar entirely, and the refusal must say so"
+    )
+
+    # NOTHING was written: the target log is byte-identical.
+    assert ours_arrival.read_bytes() == before
+
+    # And through the git-facing entry point it is a non-zero exit, not a
+    # traceback and not a silent union.
+    result = subprocess.run(
+        [
+            sys.executable, "-m", "store.derived_log_merge",
+            str(tmp_path / "no-base"), str(ours_arrival), str(theirs_arrival),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0
+    assert "derived-log merge" in result.stderr
+    assert ours_arrival.read_bytes() == before
+
+
+def test_no_arrival_merge_driver_module_exists():
+    """The structural half of the same rule: there is no second driver, so
+    nobody can wire one up by reaching for an obvious name."""
     import store.derived_log_merge as driver
 
-    source = Path(driver.__file__).read_text()
-    assert "no merge driver for ``.arrival``" in source
     assert not (Path(driver.__file__).parent / "arrival_merge.py").exists()

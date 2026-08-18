@@ -27,7 +27,7 @@ from lang.document import diff_documents, vertex_to_documents
 
 from engine.declaration import resolve_declaration_documents
 from engine.jsonl_store import JsonlStore
-from engine.residence import log_path_for
+from engine.residence import canonical_for
 from engine.tick import Tick
 
 HERE = Path(__file__).parent
@@ -81,7 +81,7 @@ def main() -> None:
         Tick(name="seal", ts=datetime.now(UTC), payload={"n": 1}, origin="golden")
     )
     store.close()
-    shutil.copyfile(log_path_for(tmp / "golden.db"), TARGET)
+    shutil.copyfile(canonical_for(tmp / "golden.db", "jsonl"), TARGET)
     print(f"wrote {TARGET}")
 
 

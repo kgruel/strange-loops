@@ -18,7 +18,7 @@ from atoms import Fact
 
 from engine.jsonl_codec import deserialize_row, serialize_fact_row
 from engine.jsonl_store import JsonlCanonicalUnsupported, JsonlStore
-from engine.residence import log_path_for
+from engine.residence import canonical_for
 from engine.sqlite_store import (
     SqliteStore,
     _fact_commitment_hash,
@@ -69,7 +69,7 @@ def offset_of(store: JsonlStore) -> int:
 def test_append_writes_log_first_and_receipt_matches_sqlite(tmp_path):
     store = open_store(tmp_path)
     fid = store.append(fact())
-    log = log_path_for(tmp_path / "s.db")
+    log = canonical_for(tmp_path / "s.db", "jsonl")
 
     assert log.exists()
     t, row = deserialize_row(lines(log)[0])
@@ -388,7 +388,7 @@ def test_rejected_insert_never_orphans_a_line(tmp_path):
     import sqlite3
 
     store = open_store(tmp_path)
-    log = log_path_for(store._path)
+    log = canonical_for(store._path, "jsonl")
     first = store.append(fact(message="one"))
 
     with pytest.raises(sqlite3.IntegrityError):
@@ -420,7 +420,7 @@ def test_duplicate_line_in_log_does_not_brick_reopen(tmp_path):
     import sqlite3
 
     store = open_store(tmp_path)
-    log = log_path_for(store._path)
+    log = canonical_for(store._path, "jsonl")
     store.append(fact(message="one"))
     store.close()
 
@@ -516,7 +516,7 @@ def test_two_open_handles_do_not_brick_the_store(tmp_path):
     a.close()
     b.close()
 
-    assert len(lines(log_path_for(tmp_path / "s.db"))) == 2
+    assert len(lines(canonical_for(tmp_path / "s.db", "jsonl"))) == 2
     assert len(sqlite_facts(tmp_path / "s.db")) == 2
 
     reopened = open_store(tmp_path)  # must not raise
@@ -571,7 +571,7 @@ def test_rebuild_drops_the_rowid_keyed_fts_index(tmp_path):
     conn.commit()
     conn.close()
 
-    log = log_path_for(db)
+    log = canonical_for(db, "jsonl")
     kept = lines(log)[0]
     log.write_text(kept + "\n", encoding="utf-8")  # shrink → forces a rebuild
 

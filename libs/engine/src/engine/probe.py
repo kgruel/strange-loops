@@ -1,13 +1,13 @@
 """probe — what IS this path, without touching it.
 
 Every client that opens loops artifacts must answer the same question: is
-this a ``.vertex`` declaration, a JSONL-canonical log, the derived sqlite
-index beside one, or a sqlite-canonical store? Answering it wrong is a
-correctness error — writing to a derived ``.db`` is an out-of-band insert
-the log never sees. Before this module every client re-derived the answer
-from suffix checks; :func:`probe_target` states it once, composed over
-:mod:`engine.residence` (the extension-is-the-switch rule) rather than
-re-spelling it.
+this a ``.vertex`` declaration, an arrival log, a legacy canonical log, the
+derived sqlite index beside one, or a sqlite-canonical store? Answering it
+wrong is a correctness error — writing to a derived ``.db`` is an
+out-of-band insert the canonical artifact never sees. Before this module
+every client re-derived the answer from suffix checks; :func:`probe_target`
+states it once, composed over :mod:`engine.residence` (the
+extension-is-the-switch rule) rather than re-spelling it.
 
 **A probe is a location claim, never a verdict claim.** ``probe_target``
 reports where things are and which artifact is authoritative; it does not
@@ -18,26 +18,35 @@ intact" — that is :mod:`engine.canonical_audit`'s scope, reached through
 
 **Pure inspection, by contract.** Nothing here constructs a store, creates
 a file, materializes an index, or repairs anything. The constructor-shaped
-traps are deliberately avoided: no :class:`~engine.jsonl_store.JsonlStore`
-(its ``__init__`` repairs), no ``ensure_index``/``resolved_index`` (they
-materialize), no bare ``sqlite3.connect`` (it CREATES a missing file and
-can spawn ``-wal``/``-shm`` siblings). Sqlite is only ever opened through
-the read-only URI helper, and file content is read with plain ``open('rb')``.
+traps are deliberately avoided: no store class (their ``__init__`` repairs
+or catches up), no ``ensure_index``/``resolved_index`` (they materialize),
+no bare ``sqlite3.connect`` (it CREATES a missing file and can spawn
+``-wal``/``-shm`` siblings), and no :class:`~engine.arrival.ArrivalLog`
+method that could ever take the append lock — corroboration reads the first
+line with plain ``open('rb')`` and hands it to the pure
+:func:`engine.arrival.decode_record`.
 
 Classification taxonomy (documented here so the matrix test reads as spec):
 
 - The **suffix classifies**; content corroborates and existence is
-  orthogonal. A missing ``foo.jsonl`` still probes as ``jsonl_log`` with
-  ``exists=False`` — the caller asked about a location, and the location's
-  meaning does not depend on whether anything is there yet.
+  orthogonal. A missing ``foo.arrival`` still probes as ``arrival_log``
+  with ``exists=False`` — the caller asked about a location, and the
+  location's meaning does not depend on whether anything is there yet.
 - ``.vertex`` → ``vertex``. The declared ``store`` locator (parsed from
   content, not guessed) supplies the canonical/index paths.
-- ``.jsonl`` → ``jsonl_log``: the file IS the store; the sibling ``.db``
-  is its derived index.
-- ``.db``/``.sqlite`` **with a sibling ``.jsonl``** → ``derived_index``:
-  not a write target at all.
+- ``.arrival`` → ``arrival_log``: the file holds custody; the sibling
+  ``.db`` is its derived index.
+- ``.jsonl`` → ``jsonl_log``: the log is the store — UNLESS an ``.arrival``
+  sits beside it, in which case custody is the arrival log's (law 1 makes
+  that the only available answer) and the ``.jsonl`` classifies as
+  ``derived_log``: a projection, not a store. That half-migrated shape is
+  the one configuration that could silently mint two custody holders, so
+  it is named here and pinned in the matrix test.
+- ``.db``/``.sqlite`` **with a sibling log** → ``derived_index``: not a
+  write target at all. The ``.arrival`` sibling is checked first, for the
+  same law-1 reason.
 - ``.db``/``.sqlite`` with no sibling log → ``sqlite_store``
-  (sqlite-canonical, the pre-flip status quo).
+  (sqlite-canonical, the original shape).
 - Anything else → ``unknown``.
 """
 
@@ -48,12 +57,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .arrival import ARRIVAL_SUFFIX
 from .residence import (
     CANONICAL_LOG_SUFFIX,
     SQLITE_SUFFIXES,
+    canonical_for,
+    canonical_mode,
     canonical_store_path,
     index_path_for,
-    log_path_for,
 )
 
 __all__ = [
@@ -78,14 +89,16 @@ class TargetInfo:
     """
 
     target_type: str
-    """One of ``vertex | jsonl_log | derived_index | sqlite_store | unknown``.
+    """One of ``vertex | arrival_log | jsonl_log | derived_log |
+    derived_index | sqlite_store | unknown``.
 
     Classified by suffix (see the module docstring's taxonomy); existence
     is carried by :attr:`exists`, not folded into the type.
     """
 
     canonical_mode: str | None
-    """``"jsonl"`` or ``"sqlite"`` — which artifact class is authoritative.
+    """``"arrival"``, ``"jsonl"`` or ``"sqlite"`` — which artifact class is
+    authoritative (:func:`engine.residence.canonical_mode`).
 
     ``None`` when there is no store to have a mode: an ``unknown`` target,
     or a ``vertex`` that declares no ``store`` (or cannot be parsed).
@@ -191,6 +204,8 @@ def probe_target(path: Path | str) -> TargetInfo:
     suffix = path.suffix
     if suffix == VERTEX_SUFFIX:
         return _probe_vertex(path)
+    if suffix == ARRIVAL_SUFFIX:
+        return _probe_arrival(path)
     if suffix == CANONICAL_LOG_SUFFIX:
         return _probe_log(path)
     if suffix in SQLITE_SUFFIXES:
@@ -262,14 +277,20 @@ def _probe_vertex(path: Path) -> TargetInfo:
             reason="vertex declares no store — declaration only",
         )
     canonical = canonical_store_path(store_field, path)
-    mode = "jsonl" if canonical.suffix == CANONICAL_LOG_SUFFIX else "sqlite"
+    mode = canonical_mode(canonical)
+    if mode == "arrival":
+        currency = _arrival_currency(canonical)
+    elif mode == "jsonl":
+        currency = _currency(canonical)
+    else:
+        currency = None
     return TargetInfo(
         target_type="vertex",
         canonical_mode=mode,
         canonical_path=canonical,
         index_path=index_path_for(canonical),
         exists=True,
-        index_current=_currency(canonical) if mode == "jsonl" else None,
+        index_current=currency,
         declaration_status=status,
         writable=_writable(path),
         canonical_writable=write_surface_reason(canonical) is None,
@@ -277,8 +298,51 @@ def _probe_vertex(path: Path) -> TargetInfo:
     )
 
 
+def _probe_arrival(path: Path) -> TargetInfo:
+    exists = path.is_file()
+    corroboration = _arrival_content_note(path) if exists else ""
+    return TargetInfo(
+        target_type="arrival_log",
+        canonical_mode="arrival",
+        canonical_path=path,
+        index_path=index_path_for(path),
+        exists=exists,
+        index_current=_arrival_currency(path) if exists else None,
+        declaration_status=None,
+        writable=_writable(path),
+        canonical_writable=write_surface_reason(path) is None,
+        reason=(
+            "arrival log — custody lives here; the sibling .db is a "
+            "derived, rebuildable index" + corroboration
+        )
+        if exists
+        else "arrival log locator — nothing on disk yet",
+    )
+
+
 def _probe_log(path: Path) -> TargetInfo:
     exists = path.is_file()
+    sibling_arrival = canonical_for(index_path_for(path), "arrival")
+    if sibling_arrival.is_file():
+        # Half-migrated store, probed from the legacy log's side: the
+        # arrival log wins custody (law 1 — the only available answer), and
+        # this file is a projection, not a store.
+        return TargetInfo(
+            target_type="derived_log",
+            canonical_mode="arrival",
+            canonical_path=sibling_arrival,
+            index_path=index_path_for(path),
+            exists=exists,
+            index_current=_arrival_currency(sibling_arrival),
+            declaration_status=None,
+            writable=False,
+            canonical_writable=write_surface_reason(sibling_arrival) is None,
+            reason=(
+                f"legacy log beside the arrival log at {sibling_arrival} — "
+                "custody is the arrival log's, so this file is a projection "
+                "and NOT a write target"
+            ),
+        )
     corroboration = _log_content_note(path) if exists else ""
     return TargetInfo(
         target_type="jsonl_log",
@@ -291,18 +355,48 @@ def _probe_log(path: Path) -> TargetInfo:
         writable=_writable(path),
         canonical_writable=write_surface_reason(path) is None,
         reason=(
-            "JSONL-canonical log — the log is the store; the sibling .db "
-            "is a derived, rebuildable index" + corroboration
+            "canonical log (mode \"jsonl\") — the log is the store; the "
+            "sibling .db is a derived, rebuildable index" + corroboration
         )
         if exists
-        else "JSONL-canonical log locator — nothing on disk yet",
+        else "canonical log locator (mode \"jsonl\") — nothing on disk yet",
     )
 
 
 def _probe_sqlite(path: Path) -> TargetInfo:
     exists = path.is_file()
-    sibling_log = log_path_for(path)
     corroboration = _sqlite_content_note(path) if exists else ""
+    # The arrival sibling is checked FIRST: when both logs exist the store
+    # is half-migrated, custody is the arrival log's (law 1), and the
+    # legacy log beside it is a projection.
+    sibling_arrival = canonical_for(path, "arrival")
+    sibling_log = canonical_for(path, "jsonl")
+    if sibling_arrival.is_file():
+        both = sibling_log.is_file()
+        return TargetInfo(
+            target_type="derived_index",
+            canonical_mode="arrival",
+            canonical_path=sibling_arrival,
+            index_path=path,
+            exists=exists,
+            index_current=_arrival_currency(sibling_arrival),
+            declaration_status=None,
+            writable=False,
+            canonical_writable=write_surface_reason(sibling_arrival) is None,
+            reason=(
+                f"derived index over the arrival log at {sibling_arrival} — "
+                "NOT a write target: writing here is an out-of-band insert "
+                "the log cannot account for; writers open the log "
+                "(engine.jsonl_store.open_canonical_store)"
+                + (
+                    f"; the legacy log at {sibling_log} is a projection, "
+                    "not a store"
+                    if both
+                    else ""
+                )
+                + corroboration
+            ),
+        )
     if sibling_log.is_file():
         return TargetInfo(
             target_type="derived_index",
@@ -315,7 +409,7 @@ def _probe_sqlite(path: Path) -> TargetInfo:
             writable=False,
             canonical_writable=write_surface_reason(sibling_log) is None,
             reason=(
-                f"derived index over the JSONL-canonical log at "
+                f"derived index over the canonical log at "
                 f"{sibling_log} — NOT a write target: writing here is an "
                 "out-of-band insert the log cannot account for; writers "
                 "open the log (engine.jsonl_store.open_canonical_store)"
@@ -359,6 +453,44 @@ def _currency(canonical: Path) -> bool | None:
     if not index.is_file():
         return False
     return _index_is_current(index, canonical)
+
+
+def _arrival_currency(canonical: Path) -> bool | None:
+    """The arrival-mode spelling of :func:`_currency` — same scope, same
+    refusals, composed over the arrival resume mark's offset field."""
+    from .arrival_store import _arrival_index_is_current
+
+    if not canonical.is_file():
+        return None
+    index = index_path_for(canonical)
+    if not index.is_file():
+        return False
+    return _arrival_index_is_current(index, canonical)
+
+
+def _arrival_content_note(path: Path) -> str:
+    """Corroborate an ``.arrival`` suffix against its first complete line.
+
+    Plain ``open('rb')`` and the pure :func:`engine.arrival.decode_record`
+    — never an :class:`engine.arrival.ArrivalLog` method, so no future
+    change to that class can smuggle a lock or a repair into a probe.
+    """
+    try:
+        with path.open("rb") as fh:
+            raw = fh.readline()
+    except OSError as exc:
+        return f"; content unreadable: {exc}"
+    if not raw.strip():
+        return "; file is empty"
+    if not raw.endswith(b"\n"):
+        return "; first line incomplete (torn or still being written)"
+    from .arrival import ArrivalGrammarError, decode_record
+
+    try:
+        decode_record(raw[:-1])
+    except ArrivalGrammarError:
+        return "; content does not decode as arrival records"
+    return ""
 
 
 def write_surface_reason(canonical_path: Path | str) -> str | None:

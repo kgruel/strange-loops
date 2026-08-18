@@ -8,9 +8,10 @@ from pathlib import Path
 import pytest
 
 from engine.residence import (
+    canonical_for,
+    canonical_mode,
     canonical_store_path,
     index_path_for,
-    is_jsonl_canonical,
     resolve_store_path,
 )
 
@@ -19,20 +20,59 @@ from engine.residence import (
 
 
 @pytest.mark.parametrize(
-    ("declared", "canonical"),
-    [("a.jsonl", True), ("a.db", False), ("a.sqlite", False), ("a", False)],
+    ("declared", "mode"),
+    [
+        ("a.arrival", "arrival"),
+        ("a.jsonl", "jsonl"),
+        ("a.db", "sqlite"),
+        ("a.sqlite", "sqlite"),
+        ("a", "sqlite"),
+    ],
 )
-def test_is_jsonl_canonical_reads_the_suffix(declared, canonical):
-    assert is_jsonl_canonical(Path(declared)) is canonical
+def test_canonical_mode_reads_the_suffix(declared, mode):
+    assert canonical_mode(Path(declared)) == mode
+
+
+def test_the_retired_boolean_survives_only_for_the_cli_lazy_import():
+    """apps/loops/src/loops/commands/store.py:142 imports the retired name
+    lazily, BEFORE its mode check, and apps/ is diff-empty for the whole
+    arrival wave — deleting the symbol would ImportError every store read
+    verb. This tripwire (pyright cannot see a lazy import) keeps the shim
+    alive until the CLI-surface cut removes the import; delete both
+    together, with Rule 18's allowlist entry."""
+    from engine import residence
+
+    shim = residence.is_jsonl_canonical
+    assert shim(Path("a.jsonl")) is True
+    assert shim(Path("a.arrival")) is False
+    assert shim(Path("a.db")) is False
+    assert "is_jsonl_canonical" not in residence.__all__
 
 
 def test_index_path_for_maps_log_to_sibling_db():
     assert index_path_for(Path("/s/project.jsonl")) == Path("/s/project.db")
+    assert index_path_for(Path("/s/project.arrival")) == Path("/s/project.db")
 
 
 def test_index_path_for_is_idempotent_on_a_db():
     assert index_path_for(Path("/s/project.db")) == Path("/s/project.db")
     assert index_path_for(index_path_for(Path("/s/p.jsonl"))) == Path("/s/p.db")
+    assert index_path_for(index_path_for(Path("/s/p.arrival"))) == Path("/s/p.db")
+
+
+def test_canonical_for_is_the_explicit_mode_inverse():
+    """The sibling bijection, both directions, per mode — with_suffix on
+    both sides so the two spellings cannot disagree. arrival_path_for is a
+    DIFFERENT question (mint a companion beside a base path) and is not
+    this inverse."""
+    db = Path("/s/p.db")
+    assert canonical_for(db, "arrival") == Path("/s/p.arrival")
+    assert canonical_for(db, "jsonl") == Path("/s/p.jsonl")
+    assert canonical_for(db, "sqlite") == db
+    for mode in ("arrival", "jsonl", "sqlite"):
+        assert index_path_for(canonical_for(db, mode)) == db
+    with pytest.raises(ValueError, match="unknown canonical mode"):
+        canonical_for(db, "flat")
 
 
 def test_relative_locators_resolve_against_the_vertex_dir_not_cwd(tmp_path):

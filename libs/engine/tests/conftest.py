@@ -77,6 +77,18 @@ class Custodian:
 
 
 @pytest.fixture
+def keys(tmp_path: Path) -> Custodian:
+    """The one custodian the arrival suites mint and sign as."""
+    return Custodian(tmp_path, "kyle")
+
+
+@pytest.fixture
+def signer(keys: Custodian):
+    """That custodian's injected signer, as a fixture the tests can request."""
+    return keys.signer
+
+
+@pytest.fixture
 def tmp_jsonl(tmp_path: Path) -> Path:
     """Temporary JSONL file path (not created yet)."""
     return tmp_path / "events.jsonl"

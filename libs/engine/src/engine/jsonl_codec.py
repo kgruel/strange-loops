@@ -41,7 +41,11 @@ import math
 __all__ = [
     "FACT_FIELDS",
     "TICK_FIELDS",
+    "TICK_CHAIN_FIELDS",
     "JsonlCodecError",
+    "object_of_fact_row",
+    "object_of_tick_row",
+    "object_of_batch",
     "serialize_fact_row",
     "serialize_tick_row",
     "serialize_batch",
@@ -60,10 +64,13 @@ class JsonlCodecError(ValueError):
 # INSERT statements from these tuples, so a schema column and a log field can
 # never drift apart.
 FACT_FIELDS = ("id", "kind", "ts", "observer", "origin", "payload")
-TICK_FIELDS = (
-    "id", "name", "ts", "since", "origin", "payload",
-    "prev_hash", "window_start", "fact_cursor", "window_hash",
-)
+_TICK_BASE_FIELDS = ("id", "name", "ts", "since", "origin", "payload")
+# The chain columns, named as a group because a consumer that carries a tick
+# ACROSS stores must null them — they are store-local custody — and would
+# otherwise re-count them by hand. The codec owns the COUNT; whether to null
+# them is the consumer's decision, not this module's.
+TICK_CHAIN_FIELDS = ("prev_hash", "window_start", "fact_cursor", "window_hash")
+TICK_FIELDS = (*_TICK_BASE_FIELDS, *TICK_CHAIN_FIELDS)
 _SIGNATURE = "signature"
 
 _NUMERIC = ("ts", "since")
@@ -91,7 +98,7 @@ _SPEC = {
     "tick": _Spec(
         "tick",
         TICK_FIELDS,
-        frozenset(("since", "prev_hash", "window_start", "fact_cursor", "window_hash")),
+        frozenset(("since", *TICK_CHAIN_FIELDS)),
     ),
 }
 
@@ -158,38 +165,63 @@ def _encode_obj(row: tuple, spec: _Spec) -> dict:
     return obj
 
 
-def serialize_fact_row(row: tuple) -> str:
-    """Encode a fact row ``(id, kind, ts, observer, origin, payload[, signature])``."""
-    return _dump(_encode_obj(row, _SPEC["fact"]))
+def object_of_fact_row(row: tuple) -> dict:
+    """A fact row ``(id, kind, ts, observer, origin, payload[, signature])`` as
+    its VALIDATED record object."""
+    return _encode_obj(row, _SPEC["fact"])
 
 
-def serialize_tick_row(row: tuple) -> str:
-    """Encode a tick row (``_TICK_ROW_SQL`` order, signature optional)."""
-    return _dump(_encode_obj(row, _SPEC["tick"]))
+def object_of_tick_row(row: tuple) -> dict:
+    """A tick row (``_TICK_ROW_SQL`` order, signature optional) as its
+    VALIDATED record object."""
+    return _encode_obj(row, _SPEC["tick"])
 
 
-def serialize_batch(rows: list[tuple]) -> str:
-    """Encode a multi-row ceremony as ONE atomic line.
+def object_of_batch(rows: list[tuple]) -> dict:
+    """A multi-row ceremony as ONE atomic record object.
 
     ``rows`` are fact row tuples in emission order. One row collapses to a
-    plain fact line — a 1-row batch would be a second spelling of the same
+    plain fact object — a 1-row batch would be a second spelling of the same
     record (the "signature must be absent, not null" ethos), so the envelope
     exists only where multi-row atomicity does. Zero rows is a caller bug.
 
-    Same both-directions symmetry as the scalar serializers: the built
-    envelope is held to :func:`_validate_batch` before dumping, so a bad row
-    fails at the append site instead of bricking every later open.
+    Same both-directions symmetry as the scalar encoders: the built envelope
+    is held to :func:`_validate_batch`, so a bad row fails at the append
+    site instead of bricking every later open.
     """
     if not rows:
         raise JsonlCodecError("batch requires at least one fact row")
     if len(rows) == 1:
-        return serialize_fact_row(rows[0])
-    obj = {"t": _BATCH, "rows": [_encode_obj(r, _SPEC["fact"]) for r in rows]}
+        return object_of_fact_row(rows[0])
+    obj = {"t": _BATCH, _ROWS: [_encode_obj(r, _SPEC["fact"]) for r in rows]}
     # Structural half only: every row object just came out of _encode_obj,
     # which already ran the field-level _validate — re-running it per row
     # would be the same check twice on the same object.
     _validate_batch(obj, validate_rows=False)
-    return _dump(obj)
+    return obj
+
+
+# The three serializers are their encoders composed with the dump, mirroring
+# the decode side (``deserialize_records`` is the load composed with
+# ``records_from_object``). A consumer that already holds — or wants — the
+# OBJECT calls the encoder directly rather than dumping a line only to parse
+# it straight back; an arrival record's ``body`` is exactly that object.
+
+
+def serialize_fact_row(row: tuple) -> str:
+    """Encode a fact row ``(id, kind, ts, observer, origin, payload[, signature])``."""
+    return _dump(object_of_fact_row(row))
+
+
+def serialize_tick_row(row: tuple) -> str:
+    """Encode a tick row (``_TICK_ROW_SQL`` order, signature optional)."""
+    return _dump(object_of_tick_row(row))
+
+
+def serialize_batch(rows: list[tuple]) -> str:
+    """Encode a multi-row ceremony as ONE atomic line — see
+    :func:`object_of_batch`, whose object this dumps."""
+    return _dump(object_of_batch(rows))
 
 
 def _reject_constant(name: str) -> None:

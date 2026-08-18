@@ -25,7 +25,6 @@ import hashlib
 import sqlite3
 from datetime import UTC, datetime
 
-import pytest
 from atoms import Fact
 from lang import parse_vertex
 from lang.document import (
@@ -44,7 +43,6 @@ from engine.witness import (
     receipt_group_span,
     resolve_witness_position,
 )
-from tests.conftest import Custodian
 
 # Two loops, so an edit ceremony can carry TWO change rows and land as one
 # multi-row batch record — the receipt group whose contiguity must survive.
@@ -53,16 +51,6 @@ SRC = (
     '  a { fold { n "inc" } }\n'
     '  b { fold { n "inc" } }\n}\n'
 )
-
-
-@pytest.fixture
-def keys(tmp_path):
-    return Custodian(tmp_path, "kyle")
-
-
-@pytest.fixture
-def signer(keys):
-    return keys.signer
 
 
 def _tick_signer(digest: str) -> str:

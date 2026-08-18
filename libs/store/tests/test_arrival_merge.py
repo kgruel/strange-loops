@@ -9,8 +9,6 @@ here rather than at B3.
 
 from __future__ import annotations
 
-import base64
-import hashlib
 import json
 import sqlite3
 import subprocess
@@ -28,13 +26,9 @@ from engine.arrival_projection import (
 from engine.arrival_store import ARRIVAL_ORDINAL_KEY, ArrivalCanonicalUnsupported
 from store.merge import merge_store
 from store.receive import receive_store
+from tests.conftest import STUB_KEY, stub_sign
 
-_STUB_KEY = base64.b64encode(b"k" * 32).decode()
 _TS = 1700000000.0
-
-
-def _sign(observer: str, commitment: str) -> str:
-    return "sig:" + hashlib.sha256(f"{observer}/{commitment}".encode()).hexdigest()
 
 
 def _fact_body(ident, message, *, ts=_TS, observer="kyle", signature=None):
@@ -80,7 +74,7 @@ def _tick_body(ident, name="check", *, ts=_TS, chained=False):
 def arrival_store(tmp_path, name, facts=(), ticks=()):
     """An arrival-canonical store: a minted log plus its built index."""
     log = ArrivalLog.mint(
-        tmp_path / f"{name}.arrival", observer="kyle", signer=_sign, key=_STUB_KEY
+        tmp_path / f"{name}.arrival", observer="kyle", signer=stub_sign, key=STUB_KEY
     )
     for body in facts:
         log.append("fact", body, observer=body["observer"], at=body["ts"])
@@ -536,7 +530,7 @@ def test_receive_refuses_to_copy_over_a_live_arrival_logs_index(tmp_path):
     """NON-NEGOTIABLE. The index is absent, not the store — and a projection
     is built from its log, never copied from a stranger."""
     ArrivalLog.mint(
-        tmp_path / "t.arrival", observer="kyle", signer=_sign, key=_STUB_KEY
+        tmp_path / "t.arrival", observer="kyle", signer=stub_sign, key=STUB_KEY
     )
     source = sqlite_source(tmp_path, "incoming", facts=[_fact_body("01S0", "s0")])
 

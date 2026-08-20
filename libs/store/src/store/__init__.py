@@ -26,7 +26,6 @@ from .rebirth import (
     ulid_migration,
     verify_rebirth,
 )
-from .jsonl import ExportResult, RebuildResult, export_jsonl, rebuild_jsonl
 from .receive import ReceiveResult, receive_store
 from .slice import SliceResult, slice_store
 from .transport import PullResult, PushResult, Transport, pull_store, push_store
@@ -34,8 +33,6 @@ from .transport import PullResult, PushResult, Transport, pull_store, push_store
 __all__ = [
     "CompactResult",
     "compact_store",
-    "ExportResult",
-    "export_jsonl",
     "FactRow",
     "filtered",
     "identity",
@@ -48,8 +45,6 @@ __all__ = [
     "push_store",
     "RebirthResult",
     "rebirth_store",
-    "RebuildResult",
-    "rebuild_jsonl",
     "RebirthVerification",
     "ReceiveResult",
     "receive_store",

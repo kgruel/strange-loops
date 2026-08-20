@@ -345,7 +345,7 @@ def test_index_with_rows_but_no_log_refuses(tmp_path):
     )
     plain.append(fact())
     plain.close()
-    with pytest.raises(JsonlCanonicalUnsupported, match="export it first"):
+    with pytest.raises(JsonlCanonicalUnsupported, match="frozen legacy"):
         open_store(tmp_path)
 
 

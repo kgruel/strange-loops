@@ -519,7 +519,7 @@ def test_merge_into_jsonl_canonical_refuses(tmp_path):
     legacy.touch()
     _, source_db = arrival_store(tmp_path, "s", facts=[_fact_body("01S0", "s0")])
 
-    with pytest.raises(JsonlCanonicalUnsupported, match="export_jsonl"):
+    with pytest.raises(JsonlCanonicalUnsupported, match="migrate it to an arrival log"):
         merge_store(tmp_path / "legacy.db", source_db)
 
 

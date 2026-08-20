@@ -685,8 +685,11 @@ class JsonlStore(SqliteStore[T], Generic[T]):
             if has_rows(self._conn):
                 raise JsonlCanonicalUnsupported(
                     f"{self._path} has indexed rows but no canonical log at "
-                    f"{self._log_path} — export it first "
-                    "(store.jsonl.export_jsonl), then open it JSONL-canonical"
+                    f"{self._log_path} — JSONL-canonical is frozen legacy and "
+                    "the sqlite-to-JSONL export bridge is gone, so this log "
+                    "cannot be produced; open it as a plain SqliteStore, or "
+                    "migrate it to an arrival log "
+                    "(engine.arrival_store.ArrivalStore)"
                 )
             self._index_offset(0, 0, 0)
             return "empty"
@@ -751,8 +754,10 @@ class JsonlStore(SqliteStore[T], Generic[T]):
             f"log accounts for {expect_facts}/{expect_ticks}. "
             "Out-of-band writers (store.merge, store.receive, rebirth, "
             "compact) are not wired for a JSONL-canonical store. Recovery: "
-            "open it as a plain SqliteStore and re-export the log "
-            "(store.jsonl.export_jsonl) before reopening JSONL-canonical."
+            "open it as a plain SqliteStore, or migrate it to an arrival log "
+            "(engine.arrival_store.ArrivalStore) — JSONL-canonical is frozen "
+            "legacy and the sqlite-to-JSONL export bridge is gone, so the log "
+            "cannot be rebuilt to account for these rows."
         )
 
     def _index_offset(self, offset: int, facts: int, ticks: int) -> None:

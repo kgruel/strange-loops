@@ -82,13 +82,29 @@ across members — a per-member cursor vector, a merge-into-one ceremony, or
 accepting that aggregates fold on a lens — is an open design question. Until it
 is ruled, no code should claim single-store and combined folds agree.
 
-### R3 — the CAS token rides the receipt axis
+### R3 — the CAS token rides the store's own receipt axis
 
 `SqliteStore.declaration_head` / `_declaration_head_in_txn` surface the token
-`absorb_edit` compares `expected_head` against. It is `(rowid, id)` — receipt-
-ordered, the same axis `declaration.py`'s resolver now folds on. The token and
-the resolver must move together or optimistic concurrency compares two different
-notions of "head".
+`absorb_edit` compares `expected_head` against. The token and the resolver must
+move together or optimistic concurrency compares two different notions of
+"head".
+
+R3's substance is that the token rides **the receipt axis of the store that
+issues it**. What that axis *is* depends on the family, and since the arrival
+cut the two families answer differently
+(`decision:design/arrival-sliceC-ordering`):
+
+- **sqlite / JSONL-canonical** — `(rowid, id)`, byte-for-byte as R3 first
+  ruled. These are frozen legacy families.
+- **arrival-canonical** — `(record_ordinal, id)`, the coordinate of the newest
+  self-lineage declaration on the arrival axis, answered by walking the log.
+  `ArrivalStore` overrides `_declaration_head_in_txn` for it. A batch record's
+  rows share one ordinal, so the fact id is doing real tie-break work here.
+
+Both shapes are `[int, str]`, so a persisted v1 rowid coordinate is
+indistinguishable from a v2 ordinal by inspection. The intent version is the
+only discriminator, which is why it bumped rather than the coordinate being
+re-read optimistically.
 
 The `at` (`rowid <=`) / `as_of` (`ts <=`) **selector duality** is untouched by
 all of this. Both are selectors, and neither is a lens — see the ruling below.
@@ -148,7 +164,10 @@ lens-labeled sites.
 | Raw / cursor reads | `libs/engine/src/engine/sqlite_store.py` — `since`, `since_raw`, `replay_cursor` |
 | Single-store vertex fold | `libs/engine/src/engine/vertex_reader.py` — `_combined_read` (single-store branch) |
 | Declaration resolution + head | `libs/engine/src/engine/declaration.py` |
-| CAS token (R3) | `libs/engine/src/engine/sqlite_store.py` — `declaration_head` |
+| CAS token (R3), legacy families | `libs/engine/src/engine/sqlite_store.py` — `declaration_head` |
+| CAS token (R3), arrival axis | `libs/engine/src/engine/arrival_store.py` — `_declaration_head_in_txn` |
+| Declared-ordering primitive | `libs/atoms/src/atoms/ordering.py` — `Arrival` / `ByKey` / `totalize` |
+| Declared read ordering | `libs/engine/src/engine/store_reader.py` — `ordered` (prefix SELECTS, the declared key ORDERS) |
 | Incremental fold | `libs/engine/src/engine/handle.py` — `replay_mode="checkpoint-suffix"` |
 | Suffix fold primitive | `libs/atoms/src/atoms/spec.py` — `Spec.replay_from` |
 | Combined-read lens (R2) | `libs/engine/src/engine/vertex_reader.py` |

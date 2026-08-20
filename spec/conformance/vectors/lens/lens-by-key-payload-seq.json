@@ -1,0 +1,62 @@
+{
+  "name": "lens-by-key-payload-seq",
+  "description": "Pins a declared non-ts lens key: the projection orders by the flat payload field 'seq', not by ts. The seq order is the REVERSE of both the ts order and the id order, so a reader that resolves 'seq' against the envelope, falls back to the ts lens, or sorts by id produces a different sequence and fails.",
+  "input": {
+    "kind": "record",
+    "members": {
+      "a": [
+        [
+          "01TESTULID0000000000000003",
+          {
+            "kind": "record",
+            "ts": 3000.0,
+            "payload": {
+              "seq": 1,
+              "note": "earliest_seq_latest_ts_highest_id"
+            },
+            "observer": "kyle",
+            "origin": ""
+          }
+        ],
+        [
+          "01TESTULID0000000000000001",
+          {
+            "kind": "record",
+            "ts": 1000.0,
+            "payload": {
+              "seq": 3,
+              "note": "latest_seq_earliest_ts_lowest_id"
+            },
+            "observer": "kyle",
+            "origin": ""
+          }
+        ]
+      ],
+      "b": [
+        [
+          "01TESTULID0000000000000002",
+          {
+            "kind": "record",
+            "ts": 2000.0,
+            "payload": {
+              "seq": 2,
+              "note": "middle"
+            },
+            "observer": "kyle",
+            "origin": ""
+          }
+        ]
+      ]
+    },
+    "ordering": {
+      "by_key": "seq"
+    }
+  },
+  "expected": {
+    "lens_order": [
+      "01TESTULID0000000000000003",
+      "01TESTULID0000000000000002",
+      "01TESTULID0000000000000001"
+    ]
+  }
+}

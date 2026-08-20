@@ -1,12 +1,23 @@
-"""Conformance runner for the (ts, id) read lens.
+"""Conformance runner for the declared read lens.
 
 Loads all vectors dynamically from spec/conformance/vectors/lens/*.json.
 
-Fold replay is receipt order (rowid ASC), which is per-store. Reads across
-a combine vertex's member stores have no receipt axis, so they fall back to
-the explicit (ts ASC, id ASC) read lens. These vectors pin that lens — the
-last place where ts tie-breaking and sub-millisecond ts precision still
-carry ordering force.
+Fold replay is receipt order (rowid ASC), which is per-store. Reads across a
+combine vertex's member stores have no receipt axis, so they read under a
+DECLARED key: `input.ordering`, defaulting to `{"by_key": "ts"}` when absent.
+
+- The default ts family runs through the production combined read
+  (`vertex_facts`), whose (ts ASC, id ASC) ordering IS that declaration. It
+  is the last place ts tie-breaking and sub-millisecond ts precision still
+  carry ordering force.
+- Declared non-default keys totalize the combined read's records through the
+  atoms primitive, which owns the one `(K(record), id ASC)` definition.
+
+`_get_field` restates the generator's field resolver (`ts`/`id` from the
+envelope, everything else from the payload) — this module cannot import the
+generator, so the two are pinned to agree by
+`lens-by-key-payload-seq`, whose payload-key order disagrees with both its
+ts order and its id order.
 """
 
 from __future__ import annotations
@@ -17,6 +28,7 @@ from typing import Any
 
 import pytest
 from atoms import Fact
+from atoms.ordering import ByKey, OrderingError, totalize
 from engine.sqlite_store import SqliteStore
 from engine.vertex_reader import vertex_facts
 
@@ -29,6 +41,29 @@ _MEMBER_KDL = (
     'loops {{\n  {kind} {{\n    fold {{\n      n "inc"\n    }}\n  }}\n}}\n'
 )
 _LOOPS_KDL = 'loops {{\n  {kind} {{\n    fold {{\n      n "inc"\n    }}\n  }}\n}}\n'
+
+
+#: The ordering a vector is read under when `input.ordering` is absent.
+DEFAULT_ORDERING = ByKey("ts")
+
+
+def _decode_ordering(wire: dict[str, Any] | None) -> ByKey:
+    if wire is None:
+        return DEFAULT_ORDERING
+    assert "by_key" in wire, f"unsupported lens ordering on the wire: {wire!r}"
+    return ByKey(wire["by_key"])
+
+
+def _get_field(record: dict[str, Any], field: str) -> Any:
+    """`ts`/`id` from the envelope, every other key from the payload."""
+    if field in ("ts", "id"):
+        return record.get(field)
+    payload = record.get("payload") or {}
+    return payload.get(field)
+
+
+def _totalize_rows(rows: list[dict[str, Any]], ordering: ByKey) -> list[dict[str, Any]]:
+    return totalize(rows, ordering, get_field=_get_field, get_id=lambda r: r["id"])
 
 
 def _load_vectors(vectors_dir: Path) -> list[Path]:
@@ -85,9 +120,41 @@ def test_conformance_lens(vector_path: Path, tmp_path: Path) -> None:
     parent = _build_combine_vertex(tmp_path, kind, vector["input"]["members"])
 
     rows = vertex_facts(parent, 0.0, float("inf"), kind=kind)
-    assert [r["id"] for r in rows] == vector["expected"]["lens_order"]
+    ordering = _decode_ordering(vector["input"].get("ordering"))
+
+    if ordering == DEFAULT_ORDERING:
+        # The production combined read's (ts ASC, id ASC) IS this declaration.
+        assert [r["id"] for r in rows] == vector["expected"]["lens_order"]
+        return
+
+    if "error" in vector["expected"]:
+        with pytest.raises(OrderingError):
+            _totalize_rows(rows, ordering)
+        return
+
+    ordered = _totalize_rows(rows, ordering)
+    assert [r["id"] for r in ordered] == vector["expected"]["lens_order"]
 
 
 def test_lens_area_is_not_empty() -> None:
     """Guard the discovery glob: an empty area would pass vacuously."""
     assert _load_vectors(LENS_VECTORS_DIR), "no lens vectors discovered"
+
+
+def test_lens_area_covers_both_key_families_and_a_refusal() -> None:
+    """Guard the key axis itself.
+
+    The runner branches three ways; a vector set that lost its non-default-key
+    family, or its refusal case, would still pass every parametrized case while
+    silently exercising only the ts arm.
+    """
+    orderings, refusals = [], 0
+    for path in _load_vectors(LENS_VECTORS_DIR):
+        with path.open(encoding="utf-8") as f:
+            vector = json.load(f)
+        orderings.append(_decode_ordering(vector["input"].get("ordering")))
+        refusals += "error" in vector["expected"]
+
+    assert DEFAULT_ORDERING in orderings, "ts family missing"
+    assert any(o != DEFAULT_ORDERING for o in orderings), "no non-ts key family"
+    assert refusals, "no refusal vector"

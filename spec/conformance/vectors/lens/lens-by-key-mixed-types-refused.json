@@ -1,0 +1,45 @@
+{
+  "name": "lens-by-key-mixed-types-refused",
+  "description": "Pins type-mixed refusal: 'seq' arrives as an int on one record and a string on another, so the declared projection has no order and the read REFUSES rather than coercing. A reader that stringifies, or that sorts int-before-str by type name, is non-conformant.",
+  "input": {
+    "kind": "record",
+    "members": {
+      "a": [
+        [
+          "01TESTULID0000000000000001",
+          {
+            "kind": "record",
+            "ts": 1000.0,
+            "payload": {
+              "seq": 1,
+              "note": "int_key"
+            },
+            "observer": "kyle",
+            "origin": ""
+          }
+        ]
+      ],
+      "b": [
+        [
+          "01TESTULID0000000000000002",
+          {
+            "kind": "record",
+            "ts": 2000.0,
+            "payload": {
+              "seq": "2",
+              "note": "string_key"
+            },
+            "observer": "kyle",
+            "origin": ""
+          }
+        ]
+      ]
+    },
+    "ordering": {
+      "by_key": "seq"
+    }
+  },
+  "expected": {
+    "error": "OrderingError"
+  }
+}

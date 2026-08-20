@@ -165,7 +165,9 @@ def totalize(
                 keyed.sort(key=lambda entry: (entry[0], entry[1]))
             except TypeError as exc:
                 raise OrderingError(
-                    f"key values under declared key {field!r} do not compare: {exc}"
+                    f"records under declared key {field!r} do not compare: {exc} "
+                    f"(the sort key is (K, id) — either element can be the "
+                    f"non-comparable one)"
                 ) from exc
             return [entry[2] for entry in keyed]
         case _:

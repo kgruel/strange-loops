@@ -92,6 +92,15 @@ class TestMixedTypes:
             totalize(records, ByKey("ts"))
         assert "do not compare" in str(exc.value)
 
+    def test_refusal_does_not_blame_the_key_when_the_ids_are_at_fault(self):
+        # Equal K, so the sort falls through to the id tie-break — and THOSE
+        # do not compare. The key values here are impeccable ints, so a
+        # message naming "key values" would point at the wrong tuple element.
+        records = [rec({"a": 1}, ts=1), rec({"b": 2}, ts=1)]
+        with pytest.raises(OrderingError) as exc:
+            totalize(records, ByKey("ts"))
+        assert "(K, id)" in str(exc.value)
+
     def test_records_missing_the_key_do_not_participate_in_the_type_check(self):
         records = [rec("a", ts=2), rec("b"), rec("c", ts=1)]
         assert [r["id"] for r in totalize(records, ByKey("ts"))] == ["c", "a"]

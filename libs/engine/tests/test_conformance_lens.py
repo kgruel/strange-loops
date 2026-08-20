@@ -163,13 +163,15 @@ _CROSS_SURFACE_FACTS = [
     ("01TESTULID0000000000000001", {"kind": "record", "ts": 3000.0,
      "payload": {"seq": 3}, "observer": "kyle"}),
     ("01TESTULID0000000000000002", {"kind": "record", "ts": 2000.0,
-     "payload": {"seq": 1}, "observer": "kyle"}),
+     "payload": {"seq": 1, "kind": "in-the-payload"}, "observer": "kyle"}),
 ]
 
 
-@pytest.mark.parametrize("field", ["ts", "id", "seq"])
+@pytest.mark.parametrize(
+    "field,expected_size", [("ts", 3), ("id", 3), ("seq", 3), ("kind", 1)]
+)
 def test_ordered_and_the_lens_resolver_agree_on_the_key_family(
-    field: str, tmp_path: Path
+    field: str, expected_size: int, tmp_path: Path
 ) -> None:
     """`StoreReader.ordered` and the conformance lens read one declaration alike.
 
@@ -178,8 +180,11 @@ def test_ordered_and_the_lens_resolver_agree_on_the_key_family(
     if every surface actually routes through it. This holds the two ends
     against each other on all three arms: an envelope key that is
     column-backed (`ts`), an envelope key that is the id itself, and a payload
-    key. Under the payload-only resolver `ordered` used to carry, the `ts` arm
-    returns [] against a full lens order.
+    key, and a stored column that is NOT an envelope key (`kind`), which
+    resolves against the payload like any other declared key. Under the
+    payload-only resolver `ordered` used to carry, the `ts` arm returns []
+    against a full lens order; under a resolver that treats every stored
+    column as envelope-backed, the `kind` arm returns all three.
     """
     from atoms import ByKey
     from engine.store_reader import StoreReader
@@ -194,5 +199,6 @@ def test_ordered_and_the_lens_resolver_agree_on_the_key_family(
         reader_order = [f["id"] for f in reader.ordered(len(rows), ByKey(field))]
 
     assert reader_order == lens_order
-    # Guard against a vacuous pass: every arm is a full, non-trivial order.
-    assert len(lens_order) == len(_CROSS_SURFACE_FACTS)
+    # Guard against a vacuous pass: each arm's size is pinned, so an
+    # agreed-upon EMPTY projection can never stand in for agreement.
+    assert len(lens_order) == expected_size

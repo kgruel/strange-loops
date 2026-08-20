@@ -22,7 +22,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from atoms import Arrival, ByKey, Ordering, OrderingError, totalize
+from atoms import ENVELOPE_KEYS, Arrival, ByKey, Ordering, OrderingError, totalize
 
 from .declaration import (
     decl_lineage_and_head_on,
@@ -347,19 +347,31 @@ def _open_combined(store_paths: list[Path]) -> tuple[sqlite3.Connection, list[st
 
 
 # Combined-read row shape: (id, kind, ts, observer, origin, payload, rowid).
-# ts is a sqlite REAL column, so column-backed ts values are always float —
-# the atoms strict type-identity check never sees an int/float mix here.
-_ROW_COLUMNS = {"id": 0, "kind": 1, "ts": 2, "observer": 3, "origin": 4}
+_ROW_INDEX = {"id": 0, "kind": 1, "ts": 2, "observer": 3, "origin": 4, "payload": 5}
+
+#: The ENVELOPE keys, positioned in the combined-read row. Derived from the
+#: atoms family rule rather than restated, so this row-shaped surface cannot
+#: drift from the mapping-shaped one (:func:`atoms.resolve_key_field`): only
+#: ``ts`` and ``id`` are envelope-resolved. ``kind``/``observer``/``origin``
+#: are stored columns but NOT key candidates — they resolve against the
+#: payload like any other declared key, which almost never carries them, so
+#: their projection is empty by non-membership rather than a grouping of the
+#: read by its columns.
+#:
+#: ts is a sqlite REAL column, so column-backed ts values are always float —
+#: the atoms strict type-identity check never sees an int/float mix here.
+_ROW_ENVELOPE_COLUMNS = {field: _ROW_INDEX[field] for field in ENVELOPE_KEYS}
 
 
 def _row_field(row: tuple, field: str) -> Any:
     """Read a declared ordering key off a combined-read row.
 
-    Column-backed fields are read straight off the tuple; anything else is a
-    flat payload field and costs a JSON parse. The default orderings
-    (``Arrival()``, ``ByKey('ts')``) never reach the parse.
+    The row-shaped spelling of :func:`atoms.resolve_key_field`: the envelope
+    keys are read straight off the tuple, anything else is a flat payload
+    field and costs a JSON parse. The default orderings (``Arrival()``,
+    ``ByKey('ts')``) are envelope-only and never reach the parse.
     """
-    index = _ROW_COLUMNS.get(field)
+    index = _ROW_ENVELOPE_COLUMNS.get(field)
     if index is not None:
         return row[index]
     return json.loads(row[5]).get(field)

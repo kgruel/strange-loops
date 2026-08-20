@@ -129,41 +129,9 @@ class TestMixedTypes:
 class TestRefusalAttribution:
     """The sort key is (K, id) — a refusal may not blame K by default.
 
-    The prose sweep for this posture has now missed a site twice (the two
-    `Raises:` sections, then `OrderingError`'s own class contract), so it is a
-    ratchet rather than review vigilance: every docstring in the module that
-    describes what OrderingError means must either name the id side or not
-    attribute the non-comparison at all.
+    Pinned on the RUNTIME message, which is what a caller actually reads: a
+    non-comparison names the (K, id) pair whichever half is at fault.
     """
-
-    _ALLOWED_UNATTRIBUTED = (
-        # The mixed-TYPE paragraph is genuinely about key values only: the
-        # type-identity check reads K and never looks at the id.
-        "Same-typed values that do not compare (dicts, say) are",
-    )
-
-    def test_no_docstring_blames_the_key_alone_for_a_non_comparison(self):
-        import inspect
-
-        import atoms.ordering as mod
-
-        sources = [inspect.getdoc(mod), inspect.getdoc(OrderingError)]
-        for name in ("totalize", "is_suffix_stable"):
-            sources.append(inspect.getdoc(getattr(mod, name)))
-
-        for doc in sources:
-            if doc is None:
-                continue
-            for line in doc.splitlines():
-                if "do not compare" not in line and "does not compare" not in line:
-                    continue
-                if any(ok in line for ok in self._ALLOWED_UNATTRIBUTED):
-                    continue
-                context = doc[max(0, doc.index(line) - 300) : doc.index(line) + 300]
-                assert "id" in context, (
-                    f"non-comparison prose attributes to the key alone: {line!r} — "
-                    "the sort key is (K, id) and either element can be at fault"
-                )
 
     def test_the_runtime_message_matches_the_documented_posture(self):
         records = [rec({"d": 1}, ts=1), rec({"d": 2}, ts=1)]

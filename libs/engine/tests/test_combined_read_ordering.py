@@ -416,3 +416,67 @@ class TestNonMappingPayloads:
             row = ("id-x", "decision", 1.0, "test", "", json.dumps(payload), 1)
             record = {"id": "id-x", "ts": 1.0, "payload": payload}
             assert _row_field(row, "n") == resolve_key_field(record, "n")
+
+
+class TestRefusalIsDeclarationShaped:
+    """Whether Arrival() fits an aggregate is the DECLARATION's property.
+
+    An aggregate whose members are all currently unresolvable still has no
+    cross-store arrival axis. If the refusal waited until the members resolved,
+    the same declaration would be accepted today and refused tomorrow purely
+    because a file appeared — an availability-dependent contract, which is not
+    a contract.
+    """
+
+    @staticmethod
+    def _aggregate_with_no_resolvable_members(tmp_path: Path, monkeypatch) -> Path:
+        home = tmp_path / "loops_home"
+        home.mkdir(parents=True)
+        combine = tmp_path / "combined.vertex"
+        combine.write_text(
+            'name "combined"\ncombine {\n    vertex "absent-a"\n    vertex "absent-b"\n}\n'
+            'loops {\n  decision { fold { items "collect" 10 } }\n}\n'
+        )
+        monkeypatch.setenv("LOOPS_HOME", str(home))
+        return combine
+
+    def test_the_fixture_really_is_an_aggregate_with_zero_members(
+        self, tmp_path, monkeypatch
+    ):
+        """Guard: the declaration is aggregate-shaped and resolves to nothing."""
+        from engine.declaration import load_declaration
+        from engine.vertex_reader import _resolve_stores
+
+        vpath = self._aggregate_with_no_resolvable_members(tmp_path, monkeypatch)
+        ast = load_declaration(vpath)
+
+        assert ast.combine is not None
+        assert _resolve_stores(ast, vpath) == []
+
+    def test_declared_arrival_refuses_even_with_zero_resolvable_members(
+        self, tmp_path, monkeypatch
+    ):
+        vpath = self._aggregate_with_no_resolvable_members(tmp_path, monkeypatch)
+
+        with pytest.raises(OrderingError) as excinfo:
+            _fold_ids(vpath, ordering=Arrival())
+
+        message = str(excinfo.value)
+        assert "dense per-log" in message
+        assert "ByKey" in message
+
+    def test_the_default_on_an_empty_aggregate_is_still_empty_state(
+        self, tmp_path, monkeypatch
+    ):
+        """No declared ordering resolves to ByKey('ts') and returns, unchanged."""
+        vpath = self._aggregate_with_no_resolvable_members(tmp_path, monkeypatch)
+
+        assert _fold_ids(vpath) == []
+
+    def test_a_declared_bykey_on_an_empty_aggregate_is_still_empty_state(
+        self, tmp_path, monkeypatch
+    ):
+        """Only the REFUSED ordering refuses; a valid one still returns empty."""
+        vpath = self._aggregate_with_no_resolvable_members(tmp_path, monkeypatch)
+
+        assert _fold_ids(vpath, ordering=ByKey("n")) == []

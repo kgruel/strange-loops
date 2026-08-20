@@ -478,13 +478,21 @@ def _combined_read(
     marker) — only the facts axis is cut by the cursor.
     """
     store_paths = _resolve_stores(ast, vertex_path)
+
+    # Resolve BEFORE the empty-members return: whether a declared ordering fits
+    # this read is a property of the DECLARATION, not of how many members
+    # happen to resolve right now. An aggregate whose members are all currently
+    # missing still has no cross-store arrival axis, so Arrival() is refused
+    # there exactly as it is once the members come back — otherwise the same
+    # declaration would start refusing only after enough files appeared, and
+    # the refusal would be availability-dependent.
+    ordering = resolve_ordering(ordering, single_store=len(store_paths) == 1)
+
     if not store_paths:
         empty_raw = {kind: spec.initial_state() for kind, spec in specs.items()}
         if return_payloads:
             return empty_raw, {k: [] for k in specs}
         return empty_raw
-
-    ordering = resolve_ordering(ordering, single_store=len(store_paths) == 1)
 
     conn, aliases = _open_combined(store_paths)
     try:

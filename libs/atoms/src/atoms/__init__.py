@@ -48,6 +48,12 @@ __all__ = [
     "FoldState",
     "TickWindow",
     "WalkedItem",
+    # Ordering vocabulary
+    "Arrival",
+    "ByKey",
+    "Ordering",
+    "OrderingError",
+    "totalize",
     # Parse vocabulary
     "Coerce",
     "Explode",
@@ -101,6 +107,12 @@ _LAZY_IMPORTS: dict[str, tuple[str, str]] = {
     "FoldState": ("atoms.fold_state", "FoldState"),
     "WalkedItem": ("atoms.fold_state", "WalkedItem"),
     "TickWindow": ("atoms.ticks", "TickWindow"),
+    # Ordering vocabulary
+    "Arrival": ("atoms.ordering", "Arrival"),
+    "ByKey": ("atoms.ordering", "ByKey"),
+    "Ordering": ("atoms.ordering", "Ordering"),
+    "OrderingError": ("atoms.ordering", "OrderingError"),
+    "totalize": ("atoms.ordering", "totalize"),
     # Parse vocabulary
     "Coerce": ("atoms.parse", "Coerce"),
     "Explode": ("atoms.parse", "Explode"),

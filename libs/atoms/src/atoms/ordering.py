@@ -28,8 +28,8 @@ class OrderingError(Exception):
 
     A declaration error against the data — mixed key types under one declared
     key, a ``NaN`` on either side of the ``(K, id)`` sort key, or sort-key
-    elements that do not compare — not
-    something a comparator may paper over with a coercion.
+    elements that do not compare — not something a comparator may paper over
+    with a coercion.
 
     The sort key is ``(K, id)``, so the non-comparable element may be EITHER
     half: a raise here does not by itself blame the declared key. The runtime

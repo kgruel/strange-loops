@@ -269,10 +269,16 @@ def _merge_into_arrival(
     )
 
 
-def _target_state(canonical: Path) -> tuple[set[str], int | None]:
-    """Row ids the target's index already holds, and the log head it accounts
-    for. Opening runs catch-up, so a target that cannot account for its own
-    log refuses HERE rather than being deduped against."""
+def _target_state(canonical: Path) -> tuple[dict[str, tuple], int | None]:
+    """The target's held rows as ``id -> comparable body``, and the log head
+    it accounts for. Opening runs catch-up, so a target that cannot account
+    for its own log refuses HERE rather than being deduped against.
+
+    The comparable is what dedup compares an incoming row against (see
+    :func:`_comparable`): facts on their full authored body, ticks on the
+    chainless base — chain columns and the tick signature are store-local
+    custody the merge strips anyway, so they can never be grounds for a
+    divergence claim."""
     from engine.arrival_store import ARRIVAL_ORDINAL_KEY
     from engine.jsonl_store import open_canonical_store
     from engine.residence import index_path_for
@@ -283,11 +289,21 @@ def _target_state(canonical: Path) -> tuple[set[str], int | None]:
 
     conn = _open(index_path_for(canonical), read_only=True)
     try:
-        held = {
-            row[0]
-            for table in ("facts", "ticks")
-            for row in conn.execute(f"SELECT id FROM {table}")
+        fact_cols = {r[1] for r in conn.execute("PRAGMA table_info(facts)")}
+        signature = "signature" if "signature" in fact_cols else "NULL"
+        held: dict[str, tuple] = {
+            row[0]: ("fact", *row[1:])
+            for row in conn.execute(
+                "SELECT id, kind, ts, observer, origin, payload, "
+                f"{signature} FROM facts"
+            )
         }
+        held.update(
+            (row[0], ("tick", *row[1:]))
+            for row in conn.execute(
+                "SELECT id, name, ts, since, origin, payload FROM ticks"
+            )
+        )
         marker = conn.execute(
             "SELECT value FROM store_meta WHERE key = ?", (ARRIVAL_ORDINAL_KEY,)
         ).fetchone()
@@ -382,9 +398,74 @@ def _read_index_source(source: Path) -> _SourceRows:
     )
 
 
-def _entries_for(source_rows: _SourceRows, held: set[str]):
+class MergeDivergence(Exception):
+    """The same id carries DIFFERENT content on the two sides of a merge.
+
+    The admission table (decision:design/arrival-substrate-laws) is explicit:
+    id collision with different bytes is identity corruption and is REJECTED,
+    never resolved silently in either side's favour. Kyle's whole-branch r1
+    ruling (CX-BR-01, decision:design/arrival-branch-r1-rulings) applies that
+    law to this merge arm. The target-wins conformance vector pins the
+    LEGACY SQLITE arm only (its harness populates plain SqliteStores) and
+    its description now says so; this arrival arm's refusal is pinned by
+    TestDivergenceRefusal.
+
+    Comparison is deliberately strict — the fact signature included, so an
+    era-mixed pair (the same authored fact carried once with its signature
+    and once through a pre-signature-era slice) also refuses. Decided, not
+    accidental: a merge cannot tell that case apart from a stripped
+    signature, and the refusal message names the diverging field so the era
+    case is diagnosable at the site.
+    """
+
+
+def _comparable(t: str, row: tuple) -> tuple:
+    """One row's dedup-comparison body, shared by both sides of the merge.
+
+    Facts compare on the full authored 7-column body minus id. Ticks compare
+    on the chainless base minus id: chain columns and the tick signature are
+    store-local custody stripped by ``_entry_for`` on every merge, so the
+    target's chain can never ground a divergence claim against a source
+    tick that legitimately carries a different (or no) chain.
+    """
+    if t == "fact":
+        return ("fact", *row[1:7])
+    return ("tick", *row[1:6])
+
+
+_COMPARED_FIELDS = {
+    "fact": ("kind", "ts", "observer", "origin", "payload", "signature"),
+    "tick": ("name", "ts", "since", "origin", "payload"),
+}
+
+
+def _refuse_divergence(t: str, row: tuple, held_body: tuple) -> None:
+    incoming = _comparable(t, row)
+    if held_body[0] != incoming[0]:
+        diverging = ["row class"]
+    else:
+        diverging = [
+            name
+            for name, ours, theirs in zip(
+                _COMPARED_FIELDS[t], held_body[1:], incoming[1:], strict=True
+            )
+            if ours != theirs
+        ]
+    raise MergeDivergence(
+        f"{t} id {row[0]!r} exists on both sides with different content "
+        f"(diverging: {', '.join(diverging) or 'row class'}) — at most one "
+        "of them is what an arrival log says, and a merge that picked a "
+        "side would re-mint identity. Nothing was appended. Resolve the "
+        "contradiction at its source before merging."
+    )
+
+
+def _entries_for(source_rows: _SourceRows, held: dict[str, tuple]):
     """The records to append, after dedup. Returns ``(entries, facts, ticks)``.
 
+    A row whose id the target holds is skipped ONLY when its comparison body
+    matches the target's (:func:`_comparable`); the same id over different
+    content raises :class:`MergeDivergence` before anything is appended.
     A group whose rows are ALL already in the target contributes no record.
     A batch group that is partly deduped contributes its remainder: two or
     more surviving rows still ride as one batch (the ceremony's atomicity is
@@ -396,11 +477,18 @@ def _entries_for(source_rows: _SourceRows, held: set[str]):
     entries: list[Entry] = []
     facts = ticks = 0
     for kind, rows in source_rows.groups:
-        fresh = [(t, row) for t, row in rows if row[0] not in held]
+        fresh = []
+        for t, row in rows:
+            body = held.get(row[0])
+            if body is not None:
+                if body != _comparable(t, row):
+                    _refuse_divergence(t, row, body)
+                continue
+            fresh.append((t, row))
         if not fresh:
             continue
         for t, row in fresh:
-            held.add(row[0])
+            held[row[0]] = _comparable(t, row)
             if t == "fact":
                 facts += 1
             else:

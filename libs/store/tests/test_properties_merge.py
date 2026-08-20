@@ -323,7 +323,11 @@ class TestMergeIdempotenceProperties:
 
 
 class TestMergeIdCollisionProbe:
-    """Probe tests asserting the engine's primary-key collision resolution policy."""
+    """Probe tests asserting the LEGACY SQLITE arm's primary-key collision policy.
+
+    Scope: sqlite targets only (the frozen pre-arrival family). The ARRIVAL
+    arm refuses the same collision — store.merge.MergeDivergence, pinned in
+    test_arrival_merge.py::TestDivergenceRefusal (CX-BR-01)."""
 
     @settings(deadline=None, max_examples=50)
     @given(

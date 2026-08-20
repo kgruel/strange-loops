@@ -336,10 +336,11 @@ def test_a_partly_deduped_ceremony_appends_its_remainder(tmp_path):
         ("01CER0", "note", _TS, "kyle", "", json.dumps({"n": 0}), None),
         ("01CER1", "note", _TS, "kyle", "", json.dumps({"n": 1}), None),
     ]
-    _, target_db = arrival_store(
-        tmp_path, "t", facts=[_fact_body("01CER0", "already", ts=_TS)]
-    )
-    # The target already holds 01CER0 under a DIFFERENT body; dedup is on id.
+    already = dict(_fact_body("01CER0", "x", ts=_TS))
+    already["payload"] = json.dumps({"n": 0})  # the SAME body the source carries
+    _, target_db = arrival_store(tmp_path, "t", facts=[already])
+    # The target already holds 01CER0 with an IDENTICAL body, so it dedups;
+    # a divergent body would refuse instead (TestDivergenceRefusal).
     source_log, source_db = arrival_store(tmp_path, "s")
     source_log.append("batch", json.loads(serialize_batch(rows)), observer="kyle")
     from engine.arrival_store import ensure_arrival_index
@@ -720,3 +721,82 @@ def test_an_interrupted_merge_leaves_a_re_runnable_store(tmp_path):
     assert log_path.read_bytes().endswith(b"\n")
     assert b'{"partial":' not in log_path.read_bytes()
     assert sorted(ids(target_db)) == ["01S0", "01S1", "01S2", "01T0"]
+
+
+class TestDivergenceRefusal:
+    """Same id, different content REFUSES (CX-BR-01, whole-branch r1).
+
+    The admission table (decision:design/arrival-substrate-laws) rejects an
+    id collision over different bytes; Kyle's r1 ruling applies it to this
+    merge arm, superseding the target-wins vector. Comparison is strict —
+    signature included, so an era-mixed carry of the same fact (signed vs
+    pre-signature-era NULL) also refuses; deliberate, because a merge cannot
+    tell that apart from a stripped signature.
+    """
+
+    def test_divergent_payload_refuses_and_appends_nothing(self, tmp_path):
+        from store.merge import MergeDivergence
+
+        _, target_db = arrival_store(
+            tmp_path, "t", facts=[_fact_body("01DIV", "target-body")]
+        )
+        _, source_db = arrival_store(
+            tmp_path, "s",
+            facts=[_fact_body("01FRESH", "fresh"), _fact_body("01DIV", "source-body")],
+        )
+        before = list(records(tmp_path / "t.arrival"))
+
+        with pytest.raises(MergeDivergence, match="01DIV.*diverging: payload"):
+            merge_store(target_db, source_db)
+
+        # Nothing appended — the fresh row that preceded the divergence
+        # included: refusal happens before any append.
+        assert list(records(tmp_path / "t.arrival")) == before
+
+    def test_divergent_signature_refuses_naming_the_field(self, tmp_path):
+        from store.merge import MergeDivergence
+
+        _, target_db = arrival_store(
+            tmp_path, "t", facts=[_fact_body("01SIG", "same", signature="sig:a")]
+        )
+        _, source_db = arrival_store(
+            tmp_path, "s", facts=[_fact_body("01SIG", "same")]  # era-mixed: NULL
+        )
+        with pytest.raises(MergeDivergence, match="diverging: signature"):
+            merge_store(target_db, source_db)
+
+    def test_identical_body_still_dedups(self, tmp_path):
+        _, target_db = arrival_store(
+            tmp_path, "t", facts=[_fact_body("01SAME", "same")]
+        )
+        _, source_db = arrival_store(
+            tmp_path, "s", facts=[_fact_body("01SAME", "same")]
+        )
+        result = merge_store(target_db, source_db)
+        assert result.facts_added == 0 and result.facts_skipped == 1
+
+    def test_tick_chain_columns_never_ground_a_divergence(self, tmp_path):
+        """A target-native chained tick vs the same tick carried chainless:
+        chain columns (and the tick signature that covers them) are
+        store-local custody the merge strips, so this is a dedup, not a
+        divergence."""
+        _, target_db = arrival_store(
+            tmp_path, "t", ticks=[_tick_body("01TCK", chained=True)]
+        )
+        _, source_db = arrival_store(
+            tmp_path, "s", ticks=[_tick_body("01TCK", chained=False)]
+        )
+        result = merge_store(target_db, source_db)
+        assert result.ticks_added == 0 and result.ticks_skipped == 1
+
+    def test_dry_run_also_refuses(self, tmp_path):
+        from store.merge import MergeDivergence
+
+        _, target_db = arrival_store(
+            tmp_path, "t", facts=[_fact_body("01DIV", "target-body")]
+        )
+        _, source_db = arrival_store(
+            tmp_path, "s", facts=[_fact_body("01DIV", "source-body")]
+        )
+        with pytest.raises(MergeDivergence):
+            merge_store(target_db, source_db, dry_run=True)

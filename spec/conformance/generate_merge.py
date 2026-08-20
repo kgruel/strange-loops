@@ -268,7 +268,7 @@ MERGE_CASES: list[MergeCase] = [
     # 4. Divergent-collision (same id, DIFFERENT content)
     MergeCase(
         name="merge-divergent-collision-target-wins",
-        description="Pins decision:friction:merge-divergent-collision-invisible: on primary-key ID collision with divergent payload content, target's version survives, source's version is silently dropped, and MergeResult counts it as skipped; this vector documents CURRENT behavior and will be edited deliberately when facts_divergent lands.",
+        description="Pins the LEGACY SQLITE FAMILY's collision behavior (frozen KEEP fence, byte-identical pre-arrival ceremony): on primary-key ID collision with divergent payload content, ATTACH + INSERT OR IGNORE preserves the target's version and counts the source's as skipped. SCOPE \u2014 this vector executes the sqlite arm only. The ARRIVAL arm REFUSES the same collision (MergeDivergence, decision:design/arrival-branch-r1-rulings CX-BR-01, per the admission table in decision:design/arrival-substrate-laws); that refusal is pinned by libs/store/tests/test_arrival_merge.py::TestDivergenceRefusal.",
         target_facts=[
             (
                 "01COLLISION0000000000000001",

@@ -14,7 +14,7 @@ This library maintains them.
 # every merge. Reach it as `store.derived_log_merge.merge_derived_log`.
 from ._transport_local import LocalTransport
 from .compact import CompactResult, compact_store
-from .merge import MergeResult, merge_store
+from .merge import MergeDivergence, MergeResult, merge_store
 from .rebirth import (
     FactRow,
     RebirthResult,
@@ -37,6 +37,7 @@ __all__ = [
     "filtered",
     "identity",
     "LocalTransport",
+    "MergeDivergence",
     "MergeResult",
     "merge_store",
     "PullResult",

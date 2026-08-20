@@ -237,7 +237,8 @@ class StoreReader:
         Raises:
             ValueError: ``prefix`` is negative.
             atoms.OrderingError: The selected facts cannot be ordered under
-                ``key`` — mixed key types, or key values that do not compare.
+                ``key`` — mixed key types, or sort-key elements (key value or
+                tie-break id) that do not compare.
                 It propagates: a declaration error against the data is a
                 refusal to surface, not something to coerce past.
         """

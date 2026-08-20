@@ -151,8 +151,9 @@ def totalize(
         A new list, ordered. For ``ByKey``, records missing the key are absent.
 
     Raises:
-        OrderingError: Mixed or non-comparable key types under the declared key,
-            or an unknown Ordering variant.
+        OrderingError: Mixed key types under the declared key, sort-key
+            elements — key value or tie-break id — that do not compare, or an
+            unknown Ordering variant.
     """
     match ordering:
         case Arrival():

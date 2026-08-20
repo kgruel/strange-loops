@@ -392,14 +392,22 @@ def resolve_ordering(ordering: Ordering | None, *, single_store: bool) -> Orderi
 
 
 def _fetch_combined_rows(
-    conn: sqlite3.Connection, aliases: list[str], until_ts: float | None
+    conn: sqlite3.Connection,
+    aliases: list[str],
+    until_ts: float | None,
+    ordering: Ordering,
 ) -> list[tuple]:
-    """All fact rows across the attached stores, in the store's native order.
+    """All fact rows across the attached stores, ready for ``ordering``.
 
-    A single store yields its native ARRIVAL order (rowid ascending) — that is
-    the store's job, not the declared ordering's. Across several stores rowid
-    is per-store and no native total order exists, so rows come back as read
-    and the caller's declared ``ByKey`` supplies the order.
+    Under ``Arrival()`` the rows are put in the store's native ARRIVAL order
+    (rowid ascending) here, because yielding that order is the store's job and
+    ``totalize`` will not synthesize it. ``Arrival()`` is reachable only for a
+    single store — :func:`resolve_ordering` refuses it on an aggregate, where
+    rowid is per-store and no native total order exists.
+
+    Under ``ByKey(K)`` the rows come back exactly as read: ``totalize`` sorts
+    on ``(K, id)``, and ``id`` is unique, so the key is total and the input
+    order cannot reach the output. Sorting first would be work discarded.
     """
     ts_clause = " WHERE ts <= ?" if until_ts is not None else ""
     selects = [
@@ -412,7 +420,7 @@ def _fetch_combined_rows(
     rows = conn.execute(sql, params).fetchall()
     # Sort in Python — avoids a SQLite index scan for the ORDER BY, which
     # causes random I/O (~14ms vs ~1ms for unsorted read).
-    if len(aliases) == 1:
+    if isinstance(ordering, Arrival):
         rows.sort(key=lambda r: r[6])
     return rows
 
@@ -466,7 +474,7 @@ def _combined_read(
         # ByKey(K) on a payload field also drops facts lacking K from the
         # fold INPUT: a key names what it projects, and the caller named K.
         rows = totalize(
-            _fetch_combined_rows(conn, aliases, until_ts),
+            _fetch_combined_rows(conn, aliases, until_ts, ordering),
             ordering,
             get_field=_row_field,
             get_id=_row_id,

@@ -1,5 +1,7 @@
 """Ordering vectors — the declared read order and its one totalization."""
 
+from dataclasses import FrozenInstanceError
+
 import pytest
 
 from atoms import Arrival, ByKey, OrderingError, totalize
@@ -63,6 +65,18 @@ class TestMissingKey:
     def test_no_record_carries_the_key_yields_an_empty_projection(self):
         assert totalize([rec("a"), rec("b")], ByKey("ts")) == []
 
+    def test_a_keyed_record_with_no_id_raises_the_raw_accessor_error(self):
+        # Ruled posture, not an accident: OrderingError means "this ordering
+        # does not fit this data". A record with no id is a broken record —
+        # the substrate's failure, not the declaration's — so the accessor's
+        # own KeyError surfaces unwrapped.
+        with pytest.raises(KeyError):
+            totalize([{"ts": 1}], ByKey("ts"))
+
+    def test_a_record_missing_the_key_never_reaches_the_id_accessor(self):
+        # Same record, minus the key: excluded before the id is ever read.
+        assert totalize([{"other": 1}], ByKey("ts")) == []
+
 
 class TestMixedTypes:
     def test_string_and_int_under_one_key_refuse(self):
@@ -89,6 +103,15 @@ class TestMixedTypes:
         with pytest.raises(OrderingError) as exc:
             totalize(records, ByKey("ts"))
         assert "do not compare" in str(exc.value)
+
+    def test_refusal_does_not_blame_the_key_when_the_ids_are_at_fault(self):
+        # Equal K, so the sort falls through to the id tie-break — and THOSE
+        # do not compare. The key values here are impeccable ints, so a
+        # message naming "key values" would point at the wrong tuple element.
+        records = [rec({"a": 1}, ts=1), rec({"b": 2}, ts=1)]
+        with pytest.raises(OrderingError) as exc:
+            totalize(records, ByKey("ts"))
+        assert "(K, id)" in str(exc.value)
 
     def test_records_missing_the_key_do_not_participate_in_the_type_check(self):
         records = [rec("a", ts=2), rec("b"), rec("c", ts=1)]
@@ -119,7 +142,7 @@ class TestVariants:
         assert ByKey("ts") == ByKey("ts")
         assert ByKey("ts") != ByKey("name")
         assert {Arrival(), ByKey("ts")}  # hashable
-        with pytest.raises(Exception):
+        with pytest.raises(FrozenInstanceError):
             ByKey("ts").field = "name"
 
     def test_unknown_ordering_refuses(self):

@@ -62,6 +62,7 @@ way: everything the gate asks answers from the log alone.
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from pathlib import Path
 from typing import Any, Generic, TypeVar
@@ -490,6 +491,64 @@ class ArrivalStore(SqliteStore[T], Generic[T]):
             following=None if consumed is None else consumed.arrival_ordinal,
         )
         self._stamp_mark(mark)
+
+    def _declaration_head_in_txn(
+        self, conn: Any, lineage_id: str
+    ) -> tuple[int, str] | None:
+        """The ``(record_ordinal, id)`` of the newest self-lineage declaration.
+
+        The CAS token names the axis this store actually accretes on. Its
+        first coordinate is the ARRIVAL ordinal of the log record whose
+        expansion carries the row — so the rows of one batch record (a
+        multi-change edit ceremony) share an ordinal and the tie-break falls
+        to the fact id, which is the one place this axis is observably not
+        the index's rowid.
+
+        The predicate is the base class's, verbatim: own genesis
+        participates, and a foreign ``_decl.*`` row is excluded by the
+        lineage its payload stamps. Only the coordinate changed.
+
+        The log answers, because the log is the store. No ordinal column, no
+        side table: a second place the coordinate is written is a second
+        thing that can disagree with the log, and the indexer/re-deriver
+        disagreement is the one this family does not tolerate. The cost is
+        one forward walk per read — twice per edit ceremony, and ceremonies
+        are rare.
+
+        Bounded at the reconciled position rather than at end-of-file. The
+        ceremony reads this INSIDE its transaction, having reconciled
+        against a specific prefix; a record another writer lands mid-ceremony
+        is :meth:`_ceremony_persist`'s ``following`` refusal to judge, not
+        this read's, and the bound also keeps a walk from reaching a tail
+        that is mid-append.
+        """
+        mark = self._read_mark()
+        if mark is None:
+            return None
+        best: tuple[int, str] | None = None
+        for record in self._log.walk():
+            ordinal = record["ord"]
+            if ordinal > mark.arrival_ordinal:
+                break
+            for kind_of_row, row in rows_of_record(record):
+                if kind_of_row != "fact":
+                    continue
+                fact_id, kind, payload_text = row[0], row[1], row[5]
+                if not kind.startswith("_decl."):
+                    continue
+                if fact_id == lineage_id:
+                    pass  # own genesis participates
+                else:
+                    try:
+                        payload = json.loads(payload_text)
+                    except (json.JSONDecodeError, TypeError):
+                        continue
+                    if payload.get("lineage") != lineage_id:
+                        continue
+                candidate = (ordinal, fact_id)
+                if best is None or candidate > best:
+                    best = candidate
+        return best
 
     # ---- ceremonies -------------------------------------------------------
 

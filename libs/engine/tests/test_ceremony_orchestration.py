@@ -331,6 +331,38 @@ def test_corrupt_intent_refuses_loudly(world):
     assert intent.exists()
 
 
+def test_a_pre_bump_intent_version_refuses_loudly(world):
+    """A v1 intent is refused, not classified — cut C's coordinate bump.
+
+    ``old_decl_head`` is ``[int, str]`` before and after the bump, so a v1
+    record's rowid coordinate is shape-indistinguishable from a v2 arrival
+    ordinal. Nothing in the record can tell them apart; the version is the
+    only discriminator, so recovery must refuse rather than compare a rowid
+    against an ordinal. The file here is a REAL intent the ceremony wrote,
+    with only its version field wound back — byte-for-byte what the pre-bump
+    code produced.
+    """
+    _apply_genesis(world)
+    preview = plan_declaration_update(world["vertex"], proposed_text=world["edit"])
+    result = apply_declaration_update(
+        preview, observer="obs", credentials=Creds(), write_file=_boom
+    )
+    intent = result.intent_path
+    record = json.loads(intent.read_text(encoding="utf-8"))
+    assert record["v"] == 2
+    assert isinstance(record["old_decl_head"], list)  # the shape that survives
+    record["v"] = 1
+    intent.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
+
+    with pytest.raises(IntentCorrupt) as exc:
+        recover_declaration_update(intent)
+    assert "unsupported intent version 1" in str(exc.value)
+    assert "v2" in str(exc.value)
+    # Refusing clobbers nothing: the evidence is left exactly as found.
+    assert json.loads(intent.read_text(encoding="utf-8"))["v"] == 1
+    intent.unlink()  # leave the world clean
+
+
 def test_recover_after_index_loss_classifies_from_the_log(world):
     """JSONL only: killing between log append + index commit AND losing the
     derived index still classifies applied — the log is the store."""

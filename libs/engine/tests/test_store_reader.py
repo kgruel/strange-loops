@@ -803,3 +803,155 @@ class TestLiveEdge:
 def reader_total(path: Path) -> int:
     with StoreReader(path) as reader:
         return reader.fact_total
+
+
+class TestOrdered:
+    """``ordered(prefix, key)`` — prefix selects, the declared key orders.
+
+    The pinned postures come from the atoms Ordering contract; these hold that
+    StoreReader CONSUMES it rather than growing a second sort key.
+    """
+
+    @staticmethod
+    def _stream(db: Path, payloads: list[dict], *, kinds: list[str] | None = None):
+        """Append facts in the given ARRIVAL order; ids are deliberately not sorted."""
+        conn = sqlite3.connect(str(db))
+        for i, payload in enumerate(payloads):
+            conn.execute(
+                "INSERT INTO facts (id, kind, ts, observer, payload) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (
+                    payload.pop("_id", f"id-{i}"),
+                    (kinds or ["note"] * len(payloads))[i],
+                    100.0 + i,
+                    "o",
+                    json.dumps(payload),
+                ),
+            )
+        conn.commit()
+        conn.close()
+
+    def test_arrival_yields_the_prefix_in_stream_order(self, tmp_db: Path):
+        self._stream(tmp_db, [{"n": 3}, {"n": 1}, {"n": 2}, {"n": 0}])
+        from atoms import Arrival
+
+        with StoreReader(tmp_db) as reader:
+            got = reader.ordered(3, Arrival())
+
+        # The prefix is [0..3) of ARRIVAL order, untouched — not sorted by n.
+        assert [f["payload"]["n"] for f in got] == [3, 1, 2]
+
+    def test_bykey_orders_by_payload_key_not_arrival(self, tmp_db: Path):
+        self._stream(tmp_db, [{"n": 3}, {"n": 1}, {"n": 2}, {"n": 0}])
+        from atoms import ByKey
+
+        with StoreReader(tmp_db) as reader:
+            got = reader.ordered(3, ByKey("n"))
+
+        # Prefix selects {3,1,2} — 0 arrived fourth and is out of scope — and
+        # the declared key orders what the prefix selected.
+        assert [f["payload"]["n"] for f in got] == [1, 2, 3]
+
+    def test_bykey_breaks_ties_on_id_ascending(self, tmp_db: Path):
+        self._stream(
+            tmp_db,
+            [
+                {"_id": "id-c", "n": 1},
+                {"_id": "id-a", "n": 1},
+                {"_id": "id-b", "n": 1},
+            ],
+        )
+        from atoms import ByKey
+
+        with StoreReader(tmp_db) as reader:
+            got = reader.ordered(3, ByKey("n"))
+
+        # Equal K: id ASC decides, and it decides against arrival order —
+        # proving the tie-break is the id, not a stable sort over the stream.
+        assert [f["id"] for f in got] == ["id-a", "id-b", "id-c"]
+
+    def test_missing_key_is_non_membership_not_a_none_bucket(self, tmp_db: Path):
+        self._stream(tmp_db, [{"n": 2}, {"other": "x"}, {"n": 1}, {"n": None}])
+        from atoms import ByKey
+
+        with StoreReader(tmp_db) as reader:
+            got = reader.ordered(4, ByKey("n"))
+
+        # Two of the four selected facts have no n — they are not in the
+        # ByKey('n') projection at all, so the result is SHORTER than prefix.
+        assert [f["payload"]["n"] for f in got] == [1, 2]
+
+    def test_mixed_key_types_surface_the_refusal(self, tmp_db: Path):
+        self._stream(tmp_db, [{"n": 1}, {"n": "two"}])
+        from atoms import ByKey, OrderingError
+
+        with StoreReader(tmp_db) as reader:
+            # The atoms refusal propagates bare — not swallowed, not coerced
+            # into a best-effort order.
+            with pytest.raises(OrderingError, match="mixed key types"):
+                reader.ordered(2, ByKey("n"))
+
+    def test_stored_columns_are_not_key_candidates(self, tmp_db: Path):
+        self._stream(tmp_db, [{"n": 1}, {"n": 2}])
+        from atoms import ByKey
+
+        with StoreReader(tmp_db) as reader:
+            # ``ts`` is a column, not a payload key. Under ByKey('ts') no fact
+            # is a member — event-time questions are selectors, not this key.
+            assert reader.ordered(2, ByKey("ts")) == []
+
+    def test_prefix_counts_the_visible_stream(self, tmp_db: Path):
+        self._stream(
+            tmp_db,
+            [{"n": 0}, {"n": 1}, {"n": 2}],
+            kinds=["_decl.edit", "note", "note"],
+        )
+        from atoms import Arrival
+
+        with StoreReader(tmp_db) as reader:
+            visible = reader.ordered(2, Arrival())
+            internal = reader.ordered(2, Arrival(), include_internal=True)
+
+        # prefix=2 means two facts a reader can SEE — the _decl.* row is
+        # excluded before the LIMIT, not after it.
+        assert [f["payload"]["n"] for f in visible] == [1, 2]
+        assert [f["payload"]["n"] for f in internal] == [0, 1]
+
+    def test_negative_prefix_is_refused(self, tmp_db: Path):
+        from atoms import Arrival
+
+        with StoreReader(tmp_db) as reader:
+            with pytest.raises(ValueError, match="prefix must be >= 0"):
+                reader.ordered(-1, Arrival())
+
+    def test_prefix_rides_arrival_not_event_time(self, tmp_db: Path):
+        """The prefix is the ARRIVAL prefix — `ts` does not select it.
+
+        Every other fixture here assigns ts monotonically with rowid, which
+        makes the two axes agree and lets an `ORDER BY ts` selection pass for
+        an arrival one. Here they DISAGREE (ts descends as rowid ascends), so
+        the prefix `[0..2)` is {a, b} on the arrival axis and {d, c} on the
+        event-time axis, and no ordering of one can be mistaken for the other.
+        Rule 17: a selector rides the receipt axis; event time is a lens.
+        """
+        conn = sqlite3.connect(str(tmp_db))
+        for name, ts in [("a", 900.0), ("b", 800.0), ("c", 700.0), ("d", 600.0)]:
+            conn.execute(
+                "INSERT INTO facts (id, kind, ts, observer, payload) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (f"id-{name}", "note", ts, "o", json.dumps({"n": name})),
+            )
+        conn.commit()
+        conn.close()
+        from atoms import Arrival, ByKey
+
+        with StoreReader(tmp_db) as reader:
+            arrival = reader.ordered(2, Arrival())
+            by_key = reader.ordered(2, ByKey("n"))
+
+        # Selection AND order both ride rowid: the two oldest-by-ts facts
+        # (d, c) are outside the prefix entirely.
+        assert [f["payload"]["n"] for f in arrival] == ["a", "b"]
+        # Same membership under a declared key — only the order changes, which
+        # pins that `key` reorders the arrival prefix rather than reselecting.
+        assert [f["payload"]["n"] for f in by_key] == ["a", "b"]

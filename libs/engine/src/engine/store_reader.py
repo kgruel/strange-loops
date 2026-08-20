@@ -14,6 +14,8 @@ from typing import TYPE_CHECKING
 from .tick import Tick
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
+    from atoms import Ordering
+
     from .witness import WitnessPosition
 
 
@@ -192,6 +194,69 @@ class StoreReader:
             if "/" in k:
                 namespaces.add(k.split("/", 1)[0] + "/")
         return sorted(namespaces)
+
+    def ordered(
+        self, prefix: int, key: "Ordering", *, include_internal: bool = False
+    ) -> list[dict]:
+        """The first ``prefix`` facts of this store's stream, under ``key``.
+
+        Two independent axes, and keeping them apart is the whole point:
+
+        - **prefix** SELECTS. It takes the stream's first ``prefix`` records —
+          ``[0..prefix)`` in arrival order, which for a sqlite-indexed store is
+          ``rowid ASC``. A selector re-scopes and never orders (Rule 17).
+        - **key** ORDERS the selected records, and the ordering is DECLARED by
+          the caller, never inferred here. ``Arrival()`` yields the prefix as
+          the store gave it; ``ByKey(K)`` re-orders it as ``(K, id ASC)``.
+
+        The sort is read-time, in Python, through :func:`atoms.totalize` — the
+        one definition of the sort key in the tree. The SQL is ``ORDER BY rowid
+        ASC LIMIT ?`` and nothing else: an ``ORDER BY json_extract(...)`` here
+        would be a second, independently-drifting spelling of ``ByKey``. There
+        is no index for ``K``, by ruling; adding one is a later optimization a
+        benchmark has to justify.
+
+        ``ByKey(K)`` resolves ``K`` against the fact's **payload**, the same
+        place every other key-addressed read on this class looks
+        (:meth:`fact_key_stats`, :meth:`key_prefixes`). A fact whose payload
+        lacks ``K`` is not in the ``ByKey(K)`` projection at all — a key names
+        what it projects and absence is non-membership, so the returned list
+        can be shorter than ``prefix``. Stored *columns* are not key candidates:
+        ``ts`` questions are event-time selectors (``as_of``) and the witness
+        axis, not this surface.
+
+        Facts only. Ticks carry no payload keys, and interleaving the two into
+        one receipt-ordered stream was the migration bridge's job — that bridge
+        is gone, and a reader that wants ticks asks for ticks.
+
+        ``prefix`` counts the VISIBLE stream: ``_decl.*`` is excluded before the
+        ``LIMIT`` applies (SPEC §9.4 — every read surface excludes it), so
+        ``prefix=10`` means ten facts a reader can see. ``include_internal=True``
+        is the usual escape hatch and widens what the prefix counts.
+
+        Raises:
+            ValueError: ``prefix`` is negative.
+            atoms.OrderingError: The selected facts cannot be ordered under
+                ``key`` — mixed key types, or key values that do not compare.
+                It propagates: a declaration error against the data is a
+                refusal to surface, not something to coerce past.
+        """
+        from atoms import totalize
+
+        if prefix < 0:
+            raise ValueError(f"ordered: prefix must be >= 0, got {prefix}")
+        where = "" if include_internal else "WHERE kind NOT GLOB '_decl.*'"
+        rows = self._conn.execute(
+            "SELECT id, kind, ts, observer, origin, payload FROM facts "
+            f"{where} ORDER BY rowid ASC LIMIT ?",
+            (prefix,),
+        ).fetchall()
+        return totalize(
+            [self._fact_row_to_dict(r) for r in rows],
+            key,
+            get_field=lambda record, field: record["payload"].get(field),
+            get_id=lambda record: record["id"],
+        )
 
     def fact_observer_stats(self, kind: str) -> dict:
         """Per-observer fact counts and freshness within one kind, count-desc.

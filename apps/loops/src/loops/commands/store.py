@@ -711,76 +711,31 @@ def _run_rebirth(argv: list[str], *, vertex_path: Path | None = None) -> int:
 
 
 def _run_export(argv: list[str], *, vertex_path: Path | None = None) -> int:
-    """Export a store to the canonical interleaved JSONL log.
+    """Refuse ``store export``: the sqlite-to-JSONL bridge it drove is gone.
 
-    Facts and ticks are written as one append-only log in GLOBAL RECEIPT
-    ORDER (each tick after the fact rows of its window — see the ordering
-    rule in ``store.jsonl``), every field verbatim, payload included, so a
-    rebuild re-derives byte-identical row hashes and signatures. Read-only
-    on the source: this is a migration read, not a store operation.
+    ``store.jsonl`` — the export/rebuild bridge to the JSONL-canonical shape —
+    dissolved with the arrival cut (decision:design/arrival-sliceC-ordering).
+    Migration targets an arrival log now, so there is no surviving thing for
+    this verb to do.
 
-    ``--rebuild PATH`` additionally rebuilds a fresh sqlite index from the
-    log just written — the round-trip oracle, on demand.
+    The ARM stays rather than the whole subcommand being deleted, because
+    deleting it is not a retirement a user can read: ``_dispatch_store`` would
+    fall through to the base-inspect pre-parse, which takes the first argv as a
+    store path and reports that a store named ``export`` cannot be resolved.
+    That reads as a broken command. A refusal that names what happened and
+    where to go instead is the honest end of a removed feature.
+
+    Argv is not parsed — every invocation refuses, so parsing it could only
+    produce a usage error for a command that no longer exists.
     """
-    import argparse
-
-    p = argparse.ArgumentParser(
-        prog="loops store export",
-        description="Export a store's facts and ticks to canonical JSONL "
-                    "in global receipt order.",
+    return _refuse_store(
+        "the sqlite-to-JSONL export bridge (store.jsonl) is gone — JSONL-"
+        "canonical is a frozen legacy family and nothing produces its log "
+        "any more. Canonical-log stores are arrival logs now "
+        "(engine.arrival_store.ArrivalStore); a plain SqliteStore is read "
+        "with `loops store` / `loops store stats`.",
+        label="store export",
     )
-    if vertex_path is None:
-        p.add_argument("source", help="Source store .db or .vertex file, or vertex name")
-    p.add_argument(
-        "target", nargs="?", default=None,
-        help="Path for the .jsonl log (default: <store>.jsonl beside the store)",
-    )
-    p.add_argument(
-        "--rebuild", default=None, metavar="PATH",
-        help="Also rebuild a fresh sqlite store from the log just written",
-    )
-    p.add_argument("--json", action="store_true", help="JSON report")
-    args = p.parse_args(argv)
-
-    src_target = _resolve_target(getattr(args, "source", None), vertex_path).resolve()
-    src_db = resolve_store_path(src_target)
-    if not src_db.exists():
-        raise FileNotFoundError(f"{src_db} does not exist")
-    target = Path(args.target) if args.target else src_db.with_suffix(".jsonl")
-
-    from store import export_jsonl, rebuild_jsonl
-
-    result = export_jsonl(src_db, target)
-    rebuilt = rebuild_jsonl(target, Path(args.rebuild)) if args.rebuild else None
-
-    if args.json:
-        import json as _json
-
-        report = {
-            "source": str(src_db), "log": str(result.path),
-            "facts": result.facts, "ticks": result.ticks, "lines": result.lines,
-        }
-        if rebuilt is not None:
-            report["rebuild"] = {
-                "path": str(rebuilt.path),
-                "facts": rebuilt.facts, "ticks": rebuilt.ticks,
-            }
-        print(_json.dumps(report, indent=2))  # noqa: T201 — machine output path
-        return 0
-
-    from painted import Block, Style, join_vertical, paint
-
-    lines = [
-        f"✓ {src_db.name} → {result.path.name}: "
-        f"{result.lines} lines ({result.facts} facts, {result.ticks} ticks)"
-    ]
-    if rebuilt is not None:
-        lines.append(
-            f"  rebuilt {rebuilt.path.name}: "
-            f"{rebuilt.facts} facts, {rebuilt.ticks} ticks"
-        )
-    paint(join_vertical(*(Block.text(ln, Style(dim=False)) for ln in lines)))
-    return 0
 
 
 def _run_reanchor(argv: list[str], *, vertex_path: Path | None = None) -> int:

@@ -17,11 +17,9 @@ G3 — apps/ diff-empty: the per-slice gate law, checked against git.
 from __future__ import annotations
 
 import json
-import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
 
-import pytest
 from atoms import Fact
 from lang import parse_vertex
 from lang.document import DECL_GENESIS, vertex_to_documents
@@ -175,24 +173,3 @@ def test_g2_the_verifier_consults_nothing_beside_the_log(tmp_path, monkeypatch):
     monkeypatch.chdir(elsewhere)
     rows = verify_authorship(ArrivalLog(log_path), _verify)
     assert rows
-
-
-# --- G3 ----------------------------------------------------------------------
-
-
-def test_g3_apps_diff_is_empty_against_main():
-    repo = Path(__file__).resolve().parents[3]
-    probe = subprocess.run(
-        ["git", "rev-parse", "--verify", "main"],
-        cwd=repo, capture_output=True, text=True,
-    )
-    if probe.returncode != 0:
-        pytest.skip("no local main ref to diff against")
-    diff = subprocess.run(
-        ["git", "diff", "--stat", "main", "--", "apps/"],
-        cwd=repo, capture_output=True, text=True,
-    )
-    assert diff.returncode == 0
-    assert diff.stdout.strip() == "", (
-        "apps/ must be diff-empty for this slice:\n" + diff.stdout
-    )

@@ -116,8 +116,11 @@ def merge_store(
             f"{target} is the derived index of the canonical log at "
             f"{info.canonical_path} — merging here would INSERT rows the log "
             "cannot account for, and the store would refuse at its next open. "
-            "Recovery: open it as a plain SqliteStore and re-export the log "
-            "(store.jsonl.export_jsonl), or migrate it to an arrival log."
+            "Recovery: migrate it to an arrival log "
+            "(engine.arrival_store.ArrivalStore), the canonical-log family "
+            "that merge does support. JSONL-canonical is frozen legacy — the "
+            "sqlite-to-JSONL export bridge is gone, so there is no supported "
+            "way back into this shape."
         )
     return _merge_into_sqlite(target, source, dry_run=dry_run)
 

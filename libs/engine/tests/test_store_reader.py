@@ -891,14 +891,83 @@ class TestOrdered:
             with pytest.raises(OrderingError, match="mixed key types"):
                 reader.ordered(2, ByKey("n"))
 
-    def test_stored_columns_are_not_key_candidates(self, tmp_db: Path):
+    def test_non_envelope_columns_are_not_key_candidates(self, tmp_db: Path):
         self._stream(tmp_db, [{"n": 1}, {"n": 2}])
         from atoms import ByKey
 
         with StoreReader(tmp_db) as reader:
-            # ``ts`` is a column, not a payload key. Under ByKey('ts') no fact
-            # is a member — event-time questions are selectors, not this key.
-            assert reader.ordered(2, ByKey("ts")) == []
+            # kind/observer/origin are stored columns but NOT key candidates
+            # on any surface (SPEC §9: only ts and id are envelope-resolved).
+            # They resolve against the payload, where no fact carries them, so
+            # the projection is empty by non-membership — never a grouping of
+            # the stream by its column.
+            for field in ("kind", "observer", "origin"):
+                assert reader.ordered(2, ByKey(field)) == [], field
+
+    def test_bykey_ts_orders_by_the_envelope_column(self, tmp_db: Path):
+        """``ts`` is envelope-resolved — the documented family rule (SPEC §9).
+
+        The fixture makes event time DISAGREE with arrival (ts descends as
+        rowid ascends), so an implementation that ignored the key and handed
+        back the arrival prefix, or one that read ``ts`` off the payload and
+        found nothing, both fail.
+        """
+        conn = sqlite3.connect(str(tmp_db))
+        for name, ts in [("a", 900.0), ("b", 800.0), ("c", 700.0), ("d", 600.0)]:
+            conn.execute(
+                "INSERT INTO facts (id, kind, ts, observer, payload) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (f"id-{name}", "note", ts, "o", json.dumps({"n": name})),
+            )
+        conn.commit()
+        conn.close()
+        from atoms import ByKey
+
+        with StoreReader(tmp_db) as reader:
+            got = reader.ordered(4, ByKey("ts"))
+
+        # Every fact is a MEMBER (the envelope always carries ts), and the
+        # order is the exact reverse of arrival.
+        assert [f["payload"]["n"] for f in got] == ["d", "c", "b", "a"]
+
+    def test_bykey_id_orders_lexicographically_by_the_envelope_id(self, tmp_db: Path):
+        self._stream(
+            tmp_db,
+            [{"_id": "id-c", "n": 1}, {"_id": "id-a", "n": 2}, {"_id": "id-b", "n": 3}],
+        )
+        from atoms import ByKey
+
+        with StoreReader(tmp_db) as reader:
+            got = reader.ordered(3, ByKey("id"))
+
+        # ids are out of arrival order, so lexicographic id order is a
+        # different sequence than the stream gave — and nothing is missing.
+        assert [f["id"] for f in got] == ["id-a", "id-b", "id-c"]
+
+    def test_payload_ts_does_not_shadow_the_envelope(self, tmp_db: Path):
+        """One key, one source: for ts/id the ENVELOPE wins, always.
+
+        The payload here carries its own ``ts`` — a string, ordered opposite
+        to the envelope. A reader that preferred the payload would return the
+        reverse sequence; one that mixed the two sources per record would
+        raise ``OrderingError`` on str-vs-float. Both are the mixed-source
+        trap the family rule closes.
+        """
+        conn = sqlite3.connect(str(tmp_db))
+        for name, ts, payload_ts in [("a", 700.0, "z"), ("b", 800.0, "y"), ("c", 900.0, "x")]:
+            conn.execute(
+                "INSERT INTO facts (id, kind, ts, observer, payload) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (f"id-{name}", "note", ts, "o", json.dumps({"n": name, "ts": payload_ts})),
+            )
+        conn.commit()
+        conn.close()
+        from atoms import ByKey
+
+        with StoreReader(tmp_db) as reader:
+            got = reader.ordered(3, ByKey("ts"))
+
+        assert [f["payload"]["n"] for f in got] == ["a", "b", "c"]
 
     def test_prefix_counts_the_visible_stream(self, tmp_db: Path):
         self._stream(

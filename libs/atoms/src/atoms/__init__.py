@@ -54,6 +54,7 @@ __all__ = [
     "Ordering",
     "OrderingError",
     "is_suffix_stable",
+    "resolve_key_field",
     "totalize",
     # Parse vocabulary
     "Coerce",
@@ -114,6 +115,7 @@ _LAZY_IMPORTS: dict[str, tuple[str, str]] = {
     "Ordering": ("atoms.ordering", "Ordering"),
     "OrderingError": ("atoms.ordering", "OrderingError"),
     "is_suffix_stable": ("atoms.ordering", "is_suffix_stable"),
+    "resolve_key_field": ("atoms.ordering", "resolve_key_field"),
     "totalize": ("atoms.ordering", "totalize"),
     # Parse vocabulary
     "Coerce": ("atoms.parse", "Coerce"),

@@ -22,11 +22,13 @@ Two families:
   K is not in the projection, equal K breaks by id ascending, and mixed key
   types are refused.
 
-FIELD RESOLUTION (see `lens_get_field`): `ts` and `id` resolve against the
-record envelope; every other key resolves against the payload. The runner
-restates this resolver — it cannot import this generator — so
-`lens-by-key-payload-seq` is built to order DIFFERENTLY under its payload key
-than under `ts`, which is what catches resolver drift between the two.
+FIELD RESOLUTION: `ts` and `id` resolve against the record envelope; every
+other key resolves against the payload. That family rule is one function,
+`atoms.resolve_key_field`, which this generator, the conformance runner and
+`StoreReader.ordered` all bind — the rule is shared, not restated.
+`lens-by-key-payload-seq` still orders DIFFERENTLY under its payload key than
+under `ts` or `id`, so a reimplementation that does NOT share the rule is
+caught.
 
 Run once to generate/regenerate frozen vector files:
     uv run python spec/conformance/generate_lens.py
@@ -41,7 +43,7 @@ from pathlib import Path
 from typing import Any
 
 from atoms import Fact
-from atoms.ordering import ByKey, Ordering, OrderingError, totalize
+from atoms.ordering import ByKey, Ordering, OrderingError, resolve_key_field, totalize
 from engine.sqlite_store import SqliteStore
 from engine.vertex_reader import vertex_facts
 
@@ -55,16 +57,11 @@ LENS_DIR = REPO_ROOT / "spec" / "conformance" / "vectors" / "lens"
 DEFAULT_ORDERING = ByKey("ts")
 
 
-def lens_get_field(record: dict[str, Any], field: str) -> Any:
-    """Resolve a declared lens key against a combined-read record.
-
-    `ts` and `id` are envelope attributes; every other key is a flat payload
-    field. Restated verbatim in the conformance runner.
-    """
-    if field in ("ts", "id"):
-        return record.get(field)
-    payload = record.get("payload") or {}
-    return payload.get(field)
+#: Resolve a declared lens key against a combined-read record: `ts` and `id`
+#: are envelope attributes, every other key a flat payload field. The rule
+#: lives in atoms — the runner and `StoreReader.ordered` bind the same
+#: function, so there is nothing left to drift.
+lens_get_field = resolve_key_field
 
 
 def ordering_to_wire(ordering: Ordering) -> dict[str, Any]:

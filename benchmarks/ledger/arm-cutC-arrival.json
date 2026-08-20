@@ -1,0 +1,513 @@
+{
+  "instrument_version": "1",
+  "label": "cutC-arrival",
+  "sdk_present": true,
+  "depths": [
+    1000,
+    5000,
+    20000
+  ],
+  "environment": {
+    "timestamp": "2026-08-20T19:39:21.129044+00:00",
+    "machine_fingerprint": "63196ac3e66d",
+    "platform": "macOS-26.4.1-arm64-arm-64bit-Mach-O",
+    "power_source": "AC",
+    "python": "3.13.11",
+    "ci": false,
+    "git_commit": "63184a09b1db8c629f30fa3e3c033a08b90567b0",
+    "git_describe": "v0.11.0-377-g63184a09-dirty",
+    "git_branch": "feat/arrival-libs"
+  },
+  "samples": [
+    {
+      "probe": "cli_cold_version",
+      "layer": "cli",
+      "depth": 0,
+      "unit": "ms",
+      "n": 3,
+      "median": 59.5856,
+      "minimum": 56.2193,
+      "p95": 385.9073
+    },
+    {
+      "probe": "store_scan_all",
+      "layer": "store",
+      "depth": 1000,
+      "unit": "ms",
+      "n": 25,
+      "median": 1.0427,
+      "minimum": 1.0336,
+      "p95": 1.2775
+    },
+    {
+      "probe": "store_append",
+      "layer": "store",
+      "depth": 1000,
+      "unit": "ms",
+      "n": 25,
+      "median": 0.0195,
+      "minimum": 0.019,
+      "p95": 0.0377
+    },
+    {
+      "probe": "engine_summary",
+      "layer": "engine",
+      "depth": 1000,
+      "unit": "ms",
+      "n": 25,
+      "median": 0.0958,
+      "minimum": 0.0944,
+      "p95": 0.104
+    },
+    {
+      "probe": "engine_replay_fold",
+      "layer": "engine",
+      "depth": 1000,
+      "unit": "ms",
+      "n": 25,
+      "median": 1.6737,
+      "minimum": 1.6612,
+      "p95": 1.957
+    },
+    {
+      "probe": "engine_open_vertex_cold",
+      "layer": "engine",
+      "depth": 1000,
+      "unit": "ms",
+      "n": 25,
+      "median": 2.6008,
+      "minimum": 2.5834,
+      "p95": 2.6777
+    },
+    {
+      "probe": "engine_reindex_fts",
+      "layer": "engine",
+      "depth": 1000,
+      "unit": "ms",
+      "n": 25,
+      "median": 3.378,
+      "minimum": 3.1204,
+      "p95": 3.9959
+    },
+    {
+      "probe": "sdk_read_summary",
+      "layer": "sdk",
+      "depth": 1000,
+      "unit": "ms",
+      "n": 25,
+      "median": 0.6314,
+      "minimum": 0.6031,
+      "p95": 0.888
+    },
+    {
+      "probe": "sdk_read_page_100",
+      "layer": "sdk",
+      "depth": 1000,
+      "unit": "ms",
+      "n": 25,
+      "median": 0.7076,
+      "minimum": 0.6925,
+      "p95": 1.0292
+    },
+    {
+      "probe": "sdk_search",
+      "layer": "sdk",
+      "depth": 1000,
+      "unit": "ms",
+      "n": 25,
+      "median": 1.0338,
+      "minimum": 1.0245,
+      "p95": 1.13
+    },
+    {
+      "probe": "engine_receive_held",
+      "layer": "engine",
+      "depth": 1000,
+      "unit": "ms",
+      "n": 25,
+      "median": 0.7444,
+      "minimum": 0.7074,
+      "p95": 0.788
+    },
+    {
+      "probe": "sdk_emit_fact",
+      "layer": "sdk",
+      "depth": 1000,
+      "unit": "ms",
+      "n": 25,
+      "median": 7.2382,
+      "minimum": 7.0781,
+      "p95": 7.8348
+    },
+    {
+      "probe": "arrival_ordered_arrival",
+      "layer": "arrival",
+      "depth": 1000,
+      "unit": "ms",
+      "n": 25,
+      "median": 1.2141,
+      "minimum": 1.2009,
+      "p95": 1.2408
+    },
+    {
+      "probe": "arrival_ordered_bykey_ts",
+      "layer": "arrival",
+      "depth": 1000,
+      "unit": "ms",
+      "n": 25,
+      "median": 1.383,
+      "minimum": 1.3713,
+      "p95": 1.4491
+    },
+    {
+      "probe": "arrival_ordered_bykey_payload",
+      "layer": "arrival",
+      "depth": 1000,
+      "unit": "ms",
+      "n": 25,
+      "median": 1.4672,
+      "minimum": 1.4599,
+      "p95": 1.4858
+    },
+    {
+      "probe": "arrival_cas_head_walk",
+      "layer": "arrival",
+      "depth": 1000,
+      "unit": "ms",
+      "n": 25,
+      "median": 27.3003,
+      "minimum": 26.956,
+      "p95": 28.4085
+    },
+    {
+      "probe": "arrival_merge_regen",
+      "layer": "arrival",
+      "depth": 1000,
+      "unit": "ms",
+      "n": 25,
+      "median": 27.5363,
+      "minimum": 26.6802,
+      "p95": 28.3433
+    },
+    {
+      "probe": "store_scan_all",
+      "layer": "store",
+      "depth": 5000,
+      "unit": "ms",
+      "n": 25,
+      "median": 5.3874,
+      "minimum": 5.1998,
+      "p95": 6.7585
+    },
+    {
+      "probe": "store_append",
+      "layer": "store",
+      "depth": 5000,
+      "unit": "ms",
+      "n": 25,
+      "median": 0.0227,
+      "minimum": 0.0206,
+      "p95": 0.1067
+    },
+    {
+      "probe": "engine_summary",
+      "layer": "engine",
+      "depth": 5000,
+      "unit": "ms",
+      "n": 25,
+      "median": 0.4409,
+      "minimum": 0.4349,
+      "p95": 0.4514
+    },
+    {
+      "probe": "engine_replay_fold",
+      "layer": "engine",
+      "depth": 5000,
+      "unit": "ms",
+      "n": 25,
+      "median": 8.0488,
+      "minimum": 7.7951,
+      "p95": 10.7452
+    },
+    {
+      "probe": "engine_open_vertex_cold",
+      "layer": "engine",
+      "depth": 5000,
+      "unit": "ms",
+      "n": 25,
+      "median": 9.3104,
+      "minimum": 8.9964,
+      "p95": 10.1768
+    },
+    {
+      "probe": "engine_reindex_fts",
+      "layer": "engine",
+      "depth": 5000,
+      "unit": "ms",
+      "n": 25,
+      "median": 13.4813,
+      "minimum": 12.7547,
+      "p95": 14.4618
+    },
+    {
+      "probe": "sdk_read_summary",
+      "layer": "sdk",
+      "depth": 5000,
+      "unit": "ms",
+      "n": 25,
+      "median": 1.2123,
+      "minimum": 1.1674,
+      "p95": 1.3028
+    },
+    {
+      "probe": "sdk_read_page_100",
+      "layer": "sdk",
+      "depth": 5000,
+      "unit": "ms",
+      "n": 25,
+      "median": 0.7795,
+      "minimum": 0.7538,
+      "p95": 0.8263
+    },
+    {
+      "probe": "sdk_search",
+      "layer": "sdk",
+      "depth": 5000,
+      "unit": "ms",
+      "n": 25,
+      "median": 3.0113,
+      "minimum": 2.9861,
+      "p95": 3.1127
+    },
+    {
+      "probe": "engine_receive_held",
+      "layer": "engine",
+      "depth": 5000,
+      "unit": "ms",
+      "n": 25,
+      "median": 1.0765,
+      "minimum": 1.0595,
+      "p95": 1.1735
+    },
+    {
+      "probe": "sdk_emit_fact",
+      "layer": "sdk",
+      "depth": 5000,
+      "unit": "ms",
+      "n": 25,
+      "median": 26.1253,
+      "minimum": 25.1805,
+      "p95": 29.3737
+    },
+    {
+      "probe": "arrival_ordered_arrival",
+      "layer": "arrival",
+      "depth": 5000,
+      "unit": "ms",
+      "n": 25,
+      "median": 6.3629,
+      "minimum": 6.2496,
+      "p95": 6.86
+    },
+    {
+      "probe": "arrival_ordered_bykey_ts",
+      "layer": "arrival",
+      "depth": 5000,
+      "unit": "ms",
+      "n": 25,
+      "median": 7.4143,
+      "minimum": 7.2328,
+      "p95": 10.3732
+    },
+    {
+      "probe": "arrival_ordered_bykey_payload",
+      "layer": "arrival",
+      "depth": 5000,
+      "unit": "ms",
+      "n": 25,
+      "median": 7.886,
+      "minimum": 7.689,
+      "p95": 10.2175
+    },
+    {
+      "probe": "arrival_cas_head_walk",
+      "layer": "arrival",
+      "depth": 5000,
+      "unit": "ms",
+      "n": 3,
+      "median": 136.1224,
+      "minimum": 134.9612,
+      "p95": 137.7466
+    },
+    {
+      "probe": "arrival_merge_regen",
+      "layer": "arrival",
+      "depth": 5000,
+      "unit": "ms",
+      "n": 3,
+      "median": 136.3407,
+      "minimum": 135.5973,
+      "p95": 146.8671
+    },
+    {
+      "probe": "store_scan_all",
+      "layer": "store",
+      "depth": 20000,
+      "unit": "ms",
+      "n": 25,
+      "median": 24.2155,
+      "minimum": 22.763,
+      "p95": 28.7645
+    },
+    {
+      "probe": "store_append",
+      "layer": "store",
+      "depth": 20000,
+      "unit": "ms",
+      "n": 25,
+      "median": 0.0222,
+      "minimum": 0.0199,
+      "p95": 0.0391
+    },
+    {
+      "probe": "engine_summary",
+      "layer": "engine",
+      "depth": 20000,
+      "unit": "ms",
+      "n": 25,
+      "median": 2.0275,
+      "minimum": 1.9795,
+      "p95": 2.214
+    },
+    {
+      "probe": "engine_replay_fold",
+      "layer": "engine",
+      "depth": 20000,
+      "unit": "ms",
+      "n": 25,
+      "median": 34.0928,
+      "minimum": 31.9881,
+      "p95": 37.515
+    },
+    {
+      "probe": "engine_open_vertex_cold",
+      "layer": "engine",
+      "depth": 20000,
+      "unit": "ms",
+      "n": 25,
+      "median": 35.5885,
+      "minimum": 34.4215,
+      "p95": 40.038
+    },
+    {
+      "probe": "engine_reindex_fts",
+      "layer": "engine",
+      "depth": 20000,
+      "unit": "ms",
+      "n": 3,
+      "median": 53.6142,
+      "minimum": 53.05,
+      "p95": 56.268
+    },
+    {
+      "probe": "sdk_read_summary",
+      "layer": "sdk",
+      "depth": 20000,
+      "unit": "ms",
+      "n": 25,
+      "median": 3.5485,
+      "minimum": 3.3227,
+      "p95": 3.9111
+    },
+    {
+      "probe": "sdk_read_page_100",
+      "layer": "sdk",
+      "depth": 20000,
+      "unit": "ms",
+      "n": 25,
+      "median": 1.1177,
+      "minimum": 1.1078,
+      "p95": 1.1567
+    },
+    {
+      "probe": "sdk_search",
+      "layer": "sdk",
+      "depth": 20000,
+      "unit": "ms",
+      "n": 25,
+      "median": 10.5983,
+      "minimum": 10.3847,
+      "p95": 11.2156
+    },
+    {
+      "probe": "engine_receive_held",
+      "layer": "engine",
+      "depth": 20000,
+      "unit": "ms",
+      "n": 3,
+      "median": 2.9708,
+      "minimum": 2.7046,
+      "p95": 67.0237
+    },
+    {
+      "probe": "sdk_emit_fact",
+      "layer": "sdk",
+      "depth": 20000,
+      "unit": "ms",
+      "n": 3,
+      "median": 102.8299,
+      "minimum": 97.9905,
+      "p95": 103.1877
+    },
+    {
+      "probe": "arrival_ordered_arrival",
+      "layer": "arrival",
+      "depth": 20000,
+      "unit": "ms",
+      "n": 25,
+      "median": 26.4055,
+      "minimum": 25.8166,
+      "p95": 31.1434
+    },
+    {
+      "probe": "arrival_ordered_bykey_ts",
+      "layer": "arrival",
+      "depth": 20000,
+      "unit": "ms",
+      "n": 25,
+      "median": 32.9419,
+      "minimum": 30.791,
+      "p95": 37.9682
+    },
+    {
+      "probe": "arrival_ordered_bykey_payload",
+      "layer": "arrival",
+      "depth": 20000,
+      "unit": "ms",
+      "n": 25,
+      "median": 33.6504,
+      "minimum": 32.7741,
+      "p95": 40.1184
+    },
+    {
+      "probe": "arrival_cas_head_walk",
+      "layer": "arrival",
+      "depth": 20000,
+      "unit": "ms",
+      "n": 3,
+      "median": 550.9525,
+      "minimum": 550.2735,
+      "p95": 551.3149
+    },
+    {
+      "probe": "arrival_merge_regen",
+      "layer": "arrival",
+      "depth": 20000,
+      "unit": "ms",
+      "n": 3,
+      "median": 569.9104,
+      "minimum": 565.3052,
+      "p95": 586.8161
+    }
+  ]
+}

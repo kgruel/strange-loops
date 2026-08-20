@@ -264,6 +264,54 @@ per-operator rather than global.
 
 ---
 
+## The arrival substrate (Cut C pre-ship, measured 2026-08-20)
+
+Arm: `ledger/arm-cutC-arrival.json`, recorded on `feat/arrival-libs` (instrument
+v1, new probes only — no comparison against the 2026-08-15 arms is meaningful,
+these surfaces did not exist there). One machine, one sitting, depths
+1k / 5k / 20k. The question was ruled in the Cut C design: `ordered()` ships
+with no key index and the CAS token reads the log by a forward walk, and each
+acceptance was conditioned on "a benchmark has to justify" the alternative.
+This is that benchmark.
+
+| probe | 1k | 5k | 20k | 20k/1k (depth 20x) |
+|---|---|---|---|---|
+| `arrival_ordered_arrival` | 1.21 ms | 6.36 | 26.4 | 21.7x |
+| `arrival_ordered_bykey_ts` | 1.38 ms | 7.41 | 32.9 | 23.8x |
+| `arrival_ordered_bykey_payload` | 1.47 ms | 7.89 | 33.7 | 22.9x |
+| `arrival_cas_head_walk` | 27.3 ms | 136.1 | 551.0 | 20.2x |
+| `arrival_merge_regen` | 27.5 ms | 136.3 | 569.9 | 20.7x |
+
+**Every curve is linear** — growth factors track the 20x depth ratio, nothing
+superlinear. Findings, in the order the rulings asked:
+
+1. **`ordered()` needs no index at these depths.** The read-time Python sort
+   costs ~25% over the raw arrival scan (`bykey_ts` vs `arrival` at 20k), and
+   the whole read is 33 ms at 20k facts. The deferred `ByKey` index stays
+   deferred; nothing here justifies it.
+2. **The payload-key parse is nearly free.** `bykey_payload` vs `bykey_ts` at
+   the same depth — the one intra-arm delta this arm can legitimately quote —
+   is ~2%, inside this instrument's stated resolution. The reader already
+   parses payloads to hand rows over; ordering by a payload key adds no
+   second parse.
+3. **The CAS head walk is linear with a large constant: ~27 µs per log
+   record.** 551 ms per read at 20k facts, and an edit ceremony pays it twice
+   (~1.1 s). The design accepted this as "ceremonies are rare"; the ledger's
+   job is to price the acceptance: at 100k records a ceremony costs ~5.5 s,
+   at 1M ~55 s. Linear, not a blocker at current store depths (the live
+   project store is ~4k records) — but this is the first curve to re-measure
+   when a store 10x deeper than today's exists, and the ordinal-bounded walk
+   is where an index would go if ceremonies stop being rare.
+4. **The merge driver is linear in total lines** (~570 ms merging two 30k-line
+   branches at the 20k band) — comfortably inside what a `git merge`
+   invocation tolerates.
+
+What this section cannot see: sub-10% deltas (per the house rule above), and
+any depth beyond 20k — the per-depth claims above 20k are extrapolations of a
+measured linear fit, labelled as such.
+
+---
+
 ## The CI series
 
 `.github/workflows/characterize.yml` records one arm per commit that lands on

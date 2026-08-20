@@ -239,9 +239,24 @@ class TestTheFetchMaterializesNativeOrder:
             self._row("F3", 2000.0, 4),
             self._row("F1", 1000.0, 2),
         ]
-        rows = _fetch_combined_rows(self._StubConn(shuffled), ["main"], None)
+        rows = _fetch_combined_rows(self._StubConn(shuffled), ["main"], None, Arrival())
         assert [r[0] for r in rows] == _ARRIVAL_IDS
         assert [r[6] for r in rows] == [1, 2, 3, 4]
+
+    def test_one_store_under_by_key_is_left_as_read(self):
+        """ByKey totalizes on (K, id); a rowid sort first would be discarded."""
+        from engine.vertex_reader import _fetch_combined_rows
+
+        shuffled = [
+            self._row("F2", 3000.0, 3),
+            self._row("F0", 4000.0, 1),
+            self._row("F3", 2000.0, 4),
+            self._row("F1", 1000.0, 2),
+        ]
+        rows = _fetch_combined_rows(
+            self._StubConn(shuffled), ["main"], None, ByKey("ts")
+        )
+        assert [r[0] for r in rows] == ["F2", "F0", "F3", "F1"]
 
     def test_several_stores_are_left_as_read(self):
         """rowid is per-store across members, so sorting on it would be a lie."""
@@ -256,17 +271,19 @@ class TestTheFetchMaterializesNativeOrder:
         ]
         assert [r[0] for r in sorted(as_read, key=lambda r: r[6])] != ["A1", "B1", "A2"]
 
-        rows = _fetch_combined_rows(self._StubConn(as_read), ["main", "s1"], None)
+        rows = _fetch_combined_rows(
+            self._StubConn(as_read), ["main", "s1"], None, ByKey("ts")
+        )
         assert [r[0] for r in rows] == ["A1", "B1", "A2"]
 
     def test_until_ts_reaches_the_sql(self):
         from engine.vertex_reader import _fetch_combined_rows
 
         conn = self._StubConn([])
-        _fetch_combined_rows(conn, ["main"], 2500.0)
+        _fetch_combined_rows(conn, ["main"], 2500.0, Arrival())
         assert "WHERE ts <= ?" in conn.sql
         conn2 = self._StubConn([])
-        _fetch_combined_rows(conn2, ["main"], None)
+        _fetch_combined_rows(conn2, ["main"], None, Arrival())
         assert "WHERE" not in conn2.sql
 
 

@@ -1,5 +1,6 @@
 """Ordering vectors — the declared read order and its one totalization."""
 
+import itertools
 from dataclasses import FrozenInstanceError
 
 import pytest
@@ -123,6 +124,49 @@ class TestMixedTypes:
     def test_records_missing_the_key_do_not_participate_in_the_type_check(self):
         records = [rec("a", ts=2), rec("b"), rec("c", ts=1)]
         assert [r["id"] for r in totalize(records, ByKey("ts"))] == ["c", "a"]
+
+
+class TestNonFiniteKeys:
+    """`totalize` totalizes — so a key value that has no position refuses."""
+
+    def test_nan_refuses_naming_the_field_and_the_value(self):
+        records = [rec("a", k=1.0), rec("b", k=float("nan")), rec("c", k=2.0)]
+        with pytest.raises(OrderingError) as excinfo:
+            totalize(records, ByKey("k"))
+        message = str(excinfo.value)
+        assert "'k'" in message  # the field
+        assert "nan" in message.lower()  # the value
+        assert "total order" in message  # the reason
+
+    def test_nan_refuses_under_every_input_permutation(self):
+        """The old behavior was permutation-dependent — that is the bug."""
+        for order in (["a", "b", "c"], ["c", "b", "a"], ["b", "a", "c"]):
+            records = [
+                rec(i, k=(float("nan") if i == "b" else 1.0)) for i in order
+            ]
+            with pytest.raises(OrderingError, match="total order"):
+                totalize(records, ByKey("k"))
+
+    def test_infinities_are_allowed_and_order_deterministically(self):
+        """Refusing these would overreach: they DO have positions."""
+        for order in itertools.permutations(["a", "b", "c"]):
+            values = {"a": float("inf"), "b": float("-inf"), "c": 0.0}
+            records = [rec(i, k=values[i]) for i in order]
+            assert [r["id"] for r in totalize(records, ByKey("k"))] == ["b", "c", "a"]
+
+    def test_an_all_infinite_key_still_totalizes(self):
+        records = [rec("z", k=float("inf")), rec("a", k=float("inf"))]
+        # Equal keys, so the id tie-break decides — ascending.
+        assert [r["id"] for r in totalize(records, ByKey("k"))] == ["a", "z"]
+
+    def test_the_nan_check_is_float_typed_only(self):
+        """Strings named 'nan' are ordinary str keys, not non-finite floats."""
+        records = [rec("a", k="nan"), rec("b", k="abc")]
+        assert [r["id"] for r in totalize(records, ByKey("k"))] == ["b", "a"]
+
+    def test_a_record_missing_the_key_is_unaffected_by_the_nan_check(self):
+        records = [rec("a", k=1.0), rec("b"), rec("c", k=0.0)]
+        assert [r["id"] for r in totalize(records, ByKey("k"))] == ["c", "a"]
 
 
 class TestArrival:

@@ -65,6 +65,18 @@ class TestMissingKey:
     def test_no_record_carries_the_key_yields_an_empty_projection(self):
         assert totalize([rec("a"), rec("b")], ByKey("ts")) == []
 
+    def test_a_keyed_record_with_no_id_raises_the_raw_accessor_error(self):
+        # Ruled posture, not an accident: OrderingError means "this ordering
+        # does not fit this data". A record with no id is a broken record —
+        # the substrate's failure, not the declaration's — so the accessor's
+        # own KeyError surfaces unwrapped.
+        with pytest.raises(KeyError):
+            totalize([{"ts": 1}], ByKey("ts"))
+
+    def test_a_record_missing_the_key_never_reaches_the_id_accessor(self):
+        # Same record, minus the key: excluded before the id is ever read.
+        assert totalize([{"other": 1}], ByKey("ts")) == []
+
 
 class TestMixedTypes:
     def test_string_and_int_under_one_key_refuse(self):

@@ -118,9 +118,21 @@ def totalize(
     as absent. This is exclusion-by-declaration — the caller named K — not
     silent loss.
 
-    Key values of mixed types under one declared key (``"5"`` and ``5``, or
-    ``True`` and ``1``) are REFUSED with ``OrderingError``. Same-typed values
-    that do not compare (dicts, say) are refused the same way.
+    Key values of mixed types under one declared key are REFUSED with
+    ``OrderingError``. The check is strict TYPE IDENTITY, not comparability:
+    ``"5"`` and ``5`` refuse, ``True`` and ``1`` refuse, and so do ``1`` and
+    ``2.0`` — Python would happily order that last pair, and refusing it
+    anyway is the point. A key whose values are sometimes int and sometimes
+    float is a declaration the data does not support, and silently ordering it
+    would hide that. Same-typed values that do not compare (dicts, say) are
+    refused the same way.
+
+    A record that CARRIES ``K`` but has no id raises the accessor's own error
+    (``KeyError``/``AttributeError``), unwrapped and by ruling: an id is the
+    substrate's, not the declaration's, so its absence is a broken record
+    rather than an ordering declaration that does not fit the data. Only the
+    latter is what ``OrderingError`` means. A record missing ``K`` never
+    reaches the id accessor at all.
 
     ``Arrival()`` returns the records as given — the store's native order is
     the store's job to yield, never synthesized here. Both accessors are

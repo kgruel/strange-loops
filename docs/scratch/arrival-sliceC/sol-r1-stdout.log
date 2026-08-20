@@ -1,0 +1,107 @@
+## Findings
+
+1. **C-SOL-01 — major** — [ordering.py](/Users/kaygee/Code/loops/libs/atoms/src/atoms/ordering.py:125), [vertex_reader.py](/Users/kaygee/Code/loops/libs/engine/src/engine/vertex_reader.py:374), [store_reader.py](/Users/kaygee/Code/loops/libs/engine/src/engine/store_reader.py:268)
+
+   **Claim:** Valid scalar payloads crash `ByKey(payload_field)` instead of being missing-K non-members. `Fact` explicitly permits non-mapping payloads, but both the canonical resolver and row-shaped combined resolver unconditionally call `.get()` on truthy payloads.
+
+   **Probe output:**
+
+   ```text
+   atoms.resolve_key_field => AttributeError 'str' object has no attribute 'get'
+   engine._row_field => AttributeError 'str' object has no attribute 'get'
+   StoreReader.ordered => AttributeError 'str' object has no attribute 'get'
+   ```
+
+   The probe persisted `payload="raw"` successfully through `SqliteStore`, alongside `payload={"n": 1}`. Under `ByKey("n")`, the scalar record should be excluded and the keyed record returned. This breaks the normative missing-K rule across StoreReader, combined reads, generator, and runner.
+
+2. **C-SOL-02 — major** — [vertex_reader.py](/Users/kaygee/Code/loops/libs/engine/src/engine/vertex_reader.py:467)
+
+   **Claim:** An aggregate with zero currently resolvable stores accepts `Arrival()` because `_combined_read` returns empty state before calling `resolve_ordering`. Therefore the mandatory aggregate refusal depends on current member availability.
+
+   **Probe used a real aggregate declaration referencing a missing member:**
+
+   ```text
+   declaration shape aggregate = True
+   resolved stores = []
+   declared Arrival result = {'note': {'items': []}}
+   ```
+
+   Expected: `OrderingError` naming the lack of a cross-store arrival order and suggesting `ByKey`. The same declaration begins refusing only after enough members become resolvable.
+
+3. **C-SOL-03 — minor** — [ordering.py](/Users/kaygee/Code/loops/libs/atoms/src/atoms/ordering.py:201)
+
+   **Claim:** `totalize` does not totalize same-typed float keys containing `NaN`. Python sorting neither raises nor defines a stable value order, so permutations produce different declared orders.
+
+   **Probe output:**
+
+   ```text
+   ['a', 'b', 'c'] => ['c', 'a', 'b']
+   ['c', 'b', 'a'] => ['c', 'b', 'a']
+   ['b', 'a', 'c'] => ['b', 'a', 'c']
+   ```
+
+   SQLite reports `json_valid({"k": NaN}) => 0`, so persisted store paths normally reject this representation. Impact is consequently bounded to the exported atoms primitive and in-memory records, but it still contradicts the primitive’s totalization claim. Non-finite values should refuse loudly.
+
+4. **C-SOL-04 — nit** — [ordering.py](/Users/kaygee/Code/loops/libs/atoms/src/atoms/ordering.py:25)
+
+   **Claim:** The wrong-element attribution sweep is incomplete. `OrderingError`’s class docstring still says “key values that do not compare,” although the failure can come solely from the id tie-break.
+
+   **Evidence:**
+
+   ```text
+   rg ... =>
+   libs/atoms/src/atoms/ordering.py:29:
+       key, or key values that do not compare
+   ```
+
+   The independent id-side probe produced:
+
+   ```text
+   records under declared key 'ts' do not compare ...
+   (the sort key is (K, id) — either element can be the non-comparable one)
+   ```
+
+## Unverified-fix verdicts
+
+- **c314a3e7 — PASS.** [test_store_reader.py](/Users/kaygee/Code/loops/libs/engine/tests/test_store_reader.py:996) makes arrival and event time disagree. Probe: rowid prefix `['id-a', 'id-b']`, ts prefix `['id-d', 'id-c']`, actual `ordered(..., Arrival())` returned `['id-a', 'id-b']`.
+
+- **c04af0de — PASS.** [vertex_reader.py](/Users/kaygee/Code/loops/libs/engine/src/engine/vertex_reader.py:406) gates rowid materialization on `Arrival`. Shuffled-source probe returned Arrival `['F0', 'F1', 'F2']` and ByKey fetch-as-read `['F2', 'F0', 'F1']`. The focused combined-read suite passed.
+
+- **8d44561c — PASS.** Mutation raised exactly `FrozenInstanceError`; [test_ordering.py](/Users/kaygee/Code/loops/libs/atoms/tests/test_ordering.py:139) now pins that class.
+
+- **0ebcead1 — PASS.** [ordering.py](/Users/kaygee/Code/loops/libs/atoms/src/atoms/ordering.py:160) explicitly documents strict type identity and raw missing-id errors. Probe produced raw `KeyError`; int/float, bool/int, and missing-key boundaries passed.
+
+- **ac335d66 — PASS.** Runtime id-side refusal names `(K, id)` and no longer blames K; direct probe exercised equal integer K with dict ids.
+
+- **c7c898ee — FAIL.** The two `Raises` sections are corrected, but C-SOL-04 is remaining wrong-attribution residue in `OrderingError`’s own class contract.
+
+- **fac793e1 — FAIL.** Envelope `ts`/`id`, payload shadowing, and stored-column exclusions pass for mapping payloads, but C-SOL-01 means the purported single family definition mishandles valid scalar payloads.
+
+- **13ef260c — FAIL.** `_ROW_ENVELOPE_COLUMNS` correctly derives from `ENVELOPE_KEYS`, but its non-envelope arm independently repeats C-SOL-01 through `json.loads(...).get(...)`.
+
+- **83ae19cc — PASS.** [strategies.py](/Users/kaygee/Code/loops/libs/atoms/src/atoms/testing/strategies.py:292) filters both strategy arms through `is_appendable_kind`. Probe: `decision=True`, `_declaration=True`, `_decl.genesis=False`, `_decl.edit=False`; 500-example property pin passed.
+
+## Other reviewed areas
+
+No further findings in:
+
+- CAS arrival-head and intent-version handling: [arrival_store.py](/Users/kaygee/Code/loops/libs/engine/src/engine/arrival_store.py:495), [ceremony.py](/Users/kaygee/Code/loops/libs/engine/src/engine/ceremony.py:727). CAS/checkpoint/rowid tests: `20 passed`; real v1-intent refusal included in a separate `4 passed`.
+- Bridge dissolution and refusal routing: `_run_export([])` and `_run_export(["--json"])` both returned `2` with the surviving-path pointer. Residue search found no live bridge symbols outside the explicitly frozen docstring and historical changelog.
+- Frozen fences: no diff in `sqlite_store.py`, `handle.py`, `atoms/spec.py`, or `benchmarks/characterize.py`; `jsonl_store.py` contains only the two licensed refusal rewords.
+- Conformance vectors: regeneration rewrote all six files but SHA-256 before/after was identical; worktree remained clean.
+- Rule 17 scope: [architecture test](/Users/kaygee/Code/loops/tests/architecture/test_rule_17_fold_order_prose_is_receipt_order.py:140) reads tracked files and excludes `docs/scratch/` as ratified.
+
+## Suites
+
+```text
+atoms:  492 passed
+engine: 1797 passed, 1 skipped
+sdk:    323 passed
+store:  152 passed
+root:   110 passed
+focused ordering/conformance: 45 passed
+```
+
+The green suites do not cover scalar payload ordering or empty-aggregate declaration validation.
+
+**Overall: NOT_CONVERGED.**

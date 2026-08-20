@@ -210,6 +210,27 @@ class TestNonFiniteKeys:
         records = [rec("a", k="nan"), rec("b", k="abc")]
         assert [r["id"] for r in totalize(records, ByKey("k"))] == ["b", "a"]
 
+    def test_a_nan_tie_break_id_refuses_and_blames_the_id_side(self):
+        """The id half of (K, id) is a position too, so NaN has none there.
+
+        Equal K throughout, so the sort falls through to the tie-break — and
+        a NaN there restored exactly the permutation-dependent output the key
+        side already refuses. Only a custom `get_id` can produce a float id.
+        """
+        ids = {"a": float("nan"), "b": 2.0, "c": 3.0}
+        for order in itertools.permutations(["a", "b", "c"]):
+            records = [rec(i, k=1.0) for i in order]
+            with pytest.raises(OrderingError) as excinfo:
+                totalize(records, ByKey("k"), get_id=lambda r: ids[r["id"]])
+            message = str(excinfo.value)
+            assert "id" in message
+            assert "nan" in message.lower()
+
+    def test_the_id_side_nan_check_is_float_typed_only(self):
+        records = [rec("a", k=1.0), rec("b", k=1.0)]
+        out = totalize(records, ByKey("k"), get_id=lambda r: "nan" + r["id"])
+        assert [r["id"] for r in out] == ["a", "b"]
+
     def test_mixed_type_wins_over_nan_under_either_input_order(self):
         """The refusal CATEGORY is a property of the data, not of the order.
 

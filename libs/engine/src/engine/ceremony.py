@@ -90,7 +90,13 @@ __all__ = [
 ]
 
 INTENT_SUFFIX = ".intent"
-_INTENT_VERSION = 1
+# v2: ``old_decl_head`` persists an ARRIVAL coordinate (record ordinal, id)
+# for the arrival store family, where v1 persisted an index rowid. The shape
+# is unchanged — ``[int, str]`` either way — so nothing about the record's
+# form distinguishes a stale v1 coordinate from a live v2 one. The version
+# IS the discriminator, and recovery refuses a v1 intent loudly rather than
+# comparing a rowid against an ordinal and guessing.
+_INTENT_VERSION = 2
 
 
 class CeremonyError(Exception):

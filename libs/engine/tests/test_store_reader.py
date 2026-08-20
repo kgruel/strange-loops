@@ -923,3 +923,35 @@ class TestOrdered:
         with StoreReader(tmp_db) as reader:
             with pytest.raises(ValueError, match="prefix must be >= 0"):
                 reader.ordered(-1, Arrival())
+
+    def test_prefix_rides_arrival_not_event_time(self, tmp_db: Path):
+        """The prefix is the ARRIVAL prefix — `ts` does not select it.
+
+        Every other fixture here assigns ts monotonically with rowid, which
+        makes the two axes agree and lets an `ORDER BY ts` selection pass for
+        an arrival one. Here they DISAGREE (ts descends as rowid ascends), so
+        the prefix `[0..2)` is {a, b} on the arrival axis and {d, c} on the
+        event-time axis, and no ordering of one can be mistaken for the other.
+        Rule 17: a selector rides the receipt axis; event time is a lens.
+        """
+        conn = sqlite3.connect(str(tmp_db))
+        for name, ts in [("a", 900.0), ("b", 800.0), ("c", 700.0), ("d", 600.0)]:
+            conn.execute(
+                "INSERT INTO facts (id, kind, ts, observer, payload) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (f"id-{name}", "note", ts, "o", json.dumps({"n": name})),
+            )
+        conn.commit()
+        conn.close()
+        from atoms import Arrival, ByKey
+
+        with StoreReader(tmp_db) as reader:
+            arrival = reader.ordered(2, Arrival())
+            by_key = reader.ordered(2, ByKey("n"))
+
+        # Selection AND order both ride rowid: the two oldest-by-ts facts
+        # (d, c) are outside the prefix entirely.
+        assert [f["payload"]["n"] for f in arrival] == ["a", "b"]
+        # Same membership under a declared key — only the order changes, which
+        # pins that `key` reorders the arrival prefix rather than reselecting.
+        assert [f["payload"]["n"] for f in by_key] == ["a", "b"]

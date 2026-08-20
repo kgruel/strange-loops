@@ -17,6 +17,7 @@ rather than growing near-copies of the same ``sort(key=...)`` line or the same
 
 from __future__ import annotations
 
+import math
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any, TypeVar
@@ -26,8 +27,12 @@ class OrderingError(Exception):
     """Raised when records cannot be ordered under the declared Ordering.
 
     A declaration error against the data — mixed key types under one declared
-    key, or key values that do not compare — not something a comparator may
-    paper over with a coercion.
+    key, a ``NaN`` key value, or sort-key elements that do not compare — not
+    something a comparator may paper over with a coercion.
+
+    The sort key is ``(K, id)``, so the non-comparable element may be EITHER
+    half: a raise here does not by itself blame the declared key. The runtime
+    message names which.
     """
 
     pass
@@ -124,7 +129,24 @@ def resolve_key_field(record: Mapping[str, Any], field: str, /) -> Any:
     """
     if field in ENVELOPE_KEYS:
         return record.get(field)
-    payload = record.get("payload") or {}
+    return resolve_payload_key(record.get("payload"), field)
+
+
+def resolve_payload_key(payload: Any, field: str, /) -> Any:
+    """Resolve a non-envelope declared key against a fact payload.
+
+    The payload half of the family rule, split out so the row-shaped combined
+    read (which already holds the parsed payload) resolves through the SAME
+    definition rather than repeating ``.get()`` on its own.
+
+    A payload need not be a mapping — ``Fact`` permits any JSON value — and a
+    non-mapping payload has no fields at all. It is therefore a missing-K
+    NON-MEMBER of every payload-key projection, exactly as an absent field is:
+    ``None``, which :func:`totalize` reads as non-membership. Exclusion by
+    declaration, not a crash and not a coercion.
+    """
+    if not isinstance(payload, Mapping):
+        return None
     return payload.get(field)
 
 
@@ -166,6 +188,13 @@ def totalize(
     would hide that. Same-typed values that do not compare (dicts, say) are
     refused the same way.
 
+    ``NaN`` key values are REFUSED. NaN compares false against everything
+    including itself, so a sort containing one produces an order that depends
+    on the input permutation — it is not a total order, and ``totalize``'s only
+    claim is that it totalizes. Infinities are ALLOWED: ``-inf`` and ``+inf``
+    order deterministically against every other float, so refusing them would
+    overreach — the claim is totalization, not finiteness.
+
     A record that CARRIES ``K`` but has no id raises the accessor's own error
     (``KeyError``/``AttributeError``), unwrapped and by ruling: an id is the
     substrate's, not the declaration's, so its absence is a broken record
@@ -190,9 +219,9 @@ def totalize(
         A new list, ordered. For ``ByKey``, records missing the key are absent.
 
     Raises:
-        OrderingError: Mixed key types under the declared key, sort-key
-            elements — key value or tie-break id — that do not compare, or an
-            unknown Ordering variant.
+        OrderingError: Mixed key types under the declared key, a ``NaN`` key
+            value, sort-key elements — key value or tie-break id — that do not
+            compare, or an unknown Ordering variant.
     """
     match ordering:
         case Arrival():
@@ -211,6 +240,14 @@ def totalize(
                         f"mixed key types under declared key {field!r}: "
                         f"{key_type.__name__} and {type(value).__name__} "
                         f"(offending value {value!r})"
+                    )
+                if isinstance(value, float) and math.isnan(value):
+                    raise OrderingError(
+                        f"NaN key value under declared key {field!r}: {value!r} — "
+                        f"NaN compares false against everything including itself, "
+                        f"so the resulting order depends on the input permutation "
+                        f"and is not a total order. Infinities are fine; NaN is "
+                        f"not a position."
                     )
                 keyed.append((value, get_id(record), record))
             try:

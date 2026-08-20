@@ -82,6 +82,36 @@ class TestAggregateRefusesArrival:
             read_facts(parent, limit=50, ordering=Arrival())
 
 
+    def test_arrival_refuses_on_an_aggregate_with_zero_resolvable_members(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """The refusal is DECLARATION-shaped, not availability-dependent.
+
+        `read_facts` already keys on declaration shape rather than member count
+        (see the one-member case above), so this holds without a change — the
+        pin is what stops a later "resolve the members first, then validate"
+        refactor from making the same declaration accepted while its members
+        happen to be missing and refused once they come back.
+        """
+        home = tmp_path / "loops_home"
+        home.mkdir()
+        monkeypatch.setenv("LOOPS_HOME", str(home))
+        parent = tmp_path / "combined.vertex"
+        parent.write_text(
+            'name "combined"\ncombine {\n    vertex "absent-a"\n    vertex "absent-b"\n}\n'
+            'loops {\n  task {\n    fold {\n      items "collect" 100\n    }\n  }\n}\n',
+            encoding="utf-8",
+        )
+
+        with pytest.raises(SdkValueError) as excinfo:
+            read_facts(parent, limit=50, ordering=Arrival())
+        assert "dense per-log" in str(excinfo.value)
+
+        # And the default on that same empty aggregate still just reads empty.
+        assert read_facts(parent, limit=50).items == []
+        assert read_facts(parent, limit=50, ordering=ByKey("ts")).items == []
+
+
 class TestUnsupportedOrderingsRefuseRatherThanApproximate:
     def test_bykey_on_a_single_store_page_refuses(
         self, single_store_vertex: Path

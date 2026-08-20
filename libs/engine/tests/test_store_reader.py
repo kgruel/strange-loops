@@ -1024,3 +1024,52 @@ class TestOrdered:
         # Same membership under a declared key — only the order changes, which
         # pins that `key` reorders the arrival prefix rather than reselecting.
         assert [f["payload"]["n"] for f in by_key] == ["a", "b"]
+
+    def test_a_scalar_payload_fact_is_a_missing_key_non_member(self, tmp_path: Path):
+        """A non-mapping payload is excluded, not a crash — through a REAL store.
+
+        `Fact` permits any JSON payload, and SqliteStore persists one, so this
+        reaches `ordered` on any store an emitter can build. The family rule
+        (`atoms.resolve_key_field`) rules it a missing-K non-member; before the
+        fix the shared resolver called `.get()` on the string and took the whole
+        read down with an AttributeError.
+        """
+        from atoms import ByKey, Fact
+
+        from engine import SqliteStore
+
+        db = tmp_path / "scalar.db"
+        store = SqliteStore(
+            path=db, serialize=lambda f: f.to_dict(), deserialize=Fact.from_dict
+        )
+        store.append(Fact(kind="note", ts=1.0, observer="o", payload="raw"))
+        store.append(Fact(kind="note", ts=2.0, observer="o", payload={"n": 1}))
+        store.close()
+
+        with StoreReader(db) as reader:
+            # Guard: the scalar payload really is persisted and readable.
+            everything = reader.ordered(10, ByKey("ts"))
+            assert [f["payload"] for f in everything] == ["raw", {"n": 1}]
+
+            projection = reader.ordered(10, ByKey("n"))
+
+        assert [f["payload"] for f in projection] == [{"n": 1}]
+
+    def test_an_envelope_key_still_orders_a_scalar_payload_fact(self, tmp_path: Path):
+        """ts/id are envelope-resolved, so payload shape cannot exclude them."""
+        from atoms import ByKey, Fact
+
+        from engine import SqliteStore
+
+        db = tmp_path / "scalar_env.db"
+        store = SqliteStore(
+            path=db, serialize=lambda f: f.to_dict(), deserialize=Fact.from_dict
+        )
+        store.append(Fact(kind="note", ts=2.0, observer="o", payload="raw"))
+        store.append(Fact(kind="note", ts=1.0, observer="o", payload=[1, 2]))
+        store.close()
+
+        with StoreReader(db) as reader:
+            by_ts = reader.ordered(10, ByKey("ts"))
+
+        assert [f["payload"] for f in by_ts] == [[1, 2], "raw"]

@@ -343,3 +343,140 @@ class TestUntilTsStillCaps:
         assert p["_origin"] == ""
         assert p["seq"] == 0
         assert json.loads(json.dumps(p))  # plain JSON, no tuple leakage
+
+
+class TestNonMappingPayloads:
+    """A payload that is not a mapping has no fields — non-member, not a crash.
+
+    `Fact` permits any JSON payload and `SqliteStore` persists one, so these
+    build the member store through the REAL append path rather than seeding
+    rows: the point is that an ordinary emitter can produce the record that
+    used to take the combined read down with an AttributeError.
+    """
+
+    @staticmethod
+    def _member_store(db_path: Path, payloads: list) -> None:
+        from atoms import Fact
+
+        from engine import SqliteStore
+
+        store = SqliteStore(
+            path=db_path, serialize=lambda f: f.to_dict(), deserialize=Fact.from_dict
+        )
+        for i, payload in enumerate(payloads):
+            store.append(
+                Fact(kind="decision", ts=float(i + 1), observer="test", payload=payload)
+            )
+        store.close()
+
+    def test_a_scalar_payload_fact_is_excluded_from_a_payload_key_projection(
+        self, tmp_path, monkeypatch
+    ):
+        vpath, db = _single_member_vertex(tmp_path, monkeypatch)
+        self._member_store(db, ["raw", {"topic": "t", "n": 1}])
+
+        from engine.compiler import compile_vertex
+        from engine.declaration import load_declaration
+
+        ast = load_declaration(vpath)
+        _, payloads = _combined_read(
+            ast, vpath, compile_vertex(ast), return_payloads=True, ordering=ByKey("n")
+        )
+
+        assert [p["n"] for p in payloads["decision"]] == [1]
+
+    def test_an_envelope_key_still_orders_scalar_payload_rows(self):
+        """ts is read off the row, so payload shape cannot exclude the fact.
+
+        Pinned at the ordering layer rather than through the fold: the fold body
+        merges `_id`/`_ts` INTO the payload dict, so it cannot consume a
+        non-mapping payload at all. That limitation predates the declared
+        ordering and is not what this fix is about — what is pinned here is that
+        the ordering layer no longer raises on the way past.
+        """
+        from atoms import totalize
+
+        from engine.vertex_reader import _row_field, _row_id
+
+        rows = [
+            ("id-b", "decision", 2.0, "test", "", json.dumps("raw"), 2),
+            ("id-a", "decision", 1.0, "test", "", json.dumps(["x"]), 1),
+        ]
+        ordered = totalize(rows, ByKey("ts"), get_field=_row_field, get_id=_row_id)
+
+        assert [r[0] for r in ordered] == ["id-a", "id-b"]
+
+    def test_the_row_accessor_matches_the_mapping_one(self):
+        """One family rule, two spellings that must agree on every payload."""
+        from atoms import resolve_key_field
+
+        from engine.vertex_reader import _row_field
+
+        for payload in ("raw", 7, ["a"], None, {"n": 1}):
+            row = ("id-x", "decision", 1.0, "test", "", json.dumps(payload), 1)
+            record = {"id": "id-x", "ts": 1.0, "payload": payload}
+            assert _row_field(row, "n") == resolve_key_field(record, "n")
+
+
+class TestRefusalIsDeclarationShaped:
+    """Whether Arrival() fits an aggregate is the DECLARATION's property.
+
+    An aggregate whose members are all currently unresolvable still has no
+    cross-store arrival axis. If the refusal waited until the members resolved,
+    the same declaration would be accepted today and refused tomorrow purely
+    because a file appeared — an availability-dependent contract, which is not
+    a contract.
+    """
+
+    @staticmethod
+    def _aggregate_with_no_resolvable_members(tmp_path: Path, monkeypatch) -> Path:
+        home = tmp_path / "loops_home"
+        home.mkdir(parents=True)
+        combine = tmp_path / "combined.vertex"
+        combine.write_text(
+            'name "combined"\ncombine {\n    vertex "absent-a"\n    vertex "absent-b"\n}\n'
+            'loops {\n  decision { fold { items "collect" 10 } }\n}\n'
+        )
+        monkeypatch.setenv("LOOPS_HOME", str(home))
+        return combine
+
+    def test_the_fixture_really_is_an_aggregate_with_zero_members(
+        self, tmp_path, monkeypatch
+    ):
+        """Guard: the declaration is aggregate-shaped and resolves to nothing."""
+        from engine.declaration import load_declaration
+        from engine.vertex_reader import _resolve_stores
+
+        vpath = self._aggregate_with_no_resolvable_members(tmp_path, monkeypatch)
+        ast = load_declaration(vpath)
+
+        assert ast.combine is not None
+        assert _resolve_stores(ast, vpath) == []
+
+    def test_declared_arrival_refuses_even_with_zero_resolvable_members(
+        self, tmp_path, monkeypatch
+    ):
+        vpath = self._aggregate_with_no_resolvable_members(tmp_path, monkeypatch)
+
+        with pytest.raises(OrderingError) as excinfo:
+            _fold_ids(vpath, ordering=Arrival())
+
+        message = str(excinfo.value)
+        assert "dense per-log" in message
+        assert "ByKey" in message
+
+    def test_the_default_on_an_empty_aggregate_is_still_empty_state(
+        self, tmp_path, monkeypatch
+    ):
+        """No declared ordering resolves to ByKey('ts') and returns, unchanged."""
+        vpath = self._aggregate_with_no_resolvable_members(tmp_path, monkeypatch)
+
+        assert _fold_ids(vpath) == []
+
+    def test_a_declared_bykey_on_an_empty_aggregate_is_still_empty_state(
+        self, tmp_path, monkeypatch
+    ):
+        """Only the REFUSED ordering refuses; a valid one still returns empty."""
+        vpath = self._aggregate_with_no_resolvable_members(tmp_path, monkeypatch)
+
+        assert _fold_ids(vpath, ordering=ByKey("n")) == []

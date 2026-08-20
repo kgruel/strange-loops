@@ -22,7 +22,15 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from atoms import ENVELOPE_KEYS, Arrival, ByKey, Ordering, OrderingError, totalize
+from atoms import (
+    ENVELOPE_KEYS,
+    Arrival,
+    ByKey,
+    Ordering,
+    OrderingError,
+    resolve_payload_key,
+    totalize,
+)
 
 from .declaration import (
     decl_lineage_and_head_on,
@@ -370,11 +378,16 @@ def _row_field(row: tuple, field: str) -> Any:
     keys are read straight off the tuple, anything else is a flat payload
     field and costs a JSON parse. The default orderings (``Arrival()``,
     ``ByKey('ts')``) are envelope-only and never reach the parse.
+
+    The payload arm defers to :func:`atoms.resolve_payload_key` rather than
+    calling ``.get()`` itself, so a non-mapping payload is the same missing-K
+    non-member here as on the mapping-shaped surface — one definition, not two
+    spellings that can disagree.
     """
     index = _ROW_ENVELOPE_COLUMNS.get(field)
     if index is not None:
         return row[index]
-    return json.loads(row[5]).get(field)
+    return resolve_payload_key(json.loads(row[5]), field)
 
 
 def _row_id(row: tuple) -> str:
@@ -465,13 +478,21 @@ def _combined_read(
     marker) — only the facts axis is cut by the cursor.
     """
     store_paths = _resolve_stores(ast, vertex_path)
+
+    # Resolve BEFORE the empty-members return: whether a declared ordering fits
+    # this read is a property of the DECLARATION, not of how many members
+    # happen to resolve right now. An aggregate whose members are all currently
+    # missing still has no cross-store arrival axis, so Arrival() is refused
+    # there exactly as it is once the members come back — otherwise the same
+    # declaration would start refusing only after enough files appeared, and
+    # the refusal would be availability-dependent.
+    ordering = resolve_ordering(ordering, single_store=len(store_paths) == 1)
+
     if not store_paths:
         empty_raw = {kind: spec.initial_state() for kind, spec in specs.items()}
         if return_payloads:
             return empty_raw, {k: [] for k in specs}
         return empty_raw
-
-    ordering = resolve_ordering(ordering, single_store=len(store_paths) == 1)
 
     conn, aliases = _open_combined(store_paths)
     try:

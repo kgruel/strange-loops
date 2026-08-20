@@ -104,11 +104,13 @@ class CeremonyError(Exception):
 
 
 class IntentCorrupt(CeremonyError):
-    """An intent file exists but does not decode to a v1 intent record.
+    """An intent file exists but does not decode to a CURRENT intent record.
 
     Recovery refuses rather than guessing: a corrupt intent is evidence of a
     torn write or foreign tampering, and the safe answer is a human look, not
-    a silent delete.
+    a silent delete. A superseded version lands here for the same reason —
+    an older record may decode perfectly and still mean something else (see
+    ``_INTENT_VERSION``), so it is refused, not reinterpreted.
     """
 
 

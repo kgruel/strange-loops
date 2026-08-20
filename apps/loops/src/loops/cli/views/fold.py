@@ -1512,9 +1512,9 @@ def _run_diff(
     # Interval honesty (M8/A13): a structural diff can look "clean" while
     # something still happened between the two positions — a late (backdated)
     # arrival, or a declaration change — that a payload-level diff would never
-    # surface. Both endpoints already resolved against the SAME store (a
-    # precondition diff_interval_report also documents), so this is best-effort
-    # supplementary info: a failure here must not sink the diff itself.
+    # surface. diff_interval_report guards both positions structurally
+    # (verify_position_for_store, Law 4); this is best-effort supplementary
+    # info: a failure here must not sink the diff itself.
     interval: dict | None = None
     try:
         from engine import diff_interval_report

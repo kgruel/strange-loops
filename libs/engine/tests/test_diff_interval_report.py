@@ -55,13 +55,20 @@ class TestNoInterval:
         assert report == {"late_arrivals": [], "declaration_changed": False}
 
     def test_invalid_store_raises(self, tmp_path):
-        """Kills mutant replacing invalid store message with None in diff_interval_report at witness.py:604."""
+        """Kills mutant replacing invalid store message with None in diff_interval_report at witness.py:604.
+
+        The store vanishes AFTER the positions resolved: the Law-4 guard
+        passes (same resolved path), so the unusable-store branch is the one
+        that answers. A position aimed at a DIFFERENT bad path now fails
+        structurally first — see TestLaw4Guard.
+        """
         store = tmp_path / "t.db"
         _fresh_store(store)
         _append(store, "decision", 100, topic="a")
         pos = resolve_witness_position(store, "head")
+        store.unlink()
         with pytest.raises(WitnessResolutionError, match="is not a usable store — cannot compute a diff interval report"):
-            diff_interval_report(tmp_path / "nope.db", pos, pos)
+            diff_interval_report(store, pos, pos)
 
 
 class TestLateArrivals:
@@ -160,3 +167,108 @@ class TestDeclarationChanged:
 
         report = diff_interval_report(store, pos1, pos2)
         assert report["declaration_changed"] is False
+
+
+class TestLaw4Guard:
+    """Cross-store positions fail structurally (CX-BR-03, Law 4).
+
+    diff_interval_report applies verify_position_for_store to BOTH
+    positions before any rowid is compared — the same guard every ``at=``
+    read selector uses. An unadopted or lineage-foreign position refuses;
+    a same-lineage position from another store RE-RESOLVES to this store's
+    rowid, which is the behavior upgrade: a cross-replica diff is answered
+    correctly instead of silently indexing an unrelated prefix.
+    """
+
+    def test_unadopted_cross_store_position_refuses(self, tmp_path):
+        from engine.witness import WitnessLineageMismatch
+
+        sa = tmp_path / "a.db"
+        _fresh_store(sa)
+        _append(sa, "decision", 100, topic="a")
+        pos_a = resolve_witness_position(sa, "head")
+
+        sb = tmp_path / "b.db"
+        _fresh_store(sb)
+        _append(sb, "decision", 100, topic="b")
+        pos_b = resolve_witness_position(sb, "head")
+
+        with pytest.raises(WitnessLineageMismatch, match="UNADOPTED handle"):
+            diff_interval_report(sb, pos_a, pos_b)
+        # Symmetric: the second position is guarded too.
+        with pytest.raises(WitnessLineageMismatch, match="UNADOPTED handle"):
+            diff_interval_report(sa, pos_a, pos_b)
+
+    def test_foreign_lineage_position_refuses(self, tmp_path):
+        from engine.witness import WitnessLineageMismatch
+        from lang import parse_vertex_file
+        from lang.document import genesis_payload
+
+        def _signer(observer: str, digest: str) -> str:
+            return f"sig:{observer}:{digest[:8]}"
+
+        def _adopt(store: Path) -> None:
+            vpath = store.with_suffix(".vertex")
+            vpath.write_text(
+                f'name "t"\nstore "{store}"\nloops {{\n'
+                '  decision { fold { items "by" "topic" } }\n}\n'
+                'observers { kyle { key "AAAA" } }\n'
+            )
+            docs = genesis_payload(parse_vertex_file(vpath))["documents"]
+            s = SqliteStore(
+                path=store, serialize=lambda f: f.to_dict(),
+                deserialize=Fact.from_dict,
+            )
+            s.absorb_genesis(docs, observer="kyle", fact_signer=_signer)
+            s.close()
+
+        sa = tmp_path / "a.db"
+        _adopt(sa)
+        _append(sa, "decision", 100, topic="a")
+        pos_a = resolve_witness_position(sa, "head")
+        assert pos_a.lineage is not None
+
+        sb = tmp_path / "b.db"
+        _adopt(sb)  # a different genesis -> different lineage
+        _append(sb, "decision", 100, topic="b")
+        pos_b = resolve_witness_position(sb, "head")
+
+        with pytest.raises(WitnessLineageMismatch, match="does not match this store's lineage"):
+            diff_interval_report(sb, pos_a, pos_b)
+
+    def test_same_lineage_copy_re_resolves_instead_of_refusing(self, tmp_path):
+        """A byte-copied store shares the lineage; its positions re-resolve
+        by fact id against the target, so the diff answers correctly."""
+        import shutil
+
+        from lang import parse_vertex_file
+        from lang.document import genesis_payload
+
+        def _signer(observer: str, digest: str) -> str:
+            return f"sig:{observer}:{digest[:8]}"
+
+        sa = tmp_path / "a.db"
+        vpath = tmp_path / "a.vertex"
+        vpath.write_text(
+            f'name "t"\nstore "{sa}"\nloops {{\n'
+            '  decision { fold { items "by" "topic" } }\n}\n'
+            'observers { kyle { key "AAAA" } }\n'
+        )
+        docs = genesis_payload(parse_vertex_file(vpath))["documents"]
+        s = SqliteStore(
+            path=sa, serialize=lambda f: f.to_dict(), deserialize=Fact.from_dict
+        )
+        s.absorb_genesis(docs, observer="kyle", fact_signer=_signer)
+        s.close()
+        _append(sa, "decision", 100, topic="a")
+        pos_early = resolve_witness_position(sa, "head")
+        assert pos_early.lineage is not None
+
+        sb = tmp_path / "b.db"
+        shutil.copy(sa, sb)  # legal byte copy, same lineage
+        _append(sb, "decision", 200, topic="b")
+        pos_late = resolve_witness_position(sb, "head")
+
+        report = diff_interval_report(sb, pos_early, pos_late)
+        assert report["declaration_changed"] is False
+        assert report["late_arrivals"] == []

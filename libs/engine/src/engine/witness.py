@@ -602,10 +602,15 @@ def diff_interval_report(
 
     Symmetric by rowid (``lo``/``hi`` = ``min``/``max(pos1.rowid,
     pos2.rowid)``): ``--diff B..A`` (the later position named first) reports
-    identically to ``--diff A..B``. Both positions MUST be resolved against
-    the SAME store — the caller (``cli.views.fold._run_diff``) already
-    requires this, since both diff endpoints resolve against one vertex.
+    identically to ``--diff A..B``. Both positions pass through
+    :func:`verify_position_for_store` before their rowids are compared —
+    the same guard every ``at=`` read selector applies — so a foreign
+    position fails structurally (:class:`WitnessLineageMismatch`, Law 4)
+    instead of silently indexing an unrelated prefix, and a same-lineage
+    position from another store re-resolves to THIS store's rowid.
     """
+    pos1 = verify_position_for_store(pos1, store_path, timeout=timeout)
+    pos2 = verify_position_for_store(pos2, store_path, timeout=timeout)
     conn = _open_readonly(store_path, timeout=timeout)
     if conn is None:
         raise WitnessResolutionError(

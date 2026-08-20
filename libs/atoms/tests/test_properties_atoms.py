@@ -26,9 +26,12 @@ from atoms import (
     Window,
 )
 from tests.strategies import (
+    COMMON_KINDS,
+    RESERVED_KIND_PREFIX,
     fact_lists,
     facts,
     fold_ops,
+    is_appendable_kind,
     json_primitives,
     kinds,
     observers,
@@ -258,3 +261,43 @@ class TestFoldKeySensitivityProperties:
         assert state["entities"]["0"]["_n"] == 1
         assert state["entities"]["0.0"]["_n"] == 1
         assert state["entities"]["False"]["_n"] == 1
+
+
+# =============================================================================
+# 8. Strategy scope
+# =============================================================================
+
+
+class TestKindStrategyScope:
+    """`kinds()` generates what a caller may APPEND — not ceremony kinds.
+
+    The reserved `_decl.` prefix names records a store acquires through a
+    ceremony (genesis, adopt). Appending one bare builds a state no ceremony
+    produces — a `_decl.genesis` with no `own_lineage` marker is an unadopted
+    lineage, which readers refuse by design — so a consumer property test fed
+    one fails on a shape the substrate never emits.
+    """
+
+    def test_common_kinds_carry_no_reserved_prefix(self) -> None:
+        assert [k for k in COMMON_KINDS if k.startswith(RESERVED_KIND_PREFIX)] == []
+
+    def test_the_predicate_admits_fact_kinds_and_refuses_ceremony_kinds(self) -> None:
+        """The rule itself, held deterministically.
+
+        The generated counter-example is NOT reproducible on demand — whether
+        hypothesis offers '_decl.genesis' to the text arm depends on which
+        modules it harvested constants from, so the @given pin below can pass
+        while the rule is broken. This one cannot.
+        """
+        assert is_appendable_kind("decision")
+        assert is_appendable_kind("_declaration")  # prefix, not substring
+        assert not is_appendable_kind("_decl.genesis")
+        assert not is_appendable_kind("_decl.edit")
+
+    @settings(max_examples=500)
+    @given(kind=kinds())
+    def test_generated_kinds_are_never_reserved(self, kind: str) -> None:
+        # The free-text arm needs this as much as the sampled one: hypothesis
+        # seeds text generation from constants harvested out of the source
+        # under test, and '_decl.genesis' is one of them.
+        assert not kind.startswith(RESERVED_KIND_PREFIX)

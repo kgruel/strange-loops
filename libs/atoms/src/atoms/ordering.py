@@ -195,6 +195,10 @@ def totalize(
     order deterministically against every other float, so refusing them would
     overreach — the claim is totalization, not finiteness.
 
+    Data that earns more than one refusal refuses by CATEGORY, never by which
+    record happened to come first: mixed type wins over a NaN key value. Each
+    check runs as its own complete pass for exactly that reason.
+
     A record that CARRIES ``K`` but has no id raises the accessor's own error
     (``KeyError``/``AttributeError``), unwrapped and by ruling: an id is the
     substrate's, not the declaration's, so its absence is a broken record
@@ -227,7 +231,10 @@ def totalize(
         case Arrival():
             return list(records)
         case ByKey(field=field):
-            keyed: list[tuple[Any, Any, R]] = []
+            # Each refusal gets its OWN complete pass, so which category fires
+            # is a property of the data and not of the input permutation:
+            # mixed type wins over a NaN key, which wins over a NaN id.
+            members: list[tuple[Any, R]] = []
             key_type: type | None = None
             for record in records:
                 value = get_field(record, field)
@@ -241,6 +248,9 @@ def totalize(
                         f"{key_type.__name__} and {type(value).__name__} "
                         f"(offending value {value!r})"
                     )
+                members.append((value, record))
+
+            for value, _record in members:
                 if isinstance(value, float) and math.isnan(value):
                     raise OrderingError(
                         f"NaN key value under declared key {field!r}: {value!r} — "
@@ -249,7 +259,10 @@ def totalize(
                         f"and is not a total order. Infinities are fine; NaN is "
                         f"not a position."
                     )
-                keyed.append((value, get_id(record), record))
+
+            keyed: list[tuple[Any, Any, R]] = [
+                (value, get_id(record), record) for value, record in members
+            ]
             try:
                 keyed.sort(key=lambda entry: (entry[0], entry[1]))
             except TypeError as exc:

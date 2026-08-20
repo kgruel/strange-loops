@@ -210,6 +210,19 @@ class TestNonFiniteKeys:
         records = [rec("a", k="nan"), rec("b", k="abc")]
         assert [r["id"] for r in totalize(records, ByKey("k"))] == ["b", "a"]
 
+    def test_mixed_type_wins_over_nan_under_either_input_order(self):
+        """The refusal CATEGORY is a property of the data, not of the order.
+
+        Both permutations carry the same two key values — a NaN float and an
+        int. When the NaN check rode along in the type-scan pass, whichever
+        value arrived first decided which refusal the caller saw.
+        """
+        values = {"n": float("nan"), "i": 1}
+        for order in (("n", "i"), ("i", "n")):
+            records = [rec(i, k=values[i]) for i in order]
+            with pytest.raises(OrderingError, match="mixed key types"):
+                totalize(records, ByKey("k"))
+
     def test_a_record_missing_the_key_is_unaffected_by_the_nan_check(self):
         records = [rec("a", k=1.0), rec("b"), rec("c", k=0.0)]
         assert [r["id"] for r in totalize(records, ByKey("k"))] == ["c", "a"]

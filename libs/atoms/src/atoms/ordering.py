@@ -27,8 +27,9 @@ class OrderingError(Exception):
     """Raised when records cannot be ordered under the declared Ordering.
 
     A declaration error against the data — mixed key types under one declared
-    key, a ``NaN`` key value, or sort-key elements that do not compare — not
-    something a comparator may paper over with a coercion.
+    key, a ``NaN`` on either side of the ``(K, id)`` sort key, or sort-key
+    elements that do not compare — not something a comparator may paper over
+    with a coercion.
 
     The sort key is ``(K, id)``, so the non-comparable element may be EITHER
     half: a raise here does not by itself blame the declared key. The runtime
@@ -195,6 +196,16 @@ def totalize(
     order deterministically against every other float, so refusing them would
     overreach — the claim is totalization, not finiteness.
 
+    A NaN TIE-BREAK ID is refused for the same reason and attributed to the id
+    side. The default ``get_id`` returns record ids, which are strings, so only
+    a custom ``get_id`` can produce one; the check is float-typed only, exactly
+    as on the key side, so a string ``"nan"`` id is an ordinary id.
+
+    Data that earns more than one refusal refuses by CATEGORY, never by which
+    record happened to come first: mixed type wins over a NaN key value, which
+    wins over a NaN id. Each check runs as its own complete pass for exactly
+    that reason.
+
     A record that CARRIES ``K`` but has no id raises the accessor's own error
     (``KeyError``/``AttributeError``), unwrapped and by ruling: an id is the
     substrate's, not the declaration's, so its absence is a broken record
@@ -219,15 +230,19 @@ def totalize(
         A new list, ordered. For ``ByKey``, records missing the key are absent.
 
     Raises:
-        OrderingError: Mixed key types under the declared key, a ``NaN`` key
-            value, sort-key elements — key value or tie-break id — that do not
-            compare, or an unknown Ordering variant.
+        OrderingError: Mixed key types under the declared key, a ``NaN`` on
+            either side of the sort key — key value or tie-break id —
+            sort-key elements that do not compare, or an unknown Ordering
+            variant.
     """
     match ordering:
         case Arrival():
             return list(records)
         case ByKey(field=field):
-            keyed: list[tuple[Any, Any, R]] = []
+            # Each refusal gets its OWN complete pass, so which category fires
+            # is a property of the data and not of the input permutation:
+            # mixed type wins over a NaN key, which wins over a NaN id.
+            members: list[tuple[Any, R]] = []
             key_type: type | None = None
             for record in records:
                 value = get_field(record, field)
@@ -241,6 +256,9 @@ def totalize(
                         f"{key_type.__name__} and {type(value).__name__} "
                         f"(offending value {value!r})"
                     )
+                members.append((value, record))
+
+            for value, _record in members:
                 if isinstance(value, float) and math.isnan(value):
                     raise OrderingError(
                         f"NaN key value under declared key {field!r}: {value!r} — "
@@ -249,7 +267,20 @@ def totalize(
                         f"and is not a total order. Infinities are fine; NaN is "
                         f"not a position."
                     )
-                keyed.append((value, get_id(record), record))
+
+            keyed: list[tuple[Any, Any, R]] = [
+                (value, get_id(record), record) for value, record in members
+            ]
+
+            for _value, record_id, _record in keyed:
+                if isinstance(record_id, float) and math.isnan(record_id):
+                    raise OrderingError(
+                        f"NaN tie-break id under declared key {field!r}: "
+                        f"{record_id!r} — the offending element is the ID side "
+                        f"of the (K, id) sort key, not the key. NaN compares "
+                        f"false against everything including itself, so records "
+                        f"sharing a key value would order by input permutation."
+                    )
             try:
                 keyed.sort(key=lambda entry: (entry[0], entry[1]))
             except TypeError as exc:

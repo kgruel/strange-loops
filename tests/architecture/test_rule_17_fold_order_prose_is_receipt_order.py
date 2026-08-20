@@ -54,13 +54,8 @@ _WINDOW = 2
 # only legal edits to this list are deletions.
 # ---------------------------------------------------------------------------
 _ALLOWLIST: set[tuple[str, str]] = {
-    # The single-store branch folds on rowid; the multi-store branch has no
-    # receipt axis at all (rowid is per-store) and says so, naming the fallback
-    # as a lens and the situation as interim. This is ruling R2 in code.
-    (
-        "libs/engine/src/engine/vertex_reader.py",
-        "(ts, id) READ LENS ordering — same rule as facts_in_range",
-    ),
+    # _combined_facts' ORDER BY: a combined view has no receipt axis (rowid is
+    # per-store), so this genuinely IS the lens, and the comment says so.
     (
         "libs/engine/src/engine/vertex_reader.py",
         "ORDER BY ts, id here is the explicit (ts, id) READ LENS ordering",
@@ -77,12 +72,6 @@ _ALLOWLIST: set[tuple[str, str]] = {
     (
         "libs/engine/src/engine/sqlite_store.py",
         "Event order ``(ts, id)`` is a read lens layered on top, never the",
-    ),
-    # read_facts' `order` parameter: an aggregate vertex genuinely pages on the
-    # lens (R2), and the docstring scopes the claim to that branch.
-    (
-        "libs/sdk/src/sdk/read.py",
-        "its pages come back on the ``(ts, id)`` read lens instead",
     ),
     # The witness interval diagnostic reports arrivals that are out of
     # EVENT-TIME order, and explains that the consequence is a lens/fold

@@ -350,11 +350,12 @@ def test_the_token_agrees_with_a_from_scratch_walk_of_the_log(
 
     store = open_store(tmp_path, signer)
     try:
-        agree(store)
+        opening_head = agree(store)
         # A plain fact moves the log's head without moving the DECLARATION
         # head — the walk and the store must agree about that too.
         store.append(Fact.of("note", "kyle", message="between"))
-        assert agree(store) == store.declaration_head()
+        assert agree(store) == opening_head
+        assert ArrivalLog(log.path).head()["ord"] > opening_head[0]
         # A one-row ceremony (a fact record).
         store.absorb_edit(
             [

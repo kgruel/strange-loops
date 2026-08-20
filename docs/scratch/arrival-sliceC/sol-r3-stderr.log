@@ -1,0 +1,1558 @@
+Reading prompt from stdin...
+OpenAI Codex v0.147.0
+--------
+workdir: /Users/kaygee/Code/loops
+model: gpt-5.6-sol
+provider: openai
+approval: never
+sandbox: workspace-write [workdir, /tmp, $TMPDIR]
+reasoning effort: medium
+reasoning summaries: none
+session id: 01a0206c-69d3-7d42-994e-a7cad6c49413
+--------
+user
+# Cut C — sol cross-family review r3 (final verification, narrow scope)
+
+Your r1 and r2 rounds and their briefs are at docs/scratch/arrival-sliceC/sol-*-r{1,2}*.{md,log}; every ruling there stands. r2's three findings were remediated. This round verifies EXACTLY those three fixes — nothing else has changed except this brief's own commit (verify: `git diff d9a8ed7d..HEAD --stat` shows only libs/atoms/ordering.py, libs/atoms/tests/test_ordering.py, and docs/scratch files). Deliver ALL sections in one response; do not stop to ask questions.
+
+Fix commits to verify (per-commit PASS/FAIL with evidence; re-run your own r2 probes and attack):
+- 723dd535 [C-SOL-05] — refusal categories are now separate complete passes (mixed type > NaN key > NaN id, precedence by pass order). ATTACK: your exact ('n','i')/('i','n') pair must both give the mixed-type category; probe additional shapes (NaN present in both a mixed-type AND same-type region; the offending-value identity may differ by order — only the CATEGORY is pinned).
+- 3ad2933e (+7f71f1e6 rewrap) [C-SOL-07] — float NaN tie-break id refuses, attributed to the ID side; string ids unaffected; default get_id can't produce floats (documented). ATTACK: your equal-K/NaN-id permutations; NaN id present but K distinct on every record (no tie needed — does the check still fire, and should it? the fix refuses on presence, which is the deterministic reading); mixed str/float ids with a NaN.
+- 0b90c9ab [C-SOL-06] — the docstring ratchet was REMOVED by arbiter ruling (construction-over-detection: a prose ratchet that fell to evasions in one round is not improved, it is deleted; the two behavioral runtime-message pins remain). Verify the pins exist and pass; confirm removal left no dead allowlist/helpers. Do not re-report the removal itself — it is the ruling.
+
+Verdict: per-fix PASS/FAIL with probe evidence; any NEW findings (C-SOL-08+); overall CONVERGED / NOT_CONVERGED. Proof-of-work bar as before.
+
+codex
+I’ll keep this to the three remediations, first verify the exact diff boundary and prior r2 probes, then rerun and extend only those attacks.
+exec
+/bin/zsh -lc 'git diff d9a8ed7d..HEAD --stat && rg -n "C-SOL-0[567]|mixed|NaN|docstring|ratchet|allowlist" docs/scratch/arrival-sliceC/sol-*-r{1,2}*.{md,log}' in /Users/kaygee/Code/loops
+ exited 1 in 0ms:
+ docs/scratch/arrival-sliceC/sol-brief-r3.md | 10 +++++
+ libs/atoms/src/atoms/ordering.py            | 45 ++++++++++++++++---
+ libs/atoms/tests/test_ordering.py           | 70 +++++++++++++++--------------
+ 3 files changed, 84 insertions(+), 41 deletions(-)
+zsh:1: no matches found: docs/scratch/arrival-sliceC/sol-*-r1*.log
+
+exec
+/bin/zsh -lc "rg --files docs/scratch/arrival-sliceC | sort | rg 'sol-.*-r[12].*\\.(md|log)"'$'"' && git log --oneline --decorate -12 && git status --short" in /Users/kaygee/Code/loops
+ succeeded in 0ms:
+docs/scratch/arrival-sliceC/sol-brief-r1.md
+docs/scratch/arrival-sliceC/sol-brief-r2.md
+dc75d377 (HEAD -> feat/arrival-libs) docs(scratch): cut C sol brief r3 — narrow fix-verification round
+b78b9fd8 Merge slice/c-sol-r2-remediation: sol r2 findings 05/07 fixed, 06 ratchet removed
+0b90c9ab test(atoms): remove the docstring-attribution ratchet (C-SOL-06)
+7f71f1e6 style(atoms): rewrap the OrderingError contract line (C-SOL-07 follow-on)
+3ad2933e fix(atoms): refuse a NaN tie-break id, attributed to the ID side (C-SOL-07)
+723dd535 fix(atoms): make the ByKey refusal category order-independent (C-SOL-05)
+d9a8ed7d docs(scratch): cut C sol r2 — NOT_CONVERGED: 01/02 PASS, 03/04 edge defects (C-SOL-05/06/07)
+d6a9f965 docs(scratch): cut C sol brief r2 — fix verification round
+91d0d7be Merge slice/c-sol-r1-remediation: 4 sol findings fixed
+a33560a8 spec(conformance): lens vector for non-mapping payload non-membership
+a1c43266 docs(atoms): OrderingError's class contract stops blaming the key alone
+1442a41d fix(atoms): totalize refuses NaN key values loudly
+
+exec
+/bin/zsh -lc "sed -n '1,260p' docs/scratch/arrival-sliceC/sol-brief-r1.md && sed -n '1,320p' docs/scratch/arrival-sliceC/sol-brief-r2.md && sed -n '1,220p' docs/scratch/arrival-sliceC/sol-brief-r3.md" in /Users/kaygee/Code/loops
+ succeeded in 0ms:
+# Cut C — sol cross-family review r1 (belt-and-braces after convergence)
+
+You are an adversarial cross-family reviewer over a CONVERGED cut. Everything below has already passed slice gates, three scoped gemini reviews, a simplify pass, and three gemini-pro readiness rounds — your value is exactly the blind spots that whole family may share. Deliver ALL sections in one response; do not stop to ask questions.
+
+## 1. Anchor
+Repo: this checkout (loops monorepo), branch feat/arrival-libs. The cut under review: `git diff a49997cd..HEAD` — 6 implementation slices (C0-C5) + gate-ordered fixes + a simplify pass + 3 readiness remediation commits; docs/scratch commits are receipts, not code. Suites: `uv run --package <pkg> pytest libs/<pkg>/tests -q` (atoms, engine, sdk, store), root `uv run pytest tests -q`. All green at the last code commit; the current tip differs from it only by docs/scratch receipt files.
+
+## 2. Design contract (ratified; full text docs/scratch/arrival-sliceC/design-proposal.md — read it first)
+- Ordering is DECLARED, never inferred. atoms `Arrival() | ByKey(field)` + ONE totalization; ByKey sort key (K(record), record.id), id ascending — id is TIE-BREAK ONLY, NEVER semantic time (NON-NEGOTIABLE).
+- Key family rule (added by readiness F1 remediation, now normative): `ts`/`id` resolve from the record ENVELOPE (payload never shadows), every other key from the flat payload — ONE definition, atoms.resolve_key_field, consumed by StoreReader.ordered, _combined_read, generate_lens, and the conformance runner.
+- Missing-K = non-membership; type-mixed K refuses loudly (strict type identity, no coercion); Arrival() never synthesizes order.
+- 'arrival' is single-store-only; aggregate reads default ByKey('ts'); aggregate + Arrival() refuses loudly.
+- CAS token = arrival head (record_ordinal, fact_id); batch rows share the record ordinal; _INTENT_VERSION bumped 1→2; pre-bump intents refuse via IntentCorrupt (refuse, never guess).
+- The whole bridge module store/jsonl.py is dissolved with residue swept; JsonlStore/SqliteStore engine classes frozen byte-for-byte except two licensed refusal-string rewords (jsonl_store.py ~:689/:755).
+- Existing ts lens vector files are NORMATIVE and byte-frozen (loops-go reads them); regeneration must be byte-identical.
+- KEEP fences: Spec.replay_from, VertexHandle checkpoint machinery (handle.py:752-1340), benchmarks/characterize.py, ArrivalStore write path except the CAS coordinate, legacy store families.
+
+## 3. Do-not-re-report (settled rulings and receipted deferrals — re-litigation is noise)
+(1) strict type-identity refusal incl. int/float and bool≠int (ts column REAL → column path all-float); (2) None-as-absent; (3) record-with-K-but-no-id raises the raw accessor error; (4) G3 apps-diff-empty gate deleted (ratified: apps NOT diff-empty this cut); (5) `sl store export` refuses with pointer, exit 2 even under --json; (6) ordered() prefix counts the VISIBLE stream; (7) jsonl_store.py:85 stale docstring frozen; (8) one-member-aggregate axis divergence pre-existing + refusal-pinned, wording deliberately kept; (9) is_suffix_stable lives in atoms, handle.py untouched; (10) sdk paged reads refuse unsupported orderings; read_summary/read_fact_by_id/read_ticks/read_timeline out of the ordering surface; (11) fact_key_stats/key_prefixes/resolve_entity_id are FOLD-KEY surfaces (contract payload[key]) — not ordering-family consumers (F2, refuted and audited); (12) kinds() strategy excludes '_decl.'; the filter-deletion durability gap (caught only by hypothesis cache) is accepted and receipted; (13) receipted deferrals: head-walk reconcile-mark race test, ceremony world-fixture arrival arm, lang non-hermetic .vertex collection, perf benchmarks pre-ship, _create self-enforce awaiting a ruling; (14) single_store param two-meanings receipted as design observation.
+
+## 4. Unverified-fixes enumeration (least-reviewed commits — re-verify empirically where possible)
+Every commit below was verified by a gemini gate or readiness round, but never by a non-gemini, non-Claude reviewer:
+- c314a3e7 — test pinning ordered()'s prefix rides rowid not ts (gate-ordered, arbiter re-ran the mutation).
+- c04af0de / 8d44561c / 0ebcead1 / ac335d66 / c7c898ee — simplify: Arrival-gated rowid sort in _fetch_combined_rows; FrozenInstanceError assertion; totalize docstring pins; OrderingError attribution reword + Raises sweep.
+- fac793e1 / 13ef260c / 83ae19cc — readiness remediation: resolve_key_field family rule (3 restatements → 1); _combined_read _row_field derives envelope columns from atoms.ENVELOPE_KEYS; kinds() reserved-prefix filter + is_appendable_kind.
+
+## 5. Verdict format
+Per unverified-fix commit: PASS/FAIL with evidence. Findings: id, severity (blocker/major/minor/nit), file:line, claim, and evidence (probes you ran, with output). Close with CONVERGED / NOT_CONVERGED overall. A "none found" per area backed by the file:line ranges you actually read and at least one probe you actually ran is a valid, valuable result; bare approvals are not.
+# Cut C — sol cross-family review r2 (fix verification round)
+
+You reviewed this cut in r1 (your findings and the brief: docs/scratch/arrival-sliceC/sol-r1-stdout.log, sol-brief-r1.md — all of r1's anchor, contract, and do-not-re-report rulings still stand). Your four findings were remediated. Fixes deserve MORE adversarial attention than first-cut code: this round verifies them. Deliver ALL sections in one response; do not stop to ask questions.
+
+## Anchor
+Branch feat/arrival-libs, this checkout. The remediation diff: `git diff 22159e4c..HEAD` (5 commits + merge). Suites as in r1; all green at HEAD (atoms 515, engine 1807+1skip, sdk 324, store 152, root 110).
+
+## Fix commits to verify (per-commit PASS/FAIL with evidence — re-run your own r1 probes and attack the fixes)
+- 15d76fc0 [C-SOL-01] — non-mapping payload = missing-K non-member, via new atoms.resolve_payload_key (one definition; resolve_key_field delegates, engine _row_field consumes it). New conformance vector lens-by-key-non-mapping-payload-excluded (a33560a8); six pre-existing vectors byte-identical. ATTACK: every payload shape (str/int/float/bool/list/None/nested), every surface (resolve_key_field, ordered, _combined_read, conformance runner); hunt any remaining spelling of payload key access that bypasses resolve_payload_key.
+- bd7c6abc [C-SOL-02] — resolve_ordering hoisted above the empty-members early return; refusal now declaration-shaped. The one-member rule (len==1 → single-store axis) was deliberately KEPT (ratified). sdk read_facts already declaration-shaped (no hole), now pinned. ATTACK: zero-member aggregate via combine AND via discover; default and ByKey on empty aggregates must stay byte-identical to pre-fix behavior; try to construct availability-dependence in either direction (incl. a single-store vertex whose store file is missing).
+- 1442a41d [C-SOL-03] — totalize refuses NaN (after the type check, so mixed-type still wins); infinities explicitly allowed and pinned both directions. ATTACK: NaN inside mixed types; NaN via your r1 permutations; -0.0/underflow edge cases; the float-typed-only claim (string "nan").
+- a1c43266 [C-SOL-04] — OrderingError class contract attribution + a shrink-only docstring ratchet (inspect.getdoc walk, allowlist of one). ATTACK: construct an evasion the ratchet misses only if it is cheap; otherwise verify the two runtime-message pins.
+
+## Do-not-re-report additions since r1
+(15) the fold-body TypeError on an INCLUDED non-mapping payload (vertex_reader.py:538) is pre-existing, independent of ordering, receipted deferred to the SDK/migration wave — the remediation deliberately pinned at the ordering layer only.
+
+## Verdict format
+Per-fix PASS/FAIL with evidence; any NEW findings (id C-SOL-05+, severity, file:line, claim, probe output); overall CONVERGED / NOT_CONVERGED. Proof-of-work as in r1: ranges read + probes run with pasted output; bare approvals are not reviews.
+# Cut C — sol cross-family review r3 (final verification, narrow scope)
+
+Your r1 and r2 rounds and their briefs are at docs/scratch/arrival-sliceC/sol-*-r{1,2}*.{md,log}; every ruling there stands. r2's three findings were remediated. This round verifies EXACTLY those three fixes — nothing else has changed except this brief's own commit (verify: `git diff d9a8ed7d..HEAD --stat` shows only libs/atoms/ordering.py, libs/atoms/tests/test_ordering.py, and docs/scratch files). Deliver ALL sections in one response; do not stop to ask questions.
+
+Fix commits to verify (per-commit PASS/FAIL with evidence; re-run your own r2 probes and attack):
+- 723dd535 [C-SOL-05] — refusal categories are now separate complete passes (mixed type > NaN key > NaN id, precedence by pass order). ATTACK: your exact ('n','i')/('i','n') pair must both give the mixed-type category; probe additional shapes (NaN present in both a mixed-type AND same-type region; the offending-value identity may differ by order — only the CATEGORY is pinned).
+- 3ad2933e (+7f71f1e6 rewrap) [C-SOL-07] — float NaN tie-break id refuses, attributed to the ID side; string ids unaffected; default get_id can't produce floats (documented). ATTACK: your equal-K/NaN-id permutations; NaN id present but K distinct on every record (no tie needed — does the check still fire, and should it? the fix refuses on presence, which is the deterministic reading); mixed str/float ids with a NaN.
+- 0b90c9ab [C-SOL-06] — the docstring ratchet was REMOVED by arbiter ruling (construction-over-detection: a prose ratchet that fell to evasions in one round is not improved, it is deleted; the two behavioral runtime-message pins remain). Verify the pins exist and pass; confirm removal left no dead allowlist/helpers. Do not re-report the removal itself — it is the ruling.
+
+Verdict: per-fix PASS/FAIL with probe evidence; any NEW findings (C-SOL-08+); overall CONVERGED / NOT_CONVERGED. Proof-of-work bar as before.
+
+exec
+/bin/zsh -lc "git ls-tree -r --name-only HEAD docs/scratch/arrival-sliceC | rg 'sol' && git show d9a8ed7d:docs/scratch/arrival-sliceC/sol-r2-stdout.log | sed -n '1,300p'" in /Users/kaygee/Code/loops
+ succeeded in 0ms:
+docs/scratch/arrival-sliceC/sol-brief-r1.md
+docs/scratch/arrival-sliceC/sol-brief-r2.md
+docs/scratch/arrival-sliceC/sol-brief-r3.md
+docs/scratch/arrival-sliceC/sol-r1-stderr.log
+docs/scratch/arrival-sliceC/sol-r1-stdout.log
+docs/scratch/arrival-sliceC/sol-r2-stderr.log
+docs/scratch/arrival-sliceC/sol-r2-stdout.log
+# Verdict: NOT_CONVERGED
+
+Two remediation commits pass fully; two retain new edge defects. Three new findings: two minor totalization issues and one nit-level ratchet hole.
+
+## Per-fix verdicts
+
+### 15d76fc0 / a33560a8 — PASS
+
+The non-mapping payload fix holds across all requested surfaces.
+
+Read:
+
+- [ordering.py](/Users/kaygee/Code/loops/libs/atoms/src/atoms/ordering.py:104) lines 104–150
+- [store_reader.py](/Users/kaygee/Code/loops/libs/engine/src/engine/store_reader.py:210) lines 210–273
+- [vertex_reader.py](/Users/kaygee/Code/loops/libs/engine/src/engine/vertex_reader.py:357) lines 357–390
+- [generate_lens.py](/Users/kaygee/Code/loops/spec/conformance/generate_lens.py:279) lines 279–470
+- [test_conformance_lens.py](/Users/kaygee/Code/loops/libs/engine/tests/test_conformance_lens.py:1) lines 1–204
+
+All tested shapes—string, integer, float, boolean, list, `None`, and a nested mapping lacking the top-level key—resolved as missing-K through both mapping and row accessors:
+
+```text
+resolve_key_field:
+  str: mapping=None row=None
+  int: mapping=None row=None
+  float: mapping=None row=None
+  bool: mapping=None row=None
+  list: mapping=None row=None
+  None: mapping=None row=None
+  nested: mapping=None row=None
+StoreReader.ordered ByKey(k): [{'k': 1, 'tag': 'included'}]
+_combined_read ByKey(k): [{'k': 1, 'tag': 'included', ...}]
+```
+
+Residue search found the live ordering-family access paths correctly routed:
+
+```text
+ordering.py:132  resolve_payload_key(record.get("payload"), field)
+vertex_reader.py:390  resolve_payload_key(json.loads(row[5]), field)
+store_reader.py:271  get_field=resolve_key_field
+generate_lens.py:64  lens_get_field = resolve_key_field
+test_conformance_lens.py:59  get_field=resolve_key_field
+```
+
+Other payload `.get()` occurrences were the already-ratified fold-key/non-ordering surfaces.
+
+Conformance evidence:
+
+```text
+lens-by-key-non-mapping-payload-excluded: 1 passed
+all conformance-lens tests: 13 passed
+```
+
+All six pre-existing vector blobs matched `22159e4c` exactly. Regeneration wrote seven vectors and left the worktree clean:
+
+```text
+lens-by-key-missing-field-excluded.json          MATCH
+lens-by-key-mixed-types-refused.json             MATCH
+lens-by-key-payload-seq.json                     MATCH
+lens-by-key-tie-id-asc.json                      MATCH
+lens-sub-millisecond-timestamp-precision.json    MATCH
+lens-timestamp-tie-id-asc.json                   MATCH
+before=''
+after=''
+```
+
+### bd7c6abc — PASS
+
+The zero-member hole is closed for both aggregate declaration forms.
+
+Read:
+
+- [vertex_reader.py](/Users/kaygee/Code/loops/libs/engine/src/engine/vertex_reader.py:63) lines 63–126
+- [vertex_reader.py](/Users/kaygee/Code/loops/libs/engine/src/engine/vertex_reader.py:397) lines 397–545
+- [read.py](/Users/kaygee/Code/loops/libs/sdk/src/sdk/read.py:62) lines 62–85 and 274–388
+
+Probe output:
+
+```text
+combine stores= []
+  default => OK {"payloads":{"decision":[]},"raw":{"decision":{"items":[]}}}
+  ByKey('n') => OK {"payloads":{"decision":[]},"raw":{"decision":{"items":[]}}}
+  Arrival() => OrderingError: ... dense per-log ... Declare ByKey ...
+
+discover stores= []
+  default => OK {"payloads":{"decision":[]},"raw":{"decision":{"items":[]}}}
+  ByKey('n') => OK {"payloads":{"decision":[]},"raw":{"decision":{"items":[]}}}
+  Arrival() => OrderingError: ... dense per-log ... Declare ByKey ...
+```
+
+The empty-return construction itself is unchanged from pre-fix; default and `ByKey` therefore retain the same serialized empty state.
+
+The ratified one-member boundary remains visible:
+
+```text
+combine-of-one available stores=1 Arrival=> OK empty state
+combine-of-one missing stores=0 Arrival=> OrderingError
+```
+
+That transition follows the explicitly retained `len == 1` rule and is not re-reported. A direct single-store declaration with its store missing remains declaration-shaped through SDK:
+
+```text
+direct missing store None      => 0 False newest
+direct missing store Arrival() => 0 False newest
+```
+
+### 1442a41d — FAIL
+
+Same-float NaN refusal, infinities, signed zero, underflow, and string `"nan"` work. However, the explicit “mixed-type still wins” property depends on input order. See C-SOL-05.
+
+Passing edges:
+
+```text
+NaN same-float r1 permutations:
+  ('a','n','b') => OrderingError: NaN key value ...
+  ('b','n','a') => OrderingError: NaN key value ...
+  ('n','b','a') => OrderingError: NaN key value ...
+
+infinities asc/reverse:
+  => OK ['m', 'z', 'p']
+  => OK ['m', 'z', 'p']
+
+-0/+0/subnormal/underflow => OK ['negzero','poszero','under','sub']
+string nan => OK ['abc', 'nan']
+```
+
+A separate adjacent NaN hole remains in the id tie-break; see C-SOL-07.
+
+### a1c43266 — FAIL
+
+The class contract and both runtime attribution cases are corrected:
+
+```text
+key-side runtime:
+OrderingError: ... (the sort key is (K, id) — either element can be the non-comparable one)
+
+id-side runtime:
+OrderingError: ... (the sort key is (K, id) — either element can be the non-comparable one)
+```
+
+The promised ratchet is cheaply evadable, however; see C-SOL-06.
+
+## New findings
+
+### C-SOL-05 — minor — [ordering.py](/Users/kaygee/Code/loops/libs/atoms/src/atoms/ordering.py:232)
+
+**Claim:** NaN validation occurs during the single-pass type scan, so a mixed-type projection’s refusal category depends on which value appears first. This contradicts the remediation claim that the type check wins over NaN.
+
+```text
+NaN mixed-type permutations:
+  ('n', 'i') => OrderingError: NaN key value under declared key 'k': nan
+  ('i', 'n') => OrderingError: mixed key types under declared key 'k':
+                int and float (offending value nan)
+```
+
+Both inputs contain precisely the same key values. A complete type-identity pass must precede NaN validation if mixed-type refusal is intended to win consistently.
+
+### C-SOL-06 — nit — [test_ordering.py](/Users/kaygee/Code/loops/libs/atoms/tests/test_ordering.py:145)
+
+**Claim:** The docstring ratchet searches individual lines for contiguous phrases, making a newline a complete evasion. It also hardcodes four inspected objects rather than walking all module docstrings.
+
+Probe:
+
+```text
+candidate:
+Raised for key values that do not
+compare under the declared ordering.
+
+split-line bad attribution flags: []
+hard-coded inspected objects:
+['module', 'OrderingError', 'totalize', 'is_suffix_stable']
+module public docstring objects omitted:
+['Arrival', 'ByKey', 'resolve_key_field', 'resolve_payload_key']
+```
+
+The current production prose is correct; the defect is in the claimed recurrence ratchet.
+
+### C-SOL-07 — minor — [ordering.py](/Users/kaygee/Code/loops/libs/atoms/src/atoms/ordering.py:252)
+
+**Claim:** NaN is rejected only in `K`, not in the id half of `(K, id)`. A float NaN returned by `get_id` silently restores permutation-dependent output instead of totalizing or refusing. This is the id-side analogue of C-SOL-03.
+
+```text
+('a', 'b', 'c') => ['a', 'b', 'c']
+('c', 'b', 'a') => ['b', 'a', 'c']
+('b', 'a', 'c') => ['b', 'a', 'c']
+```
+
+All records used equal `K=1.0`; only one tie-break id was NaN. This matters to the exported primitive and custom `get_id` callers, with the same bounded scope as the original in-memory NaN finding.
+
+## Test proof
+
+Focused:
+
+```text
+atoms ordering:          45 passed
+StoreReader scalar:       2 passed
+combined-read ordering:  28 passed
+conformance lens:        13 passed
+SDK ordering:            11 passed
+```
+
+Full suites:
+
+```text
+atoms:   515 passed
+engine:  1807 passed, 1 skipped
+sdk:     324 passed
+store:   152 passed
+root:    110 passed
+```
+
+The worktree remained clean after probes and vector regeneration.
+
+**Overall: NOT_CONVERGED.**
+
+codex
+The change boundary matches the brief exactly. I recovered the r2 stdout from Git (the files are tracked but sparse/missing in the working tree), including the original permutation outputs, and am now testing those exact cases against the revised pass ordering.
+exec
+/bin/zsh -lc "git diff --check d9a8ed7d..HEAD && git show --stat --oneline 723dd535 && git show --stat --oneline 3ad2933e && git show --stat --oneline 7f71f1e6 && git show --stat --oneline 0b90c9ab && git diff d9a8ed7d..HEAD -- libs/atoms/src/atoms/ordering.py libs/atoms/tests/test_ordering.py && nl -ba libs/atoms/src/atoms/ordering.py | sed -n '1,330p' && nl -ba libs/atoms/tests/test_ordering.py | sed -n '1,390p'" in /Users/kaygee/Code/loops
+ succeeded in 0ms:
+723dd535 fix(atoms): make the ByKey refusal category order-independent (C-SOL-05)
+ libs/atoms/src/atoms/ordering.py  | 17 +++++++++++++++--
+ libs/atoms/tests/test_ordering.py | 13 +++++++++++++
+ 2 files changed, 28 insertions(+), 2 deletions(-)
+3ad2933e fix(atoms): refuse a NaN tie-break id, attributed to the ID side (C-SOL-07)
+ libs/atoms/src/atoms/ordering.py  | 30 ++++++++++++++++++++++++------
+ libs/atoms/tests/test_ordering.py | 21 +++++++++++++++++++++
+ 2 files changed, 45 insertions(+), 6 deletions(-)
+7f71f1e6 style(atoms): rewrap the OrderingError contract line (C-SOL-07 follow-on)
+ libs/atoms/src/atoms/ordering.py | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+0b90c9ab test(atoms): remove the docstring-attribution ratchet (C-SOL-06)
+ libs/atoms/tests/test_ordering.py | 36 ++----------------------------------
+ 1 file changed, 2 insertions(+), 34 deletions(-)
+diff --git a/libs/atoms/src/atoms/ordering.py b/libs/atoms/src/atoms/ordering.py
+index a6395975..28d2f479 100644
+--- a/libs/atoms/src/atoms/ordering.py
++++ b/libs/atoms/src/atoms/ordering.py
+@@ -27,8 +27,9 @@ class OrderingError(Exception):
+     """Raised when records cannot be ordered under the declared Ordering.
+ 
+     A declaration error against the data — mixed key types under one declared
+-    key, a ``NaN`` key value, or sort-key elements that do not compare — not
+-    something a comparator may paper over with a coercion.
++    key, a ``NaN`` on either side of the ``(K, id)`` sort key, or sort-key
++    elements that do not compare — not something a comparator may paper over
++    with a coercion.
+ 
+     The sort key is ``(K, id)``, so the non-comparable element may be EITHER
+     half: a raise here does not by itself blame the declared key. The runtime
+@@ -195,6 +196,16 @@ def totalize(
+     order deterministically against every other float, so refusing them would
+     overreach — the claim is totalization, not finiteness.
+ 
++    A NaN TIE-BREAK ID is refused for the same reason and attributed to the id
++    side. The default ``get_id`` returns record ids, which are strings, so only
++    a custom ``get_id`` can produce one; the check is float-typed only, exactly
++    as on the key side, so a string ``"nan"`` id is an ordinary id.
++
++    Data that earns more than one refusal refuses by CATEGORY, never by which
++    record happened to come first: mixed type wins over a NaN key value, which
++    wins over a NaN id. Each check runs as its own complete pass for exactly
++    that reason.
++
+     A record that CARRIES ``K`` but has no id raises the accessor's own error
+     (``KeyError``/``AttributeError``), unwrapped and by ruling: an id is the
+     substrate's, not the declaration's, so its absence is a broken record
+@@ -219,15 +230,19 @@ def totalize(
+         A new list, ordered. For ``ByKey``, records missing the key are absent.
+ 
+     Raises:
+-        OrderingError: Mixed key types under the declared key, a ``NaN`` key
+-            value, sort-key elements — key value or tie-break id — that do not
+-            compare, or an unknown Ordering variant.
++        OrderingError: Mixed key types under the declared key, a ``NaN`` on
++            either side of the sort key — key value or tie-break id —
++            sort-key elements that do not compare, or an unknown Ordering
++            variant.
+     """
+     match ordering:
+         case Arrival():
+             return list(records)
+         case ByKey(field=field):
+-            keyed: list[tuple[Any, Any, R]] = []
++            # Each refusal gets its OWN complete pass, so which category fires
++            # is a property of the data and not of the input permutation:
++            # mixed type wins over a NaN key, which wins over a NaN id.
++            members: list[tuple[Any, R]] = []
+             key_type: type | None = None
+             for record in records:
+                 value = get_field(record, field)
+@@ -241,6 +256,9 @@ def totalize(
+                         f"{key_type.__name__} and {type(value).__name__} "
+                         f"(offending value {value!r})"
+                     )
++                members.append((value, record))
++
++            for value, _record in members:
+                 if isinstance(value, float) and math.isnan(value):
+                     raise OrderingError(
+                         f"NaN key value under declared key {field!r}: {value!r} — "
+@@ -249,7 +267,20 @@ def totalize(
+                         f"and is not a total order. Infinities are fine; NaN is "
+                         f"not a position."
+                     )
+-                keyed.append((value, get_id(record), record))
++
++            keyed: list[tuple[Any, Any, R]] = [
++                (value, get_id(record), record) for value, record in members
++            ]
++
++            for _value, record_id, _record in keyed:
++                if isinstance(record_id, float) and math.isnan(record_id):
++                    raise OrderingError(
++                        f"NaN tie-break id under declared key {field!r}: "
++                        f"{record_id!r} — the offending element is the ID side "
++                        f"of the (K, id) sort key, not the key. NaN compares "
++                        f"false against everything including itself, so records "
++                        f"sharing a key value would order by input permutation."
++                    )
+             try:
+                 keyed.sort(key=lambda entry: (entry[0], entry[1]))
+             except TypeError as exc:
+diff --git a/libs/atoms/tests/test_ordering.py b/libs/atoms/tests/test_ordering.py
+index f2251e7b..0c73f7e5 100644
+--- a/libs/atoms/tests/test_ordering.py
++++ b/libs/atoms/tests/test_ordering.py
+@@ -129,42 +129,10 @@ class TestMixedTypes:
+ class TestRefusalAttribution:
+     """The sort key is (K, id) — a refusal may not blame K by default.
+ 
+-    The prose sweep for this posture has now missed a site twice (the two
+-    `Raises:` sections, then `OrderingError`'s own class contract), so it is a
+-    ratchet rather than review vigilance: every docstring in the module that
+-    describes what OrderingError means must either name the id side or not
+-    attribute the non-comparison at all.
++    Pinned on the RUNTIME message, which is what a caller actually reads: a
++    non-comparison names the (K, id) pair whichever half is at fault.
+     """
+ 
+-    _ALLOWED_UNATTRIBUTED = (
+-        # The mixed-TYPE paragraph is genuinely about key values only: the
+-        # type-identity check reads K and never looks at the id.
+-        "Same-typed values that do not compare (dicts, say) are",
+-    )
+-
+-    def test_no_docstring_blames_the_key_alone_for_a_non_comparison(self):
+-        import inspect
+-
+-        import atoms.ordering as mod
+-
+-        sources = [inspect.getdoc(mod), inspect.getdoc(OrderingError)]
+-        for name in ("totalize", "is_suffix_stable"):
+-            sources.append(inspect.getdoc(getattr(mod, name)))
+-
+-        for doc in sources:
+-            if doc is None:
+-                continue
+-            for line in doc.splitlines():
+-                if "do not compare" not in line and "does not compare" not in line:
+-                    continue
+-                if any(ok in line for ok in self._ALLOWED_UNATTRIBUTED):
+-                    continue
+-                context = doc[max(0, doc.index(line) - 300) : doc.index(line) + 300]
+-                assert "id" in context, (
+-                    f"non-comparison prose attributes to the key alone: {line!r} — "
+-                    "the sort key is (K, id) and either element can be at fault"
+-                )
+-
+     def test_the_runtime_message_matches_the_documented_posture(self):
+         records = [rec({"d": 1}, ts=1), rec({"d": 2}, ts=1)]
+         with pytest.raises(OrderingError) as excinfo:
+@@ -210,6 +178,40 @@ class TestNonFiniteKeys:
+         records = [rec("a", k="nan"), rec("b", k="abc")]
+         assert [r["id"] for r in totalize(records, ByKey("k"))] == ["b", "a"]
+ 
++    def test_a_nan_tie_break_id_refuses_and_blames_the_id_side(self):
++        """The id half of (K, id) is a position too, so NaN has none there.
++
++        Equal K throughout, so the sort falls through to the tie-break — and
++        a NaN there restored exactly the permutation-dependent output the key
++        side already refuses. Only a custom `get_id` can produce a float id.
++        """
++        ids = {"a": float("nan"), "b": 2.0, "c": 3.0}
++        for order in itertools.permutations(["a", "b", "c"]):
++            records = [rec(i, k=1.0) for i in order]
++            with pytest.raises(OrderingError) as excinfo:
++                totalize(records, ByKey("k"), get_id=lambda r: ids[r["id"]])
++            message = str(excinfo.value)
++            assert "id" in message
++            assert "nan" in message.lower()
++
++    def test_the_id_side_nan_check_is_float_typed_only(self):
++        records = [rec("a", k=1.0), rec("b", k=1.0)]
++        out = totalize(records, ByKey("k"), get_id=lambda r: "nan" + r["id"])
++        assert [r["id"] for r in out] == ["a", "b"]
++
++    def test_mixed_type_wins_over_nan_under_either_input_order(self):
++        """The refusal CATEGORY is a property of the data, not of the order.
++
++        Both permutations carry the same two key values — a NaN float and an
++        int. When the NaN check rode along in the type-scan pass, whichever
++        value arrived first decided which refusal the caller saw.
++        """
++        values = {"n": float("nan"), "i": 1}
++        for order in (("n", "i"), ("i", "n")):
++            records = [rec(i, k=values[i]) for i in order]
++            with pytest.raises(OrderingError, match="mixed key types"):
++                totalize(records, ByKey("k"))
++
+     def test_a_record_missing_the_key_is_unaffected_by_the_nan_check(self):
+         records = [rec("a", k=1.0), rec("b"), rec("c", k=0.0)]
+         assert [r["id"] for r in totalize(records, ByKey("k"))] == ["c", "a"]
+     1	"""Ordering — the declared read order for a stream of records.
+     2	
+     3	Ordering is DECLARED, never inferred. Two variants:
+     4	
+     5	- ``Arrival()`` — the substrate's native per-store order. The store yields it;
+     6	  this module never synthesizes it from record fields.
+     7	- ``ByKey(field)`` — a projection ordered by one declared key, with the record
+     8	  id as tie-break only.
+     9	
+    10	``totalize()`` is the ONLY definition of the sort key, and
+    11	``resolve_key_field()`` the ONLY definition of the key FAMILY rule (which keys
+    12	come from the envelope, which from the payload). Readers (StoreReader, the
+    13	combined read, the conformance lens generator and its runner) import them
+    14	rather than growing near-copies of the same ``sort(key=...)`` line or the same
+    15	``if field in ("ts", "id")`` branch.
+    16	"""
+    17	
+    18	from __future__ import annotations
+    19	
+    20	import math
+    21	from collections.abc import Callable, Iterable, Mapping
+    22	from dataclasses import dataclass
+    23	from typing import Any, TypeVar
+    24	
+    25	
+    26	class OrderingError(Exception):
+    27	    """Raised when records cannot be ordered under the declared Ordering.
+    28	
+    29	    A declaration error against the data — mixed key types under one declared
+    30	    key, a ``NaN`` on either side of the ``(K, id)`` sort key, or sort-key
+    31	    elements that do not compare — not something a comparator may paper over
+    32	    with a coercion.
+    33	
+    34	    The sort key is ``(K, id)``, so the non-comparable element may be EITHER
+    35	    half: a raise here does not by itself blame the declared key. The runtime
+    36	    message names which.
+    37	    """
+    38	
+    39	    pass
+    40	
+    41	
+    42	@dataclass(frozen=True)
+    43	class Arrival:
+    44	    """The substrate's native per-store order.
+    45	
+    46	    Arrival ordinals are dense PER-LOG, so this names an order the store
+    47	    already yields; ``totalize`` returns the records as given, untouched. It
+    48	    is not expressible across a combined view of several stores.
+    49	    """
+    50	
+    51	
+    52	@dataclass(frozen=True)
+    53	class ByKey:
+    54	    """Order by one declared key, id ascending as tie-break.
+    55	
+    56	    Where the key resolves is :func:`resolve_key_field`'s ruling, not this
+    57	    dataclass's: ``ts`` and ``id`` against the record envelope, every other
+    58	    key against the flat payload.
+    59	
+    60	    Attributes:
+    61	        field: The declared key name. Dotted paths are not this cut.
+    62	
+    63	    Example:
+    64	        ByKey(field="ts")
+    65	    """
+    66	
+    67	    field: str
+    68	
+    69	
+    70	Ordering = Arrival | ByKey
+    71	
+    72	R = TypeVar("R")
+    73	
+    74	
+    75	def is_suffix_stable(ordering: Ordering) -> bool:
+    76	    """Does appending a record extend this projection at its END?
+    77	
+    78	    A projection is suffix-stable when a newly appended record can only land
+    79	    after every record already in it. `Arrival()` is: the substrate's native
+    80	    order IS append order, so what arrives later sorts later, always.
+    81	
+    82	    `ByKey(K)` is NOT. A record's position is its key value, and a record
+    83	    arriving now may carry any key — so an append is an INSERTION into the
+    84	    middle of the projection, not an extension of its tail.
+    85	
+    86	    Consumers that hold a result computed over a prefix and want to extend it
+    87	    with the newly arrived records — rather than recomputing over the whole
+    88	    history — are sound only over a suffix-stable ordering. Engine's
+    89	    incremental fold path is the consumer; this predicate is the taxonomy
+    90	    fact it dispatches on.
+    91	
+    92	    Raises:
+    93	        OrderingError: Unknown `Ordering` variant. A new variant must be
+    94	            RULED suffix-stable or not, never defaulted.
+    95	    """
+    96	    match ordering:
+    97	        case Arrival():
+    98	            return True
+    99	        case ByKey():
+   100	            return False
+   101	        case _:
+   102	            raise OrderingError(f"unknown Ordering variant: {ordering!r}")
+   103	
+   104	
+   105	#: Declared keys that resolve against the record ENVELOPE rather than the
+   106	#: payload. Every other key is a flat payload field — including ``kind``,
+   107	#: ``observer`` and ``origin``, which are stored columns but not key
+   108	#: candidates on any surface.
+   109	ENVELOPE_KEYS = ("ts", "id")
+   110	
+   111	
+   112	def resolve_key_field(record: Mapping[str, Any], field: str, /) -> Any:
+   113	    """Resolve a declared ordering key against an envelope+payload record.
+   114	
+   115	    The FAMILY RULE, one definition for every surface that reads facts as
+   116	    ``{"id", "kind", "ts", "observer", "origin", "payload"}`` mappings:
+   117	    ``ts`` and ``id`` come from the envelope, every other key from the flat
+   118	    payload. A payload field named ``ts`` or ``id`` NEVER shadows the
+   119	    envelope — one key, one source, so the same declaration cannot mean two
+   120	    things depending on what a payload happens to carry.
+   121	
+   122	    ``ts`` is column-backed as a storage detail, not a change of semantics;
+   123	    a surface that hands ``ts`` over as a ``datetime`` rather than the raw
+   124	    REAL orders identically (the conversion is monotone) and stays
+   125	    single-typed, so the strict type-identity check in :func:`totalize`
+   126	    cannot fire on it.
+   127	
+   128	    Dotted paths are not in this schema. Missing → ``None``, which
+   129	    :func:`totalize` reads as non-membership.
+   130	    """
+   131	    if field in ENVELOPE_KEYS:
+   132	        return record.get(field)
+   133	    return resolve_payload_key(record.get("payload"), field)
+   134	
+   135	
+   136	def resolve_payload_key(payload: Any, field: str, /) -> Any:
+   137	    """Resolve a non-envelope declared key against a fact payload.
+   138	
+   139	    The payload half of the family rule, split out so the row-shaped combined
+   140	    read (which already holds the parsed payload) resolves through the SAME
+   141	    definition rather than repeating ``.get()`` on its own.
+   142	
+   143	    A payload need not be a mapping — ``Fact`` permits any JSON value — and a
+   144	    non-mapping payload has no fields at all. It is therefore a missing-K
+   145	    NON-MEMBER of every payload-key projection, exactly as an absent field is:
+   146	    ``None``, which :func:`totalize` reads as non-membership. Exclusion by
+   147	    declaration, not a crash and not a coercion.
+   148	    """
+   149	    if not isinstance(payload, Mapping):
+   150	        return None
+   151	    return payload.get(field)
+   152	
+   153	
+   154	def _default_get_field(record: Any, field: str) -> Any:
+   155	    if isinstance(record, Mapping):
+   156	        return record.get(field)
+   157	    return getattr(record, field, None)
+   158	
+   159	
+   160	def _default_get_id(record: Any) -> Any:
+   161	    if isinstance(record, Mapping):
+   162	        return record["id"]
+   163	    return record.id
+   164	
+   165	
+   166	def totalize(
+   167	    records: Iterable[R],
+   168	    ordering: Ordering,
+   169	    *,
+   170	    get_field: Callable[[R, str], Any] = _default_get_field,
+   171	    get_id: Callable[[R], Any] = _default_get_id,
+   172	) -> list[R]:
+   173	    """Order records under a declared Ordering. The one sort-key definition.
+   174	
+   175	    ``ByKey(K)``: sort key ``(K(record), record.id)``, id ascending. **The id
+   176	    is a TIE-BREAK ONLY — never semantic time.**
+   177	
+   178	    A record without ``K`` is NOT in the ``ByKey(K)`` projection: a key names
+   179	    what it projects, and absence is non-membership. A ``None`` value counts
+   180	    as absent. This is exclusion-by-declaration — the caller named K — not
+   181	    silent loss.
+   182	
+   183	    Key values of mixed types under one declared key are REFUSED with
+   184	    ``OrderingError``. The check is strict TYPE IDENTITY, not comparability:
+   185	    ``"5"`` and ``5`` refuse, ``True`` and ``1`` refuse, and so do ``1`` and
+   186	    ``2.0`` — Python would happily order that last pair, and refusing it
+   187	    anyway is the point. A key whose values are sometimes int and sometimes
+   188	    float is a declaration the data does not support, and silently ordering it
+   189	    would hide that. Same-typed values that do not compare (dicts, say) are
+   190	    refused the same way.
+   191	
+   192	    ``NaN`` key values are REFUSED. NaN compares false against everything
+   193	    including itself, so a sort containing one produces an order that depends
+   194	    on the input permutation — it is not a total order, and ``totalize``'s only
+   195	    claim is that it totalizes. Infinities are ALLOWED: ``-inf`` and ``+inf``
+   196	    order deterministically against every other float, so refusing them would
+   197	    overreach — the claim is totalization, not finiteness.
+   198	
+   199	    A NaN TIE-BREAK ID is refused for the same reason and attributed to the id
+   200	    side. The default ``get_id`` returns record ids, which are strings, so only
+   201	    a custom ``get_id`` can produce one; the check is float-typed only, exactly
+   202	    as on the key side, so a string ``"nan"`` id is an ordinary id.
+   203	
+   204	    Data that earns more than one refusal refuses by CATEGORY, never by which
+   205	    record happened to come first: mixed type wins over a NaN key value, which
+   206	    wins over a NaN id. Each check runs as its own complete pass for exactly
+   207	    that reason.
+   208	
+   209	    A record that CARRIES ``K`` but has no id raises the accessor's own error
+   210	    (``KeyError``/``AttributeError``), unwrapped and by ruling: an id is the
+   211	    substrate's, not the declaration's, so its absence is a broken record
+   212	    rather than an ordering declaration that does not fit the data. Only the
+   213	    latter is what ``OrderingError`` means. A record missing ``K`` never
+   214	    reaches the id accessor at all.
+   215	
+   216	    ``Arrival()`` returns the records as given — the store's native order is
+   217	    the store's job to yield, never synthesized here. Both accessors are
+   218	    ignored for ``Arrival()``.
+   219	
+   220	    Args:
+   221	        records: The records to order.
+   222	        ordering: ``Arrival()`` or ``ByKey(field)``.
+   223	        get_field: Reads a named field off a record. The default reads a
+   224	            Mapping key or an attribute, missing → None. Row-tuple callers
+   225	            pass their own.
+   226	        get_id: Reads the record id. The default reads the ``id`` Mapping key
+   227	            or attribute.
+   228	
+   229	    Returns:
+   230	        A new list, ordered. For ``ByKey``, records missing the key are absent.
+   231	
+   232	    Raises:
+   233	        OrderingError: Mixed key types under the declared key, a ``NaN`` on
+   234	            either side of the sort key — key value or tie-break id —
+   235	            sort-key elements that do not compare, or an unknown Ordering
+   236	            variant.
+   237	    """
+   238	    match ordering:
+   239	        case Arrival():
+   240	            return list(records)
+   241	        case ByKey(field=field):
+   242	            # Each refusal gets its OWN complete pass, so which category fires
+   243	            # is a property of the data and not of the input permutation:
+   244	            # mixed type wins over a NaN key, which wins over a NaN id.
+   245	            members: list[tuple[Any, R]] = []
+   246	            key_type: type | None = None
+   247	            for record in records:
+   248	                value = get_field(record, field)
+   249	                if value is None:
+   250	                    continue
+   251	                if key_type is None:
+   252	                    key_type = type(value)
+   253	                elif type(value) is not key_type:
+   254	                    raise OrderingError(
+   255	                        f"mixed key types under declared key {field!r}: "
+   256	                        f"{key_type.__name__} and {type(value).__name__} "
+   257	                        f"(offending value {value!r})"
+   258	                    )
+   259	                members.append((value, record))
+   260	
+   261	            for value, _record in members:
+   262	                if isinstance(value, float) and math.isnan(value):
+   263	                    raise OrderingError(
+   264	                        f"NaN key value under declared key {field!r}: {value!r} — "
+   265	                        f"NaN compares false against everything including itself, "
+   266	                        f"so the resulting order depends on the input permutation "
+   267	                        f"and is not a total order. Infinities are fine; NaN is "
+   268	                        f"not a position."
+   269	                    )
+   270	
+   271	            keyed: list[tuple[Any, Any, R]] = [
+   272	                (value, get_id(record), record) for value, record in members
+   273	            ]
+   274	
+   275	            for _value, record_id, _record in keyed:
+   276	                if isinstance(record_id, float) and math.isnan(record_id):
+   277	                    raise OrderingError(
+   278	                        f"NaN tie-break id under declared key {field!r}: "
+   279	                        f"{record_id!r} — the offending element is the ID side "
+   280	                        f"of the (K, id) sort key, not the key. NaN compares "
+   281	                        f"false against everything including itself, so records "
+   282	                        f"sharing a key value would order by input permutation."
+   283	                    )
+   284	            try:
+   285	                keyed.sort(key=lambda entry: (entry[0], entry[1]))
+   286	            except TypeError as exc:
+   287	                raise OrderingError(
+   288	                    f"records under declared key {field!r} do not compare: {exc} "
+   289	                    f"(the sort key is (K, id) — either element can be the "
+   290	                    f"non-comparable one)"
+   291	                ) from exc
+   292	            return [entry[2] for entry in keyed]
+   293	        case _:
+   294	            raise OrderingError(f"unknown Ordering variant: {ordering!r}")
+     1	"""Ordering vectors — the declared read order and its one totalization."""
+     2	
+     3	import itertools
+     4	from dataclasses import FrozenInstanceError
+     5	
+     6	import pytest
+     7	
+     8	from atoms import (
+     9	    Arrival,
+    10	    ByKey,
+    11	    OrderingError,
+    12	    resolve_key_field,
+    13	    resolve_payload_key,
+    14	    totalize,
+    15	)
+    16	
+    17	
+    18	def rec(id_, **fields):
+    19	    return {"id": id_, **fields}
+    20	
+    21	
+    22	class TestByKey:
+    23	    def test_sorts_by_key_then_id_ascending(self):
+    24	        # Equal K: id breaks the tie, ascending — and the ids are deliberately
+    25	        # out of input order, so dropping the tie-break shows up here.
+    26	        records = [rec("c", ts=5), rec("a", ts=5), rec("b", ts=1)]
+    27	        assert [r["id"] for r in totalize(records, ByKey("ts"))] == ["b", "a", "c"]
+    28	
+    29	    def test_id_is_tie_break_only_never_semantic_time(self):
+    30	        # A low key with a high id still sorts before a high key with a low id.
+    31	        records = [rec("z", ts=1), rec("a", ts=2)]
+    32	        assert [r["id"] for r in totalize(records, ByKey("ts"))] == ["z", "a"]
+    33	
+    34	    def test_key_may_be_any_flat_payload_field(self):
+    35	        records = [rec("a", name="pear"), rec("b", name="apple")]
+    36	        assert [r["id"] for r in totalize(records, ByKey("name"))] == ["b", "a"]
+    37	
+    38	    def test_returns_a_new_list_leaving_input_order_alone(self):
+    39	        records = [rec("a", ts=2), rec("b", ts=1)]
+    40	        out = totalize(records, ByKey("ts"))
+    41	        assert out is not records
+    42	        assert [r["id"] for r in records] == ["a", "b"]
+    43	
+    44	    def test_reads_attributes_when_records_are_not_mappings(self):
+    45	        class Row:
+    46	            def __init__(self, id, ts):
+    47	                self.id = id
+    48	                self.ts = ts
+    49	
+    50	        rows = [Row("a", 2), Row("b", 1)]
+    51	        assert [r.id for r in totalize(rows, ByKey("ts"))] == ["b", "a"]
+    52	
+    53	    def test_custom_accessors_order_row_tuples(self):
+    54	        rows = [("a", 2), ("b", 1)]
+    55	        out = totalize(
+    56	            rows,
+    57	            ByKey("ts"),
+    58	            get_field=lambda r, field: r[1],
+    59	            get_id=lambda r: r[0],
+    60	        )
+    61	        assert out == [("b", 1), ("a", 2)]
+    62	
+    63	
+    64	class TestMissingKey:
+    65	    def test_record_without_the_key_is_not_in_the_projection(self):
+    66	        records = [rec("a", ts=2), rec("b"), rec("c", ts=1)]
+    67	        assert [r["id"] for r in totalize(records, ByKey("ts"))] == ["c", "a"]
+    68	
+    69	    def test_none_value_counts_as_absent(self):
+    70	        records = [rec("a", ts=2), rec("b", ts=None), rec("c", ts=1)]
+    71	        assert [r["id"] for r in totalize(records, ByKey("ts"))] == ["c", "a"]
+    72	
+    73	    def test_no_record_carries_the_key_yields_an_empty_projection(self):
+    74	        assert totalize([rec("a"), rec("b")], ByKey("ts")) == []
+    75	
+    76	    def test_a_keyed_record_with_no_id_raises_the_raw_accessor_error(self):
+    77	        # Ruled posture, not an accident: OrderingError means "this ordering
+    78	        # does not fit this data". A record with no id is a broken record —
+    79	        # the substrate's failure, not the declaration's — so the accessor's
+    80	        # own KeyError surfaces unwrapped.
+    81	        with pytest.raises(KeyError):
+    82	            totalize([{"ts": 1}], ByKey("ts"))
+    83	
+    84	    def test_a_record_missing_the_key_never_reaches_the_id_accessor(self):
+    85	        # Same record, minus the key: excluded before the id is ever read.
+    86	        assert totalize([{"other": 1}], ByKey("ts")) == []
+    87	
+    88	
+    89	class TestMixedTypes:
+    90	    def test_string_and_int_under_one_key_refuse(self):
+    91	        records = [rec("a", ts="5"), rec("b", ts=5)]
+    92	        with pytest.raises(OrderingError) as exc:
+    93	            totalize(records, ByKey("ts"))
+    94	        message = str(exc.value)
+    95	        assert "ts" in message
+    96	        assert "str" in message and "int" in message
+    97	
+    98	    def test_bool_is_not_int(self):
+    99	        records = [rec("a", flag=1), rec("b", flag=True)]
+   100	        with pytest.raises(OrderingError):
+   101	            totalize(records, ByKey("flag"))
+   102	
+   103	    def test_int_and_float_under_one_key_refuse(self):
+   104	        # Strict same-type refusal: no coercion, even across numeric types.
+   105	        records = [rec("a", ts=1), rec("b", ts=2.0)]
+   106	        with pytest.raises(OrderingError):
+   107	            totalize(records, ByKey("ts"))
+   108	
+   109	    def test_same_typed_values_that_do_not_compare_refuse(self):
+   110	        records = [rec("a", ts={"x": 1}), rec("b", ts={"y": 2})]
+   111	        with pytest.raises(OrderingError) as exc:
+   112	            totalize(records, ByKey("ts"))
+   113	        assert "do not compare" in str(exc.value)
+   114	
+   115	    def test_refusal_does_not_blame_the_key_when_the_ids_are_at_fault(self):
+   116	        # Equal K, so the sort falls through to the id tie-break — and THOSE
+   117	        # do not compare. The key values here are impeccable ints, so a
+   118	        # message naming "key values" would point at the wrong tuple element.
+   119	        records = [rec({"a": 1}, ts=1), rec({"b": 2}, ts=1)]
+   120	        with pytest.raises(OrderingError) as exc:
+   121	            totalize(records, ByKey("ts"))
+   122	        assert "(K, id)" in str(exc.value)
+   123	
+   124	    def test_records_missing_the_key_do_not_participate_in_the_type_check(self):
+   125	        records = [rec("a", ts=2), rec("b"), rec("c", ts=1)]
+   126	        assert [r["id"] for r in totalize(records, ByKey("ts"))] == ["c", "a"]
+   127	
+   128	
+   129	class TestRefusalAttribution:
+   130	    """The sort key is (K, id) — a refusal may not blame K by default.
+   131	
+   132	    Pinned on the RUNTIME message, which is what a caller actually reads: a
+   133	    non-comparison names the (K, id) pair whichever half is at fault.
+   134	    """
+   135	
+   136	    def test_the_runtime_message_matches_the_documented_posture(self):
+   137	        records = [rec({"d": 1}, ts=1), rec({"d": 2}, ts=1)]
+   138	        with pytest.raises(OrderingError) as excinfo:
+   139	            totalize(records, ByKey("ts"))
+   140	        assert "(K, id)" in str(excinfo.value)
+   141	
+   142	
+   143	class TestNonFiniteKeys:
+   144	    """`totalize` totalizes — so a key value that has no position refuses."""
+   145	
+   146	    def test_nan_refuses_naming_the_field_and_the_value(self):
+   147	        records = [rec("a", k=1.0), rec("b", k=float("nan")), rec("c", k=2.0)]
+   148	        with pytest.raises(OrderingError) as excinfo:
+   149	            totalize(records, ByKey("k"))
+   150	        message = str(excinfo.value)
+   151	        assert "'k'" in message  # the field
+   152	        assert "nan" in message.lower()  # the value
+   153	        assert "total order" in message  # the reason
+   154	
+   155	    def test_nan_refuses_under_every_input_permutation(self):
+   156	        """The old behavior was permutation-dependent — that is the bug."""
+   157	        for order in (["a", "b", "c"], ["c", "b", "a"], ["b", "a", "c"]):
+   158	            records = [
+   159	                rec(i, k=(float("nan") if i == "b" else 1.0)) for i in order
+   160	            ]
+   161	            with pytest.raises(OrderingError, match="total order"):
+   162	                totalize(records, ByKey("k"))
+   163	
+   164	    def test_infinities_are_allowed_and_order_deterministically(self):
+   165	        """Refusing these would overreach: they DO have positions."""
+   166	        for order in itertools.permutations(["a", "b", "c"]):
+   167	            values = {"a": float("inf"), "b": float("-inf"), "c": 0.0}
+   168	            records = [rec(i, k=values[i]) for i in order]
+   169	            assert [r["id"] for r in totalize(records, ByKey("k"))] == ["b", "c", "a"]
+   170	
+   171	    def test_an_all_infinite_key_still_totalizes(self):
+   172	        records = [rec("z", k=float("inf")), rec("a", k=float("inf"))]
+   173	        # Equal keys, so the id tie-break decides — ascending.
+   174	        assert [r["id"] for r in totalize(records, ByKey("k"))] == ["a", "z"]
+   175	
+   176	    def test_the_nan_check_is_float_typed_only(self):
+   177	        """Strings named 'nan' are ordinary str keys, not non-finite floats."""
+   178	        records = [rec("a", k="nan"), rec("b", k="abc")]
+   179	        assert [r["id"] for r in totalize(records, ByKey("k"))] == ["b", "a"]
+   180	
+   181	    def test_a_nan_tie_break_id_refuses_and_blames_the_id_side(self):
+   182	        """The id half of (K, id) is a position too, so NaN has none there.
+   183	
+   184	        Equal K throughout, so the sort falls through to the tie-break — and
+   185	        a NaN there restored exactly the permutation-dependent output the key
+   186	        side already refuses. Only a custom `get_id` can produce a float id.
+   187	        """
+   188	        ids = {"a": float("nan"), "b": 2.0, "c": 3.0}
+   189	        for order in itertools.permutations(["a", "b", "c"]):
+   190	            records = [rec(i, k=1.0) for i in order]
+   191	            with pytest.raises(OrderingError) as excinfo:
+   192	                totalize(records, ByKey("k"), get_id=lambda r: ids[r["id"]])
+   193	            message = str(excinfo.value)
+   194	            assert "id" in message
+   195	            assert "nan" in message.lower()
+   196	
+   197	    def test_the_id_side_nan_check_is_float_typed_only(self):
+   198	        records = [rec("a", k=1.0), rec("b", k=1.0)]
+   199	        out = totalize(records, ByKey("k"), get_id=lambda r: "nan" + r["id"])
+   200	        assert [r["id"] for r in out] == ["a", "b"]
+   201	
+   202	    def test_mixed_type_wins_over_nan_under_either_input_order(self):
+   203	        """The refusal CATEGORY is a property of the data, not of the order.
+   204	
+   205	        Both permutations carry the same two key values — a NaN float and an
+   206	        int. When the NaN check rode along in the type-scan pass, whichever
+   207	        value arrived first decided which refusal the caller saw.
+   208	        """
+   209	        values = {"n": float("nan"), "i": 1}
+   210	        for order in (("n", "i"), ("i", "n")):
+   211	            records = [rec(i, k=values[i]) for i in order]
+   212	            with pytest.raises(OrderingError, match="mixed key types"):
+   213	                totalize(records, ByKey("k"))
+   214	
+   215	    def test_a_record_missing_the_key_is_unaffected_by_the_nan_check(self):
+   216	        records = [rec("a", k=1.0), rec("b"), rec("c", k=0.0)]
+   217	        assert [r["id"] for r in totalize(records, ByKey("k"))] == ["c", "a"]
+   218	
+   219	
+   220	class TestArrival:
+   221	    def test_returns_records_in_the_order_given(self):
+   222	        records = [rec("c", ts=5), rec("a", ts=1), rec("b", ts=3)]
+   223	        assert [r["id"] for r in totalize(records, Arrival())] == ["c", "a", "b"]
+   224	
+   225	    def test_never_synthesizes_order_from_fields_or_id(self):
+   226	        # Records with neither an id nor any field: Arrival still works, which
+   227	        # pins that the totalization does not reach into the record at all.
+   228	        records = [{"n": 2}, {"n": 1}]
+   229	        assert totalize(records, Arrival()) == [{"n": 2}, {"n": 1}]
+   230	
+   231	    def test_materializes_an_iterator_into_a_list(self):
+   232	        assert totalize(iter([rec("a"), rec("b")]), Arrival()) == [
+   233	            {"id": "a"},
+   234	            {"id": "b"},
+   235	        ]
+   236	
+   237	
+   238	class TestVariants:
+   239	    def test_both_variants_are_frozen_and_compare_by_value(self):
+   240	        assert Arrival() == Arrival()
+   241	        assert ByKey("ts") == ByKey("ts")
+   242	        assert ByKey("ts") != ByKey("name")
+   243	        assert {Arrival(), ByKey("ts")}  # hashable
+   244	        with pytest.raises(FrozenInstanceError):
+   245	            ByKey("ts").field = "name"
+   246	
+   247	    def test_unknown_ordering_refuses(self):
+   248	        with pytest.raises(OrderingError):
+   249	            totalize([rec("a")], "ts")  # type: ignore[arg-type]
+   250	
+   251	
+   252	class TestKeyFamilyRule:
+   253	    """`resolve_key_field` — which keys come from the envelope, which don't."""
+   254	
+   255	    def test_envelope_keys_come_off_the_envelope(self):
+   256	        record = {"id": "a", "ts": 5.0, "payload": {"n": 1}}
+   257	        assert resolve_key_field(record, "ts") == 5.0
+   258	        assert resolve_key_field(record, "id") == "a"
+   259	
+   260	    def test_a_payload_field_never_shadows_the_envelope(self):
+   261	        record = {"id": "a", "ts": 5.0, "payload": {"ts": 999.0, "id": "shadow"}}
+   262	        assert resolve_key_field(record, "ts") == 5.0
+   263	        assert resolve_key_field(record, "id") == "a"
+   264	
+   265	    def test_every_other_key_comes_off_the_payload(self):
+   266	        assert resolve_key_field({"id": "a", "payload": {"n": 7}}, "n") == 7
+   267	
+   268	    @pytest.mark.parametrize("payload", ["raw", 7, 1.5, True, ["a", "b"], None])
+   269	    def test_a_non_mapping_payload_has_no_fields_at_all(self, payload):
+   270	        """A scalar/list payload is a missing-K NON-MEMBER, not a crash.
+   271	
+   272	        `Fact` permits any JSON payload. A payload that is not a mapping has no
+   273	        field `n` in exactly the sense an absent field does, so the answer is
+   274	        the same `None` — exclusion by declaration. Calling `.get()` on it would
+   275	        raise AttributeError and take down every reader of the projection.
+   276	        """
+   277	        assert resolve_key_field({"id": "a", "payload": payload}, "n") is None
+   278	
+   279	    @pytest.mark.parametrize("payload", ["raw", 7, ["a"], None])
+   280	    def test_envelope_keys_are_unaffected_by_payload_shape(self, payload):
+   281	        """ts/id are always present regardless of what the payload carries."""
+   282	        record = {"id": "a", "ts": 5.0, "payload": payload}
+   283	        assert resolve_key_field(record, "ts") == 5.0
+   284	        assert resolve_key_field(record, "id") == "a"
+   285	
+   286	    def test_a_scalar_payload_record_is_excluded_from_the_projection(self):
+   287	        """The rule reaching `totalize`: non-member, and it does not raise."""
+   288	        records = [
+   289	            {"id": "a", "payload": "raw"},
+   290	            {"id": "b", "payload": {"n": 1}},
+   291	        ]
+   292	        ordered = totalize(records, ByKey("n"), get_field=resolve_key_field)
+   293	        assert [r["id"] for r in ordered] == ["b"]
+   294	
+   295	    def test_payload_resolution_is_one_definition(self):
+   296	        """`resolve_payload_key` is the shared half row-shaped readers use."""
+   297	        assert resolve_payload_key({"n": 1}, "n") == 1
+   298	        assert resolve_payload_key("raw", "n") is None
+   299	        assert resolve_payload_key(None, "n") is None
+
+exec
+/bin/zsh -lc 'git show 0b90c9ab''^:libs/atoms/tests/test_ordering.py | nl -ba | sed -n '"'90,190p'; git show 0b90c9ab:libs/atoms/tests/test_ordering.py | nl -ba | sed -n '90,170p'; rg -n \"inspect|getdoc|ALLOWED_UNATTRIBUTED|allowlist|docstring.*blame|non-comparison prose\" libs/atoms/src/atoms/ordering.py libs/atoms/tests/test_ordering.py" in /Users/kaygee/Code/loops
+ exited 1 in 0ms:
+    90	    def test_string_and_int_under_one_key_refuse(self):
+    91	        records = [rec("a", ts="5"), rec("b", ts=5)]
+    92	        with pytest.raises(OrderingError) as exc:
+    93	            totalize(records, ByKey("ts"))
+    94	        message = str(exc.value)
+    95	        assert "ts" in message
+    96	        assert "str" in message and "int" in message
+    97	
+    98	    def test_bool_is_not_int(self):
+    99	        records = [rec("a", flag=1), rec("b", flag=True)]
+   100	        with pytest.raises(OrderingError):
+   101	            totalize(records, ByKey("flag"))
+   102	
+   103	    def test_int_and_float_under_one_key_refuse(self):
+   104	        # Strict same-type refusal: no coercion, even across numeric types.
+   105	        records = [rec("a", ts=1), rec("b", ts=2.0)]
+   106	        with pytest.raises(OrderingError):
+   107	            totalize(records, ByKey("ts"))
+   108	
+   109	    def test_same_typed_values_that_do_not_compare_refuse(self):
+   110	        records = [rec("a", ts={"x": 1}), rec("b", ts={"y": 2})]
+   111	        with pytest.raises(OrderingError) as exc:
+   112	            totalize(records, ByKey("ts"))
+   113	        assert "do not compare" in str(exc.value)
+   114	
+   115	    def test_refusal_does_not_blame_the_key_when_the_ids_are_at_fault(self):
+   116	        # Equal K, so the sort falls through to the id tie-break — and THOSE
+   117	        # do not compare. The key values here are impeccable ints, so a
+   118	        # message naming "key values" would point at the wrong tuple element.
+   119	        records = [rec({"a": 1}, ts=1), rec({"b": 2}, ts=1)]
+   120	        with pytest.raises(OrderingError) as exc:
+   121	            totalize(records, ByKey("ts"))
+   122	        assert "(K, id)" in str(exc.value)
+   123	
+   124	    def test_records_missing_the_key_do_not_participate_in_the_type_check(self):
+   125	        records = [rec("a", ts=2), rec("b"), rec("c", ts=1)]
+   126	        assert [r["id"] for r in totalize(records, ByKey("ts"))] == ["c", "a"]
+   127	
+   128	
+   129	class TestRefusalAttribution:
+   130	    """The sort key is (K, id) — a refusal may not blame K by default.
+   131	
+   132	    The prose sweep for this posture has now missed a site twice (the two
+   133	    `Raises:` sections, then `OrderingError`'s own class contract), so it is a
+   134	    ratchet rather than review vigilance: every docstring in the module that
+   135	    describes what OrderingError means must either name the id side or not
+   136	    attribute the non-comparison at all.
+   137	    """
+   138	
+   139	    _ALLOWED_UNATTRIBUTED = (
+   140	        # The mixed-TYPE paragraph is genuinely about key values only: the
+   141	        # type-identity check reads K and never looks at the id.
+   142	        "Same-typed values that do not compare (dicts, say) are",
+   143	    )
+   144	
+   145	    def test_no_docstring_blames_the_key_alone_for_a_non_comparison(self):
+   146	        import inspect
+   147	
+   148	        import atoms.ordering as mod
+   149	
+   150	        sources = [inspect.getdoc(mod), inspect.getdoc(OrderingError)]
+   151	        for name in ("totalize", "is_suffix_stable"):
+   152	            sources.append(inspect.getdoc(getattr(mod, name)))
+   153	
+   154	        for doc in sources:
+   155	            if doc is None:
+   156	                continue
+   157	            for line in doc.splitlines():
+   158	                if "do not compare" not in line and "does not compare" not in line:
+   159	                    continue
+   160	                if any(ok in line for ok in self._ALLOWED_UNATTRIBUTED):
+   161	                    continue
+   162	                context = doc[max(0, doc.index(line) - 300) : doc.index(line) + 300]
+   163	                assert "id" in context, (
+   164	                    f"non-comparison prose attributes to the key alone: {line!r} — "
+   165	                    "the sort key is (K, id) and either element can be at fault"
+   166	                )
+   167	
+   168	    def test_the_runtime_message_matches_the_documented_posture(self):
+   169	        records = [rec({"d": 1}, ts=1), rec({"d": 2}, ts=1)]
+   170	        with pytest.raises(OrderingError) as excinfo:
+   171	            totalize(records, ByKey("ts"))
+   172	        assert "(K, id)" in str(excinfo.value)
+   173	
+   174	
+   175	class TestNonFiniteKeys:
+   176	    """`totalize` totalizes — so a key value that has no position refuses."""
+   177	
+   178	    def test_nan_refuses_naming_the_field_and_the_value(self):
+   179	        records = [rec("a", k=1.0), rec("b", k=float("nan")), rec("c", k=2.0)]
+   180	        with pytest.raises(OrderingError) as excinfo:
+   181	            totalize(records, ByKey("k"))
+   182	        message = str(excinfo.value)
+   183	        assert "'k'" in message  # the field
+   184	        assert "nan" in message.lower()  # the value
+   185	        assert "total order" in message  # the reason
+   186	
+   187	    def test_nan_refuses_under_every_input_permutation(self):
+   188	        """The old behavior was permutation-dependent — that is the bug."""
+   189	        for order in (["a", "b", "c"], ["c", "b", "a"], ["b", "a", "c"]):
+   190	            records = [
+    90	    def test_string_and_int_under_one_key_refuse(self):
+    91	        records = [rec("a", ts="5"), rec("b", ts=5)]
+    92	        with pytest.raises(OrderingError) as exc:
+    93	            totalize(records, ByKey("ts"))
+    94	        message = str(exc.value)
+    95	        assert "ts" in message
+    96	        assert "str" in message and "int" in message
+    97	
+    98	    def test_bool_is_not_int(self):
+    99	        records = [rec("a", flag=1), rec("b", flag=True)]
+   100	        with pytest.raises(OrderingError):
+   101	            totalize(records, ByKey("flag"))
+   102	
+   103	    def test_int_and_float_under_one_key_refuse(self):
+   104	        # Strict same-type refusal: no coercion, even across numeric types.
+   105	        records = [rec("a", ts=1), rec("b", ts=2.0)]
+   106	        with pytest.raises(OrderingError):
+   107	            totalize(records, ByKey("ts"))
+   108	
+   109	    def test_same_typed_values_that_do_not_compare_refuse(self):
+   110	        records = [rec("a", ts={"x": 1}), rec("b", ts={"y": 2})]
+   111	        with pytest.raises(OrderingError) as exc:
+   112	            totalize(records, ByKey("ts"))
+   113	        assert "do not compare" in str(exc.value)
+   114	
+   115	    def test_refusal_does_not_blame_the_key_when_the_ids_are_at_fault(self):
+   116	        # Equal K, so the sort falls through to the id tie-break — and THOSE
+   117	        # do not compare. The key values here are impeccable ints, so a
+   118	        # message naming "key values" would point at the wrong tuple element.
+   119	        records = [rec({"a": 1}, ts=1), rec({"b": 2}, ts=1)]
+   120	        with pytest.raises(OrderingError) as exc:
+   121	            totalize(records, ByKey("ts"))
+   122	        assert "(K, id)" in str(exc.value)
+   123	
+   124	    def test_records_missing_the_key_do_not_participate_in_the_type_check(self):
+   125	        records = [rec("a", ts=2), rec("b"), rec("c", ts=1)]
+   126	        assert [r["id"] for r in totalize(records, ByKey("ts"))] == ["c", "a"]
+   127	
+   128	
+   129	class TestRefusalAttribution:
+   130	    """The sort key is (K, id) — a refusal may not blame K by default.
+   131	
+   132	    Pinned on the RUNTIME message, which is what a caller actually reads: a
+   133	    non-comparison names the (K, id) pair whichever half is at fault.
+   134	    """
+   135	
+   136	    def test_the_runtime_message_matches_the_documented_posture(self):
+   137	        records = [rec({"d": 1}, ts=1), rec({"d": 2}, ts=1)]
+   138	        with pytest.raises(OrderingError) as excinfo:
+   139	            totalize(records, ByKey("ts"))
+   140	        assert "(K, id)" in str(excinfo.value)
+   141	
+   142	
+   143	class TestNonFiniteKeys:
+   144	    """`totalize` totalizes — so a key value that has no position refuses."""
+   145	
+   146	    def test_nan_refuses_naming_the_field_and_the_value(self):
+   147	        records = [rec("a", k=1.0), rec("b", k=float("nan")), rec("c", k=2.0)]
+   148	        with pytest.raises(OrderingError) as excinfo:
+   149	            totalize(records, ByKey("k"))
+   150	        message = str(excinfo.value)
+   151	        assert "'k'" in message  # the field
+   152	        assert "nan" in message.lower()  # the value
+   153	        assert "total order" in message  # the reason
+   154	
+   155	    def test_nan_refuses_under_every_input_permutation(self):
+   156	        """The old behavior was permutation-dependent — that is the bug."""
+   157	        for order in (["a", "b", "c"], ["c", "b", "a"], ["b", "a", "c"]):
+   158	            records = [
+   159	                rec(i, k=(float("nan") if i == "b" else 1.0)) for i in order
+   160	            ]
+   161	            with pytest.raises(OrderingError, match="total order"):
+   162	                totalize(records, ByKey("k"))
+   163	
+   164	    def test_infinities_are_allowed_and_order_deterministically(self):
+   165	        """Refusing these would overreach: they DO have positions."""
+   166	        for order in itertools.permutations(["a", "b", "c"]):
+   167	            values = {"a": float("inf"), "b": float("-inf"), "c": 0.0}
+   168	            records = [rec(i, k=values[i]) for i in order]
+   169	            assert [r["id"] for r in totalize(records, ByKey("k"))] == ["b", "c", "a"]
+   170	
+
+exec
+/bin/zsh -lc 'UV_CACHE_DIR=/private/tmp/loops-uv-cache uv run --package atoms pytest libs/atoms/tests/test_ordering.py -q' in /Users/kaygee/Code/loops
+ succeeded in 243ms:
+...............................................                          [100%]
+47 passed in 0.08s
+
+codex
+The focused ordering suite is green (`47 passed`). The implementation is structurally three complete stages at [ordering.py](/Users/kaygee/Code/loops/libs/atoms/src/atoms/ordering.py:242): all K types, then all K NaNs, then all projected IDs/ID NaNs; I’m probing category invariance across full permutations and overlapping failure conditions now.
+exec
+/bin/zsh -lc "UV_CACHE_DIR=/private/tmp/loops-uv-cache uv run --package atoms python - <<'PY'
+from itertools import permutations
+from atoms import ByKey, OrderingError, totalize
+
+def category(exc):
+    msg = str(exc).lower()
+    if \"mixed key types\" in msg: return \"MIXED_K\"
+    if \"nan key value\" in msg: return \"NAN_K\"
+    if \"nan tie-break id\" in msg: return \"NAN_ID\"
+    if \"do not compare\" in msg: return \"NONCOMPARE\"
+    return \"OTHER\"
+
+def run(labels, kvals, idvals=None):
+    records = [{\"id\": label, \"k\": kvals[label]} for label in labels]
+    getter = (lambda r: idvals[r[\"id\"]]) if idvals is not None else (lambda r: r[\"id\"])
+    try:
+        out = totalize(records, ByKey(\"k\"), get_id=getter)
+        return \"OK:\" + \",\".join(r[\"id\"] for r in out)
+    except OrderingError as exc:
+        return category(exc) + \":\" + str(exc).split(\" — \", 1)[0]
+
+nan = float(\"nan\")
+print(\"exact-r2\")
+for order in ((\"n\",\"i\"),(\"i\",\"n\")):
+    print(order, run(order, {\"n\":nan,\"i\":1}))
+
+print(\"mixed-plus-same-float-nan-all-permutations\")
+kvals = {\"n\":nan,\"f\":2.0,\"i\":1}
+print(sorted({run(order,kvals).split(\":\",1)[0] for order in permutations(kvals)}), \"count=6\")
+
+print(\"three-category-precedence\")
+for order in permutations((\"n\",\"f\",\"i\")):
+    result=run(order,{\"n\":nan,\"f\":2.0,\"i\":1},{\"n\":nan,\"f\":3.0,\"i\":4.0})
+    assert result.startswith(\"MIXED_K\"), (order,result)
+print(\"mixed K + NaN K + NaN id => MIXED_K (6/6)\")
+for order in permutations((\"n\",\"f\")):
+    result=run(order,{\"n\":nan,\"f\":2.0},{\"n\":nan,\"f\":3.0})
+    assert result.startswith(\"NAN_K\"), (order,result)
+print(\"same-type K with NaN K + NaN id => NAN_K (2/2)\")
+
+print(\"equal-K-NaN-id\")
+idvals={\"a\":nan,\"b\":2.0,\"c\":3.0}
+results=[run(order,{x:1.0 for x in idvals},idvals).split(\":\",1)[0] for order in permutations(idvals)]
+print(sorted(set(results)), \"count=6\")
+
+print(\"distinct-K-NaN-id\")
+kvals={\"a\":1.0,\"b\":2.0,\"c\":3.0}
+results=[run(order,kvals,idvals).split(\":\",1)[0] for order in permutations(kvals)]
+print(sorted(set(results)), \"count=6\")
+
+print(\"mixed-str-float-ids-with-nan\")
+idvals2={\"a\":nan,\"b\":\"bee\",\"c\":3.0}
+results=[run(order,{x:1.0 for x in idvals2},idvals2).split(\":\",1)[0] for order in permutations(idvals2)]
+print(sorted(set(results)), \"count=6\")
+
+print(\"string-nan-ids\")
+print(run((\"b\",\"a\"),{\"a\":1.0,\"b\":1.0},{\"a\":\"nana\",\"b\":\"nanb\"}))
+
+print(\"nonmember-nan-id-not-observed\")
+records=[{\"id\":\"included\",\"k\":1.0},{\"id\":\"excluded\"}]
+print([r[\"id\"] for r in totalize(records,ByKey(\"k\"),get_id=lambda r: nan if r[\"id\"]==\"excluded\" else \"included\")])
+PY" in /Users/kaygee/Code/loops
+ succeeded in 36ms:
+exact-r2
+('n', 'i') MIXED_K:mixed key types under declared key 'k': float and int (offending value 1)
+('i', 'n') MIXED_K:mixed key types under declared key 'k': int and float (offending value nan)
+mixed-plus-same-float-nan-all-permutations
+['MIXED_K'] count=6
+three-category-precedence
+mixed K + NaN K + NaN id => MIXED_K (6/6)
+same-type K with NaN K + NaN id => NAN_K (2/2)
+equal-K-NaN-id
+['NAN_ID'] count=6
+distinct-K-NaN-id
+['NAN_ID'] count=6
+mixed-str-float-ids-with-nan
+['NAN_ID'] count=6
+string-nan-ids
+OK:a,b
+nonmember-nan-id-not-observed
+['included']
+
+exec
+/bin/zsh -lc "UV_CACHE_DIR=/private/tmp/loops-uv-cache uv run --package atoms pytest libs/atoms/tests/test_ordering.py -q -k 'same_typed_values_that_do_not_compare_refuse or refusal_does_not_blame_the_key_when_the_ids_are_at_fault or runtime_message_matches_the_documented_posture' -vv" in /Users/kaygee/Code/loops
+ succeeded in 150ms:
+============================= test session starts ==============================
+platform darwin -- Python 3.13.11, pytest-9.0.2, pluggy-1.6.0 -- /Users/kaygee/Code/loops/.venv/bin/python3
+cachedir: .pytest_cache
+hypothesis profile 'default'
+rootdir: /Users/kaygee/Code/loops/libs/atoms
+configfile: pyproject.toml
+plugins: hypothesis-6.165.7, asyncio-1.3.0, cov-7.0.0
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 47 items / 44 deselected / 3 selected
+
+libs/atoms/tests/test_ordering.py::TestMixedTypes::test_same_typed_values_that_do_not_compare_refuse PASSED [ 33%]
+libs/atoms/tests/test_ordering.py::TestMixedTypes::test_refusal_does_not_blame_the_key_when_the_ids_are_at_fault PASSED [ 66%]
+libs/atoms/tests/test_ordering.py::TestRefusalAttribution::test_the_runtime_message_matches_the_documented_posture PASSED [100%]
+
+======================= 3 passed, 44 deselected in 0.08s =======================
+
+exec
+/bin/zsh -lc "UV_CACHE_DIR=/private/tmp/loops-uv-cache uv run --package atoms python - <<'PY'
+from atoms import ByKey, OrderingError, totalize
+cases = {
+    \"key-side\": [{\"id\":\"a\",\"k\":{\"x\":1}}, {\"id\":\"b\",\"k\":{\"y\":2}}],
+    \"id-side\": [{\"id\":{\"a\":1},\"k\":1}, {\"id\":{\"b\":2},\"k\":1}],
+}
+for label, records in cases.items():
+    try:
+        totalize(records, ByKey(\"k\"))
+    except OrderingError as exc:
+        print(f\"{label}: {exc}\")
+PY" in /Users/kaygee/Code/loops
+ succeeded in 0ms:
+key-side: records under declared key 'k' do not compare: '<' not supported between instances of 'dict' and 'dict' (the sort key is (K, id) — either element can be the non-comparable one)
+id-side: records under declared key 'k' do not compare: '<' not supported between instances of 'dict' and 'dict' (the sort key is (K, id) — either element can be the non-comparable one)
+
+codex
+All requested overlap attacks preserve the declared precedence: 6/6 permutations select mixed-K when mixed K, NaN K, and NaN ID coexist; removing mixed K makes 2/2 select NaN-K before NaN-ID. Equal-K, distinct-K, and mixed str/float ID cases all refuse as ID-side NaN in every permutation.
+exec
+/bin/zsh -lc 'UV_CACHE_DIR=/private/tmp/loops-uv-cache uv run --package atoms pytest libs/atoms/tests -q' in /Users/kaygee/Code/loops
+ succeeded in 10762ms:
+........................................................................ [ 13%]
+........................................................................ [ 27%]
+........................................................................ [ 41%]
+........................................................................ [ 55%]
+........................................................................ [ 69%]
+........................................................................ [ 83%]
+........................................................................ [ 97%]
+.............                                                            [100%]
+517 passed in 10.66s
+
+exec
+/bin/zsh -lc "git status --short && git diff --check d9a8ed7d..HEAD && rg -n \"_ALLOWED_UNATTRIBUTED|inspect\\.getdoc|test_no_docstring_blames|non-comparison prose|allowlist\" libs/atoms/src/atoms/ordering.py libs/atoms/tests/test_ordering.py || true" in /Users/kaygee/Code/loops
+ succeeded in 0ms:
+codex
+# Verdict: CONVERGED
+
+The remediation boundary is correct:
+
+```text
+docs/scratch/arrival-sliceC/sol-brief-r3.md
+libs/atoms/src/atoms/ordering.py
+libs/atoms/tests/test_ordering.py
+```
+
+`git diff --check d9a8ed7d..HEAD` passed, and the worktree remained clean.
+
+## Per-fix verdicts
+
+### 723dd535 — C-SOL-05 — PASS
+
+Read [ordering.py](/Users/kaygee/Code/loops/libs/atoms/src/atoms/ordering.py:242) lines 242–283 and [test_ordering.py](/Users/kaygee/Code/loops/libs/atoms/tests/test_ordering.py:202) lines 202–213.
+
+The refusal stages are separate complete passes: mixed K types, NaN K, then NaN ID.
+
+Exact r2 reproduction:
+
+```text
+('n', 'i') => MIXED_K: float and int (offending value 1)
+('i', 'n') => MIXED_K: int and float (offending value nan)
+```
+
+Additional attacks:
+
+```text
+mixed K + same-type float region containing NaN:
+  MIXED_K in 6/6 permutations
+
+mixed K + NaN K + NaN id:
+  MIXED_K in 6/6 permutations
+
+same-type K with NaN K + NaN id:
+  NAN_K in 2/2 permutations
+```
+
+The offending value changes with input order, as allowed; the category does not.
+
+### 3ad2933e + 7f71f1e6 — C-SOL-07 — PASS
+
+Read [ordering.py](/Users/kaygee/Code/loops/libs/atoms/src/atoms/ordering.py:199) lines 199–207 and lines 271–290; tests at [test_ordering.py](/Users/kaygee/Code/loops/libs/atoms/tests/test_ordering.py:181) lines 181–200.
+
+Probe output:
+
+```text
+equal K, one NaN id:             NAN_ID in 6/6 permutations
+distinct K on every record:      NAN_ID in 6/6 permutations
+mixed str/float ids with NaN:    NAN_ID in 6/6 permutations
+string "nan" ids:                OK:a,b
+excluded missing-K NaN-id row:   ['included']
+```
+
+The distinct-K case still refuses because every projected ID is validated before sorting. That matches the pinned deterministic interpretation: NaN is invalid on the ID side regardless of whether a particular dataset happens to exercise the tie-break.
+
+The message explicitly attributes the failure to the ID side. The docstring also documents that normal record IDs are strings and only a custom accessor produces float IDs.
+
+### 0b90c9ab — C-SOL-06 — PASS
+
+The behavioral runtime cases remain at [test_ordering.py](/Users/kaygee/Code/loops/libs/atoms/tests/test_ordering.py:109) lines 109–122 and lines 129–140.
+
+Focused result:
+
+```text
+3 passed, 44 deselected
+```
+
+Direct runtime evidence:
+
+```text
+key-side: ... do not compare ... (the sort key is (K, id) — either element can be the non-comparable one)
+
+id-side: ... do not compare ... (the sort key is (K, id) — either element can be the non-comparable one)
+```
+
+Residue search found no `_ALLOWED_UNATTRIBUTED`, `inspect.getdoc`, obsolete ratchet test, allowlist, or associated helper.
+
+## New findings
+
+None. No C-SOL-08+ findings.
+
+## Test proof
+
+```text
+focused ordering suite: 47 passed
+runtime attribution pins: 3 passed
+full atoms suite: 517 passed
+git diff --check: clean
+worktree: clean
+```
+
+**Overall: CONVERGED.**
+tokens used
+41,552

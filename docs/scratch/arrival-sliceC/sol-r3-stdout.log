@@ -1,0 +1,95 @@
+# Verdict: CONVERGED
+
+The remediation boundary is correct:
+
+```text
+docs/scratch/arrival-sliceC/sol-brief-r3.md
+libs/atoms/src/atoms/ordering.py
+libs/atoms/tests/test_ordering.py
+```
+
+`git diff --check d9a8ed7d..HEAD` passed, and the worktree remained clean.
+
+## Per-fix verdicts
+
+### 723dd535 — C-SOL-05 — PASS
+
+Read [ordering.py](/Users/kaygee/Code/loops/libs/atoms/src/atoms/ordering.py:242) lines 242–283 and [test_ordering.py](/Users/kaygee/Code/loops/libs/atoms/tests/test_ordering.py:202) lines 202–213.
+
+The refusal stages are separate complete passes: mixed K types, NaN K, then NaN ID.
+
+Exact r2 reproduction:
+
+```text
+('n', 'i') => MIXED_K: float and int (offending value 1)
+('i', 'n') => MIXED_K: int and float (offending value nan)
+```
+
+Additional attacks:
+
+```text
+mixed K + same-type float region containing NaN:
+  MIXED_K in 6/6 permutations
+
+mixed K + NaN K + NaN id:
+  MIXED_K in 6/6 permutations
+
+same-type K with NaN K + NaN id:
+  NAN_K in 2/2 permutations
+```
+
+The offending value changes with input order, as allowed; the category does not.
+
+### 3ad2933e + 7f71f1e6 — C-SOL-07 — PASS
+
+Read [ordering.py](/Users/kaygee/Code/loops/libs/atoms/src/atoms/ordering.py:199) lines 199–207 and lines 271–290; tests at [test_ordering.py](/Users/kaygee/Code/loops/libs/atoms/tests/test_ordering.py:181) lines 181–200.
+
+Probe output:
+
+```text
+equal K, one NaN id:             NAN_ID in 6/6 permutations
+distinct K on every record:      NAN_ID in 6/6 permutations
+mixed str/float ids with NaN:    NAN_ID in 6/6 permutations
+string "nan" ids:                OK:a,b
+excluded missing-K NaN-id row:   ['included']
+```
+
+The distinct-K case still refuses because every projected ID is validated before sorting. That matches the pinned deterministic interpretation: NaN is invalid on the ID side regardless of whether a particular dataset happens to exercise the tie-break.
+
+The message explicitly attributes the failure to the ID side. The docstring also documents that normal record IDs are strings and only a custom accessor produces float IDs.
+
+### 0b90c9ab — C-SOL-06 — PASS
+
+The behavioral runtime cases remain at [test_ordering.py](/Users/kaygee/Code/loops/libs/atoms/tests/test_ordering.py:109) lines 109–122 and lines 129–140.
+
+Focused result:
+
+```text
+3 passed, 44 deselected
+```
+
+Direct runtime evidence:
+
+```text
+key-side: ... do not compare ... (the sort key is (K, id) — either element can be the non-comparable one)
+
+id-side: ... do not compare ... (the sort key is (K, id) — either element can be the non-comparable one)
+```
+
+Residue search found no `_ALLOWED_UNATTRIBUTED`, `inspect.getdoc`, obsolete ratchet test, allowlist, or associated helper.
+
+## New findings
+
+None. No C-SOL-08+ findings.
+
+## Test proof
+
+```text
+focused ordering suite: 47 passed
+runtime attribution pins: 3 passed
+full atoms suite: 517 passed
+git diff --check: clean
+worktree: clean
+```
+
+**Overall: CONVERGED.**

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import subprocess
 
 from ._helpers import REPO_ROOT
 
@@ -21,6 +22,13 @@ from ._helpers import REPO_ROOT
 # genuinely lens" into "these are lens or hypothetical", which is exactly the
 # overclaim this rule exists to prevent. `libs/engine/mutants/` is an artifact
 # tree and is excluded everywhere.
+#
+# Two further narrowings, same principle. Only TRACKED files are judged — what
+# git ships is what "shipped prose" means, so an untracked local scratch file
+# is not a claim the repo makes. And `docs/scratch/` is excluded outright: it
+# is the working-notes tree, where briefs and receipts must be able to QUOTE
+# retired vocabulary verbatim to record what was superseded. Both are shrinks
+# of the judged set; the rule text and its semantics are unchanged.
 
 _TS_ORDER = re.compile(
     r"\(ts,\s*id\)|\(ts,\s*fact_id\)|\(ts,id\)|ORDER BY ts\b|"
@@ -144,6 +152,17 @@ _ALLOWLIST: set[tuple[str, str]] = {
 }
 
 
+def _tracked_files() -> set[str]:
+    """Repo-relative posix paths git tracks — the definition of "shipped"."""
+    out = subprocess.run(
+        ["git", "-C", str(REPO_ROOT), "ls-files"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return set(out.stdout.splitlines())
+
+
 def _scan_targets() -> list:
     """Every shipped-prose file this rule judges.
 
@@ -169,13 +188,16 @@ def _scan_targets() -> list:
     generators = REPO_ROOT / "spec" / "conformance"
     if generators.is_dir():
         targets.extend(sorted(generators.glob("generate_*.py")))
-    return [
-        p
-        for p in sorted(set(targets))
-        if "mutants" not in p.parts
-        and "__pycache__" not in p.parts
-        and ".venv" not in p.parts
-    ]
+    tracked = _tracked_files()
+    kept: list = []
+    for p in sorted(set(targets)):
+        if {"mutants", "__pycache__", ".venv"} & set(p.parts):
+            continue
+        rel = p.relative_to(REPO_ROOT).as_posix()
+        if rel not in tracked or rel.startswith("docs/scratch/"):
+            continue
+        kept.append(p)
+    return kept
 
 
 def _found_claims() -> set[tuple[str, str]]:

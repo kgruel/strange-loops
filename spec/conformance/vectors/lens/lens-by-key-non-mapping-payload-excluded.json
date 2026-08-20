@@ -1,0 +1,72 @@
+{
+  "name": "lens-by-key-non-mapping-payload-excluded",
+  "description": "Pins missing-K non-membership for a payload that is not a mapping at all. A Fact payload may be any JSON value, and a string, number or array has no field 'seq' in exactly the sense an absent field does \u2014 so it is excluded by declaration, identically to the missing-field and explicit-null postures. A reader that indexes into a non-mapping payload, coerces it, or raises on it is non-conformant: the record is readable under any other lens and only its MEMBERSHIP in this projection is at stake.",
+  "input": {
+    "kind": "record",
+    "members": {
+      "a": [
+        [
+          "01TESTULID0000000000000001",
+          {
+            "kind": "record",
+            "ts": 1000.0,
+            "payload": {
+              "seq": 2,
+              "note": "keyed"
+            },
+            "observer": "kyle",
+            "origin": ""
+          }
+        ],
+        [
+          "01TESTULID0000000000000002",
+          {
+            "kind": "record",
+            "ts": 2000.0,
+            "payload": "a_bare_string_payload",
+            "observer": "kyle",
+            "origin": ""
+          }
+        ]
+      ],
+      "b": [
+        [
+          "01TESTULID0000000000000003",
+          {
+            "kind": "record",
+            "ts": 3000.0,
+            "payload": [
+              1,
+              2,
+              3
+            ],
+            "observer": "kyle",
+            "origin": ""
+          }
+        ],
+        [
+          "01TESTULID0000000000000004",
+          {
+            "kind": "record",
+            "ts": 4000.0,
+            "payload": {
+              "seq": 1,
+              "note": "keyed_lower"
+            },
+            "observer": "kyle",
+            "origin": ""
+          }
+        ]
+      ]
+    },
+    "ordering": {
+      "by_key": "seq"
+    }
+  },
+  "expected": {
+    "lens_order": [
+      "01TESTULID0000000000000004",
+      "01TESTULID0000000000000001"
+    ]
+  }
+}

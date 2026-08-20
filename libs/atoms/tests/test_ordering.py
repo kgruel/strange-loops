@@ -4,7 +4,14 @@ from dataclasses import FrozenInstanceError
 
 import pytest
 
-from atoms import Arrival, ByKey, OrderingError, totalize
+from atoms import (
+    Arrival,
+    ByKey,
+    OrderingError,
+    resolve_key_field,
+    resolve_payload_key,
+    totalize,
+)
 
 
 def rec(id_, **fields):
@@ -148,3 +155,53 @@ class TestVariants:
     def test_unknown_ordering_refuses(self):
         with pytest.raises(OrderingError):
             totalize([rec("a")], "ts")  # type: ignore[arg-type]
+
+
+class TestKeyFamilyRule:
+    """`resolve_key_field` — which keys come from the envelope, which don't."""
+
+    def test_envelope_keys_come_off_the_envelope(self):
+        record = {"id": "a", "ts": 5.0, "payload": {"n": 1}}
+        assert resolve_key_field(record, "ts") == 5.0
+        assert resolve_key_field(record, "id") == "a"
+
+    def test_a_payload_field_never_shadows_the_envelope(self):
+        record = {"id": "a", "ts": 5.0, "payload": {"ts": 999.0, "id": "shadow"}}
+        assert resolve_key_field(record, "ts") == 5.0
+        assert resolve_key_field(record, "id") == "a"
+
+    def test_every_other_key_comes_off_the_payload(self):
+        assert resolve_key_field({"id": "a", "payload": {"n": 7}}, "n") == 7
+
+    @pytest.mark.parametrize("payload", ["raw", 7, 1.5, True, ["a", "b"], None])
+    def test_a_non_mapping_payload_has_no_fields_at_all(self, payload):
+        """A scalar/list payload is a missing-K NON-MEMBER, not a crash.
+
+        `Fact` permits any JSON payload. A payload that is not a mapping has no
+        field `n` in exactly the sense an absent field does, so the answer is
+        the same `None` — exclusion by declaration. Calling `.get()` on it would
+        raise AttributeError and take down every reader of the projection.
+        """
+        assert resolve_key_field({"id": "a", "payload": payload}, "n") is None
+
+    @pytest.mark.parametrize("payload", ["raw", 7, ["a"], None])
+    def test_envelope_keys_are_unaffected_by_payload_shape(self, payload):
+        """ts/id are always present regardless of what the payload carries."""
+        record = {"id": "a", "ts": 5.0, "payload": payload}
+        assert resolve_key_field(record, "ts") == 5.0
+        assert resolve_key_field(record, "id") == "a"
+
+    def test_a_scalar_payload_record_is_excluded_from_the_projection(self):
+        """The rule reaching `totalize`: non-member, and it does not raise."""
+        records = [
+            {"id": "a", "payload": "raw"},
+            {"id": "b", "payload": {"n": 1}},
+        ]
+        ordered = totalize(records, ByKey("n"), get_field=resolve_key_field)
+        assert [r["id"] for r in ordered] == ["b"]
+
+    def test_payload_resolution_is_one_definition(self):
+        """`resolve_payload_key` is the shared half row-shaped readers use."""
+        assert resolve_payload_key({"n": 1}, "n") == 1
+        assert resolve_payload_key("raw", "n") is None
+        assert resolve_payload_key(None, "n") is None

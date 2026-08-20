@@ -124,7 +124,24 @@ def resolve_key_field(record: Mapping[str, Any], field: str, /) -> Any:
     """
     if field in ENVELOPE_KEYS:
         return record.get(field)
-    payload = record.get("payload") or {}
+    return resolve_payload_key(record.get("payload"), field)
+
+
+def resolve_payload_key(payload: Any, field: str, /) -> Any:
+    """Resolve a non-envelope declared key against a fact payload.
+
+    The payload half of the family rule, split out so the row-shaped combined
+    read (which already holds the parsed payload) resolves through the SAME
+    definition rather than repeating ``.get()`` on its own.
+
+    A payload need not be a mapping — ``Fact`` permits any JSON value — and a
+    non-mapping payload has no fields at all. It is therefore a missing-K
+    NON-MEMBER of every payload-key projection, exactly as an absent field is:
+    ``None``, which :func:`totalize` reads as non-membership. Exclusion by
+    declaration, not a crash and not a coercion.
+    """
+    if not isinstance(payload, Mapping):
+        return None
     return payload.get(field)
 
 

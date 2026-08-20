@@ -343,3 +343,76 @@ class TestUntilTsStillCaps:
         assert p["_origin"] == ""
         assert p["seq"] == 0
         assert json.loads(json.dumps(p))  # plain JSON, no tuple leakage
+
+
+class TestNonMappingPayloads:
+    """A payload that is not a mapping has no fields — non-member, not a crash.
+
+    `Fact` permits any JSON payload and `SqliteStore` persists one, so these
+    build the member store through the REAL append path rather than seeding
+    rows: the point is that an ordinary emitter can produce the record that
+    used to take the combined read down with an AttributeError.
+    """
+
+    @staticmethod
+    def _member_store(db_path: Path, payloads: list) -> None:
+        from atoms import Fact
+
+        from engine import SqliteStore
+
+        store = SqliteStore(
+            path=db_path, serialize=lambda f: f.to_dict(), deserialize=Fact.from_dict
+        )
+        for i, payload in enumerate(payloads):
+            store.append(
+                Fact(kind="decision", ts=float(i + 1), observer="test", payload=payload)
+            )
+        store.close()
+
+    def test_a_scalar_payload_fact_is_excluded_from_a_payload_key_projection(
+        self, tmp_path, monkeypatch
+    ):
+        vpath, db = _single_member_vertex(tmp_path, monkeypatch)
+        self._member_store(db, ["raw", {"topic": "t", "n": 1}])
+
+        from engine.compiler import compile_vertex
+        from engine.declaration import load_declaration
+
+        ast = load_declaration(vpath)
+        _, payloads = _combined_read(
+            ast, vpath, compile_vertex(ast), return_payloads=True, ordering=ByKey("n")
+        )
+
+        assert [p["n"] for p in payloads["decision"]] == [1]
+
+    def test_an_envelope_key_still_orders_scalar_payload_rows(self):
+        """ts is read off the row, so payload shape cannot exclude the fact.
+
+        Pinned at the ordering layer rather than through the fold: the fold body
+        merges `_id`/`_ts` INTO the payload dict, so it cannot consume a
+        non-mapping payload at all. That limitation predates the declared
+        ordering and is not what this fix is about — what is pinned here is that
+        the ordering layer no longer raises on the way past.
+        """
+        from atoms import totalize
+
+        from engine.vertex_reader import _row_field, _row_id
+
+        rows = [
+            ("id-b", "decision", 2.0, "test", "", json.dumps("raw"), 2),
+            ("id-a", "decision", 1.0, "test", "", json.dumps(["x"]), 1),
+        ]
+        ordered = totalize(rows, ByKey("ts"), get_field=_row_field, get_id=_row_id)
+
+        assert [r[0] for r in ordered] == ["id-a", "id-b"]
+
+    def test_the_row_accessor_matches_the_mapping_one(self):
+        """One family rule, two spellings that must agree on every payload."""
+        from atoms import resolve_key_field
+
+        from engine.vertex_reader import _row_field
+
+        for payload in ("raw", 7, ["a"], None, {"n": 1}):
+            row = ("id-x", "decision", 1.0, "test", "", json.dumps(payload), 1)
+            record = {"id": "id-x", "ts": 1.0, "payload": payload}
+            assert _row_field(row, "n") == resolve_key_field(record, "n")

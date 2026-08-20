@@ -1,5 +1,7 @@
 """Ordering vectors — the declared read order and its one totalization."""
 
+from dataclasses import FrozenInstanceError
+
 import pytest
 
 from atoms import Arrival, ByKey, OrderingError, totalize
@@ -119,7 +121,7 @@ class TestVariants:
         assert ByKey("ts") == ByKey("ts")
         assert ByKey("ts") != ByKey("name")
         assert {Arrival(), ByKey("ts")}  # hashable
-        with pytest.raises(Exception):
+        with pytest.raises(FrozenInstanceError):
             ByKey("ts").field = "name"
 
     def test_unknown_ordering_refuses(self):

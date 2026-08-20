@@ -27,8 +27,12 @@ class OrderingError(Exception):
     """Raised when records cannot be ordered under the declared Ordering.
 
     A declaration error against the data — mixed key types under one declared
-    key, or key values that do not compare — not something a comparator may
-    paper over with a coercion.
+    key, a ``NaN`` key value, or sort-key elements that do not compare — not
+    something a comparator may paper over with a coercion.
+
+    The sort key is ``(K, id)``, so the non-comparable element may be EITHER
+    half: a raise here does not by itself blame the declared key. The runtime
+    message names which.
     """
 
     pass

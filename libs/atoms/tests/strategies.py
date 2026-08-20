@@ -1,11 +1,13 @@
 """Re-export of shared testing strategies from atoms.testing.strategies."""
 
 from atoms.testing.strategies import (
+    COMMON_KINDS,
     EDGE_FACT_IDS,
     EDGE_TIMESTAMPS,
     FOLD_KEY_EDGE_VALUES,
     SUB_MS_ANCHORS,
     SUB_MS_DELTAS,
+    RESERVED_KIND_PREFIX,
     SUB_MS_TIMESTAMPS,
     addresses,
     fact_and_id_lists,
@@ -13,6 +15,7 @@ from atoms.testing.strategies import (
     fact_lists,
     facts,
     fold_ops,
+    is_appendable_kind,
     json_keys,
     json_primitives,
     kinds,
@@ -26,11 +29,13 @@ from atoms.testing.strategies import (
 )
 
 __all__ = [
+    "COMMON_KINDS",
     "EDGE_FACT_IDS",
     "EDGE_TIMESTAMPS",
     "FOLD_KEY_EDGE_VALUES",
     "SUB_MS_ANCHORS",
     "SUB_MS_DELTAS",
+    "RESERVED_KIND_PREFIX",
     "SUB_MS_TIMESTAMPS",
     "addresses",
     "fact_and_id_lists",
@@ -38,6 +43,7 @@ __all__ = [
     "fact_lists",
     "facts",
     "fold_ops",
+    "is_appendable_kind",
     "json_keys",
     "json_primitives",
     "kinds",

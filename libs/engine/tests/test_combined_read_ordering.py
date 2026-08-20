@@ -202,6 +202,34 @@ class TestRowAccessors:
 
         assert _fold_ids(vpath, ordering=ByKey("n")) == ["K2", "K0"]
 
+    @pytest.mark.parametrize("column", ["kind", "observer", "origin"])
+    def test_non_envelope_columns_resolve_against_the_payload(
+        self, column: str, tmp_path, monkeypatch
+    ):
+        """Only ts/id are envelope keys — the other columns are NOT candidates.
+
+        The family rule (SPEC §9, ``atoms.resolve_key_field``) envelope-resolves
+        ``ts`` and ``id`` and nothing else, so ``ByKey('kind')`` here is an
+        ordinary declared key that happens to share a column's name. It reads
+        the PAYLOAD: the one fact carrying it in its payload is the whole
+        projection, and the three that don't are excluded by non-membership.
+
+        The fixture discriminates. Resolving the column instead would put every
+        fact in the projection (each row's envelope always carries all three),
+        ordered ``(column, id ASC)`` — and since these facts share a kind,
+        observer and origin, that is all four ids in id order.
+        """
+        vpath, db = _single_member_vertex(tmp_path, monkeypatch)
+        _seed_facts(db, [
+            {"id": "C0", "kind": "decision", "ts": 1000.0, "payload": {"topic": "t"}},
+            {"id": "C1", "kind": "decision", "ts": 2000.0,
+             "payload": {"topic": "t", column: "in-the-payload"}},
+            {"id": "C2", "kind": "decision", "ts": 3000.0, "payload": {"topic": "t"}},
+            {"id": "C3", "kind": "decision", "ts": 4000.0, "payload": {"topic": "t"}},
+        ])
+
+        assert _fold_ids(vpath, ordering=ByKey(column)) == ["C1"]
+
 
 class TestTheFetchMaterializesNativeOrder:
     """The row source, not the ordering, owns native order.

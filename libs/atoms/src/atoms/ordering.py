@@ -4,12 +4,15 @@ Ordering is DECLARED, never inferred. Two variants:
 
 - ``Arrival()`` — the substrate's native per-store order. The store yields it;
   this module never synthesizes it from record fields.
-- ``ByKey(field)`` — a projection ordered by one flat payload field, with the
-  record id as tie-break only.
+- ``ByKey(field)`` — a projection ordered by one declared key, with the record
+  id as tie-break only.
 
-``totalize()`` is the ONLY definition of the sort key. Readers (StoreReader,
-the combined read, the conformance lens generator) import it rather than
-growing near-copies of the same ``sort(key=...)`` line.
+``totalize()`` is the ONLY definition of the sort key, and
+``resolve_key_field()`` the ONLY definition of the key FAMILY rule (which keys
+come from the envelope, which from the payload). Readers (StoreReader, the
+combined read, the conformance lens generator and its runner) import them
+rather than growing near-copies of the same ``sort(key=...)`` line or the same
+``if field in ("ts", "id")`` branch.
 """
 
 from __future__ import annotations
@@ -42,10 +45,14 @@ class Arrival:
 
 @dataclass(frozen=True)
 class ByKey:
-    """Order by one flat payload field, id ascending as tie-break.
+    """Order by one declared key, id ascending as tie-break.
+
+    Where the key resolves is :func:`resolve_key_field`'s ruling, not this
+    dataclass's: ``ts`` and ``id`` against the record envelope, every other
+    key against the flat payload.
 
     Attributes:
-        field: Flat payload field name. Dotted paths are not this cut.
+        field: The declared key name. Dotted paths are not this cut.
 
     Example:
         ByKey(field="ts")
@@ -87,6 +94,38 @@ def is_suffix_stable(ordering: Ordering) -> bool:
             return False
         case _:
             raise OrderingError(f"unknown Ordering variant: {ordering!r}")
+
+
+#: Declared keys that resolve against the record ENVELOPE rather than the
+#: payload. Every other key is a flat payload field — including ``kind``,
+#: ``observer`` and ``origin``, which are stored columns but not key
+#: candidates on any surface.
+ENVELOPE_KEYS = ("ts", "id")
+
+
+def resolve_key_field(record: Mapping[str, Any], field: str, /) -> Any:
+    """Resolve a declared ordering key against an envelope+payload record.
+
+    The FAMILY RULE, one definition for every surface that reads facts as
+    ``{"id", "kind", "ts", "observer", "origin", "payload"}`` mappings:
+    ``ts`` and ``id`` come from the envelope, every other key from the flat
+    payload. A payload field named ``ts`` or ``id`` NEVER shadows the
+    envelope — one key, one source, so the same declaration cannot mean two
+    things depending on what a payload happens to carry.
+
+    ``ts`` is column-backed as a storage detail, not a change of semantics;
+    a surface that hands ``ts`` over as a ``datetime`` rather than the raw
+    REAL orders identically (the conversion is monotone) and stays
+    single-typed, so the strict type-identity check in :func:`totalize`
+    cannot fire on it.
+
+    Dotted paths are not in this schema. Missing → ``None``, which
+    :func:`totalize` reads as non-membership.
+    """
+    if field in ENVELOPE_KEYS:
+        return record.get(field)
+    payload = record.get("payload") or {}
+    return payload.get(field)
 
 
 def _default_get_field(record: Any, field: str) -> Any:

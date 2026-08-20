@@ -13,11 +13,12 @@ DECLARED key: `input.ordering`, defaulting to `{"by_key": "ts"}` when absent.
 - Declared non-default keys totalize the combined read's records through the
   atoms primitive, which owns the one `(K(record), id ASC)` definition.
 
-`_get_field` restates the generator's field resolver (`ts`/`id` from the
-envelope, everything else from the payload) — this module cannot import the
-generator, so the two are pinned to agree by
-`lens-by-key-payload-seq`, whose payload-key order disagrees with both its
-ts order and its id order.
+Field resolution is `atoms.resolve_key_field` (`ts`/`id` from the envelope,
+everything else from the payload) — the SAME function the generator and
+`StoreReader.ordered` bind, so the family rule is shared rather than restated
+per surface. `lens-by-key-payload-seq`, whose payload-key order disagrees with
+both its ts order and its id order, still catches a reader that resolves keys
+its own way.
 """
 
 from __future__ import annotations
@@ -28,7 +29,7 @@ from typing import Any
 
 import pytest
 from atoms import Fact
-from atoms.ordering import ByKey, OrderingError, totalize
+from atoms.ordering import ByKey, OrderingError, resolve_key_field, totalize
 from engine.sqlite_store import SqliteStore
 from engine.vertex_reader import vertex_facts
 
@@ -54,16 +55,8 @@ def _decode_ordering(wire: dict[str, Any] | None) -> ByKey:
     return ByKey(wire["by_key"])
 
 
-def _get_field(record: dict[str, Any], field: str) -> Any:
-    """`ts`/`id` from the envelope, every other key from the payload."""
-    if field in ("ts", "id"):
-        return record.get(field)
-    payload = record.get("payload") or {}
-    return payload.get(field)
-
-
 def _totalize_rows(rows: list[dict[str, Any]], ordering: ByKey) -> list[dict[str, Any]]:
-    return totalize(rows, ordering, get_field=_get_field, get_id=lambda r: r["id"])
+    return totalize(rows, ordering, get_field=resolve_key_field, get_id=lambda r: r["id"])
 
 
 def _load_vectors(vectors_dir: Path) -> list[Path]:
@@ -158,3 +151,54 @@ def test_lens_area_covers_both_key_families_and_a_refusal() -> None:
     assert DEFAULT_ORDERING in orderings, "ts family missing"
     assert any(o != DEFAULT_ORDERING for o in orderings), "no non-ts key family"
     assert refusals, "no refusal vector"
+
+
+#: An adversarial record set for the cross-surface check: the payload key
+#: `seq`, the envelope `ts` and the envelope `id` each impose a DIFFERENT
+#: order (mirroring `lens-by-key-payload-seq`), so two surfaces that disagree
+#: about where a key resolves cannot accidentally agree on the sequence.
+_CROSS_SURFACE_FACTS = [
+    ("01TESTULID0000000000000003", {"kind": "record", "ts": 1000.0,
+     "payload": {"seq": 2}, "observer": "kyle"}),
+    ("01TESTULID0000000000000001", {"kind": "record", "ts": 3000.0,
+     "payload": {"seq": 3}, "observer": "kyle"}),
+    ("01TESTULID0000000000000002", {"kind": "record", "ts": 2000.0,
+     "payload": {"seq": 1, "kind": "in-the-payload"}, "observer": "kyle"}),
+]
+
+
+@pytest.mark.parametrize(
+    "field,expected_size", [("ts", 3), ("id", 3), ("seq", 3), ("kind", 1)]
+)
+def test_ordered_and_the_lens_resolver_agree_on_the_key_family(
+    field: str, expected_size: int, tmp_path: Path
+) -> None:
+    """`StoreReader.ordered` and the conformance lens read one declaration alike.
+
+    The family rule (`ts`/`id` from the envelope, everything else from the
+    payload) is `atoms.resolve_key_field`, but sharing a function only helps
+    if every surface actually routes through it. This holds the two ends
+    against each other on all three arms: an envelope key that is
+    column-backed (`ts`), an envelope key that is the id itself, and a payload
+    key, and a stored column that is NOT an envelope key (`kind`), which
+    resolves against the payload like any other declared key. Under the
+    payload-only resolver `ordered` used to carry, the `ts` arm returns []
+    against a full lens order; under a resolver that treats every stored
+    column as envelope-backed, the `kind` arm returns all three.
+    """
+    from atoms import ByKey
+    from engine.store_reader import StoreReader
+
+    parent = _build_combine_vertex(
+        tmp_path, "record", {"a": [(fid, f) for fid, f in _CROSS_SURFACE_FACTS]}
+    )
+    rows = vertex_facts(parent, 0.0, float("inf"), kind="record")
+    lens_order = [r["id"] for r in _totalize_rows(rows, ByKey(field))]
+
+    with StoreReader(tmp_path / "a.db") as reader:
+        reader_order = [f["id"] for f in reader.ordered(len(rows), ByKey(field))]
+
+    assert reader_order == lens_order
+    # Guard against a vacuous pass: each arm's size is pinned, so an
+    # agreed-upon EMPTY projection can never stand in for agreement.
+    assert len(lens_order) == expected_size

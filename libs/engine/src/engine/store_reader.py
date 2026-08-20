@@ -216,14 +216,27 @@ class StoreReader:
         is no index for ``K``, by ruling; adding one is a later optimization a
         benchmark has to justify.
 
-        ``ByKey(K)`` resolves ``K`` against the fact's **payload**, the same
-        place every other key-addressed read on this class looks
-        (:meth:`fact_key_stats`, :meth:`key_prefixes`). A fact whose payload
-        lacks ``K`` is not in the ``ByKey(K)`` projection at all — a key names
-        what it projects and absence is non-membership, so the returned list
-        can be shorter than ``prefix``. Stored *columns* are not key candidates:
-        ``ts`` questions are event-time selectors (``as_of``) and the witness
-        axis, not this surface.
+        ``ByKey(K)`` resolves ``K`` through :func:`atoms.resolve_key_field` —
+        the one definition of the key FAMILY rule, shared with the combined
+        read's lens and the conformance vectors (SPEC §9): ``ts`` and ``id``
+        resolve against the record **envelope**, every other key against the
+        flat **payload**. One declaration, one projection, whatever surface
+        asks. A payload field named ``ts`` or ``id`` does NOT shadow the
+        envelope — that is what keeps ``ByKey('ts')`` from meaning two
+        different things depending on what a payload happens to carry.
+        ``ts`` being a stored column is an optimization detail here, not a
+        change of semantics; this surface hands it over as a ``datetime``,
+        which orders identically to the raw REAL and stays single-typed.
+
+        The other stored columns — ``kind``, ``observer``, ``origin`` — are
+        NOT key candidates on any surface: ``ByKey('kind')`` is a payload key
+        that almost no fact carries, and the projection is empty by
+        non-membership rather than grouping the stream by its column.
+
+        A fact that lacks ``K`` where ``K`` resolves is not in the
+        ``ByKey(K)`` projection at all — a key names what it projects and
+        absence is non-membership, so the returned list can be shorter than
+        ``prefix``.
 
         Facts only. Ticks carry no payload keys, and interleaving the two into
         one receipt-ordered stream was the migration bridge's job — that bridge
@@ -242,7 +255,7 @@ class StoreReader:
                 It propagates: a declaration error against the data is a
                 refusal to surface, not something to coerce past.
         """
-        from atoms import totalize
+        from atoms import resolve_key_field, totalize
 
         if prefix < 0:
             raise ValueError(f"ordered: prefix must be >= 0, got {prefix}")
@@ -255,7 +268,7 @@ class StoreReader:
         return totalize(
             [self._fact_row_to_dict(r) for r in rows],
             key,
-            get_field=lambda record, field: record["payload"].get(field),
+            get_field=resolve_key_field,
             get_id=lambda record: record["id"],
         )
 

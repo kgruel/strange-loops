@@ -203,6 +203,73 @@ class TestRowAccessors:
         assert _fold_ids(vpath, ordering=ByKey("n")) == ["K2", "K0"]
 
 
+class TestTheFetchMaterializesNativeOrder:
+    """The row source, not the ordering, owns native order.
+
+    A plain single-table SELECT happens to come back in rowid order today, so a
+    fixture built on a real store CANNOT tell the rowid sort apart from sqlite's
+    incidental scan order — drop the sort and the equivalence pin still passes.
+    That would leave Arrival() resting on an sqlite implementation detail. These
+    pin the contract directly: whatever order the query hands back, one store
+    yields arrival order and several yield rows as read.
+    """
+
+    class _StubConn:
+        def __init__(self, rows):
+            self._rows = rows
+            self.sql = None
+
+        def execute(self, sql, params=()):
+            self.sql = sql
+            return self
+
+        def fetchall(self):
+            return list(self._rows)
+
+    @staticmethod
+    def _row(fact_id: str, ts: float, rowid: int) -> tuple:
+        return (fact_id, "decision", ts, "test", "", "{}", rowid)
+
+    def test_one_store_is_sorted_into_arrival_order(self):
+        from engine.vertex_reader import _fetch_combined_rows
+
+        shuffled = [
+            self._row("F2", 3000.0, 3),
+            self._row("F0", 4000.0, 1),
+            self._row("F3", 2000.0, 4),
+            self._row("F1", 1000.0, 2),
+        ]
+        rows = _fetch_combined_rows(self._StubConn(shuffled), ["main"], None)
+        assert [r[0] for r in rows] == _ARRIVAL_IDS
+        assert [r[6] for r in rows] == [1, 2, 3, 4]
+
+    def test_several_stores_are_left_as_read(self):
+        """rowid is per-store across members, so sorting on it would be a lie."""
+        from engine.vertex_reader import _fetch_combined_rows
+
+        # Rowids chosen so a rowid sort would REORDER these — otherwise the
+        # assertion could not tell "left alone" from "sorted".
+        as_read = [
+            self._row("A1", 4000.0, 2),
+            self._row("B1", 1000.0, 1),
+            self._row("A2", 3000.0, 3),
+        ]
+        assert [r[0] for r in sorted(as_read, key=lambda r: r[6])] != ["A1", "B1", "A2"]
+
+        rows = _fetch_combined_rows(self._StubConn(as_read), ["main", "s1"], None)
+        assert [r[0] for r in rows] == ["A1", "B1", "A2"]
+
+    def test_until_ts_reaches_the_sql(self):
+        from engine.vertex_reader import _fetch_combined_rows
+
+        conn = self._StubConn([])
+        _fetch_combined_rows(conn, ["main"], 2500.0)
+        assert "WHERE ts <= ?" in conn.sql
+        conn2 = self._StubConn([])
+        _fetch_combined_rows(conn2, ["main"], None)
+        assert "WHERE" not in conn2.sql
+
+
 class TestUntilTsStillCaps:
     """The event-time cursor is orthogonal to the declared ordering."""
 

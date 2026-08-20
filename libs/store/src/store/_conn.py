@@ -76,8 +76,10 @@ def refuse_create_over_arrival_custody(target: Path, action: str) -> None:
     from its log, never written by a stranger.
 
     ``action`` names what the caller was about to do, so the refusal reads
-    as a sentence at each site. One home for the rule because two create
-    arms need it and a second spelling is a second thing to get wrong.
+    as a sentence at each site. One home for the rule, and ``_create``
+    enforces it itself, so any future create arm is safe by construction;
+    the only call-site guard left is receive's, whose create arm copies a
+    foreign db file and never passes through ``_create``.
     """
     from engine.probe import probe_target
 
@@ -103,11 +105,15 @@ def _create(path: Path) -> sqlite3.Connection:
     """Create a fresh store with canonical schema.
 
     Parent directories are created if needed.
-    Raises FileExistsError if the database file already exists.
+    Raises FileExistsError if the database file already exists, and
+    ArrivalCanonicalUnsupported if an arrival log holds custody of the
+    path (invariant 15 — enforced here so every create arm that mints a
+    store through this function is covered by construction).
     """
     path = Path(path)
     if path.exists():
         raise FileExistsError(f"Store already exists: {path}")
+    refuse_create_over_arrival_custody(path, "creating a store")
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(path))
     conn.execute("PRAGMA journal_mode=WAL")

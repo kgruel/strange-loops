@@ -97,25 +97,10 @@ _ALLOWLIST: set[tuple[str, str]] = {
         "spec/conformance/SCHEMA.md",
         "neither orders the fold. `(ts, id)` survives only as an explicit",
     ),
-    # SCHEMA §9: the lens conformance area itself — its whole subject is the
-    # (ts ASC, id ASC) read lens, defined against fold replay.
-    (
-        "spec/conformance/SCHEMA.md",
-        "The `lens` area pins the explicit `(ts ASC, id ASC)` **read lens**",
-    ),
-    (
-        "spec/conformance/SCHEMA.md",
-        "no shared receipt axis exists",
-    ),
-    # The lens generator's module docstring — same subject as SCHEMA §9.
-    (
-        "spec/conformance/generate_lens.py",
-        "pins the explicit `(ts, id)` READ LENS",
-    ),
-    (
-        "spec/conformance/generate_lens.py",
-        "reads fall back to `(ts ASC, id ASC)`",
-    ),
+    # SCHEMA §9 and the lens generator's module docstring held four entries
+    # until C5 rewrote that prose around DECLARED orderings. The rewritten text
+    # makes no claim this rule needs excused, so the entries were deleted —
+    # shrink-only, exercised.
     # The replay vector that pins the inversion. Its description names (ts, id)
     # in order to assert replay is NOT that.
     (

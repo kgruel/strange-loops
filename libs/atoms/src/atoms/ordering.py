@@ -59,6 +59,36 @@ Ordering = Arrival | ByKey
 R = TypeVar("R")
 
 
+def is_suffix_stable(ordering: Ordering) -> bool:
+    """Does appending a record extend this projection at its END?
+
+    A projection is suffix-stable when a newly appended record can only land
+    after every record already in it. `Arrival()` is: the substrate's native
+    order IS append order, so what arrives later sorts later, always.
+
+    `ByKey(K)` is NOT. A record's position is its key value, and a record
+    arriving now may carry any key — so an append is an INSERTION into the
+    middle of the projection, not an extension of its tail.
+
+    Consumers that hold a result computed over a prefix and want to extend it
+    with the newly arrived records — rather than recomputing over the whole
+    history — are sound only over a suffix-stable ordering. Engine's
+    incremental fold path is the consumer; this predicate is the taxonomy
+    fact it dispatches on.
+
+    Raises:
+        OrderingError: Unknown `Ordering` variant. A new variant must be
+            RULED suffix-stable or not, never defaulted.
+    """
+    match ordering:
+        case Arrival():
+            return True
+        case ByKey():
+            return False
+        case _:
+            raise OrderingError(f"unknown Ordering variant: {ordering!r}")
+
+
 def _default_get_field(record: Any, field: str) -> Any:
     if isinstance(record, Mapping):
         return record.get(field)

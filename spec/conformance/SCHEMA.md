@@ -322,9 +322,18 @@ An object containing:
 
 ## 9. Area: `lens`
 
-The `lens` area pins the explicit `(ts ASC, id ASC)` **read lens** — the event-time projection that survives now that fold replay is receipt order (§6).
+The `lens` area pins the **read lens** — the DECLARED projection a read is ordered under, now that fold replay is receipt order (§6).
 
-Fold replay orders by `rowid`, which is a per-store axis. A combine vertex reads across several member stores, where no shared receipt axis exists, so those reads fall back to the `(ts, id)` lens. That fallback is the only remaining place where timestamp tie-breaking and sub-millisecond timestamp precision carry ordering force, and it is what this area pins. A conforming implementation returns facts across member stores ordered by `ts` ascending, tie-broken by fact `id` ascending, independent of which member holds a fact and of the order each member received it.
+Fold replay orders by `rowid`, which is a per-store axis. A combine vertex reads across several member stores, where no shared receipt axis exists, so those reads must name the key they order by. The declaration is `input.ordering`; every ordering in this area is a `by_key` ordering, totalized as **`(K(record), id ASC)`** — the key first, the fact `id` ascending as tie-break ONLY, never as semantic time.
+
+Two rules bind every `by_key` ordering, and this area pins both:
+
+- **Missing K is non-membership.** A key names what it projects, so a record whose key is absent (or `null`) is NOT in the projection. This is exclusion by declaration, not silent loss.
+- **Mixed key types are refused.** Key values of different types under one declared key (`5` and `"5"`) have no order; a conforming implementation raises rather than coercing. Such a vector carries `expected.error` instead of `expected.lens_order`.
+
+**Field resolution.** `ts` and `id` resolve against the fact envelope; every other key resolves against the flat payload. Dotted paths are not in this schema.
+
+`ByKey("ts")` is the DEFAULT and the historical family: it is what a combined read falls back to when nothing else is declared, and it is the only remaining place where timestamp tie-breaking and sub-millisecond timestamp precision carry ordering force. Vectors in that family OMIT `input.ordering` entirely.
 
 ### `input` Schema
 
@@ -332,9 +341,13 @@ Fold replay orders by `rowid`, which is a per-store axis. A combine vertex reads
 |---|---|---|---|
 | `kind` | string | Yes | The fact kind to read. |
 | `members` | object | Yes | Mapping of member store label to an array of `[fact_id, Fact Object]` in that member's APPEND order. |
+| `ordering` | object | No | The declared read order, `{"by_key": <field>}`. Absent means the default, `{"by_key": "ts"}`. |
 
 ### `expected` Schema
 
+Exactly one of the two fields is present.
+
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `lens_order` | array of strings | Yes | Ordered array of fact IDs as returned by the combined read, in `(ts ASC, id ASC)` order. |
+| `lens_order` | array of strings | No | Ordered array of fact IDs in `(K(record), id ASC)` order under the declared ordering. Records missing the declared key are absent from this array. |
+| `error` | string | No | Present instead of `lens_order` when the declared ordering must REFUSE these records. `"OrderingError"` names the mixed-key-type refusal. |

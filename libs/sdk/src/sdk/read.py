@@ -13,11 +13,13 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from atoms import Arrival, Ordering, OrderingError
 from engine.declaration import load_declaration_status
 from engine.preflight import PreflightMode, read_preflight
 from engine.store_reader import StoreReader
 from engine.vertex_reader import (
     _resolve_stores,
+    resolve_ordering,
     vertex_fact_by_id,
     vertex_facts,
     vertex_query_facts,
@@ -55,6 +57,34 @@ __all__ = [
     "read_timeline",
     "sync_target",
 ]
+
+
+def _check_declared_ordering(ordering: Ordering | None, *, single_store: bool) -> None:
+    """Validate a declared read ordering against the axis this page path serves.
+
+    ``None`` is the whole of today's behavior: the defaults are already what the
+    paged read paths serve, so nothing reroutes. A DECLARED ordering must resolve
+    to that same axis — ``Arrival()`` single-store, ``ByKey('ts')`` aggregate,
+    with ``Arrival()`` on an aggregate refused by the one engine resolver. Any
+    other declared ordering is refused rather than approximated: ordering-aware
+    witness pagination is not this cut.
+
+    Raises:
+        SdkValueError: The ordering is refused, or names an axis paged reads do
+            not serve this cut.
+    """
+    if ordering is None:
+        return
+    try:
+        resolved = resolve_ordering(ordering, single_store=single_store)
+    except OrderingError as exc:
+        raise SdkValueError(str(exc)) from exc
+    served = resolve_ordering(None, single_store=single_store)
+    if resolved != served:
+        raise SdkValueError(
+            f"ordering {ordering!r} is not supported on a paged read this cut: "
+            f"this path serves {served!r}. Declare that, or omit ordering."
+        )
 
 
 def _ensure_reader(canonical_path: Path, index_path: Path) -> tuple[StoreReader, bool]:
@@ -248,6 +278,7 @@ def read_facts(
     kind: str | None = None,
     observer: str | None = None,
     order: str = "newest",
+    ordering: Ordering | None = None,
     before: str | None = None,
     after: str | None = None,
     include_internal: bool = False,
@@ -259,11 +290,14 @@ def read_facts(
         limit: Maximum number of facts to return.
         kind: Optional kind filter.
         observer: Optional observer identity filter.
-        order: Sort order. For a single-store vertex this is receipt order —
-            'oldest' is ascending rowid (the fold axis), 'newest' descending.
-            An aggregate vertex has no shared receipt axis across members, so
-            its pages come back on the ``(ts, id)`` read lens instead, reversed
-            for 'newest'.
+        order: Sort direction along the ordering axis — 'oldest' ascending,
+            'newest' descending.
+        ordering: Declared read ordering. ``None`` keeps today's axis: receipt
+            order for a single-store vertex, the ``(ts, id)`` read lens for an
+            aggregate. Declaring ``Arrival()`` on a multi-store aggregate is
+            refused — see :func:`engine.vertex_reader.resolve_ordering`. Only
+            the resolved default axis is supported this cut; any other declared
+            ordering is refused rather than silently approximated.
         before: Cursor token to fetch rows before (older than) the cursor in newest order.
         after: Cursor token to fetch rows after (newer than) the cursor in oldest order.
         include_internal: Whether to include internal `_decl.*` facts.
@@ -282,6 +316,10 @@ def read_facts(
         is_aggregate = decl_ast is not None and (
             decl_ast.combine is not None or decl_ast.discover is not None
         )
+        # read_facts keys on DECLARATION SHAPE, not member count: an aggregate's
+        # page comes off the (ts, id) lens whatever its member count, so that is
+        # the axis a declared ordering is checked against.
+        _check_declared_ordering(ordering, single_store=not is_aggregate)
 
         if is_aggregate:
             # Multi-store aggregate vertex
@@ -345,6 +383,9 @@ def read_facts(
             truncated=page.truncated,
             order=order,
         )
+
+    # A bare .db/.jsonl target is one store, so its axis is Arrival().
+    _check_declared_ordering(ordering, single_store=True)
 
     canonical = info.canonical_path or target_path
     index_path = info.index_path or canonical
@@ -687,20 +728,21 @@ def resolve_entity(
             decl_ast.combine is not None or decl_ast.discover is not None
         )
         if is_aggregate:
-            # Entity resolution must agree with the fold, so it mirrors
-            # _combined_read's member-count branch via the same helper.
+            # Entity resolution must agree with the fold, so it resolves the
+            # SAME ordering _combined_read does, off the same member count.
             #
-            # ONE member: that member's rowid IS the aggregate's receipt
-            # axis, so the fold replays in receipt order and resolution
-            # must too — a backdated re-assertion wins the fold, and the
-            # lens walk below would hand back the row it superseded.
+            # Arrival() (ONE member): that member's arrival axis IS the
+            # aggregate's, so the fold replays on it and resolution must too —
+            # a backdated re-assertion wins the fold, and the lens walk below
+            # would hand back the row it superseded.
             #
-            # TWO OR MORE: rowid is per-store, so no shared receipt axis
-            # exists. The combined read falls back to the event-time lens
-            # and every other combined surface reads through that same
-            # lens, so the lens walk below is the coherent answer.
+            # ByKey (TWO OR MORE): no cross-store arrival axis exists, so the
+            # combined read is an event-time lens projection and every other
+            # combined surface reads through that same lens — the lens walk
+            # below is the coherent answer.
             store_paths = _resolve_stores(decl_ast, target_path)
-            if len(store_paths) == 1 and store_paths[0].exists():
+            fold_ordering = resolve_ordering(None, single_store=len(store_paths) == 1)
+            if isinstance(fold_ordering, Arrival) and store_paths[0].exists():
                 member_reader = StoreReader(store_paths[0])
                 try:
                     return member_reader.resolve_entity_id(kind, key, value)

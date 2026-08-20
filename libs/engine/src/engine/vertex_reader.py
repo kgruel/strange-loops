@@ -22,6 +22,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from atoms import Arrival, ByKey, Ordering, OrderingError, totalize
+
 from .declaration import (
     decl_lineage_and_head_on,
     declaration_generation,
@@ -344,8 +346,80 @@ def _open_combined(store_paths: list[Path]) -> tuple[sqlite3.Connection, list[st
     return conn, aliases
 
 
+# Combined-read row shape: (id, kind, ts, observer, origin, payload, rowid).
+# ts is a sqlite REAL column, so column-backed ts values are always float —
+# the atoms strict type-identity check never sees an int/float mix here.
+_ROW_COLUMNS = {"id": 0, "kind": 1, "ts": 2, "observer": 3, "origin": 4}
+
+
+def _row_field(row: tuple, field: str) -> Any:
+    """Read a declared ordering key off a combined-read row.
+
+    Column-backed fields are read straight off the tuple; anything else is a
+    flat payload field and costs a JSON parse. The default orderings
+    (``Arrival()``, ``ByKey('ts')``) never reach the parse.
+    """
+    index = _ROW_COLUMNS.get(field)
+    if index is not None:
+        return row[index]
+    return json.loads(row[5]).get(field)
+
+
+def _row_id(row: tuple) -> str:
+    return row[0]
+
+
+def resolve_ordering(ordering: Ordering | None, *, single_store: bool) -> Ordering:
+    """Resolve the declared read ordering, applying the Q2 rule.
+
+    Single store: ``Arrival()`` by default — the substrate's native order,
+    which is also the fold axis. Aggregate: ``ByKey('ts')`` by default, the
+    event-time read lens. ``Arrival()`` on an aggregate is REFUSED.
+
+    Raises:
+        OrderingError: ``Arrival()`` declared on an aggregate read.
+    """
+    if ordering is None:
+        return Arrival() if single_store else ByKey("ts")
+    if not single_store and isinstance(ordering, Arrival):
+        raise OrderingError(
+            "Arrival() is not available on an aggregate read: arrival ordinals are "
+            "dense per-log, so a combined view of several stores has no cross-store "
+            "arrival total order. Declare ByKey(field) instead — e.g. ByKey('ts'), "
+            "the aggregate default."
+        )
+    return ordering
+
+
+def _fetch_combined_rows(
+    conn: sqlite3.Connection, aliases: list[str], until_ts: float | None
+) -> list[tuple]:
+    """All fact rows across the attached stores, in the store's native order.
+
+    A single store yields its native ARRIVAL order (rowid ascending) — that is
+    the store's job, not the declared ordering's. Across several stores rowid
+    is per-store and no native total order exists, so rows come back as read
+    and the caller's declared ``ByKey`` supplies the order.
+    """
+    ts_clause = " WHERE ts <= ?" if until_ts is not None else ""
+    selects = [
+        f"SELECT id, kind, ts, observer, origin, payload, rowid "
+        f"FROM {'[' + a + '].' if a != 'main' else ''}facts{ts_clause}"
+        for a in aliases
+    ]
+    sql = " UNION ALL ".join(selects)
+    params = (until_ts,) * len(aliases) if until_ts is not None else ()
+    rows = conn.execute(sql, params).fetchall()
+    # Sort in Python — avoids a SQLite index scan for the ORDER BY, which
+    # causes random I/O (~14ms vs ~1ms for unsorted read).
+    if len(aliases) == 1:
+        rows.sort(key=lambda r: r[6])
+    return rows
+
+
 def _combined_read(
     ast: Any, vertex_path: Path, specs: dict, *, observer: str | None = None,
+    ordering: Ordering | None = None,
     return_payloads: bool = False,
     until_ts: float | None = None,
 ) -> "dict[str, dict[str, Any]] | tuple[dict[str, dict[str, Any]], dict[str, list[dict]]]":
@@ -355,6 +429,10 @@ def _combined_read(
     then groups by kind and replays through specs. Single query avoids
     the SQLite cold-start penalty (~10ms) that would hit the first of
     N per-kind queries.
+
+    ``ordering`` declares the replay order. ``None`` resolves per
+    :func:`resolve_ordering` — ``Arrival()`` for a single store, ``ByKey('ts')``
+    for an aggregate, and ``Arrival()`` on an aggregate is refused.
 
     When ``return_payloads=True``, returns ``(raw_state, kind_payloads)``
     so callers can use the per-kind payload lists for retain_facts /
@@ -373,37 +451,26 @@ def _combined_read(
             return empty_raw, {k: [] for k in specs}
         return empty_raw
 
+    ordering = resolve_ordering(ordering, single_store=len(store_paths) == 1)
+
     conn, aliases = _open_combined(store_paths)
     try:
-        # Single query for all facts, fold-replay-ordered.
+        # Single query for all facts, then ordered by the DECLARED ordering.
         #
-        # Single store: receipt order (rowid ASC) — the ratified fold axis,
-        # matching StoreReader.facts_by_kind.
+        # Under Arrival() the fetch's native order stands: receipt order, the
+        # ratified fold axis, matching StoreReader.facts_by_kind. Under
+        # ByKey(K) the fold is a lens projection, not a receipt replay, and
+        # may disagree with an Arrival fold of the same facts — which is why
+        # a combined read (no cross-store arrival axis) is ByKey by rule.
         #
-        # Multiple stores: rowid is PER-STORE, so a combined view has no
-        # receipt axis to fold on. These reads fall back to the explicit
-        # (ts, id) READ LENS ordering — same rule as facts_in_range below.
-        # A combined fold is therefore a lens projection, not a receipt
-        # replay, and may disagree with a single-store fold of the same
-        # facts. Named interim state pending the multi-store receipt-order
-        # ruling.
-        single_store = len(aliases) == 1
-        ts_clause = " WHERE ts <= ?" if until_ts is not None else ""
-        selects = [
-            f"SELECT id, kind, ts, observer, origin, payload, rowid "
-            f"FROM {'[' + a + '].' if a != 'main' else ''}facts{ts_clause}"
-            for a in aliases
-        ]
-        sql = " UNION ALL ".join(selects)
-        params = (until_ts,) * len(aliases) if until_ts is not None else ()
-
-        rows = conn.execute(sql, params).fetchall()
-        # Sort in Python — avoids a SQLite index scan for the ORDER BY,
-        # which causes random I/O (~14ms vs ~1ms for unsorted read).
-        if single_store:
-            rows.sort(key=lambda r: r[6])
-        else:
-            rows.sort(key=lambda r: (r[2], r[0]))
+        # ByKey(K) on a payload field also drops facts lacking K from the
+        # fold INPUT: a key names what it projects, and the caller named K.
+        rows = totalize(
+            _fetch_combined_rows(conn, aliases, until_ts),
+            ordering,
+            get_field=_row_field,
+            get_id=_row_id,
+        )
 
         # Build kind → spec lookup, including sub-kind (dot-prefix) routing.
         # "thread.foo" → "thread" if "thread" is a spec kind.

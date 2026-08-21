@@ -1,12 +1,12 @@
 # Slice D — Surfaces: design proposal
 
-Status: **r2 — revised against codex DP-r1 findings, awaiting Kyle's ruling.**
+Status: **r3 — revised against codex DP-r2 findings, awaiting Kyle's ruling.**
 Five separately ratifiable decisions (D0–D4) plus a gate plan and work
 packages. r1 written 2026-08-20 against `feat/arrival-libs` @ `eeb05de8`;
-r2 revises it against the ten findings in
-`codex-design-r1-stdout.log` (7 MAJOR, 3 minor; verdict
-NOT-RATIFIABLE-AS-WRITTEN). Every finding's disposition is tabled at the end.
-No source file was modified.
+r2 revised it against the ten DP-r1 findings (7 MAJOR, 3 minor); the r2
+re-verify (`codex-design-r2-stdout.log`) passed 8/10 dispositions, failed
+DP-r1-03/-10, and raised DP-r2-01..04 — r3 answers those. All dispositions
+are tabled at the end. No source file was modified.
 
 ## The contract
 
@@ -116,14 +116,31 @@ The shared `FACT_INSERT_SQL`/`TICK_INSERT_SQL` grow the two columns, so an
 insert that fails to supply them fails loudly at the statement, not
 silently as NULL (DP-r1-03).
 
-**Schema invariants** (DP-r1-03 — enforced, not audited-for):
+**Schema invariants** (DP-r1-03/DP-r2-01 — real database constraints, not
+statement discipline):
 
-- After migration: `UNIQUE (arrival_ordinal, arrival_seq)` per table
-  (unique index), and NULL forbidden — SQLite can't retro-add `NOT NULL`,
-  so the uniqueness index plus a `CHECK`-equivalent enforcement at the
-  single insert statement carries it; the audit's NULL check (D3) is then a
-  backstop for out-of-band inserts, which is exactly the location claim it
-  should be.
+- **New databases**: `_SCHEMA_STMTS` declares the columns with
+  `arrival_ordinal INTEGER NOT NULL`, `arrival_seq INTEGER NOT NULL`, and a
+  table-level `UNIQUE (arrival_ordinal, arrival_seq)` per table. The
+  invariant lives in the table, so it binds every writer including foreign
+  SQL, and NOT NULL moots SQLite's NULLs-pass-unique-indexes hole.
+- **Existing databases — table rebuild, the honest SQLite mechanism**:
+  retro-added columns cannot be ALTERed to NOT NULL, so the migration is
+  the standard rebuild, per table, in ONE transaction:
+  `CREATE TABLE facts_new (...full schema incl. NOT NULL + UNIQUE...)`;
+  `INSERT INTO facts_new SELECT ..., <coordinate>, <seq> FROM facts`
+  (coordinate computed per mode: `rowid, 0` mirrored, or a join against a
+  temp id→(ord, seq) mapping staged by the log walk for arrival-canonical);
+  `DROP TABLE facts; ALTER TABLE facts_new RENAME TO facts`; same for
+  `ticks`; recreate the table's indexes; write the `coordinate_axis`
+  marker; commit. No foreign keys exist on these tables, so the rebuild
+  needs no FK dance. **Cost, stated:** one O(store) rewrite at first
+  post-upgrade writable open — the same order as the coordinate walk it
+  absorbs (the walk and the backfill are one pass), and it happens once
+  per database.
+- The audit's NULL check (D3) remains a backstop for databases that predate
+  the migration or were written by a foreign schema copy — a location
+  claim, exactly as before.
 - **Legacy allocator:** for a store with no arrival log, append assigns
   `arrival_ordinal = COALESCE((SELECT MAX(arrival_ordinal) FROM <table>), 0) + 1`,
   `arrival_seq = 0`, inside the same transaction as the insert — one
@@ -147,12 +164,38 @@ silently as NULL (DP-r1-03).
   stamping `(ord, seq)`; any mismatch between walk and index refuses into
   the existing escape hatch — `rederive_projections`, which rebuilds the
   index with coordinates written natively. The walk is O(store), once.
-- **Interrupted migration:** the backfill/stamp runs in one transaction per
-  table and writes a `store_meta` marker (`coordinate_axis = mirrored |
-  arrival`) in the same transaction. No marker ⇒ the migration has not
-  happened ⇒ `_ensure_index_schema` (whose existing column migrations this
-  extends, `arrival_projection.py:544-566`) runs it before the connection
-  is handed out. There is no observable half-migrated state.
+- **Migration dispatch — a common upgrader on every writable open**
+  (DP-r2-02: `_ensure_index_schema` sits on the projection-rederive path
+  only, `arrival_projection.py:479/:544`, while the shared
+  `FACT_INSERT_SQL`/`TICK_INSERT_SQL` change hits ordinary `SqliteStore`
+  and `JsonlStore` writers immediately, `sqlite_store.py:131`,
+  `jsonl_store.py:668`). One module-level function beside the schema
+  statements it extends — `ensure_coordinate_schema(conn, mode)` in
+  `sqlite_store.py` — invoked before any insert SQL runs, by every writer
+  of these tables, following the store's existing lazy-migration idiom
+  (`_ensure_chain_columns`/`_ensure_fact_signature_column`,
+  `sqlite_store.py:1495-1520`, already called from the write entry
+  points):
+  1. `SqliteStore` — from the same pre-write hooks that run the two
+     existing `_ensure_*` migrations, with `mode="mirrored"`;
+  2. `JsonlStore` — same hook pattern on its index connection,
+     `mode="mirrored"` (its index rows are row-granular append-order);
+  3. `ArrivalStore` — at open, `mode="arrival"`;
+  4. `arrival_projection._ensure_index_schema` — delegates to it,
+     `mode="arrival"`.
+  The mode is passed explicitly by the constructor that knows what it is;
+  where a connection is opened on an existing file without that knowledge,
+  it is derived authoritatively from the store's own markers — the
+  `ARRIVAL_LINEAGE_KEY` resume mark in `store_meta` means arrival, its
+  absence means mirrored — never guessed from file suffix.
+- **Interrupted migration:** the rebuild is one transaction per table and
+  the `store_meta` marker (`coordinate_axis = mirrored | arrival`) commits
+  inside the second table's transaction. Marker present ⇒ migrated, the
+  upgrader no-ops; absent ⇒ the rebuild runs (idempotently — a re-run of a
+  completed first table is a no-op rebuild). A crash between the two table
+  transactions leaves no half state a reader can observe: the marker is
+  absent, so the next writable open re-runs the whole upgrader. There is
+  no observable half-migrated state.
 
 **Scope-the-claim corollary.** `arrival_ordinal IS NULL` in a migrated
 index is evidence of an out-of-band insert. The check is spelled "this
@@ -402,12 +445,33 @@ could refuse a valid admission.
 
 **Arm 1, redesigned — verify the exact post-dedup admission rows:**
 
-1. Build the source's key registry by walking the source arrival log once —
-   the registry `verify_authorship` already constructs internally
-   (`arrival.py:1595-1640`: genesis self-certification + key-introduction
-   placement rules). Exposed as a small engine function
-   (`key_registry(log, verify)` — a refactor of existing code, not new
-   logic; `verify_authorship` becomes a consumer of it).
+1. Build the source's key registry with a **selective** walk — a new engine
+   function `key_registry(log, verify)`, specified exactly (DP-r2-03: a
+   straight refactor of `verify_authorship`'s loop would verify every
+   signed envelope, `arrival.py:1597/:1627`, and a deduplicated record with
+   a bad envelope would then refuse an admission it isn't part of —
+   violating G-D4-2 — while skipping all envelope verification would admit
+   forged key introductions):
+   - walk the whole log **structurally** (`ArrivalLog.walk` — density,
+     hashes, chain linkage come free; this much covers every record);
+   - **verify envelope signatures ONLY for registry-forming records**:
+     the genesis (self-certifying against its own `body["key"]`,
+     `arrival.py:1604-1616`) and every `KEY_INTRODUCTION_KIND` record —
+     including the authorization rule that the introduction's own
+     signature must verify under a key already valid for the introducing
+     record's observer before the named key joins the registry
+     (`arrival.py:1627-1648`). A registry-forming record that fails
+     verification refuses the merge: the key history itself is not
+     trustworthy;
+   - **do NOT verify any other record's envelope** — ordinary records'
+     envelope signatures are no part of the admission claim (G-D4-2);
+   - record each key's **introduction ordinal**; the registry's validity
+     rule is the ruled slice-A clause verbatim: a key is valid at position
+     N iff introduced at a position < N, or N is genesis and the record is
+     self-certifying.
+   `verify_authorship` becomes a consumer of the same registry machinery
+   plus its existing verify-every-envelope loop, so the two verbs share
+   one placement-rule implementation.
 2. For each **admitted** (post-dedup) fact row carrying a non-NULL
    signature: verify it against `fact_commitment_hash` — the same
    content-only commitment the live emit path signs
@@ -462,10 +526,18 @@ subsequent catch-up appends collide with nothing.
 **G-D0-4** — interrupted migration: kill between schema-add and stamp;
 reopen; the store answers correctly and the marker semantics hold (no
 observable half-state).
-**G-D0-5** — invariant enforcement: duplicate `(arrival_ordinal,
-arrival_seq)` insert refused; NULL-coordinate insert refused at the
-statement; legacy allocator monotonic under interleaved fact/tick appends
-in one transaction.
+**G-D0-5** — invariant enforcement **by the table**: on a migrated (rebuilt)
+and on a freshly-created database, a raw `conn.execute` INSERT with a
+duplicate `(arrival_ordinal, arrival_seq)` raises `IntegrityError`
+(UNIQUE), and one with NULL in either coordinate raises `IntegrityError`
+(NOT NULL) — foreign SQL included, no store-layer code in the loop; legacy
+allocator monotonic under interleaved fact/tick appends in one transaction.
+**G-D0-6** — ordinary legacy opens migrate (the DP-r1-10 re-fail gap):
+existing sqlite-canonical and jsonl-canonical fixture databases opened
+through their normal public constructors and appended to via the public
+API — the upgrader ran before the first insert, coordinates are correct
+and constrained, prior rows carry the mirror backfill, and a read-only
+open of an unmigrated database still answers reads.
 
 **G-D1-2** — `WitnessAggregateUnsupported` at all three sites,
 messages unchanged; A10 refusal messages byte-identical. Pinning tests
@@ -497,11 +569,13 @@ allowlist).
 **G-D3-1** — L1 detects: index behind arrival; out-of-band insert; edit to
 the last consumed row; **rewound marker** (mark ordinal < max indexed
 ordinal) — each with the expected coordinate in the message.
-**G-D3-2** — bounded work (replaces r1's impossible no-open condition):
-on a large healthy store, L1 verifies O(1) records (assert via the
-substrate's record-verification count or a proxy: L1 wall-time flat in
-store size while `--deep` is linear); L1 calls neither `ArrivalLog.read`
-nor `ArrivalLog.walk`.
+**G-D3-2** — bounded work, deterministically instrumented (DP-r2-04: no
+timing oracle): the harness counts record verifications (a test-scoped
+counter on the substrate's record-verification seam) and asserts exact
+bounds — on a healthy N-record store, L1 verifies exactly the anchor
+record (plus zero suffix records); on a store K records behind, exactly
+1 + K; `--deep` verifies N. L1 calls neither `ArrivalLog.read` nor
+`ArrivalLog.walk` (asserted by the same instrumentation).
 **G-D3-3** — torn arrival tail: L1 reports "behind", never "tampered".
 **G-D3-4** — derived `.jsonl` reordered: multiset audit agrees; a
 **duplicated line** is detected (the DP-r1-08 case); a removed line is
@@ -512,6 +586,11 @@ detected.
 succeeds (verification covers exactly the admission set).
 **G-D4-3** — split batch: surviving rows verified, admission succeeds;
 legacy source: admits with explicit no-claim (per D4-Q1 ruling).
+**G-D4-4** — forged key introduction (DP-r2-03): a source log whose
+key-introduction record carries a signature no previously-valid key
+verifies refuses the merge — even when every admitted row is ordinary;
+paired with G-D4-2 this pins the selective boundary exactly
+(registry-forming envelopes verified, ordinary envelopes not).
 
 **Fence check, every package:** `git ls-files` diff confined to
 `libs/engine/`, `libs/store/` — plus exactly the ruled D-Q2 apps/ touches
@@ -523,14 +602,17 @@ if granted.
 
 Sequenced by dependency; each is a fence for one implementer.
 
-**WP-1 · the coordinate (D0).** `arrival_projection.py`
-(`_ensure_index_schema` mode-aware migration + marker, `rederive_projections`
-native coordinates), `arrival_store.py` (catch-up indexer),
-`sqlite_store.py` (`FACT_INSERT_SQL`/`TICK_INSERT_SQL` + legacy allocator in
-`append`/`append_tick`), closure sweep of every other insert path
-(libs/store slice/rebirth writers). Plus the permuted-insert harness
-(G-D0-1) and the batch-bearing migration fixture (G-D0-3). Suites green on
-this package alone.
+**WP-1 · the coordinate (D0).** `sqlite_store.py`: the
+`ensure_coordinate_schema(conn, mode)` upgrader (table rebuild + marker),
+new-DB schema constraints, `FACT_INSERT_SQL`/`TICK_INSERT_SQL`, legacy
+allocator in `append`/`append_tick`, pre-write hook wiring beside the two
+existing `_ensure_*` migrations. `jsonl_store.py`: the same hook on its
+index connection. `arrival_store.py`: upgrader at open + catch-up indexer
+coordinates. `arrival_projection.py`: `_ensure_index_schema` delegation +
+`rederive_projections` native coordinates. Closure sweep of every other
+insert path (libs/store slice/rebirth writers). Plus the permuted-insert
+harness (G-D0-1), the batch-bearing migration fixture (G-D0-3), and the
+normal-open fixtures (G-D0-6). Suites green on this package alone.
 
 **WP-2 · witness + read path (D1).** `witness.py`, `store_reader.py`
 (`at_rowid` → `at_ordinal`, three query methods), `declaration.py:654-656`,
@@ -552,8 +634,10 @@ coordinates), the `ArrivalLog.anchor(mark)` substrate verb, multiset
 upgrade + wiring of `audit_derived_log` into `--deep`, and — if D-Q2 rules
 it in — the dispatch arm in `apps/loops/commands/store.py`.
 
-**WP-5 · admission (D4, if arm 1 is ruled in).** `key_registry` extraction
-in `arrival.py` (refactor of `verify_authorship`'s internals),
+**WP-5 · admission (D4, if arm 1 is ruled in).** `key_registry` in
+`arrival.py` — the SELECTIVE walk specified in D4 (registry-forming
+envelopes verified, ordinary envelopes not; shared placement-rule
+implementation with `verify_authorship`) —
 `libs/store/src/store/merge.py` per-row verification + refusal class.
 Independent of WP-2/3; parallel-safe.
 
@@ -594,10 +678,13 @@ ordering-authority phrase.
    strings byte-identical), or byte-verbatim including the stale word?
 7. **D0-Q2 — column naming.** `arrival_ordinal`/`arrival_seq` in full
    (recommended) or short forms?
-8. **D0 migration cost.** The arrival-canonical coordinate migration walks
-   the log once (O(store)) at first post-upgrade open. Accept the one-time
-   open cost (recommended; it is the same order as the catch-up any
-   behind index already pays), or gate it behind an explicit ceremony?
+8. **D0 migration cost** (r3 restated — the cost grew): the migration is
+   now a one-transaction **table rebuild** per table (the only SQLite
+   mechanism that yields real NOT NULL + UNIQUE constraints on existing
+   tables), absorbing the coordinate walk in the same pass — an O(store)
+   rewrite at first post-upgrade *writable* open, once per database;
+   read-only opens of unmigrated databases still answer. Accept
+   (recommended), or gate the rebuild behind an explicit ceremony?
 
 (r1's Q8 — the uniform-backfill option menu — is withdrawn: option (a) was
 falsified by DP-r1-02; the mode-aware migration in D0 replaces it. r1's Q3
@@ -611,11 +698,21 @@ premise is corrected per DP-r1-06.)
 |---|---|---|
 | DP-r1-01 | MAJOR | **Redesigned.** `_suffix_unindexed` split into two jobs; rewound-marker capability survives as the arrival-native `rewound` check (D3); anchor self-consistency limits stated ("Four things" §4). |
 | DP-r1-02 | MAJOR | **Redesigned.** Uniform backfill withdrawn; mode-aware migration — rowid mirror for genuinely-legacy indexes, log-derived coordinates (with rederive escape hatch) for arrival-canonical (D0). Counterexample gated as G-D0-3. |
-| DP-r1-03 | MAJOR | **Redesigned.** Uniqueness index, statement-level NULL closure, per-table transactional legacy allocator, `coordinate_axis` migration marker with no observable half-state, insert-path enumeration in WP-1; G-D0-4/5 gate it (D0). |
+| DP-r1-03 | MAJOR | **Redesigned in r2; FAILED re-verify; closed in r3** via DP-r2-01/02 below — table-level constraints and a universal writable-open upgrader replace the r2 statement-level story (D0). |
 | DP-r1-04 | MAJOR | **Redesigned.** Full construction+verification enumeration incl. `verify_chain` :1902/:1929, scans :1710/:1735/:1856, heads :786/:808; rowid ratchet G-D2-5; verification-under-permutation gate G-D2-4 (D2, WP-3). |
 | DP-r1-05 | MAJOR | **Redesigned.** `ArrivalLog.anchor(mark)` public verb; offset re-described as verified internal seek hint; claim scoped to "no byte-offset custody claim"; G-D3-2 rewritten as bounded-work assertion (D3). |
 | DP-r1-06 | MAJOR | **Redesigned.** Arm 1 now verifies post-dedup admission rows' carried fact signatures (`fact_commitment_hash`) under source key registry (`key_registry` extraction); unsigned/split/dedup cases defined; scope growth stated honestly; arm choice re-presented to Kyle (D4, Q3). |
 | DP-r1-07 | MAJOR | **Redesigned + escalated.** `fold.py:1525-1536` named; engine `baseline` field recommended; folded into D-Q2 as a forced scope ruling; G-D1-6 gates behavior (D1). |
 | DP-r1-08 | minor | **Redesigned.** `audit_derived_log` comparison upgraded to digest multisets; duplicate-line detection gated in G-D3-4 (D3, "Four things" §3). |
 | DP-r1-09 | minor | **Redesigned.** Separately-typed `WitnessAxisMismatch` refusal; A10 branches/messages byte-identical; `arrival_lineage: str | None` replaces the `""` conflation (D1). |
-| DP-r1-10 | minor | **Redesigned.** Gates added for every named gap (G-D0-3/4/5, G-D2-4/5, G-D1-6, G-D3-4-dup, G-D4-2/3); impossible G-D3-2 rewritten; non-discriminating G-D1-1 replaced by behavioral G-D1-5. |
+| DP-r1-10 | minor | **Redesigned in r2; FAILED re-verify; closed in r3** — G-D0-5 now asserts table-enforced refusals (raw-SQL IntegrityError), G-D0-6 covers ordinary legacy public-API opens, G-D4-4 covers forged key introductions, G-D3-2's timing proxy removed. |
+
+r2 re-verify (`codex-design-r2-stdout.log`): DP-r1-01/02/04/05/06/07/08/09
+PASS; the two FAILs above closed by r3. New findings:
+
+| finding | severity | disposition in r3 |
+|---|---|---|
+| DP-r2-01 | MAJOR | **Redesigned.** NULL/uniqueness enforcement moved into the table itself: native NOT NULL + UNIQUE for new DBs; one-transaction table rebuild for existing DBs (the only SQLite mechanism yielding retro constraints), absorbing the coordinate backfill in the same pass; cost stated and routed to Kyle as restated Q8 (D0). |
+| DP-r2-02 | MAJOR | **Redesigned.** `ensure_coordinate_schema(conn, mode)` in `sqlite_store.py`, invoked by every writable constructor/pre-write hook (SqliteStore, JsonlStore index, ArrivalStore, `_ensure_index_schema` delegating) following the existing `_ensure_*` lazy-migration idiom; mode explicit or derived from the store's own `ARRIVAL_LINEAGE_KEY` marker; G-D0-6 gates normal public-API legacy opens (D0, WP-1). |
+| DP-r2-03 | MAJOR | **Redesigned.** `key_registry` specified as a selective walk: structural over everything; envelope verification ONLY for genesis + key-introduction records including the previously-valid-key authorization chain (`arrival.py:1627-1648`); ordinary envelopes never verified; introduction ordinals recorded, slice-A validity clause verbatim; G-D4-4 (forged introduction) added beside G-D4-2 (D4, WP-5). |
+| DP-r2-04 | minor | **Redesigned.** G-D3-2's timing proxy deleted; mandatory record-verification call-count instrumentation with exact bounds (anchor-only healthy, 1+K behind, N for `--deep`). |

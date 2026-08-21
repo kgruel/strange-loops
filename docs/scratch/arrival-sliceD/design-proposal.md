@@ -1,8 +1,12 @@
 # Slice D — Surfaces: design proposal
 
-Status: **proposed, awaiting Kyle's ruling.** Five separately ratifiable
-decisions (D0–D4) plus a gate plan and work packages. Written 2026-08-20
-against `feat/arrival-libs` @ `eeb05de8`. No source file was modified.
+Status: **r2 — revised against codex DP-r1 findings, awaiting Kyle's ruling.**
+Five separately ratifiable decisions (D0–D4) plus a gate plan and work
+packages. r1 written 2026-08-20 against `feat/arrival-libs` @ `eeb05de8`;
+r2 revises it against the ten findings in
+`codex-design-r1-stdout.log` (7 MAJOR, 3 minor; verdict
+NOT-RATIFIABLE-AS-WRITTEN). Every finding's disposition is tabled at the end.
+No source file was modified.
 
 ## The contract
 
@@ -28,46 +32,52 @@ deferred once already).
 
 ---
 
-## Four things that are already true, and make D smaller than it looks
+## Four things that are true, and what each licenses (r2-corrected)
 
-Each was verified against source before anything below was designed. Each
-removes work the plan's prose implies.
+Each was verified against source; two of r1's four survived review intact,
+one was narrowed, one was overturned. What each now licenses is stated
+exactly.
 
-**1. The portable witness handle never carried a rowid.**
-`durable_handle` (`witness.py:550-568`) emits `fact:<lineage>/<id>` and
-refuses to serialize unadopted/genesis positions. The rowid lives only
-inside the in-memory `WitnessPosition`. Nothing in the tree writes a
-position to disk: `handle.py`'s `VertexHandle` checkpoint machinery holds
-`FactHead`/`TickHead`/`CursoredFact` in memory on an open handle
-(`handle.py:196-240`) and never serializes them — the only `open(`-class
-call in that module is `sqlite3.connect` at `handle.py:291`. **There is
-therefore no persisted-position migration story and no wire-format change
-in D1.** The compat surface is one process's lifetime.
+**1. The portable witness handle never carried a rowid, and nothing
+persists a position.** `durable_handle` (`witness.py:550-568`) emits
+`fact:<lineage>/<id>` and refuses to serialize unadopted/genesis positions;
+`handle.py`'s checkpoint machinery holds heads in memory only. **Licenses:**
+no persisted-position migration, no wire-format change in D1. **Does NOT
+license** "all rowid consumers are in libs/engine": app code compares
+in-memory `WitnessPosition.rowid` values to attribute a diff baseline
+(`apps/loops/src/loops/cli/views/fold.py:1525-1536`) — see D1 and DP-r1-07.
 
-**2. Tick commitments never contained a rowid.**
-`_tick_envelope` (`sqlite_store.py:158-166`) signs ten fields: id, name, ts,
-since, origin, payload, prev_hash, window_start, fact_cursor, window_hash.
-`window_start` and `fact_cursor` are **fact ids**. The rowid appears only in
-`_cursor_rowid` (`:1531`) and `_window_hash`'s selection clause (`:1547`),
-i.e. in how the window's row *set and order* are resolved — never in the
-bytes. **D2 can therefore preserve signed bytes exactly and keep every
-existing sealed chain verifiable**, provided the re-keyed selection
-enumerates the same rows in the same order. It does (see D2).
+**2. Tick commitments never contained a rowid.** `_tick_envelope`
+(`sqlite_store.py:158-166`) signs ten fields; `window_start` and
+`fact_cursor` are fact ids. The rowid appears only in how windows and edges
+are *resolved*. **Licenses:** signed bytes are untouched in D2 and old seals
+can stay verifiable — but only once every resolution site is re-keyed, on
+the verification path as well as construction (the r1 "three functions"
+blast radius was wrong; see D2), and only with a migration that assigns
+correct coordinates (the r1 backfill did not; see D0).
 
-**3. The set-membership jsonl comparison already exists.**
-`arrival_projection.audit_derived_log` (`:343`) re-derives the log and diffs
-digest **sets** (`_derived_digests`, `:313`). Slice D does not write it; D
-*wires* it into the audit surface. The dissolution test kills a whole
-proposed component here.
+**3. An order-insensitive derived-jsonl audit already exists — with set,
+not multiset, semantics.** `arrival_projection.audit_derived_log` (`:343`)
+diffs `set[bytes]` digests (`_derived_digests`, `:313`), so a *duplicated*
+legitimate line is invisible as an extra line. D3 wires it in and upgrades
+the comparison to digest **multisets** (a `Counter`), staying
+order-insensitive while making multiplicity part of the claim (DP-r1-08).
 
-**4. `_suffix_unindexed` exists only because the byte offset was an
-unverifiable self-report.** Its docstring says so: it turns "the suspect's
-own marker says so" into a claim the log supports. Under arrival, the
-consumed mark is structurally corroborated by the substrate —
-`ArrivalLog.walk_from`/`walk_marked` re-verify the anchor record at the
-mark's ordinal and reject a mark that does not match (`arrival.py:1165-1174`),
-and the records past it are enumerable directly. The corroboration probe has
-no job left. **`_suffix_unindexed` dissolves; it does not translate.**
+**4. `_suffix_unindexed`'s mechanism dissolves; its capability does not.**
+(r1 overclaimed here — DP-r1-01.) The check does two jobs
+(`canonical_audit.py:383-427`): (a) corroborate that the first line past the
+stamped mark is genuinely unindexed — the byte-marker self-report problem,
+which arrival's verified anchor genuinely retires; and (b) detect a
+**rewound marker** — a mark sitting *below* rows the index already consumed
+("the marker was rewound below rows the index consumed, which no writer
+produces", `:400-402`). Job (b) is a real detection that must survive.
+Arrival-native replacement: the index holds a row with
+`arrival_ordinal > consumed_ordinal` — a structural query, stronger than the
+one-line probe it replaces. It survives as the named check `rewound` in D3.
+Note also that `walk_marked`'s anchor check is *self-consistency only* —
+"checked for self-consistency, never for chaining back to genesis"
+(`arrival.py:1149`) — so no L1 claim may lean on anchor validation implying
+chain integrity; chain-to-genesis remains `--deep`'s scope.
 
 ---
 
@@ -81,68 +91,75 @@ no job left. **`_suffix_unindexed` dissolves; it does not translate.**
 | `arrival_ordinal INTEGER` | the ordinal of the arrival record this row was derived from |
 | `arrival_seq INTEGER` | this row's 0-based position within that record's `rows_of_record` expansion |
 
-Spelled in full to match the vocabulary already in the tree —
-`ARRIVAL_ORDINAL_KEY = "arrival_ordinal"` (`arrival_store.py:104`) and
-`ResumeMark.arrival_ordinal` (`arrival.py:682`). An abbreviated sibling
-(`arr_ord`) would be a second spelling of one coordinate. Flagged as
-**open question D0-Q2** in case Kyle prefers the short form at the column
-level; the rest of this document uses the long form.
+Spelled in full to match `ARRIVAL_ORDINAL_KEY = "arrival_ordinal"`
+(`arrival_store.py:104`) and `ResumeMark.arrival_ordinal` (`arrival.py:682`).
+(Open question D0-Q2 keeps the short-form alternative in front of Kyle.)
 
-`(arrival_ordinal, arrival_seq)` is the index's total order. It is written by the two —
-and only two — sites that already expand a record into rows:
-`arrival_store`'s catch-up indexer and `arrival_projection.rederive_projections`
-(`:500-509`), both of which consume `rows_of_record` and already hold the
-record's `ResumeMark`.
+`(arrival_ordinal, arrival_seq)` is the index's total order, per table.
+The two coordinate spaces are **per-table** in legacy stores (facts and
+ticks have independent rowid sequences today and no query compares a fact
+coordinate to a tick coordinate — windows select facts only, edges select
+newest-per-table) and **shared** in arrival-projected stores (the log's
+ordinal is one axis for all record types; density per table is not assumed
+anywhere).
 
-**Why this is not new state.** It is a projection column carrying a
-coordinate arrival already mints and already verifies. It is derived,
-rebuildable, and — unlike rowid — invariant under any re-derivation,
-including a shuffled one. The dissolution test was run: the alternative is
-resolving a coordinate by walking arrival on every witness resolve, every
-seal window bound, and every audit check, which is O(log) per call on the
-substrate's hot read path. `arrival_ordinal` is the memoization of that walk, and
-all three of D1/D2/D3 dissolve into it.
+**Write sites.** Arrival-projected rows get the real coordinate at the two
+— and only two — sites that expand a record into rows: `arrival_store`'s
+catch-up indexer (`_index_record`, `:342-360`) and
+`arrival_projection.rederive_projections` (`:500-509`), both of which hold
+the record's `ResumeMark`. Legacy stores get a mirrored coordinate at
+append time (below). **Every other insert path is enumerated and closed**
+in WP-1: `SqliteStore.append`/`append_tick` (`sqlite_store.py:746`), the
+slice/rebirth writers in `libs/store`, and the re-sign/re-anchor UPDATE
+paths (`sqlite_store.py:1710-1756` — updates only, no inserts, unaffected).
+The shared `FACT_INSERT_SQL`/`TICK_INSERT_SQL` grow the two columns, so an
+insert that fails to supply them fails loudly at the statement, not
+silently as NULL (DP-r1-03).
 
-**Why `arrival_seq` and not `ORDER BY arrival_ordinal, rowid`.** A batch record expands
-to N fact rows sharing one ordinal (`jsonl_codec.records_from_object:448-451`).
-Ordering those by rowid would reintroduce exactly the axis D exists to
-leave, under shuffle. `arrival_seq` is derived from the record's own row order,
-so the total order is arrival-derived end to end.
+**Schema invariants** (DP-r1-03 — enforced, not audited-for):
 
-**Legacy indexes (the NULL problem).** jsonl-canonical and sqlite-canonical
-indexes have rows predating these columns, and a legacy store must keep
-answering reads after upgrade without a forced rebuild. Three options:
+- After migration: `UNIQUE (arrival_ordinal, arrival_seq)` per table
+  (unique index), and NULL forbidden — SQLite can't retro-add `NOT NULL`,
+  so the uniqueness index plus a `CHECK`-equivalent enforcement at the
+  single insert statement carries it; the audit's NULL check (D3) is then a
+  backstop for out-of-band inserts, which is exactly the location claim it
+  should be.
+- **Legacy allocator:** for a store with no arrival log, append assigns
+  `arrival_ordinal = COALESCE((SELECT MAX(arrival_ordinal) FROM <table>), 0) + 1`,
+  `arrival_seq = 0`, inside the same transaction as the insert — one
+  allocator, per table, serialized by the store's existing write
+  transaction. For such a store the mirrored coordinate *is* its arrival
+  axis: dense, append-ordered, rebuild-invariant is vacuous (nothing
+  rebuilds it from a log), and identical to rowid order by construction.
 
-- **(a) Populate at insert for every store class.** `SqliteStore.append`
-  writes `arrival_ordinal = <next monotonic>`, `arrival_seq = 0`; `ArrivalStore` writes
-  the real coordinate. `_ensure_index_schema`'s `ALTER TABLE` backfills
-  existing rows with `arrival_ordinal = rowid, arrival_seq = 0` in the same idempotent
-  migration that already adds `signature` and the chain columns
-  (`arrival_projection.py:544-566`). One axis name, one query shape, no
-  per-mode fork anywhere above the schema.
-- (b) A per-mode axis switch at `canonical_mode`'s three arms — explicit,
-  but forks every witness/seal/audit query three ways.
-- (c) `COALESCE(arrival_ordinal, rowid)` at each query site — cheapest diff, but
-  makes every query silently dual-axis and defeats the provenance check
-  below.
+**Migration — mode-aware, not uniform** (DP-r1-02 replaced r1's option (a)):
 
-**Recommended: (a).** It is the only one where the coordinate vocabulary
-above the schema is single-valued, which is the point of the re-key. For a
-store with no arrival log, `arrival_ordinal` *is* its arrival axis — the statement
-is true, not a fudge.
+- **Legacy index (jsonl-/sqlite-canonical, no arrival log):** backfill
+  `arrival_ordinal = rowid, arrival_seq = 0`. Correct by construction —
+  rowid is that store's append order, and no batch record exists to share
+  an ordinal (legacy rows are row-granular).
+- **Arrival-canonical index:** rowid backfill is WRONG — a batch expands to
+  N rows sharing one ordinal (`arrival_store.py:342`), so `ordinal = rowid`
+  mints coordinates the log never issued and collides with the next
+  catch-up (the DP-r1-02 counterexample). The migration instead re-derives
+  coordinates **from the log**: walk `rows_of_record` over the records up
+  to the stamped consumed mark, matching row ids in index order and
+  stamping `(ord, seq)`; any mismatch between walk and index refuses into
+  the existing escape hatch — `rederive_projections`, which rebuilds the
+  index with coordinates written natively. The walk is O(store), once.
+- **Interrupted migration:** the backfill/stamp runs in one transaction per
+  table and writes a `store_meta` marker (`coordinate_axis = mirrored |
+  arrival`) in the same transaction. No marker ⇒ the migration has not
+  happened ⇒ `_ensure_index_schema` (whose existing column migrations this
+  extends, `arrival_projection.py:544-566`) runs it before the connection
+  is handed out. There is no observable half-migrated state.
 
-**Scope-the-claim corollary.** `arrival_ordinal IS NULL` is evidence of an
-out-of-band insert **only in an arrival-canonical index that has been
-migrated**. Under (a) the backfill makes NULL impossible in legacy rows, so
-the check is safe — but it must be spelled as "this arrival-canonical index
-holds a row carrying no arrival coordinate", a location claim scoped to
-arrival stores, never "this store is clean".
-
-**Legacy rows are row-granular.** The backfill gives each legacy row a
-distinct `arrival_ordinal = rowid` with `arrival_seq = 0`, so D1-Q1's
-record-granularity semantics apply only to arrival-projected rows. True by
-construction; worth stating so nobody looks for batch behavior in a
-pre-arrival store.
+**Scope-the-claim corollary.** `arrival_ordinal IS NULL` in a migrated
+index is evidence of an out-of-band insert. The check is spelled "this
+index holds a row carrying no arrival coordinate" — a location claim,
+never "this store is clean" — and after DP-r1-03's statement-level closure
+it should never fire except on genuinely foreign writes, which is what an
+audit backstop is for.
 
 ---
 
@@ -153,138 +170,146 @@ pre-arrival store.
 ```python
 @dataclass(frozen=True)
 class WitnessPosition:
-    fact_id: str            # unchanged — the durable handle
-    arrival_lineage: str    # NEW — the log whose ordinal axis this indexes
-    ordinal: int            # REPLACES rowid — the arrival record cutoff; -1 = empty prefix
-    seq: int                # unchanged meaning — count of rows at-or-before
-    lineage: str | None     # unchanged — the store's own_lineage (declaration lineage)
-    unadopted: bool         # unchanged
-    anchor: TickAnchor | None   # unchanged
-    store: str              # unchanged
+    fact_id: str              # unchanged — the durable handle
+    arrival_lineage: str | None  # NEW — the log whose ordinal axis this indexes;
+                              # None = no arrival axis (legacy store / storeless bootstrap)
+    ordinal: int              # REPLACES rowid — the arrival record cutoff; -1 = empty prefix
+    seq: int                  # unchanged meaning — count of rows at-or-before
+    lineage: str | None       # unchanged — the store's own_lineage (declaration lineage)
+    unadopted: bool           # unchanged
+    anchor: TickAnchor | None # unchanged
+    store: str                # unchanged
 ```
 
 `lineage` and `arrival_lineage` are **different identities and both stay**:
-`lineage` is the store's `own_lineage` declaration marker, which is what A10
-qualifies a portable handle by; `arrival_lineage` names the coordinate axis
-the `ordinal` indexes. Collapsing them would be the subtle error available
-here.
+`lineage` is what A10 qualifies a portable handle by; `arrival_lineage`
+names the coordinate axis. r2 change (DP-r1-09): the no-axis state is
+`None`, not `""` — r1's empty-string spelling conflated "legacy store-local
+axis" with "storeless bootstrap", and `None` makes axis-absence explicit
+and unequal to every real lineage. The same-path replacement guard (below)
+fires only when **both** sides carry a real axis.
 
-**Empty-prefix sentinel.** Today `rowid = 0` is the empty prefix because
-rowids start at 1. Arrival ordinals start at 0 (genesis), so the empty
-prefix is `ordinal = -1`. Genesis is structural and projects no rows
-(`arrival_projection._projects`), so `arrival_ordinal <= 0` and `arrival_ordinal <= -1` in
-fact select the same empty set — but `-1` is the honest spelling and the one
-that survives a future projecting-genesis grammar. `handle.py:852-855`'s
-storeless bootstrap moves to `ordinal=-1, arrival_lineage=""`.
+**Empty-prefix sentinel.** Today `rowid = 0`; arrival ordinals start at 0
+(genesis), so the empty prefix is `ordinal = -1`. Genesis projects no rows,
+so the selected set is unchanged; `-1` is the honest spelling.
+`handle.py:852-855`'s storeless bootstrap moves to
+`ordinal=-1, arrival_lineage=None`.
 
-**Selection.** Every `rowid <= ?` cutoff becomes `arrival_ordinal <= ?`. The sites
-are enumerated in e2/e6 and are all inside libs/engine:
-`store_reader.facts_between` (`:631`), `facts_by_kind` (`:677`),
-`query_facts` pagination (`:809-816`, `<`/`>`), `declaration._decl_lineage_and_head_on_conn`
-(`:654-656`), `witness._resolve_witness_position_on_conn`'s seq count (`:317`),
-`witness.diff_interval_report` (`:624-641`), `witness._resolve_anchor`. The
-`at_rowid: int | None` parameter name on `store_reader` moves to
-`at_ordinal: int | None` in the same change — it is coordinate vocabulary,
-and leaving it is exactly the residue the dissolution rule forbids.
+**Selection.** Every `rowid <= ?` cutoff becomes `arrival_ordinal <= ?`
+(record-granular arm; see D1-Q1 for the composite alternative). Enumerated
+sites, all libs/engine: `store_reader.facts_between` (`:631`),
+`facts_by_kind` (`:677`), `query_facts` pagination (`:809-816`),
+`declaration._decl_lineage_and_head_on_conn` (`:654-656`),
+`witness._resolve_witness_position_on_conn` seq count (`:317`),
+`witness.diff_interval_report` (`:624-641`), `witness._resolve_anchor`.
+The fold-replay and event-cursor prefix queries
+(`sqlite_store.py:1203-1292`, `:1359`, `:1402`, `:2018-2069` — "FOLD REPLAY
+ORDER is receipt order (rowid)") re-key to
+`ORDER BY arrival_ordinal, arrival_seq` in the same package: they are the
+ordering-authority read path the coordinate exists for. `at_rowid` →
+`at_ordinal` rides along; leaving it is forbidden residue.
 
-**Non-arrival stores.** `resolve_witness_position` against a jsonl- or
-sqlite-canonical store sets `arrival_lineage=""` — the same spelling as the
-storeless bootstrap, meaning "this store's axis is its own". The new
-same-path replacement guard below is therefore scoped to arrival-canonical
-stores only: a legacy store has no log to compare a lineage against, and the
-guard must not fire there.
+**The app-side rowid consumer** (DP-r1-07 — r1's "all sites inside
+libs/engine" was false). `fold.py:1525-1536` picks the diff baseline by
+comparing `pos1.rowid`/`pos2.rowid`. Two designs, Kyle rules (merged into
+open question D-Q2 with the audit dispatch, since both are apps/ touches):
 
-**Serialization / compat.** `durable_handle` is **unchanged, verbatim**.
-Nothing persists a position (finding 1 above). No migration.
+- **(i) Engine primitive (recommended).** `diff_interval_report` already
+  computes the baseline; it gains a `baseline` field naming which input
+  position is the lower endpoint. The app reads the field instead of
+  comparing coordinates — the knowledge moves to the layer that owns it
+  (the comment at `fold.py:1529-1536` documents that only attribution, not
+  computation, belongs to the app). App diff: a few lines in one function.
+- (ii) A public ordering predicate (`WitnessPosition.precedes(other)`, same
+  refusals as `diff_interval_report`) — keeps the comparison app-side but
+  re-keyed. Still touches apps/.
+
+**Serialization / compat.** `durable_handle` unchanged, verbatim. No
+migration.
 
 **Same-lineage re-resolution** (`verify_position_for_store:466-516`) keeps
-its exact structure and both refusals verbatim. Only the closing comment's
-rationale improves: today it re-resolves because "append order is per-store,
-so a merge that copied the fact reorders it"; under the re-key it
-re-resolves because **the target store's arrival log is a different lineage,
-so the source ordinal indexes an axis that does not exist here** — a
-stronger statement of the same refusal. Add a cheap structural guard at the
-top of the same-store arm: if `at.arrival_lineage` does not match the target
-log's lineage, refuse even when the paths match (a store file replaced
-in place under the same path). This *strengthens* A10 without altering its
-message.
+its exact structure and both refusal branches **byte-identical, messages
+included** (DP-r1-09 tightened this): the new same-path guard — target is
+arrival-canonical, position carries a real `arrival_lineage`, and it does
+not match the target log's lineage (a store file replaced in place under
+the same path) — raises a **separately-typed refusal**
+(`WitnessAxisMismatch`, name final at implementation) rather than reusing
+the A10 message for a failure A10's prose does not describe. A10's
+branches, conditions, and messages do not change.
 
 **Proof the verbatim criteria survive.** `WitnessAggregateUnsupported`
 (`witness.py:98-106`) is raised at three sites (`vertex_reader.py:1216`,
-`:1613`, `:1692`) on a purely structural condition — "the read is a
-combine/discover aggregate" — which mentions no coordinate. Its raise
-conditions and messages are untouched by D1. The A10 refusal
-(`WitnessLineageMismatch`, `witness.py:109-119`) keys on `at.lineage` and
-`at.store`, neither of which changes. Both are pinned by
-`libs/engine/tests/test_witness_position.py` and
-`libs/engine/tests/test_diff_interval_report.py`, which match on message
-substrings (`"an UNADOPTED handle is session-local to its own store"`,
-`"does not match this store's lineage"`) — those substrings must not move.
+`:1613`, `:1692`) on a structural condition mentioning no coordinate; raise
+conditions and messages untouched. The A10 refusal (`WitnessLineageMismatch`,
+`witness.py:109-119`) keys on `at.lineage`/`at.store`, neither changes.
+One nuance is escalated rather than fudged: the class docstring of
+`WitnessAggregateUnsupported` says positions "resolve against one store's
+rowid axis" — open question D-Q6 rules whether correcting that one stale
+word inside the docstring violates "VERBATIM" (raise sites and message
+strings stay byte-identical either way).
 
-**Open question D1-Q1 — batch granularity.** An ordinal cutoff is
-record-granular: a fact inside a batch resolves to its record's ordinal, so
-the prefix includes its batch siblings. Today's rowid cutoff can stand
-*inside* a batch. Recommended: **record granularity** — a ceremony is
-admitted atomically, so no witness should stand inside one, and it keeps the
-cutoff a single integer. Named consequence Kyle must accept: resolving
-`seq:N` where N lands mid-batch returns a position whose `seq` is greater
-than N, breaking `seq` round-trip for that case. The alternative is a
-`(arrival_ordinal, arrival_seq)` composite cutoff, which restores intra-batch
-addressing at the cost of a two-field comparison in every query. Kyle rules;
-either way the gate carries the named round-trip test (G-D1-3).
+**Open question D1-Q1 — batch granularity** (unchanged from r1). Record-
+granular ordinal cutoff (recommended; a ceremony is atomic; costs `seq:N`
+round-trip mid-batch — G-D1-3 pins the ruled answer) vs
+`(arrival_ordinal, arrival_seq)` composite cutoff (restores intra-batch
+addressing; two-field comparison everywhere).
 
 ---
 
 ## D2 — Seal re-base
 
-**What changes.** Three functions in `sqlite_store.py`:
+**Blast radius, enumerated honestly** (DP-r1-04 — r1 named three functions;
+the truth is every coordinate-resolution site on BOTH paths):
 
-- `_cursor_rowid(fact_id) -> int | None` (`:1531-1545`) becomes
-  `_cursor_ordinal(fact_id) -> int | None`, selecting `arrival_ordinal` instead of
-  `rowid`, with `"" -> -1` as the start-of-store sentinel. Its
-  unresolvable-cursor behavior (returns `None`, window hashes as empty) is
-  preserved verbatim — it is a deliberate custody property.
-- `_window_hash(start, end)` (`:1547-1574`) selects
-  `WHERE arrival_ordinal > ? AND arrival_ordinal <= ? ORDER BY arrival_ordinal, arrival_seq`. Every
-  other line — the era-aware column list, `_facts_have_signature_column`,
-  `_fact_row_hash` — is unchanged.
-- New-tick state (`:1632-1650`): the fact-cursor edge becomes
-  `SELECT id FROM facts ORDER BY arrival_ordinal DESC, arrival_seq DESC LIMIT 1`, and
-  the predecessor tick `SELECT ... FROM ticks ORDER BY arrival_ordinal DESC,
-  arrival_seq DESC LIMIT 1`.
+*Construction:*
+- `_cursor_rowid(fact_id)` (`:1531-1545`) → `_cursor_ordinal`, selecting
+  `(arrival_ordinal, arrival_seq)`; `"" → (-1, 0)` start-of-store sentinel;
+  unresolvable cursor still returns `None` (deliberate custody property,
+  preserved).
+- `_window_hash` (`:1547-1574`) → `WHERE (arrival_ordinal, arrival_seq) > (?, ?)
+  AND (arrival_ordinal, arrival_seq) <= (?, ?) ORDER BY arrival_ordinal,
+  arrival_seq` (row-value comparison; the era-aware column list and
+  `_fact_row_hash` unchanged).
+- New-tick state (`:1622-1650`): newest-fact and predecessor-tick edges →
+  `ORDER BY arrival_ordinal DESC, arrival_seq DESC LIMIT 1`.
+- Latest sealed head / newest fact lookups (`:786`, `:808`) — same re-key.
 
-**What does not change: the signed bytes.** `_tick_envelope` is untouched
-(finding 2). `window_start` and `fact_cursor` remain fact ids.
+*Verification (missed in r1):*
+- `verify_chain`'s per-tick window count (`:1902-1908`):
+  `_cursor_rowid` + `COUNT(*) WHERE rowid > ? AND rowid <= ?` → ordinal
+  form.
+- The covered-total count (`:1929-1935`): same re-key.
+- The tick-scan ordering (`:1856`, `:1735`, and the re-anchor scan `:1710`)
+  → `ORDER BY arrival_ordinal, arrival_seq` (scan order is presentation
+  order for verification; re-anchor's UPDATE-by-rowid plumbing may keep
+  rowid as a row *address*, which is the one allowlisted use — addressing a
+  row, never ordering or windowing rows).
 
-**Backward verifiability — a hard requirement, and it holds.** For any
-existing store, the row set selected by `arrival_ordinal > lo AND arrival_ordinal <= hi` is
-identical to the set selected by `rowid > lo' AND rowid <= hi'` for the
-corresponding cursors, and `(arrival_ordinal, arrival_seq)` order equals rowid order,
-because both the arrival catch-up indexer and `rederive_projections` insert
-rows in record order and, within a record, in `rows_of_record` order — the
-same traversal that assigns rowids. Under D0 option (a) the legacy backfill
-sets `arrival_ordinal = rowid`, making the identity exact by construction for
-pre-arrival stores. So `_window_hash` returns byte-identical digests before
-and after, and previously sealed chains verify unchanged. **This is an
-empirical claim, not a rhetorical one — G-D2-1 tests it against a fixture
-store sealed by the pre-D code.**
+WP-3's fence closes with a ratchet grep: no `rowid` in any ORDER BY, range
+WHERE, or COUNT window inside `sqlite_store.py` outside the allowlisted
+row-address sites.
 
-**The latent defect this fixes** (`jsonl_store.py:920-940`, CX-DC-03): today
-a chain commitment's window membership rests on rowid, an axis a rebuild
-regenerates. The rebuild happens to reproduce it — `rederive_projections`
-replays from ordinal 0 precisely to preserve that (`:460-463`) — but the
-property is an accident of the replay strategy rather than a commitment to
-anything in the log. After D2 the window is defined on the arrival
-coordinate, so a *shuffled* or partially rebuilt index no longer silently
-produces a different window. Sweep item: that docstring's rationale
-("the rowids handed out by a replay from empty reproduce the original
-assignment exactly, which is what keeps outstanding witness positions and
-seals valid across a re-derivation") is superseded and must be rewritten in
+**What does not change: the signed bytes.** `_tick_envelope` untouched;
+`window_start`/`fact_cursor` remain fact ids.
+
+**Backward verifiability — an empirical claim with a precondition.** After
+D0's *mode-aware* migration, `(arrival_ordinal, arrival_seq)` order equals
+rowid order for every correctly-derived existing index: legacy rows mirror
+rowid by construction, and arrival-projected rows were inserted in record
+order, `rows_of_record` order within a record — the same traversal that
+assigned their rowids. r1's version of this claim was falsified by its own
+uniform backfill (DP-r1-02); it holds now *because* the migration
+re-derives coordinates from the log for arrival stores. It remains an
+empirical claim: G-D2-1 byte-compares window hashes on a pre-D sealed
+fixture, and G-D2-2 does it across a batch-bearing store specifically.
+
+**The latent defect this fixes** (`jsonl_store.py:920-940`, CX-DC-03):
+window membership currently rests on rowid, an axis a rebuild regenerates;
+the property survives rebuilds only because `rederive_projections` replays
+from zero in order — an accident of replay strategy, not a commitment.
+After D2 the window is defined on the arrival coordinate. Sweep item: that
+docstring's rowid-reproduction rationale is superseded and is rewritten in
 the same change.
-
-**Ordering-authority note.** `_window_hash`'s comment block ("Id order is not
-append order in mixed-id-era stores") stays true and stays; only the word
-naming the axis changes from receipt/rowid order to arrival order.
 
 ---
 
@@ -295,177 +320,202 @@ naming the axis changes from receipt/rowid order to arrival order.
 | legacy check | disposition | arrival replacement |
 |---|---|---|
 | `index` (`:340-353`) | TRANSLATE unchanged | index exists and is readable |
-| `_check_offset` (`:430-461`) | **DISSOLVE → re-found** | `_check_consumed`: the index's stamped `ResumeMark` (`arrival_lineage`, `arrival_ordinal`) vs the log's head ordinal. Claim: "index is behind arrival by N record(s), consumed through ordinal X." |
-| `_suffix_unindexed` (`:383-427`) | **DISSOLVE, no replacement** | Its job was corroborating an unverifiable byte marker (finding 4). The mark's ordinal is structurally verified by `walk_from`'s anchor check. `beyond_offset` on `Check` dies with it. |
-| `_check_counts` (`:464-492`) | TRANSLATE + strengthen | Stamped counters vs `COUNT(*)` as today, plus: no row may carry `arrival_ordinal >` the consumed ordinal, and (arrival-canonical only) no row may carry a NULL `arrival_ordinal`. Both are out-of-band-insert location claims. |
-| `_check_last_line` (`:495-542`) | TRANSLATE | `_check_consumed_edge`: read the record at the consumed ordinal via the log, expand it with `rows_of_record`, and `row_matches` every row against the index. Same detection (an out-of-band edit to the last consumed row), no byte seek. `_last_line`'s backward-scan helper (`:290-310`) dissolves with it. |
-| jsonl comparison (`--deep`, `_deep_checks:605-704`) | **wire, do not write** | `arrival_projection.audit_derived_log` — set membership over digests, already built. |
+| `_check_offset` (`:430-461`) | **DISSOLVE → re-found** | `consumed`: the index's stamped `ResumeMark` vs the log's head ordinal. Claim: "index is behind arrival by N record(s), consumed through ordinal X." |
+| `_suffix_unindexed` (`:383-427`) | **mechanism dissolves, capability survives** (DP-r1-01) | Job (a), unindexed-suffix corroboration: retired — the mark's anchor is verified structurally by the substrate. Job (b), rewound-marker detection: survives as `rewound` — any index row with `arrival_ordinal > consumed_ordinal` means the mark sits below consumed rows, which no writer produces. `beyond_offset` on `Check` is replaced by coordinates (below). |
+| `_check_counts` (`:464-492`) | TRANSLATE + strengthen | stamped counters vs `COUNT(*)`; plus NULL-coordinate backstop (migrated indexes). |
+| `_check_last_line` (`:495-542`) | TRANSLATE | `consumed_edge`: read the record at the consumed ordinal via the verified anchor (mechanism below), expand with `rows_of_record`, `row_matches` every row. `_last_line`'s backward byte-scan (`:290-310`) dissolves. |
+| jsonl comparison (`--deep`, `_deep_checks:605-704`) | **wire + strengthen** | `audit_derived_log`, upgraded to digest **multisets** (order-insensitive, multiplicity-preserving — DP-r1-08). |
 
-**Byte offsets do not survive as custody claims anywhere.** `arrival_offset`
-remains inside the `ResumeMark` because arrival's own verified walk uses it
-as a seek hint, checked against the anchor record before it is trusted. That
-is a substrate internal, not an audit claim, and no `Check` may cite it.
+### The L1 mechanism, stated honestly (DP-r1-05 rewrote this)
 
-### Required mechanism — how L1 stays cheap (fence for the implementer)
+r1 claimed L1 "never reads a byte offset" and could get the consumed record
+"through the anchor" from `walk_marked`. Both were wrong: `walk_marked`
+yields records *after* the anchor (`arrival.py:1206-1230`), and anchor
+validation itself opens the file and seeks to `mark.arrival_offset`
+(`_record_ending_at`, `arrival.py:1173-1180`).
 
-`ArrivalLog.read(ordinal)` is a **full verified walk from zero** by design
-(`arrival.py:1040-1053`: "the walk is the only way in on purpose"). An
-implementer who reaches for `read(consumed_ordinal)` turns the default gate
-into an O(n) per-record-hash verification of the whole log and silently
-destroys the cheapness this section claims. The cheap path is
-`walk_marked(stamped_mark)`: the mark's byte offset seeks directly to its
-anchor record, whose ordinal and chain linkage are verified there
-(`arrival.py:1165-1174`), and the iterator then yields only the suffix.
-`_check_consumed_edge` reads the consumed record through that anchor;
-`_check_consumed` counts the suffix, so it costs O(records behind), which is
-zero on a healthy store. **L1 must not call `ArrivalLog.read` or
-`ArrivalLog.walk`.** G-D3-2 asserts this.
+The honest design: a small substrate API, `ArrivalLog.anchor(mark) ->
+dict | None` — the already-existing `_anchor_for` validation
+(`arrival.py:1149-1174`) surfaced as a public verb returning the **validated
+anchor record itself** (None on rejection, same semantics the walk uses).
+One new public method exposing existing machinery; no new validation logic.
 
-### The L1 / `--deep` split under the new model
+The claim is then **scoped correctly**: the byte offset is an internal,
+*verified seek hint* — trusted only after the record found there passes the
+anchor checks (shape, lineage, ordinal, authority) — and L1 makes **no
+byte-offset custody claim**: no `Check` cites an offset, and no audit
+verdict depends on unverified byte positions. L1 does open the log file;
+what it never does is unbounded work or offset-trusting reads. The
+substrate note stays: anchor validation is self-consistency, not
+chain-to-genesis (`arrival.py:1149`) — chain integrity is `--deep`'s claim.
 
-- **L1 (`audit_agreement`)** — O(1) plus the size of one record:
-  `index` · `consumed` · `counts` · `consumed-edge`. It answers from the
-  arrival log's head and the index's stamped mark. It never reads a byte
-  offset and never streams the log.
-- **`--deep` (`audit_deep`)** — L1, then a full `ArrivalLog.walk()` (which
-  verifies density, record hashes, ordinals and chain linkage as a free
-  consequence of walking), row-by-row index comparison over
-  `rows_of_record`, `audit_derived_log` for the derived `.jsonl`, and the
-  tick chain re-derived from log content as today. `verify_authorship` is
-  available at this tier but is a separate verb, not folded in — it makes an
-  authorship claim, not an agreement claim.
+Cost model: `consumed_edge` = one verified anchor read (O(1 record));
+`consumed` = suffix count via `walk_marked` (O(records behind), zero on a
+healthy store); `rewound` = one indexed query. **L1 must not call
+`ArrivalLog.read` or `ArrivalLog.walk`** (both walk from zero by design,
+`arrival.py:1040-1053`); G-D3-2 asserts bounded work behaviorally.
+
+### The L1 / `--deep` split
+
+- **L1 (`audit_agreement`)**: `index` · `consumed` · `rewound` · `counts` ·
+  `consumed_edge`. Bounded: one verified record + suffix count + O(1)
+  queries.
+- **`--deep` (`audit_deep`)**: L1, then full `ArrivalLog.walk()` (density,
+  hashes, ordinals, chain linkage), row-by-row index comparison over
+  `rows_of_record`, multiset `audit_derived_log` for the derived `.jsonl`,
+  tick chain re-derived from log content. `verify_authorship` stays a
+  separate verb (authorship claim, not agreement claim).
 
 ### Scope-the-claim discipline
 
-Every `Check` emits a **location claim**. Concretely: `beyond_offset: bool`
-(a flag one step from innocence) is replaced by `behind_by: int` and
-`at_ordinal: int` — coordinates, not verdicts. No check may return a message
-asserting a store is intact, clean, or safe; the strongest positive form
-stays the existing one, "N fact(s), M tick(s) accounted for". The L1 pass
-returning all-true means *these four questions found nothing here*, and the
-report's own prose must not let a renderer say more.
+Every `Check` emits a location claim. `beyond_offset: bool` is replaced by
+`behind_by: int` and `at_ordinal: int`; `rewound` reports the offending
+coordinate. No check may assert intact/clean/safe; the strongest positive
+form stays "N fact(s), M tick(s) accounted for".
 
 ### Blast radius — the one call site
 
-`apps/loops/src/loops/commands/store.py:141-163` gates on
-`is_jsonl_canonical(canonical)` and returns `None` for an arrival store, so
-today arrival stores are simply unaudited. That gate growing an arrival arm
-**is** the "blast radius one call site" the plan names. Note for the fence:
-this is `apps/`, and the arc's scope law says apps/ is diff-empty across
-every slice. Flagged as **open question D3-Q1** — either D touches this one
-dispatch as a ruled exception, or the audit lands library-side and the CLI
-arm waits for the tail's CLI rebuild, leaving arrival stores unaudited
-through the CLI in the interim. Recommended: **library-side complete, plus
-the one dispatch arm as a ruled, receipted exception** — an audit surface
-nothing can reach is not a surface.
+`apps/loops/src/loops/commands/store.py:141-163` returns `None` for a
+non-jsonl-canonical store, so arrival stores are unaudited through the CLI
+today. Growing that dispatch an arrival arm **is** the plan's "blast radius
+one call site" — and an apps/ touch under the arc's diff-empty scope law.
+Open question D-Q2 (now jointly with the fold.py baseline touch from D1).
+Recommendation unchanged: library-side complete, plus the dispatch arm as a
+ruled, receipted exception — an audit surface nothing can reach is not a
+surface.
 
 ---
 
 ## D4 — Admission signature verification (CX-BR-02 rider)
 
-**The situation, stated honestly.** `merge_store` admits foreign records
-with no signature verification; `merge.py:526-532` and `arrival.py:694-699`
-both say so explicitly and say an admission attestation is "a later cut".
-This rider has rolled once. Three arms:
+**The situation.** `merge_store` admits foreign records with no signature
+verification (`merge.py:526-532`, `arrival.py:694-699` both say so). The
+rider has rolled once. r1's arm 1 was **UNSOUND as designed** (DP-r1-06):
+`verify_authorship(source_log, verify)` checks arrival-record *envelope*
+signatures over the whole source log — but merge admits *rows*, carries the
+**fact-row signature** ("a per-observer authorship claim over content only,
+carried verbatim and never re-signed", `merge.py:512-515`), dedups before
+appending (`_entries_for`, `:463-499`), and can split batches. So r1's arm
+verified the wrong commitment over the wrong set: a forged carried
+signature could enter unseen, and a bad envelope on a *non-admitted* record
+could refuse a valid admission.
 
-**Arm 1 — source-side verification at admission (in-slice, feasible).**
-Merge holds the *source* arrival log open, and
-`verify_authorship(log, verify)` (`arrival.py:1558`) resolves keys **from
-that log alone**. So merge can verify the source's records against the
-source's own key chain before admitting them, and refuse on a bad signature.
-Dependency direction permits it: `Verify` is a bare
-`Callable[[str, str, str], bool]` alias (`arrival.py:137`), so `libs/store`
-takes one as a caller-supplied parameter — no `libs/sign` dependency is
-added (`libs/store/pyproject.toml` depends on `engine` only, and `engine`
-imports `sign` nowhere). Cost: one new parameter, one refusal class, and a
-ruling on the legacy-source case (a jsonl/sqlite source has no arrival log,
-so it must make an explicit no-claim or be refused — see D4-Q1).
+**Arm 1, redesigned — verify the exact post-dedup admission rows:**
 
-**Arm 2 — target-side verification (blocked, wave 2).** Verifying admitted
-records against the *target's* key chain is not implementable in D:
-`merge.py` transports no key-introduction records (grep for
-`KEY_INTRODUCTION_KIND` in `libs/store/src/store/merge.py` returns nothing),
-so the target cannot resolve a foreign observer's key at all. This needs
-key-introduction transport, which is a grammar-adjacent design exceeding
-slice D.
+1. Build the source's key registry by walking the source arrival log once —
+   the registry `verify_authorship` already constructs internally
+   (`arrival.py:1595-1640`: genesis self-certification + key-introduction
+   placement rules). Exposed as a small engine function
+   (`key_registry(log, verify)` — a refactor of existing code, not new
+   logic; `verify_authorship` becomes a consumer of it).
+2. For each **admitted** (post-dedup) fact row carrying a non-NULL
+   signature: verify it against `fact_commitment_hash` — the same
+   content-only commitment the live emit path signs
+   (`sqlite_store.py:254-278`) — under a key valid for the row's observer
+   at the row's source position. Refusal class on failure; nothing is
+   appended.
+3. **Unsigned admitted rows**: admitted, era-aware, making no claim — the
+   same NULL-era posture merge already documents.
+4. **Split batches**: verification is per-row, so batch regrouping is
+   irrelevant to it — the dedup/regroup question dissolves.
+5. **Deduplicated (non-admitted) rows**: never verified — a bad signature
+   on a record the merge does not admit cannot refuse the merge.
 
-**Arm 3 — full carve.** Ship D without it, with a fresh receipt naming arm 1
-as available and arm 2 as blocked.
+**Honest scope note:** this is bigger than r1's arm 1 — one new engine
+function (registry extraction), one merge parameter, one refusal class, and
+a per-row verification loop keyed by observer+position. It is still
+libs-only, still callable-injected (`Verify`, `arrival.py:137` — the
+no-`libs/sign`-dependency claim survives review, DP-r1-06 confirmed it),
+and still the half of admission verification that is implementable now.
+**Arm 2** (target-side trust: verifying against the *target's* key chain)
+remains blocked on key-introduction transport — merge carries none
+(no `KEY_INTRODUCTION_KIND` in `merge.py`) — wave-2 territory. **Arm 3**
+remains full carve with a fresh receipt.
 
-**Recommendation: Arm 1, in slice D, opt-in.** It discharges the rider with
-existing machinery, it is the half that is actually implementable, and it
-gives the federated-read-vs-admission distinction something to *be* — the
-admission verb verifies, the federated read does not. Carving would be the
-third deferral of a rider whose blocking rationale only ever applied to
-arm 2. But the tradeoff is real and stated: arm 1 verifies the source's
-self-consistency, **not** that the target's operator trusts the source's
-keys. It is a weaker claim than "admission verified authorship", and the
-refusal message and docstring must say exactly which claim it makes.
-
-**Open question D4-Q1.** Legacy source (jsonl/sqlite, no arrival log) under
-arm 1: explicit no-claim (admit, record that nothing was verified) or
-refuse? Recommended no-claim — refusing would break every pre-migration
-merge, and the hazard clock is already accepted.
+**Recommendation: redesigned arm 1, opt-in.** With the corrected claim
+stated exactly: it verifies that every admitted signed row's authorship
+claim verifies under the source's own key history — source
+self-consistency, not target-operator trust. The refusal message and
+docstring carry that scope. D4-Q1 (legacy source with no arrival log:
+explicit no-claim, recommended, vs refusal) stands.
 
 ---
 
 ## Gate plan
 
 Independent gate agent; re-derives the oracle from scratch; pointer branch
-`slice/D-gate`.
+`slice/D-gate`. (r2: gates for every DP-r1 gap; the impossible and
+non-discriminating r1 gates replaced — DP-r1-10.)
 
 **G-D0-1 — the shuffled index (the ruled gate item).** A natural rebuild
-*cannot* produce a shuffled index: `rederive_projections` replays in order,
-so it reproduces the original rowid assignment by construction. The gate
-therefore needs a **deliberate permuted-insert harness** — build an index by
-inserting `rows_of_record` output in a permuted record order, so rowid order
-and arrival order disagree. Assertions: L1 passes; every witness position,
-seal window, and audit check answers identically to the unshuffled store.
-Any answer that changes under permutation is a rowid dependency that
-survived the re-key. This harness is the slice's central artifact and should
-be written first.
+cannot produce one (`rederive_projections` replays in order), so the gate
+builds a **deliberate permuted-insert harness** — index rows inserted in
+permuted record order so rowid order and arrival order disagree.
+Assertions: L1 passes; every witness position, seal window, audit check,
+and `verify_chain` answer identical to the unshuffled store. Written first;
+used by every later package.
+**G-D0-2** — deliberately rebuilt index: outstanding positions and seals
+valid.
+**G-D0-3** — migration of an existing **batch-bearing arrival-canonical**
+index: coordinates equal the log's (the DP-r1-02 counterexample as a test);
+subsequent catch-up appends collide with nothing.
+**G-D0-4** — interrupted migration: kill between schema-add and stamp;
+reopen; the store answers correctly and the marker semantics hold (no
+observable half-state).
+**G-D0-5** — invariant enforcement: duplicate `(arrival_ordinal,
+arrival_seq)` insert refused; NULL-coordinate insert refused at the
+statement; legacy allocator monotonic under interleaved fact/tick appends
+in one transaction.
 
-**G-D0-2** — deliberately rebuilt index (`rederive_projections`): outstanding
-positions and seals still valid.
+**G-D1-2** — `WitnessAggregateUnsupported` at all three sites,
+messages unchanged; A10 refusal messages byte-identical. Pinning tests
+(`test_witness_position.py`, `test_diff_interval_report.py`,
+`test_query_facts.py`, `test_fold_at.py`) pass untouched.
+**G-D1-3** — `seq:N` round-trip across a batch boundary, pinning the ruled
+D1-Q1 arm.
+**G-D1-4** — same-path store-replacement: new typed refusal fires;
+A10 and the unadopted refusal unchanged (their tests prove it).
+**G-D1-5** — position equivalence (replaces r1's non-discriminating
+G-D1-1): for a corpus store, every fact's resolved position selects the
+same prefix row-set before and after the re-key; `durable_handle` output
+unchanged as a corollary.
+**G-D1-6** — fold diff baseline: reversed `--diff B..A` attributes the
+baseline identically pre/post re-key (whichever D-Q2 design is ruled).
 
-**G-D1-1** — `durable_handle` output byte-identical before/after the re-key.
-**G-D1-2** — `WitnessAggregateUnsupported` raised at all three sites with
-unchanged messages; A10 refusal messages unchanged. Pinning tests:
-`libs/engine/tests/test_witness_position.py`,
-`libs/engine/tests/test_diff_interval_report.py`,
-`libs/engine/tests/test_query_facts.py`, `libs/engine/tests/test_fold_at.py`
-— they match on message substrings and must pass untouched.
-**G-D1-3** — `seq:N` round-trip across a batch boundary, pinning whichever
-D1-Q1 answer Kyle rules.
-**G-D1-4** — same-path store-replacement refusal (the new `arrival_lineage`
-guard).
-
-**G-D2-1 — backward verifiability, empirically.** A fixture store sealed by
-the pre-D code: after the re-key, `verify_chain` is green **and** each
-window hash is byte-equal to the legacy computation. Not an argument, a
-byte comparison.
-**G-D2-2** — a seal spanning a batch record: window membership and hash
-identical before/after.
+**G-D2-1** — pre-D sealed fixture: `verify_chain` green AND each window
+hash byte-equal to the legacy computation.
+**G-D2-2** — a seal spanning a batch record on a batch-bearing store:
+window membership and hash identical before/after migration.
 **G-D2-3** — unresolvable cursor still hashes as empty.
+**G-D2-4** — verification under permutation: `verify_chain`'s window
+counts and verdicts identical on the shuffled index (the DP-r1-04
+verification-side residue, gated).
+**G-D2-5** — rowid ratchet: no ORDER BY / range / COUNT on rowid in
+`sqlite_store.py` outside allowlisted row-address sites (shrink-only
+allowlist).
 
-**G-D3-1** — L1 detects: index behind arrival; out-of-band sqlite insert;
-edit to the last consumed row. Each with the expected coordinate in the
-message.
-**G-D3-2** — L1 makes no byte-offset custody read and stays cheap: no
-`open(canonical, "rb")` remains on the L1 path, and L1 calls neither
-`ArrivalLog.read` nor `ArrivalLog.walk` (assert by construction or by
-counting records verified on a large healthy store).
-**G-D3-3** — torn arrival tail: L1 reports "behind", never "tampered" — the
-false-accusation property `_check_last_line`'s docstring protects.
-**G-D3-4** — derived `.jsonl` reordered line-for-line: set-membership audit
-still agrees (the whole point of set membership).
+**G-D3-1** — L1 detects: index behind arrival; out-of-band insert; edit to
+the last consumed row; **rewound marker** (mark ordinal < max indexed
+ordinal) — each with the expected coordinate in the message.
+**G-D3-2** — bounded work (replaces r1's impossible no-open condition):
+on a large healthy store, L1 verifies O(1) records (assert via the
+substrate's record-verification count or a proxy: L1 wall-time flat in
+store size while `--deep` is linear); L1 calls neither `ArrivalLog.read`
+nor `ArrivalLog.walk`.
+**G-D3-3** — torn arrival tail: L1 reports "behind", never "tampered".
+**G-D3-4** — derived `.jsonl` reordered: multiset audit agrees; a
+**duplicated line** is detected (the DP-r1-08 case); a removed line is
+detected.
 
-**G-D4-1** (if arm 1 lands) — merge from a source with a forged record
-refuses; merge from a legacy source admits with an explicit no-claim.
+**G-D4-1** — forged carried signature on an admitted row: merge refuses.
+**G-D4-2** — bad envelope/signature on a row the dedup drops: merge
+succeeds (verification covers exactly the admission set).
+**G-D4-3** — split batch: surviving rows verified, admission succeeds;
+legacy source: admits with explicit no-claim (per D4-Q1 ruling).
 
 **Fence check, every package:** `git ls-files` diff confined to
-`libs/engine/`, `libs/store/` — plus, if D3-Q1 is ruled in, exactly the one
-dispatch in `apps/loops/src/loops/commands/store.py`.
+`libs/engine/`, `libs/store/` — plus exactly the ruled D-Q2 apps/ touches
+if granted.
 
 ---
 
@@ -473,75 +523,99 @@ dispatch in `apps/loops/src/loops/commands/store.py`.
 
 Sequenced by dependency; each is a fence for one implementer.
 
-**WP-1 · the coordinate (D0).** `arrival_projection.py` (`_ensure_index_schema`
-migration + backfill, `rederive_projections` insert), `arrival_store.py`
-(catch-up indexer), `sqlite_store.py` (`FACT_INSERT_SQL`/`TICK_INSERT_SQL`,
-`append`/`append_tick` monotonic assignment). Plus the permuted-insert
-harness (G-D0-1) — written here, used by every later package. Nothing above
-the schema changes yet; the suites must stay green on this package alone.
+**WP-1 · the coordinate (D0).** `arrival_projection.py`
+(`_ensure_index_schema` mode-aware migration + marker, `rederive_projections`
+native coordinates), `arrival_store.py` (catch-up indexer),
+`sqlite_store.py` (`FACT_INSERT_SQL`/`TICK_INSERT_SQL` + legacy allocator in
+`append`/`append_tick`), closure sweep of every other insert path
+(libs/store slice/rebirth writers). Plus the permuted-insert harness
+(G-D0-1) and the batch-bearing migration fixture (G-D0-3). Suites green on
+this package alone.
 
-**WP-2 · witness (D1).** `witness.py`, `store_reader.py` (`at_rowid` →
-`at_ordinal`, three query methods), `declaration.py:654-656`,
-`handle.py:852-855` bootstrap, `vertex_reader.py` at the `at=` selectors.
-Residue: coordinate vocabulary in docstrings across all of these.
+**WP-2 · witness + read path (D1).** `witness.py`, `store_reader.py`
+(`at_rowid` → `at_ordinal`, three query methods), `declaration.py:654-656`,
+`handle.py:852-855`, `vertex_reader.py` `at=` selectors, and the
+fold-replay/event-cursor ORDER BY sites in `sqlite_store.py`
+(`:1203-1292`, `:1359`, `:1402`, `:2018-2069`). The new typed same-path
+refusal. If D-Q2 rules design (i): the `baseline` field on
+`diff_interval_report` + the one `fold.py` consumer change.
+Residue sweep: coordinate vocabulary in docstrings.
 
-**WP-3 · seals (D2).** `sqlite_store.py:1531-1650` only. Sweep the superseded
-`rederive_projections` docstring rationale in the same change.
+**WP-3 · seals (D2).** `sqlite_store.py` seal construction AND verification
+(`:786`, `:808`, `:1531-1650`, `:1710`, `:1735`, `:1856`, `:1902-1935`),
+the rowid ratchet (G-D2-5), and the superseded `rederive_projections`
+docstring rationale.
 
-**WP-4 · audit (D3).** `canonical_audit.py` (the L1 rewrite, the two
-dissolutions, `Check.beyond_offset` removal), wiring `audit_derived_log`
-into `--deep`, and — if D3-Q1 is ruled in — the one dispatch arm in
-`apps/loops/src/loops/commands/store.py`.
+**WP-4 · audit (D3).** `canonical_audit.py` (L1 rewrite: `consumed`,
+`rewound`, `counts`, `consumed_edge`; `Check.beyond_offset` →
+coordinates), the `ArrivalLog.anchor(mark)` substrate verb, multiset
+upgrade + wiring of `audit_derived_log` into `--deep`, and — if D-Q2 rules
+it in — the dispatch arm in `apps/loops/commands/store.py`.
 
-**WP-5 · admission (D4, if arm 1 is ruled in).** `libs/store/src/store/merge.py`
-plus its refusal class. Independent of WP-2/3/4; can run in parallel with
-WP-3.
+**WP-5 · admission (D4, if arm 1 is ruled in).** `key_registry` extraction
+in `arrival.py` (refactor of `verify_authorship`'s internals),
+`libs/store/src/store/merge.py` per-row verification + refusal class.
+Independent of WP-2/3; parallel-safe.
 
-**Ordering:** WP-1 → {WP-2, WP-3, WP-5} → WP-4. WP-4 last because it audits
-what the others establish.
+**Ordering:** WP-1 → {WP-2, WP-3, WP-5} → WP-4. WP-4 last because it
+audits what the others establish.
 
-**Vocabulary ratchet — candidate additions from this slice:** `rowid` as a
-public coordinate name (allowlisted only inside `sqlite_store`'s row
-plumbing), `at_rowid`, `beyond_offset`, `consumed-offset`, `receipt order`
-as an ordering-authority phrase.
+**Vocabulary ratchet — candidate additions:** `rowid` as a public
+coordinate name (allowlist: `sqlite_store` row-address plumbing only),
+`at_rowid`, `beyond_offset`, `consumed-offset`, `receipt order` as an
+ordering-authority phrase.
 
 ---
 
 ## Open questions for Kyle
 
 1. **D1-Q1 — batch granularity.** Record-granular ordinal cutoff
-   (recommended; batch is atomic; costs `seq:N` round-trip mid-batch) or
-   `(arrival_ordinal, arrival_seq)` composite cutoff (restores intra-batch addressing;
-   two-field comparison everywhere)?
-2. **D3-Q1 — the one call site vs the apps/ diff-empty scope law.** Growing
-   `apps/loops/.../store.py:141-163` an arrival arm is the plan's own
-   "blast radius one call site", but the arc's scope law says apps/ is
-   diff-empty every slice. Ruled exception, or library-only with arrival
-   stores unauditable through the CLI until the tail's CLI rebuild?
-3. **D4 arm.** Arm 1 (source-side, in-slice, recommended), arm 2 (blocked on
-   key transport, wave 2), or arm 3 (full carve with a fresh receipt)?
+   (recommended) or `(arrival_ordinal, arrival_seq)` composite cutoff?
+2. **D-Q2 — the apps/ scope law, now TWO touches** (r2 widened: DP-r1-07).
+   (a) the audit dispatch arm (`commands/store.py:141-163`) and (b) the
+   fold diff-baseline consumer (`cli/views/fold.py:1525-1536`, required by
+   the removal of `WitnessPosition.rowid`). Recommended: both as ruled,
+   receipted exceptions, with design (i) (engine `baseline` field)
+   minimizing (b) to reading a field. Alternative: library-only, leaving a
+   broken or shimmed app path — not actually available for (b), which makes
+   this a forced ruling: (b) happens; the ruling is whether it is receipted
+   as an exception or D is blocked on the scope law.
+3. **D4 arm.** Redesigned arm 1 (post-dedup row verification, recommended;
+   honestly bigger than r1's version), arm 2 (blocked, wave 2), or arm 3
+   (carve with fresh receipt)?
 4. **D4-Q1** (if arm 1) — legacy source with no arrival log: explicit
    no-claim (recommended) or refusal?
-5. **Verbatim-vs-staleness conflict A — `preflight.py` UNTOUCHED.**
-   `_arrival_preflight`'s docstring (`preflight.py:381-393`) says "the
-   arrival agreement audit is a later cut; this gate makes no agreement
-   claim". That sentence becomes false the moment D lands. Its *behavior*
-   (`agreed` stays `None`, no innocence claim) should stay verbatim —
-   preflight legitimately still makes no agreement claim, it just is no
-   longer true that none exists. Proposed: a one-sentence docstring truth-up
-   as a Kyle-ratified exception to "UNTOUCHED", with behavior byte-identical.
-   Alternative: leave it stale and sweep in wave 2.
-6. **Verbatim-vs-staleness conflict B — `WitnessAggregateUnsupported`.** Its
-   docstring says positions "resolve against one store's rowid axis"
-   (`witness.py:98-106`). Keeping it byte-verbatim preserves a coordinate
-   word the slice exists to retire. Proposed: raise conditions, exception
-   identity, and the raised *message strings* at all three sites stay
-   verbatim (that is what the tests and the criteria actually protect); the
-   class docstring's one stale word is corrected. Kyle rules whether that
-   counts as verbatim.
+5. **Verbatim-vs-staleness A — `preflight.py` UNTOUCHED.** One-sentence
+   docstring truth-up (`preflight.py:381-393`, "agreement audit is a later
+   cut") as a ratified exception with byte-identical behavior, or leave
+   stale for wave 2?
+6. **Verbatim-vs-staleness B — `WitnessAggregateUnsupported` docstring**
+   says "rowid axis". Correct the one stale word (raise sites + message
+   strings byte-identical), or byte-verbatim including the stale word?
 7. **D0-Q2 — column naming.** `arrival_ordinal`/`arrival_seq` in full
-   (recommended, matches `ARRIVAL_ORDINAL_KEY` and `ResumeMark`) or the
-   short `arr_ord`/`arr_seq` at the column level?
-8. **D0 legacy-index option.** (a) backfill `arrival_ordinal = rowid` for every
-   store class (recommended), (b) per-mode axis switch, or
-   (c) `COALESCE(arrival_ordinal, rowid)`?
+   (recommended) or short forms?
+8. **D0 migration cost.** The arrival-canonical coordinate migration walks
+   the log once (O(store)) at first post-upgrade open. Accept the one-time
+   open cost (recommended; it is the same order as the catch-up any
+   behind index already pays), or gate it behind an explicit ceremony?
+
+(r1's Q8 — the uniform-backfill option menu — is withdrawn: option (a) was
+falsified by DP-r1-02; the mode-aware migration in D0 replaces it. r1's Q3
+premise is corrected per DP-r1-06.)
+
+---
+
+## DP-r1 disposition table
+
+| finding | severity | disposition in r2 |
+|---|---|---|
+| DP-r1-01 | MAJOR | **Redesigned.** `_suffix_unindexed` split into two jobs; rewound-marker capability survives as the arrival-native `rewound` check (D3); anchor self-consistency limits stated ("Four things" §4). |
+| DP-r1-02 | MAJOR | **Redesigned.** Uniform backfill withdrawn; mode-aware migration — rowid mirror for genuinely-legacy indexes, log-derived coordinates (with rederive escape hatch) for arrival-canonical (D0). Counterexample gated as G-D0-3. |
+| DP-r1-03 | MAJOR | **Redesigned.** Uniqueness index, statement-level NULL closure, per-table transactional legacy allocator, `coordinate_axis` migration marker with no observable half-state, insert-path enumeration in WP-1; G-D0-4/5 gate it (D0). |
+| DP-r1-04 | MAJOR | **Redesigned.** Full construction+verification enumeration incl. `verify_chain` :1902/:1929, scans :1710/:1735/:1856, heads :786/:808; rowid ratchet G-D2-5; verification-under-permutation gate G-D2-4 (D2, WP-3). |
+| DP-r1-05 | MAJOR | **Redesigned.** `ArrivalLog.anchor(mark)` public verb; offset re-described as verified internal seek hint; claim scoped to "no byte-offset custody claim"; G-D3-2 rewritten as bounded-work assertion (D3). |
+| DP-r1-06 | MAJOR | **Redesigned.** Arm 1 now verifies post-dedup admission rows' carried fact signatures (`fact_commitment_hash`) under source key registry (`key_registry` extraction); unsigned/split/dedup cases defined; scope growth stated honestly; arm choice re-presented to Kyle (D4, Q3). |
+| DP-r1-07 | MAJOR | **Redesigned + escalated.** `fold.py:1525-1536` named; engine `baseline` field recommended; folded into D-Q2 as a forced scope ruling; G-D1-6 gates behavior (D1). |
+| DP-r1-08 | minor | **Redesigned.** `audit_derived_log` comparison upgraded to digest multisets; duplicate-line detection gated in G-D3-4 (D3, "Four things" §3). |
+| DP-r1-09 | minor | **Redesigned.** Separately-typed `WitnessAxisMismatch` refusal; A10 branches/messages byte-identical; `arrival_lineage: str | None` replaces the `""` conflation (D1). |
+| DP-r1-10 | minor | **Redesigned.** Gates added for every named gap (G-D0-3/4/5, G-D2-4/5, G-D1-6, G-D3-4-dup, G-D4-2/3); impossible G-D3-2 rewritten; non-discriminating G-D1-1 replaced by behavioral G-D1-5. |

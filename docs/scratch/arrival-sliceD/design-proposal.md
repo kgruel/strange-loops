@@ -1,6 +1,6 @@
 # Slice D — Surfaces: design proposal
 
-Status: **r5 — revised against codex DP-r4 findings, awaiting Kyle's ruling.**
+Status: **r6 — revised against codex DP-r5 finding, awaiting Kyle's ruling.**
 Five separately ratifiable decisions (D0–D4) plus a gate plan and work
 packages. r1 written 2026-08-20 against `feat/arrival-libs` @ `eeb05de8`;
 r2 revised it against the ten DP-r1 findings (7 MAJOR, 3 minor); the r2
@@ -156,11 +156,24 @@ statement discipline):
     (skipping auto-indexes) — and, separately, every `type = 'view'` row
     whose stored `sql` references the table, because a view's `tbl_name`
     is its own name and the table-keyed query structurally cannot find it.
-    Dependent views are DROPped before the rebuild and replayed verbatim
-    after the RENAME, in the same transaction, per SQLite's documented
-    generalized rebuild procedure (lang_altertable.html#otheralter, steps
-    3/8/9) — necessary not only for preservation but for correctness: a
-    surviving stale view can fail the RENAME's schema reparse outright.
+    The view inventory is **dependency-closed, not direct-only**
+    (DP-r5-01): view discovery iterates to a fixed point — after finding
+    views whose `sql` references the table, re-scan for views whose `sql`
+    references any already-collected view's name, until no new view is
+    found — because a view over a dropped view is left invalid and can
+    itself fail the RENAME's whole-schema reparse. The trigger inventory
+    likewise extends over the closure: triggers attached to a collected
+    view (INSTEAD OF triggers included) carry `sqlite_schema.tbl_name` =
+    the VIEW's name, so the table-keyed query misses them and the view
+    drop would silently delete them — they are inventoried by
+    `tbl_name IN (<collected view names>)` and replayed with their views.
+    The whole closure is DROPped before the rebuild and replayed verbatim
+    after the RENAME **in dependency order** (views before the views that
+    reference them, triggers after their views), in the same transaction,
+    per SQLite's documented generalized rebuild procedure
+    (lang_altertable.html#otheralter, steps 3/8/9) — necessary not only
+    for preservation but for correctness: a surviving stale view can fail
+    the RENAME's schema reparse outright.
     Triggers are supported behavior, not debris — the store deliberately
     reads back committed rows "after any AFTER triggers fired"
     (`sqlite_store.py:702-712`, `:746`).
@@ -625,10 +638,11 @@ arrival-marked index refuses to mirror-stamp it.
 containing a fact and a tick sharing the same id string, from different
 records; migration assigns each its own distinct correct coordinate
 (composite `(table, row_id)` staging proven discriminating).
-**G-D0-13** — dependent-view survival (DP-r4-02): a pre-existing view
-over `facts` remains present in `sqlite_schema` and queryable with
-identical results post-migration; the RENAME completes with the view
-in place.
+**G-D0-13** — dependent-view survival, closure-deep (DP-r4-02 +
+DP-r5-01): fixture carries `v1` over `facts`, `v2` over `v1`, and an
+INSTEAD OF trigger on `v1`; post-migration all three remain present in
+`sqlite_schema`, `v1` and `v2` answer identically, the INSTEAD OF
+trigger still fires with identical behavior, and the RENAME completes.
 
 **G-D1-2** — `WitnessAggregateUnsupported` at all three sites,
 messages unchanged; A10 refusal messages byte-identical. Pinning tests
@@ -831,3 +845,10 @@ r5 answers:
 |---|---|---|
 | DP-r4-01 | MAJOR | **Redesigned.** Provider yields `(table, row_id, arrival_ordinal, arrival_seq)`; staging temp table and rebuild join key on composite `(table, row_id)` — facts.id and ticks.id are independent primary keys, so the bare-id mapping was ambiguous; `rows_of_record` already yields the row type, so the closure has the namespace for free. Gated by G-D0-12 (fact and tick sharing one id string, distinct coordinates). |
 | DP-r4-02 | MAJOR | **Redesigned.** Rebuild inventory extended to dependent views, discovered via `sqlite_schema.sql` content (a view's `tbl_name` is its own name — the table-keyed query structurally misses them), dropped before and replayed verbatim after the rebuild per SQLite's generalized procedure (steps 3/8/9); stale-view RENAME-reparse failure mode noted. Gated by G-D0-13 (pre-existing view over facts queryable post-migration). |
+
+r5 re-verify (`codex-design-r5-stdout.log`): DP-r4-01/02 both PASS; one
+new finding. r6 answers:
+
+| finding | severity | disposition in r6 |
+|---|---|---|
+| DP-r5-01 | MAJOR | **Redesigned.** View inventory made dependency-CLOSED: fixed-point iteration over view-name references in `sqlite_schema.sql` (views-on-views collected transitively); trigger inventory extended to triggers whose `tbl_name` names any collected view (INSTEAD OF included — the view drop would otherwise silently delete them); the whole closure dropped and replayed in dependency order within the one transaction. G-D0-13 extended: v2-over-v1-over-facts plus an INSTEAD OF trigger on v1, all surviving with identical behavior. |

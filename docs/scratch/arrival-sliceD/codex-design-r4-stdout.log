@@ -1,0 +1,36 @@
+Reviewed r4 at `2b05131e`, read-only. No files modified.
+
+## Re-verification
+
+| Finding | Verdict | Evidence |
+|---|---|---|
+| DP-r3-01 | **FAIL** | r4 correctly adds an explicit lazy coordinate provider and accurately describes the four supply routes. `ArrivalStore` opens SQLite in `super().__init__`, then constructs `ArrivalLog`, and only afterward runs migrations/catch-up ([arrival_store.py:133](/Users/kaygee/Code/loops/libs/engine/src/engine/arrival_store.py:133)); the base constructor only opens/configures SQLite and creates schema for a new database—no row INSERT occurs ([sqlite_store.py:439](/Users/kaygee/Code/loops/libs/engine/src/engine/sqlite_store.py:439)). Rederivation likewise holds `canonical` and `log` before opening the index ([arrival_projection.py:471](/Users/kaygee/Code/loops/libs/engine/src/engine/arrival_projection.py:471)). However, the new provider yields only `(row_id, ordinal, seq)` ([design-proposal.md:197](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceD/design-proposal.md:197)); facts and ticks have independent `id` primary keys ([sqlite_store.py:308](/Users/kaygee/Code/loops/libs/engine/src/engine/sqlite_store.py:308)). A valid index may therefore contain the same ID in both tables, with different coordinates, making the proposed global `id → coordinate` mapping ambiguous. See DP-r4-01. |
+| DP-r3-02 | **PASS** | r4 explicitly copies `rowid` in both INSERT and SELECT lists ([design-proposal.md:131](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceD/design-proposal.md:131)). These are ordinary rowid tables with text primary keys, and SQLite permits INSERT to supply rowid explicitly, so this preserves the old values ([SQLite CREATE TABLE](https://www.sqlite.org/lang_createtable.html)). That correctly differs from the existing DELETE/replay path, which drops FTS because replay can reassign rowids ([jsonl_store.py:939](/Users/kaygee/Code/loops/libs/engine/src/engine/jsonl_store.py:939)). Capturing trigger/index SQL from `sqlite_schema`, skipping NULL auto-index SQL, and replaying it after rename follows SQLite’s documented rebuild procedure; `tbl_name` identifies the owning table and stored SQL recreates the object ([SQLite schema table](https://www.sqlite.org/schematab.html), [SQLite ALTER TABLE](https://www.sqlite.org/lang_altertable.html)). G-D0-9 and G-D0-10 directly test trigger behavior and FTS/watermark continuity ([design-proposal.md:599](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceD/design-proposal.md:599)). The newly broadened artifact-preservation claim has a separate view omission, DP-r4-02. |
+| DP-r3-03 | **PASS** | G-D0-7 independently requires migration through `ArrivalStore`’s public constructor, including coordinates, constraints, and subsequent append; G-D0-8 requires the rederivation entry point to produce identical coordinates ([design-proposal.md:591](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceD/design-proposal.md:591)). These cover the two routes with materially different log access. G-D0-11 also exercises the new mis-mode refusal. |
+
+## Fresh r4 findings
+
+### DP-r4-01 — MAJOR — coordinate-provider keys lack the table namespace
+
+`Callable[[], Iterator[tuple[str, int, int]]]` supplies only a row ID. Yet `facts.id` and `ticks.id` are separate primary keys; neither the schema nor `rows_of_record` establishes cross-table uniqueness ([sqlite_store.py:308](/Users/kaygee/Code/loops/libs/engine/src/engine/sqlite_store.py:308), [arrival_projection.py:153](/Users/kaygee/Code/loops/libs/engine/src/engine/arrival_projection.py:153)). Consequently, the same string may legally identify both a fact and a tick from different arrival records.
+
+The staging/join key must include row kind/table, for example `(table, row_id, ordinal, seq)`, with a composite `(table, row_id)` key. Add a migration gate containing a fact and tick with the same ID and distinct coordinates.
+
+### DP-r4-02 — MAJOR — the rebuild omits dependent views
+
+The new text claims preservation of supported schema artifacts but inventories only rows with `type IN ('trigger','index')` ([design-proposal.md:140](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceD/design-proposal.md:140)). SQLite’s authoritative generalized rebuild procedure requires remembering and reconstructing associated views as well as indexes and triggers. A view’s `tbl_name` is its own name, so the proposed `tbl_name = facts|ticks` query cannot discover views referencing those tables. A surviving invalid view can also cause the later `ALTER TABLE ... RENAME` schema reparse to fail. [SQLite explicitly includes views in rebuild steps 3, 8, and 9](https://www.sqlite.org/lang_altertable.html#otheralter).
+
+Inventory dependent views from `sqlite_schema.sql`, or otherwise specify and gate a safe view-preservation strategy. Add a gate proving a pre-existing view over `facts` remains queryable after migration.
+
+## Decision verdicts
+
+| Decision | Verdict | Reason |
+|---|---|---|
+| D0 | **UNSOUND** | The route ordering, rowid preservation, triggers, indexes, FTS handling, and new gates are substantially repaired, but the provider cannot disambiguate cross-table IDs and the rebuild does not handle dependent views. |
+| D1 | **SOUND-WITH-CHANGES** | The coordinate model remains coherent once D0 produces an unambiguous, safely migrated coordinate. |
+| D2 | **SOUND-WITH-CHANGES** | Re-keying remains coherent but depends on D0’s migration guarantee. |
+| D3 | **SOUND** | No r4-changed text introduces a new defect in the bounded-work design. |
+| D4 | **SOUND** | No r4-changed text affects the previously sound selective-verification design. |
+| Gate plan | **SOUND-WITH-CHANGES** | G-D0-7..11 close the previously requested route, trigger, FTS, and mis-mode gaps; collision and dependent-view gates remain necessary. |
+
+Overall: **NOT-RATIFIABLE-AS-WRITTEN**.

@@ -1,0 +1,38 @@
+## Findings
+
+### DP-r5-01 — MAJOR — dependent-view handling is not dependency-closed
+
+The new procedure inventories direct views whose SQL references `facts` or `ticks`, then drops those views before rebuilding ([design proposal:153](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceD/design-proposal.md:153)). It does not preserve:
+
+- Views that transitively depend on a directly dependent view.
+- Triggers attached to a dropped view, because their `sqlite_schema.tbl_name` is the view name, not `facts` or `ticks`.
+
+Dropping direct view `v1` can therefore leave dependent view `v2` invalid during `ALTER TABLE ... RENAME`; SQLite reparses the complete schema and normally refuses malformed view entries. An `INSTEAD OF` trigger on `v1` is also deleted with `v1` but absent from the table-keyed trigger inventory. SQLite defines `tbl_name` as the associated table or view, while a view’s `tbl_name` is its own name. [SQLite schema table](https://www.sqlite.org/schematab.html), [SQLite ALTER TABLE](https://www.sqlite.org/lang_altertable.html#otheralter).
+
+G-D0-13 exercises only a single direct view and would not catch either failure ([design proposal:628](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceD/design-proposal.md:628)).
+
+Required change: inventory and restore the complete dependent-view closure, including triggers attached to every dropped view; extend G-D0-13 with a view-on-view dependency and an `INSTEAD OF` trigger.
+
+## r4 convergence items
+
+| Item | Verdict | Evidence |
+|---|---|---|
+| DP-r4-01 | **PASS** | The provider now emits `(table, row_id, ordinal, seq)` and explicitly keys staging and joins by `(table, row_id)` ([proposal:203](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceD/design-proposal.md:203)). This matches the schema: `facts.id` and `ticks.id` are independent primary keys ([sqlite_store.py:308](/Users/kaygee/Code/loops/libs/engine/src/engine/sqlite_store.py:308)). `rows_of_record` returns `(row_type, row)` pairs ([arrival_projection.py:153](/Users/kaygee/Code/loops/libs/engine/src/engine/arrival_projection.py:153)), so the provider can derive the table namespace. G-D0-12 directly tests the collision case ([proposal:624](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceD/design-proposal.md:624)). |
+| DP-r4-02 | **PASS**, narrowly | r5 correctly recognizes that a view’s `tbl_name` is its own name and consequently uses view-definition content rather than the table-keyed index/trigger query ([proposal:153](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceD/design-proposal.md:153)). That matches `sqlite_schema` semantics and SQLite’s rebuild steps 3, 8, and 9. G-D0-13 tests direct-view survival. [SQLite schema table](https://www.sqlite.org/schematab.html), [SQLite generalized rebuild](https://www.sqlite.org/lang_altertable.html#otheralter). The newly exposed transitive/trigger problem is separately reported as DP-r5-01. |
+
+## Decision verdicts
+
+| Decision | Verdict |
+|---|---|
+| D0 | **SOUND-WITH-CHANGES** — DP-r5-01 must be closed. |
+| D1 | **SOUND-WITH-CHANGES** — remains dependent on D0’s migration guarantee. |
+| D2 | **SOUND-WITH-CHANGES** — remains dependent on D0’s migration guarantee. |
+| D3 | **SOUND** |
+| D4 | **SOUND** |
+| Gate plan | **SOUND-WITH-CHANGES** — strengthen G-D0-13 as described. |
+
+Overall: **NOT-RATIFIABLE-AS-WRITTEN**.
+
+Convergence: **NOT CONVERGED** — both r4 items pass, but there is one new r5 finding.
+
+Review was read-only; no files were modified.

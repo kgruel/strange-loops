@@ -1,0 +1,95 @@
+DP-r1-01 — MAJOR — “Four things already true” §4 / D3 `_suffix_unindexed` dissolution
+
+The dissolution argument overclaims what `walk_marked` establishes. `_anchor_for` validates the marked record’s local shape, lineage, ordinal, and authority constraints, but explicitly does **not** establish that the anchor chains back to genesis: “checked for self-consistency, never for chaining back to genesis” ([arrival.py:1149](/Users/kaygee/Code/loops/libs/engine/src/engine/arrival.py:1149)). `_suffix_unindexed` additionally detects a rewound marker when rows from beyond it are already indexed ([canonical_audit.py:395](/Users/kaygee/Code/loops/libs/engine/src/engine/canonical_audit.py:395), [canonical_audit.py:442](/Users/kaygee/Code/loops/libs/engine/src/engine/canonical_audit.py:442)). Merely validating the claimed anchor does not detect that condition.
+
+Fix direction: retain an arrival-native corroboration check comparing indexed coordinates/content beyond the mark, or strengthen the replacement so a rewound/self-consistent mark cannot be reported merely as “behind.”
+
+DP-r1-02 — MAJOR — D0 legacy backfill / D2 backward verifiability
+
+`arrival_ordinal = rowid` is invalid for an already-existing arrival-canonical index containing a batch. One arrival batch expands into multiple projection rows ([arrival_store.py:342](/Users/kaygee/Code/loops/libs/engine/src/engine/arrival_store.py:342)), while the arrival record has one ordinal. Example:
+
+```text
+arrival ord 1: fact A       -> fact rowid 1
+arrival ord 2: batch B,C    -> fact rowids 2,3
+arrival ord 3: fact D       -> fact rowid 4
+```
+
+The proposed backfill assigns ordinals `1,2,3,4`, not `1,2,2,3`. On the next catch-up, a real ordinal can collide with a falsely backfilled one; even without a constraint, ordering and range membership are wrong. This directly falsifies “for any existing store” and “exact by construction” ([design-proposal.md:259](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceD/design-proposal.md:259)).
+
+Fix direction: mode-aware migration—re-derive arrival-canonical coordinates from the arrival log and reserve `rowid` backfill solely for stores that genuinely lack arrival.
+
+DP-r1-03 — MAJOR — D0 schema and assignment invariants
+
+The proposal does not design enforceable invariants for the purported total order. It specifies neither `NOT NULL` nor uniqueness on `(arrival_ordinal, arrival_seq)`, and its NULL check is audit-only and arrival-store-only. Meanwhile, shared `FACT_INSERT_SQL`/`TICK_INSERT_SQL` are used by many paths beyond the two claimed expansion sites, including ordinary writes ([sqlite_store.py:746](/Users/kaygee/Code/loops/libs/engine/src/engine/sqlite_store.py:746)), arrival catch-up ([arrival_store.py:351](/Users/kaygee/Code/loops/libs/engine/src/engine/arrival_store.py:351)), and re-derivation. D0 says plain `SqliteStore.append` assigns the next monotonic coordinate but does not define transactional allocation across fact/tick tables, explicit inserts, triggers, rebirth/slice paths, or partially migrated schemas.
+
+Fix direction: specify schema constraints, one transactional allocator shared across facts and ticks for legacy stores, migration detection/versioning, and behavior for every explicit insert path before treating the pair as a total order.
+
+DP-r1-04 — MAJOR — D2 seal re-base completeness
+
+D2 changes window construction and new-tick edge queries, but seal verification still contains rowid-based window resolution and counts outside the three named functions. `verify_chain` calls `_cursor_rowid` and counts `WHERE rowid > ? AND rowid <= ?` ([sqlite_store.py:1902](/Users/kaygee/Code/loops/libs/engine/src/engine/sqlite_store.py:1902)); the aggregate window check repeats that logic ([sqlite_store.py:1929](/Users/kaygee/Code/loops/libs/engine/src/engine/sqlite_store.py:1929)). Thus the claimed “three functions” blast radius leaves verification partly keyed to rowid.
+
+Fix direction: enumerate and re-key every seal construction and verification query, including individual and aggregate window-count checks, and gate against a shuffled index.
+
+DP-r1-05 — MAJOR — D3 L1 mechanism and cheapness fence
+
+The proposed mechanism is internally impossible as written:
+
+- `walk_marked(mark)` returns records **after** the anchor, not the consumed anchor itself ([arrival.py:1206](/Users/kaygee/Code/loops/libs/engine/src/engine/arrival.py:1206), [arrival.py:1227](/Users/kaygee/Code/loops/libs/engine/src/engine/arrival.py:1227)). Therefore `_check_consumed_edge` cannot obtain the consumed record “through that anchor” from its iterator.
+- `walk_marked` necessarily performs byte-offset custody reads: `_anchor_for` calls `_record_ending_at(mark.arrival_offset)`, which opens, seeks, and reads the file ([arrival.py:1173](/Users/kaygee/Code/loops/libs/engine/src/engine/arrival.py:1173), [arrival.py:1180](/Users/kaygee/Code/loops/libs/engine/src/engine/arrival.py:1180)). That contradicts both “never reads a byte offset” and G-D3-2’s assertion that no `open(..., "rb")` remains on L1.
+
+Fix direction: either expose a substrate API that returns the validated anchor record and accurately describe offset as an internal seek hint, or redesign L1 around head/mark metadata; rewrite G-D3-2 to test bounded work rather than an impossible no-open/no-offset condition.
+
+DP-r1-06 — MAJOR — D4 arm 1 admission verification
+
+`verify_authorship(source_log, verify)` does not verify the merge admission set’s carried fact signatures. It verifies arrival-record signatures when `_SIG` exists and explicitly treats unsigned non-genesis records as making no claim ([arrival.py:1585](/Users/kaygee/Code/loops/libs/engine/src/engine/arrival.py:1585), [arrival.py:1627](/Users/kaygee/Code/loops/libs/engine/src/engine/arrival.py:1627)). Merge, however, carries the fact-row signature inside the body ([merge.py:512](/Users/kaygee/Code/loops/libs/store/src/store/merge.py:512)); that is a different signed commitment from the arrival-record envelope. It also verifies the entire source log before deduplication, whereas `_entries_for` admits only fresh rows and may split partially deduplicated batches ([merge.py:463](/Users/kaygee/Code/loops/libs/store/src/store/merge.py:463)). Consequently, a forged carried fact signature can enter admission unseen, while a bad signature on a non-admitted/deduplicated record can refuse an otherwise valid admission.
+
+The dependency claim itself is sound: verification is callable-injected and requires no `libs/sign` import.
+
+Fix direction: verify the exact post-dedup admission rows using the fact-authorship commitment and keys resolved from source arrival history; define treatment of split batches and unsigned admitted rows explicitly.
+
+DP-r1-07 — MAJOR — D1 blast radius / contract conformance
+
+The “all sites are inside libs/engine” claim is false. Application code directly compares `WitnessPosition.rowid` to choose a diff baseline ([fold.py:1531](/Users/kaygee/Code/loops/apps/loops/src/loops/cli/views/fold.py:1531)). Removing `rowid` from the model will break this path or leave rowid authority alive. The proposal’s fence permits only the separately flagged audit dispatch under `apps/`, contradicting the arc’s apps-diff-empty law for an unflagged required D1 change.
+
+Fix direction: preserve a compatible non-rowid application-facing operation/property, move baseline selection into an engine primitive, or obtain an explicit scope ruling and add the application change and gate.
+
+DP-r1-08 — minor — “set-membership already exists” / D3 deep audit
+
+`audit_derived_log` uses `set[bytes]`, not multiset membership ([arrival_projection.py:313](/Users/kaygee/Code/loops/libs/engine/src/engine/arrival_projection.py:313)). Its claim that digest-set difference cardinality equals line-set difference cardinality fails when the derived file contains duplicate lines ([arrival_projection.py:352](/Users/kaygee/Code/loops/libs/engine/src/engine/arrival_projection.py:352)). A duplicated legitimate line can therefore be invisible as an extra line. Reordering is correctly ignored, but multiplicity is also discarded without being named.
+
+Fix direction: clarify that the ruled semantics intentionally ignore multiplicity, or compare digest counters/multisets while remaining order-insensitive.
+
+DP-r1-09 — minor — D1 same-path replacement and A10 survival
+
+The proposal says the new same-path lineage guard “strengthens A10 without altering its message,” but A10 currently keys its distinct refusals on declaration lineage/store identity, not arrival-log replacement ([design-proposal.md:200](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceD/design-proposal.md:200)). Reusing the A10 message for a replaced arrival lineage would preserve bytes while misdescribing the failure; adding a new refusal would violate the proposal’s “exact structure and both refusals verbatim” claim unless carefully separated. `arrival_lineage=""` also conflates storeless positions with legacy store-local axes, making equality insufficient to distinguish those states.
+
+Fix direction: keep A10’s existing branches and messages byte-identical, add a separately typed structural refusal for arrival-lineage replacement, and represent legacy/storeless axis kind explicitly or gate it on store presence.
+
+DP-r1-10 — minor — Gate plan coverage
+
+Several load-bearing decisions have no failing gate:
+
+- migration of an existing arrival index containing batches;
+- partially migrated schemas and interrupted backfill;
+- uniqueness/NULL enforcement and concurrent monotonic assignment;
+- verification-side rowid residue;
+- exact post-dedup admission-set signature verification;
+- untouched-app compatibility for removal of `WitnessPosition.rowid`;
+- duplicate-line behavior in the derived JSONL audit.
+
+Conversely, G-D3-2’s literal no-`open(..., "rb")` condition cannot pass if L1 uses `walk_marked`, because anchor validation itself opens the log. G-D1-1 is largely non-discriminating: `durable_handle` does not encode the coordinate today, so byte equality can pass even while the re-key is incorrect.
+
+Fix direction: add adversarial gates for the missing invariants and replace impossible/non-discriminating checks with behavioral assertions.
+
+### Per-decision verdict
+
+| Decision | Verdict | Reason |
+|---|---|---|
+| D0 | UNSOUND | Backfill corrupts arrival coordinates in existing batch-bearing stores; schema and allocation invariants are incomplete. |
+| D1 | SOUND-WITH-CHANGES | Arrival coordinates are the correct direction, but app-level rowid use, legacy/storeless spelling, and replacement refusal semantics are unresolved. |
+| D2 | UNSOUND | Backward-verifiability proof has a concrete batch counterexample, and verification queries remain rowid-based. |
+| D3 | UNSOUND | `_suffix_unindexed` capability disappears, and the proposed L1 anchor/cheapness mechanism cannot work as described. |
+| D4 | UNSOUND | Arm 1 verifies source record signatures, not the exact admitted rows’ carried authorship signatures. |
+| Gate plan | UNSOUND | It misses critical migration/admission cases and contains one gate incompatible with the prescribed implementation. |
+
+Overall: **NOT-RATIFIABLE-AS-WRITTEN**.

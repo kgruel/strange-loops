@@ -1,0 +1,468 @@
+Reading prompt from stdin...
+OpenAI Codex v0.147.0
+--------
+workdir: /Users/kaygee/Code/loops
+model: gpt-5.6-sol
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: low
+reasoning summaries: none
+session id: 01a022b3-91f5-75d2-92ca-3d34136d51f0
+--------
+user
+# Codex review brief — slice D design proposal r6 (convergence check, sol LOW)
+
+Repo: this checkout, branch `feat/arrival-libs` @ HEAD. **Review-only: do not
+modify any file.** Target: `docs/scratch/arrival-sliceD/design-proposal.md`
+(now r6). Prior rounds: codex-design-r1..r5-stdout.log here. r5 left exactly
+one finding (DP-r5-01, view dependency closure); r6 revised against only it.
+
+Convergence check:
+1. DP-r5-01: PASS/FAIL with evidence (fixed-point view discovery, closure
+   trigger inventory, dependency-ordered replay, extended G-D0-13).
+2. Fresh-eyes on ONLY the r6-changed text: new findings as DP-r6-NN.
+3. Do not re-report anything previously PASSed or routed to Kyle.
+
+Verdict: PASS/FAIL for DP-r5-01, any DP-r6 findings, per-decision verdicts,
+overall RATIFIABLE / NOT-RATIFIABLE-AS-WRITTEN, explicit CONVERGED /
+NOT CONVERGED. One response.
+
+codex
+I’ll review only the r6 delta against r5 and the prior finding history, without changing files. I’ll first inspect the review logs and proposal diff, then validate the dependency-closure mechanics and verdicts.
+exec
+/bin/zsh -lc 'rg --files docs/scratch/arrival-sliceD | sort && git status --short --branch && git diff --no-ext-diff HEAD''^ -- docs/scratch/arrival-sliceD/design-proposal.md' in /Users/kaygee/Code/loops
+ succeeded in 0ms:
+docs/scratch/arrival-sliceD/codex-design-brief-r1.md
+docs/scratch/arrival-sliceD/codex-design-brief-r2.md
+docs/scratch/arrival-sliceD/codex-design-brief-r3.md
+docs/scratch/arrival-sliceD/codex-design-brief-r4.md
+docs/scratch/arrival-sliceD/codex-design-brief-r5.md
+docs/scratch/arrival-sliceD/codex-design-brief-r6.md
+docs/scratch/arrival-sliceD/codex-design-r1-stderr.log
+docs/scratch/arrival-sliceD/codex-design-r1-stdout.log
+docs/scratch/arrival-sliceD/codex-design-r2-stderr.log
+docs/scratch/arrival-sliceD/codex-design-r2-stdout.log
+docs/scratch/arrival-sliceD/codex-design-r3-stderr.log
+docs/scratch/arrival-sliceD/codex-design-r3-stdout.log
+docs/scratch/arrival-sliceD/codex-design-r4-stderr.log
+docs/scratch/arrival-sliceD/codex-design-r4-stdout.log
+docs/scratch/arrival-sliceD/codex-design-r5-stderr.log
+docs/scratch/arrival-sliceD/codex-design-r5-stdout.log
+docs/scratch/arrival-sliceD/codex-design-r6-stderr.log
+docs/scratch/arrival-sliceD/codex-design-r6-stdout.log
+docs/scratch/arrival-sliceD/design-proposal.md
+docs/scratch/arrival-sliceD/e1.json
+docs/scratch/arrival-sliceD/e1.md
+docs/scratch/arrival-sliceD/e2.json
+docs/scratch/arrival-sliceD/e2.md
+docs/scratch/arrival-sliceD/e3.json
+docs/scratch/arrival-sliceD/e3.md
+docs/scratch/arrival-sliceD/e4.json
+docs/scratch/arrival-sliceD/e4.md
+docs/scratch/arrival-sliceD/e5.json
+docs/scratch/arrival-sliceD/e5.md
+docs/scratch/arrival-sliceD/e6.json
+docs/scratch/arrival-sliceD/e6.md
+docs/scratch/arrival-sliceD/explorer-stderr.log
+docs/scratch/arrival-sliceD/explorer-stdout.log
+docs/scratch/arrival-sliceD/run-plan.md
+## feat/arrival-libs...origin/main [ahead 146]
+?? docs/scratch/arrival-sliceD/codex-design-brief-r1.md
+?? docs/scratch/arrival-sliceD/codex-design-brief-r2.md
+?? docs/scratch/arrival-sliceD/codex-design-brief-r3.md
+?? docs/scratch/arrival-sliceD/codex-design-brief-r4.md
+?? docs/scratch/arrival-sliceD/codex-design-brief-r5.md
+?? docs/scratch/arrival-sliceD/codex-design-brief-r6.md
+?? docs/scratch/arrival-sliceD/codex-design-r1-stderr.log
+?? docs/scratch/arrival-sliceD/codex-design-r1-stdout.log
+?? docs/scratch/arrival-sliceD/codex-design-r2-stderr.log
+?? docs/scratch/arrival-sliceD/codex-design-r2-stdout.log
+?? docs/scratch/arrival-sliceD/codex-design-r3-stderr.log
+?? docs/scratch/arrival-sliceD/codex-design-r3-stdout.log
+?? docs/scratch/arrival-sliceD/codex-design-r4-stderr.log
+?? docs/scratch/arrival-sliceD/codex-design-r4-stdout.log
+?? docs/scratch/arrival-sliceD/codex-design-r5-stderr.log
+?? docs/scratch/arrival-sliceD/codex-design-r5-stdout.log
+?? docs/scratch/arrival-sliceD/codex-design-r6-stderr.log
+?? docs/scratch/arrival-sliceD/codex-design-r6-stdout.log
+diff --git a/docs/scratch/arrival-sliceD/design-proposal.md b/docs/scratch/arrival-sliceD/design-proposal.md
+index f2485719..29ba5a89 100644
+--- a/docs/scratch/arrival-sliceD/design-proposal.md
++++ b/docs/scratch/arrival-sliceD/design-proposal.md
+@@ -1,6 +1,6 @@
+ # Slice D — Surfaces: design proposal
+ 
+-Status: **r5 — revised against codex DP-r4 findings, awaiting Kyle's ruling.**
++Status: **r6 — revised against codex DP-r5 finding, awaiting Kyle's ruling.**
+ Five separately ratifiable decisions (D0–D4) plus a gate plan and work
+ packages. r1 written 2026-08-20 against `feat/arrival-libs` @ `eeb05de8`;
+ r2 revised it against the ten DP-r1 findings (7 MAJOR, 3 minor); the r2
+@@ -156,11 +156,24 @@ statement discipline):
+     (skipping auto-indexes) — and, separately, every `type = 'view'` row
+     whose stored `sql` references the table, because a view's `tbl_name`
+     is its own name and the table-keyed query structurally cannot find it.
+-    Dependent views are DROPped before the rebuild and replayed verbatim
+-    after the RENAME, in the same transaction, per SQLite's documented
+-    generalized rebuild procedure (lang_altertable.html#otheralter, steps
+-    3/8/9) — necessary not only for preservation but for correctness: a
+-    surviving stale view can fail the RENAME's schema reparse outright.
++    The view inventory is **dependency-closed, not direct-only**
++    (DP-r5-01): view discovery iterates to a fixed point — after finding
++    views whose `sql` references the table, re-scan for views whose `sql`
++    references any already-collected view's name, until no new view is
++    found — because a view over a dropped view is left invalid and can
++    itself fail the RENAME's whole-schema reparse. The trigger inventory
++    likewise extends over the closure: triggers attached to a collected
++    view (INSTEAD OF triggers included) carry `sqlite_schema.tbl_name` =
++    the VIEW's name, so the table-keyed query misses them and the view
++    drop would silently delete them — they are inventoried by
++    `tbl_name IN (<collected view names>)` and replayed with their views.
++    The whole closure is DROPped before the rebuild and replayed verbatim
++    after the RENAME **in dependency order** (views before the views that
++    reference them, triggers after their views), in the same transaction,
++    per SQLite's documented generalized rebuild procedure
++    (lang_altertable.html#otheralter, steps 3/8/9) — necessary not only
++    for preservation but for correctness: a surviving stale view can fail
++    the RENAME's schema reparse outright.
+     Triggers are supported behavior, not debris — the store deliberately
+     reads back committed rows "after any AFTER triggers fired"
+     (`sqlite_store.py:702-712`, `:746`).
+@@ -625,10 +638,11 @@ arrival-marked index refuses to mirror-stamp it.
+ containing a fact and a tick sharing the same id string, from different
+ records; migration assigns each its own distinct correct coordinate
+ (composite `(table, row_id)` staging proven discriminating).
+-**G-D0-13** — dependent-view survival (DP-r4-02): a pre-existing view
+-over `facts` remains present in `sqlite_schema` and queryable with
+-identical results post-migration; the RENAME completes with the view
+-in place.
++**G-D0-13** — dependent-view survival, closure-deep (DP-r4-02 +
++DP-r5-01): fixture carries `v1` over `facts`, `v2` over `v1`, and an
++INSTEAD OF trigger on `v1`; post-migration all three remain present in
++`sqlite_schema`, `v1` and `v2` answer identically, the INSTEAD OF
++trigger still fires with identical behavior, and the RENAME completes.
+ 
+ **G-D1-2** — `WitnessAggregateUnsupported` at all three sites,
+ messages unchanged; A10 refusal messages byte-identical. Pinning tests
+@@ -831,3 +845,10 @@ r5 answers:
+ |---|---|---|
+ | DP-r4-01 | MAJOR | **Redesigned.** Provider yields `(table, row_id, arrival_ordinal, arrival_seq)`; staging temp table and rebuild join key on composite `(table, row_id)` — facts.id and ticks.id are independent primary keys, so the bare-id mapping was ambiguous; `rows_of_record` already yields the row type, so the closure has the namespace for free. Gated by G-D0-12 (fact and tick sharing one id string, distinct coordinates). |
+ | DP-r4-02 | MAJOR | **Redesigned.** Rebuild inventory extended to dependent views, discovered via `sqlite_schema.sql` content (a view's `tbl_name` is its own name — the table-keyed query structurally misses them), dropped before and replayed verbatim after the rebuild per SQLite's generalized procedure (steps 3/8/9); stale-view RENAME-reparse failure mode noted. Gated by G-D0-13 (pre-existing view over facts queryable post-migration). |
++
++r5 re-verify (`codex-design-r5-stdout.log`): DP-r4-01/02 both PASS; one
++new finding. r6 answers:
++
++| finding | severity | disposition in r6 |
++|---|---|---|
++| DP-r5-01 | MAJOR | **Redesigned.** View inventory made dependency-CLOSED: fixed-point iteration over view-name references in `sqlite_schema.sql` (views-on-views collected transitively); trigger inventory extended to triggers whose `tbl_name` names any collected view (INSTEAD OF included — the view drop would otherwise silently delete them); the whole closure dropped and replayed in dependency order within the one transaction. G-D0-13 extended: v2-over-v1-over-facts plus an INSTEAD OF trigger on v1, all surviving with identical behavior. |
+
+exec
+/bin/zsh -lc "sed -n '1,240p' docs/scratch/arrival-sliceD/codex-design-r5-stdout.log; sed -n '100,205p' docs/scratch/arrival-sliceD/design-proposal.md; sed -n '580,670p' docs/scratch/arrival-sliceD/design-proposal.md; rg -n \"sqlite_schema|dependent view|dependency|replay|G-D0-13|D0 verdict|Decision D0|D0 —\" docs/scratch/arrival-sliceD/design-proposal.md" in /Users/kaygee/Code/loops
+ succeeded in 0ms:
+## Findings
+
+### DP-r5-01 — MAJOR — dependent-view handling is not dependency-closed
+
+The new procedure inventories direct views whose SQL references `facts` or `ticks`, then drops those views before rebuilding ([design proposal:153](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceD/design-proposal.md:153)). It does not preserve:
+
+- Views that transitively depend on a directly dependent view.
+- Triggers attached to a dropped view, because their `sqlite_schema.tbl_name` is the view name, not `facts` or `ticks`.
+
+Dropping direct view `v1` can therefore leave dependent view `v2` invalid during `ALTER TABLE ... RENAME`; SQLite reparses the complete schema and normally refuses malformed view entries. An `INSTEAD OF` trigger on `v1` is also deleted with `v1` but absent from the table-keyed trigger inventory. SQLite defines `tbl_name` as the associated table or view, while a view’s `tbl_name` is its own name. [SQLite schema table](https://www.sqlite.org/schematab.html), [SQLite ALTER TABLE](https://www.sqlite.org/lang_altertable.html#otheralter).
+
+G-D0-13 exercises only a single direct view and would not catch either failure ([design proposal:628](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceD/design-proposal.md:628)).
+
+Required change: inventory and restore the complete dependent-view closure, including triggers attached to every dropped view; extend G-D0-13 with a view-on-view dependency and an `INSTEAD OF` trigger.
+
+## r4 convergence items
+
+| Item | Verdict | Evidence |
+|---|---|---|
+| DP-r4-01 | **PASS** | The provider now emits `(table, row_id, ordinal, seq)` and explicitly keys staging and joins by `(table, row_id)` ([proposal:203](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceD/design-proposal.md:203)). This matches the schema: `facts.id` and `ticks.id` are independent primary keys ([sqlite_store.py:308](/Users/kaygee/Code/loops/libs/engine/src/engine/sqlite_store.py:308)). `rows_of_record` returns `(row_type, row)` pairs ([arrival_projection.py:153](/Users/kaygee/Code/loops/libs/engine/src/engine/arrival_projection.py:153)), so the provider can derive the table namespace. G-D0-12 directly tests the collision case ([proposal:624](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceD/design-proposal.md:624)). |
+| DP-r4-02 | **PASS**, narrowly | r5 correctly recognizes that a view’s `tbl_name` is its own name and consequently uses view-definition content rather than the table-keyed index/trigger query ([proposal:153](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceD/design-proposal.md:153)). That matches `sqlite_schema` semantics and SQLite’s rebuild steps 3, 8, and 9. G-D0-13 tests direct-view survival. [SQLite schema table](https://www.sqlite.org/schematab.html), [SQLite generalized rebuild](https://www.sqlite.org/lang_altertable.html#otheralter). The newly exposed transitive/trigger problem is separately reported as DP-r5-01. |
+
+## Decision verdicts
+
+| Decision | Verdict |
+|---|---|
+| D0 | **SOUND-WITH-CHANGES** — DP-r5-01 must be closed. |
+| D1 | **SOUND-WITH-CHANGES** — remains dependent on D0’s migration guarantee. |
+| D2 | **SOUND-WITH-CHANGES** — remains dependent on D0’s migration guarantee. |
+| D3 | **SOUND** |
+| D4 | **SOUND** |
+| Gate plan | **SOUND-WITH-CHANGES** — strengthen G-D0-13 as described. |
+
+Overall: **NOT-RATIFIABLE-AS-WRITTEN**.
+
+Convergence: **NOT CONVERGED** — both r4 items pass, but there is one new r5 finding.
+
+Review was read-only; no files were modified.
+ticks have independent rowid sequences today and no query compares a fact
+coordinate to a tick coordinate — windows select facts only, edges select
+newest-per-table) and **shared** in arrival-projected stores (the log's
+ordinal is one axis for all record types; density per table is not assumed
+anywhere).
+
+**Write sites.** Arrival-projected rows get the real coordinate at the two
+— and only two — sites that expand a record into rows: `arrival_store`'s
+catch-up indexer (`_index_record`, `:342-360`) and
+`arrival_projection.rederive_projections` (`:500-509`), both of which hold
+the record's `ResumeMark`. Legacy stores get a mirrored coordinate at
+append time (below). **Every other insert path is enumerated and closed**
+in WP-1: `SqliteStore.append`/`append_tick` (`sqlite_store.py:746`), the
+slice/rebirth writers in `libs/store`, and the re-sign/re-anchor UPDATE
+paths (`sqlite_store.py:1710-1756` — updates only, no inserts, unaffected).
+The shared `FACT_INSERT_SQL`/`TICK_INSERT_SQL` grow the two columns, so an
+insert that fails to supply them fails loudly at the statement, not
+silently as NULL (DP-r1-03).
+
+**Schema invariants** (DP-r1-03/DP-r2-01 — real database constraints, not
+statement discipline):
+
+- **New databases**: `_SCHEMA_STMTS` declares the columns with
+  `arrival_ordinal INTEGER NOT NULL`, `arrival_seq INTEGER NOT NULL`, and a
+  table-level `UNIQUE (arrival_ordinal, arrival_seq)` per table. The
+  invariant lives in the table, so it binds every writer including foreign
+  SQL, and NOT NULL moots SQLite's NULLs-pass-unique-indexes hole.
+- **Existing databases — table rebuild, the honest SQLite mechanism**:
+  retro-added columns cannot be ALTERed to NOT NULL, so the migration is
+  the standard rebuild, per table, in ONE transaction:
+  `CREATE TABLE facts_new (...full schema incl. NOT NULL + UNIQUE...)`;
+  `INSERT INTO facts_new (rowid, ...) SELECT rowid, ..., <coordinate>,
+  <seq> FROM facts` (coordinate per mode: `rowid, 0` mirrored, or a join
+  against a temp id→(ord, seq) mapping staged from the coordinate provider
+  for arrival-canonical); `DROP TABLE facts; ALTER TABLE facts_new RENAME
+  TO facts`; same for `ticks`; recreate dependent schema; write the
+  `coordinate_axis` marker; commit. No foreign keys exist on these tables,
+  so the rebuild needs no FK dance. **Cost, stated:** one O(store) rewrite
+  at first post-upgrade writable open — the same order as the coordinate
+  walk it absorbs, once per database.
+- **The rebuild preserves supported schema artifacts** (DP-r3-02):
+  - **Rowids are preserved explicitly** — the copy names `rowid` in both
+    column lists. This is not optional politeness: `facts_fts.fact_rowid`
+    and the `fts_state.last_rowid` watermark key on exactly these rowids
+    (`jsonl_store.py:944-954` documents the poisoning that renumbering
+    causes; `vertex_reader.py:2187`), and WP-1 lands while witness/seal
+    rowid consumers are still live — a renumbering rebuild would break the
+    suites WP-1 is required to keep green. The FTS projection therefore
+    survives the migration valid, and the rederivation precedent of
+    dropping `facts_fts`/`fts_state` (`arrival_projection.py:492-495`) is
+    correctly NOT followed here: rederivation renumbers (DELETE resets the
+    rowid counter), the migration copy does not, and each treatment is the
+    honest one for its mechanism.
+  - **Triggers, indexes, AND dependent views are inventoried and
+    recreated** (DP-r4-02): before the DROP, read every `sqlite_schema`
+    row with `tbl_name` = the table and `type IN ('trigger','index')`
+    (skipping auto-indexes) — and, separately, every `type = 'view'` row
+    whose stored `sql` references the table, because a view's `tbl_name`
+    is its own name and the table-keyed query structurally cannot find it.
+    The view inventory is **dependency-closed, not direct-only**
+    (DP-r5-01): view discovery iterates to a fixed point — after finding
+    views whose `sql` references the table, re-scan for views whose `sql`
+    references any already-collected view's name, until no new view is
+    found — because a view over a dropped view is left invalid and can
+    itself fail the RENAME's whole-schema reparse. The trigger inventory
+    likewise extends over the closure: triggers attached to a collected
+    view (INSTEAD OF triggers included) carry `sqlite_schema.tbl_name` =
+    the VIEW's name, so the table-keyed query misses them and the view
+    drop would silently delete them — they are inventoried by
+    `tbl_name IN (<collected view names>)` and replayed with their views.
+    The whole closure is DROPped before the rebuild and replayed verbatim
+    after the RENAME **in dependency order** (views before the views that
+    reference them, triggers after their views), in the same transaction,
+    per SQLite's documented generalized rebuild procedure
+    (lang_altertable.html#otheralter, steps 3/8/9) — necessary not only
+    for preservation but for correctness: a surviving stale view can fail
+    the RENAME's schema reparse outright.
+    Triggers are supported behavior, not debris — the store deliberately
+    reads back committed rows "after any AFTER triggers fired"
+    (`sqlite_store.py:702-712`, `:746`).
+- The audit's NULL check (D3) remains a backstop for databases that predate
+  the migration or were written by a foreign schema copy — a location
+  claim, exactly as before.
+- **Legacy allocator:** for a store with no arrival log, append assigns
+  `arrival_ordinal = COALESCE((SELECT MAX(arrival_ordinal) FROM <table>), 0) + 1`,
+  `arrival_seq = 0`, inside the same transaction as the insert — one
+  allocator, per table, serialized by the store's existing write
+  transaction. For such a store the mirrored coordinate *is* its arrival
+  axis: dense, append-ordered, rebuild-invariant is vacuous (nothing
+  rebuilds it from a log), and identical to rowid order by construction.
+
+**Migration — mode-aware, not uniform** (DP-r1-02 replaced r1's option (a)):
+
+- **Legacy index (jsonl-/sqlite-canonical, no arrival log):** backfill
+  `arrival_ordinal = rowid, arrival_seq = 0`. Correct by construction —
+  rowid is that store's append order, and no batch record exists to share
+  an ordinal (legacy rows are row-granular).
+- **Arrival-canonical index:** rowid backfill is WRONG — a batch expands to
+  N rows sharing one ordinal (`arrival_store.py:342`), so `ordinal = rowid`
+  mints coordinates the log never issued and collides with the next
+  catch-up (the DP-r1-02 counterexample). The migration instead re-derives
+  coordinates **from the log**: walk `rows_of_record` over the records up
+  to the stamped consumed mark, matching row ids in index order and
+  stamping `(ord, seq)`; any mismatch between walk and index refuses into
+  the existing escape hatch — `rederive_projections`, which rebuilds the
+  index with coordinates written natively. The walk is O(store), once.
+docstring carry that scope. D4-Q1 (legacy source with no arrival log:
+explicit no-claim, recommended, vs refusal) stands.
+
+---
+
+## Gate plan
+
+Independent gate agent; re-derives the oracle from scratch; pointer branch
+`slice/D-gate`. (r2: gates for every DP-r1 gap; the impossible and
+non-discriminating r1 gates replaced — DP-r1-10.)
+
+**G-D0-1 — the shuffled index (the ruled gate item).** A natural rebuild
+cannot produce one (`rederive_projections` replays in order), so the gate
+builds a **deliberate permuted-insert harness** — index rows inserted in
+permuted record order so rowid order and arrival order disagree.
+Assertions: L1 passes; every witness position, seal window, audit check,
+and `verify_chain` answer identical to the unshuffled store. Written first;
+used by every later package.
+**G-D0-2** — deliberately rebuilt index: outstanding positions and seals
+valid.
+**G-D0-3** — migration of an existing **batch-bearing arrival-canonical**
+index: coordinates equal the log's (the DP-r1-02 counterexample as a test);
+subsequent catch-up appends collide with nothing.
+**G-D0-4** — interrupted migration: kill between schema-add and stamp;
+reopen; the store answers correctly and the marker semantics hold (no
+observable half-state).
+**G-D0-5** — invariant enforcement **by the table**: on a migrated (rebuilt)
+and on a freshly-created database, a raw `conn.execute` INSERT with a
+duplicate `(arrival_ordinal, arrival_seq)` raises `IntegrityError`
+(UNIQUE), and one with NULL in either coordinate raises `IntegrityError`
+(NOT NULL) — foreign SQL included, no store-layer code in the loop; legacy
+allocator monotonic under interleaved fact/tick appends in one transaction.
+**G-D0-6** — ordinary legacy opens migrate (the DP-r1-10 re-fail gap):
+existing sqlite-canonical and jsonl-canonical fixture databases opened
+through their normal public constructors and appended to via the public
+API — the upgrader ran before the first insert, coordinates are correct
+and constrained, prior rows carry the mirror backfill, and a read-only
+open of an unmigrated database still answers reads.
+**G-D0-7** — arrival dispatch route 3 (DP-r3-03): an existing UNMIGRATED
+batch-bearing arrival-canonical index opened through `ArrivalStore`'s
+public constructor — coordinates equal the log's, constraints present,
+appends land correctly after.
+**G-D0-8** — arrival dispatch route 4 (DP-r3-03): the same unmigrated
+fixture through the rederivation entry point — migrated/rederived
+coordinates identical to G-D0-7's, proving the two routes with different
+log access agree.
+**G-D0-9** — trigger survival (DP-r3-02): a fixture with an AFTER INSERT
+trigger on `facts` (the read-back contract `sqlite_store.py:702-712`
+supports) migrates; the trigger still exists in `sqlite_schema` and still
+fires on the next public-API append.
+**G-D0-10** — FTS/rowid survival (DP-r3-02): a fixture with populated
+`facts_fts` + `fts_state` migrates; every `fact_rowid` still resolves to
+the same fact (rowids preserved byte-for-byte), search answers
+identically, and incremental indexing resumes from the watermark without
+skipping or double-indexing.
+**G-D0-11** — mis-mode refusal: a plain `SqliteStore` opened on an
+arrival-marked index refuses to mirror-stamp it.
+**G-D0-12** — cross-table id collision (DP-r4-01): an arrival fixture
+containing a fact and a tick sharing the same id string, from different
+records; migration assigns each its own distinct correct coordinate
+(composite `(table, row_id)` staging proven discriminating).
+**G-D0-13** — dependent-view survival, closure-deep (DP-r4-02 +
+DP-r5-01): fixture carries `v1` over `facts`, `v2` over `v1`, and an
+INSTEAD OF trigger on `v1`; post-migration all three remain present in
+`sqlite_schema`, `v1` and `v2` answer identically, the INSTEAD OF
+trigger still fires with identical behavior, and the RENAME completes.
+
+**G-D1-2** — `WitnessAggregateUnsupported` at all three sites,
+messages unchanged; A10 refusal messages byte-identical. Pinning tests
+(`test_witness_position.py`, `test_diff_interval_report.py`,
+`test_query_facts.py`, `test_fold_at.py`) pass untouched.
+**G-D1-3** — `seq:N` round-trip across a batch boundary, pinning the ruled
+D1-Q1 arm.
+**G-D1-4** — same-path store-replacement: new typed refusal fires;
+A10 and the unadopted refusal unchanged (their tests prove it).
+**G-D1-5** — position equivalence (replaces r1's non-discriminating
+G-D1-1): for a corpus store, every fact's resolved position selects the
+same prefix row-set before and after the re-key; `durable_handle` output
+unchanged as a corollary.
+**G-D1-6** — fold diff baseline: reversed `--diff B..A` attributes the
+baseline identically pre/post re-key (whichever D-Q2 design is ruled).
+
+**G-D2-1** — pre-D sealed fixture: `verify_chain` green AND each window
+hash byte-equal to the legacy computation.
+**G-D2-2** — a seal spanning a batch record on a batch-bearing store:
+window membership and hash identical before/after migration.
+**G-D2-3** — unresolvable cursor still hashes as empty.
+**G-D2-4** — verification under permutation: `verify_chain`'s window
+counts and verdicts identical on the shuffled index (the DP-r1-04
+verification-side residue, gated).
+**G-D2-5** — rowid ratchet: no ORDER BY / range / COUNT on rowid in
+84:## D0 — The projected arrival coordinate (prerequisite for D1–D3)
+153:  - **Triggers, indexes, AND dependent views are inventoried and
+154:    recreated** (DP-r4-02): before the DROP, read every `sqlite_schema`
+159:    The view inventory is **dependency-closed, not direct-only**
+166:    view (INSTEAD OF triggers included) carry `sqlite_schema.tbl_name` =
+169:    `tbl_name IN (<collected view names>)` and replayed with their views.
+170:    The whole closure is DROPped before the rebuild and replayed verbatim
+171:    after the RENAME **in dependency order** (views before the views that
+325:The fold-replay and event-cursor prefix queries
+428:the property survives rebuilds only because `rederive_projections` replays
+429:from zero in order — an accident of replay strategy, not a commitment.
+569:no-`libs/sign`-dependency claim survives review, DP-r1-06 confirmed it),
+592:cannot produce one (`rederive_projections` replays in order), so the gate
+628:supports) migrates; the trigger still exists in `sqlite_schema` and still
+641:**G-D0-13** — dependent-view survival, closure-deep (DP-r4-02 +
+644:`sqlite_schema`, `v1` and `v2` answer identically, the INSTEAD OF
+708:Sequenced by dependency; each is a fence for one implementer.
+728:fold-replay/event-cursor ORDER BY sites in `sqlite_store.py`
+835:| DP-r3-02 | MAJOR | **Redesigned.** Rebuild copies `rowid` explicitly in both column lists — chosen over the rederivation FTS-drop precedent because the copy (unlike rederivation's DELETE) can preserve rowids, FTS stays valid, and live rowid consumers keep WP-1's suites green; triggers and indexes inventoried from `sqlite_schema` and replayed verbatim post-RENAME in the same transaction; gated by G-D0-9 (trigger fires after migration) and G-D0-10 (FTS resolves and resumes correctly). |
+839:preservation, trigger/index replay, route gates all confirmed against
+847:| DP-r4-02 | MAJOR | **Redesigned.** Rebuild inventory extended to dependent views, discovered via `sqlite_schema.sql` content (a view's `tbl_name` is its own name — the table-keyed query structurally misses them), dropped before and replayed verbatim after the rebuild per SQLite's generalized procedure (steps 3/8/9); stale-view RENAME-reparse failure mode noted. Gated by G-D0-13 (pre-existing view over facts queryable post-migration). |
+854:| DP-r5-01 | MAJOR | **Redesigned.** View inventory made dependency-CLOSED: fixed-point iteration over view-name references in `sqlite_schema.sql` (views-on-views collected transitively); trigger inventory extended to triggers whose `tbl_name` names any collected view (INSTEAD OF included — the view drop would otherwise silently delete them); the whole closure dropped and replayed in dependency order within the one transaction. G-D0-13 extended: v2-over-v1-over-facts plus an INSTEAD OF trigger on v1, all surviving with identical behavior. |
+
+codex
+The r6 additions cover all four requested closure dimensions on their face. I’m checking one implementation-critical edge in the changed wording now: whether it constrains both sides of ordering enough to avoid an invalid intermediate schema, not just replay.
+exec
+/bin/zsh -lc "sqlite3 ':memory:' \"CREATE TABLE facts(x); CREATE VIEW v1 AS SELECT * FROM facts; CREATE VIEW v2 AS SELECT * FROM v1; DROP VIEW v1; DROP VIEW v2; SELECT type,name FROM sqlite_schema ORDER BY name;\"" in /Users/kaygee/Code/loops
+ succeeded in 0ms:
+table|facts
+
+exec
+/bin/zsh -lc "sqlite3 ':memory:' \"CREATE TABLE facts(x); CREATE TABLE aux(y); CREATE VIEW v1 AS SELECT * FROM facts; CREATE TRIGGER aux_ai AFTER INSERT ON aux BEGIN SELECT * FROM v1; END; DROP VIEW v1; CREATE TABLE facts_new(x); ALTER TABLE facts_new RENAME TO facts2;\"" in /Users/kaygee/Code/loops
+ succeeded in 0ms:
+exec
+/bin/zsh -lc "sqlite3 ':memory:' \"CREATE TABLE facts(x); CREATE TABLE aux(y); CREATE VIEW v1 AS SELECT * FROM facts; CREATE TRIGGER aux_ai AFTER INSERT ON aux BEGIN SELECT * FROM v1; END; DROP VIEW v1; ALTER TABLE facts RENAME TO facts_old;\"; sqlite3 --version" in /Users/kaygee/Code/loops
+ succeeded in 0ms:
+3.51.0 2025-06-12 13:14:41 f0ca7bba1c5e232e5d279fad6338121ab55af0c8c68c84cdfb18ba5114dcaapl (64-bit)
+
+codex
+## Findings
+
+No DP-r6 findings.
+
+## DP-r5-01 convergence
+
+**PASS.**
+
+Evidence:
+
+- **Fixed-point view discovery:** r6 explicitly iterates over views referencing the rebuilt table, then views referencing collected views, until no new view is found ([design-proposal.md:159](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceD/design-proposal.md:159)).
+- **Closure trigger inventory:** triggers attached to every collected view—including `INSTEAD OF` triggers—are inventoried using the view names in `sqlite_schema.tbl_name` ([design-proposal.md:165](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceD/design-proposal.md:165)).
+- **Dependency-ordered replay:** views are restored before their dependents and triggers after their owning views, within the migration transaction ([design-proposal.md:170](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceD/design-proposal.md:170)).
+- **Extended G-D0-13:** the gate now covers `v2 → v1 → facts`, an `INSTEAD OF` trigger on `v1`, preservation, equivalent query/trigger behavior, and successful rename ([design-proposal.md:641](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceD/design-proposal.md:641)).
+
+## Decision verdicts
+
+| Decision | Verdict |
+|---|---|
+| D0 | **SOUND** |
+| D1 | **SOUND** |
+| D2 | **SOUND** |
+| D3 | **SOUND** |
+| D4 | **SOUND** |
+| Gate plan | **SOUND** |
+
+Overall: **RATIFIABLE**.
+
+Convergence: **CONVERGED**.
+
+Review was read-only; no files were modified.
+tokens used
+27,371

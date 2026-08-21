@@ -1,0 +1,75 @@
+Reviewed r2 at `b5628350`, read-only. The redesign materially improves r1, but D0 still lacks a realizable invariant/migration design, and D4’s registry extraction is underspecified in a way that conflicts with its exact-admission-set promise.
+
+## DP-r1 re-verification
+
+| Finding | Verdict | Evidence |
+|---|---|---|
+| DP-r1-01 | PASS | The rewound-marker capability now survives as an indexed query for coordinates beyond the consumed ordinal ([design-proposal.md:70](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceD/design-proposal.md:70), [design-proposal.md:320](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceD/design-proposal.md:320)). The proposal also correctly limits anchor validation to self-consistency; source confirms it does not establish chaining to genesis ([arrival.py:1149](/Users/kaygee/Code/loops/libs/engine/src/engine/arrival.py:1149)). |
+| DP-r1-02 | PASS | Arrival-canonical migration is now log-derived, preserving shared batch ordinals, with rederivation on mismatch ([design-proposal.md:135](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceD/design-proposal.md:135)). This matches the source expansion model: one record can yield multiple rows ([arrival_projection.py:153](/Users/kaygee/Code/loops/libs/engine/src/engine/arrival_projection.py:153), [arrival_store.py:342](/Users/kaygee/Code/loops/libs/engine/src/engine/arrival_store.py:342)). |
+| DP-r1-03 | FAIL | The proposed enforcement remains internally incomplete. A unique index permits multiple NULL coordinates in SQLite; merely adding columns to a shared INSERT does not reject explicitly supplied NULLs. The promised “CHECK-equivalent enforcement at the single insert statement” is neither defined nor schema-enforced ([design-proposal.md:115](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceD/design-proposal.md:115), [design-proposal.md:119](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceD/design-proposal.md:119)). Existing shared insert SQL accepts whatever tuple its callers supply ([sqlite_store.py:746](/Users/kaygee/Code/loops/libs/engine/src/engine/sqlite_store.py:746), [arrival_store.py:351](/Users/kaygee/Code/loops/libs/engine/src/engine/arrival_store.py:351)). See DP-r2-01/02. |
+| DP-r1-04 | PASS | Both construction and verification paths are now enumerated, including the two rowid-based verification counts visible in source ([design-proposal.md:261](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceD/design-proposal.md:261), [sqlite_store.py:1902](/Users/kaygee/Code/loops/libs/engine/src/engine/sqlite_store.py:1902), [sqlite_store.py:1929](/Users/kaygee/Code/loops/libs/engine/src/engine/sqlite_store.py:1929)). The permutation gate directly covers the prior omission. |
+| DP-r1-05 | PASS | `ArrivalLog.anchor(mark)` now returns the consumed anchor itself, and the proposal accurately treats the offset as an internal seek hint ([design-proposal.md:329](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceD/design-proposal.md:329)). Source confirms `_anchor_for` already returns the anchor while `walk_marked` yields only subsequent records ([arrival.py:1173](/Users/kaygee/Code/loops/libs/engine/src/engine/arrival.py:1173), [arrival.py:1218](/Users/kaygee/Code/loops/libs/engine/src/engine/arrival.py:1218)). |
+| DP-r1-06 | PASS | The admission check is now correctly defined over post-dedup fact rows, their carried signatures, and `fact_commitment_hash` ([design-proposal.md:403](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceD/design-proposal.md:403)). Source confirms the content-only commitment excludes custody context ([sqlite_store.py:254](/Users/kaygee/Code/loops/libs/engine/src/engine/sqlite_store.py:254)) and merge carries the row signature verbatim ([merge.py:512](/Users/kaygee/Code/loops/libs/store/src/store/merge.py:512)). The original finding is dissolved, though registry extraction has a new hole below. |
+| DP-r1-07 | PASS | The application consumer is now named, a concrete engine-owned baseline design is supplied, and the required app touch is honestly routed to Kyle ([design-proposal.md:212](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceD/design-proposal.md:212)). Source confirms the app currently compares `pos1.rowid` and `pos2.rowid` ([fold.py:1531](/Users/kaygee/Code/loops/apps/loops/src/loops/cli/views/fold.py:1531)). |
+| DP-r1-08 | PASS | The design now requires digest counters/multisets and gates duplicate-line detection ([design-proposal.md:327](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceD/design-proposal.md:327), [design-proposal.md:505](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceD/design-proposal.md:505)). This directly replaces the current lossy `set[bytes]` implementation ([arrival_projection.py:313](/Users/kaygee/Code/loops/libs/engine/src/engine/arrival_projection.py:313)). |
+| DP-r1-09 | PASS | `None` now represents absence of an arrival axis, and arrival replacement receives a separate `WitnessAxisMismatch` without changing A10 branches/messages ([design-proposal.md:184](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceD/design-proposal.md:184), [design-proposal.md:230](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceD/design-proposal.md:230)). Routing the stale docstring question to Kyle is honest. |
+| DP-r1-10 | FAIL | Most missing gates were added, but G-D0-5 asserts NULL refusal without specifying a mechanism capable of providing it, and there is no explicit gate proving that ordinary existing legacy `SqliteStore`/`JsonlStore` opens actually run the migration before shared INSERT SQL changes ([design-proposal.md:462](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceD/design-proposal.md:462), [design-proposal.md:526](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceD/design-proposal.md:526)). |
+
+## New findings
+
+### DP-r2-01 — MAJOR — D0 NULL enforcement is not designed
+
+The proposal says NULL is forbidden, but specifies only:
+
+- nullable columns retro-added to existing tables;
+- a unique index;
+- expanded shared INSERT statements;
+- an unnamed “CHECK-equivalent enforcement at the single insert statement.”
+
+A unique index does not prohibit NULL coordinate pairs, and an INSERT with coordinate placeholders still accepts explicit NULLs. It also cannot protect out-of-band INSERTs unless the table has a real `CHECK`, `NOT NULL`, or trigger.
+
+This contradicts both “enforced, not audited-for” and G-D0-5’s required NULL refusal ([design-proposal.md:119](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceD/design-proposal.md:119), [design-proposal.md:465](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceD/design-proposal.md:465)).
+
+Required change: name an actual database invariant—most cleanly rebuilding each table with `NOT NULL` plus `UNIQUE`, or adding explicit `CHECK`/trigger enforcement that covers every writer, including foreign SQL.
+
+### DP-r2-02 — MAJOR — `coordinate_axis` migration dispatch does not cover ordinary legacy opens
+
+The document assigns migration to `arrival_projection._ensure_index_schema` and says it runs “before the connection is handed out” ([design-proposal.md:150](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceD/design-proposal.md:150)). In current source, that helper belongs to projection rederivation and is called there ([arrival_projection.py:479](/Users/kaygee/Code/loops/libs/engine/src/engine/arrival_projection.py:479), [arrival_projection.py:544](/Users/kaygee/Code/loops/libs/engine/src/engine/arrival_projection.py:544)); ordinary `SqliteStore` and `JsonlStore` opens do not route through it.
+
+Yet changing global `FACT_INSERT_SQL`/`TICK_INSERT_SQL` affects those ordinary writers immediately ([sqlite_store.py:131](/Users/kaygee/Code/loops/libs/engine/src/engine/sqlite_store.py:131), [jsonl_store.py:668](/Users/kaygee/Code/loops/libs/engine/src/engine/jsonl_store.py:668)). An existing legacy database can therefore encounter new-column SQL before any stated migration path has installed/backfilled those columns.
+
+Required change: define a common schema upgrader invoked by every writable store constructor before any insert SQL is used, with mode passed explicitly or derived authoritatively. Gate existing sqlite-canonical and jsonl-canonical databases opened through their normal public APIs.
+
+### DP-r2-03 — MAJOR — D4 `key_registry` extraction conflicts with exact-admission verification unless selectively defined
+
+The proposed registry is described as a refactor of the registry that `verify_authorship` already constructs ([design-proposal.md:405](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceD/design-proposal.md:405)). But current `verify_authorship` verifies every signed arrival envelope while walking the source ([arrival.py:1597](/Users/kaygee/Code/loops/libs/engine/src/engine/arrival.py:1597), [arrival.py:1627](/Users/kaygee/Code/loops/libs/engine/src/engine/arrival.py:1627)). G-D4-2 simultaneously requires a bad envelope on a deduplicated row not to refuse admission ([design-proposal.md:510](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceD/design-proposal.md:510)).
+
+Those properties coexist only if `key_registry`:
+
+- structurally walks the whole log;
+- verifies genesis and key-introduction envelopes required to establish registry authority;
+- does not verify unrelated row-record envelopes;
+- records introduction ordinals so row signatures are checked only against keys introduced before the row’s source ordinal.
+
+The proposal states the final temporal rule but does not define this selective extraction behavior. A straightforward refactor of the existing loop fails G-D4-2; skipping all envelope verification would admit unverified key introductions. Source confirms key introduction is authorized only after its own signature verifies under a previously valid key ([arrival.py:1627](/Users/kaygee/Code/loops/libs/engine/src/engine/arrival.py:1627), [arrival.py:1648](/Users/kaygee/Code/loops/libs/engine/src/engine/arrival.py:1648)).
+
+Required change: specify the selective registry algorithm and add a forged key-introduction gate in addition to the deduplicated ordinary-envelope case.
+
+### DP-r2-04 — minor — G-D3-2 offers timing as an invalid correctness oracle
+
+G-D3-2 permits “wall-time flat in store size” as a proxy for O(1) record verification ([design-proposal.md:500](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceD/design-proposal.md:500)). Timing is nondeterministic and cannot prove which substrate methods or records were consumed.
+
+The design already identifies the correct alternative: instrument record-verification calls. Make that mandatory and assert exact/bounded call counts; do not permit timing as the gate oracle.
+
+## Per-decision verdict
+
+| Decision | Verdict | Reason |
+|---|---|---|
+| D0 | UNSOUND | The mode-aware coordinate derivation is correct, but NULL enforcement and migration dispatch across ordinary legacy store opens remain unrealized. |
+| D1 | SOUND-WITH-CHANGES | The witness model, app routing, and typed axis mismatch are coherent, contingent on D0 becoming a dependable invariant. |
+| D2 | SOUND-WITH-CHANGES | Construction and verification are now comprehensively re-keyed; correctness depends on repairing D0 migration/enforcement. |
+| D3 | SOUND-WITH-CHANGES | The anchor verb, rewound check, and multiset audit are sound. Replace the timing proxy with deterministic instrumentation. |
+| D4 | SOUND-WITH-CHANGES | Post-dedup fact-commitment verification is the correct design, but registry extraction must selectively verify registry-forming records without reinstating whole-log envelope admission checks. |
+| Gate plan | UNSOUND | It contains an unenforceable-as-specified D0 assertion, omits normal legacy-open migration gates, lacks forged key-introduction coverage, and permits a timing oracle. |
+
+Overall: **NOT-RATIFIABLE-AS-WRITTEN**.

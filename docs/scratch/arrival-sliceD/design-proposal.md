@@ -1,6 +1,6 @@
 # Slice D — Surfaces: design proposal
 
-Status: **r3 — revised against codex DP-r2 findings, awaiting Kyle's ruling.**
+Status: **r4 — revised against codex DP-r3 findings, awaiting Kyle's ruling.**
 Five separately ratifiable decisions (D0–D4) plus a gate plan and work
 packages. r1 written 2026-08-20 against `feat/arrival-libs` @ `eeb05de8`;
 r2 revised it against the ten DP-r1 findings (7 MAJOR, 3 minor); the r2
@@ -128,16 +128,35 @@ statement discipline):
   retro-added columns cannot be ALTERed to NOT NULL, so the migration is
   the standard rebuild, per table, in ONE transaction:
   `CREATE TABLE facts_new (...full schema incl. NOT NULL + UNIQUE...)`;
-  `INSERT INTO facts_new SELECT ..., <coordinate>, <seq> FROM facts`
-  (coordinate computed per mode: `rowid, 0` mirrored, or a join against a
-  temp id→(ord, seq) mapping staged by the log walk for arrival-canonical);
-  `DROP TABLE facts; ALTER TABLE facts_new RENAME TO facts`; same for
-  `ticks`; recreate the table's indexes; write the `coordinate_axis`
-  marker; commit. No foreign keys exist on these tables, so the rebuild
-  needs no FK dance. **Cost, stated:** one O(store) rewrite at first
-  post-upgrade writable open — the same order as the coordinate walk it
-  absorbs (the walk and the backfill are one pass), and it happens once
-  per database.
+  `INSERT INTO facts_new (rowid, ...) SELECT rowid, ..., <coordinate>,
+  <seq> FROM facts` (coordinate per mode: `rowid, 0` mirrored, or a join
+  against a temp id→(ord, seq) mapping staged from the coordinate provider
+  for arrival-canonical); `DROP TABLE facts; ALTER TABLE facts_new RENAME
+  TO facts`; same for `ticks`; recreate dependent schema; write the
+  `coordinate_axis` marker; commit. No foreign keys exist on these tables,
+  so the rebuild needs no FK dance. **Cost, stated:** one O(store) rewrite
+  at first post-upgrade writable open — the same order as the coordinate
+  walk it absorbs, once per database.
+- **The rebuild preserves supported schema artifacts** (DP-r3-02):
+  - **Rowids are preserved explicitly** — the copy names `rowid` in both
+    column lists. This is not optional politeness: `facts_fts.fact_rowid`
+    and the `fts_state.last_rowid` watermark key on exactly these rowids
+    (`jsonl_store.py:944-954` documents the poisoning that renumbering
+    causes; `vertex_reader.py:2187`), and WP-1 lands while witness/seal
+    rowid consumers are still live — a renumbering rebuild would break the
+    suites WP-1 is required to keep green. The FTS projection therefore
+    survives the migration valid, and the rederivation precedent of
+    dropping `facts_fts`/`fts_state` (`arrival_projection.py:492-495`) is
+    correctly NOT followed here: rederivation renumbers (DELETE resets the
+    rowid counter), the migration copy does not, and each treatment is the
+    honest one for its mechanism.
+  - **Triggers and indexes are inventoried and recreated**: before the
+    DROP, read every `sqlite_schema` row with `tbl_name` = the table and
+    `type IN ('trigger','index')` (skipping auto-indexes), and replay each
+    stored `sql` verbatim after the RENAME, inside the same transaction.
+    Triggers are supported behavior, not debris — the store deliberately
+    reads back committed rows "after any AFTER triggers fired"
+    (`sqlite_store.py:702-712`, `:746`).
 - The audit's NULL check (D3) remains a backstop for databases that predate
   the migration or were written by a foreign schema copy — a location
   claim, exactly as before.
@@ -170,24 +189,55 @@ statement discipline):
   `FACT_INSERT_SQL`/`TICK_INSERT_SQL` change hits ordinary `SqliteStore`
   and `JsonlStore` writers immediately, `sqlite_store.py:131`,
   `jsonl_store.py:668`). One module-level function beside the schema
-  statements it extends — `ensure_coordinate_schema(conn, mode)` in
-  `sqlite_store.py` — invoked before any insert SQL runs, by every writer
-  of these tables, following the store's existing lazy-migration idiom
+  statements it extends, in `sqlite_store.py` — signature redesigned in r4
+  (DP-r3-01: a bare `(conn, mode)` cannot perform the log-derived join —
+  neither a connection nor a mode string reaches the arrival log):
+
+  ```python
+  ensure_coordinate_schema(
+      conn, *,
+      mode: Literal["mirrored", "arrival"],
+      coordinates: Callable[[], Iterator[tuple[str, int, int]]] | None = None,
+      # provider of (row_id, arrival_ordinal, arrival_seq); REQUIRED for
+      # mode="arrival", forbidden for mode="mirrored". A provider, not a
+      # materialized mapping: the walk runs only if a rebuild is needed.
+  )
+  ```
+
+  Invoked before any insert SQL runs, by every writer of these tables,
+  following the store's existing lazy-migration idiom
   (`_ensure_chain_columns`/`_ensure_fact_signature_column`,
-  `sqlite_store.py:1495-1520`, already called from the write entry
-  points):
-  1. `SqliteStore` — from the same pre-write hooks that run the two
-     existing `_ensure_*` migrations, with `mode="mirrored"`;
-  2. `JsonlStore` — same hook pattern on its index connection,
-     `mode="mirrored"` (its index rows are row-granular append-order);
-  3. `ArrivalStore` — at open, `mode="arrival"`;
-  4. `arrival_projection._ensure_index_schema` — delegates to it,
-     `mode="arrival"`.
-  The mode is passed explicitly by the constructor that knows what it is;
-  where a connection is opened on an existing file without that knowledge,
-  it is derived authoritatively from the store's own markers — the
-  `ARRIVAL_LINEAGE_KEY` resume mark in `store_meta` means arrival, its
-  absence means mirrored — never guessed from file suffix.
+  `sqlite_store.py:1495-1520`). How each route supplies its inputs:
+  1. `SqliteStore` — pre-write hooks beside the two existing `_ensure_*`
+     migrations; `mode="mirrored"`, no provider. The base class holds
+     `self._coordinate_mode = "mirrored"` / `self._coordinate_provider =
+     None` and the shared hook reads them, so subclasses override data,
+     not the hook.
+  2. `JsonlStore` — same inherited hook on its index connection, mirrored
+     (its index rows are row-granular append-order).
+  3. `ArrivalStore` — **constructor-ordering note, stated honestly**: its
+     `ArrivalLog` is constructed only after `super().__init__` opens the
+     connection (`arrival_store.py:133-139`), so the upgrader cannot run
+     inside the base constructor for this class. It doesn't need to: no
+     insert SQL runs during construction. Immediately after `self._log`
+     is assigned — before the existing `_ensure_*` calls in its own
+     `__init__` tail (`:144-145`) — ArrivalStore sets
+     `self._coordinate_mode = "arrival"` and `self._coordinate_provider`
+     to a closure walking `self._log` via `rows_of_record` (yielding each
+     row's id with its record ordinal and expansion seq), then invokes
+     the upgrader once. The pre-write hook remains as the backstop.
+  4. `arrival_projection.rederive_projections` — holds `canonical` AND
+     `log` before opening the index (`arrival_projection.py:470`);
+     `_ensure_index_schema` delegates with `mode="arrival"` and the same
+     log-walking provider. (Its own rebuild path deletes and re-derives
+     rows with native coordinates, so the provider is only consulted if
+     the index predates the columns and is not being rederived.)
+  **Mis-mode guard**: a `mode="mirrored"` call against an index whose
+  `store_meta` carries `ARRIVAL_LINEAGE_KEY` refuses (the
+  `ArrivalCanonicalUnsupported` posture) instead of mis-stamping — a
+  plain `SqliteStore` opened on an arrival index file must not mint
+  mirror coordinates over a log-owned axis. The marker is authority;
+  file suffix is never consulted.
 - **Interrupted migration:** the rebuild is one transaction per table and
   the `store_meta` marker (`coordinate_axis = mirrored | arrival`) commits
   inside the second table's transaction. Marker present ⇒ migrated, the
@@ -538,6 +588,25 @@ through their normal public constructors and appended to via the public
 API — the upgrader ran before the first insert, coordinates are correct
 and constrained, prior rows carry the mirror backfill, and a read-only
 open of an unmigrated database still answers reads.
+**G-D0-7** — arrival dispatch route 3 (DP-r3-03): an existing UNMIGRATED
+batch-bearing arrival-canonical index opened through `ArrivalStore`'s
+public constructor — coordinates equal the log's, constraints present,
+appends land correctly after.
+**G-D0-8** — arrival dispatch route 4 (DP-r3-03): the same unmigrated
+fixture through the rederivation entry point — migrated/rederived
+coordinates identical to G-D0-7's, proving the two routes with different
+log access agree.
+**G-D0-9** — trigger survival (DP-r3-02): a fixture with an AFTER INSERT
+trigger on `facts` (the read-back contract `sqlite_store.py:702-712`
+supports) migrates; the trigger still exists in `sqlite_schema` and still
+fires on the next public-API append.
+**G-D0-10** — FTS/rowid survival (DP-r3-02): a fixture with populated
+`facts_fts` + `fts_state` migrates; every `fact_rowid` still resolves to
+the same fact (rowids preserved byte-for-byte), search answers
+identically, and incremental indexing resumes from the watermark without
+skipping or double-indexing.
+**G-D0-11** — mis-mode refusal: a plain `SqliteStore` opened on an
+arrival-marked index refuses to mirror-stamp it.
 
 **G-D1-2** — `WitnessAggregateUnsupported` at all three sites,
 messages unchanged; A10 refusal messages byte-identical. Pinning tests
@@ -612,7 +681,10 @@ coordinates. `arrival_projection.py`: `_ensure_index_schema` delegation +
 `rederive_projections` native coordinates. Closure sweep of every other
 insert path (libs/store slice/rebirth writers). Plus the permuted-insert
 harness (G-D0-1), the batch-bearing migration fixture (G-D0-3), and the
-normal-open fixtures (G-D0-6). Suites green on this package alone.
+normal-open fixtures (G-D0-6), both arrival dispatch routes (G-D0-7/8),
+and the trigger/FTS survival fixtures (G-D0-9/10). Suites green on this
+package alone — which the rowid-preserving copy is load-bearing for:
+witness/seal rowid consumers are still live until WP-2/3.
 
 **WP-2 · witness + read path (D1).** `witness.py`, `store_reader.py`
 (`at_rowid` → `at_ordinal`, three query methods), `declaration.py:654-656`,
@@ -716,3 +788,13 @@ PASS; the two FAILs above closed by r3. New findings:
 | DP-r2-02 | MAJOR | **Redesigned.** `ensure_coordinate_schema(conn, mode)` in `sqlite_store.py`, invoked by every writable constructor/pre-write hook (SqliteStore, JsonlStore index, ArrivalStore, `_ensure_index_schema` delegating) following the existing `_ensure_*` lazy-migration idiom; mode explicit or derived from the store's own `ARRIVAL_LINEAGE_KEY` marker; G-D0-6 gates normal public-API legacy opens (D0, WP-1). |
 | DP-r2-03 | MAJOR | **Redesigned.** `key_registry` specified as a selective walk: structural over everything; envelope verification ONLY for genesis + key-introduction records including the previously-valid-key authorization chain (`arrival.py:1627-1648`); ordinary envelopes never verified; introduction ordinals recorded, slice-A validity clause verbatim; G-D4-4 (forged introduction) added beside G-D4-2 (D4, WP-5). |
 | DP-r2-04 | minor | **Redesigned.** G-D3-2's timing proxy deleted; mandatory record-verification call-count instrumentation with exact bounds (anchor-only healthy, 1+K behind, N for `--deep`). |
+
+r3 re-verify (`codex-design-r3-stdout.log`): DP-r2-01/03/04 + DP-r1-03/10
+PASS; DP-r2-02 FAIL, closed by DP-r3-01 below. D3 and D4 ruled SOUND;
+D0 remained UNSOUND on migration mechanics. r4 answers:
+
+| finding | severity | disposition in r4 |
+|---|---|---|
+| DP-r3-01 | MAJOR | **Redesigned.** Upgrader signature gains an explicit coordinate provider (`coordinates: Callable[[], Iterator[(row_id, ord, seq)]]`, required for arrival mode, forbidden for mirrored); per-route supply specified, including ArrivalStore's constructor-ordering reality (log constructed after the base connection opens; upgrader runs post-log-assignment, before the existing `_ensure_*` tail, with the pre-write hook as backstop) and rederivation's direct provider; mis-mode guard refuses mirror-stamping an arrival-marked index (G-D0-11). |
+| DP-r3-02 | MAJOR | **Redesigned.** Rebuild copies `rowid` explicitly in both column lists — chosen over the rederivation FTS-drop precedent because the copy (unlike rederivation's DELETE) can preserve rowids, FTS stays valid, and live rowid consumers keep WP-1's suites green; triggers and indexes inventoried from `sqlite_schema` and replayed verbatim post-RENAME in the same transaction; gated by G-D0-9 (trigger fires after migration) and G-D0-10 (FTS resolves and resumes correctly). |
+| DP-r3-03 | minor | **Redesigned.** G-D0-7 (ArrivalStore public constructor on an unmigrated batch-bearing index) and G-D0-8 (rederivation entry point on the same fixture, results identical) cover the two arrival dispatch routes independently. |

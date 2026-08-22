@@ -83,7 +83,9 @@ from .residence import canonical_for, index_path_for
 from .sqlite_store import (
     FACT_ALL_COLUMNS,
     FACT_COLUMNS,
+    FACT_CONTENT_COLUMNS,
     FACT_INSERT_SQL,
+    TICK_CONTENT_COLUMNS,
     TICK_INSERT_SQL,
     SqliteStore,
 )
@@ -433,7 +435,12 @@ class ArrivalStore(SqliteStore[T], Generic[T]):
             committed_row = self._committed_full_row(
                 table, row[0]
             )
-            committed = committed_row[6] if is_fact else committed_row[10]
+            sig_col_idx = (
+                FACT_CONTENT_COLUMNS.index("signature")
+                if is_fact
+                else TICK_CONTENT_COLUMNS.index("signature")
+            )
+            committed = committed_row[sig_col_idx]
             body = encode_row(committed_row[:-2])
             record, mark = self._log.append_marked(
                 "fact" if is_fact else "tick",

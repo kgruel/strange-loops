@@ -60,10 +60,13 @@ def _genesis_ts(store: Path) -> float:
 
 def _row(store: Path, kind: str, ts: float, row_id: str, payload: dict) -> None:
     conn = sqlite3.connect(str(store))
+    ord_val = conn.execute(
+        "SELECT COALESCE(MAX(arrival_ordinal), 0) + 1 FROM facts"
+    ).fetchone()[0]
     conn.execute(
-        "INSERT INTO facts (id, kind, ts, observer, origin, payload, signature) "
-        "VALUES (?, ?, ?, ?, ?, ?, NULL)",
-        (row_id, kind, ts, "kyle", "", json.dumps(payload)),
+        "INSERT INTO facts (id, kind, ts, observer, origin, payload, signature, arrival_ordinal, arrival_seq) "
+        "VALUES (?, ?, ?, ?, ?, ?, NULL, ?, 0)",
+        (row_id, kind, ts, "kyle", "", json.dumps(payload), ord_val),
     )
     conn.commit()
     conn.close()
@@ -95,10 +98,13 @@ def _backdate_genesis(store: Path, ts: float) -> None:
 def _append_tick(store: Path, *, name: str, since: float, ts: float, payload: dict) -> None:
     """Hand-append a stored tick (unsigned, unchained → envelope chained=False)."""
     conn = sqlite3.connect(str(store))
+    ord_val = conn.execute(
+        "SELECT COALESCE(MAX(arrival_ordinal), 0) + 1 FROM ticks"
+    ).fetchone()[0]
     conn.execute(
-        "INSERT INTO ticks (id, name, ts, since, origin, payload) "
-        "VALUES (?, ?, ?, ?, ?, ?)",
-        (gen_id(), name, ts, since, "", json.dumps(payload)),
+        "INSERT INTO ticks (id, name, ts, since, origin, payload, arrival_ordinal, arrival_seq) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, 0)",
+        (gen_id(), name, ts, since, "", json.dumps(payload), ord_val),
     )
     conn.commit()
     conn.close()

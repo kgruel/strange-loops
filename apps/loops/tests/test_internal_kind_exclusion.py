@@ -53,10 +53,13 @@ def _append_decl_row(store: Path, *, kind: str, payload: dict, ts: float, row_id
     not another genesis — signature is irrelevant to these read-path tests).
     """
     conn = sqlite3.connect(str(store))
+    ord_val = conn.execute(
+        "SELECT COALESCE(MAX(arrival_ordinal), 0) + 1 FROM facts"
+    ).fetchone()[0]
     conn.execute(
-        "INSERT INTO facts (id, kind, ts, observer, origin, payload, signature) "
-        "VALUES (?, ?, ?, ?, ?, ?, NULL)",
-        (row_id, kind, ts, "kyle", "", json.dumps(payload)),
+        "INSERT INTO facts (id, kind, ts, observer, origin, payload, signature, arrival_ordinal, arrival_seq) "
+        "VALUES (?, ?, ?, ?, ?, ?, NULL, ?, 0)",
+        (row_id, kind, ts, "kyle", "", json.dumps(payload), ord_val),
     )
     conn.commit()
     conn.close()

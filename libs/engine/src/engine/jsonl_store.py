@@ -193,8 +193,10 @@ from .sql_util import sqlite_busy
 from .sqlite_store import (
     FACT_ALL_COLUMNS,
     FACT_COLUMNS,
+    FACT_CONTENT_COLUMNS,
     FACT_INSERT_SQL,
     TICK_COLUMNS,
+    TICK_CONTENT_COLUMNS,
     TICK_INSERT_SQL,
     SqliteStore,
 )
@@ -502,23 +504,23 @@ class JsonlStore(SqliteStore[T], Generic[T]):
         store): there is nothing to compare against, and inventing a
         baseline from this handle's guesses is exactly the bug the markers
         exist to avoid. Always read from the db, never cached per handle —
-        each transaction sees what other processes actually committed.
+        a second open handle would otherwise stamp its own stale idea of
+        the count over a concurrent writer's correct one.
         """
         facts = self._read_meta_int(_FACT_COUNT_KEY)
         ticks = self._read_meta_int(_TICK_COUNT_KEY)
-        return None if facts is None or ticks is None else (facts, ticks)
+        if facts is None or ticks is None:
+            return None
+        return facts, ticks
 
     def _stamp(self, offset: int, facts: int, ticks: int) -> None:
-        """Record the consumed log offset and the (fact, tick) counts."""
-        self._ensure_meta_table()
-        self._conn.executemany(
-            "INSERT OR REPLACE INTO store_meta (key, value) VALUES (?, ?)",
-            [
-                (_OFFSET_KEY, str(offset)),
-                (_FACT_COUNT_KEY, str(facts)),
-                (_TICK_COUNT_KEY, str(ticks)),
-            ],
-        )
+        """Stage the offset + indexed-row-count marks (caller commits)."""
+        for key, value in (
+            (_OFFSET_KEY, offset),
+            (_FACT_COUNT_KEY, facts),
+            (_TICK_COUNT_KEY, ticks),
+        ):
+            self._meta_set(key, value)
 
     def _row_counts(self) -> tuple[int, int]:
         facts = self._conn.execute("SELECT COUNT(*) FROM facts").fetchone()[0]
@@ -556,6 +558,22 @@ class JsonlStore(SqliteStore[T], Generic[T]):
         serialize_row: Callable[[tuple], str],
         is_fact: bool,
     ) -> str | None:
+        """Stage the INSERT, make the line durable, then stamp and commit.
+
+        The INSERT runs first, uncommitted: a rejected row (duplicate id from
+        ``id_override``, any constraint) fails before a byte reaches the log,
+        so a refused append can never orphan a line. Nothing is observable
+        until the commit, which happens strictly after the fsync.
+
+        The log line serializes the COMMITTED read-back row, not the
+        caller-assembled one (SOL-R4-03): an AFTER trigger that rewrites
+        the row would otherwise put one truth in the index and another in
+        the canonical log — instant derivation divergence
+        (``audit_agreement`` fails on the very next check). The index is
+        what was committed; the log must derive-match it byte-for-byte.
+
+        Reconcile first: see :meth:`_reconcile`.
+        """
         self._reconcile()
         # Codec pre-flight on the ASSEMBLED row: a row the codec refuses
         # (string timestamp, non-JSON constant) must fail before sqlite's
@@ -580,7 +598,12 @@ class JsonlStore(SqliteStore[T], Generic[T]):
             committed_row = self._committed_full_row(
                 table, row[0]
             )
-            committed = committed_row[6] if is_fact else committed_row[10]
+            sig_col_idx = (
+                FACT_CONTENT_COLUMNS.index("signature")
+                if is_fact
+                else TICK_CONTENT_COLUMNS.index("signature")
+            )
+            committed = committed_row[sig_col_idx]
             line = serialize_row(committed_row[:-2])
             # The INSERT has taken sqlite's write lock, so the committed
             # markers read here cannot be raced by another handle: whatever

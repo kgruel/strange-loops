@@ -112,11 +112,16 @@ def gen_id() -> str:
 _CHAIN_COLUMNS = ("prev_hash", "window_start", "fact_cursor", "window_hash",
                   "signature")
 
-# Persisted column order — ONE spelling, derived from the codec's field
-# tuples. The schema, the INSERTs, the SELECTs and the JSONL line all order
-# their columns the same way by construction; a row assembled for one is the
-# row the others take. Spelling it a second time is how a fact ends up with
-# its observer in the origin column.
+# Column definitions for facts and ticks.
+#
+# FACT_CONTENT_COLUMNS / TICK_CONTENT_COLUMNS define the canonical content
+# payload order derived from the codec's field tuples (+ signature). This is the
+# row layout shared by the JSONL log lines, codec serializations, and content-row
+# assemblies.
+#
+# FACT_ALL_COLUMNS / TICK_ALL_COLUMNS append the trailing coordinate columns
+# (arrival_ordinal, arrival_seq) required by the persisted SQLite tables and
+# full INSERT statements.
 FACT_CONTENT_COLUMNS = (*jsonl_codec.FACT_FIELDS, "signature")
 TICK_CONTENT_COLUMNS = (*jsonl_codec.TICK_FIELDS, "signature")
 
@@ -381,13 +386,7 @@ def ensure_coordinate_schema(
     ).fetchone() is not None
 
     if meta_table_exists:
-        axis_row = conn.execute(
-            "SELECT value FROM store_meta WHERE key = 'coordinate_axis'"
-        ).fetchone()
-        if axis_row is not None and axis_row[0]:
-            return  # Already migrated
-
-        # Mis-mode refusal STUB: if store_meta carries ARRIVAL_LINEAGE_KEY and mode="mirrored"
+        # Mis-mode refusal: if store_meta carries ARRIVAL_LINEAGE_KEY and mode="mirrored"
         from .arrival_store import ARRIVAL_LINEAGE_KEY, ArrivalCanonicalUnsupported
 
         lineage_row = conn.execute(
@@ -398,6 +397,12 @@ def ensure_coordinate_schema(
                 "cannot apply mirrored coordinate schema to arrival-canonical index "
                 f"(store carries {ARRIVAL_LINEAGE_KEY}={lineage_row[0]!r})"
             )
+
+        axis_row = conn.execute(
+            "SELECT value FROM store_meta WHERE key = 'coordinate_axis'"
+        ).fetchone()
+        if axis_row is not None and axis_row[0]:
+            return  # Already migrated
 
     # Check which tables exist
     tables_to_check = ("facts", "ticks")
@@ -1322,7 +1327,7 @@ class SqliteStore(Generic[T]):
            unmarked + genesis rows → :class:`AmbiguousGenesis` (identity is
            claimed by :meth:`adopt_lineage`, never inferred).
         2. If ``expected_head`` is given, compare it against the store's
-        current declaration head — the ``(ts, id)`` of the newest
+           current declaration head — the ``(ts, id)`` of the newest
            self-lineage ``_decl.*`` row (genesis included). A mismatch raises
            :class:`StaleDeclarationHead` (rollback): the caller diffed against
            a head that has since moved (concurrent re-absorb), and applying a

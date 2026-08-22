@@ -50,10 +50,13 @@ def diff_vertex(tmp_path):
 def _append(store, kind, ts, *, fid=None, observer="kyle", **payload) -> str:
     conn = sqlite3.connect(str(store))
     fid = fid or gen_id()
+    ord_val = conn.execute(
+        "SELECT COALESCE(MAX(arrival_ordinal), 0) + 1 FROM facts"
+    ).fetchone()[0]
     conn.execute(
-        "INSERT INTO facts (id, kind, ts, observer, origin, payload, signature) "
-        "VALUES (?, ?, ?, ?, ?, ?, NULL)",
-        (fid, kind, ts, observer, "", json.dumps(payload)),
+        "INSERT INTO facts (id, kind, ts, observer, origin, payload, signature, arrival_ordinal, arrival_seq) "
+        "VALUES (?, ?, ?, ?, ?, ?, NULL, ?, 0)",
+        (fid, kind, ts, observer, "", json.dumps(payload), ord_val),
     )
     conn.commit()
     conn.close()

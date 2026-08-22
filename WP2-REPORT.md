@@ -75,7 +75,7 @@ position unchanged (no DB hit)" comment stays true), and restoring the
 ### Tests
 
 - **`libs/engine/tests/test_witness_rekey_d1.py`** — NEW. G-D1-2..G-D1-6,
-  19 tests. See §3.
+  20 tests. See §3.
 - **`libs/engine/tests/test_arrival_rederivation_rowids.py`** — the
   `test_rederivation_preserves_receipt_group_contiguity` non-vacuity probe
   was structurally dead under record granularity (see §4); replaced with a
@@ -98,7 +98,7 @@ position unchanged (no DB hit)" comment stays true), and restoring the
 
 ## 3. The gates
 
-`libs/engine/tests/test_witness_rekey_d1.py`, 19 tests, all passing.
+`libs/engine/tests/test_witness_rekey_d1.py`, 20 tests, all passing.
 
 - **G-D1-2** (5 tests) — the three `WitnessAggregateUnsupported` raise-site
   messages and both A10 messages pinned by **whole-string equality**. The
@@ -119,14 +119,16 @@ position unchanged (no DB hit)" comment stays true), and restoring the
   stores; a same-lineage sibling still re-resolves to the TARGET's
   coordinate and the TARGET's axis. The last three are the regression net
   for §1a.
-- **G-D1-5** (4 tests) — position equivalence on a 12-row corpus in two
+- **G-D1-5** (5 tests) — position equivalence on a 12-row corpus in two
   representations: un-permuted (rowid order == arrival order) and permuted
   (physically written in a scrambled order). On the un-permuted store the
   arrival-resolved prefix selects exactly the row-set rowid selection did;
   on the permuted store arrival governs, rowid does not, and the test
   asserts the divergence is non-zero so it cannot pass vacuously. Plus:
   `durable_handle` output unchanged (`fact:<lineage>/<id>` for adopted,
-  `None` for genesis and unadopted).
+  `None` for genesis and unadopted); and the SELECTION path
+  (`StoreReader.facts_by_kind(at_ordinal=...)`) proved to ride the arrival
+  axis, which the first draft of this gate missed — see §6b.
 - **G-D1-6** (3 tests) — a reversed `--diff` reports identical content and
   flips only `baseline`; `baseline` is present on the empty interval; the
   app's engine-name → CLI-label mapping is pinned so it cannot silently
@@ -226,12 +228,46 @@ arm Kyle did not take.
 
 ---
 
+## 6b. Break / restore proofs
+
+Run AFTER the commit (`450bfa5d`), one mutation each, every mutation
+reverted with `git checkout` and re-verified green.
+
+| Gate | Mutation | Result |
+|---|---|---|
+| G-D1-3 | `witness.py` seq count cutoff `arrival_ordinal <= ?` → `< ?` | **2 of 3 FAILED** — `SeqOutOfRange: seq:0 is out of range` on the mid-batch round-trip, plus the single-record converse. Restored: 3 passed. |
+| G-D1-4 | re-hoist the axis guard above the same-path early return — i.e. **reintroduce the prior worker's exact bug** | **2 of 4 FAILED** — `WitnessAxisMismatch: ... (AXIS-A) does not match ... (AXIS-B)` raised where A10 and B1c re-resolution belong. Restored: 4 passed. |
+| G-D1-5 | `witness.py` id→position resolution `SELECT arrival_ordinal` → `SELECT rowid` | **1 FAILED** — `At index 0 diff: 1 != 2`. Restored: passed. |
+| G-D1-5 | `store_reader.facts_by_kind` witness cutoff `arrival_ordinal <= ?` → `rowid <= ?` | **initially SURVIVED — see below**; after the gate was extended, **FAILED** with `assert ['corpus-007'] == ['corpus-000']`. Restored: 5 passed. |
+
+### A real gap the proofs found, and closed
+
+The fourth mutation is the one worth reading. With `facts_by_kind`'s
+witness cutoff silently reverted to the **rowid** axis, the **entire engine
+suite passed — 1860 passed, 1 skipped**. G-D1-5 as first written tested
+position *resolution* and the prefix row-set via hand-rolled SQL; the
+**selection** path (`StoreReader.facts_by_kind(at_ordinal=...)`, which is
+what every `at=` fold actually reads through) has its own cutoff clause and
+was unguarded. A regression there would have shipped silently.
+
+G-D1-5 gained
+`test_the_reader_selects_on_the_arrival_axis_not_the_rowid_axis`: it
+selects through the real reader on the permuted store, asserts the result
+is exactly the canonical arrival prefix in arrival order, and asserts
+non-vacuously that rowid order genuinely disagrees there. The mutation now
+dies. Engine is **1861 passed, 1 skipped**.
+
+This is why the break/restore step is run after the commit and not skipped:
+the gate that passed on the first write was not yet a gate.
+
+---
+
 ## 7. Suite results — all seven, foreground, exact
 
 | Suite | Result |
 |---|---|
 | `libs/atoms/tests` | **517 passed** |
-| `libs/engine/tests` | **1860 passed, 1 skipped** (1841 + 19 new gates) |
+| `libs/engine/tests` | **1861 passed, 1 skipped** (1841 + 20 new gates) |
 | `libs/sdk/tests` | **324 passed** |
 | `libs/lang/tests` | **655 passed** |
 | `libs/store/tests` | **157 passed** |
@@ -239,7 +275,7 @@ arm Kyle did not take.
 | `apps/loops/tests` | **2525 passed, 1 xfailed** |
 
 Every count matches the brief's expected numbers, with engine at
-1841 + 19 gates. No assertion was weakened anywhere; every red was fixed by
+1841 + 20 gates. No assertion was weakened anywhere; every red was fixed by
 fixture conformance, one missed rename, or §1a's product fix — except the
 one documented semantic change in §4, which was made STRONGER.
 

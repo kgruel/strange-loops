@@ -509,6 +509,19 @@ def _prefix_by_ordinal(db: Path, ordinal: int) -> set[str]:
         conn.close()
 
 
+def _rowid_rank(db: Path):
+    """A sort key giving each fact id its physical (rowid) rank."""
+    conn = sqlite3.connect(str(db))
+    try:
+        rank = {
+            r[0]: r[1]
+            for r in conn.execute("SELECT id, rowid FROM facts")
+        }
+    finally:
+        conn.close()
+    return lambda fid: rank[fid]
+
+
 def _prefix_by_rowid(db: Path, fact_id: str) -> set[str]:
     conn = sqlite3.connect(str(db))
     try:
@@ -568,6 +581,33 @@ class TestG_D1_5_PositionEquivalence:
             a = resolve_witness_position(ordered, fid, group_boundary="allow")
             b = resolve_witness_position(permuted, fid, group_boundary="allow")
             assert (a.ordinal, a.seq, a.fact_id) == (b.ordinal, b.seq, b.fact_id)
+
+    def test_the_reader_selects_on_the_arrival_axis_not_the_rowid_axis(self, tmp_path):
+        """The SELECTION path, not just resolution.
+
+        ``StoreReader.facts_by_kind(at_ordinal=...)`` is what every ``at=``
+        fold actually reads through, and its cutoff clause is a separate site
+        from the resolution query. On the permuted store the two axes disagree
+        row-for-row, so a cutoff silently left on ``rowid`` returns a
+        different set — which resolution-only assertions cannot see.
+        """
+        from engine.store_reader import StoreReader
+
+        permuted = tmp_path / "p.db"
+        ids = _corpus(permuted, self.PERMUTED)
+        disagreements = 0
+        for fid in ids:
+            pos = resolve_witness_position(permuted, fid, group_boundary="allow")
+            with StoreReader(permuted) as reader:
+                selected = [
+                    f["id"] for f in reader.facts_by_kind("note", at_ordinal=pos.ordinal)
+                ]
+            # Selected in ARRIVAL order, and exactly the canonical prefix.
+            assert selected == ids[: pos.ordinal]
+            if selected != sorted(selected, key=_rowid_rank(permuted)):
+                disagreements += 1
+        # Not vacuous: on this store rowid order is genuinely not arrival order.
+        assert disagreements > 0
 
     def test_durable_handle_output_is_unchanged_by_the_rekey(self, tmp_path, keys, signer):
         """DONE-CRITERIA: ``durable_handle`` is untouched — ``fact:<lineage>/<id>``

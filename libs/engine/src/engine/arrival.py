@@ -73,10 +73,12 @@ __all__ = [
     "AuthorshipUnverified",
     "ArrivalLog",
     "Entry",
+    "KeyRegistry",
     "KeyResolution",
     "ResumeMark",
     "Verify",
     "build_record",
+    "key_registry",
     "verify_authorship",
     "arrival_path_for",
     "lock_path_for",
@@ -1555,6 +1557,87 @@ class KeyResolution:
     introduced_ordinal: int
 
 
+@dataclass(frozen=True)
+class KeyRegistry:
+    """One log's key history: who may speak, with which key, from where on.
+
+    The registry a log says about ITSELF — extracted from the log alone, the
+    same exclusivity claim :func:`verify_authorship` makes. It answers one
+    question, :meth:`keys_valid_at`, and the answer is the ruled slice-A
+    placement clause verbatim (decision:design/arrival-sliceA-authority): a
+    key is valid at position N iff it was introduced at a position < N.
+    Genesis self-certification is NOT expressible here on purpose — it is a
+    property of one record verifying against its own body, which the walk
+    that builds the registry settles before any registry exists.
+
+    Built by :func:`key_registry`, whose walk is SELECTIVE: the registry is
+    trustworthy because every record that FORMED it was signature-verified,
+    and it says nothing at all about records that did not form it.
+    """
+
+    lineage: str
+    introductions: dict[str, tuple[tuple[str, int], ...]]
+    """observer -> ``(key, introduced_ordinal)`` in introduction order."""
+
+    def keys_valid_at(self, observer: str, position: int) -> tuple[tuple[str, int], ...]:
+        """The keys this log makes valid for ``observer`` at ``position``.
+
+        ``(key, introduced_ordinal)`` in introduction order, possibly empty.
+        Keys are bound to observers, never free-floating: asking on behalf of
+        the wrong observer returns nothing rather than someone else's key.
+        """
+        return _keys_valid_at(self.introductions, observer, position)
+
+
+def _keys_valid_at(
+    introductions: dict[str, list[tuple[str, int]]] | dict[str, tuple[tuple[str, int], ...]],
+    observer: str,
+    position: int,
+) -> tuple[tuple[str, int], ...]:
+    """The ruled placement clause, in ONE place.
+
+    Both verbs consult it — the live walk through :func:`_resolve`, and a
+    finished :class:`KeyRegistry` through :meth:`KeyRegistry.keys_valid_at` —
+    so "valid at N" cannot come to mean two things.
+    """
+    return tuple(
+        (key, introduced)
+        for key, introduced in introductions.get(observer, ())
+        if introduced < position
+    )
+
+
+def key_registry(log: ArrivalLog, verify: Verify) -> KeyRegistry:
+    """The log's key history, verified SELECTIVELY — the admission verb.
+
+    Same walk as :func:`verify_authorship`, same placement rule, one
+    deliberate difference: **only registry-forming records' envelope
+    signatures are verified.** The genesis (self-certifying against its own
+    ``body["key"]``) and every :data:`KEY_INTRODUCTION_KIND` record —
+    including the authorization rule that an introduction's own signature
+    must verify under a key already valid for the INTRODUCING record's
+    observer — are held to their signatures, and a registry-forming record
+    that fails refuses: a key history assembled from unverified records is
+    not a key history. **No ordinary record's envelope is verified here.**
+
+    That boundary is the point (DP-r2-03). The consumer is
+    :func:`store.merge_store`, which admits a post-dedup SUBSET of the
+    source's rows; an ordinary record's envelope signature is no part of
+    that admission claim, so a bad envelope on a record the merge does not
+    admit must not refuse the merge — while a forged key introduction must,
+    because every row admitted under the registry it corrupts is affected.
+
+    The whole log is still walked structurally (:meth:`ArrivalLog.walk`), so
+    density, record hashes and chain linkage are established for free, over
+    every record, exactly as the whole-log verifier establishes them.
+
+    Raises :class:`AuthorshipUnverified` on the first registry-forming
+    record no valid key verifies.
+    """
+    registry, _rows = _walk_authority(log, verify, verify_ordinary=False)
+    return registry
+
+
 def verify_authorship(log: ArrivalLog, verify: Verify) -> tuple[KeyResolution, ...]:
     """Verify every signature in the log, resolving keys from the log alone.
 
@@ -1589,10 +1672,31 @@ def verify_authorship(log: ArrivalLog, verify: Verify) -> tuple[KeyResolution, .
     :class:`KeyResolution` per verified signature, in log order; raises
     :class:`AuthorshipUnverified` on the first signature that no valid key
     verifies.
+
+    Shares its walk, its registry and its placement rule with
+    :func:`key_registry` — this verb is that one plus the verify-every-
+    envelope clause, so the two cannot drift on what "valid at N" means.
+    """
+    _registry, rows = _walk_authority(log, verify, verify_ordinary=True)
+    return rows
+
+
+def _walk_authority(
+    log: ArrivalLog, verify: Verify, *, verify_ordinary: bool
+) -> tuple[KeyRegistry, tuple[KeyResolution, ...]]:
+    """The one authority walk, in both its widths.
+
+    ``verify_ordinary`` is the ONLY difference between the two public verbs:
+    with it, every signed record's envelope is verified (whole-log
+    authorship); without it, only the registry-forming ones are (the
+    admission registry). Everything else — the structural walk, genesis
+    self-certification, the authorization rule on key introductions, the
+    placement clause — is shared by construction.
     """
     # observer -> [(key, introduced_ordinal)] in introduction order.
     registry: dict[str, list[tuple[str, int]]] = {}
     rows: list[KeyResolution] = []
+    lineage = ""
 
     for record in log.walk():
         ordinal = record["ord"]
@@ -1624,17 +1728,27 @@ def verify_authorship(log: ArrivalLog, verify: Verify) -> tuple[KeyResolution, .
             )
             continue
 
-        if _SIG in record:
+        forming = record["k"] == KEY_INTRODUCTION_KIND
+        if _SIG in record and (verify_ordinary or forming):
             rows.append(_resolve(record, registry, lineage, verify))
-        if record["k"] == KEY_INTRODUCTION_KIND:
+        if forming:
             # The signature just verified under an already-valid key (the
-            # placement rules make an unsigned introduction unspellable),
-            # so the named key joins the registry at THIS ordinal: valid
-            # strictly after it, per the ruled clause.
+            # placement rules make an unsigned introduction unspellable, and
+            # a key introduction is registry-forming in BOTH widths of this
+            # walk), so the named key joins the registry at THIS ordinal:
+            # valid strictly after it, per the ruled clause.
             named = record["body"]["observer"]
             registry.setdefault(named, []).append((record["body"]["key"], ordinal))
 
-    return tuple(rows)
+    return (
+        KeyRegistry(
+            lineage=lineage,
+            introductions={
+                observer: tuple(entries) for observer, entries in registry.items()
+            },
+        ),
+        tuple(rows),
+    )
 
 
 def _resolve(
@@ -1652,11 +1766,7 @@ def _resolve(
     """
     ordinal = record["ord"]
     digest = _commitment_of(record)
-    candidates = [
-        (key, introduced)
-        for key, introduced in registry.get(record["observer"], [])
-        if introduced < ordinal
-    ]
+    candidates = _keys_valid_at(registry, record["observer"], ordinal)
     for key, introduced in candidates:
         if verify(key, record[_SIG], digest):
             return KeyResolution(

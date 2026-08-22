@@ -325,7 +325,7 @@ class TestWitnessAppendInvarianceProperties:
 
             # Verify that head did advance and reflects the new facts
             head_pos = resolve_witness_position(store_path, "head")
-            assert head_pos.rowid > pos_p.rowid
+            assert head_pos.ordinal > pos_p.ordinal
             fold_head = vertex_fold(vpath, at=head_pos)
             items_head = _extract_fold_items(fold_head)
             decision_topics = [p.get("topic") for p in items_head.get("decision", [])]

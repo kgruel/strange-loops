@@ -1185,9 +1185,9 @@ def vertex_fold(
 
     - ``at`` (a :class:`~engine.witness.WitnessPosition`, 0.8.0
       fold-state-as-of) reconstructs the fold at a witness position: the
-      prefix ``rowid <= at.rowid`` is selected, ontology is resolved **from
+      prefix ``arrival_ordinal <= at.ordinal`` is selected, ontology is resolved **from
       the same prefix** (equal cursors ⇒ one position for selection and
-      ontology), and facts are replayed in receipt order (``rowid`` ascending).
+      ontology), and facts are replayed in arrival order (``arrival_ordinal, arrival_seq`` ascending).
       This is the reference full reconstruction — the oracle the handle's
       incremental path is checked against — never an incremental application of
       an interval. Returns a
@@ -1299,7 +1299,7 @@ def vertex_fold(
             from .store_reader import StoreReader  # deferred: not needed for combine-only
             from atoms.fold import Upsert
 
-            at_rowid = at.rowid if at is not None else None
+            at_ordinal = at.ordinal if at is not None else None
             # ONE snapshot across every read that contributes to this fold
             # (sol HIGH r2, confirmed P2). The per-kind reads, the kind stats,
             # and live_edge() were separate autocommit statements: live_edge()
@@ -1320,7 +1320,7 @@ def vertex_fold(
             with StoreReader(store_path) as reader, reader.snapshot():
                 raw = {}
                 for k, spec in full_specs.items():
-                    facts = reader.facts_by_kind(k, at_rowid=at_rowid, until_ts=as_of)
+                    facts = reader.facts_by_kind(k, at_ordinal=at_ordinal, until_ts=as_of)
                     if observer:
                         facts = [f for f in facts if observer_matches(f["observer"], observer)]
                     payloads = []
@@ -1379,7 +1379,7 @@ def vertex_fold(
                 # reserved-namespace kind on demand: an explicit ask overrides
                 # the ambient default everywhere else in this module too.
                 if kind is not None and kind not in full_specs:
-                    facts = reader.facts_by_kind(kind, at_rowid=at_rowid, until_ts=as_of)
+                    facts = reader.facts_by_kind(kind, at_ordinal=at_ordinal, until_ts=as_of)
                     if observer:
                         facts = [f for f in facts if observer_matches(f["observer"], observer)]
                     payloads = []
@@ -1587,7 +1587,7 @@ def vertex_facts(
       Only store-resolution and the reserved-namespace exclusion ride it; the
       fact window stays ``since_ts..until_ts``.
     - ``at`` (a :class:`~engine.witness.WitnessPosition`, 0.8.0 cursor) caps the
-      result to the witness prefix ``rowid <= at.rowid`` AND resolves ontology
+      result to the witness prefix ``arrival_ordinal <= at.ordinal`` AND resolves ontology
       from that prefix — the facts the store had *received* at the position,
       inside the time window. Per-store only: refused on aggregates
       (:class:`~engine.witness.WitnessAggregateUnsupported`) — witness order is
@@ -1642,7 +1642,7 @@ def vertex_facts(
                 facts = reader.facts_between(
                     since_ts, until_ts, kind=kind,
                     include_internal=include_internal,
-                    at_rowid=at.rowid if at is not None else None,
+                    at_ordinal=at.ordinal if at is not None else None,
                 )
 
     if observer:
@@ -1669,7 +1669,7 @@ def vertex_query_facts(
     :class:`~engine.store_reader.FactPage` (items + ``next`` cursor +
     truncation) from ONE read snapshot. Cursors are 0.8.0
     :class:`~engine.witness.WitnessPosition` values; ordering is the witness
-    (append/rowid) axis — ids are never ordered (A3).
+    (arrival coordinate) axis — ids are never ordered (A3).
 
     Combine/discover aggregates are REFUSED with the typed
     :class:`~engine.witness.WitnessAggregateUnsupported`: witness order is

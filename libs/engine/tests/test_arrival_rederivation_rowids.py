@@ -148,7 +148,7 @@ def positions(db):
     out = {}
     for fid in fact_ids(db):
         pos = resolve_witness_position(db, fid, group_boundary="allow")
-        out[fid] = (pos.rowid, pos.seq, pos.lineage, pos.unadopted, durable_handle(pos))
+        out[fid] = (pos.ordinal, pos.seq, pos.lineage, pos.unadopted, durable_handle(pos))
     return out
 
 
@@ -192,24 +192,50 @@ def test_a_durable_handle_survives_because_it_never_named_a_rowid(
 
 def test_rederivation_preserves_receipt_group_contiguity(tmp_path, keys, signer):
     """A ceremony's rows ride as ONE batch record and expand in array order,
-    so the contiguity heuristic sees the same runs."""
+    so the contiguity heuristic sees the same runs.
+
+    Under the RECORD-GRANULAR cutoff (slice D, D1-Q1) the ceremony's two rows
+    share ONE ``arrival_ordinal`` and differ only in ``arrival_seq``, so no
+    cutoff can land strictly inside it: the mid-ceremony hazard the guard
+    exists for is *dissolved* by the record boundary rather than detected.
+    That is the ruled cost of record granularity, and it is asserted here
+    positively (the rows share an ordinal) instead of the pre-D1 non-vacuity
+    probe, which structurally cannot fire any more.
+    """
     log, db = build_through_the_write_path(tmp_path, keys, signer)
+
+    def ceremony_coords():
+        conn = sqlite3.connect(str(db))
+        try:
+            return conn.execute(
+                "SELECT arrival_ordinal, arrival_seq FROM facts "
+                "WHERE kind IN (?, ?) ORDER BY arrival_ordinal, arrival_seq",
+                (DECL_KIND_DEFINED, DECL_KIND_RETIRED),
+            ).fetchall()
+        finally:
+            conn.close()
 
     def spans():
         conn = sqlite3.connect(str(db))
         try:
-            top = conn.execute("SELECT MAX(rowid) FROM facts").fetchone()[0]
+            top = conn.execute("SELECT MAX(arrival_ordinal) FROM facts").fetchone()[0]
             return [receipt_group_span(conn, r) for r in range(1, top + 1)]
         finally:
             conn.close()
 
+    before_coords = ceremony_coords()
     before = spans()
-    # Not vacuous: the two-row edit ceremony IS a group, so some probe lands
-    # strictly inside it.
-    assert any(s is not None for s in before)
+    # Not vacuous: the edit ceremony is TWO rows, and they ride ONE record —
+    # one shared ordinal, seq 0 and 1 — which is precisely why every probe
+    # over the ordinal axis answers None.
+    assert len(before_coords) == 2
+    assert before_coords[0][0] == before_coords[1][0]
+    assert [c[1] for c in before_coords] == [0, 1]
+    assert all(s is None for s in before)
 
     rederive_projections(log.path)
 
+    assert ceremony_coords() == before_coords
     assert spans() == before
 
 

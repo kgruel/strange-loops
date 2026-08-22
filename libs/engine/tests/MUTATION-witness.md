@@ -1,5 +1,30 @@
 # Mutation Testing Report: `engine.witness`
 
+> **STALE as of slice D / WP-2 (the witness re-key, D1).** This is a HISTORICAL
+> record of a mutmut run against the pre-re-key module, kept verbatim: the
+> mutant ids below are the ones mutmut actually emitted, and rewriting them to
+> the new symbol names would make the record claim a run that never happened.
+> What changed under D1, and therefore needs a re-run before any row here is
+> trusted again:
+>
+> - `_resolve_address_rowid` → `_resolve_address_ordinal`, `_id_at_rowid` →
+>   `_id_at_ordinal` (rows 10, 16, 17, 18 and survivor
+>   `x__id_at_rowid__mutmut_1`). `_id_at_ordinal` is no longer an exact
+>   `rowid = ?` lookup — it is a `arrival_ordinal <= ?` descending pick — and
+>   its empty-prefix guard moved from `rowid <= 0` to `ordinal < 0`, so the
+>   equivalence argument recorded for `mutmut_1` no longer applies as written.
+> - `receipt_group_span`'s contiguity condition gained an equal-ordinal
+>   disjunct (rows of ONE arrival record share an ordinal), so row 5's mutant
+>   sits in a rewritten expression. Row 5's mutant was RE-VERIFIED by hand
+>   under the rewrite and still dies (WP2-REPORT.md §6b); no other row in
+>   this report was re-measured.
+> - `verify_position_for_store` gained the same-path `WitnessAxisMismatch`
+>   branch and moved its connection open, invalidating survivor
+>   `x_verify_position_for_store__mutmut_24`'s equivalence argument.
+>
+> Apart from row 5's hand re-verification above, no count or classification
+> in this report has been re-measured under D1.
+
 - **Target Module**: `libs/engine/src/engine/witness.py`
 - **Test Suites**: `libs/engine/tests/test_witness_position.py`, `libs/engine/tests/test_witness_address_helpers.py`, `libs/engine/tests/test_diff_interval_report.py`, `libs/engine/tests/test_fold_at.py`
 - **Total Mutants**: 512

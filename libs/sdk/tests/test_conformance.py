@@ -221,7 +221,7 @@ def test_sdk_conformance_witness(vector_path: Path, tmp_path: Path) -> None:
     for label, cursor_addr in cursors.items():
         pos = resolve_witness_position(db_path, cursor_addr)
         with StoreReader(db_path) as reader:
-            stored_facts = reader.facts_by_kind(spec.name, at_rowid=pos.rowid)
+            stored_facts = reader.facts_by_kind(spec.name, at_ordinal=pos.ordinal)
             payloads = []
             for f in stored_facts:
                 p = dict(f["payload"])

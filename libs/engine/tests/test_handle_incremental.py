@@ -53,11 +53,11 @@ def _scaffold(tmp_path: Path) -> tuple[Path, Path]:
     conn = sqlite3.connect(str(store))
     conn.execute(
         "CREATE TABLE IF NOT EXISTS facts (id TEXT PRIMARY KEY, kind TEXT, ts REAL,"
-        " observer TEXT, origin TEXT, payload TEXT, signature TEXT)"
+        " observer TEXT, origin TEXT, payload TEXT, signature TEXT, arrival_ordinal INTEGER, arrival_seq INTEGER)"
     )
     conn.execute(
         "CREATE TABLE IF NOT EXISTS ticks (id TEXT PRIMARY KEY, name TEXT, ts REAL,"
-        " payload TEXT)"
+        " payload TEXT, arrival_ordinal INTEGER, arrival_seq INTEGER)"
     )
     conn.commit()
     conn.close()
@@ -67,10 +67,11 @@ def _scaffold(tmp_path: Path) -> tuple[Path, Path]:
 def _append(store: Path, kind: str, ts: float, **payload) -> str:
     fid = gen_id()
     conn = sqlite3.connect(str(store))
+    ord_val = conn.execute("SELECT COALESCE(MAX(arrival_ordinal), 0) + 1 FROM facts").fetchone()[0]
     conn.execute(
-        "INSERT INTO facts (id,kind,ts,observer,origin,payload,signature)"
-        " VALUES (?,?,?,?,?,?,NULL)",
-        (fid, kind, ts, "kyle", "", json.dumps(payload)),
+        "INSERT INTO facts (id,kind,ts,observer,origin,payload,signature,arrival_ordinal,arrival_seq)"
+        " VALUES (?,?,?,?,?,?,NULL,?,0)",
+        (fid, kind, ts, "kyle", "", json.dumps(payload), ord_val),
     )
     conn.commit()
     conn.close()

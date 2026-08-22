@@ -1741,7 +1741,7 @@ class SqliteStore(Generic[T]):
         cursor=0 returns all events (rowid starts at 1 in SQLite).
         """
         rows = self._conn.execute(
-            "SELECT kind, ts, observer, origin, payload FROM facts WHERE rowid > ? ORDER BY rowid",
+            "SELECT kind, ts, observer, origin, payload FROM facts WHERE rowid > ? ORDER BY arrival_ordinal, arrival_seq",
             (cursor,),
         ).fetchall()
         loads = _raw_decode
@@ -1770,14 +1770,14 @@ class SqliteStore(Generic[T]):
         is injected as ``_ts`` (Latest folds consume it — replay must never
         consult the wall clock).
 
-        FOLD REPLAY ORDER is receipt order (rowid) — the order this store
-        received the facts. Receipt order is the chain/window authority and
+        FOLD REPLAY ORDER is arrival order (arrival_ordinal, arrival_seq) — the order this store
+        received the facts. Arrival order is the chain/window authority and
         the fold authority alike: a fact's fold position is where it landed.
         Event order ``(ts, id)`` is a read lens layered on top, never the
         replay axis (see ORDERING AUTHORITY on append_tick).
         """
         rows = self._conn.execute(
-            "SELECT kind, ts, payload FROM facts WHERE rowid > ? ORDER BY rowid",
+            "SELECT kind, ts, payload FROM facts WHERE rowid > ? ORDER BY arrival_ordinal, arrival_seq",
             (cursor,),
         ).fetchall()
         loads = _raw_decode
@@ -1794,12 +1794,12 @@ class SqliteStore(Generic[T]):
         No intermediate list allocation — rows are decoded and yielded
         one at a time. The caller handles fold dispatch; the store just
         provides data. This keeps fold logic in the Projection layer
-        where it belongs. Same receipt-order (rowid) fold replay and ``_ts``
+        where it belongs. Same arrival-order (arrival_ordinal, arrival_seq) fold replay and ``_ts``
         injection as since_raw.
         """
         loads = _raw_decode
         for r in self._conn.execute(
-            "SELECT kind, ts, payload FROM facts WHERE rowid > ? ORDER BY rowid",
+            "SELECT kind, ts, payload FROM facts WHERE rowid > ? ORDER BY arrival_ordinal, arrival_seq",
             (cursor,),
         ):
             payload = loads(r[2])[0]
@@ -1825,7 +1825,7 @@ class SqliteStore(Generic[T]):
         end_ts = end.timestamp() if isinstance(end, datetime) else end
 
         rows = self._conn.execute(
-            "SELECT kind, ts, observer, origin, payload FROM facts WHERE ts >= ? AND ts <= ? ORDER BY rowid",
+            "SELECT kind, ts, observer, origin, payload FROM facts WHERE ts >= ? AND ts <= ? ORDER BY arrival_ordinal, arrival_seq",
             (start_ts, end_ts),
         ).fetchall()
         return [
@@ -1893,7 +1893,7 @@ class SqliteStore(Generic[T]):
         from lang.document import DECL_GENESIS
 
         genesis_rows = conn.execute(
-            "SELECT id FROM facts WHERE kind = ? ORDER BY rowid",
+            "SELECT id FROM facts WHERE kind = ? ORDER BY arrival_ordinal, arrival_seq",
             (DECL_GENESIS,),
         ).fetchall()
         if not genesis_rows:
@@ -1936,7 +1936,7 @@ class SqliteStore(Generic[T]):
                     )
                 genesis_rows = conn.execute(
                     "SELECT id, observer, ts FROM facts WHERE kind = ? "
-                    "ORDER BY rowid",
+                    "ORDER BY arrival_ordinal, arrival_seq",
                     (DECL_GENESIS,),
                 ).fetchall()
                 if not genesis_rows:
@@ -2565,7 +2565,7 @@ class SqliteStore(Generic[T]):
         signed = unsigned = 0
         for row in self._conn.execute(
             "SELECT id, kind, ts, observer, origin, payload, signature "
-            "FROM facts ORDER BY rowid"
+            "FROM facts ORDER BY arrival_ordinal, arrival_seq"
         ):
             fact_id, kind, ts, observer, origin, payload_text, signature = row
             if signature is None:
@@ -2601,7 +2601,7 @@ class SqliteStore(Generic[T]):
     def ticks_since(self, cursor: int) -> list[Tick]:
         """Return ticks with rowid > cursor."""
         rows = self._conn.execute(
-            "SELECT name, ts, since, origin, payload FROM ticks WHERE rowid > ? ORDER BY rowid",
+            "SELECT name, ts, since, origin, payload FROM ticks WHERE rowid > ? ORDER BY arrival_ordinal, arrival_seq",
             (cursor,),
         ).fetchall()
         return [
@@ -2616,7 +2616,7 @@ class SqliteStore(Generic[T]):
         start_ts = start.timestamp() if isinstance(start, datetime) else start
         end_ts = end.timestamp() if isinstance(end, datetime) else end
         rows = self._conn.execute(
-            "SELECT name, ts, since, origin, payload FROM ticks WHERE ts >= ? AND ts <= ? ORDER BY rowid",
+            "SELECT name, ts, since, origin, payload FROM ticks WHERE ts >= ? AND ts <= ? ORDER BY arrival_ordinal, arrival_seq",
             (start_ts, end_ts),
         ).fetchall()
         return [

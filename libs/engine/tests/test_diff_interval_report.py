@@ -53,7 +53,7 @@ class TestNoInterval:
         _append(store, "decision", 100, topic="a")
         pos = resolve_witness_position(store, "head")
         report = diff_interval_report(store, pos, pos)
-        assert report == {"late_arrivals": [], "declaration_changed": False}
+        assert report == {"late_arrivals": [], "declaration_changed": False, "baseline": "pos1"}
 
     def test_invalid_store_raises(self, tmp_path):
         """Kills mutant replacing invalid store message with None in diff_interval_report at witness.py:604.
@@ -121,7 +121,10 @@ class TestLateArrivals:
 
         forward = diff_interval_report(store, pos1, pos2)
         backward = diff_interval_report(store, pos2, pos1)
-        assert forward == backward
+        assert forward["late_arrivals"] == backward["late_arrivals"]
+        assert forward["declaration_changed"] == backward["declaration_changed"]
+        assert forward["baseline"] == "pos1"
+        assert backward["baseline"] == "pos2"
         assert forward["late_arrivals"][0]["id"] == late_id
 
     def test_decl_rows_excluded_from_late_arrivals(self, tmp_path):

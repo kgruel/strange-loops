@@ -556,14 +556,25 @@ def _verify_admitted_rows(
     pre-signature sources. Verifying nothing is honest; pretending an absent
     signature is a failed one is not.
     """
-    from engine.sqlite_store import fact_commitment_hash
+    from engine.sqlite_store import FACT_CONTENT_COLUMNS, fact_commitment_hash
+
+    # Derived, not hardcoded (WP-1a F-4 / WP-5 W5-1): positional constants
+    # silently rot the next time a content column lands.
+    _kind = FACT_CONTENT_COLUMNS.index("kind")
+    _ts = FACT_CONTENT_COLUMNS.index("ts")
+    _observer = FACT_CONTENT_COLUMNS.index("observer")
+    _origin = FACT_CONTENT_COLUMNS.index("origin")
+    _payload = FACT_CONTENT_COLUMNS.index("payload")
+    _sig = FACT_CONTENT_COLUMNS.index("signature")
 
     for ordinal, row in admitted:
-        signature = row[6] if len(row) > 6 else None
+        signature = row[_sig] if len(row) > _sig else None
         if signature is None:
             continue
-        observer = row[3]
-        digest = fact_commitment_hash(row[1], row[2], observer, row[4], row[5])
+        observer = row[_observer]
+        digest = fact_commitment_hash(
+            row[_kind], row[_ts], observer, row[_origin], row[_payload]
+        )
         candidates = (
             () if ordinal is None else registry.keys_valid_at(observer, ordinal)
         )

@@ -57,10 +57,11 @@ def _scaffold(tmp_path: Path) -> tuple[Path, Path]:
 def _append(store: Path, kind: str, ts: float, *, fid: str | None = None, **payload) -> str:
     conn = sqlite3.connect(str(store))
     fid = fid or gen_id()
+    ord_val = conn.execute("SELECT COALESCE(MAX(arrival_ordinal), 0) + 1 FROM facts").fetchone()[0]
     conn.execute(
-        "INSERT INTO facts (id, kind, ts, observer, origin, payload, signature) "
-        "VALUES (?, ?, ?, ?, ?, ?, NULL)",
-        (fid, kind, ts, "kyle", "", json.dumps(payload)),
+        "INSERT INTO facts (id, kind, ts, observer, origin, payload, signature, arrival_ordinal, arrival_seq) "
+        "VALUES (?, ?, ?, ?, ?, ?, NULL, ?, 0)",
+        (fid, kind, ts, "kyle", "", json.dumps(payload), ord_val),
     )
     conn.commit()
     conn.close()
@@ -70,9 +71,10 @@ def _append(store: Path, kind: str, ts: float, *, fid: str | None = None, **payl
 def _append_tick(store: Path, name: str, ts: float) -> str:
     conn = sqlite3.connect(str(store))
     tid = gen_id()
+    ord_val = conn.execute("SELECT COALESCE(MAX(arrival_ordinal), 0) + 1 FROM ticks").fetchone()[0]
     conn.execute(
-        "INSERT INTO ticks (id, name, ts, since, origin, payload) VALUES (?,?,?,?,?,?)",
-        (tid, name, ts, ts, "t", json.dumps({"closed": True})),
+        "INSERT INTO ticks (id, name, ts, since, origin, payload, arrival_ordinal, arrival_seq) VALUES (?,?,?,?,?,?,?,0)",
+        (tid, name, ts, ts, "t", json.dumps({"closed": True}), ord_val),
     )
     conn.commit()
     conn.close()
@@ -324,20 +326,22 @@ class TestSemanticEpoch:
             # ONE burst: a _decl edit moving decision's key topic→name, then a
             # domain decision fact under that new ontology.
             conn = sqlite3.connect(str(store))
+            ord1 = conn.execute("SELECT COALESCE(MAX(arrival_ordinal), 0) + 1 FROM facts").fetchone()[0]
             conn.execute(
-                "INSERT INTO facts (id, kind, ts, observer, origin, payload, signature) "
-                "VALUES (?, ?, ?, ?, ?, ?, NULL)",
+                "INSERT INTO facts (id, kind, ts, observer, origin, payload, signature, arrival_ordinal, arrival_seq) "
+                "VALUES (?, ?, ?, ?, ?, ?, NULL, ?, 0)",
                 ("rekey", DECL_KIND_DEFINED, gts + 100, "kyle", "", json.dumps({
                     "lineage": lineage, "subject": "decision",
                     "payload": {"order": 0, "search": ["message"], "folds": [
                         {"target": "items", "op": {"op": "by", "key_field": "name"}}]},
-                })),
+                }), ord1),
             )
+            ord2 = conn.execute("SELECT COALESCE(MAX(arrival_ordinal), 0) + 1 FROM facts").fetchone()[0]
             conn.execute(
-                "INSERT INTO facts (id, kind, ts, observer, origin, payload, signature) "
-                "VALUES (?, ?, ?, ?, ?, ?, NULL)",
+                "INSERT INTO facts (id, kind, ts, observer, origin, payload, signature, arrival_ordinal, arrival_seq) "
+                "VALUES (?, ?, ?, ?, ?, ?, NULL, ?, 0)",
                 (gen_id(), "decision", gts + 200, "kyle", "", json.dumps(
-                    {"topic": "OLDKEY", "name": "NEWKEY", "message": "m"})),
+                    {"topic": "OLDKEY", "name": "NEWKEY", "message": "m"}), ord2),
             )
             conn.commit()
             conn.close()

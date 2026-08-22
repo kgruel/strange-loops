@@ -136,6 +136,9 @@ def _merge_into_sqlite(target: Path, source: Path, *, dry_run: bool) -> MergeRes
     """
     conn = _open(target)
     try:
+        from engine.sqlite_store import ensure_coordinate_schema
+
+        ensure_coordinate_schema(conn, mode="mirrored")
         conn.execute("ATTACH DATABASE ? AS src", (str(source),))
 
         src_facts = conn.execute("SELECT COUNT(*) FROM src.facts").fetchone()[0]
@@ -163,15 +166,15 @@ def _merge_into_sqlite(target: Path, source: Path, *, dry_run: bool) -> MergeRes
         else:  # both pre-delta-3
             ins_cols = sel_cols = "id, kind, ts, observer, origin, payload"
         conn.execute(f"""
-            INSERT OR IGNORE INTO facts ({ins_cols})
-            SELECT {sel_cols}
+            INSERT OR IGNORE INTO facts ({ins_cols}, arrival_ordinal, arrival_seq)
+            SELECT {sel_cols}, COALESCE((SELECT MAX(arrival_ordinal) FROM facts), 0) + ROW_NUMBER() OVER (ORDER BY ts, id), 0
             FROM src.facts ORDER BY ts, id
         """)
         facts_added = conn.execute("SELECT changes()").fetchone()[0]
 
         conn.execute("""
-            INSERT OR IGNORE INTO ticks (id, name, ts, since, origin, payload)
-            SELECT id, name, ts, since, origin, payload
+            INSERT OR IGNORE INTO ticks (id, name, ts, since, origin, payload, arrival_ordinal, arrival_seq)
+            SELECT id, name, ts, since, origin, payload, COALESCE((SELECT MAX(arrival_ordinal) FROM ticks), 0) + ROW_NUMBER() OVER (ORDER BY ts, id), 0
             FROM src.ticks ORDER BY ts, id
         """)
         ticks_added = conn.execute("SELECT changes()").fetchone()[0]

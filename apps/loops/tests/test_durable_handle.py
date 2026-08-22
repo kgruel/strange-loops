@@ -60,10 +60,13 @@ def _fresh(store: Path) -> None:
 def _append(store: Path, ts: float, topic: str) -> str:
     conn = sqlite3.connect(str(store))
     fid = gen_id()
+    ord_val = conn.execute(
+        "SELECT COALESCE(MAX(arrival_ordinal), 0) + 1 FROM facts"
+    ).fetchone()[0]
     conn.execute(
-        "INSERT INTO facts (id, kind, ts, observer, origin, payload, signature) "
-        "VALUES (?, 'decision', ?, 'kyle', '', ?, NULL)",
-        (fid, ts, json.dumps({"topic": topic})),
+        "INSERT INTO facts (id, kind, ts, observer, origin, payload, signature, arrival_ordinal, arrival_seq) "
+        "VALUES (?, 'decision', ?, 'kyle', '', ?, NULL, ?, 0)",
+        (fid, ts, json.dumps({"topic": topic}), ord_val),
     )
     conn.commit()
     conn.close()

@@ -173,11 +173,20 @@ def _append(store: Path, ts: float, **payload: Any) -> None:
     import json
 
     conn = sqlite3.connect(str(store))
-    conn.execute(
-        "INSERT INTO facts (id, kind, ts, observer, origin, payload, signature)"
-        " VALUES (?, ?, ?, ?, ?, ?, ?)",
-        (gen_id(), "decision", ts, "kyle", "", json.dumps(payload), ""),
-    )
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(facts)")}
+    if "arrival_ordinal" in cols:
+        ord_val = conn.execute("SELECT COALESCE(MAX(arrival_ordinal), 0) + 1 FROM facts").fetchone()[0]
+        conn.execute(
+            "INSERT INTO facts (id, kind, ts, observer, origin, payload, signature, arrival_ordinal, arrival_seq)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)",
+            (gen_id(), "decision", ts, "kyle", "", json.dumps(payload), "", ord_val),
+        )
+    else:
+        conn.execute(
+            "INSERT INTO facts (id, kind, ts, observer, origin, payload, signature)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (gen_id(), "decision", ts, "kyle", "", json.dumps(payload), ""),
+        )
     conn.commit()
     conn.close()
 

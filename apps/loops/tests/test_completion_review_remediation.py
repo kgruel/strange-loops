@@ -334,10 +334,13 @@ class TestRound2KeyFieldHonesty:
         vpath = _scaffold_and_absorb(tmp_path)
         db = tmp_path / "t.db"
         conn = sqlite3.connect(str(db))
+        ord_val = conn.execute(
+            "SELECT COALESCE(MAX(arrival_ordinal), 0) + 1 FROM facts"
+        ).fetchone()[0]
         conn.execute(
-            "INSERT INTO facts (id, kind, ts, observer, payload) "
-            "VALUES ('f1', 'decision', 1.0, 'kyle', ?)",
-            (json.dumps({"topic": "real/a", "slug": "fake/b"}),),
+            "INSERT INTO facts (id, kind, ts, observer, payload, arrival_ordinal, arrival_seq) "
+            "VALUES ('f1', 'decision', 1.0, 'kyle', ?, ?, 0)",
+            (json.dumps({"topic": "real/a", "slug": "fake/b"}), ord_val),
         )
         conn.commit()
         conn.close()
@@ -404,10 +407,13 @@ class TestRound3BoundedCanonicalPath:
 
         vpath = _scaffold_and_absorb(tmp_path)
         conn = sqlite3.connect(str(tmp_path / "t.db"))
+        ord_val = conn.execute(
+            "SELECT COALESCE(MAX(arrival_ordinal), 0) + 1 FROM facts"
+        ).fetchone()[0]
         conn.executemany(
-            "INSERT INTO facts (id, kind, ts, observer, payload) "
-            "VALUES (?, '_decl.kind-defined', 1.0, 'kyle', '{}')",
-            [(f"pad{i}",) for i in range(5001)],
+            "INSERT INTO facts (id, kind, ts, observer, payload, arrival_ordinal, arrival_seq) "
+            "VALUES (?, '_decl.kind-defined', 1.0, 'kyle', '{}', ?, 0)",
+            [(f"pad{i}", ord_val + i) for i in range(5001)],
         )
         conn.commit()
         conn.close()
@@ -497,10 +503,13 @@ class TestRound4BoundedGuard:
 
         vpath = _scaffold_and_absorb(tmp_path)
         conn = sqlite3.connect(str(tmp_path / "t.db"))
+        ord_val = conn.execute(
+            "SELECT COALESCE(MAX(arrival_ordinal), 0) + 1 FROM facts"
+        ).fetchone()[0]
         conn.executemany(
-            "INSERT INTO facts (id, kind, ts, observer, payload) "
-            "VALUES (?, '_decl.kind-defined', 1.0, 'kyle', '{}')",
-            [(f"pad{i}",) for i in range(50_000)],
+            "INSERT INTO facts (id, kind, ts, observer, payload, arrival_ordinal, arrival_seq) "
+            "VALUES (?, '_decl.kind-defined', 1.0, 'kyle', '{}', ?, 0)",
+            [(f"pad{i}", ord_val + i) for i in range(50_000)],
         )
         conn.commit()
         conn.close()

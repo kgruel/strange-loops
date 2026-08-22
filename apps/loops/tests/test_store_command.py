@@ -714,9 +714,13 @@ class TestJsonlCanonicalStoreVerbRefusals:
         import sqlite3
 
         conn = sqlite3.connect(vpath.parent / "x.db")
+        ord_val = conn.execute(
+            "SELECT COALESCE(MAX(arrival_ordinal), 0) + 1 FROM facts"
+        ).fetchone()[0]
         conn.execute(
-            "INSERT INTO facts (id, kind, ts, observer, origin, payload) "
-            "VALUES ('OUT-OF-BAND-ROW', 'ping', 1.0, 'x', '', '{}')"
+            "INSERT INTO facts (id, kind, ts, observer, origin, payload, arrival_ordinal, arrival_seq) "
+            "VALUES ('OUT-OF-BAND-ROW', 'ping', 1.0, 'x', '', '{}', ?, 0)",
+            (ord_val,),
         )
         conn.commit()
         conn.close()
@@ -865,10 +869,13 @@ class TestCanonicalAgreementGate:
         import time
 
         conn = sqlite3.connect(str(tmp_path / "x.db"))
+        ord_val = conn.execute(
+            "SELECT COALESCE(MAX(arrival_ordinal), 0) + 1 FROM facts"
+        ).fetchone()[0]
         conn.execute(
-            "INSERT INTO facts (id, kind, ts, observer, origin, payload) "
-            "VALUES ('01FORGED', 'ping', ?, 'mallory', '', ?)",
-            (time.time(), json.dumps({"message": "forged"})),
+            "INSERT INTO facts (id, kind, ts, observer, origin, payload, arrival_ordinal, arrival_seq) "
+            "VALUES ('01FORGED', 'ping', ?, 'mallory', '', ?, ?, 0)",
+            (time.time(), json.dumps({"message": "forged"}), ord_val),
         )
         conn.commit()
         conn.close()

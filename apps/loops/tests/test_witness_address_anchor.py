@@ -28,10 +28,13 @@ def _fresh(store: Path) -> None:
 def _append(store: Path, ts: float) -> str:
     conn = sqlite3.connect(str(store))
     fid = gen_id()
+    ord_val = conn.execute(
+        "SELECT COALESCE(MAX(arrival_ordinal), 0) + 1 FROM facts"
+    ).fetchone()[0]
     conn.execute(
-        "INSERT INTO facts (id, kind, ts, observer, origin, payload, signature) "
-        "VALUES (?, 'decision', ?, 'kyle', '', ?, NULL)",
-        (fid, ts, json.dumps({"topic": "a"})),
+        "INSERT INTO facts (id, kind, ts, observer, origin, payload, signature, arrival_ordinal, arrival_seq) "
+        "VALUES (?, 'decision', ?, 'kyle', '', ?, NULL, ?, 0)",
+        (fid, ts, json.dumps({"topic": "a"}), ord_val),
     )
     conn.commit()
     conn.close()
@@ -40,10 +43,13 @@ def _append(store: Path, ts: float) -> str:
 
 def _tick(store: Path, name: str, ts: float, cursor: str) -> None:
     conn = sqlite3.connect(str(store))
+    ord_val = conn.execute(
+        "SELECT COALESCE(MAX(arrival_ordinal), 0) + 1 FROM ticks"
+    ).fetchone()[0]
     conn.execute(
-        "INSERT INTO ticks (id, name, ts, since, origin, payload, fact_cursor) "
-        "VALUES (?, ?, ?, 0.0, '', '{}', ?)",
-        (gen_id(), name, ts, cursor),
+        "INSERT INTO ticks (id, name, ts, since, origin, payload, fact_cursor, arrival_ordinal, arrival_seq) "
+        "VALUES (?, ?, ?, 0.0, '', '{}', ?, ?, 0)",
+        (gen_id(), name, ts, cursor, ord_val),
     )
     conn.commit()
     conn.close()

@@ -419,20 +419,25 @@ def rebirth_store(
 
     dst = _create(target)
     try:
+        from engine.sqlite_store import ensure_coordinate_schema
+
+        ensure_coordinate_schema(dst, mode="mirrored")
         # Fact signatures ride VERBATIM (never re-signed — see FactRow);
         # the spine already dropped any signature whose content changed.
         dst.executemany(
-            "INSERT INTO facts (id, kind, ts, observer, origin, payload, signature) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            [(r.id, r.kind, r.ts, r.observer, r.origin, r.payload, r.signature)
-             for r in rows],
+            "INSERT INTO facts (id, kind, ts, observer, origin, payload, signature, arrival_ordinal, arrival_seq) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [(r.id, r.kind, r.ts, r.observer, r.origin, r.payload, r.signature, idx + 1, 0)
+             for idx, r in enumerate(rows)],
         )
+        receipt_ord = len(rows) + 1
         dst.execute(
-            "INSERT INTO facts (id, kind, ts, observer, origin, payload) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
+            "INSERT INTO facts (id, kind, ts, observer, origin, payload, arrival_ordinal, arrival_seq) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (receipt_id, "rebirth", now.timestamp(), observer, "rebirth",
              json.dumps(receipt_payload, sort_keys=True,
-                        separators=(",", ":"))),
+                        separators=(",", ":")),
+             receipt_ord, 0),
         )
         dst.commit()
     finally:

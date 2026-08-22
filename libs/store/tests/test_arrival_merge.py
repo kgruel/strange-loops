@@ -95,13 +95,14 @@ def sqlite_source(tmp_path, name, facts=()):
         path=path, serialize=lambda d: d, deserialize=lambda d: d
     )
     conn = store._conn
-    for body in facts:
+    for idx, body in enumerate(facts):
         conn.execute(
-            "INSERT INTO facts (id, kind, ts, observer, origin, payload, signature) "
-            "VALUES (?,?,?,?,?,?,?)",
+            "INSERT INTO facts (id, kind, ts, observer, origin, payload, signature, arrival_ordinal, arrival_seq) "
+            "VALUES (?,?,?,?,?,?,?,?,?)",
             (
                 body["id"], body["kind"], body["ts"], body["observer"],
                 body["origin"], body["payload"], body.get("signature"),
+                idx + 1, 0,
             ),
         )
     conn.commit()

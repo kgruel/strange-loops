@@ -84,10 +84,11 @@ def _emit(store: Path, kind: str, ts: float, **payload) -> None:
     conn = sqlite3.connect(str(store))
     from engine.sqlite_store import gen_id
 
+    ord_val = conn.execute("SELECT COALESCE(MAX(arrival_ordinal), 0) + 1 FROM facts").fetchone()[0]
     conn.execute(
-        "INSERT INTO facts (id, kind, ts, observer, origin, payload, signature) "
-        "VALUES (?, ?, ?, ?, ?, ?, NULL)",
-        (gen_id(), kind, ts, "kyle", "", json.dumps(payload)),
+        "INSERT INTO facts (id, kind, ts, observer, origin, payload, signature, arrival_ordinal, arrival_seq) "
+        "VALUES (?, ?, ?, ?, ?, ?, NULL, ?, 0)",
+        (gen_id(), kind, ts, "kyle", "", json.dumps(payload), ord_val),
     )
     conn.commit()
     conn.close()
@@ -96,16 +97,17 @@ def _emit(store: Path, kind: str, ts: float, **payload) -> None:
 def _rekey_decision(store: Path, lineage: str, ts: float) -> None:
     """S4-shaped overlay: move ``decision``'s fold key from ``topic`` to ``name``."""
     conn = sqlite3.connect(str(store))
+    ord_val = conn.execute("SELECT COALESCE(MAX(arrival_ordinal), 0) + 1 FROM facts").fetchone()[0]
     conn.execute(
-        "INSERT INTO facts (id, kind, ts, observer, origin, payload, signature) "
-        "VALUES (?, ?, ?, ?, ?, ?, NULL)",
+        "INSERT INTO facts (id, kind, ts, observer, origin, payload, signature, arrival_ordinal, arrival_seq) "
+        "VALUES (?, ?, ?, ?, ?, ?, NULL, ?, 0)",
         ("rekey-decision", DECL_KIND_DEFINED, ts, "kyle", "", json.dumps({
             "lineage": lineage,
             "subject": "decision",
             "payload": {"order": 0, "search": ["message"], "folds": [
                 {"target": "items", "op": {"op": "by", "key_field": "name"}}
             ]},
-        })),
+        }), ord_val),
     )
     conn.commit()
     conn.close()
@@ -143,14 +145,15 @@ class TestFoldKeyRewind:
         gts = _genesis_ts(store)
         _rekey_decision(store, lineage, ts=gts + 100)  # → name
         conn = sqlite3.connect(str(store))
+        ord_val = conn.execute("SELECT COALESCE(MAX(arrival_ordinal), 0) + 1 FROM facts").fetchone()[0]
         conn.execute(
-            "INSERT INTO facts (id, kind, ts, observer, origin, payload, signature) "
-            "VALUES (?, ?, ?, ?, ?, ?, NULL)",
+            "INSERT INTO facts (id, kind, ts, observer, origin, payload, signature, arrival_ordinal, arrival_seq) "
+            "VALUES (?, ?, ?, ?, ?, ?, NULL, ?, 0)",
             ("rekey-2", DECL_KIND_DEFINED, gts + 200, "kyle", "", json.dumps({
                 "lineage": lineage, "subject": "decision",
                 "payload": {"order": 0, "folds": [
                     {"target": "items", "op": {"op": "by", "key_field": "title"}}]},
-            })),
+            }), ord_val),
         )
         conn.commit()
         conn.close()

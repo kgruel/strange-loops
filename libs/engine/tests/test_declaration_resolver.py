@@ -95,10 +95,11 @@ def _append_decl_row(
     irrelevant to resolution (lineage + protocol are the gates), so NULL.
     """
     conn = sqlite3.connect(str(store))
+    ord_val = conn.execute("SELECT COALESCE(MAX(arrival_ordinal), 0) + 1 FROM facts").fetchone()[0]
     conn.execute(
-        "INSERT INTO facts (id, kind, ts, observer, origin, payload, signature) "
-        "VALUES (?, ?, ?, ?, ?, ?, NULL)",
-        (row_id, kind, ts, "kyle", "", json.dumps(payload)),
+        "INSERT INTO facts (id, kind, ts, observer, origin, payload, signature, arrival_ordinal, arrival_seq) "
+        "VALUES (?, ?, ?, ?, ?, ?, NULL, ?, 0)",
+        (row_id, kind, ts, "kyle", "", json.dumps(payload), ord_val),
     )
     conn.commit()
     conn.close()
@@ -773,11 +774,12 @@ loops''')
         vpath, store = _scaffold(tmp_path)
         _absorb(vpath, store)
         conn = sqlite3.connect(str(store))
-        for fid, kind in (("abc1", "decision"), ("abc2", "thread")):
+        for idx, (fid, kind) in enumerate((("abc1", "decision"), ("abc2", "thread"))):
+            ord_val = conn.execute("SELECT COALESCE(MAX(arrival_ordinal), 0) + 1 FROM facts").fetchone()[0]
             conn.execute(
-                "INSERT INTO facts (id, kind, ts, observer, payload) "
-                "VALUES (?, ?, 100.0, 'kyle', '{}')",
-                (fid, kind),
+                "INSERT INTO facts (id, kind, ts, observer, payload, arrival_ordinal, arrival_seq) "
+                "VALUES (?, ?, 100.0, 'kyle', '{}', ?, 0)",
+                (fid, kind, ord_val),
             )
         conn.commit()
         conn.close()
@@ -795,10 +797,11 @@ loops''')
         _absorb(vpath, store)
         conn = sqlite3.connect(str(store))
         for fid in ("abc1", "abc2"):
+            ord_val = conn.execute("SELECT COALESCE(MAX(arrival_ordinal), 0) + 1 FROM facts").fetchone()[0]
             conn.execute(
-                "INSERT INTO facts (id, kind, ts, observer, payload) "
-                "VALUES (?, 'decision', 100.0, 'kyle', '{}')",
-                (fid,),
+                "INSERT INTO facts (id, kind, ts, observer, payload, arrival_ordinal, arrival_seq) "
+                "VALUES (?, 'decision', 100.0, 'kyle', '{}', ?, 0)",
+                (fid, ord_val),
             )
         conn.commit()
         conn.close()

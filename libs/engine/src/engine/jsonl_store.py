@@ -191,7 +191,12 @@ from .jsonl_codec import (
 from .residence import canonical_for
 from .sql_util import sqlite_busy
 from .sqlite_store import (
+    FACT_ALL_COLUMNS,
+    FACT_COLUMNS,
+    FACT_CONTENT_COLUMNS,
     FACT_INSERT_SQL,
+    TICK_COLUMNS,
+    TICK_CONTENT_COLUMNS,
     TICK_INSERT_SQL,
     SqliteStore,
 )
@@ -466,6 +471,7 @@ class JsonlStore(SqliteStore[T], Generic[T]):
         try:
             self._ensure_fact_signature_column()
             self._ensure_chain_columns()
+            self._ensure_coordinate_schema()
             self._ensure_meta_table()
             self.catch_up()
         except BaseException:
@@ -543,8 +549,14 @@ class JsonlStore(SqliteStore[T], Generic[T]):
             os.fsync(fh.fileno())
             return fh.tell()
 
+    # ---- write half ---------------------------------------------------
+
     def _write(
-        self, sql: str, row: tuple, serialize_row, is_fact: bool
+        self,
+        sql: str,
+        row: tuple,
+        serialize_row: Callable[[tuple], str],
+        is_fact: bool,
     ) -> str | None:
         """Stage the INSERT, make the line durable, then stamp and commit.
 
@@ -570,6 +582,13 @@ class JsonlStore(SqliteStore[T], Generic[T]):
         # bytes still come from the read-back row below.
         serialize_row(row)
         try:
+            table = "facts" if is_fact else "ticks"
+            columns = FACT_COLUMNS if is_fact else TICK_COLUMNS
+            if len(row) == len(columns):
+                ord_val = self._conn.execute(
+                    f"SELECT COALESCE(MAX(arrival_ordinal), 0) + 1 FROM {table}"
+                ).fetchone()[0]
+                row = (*row, ord_val, 0)
             self._conn.execute(sql, row)
             # Committed-row honesty (SOL-R3-02 + SOL-R4-02/03): read the
             # COMPLETE row back after the INSERT (AFTER triggers fired),
@@ -577,10 +596,15 @@ class JsonlStore(SqliteStore[T], Generic[T]):
             # log line both report what the index will actually hold; an
             # absent row refuses.
             committed_row = self._committed_full_row(
-                "facts" if is_fact else "ticks", row[0]
+                table, row[0]
             )
-            committed = committed_row[-1]  # signature is the last column
-            line = serialize_row(committed_row)
+            sig_col_idx = (
+                FACT_CONTENT_COLUMNS.index("signature")
+                if is_fact
+                else TICK_CONTENT_COLUMNS.index("signature")
+            )
+            committed = committed_row[sig_col_idx]
+            line = serialize_row(committed_row[:-2])
             # The INSERT has taken sqlite's write lock, so the committed
             # markers read here cannot be raced by another handle: whatever
             # a concurrent writer stamped is already visible, and nothing
@@ -650,7 +674,14 @@ class JsonlStore(SqliteStore[T], Generic[T]):
         and unindexed — the standard recoverable state the next
         open/reconcile tails forward, all N rows atomically.
         """
-        line = serialize_batch(rows) if len(rows) > 1 else serialize_fact_row(rows[0])
+        persisted_rows = [
+            r[:-2] if len(r) == len(FACT_ALL_COLUMNS) else r for r in rows
+        ]
+        line = (
+            serialize_batch(persisted_rows)
+            if len(persisted_rows) > 1
+            else serialize_fact_row(persisted_rows[0])
+        )
         # Same committed-marker discipline as _write: the staged INSERTs
         # hold sqlite's write lock, so the marker read here cannot be raced.
         marked = self._marked_counts()
@@ -885,6 +916,13 @@ class JsonlStore(SqliteStore[T], Generic[T]):
             # ceremony can never index as a subset. facts += N; the offset
             # stamps at the line's end as for any line.
             for t, row in deserialize_records(line):
+                table = "facts" if t == "fact" else "ticks"
+                columns = FACT_COLUMNS if t == "fact" else TICK_COLUMNS
+                if len(row) == len(columns):
+                    ord_val = self._conn.execute(
+                        f"SELECT COALESCE(MAX(arrival_ordinal), 0) + 1 FROM {table}"
+                    ).fetchone()[0]
+                    row = (*row, ord_val, 0)
                 try:
                     self._conn.execute(
                         FACT_INSERT_SQL if t == "fact" else TICK_INSERT_SQL, row

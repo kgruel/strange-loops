@@ -57,7 +57,7 @@ import os
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
-from typing import NoReturn
+from typing import Iterator, NoReturn
 
 from .arrival import GENESIS_KIND, KEY_INTRODUCTION_KIND, ArrivalLog, ResumeMark
 from .jsonl_codec import records_from_object, serialize_object
@@ -66,6 +66,7 @@ from .sqlite_store import (
     _SCHEMA_STMTS,
     FACT_INSERT_SQL,
     TICK_INSERT_SQL,
+    ensure_coordinate_schema,
 )
 
 __all__ = [
@@ -476,7 +477,7 @@ def rederive_projections(
     conn = sqlite3.connect(str(index))
     conn.isolation_level = None  # explicit transaction control
     try:
-        _ensure_index_schema(conn)
+        _ensure_index_schema(conn, log)
         conn.execute("BEGIN IMMEDIATE")
         try:
             marker = _meta_get(conn, _OWN_LINEAGE_KEY)
@@ -498,9 +499,11 @@ def rederive_projections(
             last: ResumeMark | None = None
             _, walked = log.walk_marked(None)
             for record, mark in walked:
-                for t, row in rows_of_record(record):
+                ord_val = record["ord"]
+                for seq, (t, row) in enumerate(rows_of_record(record)):
                     conn.execute(
-                        FACT_INSERT_SQL if t == "fact" else TICK_INSERT_SQL, row
+                        FACT_INSERT_SQL if t == "fact" else TICK_INSERT_SQL,
+                        (*row, ord_val, seq),
                     )
                     if t == "fact":
                         facts += 1
@@ -541,7 +544,9 @@ def rederive_projections(
 # --- index plumbing, kept off the store classes ------------------------------
 
 
-def _ensure_index_schema(conn: sqlite3.Connection) -> None:
+def _ensure_index_schema(
+    conn: sqlite3.Connection, log: ArrivalLog | None = None
+) -> None:
     """Make the index connectable as an index, whatever era it is from.
 
     Every statement is idempotent. The schema statements are the store
@@ -564,6 +569,8 @@ def _ensure_index_schema(conn: sqlite3.Connection) -> None:
         if col not in tick_cols:
             conn.execute(f"ALTER TABLE ticks ADD COLUMN {col} TEXT")
     conn.commit()
+
+    ensure_coordinate_schema(conn, mode="arrival", validate=False)
 
 
 def _meta_get(conn: sqlite3.Connection, key: str) -> str | None:

@@ -89,10 +89,11 @@ def test_out_of_band_insert_fails_count_parity(tmp_path):
     """The lie the index-only walk missed: a row the log never carried."""
     log, db = seeded(tmp_path)
     conn = sqlite3.connect(str(db))
+    ord_val = conn.execute("SELECT COALESCE(MAX(arrival_ordinal), 0) + 1 FROM facts").fetchone()[0]
     conn.execute(
-        "INSERT INTO facts (id, kind, ts, observer, origin, payload) "
-        "VALUES ('01FORGED', 'note', ?, 'mallory', '', ?)",
-        (time.time(), json.dumps({"message": "forged"})),
+        "INSERT INTO facts (id, kind, ts, observer, origin, payload, arrival_ordinal, arrival_seq) "
+        "VALUES ('01FORGED', 'note', ?, 'mallory', '', ?, ?, 0)",
+        (time.time(), json.dumps({"message": "forged"}), ord_val),
     )
     conn.commit()
     conn.close()
@@ -224,10 +225,11 @@ def test_deep_names_a_chain_break_when_index_and_log_agree(tmp_path):
 def test_deep_names_index_rows_the_log_never_carried(tmp_path):
     log, db = seeded(tmp_path)
     conn = sqlite3.connect(str(db))
+    ord_val = conn.execute("SELECT COALESCE(MAX(arrival_ordinal), 0) + 1 FROM facts").fetchone()[0]
     conn.execute(
-        "INSERT INTO facts (id, kind, ts, observer, origin, payload) "
-        "VALUES ('01APPENDED', 'note', ?, 'mallory', '', ?)",
-        (time.time(), json.dumps({"message": "forged"})),
+        "INSERT INTO facts (id, kind, ts, observer, origin, payload, arrival_ordinal, arrival_seq) "
+        "VALUES ('01APPENDED', 'note', ?, 'mallory', '', ?, ?, 0)",
+        (time.time(), json.dumps({"message": "forged"}), ord_val),
     )
     conn.commit()
     conn.close()
@@ -317,9 +319,10 @@ def test_a_real_index_edit_is_never_scoped_to_the_unconsumed_suffix(tmp_path):
 def test_an_out_of_band_insert_is_never_scoped_to_the_unconsumed_suffix(tmp_path):
     log, db = seeded(tmp_path)
     conn = sqlite3.connect(str(db))
+    ord_val = conn.execute("SELECT COALESCE(MAX(arrival_ordinal), 0) + 1 FROM facts").fetchone()[0]
     conn.execute(
-        "INSERT INTO facts (id, kind, ts, observer, payload) "
-        "VALUES ('01GHOST', 'note', ?, 'sol', '{}')", (time.time(),)
+        "INSERT INTO facts (id, kind, ts, observer, payload, arrival_ordinal, arrival_seq) "
+        "VALUES ('01GHOST', 'note', ?, 'sol', '{}', ?, 0)", (time.time(), ord_val)
     )
     conn.commit()
     conn.close()

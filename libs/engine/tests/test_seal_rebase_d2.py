@@ -43,6 +43,7 @@ from engine.replay import replay
 from engine.sqlite_store import (
     FACT_INSERT_SQL,
     TICK_INSERT_SQL,
+    _TICK_ROW_SQL,
     SqliteStore,
     _fact_row_hash,
     _tick_commitment_hash,
@@ -297,6 +298,7 @@ class TestGD2_4_VerificationUnderPermutation:
 
         # Seal tick covering f-2..f-3
         t2_hash = store_ord._window_hash("f-1", "f-3")
+        t2_row_hash = _tick_row_hash(("t-2", "seal", 103.5, None, "test", '{"n": 2}', t1_row_hash, "f-1", "f-3", t2_hash, None))
         conn_ord.execute(
             TICK_INSERT_SQL,
             ("t-2", "seal", 103.5, None, "test", '{"n": 2}', t1_row_hash, "f-1", "f-3", t2_hash, None, 5, 0),
@@ -340,6 +342,71 @@ class TestGD2_4_VerificationUnderPermutation:
             assert d_ord["fact_cursor"] == d_perm["fact_cursor"]
             assert d_ord["ok"] == d_perm["ok"]
 
+        # Behavioral discrimination: verify_chain window counts and cursor ordering
+        # on arrival axis differ from rowid/oid axis (t-1: 2 facts on arrival vs 4 on rowid;
+        # t-2: 2 facts on arrival vs 0 on rowid)
+        assert report_perm["tick_detail"][0]["tick"] == "t-1"
+        assert report_perm["tick_detail"][0]["fact_cursor"] == "f-1"
+        assert report_perm["tick_detail"][0]["window_facts"] == 2
+
+        assert report_perm["tick_detail"][1]["tick"] == "t-2"
+        assert report_perm["tick_detail"][1]["fact_cursor"] == "f-3"
+        assert report_perm["tick_detail"][1]["window_facts"] == 2
+
+        # Chain head and last tick ts discrimination (arrival tick t-2 vs rowid/oid tick t-1)
+        assert store_perm.current_chain_head() == t2_row_hash
+        assert store_perm.last_tick_ts("seal") == datetime.fromtimestamp(103.5, tz=UTC)
+
+        # Live minting under permutation: predecessor-tick selection, newest-fact edge,
+        # and window_start MUST follow the arrival coordinate axis, not rowid/oid.
+        t3_id = store_perm.append_tick(
+            Tick(name="seal", ts=datetime.fromtimestamp(104.0, tz=UTC), payload={"n": 3}, origin="test")
+        )
+        t3_row = conn_perm.execute(
+            f"SELECT {_TICK_ROW_SQL} FROM ticks WHERE id = ?", (t3_id,)
+        ).fetchone()
+
+        # Arrival-axis predecessor is t-2 (rowid/oid axis would pick t-1)
+        assert t3_row[6] == t2_row_hash, f"Expected prev_hash from arrival head t-2, got {t3_row[6]}"
+        assert t3_row[7] == "f-3", f"Expected window_start 'f-3' from t-2, got {t3_row[7]}"
+        # Arrival-axis newest fact is f-3 (rowid/oid axis would pick f-1)
+        assert t3_row[8] == "f-3", f"Expected fact_cursor 'f-3', got {t3_row[8]}"
+        assert t3_row[9] == store_perm._window_hash("f-3", "f-3")
+        t3_row_hash = _tick_row_hash(t3_row)
+
+        # Insert new facts scrambled: f-5 (coord 5,0) inserted before f-4 (coord 4,0)
+        conn_perm.execute(
+            FACT_INSERT_SQL,
+            ("f-5", "note", 105.0, "kyle", "", '{"v": 5}', None, 5, 0),
+        )
+        conn_perm.execute(
+            FACT_INSERT_SQL,
+            ("f-4", "note", 104.5, "kyle", "", '{"v": 4}', None, 4, 0),
+        )
+
+        t4_id = store_perm.append_tick(
+            Tick(name="seal", ts=datetime.fromtimestamp(106.0, tz=UTC), payload={"n": 4}, origin="test")
+        )
+        t4_row = conn_perm.execute(
+            f"SELECT {_TICK_ROW_SQL} FROM ticks WHERE id = ?", (t4_id,)
+        ).fetchone()
+
+        # Predecessor is t-3
+        assert t4_row[6] == t3_row_hash
+        assert t4_row[7] == "f-3"
+        # Newest fact by arrival coordinate is f-5 (rowid/oid axis would pick f-4 having higher rowid)
+        assert t4_row[8] == "f-5", f"Expected fact_cursor 'f-5', got {t4_row[8]}"
+        assert t4_row[9] == store_perm._window_hash("f-3", "f-5")
+
+        # Verify extended chain
+        report_final = store_perm.verify_chain(include_ticks=True)
+        assert report_final["ok"] is True, f"Extended permuted store failed verify_chain: {report_final.get('breaks')}"
+        assert report_final["chained"] == 4
+        assert report_final["covered_facts"] == 6
+        assert report_final["uncovered_facts"] == 0
+        assert [d["fact_cursor"] for d in report_final["tick_detail"]] == ["f-1", "f-3", "f-3", "f-5"]
+        assert [d["window_facts"] for d in report_final["tick_detail"]] == [2, 2, 0, 2]
+
         conn_perm.close()
         store_perm.close()
 
@@ -352,7 +419,11 @@ class TestGD2_4_VerificationUnderPermutation:
 class TestGD2_5_RowidRatchet:
     def test_no_rowid_in_ordering_range_or_count_windows(self) -> None:
         """AST and pattern scan over sqlite_store.py: no rowid in ORDER BY,
-        range WHERE, or COUNT window outside the explicit shrink-only allowlist."""
+        range WHERE, or COUNT window outside the explicit shrink-only allowlist.
+
+        NOTE: This ratchet is a residue locator for the literal 'rowid' spelling,
+        not proof of axis correctness against synonyms or alternative syntax.
+        The behavioral gates (such as G-D2-4) own the axis-correctness verdict."""
         store_file = Path(__file__).parent.parent / "src" / "engine" / "sqlite_store.py"
         content = store_file.read_text()
 
@@ -372,7 +443,7 @@ class TestGD2_5_RowidRatchet:
 
         # 4. Explicit allowlist for any remaining rowid occurrences in SQL statements
         # Permitted sites:
-        # - Schema rebuild table copies in _rebuild_table_with_coordinates
+        # - Schema rebuild table copies in _rebuild_table
         # - reanchor Pass 1 / Pass 2 update statements
         # - _declaration_head_in_txn CAS token
         tree = ast.parse(content)
@@ -383,7 +454,6 @@ class TestGD2_5_RowidRatchet:
                 if "rowid" in func_code:
                     assert func_name in (
                         "_rebuild_table",
-                        "_rebuild_table_with_coordinates",
                         "ensure_coordinate_schema",
                         "reanchor",
                         "_declaration_head_in_txn",

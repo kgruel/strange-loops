@@ -1485,3 +1485,33 @@ class TestParseAtVertex:
         assert v.state("event") == []
         # But store should have the fact
         assert len(list(store.since(0))) == 1
+
+    def test_replay_pair_cursor_boundary_count_not_implemented(self, tmp_path):
+        """W3-3: Pair-cursor projections raise NotImplementedError when reconciling
+        count-based loop boundaries during replay."""
+        import pytest
+        from atoms import Fact
+        from engine.loop import Loop
+        from engine.sqlite_store import SqliteStore
+
+        db_path = tmp_path / "pair_cursor.db"
+        store = SqliteStore(path=db_path, serialize=Fact.to_dict, deserialize=Fact.from_dict)
+        store.append(Fact.of("experiment", "alice", n=1))
+
+        v = Vertex("test", store=store)
+        loop = Loop(
+            name="experiment",
+            initial=[],
+            fold=lambda s, p: [*s, p],
+            boundary_count=3,
+            boundary_mode="every",
+        )
+        loop._projection.cursor = (1, 0)
+        v.register_loop(loop)
+
+        with pytest.raises(
+            NotImplementedError,
+            match="loop boundary accounting is count-based; pair-cursor projections are not yet supported here",
+        ):
+            v.replay()
+        store.close()

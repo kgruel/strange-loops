@@ -1,15 +1,20 @@
-"""Tests for WP-1a / D0 — The projected arrival coordinate, mirrored mode + write-site closure.
+"""Tests for WP-1a / WP-1b / D0 — The projected arrival coordinate, mirrored mode + arrival mode + write-site closure.
 
 Gates covered:
-- G-D0-1: Permuted-insert harness (index rows inserted in permuted record order).
+- G-D0-1: Permuted-insert harness (index rows inserted in permuted record order; read equivalence).
 - G-D0-2: Deliberately rebuilt index (preserves rowids; reads identical).
+- G-D0-3: Migration of existing batch-bearing arrival-canonical index.
 - G-D0-4: Interrupted migration (reopen recovers cleanly, no observable half-state).
 - G-D0-5: Invariant enforcement by the table (NOT NULL and UNIQUE on coordinates).
 - G-D0-6: Ordinary legacy opens migrate (sqlite and jsonl canonical).
+- G-D0-7: ArrivalStore public constructor migration on unmigrated batch-bearing index.
+- G-D0-8: Rederivation migration equivalence with ArrivalStore public constructor.
 - G-D0-9: Trigger survival (AFTER INSERT triggers preserved and fire after rebuild).
 - G-D0-10: FTS / rowid survival (FTS index and state watermark preserved across rebuild).
 - G-D0-11: Mis-mode refusal (mirrored mode refuses arrival-canonical store).
+- G-D0-12: Cross-table id collision (fact and tick sharing same id string).
 - G-D0-13: Dependent-view survival closure-deep (v1 over facts, v2 over v1, INSTEAD OF triggers).
+- Provider-mismatch refusal: Provider walk disagreeing with index refuses with rederive recommendation.
 """
 
 from __future__ import annotations
@@ -18,12 +23,25 @@ import json
 import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 import pytest
 from atoms import Fact
 from engine import Tick
-from engine.arrival_store import ArrivalCanonicalUnsupported, ArrivalStore
+from engine.arrival import ArrivalLog, ResumeMark
+from engine.arrival_projection import rederive_projections, rows_of_record
+from engine.arrival_store import (
+    ARRIVAL_LINEAGE_KEY,
+    ARRIVAL_OFFSET_KEY,
+    ARRIVAL_ORDINAL_KEY,
+    ArrivalCanonicalUnsupported,
+    ArrivalStore,
+)
+from engine.jsonl_codec import (
+    object_of_batch,
+    object_of_fact_row,
+    object_of_tick_row,
+)
 from engine.jsonl_store import JsonlStore
 from engine.sqlite_store import (
     FACT_ALL_COLUMNS,
@@ -34,6 +52,7 @@ from engine.sqlite_store import (
     ensure_coordinate_schema,
     gen_id,
 )
+from tests.conftest import Custodian
 
 
 def _create_legacy_db(path: Path) -> Path:
@@ -138,6 +157,67 @@ class TestPermutedInsertHarness:
         assert [r[1] for r in rows] == [f0, f1, f2]
         assert [r[2] for r in rows] == [1, 2, 3]
         assert [r[3] for r in rows] == [0, 0, 0]
+
+    def test_permuted_vs_ordered_index_reads_equivalence(self, tmp_path: Path) -> None:
+        """G-D0-1: Reads ordered by (arrival_ordinal, arrival_seq) answer identically on
+        permuted vs ordered index representations.
+        """
+        ord_db = tmp_path / "ordered.db"
+        perm_db = tmp_path / "permuted_equiv.db"
+
+        # 1. Ordered index: physical insertion order matches arrival coordinate order
+        conn_ord = sqlite3.connect(str(ord_db))
+        for stmt in _SCHEMA_STMTS if "_SCHEMA_STMTS" in globals() else ():
+            conn_ord.execute(stmt)
+        _create_legacy_db(ord_db)
+        ensure_coordinate_schema(conn_ord, mode="mirrored")
+        conn_ord.execute(
+            "INSERT INTO facts (id, kind, ts, observer, origin, payload, signature, arrival_ordinal, arrival_seq) "
+            "VALUES ('f-alpha', 'note', 100.0, 'kyle', '', '{\"m\": 1}', NULL, 1, 0)"
+        )
+        conn_ord.execute(
+            "INSERT INTO facts (id, kind, ts, observer, origin, payload, signature, arrival_ordinal, arrival_seq) "
+            "VALUES ('f-beta', 'note', 101.0, 'kyle', '', '{\"m\": 2}', NULL, 2, 0)"
+        )
+        conn_ord.execute(
+            "INSERT INTO facts (id, kind, ts, observer, origin, payload, signature, arrival_ordinal, arrival_seq) "
+            "VALUES ('f-gamma', 'note', 102.0, 'kyle', '', '{\"m\": 3}', NULL, 3, 0)"
+        )
+        conn_ord.commit()
+
+        # 2. Permuted index: physical insertion order is reversed relative to arrival coordinate order
+        conn_perm = sqlite3.connect(str(perm_db))
+        _create_legacy_db(perm_db)
+        ensure_coordinate_schema(conn_perm, mode="mirrored")
+        conn_perm.execute(
+            "INSERT INTO facts (id, kind, ts, observer, origin, payload, signature, arrival_ordinal, arrival_seq) "
+            "VALUES ('f-gamma', 'note', 102.0, 'kyle', '', '{\"m\": 3}', NULL, 3, 0)"
+        )
+        conn_perm.execute(
+            "INSERT INTO facts (id, kind, ts, observer, origin, payload, signature, arrival_ordinal, arrival_seq) "
+            "VALUES ('f-alpha', 'note', 100.0, 'kyle', '', '{\"m\": 1}', NULL, 1, 0)"
+        )
+        conn_perm.execute(
+            "INSERT INTO facts (id, kind, ts, observer, origin, payload, signature, arrival_ordinal, arrival_seq) "
+            "VALUES ('f-beta', 'note', 101.0, 'kyle', '', '{\"m\": 2}', NULL, 2, 0)"
+        )
+        conn_perm.commit()
+
+        # 3. Read queries ordered by coordinate axis on both databases
+        facts_ord = conn_ord.execute(
+            "SELECT id, kind, ts, payload, arrival_ordinal, arrival_seq FROM facts ORDER BY arrival_ordinal, arrival_seq"
+        ).fetchall()
+        facts_perm = conn_perm.execute(
+            "SELECT id, kind, ts, payload, arrival_ordinal, arrival_seq FROM facts ORDER BY arrival_ordinal, arrival_seq"
+        ).fetchall()
+
+        conn_ord.close()
+        conn_perm.close()
+
+        # Reads answer byte-identically
+        assert facts_perm == facts_ord
+        assert [f[0] for f in facts_perm] == ["f-alpha", "f-beta", "f-gamma"]
+        assert [f[4] for f in facts_perm] == [1, 2, 3]
 
 
 # ---------------------------------------------------------------------------
@@ -552,3 +632,600 @@ class TestDependentViewSurvivalClosureDeep:
         assert v1_after == v1_before
         assert v2_after == v2_before
         assert intercepted == [("f_v1", "intercepted")]
+
+
+# ---------------------------------------------------------------------------
+# G-D0-3: Batch-bearing arrival-canonical migration
+# ---------------------------------------------------------------------------
+
+
+class TestBatchBearingArrivalMigration:
+    def test_batch_bearing_arrival_canonical_index_migration(self, tmp_path: Path) -> None:
+        """G-D0-3: Migration of an existing batch-bearing arrival-canonical index assigns
+        coordinates equal to the log's (a batch of N rows shares one ordinal with seq 0..N-1;
+        ordinal=rowid would be WRONG and the test must discriminate that); subsequent
+        catch-up appends collide with nothing.
+        """
+        custodian = Custodian(tmp_path, "kyle")
+        log_path = tmp_path / "batch_bearing.arrival"
+        db_path = tmp_path / "batch_bearing.db"
+
+        # 1. Mint arrival log
+        log = ArrivalLog.mint(
+            log_path,
+            observer="kyle",
+            signer=custodian.signer,
+            key=custodian.public,
+        )
+
+        # Ordinal 1: Single fact record
+        f1_row = ("f-001", "note", 1000.0, "kyle", "", json.dumps({"n": 1}), None)
+        _, mark1 = log.append_marked(
+            "fact",
+            object_of_fact_row(f1_row),
+            observer="kyle",
+            origin="",
+            at=1000.0,
+            signer=custodian.signer,
+        )
+
+        # Ordinal 2: Batch record with 3 facts
+        f2_rows = [
+            ("f-002-a", "note", 1001.0, "kyle", "", json.dumps({"n": 2, "sub": 0}), None),
+            ("f-002-b", "note", 1002.0, "kyle", "", json.dumps({"n": 2, "sub": 1}), None),
+            ("f-002-c", "note", 1003.0, "kyle", "", json.dumps({"n": 2, "sub": 2}), None),
+        ]
+        _, mark2 = log.append_marked(
+            "batch",
+            object_of_batch(f2_rows),
+            observer="kyle",
+            origin="",
+            at=1001.0,
+            signer=custodian.signer,
+        )
+
+        # Ordinal 3: Tick record
+        t1_row = ("t-001", "seal", 1004.0, 0.0, "t", "{}", "", "", "", "h", None)
+        _, mark3 = log.append_marked(
+            "tick",
+            object_of_tick_row(t1_row),
+            observer="seal",
+            origin="t",
+            at=1004.0,
+        )
+
+        # 2. Create unmigrated SQLite index (without arrival coordinates)
+        _create_legacy_db(db_path)
+        conn = sqlite3.connect(str(db_path))
+        conn.execute(
+            "INSERT INTO facts (id, kind, ts, observer, origin, payload, signature) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            f1_row,
+        )
+        for r in f2_rows:
+            conn.execute(
+                "INSERT INTO facts (id, kind, ts, observer, origin, payload, signature) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                r,
+            )
+        conn.execute(
+            "INSERT INTO ticks (id, name, ts, since, origin, payload, prev_hash, window_start, fact_cursor, window_hash, signature) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            t1_row,
+        )
+        conn.execute("CREATE TABLE store_meta (key TEXT PRIMARY KEY, value TEXT)")
+        conn.execute(
+            "INSERT INTO store_meta (key, value) VALUES (?, ?)",
+            (ARRIVAL_LINEAGE_KEY, mark3.arrival_lineage),
+        )
+        conn.execute(
+            "INSERT INTO store_meta (key, value) VALUES (?, ?)",
+            (ARRIVAL_OFFSET_KEY, mark3.arrival_offset),
+        )
+        conn.execute(
+            "INSERT INTO store_meta (key, value) VALUES (?, ?)",
+            (ARRIVAL_ORDINAL_KEY, mark3.arrival_ordinal),
+        )
+        conn.commit()
+
+        # 3. Provider closure walking log
+        def provider() -> Iterator[tuple[str, str, int, int]]:
+            for record in log.walk():
+                if record["ord"] > mark3.arrival_ordinal:
+                    break
+                ord_val = record["ord"]
+                for seq, (t, row) in enumerate(rows_of_record(record)):
+                    table = "facts" if t == "fact" else "ticks"
+                    yield table, row[0], ord_val, seq
+
+        # 4. Run migration in mode='arrival'
+        ensure_coordinate_schema(conn, mode="arrival", coordinates=provider)
+        conn.close()
+
+        # 5. Verify coordinates in migrated database
+        conn = sqlite3.connect(str(db_path))
+        meta = conn.execute("SELECT value FROM store_meta WHERE key = 'coordinate_axis'").fetchone()
+        fact_rows = conn.execute(
+            "SELECT rowid, id, arrival_ordinal, arrival_seq FROM facts ORDER BY rowid"
+        ).fetchall()
+        tick_rows = conn.execute(
+            "SELECT rowid, id, arrival_ordinal, arrival_seq FROM ticks ORDER BY rowid"
+        ).fetchall()
+        conn.close()
+
+        assert meta is not None and meta[0] == "arrival"
+        assert len(fact_rows) == 4
+        # Single fact at ord 1
+        assert fact_rows[0] == (1, "f-001", 1, 0)
+        # Batch of 3 facts at ord 2 — ALL THREE SHARE arrival_ordinal=2 with seq 0, 1, 2!
+        # Notice: rowids are 2, 3, 4 while ordinals are 2, 2, 2 (NOT rowid backfill)
+        assert fact_rows[1] == (2, "f-002-a", 2, 0)
+        assert fact_rows[2] == (3, "f-002-b", 2, 1)
+        assert fact_rows[3] == (4, "f-002-c", 2, 2)
+        # Tick at ord 3
+        assert tick_rows[0] == (1, "t-001", 3, 0)
+
+        # 6. Subsequent catch-up / append via ArrivalStore
+        store = ArrivalStore(
+            path=db_path,
+            log_path=log_path,
+            serialize=lambda f: f.to_dict(),
+            deserialize=Fact.from_dict,
+            fact_signer=custodian.signer,
+        )
+        assert store.total == 4
+        new_fid = store.append(Fact.of("note", "kyle", msg="catch-up-append"))
+        store.close()
+
+        conn = sqlite3.connect(str(db_path))
+        new_fact = conn.execute(
+            "SELECT rowid, id, arrival_ordinal, arrival_seq FROM facts WHERE id = ?",
+            (new_fid,),
+        ).fetchone()
+        conn.close()
+
+        assert new_fact == (5, new_fid, 4, 0)
+
+
+# ---------------------------------------------------------------------------
+# G-D0-7: ArrivalStore public constructor migration on unmigrated batch-bearing index
+# ---------------------------------------------------------------------------
+
+
+class TestArrivalStorePublicOpenMigration:
+    def test_unmigrated_batch_bearing_index_opens_via_arrival_store(self, tmp_path: Path) -> None:
+        """G-D0-7: An existing UNMIGRATED batch-bearing arrival-canonical index opened
+        through ArrivalStore's public constructor migrates coordinates from log, enforces
+        constraints, and appends land correctly after.
+        """
+        custodian = Custodian(tmp_path, "kyle")
+        log_path = tmp_path / "route3.arrival"
+        db_path = tmp_path / "route3.db"
+
+        # 1. Mint arrival log
+        log = ArrivalLog.mint(
+            log_path,
+            observer="kyle",
+            signer=custodian.signer,
+            key=custodian.public,
+        )
+
+        # Ordinal 1: Single fact
+        f1_row = ("f-001", "note", 1000.0, "kyle", "", json.dumps({"n": 1}), None)
+        _, mark1 = log.append_marked(
+            "fact",
+            object_of_fact_row(f1_row),
+            observer="kyle",
+            origin="",
+            at=1000.0,
+            signer=custodian.signer,
+        )
+
+        # Ordinal 2: Batch of 3 facts
+        f2_rows = [
+            ("f-002-a", "note", 1001.0, "kyle", "", json.dumps({"n": 2, "sub": 0}), None),
+            ("f-002-b", "note", 1002.0, "kyle", "", json.dumps({"n": 2, "sub": 1}), None),
+            ("f-002-c", "note", 1003.0, "kyle", "", json.dumps({"n": 2, "sub": 2}), None),
+        ]
+        _, mark2 = log.append_marked(
+            "batch",
+            object_of_batch(f2_rows),
+            observer="kyle",
+            origin="",
+            at=1001.0,
+            signer=custodian.signer,
+        )
+
+        # Ordinal 3: Tick
+        t1_row = ("t-001", "seal", 1004.0, 0.0, "t", "{}", "", "", "", "h", None)
+        _, mark3 = log.append_marked(
+            "tick",
+            object_of_tick_row(t1_row),
+            observer="seal",
+            origin="t",
+            at=1004.0,
+        )
+
+        # 2. Create unmigrated SQLite index
+        _create_legacy_db(db_path)
+        conn = sqlite3.connect(str(db_path))
+        conn.execute(
+            "INSERT INTO facts (id, kind, ts, observer, origin, payload, signature) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            f1_row,
+        )
+        for r in f2_rows:
+            conn.execute(
+                "INSERT INTO facts (id, kind, ts, observer, origin, payload, signature) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                r,
+            )
+        conn.execute(
+            "INSERT INTO ticks (id, name, ts, since, origin, payload, prev_hash, window_start, fact_cursor, window_hash, signature) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            t1_row,
+        )
+        conn.execute("CREATE TABLE store_meta (key TEXT PRIMARY KEY, value TEXT)")
+        conn.execute(
+            "INSERT INTO store_meta (key, value) VALUES (?, ?)",
+            (ARRIVAL_LINEAGE_KEY, mark3.arrival_lineage),
+        )
+        conn.execute(
+            "INSERT INTO store_meta (key, value) VALUES (?, ?)",
+            (ARRIVAL_OFFSET_KEY, mark3.arrival_offset),
+        )
+        conn.execute(
+            "INSERT INTO store_meta (key, value) VALUES (?, ?)",
+            (ARRIVAL_ORDINAL_KEY, mark3.arrival_ordinal),
+        )
+        conn.commit()
+        conn.close()
+
+        # 3. Open directly through ArrivalStore's public constructor (Route 3)
+        store = ArrivalStore(
+            path=db_path,
+            log_path=log_path,
+            serialize=lambda f: f.to_dict(),
+            deserialize=Fact.from_dict,
+            fact_signer=custodian.signer,
+        )
+        assert store.total == 4
+
+        # 4. Verify coordinates and constraints
+        conn = sqlite3.connect(str(db_path))
+        meta = conn.execute("SELECT value FROM store_meta WHERE key = 'coordinate_axis'").fetchone()
+        fact_rows = conn.execute(
+            "SELECT rowid, id, arrival_ordinal, arrival_seq FROM facts ORDER BY rowid"
+        ).fetchall()
+        tick_rows = conn.execute(
+            "SELECT rowid, id, arrival_ordinal, arrival_seq FROM ticks ORDER BY rowid"
+        ).fetchall()
+
+        assert meta is not None and meta[0] == "arrival"
+        assert fact_rows[0] == (1, "f-001", 1, 0)
+        assert fact_rows[1] == (2, "f-002-a", 2, 0)
+        assert fact_rows[2] == (3, "f-002-b", 2, 1)
+        assert fact_rows[3] == (4, "f-002-c", 2, 2)
+        assert tick_rows[0] == (1, "t-001", 3, 0)
+
+        # Verify UNIQUE constraint is enforced
+        with pytest.raises(sqlite3.IntegrityError, match="UNIQUE"):
+            conn.execute(
+                "INSERT INTO facts (id, kind, ts, observer, origin, payload, signature, arrival_ordinal, arrival_seq) "
+                "VALUES ('dup-fact', 'note', 1005.0, 'kyle', '', '{}', NULL, 2, 1)"
+            )
+
+        # Verify NOT NULL constraint is enforced
+        with pytest.raises(sqlite3.IntegrityError, match="NOT NULL"):
+            conn.execute(
+                "INSERT INTO facts (id, kind, ts, observer, origin, payload, signature, arrival_ordinal, arrival_seq) "
+                "VALUES ('null-fact', 'note', 1005.0, 'kyle', '', '{}', NULL, NULL, 0)"
+            )
+        conn.close()
+
+        # 5. Subsequent append via public API lands correctly
+        new_fid = store.append(Fact.of("note", "kyle", msg="route3-append"))
+        store.close()
+
+        conn = sqlite3.connect(str(db_path))
+        new_row = conn.execute(
+            "SELECT rowid, id, arrival_ordinal, arrival_seq FROM facts WHERE id = ?",
+            (new_fid,),
+        ).fetchone()
+        conn.close()
+
+        assert new_row == (5, new_fid, 4, 0)
+
+
+# ---------------------------------------------------------------------------
+# G-D0-8: Rederivation migration equivalence
+# ---------------------------------------------------------------------------
+
+
+class TestRederiveProjectionsMigrationEquivalence:
+    def test_rederive_projections_matches_arrival_store_migration(self, tmp_path: Path) -> None:
+        """G-D0-8: The same unmigrated batch-bearing fixture through rederive_projections
+        yields resulting coordinates and schema state identical to ArrivalStore public migration (G-D0-7).
+        """
+        custodian = Custodian(tmp_path, "kyle")
+
+        def setup_fixture(name: str) -> tuple[Path, Path]:
+            log_path = tmp_path / f"{name}.arrival"
+            db_path = tmp_path / f"{name}.db"
+            log = ArrivalLog.mint(
+                log_path,
+                observer="kyle",
+                signer=custodian.signer,
+                key=custodian.public,
+            )
+
+            f1_row = ("f-001", "note", 1000.0, "kyle", "", json.dumps({"n": 1}), None)
+            log.append_marked(
+                "fact",
+                object_of_fact_row(f1_row),
+                observer="kyle",
+                origin="",
+                at=1000.0,
+                signer=custodian.signer,
+            )
+
+            f2_rows = [
+                ("f-002-a", "note", 1001.0, "kyle", "", json.dumps({"n": 2, "sub": 0}), None),
+                ("f-002-b", "note", 1002.0, "kyle", "", json.dumps({"n": 2, "sub": 1}), None),
+                ("f-002-c", "note", 1003.0, "kyle", "", json.dumps({"n": 2, "sub": 2}), None),
+            ]
+            log.append_marked(
+                "batch",
+                object_of_batch(f2_rows),
+                observer="kyle",
+                origin="",
+                at=1001.0,
+                signer=custodian.signer,
+            )
+
+            t1_row = ("t-001", "seal", 1004.0, 0.0, "t", "{}", "", "", "", "h", None)
+            _, mark3 = log.append_marked(
+                "tick",
+                object_of_tick_row(t1_row),
+                observer="seal",
+                origin="t",
+                at=1004.0,
+            )
+
+            _create_legacy_db(db_path)
+            conn = sqlite3.connect(str(db_path))
+            conn.execute(
+                "INSERT INTO facts (id, kind, ts, observer, origin, payload, signature) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                f1_row,
+            )
+            for r in f2_rows:
+                conn.execute(
+                    "INSERT INTO facts (id, kind, ts, observer, origin, payload, signature) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    r,
+                )
+            conn.execute(
+                "INSERT INTO ticks (id, name, ts, since, origin, payload, prev_hash, window_start, fact_cursor, window_hash, signature) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                t1_row,
+            )
+            conn.execute("CREATE TABLE store_meta (key TEXT PRIMARY KEY, value TEXT)")
+            conn.execute(
+                "INSERT INTO store_meta (key, value) VALUES (?, ?)",
+                (ARRIVAL_LINEAGE_KEY, mark3.arrival_lineage),
+            )
+            conn.execute(
+                "INSERT INTO store_meta (key, value) VALUES (?, ?)",
+                (ARRIVAL_OFFSET_KEY, mark3.arrival_offset),
+            )
+            conn.execute(
+                "INSERT INTO store_meta (key, value) VALUES (?, ?)",
+                (ARRIVAL_ORDINAL_KEY, mark3.arrival_ordinal),
+            )
+            conn.commit()
+            conn.close()
+            return log_path, db_path
+
+        log_a, db_a = setup_fixture("store_a")
+        log_b, db_b = setup_fixture("store_b")
+
+        # Migrate A via ArrivalStore public constructor (Route 3)
+        store_a = ArrivalStore(
+            path=db_a,
+            log_path=log_a,
+            serialize=lambda f: f.to_dict(),
+            deserialize=Fact.from_dict,
+        )
+        store_a.close()
+
+        # Migrate B via rederive_projections (Route 4)
+        rederive_projections(log_b)
+
+        # Compare both databases
+        conn_a = sqlite3.connect(str(db_a))
+        conn_b = sqlite3.connect(str(db_b))
+
+        facts_a = conn_a.execute(
+            "SELECT rowid, id, kind, ts, observer, origin, payload, arrival_ordinal, arrival_seq FROM facts ORDER BY rowid"
+        ).fetchall()
+        facts_b = conn_b.execute(
+            "SELECT rowid, id, kind, ts, observer, origin, payload, arrival_ordinal, arrival_seq FROM facts ORDER BY rowid"
+        ).fetchall()
+
+        ticks_a = conn_a.execute(
+            "SELECT rowid, id, name, ts, since, origin, payload, arrival_ordinal, arrival_seq FROM ticks ORDER BY rowid"
+        ).fetchall()
+        ticks_b = conn_b.execute(
+            "SELECT rowid, id, name, ts, since, origin, payload, arrival_ordinal, arrival_seq FROM ticks ORDER BY rowid"
+        ).fetchall()
+
+        meta_a = conn_a.execute("SELECT value FROM store_meta WHERE key = 'coordinate_axis'").fetchone()
+        meta_b = conn_b.execute("SELECT value FROM store_meta WHERE key = 'coordinate_axis'").fetchone()
+
+        conn_a.close()
+        conn_b.close()
+
+        assert facts_a == facts_b
+        assert ticks_a == ticks_b
+        assert meta_a == meta_b == ("arrival",)
+
+
+# ---------------------------------------------------------------------------
+# G-D0-12: Cross-table ID collision
+# ---------------------------------------------------------------------------
+
+
+class TestCrossTableIdCollision:
+    def test_cross_table_id_collision_assigned_distinct_coordinates(self, tmp_path: Path) -> None:
+        """G-D0-12: An arrival fixture containing a fact and a tick sharing the same id string
+        from different records assigns each its own distinct correct coordinate.
+        """
+        custodian = Custodian(tmp_path, "kyle")
+        log_path = tmp_path / "cross_collision.arrival"
+        db_path = tmp_path / "cross_collision.db"
+
+        log = ArrivalLog.mint(
+            log_path,
+            observer="kyle",
+            signer=custodian.signer,
+            key=custodian.public,
+        )
+
+        shared_id = "shared-item-id-999"
+
+        # Ordinal 1: Fact with shared_id
+        f_row = (shared_id, "note", 1000.0, "kyle", "", json.dumps({"n": 1}), None)
+        _, mark1 = log.append_marked(
+            "fact",
+            object_of_fact_row(f_row),
+            observer="kyle",
+            origin="",
+            at=1000.0,
+            signer=custodian.signer,
+        )
+
+        # Ordinal 2: Tick with shared_id
+        t_row = (shared_id, "seal", 2000.0, 0.0, "t", "{}", "", "", "", "h", None)
+        _, mark2 = log.append_marked(
+            "tick",
+            object_of_tick_row(t_row),
+            observer="seal",
+            origin="t",
+            at=2000.0,
+        )
+
+        # Create unmigrated SQLite index
+        _create_legacy_db(db_path)
+        conn = sqlite3.connect(str(db_path))
+        conn.execute(
+            "INSERT INTO facts (id, kind, ts, observer, origin, payload, signature) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            f_row,
+        )
+        conn.execute(
+            "INSERT INTO ticks (id, name, ts, since, origin, payload, prev_hash, window_start, fact_cursor, window_hash, signature) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            t_row,
+        )
+        conn.execute("CREATE TABLE store_meta (key TEXT PRIMARY KEY, value TEXT)")
+        conn.execute(
+            "INSERT INTO store_meta (key, value) VALUES (?, ?)",
+            (ARRIVAL_LINEAGE_KEY, mark2.arrival_lineage),
+        )
+        conn.execute(
+            "INSERT INTO store_meta (key, value) VALUES (?, ?)",
+            (ARRIVAL_OFFSET_KEY, mark2.arrival_offset),
+        )
+        conn.execute(
+            "INSERT INTO store_meta (key, value) VALUES (?, ?)",
+            (ARRIVAL_ORDINAL_KEY, mark2.arrival_ordinal),
+        )
+        conn.commit()
+
+        # Coordinate provider yielding composite (table, row_id, ord, seq)
+        def provider() -> Iterator[tuple[str, str, int, int]]:
+            for record in log.walk():
+                ord_val = record["ord"]
+                for seq, (t, row) in enumerate(rows_of_record(record)):
+                    table = "facts" if t == "fact" else "ticks"
+                    yield table, row[0], ord_val, seq
+
+        # Run migration
+        ensure_coordinate_schema(conn, mode="arrival", coordinates=provider)
+        conn.close()
+
+        conn = sqlite3.connect(str(db_path))
+        fact_coord = conn.execute(
+            "SELECT id, arrival_ordinal, arrival_seq FROM facts WHERE id = ?",
+            (shared_id,),
+        ).fetchone()
+        tick_coord = conn.execute(
+            "SELECT id, arrival_ordinal, arrival_seq FROM ticks WHERE id = ?",
+            (shared_id,),
+        ).fetchone()
+        conn.close()
+
+        assert fact_coord == (shared_id, 1, 0)
+        assert tick_coord == (shared_id, 2, 0)
+
+
+# ---------------------------------------------------------------------------
+# Provider Mismatch Refusal
+# ---------------------------------------------------------------------------
+
+
+class TestProviderMismatchRefusal:
+    def test_provider_fewer_rows_refuses(self, tmp_path: Path) -> None:
+        """Provider walk yielding fewer rows than index refuses with rederive recommendation."""
+        db_path = _create_legacy_db(tmp_path / "mismatch_fewer.db")
+        _populate_legacy_facts(db_path, 3)
+
+        conn = sqlite3.connect(str(db_path))
+        conn.execute("CREATE TABLE store_meta (key TEXT PRIMARY KEY, value TEXT)")
+        conn.execute(
+            "INSERT INTO store_meta (key, value) VALUES ('arrival_lineage', '01TESTLIN')"
+        )
+
+        # Provider only yields 2 facts when index has 3
+        def provider() -> Iterator[tuple[str, str, int, int]]:
+            yield "facts", "fact-000", 1, 0
+            yield "facts", "fact-001", 2, 0
+
+        with pytest.raises(ArrivalCanonicalUnsupported, match="rederive_projections"):
+            ensure_coordinate_schema(conn, mode="arrival", coordinates=provider)
+        conn.close()
+
+    def test_provider_more_rows_refuses(self, tmp_path: Path) -> None:
+        """Provider walk yielding extra rows not in index refuses with rederive recommendation."""
+        db_path = _create_legacy_db(tmp_path / "mismatch_more.db")
+        _populate_legacy_facts(db_path, 2)
+
+        conn = sqlite3.connect(str(db_path))
+        conn.execute("CREATE TABLE store_meta (key TEXT PRIMARY KEY, value TEXT)")
+        conn.execute(
+            "INSERT INTO store_meta (key, value) VALUES ('arrival_lineage', '01TESTLIN')"
+        )
+
+        # Provider yields 3 facts when index has 2
+        def provider() -> Iterator[tuple[str, str, int, int]]:
+            yield "facts", "fact-000", 1, 0
+            yield "facts", "fact-001", 2, 0
+            yield "facts", "fact-002", 3, 0
+
+        with pytest.raises(ArrivalCanonicalUnsupported, match="rederive_projections"):
+            ensure_coordinate_schema(conn, mode="arrival", coordinates=provider)
+        conn.close()
+
+    def test_provider_differing_id_refuses(self, tmp_path: Path) -> None:
+        """Provider walk yielding non-matching id refuses with rederive recommendation."""
+        db_path = _create_legacy_db(tmp_path / "mismatch_id.db")
+        _populate_legacy_facts(db_path, 2)
+
+        conn = sqlite3.connect(str(db_path))
+        conn.execute("CREATE TABLE store_meta (key TEXT PRIMARY KEY, value TEXT)")
+        conn.execute(
+            "INSERT INTO store_meta (key, value) VALUES ('arrival_lineage', '01TESTLIN')"
+        )
+
+        # Provider yields different id
+        def provider() -> Iterator[tuple[str, str, int, int]]:
+            yield "facts", "fact-000", 1, 0
+            yield "facts", "fact-OTHER", 2, 0
+
+        with pytest.raises(ArrivalCanonicalUnsupported, match="rederive_projections"):
+            ensure_coordinate_schema(conn, mode="arrival", coordinates=provider)
+        conn.close()

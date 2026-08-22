@@ -65,7 +65,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from pathlib import Path
-from typing import Any, Generic, TypeVar
+from typing import Any, Generic, Iterator, TypeVar
 
 from .arrival import (
     ArrivalLog,
@@ -141,10 +141,26 @@ class ArrivalStore(SqliteStore[T], Generic[T]):
             if log_path is not None
             else canonical_for(self._path, "arrival")
         )
+        self._coordinate_mode = "arrival"
+
+        def _provider() -> Iterator[tuple[str, str, int, int]]:
+            mark = self._read_mark()
+            if mark is None:
+                return
+            for record in self._log.walk():
+                if record["ord"] > mark.arrival_ordinal:
+                    break
+                ord_val = record["ord"]
+                for seq, (t, row) in enumerate(rows_of_record(record)):
+                    table = "facts" if t == "fact" else "ticks"
+                    yield table, row[0], ord_val, seq
+
+        self._coordinate_provider = _provider
         # The mark the last ceremony-path reconcile verified — see
         # _sync_derived_state / _ceremony_persist.
         self._reconciled_mark: ResumeMark | None = None
         try:
+            self._ensure_coordinate_schema()
             self._ensure_fact_signature_column()
             self._ensure_chain_columns()
             self._ensure_meta_table()
@@ -467,9 +483,6 @@ class ArrivalStore(SqliteStore[T], Generic[T]):
             self._db.rollback()
             raise
 
-    def _ensure_coordinate_schema(self) -> None:
-        """ArrivalStore schema is managed by the arrival log derivation."""
-        pass
 
     def _allocate_ceremony_coordinates(
         self, conn: Any, count: int

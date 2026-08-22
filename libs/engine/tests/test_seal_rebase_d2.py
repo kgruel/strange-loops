@@ -51,6 +51,7 @@ from engine.sqlite_store import (
     ensure_coordinate_schema,
     gen_id,
 )
+from engine.store_reader import StoreReader
 from engine.tick import Tick
 from engine.vertex import Vertex
 
@@ -409,6 +410,114 @@ class TestGD2_4_VerificationUnderPermutation:
 
         conn_perm.close()
         store_perm.close()
+
+    def test_live_edge_agrees_with_verify_chain_under_permutation(self, tmp_path: Path) -> None:
+        """On a store where physical insertion order (rowids) is scrambled
+        relative to arrival coordinates (SOL-WP3-01 reproduction), StoreReader.live_edge
+        agrees with verify_chain's coverage accounting:
+        covered_facts + live_count == total_facts.
+
+        Fixture setup:
+        - Sealed cursor row's rowid sits behind an unsealed fact: unsealed fact f-unsealed (coord 3,0)
+          is inserted with rowid 1, while sealed cursor facts f-1 (coord 1,0) and f-2 (coord 2,0)
+          are inserted with higher rowids (rowids 3 and 4).
+        - Tick rowids are also permuted: older tick t-1 (coord 4,0) is inserted with higher rowid (rowid 2)
+          than newer tick t-2 (coord 5,0, rowid 1).
+
+        Under rowid logic:
+        - Newest tick selection via ORDER BY rowid DESC picked t-1 (fact_cursor f-1) instead of t-2 (fact_cursor f-2).
+        - Boundary via rowid > cursor_rowid looked for facts with rowid > rowid(f-2), missing f-unsealed (rowid 1).
+        - verify_chain reported uncovered_facts == 1 while live_edge returned (0, None).
+
+        Under arrival coordinate axis:
+        - Newest tick is t-2, fact_cursor is f-2 (coord 2,0).
+        - live_edge correctly identifies f-unsealed (coord 3,0 > 2,0) as the 1 live fact.
+        - verify_chain coverage accounting (covered 3 + live 1 == total 4) holds.
+        """
+        db_path = tmp_path / "permuted_live_edge.db"
+        conn = sqlite3.connect(str(db_path), autocommit=True)
+        store = SqliteStore(
+            path=db_path,
+            serialize=lambda f: f.to_dict(),
+            deserialize=Fact.from_dict,
+        )
+
+        facts = [
+            ("f-unsealed", "note", 103.0, "kyle", "", '{"v": 3}', None, 3, 0),  # rowid 1, coord (3,0)
+            ("f-0", "note", 100.0, "kyle", "", '{"v": 0}', None, 0, 0),         # rowid 2, coord (0,0)
+            ("f-1", "note", 101.0, "kyle", "", '{"v": 1}', None, 1, 0),         # rowid 3, coord (1,0)
+            ("f-2", "note", 102.0, "kyle", "", '{"v": 2}', None, 2, 0),         # rowid 4, coord (2,0)
+        ]
+        for row in facts:
+            conn.execute(FACT_INSERT_SQL, row)
+
+        # Precompute hashes on arrival axis
+        t1_hash = store._window_hash("", "f-1")
+        t1_row_hash = _tick_row_hash(("t-1", "seal", 101.5, None, "test", '{"n": 1}', None, "", "f-1", t1_hash, None))
+
+        t2_hash = store._window_hash("f-1", "f-2")
+        t2_row_hash = _tick_row_hash(("t-2", "seal", 102.5, None, "test", '{"n": 2}', t1_row_hash, "f-1", "f-2", t2_hash, None))
+
+        # Insert tick 2 (coord 5,0) before tick 1 (coord 4,0) -> t-2 gets rowid 1, t-1 gets rowid 2
+        conn.execute(
+            TICK_INSERT_SQL,
+            ("t-2", "seal", 102.5, None, "test", '{"n": 2}', t1_row_hash, "f-1", "f-2", t2_hash, None, 5, 0),
+        )
+        conn.execute(
+            TICK_INSERT_SQL,
+            ("t-1", "seal", 101.5, None, "test", '{"n": 1}', None, "", "f-1", t1_hash, None, 4, 0),
+        )
+
+        # verify_chain reports 3 covered facts (f-0, f-1, f-2) and 1 uncovered fact (f-unsealed)
+        report = store.verify_chain(include_ticks=True)
+        assert report["ok"] is True
+        assert report["chained"] == 2
+        assert report["covered_facts"] == 3
+        assert report["uncovered_facts"] == 1
+        assert store.total == 4
+
+        # live_edge on StoreReader MUST agree with verify_chain
+        with StoreReader(db_path) as reader:
+            live_count, oldest_ts = reader.live_edge()
+
+        assert live_count == 1, f"Expected 1 live fact (f-unsealed), got {live_count}"
+        assert oldest_ts == 103.0, f"Expected oldest_ts 103.0 for f-unsealed, got {oldest_ts}"
+        assert report["covered_facts"] + live_count == store.total
+
+        # Append another unsealed backdated fact and verify accounting still holds
+        conn.execute(
+            FACT_INSERT_SQL,
+            ("f-late", "note", 99.0, "kyle", "", '{"v": 6}', None, 6, 0),
+        )
+        report_late = store.verify_chain()
+        assert report_late["covered_facts"] == 3
+        assert report_late["uncovered_facts"] == 2
+
+        with StoreReader(db_path) as reader:
+            live_count, oldest_ts = reader.live_edge()
+
+        assert live_count == 2
+        assert oldest_ts == 99.0  # oldest on live edge is min(103.0, 99.0) = 99.0
+        assert report_late["covered_facts"] + live_count == store.total
+
+        # Append tick to seal the remaining edge
+        t3_id = store.append_tick(
+            Tick(name="seal", ts=datetime.fromtimestamp(105.0, tz=UTC), payload={"n": 3}, origin="test")
+        )
+        report_sealed = store.verify_chain()
+        assert report_sealed["ok"] is True
+        assert report_sealed["covered_facts"] == 5
+        assert report_sealed["uncovered_facts"] == 0
+
+        with StoreReader(db_path) as reader:
+            live_count, oldest_ts = reader.live_edge()
+
+        assert live_count == 0
+        assert oldest_ts is None
+        assert report_sealed["covered_facts"] + live_count == store.total
+
+        conn.close()
+        store.close()
 
 
 # ---------------------------------------------------------------------------

@@ -355,13 +355,14 @@ class StoreReader:
         Returns ``(count, oldest_ts)`` — the live edge and the ``ts`` of its
         oldest fact (``None`` when the edge is empty). The boundary is the
         same claim ``SqliteStore.verify_chain`` walks: the newest chained
-        tick's ``fact_cursor`` resolved to its rowid (witness/append order,
-        never ``ts`` — a backfilled fact with an old event time stays on the
-        edge until sealed; see the ORDERING AUTHORITY note in sqlite_store).
+        tick's ``fact_cursor`` resolved to its arrival coordinate
+        ((arrival_ordinal, arrival_seq), arrival/append order, never ``ts`` —
+        a backfilled fact with an old event time stays on the edge until sealed;
+        see the ORDERING AUTHORITY note in sqlite_store).
 
         Boundary fallbacks, all conservative (larger edge, never smaller):
         pre-chain schema (no ``window_hash`` column), no chained ticks, or an
-        unresolvable cursor fact all report from rowid 0 — every visible fact
+        unresolvable cursor fact all report from (-1, 0) — every visible fact
         is on the edge, matching ``verify_chain``'s ``covered=0`` for the
         same stores.
 
@@ -386,7 +387,7 @@ class StoreReader:
         The ``PRAGMA table_info`` schema gate stays a separate statement, and
         that is safe in the only direction it can drift: a migration that adds
         ``window_hash`` between the probe and the aggregate makes this read
-        fall back to boundary 0 — the whole store on the edge, the same
+        fall back to boundary (-1, 0) — the whole store on the edge, the same
         conservative answer every other fallback gives. There is no
         interleaving in which the gate makes the edge look *smaller* than a
         coherent snapshot would.
@@ -395,28 +396,37 @@ class StoreReader:
             r[1] for r in self._conn.execute("PRAGMA table_info(ticks)")
         }
         # All four documented fallbacks live inside the one statement:
-        #   pre-chain schema        -> the literal 0 boundary below
-        #   no chained tick         -> inner SELECT yields no row -> COALESCE 0
-        #   "" cursor sentinel      -> no fact has id '' -> COALESCE 0
-        #   unresolvable cursor     -> no id match -> COALESCE 0
-        # No parameters are interpolated — `boundary` is one of two literal
-        # SQL fragments chosen by the schema probe.
-        boundary = (
-            """COALESCE((
-                SELECT f.rowid FROM facts f
-                 WHERE f.id = (
-                     SELECT fact_cursor FROM ticks
-                      WHERE window_hash IS NOT NULL
-                      ORDER BY rowid DESC LIMIT 1
-                 )
-            ), 0)"""
-            if "window_hash" in cols
-            else "0"
-        )
-        count, oldest = self._conn.execute(
-            "SELECT COUNT(*), MIN(ts) FROM facts "
-            f"WHERE rowid > {boundary} AND kind NOT GLOB '_decl.*'"
-        ).fetchone()
+        #   pre-chain schema        -> literal WHERE kind NOT GLOB '_decl.*'
+        #   no chained tick         -> inner SELECT yields no row -> COALESCE (-1, 0)
+        #   "" cursor sentinel      -> no fact has id '' -> COALESCE (-1, 0)
+        #   unresolvable cursor     -> no id match -> COALESCE (-1, 0)
+        if "window_hash" in cols:
+            count, oldest = self._conn.execute(
+                "SELECT COUNT(*), MIN(ts) FROM facts "
+                "WHERE (arrival_ordinal, arrival_seq) > ("
+                "    COALESCE(("
+                "        SELECT arrival_ordinal FROM facts"
+                "         WHERE id = ("
+                "             SELECT fact_cursor FROM ticks"
+                "              WHERE window_hash IS NOT NULL"
+                "              ORDER BY arrival_ordinal DESC, arrival_seq DESC LIMIT 1"
+                "         )"
+                "    ), -1),"
+                "    COALESCE(("
+                "        SELECT arrival_seq FROM facts"
+                "         WHERE id = ("
+                "             SELECT fact_cursor FROM ticks"
+                "              WHERE window_hash IS NOT NULL"
+                "              ORDER BY arrival_ordinal DESC, arrival_seq DESC LIMIT 1"
+                "         )"
+                "    ), 0)"
+                ") AND kind NOT GLOB '_decl.*'"
+            ).fetchone()
+        else:
+            count, oldest = self._conn.execute(
+                "SELECT COUNT(*), MIN(ts) FROM facts "
+                "WHERE kind NOT GLOB '_decl.*'"
+            ).fetchone()
         return count, oldest
 
     def summary(self, *, include_internal: bool = False) -> dict:

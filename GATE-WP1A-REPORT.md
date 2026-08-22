@@ -817,3 +817,159 @@ repaired path produces log-faithful coordinates — batch expansion and all — 
 scrambled, forged, legacy index, which is the case that started this finding.
 Clear R4-1 and R4-2 as housekeeping whenever convenient; neither affects behaviour.
 WP-1 is ready for the codex pass check.
+
+---
+---
+
+# ROUND 5 — re-gate of the SOL-WP1-01 fix (`ac8b61fa` + `3f9fa7fb`)
+
+The codex sol-low pass found a defect my Rounds 1-4 did not: `ensure_coordinate_schema`'s
+migrated-detection was shallow — a bare marker returned immediately with no
+structural inspection, and the markerless path accepted mere `arrival_ordinal`
+column presence, never checking `arrival_seq`, NOT NULL on both, or UNIQUE. It is
+the deeper version of my F-6. **Credit to the codex pass: my F-6 fixed the
+*ordering* of the marker check and I did not go on to ask whether the marker was
+*trustworthy*. That was a real gap in my Round 2 review.**
+
+Scoped to the arbiter-ruled fix. Gate branch rebased onto `3f9fa7fb`.
+
+## ROUND 5 VERDICT: **PASS** — SOL-WP1-01 cleared.
+
+One coverage finding (R5-1) that does not affect current behaviour but should be
+closed before the sol re-verdict, plus two carry-forwards.
+
+## SOL-WP1-01 cleared — all four ruled behaviours verified independently
+
+Scope in-fence (`sqlite_store.py` + `test_arrival_coordinate_d0.py` only).
+
+**1. The verifier is genuinely deep.** I drove `_verify_coordinate_schema`
+across every defect dimension the finding named, each returning a precise
+location claim rather than a bare verdict:
+
+| Table shape | Result |
+|---|---|
+| no coordinate columns | `facts lacks arrival_ordinal column` |
+| **`arrival_ordinal` only — the old shallow pass** | **`facts lacks arrival_seq column`** |
+| both columns, `arrival_ordinal` nullable | `facts lacks NOT NULL on arrival_ordinal` |
+| both columns, `arrival_seq` nullable | `facts lacks NOT NULL on arrival_seq` |
+| both NOT NULL, no UNIQUE | `facts lacks UNIQUE (arrival_ordinal, arrival_seq) constraint` |
+| complete (control) | `(True, None)` |
+
+The second row *is* SOL-WP1-01, demonstrated closed. A fresh store built from
+`_SCHEMA_STMTS` passes cleanly, so the stricter verifier raises no false refusal
+on new stores.
+
+**2. Marker present + incomplete → loud refusal, store provably unmodified.**
+`ArrivalCanonicalUnsupported` naming table and defect plus "out-of-band
+interference", with **no auto-rebuild**. I checked "unmodified" at the strongest
+level available rather than trusting the absence of DDL: after the refusal the
+**file's SHA-256 is byte-identical**, and so are the full `sqlite_schema` listing
+(names, rootpages, SQL) and every row. Evidence preserved exactly as ruled.
+
+**3. Marker absent + failing table → rebuild, idempotent.** A foreign partial
+schema (nullable `arrival_ordinal`, no `arrival_seq`, no UNIQUE) is now detected
+as unmigrated and rebuilt; the verifier passes afterwards and `coordinate_axis`
+is stamped. Rebuild confirmed by `sqlite_schema.rootpage` changing.
+
+**4. Marker present + complete → genuinely cheap fast path.** The team asked
+whether the fast path is actually cheap rather than a rebuild per open. It is:
+three PRAGMAs per table (`table_info`, `index_list`, `index_info`) and return,
+before any transaction. Confirmed empirically — after the call the **rootpages
+are unchanged and the file is byte-identical**, so no table was recreated. (It is
+also invoked once per handle, behind `self._coordinate_ready`.)
+
+**F-6 ordering preserved.** The `ARRIVAL_LINEAGE_KEY` mis-mode check remains in
+the first `meta_table_exists` block; the axis-marker check moved to a second block
+after `existing_tables` is computed. On a store carrying **both** an arrival
+lineage marker and `coordinate_axis`, the refusal that fires is still the
+**lineage** one ("cannot apply mirrored coordinate schema to arrival-canonical
+index"), not the structural one. My Round 2 ordering survived the rewrite.
+
+## Independent break/restore
+
+I re-introduced the exact defect, truncating `_verify_coordinate_schema` to bare
+`arrival_ordinal` presence:
+
+- before: `TestSolWp101StructuralVerification` 3 passed
+- after: **FAILED** — `test_foreign_partial_schema_no_marker_rebuilt_correctly`
+  with `sqlite3.OperationalError: table facts has no column named arrival_seq`,
+  the precise downstream consequence of shallow detection
+- after `git restore`: 26 passed
+
+## Suite reconciliation
+
+| Suite | Round 4 | Round 5 (`3f9fa7fb`) | Status |
+|---|---|---|---|
+| atoms | 517 | **517 passed** | OK |
+| engine | 1833 + 1 skip | **1836 passed, 1 skipped** | OK — **+3, exact** |
+| sdk | 324 | **324 passed** | OK |
+| lang | 655 | **655 passed** | OK |
+| store | 157 | **157 passed** | OK |
+| arch | 98 | **98 passed** | OK |
+| apps/loops | 2525 + 1 xfail | **2525 passed, 1 xfailed** | OK |
+
+Engine's +3 reconciles exactly: the D0 file collects **26** (was 23), the three
+additions being `TestSolWp101StructuralVerification`. Working tree clean.
+
+---
+
+## R5-1 — the refusal test under-covers the finding it was written for (non-blocking, but close it before the sol re-verdict)
+
+**The production behaviour is correct** — I verified all five defect dimensions
+above. This is purely about what the net would catch tomorrow.
+
+`test_marker_present_structure_incomplete_refuses_loudly` builds its fixture with
+`_create_legacy_db`, a table carrying **no coordinate columns at all**, and
+asserts `"facts lacks arrival_ordinal column"`. So the marker-present refusal is
+pinned only for the *shallowest* defect — the one case the old shallow code
+already handled. The deeper dimensions SOL-WP1-01 was actually about (`arrival_seq`
+absent while `arrival_ordinal` present, NOT NULL missing, UNIQUE missing) are not
+exercised on the refusal path at all.
+
+**Proven, not asserted.** I re-introduced SOL-WP1-01 on the marker-present path
+only (reducing it to column presence) and ran the whole D0 file:
+
+```
+=== FULL D0 SUITE with the deep refusal broken ===
+26 passed
+=== probe against the same build ===
+marked + STRUCTURALLY INCOMPLETE -> ACCEPTED SILENTLY
+```
+
+**All 26 tests stay green while the finding is regressed.** That is the definition
+of an invariant living in review vigilance rather than in the suite — and this is
+the second shallow-check incident in this work package, the first having survived
+my own review.
+
+**Fix:** parametrize the marked-but-incomplete refusal over the defect matrix in
+the table above (nullable ordinal, nullable seq, missing seq, missing UNIQUE),
+asserting the specific defect string each time and the unmodified-store property
+at least once. Cheap, and it converts the ruling into a ratchet.
+
+## Carry-forwards, still open (both out of this fence)
+
+- **R4-1** — `_ensure_index_schema`'s `log` parameter remains dead: it appears
+  only in the signature while `rederive_projections:480` still passes it.
+- **R4-2** — `Iterator` remains imported but unreferenced in
+  `arrival_projection.py`.
+
+- **R5-2 (recurrence of R4-3)** — `WP1-SOL-FIX-REPORT.md`'s suite table again
+  lists **six of seven** suites, omitting `libs/lang`. Same shape as Round 4 and
+  the same low severity: lang is untouched and I verified it green (655), so this
+  is incompleteness rather than concealment. Worth naming only because it has now
+  happened twice; a seven-row table should be the standing template.
+
+## Bottom line
+
+**SOL-WP1-01 is cleared and the fix matches the arbiter's ruling point for
+point** — deep structural verification on both paths, rebuild when unmarked,
+loud non-destructive refusal when marked, F-6 ordering intact, and a fast path
+that really is three PRAGMAs rather than a rebuild. I confirmed the
+non-destructive property by byte-comparing the database file, and the fast path
+the same way.
+
+The one thing I would not ship silently is R5-1: the new refusal test would stay
+green through a regression of the very defect it was written to prevent, and I
+demonstrated that. It does not change today's behaviour, so it does not block the
+verdict — but it should be closed before the sol re-verdict, so the next round of
+this does not depend on someone re-running my probes by hand.

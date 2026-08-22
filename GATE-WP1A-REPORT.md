@@ -292,3 +292,156 @@ from cold, it is worth watching for a recurrence.**
 
 Re-gate needs only: full `apps/loops`, full engine, and `git diff` of the
 remediation.
+
+---
+---
+
+# ROUND 2 — re-gate of the fix commit `e81de220`
+
+Scope of this round: **only the Round 1 findings**. Nothing already passed in
+Round 1 was re-litigated. Gate branch rebased onto `e81de220` (fast-forward was
+not possible — the gate branch carries the Round 1 report commit), giving
+`d6585cae` over `e81de220` over `6b2297d8`.
+
+## ROUND 2 VERDICT: **PASS**
+
+All seven suites green at baseline. F-1 cleared. F-3 through F-7 each verified in
+the code, not taken on the fix report's word. No new findings.
+
+## Suite reconciliation — all measured by this gate at `e81de220`
+
+| Suite | Baseline | Round 1 (`6b2297d8`) | Round 2 (`e81de220`) | Status |
+|---|---|---|---|---|
+| atoms | 517 | 517 | **517 passed** | OK |
+| engine | 1810 + 1 skip | 1822 + 1 skip | **1822 passed, 1 skipped** | OK (+12 new tests) |
+| sdk | 324 | 324 | **324 passed** | OK |
+| lang | 655 (corrected) | 655 | **655 passed** | OK |
+| store | 157 | 157 | **157 passed** | OK |
+| arch | 98 | 98 | **98 passed** | OK |
+| apps/loops | 2525 + 1 xfail | **100F / 2423P / 2E** | **2525 passed, 1 xfailed** | **FIXED** |
+
+`apps/loops` is restored exactly to baseline: 2525 passed, 1 xfailed, 2526
+collected. Zero failures, zero errors.
+
+## Scope of the fix commit — clean
+
+`git diff --stat 6b2297d8..e81de220` touches only:
+
+- `apps/loops/tests/**` — 13 files (the F-1 fixture repair)
+- `libs/engine/src/engine/{jsonl_store,arrival_store,sqlite_store}.py` — the three
+  files named in F-3…F-7
+- `WP1A-FIX-REPORT.md`
+
+**No production change beyond the F-3…F-7 specifications.** No new source files,
+no changes to `libs/store`, no schema changes, no test deletions.
+
+## Finding-by-finding re-verification
+
+### F-1 — CLEARED
+
+All 13 `apps/loops` test files repaired with the same coordinate-supplying pattern
+used in the engine fixtures (`SELECT COALESCE(MAX(arrival_ordinal), 0) + 1`, then
+the explicit-column INSERT). `apps/loops` back to 2525 passed, 1 xfailed.
+
+**Held to the Round 1 anti-weakening standard.** Across the entire 13-file diff:
+
+```
+git diff 6b2297d8..e81de220 -- apps/loops/tests \
+  | grep -E "^[-+].*(assert|xfail|skip|pytest\.mark)"
+  → (no output)
+```
+
+**Not one assertion, xfail, skip, or marker line was added, removed, or altered.**
+The only non-SQL lines removed are `executemany` parameter tuples (the 5001- and
+50,000-row pad batches, and one tick tuple) rewritten to carry coordinates. I read
+`test_durable_handle.py` and `test_store_command.py` in full: the adversarial
+fixtures still forge exactly what they forged before — `'01FORGED'` by `mallory`
+and `'OUT-OF-BAND-ROW'` still land out-of-band, so the canonical-agreement and
+refusal gates still have real lies to catch. The fixtures were made schema-legal,
+not toothless.
+
+### F-3 — CLEARED (fully restored)
+
+Diffing `jsonl_store.py` from the **pre-WP-1a base** `560710b8` to `e81de220` is
+the decisive check, and it shows:
+
+- `_write`'s docstring — **absent from the diff**, i.e. the SOL-R4-03 rationale is
+  restored byte-for-byte.
+- `_marked_counts` — **absent from the diff entirely**; the concurrency warning
+  ("a second open handle would otherwise stamp its own stale idea of the count
+  over a concurrent writer's correct one") is back.
+- `_stamp` — **absent from the diff**; reverted to the original `_meta_set` loop.
+  The unrequested `executemany` refactor of the concurrency-critical path is gone.
+
+Residual, accepted: a `# ---- write half ----` banner and a real type annotation
+(`serialize_row: Callable[[tuple], str]`) on `_write`'s signature. Both are
+improvements; neither touches behaviour or deletes rationale. Not a finding.
+
+### F-4 — CLEARED
+
+Hardcoded indices replaced with derived ones in **both** files:
+
+```python
+sig_col_idx = (FACT_CONTENT_COLUMNS.index("signature") if is_fact
+               else TICK_CONTENT_COLUMNS.index("signature"))
+committed = committed_row[sig_col_idx]
+```
+
+Confirmed in `jsonl_store._write` and `arrival_store._write`. I evaluated the
+derived values at runtime: `fact=6, tick=10` — exactly the previously hardcoded
+constants, so the change is behaviour-preserving and now survives a future content
+column.
+
+### F-5 — CLEARED
+
+The stale comment asserting "a row assembled for one is the row the others take"
+is gone, replaced by an accurate description of the CONTENT/ALL split: content
+columns are the layout shared by JSONL lines, codec serializations and row
+assemblies; `*_ALL_COLUMNS` append the trailing coordinate pair for the persisted
+tables and full INSERTs. Residue swept in the same change.
+
+### F-6 — CLEARED, and it closed a real hole
+
+The `ARRIVAL_LINEAGE_KEY` mis-mode refusal now runs **before** the
+`coordinate_axis` early-return (the "STUB" wording is also gone). I verified the
+reordering is load-bearing with the case that distinguishes the two orders — a
+store carrying **both** the arrival lineage marker **and** `coordinate_axis`:
+
+- old order: returns early, silently accepting a mirrored call on an
+  arrival-canonical index
+- new order: **raises `ArrivalCanonicalUnsupported`** ✓
+
+`TestMisModeRefusal` passes, and the whole D0 file is 12/12. `mode="arrival"`
+still raises `NotImplementedError` (WP-1b deferral intact), and the migration is
+still idempotent across three consecutive calls (`rowid=1, arrival_ordinal=1,
+arrival_seq=0`, `coordinate_axis='mirrored'`) — the reorder cost nothing.
+
+### F-7 — CLEARED
+
+`adopt_lineage` docstring indent restored to the 11-space hanging indent.
+
+## Round 2 disclosure
+
+The Round 1 non-reproducible first-run engine anomaly (`3 failed / 79 errors`,
+never reproduced across six runs) **did not recur** in this round. I still have no
+explanation tying it to any commit, and continue to attribute it to a `uv`
+environment-sync race on first use of a fresh worktree. The advice to watch for a
+recurrence in cold CI stands, but nothing in Round 2 strengthens it.
+
+Working tree clean; no cruft introduced.
+
+## Standing (non-blocking) note carried forward
+
+The legacy allocator's `SELECT COALESCE(MAX(arrival_ordinal), 0) + 1` performs a
+read before the INSERT takes SQLite's write lock. Under WAL a second concurrent
+writer gets `SQLITE_BUSY` rather than a duplicate, and the table-level `UNIQUE`
+constraint is the backstop either way, so this is not a correctness hole. It is
+worth keeping in view for WP-1b, where the arrival coordinate provider replaces
+this allocator anyway. Not a finding against WP-1a.
+
+## Bottom line
+
+**WP-1a PASSES the gate.** The blocking regression is fixed without weakening a
+single assertion, the five minor findings are genuinely addressed rather than
+papered over, and one of them (F-6) turned out to close a real refusal hole. The
+implementation is ready to proceed to WP-1b.

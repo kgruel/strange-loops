@@ -498,9 +498,11 @@ def rederive_projections(
             last: ResumeMark | None = None
             _, walked = log.walk_marked(None)
             for record, mark in walked:
-                for t, row in rows_of_record(record):
+                ord_val = record["ord"]
+                for seq, (t, row) in enumerate(rows_of_record(record)):
                     conn.execute(
-                        FACT_INSERT_SQL if t == "fact" else TICK_INSERT_SQL, row
+                        FACT_INSERT_SQL if t == "fact" else TICK_INSERT_SQL,
+                        (*row, ord_val, seq),
                     )
                     if t == "fact":
                         facts += 1

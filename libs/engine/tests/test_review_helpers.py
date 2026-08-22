@@ -54,10 +54,11 @@ def _empty(store: Path) -> None:
 
 def _append(store, kind, ts, *, fid, signature=None, **payload) -> str:
     conn = sqlite3.connect(str(store))
+    ord_val = conn.execute("SELECT COALESCE(MAX(arrival_ordinal), 0) + 1 FROM facts").fetchone()[0]
     conn.execute(
-        "INSERT INTO facts (id, kind, ts, observer, origin, payload, signature) "
-        "VALUES (?, ?, ?, 'kyle', '', ?, ?)",
-        (fid, kind, ts, json.dumps(payload), signature),
+        "INSERT INTO facts (id, kind, ts, observer, origin, payload, signature, arrival_ordinal, arrival_seq) "
+        "VALUES (?, ?, ?, 'kyle', '', ?, ?, ?, 0)",
+        (fid, kind, ts, json.dumps(payload), signature, ord_val),
     )
     conn.commit()
     conn.close()

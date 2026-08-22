@@ -81,6 +81,8 @@ from .jsonl_codec import (
 from .jsonl_store import _as_int, _stamped_offset_current
 from .residence import canonical_for, index_path_for
 from .sqlite_store import (
+    FACT_ALL_COLUMNS,
+    FACT_COLUMNS,
     FACT_INSERT_SQL,
     TICK_INSERT_SQL,
     SqliteStore,
@@ -348,10 +350,12 @@ class ArrivalStore(SqliteStore[T], Generic[T]):
         and the re-deriver disagreeing about a record is the one
         disagreement this design cannot tolerate.
         """
-        for t, row in rows_of_record(record):
+        ord_val = record["ord"]
+        for seq, (t, row) in enumerate(rows_of_record(record)):
             try:
                 self._db.execute(
-                    FACT_INSERT_SQL if t == "fact" else TICK_INSERT_SQL, row
+                    FACT_INSERT_SQL if t == "fact" else TICK_INSERT_SQL,
+                    (*row, ord_val, seq),
                 )
             except Exception as exc:
                 raise ArrivalCanonicalUnsupported(
@@ -422,12 +426,15 @@ class ArrivalStore(SqliteStore[T], Generic[T]):
         # attributable, instead of laundering the value.
         encode_row(row)
         try:
-            self._db.execute(sql, row)
+            table = "facts" if is_fact else "ticks"
+            expected_ordinal = 0 if consumed is None else consumed.arrival_ordinal + 1
+            staged_row = (*row, expected_ordinal, 0)
+            self._db.execute(sql, staged_row)
             committed_row = self._committed_full_row(
-                "facts" if is_fact else "ticks", row[0]
+                table, row[0]
             )
-            committed = committed_row[-1]  # signature is the last column
-            body = encode_row(committed_row)
+            committed = committed_row[6] if is_fact else committed_row[10]
+            body = encode_row(committed_row[:-2])
             record, mark = self._log.append_marked(
                 "fact" if is_fact else "tick",
                 body,
@@ -453,6 +460,17 @@ class ArrivalStore(SqliteStore[T], Generic[T]):
             self._db.rollback()
             raise
 
+    def _ensure_coordinate_schema(self) -> None:
+        """ArrivalStore schema is managed by the arrival log derivation."""
+        pass
+
+    def _allocate_ceremony_coordinates(
+        self, conn: Any, count: int
+    ) -> list[tuple[int, int]]:
+        consumed = self._reconciled_mark
+        expected_ordinal = 0 if consumed is None else consumed.arrival_ordinal + 1
+        return [(expected_ordinal, idx) for idx in range(count)]
+
     def _write_fact_row(self, row: tuple) -> str | None:
         return self._write(FACT_INSERT_SQL, row, object_of_fact_row, True)
 
@@ -476,10 +494,13 @@ class ArrivalStore(SqliteStore[T], Generic[T]):
         cannot resolve a gap after the fact, because the record it would
         have made durable is the ceremony itself.
         """
-        if len(rows) > 1:
-            k, body = "batch", object_of_batch(rows)
+        persisted_rows = [
+            r[:-2] if len(r) == len(FACT_ALL_COLUMNS) else r for r in rows
+        ]
+        if len(persisted_rows) > 1:
+            k, body = "batch", object_of_batch(persisted_rows)
         else:
-            k, body = "fact", object_of_fact_row(rows[0])
+            k, body = "fact", object_of_fact_row(persisted_rows[0])
         consumed = self._reconciled_mark
         _, mark = self._log.append_marked(
             k,

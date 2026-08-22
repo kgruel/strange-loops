@@ -95,10 +95,11 @@ def _append(store: Path, kind: str, ts: float, *, fid: str | None = None, **payl
     """Append a fact at a controlled ts; returns the (append-ordered) fact id."""
     conn = sqlite3.connect(str(store))
     fid = fid or gen_id()
+    ord_val = conn.execute("SELECT COALESCE(MAX(arrival_ordinal), 0) + 1 FROM facts").fetchone()[0]
     conn.execute(
-        "INSERT INTO facts (id, kind, ts, observer, origin, payload, signature) "
-        "VALUES (?, ?, ?, ?, ?, ?, NULL)",
-        (fid, kind, ts, "kyle", "", json.dumps(payload)),
+        "INSERT INTO facts (id, kind, ts, observer, origin, payload, signature, arrival_ordinal, arrival_seq) "
+        "VALUES (?, ?, ?, ?, ?, ?, NULL, ?, 0)",
+        (fid, kind, ts, "kyle", "", json.dumps(payload), ord_val),
     )
     conn.commit()
     conn.close()
@@ -118,10 +119,11 @@ def _append_tick(store: Path, name: str, ts: float, *, fact_cursor: str | None) 
     would use, rather than reusing whatever connection a caller has open."""
     conn = sqlite3.connect(str(store))
     tid = gen_id()
+    ord_val = conn.execute("SELECT COALESCE(MAX(arrival_ordinal), 0) + 1 FROM ticks").fetchone()[0]
     conn.execute(
-        "INSERT INTO ticks (id, name, ts, since, origin, payload, fact_cursor) "
-        "VALUES (?, ?, ?, 0.0, '', '{}', ?)",
-        (tid, name, ts, fact_cursor),
+        "INSERT INTO ticks (id, name, ts, since, origin, payload, fact_cursor, arrival_ordinal, arrival_seq) "
+        "VALUES (?, ?, ?, 0.0, '', '{}', ?, ?, 0)",
+        (tid, name, ts, fact_cursor, ord_val),
     )
     conn.commit()
     conn.close()
@@ -231,14 +233,7 @@ class TestAnchor:
         f1 = _append(store, "decision", 100, topic="a")
         _append(store, "decision", 101, topic="b")  # head advances past f1
         # A tick whose window closed at f1 (its fact_cursor).
-        conn = sqlite3.connect(str(store))
-        conn.execute(
-            "INSERT INTO ticks (id, name, ts, since, origin, payload, fact_cursor) "
-            "VALUES (?, 't', 150.0, 0.0, '', '{}', ?)",
-            (gen_id(), f1),
-        )
-        conn.commit()
-        conn.close()
+        _append_tick(store, "t", 150.0, fact_cursor=f1)
         # Position at head (f2) — the anchor is the tick sealing f1.
         pos = resolve_witness_position(store, "head")
         assert pos.anchor is not None
@@ -696,8 +691,8 @@ def _mirror_lineage(src: Path, dst: Path, lineage: str) -> None:
     sconn.close()
     dconn = sqlite3.connect(str(dst))
     dconn.execute(
-        "INSERT INTO facts (id, kind, ts, observer, origin, payload, signature) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO facts (id, kind, ts, observer, origin, payload, signature, arrival_ordinal, arrival_seq) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, 1, 0)",
         grow,
     )
     dconn.execute(

@@ -117,8 +117,14 @@ _CHAIN_COLUMNS = ("prev_hash", "window_start", "fact_cursor", "window_hash",
 # their columns the same way by construction; a row assembled for one is the
 # row the others take. Spelling it a second time is how a fact ends up with
 # its observer in the origin column.
-FACT_COLUMNS = (*jsonl_codec.FACT_FIELDS, "signature")
-TICK_COLUMNS = (*jsonl_codec.TICK_FIELDS, "signature")
+FACT_CONTENT_COLUMNS = (*jsonl_codec.FACT_FIELDS, "signature")
+TICK_CONTENT_COLUMNS = (*jsonl_codec.TICK_FIELDS, "signature")
+
+FACT_COLUMNS = FACT_CONTENT_COLUMNS
+TICK_COLUMNS = TICK_CONTENT_COLUMNS
+
+FACT_ALL_COLUMNS = (*FACT_CONTENT_COLUMNS, "arrival_ordinal", "arrival_seq")
+TICK_ALL_COLUMNS = (*TICK_CONTENT_COLUMNS, "arrival_ordinal", "arrival_seq")
 
 
 def _insert_sql(table: str, columns: tuple[str, ...]) -> str:
@@ -128,8 +134,8 @@ def _insert_sql(table: str, columns: tuple[str, ...]) -> str:
     )
 
 
-FACT_INSERT_SQL = _insert_sql("facts", FACT_COLUMNS)
-TICK_INSERT_SQL = _insert_sql("ticks", TICK_COLUMNS)
+FACT_INSERT_SQL = _insert_sql("facts", FACT_ALL_COLUMNS)
+TICK_INSERT_SQL = _insert_sql("ticks", TICK_ALL_COLUMNS)
 
 _TICK_ROW_SQL = ", ".join(TICK_COLUMNS)
 
@@ -283,10 +289,11 @@ def fact_commitment_hash(
 
 
 from datetime import datetime, timezone as _tz
+import re
 
 _UTC = _tz.utc
 from pathlib import Path
-from typing import Any, Callable, Generic, TypeVar
+from typing import Any, Callable, Generic, Iterator, Literal, TypeVar
 
 # IDs generated Python-side via python-ulid (see gen_id above).
 # The sqlite-ulid C extension is not a dependency — id generation lives
@@ -313,7 +320,10 @@ _SCHEMA_STMTS = (
         observer TEXT NOT NULL,
         origin   TEXT NOT NULL DEFAULT '',
         payload  TEXT NOT NULL CHECK (json_valid(payload)),
-        signature TEXT
+        signature TEXT,
+        arrival_ordinal INTEGER NOT NULL,
+        arrival_seq     INTEGER NOT NULL,
+        UNIQUE (arrival_ordinal, arrival_seq)
     )""",
     "CREATE INDEX IF NOT EXISTS idx_facts_kind ON facts(kind)",
     "CREATE INDEX IF NOT EXISTS idx_facts_ts ON facts(ts)",
@@ -328,11 +338,280 @@ _SCHEMA_STMTS = (
         window_start TEXT,
         fact_cursor  TEXT,
         window_hash  TEXT,
-        signature    TEXT
+        signature    TEXT,
+        arrival_ordinal INTEGER NOT NULL,
+        arrival_seq     INTEGER NOT NULL,
+        UNIQUE (arrival_ordinal, arrival_seq)
     )""",
     "CREATE INDEX IF NOT EXISTS idx_ticks_name ON ticks(name)",
     "CREATE INDEX IF NOT EXISTS idx_ticks_ts ON ticks(ts)",
 )
+
+
+def ensure_coordinate_schema(
+    conn: sqlite3.Connection,
+    *,
+    mode: Literal["mirrored", "arrival"],
+    coordinates: Callable[[], Iterator[tuple[str, str, int, int]]] | None = None,
+) -> None:
+    """Ensure facts and ticks have arrival_ordinal and arrival_seq columns with
+    NOT NULL and table-level UNIQUE (arrival_ordinal, arrival_seq) constraints.
+
+    In mode="mirrored":
+        Rebuilds legacy tables, assigning arrival_ordinal = rowid, arrival_seq = 0.
+        Preserves rowids explicitly, and recreates indexes, triggers, and dependent
+        views in dependency-closed order.
+        Stamps store_meta.coordinate_axis = 'mirrored'.
+    In mode="arrival":
+        Coordinate provider migration is deferred to WP-1b.
+    """
+    if mode == "arrival":
+        # WP-1b scope: coordinate provider migration for arrival-canonical indices
+        raise NotImplementedError(
+            "mode='arrival' coordinate provider migration is implemented in WP-1b"
+        )
+    if mode != "mirrored":
+        raise ValueError(f"unknown coordinate mode: {mode!r}")
+    if coordinates is not None:
+        raise ValueError("coordinates provider is forbidden for mode='mirrored'")
+
+    # Check store_meta for existing coordinate_axis marker or arrival lineage
+    meta_table_exists = conn.execute(
+        "SELECT 1 FROM sqlite_schema WHERE type='table' AND name='store_meta'"
+    ).fetchone() is not None
+
+    if meta_table_exists:
+        axis_row = conn.execute(
+            "SELECT value FROM store_meta WHERE key = 'coordinate_axis'"
+        ).fetchone()
+        if axis_row is not None and axis_row[0]:
+            return  # Already migrated
+
+        # Mis-mode refusal STUB: if store_meta carries ARRIVAL_LINEAGE_KEY and mode="mirrored"
+        from .arrival_store import ARRIVAL_LINEAGE_KEY, ArrivalCanonicalUnsupported
+
+        lineage_row = conn.execute(
+            "SELECT value FROM store_meta WHERE key = ?", (ARRIVAL_LINEAGE_KEY,)
+        ).fetchone()
+        if lineage_row is not None and lineage_row[0]:
+            raise ArrivalCanonicalUnsupported(
+                "cannot apply mirrored coordinate schema to arrival-canonical index "
+                f"(store carries {ARRIVAL_LINEAGE_KEY}={lineage_row[0]!r})"
+            )
+
+    # Check which tables exist
+    tables_to_check = ("facts", "ticks")
+    existing_tables = [
+        t for t in tables_to_check
+        if conn.execute(
+            "SELECT 1 FROM sqlite_schema WHERE type='table' AND name=?", (t,)
+        ).fetchone() is not None
+    ]
+
+    if not existing_tables:
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS store_meta (key TEXT PRIMARY KEY, value TEXT)"
+        )
+        conn.execute(
+            "INSERT OR REPLACE INTO store_meta (key, value) VALUES ('coordinate_axis', ?)",
+            (mode,),
+        )
+        conn.commit()
+        return
+
+    already_migrated = True
+    for t in existing_tables:
+        cols = {r[1] for r in conn.execute(f"PRAGMA table_info({t})")}
+        if "arrival_ordinal" not in cols:
+            already_migrated = False
+            break
+
+    if already_migrated:
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS store_meta (key TEXT PRIMARY KEY, value TEXT)"
+        )
+        conn.execute(
+            "INSERT OR REPLACE INTO store_meta (key, value) VALUES ('coordinate_axis', ?)",
+            (mode,),
+        )
+        conn.commit()
+        return
+
+    prev_iso = conn.isolation_level
+    conn.isolation_level = None  # explicit transaction control
+    try:
+        for idx, table in enumerate(tables_to_check):
+            if table not in existing_tables:
+                continue
+
+            cols = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+            is_final = (idx == len(tables_to_check) - 1) or (
+                idx == 0 and len(existing_tables) == 1
+            )
+            if "arrival_ordinal" in cols:
+                if is_final:
+                    conn.execute("BEGIN IMMEDIATE")
+                    conn.execute(
+                        "CREATE TABLE IF NOT EXISTS store_meta (key TEXT PRIMARY KEY, value TEXT)"
+                    )
+                    conn.execute(
+                        "INSERT OR REPLACE INTO store_meta (key, value) VALUES ('coordinate_axis', ?)",
+                        (mode,),
+                    )
+                    conn.execute("COMMIT")
+                continue
+
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                _rebuild_table_mirrored(conn, table, is_final=is_final, mode=mode)
+                conn.execute("COMMIT")
+            except BaseException:
+                if conn.in_transaction:
+                    conn.execute("ROLLBACK")
+                raise
+    finally:
+        conn.isolation_level = prev_iso
+
+
+def _rebuild_table_mirrored(
+    conn: sqlite3.Connection, table: str, *, is_final: bool, mode: str
+) -> None:
+    # 1. Collect views in dependency closure (fixed-point iteration)
+    all_views = conn.execute(
+        "SELECT name, sql FROM sqlite_schema WHERE type = 'view' AND sql IS NOT NULL"
+    ).fetchall()
+
+    collected_view_names: set[str] = set()
+    collected_views_ordered: list[tuple[str, str]] = []
+    target_names: set[str] = {table}
+
+    while True:
+        newly_found: list[tuple[str, str]] = []
+        for v_name, v_sql in all_views:
+            if v_name in collected_view_names:
+                continue
+            for target in target_names:
+                if re.search(rf"\b{re.escape(target)}\b", v_sql, re.IGNORECASE):
+                    newly_found.append((v_name, v_sql))
+                    break
+        if not newly_found:
+            break
+        for v_name, v_sql in newly_found:
+            collected_view_names.add(v_name)
+            collected_views_ordered.append((v_name, v_sql))
+        target_names = {v_name for v_name, _ in newly_found}
+
+    # 2. Collect triggers on table and collected views
+    collected_triggers: list[tuple[str, str, str]] = []
+    for target in [table, *collected_views_ordered]:
+        t_target_name = target if isinstance(target, str) else target[0]
+        t_rows = conn.execute(
+            "SELECT name, tbl_name, sql FROM sqlite_schema WHERE type = 'trigger' AND tbl_name = ? AND sql IS NOT NULL",
+            (t_target_name,),
+        ).fetchall()
+        collected_triggers.extend(t_rows)
+
+    # 3. Collect indexes on table (skipping auto-indexes)
+    collected_indexes = conn.execute(
+        "SELECT name, sql FROM sqlite_schema WHERE type = 'index' AND tbl_name = ? AND sql IS NOT NULL",
+        (table,),
+    ).fetchall()
+
+    # 4. Drop triggers, views (reverse dependency order), and indexes
+    for t_name, _, _ in collected_triggers:
+        conn.execute(f"DROP TRIGGER IF EXISTS {t_name}")
+
+    for v_name, _ in reversed(collected_views_ordered):
+        conn.execute(f"DROP VIEW IF EXISTS {v_name}")
+
+    for idx_name, _ in collected_indexes:
+        conn.execute(f"DROP INDEX IF EXISTS {idx_name}")
+
+    # 5. Create new table with full schema
+    temp_table = f"{table}_new"
+    conn.execute(f"DROP TABLE IF EXISTS {temp_table}")
+    if table == "facts":
+        conn.execute(f"""CREATE TABLE {temp_table} (
+            id       TEXT NOT NULL PRIMARY KEY,
+            kind     TEXT NOT NULL,
+            ts       REAL NOT NULL,
+            observer TEXT NOT NULL,
+            origin   TEXT NOT NULL DEFAULT '',
+            payload  TEXT NOT NULL CHECK (json_valid(payload)),
+            signature TEXT,
+            arrival_ordinal INTEGER NOT NULL,
+            arrival_seq     INTEGER NOT NULL,
+            UNIQUE (arrival_ordinal, arrival_seq)
+        )""")
+        existing_cols = {r[1] for r in conn.execute("PRAGMA table_info(facts)")}
+        sig_sel = "signature" if "signature" in existing_cols else "NULL"
+        conn.execute(f"""
+            INSERT INTO {temp_table} (rowid, id, kind, ts, observer, origin, payload, signature, arrival_ordinal, arrival_seq)
+            SELECT rowid, id, kind, ts, observer, origin, payload, {sig_sel}, rowid, 0
+            FROM {table}
+        """)
+    else:  # ticks
+        conn.execute(f"""CREATE TABLE {temp_table} (
+            id           TEXT NOT NULL PRIMARY KEY,
+            name         TEXT NOT NULL,
+            ts           REAL NOT NULL,
+            since        REAL,
+            origin       TEXT NOT NULL,
+            payload      TEXT NOT NULL CHECK (json_valid(payload)),
+            prev_hash    TEXT,
+            window_start TEXT,
+            fact_cursor  TEXT,
+            window_hash  TEXT,
+            signature    TEXT,
+            arrival_ordinal INTEGER NOT NULL,
+            arrival_seq     INTEGER NOT NULL,
+            UNIQUE (arrival_ordinal, arrival_seq)
+        )""")
+        existing_cols = {r[1] for r in conn.execute("PRAGMA table_info(ticks)")}
+        sig_sel = "signature" if "signature" in existing_cols else "NULL"
+        chain_sel = (
+            "prev_hash, window_start, fact_cursor, window_hash"
+            if "prev_hash" in existing_cols
+            else "NULL, NULL, NULL, NULL"
+        )
+        conn.execute(f"""
+            INSERT INTO {temp_table} (rowid, id, name, ts, since, origin, payload, prev_hash, window_start, fact_cursor, window_hash, signature, arrival_ordinal, arrival_seq)
+            SELECT rowid, id, name, ts, since, origin, payload, {chain_sel}, {sig_sel}, rowid, 0
+            FROM {table}
+        """)
+
+    # 6. Drop old table and rename new table
+    conn.execute(f"DROP TABLE {table}")
+    conn.execute(f"ALTER TABLE {temp_table} RENAME TO {table}")
+
+    # 7. Recreate indexes
+    for idx_name, idx_sql in collected_indexes:
+        conn.execute(idx_sql)
+
+    if table == "facts":
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_facts_kind ON facts(kind)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_facts_ts ON facts(ts)")
+    else:
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_ticks_name ON ticks(name)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_ticks_ts ON ticks(ts)")
+
+    # 8. Recreate views in forward dependency order
+    for v_name, v_sql in collected_views_ordered:
+        conn.execute(v_sql)
+
+    # 9. Recreate triggers
+    for t_name, _, t_sql in collected_triggers:
+        conn.execute(t_sql)
+
+    # 10. Stamp coordinate_axis marker if final table
+    if is_final:
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS store_meta (key TEXT PRIMARY KEY, value TEXT)"
+        )
+        conn.execute(
+            "INSERT OR REPLACE INTO store_meta (key, value) VALUES ('coordinate_axis', ?)",
+            (mode,),
+        )
 
 
 class UnsignedTickInSignedEra(Exception):
@@ -474,6 +753,9 @@ class SqliteStore(Generic[T]):
         self._conn = sqlite3.connect(str(self._path))
         self._chain_ready = is_new  # new DBs get chain columns in schema
         self._fact_sig_ready = is_new  # new DBs get facts.signature in schema
+        self._coordinate_ready = is_new  # new DBs get coordinates in schema
+        self._coordinate_mode: Literal["mirrored", "arrival"] = "mirrored"
+        self._coordinate_provider: Callable[[], Iterator[tuple[str, str, int, int]]] | None = None
         if is_new:
             # New DB — set WAL (persistent) and synchronous, create schema
             self._conn.execute("PRAGMA journal_mode=WAL")
@@ -561,6 +843,7 @@ class SqliteStore(Generic[T]):
             raise RuntimeError(f"store closed: {self._path}")
         self._ensure_sync()
         self._ensure_fact_signature_column()
+        self._ensure_coordinate_schema()
         d = self._serialize(event)
         fact_id = id_override if id_override is not None else gen_id()
         observer = d["observer"]
@@ -709,7 +992,7 @@ class SqliteStore(Generic[T]):
         log derivation (SOL-R4-03) and the ceremony full-row equality
         check (R4 arbiter follow-up).
         """
-        columns = FACT_COLUMNS if table == "facts" else TICK_COLUMNS
+        columns = FACT_ALL_COLUMNS if table == "facts" else TICK_ALL_COLUMNS
         r = self._conn.execute(
             f"SELECT {', '.join(columns)} FROM {table} "  # noqa: S608
             "WHERE id = ?", (row_id,)
@@ -749,6 +1032,11 @@ class SqliteStore(Generic[T]):
         inside the transaction, after triggers, before commit); raises
         CommittedRowMissing — after rollback — if the row is gone."""
         try:
+            if len(row) == len(FACT_CONTENT_COLUMNS):
+                ord_val = self._conn.execute(
+                    "SELECT COALESCE(MAX(arrival_ordinal), 0) + 1 FROM facts"
+                ).fetchone()[0]
+                row = (*row, ord_val, 0)
             self._conn.execute(FACT_INSERT_SQL, row)
             committed = self._committed_signature("facts", row[0])
             self._conn.commit()
@@ -761,6 +1049,11 @@ class SqliteStore(Generic[T]):
         """Persist one assembled tick row (_TICK_ROW_SQL order + signature).
         Same read-back + rollback-on-absence contract as facts."""
         try:
+            if len(row) == len(TICK_CONTENT_COLUMNS):
+                ord_val = self._conn.execute(
+                    "SELECT COALESCE(MAX(arrival_ordinal), 0) + 1 FROM ticks"
+                ).fetchone()[0]
+                row = (*row, ord_val, 0)
             self._conn.execute(TICK_INSERT_SQL, row)
             committed = self._committed_signature("ticks", row[0])
             self._conn.commit()
@@ -824,6 +1117,14 @@ class SqliteStore(Generic[T]):
         fresh one. Legacy modes mint here, unchanged.
         """
         return gen_id()
+
+    def _allocate_ceremony_coordinates(
+        self, conn: Any, count: int
+    ) -> list[tuple[int, int]]:
+        ord_val = conn.execute(
+            "SELECT COALESCE(MAX(arrival_ordinal), 0) + 1 FROM facts"
+        ).fetchone()[0]
+        return [(ord_val + idx, 0) for idx in range(count)]
 
     def absorb_genesis(
         self,
@@ -895,6 +1196,7 @@ class SqliteStore(Generic[T]):
         self._ensure_sync()
         self._ensure_fact_signature_column()
         self._ensure_chain_columns()
+        self._ensure_coordinate_schema()
         self._ensure_meta_table()
         # Reconcile derived state BEFORE the transaction (a reconcile commits):
         # the chain-head and fact-cursor pins read below must not miss a
@@ -946,9 +1248,11 @@ class SqliteStore(Generic[T]):
                         "attestation root); set up signing first"
                     )
 
+                coords = self._allocate_ceremony_coordinates(conn, 1)[0]
                 row = (
                     lineage_id, DECL_GENESIS, ts, observer, origin,
                     payload_text, signature,
+                    coords[0], coords[1],
                 )
                 conn.execute(FACT_INSERT_SQL, row)
                 # Committed-row honesty (SOL-R3-02 + R4 arbiter follow-up):
@@ -1018,7 +1322,7 @@ class SqliteStore(Generic[T]):
            unmarked + genesis rows → :class:`AmbiguousGenesis` (identity is
            claimed by :meth:`adopt_lineage`, never inferred).
         2. If ``expected_head`` is given, compare it against the store's
-           current declaration head — the ``(ts, id)`` of the newest
+        current declaration head — the ``(ts, id)`` of the newest
            self-lineage ``_decl.*`` row (genesis included). A mismatch raises
            :class:`StaleDeclarationHead` (rollback): the caller diffed against
            a head that has since moved (concurrent re-absorb), and applying a
@@ -1064,6 +1368,7 @@ class SqliteStore(Generic[T]):
 
         self._ensure_sync()
         self._ensure_fact_signature_column()
+        self._ensure_coordinate_schema()
         self._ensure_meta_table()
         # Reconcile derived state BEFORE the transaction (same rule as
         # absorb_genesis): the declaration-head CAS read must see every
@@ -1108,7 +1413,7 @@ class SqliteStore(Generic[T]):
                 # ONE effective ts for the whole ceremony (step 3).
                 ts = datetime.now(_UTC).timestamp()
 
-                rows: list[tuple] = []
+                assembled_rows: list[tuple] = []
                 for ch in changes:
                     kind = ch.kind
                     subject = ch.subject
@@ -1151,14 +1456,16 @@ class SqliteStore(Generic[T]):
                             "a declaration edit must be signed (it enters the "
                             "attestation tier); set up signing first"
                         )
-                    row = (
-                        fact_id, kind, ts, observer, origin,
-                        payload_text, signature,
+                    assembled_rows.append(
+                        (fact_id, kind, ts, observer, origin, payload_text, signature)
                     )
+
+                coords = self._allocate_ceremony_coordinates(conn, len(assembled_rows))
+                rows: list[tuple] = []
+                for idx, item in enumerate(assembled_rows):
+                    row = (*item, coords[idx][0], coords[idx][1])
                     conn.execute(
-                        "INSERT INTO facts "
-                        "(id, kind, ts, observer, origin, payload, signature) "
-                        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                        FACT_INSERT_SQL,
                         row,
                     )
                     rows.append(row)
@@ -1316,7 +1623,8 @@ class SqliteStore(Generic[T]):
         self._conn.execute(
             "CREATE TABLE IF NOT EXISTS store_meta (key TEXT PRIMARY KEY, value TEXT)"
         )
-        self._conn.commit()
+        if not self._conn.in_transaction:
+            self._conn.commit()
 
     def _meta_get(self, key: str) -> str | None:
         """One ``store_meta`` value, or None. Never commits."""
@@ -1521,6 +1829,18 @@ class SqliteStore(Generic[T]):
             self._conn.commit()
         self._fact_sig_ready = True
 
+    def _ensure_coordinate_schema(self) -> None:
+        """Idempotent migration: ensure coordinate schema (arrival_ordinal,
+        arrival_seq, UNIQUE) on facts and ticks tables."""
+        if self._coordinate_ready:
+            return
+        ensure_coordinate_schema(
+            self._conn,
+            mode=self._coordinate_mode,
+            coordinates=self._coordinate_provider,
+        )
+        self._coordinate_ready = True
+
     def _facts_have_signature_column(self) -> bool:
         """Read-only column probe for verify paths (never migrates)."""
         if self._fact_sig_ready:
@@ -1621,6 +1941,7 @@ class SqliteStore(Generic[T]):
         """
         self._ensure_sync()
         self._ensure_chain_columns()
+        self._ensure_coordinate_schema()
         # Every read below (prev_row, the fact cursor, the signed-era probe)
         # derives chain state from sqlite. Where sqlite is a derived index,
         # it must have consumed the whole canonical log first — see

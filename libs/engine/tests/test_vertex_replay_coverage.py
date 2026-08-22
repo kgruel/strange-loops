@@ -24,9 +24,10 @@ def inject_fact(store, kind: str, observer: str = "test", ts: float | None = Non
     d = Fact.to_dict(Fact.of(kind, observer, **payload))
     d["ts"] = ts
     store._ensure_sync()
+    ord_val = store._conn.execute("SELECT COALESCE(MAX(arrival_ordinal), 0) + 1 FROM facts").fetchone()[0]
     store._conn.execute(
-        "INSERT INTO facts (id, kind, ts, observer, origin, payload) VALUES (?, ?, ?, ?, ?, ?)",
-        (gen_id(), d["kind"], d["ts"], d["observer"], d.get("origin", ""), json.dumps(d["payload"])),
+        "INSERT INTO facts (id, kind, ts, observer, origin, payload, arrival_ordinal, arrival_seq) VALUES (?, ?, ?, ?, ?, ?, ?, 0)",
+        (gen_id(), d["kind"], d["ts"], d["observer"], d.get("origin", ""), json.dumps(d["payload"]), ord_val),
     )
     store._conn.commit()
 

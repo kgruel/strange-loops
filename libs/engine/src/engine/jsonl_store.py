@@ -191,7 +191,10 @@ from .jsonl_codec import (
 from .residence import canonical_for
 from .sql_util import sqlite_busy
 from .sqlite_store import (
+    FACT_ALL_COLUMNS,
+    FACT_COLUMNS,
     FACT_INSERT_SQL,
+    TICK_COLUMNS,
     TICK_INSERT_SQL,
     SqliteStore,
 )
@@ -466,6 +469,7 @@ class JsonlStore(SqliteStore[T], Generic[T]):
         try:
             self._ensure_fact_signature_column()
             self._ensure_chain_columns()
+            self._ensure_coordinate_schema()
             self._ensure_meta_table()
             self.catch_up()
         except BaseException:
@@ -498,23 +502,23 @@ class JsonlStore(SqliteStore[T], Generic[T]):
         store): there is nothing to compare against, and inventing a
         baseline from this handle's guesses is exactly the bug the markers
         exist to avoid. Always read from the db, never cached per handle —
-        a second open handle would otherwise stamp its own stale idea of
-        the count over a concurrent writer's correct one.
+        each transaction sees what other processes actually committed.
         """
         facts = self._read_meta_int(_FACT_COUNT_KEY)
         ticks = self._read_meta_int(_TICK_COUNT_KEY)
-        if facts is None or ticks is None:
-            return None
-        return facts, ticks
+        return None if facts is None or ticks is None else (facts, ticks)
 
     def _stamp(self, offset: int, facts: int, ticks: int) -> None:
-        """Stage the offset + indexed-row-count marks (caller commits)."""
-        for key, value in (
-            (_OFFSET_KEY, offset),
-            (_FACT_COUNT_KEY, facts),
-            (_TICK_COUNT_KEY, ticks),
-        ):
-            self._meta_set(key, value)
+        """Record the consumed log offset and the (fact, tick) counts."""
+        self._ensure_meta_table()
+        self._conn.executemany(
+            "INSERT OR REPLACE INTO store_meta (key, value) VALUES (?, ?)",
+            [
+                (_OFFSET_KEY, str(offset)),
+                (_FACT_COUNT_KEY, str(facts)),
+                (_TICK_COUNT_KEY, str(ticks)),
+            ],
+        )
 
     def _row_counts(self) -> tuple[int, int]:
         facts = self._conn.execute("SELECT COUNT(*) FROM facts").fetchone()[0]
@@ -543,25 +547,15 @@ class JsonlStore(SqliteStore[T], Generic[T]):
             os.fsync(fh.fileno())
             return fh.tell()
 
+    # ---- write half ---------------------------------------------------
+
     def _write(
-        self, sql: str, row: tuple, serialize_row, is_fact: bool
+        self,
+        sql: str,
+        row: tuple,
+        serialize_row: Callable[[tuple], str],
+        is_fact: bool,
     ) -> str | None:
-        """Stage the INSERT, make the line durable, then stamp and commit.
-
-        The INSERT runs first, uncommitted: a rejected row (duplicate id from
-        ``id_override``, any constraint) fails before a byte reaches the log,
-        so a refused append can never orphan a line. Nothing is observable
-        until the commit, which happens strictly after the fsync.
-
-        The log line serializes the COMMITTED read-back row, not the
-        caller-assembled one (SOL-R4-03): an AFTER trigger that rewrites
-        the row would otherwise put one truth in the index and another in
-        the canonical log — instant derivation divergence
-        (``audit_agreement`` fails on the very next check). The index is
-        what was committed; the log must derive-match it byte-for-byte.
-
-        Reconcile first: see :meth:`_reconcile`.
-        """
         self._reconcile()
         # Codec pre-flight on the ASSEMBLED row: a row the codec refuses
         # (string timestamp, non-JSON constant) must fail before sqlite's
@@ -570,6 +564,13 @@ class JsonlStore(SqliteStore[T], Generic[T]):
         # bytes still come from the read-back row below.
         serialize_row(row)
         try:
+            table = "facts" if is_fact else "ticks"
+            columns = FACT_COLUMNS if is_fact else TICK_COLUMNS
+            if len(row) == len(columns):
+                ord_val = self._conn.execute(
+                    f"SELECT COALESCE(MAX(arrival_ordinal), 0) + 1 FROM {table}"
+                ).fetchone()[0]
+                row = (*row, ord_val, 0)
             self._conn.execute(sql, row)
             # Committed-row honesty (SOL-R3-02 + SOL-R4-02/03): read the
             # COMPLETE row back after the INSERT (AFTER triggers fired),
@@ -577,10 +578,10 @@ class JsonlStore(SqliteStore[T], Generic[T]):
             # log line both report what the index will actually hold; an
             # absent row refuses.
             committed_row = self._committed_full_row(
-                "facts" if is_fact else "ticks", row[0]
+                table, row[0]
             )
-            committed = committed_row[-1]  # signature is the last column
-            line = serialize_row(committed_row)
+            committed = committed_row[6] if is_fact else committed_row[10]
+            line = serialize_row(committed_row[:-2])
             # The INSERT has taken sqlite's write lock, so the committed
             # markers read here cannot be raced by another handle: whatever
             # a concurrent writer stamped is already visible, and nothing
@@ -650,7 +651,14 @@ class JsonlStore(SqliteStore[T], Generic[T]):
         and unindexed — the standard recoverable state the next
         open/reconcile tails forward, all N rows atomically.
         """
-        line = serialize_batch(rows) if len(rows) > 1 else serialize_fact_row(rows[0])
+        persisted_rows = [
+            r[:-2] if len(r) == len(FACT_ALL_COLUMNS) else r for r in rows
+        ]
+        line = (
+            serialize_batch(persisted_rows)
+            if len(persisted_rows) > 1
+            else serialize_fact_row(persisted_rows[0])
+        )
         # Same committed-marker discipline as _write: the staged INSERTs
         # hold sqlite's write lock, so the marker read here cannot be raced.
         marked = self._marked_counts()
@@ -885,6 +893,13 @@ class JsonlStore(SqliteStore[T], Generic[T]):
             # ceremony can never index as a subset. facts += N; the offset
             # stamps at the line's end as for any line.
             for t, row in deserialize_records(line):
+                table = "facts" if t == "fact" else "ticks"
+                columns = FACT_COLUMNS if t == "fact" else TICK_COLUMNS
+                if len(row) == len(columns):
+                    ord_val = self._conn.execute(
+                        f"SELECT COALESCE(MAX(arrival_ordinal), 0) + 1 FROM {table}"
+                    ).fetchone()[0]
+                    row = (*row, ord_val, 0)
                 try:
                     self._conn.execute(
                         FACT_INSERT_SQL if t == "fact" else TICK_INSERT_SQL, row

@@ -45,15 +45,15 @@ def _member(tmp_path: Path, name: str, tick_ts: float) -> tuple[Path, str]:
     conn = sqlite3.connect(str(store))
     cursor_id = gen_id()
     conn.execute(
-        "INSERT INTO facts (id, kind, ts, observer, origin, payload, signature) "
-        "VALUES (?, 'decision', ?, 'kyle', '', ?, NULL)",
+        "INSERT INTO facts (id, kind, ts, observer, origin, payload, signature, arrival_ordinal, arrival_seq) "
+        "VALUES (?, 'decision', ?, 'kyle', '', ?, NULL, 1, 0)",
         (cursor_id, tick_ts - 1, json.dumps({"topic": name})),
     )
     # A chained tick (non-null window_hash) sealing that fact.
     conn.execute(
         "INSERT INTO ticks (id, name, ts, since, origin, payload, "
-        "window_start, fact_cursor, window_hash) "
-        "VALUES (?, ?, ?, 0.0, '', '{}', '', ?, 'deadbeef')",
+        "window_start, fact_cursor, window_hash, arrival_ordinal, arrival_seq) "
+        "VALUES (?, ?, ?, 0.0, '', '{}', '', ?, 'deadbeef', 1, 0)",
         (gen_id(), name, tick_ts, cursor_id),
     )
     conn.commit()
@@ -104,14 +104,14 @@ def _member_in(
     conn = sqlite3.connect(str(store))
     cursor_id = gen_id()
     conn.execute(
-        "INSERT INTO facts (id, kind, ts, observer, origin, payload, signature) "
-        "VALUES (?, 'decision', ?, 'kyle', '', ?, NULL)",
+        "INSERT INTO facts (id, kind, ts, observer, origin, payload, signature, arrival_ordinal, arrival_seq) "
+        "VALUES (?, 'decision', ?, 'kyle', '', ?, NULL, 1, 0)",
         (cursor_id, tick_ts - 1, json.dumps({"topic": vname})),
     )
     conn.execute(
         "INSERT INTO ticks (id, name, ts, since, origin, payload, "
-        "window_start, fact_cursor, window_hash) "
-        "VALUES (?, ?, ?, 0.0, '', '{}', '', ?, 'deadbeef')",
+        "window_start, fact_cursor, window_hash, arrival_ordinal, arrival_seq) "
+        "VALUES (?, ?, ?, 0.0, '', '{}', '', ?, 'deadbeef', 1, 0)",
         (gen_id(), vname, tick_ts, cursor_id),
     )
     conn.commit()

@@ -50,11 +50,11 @@ def _build_10k(tmp_path: Path) -> tuple[Path, Path]:
     conn = sqlite3.connect(str(store))
     conn.execute("PRAGMA journal_mode=WAL")
     conn.executemany(
-        "INSERT INTO facts (id,kind,ts,observer,origin,payload,signature) "
-        "VALUES (?,?,?,?,?,?,NULL)",
+        "INSERT INTO facts (id,kind,ts,observer,origin,payload,signature,arrival_ordinal,arrival_seq) "
+        "VALUES (?,?,?,?,?,?,NULL,?,0)",
         [
             (gen_id(), "decision", 1000.0 + i, "kyle", "",
-             json.dumps({"topic": f"t{i % _TOPICS}", "message": f"m{i}"}))
+             json.dumps({"topic": f"t{i % _TOPICS}", "message": f"m{i}"}), i + 1)
             for i in range(_N)
         ],
     )
@@ -65,11 +65,12 @@ def _build_10k(tmp_path: Path) -> tuple[Path, Path]:
 
 def _append_one(store: Path, i: int) -> None:
     c = sqlite3.connect(str(store))
+    ord_val = c.execute("SELECT COALESCE(MAX(arrival_ordinal), 0) + 1 FROM facts").fetchone()[0]
     c.execute(
-        "INSERT INTO facts (id,kind,ts,observer,origin,payload,signature) "
-        "VALUES (?,?,?,?,?,?,NULL)",
+        "INSERT INTO facts (id,kind,ts,observer,origin,payload,signature,arrival_ordinal,arrival_seq) "
+        "VALUES (?,?,?,?,?,?,NULL,?,0)",
         (gen_id(), "decision", 90000.0 + i, "kyle", "",
-         json.dumps({"topic": f"new{i}", "message": "x"})),
+         json.dumps({"topic": f"new{i}", "message": "x"}), ord_val),
     )
     c.commit()
     c.close()

@@ -51,10 +51,11 @@ def _scaffold(tmp_path: Path) -> tuple[Path, Path]:
 def _append(store: Path, kind: str, ts: float, *, fid: str | None = None, **payload) -> str:
     conn = sqlite3.connect(str(store))
     fid = fid or gen_id()
+    ord_val = conn.execute("SELECT COALESCE(MAX(arrival_ordinal), 0) + 1 FROM facts").fetchone()[0]
     conn.execute(
-        "INSERT INTO facts (id, kind, ts, observer, origin, payload, signature) "
-        "VALUES (?, ?, ?, ?, ?, ?, NULL)",
-        (fid, kind, ts, "kyle", "", json.dumps(payload)),
+        "INSERT INTO facts (id, kind, ts, observer, origin, payload, signature, arrival_ordinal, arrival_seq) "
+        "VALUES (?, ?, ?, ?, ?, ?, NULL, ?, 0)",
+        (fid, kind, ts, "kyle", "", json.dumps(payload), ord_val),
     )
     conn.commit()
     conn.close()
@@ -63,9 +64,10 @@ def _append(store: Path, kind: str, ts: float, *, fid: str | None = None, **payl
 
 def _append_tick(store: Path, name: str, ts: float) -> None:
     conn = sqlite3.connect(str(store))
+    ord_val = conn.execute("SELECT COALESCE(MAX(arrival_ordinal), 0) + 1 FROM ticks").fetchone()[0]
     conn.execute(
-        "INSERT INTO ticks (id, name, ts, since, origin, payload) VALUES (?,?,?,?,?,?)",
-        (gen_id(), name, ts, ts, "t", json.dumps({"x": 1})),
+        "INSERT INTO ticks (id, name, ts, since, origin, payload, arrival_ordinal, arrival_seq) VALUES (?,?,?,?,?,?,?,0)",
+        (gen_id(), name, ts, ts, "t", json.dumps({"x": 1}), ord_val),
     )
     conn.commit()
     conn.close()
@@ -213,8 +215,9 @@ class TestProcessAndLifecycle:
             writer = (
                 "import sqlite3, sys, json;"
                 "c=sqlite3.connect(sys.argv[1]);"
-                "c.execute(\"INSERT INTO facts (id,kind,ts,observer,origin,payload,signature)"
-                " VALUES ('EXT','decision',105,'kyle','',?,NULL)\", (json.dumps({'topic':'z'}),));"
+                "ord_val=c.execute('SELECT COALESCE(MAX(arrival_ordinal), 0) + 1 FROM facts').fetchone()[0];"
+                "c.execute(\"INSERT INTO facts (id,kind,ts,observer,origin,payload,signature,arrival_ordinal,arrival_seq)"
+                " VALUES ('EXT','decision',105,'kyle','',?,NULL,?,0)\", (json.dumps({'topic':'z'}), ord_val));"
                 "c.commit(); c.close()"
             )
             seen: list[str] = []

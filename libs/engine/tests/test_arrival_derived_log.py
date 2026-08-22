@@ -280,9 +280,11 @@ def test_it_is_derived_from_the_log_and_never_from_the_index(
 
     conn = sqlite3.connect(str(tmp_path / "s.db"))
     try:
+        ord_val = conn.execute("SELECT COALESCE(MAX(arrival_ordinal), 0) + 1 FROM facts").fetchone()[0]
         conn.execute(
-            "INSERT INTO facts (id, kind, ts, observer, origin, payload) "
-            "VALUES ('01OUTOFBANDROWZZZZZZZZZZZZ', 'note', 9.0, 'x', '', '{}')"
+            "INSERT INTO facts (id, kind, ts, observer, origin, payload, arrival_ordinal, arrival_seq) "
+            "VALUES ('01OUTOFBANDROWZZZZZZZZZZZZ', 'note', 9.0, 'x', '', '{}', ?, 0)",
+            (ord_val,),
         )
         conn.commit()
     finally:

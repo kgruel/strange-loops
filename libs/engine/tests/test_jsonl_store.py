@@ -476,10 +476,11 @@ def test_out_of_band_sqlite_rows_refuse_rather_than_vanish(tmp_path):
     store.close()
 
     conn = sqlite3.connect(str(tmp_path / "s.db"))
+    ord_val = conn.execute("SELECT COALESCE(MAX(arrival_ordinal), 0) + 1 FROM facts").fetchone()[0]
     conn.execute(
-        "INSERT OR IGNORE INTO facts (id, kind, ts, observer, origin, payload) "
-        "VALUES (?, ?, ?, ?, ?, ?)",
-        ("MERGED", "note", 1.0, "peer", "", "{}"),
+        "INSERT OR IGNORE INTO facts (id, kind, ts, observer, origin, payload, arrival_ordinal, arrival_seq) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, 0)",
+        ("MERGED", "note", 1.0, "peer", "", "{}", ord_val),
     )
     conn.commit()
     conn.close()

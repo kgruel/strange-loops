@@ -155,8 +155,8 @@ class TestEraFloor:
         conn = sqlite3.connect(str(tmp_db))
         conn.execute(
             "INSERT INTO ticks (id, name, ts, since, origin, payload, "
-            "prev_hash, window_start, fact_cursor, window_hash, signature) "
-            "VALUES ('t0','legacy',0,NULL,'x','{}',NULL,NULL,NULL,NULL,'FAKESIG')"
+            "prev_hash, window_start, fact_cursor, window_hash, signature, arrival_ordinal, arrival_seq) "
+            "VALUES ('t0','legacy',0,NULL,'x','{}',NULL,NULL,NULL,NULL,'FAKESIG', 2, 0)"
         )
         conn.commit()
         conn.close()
@@ -907,8 +907,8 @@ class TestReanchor:
         store = make_store(tmp_db)
         emit(store, 1)
         store._conn.execute(
-            "INSERT INTO ticks (id, name, ts, since, origin, payload) "
-            "VALUES ('t-legacy', 'legacy', 1.0, NULL, '', '{}')"
+            "INSERT INTO ticks (id, name, ts, since, origin, payload, arrival_ordinal, arrival_seq) "
+            "VALUES ('t-legacy', 'legacy', 1.0, NULL, '', '{}', 2, 0)"
         )
         store._conn.commit()
         store.close()

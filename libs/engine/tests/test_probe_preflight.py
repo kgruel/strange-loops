@@ -233,9 +233,11 @@ def test_probe_tampered_store_makes_no_verdict_and_mutates_nothing(tmp_path):
     """
     log, db = seeded_jsonl(tmp_path)
     conn = sqlite3.connect(db)
+    ord_val = conn.execute("SELECT COALESCE(MAX(arrival_ordinal), 0) + 1 FROM facts").fetchone()[0]
     conn.execute(
-        "INSERT INTO facts (id, ts, kind, observer, payload)"
-        " VALUES ('oob', 1.0, 'note', 'mallory', '{}')"
+        "INSERT INTO facts (id, ts, kind, observer, payload, arrival_ordinal, arrival_seq)"
+        " VALUES ('oob', 1.0, 'note', 'mallory', '{}', ?, 0)",
+        (ord_val,),
     )
     conn.commit()
     conn.close()
@@ -286,9 +288,11 @@ def test_probe_never_creates_sqlite_siblings_for_missing_targets(tmp_path):
 
 def damage_out_of_band(db: Path) -> None:
     conn = sqlite3.connect(db)
+    ord_val = conn.execute("SELECT COALESCE(MAX(arrival_ordinal), 0) + 1 FROM facts").fetchone()[0]
     conn.execute(
-        "INSERT INTO facts (id, ts, kind, observer, payload)"
-        " VALUES ('oob', 1.0, 'note', 'mallory', '{}')"
+        "INSERT INTO facts (id, ts, kind, observer, payload, arrival_ordinal, arrival_seq)"
+        " VALUES ('oob', 1.0, 'note', 'mallory', '{}', ?, 0)",
+        (ord_val,),
     )
     conn.commit()
     conn.close()

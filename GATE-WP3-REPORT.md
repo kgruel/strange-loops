@@ -343,3 +343,185 @@ been demoted to the residue locator it always was. My own evasion no longer work
 and neither does the same evasion at a site nobody rehearsed.
 
 WP-3 is ready for the sol-low pass check.
+
+---
+---
+
+# ROUND 3 — SOL-WP3-01 fix + the mandated residue sweep (`ec6b70c3`)
+
+Scoped to the live_edge fix and the four sweep sites. Gate branch rebased onto
+`ec6b70c3`.
+
+## ROUND 3 VERDICT: **PASS** — SOL-WP3-01 closed, sweep fixes correct.
+
+One coverage finding (W3-R3-1) and one scope disposition recommended for the
+arbiter (§3b). Neither blocks.
+
+## 1. SOL-WP3-01 — closed, reproduction re-derived independently
+
+I rebuilt sol's scenario from the description rather than running their fixture: a
+store whose sealed cursor's **rowid** sits behind an unsealed fact while its
+**arrival** coordinate does not.
+
+```
+rowid vs arrival:   (1,'f-2',ord 2)  (2,'f-0',ord 0)  (3,'f-1',ord 1)
+sealed cursor f-1 has rowid 3 (the highest) -> facts with GREATER rowid = 0
+   => the OLD rowid-based live_edge reports 0
+
+verify_chain: covered=2  uncovered=1
+live_edge   : 1
+*** AGREE: True
+```
+
+The old boundary would have reported an empty live edge while `verify_chain` said
+one fact was unsealed — the exact divergence. They now agree.
+
+The fix uses SQLite row-value comparison, `(arrival_ordinal, arrival_seq) > (…)`,
+which is the correct pair semantics rather than an ordinal-only cutoff. The two
+`COALESCE` fallbacks are `(-1, 0)`, so every documented fallback still yields the
+conservative *whole-store-on-the-edge* answer; they cannot disagree with each
+other because `arrival_seq` is `NOT NULL`.
+
+**Mutation proof re-run independently.** I reverted `live_edge` to the old
+rowid boundary myself:
+
+```
+1 failed, 1877 passed, 1 skipped
+FAILED …TestGD2_4_VerificationUnderPermutation::test_live_edge_agrees_with_verify_chain_under_permutation
+```
+
+Restored: 1878 passed. *(My first attempt at this mutation had a Python syntax
+error and silently never applied — the suite I saw was unmutated. I caught it and
+redid it; recording the misstep rather than the clean second run alone.)*
+
+## 2. Suite reconciliation
+
+| Suite | Round 2 (`6dc12f15`) | Round 3 (`ec6b70c3`) | Delta |
+|---|---|---|---|
+| engine | 1877 passed, 1 skipped | **1878 passed, 1 skipped** | **+1** |
+| store | 175 | **175** | 0 |
+| apps/loops | 2525 + 1 xfail | **2525 + 1 xfail** | 0 |
+
+`test_seal_rebase_d2.py` collects **7** (was 6) — the one new live_edge test.
++1 engine, exact.
+
+## 3a. The sweep fixes to `slice.py` / `rebirth.py` / `merge.py` — CORRECT
+
+**Semantics.** All four are *source-reading* or *newest-row* sites, and arrival
+order is the arc's receipt order:
+
+- `merge._read_index_source` — a transport `.db`'s rows now replay into the target
+  in the source's arrival order, which is the order the source received them.
+- `rebirth._chain_head` and `verify_rebirth` — pick the arrival-newest tick/receipt,
+  matching `SqliteStore.current_chain_head()`, which WP-3 already re-keyed. Leaving
+  these on rowid would have made rebirth and the engine disagree about the chain
+  head on a permuted store.
+- `slice.slice_store` — allocates target coordinates by `ROW_NUMBER` over the
+  source's arrival order, so a slice preserves receipt order into the target.
+
+Every site is era-aware: a `PRAGMA table_info` probe with a `rowid` fallback, so
+pre-coordinate transport files still work.
+
+**Zero behaviour change on mirrored stores — verified, not assumed.** On a
+mirrored store `arrival_ordinal == rowid` for every row, so the two `ORDER BY`
+clauses are provably the same sequence:
+
+```
+MIRRORED : rowid==ordinal for all rows: True
+           by rowid  = ['f-0','f-1','f-2','f-3','f-4']
+           by arrival= ['f-0','f-1','f-2','f-3','f-4']   identical -> ZERO change
+```
+
+**And non-vacuous where it should bite.** On a permuted source the orderings
+differ, and the slice now carries arrival order into the target's coordinates:
+
+```
+PERMUTED : by rowid  = ['f-3','f-0','f-4','f-1','f-2']
+           by arrival= ['f-0','f-1','f-2','f-3','f-4']
+           slice out = [('f-0',1),('f-1',2),('f-2',3),('f-3',4),('f-4',5)]
+```
+
+Under the old ordering the slice would have written `f-3` at ordinal 1, scrambling
+receipt order into the target. The fix is the correct semantics per the arc.
+
+**Existing transport/rebirth tests still pin output equivalence** — `test_slice.py`,
+`test_rebirth.py`, `test_merge.py`, `test_transport.py`, `test_properties_merge.py`
+and `test_conformance_merge.py` are all green at 175, unchanged. They pin the
+mirrored corpus, which is the whole real corpus today.
+
+## 3b. `apps/loops/commands/store.py` — RECOMMENDATION: accept, as a *second, narrow* exception
+
+**What it actually changes.** Two queries inside `_read_absorption_state`
+(`:866-895`):
+
+1. `SELECT id FROM facts ORDER BY rowid DESC LIMIT 1` → the newest-fact cursor.
+2. `SELECT … FROM ticks WHERE window_hash IS NOT NULL ORDER BY rowid DESC LIMIT 1`
+   → fed straight into `tick_row_hash(row)`, i.e. **the chain head**.
+
+**My recommendation: accept it under the sweep mandate — this is a forced
+same-class fix, not scope creep.** Reasoning:
+
+- Query 2 is *character-for-character* the chain-head selection the engine
+  re-keyed in WP-3 — the very statement I mutated in Rounds 1 and 2. The app
+  carries a duplicate of the engine's seal-chain derivation.
+- Both quantities are signed-chain quantities. Leaving them on rowid creates an
+  **app-vs-engine axis split on the exact value D2 re-based**: on a permuted store
+  the app would compute a different chain head than the engine, which is the
+  false-tamper / bad-prev_hash-linkage class the sweep exists to close.
+- It is ordering-authority-in-a-seal-context, squarely the sweep's stated class.
+- The edit is minimal and era-aware, identical in shape to the other three sites.
+
+**But it should be recorded as a distinct exception, not absorbed into the
+existing one.** The ruled D-Q2 exception covers the **audit dispatch arm**
+(`:141-163`, WP-4 scope). This touch is a *different function and a different
+concern* several hundred lines away. "store.py is already an exception file" must
+not become blanket pre-authorization for further apps/ touches — the file being
+excepted once is not the same as the file being open. I recommend the arbiter
+record a second, narrowly-worded exception: *seal-chain ordering authority in
+`_read_absorption_state`*, and nothing wider.
+
+**Caveat if accepted:** it is unpinned. See below.
+
+## FINDING W3-R3-1 — MINOR — the sweep changed four sites and added zero tests
+
+The sweep commit `5bf44f52` touches `merge.py`, `rebirth.py`, `slice.py` and
+`apps/loops/commands/store.py`. `git diff --stat` over `libs/store/tests` and
+`apps/loops/tests` for that range is **empty**.
+
+The mirrored corpus cannot discriminate these changes — I proved above that the
+two orderings are identical there — so the existing suites are structurally
+incapable of catching a revert. Demonstrated:
+
+| Revert | Suite result |
+|---|---|
+| `slice.py` ordering → `rowid` | **store: 175 passed** |
+| `apps/loops/commands/store.py` ordering → `rowid` | **apps/loops: 2525 passed, 1 xfailed** |
+
+Both fixes can be undone with no test noticing.
+
+This is the **third recurrence in this arc** of the same shape — W3-1 (the `oid`
+evasion), R5-1 (the marked-incomplete refusal), and now the sweep. The pattern is
+consistent: axis-correctness keeps landing as correct code guarded only by review
+attention. The engine side got its behavioural ratchet in Round 2 (G-D2-4); the
+store and apps sides did not get theirs.
+
+**Recommended:** one permuted-source transport test — slice or merge a permuted
+source and assert the target's coordinates follow the source's arrival order — plus
+one app-side assertion that `_read_absorption_state`'s chain head matches
+`SqliteStore.current_chain_head()` on a permuted store. Two tests close all four
+sites, because they are the same claim.
+
+Not blocking: every swept site is correct today, and I verified each one.
+
+## Bottom line
+
+SOL-WP3-01 is closed, and I confirmed it against a reproduction I derived
+independently rather than against their fixture — the old boundary reports 0 where
+`verify_chain` reports 1, and the new one agrees. The sweep fixes are the right
+semantics, era-aware, provably inert on mirrored stores and provably corrective on
+permuted ones.
+
+The apps/ touch is a genuine same-class fix and I recommend accepting it, with the
+exception recorded narrowly rather than folded into the D-Q2 audit-dispatch
+ruling. The one thing I would not leave silent is W3-R3-1: four correct fixes,
+zero tests, and both of the ones I reverted stayed green.

@@ -1119,6 +1119,20 @@ class ArrivalLog:
         adopted = self._anchor_for(mark)
         return 0 if adopted is None else adopted[0]
 
+    def anchor(self, mark: ResumeMark | None) -> dict | None:
+        """The validated anchor record dict for ``mark``, or None on rejection.
+
+        Surfaces the existing :meth:`_anchor_for` validation machinery as a
+        public verb. The byte offset in ``mark`` is an internal verified seek
+        hint, trusted only after the record found there passes all anchor
+        checks (shape, lineage, ordinal, authority).
+
+        Anchor validation checks self-consistency only, never chaining back to
+        genesis. :meth:`walk` remains the integrity statement over full history.
+        """
+        adopted = self._anchor_for(mark)
+        return None if adopted is None else adopted[1]
+
     def _anchor_for(self, mark: ResumeMark | None) -> tuple[int, dict, str] | None:
         """Adopt ``mark``'s anchor, or None when the mark cannot be trusted.
 

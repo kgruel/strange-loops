@@ -55,6 +55,7 @@ import hashlib
 import json
 import os
 import sqlite3
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterator, NoReturn
@@ -311,19 +312,23 @@ class DerivedLogAgreement:
     detail: str
 
 
-def _derived_digests(canonical: Path) -> set[bytes]:
+def _derived_digests(canonical: Path) -> Counter[bytes]:
     """Digest every line the arrival log projects, retaining none of them.
 
     Deliberately NOT ``{_digest(line) for line in derived_lines(...)}``:
     :func:`derived_lines` must materialize every line because it SORTS them,
     and an audit that borrowed it inherited a cost it does not need. Here
-    each line is produced, hashed, and dropped, so what survives the walk is
-    32 bytes per record.
+    each line is produced, hashed, and counted in a multiset (:class:`Counter`),
+    so what survives the walk is 32 bytes per unique digest.
+
+    The multiset structure makes the audit order-insensitive while preserving
+    multiplicity: duplicated lines in either artifact are caught as extra
+    lines, rather than collapsing into an innocence-granting set union.
 
     The bound, stated exactly rather than loosely: peak is **flat in record
     count** and **linear in the size of the LARGEST single record**. What
-    survives the walk is 32 bytes per record; what is in flight is one
-    record, which costs a small multiple of its own size because it is
+    survives the walk is a 32-byte digest count per record; what is in flight is
+    one record, which costs a small multiple of its own size because it is
     decoded, re-encoded and hashed. Measured: 5, 10, 20 and 40 records of
     1 MB each all peak at 7.02 MB, while one 4 MB record peaks at 28 MB.
 
@@ -333,11 +338,11 @@ def _derived_digests(canonical: Path) -> set[bytes]:
     otherwise would be the kind of unbounded promise this module refuses to
     make elsewhere.
     """
-    digests: set[bytes] = set()
+    digests: Counter[bytes] = Counter()
     for record in ArrivalLog(canonical).walk():
         line = line_of_record(record)
         if line is not None:
-            digests.add(_digest(line))
+            digests[_digest(line)] += 1
     return digests
 
 
@@ -346,11 +351,11 @@ def audit_derived_log(canonical: Path) -> DerivedLogAgreement:
 
     The repo's established contract for derived artifacts (``verify_rebirth``
     is the precedent). Each side's lines are hashed to 32 bytes as they are
-    produced and two set differences taken, so memory is bounded by RECORD
+    produced and two multiset differences taken, so memory is bounded by RECORD
     COUNT and never by total payload size — see :func:`_derived_digests` for
     the exact bound.
 
-    The reported counts survive digest-only sets, because a set difference
+    The reported counts survive digest-only multisets, because a multiset difference
     over digests has the same cardinality as one over the lines they stand
     for. Nothing in :class:`DerivedLogAgreement` echoes line CONTENT — the
     detail names paths and counts — so the result is bounded too.
@@ -360,21 +365,22 @@ def audit_derived_log(canonical: Path) -> DerivedLogAgreement:
     derived = _derived_digests(canonical)
 
     if not target.exists():
+        missing_count = derived.total()
         return DerivedLogAgreement(
             ok=not derived,
-            missing=len(derived),
+            missing=missing_count,
             extra=0,
             detail=(
                 f"no derived log at {target}"
-                + ("" if not derived else f"; the arrival log projects {len(derived)} line(s)")
+                + ("" if not derived else f"; the arrival log projects {missing_count} line(s)")
             ),
         )
 
-    present = set()
+    present: Counter[bytes] = Counter()
     with target.open("rb") as fh:
         for raw in fh:
             if raw.endswith(b"\n"):
-                present.add(hashlib.sha256(raw[:-1]).digest())
+                present[hashlib.sha256(raw[:-1]).digest()] += 1
             elif raw:
                 # A torn tail is not a line: it was never terminated, so it
                 # never claimed to be a record. Counting it as `extra` would
@@ -382,9 +388,11 @@ def audit_derived_log(canonical: Path) -> DerivedLogAgreement:
                 # content; the honest reading is that the file is short.
                 pass
 
-    missing = len(derived - present)
-    extra = len(present - derived)
-    ok = not missing and not extra
+    missing_counter = derived - present
+    extra_counter = present - derived
+    missing = missing_counter.total()
+    extra = extra_counter.total()
+    ok = missing == 0 and extra == 0
     return DerivedLogAgreement(
         ok=ok,
         missing=missing,

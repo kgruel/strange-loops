@@ -570,23 +570,7 @@ def _ensure_index_schema(
             conn.execute(f"ALTER TABLE ticks ADD COLUMN {col} TEXT")
     conn.commit()
 
-    def _provider() -> Iterator[tuple[str, str, int, int]]:
-        if log is None:
-            return
-        from .arrival_store import ARRIVAL_ORDINAL_KEY
-        mark_ord_str = _meta_get(conn, ARRIVAL_ORDINAL_KEY)
-        mark_ord = int(mark_ord_str) if mark_ord_str is not None else None
-        if mark_ord is None:
-            return
-        for record in log.walk():
-            if record["ord"] > mark_ord:
-                break
-            ord_val = record["ord"]
-            for seq, (t, row) in enumerate(rows_of_record(record)):
-                table = "facts" if t == "fact" else "ticks"
-                yield table, row[0], ord_val, seq
-
-    ensure_coordinate_schema(conn, mode="arrival", coordinates=_provider)
+    ensure_coordinate_schema(conn, mode="arrival", validate=False)
 
 
 def _meta_get(conn: sqlite3.Connection, key: str) -> str | None:

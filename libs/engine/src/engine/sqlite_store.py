@@ -358,6 +358,7 @@ def ensure_coordinate_schema(
     *,
     mode: Literal["mirrored", "arrival"],
     coordinates: Callable[[], Iterator[tuple[str, str, int, int]]] | None = None,
+    validate: bool = True,
 ) -> None:
     """Ensure facts and ticks have arrival_ordinal and arrival_seq columns with
     NOT NULL and table-level UNIQUE (arrival_ordinal, arrival_seq) constraints.
@@ -368,19 +369,26 @@ def ensure_coordinate_schema(
         views in dependency-closed order.
         Stamps store_meta.coordinate_axis = 'mirrored'.
     In mode="arrival":
-        Rebuilds legacy tables using coordinates provided by `coordinates` closure
-        which yields (table, row_id, arrival_ordinal, arrival_seq).
-        Preserves rowids explicitly, and recreates indexes, triggers, and dependent
-        views in dependency-closed order.
-        Stamps store_meta.coordinate_axis = 'arrival'.
-        Refuses if index and provider walk mismatch.
+        When validate=True:
+            Rebuilds legacy tables using coordinates provided by `coordinates` closure
+            which yields (table, row_id, arrival_ordinal, arrival_seq).
+            Preserves rowids explicitly, and recreates indexes, triggers, and dependent
+            views in dependency-closed order.
+            Stamps store_meta.coordinate_axis = 'arrival'.
+            Refuses if index and provider walk mismatch.
+        When validate=False:
+            Rebuilds legacy tables populating existing rows with placeholder coordinates
+            (arrival_ordinal = rowid, arrival_seq = 0) without provider validation.
+            Preserves rowids explicitly, and recreates indexes, triggers, and dependent
+            views in dependency-closed order.
+            Stamps store_meta.coordinate_axis = 'arrival'.
     """
     if mode not in ("mirrored", "arrival"):
         raise ValueError(f"unknown coordinate mode: {mode!r}")
     if mode == "mirrored" and coordinates is not None:
         raise ValueError("coordinates provider is forbidden for mode='mirrored'")
-    if mode == "arrival" and coordinates is None:
-        raise ValueError("coordinates provider is required for mode='arrival'")
+    if mode == "arrival" and validate and coordinates is None:
+        raise ValueError("coordinates provider is required for mode='arrival' when validate=True")
 
     # Check store_meta for existing coordinate_axis marker or arrival lineage
     meta_table_exists = conn.execute(
@@ -445,8 +453,8 @@ def ensure_coordinate_schema(
         conn.commit()
         return
 
-    # If arrival mode, stage the coordinates and check for mismatches
-    if mode == "arrival":
+    # If arrival mode with validation, stage the coordinates and check for mismatches
+    if mode == "arrival" and validate:
         from .arrival_store import ArrivalCanonicalUnsupported
 
         conn.execute(
@@ -575,20 +583,27 @@ def ensure_coordinate_schema(
 
             conn.execute("BEGIN IMMEDIATE")
             try:
-                _rebuild_table(conn, table, is_final=is_final, mode=mode)
+                _rebuild_table(
+                    conn, table, is_final=is_final, mode=mode, validate=validate
+                )
                 conn.execute("COMMIT")
             except BaseException:
                 if conn.in_transaction:
                     conn.execute("ROLLBACK")
                 raise
     finally:
-        if mode == "arrival":
+        if mode == "arrival" and validate:
             conn.execute("DROP TABLE IF EXISTS _coordinate_staging")
         conn.isolation_level = prev_iso
 
 
 def _rebuild_table(
-    conn: sqlite3.Connection, table: str, *, is_final: bool, mode: str
+    conn: sqlite3.Connection,
+    table: str,
+    *,
+    is_final: bool,
+    mode: str,
+    validate: bool = True,
 ) -> None:
     # 1. Collect views in dependency closure (fixed-point iteration)
     all_views = conn.execute(
@@ -659,7 +674,7 @@ def _rebuild_table(
         )""")
         existing_cols = {r[1] for r in conn.execute("PRAGMA table_info(facts)")}
         sig_sel = "signature" if "signature" in existing_cols else "NULL"
-        if mode == "mirrored":
+        if mode == "mirrored" or not validate:
             conn.execute(f"""
                 INSERT INTO {temp_table} (rowid, id, kind, ts, observer, origin, payload, signature, arrival_ordinal, arrival_seq)
                 SELECT rowid, id, kind, ts, observer, origin, payload, {sig_sel}, rowid, 0
@@ -697,7 +712,7 @@ def _rebuild_table(
             if "prev_hash" in existing_cols
             else "NULL, NULL, NULL, NULL"
         )
-        if mode == "mirrored":
+        if mode == "mirrored" or not validate:
             conn.execute(f"""
                 INSERT INTO {temp_table} (rowid, id, name, ts, since, origin, payload, prev_hash, window_start, fact_cursor, window_hash, signature, arrival_ordinal, arrival_seq)
                 SELECT rowid, id, name, ts, since, origin, payload, {chain_sel}, {sig_sel}, rowid, 0

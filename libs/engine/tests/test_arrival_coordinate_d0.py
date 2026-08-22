@@ -1229,3 +1229,261 @@ class TestProviderMismatchRefusal:
         with pytest.raises(ArrivalCanonicalUnsupported, match="rederive_projections"):
             ensure_coordinate_schema(conn, mode="arrival", coordinates=provider)
         conn.close()
+
+
+# ---------------------------------------------------------------------------
+# G-1: Divergent Legacy Index Rederivation & Strict Open Refusal
+# ---------------------------------------------------------------------------
+
+
+class TestDivergentLegacyRederivation:
+    def test_rederivation_over_divergent_legacy_index_succeeds(
+        self, tmp_path: Path
+    ) -> None:
+        """G-1: Rederivation over a divergent legacy (no-coordinate) index with a forged
+        out-of-band row succeeds, purges the forged row, and produces log-faithful coordinates.
+        """
+        custodian = Custodian(tmp_path, "kyle")
+        log_path = tmp_path / "divergent.arrival"
+        db_path = tmp_path / "divergent.db"
+
+        log = ArrivalLog.mint(
+            log_path,
+            observer="kyle",
+            signer=custodian.signer,
+            key=custodian.public,
+        )
+
+        f1_row = ("f-001", "note", 1000.0, "kyle", "", json.dumps({"n": 1}), None)
+        log.append_marked(
+            "fact",
+            object_of_fact_row(f1_row),
+            observer="kyle",
+            origin="",
+            at=1000.0,
+            signer=custodian.signer,
+        )
+
+        t1_row = ("t-001", "seal", 1004.0, 0.0, "t", "{}", "", "", "", "h", None)
+        _, mark2 = log.append_marked(
+            "tick",
+            object_of_tick_row(t1_row),
+            observer="seal",
+            origin="t",
+            at=1004.0,
+        )
+
+        # Build legacy SQLite database (without arrival_ordinal / arrival_seq)
+        _create_legacy_db(db_path)
+        conn = sqlite3.connect(str(db_path))
+        conn.execute(
+            "INSERT INTO facts (id, kind, ts, observer, origin, payload, signature) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            f1_row,
+        )
+        # Inject forged out-of-band row not present in the arrival log
+        forged_row = ("f-forged-999", "note", 9999.0, "evil", "", json.dumps({"forged": True}), None)
+        conn.execute(
+            "INSERT INTO facts (id, kind, ts, observer, origin, payload, signature) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            forged_row,
+        )
+        conn.execute(
+            "INSERT INTO ticks (id, name, ts, since, origin, payload, prev_hash, window_start, fact_cursor, window_hash, signature) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            t1_row,
+        )
+        conn.execute("CREATE TABLE store_meta (key TEXT PRIMARY KEY, value TEXT)")
+        conn.execute(
+            "INSERT INTO store_meta (key, value) VALUES (?, ?)",
+            (ARRIVAL_LINEAGE_KEY, mark2.arrival_lineage),
+        )
+        conn.execute(
+            "INSERT INTO store_meta (key, value) VALUES (?, ?)",
+            (ARRIVAL_OFFSET_KEY, mark2.arrival_offset),
+        )
+        conn.execute(
+            "INSERT INTO store_meta (key, value) VALUES (?, ?)",
+            (ARRIVAL_ORDINAL_KEY, mark2.arrival_ordinal),
+        )
+        conn.commit()
+        conn.close()
+
+        # Public rederive_projections must succeed, purge forgery, produce log-faithful coordinates
+        result = rederive_projections(log_path)
+        assert result.records == 3
+        assert result.facts == 1
+        assert result.ticks == 1
+
+        conn = sqlite3.connect(str(db_path))
+        facts = conn.execute(
+            "SELECT id, kind, ts, observer, origin, payload, arrival_ordinal, arrival_seq FROM facts ORDER BY arrival_ordinal, arrival_seq"
+        ).fetchall()
+        ticks = conn.execute(
+            "SELECT id, name, ts, since, origin, payload, arrival_ordinal, arrival_seq FROM ticks ORDER BY arrival_ordinal, arrival_seq"
+        ).fetchall()
+        meta_axis = conn.execute("SELECT value FROM store_meta WHERE key = 'coordinate_axis'").fetchone()
+        conn.close()
+
+        # Assert forged row is purged
+        assert len(facts) == 1
+        assert facts[0][0] == "f-001"
+        assert facts[0][6] == 1  # arrival_ordinal
+        assert facts[0][7] == 0  # arrival_seq
+
+        assert len(ticks) == 1
+        assert ticks[0][0] == "t-001"
+        assert ticks[0][6] == 2  # arrival_ordinal
+        assert ticks[0][7] == 0  # arrival_seq
+
+        assert meta_axis == ("arrival",)
+
+    def test_rederivation_over_legacy_index_without_stamped_ordinal_succeeds(
+        self, tmp_path: Path
+    ) -> None:
+        """G-1: Rederivation over a legacy index with rows but NO stamped ordinal mark
+        succeeds with log-faithful coordinates.
+        """
+        custodian = Custodian(tmp_path, "kyle")
+        log_path = tmp_path / "no_ordinal.arrival"
+        db_path = tmp_path / "no_ordinal.db"
+
+        log = ArrivalLog.mint(
+            log_path,
+            observer="kyle",
+            signer=custodian.signer,
+            key=custodian.public,
+        )
+
+        f1_row = ("f-100", "note", 1000.0, "kyle", "", json.dumps({"n": 100}), None)
+        log.append_marked(
+            "fact",
+            object_of_fact_row(f1_row),
+            observer="kyle",
+            origin="",
+            at=1000.0,
+            signer=custodian.signer,
+        )
+
+        t1_row = ("t-100", "seal", 1004.0, 0.0, "t", "{}", "", "", "", "h", None)
+        log.append_marked(
+            "tick",
+            object_of_tick_row(t1_row),
+            observer="seal",
+            origin="t",
+            at=1004.0,
+        )
+
+        # Build legacy SQLite database with rows, but store_meta lacks ARRIVAL_ORDINAL_KEY
+        _create_legacy_db(db_path)
+        conn = sqlite3.connect(str(db_path))
+        conn.execute(
+            "INSERT INTO facts (id, kind, ts, observer, origin, payload, signature) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            f1_row,
+        )
+        conn.execute(
+            "INSERT INTO ticks (id, name, ts, since, origin, payload, prev_hash, window_start, fact_cursor, window_hash, signature) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            t1_row,
+        )
+        conn.execute("CREATE TABLE store_meta (key TEXT PRIMARY KEY, value TEXT)")
+        conn.execute(
+            "INSERT INTO store_meta (key, value) VALUES (?, ?)",
+            (ARRIVAL_LINEAGE_KEY, log.lineage()),
+        )
+        # Note: NO ARRIVAL_ORDINAL_KEY or ARRIVAL_OFFSET_KEY inserted
+        conn.commit()
+        conn.close()
+
+        # Public rederive_projections must succeed and populate log-faithful coordinates
+        result = rederive_projections(log_path)
+        assert result.records == 3
+        assert result.facts == 1
+        assert result.ticks == 1
+
+        conn = sqlite3.connect(str(db_path))
+        facts = conn.execute(
+            "SELECT id, arrival_ordinal, arrival_seq FROM facts ORDER BY arrival_ordinal, arrival_seq"
+        ).fetchall()
+        ticks = conn.execute(
+            "SELECT id, arrival_ordinal, arrival_seq FROM ticks ORDER BY arrival_ordinal, arrival_seq"
+        ).fetchall()
+        meta_axis = conn.execute("SELECT value FROM store_meta WHERE key = 'coordinate_axis'").fetchone()
+        conn.close()
+
+        assert facts == [("f-100", 1, 0)]
+        assert ticks == [("t-100", 2, 0)]
+        assert meta_axis == ("arrival",)
+
+    def test_arrival_store_init_on_divergent_fixture_refuses(
+        self, tmp_path: Path
+    ) -> None:
+        """G-1: ArrivalStore.__init__ on the divergent fixture still refuses (strict path unaffected)."""
+        custodian = Custodian(tmp_path, "kyle")
+        log_path = tmp_path / "divergent_strict.arrival"
+        db_path = tmp_path / "divergent_strict.db"
+
+        log = ArrivalLog.mint(
+            log_path,
+            observer="kyle",
+            signer=custodian.signer,
+            key=custodian.public,
+        )
+
+        f1_row = ("f-001", "note", 1000.0, "kyle", "", json.dumps({"n": 1}), None)
+        log.append_marked(
+            "fact",
+            object_of_fact_row(f1_row),
+            observer="kyle",
+            origin="",
+            at=1000.0,
+            signer=custodian.signer,
+        )
+
+        t1_row = ("t-001", "seal", 1004.0, 0.0, "t", "{}", "", "", "", "h", None)
+        _, mark2 = log.append_marked(
+            "tick",
+            object_of_tick_row(t1_row),
+            observer="seal",
+            origin="t",
+            at=1004.0,
+        )
+
+        # Build legacy SQLite database with forged out-of-band row
+        _create_legacy_db(db_path)
+        conn = sqlite3.connect(str(db_path))
+        conn.execute(
+            "INSERT INTO facts (id, kind, ts, observer, origin, payload, signature) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            f1_row,
+        )
+        conn.execute(
+            "INSERT INTO facts (id, kind, ts, observer, origin, payload, signature) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            ("f-forged-999", "note", 9999.0, "evil", "", json.dumps({"forged": True}), None),
+        )
+        conn.execute(
+            "INSERT INTO ticks (id, name, ts, since, origin, payload, prev_hash, window_start, fact_cursor, window_hash, signature) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            t1_row,
+        )
+        conn.execute("CREATE TABLE store_meta (key TEXT PRIMARY KEY, value TEXT)")
+        conn.execute(
+            "INSERT INTO store_meta (key, value) VALUES (?, ?)",
+            (ARRIVAL_LINEAGE_KEY, mark2.arrival_lineage),
+        )
+        conn.execute(
+            "INSERT INTO store_meta (key, value) VALUES (?, ?)",
+            (ARRIVAL_OFFSET_KEY, mark2.arrival_offset),
+        )
+        conn.execute(
+            "INSERT INTO store_meta (key, value) VALUES (?, ?)",
+            (ARRIVAL_ORDINAL_KEY, mark2.arrival_ordinal),
+        )
+        conn.commit()
+        conn.close()
+
+        # ArrivalStore constructor MUST refuse with rederive_projections recommendation
+        with pytest.raises(ArrivalCanonicalUnsupported, match="rederive_projections"):
+            ArrivalStore(
+                path=db_path,
+                log_path=log_path,
+                serialize=lambda f: f.to_dict(),
+                deserialize=Fact.from_dict,
+            )

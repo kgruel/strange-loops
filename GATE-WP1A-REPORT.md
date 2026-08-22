@@ -676,3 +676,144 @@ honest this time. One wiring decision — validating provider agreement inside t
 repair path — turns a good safety check into a deadlock on exactly the indices
 that need repairing. Fix G-1 and add the divergent-rederivation test, and this
 package passes.
+
+---
+---
+
+# ROUND 4 — re-gate of the G-1 fix (`8a5fbe35` + `1aa1f7af`)
+
+Scoped to G-1 only, as instructed. Gate branch rebased onto `1aa1f7af`.
+
+## ROUND 4 VERDICT: **PASS** — G-1 cleared. WP-1 is complete.
+
+Two minor residue notes and one reporting note below; none blocking.
+
+## G-1 — CLEARED, verified with my own Round 3 probes
+
+I re-ran the exact probes that produced the circular refusal, plus the two
+controls. All through the **public** `rederive_projections`:
+
+| Case | Round 3 | Round 4 | Forgery purged | Axis |
+|---|---|---|---|---|
+| Healthy legacy index | SUCCEEDED | **SUCCEEDS** (`facts=3`) | n/a | `arrival` |
+| **Divergent legacy (forged row)** | **REFUSED (circular)** | **SUCCEEDS** (`facts=3`) | **yes** | `arrival` |
+| **Legacy, rows, no ordinal mark** | **REFUSED (circular)** | **SUCCEEDS** (`facts=3`) | n/a | `arrival` |
+| `ArrivalStore.__init__` on divergent fixture | REFUSED | **REFUSED** (strict path intact) | — | — |
+
+The deadlock is broken in both directions that mattered, and the strict route
+still refuses — so the refusal design is preserved where refusing is correct, and
+its remedy text now names a function that actually works.
+
+**Coordinates are log-faithful, not placeholders — proven with a batch.** The
+`validate=False` rebuild backfills `arrival_ordinal = rowid, arrival_seq = 0`, so
+a test using only single-record facts could not distinguish "log-faithful" from
+"placeholder left behind". I built the discriminating fixture: a legacy index
+seeded **scrambled** (rows out of log order), carrying a forged row, against a log
+whose ordinal 2 is a **batch of three**. After rederivation:
+
+```
+(1, 'f-001',   1, 0)
+(2, 'f-002-a', 2, 0)
+(3, 'f-002-b', 2, 1)    <- rowid 3, ordinal 2
+(4, 'f-002-c', 2, 2)    <- rowid 4, ordinal 2
+```
+
+A surviving placeholder backfill would read `(1,0),(2,0),(3,0),(4,0)`. It does
+not: the batch shares ordinal 2 with seq 0/1/2, and `01FORGED` is gone. The
+placeholders are genuinely overwritten by rederivation's own log-driven inserts.
+
+## The fix's shape is exactly right — machinery shared, not duplicated
+
+`validate=False` gates **only two things**: the `_coordinate_staging` creation +
+provider-agreement block (`if mode == "arrival" and validate:`) and the choice of
+INSERT. Everything else in `_rebuild_table` is one shared body. Better still, the
+non-validating INSERT **reuses the existing mirrored placeholder SQL** rather than
+adding a third statement (`if mode == "mirrored" or not validate:`), so the fix
+adds no duplicated SQL at all. The `_provider` closure in `_ensure_index_schema`
+was deleted outright rather than left dead.
+
+**Verified empirically, not just by reading the diff.** I ran the
+`validate=False` path against a legacy table carrying two stacked views, an AFTER
+INSERT trigger, an INSTEAD OF trigger on a view, and two indexes:
+
+- **rowids preserved** — `[(1,'f0'),(2,'f1'),(3,'f2')]` unchanged
+- **dependency-closed views survived** — `v1_facts` *and* `v2_notes` (the
+  view-over-view) both present and queryable
+- **both triggers survived** — `trg_after` and `trg_io`; the AFTER INSERT trigger
+  still fires on a subsequent insert
+- **indexes recreated** — `idx_facts_kind`, `idx_facts_ts`
+- **marker stamps `'arrival'`**, not `'mirrored'` — the correct axis, which a
+  lazier fix (just calling mirrored mode) would have got wrong
+
+So the non-validating path is the *same* migration, minus only the agreement
+assertion. That is precisely the requirement.
+
+## Their break/restore evidence is genuine
+
+`WP1B-FIX-REPORT.md` shows the two new tests **failing** against the pre-fix code
+with `ArrivalCanonicalUnsupported` at `sqlite_store.py:524` (`2 failed, 1 passed`)
+and passing after — including the honest red output rather than only the green.
+My independent probes reach the same conclusion by a different route.
+
+## Suite reconciliation
+
+| Suite | Round 3 | Round 4 (`1aa1f7af`) | Status |
+|---|---|---|---|
+| atoms | 517 | **517 passed** | OK |
+| engine | 1830 + 1 skip | **1833 passed, 1 skipped** | OK — **+3, exact** |
+| sdk | 324 | **324 passed** | OK |
+| lang | 655 | **655 passed** | OK |
+| store | 157 | **157 passed** | OK |
+| arch | 98 | **98 passed** | OK |
+| apps/loops | 2525 + 1 xfail | **2525 passed, 1 xfailed** | OK |
+
+Engine's +3 reconciles exactly: `test_arrival_coordinate_d0.py` collects **23**
+(was 20), the three added being `TestDivergentLegacyRederivation` — divergent
+rederivation succeeds, no-ordinal-mark rederivation succeeds, and
+`ArrivalStore.__init__` on the divergent fixture still refuses. That last one is
+the right test to have written: it pins the strict path so a future loosening of
+`validate` cannot silently disarm it.
+
+Scope in-fence (`arrival_projection.py`, `sqlite_store.py`, the D0 test file, the
+fix report). Working tree clean.
+
+## Minor notes — none blocking
+
+**R4-1 (minor) — unswept residue: `_ensure_index_schema`'s `log` parameter is now
+dead.** Deleting the `_provider` closure left the signature
+`_ensure_index_schema(conn, log: ArrivalLog | None = None)` with `log` appearing
+**only in the signature** — the body no longer references it — while
+`rederive_projections:480` still passes it. Per the project's own rule that
+dissolution isn't done until its residue is swept, drop the parameter and the
+argument in the same change.
+
+**R4-2 (minor) — unused import.** `from typing import Iterator, NoReturn` in
+`arrival_projection.py`: `Iterator` was imported for the deleted closure and is
+now unreferenced.
+
+**R4-3 (reporting, minor) — the fix report's suite section covers six of seven
+suites; `libs/lang` is absent.** I want to be precise about severity given the
+F-2 history: this is **not** a repeat of F-2. F-2 concealed a suite that was
+**red**. Here the omitted suite is untouched by the fix and I verified it green
+myself (655 passed). This is incompleteness, not concealment — worth naming only
+because the earlier round makes suite-table completeness a standing expectation.
+Every figure the report *does* state matches mine exactly.
+
+**Standing note check (as asked): the staging temp-table cleanup asymmetry is
+unchanged.** The cleanup is still `finally: if mode == "arrival" and validate:
+DROP TABLE IF EXISTS _coordinate_staging`, and provider-mismatch refusals still
+raise before that block is entered, so the temp table still outlives a refusal.
+The fix neither improved nor worsened it. Still harmless for the same reasons
+(TEMP table, dies with the connection, each call re-`DELETE`s it), still worth
+tidying opportunistically. Not a finding.
+
+## Bottom line
+
+**G-1 is cleared and WP-1 is complete.** The fix is the minimal correct one: it
+adds a single flag that suppresses only the agreement assertion, reuses the
+existing rebuild machinery and even the existing placeholder SQL, keeps the strict
+route strict, and stamps the right axis. I confirmed by direct probe that the
+repaired path produces log-faithful coordinates — batch expansion and all — on a
+scrambled, forged, legacy index, which is the case that started this finding.
+Clear R4-1 and R4-2 as housekeeping whenever convenient; neither affects behaviour.
+WP-1 is ready for the codex pass check.

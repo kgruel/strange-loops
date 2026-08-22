@@ -1487,3 +1487,253 @@ class TestDivergentLegacyRederivation:
                 serialize=lambda f: f.to_dict(),
                 deserialize=Fact.from_dict,
             )
+
+
+# ---------------------------------------------------------------------------
+# SOL-WP1-01: Structural Schema Verification & Refusal on Marked Incomplete
+# ---------------------------------------------------------------------------
+
+
+class TestSolWp101StructuralVerification:
+    def test_foreign_partial_schema_no_marker_rebuilt_correctly(
+        self, tmp_path: Path
+    ) -> None:
+        """Foreign partial schema without marker (arrival_ordinal present, no arrival_seq / no
+        constraints) is detected as unmigrated and rebuilt correctly with full constraints.
+        """
+        db_path = tmp_path / "foreign_partial.db"
+        conn = sqlite3.connect(str(db_path))
+        # Foreign partial schema: arrival_ordinal is nullable, no arrival_seq, no UNIQUE constraint
+        conn.executescript(
+            """
+            CREATE TABLE facts (
+                id TEXT NOT NULL PRIMARY KEY,
+                kind TEXT NOT NULL,
+                ts REAL NOT NULL,
+                observer TEXT NOT NULL,
+                origin TEXT NOT NULL DEFAULT '',
+                payload TEXT NOT NULL,
+                signature TEXT,
+                arrival_ordinal INTEGER
+            );
+            CREATE INDEX idx_facts_kind ON facts(kind);
+            CREATE INDEX idx_facts_ts ON facts(ts);
+
+            CREATE TABLE ticks (
+                id TEXT NOT NULL PRIMARY KEY,
+                name TEXT NOT NULL,
+                ts REAL NOT NULL,
+                since REAL,
+                origin TEXT NOT NULL,
+                payload TEXT NOT NULL,
+                prev_hash TEXT,
+                window_start TEXT,
+                fact_cursor TEXT,
+                window_hash TEXT,
+                signature TEXT,
+                arrival_ordinal INTEGER
+            );
+            CREATE INDEX idx_ticks_name ON ticks(name);
+            CREATE INDEX idx_ticks_ts ON ticks(ts);
+            """
+        )
+        conn.execute(
+            "INSERT INTO facts (id, kind, ts, observer, origin, payload, signature, arrival_ordinal) "
+            "VALUES ('f-partial-1', 'note', 1000.0, 'kyle', '', '{\"m\": 1}', NULL, NULL)"
+        )
+        conn.execute(
+            "INSERT INTO ticks (id, name, ts, since, origin, payload, prev_hash, window_start, fact_cursor, window_hash, signature, arrival_ordinal) "
+            "VALUES ('t-partial-1', 'seal', 2000.0, 0.0, 't', '{}', '', '', '', 'h', NULL, NULL)"
+        )
+        conn.commit()
+        conn.close()
+
+        # Open via SqliteStore public constructor
+        store = SqliteStore(
+            path=db_path,
+            serialize=lambda f: f.to_dict(),
+            deserialize=Fact.from_dict,
+        )
+        assert store.total == 1
+        new_fid = store.append(Fact.of("note", "kyle", msg="post_rebuild"))
+        store.close()
+
+        # Verify schema constraints and data
+        conn = sqlite3.connect(str(db_path))
+        meta = conn.execute(
+            "SELECT value FROM store_meta WHERE key = 'coordinate_axis'"
+        ).fetchone()
+        assert meta == ("mirrored",)
+
+        # Check facts columns and NOT NULL
+        fact_cols = {
+            r[1]: {"notnull": bool(r[3]), "pk": bool(r[5])}
+            for r in conn.execute("PRAGMA table_info(facts)")
+        }
+        assert fact_cols["arrival_ordinal"]["notnull"] is True
+        assert fact_cols["arrival_seq"]["notnull"] is True
+
+        # Check ticks columns and NOT NULL
+        tick_cols = {
+            r[1]: {"notnull": bool(r[3]), "pk": bool(r[5])}
+            for r in conn.execute("PRAGMA table_info(ticks)")
+        }
+        assert tick_cols["arrival_ordinal"]["notnull"] is True
+        assert tick_cols["arrival_seq"]["notnull"] is True
+
+        # Check UNIQUE constraint on facts
+        fact_unique = False
+        for idx_row in conn.execute("PRAGMA index_list(facts)"):
+            if idx_row[2]:
+                idx_name = idx_row[1]
+                idx_cols = [
+                    r[2] for r in conn.execute(f"PRAGMA index_info({idx_name})")
+                ]
+                if idx_cols == ["arrival_ordinal", "arrival_seq"]:
+                    fact_unique = True
+                    break
+        assert fact_unique is True
+
+        # Check UNIQUE constraint on ticks
+        tick_unique = False
+        for idx_row in conn.execute("PRAGMA index_list(ticks)"):
+            if idx_row[2]:
+                idx_name = idx_row[1]
+                idx_cols = [
+                    r[2] for r in conn.execute(f"PRAGMA index_info({idx_name})")
+                ]
+                if idx_cols == ["arrival_ordinal", "arrival_seq"]:
+                    tick_unique = True
+                    break
+        assert tick_unique is True
+
+        # Check existing and new row coordinates
+        rows = conn.execute(
+            "SELECT rowid, id, arrival_ordinal, arrival_seq FROM facts ORDER BY rowid"
+        ).fetchall()
+        assert rows[0] == (1, "f-partial-1", 1, 0)
+        assert rows[1] == (2, new_fid, 2, 0)
+
+        # Constraint enforcement: duplicate coordinate rejected
+        with pytest.raises(sqlite3.IntegrityError, match="UNIQUE"):
+            conn.execute(
+                "INSERT INTO facts (id, kind, ts, observer, origin, payload, signature, arrival_ordinal, arrival_seq) "
+                "VALUES ('f-dup', 'note', 1001.0, 'kyle', '', '{}', NULL, 1, 0)"
+            )
+        # Constraint enforcement: NULL coordinate rejected
+        with pytest.raises(sqlite3.IntegrityError, match="NOT NULL"):
+            conn.execute(
+                "INSERT INTO facts (id, kind, ts, observer, origin, payload, signature, arrival_ordinal, arrival_seq) "
+                "VALUES ('f-null', 'note', 1002.0, 'kyle', '', '{}', NULL, NULL, 0)"
+            )
+
+        conn.close()
+
+    def test_marker_present_structure_incomplete_refuses_loudly(
+        self, tmp_path: Path
+    ) -> None:
+        """A store with coordinate_axis stamped by hand on incomplete/legacy tables raises
+        ArrivalCanonicalUnsupported naming the table and defect, and leaves the store unmodified.
+        """
+        db_path = _create_legacy_db(tmp_path / "stamped_incomplete.db")
+        fids = _populate_legacy_facts(db_path, 2)
+
+        # Stamp coordinate_axis by hand on legacy database
+        conn = sqlite3.connect(str(db_path))
+        conn.execute("CREATE TABLE store_meta (key TEXT PRIMARY KEY, value TEXT)")
+        conn.execute(
+            "INSERT INTO store_meta (key, value) VALUES ('coordinate_axis', 'mirrored')"
+        )
+        conn.commit()
+
+        # Capture schema before
+        facts_schema_before = conn.execute(
+            "SELECT sql FROM sqlite_schema WHERE type='table' AND name='facts'"
+        ).fetchone()[0]
+        conn.close()
+
+        # Direct ensure_coordinate_schema must raise ArrivalCanonicalUnsupported with loud location claim
+        conn = sqlite3.connect(str(db_path))
+        with pytest.raises(ArrivalCanonicalUnsupported) as exc_info:
+            ensure_coordinate_schema(conn, mode="mirrored")
+        conn.close()
+
+        err_msg = str(exc_info.value)
+        assert "facts lacks arrival_ordinal column" in err_msg
+        assert "coordinate_axis marker disagrees with table structure" in err_msg
+        assert "out-of-band interference" in err_msg
+
+        # Opening via SqliteStore and attempting write must also refuse
+        store = SqliteStore(
+            path=db_path,
+            serialize=lambda f: f.to_dict(),
+            deserialize=Fact.from_dict,
+        )
+        with pytest.raises(ArrivalCanonicalUnsupported) as exc_info_store:
+            store.append(Fact.of("note", "kyle", msg="attempt"))
+        store.close()
+
+        err_msg_store = str(exc_info_store.value)
+        assert "facts lacks arrival_ordinal column" in err_msg_store
+        assert "coordinate_axis marker disagrees with table structure" in err_msg_store
+        assert "out-of-band interference" in err_msg_store
+
+        # Store must NOT be modified
+        conn = sqlite3.connect(str(db_path))
+        facts_schema_after = conn.execute(
+            "SELECT sql FROM sqlite_schema WHERE type='table' AND name='facts'"
+        ).fetchone()[0]
+        cols_after = [r[1] for r in conn.execute("PRAGMA table_info(facts)")]
+        rows_after = conn.execute("SELECT id FROM facts ORDER BY rowid").fetchall()
+        conn.close()
+
+        assert facts_schema_after == facts_schema_before
+        assert "arrival_ordinal" not in cols_after
+        assert "arrival_seq" not in cols_after
+        assert [r[0] for r in rows_after] == fids
+
+    def test_marker_present_structure_complete_fast_path(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """When marker is present and structure is complete, no rebuild happens (fast path)."""
+        db_path = tmp_path / "complete_fast.db"
+        store = SqliteStore(
+            path=db_path,
+            serialize=lambda f: f.to_dict(),
+            deserialize=Fact.from_dict,
+        )
+        f0 = store.append(Fact.of("note", "kyle", n=0))
+        store.close()
+
+        # On reopen, monkeypatch _rebuild_table to fail if called
+        import engine.sqlite_store as sqlmod
+
+        def forbid_rebuild(*args: Any, **kwargs: Any) -> None:
+            pytest.fail(
+                "_rebuild_table was invoked on already complete and marked database"
+            )
+
+        monkeypatch.setattr(sqlmod, "_rebuild_table", forbid_rebuild)
+
+        reopened = SqliteStore(
+            path=db_path,
+            serialize=lambda f: f.to_dict(),
+            deserialize=Fact.from_dict,
+        )
+        assert reopened.total == 1
+        f1 = reopened.append(Fact.of("note", "kyle", n=1))
+        reopened.close()
+
+        conn = sqlite3.connect(str(db_path))
+        rows = conn.execute(
+            "SELECT rowid, id, arrival_ordinal, arrival_seq FROM facts ORDER BY rowid"
+        ).fetchall()
+        meta = conn.execute(
+            "SELECT value FROM store_meta WHERE key = 'coordinate_axis'"
+        ).fetchone()
+        conn.close()
+
+        assert meta == ("mirrored",)
+        assert rows[0] == (1, f0, 1, 0)
+        assert rows[1] == (2, f1, 2, 0)
+

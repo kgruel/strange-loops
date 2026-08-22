@@ -353,6 +353,56 @@ _SCHEMA_STMTS = (
 )
 
 
+def _verify_coordinate_schema(
+    conn: sqlite3.Connection, table: str
+) -> tuple[bool, str | None]:
+    """Verify table has arrival_ordinal and arrival_seq columns with NOT NULL
+    and a UNIQUE (arrival_ordinal, arrival_seq) constraint.
+
+    Returns (True, None) if valid, or (False, defect_description) if invalid.
+    """
+    cols = {
+        r[1]: {"notnull": bool(r[3]), "pk": bool(r[5])}
+        for r in conn.execute(f"PRAGMA table_info({table})")
+    }
+    if "arrival_ordinal" not in cols:
+        return False, f"{table} lacks arrival_ordinal column"
+    if not cols["arrival_ordinal"]["notnull"]:
+        return False, f"{table} lacks NOT NULL on arrival_ordinal"
+    if "arrival_seq" not in cols:
+        return False, f"{table} lacks arrival_seq column"
+    if not cols["arrival_seq"]["notnull"]:
+        return False, f"{table} lacks NOT NULL on arrival_seq"
+
+    has_unique = False
+    for idx_row in conn.execute(f"PRAGMA index_list({table})"):
+        is_unique = bool(idx_row[2])
+        if not is_unique:
+            continue
+        idx_name = idx_row[1]
+        idx_cols = [r[2] for r in conn.execute(f"PRAGMA index_info({idx_name})")]
+        if idx_cols == ["arrival_ordinal", "arrival_seq"]:
+            has_unique = True
+            break
+
+    if not has_unique:
+        schema_row = conn.execute(
+            "SELECT sql FROM sqlite_schema WHERE type='table' AND name=?", (table,)
+        ).fetchone()
+        if schema_row and schema_row[0]:
+            if re.search(
+                r"UNIQUE\s*\(\s*arrival_ordinal\s*,\s*arrival_seq\s*\)",
+                schema_row[0],
+                re.IGNORECASE,
+            ):
+                has_unique = True
+
+    if not has_unique:
+        return False, f"{table} lacks UNIQUE (arrival_ordinal, arrival_seq) constraint"
+
+    return True, None
+
+
 def ensure_coordinate_schema(
     conn: sqlite3.Connection,
     *,
@@ -362,6 +412,22 @@ def ensure_coordinate_schema(
 ) -> None:
     """Ensure facts and ticks have arrival_ordinal and arrival_seq columns with
     NOT NULL and table-level UNIQUE (arrival_ordinal, arrival_seq) constraints.
+
+    Structurally verifies that each existing table (facts, ticks) has both
+    arrival_ordinal and arrival_seq columns with notnull=1 and a
+    UNIQUE (arrival_ordinal, arrival_seq) constraint.
+
+    When the store_meta.coordinate_axis marker is present:
+        Performs structural verification across all existing tables.
+        If all tables conform, returns immediately (fast path).
+        If any structural requirement fails, raises ArrivalCanonicalUnsupported
+        naming the table and defect, refusing out-of-band stamped incomplete stores
+        without modifying them.
+
+    When the store_meta.coordinate_axis marker is absent:
+        Structurally verified tables are skipped.
+        Incomplete or legacy tables are rebuilt in dependency-closed order.
+        Stamps store_meta.coordinate_axis upon successful migration.
 
     In mode="mirrored":
         Rebuilds legacy tables, assigning arrival_ordinal = rowid, arrival_seq = 0.
@@ -409,12 +475,6 @@ def ensure_coordinate_schema(
                     f"(store carries {ARRIVAL_LINEAGE_KEY}={lineage_row[0]!r})"
                 )
 
-        axis_row = conn.execute(
-            "SELECT value FROM store_meta WHERE key = 'coordinate_axis'"
-        ).fetchone()
-        if axis_row is not None and axis_row[0]:
-            return  # Already migrated
-
     # Check which tables exist
     tables_to_check = ("facts", "ticks")
     existing_tables = [
@@ -423,6 +483,22 @@ def ensure_coordinate_schema(
             "SELECT 1 FROM sqlite_schema WHERE type='table' AND name=?", (t,)
         ).fetchone() is not None
     ]
+
+    if meta_table_exists:
+        axis_row = conn.execute(
+            "SELECT value FROM store_meta WHERE key = 'coordinate_axis'"
+        ).fetchone()
+        if axis_row is not None and axis_row[0]:
+            from .arrival_store import ArrivalCanonicalUnsupported
+
+            for t in existing_tables:
+                valid, defect = _verify_coordinate_schema(conn, t)
+                if not valid:
+                    raise ArrivalCanonicalUnsupported(
+                        f"{defect} — coordinate_axis marker disagrees with table structure "
+                        "(out-of-band interference)"
+                    )
+            return  # Fast path: marker present and structure complete
 
     if not existing_tables:
         conn.execute(
@@ -435,12 +511,9 @@ def ensure_coordinate_schema(
         conn.commit()
         return
 
-    already_migrated = True
-    for t in existing_tables:
-        cols = {r[1] for r in conn.execute(f"PRAGMA table_info({t})")}
-        if "arrival_ordinal" not in cols:
-            already_migrated = False
-            break
+    already_migrated = all(
+        _verify_coordinate_schema(conn, t)[0] for t in existing_tables
+    )
 
     if already_migrated:
         conn.execute(
@@ -564,11 +637,11 @@ def ensure_coordinate_schema(
             if table not in existing_tables:
                 continue
 
-            cols = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
             is_final = (idx == len(tables_to_check) - 1) or (
                 idx == 0 and len(existing_tables) == 1
             )
-            if "arrival_ordinal" in cols:
+            valid, _ = _verify_coordinate_schema(conn, table)
+            if valid:
                 if is_final:
                     conn.execute("BEGIN IMMEDIATE")
                     conn.execute(

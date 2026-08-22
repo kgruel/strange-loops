@@ -445,3 +445,234 @@ this allocator anyway. Not a finding against WP-1a.
 single assertion, the five minor findings are genuinely addressed rather than
 papered over, and one of them (F-6) turned out to close a real refusal hole. The
 implementation is ready to proceed to WP-1b.
+
+---
+---
+
+# ROUND 3 — full gate of WP-1b (arrival-canonical migration mode)
+
+New work package, full protocol. Commits `ac7ac6a0` (implementation) +
+`b07d5a03` (report), on top of the WP-1a tip `e81de220` this gate passed in
+Round 2. Gate branch rebased onto `b07d5a03`.
+
+## ROUND 3 VERDICT: **BLOCKING** — one finding (G-1).
+
+All seven suites are green, the gate coverage is real, and the mechanism matches
+the proposal on every point I was asked to check. The block is a **reachable
+circular refusal**: WP-1b wires the provider-mismatch check into
+`rederive_projections` itself, so on a divergent legacy index the designated
+repair path refuses with the instruction "run `rederive_projections`". I
+demonstrated it end-to-end; it is not hypothetical, and no test covers it.
+
+## Suite reconciliation — all seven measured by this gate at `b07d5a03`
+
+| Suite | Round 2 (`e81de220`) | Round 3 (`b07d5a03`) | Delta | Status |
+|---|---|---|---|---|
+| atoms | 517 | **517 passed** | 0 | OK |
+| engine | 1822 + 1 skip | **1830 passed, 1 skipped** | **+8** | OK — exact, see below |
+| sdk | 324 | **324 passed** | 0 | OK |
+| lang | 655 | **655 passed** | 0 | OK |
+| store | 157 | **157 passed** | 0 | OK |
+| arch | 98 | **98 passed** | 0 | OK |
+| apps/loops | 2525 + 1 xfail | **2525 passed, 1 xfailed** | 0 | OK — WP-1a fix holds |
+
+**Engine +8 reconciles exactly.** `test_arrival_coordinate_d0.py` grew from 12 to
+**20 collected** tests: G-D0-3, G-D0-7, G-D0-8, G-D0-12, and four
+provider-mismatch/validation tests. 1822 + 8 = 1830. No existing test dropped.
+
+**On the F-2 history — the reporting problem is corrected.** I checked
+`WP1B-REPORT.md`'s suite table against my own numbers specifically because Round 1
+found the WP-1a report concealing a red suite. This time all seven suites are
+listed, `apps/loops` included, and **every figure matches mine exactly**
+(engine 1830+1skip, apps/loops 2525+1xfail, lang 655, atoms 517, sdk 324,
+store 157, arch 98). The claims are complete and truthful. Credit where due.
+
+## Scope — clean
+
+`git diff --stat e81de220..b07d5a03` touches only the three fenced engine sources
+(`sqlite_store.py`, `arrival_store.py`, `arrival_projection.py`),
+`libs/engine/tests/test_arrival_coordinate_d0.py`, and `WP1B-REPORT.md`. Nothing
+outside the fence. Working tree clean; the only ignored entries (`.hypothesis/`,
+`uv.lock`) are pre-existing and untracked, not cruft from this commit.
+
+## Design conformance — every requested point verified in the code
+
+**Composite `(table, row_id)` staging join — YES.** `_coordinate_staging` is
+declared `PRIMARY KEY (table_name, row_id)`, and both rebuild INSERTs join on the
+composite key (`ON s.table_name = 'facts' AND s.row_id = f.id`, and the `'ticks'`
+analogue). **Proven load-bearing** by break/restore below.
+
+**Mismatch refusal fires in BOTH directions — YES.** Three independent checks per
+table: row-count disagreement; an index row with no log coordinate
+(`missing_in_staging`); and a log coordinate with no index row
+(`missing_in_index`). Plus coordinate-duplication (a `GROUP BY … HAVING COUNT(*)>1`
+check *and* the staging primary key catching duplicate identities), invalid table
+names, and malformed tuples. `TestProviderMismatchRefusal` covers fewer / more /
+differing-id, all asserting `match="rederive_projections"`.
+
+**ArrivalStore invokes the upgrader before its `_ensure_*` tail — YES.**
+`__init__` assigns `self._log`, then sets `_coordinate_mode = "arrival"` and the
+`_provider` closure (which walks `self._log` via `rows_of_record`, bounded by the
+stamped resume mark), then calls `self._ensure_coordinate_schema()` **ahead of**
+`_ensure_fact_signature_column` / `_ensure_chain_columns` / `_ensure_meta_table`.
+Correct order, provider closed over the log after assignment.
+
+**WP-1a rebuild machinery REUSED, not duplicated — YES.** `_rebuild_table_mirrored`
+was renamed `_rebuild_table` and takes `mode`; the view dependency-closure,
+trigger inventory, index inventory, drop/rename and replay steps are **one shared
+body**. Only the single staging INSERT branches on mode. The WP-1a-era
+`ArrivalStore._ensure_coordinate_schema` no-op override was correctly *deleted*
+so the base implementation now drives both modes — dissolution residue swept.
+
+**Mode argument validation tightened correctly:** `mirrored` + a provider →
+`ValueError`; `arrival` without a provider → `ValueError`; unknown mode →
+`ValueError`. The WP-1a lineage refusal is now correctly scoped to
+`mode == "mirrored"` only, so arrival mode may legitimately operate on an
+arrival-marked store. `TestMisModeRefusal` still passes.
+
+## G-D0-3 genuinely discriminates `ordinal = rowid`
+
+I was asked to confirm the fixture actually expands a batch. It does, and it is
+the sharpest test in the file. The log carries ordinal 1 = one fact, **ordinal 2 =
+a batch of three facts**, ordinal 3 = a tick. The assertions:
+
+```python
+assert fact_rows[1] == (2, "f-002-a", 2, 0)
+assert fact_rows[2] == (3, "f-002-b", 2, 1)   # rowid 3, ordinal 2
+assert fact_rows[3] == (4, "f-002-c", 2, 2)   # rowid 4, ordinal 2
+```
+
+Rowids run 2, 3, 4 while ordinals are 2, 2, 2 with seq 0, 1, 2. A rowid backfill
+would produce `(3, …, 3, 0)` and fail on the very next line. **The test cannot
+pass under `ordinal = rowid`.** It also verifies the post-migration catch-up
+append lands at `(5, new_fid, 4, 0)` — a new ordinal, colliding with nothing.
+
+## Independent break/restore — G-D0-12 (cross-table id collision)
+
+I removed the table predicate from **both** staging joins, reducing the composite
+key to `row_id` alone:
+
+- before break: 1 passed
+- after break: **FAILED** — `sqlite3.IntegrityError: UNIQUE constraint failed:
+  facts_new.rowid` (a fact and a tick sharing an id fan the join out to two rows)
+- after `git restore`: **20 passed** (full D0 file)
+
+The composite key is genuinely load-bearing, and the test discriminates it.
+
+---
+
+## FINDING G-1 — BLOCKING — `rederive_projections` refuses with instructions to run `rederive_projections`
+
+**What.** `rederive_projections` calls `_ensure_index_schema(conn, log)` at
+`arrival_projection.py:480`, **before** the `DELETE FROM facts` / `DELETE FROM
+ticks` at lines 493-494. WP-1b made `_ensure_index_schema` delegate to
+`ensure_coordinate_schema(mode="arrival")`, whose provider/index agreement check
+therefore runs against the **stale, pre-delete** index content. When that content
+disagrees with the log — the exact condition rederivation exists to repair — the
+migration raises `ArrivalCanonicalUnsupported` whose remedy text is *"run
+engine.arrival_projection.rederive_projections to rebuild the index from the
+log"*. We are already inside that function. The repair path cannot repair.
+
+**Evidence — reproduced end-to-end, two reachable cases.** Both build a legacy
+(no-coordinate) arrival index on disk and call the public
+`rederive_projections(log_path)`:
+
+| Case | Result |
+|---|---|
+| Healthy legacy index, ordinal mark present | SUCCEEDS (`records=4, facts=3`) |
+| **Legacy index with a forged out-of-band row** | **REFUSED** — `index content does not match arrival log coordinates (facts has 4 rows, log has 3) — run engine.arrival_projection.rederive_projections …` |
+| **Legacy index, rows present, `ARRIVAL_ORDINAL_KEY` meta absent** | **REFUSED** — `(facts has 3 rows, log has 0) — run engine.arrival_projection.rederive_projections …` |
+
+The second case is broader than it looks: `_ensure_index_schema`'s `_provider`
+returns immediately when the stamped ordinal mark is missing (`if mark_ord is
+None: return`), yielding **zero** coordinates, so *any* legacy index with rows but
+no ordinal mark refuses on the count check.
+
+**Why the suite is green anyway.** G-D0-8 exercises rederivation only on an index
+that already agrees with its log. No test drives rederivation on a **divergent**
+legacy index. The gap is in coverage, not just in code.
+
+**Is it a regression? — measured across all three commits, not inferred.** I ran
+the identical probe at each tip. The precise answer is *"a regression against
+pre-slice-D, and an unclosed assignment against WP-1a"*:
+
+| Commit | Healthy legacy index | Divergent legacy index |
+|---|---|---|
+| `560710b8` pre-slice-D | SUCCEEDS (`facts=3`) | **SUCCEEDS — repairs it**, forged row purged, `facts=3` |
+| `e81de220` WP-1a tip | `OperationalError: table facts has no column named arrival_ordinal` | same error |
+| `b07d5a03` WP-1b | SUCCEEDS | **REFUSED (circular)** |
+
+Read across the row, the story is exact. **Pre-slice-D, rederivation did exactly
+its job**: handed a legacy index carrying a forged out-of-band row, it rebuilt
+from the log and dropped the forgery. **WP-1a broke the route outright** for
+*every* legacy arrival index — its rederivation inserts began supplying
+coordinates via `FACT_INSERT_SQL` while `_ensure_index_schema` still could not add
+those columns, so both cases died on a missing column. That latent breakage was
+never caught because no test drives rederivation on a legacy index.
+
+**WP-1b's assignment was to close precisely that gap** — the
+`arrival_projection._ensure_index_schema` delegation is named in it. It closed
+the healthy half and left the divergent half broken, converting a loud
+`OperationalError` into a quiet circular refusal. So G-1 is not "WP-1b broke a
+working path"; it is **"WP-1b half-fixed the path it was assigned to fix, and the
+unfixed half is the one that matters"** — the divergent index is the only kind
+that needs repairing at all. Against the pre-slice-D behaviour above, the
+capability loss is real and measured.
+
+**Exact fix required — and why the obvious two do not work.** I checked both
+before recommending:
+
+- *"Just delete the rows first, then migrate"* — does **not** work. The provider
+  walks the log and would still yield N coordinates against an emptied index, so
+  the count check fails in the other direction.
+- *"Skip the migration in the rederive path"* — does **not** work either. I
+  verified that `_SCHEMA_STMTS` is `CREATE TABLE IF NOT EXISTS` and so cannot add
+  columns to an existing legacy table (probe: columns remain
+  `id…signature`, no `arrival_ordinal`). A NOT NULL column addition genuinely
+  requires the table rebuild. Rederivation's own `FACT_INSERT_SQL` needs those
+  columns to exist.
+
+The correct shape is a **schema-only rebuild for the rederivation route**: add the
+coordinate columns via the existing `_rebuild_table` machinery with placeholder
+coordinates and **no provider-agreement validation**, stamping
+`coordinate_axis = 'arrival'`. This is sound precisely because rederivation
+deletes every row microseconds later and reinserts each one with authoritative
+`(ord, seq)` from the log walk — validating the doomed content is not merely
+unnecessary, it is the thing preventing the repair. Concretely: give
+`ensure_coordinate_schema` a way to add the axis without asserting agreement (a
+third internal path, or a `validate=False` flag honoured only by
+`_ensure_index_schema`), and keep the strict validating path for
+`ArrivalStore.__init__`, where refusing *is* the right answer because that route
+has no authority to rewrite content.
+
+**Also add the missing test**: rederivation over a divergent legacy index must
+succeed and produce log-faithful coordinates. That is the gate G-D0-8 should have
+had.
+
+---
+
+## Round 3 disclosure
+
+The Round 1 first-run engine anomaly did not recur. I ran the full engine suite
+twice more this round with no instability. Nothing else in WP-1b was unverifiable.
+
+## Standing notes (non-blocking, carried forward)
+
+- **Staging temp table cleanup is asymmetric.** `_coordinate_staging` is dropped
+  in the `finally` of the rebuild block, but every provider-mismatch refusal
+  raises *before* that block is entered, leaving the temp table on the connection.
+  Harmless in practice — it is a `TEMP` table that dies with the connection, and
+  each arrival call begins with `DELETE FROM _coordinate_staging` — but the
+  cleanup would read more honestly wrapped around the whole arrival section.
+- The WP-1a legacy-allocator concurrency note still stands unchanged for the
+  mirrored path; arrival mode takes coordinates from the log and is unaffected.
+
+## Bottom line
+
+WP-1b's mechanism is correct and its tests are real: the composite key, the
+bidirectional mismatch refusal, the batch-expansion discrimination and the
+machinery reuse all hold up under direct attack, and the report's numbers are
+honest this time. One wiring decision — validating provider agreement inside the
+repair path — turns a good safety check into a deadlock on exactly the indices
+that need repairing. Fix G-1 and add the divergent-rederivation test, and this
+package passes.

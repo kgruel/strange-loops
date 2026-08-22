@@ -107,7 +107,14 @@ class WitnessAggregateUnsupported(WitnessResolutionError):
 
 
 class WitnessAxisMismatch(WitnessResolutionError):
-    """A witness position's arrival coordinate axis does not match the target store's arrival log lineage."""
+    """A position's arrival axis is not the target store's arrival axis.
+
+    Distinct from A10 (:class:`WitnessLineageMismatch`), which keys on the
+    DECLARATION lineage and the store path. This one fires on the SAME path:
+    a store file replaced in place is a different coordinate axis wearing the
+    old address, and its ordinals mean something else. Refused separately
+    because A10's prose describes a failure this is not.
+    """
 
 
 class WitnessLineageMismatch(WitnessResolutionError):
@@ -240,7 +247,8 @@ def receipt_group_span(conn: sqlite3.Connection, ordinal: int) -> tuple[int, int
     store-wide today).
     """
     rows = conn.execute(
-        "SELECT arrival_ordinal, ts, payload FROM facts WHERE kind GLOB '_decl.*' ORDER BY arrival_ordinal, arrival_seq"
+        "SELECT arrival_ordinal, ts, payload FROM facts "
+        "WHERE kind GLOB '_decl.*' ORDER BY arrival_ordinal, arrival_seq"
     ).fetchall()
     if not rows:
         return None
@@ -250,7 +258,11 @@ def receipt_group_span(conn: sqlite3.Connection, ordinal: int) -> tuple[int, int
     prev_lineage = _lineage_of(rows[0][2])
     for ord_val, ts, payload_text in rows[1:]:
         lineage = _lineage_of(payload_text)
-        if (ord_val == prev_ord + 1 or ord_val == prev_ord) and ts == prev_ts and lineage == prev_lineage:
+        # Contiguous OR equal: rows expanded from ONE arrival record share an
+        # ordinal (they differ only in ``arrival_seq``), so equality continues
+        # the run just as adjacency does.
+        contiguous = ord_val in (prev_ord, prev_ord + 1)
+        if contiguous and ts == prev_ts and lineage == prev_lineage:
             pass  # same ceremony — extend the run
         else:
             runs.append((run_start, prev_ord))
@@ -272,9 +284,10 @@ def _resolve_anchor(conn: sqlite3.Connection, ordinal: int) -> TickAnchor | None
     contribute nothing — honestly no anchor.
 
     Tie-break: when several ticks seal the SAME ``fact_cursor`` (a re-fired
-    boundary), the LAST-appended tick wins (``t.arrival_ordinal DESC, t.arrival_seq DESC``) — the "last tick"
-    the docstring promises, resolved deterministically rather than by whichever
-    row the engine happened to return.
+    boundary), the LAST-appended tick wins (``t.arrival_ordinal DESC,
+    t.arrival_seq DESC``) — the "last tick" the docstring promises, resolved
+    deterministically rather than by whichever row the engine happened to
+    return.
     """
     tick_cols = {r[1] for r in conn.execute("PRAGMA table_info(ticks)")}
     if "fact_cursor" not in tick_cols:
@@ -283,7 +296,9 @@ def _resolve_anchor(conn: sqlite3.Connection, ordinal: int) -> TickAnchor | None
         "SELECT t.name, t.ts, t.fact_cursor FROM ticks t "
         "JOIN facts f ON f.id = t.fact_cursor "
         "WHERE t.fact_cursor IS NOT NULL AND t.fact_cursor <> '' "
-        "AND f.arrival_ordinal <= ? ORDER BY f.arrival_ordinal DESC, f.arrival_seq DESC, t.arrival_ordinal DESC, t.arrival_seq DESC LIMIT 1",
+        "AND f.arrival_ordinal <= ? "
+        "ORDER BY f.arrival_ordinal DESC, f.arrival_seq DESC, "
+        "t.arrival_ordinal DESC, t.arrival_seq DESC LIMIT 1",
         (ordinal,),
     ).fetchone()
     if row is None:
@@ -500,9 +515,17 @@ def verify_position_for_store(
       order is per-store, so a merge that copied the fact reorders it (B1c). A
       fact id absent from the target raises :class:`UnknownWitnessHandle`;
       - an unadopted position (no lineage) on a different store, or a lineage
-      mismatch, raises :class:`WitnessLineageMismatch` with teaching;
-    - target is arrival-canonical AND position carries a real arrival_lineage
-      AND it differs from the target log's lineage — raises :class:`WitnessAxisMismatch`.
+      mismatch, raises :class:`WitnessLineageMismatch` with teaching.
+
+    The SAME-PATH case carries one extra guard: a store file replaced in place
+    under the same path is a different coordinate axis wearing the old address.
+    When the position carries a real ``arrival_lineage`` AND the target is
+    arrival-canonical AND the two differ, the position is refused with the
+    separately-typed :class:`WitnessAxisMismatch` — NOT the A10 message, whose
+    prose describes a failure this is not. It fires only when BOTH sides carry a
+    real axis; a legacy (axis-less) position keeps the no-DB-hit fast path, and
+    the cross-store branches below are A10's alone (a same-lineage sibling store
+    legitimately has its own arrival log, and must re-resolve, not refuse).
 
     Called at every engine ``at=`` selector (``vertex_fold`` / ``vertex_facts`` /
     ``resolve_declaration_documents``) before the ordinal is applied, so no read
@@ -510,26 +533,26 @@ def verify_position_for_store(
     could not give once a handle is serialized and re-used across stores.
     """
     target = str(Path(store_path).resolve())
-    conn = _open_readonly(store_path, timeout=timeout)
-    try:
-        target_lineage = _read_own_lineage(conn) if conn is not None else None
-        target_arrival_lineage = _read_arrival_lineage(conn) if conn is not None else None
-    finally:
-        if conn is not None:
-            conn.close()
-
-    if (
-        target_arrival_lineage is not None
-        and at.arrival_lineage is not None
-        and at.arrival_lineage != target_arrival_lineage
-    ):
-        raise WitnessAxisMismatch(
-            f"witness position arrival lineage ({at.arrival_lineage}) does not "
-            f"match target store arrival lineage ({target_arrival_lineage}) at {target} — "
-            "a position cannot be applied across different arrival log coordinate axes."
-        )
-
     if at.store == target:
+        if at.arrival_lineage is None:
+            return at
+        conn = _open_readonly(store_path, timeout=timeout)
+        try:
+            target_arrival_lineage = (
+                _read_arrival_lineage(conn) if conn is not None else None
+            )
+        finally:
+            if conn is not None:
+                conn.close()
+        if (
+            target_arrival_lineage is not None
+            and target_arrival_lineage != at.arrival_lineage
+        ):
+            raise WitnessAxisMismatch(
+                f"witness position arrival lineage ({at.arrival_lineage}) does not "
+                f"match target store arrival lineage ({target_arrival_lineage}) at {target} — "
+                "a position cannot be applied across different arrival log coordinate axes."
+            )
         return at
     if at.lineage is None:
         raise WitnessLineageMismatch(
@@ -539,6 +562,10 @@ def verify_position_for_store(
             "here. Resolve the position against this store, or adopt the store "
             "to mint a portable lineage-qualified handle."
         )
+    conn = _open_readonly(store_path, timeout=timeout)
+    target_lineage = _read_own_lineage(conn) if conn is not None else None
+    if conn is not None:
+        conn.close()
     if target_lineage != at.lineage:
         raise WitnessLineageMismatch(
             f"witness position (lineage {at.lineage}) was resolved against "
@@ -559,7 +586,8 @@ def _resolve_address_ordinal(conn: sqlite3.Connection, address: str) -> tuple[st
         return GENESIS_SENTINEL, -1
     if address == "head":
         row = conn.execute(
-            "SELECT id, arrival_ordinal FROM facts ORDER BY arrival_ordinal DESC, arrival_seq DESC LIMIT 1"
+            "SELECT id, arrival_ordinal FROM facts "
+            "ORDER BY arrival_ordinal DESC, arrival_seq DESC LIMIT 1"
         ).fetchone()
         if row is None:
             return GENESIS_SENTINEL, -1  # empty store → empty prefix
@@ -581,7 +609,8 @@ def _id_at_ordinal(conn: sqlite3.Connection, ordinal: int) -> str:
     if ordinal < 0:
         return GENESIS_SENTINEL
     row = conn.execute(
-        "SELECT id FROM facts WHERE arrival_ordinal <= ? ORDER BY arrival_ordinal DESC, arrival_seq DESC LIMIT 1",
+        "SELECT id FROM facts WHERE arrival_ordinal <= ? "
+        "ORDER BY arrival_ordinal DESC, arrival_seq DESC LIMIT 1",
         (ordinal,),
     ).fetchone()
     return row[0] if row else GENESIS_SENTINEL
@@ -674,7 +703,8 @@ def diff_interval_report(
         if newest_ts_at_lo is not None:
             rows = conn.execute(
                 "SELECT id, kind, ts FROM facts WHERE arrival_ordinal > ? AND arrival_ordinal <= ? "
-                "AND kind NOT GLOB '_decl.*' AND ts < ? ORDER BY arrival_ordinal DESC, arrival_seq DESC",
+                "AND kind NOT GLOB '_decl.*' AND ts < ? "
+                "ORDER BY arrival_ordinal DESC, arrival_seq DESC",
                 (lo, hi, newest_ts_at_lo),
             ).fetchall()
             late_arrivals = [{"id": r[0], "kind": r[1], "ts": r[2]} for r in rows]
@@ -724,8 +754,8 @@ def resolve_seq(store_path: Path, n: int, *, timeout: float = 5.0) -> str:
 
     The inverse of :attr:`WitnessPosition.seq`: ``seq`` is a 1-based ordinal
     over ALL rows in arrival order, ``_decl.*`` included. This is an
-    arrival-order lookup (``ORDER BY arrival_ordinal, arrival_seq`` + offset), never an ordering of ids
-    (A3) — the resolved id still flows through
+    arrival-order lookup (``ORDER BY arrival_ordinal, arrival_seq`` +
+    offset), never an ordering of ids (A3) — the resolved id still flows through
     :func:`resolve_witness_position` for the actual position (receipt-group
     guard, lineage, anchor).
 

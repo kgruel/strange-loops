@@ -2778,10 +2778,11 @@ class TestEmitExceptionAndResolveEdges:
         conn = sqlite3.connect(str(db))
         conn.execute(
             "CREATE TABLE facts "
-            "(id TEXT PRIMARY KEY, kind TEXT, ts REAL, observer TEXT, origin TEXT, payload TEXT)"
+            "(id TEXT PRIMARY KEY, kind TEXT, ts REAL, observer TEXT, origin TEXT, "
+            "payload TEXT, arrival_ordinal INTEGER, arrival_seq INTEGER)"
         )
         conn.execute(
-            "INSERT INTO facts VALUES (?,?,?,?,?,?)",
+            "INSERT INTO facts VALUES (?,?,?,?,?,?,1,0)",
             ("id1", "_topology", time.time(), "sys", "",
              json.dumps({"name": "gone", "store": str(tmp_path / "nonexistent.db"),
                          "kind_keys": {}})),
@@ -2842,9 +2843,10 @@ class TestCloseValidateEmitError:
         conn = sqlite3.connect(str(db))
         conn.execute(
             "CREATE TABLE IF NOT EXISTS facts "
-            "(id TEXT PRIMARY KEY, kind TEXT, ts REAL, observer TEXT, origin TEXT, payload TEXT)"
+            "(id TEXT PRIMARY KEY, kind TEXT, ts REAL, observer TEXT, origin TEXT, "
+            "payload TEXT, arrival_ordinal INTEGER, arrival_seq INTEGER)"
         )
-        conn.execute("INSERT INTO facts VALUES (?,?,?,?,?,?)",
+        conn.execute("INSERT INTO facts VALUES (?,?,?,?,?,?,1,0)",
             ("fakeid1", "thread", time.time(), "admin", "",
              _json.dumps({"name": "task1"})))
         conn.commit()

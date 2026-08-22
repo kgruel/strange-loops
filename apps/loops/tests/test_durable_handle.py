@@ -81,7 +81,7 @@ def test_durable_handle_round_trips_through_the_address_parser(tmp_path):
     assert handle == f"fact:{lineage}/{f1}"
     # The advertised portable handle resolves back to the same position.
     back = resolve_at_address(store, handle)
-    assert back.fact_id == f1 and back.rowid == pos.rowid and back.lineage == lineage
+    assert back.fact_id == f1 and back.ordinal == pos.ordinal and back.lineage == lineage
 
 
 def test_wrong_lineage_qualified_handle_is_refused(tmp_path):

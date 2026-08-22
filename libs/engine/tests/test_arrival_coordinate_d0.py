@@ -1629,6 +1629,101 @@ class TestSolWp101StructuralVerification:
 
         conn.close()
 
+    @pytest.mark.parametrize(
+        ("facts_coord_ddl", "expected_defect"),
+        [
+            pytest.param(
+                "arrival_ordinal INTEGER NOT NULL",
+                "facts lacks arrival_seq column",
+                id="missing-seq",
+            ),
+            pytest.param(
+                "arrival_ordinal INTEGER,\n"
+                "                arrival_seq INTEGER NOT NULL,\n"
+                "                UNIQUE (arrival_ordinal, arrival_seq)",
+                "facts lacks NOT NULL on arrival_ordinal",
+                id="nullable-ordinal",
+            ),
+            pytest.param(
+                "arrival_ordinal INTEGER NOT NULL,\n"
+                "                arrival_seq INTEGER,\n"
+                "                UNIQUE (arrival_ordinal, arrival_seq)",
+                "facts lacks NOT NULL on arrival_seq",
+                id="nullable-seq",
+            ),
+            pytest.param(
+                "arrival_ordinal INTEGER NOT NULL,\n"
+                "                arrival_seq INTEGER NOT NULL",
+                "facts lacks UNIQUE (arrival_ordinal, arrival_seq)",
+                id="missing-unique",
+            ),
+        ],
+    )
+    def test_marker_present_deep_defects_refuse_loudly(
+        self, tmp_path: Path, facts_coord_ddl: str, expected_defect: str
+    ) -> None:
+        """R5-1: the marker-present refusal is pinned for every DEEP defect
+        dimension of SOL-WP1-01, not just total column absence — a facts table
+        that would have passed the old shallow column-exists check must still
+        refuse, naming the specific structural defect.
+        """
+        db_path = tmp_path / "stamped_deep_defect.db"
+        conn = sqlite3.connect(str(db_path))
+        conn.executescript(
+            f"""
+            CREATE TABLE facts (
+                id TEXT NOT NULL PRIMARY KEY,
+                kind TEXT NOT NULL,
+                ts REAL NOT NULL,
+                observer TEXT NOT NULL,
+                origin TEXT NOT NULL DEFAULT '',
+                payload TEXT NOT NULL,
+                signature TEXT,
+                {facts_coord_ddl}
+            );
+            CREATE TABLE ticks (
+                id TEXT NOT NULL PRIMARY KEY,
+                name TEXT NOT NULL,
+                ts REAL NOT NULL,
+                since REAL,
+                origin TEXT NOT NULL,
+                payload TEXT NOT NULL,
+                prev_hash TEXT,
+                window_start TEXT,
+                fact_cursor TEXT,
+                window_hash TEXT,
+                signature TEXT,
+                arrival_ordinal INTEGER NOT NULL,
+                arrival_seq INTEGER NOT NULL,
+                UNIQUE (arrival_ordinal, arrival_seq)
+            );
+            CREATE TABLE store_meta (key TEXT PRIMARY KEY, value TEXT);
+            INSERT INTO store_meta (key, value) VALUES ('coordinate_axis', 'mirrored');
+            """
+        )
+        conn.commit()
+        schema_before = conn.execute(
+            "SELECT name, sql FROM sqlite_schema ORDER BY name"
+        ).fetchall()
+        conn.close()
+
+        conn = sqlite3.connect(str(db_path))
+        with pytest.raises(ArrivalCanonicalUnsupported) as exc_info:
+            ensure_coordinate_schema(conn, mode="mirrored")
+        conn.close()
+
+        err_msg = str(exc_info.value)
+        assert expected_defect in err_msg
+        assert "coordinate_axis marker disagrees with table structure" in err_msg
+
+        # Store must NOT be modified — no auto-rebuild on a marked store.
+        conn = sqlite3.connect(str(db_path))
+        schema_after = conn.execute(
+            "SELECT name, sql FROM sqlite_schema ORDER BY name"
+        ).fetchall()
+        conn.close()
+        assert schema_after == schema_before
+
     def test_marker_present_structure_incomplete_refuses_loudly(
         self, tmp_path: Path
     ) -> None:

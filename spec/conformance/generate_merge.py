@@ -562,7 +562,7 @@ def generate_merge_vectors() -> None:
                 for label, cursor_addr in case.cursors.items():
                     pos = resolve_witness_position(target_path, cursor_addr)
                     with StoreReader(target_path) as reader:
-                        stored_facts = reader.facts_by_kind(case.spec.name, at_rowid=pos.rowid)
+                        stored_facts = reader.facts_by_kind(case.spec.name, at_ordinal=pos.ordinal)
                         payloads = []
                         for f in stored_facts:
                             p = dict(f["payload"])

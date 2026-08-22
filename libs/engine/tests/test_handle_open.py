@@ -97,7 +97,7 @@ class TestOpen:
             snap = h.snapshot
             assert isinstance(snap, VertexSnapshot)
             assert snap.generation == 0
-            assert snap.position.rowid == 0
+            assert snap.position.ordinal == -1
             assert snap.visible_domain_count == 0
             assert snap.fold.is_empty
 
@@ -157,7 +157,7 @@ class TestRefresh:
             assert [r.fact_id for r in batch.receipts] == [new_id]
             assert batch.receipts[0].control is False
             assert h.snapshot.generation == gen0 + 1
-            assert h.snapshot.position.rowid == 2
+            assert h.snapshot.position.ordinal == 2
             assert h.snapshot.visible_domain_count == 2
             # fold now equal to a fresh cold read
             cold = vertex_fold(vpath)

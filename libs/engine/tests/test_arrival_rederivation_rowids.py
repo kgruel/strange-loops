@@ -148,7 +148,7 @@ def positions(db):
     out = {}
     for fid in fact_ids(db):
         pos = resolve_witness_position(db, fid, group_boundary="allow")
-        out[fid] = (pos.rowid, pos.seq, pos.lineage, pos.unadopted, durable_handle(pos))
+        out[fid] = (pos.ordinal, pos.seq, pos.lineage, pos.unadopted, durable_handle(pos))
     return out
 
 
@@ -198,7 +198,7 @@ def test_rederivation_preserves_receipt_group_contiguity(tmp_path, keys, signer)
     def spans():
         conn = sqlite3.connect(str(db))
         try:
-            top = conn.execute("SELECT MAX(rowid) FROM facts").fetchone()[0]
+            top = conn.execute("SELECT MAX(arrival_ordinal) FROM facts").fetchone()[0]
             return [receipt_group_span(conn, r) for r in range(1, top + 1)]
         finally:
             conn.close()

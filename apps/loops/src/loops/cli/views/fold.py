@@ -1528,15 +1528,13 @@ def _run_diff(
 
     if interval is not None:
         # Baseline attribution (codex re-verify, post-capstone): the engine
-        # report is symmetric by rowid — late arrivals are computed against
-        # the rowid-LOWER endpoint, whichever the user named first. Only this
-        # layer knows which CLI label ('from'/'to') that endpoint wears, so
-        # stamp it here for both the JSON contract and the lens sentence; a
-        # reversed `--diff B..A` must attribute the baseline to 'to', not
-        # hardcode 'from'.
+        # report computes the baseline endpoint and returns it in `baseline`.
+        # Map the engine position name ('pos1'/'pos2') to the CLI label ('from'/'to')
+        # for both the JSON contract and the lens sentence; a reversed
+        # `--diff B..A` attributes the baseline to 'to'.
         interval = {
             **interval,
-            "baseline": "from" if pos1.rowid <= pos2.rowid else "to",
+            "baseline": "from" if interval.get("baseline") == "pos1" else "to",
         }
 
     if parse_format(args) is Format.JSON:

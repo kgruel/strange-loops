@@ -233,3 +233,113 @@ implementation from a reverted one that spells `rowid` as `oid`, and I showed th
 whole engine suite staying green through that regression. The right response is to
 narrow what the text ratchet claims and to make the behavioural gate carry the
 verdict, not to teach the regex more spellings.
+
+---
+---
+
+# ROUND 2 — re-gate of the WP-3 fix (`6dc12f15`)
+
+Scoped to W3-1, W3-2, W3-3. Gate branch rebased onto `6dc12f15`.
+
+## ROUND 2 VERDICT: **PASS** — all three findings closed.
+
+Scope is in-fence and additive: `vertex.py` (+4), `test_seal_rebase_d2.py` (+76),
+`test_vertex.py` (+30), fix report. No production logic outside the one guard.
+
+## W3-1 — CLOSED. The decisive check: my `oid` mutation now fails, in G-D2-4.
+
+Re-applied the exact mutation from Round 1 — chain-head selection reverted to the
+rowid axis spelled `oid`:
+
+| | Round 1 | Round 2 |
+|---|---|---|
+| D2 suite | 6 passed | **1 failed**, 5 passed |
+| engine suite | **1876 passed** (regression invisible) | **1 failed**, 1876 passed |
+| failing test | — | `TestGD2_4_VerificationUnderPermutation::test_permuted_insert_verify_chain_identical` |
+
+It fails in **G-D2-4**, the behavioural gate — not the text ratchet — which is
+exactly where the verdict was supposed to move. Restored: green.
+
+**Second site, not rehearsed in their proof.** Their demonstration mutates
+predecessor selection in `append_tick_attested`. I picked a different site — the
+`verify_chain` tick-ordering walk (`sqlite_store.py:2474`,
+`SELECT {row_sql} FROM ticks ORDER BY …`) — and mutated it to `ORDER BY oid`:
+
+```
+1 failed, 1876 passed
+FAILED …TestGD2_4_VerificationUnderPermutation::test_permuted_insert_verify_chain_identical
+```
+
+Caught, and at a **different assertion** (line 334) than the chain-head mutation
+hits (line 357). So the strengthened gate discriminates at least three distinct
+sites — theirs, my chain-head one, and my tick-walk one — rather than being
+fitted to the single case they rehearsed. *(Correction to my own read: I initially
+described 2474 as a reanchor walk; it is inside `verify_chain`. Still a distinct
+code path and a distinct assertion, but I want the record accurate.)*
+
+The strengthening is genuinely behavioural, not a text check in disguise: it
+asserts arrival-axis outcomes that differ from rowid-axis ones and says so
+inline — `window_facts == 2` where the rowid axis gives 4 and 0, `current_chain_head()`
+resolving to `t-2` where rowid picks `t-1`, and live minting under permutation
+where predecessor, `window_start`, and the newest-fact edge (`f-5`, where the
+rowid axis would pick `f-4`) must all follow arrival.
+
+**The claim is narrowed, as ruled.** G-D2-5's docstring now reads:
+
+> NOTE: This ratchet is a residue locator for the literal 'rowid' spelling, not
+> proof of axis correctness against synonyms or alternative syntax. The
+> behavioral gates (such as G-D2-4) own the axis-correctness verdict.
+
+That is a location claim, not a verdict claim — the scope-the-claim disposition
+applied exactly, and the regexes were correctly **not** grown to chase `oid`.
+
+## W3-2 — CLOSED
+
+The allowlist shrank from five names to four; `_rebuild_table_with_coordinates`
+is gone and the explanatory comment now names `_rebuild_table`. All four
+remaining entries exist in `sqlite_store.py` (verified individually in Round 1).
+
+## W3-3 — CLOSED for the reachable hazard; the second is a declared deferral
+
+`vertex.py:982` now raises `NotImplementedError("loop boundary accounting is
+count-based; pair-cursor projections are not yet supported here")` when the cursor
+is a tuple, and `test_vertex.py` pins that exact message. That converts the latent
+`TypeError` I found into an explicit, named refusal — the honest disposition,
+since pair-cursor boundary accounting is not implemented rather than merely
+mis-typed.
+
+- **Pin test passes** (1 passed).
+- **Int-cursor behaviour unchanged**: 105 boundary tests pass; the guard fires
+  only on `isinstance(replayed, tuple)`, so the count path is untouched.
+
+**Hazard #2 remains and that is fine.** `projection.py` was not touched, so all
+three tuple-cursor bumps still compute `(cursor[0] + 1, cursor[1])` — advancing
+the ordinal where a batch needs `seq`. It stays unreachable (`advance()` has no
+production callers; `advance()` itself assigns the store's correct pair; the
+boundary consumer now refuses tuples outright). The fix report **declares this
+explicitly** — *"Cursor type unification deferred as a candidate for the simplify
+pass"* — rather than claiming W3-3 fully closed. I agree with the deferral and am
+recording it as a tracked deferral, not a residual finding.
+
+## Suite reconciliation
+
+| Suite | Round 1 (`eb1b6566`) | Round 2 (`6dc12f15`) | Delta |
+|---|---|---|---|
+| engine | 1876 passed, 1 skipped | **1877 passed, 1 skipped** | **+1** |
+| apps/loops | 2525 + 1 xfail | **2525 + 1 xfail** | 0 |
+
++1 is exactly the W3-3 pin test. `test_seal_rebase_d2.py` still collects **6** —
+the G-D2-4 strengthening was in-place assertions, not new cases, which is the
+right shape for making an existing gate discriminate rather than adding a parallel
+one. The fix report's suite table lists all seven suites and every figure matches
+mine.
+
+## Bottom line
+
+All three findings are closed by the rulings, and the one that mattered is closed
+in the right place: the axis-correctness verdict now lives in a behavioural gate
+that catches the regression regardless of spelling, while the text ratchet has
+been demoted to the residue locator it always was. My own evasion no longer works,
+and neither does the same evasion at a site nobody rehearsed.
+
+WP-3 is ready for the sol-low pass check.

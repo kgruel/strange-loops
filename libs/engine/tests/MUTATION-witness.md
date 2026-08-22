@@ -22,7 +22,8 @@
 >   branch and moved its connection open, invalidating survivor
 >   `x_verify_position_for_store__mutmut_24`'s equivalence argument.
 >
-> No number in this report has been re-measured under D1.
+> Apart from row 5's hand re-verification above, no count or classification
+> in this report has been re-measured under D1.
 
 - **Target Module**: `libs/engine/src/engine/witness.py`
 - **Test Suites**: `libs/engine/tests/test_witness_position.py`, `libs/engine/tests/test_witness_address_helpers.py`, `libs/engine/tests/test_diff_interval_report.py`, `libs/engine/tests/test_fold_at.py`

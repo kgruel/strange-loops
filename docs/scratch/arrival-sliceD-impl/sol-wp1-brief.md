@@ -46,8 +46,18 @@ Every commit on the branch has been through an independent Claude-opus gate
 | ac7ac6a0 + b07d5a03 | WP-1b impl | r3 BLOCKING (G-1 circular refusal in rederive route) |
 | 8a5fbe35 + 1aa1f7af | G-1 fix | r4 PASS (G-1 cleared; batch-discriminating log-faithfulness proof; machinery shared not duplicated) |
 
-Arbiter-applied fixes: NONE — every change went through an implementer + the
-gate.
+ARBITER-APPLIED FIX — verify this one first, it has no independent gate:
+
+| Commit | What |
+|---|---|
+| aaf44142 | R5-1: parametrized the marker-present refusal test over the deep defect matrix (nullable ordinal/seq, missing seq, missing UNIQUE) with unmodified-store proof. TEST-ONLY. Arbiter mutation-verified: shallow-verifier mutation fails all 4, restore => 30 green. |
+
+Also since your last review: ac8b61fa (SOL-WP1-01 fix — structural verifier both
+paths, marker+incomplete => loud refusal no auto-rebuild, marker-absent+partial
+=> rebuild; gate round 5 PASS with SHA-256-level unmodified-store verification).
+
+RE-VERDICT SCOPE: the delta 3f9fa7fb^^..HEAD plus your SOL-WP1-01 claim —
+is it closed as you meant it? Full re-review NOT needed.
 
 Your job at LOW effort: an independent last pass over the diff for anything the
 gate's protocol would structurally miss — cross-file semantic drift, a claim in

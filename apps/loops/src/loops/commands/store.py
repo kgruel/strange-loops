@@ -120,7 +120,7 @@ def _require_materialized_store(target_path: Path) -> Path:
 
 
 def canonical_agreement(target_path: Path, *, deep: bool = False):
-    """Judge a JSONL-canonical target's index against its log — or ``None``.
+    """Judge a log-canonical target's index against its log — or ``None``.
 
     The gate every store read verb runs BEFORE it reads (design/store/
     verify-canonical-agreement). A ``.db``-canonical target has one artifact
@@ -129,20 +129,21 @@ def canonical_agreement(target_path: Path, *, deep: bool = False):
 
     Deliberately resolved through :func:`resolve_canonical_path` and
     ``index_path_for`` — both pure — rather than :func:`resolve_store_path`.
-    That path runs ``ensure_index``, which constructs a ``JsonlStore``
-    whenever the index is behind, and a ``JsonlStore`` constructor *repairs*:
-    it would catch the index up and then report agreement about a store whose
-    disagreement it had just erased. Verification and open-time recovery are
-    opposite contracts; this is the seam where they must not meet.
+    That path runs ``ensure_index`` / ``ensure_arrival_index``, which
+    constructs a store whenever the index is behind, and a store constructor
+    *repairs*: it would catch the index up and then report agreement about a
+    store whose disagreement it had just erased. Verification and open-time
+    recovery are opposite contracts; this is the seam where they must not meet.
 
     Returns ``(index_path, report)``. A non-materialized log raises the same
     ``FileNotFoundError`` as :func:`_require_materialized_store`.
     """
     from engine.canonical_audit import audit_agreement, audit_deep
-    from engine.residence import index_path_for, is_jsonl_canonical
+    from engine.residence import canonical_mode, index_path_for
 
     canonical = resolve_canonical_path(target_path)
-    if not is_jsonl_canonical(canonical):
+    mode = canonical_mode(canonical)
+    if mode not in ("jsonl", "arrival"):
         return None
     if not canonical.exists():
         raise FileNotFoundError(
@@ -156,9 +157,14 @@ def canonical_agreement(target_path: Path, *, deep: bool = False):
         # to destroy and no divergence it could hide, so the store-verb
         # existence contract keeps working. An index that DOES exist is
         # evidence and is never materialized through here.
-        from engine.jsonl_store import ensure_index
+        if mode == "arrival":
+            from engine.arrival_store import ensure_arrival_index
 
-        ensure_index(canonical)
+            ensure_arrival_index(canonical)
+        else:
+            from engine.jsonl_store import ensure_index
+
+            ensure_index(canonical)
     audit = audit_deep if deep else audit_agreement
     return index, audit(canonical)
 

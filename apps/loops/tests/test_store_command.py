@@ -1459,3 +1459,69 @@ class TestBareStoreEmptyHome:
             f"{loops_home / '.vertex'} not found. Run 'loops init' first."
             in captured.err
         )
+
+
+class TestArrivalStoreCanonicalAgreement:
+    """WP-4: arrival-canonical store audits through the CLI dispatch path."""
+
+    def _arrival_store(self, tmp_path):
+        import base64
+        from atoms import Fact
+        from engine.arrival import ArrivalLog
+        from engine.arrival_store import ArrivalStore
+        from engine.builder import fold_count, vertex
+
+        vpath = tmp_path / "arr.vertex"
+        (vertex("arr").store("./arr.arrival")
+            .loop("ping", fold_count("n"), boundary_every=1)
+            .write(vpath))
+
+        log_path = tmp_path / "arr.arrival"
+        db_path = tmp_path / "arr.db"
+        sig = base64.b64encode(b"\x01" * 64).decode()
+        pub = base64.b64encode(b"\x00" * 32).decode()
+
+        ArrivalLog.mint(
+            log_path,
+            observer="kyle",
+            signer=lambda obs, dig: sig,
+            key=pub,
+        )
+        store = ArrivalStore(
+            path=db_path,
+            serialize=lambda f: f.to_dict(),
+            deserialize=Fact.from_dict,
+            tick_signer=lambda obs, dig: sig,
+            fact_signer=lambda obs, dig: sig,
+        )
+        store.append(Fact.of("ping", "kyle", n=1))
+        store.close()
+        return vpath, log_path, db_path
+
+    def test_arrival_store_audits_clean_through_cli(self, tmp_path, capsys):
+        from loops.commands.store import _run_store
+
+        vpath, log_path, db_path = self._arrival_store(tmp_path)
+        rc = _run_store(["verify"], vertex_path=vpath)
+        out = capsys.readouterr()
+        assert rc == 0
+        assert "chain intact" in out.out
+
+    def test_arrival_store_deep_audit_through_cli(self, tmp_path, capsys):
+        from loops.commands.store import _run_store
+
+        vpath, log_path, db_path = self._arrival_store(tmp_path)
+        rc = _run_store(["verify", "--deep"], vertex_path=vpath)
+        out = capsys.readouterr()
+        assert rc == 0
+        assert "canonical content verified" in out.out
+        assert "chain re-derived" in out.out
+
+    def test_arrival_store_canonical_agreement_helper(self, tmp_path):
+        from loops.commands.store import canonical_agreement
+
+        vpath, log_path, db_path = self._arrival_store(tmp_path)
+        idx_path, report = canonical_agreement(vpath)
+        assert idx_path == db_path
+        assert report.ok is True
+        assert report.index_behind is False

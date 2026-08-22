@@ -981,6 +981,10 @@ class JsonlStore(SqliteStore[T], Generic[T]):
         ``own_lineage`` (which ``_decl.genesis`` row is *self*) is identity,
         not fact — it is not in the log and cannot be re-derived from it.
 
+        Window commitments and witness positions are defined on the arrival
+        coordinate (arrival_ordinal, arrival_seq), so seal verification survives
+        rebuilds structurally rather than relying on rowid reproduction.
+
         The FTS index is dropped in the same transaction. ``facts`` has no
         ``AUTOINCREMENT``, so ``DELETE FROM facts`` resets sqlite's rowid
         counter and re-indexed rows take rowids that previously named other

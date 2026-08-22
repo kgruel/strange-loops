@@ -377,7 +377,11 @@ def _verify_coordinate_schema(
     has_unique = False
     for idx_row in conn.execute(f"PRAGMA index_list({table})"):
         is_unique = bool(idx_row[2])
-        if not is_unique:
+        # Only a table-owned constraint counts (origin 'u' = auto-index from a
+        # table-level UNIQUE). A standalone CREATE UNIQUE INDEX (origin 'c')
+        # can be dropped without a rebuild, so the invariant would not live in
+        # the table as D0 requires.
+        if not is_unique or idx_row[3] != "u":
             continue
         idx_name = idx_row[1]
         idx_cols = [r[2] for r in conn.execute(f"PRAGMA index_info({idx_name})")]

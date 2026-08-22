@@ -1724,6 +1724,62 @@ class TestSolWp101StructuralVerification:
         conn.close()
         assert schema_after == schema_before
 
+    def test_standalone_unique_index_does_not_satisfy_table_custody(
+        self, tmp_path: Path
+    ) -> None:
+        """SOL-WP1-02: a standalone CREATE UNIQUE INDEX (origin 'c') is not the
+        table-level UNIQUE constraint D0 requires — it can be dropped without a
+        rebuild, so the invariant would not live in the table. A marked store
+        whose only uniqueness comes from such an index must refuse.
+        """
+        db_path = tmp_path / "standalone_unique_index.db"
+        conn = sqlite3.connect(str(db_path))
+        conn.executescript(
+            """
+            CREATE TABLE facts (
+                id TEXT NOT NULL PRIMARY KEY,
+                kind TEXT NOT NULL,
+                ts REAL NOT NULL,
+                observer TEXT NOT NULL,
+                origin TEXT NOT NULL DEFAULT '',
+                payload TEXT NOT NULL,
+                signature TEXT,
+                arrival_ordinal INTEGER NOT NULL,
+                arrival_seq INTEGER NOT NULL
+            );
+            CREATE UNIQUE INDEX foreign_coordinate_unique
+                ON facts(arrival_ordinal, arrival_seq);
+            CREATE TABLE ticks (
+                id TEXT NOT NULL PRIMARY KEY,
+                name TEXT NOT NULL,
+                ts REAL NOT NULL,
+                since REAL,
+                origin TEXT NOT NULL,
+                payload TEXT NOT NULL,
+                prev_hash TEXT,
+                window_start TEXT,
+                fact_cursor TEXT,
+                window_hash TEXT,
+                signature TEXT,
+                arrival_ordinal INTEGER NOT NULL,
+                arrival_seq INTEGER NOT NULL,
+                UNIQUE (arrival_ordinal, arrival_seq)
+            );
+            CREATE TABLE store_meta (key TEXT PRIMARY KEY, value TEXT);
+            INSERT INTO store_meta (key, value) VALUES ('coordinate_axis', 'mirrored');
+            """
+        )
+        conn.commit()
+        conn.close()
+
+        conn = sqlite3.connect(str(db_path))
+        with pytest.raises(ArrivalCanonicalUnsupported) as exc_info:
+            ensure_coordinate_schema(conn, mode="mirrored")
+        conn.close()
+        assert "facts lacks UNIQUE (arrival_ordinal, arrival_seq)" in str(
+            exc_info.value
+        )
+
     def test_marker_present_structure_incomplete_refuses_loudly(
         self, tmp_path: Path
     ) -> None:

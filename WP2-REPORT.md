@@ -239,6 +239,7 @@ reverted with `git checkout` and re-verified green.
 | G-D1-4 | re-hoist the axis guard above the same-path early return — i.e. **reintroduce the prior worker's exact bug** | **2 of 4 FAILED** — `WitnessAxisMismatch: ... (AXIS-A) does not match ... (AXIS-B)` raised where A10 and B1c re-resolution belong. Restored: 4 passed. |
 | G-D1-5 | `witness.py` id→position resolution `SELECT arrival_ordinal` → `SELECT rowid` | **1 FAILED** — `At index 0 diff: 1 != 2`. Restored: passed. |
 | G-D1-5 | `store_reader.facts_by_kind` witness cutoff `arrival_ordinal <= ?` → `rowid <= ?` | **initially SURVIVED — see below**; after the gate was extended, **FAILED** with `assert ['corpus-007'] == ['corpus-000']`. Restored: 5 passed. |
+| existing pin (row 5 of `MUTATION-witness.md`) | `receipt_group_span`'s ts/lineage conjunction `and` → `or` — the mutant that pin exists to kill, inside the expression the checkpoint rewrote | **FAILED** — `assert (1, 3) is None`. The pre-existing pin still kills it under the equal-ordinal rewrite. Restored: passed. |
 
 ### A real gap the proofs found, and closed
 

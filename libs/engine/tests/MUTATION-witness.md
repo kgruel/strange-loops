@@ -15,8 +15,9 @@
 >   equivalence argument recorded for `mutmut_1` no longer applies as written.
 > - `receipt_group_span`'s contiguity condition gained an equal-ordinal
 >   disjunct (rows of ONE arrival record share an ordinal), so row 5's mutant
->   sits in a rewritten expression. Its killing test still passes; the
->   classification is unre-run.
+>   sits in a rewritten expression. Row 5's mutant was RE-VERIFIED by hand
+>   under the rewrite and still dies (WP2-REPORT.md §6b); no other row in
+>   this report was re-measured.
 > - `verify_position_for_store` gained the same-path `WitnessAxisMismatch`
 >   branch and moved its connection open, invalidating survivor
 >   `x_verify_position_for_store__mutmut_24`'s equivalence argument.

@@ -979,6 +979,10 @@ class Vertex:
         for loop in self._loops.values():
             if loop.boundary_count is not None:
                 replayed = loop._projection.cursor
+                if isinstance(replayed, tuple):
+                    raise NotImplementedError(
+                        "loop boundary accounting is count-based; pair-cursor projections are not yet supported here"
+                    )
                 if loop.boundary_mode == "after":
                     if replayed >= loop.boundary_count:
                         loop._boundary_exhausted = True

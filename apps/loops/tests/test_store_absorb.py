@@ -148,6 +148,82 @@ class TestAbsorbPins:
         assert payload["chain_head"] == expected_head
         assert len(payload["chain_head"]) == 64  # sha256 hexdigest
 
+    def test_read_absorption_state_agrees_with_chain_head_under_permutation(
+        self, tmp_path: Path
+    ) -> None:
+        """On a permuted store with ticks whose rowid order and arrival order disagree,
+        _read_absorption_state's chain head equals SqliteStore.current_chain_head().
+        """
+        from atoms import Fact
+        from engine.sqlite_store import (
+            FACT_INSERT_SQL,
+            TICK_INSERT_SQL,
+            SqliteStore,
+            _tick_row_hash,
+        )
+        from loops.commands.store import _read_absorption_state
+
+        db_path = tmp_path / "permuted_absorb.db"
+        conn = sqlite3.connect(str(db_path), autocommit=True)
+        store = SqliteStore(
+            path=db_path,
+            serialize=lambda f: f.to_dict(),
+            deserialize=Fact.from_dict,
+        )
+
+        facts = [
+            ("f-0", "note", 100.0, "kyle", "", '{"v": 0}', None, 0, 0),
+            ("f-1", "note", 101.0, "kyle", "", '{"v": 1}', None, 1, 0),
+            ("f-2", "note", 102.0, "kyle", "", '{"v": 2}', None, 2, 0),
+        ]
+        for row in facts:
+            conn.execute(FACT_INSERT_SQL, row)
+
+        # Precompute tick hashes on arrival coordinate axis
+        t1_hash = store._window_hash("", "f-1")
+        t1_row = (
+            "t-1", "seal", 101.5, None, "test", '{"n": 1}', None, "", "f-1", t1_hash, None
+        )
+        t1_row_hash = _tick_row_hash(t1_row)
+
+        t2_hash = store._window_hash("f-1", "f-2")
+        t2_row = (
+            "t-2", "seal", 102.5, None, "test", '{"n": 2}', t1_row_hash, "f-1", "f-2", t2_hash, None
+        )
+        t2_row_hash = _tick_row_hash(t2_row)
+
+        # Insert tick 2 (coord 5,0) before tick 1 (coord 4,0) -> t-2 gets rowid 1, t-1 gets rowid 2
+        conn.execute(
+            TICK_INSERT_SQL,
+            ("t-2", "seal", 102.5, None, "test", '{"n": 2}', t1_row_hash, "f-1", "f-2", t2_hash, None, 5, 0),
+        )
+        conn.execute(
+            TICK_INSERT_SQL,
+            ("t-1", "seal", 101.5, None, "test", '{"n": 1}', None, "", "f-1", t1_hash, None, 4, 0),
+        )
+
+        # Disagreement check: rowid order has t-1 as newest; arrival order has t-2 as newest
+        tick_rowids = [r[0] for r in conn.execute("SELECT id FROM ticks ORDER BY rowid").fetchall()]
+        assert tick_rowids == ["t-2", "t-1"]
+
+        tick_arrivals = [
+            r[0] for r in conn.execute("SELECT id FROM ticks ORDER BY arrival_ordinal, arrival_seq").fetchall()
+        ]
+        assert tick_arrivals == ["t-1", "t-2"]
+
+        expected_chain_head = store.current_chain_head()
+        assert expected_chain_head == t2_row_hash
+        assert expected_chain_head != t1_row_hash
+
+        has_genesis, chain_head, fact_cursor, has_marker = _read_absorption_state(db_path)
+        assert chain_head is not None
+        assert chain_head == expected_chain_head
+        assert chain_head == t2_row_hash
+        assert chain_head != t1_row_hash
+
+        conn.close()
+        store.close()
+
 
 class TestAbsorbRefusals:
     def test_reabsorb_unchanged_is_noop(self, tmp_path):

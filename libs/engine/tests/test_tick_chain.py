@@ -255,16 +255,16 @@ class TestTamperDetection:
         assert any("window_hash" in b["reason"] for b in report["breaks"])
 
     def test_displaced_fact_breaks_window(self, tmp_db: Path):
-        """Windows are witness-order (rowid) ranges — moving a covered row
+        """Windows are arrival coordinate ((arrival_ordinal, arrival_seq)) ranges — moving a covered row
         out of its sealed range changes window content: break. Append-only
-        leaves no rowid gaps, so wedging a row INTO a sealed window requires
+        leaves no ordinal gaps, so wedging a row INTO a sealed window requires
         displacing one — equally detected."""
         store = make_store(tmp_db)
         ids = emit(store, 3)
         tick(store)
 
         store._conn.execute(
-            "UPDATE facts SET rowid = 1000 WHERE id = ?", (ids[1],)
+            "UPDATE facts SET arrival_ordinal = 1000 WHERE id = ?", (ids[1],)
         )
         store._conn.commit()
 

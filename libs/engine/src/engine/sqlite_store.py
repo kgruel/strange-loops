@@ -9,7 +9,7 @@ Python-side via python-ulid (26-char Crockford base32, time-sortable to the
 millisecond — but NOT within-ms monotonic; see ``gen_id``). Ms-granular
 time-sortability is load-bearing for cross-store fact interleaving (ORDER BY
 id ≈ chronological) and for merge dedup on slice→merge round-trips via INSERT
-OR IGNORE on the id PK. Receipt order is always rowid (append order), never
+OR IGNORE on the id PK. Receipt order is always (arrival_ordinal, arrival_seq), never
 id order.
 
 History: 2026-03-15 to 2026-05-16 a perf-driven change swapped to
@@ -64,7 +64,7 @@ def gen_id() -> str:
     random 80-bit component per id (it is not a monotonic factory), so two ids
     minted in the same millisecond have NO order relation — adjacent calls can
     invert (empirically ~1/5000 in a tight loop). Any code that needs receipt
-    order MUST use rowid (append order), never id order — see the ORDERING
+    order MUST use the arrival coordinate (arrival_ordinal, arrival_seq), never id order — see the ORDERING
     AUTHORITY note on ``append_tick`` and the WitnessPosition A3 rule. Pure
     Python — no C extension, no dlopen cost.
     """
@@ -268,7 +268,7 @@ def _fact_commitment_hash(
     """Hash the fact's CONTENT commitment — what the fact signer signs.
 
     Content-only by design (design/fact-signature-at-store-column):
-    excludes id and rowid, which are custody context, not authored
+    excludes id and arrival coordinates, which are custody context, not authored
     content. This is what makes the signature transport-stable — any
     store holding the row can re-derive the commitment and verify
     authorship against the observer registry without trusting the
@@ -1305,7 +1305,7 @@ class SqliteStore(Generic[T]):
         row_sql = _TICK_ROW_SQL if "signature" in cols else _TICK_ROW_SQL_V1
         row = self._conn.execute(
             f"SELECT {row_sql} FROM ticks "
-            "WHERE window_hash IS NOT NULL ORDER BY rowid DESC LIMIT 1"
+            "WHERE window_hash IS NOT NULL ORDER BY arrival_ordinal DESC, arrival_seq DESC LIMIT 1"
         ).fetchone()
         if row is None:
             return None
@@ -1327,7 +1327,7 @@ class SqliteStore(Generic[T]):
         """
         chain_head = self.current_chain_head()
         frow = self._conn.execute(
-            "SELECT id FROM facts ORDER BY rowid DESC LIMIT 1"
+            "SELECT id FROM facts ORDER BY arrival_ordinal DESC, arrival_seq DESC LIMIT 1"
         ).fetchone()
         return {
             "protocol": protocol,
@@ -1385,7 +1385,7 @@ class SqliteStore(Generic[T]):
            carries them as inert citizens (§9.2 Lineage), and a store that
            received one must still be able to mint its own identity.
         2. Read the era pins — chain head (latest chained tick's row hash) and
-           fact cursor (newest fact by WITNESS order / rowid) — so
+           fact cursor (newest fact by arrival coordinate order) — so
            "everything before me predates historization" is verifiable.
         3. Build the whole payload (``documents`` + ``protocol`` + pins), sign
            its CONTENT commitment under ``observer`` via ``fact_signer``, and
@@ -1735,14 +1735,23 @@ class SqliteStore(Generic[T]):
         """Consumer protocol: append event to store."""
         self.append(event, id_override=id_override)
 
-    def since(self, cursor: int) -> list[T]:
-        """Return events with rowid > cursor.
+    def since(self, cursor: tuple[int, int] | int = (-1, 0)) -> list[T]:
+        """Return events with (arrival_ordinal, arrival_seq) > cursor.
 
-        cursor=0 returns all events (rowid starts at 1 in SQLite).
+        cursor=(-1, 0) or cursor=0 returns all events.
         """
+        if isinstance(cursor, tuple):
+            lo_ord, lo_seq = cursor
+        elif isinstance(cursor, int):
+            lo_ord, lo_seq = (-1, 0) if cursor <= 0 else (cursor, 0)
+        else:
+            lo_ord, lo_seq = (-1, 0)
+
         rows = self._conn.execute(
-            "SELECT kind, ts, observer, origin, payload FROM facts WHERE rowid > ? ORDER BY arrival_ordinal, arrival_seq",
-            (cursor,),
+            "SELECT kind, ts, observer, origin, payload FROM facts "
+            "WHERE (arrival_ordinal, arrival_seq) > (?, ?) "
+            "ORDER BY arrival_ordinal, arrival_seq",
+            (lo_ord, lo_seq),
         ).fetchall()
         loads = _raw_decode
         # Fast path: build Facts directly when deserializer is Fact.from_dict
@@ -1762,7 +1771,43 @@ class SqliteStore(Generic[T]):
             for r in rows
         ]
 
-    def since_raw(self, cursor: int) -> list[tuple[str, dict]]:
+    def since_with_cursor(
+        self, cursor: tuple[int, int] | int = (-1, 0)
+    ) -> list[tuple[T, tuple[int, int]]]:
+        """Return (event, (arrival_ordinal, arrival_seq)) pairs with coordinate > cursor."""
+        if isinstance(cursor, tuple):
+            lo_ord, lo_seq = cursor
+        elif isinstance(cursor, int):
+            lo_ord, lo_seq = (-1, 0) if cursor <= 0 else (cursor, 0)
+        else:
+            lo_ord, lo_seq = (-1, 0)
+
+        rows = self._conn.execute(
+            "SELECT kind, ts, observer, origin, payload, arrival_ordinal, arrival_seq FROM facts "
+            "WHERE (arrival_ordinal, arrival_seq) > (?, ?) "
+            "ORDER BY arrival_ordinal, arrival_seq",
+            (lo_ord, lo_seq),
+        ).fetchall()
+        loads = _raw_decode
+        out = []
+        if self._direct_fact_build is None:
+            self._detect_fact_build()
+        if self._direct_fact_build:
+            for r in rows:
+                fact = self._fact_class(
+                    kind=r[0], ts=r[1], observer=r[2], origin=r[3], payload=loads(r[4])[0]
+                )
+                out.append((fact, (r[5], r[6])))
+        else:
+            deserialize = self._deserialize
+            for r in rows:
+                fact = deserialize(
+                    {"kind": r[0], "ts": r[1], "observer": r[2], "origin": r[3], "payload": loads(r[4])[0]}
+                )
+                out.append((fact, (r[5], r[6])))
+        return out
+
+    def since_raw(self, cursor: tuple[int, int] | int = (-1, 0)) -> list[tuple[str, dict]]:
         """Return (kind, payload) tuples for replay — no Fact construction.
 
         Avoids MappingProxyType wrapping and full Fact dataclass overhead.
@@ -1776,9 +1821,18 @@ class SqliteStore(Generic[T]):
         Event order ``(ts, id)`` is a read lens layered on top, never the
         replay axis (see ORDERING AUTHORITY on append_tick).
         """
+        if isinstance(cursor, tuple):
+            lo_ord, lo_seq = cursor
+        elif isinstance(cursor, int):
+            lo_ord, lo_seq = (-1, 0) if cursor <= 0 else (cursor, 0)
+        else:
+            lo_ord, lo_seq = (-1, 0)
+
         rows = self._conn.execute(
-            "SELECT kind, ts, payload FROM facts WHERE rowid > ? ORDER BY arrival_ordinal, arrival_seq",
-            (cursor,),
+            "SELECT kind, ts, payload FROM facts "
+            "WHERE (arrival_ordinal, arrival_seq) > (?, ?) "
+            "ORDER BY arrival_ordinal, arrival_seq",
+            (lo_ord, lo_seq),
         ).fetchall()
         loads = _raw_decode
         out = []
@@ -1788,7 +1842,7 @@ class SqliteStore(Generic[T]):
             out.append((r[0], payload))
         return out
 
-    def replay_cursor(self, cursor: int):
+    def replay_cursor(self, cursor: tuple[int, int] | int = (-1, 0)):
         """Yield (kind, payload) pairs by streaming from the SQL cursor.
 
         No intermediate list allocation — rows are decoded and yielded
@@ -1797,10 +1851,19 @@ class SqliteStore(Generic[T]):
         where it belongs. Same arrival-order (arrival_ordinal, arrival_seq) fold replay and ``_ts``
         injection as since_raw.
         """
+        if isinstance(cursor, tuple):
+            lo_ord, lo_seq = cursor
+        elif isinstance(cursor, int):
+            lo_ord, lo_seq = (-1, 0) if cursor <= 0 else (cursor, 0)
+        else:
+            lo_ord, lo_seq = (-1, 0)
+
         loads = _raw_decode
         for r in self._conn.execute(
-            "SELECT kind, ts, payload FROM facts WHERE rowid > ? ORDER BY arrival_ordinal, arrival_seq",
-            (cursor,),
+            "SELECT kind, ts, payload FROM facts "
+            "WHERE (arrival_ordinal, arrival_seq) > (?, ?) "
+            "ORDER BY arrival_ordinal, arrival_seq",
+            (lo_ord, lo_seq),
         ):
             payload = loads(r[2])[0]
             payload["_ts"] = r[1]
@@ -1812,7 +1875,7 @@ class SqliteStore(Generic[T]):
         Optimized query for replay period tracking — avoids loading all ticks.
         """
         row = self._conn.execute(
-            "SELECT ts FROM ticks WHERE name = ? ORDER BY rowid DESC LIMIT 1",
+            "SELECT ts FROM ticks WHERE name = ? ORDER BY arrival_ordinal DESC, arrival_seq DESC LIMIT 1",
             (name,),
         ).fetchone()
         if row is None:
@@ -2077,34 +2140,34 @@ class SqliteStore(Generic[T]):
         cols = {r[1] for r in self._conn.execute("PRAGMA table_info(facts)")}
         return "signature" in cols
 
-    def _cursor_rowid(self, fact_id: str) -> int | None:
-        """Resolve a window cursor (fact id) to its rowid — witness order.
+    def _cursor_ordinal(self, fact_id: str) -> tuple[int, int] | None:
+        """Resolve a window cursor (fact id) to its (arrival_ordinal, arrival_seq) coordinate.
 
-        "" (start-of-store / empty-store sentinel) resolves to 0, before the
-        first rowid. A cursor whose fact no longer exists resolves to None:
+        "" (start-of-store / empty-store sentinel) resolves to (-1, 0), before the
+        first arrival coordinate. A cursor whose fact no longer exists resolves to None:
         the window is unresolvable and hashes as empty — any non-empty
         commitment over it then mismatches. (Deleting a cursor fact that was
         itself inside a covered window already breaks THAT window's hash.)
         """
         if fact_id == "":
-            return 0
+            return (-1, 0)
         row = self._conn.execute(
-            "SELECT rowid FROM facts WHERE id = ?", (fact_id,)
+            "SELECT arrival_ordinal, arrival_seq FROM facts WHERE id = ?", (fact_id,)
         ).fetchone()
-        return row[0] if row else None
+        return (row[0], row[1]) if row else None
 
     def _window_hash(self, start: str, end: str) -> str:
-        """Hash the fact window (start, end] in witness order (rowid).
+        """Hash the fact window (start, end] in arrival coordinate order.
 
-        Cursors are fact ids; ordering and membership are append order — see
-        the ORDERING AUTHORITY note in the chain comment block. Id order is
-        not append order in mixed-id-era stores, and a late-arriving fact
-        with an old event-time id must not retroactively enter a sealed
-        window.
+        Cursors are fact ids; ordering and membership are arrival coordinate
+        order ((arrival_ordinal, arrival_seq)) — see the ORDERING AUTHORITY note
+        in the chain comment block. Id order is not append order in mixed-id-era
+        stores, and a late-arriving fact with an old event-time id must not
+        retroactively enter a sealed window.
         """
         h = hashlib.sha256()
-        lo = self._cursor_rowid(start)
-        hi = self._cursor_rowid(end)
+        lo = self._cursor_ordinal(start)
+        hi = self._cursor_ordinal(end)
         if lo is None or hi is None:
             return h.hexdigest()  # unresolvable cursor → empty commitment
         # Era-aware row hash: include the signature column when it exists.
@@ -2116,8 +2179,10 @@ class SqliteStore(Generic[T]):
             cols += ", signature"
         for row in self._conn.execute(
             f"SELECT {cols} FROM facts "
-            "WHERE rowid > ? AND rowid <= ? ORDER BY rowid",
-            (lo, hi),
+            "WHERE (arrival_ordinal, arrival_seq) > (?, ?) "
+            "AND (arrival_ordinal, arrival_seq) <= (?, ?) "
+            "ORDER BY arrival_ordinal, arrival_seq",
+            (lo[0], lo[1], hi[0], hi[1]),
         ):
             h.update(_fact_row_hash(row).encode())
         return h.hexdigest()
@@ -2144,8 +2209,9 @@ class SqliteStore(Generic[T]):
         - prev_hash: sha256 of the previous tick row (any era) — None for
           the first row in the store.
         - window bounds are explicit fact ids; membership and ordering are
-          APPEND ORDER (rowid), never id order — the cursor is the id of the
-          newest fact BY ROWID, not MAX(id) (see ORDERING AUTHORITY above):
+          arrival coordinate order (arrival_ordinal, arrival_seq), never id
+          order — the cursor is the id of the newest fact BY ARRIVAL
+          COORDINATE, not MAX(id) (see ORDERING AUTHORITY above):
           - first tick in a new store: window_start "" (covers all facts);
           - first chained tick after pre-chain rows: window_start =
             current append edge (epoch marker — claims no coverage of
@@ -2180,12 +2246,14 @@ class SqliteStore(Generic[T]):
         payload_text = json.dumps(d["payload"], default=_mapping_proxy_default)
 
         prev_row = self._conn.execute(
-            f"SELECT {_TICK_ROW_SQL} FROM ticks ORDER BY rowid DESC LIMIT 1"
+            f"SELECT {_TICK_ROW_SQL} FROM ticks "
+            "ORDER BY arrival_ordinal DESC, arrival_seq DESC LIMIT 1"
         ).fetchone()
         prev_hash = _tick_row_hash(prev_row) if prev_row is not None else None
 
         edge_row = self._conn.execute(
-            "SELECT id FROM facts ORDER BY rowid DESC LIMIT 1"
+            "SELECT id FROM facts "
+            "ORDER BY arrival_ordinal DESC, arrival_seq DESC LIMIT 1"
         ).fetchone()
         fact_cursor = edge_row[0] if edge_row else ""
         if prev_row is None:
@@ -2258,7 +2326,7 @@ class SqliteStore(Generic[T]):
         if self._facts_have_signature_column():
             signed = self._conn.execute(
                 "SELECT rowid, kind, ts, observer, origin, payload "
-                "FROM facts WHERE signature IS NOT NULL ORDER BY rowid"
+                "FROM facts WHERE signature IS NOT NULL ORDER BY arrival_ordinal, arrival_seq"
             ).fetchall()
             updates = []
             for rowid, kind, ts, observer, origin, payload in signed:
@@ -2277,12 +2345,12 @@ class SqliteStore(Generic[T]):
             )
             facts_resigned = len(updates)
 
-        # --- Pass 2: walk ticks in witness order, re-deriving the chain. ---
+        # --- Pass 2: walk ticks in arrival order, re-deriving the chain. ---
         ticks_rechained = 0
         ticks_resigned = 0
         running_hash: str | None = None
         rows = self._conn.execute(
-            f"SELECT rowid, {_TICK_ROW_SQL} FROM ticks ORDER BY rowid"
+            f"SELECT rowid, {_TICK_ROW_SQL} FROM ticks ORDER BY arrival_ordinal, arrival_seq"
         ).fetchall()
         for raw in rows:
             rowid, row10, old_sig = raw[0], raw[1:11], raw[11]
@@ -2326,18 +2394,18 @@ class SqliteStore(Generic[T]):
     ) -> dict[str, Any]:
         """Verify the tick hash chain, fact-window commitments, and signatures.
 
-        Walks ticks in append order recomputing prev_hash linkage,
+        Walks ticks in arrival order recomputing prev_hash linkage,
         window_start continuity, and window_hash contents. Any modified,
         deleted, or displaced fact inside a covered window breaks
         verification; facts emitted after the last tick are the uncovered
         live edge (reported, not an error).
 
-        Windows are WITNESS-ORDER (rowid) ranges — see ORDERING AUTHORITY
-        in the chain comment block. A late-arriving fact carrying an old
-        event timestamp (backfill, peer sync) lands on the live edge and is
-        sealed by the next tick as received-now: honest history, not a
-        break. The chain attests receipt order; event order is the read
-        path's concern.
+        Windows are arrival coordinate ranges ((arrival_ordinal, arrival_seq))
+        — see ORDERING AUTHORITY in the chain comment block. A late-arriving
+        fact carrying an old event timestamp (backfill, peer sync) lands on the
+        live edge and is sealed by the next tick as received-now: honest
+        history, not a break. The chain attests receipt order; event order is
+        the read path's concern.
 
         Signatures (delta 2): ``verifier`` is an injected callable
         (signature str, commitment digest str) -> bool — apps/loops composes
@@ -2403,7 +2471,7 @@ class SqliteStore(Generic[T]):
         rows = [
             r if len(r) > 10 else (*r, None)
             for r in self._conn.execute(
-                f"SELECT {row_sql} FROM ticks ORDER BY rowid"
+                f"SELECT {row_sql} FROM ticks ORDER BY arrival_ordinal, arrival_seq"
             )
         ]
 
@@ -2449,13 +2517,15 @@ class SqliteStore(Generic[T]):
                                "reason": "unsigned tick after signed era — "
                                          "signature stripped or era regressed"})
             if include_ticks:
-                lo = self._cursor_rowid(row[7])
-                hi = self._cursor_rowid(row[8])
+                lo = self._cursor_ordinal(row[7])
+                hi = self._cursor_ordinal(row[8])
                 window_facts = 0
                 if lo is not None and hi is not None:
                     window_facts = self._conn.execute(
-                        "SELECT COUNT(*) FROM facts WHERE rowid > ? AND rowid <= ?",
-                        (lo, hi),
+                        "SELECT COUNT(*) FROM facts "
+                        "WHERE (arrival_ordinal, arrival_seq) > (?, ?) "
+                        "AND (arrival_ordinal, arrival_seq) <= (?, ?)",
+                        (lo[0], lo[1], hi[0], hi[1]),
                     ).fetchone()[0]
                 tick_detail.append({
                     "tick": row[0], "name": row[1], "ts": row[2],
@@ -2476,12 +2546,14 @@ class SqliteStore(Generic[T]):
 
         covered = 0
         if first_start is not None and last_cursor:
-            lo = self._cursor_rowid(first_start)
-            hi = self._cursor_rowid(last_cursor)
+            lo = self._cursor_ordinal(first_start)
+            hi = self._cursor_ordinal(last_cursor)
             if lo is not None and hi is not None:
                 covered = self._conn.execute(
-                    "SELECT COUNT(*) FROM facts WHERE rowid > ? AND rowid <= ?",
-                    (lo, hi),
+                    "SELECT COUNT(*) FROM facts "
+                    "WHERE (arrival_ordinal, arrival_seq) > (?, ?) "
+                    "AND (arrival_ordinal, arrival_seq) <= (?, ?)",
+                    (lo[0], lo[1], hi[0], hi[1]),
                 ).fetchone()[0]
         total_facts = self.total
 
@@ -2598,11 +2670,20 @@ class SqliteStore(Generic[T]):
             "truncated": truncated,
         }
 
-    def ticks_since(self, cursor: int) -> list[Tick]:
-        """Return ticks with rowid > cursor."""
+    def ticks_since(self, cursor: tuple[int, int] | int = (-1, 0)) -> list[Tick]:
+        """Return ticks with (arrival_ordinal, arrival_seq) > cursor."""
+        if isinstance(cursor, tuple):
+            lo_ord, lo_seq = cursor
+        elif isinstance(cursor, int):
+            lo_ord, lo_seq = (-1, 0) if cursor <= 0 else (cursor, 0)
+        else:
+            lo_ord, lo_seq = (-1, 0)
+
         rows = self._conn.execute(
-            "SELECT name, ts, since, origin, payload FROM ticks WHERE rowid > ? ORDER BY arrival_ordinal, arrival_seq",
-            (cursor,),
+            "SELECT name, ts, since, origin, payload FROM ticks "
+            "WHERE (arrival_ordinal, arrival_seq) > (?, ?) "
+            "ORDER BY arrival_ordinal, arrival_seq",
+            (lo_ord, lo_seq),
         ).fetchall()
         return [
             Tick.from_dict(

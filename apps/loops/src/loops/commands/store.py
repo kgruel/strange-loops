@@ -866,8 +866,14 @@ def _read_absorption_state(
                 ).fetchone()
                 is not None
             )
+            fcols = {r[1] for r in conn.execute("PRAGMA table_info(facts)")}
+            f_order = (
+                "ORDER BY arrival_ordinal DESC, arrival_seq DESC"
+                if "arrival_ordinal" in fcols
+                else "ORDER BY rowid DESC"
+            )
             frow = conn.execute(
-                "SELECT id FROM facts ORDER BY rowid DESC LIMIT 1"
+                f"SELECT id FROM facts {f_order} LIMIT 1"
             ).fetchone()
             fact_cursor = frow[0] if frow else None
         except sqlite3.OperationalError:
@@ -879,9 +885,14 @@ def _read_absorption_state(
             tcols = {r[1] for r in conn.execute("PRAGMA table_info(ticks)")}
             if "window_hash" in tcols:
                 row_sql = _TICK_ROW_SQL if "signature" in tcols else _TICK_ROW_SQL_V1
+                t_order = (
+                    "ORDER BY arrival_ordinal DESC, arrival_seq DESC"
+                    if "arrival_ordinal" in tcols
+                    else "ORDER BY rowid DESC"
+                )
                 row = conn.execute(
                     f"SELECT {row_sql} FROM ticks "
-                    "WHERE window_hash IS NOT NULL ORDER BY rowid DESC LIMIT 1"
+                    f"WHERE window_hash IS NOT NULL {t_order} LIMIT 1"
                 ).fetchone()
                 if row is not None:
                     # tick_row_hash reads an 11-field row (signature at [10]);

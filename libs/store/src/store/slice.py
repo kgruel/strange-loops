@@ -90,11 +90,16 @@ def slice_store(
         # below. Era-aware: a source predating the column slices as NULL.
         src_cols = {r[1] for r in conn.execute("PRAGMA table_info(facts)")}
         sig_src = "signature" if "signature" in src_cols else "NULL"
+        order_src = (
+            "arrival_ordinal, arrival_seq"
+            if "arrival_ordinal" in src_cols
+            else "rowid"
+        )
         fact_sql = (
             "INSERT INTO slice.facts (id, kind, ts, observer, origin, payload, signature, arrival_ordinal, arrival_seq) "
             f"SELECT id, kind, ts, observer, origin, payload, {sig_src}, "
-            "COALESCE((SELECT MAX(arrival_ordinal) FROM slice.facts), 0) + ROW_NUMBER() OVER (ORDER BY rowid), 0 "
-            f"FROM facts{where} ORDER BY rowid"
+            f"COALESCE((SELECT MAX(arrival_ordinal) FROM slice.facts), 0) + ROW_NUMBER() OVER (ORDER BY {order_src}), 0 "
+            f"FROM facts{where} ORDER BY {order_src}"
         )
         conn.execute(fact_sql, params)
         fact_count = conn.execute(
@@ -109,12 +114,18 @@ def slice_store(
         # slice — copying them would produce false tamper alarms. Sliced ticks
         # land as pre-chain rows; the target starts its own chain on first
         # append_tick. Same semantics as merge (explicit-column INSERT).
+        src_tick_cols = {r[1] for r in conn.execute("PRAGMA table_info(ticks)")}
+        order_tick_src = (
+            "arrival_ordinal, arrival_seq"
+            if "arrival_ordinal" in src_tick_cols
+            else "rowid"
+        )
         tick_where, tick_params = _build_where(since=since, before=before)
         tick_sql = (
             "INSERT INTO slice.ticks (id, name, ts, since, origin, payload, arrival_ordinal, arrival_seq) "
             f"SELECT id, name, ts, since, origin, payload, "
-            "COALESCE((SELECT MAX(arrival_ordinal) FROM slice.ticks), 0) + ROW_NUMBER() OVER (ORDER BY rowid), 0 "
-            f"FROM ticks{tick_where} ORDER BY rowid"
+            f"COALESCE((SELECT MAX(arrival_ordinal) FROM slice.ticks), 0) + ROW_NUMBER() OVER (ORDER BY {order_tick_src}), 0 "
+            f"FROM ticks{tick_where} ORDER BY {order_tick_src}"
         )
         conn.execute(tick_sql, tick_params)
         tick_count = conn.execute(

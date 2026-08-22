@@ -14,7 +14,12 @@ if TYPE_CHECKING:
     from .vertex import Vertex
 
 
-def replay(vertex: Vertex, store: "Store[Fact]", *, from_cursor: int = 0) -> int:
+def replay(
+    vertex: Vertex,
+    store: "Store[Fact]",
+    *,
+    from_cursor: tuple[int, int] | int = 0,
+) -> tuple[int, int] | int:
     """Replay stored facts into vertex, return cursor position after replay.
 
     Facts are received with grant=None — they were already permitted when
@@ -26,8 +31,15 @@ def replay(vertex: Vertex, store: "Store[Fact]", *, from_cursor: int = 0) -> int
         from_cursor: Start from this position (for incremental replay)
 
     Returns:
-        Cursor position after replay (store.total)
+        Cursor position after replay (coordinate tuple or store.total)
     """
+    if hasattr(store, "since_with_cursor"):
+        last_cursor = from_cursor if isinstance(from_cursor, tuple) else (-1, 0)
+        for fact, cursor in store.since_with_cursor(from_cursor):
+            vertex.receive(fact, grant=None)
+            last_cursor = cursor
+        return last_cursor
+
     for fact in store.since(from_cursor):
         vertex.receive(fact, grant=None)
     return store.total

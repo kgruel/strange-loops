@@ -436,12 +436,23 @@ def _read_index_source(source: Path) -> _SourceRows:
     try:
         fact_cols = {r[1] for r in conn.execute("PRAGMA table_info(facts)")}
         signature = "signature" if "signature" in fact_cols else "NULL"
+        fact_order = (
+            "arrival_ordinal, arrival_seq"
+            if "arrival_ordinal" in fact_cols
+            else "rowid"
+        )
         fact_rows = conn.execute(
             "SELECT id, kind, ts, observer, origin, payload, "
-            f"{signature} FROM facts ORDER BY rowid"
+            f"{signature} FROM facts ORDER BY {fact_order}"
         ).fetchall()
+        tick_cols = {r[1] for r in conn.execute("PRAGMA table_info(ticks)")}
+        tick_order = (
+            "arrival_ordinal, arrival_seq"
+            if "arrival_ordinal" in tick_cols
+            else "rowid"
+        )
         tick_rows = conn.execute(
-            "SELECT id, name, ts, since, origin, payload FROM ticks ORDER BY rowid"
+            f"SELECT id, name, ts, since, origin, payload FROM ticks ORDER BY {tick_order}"
         ).fetchall()
     finally:
         conn.close()

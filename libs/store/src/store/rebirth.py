@@ -229,8 +229,13 @@ def _chain_head(conn: sqlite3.Connection) -> str | None:
     from engine import tick_row_hash
 
     cols = _tick_columns(conn)
+    order_sql = (
+        "ORDER BY arrival_ordinal DESC, arrival_seq DESC"
+        if "arrival_ordinal" in cols
+        else "ORDER BY rowid DESC"
+    )
     row = conn.execute(
-        f"SELECT {', '.join(cols)} FROM ticks ORDER BY rowid DESC LIMIT 1"
+        f"SELECT {', '.join(cols)} FROM ticks {order_sql} LIMIT 1"
     ).fetchone()
     if row is None:
         return None
@@ -553,8 +558,14 @@ def verify_rebirth(
 
     tgt = _open(target, read_only=True)
     try:
+        fcols = {r[1] for r in tgt.execute("PRAGMA table_info(facts)")}
+        order_sql = (
+            "ORDER BY arrival_ordinal DESC, arrival_seq DESC"
+            if "arrival_ordinal" in fcols
+            else "ORDER BY rowid DESC"
+        )
         receipt_row = tgt.execute(
-            "SELECT id, kind, payload FROM facts ORDER BY rowid DESC LIMIT 1"
+            f"SELECT id, kind, payload FROM facts {order_sql} LIMIT 1"
         ).fetchone()
         receipt_found = False
         receipt: dict = {}

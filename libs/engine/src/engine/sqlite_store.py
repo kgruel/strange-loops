@@ -418,18 +418,199 @@ def _verify_coordinate_schema(
     return True, None
 
 
-def _stamp_coordinate_axis(conn: sqlite3.Connection, mode: str) -> None:
-    """Write the store_meta.coordinate_axis marker.
+def _stamp_coordinate_axis(conn: sqlite3.Connection, mode: str = "mirrored") -> None:
+    """Write the store_meta.coordinate_axis marker for mirrored mode.
 
-    Statements only — the caller owns the transaction boundary (some stamp
-    sites run inside their own BEGIN IMMEDIATE, others commit afterwards).
+    Arrival mode MUST go through _stamp_arrival_axis to ensure provider agreement.
     """
+    if mode == "arrival":
+        raise ValueError("coordinate_axis='arrival' must be stamped via _stamp_arrival_axis")
     conn.execute(
         "CREATE TABLE IF NOT EXISTS store_meta (key TEXT PRIMARY KEY, value TEXT)"
     )
     conn.execute(
         "INSERT OR REPLACE INTO store_meta (key, value) VALUES ('coordinate_axis', ?)",
         (mode,),
+    )
+
+
+def _stage_arrival_coordinates(
+    conn: sqlite3.Connection,
+    coordinates: Callable[[], Iterator[tuple[str, str, int, int]]] | None,
+) -> None:
+    """Stage coordinates from provider into _coordinate_staging temp table."""
+    if coordinates is None:
+        raise ValueError("coordinates provider is required for mode='arrival' when validate=True")
+
+    from .arrival import ArrivalCorrupt, GenesisRefused
+    from .arrival_store import ArrivalCanonicalUnsupported
+
+    conn.execute(
+        "CREATE TEMP TABLE IF NOT EXISTS _coordinate_staging ("
+        "table_name TEXT NOT NULL, "
+        "row_id TEXT NOT NULL, "
+        "arrival_ordinal INTEGER NOT NULL, "
+        "arrival_seq INTEGER NOT NULL, "
+        "PRIMARY KEY (table_name, row_id)"
+        ")"
+    )
+    conn.execute("DELETE FROM _coordinate_staging")
+
+    try:
+        staged = list(coordinates())
+    except BaseException as exc:
+        if (
+            isinstance(exc, (FileNotFoundError, ArrivalCorrupt, GenesisRefused))
+            or "is empty — mint a genesis first" in str(exc)
+            or "does not exist" in str(exc)
+            or "No such file" in str(exc)
+        ):
+            raise ArrivalCanonicalUnsupported(
+                "an index without its log cannot be reconciled, and re-derivation cannot "
+                "manufacture a log: offering it here would name an operation that destroys "
+                "the only surviving artifact. Restore the log, or open the db as a plain sqlite store"
+            ) from exc
+        raise ArrivalCanonicalUnsupported(
+            f"error retrieving coordinates from arrival log: {exc} — "
+            "run engine.arrival_projection.rederive_projections to rebuild the index from the log"
+        ) from exc
+
+    for item in staged:
+        if not isinstance(item, tuple) or len(item) != 4:
+            raise ArrivalCanonicalUnsupported(
+                "coordinate provider yielded invalid tuple format — "
+                "run engine.arrival_projection.rederive_projections to rebuild the index from the log"
+            )
+        tbl, r_id, ord_val, seq_val = item
+        if tbl not in ("facts", "ticks"):
+            raise ArrivalCanonicalUnsupported(
+                f"invalid table name {tbl!r} in coordinate provider — "
+                "run engine.arrival_projection.rederive_projections to rebuild the index from the log"
+            )
+
+    try:
+        conn.executemany(
+            "INSERT INTO _coordinate_staging (table_name, row_id, arrival_ordinal, arrival_seq) "
+            "VALUES (?, ?, ?, ?)",
+            staged,
+        )
+    except sqlite3.IntegrityError as exc:
+        raise ArrivalCanonicalUnsupported(
+            f"duplicate or conflicting coordinates in arrival log: {exc} — "
+            "run engine.arrival_projection.rederive_projections to rebuild the index from the log"
+        ) from exc
+
+    dup = conn.execute(
+        "SELECT table_name, arrival_ordinal, arrival_seq, COUNT(*) "
+        "FROM _coordinate_staging "
+        "GROUP BY table_name, arrival_ordinal, arrival_seq "
+        "HAVING COUNT(*) > 1 LIMIT 1"
+    ).fetchone()
+    if dup is not None:
+        raise ArrivalCanonicalUnsupported(
+            f"duplicate coordinate ({dup[1]}, {dup[2]}) in log for {dup[0]} — "
+            "run engine.arrival_projection.rederive_projections to rebuild the index from the log"
+        )
+
+
+def _check_arrival_provider_agreement(
+    conn: sqlite3.Connection,
+    coordinates: Callable[[], Iterator[tuple[str, str, int, int]]] | None,
+) -> None:
+    """Stage coordinates from provider and verify exact agreement with existing tables."""
+    _stage_arrival_coordinates(conn, coordinates)
+    from .arrival_store import ArrivalCanonicalUnsupported
+
+    tables_to_check = ("facts", "ticks")
+    existing_tables = [
+        t for t in tables_to_check
+        if conn.execute(
+            "SELECT 1 FROM sqlite_schema WHERE type='table' AND name=?", (t,)
+        ).fetchone() is not None
+    ]
+
+    # Mismatch checks against existing tables:
+    for t in existing_tables:
+        index_count = conn.execute(f"SELECT COUNT(*) FROM {_quote_ident(t)}").fetchone()[0]
+        staging_count = conn.execute(
+            "SELECT COUNT(*) FROM _coordinate_staging WHERE table_name = ?", (t,)
+        ).fetchone()[0]
+        if index_count != staging_count:
+            raise ArrivalCanonicalUnsupported(
+                f"index content does not match arrival log coordinates ({t} has {index_count} rows, log has {staging_count}) — "
+                "run engine.arrival_projection.rederive_projections to rebuild the index from the log"
+            )
+
+        missing_in_staging = conn.execute(
+            f"SELECT f.id FROM {_quote_ident(t)} f LEFT JOIN _coordinate_staging s ON s.table_name = ? AND s.row_id = f.id WHERE s.row_id IS NULL LIMIT 1",
+            (t,),
+        ).fetchone()
+        if missing_in_staging is not None:
+            raise ArrivalCanonicalUnsupported(
+                f"index content does not match arrival log coordinates ({t} row {missing_in_staging[0]!r} not in log) — "
+                "run engine.arrival_projection.rederive_projections to rebuild the index from the log"
+            )
+
+        missing_in_index = conn.execute(
+            f"SELECT s.row_id FROM _coordinate_staging s LEFT JOIN {_quote_ident(t)} f ON s.row_id = f.id WHERE s.table_name = ? AND f.id IS NULL LIMIT 1",
+            (t,),
+        ).fetchone()
+        if missing_in_index is not None:
+            raise ArrivalCanonicalUnsupported(
+                f"index content does not match arrival log coordinates (log {t} row {missing_in_index[0]!r} not in index) — "
+                "run engine.arrival_projection.rederive_projections to rebuild the index from the log"
+            )
+
+        # Staging join agreement check for existing coordinate columns
+        cols = {r[1] for r in conn.execute(f"PRAGMA table_info({_quote_ident(t)})")}
+        if "arrival_ordinal" in cols and "arrival_seq" in cols:
+            coord_mismatch = conn.execute(
+                f"SELECT f.id, f.arrival_ordinal, f.arrival_seq, s.arrival_ordinal, s.arrival_seq "
+                f"FROM {_quote_ident(t)} f JOIN _coordinate_staging s ON s.table_name = ? AND s.row_id = f.id "
+                f"WHERE f.arrival_ordinal != s.arrival_ordinal OR f.arrival_seq != s.arrival_seq "
+                f"LIMIT 1",
+                (t,),
+            ).fetchone()
+            if coord_mismatch is not None:
+                raise ArrivalCanonicalUnsupported(
+                    f"index coordinates do not match arrival log ({t} row {coord_mismatch[0]!r} has "
+                    f"({coord_mismatch[1]}, {coord_mismatch[2]}), log has ({coord_mismatch[3]}, {coord_mismatch[4]})) — "
+                    "run engine.arrival_projection.rederive_projections to rebuild the index from the log"
+                )
+
+    non_existing = set(tables_to_check) - set(existing_tables)
+    for non_t in non_existing:
+        extra = conn.execute(
+            "SELECT COUNT(*) FROM _coordinate_staging WHERE table_name = ?", (non_t,)
+        ).fetchone()[0]
+        if extra > 0:
+            raise ArrivalCanonicalUnsupported(
+                f"index content does not match arrival log coordinates (log has {extra} {non_t} rows but table does not exist) — "
+                "run engine.arrival_projection.rederive_projections to rebuild the index from the log"
+            )
+
+
+def _stamp_arrival_axis(
+    conn: sqlite3.Connection,
+    coordinates: Callable[[], Iterator[tuple[str, str, int, int]]] | None = None,
+    *,
+    validate: bool = True,
+) -> None:
+    """The ONLY gatekeeper path allowed to write coordinate_axis='arrival' into store_meta.
+
+    Always runs the provider-agreement check (staging join) when validate=True:
+    - empty index + empty provider = agreement (stamps)
+    - empty index + any provider row = refusal toward rederive_projections
+    - coordinate disagreement or count mismatch = refusal toward rederive_projections
+    """
+    if validate:
+        _check_arrival_provider_agreement(conn, coordinates)
+
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS store_meta (key TEXT PRIMARY KEY, value TEXT)"
+    )
+    conn.execute(
+        "INSERT OR REPLACE INTO store_meta (key, value) VALUES ('coordinate_axis', 'arrival')"
     )
 
 
@@ -476,7 +657,7 @@ def ensure_coordinate_schema(
             which yields (table, row_id, arrival_ordinal, arrival_seq).
             Preserves rowids explicitly, and recreates indexes, triggers, and dependent
             views in dependency-closed order.
-            Stamps store_meta.coordinate_axis = 'arrival'.
+            Stamps store_meta.coordinate_axis = 'arrival' via the _stamp_arrival_axis gatekeeper.
             Refuses if index and provider walk mismatch.
         When validate=False:
             Rebuilds legacy tables populating existing rows with placeholder coordinates
@@ -554,12 +735,18 @@ def ensure_coordinate_schema(
                         f"{defect} — coordinate_axis marker disagrees with table structure "
                         "(out-of-band interference)"
                     )
-            _stamp_coordinate_axis(conn, mode)
+            if mode == "arrival":
+                _stamp_arrival_axis(conn, coordinates, validate=validate)
+            else:
+                _stamp_coordinate_axis(conn, mode)
             conn.commit()
             return
 
     if not existing_tables:
-        _stamp_coordinate_axis(conn, mode)
+        if mode == "arrival":
+            _stamp_arrival_axis(conn, coordinates, validate=validate)
+        else:
+            _stamp_coordinate_axis(conn, mode)
         conn.commit()
         return
 
@@ -568,172 +755,51 @@ def ensure_coordinate_schema(
     )
 
     if already_migrated:
-        if mode == "mirrored" or not validate:
+        if mode == "arrival":
+            _stamp_arrival_axis(conn, coordinates, validate=validate)
+        else:
             _stamp_coordinate_axis(conn, mode)
-            conn.commit()
-            return
+        conn.commit()
+        return
 
-    # If arrival mode with validation, stage the coordinates and check for mismatches
-    if mode == "arrival" and validate:
-        from .arrival import ArrivalCorrupt, GenesisRefused
-        from .arrival_store import ArrivalCanonicalUnsupported
-
-        conn.execute(
-            "CREATE TEMP TABLE IF NOT EXISTS _coordinate_staging ("
-            "table_name TEXT NOT NULL, "
-            "row_id TEXT NOT NULL, "
-            "arrival_ordinal INTEGER NOT NULL, "
-            "arrival_seq INTEGER NOT NULL, "
-            "PRIMARY KEY (table_name, row_id)"
-            ")"
-        )
-        conn.execute("DELETE FROM _coordinate_staging")
-
-        try:
-            assert coordinates is not None
-            staged = list(coordinates())
-        except BaseException as exc:
-            if (
-                isinstance(exc, (FileNotFoundError, ArrivalCorrupt, GenesisRefused))
-                or "is empty — mint a genesis first" in str(exc)
-                or "does not exist" in str(exc)
-                or "No such file" in str(exc)
-            ):
-                raise ArrivalCanonicalUnsupported(
-                    "an index without its log cannot be reconciled, and re-derivation cannot "
-                    "manufacture a log: offering it here would name an operation that destroys "
-                    "the only surviving artifact. Restore the log, or open the db as a plain sqlite store"
-                ) from exc
-            raise ArrivalCanonicalUnsupported(
-                f"error retrieving coordinates from arrival log: {exc} — "
-                "run engine.arrival_projection.rederive_projections to rebuild the index from the log"
-            ) from exc
-
-        for item in staged:
-            if not isinstance(item, tuple) or len(item) != 4:
-                raise ArrivalCanonicalUnsupported(
-                    "coordinate provider yielded invalid tuple format — "
-                    "run engine.arrival_projection.rederive_projections to rebuild the index from the log"
-                )
-            tbl, r_id, ord_val, seq_val = item
-            if tbl not in ("facts", "ticks"):
-                raise ArrivalCanonicalUnsupported(
-                    f"invalid table name {tbl!r} in coordinate provider — "
-                    "run engine.arrival_projection.rederive_projections to rebuild the index from the log"
-                )
-
-        try:
-            conn.executemany(
-                "INSERT INTO _coordinate_staging (table_name, row_id, arrival_ordinal, arrival_seq) "
-                "VALUES (?, ?, ?, ?)",
-                staged,
-            )
-        except sqlite3.IntegrityError as exc:
-            raise ArrivalCanonicalUnsupported(
-                f"duplicate or conflicting coordinates in arrival log: {exc} — "
-                "run engine.arrival_projection.rederive_projections to rebuild the index from the log"
-            ) from exc
-
-        dup = conn.execute(
-            "SELECT table_name, arrival_ordinal, arrival_seq, COUNT(*) "
-            "FROM _coordinate_staging "
-            "GROUP BY table_name, arrival_ordinal, arrival_seq "
-            "HAVING COUNT(*) > 1 LIMIT 1"
-        ).fetchone()
-        if dup is not None:
-            raise ArrivalCanonicalUnsupported(
-                f"duplicate coordinate ({dup[1]}, {dup[2]}) in log for {dup[0]} — "
-                "run engine.arrival_projection.rederive_projections to rebuild the index from the log"
-            )
-
-        # Mismatch checks against existing tables:
-        for t in existing_tables:
-            index_count = conn.execute(f"SELECT COUNT(*) FROM {_quote_ident(t)}").fetchone()[0]
-            staging_count = conn.execute(
-                "SELECT COUNT(*) FROM _coordinate_staging WHERE table_name = ?", (t,)
-            ).fetchone()[0]
-            if index_count != staging_count:
-                raise ArrivalCanonicalUnsupported(
-                    f"index content does not match arrival log coordinates ({t} has {index_count} rows, log has {staging_count}) — "
-                    "run engine.arrival_projection.rederive_projections to rebuild the index from the log"
-                )
-
-            missing_in_staging = conn.execute(
-                f"SELECT f.id FROM {_quote_ident(t)} f LEFT JOIN _coordinate_staging s ON s.table_name = ? AND s.row_id = f.id WHERE s.row_id IS NULL LIMIT 1",
-                (t,),
-            ).fetchone()
-            if missing_in_staging is not None:
-                raise ArrivalCanonicalUnsupported(
-                    f"index content does not match arrival log coordinates ({t} row {missing_in_staging[0]!r} not in log) — "
-                    "run engine.arrival_projection.rederive_projections to rebuild the index from the log"
-                )
-
-            missing_in_index = conn.execute(
-                f"SELECT s.row_id FROM _coordinate_staging s LEFT JOIN {_quote_ident(t)} f ON s.row_id = f.id WHERE s.table_name = ? AND f.id IS NULL LIMIT 1",
-                (t,),
-            ).fetchone()
-            if missing_in_index is not None:
-                raise ArrivalCanonicalUnsupported(
-                    f"index content does not match arrival log coordinates (log {t} row {missing_in_index[0]!r} not in index) — "
-                    "run engine.arrival_projection.rederive_projections to rebuild the index from the log"
-                )
-
-            # Staging join agreement check for existing coordinate columns
-            cols = {r[1] for r in conn.execute(f"PRAGMA table_info({_quote_ident(t)})")}
-            if "arrival_ordinal" in cols and "arrival_seq" in cols:
-                coord_mismatch = conn.execute(
-                    f"SELECT f.id, f.arrival_ordinal, f.arrival_seq, s.arrival_ordinal, s.arrival_seq "
-                    f"FROM {_quote_ident(t)} f JOIN _coordinate_staging s ON s.table_name = ? AND s.row_id = f.id "
-                    f"WHERE f.arrival_ordinal != s.arrival_ordinal OR f.arrival_seq != s.arrival_seq "
-                    f"LIMIT 1",
-                    (t,),
-                ).fetchone()
-                if coord_mismatch is not None:
-                    raise ArrivalCanonicalUnsupported(
-                        f"index coordinates do not match arrival log ({t} row {coord_mismatch[0]!r} has "
-                        f"({coord_mismatch[1]}, {coord_mismatch[2]}), log has ({coord_mismatch[3]}, {coord_mismatch[4]})) — "
-                        "run engine.arrival_projection.rederive_projections to rebuild the index from the log"
-                    )
-
-        non_existing = set(tables_to_check) - set(existing_tables)
-        for non_t in non_existing:
-            extra = conn.execute(
-                "SELECT COUNT(*) FROM _coordinate_staging WHERE table_name = ?", (non_t,)
-            ).fetchone()[0]
-            if extra > 0:
-                raise ArrivalCanonicalUnsupported(
-                    f"index content does not match arrival log coordinates (log has {extra} {non_t} rows but table does not exist) — "
-                    "run engine.arrival_projection.rederive_projections to rebuild the index from the log"
-                )
-
+    # Non-migrated / legacy tables path
     prev_iso = conn.isolation_level
     conn.isolation_level = None  # explicit transaction control
     try:
-        for idx, table in enumerate(tables_to_check):
+        if mode == "arrival" and validate:
+            _check_arrival_provider_agreement(conn, coordinates)
+
+        for table in tables_to_check:
             if table not in existing_tables:
                 continue
 
-            is_final = (idx == len(tables_to_check) - 1) or (
-                idx == 0 and len(existing_tables) == 1
-            )
             valid, _ = _verify_coordinate_schema(conn, table)
             if valid:
-                if is_final:
-                    conn.execute("BEGIN IMMEDIATE")
-                    _stamp_coordinate_axis(conn, mode)
-                    conn.execute("COMMIT")
                 continue
 
             conn.execute("BEGIN IMMEDIATE")
             try:
                 _rebuild_table(
-                    conn, table, is_final=is_final, mode=mode, validate=validate
+                    conn, table, mode=mode, validate=validate
                 )
                 conn.execute("COMMIT")
             except BaseException:
                 if conn.in_transaction:
                     conn.execute("ROLLBACK")
                 raise
+
+        # Post-rebuild stamp
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            if mode == "arrival":
+                _stamp_arrival_axis(conn, coordinates, validate=validate)
+            else:
+                _stamp_coordinate_axis(conn, mode)
+            conn.execute("COMMIT")
+        except BaseException:
+            if conn.in_transaction:
+                conn.execute("ROLLBACK")
+            raise
     finally:
         if mode == "arrival" and validate:
             conn.execute("DROP TABLE IF EXISTS _coordinate_staging")
@@ -744,7 +810,6 @@ def _rebuild_table(
     conn: sqlite3.Connection,
     table: str,
     *,
-    is_final: bool,
     mode: str,
     validate: bool = True,
 ) -> None:
@@ -897,10 +962,6 @@ def _rebuild_table(
     # 9. Recreate triggers
     for t_name, _, t_sql in collected_triggers:
         conn.execute(t_sql)
-
-    # 10. Stamp coordinate_axis marker if final table
-    if is_final:
-        _stamp_coordinate_axis(conn, mode)
 
 
 class UnsignedTickInSignedEra(Exception):

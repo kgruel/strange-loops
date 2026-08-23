@@ -1,0 +1,5 @@
+SOL-WP3-01 (major, `libs/engine/src/engine/store_reader.py:358`): `StoreReader.live_edge()` still computes the seal boundary entirely on the physical `rowid` axis. Lines 406–418 select the newest tick with `ORDER BY rowid`, resolve `fact_cursor` to `f.rowid`, then count `facts.rowid > boundary`. This contradicts D2’s `(arrival_ordinal, arrival_seq)` axis and makes the accompanying docstring false. Reproduction after moving a sealed cursor row’s `rowid` behind an unsealed fact: `verify_chain()` reported `uncovered_facts == 1`, while `StoreReader.live_edge()` returned `(0, None)`. This is precisely an external seal-path consumer missed by the sqlite-only residue gate.
+
+The `("", (-1, 0))` sentinel correctly includes genesis coordinate `(0, 0)` under the open lower bound, and the targeted D2/tick-chain suite passed: 57 tests.
+
+Overall: **FAIL**.

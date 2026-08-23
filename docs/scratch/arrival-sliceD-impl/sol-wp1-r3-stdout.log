@@ -1,0 +1,1 @@
+PASS — SOL-WP1-02 is closed as intended. The `idx_row[3] == "u"` requirement correctly excludes standalone origin-`c` unique indexes while retaining table-owned UNIQUE custody. The regression test pins the refusal.

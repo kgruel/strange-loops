@@ -1,0 +1,9 @@
+SOL-WP1-01 — BLOCKING — `libs/engine/src/engine/sqlite_store.py:415`
+
+Claim: `ensure_coordinate_schema()` guarantees both coordinate columns are `NOT NULL` and protected by table-level `UNIQUE (arrival_ordinal, arrival_seq)`.
+
+Evidence: the function returns immediately when any non-empty `coordinate_axis` marker exists, without inspecting either table. Without a marker, lines 438–454 consider a table migrated merely when `arrival_ordinal` exists; they do not verify `arrival_seq`, either column’s nullability, or the table-level unique constraint. It can therefore stamp and accept a partially migrated or foreign-created schema that violates D0, falsifying both the function’s docstring and the requirement that the invariant live in the table. Subsequent full-column inserts may then fail for a missing `arrival_seq`, or foreign SQL may insert null/duplicate coordinates.
+
+The repo-wide production insert/executemany closure otherwise appears covered, and `_tick_envelope` is unchanged.
+
+Overall: **FAIL** — blocking subset: `SOL-WP1-01`.

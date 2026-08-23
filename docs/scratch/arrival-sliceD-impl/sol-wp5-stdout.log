@@ -1,0 +1,14 @@
+Findings: none.
+
+Overall PASS.
+
+Verified independently:
+
+- Arbiter W5-1 mapping correctly hashes `(kind, ts, observer, origin, payload)` using `FACT_CONTENT_COLUMNS`; `id` is excluded.
+- Key validity uses strict `introduced_ordinal < row_position`, with genesis handled only through self-certification.
+- Only post-dedup admitted fact rows enter verification; collision, split-batch, and tick interleavings do not bypass it.
+- Verification remains inside the retry loop, before append; refusal is transactional.
+- Verifier exceptions propagate before append, while `False` produces the specified refusal.
+- Legacy sources retain explicit no-claim admission.
+
+Targeted tests could not collect locally because `rfc8785` is absent; no suite rerun was required for this gate-verified package.

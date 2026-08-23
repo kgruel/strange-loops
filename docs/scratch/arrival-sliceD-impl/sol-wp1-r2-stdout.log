@@ -1,0 +1,16 @@
+SOL-WP1-02 — BLOCKING — `libs/engine/src/engine/sqlite_store.py:378`
+
+Claim: `_verify_coordinate_schema` verifies the required table-level `UNIQUE (arrival_ordinal, arrival_seq)` constraint.
+
+Evidence: the verifier accepts any unique index with those columns at lines 378–386, including an independently created:
+
+```sql
+CREATE UNIQUE INDEX foreign_coordinate_unique
+ON facts(arrival_ordinal, arrival_seq);
+```
+
+SQLite reports that index through `PRAGMA index_list` with origin `c`, and the current code returns valid without checking origin. A table-owned UNIQUE constraint reports origin `u`. Thus marker-present stores can take the fast path, and marker-absent stores can be stamped, despite the invariant not living in the table as D0 requires. This also falsifies the table-level claim in the docstring at line 414. R5-1’s missing-UNIQUE case does not exercise this shape.
+
+The insert/executemany closure and new-column consumers revealed no additional findings. `_tick_envelope` remains unchanged.
+
+Overall: **FAIL** — blocking subset: SOL-WP1-02. The SOL-WP1-01 structural-verifier claim is not fully closed as intended.

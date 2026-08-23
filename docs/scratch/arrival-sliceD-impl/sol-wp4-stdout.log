@@ -1,0 +1,7 @@
+SOL-WP4-01 (MAJOR, `libs/engine/src/engine/canonical_audit.py:109`) — Dissolved `beyond_offset` residue remains. `Check` still exposes a compatibility property and `as_dict()` still publishes `"beyond_offset"`, so the old audit API remains externally observable alongside `behind_by`/`at_ordinal`. Repo-wide consumers remain in `store.py`, `probe.py`, and JSON assertions. This contradicts the ratified replacement of `beyond_offset` with arrival-native coordinates.
+
+SOL-WP4-02 (MINOR, `apps/loops/src/loops/commands/store.py:392`) — The CLI dispatch arm does not describe the new `Check` shape end-to-end. For arrival logs, the warning still says disagreements are in “bytes the index never claimed to have consumed,” cites `Check.beyond_offset`, and describes first-unindexed-line corroboration. Arrival D3 instead reports record counts and consumed ordinals, with a separate exact `rewound` check. Thus arrival users receive stale JSONL semantics despite the individual check detail being correct.
+
+Focused verification: 12 D3 tests and 76 store-command tests passed. No repo-wide imports of the removed private `_check_offset`, `_suffix_unindexed`, or `_last_line` symbols were found.
+
+Overall: **FAIL**.

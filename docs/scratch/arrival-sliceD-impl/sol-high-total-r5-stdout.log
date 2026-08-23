@@ -1,0 +1,60 @@
+I accept SOL-HIGH-10’s open-path refutation: marked open owns structural validation, not an O(log) provider-agreement walk. The new boundary-pin test passes.
+
+However, the broader convergence argument is unsound: `--deep` misses monotone below-mark coordinate tampering.
+
+### SOL-HIGH-11 — MAJOR
+
+[canonical_audit.py:562](/Users/kaygee/Code/loops/libs/engine/src/engine/canonical_audit.py:562), [canonical_audit.py:620](/Users/kaygee/Code/loops/libs/engine/src/engine/canonical_audit.py:620)
+
+Deep audit orders index rows by `(arrival_ordinal, arrival_seq)`, but selects and compares only `FACT_COLUMNS`/`TICK_COLUMNS`, which explicitly exclude the coordinates. Consequently, changing coordinates while preserving row order passes field-for-field comparison.
+
+Empirical reproduction on three facts at `(1,0), (2,0), (3,0)`:
+
+```sql
+UPDATE facts
+SET arrival_ordinal = 1, arrival_seq = 1
+WHERE arrival_ordinal = 2;
+```
+
+Results:
+
+```text
+coordinates before: [(1, 0), (2, 0), (3, 0)]
+coordinates after:  [(1, 0), (1, 1), (3, 0)]
+marked public reopen: accepted
+L1 ok: True
+deep ok: True
+prefix <= ordinal 1 before: [0]
+prefix <= ordinal 1 after:  [0, 1]
+```
+
+This meets all three requested conditions:
+
+- Marked public open accepts it; the schema remains NOT NULL and UNIQUE.
+- L1 misses it because no row exceeds consumed ordinal 3; deep misses it because row order and content remain unchanged.
+- It corrupts a consumer-visible claim: [StoreReader.facts_by_kind:687](/Users/kaygee/Code/loops/libs/engine/src/engine/store_reader.py:687) defines `at_ordinal=1` as the prefix received through log ordinal 1, but now includes a fact actually issued at ordinal 2.
+
+The new test at [test_audit_rebase_d3.py:256](/Users/kaygee/Code/loops/libs/engine/tests/test_audit_rebase_d3.py:256) only covers the above-mark `+100` class caught by `rewound`; it does not pin the asserted below-mark deep-audit boundary.
+
+Deep audit needs to compare each stored coordinate with `(record["ord"], expansion_seq)`, not merely use coordinates for ordering.
+
+### Verdict
+
+| Area | Verdict | Basis |
+|---|---|---|
+| D0 — coordinate schema/migration | PASS | Existing migration and marker dispositions stand |
+| D1 — witness re-key | PASS | Consumer correctly relies on the coordinate; SOL-HIGH-11 corrupts its input |
+| D2 — seal re-base | PASS | Existing dispositions stand |
+| D3 — audit re-base | **FAIL** | SOL-HIGH-11: both L1 and deep accept a consumer-visible coordinate disagreement |
+| D4 — admission verification | PASS | Existing dispositions stand |
+| Scope law | PASS | Changes remain within the receipted exceptions |
+
+Verification:
+
+```text
+Boundary-pin test: 1 passed
+D0–D3 + key-registry gates: 97 passed
+D4 admission gates: 18 passed
+```
+
+## NOT_CONVERGED

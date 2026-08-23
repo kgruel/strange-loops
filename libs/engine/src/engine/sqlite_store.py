@@ -131,6 +131,12 @@ TICK_COLUMNS = TICK_CONTENT_COLUMNS
 FACT_ALL_COLUMNS = (*FACT_CONTENT_COLUMNS, "arrival_ordinal", "arrival_seq")
 TICK_ALL_COLUMNS = (*TICK_CONTENT_COLUMNS, "arrival_ordinal", "arrival_seq")
 
+# Name -> position in a content row. Consumers index rows by name through
+# these instead of re-deriving positions with .index() at each call site,
+# so a new content column moves every reader at once.
+FACT_COLUMN_INDEX = {name: i for i, name in enumerate(FACT_CONTENT_COLUMNS)}
+TICK_COLUMN_INDEX = {name: i for i, name in enumerate(TICK_CONTENT_COLUMNS)}
+
 
 def _insert_sql(table: str, columns: tuple[str, ...]) -> str:
     return (
@@ -407,6 +413,21 @@ def _verify_coordinate_schema(
     return True, None
 
 
+def _stamp_coordinate_axis(conn: sqlite3.Connection, mode: str) -> None:
+    """Write the store_meta.coordinate_axis marker.
+
+    Statements only — the caller owns the transaction boundary (some stamp
+    sites run inside their own BEGIN IMMEDIATE, others commit afterwards).
+    """
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS store_meta (key TEXT PRIMARY KEY, value TEXT)"
+    )
+    conn.execute(
+        "INSERT OR REPLACE INTO store_meta (key, value) VALUES ('coordinate_axis', ?)",
+        (mode,),
+    )
+
+
 def ensure_coordinate_schema(
     conn: sqlite3.Connection,
     *,
@@ -505,13 +526,7 @@ def ensure_coordinate_schema(
             return  # Fast path: marker present and structure complete
 
     if not existing_tables:
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS store_meta (key TEXT PRIMARY KEY, value TEXT)"
-        )
-        conn.execute(
-            "INSERT OR REPLACE INTO store_meta (key, value) VALUES ('coordinate_axis', ?)",
-            (mode,),
-        )
+        _stamp_coordinate_axis(conn, mode)
         conn.commit()
         return
 
@@ -520,13 +535,7 @@ def ensure_coordinate_schema(
     )
 
     if already_migrated:
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS store_meta (key TEXT PRIMARY KEY, value TEXT)"
-        )
-        conn.execute(
-            "INSERT OR REPLACE INTO store_meta (key, value) VALUES ('coordinate_axis', ?)",
-            (mode,),
-        )
+        _stamp_coordinate_axis(conn, mode)
         conn.commit()
         return
 
@@ -648,13 +657,7 @@ def ensure_coordinate_schema(
             if valid:
                 if is_final:
                     conn.execute("BEGIN IMMEDIATE")
-                    conn.execute(
-                        "CREATE TABLE IF NOT EXISTS store_meta (key TEXT PRIMARY KEY, value TEXT)"
-                    )
-                    conn.execute(
-                        "INSERT OR REPLACE INTO store_meta (key, value) VALUES ('coordinate_axis', ?)",
-                        (mode,),
-                    )
+                    _stamp_coordinate_axis(conn, mode)
                     conn.execute("COMMIT")
                 continue
 
@@ -834,13 +837,7 @@ def _rebuild_table(
 
     # 10. Stamp coordinate_axis marker if final table
     if is_final:
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS store_meta (key TEXT PRIMARY KEY, value TEXT)"
-        )
-        conn.execute(
-            "INSERT OR REPLACE INTO store_meta (key, value) VALUES ('coordinate_axis', ?)",
-            (mode,),
-        )
+        _stamp_coordinate_axis(conn, mode)
 
 
 class UnsignedTickInSignedEra(Exception):

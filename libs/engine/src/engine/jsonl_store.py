@@ -192,11 +192,11 @@ from .residence import canonical_for
 from .sql_util import sqlite_busy
 from .sqlite_store import (
     FACT_ALL_COLUMNS,
+    FACT_COLUMN_INDEX,
     FACT_COLUMNS,
-    FACT_CONTENT_COLUMNS,
     FACT_INSERT_SQL,
+    TICK_COLUMN_INDEX,
     TICK_COLUMNS,
-    TICK_CONTENT_COLUMNS,
     TICK_INSERT_SQL,
     SqliteStore,
 )
@@ -599,10 +599,8 @@ class JsonlStore(SqliteStore[T], Generic[T]):
                 table, row[0]
             )
             sig_col_idx = (
-                FACT_CONTENT_COLUMNS.index("signature")
-                if is_fact
-                else TICK_CONTENT_COLUMNS.index("signature")
-            )
+                FACT_COLUMN_INDEX if is_fact else TICK_COLUMN_INDEX
+            )["signature"]
             committed = committed_row[sig_col_idx]
             line = serialize_row(committed_row[:-2])
             # The INSERT has taken sqlite's write lock, so the committed

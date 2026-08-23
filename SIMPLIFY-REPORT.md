@@ -83,7 +83,9 @@ Split applied:
 
 `libs/engine/src/engine/vertex.py` boundary reconciliation reads
 `loop._projection.events_folded`; the `NotImplementedError` typed guard is
-deleted. Every replay route feeds the count — verified: the raw
+deleted, and a repo-wide grep for the guard's message across `libs`, `apps`,
+`docs`, `spec`, and `tests` returns nothing — no prose or comment residue.
+Every replay route feeds the count — verified: the raw
 `replay_cursor` and `since_raw` paths call `fold_one_mut`, the non-mut raw path
 calls `fold_one`, and the full-Fact fallback goes through `Loop.receive`
 (`loop.py:105-108`), which calls one of the two.
@@ -160,6 +162,10 @@ compared against the originals character-for-character.
 arrival identical: True
 jsonl identical: True
 ```
+
+The strongest proof is upstream of that comparison: the edit script asserted the
+old two-branch block was present byte-for-byte before swapping it, so the
+literals compared against are the pre-edit source, not a transcription of it.
 
 The WP-4 tests that pin the arrival wording pass unchanged.
 

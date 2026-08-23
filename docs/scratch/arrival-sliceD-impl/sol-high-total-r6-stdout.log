@@ -1,0 +1,31 @@
+SOL-HIGH-11 is empirically verified as fixed.
+
+- `test_audit_rebase_d3.py`: 18/18 passed.
+- Both fact and tick order-preserving tampers keep L1 green and make deep audit fail at ordinal 2, reporting true `(2, 0)` versus stored `(1, 1)`.
+- Exact `1+N` deep-audit work bound remains pinned.
+- Implementation performs coordinate comparison through the existing cursors without another log walk.
+
+| Area | Verdict | Basis |
+|---|---|---|
+| D0 | PASS | Coordinate schema, migration, constraints, provider-validation, and rederivation coverage remain green. |
+| D1 | PASS | Witness lineage/ordinal semantics and required refusal/API compatibility remain pinned. |
+| D2 | PASS | Pair-coordinate seal traversal remains covered; signed bytes and fact-ID cursors remain unchanged. |
+| D3 | PASS | SOL-HIGH-11 closed for facts and ticks; L1/deep boundary, location claims, and exact work bounds verified. |
+| D4 | PASS | Selective key walk and post-dedup admission verification remain green. |
+| Scope law | PASS | Full-arc diff matches the receipted exceptions; `preflight.py` is exactly one docstring-sentence change. |
+
+Broad reruns:
+
+- Engine: 1,913 passed, 1 skipped
+- Store: 176 passed
+- Apps: 2,530 passed, 1 xfailed
+- SDK: 324 passed
+- Architecture: 98 passed
+- Atoms: 517 passed
+- Lang: 691 passed, 3 skipped
+
+One initial store run encountered a pre-existing randomized ULID-order test flake; its isolated rerun and full-suite rerun passed. It is outside the arc’s test diff and unrelated to D0–D4.
+
+No new findings. SOL-HIGH-01–11 dispositions stand.
+
+**CONVERGED**

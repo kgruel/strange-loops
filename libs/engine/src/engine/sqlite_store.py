@@ -448,11 +448,17 @@ def ensure_coordinate_schema(
     UNIQUE (arrival_ordinal, arrival_seq) constraint.
 
     When the store_meta.coordinate_axis marker is present:
-        Performs structural verification across all existing tables.
-        If all tables conform, returns immediately (fast path).
-        If any structural requirement fails, raises ArrivalCanonicalUnsupported
-        naming the table and defect, refusing out-of-band stamped incomplete stores
-        without modifying them.
+        If the marker matches the requested mode:
+            Performs structural verification across all existing tables.
+            If all tables conform, returns immediately (fast path).
+            If any structural requirement fails, raises ArrivalCanonicalUnsupported
+            naming the table and defect, refusing out-of-band stamped incomplete stores
+            without modifying them.
+        If the marker does not match the requested mode:
+            If the store has zero rows in both tables (fresh store case), verifies
+            structure and corrects the marker to the requested mode.
+            If any rows are present in existing tables, raises ArrivalCanonicalUnsupported
+            naming both the existing marker and the requested mode.
 
     When the store_meta.coordinate_axis marker is absent:
         Structurally verified tables are skipped.
@@ -521,6 +527,26 @@ def ensure_coordinate_schema(
         if axis_row is not None and axis_row[0]:
             from .arrival_store import ArrivalCanonicalUnsupported
 
+            if axis_row[0] == mode:
+                for t in existing_tables:
+                    valid, defect = _verify_coordinate_schema(conn, t)
+                    if not valid:
+                        raise ArrivalCanonicalUnsupported(
+                            f"{defect} — coordinate_axis marker disagrees with table structure "
+                            "(out-of-band interference)"
+                        )
+                return  # Fast path: marker present, mode matches, and structure complete
+
+            # Marker value does not match requested mode
+            all_empty = all(
+                conn.execute(f"SELECT COUNT(*) FROM {_quote_ident(t)}").fetchone()[0] == 0
+                for t in existing_tables
+            )
+            if not all_empty:
+                raise ArrivalCanonicalUnsupported(
+                    f"coordinate_axis marker {axis_row[0]!r} disagrees with requested mode {mode!r} "
+                    "on non-empty store"
+                )
             for t in existing_tables:
                 valid, defect = _verify_coordinate_schema(conn, t)
                 if not valid:
@@ -528,7 +554,9 @@ def ensure_coordinate_schema(
                         f"{defect} — coordinate_axis marker disagrees with table structure "
                         "(out-of-band interference)"
                     )
-            return  # Fast path: marker present and structure complete
+            _stamp_coordinate_axis(conn, mode)
+            conn.commit()
+            return
 
     if not existing_tables:
         _stamp_coordinate_axis(conn, mode)
@@ -544,30 +572,10 @@ def ensure_coordinate_schema(
             _stamp_coordinate_axis(conn, mode)
             conn.commit()
             return
-        all_empty = all(
-            conn.execute(f"SELECT COUNT(*) FROM {_quote_ident(t)}").fetchone()[0] == 0
-            for t in existing_tables
-        )
-        if all_empty:
-            _stamp_coordinate_axis(conn, mode)
-            conn.commit()
-            return
-
-    all_empty = all(
-        conn.execute(f"SELECT COUNT(*) FROM {_quote_ident(t)}").fetchone()[0] == 0
-        for t in existing_tables
-    )
-    if all_empty and mode == "arrival" and validate:
-        # Rebuild empty tables with coordinate schema without needing provider rows
-        for t in existing_tables:
-            if not _verify_coordinate_schema(conn, t)[0]:
-                _rebuild_table(conn, t, "arrival", validate=False)
-        _stamp_coordinate_axis(conn, mode)
-        conn.commit()
-        return
 
     # If arrival mode with validation, stage the coordinates and check for mismatches
     if mode == "arrival" and validate:
+        from .arrival import ArrivalCorrupt, GenesisRefused
         from .arrival_store import ArrivalCanonicalUnsupported
 
         conn.execute(
@@ -1957,10 +1965,13 @@ class SqliteStore(Generic[T]):
 
     def _meta_get(self, key: str) -> str | None:
         """One ``store_meta`` value, or None. Never commits."""
-        row = self._conn.execute(
-            "SELECT value FROM store_meta WHERE key = ?", (key,)
-        ).fetchone()
-        return None if row is None else row[0]
+        try:
+            row = self._conn.execute(
+                "SELECT value FROM store_meta WHERE key = ?", (key,)
+            ).fetchone()
+            return None if row is None else row[0]
+        except sqlite3.OperationalError:
+            return None
 
     def _meta_set(self, key: str, value: object) -> None:
         """Stage one ``store_meta`` write — the caller owns the commit.

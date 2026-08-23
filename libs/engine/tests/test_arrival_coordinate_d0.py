@@ -2062,3 +2062,256 @@ class TestSolHigh02IdentifierQuotingInRebuild:
         assert row == ("f1", 1, 0)
         conn.close()
 
+
+class TestSolHigh06CoordinateAxisModeMismatch:
+    """SOL-HIGH-06: A fresh ArrivalStore's coordinate_axis marker must read 'arrival',
+    a fresh SqliteStore must read 'mirrored', and a hand-stamped mismatch on a NON-empty
+    store must refuse loudly with ArrivalCanonicalUnsupported naming both modes.
+    Empty store allows correcting marker to requested mode.
+    """
+
+    def test_fresh_arrival_store_stamped_arrival(self, tmp_path: Path) -> None:
+        import base64
+
+        sample_key = base64.b64encode(b"\x00" * 32).decode()
+        sample_sig = base64.b64encode(b"\x01" * 64).decode()
+
+        log_path = tmp_path / "fresh.arrival"
+        ArrivalLog.mint(
+            log_path,
+            observer="kyle",
+            signer=lambda obs, dig: sample_sig,
+            key=sample_key,
+        )
+        db_path = log_path.with_suffix(".db")
+        store = ArrivalStore(
+            path=db_path,
+            serialize=lambda f: f.to_dict(),
+            deserialize=Fact.from_dict,
+        )
+        store.close()
+
+        conn = sqlite3.connect(str(db_path))
+        meta = conn.execute(
+            "SELECT value FROM store_meta WHERE key = 'coordinate_axis'"
+        ).fetchone()
+        conn.close()
+
+        assert meta == ("arrival",)
+
+    def test_fresh_sqlite_store_stamped_mirrored(self, tmp_path: Path) -> None:
+        db_path = tmp_path / "fresh_sqlite.db"
+        store = SqliteStore(
+            path=db_path,
+            serialize=lambda f: f.to_dict(),
+            deserialize=Fact.from_dict,
+        )
+        store.close()
+
+        conn = sqlite3.connect(str(db_path))
+        meta = conn.execute(
+            "SELECT value FROM store_meta WHERE key = 'coordinate_axis'"
+        ).fetchone()
+        conn.close()
+
+        assert meta == ("mirrored",)
+
+    def test_hand_stamped_mismatch_non_empty_store_refuses_loudly(
+        self, tmp_path: Path
+    ) -> None:
+        # Case A: Mirrored store with rows hand-stamped with coordinate_axis='arrival'
+        db_path = tmp_path / "mismatch_mirrored.db"
+        store = SqliteStore(
+            path=db_path,
+            serialize=lambda f: f.to_dict(),
+            deserialize=Fact.from_dict,
+        )
+        store.append(Fact.of("note", "kyle", text="fact1"))
+        store.close()
+
+        conn = sqlite3.connect(str(db_path))
+        conn.execute(
+            "UPDATE store_meta SET value = 'arrival' WHERE key = 'coordinate_axis'"
+        )
+        conn.commit()
+        conn.close()
+
+        conn = sqlite3.connect(str(db_path))
+        with pytest.raises(ArrivalCanonicalUnsupported) as exc_info:
+            ensure_coordinate_schema(conn, mode="mirrored")
+        conn.close()
+
+        err_msg = str(exc_info.value)
+        assert "coordinate_axis marker 'arrival' disagrees with requested mode 'mirrored'" in err_msg
+        assert "non-empty store" in err_msg
+
+        # Case B: Arrival store with rows hand-stamped with coordinate_axis='mirrored'
+        import base64
+
+        sample_key = base64.b64encode(b"\x00" * 32).decode()
+        sample_sig = base64.b64encode(b"\x01" * 64).decode()
+
+        log_path = tmp_path / "mismatch_arrival.arrival"
+        ArrivalLog.mint(
+            log_path,
+            observer="kyle",
+            signer=lambda obs, dig: sample_sig,
+            key=sample_key,
+        )
+        arr_db_path = log_path.with_suffix(".db")
+        arr_store = ArrivalStore(
+            path=arr_db_path,
+            serialize=lambda f: f.to_dict(),
+            deserialize=Fact.from_dict,
+        )
+        arr_store.append(Fact.of("note", "kyle", text="arrival fact"))
+        arr_store.close()
+
+        conn = sqlite3.connect(str(arr_db_path))
+        conn.execute(
+            "UPDATE store_meta SET value = 'mirrored' WHERE key = 'coordinate_axis'"
+        )
+        conn.commit()
+        conn.close()
+
+        with pytest.raises(ArrivalCanonicalUnsupported) as exc_info_arr:
+            ArrivalStore(
+                path=arr_db_path,
+                serialize=lambda f: f.to_dict(),
+                deserialize=Fact.from_dict,
+            )
+
+        err_msg_arr = str(exc_info_arr.value)
+        assert "coordinate_axis marker 'mirrored' disagrees with requested mode 'arrival'" in err_msg_arr
+        assert "non-empty store" in err_msg_arr
+
+    def test_empty_store_mode_mismatch_corrected(self, tmp_path: Path) -> None:
+        from engine.sqlite_store import _SCHEMA_STMTS
+
+        db_path = tmp_path / "empty_correct.db"
+        conn = sqlite3.connect(str(db_path))
+        for stmt in _SCHEMA_STMTS:
+            conn.execute(stmt)
+        conn.execute("CREATE TABLE store_meta (key TEXT PRIMARY KEY, value TEXT)")
+        conn.execute(
+            "INSERT INTO store_meta (key, value) VALUES ('coordinate_axis', 'mirrored')"
+        )
+        conn.commit()
+
+        # In mode 'arrival' on empty store, correcting stamp to 'arrival' is permitted
+        ensure_coordinate_schema(conn, mode="arrival", coordinates=lambda: iter([]))
+        meta = conn.execute(
+            "SELECT value FROM store_meta WHERE key = 'coordinate_axis'"
+        ).fetchone()
+        conn.close()
+
+        assert meta == ("arrival",)
+
+
+class TestSolHigh07EmptyIndexConsultsProvider:
+    """SOL-HIGH-07: The all_empty path must consult the provider in mode='arrival'.
+    If the provider yields zero rows, it stamps; if the provider yields ANY rows,
+    it refuses toward rederive_projections.
+    """
+
+    def test_empty_index_with_populated_log_refuses_rederive(
+        self, tmp_path: Path
+    ) -> None:
+        import base64
+
+        sample_key = base64.b64encode(b"\x00" * 32).decode()
+        sample_sig = base64.b64encode(b"\x01" * 64).decode()
+
+        log_path = tmp_path / "empty_index_pop_log.arrival"
+        ArrivalLog.mint(
+            log_path,
+            observer="kyle",
+            signer=lambda obs, dig: sample_sig,
+            key=sample_key,
+        )
+        db_path = log_path.with_suffix(".db")
+        store = ArrivalStore(
+            path=db_path,
+            serialize=lambda f: f.to_dict(),
+            deserialize=Fact.from_dict,
+        )
+        store.append(Fact.of("note", "kyle", text="fact one"))
+        store.append(Fact.of("note", "kyle", text="fact two"))
+        store.close()
+
+        # Sol's reproduction: delete projected rows and marker, retain resume mark
+        conn = sqlite3.connect(str(db_path))
+        conn.execute("DELETE FROM facts")
+        conn.execute("DELETE FROM store_meta WHERE key = 'coordinate_axis'")
+        conn.commit()
+        conn.close()
+
+        # Reopening ArrivalStore must refuse toward rederive_projections, NOT silently stamp
+        with pytest.raises(ArrivalCanonicalUnsupported) as exc_info:
+            ArrivalStore(
+                path=db_path,
+                serialize=lambda f: f.to_dict(),
+                deserialize=Fact.from_dict,
+            )
+
+        err_msg = str(exc_info.value)
+        assert "rederive_projections" in err_msg
+        assert "index content does not match arrival log coordinates" in err_msg
+
+
+class TestSolHigh08EmptyLegacyIndexPublicConstructor:
+    """SOL-HIGH-08: Opening an empty legacy arrival index through the public ArrivalStore
+    constructor must rebuild tables with coordinate columns, stamp coordinate_axis='arrival',
+    and succeed without TypeError. Appends work after migration.
+    """
+
+    def test_empty_legacy_arrival_index_migrates_stamps_and_appends(
+        self, tmp_path: Path
+    ) -> None:
+        import base64
+
+        sample_key = base64.b64encode(b"\x00" * 32).decode()
+        sample_sig = base64.b64encode(b"\x01" * 64).decode()
+
+        log_path = tmp_path / "empty_legacy.arrival"
+        ArrivalLog.mint(
+            log_path,
+            observer="kyle",
+            signer=lambda obs, dig: sample_sig,
+            key=sample_key,
+        )
+        db_path = log_path.with_suffix(".db")
+        _create_legacy_db(db_path)
+
+        # Open through public ArrivalStore constructor
+        store = ArrivalStore(
+            path=db_path,
+            serialize=lambda f: f.to_dict(),
+            deserialize=Fact.from_dict,
+        )
+        # Verify schema migrated and stamped
+        conn = sqlite3.connect(str(db_path))
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(facts)")}
+        meta = conn.execute(
+            "SELECT value FROM store_meta WHERE key = 'coordinate_axis'"
+        ).fetchone()
+        conn.close()
+
+        assert "arrival_ordinal" in cols
+        assert "arrival_seq" in cols
+        assert meta == ("arrival",)
+
+        # Appends work after migration
+        f1 = store.append(Fact.of("note", "kyle", text="first fact after migration"))
+        assert f1 is not None
+        assert store.total == 1
+        store.close()
+
+        conn = sqlite3.connect(str(db_path))
+        row = conn.execute(
+            "SELECT id, arrival_ordinal, arrival_seq FROM facts"
+        ).fetchone()
+        conn.close()
+        assert row == (f1, 1, 0)
+
+

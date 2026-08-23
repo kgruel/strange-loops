@@ -2315,3 +2315,223 @@ class TestSolHigh08EmptyLegacyIndexPublicConstructor:
         assert row == (f1, 1, 0)
 
 
+class TestSolHigh09ArrivalStampGatekeeperByConstruction:
+    """SOL-HIGH-09: A single gatekeeper path (_stamp_arrival_axis) owns writing
+    coordinate_axis='arrival' into store_meta by construction. Every arrival-stamping
+    branch (mismatch-correction, all_empty/no tables, already_migrated, post-rebuild)
+    MUST invoke the gatekeeper, ensuring provider agreement is verified on every path.
+    """
+
+    def test_structural_ratchet_single_arrival_stamp_in_store_meta(self) -> None:
+        """Structural ratchet: exactly ONE write site of literal 'arrival' into store_meta
+        remains in sqlite_store.py, located strictly inside _stamp_arrival_axis.
+
+        NOTE: This ratchet is a residue locator for the literal 'arrival' write into store_meta,
+        not proof of provider-agreement correctness alone. The behavioral gates own the verdict.
+        """
+        import ast
+        import re
+
+        store_file = (
+            Path(__file__).parent.parent / "src" / "engine" / "sqlite_store.py"
+        )
+        content = store_file.read_text()
+
+        # 1. Regex check: Scan for SQL INSERT / UPDATE statements writing literal 'arrival' into store_meta
+        arrival_meta_writes = re.findall(
+            r"INSERT\s+OR\s+REPLACE\s+INTO\s+store_meta[^\n;]*?'coordinate_axis',\s*'arrival'",
+            content,
+            re.IGNORECASE,
+        )
+        assert len(arrival_meta_writes) == 1, (
+            f"Expected exactly 1 SQL write of 'arrival' into store_meta, found {len(arrival_meta_writes)}: "
+            f"{arrival_meta_writes}"
+        )
+
+        # 2. AST check: Scan all function definitions for SQL execution writing literal 'arrival' to store_meta
+        tree = ast.parse(content)
+        functions_with_arrival_stamp: list[str] = []
+
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                for subnode in ast.walk(node):
+                    if isinstance(subnode, ast.Call):
+                        call_str = ast.unparse(subnode)
+                        if (
+                            "store_meta" in call_str
+                            and "coordinate_axis" in call_str
+                            and "arrival" in call_str
+                            and ("INSERT" in call_str or "UPDATE" in call_str)
+                        ):
+                            functions_with_arrival_stamp.append(node.name)
+                            break
+
+        assert functions_with_arrival_stamp == ["_stamp_arrival_axis"], (
+            f"Expected only '_stamp_arrival_axis' to write 'arrival' to store_meta, "
+            f"but found: {functions_with_arrival_stamp}"
+        )
+
+    def test_sol_r3_reproduction_empty_index_with_flipped_marker_refuses(
+        self, tmp_path: Path
+    ) -> None:
+        """Sol's r3 reproduction: populated log + retained resume mark, index rows deleted,
+        marker flipped to 'mirrored' -> reopening through ArrivalStore or calling
+        ensure_coordinate_schema MUST refuse with ArrivalCanonicalUnsupported and advise
+        running rederive_projections, never accept as valid-empty.
+        """
+        import base64
+
+        sample_key = base64.b64encode(b"\x00" * 32).decode()
+        sample_sig = base64.b64encode(b"\x01" * 64).decode()
+
+        log_path = tmp_path / "sol_r3_repro.arrival"
+        ArrivalLog.mint(
+            log_path,
+            observer="kyle",
+            signer=lambda obs, dig: sample_sig,
+            key=sample_key,
+        )
+        db_path = log_path.with_suffix(".db")
+        store = ArrivalStore(
+            path=db_path,
+            serialize=lambda f: f.to_dict(),
+            deserialize=Fact.from_dict,
+        )
+        store.append(Fact.of("note", "kyle", text="first fact"))
+        store.append(Fact.of("note", "kyle", text="second fact"))
+        store.close()
+
+        # Sol's reproduction: delete index rows, flip marker to 'mirrored', keep resume mark
+        conn = sqlite3.connect(str(db_path))
+        conn.execute("DELETE FROM facts")
+        conn.execute(
+            "UPDATE store_meta SET value = 'mirrored' WHERE key = 'coordinate_axis'"
+        )
+        conn.commit()
+        conn.close()
+
+        # Reopening through ArrivalStore MUST refuse with rederive_projections recommendation
+        with pytest.raises(ArrivalCanonicalUnsupported) as exc_info:
+            ArrivalStore(
+                path=db_path,
+                serialize=lambda f: f.to_dict(),
+                deserialize=Fact.from_dict,
+            )
+
+        err_msg = str(exc_info.value)
+        assert "rederive_projections" in err_msg
+        assert "index content does not match arrival log coordinates" in err_msg
+        assert "facts has 0 rows, log has 2" in err_msg
+
+    def test_all_four_arrival_stamping_branches_refuse_on_provider_mismatch(
+        self, tmp_path: Path
+    ) -> None:
+        """Every arrival-stamping branch (1: mismatch-correction, 2: all_empty,
+        3: already_migrated, 4: post-rebuild) must refuse when provider disagrees with index.
+        """
+        from engine.sqlite_store import ensure_coordinate_schema
+
+        def provider_with_rows() -> Iterator[tuple[str, str, int, int]]:
+            yield "facts", "f-001", 1, 0
+            yield "facts", "f-002", 2, 0
+
+        # Branch 1: Mismatch correction on empty index when provider has rows -> refuses
+        db1 = tmp_path / "branch1.db"
+        _create_legacy_db(db1)
+        conn1 = sqlite3.connect(str(db1))
+        ensure_coordinate_schema(conn1, mode="mirrored")
+        conn1.execute("DELETE FROM facts")
+        conn1.commit()
+        with pytest.raises(ArrivalCanonicalUnsupported) as exc1:
+            ensure_coordinate_schema(conn1, mode="arrival", coordinates=provider_with_rows)
+        assert "index content does not match arrival log coordinates" in str(exc1.value)
+        conn1.close()
+
+        # Branch 2: all_empty / not existing_tables when provider has rows -> refuses
+        db2 = tmp_path / "branch2.db"
+        conn2 = sqlite3.connect(str(db2))
+        with pytest.raises(ArrivalCanonicalUnsupported) as exc2:
+            ensure_coordinate_schema(conn2, mode="arrival", coordinates=provider_with_rows)
+        assert "log has 2 facts rows but table does not exist" in str(exc2.value)
+        conn2.close()
+
+        # Branch 3: already_migrated when provider has row count mismatch -> refuses
+        db3 = tmp_path / "branch3.db"
+        _create_legacy_db(db3)
+        conn3 = sqlite3.connect(str(db3))
+        ensure_coordinate_schema(conn3, mode="mirrored")
+        conn3.execute("DELETE FROM store_meta WHERE key = 'coordinate_axis'")
+        conn3.commit()
+        with pytest.raises(ArrivalCanonicalUnsupported) as exc3:
+            ensure_coordinate_schema(conn3, mode="arrival", coordinates=provider_with_rows)
+        assert "index content does not match arrival log coordinates" in str(exc3.value)
+        conn3.close()
+
+        # Branch 4: post-rebuild of legacy tables when provider has row count mismatch -> refuses
+        db4 = tmp_path / "branch4.db"
+        _create_legacy_db(db4)
+        _populate_legacy_facts(db4, 3)
+        conn4 = sqlite3.connect(str(db4))
+        with pytest.raises(ArrivalCanonicalUnsupported) as exc4:
+            ensure_coordinate_schema(conn4, mode="arrival", coordinates=provider_with_rows)
+        assert "index content does not match arrival log coordinates" in str(exc4.value)
+        conn4.close()
+
+    def test_all_four_arrival_stamping_branches_succeed_when_provider_agrees(
+        self, tmp_path: Path
+    ) -> None:
+        """Every arrival-stamping branch (1: mismatch-correction, 2: all_empty,
+        3: already_migrated, 4: post-rebuild) must succeed and stamp 'arrival' when provider agrees.
+        """
+        from engine.sqlite_store import ensure_coordinate_schema
+
+        empty_provider = lambda: iter([])
+
+        # Branch 1: Mismatch correction on empty index when provider is empty -> stamps 'arrival'
+        db1 = tmp_path / "agree_branch1.db"
+        _create_legacy_db(db1)
+        conn1 = sqlite3.connect(str(db1))
+        ensure_coordinate_schema(conn1, mode="mirrored")
+        conn1.execute("DELETE FROM facts")
+        conn1.commit()
+        ensure_coordinate_schema(conn1, mode="arrival", coordinates=empty_provider)
+        meta1 = conn1.execute("SELECT value FROM store_meta WHERE key = 'coordinate_axis'").fetchone()
+        assert meta1 == ("arrival",)
+        conn1.close()
+
+        # Branch 2: all_empty / not existing_tables when provider is empty -> stamps 'arrival'
+        db2 = tmp_path / "agree_branch2.db"
+        conn2 = sqlite3.connect(str(db2))
+        ensure_coordinate_schema(conn2, mode="arrival", coordinates=empty_provider)
+        meta2 = conn2.execute("SELECT value FROM store_meta WHERE key = 'coordinate_axis'").fetchone()
+        assert meta2 == ("arrival",)
+        conn2.close()
+
+        # Branch 3: already_migrated when provider matches rows -> stamps 'arrival'
+        db3 = tmp_path / "agree_branch3.db"
+        _create_legacy_db(db3)
+        conn3 = sqlite3.connect(str(db3))
+        ensure_coordinate_schema(conn3, mode="mirrored")
+        conn3.execute("DELETE FROM store_meta WHERE key = 'coordinate_axis'")
+        conn3.execute("DELETE FROM facts")
+        conn3.execute("INSERT INTO facts (id, kind, ts, observer, origin, payload, arrival_ordinal, arrival_seq) VALUES ('f1', 'n', 1.0, 'k', '', '{}', 1, 0)")
+        conn3.commit()
+        def provider_f1() -> Iterator[tuple[str, str, int, int]]:
+            yield "facts", "f1", 1, 0
+        ensure_coordinate_schema(conn3, mode="arrival", coordinates=provider_f1)
+        meta3 = conn3.execute("SELECT value FROM store_meta WHERE key = 'coordinate_axis'").fetchone()
+        assert meta3 == ("arrival",)
+        conn3.close()
+
+        # Branch 4: post-rebuild of legacy tables when provider matches -> rebuilds and stamps 'arrival'
+        db4 = tmp_path / "agree_branch4.db"
+        _create_legacy_db(db4)
+        conn4 = sqlite3.connect(str(db4))
+        conn4.execute("INSERT INTO facts (id, kind, ts, observer, origin, payload) VALUES ('f1', 'n', 1.0, 'k', '', '{}')")
+        conn4.commit()
+        ensure_coordinate_schema(conn4, mode="arrival", coordinates=provider_f1)
+        meta4 = conn4.execute("SELECT value FROM store_meta WHERE key = 'coordinate_axis'").fetchone()
+        assert meta4 == ("arrival",)
+        conn4.close()
+
+

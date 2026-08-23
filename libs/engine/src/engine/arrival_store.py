@@ -82,10 +82,10 @@ from .jsonl_store import _as_int, _stamped_offset_current
 from .residence import canonical_for, index_path_for
 from .sqlite_store import (
     FACT_ALL_COLUMNS,
+    FACT_COLUMN_INDEX,
     FACT_COLUMNS,
-    FACT_CONTENT_COLUMNS,
     FACT_INSERT_SQL,
-    TICK_CONTENT_COLUMNS,
+    TICK_COLUMN_INDEX,
     TICK_INSERT_SQL,
     SqliteStore,
 )
@@ -452,10 +452,8 @@ class ArrivalStore(SqliteStore[T], Generic[T]):
                 table, row[0]
             )
             sig_col_idx = (
-                FACT_CONTENT_COLUMNS.index("signature")
-                if is_fact
-                else TICK_CONTENT_COLUMNS.index("signature")
-            )
+                FACT_COLUMN_INDEX if is_fact else TICK_COLUMN_INDEX
+            )["signature"]
             committed = committed_row[sig_col_idx]
             body = encode_row(committed_row[:-2])
             record, mark = self._log.append_marked(

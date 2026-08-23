@@ -394,40 +394,39 @@ def _run_verify(argv: list[str], *, vertex_path: Path | None = None) -> int:
 
             canonical = resolve_canonical_path(target_path)
             mode = canonical_mode(canonical)
+            # Both modes say the same thing: every divergence sits past what
+            # the index claims to have consumed — where an interrupted append
+            # lands, and (jsonl) also where a rewound marker plus a doctored
+            # suffix lands. So this reports WHERE, never "benign". Still rc=1
+            # and still no chain walk (it would attest to a partial index).
+            # The vocabulary is the only difference — arrival counts records
+            # against a consumed ordinal (see engine.canonical_audit.
+            # Check.behind_by / at_ordinal, whose rewound check rules out a
+            # moved marker), jsonl counts bytes against a consumed prefix and
+            # L1 corroborates only the first unindexed line.
             if mode == "arrival":
-                # Every divergence is beyond the consumed ordinal — see
-                # engine.canonical_audit.Check.behind_by / at_ordinal. That is
-                # where an interrupted append lands, and the rewound check
-                # rules out a moved marker; this reports the shortfall in record
-                # counts and consumed ordinals. Still rc=1 and still no chain
-                # walk (it would attest to a partial index).
-                detail = (
-                    "the derived index is behind the canonical arrival log, and "
-                    "every disagreement is in records beyond the consumed ordinal "
-                    "— consistent with a crash between the arrival fsync and "
-                    "the index commit, with record counts and the rewound check "
-                    "confirming the consumed prefix; the tick chain was NOT "
-                    "walked (it would attest to a partial index). Catch the "
-                    f"index up with 'loops read {target_path.stem}', or run "
-                    "'loops store verify --deep' to rule out tampering"
+                log_name = "canonical arrival log"
+                divergence = "records beyond the consumed ordinal"
+                provenance = (
+                    "consistent with a crash between the arrival fsync and "
+                    "the index commit, with record counts and the rewound "
+                    "check confirming the consumed prefix"
                 )
             else:
-                # Every divergence is past the consumed prefix. That is where an
-                # interrupted append lands, and also where a rewound marker plus a
-                # doctored suffix lands; L1 corroborates only the first unindexed
-                # line, so this says WHERE, never "benign". Still rc=1 and still no
-                # chain walk (it would attest to a partial index).
-                detail = (
-                    "the derived index is behind the canonical log, and "
-                    "every disagreement is in bytes the index never claimed "
-                    "to have consumed — consistent with a crash between the "
-                    "log's fsync and the index commit, which this check "
-                    "cannot tell apart from an edited suffix; the tick "
-                    "chain was NOT walked (it would attest to a partial "
-                    f"index). Catch the index up with 'loops read "
-                    f"{target_path.stem}', or run 'loops store verify "
-                    "--deep' to rule out tampering"
+                log_name = "canonical log"
+                divergence = "bytes the index never claimed to have consumed"
+                provenance = (
+                    "consistent with a crash between the log's fsync and the "
+                    "index commit, which this check cannot tell apart from an "
+                    "edited suffix"
                 )
+            detail = (
+                f"the derived index is behind the {log_name}, and every "
+                f"disagreement is in {divergence} — {provenance}; the tick "
+                "chain was NOT walked (it would attest to a partial index). "
+                f"Catch the index up with 'loops read {target_path.stem}', or "
+                "run 'loops store verify --deep' to rule out tampering"
+            )
             head = callout(
                 f"{db_path.name} — INDEX BEHIND THE LOG",
                 severity=Severity.WARNING,
@@ -896,14 +895,18 @@ def _read_absorption_state(
                 ).fetchone()
                 is not None
             )
-            fcols = {r[1] for r in conn.execute("PRAGMA table_info(facts)")}
-            f_order = (
-                "ORDER BY arrival_ordinal DESC, arrival_seq DESC"
-                if "arrival_ordinal" in fcols
-                else "ORDER BY rowid DESC"
-            )
+            def newest_first(table: str) -> str:
+                """Newest-row ordering for `table`: the arrival coordinate
+                when the store carries one, rowid on a pre-coordinate store."""
+                cols = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+                return (
+                    "ORDER BY arrival_ordinal DESC, arrival_seq DESC"
+                    if "arrival_ordinal" in cols
+                    else "ORDER BY rowid DESC"
+                )
+
             frow = conn.execute(
-                f"SELECT id FROM facts {f_order} LIMIT 1"
+                f"SELECT id FROM facts {newest_first('facts')} LIMIT 1"
             ).fetchone()
             fact_cursor = frow[0] if frow else None
         except sqlite3.OperationalError:
@@ -915,14 +918,9 @@ def _read_absorption_state(
             tcols = {r[1] for r in conn.execute("PRAGMA table_info(ticks)")}
             if "window_hash" in tcols:
                 row_sql = _TICK_ROW_SQL if "signature" in tcols else _TICK_ROW_SQL_V1
-                t_order = (
-                    "ORDER BY arrival_ordinal DESC, arrival_seq DESC"
-                    if "arrival_ordinal" in tcols
-                    else "ORDER BY rowid DESC"
-                )
                 row = conn.execute(
                     f"SELECT {row_sql} FROM ticks "
-                    f"WHERE window_hash IS NOT NULL {t_order} LIMIT 1"
+                    f"WHERE window_hash IS NOT NULL {newest_first('ticks')} LIMIT 1"
                 ).fetchone()
                 if row is not None:
                     # tick_row_hash reads an 11-field row (signature at [10]);

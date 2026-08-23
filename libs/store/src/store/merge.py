@@ -567,16 +567,14 @@ def _verify_admitted_rows(
     pre-signature sources. Verifying nothing is honest; pretending an absent
     signature is a failed one is not.
     """
-    from engine.sqlite_store import FACT_CONTENT_COLUMNS, fact_commitment_hash
+    from engine.sqlite_store import FACT_COLUMN_INDEX, fact_commitment_hash
 
-    # Derived, not hardcoded (WP-1a F-4 / WP-5 W5-1): positional constants
-    # silently rot the next time a content column lands.
-    _kind = FACT_CONTENT_COLUMNS.index("kind")
-    _ts = FACT_CONTENT_COLUMNS.index("ts")
-    _observer = FACT_CONTENT_COLUMNS.index("observer")
-    _origin = FACT_CONTENT_COLUMNS.index("origin")
-    _payload = FACT_CONTENT_COLUMNS.index("payload")
-    _sig = FACT_CONTENT_COLUMNS.index("signature")
+    # Derived, not hardcoded (WP-1a F-4 / WP-5 W5-1).
+    col = FACT_COLUMN_INDEX
+    _kind, _ts, _observer, _origin, _payload, _sig = (
+        col["kind"], col["ts"], col["observer"], col["origin"],
+        col["payload"], col["signature"],
+    )
 
     for ordinal, row in admitted:
         signature = row[_sig] if len(row) > _sig else None

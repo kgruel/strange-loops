@@ -131,6 +131,12 @@ TICK_COLUMNS = TICK_CONTENT_COLUMNS
 FACT_ALL_COLUMNS = (*FACT_CONTENT_COLUMNS, "arrival_ordinal", "arrival_seq")
 TICK_ALL_COLUMNS = (*TICK_CONTENT_COLUMNS, "arrival_ordinal", "arrival_seq")
 
+# Name -> position in a content row. Consumers index rows by name through
+# these instead of re-deriving positions with .index() at each call site,
+# so a new content column moves every reader at once.
+FACT_COLUMN_INDEX = {name: i for i, name in enumerate(FACT_CONTENT_COLUMNS)}
+TICK_COLUMN_INDEX = {name: i for i, name in enumerate(TICK_CONTENT_COLUMNS)}
+
 
 def _insert_sql(table: str, columns: tuple[str, ...]) -> str:
     return (
@@ -407,6 +413,21 @@ def _verify_coordinate_schema(
     return True, None
 
 
+def _stamp_coordinate_axis(conn: sqlite3.Connection, mode: str) -> None:
+    """Write the store_meta.coordinate_axis marker.
+
+    Statements only — the caller owns the transaction boundary (some stamp
+    sites run inside their own BEGIN IMMEDIATE, others commit afterwards).
+    """
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS store_meta (key TEXT PRIMARY KEY, value TEXT)"
+    )
+    conn.execute(
+        "INSERT OR REPLACE INTO store_meta (key, value) VALUES ('coordinate_axis', ?)",
+        (mode,),
+    )
+
+
 def ensure_coordinate_schema(
     conn: sqlite3.Connection,
     *,
@@ -505,13 +526,7 @@ def ensure_coordinate_schema(
             return  # Fast path: marker present and structure complete
 
     if not existing_tables:
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS store_meta (key TEXT PRIMARY KEY, value TEXT)"
-        )
-        conn.execute(
-            "INSERT OR REPLACE INTO store_meta (key, value) VALUES ('coordinate_axis', ?)",
-            (mode,),
-        )
+        _stamp_coordinate_axis(conn, mode)
         conn.commit()
         return
 
@@ -520,13 +535,7 @@ def ensure_coordinate_schema(
     )
 
     if already_migrated:
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS store_meta (key TEXT PRIMARY KEY, value TEXT)"
-        )
-        conn.execute(
-            "INSERT OR REPLACE INTO store_meta (key, value) VALUES ('coordinate_axis', ?)",
-            (mode,),
-        )
+        _stamp_coordinate_axis(conn, mode)
         conn.commit()
         return
 
@@ -648,13 +657,7 @@ def ensure_coordinate_schema(
             if valid:
                 if is_final:
                     conn.execute("BEGIN IMMEDIATE")
-                    conn.execute(
-                        "CREATE TABLE IF NOT EXISTS store_meta (key TEXT PRIMARY KEY, value TEXT)"
-                    )
-                    conn.execute(
-                        "INSERT OR REPLACE INTO store_meta (key, value) VALUES ('coordinate_axis', ?)",
-                        (mode,),
-                    )
+                    _stamp_coordinate_axis(conn, mode)
                     conn.execute("COMMIT")
                 continue
 
@@ -834,13 +837,7 @@ def _rebuild_table(
 
     # 10. Stamp coordinate_axis marker if final table
     if is_final:
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS store_meta (key TEXT PRIMARY KEY, value TEXT)"
-        )
-        conn.execute(
-            "INSERT OR REPLACE INTO store_meta (key, value) VALUES ('coordinate_axis', ?)",
-            (mode,),
-        )
+        _stamp_coordinate_axis(conn, mode)
 
 
 class UnsignedTickInSignedEra(Exception):
@@ -1735,23 +1732,40 @@ class SqliteStore(Generic[T]):
         """Consumer protocol: append event to store."""
         self.append(event, id_override=id_override)
 
+    @staticmethod
+    def _cursor_bounds(cursor: tuple[int, int] | int) -> tuple[int, int]:
+        """Normalise a cursor to the exclusive lower bound (ordinal, seq).
+
+        A pair is a coordinate and passes through. A legacy int cursor is a
+        bare ordinal: <= 0 means start-of-store. Anything else is read as
+        start-of-store rather than guessed at.
+        """
+        if isinstance(cursor, tuple):
+            return cursor
+        if isinstance(cursor, int):
+            return (-1, 0) if cursor <= 0 else (cursor, 0)
+        return (-1, 0)
+
+    def _rows_since(
+        self, columns: str, cursor: tuple[int, int] | int, table: str = "facts"
+    ):
+        """Rows after `cursor` in arrival coordinate order, as a live SQL
+        cursor — the one range query the since-family shares. Callers shape
+        the rows; the range and its order live here."""
+        return self._conn.execute(
+            f"SELECT {columns} FROM {table} "
+            "WHERE (arrival_ordinal, arrival_seq) > (?, ?) "
+            "ORDER BY arrival_ordinal, arrival_seq",
+            self._cursor_bounds(cursor),
+        )
+
     def since(self, cursor: tuple[int, int] | int = (-1, 0)) -> list[T]:
         """Return events with (arrival_ordinal, arrival_seq) > cursor.
 
         cursor=(-1, 0) or cursor=0 returns all events.
         """
-        if isinstance(cursor, tuple):
-            lo_ord, lo_seq = cursor
-        elif isinstance(cursor, int):
-            lo_ord, lo_seq = (-1, 0) if cursor <= 0 else (cursor, 0)
-        else:
-            lo_ord, lo_seq = (-1, 0)
-
-        rows = self._conn.execute(
-            "SELECT kind, ts, observer, origin, payload FROM facts "
-            "WHERE (arrival_ordinal, arrival_seq) > (?, ?) "
-            "ORDER BY arrival_ordinal, arrival_seq",
-            (lo_ord, lo_seq),
+        rows = self._rows_since(
+            "kind, ts, observer, origin, payload", cursor
         ).fetchall()
         loads = _raw_decode
         # Fast path: build Facts directly when deserializer is Fact.from_dict
@@ -1775,18 +1789,8 @@ class SqliteStore(Generic[T]):
         self, cursor: tuple[int, int] | int = (-1, 0)
     ) -> list[tuple[T, tuple[int, int]]]:
         """Return (event, (arrival_ordinal, arrival_seq)) pairs with coordinate > cursor."""
-        if isinstance(cursor, tuple):
-            lo_ord, lo_seq = cursor
-        elif isinstance(cursor, int):
-            lo_ord, lo_seq = (-1, 0) if cursor <= 0 else (cursor, 0)
-        else:
-            lo_ord, lo_seq = (-1, 0)
-
-        rows = self._conn.execute(
-            "SELECT kind, ts, observer, origin, payload, arrival_ordinal, arrival_seq FROM facts "
-            "WHERE (arrival_ordinal, arrival_seq) > (?, ?) "
-            "ORDER BY arrival_ordinal, arrival_seq",
-            (lo_ord, lo_seq),
+        rows = self._rows_since(
+            "kind, ts, observer, origin, payload, arrival_ordinal, arrival_seq", cursor
         ).fetchall()
         loads = _raw_decode
         out = []
@@ -1821,22 +1825,9 @@ class SqliteStore(Generic[T]):
         Event order ``(ts, id)`` is a read lens layered on top, never the
         replay axis (see ORDERING AUTHORITY on append_tick).
         """
-        if isinstance(cursor, tuple):
-            lo_ord, lo_seq = cursor
-        elif isinstance(cursor, int):
-            lo_ord, lo_seq = (-1, 0) if cursor <= 0 else (cursor, 0)
-        else:
-            lo_ord, lo_seq = (-1, 0)
-
-        rows = self._conn.execute(
-            "SELECT kind, ts, payload FROM facts "
-            "WHERE (arrival_ordinal, arrival_seq) > (?, ?) "
-            "ORDER BY arrival_ordinal, arrival_seq",
-            (lo_ord, lo_seq),
-        ).fetchall()
         loads = _raw_decode
         out = []
-        for r in rows:
+        for r in self._rows_since("kind, ts, payload", cursor).fetchall():
             payload = loads(r[2])[0]
             payload["_ts"] = r[1]
             out.append((r[0], payload))
@@ -1851,20 +1842,8 @@ class SqliteStore(Generic[T]):
         where it belongs. Same arrival-order (arrival_ordinal, arrival_seq) fold replay and ``_ts``
         injection as since_raw.
         """
-        if isinstance(cursor, tuple):
-            lo_ord, lo_seq = cursor
-        elif isinstance(cursor, int):
-            lo_ord, lo_seq = (-1, 0) if cursor <= 0 else (cursor, 0)
-        else:
-            lo_ord, lo_seq = (-1, 0)
-
         loads = _raw_decode
-        for r in self._conn.execute(
-            "SELECT kind, ts, payload FROM facts "
-            "WHERE (arrival_ordinal, arrival_seq) > (?, ?) "
-            "ORDER BY arrival_ordinal, arrival_seq",
-            (lo_ord, lo_seq),
-        ):
+        for r in self._rows_since("kind, ts, payload", cursor):
             payload = loads(r[2])[0]
             payload["_ts"] = r[1]
             yield r[0], payload
@@ -2672,18 +2651,8 @@ class SqliteStore(Generic[T]):
 
     def ticks_since(self, cursor: tuple[int, int] | int = (-1, 0)) -> list[Tick]:
         """Return ticks with (arrival_ordinal, arrival_seq) > cursor."""
-        if isinstance(cursor, tuple):
-            lo_ord, lo_seq = cursor
-        elif isinstance(cursor, int):
-            lo_ord, lo_seq = (-1, 0) if cursor <= 0 else (cursor, 0)
-        else:
-            lo_ord, lo_seq = (-1, 0)
-
-        rows = self._conn.execute(
-            "SELECT name, ts, since, origin, payload FROM ticks "
-            "WHERE (arrival_ordinal, arrival_seq) > (?, ?) "
-            "ORDER BY arrival_ordinal, arrival_seq",
-            (lo_ord, lo_seq),
+        rows = self._rows_since(
+            "name, ts, since, origin, payload", cursor, table="ticks"
         ).fetchall()
         return [
             Tick.from_dict(

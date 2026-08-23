@@ -28,6 +28,7 @@ import base64
 import contextlib
 import json
 import sqlite3
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -50,6 +51,7 @@ from engine.canonical_audit import (
 )
 from engine.jsonl_codec import object_of_fact_row
 from engine.sqlite_store import gen_id
+from engine.tick import Tick
 
 _SAMPLE_PUBKEY = base64.b64encode(b"\x00" * 32).decode()
 _SAMPLE_SIG = base64.b64encode(b"\x01" * 64).decode()
@@ -59,7 +61,7 @@ def _fact_signer(obs: str, dig: bytes) -> str:
     return _SAMPLE_SIG
 
 
-def _tick_signer(obs: str, dig: bytes) -> str:
+def _tick_signer(*args: Any) -> str:
     return _SAMPLE_SIG
 
 
@@ -290,6 +292,97 @@ class TestGateD3_1_DetectionCoordinates:
         assert not rewound.ok
         assert rewound.at_ordinal == 102
         assert "beyond consumed ordinal 2" in rewound.detail
+
+    def test_sol_high_11_deep_audit_detects_interior_coordinate_tamper_below_mark(
+        self, tmp_path: Path
+    ):
+        """SOL-HIGH-11: An interior coordinate tamper below the mark (e.g. (2,0)->(1,1))
+        preserves row counts, NOT NULL, UNIQUE, and row ordering. L1 remains ok=True
+        (below-mark content is deep's claim — pinning the L1/deep boundary), while
+        --deep audit detects the coordinate mismatch with a location claim naming the
+        row id, stored coordinate, and true log coordinate.
+        """
+        log_path, db_path, store = _create_arrival_store(tmp_path, n_facts=3)
+        store.close()
+
+        conn = sqlite3.connect(db_path)
+        try:
+            row2 = conn.execute(
+                "SELECT id FROM facts WHERE arrival_ordinal = 2 AND arrival_seq = 0"
+            ).fetchone()
+            assert row2 is not None
+            f2_id = row2[0]
+
+            # Update middle row coordinate from (2, 0) to (1, 1)
+            conn.execute(
+                "UPDATE facts SET arrival_ordinal = 1, arrival_seq = 1 WHERE id = ?",
+                (f2_id,),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        # L1 audit passes: below-mark content is deep's claim (pinning L1/deep boundary)
+        l1_report = audit_agreement(log_path)
+        assert l1_report.ok
+
+        # Deep audit fails on content check with location claim naming row id and both coordinates
+        deep_report = audit_deep(log_path)
+        assert not deep_report.ok
+        content = next(c for c in deep_report.checks if c.name == "content")
+        assert not content.ok
+        assert content.at_ordinal == 2
+        assert f2_id in content.detail
+        assert "coordinate (2, 0) disagrees with index coordinate (1, 1)" in content.detail
+
+    def test_sol_high_11_deep_audit_detects_tick_coordinate_tamper_below_mark(
+        self, tmp_path: Path
+    ):
+        """SOL-HIGH-11: Deep audit detects coordinate tamper on ticks alongside facts."""
+        log_path = tmp_path / "store.arrival"
+        db_path = tmp_path / "store.db"
+
+        ArrivalLog.mint(
+            log_path,
+            observer="kyle",
+            signer=lambda obs, dig: _SAMPLE_SIG,
+            key=_SAMPLE_PUBKEY,
+        )
+        store = ArrivalStore(
+            path=db_path,
+            serialize=lambda f: f.to_dict(),
+            deserialize=Fact.from_dict,
+            tick_signer=_tick_signer,
+            fact_signer=_fact_signer,
+        )
+
+        store.append(Fact.of("note", "kyle", n=1, text="f1"))
+        t1_id = store.append_tick(
+            Tick(name="seal", ts=datetime.now(UTC), payload={"n": 1}, origin="t")
+        )
+        store.append(Fact.of("note", "kyle", n=2, text="f2"))
+        store.close()
+
+        conn = sqlite3.connect(db_path)
+        try:
+            conn.execute(
+                "UPDATE ticks SET arrival_ordinal = 1, arrival_seq = 1 WHERE id = ?",
+                (t1_id,),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        l1_report = audit_agreement(log_path)
+        assert l1_report.ok
+
+        deep_report = audit_deep(log_path)
+        assert not deep_report.ok
+        content = next(c for c in deep_report.checks if c.name == "content")
+        assert not content.ok
+        assert content.at_ordinal == 2
+        assert t1_id in content.detail
+        assert "coordinate (2, 0) disagrees with index coordinate (1, 1)" in content.detail
 
 
 # ===========================================================================

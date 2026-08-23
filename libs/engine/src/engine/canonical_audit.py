@@ -563,7 +563,7 @@ def _deep_checks_arrival(
             ordinal = record["ord"]
             beyond = (consumed_ordinal is not None and ordinal > consumed_ordinal)
             records = rows_of_record(record)
-            for t, row in records:
+            for seq, (t, row) in enumerate(records):
                 arity, rows = cursors[t]
                 stored = rows.fetchone()
                 seen[t] += 1
@@ -575,7 +575,7 @@ def _deep_checks_arrival(
                         behind_by=1 if beyond else 0,
                         at_ordinal=ordinal,
                     )
-                elif tuple(stored) != _trim(row, arity):
+                elif tuple(stored[:arity]) != _trim(row, arity):
                     diverged.add(
                         f"log record at ordinal {ordinal} ({t} {row[0]}) disagrees with index "
                         f"{t} {stored[0]} at the same position"
@@ -584,6 +584,18 @@ def _deep_checks_arrival(
                             if stored[0] == row[0]
                             else " — the index rows are out of log order"
                         ),
+                        False,
+                        at_ordinal=ordinal,
+                    )
+                elif (
+                    len(stored) >= arity + 2
+                    and (stored[arity], stored[arity + 1]) != (ordinal, seq)
+                ):
+                    stored_coord = (stored[arity], stored[arity + 1])
+                    diverged.add(
+                        f"log record at ordinal {ordinal} ({t} {row[0]}) "
+                        f"coordinate ({ordinal}, {seq}) disagrees with index "
+                        f"coordinate ({stored_coord[0]}, {stored_coord[1]})",
                         False,
                         at_ordinal=ordinal,
                     )
@@ -619,8 +631,10 @@ def _deep_checks_arrival(
 
 def _index_cursor_arrival(conn: sqlite3.Connection, table: str, columns: tuple[str, ...]):
     cols = _present(conn, table, columns)
+    coord_cols = _present(conn, table, ("arrival_ordinal", "arrival_seq"))
+    all_cols = (*cols, *coord_cols)
     return len(cols), conn.execute(
-        f"SELECT {', '.join(cols)} FROM {table} ORDER BY arrival_ordinal, arrival_seq"
+        f"SELECT {', '.join(all_cols)} FROM {table} ORDER BY arrival_ordinal, arrival_seq"
     )
 
 

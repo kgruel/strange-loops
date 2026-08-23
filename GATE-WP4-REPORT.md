@@ -232,3 +232,113 @@ every instrumented quantity reads clean. On a 200-record store that is 201 recor
 verified for an index that was zero behind, reported to the operator as
 "behind by 201". Fixing the bound and moving the instrumentation from names to a
 counted quantity closes both halves.
+
+---
+---
+
+# ROUND 2 — re-gate of the W4-1 fix (`65e1adcb` + `c3b8dcd4`)
+
+Scoped to W4-1. Gate branch rebased onto `c3b8dcd4`.
+
+## ROUND 2 VERDICT: **PASS** — W4-1 closed, and no second evasion exists.
+
+The production fix is five lines: branch 2's `walk_marked(None)` and its
+`suffix_count` are deleted, and the Check becomes an O(1) location claim with no
+magnitude. Exactly the recommended shape, and nothing else in the module moved.
+
+## 1. My Round-1 reproduction, re-run verbatim
+
+Same fixture: 200 facts, index mark current at ordinal 200, offset corrupted
+mid-record so anchor validation fails.
+
+| Quantity | Round 1 | Round 2 |
+|---|---|---|
+| records via from-zero seam (`_verify_from`) | **201** | **0** |
+| records via `_walk_tail` | 0 | 0 |
+| `ArrivalLog.read` / `.walk` calls | 0 / 0 | 0 / 0 |
+
+The audit now reports:
+
+```
+[consumed]       ok=False behind_by=0
+    anchor verification failed; consumed position unverifiable at ordinal 200
+[counts]         ok=True  200 fact(s), 0 tick(s) accounted for
+[consumed_edge]  ok=False record at consumed arrival ordinal 200 failed anchor verification
+```
+
+Both halves of the finding are closed. The walk is gone, and the invented
+magnitude is gone — `behind_by=0`, and the message is a location claim
+("unverifiable at ordinal 200") rather than a fabricated behind-count. The
+self-contradiction is gone too: `consumed` no longer claims 201 records missing
+while `counts` in the same report accounts for all 200.
+
+## 2. Second evasion attempt — none found, and I can say why
+
+I enumerated every record-reading primitive in `arrival.py` and traced which
+bypass the quantity seam:
+
+| Primitive | Routes through `_verify_from`? |
+|---|---|
+| `walk()` | yes — `_records_only(_walk_marked_from_zero())` |
+| `read(ordinal)` | yes — via `walk()` |
+| `head()` | yes — via `walk()` |
+| `walk_from` / `walk_marked` | yes — **both** arms (`_walk_marked_from_zero`, `_walk_tail`) |
+| `_record_ending_at` | **no** — but reads exactly ONE record (seek, `_last_newline_before`, one `decode_record`) |
+| `_tail_record` | **no** — reverse scan, constant-time by design, and called only from `append_record` (`arrival.py:1463`), never from an audit path |
+
+So the two bypasses are structurally incapable of O(N) work: one reads a single
+record at a byte boundary, the other reads the last record for the append path.
+`_record_ending_at` is the anchor read, and it is the quantity the instrumentation
+counts separately.
+
+**Confirmed empirically on a healthy 50-fact store (51 records):**
+
+```
+L1 audit_agreement   _verify_from records=  0   _record_ending_at calls=1
+--deep audit_deep    _verify_from records= 51   _record_ending_at calls=1
+```
+
+L1 verifies zero records through the seam and reads exactly one anchor; `--deep`
+routes the entire history through the seam. **The quantity seam genuinely covers
+all multi-record verification** — an answer, not a "found nothing". This also
+fixes the class weakness I flagged in Round 1: the instrumentation no longer
+asserts that two method names went uncalled, it counts records at the one place
+records are verified, so a third name cannot slip past it.
+
+## 3. Mutation proof — verified independently
+
+Rather than re-running theirs, I re-introduced **my own** Round-1 defect: the
+branch-2 `walk_marked(None)` and its `behind_by=suffix_count`.
+
+```
+1 failed, 11 passed
+FAILED …TestGateD3_2_BoundedWorkInstrumentation::test_anchor_failed_corrupted_offset_verifies_single_record_no_walk
+```
+
+Restored: 12 passed. The test that catches it did not exist in Round 1 — it is my
+reproduction turned into a fixture, which is the right outcome: the finding is now
+pinned by the suite rather than by my having looked.
+
+## 4. Suite reconciliation
+
+| Suite | Round 1 (`6ac0ae23`) | Round 2 (`c3b8dcd4`) | Delta |
+|---|---|---|---|
+| engine | 1889 passed, 1 skipped | **1890 passed, 1 skipped** | **+1** |
+| apps/loops | 2529 + 1 xfail | **2529 + 1 xfail** | 0 |
+| store | 176 | **176** | 0 |
+
+`test_audit_rebase_d3.py` collects **12** (was 11) — the +1 is exactly the new
+anchor-failed bound test. The fix report's suite table matches mine on every
+figure, and lists two suites I had not been running (`libs/custody` 13,
+`libs/sign` 37) — more complete than my set, not less.
+
+## Bottom line
+
+W4-1 is closed on both halves and the fix is minimal — five deleted lines and a
+re-worded Check, with no other production change. More importantly the
+instrumentation moved from a name list to a counted quantity, which is what makes
+the bound defensible rather than merely asserted: I went looking for a second way
+past it and found that every path verifying more than one record funnels through
+the seam, with the only two bypasses bounded to a single record by construction.
+
+WP-4 passes. Ready for sol-low.

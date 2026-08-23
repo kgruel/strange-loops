@@ -32,10 +32,11 @@ Two depths:
     L1 MUST NOT call ``ArrivalLog.read`` or ``ArrivalLog.walk`` (both walk from zero).
 
 ``audit_deep``  (``--deep``)
-    L1 then full :meth:`engine.arrival.ArrivalLog.walk` (density, hashes,
-    ordinals, chain), row-by-row index comparison over ``rows_of_record``,
-    multiset derived log audit (:func:`engine.arrival_projection.audit_derived_log`),
-    and tick hash chain re-derived from log content.
+    L1 (verifying 1 anchor record) then full :meth:`engine.arrival.ArrivalLog.walk`
+    (density, hashes, ordinals, chain, verifying all N records), row-by-row index
+    comparison over ``rows_of_record``, multiset derived log audit
+    (:func:`engine.arrival_projection.audit_derived_log`), and tick hash chain
+    re-derived from log content. Exactly 1 + N records verified in total.
 """
 
 from __future__ import annotations
@@ -444,10 +445,26 @@ def _check_rewound_arrival(conn: sqlite3.Connection, mark: ResumeMark | None) ->
 
 
 def _check_counts_arrival(conn: sqlite3.Connection, counts: dict[str, int]) -> Check:
-    null_facts = conn.execute("SELECT COUNT(*) FROM facts WHERE arrival_ordinal IS NULL").fetchone()[0]
-    null_ticks = conn.execute("SELECT COUNT(*) FROM ticks WHERE arrival_ordinal IS NULL").fetchone()[0]
-    if null_facts > 0 or null_ticks > 0:
-        return Check("counts", False, "this index holds a row carrying no arrival coordinate")
+    # Coordinate is the PAIR: check for NULL arrival_ordinal or NULL arrival_seq
+    null_ord_facts = conn.execute("SELECT COUNT(*) FROM facts WHERE arrival_ordinal IS NULL").fetchone()[0]
+    null_ord_ticks = conn.execute("SELECT COUNT(*) FROM ticks WHERE arrival_ordinal IS NULL").fetchone()[0]
+    if null_ord_facts > 0 or null_ord_ticks > 0:
+        tbl = "facts" if null_ord_facts > 0 else "ticks"
+        return Check(
+            "counts",
+            False,
+            f"this index holds a row carrying no arrival coordinate ({tbl} has NULL arrival_ordinal)",
+        )
+
+    null_seq_facts = conn.execute("SELECT COUNT(*) FROM facts WHERE arrival_seq IS NULL").fetchone()[0]
+    null_seq_ticks = conn.execute("SELECT COUNT(*) FROM ticks WHERE arrival_seq IS NULL").fetchone()[0]
+    if null_seq_facts > 0 or null_seq_ticks > 0:
+        tbl = "facts" if null_seq_facts > 0 else "ticks"
+        return Check(
+            "counts",
+            False,
+            f"this index holds a row carrying no arrival coordinate ({tbl} has NULL arrival_seq)",
+        )
 
     return Check(
         "counts",
@@ -499,6 +516,11 @@ def _check_consumed_edge_arrival(
 
 
 def _audit_deep_arrival(canonical: Path) -> AgreementReport:
+    """Perform deep audit of arrival store against canonical log.
+
+    Verifies exactly 1 + N records: 1 anchor record in the base L1 audit,
+    followed by all N records in the full log walk.
+    """
     from .residence import index_path_for
 
     base = _audit_agreement_arrival(canonical)

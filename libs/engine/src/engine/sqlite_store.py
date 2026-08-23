@@ -359,6 +359,11 @@ _SCHEMA_STMTS = (
 )
 
 
+def _quote_ident(ident: str) -> str:
+    """Quote a SQLite identifier using double quotes, escaping embedded quotes."""
+    return '"' + ident.replace('"', '""') + '"'
+
+
 def _verify_coordinate_schema(
     conn: sqlite3.Connection, table: str
 ) -> tuple[bool, str | None]:
@@ -369,7 +374,7 @@ def _verify_coordinate_schema(
     """
     cols = {
         r[1]: {"notnull": bool(r[3]), "pk": bool(r[5])}
-        for r in conn.execute(f"PRAGMA table_info({table})")
+        for r in conn.execute(f"PRAGMA table_info({_quote_ident(table)})")
     }
     if "arrival_ordinal" not in cols:
         return False, f"{table} lacks arrival_ordinal column"
@@ -381,7 +386,7 @@ def _verify_coordinate_schema(
         return False, f"{table} lacks NOT NULL on arrival_seq"
 
     has_unique = False
-    for idx_row in conn.execute(f"PRAGMA index_list({table})"):
+    for idx_row in conn.execute(f"PRAGMA index_list({_quote_ident(table)})"):
         is_unique = bool(idx_row[2])
         # Only a table-owned constraint counts (origin 'u' = auto-index from a
         # table-level UNIQUE). A standalone CREATE UNIQUE INDEX (origin 'c')
@@ -390,7 +395,7 @@ def _verify_coordinate_schema(
         if not is_unique or idx_row[3] != "u":
             continue
         idx_name = idx_row[1]
-        idx_cols = [r[2] for r in conn.execute(f"PRAGMA index_info({idx_name})")]
+        idx_cols = [r[2] for r in conn.execute(f"PRAGMA index_info({_quote_ident(idx_name)})")]
         if idx_cols == ["arrival_ordinal", "arrival_seq"]:
             has_unique = True
             break
@@ -535,6 +540,28 @@ def ensure_coordinate_schema(
     )
 
     if already_migrated:
+        if mode == "mirrored" or not validate:
+            _stamp_coordinate_axis(conn, mode)
+            conn.commit()
+            return
+        all_empty = all(
+            conn.execute(f"SELECT COUNT(*) FROM {_quote_ident(t)}").fetchone()[0] == 0
+            for t in existing_tables
+        )
+        if all_empty:
+            _stamp_coordinate_axis(conn, mode)
+            conn.commit()
+            return
+
+    all_empty = all(
+        conn.execute(f"SELECT COUNT(*) FROM {_quote_ident(t)}").fetchone()[0] == 0
+        for t in existing_tables
+    )
+    if all_empty and mode == "arrival" and validate:
+        # Rebuild empty tables with coordinate schema without needing provider rows
+        for t in existing_tables:
+            if not _verify_coordinate_schema(conn, t)[0]:
+                _rebuild_table(conn, t, "arrival", validate=False)
         _stamp_coordinate_axis(conn, mode)
         conn.commit()
         return
@@ -558,6 +585,17 @@ def ensure_coordinate_schema(
             assert coordinates is not None
             staged = list(coordinates())
         except BaseException as exc:
+            if (
+                isinstance(exc, (FileNotFoundError, ArrivalCorrupt, GenesisRefused))
+                or "is empty — mint a genesis first" in str(exc)
+                or "does not exist" in str(exc)
+                or "No such file" in str(exc)
+            ):
+                raise ArrivalCanonicalUnsupported(
+                    "an index without its log cannot be reconciled, and re-derivation cannot "
+                    "manufacture a log: offering it here would name an operation that destroys "
+                    "the only surviving artifact. Restore the log, or open the db as a plain sqlite store"
+                ) from exc
             raise ArrivalCanonicalUnsupported(
                 f"error retrieving coordinates from arrival log: {exc} — "
                 "run engine.arrival_projection.rederive_projections to rebuild the index from the log"
@@ -602,7 +640,7 @@ def ensure_coordinate_schema(
 
         # Mismatch checks against existing tables:
         for t in existing_tables:
-            index_count = conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
+            index_count = conn.execute(f"SELECT COUNT(*) FROM {_quote_ident(t)}").fetchone()[0]
             staging_count = conn.execute(
                 "SELECT COUNT(*) FROM _coordinate_staging WHERE table_name = ?", (t,)
             ).fetchone()[0]
@@ -613,7 +651,7 @@ def ensure_coordinate_schema(
                 )
 
             missing_in_staging = conn.execute(
-                f"SELECT f.id FROM {t} f LEFT JOIN _coordinate_staging s ON s.table_name = ? AND s.row_id = f.id WHERE s.row_id IS NULL LIMIT 1",
+                f"SELECT f.id FROM {_quote_ident(t)} f LEFT JOIN _coordinate_staging s ON s.table_name = ? AND s.row_id = f.id WHERE s.row_id IS NULL LIMIT 1",
                 (t,),
             ).fetchone()
             if missing_in_staging is not None:
@@ -623,7 +661,7 @@ def ensure_coordinate_schema(
                 )
 
             missing_in_index = conn.execute(
-                f"SELECT s.row_id FROM _coordinate_staging s LEFT JOIN {t} f ON s.row_id = f.id WHERE s.table_name = ? AND f.id IS NULL LIMIT 1",
+                f"SELECT s.row_id FROM _coordinate_staging s LEFT JOIN {_quote_ident(t)} f ON s.row_id = f.id WHERE s.table_name = ? AND f.id IS NULL LIMIT 1",
                 (t,),
             ).fetchone()
             if missing_in_index is not None:
@@ -631,6 +669,23 @@ def ensure_coordinate_schema(
                     f"index content does not match arrival log coordinates (log {t} row {missing_in_index[0]!r} not in index) — "
                     "run engine.arrival_projection.rederive_projections to rebuild the index from the log"
                 )
+
+            # Staging join agreement check for existing coordinate columns
+            cols = {r[1] for r in conn.execute(f"PRAGMA table_info({_quote_ident(t)})")}
+            if "arrival_ordinal" in cols and "arrival_seq" in cols:
+                coord_mismatch = conn.execute(
+                    f"SELECT f.id, f.arrival_ordinal, f.arrival_seq, s.arrival_ordinal, s.arrival_seq "
+                    f"FROM {_quote_ident(t)} f JOIN _coordinate_staging s ON s.table_name = ? AND s.row_id = f.id "
+                    f"WHERE f.arrival_ordinal != s.arrival_ordinal OR f.arrival_seq != s.arrival_seq "
+                    f"LIMIT 1",
+                    (t,),
+                ).fetchone()
+                if coord_mismatch is not None:
+                    raise ArrivalCanonicalUnsupported(
+                        f"index coordinates do not match arrival log ({t} row {coord_mismatch[0]!r} has "
+                        f"({coord_mismatch[1]}, {coord_mismatch[2]}), log has ({coord_mismatch[3]}, {coord_mismatch[4]})) — "
+                        "run engine.arrival_projection.rederive_projections to rebuild the index from the log"
+                    )
 
         non_existing = set(tables_to_check) - set(existing_tables)
         for non_t in non_existing:
@@ -728,19 +783,19 @@ def _rebuild_table(
 
     # 4. Drop triggers, views (reverse dependency order), and indexes
     for t_name, _, _ in collected_triggers:
-        conn.execute(f"DROP TRIGGER IF EXISTS {t_name}")
+        conn.execute(f"DROP TRIGGER IF EXISTS {_quote_ident(t_name)}")
 
     for v_name, _ in reversed(collected_views_ordered):
-        conn.execute(f"DROP VIEW IF EXISTS {v_name}")
+        conn.execute(f"DROP VIEW IF EXISTS {_quote_ident(v_name)}")
 
     for idx_name, _ in collected_indexes:
-        conn.execute(f"DROP INDEX IF EXISTS {idx_name}")
+        conn.execute(f"DROP INDEX IF EXISTS {_quote_ident(idx_name)}")
 
     # 5. Create new table with full schema
     temp_table = f"{table}_new"
-    conn.execute(f"DROP TABLE IF EXISTS {temp_table}")
+    conn.execute(f"DROP TABLE IF EXISTS {_quote_ident(temp_table)}")
     if table == "facts":
-        conn.execute(f"""CREATE TABLE {temp_table} (
+        conn.execute(f"""CREATE TABLE {_quote_ident(temp_table)} (
             id       TEXT NOT NULL PRIMARY KEY,
             kind     TEXT NOT NULL,
             ts       REAL NOT NULL,
@@ -752,24 +807,24 @@ def _rebuild_table(
             arrival_seq     INTEGER NOT NULL,
             UNIQUE (arrival_ordinal, arrival_seq)
         )""")
-        existing_cols = {r[1] for r in conn.execute("PRAGMA table_info(facts)")}
+        existing_cols = {r[1] for r in conn.execute(f"PRAGMA table_info({_quote_ident(table)})")}
         sig_sel = "signature" if "signature" in existing_cols else "NULL"
         if mode == "mirrored" or not validate:
             conn.execute(f"""
-                INSERT INTO {temp_table} (rowid, id, kind, ts, observer, origin, payload, signature, arrival_ordinal, arrival_seq)
+                INSERT INTO {_quote_ident(temp_table)} (rowid, id, kind, ts, observer, origin, payload, signature, arrival_ordinal, arrival_seq)
                 SELECT rowid, id, kind, ts, observer, origin, payload, {sig_sel}, rowid, 0
-                FROM {table}
+                FROM {_quote_ident(table)}
             """)
         else:
             sig_join_sel = "f.signature" if "signature" in existing_cols else "NULL"
             conn.execute(f"""
-                INSERT INTO {temp_table} (rowid, id, kind, ts, observer, origin, payload, signature, arrival_ordinal, arrival_seq)
+                INSERT INTO {_quote_ident(temp_table)} (rowid, id, kind, ts, observer, origin, payload, signature, arrival_ordinal, arrival_seq)
                 SELECT f.rowid, f.id, f.kind, f.ts, f.observer, f.origin, f.payload, {sig_join_sel}, s.arrival_ordinal, s.arrival_seq
-                FROM {table} f
+                FROM {_quote_ident(table)} f
                 JOIN _coordinate_staging s ON s.table_name = 'facts' AND s.row_id = f.id
             """)
     else:  # ticks
-        conn.execute(f"""CREATE TABLE {temp_table} (
+        conn.execute(f"""CREATE TABLE {_quote_ident(temp_table)} (
             id           TEXT NOT NULL PRIMARY KEY,
             name         TEXT NOT NULL,
             ts           REAL NOT NULL,
@@ -785,7 +840,7 @@ def _rebuild_table(
             arrival_seq     INTEGER NOT NULL,
             UNIQUE (arrival_ordinal, arrival_seq)
         )""")
-        existing_cols = {r[1] for r in conn.execute("PRAGMA table_info(ticks)")}
+        existing_cols = {r[1] for r in conn.execute(f"PRAGMA table_info({_quote_ident(table)})")}
         sig_sel = "signature" if "signature" in existing_cols else "NULL"
         chain_sel = (
             "prev_hash, window_start, fact_cursor, window_hash"
@@ -794,9 +849,9 @@ def _rebuild_table(
         )
         if mode == "mirrored" or not validate:
             conn.execute(f"""
-                INSERT INTO {temp_table} (rowid, id, name, ts, since, origin, payload, prev_hash, window_start, fact_cursor, window_hash, signature, arrival_ordinal, arrival_seq)
+                INSERT INTO {_quote_ident(temp_table)} (rowid, id, name, ts, since, origin, payload, prev_hash, window_start, fact_cursor, window_hash, signature, arrival_ordinal, arrival_seq)
                 SELECT rowid, id, name, ts, since, origin, payload, {chain_sel}, {sig_sel}, rowid, 0
-                FROM {table}
+                FROM {_quote_ident(table)}
             """)
         else:
             sig_join_sel = "t.signature" if "signature" in existing_cols else "NULL"
@@ -806,15 +861,15 @@ def _rebuild_table(
                 else "NULL, NULL, NULL, NULL"
             )
             conn.execute(f"""
-                INSERT INTO {temp_table} (rowid, id, name, ts, since, origin, payload, prev_hash, window_start, fact_cursor, window_hash, signature, arrival_ordinal, arrival_seq)
+                INSERT INTO {_quote_ident(temp_table)} (rowid, id, name, ts, since, origin, payload, prev_hash, window_start, fact_cursor, window_hash, signature, arrival_ordinal, arrival_seq)
                 SELECT t.rowid, t.id, t.name, t.ts, t.since, t.origin, t.payload, {chain_join_sel}, {sig_join_sel}, s.arrival_ordinal, s.arrival_seq
-                FROM {table} t
+                FROM {_quote_ident(table)} t
                 JOIN _coordinate_staging s ON s.table_name = 'ticks' AND s.row_id = t.id
             """)
 
     # 6. Drop old table and rename new table
-    conn.execute(f"DROP TABLE {table}")
-    conn.execute(f"ALTER TABLE {temp_table} RENAME TO {table}")
+    conn.execute(f"DROP TABLE {_quote_ident(table)}")
+    conn.execute(f"ALTER TABLE {_quote_ident(temp_table)} RENAME TO {_quote_ident(table)}")
 
     # 7. Recreate indexes
     for idx_name, idx_sql in collected_indexes:
@@ -988,6 +1043,9 @@ class SqliteStore(Generic[T]):
             self._conn.execute("PRAGMA synchronous=NORMAL")
             for stmt in _SCHEMA_STMTS:
                 self._conn.execute(stmt)
+            self._ensure_meta_table()
+            _stamp_coordinate_axis(self._conn, self._coordinate_mode)
+            self._conn.commit()
             self._sync_set = True
         else:
             # Existing DB: skip schema + pragmas — WAL is persistent,
@@ -2103,7 +2161,7 @@ class SqliteStore(Generic[T]):
     def _ensure_coordinate_schema(self) -> None:
         """Idempotent migration: ensure coordinate schema (arrival_ordinal,
         arrival_seq, UNIQUE) on facts and ticks tables."""
-        if self._coordinate_ready:
+        if self._coordinate_ready and self._coordinate_mode == "mirrored":
             return
         ensure_coordinate_schema(
             self._conn,

@@ -347,3 +347,139 @@ class TestKindFilterExactness:
         with StoreReader(path) as reader:
             rows = reader.facts_between(0.0, 2000.0, kind="a_b")
         assert {r["kind"] for r in rows} == {"a_b", "a_b.child"}
+
+
+class TestSolHigh03AtomicRecordPageExtension:
+    """SOL-HIGH-03: query_facts LIMIT is a floor that extends with any remaining
+    rows of the last record at that arrival_ordinal so no record/ceremony is split
+    across pages.
+
+    Sol's reproduction:
+    - fact 1 at (1, 0)
+    - batch of 2 facts at (5, 0) and (5, 1)
+    - fact 3 at (7, 0)
+    Paging with limit=1 across the store visits all 4 facts across pages (no skipped facts).
+    Also: limit=1 page over a 3-row batch returns all 3 rows in that single page.
+    """
+
+    def _create_batched_store(self, tmp_path: Path) -> Path:
+        import base64
+        sample_key = base64.b64encode(b"\x00" * 32).decode()
+        sample_sig = base64.b64encode(b"\x01" * 64).decode()
+
+        log_path = tmp_path / "batched.arrival"
+        from engine.arrival import ArrivalLog
+        from engine.arrival_store import ArrivalStore
+        from engine.jsonl_codec import object_of_batch, object_of_fact_row
+
+        ArrivalLog.mint(
+            log_path,
+            observer="kyle",
+            signer=lambda obs, dig: sample_sig,
+            key=sample_key,
+        )
+        log = ArrivalLog(log_path)
+        # record 1: 1 fact (ordinal 1, seq 0)
+        log.append(
+            "fact",
+            object_of_fact_row(("f-001", "note", 1700000001.0, "kyle", "", '{"msg": "one"}')),
+            observer="kyle",
+        )
+        # record 2: batch of 2 facts (ordinal 2, seq 0 and seq 1)
+        log.append(
+            "batch",
+            object_of_batch([
+                ("f-002a", "note", 1700000002.0, "kyle", "", '{"msg": "two-a"}'),
+                ("f-002b", "note", 1700000003.0, "kyle", "", '{"msg": "two-b"}'),
+            ]),
+            observer="kyle",
+        )
+        # record 3: 1 fact (ordinal 3, seq 0)
+        log.append(
+            "fact",
+            object_of_fact_row(("f-003", "note", 1700000004.0, "kyle", "", '{"msg": "three"}')),
+            observer="kyle",
+        )
+        store = ArrivalStore(
+            path=log_path.with_suffix(".db"),
+            serialize=lambda f: f.to_dict(),
+            deserialize=Fact.from_dict,
+        )
+        store.close()
+        return log_path.with_suffix(".db")
+
+    def test_two_facts_in_batch_seen_across_pages(self, tmp_path: Path):
+        db_path = self._create_batched_store(tmp_path)
+        with StoreReader(db_path) as reader:
+            # Oldest walk with limit=1
+            p1 = reader.query_facts(limit=1, order="oldest")
+            assert [f["id"] for f in p1.items] == ["f-001"]
+            assert p1.truncated is True
+            assert p1.next is not None
+
+            p2 = reader.query_facts(limit=1, order="oldest", after=p1.next)
+            # Batch at ordinal 2 extended: both f-002a and f-002b returned together!
+            assert [f["id"] for f in p2.items] == ["f-002a", "f-002b"]
+            assert p2.truncated is True
+            assert p2.next is not None
+
+            p3 = reader.query_facts(limit=1, order="oldest", after=p2.next)
+            assert [f["id"] for f in p3.items] == ["f-003"]
+            assert p3.truncated is False
+            assert p3.next is None
+
+            # Newest walk with limit=1
+            np1 = reader.query_facts(limit=1, order="newest")
+            assert [f["id"] for f in np1.items] == ["f-003"]
+            assert np1.truncated is True
+            assert np1.next is not None
+
+            np2 = reader.query_facts(limit=1, order="newest", before=np1.next)
+            # Batch at ordinal 2 extended: newest first (f-002b, f-002a)
+            assert [f["id"] for f in np2.items] == ["f-002b", "f-002a"]
+            assert np2.truncated is True
+            assert np2.next is not None
+
+            np3 = reader.query_facts(limit=1, order="newest", before=np2.next)
+            assert [f["id"] for f in np3.items] == ["f-001"]
+            assert np3.truncated is False
+            assert np3.next is None
+
+    def test_limit_1_over_3_row_batch_returns_all_3(self, tmp_path: Path):
+        import base64
+        sample_key = base64.b64encode(b"\x00" * 32).decode()
+        sample_sig = base64.b64encode(b"\x01" * 64).decode()
+
+        log_path = tmp_path / "batch3.arrival"
+        from engine.arrival import ArrivalLog
+        from engine.arrival_store import ArrivalStore
+        from engine.jsonl_codec import object_of_batch
+
+        ArrivalLog.mint(
+            log_path,
+            observer="kyle",
+            signer=lambda obs, dig: sample_sig,
+            key=sample_key,
+        )
+        log = ArrivalLog(log_path)
+        log.append(
+            "batch",
+            object_of_batch([
+                ("b1", "note", 1700000001.0, "kyle", "", '{"i": 1}'),
+                ("b2", "note", 1700000002.0, "kyle", "", '{"i": 2}'),
+                ("b3", "note", 1700000003.0, "kyle", "", '{"i": 3}'),
+            ]),
+            observer="kyle",
+        )
+        store = ArrivalStore(
+            path=log_path.with_suffix(".db"),
+            serialize=lambda f: f.to_dict(),
+            deserialize=Fact.from_dict,
+        )
+        store.close()
+
+        with StoreReader(log_path.with_suffix(".db")) as reader:
+            page = reader.query_facts(limit=1, order="oldest")
+            assert [f["id"] for f in page.items] == ["b1", "b2", "b3"]
+            assert page.truncated is False
+            assert page.next is None

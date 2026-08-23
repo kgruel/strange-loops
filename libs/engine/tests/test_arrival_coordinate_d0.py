@@ -1888,3 +1888,177 @@ class TestSolWp101StructuralVerification:
         assert rows[0] == (1, f0, 1, 0)
         assert rows[1] == (2, f1, 2, 0)
 
+
+class TestSolHigh01UnmarkedStructurallyCompleteValidation:
+    """SOL-HIGH-01: In mode="arrival", a structurally-complete but UNMARKED index
+    does not earn the stamp on structure alone — validate its coordinates against
+    the provider (staging join agreement check) before stamping; disagreement refuses
+    toward rederive_projections exactly like the rebuild path. Correct coordinates
+    + removed marker validates and stamps with zero rebuild.
+    """
+
+    def test_unmarked_structurally_complete_shifted_coordinates_refuses_rederive(
+        self, tmp_path: Path
+    ) -> None:
+        import base64
+
+        sample_key = base64.b64encode(b"\x00" * 32).decode()
+        sample_sig = base64.b64encode(b"\x01" * 64).decode()
+
+        log_path = tmp_path / "shifted.arrival"
+        ArrivalLog.mint(
+            log_path,
+            observer="kyle",
+            signer=lambda obs, dig: sample_sig,
+            key=sample_key,
+        )
+        store = ArrivalStore(
+            path=log_path.with_suffix(".db"),
+            serialize=lambda f: f.to_dict(),
+            deserialize=Fact.from_dict,
+        )
+        store.append(Fact.of("note", "kyle", text="one"))
+        store.append(Fact.of("note", "kyle", text="two"))
+        store.close()
+
+        db_path = log_path.with_suffix(".db")
+        conn = sqlite3.connect(str(db_path))
+        try:
+            # Sol's reproduction: remove coordinate_axis marker, shift coordinates from (1,0),(2,0) to (0,0),(1,0)
+            conn.execute("DELETE FROM store_meta WHERE key = 'coordinate_axis'")
+            conn.execute("UPDATE facts SET arrival_ordinal = arrival_ordinal - 1")
+            conn.commit()
+        finally:
+            conn.close()
+
+        # Reopening must refuse toward rederive_projections
+        with pytest.raises(ArrivalCanonicalUnsupported) as exc_info:
+            ArrivalStore(
+                path=db_path,
+                serialize=lambda f: f.to_dict(),
+                deserialize=Fact.from_dict,
+            )
+
+        err_msg = str(exc_info.value)
+        assert "index coordinates do not match arrival log" in err_msg
+        assert "rederive_projections" in err_msg
+
+    def test_unmarked_structurally_complete_correct_coordinates_stamped_zero_rebuild(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import base64
+
+        sample_key = base64.b64encode(b"\x00" * 32).decode()
+        sample_sig = base64.b64encode(b"\x01" * 64).decode()
+
+        log_path = tmp_path / "correct_unmarked.arrival"
+        ArrivalLog.mint(
+            log_path,
+            observer="kyle",
+            signer=lambda obs, dig: sample_sig,
+            key=sample_key,
+        )
+        store = ArrivalStore(
+            path=log_path.with_suffix(".db"),
+            serialize=lambda f: f.to_dict(),
+            deserialize=Fact.from_dict,
+        )
+        store.append(Fact.of("note", "kyle", text="one"))
+        store.append(Fact.of("note", "kyle", text="two"))
+        store.close()
+
+        db_path = log_path.with_suffix(".db")
+        conn = sqlite3.connect(str(db_path))
+        try:
+            # Remove coordinate_axis marker, but leave correct coordinates intact
+            conn.execute("DELETE FROM store_meta WHERE key = 'coordinate_axis'")
+            conn.commit()
+        finally:
+            conn.close()
+
+        # Forbid _rebuild_table on reopen
+        import engine.sqlite_store as sqlmod
+
+        def forbid_rebuild(*args: Any, **kwargs: Any) -> None:
+            pytest.fail("_rebuild_table was invoked on structurally-complete matching index")
+
+        monkeypatch.setattr(sqlmod, "_rebuild_table", forbid_rebuild)
+
+        reopened = ArrivalStore(
+            path=db_path,
+            serialize=lambda f: f.to_dict(),
+            deserialize=Fact.from_dict,
+        )
+        assert reopened.total == 2
+        reopened.close()
+
+        conn = sqlite3.connect(str(db_path))
+        meta = conn.execute(
+            "SELECT value FROM store_meta WHERE key = 'coordinate_axis'"
+        ).fetchone()
+        conn.close()
+
+        assert meta == ("arrival",)
+
+
+class TestSolHigh02IdentifierQuotingInRebuild:
+    """SOL-HIGH-02: trigger/view/index names with spaces or special characters
+    interpolated into DROP/re-create statements must be properly quoted.
+    Sol's fixture: trigger "facts audit trigger", view "facts view", index "facts kind index"
+    migrates successfully and artifacts survive.
+    """
+
+    def test_rebuild_migrates_identifiers_with_spaces(self, tmp_path: Path) -> None:
+        import engine.sqlite_store as sqlmod
+
+        db_path = tmp_path / "spaces.db"
+        conn = sqlite3.connect(str(db_path))
+        conn.executescript(
+            """
+            CREATE TABLE facts (
+                id TEXT NOT NULL PRIMARY KEY,
+                kind TEXT NOT NULL,
+                ts REAL NOT NULL,
+                observer TEXT NOT NULL,
+                origin TEXT NOT NULL DEFAULT '',
+                payload TEXT NOT NULL,
+                signature TEXT
+            );
+            CREATE INDEX "facts kind index" ON facts(kind);
+            CREATE VIEW "facts view" AS SELECT id, kind, ts, observer FROM facts;
+            CREATE TRIGGER "facts audit trigger" AFTER INSERT ON facts BEGIN
+                SELECT 1;
+            END;
+            INSERT INTO facts (id, kind, ts, observer, origin, payload, signature)
+            VALUES ('f1', 'note', 1700000000.0, 'kyle', '', '{}', NULL);
+            """
+        )
+
+        ensure_coordinate_schema(conn, mode="mirrored")
+        conn.commit()
+
+        # Check that table schema was migrated
+        valid, defect = sqlmod._verify_coordinate_schema(conn, "facts")
+        assert valid, defect
+
+        # Check that index, view, and trigger survived
+        idx = conn.execute(
+            "SELECT name FROM sqlite_schema WHERE type='index' AND name='facts kind index'"
+        ).fetchone()
+        assert idx is not None
+
+        view = conn.execute(
+            "SELECT name FROM sqlite_schema WHERE type='view' AND name='facts view'"
+        ).fetchone()
+        assert view is not None
+
+        trigger = conn.execute(
+            "SELECT name FROM sqlite_schema WHERE type='trigger' AND name='facts audit trigger'"
+        ).fetchone()
+        assert trigger is not None
+
+        # Check that rows survived with coordinates
+        row = conn.execute("SELECT id, arrival_ordinal, arrival_seq FROM facts").fetchone()
+        assert row == ("f1", 1, 0)
+        conn.close()
+

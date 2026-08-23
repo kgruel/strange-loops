@@ -794,11 +794,13 @@ class StoreReader:
         ``before`` cursor) while an ``oldest`` walk tails new appends —
         the honest append-only reading.
 
-        Truncation is probed by over-fetching one row: ``truncated`` is
-        True iff a ``limit+1``-th matching row existed in this snapshot,
-        and then ``next`` is the :class:`WitnessPosition` of the page's
-        last item (resolved with ``group_boundary="allow"`` — a page
-        boundary is a read-progress token, not a fold cut, so the A2
+        The page limit is a FLOOR (ceremonies are atomic): after fetching
+        ``limit`` rows, the page extends with any remaining rows of the LAST
+        record (same arrival_ordinal) so no record is ever split across
+        pages. ``truncated`` is True iff matching rows exist beyond the
+        page's last record, and then ``next`` is the :class:`WitnessPosition`
+        of the page's last item (resolved with ``group_boundary="allow"`` —
+        a page boundary is a read-progress token, not a fold cut, so the A2
         mid-ceremony refusal does not apply). Feed ``next`` back as
         ``before`` for ``"newest"`` or ``after`` for ``"oldest"``.
         """
@@ -854,22 +856,52 @@ class StoreReader:
             self._conn.execute("BEGIN DEFERRED")
         try:
             rows = self._conn.execute(
-                "SELECT id, kind, ts, observer, origin, payload FROM facts "
+                "SELECT id, kind, ts, observer, origin, payload, arrival_ordinal, arrival_seq FROM facts "
                 f"{where} ORDER BY arrival_ordinal {direction}, arrival_seq {direction} LIMIT ?",
-                (*params, limit + 1),
+                (*params, limit),
             ).fetchall()
-            truncated = len(rows) > limit
-            rows = rows[:limit]
+            truncated = False
             next_pos = None
-            if truncated:
-                next_pos = _resolve_witness_position_on_conn(
-                    self._conn, self._path, rows[-1][0], group_boundary="allow",
-                )
+            if len(rows) == limit:
+                # The page limit is a FLOOR: extend with any remaining rows of the LAST record
+                # (same arrival_ordinal) so no record is ever split across pages.
+                last_ord = rows[-1][6]
+                last_seq = rows[-1][7]
+                where_and = f"{where} AND " if where else "WHERE "
+                if order == "oldest":
+                    ext_rows = self._conn.execute(
+                        f"SELECT id, kind, ts, observer, origin, payload, arrival_ordinal, arrival_seq FROM facts "
+                        f"{where_and} arrival_ordinal = ? AND arrival_seq > ? "
+                        f"ORDER BY arrival_seq ASC",
+                        (*params, last_ord, last_seq),
+                    ).fetchall()
+                    rows.extend(ext_rows)
+                    more = self._conn.execute(
+                        f"SELECT 1 FROM facts {where_and} arrival_ordinal > ? LIMIT 1",
+                        (*params, last_ord),
+                    ).fetchone()
+                else:  # newest
+                    ext_rows = self._conn.execute(
+                        f"SELECT id, kind, ts, observer, origin, payload, arrival_ordinal, arrival_seq FROM facts "
+                        f"{where_and} arrival_ordinal = ? AND arrival_seq < ? "
+                        f"ORDER BY arrival_seq DESC",
+                        (*params, last_ord, last_seq),
+                    ).fetchall()
+                    rows.extend(ext_rows)
+                    more = self._conn.execute(
+                        f"SELECT 1 FROM facts {where_and} arrival_ordinal < ? LIMIT 1",
+                        (*params, last_ord),
+                    ).fetchone()
+                truncated = more is not None
+                if truncated:
+                    next_pos = _resolve_witness_position_on_conn(
+                        self._conn, self._path, rows[-1][0], group_boundary="allow",
+                    )
         finally:
             if own_txn:
                 self._conn.rollback()
         return FactPage(
-            items=[self._fact_row_to_dict(r) for r in rows],
+            items=[self._fact_row_to_dict(r[:6]) for r in rows],
             next=next_pos,
             truncated=truncated,
             order=order,

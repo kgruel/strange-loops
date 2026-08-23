@@ -164,6 +164,44 @@ class TestGateD3_1_DetectionCoordinates:
         counts = next(c for c in report.checks if c.name == "counts")
         assert not counts.ok
         assert "this index holds a row carrying no arrival coordinate" in counts.detail
+        assert "facts has NULL arrival_ordinal" in counts.detail
+
+    def test_l1_detects_null_arrival_seq_with_location_claim(self, tmp_path: Path):
+        """SOL-HIGH-04: Non-NULL ordinal + NULL seq => counts check fails with location claim."""
+        log_path, db_path, store = _create_arrival_store(tmp_path, n_facts=3)
+        conn = sqlite3.connect(db_path)
+        try:
+            # Recreate facts table without NOT NULL to allow NULL arrival_seq
+            conn.execute("CREATE TEMP TABLE facts_backup AS SELECT * FROM facts")
+            conn.execute("DROP TABLE facts")
+            conn.execute(
+                "CREATE TABLE facts ("
+                "id TEXT PRIMARY KEY, kind TEXT, ts REAL, observer TEXT, origin TEXT, "
+                "payload TEXT, signature TEXT, arrival_ordinal INTEGER, arrival_seq INTEGER"
+                ")"
+            )
+            conn.execute(
+                "INSERT INTO facts SELECT id, kind, ts, observer, origin, payload, signature, "
+                "arrival_ordinal, arrival_seq FROM facts_backup"
+            )
+            conn.execute("DROP TABLE facts_backup")
+            # Insert a rogue row with arrival_ordinal = 5 (non-NULL) but arrival_seq = NULL
+            conn.execute(
+                "INSERT INTO facts (id, kind, ts, observer, origin, payload, signature, arrival_ordinal, arrival_seq) "
+                "VALUES (?, ?, ?, ?, ?, ?, NULL, 5, NULL)",
+                (gen_id(), "rogue", 1700000000.0, "attacker", "", "{}"),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        report = audit_agreement(log_path)
+        assert not report.ok
+        assert report.index_behind is False
+
+        counts = next(c for c in report.checks if c.name == "counts")
+        assert not counts.ok
+        assert "this index holds a row carrying no arrival coordinate (facts has NULL arrival_seq)" in counts.detail
 
     def test_l1_detects_edit_to_last_consumed_row(self, tmp_path: Path):
         log_path, db_path, store = _create_arrival_store(tmp_path, n_facts=3)
@@ -256,7 +294,7 @@ class TestGateD3_2_BoundedWorkInstrumentation:
     - healthy N-record: anchor (1) + 0 suffix = 1 record verified
     - K behind: 1 anchor + K suffix = 1 + K records verified
     - anchor-failed: 1 anchor attempt + 0 suffix = 1 record verified (NO walk from zero)
-    - --deep: N records.
+    - --deep: 1 + N records verified (1 anchor in L1 base + N records in full walk).
     """
 
     def test_healthy_store_verifies_exactly_anchor_plus_zero_suffix(self, tmp_path: Path):
@@ -356,7 +394,10 @@ class TestGateD3_2_BoundedWorkInstrumentation:
             report = audit_deep(log_path)
 
         assert report.ok
+        assert counts["anchor"] == 1
         assert counts["walk"] == expected_n
+        total_verified = counts["anchor"] + counts["walk"]
+        assert total_verified == 1 + expected_n
 
 
 # ===========================================================================

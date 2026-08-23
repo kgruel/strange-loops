@@ -52,7 +52,7 @@ class TestStreamToProjection:
         await stream.emit(Event(2))
         assert sum_projection.version == 2
 
-    async def test_projection_cursor_tracks_events(
+    async def test_projection_counts_tapped_events(
         self, stream: Stream[Event], sum_projection: SumProjection
     ):
         stream.tap(sum_projection)
@@ -60,7 +60,10 @@ class TestStreamToProjection:
         await stream.emit(Event(1))
         await stream.emit(Event(2))
 
-        assert sum_projection.cursor == 2
+        # Stream-tapped folds are counted; the store cursor is untouched
+        # because no store handed one back.
+        assert sum_projection.events_folded == 2
+        assert sum_projection.cursor == 0
 
 
 class TestStreamToEventStore:

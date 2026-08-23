@@ -666,3 +666,57 @@ class TestW2_1_IncrementalFoldEquivalence:
 
         conn.close()
         store.close()
+
+
+class TestW3_3_CursorAndCountAreSeparateRoles:
+    """W3-3 (S-4 split): a Projection's `cursor` is a store coordinate and
+    `events_folded` is a fold count. Mixing advance() with fold_one() must
+    leave the cursor a coordinate the store actually minted — never
+    (ordinal + 1, seq), which names a row that may not exist."""
+
+    def test_mixed_advance_then_fold_keeps_a_real_store_cursor(
+        self, tmp_path: Path
+    ) -> None:
+        from atoms import Fact
+        from engine.projection import Projection
+        from engine.sqlite_store import SqliteStore
+
+        store = SqliteStore(
+            path=tmp_path / "mixed.db",
+            serialize=Fact.to_dict,
+            deserialize=Fact.from_dict,
+        )
+        for n in (1, 2, 3):
+            store.append(Fact.of("item", "kyle", val=n))
+
+        proj: Projection[int, Fact] = Projection(
+            0, fold=lambda s, e: s + e.payload["val"]
+        )
+        proj.advance(store)
+
+        cursor_after_advance = proj.cursor
+        assert cursor_after_advance == (3, 0)
+        assert proj.events_folded == 3
+        assert proj.state == 6
+
+        # A hand-fed event (stream tap, out-of-band delivery) is folded and
+        # counted, but says nothing about the store's position.
+        proj.fold_one(Fact.of("item", "kyle", val=10))
+
+        assert proj.cursor == cursor_after_advance  # pre-fix: (4, 0), a phantom
+        assert proj.events_folded == 4
+        assert proj.state == 16
+
+        # The cursor is still one the store minted: advancing from it returns
+        # only genuinely-new rows.
+        assert store.since_with_cursor(proj.cursor) == []
+        store.append(Fact.of("item", "kyle", val=100))
+        assert [f.payload["val"] for f, _ in store.since_with_cursor(proj.cursor)] == [
+            100
+        ]
+
+        proj.advance(store)
+        assert proj.cursor == (4, 0)
+        assert proj.events_folded == 5
+        assert proj.state == 116
+        store.close()

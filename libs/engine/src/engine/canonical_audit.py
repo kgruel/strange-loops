@@ -104,11 +104,6 @@ class Check:
     behind_by: int = 0
     at_ordinal: int = -1
 
-    @property
-    def beyond_offset(self) -> bool:
-        """Compatibility property for legacy callers."""
-        return self.behind_by > 0
-
     def as_dict(self) -> dict[str, Any]:
         return {
             "check": self.name,
@@ -116,7 +111,6 @@ class Check:
             "detail": self.detail,
             "behind_by": self.behind_by,
             "at_ordinal": self.at_ordinal,
-            "beyond_offset": self.beyond_offset,
         }
 
 

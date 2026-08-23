@@ -459,3 +459,42 @@ class TestGateD3_4_MultisetDerivedLogAudit:
         assert not report.ok
         derived_check = next(c for c in report.checks if c.name == "derived_log")
         assert not derived_check.ok
+
+
+# ===========================================================================
+# G-D3-5: SOL-WP4-01: beyond_offset dissolved without shim
+# ===========================================================================
+
+
+class TestGateD3_5_CheckDissolvesBeyondOffset:
+    """SOL-WP4-01: Check dissolves beyond_offset into behind_by/at_ordinal — no shim."""
+
+    def test_check_has_no_beyond_offset_attribute_and_as_dict_has_no_such_key(self):
+        c = Check("consumed", False, "index is behind arrival", behind_by=3, at_ordinal=2)
+        with pytest.raises(AttributeError):
+            _ = c.beyond_offset  # type: ignore[attr-defined]
+        with pytest.raises(AttributeError):
+            _ = getattr(c, "beyond_offset")
+        d = c.as_dict()
+        assert "beyond_offset" not in d
+        assert d == {
+            "check": "consumed",
+            "ok": False,
+            "detail": "index is behind arrival",
+            "behind_by": 3,
+            "at_ordinal": 2,
+        }
+
+    def test_agreement_reports_checks_contain_no_beyond_offset(self, tmp_path: Path):
+        log_path, db_path, store = _create_arrival_store(tmp_path, n_facts=3)
+        report = audit_agreement(log_path)
+        assert report.ok
+        for c in report.checks:
+            with pytest.raises(AttributeError):
+                _ = c.beyond_offset  # type: ignore[attr-defined]
+            assert "beyond_offset" not in c.as_dict()
+
+        report_dict = report.as_dict()
+        assert "checks" in report_dict
+        for cd in report_dict["checks"]:
+            assert "beyond_offset" not in cd

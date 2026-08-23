@@ -390,24 +390,48 @@ def _run_verify(argv: list[str], *, vertex_path: Path | None = None) -> int:
         from painted.views import Severity, callout
 
         if agreement.index_behind:
-            # Every divergence is past the consumed prefix — see
-            # engine.canonical_audit.Check.beyond_offset. That is where an
-            # interrupted append lands, and also where a rewound marker plus a
-            # doctored suffix lands; L1 corroborates only the first unindexed
-            # line, so this says WHERE, never "benign". Still rc=1 and still no
-            # chain walk (it would attest to a partial index).
+            from engine.residence import canonical_mode
+
+            canonical = resolve_canonical_path(target_path)
+            mode = canonical_mode(canonical)
+            if mode == "arrival":
+                # Every divergence is beyond the consumed ordinal — see
+                # engine.canonical_audit.Check.behind_by / at_ordinal. That is
+                # where an interrupted append lands, and the rewound check
+                # rules out a moved marker; this reports the shortfall in record
+                # counts and consumed ordinals. Still rc=1 and still no chain
+                # walk (it would attest to a partial index).
+                detail = (
+                    "the derived index is behind the canonical arrival log, and "
+                    "every disagreement is in records beyond the consumed ordinal "
+                    "— consistent with a crash between the arrival fsync and "
+                    "the index commit, with record counts and the rewound check "
+                    "confirming the consumed prefix; the tick chain was NOT "
+                    "walked (it would attest to a partial index). Catch the "
+                    f"index up with 'loops read {target_path.stem}', or run "
+                    "'loops store verify --deep' to rule out tampering"
+                )
+            else:
+                # Every divergence is past the consumed prefix. That is where an
+                # interrupted append lands, and also where a rewound marker plus a
+                # doctored suffix lands; L1 corroborates only the first unindexed
+                # line, so this says WHERE, never "benign". Still rc=1 and still no
+                # chain walk (it would attest to a partial index).
+                detail = (
+                    "the derived index is behind the canonical log, and "
+                    "every disagreement is in bytes the index never claimed "
+                    "to have consumed — consistent with a crash between the "
+                    "log's fsync and the index commit, which this check "
+                    "cannot tell apart from an edited suffix; the tick "
+                    "chain was NOT walked (it would attest to a partial "
+                    f"index). Catch the index up with 'loops read "
+                    f"{target_path.stem}', or run 'loops store verify "
+                    "--deep' to rule out tampering"
+                )
             head = callout(
                 f"{db_path.name} — INDEX BEHIND THE LOG",
                 severity=Severity.WARNING,
-                detail="the derived index is behind the canonical log, and "
-                       "every disagreement is in bytes the index never claimed "
-                       "to have consumed — consistent with a crash between the "
-                       "log's fsync and the index commit, which this check "
-                       "cannot tell apart from an edited suffix; the tick "
-                       "chain was NOT walked (it would attest to a partial "
-                       f"index). Catch the index up with 'loops read "
-                       f"{target_path.stem}', or run 'loops store verify "
-                       "--deep' to rule out tampering",
+                detail=detail,
             )
         else:
             head = callout(

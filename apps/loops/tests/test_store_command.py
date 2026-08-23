@@ -1024,7 +1024,8 @@ class TestCanonicalAgreementGate:
         assert payload["canonical"]["index_behind"] is True
         offset = next(c for c in payload["canonical"]["checks"]
                       if c["check"] == "offset")
-        assert offset["beyond_offset"] is True
+        assert offset["behind_by"] > 0
+        assert "beyond_offset" not in offset
 
     def test_a_forged_row_is_never_classified_as_lag(self, tmp_path, capsys):
         import json as _json
@@ -1525,3 +1526,41 @@ class TestArrivalStoreCanonicalAgreement:
         assert idx_path == db_path
         assert report.ok is True
         assert report.index_behind is False
+
+    def test_arrival_store_index_behind_cli_prose_and_json(self, tmp_path, capsys):
+        import json as _json
+        import time
+
+        from engine.arrival import ArrivalLog
+        from engine.jsonl_codec import object_of_fact_row
+        from engine.sqlite_store import gen_id
+        from loops.commands.store import _run_store
+
+        vpath, log_path, db_path = self._arrival_store(tmp_path)
+        log = ArrivalLog(log_path)
+        log.append(
+            "fact",
+            object_of_fact_row((gen_id(), "ping", time.time(), "kyle", "", _json.dumps({"n": 2}))),
+            observer="kyle",
+        )
+
+        # Plain CLI prose check
+        rc = _run_store(["verify"], vertex_path=vpath)
+        out = capsys.readouterr().out
+        assert rc == 1
+        assert "INDEX BEHIND THE LOG" in out
+        assert "canonical arrival log" in out
+        assert "records beyond the consumed ordinal" in out
+        assert "rewound check" in out
+        assert "bytes the index never claimed to have consumed" not in out
+
+        # JSON verification check
+        rc_json = _run_store(["verify", "--json"], vertex_path=vpath)
+        payload = _json.loads(capsys.readouterr().out)
+        assert rc_json == 1
+        assert payload["canonical"]["index_behind"] is True
+        consumed = next(c for c in payload["canonical"]["checks"]
+                        if c["check"] == "consumed")
+        assert consumed["behind_by"] == 1
+        assert consumed["at_ordinal"] == 1
+        assert "beyond_offset" not in consumed

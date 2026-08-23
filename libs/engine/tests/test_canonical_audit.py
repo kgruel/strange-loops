@@ -13,9 +13,10 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 
+import pytest
 from atoms import Fact
 
-from engine.canonical_audit import audit_agreement, audit_deep
+from engine.canonical_audit import Check, audit_agreement, audit_deep
 from engine.jsonl_codec import serialize_fact_row
 from engine.jsonl_store import JsonlStore
 from engine.tick import Tick
@@ -373,12 +374,29 @@ def test_a_rewound_offset_over_indexed_rows_is_never_index_behind(tmp_path):
     assert "marker was moved" in report.summary()
 
 
-def test_deep_never_stamps_beyond_offset_on_a_line_behind_a_rewound_offset(tmp_path):
+def test_deep_never_stamps_behind_by_on_a_line_behind_a_rewound_offset(tmp_path):
     log, db = seeded(tmp_path)
     _rewind_offset(db, _line_ends(log)[0])
     deep = audit_deep(log)
     assert not deep.index_behind
-    assert not any(c.beyond_offset for c in deep.checks), deep.as_dict()
+    assert not any(c.behind_by > 0 for c in deep.checks), deep.as_dict()
+    for c in deep.checks:
+        assert "beyond_offset" not in c.as_dict()
+
+
+def test_check_has_no_beyond_offset_and_as_dict_has_no_such_key():
+    c = Check("offset", False, "shortfall", behind_by=10, at_ordinal=4)
+    with pytest.raises(AttributeError):
+        _ = getattr(c, "beyond_offset")
+    with pytest.raises(AttributeError):
+        _ = c.beyond_offset  # type: ignore[attr-defined]
+    d = c.as_dict()
+    assert "beyond_offset" not in d
+    assert d["behind_by"] == 10
+    assert d["at_ordinal"] == 4
+    assert d["check"] == "offset"
+    assert d["ok"] is False
+    assert d["detail"] == "shortfall"
 
 
 def test_a_pure_marker_rewind_with_no_tamper_is_still_not_the_crash_shape(tmp_path):

@@ -121,7 +121,7 @@ class TargetInfo:
     """Has the derived index consumed the whole log — by OFFSET PARITY ONLY.
 
     A SCOPE STATEMENT, NOT AN INTEGRITY CLAIM (the same discipline as
-    ``canonical_audit.Check.beyond_offset``). This is one stamped-offset
+    ``canonical_audit.Check.behind_by``). This is one stamped-offset
     read against one ``stat``: it distinguishes "the index has consumed
     every log byte" from "it is behind / absent / unreadable". It does NOT
     say the index rows agree with the log — an out-of-band sqlite insert

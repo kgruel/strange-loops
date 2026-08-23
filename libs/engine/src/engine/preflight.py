@@ -381,7 +381,7 @@ def _sqlite_preflight(
 def _arrival_preflight(
     canonical: Path, mode: PreflightMode, open_kwargs: dict[str, Any]
 ) -> PreflightResult:
-    """Arrival-canonical: the agreement audit for this mode is a later cut.
+    """Arrival-canonical: agreement audit lives in canonical_audit, not preflight.
 
     Scope stated rather than blurred: an arrival store HAS a log/index pair,
     so agreement is not vacuous the way sqlite's is — it is simply not

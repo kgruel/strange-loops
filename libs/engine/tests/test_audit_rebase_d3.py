@@ -25,6 +25,7 @@ Gates covered:
 from __future__ import annotations
 
 import base64
+import contextlib
 import json
 import sqlite3
 from pathlib import Path
@@ -220,46 +221,54 @@ class TestGateD3_1_DetectionCoordinates:
 # ===========================================================================
 
 
+@contextlib.contextmanager
+def _record_verification_counter():
+    """Quantity seam counter: counts anchor validation attempts and verified walk records.
+
+    - anchor: calls to ArrivalLog.anchor (validating single anchor record)
+    - walk: records verified in ArrivalLog._verify_from (the single verification loop
+      for all walks — both from zero and resumed suffix)
+    - total: anchor + walk
+    """
+    counts = {"anchor": 0, "walk": 0}
+
+    orig_anchor = ArrivalLog.anchor
+    orig_verify_from = ArrivalLog._verify_from
+
+    def counting_anchor(self_log, mark):
+        counts["anchor"] += 1
+        return orig_anchor(self_log, mark)
+
+    def counting_verify_from(self_log, fh, *, expected, prev, lineage):
+        for item in orig_verify_from(self_log, fh, expected=expected, prev=prev, lineage=lineage):
+            counts["walk"] += 1
+            yield item
+
+    with patch.object(ArrivalLog, "anchor", counting_anchor), \
+         patch.object(ArrivalLog, "_verify_from", counting_verify_from):
+        yield counts
+
+
 class TestGateD3_2_BoundedWorkInstrumentation:
     """G-D3-2: bounded work, deterministically instrumented (NO timing):
 
     Test-scoped counter on record-verification seam asserts EXACT bounds:
     - healthy N-record: anchor (1) + 0 suffix = 1 record verified
     - K behind: 1 anchor + K suffix = 1 + K records verified
-    - --deep: N records
-    - neither ArrivalLog.read nor ArrivalLog.walk called in L1.
+    - anchor-failed: 1 anchor attempt + 0 suffix = 1 record verified (NO walk from zero)
+    - --deep: N records.
     """
 
     def test_healthy_store_verifies_exactly_anchor_plus_zero_suffix(self, tmp_path: Path):
         log_path, db_path, store = _create_arrival_store(tmp_path, n_facts=10)
 
-        # Instrument ArrivalLog.anchor and _walk_tail
-        anchor_calls = 0
-        suffix_records_verified = 0
-
-        orig_anchor = ArrivalLog.anchor
-        orig_walk_tail = ArrivalLog._walk_tail
-
-        def counting_anchor(self_log, mark):
-            nonlocal anchor_calls
-            anchor_calls += 1
-            return orig_anchor(self_log, mark)
-
-        def counting_walk_tail(self_log, offset, anchor, lineage):
-            nonlocal suffix_records_verified
-            for rec in orig_walk_tail(self_log, offset, anchor, lineage):
-                suffix_records_verified += 1
-                yield rec
-
-        with patch.object(ArrivalLog, "anchor", counting_anchor), \
-             patch.object(ArrivalLog, "_walk_tail", counting_walk_tail), \
-             patch.object(ArrivalLog, "read", side_effect=AssertionError("read() called in L1")), \
-             patch.object(ArrivalLog, "walk", side_effect=AssertionError("walk() called in L1")):
+        with _record_verification_counter() as counts:
             report = audit_agreement(log_path)
 
         assert report.ok
-        assert anchor_calls == 1
-        assert suffix_records_verified == 0
+        assert counts["anchor"] == 1
+        assert counts["walk"] == 0
+        assert counts["anchor"] + counts["walk"] == 1
 
     def test_k_behind_store_verifies_exactly_one_anchor_plus_k_suffix(self, tmp_path: Path):
         log_path, db_path, store = _create_arrival_store(tmp_path, n_facts=5)
@@ -273,33 +282,69 @@ class TestGateD3_2_BoundedWorkInstrumentation:
                 observer="kyle",
             )
 
-        anchor_calls = 0
-        suffix_records_verified = 0
-
-        orig_anchor = ArrivalLog.anchor
-        orig_walk_tail = ArrivalLog._walk_tail
-
-        def counting_anchor(self_log, mark):
-            nonlocal anchor_calls
-            anchor_calls += 1
-            return orig_anchor(self_log, mark)
-
-        def counting_walk_tail(self_log, offset, anchor, lineage):
-            nonlocal suffix_records_verified
-            for rec in orig_walk_tail(self_log, offset, anchor, lineage):
-                suffix_records_verified += 1
-                yield rec
-
-        with patch.object(ArrivalLog, "anchor", counting_anchor), \
-             patch.object(ArrivalLog, "_walk_tail", counting_walk_tail), \
-             patch.object(ArrivalLog, "read", side_effect=AssertionError("read() called in L1")), \
-             patch.object(ArrivalLog, "walk", side_effect=AssertionError("walk() called in L1")):
+        with _record_verification_counter() as counts:
             report = audit_agreement(log_path)
 
         assert not report.ok
         assert report.index_behind is True
-        assert anchor_calls == 1
-        assert suffix_records_verified == k_behind
+        assert counts["anchor"] == 1
+        assert counts["walk"] == k_behind
+        assert counts["anchor"] + counts["walk"] == 1 + k_behind
+
+    def test_anchor_failed_corrupted_offset_verifies_single_record_no_walk(self, tmp_path: Path):
+        """Gate W4-1 reproduction fixture: mark current, offset corrupted mid-record.
+
+        Anchor validation fails => L1 verifies O(1) records (assert via quantity seam),
+        consumed check reports unverifiable with NO behind_by magnitude, sibling counts check
+        still truthfully reports all facts accounted for.
+        """
+        n_facts = 200
+        log_path, db_path, store = _create_arrival_store(tmp_path, n_facts=n_facts)
+
+        # Corrupt the offset in the index's store_meta table to point mid-record
+        conn = sqlite3.connect(db_path)
+        try:
+            cur_offset = int(conn.execute(
+                f"SELECT value FROM store_meta WHERE key = '{ARRIVAL_OFFSET_KEY}'"
+            ).fetchone()[0])
+            corrupted_offset = cur_offset - 5
+            conn.execute(
+                f"UPDATE store_meta SET value = ? WHERE key = '{ARRIVAL_OFFSET_KEY}'",
+                (str(corrupted_offset),),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        with _record_verification_counter() as counts:
+            report = audit_agreement(log_path)
+
+        assert not report.ok
+        assert report.index_behind is False
+
+        # Quantity seam: anchor failed => exactly 1 record verified (anchor attempt), NO walk from zero
+        assert counts["anchor"] == 1
+        assert counts["walk"] == 0
+        assert counts["anchor"] + counts["walk"] == 1
+
+        # Check consumed: unverifiable with NO behind_by magnitude
+        consumed = next(c for c in report.checks if c.name == "consumed")
+        assert not consumed.ok
+        assert consumed.behind_by == 0
+        assert consumed.at_ordinal == n_facts
+        assert "anchor verification failed; consumed position unverifiable" in consumed.detail
+        assert str(n_facts) in consumed.detail
+
+        # Sibling counts check: truthfully reports all facts accounted for
+        counts_check = next(c for c in report.checks if c.name == "counts")
+        assert counts_check.ok
+        assert f"{n_facts} fact(s), 0 tick(s) accounted for" in counts_check.detail
+
+        # Consumed edge check: failed anchor verification
+        edge_check = next(c for c in report.checks if c.name == "consumed_edge")
+        assert not edge_check.ok
+        assert "failed anchor verification" in edge_check.detail
+        assert edge_check.at_ordinal == n_facts
 
     def test_deep_audit_verifies_full_n_records(self, tmp_path: Path):
         n_facts = 7
@@ -307,20 +352,11 @@ class TestGateD3_2_BoundedWorkInstrumentation:
         # Total arrival records = 1 genesis + 7 facts = 8 records.
         expected_n = 1 + n_facts
 
-        walked_records = 0
-        orig_walk = ArrivalLog.walk
-
-        def counting_walk(self_log):
-            nonlocal walked_records
-            for rec in orig_walk(self_log):
-                walked_records += 1
-                yield rec
-
-        with patch.object(ArrivalLog, "walk", counting_walk):
+        with _record_verification_counter() as counts:
             report = audit_deep(log_path)
 
         assert report.ok
-        assert walked_records == expected_n
+        assert counts["walk"] == expected_n
 
 
 # ===========================================================================

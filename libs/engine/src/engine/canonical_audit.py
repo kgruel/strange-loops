@@ -392,13 +392,10 @@ def _check_consumed_arrival(
                 "the log was truncated or replaced",
                 at_ordinal=mark.arrival_ordinal,
             )
-        resumed, pairs = log.walk_marked(None)
-        suffix_count = sum(1 for _ in pairs)
         return Check(
             "consumed",
             False,
-            f"index is behind arrival by {suffix_count} record(s), consumed through ordinal {mark.arrival_ordinal} — anchor verification failed",
-            behind_by=suffix_count,
+            f"anchor verification failed; consumed position unverifiable at ordinal {mark.arrival_ordinal}",
             at_ordinal=mark.arrival_ordinal,
         )
 

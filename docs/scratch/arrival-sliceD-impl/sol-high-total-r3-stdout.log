@@ -1,0 +1,60 @@
+Overall verdict: **NOT_CONVERGED**. The advertised fixtures pass, but `a925c697` introduces a new D0 evasion.
+
+### SOL-HIGH-09 — MAJOR
+
+[sqlite_store.py:541](/Users/kaygee/Code/loops/libs/engine/src/engine/sqlite_store.py:541)
+
+The mismatched-marker correction conflates “both tables empty” with “fresh.” In arrival mode it rewrites the marker and returns without consulting the coordinate provider.
+
+Direct probe with an empty index and a provider containing one fact:
+
+```text
+provider_calls= 0 marker= ('arrival',) facts= 0
+```
+
+Public reproduction:
+
+1. Create an `ArrivalStore` and append two facts.
+2. Retain its populated log and resume mark (`arrival_ordinal='2'`).
+3. Delete both index tables’ rows.
+4. Change `coordinate_axis` to `'mirrored'`.
+5. Reopen through `ArrivalStore`.
+
+Result:
+
+```text
+before= (2, 0, 'arrival', '2')
+reopen=ACCEPTED total=0 after=(0, 0, 'arrival', '2')
+```
+
+The store is demonstrably non-fresh, yet reopening silently corrects the marker and accepts two missing projections. This evades SOL-HIGH-07 through the new SOL-HIGH-06 correction branch. For `mode="arrival", validate=True`, that branch must validate the empty index against the provider before stamping.
+
+### Disposition replay
+
+| Finding | Verdict | Evidence |
+|---|---|---|
+| 06 | **NOT fully confirmed** | Fresh stores stamp correctly and mismatches with any table rows refuse. However, “both tables empty” is insufficient to prove freshness; retained arrival state is silently accepted. |
+| 07 | **NOT fully confirmed** | The committed marker-absent reproduction correctly refuses toward `rederive_projections`, but the mismatched-marker branch bypasses the provider entirely. |
+| 08 | **CONFIRMED** | Empty legacy public open migrates, stamps `'arrival'`, and supports append without `TypeError`. |
+
+Verification:
+
+```text
+SOL-HIGH-06/07/08 regression tests: 6 passed
+Focused D0–D4 suite:              92 passed
+Admission/permutation suite:      19 passed
+Full engine suite:                1906 passed, 1 skipped
+```
+
+### Final verdict table
+
+| Contract | Verdict | Basis |
+|---|---|---|
+| D0 — coordinate schema/migration | **FAIL** | SOL-HIGH-09 |
+| D1 — witness re-key | **PASS** | Unchanged; focused gates pass |
+| D2 — seal re-base | **PASS** | Unchanged; focused gates pass |
+| D3 — audit re-base | **PASS** | Unchanged; focused gates pass |
+| D4 — selective admission verification | **PASS** | Admission/permutation gates pass |
+| Scope law | **PASS** | `a925c697` remains within engine implementation/tests; full-arc exceptions match the receipt |
+
+# **NOT_CONVERGED**

@@ -1,0 +1,94 @@
+Overall verdict: **NOT_CONVERGED**. Four dispositions are closed. SOL-HIGH-01’s advertised fixtures pass, but its broader ruling still has an empty-index evasion. I found three new major D0 defects in `7c792dfd`.
+
+### New findings
+
+**SOL-HIGH-06 — MAJOR — [sqlite_store.py:1047](/Users/kaygee/Code/loops/libs/engine/src/engine/sqlite_store.py:1047), [sqlite_store.py:517](/Users/kaygee/Code/loops/libs/engine/src/engine/sqlite_store.py:517)**
+
+A newly created `ArrivalStore` is stamped `coordinate_axis='mirrored'`. The base constructor stamps before `ArrivalStore` selects arrival mode at [arrival_store.py:144](/Users/kaygee/Code/loops/libs/engine/src/engine/arrival_store.py:144), and the marker fast path checks only that the value is truthy—not that it equals the requested mode.
+
+```text
+after_constructor_axis= ('mirrored',)
+after_append_axis= ('mirrored',)
+stored_coords= [(1, 0)]
+```
+
+Thus an ordinary fresh arrival store carries a marker contradicting its actual coordinate axis. This violates D0’s marker-authority contract.
+
+---
+
+**SOL-HIGH-07 — MAJOR — [sqlite_store.py:547](/Users/kaygee/Code/loops/libs/engine/src/engine/sqlite_store.py:547)**
+
+The new `all_empty` shortcut stamps an unmarked arrival index without invoking its provider. An empty index is not evidence that the consumed log prefix contains no projected rows.
+
+Direct fixture with a provider reporting a log-only row:
+
+```text
+provider_calls= 0 marker= ('arrival',) facts= 0
+```
+
+Public reproduction: create two arrival facts, retain the resume mark, delete the projected facts and axis marker, then reopen:
+
+```text
+result=ACCEPTED
+total=0
+marker=('arrival',)
+mark_ord=('2',)
+```
+
+The provider would have exposed the two missing rows, but the shortcut stamps first and `catch_up` returns synced because the retained mark names end-of-log. This is a direct evasion of SOL-HIGH-01’s ruling.
+
+---
+
+**SOL-HIGH-08 — MAJOR — [sqlite_store.py:564](/Users/kaygee/Code/loops/libs/engine/src/engine/sqlite_store.py:564), [sqlite_store.py:735](/Users/kaygee/Code/loops/libs/engine/src/engine/sqlite_store.py:735)**
+
+The other new empty-index branch calls the keyword-only `_rebuild_table` API positionally and omits `is_final`. A public open of an empty legacy arrival index fails before migration:
+
+```text
+result=FAILED TypeError
+_rebuild_table() takes 2 positional arguments but 3 positional arguments
+(and 1 keyword-only argument) were given
+facts_cols=['id', 'kind', 'ts', 'observer', 'origin', 'payload', 'signature']
+marker=None
+```
+
+This breaks the required first writable-open migration for a valid empty legacy database.
+
+### R1 disposition replay
+
+| Finding | Result | Independent evidence |
+|---|---|---|
+| SOL-HIGH-01 | **FAIL overall** | Shifted nonempty coordinates refuse with one provider call and no marker; correct coordinates stamp with one provider call and zero rebuilds. However SOL-HIGH-07 proves the empty structurally-complete evasion remains. |
+| SOL-HIGH-02 | **PASS** | Index, view, and trigger names containing embedded quotes, spaces, and punctuation survived; trigger fired; rowid survived. |
+| SOL-HIGH-03 | **PASS** | `limit=3` extended across a four-row batch in both orders: oldest returned `left,b0,b1,b2,b3`; newest returned `right,b3,b2,b1,b0`; subsequent pages had the remaining singleton with no omissions. |
+| SOL-HIGH-04 | **PASS** | NULL `facts.arrival_seq` and NULL `ticks.arrival_ordinal` both failed `counts`, naming the exact table and column. |
+| SOL-HIGH-05 | **PASS** | For `N=5`, instrumentation measured anchor `1`, walk `5`, total `6 == 1+N`. |
+
+### Verification
+
+```text
+Targeted D0–D4/query/key-registry: 117 passed
+Admission/permutation:             19 passed
+
+Engine: 1900 passed, 1 skipped
+Store:   176 passed
+Apps:   2530 passed, 1 xfailed
+Atoms:   517 passed
+SDK:     324 passed
+Lang:    691 passed, 3 skipped
+Arch:     98 passed
+```
+
+All suites are green, but none covers the three new D0 fixtures.
+
+### Decision verdicts
+
+| Contract | Verdict | Basis |
+|---|---|---|
+| D0 — coordinate schema/migration | **FAIL** | SOL-HIGH-06, 07, 08 |
+| D1 — witness re-key | **PASS** | Record-atomic pagination confirmed; D1/query gates pass |
+| D2 — seal re-base | **PASS** | D2 gates pass; remediation does not alter signed primitive bodies |
+| D3 — audit re-base | **PASS** | NULL-pair and exact `1+N` claims confirmed |
+| D4 — selective admission verification | **PASS** | Key-registry/admission/permutation gates pass |
+| Scope law | **PASS** | Exceptions match the receipt; `preflight.py` changes exactly one docstring sentence |
+
+# **NOT_CONVERGED**

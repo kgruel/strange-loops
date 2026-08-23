@@ -342,3 +342,103 @@ past it and found that every path verifying more than one record funnels through
 the seam, with the only two bypasses bounded to a single record by construction.
 
 WP-4 passes. Ready for sol-low.
+
+---
+---
+
+# ROUND 3 — SOL-WP4-01 residue dissolution + SOL-WP4-02 prose (`4a10e251`)
+
+Scoped to the two sol findings. Gate branch rebased onto `4a10e251`.
+
+## ROUND 3 VERDICT: **PASS** — both closed, legacy arm verified unchanged.
+
+Scope in-fence: `canonical_audit.py` (−6), `apps/loops/{store,probe}.py`, tests,
+report.
+
+## 1. SOL-WP4-01 — `beyond_offset` dissolved, and the repo claim verified independently
+
+The `beyond_offset` property and its `as_dict` key are deleted outright (−6 lines
+in `canonical_audit.py`); `probe.py` is a one-word docstring reference update
+(`Check.beyond_offset` → `Check.behind_by`).
+
+**I checked the "remaining hits are all absence-pins" claim myself rather than
+taking it.** Every surviving occurrence in `libs`, `apps`, `spec` and `tests`:
+
+| Location | Form |
+|---|---|
+| `test_audit_rebase_d3.py` ×7 | `pytest.raises(AttributeError)` / `assert "beyond_offset" not in …` |
+| `test_canonical_audit.py` ×5 | same |
+| `test_store_command.py` ×2 | `assert "beyond_offset" not in …` |
+
+**No production consumer survives, and `spec/` contains none** — so no frozen
+conformance vector or golden file carries the key. The arbiter's claim holds.
+
+## 2. Legacy-arm behaviour — verified by end-to-end A/B, not by reading
+
+The sweep rewrote the `_run_verify` "INDEX BEHIND THE LOG" branch into an
+arrival/legacy split, so the legacy prose moved lines even where its text did not.
+Rather than judge that from the diff, I ran the **same legacy fixture through the
+CLI at both revisions** (a JSONL-canonical store with one unindexed line appended,
+`loops store verify` and `--json`) and diffed the captured output:
+
+```
+6c6  offset 585/717  vs  584/716      <- volatile fixture bytes, same "behind by 132 byte(s)"
+8c8  tick ULID differs                <- volatile
+11c11
+< ['at_ordinal','behind_by','beyond_offset','check','detail','ok']
+> ['at_ordinal','behind_by','check','detail','ok']
+```
+
+**The legacy prose is byte-identical** — the entire "INDEX BEHIND THE LOG" detail,
+including "bytes the index never claimed to have consumed", does not appear in the
+diff at all. The only non-volatile difference is the intended
+`beyond_offset` key removal. The four pre-existing legacy CLI tests (unindexed
+line, torn line, JSON lag shape, forged row) pass.
+
+**Observation, not a finding:** that key removal is a **public JSON output change
+on both arms**, not just the arrival one. It is the intended dissolution and
+nothing in `spec/` pins it, but an external consumer reading
+`canonical.checks[].beyond_offset` would now find it absent. Recording it because
+"residue removal" and "output schema change" are the same edit here.
+
+## 3. SOL-WP4-02 — arrival prose now matches what the checks claim
+
+The arrival branch's detail speaks in coordinates: *"every disagreement is in
+records beyond the consumed ordinal"*, *"record counts and the rewound check
+confirming the consumed prefix"*, *"a crash between the arrival fsync and the
+index commit"*. A grep of that branch for `byte`/`offset` vocabulary returns
+**nothing**. The stale comment referencing the deleted property now points at
+`Check.behind_by / at_ordinal`.
+
+It is also discriminatingly pinned — `test_store_command.py:1551-1566` asserts the
+arrival phrasing is present, that *"bytes the index never claimed to have
+consumed"* is **absent**, and that the JSON `consumed` check carries
+`behind_by == 1`, `at_ordinal == 1` and no `beyond_offset`. That negative
+assertion is what stops the two arms' prose from silently converging again.
+
+## 4. Suite reconciliation — exact
+
+| Suite | Round 2 (`c3b8dcd4`) | Round 3 (`4a10e251`) | Delta |
+|---|---|---|---|
+| engine | 1890 passed, 1 skipped | **1893 passed, 1 skipped** | **+3** |
+| apps/loops | 2529 + 1 xfail | **2530 + 1 xfail** | **+1** |
+| store | 176 | **176** | 0 |
+
+The +3 decomposes exactly: `test_audit_rebase_d3.py` 12 → **14** (+2) and
+`test_canonical_audit.py` 27 → **28** (+1). The +1 in apps is the arrival-prose
+test. Both match the implementer's claimed figures.
+
+## Bottom line
+
+Both sol findings are closed. The dissolution is complete rather than renamed —
+property and serialized key both gone, the one non-test consumer swept, and every
+surviving mention is an absence-pin that will fail if the property returns. The
+prose split is real and pinned from both sides.
+
+The check I would not have wanted to skip is the legacy A/B: the sweep restructured
+the branch that renders legacy output, and reading the diff would have told me the
+string literal was unchanged without telling me the rendered output was. Running
+both revisions showed it is — modulo the deliberate key removal, which is worth
+naming as an output-schema change in its own right.
+
+**WP-4 passes.** Ready for the final sol re-verdict.

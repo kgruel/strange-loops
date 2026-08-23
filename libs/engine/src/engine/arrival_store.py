@@ -160,10 +160,10 @@ class ArrivalStore(SqliteStore[T], Generic[T]):
         # _sync_derived_state / _ceremony_persist.
         self._reconciled_mark: ResumeMark | None = None
         try:
+            self._ensure_meta_table()
             self._ensure_coordinate_schema()
             self._ensure_fact_signature_column()
             self._ensure_chain_columns()
-            self._ensure_meta_table()
             self.catch_up()
         except BaseException:
             # A raise out of __init__ must leave the db reopenable: an

@@ -253,6 +253,44 @@ class TestGateD3_1_DetectionCoordinates:
         assert "index holds row(s) at arrival ordinal 4 beyond consumed ordinal 2" in rewound.detail
         assert "the marker was rewound, which no writer produces" in rewound.detail
 
+    def test_marked_open_trusts_structure_but_audit_detects_coordinate_tamper(
+        self, tmp_path: Path
+    ):
+        """SOL-HIGH-10 claim-boundary pin: a MARKED, structurally-complete index
+        whose coordinates were shifted out-of-band (marker and resume mark
+        retained) reopens without an O(log) content walk — content agreement is
+        the AUDIT surface's claim, not the open path's — and the L1 audit then
+        detects the tamper via the rewound check with a location claim.
+        """
+        log_path, db_path, store = _create_arrival_store(tmp_path, n_facts=2)
+        store.close()
+
+        conn = sqlite3.connect(db_path)
+        try:
+            conn.execute("UPDATE facts SET arrival_ordinal = arrival_ordinal + 100")
+            conn.commit()
+        finally:
+            conn.close()
+
+        # Reopen through the public constructor: accepted (structure is valid,
+        # marker is authority for the open path's structural claim).
+        reopened = ArrivalStore(
+            path=db_path,
+            serialize=lambda f: f.to_dict(),
+            deserialize=Fact.from_dict,
+            tick_signer=_tick_signer,
+            fact_signer=_fact_signer,
+        )
+        reopened.close()
+
+        # The audit surface owns the content claim, and detects the tamper.
+        report = audit_agreement(log_path)
+        assert not report.ok
+        rewound = next(c for c in report.checks if c.name == "rewound")
+        assert not rewound.ok
+        assert rewound.at_ordinal == 102
+        assert "beyond consumed ordinal 2" in rewound.detail
+
 
 # ===========================================================================
 # G-D3-2: Bounded work, deterministically instrumented

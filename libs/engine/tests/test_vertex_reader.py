@@ -17,6 +17,11 @@ def _create_vertex_file(tmp_path: Path, name: str, loops_kdl: str) -> Path:
     return vpath
 
 
+def _next_ordinal(conn: sqlite3.Connection, table: str) -> int:
+    """Next dense arrival ordinal for a hand-rolled test table (legacy mirror: seq 0)."""
+    return conn.execute(f"SELECT COALESCE(MAX(arrival_ordinal), 0) + 1 FROM {table}").fetchone()[0]
+
+
 def _seed_facts(db_path: Path, facts: list[dict]) -> None:
     """Insert facts into a SQLite store at db_path."""
     conn = sqlite3.connect(str(db_path))
@@ -27,7 +32,9 @@ def _seed_facts(db_path: Path, facts: list[dict]) -> None:
         "    ts REAL NOT NULL,"
         "    observer TEXT NOT NULL,"
         "    origin TEXT NOT NULL DEFAULT '',"
-        "    payload TEXT NOT NULL"
+        "    payload TEXT NOT NULL,"
+        "    arrival_ordinal INTEGER,"
+        "    arrival_seq INTEGER"
         ");"
         "CREATE TABLE IF NOT EXISTS ticks ("
         "    id TEXT NOT NULL PRIMARY KEY,"
@@ -35,13 +42,18 @@ def _seed_facts(db_path: Path, facts: list[dict]) -> None:
         "    ts REAL NOT NULL,"
         "    since REAL,"
         "    origin TEXT NOT NULL,"
-        "    payload TEXT NOT NULL"
+        "    payload TEXT NOT NULL,"
+        "    arrival_ordinal INTEGER,"
+        "    arrival_seq INTEGER"
         ");"
     )
     for i, f in enumerate(facts):
         conn.execute(
-            "INSERT INTO facts (id, kind, ts, observer, origin, payload) VALUES (?, ?, ?, ?, ?, ?)",
-            (f.get("id", f"TESTFACT{i:04d}"), f["kind"], f["ts"], f.get("observer", "test"), f.get("origin", ""), json.dumps(f["payload"])),
+            "INSERT INTO facts (id, kind, ts, observer, origin, payload,"
+            " arrival_ordinal, arrival_seq) VALUES (?, ?, ?, ?, ?, ?, ?, 0)",
+            (f.get("id", f"TESTFACT{i:04d}"), f["kind"], f["ts"],
+             f.get("observer", "test"), f.get("origin", ""),
+             json.dumps(f["payload"]), _next_ordinal(conn, "facts")),
         )
     conn.commit()
     conn.close()
@@ -1316,7 +1328,9 @@ def _seed_ticks(db_path: Path, ticks: list[dict]) -> None:
         "    ts REAL NOT NULL,"
         "    observer TEXT NOT NULL,"
         "    origin TEXT NOT NULL DEFAULT '',"
-        "    payload TEXT NOT NULL"
+        "    payload TEXT NOT NULL,"
+        "    arrival_ordinal INTEGER,"
+        "    arrival_seq INTEGER"
         ");"
         "CREATE TABLE IF NOT EXISTS ticks ("
         "    id TEXT NOT NULL PRIMARY KEY,"
@@ -1324,13 +1338,18 @@ def _seed_ticks(db_path: Path, ticks: list[dict]) -> None:
         "    ts REAL NOT NULL,"
         "    since REAL,"
         "    origin TEXT NOT NULL,"
-        "    payload TEXT NOT NULL"
+        "    payload TEXT NOT NULL,"
+        "    arrival_ordinal INTEGER,"
+        "    arrival_seq INTEGER"
         ");"
     )
     for i, t in enumerate(ticks):
         conn.execute(
-            "INSERT INTO ticks (id, name, ts, since, origin, payload) VALUES (?, ?, ?, ?, ?, ?)",
-            (t.get("id", f"TESTTICK{i:04d}"), t["name"], t["ts"], t.get("since"), t.get("origin", ""), json.dumps(t.get("payload", {}))),
+            "INSERT INTO ticks (id, name, ts, since, origin, payload,"
+            " arrival_ordinal, arrival_seq) VALUES (?, ?, ?, ?, ?, ?, ?, 0)",
+            (t.get("id", f"TESTTICK{i:04d}"), t["name"], t["ts"], t.get("since"),
+             t.get("origin", ""), json.dumps(t.get("payload", {})),
+             _next_ordinal(conn, "ticks")),
         )
     conn.commit()
     conn.close()

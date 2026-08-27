@@ -18,7 +18,7 @@ from atoms import Fact
 
 from engine.jsonl_codec import deserialize_row, serialize_fact_row
 from engine.jsonl_store import JsonlCanonicalUnsupported, JsonlStore
-from engine.residence import log_path_for
+from engine.residence import canonical_for
 from engine.sqlite_store import (
     SqliteStore,
     _fact_commitment_hash,
@@ -69,7 +69,7 @@ def offset_of(store: JsonlStore) -> int:
 def test_append_writes_log_first_and_receipt_matches_sqlite(tmp_path):
     store = open_store(tmp_path)
     fid = store.append(fact())
-    log = log_path_for(tmp_path / "s.db")
+    log = canonical_for(tmp_path / "s.db", "jsonl")
 
     assert log.exists()
     t, row = deserialize_row(lines(log)[0])
@@ -345,7 +345,7 @@ def test_index_with_rows_but_no_log_refuses(tmp_path):
     )
     plain.append(fact())
     plain.close()
-    with pytest.raises(JsonlCanonicalUnsupported, match="export it first"):
+    with pytest.raises(JsonlCanonicalUnsupported, match="frozen legacy"):
         open_store(tmp_path)
 
 
@@ -365,13 +365,21 @@ def test_read_surface_is_untouched(tmp_path):
 def test_reanchor_still_refuses_loudly(tmp_path):
     """Scope pin (S1b oracle #10): the append-shaped ceremonies
     (absorb_genesis/absorb_edit) are wired through the _ceremony_persist
-    seam, but reanchor is history-mutating and stays refused until the
-    log-rewrite ceremony is designed."""
+    seam, but reanchor is history-mutating and refused.
+
+    PERMANENT at cut B: the refusal no longer promises a later log-rewrite
+    ceremony, because rewriting a log is not an operation in this model.
+    """
     store = open_store(tmp_path)
     store.append(fact())
-    with pytest.raises(JsonlCanonicalUnsupported, match="jsonl-canonical-store"):
+    with pytest.raises(JsonlCanonicalUnsupported) as exc:
         store.reanchor()
     store.close()
+    message = str(exc.value)
+    assert "not an operation in this model" in message
+    # It denies deferral outright rather than promising a later ceremony.
+    assert "not a later slice's either" in message
+    assert "is a later slice" not in message
 
 
 # --- review regressions (S3 round 1) --------------------------------------
@@ -388,7 +396,7 @@ def test_rejected_insert_never_orphans_a_line(tmp_path):
     import sqlite3
 
     store = open_store(tmp_path)
-    log = log_path_for(store._path)
+    log = canonical_for(store._path, "jsonl")
     first = store.append(fact(message="one"))
 
     with pytest.raises(sqlite3.IntegrityError):
@@ -420,7 +428,7 @@ def test_duplicate_line_in_log_does_not_brick_reopen(tmp_path):
     import sqlite3
 
     store = open_store(tmp_path)
-    log = log_path_for(store._path)
+    log = canonical_for(store._path, "jsonl")
     store.append(fact(message="one"))
     store.close()
 
@@ -468,10 +476,11 @@ def test_out_of_band_sqlite_rows_refuse_rather_than_vanish(tmp_path):
     store.close()
 
     conn = sqlite3.connect(str(tmp_path / "s.db"))
+    ord_val = conn.execute("SELECT COALESCE(MAX(arrival_ordinal), 0) + 1 FROM facts").fetchone()[0]
     conn.execute(
-        "INSERT OR IGNORE INTO facts (id, kind, ts, observer, origin, payload) "
-        "VALUES (?, ?, ?, ?, ?, ?)",
-        ("MERGED", "note", 1.0, "peer", "", "{}"),
+        "INSERT OR IGNORE INTO facts (id, kind, ts, observer, origin, payload, arrival_ordinal, arrival_seq) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, 0)",
+        ("MERGED", "note", 1.0, "peer", "", "{}", ord_val),
     )
     conn.commit()
     conn.close()
@@ -516,7 +525,7 @@ def test_two_open_handles_do_not_brick_the_store(tmp_path):
     a.close()
     b.close()
 
-    assert len(lines(log_path_for(tmp_path / "s.db"))) == 2
+    assert len(lines(canonical_for(tmp_path / "s.db", "jsonl"))) == 2
     assert len(sqlite_facts(tmp_path / "s.db")) == 2
 
     reopened = open_store(tmp_path)  # must not raise
@@ -571,7 +580,7 @@ def test_rebuild_drops_the_rowid_keyed_fts_index(tmp_path):
     conn.commit()
     conn.close()
 
-    log = log_path_for(db)
+    log = canonical_for(db, "jsonl")
     kept = lines(log)[0]
     log.write_text(kept + "\n", encoding="utf-8")  # shrink → forces a rebuild
 

@@ -1,0 +1,94 @@
+/**
+ * Gruel Design System — Utility Classes
+ *
+ * Color utilities for avatar/element backgrounds.
+ * Import after tokens.css.
+ */
+
+/* ===========================================
+   AVATAR COLOR UTILITIES
+   Background + appropriate text color
+   =========================================== */
+
+.bg-botanical {
+  background: var(--botanical);
+  color: var(--on-botanical);
+}
+
+.bg-botanical-light {
+  background: var(--botanical-light);
+  color: var(--on-botanical-light);
+}
+
+.bg-amber {
+  background: var(--amber);
+  color: var(--on-amber);
+}
+
+.bg-rose {
+  background: var(--rose);
+  color: var(--on-rose);
+}
+
+.bg-ink {
+  background: var(--ink);
+  color: var(--on-ink);
+}
+
+.bg-lavender {
+  background: var(--lavender);
+  color: var(--on-lavender);
+}
+
+/* Shorthand color modifiers (for selector compatibility) */
+.botanical { background: var(--botanical); color: var(--on-botanical); }
+.amber { background: var(--amber); color: var(--on-amber); }
+.rose { background: var(--rose); color: var(--on-rose); }
+.ink { background: var(--ink); color: var(--on-ink); }
+.lavender { background: var(--lavender); color: var(--on-lavender); }
+
+/* ===========================================
+   SHADOW UTILITIES
+   =========================================== */
+
+.shadow-avatar {
+  box-shadow: var(--shadow-avatar);
+}
+
+.shadow-avatar-hover {
+  box-shadow: var(--shadow-avatar-hover);
+}
+
+/* ===========================================
+   BORDER UTILITIES
+   =========================================== */
+
+.border-transparent {
+  border: 2px solid transparent;
+}
+
+.border-dashed {
+  border: 2px dashed var(--ink-faint);
+}
+
+/* ===========================================
+   CURSOR UTILITIES
+   =========================================== */
+
+.cursor-pointer {
+  cursor: pointer;
+}
+
+/* ===========================================
+   DISPLAY UTILITIES
+   =========================================== */
+
+.flex-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.circle {
+  border-radius: 50%;
+}

@@ -41,12 +41,18 @@ import math
 __all__ = [
     "FACT_FIELDS",
     "TICK_FIELDS",
+    "TICK_CHAIN_FIELDS",
     "JsonlCodecError",
+    "object_of_fact_row",
+    "object_of_tick_row",
+    "object_of_batch",
     "serialize_fact_row",
     "serialize_tick_row",
     "serialize_batch",
+    "serialize_object",
     "deserialize_row",
     "deserialize_records",
+    "records_from_object",
 ]
 
 
@@ -58,10 +64,13 @@ class JsonlCodecError(ValueError):
 # INSERT statements from these tuples, so a schema column and a log field can
 # never drift apart.
 FACT_FIELDS = ("id", "kind", "ts", "observer", "origin", "payload")
-TICK_FIELDS = (
-    "id", "name", "ts", "since", "origin", "payload",
-    "prev_hash", "window_start", "fact_cursor", "window_hash",
-)
+_TICK_BASE_FIELDS = ("id", "name", "ts", "since", "origin", "payload")
+# The chain columns, named as a group because a consumer that carries a tick
+# ACROSS stores must null them — they are store-local custody — and would
+# otherwise re-count them by hand. The codec owns the COUNT; whether to null
+# them is the consumer's decision, not this module's.
+TICK_CHAIN_FIELDS = ("prev_hash", "window_start", "fact_cursor", "window_hash")
+TICK_FIELDS = (*_TICK_BASE_FIELDS, *TICK_CHAIN_FIELDS)
 _SIGNATURE = "signature"
 
 _NUMERIC = ("ts", "since")
@@ -89,7 +98,7 @@ _SPEC = {
     "tick": _Spec(
         "tick",
         TICK_FIELDS,
-        frozenset(("since", "prev_hash", "window_start", "fact_cursor", "window_hash")),
+        frozenset(("since", *TICK_CHAIN_FIELDS)),
     ),
 }
 
@@ -156,38 +165,63 @@ def _encode_obj(row: tuple, spec: _Spec) -> dict:
     return obj
 
 
-def serialize_fact_row(row: tuple) -> str:
-    """Encode a fact row ``(id, kind, ts, observer, origin, payload[, signature])``."""
-    return _dump(_encode_obj(row, _SPEC["fact"]))
+def object_of_fact_row(row: tuple) -> dict:
+    """A fact row ``(id, kind, ts, observer, origin, payload[, signature])`` as
+    its VALIDATED record object."""
+    return _encode_obj(row, _SPEC["fact"])
 
 
-def serialize_tick_row(row: tuple) -> str:
-    """Encode a tick row (``_TICK_ROW_SQL`` order, signature optional)."""
-    return _dump(_encode_obj(row, _SPEC["tick"]))
+def object_of_tick_row(row: tuple) -> dict:
+    """A tick row (``_TICK_ROW_SQL`` order, signature optional) as its
+    VALIDATED record object."""
+    return _encode_obj(row, _SPEC["tick"])
 
 
-def serialize_batch(rows: list[tuple]) -> str:
-    """Encode a multi-row ceremony as ONE atomic line.
+def object_of_batch(rows: list[tuple]) -> dict:
+    """A multi-row ceremony as ONE atomic record object.
 
     ``rows`` are fact row tuples in emission order. One row collapses to a
-    plain fact line — a 1-row batch would be a second spelling of the same
+    plain fact object — a 1-row batch would be a second spelling of the same
     record (the "signature must be absent, not null" ethos), so the envelope
     exists only where multi-row atomicity does. Zero rows is a caller bug.
 
-    Same both-directions symmetry as the scalar serializers: the built
-    envelope is held to :func:`_validate_batch` before dumping, so a bad row
-    fails at the append site instead of bricking every later open.
+    Same both-directions symmetry as the scalar encoders: the built envelope
+    is held to :func:`_validate_batch`, so a bad row fails at the append
+    site instead of bricking every later open.
     """
     if not rows:
         raise JsonlCodecError("batch requires at least one fact row")
     if len(rows) == 1:
-        return serialize_fact_row(rows[0])
-    obj = {"t": _BATCH, "rows": [_encode_obj(r, _SPEC["fact"]) for r in rows]}
+        return object_of_fact_row(rows[0])
+    obj = {"t": _BATCH, _ROWS: [_encode_obj(r, _SPEC["fact"]) for r in rows]}
     # Structural half only: every row object just came out of _encode_obj,
     # which already ran the field-level _validate — re-running it per row
     # would be the same check twice on the same object.
     _validate_batch(obj, validate_rows=False)
-    return _dump(obj)
+    return obj
+
+
+# The three serializers are their encoders composed with the dump, mirroring
+# the decode side (``deserialize_records`` is the load composed with
+# ``records_from_object``). A consumer that already holds — or wants — the
+# OBJECT calls the encoder directly rather than dumping a line only to parse
+# it straight back; an arrival record's ``body`` is exactly that object.
+
+
+def serialize_fact_row(row: tuple) -> str:
+    """Encode a fact row ``(id, kind, ts, observer, origin, payload[, signature])``."""
+    return _dump(object_of_fact_row(row))
+
+
+def serialize_tick_row(row: tuple) -> str:
+    """Encode a tick row (``_TICK_ROW_SQL`` order, signature optional)."""
+    return _dump(object_of_tick_row(row))
+
+
+def serialize_batch(rows: list[tuple]) -> str:
+    """Encode a multi-row ceremony as ONE atomic line — see
+    :func:`object_of_batch`, whose object this dumps."""
+    return _dump(object_of_batch(rows))
 
 
 def _reject_constant(name: str) -> None:
@@ -343,6 +377,23 @@ def _row_of(obj: dict, spec: _Spec) -> tuple:
     return (*(obj[f] for f in spec.fields), obj.get(_SIGNATURE))
 
 
+def _ordered(obj: dict, spec: _Spec) -> dict:
+    """A VALIDATED record object, rebuilt in canonical field order.
+
+    Same shape :func:`_encode_obj` builds from a row tuple — discriminator,
+    then the spec's fields in sqlite column order, then ``signature`` when
+    the row carries one. Rebuilt rather than re-dumped as-received because
+    key order in a decoded object is whatever its producer happened to use,
+    and :func:`serialize_object` promises the bytes the row serializers
+    produce.
+    """
+    out: dict = {"t": spec.t}
+    out.update((field, obj[field]) for field in spec.fields)
+    if obj.get(_SIGNATURE) is not None:
+        out[_SIGNATURE] = obj[_SIGNATURE]
+    return out
+
+
 def deserialize_row(line: str) -> tuple[str, tuple]:
     """Decode a SINGLE-record line, dispatching on ``"t"``. Returns
     ``(t, row)`` with the row at full arity (7 fact fields / 11 tick fields,
@@ -369,8 +420,30 @@ def deserialize_records(line: str) -> list[tuple[str, tuple]]:
     exactly "this line was a batch"). This is the decode every log consumer
     (replay, catch-up, rebuild, audit) reads through, so batch expansion has
     one spelling.
+
+    Defined as the line decode composed with :func:`records_from_object`,
+    so decoding still has exactly one dispatch.
     """
-    obj = _load(line)
+    return records_from_object(_load(line))
+
+
+def records_from_object(obj: dict) -> list[tuple[str, tuple]]:
+    """:func:`deserialize_records` on an ALREADY-DECODED object.
+
+    An arrival record's ``body`` IS this codec's object for the row it
+    carries, so a consumer holding one has nothing to parse — before this
+    entry existed, ``arrival_store`` re-encoded the body just to hand a
+    string back to the line decoder.
+
+    The SAME validator runs: an object handed in is held to exactly the
+    domain a line is held to. What a line has and an object cannot is a
+    duplicate key, which the decode hook catches; everything downstream of
+    that hook is shared.
+    """
+    if not isinstance(obj, dict):
+        raise JsonlCodecError(
+            f"record must be a JSON object, got {type(obj).__name__}"
+        )
     t = obj.get("t")
     if t == _BATCH:
         _validate_batch(obj)
@@ -381,3 +454,21 @@ def deserialize_records(line: str) -> list[tuple[str, tuple]]:
         raise JsonlCodecError(f"unknown record discriminator t={t!r}")
     _validate(obj, spec)
     return [(spec.t, _row_of(obj, spec))]
+
+
+def serialize_object(obj: dict) -> str:
+    """Encode an ALREADY-DECODED record object as one canonical line.
+
+    Validated through :func:`records_from_object` — the same domain a line
+    is held to — then dumped in canonical field order, so the result is
+    byte-identical to the ``serialize_*`` call that produced the object.
+    Field order is REBUILT rather than inherited: a decoded object's key
+    order is its producer's, and this function's contract is about the
+    codec's bytes, not the caller's dict.
+    """
+    records_from_object(obj)
+    t = obj["t"]
+    if t == _BATCH:
+        fact = _SPEC["fact"]
+        return _dump({"t": _BATCH, _ROWS: [_ordered(e, fact) for e in obj[_ROWS]]})
+    return _dump(_ordered(obj, _SPEC[t]))

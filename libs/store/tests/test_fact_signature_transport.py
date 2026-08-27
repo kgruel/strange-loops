@@ -124,14 +124,13 @@ class TestRebirthCarriesSignature:
         """Content-only commitment pays off: re-minting the id leaves the
         authorship signature valid, so rebirth carries it verbatim."""
         src, tgt = tmp_path / "src.db", tmp_path / "reborn.db"
-        # uuid4-style id forces migration
         conn_ids = make_signed_store(src)
         conn = sqlite3.connect(str(src))
         conn.execute(
-            "INSERT INTO facts (id, kind, ts, observer, origin, payload, signature) "
-            "VALUES (?,?,?,?,?,?,?)",
+            "INSERT INTO facts (id, kind, ts, observer, origin, payload, signature, arrival_ordinal, arrival_seq) "
+            "VALUES (?,?,?,?,?,?,?,?,?)",
             ("deadbeef-0000-4000-8000-000000000000", "note", 50.0, "keyed",
-             "", '{"body": "uuid era"}', "carried-sig"),
+             "", '{"body": "uuid era"}', "carried-sig", 3, 0),
         )
         conn.commit()
         conn.close()

@@ -229,8 +229,13 @@ def _chain_head(conn: sqlite3.Connection) -> str | None:
     from engine import tick_row_hash
 
     cols = _tick_columns(conn)
+    order_sql = (
+        "ORDER BY arrival_ordinal DESC, arrival_seq DESC"
+        if "arrival_ordinal" in cols
+        else "ORDER BY rowid DESC"
+    )
     row = conn.execute(
-        f"SELECT {', '.join(cols)} FROM ticks ORDER BY rowid DESC LIMIT 1"
+        f"SELECT {', '.join(cols)} FROM ticks {order_sql} LIMIT 1"
     ).fetchone()
     if row is None:
         return None
@@ -363,11 +368,17 @@ def rebirth_store(
     Raises:
         FileNotFoundError: If source does not exist.
         FileExistsError: If target already exists.
+        engine.arrival_store.ArrivalCanonicalUnsupported: If the target does
+            not exist but its ``.arrival`` sibling does — see below.
     """
     source = Path(source)
     target = Path(target)
     if not source.exists():
         raise FileNotFoundError(f"Source store not found: {source}")
+    # `_create` self-enforces the arrival-custody guard (invariant 15) at
+    # the write, so a rebirth refused for a live log's derived index has
+    # already paid the transform pass — acceptable on an error path in
+    # exchange for a single enforcement point.
     transform = transform if transform is not None else identity()
     name = source_name or source.stem
 
@@ -413,20 +424,25 @@ def rebirth_store(
 
     dst = _create(target)
     try:
+        from engine.sqlite_store import ensure_coordinate_schema
+
+        ensure_coordinate_schema(dst, mode="mirrored")
         # Fact signatures ride VERBATIM (never re-signed — see FactRow);
         # the spine already dropped any signature whose content changed.
         dst.executemany(
-            "INSERT INTO facts (id, kind, ts, observer, origin, payload, signature) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            [(r.id, r.kind, r.ts, r.observer, r.origin, r.payload, r.signature)
-             for r in rows],
+            "INSERT INTO facts (id, kind, ts, observer, origin, payload, signature, arrival_ordinal, arrival_seq) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [(r.id, r.kind, r.ts, r.observer, r.origin, r.payload, r.signature, idx + 1, 0)
+             for idx, r in enumerate(rows)],
         )
+        receipt_ord = len(rows) + 1
         dst.execute(
-            "INSERT INTO facts (id, kind, ts, observer, origin, payload) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
+            "INSERT INTO facts (id, kind, ts, observer, origin, payload, arrival_ordinal, arrival_seq) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (receipt_id, "rebirth", now.timestamp(), observer, "rebirth",
              json.dumps(receipt_payload, sort_keys=True,
-                        separators=(",", ":"))),
+                        separators=(",", ":")),
+             receipt_ord, 0),
         )
         dst.commit()
     finally:
@@ -542,8 +558,14 @@ def verify_rebirth(
 
     tgt = _open(target, read_only=True)
     try:
+        fcols = {r[1] for r in tgt.execute("PRAGMA table_info(facts)")}
+        order_sql = (
+            "ORDER BY arrival_ordinal DESC, arrival_seq DESC"
+            if "arrival_ordinal" in fcols
+            else "ORDER BY rowid DESC"
+        )
         receipt_row = tgt.execute(
-            "SELECT id, kind, payload FROM facts ORDER BY rowid DESC LIMIT 1"
+            f"SELECT id, kind, payload FROM facts {order_sql} LIMIT 1"
         ).fetchone()
         receipt_found = False
         receipt: dict = {}

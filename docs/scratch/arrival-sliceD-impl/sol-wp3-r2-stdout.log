@@ -1,0 +1,3 @@
+PASS — SOL-WP3-01 is closed as intended, sweep included.
+
+`live_edge` now agrees with `verify_chain` on the arrival-coordinate boundary. The inspected sweep site, `slice.py`, correctly preserves source arrival order with a legacy-schema fallback. Both focused behavioral ratchets pass.

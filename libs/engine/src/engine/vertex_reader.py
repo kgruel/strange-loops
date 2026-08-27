@@ -22,6 +22,16 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from atoms import (
+    ENVELOPE_KEYS,
+    Arrival,
+    ByKey,
+    Ordering,
+    OrderingError,
+    resolve_payload_key,
+    totalize,
+)
+
 from .declaration import (
     decl_lineage_and_head_on,
     declaration_generation,
@@ -344,8 +354,105 @@ def _open_combined(store_paths: list[Path]) -> tuple[sqlite3.Connection, list[st
     return conn, aliases
 
 
+# Combined-read row shape: (id, kind, ts, observer, origin, payload, rowid).
+_ROW_INDEX = {"id": 0, "kind": 1, "ts": 2, "observer": 3, "origin": 4, "payload": 5}
+
+#: The ENVELOPE keys, positioned in the combined-read row. Derived from the
+#: atoms family rule rather than restated, so this row-shaped surface cannot
+#: drift from the mapping-shaped one (:func:`atoms.resolve_key_field`): only
+#: ``ts`` and ``id`` are envelope-resolved. ``kind``/``observer``/``origin``
+#: are stored columns but NOT key candidates — they resolve against the
+#: payload like any other declared key, which almost never carries them, so
+#: their projection is empty by non-membership rather than a grouping of the
+#: read by its columns.
+#:
+#: ts is a sqlite REAL column, so column-backed ts values are always float —
+#: the atoms strict type-identity check never sees an int/float mix here.
+_ROW_ENVELOPE_COLUMNS = {field: _ROW_INDEX[field] for field in ENVELOPE_KEYS}
+
+
+def _row_field(row: tuple, field: str) -> Any:
+    """Read a declared ordering key off a combined-read row.
+
+    The row-shaped spelling of :func:`atoms.resolve_key_field`: the envelope
+    keys are read straight off the tuple, anything else is a flat payload
+    field and costs a JSON parse. The default orderings (``Arrival()``,
+    ``ByKey('ts')``) are envelope-only and never reach the parse.
+
+    The payload arm defers to :func:`atoms.resolve_payload_key` rather than
+    calling ``.get()`` itself, so a non-mapping payload is the same missing-K
+    non-member here as on the mapping-shaped surface — one definition, not two
+    spellings that can disagree.
+    """
+    index = _ROW_ENVELOPE_COLUMNS.get(field)
+    if index is not None:
+        return row[index]
+    return resolve_payload_key(json.loads(row[5]), field)
+
+
+def _row_id(row: tuple) -> str:
+    return row[0]
+
+
+def resolve_ordering(ordering: Ordering | None, *, single_store: bool) -> Ordering:
+    """Resolve the declared read ordering, applying the Q2 rule.
+
+    Single store: ``Arrival()`` by default — the substrate's native order,
+    which is also the fold axis. Aggregate: ``ByKey('ts')`` by default, the
+    event-time read lens. ``Arrival()`` on an aggregate is REFUSED.
+
+    Raises:
+        OrderingError: ``Arrival()`` declared on an aggregate read.
+    """
+    if ordering is None:
+        return Arrival() if single_store else ByKey("ts")
+    if not single_store and isinstance(ordering, Arrival):
+        raise OrderingError(
+            "Arrival() is not available on an aggregate read: arrival ordinals are "
+            "dense per-log, so a combined view of several stores has no cross-store "
+            "arrival total order. Declare ByKey(field) instead — e.g. ByKey('ts'), "
+            "the aggregate default."
+        )
+    return ordering
+
+
+def _fetch_combined_rows(
+    conn: sqlite3.Connection,
+    aliases: list[str],
+    until_ts: float | None,
+    ordering: Ordering,
+) -> list[tuple]:
+    """All fact rows across the attached stores, ready for ``ordering``.
+
+    Under ``Arrival()`` the rows are put in the store's native ARRIVAL order
+    (rowid ascending) here, because yielding that order is the store's job and
+    ``totalize`` will not synthesize it. ``Arrival()`` is reachable only for a
+    single store — :func:`resolve_ordering` refuses it on an aggregate, where
+    rowid is per-store and no native total order exists.
+
+    Under ``ByKey(K)`` the rows come back exactly as read: ``totalize`` sorts
+    on ``(K, id)``, and ``id`` is unique, so the key is total and the input
+    order cannot reach the output. Sorting first would be work discarded.
+    """
+    ts_clause = " WHERE ts <= ?" if until_ts is not None else ""
+    selects = [
+        f"SELECT id, kind, ts, observer, origin, payload, rowid "
+        f"FROM {'[' + a + '].' if a != 'main' else ''}facts{ts_clause}"
+        for a in aliases
+    ]
+    sql = " UNION ALL ".join(selects)
+    params = (until_ts,) * len(aliases) if until_ts is not None else ()
+    rows = conn.execute(sql, params).fetchall()
+    # Sort in Python — avoids a SQLite index scan for the ORDER BY, which
+    # causes random I/O (~14ms vs ~1ms for unsorted read).
+    if isinstance(ordering, Arrival):
+        rows.sort(key=lambda r: r[6])
+    return rows
+
+
 def _combined_read(
     ast: Any, vertex_path: Path, specs: dict, *, observer: str | None = None,
+    ordering: Ordering | None = None,
     return_payloads: bool = False,
     until_ts: float | None = None,
 ) -> "dict[str, dict[str, Any]] | tuple[dict[str, dict[str, Any]], dict[str, list[dict]]]":
@@ -355,6 +462,10 @@ def _combined_read(
     then groups by kind and replays through specs. Single query avoids
     the SQLite cold-start penalty (~10ms) that would hit the first of
     N per-kind queries.
+
+    ``ordering`` declares the replay order. ``None`` resolves per
+    :func:`resolve_ordering` — ``Arrival()`` for a single store, ``ByKey('ts')``
+    for an aggregate, and ``Arrival()`` on an aggregate is refused.
 
     When ``return_payloads=True``, returns ``(raw_state, kind_payloads)``
     so callers can use the per-kind payload lists for retain_facts /
@@ -367,6 +478,16 @@ def _combined_read(
     marker) — only the facts axis is cut by the cursor.
     """
     store_paths = _resolve_stores(ast, vertex_path)
+
+    # Resolve BEFORE the empty-members return: whether a declared ordering fits
+    # this read is a property of the DECLARATION, not of how many members
+    # happen to resolve right now. An aggregate whose members are all currently
+    # missing still has no cross-store arrival axis, so Arrival() is refused
+    # there exactly as it is once the members come back — otherwise the same
+    # declaration would start refusing only after enough files appeared, and
+    # the refusal would be availability-dependent.
+    ordering = resolve_ordering(ordering, single_store=len(store_paths) == 1)
+
     if not store_paths:
         empty_raw = {kind: spec.initial_state() for kind, spec in specs.items()}
         if return_payloads:
@@ -375,35 +496,22 @@ def _combined_read(
 
     conn, aliases = _open_combined(store_paths)
     try:
-        # Single query for all facts, fold-replay-ordered.
+        # Single query for all facts, then ordered by the DECLARED ordering.
         #
-        # Single store: receipt order (rowid ASC) — the ratified fold axis,
-        # matching StoreReader.facts_by_kind.
+        # Under Arrival() the fetch's native order stands: receipt order, the
+        # ratified fold axis, matching StoreReader.facts_by_kind. Under
+        # ByKey(K) the fold is a lens projection, not a receipt replay, and
+        # may disagree with an Arrival fold of the same facts — which is why
+        # a combined read (no cross-store arrival axis) is ByKey by rule.
         #
-        # Multiple stores: rowid is PER-STORE, so a combined view has no
-        # receipt axis to fold on. These reads fall back to the explicit
-        # (ts, id) READ LENS ordering — same rule as facts_in_range below.
-        # A combined fold is therefore a lens projection, not a receipt
-        # replay, and may disagree with a single-store fold of the same
-        # facts. Named interim state pending the multi-store receipt-order
-        # ruling.
-        single_store = len(aliases) == 1
-        ts_clause = " WHERE ts <= ?" if until_ts is not None else ""
-        selects = [
-            f"SELECT id, kind, ts, observer, origin, payload, rowid "
-            f"FROM {'[' + a + '].' if a != 'main' else ''}facts{ts_clause}"
-            for a in aliases
-        ]
-        sql = " UNION ALL ".join(selects)
-        params = (until_ts,) * len(aliases) if until_ts is not None else ()
-
-        rows = conn.execute(sql, params).fetchall()
-        # Sort in Python — avoids a SQLite index scan for the ORDER BY,
-        # which causes random I/O (~14ms vs ~1ms for unsorted read).
-        if single_store:
-            rows.sort(key=lambda r: r[6])
-        else:
-            rows.sort(key=lambda r: (r[2], r[0]))
+        # ByKey(K) on a payload field also drops facts lacking K from the
+        # fold INPUT: a key names what it projects, and the caller named K.
+        rows = totalize(
+            _fetch_combined_rows(conn, aliases, until_ts, ordering),
+            ordering,
+            get_field=_row_field,
+            get_id=_row_id,
+        )
 
         # Build kind → spec lookup, including sub-kind (dot-prefix) routing.
         # "thread.foo" → "thread" if "thread" is a spec kind.
@@ -1077,9 +1185,9 @@ def vertex_fold(
 
     - ``at`` (a :class:`~engine.witness.WitnessPosition`, 0.8.0
       fold-state-as-of) reconstructs the fold at a witness position: the
-      prefix ``rowid <= at.rowid`` is selected, ontology is resolved **from
+      prefix ``arrival_ordinal <= at.ordinal`` is selected, ontology is resolved **from
       the same prefix** (equal cursors ⇒ one position for selection and
-      ontology), and facts are replayed in receipt order (``rowid`` ascending).
+      ontology), and facts are replayed in arrival order (``arrival_ordinal, arrival_seq`` ascending).
       This is the reference full reconstruction — the oracle the handle's
       incremental path is checked against — never an incremental application of
       an interval. Returns a
@@ -1191,7 +1299,7 @@ def vertex_fold(
             from .store_reader import StoreReader  # deferred: not needed for combine-only
             from atoms.fold import Upsert
 
-            at_rowid = at.rowid if at is not None else None
+            at_ordinal = at.ordinal if at is not None else None
             # ONE snapshot across every read that contributes to this fold
             # (sol HIGH r2, confirmed P2). The per-kind reads, the kind stats,
             # and live_edge() were separate autocommit statements: live_edge()
@@ -1212,7 +1320,7 @@ def vertex_fold(
             with StoreReader(store_path) as reader, reader.snapshot():
                 raw = {}
                 for k, spec in full_specs.items():
-                    facts = reader.facts_by_kind(k, at_rowid=at_rowid, until_ts=as_of)
+                    facts = reader.facts_by_kind(k, at_ordinal=at_ordinal, until_ts=as_of)
                     if observer:
                         facts = [f for f in facts if observer_matches(f["observer"], observer)]
                     payloads = []
@@ -1271,7 +1379,7 @@ def vertex_fold(
                 # reserved-namespace kind on demand: an explicit ask overrides
                 # the ambient default everywhere else in this module too.
                 if kind is not None and kind not in full_specs:
-                    facts = reader.facts_by_kind(kind, at_rowid=at_rowid, until_ts=as_of)
+                    facts = reader.facts_by_kind(kind, at_ordinal=at_ordinal, until_ts=as_of)
                     if observer:
                         facts = [f for f in facts if observer_matches(f["observer"], observer)]
                     payloads = []
@@ -1479,7 +1587,7 @@ def vertex_facts(
       Only store-resolution and the reserved-namespace exclusion ride it; the
       fact window stays ``since_ts..until_ts``.
     - ``at`` (a :class:`~engine.witness.WitnessPosition`, 0.8.0 cursor) caps the
-      result to the witness prefix ``rowid <= at.rowid`` AND resolves ontology
+      result to the witness prefix ``arrival_ordinal <= at.ordinal`` AND resolves ontology
       from that prefix — the facts the store had *received* at the position,
       inside the time window. Per-store only: refused on aggregates
       (:class:`~engine.witness.WitnessAggregateUnsupported`) — witness order is
@@ -1534,7 +1642,7 @@ def vertex_facts(
                 facts = reader.facts_between(
                     since_ts, until_ts, kind=kind,
                     include_internal=include_internal,
-                    at_rowid=at.rowid if at is not None else None,
+                    at_ordinal=at.ordinal if at is not None else None,
                 )
 
     if observer:
@@ -1561,7 +1669,7 @@ def vertex_query_facts(
     :class:`~engine.store_reader.FactPage` (items + ``next`` cursor +
     truncation) from ONE read snapshot. Cursors are 0.8.0
     :class:`~engine.witness.WitnessPosition` values; ordering is the witness
-    (append/rowid) axis — ids are never ordered (A3).
+    (arrival coordinate) axis — ids are never ordered (A3).
 
     Combine/discover aggregates are REFUSED with the typed
     :class:`~engine.witness.WitnessAggregateUnsupported`: witness order is

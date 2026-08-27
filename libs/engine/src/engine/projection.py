@@ -35,7 +35,14 @@ class Projection(Generic[S, T]):
     def __init__(self, initial: S, *, fold: Callable[[S, T], S] | None = None):
         self._state: S = initial
         self._version: int = 0
-        self.cursor: int = 0
+        # Store position. Assigned ONLY from what a store hands back
+        # (since_with_cursor / since); never synthesised locally. A
+        # coordinate is the store's to mint — fabricating (ordinal+1, seq)
+        # would name a row that may not exist.
+        self.cursor: tuple[int, int] | int = 0
+        # How many events this projection has folded, by any path. The
+        # count is the projection's own; loop boundary accounting reads it.
+        self.events_folded: int = 0
         self._fold: Callable[[S, T], S] | None = fold
 
     @property
@@ -66,14 +73,16 @@ class Projection(Generic[S, T]):
     def fold_one(self, event: T) -> None:
         """Fold a single event into state (synchronous).
 
-        Applies the fold, bumps version on identity change, increments cursor.
+        Applies the fold, bumps version on identity change, counts the event.
         This is the core fold step — consume() and advance() delegate here.
+        The cursor is untouched: a folded event says nothing about where the
+        store's coordinate now sits.
         """
         new_state = self.apply(self._state, event)
         if new_state is not self._state:
             self._state = new_state
             self._version += 1
-        self.cursor += 1
+        self.events_folded += 1
 
     def fold_one_mut(self, event: T, fns: tuple) -> None:
         """Fold a single event in place using pre-built fold functions.
@@ -86,26 +95,45 @@ class Projection(Generic[S, T]):
         for fn in fns:
             fn(state, event)
         self._version += 1
-        self.cursor += 1
+        self.events_folded += 1
 
     async def consume(self, event: T) -> None:
         """Consumer protocol: fold a single event into state."""
         self.fold_one(event)
 
     def reset(self, state: S) -> None:
-        """Reset to a new state. Bumps version. Cursor unchanged."""
+        """Reset to a new state. Bumps version. Cursor and count unchanged."""
         self._state = state
         self._version += 1
 
     def advance(self, store: "EventStore[T]") -> None:
         """Process all new events since last cursor, update state once."""
+        if hasattr(store, "since_with_cursor"):
+            items = store.since_with_cursor(self.cursor)
+            if not items:
+                return
+            current = self._state
+            for event, next_cursor in items:
+                current = self.apply(current, event)
+                self.cursor = next_cursor
+                self.events_folded += 1
+            if current is not self._state:
+                self._state = current
+                self._version += 1
+            return
+
         new_events = store.since(self.cursor)
         if not new_events:
             return
         current = self._state
         for event in new_events:
             current = self.apply(current, event)
-            self.cursor += 1
+            # since(n) on an int-cursor store IS index arithmetic — that is
+            # the store's own contract, so advancing by one per consumed
+            # event is store-derived, not synthesised.
+            if isinstance(self.cursor, int):
+                self.cursor += 1
+            self.events_folded += 1
         if current is not self._state:
             self._state = current
             self._version += 1

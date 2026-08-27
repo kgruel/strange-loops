@@ -289,15 +289,45 @@ COMMON_ORIGINS = [
 ]
 
 
+#: Kind prefix reserved for the substrate's own declaration records. A store
+#: acquires these through a CEREMONY (genesis, adopt), never through an
+#: ordinary append.
+RESERVED_KIND_PREFIX = "_decl."
+
+
+def is_appendable_kind(kind: str) -> bool:
+    """Is ``kind`` one a caller may APPEND to a store?
+
+    False for the reserved ceremony prefix. Named rather than inlined so the
+    rule is directly assertable: rediscovering the generated counter-example
+    depends on which modules hypothesis harvested constants from, so the
+    predicate itself is the part a test can hold deterministically.
+    """
+    return not kind.startswith(RESERVED_KIND_PREFIX)
+
+
 def kinds() -> st.SearchStrategy[str]:
-    """Fact kind strings."""
+    """Appendable fact-surface kind strings.
+
+    Excludes the reserved ``_decl.`` prefix, on both arms. A bare append of a
+    ceremony kind builds a store state no ceremony can produce — an appended
+    ``_decl.genesis`` with no ``own_lineage`` marker is an unadopted lineage,
+    which readers REFUSE by design — so a property test fed one is exercising
+    a shape the substrate never emits, not a bug. The free-text arm needs the
+    filter as much as the sampled one: hypothesis seeds text generation from
+    constants harvested out of the source under test, and ``'_decl.genesis'``
+    is among them.
+
+    Scoping the claim, not widening a detector: this strategy generates what a
+    caller may APPEND. Ceremony kinds are reachable through their ceremonies.
+    """
     return st.one_of(
         st.sampled_from(COMMON_KINDS),
         st.text(
             alphabet=st.characters(blacklist_categories=("Cs",)),
             min_size=1,
             max_size=30,
-        ),
+        ).filter(is_appendable_kind),
     )
 
 

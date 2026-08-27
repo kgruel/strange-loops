@@ -399,6 +399,201 @@ def _assert_hits(result: Any) -> None:
 
 
 # --------------------------------------------------------------------------
+# Layer: arrival substrate (cut C pre-ship characterization)
+# --------------------------------------------------------------------------
+
+
+def arrival_available() -> bool:
+    """Whether the arrival surfaces this arm measures exist on this checkout.
+
+    Same posture as `sdk_available`: probe the symbols, not the package name,
+    so an arm recorded on a pre-arrival checkout simply lacks these probes
+    instead of failing to import at all.
+    """
+    try:
+        from atoms import Arrival, ByKey  # noqa: F401
+        from engine.arrival import ArrivalLog  # noqa: F401
+        from engine.arrival_store import ArrivalStore  # noqa: F401
+        from store.derived_log_merge import merge_derived_log  # noqa: F401
+    except ImportError:
+        return False
+    return True
+
+
+# A shape-valid signer and founding key, deterministic — the ledger measures
+# the substrate, not signing (same posture as BenchCredentials).
+def _stub_key() -> str:
+    import base64
+
+    return base64.b64encode(b"k" * 32).decode()
+
+
+def _stub_sign(observer: str, commitment: str) -> str:
+    return "sig:" + hashlib.sha256(f"{observer}/{commitment}".encode()).hexdigest()
+
+
+def _ordered_probes(store_path: Path, depth: int) -> list[Sample]:
+    """`StoreReader.ordered` under each declared Ordering, against `depth` facts.
+
+    Three arms, one fixture. `Arrival()` is the no-sort baseline (rowid scan);
+    `ByKey('ts')` orders on the envelope column (no JSON parse); `ByKey('index')`
+    orders on a payload key every fixture fact carries — the delta against the
+    'ts' arm at the same depth IS the payload-parse cost, and that intra-arm
+    comparison is legitimate where cross-sitting ones are not.
+
+    Every arm asserts the returned count: missing-K is non-membership, so a
+    fixture that dropped the key would measure a very fast nothing.
+    """
+    from atoms import Arrival, ByKey
+
+    reader = StoreReader(store_path)
+    return [
+        measure(
+            "arrival_ordered_arrival",
+            "arrival",
+            depth,
+            lambda: _assert_len(reader.ordered(depth, Arrival()), depth),
+        ),
+        measure(
+            "arrival_ordered_bykey_ts",
+            "arrival",
+            depth,
+            lambda: _assert_len(reader.ordered(depth, ByKey("ts")), depth),
+        ),
+        measure(
+            "arrival_ordered_bykey_payload",
+            "arrival",
+            depth,
+            lambda: _assert_len(reader.ordered(depth, ByKey("index")), depth),
+        ),
+    ]
+
+
+def _cas_head_probe(tmpdir: Path, depth: int) -> Sample:
+    """`declaration_head()` on an ArrivalStore whose log carries `depth` facts.
+
+    This is the CAS-token read the edit ceremony pays (twice per ceremony).
+    The design accepts a forward log walk here — "ceremonies are rare" — and
+    ruling 4 defers any index to a benchmark's justification. This is that
+    benchmark: the curve says what the walk costs at depth, so the acceptance
+    is a measured trade instead of a hopeful one.
+
+    The store is opened with a genesis (the walk returns None without one, and
+    a None head is a broken probe, not a fast one).
+    """
+    from atoms import Fact as AtomsFact
+    from engine.arrival import ArrivalLog
+    from engine.arrival_store import ArrivalStore
+    from lang import parse_vertex
+    from lang.document import vertex_to_documents
+
+    store_path = tmpdir / "cas.db"
+    log_path = tmpdir / "cas.arrival"
+    ArrivalLog.mint(log_path, observer="ledger", signer=_stub_sign, key=_stub_key())
+    src = 'name "ledger"\nstore "./cas.arrival"\nloops {\n  note { fold { items "collect" 100 } }\n}\n'
+    store = ArrivalStore(
+        path=store_path,
+        serialize=lambda f: f.to_dict(),
+        deserialize=AtomsFact.from_dict,
+        fact_signer=_stub_sign,
+    )
+    try:
+        store.absorb_genesis(
+            [d.as_json() for d in vertex_to_documents(parse_vertex(src))],
+            observer="ledger",
+            fact_signer=_stub_sign,
+        )
+        for i in range(depth):
+            store.append(_fact(i))
+
+        def walk() -> None:
+            if store.declaration_head() is None:
+                raise ProbeError("declaration_head returned None on an opened lineage")
+
+        return measure("arrival_cas_head_walk", "arrival", depth, walk)
+    finally:
+        store.close()
+
+
+def _merge_probe(tmpdir: Path, depth: int) -> Sample:
+    """`merge_derived_log` of two branches, `depth` shared + depth/2 unique each.
+
+    The driver reads three line files, unions by row id, refuses on
+    contradiction, and writes byte-sorted output — expect linear in total
+    lines. A superlinear curve here blocks ship: the driver runs inside real
+    `git merge` invocations.
+
+    `out=` keeps the pristine fixtures pristine, so every sample merges the
+    same inputs instead of an already-merged accumulation.
+    """
+    from engine.arrival import ArrivalLog
+    from engine.arrival_projection import write_derived_log
+    from store.derived_log_merge import merge_derived_log
+
+    def _row(ident: str, index: int) -> dict:
+        return {
+            "t": "fact",
+            "id": ident,
+            "kind": "note",
+            "ts": 1_700_000_000.0 + index,
+            "observer": "ledger",
+            "origin": "ledger",
+            "payload": json.dumps({"index": index}),
+        }
+
+    def _log_with(path: Path, ids: list[tuple[str, int]]) -> Path:
+        log = ArrivalLog.mint(
+            path, observer="ledger", signer=_stub_sign, key=_stub_key()
+        )
+        for ident, index in ids:
+            log.append("fact", _row(ident, index), observer="ledger")
+        write_derived_log(path)
+        return path.with_suffix(".jsonl")
+
+    def _ident(tag: str, i: int) -> str:
+        return f"01{tag}{i:023d}"[:26]
+
+    half = max(1, depth // 2)
+    shared = [(_ident("S", i), i) for i in range(depth)]
+    ours_only = [(_ident("A", i), depth + i) for i in range(half)]
+    theirs_only = [(_ident("B", i), depth + half + i) for i in range(half)]
+
+    base = _log_with(tmpdir / "base.arrival", shared)
+    ours = _log_with(tmpdir / "ours.arrival", shared + ours_only)
+    theirs = _log_with(tmpdir / "theirs.arrival", shared + theirs_only)
+    out = tmpdir / "merged.jsonl"
+    expected = depth + 2 * half
+
+    def one_merge() -> None:
+        result = merge_derived_log(base, ours, theirs, out=out)
+        if result.lines != expected:
+            raise ProbeError(f"merge produced {result.lines} lines, expected {expected}")
+
+    return measure("arrival_merge_regen", "arrival", depth, one_merge)
+
+
+def probe_arrival(depth: int) -> list[Sample]:
+    """The cut C surfaces, characterized at `depth` — the pre-ship benchmark.
+
+    Four receipted families: ordered() under each Ordering, the payload-key
+    parse cost (the bykey_payload vs bykey_ts delta), the CAS head walk, and
+    the derived-log merge driver. Scoped to the receipted item, no wider.
+    """
+    samples: list[Sample] = []
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp = Path(tmpdir)
+        ordered_path = tmp / "ordered.db"
+        store = _new_store(ordered_path)
+        for i in range(depth):
+            store.append(_fact(i))
+        store.close()
+        samples.extend(_ordered_probes(ordered_path, depth))
+        samples.append(_cas_head_probe(tmp, depth))
+        samples.append(_merge_probe(tmp, depth))
+    return samples
+
+
+# --------------------------------------------------------------------------
 # Layer: CLI cold start (depth-independent)
 # --------------------------------------------------------------------------
 
@@ -504,6 +699,7 @@ def run_arm(
     part of the curve you can still trust.
     """
     include_sdk = sdk_available()
+    include_arrival = arrival_available()
     samples: list[Sample] = []
     environment = capture_environment()
 
@@ -537,6 +733,9 @@ def run_arm(
         samples.extend(probe_store(depth))
         print(f"  engine{'+sdk' if include_sdk else ''} layers @ depth {depth:,} ...", flush=True)
         samples.extend(probe_vertex_layers(depth, include_sdk))
+        if include_arrival:
+            print(f"  arrival layer @ depth {depth:,} ...", flush=True)
+            samples.extend(probe_arrival(depth))
         completed.append(depth)
         flush(completed)
         print(f"    depth {depth:,} done in {time.perf_counter() - started:.1f}s", flush=True)

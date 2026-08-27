@@ -1,0 +1,294 @@
+"""Ordering — the declared read order for a stream of records.
+
+Ordering is DECLARED, never inferred. Two variants:
+
+- ``Arrival()`` — the substrate's native per-store order. The store yields it;
+  this module never synthesizes it from record fields.
+- ``ByKey(field)`` — a projection ordered by one declared key, with the record
+  id as tie-break only.
+
+``totalize()`` is the ONLY definition of the sort key, and
+``resolve_key_field()`` the ONLY definition of the key FAMILY rule (which keys
+come from the envelope, which from the payload). Readers (StoreReader, the
+combined read, the conformance lens generator and its runner) import them
+rather than growing near-copies of the same ``sort(key=...)`` line or the same
+``if field in ("ts", "id")`` branch.
+"""
+
+from __future__ import annotations
+
+import math
+from collections.abc import Callable, Iterable, Mapping
+from dataclasses import dataclass
+from typing import Any, TypeVar
+
+
+class OrderingError(Exception):
+    """Raised when records cannot be ordered under the declared Ordering.
+
+    A declaration error against the data — mixed key types under one declared
+    key, a ``NaN`` on either side of the ``(K, id)`` sort key, or sort-key
+    elements that do not compare — not something a comparator may paper over
+    with a coercion.
+
+    The sort key is ``(K, id)``, so the non-comparable element may be EITHER
+    half: a raise here does not by itself blame the declared key. The runtime
+    message names which.
+    """
+
+    pass
+
+
+@dataclass(frozen=True)
+class Arrival:
+    """The substrate's native per-store order.
+
+    Arrival ordinals are dense PER-LOG, so this names an order the store
+    already yields; ``totalize`` returns the records as given, untouched. It
+    is not expressible across a combined view of several stores.
+    """
+
+
+@dataclass(frozen=True)
+class ByKey:
+    """Order by one declared key, id ascending as tie-break.
+
+    Where the key resolves is :func:`resolve_key_field`'s ruling, not this
+    dataclass's: ``ts`` and ``id`` against the record envelope, every other
+    key against the flat payload.
+
+    Attributes:
+        field: The declared key name. Dotted paths are not this cut.
+
+    Example:
+        ByKey(field="ts")
+    """
+
+    field: str
+
+
+Ordering = Arrival | ByKey
+
+R = TypeVar("R")
+
+
+def is_suffix_stable(ordering: Ordering) -> bool:
+    """Does appending a record extend this projection at its END?
+
+    A projection is suffix-stable when a newly appended record can only land
+    after every record already in it. `Arrival()` is: the substrate's native
+    order IS append order, so what arrives later sorts later, always.
+
+    `ByKey(K)` is NOT. A record's position is its key value, and a record
+    arriving now may carry any key — so an append is an INSERTION into the
+    middle of the projection, not an extension of its tail.
+
+    Consumers that hold a result computed over a prefix and want to extend it
+    with the newly arrived records — rather than recomputing over the whole
+    history — are sound only over a suffix-stable ordering. Engine's
+    incremental fold path is the consumer; this predicate is the taxonomy
+    fact it dispatches on.
+
+    Raises:
+        OrderingError: Unknown `Ordering` variant. A new variant must be
+            RULED suffix-stable or not, never defaulted.
+    """
+    match ordering:
+        case Arrival():
+            return True
+        case ByKey():
+            return False
+        case _:
+            raise OrderingError(f"unknown Ordering variant: {ordering!r}")
+
+
+#: Declared keys that resolve against the record ENVELOPE rather than the
+#: payload. Every other key is a flat payload field — including ``kind``,
+#: ``observer`` and ``origin``, which are stored columns but not key
+#: candidates on any surface.
+ENVELOPE_KEYS = ("ts", "id")
+
+
+def resolve_key_field(record: Mapping[str, Any], field: str, /) -> Any:
+    """Resolve a declared ordering key against an envelope+payload record.
+
+    The FAMILY RULE, one definition for every surface that reads facts as
+    ``{"id", "kind", "ts", "observer", "origin", "payload"}`` mappings:
+    ``ts`` and ``id`` come from the envelope, every other key from the flat
+    payload. A payload field named ``ts`` or ``id`` NEVER shadows the
+    envelope — one key, one source, so the same declaration cannot mean two
+    things depending on what a payload happens to carry.
+
+    ``ts`` is column-backed as a storage detail, not a change of semantics;
+    a surface that hands ``ts`` over as a ``datetime`` rather than the raw
+    REAL orders identically (the conversion is monotone) and stays
+    single-typed, so the strict type-identity check in :func:`totalize`
+    cannot fire on it.
+
+    Dotted paths are not in this schema. Missing → ``None``, which
+    :func:`totalize` reads as non-membership.
+    """
+    if field in ENVELOPE_KEYS:
+        return record.get(field)
+    return resolve_payload_key(record.get("payload"), field)
+
+
+def resolve_payload_key(payload: Any, field: str, /) -> Any:
+    """Resolve a non-envelope declared key against a fact payload.
+
+    The payload half of the family rule, split out so the row-shaped combined
+    read (which already holds the parsed payload) resolves through the SAME
+    definition rather than repeating ``.get()`` on its own.
+
+    A payload need not be a mapping — ``Fact`` permits any JSON value — and a
+    non-mapping payload has no fields at all. It is therefore a missing-K
+    NON-MEMBER of every payload-key projection, exactly as an absent field is:
+    ``None``, which :func:`totalize` reads as non-membership. Exclusion by
+    declaration, not a crash and not a coercion.
+    """
+    if not isinstance(payload, Mapping):
+        return None
+    return payload.get(field)
+
+
+def _default_get_field(record: Any, field: str) -> Any:
+    if isinstance(record, Mapping):
+        return record.get(field)
+    return getattr(record, field, None)
+
+
+def _default_get_id(record: Any) -> Any:
+    if isinstance(record, Mapping):
+        return record["id"]
+    return record.id
+
+
+def totalize(
+    records: Iterable[R],
+    ordering: Ordering,
+    *,
+    get_field: Callable[[R, str], Any] = _default_get_field,
+    get_id: Callable[[R], Any] = _default_get_id,
+) -> list[R]:
+    """Order records under a declared Ordering. The one sort-key definition.
+
+    ``ByKey(K)``: sort key ``(K(record), record.id)``, id ascending. **The id
+    is a TIE-BREAK ONLY — never semantic time.**
+
+    A record without ``K`` is NOT in the ``ByKey(K)`` projection: a key names
+    what it projects, and absence is non-membership. A ``None`` value counts
+    as absent. This is exclusion-by-declaration — the caller named K — not
+    silent loss.
+
+    Key values of mixed types under one declared key are REFUSED with
+    ``OrderingError``. The check is strict TYPE IDENTITY, not comparability:
+    ``"5"`` and ``5`` refuse, ``True`` and ``1`` refuse, and so do ``1`` and
+    ``2.0`` — Python would happily order that last pair, and refusing it
+    anyway is the point. A key whose values are sometimes int and sometimes
+    float is a declaration the data does not support, and silently ordering it
+    would hide that. Same-typed values that do not compare (dicts, say) are
+    refused the same way.
+
+    ``NaN`` key values are REFUSED. NaN compares false against everything
+    including itself, so a sort containing one produces an order that depends
+    on the input permutation — it is not a total order, and ``totalize``'s only
+    claim is that it totalizes. Infinities are ALLOWED: ``-inf`` and ``+inf``
+    order deterministically against every other float, so refusing them would
+    overreach — the claim is totalization, not finiteness.
+
+    A NaN TIE-BREAK ID is refused for the same reason and attributed to the id
+    side. The default ``get_id`` returns record ids, which are strings, so only
+    a custom ``get_id`` can produce one; the check is float-typed only, exactly
+    as on the key side, so a string ``"nan"`` id is an ordinary id.
+
+    Data that earns more than one refusal refuses by CATEGORY, never by which
+    record happened to come first: mixed type wins over a NaN key value, which
+    wins over a NaN id. Each check runs as its own complete pass for exactly
+    that reason.
+
+    A record that CARRIES ``K`` but has no id raises the accessor's own error
+    (``KeyError``/``AttributeError``), unwrapped and by ruling: an id is the
+    substrate's, not the declaration's, so its absence is a broken record
+    rather than an ordering declaration that does not fit the data. Only the
+    latter is what ``OrderingError`` means. A record missing ``K`` never
+    reaches the id accessor at all.
+
+    ``Arrival()`` returns the records as given — the store's native order is
+    the store's job to yield, never synthesized here. Both accessors are
+    ignored for ``Arrival()``.
+
+    Args:
+        records: The records to order.
+        ordering: ``Arrival()`` or ``ByKey(field)``.
+        get_field: Reads a named field off a record. The default reads a
+            Mapping key or an attribute, missing → None. Row-tuple callers
+            pass their own.
+        get_id: Reads the record id. The default reads the ``id`` Mapping key
+            or attribute.
+
+    Returns:
+        A new list, ordered. For ``ByKey``, records missing the key are absent.
+
+    Raises:
+        OrderingError: Mixed key types under the declared key, a ``NaN`` on
+            either side of the sort key — key value or tie-break id —
+            sort-key elements that do not compare, or an unknown Ordering
+            variant.
+    """
+    match ordering:
+        case Arrival():
+            return list(records)
+        case ByKey(field=field):
+            # Each refusal gets its OWN complete pass, so which category fires
+            # is a property of the data and not of the input permutation:
+            # mixed type wins over a NaN key, which wins over a NaN id.
+            members: list[tuple[Any, R]] = []
+            key_type: type | None = None
+            for record in records:
+                value = get_field(record, field)
+                if value is None:
+                    continue
+                if key_type is None:
+                    key_type = type(value)
+                elif type(value) is not key_type:
+                    raise OrderingError(
+                        f"mixed key types under declared key {field!r}: "
+                        f"{key_type.__name__} and {type(value).__name__} "
+                        f"(offending value {value!r})"
+                    )
+                members.append((value, record))
+
+            for value, _record in members:
+                if isinstance(value, float) and math.isnan(value):
+                    raise OrderingError(
+                        f"NaN key value under declared key {field!r}: {value!r} — "
+                        f"NaN compares false against everything including itself, "
+                        f"so the resulting order depends on the input permutation "
+                        f"and is not a total order. Infinities are fine; NaN is "
+                        f"not a position."
+                    )
+
+            keyed: list[tuple[Any, Any, R]] = [
+                (value, get_id(record), record) for value, record in members
+            ]
+
+            for _value, record_id, _record in keyed:
+                if isinstance(record_id, float) and math.isnan(record_id):
+                    raise OrderingError(
+                        f"NaN tie-break id under declared key {field!r}: "
+                        f"{record_id!r} — the offending element is the ID side "
+                        f"of the (K, id) sort key, not the key. NaN compares "
+                        f"false against everything including itself, so records "
+                        f"sharing a key value would order by input permutation."
+                    )
+            try:
+                keyed.sort(key=lambda entry: (entry[0], entry[1]))
+            except TypeError as exc:
+                raise OrderingError(
+                    f"records under declared key {field!r} do not compare: {exc} "
+                    f"(the sort key is (K, id) — either element can be the "
+                    f"non-comparable one)"
+                ) from exc
+            return [entry[2] for entry in keyed]
+        case _:
+            raise OrderingError(f"unknown Ordering variant: {ordering!r}")

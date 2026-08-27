@@ -1,0 +1,213 @@
+# Verdict: NOT_CONVERGED
+
+Two remediation commits pass fully; two retain new edge defects. Three new findings: two minor totalization issues and one nit-level ratchet hole.
+
+## Per-fix verdicts
+
+### 15d76fc0 / a33560a8 — PASS
+
+The non-mapping payload fix holds across all requested surfaces.
+
+Read:
+
+- [ordering.py](/Users/kaygee/Code/loops/libs/atoms/src/atoms/ordering.py:104) lines 104–150
+- [store_reader.py](/Users/kaygee/Code/loops/libs/engine/src/engine/store_reader.py:210) lines 210–273
+- [vertex_reader.py](/Users/kaygee/Code/loops/libs/engine/src/engine/vertex_reader.py:357) lines 357–390
+- [generate_lens.py](/Users/kaygee/Code/loops/spec/conformance/generate_lens.py:279) lines 279–470
+- [test_conformance_lens.py](/Users/kaygee/Code/loops/libs/engine/tests/test_conformance_lens.py:1) lines 1–204
+
+All tested shapes—string, integer, float, boolean, list, `None`, and a nested mapping lacking the top-level key—resolved as missing-K through both mapping and row accessors:
+
+```text
+resolve_key_field:
+  str: mapping=None row=None
+  int: mapping=None row=None
+  float: mapping=None row=None
+  bool: mapping=None row=None
+  list: mapping=None row=None
+  None: mapping=None row=None
+  nested: mapping=None row=None
+StoreReader.ordered ByKey(k): [{'k': 1, 'tag': 'included'}]
+_combined_read ByKey(k): [{'k': 1, 'tag': 'included', ...}]
+```
+
+Residue search found the live ordering-family access paths correctly routed:
+
+```text
+ordering.py:132  resolve_payload_key(record.get("payload"), field)
+vertex_reader.py:390  resolve_payload_key(json.loads(row[5]), field)
+store_reader.py:271  get_field=resolve_key_field
+generate_lens.py:64  lens_get_field = resolve_key_field
+test_conformance_lens.py:59  get_field=resolve_key_field
+```
+
+Other payload `.get()` occurrences were the already-ratified fold-key/non-ordering surfaces.
+
+Conformance evidence:
+
+```text
+lens-by-key-non-mapping-payload-excluded: 1 passed
+all conformance-lens tests: 13 passed
+```
+
+All six pre-existing vector blobs matched `22159e4c` exactly. Regeneration wrote seven vectors and left the worktree clean:
+
+```text
+lens-by-key-missing-field-excluded.json          MATCH
+lens-by-key-mixed-types-refused.json             MATCH
+lens-by-key-payload-seq.json                     MATCH
+lens-by-key-tie-id-asc.json                      MATCH
+lens-sub-millisecond-timestamp-precision.json    MATCH
+lens-timestamp-tie-id-asc.json                   MATCH
+before=''
+after=''
+```
+
+### bd7c6abc — PASS
+
+The zero-member hole is closed for both aggregate declaration forms.
+
+Read:
+
+- [vertex_reader.py](/Users/kaygee/Code/loops/libs/engine/src/engine/vertex_reader.py:63) lines 63–126
+- [vertex_reader.py](/Users/kaygee/Code/loops/libs/engine/src/engine/vertex_reader.py:397) lines 397–545
+- [read.py](/Users/kaygee/Code/loops/libs/sdk/src/sdk/read.py:62) lines 62–85 and 274–388
+
+Probe output:
+
+```text
+combine stores= []
+  default => OK {"payloads":{"decision":[]},"raw":{"decision":{"items":[]}}}
+  ByKey('n') => OK {"payloads":{"decision":[]},"raw":{"decision":{"items":[]}}}
+  Arrival() => OrderingError: ... dense per-log ... Declare ByKey ...
+
+discover stores= []
+  default => OK {"payloads":{"decision":[]},"raw":{"decision":{"items":[]}}}
+  ByKey('n') => OK {"payloads":{"decision":[]},"raw":{"decision":{"items":[]}}}
+  Arrival() => OrderingError: ... dense per-log ... Declare ByKey ...
+```
+
+The empty-return construction itself is unchanged from pre-fix; default and `ByKey` therefore retain the same serialized empty state.
+
+The ratified one-member boundary remains visible:
+
+```text
+combine-of-one available stores=1 Arrival=> OK empty state
+combine-of-one missing stores=0 Arrival=> OrderingError
+```
+
+That transition follows the explicitly retained `len == 1` rule and is not re-reported. A direct single-store declaration with its store missing remains declaration-shaped through SDK:
+
+```text
+direct missing store None      => 0 False newest
+direct missing store Arrival() => 0 False newest
+```
+
+### 1442a41d — FAIL
+
+Same-float NaN refusal, infinities, signed zero, underflow, and string `"nan"` work. However, the explicit “mixed-type still wins” property depends on input order. See C-SOL-05.
+
+Passing edges:
+
+```text
+NaN same-float r1 permutations:
+  ('a','n','b') => OrderingError: NaN key value ...
+  ('b','n','a') => OrderingError: NaN key value ...
+  ('n','b','a') => OrderingError: NaN key value ...
+
+infinities asc/reverse:
+  => OK ['m', 'z', 'p']
+  => OK ['m', 'z', 'p']
+
+-0/+0/subnormal/underflow => OK ['negzero','poszero','under','sub']
+string nan => OK ['abc', 'nan']
+```
+
+A separate adjacent NaN hole remains in the id tie-break; see C-SOL-07.
+
+### a1c43266 — FAIL
+
+The class contract and both runtime attribution cases are corrected:
+
+```text
+key-side runtime:
+OrderingError: ... (the sort key is (K, id) — either element can be the non-comparable one)
+
+id-side runtime:
+OrderingError: ... (the sort key is (K, id) — either element can be the non-comparable one)
+```
+
+The promised ratchet is cheaply evadable, however; see C-SOL-06.
+
+## New findings
+
+### C-SOL-05 — minor — [ordering.py](/Users/kaygee/Code/loops/libs/atoms/src/atoms/ordering.py:232)
+
+**Claim:** NaN validation occurs during the single-pass type scan, so a mixed-type projection’s refusal category depends on which value appears first. This contradicts the remediation claim that the type check wins over NaN.
+
+```text
+NaN mixed-type permutations:
+  ('n', 'i') => OrderingError: NaN key value under declared key 'k': nan
+  ('i', 'n') => OrderingError: mixed key types under declared key 'k':
+                int and float (offending value nan)
+```
+
+Both inputs contain precisely the same key values. A complete type-identity pass must precede NaN validation if mixed-type refusal is intended to win consistently.
+
+### C-SOL-06 — nit — [test_ordering.py](/Users/kaygee/Code/loops/libs/atoms/tests/test_ordering.py:145)
+
+**Claim:** The docstring ratchet searches individual lines for contiguous phrases, making a newline a complete evasion. It also hardcodes four inspected objects rather than walking all module docstrings.
+
+Probe:
+
+```text
+candidate:
+Raised for key values that do not
+compare under the declared ordering.
+
+split-line bad attribution flags: []
+hard-coded inspected objects:
+['module', 'OrderingError', 'totalize', 'is_suffix_stable']
+module public docstring objects omitted:
+['Arrival', 'ByKey', 'resolve_key_field', 'resolve_payload_key']
+```
+
+The current production prose is correct; the defect is in the claimed recurrence ratchet.
+
+### C-SOL-07 — minor — [ordering.py](/Users/kaygee/Code/loops/libs/atoms/src/atoms/ordering.py:252)
+
+**Claim:** NaN is rejected only in `K`, not in the id half of `(K, id)`. A float NaN returned by `get_id` silently restores permutation-dependent output instead of totalizing or refusing. This is the id-side analogue of C-SOL-03.
+
+```text
+('a', 'b', 'c') => ['a', 'b', 'c']
+('c', 'b', 'a') => ['b', 'a', 'c']
+('b', 'a', 'c') => ['b', 'a', 'c']
+```
+
+All records used equal `K=1.0`; only one tie-break id was NaN. This matters to the exported primitive and custom `get_id` callers, with the same bounded scope as the original in-memory NaN finding.
+
+## Test proof
+
+Focused:
+
+```text
+atoms ordering:          45 passed
+StoreReader scalar:       2 passed
+combined-read ordering:  28 passed
+conformance lens:        13 passed
+SDK ordering:            11 passed
+```
+
+Full suites:
+
+```text
+atoms:   515 passed
+engine:  1807 passed, 1 skipped
+sdk:     324 passed
+store:   152 passed
+root:    110 passed
+```
+
+The worktree remained clean after probes and vector regeneration.
+
+**Overall: NOT_CONVERGED.**

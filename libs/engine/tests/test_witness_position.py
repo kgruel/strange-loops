@@ -95,19 +95,20 @@ def _append(store: Path, kind: str, ts: float, *, fid: str | None = None, **payl
     """Append a fact at a controlled ts; returns the (append-ordered) fact id."""
     conn = sqlite3.connect(str(store))
     fid = fid or gen_id()
+    ord_val = conn.execute("SELECT COALESCE(MAX(arrival_ordinal), 0) + 1 FROM facts").fetchone()[0]
     conn.execute(
-        "INSERT INTO facts (id, kind, ts, observer, origin, payload, signature) "
-        "VALUES (?, ?, ?, ?, ?, ?, NULL)",
-        (fid, kind, ts, "kyle", "", json.dumps(payload)),
+        "INSERT INTO facts (id, kind, ts, observer, origin, payload, signature, arrival_ordinal, arrival_seq) "
+        "VALUES (?, ?, ?, ?, ?, ?, NULL, ?, 0)",
+        (fid, kind, ts, "kyle", "", json.dumps(payload), ord_val),
     )
     conn.commit()
     conn.close()
     return fid
 
 
-def _rowid_of(store: Path, fid: str) -> int:
+def _ordinal_of(store: Path, fid: str) -> int:
     conn = sqlite3.connect(str(store))
-    r = conn.execute("SELECT rowid FROM facts WHERE id = ?", (fid,)).fetchone()
+    r = conn.execute("SELECT arrival_ordinal FROM facts WHERE id = ?", (fid,)).fetchone()
     conn.close()
     return r[0]
 
@@ -118,10 +119,11 @@ def _append_tick(store: Path, name: str, ts: float, *, fact_cursor: str | None) 
     would use, rather than reusing whatever connection a caller has open."""
     conn = sqlite3.connect(str(store))
     tid = gen_id()
+    ord_val = conn.execute("SELECT COALESCE(MAX(arrival_ordinal), 0) + 1 FROM ticks").fetchone()[0]
     conn.execute(
-        "INSERT INTO ticks (id, name, ts, since, origin, payload, fact_cursor) "
-        "VALUES (?, ?, ?, 0.0, '', '{}', ?)",
-        (tid, name, ts, fact_cursor),
+        "INSERT INTO ticks (id, name, ts, since, origin, payload, fact_cursor, arrival_ordinal, arrival_seq) "
+        "VALUES (?, ?, ?, 0.0, '', '{}', ?, ?, 0)",
+        (tid, name, ts, fact_cursor, ord_val),
     )
     conn.commit()
     conn.close()
@@ -141,7 +143,7 @@ class TestResolveAddress:
         last = _append(store, "decision", 101, topic="b")
         pos = resolve_witness_position(store, "head")
         assert pos.fact_id == last
-        assert pos.rowid == _rowid_of(store, last)
+        assert pos.ordinal == _ordinal_of(store, last)
         assert pos.seq == 2  # two rows at-or-before head
 
     def test_genesis_sentinel_is_empty_prefix(self, tmp_path):
@@ -150,14 +152,14 @@ class TestResolveAddress:
         _append(store, "decision", 100, topic="a")
         pos = resolve_witness_position(store, GENESIS_SENTINEL)
         assert pos.fact_id == GENESIS_SENTINEL
-        assert pos.rowid == 0
+        assert pos.ordinal == -1
         assert pos.seq == 0
 
     def test_head_on_empty_store_is_empty_prefix(self, tmp_path):
         vpath, store = _scaffold(tmp_path)
         _fresh_store(store)
         pos = resolve_witness_position(store, "head")
-        assert pos.rowid == 0 and pos.fact_id == GENESIS_SENTINEL
+        assert pos.ordinal == -1 and pos.fact_id == GENESIS_SENTINEL
 
     def test_fact_id_resolves_by_primary_key(self, tmp_path):
         vpath, store = _scaffold(tmp_path)
@@ -165,7 +167,7 @@ class TestResolveAddress:
         first = _append(store, "decision", 100, topic="a")
         _append(store, "decision", 101, topic="b")
         pos = resolve_witness_position(store, first)
-        assert pos.rowid == _rowid_of(store, first)
+        assert pos.ordinal == _ordinal_of(store, first)
         assert pos.seq == 1
 
     def test_unknown_handle_refuses(self, tmp_path):
@@ -203,7 +205,7 @@ class TestAdoption:
         pos = resolve_witness_position(store, "head")
         assert pos.unadopted is True and pos.lineage is None
         # In-session position still works everywhere (N1).
-        assert pos.rowid == 1
+        assert pos.ordinal == 1
 
     def test_adopted_store_carries_lineage(self, tmp_path):
         vpath, store = _scaffold(tmp_path)
@@ -231,19 +233,12 @@ class TestAnchor:
         f1 = _append(store, "decision", 100, topic="a")
         _append(store, "decision", 101, topic="b")  # head advances past f1
         # A tick whose window closed at f1 (its fact_cursor).
-        conn = sqlite3.connect(str(store))
-        conn.execute(
-            "INSERT INTO ticks (id, name, ts, since, origin, payload, fact_cursor) "
-            "VALUES (?, 't', 150.0, 0.0, '', '{}', ?)",
-            (gen_id(), f1),
-        )
-        conn.commit()
-        conn.close()
+        _append_tick(store, "t", 150.0, fact_cursor=f1)
         # Position at head (f2) — the anchor is the tick sealing f1.
         pos = resolve_witness_position(store, "head")
         assert pos.anchor is not None
         assert pos.anchor.fact_cursor == f1 and pos.anchor.name == "t" and pos.anchor.ts == 150.0
-        # Position AT f1 — still anchored (f1 rowid <= position rowid).
+        # Position AT f1 — still anchored (f1 ordinal <= position ordinal).
         at_f1 = resolve_witness_position(store, f1)
         assert at_f1.anchor is not None
         assert at_f1.anchor.ts == 150.0 and at_f1.anchor.name == "t"
@@ -260,7 +255,7 @@ class TestReceiptGroupGuard:
     def _ceremony_store(self, tmp_path) -> tuple[Path, Path, list[int]]:
         """A store whose lineage has a REAL 2-row edit ceremony (one absorb_edit).
 
-        Returns (vpath, store, [row1, row2]) — the two contiguous _decl rows.
+        Returns (vpath, store, [ord1, ord2]) — the two contiguous _decl rows.
         """
         vpath = tmp_path / "x.vertex"
         store = tmp_path / "x.db"
@@ -294,7 +289,7 @@ class TestReceiptGroupGuard:
         rows = [
             r[0]
             for r in conn.execute(
-                "SELECT rowid FROM facts WHERE kind = ? ORDER BY rowid",
+                "SELECT arrival_ordinal FROM facts WHERE kind = ? ORDER BY arrival_ordinal, arrival_seq",
                 (DECL_KIND_DEFINED,),
             ).fetchall()
         ]
@@ -321,22 +316,22 @@ class TestReceiptGroupGuard:
         _vpath, store, rows = self._ceremony_store(tmp_path)
         conn = sqlite3.connect(str(store))
         first_id = conn.execute(
-            "SELECT id FROM facts WHERE rowid = ?", (rows[0],)
+            "SELECT id FROM facts WHERE arrival_ordinal = ?", (rows[0],)
         ).fetchone()[0]
         last_id = conn.execute(
-            "SELECT id FROM facts WHERE rowid = ?", (rows[1],)
+            "SELECT id FROM facts WHERE arrival_ordinal = ?", (rows[1],)
         ).fetchone()[0]
         conn.close()
         # Naming the FIRST ceremony row = mid-group → refuse with teaching.
         with pytest.raises(
             MidReceiptGroupPosition,
-            match=f"rowids {rows[0]}\\.\\.{rows[1]}",
+            match=f"ordinals {rows[0]}\\.\\.{rows[1]}",
         ):
             resolve_witness_position(store, first_id)
         # Naming the LAST row = complete ceremony → resolves fine (head snaps
         # after a completed ceremony only).
         pos = resolve_witness_position(store, last_id)
-        assert pos.rowid == rows[1]
+        assert pos.ordinal == rows[1]
 
     def test_receipt_group_span_requires_contiguous_rowids_and_matching_ts(self, tmp_path):
         """Kills 'and' -> 'or' mutant at witness.py:234 in receipt_group_span."""
@@ -399,7 +394,7 @@ class TestReceiptGroupGuard:
         # STILL be refused at the ontology seam (A2↔A8 placement gap).
         _vpath, store, rows = self._ceremony_store(tmp_path)
         rogue = WitnessPosition(
-            fact_id="rogue", rowid=rows[0], seq=rows[0],
+            fact_id="rogue", arrival_lineage=None, ordinal=rows[0], seq=rows[0],
             lineage=None, unadopted=True, anchor=None, store=str(store.resolve()),
         )
         with pytest.raises(MidReceiptGroupPosition):
@@ -434,24 +429,24 @@ class TestEqualCursorsOntology:
         vpath, store = _scaffold(tmp_path)
         lineage = _absorb(vpath, store)  # genesis rowid 1
         rekey_id = _rekey(store, lineage, ts=1000.0)  # rowid 2 (topic→name)
-        rekey_rowid = _rowid_of(store, rekey_id)
+        rekey_ordinal = _ordinal_of(store, rekey_id)
 
-        # A position AT genesis (rowid 1) sees the genesis ontology (topic); the
-        # rekey lives at rowid 2, outside the genesis prefix.
+        # A position AT genesis (ordinal 1) sees the genesis ontology (topic); the
+        # rekey lives at ordinal 2, outside the genesis prefix.
         at_genesis = WitnessPosition(
-            fact_id="g", rowid=1, seq=1, lineage=lineage,
+            fact_id="g", arrival_lineage=None, ordinal=1, seq=1, lineage=lineage,
             unadopted=False, anchor=None, store=str(store.resolve()),
         )
-        at_rekey = resolve_witness_position(store, rekey_id)  # rowid 2
+        at_rekey = resolve_witness_position(store, rekey_id)  # ordinal 2
 
         assert _decision_key_field(load_declaration(vpath, at=at_genesis)) == "topic"
         assert _decision_key_field(load_declaration(vpath, at=at_rekey)) == "name"
         # Head sees the rekey too.
         assert _decision_key_field(load_declaration(vpath)) == "name"
-        assert rekey_rowid == 2
+        assert rekey_ordinal == 2
 
     def test_position_before_genesis_is_unhistorized(self, tmp_path):
-        # A13 witness variant: the position predates the genesis ROWID → floor.
+        # A13 witness variant: the position predates the genesis ORDINAL → floor.
         vpath, store = _scaffold(tmp_path)
         _absorb(vpath, store)  # genesis rowid 1
         empty = resolve_witness_position(store, GENESIS_SENTINEL)  # rowid 0
@@ -605,7 +600,7 @@ class TestPreGenesisGuard:
                 lineage="foreign", subject="b", payload={"folds": [], "order": 1})
         conn = sqlite3.connect(str(store))
         rows = [r[0] for r in conn.execute(
-            "SELECT rowid FROM facts WHERE kind = ? ORDER BY rowid",
+            "SELECT arrival_ordinal FROM facts WHERE kind = ? ORDER BY arrival_ordinal, arrival_seq",
             (DECL_KIND_DEFINED,)).fetchall()]
         conn.close()
         return rows
@@ -619,7 +614,7 @@ class TestPreGenesisGuard:
         rows = self._foreign_group(store)
         assert rows[1] == rows[0] + 1  # contiguous
         rogue = WitnessPosition(
-            fact_id="rogue", rowid=rows[0], seq=rows[0], lineage=None,
+            fact_id="rogue", arrival_lineage=None, ordinal=rows[0], seq=rows[0], lineage=None,
             unadopted=True, anchor=None, store=str(store.resolve()),
         )
         with pytest.raises(MidReceiptGroupPosition):
@@ -633,7 +628,7 @@ class TestPreGenesisGuard:
         _fresh_store(store)
         rows = self._foreign_group(store)
         ok = WitnessPosition(
-            fact_id="ok", rowid=rows[1], seq=rows[1], lineage=None,
+            fact_id="ok", arrival_lineage=None, ordinal=rows[1], seq=rows[1], lineage=None,
             unadopted=True, anchor=None, store=str(store.resolve()),
         )
         assert resolve_declaration_documents(store, at=ok) is None
@@ -669,7 +664,8 @@ class TestDurableHandle:
         """Kills 'or' -> 'and' mutant on unadopted flag check in durable_handle at witness.py:564."""
         pos = WitnessPosition(
             fact_id="f1",
-            rowid=1,
+            arrival_lineage=None,
+            ordinal=1,
             seq=1,
             lineage="some-lineage",
             unadopted=True,
@@ -696,8 +692,8 @@ def _mirror_lineage(src: Path, dst: Path, lineage: str) -> None:
     sconn.close()
     dconn = sqlite3.connect(str(dst))
     dconn.execute(
-        "INSERT INTO facts (id, kind, ts, observer, origin, payload, signature) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO facts (id, kind, ts, observer, origin, payload, signature, arrival_ordinal, arrival_seq) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, 1, 0)",
         grow,
     )
     dconn.execute(
@@ -722,7 +718,7 @@ class TestCrossStoreReResolution:
         lineage = _absorb(va, sa)  # genesis rowid 1 in A
         f1 = _append(sa, "decision", 100, topic="a")  # rowid 2 in A
         pos_a = resolve_witness_position(sa, f1)
-        assert pos_a.rowid == 2 and pos_a.lineage == lineage and not pos_a.unadopted
+        assert pos_a.ordinal == 2 and pos_a.lineage == lineage and not pos_a.unadopted
 
         sb = tmp_path / "b.db"
         _fresh_store(sb)
@@ -731,7 +727,7 @@ class TestCrossStoreReResolution:
         _append(sb, "decision", 100, topic="a", fid=f1)  # SAME id, rowid 3 in B
 
         applied = verify_position_for_store(pos_a, sb)
-        assert applied.rowid == 3  # the TARGET rowid, not the source rowid 2
+        assert applied.ordinal == 3  # the TARGET ordinal, not the source ordinal 2
         assert applied.store == str(sb.resolve())
         assert applied.fact_id == f1 and applied.lineage == lineage
 
@@ -787,10 +783,10 @@ class TestGroupBoundarySnap:
         _vpath, store, rows = self._ceremony(tmp_path)
         conn = sqlite3.connect(str(store))
         first_id = conn.execute(
-            "SELECT id FROM facts WHERE rowid = ?", (rows[0],)
+            "SELECT id FROM facts WHERE arrival_ordinal = ?", (rows[0],)
         ).fetchone()[0]
         genesis_id = conn.execute(
-            "SELECT id FROM facts WHERE rowid = ?", (rows[0] - 1,)
+            "SELECT id FROM facts WHERE arrival_ordinal = ?", (rows[0] - 1,)
         ).fetchone()[0]
         conn.close()
         # Exact form (default refuse) — a mid-group position errors.
@@ -798,7 +794,7 @@ class TestGroupBoundarySnap:
             resolve_witness_position(store, first_id)
         # Floor form — snaps to the position JUST BEFORE the ceremony's first row.
         snapped = resolve_witness_position(store, first_id, group_boundary="floor")
-        assert snapped.rowid == rows[0] - 1
+        assert snapped.ordinal == rows[0] - 1
         assert snapped.fact_id == genesis_id
         assert snapped.fact_id != "" and snapped.fact_id is not None
 
@@ -807,11 +803,11 @@ class TestGroupBoundarySnap:
         _vpath, store, rows = self._ceremony(tmp_path)
         conn = sqlite3.connect(str(store))
         first_id = conn.execute(
-            "SELECT id FROM facts WHERE rowid = ?", (rows[0],)
+            "SELECT id FROM facts WHERE arrival_ordinal = ?", (rows[0],)
         ).fetchone()[0]
         conn.close()
         pos = resolve_witness_position(store, first_id, group_boundary="allow")
-        assert pos.rowid == rows[0]
+        assert pos.ordinal == rows[0]
         assert pos.fact_id == first_id
 
 

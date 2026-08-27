@@ -714,9 +714,13 @@ class TestJsonlCanonicalStoreVerbRefusals:
         import sqlite3
 
         conn = sqlite3.connect(vpath.parent / "x.db")
+        ord_val = conn.execute(
+            "SELECT COALESCE(MAX(arrival_ordinal), 0) + 1 FROM facts"
+        ).fetchone()[0]
         conn.execute(
-            "INSERT INTO facts (id, kind, ts, observer, origin, payload) "
-            "VALUES ('OUT-OF-BAND-ROW', 'ping', 1.0, 'x', '', '{}')"
+            "INSERT INTO facts (id, kind, ts, observer, origin, payload, arrival_ordinal, arrival_seq) "
+            "VALUES ('OUT-OF-BAND-ROW', 'ping', 1.0, 'x', '', '{}', ?, 0)",
+            (ord_val,),
         )
         conn.commit()
         conn.close()
@@ -865,10 +869,13 @@ class TestCanonicalAgreementGate:
         import time
 
         conn = sqlite3.connect(str(tmp_path / "x.db"))
+        ord_val = conn.execute(
+            "SELECT COALESCE(MAX(arrival_ordinal), 0) + 1 FROM facts"
+        ).fetchone()[0]
         conn.execute(
-            "INSERT INTO facts (id, kind, ts, observer, origin, payload) "
-            "VALUES ('01FORGED', 'ping', ?, 'mallory', '', ?)",
-            (time.time(), json.dumps({"message": "forged"})),
+            "INSERT INTO facts (id, kind, ts, observer, origin, payload, arrival_ordinal, arrival_seq) "
+            "VALUES ('01FORGED', 'ping', ?, 'mallory', '', ?, ?, 0)",
+            (time.time(), json.dumps({"message": "forged"}), ord_val),
         )
         conn.commit()
         conn.close()
@@ -1017,7 +1024,8 @@ class TestCanonicalAgreementGate:
         assert payload["canonical"]["index_behind"] is True
         offset = next(c for c in payload["canonical"]["checks"]
                       if c["check"] == "offset")
-        assert offset["beyond_offset"] is True
+        assert offset["behind_by"] > 0
+        assert "beyond_offset" not in offset
 
     def test_a_forged_row_is_never_classified_as_lag(self, tmp_path, capsys):
         import json as _json
@@ -1452,3 +1460,107 @@ class TestBareStoreEmptyHome:
             f"{loops_home / '.vertex'} not found. Run 'loops init' first."
             in captured.err
         )
+
+
+class TestArrivalStoreCanonicalAgreement:
+    """WP-4: arrival-canonical store audits through the CLI dispatch path."""
+
+    def _arrival_store(self, tmp_path):
+        import base64
+        from atoms import Fact
+        from engine.arrival import ArrivalLog
+        from engine.arrival_store import ArrivalStore
+        from engine.builder import fold_count, vertex
+
+        vpath = tmp_path / "arr.vertex"
+        (vertex("arr").store("./arr.arrival")
+            .loop("ping", fold_count("n"), boundary_every=1)
+            .write(vpath))
+
+        log_path = tmp_path / "arr.arrival"
+        db_path = tmp_path / "arr.db"
+        sig = base64.b64encode(b"\x01" * 64).decode()
+        pub = base64.b64encode(b"\x00" * 32).decode()
+
+        ArrivalLog.mint(
+            log_path,
+            observer="kyle",
+            signer=lambda obs, dig: sig,
+            key=pub,
+        )
+        store = ArrivalStore(
+            path=db_path,
+            serialize=lambda f: f.to_dict(),
+            deserialize=Fact.from_dict,
+            tick_signer=lambda obs, dig: sig,
+            fact_signer=lambda obs, dig: sig,
+        )
+        store.append(Fact.of("ping", "kyle", n=1))
+        store.close()
+        return vpath, log_path, db_path
+
+    def test_arrival_store_audits_clean_through_cli(self, tmp_path, capsys):
+        from loops.commands.store import _run_store
+
+        vpath, log_path, db_path = self._arrival_store(tmp_path)
+        rc = _run_store(["verify"], vertex_path=vpath)
+        out = capsys.readouterr()
+        assert rc == 0
+        assert "chain intact" in out.out
+
+    def test_arrival_store_deep_audit_through_cli(self, tmp_path, capsys):
+        from loops.commands.store import _run_store
+
+        vpath, log_path, db_path = self._arrival_store(tmp_path)
+        rc = _run_store(["verify", "--deep"], vertex_path=vpath)
+        out = capsys.readouterr()
+        assert rc == 0
+        assert "canonical content verified" in out.out
+        assert "chain re-derived" in out.out
+
+    def test_arrival_store_canonical_agreement_helper(self, tmp_path):
+        from loops.commands.store import canonical_agreement
+
+        vpath, log_path, db_path = self._arrival_store(tmp_path)
+        idx_path, report = canonical_agreement(vpath)
+        assert idx_path == db_path
+        assert report.ok is True
+        assert report.index_behind is False
+
+    def test_arrival_store_index_behind_cli_prose_and_json(self, tmp_path, capsys):
+        import json as _json
+        import time
+
+        from engine.arrival import ArrivalLog
+        from engine.jsonl_codec import object_of_fact_row
+        from engine.sqlite_store import gen_id
+        from loops.commands.store import _run_store
+
+        vpath, log_path, db_path = self._arrival_store(tmp_path)
+        log = ArrivalLog(log_path)
+        log.append(
+            "fact",
+            object_of_fact_row((gen_id(), "ping", time.time(), "kyle", "", _json.dumps({"n": 2}))),
+            observer="kyle",
+        )
+
+        # Plain CLI prose check
+        rc = _run_store(["verify"], vertex_path=vpath)
+        out = capsys.readouterr().out
+        assert rc == 1
+        assert "INDEX BEHIND THE LOG" in out
+        assert "canonical arrival log" in out
+        assert "records beyond the consumed ordinal" in out
+        assert "rewound check" in out
+        assert "bytes the index never claimed to have consumed" not in out
+
+        # JSON verification check
+        rc_json = _run_store(["verify", "--json"], vertex_path=vpath)
+        payload = _json.loads(capsys.readouterr().out)
+        assert rc_json == 1
+        assert payload["canonical"]["index_behind"] is True
+        consumed = next(c for c in payload["canonical"]["checks"]
+                        if c["check"] == "consumed")
+        assert consumed["behind_by"] == 1
+        assert consumed["at_ordinal"] == 1
+        assert "beyond_offset" not in consumed

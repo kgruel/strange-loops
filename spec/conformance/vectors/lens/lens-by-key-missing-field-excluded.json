@@ -1,0 +1,73 @@
+{
+  "name": "lens-by-key-missing-field-excluded",
+  "description": "Pins missing-K non-membership: a key names what it projects, so a record whose payload carries no 'seq' is NOT in the ByKey('seq') projection. Exclusion is by declaration, not silent loss \u2014 the record is present in both member stores and readable under any other lens.",
+  "input": {
+    "kind": "record",
+    "members": {
+      "a": [
+        [
+          "01TESTULID0000000000000001",
+          {
+            "kind": "record",
+            "ts": 1000.0,
+            "payload": {
+              "seq": 2,
+              "note": "keyed"
+            },
+            "observer": "kyle",
+            "origin": ""
+          }
+        ],
+        [
+          "01TESTULID0000000000000002",
+          {
+            "kind": "record",
+            "ts": 2000.0,
+            "payload": {
+              "note": "no_seq_field_at_all"
+            },
+            "observer": "kyle",
+            "origin": ""
+          }
+        ]
+      ],
+      "b": [
+        [
+          "01TESTULID0000000000000003",
+          {
+            "kind": "record",
+            "ts": 3000.0,
+            "payload": {
+              "seq": null,
+              "note": "explicit_null_seq"
+            },
+            "observer": "kyle",
+            "origin": ""
+          }
+        ],
+        [
+          "01TESTULID0000000000000004",
+          {
+            "kind": "record",
+            "ts": 4000.0,
+            "payload": {
+              "seq": 1,
+              "note": "keyed_lower"
+            },
+            "observer": "kyle",
+            "origin": ""
+          }
+        ]
+      ]
+    },
+    "ordering": {
+      "by_key": "seq"
+    }
+  },
+  "expected": {
+    "lens_order": [
+      "01TESTULID0000000000000004",
+      "01TESTULID0000000000000001"
+    ]
+  }
+}

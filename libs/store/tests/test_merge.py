@@ -454,29 +454,11 @@ class TestMergeFoldCommutativity:
                          deserialize=lambda d: d) as store:
             return [p for _, p in store.since_raw(0)]
 
-    def test_merge_direction_sets_fold_order_by_receipt(self, tmp_path):
-        a_facts = [(_BASE_TS + 0, {"n": "a0"}), (_BASE_TS + 2, {"n": "a1"})]
-        b_facts = [(_BASE_TS + 1, {"n": "b0"}), (_BASE_TS + 3, {"n": "b1"})]
-
-        a1, b1 = tmp_path / "a1.db", tmp_path / "b1.db"
-        a2, b2 = tmp_path / "a2.db", tmp_path / "b2.db"
-        self._emit(a1, a_facts)
-        self._emit(b1, b_facts)
-        self._emit(a2, a_facts)
-        self._emit(b2, b_facts)
-
-        merge_store(a1, b1)  # A ← B
-        merge_store(b2, a2)  # B ← A
-
-        order_ab = [p["n"] for p in self._replayed(a1)]
-        order_ba = [p["n"] for p in self._replayed(b2)]
-
-        # Each merged store folds in ITS OWN receipt order: the target's rows
-        # first, then the source's rows in (ts, id) insertion order.
-        assert order_ab == ["a0", "a1", "b0", "b1"]
-        assert order_ba == ["b0", "b1", "a0", "a1"]
-        # Content is direction-independent; only the order differs.
-        assert sorted(order_ab) == sorted(order_ba)
+    # The direction test that asserted a doctrine here is DELETED at cut B
+    # (decision:design/arrival-sliceB-projections §Q4). Its replacement is
+    # test_arrival_merge.py::test_merge_ordering_claim_is_the_target_ordinal,
+    # which asserts against the arrival ordinal rather than against rowids as
+    # a primitive. What survives unchanged is the test below.
 
     def test_merge_direction_is_deterministic(self, tmp_path):
         """Re-running the same merge reproduces the same receipt order."""

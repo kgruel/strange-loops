@@ -38,45 +38,33 @@ unchanged — it is now determinism *given a store*, which is the honest scope.
 
 ## Rulings
 
-### R1 — merge inserts by `(ts, id)`; that IS the merge ceremony
+### R1 — DISCARDED at the arrival cut B
 
-`store.merge_store` inserts the source's rows into the target ordered by
-`(ts, id)` (`libs/store/src/store/merge.py`). The SQL did not change and the
-reason it did not is the ruling:
+R1 ruled that `store.merge_store` inserted the source's rows ordered by
+`(ts, id)`, and that the rowids the merge handed out *were* the merged store's
+fold order — the merge being the receipt event.
 
-A merged store is a **new store**. The rowids the merge hands out *are* that
-store's receipt order — the merge is the receipt event. So the insertion order
-is not an incidental scan order to be documented away; it is the ceremony that
-defines what the merged store folds. `(ts, id)` is chosen because it is
-deterministic for given source content.
+**That doctrine is discarded** (`decision:design/arrival-sliceB-projections`).
+A merge into an arrival-canonical store no longer inserts into sqlite at all:
+it appends records into the target's arrival log, and the index is re-derived
+from that log. The merged store's ordering claim is **the target's arrival
+ordinal — the order records arrived at the target — and nothing else**. No
+claim is made about event time, about rowids as a primitive, or about the
+relationship between `merge(A,B)` and `merge(B,A)`.
 
-What survives of commutativity is **narrower than it was, and it must be stated
-narrowly.** Under the old decision `merge(A,B)` and `merge(B,A)` re-folded
-identically, because both fed the same store-independent sort into the fold.
-That is **no longer true and must not be claimed**. A merge appends the source's
-rows after the target's existing rowids, so the two directions produce different
-receipt orders and therefore different fold sequences: merging B into A folds
-A's rows then B's; merging A into B folds B's rows then A's.
-`libs/store/tests/test_merge.py::test_merge_direction_sets_fold_order_by_receipt`
-pins exactly this.
-
-That is not a defect. It is receipt order being honest: the two merges *are*
-different custody events, and a store folds what it received in the order it
-received it.
-
-What merge still guarantees, and what R1 is actually about:
+What survives, unchanged in substance:
 
 - **Determinism per direction.** For given source content, `merge(A,B)` lays
-  down one specific rowid sequence, every time — never a scan order. This is
-  what the `(ts, id)` insertion convention buys, and it is why the convention is
-  load-bearing rather than incidental.
-- **Content equality across directions.** Both results hold the same fact set
-  with the same ids (dedup is on the id primary key). They disagree on fold
-  *sequence*, not on what was merged.
+  down one specific ordinal sequence, every time — never a scan order.
+- **Content equality across directions.** Both results hold the same row set
+  with the same ids (dedup is on the id primary key). They disagree on
+  sequence, not on what was merged. The two merges *are* different custody
+  events, and the ordinal says so.
 
-Fold-state equality across directions therefore holds only for order-insensitive
-fold ops, and is not a merge guarantee. Code and prose must claim determinism
-and content equality — never identical fold sequences.
+Code and prose must claim determinism and content equality — never identical
+fold sequences. The sqlite-canonical arm of `merge_store` is untouched by the
+arrival cut and keeps its insertion SQL; what changed is that the SQL no
+longer carries a doctrine.
 
 ### R2 — combined reads use the `(ts, id)` lens (named interim state)
 
@@ -94,13 +82,29 @@ across members — a per-member cursor vector, a merge-into-one ceremony, or
 accepting that aggregates fold on a lens — is an open design question. Until it
 is ruled, no code should claim single-store and combined folds agree.
 
-### R3 — the CAS token rides the receipt axis
+### R3 — the CAS token rides the store's own receipt axis
 
 `SqliteStore.declaration_head` / `_declaration_head_in_txn` surface the token
-`absorb_edit` compares `expected_head` against. It is `(rowid, id)` — receipt-
-ordered, the same axis `declaration.py`'s resolver now folds on. The token and
-the resolver must move together or optimistic concurrency compares two different
-notions of "head".
+`absorb_edit` compares `expected_head` against. The token and the resolver must
+move together or optimistic concurrency compares two different notions of
+"head".
+
+R3's substance is that the token rides **the receipt axis of the store that
+issues it**. What that axis *is* depends on the family, and since the arrival
+cut the two families answer differently
+(`decision:design/arrival-sliceC-ordering`):
+
+- **sqlite / JSONL-canonical** — `(rowid, id)`, byte-for-byte as R3 first
+  ruled. These are frozen legacy families.
+- **arrival-canonical** — `(record_ordinal, id)`, the coordinate of the newest
+  self-lineage declaration on the arrival axis, answered by walking the log.
+  `ArrivalStore` overrides `_declaration_head_in_txn` for it. A batch record's
+  rows share one ordinal, so the fact id is doing real tie-break work here.
+
+Both shapes are `[int, str]`, so a persisted v1 rowid coordinate is
+indistinguishable from a v2 ordinal by inspection. The intent version is the
+only discriminator, which is why it bumped rather than the coordinate being
+re-read optimistically.
 
 The `at` (`rowid <=`) / `as_of` (`ts <=`) **selector duality** is untouched by
 all of this. Both are selectors, and neither is a lens — see the ruling below.
@@ -160,10 +164,12 @@ lens-labeled sites.
 | Raw / cursor reads | `libs/engine/src/engine/sqlite_store.py` — `since`, `since_raw`, `replay_cursor` |
 | Single-store vertex fold | `libs/engine/src/engine/vertex_reader.py` — `_combined_read` (single-store branch) |
 | Declaration resolution + head | `libs/engine/src/engine/declaration.py` |
-| CAS token (R3) | `libs/engine/src/engine/sqlite_store.py` — `declaration_head` |
+| CAS token (R3), legacy families | `libs/engine/src/engine/sqlite_store.py` — `declaration_head` |
+| CAS token (R3), arrival axis | `libs/engine/src/engine/arrival_store.py` — `_declaration_head_in_txn` |
+| Declared-ordering primitive | `libs/atoms/src/atoms/ordering.py` — `Arrival` / `ByKey` / `totalize` |
+| Declared read ordering | `libs/engine/src/engine/store_reader.py` — `ordered` (prefix SELECTS, the declared key ORDERS) |
 | Incremental fold | `libs/engine/src/engine/handle.py` — `replay_mode="checkpoint-suffix"` |
 | Suffix fold primitive | `libs/atoms/src/atoms/spec.py` — `Spec.replay_from` |
-| Merge ceremony (R1) | `libs/store/src/store/merge.py` |
 | Combined-read lens (R2) | `libs/engine/src/engine/vertex_reader.py` |
 | Normative spec | `spec/conformance/SCHEMA.md` §6 replay, §7 witness, §8 merge, §9 lens |
 | Lens conformance vectors | `spec/conformance/vectors/lens/` |

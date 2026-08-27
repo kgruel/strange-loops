@@ -1,0 +1,63 @@
+Overall verdict: **NOT_CONVERGED**. SOL-HIGH-09 is fixed, but the completeness review found one new D0 acceptance path.
+
+### SOL-HIGH-10 — MAJOR
+
+[sqlite_store.py:711](/Users/kaygee/Code/loops/libs/engine/src/engine/sqlite_store.py:711)
+
+A matching `coordinate_axis='arrival'` marker bypasses provider agreement. The fast path verifies only schema structure and returns at line 719. Although `ArrivalStore` installs the log-backed provider at [arrival_store.py:146](/Users/kaygee/Code/loops/libs/engine/src/engine/arrival_store.py:146), that provider is never called on this path; subsequent `catch_up()` only considers records after the resume mark.
+
+Public reproduction:
+
+1. Create an `ArrivalStore` and append two facts at coordinates `(1,0)` and `(2,0)`.
+2. Retain the marker and resume mark.
+3. Change the coordinates to `(101,0)` and `(102,0)`, preserving NOT NULL and UNIQUE.
+4. Reopen through `ArrivalStore`.
+
+```text
+provider_agreement_calls=0
+reopen=ACCEPTED
+total=2
+coords=[(101, 0), (102, 0)]
+```
+
+Thus a structurally valid, marked index can accept coordinates the log never issued. This is in the established out-of-band-interference scope: marked incomplete schemas already refuse for that reason.
+
+The matching-marker arrival path must validate provider agreement before accepting, or use equivalent durable evidence binding the marker to the validated coordinate contents.
+
+### SOL-HIGH-09 disposition
+
+**CONFIRMED fixed.** My original r3 fixture now produces:
+
+```text
+before=(2, 'arrival', '2')
+reopen=REFUSED index content does not match arrival log coordinates
+       (facts has 0 rows, log has 2) — run …rederive_projections
+after=(0, 'mirrored', '2')
+```
+
+The marker remains unchanged on refusal. I also checked:
+
+- All four writing branches—mismatch correction, no tables, already migrated, and post-rebuild—route through `_stamp_arrival_axis`.
+- `_stamp_coordinate_axis` rejects `"arrival"`.
+- The arrival literal has one production write site.
+- `validate=False` has exactly one production caller: the ruled rederivation route at [arrival_projection.py:581](/Users/kaygee/Code/loops/libs/engine/src/engine/arrival_projection.py:581).
+- Repo-wide mirrored callers in `libs/store` cannot write the arrival marker.
+
+Verification:
+
+```text
+SOL-HIGH-09 structural/reproduction/branch tests: 4 passed
+Focused D0–D3 suite:                         87 passed
+D4 admission/permutation suite:              19 passed
+```
+
+| Contract | Verdict | Basis |
+|---|---|---|
+| D0 — coordinate schema/migration | **FAIL** | SOL-HIGH-10 |
+| D1 — witness re-key | **PASS** | Prior disposition unchanged; focused gates pass |
+| D2 — seal re-base | **PASS** | Prior disposition unchanged; focused gates pass |
+| D3 — audit re-base | **PASS** | Prior disposition unchanged; focused gates pass |
+| D4 — selective admission verification | **PASS** | 19 admission/permutation tests pass |
+| Scope law | **PASS** | `bc5ee83b` changes only the fenced engine source/test; full-arc exceptions remain receipted |
+
+# **NOT_CONVERGED**

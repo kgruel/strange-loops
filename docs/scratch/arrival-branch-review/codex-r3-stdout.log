@@ -1,0 +1,144 @@
+# Design-conformance verdict
+
+**Not design-conformant as a completed Wave 1.** I found **6 SILENT-DIVERGENCE** items and **3 DESIGN-DEBT** items. Most conspicuous textual mismatches—new record envelope, stored ordinals, `at`, `prev`/`rh`, batch rows sharing an outer ordinal, `(record_ordinal, fact_id)` CAS, `ts` as an envelope key, and ordering-only checkpoint dispatch—are licensed by later ratified slice decisions and are therefore **RULED-DEVIATION**, not findings.
+
+No files were changed. Targeted verification passed: **56 engine tests + 16 store merge-driver tests**.
+
+## 1. The Arrival Substrate
+
+| Section / commitment | Classification | Evidence |
+|---|---|---|
+| §3 — arrival is canonical; SQLite and JSONL are projections | CONFORMS | The projection module states and implements exactly two rebuildable derivatives: [arrival_projection.py:1](/Users/kaygee/Code/loops/libs/engine/src/engine/arrival_projection.py:1). Merge writes arrival and re-derives rather than inserting into the index: [merge.py:12](/Users/kaygee/Code/loops/libs/store/src/store/merge.py:12). |
+| §3 — witness authority is `(lineage, ordinal)` | CONFORMS at the log primitive; SILENT-DIVERGENCE at the read surface | Records carry and validate dense lineage/ordinal coordinates: [arrival.py:575](/Users/kaygee/Code/loops/libs/engine/src/engine/arrival.py:575). Public witness cursors remain rowid-based: CX-DC-02. |
+| §3 — no per-record receipt timestamp | RULED-DEVIATION | The later ratified slice-0 grammar requires signed `at`: [slice-0 proposal:115](/Users/kaygee/Code/loops/docs/dev/arrival-slice0-record-grammar-2026-08-17.md:115); shipped at [arrival.py:584](/Users/kaygee/Code/loops/libs/engine/src/engine/arrival.py:584). |
+| Law 1 — arrival determines semantic and integrity claims | CONFORMS for custody/projection authority; SILENT-DIVERGENCE for the Wave-1 agreement surface | Re-derivation and derived JSONL use arrival alone: [arrival_projection.py:252](/Users/kaygee/Code/loops/libs/engine/src/engine/arrival_projection.py:252). Arrival-native L1 agreement audit is absent: CX-DC-01. |
+| Law 2 — declared `(K,id)` order; substrate never learns `ts` | RULED-DEVIATION | `Arrival | ByKey` and one totalization conform to the general ordering: [ordering.py:42](/Users/kaygee/Code/loops/libs/atoms/src/atoms/ordering.py:42). But `ts` and `id` are explicitly privileged envelope keys: [ordering.py:105](/Users/kaygee/Code/loops/libs/atoms/src/atoms/ordering.py:105). Licensed by `decision:design/arrival-sliceC-ordering`, Q1: [design-proposal.md:16](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceC/design-proposal.md:16). |
+| Law 3 — drivers propose; custodian admits and mints | CONFORMS within Wave-1 scope | The derived-log driver never opens arrival: [derived_log_merge.py:21](/Users/kaygee/Code/loops/libs/store/src/store/derived_log_merge.py:21). Arrival merge executes the custody append under one guarded lock: [merge.py:200](/Users/kaygee/Code/loops/libs/store/src/store/merge.py:200). Admission-signature verification remains the receipted r1/SDK-wave deferral. |
+| Law 4 — positions compare only within one lineage | CONFORMS structurally | Cross-lineage application refuses and same-lineage foreign positions re-resolve rather than reuse rowid: [witness.py:466](/Users/kaygee/Code/loops/libs/engine/src/engine/witness.py:466). This is the r1 CX-BR-03 disposition. The coordinate itself remains wrong; see CX-DC-02. |
+| Law 5 — maintenance derives from ordering and reduction algebra | RULED-DEVIATION | Shipped taxonomy is ordering-only: `Arrival=True`, every `ByKey=False`: [ordering.py:75](/Users/kaygee/Code/loops/libs/atoms/src/atoms/ordering.py:75). Slice C expressly licenses Arrival checkpoint/suffix and ByKey cold-fold: [gate-c5-report.md:82](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceC/gate-c5-report.md:82). The artifact’s order-independent/direct-incorporation and shuffled-reduction branches do not exist. |
+| §5 — `ordered(prefix=W,key=K)` with `(K,id)` totalization | CONFORMS, subject to the Law-2 ruling | Prefix selection is arrival/rowid; ordering goes through the common totalizer: [store_reader.py:198](/Users/kaygee/Code/loops/libs/engine/src/engine/store_reader.py:198), [ordering.py:166](/Users/kaygee/Code/loops/libs/atoms/src/atoms/ordering.py:166). |
+| §6 — custody table, including collision refusal | CONFORMS / RULED-DEVIATION | Arrival merge collision refusal was fixed under `decision:design/arrival-branch-r1-rulings`; the transport driver also refuses divergent bytes: [derived_log_merge.py:127](/Users/kaygee/Code/loops/libs/store/src/store/derived_log_merge.py:127). Signature verification is the named deferral. |
+| §9 — witness addressing and seals re-based on arrival | SILENT-DIVERGENCE | Neither surface was re-based: CX-DC-02 and CX-DC-03. |
+| §11 — decomposition “not attacked” | DESIGN-DEBT | A–C now have independent gate receipts; see CX-DC-09. |
+| §8 transport; §9 sidecar/CLI | CONFORMS to calibrated scope | Monotonic-ref transport, sidecar, live migration, and CLI rebuild remain absent and are not structurally foreclosed. |
+
+## 2. The Arrival Log
+
+| Section / commitment | Classification | Evidence |
+|---|---|---|
+| §1–2 — no new format or envelope; existing codec | RULED-DEVIATION | Slice 0 ratified a new outer record envelope: [slice-0 proposal:115](/Users/kaygee/Code/loops/docs/dev/arrival-slice0-record-grammar-2026-08-17.md:115), shipped as `v,lin,ord,prev,at,k,…,rh`: [arrival.py:104](/Users/kaygee/Code/loops/libs/engine/src/engine/arrival.py:104). |
+| §3 — verbatim payload string and old fact/tick/batch grammar | RULED-DEVIATION | The later fact expressly replaces verbatim text with a JCS object body: [arrival.py:322](/Users/kaygee/Code/loops/libs/engine/src/engine/arrival.py:322). |
+| §3 — position computed, never stored | RULED-DEVIATION | The ratified slice-0 decision requires `lin` and `ord` inside every record: [slice-0 proposal:160](/Users/kaygee/Code/loops/docs/dev/arrival-slice0-record-grammar-2026-08-17.md:160). |
+| §3 — per-row batch ordinals forming a contiguous range | RULED-DEVIATION | `decision:design/arrival-sliceC-ordering` Q3 instead rules that batch rows share the outer record ordinal and use fact id as tie-break: [design-proposal.md:52](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceC/design-proposal.md:52), implemented at [arrival_store.py:498](/Users/kaygee/Code/loops/libs/engine/src/engine/arrival_store.py:498). |
+| §4 — declarations, observer definitions, assertions and seals live in arrival | CONFORMS for ordinary declarations/observers/assertions/seals | Declaration documents include observer and member vocabulary: [document.py:133](/Users/kaygee/Code/loops/libs/lang/src/lang/document.py:133). Projection deletion still leaves records and authorship answerable from arrival: [authority gate:92](/Users/kaygee/Code/loops/libs/engine/tests/test_arrival_authority_gate.py:92). |
+| §4/§8 — standing aggregation membership is declaration state in the aggregator’s lineage | SILENT-DIVERGENCE | CX-DC-06. |
+| §5 — genesis, declaration absorption and seal precede ordinary admission | SILENT-DIVERGENCE | CX-DC-04. |
+| §5 — no unsigned line in a signed lineage | RULED-DEVIATION | The outer grammar permits optional `sig`; admission verification is explicitly deferred by `decision:design/arrival-branch-r1-rulings`. Genesis remains mandatorily self-signed: [arrival.py:451](/Users/kaygee/Code/loops/libs/engine/src/engine/arrival.py:451). |
+| §6 — position-dependent, log-local key verification | CONFORMS for introduction/bootstrap | The verifier derives keys solely from genesis and prior key records: [arrival.py:1558](/Users/kaygee/Code/loops/libs/engine/src/engine/arrival.py:1558); the deletion/exclusivity gate passed independently: [gate-report.md:57](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceA/gate-report.md:57). |
+| §7 — revocation/taint | CONFORMS to the document’s explicit deferral | The artifact itself says nothing is built for revocation; Wave 1 did not prematurely invent it. |
+| §9 — exactly two CAS scopes and `_decl.*` structural namespace | CONFORMS at the public head predicate; SILENT-DIVERGENCE at final append | `_declaration_head_in_txn` keeps the lineage-filtered `_decl.*` predicate: [arrival_store.py:495](/Users/kaygee/Code/loops/libs/engine/src/engine/arrival_store.py:495). The ceremony additionally applies an everything-head guard: CX-DC-05. |
+| §9 — persisted intent uses arrival CAS coordinate | RULED-DEVIATION | C Q3 explicitly requires persisted `(record_ordinal,fact_id)` and an intent-version bump: [design-proposal.md:59](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceC/design-proposal.md:59); shipped at [ceremony.py:92](/Users/kaygee/Code/loops/libs/engine/src/engine/ceremony.py:92) and [ceremony.py:431](/Users/kaygee/Code/loops/libs/engine/src/engine/ceremony.py:431). |
+| §10 — facts-only windows and tick-chain ordering | CONFORMS | Window hashing still selects facts only: [sqlite_store.py:1547](/Users/kaygee/Code/loops/libs/engine/src/engine/sqlite_store.py:1547). |
+| §10 — no per-record chain | RULED-DEVIATION | Slice 0 expressly introduced `prev`/`rh`: [slice-0 proposal:221](/Users/kaygee/Code/loops/docs/dev/arrival-slice0-record-grammar-2026-08-17.md:221). |
+| §10 — seals/witness basis over arrival | SILENT-DIVERGENCE | The facts-only content rule conforms, but the selector remains rowid-based: CX-DC-03. Interleave-uniqueness vectors are correctly absent as tail work. |
+| §11–12 — migration/future surface | CONFORMS to calibrated scope | No live migration or sidecar implementation landed. The keyless-genesis incompatibility is explicitly left to the sidecar ruling and does not presently foreclose a versioned grammar. |
+
+## 3. The Arrival Plan
+
+| Section / commitment | Classification | Evidence |
+|---|---|---|
+| §1 — Wave 1 is slices 0+A–D, landing together | SILENT-DIVERGENCE | Branch history and receipts stop after C; the missing D obligations are CX-DC-01 through CX-DC-03. |
+| §2 — apps diff-empty | RULED-DEVIATION | The ratified cut-C decision permits the bridge-dissolution sweep in `apps/`; C2 records the exact apps diff: [gate-c2-report.md:14](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceC/gate-c2-report.md:14). |
+| §2 — vocabulary ratchet and one-level-down ratification | CONFORMS | Rule 17 scans tracked shipped prose with scratch excluded: [test_rule_17…py:140](/Users/kaygee/Code/loops/tests/architecture/test_rule_17_fold_order_prose_is_receipt_order.py:140). Slice 0 and A–C each have ratified proposals preceding implementation. |
+| Slice 0 — grammar, genesis, append, torn tail, resume | CONFORMS | Primitive is present at [arrival.py:1](/Users/kaygee/Code/loops/libs/engine/src/engine/arrival.py:1). Its required real-process test runs four writers ×250: [test_arrival_gate.py:101](/Users/kaygee/Code/loops/libs/engine/tests/test_arrival_gate.py:101), plus a two-process genesis race: [test_arrival_gate.py:531](/Users/kaygee/Code/loops/libs/engine/tests/test_arrival_gate.py:531). |
+| Slice A — authority and delete-every-projection gate | CONFORMS to the named gate | The literal deletion test is [test_arrival_authority_gate.py:80](/Users/kaygee/Code/loops/libs/engine/tests/test_arrival_authority_gate.py:80); independent report: [gate-report.md:21](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceA/gate-report.md:21). The separate genesis-sequence commitment still diverges under CX-DC-04. |
+| Slice B — re-derivation, derived JSONL, arrival merge, permanent reanchor refusal | CONFORMS | Projection implementation: [arrival_projection.py:25](/Users/kaygee/Code/loops/libs/engine/src/engine/arrival_projection.py:25). Rowid/witness-survival gate passed: [slice-B gate:30](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceB/gate-report.md:30). Real Git merge proof passed: [slice-B gate:102](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceB/gate-report.md:102). |
+| Slice C — declared ordering, bridge dissolution, CAS, combined read | CONFORMS subject to ratified deviations | Ordering primitive and combined-read refusal are shipped: [ordering.py:70](/Users/kaygee/Code/loops/libs/atoms/src/atoms/ordering.py:70), [vertex_reader.py:397](/Users/kaygee/Code/loops/libs/engine/src/engine/vertex_reader.py:397). C1–C5 gate reports all record PASS. |
+| Slice C gate — taxonomy drives checkpoint dispatch | RULED-DEVIATION from Substrate Law 5, CONFORMS to C ruling | Arrival licenses suffix replay and ByKey cold-folds: [gate-c5-report.md:82](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceC/gate-c5-report.md:82). No reduction-algebra or shuffled-visitation arm exists because C narrowed the gate. |
+| Slice D — audit, witness/seals and shuffled-index gate | SILENT-DIVERGENCE | CX-DC-01 through CX-DC-03. No `docs/scratch/arrival-sliceD/` gate receipt exists. |
+| §4–5 — Wave 2 and tail | CONFORMS to calibrated scope | Typed SDK heads, `guarded_append`, sidecar, live migration, interleave vectors, CLI rebuild and monotonic-ref transport remain absent. |
+| Pre-ship benchmark | CONFORMS | `ordered`, CAS walk and merge/re-derive curves were measured in the same runner: [LEDGER.md:267](/Users/kaygee/Code/loops/benchmarks/LEDGER.md:267). |
+
+### PR #8 disposition table
+
+| Row | Classification | Evidence |
+|---|---|---|
+| Keep `Spec.replay_from` | CONFORMS | Untouched by the branch; implementation remains at [spec.py:128](/Users/kaygee/Code/loops/libs/atoms/src/atoms/spec.py:128). |
+| Keep `VertexHandle` checkpoint machinery | CONFORMS | C5 independently verified `handle.py` byte-untouched: [gate-c5-report.md:33](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceC/gate-c5-report.md:33). |
+| Keep benchmark arms | CONFORMS | Existing runner retained and extended: [LEDGER.md:267](/Users/kaygee/Code/loops/benchmarks/LEDGER.md:267). |
+| Keep Rule 17 | CONFORMS | Semantic rule remains, with only ratified scan-scope narrowing: [test_rule_17…py:26](/Users/kaygee/Code/loops/tests/architecture/test_rule_17_fold_order_prose_is_receipt_order.py:26). |
+| Keep `test_merge_direction_is_deterministic` | CONFORMS | Test remains at [test_merge.py:463](/Users/kaygee/Code/loops/libs/store/tests/test_merge.py:463). |
+| Rewrite CAS coordinate to arrival head | CONFORMS | [arrival_store.py:498](/Users/kaygee/Code/loops/libs/engine/src/engine/arrival_store.py:498), independently checked against raw log bytes: [gate-c3-report.md:69](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceC/gate-c3-report.md:69). |
+| Rewrite combined-read fork to declared ordering | CONFORMS in code; DESIGN-DEBT in carried prose | Code: [vertex_reader.py:397](/Users/kaygee/Code/loops/libs/engine/src/engine/vertex_reader.py:397). Stale R2 prose: CX-DC-08. |
+| Rewrite authority prose across store reader/witness/declaration/docs | SILENT-DIVERGENCE | Witness and audit prose still describe rowid/legacy authority: CX-DC-01 and CX-DC-02. |
+| Discard R1 merge-as-receipt-order doctrine | CONFORMS | R1 is explicitly marked discarded and arrival ordinal substituted: [RECEIPT_ORDER_FOLD.md:41](/Users/kaygee/Code/loops/docs/RECEIPT_ORDER_FOLD.md:41). |
+
+## 4. The Migration Sidecar
+
+| Section / commitment | Classification | Evidence |
+|---|---|---|
+| §1 — sidecar is a separate frozen tail artifact | CONFORMS to scope | No sidecar or live migration landed in Wave 1. Existing legacy readers remain available for its future pinned end. |
+| §2–3 — containment-only, content-addressed and possibly keyless genesis | CONFORMS to the explicit preparatory deferral | Current live grammar requires a signed keyed genesis: [arrival.py:459](/Users/kaygee/Code/loops/libs/engine/src/engine/arrival.py:459). `decision:design/arrival-sliceA-authority` explicitly leaves the sidecar to choose a grammar amendment or retirement of keyless migration; current code does not silently claim compatibility. |
+| §4 — per-record ordinals and batch contiguous ranges | RULED-DEVIATION | C Q3 later rules outer-record ordinals with batch rows sharing one ordinal: [design-proposal.md:54](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceC/design-proposal.md:54). The frozen sidecar text is therefore not usable verbatim against the shipped Wave-1 grammar. |
+| §4 — no rowid inside signed/hashed bytes | CONFORMS; also exposes Substrate debt | Tick commitments contain fact ids, not rowids: [sqlite_store.py:158](/Users/kaygee/Code/loops/libs/engine/src/engine/sqlite_store.py:158). |
+| §5–10 — verifier grades, keyless flag, structural resume, migration ceremony and inventory | CONFORMS to scope preservation | None is prematurely implemented. The arrival primitive supplies dense walk/resume and torn-tail behavior without implementing migration policy. |
+
+# Findings
+
+### CX-DC-01 — SILENT-DIVERGENCE: Wave-1 arrival agreement audit and shuffled-index gate are absent
+
+The arrival preflight explicitly says agreement is “a later cut” and returns no agreement verdict: [preflight.py:381](/Users/kaygee/Code/loops/libs/engine/src/engine/preflight.py:381). `canonical_audit.py` remains the legacy JSONL byte-offset/count/last-line and rowid-order audit: [canonical_audit.py:1](/Users/kaygee/Code/loops/libs/engine/src/engine/canonical_audit.py:1), [canonical_audit.py:316](/Users/kaygee/Code/loops/libs/engine/src/engine/canonical_audit.py:316), [canonical_audit.py:548](/Users/kaygee/Code/loops/libs/engine/src/engine/canonical_audit.py:548). There is no slice-D gate directory.
+
+Contradicted design sentence: “`canonical_audit.py`’s entire offset/prefix custody model moves to arrival … [and] audit vectors over a deliberately rebuilt and shuffled index” ([Plan §3D](/Users/kaygee/Code/loops/docs/scratch/arrival-branch-review/design-artifacts/3-the-arrival-plan.md:79), [gate](/Users/kaygee/Code/loops/docs/scratch/arrival-branch-review/design-artifacts/3-the-arrival-plan.md:83)).
+
+### CX-DC-02 — SILENT-DIVERGENCE: public witness positions remain projection rowids
+
+`WitnessPosition` stores `fact_id`, `rowid`, `seq`, lineage and store path; its prefix is `WHERE rowid <= rowid`: [witness.py:164](/Users/kaygee/Code/loops/libs/engine/src/engine/witness.py:164). Same-lineage portability is implemented by resolving the fact id to another projection’s rowid: [witness.py:471](/Users/kaygee/Code/loops/libs/engine/src/engine/witness.py:471). The r1 Law-4 fix makes misuse structural, but it does not re-key the coordinate.
+
+Contradicted design sentences: “Its position is the witness position: `(arrival_lineage, ordinal)`” ([Substrate §3](/Users/kaygee/Code/loops/docs/scratch/arrival-branch-review/design-artifacts/1-the-arrival-substrate.md:92)); “witness addressing, re-keyed on `(lineage, ordinal)`” ([Substrate §9](/Users/kaygee/Code/loops/docs/scratch/arrival-branch-review/design-artifacts/1-the-arrival-substrate.md:471)); and Plan D’s seal/witness rebase ([Plan §3D](/Users/kaygee/Code/loops/docs/scratch/arrival-branch-review/design-artifacts/3-the-arrival-plan.md:79)).
+
+### CX-DC-03 — SILENT-DIVERGENCE: seals remain derived-index rowid commitments
+
+Window bounds are fact ids but resolve to SQLite rowids: [sqlite_store.py:1531](/Users/kaygee/Code/loops/libs/engine/src/engine/sqlite_store.py:1531). Window membership and order are selected by `rowid`: [sqlite_store.py:1547](/Users/kaygee/Code/loops/libs/engine/src/engine/sqlite_store.py:1547). New tick state takes its cursor and predecessor from SQLite projection rows: [sqlite_store.py:1622](/Users/kaygee/Code/loops/libs/engine/src/engine/sqlite_store.py:1622).
+
+Contradicted design sentence: “seals, chain verification, signing — re-based on arrival positions” ([Substrate §9](/Users/kaygee/Code/loops/docs/scratch/arrival-branch-review/design-artifacts/1-the-arrival-substrate.md:477)); Plan D is more explicit: “Seals re-base on `(arrival_lineage, ordinal)`” ([Plan §3D](/Users/kaygee/Code/loops/docs/scratch/arrival-branch-review/design-artifacts/3-the-arrival-plan.md:79)).
+
+### CX-DC-04 — SILENT-DIVERGENCE: the three-movement genesis is not an admission precondition
+
+`ArrivalLog.mint` publishes after writing only the structural genesis: [arrival.py:753](/Users/kaygee/Code/loops/libs/engine/src/engine/arrival.py:753). Normal append is immediately available: [arrival.py:1264](/Users/kaygee/Code/loops/libs/engine/src/engine/arrival.py:1264). The ratified authority gate itself demonstrates ordinary records at ordinals 1 and 3, declaration absorption at 4, and the first seal at 5: [test_arrival_authority_gate.py:62](/Users/kaygee/Code/loops/libs/engine/tests/test_arrival_authority_gate.py:62).
+
+Contradicted design sentence: “A fresh 1.0 log opens with a genesis ceremony of three movements — self-certifying genesis, declaration absorption, seal — committed before the first ordinary admission” ([Log §5](/Users/kaygee/Code/loops/docs/scratch/arrival-branch-review/design-artifacts/2-the-arrival-log.md:201)). The later ratified A proposal repeats the same order: [slice-A proposal:116](/Users/kaygee/Code/loops/docs/dev/arrival-sliceA-authority-design-2026-08-18.md:116).
+
+### CX-DC-05 — SILENT-DIVERGENCE: declaration ceremonies also guard the everything-head
+
+The public token is correctly declaration-scoped, but `_ceremony_persist` passes the reconciled overall arrival ordinal as `following`, so any intervening record refuses the append: [arrival_store.py:462](/Users/kaygee/Code/loops/libs/engine/src/engine/arrival_store.py:462). A test explicitly pins refusal when an ordinary interloper lands: [test_arrival_store.py:385](/Users/kaygee/Code/loops/libs/engine/tests/test_arrival_store.py:385).
+
+Contradicted design sentence: “CAS against the arrival head would be spuriously strict: any ordinary admission between fold-out and re-absorb would fail an edit with no actual conflict” ([Log §9](/Users/kaygee/Code/loops/docs/scratch/arrival-branch-review/design-artifacts/2-the-arrival-log.md:346)). The later C ruling says the lineage-filtered `_decl.*` predicate is preserved verbatim: [C Q3](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceC/design-proposal.md:57).
+
+### CX-DC-06 — SILENT-DIVERGENCE: standing aggregation membership is still file/path authority
+
+The declaration loader openly reports aggregate membership as current-file state because aggregation tables are not built: [declaration.py:440](/Users/kaygee/Code/loops/libs/engine/src/engine/declaration.py:440). Store resolution still consumes `combine`/`discover` paths: [vertex_reader.py:120](/Users/kaygee/Code/loops/libs/engine/src/engine/vertex_reader.py:120). Although `_decl.member-defined` documents exist, the grammar forbids `combine` together with a store, so a standing combine cannot absorb them into its own lineage: [loader.py:858](/Users/kaygee/Code/loops/libs/lang/src/lang/loader.py:858).
+
+Contradicted design sentence: “Membership … [is] declaration state, changed through the declaration ceremony in the aggregator’s own log,” while the discover glob “degrades from authority to a discovery driver” ([Log §8](/Users/kaygee/Code/loops/docs/scratch/arrival-branch-review/design-artifacts/2-the-arrival-log.md:306), [Log §8 table](/Users/kaygee/Code/loops/docs/scratch/arrival-branch-review/design-artifacts/2-the-arrival-log.md:322)).
+
+### CX-DC-07 — DESIGN-DEBT: the Substrate overstates rowid’s cryptographic role
+
+The Substrate says “window hashes, cursors” are computed over rowid ranges and that cryptographic commitments rest on rowid: [Substrate §2](/Users/kaygee/Code/loops/docs/scratch/arrival-branch-review/design-artifacts/1-the-arrival-substrate.md:76). The code’s signed tick envelope contains fact-id cursors, not rowids: [sqlite_store.py:158](/Users/kaygee/Code/loops/libs/engine/src/engine/sqlite_store.py:158). Rowid is only the local selector used after resolving those ids: [sqlite_store.py:1531](/Users/kaygee/Code/loops/libs/engine/src/engine/sqlite_store.py:1531).
+
+The Log itself corrects this claim: “no rowid was ever inside signed or hashed bytes” ([Log §10](/Users/kaygee/Code/loops/docs/scratch/arrival-branch-review/design-artifacts/2-the-arrival-log.md:407)).
+
+### CX-DC-08 — DESIGN-DEBT: PR #8’s combined-read receipt still calls the ruled state open
+
+The implementation now resolves aggregate ordering through `ByKey`, defaulting to `ByKey("ts")`, and structurally refuses aggregate `Arrival`: [vertex_reader.py:397](/Users/kaygee/Code/loops/libs/engine/src/engine/vertex_reader.py:397). But the carried PR #8 receipt still labels R2 an “interim state” and says the question “needs a ruling”: [RECEIPT_ORDER_FOLD.md:69](/Users/kaygee/Code/loops/docs/RECEIPT_ORDER_FOLD.md:69), [RECEIPT_ORDER_FOLD.md:177](/Users/kaygee/Code/loops/docs/RECEIPT_ORDER_FOLD.md:177).
+
+Contradicted design sentence: “Combined-read fold fork → declared projection ordering” ([Plan §6](/Users/kaygee/Code/loops/docs/scratch/arrival-branch-review/design-artifacts/3-the-arrival-plan.md:113)). `decision:design/arrival-sliceC-ordering` expressly said the interim comment and R2/R3 residue retire.
+
+### CX-DC-09 — DESIGN-DEBT: the Substrate’s decomposition status is stale
+
+The Substrate says: “The four cuts have not been attacked as a decomposition — nobody has pressure-tested whether cut A is atomically shippable” ([Substrate §11](/Users/kaygee/Code/loops/docs/scratch/arrival-branch-review/design-artifacts/1-the-arrival-substrate.md:529)).
+
+That is now false for A–C: A independently passed every gate item ([A gate](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceA/gate-report.md:8)); B independently exercised reconstruction and a real Git merge ([B gate](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceB/gate-report.md:30)); C has independent C1–C5 gate receipts. The truthful residual is narrower: D was never implemented or attacked.
+
+## Overall
+
+If Kyle hands these four documents to a cold reader tomorrow, the code makes them liars in two different ways. The **licensed** lies are concentrated in the Log’s physical model and the Substrate’s ordering/maintenance model: arrival is now a new chained envelope with stored coordinates and `at`; batch facts share an outer record ordinal; `ts` is a privileged envelope key; and all `ByKey` folds cold-fold. The **unlicensed** lies are that Wave 1 is complete, that verification and seals have moved to arrival coordinates, that genesis closes all three movements before ordinary admission, that declaration CAS ignores unrelated admissions, and that standing aggregation membership lives in the aggregator’s lineage. The Sidecar remains safely future-scoped, but its per-record batch-ordinal text is already superseded by the ratified C grammar.

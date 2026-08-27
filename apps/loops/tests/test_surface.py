@@ -723,13 +723,16 @@ def test_search_fts_truncation_disclosed_in_window(tmp_path):
         "    ts REAL NOT NULL,"
         "    observer TEXT NOT NULL,"
         "    origin TEXT NOT NULL DEFAULT '',"
-        "    payload TEXT NOT NULL"
+        "    payload TEXT NOT NULL,"
+        "    arrival_ordinal INTEGER,"
+        "    arrival_seq INTEGER"
         ");"
     )
     for i in range(101):  # one past the default limit
         conn.execute(
-            "INSERT INTO facts (id, kind, ts, observer, origin, payload) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
+            "INSERT INTO facts (id, kind, ts, observer, origin, payload, "
+            "arrival_ordinal, arrival_seq) VALUES (?, ?, ?, ?, ?, ?, "
+            "(SELECT COALESCE(MAX(arrival_ordinal), 0) + 1 FROM facts), 0)",
             (
                 f"TRUNC{i:04d}", "decision", float(i), "test", "",
                 json.dumps({"topic": f"topic-{i}", "message": "truncatetoken"}),
@@ -791,7 +794,9 @@ def test_search_stale_kind_crowd_does_not_bury_fresh_kind_match(tmp_path):
         "    ts REAL NOT NULL,"
         "    observer TEXT NOT NULL,"
         "    origin TEXT NOT NULL DEFAULT '',"
-        "    payload TEXT NOT NULL"
+        "    payload TEXT NOT NULL,"
+        "    arrival_ordinal INTEGER,"
+        "    arrival_seq INTEGER"
         ");"
     )
     # crowd_kind: 105 matching facts, all NEWER than target_kind's one match —
@@ -799,8 +804,9 @@ def test_search_stale_kind_crowd_does_not_bury_fresh_kind_match(tmp_path):
     # limit window before target_kind is ever reached.
     for i in range(105):
         conn.execute(
-            "INSERT INTO facts (id, kind, ts, observer, origin, payload) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
+            "INSERT INTO facts (id, kind, ts, observer, origin, payload, "
+            "arrival_ordinal, arrival_seq) VALUES (?, ?, ?, ?, ?, ?, "
+            "(SELECT COALESCE(MAX(arrival_ordinal), 0) + 1 FROM facts), 0)",
             (
                 f"CROWD{i:04d}", "crowd_kind", 5000.0 + i, "test", "",
                 json.dumps({"topic": f"crowd-{i}", "message": "needle"}),

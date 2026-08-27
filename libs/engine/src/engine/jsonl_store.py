@@ -160,6 +160,7 @@ not refused (above).
 
 from __future__ import annotations
 
+import contextlib
 import itertools
 import logging
 import os
@@ -167,6 +168,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any, Generic, TypeVar
 
+from .arrival_projection import has_rows
 from .canonical_audit import (
     FACT_COUNT_KEY as _FACT_COUNT_KEY,
 )
@@ -186,10 +188,15 @@ from .jsonl_codec import (
     serialize_fact_row,
     serialize_tick_row,
 )
-from .residence import log_path_for
+from .residence import canonical_for
 from .sql_util import sqlite_busy
 from .sqlite_store import (
+    FACT_ALL_COLUMNS,
+    FACT_COLUMN_INDEX,
+    FACT_COLUMNS,
     FACT_INSERT_SQL,
+    TICK_COLUMN_INDEX,
+    TICK_COLUMNS,
     TICK_INSERT_SQL,
     SqliteStore,
 )
@@ -249,51 +256,62 @@ def _as_int(value: object) -> int | None:
 def open_canonical_store(canonical: Path, **kwargs: Any) -> SqliteStore[Any]:
     """Open the right store class for a store locator (see ``engine.residence``).
 
-    ``.jsonl`` → :class:`JsonlStore` over the sibling index; anything else →
-    :class:`SqliteStore` at the path itself. One place to ask "which file is
-    authoritative here", so no write site can answer it differently.
+    ``.arrival`` → :class:`engine.arrival_store.ArrivalStore` over the
+    sibling index; ``.jsonl`` → :class:`JsonlStore` over the sibling index;
+    anything else → :class:`SqliteStore` at the path itself. One place to
+    ask "which file is authoritative here", so no write site can answer it
+    differently.
     """
-    from .residence import index_path_for, is_jsonl_canonical
+    from .residence import canonical_mode, index_path_for
 
     canonical = Path(canonical)
-    if is_jsonl_canonical(canonical):
+    mode = canonical_mode(canonical)
+    if mode == "arrival":
+        from .arrival_store import ArrivalStore
+
+        return ArrivalStore(
+            path=index_path_for(canonical), log_path=canonical, **kwargs
+        )
+    if mode == "jsonl":
         return JsonlStore(path=index_path_for(canonical), log_path=canonical, **kwargs)
     return SqliteStore(path=canonical, **kwargs)
 
 
-def _index_is_current(index: Path, canonical: Path) -> bool:
+def _stamped_offset_current(index: Path, log: Path, offset_key: str) -> bool:
     """Whether ``index`` has consumed the whole log — cheaply, read-only.
 
     One read-only sqlite connection for the stamped offset and one ``stat``
-    for the log's size; no scan, no lock, no store construction. Anything
-    that makes the answer unknowable (no index tables yet, no offset marker,
-    a value that isn't an integer, an unreadable db) answers "not current":
-    the honest response is to let :class:`JsonlStore`'s catch-up decide,
-    which is where every recovery rule already lives.
+    for the log's size; no scan, no lock, no store construction. The one
+    currency rule for every log-canonical mode — ``offset_key`` names which
+    cursor family the store stamps. Anything that makes the answer
+    unknowable (no index tables yet, no offset marker, a value that isn't
+    an integer, an unreadable db) answers "not current": the honest
+    response is to let the store's own catch-up decide, which is where
+    every recovery rule already lives.
     """
     import sqlite3
 
     from .declaration import _open_readonly
 
     try:
-        size = canonical.stat().st_size
+        size = log.stat().st_size
     except OSError:
         return True  # no log to be behind
     if size == 0:
         # Nothing durable exists, so nothing durable can be unindexed. Says
         # current without touching the db at all — an index that is wrong
-        # about an empty log is a JsonlStore-open concern (it refuses), not
-        # something a read-path resolve should provoke.
+        # about an empty log is an open-time concern (the store refuses),
+        # not something a read-path resolve should provoke.
         return True
     # A quarter-second, not _open_readonly's 5s default: this runs on every
     # read resolve, and "a writer is holding the lock" is a fine reason to
-    # answer "not current" and let JsonlStore's catch-up decide.
+    # answer "not current" and let the store's catch-up decide.
     conn = _open_readonly(index, timeout=0.25)
     if conn is None:
         return False
     try:
         row = conn.execute(
-            "SELECT value FROM store_meta WHERE key = ?", (_OFFSET_KEY,)
+            "SELECT value FROM store_meta WHERE key = ?", (offset_key,)
         ).fetchone()
     except sqlite3.Error:
         return False
@@ -317,21 +335,27 @@ def ensure_index(canonical: Path) -> Path:
     ``index.exists()`` left every read-only invocation — which never
     constructs a ``JsonlStore`` — silently omitting canonical facts until
     some writer happened along. So an existing index is checked for
-    staleness (:func:`_index_is_current`: one read-only meta read, one
-    stat) and opened only when it is behind.
+    staleness (:func:`_stamped_offset_current`: one read-only meta read,
+    one stat) and opened only when it is behind.
 
     A no-op — no store constructed, no lock taken — when ``canonical`` is
-    not JSONL-canonical, when the log itself is missing (nothing to build
-    from; let the caller's own not-found handling speak), or when the index
-    is already current. Read paths may call this on every resolve.
+    sqlite-canonical (there is no separate index to materialize), when the
+    log itself is missing (nothing to build from; let the caller's own
+    not-found handling speak), or when the index is already current. Read
+    paths may call this on every resolve.
     """
-    from .residence import index_path_for, is_jsonl_canonical
+    from .residence import canonical_mode, index_path_for
 
     canonical = Path(canonical)
     index = index_path_for(canonical)
-    if not is_jsonl_canonical(canonical) or not canonical.exists():
+    mode = canonical_mode(canonical)
+    if mode == "sqlite" or not canonical.exists():
         return index
-    if index.exists() and _index_is_current(index, canonical):
+    if mode == "arrival":
+        from .arrival_store import ensure_arrival_index
+
+        return ensure_arrival_index(canonical)
+    if index.exists() and _stamped_offset_current(index, canonical, _OFFSET_KEY):
         return index
     store: JsonlStore[Any] = JsonlStore(
         path=index,
@@ -376,7 +400,7 @@ class JsonlStore(SqliteStore[T], Generic[T]):
     def __init__(self, *, log_path: Path | None = None, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self._log_path = (
-            Path(log_path) if log_path is not None else log_path_for(self._path)
+            Path(log_path) if log_path is not None else canonical_for(self._path, "jsonl")
         )
         try:
             self._open_index()
@@ -435,10 +459,8 @@ class JsonlStore(SqliteStore[T], Generic[T]):
             quarantine = self._path.with_name(
                 f"{self._path.name}.corrupt.{os.getpid()}-{next(_QUARANTINE_SEQ)}"
             )
-            try:
+            with contextlib.suppress(FileNotFoundError):
                 self._path.replace(quarantine)  # atomic, evidence preserved
-            except FileNotFoundError:
-                pass
             for stale in sqlite_sidecars(self._path):
                 stale.unlink(missing_ok=True)
             super().__init__(**kwargs)  # fresh empty index at the same path
@@ -449,6 +471,7 @@ class JsonlStore(SqliteStore[T], Generic[T]):
         try:
             self._ensure_fact_signature_column()
             self._ensure_chain_columns()
+            self._ensure_coordinate_schema()
             self._ensure_meta_table()
             self.catch_up()
         except BaseException:
@@ -526,8 +549,14 @@ class JsonlStore(SqliteStore[T], Generic[T]):
             os.fsync(fh.fileno())
             return fh.tell()
 
+    # ---- write half ---------------------------------------------------
+
     def _write(
-        self, sql: str, row: tuple, serialize_row, is_fact: bool
+        self,
+        sql: str,
+        row: tuple,
+        serialize_row: Callable[[tuple], str],
+        is_fact: bool,
     ) -> str | None:
         """Stage the INSERT, make the line durable, then stamp and commit.
 
@@ -553,6 +582,13 @@ class JsonlStore(SqliteStore[T], Generic[T]):
         # bytes still come from the read-back row below.
         serialize_row(row)
         try:
+            table = "facts" if is_fact else "ticks"
+            columns = FACT_COLUMNS if is_fact else TICK_COLUMNS
+            if len(row) == len(columns):
+                ord_val = self._conn.execute(
+                    f"SELECT COALESCE(MAX(arrival_ordinal), 0) + 1 FROM {table}"
+                ).fetchone()[0]
+                row = (*row, ord_val, 0)
             self._conn.execute(sql, row)
             # Committed-row honesty (SOL-R3-02 + SOL-R4-02/03): read the
             # COMPLETE row back after the INSERT (AFTER triggers fired),
@@ -560,10 +596,13 @@ class JsonlStore(SqliteStore[T], Generic[T]):
             # log line both report what the index will actually hold; an
             # absent row refuses.
             committed_row = self._committed_full_row(
-                "facts" if is_fact else "ticks", row[0]
+                table, row[0]
             )
-            committed = committed_row[-1]  # signature is the last column
-            line = serialize_row(committed_row)
+            sig_col_idx = (
+                FACT_COLUMN_INDEX if is_fact else TICK_COLUMN_INDEX
+            )["signature"]
+            committed = committed_row[sig_col_idx]
+            line = serialize_row(committed_row[:-2])
             # The INSERT has taken sqlite's write lock, so the committed
             # markers read here cannot be raced by another handle: whatever
             # a concurrent writer stamped is already visible, and nothing
@@ -633,7 +672,14 @@ class JsonlStore(SqliteStore[T], Generic[T]):
         and unindexed — the standard recoverable state the next
         open/reconcile tails forward, all N rows atomically.
         """
-        line = serialize_batch(rows) if len(rows) > 1 else serialize_fact_row(rows[0])
+        persisted_rows = [
+            r[:-2] if len(r) == len(FACT_ALL_COLUMNS) else r for r in rows
+        ]
+        line = (
+            serialize_batch(persisted_rows)
+            if len(persisted_rows) > 1
+            else serialize_fact_row(persisted_rows[0])
+        )
         # Same committed-marker discipline as _write: the staged INSERTs
         # hold sqlite's write lock, so the marker read here cannot be raced.
         marked = self._marked_counts()
@@ -665,11 +711,14 @@ class JsonlStore(SqliteStore[T], Generic[T]):
         if size == 0:
             # No log yet. An index with rows but no log is not a
             # JSONL-canonical store — refuse rather than invent a log.
-            if self._has_rows():
+            if has_rows(self._conn):
                 raise JsonlCanonicalUnsupported(
                     f"{self._path} has indexed rows but no canonical log at "
-                    f"{self._log_path} — export it first "
-                    "(store.jsonl.export_jsonl), then open it JSONL-canonical"
+                    f"{self._log_path} — JSONL-canonical is frozen legacy and "
+                    "the sqlite-to-JSONL export bridge is gone, so this log "
+                    "cannot be produced; open it as a plain SqliteStore, or "
+                    "migrate it to an arrival log "
+                    "(engine.arrival_store.ArrivalStore)"
                 )
             self._index_offset(0, 0, 0)
             return "empty"
@@ -734,15 +783,11 @@ class JsonlStore(SqliteStore[T], Generic[T]):
             f"log accounts for {expect_facts}/{expect_ticks}. "
             "Out-of-band writers (store.merge, store.receive, rebirth, "
             "compact) are not wired for a JSONL-canonical store. Recovery: "
-            "open it as a plain SqliteStore and re-export the log "
-            "(store.jsonl.export_jsonl) before reopening JSONL-canonical."
+            "open it as a plain SqliteStore, or migrate it to an arrival log "
+            "(engine.arrival_store.ArrivalStore) — JSONL-canonical is frozen "
+            "legacy and the sqlite-to-JSONL export bridge is gone, so the log "
+            "cannot be rebuilt to account for these rows."
         )
-
-    def _has_rows(self) -> bool:
-        for table in ("facts", "ticks"):
-            if self._conn.execute(f"SELECT EXISTS(SELECT 1 FROM {table})").fetchone()[0]:
-                return True
-        return False
 
     def _index_offset(self, offset: int, facts: int, ticks: int) -> None:
         self._stamp(offset, facts, ticks)
@@ -869,6 +914,13 @@ class JsonlStore(SqliteStore[T], Generic[T]):
             # ceremony can never index as a subset. facts += N; the offset
             # stamps at the line's end as for any line.
             for t, row in deserialize_records(line):
+                table = "facts" if t == "fact" else "ticks"
+                columns = FACT_COLUMNS if t == "fact" else TICK_COLUMNS
+                if len(row) == len(columns):
+                    ord_val = self._conn.execute(
+                        f"SELECT COALESCE(MAX(arrival_ordinal), 0) + 1 FROM {table}"
+                    ).fetchone()[0]
+                    row = (*row, ord_val, 0)
                 try:
                     self._conn.execute(
                         FACT_INSERT_SQL if t == "fact" else TICK_INSERT_SQL, row
@@ -927,6 +979,10 @@ class JsonlStore(SqliteStore[T], Generic[T]):
         ``own_lineage`` (which ``_decl.genesis`` row is *self*) is identity,
         not fact — it is not in the log and cannot be re-derived from it.
 
+        Window commitments and witness positions are defined on the arrival
+        coordinate (arrival_ordinal, arrival_seq), so seal verification survives
+        rebuilds structurally rather than relying on rowid reproduction.
+
         The FTS index is dropped in the same transaction. ``facts`` has no
         ``AUTOINCREMENT``, so ``DELETE FROM facts`` resets sqlite's rowid
         counter and re-indexed rows take rowids that previously named other
@@ -953,14 +1009,14 @@ class JsonlStore(SqliteStore[T], Generic[T]):
     # ---- refusals ------------------------------------------------------
 
     def reanchor(self, *args: Any, **kwargs: Any):  # noqa: D102
-        # Scope pin: reanchor is history-mutating, not append-shaped — it
-        # belongs to the (undesigned) log-rewrite ceremony. The append-shaped
-        # ceremonies (absorb_genesis/absorb_edit) are inherited and land
-        # through the _ceremony_persist seam.
+        # PERMANENT, not deferred (cut B): the queued log-rewrite ceremony is
+        # RETIRED rather than pending. The append-shaped ceremonies
+        # (absorb_genesis/absorb_edit) are inherited and land through the
+        # _ceremony_persist seam; nothing history-mutating joins them.
         raise JsonlCanonicalUnsupported(
-            "reanchor is not wired for a JSONL-canonical store: it would "
-            "rewrite sqlite rows while the canonical log kept the originals, "
-            "so the index would stop being a function of the log. See "
-            "design/architecture/jsonl-canonical-store — the log-rewrite "
-            "ceremony is a later slice."
+            "reanchor is not an operation a jsonl-canonical store has, and "
+            "it is not a later slice's either: it would rewrite sqlite rows "
+            "while the canonical log kept the originals, so the index would "
+            "stop being a function of the log. Rewriting a log is not an "
+            "operation in this model."
         )

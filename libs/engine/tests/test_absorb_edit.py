@@ -244,11 +244,12 @@ class TestAbsorbEditPrimitive:
         # Append a self-lineage decl row with a ts far in the PAST at the
         # highest rowid. Under (ts, id) it would be invisible as head.
         conn = sqlite3.connect(str(db))
+        ord_val = conn.execute("SELECT COALESCE(MAX(arrival_ordinal), 0) + 1 FROM facts").fetchone()[0]
         conn.execute(
-            "INSERT INTO facts (id, kind, ts, observer, origin, payload, signature) "
-            "VALUES (?, ?, ?, ?, ?, ?, NULL)",
+            "INSERT INTO facts (id, kind, ts, observer, origin, payload, signature, arrival_ordinal, arrival_seq) "
+            "VALUES (?, ?, ?, ?, ?, ?, NULL, ?, 0)",
             ("01BACKDATED0000000000000A", DECL_KIND_DEFINED, 1.0, "obs", "",
-             json.dumps({"lineage": lineage, "subject": "b", "order": 1})),
+             json.dumps({"lineage": lineage, "subject": "b", "order": 1}), ord_val),
         )
         conn.commit()
         max_rowid, max_ts_id = conn.execute(

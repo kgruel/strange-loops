@@ -155,8 +155,8 @@ class TestEraFloor:
         conn = sqlite3.connect(str(tmp_db))
         conn.execute(
             "INSERT INTO ticks (id, name, ts, since, origin, payload, "
-            "prev_hash, window_start, fact_cursor, window_hash, signature) "
-            "VALUES ('t0','legacy',0,NULL,'x','{}',NULL,NULL,NULL,NULL,'FAKESIG')"
+            "prev_hash, window_start, fact_cursor, window_hash, signature, arrival_ordinal, arrival_seq) "
+            "VALUES ('t0','legacy',0,NULL,'x','{}',NULL,NULL,NULL,NULL,'FAKESIG', 2, 0)"
         )
         conn.commit()
         conn.close()
@@ -255,16 +255,16 @@ class TestTamperDetection:
         assert any("window_hash" in b["reason"] for b in report["breaks"])
 
     def test_displaced_fact_breaks_window(self, tmp_db: Path):
-        """Windows are witness-order (rowid) ranges — moving a covered row
+        """Windows are arrival coordinate ((arrival_ordinal, arrival_seq)) ranges — moving a covered row
         out of its sealed range changes window content: break. Append-only
-        leaves no rowid gaps, so wedging a row INTO a sealed window requires
+        leaves no ordinal gaps, so wedging a row INTO a sealed window requires
         displacing one — equally detected."""
         store = make_store(tmp_db)
         ids = emit(store, 3)
         tick(store)
 
         store._conn.execute(
-            "UPDATE facts SET rowid = 1000 WHERE id = ?", (ids[1],)
+            "UPDATE facts SET arrival_ordinal = 1000 WHERE id = ?", (ids[1],)
         )
         store._conn.commit()
 
@@ -907,8 +907,8 @@ class TestReanchor:
         store = make_store(tmp_db)
         emit(store, 1)
         store._conn.execute(
-            "INSERT INTO ticks (id, name, ts, since, origin, payload) "
-            "VALUES ('t-legacy', 'legacy', 1.0, NULL, '', '{}')"
+            "INSERT INTO ticks (id, name, ts, since, origin, payload, arrival_ordinal, arrival_seq) "
+            "VALUES ('t-legacy', 'legacy', 1.0, NULL, '', '{}', 2, 0)"
         )
         store._conn.commit()
         store.close()

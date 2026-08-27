@@ -6,7 +6,6 @@ Validates:
 - Merge idempotence: merge(A, A) and repeated merge operations are no-ops.
 - Id-collision behavior probe: primary-key deduplication (target-wins).
 - Transport roundtrip: slice -> push -> receive preserves fact set and replay sequence.
-- JSONL <-> SQLite consistency: export_jsonl -> rebuild_jsonl preserves replay sequences.
 - Witness prefix invariance: merging backdated facts preserves earlier witness fold.
 """
 
@@ -30,10 +29,8 @@ from lang.document import genesis_payload
 
 from store import (
     LocalTransport,
-    export_jsonl,
     merge_store,
     push_store,
-    rebuild_jsonl,
 )
 from tests.strategies import (
     fact_and_id_lists,
@@ -326,7 +323,11 @@ class TestMergeIdempotenceProperties:
 
 
 class TestMergeIdCollisionProbe:
-    """Probe tests asserting the engine's primary-key collision resolution policy."""
+    """Probe tests asserting the LEGACY SQLITE arm's primary-key collision policy.
+
+    Scope: sqlite targets only (the frozen pre-arrival family). The ARRIVAL
+    arm refuses the same collision — store.merge.MergeDivergence, pinned in
+    test_arrival_merge.py::TestDivergenceRefusal (CX-BR-01)."""
 
     @settings(deadline=None, max_examples=50)
     @given(
@@ -412,45 +413,7 @@ class TestTransportRoundtripProperties:
 
 
 # =============================================================================
-# 6. JSONL <-> SQLite Consistency
-# =============================================================================
-
-
-class TestJsonlSqliteConsistencyProperties:
-    """Property tests asserting JSONL export and SQLite rebuild consistency."""
-
-    @settings(deadline=None, max_examples=50)
-    @given(facts=fact_and_id_lists(min_size=1, max_size=12))
-    def test_jsonl_sqlite_roundtrip_replay_consistency(
-        self,
-        facts: list[tuple[str, Fact]],
-    ) -> None:
-        """Exporting a store to JSONL and rebuilding it preserves the exact replay sequence."""
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            tmp_path = Path(tmp_dir)
-
-            source = tmp_path / "source.db"
-            jsonl_path = tmp_path / "log.jsonl"
-            rebuilt = tmp_path / "rebuilt.db"
-
-            _populate_store(source, facts)
-
-            export_res = export_jsonl(source, jsonl_path)
-            assert export_res.facts == len(facts)
-
-            rebuild_res = rebuild_jsonl(jsonl_path, rebuilt)
-            assert rebuild_res.facts == len(facts)
-
-            source_facts = _read_all_facts(source)
-            rebuilt_facts = _read_all_facts(rebuilt)
-
-            seq_source = [(f["ts"], f["id"], f["kind"], f["payload"]) for f in source_facts]
-            seq_rebuilt = [(f["ts"], f["id"], f["kind"], f["payload"]) for f in rebuilt_facts]
-            assert seq_rebuilt == seq_source
-
-
-# =============================================================================
-# 7. Witness Prefix Invariance Under Real Merge
+# 6. Witness Prefix Invariance Under Real Merge
 # =============================================================================
 
 

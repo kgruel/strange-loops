@@ -1,12 +1,12 @@
 """Witness positions — the read-path temporal cursor (SPEC §9.3, 0.8.0 session 1).
 
 A cursor denotes the **inclusive witness prefix** of rows a store had received at
-a position: ``WHERE rowid <= resolved``. The selected prefix — domain facts and
-self-lineage ``_decl.*`` rows alike — is then replayed in receipt order
-(``rowid`` ascending, the same axis the prefix was cut on), and ontology
+a position: ``WHERE arrival_ordinal <= resolved``. The selected prefix — domain facts and
+self-lineage ``_decl.*`` rows alike — is then replayed in arrival order
+(``arrival_ordinal, arrival_seq`` ascending, the same axis the prefix was cut on), and ontology
 resolves from the ``_decl`` rows *in the same prefix* (equal cursors ⇒ same
 position for selection and ontology). This is the "what a reader at P could
-have seen" honesty of §9.3, and under receipt-order replay it is close to
+have seen" honesty of §9.3, and under arrival-order replay it is close to
 tautological: a backdated fact lands at a *later* witness position, and folds
 there too, so it cannot reach back into what an earlier position showed.
 
@@ -20,17 +20,17 @@ Design invariants this module pins:
 - **Identity is a fact id, resolved by primary-key lookup ONLY** (A3). Ids are
   never ordered or parsed for cursor purposes — the corpus mixes uuid4-era and
   ULID-era ids, and even pure-ULID stores are not within-millisecond monotonic
-  (see :func:`~engine.sqlite_store.gen_id`). ``id -> rowid`` is a ``WHERE id = ?``
-  point lookup; ``rowid`` (append order) is the witness axis.
+  (see :func:`~engine.sqlite_store.gen_id`). ``id -> arrival_ordinal`` is a ``WHERE id = ?``
+  point lookup; ``arrival_ordinal`` (append order) is the witness axis.
 
-- **Facts-only axis** (A1). Facts and ticks occupy separate rowid domains with no
+- **Facts-only axis** (A1). Facts and ticks occupy separate coordinate domains with no
   durable cross-table receipt log in 0.8.0; the fold boundary needs only the
   facts axis (ticks never feed fold state). A store-wide receipt ordinal
   (GlobalReceiptPosition) is a queued protocol amendment, not smuggled in here.
 
 - **Receipt-group atomicity** (A2). An absorb-edit ceremony writes multiple
   ``_decl.*`` rows atomically — one ``BEGIN IMMEDIATE``, one stamped effective
-  ``ts``, contiguous rowids (``sqlite_store.absorb_edit``). A cursor that lands
+  ``ts``, contiguous ordinals (``sqlite_store.absorb_edit``). A cursor that lands
   *strictly inside* such a group would select a half-applied ceremony, so
   resolution **refuses on ambiguity** (:class:`MidReceiptGroupPosition`) rather
   than silently folding a partial ontology. The guard lives at the engine
@@ -64,7 +64,7 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
     from atoms.fold_state import FoldState
 
 #: The empty / start-of-store cursor: the position *before* the first received
-#: row. Its prefix (``rowid <= 0``) is empty. Distinct from "head" (newest row).
+#: row. Its prefix (``arrival_ordinal <= -1``) is empty. Distinct from "head" (newest row).
 GENESIS_SENTINEL = ""
 
 
@@ -98,18 +98,29 @@ class MidReceiptGroupPosition(WitnessResolutionError):
 class WitnessAggregateUnsupported(WitnessResolutionError):
     """A witness position was handed to a combine/discover (aggregate) read.
 
-    Witness positions are per-store — they resolve against one store's rowid
-    axis. An aggregate has no shared witness order across members (A1/A9); a
+    Witness positions are per-store — they resolve against one store's arrival
+    coordinate axis. An aggregate has no shared witness order across members (A1/A9); a
     ``seq:``/``fact:`` handle is member-scoped. Address the member store
     directly, or use the event-time ``as_of`` projection for a uniform
     aggregate answer.
     """
 
 
+class WitnessAxisMismatch(WitnessResolutionError):
+    """A position's arrival axis is not the target store's arrival axis.
+
+    Distinct from A10 (:class:`WitnessLineageMismatch`), which keys on the
+    DECLARATION lineage and the store path. This one fires on the SAME path:
+    a store file replaced in place is a different coordinate axis wearing the
+    old address, and its ordinals mean something else. Refused separately
+    because A10's prose describes a failure this is not.
+    """
+
+
 class WitnessLineageMismatch(WitnessResolutionError):
     """A witness position is applied to a store it was not resolved against (A10).
 
-    A position's ``rowid`` indexes ONE store's append order; applying it to a
+    A position's arrival coordinates index ONE store's append order; applying it to a
     different store selects an unrelated prefix. A read is accepted only when the
     target store IS the store the position was resolved against (same resolved
     path — always valid, unadopted handles included, N1) or when the position is
@@ -122,8 +133,8 @@ class WitnessLineageMismatch(WitnessResolutionError):
 class SeqOutOfRange(WitnessResolutionError):
     """A ``seq:N`` address names a receipt ordinal outside ``[1, total rows]``.
 
-    ``seq`` is a 1-based receipt ordinal over ALL rows in rowid (append)
-    order, ``_decl.*`` included — the inverse of :attr:`WitnessPosition.seq`.
+    ``seq`` is a 1-based receipt ordinal over ALL rows in arrival order,
+    ``_decl.*`` included — the inverse of :attr:`WitnessPosition.seq`.
     """
 
 
@@ -165,19 +176,22 @@ class TickAnchor:
 class WitnessPosition:
     """A resolved inclusive witness prefix — the rows a reader at P had received.
 
-    Produced by :func:`resolve_witness_position`; the resolved ``rowid`` is the
-    selection cutoff (``WHERE rowid <= rowid``). Frozen: a position is a fixed
+    Produced by :func:`resolve_witness_position`; the resolved ``ordinal`` is the
+    selection cutoff (``WHERE arrival_ordinal <= ordinal``). Frozen: a position is a fixed
     point, never a moving token (head is captured atomically at resolve time).
     """
 
     #: The durable canonical handle — the fact id at this position.
     #: :data:`GENESIS_SENTINEL` (``""``) for the empty/start-of-store position.
     fact_id: str
-    #: Append-order cutoff. The prefix is every row with ``rowid <= rowid``.
-    #: ``0`` is the empty prefix (before the first row).
-    rowid: int
+    #: The log whose ordinal axis this indexes; None = no arrival axis
+    #: (legacy store / storeless bootstrap).
+    arrival_lineage: str | None
+    #: Append-order cutoff. The prefix is every row with ``arrival_ordinal <= ordinal``.
+    #: ``-1`` is the empty prefix (before the first row).
+    ordinal: int
     #: Receipt ordinal — the count of rows at-or-before this position
-    #: (``ROW_NUMBER`` over rowid order, display-tier, per-store). Includes
+    #: (``ROW_NUMBER`` over arrival order, display-tier, per-store). Includes
     #: ``_decl.*`` rows in the count, matching the ``seq:N`` address form.
     seq: int
     #: The store's own lineage id, or ``None`` when the store is unadopted.
@@ -188,11 +202,22 @@ class WitnessPosition:
     #: The last sealed tick at-or-before this position, or ``None`` (A12).
     anchor: TickAnchor | None
     #: The resolved (canonical, absolute) path of the store this position was
-    #: resolved against. A position's rowid is meaningful ONLY in this store;
+    #: resolved against. A position's ordinal is meaningful ONLY in this store;
     #: :func:`verify_position_for_store` uses it to refuse cross-store misuse
     #: (A10) — especially for unadopted handles, which have no lineage to
     #: qualify them with.
     store: str
+
+
+def _read_arrival_lineage(conn: sqlite3.Connection) -> str | None:
+    """Read the store's arrival log lineage from store_meta, or None if unindexed/legacy."""
+    try:
+        row = conn.execute(
+            "SELECT value FROM store_meta WHERE key = 'arrival_lineage'"
+        ).fetchone()
+        return row[0] if row else None
+    except sqlite3.OperationalError:
+        return None
 
 
 def _lineage_of(payload_text: str) -> str | None:
@@ -203,14 +228,14 @@ def _lineage_of(payload_text: str) -> str | None:
         return None
 
 
-def receipt_group_span(conn: sqlite3.Connection, rowid: int) -> tuple[int, int] | None:
-    """If ``rowid`` falls strictly inside a receipt group, return its span.
+def receipt_group_span(conn: sqlite3.Connection, ordinal: int) -> tuple[int, int] | None:
+    """If ``ordinal`` falls strictly inside a receipt group, return its span.
 
     A receipt group is a maximal run of ``_decl.*`` rows that are **contiguous in
-    rowid** and share one effective ``ts`` and one ``lineage`` — the atomic
+    ordinal** and share one effective ``ts`` and one ``lineage`` — the atomic
     footprint of one absorb ceremony (``sqlite_store.absorb_edit``: one
-    ``BEGIN IMMEDIATE``, one stamped ``ts``). Returns ``(first_rowid,
-    last_rowid)`` when ``first <= rowid < last`` (the prefix would include a
+    ``BEGIN IMMEDIATE``, one stamped ``ts``). Returns ``(first_ordinal,
+    last_ordinal)`` when ``first <= ordinal < last`` (the prefix would include a
     *partial* ceremony); ``None`` otherwise — a cutoff at-or-after the group's
     last row includes the whole ceremony (fine), and a genesis or a lone edit is
     a singleton run that can never be mid-group.
@@ -222,41 +247,47 @@ def receipt_group_span(conn: sqlite3.Connection, rowid: int) -> tuple[int, int] 
     store-wide today).
     """
     rows = conn.execute(
-        "SELECT rowid, ts, payload FROM facts WHERE kind GLOB '_decl.*' ORDER BY rowid"
+        "SELECT arrival_ordinal, ts, payload FROM facts "
+        "WHERE kind GLOB '_decl.*' ORDER BY arrival_ordinal, arrival_seq"
     ).fetchall()
     if not rows:
         return None
     runs: list[tuple[int, int]] = []
-    run_start = prev_rowid = rows[0][0]
+    run_start = prev_ord = rows[0][0]
     prev_ts = rows[0][1]
     prev_lineage = _lineage_of(rows[0][2])
-    for rid, ts, payload_text in rows[1:]:
+    for ord_val, ts, payload_text in rows[1:]:
         lineage = _lineage_of(payload_text)
-        if rid == prev_rowid + 1 and ts == prev_ts and lineage == prev_lineage:
+        # Contiguous OR equal: rows expanded from ONE arrival record share an
+        # ordinal (they differ only in ``arrival_seq``), so equality continues
+        # the run just as adjacency does.
+        contiguous = ord_val in (prev_ord, prev_ord + 1)
+        if contiguous and ts == prev_ts and lineage == prev_lineage:
             pass  # same ceremony — extend the run
         else:
-            runs.append((run_start, prev_rowid))
-            run_start = rid
-        prev_rowid, prev_ts, prev_lineage = rid, ts, lineage
-    runs.append((run_start, prev_rowid))
+            runs.append((run_start, prev_ord))
+            run_start = ord_val
+        prev_ord, prev_ts, prev_lineage = ord_val, ts, lineage
+    runs.append((run_start, prev_ord))
     for first, last in runs:
-        if first <= rowid < last:
+        if first <= ordinal < last:
             return (first, last)
     return None
 
 
-def _resolve_anchor(conn: sqlite3.Connection, rowid: int) -> TickAnchor | None:
-    """Last sealed tick whose ``fact_cursor`` resolves at-or-before ``rowid``.
+def _resolve_anchor(conn: sqlite3.Connection, ordinal: int) -> TickAnchor | None:
+    """Last sealed tick whose ``fact_cursor`` resolves at-or-before ``ordinal``.
 
-    Joins ``ticks.fact_cursor`` to ``facts.id`` (the same id→rowid resolution the
-    window hash uses) and takes the highest cursor-rowid within the prefix. Pre-
+    Joins ``ticks.fact_cursor`` to ``facts.id`` (the same id→ordinal resolution the
+    window hash uses) and takes the highest cursor-ordinal within the prefix. Pre-
     chain schemas (no ``fact_cursor`` column) and pre-chain rows (empty cursor)
     contribute nothing — honestly no anchor.
 
     Tie-break: when several ticks seal the SAME ``fact_cursor`` (a re-fired
-    boundary), the LAST-appended tick wins (``t.rowid DESC``) — the "last tick"
-    the docstring promises, resolved deterministically rather than by whichever
-    row the engine happened to return.
+    boundary), the LAST-appended tick wins (``t.arrival_ordinal DESC,
+    t.arrival_seq DESC``) — the "last tick" the docstring promises, resolved
+    deterministically rather than by whichever row the engine happened to
+    return.
     """
     tick_cols = {r[1] for r in conn.execute("PRAGMA table_info(ticks)")}
     if "fact_cursor" not in tick_cols:
@@ -265,8 +296,10 @@ def _resolve_anchor(conn: sqlite3.Connection, rowid: int) -> TickAnchor | None:
         "SELECT t.name, t.ts, t.fact_cursor FROM ticks t "
         "JOIN facts f ON f.id = t.fact_cursor "
         "WHERE t.fact_cursor IS NOT NULL AND t.fact_cursor <> '' "
-        "AND f.rowid <= ? ORDER BY f.rowid DESC, t.rowid DESC LIMIT 1",
-        (rowid,),
+        "AND f.arrival_ordinal <= ? "
+        "ORDER BY f.arrival_ordinal DESC, f.arrival_seq DESC, "
+        "t.arrival_ordinal DESC, t.arrival_seq DESC LIMIT 1",
+        (ordinal,),
     ).fetchone()
     if row is None:
         return None
@@ -295,32 +328,34 @@ def _resolve_witness_position_on_conn(
     ``verify_position_for_store``'s cross-store guard) — no I/O against it
     here; all reads go through ``conn``.
     """
-    fact_id, rowid = _resolve_address_rowid(conn, address)
-    span = None if group_boundary == "allow" else receipt_group_span(conn, rowid)
+    fact_id, ordinal = _resolve_address_ordinal(conn, address)
+    span = None if group_boundary == "allow" else receipt_group_span(conn, ordinal)
     if span is not None:
         if group_boundary == "floor":
             # Snap OUT of the ceremony to the position just before its first
             # row — the last complete state (M3). Floor forms land on solid
             # ground rather than refusing.
-            rowid = span[0] - 1
-            fact_id = _id_at_rowid(conn, rowid)
+            ordinal = span[0] - 1
+            fact_id = _id_at_ordinal(conn, ordinal)
         else:  # "refuse" — an exact fact:/seq: form never silently snaps.
             raise MidReceiptGroupPosition(
-                f"witness position {address!r} (rowid {rowid}) lands inside "
-                f"the atomic receipt group at rowids {span[0]}..{span[1]} — "
+                f"witness position {address!r} (ordinal {ordinal}) lands inside "
+                f"the atomic receipt group at ordinals {span[0]}..{span[1]} — "
                 "a declaration edit ceremony is all-or-nothing. Address the "
-                f"position at-or-after rowid {span[1]} (the ceremony's last "
+                f"position at-or-after ordinal {span[1]} (the ceremony's last "
                 "row) to include the whole edit, or before its first row to "
                 "exclude it."
             )
     marker = _read_own_lineage(conn)
     seq = conn.execute(
-        "SELECT COUNT(*) FROM facts WHERE rowid <= ?", (rowid,)
+        "SELECT COUNT(*) FROM facts WHERE arrival_ordinal <= ?", (ordinal,)
     ).fetchone()[0]
-    resolved_anchor = anchor if anchor is not None else _resolve_anchor(conn, rowid)
+    resolved_anchor = anchor if anchor is not None else _resolve_anchor(conn, ordinal)
+    arrival_lineage = _read_arrival_lineage(conn)
     return WitnessPosition(
         fact_id=fact_id,
-        rowid=rowid,
+        arrival_lineage=arrival_lineage,
+        ordinal=ordinal,
         seq=seq,
         lineage=marker,
         unadopted=marker is None,
@@ -347,7 +382,7 @@ def resolve_witness_position(
     - a full, canonical fact id — resolved by **primary-key lookup only** (A3);
       an unknown id raises :class:`UnknownWitnessHandle`. Prefix expansion and
       ``seq:``/``tick:``/wall-clock address forms are CLI-layer resolutions that
-      produce a fact id (or a rowid) to hand here.
+      produce a fact id to hand here.
 
     Runs the receipt-group guard (A2) — a mid-ceremony position raises
     :class:`MidReceiptGroupPosition`. Reads the ``own_lineage`` marker to set
@@ -468,27 +503,56 @@ def verify_position_for_store(
 ) -> WitnessPosition:
     """Return the position to APPLY against ``store_path``, or refuse (A10).
 
-    A witness position's ``rowid`` is an index into ONE store's append order;
-    applying it to another store silently selects an unrelated prefix. Cases:
+    A witness position's ``ordinal`` is an index into ONE store's arrival coordinate
+    axis; applying it to another store silently selects an unrelated prefix. Cases:
 
     - the target store IS the store the position was resolved against (same
-      resolved path) — returns ``at`` unchanged (its rowid is valid, unadopted
+      resolved path) — returns ``at`` unchanged (its ordinal is valid, unadopted
       handles included, N1);
     - the position is lineage-qualified (adopted) AND the target store shares
       that lineage — **re-resolves** ``at.fact_id`` in the target store and
-      returns the target-store position. The source rowid is NEVER reused: append
+      returns the target-store position. The source ordinal is NEVER reused: append
       order is per-store, so a merge that copied the fact reorders it (B1c). A
       fact id absent from the target raises :class:`UnknownWitnessHandle`;
       - an unadopted position (no lineage) on a different store, or a lineage
       mismatch, raises :class:`WitnessLineageMismatch` with teaching.
 
+    The SAME-PATH case carries one extra guard: a store file replaced in place
+    under the same path is a different coordinate axis wearing the old address.
+    When the position carries a real ``arrival_lineage`` AND the target is
+    arrival-canonical AND the two differ, the position is refused with the
+    separately-typed :class:`WitnessAxisMismatch` — NOT the A10 message, whose
+    prose describes a failure this is not. It fires only when BOTH sides carry a
+    real axis; a legacy (axis-less) position keeps the no-DB-hit fast path, and
+    the cross-store branches below are A10's alone (a same-lineage sibling store
+    legitimately has its own arrival log, and must re-resolve, not refuse).
+
     Called at every engine ``at=`` selector (``vertex_fold`` / ``vertex_facts`` /
-    ``resolve_declaration_documents``) before the rowid is applied, so no read
+    ``resolve_declaration_documents``) before the ordinal is applied, so no read
     layer trusts a foreign position — the guard that the in-memory check alone
     could not give once a handle is serialized and re-used across stores.
     """
     target = str(Path(store_path).resolve())
     if at.store == target:
+        if at.arrival_lineage is None:
+            return at
+        conn = _open_readonly(store_path, timeout=timeout)
+        try:
+            target_arrival_lineage = (
+                _read_arrival_lineage(conn) if conn is not None else None
+            )
+        finally:
+            if conn is not None:
+                conn.close()
+        if (
+            target_arrival_lineage is not None
+            and target_arrival_lineage != at.arrival_lineage
+        ):
+            raise WitnessAxisMismatch(
+                f"witness position arrival lineage ({at.arrival_lineage}) does not "
+                f"match target store arrival lineage ({target_arrival_lineage}) at {target} — "
+                "a position cannot be applied across different arrival log coordinate axes."
+            )
         return at
     if at.lineage is None:
         raise WitnessLineageMismatch(
@@ -511,25 +575,26 @@ def verify_position_for_store(
             "store, or re-resolve the position here."
         )
     # Same lineage, DIFFERENT store: re-resolve the fact id in the target store
-    # so the applied rowid is the TARGET's append position (B1c) — never the
+    # so the applied ordinal is the TARGET's append position (B1c) — never the
     # source's. The empty/genesis sentinel maps to the target's empty prefix.
     return resolve_witness_position(store_path, at.fact_id, timeout=timeout)
 
 
-def _resolve_address_rowid(conn: sqlite3.Connection, address: str) -> tuple[str, int]:
-    """Map an address to ``(fact_id, rowid)`` — primary-key lookup only (A3)."""
+def _resolve_address_ordinal(conn: sqlite3.Connection, address: str) -> tuple[str, int]:
+    """Map an address to ``(fact_id, ordinal)`` — primary-key lookup only (A3)."""
     if address == GENESIS_SENTINEL:
-        return GENESIS_SENTINEL, 0
+        return GENESIS_SENTINEL, -1
     if address == "head":
         row = conn.execute(
-            "SELECT id, rowid FROM facts ORDER BY rowid DESC LIMIT 1"
+            "SELECT id, arrival_ordinal FROM facts "
+            "ORDER BY arrival_ordinal DESC, arrival_seq DESC LIMIT 1"
         ).fetchone()
         if row is None:
-            return GENESIS_SENTINEL, 0  # empty store → empty prefix
+            return GENESIS_SENTINEL, -1  # empty store → empty prefix
         return row[0], row[1]
     # A full fact id — PK point lookup, never ordered or parsed.
     row = conn.execute(
-        "SELECT rowid FROM facts WHERE id = ?", (address,)
+        "SELECT arrival_ordinal FROM facts WHERE id = ?", (address,)
     ).fetchone()
     if row is None:
         raise UnknownWitnessHandle(
@@ -539,11 +604,15 @@ def _resolve_address_rowid(conn: sqlite3.Connection, address: str) -> tuple[str,
     return address, row[0]
 
 
-def _id_at_rowid(conn: sqlite3.Connection, rowid: int) -> str:
-    """The fact id at ``rowid``, or the empty sentinel for rowid <= 0."""
-    if rowid <= 0:
+def _id_at_ordinal(conn: sqlite3.Connection, ordinal: int) -> str:
+    """The fact id at ``ordinal``, or the empty sentinel for ordinal < 0."""
+    if ordinal < 0:
         return GENESIS_SENTINEL
-    row = conn.execute("SELECT id FROM facts WHERE rowid = ?", (rowid,)).fetchone()
+    row = conn.execute(
+        "SELECT id FROM facts WHERE arrival_ordinal <= ? "
+        "ORDER BY arrival_ordinal DESC, arrival_seq DESC LIMIT 1",
+        (ordinal,),
+    ).fetchone()
     return row[0] if row else GENESIS_SENTINEL
 
 
@@ -554,7 +623,7 @@ def durable_handle(pos: WitnessPosition) -> str | None:
 
     - **Adopted** store → ``fact:<lineage>/<id>`` — the lineage-qualified handle.
       Re-resolving it elsewhere verifies the lineage and re-resolves the id in
-      the target store (never reuses a rowid), so the same handle can never
+      the target store (never reuses an ordinal), so the same handle can never
       silently mean a different prefix across stores.
     - **Unadopted** store (no lineage), or the empty/genesis sentinel → ``None``:
       **durable serialization is REFUSED** (N1). The position is session-local;
@@ -589,20 +658,31 @@ def diff_interval_report(
       perturbs nothing the earlier position showed. What it tells the reader is
       that the ``(ts, id)`` read lens over this interval will order these rows
       differently from the fold, so a lens-ordered view of the window is not
-      the fold's history. Each entry is ``{"id", "kind", "ts"}``,
+      the fold's history. ("Arrival" here is the witness-time sense — when a
+      fact reached this store relative to event time — not the custody
+      coordinate the ``.arrival`` log names.) Each entry is
+      ``{"id", "kind", "ts"}``,
       newest-received first. ``_decl.*`` rows are excluded (domain facts
       only — a declaration change is reported separately below).
     - ``declaration_changed``: True when any ``_decl.*`` row falls in the
       interval — the ontology itself may have moved between the two
       positions (a rekey, a new kind, ...), independent of whether any
       domain payload changed.
+    - ``baseline``: "pos1" if pos1.ordinal <= pos2.ordinal else "pos2" naming
+      which input position is the lower endpoint.
 
-    Symmetric by rowid (``lo``/``hi`` = ``min``/``max(pos1.rowid,
-    pos2.rowid)``): ``--diff B..A`` (the later position named first) reports
-    identically to ``--diff A..B``. Both positions MUST be resolved against
-    the SAME store — the caller (``cli.views.fold._run_diff``) already
-    requires this, since both diff endpoints resolve against one vertex.
+    Symmetric by coordinate (``lo``/``hi`` = ``min``/``max(pos1.ordinal,
+    pos2.ordinal)``): ``--diff B..A`` (the later position named first) reports
+    identically to ``--diff A..B`` (except ``baseline`` names the lower endpoint).
+    Both positions pass through
+    :func:`verify_position_for_store` before their coordinates are compared —
+    the same guard every ``at=`` read selector applies — so a foreign
+    position fails structurally (:class:`WitnessLineageMismatch`, Law 4)
+    instead of silently indexing an unrelated prefix, and a same-lineage
+    position from another store re-resolves to THIS store's coordinate.
     """
+    pos1 = verify_position_for_store(pos1, store_path, timeout=timeout)
+    pos2 = verify_position_for_store(pos2, store_path, timeout=timeout)
     conn = _open_readonly(store_path, timeout=timeout)
     if conn is None:
         raise WitnessResolutionError(
@@ -610,30 +690,33 @@ def diff_interval_report(
             "interval report against it"
         )
     try:
-        lo, hi = sorted((pos1.rowid, pos2.rowid))
+        lo, hi = sorted((pos1.ordinal, pos2.ordinal))
+        baseline = "pos1" if pos1.ordinal <= pos2.ordinal else "pos2"
         if lo == hi:
-            return {"late_arrivals": [], "declaration_changed": False}
+            return {"late_arrivals": [], "declaration_changed": False, "baseline": baseline}
         newest_row = conn.execute(
-            "SELECT MAX(ts) FROM facts WHERE rowid <= ? AND kind NOT GLOB '_decl.*'",
+            "SELECT MAX(ts) FROM facts WHERE arrival_ordinal <= ? AND kind NOT GLOB '_decl.*'",
             (lo,),
         ).fetchone()
         newest_ts_at_lo = newest_row[0] if newest_row else None
         late_arrivals: list[dict] = []
         if newest_ts_at_lo is not None:
             rows = conn.execute(
-                "SELECT id, kind, ts FROM facts WHERE rowid > ? AND rowid <= ? "
-                "AND kind NOT GLOB '_decl.*' AND ts < ? ORDER BY rowid DESC",
+                "SELECT id, kind, ts FROM facts WHERE arrival_ordinal > ? AND arrival_ordinal <= ? "
+                "AND kind NOT GLOB '_decl.*' AND ts < ? "
+                "ORDER BY arrival_ordinal DESC, arrival_seq DESC",
                 (lo, hi, newest_ts_at_lo),
             ).fetchall()
             late_arrivals = [{"id": r[0], "kind": r[1], "ts": r[2]} for r in rows]
         decl_row = conn.execute(
-            "SELECT 1 FROM facts WHERE rowid > ? AND rowid <= ? "
+            "SELECT 1 FROM facts WHERE arrival_ordinal > ? AND arrival_ordinal <= ? "
             "AND kind GLOB '_decl.*' LIMIT 1",
             (lo, hi),
         ).fetchone()
         return {
             "late_arrivals": late_arrivals,
             "declaration_changed": decl_row is not None,
+            "baseline": baseline,
         }
     finally:
         conn.close()
@@ -670,9 +753,9 @@ def resolve_seq(store_path: Path, n: int, *, timeout: float = 5.0) -> str:
     """Resolve a ``seq:N`` receipt ordinal to its fact id.
 
     The inverse of :attr:`WitnessPosition.seq`: ``seq`` is a 1-based ordinal
-    over ALL rows in rowid (append) order, ``_decl.*`` included. This is a
-    rowid→id lookup (``ORDER BY rowid`` + offset), never an ordering of ids
-    (A3) — the resolved id still flows through
+    over ALL rows in arrival order, ``_decl.*`` included. This is an
+    arrival-order lookup (``ORDER BY arrival_ordinal, arrival_seq`` +
+    offset), never an ordering of ids (A3) — the resolved id still flows through
     :func:`resolve_witness_position` for the actual position (receipt-group
     guard, lineage, anchor).
 
@@ -688,7 +771,7 @@ def resolve_seq(store_path: Path, n: int, *, timeout: float = 5.0) -> str:
     try:
         row = (
             conn.execute(
-                "SELECT id FROM facts ORDER BY rowid LIMIT 1 OFFSET ?",
+                "SELECT id FROM facts ORDER BY arrival_ordinal, arrival_seq LIMIT 1 OFFSET ?",
                 (n - 1,),
             ).fetchone()
             if n >= 1

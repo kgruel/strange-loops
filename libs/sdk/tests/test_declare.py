@@ -176,8 +176,14 @@ def test_inspect_declaration_unadopted_lineage_error(tmp_path: Path) -> None:
 
     db_path = tmp_path / "unadopted.db"
     conn = sqlite3.connect(db_path)
-    conn.execute("CREATE TABLE facts (id TEXT, ts REAL, kind TEXT, payload TEXT)")
-    conn.execute("INSERT INTO facts VALUES ('1', 1.0, '_decl.genesis', '{}')")
+    # The coordinate columns are part of every post-D0 facts schema; a
+    # hand-rolled table without them is not a readable store at all, which
+    # would short-circuit before the marker check this test is about.
+    conn.execute(
+        "CREATE TABLE facts (id TEXT, ts REAL, kind TEXT, payload TEXT,"
+        " arrival_ordinal INTEGER, arrival_seq INTEGER)"
+    )
+    conn.execute("INSERT INTO facts VALUES ('1', 1.0, '_decl.genesis', '{}', 1, 0)")
     conn.execute("CREATE TABLE store_meta (key TEXT PRIMARY KEY, value TEXT)")
     conn.commit()
     conn.close()

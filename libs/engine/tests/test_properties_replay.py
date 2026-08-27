@@ -102,10 +102,11 @@ def _merge_facts_into_store(target_store: Path, fact_pairs: list[tuple[str, Fact
     conn = sqlite3.connect(str(target_store))
     for fid, fact in fact_pairs:
         payload_data = fact.payload if isinstance(fact.payload, dict) else fact.to_dict()["payload"]
+        ord_val = conn.execute("SELECT COALESCE(MAX(arrival_ordinal), 0) + 1 FROM facts").fetchone()[0]
         conn.execute(
-            "INSERT OR IGNORE INTO facts (id, kind, ts, observer, origin, payload, signature) "
-            "VALUES (?, ?, ?, ?, ?, ?, NULL)",
-            (fid, fact.kind, fact.ts, fact.observer, fact.origin, json.dumps(payload_data)),
+            "INSERT OR IGNORE INTO facts (id, kind, ts, observer, origin, payload, signature, arrival_ordinal, arrival_seq) "
+            "VALUES (?, ?, ?, ?, ?, ?, NULL, ?, 0)",
+            (fid, fact.kind, fact.ts, fact.observer, fact.origin, json.dumps(payload_data), ord_val),
         )
     conn.commit()
     conn.close()
@@ -324,7 +325,7 @@ class TestWitnessAppendInvarianceProperties:
 
             # Verify that head did advance and reflects the new facts
             head_pos = resolve_witness_position(store_path, "head")
-            assert head_pos.rowid > pos_p.rowid
+            assert head_pos.ordinal > pos_p.ordinal
             fold_head = vertex_fold(vpath, at=head_pos)
             items_head = _extract_fold_items(fold_head)
             decision_topics = [p.get("topic") for p in items_head.get("decision", [])]

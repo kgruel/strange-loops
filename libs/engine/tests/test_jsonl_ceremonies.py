@@ -30,7 +30,7 @@ from engine.canonical_audit import audit_agreement, audit_deep
 from engine.declaration import resolve_declaration_documents
 from engine.jsonl_codec import deserialize_records, deserialize_row
 from engine.jsonl_store import JsonlStore
-from engine.residence import log_path_for
+from engine.residence import canonical_for
 from engine.sqlite_store import (
     AmbiguousGenesis,
     GenesisExists,
@@ -102,7 +102,7 @@ def _changes(db: Path, target_text: str):
 def test_genesis_succeeds_and_log_carries_one_genesis_line(tmp_path):
     store = open_store(tmp_path)
     receipt = _genesis(store)
-    log = log_path_for(store._path)
+    log = canonical_for(store._path, "jsonl")
 
     assert receipt["signed"] is True
     assert receipt["chain_head"] is None and receipt["fact_cursor"] is None
@@ -143,7 +143,7 @@ def test_genesis_receipt_matches_sqlite_canonical_behavior(tmp_path):
 def test_second_genesis_refuses_and_log_is_byte_identical(tmp_path):
     store = open_store(tmp_path)
     _genesis(store)
-    log = log_path_for(store._path)
+    log = canonical_for(store._path, "jsonl")
     before = log.read_bytes()
     with pytest.raises(GenesisExists):
         _genesis(store)
@@ -157,7 +157,7 @@ def test_second_genesis_refuses_and_log_is_byte_identical(tmp_path):
 def test_multi_change_ceremony_lands_as_one_batch_line_and_resolves(tmp_path):
     store = open_store(tmp_path)
     _genesis(store)
-    db, log = store._path, log_path_for(store._path)
+    db, log = store._path, canonical_for(store._path, "jsonl")
 
     changes = _changes(db, EDIT_TWO)
     assert len(changes) >= 2
@@ -187,7 +187,7 @@ def test_multi_change_ceremony_lands_as_one_batch_line_and_resolves(tmp_path):
 def test_single_change_ceremony_is_a_plain_fact_line(tmp_path):
     store = open_store(tmp_path)
     _genesis(store)
-    db, log = store._path, log_path_for(store._path)
+    db, log = store._path, canonical_for(store._path, "jsonl")
 
     changes = _changes(db, EDIT_ONE)
     assert len(changes) == 1
@@ -207,7 +207,7 @@ def test_single_change_ceremony_is_a_plain_fact_line(tmp_path):
 def test_stale_head_refuses_with_log_byte_identical(tmp_path):
     store = open_store(tmp_path)
     _genesis(store)
-    log = log_path_for(store._path)
+    log = canonical_for(store._path, "jsonl")
     before = log.read_bytes()
     changes = _changes(store._path, EDIT_ONE)
     with pytest.raises(StaleDeclarationHead):
@@ -229,7 +229,7 @@ def test_stale_head_allows_lawful_pre_cas_index_catch_up(tmp_path):
 
     store = open_store(tmp_path)
     _genesis(store)
-    log = log_path_for(store._path)
+    log = canonical_for(store._path, "jsonl")
     changes = _changes(store._path, EDIT_ONE)
 
     # A durable line the index has not consumed (another process's write).
@@ -261,7 +261,7 @@ def test_fault_before_append_leaves_log_untouched(tmp_path):
     log byte written."""
     store = open_store(tmp_path)
     _genesis(store)
-    log = log_path_for(store._path)
+    log = canonical_for(store._path, "jsonl")
     before = log.read_bytes()
     changes = _changes(store._path, EDIT_TWO)
     with pytest.raises(UnsignableEdit):
@@ -277,7 +277,7 @@ def test_fault_after_append_before_commit_tails_full_ceremony(tmp_path, monkeypa
     the WHOLE ceremony in — never a subset."""
     store = open_store(tmp_path)
     _genesis(store)
-    log = log_path_for(store._path)
+    log = canonical_for(store._path, "jsonl")
     changes = _changes(store._path, EDIT_TWO)
 
     real_stamp = JsonlStore._stamp
@@ -314,7 +314,7 @@ def test_fault_after_genesis_append_recovers_via_explicit_adoption(
     s1b-genesis-selfheal-deviation). Retry surfaces AmbiguousGenesis; the
     honest recovery is the explicit adopt_lineage ceremony."""
     store = open_store(tmp_path)
-    log = log_path_for(store._path)
+    log = canonical_for(store._path, "jsonl")
 
     def boom(self, *a, **kw):
         raise RuntimeError("crash between fsync and commit")
@@ -348,7 +348,7 @@ def test_torn_batch_line_truncates_and_no_ceremony_happened(tmp_path):
 
     store = open_store(tmp_path)
     _genesis(store)
-    log = log_path_for(store._path)
+    log = canonical_for(store._path, "jsonl")
     intact = log.read_bytes()
     store.close()
 
@@ -390,7 +390,7 @@ def test_rebuild_from_log_reproduces_ceremony_rows_in_order(tmp_path):
     assert rebuilt._meta_get("own_lineage") is None
     assert rebuilt.adopt_lineage()["lineage"] == lineage
     rebuilt.close()
-    assert audit_deep(log_path_for(db)).ok
+    assert audit_deep(canonical_for(db, "jsonl")).ok
 
 
 def test_rebuild_preserves_own_lineage_when_only_rows_cleared(tmp_path):
@@ -414,7 +414,7 @@ def test_index_edit_to_any_row_of_a_trailing_batch_is_detected(tmp_path, victim)
     store.absorb_edit(
         _changes(store._path, EDIT_TWO), observer="obs", fact_signer=_signer("k")
     )
-    log = log_path_for(store._path)
+    log = canonical_for(store._path, "jsonl")
     records = deserialize_records(lines(log)[-1])
     assert len(records) >= 2
     victim_id = records[victim][1][0]

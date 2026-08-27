@@ -468,3 +468,83 @@ class TestBatch:
         assert deserialize_records(serialize_tick_row(TICK_SIGNED)) == [
             ("tick", TICK_SIGNED)
         ]
+
+
+# --- decoded-object entry points (cut B) -----------------------------------
+
+from engine.jsonl_codec import records_from_object, serialize_object  # noqa: E402
+
+
+class TestDecodedObjectEntry:
+    """The two entries an arrival record's ``body`` is consumed through.
+
+    A record's body IS this codec's object for the row it carries, so the
+    line functions' ``json.loads``/``json.dumps`` step is the only thing
+    separating them from what a log consumer already holds.
+    """
+
+    @pytest.mark.parametrize(
+        "line",
+        [
+            serialize_fact_row(FACT_SIGNED),
+            serialize_fact_row(FACT_UNSIGNED_7),
+            serialize_tick_row(TICK_PRECHAIN),
+            serialize_tick_row(TICK_SIGNED),
+            serialize_batch([FACT_SIGNED, FACT_B]),
+        ],
+    )
+    def test_decoding_an_object_agrees_with_decoding_its_line(self, line):
+        assert records_from_object(json.loads(line)) == deserialize_records(line)
+
+    @pytest.mark.parametrize(
+        "line",
+        [
+            serialize_fact_row(FACT_SIGNED),
+            serialize_fact_row(FACT_UNSIGNED_7),
+            serialize_tick_row(TICK_PRECHAIN),
+            serialize_tick_row(TICK_SIGNED),
+            serialize_batch([FACT_SIGNED, FACT_B]),
+        ],
+    )
+    def test_serialize_object_reproduces_the_serializers_bytes(self, line):
+        assert serialize_object(json.loads(line)) == line
+
+    def test_key_order_in_the_handed_object_does_not_reach_the_bytes(self):
+        """The contract is the codec's bytes, not the caller's dict order."""
+        line = serialize_fact_row(FACT_SIGNED)
+        shuffled = dict(reversed(list(json.loads(line).items())))
+        assert list(shuffled) != list(json.loads(line))
+        assert serialize_object(shuffled) == line
+
+    def test_batch_row_key_order_does_not_reach_the_bytes(self):
+        line = serialize_batch([FACT_SIGNED, FACT_B])
+        obj = json.loads(line)
+        obj["rows"] = [dict(reversed(list(r.items()))) for r in obj["rows"]]
+        assert serialize_object(obj) == line
+
+    @pytest.mark.parametrize(
+        "obj, match",
+        [
+            ({"t": "fact"}, "missing field"),
+            ({"t": "nope"}, "unknown record discriminator"),
+            ({"t": "batch", "rows": []}, "at least 2 rows"),
+            (
+                {**json.loads(serialize_fact_row(FACT_SIGNED)), "ts": "1.0"},
+                "must be a number",
+            ),
+            (
+                {**json.loads(serialize_fact_row(FACT_SIGNED)), "extra": 1},
+                "unknown field",
+            ),
+        ],
+    )
+    def test_an_object_is_held_to_the_domain_a_line_is_held_to(self, obj, match):
+        """The SAME validator runs — no new rules, no relaxed rules."""
+        with pytest.raises(JsonlCodecError, match=match):
+            records_from_object(obj)
+        with pytest.raises(JsonlCodecError, match=match):
+            serialize_object(obj)
+
+    def test_a_non_object_is_refused_rather_than_crashing(self):
+        with pytest.raises(JsonlCodecError, match="must be a JSON object"):
+            records_from_object(["not", "an", "object"])

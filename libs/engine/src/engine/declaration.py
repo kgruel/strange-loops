@@ -62,11 +62,11 @@ Resolution contract (SPEC §9.2 Lineage, §9.5):
 - **Witness-order selection (``at=``) is implemented (0.8.0).** The finer axis
   SPEC §9.4 grounds fact-residence on is now live: pass a
   :class:`~engine.witness.WitnessPosition` as ``at=`` (mutually exclusive with
-  ``as_of``) and the cutoff is the receipt prefix ``rowid <= at.rowid`` rather
+  ``as_of``) and the cutoff is the receipt prefix ``arrival_ordinal <= at.ordinal`` rather
   than ``ts <= as_of``. Selection and replay now share one axis — the prefix is
-  chosen by rowid and replayed by rowid — so ``at`` no longer has to reconcile
+  chosen by arrival coordinate and replayed by arrival coordinate — so ``at`` no longer has to reconcile
   two orderings; the ``as_of`` ts tie-break above governs that selector only. The
-  position is A10-verified against this store before its rowid is applied
+  position is A10-verified against this store before its ordinal is applied
   (:func:`~engine.witness.verify_position_for_store`).
 
 The overlay-row *payload shape* this reader consumes —
@@ -237,7 +237,7 @@ def resolve_declaration_documents(
       is unchanged (module docstring).
     - ``at`` — a **witness prefix** (:class:`~engine.witness.WitnessPosition`):
       the ``_decl`` rows this store had *received* at that position
-      (``rowid <= at.rowid``), replayed in receipt order (``rowid`` ascending) —
+      (``arrival_ordinal <= at.ordinal``), replayed in arrival order (``arrival_ordinal, arrival_seq`` ascending) —
       the same axis the prefix is selected on. Late arrivals do not rewrite an
       earlier position; this is the §9.3 cursor default. A
       position strictly inside an atomic receipt group is refused
@@ -251,12 +251,12 @@ def resolve_declaration_documents(
     - ``None`` — the store has no own ``_decl.genesis`` (pre-genesis; the file
       is authoritative), or is not a usable SQLite store.
     - :class:`Unhistorized` — an own genesis exists but is later than the cutoff
-      (``as_of``-earlier, or ``at`` before the genesis *rowid*); carries the
+      (``as_of``-earlier, or ``at`` before the genesis *ordinal*); carries the
       genesis document set as the earliest known state.
     - ``list[dict]`` — the folded documents (``{"kind", "subject", "payload"}``
       each), ready for :func:`~lang.document.documents_to_vertex`.
 
-    Fold (all inside the store, replay-ordered ``ORDER BY rowid``):
+    Fold (all inside the store, replay-ordered ``ORDER BY arrival_ordinal, arrival_seq``):
 
     1. Locate the OWN genesis: the ``store_meta.own_lineage`` marker selects it
        by id (foreign genesis rows are inert regardless of count); a marker
@@ -265,13 +265,13 @@ def resolve_declaration_documents(
        more → :class:`AmbiguousLineage`.
     2. If the genesis is later than the cutoff → :class:`Unhistorized` carrying
        the genesis documents (the SPEC §9.2 earliest-known floor). For ``at`` the
-       comparison is by genesis *rowid* (witness order), not ``ts`` (A13).
+       comparison is by genesis *ordinal* (witness order), not ``ts`` (A13).
     3. Check ``protocol`` ≤ supported → else :class:`UnsupportedProtocol`.
     4. Seed the document dict (keyed by ``(kind, subject)``) from the genesis
        payload's ``documents``.
     5. Overlay every LATER ``_decl.*`` row that is self-lineage-scoped
        (``payload["lineage"] == genesis id``) and within the cutoff
-       (``ts <= as_of`` or ``rowid <= at.rowid``): ``*-defined`` replaces its
+       (``ts <= as_of`` or ``arrival_ordinal <= at.ordinal``): ``*-defined`` replaces its
        ``(kind, subject)`` document (Latest wins by replay order); a tombstone
        removes the paired ``*-defined`` subject; ``_decl.genesis`` and unknown
        ``_decl.*`` kinds are skipped.
@@ -286,10 +286,10 @@ def resolve_declaration_documents(
         )
     if at is not None:
         # A10 lineage guard at THIS public selector too (capstone M2): this API
-        # is exported and applies at.rowid directly, so a position from another
+        # is exported and applies at.ordinal directly, so a position from another
         # store must be refused / re-resolved here, not only in vertex_fold.
         # Same-store returns the position unchanged (no DB hit); a same-lineage
-        # sibling re-resolves to the target rowid; foreign/unadopted refuses.
+        # sibling re-resolves to the target ordinal; foreign/unadopted refuses.
         from engine.witness import verify_position_for_store
 
         at = verify_position_for_store(at, store_path, timeout=timeout)
@@ -299,8 +299,8 @@ def resolve_declaration_documents(
     try:
         try:
             genesis_rows = conn.execute(
-                "SELECT id, rowid, ts, payload FROM facts WHERE kind = ? "
-                "ORDER BY rowid",
+                "SELECT id, arrival_ordinal, ts, payload FROM facts WHERE kind = ? "
+                "ORDER BY arrival_ordinal, arrival_seq",
                 (DECL_GENESIS,),
             ).fetchall()
         except sqlite3.Error as e:
@@ -324,11 +324,11 @@ def resolve_declaration_documents(
         if at is not None:
             from engine.witness import MidReceiptGroupPosition, receipt_group_span
 
-            span = receipt_group_span(conn, at.rowid)
+            span = receipt_group_span(conn, at.ordinal)
             if span is not None:
                 raise MidReceiptGroupPosition(
-                    f"witness position rowid {at.rowid} lands inside the atomic "
-                    f"receipt group at rowids {span[0]}..{span[1]} — refusing to "
+                    f"witness position ordinal {at.ordinal} lands inside the atomic "
+                    f"receipt group at ordinals {span[0]}..{span[1]} — refusing to "
                     "resolve a partial declaration ceremony"
                 )
 
@@ -344,7 +344,7 @@ def resolve_declaration_documents(
                     "matching _decl.genesis row — the store's identity record "
                     "is corrupt (marker without its genesis)"
                 )
-            genesis_id, genesis_rowid, genesis_ts, genesis_payload_text = (
+            genesis_id, genesis_ordinal, genesis_ts, genesis_payload_text = (
                 selected[0]
             )
         else:
@@ -372,9 +372,9 @@ def resolve_declaration_documents(
 
         if as_of is not None and genesis_ts > as_of:
             return Unhistorized(list(genesis_payload.get("documents", ())))
-        if at is not None and genesis_rowid > at.rowid:
+        if at is not None and genesis_ordinal > at.ordinal:
             # Witness-mode pre-genesis: the position predates the genesis ROW
-            # (A13 — compared by rowid, not ts). Same genesis floor, honestly
+            # (A13 — compared by ordinal, not ts). Same genesis floor, honestly
             # marked unhistorized upstream.
             return Unhistorized(list(genesis_payload.get("documents", ())))
 
@@ -390,12 +390,12 @@ def resolve_declaration_documents(
         # genesis is confirmed — never on a pre-genesis store (the hot path),
         # where step 1 already returned None.
         overlay_rows = conn.execute(
-            "SELECT id, rowid, kind, ts, payload FROM facts "
-            "WHERE kind GLOB '_decl.*' AND kind <> ? ORDER BY rowid",
+            "SELECT id, arrival_ordinal, kind, ts, payload FROM facts "
+            "WHERE kind GLOB '_decl.*' AND kind <> ? ORDER BY arrival_ordinal, arrival_seq",
             (DECL_GENESIS,),
         ).fetchall()
 
-        for _row_id, _rowid, kind, _ts, payload_text in overlay_rows:
+        for _row_id, _ord, kind, _ts, payload_text in overlay_rows:
             if not is_internal_kind(kind):  # defensive; GLOB already scopes
                 continue
             # Inclusive cutoff (`> as_of`, not `>= as_of`): an edit AT `as_of`
@@ -405,11 +405,11 @@ def resolve_declaration_documents(
             if as_of is not None and _ts > as_of:
                 continue
             # Witness cutoff: the row must be WITHIN the received prefix
-            # (rowid <= position). Selection and replay ride the same rowid axis
+            # (arrival_ordinal <= position). Selection and replay ride the same arrival axis
             # (the SELECT above), so this is a suffix trim, not a second sort: a
             # backdated edit that arrived after the position sorts last and is
-            # excluded by its rowid.
-            if at is not None and _rowid > at.rowid:
+            # excluded by its arrival ordinal.
+            if at is not None and _ord > at.ordinal:
                 continue
             try:
                 payload = json.loads(payload_text)
@@ -652,13 +652,13 @@ def decl_lineage_and_head_on(
         cutoff = ""
         params: list[Any] = []
         if at is not None:
-            cutoff = " AND rowid <= ?"
-            params.append(at.rowid)
+            cutoff = " AND arrival_ordinal <= ?"
+            params.append(at.ordinal)
         elif as_of is not None:
             cutoff = " AND ts <= ?"
             params.append(as_of)
-        # Newest-first by replay order (receipt order, rowid DESC — the
-        # ``at`` rowid cutoff and the ``as_of`` ts cutoff stay independent
+        # Newest-first by replay order (arrival order, arrival_ordinal DESC, arrival_seq DESC — the
+        # ``at`` ordinal cutoff and the ``as_of`` ts cutoff stay independent
         # selectors); the first row that is self-lineage
         # (the genesis itself, id == lineage, or an overlay whose payload
         # lineage matches) is the declaration head. Foreign _decl rows sort
@@ -667,7 +667,7 @@ def decl_lineage_and_head_on(
             rows = conn.execute(
                 "SELECT id, payload FROM facts WHERE kind GLOB '_decl.*'"
                 + cutoff
-                + " ORDER BY rowid DESC",
+                + " ORDER BY arrival_ordinal DESC, arrival_seq DESC",
                 params,
             ).fetchall()
         except sqlite3.Error:

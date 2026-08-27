@@ -1,0 +1,77 @@
+/**
+ * Gruel Design System — foundation
+ *
+ * Optional global defaults. Import after tokens.css and themes.css when a
+ * consumer wants Gruel's reset, typography, focus, and reduced-motion policy.
+ */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+.theme-light,
+.theme-night-botanist,
+.theme-cotswolds {
+  color-scheme: var(--theme-color-scheme, light);
+}
+
+html {
+  font-family: var(--font-sans);
+  background: var(--parchment);
+  color: var(--ink);
+}
+
+body {
+  min-height: 100vh;
+  margin: 0;
+  background: var(--parchment);
+  color: var(--ink);
+  line-height: 1.6;
+}
+
+button,
+input,
+select,
+textarea {
+  color: inherit;
+  font: inherit;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  font-family: var(--font-serif);
+  font-weight: 400;
+  line-height: 1.2;
+}
+
+h1 em,
+h2 em,
+h3 em {
+  color: var(--botanical);
+  font-style: italic;
+  font-weight: 300;
+}
+
+:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: var(--focus-offset);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    transition-delay: 0ms !important;
+  }
+}

@@ -850,7 +850,7 @@ class VertexHandle:
             fold, status = self._reconstruct(None)
             store_str = str(self._store_path) if self._store_path is not None else str(self._vertex_path)
             position = WitnessPosition(
-                fact_id=GENESIS_SENTINEL, rowid=0, seq=0, lineage=None,
+                fact_id=GENESIS_SENTINEL, arrival_lineage=None, ordinal=-1, seq=0, lineage=None,
                 unadopted=True, anchor=None, store=store_str,
             )
             snap = VertexSnapshot(

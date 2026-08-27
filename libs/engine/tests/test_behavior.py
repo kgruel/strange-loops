@@ -216,14 +216,17 @@ class TestProjectionReset:
         proj.reset(42)
         assert proj.version == 1
 
-    def test_reset_preserves_cursor(self):
+    def test_reset_preserves_cursor_and_count(self):
         proj = SumProjection(initial=0)
         proj.fold_one(Event(1))
         proj.fold_one(Event(2))
-        assert proj.cursor == 2
+        # fold_one counts events; it does not move the store cursor.
+        assert proj.events_folded == 2
+        assert proj.cursor == 0
 
         proj.reset(0)
-        assert proj.cursor == 2
+        assert proj.events_folded == 2
+        assert proj.cursor == 0
 
 
 class TestFileWriterBehavior:

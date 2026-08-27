@@ -54,16 +54,26 @@ def slice_store(
     Raises:
         FileNotFoundError: If source database does not exist.
         FileExistsError: If target already exists.
+        engine.arrival_store.ArrivalCanonicalUnsupported: If the target does
+            not exist but its ``.arrival`` sibling does — see below.
     """
     source = Path(source)
     target = Path(target)
 
     if not source.exists():
         raise FileNotFoundError(f"Source store not found: {source}")
-
-    # Create target with canonical schema
+    # Create target with canonical schema. `_create` self-enforces the
+    # arrival-custody guard (invariant 15): a target whose .db is absent
+    # while its .arrival sibling is present refuses before any file or WAL
+    # sidecar exists — slicing a PARTIAL subset there would mint a second
+    # custody holder that disagrees with the log about content too.
     target_conn = _create(target)
-    target_conn.close()
+    try:
+        from engine.sqlite_store import ensure_coordinate_schema
+
+        ensure_coordinate_schema(target_conn, mode="mirrored")
+    finally:
+        target_conn.close()
 
     # Open source, attach target, copy
     conn = _open(source)
@@ -80,13 +90,20 @@ def slice_store(
         # below. Era-aware: a source predating the column slices as NULL.
         src_cols = {r[1] for r in conn.execute("PRAGMA table_info(facts)")}
         sig_src = "signature" if "signature" in src_cols else "NULL"
+        order_src = (
+            "arrival_ordinal, arrival_seq"
+            if "arrival_ordinal" in src_cols
+            else "rowid"
+        )
         fact_sql = (
-            "INSERT INTO slice.facts (id, kind, ts, observer, origin, payload, signature) "
-            f"SELECT id, kind, ts, observer, origin, payload, {sig_src} FROM facts{where}"
+            "INSERT INTO slice.facts (id, kind, ts, observer, origin, payload, signature, arrival_ordinal, arrival_seq) "
+            f"SELECT id, kind, ts, observer, origin, payload, {sig_src}, "
+            f"COALESCE((SELECT MAX(arrival_ordinal) FROM slice.facts), 0) + ROW_NUMBER() OVER (ORDER BY {order_src}), 0 "
+            f"FROM facts{where} ORDER BY {order_src}"
         )
         conn.execute(fact_sql, params)
         fact_count = conn.execute(
-            f"SELECT COUNT(*) FROM slice.facts"
+            "SELECT COUNT(*) FROM slice.facts"
         ).fetchone()[0]
 
         # Copy ticks — filtered by time range only (kinds/observers don't apply).
@@ -97,14 +114,22 @@ def slice_store(
         # slice — copying them would produce false tamper alarms. Sliced ticks
         # land as pre-chain rows; the target starts its own chain on first
         # append_tick. Same semantics as merge (explicit-column INSERT).
+        src_tick_cols = {r[1] for r in conn.execute("PRAGMA table_info(ticks)")}
+        order_tick_src = (
+            "arrival_ordinal, arrival_seq"
+            if "arrival_ordinal" in src_tick_cols
+            else "rowid"
+        )
         tick_where, tick_params = _build_where(since=since, before=before)
         tick_sql = (
-            "INSERT INTO slice.ticks (id, name, ts, since, origin, payload) "
-            f"SELECT id, name, ts, since, origin, payload FROM ticks{tick_where}"
+            "INSERT INTO slice.ticks (id, name, ts, since, origin, payload, arrival_ordinal, arrival_seq) "
+            f"SELECT id, name, ts, since, origin, payload, "
+            f"COALESCE((SELECT MAX(arrival_ordinal) FROM slice.ticks), 0) + ROW_NUMBER() OVER (ORDER BY {order_tick_src}), 0 "
+            f"FROM ticks{tick_where} ORDER BY {order_tick_src}"
         )
         conn.execute(tick_sql, tick_params)
         tick_count = conn.execute(
-            f"SELECT COUNT(*) FROM slice.ticks"
+            "SELECT COUNT(*) FROM slice.ticks"
         ).fetchone()[0]
 
         conn.commit()

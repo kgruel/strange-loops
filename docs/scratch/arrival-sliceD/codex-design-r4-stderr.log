@@ -1,0 +1,1908 @@
+Reading prompt from stdin...
+OpenAI Codex v0.147.0
+--------
+workdir: /Users/kaygee/Code/loops
+model: gpt-5.6-sol
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: low
+reasoning summaries: none
+session id: 01a022af-1f6d-75c1-9fc4-eb4f043219e4
+--------
+user
+# Codex review brief — slice D design proposal r4 (re-verify, sol LOW)
+
+Repo: this checkout, branch `feat/arrival-libs` @ 2b05131e. **Review-only: do
+not modify any file.** Target: `docs/scratch/arrival-sliceD/design-proposal.md`
+(now r4). Prior rounds and findings: codex-design-r1/r2/r3-stdout.log in this
+directory. r3 left three findings (DP-r3-01..03), all D0 migration mechanics;
+r4 revised against them.
+
+Narrow re-verify:
+1. DP-r3-01..03: PASS/FAIL with evidence, primary-sourcing the revision's
+   claims — the coordinate-provider signature and its four per-route supply
+   stories (esp. ArrivalStore's constructor ordering vs arrival_store.py:133
+   and the claim that no insert SQL runs during construction), the
+   rowid-preserving copy vs the rederivation DELETE precedent
+   (jsonl_store.py:944-954), the sqlite_schema trigger/index replay, and the
+   new gates G-D0-7..11.
+2. Fresh-eyes on ONLY the r4-changed text: new findings as DP-r4-NN.
+3. Do not re-report anything that previously PASSed or is routed to Kyle.
+
+Verdict: PASS/FAIL for DP-r3-01..03, any DP-r4 findings, per-decision
+SOUND/UNSOUND/SOUND-WITH-CHANGES, overall RATIFIABLE /
+NOT-RATIFIABLE-AS-WRITTEN. Deliver everything in one response.
+
+codex
+I’ll treat this as a read-only design re-verification. I’ll inspect the r3 log, the r4 diff, and the cited implementation/migration code, then report only the three carried findings and genuinely new issues in r4-changed text.
+exec
+/bin/zsh -lc "pwd && git status --short --branch && git rev-parse HEAD && rg --files docs/scratch/arrival-sliceD | sort && rg --files | rg '(arrival_store\\.py|jsonl_store\\.py)"'$'"'" in /Users/kaygee/Code/loops
+ succeeded in 0ms:
+/Users/kaygee/Code/loops
+## feat/arrival-libs...origin/main [ahead 144]
+?? docs/scratch/arrival-sliceD/codex-design-brief-r1.md
+?? docs/scratch/arrival-sliceD/codex-design-brief-r2.md
+?? docs/scratch/arrival-sliceD/codex-design-brief-r3.md
+?? docs/scratch/arrival-sliceD/codex-design-brief-r4.md
+?? docs/scratch/arrival-sliceD/codex-design-r1-stderr.log
+?? docs/scratch/arrival-sliceD/codex-design-r1-stdout.log
+?? docs/scratch/arrival-sliceD/codex-design-r2-stderr.log
+?? docs/scratch/arrival-sliceD/codex-design-r2-stdout.log
+?? docs/scratch/arrival-sliceD/codex-design-r3-stderr.log
+?? docs/scratch/arrival-sliceD/codex-design-r3-stdout.log
+?? docs/scratch/arrival-sliceD/codex-design-r4-stderr.log
+?? docs/scratch/arrival-sliceD/codex-design-r4-stdout.log
+2b05131e03729ddbae9e36e6121aa47f412d544e
+docs/scratch/arrival-sliceD/codex-design-brief-r1.md
+docs/scratch/arrival-sliceD/codex-design-brief-r2.md
+docs/scratch/arrival-sliceD/codex-design-brief-r3.md
+docs/scratch/arrival-sliceD/codex-design-brief-r4.md
+docs/scratch/arrival-sliceD/codex-design-r1-stderr.log
+docs/scratch/arrival-sliceD/codex-design-r1-stdout.log
+docs/scratch/arrival-sliceD/codex-design-r2-stderr.log
+docs/scratch/arrival-sliceD/codex-design-r2-stdout.log
+docs/scratch/arrival-sliceD/codex-design-r3-stderr.log
+docs/scratch/arrival-sliceD/codex-design-r3-stdout.log
+docs/scratch/arrival-sliceD/codex-design-r4-stderr.log
+docs/scratch/arrival-sliceD/codex-design-r4-stdout.log
+docs/scratch/arrival-sliceD/design-proposal.md
+docs/scratch/arrival-sliceD/e1.json
+docs/scratch/arrival-sliceD/e1.md
+docs/scratch/arrival-sliceD/e2.json
+docs/scratch/arrival-sliceD/e2.md
+docs/scratch/arrival-sliceD/e3.json
+docs/scratch/arrival-sliceD/e3.md
+docs/scratch/arrival-sliceD/e4.json
+docs/scratch/arrival-sliceD/e4.md
+docs/scratch/arrival-sliceD/e5.json
+docs/scratch/arrival-sliceD/e5.md
+docs/scratch/arrival-sliceD/e6.json
+docs/scratch/arrival-sliceD/e6.md
+docs/scratch/arrival-sliceD/explorer-stderr.log
+docs/scratch/arrival-sliceD/explorer-stdout.log
+docs/scratch/arrival-sliceD/run-plan.md
+libs/engine/src/engine/arrival_store.py
+libs/engine/src/engine/jsonl_store.py
+libs/engine/tests/test_jsonl_store.py
+libs/engine/tests/test_arrival_store.py
+
+exec
+/bin/zsh -lc "sed -n '1,260p' docs/scratch/arrival-sliceD/codex-design-r3-stdout.log && rg -n \"DP-r3|G-D0|coordinate|provider|sqlite_schema|rowid|DELETE|ArrivalStore|constructor|Decision\" docs/scratch/arrival-sliceD/design-proposal.md" in /Users/kaygee/Code/loops
+ succeeded in 0ms:
+Reviewed r3 at `ea0ad590`, read-only. Four of the six items pass. The selective registry and deterministic instrumentation fixes are sound, and table rebuilding can enforce the proposed constraints. However, D0’s upgrader is still not implementable as specified and would discard or invalidate supported schema artifacts.
+
+## Re-verification
+
+| Finding | Verdict | Evidence |
+|---|---|---|
+| DP-r2-01 | **PASS** | r3 replaces nullable retrofits with `NOT NULL` and table-level `UNIQUE`, rebuilding existing `facts` and `ticks` tables ([design-proposal.md:119](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceD/design-proposal.md:119)). These schemas contain ordinary columns, checks, primary keys, and indexes, with no foreign keys ([sqlite_store.py:308](/Users/kaygee/Code/loops/libs/engine/src/engine/sqlite_store.py:308)); therefore the proposed create/copy/drop/rename mechanism can enforce both constraints. The raw-SQL gate correctly proves table-level enforcement ([design-proposal.md:529](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceD/design-proposal.md:529)). Fresh-eyes caveats about other schema objects are DP-r3-02 below. |
+| DP-r2-02 | **FAIL** | The four dispatch sites are now named ([design-proposal.md:167](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceD/design-proposal.md:167)), matching the actual writers: base SQLite INSERT hooks ([sqlite_store.py:746](/Users/kaygee/Code/loops/libs/engine/src/engine/sqlite_store.py:746)), JsonlStore’s overrides and replay writer ([jsonl_store.py:667](/Users/kaygee/Code/loops/libs/engine/src/engine/jsonl_store.py:667), [jsonl_store.py:887](/Users/kaygee/Code/loops/libs/engine/src/engine/jsonl_store.py:887)), ArrivalStore’s catch-up/live writers ([arrival_store.py:342](/Users/kaygee/Code/loops/libs/engine/src/engine/arrival_store.py:342), [arrival_store.py:456](/Users/kaygee/Code/loops/libs/engine/src/engine/arrival_store.py:456)), and projection rederivation ([arrival_projection.py:479](/Users/kaygee/Code/loops/libs/engine/src/engine/arrival_projection.py:479), [arrival_projection.py:500](/Users/kaygee/Code/loops/libs/engine/src/engine/arrival_projection.py:500)). But the specified `ensure_coordinate_schema(conn, mode)` lacks the arrival log or a prepared mapping, so it cannot perform the promised log-derived `id → (ord, seq)` join. See DP-r3-01. |
+| DP-r2-03 | **PASS** | The selective algorithm now exactly separates structural verification, registry-forming envelope verification, and ordinary envelopes ([design-proposal.md:448](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceD/design-proposal.md:448)). This matches the source rules: `walk()` establishes structure ([arrival.py:951](/Users/kaygee/Code/loops/libs/engine/src/engine/arrival.py:951)); genesis self-certifies; ordinary signed records currently route through `_resolve`; and introductions join the registry only after authorization ([arrival.py:1595](/Users/kaygee/Code/loops/libs/engine/src/engine/arrival.py:1595), [arrival.py:1627](/Users/kaygee/Code/loops/libs/engine/src/engine/arrival.py:1627)). G-D4-2 and G-D4-4 now pin both sides of the selective boundary ([design-proposal.md:584](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceD/design-proposal.md:584)). |
+| DP-r2-04 | **PASS** | Timing is gone. G-D3-2 requires deterministic instrumentation and exact healthy/behind/deep bounds ([design-proposal.md:572](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceD/design-proposal.md:572)). Source provides identifiable verification sites: anchor adoption validates the anchor directly ([arrival.py:1129](/Users/kaygee/Code/loops/libs/engine/src/engine/arrival.py:1129)), while suffix and full walks use `_verify_from` ([arrival.py:984](/Users/kaygee/Code/loops/libs/engine/src/engine/arrival.py:984), [arrival.py:1246](/Users/kaygee/Code/loops/libs/engine/src/engine/arrival.py:1246)). Instrumentation must count both sites, but the stated bounds are valid. |
+| DP-r1-03 | **PASS** | The original NULL-enforcement hole is closed: new and rebuilt tables carry real `NOT NULL` and `UNIQUE` constraints, including for foreign SQL ([design-proposal.md:122](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceD/design-proposal.md:122)). G-D0-5 directly exercises both fresh and migrated schemas with raw INSERTs ([design-proposal.md:529](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceD/design-proposal.md:529)). |
+| DP-r1-10 | **PASS** | Every r2 gate omission is now explicitly closed: table-enforced NULL/duplicate refusal and normal SQLite/JSONL public-constructor migration ([design-proposal.md:529](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceD/design-proposal.md:529)); deterministic D3 bounds ([design-proposal.md:572](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceD/design-proposal.md:572)); and forged key-introduction coverage ([design-proposal.md:589](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceD/design-proposal.md:589)). The new D0 defects below require additional gates but do not reinstate the exact omissions DP-r1-10 identified. |
+
+## New r3 findings
+
+### DP-r3-01 — MAJOR — the arrival-mode upgrader lacks its required source data
+
+The table rebuild says arrival coordinates come from “a temp id→(ord, seq) mapping staged by the log walk” ([design-proposal.md:127](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceD/design-proposal.md:127)), but the common upgrader is specified as only:
+
+`ensure_coordinate_schema(conn, mode)`
+
+Neither a SQLite connection nor `mode="arrival"` identifies or exposes the canonical arrival log. `ARRIVAL_LINEAGE_KEY` supplies a lineage value, not a filesystem path or row-coordinate mapping. In current construction, ArrivalStore obtains its `ArrivalLog` only after `SqliteStore.__init__` opens the connection ([arrival_store.py:133](/Users/kaygee/Code/loops/libs/engine/src/engine/arrival_store.py:133)); rederivation independently has both `canonical` and `log` before opening its index ([arrival_projection.py:470](/Users/kaygee/Code/loops/libs/engine/src/engine/arrival_projection.py:470)).
+
+Required change: make the upgrader accept an explicit mapping/provider or canonical `ArrivalLog`, with mirrored mode requiring neither. Specify how ArrivalStore and `rederive_projections` supply it and gate both paths independently.
+
+### DP-r3-02 — MAJOR — the table rebuild does not preserve supported schema artifacts
+
+The rebuild says only to recreate “the table’s indexes” ([design-proposal.md:134](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceD/design-proposal.md:134)). Dropping `facts` or `ticks` also drops attached triggers. Triggers are not hypothetical foreign debris: the store deliberately reads back rows after AFTER INSERT triggers and treats their effects as committed truth ([sqlite_store.py:702](/Users/kaygee/Code/loops/libs/engine/src/engine/sqlite_store.py:702), [sqlite_store.py:746](/Users/kaygee/Code/loops/libs/engine/src/engine/sqlite_store.py:746)).
+
+A facts rebuild can also renumber rowids unless explicitly preserved. The optional FTS projection stores `facts_fts.fact_rowid` and an incremental `last_rowid` watermark keyed to those exact rowids ([jsonl_store.py:949](/Users/kaygee/Code/loops/libs/engine/src/engine/jsonl_store.py:949), [vertex_reader.py:2187](/Users/kaygee/Code/loops/libs/engine/src/engine/vertex_reader.py:2187)). Existing rederivation explicitly drops `facts_fts` and `fts_state` before rebuilding facts ([arrival_projection.py:492](/Users/kaygee/Code/loops/libs/engine/src/engine/arrival_projection.py:492)); r3’s migration does neither.
+
+Required change: inventory and recreate triggers from `sqlite_schema`; explicitly preserve rowids during copy or invalidate/rebuild FTS state; add gates proving trigger behavior and FTS correctness survive migration.
+
+### DP-r3-03 — minor — dispatch gates do not cover all four promised routes
+
+G-D0-6 exercises ordinary SqliteStore and JsonlStore constructors only ([design-proposal.md:535](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceD/design-proposal.md:535)). G-D0-3 covers an arrival-canonical fixture but does not require both the normal ArrivalStore constructor and `_ensure_index_schema`/rederivation delegation. Because those routes have different access to the arrival log, one test cannot establish universal dispatch.
+
+Required change: add explicit existing-index migration gates through ArrivalStore’s public constructor and the projection-rederivation entry point.
+
+## Decision verdicts
+
+| Decision | Verdict | Reason |
+|---|---|---|
+| D0 | **UNSOUND** | The constraint mechanism is valid, but the arrival upgrader lacks its mapping input and the rebuild loses or invalidates supported schema artifacts. |
+| D1 | **SOUND-WITH-CHANGES** | Its coordinate model remains coherent once D0 provides a safe invariant. |
+| D2 | **SOUND-WITH-CHANGES** | Re-keying remains coherent but depends on a correct, non-destructive D0 migration. |
+| D3 | **SOUND** | Deterministic bounded-work instrumentation is now adequately specified. |
+| D4 | **SOUND** | Selective registry construction and its gates now match the source authority rules and exact-admission claim. |
+| Gate plan | **SOUND-WITH-CHANGES** | The r2 omissions are closed, but gates are still needed for both arrival dispatch routes, trigger preservation, and FTS/rowid handling. |
+
+Overall: **NOT-RATIFIABLE-AS-WRITTEN**.
+3:Status: **r4 — revised against codex DP-r3 findings, awaiting Kyle's ruling.**
+21:> fixing the latent rowid chain-commitment defect (`jsonl_store.py:931-934`).
+29:(witness positions still projection rowids), CX-DC-03 (seals still rowid
+41:**1. The portable witness handle never carried a rowid, and nothing
+46:license** "all rowid consumers are in libs/engine": app code compares
+47:in-memory `WitnessPosition.rowid` values to attribute a diff baseline
+50:**2. Tick commitments never contained a rowid.** `_tick_envelope`
+52:`fact_cursor` are fact ids. The rowid appears only in how windows and edges
+57:correct coordinates (the r1 backfill did not; see D0).
+84:## D0 — The projected arrival coordinate (prerequisite for D1–D3)
+86:**Decision.** The derived index gains two columns on both `facts` and
+99:The two coordinate spaces are **per-table** in legacy stores (facts and
+100:ticks have independent rowid sequences today and no query compares a fact
+101:coordinate to a tick coordinate — windows select facts only, edges select
+106:**Write sites.** Arrival-projected rows get the real coordinate at the two
+110:the record's `ResumeMark`. Legacy stores get a mirrored coordinate at
+131:  `INSERT INTO facts_new (rowid, ...) SELECT rowid, ..., <coordinate>,
+132:  <seq> FROM facts` (coordinate per mode: `rowid, 0` mirrored, or a join
+133:  against a temp id→(ord, seq) mapping staged from the coordinate provider
+136:  `coordinate_axis` marker; commit. No foreign keys exist on these tables,
+138:  at first post-upgrade writable open — the same order as the coordinate
+140:- **The rebuild preserves supported schema artifacts** (DP-r3-02):
+141:  - **Rowids are preserved explicitly** — the copy names `rowid` in both
+142:    column lists. This is not optional politeness: `facts_fts.fact_rowid`
+143:    and the `fts_state.last_rowid` watermark key on exactly these rowids
+146:    rowid consumers are still live — a renumbering rebuild would break the
+150:    correctly NOT followed here: rederivation renumbers (DELETE resets the
+151:    rowid counter), the migration copy does not, and each treatment is the
+154:    DROP, read every `sqlite_schema` row with `tbl_name` = the table and
+167:  transaction. For such a store the mirrored coordinate *is* its arrival
+169:  rebuilds it from a log), and identical to rowid order by construction.
+174:  `arrival_ordinal = rowid, arrival_seq = 0`. Correct by construction —
+175:  rowid is that store's append order, and no batch record exists to share
+177:- **Arrival-canonical index:** rowid backfill is WRONG — a batch expands to
+178:  N rows sharing one ordinal (`arrival_store.py:342`), so `ordinal = rowid`
+179:  mints coordinates the log never issued and collides with the next
+181:  coordinates **from the log**: walk `rows_of_record` over the records up
+185:  index with coordinates written natively. The walk is O(store), once.
+193:  (DP-r3-01: a bare `(conn, mode)` cannot perform the log-derived join —
+197:  ensure_coordinate_schema(
+200:      coordinates: Callable[[], Iterator[tuple[str, int, int]]] | None = None,
+201:      # provider of (row_id, arrival_ordinal, arrival_seq); REQUIRED for
+202:      # mode="arrival", forbidden for mode="mirrored". A provider, not a
+212:     migrations; `mode="mirrored"`, no provider. The base class holds
+213:     `self._coordinate_mode = "mirrored"` / `self._coordinate_provider =
+218:  3. `ArrivalStore` — **constructor-ordering note, stated honestly**: its
+221:     inside the base constructor for this class. It doesn't need to: no
+224:     `__init__` tail (`:144-145`) — ArrivalStore sets
+225:     `self._coordinate_mode = "arrival"` and `self._coordinate_provider`
+232:     log-walking provider. (Its own rebuild path deletes and re-derives
+233:     rows with native coordinates, so the provider is only consulted if
+239:  mirror coordinates over a log-owned axis. The marker is authority;
+242:  the `store_meta` marker (`coordinate_axis = mirrored | arrival`) commits
+252:index holds a row carrying no arrival coordinate" — a location claim,
+269:    ordinal: int              # REPLACES rowid — the arrival record cutoff; -1 = empty prefix
+279:names the coordinate axis. r2 change (DP-r1-09): the no-axis state is
+285:**Empty-prefix sentinel.** Today `rowid = 0`; arrival ordinals start at 0
+291:**Selection.** Every `rowid <= ?` cutoff becomes `arrival_ordinal <= ?`
+300:ORDER is receipt order (rowid)") re-key to
+302:ordering-authority read path the coordinate exists for. `at_rowid` →
+305:**The app-side rowid consumer** (DP-r1-07 — r1's "all sites inside
+307:comparing `pos1.rowid`/`pos2.rowid`. Two designs, Kyle rules (merged into
+313:  comparing coordinates — the knowledge moves to the layer that owns it
+335:`:1613`, `:1692`) on a structural condition mentioning no coordinate; raise
+340:rowid axis" — open question D-Q6 rules whether correcting that one stale
+355:the truth is every coordinate-resolution site on BOTH paths):
+358:- `_cursor_rowid(fact_id)` (`:1531-1545`) → `_cursor_ordinal`, selecting
+372:  `_cursor_rowid` + `COUNT(*) WHERE rowid > ? AND rowid <= ?` → ordinal
+377:  order for verification; re-anchor's UPDATE-by-rowid plumbing may keep
+378:  rowid as a row *address*, which is the one allowlisted use — addressing a
+381:WP-3's fence closes with a ratchet grep: no `rowid` in any ORDER BY, range
+390:rowid order for every correctly-derived existing index: legacy rows mirror
+391:rowid by construction, and arrival-projected rows were inserted in record
+393:assigned their rowids. r1's version of this claim was falsified by its own
+395:re-derives coordinates from the log for arrival stores. It remains an
+400:window membership currently rests on rowid, an axis a rebuild regenerates;
+403:After D2 the window is defined on the arrival coordinate. Sweep item: that
+404:docstring's rowid-reproduction rationale is superseded and is rewritten in
+417:| `_suffix_unindexed` (`:383-427`) | **mechanism dissolves, capability survives** (DP-r1-01) | Job (a), unindexed-suffix corroboration: retired — the mark's anchor is verified structurally by the substrate. Job (b), rewound-marker detection: survives as `rewound` — any index row with `arrival_ordinal > consumed_ordinal` means the mark sits below consumed rows, which no writer produces. `beyond_offset` on `Check` is replaced by coordinates (below). |
+418:| `_check_counts` (`:464-492`) | TRANSLATE + strengthen | stamped counters vs `COUNT(*)`; plus NULL-coordinate backstop (migrated indexes). |
+466:coordinate. No check may assert intact/clean/safe; the strongest positive
+564:**G-D0-1 — the shuffled index (the ruled gate item).** A natural rebuild
+567:permuted record order so rowid order and arrival order disagree.
+571:**G-D0-2** — deliberately rebuilt index: outstanding positions and seals
+573:**G-D0-3** — migration of an existing **batch-bearing arrival-canonical**
+574:index: coordinates equal the log's (the DP-r1-02 counterexample as a test);
+576:**G-D0-4** — interrupted migration: kill between schema-add and stamp;
+579:**G-D0-5** — invariant enforcement **by the table**: on a migrated (rebuilt)
+582:(UNIQUE), and one with NULL in either coordinate raises `IntegrityError`
+585:**G-D0-6** — ordinary legacy opens migrate (the DP-r1-10 re-fail gap):
+587:through their normal public constructors and appended to via the public
+588:API — the upgrader ran before the first insert, coordinates are correct
+591:**G-D0-7** — arrival dispatch route 3 (DP-r3-03): an existing UNMIGRATED
+592:batch-bearing arrival-canonical index opened through `ArrivalStore`'s
+593:public constructor — coordinates equal the log's, constraints present,
+595:**G-D0-8** — arrival dispatch route 4 (DP-r3-03): the same unmigrated
+597:coordinates identical to G-D0-7's, proving the two routes with different
+599:**G-D0-9** — trigger survival (DP-r3-02): a fixture with an AFTER INSERT
+601:supports) migrates; the trigger still exists in `sqlite_schema` and still
+603:**G-D0-10** — FTS/rowid survival (DP-r3-02): a fixture with populated
+604:`facts_fts` + `fts_state` migrates; every `fact_rowid` still resolves to
+605:the same fact (rowids preserved byte-for-byte), search answers
+608:**G-D0-11** — mis-mode refusal: a plain `SqliteStore` opened on an
+634:**G-D2-5** — rowid ratchet: no ORDER BY / range / COUNT on rowid in
+640:ordinal) — each with the expected coordinate in the message.
+674:**WP-1 · the coordinate (D0).** `sqlite_store.py`: the
+675:`ensure_coordinate_schema(conn, mode)` upgrader (table rebuild + marker),
+680:coordinates. `arrival_projection.py`: `_ensure_index_schema` delegation +
+681:`rederive_projections` native coordinates. Closure sweep of every other
+683:harness (G-D0-1), the batch-bearing migration fixture (G-D0-3), and the
+684:normal-open fixtures (G-D0-6), both arrival dispatch routes (G-D0-7/8),
+685:and the trigger/FTS survival fixtures (G-D0-9/10). Suites green on this
+686:package alone — which the rowid-preserving copy is load-bearing for:
+687:witness/seal rowid consumers are still live until WP-2/3.
+690:(`at_rowid` → `at_ordinal`, three query methods), `declaration.py:654-656`,
+696:Residue sweep: coordinate vocabulary in docstrings.
+700:the rowid ratchet (G-D2-5), and the superseded `rederive_projections`
+705:coordinates), the `ArrivalLog.anchor(mark)` substrate verb, multiset
+719:**Vocabulary ratchet — candidate additions:** `rowid` as a public
+720:coordinate name (allowlist: `sqlite_store` row-address plumbing only),
+721:`at_rowid`, `beyond_offset`, `consumed-offset`, `receipt order` as an
+733:   the removal of `WitnessPosition.rowid`). Recommended: both as ruled,
+749:   says "rowid axis". Correct the one stale word (raise sites + message
+756:   tables), absorbing the coordinate walk in the same pass — an O(store)
+772:| DP-r1-02 | MAJOR | **Redesigned.** Uniform backfill withdrawn; mode-aware migration — rowid mirror for genuinely-legacy indexes, log-derived coordinates (with rederive escape hatch) for arrival-canonical (D0). Counterexample gated as G-D0-3. |
+774:| DP-r1-04 | MAJOR | **Redesigned.** Full construction+verification enumeration incl. `verify_chain` :1902/:1929, scans :1710/:1735/:1856, heads :786/:808; rowid ratchet G-D2-5; verification-under-permutation gate G-D2-4 (D2, WP-3). |
+780:| DP-r1-10 | minor | **Redesigned in r2; FAILED re-verify; closed in r3** — G-D0-5 now asserts table-enforced refusals (raw-SQL IntegrityError), G-D0-6 covers ordinary legacy public-API opens, G-D4-4 covers forged key introductions, G-D3-2's timing proxy removed. |
+787:| DP-r2-01 | MAJOR | **Redesigned.** NULL/uniqueness enforcement moved into the table itself: native NOT NULL + UNIQUE for new DBs; one-transaction table rebuild for existing DBs (the only SQLite mechanism yielding retro constraints), absorbing the coordinate backfill in the same pass; cost stated and routed to Kyle as restated Q8 (D0). |
+788:| DP-r2-02 | MAJOR | **Redesigned.** `ensure_coordinate_schema(conn, mode)` in `sqlite_store.py`, invoked by every writable constructor/pre-write hook (SqliteStore, JsonlStore index, ArrivalStore, `_ensure_index_schema` delegating) following the existing `_ensure_*` lazy-migration idiom; mode explicit or derived from the store's own `ARRIVAL_LINEAGE_KEY` marker; G-D0-6 gates normal public-API legacy opens (D0, WP-1). |
+793:PASS; DP-r2-02 FAIL, closed by DP-r3-01 below. D3 and D4 ruled SOUND;
+798:| DP-r3-01 | MAJOR | **Redesigned.** Upgrader signature gains an explicit coordinate provider (`coordinates: Callable[[], Iterator[(row_id, ord, seq)]]`, required for arrival mode, forbidden for mirrored); per-route supply specified, including ArrivalStore's constructor-ordering reality (log constructed after the base connection opens; upgrader runs post-log-assignment, before the existing `_ensure_*` tail, with the pre-write hook as backstop) and rederivation's direct provider; mis-mode guard refuses mirror-stamping an arrival-marked index (G-D0-11). |
+799:| DP-r3-02 | MAJOR | **Redesigned.** Rebuild copies `rowid` explicitly in both column lists — chosen over the rederivation FTS-drop precedent because the copy (unlike rederivation's DELETE) can preserve rowids, FTS stays valid, and live rowid consumers keep WP-1's suites green; triggers and indexes inventoried from `sqlite_schema` and replayed verbatim post-RENAME in the same transaction; gated by G-D0-9 (trigger fires after migration) and G-D0-10 (FTS resolves and resumes correctly). |
+800:| DP-r3-03 | minor | **Redesigned.** G-D0-7 (ArrivalStore public constructor on an unmigrated batch-bearing index) and G-D0-8 (rederivation entry point on the same fixture, results identical) cover the two arrival dispatch routes independently. |
+
+codex
+The r4 changes are concentrated in D0: an explicit provider contract, route-by-route dispatch, rowid/artifact preservation, and gates G-D0-7..11. I’m now checking those statements against constructor control flow and SQLite behavior, including whether any write can precede ArrivalStore’s post-base migration.
+exec
+/bin/zsh -lc "sed -n '84,250p' docs/scratch/arrival-sliceD/design-proposal.md && sed -n '560,615p' docs/scratch/arrival-sliceD/design-proposal.md && nl -ba libs/engine/src/engine/arrival_store.py | sed -n '90,175p' && nl -ba libs/engine/src/engine/sqlite_store.py | sed -n '250,390p' && nl -ba libs/engine/src/engine/sqlite_store.py | sed -n '650,780p'" in /Users/kaygee/Code/loops
+ succeeded in 0ms:
+## D0 — The projected arrival coordinate (prerequisite for D1–D3)
+
+**Decision.** The derived index gains two columns on both `facts` and
+`ticks`:
+
+| column | meaning |
+|---|---|
+| `arrival_ordinal INTEGER` | the ordinal of the arrival record this row was derived from |
+| `arrival_seq INTEGER` | this row's 0-based position within that record's `rows_of_record` expansion |
+
+Spelled in full to match `ARRIVAL_ORDINAL_KEY = "arrival_ordinal"`
+(`arrival_store.py:104`) and `ResumeMark.arrival_ordinal` (`arrival.py:682`).
+(Open question D0-Q2 keeps the short-form alternative in front of Kyle.)
+
+`(arrival_ordinal, arrival_seq)` is the index's total order, per table.
+The two coordinate spaces are **per-table** in legacy stores (facts and
+ticks have independent rowid sequences today and no query compares a fact
+coordinate to a tick coordinate — windows select facts only, edges select
+newest-per-table) and **shared** in arrival-projected stores (the log's
+ordinal is one axis for all record types; density per table is not assumed
+anywhere).
+
+**Write sites.** Arrival-projected rows get the real coordinate at the two
+— and only two — sites that expand a record into rows: `arrival_store`'s
+catch-up indexer (`_index_record`, `:342-360`) and
+`arrival_projection.rederive_projections` (`:500-509`), both of which hold
+the record's `ResumeMark`. Legacy stores get a mirrored coordinate at
+append time (below). **Every other insert path is enumerated and closed**
+in WP-1: `SqliteStore.append`/`append_tick` (`sqlite_store.py:746`), the
+slice/rebirth writers in `libs/store`, and the re-sign/re-anchor UPDATE
+paths (`sqlite_store.py:1710-1756` — updates only, no inserts, unaffected).
+The shared `FACT_INSERT_SQL`/`TICK_INSERT_SQL` grow the two columns, so an
+insert that fails to supply them fails loudly at the statement, not
+silently as NULL (DP-r1-03).
+
+**Schema invariants** (DP-r1-03/DP-r2-01 — real database constraints, not
+statement discipline):
+
+- **New databases**: `_SCHEMA_STMTS` declares the columns with
+  `arrival_ordinal INTEGER NOT NULL`, `arrival_seq INTEGER NOT NULL`, and a
+  table-level `UNIQUE (arrival_ordinal, arrival_seq)` per table. The
+  invariant lives in the table, so it binds every writer including foreign
+  SQL, and NOT NULL moots SQLite's NULLs-pass-unique-indexes hole.
+- **Existing databases — table rebuild, the honest SQLite mechanism**:
+  retro-added columns cannot be ALTERed to NOT NULL, so the migration is
+  the standard rebuild, per table, in ONE transaction:
+  `CREATE TABLE facts_new (...full schema incl. NOT NULL + UNIQUE...)`;
+  `INSERT INTO facts_new (rowid, ...) SELECT rowid, ..., <coordinate>,
+  <seq> FROM facts` (coordinate per mode: `rowid, 0` mirrored, or a join
+  against a temp id→(ord, seq) mapping staged from the coordinate provider
+  for arrival-canonical); `DROP TABLE facts; ALTER TABLE facts_new RENAME
+  TO facts`; same for `ticks`; recreate dependent schema; write the
+  `coordinate_axis` marker; commit. No foreign keys exist on these tables,
+  so the rebuild needs no FK dance. **Cost, stated:** one O(store) rewrite
+  at first post-upgrade writable open — the same order as the coordinate
+  walk it absorbs, once per database.
+- **The rebuild preserves supported schema artifacts** (DP-r3-02):
+  - **Rowids are preserved explicitly** — the copy names `rowid` in both
+    column lists. This is not optional politeness: `facts_fts.fact_rowid`
+    and the `fts_state.last_rowid` watermark key on exactly these rowids
+    (`jsonl_store.py:944-954` documents the poisoning that renumbering
+    causes; `vertex_reader.py:2187`), and WP-1 lands while witness/seal
+    rowid consumers are still live — a renumbering rebuild would break the
+    suites WP-1 is required to keep green. The FTS projection therefore
+    survives the migration valid, and the rederivation precedent of
+    dropping `facts_fts`/`fts_state` (`arrival_projection.py:492-495`) is
+    correctly NOT followed here: rederivation renumbers (DELETE resets the
+    rowid counter), the migration copy does not, and each treatment is the
+    honest one for its mechanism.
+  - **Triggers and indexes are inventoried and recreated**: before the
+    DROP, read every `sqlite_schema` row with `tbl_name` = the table and
+    `type IN ('trigger','index')` (skipping auto-indexes), and replay each
+    stored `sql` verbatim after the RENAME, inside the same transaction.
+    Triggers are supported behavior, not debris — the store deliberately
+    reads back committed rows "after any AFTER triggers fired"
+    (`sqlite_store.py:702-712`, `:746`).
+- The audit's NULL check (D3) remains a backstop for databases that predate
+  the migration or were written by a foreign schema copy — a location
+  claim, exactly as before.
+- **Legacy allocator:** for a store with no arrival log, append assigns
+  `arrival_ordinal = COALESCE((SELECT MAX(arrival_ordinal) FROM <table>), 0) + 1`,
+  `arrival_seq = 0`, inside the same transaction as the insert — one
+  allocator, per table, serialized by the store's existing write
+  transaction. For such a store the mirrored coordinate *is* its arrival
+  axis: dense, append-ordered, rebuild-invariant is vacuous (nothing
+  rebuilds it from a log), and identical to rowid order by construction.
+
+**Migration — mode-aware, not uniform** (DP-r1-02 replaced r1's option (a)):
+
+- **Legacy index (jsonl-/sqlite-canonical, no arrival log):** backfill
+  `arrival_ordinal = rowid, arrival_seq = 0`. Correct by construction —
+  rowid is that store's append order, and no batch record exists to share
+  an ordinal (legacy rows are row-granular).
+- **Arrival-canonical index:** rowid backfill is WRONG — a batch expands to
+  N rows sharing one ordinal (`arrival_store.py:342`), so `ordinal = rowid`
+  mints coordinates the log never issued and collides with the next
+  catch-up (the DP-r1-02 counterexample). The migration instead re-derives
+  coordinates **from the log**: walk `rows_of_record` over the records up
+  to the stamped consumed mark, matching row ids in index order and
+  stamping `(ord, seq)`; any mismatch between walk and index refuses into
+  the existing escape hatch — `rederive_projections`, which rebuilds the
+  index with coordinates written natively. The walk is O(store), once.
+- **Migration dispatch — a common upgrader on every writable open**
+  (DP-r2-02: `_ensure_index_schema` sits on the projection-rederive path
+  only, `arrival_projection.py:479/:544`, while the shared
+  `FACT_INSERT_SQL`/`TICK_INSERT_SQL` change hits ordinary `SqliteStore`
+  and `JsonlStore` writers immediately, `sqlite_store.py:131`,
+  `jsonl_store.py:668`). One module-level function beside the schema
+  statements it extends, in `sqlite_store.py` — signature redesigned in r4
+  (DP-r3-01: a bare `(conn, mode)` cannot perform the log-derived join —
+  neither a connection nor a mode string reaches the arrival log):
+
+  ```python
+  ensure_coordinate_schema(
+      conn, *,
+      mode: Literal["mirrored", "arrival"],
+      coordinates: Callable[[], Iterator[tuple[str, int, int]]] | None = None,
+      # provider of (row_id, arrival_ordinal, arrival_seq); REQUIRED for
+      # mode="arrival", forbidden for mode="mirrored". A provider, not a
+      # materialized mapping: the walk runs only if a rebuild is needed.
+  )
+  ```
+
+  Invoked before any insert SQL runs, by every writer of these tables,
+  following the store's existing lazy-migration idiom
+  (`_ensure_chain_columns`/`_ensure_fact_signature_column`,
+  `sqlite_store.py:1495-1520`). How each route supplies its inputs:
+  1. `SqliteStore` — pre-write hooks beside the two existing `_ensure_*`
+     migrations; `mode="mirrored"`, no provider. The base class holds
+     `self._coordinate_mode = "mirrored"` / `self._coordinate_provider =
+     None` and the shared hook reads them, so subclasses override data,
+     not the hook.
+  2. `JsonlStore` — same inherited hook on its index connection, mirrored
+     (its index rows are row-granular append-order).
+  3. `ArrivalStore` — **constructor-ordering note, stated honestly**: its
+     `ArrivalLog` is constructed only after `super().__init__` opens the
+     connection (`arrival_store.py:133-139`), so the upgrader cannot run
+     inside the base constructor for this class. It doesn't need to: no
+     insert SQL runs during construction. Immediately after `self._log`
+     is assigned — before the existing `_ensure_*` calls in its own
+     `__init__` tail (`:144-145`) — ArrivalStore sets
+     `self._coordinate_mode = "arrival"` and `self._coordinate_provider`
+     to a closure walking `self._log` via `rows_of_record` (yielding each
+     row's id with its record ordinal and expansion seq), then invokes
+     the upgrader once. The pre-write hook remains as the backstop.
+  4. `arrival_projection.rederive_projections` — holds `canonical` AND
+     `log` before opening the index (`arrival_projection.py:470`);
+     `_ensure_index_schema` delegates with `mode="arrival"` and the same
+     log-walking provider. (Its own rebuild path deletes and re-derives
+     rows with native coordinates, so the provider is only consulted if
+     the index predates the columns and is not being rederived.)
+  **Mis-mode guard**: a `mode="mirrored"` call against an index whose
+  `store_meta` carries `ARRIVAL_LINEAGE_KEY` refuses (the
+  `ArrivalCanonicalUnsupported` posture) instead of mis-stamping — a
+  plain `SqliteStore` opened on an arrival index file must not mint
+  mirror coordinates over a log-owned axis. The marker is authority;
+  file suffix is never consulted.
+- **Interrupted migration:** the rebuild is one transaction per table and
+  the `store_meta` marker (`coordinate_axis = mirrored | arrival`) commits
+  inside the second table's transaction. Marker present ⇒ migrated, the
+  upgrader no-ops; absent ⇒ the rebuild runs (idempotently — a re-run of a
+  completed first table is a no-op rebuild). A crash between the two table
+  transactions leaves no half state a reader can observe: the marker is
+  absent, so the next writable open re-runs the whole upgrader. There is
+  no observable half-migrated state.
+
+**Scope-the-claim corollary.** `arrival_ordinal IS NULL` in a migrated
+Independent gate agent; re-derives the oracle from scratch; pointer branch
+`slice/D-gate`. (r2: gates for every DP-r1 gap; the impossible and
+non-discriminating r1 gates replaced — DP-r1-10.)
+
+**G-D0-1 — the shuffled index (the ruled gate item).** A natural rebuild
+cannot produce one (`rederive_projections` replays in order), so the gate
+builds a **deliberate permuted-insert harness** — index rows inserted in
+permuted record order so rowid order and arrival order disagree.
+Assertions: L1 passes; every witness position, seal window, audit check,
+and `verify_chain` answer identical to the unshuffled store. Written first;
+used by every later package.
+**G-D0-2** — deliberately rebuilt index: outstanding positions and seals
+valid.
+**G-D0-3** — migration of an existing **batch-bearing arrival-canonical**
+index: coordinates equal the log's (the DP-r1-02 counterexample as a test);
+subsequent catch-up appends collide with nothing.
+**G-D0-4** — interrupted migration: kill between schema-add and stamp;
+reopen; the store answers correctly and the marker semantics hold (no
+observable half-state).
+**G-D0-5** — invariant enforcement **by the table**: on a migrated (rebuilt)
+and on a freshly-created database, a raw `conn.execute` INSERT with a
+duplicate `(arrival_ordinal, arrival_seq)` raises `IntegrityError`
+(UNIQUE), and one with NULL in either coordinate raises `IntegrityError`
+(NOT NULL) — foreign SQL included, no store-layer code in the loop; legacy
+allocator monotonic under interleaved fact/tick appends in one transaction.
+**G-D0-6** — ordinary legacy opens migrate (the DP-r1-10 re-fail gap):
+existing sqlite-canonical and jsonl-canonical fixture databases opened
+through their normal public constructors and appended to via the public
+API — the upgrader ran before the first insert, coordinates are correct
+and constrained, prior rows carry the mirror backfill, and a read-only
+open of an unmigrated database still answers reads.
+**G-D0-7** — arrival dispatch route 3 (DP-r3-03): an existing UNMIGRATED
+batch-bearing arrival-canonical index opened through `ArrivalStore`'s
+public constructor — coordinates equal the log's, constraints present,
+appends land correctly after.
+**G-D0-8** — arrival dispatch route 4 (DP-r3-03): the same unmigrated
+fixture through the rederivation entry point — migrated/rederived
+coordinates identical to G-D0-7's, proving the two routes with different
+log access agree.
+**G-D0-9** — trigger survival (DP-r3-02): a fixture with an AFTER INSERT
+trigger on `facts` (the read-back contract `sqlite_store.py:702-712`
+supports) migrates; the trigger still exists in `sqlite_schema` and still
+fires on the next public-API append.
+**G-D0-10** — FTS/rowid survival (DP-r3-02): a fixture with populated
+`facts_fts` + `fts_state` migrates; every `fact_rowid` still resolves to
+the same fact (rowids preserved byte-for-byte), search answers
+identically, and incremental indexing resumes from the watermark without
+skipping or double-indexing.
+**G-D0-11** — mis-mode refusal: a plain `SqliteStore` opened on an
+arrival-marked index refuses to mirror-stamp it.
+
+**G-D1-2** — `WitnessAggregateUnsupported` at all three sites,
+messages unchanged; A10 refusal messages byte-identical. Pinning tests
+(`test_witness_position.py`, `test_diff_interval_report.py`,
+`test_query_facts.py`, `test_fold_at.py`) pass untouched.
+**G-D1-3** — `seq:N` round-trip across a batch boundary, pinning the ruled
+    90	    "ARRIVAL_LINEAGE_KEY",
+    91	    "ARRIVAL_OFFSET_KEY",
+    92	    "ARRIVAL_ORDINAL_KEY",
+    93	    "ArrivalCanonicalUnsupported",
+    94	    "ArrivalStore",
+    95	    "ensure_arrival_index",
+    96	]
+    97	
+    98	# The resume mark's three store_meta keys — the ratified fields and no
+    99	# others. The old cursor custody's row counts deliberately do not return:
+   100	# the ordinal is dense, so "how many records precede this one" is ``ord``,
+   101	# by construction.
+   102	ARRIVAL_LINEAGE_KEY = "arrival_lineage"
+   103	ARRIVAL_OFFSET_KEY = "arrival_offset"
+   104	ARRIVAL_ORDINAL_KEY = "arrival_ordinal"
+   105	
+   106	T = TypeVar("T")
+   107	
+   108	
+   109	class ArrivalCanonicalUnsupported(NotImplementedError):
+   110	    """An operation an arrival-canonical store refuses rather than fudges.
+   111	
+   112	    Two families: history-mutating ops (they would rewrite index rows while
+   113	    the log kept the originals), and index states that only projection
+   114	    re-derivation can honestly resolve — which is the next cut's verb, so
+   115	    refusing keeps it designable there. A refusal names what the caller can
+   116	    do instead.
+   117	    """
+   118	
+   119	
+   120	class ArrivalStore(SqliteStore[T], Generic[T]):
+   121	    """A store whose canonical persistence is its arrival log.
+   122	
+   123	    Same constructor as :class:`SqliteStore` plus an optional ``log_path``
+   124	    (defaults to the db path with the ``.arrival`` suffix). Opening runs
+   125	    catch-up; every append lands in the log first.
+   126	
+   127	    The log must be minted before the store accepts writes — movement 1
+   128	    (genesis, with the founding key) is its custodian's act, performed with
+   129	    key material this class never sees. An unminted log opens as an empty
+   130	    store and refuses appends with the mint-first message.
+   131	    """
+   132	
+   133	    def __init__(self, *, log_path: Path | None = None, **kwargs: Any) -> None:
+   134	        super().__init__(**kwargs)
+   135	        self._log = ArrivalLog(
+   136	            Path(log_path)
+   137	            if log_path is not None
+   138	            else canonical_for(self._path, "arrival")
+   139	        )
+   140	        # The mark the last ceremony-path reconcile verified — see
+   141	        # _sync_derived_state / _ceremony_persist.
+   142	        self._reconciled_mark: ResumeMark | None = None
+   143	        try:
+   144	            self._ensure_fact_signature_column()
+   145	            self._ensure_chain_columns()
+   146	            self._ensure_meta_table()
+   147	            self.catch_up()
+   148	        except BaseException:
+   149	            # A raise out of __init__ must leave the db reopenable: an
+   150	            # uncommitted write on a leaked connection locks the file.
+   151	            conn = self._db
+   152	            try:
+   153	                conn.rollback()
+   154	            finally:
+   155	                conn.close()
+   156	            raise
+   157	
+   158	    @property
+   159	    def log_path(self) -> Path:
+   160	        """The arrival log this store's sqlite index derives from."""
+   161	        return self._log.path
+   162	
+   163	    @property
+   164	    def _db(self) -> sqlite3.Connection:
+   165	        """The open index connection, narrowed.
+   166	
+   167	        ``SqliteStore`` nulls ``_conn`` on close; nothing in this class runs
+   168	        after close, so a None here is a caller bug and refuses loudly
+   169	        rather than surfacing as an attribute error three frames deep.
+   170	        """
+   171	        conn = self._conn
+   172	        if conn is None:
+   173	            raise RuntimeError(f"store at {self._path} is closed")
+   174	        return conn
+   175	
+   250	        envelope["signature"] = row[6]
+   251	    return hashlib.sha256(_canonical_bytes(envelope)).hexdigest()
+   252	
+   253	
+   254	def _fact_commitment_hash(
+   255	    kind: str, ts: float, observer: str, origin: str, payload_text: str
+   256	) -> str:
+   257	    """Hash the fact's CONTENT commitment — what the fact signer signs.
+   258	
+   259	    Content-only by design (design/fact-signature-at-store-column):
+   260	    excludes id and rowid, which are custody context, not authored
+   261	    content. This is what makes the signature transport-stable — any
+   262	    store holding the row can re-derive the commitment and verify
+   263	    authorship against the observer registry without trusting the
+   264	    sender. Stored payload TEXT is embedded verbatim (same posture as
+   265	    the tick envelope: byte-level tamper detection, no re-serialization).
+   266	    Never includes the signature (a signature cannot sign itself).
+   267	    """
+   268	    envelope = {
+   269	        "kind": kind, "ts": ts, "observer": observer,
+   270	        "origin": origin, "payload": payload_text,
+   271	    }
+   272	    return hashlib.sha256(_canonical_bytes(envelope)).hexdigest()
+   273	
+   274	
+   275	# Public name: the content commitment is a cross-lib contract —
+   276	# libs/store's transport paths and any receive-side verifier must hash
+   277	# the same envelope the signer signed. Same function, two names.
+   278	def fact_commitment_hash(
+   279	    kind: str, ts: float, observer: str, origin: str, payload_text: str
+   280	) -> str:
+   281	    """Content commitment hash for fact signing (see _fact_commitment_hash)."""
+   282	    return _fact_commitment_hash(kind, ts, observer, origin, payload_text)
+   283	
+   284	
+   285	from datetime import datetime, timezone as _tz
+   286	
+   287	_UTC = _tz.utc
+   288	from pathlib import Path
+   289	from typing import Any, Callable, Generic, TypeVar
+   290	
+   291	# IDs generated Python-side via python-ulid (see gen_id above).
+   292	# The sqlite-ulid C extension is not a dependency — id generation lives
+   293	# entirely in Python. All INSERTs supply id explicitly, so no SQL-callable
+   294	# ulid() function is needed.
+   295	
+   296	
+   297	def _mapping_proxy_default(obj: object) -> object:
+   298	    """Handle MappingProxyType in JSON serialization."""
+   299	    from types import MappingProxyType
+   300	    if isinstance(obj, MappingProxyType):
+   301	        return dict(obj)
+   302	    raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
+   303	
+   304	from .tick import Tick
+   305	
+   306	T = TypeVar("T")
+   307	
+   308	_SCHEMA_STMTS = (
+   309	    """CREATE TABLE IF NOT EXISTS facts (
+   310	        id       TEXT NOT NULL PRIMARY KEY,
+   311	        kind     TEXT NOT NULL,
+   312	        ts       REAL NOT NULL,
+   313	        observer TEXT NOT NULL,
+   314	        origin   TEXT NOT NULL DEFAULT '',
+   315	        payload  TEXT NOT NULL CHECK (json_valid(payload)),
+   316	        signature TEXT
+   317	    )""",
+   318	    "CREATE INDEX IF NOT EXISTS idx_facts_kind ON facts(kind)",
+   319	    "CREATE INDEX IF NOT EXISTS idx_facts_ts ON facts(ts)",
+   320	    """CREATE TABLE IF NOT EXISTS ticks (
+   321	        id           TEXT NOT NULL PRIMARY KEY,
+   322	        name         TEXT NOT NULL,
+   323	        ts           REAL NOT NULL,
+   324	        since        REAL,
+   325	        origin       TEXT NOT NULL,
+   326	        payload      TEXT NOT NULL CHECK (json_valid(payload)),
+   327	        prev_hash    TEXT,
+   328	        window_start TEXT,
+   329	        fact_cursor  TEXT,
+   330	        window_hash  TEXT,
+   331	        signature    TEXT
+   332	    )""",
+   333	    "CREATE INDEX IF NOT EXISTS idx_ticks_name ON ticks(name)",
+   334	    "CREATE INDEX IF NOT EXISTS idx_ticks_ts ON ticks(ts)",
+   335	)
+   336	
+   337	
+   338	class UnsignedTickInSignedEra(Exception):
+   339	    """``append_tick`` was asked to append an unsigned tick to a store already
+   340	    in the signed era — the tick-signing floor (decision design/tick-signing
+   341	    -era-is-a-floor). Minting it would break chain era-monotonicity
+   342	    (verify_chain flags "unsigned tick after signed era").
+   343	
+   344	    The floor is enforced BY DEFAULT (``enforce_floor=True``): the invariant
+   345	    lives on the store mint, so every caller — every verb that fires a boundary
+   346	    AND every other live mint (e.g. the tasks harness) — is fail-safe without
+   347	    having to opt in. Only re-mint paths that legitimately reconstruct history
+   348	    under their own signer wiring (rebirth/slice/replay) opt OUT explicitly
+   349	    with ``enforce_floor=False``; the exemptions are named, not the enforcement.
+   350	
+   351	    The signed-era predicate matches verify_chain exactly: a *chained* signed
+   352	    tick (``signature IS NOT NULL AND window_hash IS NOT NULL``) — a legacy
+   353	    pre-chain signed row does not open the era.
+   354	    """
+   355	
+   356	
+   357	class GenesisExists(Exception):
+   358	    """``absorb_genesis`` found a ``_decl.genesis`` row already in the store.
+   359	
+   360	    Genesis is identity, not fold state (SPEC §9.2): a store's OWN lineage is
+   361	    opened exactly once, so re-absorption is refused rather than last-write-
+   362	    wins. Scoped by the ``store_meta.own_lineage`` marker — a merged foreign
+   363	    genesis does NOT block minting our own; only an already-open own lineage
+   364	    (marker present, or a single pre-marker genesis adopted as self) refuses.
+   365	    Re-absorb over an open lineage is the edit ceremony (``absorb_edit``).
+   366	    """
+   367	
+   368	
+   369	class UnsignableGenesis(Exception):
+   370	    """``absorb_genesis`` could not sign the genesis event.
+   371	
+   372	    A genesis is the lineage's attestation root — an unsigned one is a hole
+   373	    in the store's attestation story (SPEC §9.2 / §9.4), so absorb refuses
+   374	    (rollback, no write) rather than append an unsigned root. Raised when the
+   375	    injected ``fact_signer`` is absent or returns no signature for the
+   376	    recording observer. The signature that matters is over the ACTUAL final
+   377	    payload, verified before commit — never a throwaway probe digest.
+   378	    """
+   379	
+   380	
+   381	class NoGenesis(Exception):
+   382	    """``absorb_edit`` found no ``_decl.genesis`` row — the store is unabsorbed.
+   383	
+   384	    The edit ceremony (SPEC §9.2, S4) re-emits changed subjects over an
+   385	    already-opened lineage; there is nothing to diff against before genesis.
+   386	    Opening the lineage is the genesis path (``absorb_genesis``), not an edit.
+   387	    """
+   388	
+   389	
+   390	class AmbiguousGenesis(Exception):
+   650	    # to make a durable JSONL line the authoritative write and sqlite the
+   651	    # derived index, without touching mint logic or the read surface.
+   652	    # ------------------------------------------------------------------
+   653	
+   654	    def _sync_derived_state(self) -> None:
+   655	        """Seam: bring derived state up to date before reading chain state.
+   656	
+   657	        A no-op here — sqlite IS the state. A subclass whose sqlite is a
+   658	        DERIVED index (engine.jsonl_store) must reconcile the index with its
+   659	        canonical log *before* any mint reads chain state from it: a durable
+   660	        but unindexed line would otherwise be invisible to the predecessor,
+   661	        window-start and fact-cursor derivation, and the resulting mis-linked
+   662	        tick lands in the canonical log where no rebuild can repair it.
+   663	
+   664	        Called at the top of ``append_tick`` (before the ``prev_row`` read)
+   665	        and at the top of ``absorb_genesis``/``absorb_edit`` — strictly
+   666	        BEFORE their ``BEGIN IMMEDIATE``, because a reconcile commits and
+   667	        would split the ceremony transaction. The chain-head, fact-cursor and
+   668	        declaration-head reads inside those transactions therefore see an
+   669	        index that has consumed every durable line.
+   670	        """
+   671	
+   672	    def _ceremony_persist(self, rows: list[tuple]) -> None:
+   673	        """Seam: make a declaration ceremony's rows canonical, pre-commit.
+   674	
+   675	        Called inside the open ``BEGIN IMMEDIATE`` transaction, after every
+   676	        CAS check has passed and all fact-row INSERTs (and meta stamps) are
+   677	        staged, immediately before COMMIT. ``rows`` are the full 7-field
+   678	        persisted fact rows, in emission order.
+   679	
+   680	        A no-op here — sqlite IS the store, and the staged INSERTs commit.
+   681	        ``engine.jsonl_store`` overrides it to append the ceremony as ONE
+   682	        durable log line (a plain fact line for one row, a ``batch`` envelope
+   683	        for several) and stamp the consumed offset/counts, preserving
+   684	        ``_write``'s ordering: refusals before any log byte, fsync before the
+   685	        index row is observable.
+   686	        """
+   687	
+   688	    def _committed_row_state(self, table: str, row_id: str) -> tuple[bool, str | None]:
+   689	        """(exists, signature) of the row as it stands post-INSERT, pre-commit.
+   690	
+   691	        Existence and signature are separate answers (SOL-R4-02): a NULL
+   692	        signature on a committed row and a row an AFTER trigger deleted are
+   693	        different facts, and conflating them once minted a stored=True
+   694	        receipt for no row. ``table`` is an internal constant
+   695	        (``facts``/``ticks``), never caller input.
+   696	        """
+   697	        r = self._conn.execute(
+   698	            f"SELECT signature FROM {table} WHERE id = ?", (row_id,)  # noqa: S608
+   699	        ).fetchone()
+   700	        return (r is not None, r[0] if r is not None else None)
+   701	
+   702	    def _committed_full_row(self, table: str, row_id: str) -> tuple:
+   703	        """The COMPLETE inserted row, post-INSERT pre-commit, or refuse.
+   704	
+   705	        Read back after any AFTER triggers fired, in persisted column
+   706	        order — what the store will actually commit. An absent row is the
+   707	        SOL-R4-02 typed refusal. Used wherever the caller must compare or
+   708	        persist the committed truth, not the assembled intent: the JSONL
+   709	        log derivation (SOL-R4-03) and the ceremony full-row equality
+   710	        check (R4 arbiter follow-up).
+   711	        """
+   712	        columns = FACT_COLUMNS if table == "facts" else TICK_COLUMNS
+   713	        r = self._conn.execute(
+   714	            f"SELECT {', '.join(columns)} FROM {table} "  # noqa: S608
+   715	            "WHERE id = ?", (row_id,)
+   716	        ).fetchone()
+   717	        if r is None:
+   718	            raise CommittedRowMissing(
+   719	                f"the inserted {table} row {row_id} is ABSENT at pre-commit "
+   720	                "read-back (a schema-level rewrite, e.g. an AFTER INSERT "
+   721	                "trigger, deleted it) — rolling back; refusing to mint a "
+   722	                "stored receipt for a row the store did not keep"
+   723	            )
+   724	        return tuple(r)
+   725	
+   726	    def _committed_signature(self, table: str, row_id: str) -> str | None:
+   727	        """The COMMITTED signature; raises if the row itself is gone.
+   728	
+   729	        The one read-back per write (SOL-R3-02): executed after the INSERT
+   730	        — so any AFTER triggers have already fired — and before the commit,
+   731	        it reads exactly what will be committed. An ABSENT row (something
+   732	        deleted it out from under the staged INSERT) is a typed refusal
+   733	        (SOL-R4-02): callers roll back — a store that eats rows must not
+   734	        get a stored=True receipt.
+   735	        """
+   736	        exists, signature = self._committed_row_state(table, row_id)
+   737	        if not exists:
+   738	            raise CommittedRowMissing(
+   739	                f"the inserted {table} row {row_id} is ABSENT at pre-commit "
+   740	                "read-back (a schema-level rewrite, e.g. an AFTER INSERT "
+   741	                "trigger, deleted it) — rolling back; refusing to mint a "
+   742	                "stored receipt for a row the store did not keep"
+   743	            )
+   744	        return signature
+   745	
+   746	    def _write_fact_row(self, row: tuple) -> str | None:
+   747	        """Persist one assembled fact row (id, kind, ts, observer, origin,
+   748	        payload, signature). Returns the COMMITTED signature (read back
+   749	        inside the transaction, after triggers, before commit); raises
+   750	        CommittedRowMissing — after rollback — if the row is gone."""
+   751	        try:
+   752	            self._conn.execute(FACT_INSERT_SQL, row)
+   753	            committed = self._committed_signature("facts", row[0])
+   754	            self._conn.commit()
+   755	        except BaseException:
+   756	            self._conn.rollback()
+   757	            raise
+   758	        return committed
+   759	
+   760	    def _write_tick_row(self, row: tuple) -> str | None:
+   761	        """Persist one assembled tick row (_TICK_ROW_SQL order + signature).
+   762	        Same read-back + rollback-on-absence contract as facts."""
+   763	        try:
+   764	            self._conn.execute(TICK_INSERT_SQL, row)
+   765	            committed = self._committed_signature("ticks", row[0])
+   766	            self._conn.commit()
+   767	        except BaseException:
+   768	            self._conn.rollback()
+   769	            raise
+   770	        return committed
+   771	
+   772	    def current_chain_head(self) -> str | None:
+   773	        """The row-identity hash of the latest *chained* tick, or None.
+   774	
+   775	        What a successor tick's ``prev_hash`` commits to (era-aware
+   776	        ``_tick_row_hash``) — the "chain head" a genesis pins. None when the
+   777	        store has no chained tick (a pre-chain-only or empty store pins on
+   778	        the fact cursor instead). Read-only; never migrates schema.
+   779	        """
+   780	        cols = {r[1] for r in self._conn.execute("PRAGMA table_info(ticks)")}
+
+exec
+/bin/zsh -lc "rg -n \"def __init__|_SCHEMA_STMTS|INSERT|_ensure_|CREATE\" libs/engine/src/engine/sqlite_store.py | head -100 && nl -ba libs/engine/src/engine/sqlite_store.py | sed -n '525,650p' && nl -ba libs/engine/src/engine/jsonl_store.py | sed -n '900,975p' && nl -ba libs/engine/src/engine/arrival_projection.py | sed -n '450,560p' && rg -n \"def rows_of_record|rows_of_record\\(\" libs/engine/src/engine" in /Users/kaygee/Code/loops
+ succeeded in 0ms:
+11:id ≈ chronological) and for merge dedup on slice→merge round-trips via INSERT
+42:    """The row just INSERTed is absent at pre-commit read-back.
+44:    Something inside the same transaction (an AFTER INSERT trigger, a
+45:    schema-level rewrite) deleted the row between the staged INSERT and the
+116:# tuples. The schema, the INSERTs, the SELECTs and the JSONL line all order
+126:        f"INSERT INTO {table} ({', '.join(columns)}) "
+131:FACT_INSERT_SQL = _insert_sql("facts", FACT_COLUMNS)
+132:TICK_INSERT_SQL = _insert_sql("ticks", TICK_COLUMNS)
+293:# entirely in Python. All INSERTs supply id explicitly, so no SQL-callable
+308:_SCHEMA_STMTS = (
+309:    """CREATE TABLE IF NOT EXISTS facts (
+318:    "CREATE INDEX IF NOT EXISTS idx_facts_kind ON facts(kind)",
+319:    "CREATE INDEX IF NOT EXISTS idx_facts_ts ON facts(ts)",
+320:    """CREATE TABLE IF NOT EXISTS ticks (
+333:    "CREATE INDEX IF NOT EXISTS idx_ticks_name ON ticks(name)",
+334:    "CREATE INDEX IF NOT EXISTS idx_ticks_ts ON ticks(ts)",
+439:    def __init__(
+481:            for stmt in _SCHEMA_STMTS:
+506:    def _ensure_sync(self) -> None:
+549:        the write transaction after the INSERT (any AFTER triggers have
+553:        INSERT trigger can rewrite the row between the two, and the receipt
+562:        self._ensure_sync()
+563:        self._ensure_fact_signature_column()
+634:        correctly no-ops ``_ensure_chain_columns``); a legacy schema re-probes.
+649:    # INSERT *and* the commit. Subclasses (engine.jsonl_store) override them
+676:        CAS check has passed and all fact-row INSERTs (and meta stamps) are
+680:        A no-op here — sqlite IS the store, and the staged INSERTs commit.
+689:        """(exists, signature) of the row as it stands post-INSERT, pre-commit.
+703:        """The COMPLETE inserted row, post-INSERT pre-commit, or refuse.
+720:                "read-back (a schema-level rewrite, e.g. an AFTER INSERT "
+729:        The one read-back per write (SOL-R3-02): executed after the INSERT
+732:        deleted it out from under the staged INSERT) is a typed refusal
+740:                "read-back (a schema-level rewrite, e.g. an AFTER INSERT "
+752:            self._conn.execute(FACT_INSERT_SQL, row)
+764:            self._conn.execute(TICK_INSERT_SQL, row)
+895:        self._ensure_sync()
+896:        self._ensure_fact_signature_column()
+897:        self._ensure_chain_columns()
+898:        self._ensure_meta_table()
+953:                conn.execute(FACT_INSERT_SQL, row)
+955:                # read the WHOLE row back after the INSERT (AFTER triggers
+966:                        "e.g. an AFTER INSERT trigger, altered it) — its "
+971:                    "INSERT OR REPLACE INTO store_meta (key, value) "
+1065:        self._ensure_sync()
+1066:        self._ensure_fact_signature_column()
+1067:        self._ensure_meta_table()
+1159:                        "INSERT INTO facts "
+1167:                # signed — full-row read-back post-INSERT (triggers fired),
+1177:                            "rewrite, e.g. an AFTER INSERT trigger, altered "
+1308:    def _ensure_meta_table(self) -> None:
+1317:            "CREATE TABLE IF NOT EXISTS store_meta (key TEXT PRIMARY KEY, value TEXT)"
+1337:            "INSERT OR REPLACE INTO store_meta (key, value) VALUES (?, ?)",
+1385:        self._ensure_meta_table()
+1430:                    "INSERT OR REPLACE INTO store_meta (key, value) "
+1485:        self._ensure_meta_table()
+1495:    def _ensure_chain_columns(self) -> None:
+1511:    def _ensure_fact_signature_column(self) -> None:
+1617:        is read back inside the write transaction, after the INSERT (AFTER
+1622:        self._ensure_sync()
+1623:        self._ensure_chain_columns()
+1702:        self._ensure_sync()
+1703:        self._ensure_chain_columns()
+   525	
+   526	        Signature (delta 3): when a fact_signer was injected, signs the
+   527	        CONTENT commitment of the new row under the fact's own observer;
+   528	        NULL when the signer returns None for that observer (per-observer
+   529	        pre-signature era). signature_override carries an EXISTING
+   530	        signature verbatim — replay/rebirth/transport paths must preserve
+   531	        the original authorship signature, never re-sign (re-signing
+   532	        another observer's fact under a local key would be forgery; the
+   533	        override bypasses the signer entirely).
+   534	        """
+   535	        return self.append_attested(
+   536	            event, id_override=id_override, signature_override=signature_override
+   537	        )[0]
+   538	
+   539	    def append_attested(
+   540	        self,
+   541	        event: T,
+   542	        *,
+   543	        id_override: str | None = None,
+   544	        signature_override: str | None = None,
+   545	    ) -> tuple[str, str | None]:
+   546	        """:meth:`append`, also returning the committed row's signature.
+   547	
+   548	        The signature handed back is the COMMITTED column, read back inside
+   549	        the write transaction after the INSERT (any AFTER triggers have
+   550	        fired) and before the commit — the write-receipt attestation
+   551	        contract (LIBS_CHANGES P1: "the committed row, or the write
+   552	        operation's actual result"). Assembly state is not enough: an AFTER
+   553	        INSERT trigger can rewrite the row between the two, and the receipt
+   554	        follows the row (SOL-R3-02). ``signature_override`` flows through
+   555	        the assembly verbatim. :meth:`fact_signature` remains the public
+   556	        read-back API for cross-checks.
+   557	        """
+   558	        if self._conn is None:
+   559	            # close() is part of the public lifecycle now — use-after-close
+   560	            # gets a named error, not AttributeError on a None connection.
+   561	            raise RuntimeError(f"store closed: {self._path}")
+   562	        self._ensure_sync()
+   563	        self._ensure_fact_signature_column()
+   564	        d = self._serialize(event)
+   565	        fact_id = id_override if id_override is not None else gen_id()
+   566	        observer = d["observer"]
+   567	        origin = d.get("origin", "")
+   568	        payload_text = json.dumps(d["payload"])
+   569	        if signature_override is not None:
+   570	            signature = signature_override
+   571	        elif self._fact_signer is not None:
+   572	            signature = self._fact_signer(
+   573	                observer,
+   574	                _fact_commitment_hash(d["kind"], d["ts"], observer, origin, payload_text),
+   575	            )
+   576	        else:
+   577	            signature = None
+   578	        committed = self._write_fact_row(
+   579	            (fact_id, d["kind"], d["ts"], observer, origin, payload_text, signature)
+   580	        )
+   581	        return fact_id, committed
+   582	
+   583	    def fact_signature(self, fact_id: str) -> str | None:
+   584	        """Signature column of the COMMITTED fact row, or None.
+   585	
+   586	        The read-back half of the write-receipt attestation contract
+   587	        (LIBS_CHANGES P1): the committed row is the authority on whether a
+   588	        write was signed — never "keys exist locally" inference. Returns
+   589	        None for an unsigned row, a pre-signature-column schema, or an
+   590	        unknown id (callers that need to distinguish absence hold the id
+   591	        ``append`` just returned). Read-only: never migrates schema.
+   592	        """
+   593	        if self._conn is None:
+   594	            raise RuntimeError(f"store closed: {self._path}")
+   595	        if not self._facts_have_signature_column():
+   596	            return None
+   597	        row = self._conn.execute(
+   598	            "SELECT signature FROM facts WHERE id = ?", (fact_id,)
+   599	        ).fetchone()
+   600	        return row[0] if row is not None else None
+   601	
+   602	    def tick_signature_state(self, tick_id: str) -> tuple[str | None, bool] | None:
+   603	        """(signature, chained) of the COMMITTED tick row; None if unknown id.
+   604	
+   605	        Same committed-row authority as :meth:`fact_signature`, for the
+   606	        ticks axis: ``signature`` is the row's persisted Ed25519 signature
+   607	        (None in the pre-signature era), ``chained`` whether the row
+   608	        carries chain fields (``window_hash`` non-NULL). Read-only: never
+   609	        migrates schema — pre-chain/pre-signature schemas report
+   610	        ``(None, False)`` for a known id.
+   611	        """
+   612	        if self._conn is None:
+   613	            raise RuntimeError(f"store closed: {self._path}")
+   614	        if self._ticks_have_chain_columns():
+   615	            select = "signature, window_hash"
+   616	        else:
+   617	            cols = {r[1] for r in self._conn.execute("PRAGMA table_info(ticks)")}
+   618	            select = ", ".join(
+   619	                c if c in cols else f"NULL AS {c}"
+   620	                for c in ("signature", "window_hash")
+   621	            )
+   622	        row = self._conn.execute(
+   623	            f"SELECT {select} FROM ticks WHERE id = ?", (tick_id,)
+   624	        ).fetchone()
+   625	        if row is None:
+   626	            return None
+   627	        return (row[0], row[1] is not None)
+   628	
+   629	    def _ticks_have_chain_columns(self) -> bool:
+   630	        """Cached read-only probe for the ticks chain/signature columns.
+   631	
+   632	        Same posture as ``_fact_sig_ready`` / ``_facts_have_signature_column``:
+   633	        the positive result is cached (adopting ``_chain_ready``, which then
+   634	        correctly no-ops ``_ensure_chain_columns``); a legacy schema re-probes.
+   635	        Never migrates.
+   636	        """
+   637	        if self._chain_ready:
+   638	            return True
+   639	        cols = {r[1] for r in self._conn.execute("PRAGMA table_info(ticks)")}
+   640	        if all(c in cols for c in _CHAIN_COLUMNS):
+   641	            self._chain_ready = True
+   642	            return True
+   643	        return False
+   644	
+   645	    # ------------------------------------------------------------------
+   646	    # Row-write seam. Both append paths assemble the full persisted row —
+   647	    # exactly the 7-field fact / 11-field tick shape the commitment hashers
+   648	    # and engine.jsonl_codec take — and hand it to these hooks, which own the
+   649	    # INSERT *and* the commit. Subclasses (engine.jsonl_store) override them
+   650	    # to make a durable JSONL line the authoritative write and sqlite the
+   900	                            "written"
+   901	                        ) from exc
+   902	                    raise _RowAlreadyIndexed(
+   903	                        f"index already holds {t} {row[0]}, a row the "
+   904	                        f"consumed-offset marker ({offset}) calls unindexed"
+   905	                    ) from exc
+   906	                if t == "fact":
+   907	                    facts += 1
+   908	                else:
+   909	                    ticks += 1
+   910	            end = pos
+   911	        self._stamp(end, base_facts + facts, base_ticks + ticks)
+   912	        self._conn.commit()
+   913	        return facts, ticks, end
+   914	
+   915	    def _tail_forward(
+   916	        self, offset: int, base_facts: int, base_ticks: int
+   917	    ) -> tuple[int, int]:
+   918	        try:
+   919	            facts, ticks, end = self._index_lines(offset, base_facts, base_ticks)
+   920	        except _RowAlreadyIndexed as collision:
+   921	            # The marker understates what the index consumed: a line the offset
+   922	            # calls unindexed already has its row. Same class as the
+   923	            # ``_prefix_intact`` failure one line up in ``catch_up`` — the
+   924	            # index is not a function of the log at the stamped offset — and
+   925	            # the same answer, rebuild, because every colliding row IS
+   926	            # reproducible from the canonical log (unlike the out-of-band rows
+   927	            # ``_refuse_out_of_band`` protects). Raising instead would make the
+   928	            # store a permanent dead end that the verify gate calls
+   929	            # recoverable; before this, it surfaced as a raw sqlite
+   930	            # IntegrityError traceback out of every read verb.
+   931	            self._conn.rollback()
+   932	            raise collision
+   933	        _log.info(
+   934	            "jsonl-canonical: %s behind %s — tailed %d fact(s), %d tick(s) to %d",
+   935	            self._path, self._log_path, facts, ticks, end,
+   936	        )
+   937	        return base_facts + facts, base_ticks + ticks
+   938	
+   939	    def _rebuild(self, reason: str) -> None:
+   940	        """Rebuild the whole sqlite index from the log.
+   941	
+   942	        Clears ``facts`` and ``ticks`` only: ``store_meta`` survives, because
+   943	        ``own_lineage`` (which ``_decl.genesis`` row is *self*) is identity,
+   944	        not fact — it is not in the log and cannot be re-derived from it.
+   945	
+   946	        The FTS index is dropped in the same transaction. ``facts`` has no
+   947	        ``AUTOINCREMENT``, so ``DELETE FROM facts`` resets sqlite's rowid
+   948	        counter and re-indexed rows take rowids that previously named other
+   949	        facts. ``facts_fts.fact_rowid`` keys on exactly that rowid and
+   950	        ``fts_state.last_rowid`` is the incremental watermark, so a surviving
+   951	        FTS index would resolve stale text to new facts and skip every
+   952	        re-indexed row. Dropping it makes search report ``missing`` (the
+   953	        honest "run reindex" state) instead of answering wrongly.
+   954	        """
+   955	        _log.warning(
+   956	            "jsonl-canonical: rebuilding sqlite index %s from %s — %s",
+   957	            self._path, self._log_path, reason,
+   958	        )
+   959	        self._conn.execute("DELETE FROM facts")
+   960	        self._conn.execute("DELETE FROM ticks")
+   961	        self._conn.execute("DROP TABLE IF EXISTS facts_fts")
+   962	        self._conn.execute("DROP TABLE IF EXISTS fts_state")
+   963	        facts, ticks, end = self._index_lines(0, 0, 0, rebuilding=True)
+   964	        _log.warning(
+   965	            "jsonl-canonical: rebuilt %d fact(s), %d tick(s) from %s (offset %d)",
+   966	            facts, ticks, self._log_path, end,
+   967	        )
+   968	
+   969	    # ---- refusals ------------------------------------------------------
+   970	
+   971	    def reanchor(self, *args: Any, **kwargs: Any):  # noqa: D102
+   972	        # PERMANENT, not deferred (cut B): the queued log-rewrite ceremony is
+   973	        # RETIRED rather than pending. The append-shaped ceremonies
+   974	        # (absorb_genesis/absorb_edit) are inherited and land through the
+   975	        # _ceremony_persist seam; nothing history-mutating joins them.
+   450	    canonical: Path, *, derived_log: bool = False
+   451	) -> Rederivation:
+   452	    """Discard an arrival store's projections and rebuild them from the log.
+   453	
+   454	    The explicit operator verb. Building an ABSENT projection stays
+   455	    automatic (an absent projection destroys nothing when built); an
+   456	    EXISTING projection carrying rows is evidence, and discarding evidence
+   457	    is an operator's decision — so it is spelled here, off the object the
+   458	    write path holds.
+   459	
+   460	    Replays from **ordinal 0, never partially**: the rowids handed out by a
+   461	    replay from empty reproduce the original assignment exactly, which is
+   462	    what keeps outstanding witness positions and seals valid across a
+   463	    re-derivation. A partial rebuild would renumber.
+   464	
+   465	    Refuses (:class:`~engine.arrival_store.ArrivalCanonicalUnsupported`)
+   466	    when ``own_lineage`` is present and names a lineage other than the
+   467	    log's — that index is some other log's projection, and silently
+   468	    repointing it would be the strongest lie available in this design. The
+   469	    check runs BEFORE anything is cleared.
+   470	    """
+   471	    canonical = Path(canonical)
+   472	    log = ArrivalLog(canonical)
+   473	    lineage = log.lineage()  # refuses when this is not an arrival log
+   474	    index = index_path_for(canonical)
+   475	
+   476	    conn = sqlite3.connect(str(index))
+   477	    conn.isolation_level = None  # explicit transaction control
+   478	    try:
+   479	        _ensure_index_schema(conn)
+   480	        conn.execute("BEGIN IMMEDIATE")
+   481	        try:
+   482	            marker = _meta_get(conn, _OWN_LINEAGE_KEY)
+   483	            if marker is not None and marker != lineage:
+   484	                _unsupported(
+   485	                    f"{index} carries an own_lineage marker of {marker!r}, "
+   486	                    f"but the log at {canonical} opens lineage {lineage!r} — "
+   487	                    "this index is some other log's projection; re-deriving "
+   488	                    "it would repoint an identity claim rather than rebuild "
+   489	                    "one"
+   490	                )
+   491	
+   492	            conn.execute("DELETE FROM facts")
+   493	            conn.execute("DELETE FROM ticks")
+   494	            conn.execute("DROP TABLE IF EXISTS facts_fts")
+   495	            conn.execute("DROP TABLE IF EXISTS fts_state")
+   496	
+   497	            records = facts = ticks = 0
+   498	            last: ResumeMark | None = None
+   499	            _, walked = log.walk_marked(None)
+   500	            for record, mark in walked:
+   501	                for t, row in rows_of_record(record):
+   502	                    conn.execute(
+   503	                        FACT_INSERT_SQL if t == "fact" else TICK_INSERT_SQL, row
+   504	                    )
+   505	                    if t == "fact":
+   506	                        facts += 1
+   507	                    else:
+   508	                        ticks += 1
+   509	                records += 1
+   510	                last = mark
+   511	
+   512	            own = licensed_own_lineage(conn, lineage)
+   513	            if own is not None:
+   514	                _meta_set(conn, _OWN_LINEAGE_KEY, own)
+   515	            if last is not None:
+   516	                _stamp_mark(conn, last)
+   517	            conn.execute("COMMIT")
+   518	        except BaseException:
+   519	            conn.execute("ROLLBACK")
+   520	            raise
+   521	    finally:
+   522	        conn.close()
+   523	
+   524	    if derived_log:
+   525	        # Derived from the arrival log, in its own pass, AFTER the index
+   526	        # transaction closed — never from the rows just written. A
+   527	        # projection of a projection would let a poisoned index launder
+   528	        # itself into a second artifact.
+   529	        write_derived_log(canonical)
+   530	    projections = ("index", "derived-log") if derived_log else ("index",)
+   531	    return Rederivation(
+   532	        lineage=lineage,
+   533	        ordinal=-1 if last is None else last.arrival_ordinal,
+   534	        records=records,
+   535	        facts=facts,
+   536	        ticks=ticks,
+   537	        projections=projections,
+   538	    )
+   539	
+   540	
+   541	# --- index plumbing, kept off the store classes ------------------------------
+   542	
+   543	
+   544	def _ensure_index_schema(conn: sqlite3.Connection) -> None:
+   545	    """Make the index connectable as an index, whatever era it is from.
+   546	
+   547	    Every statement is idempotent. The schema statements are the store
+   548	    class's own — imported rather than restated, so a schema column and a
+   549	    re-derived row can never drift apart — and the two column migrations
+   550	    mirror the store's, so an index written before the chain columns or the
+   551	    fact signature existed re-derives instead of failing on a missing
+   552	    column.
+   553	    """
+   554	    for stmt in _SCHEMA_STMTS:
+   555	        conn.execute(stmt)
+   556	    conn.execute(
+   557	        "CREATE TABLE IF NOT EXISTS store_meta (key TEXT PRIMARY KEY, value TEXT)"
+   558	    )
+   559	    fact_cols = {r[1] for r in conn.execute("PRAGMA table_info(facts)")}
+   560	    if "signature" not in fact_cols:
+libs/engine/src/engine/arrival_projection.py:153:def rows_of_record(record: dict) -> list[tuple[str, tuple]]:
+libs/engine/src/engine/arrival_projection.py:501:                for t, row in rows_of_record(record):
+libs/engine/src/engine/arrival_store.py:351:        for t, row in rows_of_record(record):
+libs/engine/src/engine/arrival_store.py:533:            for kind_of_row, row in rows_of_record(record):
+
+exec
+/bin/zsh -lc "nl -ba libs/engine/src/engine/sqlite_store.py | sed -n '430,525p'; nl -ba libs/engine/src/engine/jsonl_store.py | sed -n '610,715p'; nl -ba libs/engine/src/engine/arrival_projection.py | sed -n '130,185p'; nl -ba libs/engine/src/engine/arrival_store.py | sed -n '325,375p'; rg -n \"CREATE TRIGGER|CREATE (UNIQUE )?INDEX|facts_fts|fts_state\" libs/engine/src libs/engine/tests | head -120" in /Users/kaygee/Code/loops
+ succeeded in 0ms:
+   430	
+   431	
+   432	class SqliteStore(Generic[T]):
+   433	    """Append-only SQLite event store.
+   434	
+   435	    Cursor semantics: since(cursor) returns rows with rowid > cursor,
+   436	    matching EventStore's logical index behavior (0 = all events).
+   437	    """
+   438	
+   439	    def __init__(
+   440	        self,
+   441	        *,
+   442	        path: Path,
+   443	        serialize: Callable[[T], dict],
+   444	        deserialize: Callable[[dict], T],
+   445	        tick_signer: Callable[[str], str] | None = None,
+   446	        fact_signer: Callable[[str, str], str | None] | None = None,
+   447	    ) -> None:
+   448	        """tick_signer: optional callable (commitment digest str -> signature
+   449	        str, e.g. base64 Ed25519). Injected, never imported — custody is a
+   450	        property of the store handle (the key lives next to the db), so the
+   451	        signer rides the constructor rather than each append_tick call.
+   452	        None = ticks append unsigned (pre-signature era, honest NULL).
+   453	
+   454	        fact_signer (delta 3): optional callable (observer str, content
+   455	        commitment digest str -> signature str | None). Per-observer
+   456	        authorship (design/fact-signing-per-observer-keys): the callable
+   457	        selects a key by observer and returns None for observers without
+   458	        one — those facts append unsigned (honest NULL, a per-observer
+   459	        era rather than a per-store epoch). Injected, never imported.
+   460	        """
+   461	        self._path = Path(path)
+   462	        self._serialize = serialize
+   463	        self._deserialize = deserialize
+   464	        self._tick_signer = tick_signer
+   465	        self._fact_signer = fact_signer
+   466	        self._direct_fact_build: bool | None = None  # lazy detection
+   467	        self._fact_class: type | None = None
+   468	
+   469	        try:
+   470	            is_new = self._path.stat().st_size == 0
+   471	        except OSError:
+   472	            is_new = True
+   473	            self._path.parent.mkdir(parents=True, exist_ok=True)
+   474	        self._conn = sqlite3.connect(str(self._path))
+   475	        self._chain_ready = is_new  # new DBs get chain columns in schema
+   476	        self._fact_sig_ready = is_new  # new DBs get facts.signature in schema
+   477	        if is_new:
+   478	            # New DB — set WAL (persistent) and synchronous, create schema
+   479	            self._conn.execute("PRAGMA journal_mode=WAL")
+   480	            self._conn.execute("PRAGMA synchronous=NORMAL")
+   481	            for stmt in _SCHEMA_STMTS:
+   482	                self._conn.execute(stmt)
+   483	            self._sync_set = True
+   484	        else:
+   485	            # Existing DB: skip schema + pragmas — WAL is persistent,
+   486	            # schema already exists, first real query triggers schema load.
+   487	            # Defer synchronous=NORMAL to first write (after schema is loaded).
+   488	            self._sync_set = False
+   489	
+   490	    def _detect_fact_build(self) -> None:
+   491	        """Detect if deserializer is Fact.from_dict for direct construction."""
+   492	        self._direct_fact_build = False
+   493	        deserialize = self._deserialize
+   494	        if hasattr(deserialize, '__self__') and hasattr(deserialize.__self__, '__name__'):
+   495	            self._fact_class = deserialize.__self__
+   496	            self._direct_fact_build = True
+   497	        elif hasattr(deserialize, '__func__'):
+   498	            try:
+   499	                from atoms import Fact
+   500	                if deserialize.__func__ is Fact.from_dict.__func__:
+   501	                    self._fact_class = Fact
+   502	                    self._direct_fact_build = True
+   503	            except (ImportError, AttributeError):
+   504	                pass
+   505	
+   506	    def _ensure_sync(self) -> None:
+   507	        """Set synchronous=NORMAL before first write. Deferred so schema load
+   508	        happens on first read (replay_into) rather than on pragma."""
+   509	        if not self._sync_set:
+   510	            self._conn.execute("PRAGMA synchronous=NORMAL")
+   511	            self._sync_set = True
+   512	
+   513	    def append(
+   514	        self,
+   515	        event: T,
+   516	        *,
+   517	        id_override: str | None = None,
+   518	        signature_override: str | None = None,
+   519	    ) -> str:
+   520	        """Append one event to the store. Returns the ID assigned.
+   521	
+   522	        If id_override is provided, that ID is used; otherwise a new ID
+   523	        is generated via gen_id(). The ID is returned in either case so
+   524	        callers (e.g. emit's receipt path) can reference the stored row.
+   525	
+   610	        dying) rolls the transaction back, leaving the line durable and the
+   611	        offset unstamped — that is the recoverable state, and the next open
+   612	        tails it forward. But a long-lived handle never reopens: it would
+   613	        append line N+1 and stamp the offset past *both*, burying the orphan
+   614	        forever while reporting ``synced``. So every append reconciles first.
+   615	
+   616	        Cheap in the common case: one ``store_meta`` read and one ``stat``,
+   617	        no scan, no lock. Only a disagreement pays for :meth:`catch_up`
+   618	        (which also covers a shrunk log, a torn tail and untrustworthy
+   619	        offset metadata). Two handles racing the same orphan line is a loud
+   620	        failure, not a silent one: the loser's tail INSERT hits the primary
+   621	        key, rolls back, and the line stays recoverable.
+   622	        """
+   623	        if self._read_offset() == self._log_size():
+   624	            return
+   625	        self.catch_up()
+   626	
+   627	    def _sync_derived_state(self) -> None:
+   628	        """Reconcile before the mint reads chain state off the index.
+   629	
+   630	        ``_write``'s reconcile is too late for a tick: ``append_tick`` has by
+   631	        then already derived ``prev_hash``, ``window_start`` and the fact
+   632	        cursor from an index that may not have consumed a durable line. The
+   633	        successor would link past the orphan, and that mis-linkage goes into
+   634	        the canonical log itself — where no later catch-up or rebuild can
+   635	        repair it. Reconciling in front of the derivation costs two syscalls
+   636	        when the index is current.
+   637	        """
+   638	        self._reconcile()
+   639	
+   640	    def _ceremony_persist(self, rows: list[tuple]) -> None:
+   641	        """Make a declaration ceremony canonical: one durable line, stamped.
+   642	
+   643	        Runs inside the ceremony's open ``BEGIN IMMEDIATE`` transaction,
+   644	        after every CAS check passed and the fact INSERTs (+ meta stamps)
+   645	        are staged, immediately before the caller's COMMIT — the same shape
+   646	        as :meth:`_write` steps 3–4. One row serializes as a plain fact
+   647	        line; several as one ``batch`` envelope line (the log's atomicity
+   648	        unit), so recovery can never expose a partial ceremony. Any failure
+   649	        after the fsync rolls the index back and leaves the line durable
+   650	        and unindexed — the standard recoverable state the next
+   651	        open/reconcile tails forward, all N rows atomically.
+   652	        """
+   653	        line = serialize_batch(rows) if len(rows) > 1 else serialize_fact_row(rows[0])
+   654	        # Same committed-marker discipline as _write: the staged INSERTs
+   655	        # hold sqlite's write lock, so the marker read here cannot be raced.
+   656	        marked = self._marked_counts()
+   657	        if marked is None:
+   658	            # Pre-marker store: adopt. _row_counts() already includes the
+   659	            # ceremony's staged rows on this connection.
+   660	            facts, ticks = self._row_counts()
+   661	        else:
+   662	            facts, ticks = marked
+   663	            facts += len(rows)
+   664	        offset = self._append_line(line)
+   665	        self._stamp(offset, facts, ticks)
+   666	
+   667	    def _write_fact_row(self, row: tuple) -> str | None:
+   668	        return self._write(FACT_INSERT_SQL, row, serialize_fact_row, True)
+   669	
+   670	    def _write_tick_row(self, row: tuple) -> str | None:
+   671	        return self._write(TICK_INSERT_SQL, row, serialize_tick_row, False)
+   672	
+   673	    # ---- catch-up -----------------------------------------------------
+   674	
+   675	    def catch_up(self) -> str:
+   676	        """Reconcile the sqlite index with the log. Returns what it did:
+   677	        ``"synced"``, ``"tailed"``, ``"rebuilt"`` or ``"empty"``."""
+   678	        self._truncate_torn_line()
+   679	        size = self._log_size()
+   680	        offset = self._read_offset()
+   681	
+   682	        if size == 0:
+   683	            # No log yet. An index with rows but no log is not a
+   684	            # JSONL-canonical store — refuse rather than invent a log.
+   685	            if has_rows(self._conn):
+   686	                raise JsonlCanonicalUnsupported(
+   687	                    f"{self._path} has indexed rows but no canonical log at "
+   688	                    f"{self._log_path} — JSONL-canonical is frozen legacy and "
+   689	                    "the sqlite-to-JSONL export bridge is gone, so this log "
+   690	                    "cannot be produced; open it as a plain SqliteStore, or "
+   691	                    "migrate it to an arrival log "
+   692	                    "(engine.arrival_store.ArrivalStore)"
+   693	                )
+   694	            self._index_offset(0, 0, 0)
+   695	            return "empty"
+   696	
+   697	        if offset is None:
+   698	            self._rebuild("no consumed-offset marker recorded")
+   699	            return "rebuilt"
+   700	        if not 0 <= offset <= size:
+   701	            # Outside the log's byte range in either direction. A negative
+   702	            # offset is not a seek position to try — it is metadata that
+   703	            # cannot be true, exactly as untrustworthy as one past the end.
+   704	            self._rebuild(f"offset {offset} outside the log's 0..{size} byte range")
+   705	            return "rebuilt"
+   706	        if not self._prefix_intact(offset):
+   707	            self._rebuild(f"log content at offset {offset} does not match the index")
+   708	            return "rebuilt"
+   709	
+   710	        marked = self._marked_counts()
+   711	        if marked is None:
+   712	            # Pre-marker store: no baseline exists, so nothing can be judged
+   713	            # out of band. Adopt the current row counts as the baseline so
+   714	            # every later open has something honest to compare against.
+   715	            base_facts, base_ticks = self._row_counts()
+   130	    The classification BOTH projections make, spelled once. It is the same
+   131	    question in both directions (an index row and a derived-log line are two
+   132	    encodings of one row-class body), and the two projections answering it
+   133	    separately is how they would come to disagree about a store.
+   134	
+   135	    ``False`` is the structural class — genesis, key introductions. Their
+   136	    bodies are not codec objects at all (the codec refuses them on unknown
+   137	    fields), and skipping them loses nothing: their content lives in the
+   138	    arrival log, which is the store. An unrecognized kind is neither class
+   139	    and refuses here, once, for both callers.
+   140	    """
+   141	    kind = record["k"]
+   142	    if kind in _STRUCTURAL_KINDS:
+   143	        return False
+   144	    if kind not in _ROW_KINDS:
+   145	        _unsupported(
+   146	            f"record kind {kind!r} at ordinal {record['ord']} is not one "
+   147	            "this store's projections know how to derive — refusing rather "
+   148	            "than silently dropping it"
+   149	        )
+   150	    return True
+   151	
+   152	
+   153	def rows_of_record(record: dict) -> list[tuple[str, tuple]]:
+   154	    """The index rows one arrival record expands to, in order.
+   155	
+   156	    ONE definition of "what a record indexes to", consumed by both the
+   157	    catch-up indexer and the re-deriver. Two definitions is how the writer
+   158	    and the re-deriver end up disagreeing about a store, which is the one
+   159	    disagreement this cut cannot tolerate.
+   160	
+   161	    Structural records expand to **no rows** — see :func:`_projects`, which
+   162	    is also where an unknown kind is refused.
+   163	    """
+   164	    if not _projects(record):
+   165	        return []
+   166	    return records_from_object(record["body"])
+   167	
+   168	
+   169	# --- the derived .jsonl log --------------------------------------------------
+   170	
+   171	
+   172	def derived_log_path_for(canonical: Path) -> Path:
+   173	    """Where an arrival log's derived ``.jsonl`` projection lives.
+   174	
+   175	    ``<name>.jsonl`` beside the ``<name>.arrival`` — NO new suffix. This is
+   176	    the shape :func:`engine.probe.probe_target` already classifies as
+   177	    ``derived_log`` ("custody is the arrival log's, so this file is a
+   178	    projection, not a store"). Cut A named the half-migrated shape; cut B is
+   179	    what makes it deliberate rather than transitional, and a
+   180	    ``.derived.jsonl`` spelling would strand the classification and break
+   181	    every last-0.x reader the projection exists for.
+   182	    """
+   183	    return canonical_for(index_path_for(canonical), "jsonl")
+   184	
+   185	
+   325	        stamp would be destructive.
+   326	
+   327	        Returns whether it staged a write, so the caller knows whether a
+   328	        commit is owed on the otherwise-no-op path.
+   329	        """
+   330	        if self._meta_get("own_lineage") is not None:
+   331	            return False
+   332	        try:
+   333	            lineage = self._log.lineage()
+   334	        except GenesisRefused:
+   335	            return False
+   336	        own = licensed_own_lineage(self._db, lineage)
+   337	        if own is None:
+   338	            return False
+   339	        self._meta_set("own_lineage", own)
+   340	        return True
+   341	
+   342	    def _index_record(self, record: dict) -> None:
+   343	        """Stage one record's rows into the index — verbatim, no mint
+   344	        machinery, no signer; signatures ride as stored in the body.
+   345	
+   346	        What a record expands to is :func:`engine.arrival_projection.
+   347	        rows_of_record`'s answer and not a second copy of it: the indexer
+   348	        and the re-deriver disagreeing about a record is the one
+   349	        disagreement this design cannot tolerate.
+   350	        """
+   351	        for t, row in rows_of_record(record):
+   352	            try:
+   353	                self._db.execute(
+   354	                    FACT_INSERT_SQL if t == "fact" else TICK_INSERT_SQL, row
+   355	                )
+   356	            except Exception as exc:
+   357	                raise ArrivalCanonicalUnsupported(
+   358	                    f"the index at {self._path} refuses {t} {row[0]!r} from "
+   359	                    f"ordinal {record['ord']} ({exc}) — it holds state the "
+   360	                    "log does not account for. Run engine.arrival_projection."
+   361	                    f"rederive_projections({str(self._log.path)!r}) to "
+   362	                    "discard the projection and rebuild it from the log"
+   363	                ) from exc
+   364	
+   365	    def _reconcile(self) -> ResumeMark | None:
+   366	        """Refuse to stamp past a durable record the index has not consumed.
+   367	
+   368	        Same posture as the log-canonical store: a long-lived handle never
+   369	        reopens, so every append reconciles first. Cheap in the common case
+   370	        — one meta read and one stat.
+   371	
+   372	        Returns the mark this reconcile verified or (via catch-up) stamped,
+   373	        so the write paths consume the reconciled position instead of
+   374	        re-reading ``store_meta`` — the interloper checks are DEFINED
+   375	        against exactly this pre-append mark. ``None`` only when the log is
+libs/engine/src/engine/sqlite_store.py:318:    "CREATE INDEX IF NOT EXISTS idx_facts_kind ON facts(kind)",
+libs/engine/src/engine/sqlite_store.py:319:    "CREATE INDEX IF NOT EXISTS idx_facts_ts ON facts(ts)",
+libs/engine/src/engine/sqlite_store.py:333:    "CREATE INDEX IF NOT EXISTS idx_ticks_name ON ticks(name)",
+libs/engine/src/engine/sqlite_store.py:334:    "CREATE INDEX IF NOT EXISTS idx_ticks_ts ON ticks(ts)",
+libs/engine/src/engine/store_reader.py:896:                "SELECT value FROM fts_state WHERE key='decl_fingerprint'"
+libs/engine/src/engine/store_reader.py:914:        Requires facts_fts virtual table to exist (built only by the explicit
+libs/engine/src/engine/store_reader.py:934:        clauses = ["facts_fts MATCH ?", "fts.kind NOT GLOB '_decl.*'"]
+libs/engine/src/engine/store_reader.py:961:            f"FROM facts_fts fts "
+libs/engine/src/engine/jsonl_store.py:949:        facts. ``facts_fts.fact_rowid`` keys on exactly that rowid and
+libs/engine/src/engine/jsonl_store.py:950:        ``fts_state.last_rowid`` is the incremental watermark, so a surviving
+libs/engine/src/engine/jsonl_store.py:961:        self._conn.execute("DROP TABLE IF EXISTS facts_fts")
+libs/engine/src/engine/jsonl_store.py:962:        self._conn.execute("DROP TABLE IF EXISTS fts_state")
+libs/engine/tests/test_store_reader.py:21:CREATE INDEX IF NOT EXISTS idx_facts_kind ON facts(kind);
+libs/engine/tests/test_store_reader.py:22:CREATE INDEX IF NOT EXISTS idx_facts_ts ON facts(ts);
+libs/engine/tests/test_store_reader.py:32:CREATE INDEX IF NOT EXISTS idx_ticks_name ON ticks(name);
+libs/engine/tests/test_store_reader.py:33:CREATE INDEX IF NOT EXISTS idx_ticks_ts ON ticks(ts);
+libs/engine/src/engine/arrival_projection.py:494:            conn.execute("DROP TABLE IF EXISTS facts_fts")
+libs/engine/src/engine/arrival_projection.py:495:            conn.execute("DROP TABLE IF EXISTS fts_state")
+libs/engine/tests/test_jsonl_store.py:553:    """DELETE FROM facts resets rowids, so facts_fts/fts_state must go.
+libs/engine/tests/test_jsonl_store.py:556:    freshly re-indexed facts, while fts_state.last_rowid would keep the
+libs/engine/tests/test_jsonl_store.py:569:        "CREATE VIRTUAL TABLE facts_fts USING fts5("
+libs/engine/tests/test_jsonl_store.py:572:        "CREATE TABLE fts_state (key TEXT PRIMARY KEY, value TEXT);"
+libs/engine/tests/test_jsonl_store.py:575:        "INSERT INTO facts_fts(text_content, fact_rowid, kind, observer) "
+libs/engine/tests/test_jsonl_store.py:578:    conn.execute("INSERT INTO fts_state(key, value) VALUES ('last_rowid', '3')")
+libs/engine/tests/test_jsonl_store.py:600:    assert "facts_fts" not in present
+libs/engine/tests/test_jsonl_store.py:601:    assert "fts_state" not in present
+libs/engine/src/engine/vertex_reader.py:1892:    ``missing`` — ``facts_fts``/``fts_state`` don't exist at all for this
+libs/engine/src/engine/vertex_reader.py:1943:       :func:`vertex_reindex` persisted into ``fts_state`` at rebuild time.
+libs/engine/src/engine/vertex_reader.py:1987:    # fingerprint used to be read on its own connection, fts_state on a
+libs/engine/src/engine/vertex_reader.py:2008:            "SELECT name FROM sqlite_master WHERE type='table' AND name='facts_fts'"
+libs/engine/src/engine/vertex_reader.py:2014:            "SELECT value FROM fts_state WHERE key='decl_fingerprint'"
+libs/engine/src/engine/vertex_reader.py:2030:            "SELECT value FROM fts_state WHERE key='last_rowid'"
+libs/engine/src/engine/vertex_reader.py:2077:    """Drop and rebuild the FTS derived index (``facts_fts``/``fts_state``).
+libs/engine/src/engine/vertex_reader.py:2104:    into ``fts_state`` (capstone sol P1). A DECLARATION change — a newly
+libs/engine/src/engine/vertex_reader.py:2156:            DROP TABLE IF EXISTS facts_fts;
+libs/engine/src/engine/vertex_reader.py:2157:            DROP TABLE IF EXISTS fts_state;
+libs/engine/src/engine/vertex_reader.py:2158:            CREATE VIRTUAL TABLE facts_fts USING fts5(
+libs/engine/src/engine/vertex_reader.py:2164:            CREATE TABLE fts_state (
+libs/engine/src/engine/vertex_reader.py:2187:                    "INSERT INTO facts_fts(text_content, fact_rowid, kind, observer) "
+libs/engine/src/engine/vertex_reader.py:2198:            "INSERT OR REPLACE INTO fts_state(key, value) VALUES ('last_rowid', ?)",
+libs/engine/src/engine/vertex_reader.py:2206:        # ABSENT (fts_state was just freshly created above, so there's
+libs/engine/src/engine/vertex_reader.py:2212:                "INSERT OR REPLACE INTO fts_state(key, value) VALUES "
+libs/engine/src/engine/vertex_reader.py:2288:    This function never writes. The FTS index (``facts_fts``/``fts_state``)
+libs/engine/src/engine/vertex_reader.py:2295:    ``sqlite3.OperationalError`` because ``facts_fts`` doesn't exist yet —
+libs/engine/tests/test_absorb_genesis.py:155:            "CREATE TRIGGER tamper AFTER INSERT ON facts "
+libs/engine/tests/test_fact_signing.py:271:        "CREATE TRIGGER null_sig AFTER INSERT ON facts BEGIN "
+libs/engine/tests/test_fact_signing.py:298:            "CREATE TRIGGER null_tick_sig AFTER INSERT ON ticks BEGIN "
+libs/engine/tests/test_arrival_projection.py:237:        conn.execute("CREATE TABLE facts_fts (fact_rowid INTEGER, text TEXT)")
+libs/engine/tests/test_arrival_projection.py:238:        conn.execute("CREATE TABLE fts_state (last_rowid INTEGER)")
+libs/engine/tests/test_arrival_projection.py:239:        conn.execute("INSERT INTO fts_state VALUES (99)")
+libs/engine/tests/test_arrival_projection.py:251:    assert "facts_fts" not in present and "fts_state" not in present
+libs/engine/tests/test_vertex_reader.py:709:                    "SELECT value FROM fts_state WHERE key='last_rowid'"
+libs/engine/tests/test_vertex_reader.py:798:        facts_fts at all) also touches zero bytes — the old code built the
+libs/engine/tests/test_vertex_reader.py:832:        """facts_fts/fts_state appear ONLY after an explicit vertex_reindex
+libs/engine/tests/test_vertex_reader.py:858:        assert _table_exists("facts_fts") is False
+libs/engine/tests/test_vertex_reader.py:861:        assert _table_exists("facts_fts") is True
+libs/engine/tests/test_vertex_reader.py:2027:                    "SELECT name FROM sqlite_master WHERE type='table' AND name='facts_fts'"
+libs/engine/tests/test_vertex_reader.py:2030:                count = conn.execute("SELECT COUNT(*) FROM facts_fts").fetchone()[0]
+libs/engine/tests/test_vertex_reader.py:2635:    read ``fts_state`` on a second, and let the eventual ``vertex_search`` run
+libs/engine/tests/test_vertex_reader.py:2780:                        "UPDATE fts_state SET value = ? "
+libs/engine/tests/test_absorb_edit.py:454:            "CREATE TRIGGER tamper AFTER INSERT ON facts "
+libs/engine/tests/test_receipt_attestation.py:211:            f"CREATE TRIGGER eat_{table} AFTER INSERT ON {table} "
+libs/engine/tests/test_receipt_attestation.py:277:            "CREATE TRIGGER strip_sig AFTER INSERT ON facts "
+
+exec
+/bin/zsh -lc "rg -n \"def records_from_object|serialize_batch|id_override|class Tick|tick_id|gen_id\\(\" libs/engine/src/engine | head -160; nl -ba libs/engine/src/engine/jsonl_codec.py | sed -n '120,245p'; nl -ba libs/engine/src/engine/sqlite_store.py | sed -n '100,140p'; rg -n \"def append_tick\" libs/engine/src/engine/sqlite_store.py" in /Users/kaygee/Code/loops
+ succeeded in 0ms:
+libs/engine/src/engine/jsonl_store.py:33:   is observable yet, but a rejected row (duplicate id via ``id_override``
+libs/engine/src/engine/jsonl_store.py:187:    serialize_batch,
+libs/engine/src/engine/jsonl_store.py:552:        ``id_override``, any constraint) fails before a byte reaches the log,
+libs/engine/src/engine/jsonl_store.py:653:        line = serialize_batch(rows) if len(rows) > 1 else serialize_fact_row(rows[0])
+libs/engine/src/engine/file_store.py:53:    def append(self, event: T, *, id_override: str | None = None) -> None:
+libs/engine/src/engine/file_store.py:56:        ``id_override`` is accepted for protocol compatibility with SqliteStore
+libs/engine/src/engine/file_store.py:64:    async def consume(self, event: T, *, id_override: str | None = None) -> None:
+libs/engine/src/engine/file_store.py:66:        self.append(event, id_override=id_override)
+libs/engine/src/engine/store.py:28:    def append(self, event: T_contra, *, id_override: str | None = None) -> str | None:
+libs/engine/src/engine/store.py:32:        ``id_override`` is honored by stores that track explicit IDs
+libs/engine/src/engine/store.py:34:        the returned ID (if any) equals ``id_override``. The returned id
+libs/engine/src/engine/store.py:119:    async def consume(self, event: T, *, id_override: str | None = None) -> None:
+libs/engine/src/engine/store.py:121:        self.append(event, id_override=id_override)
+libs/engine/src/engine/store.py:128:    def append(self, event: T, *, id_override: str | None = None) -> None:
+libs/engine/src/engine/store.py:131:        ``id_override`` is accepted for protocol compatibility with SqliteStore
+libs/engine/src/engine/handle.py:209:class TickHead:
+libs/engine/src/engine/handle.py:239:    tick_id: str
+libs/engine/src/engine/handle.py:420:                rowid=r[0], tick_id=r[1], name=r[2], ts=r[3],
+libs/engine/src/engine/handle.py:527:class TickEvent:
+libs/engine/src/engine/handle.py:538:    tick_id: str
+libs/engine/src/engine/handle.py:1416:            TickEvent(tick_seq=t.rowid, tick_id=t.tick_id, name=t.name,
+libs/engine/src/engine/handle.py:1462:        id_override: str | None = None,
+libs/engine/src/engine/handle.py:1543:            write_id = id_override if id_override is not None else gen_id()
+libs/engine/src/engine/handle.py:1548:                    fact, grant, id_override=write_id,
+libs/engine/src/engine/handle.py:1583:        id_override: str | None = None,
+libs/engine/src/engine/handle.py:1605:            fact, grant, expect=expect, id_override=id_override,
+libs/engine/src/engine/vertex.py:77:class TickAttestation:
+libs/engine/src/engine/vertex.py:101:      ``id_override`` when one was passed). ``None`` when the attached
+libs/engine/src/engine/vertex.py:507:        id_override: str | None = None,
+libs/engine/src/engine/vertex.py:521:            fact, grant, _from_child=_from_child, id_override=id_override,
+libs/engine/src/engine/vertex.py:531:        id_override: str | None = None,
+libs/engine/src/engine/vertex.py:563:            id_override: Pre-generated fact id to store under (rare —
+libs/engine/src/engine/vertex.py:625:        # rides out on the Receipt. id_override forces a specific id
+libs/engine/src/engine/vertex.py:638:                fact_id, signature = appender(fact, id_override=id_override)
+libs/engine/src/engine/vertex.py:643:                fact_id = self._store.append(fact, id_override=id_override)
+libs/engine/src/engine/tick.py:13:class Tick(Generic[T]):
+libs/engine/src/engine/__init__.py:48:    "serialize_batch",
+libs/engine/src/engine/__init__.py:214:    "serialize_batch": ("engine.jsonl_codec", "serialize_batch"),
+libs/engine/src/engine/witness.py:148:class TickAnchor:
+libs/engine/src/engine/witness.py:717:    store_path: Path, tick_id: str, *, timeout: float = 5.0
+libs/engine/src/engine/witness.py:734:            f"{tick_id} against it"
+libs/engine/src/engine/witness.py:740:                "SELECT name, ts FROM ticks WHERE id = ?", (tick_id,)
+libs/engine/src/engine/witness.py:744:                    f"no tick with id {tick_id!r} in this store"
+libs/engine/src/engine/witness.py:747:                f"tick:{tick_id} ({row[0]} @ {row[1]}) predates the "
+libs/engine/src/engine/witness.py:753:            "SELECT name, ts, fact_cursor FROM ticks WHERE id = ?", (tick_id,)
+libs/engine/src/engine/witness.py:756:            raise UnknownTickHandle(f"no tick with id {tick_id!r} in this store")
+libs/engine/src/engine/witness.py:760:                f"tick:{tick_id} ({name} @ {ts}) has no witness anchor — a "
+libs/engine/src/engine/program.py:89:        id_override: str | None = None,
+libs/engine/src/engine/program.py:115:        ``id_override`` (rare) forces a specific fact id — replay/transport-
+libs/engine/src/engine/program.py:120:            fact, grant, id_override=id_override,
+libs/engine/src/engine/program.py:131:        id_override: str | None = None,
+libs/engine/src/engine/program.py:170:            fact, grant, id_override=id_override,
+libs/engine/src/engine/jsonl_codec.py:51:    "serialize_batch",
+libs/engine/src/engine/jsonl_codec.py:221:def serialize_batch(rows: list[tuple]) -> str:
+libs/engine/src/engine/jsonl_codec.py:430:def records_from_object(obj: dict) -> list[tuple[str, tuple]]:
+libs/engine/src/engine/sqlite_store.py:52:def gen_id() -> str:
+libs/engine/src/engine/sqlite_store.py:517:        id_override: str | None = None,
+libs/engine/src/engine/sqlite_store.py:522:        If id_override is provided, that ID is used; otherwise a new ID
+libs/engine/src/engine/sqlite_store.py:523:        is generated via gen_id(). The ID is returned in either case so
+libs/engine/src/engine/sqlite_store.py:536:            event, id_override=id_override, signature_override=signature_override
+libs/engine/src/engine/sqlite_store.py:543:        id_override: str | None = None,
+libs/engine/src/engine/sqlite_store.py:565:        fact_id = id_override if id_override is not None else gen_id()
+libs/engine/src/engine/sqlite_store.py:602:    def tick_signature_state(self, tick_id: str) -> tuple[str | None, bool] | None:
+libs/engine/src/engine/sqlite_store.py:623:            f"SELECT {select} FROM ticks WHERE id = ?", (tick_id,)
+libs/engine/src/engine/sqlite_store.py:826:        return gen_id()
+libs/engine/src/engine/sqlite_store.py:1136:                    fact_id = gen_id()
+libs/engine/src/engine/sqlite_store.py:1198:    async def consume(self, event: T, *, id_override: str | None = None) -> None:
+libs/engine/src/engine/sqlite_store.py:1200:        self.append(event, id_override=id_override)
+libs/engine/src/engine/sqlite_store.py:1649:        row = (gen_id(), d["name"], d["ts"], d["since"], d["origin"],
+   120	_ROWS = "rows"
+   121	_BATCH_KEYS = frozenset(("t", _ROWS))
+   122	_MIN_BATCH_ROWS = 2
+   123	
+   124	# JCS (RFC 8785) numeric domain — mirrors rfc8785._impl._INT_MIN/_INT_MAX.
+   125	# Integers outside it, and non-finite floats, are not canonicalizable, so a
+   126	# line carrying one cannot be hashed: reject at the codec gate rather than
+   127	# detonating inside the commitment hashers.
+   128	_JCS_INT_MAX = 2**53 - 1
+   129	_JCS_INT_MIN = -(2**53) + 1
+   130	
+   131	
+   132	def _dump(obj: dict) -> str:
+   133	    """Encode one line. ensure_ascii keeps lines 7-bit and free of raw
+   134	    U+2028/U+2029; allow_nan=False refuses non-JSON floats explicitly;
+   135	    separators drop insignificant whitespace. Key order is the dict's
+   136	    insertion order — sqlite column order — not sorted: this is a transport
+   137	    encoding, not a canonicalization (JCS lives in the hashers)."""
+   138	    return json.dumps(obj, ensure_ascii=True, allow_nan=False,
+   139	                      separators=(",", ":"))
+   140	
+   141	
+   142	def _encode_obj(row: tuple, spec: _Spec) -> dict:
+   143	    """Build the line object for a row — and hold it to the decoder's rules.
+   144	
+   145	    ``serialize(x)`` must always be decodable. Checking arity alone let a
+   146	    row with a *typed*-wrong field through: a fact carrying ``ts="1.0"``
+   147	    (a string, which sqlite's REAL affinity accepts) got a durable JSONL
+   148	    receipt, and then every subsequent open failed on decode — the store
+   149	    bricked by a line its own serializer wrote. Running the decoder's
+   150	    :func:`_validate` over the object before dumping makes the two
+   151	    directions symmetric by construction rather than by parallel
+   152	    maintenance, and puts the error at the append site, where it is
+   153	    attributable to the caller that built the row.
+   154	    """
+   155	    n = len(spec.fields)
+   156	    if len(row) not in (n, n + 1):
+   157	        raise JsonlCodecError(
+   158	            f"{spec.t} row must have {n} or {n + 1} fields, got {len(row)}"
+   159	        )
+   160	    obj: dict = {"t": spec.t}
+   161	    obj.update(zip(spec.fields, row[:n], strict=True))
+   162	    if len(row) > n and row[n] is not None:
+   163	        obj[_SIGNATURE] = row[n]
+   164	    _validate(obj, spec)
+   165	    return obj
+   166	
+   167	
+   168	def object_of_fact_row(row: tuple) -> dict:
+   169	    """A fact row ``(id, kind, ts, observer, origin, payload[, signature])`` as
+   170	    its VALIDATED record object."""
+   171	    return _encode_obj(row, _SPEC["fact"])
+   172	
+   173	
+   174	def object_of_tick_row(row: tuple) -> dict:
+   175	    """A tick row (``_TICK_ROW_SQL`` order, signature optional) as its
+   176	    VALIDATED record object."""
+   177	    return _encode_obj(row, _SPEC["tick"])
+   178	
+   179	
+   180	def object_of_batch(rows: list[tuple]) -> dict:
+   181	    """A multi-row ceremony as ONE atomic record object.
+   182	
+   183	    ``rows`` are fact row tuples in emission order. One row collapses to a
+   184	    plain fact object — a 1-row batch would be a second spelling of the same
+   185	    record (the "signature must be absent, not null" ethos), so the envelope
+   186	    exists only where multi-row atomicity does. Zero rows is a caller bug.
+   187	
+   188	    Same both-directions symmetry as the scalar encoders: the built envelope
+   189	    is held to :func:`_validate_batch`, so a bad row fails at the append
+   190	    site instead of bricking every later open.
+   191	    """
+   192	    if not rows:
+   193	        raise JsonlCodecError("batch requires at least one fact row")
+   194	    if len(rows) == 1:
+   195	        return object_of_fact_row(rows[0])
+   196	    obj = {"t": _BATCH, _ROWS: [_encode_obj(r, _SPEC["fact"]) for r in rows]}
+   197	    # Structural half only: every row object just came out of _encode_obj,
+   198	    # which already ran the field-level _validate — re-running it per row
+   199	    # would be the same check twice on the same object.
+   200	    _validate_batch(obj, validate_rows=False)
+   201	    return obj
+   202	
+   203	
+   204	# The three serializers are their encoders composed with the dump, mirroring
+   205	# the decode side (``deserialize_records`` is the load composed with
+   206	# ``records_from_object``). A consumer that already holds — or wants — the
+   207	# OBJECT calls the encoder directly rather than dumping a line only to parse
+   208	# it straight back; an arrival record's ``body`` is exactly that object.
+   209	
+   210	
+   211	def serialize_fact_row(row: tuple) -> str:
+   212	    """Encode a fact row ``(id, kind, ts, observer, origin, payload[, signature])``."""
+   213	    return _dump(object_of_fact_row(row))
+   214	
+   215	
+   216	def serialize_tick_row(row: tuple) -> str:
+   217	    """Encode a tick row (``_TICK_ROW_SQL`` order, signature optional)."""
+   218	    return _dump(object_of_tick_row(row))
+   219	
+   220	
+   221	def serialize_batch(rows: list[tuple]) -> str:
+   222	    """Encode a multi-row ceremony as ONE atomic line — see
+   223	    :func:`object_of_batch`, whose object this dumps."""
+   224	    return _dump(object_of_batch(rows))
+   225	
+   226	
+   227	def _reject_constant(name: str) -> None:
+   228	    """Refuse the non-JSON literals ``NaN``/``Infinity``/``-Infinity``.
+   229	
+   230	    Serialization uses ``allow_nan=False``, so these can never be emitted;
+   231	    admitting them on read would let a corrupt line past the codec gate and
+   232	    detonate later inside the JCS commitment hashers (or land a NaN ``ts``
+   233	    in sqlite). Reject at the boundary — explicit over implicit.
+   234	    """
+   235	    raise JsonlCodecError(f"non-JSON literal {name!r} is not permitted")
+   236	
+   237	
+   238	def _no_duplicate_keys(pairs: list[tuple[str, object]]) -> dict:
+   239	    """Build the object, refusing a key spelled twice.
+   240	
+   241	    ``json.loads`` resolves duplicates last-wins, so ``"id":"A","id":"B"``
+   242	    decodes as ``B`` — two different lines with two different meanings that
+   243	    a reader silently collapses to one. A canonical log admits exactly one
+   244	    spelling per record; ambiguity is corruption, not a parse detail.
+   245	    """
+   100	# Ed25519 signature over its COMMITMENT hash (the 10 chain fields). Signing
+   101	# is injected, never imported — the store takes an optional signer callable
+   102	# (digest str -> signature str); verify_chain takes an optional verifier
+   103	# (signature str, digest str -> bool). apps/loops composes both with
+   104	# libs/sign. Pre-signature rows keep NULL — a visible era, same posture as
+   105	# the pre-chain era. The successor's prev_hash commits to the signature
+   106	# (design/tick-signature-in-chain-envelope): the row-IDENTITY hash is
+   107	# era-aware (includes the signature key only when non-NULL), so stripping a
+   108	# signature breaks the successor's link and a forger must rewrite the whole
+   109	# chain ahead — at which point only the registry outside the store (and
+   110	# external witnessing, a later delta) anchors the truth.
+   111	
+   112	_CHAIN_COLUMNS = ("prev_hash", "window_start", "fact_cursor", "window_hash",
+   113	                  "signature")
+   114	
+   115	# Persisted column order — ONE spelling, derived from the codec's field
+   116	# tuples. The schema, the INSERTs, the SELECTs and the JSONL line all order
+   117	# their columns the same way by construction; a row assembled for one is the
+   118	# row the others take. Spelling it a second time is how a fact ends up with
+   119	# its observer in the origin column.
+   120	FACT_COLUMNS = (*jsonl_codec.FACT_FIELDS, "signature")
+   121	TICK_COLUMNS = (*jsonl_codec.TICK_FIELDS, "signature")
+   122	
+   123	
+   124	def _insert_sql(table: str, columns: tuple[str, ...]) -> str:
+   125	    return (
+   126	        f"INSERT INTO {table} ({', '.join(columns)}) "
+   127	        f"VALUES ({', '.join('?' * len(columns))})"
+   128	    )
+   129	
+   130	
+   131	FACT_INSERT_SQL = _insert_sql("facts", FACT_COLUMNS)
+   132	TICK_INSERT_SQL = _insert_sql("ticks", TICK_COLUMNS)
+   133	
+   134	_TICK_ROW_SQL = ", ".join(TICK_COLUMNS)
+   135	
+   136	# Delta-1 column set — used by the read-only verify path against stores that
+   137	# predate the signature column (verify never migrates schema).
+   138	_TICK_ROW_SQL_V1 = ", ".join(jsonl_codec.TICK_FIELDS)
+   139	
+   140	
+1576:    def append_tick(self, tick: Tick, *, enforce_floor: bool = True) -> str:
+1611:    def append_tick_attested(
+
+codex
+One fresh r4 issue has emerged in the new provider contract: it identifies rows only by `row_id`, while `facts.id` and `ticks.id` are independent primary-key namespaces. I’m validating the rest of the migration against SQLite’s own schema/rowid rules before assigning the carried verdicts.
+web search: 
+web search: site:sqlite.org lang_altertable recreate table indexes triggers sqlite_schema rowid INSERT SELECT explicit rowid ...
+codex
+Reviewed r4 at `2b05131e`, read-only. No files modified.
+
+## Re-verification
+
+| Finding | Verdict | Evidence |
+|---|---|---|
+| DP-r3-01 | **FAIL** | r4 correctly adds an explicit lazy coordinate provider and accurately describes the four supply routes. `ArrivalStore` opens SQLite in `super().__init__`, then constructs `ArrivalLog`, and only afterward runs migrations/catch-up ([arrival_store.py:133](/Users/kaygee/Code/loops/libs/engine/src/engine/arrival_store.py:133)); the base constructor only opens/configures SQLite and creates schema for a new database—no row INSERT occurs ([sqlite_store.py:439](/Users/kaygee/Code/loops/libs/engine/src/engine/sqlite_store.py:439)). Rederivation likewise holds `canonical` and `log` before opening the index ([arrival_projection.py:471](/Users/kaygee/Code/loops/libs/engine/src/engine/arrival_projection.py:471)). However, the new provider yields only `(row_id, ordinal, seq)` ([design-proposal.md:197](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceD/design-proposal.md:197)); facts and ticks have independent `id` primary keys ([sqlite_store.py:308](/Users/kaygee/Code/loops/libs/engine/src/engine/sqlite_store.py:308)). A valid index may therefore contain the same ID in both tables, with different coordinates, making the proposed global `id → coordinate` mapping ambiguous. See DP-r4-01. |
+| DP-r3-02 | **PASS** | r4 explicitly copies `rowid` in both INSERT and SELECT lists ([design-proposal.md:131](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceD/design-proposal.md:131)). These are ordinary rowid tables with text primary keys, and SQLite permits INSERT to supply rowid explicitly, so this preserves the old values ([SQLite CREATE TABLE](https://www.sqlite.org/lang_createtable.html)). That correctly differs from the existing DELETE/replay path, which drops FTS because replay can reassign rowids ([jsonl_store.py:939](/Users/kaygee/Code/loops/libs/engine/src/engine/jsonl_store.py:939)). Capturing trigger/index SQL from `sqlite_schema`, skipping NULL auto-index SQL, and replaying it after rename follows SQLite’s documented rebuild procedure; `tbl_name` identifies the owning table and stored SQL recreates the object ([SQLite schema table](https://www.sqlite.org/schematab.html), [SQLite ALTER TABLE](https://www.sqlite.org/lang_altertable.html)). G-D0-9 and G-D0-10 directly test trigger behavior and FTS/watermark continuity ([design-proposal.md:599](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceD/design-proposal.md:599)). The newly broadened artifact-preservation claim has a separate view omission, DP-r4-02. |
+| DP-r3-03 | **PASS** | G-D0-7 independently requires migration through `ArrivalStore`’s public constructor, including coordinates, constraints, and subsequent append; G-D0-8 requires the rederivation entry point to produce identical coordinates ([design-proposal.md:591](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceD/design-proposal.md:591)). These cover the two routes with materially different log access. G-D0-11 also exercises the new mis-mode refusal. |
+
+## Fresh r4 findings
+
+### DP-r4-01 — MAJOR — coordinate-provider keys lack the table namespace
+
+`Callable[[], Iterator[tuple[str, int, int]]]` supplies only a row ID. Yet `facts.id` and `ticks.id` are separate primary keys; neither the schema nor `rows_of_record` establishes cross-table uniqueness ([sqlite_store.py:308](/Users/kaygee/Code/loops/libs/engine/src/engine/sqlite_store.py:308), [arrival_projection.py:153](/Users/kaygee/Code/loops/libs/engine/src/engine/arrival_projection.py:153)). Consequently, the same string may legally identify both a fact and a tick from different arrival records.
+
+The staging/join key must include row kind/table, for example `(table, row_id, ordinal, seq)`, with a composite `(table, row_id)` key. Add a migration gate containing a fact and tick with the same ID and distinct coordinates.
+
+### DP-r4-02 — MAJOR — the rebuild omits dependent views
+
+The new text claims preservation of supported schema artifacts but inventories only rows with `type IN ('trigger','index')` ([design-proposal.md:140](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceD/design-proposal.md:140)). SQLite’s authoritative generalized rebuild procedure requires remembering and reconstructing associated views as well as indexes and triggers. A view’s `tbl_name` is its own name, so the proposed `tbl_name = facts|ticks` query cannot discover views referencing those tables. A surviving invalid view can also cause the later `ALTER TABLE ... RENAME` schema reparse to fail. [SQLite explicitly includes views in rebuild steps 3, 8, and 9](https://www.sqlite.org/lang_altertable.html#otheralter).
+
+Inventory dependent views from `sqlite_schema.sql`, or otherwise specify and gate a safe view-preservation strategy. Add a gate proving a pre-existing view over `facts` remains queryable after migration.
+
+## Decision verdicts
+
+| Decision | Verdict | Reason |
+|---|---|---|
+| D0 | **UNSOUND** | The route ordering, rowid preservation, triggers, indexes, FTS handling, and new gates are substantially repaired, but the provider cannot disambiguate cross-table IDs and the rebuild does not handle dependent views. |
+| D1 | **SOUND-WITH-CHANGES** | The coordinate model remains coherent once D0 produces an unambiguous, safely migrated coordinate. |
+| D2 | **SOUND-WITH-CHANGES** | Re-keying remains coherent but depends on D0’s migration guarantee. |
+| D3 | **SOUND** | No r4-changed text introduces a new defect in the bounded-work design. |
+| D4 | **SOUND** | No r4-changed text affects the previously sound selective-verification design. |
+| Gate plan | **SOUND-WITH-CHANGES** | G-D0-7..11 close the previously requested route, trigger, FTS, and mis-mode gaps; collision and dependent-view gates remain necessary. |
+
+Overall: **NOT-RATIFIABLE-AS-WRITTEN**.
+tokens used
+58,616

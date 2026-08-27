@@ -1,0 +1,51 @@
+Reviewed r3 at `ea0ad590`, read-only. Four of the six items pass. The selective registry and deterministic instrumentation fixes are sound, and table rebuilding can enforce the proposed constraints. However, D0’s upgrader is still not implementable as specified and would discard or invalidate supported schema artifacts.
+
+## Re-verification
+
+| Finding | Verdict | Evidence |
+|---|---|---|
+| DP-r2-01 | **PASS** | r3 replaces nullable retrofits with `NOT NULL` and table-level `UNIQUE`, rebuilding existing `facts` and `ticks` tables ([design-proposal.md:119](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceD/design-proposal.md:119)). These schemas contain ordinary columns, checks, primary keys, and indexes, with no foreign keys ([sqlite_store.py:308](/Users/kaygee/Code/loops/libs/engine/src/engine/sqlite_store.py:308)); therefore the proposed create/copy/drop/rename mechanism can enforce both constraints. The raw-SQL gate correctly proves table-level enforcement ([design-proposal.md:529](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceD/design-proposal.md:529)). Fresh-eyes caveats about other schema objects are DP-r3-02 below. |
+| DP-r2-02 | **FAIL** | The four dispatch sites are now named ([design-proposal.md:167](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceD/design-proposal.md:167)), matching the actual writers: base SQLite INSERT hooks ([sqlite_store.py:746](/Users/kaygee/Code/loops/libs/engine/src/engine/sqlite_store.py:746)), JsonlStore’s overrides and replay writer ([jsonl_store.py:667](/Users/kaygee/Code/loops/libs/engine/src/engine/jsonl_store.py:667), [jsonl_store.py:887](/Users/kaygee/Code/loops/libs/engine/src/engine/jsonl_store.py:887)), ArrivalStore’s catch-up/live writers ([arrival_store.py:342](/Users/kaygee/Code/loops/libs/engine/src/engine/arrival_store.py:342), [arrival_store.py:456](/Users/kaygee/Code/loops/libs/engine/src/engine/arrival_store.py:456)), and projection rederivation ([arrival_projection.py:479](/Users/kaygee/Code/loops/libs/engine/src/engine/arrival_projection.py:479), [arrival_projection.py:500](/Users/kaygee/Code/loops/libs/engine/src/engine/arrival_projection.py:500)). But the specified `ensure_coordinate_schema(conn, mode)` lacks the arrival log or a prepared mapping, so it cannot perform the promised log-derived `id → (ord, seq)` join. See DP-r3-01. |
+| DP-r2-03 | **PASS** | The selective algorithm now exactly separates structural verification, registry-forming envelope verification, and ordinary envelopes ([design-proposal.md:448](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceD/design-proposal.md:448)). This matches the source rules: `walk()` establishes structure ([arrival.py:951](/Users/kaygee/Code/loops/libs/engine/src/engine/arrival.py:951)); genesis self-certifies; ordinary signed records currently route through `_resolve`; and introductions join the registry only after authorization ([arrival.py:1595](/Users/kaygee/Code/loops/libs/engine/src/engine/arrival.py:1595), [arrival.py:1627](/Users/kaygee/Code/loops/libs/engine/src/engine/arrival.py:1627)). G-D4-2 and G-D4-4 now pin both sides of the selective boundary ([design-proposal.md:584](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceD/design-proposal.md:584)). |
+| DP-r2-04 | **PASS** | Timing is gone. G-D3-2 requires deterministic instrumentation and exact healthy/behind/deep bounds ([design-proposal.md:572](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceD/design-proposal.md:572)). Source provides identifiable verification sites: anchor adoption validates the anchor directly ([arrival.py:1129](/Users/kaygee/Code/loops/libs/engine/src/engine/arrival.py:1129)), while suffix and full walks use `_verify_from` ([arrival.py:984](/Users/kaygee/Code/loops/libs/engine/src/engine/arrival.py:984), [arrival.py:1246](/Users/kaygee/Code/loops/libs/engine/src/engine/arrival.py:1246)). Instrumentation must count both sites, but the stated bounds are valid. |
+| DP-r1-03 | **PASS** | The original NULL-enforcement hole is closed: new and rebuilt tables carry real `NOT NULL` and `UNIQUE` constraints, including for foreign SQL ([design-proposal.md:122](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceD/design-proposal.md:122)). G-D0-5 directly exercises both fresh and migrated schemas with raw INSERTs ([design-proposal.md:529](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceD/design-proposal.md:529)). |
+| DP-r1-10 | **PASS** | Every r2 gate omission is now explicitly closed: table-enforced NULL/duplicate refusal and normal SQLite/JSONL public-constructor migration ([design-proposal.md:529](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceD/design-proposal.md:529)); deterministic D3 bounds ([design-proposal.md:572](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceD/design-proposal.md:572)); and forged key-introduction coverage ([design-proposal.md:589](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceD/design-proposal.md:589)). The new D0 defects below require additional gates but do not reinstate the exact omissions DP-r1-10 identified. |
+
+## New r3 findings
+
+### DP-r3-01 — MAJOR — the arrival-mode upgrader lacks its required source data
+
+The table rebuild says arrival coordinates come from “a temp id→(ord, seq) mapping staged by the log walk” ([design-proposal.md:127](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceD/design-proposal.md:127)), but the common upgrader is specified as only:
+
+`ensure_coordinate_schema(conn, mode)`
+
+Neither a SQLite connection nor `mode="arrival"` identifies or exposes the canonical arrival log. `ARRIVAL_LINEAGE_KEY` supplies a lineage value, not a filesystem path or row-coordinate mapping. In current construction, ArrivalStore obtains its `ArrivalLog` only after `SqliteStore.__init__` opens the connection ([arrival_store.py:133](/Users/kaygee/Code/loops/libs/engine/src/engine/arrival_store.py:133)); rederivation independently has both `canonical` and `log` before opening its index ([arrival_projection.py:470](/Users/kaygee/Code/loops/libs/engine/src/engine/arrival_projection.py:470)).
+
+Required change: make the upgrader accept an explicit mapping/provider or canonical `ArrivalLog`, with mirrored mode requiring neither. Specify how ArrivalStore and `rederive_projections` supply it and gate both paths independently.
+
+### DP-r3-02 — MAJOR — the table rebuild does not preserve supported schema artifacts
+
+The rebuild says only to recreate “the table’s indexes” ([design-proposal.md:134](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceD/design-proposal.md:134)). Dropping `facts` or `ticks` also drops attached triggers. Triggers are not hypothetical foreign debris: the store deliberately reads back rows after AFTER INSERT triggers and treats their effects as committed truth ([sqlite_store.py:702](/Users/kaygee/Code/loops/libs/engine/src/engine/sqlite_store.py:702), [sqlite_store.py:746](/Users/kaygee/Code/loops/libs/engine/src/engine/sqlite_store.py:746)).
+
+A facts rebuild can also renumber rowids unless explicitly preserved. The optional FTS projection stores `facts_fts.fact_rowid` and an incremental `last_rowid` watermark keyed to those exact rowids ([jsonl_store.py:949](/Users/kaygee/Code/loops/libs/engine/src/engine/jsonl_store.py:949), [vertex_reader.py:2187](/Users/kaygee/Code/loops/libs/engine/src/engine/vertex_reader.py:2187)). Existing rederivation explicitly drops `facts_fts` and `fts_state` before rebuilding facts ([arrival_projection.py:492](/Users/kaygee/Code/loops/libs/engine/src/engine/arrival_projection.py:492)); r3’s migration does neither.
+
+Required change: inventory and recreate triggers from `sqlite_schema`; explicitly preserve rowids during copy or invalidate/rebuild FTS state; add gates proving trigger behavior and FTS correctness survive migration.
+
+### DP-r3-03 — minor — dispatch gates do not cover all four promised routes
+
+G-D0-6 exercises ordinary SqliteStore and JsonlStore constructors only ([design-proposal.md:535](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceD/design-proposal.md:535)). G-D0-3 covers an arrival-canonical fixture but does not require both the normal ArrivalStore constructor and `_ensure_index_schema`/rederivation delegation. Because those routes have different access to the arrival log, one test cannot establish universal dispatch.
+
+Required change: add explicit existing-index migration gates through ArrivalStore’s public constructor and the projection-rederivation entry point.
+
+## Decision verdicts
+
+| Decision | Verdict | Reason |
+|---|---|---|
+| D0 | **UNSOUND** | The constraint mechanism is valid, but the arrival upgrader lacks its mapping input and the rebuild loses or invalidates supported schema artifacts. |
+| D1 | **SOUND-WITH-CHANGES** | Its coordinate model remains coherent once D0 provides a safe invariant. |
+| D2 | **SOUND-WITH-CHANGES** | Re-keying remains coherent but depends on a correct, non-destructive D0 migration. |
+| D3 | **SOUND** | Deterministic bounded-work instrumentation is now adequately specified. |
+| D4 | **SOUND** | Selective registry construction and its gates now match the source authority rules and exact-admission claim. |
+| Gate plan | **SOUND-WITH-CHANGES** | The r2 omissions are closed, but gates are still needed for both arrival dispatch routes, trigger preservation, and FTS/rowid handling. |
+
+Overall: **NOT-RATIFIABLE-AS-WRITTEN**.

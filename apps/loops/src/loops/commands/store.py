@@ -120,7 +120,7 @@ def _require_materialized_store(target_path: Path) -> Path:
 
 
 def canonical_agreement(target_path: Path, *, deep: bool = False):
-    """Judge a JSONL-canonical target's index against its log — or ``None``.
+    """Judge a log-canonical target's index against its log — or ``None``.
 
     The gate every store read verb runs BEFORE it reads (design/store/
     verify-canonical-agreement). A ``.db``-canonical target has one artifact
@@ -129,20 +129,21 @@ def canonical_agreement(target_path: Path, *, deep: bool = False):
 
     Deliberately resolved through :func:`resolve_canonical_path` and
     ``index_path_for`` — both pure — rather than :func:`resolve_store_path`.
-    That path runs ``ensure_index``, which constructs a ``JsonlStore``
-    whenever the index is behind, and a ``JsonlStore`` constructor *repairs*:
-    it would catch the index up and then report agreement about a store whose
-    disagreement it had just erased. Verification and open-time recovery are
-    opposite contracts; this is the seam where they must not meet.
+    That path runs ``ensure_index`` / ``ensure_arrival_index``, which
+    constructs a store whenever the index is behind, and a store constructor
+    *repairs*: it would catch the index up and then report agreement about a
+    store whose disagreement it had just erased. Verification and open-time
+    recovery are opposite contracts; this is the seam where they must not meet.
 
     Returns ``(index_path, report)``. A non-materialized log raises the same
     ``FileNotFoundError`` as :func:`_require_materialized_store`.
     """
     from engine.canonical_audit import audit_agreement, audit_deep
-    from engine.residence import index_path_for, is_jsonl_canonical
+    from engine.residence import canonical_mode, index_path_for
 
     canonical = resolve_canonical_path(target_path)
-    if not is_jsonl_canonical(canonical):
+    mode = canonical_mode(canonical)
+    if mode not in ("jsonl", "arrival"):
         return None
     if not canonical.exists():
         raise FileNotFoundError(
@@ -156,9 +157,14 @@ def canonical_agreement(target_path: Path, *, deep: bool = False):
         # to destroy and no divergence it could hide, so the store-verb
         # existence contract keeps working. An index that DOES exist is
         # evidence and is never materialized through here.
-        from engine.jsonl_store import ensure_index
+        if mode == "arrival":
+            from engine.arrival_store import ensure_arrival_index
 
-        ensure_index(canonical)
+            ensure_arrival_index(canonical)
+        else:
+            from engine.jsonl_store import ensure_index
+
+            ensure_index(canonical)
     audit = audit_deep if deep else audit_agreement
     return index, audit(canonical)
 
@@ -384,24 +390,47 @@ def _run_verify(argv: list[str], *, vertex_path: Path | None = None) -> int:
         from painted.views import Severity, callout
 
         if agreement.index_behind:
-            # Every divergence is past the consumed prefix — see
-            # engine.canonical_audit.Check.beyond_offset. That is where an
-            # interrupted append lands, and also where a rewound marker plus a
-            # doctored suffix lands; L1 corroborates only the first unindexed
-            # line, so this says WHERE, never "benign". Still rc=1 and still no
-            # chain walk (it would attest to a partial index).
+            from engine.residence import canonical_mode
+
+            canonical = resolve_canonical_path(target_path)
+            mode = canonical_mode(canonical)
+            # Both modes say the same thing: every divergence sits past what
+            # the index claims to have consumed — where an interrupted append
+            # lands, and (jsonl) also where a rewound marker plus a doctored
+            # suffix lands. So this reports WHERE, never "benign". Still rc=1
+            # and still no chain walk (it would attest to a partial index).
+            # The vocabulary is the only difference — arrival counts records
+            # against a consumed ordinal (see engine.canonical_audit.
+            # Check.behind_by / at_ordinal, whose rewound check rules out a
+            # moved marker), jsonl counts bytes against a consumed prefix and
+            # L1 corroborates only the first unindexed line.
+            if mode == "arrival":
+                log_name = "canonical arrival log"
+                divergence = "records beyond the consumed ordinal"
+                provenance = (
+                    "consistent with a crash between the arrival fsync and "
+                    "the index commit, with record counts and the rewound "
+                    "check confirming the consumed prefix"
+                )
+            else:
+                log_name = "canonical log"
+                divergence = "bytes the index never claimed to have consumed"
+                provenance = (
+                    "consistent with a crash between the log's fsync and the "
+                    "index commit, which this check cannot tell apart from an "
+                    "edited suffix"
+                )
+            detail = (
+                f"the derived index is behind the {log_name}, and every "
+                f"disagreement is in {divergence} — {provenance}; the tick "
+                "chain was NOT walked (it would attest to a partial index). "
+                f"Catch the index up with 'loops read {target_path.stem}', or "
+                "run 'loops store verify --deep' to rule out tampering"
+            )
             head = callout(
                 f"{db_path.name} — INDEX BEHIND THE LOG",
                 severity=Severity.WARNING,
-                detail="the derived index is behind the canonical log, and "
-                       "every disagreement is in bytes the index never claimed "
-                       "to have consumed — consistent with a crash between the "
-                       "log's fsync and the index commit, which this check "
-                       "cannot tell apart from an edited suffix; the tick "
-                       "chain was NOT walked (it would attest to a partial "
-                       f"index). Catch the index up with 'loops read "
-                       f"{target_path.stem}', or run 'loops store verify "
-                       "--deep' to rule out tampering",
+                detail=detail,
             )
         else:
             head = callout(
@@ -711,76 +740,31 @@ def _run_rebirth(argv: list[str], *, vertex_path: Path | None = None) -> int:
 
 
 def _run_export(argv: list[str], *, vertex_path: Path | None = None) -> int:
-    """Export a store to the canonical interleaved JSONL log.
+    """Refuse ``store export``: the sqlite-to-JSONL bridge it drove is gone.
 
-    Facts and ticks are written as one append-only log in GLOBAL RECEIPT
-    ORDER (each tick after the fact rows of its window — see the ordering
-    rule in ``store.jsonl``), every field verbatim, payload included, so a
-    rebuild re-derives byte-identical row hashes and signatures. Read-only
-    on the source: this is a migration read, not a store operation.
+    ``store.jsonl`` — the export/rebuild bridge to the JSONL-canonical shape —
+    dissolved with the arrival cut (decision:design/arrival-sliceC-ordering).
+    Migration targets an arrival log now, so there is no surviving thing for
+    this verb to do.
 
-    ``--rebuild PATH`` additionally rebuilds a fresh sqlite index from the
-    log just written — the round-trip oracle, on demand.
+    The ARM stays rather than the whole subcommand being deleted, because
+    deleting it is not a retirement a user can read: ``_dispatch_store`` would
+    fall through to the base-inspect pre-parse, which takes the first argv as a
+    store path and reports that a store named ``export`` cannot be resolved.
+    That reads as a broken command. A refusal that names what happened and
+    where to go instead is the honest end of a removed feature.
+
+    Argv is not parsed — every invocation refuses, so parsing it could only
+    produce a usage error for a command that no longer exists.
     """
-    import argparse
-
-    p = argparse.ArgumentParser(
-        prog="loops store export",
-        description="Export a store's facts and ticks to canonical JSONL "
-                    "in global receipt order.",
+    return _refuse_store(
+        "the sqlite-to-JSONL export bridge (store.jsonl) is gone — JSONL-"
+        "canonical is a frozen legacy family and nothing produces its log "
+        "any more. Canonical-log stores are arrival logs now "
+        "(engine.arrival_store.ArrivalStore); a plain SqliteStore is read "
+        "with `loops store` / `loops store stats`.",
+        label="store export",
     )
-    if vertex_path is None:
-        p.add_argument("source", help="Source store .db or .vertex file, or vertex name")
-    p.add_argument(
-        "target", nargs="?", default=None,
-        help="Path for the .jsonl log (default: <store>.jsonl beside the store)",
-    )
-    p.add_argument(
-        "--rebuild", default=None, metavar="PATH",
-        help="Also rebuild a fresh sqlite store from the log just written",
-    )
-    p.add_argument("--json", action="store_true", help="JSON report")
-    args = p.parse_args(argv)
-
-    src_target = _resolve_target(getattr(args, "source", None), vertex_path).resolve()
-    src_db = resolve_store_path(src_target)
-    if not src_db.exists():
-        raise FileNotFoundError(f"{src_db} does not exist")
-    target = Path(args.target) if args.target else src_db.with_suffix(".jsonl")
-
-    from store import export_jsonl, rebuild_jsonl
-
-    result = export_jsonl(src_db, target)
-    rebuilt = rebuild_jsonl(target, Path(args.rebuild)) if args.rebuild else None
-
-    if args.json:
-        import json as _json
-
-        report = {
-            "source": str(src_db), "log": str(result.path),
-            "facts": result.facts, "ticks": result.ticks, "lines": result.lines,
-        }
-        if rebuilt is not None:
-            report["rebuild"] = {
-                "path": str(rebuilt.path),
-                "facts": rebuilt.facts, "ticks": rebuilt.ticks,
-            }
-        print(_json.dumps(report, indent=2))  # noqa: T201 — machine output path
-        return 0
-
-    from painted import Block, Style, join_vertical, paint
-
-    lines = [
-        f"✓ {src_db.name} → {result.path.name}: "
-        f"{result.lines} lines ({result.facts} facts, {result.ticks} ticks)"
-    ]
-    if rebuilt is not None:
-        lines.append(
-            f"  rebuilt {rebuilt.path.name}: "
-            f"{rebuilt.facts} facts, {rebuilt.ticks} ticks"
-        )
-    paint(join_vertical(*(Block.text(ln, Style(dim=False)) for ln in lines)))
-    return 0
 
 
 def _run_reanchor(argv: list[str], *, vertex_path: Path | None = None) -> int:
@@ -911,8 +895,18 @@ def _read_absorption_state(
                 ).fetchone()
                 is not None
             )
+            def newest_first(table: str) -> str:
+                """Newest-row ordering for `table`: the arrival coordinate
+                when the store carries one, rowid on a pre-coordinate store."""
+                cols = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+                return (
+                    "ORDER BY arrival_ordinal DESC, arrival_seq DESC"
+                    if "arrival_ordinal" in cols
+                    else "ORDER BY rowid DESC"
+                )
+
             frow = conn.execute(
-                "SELECT id FROM facts ORDER BY rowid DESC LIMIT 1"
+                f"SELECT id FROM facts {newest_first('facts')} LIMIT 1"
             ).fetchone()
             fact_cursor = frow[0] if frow else None
         except sqlite3.OperationalError:
@@ -926,7 +920,7 @@ def _read_absorption_state(
                 row_sql = _TICK_ROW_SQL if "signature" in tcols else _TICK_ROW_SQL_V1
                 row = conn.execute(
                     f"SELECT {row_sql} FROM ticks "
-                    "WHERE window_hash IS NOT NULL ORDER BY rowid DESC LIMIT 1"
+                    f"WHERE window_hash IS NOT NULL {newest_first('ticks')} LIMIT 1"
                 ).fetchone()
                 if row is not None:
                     # tick_row_hash reads an 11-field row (signature at [10]);

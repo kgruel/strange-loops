@@ -53,7 +53,7 @@ from pathlib import Path
 from typing import Any
 
 from .canonical_audit import AgreementReport, audit_agreement
-from .residence import index_path_for, is_jsonl_canonical
+from .residence import canonical_mode, index_path_for
 from .sql_util import sqlite_busy
 
 __all__ = [
@@ -167,7 +167,10 @@ def read_preflight(
     canonical = _canonical_of(target)
     index = index_path_for(canonical)
 
-    if not is_jsonl_canonical(canonical):
+    store_mode = canonical_mode(canonical)
+    if store_mode == "arrival":
+        return _arrival_preflight(canonical, mode, open_kwargs)
+    if store_mode != "jsonl":
         return _sqlite_preflight(canonical, mode, open_kwargs)
 
     report = audit_agreement(canonical)
@@ -372,6 +375,43 @@ def _sqlite_preflight(
     return _result(
         mode, canonical, canonical, "ok", agreed=True, opened=True,
         store=store, reason=reason + "; store opened",
+    )
+
+
+def _arrival_preflight(
+    canonical: Path, mode: PreflightMode, open_kwargs: dict[str, Any]
+) -> PreflightResult:
+    """Arrival-canonical: agreement audit lives in canonical_audit, not preflight.
+
+    Scope stated rather than blurred: an arrival store HAS a log/index pair,
+    so agreement is not vacuous the way sqlite's is — it is simply not
+    judged yet, and ``agreed`` stays ``None`` so no caller can render an
+    innocence claim this gate never made. The log itself remains fully
+    verifiable through :meth:`engine.arrival.ArrivalLog.walk` and
+    :func:`engine.arrival.verify_authorship`, which is where the authority
+    claims live. A missing log is ``unreadable`` in every mode — a read
+    preflight never creates, and recovery never invents a log.
+    """
+    index = index_path_for(canonical)
+    if not canonical.exists():
+        return _result(
+            mode, canonical, index, "unreadable",
+            reason=(
+                f"no arrival log at {canonical} — a read preflight never "
+                "creates a store"
+            ),
+        )
+    reason = (
+        "arrival-canonical store — the arrival agreement audit is a later "
+        "cut; this gate makes no agreement claim (the log verifies through "
+        "ArrivalLog.walk / verify_authorship)"
+    )
+    if mode is PreflightMode.AUDIT_ONLY:
+        return _result(mode, canonical, index, "ok", reason=reason)
+    store = _open(canonical, open_kwargs)
+    return _result(
+        mode, canonical, index, "ok", opened=True, store=store,
+        reason=reason + "; store opened",
     )
 
 

@@ -1,0 +1,135 @@
+/**
+ * Gruel Design System — Avatar Component
+ *
+ * Circular avatar base for color options, triggers, and icons.
+ * Compose with color utilities (.bg-botanical, etc.) and animations.
+ *
+ * Interactive usage:
+ *   <button type="button" class="avatar avatar--lg bg-botanical"
+ *     aria-label="Choose Juniper">J</button>
+ *
+ * Use a div or span only when the avatar is decorative or presentational.
+ */
+
+/* ===========================================
+   BASE AVATAR
+   =========================================== */
+.avatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  font-family: var(--font-serif);
+  font-weight: 500;
+  color: inherit;
+  cursor: default;
+  padding: 0;
+  transition: transform 0.2s, box-shadow 0.2s;
+  box-shadow: var(--shadow-avatar);
+  border: 2px solid transparent;
+  flex-shrink: 0;
+}
+
+.avatar:is(button, a, [role="button"]) {
+  cursor: pointer;
+}
+
+.avatar:is(button, a, [role="button"]):hover {
+  box-shadow: var(--shadow-avatar-hover);
+}
+
+.avatar:is(button, a, [role="button"]):focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: var(--focus-offset);
+}
+
+/* ===========================================
+   SIZE VARIANTS
+   =========================================== */
+.avatar--xs {
+  width: var(--avatar-xs);
+  height: var(--avatar-xs);
+  font-size: 0.8rem;
+}
+
+.avatar--sm {
+  width: var(--avatar-sm);
+  height: var(--avatar-sm);
+  font-size: 0.9rem;
+}
+
+.avatar--md {
+  width: var(--avatar-md);
+  height: var(--avatar-md);
+  font-size: 1rem;
+}
+
+.avatar--lg {
+  width: var(--avatar-lg);
+  height: var(--avatar-lg);
+  font-size: 1.1rem;
+}
+
+.avatar--xl {
+  width: var(--avatar-xl);
+  height: var(--avatar-xl);
+  font-size: 1.35rem;
+}
+
+.avatar--2xl {
+  width: var(--avatar-2xl);
+  height: var(--avatar-2xl);
+  font-size: 1.6rem;
+}
+
+/* ===========================================
+   ICON SIZING
+   SVGs inside avatars scale proportionally
+   =========================================== */
+.avatar svg {
+  width: 50%;
+  height: 50%;
+}
+
+/* Larger icon for botanical avatars */
+.avatar--icon-lg svg {
+  width: 60%;
+  height: 60%;
+}
+
+/* ===========================================
+   STATE MODIFIERS
+   =========================================== */
+
+/* Disabled/inactive state */
+.avatar--disabled,
+.avatar:disabled,
+.avatar[aria-disabled="true"] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.avatar--disabled:hover,
+.avatar:disabled:hover,
+.avatar[aria-disabled="true"]:hover {
+  box-shadow: var(--shadow-avatar);
+  transform: none;
+}
+
+/* Ghost/hidden state for swap animations */
+.avatar--ghost {
+  opacity: 0;
+  transform: scale(0.5);
+}
+
+/* ===========================================
+   BOTANICAL BRAND VARIANT
+   Special shadow treatment for botanical avatars
+   =========================================== */
+.avatar--botanical-brand {
+  box-shadow: var(--shadow-avatar-botanical);
+}
+
+.avatar--botanical-brand:is(button, a, [role="button"]):hover {
+  box-shadow: var(--shadow-avatar-botanical-hover);
+}

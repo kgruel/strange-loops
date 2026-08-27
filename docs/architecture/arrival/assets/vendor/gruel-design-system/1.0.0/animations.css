@@ -1,0 +1,114 @@
+/**
+ * Gruel Design System — Animations
+ *
+ * Keyframes and animation utility classes for interactive elements.
+ * Import after tokens.css.
+ *
+ * INTERACTIVITY PATTERN (for Flip, Swap, Vacuum, Morph selectors):
+ * - Idle triggers: scale-breath (two subtle pulses to indicate interactivity)
+ * - Hover: hover-bounce (satisfying overshoot feedback)
+ * - Selected: selected-ring-breath (amber ring with gentle pulse)
+ */
+
+/* ===========================================
+   KEYFRAMES: Scale Breath
+   Subtle idle animation for functional triggers
+   =========================================== */
+@keyframes scale-breath {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.04); }
+}
+
+/* ===========================================
+   KEYFRAMES: Hover Bounce
+   Satisfying overshoot on hover
+   =========================================== */
+@keyframes hover-bounce {
+  0% { transform: scale(1); }
+  40% { transform: scale(1.12); }
+  60% { transform: scale(1.06); }
+  80% { transform: scale(1.09); }
+  100% { transform: scale(1.08); }
+}
+
+/* ===========================================
+   KEYFRAMES: Selected Ring Breath
+   Soft amber ring with gentle pulse outward
+   =========================================== */
+@keyframes selected-ring-breath {
+  0%, 100% {
+    box-shadow: var(--shadow-avatar), var(--ring-selected);
+  }
+  50% {
+    box-shadow: var(--shadow-avatar), var(--ring-selected), var(--ring-selected-pulse);
+  }
+}
+
+/* ===========================================
+   KEYFRAMES: Center Bounce (Wheel-specific)
+   Bounce for centered elements with translate offset
+   =========================================== */
+@keyframes center-bounce {
+  0% { transform: translate(-50%, -50%) scale(1); }
+  40% { transform: translate(-50%, -50%) scale(0.92); }
+  70% { transform: translate(-50%, -50%) scale(1.08); }
+  100% { transform: translate(-50%, -50%) scale(1); }
+}
+
+/* ===========================================
+   ANIMATION UTILITY CLASSES
+   Apply these to elements for consistent behavior
+   =========================================== */
+
+/**
+ * .anim-trigger-breath
+ * Apply to functional triggers (elements that transform the row)
+ * Breathes twice when idle; does not run on hover, focus, or when selected
+ */
+@media (prefers-reduced-motion: no-preference) {
+  .anim-trigger-breath:not(:hover):not(:focus-visible):not(.selected) {
+    animation: scale-breath 2.5s ease-in-out 2;
+  }
+
+/**
+ * .anim-hover-bounce
+ * Apply to any element that should bounce on hover
+ */
+  .anim-hover-bounce:hover,
+  .anim-hover-bounce:focus-visible {
+    animation: hover-bounce 0.4s ease forwards;
+  }
+
+/**
+ * .anim-selected-ring
+ * Apply to elements that show selection state
+ * Must also have .selected class to activate
+ */
+  .anim-selected-ring.selected {
+    animation: selected-ring-breath 2.5s ease-in-out 2;
+    border-color: transparent;
+  }
+
+/**
+ * .anim-center-bounce
+ * Apply to centered wheel hubs
+ * Requires .bounce class to trigger
+ */
+  .anim-center-bounce.bounce {
+    animation: center-bounce 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+  }
+
+/* ===========================================
+   HOVER SCALE UTILITIES
+   For elements that don't use the full bounce
+   =========================================== */
+
+  .hover-scale-sm:hover,
+  .hover-scale-sm:focus-visible { transform: scale(1.05); }
+
+  .hover-scale-md:hover,
+  .hover-scale-md:focus-visible { transform: scale(1.1); }
+
+  .hover-scale-lg:hover,
+  .hover-scale-lg:focus-visible { transform: scale(1.15); }
+}

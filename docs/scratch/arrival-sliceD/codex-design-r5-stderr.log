@@ -1,0 +1,986 @@
+Reading prompt from stdin...
+OpenAI Codex v0.147.0
+--------
+workdir: /Users/kaygee/Code/loops
+model: gpt-5.6-sol
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: low
+reasoning summaries: none
+session id: 01a022b1-b88f-78f1-bef8-cfe785f86377
+--------
+user
+# Codex review brief — slice D design proposal r5 (convergence check, sol LOW)
+
+Repo: this checkout, branch `feat/arrival-libs` @ HEAD. **Review-only: do not
+modify any file.** Target: `docs/scratch/arrival-sliceD/design-proposal.md`
+(now r5). Prior rounds: codex-design-r1..r4-stdout.log in this directory.
+r4 left exactly two findings (DP-r4-01 provider table namespace, DP-r4-02
+dependent views); r5 revised against only those two.
+
+Narrow convergence check:
+1. DP-r4-01 and DP-r4-02: PASS/FAIL with evidence, primary-sourcing the
+   claims (composite (table,row_id) key vs the schemas; rows_of_record
+   yielding row type; the sql-content view discovery vs sqlite_schema
+   semantics; gates G-D0-12/13).
+2. Fresh-eyes on ONLY the r5-changed text: new findings as DP-r5-NN.
+3. Do not re-report anything previously PASSed or routed to Kyle.
+
+Verdict: PASS/FAIL for the two items, any DP-r5 findings, per-decision
+SOUND/UNSOUND/SOUND-WITH-CHANGES, overall RATIFIABLE /
+NOT-RATIFIABLE-AS-WRITTEN, and an explicit CONVERGED / NOT CONVERGED call
+(converged = zero new findings and both items PASS). One response.
+
+codex
+I’ll perform a read-only convergence review, first identifying the exact r5 diff and prior r4 findings, then checking each claim against repository schemas, APIs, SQLite semantics, and the named gates.
+exec
+/bin/zsh -lc "pwd && rg --files -g 'AGENTS.md' -g 'design-proposal.md' -g 'codex-design-r*-stdout.log' -g '*.sql' -g '*.rs' -g '*.ts' -g '*.py' | sed -n '1,240p'" in /Users/kaygee/Code/loops
+ succeeded in 0ms:
+/Users/kaygee/Code/loops
+spec/conformance/generate_replay.py
+spec/conformance/generate_fold.py
+spec/conformance/generate_lens.py
+docs/scratch/arrival-sliceB/design-proposal.md
+docs/scratch/arrival-sliceB/gate_probe_race.py
+benchmarks/characterize.py
+apps/loops/src/loops/lenses/declarations.py
+apps/loops/src/loops/lenses/_helpers.py
+apps/loops/src/loops/lenses/fold.py
+apps/loops/src/loops/lenses/vertices.py
+apps/loops/src/loops/lenses/provenance.py
+apps/loops/src/loops/lenses/compile.py
+apps/loops/src/loops/lenses/gist.py
+libs/store/src/store/_transport_local.py
+apps/loops/src/loops/lenses/validate.py
+libs/store/src/store/derived_log_merge.py
+apps/loops/src/loops/lenses/stream.py
+libs/store/src/store/__init__.py
+apps/loops/src/loops/lenses/test.py
+libs/store/src/store/compact.py
+apps/loops/src/loops/lenses/_grammar.py
+libs/store/src/store/transport.py
+apps/loops/src/loops/lenses/__init__.py
+libs/store/src/store/slice.py
+apps/loops/src/loops/lenses/horizon.py
+libs/store/src/store/receive.py
+apps/loops/src/loops/lenses/graph.py
+libs/store/src/store/rebirth.py
+apps/loops/src/loops/lenses/autoresearch.py
+libs/store/src/store/_conn.py
+libs/store/src/store/merge.py
+apps/loops/src/loops/lenses/ticks.py
+apps/loops/src/loops/lenses/confluence.py
+apps/loops/src/loops/lenses/_statview.py
+apps/loops/src/loops/lenses/run.py
+apps/loops/src/loops/lenses/store.py
+apps/loops/src/loops/lenses/sync.py
+apps/loops/src/loops/surface.py
+apps/loops/src/loops/__main__.py
+apps/loops/src/loops/main.py
+apps/loops/src/loops/provenance.py
+apps/loops/src/loops/errors.py
+docs/scratch/arrival-sliceB/gate_probe_base_hypothesis.py
+docs/scratch/arrival-sliceB/gate_probe_stray_files.py
+docs/scratch/arrival-sliceB/gate_oracle.py
+docs/scratch/arrival-sliceB/gate_probe_rule18.py
+tests/chaos/test_sdk_faults.py
+tests/chaos/test_storage_faults.py
+libs/store/tests/test_slice.py
+libs/store/tests/test_conformance_merge.py
+libs/store/tests/test_merge.py
+libs/store/tests/test_transport.py
+libs/store/tests/__init__.py
+libs/store/tests/test_compact.py
+libs/store/tests/test_arrival_merge.py
+libs/store/tests/test_properties_merge.py
+libs/store/tests/strategies.py
+libs/store/tests/test_derived_log_merge.py
+libs/store/tests/conftest.py
+libs/store/tests/test_fact_signature_transport.py
+libs/store/tests/test_receive.py
+libs/store/tests/test_rebirth.py
+apps/loops/src/loops/commands/orient.py
+apps/loops/src/loops/commands/identity.py
+apps/loops/src/loops/commands/emit.py
+apps/loops/src/loops/commands/init.py
+apps/loops/src/loops/commands/vertices.py
+apps/loops/src/loops/commands/devtools.py
+apps/loops/src/loops/commands/whoami.py
+apps/loops/src/loops/commands/stream.py
+apps/loops/src/loops/commands/rm.py
+apps/loops/src/loops/commands/ls.py
+apps/loops/src/loops/commands/__init__.py
+apps/loops/src/loops/commands/population.py
+apps/loops/src/loops/commands/ticks.py
+apps/loops/src/loops/commands/add.py
+apps/loops/src/loops/commands/resolve.py
+apps/loops/src/loops/commands/store.py
+apps/loops/src/loops/commands/sync.py
+apps/loops/src/loops/commands/fetch.py
+apps/loops/src/loops/palette.py
+docs/scratch/arrival-sliceD/design-proposal.md
+docs/scratch/arrival-sliceD/codex-design-r2-stdout.log
+docs/scratch/arrival-sliceD/codex-design-r5-stdout.log
+docs/scratch/arrival-sliceD/codex-design-r3-stdout.log
+docs/scratch/arrival-sliceD/codex-design-r4-stdout.log
+docs/scratch/arrival-sliceD/codex-design-r1-stdout.log
+spec/conformance/generate_merge.py
+libs/sign/src/sign/jwt.py
+libs/sign/src/sign/ed25519.py
+libs/sign/src/sign/keys.py
+libs/sign/src/sign/jwks.py
+libs/sign/src/sign/__init__.py
+apps/loops/src/loops/cli/cite_args.py
+apps/loops/src/loops/cli/output.py
+apps/loops/src/loops/cli/read_args.py
+apps/loops/src/loops/cli/store_args.py
+docs/scratch/arrival-sliceA/gate_g1_g2.py
+docs/scratch/arrival-sliceC/design-proposal.md
+tests/architecture/test_rule_04_lib_dependency_dag.py
+tests/architecture/test_rule_09_resolve_local_vertex_ambiguity.py
+tests/architecture/_helpers.py
+tests/architecture/test_rule_05_lib_dataclasses_frozen.py
+tests/architecture/test_rule_18_arrival_vocabulary_denylist.py
+tests/architecture/test_rule_16_hot_path_libs_import_footprint.py
+tests/architecture/test_rule_06_atoms_stdlib_only.py
+tests/architecture/test_rule_03_libs_dont_import_apps.py
+tests/architecture/test_rule_08_domain_constants_in_custody_only.py
+tests/architecture/__init__.py
+tests/architecture/test_rule_02_apps_no_raw_sqlite.py
+tests/architecture/test_rule_13_production_never_imports_non_production.py
+libs/sign/tests/test_jwt.py
+tests/architecture/test_rule_12_render_register_is_offered_width.py
+libs/sign/tests/test_ed25519.py
+tests/architecture/test_rule_14_mutation_survivors_shrink_only.py
+libs/sign/tests/__init__.py
+tests/architecture/test_rule_10_disclosure_renderers_no_store_io.py
+libs/sign/tests/test_jwks.py
+tests/architecture/test_rule_15_apps_import_only_sdk_and_painted.py
+libs/sign/tests/test_keys.py
+tests/architecture/test_rule_07_sqlite3_confined_to_engine_store.py
+tests/architecture/test_rule_11_record_never_imports_surfacing.py
+tests/architecture/test_rule_01_apps_no_store_reader.py
+tests/architecture/test_rule_17_fold_order_prose_is_receipt_order.py
+apps/loops/src/loops/cli/views/read.py
+apps/loops/src/loops/cli/views/fold.py
+apps/loops/src/loops/cli/views/orient.py
+apps/loops/src/loops/cli/views/emit.py
+apps/loops/src/loops/cli/views/stream.py
+apps/loops/src/loops/cli/views/__init__.py
+apps/loops/src/loops/cli/views/population.py
+apps/loops/src/loops/cli/views/ticks.py
+apps/loops/src/loops/cli/views/seal.py
+apps/loops/src/loops/cli/views/cite.py
+apps/loops/src/loops/cli/views/store.py
+apps/loops/src/loops/cli/completers.py
+apps/loops/src/loops/cli/ls_args.py
+apps/loops/src/loops/cli/emit_args.py
+apps/loops/src/loops/cli/invocation.py
+apps/loops/src/loops/cli/app.py
+apps/loops/src/loops/cli/sync_args.py
+apps/loops/src/loops/cli/refusals.py
+apps/loops/src/loops/cli/operation.py
+apps/loops/src/loops/cli/seal_args.py
+apps/loops/src/loops/cli/__init__.py
+apps/loops/src/loops/cli/witness_address.py
+apps/loops/src/loops/cli/close_args.py
+apps/loops/src/loops/cli/dispatch.py
+apps/loops/src/loops/cli/registry.py
+apps/loops/src/loops/cli/lens.py
+apps/loops/src/loops/__init__.py
+apps/loops/src/loops/foldkey.py
+apps/loops/src/loops/lens_resolver.py
+apps/loops/src/loops/tui/store_app.py
+apps/loops/src/loops/tui/__init__.py
+apps/loops/src/loops/tui/autoresearch_app.py
+clients/claude-code/hooks/turn-capture.py
+libs/engine/src/engine/preflight.py
+libs/engine/src/engine/source_protocol.py
+libs/engine/src/engine/executor.py
+libs/engine/src/engine/arrival.py
+libs/engine/src/engine/projection.py
+libs/engine/src/engine/jsonl_codec.py
+libs/engine/src/engine/admission.py
+libs/engine/src/engine/canonical_audit.py
+libs/engine/src/engine/program.py
+libs/engine/src/engine/forward.py
+libs/engine/src/engine/tick.py
+libs/engine/src/engine/cadence.py
+libs/engine/src/engine/loop.py
+libs/engine/src/engine/probe.py
+libs/engine/src/engine/replay.py
+libs/engine/src/engine/ceremony.py
+libs/engine/src/engine/builder.py
+libs/engine/src/engine/peer.py
+libs/engine/src/engine/stream.py
+libs/engine/src/engine/declaration.py
+libs/engine/src/engine/sql_util.py
+libs/engine/src/engine/file_writer.py
+libs/engine/src/engine/vertex.py
+libs/engine/src/engine/sqlite_store.py
+libs/engine/src/engine/__init__.py
+libs/engine/src/engine/witness.py
+libs/engine/src/engine/arrival_projection.py
+libs/engine/src/engine/handle.py
+libs/engine/src/engine/residence.py
+libs/engine/src/engine/compiler.py
+libs/engine/src/engine/file_store.py
+libs/engine/src/engine/store_reader.py
+libs/engine/src/engine/arrival_store.py
+libs/engine/src/engine/lens.py
+libs/engine/src/engine/jsonl_store.py
+libs/engine/src/engine/store.py
+libs/engine/src/engine/vertex_reader.py
+libs/engine/src/engine/tailer.py
+libs/engine/src/engine/observer.py
+libs/engine/benchmarks/benchmark_vertex_hotpath.py
+libs/sdk/src/sdk/read.py
+libs/sdk/src/sdk/emit.py
+libs/sdk/src/sdk/target.py
+libs/sdk/src/sdk/declare.py
+libs/sdk/src/sdk/types.py
+libs/sdk/src/sdk/__init__.py
+libs/sdk/src/sdk/kind.py
+libs/atoms/src/atoms/fold.py
+libs/atoms/src/atoms/source.py
+libs/atoms/src/atoms/parse.py
+libs/atoms/src/atoms/facet.py
+libs/atoms/src/atoms/ordering.py
+libs/atoms/src/atoms/engine.py
+libs/atoms/src/atoms/sequential.py
+libs/atoms/src/atoms/testing/__init__.py
+libs/atoms/src/atoms/testing/strategies.py
+libs/atoms/src/atoms/types.py
+libs/atoms/src/atoms/spec.py
+libs/atoms/src/atoms/__init__.py
+libs/atoms/src/atoms/fact.py
+libs/atoms/src/atoms/protocol.py
+libs/atoms/tests/test_ordering.py
+libs/atoms/src/atoms/ticks.py
+libs/atoms/tests/test_properties_atoms.py
+libs/atoms/src/atoms/boundary.py
+libs/atoms/tests/test_fold_state.py
+libs/atoms/src/atoms/address.py
+libs/atoms/tests/test_ticks.py
+libs/atoms/src/atoms/fold_state.py
+libs/atoms/tests/test_fold_rejection.py
+libs/atoms/tests/test_shapes.py
+libs/atoms/tests/test_parse_coverage.py
+libs/atoms/tests/__init__.py
+libs/atoms/tests/test_fact.py
+libs/atoms/tests/test_source.py
+libs/atoms/tests/test_boundary.py
+libs/atoms/tests/test_parse.py
+libs/atoms/tests/test_fold_typed.py
+libs/atoms/tests/strategies.py
+libs/atoms/tests/test_address.py
+libs/atoms/tests/test_protocol.py
+libs/atoms/tests/test_replay.py
+libs/sdk/tests/test_declare.py
+
+exec
+/bin/zsh -lc 'git status --short && git log -6 --oneline --decorate && git diff HEAD''^ -- docs/scratch/arrival-sliceD/design-proposal.md && sed -n '"'1,240p' docs/scratch/arrival-sliceD/codex-design-r4-stdout.log" in /Users/kaygee/Code/loops
+ succeeded in 0ms:
+?? docs/scratch/arrival-sliceD/codex-design-brief-r1.md
+?? docs/scratch/arrival-sliceD/codex-design-brief-r2.md
+?? docs/scratch/arrival-sliceD/codex-design-brief-r3.md
+?? docs/scratch/arrival-sliceD/codex-design-brief-r4.md
+?? docs/scratch/arrival-sliceD/codex-design-brief-r5.md
+?? docs/scratch/arrival-sliceD/codex-design-r1-stderr.log
+?? docs/scratch/arrival-sliceD/codex-design-r1-stdout.log
+?? docs/scratch/arrival-sliceD/codex-design-r2-stderr.log
+?? docs/scratch/arrival-sliceD/codex-design-r2-stdout.log
+?? docs/scratch/arrival-sliceD/codex-design-r3-stderr.log
+?? docs/scratch/arrival-sliceD/codex-design-r3-stdout.log
+?? docs/scratch/arrival-sliceD/codex-design-r4-stderr.log
+?? docs/scratch/arrival-sliceD/codex-design-r4-stdout.log
+?? docs/scratch/arrival-sliceD/codex-design-r5-stderr.log
+?? docs/scratch/arrival-sliceD/codex-design-r5-stdout.log
+6f119ce7 (HEAD -> feat/arrival-libs) docs(scratch): slice D design proposal r5 — table-namespaced provider key, dependent-view preservation
+2b05131e docs(scratch): slice D design proposal r4 — coordinate provider, rowid-preserving rebuild, per-route dispatch gates
+ea0ad590 docs(scratch): slice D design proposal r3 — table-rebuild invariant, constructor-path upgrader, selective key registry
+b5628350 docs(scratch): slice D design proposal r2 — revised against codex DP-r1 findings (all 10 dispositioned)
+c5e684fa docs(scratch): slice D stood up — run plan, agy explorer recon (6 reports, spot-checked), design proposal awaiting ratification
+eeb05de8 docs(scratch): design-conformance review inputs — 4 artifacts extracted + r3 brief
+diff --git a/docs/scratch/arrival-sliceD/design-proposal.md b/docs/scratch/arrival-sliceD/design-proposal.md
+index 01bccae8..f2485719 100644
+--- a/docs/scratch/arrival-sliceD/design-proposal.md
++++ b/docs/scratch/arrival-sliceD/design-proposal.md
+@@ -1,6 +1,6 @@
+ # Slice D — Surfaces: design proposal
+ 
+-Status: **r4 — revised against codex DP-r3 findings, awaiting Kyle's ruling.**
++Status: **r5 — revised against codex DP-r4 findings, awaiting Kyle's ruling.**
+ Five separately ratifiable decisions (D0–D4) plus a gate plan and work
+ packages. r1 written 2026-08-20 against `feat/arrival-libs` @ `eeb05de8`;
+ r2 revised it against the ten DP-r1 findings (7 MAJOR, 3 minor); the r2
+@@ -150,10 +150,17 @@ statement discipline):
+     correctly NOT followed here: rederivation renumbers (DELETE resets the
+     rowid counter), the migration copy does not, and each treatment is the
+     honest one for its mechanism.
+-  - **Triggers and indexes are inventoried and recreated**: before the
+-    DROP, read every `sqlite_schema` row with `tbl_name` = the table and
+-    `type IN ('trigger','index')` (skipping auto-indexes), and replay each
+-    stored `sql` verbatim after the RENAME, inside the same transaction.
++  - **Triggers, indexes, AND dependent views are inventoried and
++    recreated** (DP-r4-02): before the DROP, read every `sqlite_schema`
++    row with `tbl_name` = the table and `type IN ('trigger','index')`
++    (skipping auto-indexes) — and, separately, every `type = 'view'` row
++    whose stored `sql` references the table, because a view's `tbl_name`
++    is its own name and the table-keyed query structurally cannot find it.
++    Dependent views are DROPped before the rebuild and replayed verbatim
++    after the RENAME, in the same transaction, per SQLite's documented
++    generalized rebuild procedure (lang_altertable.html#otheralter, steps
++    3/8/9) — necessary not only for preservation but for correctness: a
++    surviving stale view can fail the RENAME's schema reparse outright.
+     Triggers are supported behavior, not debris — the store deliberately
+     reads back committed rows "after any AFTER triggers fired"
+     (`sqlite_store.py:702-712`, `:746`).
+@@ -197,10 +204,17 @@ statement discipline):
+   ensure_coordinate_schema(
+       conn, *,
+       mode: Literal["mirrored", "arrival"],
+-      coordinates: Callable[[], Iterator[tuple[str, int, int]]] | None = None,
+-      # provider of (row_id, arrival_ordinal, arrival_seq); REQUIRED for
+-      # mode="arrival", forbidden for mode="mirrored". A provider, not a
+-      # materialized mapping: the walk runs only if a rebuild is needed.
++      coordinates: Callable[[], Iterator[tuple[str, str, int, int]]] | None = None,
++      # provider of (table, row_id, arrival_ordinal, arrival_seq), where
++      # table is "facts" | "ticks"; REQUIRED for mode="arrival", forbidden
++      # for mode="mirrored". A provider, not a materialized mapping: the
++      # walk runs only if a rebuild is needed. The table namespace is part
++      # of the key (DP-r4-01): facts.id and ticks.id are independent
++      # primary keys (sqlite_store.py:308), so the same id string may
++      # legally name a fact AND a tick from different arrival records —
++      # the staging temp table and the rebuild's join both key on the
++      # composite (table, row_id). rows_of_record already yields the row
++      # type alongside the row, so the closure has the namespace for free.
+   )
+   ```
+ 
+@@ -607,6 +621,14 @@ identically, and incremental indexing resumes from the watermark without
+ skipping or double-indexing.
+ **G-D0-11** — mis-mode refusal: a plain `SqliteStore` opened on an
+ arrival-marked index refuses to mirror-stamp it.
++**G-D0-12** — cross-table id collision (DP-r4-01): an arrival fixture
++containing a fact and a tick sharing the same id string, from different
++records; migration assigns each its own distinct correct coordinate
++(composite `(table, row_id)` staging proven discriminating).
++**G-D0-13** — dependent-view survival (DP-r4-02): a pre-existing view
++over `facts` remains present in `sqlite_schema` and queryable with
++identical results post-migration; the RENAME completes with the view
++in place.
+ 
+ **G-D1-2** — `WitnessAggregateUnsupported` at all three sites,
+ messages unchanged; A10 refusal messages byte-identical. Pinning tests
+@@ -798,3 +820,14 @@ D0 remained UNSOUND on migration mechanics. r4 answers:
+ | DP-r3-01 | MAJOR | **Redesigned.** Upgrader signature gains an explicit coordinate provider (`coordinates: Callable[[], Iterator[(row_id, ord, seq)]]`, required for arrival mode, forbidden for mirrored); per-route supply specified, including ArrivalStore's constructor-ordering reality (log constructed after the base connection opens; upgrader runs post-log-assignment, before the existing `_ensure_*` tail, with the pre-write hook as backstop) and rederivation's direct provider; mis-mode guard refuses mirror-stamping an arrival-marked index (G-D0-11). |
+ | DP-r3-02 | MAJOR | **Redesigned.** Rebuild copies `rowid` explicitly in both column lists — chosen over the rederivation FTS-drop precedent because the copy (unlike rederivation's DELETE) can preserve rowids, FTS stays valid, and live rowid consumers keep WP-1's suites green; triggers and indexes inventoried from `sqlite_schema` and replayed verbatim post-RENAME in the same transaction; gated by G-D0-9 (trigger fires after migration) and G-D0-10 (FTS resolves and resumes correctly). |
+ | DP-r3-03 | minor | **Redesigned.** G-D0-7 (ArrivalStore public constructor on an unmigrated batch-bearing index) and G-D0-8 (rederivation entry point on the same fixture, results identical) cover the two arrival dispatch routes independently. |
++
++r4 re-verify (`codex-design-r4-stdout.log`): DP-r3-02/03 PASS (rowid
++preservation, trigger/index replay, route gates all confirmed against
++SQLite's documented rebuild procedure); DP-r3-01 FAIL solely on the
++provider key shape, closed by DP-r4-01 below. D3 and D4 remain SOUND.
++r5 answers:
++
++| finding | severity | disposition in r5 |
++|---|---|---|
++| DP-r4-01 | MAJOR | **Redesigned.** Provider yields `(table, row_id, arrival_ordinal, arrival_seq)`; staging temp table and rebuild join key on composite `(table, row_id)` — facts.id and ticks.id are independent primary keys, so the bare-id mapping was ambiguous; `rows_of_record` already yields the row type, so the closure has the namespace for free. Gated by G-D0-12 (fact and tick sharing one id string, distinct coordinates). |
++| DP-r4-02 | MAJOR | **Redesigned.** Rebuild inventory extended to dependent views, discovered via `sqlite_schema.sql` content (a view's `tbl_name` is its own name — the table-keyed query structurally misses them), dropped before and replayed verbatim after the rebuild per SQLite's generalized procedure (steps 3/8/9); stale-view RENAME-reparse failure mode noted. Gated by G-D0-13 (pre-existing view over facts queryable post-migration). |
+Reviewed r4 at `2b05131e`, read-only. No files modified.
+
+## Re-verification
+
+| Finding | Verdict | Evidence |
+|---|---|---|
+| DP-r3-01 | **FAIL** | r4 correctly adds an explicit lazy coordinate provider and accurately describes the four supply routes. `ArrivalStore` opens SQLite in `super().__init__`, then constructs `ArrivalLog`, and only afterward runs migrations/catch-up ([arrival_store.py:133](/Users/kaygee/Code/loops/libs/engine/src/engine/arrival_store.py:133)); the base constructor only opens/configures SQLite and creates schema for a new database—no row INSERT occurs ([sqlite_store.py:439](/Users/kaygee/Code/loops/libs/engine/src/engine/sqlite_store.py:439)). Rederivation likewise holds `canonical` and `log` before opening the index ([arrival_projection.py:471](/Users/kaygee/Code/loops/libs/engine/src/engine/arrival_projection.py:471)). However, the new provider yields only `(row_id, ordinal, seq)` ([design-proposal.md:197](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceD/design-proposal.md:197)); facts and ticks have independent `id` primary keys ([sqlite_store.py:308](/Users/kaygee/Code/loops/libs/engine/src/engine/sqlite_store.py:308)). A valid index may therefore contain the same ID in both tables, with different coordinates, making the proposed global `id → coordinate` mapping ambiguous. See DP-r4-01. |
+| DP-r3-02 | **PASS** | r4 explicitly copies `rowid` in both INSERT and SELECT lists ([design-proposal.md:131](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceD/design-proposal.md:131)). These are ordinary rowid tables with text primary keys, and SQLite permits INSERT to supply rowid explicitly, so this preserves the old values ([SQLite CREATE TABLE](https://www.sqlite.org/lang_createtable.html)). That correctly differs from the existing DELETE/replay path, which drops FTS because replay can reassign rowids ([jsonl_store.py:939](/Users/kaygee/Code/loops/libs/engine/src/engine/jsonl_store.py:939)). Capturing trigger/index SQL from `sqlite_schema`, skipping NULL auto-index SQL, and replaying it after rename follows SQLite’s documented rebuild procedure; `tbl_name` identifies the owning table and stored SQL recreates the object ([SQLite schema table](https://www.sqlite.org/schematab.html), [SQLite ALTER TABLE](https://www.sqlite.org/lang_altertable.html)). G-D0-9 and G-D0-10 directly test trigger behavior and FTS/watermark continuity ([design-proposal.md:599](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceD/design-proposal.md:599)). The newly broadened artifact-preservation claim has a separate view omission, DP-r4-02. |
+| DP-r3-03 | **PASS** | G-D0-7 independently requires migration through `ArrivalStore`’s public constructor, including coordinates, constraints, and subsequent append; G-D0-8 requires the rederivation entry point to produce identical coordinates ([design-proposal.md:591](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceD/design-proposal.md:591)). These cover the two routes with materially different log access. G-D0-11 also exercises the new mis-mode refusal. |
+
+## Fresh r4 findings
+
+### DP-r4-01 — MAJOR — coordinate-provider keys lack the table namespace
+
+`Callable[[], Iterator[tuple[str, int, int]]]` supplies only a row ID. Yet `facts.id` and `ticks.id` are separate primary keys; neither the schema nor `rows_of_record` establishes cross-table uniqueness ([sqlite_store.py:308](/Users/kaygee/Code/loops/libs/engine/src/engine/sqlite_store.py:308), [arrival_projection.py:153](/Users/kaygee/Code/loops/libs/engine/src/engine/arrival_projection.py:153)). Consequently, the same string may legally identify both a fact and a tick from different arrival records.
+
+The staging/join key must include row kind/table, for example `(table, row_id, ordinal, seq)`, with a composite `(table, row_id)` key. Add a migration gate containing a fact and tick with the same ID and distinct coordinates.
+
+### DP-r4-02 — MAJOR — the rebuild omits dependent views
+
+The new text claims preservation of supported schema artifacts but inventories only rows with `type IN ('trigger','index')` ([design-proposal.md:140](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceD/design-proposal.md:140)). SQLite’s authoritative generalized rebuild procedure requires remembering and reconstructing associated views as well as indexes and triggers. A view’s `tbl_name` is its own name, so the proposed `tbl_name = facts|ticks` query cannot discover views referencing those tables. A surviving invalid view can also cause the later `ALTER TABLE ... RENAME` schema reparse to fail. [SQLite explicitly includes views in rebuild steps 3, 8, and 9](https://www.sqlite.org/lang_altertable.html#otheralter).
+
+Inventory dependent views from `sqlite_schema.sql`, or otherwise specify and gate a safe view-preservation strategy. Add a gate proving a pre-existing view over `facts` remains queryable after migration.
+
+## Decision verdicts
+
+| Decision | Verdict | Reason |
+|---|---|---|
+| D0 | **UNSOUND** | The route ordering, rowid preservation, triggers, indexes, FTS handling, and new gates are substantially repaired, but the provider cannot disambiguate cross-table IDs and the rebuild does not handle dependent views. |
+| D1 | **SOUND-WITH-CHANGES** | The coordinate model remains coherent once D0 produces an unambiguous, safely migrated coordinate. |
+| D2 | **SOUND-WITH-CHANGES** | Re-keying remains coherent but depends on D0’s migration guarantee. |
+| D3 | **SOUND** | No r4-changed text introduces a new defect in the bounded-work design. |
+| D4 | **SOUND** | No r4-changed text affects the previously sound selective-verification design. |
+| Gate plan | **SOUND-WITH-CHANGES** | G-D0-7..11 close the previously requested route, trigger, FTS, and mis-mode gaps; collision and dependent-view gates remain necessary. |
+
+Overall: **NOT-RATIFIABLE-AS-WRITTEN**.
+
+exec
+/bin/zsh -lc 'rg -n "''^## Decision|''^### D|rows_of_record|CREATE TABLE (facts|ticks)|G-D0-12|G-D0-13|dependent views|coordinates:|sqlite_schema|table, row_id|staging|provider" docs/scratch/arrival-sliceD/design-proposal.md libs/engine/src/engine/sqlite_store.py libs/engine/src/engine/arrival_projection.py libs/engine/src/engine/arrival.py && sed -n '"'105,235p' docs/scratch/arrival-sliceD/design-proposal.md && sed -n '600,640p' docs/scratch/arrival-sliceD/design-proposal.md && sed -n '275,330p' libs/engine/src/engine/sqlite_store.py && sed -n '130,180p' libs/engine/src/engine/arrival_projection.py" in /Users/kaygee/Code/loops
+ succeeded in 0ms:
+libs/engine/src/engine/arrival_projection.py:82:    "rows_of_record",
+libs/engine/src/engine/arrival_projection.py:153:def rows_of_record(record: dict) -> list[tuple[str, tuple]]:
+libs/engine/src/engine/arrival_projection.py:200:    Not "the same arms as :func:`rows_of_record`" but literally the same
+libs/engine/src/engine/arrival_projection.py:501:                for t, row in rows_of_record(record):
+docs/scratch/arrival-sliceD/design-proposal.md:92:| `arrival_seq INTEGER` | this row's 0-based position within that record's `rows_of_record` expansion |
+docs/scratch/arrival-sliceD/design-proposal.md:130:  `CREATE TABLE facts_new (...full schema incl. NOT NULL + UNIQUE...)`;
+docs/scratch/arrival-sliceD/design-proposal.md:133:  against a temp id→(ord, seq) mapping staged from the coordinate provider
+docs/scratch/arrival-sliceD/design-proposal.md:153:  - **Triggers, indexes, AND dependent views are inventoried and
+docs/scratch/arrival-sliceD/design-proposal.md:154:    recreated** (DP-r4-02): before the DROP, read every `sqlite_schema`
+docs/scratch/arrival-sliceD/design-proposal.md:188:  coordinates **from the log**: walk `rows_of_record` over the records up
+docs/scratch/arrival-sliceD/design-proposal.md:207:      coordinates: Callable[[], Iterator[tuple[str, str, int, int]]] | None = None,
+docs/scratch/arrival-sliceD/design-proposal.md:208:      # provider of (table, row_id, arrival_ordinal, arrival_seq), where
+docs/scratch/arrival-sliceD/design-proposal.md:210:      # for mode="mirrored". A provider, not a materialized mapping: the
+docs/scratch/arrival-sliceD/design-proposal.md:215:      # the staging temp table and the rebuild's join both key on the
+docs/scratch/arrival-sliceD/design-proposal.md:216:      # composite (table, row_id). rows_of_record already yields the row
+docs/scratch/arrival-sliceD/design-proposal.md:226:     migrations; `mode="mirrored"`, no provider. The base class holds
+docs/scratch/arrival-sliceD/design-proposal.md:227:     `self._coordinate_mode = "mirrored"` / `self._coordinate_provider =
+docs/scratch/arrival-sliceD/design-proposal.md:239:     `self._coordinate_mode = "arrival"` and `self._coordinate_provider`
+docs/scratch/arrival-sliceD/design-proposal.md:240:     to a closure walking `self._log` via `rows_of_record` (yielding each
+docs/scratch/arrival-sliceD/design-proposal.md:246:     log-walking provider. (Its own rebuild path deletes and re-derives
+docs/scratch/arrival-sliceD/design-proposal.md:247:     rows with native coordinates, so the provider is only consulted if
+docs/scratch/arrival-sliceD/design-proposal.md:406:order, `rows_of_record` order within a record — the same traversal that
+docs/scratch/arrival-sliceD/design-proposal.md:433:| `_check_last_line` (`:495-542`) | TRANSLATE | `consumed_edge`: read the record at the consumed ordinal via the verified anchor (mechanism below), expand with `rows_of_record`, `row_matches` every row. `_last_line`'s backward byte-scan (`:290-310`) dissolves. |
+docs/scratch/arrival-sliceD/design-proposal.md:472:  `rows_of_record`, multiset `audit_derived_log` for the derived `.jsonl`,
+docs/scratch/arrival-sliceD/design-proposal.md:615:supports) migrates; the trigger still exists in `sqlite_schema` and still
+docs/scratch/arrival-sliceD/design-proposal.md:624:**G-D0-12** — cross-table id collision (DP-r4-01): an arrival fixture
+docs/scratch/arrival-sliceD/design-proposal.md:627:(composite `(table, row_id)` staging proven discriminating).
+docs/scratch/arrival-sliceD/design-proposal.md:628:**G-D0-13** — dependent-view survival (DP-r4-02): a pre-existing view
+docs/scratch/arrival-sliceD/design-proposal.md:629:over `facts` remains present in `sqlite_schema` and queryable with
+docs/scratch/arrival-sliceD/design-proposal.md:820:| DP-r3-01 | MAJOR | **Redesigned.** Upgrader signature gains an explicit coordinate provider (`coordinates: Callable[[], Iterator[(row_id, ord, seq)]]`, required for arrival mode, forbidden for mirrored); per-route supply specified, including ArrivalStore's constructor-ordering reality (log constructed after the base connection opens; upgrader runs post-log-assignment, before the existing `_ensure_*` tail, with the pre-write hook as backstop) and rederivation's direct provider; mis-mode guard refuses mirror-stamping an arrival-marked index (G-D0-11). |
+docs/scratch/arrival-sliceD/design-proposal.md:821:| DP-r3-02 | MAJOR | **Redesigned.** Rebuild copies `rowid` explicitly in both column lists — chosen over the rederivation FTS-drop precedent because the copy (unlike rederivation's DELETE) can preserve rowids, FTS stays valid, and live rowid consumers keep WP-1's suites green; triggers and indexes inventoried from `sqlite_schema` and replayed verbatim post-RENAME in the same transaction; gated by G-D0-9 (trigger fires after migration) and G-D0-10 (FTS resolves and resumes correctly). |
+docs/scratch/arrival-sliceD/design-proposal.md:827:provider key shape, closed by DP-r4-01 below. D3 and D4 remain SOUND.
+docs/scratch/arrival-sliceD/design-proposal.md:832:| DP-r4-01 | MAJOR | **Redesigned.** Provider yields `(table, row_id, arrival_ordinal, arrival_seq)`; staging temp table and rebuild join key on composite `(table, row_id)` — facts.id and ticks.id are independent primary keys, so the bare-id mapping was ambiguous; `rows_of_record` already yields the row type, so the closure has the namespace for free. Gated by G-D0-12 (fact and tick sharing one id string, distinct coordinates). |
+docs/scratch/arrival-sliceD/design-proposal.md:833:| DP-r4-02 | MAJOR | **Redesigned.** Rebuild inventory extended to dependent views, discovered via `sqlite_schema.sql` content (a view's `tbl_name` is its own name — the table-keyed query structurally misses them), dropped before and replayed verbatim after the rebuild per SQLite's generalized procedure (steps 3/8/9); stale-view RENAME-reparse failure mode noted. Gated by G-D0-13 (pre-existing view over facts queryable post-migration). |
+libs/engine/src/engine/sqlite_store.py:736:        exists, signature = self._committed_row_state(table, row_id)
+libs/engine/src/engine/arrival.py:255:    """The genesis staging path: ``<name>.arrival.tmp``.
+libs/engine/src/engine/arrival.py:829:                "or a previous mint died mid-flight and left staging behind"
+libs/engine/src/engine/arrival.py:833:                # The existence check runs with the staging mutex held, which
+libs/engine/src/engine/arrival.py:845:            # The staging create won, but the bytes never became durable —
+
+**Write sites.** Arrival-projected rows get the real coordinate at the two
+— and only two — sites that expand a record into rows: `arrival_store`'s
+catch-up indexer (`_index_record`, `:342-360`) and
+`arrival_projection.rederive_projections` (`:500-509`), both of which hold
+the record's `ResumeMark`. Legacy stores get a mirrored coordinate at
+append time (below). **Every other insert path is enumerated and closed**
+in WP-1: `SqliteStore.append`/`append_tick` (`sqlite_store.py:746`), the
+slice/rebirth writers in `libs/store`, and the re-sign/re-anchor UPDATE
+paths (`sqlite_store.py:1710-1756` — updates only, no inserts, unaffected).
+The shared `FACT_INSERT_SQL`/`TICK_INSERT_SQL` grow the two columns, so an
+insert that fails to supply them fails loudly at the statement, not
+silently as NULL (DP-r1-03).
+
+**Schema invariants** (DP-r1-03/DP-r2-01 — real database constraints, not
+statement discipline):
+
+- **New databases**: `_SCHEMA_STMTS` declares the columns with
+  `arrival_ordinal INTEGER NOT NULL`, `arrival_seq INTEGER NOT NULL`, and a
+  table-level `UNIQUE (arrival_ordinal, arrival_seq)` per table. The
+  invariant lives in the table, so it binds every writer including foreign
+  SQL, and NOT NULL moots SQLite's NULLs-pass-unique-indexes hole.
+- **Existing databases — table rebuild, the honest SQLite mechanism**:
+  retro-added columns cannot be ALTERed to NOT NULL, so the migration is
+  the standard rebuild, per table, in ONE transaction:
+  `CREATE TABLE facts_new (...full schema incl. NOT NULL + UNIQUE...)`;
+  `INSERT INTO facts_new (rowid, ...) SELECT rowid, ..., <coordinate>,
+  <seq> FROM facts` (coordinate per mode: `rowid, 0` mirrored, or a join
+  against a temp id→(ord, seq) mapping staged from the coordinate provider
+  for arrival-canonical); `DROP TABLE facts; ALTER TABLE facts_new RENAME
+  TO facts`; same for `ticks`; recreate dependent schema; write the
+  `coordinate_axis` marker; commit. No foreign keys exist on these tables,
+  so the rebuild needs no FK dance. **Cost, stated:** one O(store) rewrite
+  at first post-upgrade writable open — the same order as the coordinate
+  walk it absorbs, once per database.
+- **The rebuild preserves supported schema artifacts** (DP-r3-02):
+  - **Rowids are preserved explicitly** — the copy names `rowid` in both
+    column lists. This is not optional politeness: `facts_fts.fact_rowid`
+    and the `fts_state.last_rowid` watermark key on exactly these rowids
+    (`jsonl_store.py:944-954` documents the poisoning that renumbering
+    causes; `vertex_reader.py:2187`), and WP-1 lands while witness/seal
+    rowid consumers are still live — a renumbering rebuild would break the
+    suites WP-1 is required to keep green. The FTS projection therefore
+    survives the migration valid, and the rederivation precedent of
+    dropping `facts_fts`/`fts_state` (`arrival_projection.py:492-495`) is
+    correctly NOT followed here: rederivation renumbers (DELETE resets the
+    rowid counter), the migration copy does not, and each treatment is the
+    honest one for its mechanism.
+  - **Triggers, indexes, AND dependent views are inventoried and
+    recreated** (DP-r4-02): before the DROP, read every `sqlite_schema`
+    row with `tbl_name` = the table and `type IN ('trigger','index')`
+    (skipping auto-indexes) — and, separately, every `type = 'view'` row
+    whose stored `sql` references the table, because a view's `tbl_name`
+    is its own name and the table-keyed query structurally cannot find it.
+    Dependent views are DROPped before the rebuild and replayed verbatim
+    after the RENAME, in the same transaction, per SQLite's documented
+    generalized rebuild procedure (lang_altertable.html#otheralter, steps
+    3/8/9) — necessary not only for preservation but for correctness: a
+    surviving stale view can fail the RENAME's schema reparse outright.
+    Triggers are supported behavior, not debris — the store deliberately
+    reads back committed rows "after any AFTER triggers fired"
+    (`sqlite_store.py:702-712`, `:746`).
+- The audit's NULL check (D3) remains a backstop for databases that predate
+  the migration or were written by a foreign schema copy — a location
+  claim, exactly as before.
+- **Legacy allocator:** for a store with no arrival log, append assigns
+  `arrival_ordinal = COALESCE((SELECT MAX(arrival_ordinal) FROM <table>), 0) + 1`,
+  `arrival_seq = 0`, inside the same transaction as the insert — one
+  allocator, per table, serialized by the store's existing write
+  transaction. For such a store the mirrored coordinate *is* its arrival
+  axis: dense, append-ordered, rebuild-invariant is vacuous (nothing
+  rebuilds it from a log), and identical to rowid order by construction.
+
+**Migration — mode-aware, not uniform** (DP-r1-02 replaced r1's option (a)):
+
+- **Legacy index (jsonl-/sqlite-canonical, no arrival log):** backfill
+  `arrival_ordinal = rowid, arrival_seq = 0`. Correct by construction —
+  rowid is that store's append order, and no batch record exists to share
+  an ordinal (legacy rows are row-granular).
+- **Arrival-canonical index:** rowid backfill is WRONG — a batch expands to
+  N rows sharing one ordinal (`arrival_store.py:342`), so `ordinal = rowid`
+  mints coordinates the log never issued and collides with the next
+  catch-up (the DP-r1-02 counterexample). The migration instead re-derives
+  coordinates **from the log**: walk `rows_of_record` over the records up
+  to the stamped consumed mark, matching row ids in index order and
+  stamping `(ord, seq)`; any mismatch between walk and index refuses into
+  the existing escape hatch — `rederive_projections`, which rebuilds the
+  index with coordinates written natively. The walk is O(store), once.
+- **Migration dispatch — a common upgrader on every writable open**
+  (DP-r2-02: `_ensure_index_schema` sits on the projection-rederive path
+  only, `arrival_projection.py:479/:544`, while the shared
+  `FACT_INSERT_SQL`/`TICK_INSERT_SQL` change hits ordinary `SqliteStore`
+  and `JsonlStore` writers immediately, `sqlite_store.py:131`,
+  `jsonl_store.py:668`). One module-level function beside the schema
+  statements it extends, in `sqlite_store.py` — signature redesigned in r4
+  (DP-r3-01: a bare `(conn, mode)` cannot perform the log-derived join —
+  neither a connection nor a mode string reaches the arrival log):
+
+  ```python
+  ensure_coordinate_schema(
+      conn, *,
+      mode: Literal["mirrored", "arrival"],
+      coordinates: Callable[[], Iterator[tuple[str, str, int, int]]] | None = None,
+      # provider of (table, row_id, arrival_ordinal, arrival_seq), where
+      # table is "facts" | "ticks"; REQUIRED for mode="arrival", forbidden
+      # for mode="mirrored". A provider, not a materialized mapping: the
+      # walk runs only if a rebuild is needed. The table namespace is part
+      # of the key (DP-r4-01): facts.id and ticks.id are independent
+      # primary keys (sqlite_store.py:308), so the same id string may
+      # legally name a fact AND a tick from different arrival records —
+      # the staging temp table and the rebuild's join both key on the
+      # composite (table, row_id). rows_of_record already yields the row
+      # type alongside the row, so the closure has the namespace for free.
+  )
+  ```
+
+  Invoked before any insert SQL runs, by every writer of these tables,
+  following the store's existing lazy-migration idiom
+  (`_ensure_chain_columns`/`_ensure_fact_signature_column`,
+  `sqlite_store.py:1495-1520`). How each route supplies its inputs:
+  1. `SqliteStore` — pre-write hooks beside the two existing `_ensure_*`
+     migrations; `mode="mirrored"`, no provider. The base class holds
+     `self._coordinate_mode = "mirrored"` / `self._coordinate_provider =
+     None` and the shared hook reads them, so subclasses override data,
+     not the hook.
+  2. `JsonlStore` — same inherited hook on its index connection, mirrored
+     (its index rows are row-granular append-order).
+  3. `ArrivalStore` — **constructor-ordering note, stated honestly**: its
+     `ArrivalLog` is constructed only after `super().__init__` opens the
+     connection (`arrival_store.py:133-139`), so the upgrader cannot run
+     inside the base constructor for this class. It doesn't need to: no
+existing sqlite-canonical and jsonl-canonical fixture databases opened
+through their normal public constructors and appended to via the public
+API — the upgrader ran before the first insert, coordinates are correct
+and constrained, prior rows carry the mirror backfill, and a read-only
+open of an unmigrated database still answers reads.
+**G-D0-7** — arrival dispatch route 3 (DP-r3-03): an existing UNMIGRATED
+batch-bearing arrival-canonical index opened through `ArrivalStore`'s
+public constructor — coordinates equal the log's, constraints present,
+appends land correctly after.
+**G-D0-8** — arrival dispatch route 4 (DP-r3-03): the same unmigrated
+fixture through the rederivation entry point — migrated/rederived
+coordinates identical to G-D0-7's, proving the two routes with different
+log access agree.
+**G-D0-9** — trigger survival (DP-r3-02): a fixture with an AFTER INSERT
+trigger on `facts` (the read-back contract `sqlite_store.py:702-712`
+supports) migrates; the trigger still exists in `sqlite_schema` and still
+fires on the next public-API append.
+**G-D0-10** — FTS/rowid survival (DP-r3-02): a fixture with populated
+`facts_fts` + `fts_state` migrates; every `fact_rowid` still resolves to
+the same fact (rowids preserved byte-for-byte), search answers
+identically, and incremental indexing resumes from the watermark without
+skipping or double-indexing.
+**G-D0-11** — mis-mode refusal: a plain `SqliteStore` opened on an
+arrival-marked index refuses to mirror-stamp it.
+**G-D0-12** — cross-table id collision (DP-r4-01): an arrival fixture
+containing a fact and a tick sharing the same id string, from different
+records; migration assigns each its own distinct correct coordinate
+(composite `(table, row_id)` staging proven discriminating).
+**G-D0-13** — dependent-view survival (DP-r4-02): a pre-existing view
+over `facts` remains present in `sqlite_schema` and queryable with
+identical results post-migration; the RENAME completes with the view
+in place.
+
+**G-D1-2** — `WitnessAggregateUnsupported` at all three sites,
+messages unchanged; A10 refusal messages byte-identical. Pinning tests
+(`test_witness_position.py`, `test_diff_interval_report.py`,
+`test_query_facts.py`, `test_fold_at.py`) pass untouched.
+**G-D1-3** — `seq:N` round-trip across a batch boundary, pinning the ruled
+D1-Q1 arm.
+**G-D1-4** — same-path store-replacement: new typed refusal fires;
+A10 and the unadopted refusal unchanged (their tests prove it).
+# Public name: the content commitment is a cross-lib contract —
+# libs/store's transport paths and any receive-side verifier must hash
+# the same envelope the signer signed. Same function, two names.
+def fact_commitment_hash(
+    kind: str, ts: float, observer: str, origin: str, payload_text: str
+) -> str:
+    """Content commitment hash for fact signing (see _fact_commitment_hash)."""
+    return _fact_commitment_hash(kind, ts, observer, origin, payload_text)
+
+
+from datetime import datetime, timezone as _tz
+
+_UTC = _tz.utc
+from pathlib import Path
+from typing import Any, Callable, Generic, TypeVar
+
+# IDs generated Python-side via python-ulid (see gen_id above).
+# The sqlite-ulid C extension is not a dependency — id generation lives
+# entirely in Python. All INSERTs supply id explicitly, so no SQL-callable
+# ulid() function is needed.
+
+
+def _mapping_proxy_default(obj: object) -> object:
+    """Handle MappingProxyType in JSON serialization."""
+    from types import MappingProxyType
+    if isinstance(obj, MappingProxyType):
+        return dict(obj)
+    raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
+
+from .tick import Tick
+
+T = TypeVar("T")
+
+_SCHEMA_STMTS = (
+    """CREATE TABLE IF NOT EXISTS facts (
+        id       TEXT NOT NULL PRIMARY KEY,
+        kind     TEXT NOT NULL,
+        ts       REAL NOT NULL,
+        observer TEXT NOT NULL,
+        origin   TEXT NOT NULL DEFAULT '',
+        payload  TEXT NOT NULL CHECK (json_valid(payload)),
+        signature TEXT
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_facts_kind ON facts(kind)",
+    "CREATE INDEX IF NOT EXISTS idx_facts_ts ON facts(ts)",
+    """CREATE TABLE IF NOT EXISTS ticks (
+        id           TEXT NOT NULL PRIMARY KEY,
+        name         TEXT NOT NULL,
+        ts           REAL NOT NULL,
+        since        REAL,
+        origin       TEXT NOT NULL,
+        payload      TEXT NOT NULL CHECK (json_valid(payload)),
+        prev_hash    TEXT,
+        window_start TEXT,
+        fact_cursor  TEXT,
+        window_hash  TEXT,
+    The classification BOTH projections make, spelled once. It is the same
+    question in both directions (an index row and a derived-log line are two
+    encodings of one row-class body), and the two projections answering it
+    separately is how they would come to disagree about a store.
+
+    ``False`` is the structural class — genesis, key introductions. Their
+    bodies are not codec objects at all (the codec refuses them on unknown
+    fields), and skipping them loses nothing: their content lives in the
+    arrival log, which is the store. An unrecognized kind is neither class
+    and refuses here, once, for both callers.
+    """
+    kind = record["k"]
+    if kind in _STRUCTURAL_KINDS:
+        return False
+    if kind not in _ROW_KINDS:
+        _unsupported(
+            f"record kind {kind!r} at ordinal {record['ord']} is not one "
+            "this store's projections know how to derive — refusing rather "
+            "than silently dropping it"
+        )
+    return True
+
+
+def rows_of_record(record: dict) -> list[tuple[str, tuple]]:
+    """The index rows one arrival record expands to, in order.
+
+    ONE definition of "what a record indexes to", consumed by both the
+    catch-up indexer and the re-deriver. Two definitions is how the writer
+    and the re-deriver end up disagreeing about a store, which is the one
+    disagreement this cut cannot tolerate.
+
+    Structural records expand to **no rows** — see :func:`_projects`, which
+    is also where an unknown kind is refused.
+    """
+    if not _projects(record):
+        return []
+    return records_from_object(record["body"])
+
+
+# --- the derived .jsonl log --------------------------------------------------
+
+
+def derived_log_path_for(canonical: Path) -> Path:
+    """Where an arrival log's derived ``.jsonl`` projection lives.
+
+    ``<name>.jsonl`` beside the ``<name>.arrival`` — NO new suffix. This is
+    the shape :func:`engine.probe.probe_target` already classifies as
+    ``derived_log`` ("custody is the arrival log's, so this file is a
+    projection, not a store"). Cut A named the half-migrated shape; cut B is
+    what makes it deliberate rather than transitional, and a
+    ``.derived.jsonl`` spelling would strand the classification and break
+
+codex
+The namespace repair aligns with the two independent table primary-key domains and with `rows_of_record`’s `(row_type, row)` output. I’m now stress-checking the newly introduced view-discovery wording itself, since that is the only r5 area where correctness depends on an unstated parsing mechanism.
+web search: 
+web search: https://www.sqlite.org/schematab.html
+exec
+/bin/zsh -lc "nl -ba docs/scratch/arrival-sliceD/design-proposal.md | sed -n '125,225p;620,635p' && nl -ba libs/engine/src/engine/sqlite_store.py | sed -n '302,335p' && nl -ba libs/engine/src/engine/arrival_projection.py | sed -n '145,166p;494,507p'" in /Users/kaygee/Code/loops
+ succeeded in 0ms:
+   125	  invariant lives in the table, so it binds every writer including foreign
+   126	  SQL, and NOT NULL moots SQLite's NULLs-pass-unique-indexes hole.
+   127	- **Existing databases — table rebuild, the honest SQLite mechanism**:
+   128	  retro-added columns cannot be ALTERed to NOT NULL, so the migration is
+   129	  the standard rebuild, per table, in ONE transaction:
+   130	  `CREATE TABLE facts_new (...full schema incl. NOT NULL + UNIQUE...)`;
+   131	  `INSERT INTO facts_new (rowid, ...) SELECT rowid, ..., <coordinate>,
+   132	  <seq> FROM facts` (coordinate per mode: `rowid, 0` mirrored, or a join
+   133	  against a temp id→(ord, seq) mapping staged from the coordinate provider
+   134	  for arrival-canonical); `DROP TABLE facts; ALTER TABLE facts_new RENAME
+   135	  TO facts`; same for `ticks`; recreate dependent schema; write the
+   136	  `coordinate_axis` marker; commit. No foreign keys exist on these tables,
+   137	  so the rebuild needs no FK dance. **Cost, stated:** one O(store) rewrite
+   138	  at first post-upgrade writable open — the same order as the coordinate
+   139	  walk it absorbs, once per database.
+   140	- **The rebuild preserves supported schema artifacts** (DP-r3-02):
+   141	  - **Rowids are preserved explicitly** — the copy names `rowid` in both
+   142	    column lists. This is not optional politeness: `facts_fts.fact_rowid`
+   143	    and the `fts_state.last_rowid` watermark key on exactly these rowids
+   144	    (`jsonl_store.py:944-954` documents the poisoning that renumbering
+   145	    causes; `vertex_reader.py:2187`), and WP-1 lands while witness/seal
+   146	    rowid consumers are still live — a renumbering rebuild would break the
+   147	    suites WP-1 is required to keep green. The FTS projection therefore
+   148	    survives the migration valid, and the rederivation precedent of
+   149	    dropping `facts_fts`/`fts_state` (`arrival_projection.py:492-495`) is
+   150	    correctly NOT followed here: rederivation renumbers (DELETE resets the
+   151	    rowid counter), the migration copy does not, and each treatment is the
+   152	    honest one for its mechanism.
+   153	  - **Triggers, indexes, AND dependent views are inventoried and
+   154	    recreated** (DP-r4-02): before the DROP, read every `sqlite_schema`
+   155	    row with `tbl_name` = the table and `type IN ('trigger','index')`
+   156	    (skipping auto-indexes) — and, separately, every `type = 'view'` row
+   157	    whose stored `sql` references the table, because a view's `tbl_name`
+   158	    is its own name and the table-keyed query structurally cannot find it.
+   159	    Dependent views are DROPped before the rebuild and replayed verbatim
+   160	    after the RENAME, in the same transaction, per SQLite's documented
+   161	    generalized rebuild procedure (lang_altertable.html#otheralter, steps
+   162	    3/8/9) — necessary not only for preservation but for correctness: a
+   163	    surviving stale view can fail the RENAME's schema reparse outright.
+   164	    Triggers are supported behavior, not debris — the store deliberately
+   165	    reads back committed rows "after any AFTER triggers fired"
+   166	    (`sqlite_store.py:702-712`, `:746`).
+   167	- The audit's NULL check (D3) remains a backstop for databases that predate
+   168	  the migration or were written by a foreign schema copy — a location
+   169	  claim, exactly as before.
+   170	- **Legacy allocator:** for a store with no arrival log, append assigns
+   171	  `arrival_ordinal = COALESCE((SELECT MAX(arrival_ordinal) FROM <table>), 0) + 1`,
+   172	  `arrival_seq = 0`, inside the same transaction as the insert — one
+   173	  allocator, per table, serialized by the store's existing write
+   174	  transaction. For such a store the mirrored coordinate *is* its arrival
+   175	  axis: dense, append-ordered, rebuild-invariant is vacuous (nothing
+   176	  rebuilds it from a log), and identical to rowid order by construction.
+   177	
+   178	**Migration — mode-aware, not uniform** (DP-r1-02 replaced r1's option (a)):
+   179	
+   180	- **Legacy index (jsonl-/sqlite-canonical, no arrival log):** backfill
+   181	  `arrival_ordinal = rowid, arrival_seq = 0`. Correct by construction —
+   182	  rowid is that store's append order, and no batch record exists to share
+   183	  an ordinal (legacy rows are row-granular).
+   184	- **Arrival-canonical index:** rowid backfill is WRONG — a batch expands to
+   185	  N rows sharing one ordinal (`arrival_store.py:342`), so `ordinal = rowid`
+   186	  mints coordinates the log never issued and collides with the next
+   187	  catch-up (the DP-r1-02 counterexample). The migration instead re-derives
+   188	  coordinates **from the log**: walk `rows_of_record` over the records up
+   189	  to the stamped consumed mark, matching row ids in index order and
+   190	  stamping `(ord, seq)`; any mismatch between walk and index refuses into
+   191	  the existing escape hatch — `rederive_projections`, which rebuilds the
+   192	  index with coordinates written natively. The walk is O(store), once.
+   193	- **Migration dispatch — a common upgrader on every writable open**
+   194	  (DP-r2-02: `_ensure_index_schema` sits on the projection-rederive path
+   195	  only, `arrival_projection.py:479/:544`, while the shared
+   196	  `FACT_INSERT_SQL`/`TICK_INSERT_SQL` change hits ordinary `SqliteStore`
+   197	  and `JsonlStore` writers immediately, `sqlite_store.py:131`,
+   198	  `jsonl_store.py:668`). One module-level function beside the schema
+   199	  statements it extends, in `sqlite_store.py` — signature redesigned in r4
+   200	  (DP-r3-01: a bare `(conn, mode)` cannot perform the log-derived join —
+   201	  neither a connection nor a mode string reaches the arrival log):
+   202	
+   203	  ```python
+   204	  ensure_coordinate_schema(
+   205	      conn, *,
+   206	      mode: Literal["mirrored", "arrival"],
+   207	      coordinates: Callable[[], Iterator[tuple[str, str, int, int]]] | None = None,
+   208	      # provider of (table, row_id, arrival_ordinal, arrival_seq), where
+   209	      # table is "facts" | "ticks"; REQUIRED for mode="arrival", forbidden
+   210	      # for mode="mirrored". A provider, not a materialized mapping: the
+   211	      # walk runs only if a rebuild is needed. The table namespace is part
+   212	      # of the key (DP-r4-01): facts.id and ticks.id are independent
+   213	      # primary keys (sqlite_store.py:308), so the same id string may
+   214	      # legally name a fact AND a tick from different arrival records —
+   215	      # the staging temp table and the rebuild's join both key on the
+   216	      # composite (table, row_id). rows_of_record already yields the row
+   217	      # type alongside the row, so the closure has the namespace for free.
+   218	  )
+   219	  ```
+   220	
+   221	  Invoked before any insert SQL runs, by every writer of these tables,
+   222	  following the store's existing lazy-migration idiom
+   223	  (`_ensure_chain_columns`/`_ensure_fact_signature_column`,
+   224	  `sqlite_store.py:1495-1520`). How each route supplies its inputs:
+   225	  1. `SqliteStore` — pre-write hooks beside the two existing `_ensure_*`
+   620	identically, and incremental indexing resumes from the watermark without
+   621	skipping or double-indexing.
+   622	**G-D0-11** — mis-mode refusal: a plain `SqliteStore` opened on an
+   623	arrival-marked index refuses to mirror-stamp it.
+   624	**G-D0-12** — cross-table id collision (DP-r4-01): an arrival fixture
+   625	containing a fact and a tick sharing the same id string, from different
+   626	records; migration assigns each its own distinct correct coordinate
+   627	(composite `(table, row_id)` staging proven discriminating).
+   628	**G-D0-13** — dependent-view survival (DP-r4-02): a pre-existing view
+   629	over `facts` remains present in `sqlite_schema` and queryable with
+   630	identical results post-migration; the RENAME completes with the view
+   631	in place.
+   632	
+   633	**G-D1-2** — `WitnessAggregateUnsupported` at all three sites,
+   634	messages unchanged; A10 refusal messages byte-identical. Pinning tests
+   635	(`test_witness_position.py`, `test_diff_interval_report.py`,
+   302	    raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
+   303	
+   304	from .tick import Tick
+   305	
+   306	T = TypeVar("T")
+   307	
+   308	_SCHEMA_STMTS = (
+   309	    """CREATE TABLE IF NOT EXISTS facts (
+   310	        id       TEXT NOT NULL PRIMARY KEY,
+   311	        kind     TEXT NOT NULL,
+   312	        ts       REAL NOT NULL,
+   313	        observer TEXT NOT NULL,
+   314	        origin   TEXT NOT NULL DEFAULT '',
+   315	        payload  TEXT NOT NULL CHECK (json_valid(payload)),
+   316	        signature TEXT
+   317	    )""",
+   318	    "CREATE INDEX IF NOT EXISTS idx_facts_kind ON facts(kind)",
+   319	    "CREATE INDEX IF NOT EXISTS idx_facts_ts ON facts(ts)",
+   320	    """CREATE TABLE IF NOT EXISTS ticks (
+   321	        id           TEXT NOT NULL PRIMARY KEY,
+   322	        name         TEXT NOT NULL,
+   323	        ts           REAL NOT NULL,
+   324	        since        REAL,
+   325	        origin       TEXT NOT NULL,
+   326	        payload      TEXT NOT NULL CHECK (json_valid(payload)),
+   327	        prev_hash    TEXT,
+   328	        window_start TEXT,
+   329	        fact_cursor  TEXT,
+   330	        window_hash  TEXT,
+   331	        signature    TEXT
+   332	    )""",
+   333	    "CREATE INDEX IF NOT EXISTS idx_ticks_name ON ticks(name)",
+   334	    "CREATE INDEX IF NOT EXISTS idx_ticks_ts ON ticks(ts)",
+   335	)
+   145	        _unsupported(
+   146	            f"record kind {kind!r} at ordinal {record['ord']} is not one "
+   147	            "this store's projections know how to derive — refusing rather "
+   148	            "than silently dropping it"
+   149	        )
+   150	    return True
+   151	
+   152	
+   153	def rows_of_record(record: dict) -> list[tuple[str, tuple]]:
+   154	    """The index rows one arrival record expands to, in order.
+   155	
+   156	    ONE definition of "what a record indexes to", consumed by both the
+   157	    catch-up indexer and the re-deriver. Two definitions is how the writer
+   158	    and the re-deriver end up disagreeing about a store, which is the one
+   159	    disagreement this cut cannot tolerate.
+   160	
+   161	    Structural records expand to **no rows** — see :func:`_projects`, which
+   162	    is also where an unknown kind is refused.
+   163	    """
+   164	    if not _projects(record):
+   165	        return []
+   166	    return records_from_object(record["body"])
+   494	            conn.execute("DROP TABLE IF EXISTS facts_fts")
+   495	            conn.execute("DROP TABLE IF EXISTS fts_state")
+   496	
+   497	            records = facts = ticks = 0
+   498	            last: ResumeMark | None = None
+   499	            _, walked = log.walk_marked(None)
+   500	            for record, mark in walked:
+   501	                for t, row in rows_of_record(record):
+   502	                    conn.execute(
+   503	                        FACT_INSERT_SQL if t == "fact" else TICK_INSERT_SQL, row
+   504	                    )
+   505	                    if t == "fact":
+   506	                        facts += 1
+   507	                    else:
+
+codex
+## Findings
+
+### DP-r5-01 — MAJOR — dependent-view handling is not dependency-closed
+
+The new procedure inventories direct views whose SQL references `facts` or `ticks`, then drops those views before rebuilding ([design proposal:153](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceD/design-proposal.md:153)). It does not preserve:
+
+- Views that transitively depend on a directly dependent view.
+- Triggers attached to a dropped view, because their `sqlite_schema.tbl_name` is the view name, not `facts` or `ticks`.
+
+Dropping direct view `v1` can therefore leave dependent view `v2` invalid during `ALTER TABLE ... RENAME`; SQLite reparses the complete schema and normally refuses malformed view entries. An `INSTEAD OF` trigger on `v1` is also deleted with `v1` but absent from the table-keyed trigger inventory. SQLite defines `tbl_name` as the associated table or view, while a view’s `tbl_name` is its own name. [SQLite schema table](https://www.sqlite.org/schematab.html), [SQLite ALTER TABLE](https://www.sqlite.org/lang_altertable.html#otheralter).
+
+G-D0-13 exercises only a single direct view and would not catch either failure ([design proposal:628](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceD/design-proposal.md:628)).
+
+Required change: inventory and restore the complete dependent-view closure, including triggers attached to every dropped view; extend G-D0-13 with a view-on-view dependency and an `INSTEAD OF` trigger.
+
+## r4 convergence items
+
+| Item | Verdict | Evidence |
+|---|---|---|
+| DP-r4-01 | **PASS** | The provider now emits `(table, row_id, ordinal, seq)` and explicitly keys staging and joins by `(table, row_id)` ([proposal:203](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceD/design-proposal.md:203)). This matches the schema: `facts.id` and `ticks.id` are independent primary keys ([sqlite_store.py:308](/Users/kaygee/Code/loops/libs/engine/src/engine/sqlite_store.py:308)). `rows_of_record` returns `(row_type, row)` pairs ([arrival_projection.py:153](/Users/kaygee/Code/loops/libs/engine/src/engine/arrival_projection.py:153)), so the provider can derive the table namespace. G-D0-12 directly tests the collision case ([proposal:624](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceD/design-proposal.md:624)). |
+| DP-r4-02 | **PASS**, narrowly | r5 correctly recognizes that a view’s `tbl_name` is its own name and consequently uses view-definition content rather than the table-keyed index/trigger query ([proposal:153](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceD/design-proposal.md:153)). That matches `sqlite_schema` semantics and SQLite’s rebuild steps 3, 8, and 9. G-D0-13 tests direct-view survival. [SQLite schema table](https://www.sqlite.org/schematab.html), [SQLite generalized rebuild](https://www.sqlite.org/lang_altertable.html#otheralter). The newly exposed transitive/trigger problem is separately reported as DP-r5-01. |
+
+## Decision verdicts
+
+| Decision | Verdict |
+|---|---|
+| D0 | **SOUND-WITH-CHANGES** — DP-r5-01 must be closed. |
+| D1 | **SOUND-WITH-CHANGES** — remains dependent on D0’s migration guarantee. |
+| D2 | **SOUND-WITH-CHANGES** — remains dependent on D0’s migration guarantee. |
+| D3 | **SOUND** |
+| D4 | **SOUND** |
+| Gate plan | **SOUND-WITH-CHANGES** — strengthen G-D0-13 as described. |
+
+Overall: **NOT-RATIFIABLE-AS-WRITTEN**.
+
+Convergence: **NOT CONVERGED** — both r4 items pass, but there is one new r5 finding.
+
+Review was read-only; no files were modified.
+tokens used
+35,313

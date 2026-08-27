@@ -1,0 +1,27 @@
+## Verdict
+
+No new findings.
+
+| Item | Verdict | Evidence |
+|---|---|---|
+| CX-BR-01 | **PASS** | Exact r1 divergent pair raised exported `store.MergeDivergence`, naming `payload, signature`. Target arrival log remained byte-identical: SHA-256 `1d9837…24e9e` before and after. Identical bodies still deduped with `facts_added=0, facts_skipped=1`. The pre-divergence fresh-row atomicity test also passes at [test_arrival_merge.py:737](/Users/kaygee/Code/loops/libs/store/tests/test_arrival_merge.py:737). |
+| Legacy SQLite | **PASS** | Divergent collision retained target-wins behavior: `facts_added=0, facts_skipped=1`; target row remained unchanged. Database bytes were identical before/after, SHA-256 `3aa44b…a9546`. `_merge_into_sqlite` has the identical source hash across `a95c8f2b`: `355533…32c`. |
+| CX-BR-03 | **PASS** | Exact independently adopted cross-store/cross-lineage call raised `WitnessLineageMismatch`. Both positions are guarded before rowid comparison at [witness.py:612](/Users/kaygee/Code/loops/libs/engine/src/engine/witness.py:612). |
+| Same-lineage copy | **PASS** | Discriminating probe used a foreign position at rowid 3 whose fact occupied rowid 4 in the target. The report returned `declaration_changed=True`, proving target-side fact-ID re-resolution rather than foreign-rowid reuse. |
+| `45fc6fd5` | **PASS** | Diff audit found no regression or new seam; engine and apps corpora passed. |
+| `a95c8f2b` | **PASS** | Comparison includes full fact authorship content and chainless tick content at [merge.py:422](/Users/kaygee/Code/loops/libs/store/src/store/merge.py:422); refusal occurs while staging, before append, at [merge.py:463](/Users/kaygee/Code/loops/libs/store/src/store/merge.py:463). No regression or new seam found. |
+
+Independent corpus sweep:
+
+- Atoms: 517 passed
+- Engine: 1,810 passed, 1 skipped
+- SDK: 324 passed
+- Store: 157 passed
+- Root architecture: 110 passed
+- Apps: 2,525 passed, 1 xfailed
+
+## Overall
+
+**CONVERGED.**
+
+Arbiter sentence: Both ruled fixes hold under their original adversarial repros, preserve the frozen SQLite behavior, and introduce no regression attributable to either fix commit.

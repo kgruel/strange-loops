@@ -184,7 +184,7 @@ def test_conformance_merge(vector_path: Path, tmp_path: Path) -> None:
         for label, cursor_addr in cursors.items():
             pos = resolve_witness_position(target_db, cursor_addr)
             with StoreReader(target_db) as reader:
-                stored_facts = reader.facts_by_kind(spec.name, at_rowid=pos.rowid)
+                stored_facts = reader.facts_by_kind(spec.name, at_ordinal=pos.ordinal)
                 payloads = []
                 for f in stored_facts:
                     p = dict(f["payload"])

@@ -1,0 +1,120 @@
+Overall verdict: **NOT_CONVERGED**. I found five contract violations: four major and one minor.
+
+### Findings
+
+**SOL-HIGH-01 — MAJOR — [sqlite_store.py:533](/Users/kaygee/Code/loops/libs/engine/src/engine/sqlite_store.py:533)**
+
+Claim: a marker-absent, structurally complete arrival index bypasses log-coordinate validation. The `already_migrated` branch stamps `coordinate_axis=arrival` and returns before invoking the required provider.
+
+Evidence:
+
+```text
+provider_calls= 0
+stored_coordinate= (99, 0)
+expected_from_log= (1, 0)
+coordinate_axis= arrival
+```
+
+A public `ArrivalStore` reproduction shifted valid coordinates `(1,0),(2,0)` to incorrect `(0,0),(1,0)`, removed only the axis marker, and reopened:
+
+```text
+accepted_coordinates= [(0, 0), (1, 0)]
+audit_agreement ok= True summary=
+audit_deep ok= True summary=
+```
+
+Thus marker absence can promote arbitrary structurally valid coordinates to arrival authority without consulting the log. This contradicts D0’s mode-aware migration and provider-agreement requirement.
+
+---
+
+**SOL-HIGH-02 — MAJOR — [sqlite_store.py:729](/Users/kaygee/Code/loops/libs/engine/src/engine/sqlite_store.py:729)**
+
+Claim: dependency replay does not support valid quoted SQLite artifact names. Collected trigger, view, and index names are interpolated into `DROP` statements without identifier quoting.
+
+A legacy database with `"facts audit trigger"`, `"facts view"`, and `"facts kind index"` failed migration:
+
+```text
+migration=FAILED OperationalError near "audit": syntax error
+coordinate_axis= None
+facts_columns= ['id', 'kind', 'ts', 'observer', 'origin', 'payload', 'signature']
+artifacts= [('index', 'facts kind index'),
+            ('trigger', 'facts audit trigger'),
+            ('view', 'facts view')]
+```
+
+Rollback preserved the database, but a valid supported schema cannot complete the mandatory writable-open migration. That violates D0’s dependency-closed trigger/view/index replay contract.
+
+---
+
+**SOL-HIGH-03 — MAJOR — [store_reader.py:819](/Users/kaygee/Code/loops/libs/engine/src/engine/store_reader.py:819)**
+
+Claim: `query_facts` pagination drops rows when `LIMIT` splits a multi-row arrival record. The query limits individual `(ordinal, seq)` rows, but the returned `WitnessPosition` is record-granular; the next page applies `arrival_ordinal > cursor.ordinal`.
+
+With two facts at `(5,0)` and `(5,1)`:
+
+```text
+page1_ids= ['batch-a']
+page1_next= ('batch-a', 5, 2)
+page2_ids= ['later']
+all_seen= ['batch-a', 'later']
+expected= ['batch-a', 'batch-b', 'later']
+```
+
+`batch-b` is permanently skipped. The cursor even reports `seq=2`, meaning its semantic prefix contains both batch facts although the page returned only one. D1’s record-granular position cannot safely serve a per-row page boundary without avoiding batch splits or introducing a separate composite paging coordinate.
+
+---
+
+**SOL-HIGH-04 — MAJOR — [canonical_audit.py:446](/Users/kaygee/Code/loops/libs/engine/src/engine/canonical_audit.py:446)**
+
+Claim: the arrival audit’s NULL-coordinate backstop checks only `arrival_ordinal`, not `arrival_seq`. A row with a non-NULL ordinal and NULL sequence is reported as fully accounted for by both L1 and deep audit.
+
+Evidence:
+
+```text
+audit_agreement ok= True counts_ok= True detail= 2 fact(s), 0 tick(s) accounted for
+audit_deep ok= True counts_ok= True detail= 2 fact(s), 0 tick(s) accounted for
+null_seq_rows= 1
+```
+
+Because the custody coordinate is the pair `(arrival_ordinal, arrival_seq)`, this is a malformed coordinate, not an accounted-for row. It violates D3’s NULL-coordinate backstop and permits an invalid D0 structure to receive a positive audit.
+
+---
+
+**SOL-HIGH-05 — MINOR — [canonical_audit.py:501](/Users/kaygee/Code/loops/libs/engine/src/engine/canonical_audit.py:501)**
+
+Claim: deep audit performs `N+1` record verifications, not the ratified exact `N`. It first runs L1, verifying the anchor, and then walks all `N` records.
+
+Evidence from the same record-verification seam used by G-D3-2:
+
+```text
+report_ok= True
+arrival_records_N= 5
+anchor_verifications= 1
+walk_verifications= 5
+total_verified= 6
+```
+
+The gate misses this because [test_audit_rebase_d3.py:359](/Users/kaygee/Code/loops/libs/engine/tests/test_audit_rebase_d3.py:359) asserts only `counts["walk"] == expected_n`, omitting `counts["anchor"]` despite its own “exact bounds” contract.
+
+### Verdict table
+
+| Decision | Verdict | Basis |
+|---|---|---|
+| D0 — coordinate schema/migration | **FAIL** | SOL-HIGH-01, SOL-HIGH-02 |
+| D1 — witness re-key | **FAIL** | SOL-HIGH-03 |
+| D2 — seal re-base | **PASS** | Composite cursor pairs consistently used; permutation/seal gates pass; signed-envelope/hash executable bytes remain unchanged |
+| D3 — audit re-base | **FAIL** | SOL-HIGH-04, SOL-HIGH-05; SOL-HIGH-01 also constructs a log-coordinate disagreement both audits accept |
+| D4 — selective admission verification | **PASS** | Registry-forming-only envelope verification and post-dedup fact verification hold; W5-1 indexing is derived; admission/permutation tests pass |
+| Scope law | **PASS** | Production exceptions match the receipted set; `preflight.py` changes exactly one docstring sentence |
+
+Verification totals:
+
+```text
+Engine: 1894 passed, 1 skipped
+Store:  176 passed
+Apps:   2530 passed, 1 xfailed
+Targeted D0–D4 gates: 82 passed
+Admission/permutation gates: 19 passed
+```
+
+**Overall: NOT_CONVERGED.**

@@ -1,0 +1,682 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="The Arrival head-witness protocol for detecting record edits, deletion, rollback, forks, and projection divergence.">
+  <title>Arrival Witness Protocol</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,400;0,9..144,500;1,9..144,300&amp;family=Source+Sans+3:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="assets/gruel.css">
+</head>
+<body class="technical-document">
+  <a class="doc-skip-link" href="#main-content">Skip to content</a>
+
+  <nav class="doc-suite-nav" aria-label="Arrival architecture documents">
+    <a class="doc-suite-brand" href="index.html">
+      <span class="doc-suite-brand-mark">Arrival</span>
+      Architecture
+    </a>
+    <div class="doc-suite-links">
+      <a href="index.html">Overview</a>
+      <a href="protocol.html">Protocol</a>
+      <a href="wire-format.html">Wire format</a>
+      <a href="backend-contract.html">Backend contract</a>
+      <a href="witness-protocol.html" aria-current="page">Witness protocol</a>
+    </div>
+  </nav>
+
+  <div class="doc-shell">
+    <aside class="doc-rail" aria-label="On this page">
+      <p class="doc-rail-label">Witness contents</p>
+      <ol class="doc-toc">
+        <li><a href="#purpose">Purpose and boundary</a></li>
+        <li><a href="#threats">Threat model</a></li>
+        <li><a href="#chain">Record-chain claim</a></li>
+        <li><a href="#attestation">Head attestation</a></li>
+        <li><a href="#issuance">Issuance and receipts</a></li>
+        <li><a href="#topologies">Witness topologies</a></li>
+        <li><a href="#comparison">Comparison state machine</a></li>
+        <li><a href="#attacks">Attack and failure matrix</a></li>
+        <li><a href="#audit">Audit layers</a></li>
+        <li><a href="#keys">Keys and trust</a></li>
+        <li><a href="#recovery">Recovery posture</a></li>
+        <li><a href="#scale">Scaling and Merkle option</a></li>
+        <li><a href="#conformance">Conformance and open choices</a></li>
+      </ol>
+    </aside>
+
+    <main class="doc-main" id="main-content">
+      <header class="doc-hero">
+        <p class="doc-eyebrow">Specification 04 · tamper evidence</p>
+        <h1>Arrival <em>Witness Protocol</em></h1>
+        <p class="doc-lede">
+          A logical hash chain detects damaged history. A remembered head outside the mutable
+          store detects the harder cases: tail deletion, old-backup rollback, and complete re-chaining.
+        </p>
+        <div class="doc-meta">
+          <span class="doc-badge is-security">Security draft v1</span>
+          <span>External head attestation</span>
+          <span>26 August 2026</span>
+        </div>
+      </header>
+
+      <section class="doc-section" id="purpose">
+        <div class="doc-section-header">
+          <span class="doc-section-number">01</span>
+          <h2>Purpose and security boundary</h2>
+        </div>
+        <p>
+          This protocol answers the narrow question: “Can a verifier determine that the Arrival
+          history presented now is not the history it previously accepted?” It works across file,
+          DuckDB, PostgreSQL, and service backends because it commits logical heads rather than
+          physical database bytes.
+        </p>
+
+        <div class="doc-callout is-security">
+          <span class="doc-callout-label">Necessary trust separation</span>
+          <p>
+            If one administrator can rewrite the backend, every witness copy, and every witness
+            signing key, that administrator can manufacture a consistent replacement history.
+            Detection requires at least one previously accepted head or trusted key outside the
+            rewrite boundary under consideration.
+          </p>
+        </div>
+
+        <h3>Relationship to existing witness cursors</h3>
+        <p>
+          The current branch uses <code>WitnessPosition</code> for temporal read cursors. This
+          document defines a different artifact: an <strong>Arrival head witness</strong>. A read
+          cursor says which prefix to query; a head witness says which prefix a verifier already
+          trusted. Implementations should use distinct type and serialization names even if the
+          human-facing suite retains “Witness Protocol.” Ruled: the code vocabulary is
+          <strong>head attestation</strong> — “witness” stays the read cursor
+          (<code>decision:design/arrival-suite-review-dispositions</code> §3, Rule 18 glossary
+          discipline).
+        </p>
+
+        <h3>Why not hash the whole database?</h3>
+        <p>
+          A full file digest can confirm one backup image, but ordinary database maintenance may
+          change pages, indexes, free lists, statistics, and metadata without changing any fact.
+          Conversely, a malicious administrator can rebuild a different database file containing
+          a forged logical history and publish its new digest. Arrival witnesses commit the
+          stable record sequence; optional physical snapshot digests remain useful archive metadata.
+        </p>
+      </section>
+
+      <section class="doc-section" id="threats">
+        <div class="doc-section-header">
+          <span class="doc-section-number">02</span>
+          <h2>Threat model and claims</h2>
+        </div>
+
+        <div class="doc-split">
+          <article class="doc-panel">
+            <h3>Designed to detect</h3>
+            <ul>
+              <li>Accidental record corruption</li>
+              <li>Interior edit or deletion</li>
+              <li>Projection-only edit or deletion</li>
+              <li>Tail truncation</li>
+              <li>Replacement by an older backup</li>
+              <li>Complete history rewrite and re-chaining</li>
+              <li>Same-lineage equivocation between clients</li>
+            </ul>
+          </article>
+          <article class="doc-panel">
+            <h3>Not claimed</h3>
+            <ul>
+              <li>Preventing a privileged administrator from deleting bytes</li>
+              <li>Recovery when every copy is destroyed</li>
+              <li>Truth of an authored fact’s real-world assertion</li>
+              <li>Detection before any trusted first-contact checkpoint</li>
+              <li>Detection when all witnesses and keys collude</li>
+              <li>Availability of a remote witness</li>
+              <li>Confidentiality of record content</li>
+            </ul>
+          </article>
+        </div>
+
+        <h3>Adversary capabilities</h3>
+        <p>
+          The relevant adversary may have direct SQL or filesystem administration over the
+          authority. They can delete rows, edit bodies, replace head metadata, restore old media,
+          or reconstruct a new internally valid chain. They may not control at least one verifier’s
+          cached receipt, independently operated witness, or pinned witness public key. Network
+          responses may be withheld, reordered, or replayed.
+        </p>
+
+        <h3>Detection window</h3>
+        <p>
+          A witness proves no more than the most recent head it retained. If heads are witnessed
+          hourly, an attacker may remove commits made after the last receipt without contradicting
+          that receipt. A deployment that promises every acknowledged fact is rollback-detectable
+          must retain a witness receipt for the commit before returning that stronger acknowledgment.
+        </p>
+      </section>
+
+      <section class="doc-section" id="chain">
+        <div class="doc-section-header">
+          <span class="doc-section-number">03</span>
+          <h2>What the record chain proves</h2>
+        </div>
+        <p>
+          Wire v1 hashes the JCS-canonical record envelope with <code>rh</code> removed. Each
+          successor commits the previous hash. Given collision resistance, the head hash commits
+          the content and custody metadata of the complete dense prefix back to genesis.
+        </p>
+
+        <div class="doc-equation">
+          rh[0] = SHA-256( JCS(genesis without "rh") )<br>
+          rh[n] = SHA-256( JCS(record[n] without "rh") )<br>
+          record[n].prev = rh[n − 1]
+        </div>
+
+        <h3>Local verification</h3>
+        <ol class="doc-steps">
+          <li>Validate genesis placement, lineage claim, founding key shape, signature presence, and record hash.</li>
+          <li>For ordinal <em>n</em>, require the same lineage, exact ordinal <em>n</em>, and <code>prev == rh[n−1]</code>.</li>
+          <li>Recompute <code>rh[n]</code> from the complete envelope excluding only <code>rh</code>.</li>
+          <li>Apply record-kind placement rules and, when requested, resolve and verify authorship.</li>
+          <li>Continue through the captured head; stopping early proves only the prefix actually visited.</li>
+        </ol>
+
+        <h3>The valid-prefix problem</h3>
+        <p>
+          Removing the last records leaves a shorter chain that is internally valid. An
+          administrator can also edit content and recompute every subsequent coordinate hash;
+          authored content signatures may remain valid because they intentionally exclude
+          custody coordinates. Local verification alone cannot know that a different valid chain
+          was presented yesterday. That memory is the witness head.
+        </p>
+      </section>
+
+      <section class="doc-section" id="attestation">
+        <div class="doc-section-header">
+          <span class="doc-section-number">04</span>
+          <h2>The head attestation</h2>
+        </div>
+        <p>
+          A head attestation is a small signed statement about one observed lineage prefix. It is
+          stored outside the authority or copied to a verifier that will remember it. The logical
+          fields are below — counts are optional corroboration, never required
+          (<code>decision:design/arrival-suite-review-dispositions</code> §2: the attestation’s
+          claim is the prefix, not its projection); the final wire object will need its own
+          golden corpus.
+        </p>
+
+        <div class="doc-table-wrap">
+          <table class="doc-spec-table">
+            <thead>
+              <tr><th>Field</th><th>Type</th><th>Meaning</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><code>v</code></td><td>integer</td><td>Head-attestation grammar version; initially 1.</td></tr>
+              <tr><td><code>type</code></td><td>string</td><td>Exactly <code>arrival-head</code>.</td></tr>
+              <tr><td><code>protocol</code></td><td>integer</td><td>Arrival semantic protocol version.</td></tr>
+              <tr><td><code>wire</code></td><td>integer</td><td>Record wire profile used to derive hashes.</td></tr>
+              <tr><td><code>lineage</code></td><td>string</td><td>The genesis lineage being witnessed.</td></tr>
+              <tr><td><code>ordinal</code></td><td>integer</td><td>The highest included Arrival record—not merely the last fact.</td></tr>
+              <tr><td><code>record_hash</code></td><td>digest</td><td>The <code>rh</code> at that ordinal.</td></tr>
+              <tr><td><code>record_count</code></td><td>integer</td><td>Exactly ordinal + 1 for a dense v1 lineage.</td></tr>
+              <tr><td><code>fact_count</code></td><td>integer, optional</td><td>Projected fact rows, including rows inside batch records; corroboration only.</td></tr>
+              <tr><td><code>tick_count</code></td><td>integer, optional</td><td>Projected tick rows through the witnessed head; corroboration only.</td></tr>
+              <tr><td><code>observed_at</code></td><td>number</td><td>Finite Unix seconds; witness metadata, never ledger order.</td></tr>
+              <tr><td><code>issuer</code></td><td>string</td><td>Stable identity of the witness service or device.</td></tr>
+              <tr><td><code>key_id</code></td><td>string</td><td>Externally resolvable witness signing key.</td></tr>
+              <tr><td><code>previous</code></td><td>null or digest</td><td>Identifier of this issuer’s preceding complete attestation, creating a receipt chain.</td></tr>
+              <tr><td><code>sig</code></td><td>string</td><td>Signature over every preceding attestation field.</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="doc-code">
+          <div class="doc-code-label"><span>Illustrative attestation</span><span>placeholders, not a conformance fixture</span></div>
+          <pre><code>{
+  "v": 1,
+  "type": "arrival-head",
+  "protocol": 1,
+  "wire": 1,
+  "lineage": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+  "ordinal": 4217,
+  "record_hash": "&lt;64-lowercase-hex&gt;",
+  "record_count": 4218,
+  "fact_count": 4381,
+  "tick_count": 94,
+  "observed_at": 1787779020.0,
+  "issuer": "personal-macbook",
+  "key_id": "keychain:arrival-witness-2026-01",
+  "previous": "&lt;prior-attestation-hash-or-null&gt;",
+  "sig": "&lt;base64-signature&gt;"
+}</code></pre>
+        </div>
+
+        <h3>Attestation commitment</h3>
+        <div class="doc-equation">
+          payload_hash = SHA-256( "arrival/head-attestation/v1\0" || JCS(attestation without "sig") )<br>
+          sig = Sign(witness_key, domain="loops-arrival-head-v1", digest=payload_hash)<br>
+          attestation_id = SHA-256( "arrival/head-attestation-id/v1\0" || JCS(complete attestation) )
+        </div>
+
+        <p>
+          <code>previous</code> names the preceding <code>attestation_id</code>. The domain strings
+          above are proposed and must be ratified with test vectors. Signed
+          fields never include backend page state. An optional extension may name a backend or
+          authority epoch for operations, but logical comparison keys on lineage, ordinal, and
+          record hash.
+        </p>
+      </section>
+
+      <section class="doc-section" id="issuance">
+        <div class="doc-section-header">
+          <span class="doc-section-number">05</span>
+          <h2>Issuance, acknowledgment, and receipts</h2>
+        </div>
+        <p>
+          A witness first verifies that the presented record at <code>ordinal</code> recomputes to
+          <code>record_hash</code>. When advancing from a prior head, it verifies the entire suffix
+          from that prior head to the new one. It derives counts from verified records or from
+          incrementally maintained state tied to the prior attestation.
+        </p>
+
+        <ol class="doc-steps">
+          <li>The authority durably commits and returns the new logical head.</li>
+          <li>The witness compares that head to its last accepted attestation.</li>
+          <li>The witness verifies the descendant suffix and updates counts.</li>
+          <li>The witness creates, signs, and durably retains the next attestation linked by <code>previous</code>.</li>
+          <li>The caller receives a portable receipt or receipt identifier and caches the accepted head.</li>
+        </ol>
+
+        <h3>Two acknowledgment strengths</h3>
+        <div class="doc-table-wrap">
+          <table class="doc-spec-table">
+            <thead>
+              <tr><th>Status</th><th>Meaning</th><th>Rollback exposure</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><code>committed</code></td><td>The authority’s durability profile is satisfied.</td><td>Changes since the last external receipt may be lost without contradicting a witness.</td></tr>
+              <tr><td><code>witnessed</code></td><td>At least the configured witness quorum durably retained this exact head.</td><td>Rollback below or rewrite through this head is detectable by that quorum.</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <p>
+          Personal deployments may choose asynchronous witnessing and accept a small window.
+          Team systems can require <code>witnessed</code> before returning a final write receipt.
+          The API must name which status it returned rather than collapse them into “saved.”
+        </p>
+
+        <h3>Unsigned memory is still useful</h3>
+        <p>
+          A client that securely caches a previously seen <code>Head</code> can detect rollback
+          without a signing service. Signatures make receipts transferable and independently
+          verifiable; they do not create the fundamental comparison. The cache must remain
+          outside the authority’s rewrite boundary and must be scoped to the lineage.
+        </p>
+      </section>
+
+      <section class="doc-section" id="topologies">
+        <div class="doc-section-header">
+          <span class="doc-section-number">06</span>
+          <h2>Witness topologies</h2>
+        </div>
+
+        <div class="doc-card-grid">
+          <article class="doc-card">
+            <span class="doc-card-index">Personal baseline</span>
+            <h3>Client head cache</h3>
+            <p>Store the last accepted head in an OS keychain or configuration state separate from the DuckDB file. Simple and sufficient for later local edit detection.</p>
+          </article>
+          <article class="doc-card">
+            <span class="doc-card-index">Personal stronger</span>
+            <h3>Append-only receipt journal</h3>
+            <p>Chain signed attestations in a separately backed-up journal. This preserves head history and makes accidental cache reset visible.</p>
+          </article>
+          <article class="doc-card">
+            <span class="doc-card-index">Team baseline</span>
+            <h3>Independent notary</h3>
+            <p>A small service under separate credentials retains each team lineage head. The database administrator cannot silently rewrite both systems.</p>
+          </article>
+          <article class="doc-card">
+            <span class="doc-card-index">Higher assurance</span>
+            <h3>Quorum + gossip</h3>
+            <p>Several witnesses sign heads and clients exchange receipts. Equivocation requires collusion or becomes visible as incompatible signed branches.</p>
+          </article>
+        </div>
+
+        <h3>Suggested initial choices</h3>
+        <p>
+          For a personal DuckDB canonical store, begin with a keychain-cached head plus a signed
+          receipt copied into ordinary backups. For a PostgreSQL team service, place a witness
+          service in a separate credential and storage domain, and require one witness receipt
+          per acknowledged append group or short interval. Multi-witness quorum is an upgrade,
+          not a prerequisite for the architecture.
+        </p>
+
+        <div class="doc-callout is-warning">
+          <span class="doc-callout-label">Do not colocate the only evidence</span>
+          <p>
+            A witness table in the same database, writable by the same administrator, is useful
+            operational history but does not meet the administrator-tamper threat model. It may
+            be one copy; it cannot be the only copy.
+          </p>
+        </div>
+      </section>
+
+      <section class="doc-section" id="comparison">
+        <div class="doc-section-header">
+          <span class="doc-section-number">07</span>
+          <h2>Head comparison state machine</h2>
+        </div>
+        <p>
+          Let <em>K</em> be the last known or attested head and <em>P</em> the head now presented by
+          the authority. Comparison uses lineage, ordinal, and record hash—never timestamp alone.
+        </p>
+
+        <div class="doc-table-wrap">
+          <table class="doc-spec-table">
+            <thead>
+              <tr><th>Condition</th><th>Classification</th><th>Required action</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>No known head</td><td>First contact</td><td>Establish trust from migration receipt, pinned witness, or explicit trust reset.</td></tr>
+              <tr><td><code>P == K</code></td><td>Unchanged</td><td>Accept after local head validation.</td></tr>
+              <tr><td>Same lineage; P is a verified descendant of K</td><td>Advanced</td><td>Accept suffix, issue and retain the next receipt.</td></tr>
+              <tr><td>Same lineage; <code>P.ordinal &lt; K.ordinal</code></td><td>Rollback</td><td>Refuse authority; investigate or restore forward.</td></tr>
+              <tr><td>Same lineage and ordinal; different hash</td><td>Same-height fork</td><td>Refuse both as a single continuation; quarantine evidence.</td></tr>
+              <tr><td>P is higher but suffix does not descend from K</td><td>History rewrite / fork</td><td>Refuse; never accept height as proof of continuity.</td></tr>
+              <tr><td>Different lineage</td><td>Replacement or explicit re-custody</td><td>Require a trusted transition statement; otherwise refuse.</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="doc-code">
+          <div class="doc-code-label"><span>Verifier sketch</span><span>pseudocode</span></div>
+          <pre><code>compare(known, presented, source):
+  if known is None:
+    return FIRST_CONTACT
+  if presented.lineage != known.lineage:
+    return LINEAGE_REPLACED
+  if presented.ordinal &lt; known.ordinal:
+    return ROLLBACK
+  if presented.ordinal == known.ordinal:
+    return UNCHANGED if presented.hash == known.hash else FORK
+
+  suffix = source.scan(after=known, through=presented)
+  return ADVANCED if verifies_as_descendant(suffix) else FORK</code></pre>
+        </div>
+
+        <h3>First-contact limitation</h3>
+        <p>
+          A verifier with no cached head or pinned witness cannot distinguish the authentic
+          lineage from a carefully constructed replacement. Migration should therefore emit a
+          bootstrap receipt, and new devices should retrieve a checkpoint from an already trusted
+          device or witness rather than trusting only the database they are meant to audit.
+        </p>
+      </section>
+
+      <section class="doc-section" id="attacks">
+        <div class="doc-section-header">
+          <span class="doc-section-number">08</span>
+          <h2>Attack and failure matrix</h2>
+        </div>
+
+        <div class="doc-table-wrap">
+          <table class="doc-spec-table">
+            <thead>
+              <tr><th>Event</th><th>Local evidence</th><th>External evidence</th><th>Result</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>Flip a byte in an interior body</td><td><code>rh</code> fails, then chain breaks</td><td>Known head remains different</td><td>Immediate corruption refusal</td></tr>
+              <tr><td>Delete an interior record only</td><td>Ordinal gap and predecessor mismatch</td><td>Known head corroborates old prefix</td><td>Immediate corruption refusal</td></tr>
+              <tr><td>Delete a projection row</td><td>Ledger verifies; projection audit disagrees</td><td>Head unchanged</td><td>Rebuild projection</td></tr>
+              <tr><td>Delete the last ten records</td><td>Short prefix self-verifies</td><td>Presented ordinal is lower</td><td>Rollback refusal</td></tr>
+              <tr><td>Restore an old database backup</td><td>Old prefix self-verifies</td><td>Known head is newer</td><td>Rollback refusal</td></tr>
+              <tr><td>Edit and rehash all later records</td><td>Forged chain self-verifies</td><td>Same or later height does not descend from known hash</td><td>Fork / rewrite refusal</td></tr>
+              <tr><td>Rewrite head metadata only</td><td>Metadata disagrees with actual head record or dense scan</td><td>Known head assists diagnosis</td><td>Metadata corruption refusal</td></tr>
+              <tr><td>Show two clients different descendants</td><td>Each branch may self-verify</td><td>Receipt gossip reveals incompatible hashes</td><td>Equivocation evidence</td></tr>
+              <tr><td>Delete store and every backup</td><td>No history remains</td><td>Witness proves what was lost, not its contents</td><td>Detectable loss, not recovery</td></tr>
+              <tr><td>Compromise backend and sole witness key</td><td>Replacement can self-verify</td><td>Attacker can forge receipts</td><td>Outside claimed protection</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="doc-callout">
+          <span class="doc-callout-label">The direct answer</span>
+          <p>
+            Yes: a manually deleted canonical row computes differently. Interior deletion is
+            caught by density and chain verification; tail deletion is caught by comparing the
+            now-shorter head to the last externally remembered head. If the administrator also
+            rehashes the remaining history, that new head still differs from the remembered one.
+          </p>
+        </div>
+      </section>
+
+      <section class="doc-section" id="audit">
+        <div class="doc-section-header">
+          <span class="doc-section-number">09</span>
+          <h2>Layered audit posture</h2>
+        </div>
+        <p>
+          No single “hash database” command should stand in for all integrity claims. Operations
+          combine four layers with different costs and answers.
+        </p>
+
+        <div class="doc-layer-list">
+          <div class="doc-layer">
+            <div><strong>Preventive controls</strong><span>Read-only query users, admission-only writes, filesystem or database roles, backups, and writer fencing reduce accidental and ordinary malicious mutation.</span></div>
+          </div>
+          <div class="doc-layer">
+            <div><strong>Fast open checks</strong><span>Validate genesis, stored head, adopted head record, projection watermark, and comparison to the most recent cached witness.</span></div>
+          </div>
+          <div class="doc-layer">
+            <div><strong>Incremental verification</strong><span>Verify every record after the last fully checked checkpoint, advance counts, and issue the next attestation.</span></div>
+          </div>
+          <div class="doc-layer">
+            <div><strong>Periodic full audit</strong><span>Walk from genesis, verify authorship as configured, re-derive or compare projections, validate archive exports, and reconcile every witness stream.</span></div>
+          </div>
+        </div>
+
+        <h3>Projection agreement</h3>
+        <p>
+          Projection verification compares deterministic expansion of records through a captured
+          head to the materialized rows and their <code>(ordinal, sequence)</code> coordinates.
+          It uses multiset or primary-key-aware comparison so duplicated legitimate rows do not
+          disappear inside set semantics. The report distinguishes missing, extra, changed, and
+          misplaced rows.
+        </p>
+
+        <h3>Archive snapshot digest</h3>
+        <p>
+          For backup operations, record both the logical head and a SHA-256 digest of the stable
+          snapshot or canonical export bytes. The physical digest verifies the recovered object;
+          the logical head verifies its Arrival identity. A healthy restore should satisfy both.
+        </p>
+      </section>
+
+      <section class="doc-section" id="keys">
+        <div class="doc-section-header">
+          <span class="doc-section-number">10</span>
+          <h2>Witness keys, rotation, and trust</h2>
+        </div>
+
+        <h3>Key placement</h3>
+        <p>
+          A witness signing key should live in a different credential boundary from backend
+          administration: an OS keychain not stored beside the DuckDB file, a service identity
+          separate from the PostgreSQL role, hardware-backed storage, or an independent notary.
+          The verifier pins the public key or a chain to an already pinned key outside the ledger
+          being judged.
+        </p>
+
+        <h3>Rotation</h3>
+        <p>
+          Rotation produces a transition statement signed by the old witness key that names the
+          new key ID and public key, effective after a specific <code>attestation_id</code>. The new key’s
+          first attestation links to the last old-key attestation. Verifiers retain the transition;
+          silently replacing a key in configuration is a trust reset, not rotation.
+        </p>
+
+        <h3>Compromise</h3>
+        <p>
+          If a witness key is compromised, receipts issued before the compromise remain useful
+          only to verifiers that can establish their observation time or retained copy independently.
+          Rotate, publish a compromise boundary, compare heads across other witnesses and archives,
+          and do not claim that a new key retroactively proves the old receipt stream.
+        </p>
+
+        <h3>Receipt privacy</h3>
+        <p>
+          A head receipt reveals lineage activity, approximate size, and observation time even
+          without fact content. Services should treat receipts as metadata with an access policy.
+          Counts are optional generally (dispositions §2), and omitting them also serves
+          privacy — projection-count corroboration is then unavailable; lineage, ordinal, and
+          record hash remain required.
+        </p>
+      </section>
+
+      <section class="doc-section" id="recovery">
+        <div class="doc-section-header">
+          <span class="doc-section-number">11</span>
+          <h2>Recovery and operator posture</h2>
+        </div>
+
+        <div class="doc-table-wrap">
+          <table class="doc-spec-table">
+            <thead>
+              <tr><th>Finding</th><th>Safe response</th><th>Unsafe shortcut</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>Projection mismatch; ledger and witness agree</td><td>Quarantine query surface, rebuild from captured ledger head, re-audit</td><td>Edit ledger to match projection</td></tr>
+              <tr><td>Interior chain corruption</td><td>Stop writes, preserve bytes, restore or replicate a verified prefix/suffix from another copy</td><td>Skip the bad record</td></tr>
+              <tr><td>Presented head below witness</td><td>Refuse authority, locate a replica or backup at/above witnessed head</td><td>Move the witness backward</td></tr>
+              <tr><td>Presented head forks from witness</td><td>Freeze branches, collect receipts and audit evidence, choose recovery through explicit incident procedure</td><td>Pick the taller branch automatically</td></tr>
+              <tr><td>Witness unavailable; local head matches cache</td><td>Report witness stale/unavailable according to policy; reads may continue if allowed</td><td>Call the head newly witnessed</td></tr>
+              <tr><td>All witness state lost</td><td>Perform explicit trust reset from archives or operator ceremony and record the gap</td><td>Treat first presented database as historically proven</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="doc-callout is-security">
+          <span class="doc-callout-label">Witnesses move forward</span>
+          <p>
+            Normal operation never decreases a witnessed ordinal and never changes the hash at a
+            witnessed coordinate. A repair that intentionally starts a new lineage is explicit
+            and retains a transition report; it does not rewrite the old witness into agreement.
+          </p>
+        </div>
+      </section>
+
+      <section class="doc-section" id="scale">
+        <div class="doc-section-header">
+          <span class="doc-section-number">12</span>
+          <h2>Scaling verification and the Merkle option</h2>
+        </div>
+        <p>
+          The linear hash chain is the correct v1 primitive: appends are O(1), incremental
+          verification is O(new records), and a full audit is O(history). It directly matches
+          dense Arrival order and the branch’s existing record hashes.
+        </p>
+
+        <h3>Verified checkpoints</h3>
+        <p>
+          A local verifier may retain a checkpoint containing head, counts, verifier version,
+          and completion status after a full audit. It can then verify only the descendant suffix
+          on routine operation. A checkpoint is trusted only within the storage boundary where it
+          was retained; if stored inside the backend under audit, it is a performance hint rather
+          than independent evidence.
+        </p>
+
+        <h3>Optional accumulator</h3>
+        <p>
+          If very large remote lineages later need compact inclusion or consistency proofs, a
+          Merkle Mountain Range or transparency-log tree root can be added to head attestations.
+          It should be an optional witnessed accumulator derived from the same ordered record
+          hashes, not a replacement for them. The upgrade must define append proofs, consistency
+          proofs, leaf domain separation, and golden vectors before any security claim.
+        </p>
+
+        <div class="doc-callout is-warning">
+          <span class="doc-callout-label">Do not pre-pay the complexity</span>
+          <p>
+            A Merkle structure does not solve first contact, witness compromise, authority
+            transfer, or projection tampering by itself. Add it only when measured proof-size or
+            audit-time needs exceed the simple chain plus checkpoints.
+          </p>
+        </div>
+      </section>
+
+      <section class="doc-section" id="conformance">
+        <div class="doc-section-header">
+          <span class="doc-section-number">13</span>
+          <h2>Conformance and open choices</h2>
+        </div>
+
+        <h3>Required test vectors</h3>
+        <ul>
+          <li>Golden attestation canonical bytes, digest, Ed25519 signature, and verification</li>
+          <li>Unchanged, descendant, lower-height rollback, same-height fork, and higher non-descendant comparisons</li>
+          <li>Interior edit, interior delete, tail delete, old backup, and full re-chain attacks</li>
+          <li>Fact, batch, tick, and key records proving the attested ordinal is store-wide</li>
+          <li>Incremental fact/tick counts across batch expansion</li>
+          <li>Lost acknowledgment and duplicate issuance under one head</li>
+          <li>Issuer receipt-chain gap, replay, reordering, and conflicting successors</li>
+          <li>Witness key rotation and unpinned-key substitution</li>
+          <li>Projection row delete, duplicate, edit, and coordinate permutation</li>
+          <li>Cross-backend verification of the same logical head</li>
+        </ul>
+
+        <h3>Open deployment rulings</h3>
+        <div class="doc-card-grid">
+          <article class="doc-card">
+            <span class="doc-card-index">Policy</span>
+            <h3>Witness frequency</h3>
+            <p>Per commit, timed interval, shutdown checkpoint, or a combination—and which acknowledgment each mode permits.</p>
+          </article>
+          <article class="doc-card">
+            <span class="doc-card-index">Trust</span>
+            <h3>Personal key home</h3>
+            <p>OS keychain, hardware token, another device, or a small hosted notary.</p>
+          </article>
+          <article class="doc-card">
+            <span class="doc-card-index">Service</span>
+            <h3>Team witness quorum</h3>
+            <p>One separate notary initially versus multiple witnesses and gossip at higher assurance.</p>
+          </article>
+          <article class="doc-card">
+            <span class="doc-card-index">Retention</span>
+            <h3>Receipt history</h3>
+            <p>Keep every attestation, periodic checkpoints, or every externally acknowledged commit.</p>
+          </article>
+        </div>
+
+        <div class="doc-callout">
+          <span class="doc-callout-label">Recommended minimum — adopted</span>
+          <p>
+            Adopted as the v1 scope (<code>decision:design/arrival-suite-review-dispositions</code> §1):
+            cache one head outside every authority, emit a bootstrap receipt during migration,
+            compare on every open, and perform a periodic full chain-plus-projection audit.
+            The signed-attestation grammar, notary, and quorum apparatus is deferred until a
+            consumer forces it. That closes the deletion concern without forcing a universal
+            database file hash or a premature transparency-log service.
+          </p>
+        </div>
+      </section>
+
+      <nav class="doc-footer-nav" aria-label="Document pagination">
+        <a class="doc-footer-link" href="backend-contract.html">
+          <span>Previous</span>
+          <strong>← Backend contract</strong>
+        </a>
+        <a class="doc-footer-link" href="index.html">
+          <span>Return to</span>
+          <strong>Architecture overview →</strong>
+        </a>
+      </nav>
+      <p class="doc-footer-note">Arrival Witness Protocol · Security draft v1 · External head attestation</p>
+    </main>
+  </div>
+</body>
+</html>

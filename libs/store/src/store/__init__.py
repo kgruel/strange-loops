@@ -5,9 +5,16 @@ facts/ticks schema. engine.SqliteStore writes facts at runtime.
 This library maintains them.
 """
 
+# `derived_log_merge` is deliberately NOT re-exported here. It is a git
+# merge driver — tooling over store artifacts, not part of this lib's
+# runtime API — and its interface is `python -m store.derived_log_merge`.
+# Importing it here would also make that invocation load the module twice
+# (once through this package, once as __main__), which runpy reports as a
+# RuntimeWarning on the driver's stderr, where git shows it to the user on
+# every merge. Reach it as `store.derived_log_merge.merge_derived_log`.
 from ._transport_local import LocalTransport
 from .compact import CompactResult, compact_store
-from .merge import MergeResult, merge_store
+from .merge import MergeDivergence, MergeResult, merge_store
 from .rebirth import (
     FactRow,
     RebirthResult,
@@ -19,7 +26,6 @@ from .rebirth import (
     ulid_migration,
     verify_rebirth,
 )
-from .jsonl import ExportResult, RebuildResult, export_jsonl, rebuild_jsonl
 from .receive import ReceiveResult, receive_store
 from .slice import SliceResult, slice_store
 from .transport import PullResult, PushResult, Transport, pull_store, push_store
@@ -27,12 +33,11 @@ from .transport import PullResult, PushResult, Transport, pull_store, push_store
 __all__ = [
     "CompactResult",
     "compact_store",
-    "ExportResult",
-    "export_jsonl",
     "FactRow",
     "filtered",
     "identity",
     "LocalTransport",
+    "MergeDivergence",
     "MergeResult",
     "merge_store",
     "PullResult",
@@ -41,8 +46,6 @@ __all__ = [
     "push_store",
     "RebirthResult",
     "rebirth_store",
-    "RebuildResult",
-    "rebuild_jsonl",
     "RebirthVerification",
     "ReceiveResult",
     "receive_store",

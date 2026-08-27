@@ -570,6 +570,9 @@ class TestChangeFactRoutesThroughTheLog:
         db = vpath.parent / "data" / "project.db"
         conn = sqlite3.connect(db)
         cols = [r[1] for r in conn.execute("PRAGMA table_info(facts)")]
+        ord_val = conn.execute(
+            "SELECT COALESCE(MAX(arrival_ordinal), 0) + 1 FROM facts"
+        ).fetchone()[0]
         vals = {
             "id": "OUT-OF-BAND-ROW",
             "kind": "note",
@@ -578,6 +581,8 @@ class TestChangeFactRoutesThroughTheLog:
             "payload": "{}",
             "origin": "",
             "seq": 999,
+            "arrival_ordinal": ord_val,
+            "arrival_seq": 0,
         }
         used = [c for c in cols if c in vals]
         conn.execute(

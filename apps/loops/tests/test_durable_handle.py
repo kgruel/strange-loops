@@ -60,10 +60,13 @@ def _fresh(store: Path) -> None:
 def _append(store: Path, ts: float, topic: str) -> str:
     conn = sqlite3.connect(str(store))
     fid = gen_id()
+    ord_val = conn.execute(
+        "SELECT COALESCE(MAX(arrival_ordinal), 0) + 1 FROM facts"
+    ).fetchone()[0]
     conn.execute(
-        "INSERT INTO facts (id, kind, ts, observer, origin, payload, signature) "
-        "VALUES (?, 'decision', ?, 'kyle', '', ?, NULL)",
-        (fid, ts, json.dumps({"topic": topic})),
+        "INSERT INTO facts (id, kind, ts, observer, origin, payload, signature, arrival_ordinal, arrival_seq) "
+        "VALUES (?, 'decision', ?, 'kyle', '', ?, NULL, ?, 0)",
+        (fid, ts, json.dumps({"topic": topic}), ord_val),
     )
     conn.commit()
     conn.close()
@@ -78,7 +81,7 @@ def test_durable_handle_round_trips_through_the_address_parser(tmp_path):
     assert handle == f"fact:{lineage}/{f1}"
     # The advertised portable handle resolves back to the same position.
     back = resolve_at_address(store, handle)
-    assert back.fact_id == f1 and back.rowid == pos.rowid and back.lineage == lineage
+    assert back.fact_id == f1 and back.ordinal == pos.ordinal and back.lineage == lineage
 
 
 def test_wrong_lineage_qualified_handle_is_refused(tmp_path):

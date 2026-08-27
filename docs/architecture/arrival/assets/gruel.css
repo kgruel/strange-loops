@@ -1,0 +1,9 @@
+/**
+ * Arrival architecture suite — local Gruel design-system adapter.
+ *
+ * The component remains owned by ~/Code/gruel-design-system. This adapter pins
+ * the suite to a reviewed artifact; refresh it from that repository with:
+ * npm run vendor -- ~/Code/loops/docs/architecture/arrival/assets/vendor
+ */
+@import url("./vendor/gruel-design-system/1.0.0/index.css");
+@import url("./vendor/gruel-design-system/1.0.0/components/technical-document.css");

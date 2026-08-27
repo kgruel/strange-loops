@@ -1,0 +1,31 @@
+## Findings
+
+No DP-r6 findings.
+
+## DP-r5-01 convergence
+
+**PASS.**
+
+Evidence:
+
+- **Fixed-point view discovery:** r6 explicitly iterates over views referencing the rebuilt table, then views referencing collected views, until no new view is found ([design-proposal.md:159](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceD/design-proposal.md:159)).
+- **Closure trigger inventory:** triggers attached to every collected view—including `INSTEAD OF` triggers—are inventoried using the view names in `sqlite_schema.tbl_name` ([design-proposal.md:165](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceD/design-proposal.md:165)).
+- **Dependency-ordered replay:** views are restored before their dependents and triggers after their owning views, within the migration transaction ([design-proposal.md:170](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceD/design-proposal.md:170)).
+- **Extended G-D0-13:** the gate now covers `v2 → v1 → facts`, an `INSTEAD OF` trigger on `v1`, preservation, equivalent query/trigger behavior, and successful rename ([design-proposal.md:641](/Users/kaygee/Code/loops/docs/scratch/arrival-sliceD/design-proposal.md:641)).
+
+## Decision verdicts
+
+| Decision | Verdict |
+|---|---|
+| D0 | **SOUND** |
+| D1 | **SOUND** |
+| D2 | **SOUND** |
+| D3 | **SOUND** |
+| D4 | **SOUND** |
+| Gate plan | **SOUND** |
+
+Overall: **RATIFIABLE**.
+
+Convergence: **CONVERGED**.
+
+Review was read-only; no files were modified.

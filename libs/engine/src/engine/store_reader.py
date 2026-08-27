@@ -14,6 +14,8 @@ from typing import TYPE_CHECKING
 from .tick import Tick
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
+    from atoms import Ordering
+
     from .witness import WitnessPosition
 
 
@@ -193,6 +195,83 @@ class StoreReader:
                 namespaces.add(k.split("/", 1)[0] + "/")
         return sorted(namespaces)
 
+    def ordered(
+        self, prefix: int, key: "Ordering", *, include_internal: bool = False
+    ) -> list[dict]:
+        """The first ``prefix`` facts of this store's stream, under ``key``.
+
+        Two independent axes, and keeping them apart is the whole point:
+
+        - **prefix** SELECTS. It takes the stream's first ``prefix`` records —
+          ``[0..prefix)`` in arrival order, which for a sqlite-indexed store is
+          ``rowid ASC``. A selector re-scopes and never orders (Rule 17).
+        - **key** ORDERS the selected records, and the ordering is DECLARED by
+          the caller, never inferred here. ``Arrival()`` yields the prefix as
+          the store gave it; ``ByKey(K)`` re-orders it as ``(K, id ASC)``.
+
+        The sort is read-time, in Python, through :func:`atoms.totalize` — the
+        one definition of the sort key in the tree. The SQL is ``ORDER BY rowid
+        ASC LIMIT ?`` and nothing else: an ``ORDER BY json_extract(...)`` here
+        would be a second, independently-drifting spelling of ``ByKey``. There
+        is no index for ``K``, by ruling; adding one is a later optimization a
+        benchmark has to justify.
+
+        ``ByKey(K)`` resolves ``K`` through :func:`atoms.resolve_key_field` —
+        the one definition of the key FAMILY rule, shared with the combined
+        read's lens and the conformance vectors (SPEC §9): ``ts`` and ``id``
+        resolve against the record **envelope**, every other key against the
+        flat **payload**. One declaration, one projection, whatever surface
+        asks. A payload field named ``ts`` or ``id`` does NOT shadow the
+        envelope — that is what keeps ``ByKey('ts')`` from meaning two
+        different things depending on what a payload happens to carry.
+        ``ts`` being a stored column is an optimization detail here, not a
+        change of semantics; this surface hands it over as a ``datetime``,
+        which orders identically to the raw REAL and stays single-typed.
+
+        The other stored columns — ``kind``, ``observer``, ``origin`` — are
+        NOT key candidates on any surface: ``ByKey('kind')`` is a payload key
+        that almost no fact carries, and the projection is empty by
+        non-membership rather than grouping the stream by its column.
+
+        A fact that lacks ``K`` where ``K`` resolves is not in the
+        ``ByKey(K)`` projection at all — a key names what it projects and
+        absence is non-membership, so the returned list can be shorter than
+        ``prefix``.
+
+        Facts only. Ticks carry no payload keys, and interleaving the two into
+        one receipt-ordered stream was the migration bridge's job — that bridge
+        is gone, and a reader that wants ticks asks for ticks.
+
+        ``prefix`` counts the VISIBLE stream: ``_decl.*`` is excluded before the
+        ``LIMIT`` applies (SPEC §9.4 — every read surface excludes it), so
+        ``prefix=10`` means ten facts a reader can see. ``include_internal=True``
+        is the usual escape hatch and widens what the prefix counts.
+
+        Raises:
+            ValueError: ``prefix`` is negative.
+            atoms.OrderingError: The selected facts cannot be ordered under
+                ``key`` — mixed key types, or sort-key elements (key value or
+                tie-break id) that do not compare.
+                It propagates: a declaration error against the data is a
+                refusal to surface, not something to coerce past.
+        """
+        from atoms import resolve_key_field, totalize
+
+        if prefix < 0:
+            raise ValueError(f"ordered: prefix must be >= 0, got {prefix}")
+        where = "" if include_internal else "WHERE kind NOT GLOB '_decl.*'"
+        rows = self._conn.execute(
+            "SELECT id, kind, ts, observer, origin, payload FROM facts "
+            f"{where} ORDER BY rowid ASC LIMIT ?",
+            (prefix,),
+        ).fetchall()
+        return totalize(
+            [self._fact_row_to_dict(r) for r in rows],
+            key,
+            get_field=resolve_key_field,
+            get_id=lambda record: record["id"],
+        )
+
     def fact_observer_stats(self, kind: str) -> dict:
         """Per-observer fact counts and freshness within one kind, count-desc.
 
@@ -276,13 +355,14 @@ class StoreReader:
         Returns ``(count, oldest_ts)`` — the live edge and the ``ts`` of its
         oldest fact (``None`` when the edge is empty). The boundary is the
         same claim ``SqliteStore.verify_chain`` walks: the newest chained
-        tick's ``fact_cursor`` resolved to its rowid (witness/append order,
-        never ``ts`` — a backfilled fact with an old event time stays on the
-        edge until sealed; see the ORDERING AUTHORITY note in sqlite_store).
+        tick's ``fact_cursor`` resolved to its arrival coordinate
+        ((arrival_ordinal, arrival_seq), arrival/append order, never ``ts`` —
+        a backfilled fact with an old event time stays on the edge until sealed;
+        see the ORDERING AUTHORITY note in sqlite_store).
 
         Boundary fallbacks, all conservative (larger edge, never smaller):
         pre-chain schema (no ``window_hash`` column), no chained ticks, or an
-        unresolvable cursor fact all report from rowid 0 — every visible fact
+        unresolvable cursor fact all report from (-1, 0) — every visible fact
         is on the edge, matching ``verify_chain``'s ``covered=0`` for the
         same stores.
 
@@ -307,7 +387,7 @@ class StoreReader:
         The ``PRAGMA table_info`` schema gate stays a separate statement, and
         that is safe in the only direction it can drift: a migration that adds
         ``window_hash`` between the probe and the aggregate makes this read
-        fall back to boundary 0 — the whole store on the edge, the same
+        fall back to boundary (-1, 0) — the whole store on the edge, the same
         conservative answer every other fallback gives. There is no
         interleaving in which the gate makes the edge look *smaller* than a
         coherent snapshot would.
@@ -316,28 +396,37 @@ class StoreReader:
             r[1] for r in self._conn.execute("PRAGMA table_info(ticks)")
         }
         # All four documented fallbacks live inside the one statement:
-        #   pre-chain schema        -> the literal 0 boundary below
-        #   no chained tick         -> inner SELECT yields no row -> COALESCE 0
-        #   "" cursor sentinel      -> no fact has id '' -> COALESCE 0
-        #   unresolvable cursor     -> no id match -> COALESCE 0
-        # No parameters are interpolated — `boundary` is one of two literal
-        # SQL fragments chosen by the schema probe.
-        boundary = (
-            """COALESCE((
-                SELECT f.rowid FROM facts f
-                 WHERE f.id = (
-                     SELECT fact_cursor FROM ticks
-                      WHERE window_hash IS NOT NULL
-                      ORDER BY rowid DESC LIMIT 1
-                 )
-            ), 0)"""
-            if "window_hash" in cols
-            else "0"
-        )
-        count, oldest = self._conn.execute(
-            "SELECT COUNT(*), MIN(ts) FROM facts "
-            f"WHERE rowid > {boundary} AND kind NOT GLOB '_decl.*'"
-        ).fetchone()
+        #   pre-chain schema        -> literal WHERE kind NOT GLOB '_decl.*'
+        #   no chained tick         -> inner SELECT yields no row -> COALESCE (-1, 0)
+        #   "" cursor sentinel      -> no fact has id '' -> COALESCE (-1, 0)
+        #   unresolvable cursor     -> no id match -> COALESCE (-1, 0)
+        if "window_hash" in cols:
+            count, oldest = self._conn.execute(
+                "SELECT COUNT(*), MIN(ts) FROM facts "
+                "WHERE (arrival_ordinal, arrival_seq) > ("
+                "    COALESCE(("
+                "        SELECT arrival_ordinal FROM facts"
+                "         WHERE id = ("
+                "             SELECT fact_cursor FROM ticks"
+                "              WHERE window_hash IS NOT NULL"
+                "              ORDER BY arrival_ordinal DESC, arrival_seq DESC LIMIT 1"
+                "         )"
+                "    ), -1),"
+                "    COALESCE(("
+                "        SELECT arrival_seq FROM facts"
+                "         WHERE id = ("
+                "             SELECT fact_cursor FROM ticks"
+                "              WHERE window_hash IS NOT NULL"
+                "              ORDER BY arrival_ordinal DESC, arrival_seq DESC LIMIT 1"
+                "         )"
+                "    ), 0)"
+                ") AND kind NOT GLOB '_decl.*'"
+            ).fetchone()
+        else:
+            count, oldest = self._conn.execute(
+                "SELECT COUNT(*), MIN(ts) FROM facts "
+                "WHERE kind NOT GLOB '_decl.*'"
+            ).fetchone()
         return count, oldest
 
     def summary(self, *, include_internal: bool = False) -> dict:
@@ -530,7 +619,7 @@ class StoreReader:
         kind: str | None = None,
         *,
         include_internal: bool = False,
-        at_rowid: int | None = None,
+        at_ordinal: int | None = None,
     ) -> list[dict]:
         """Facts within a time range, optionally filtered by kind.
 
@@ -541,16 +630,16 @@ class StoreReader:
         this, since the ambient exclusion would otherwise filter out the very
         kind being asked for.
 
-        ``at_rowid`` caps the result to the witness prefix ``rowid <= at_rowid``
+        ``at_ordinal`` caps the result to the witness prefix ``arrival_ordinal <= at_ordinal``
         (0.8.0 temporal cursor, A1 facts-only) — rows the store had *received*
         at that position. It composes with the time window: a witnessed read of
         a range returns the facts in ``[since, until]`` that were present at the
-        cursor. Resolve a :class:`~engine.witness.WitnessPosition` for the rowid;
+        cursor. Resolve a :class:`~engine.witness.WitnessPosition` for the ordinal;
         never hand a raw id here (ids are never ordered — A3).
         """
         internal_clause = "" if include_internal else " AND kind NOT GLOB '_decl.*'"
-        rowid_clause = " AND rowid <= ?" if at_rowid is not None else ""
-        rowid_param: tuple = (at_rowid,) if at_rowid is not None else ()
+        ordinal_clause = " AND arrival_ordinal <= ?" if at_ordinal is not None else ""
+        ordinal_param: tuple = (at_ordinal,) if at_ordinal is not None else ()
         if kind is not None:
             from .sql_util import kind_subtree_predicate
 
@@ -558,15 +647,15 @@ class StoreReader:
             rows = self._conn.execute(
                 "SELECT id, kind, ts, observer, origin, payload FROM facts "
                 f"WHERE ts >= ? AND ts <= ? AND {kind_sql}"
-                f"{internal_clause}{rowid_clause} ORDER BY ts",
-                (since_ts, until_ts, *kind_params, *rowid_param),
+                f"{internal_clause}{ordinal_clause} ORDER BY ts",
+                (since_ts, until_ts, *kind_params, *ordinal_param),
             ).fetchall()
         else:
             rows = self._conn.execute(
                 "SELECT id, kind, ts, observer, origin, payload FROM facts "
-                f"WHERE ts >= ? AND ts <= ?{internal_clause}{rowid_clause} "
+                f"WHERE ts >= ? AND ts <= ?{internal_clause}{ordinal_clause} "
                 "ORDER BY ts",
-                (since_ts, until_ts, *rowid_param),
+                (since_ts, until_ts, *ordinal_param),
             ).fetchall()
         return [self._fact_row_to_dict(r) for r in rows]
 
@@ -574,35 +663,35 @@ class StoreReader:
         self,
         kind: str,
         *,
-        at_rowid: int | None = None,
+        at_ordinal: int | None = None,
         until_ts: float | None = None,
     ) -> list[dict]:
-        """All facts for a kind in receipt order (rowid ASC).
+        """All facts for a kind in arrival order (arrival_ordinal, arrival_seq ASC).
 
         This is THE fold replay order: a fact's fold position is the position
         at which this store received it. The ULID ``id`` is stable identity
         only, and ``ts`` is event-time metadata — neither orders the fold.
         ``(ts, id)`` survives only as an explicit read-path lens.
 
-        ``at_rowid`` caps to the witness prefix (``rowid <= at_rowid``): the fold
+        ``at_ordinal`` caps to the witness prefix (``arrival_ordinal <= at_ordinal``): the fold
         reconstructs from the rows the store had received at that position,
-        replayed in that same receipt order (0.8.0 fold-at). ``None`` is a head
+        replayed in that same arrival order (0.8.0 fold-at). ``None`` is a head
         read.
 
         ``until_ts`` caps to ``ts <= until_ts`` — the event-time projection
         sibling (0.8.0 fold-state-``as_of``, A8): facts are selected by
         timestamp cutoff rather than receipt prefix. Mutually exclusive with
-        ``at_rowid`` in practice (the caller picks one selector); both compose
+        ``at_ordinal`` in practice (the caller picks one selector); both compose
         as independent WHERE clauses if ever passed together.
         """
-        rowid_clause = " AND rowid <= ?" if at_rowid is not None else ""
-        rowid_param: tuple = (at_rowid,) if at_rowid is not None else ()
+        ordinal_clause = " AND arrival_ordinal <= ?" if at_ordinal is not None else ""
+        ordinal_param: tuple = (at_ordinal,) if at_ordinal is not None else ()
         ts_clause = " AND ts <= ?" if until_ts is not None else ""
         ts_param: tuple = (until_ts,) if until_ts is not None else ()
         rows = self._conn.execute(
             "SELECT id, kind, ts, observer, origin, payload FROM facts "
-            f"WHERE kind = ?{rowid_clause}{ts_clause} ORDER BY rowid",
-            (kind, *rowid_param, *ts_param),
+            f"WHERE kind = ?{ordinal_clause}{ts_clause} ORDER BY arrival_ordinal, arrival_seq",
+            (kind, *ordinal_param, *ts_param),
         ).fetchall()
         return [
             {
@@ -668,16 +757,16 @@ class StoreReader:
         order) — the same contract every 0.8.0 temporal seam uses. Fact ids
         are NEVER ordered or compared (A3): the corpus mixes uuid4-era and
         ULID-era ids, and even pure-ULID stores are not within-millisecond
-        monotonic. ``order="newest"`` walks ``rowid DESC``; ``"oldest"``
-        walks ``rowid ASC``. (Note this is receipt order, not event-time
+        monotonic. ``order="newest"`` walks ``arrival_ordinal DESC, arrival_seq DESC``; ``"oldest"``
+        walks ``arrival_ordinal ASC, arrival_seq ASC``. (Note this is arrival order, not event-time
         ``ts`` order — a merged/backdated fact lists where it was RECEIVED,
         the same honesty the witness prefix gives ``at=`` reads.)
 
         Cursors are 0.8.0 :class:`~engine.witness.WitnessPosition` values —
-        no second cursor type. ``before`` selects ``rowid < before.rowid``,
-        ``after`` selects ``rowid > after.rowid`` (both exclusive; they
+        no second cursor type. ``before`` selects ``arrival_ordinal < before.ordinal``,
+        ``after`` selects ``arrival_ordinal > after.ordinal`` (both exclusive; they
         compose into a window). Each is A10-verified against THIS store via
-        :func:`~engine.witness.verify_position_for_store` before its rowid
+        :func:`~engine.witness.verify_position_for_store` before its ordinal
         is applied — a foreign position is re-resolved (same lineage) or
         refused (:class:`~engine.witness.WitnessLineageMismatch`), never
         silently applied.
@@ -701,15 +790,17 @@ class StoreReader:
         against concurrent writers wraps the whole walk in
         :meth:`snapshot`; without it, each page is internally consistent
         and the cursor arithmetic still guarantees no duplicates for
-        ``newest`` walks (new rows land at higher rowids than any
+        ``newest`` walks (new rows land at higher arrival ordinals than any
         ``before`` cursor) while an ``oldest`` walk tails new appends —
         the honest append-only reading.
 
-        Truncation is probed by over-fetching one row: ``truncated`` is
-        True iff a ``limit+1``-th matching row existed in this snapshot,
-        and then ``next`` is the :class:`WitnessPosition` of the page's
-        last item (resolved with ``group_boundary="allow"`` — a page
-        boundary is a read-progress token, not a fold cut, so the A2
+        The page limit is a FLOOR (ceremonies are atomic): after fetching
+        ``limit`` rows, the page extends with any remaining rows of the LAST
+        record (same arrival_ordinal) so no record is ever split across
+        pages. ``truncated`` is True iff matching rows exist beyond the
+        page's last record, and then ``next`` is the :class:`WitnessPosition`
+        of the page's last item (resolved with ``group_boundary="allow"`` —
+        a page boundary is a read-progress token, not a fold cut, so the A2
         mid-ceremony refusal does not apply). Feed ``next`` back as
         ``before`` for ``"newest"`` or ``after`` for ``"oldest"``.
         """
@@ -729,12 +820,12 @@ class StoreReader:
         params: list = []
         if before is not None:
             before = verify_position_for_store(before, self._path)
-            clauses.append("rowid < ?")
-            params.append(before.rowid)
+            clauses.append("arrival_ordinal < ?")
+            params.append(before.ordinal)
         if after is not None:
             after = verify_position_for_store(after, self._path)
-            clauses.append("rowid > ?")
-            params.append(after.rowid)
+            clauses.append("arrival_ordinal > ?")
+            params.append(after.ordinal)
         if kind is not None:
             from .sql_util import kind_subtree_predicate
 
@@ -765,22 +856,52 @@ class StoreReader:
             self._conn.execute("BEGIN DEFERRED")
         try:
             rows = self._conn.execute(
-                "SELECT id, kind, ts, observer, origin, payload FROM facts "
-                f"{where} ORDER BY rowid {direction} LIMIT ?",
-                (*params, limit + 1),
+                "SELECT id, kind, ts, observer, origin, payload, arrival_ordinal, arrival_seq FROM facts "
+                f"{where} ORDER BY arrival_ordinal {direction}, arrival_seq {direction} LIMIT ?",
+                (*params, limit),
             ).fetchall()
-            truncated = len(rows) > limit
-            rows = rows[:limit]
+            truncated = False
             next_pos = None
-            if truncated:
-                next_pos = _resolve_witness_position_on_conn(
-                    self._conn, self._path, rows[-1][0], group_boundary="allow",
-                )
+            if len(rows) == limit:
+                # The page limit is a FLOOR: extend with any remaining rows of the LAST record
+                # (same arrival_ordinal) so no record is ever split across pages.
+                last_ord = rows[-1][6]
+                last_seq = rows[-1][7]
+                where_and = f"{where} AND " if where else "WHERE "
+                if order == "oldest":
+                    ext_rows = self._conn.execute(
+                        f"SELECT id, kind, ts, observer, origin, payload, arrival_ordinal, arrival_seq FROM facts "
+                        f"{where_and} arrival_ordinal = ? AND arrival_seq > ? "
+                        f"ORDER BY arrival_seq ASC",
+                        (*params, last_ord, last_seq),
+                    ).fetchall()
+                    rows.extend(ext_rows)
+                    more = self._conn.execute(
+                        f"SELECT 1 FROM facts {where_and} arrival_ordinal > ? LIMIT 1",
+                        (*params, last_ord),
+                    ).fetchone()
+                else:  # newest
+                    ext_rows = self._conn.execute(
+                        f"SELECT id, kind, ts, observer, origin, payload, arrival_ordinal, arrival_seq FROM facts "
+                        f"{where_and} arrival_ordinal = ? AND arrival_seq < ? "
+                        f"ORDER BY arrival_seq DESC",
+                        (*params, last_ord, last_seq),
+                    ).fetchall()
+                    rows.extend(ext_rows)
+                    more = self._conn.execute(
+                        f"SELECT 1 FROM facts {where_and} arrival_ordinal < ? LIMIT 1",
+                        (*params, last_ord),
+                    ).fetchone()
+                truncated = more is not None
+                if truncated:
+                    next_pos = _resolve_witness_position_on_conn(
+                        self._conn, self._path, rows[-1][0], group_boundary="allow",
+                    )
         finally:
             if own_txn:
                 self._conn.rollback()
         return FactPage(
-            items=[self._fact_row_to_dict(r) for r in rows],
+            items=[self._fact_row_to_dict(r[:6]) for r in rows],
             next=next_pos,
             truncated=truncated,
             order=order,

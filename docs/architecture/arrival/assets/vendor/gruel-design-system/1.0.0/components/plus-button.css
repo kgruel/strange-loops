@@ -1,0 +1,77 @@
+/**
+ * Gruel Design System — Plus Button Component
+ *
+ * Dashed circular button for "add custom" actions.
+ *
+ * Usage:
+ *   <button type="button" class="plus-button plus-button--lg"
+ *     aria-label="Add another item"><span aria-hidden="true">+</span></button>
+ */
+
+/* ===========================================
+   BASE PLUS BUTTON
+   =========================================== */
+.plus-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--warm-white);
+  border: 2px dashed var(--ink-faint);
+  color: var(--ink-muted);
+  font-weight: 300;
+  cursor: pointer;
+  transition: transform 0.15s, border-color 0.15s, border-style 0.15s;
+  flex-shrink: 0;
+}
+
+.plus-button:hover:not(:disabled):not([aria-disabled="true"]),
+.plus-button:focus-visible:not(:disabled):not([aria-disabled="true"]) {
+  transform: scale(1.15);
+  border-color: var(--botanical-muted);
+  border-style: solid;
+}
+
+.plus-button:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: var(--focus-offset);
+}
+
+.plus-button:disabled,
+.plus-button[aria-disabled="true"] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ===========================================
+   SIZE VARIANTS
+   =========================================== */
+.plus-button--xs {
+  width: var(--avatar-xs);
+  height: var(--avatar-xs);
+  font-size: 1rem;
+}
+
+.plus-button--sm {
+  width: var(--avatar-sm);
+  height: var(--avatar-sm);
+  font-size: 1.1rem;
+}
+
+.plus-button--md {
+  width: var(--avatar-md);
+  height: var(--avatar-md);
+  font-size: 1.25rem;
+}
+
+.plus-button--lg {
+  width: var(--avatar-lg);
+  height: var(--avatar-lg);
+  font-size: 1.4rem;
+}
+
+.plus-button--xl {
+  width: var(--avatar-xl);
+  height: var(--avatar-xl);
+  font-size: 1.5rem;
+}

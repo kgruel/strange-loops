@@ -1,0 +1,21 @@
+## Findings
+
+| ID | Severity | File:line | Claim | Evidence |
+|---|---|---|---|---|
+| CX-BR-01 | MAJOR | [merge.py:399](/Users/kaygee/Code/loops/libs/store/src/store/merge.py:399) | Arrival merge deduplicates solely by fact ID, silently accepting an ID collision with different bytes instead of rejecting it. | A target/source pair containing the same ID with different payloads produced `MergeResult(facts_added=0, facts_skipped=1, ...)`; the target remained unchanged. The existing test at [test_arrival_merge.py:328](/Users/kaygee/Code/loops/libs/store/tests/test_arrival_merge.py:328) pins this behavior. This breaks the admission boundary’s collision-different-bytes rejection rule. |
+| CX-BR-02 | MAJOR | [merge.py:236](/Users/kaygee/Code/loops/libs/store/src/store/merge.py:236), [merge.py:438](/Users/kaygee/Code/loops/libs/store/src/store/merge.py:438) | `merge_store` is a driver that directly mints target witness positions without signature or source-authorization admission. | A source fact with observer `mallory` and signature `"not-a-valid-signature"` produced `facts_added=1` and appeared in the target arrival log. The implementation acknowledges that it has no admission attestation, then calls `append_marked_many` directly at line 252. This violates both the admission boundary and the single-custodian law. |
+| CX-BR-03 | MAJOR | [witness.py:609](/Users/kaygee/Code/loops/libs/engine/src/engine/witness.py:609) | `diff_interval_report` compares witness rowids without structurally checking their stores or lineages. | Passing two real positions resolved from distinct stores and distinct lineages returned `{"late_arrivals": [], "declaration_changed": False}`. It raised neither `WitnessAggregateUnsupported` nor any lineage error. The current CLI supplies same-store positions, but the public comparison surface does not enforce the required structural failure. |
+
+## Tail commits
+
+- `63184a09` — **PASS.** `_create` checks existence before the custody guard, then guards before any directory or SQLite creation at [_conn.py:104](/Users/kaygee/Code/loops/libs/store/src/store/_conn.py:104). Slice and rebirth pass through `_create`; receive retains its explicit pre-copy guard. Absent `.db` plus live `.arrival` refused without producing `.db`, WAL, or SHM files. Focused custody/create tests: 84 passed.
+
+- `61c00586` — **PASS.** The ordering probes assert fixture cardinality, the merge probe asserts regenerated output, and the CAS probe calls the real `declaration_head()`. ArrivalStore performs a forward log walk at [arrival_store.py:529](/Users/kaygee/Code/loops/libs/engine/src/engine/arrival_store.py:529), so depth is genuinely exercised rather than cached. The arm JSON medians exactly reproduce the rounded [LEDGER values](/Users/kaygee/Code/loops/benchmarks/LEDGER.md:277).
+
+Verification: atoms 517 passed; engine 1,807 passed/1 skipped; SDK 324 passed; store 152 passed; architecture 110 passed; apps 2,525 passed/1 xfailed. The combined library invocation encounters pytest’s cross-corpus `tests.conftest` import collision, so each corpus was run independently.
+
+## Overall call
+
+**NOT CONVERGED.**
+
+Arbiter sentence: Do not ship until arrival merge rejects conflicting bytes and inadmissible authorship before minting positions, and cross-lineage witness comparison fails structurally.

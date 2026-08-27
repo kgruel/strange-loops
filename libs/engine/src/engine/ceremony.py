@@ -90,7 +90,13 @@ __all__ = [
 ]
 
 INTENT_SUFFIX = ".intent"
-_INTENT_VERSION = 1
+# v2: ``old_decl_head`` persists an ARRIVAL coordinate (record ordinal, id)
+# for the arrival store family, where v1 persisted an index rowid. The shape
+# is unchanged — ``[int, str]`` either way — so nothing about the record's
+# form distinguishes a stale v1 coordinate from a live v2 one. The version
+# IS the discriminator, and recovery refuses a v1 intent loudly rather than
+# comparing a rowid against an ordinal and guessing.
+_INTENT_VERSION = 2
 
 
 class CeremonyError(Exception):
@@ -98,11 +104,13 @@ class CeremonyError(Exception):
 
 
 class IntentCorrupt(CeremonyError):
-    """An intent file exists but does not decode to a v1 intent record.
+    """An intent file exists but does not decode to a CURRENT intent record.
 
     Recovery refuses rather than guessing: a corrupt intent is evidence of a
     torn write or foreign tampering, and the safe answer is a human look, not
-    a silent delete.
+    a silent delete. A superseded version lands here for the same reason —
+    an older record may decode perfectly and still mean something else (see
+    ``_INTENT_VERSION``), so it is refused, not reinterpreted.
     """
 
 
@@ -187,7 +195,7 @@ class DeclarationUpdatePreview:
     mode: str  # "genesis" | "edit"
     declaration_status: str  # load_declaration_status label at plan time
     generation: dict[str, Any]  # declaration_generation() disclosure
-    canonical_mode: str  # "jsonl" | "sqlite"
+    canonical_mode: str  # engine.residence.canonical_mode's vocabulary
     canonical_path: Path
     index_path: Path
     changes: tuple  # lang.document.Change rows; () in genesis mode

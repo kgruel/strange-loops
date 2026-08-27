@@ -1,0 +1,62 @@
+{
+  "name": "lens-by-key-tie-id-asc",
+  "description": "Pins the tie-break under a declared non-ts key: three records share seq=7, so the projection falls to fact id ASCENDING. Append order and ts order both contradict id order here, so neither can be mistaken for the tie-break.",
+  "input": {
+    "kind": "record",
+    "members": {
+      "a": [
+        [
+          "01TESTULID0000000000000003",
+          {
+            "kind": "record",
+            "ts": 1000.0,
+            "payload": {
+              "seq": 7,
+              "note": "highest_id_earliest_ts"
+            },
+            "observer": "kyle",
+            "origin": ""
+          }
+        ],
+        [
+          "01TESTULID0000000000000001",
+          {
+            "kind": "record",
+            "ts": 3000.0,
+            "payload": {
+              "seq": 7,
+              "note": "lowest_id_latest_ts"
+            },
+            "observer": "kyle",
+            "origin": ""
+          }
+        ]
+      ],
+      "b": [
+        [
+          "01TESTULID0000000000000002",
+          {
+            "kind": "record",
+            "ts": 2000.0,
+            "payload": {
+              "seq": 7,
+              "note": "middle_id"
+            },
+            "observer": "kyle",
+            "origin": ""
+          }
+        ]
+      ]
+    },
+    "ordering": {
+      "by_key": "seq"
+    }
+  },
+  "expected": {
+    "lens_order": [
+      "01TESTULID0000000000000001",
+      "01TESTULID0000000000000002",
+      "01TESTULID0000000000000003"
+    ]
+  }
+}

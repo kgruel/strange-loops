@@ -1,0 +1,11 @@
+Overall: PASS
+
+No `SOL-SIMP-NN` findings.
+
+Reviewed the anchored diff excluding `SIMPLIFY-REPORT.md`, with emphasis on:
+
+- S-3 cache lifecycle and cross-connection schema mutation; no new cache behavior was introduced by this slice.
+- S-4 `.cursor` consumers and `events_folded` accounting across all fold/advance paths.
+- S-5 row shape, ordering, bounds, materialization, and streaming behavior. `replay_cursor()` remains lazy over the live SQLite cursor.
+
+Spot verification: 31 targeted tests passed. `git diff --check` was clean.

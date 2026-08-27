@@ -479,7 +479,7 @@ WITNESS_CASES: list[WitnessCase] = [
 def _build_and_replay_store(
     spec: Spec,
     facts: list[tuple[str, Fact]],
-    at_rowid: int | None = None,
+    at_ordinal: int | None = None,
 ) -> dict[str, Any]:
     with tempfile.TemporaryDirectory() as tmp_dir:
         db_path = Path(tmp_dir) / "store.db"
@@ -493,7 +493,7 @@ def _build_and_replay_store(
         store.close()
 
         with StoreReader(db_path) as reader:
-            stored_facts = reader.facts_by_kind(spec.name, at_rowid=at_rowid)
+            stored_facts = reader.facts_by_kind(spec.name, at_ordinal=at_ordinal)
             payloads = []
             for f in stored_facts:
                 p = dict(f["payload"])
@@ -546,7 +546,7 @@ def generate_witness_vectors() -> None:
             for label, cursor_addr in case.cursors.items():
                 pos = resolve_witness_position(db_path, cursor_addr)
                 with StoreReader(db_path) as reader:
-                    stored_facts = reader.facts_by_kind(case.spec.name, at_rowid=pos.rowid)
+                    stored_facts = reader.facts_by_kind(case.spec.name, at_ordinal=pos.ordinal)
                     payloads = []
                     for f in stored_facts:
                         p = dict(f["payload"])

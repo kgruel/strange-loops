@@ -352,3 +352,61 @@ class TestSliceErrors:
 
         with pytest.raises(FileExistsError):
             slice_store(src, tgt)
+
+
+class TestSliceArrivalCustody:
+    """Cut B, invariant 15 — the third create arm.
+
+    A slice target whose ``.arrival`` sibling exists is not an absent store:
+    it is the derived index of a log that holds custody. Writing a sliced
+    subset there would put a second custody holder beside a live log, and the
+    resulting index would carry rows the log cannot account for.
+    """
+
+    @staticmethod
+    def _mint_arrival(path):
+        import base64
+        import hashlib
+
+        from engine.arrival import ArrivalLog
+
+        def sign(observer: str, commitment: str) -> str:
+            return "sig:" + hashlib.sha256(
+                f"{observer}/{commitment}".encode()
+            ).hexdigest()
+
+        return ArrivalLog.mint(
+            path,
+            observer="kyle",
+            signer=sign,
+            key=base64.b64encode(b"k" * 32).decode(),
+        )
+
+    def test_slice_refuses_to_write_over_a_live_arrival_logs_index(self, tmp_path):
+        from engine.arrival_store import ArrivalCanonicalUnsupported
+
+        src = tmp_path / "source.db"
+        _make_store(src, facts=SAMPLE_FACTS)
+        self._mint_arrival(tmp_path / "sliced.arrival")
+        tgt = tmp_path / "sliced.db"
+        assert not tgt.exists()
+
+        with pytest.raises(ArrivalCanonicalUnsupported, match="second custody holder"):
+            slice_store(src, tgt)
+
+        # Refused before any byte: no store and no sidecars left behind.
+        assert not tgt.exists()
+        assert not (tmp_path / "sliced.db-wal").exists()
+        assert not (tmp_path / "sliced.db-shm").exists()
+
+    def test_slice_into_a_plain_target_is_unaffected(self, tmp_path):
+        """The happy path is untouched — the guard fires only on the one
+        shape that carries the hazard."""
+        src = tmp_path / "source.db"
+        tgt = tmp_path / "sliced.db"
+        _make_store(src, facts=SAMPLE_FACTS)
+
+        result = slice_store(src, tgt)
+
+        assert result.facts == len(SAMPLE_FACTS)
+        assert tgt.exists()

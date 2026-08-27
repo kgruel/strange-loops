@@ -1485,3 +1485,35 @@ class TestParseAtVertex:
         assert v.state("event") == []
         # But store should have the fact
         assert len(list(store.since(0))) == 1
+
+    def test_replay_pair_cursor_boundary_count_is_counted_not_coordinate_read(
+        self, tmp_path
+    ):
+        """W3-3, resolved by the S-4 split: boundary accounting reads the
+        projection's own fold COUNT, so a pair-cursor projection reconciles
+        normally instead of refusing (and never reads an ordinal as a count)."""
+        from atoms import Fact
+        from engine.loop import Loop
+        from engine.sqlite_store import SqliteStore
+
+        db_path = tmp_path / "pair_cursor.db"
+        store = SqliteStore(path=db_path, serialize=Fact.to_dict, deserialize=Fact.from_dict)
+        store.append(Fact.of("experiment", "alice", n=1))
+
+        v = Vertex("test", store=store)
+        loop = Loop(
+            name="experiment",
+            initial=[],
+            fold=lambda s, p: [*s, p],
+            boundary_count=3,
+            boundary_mode="every",
+        )
+        # A pair cursor is a legitimate store coordinate, not a count.
+        loop._projection.cursor = (1, 0)
+        v.register_loop(loop)
+
+        v.replay()
+
+        assert loop._projection.events_folded == 1
+        assert loop._count_since_boundary == 1  # 1 % 3, from the count
+        store.close()

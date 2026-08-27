@@ -1,0 +1,611 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="The backend-neutral Arrival ledger protocol: semantics, invariants, transitions, authority, and migration.">
+  <title>Arrival Protocol</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,400;0,9..144,500;1,9..144,300&amp;family=Source+Sans+3:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="assets/gruel.css">
+</head>
+<body class="technical-document">
+  <a class="doc-skip-link" href="#main-content">Skip to content</a>
+
+  <nav class="doc-suite-nav" aria-label="Arrival architecture documents">
+    <a class="doc-suite-brand" href="index.html">
+      <span class="doc-suite-brand-mark">Arrival</span>
+      Architecture
+    </a>
+    <div class="doc-suite-links">
+      <a href="index.html">Overview</a>
+      <a href="protocol.html" aria-current="page">Protocol</a>
+      <a href="wire-format.html">Wire format</a>
+      <a href="backend-contract.html">Backend contract</a>
+      <a href="witness-protocol.html">Witness protocol</a>
+    </div>
+  </nav>
+
+  <div class="doc-shell">
+    <aside class="doc-rail" aria-label="On this page">
+      <p class="doc-rail-label">Protocol contents</p>
+      <ol class="doc-toc">
+        <li><a href="#status">Status and scope</a></li>
+        <li><a href="#vocabulary">Vocabulary and roles</a></li>
+        <li><a href="#model">Logical model</a></li>
+        <li><a href="#invariants">Required invariants</a></li>
+        <li><a href="#transitions">State transitions</a></li>
+        <li><a href="#authorship">Authorship and admission</a></li>
+        <li><a href="#reads">Reads and projections</a></li>
+        <li><a href="#migration">Migration sidecar</a></li>
+        <li><a href="#change">Correction and re-custody</a></li>
+        <li><a href="#versioning">Versioning and extensions</a></li>
+        <li><a href="#conformance">Conformance</a></li>
+      </ol>
+    </aside>
+
+    <main class="doc-main" id="main-content">
+      <header class="doc-hero">
+        <p class="doc-eyebrow">Specification 01 · logical meaning</p>
+        <h1>Arrival <em>Protocol</em></h1>
+        <p class="doc-lede">
+          A storage-independent contract for ordered custody: one lineage, one authoritative
+          head, deterministic records, explicit admission, and rebuildable reads.
+        </p>
+        <div class="doc-meta">
+          <span class="doc-badge">Draft v1</span>
+          <span>Normative full-break target</span>
+          <span>26 August 2026</span>
+        </div>
+      </header>
+
+      <section class="doc-section" id="status">
+        <div class="doc-section-header">
+          <span class="doc-section-number">01</span>
+          <h2>Status and scope</h2>
+        </div>
+        <p>
+          This document defines the logical behavior of an Arrival ledger. It intentionally
+          does not define files, SQL schemas, network endpoints, or query languages. Those are
+          implementations of the <a href="backend-contract.html">Backend Contract</a> or
+          encodings defined by the <a href="wire-format.html">Wire Format</a>.
+        </p>
+
+        <div class="doc-callout">
+          <span class="doc-callout-label">Normative language</span>
+          <p>
+            MUST identifies a conformance requirement, SHOULD a requirement that may be
+            departed from only with a documented reason, and MAY an optional behavior. This is
+            a proposed target; the words do not retroactively claim that the branch already
+            supplies every adapter.
+          </p>
+        </div>
+
+        <div class="doc-callout">
+          <span class="doc-callout-label">Ratified</span>
+          <p>
+            Ratified 26 August 2026 as the 1.0 full-break target
+            (<code>decision:design/arrival-backend-neutral-protocol</code>), consistent with
+            the five substrate laws of <code>decision:design/arrival-substrate-laws</code>.
+            The wire profile this document references pins only after the seam triage of
+            <code>decision:design/arrival-wire-v1-seam-triage</code>.
+          </p>
+        </div>
+
+        <h3>Goals</h3>
+        <ul>
+          <li>Keep logical history independent of its physical storage engine.</li>
+          <li>Make append order, atomicity, and lineage identity portable.</li>
+          <li>Allow deterministic migration, replication, audit, and export.</li>
+          <li>Support personal, team, embedded, and remote deployments without mandatory double storage.</li>
+          <li>Detect accidental damage locally and history rollback with an external witness.</li>
+        </ul>
+
+        <h3>Non-goals</h3>
+        <ul>
+          <li>Arrival does not make a fully compromised authority unable to destroy its own bytes.</li>
+          <li>Arrival does not prescribe a universal query schema or SQL dialect.</li>
+          <li>Arrival does not make wall-clock time a trustworthy ordering axis.</li>
+          <li>Arrival does not solve cross-lineage global ordering.</li>
+          <li>Arrival does not silently infer authority from a file suffix or database path.</li>
+        </ul>
+      </section>
+
+      <section class="doc-section" id="vocabulary">
+        <div class="doc-section-header">
+          <span class="doc-section-number">02</span>
+          <h2>Vocabulary and roles</h2>
+        </div>
+
+        <dl class="doc-terms">
+          <div class="doc-term">
+            <dt>lineage</dt>
+            <dd>An independently ordered history opened by exactly one genesis record.</dd>
+          </div>
+          <div class="doc-term">
+            <dt>record</dt>
+            <dd>The atomic logical custody unit at one dense ordinal in a lineage.</dd>
+          </div>
+          <div class="doc-term">
+            <dt>head</dt>
+            <dd>The tuple <code>(lineage, ordinal, record_hash)</code> naming a complete prefix.</dd>
+          </div>
+          <div class="doc-term">
+            <dt>authority</dt>
+            <dd>The one backend currently designated to assign new ordinals for a lineage.</dd>
+          </div>
+          <div class="doc-term">
+            <dt>replica</dt>
+            <dd>A backend that holds an exact prefix but does not independently assign coordinates.</dd>
+          </div>
+          <div class="doc-term">
+            <dt>admission</dt>
+            <dd>The policy gate that validates and authorizes authored content before custody is assigned.</dd>
+          </div>
+          <div class="doc-term">
+            <dt>projection</dt>
+            <dd>Rebuildable query state derived from a known ledger prefix.</dd>
+          </div>
+          <div class="doc-term">
+            <dt>witness</dt>
+            <dd>State retained outside the authority that remembers or attests a previously observed head.</dd>
+          </div>
+        </dl>
+
+        <h3>Actors</h3>
+        <div class="doc-card-grid is-three">
+          <article class="doc-card">
+            <span class="doc-card-index">Writer</span>
+            <h4>Authors content</h4>
+            <p>Submits a record draft and may sign its transport-stable content commitment.</p>
+          </article>
+          <article class="doc-card">
+            <span class="doc-card-index">Custodian</span>
+            <h4>Admits custody</h4>
+            <p>Applies policy, selects the authority, and requests an atomic append.</p>
+          </article>
+          <article class="doc-card">
+            <span class="doc-card-index">Reader</span>
+            <h4>Consumes a prefix</h4>
+            <p>Scans records or queries a projection with an explicit freshness watermark.</p>
+          </article>
+        </div>
+
+        <div class="doc-callout is-warning">
+          <span class="doc-callout-label">Name collision</span>
+          <p>
+            The external Arrival witness in this suite is not the branch’s existing
+            <code>engine.witness.WitnessPosition</code>, which is a read-path cursor over a
+            store prefix. Both use observed position, but they have different jobs and wire
+            identities. Ruled: the code vocabulary for the external artifact is
+            <strong>head attestation</strong>; “witness” stays the read cursor
+            (<code>decision:design/arrival-suite-review-dispositions</code> §3, Rule 18
+            glossary discipline).
+          </p>
+        </div>
+      </section>
+
+      <section class="doc-section" id="model">
+        <div class="doc-section-header">
+          <span class="doc-section-number">03</span>
+          <h2>The logical model</h2>
+        </div>
+
+        <h3>Lineage and coordinates</h3>
+        <p>
+          A genesis record opens a lineage at ordinal zero. Every successor uses the same
+          lineage identifier and the next integer ordinal. A record coordinate is therefore
+          <code>(lineage, ordinal)</code>. It is stable across backends and exports.
+        </p>
+        <p>
+          A record may expand into several projected rows. The stable projected coordinate is
+          <code>(lineage, ordinal, sequence)</code>, where <code>sequence</code> is the zero-based
+          position inside that record’s deterministic expansion. A batch does not consume one
+          ledger ordinal per fact.
+        </p>
+
+        <h3>Core record kinds</h3>
+        <div class="doc-table-wrap">
+          <table class="doc-spec-table">
+            <thead>
+              <tr><th>Kind</th><th>Role</th><th>Required behavior</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><code>genesis</code></td><td>Opens the lineage and founding key</td><td>Exactly ordinal 0; self-naming and self-certifying.</td></tr>
+              <tr><td><code>key</code></td><td>Introduces an observer key</td><td>Signed by a key already valid before its ordinal.</td></tr>
+              <tr><td><code>fact</code></td><td>Carries one canonical fact row</td><td>Expands deterministically to sequence 0.</td></tr>
+              <tr><td><code>batch</code></td><td>Carries one atomic fact ceremony</td><td>Expansion order is part of its body grammar.</td></tr>
+              <tr><td><code>tick</code></td><td>Carries one canonical tick row</td><td>Never participates in wall-clock ledger ordering.</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <p>
+          The protocol treats record bodies as semantic JSON objects. The v1 wire profile pins
+          the post-triage forms of the fact, batch, and tick object grammars used by the branch
+          codecs (<code>decision:design/arrival-wire-v1-seam-triage</code>).
+          Storage backends MAY normalize those values internally only if they preserve the JSON
+          value exactly enough to reproduce commitments and canonical export.
+        </p>
+
+        <h3>Three different commitments</h3>
+        <div class="doc-layer-list">
+          <div class="doc-layer">
+            <div><strong>Content commitment</strong><span>Covers authored fields and remains stable when another custodian assigns a coordinate.</span></div>
+          </div>
+          <div class="doc-layer">
+            <div><strong>Record hash</strong><span>Covers the full custody envelope except itself, including coordinate, predecessor, and optional signature.</span></div>
+          </div>
+          <div class="doc-layer">
+            <div><strong>Head attestation</strong><span>Commits a complete prefix outside the mutable authority and detects rollback or re-chaining.</span></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="doc-section" id="invariants">
+        <div class="doc-section-header">
+          <span class="doc-section-number">04</span>
+          <h2>Required invariants</h2>
+        </div>
+
+        <ol class="doc-checklist">
+          <li><strong>Single genesis.</strong> Ordinal 0 is a valid genesis; no later record has kind <code>genesis</code>.</li>
+          <li><strong>Dense order.</strong> Ordinals begin at 0 and increase by exactly 1 with no gaps or repeats.</li>
+          <li><strong>One lineage.</strong> Every record in a scan belongs to the genesis lineage.</li>
+          <li><strong>Hash continuity.</strong> Genesis has no predecessor; every successor names the preceding record hash.</li>
+          <li><strong>Canonical integrity.</strong> Every stored record hash recomputes under the selected wire profile.</li>
+          <li><strong>Atomic record.</strong> A reader observes all of a record or none of it.</li>
+          <li><strong>Atomic record.</strong> Every authority atomically appends at least one record; an advertised multi-record transaction commits its complete suffix or none of it.</li>
+          <li><strong>Durable success.</strong> A successful append survives the backend’s declared failure model.</li>
+          <li><strong>One authority.</strong> Only the designated authority assigns new coordinates for a lineage.</li>
+          <li><strong>Deterministic prefix.</strong> Reading through a captured head always yields the same records or a corruption/fork refusal.</li>
+        </ol>
+
+        <div class="doc-callout is-security">
+          <span class="doc-callout-label">No silent repair</span>
+          <p>
+            A complete interior record that fails grammar, density, lineage, or hash checks is
+            corruption. A conforming implementation MUST refuse it; it MUST NOT skip, rewrite,
+            or truncate history in the name of repair.
+          </p>
+        </div>
+      </section>
+
+      <section class="doc-section" id="transitions">
+        <div class="doc-section-header">
+          <span class="doc-section-number">05</span>
+          <h2>State transitions</h2>
+        </div>
+
+        <h3>Mint</h3>
+        <p>
+          <code>mint</code> creates a new lineage with a signed genesis and returns head zero.
+          Publication MUST be exclusive: two concurrent mints cannot overwrite one another or
+          accidentally open the same physical target as different lineages.
+        </p>
+
+        <h3>Admit and append</h3>
+        <p>
+          The authority accepts one or more record drafts plus an expected head, up to its
+          advertised atomic limit. Under one serialization
+          boundary it compares the expected head, assigns dense coordinates, links and hashes
+          the records, durably commits the suffix, and returns the committed records and new
+          head. A mismatch refuses without mutation.
+        </p>
+
+        <div class="doc-code">
+          <div class="doc-code-label"><span>Logical operation</span><span>pseudocode</span></div>
+          <pre><code>append(expected_head, drafts):
+  atomically:
+    actual = head()
+    require actual == expected_head
+    require this backend is authority(actual.lineage)
+
+    records = assign_and_chain(actual, drafts)
+    validate(records)
+    durable_commit(records)
+
+  return Commit(records, head=records[-1].head)</code></pre>
+        </div>
+
+        <p>
+          The expected token MUST include the record hash as well as the ordinal. Comparing only
+          the ordinal cannot distinguish two same-height forks.
+        </p>
+
+        <h3>Replicate exact records</h3>
+        <p>
+          Replication does not re-coordinate or re-sign records. A replica accepts only the
+          exact next record, or an exact next group when it advertises transactional groups,
+          for its current head. If lineage,
+          ordinal, predecessor, or hash differs, it reports a fork.
+        </p>
+
+        <h3>Scan and capture</h3>
+        <p>
+          <code>capture_head</code> returns an immutable prefix token.
+          <code>scan(after, through)</code> yields deterministic records strictly after one
+          coordinate and no later than the captured head. A scan MUST NOT quietly cross onto a
+          new head while it is in progress.
+        </p>
+
+        <h3>Export</h3>
+        <p>
+          Export is a read over a captured prefix encoded in the portable wire format. Export
+          creates a replica artifact, not a second authority. A deterministic manifest names
+          the exported head, record count, codec, and digest.
+        </p>
+      </section>
+
+      <section class="doc-section" id="authorship">
+        <div class="doc-section-header">
+          <span class="doc-section-number">06</span>
+          <h2>Authorship and admission</h2>
+        </div>
+        <p>
+          Arrival separates what an observer authored from where a custodian placed it. The
+          optional record signature covers the content commitment—kind, authored timestamp,
+          observer, origin, and body—but not lineage, ordinal, predecessor, or record hash. A
+          signed fact can therefore move between custody lineages without fabricating a new
+          author signature.
+        </p>
+
+        <div class="doc-equation">
+          content = SHA-256( JCS({ "k", "at", "observer", "origin", "body" }) )
+        </div>
+
+        <p>
+          Genesis introduces the founding public key and is self-certifying. A <code>key</code>
+          record introduces a later key only when signed by a key valid for its observer at a
+          lower ordinal. Verifiers resolve keys from lineage history rather than a mutable
+          side table.
+        </p>
+
+        <h3>Admission policy</h3>
+        <p>
+          Ledger validity and application admissibility are distinct. The backend enforces
+          ledger invariants. The admission layer additionally MAY require ordinary signatures,
+          authorize a team or observer, reject duplicate fact IDs, validate domain schemas,
+          enforce size limits, and apply retention rules. Replication verifies existing custody;
+          it does not rerun policy as though the source record were newly authored.
+        </p>
+
+        <div class="doc-callout">
+          <span class="doc-callout-label">Remote service rule</span>
+          <p>
+            Team authorization belongs at admission, ahead of the authoritative append. It is
+            not implemented by granting clients direct INSERT access to ledger tables.
+          </p>
+        </div>
+      </section>
+
+      <section class="doc-section" id="reads">
+        <div class="doc-section-header">
+          <span class="doc-section-number">07</span>
+          <h2>Reads, snapshots, and projections</h2>
+        </div>
+        <p>
+          The ledger is the custody truth; projections are query accelerators. A backend may
+          query directly from canonical record storage, maintain normalized tables in the same
+          transaction, or catch up asynchronously. The choice is local, but freshness is not
+          allowed to become ambiguous.
+        </p>
+
+        <div class="doc-table-wrap">
+          <table class="doc-spec-table">
+            <thead>
+              <tr><th>Read result field</th><th>Meaning</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><code>lineage</code></td><td>The ledger axis against which the result was resolved.</td></tr>
+              <tr><td><code>captured_head</code></td><td>The authority head captured for this read.</td></tr>
+              <tr><td><code>projected_through</code></td><td>The greatest record head completely represented in the query surface.</td></tr>
+              <tr><td><code>rows</code></td><td>Results evaluated against the stated projected prefix.</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <p>
+          A caller that requires current reads asks for
+          <code>projected_through == captured_head</code>, waits for catch-up, or receives a
+          <code>ProjectionBehind</code> refusal. It must never be handed stale rows labeled as
+          current. Cross-lineage aggregation has no shared Arrival order; an aggregate query
+          must report a per-lineage watermark map.
+        </p>
+
+        <h3>DuckDB without duplicated canonical storage</h3>
+        <p>
+          A DuckDB backend can store the canonical envelope as typed columns plus semantic JSON
+          and expose views over that same data. It need not keep a parallel <code>.arrival</code>
+          file. If extra fact tables are materialized for speed, they are projections and may
+          contain only the fields and indexes that justify their cost.
+        </p>
+      </section>
+
+      <section class="doc-section" id="migration">
+        <div class="doc-section-header">
+          <span class="doc-section-number">08</span>
+          <h2>The migration sidecar boundary</h2>
+        </div>
+        <p>
+          The full-break design gives legacy interpretation to one disposable sidecar. The new
+          runtime has no “old store mode.” The sidecar implements a frozen <code>LegacySource</code>
+          and writes through the same <code>ArrivalSink</code> any ordinary importer uses.
+        </p>
+
+        <div class="doc-callout">
+          <span class="doc-callout-label">One genesis grammar</span>
+          <p>
+            The sidecar mints an ordinary signed target genesis under the migration custodian.
+            It does not introduce a second keyless or containment-only genesis into the core
+            protocol. Source fingerprints, counts, exceptions, and equivalence claims live in
+            the signed migration report and bootstrap witness receipt; a future in-ledger
+            provenance record, if wanted, uses a namespaced extension kind.
+          </p>
+        </div>
+
+        <div class="doc-flow" role="img" aria-label="A frozen legacy reader transforms records into the generic Arrival sink, targeting any conforming backend">
+          <div class="doc-flow-node"><strong>0.x store</strong><span>stable snapshot</span></div>
+          <div class="doc-flow-arrow" aria-hidden="true">→</div>
+          <div class="doc-flow-node"><strong>LegacySource</strong><span>old format only here</span></div>
+          <div class="doc-flow-arrow" aria-hidden="true">→</div>
+          <div class="doc-flow-node"><strong>Transformer</strong><span>facts, ticks, evidence</span></div>
+          <div class="doc-flow-arrow" aria-hidden="true">→</div>
+          <div class="doc-flow-node is-authority"><strong>ArrivalSink</strong><span>any staged backend</span></div>
+        </div>
+
+        <h3>Sidecar obligations</h3>
+        <ul>
+          <li>Read a stable source snapshot without mutating it.</li>
+          <li>Declare the source format and migration tool version.</li>
+          <li>Map every in-scope canonical row exactly once and in the ruled source order.</li>
+          <li>Preserve authored signatures and content where the old format carried them.</li>
+          <li>Produce source inventory, target head, exceptions, and deterministic equivalence evidence.</li>
+          <li>Be restartable: an interrupted stage is discarded or resumed only from a verified target head.</li>
+          <li>Publish the new store descriptor atomically after verification and witnessing.</li>
+        </ul>
+
+        <div class="doc-callout is-warning">
+          <span class="doc-callout-label">No dual authority</span>
+          <p>
+            During staging, the legacy store remains the user-visible authority and the target
+            accepts only migration writes. At cutover, the descriptor changes once. If either
+            side accepts ordinary writes concurrently, the result is two histories, not a
+            migration.
+          </p>
+        </div>
+
+        <h3>Legacy conversion versus backend movement</h3>
+        <p>
+          The sidecar conversion above is only for a pre-Arrival source. Moving an existing
+          Arrival lineage from the file backend to DuckDB or PostgreSQL is exact replication
+          followed by the re-custody procedure: it preserves genesis, ordinals, signatures,
+          record hashes, and the witnessed head rather than admitting the content into a new
+          lineage.
+        </p>
+      </section>
+
+      <section class="doc-section" id="change">
+        <div class="doc-section-header">
+          <span class="doc-section-number">09</span>
+          <h2>Correction, erasure, and re-custody</h2>
+        </div>
+
+        <h3>Correction</h3>
+        <p>
+          A semantic mistake is corrected by appending a new fact or explicit tombstone whose
+          meaning supersedes earlier content. Editing or deleting an admitted record is not a
+          correction operation; it is a custody integrity failure.
+        </p>
+
+        <h3>Erasure</h3>
+        <p>
+          Append-only history and legal or privacy erasure can conflict. Protocol v1 leaves the
+          erasure profile open rather than pretending tombstones erase bytes. Candidate profiles
+          include payload encryption followed by key destruction, lineage re-custody into a
+          redacted successor with an external transition statement, and explicitly destructive
+          compaction that creates a new lineage. Each changes what can be proven and requires a
+          separate ruling.
+        </p>
+
+        <h3>Authority transfer</h3>
+        <p>
+          A portable export alone never transfers authority. A future re-custody ceremony MUST
+          identify the old witnessed head, the new backend identity, an activation condition,
+          and proof that the old authority will refuse new appends. Until that profile is
+          ratified, operational transfer is a controlled stop-export-verify-switch procedure.
+        </p>
+      </section>
+
+      <section class="doc-section" id="versioning">
+        <div class="doc-section-header">
+          <span class="doc-section-number">10</span>
+          <h2>Versioning and extensions</h2>
+        </div>
+        <p>Four version axes are independent even when their first value is all “1.”</p>
+
+        <div class="doc-table-wrap">
+          <table class="doc-spec-table">
+            <thead>
+              <tr><th>Axis</th><th>Changes when</th><th>Must not imply</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>Protocol</td><td>Logical semantics or invariants change</td><td>A physical schema rewrite everywhere</td></tr>
+              <tr><td>Wire</td><td>Envelope grammar, canonicalization, or framing changes</td><td>A new backend implementation</td></tr>
+              <tr><td>Backend schema</td><td>One adapter changes its physical representation</td><td>A change to portable records</td></tr>
+              <tr><td>API</td><td>Client operations or transport endpoints change</td><td>A rewrite of stored history</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <p>
+          Core record kinds are unqualified lowercase names. Extension kinds SHOULD use a
+          collision-resistant namespace such as <code>org.example/name</code>. A backend may
+          preserve an unknown extension record without projecting it, but it MUST NOT claim full
+          application conformance for semantics it does not understand.
+        </p>
+      </section>
+
+      <section class="doc-section" id="conformance">
+        <div class="doc-section-header">
+          <span class="doc-section-number">11</span>
+          <h2>Conformance and refusal</h2>
+        </div>
+
+        <h3>Named refusals</h3>
+        <div class="doc-table-wrap">
+          <table class="doc-spec-table">
+            <thead>
+              <tr><th>Refusal</th><th>Condition</th><th>Mutation allowed?</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><code>InvalidRecord</code></td><td>Grammar, kind, hash, or placement fails</td><td>No</td></tr>
+              <tr><td><code>HeadMismatch</code></td><td>Expected head is not current head</td><td>No</td></tr>
+              <tr><td><code>ForkDetected</code></td><td>Same lineage position names a different hash</td><td>No</td></tr>
+              <tr><td><code>AuthorshipUnverified</code></td><td>Required signature cannot resolve or verify</td><td>No</td></tr>
+              <tr><td><code>AuthorityRefused</code></td><td>Target is not designated to assign coordinates</td><td>No</td></tr>
+              <tr><td><code>DurabilityFailure</code></td><td>Backend cannot establish its success guarantee</td><td>Outcome reported unknown; reconcile by head</td></tr>
+              <tr><td><code>ProjectionBehind</code></td><td>Requested query prefix is not fully projected</td><td>No ledger mutation</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3>Minimum protocol test suite</h3>
+        <ul>
+          <li>Mint racing and duplicate-genesis refusal</li>
+          <li>Concurrent compare-and-append with one winner</li>
+          <li>Atomic multi-record append under injected failure</li>
+          <li>Dense ordinal, lineage, predecessor, and record-hash corruption vectors</li>
+          <li>Exact replication and same-height fork vectors</li>
+          <li>Snapshot isolation while another writer advances the head</li>
+          <li>Cross-backend export byte equality under the selected wire profile</li>
+          <li>Projection rebuild equality and explicit behind-watermark behavior</li>
+          <li>Witness rollback and history-rewrite vectors</li>
+        </ul>
+
+        <div class="doc-callout is-open">
+          <span class="doc-callout-label">Open before ratification</span>
+          <p>
+            Ratification still needs the authority-transfer profile, the erasure posture, the
+            extension-kind policy, and executable cross-language conformance vectors. The
+            storage-independent split itself does not depend on those choices.
+          </p>
+        </div>
+      </section>
+
+      <nav class="doc-footer-nav" aria-label="Document pagination">
+        <a class="doc-footer-link" href="index.html">
+          <span>Previous</span>
+          <strong>← Architecture overview</strong>
+        </a>
+        <a class="doc-footer-link" href="wire-format.html">
+          <span>Next</span>
+          <strong>Arrival wire format →</strong>
+        </a>
+      </nav>
+      <p class="doc-footer-note">Arrival Protocol · Draft v1 · Proposed full-break contract</p>
+    </main>
+  </div>
+</body>
+</html>

@@ -1,0 +1,10 @@
+/**
+ * Gruel Design System — default foundation bundle
+ *
+ * Components remain explicit imports so consumers only take what they use.
+ */
+
+@import url("./tokens.css");
+@import url("./themes.css");
+@import url("./foundation.css");
+@import url("./utilities.css");

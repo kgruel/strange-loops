@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Overview and study guide for the backend-neutral Arrival architecture.">
+  <title>Arrival Architecture — Overview</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,400;0,9..144,500;1,9..144,300&amp;family=Source+Sans+3:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="assets/gruel.css">
+</head>
+<body class="technical-document">
+  <a class="doc-skip-link" href="#main-content">Skip to content</a>
+
+  <nav class="doc-suite-nav" aria-label="Arrival architecture documents">
+    <a class="doc-suite-brand" href="index.html">
+      <span class="doc-suite-brand-mark">Arrival</span>
+      Architecture
+    </a>
+    <div class="doc-suite-links">
+      <a href="index.html" aria-current="page">Overview</a>
+      <a href="protocol.html">Protocol</a>
+      <a href="wire-format.html">Wire format</a>
+      <a href="backend-contract.html">Backend contract</a>
+      <a href="witness-protocol.html">Witness protocol</a>
+    </div>
+  </nav>
+
+  <div class="doc-shell">
+    <aside class="doc-rail" aria-label="On this page">
+      <p class="doc-rail-label">On this page</p>
+      <ol class="doc-toc">
+        <li><a href="#decision">The decision</a></li>
+        <li><a href="#shape">Architecture at a glance</a></li>
+        <li><a href="#documents">The four specifications</a></li>
+        <li><a href="#deployments">Deployment shapes</a></li>
+        <li><a href="#integrity">Integrity model</a></li>
+        <li><a href="#migration">Full-break migration</a></li>
+        <li><a href="#boundaries">Decided and still open</a></li>
+        <li><a href="#reading">Suggested reading path</a></li>
+      </ol>
+    </aside>
+
+    <main class="doc-main" id="main-content">
+      <header class="doc-hero">
+        <p class="doc-eyebrow">Session wrap-up · architecture suite</p>
+        <h1>Arrival, <em>unbound</em> from storage</h1>
+        <p class="doc-lede">
+          Arrival is a logical, append-only custody protocol. A <code>.arrival</code>
+          file is one useful encoding and backend—not a second copy every store must keep.
+        </p>
+        <div class="doc-meta">
+          <span class="doc-badge">Ratified 1.0 target</span>
+          <span>Five linked study documents</span>
+          <span>26 August 2026</span>
+        </div>
+      </header>
+
+      <section class="doc-section" id="decision">
+        <div class="doc-section-header">
+          <span class="doc-section-number">01</span>
+          <h2>The decision in one page</h2>
+        </div>
+        <p>
+          The durable idea is not “every store has an arrival file.” It is “every lineage has
+          an ordered, verifiable arrival history with one authoritative append head.” The
+          storage engine may be a local file, DuckDB, PostgreSQL, or a future service, provided
+          it implements the same ledger contract.
+        </p>
+
+        <div class="doc-callout">
+          <span class="doc-callout-label">Ratified</span>
+          <p>
+            Ratified 26 August 2026 as the 1.0 full-break target —
+            <code>decision:design/arrival-backend-neutral-protocol</code> — with one
+            amendment: the envelope pins as wire v1 only after the seam triage of
+            <code>decision:design/arrival-wire-v1-seam-triage</code>. The remaining review
+            findings are dispositioned in
+            <code>decision:design/arrival-suite-review-dispositions</code>.
+          </p>
+        </div>
+
+        <div class="doc-callout">
+          <span class="doc-callout-label">Core invariant</span>
+          <p>
+            At any moment, one lineage has exactly one designated authority. Exports and
+            replicas are copies of that authority unless an explicit re-custody ceremony says
+            otherwise.
+          </p>
+        </div>
+
+        <div class="doc-split">
+          <article class="doc-panel">
+            <h3>What becomes stable</h3>
+            <ul>
+              <li>Lineage and dense ordinal coordinates</li>
+              <li>Record semantics and hash chaining</li>
+              <li>Atomic compare-and-append behavior</li>
+              <li>Deterministic scan and portable export</li>
+              <li>External head attestations</li>
+            </ul>
+          </article>
+          <article class="doc-panel">
+            <h3>What remains replaceable</h3>
+            <ul>
+              <li>Physical files, pages, tables, and indexes</li>
+              <li>Projection strategy and query language</li>
+              <li>Single-user versus team deployment</li>
+              <li>Local versus remote durability mechanics</li>
+              <li>Transport and archive packaging</li>
+            </ul>
+          </article>
+        </div>
+
+        <p>
+          This removes the forced double-storage shape. A personal DuckDB store can be the
+          canonical Arrival backend and expose Quack-friendly read views. A team service can
+          use PostgreSQL as its canonical backend. Either one produces a <code>.arrival</code>
+          stream only for interchange, audit, backup, or migration.
+        </p>
+      </section>
+
+      <section class="doc-section" id="shape">
+        <div class="doc-section-header">
+          <span class="doc-section-number">02</span>
+          <h2>Architecture at a glance</h2>
+        </div>
+
+        <div class="doc-flow" role="img" aria-label="Writers pass through admission and the Arrival protocol to one authoritative backend, which feeds query surfaces and external witnesses">
+          <div class="doc-flow-node"><strong>Writers</strong><span>people, SDKs, migration</span></div>
+          <div class="doc-flow-arrow" aria-hidden="true">→</div>
+          <div class="doc-flow-node"><strong>Admission</strong><span>validate, authorize, dedupe</span></div>
+          <div class="doc-flow-arrow" aria-hidden="true">→</div>
+          <div class="doc-flow-node is-authority"><strong>Arrival authority</strong><span>one backend per lineage</span></div>
+          <div class="doc-flow-arrow" aria-hidden="true">→</div>
+          <div class="doc-flow-node"><strong>Reads + witnesses</strong><span>queries, export, audit</span></div>
+        </div>
+
+        <div class="doc-layer-list">
+          <div class="doc-layer">
+            <div><strong>Protocol</strong><span>Defines what a lineage, record, coordinate, append, snapshot, and fork mean.</span></div>
+          </div>
+          <div class="doc-layer">
+            <div><strong>Backend contract</strong><span>Defines the guarantees a storage implementation must provide to hold authority.</span></div>
+          </div>
+          <div class="doc-layer">
+            <div><strong>Wire format</strong><span>Defines a canonical portable JSONL representation for movement between implementations.</span></div>
+          </div>
+          <div class="doc-layer">
+            <div><strong>Query surfaces</strong><span>Expose facts, ticks, folds, and SQL with an explicit projection watermark.</span></div>
+          </div>
+          <div class="doc-layer">
+            <div><strong>Witnessing</strong><span>Anchors the logical head outside the mutable backend so rollback and rewritten history are detectable.</span></div>
+          </div>
+        </div>
+
+        <div class="doc-callout is-warning">
+          <span class="doc-callout-label">Important separation</span>
+          <p>
+            Query interfaces do not get ledger-write authority. Raw SQL may inspect a DuckDB
+            or PostgreSQL projection, but protocol writes pass through admission and
+            compare-and-append. This is an integrity boundary, not merely an API preference.
+          </p>
+        </div>
+      </section>
+
+      <section class="doc-section" id="documents">
+        <div class="doc-section-header">
+          <span class="doc-section-number">03</span>
+          <h2>The four specifications</h2>
+        </div>
+        <p>
+          These documents are written as a coherent draft. Normative words—MUST, SHOULD, and
+          MAY—describe the proposed full-break target, not behavior already shipped by every
+          backend.
+        </p>
+
+        <div class="doc-card-grid">
+          <a class="doc-card" href="protocol.html">
+            <span class="doc-card-index">01 / Meaning</span>
+            <h3>Arrival Protocol</h3>
+            <p>The logical ledger, its invariants, record roles, append transitions, authority, and migration boundary.</p>
+            <span class="doc-card-link">Read the protocol →</span>
+          </a>
+          <a class="doc-card" href="wire-format.html">
+            <span class="doc-card-index">02 / Interchange</span>
+            <h3>Arrival Wire Format</h3>
+            <p>The reference UTF-8 JSON Lines envelope, JCS commitments, field grammar, streaming, and import rules.</p>
+            <span class="doc-card-link">Read the wire format →</span>
+          </a>
+          <a class="doc-card" href="backend-contract.html">
+            <span class="doc-card-index">03 / Storage</span>
+            <h3>Arrival Backend Contract</h3>
+            <p>The interfaces and durability guarantees that let files, DuckDB, PostgreSQL, and services hold authority.</p>
+            <span class="doc-card-link">Read the backend contract →</span>
+          </a>
+          <a class="doc-card" href="witness-protocol.html">
+            <span class="doc-card-index">04 / Detection</span>
+            <h3>Arrival Witness Protocol</h3>
+            <p>Record-chain verification plus externally retained head attestations for edits, deletion, rollback, and forks.</p>
+            <span class="doc-card-link">Read the witness protocol →</span>
+          </a>
+        </div>
+      </section>
+
+      <section class="doc-section" id="deployments">
+        <div class="doc-section-header">
+          <span class="doc-section-number">04</span>
+          <h2>Deployment shapes</h2>
+        </div>
+
+        <div class="doc-table-wrap">
+          <table class="doc-spec-table">
+            <thead>
+              <tr>
+                <th>Use</th>
+                <th>Authority</th>
+                <th>Query surface</th>
+                <th><code>.arrival</code> role</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Personal</td>
+                <td>DuckDB file</td>
+                <td>DuckDB / Quack read views</td>
+                <td>Export, backup, interchange</td>
+              </tr>
+              <tr>
+                <td>Small local</td>
+                <td>JSONL file backend</td>
+                <td>SQLite projection</td>
+                <td>The authority itself</td>
+              </tr>
+              <tr>
+                <td>Team service</td>
+                <td>PostgreSQL or service backend</td>
+                <td>SQL and application APIs</td>
+                <td>Streaming export or archive</td>
+              </tr>
+              <tr>
+                <td>Cold archive</td>
+                <td>None; read-only replica</td>
+                <td>Offline verification</td>
+                <td>Immutable bundle with manifest</td>
+              </tr>
+            </tbody>
+          </table>
+          <p class="doc-table-caption">
+            Backend selection is explicit in a store descriptor. A filename suffix never
+            silently decides which implementation is authoritative.
+          </p>
+        </div>
+
+        <h3>Team tenancy</h3>
+        <p>
+          A service backend may host many lineages. One lineage per team gives the clearest
+          authority, export, retention, and access-control boundary. A shared multi-tenant
+          lineage is possible, but it couples authorization and erasure policy across tenants
+          and should require an explicit protocol profile rather than an incidental
+          <code>team_id</code> column.
+        </p>
+      </section>
+
+      <section class="doc-section" id="integrity">
+        <div class="doc-section-header">
+          <span class="doc-section-number">05</span>
+          <h2>Integrity without hashing the physical database</h2>
+        </div>
+        <p>
+          Hashing an entire database file is useful for identifying one backup image, but it is
+          a poor logical integrity contract: page layout, vacuuming, indexes, statistics, and
+          engine metadata can change while the facts do not. Arrival instead hashes the stable
+          logical record sequence.
+        </p>
+
+        <div class="doc-equation" role="math" aria-label="Each record hash is SHA-256 over the JCS canonical record without its record hash field">
+          rh[n] = SHA-256( JCS( record[n] without "rh" ) )<br>
+          record[n].prev = rh[n − 1]
+        </div>
+
+        <div class="doc-table-wrap">
+          <table class="doc-spec-table">
+            <thead>
+              <tr><th>Change</th><th>Local chain</th><th>External head</th><th>Projection audit</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>Edit an interior record</td><td>Detects hash/chain break</td><td>Corroborates known head</td><td>May detect row mismatch</td></tr>
+              <tr><td>Delete an interior record</td><td>Detects gap or broken link</td><td>Corroborates known head</td><td>Detects missing materialization</td></tr>
+              <tr><td>Delete the tail</td><td>Shorter prefix still validates</td><td><strong>Detects rollback</strong></td><td>May only appear stale</td></tr>
+              <tr><td>Rebuild and rehash history</td><td>New chain can self-validate</td><td><strong>Detects fork/rewrite</strong></td><td>Cannot establish old truth</td></tr>
+              <tr><td>Delete only a query row</td><td>Ledger remains intact</td><td>Head remains intact</td><td><strong>Detects divergence</strong></td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="doc-callout is-security">
+          <span class="doc-callout-label">Security boundary</span>
+          <p>
+            A backend administrator can always rewrite storage they fully control. Detection
+            becomes meaningful when a previously seen head—or its signed attestation—is kept
+            outside that administrator’s rewrite boundary: a client cache, another machine,
+            an append-only notary, or several witnesses.
+          </p>
+        </div>
+      </section>
+
+      <section class="doc-section" id="migration">
+        <div class="doc-section-header">
+          <span class="doc-section-number">06</span>
+          <h2>The full-break migration</h2>
+        </div>
+        <p>
+          The clean break is an advantage if legacy knowledge stays in one sidecar. The new
+          application need only understand the Arrival interfaces; it never needs a permanent
+          compatibility mode or a dual-write period.
+        </p>
+
+        <ol class="doc-steps">
+          <li><strong>Freeze and inventory.</strong> Open the old 0.x store with a frozen reader and capture a stable logical inventory.</li>
+          <li><strong>Stage a chosen backend.</strong> Create a new lineage in a temporary File, DuckDB, PostgreSQL, or service authority.</li>
+          <li><strong>Stream through the protocol.</strong> Translate legacy facts and ticks into record drafts and append only through <code>ArrivalSink</code>.</li>
+          <li><strong>Prove equivalence.</strong> Compare counts, IDs, content commitments, and the deterministic portable export; retain a migration report.</li>
+          <li><strong>Witness and publish.</strong> Sign or retain the new head, then atomically replace the store descriptor that names the authority.</li>
+          <li><strong>Archive the source.</strong> Keep the old store read-only until the chosen rollback window ends; never let both accept writes.</li>
+        </ol>
+
+        <div class="doc-callout">
+          <span class="doc-callout-label">Simplification</span>
+          <p>
+            Migration targets the protocol, not each storage layout. Adding a DuckDB backend
+            does not require a DuckDB-specific legacy migrator; it requires one backend adapter
+            and the same sidecar pipeline.
+          </p>
+        </div>
+      </section>
+
+      <section class="doc-section" id="boundaries">
+        <div class="doc-section-header">
+          <span class="doc-section-number">07</span>
+          <h2>Decided and still open</h2>
+        </div>
+
+        <div class="doc-split">
+          <article class="doc-panel">
+            <h3>Strongly decided</h3>
+            <ul>
+              <li>Arrival is a protocol, not a mandatory file.</li>
+              <li>One authority exists per lineage.</li>
+              <li>The envelope becomes wire v1 after the seam triage — drop <code>body.t</code>, re-spell the tick <code>observer</code>, keep the dual signature (<code>decision:design/arrival-wire-v1-seam-triage</code>).</li>
+              <li>Ledger and query APIs remain separate.</li>
+              <li>The sidecar owns legacy interpretation.</li>
+              <li>External state is required for rollback detection.</li>
+            </ul>
+          </article>
+          <article class="doc-panel">
+            <h3>Requires a later ruling</h3>
+            <ul>
+              <li>The tick <code>observer</code> re-spelling — the one seam-triage sub-ruling still open</li>
+              <li>Formal authority-transfer / re-custody ceremony</li>
+              <li>Erasure and privacy profile</li>
+              <li>Witness topology and retention policy</li>
+              <li>Extension-kind registry and compatibility rules</li>
+              <li>First production DuckDB and PostgreSQL schemas</li>
+              <li>Multi-tenant lineage policy</li>
+            </ul>
+          </article>
+        </div>
+
+        <p>
+          None of those open choices undermines the central split. They are profiles built on
+          top of a backend-neutral ledger rather than reasons to make one file format universal.
+        </p>
+      </section>
+
+      <section class="doc-section" id="reading">
+        <div class="doc-section-header">
+          <span class="doc-section-number">08</span>
+          <h2>Suggested reading path</h2>
+        </div>
+        <ol class="doc-checklist">
+          <li>Read the <a href="protocol.html">Protocol</a> first for the vocabulary and invariants.</li>
+          <li>Read the <a href="backend-contract.html">Backend Contract</a> next if implementation shape is the main concern.</li>
+          <li>Use the <a href="wire-format.html">Wire Format</a> as the precise bridge to the current branch.</li>
+          <li>Finish with the <a href="witness-protocol.html">Witness Protocol</a> for the deletion and rollback threat model.</li>
+        </ol>
+      </section>
+
+      <nav class="doc-footer-nav" aria-label="Document pagination">
+        <a class="doc-footer-link" href="witness-protocol.html">
+          <span>Last specification</span>
+          <strong>← Witness protocol</strong>
+        </a>
+        <a class="doc-footer-link" href="protocol.html">
+          <span>Begin the suite</span>
+          <strong>Arrival protocol →</strong>
+        </a>
+      </nav>
+      <p class="doc-footer-note">Arrival architecture study set · Ratified 26 August 2026 as the 1.0 target — <code>decision:design/arrival-backend-neutral-protocol</code></p>
+    </main>
+  </div>
+</body>
+</html>

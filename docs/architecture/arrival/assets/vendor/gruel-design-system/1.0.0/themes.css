@@ -1,0 +1,188 @@
+/**
+ * Gruel Design System — themes
+ *
+ * Automatic Night Botanist plus explicit theme classes. Import after
+ * tokens.css. Theme classes may be applied to html or to a scoped container.
+ */
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --theme-color-scheme: dark;
+    --parchment: #1a1a2e;
+    --parchment-dark: #12121f;
+    --oatmeal: #2a2a44;
+    --warm-white: #22223a;
+    --botanical: #6c9574;
+    --botanical-light: #7da584;
+    --botanical-muted: #79917e;
+    --amber: #e8d5b7;
+    --amber-light: #f0e0c8;
+    --rose: #d4a0a0;
+    --rose-muted: #b89585;
+    --lavender: #b0a5c3;
+    --ink: #e8e4dc;
+    --ink-muted: #a8a8b8;
+    --ink-faint: #8a8a9b;
+    --on-amber: var(--parchment);
+    --on-rose: var(--parchment);
+    --on-lavender: var(--parchment);
+    --success-text: var(--botanical-light);
+    --success-bg: #1a2a2e;
+    --warning-text: var(--amber);
+    --warning-bg: #2a2a1e;
+    --error-text: var(--rose);
+    --error-bg: #2a1a24;
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+    --shadow-md: 0 1px 3px rgba(0, 0, 0, 0.25), 0 4px 12px rgba(0, 0, 0, 0.3);
+    --shadow-lg: 0 1px 3px rgba(0, 0, 0, 0.25), 0 4px 12px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(232, 213, 183, 0.05);
+    --shadow-avatar: 0 2px 8px rgba(0, 0, 0, 0.35);
+    --shadow-avatar-hover: 0 4px 12px rgba(0, 0, 0, 0.45);
+    --shadow-avatar-botanical: 0 2px 8px rgba(108, 149, 116, 0.25);
+    --shadow-avatar-botanical-hover: 0 4px 16px rgba(108, 149, 116, 0.35);
+    --ring-selected: 0 0 0 3px rgba(232, 213, 183, 0.35);
+    --ring-selected-pulse: 0 0 0 7px rgba(232, 213, 183, 0.15);
+    --focus-color: var(--botanical-light);
+    --focus-ring: 0 0 0 3px rgba(125, 165, 132, 0.3);
+    --focus-ring-error: 0 0 0 3px rgba(212, 160, 160, 0.3);
+  }
+}
+
+/* Force the default light palette, regardless of the device preference. */
+.theme-light {
+  --theme-color-scheme: light;
+  --parchment: #f5f0e8;
+  --parchment-dark: #ebe4d8;
+  --oatmeal: #e8e0d0;
+  --warm-white: #fdfcfa;
+  --botanical: #3d5a45;
+  --botanical-light: #4a6b53;
+  --botanical-muted: #587461;
+  --amber: #c4883a;
+  --amber-light: #d4a85a;
+  --rose: #c27a7a;
+  --rose-muted: #d4a0a0;
+  --lavender: #9a8fad;
+  --ink: #2a2622;
+  --ink-muted: #5c564e;
+  --ink-faint: #736d64;
+  --on-amber: var(--ink);
+  --on-rose: var(--ink);
+  --on-lavender: var(--ink);
+  --success-text: var(--botanical);
+  --success-bg: #f4f7f5;
+  --warning-text: #805414;
+  --warning-bg: #fdf8f0;
+  --error-text: #984f4f;
+  --error-bg: #fdf6f5;
+  --shadow-sm: 0 1px 2px rgba(42, 38, 34, 0.04);
+  --shadow-md: 0 1px 3px rgba(42, 38, 34, 0.04), 0 4px 12px rgba(42, 38, 34, 0.06);
+  --shadow-lg: 0 1px 3px rgba(42, 38, 34, 0.04), 0 4px 12px rgba(42, 38, 34, 0.06), 0 0 0 1px rgba(42, 38, 34, 0.03);
+  --shadow-avatar: 0 2px 8px rgba(42, 38, 34, 0.15);
+  --shadow-avatar-hover: 0 4px 12px rgba(42, 38, 34, 0.22);
+  --shadow-avatar-botanical: 0 2px 8px rgba(61, 90, 69, 0.25);
+  --shadow-avatar-botanical-hover: 0 4px 16px rgba(61, 90, 69, 0.3);
+  --ring-selected: 0 0 0 3px rgba(196, 136, 58, 0.35);
+  --ring-selected-pulse: 0 0 0 7px rgba(196, 136, 58, 0.15);
+  --focus-color: var(--botanical);
+  --focus-ring: 0 0 0 3px rgba(61, 90, 69, 0.2);
+  --focus-ring-error: 0 0 0 3px rgba(152, 79, 79, 0.2);
+}
+
+/* Midnight blue with lamplight warmth. */
+.theme-night-botanist {
+  --theme-color-scheme: dark;
+  --parchment: #1a1a2e;
+  --parchment-dark: #12121f;
+  --oatmeal: #2a2a44;
+  --warm-white: #22223a;
+  --botanical: #6c9574;
+  --botanical-light: #7da584;
+  --botanical-muted: #79917e;
+  --amber: #e8d5b7;
+  --amber-light: #f0e0c8;
+  --rose: #d4a0a0;
+  --rose-muted: #b89585;
+  --lavender: #b0a5c3;
+  --ink: #e8e4dc;
+  --ink-muted: #a8a8b8;
+  --ink-faint: #8a8a9b;
+  --on-amber: var(--parchment);
+  --on-rose: var(--parchment);
+  --on-lavender: var(--parchment);
+  --success-text: var(--botanical-light);
+  --success-bg: #1a2a2e;
+  --warning-text: var(--amber);
+  --warning-bg: #2a2a1e;
+  --error-text: var(--rose);
+  --error-bg: #2a1a24;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 1px 3px rgba(0, 0, 0, 0.25), 0 4px 12px rgba(0, 0, 0, 0.3);
+  --shadow-lg: 0 1px 3px rgba(0, 0, 0, 0.25), 0 4px 12px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(232, 213, 183, 0.05);
+  --shadow-avatar: 0 2px 8px rgba(0, 0, 0, 0.35);
+  --shadow-avatar-hover: 0 4px 12px rgba(0, 0, 0, 0.45);
+  --shadow-avatar-botanical: 0 2px 8px rgba(108, 149, 116, 0.25);
+  --shadow-avatar-botanical-hover: 0 4px 16px rgba(108, 149, 116, 0.35);
+  --ring-selected: 0 0 0 3px rgba(232, 213, 183, 0.35);
+  --ring-selected-pulse: 0 0 0 7px rgba(232, 213, 183, 0.15);
+  --focus-color: var(--botanical-light);
+  --focus-ring: 0 0 0 3px rgba(125, 165, 132, 0.3);
+  --focus-ring-error: 0 0 0 3px rgba(212, 160, 160, 0.3);
+}
+
+/* Deep ivy with dusty rose. */
+.theme-cotswolds {
+  --theme-color-scheme: dark;
+  --parchment: #2b3d2e;
+  --parchment-dark: #1f2d21;
+  --oatmeal: #3d5340;
+  --warm-white: #354739;
+  --botanical: #e9edc9;
+  --botanical-light: #f0f4d4;
+  --botanical-muted: #c8d4a8;
+  --amber: #ddbea9;
+  --amber-light: #e8d0c0;
+  --rose: #c9a090;
+  --rose-muted: #bfa898;
+  --lavender: #c8c0d8;
+  --ink: #f5f7ec;
+  --ink-muted: #c8d4b8;
+  --ink-faint: #a4b497;
+  --on-amber: var(--parchment);
+  --on-rose: var(--parchment);
+  --on-lavender: var(--parchment);
+  --success-text: var(--botanical);
+  --success-bg: #2a3d2e;
+  --warning-text: var(--amber);
+  --warning-bg: #3d3d2e;
+  --error-text: var(--rose);
+  --error-bg: #3d2d2e;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.2);
+  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.25);
+  --shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.3);
+  --shadow-avatar: 0 2px 8px rgba(0, 0, 0, 0.3);
+  --shadow-avatar-hover: 0 4px 12px rgba(0, 0, 0, 0.4);
+  --shadow-avatar-botanical: 0 2px 8px rgba(233, 237, 201, 0.2);
+  --shadow-avatar-botanical-hover: 0 4px 16px rgba(233, 237, 201, 0.25);
+  --ring-selected: 0 0 0 3px rgba(221, 190, 169, 0.4);
+  --ring-selected-pulse: 0 0 0 7px rgba(221, 190, 169, 0.2);
+  --focus-color: var(--botanical);
+  --focus-ring: 0 0 0 3px rgba(233, 237, 201, 0.3);
+  --focus-ring-error: 0 0 0 3px rgba(201, 160, 144, 0.3);
+}
+
+/* Rebind aliases on the themed element so body and nested scopes work too. */
+.theme-light,
+.theme-night-botanist,
+.theme-cotswolds {
+  --on-botanical: var(--parchment);
+  --on-botanical-light: var(--parchment);
+  --on-ink: var(--parchment);
+  --success: var(--botanical);
+  --warning: var(--amber);
+  --error: var(--rose);
+  --focus-outline: 3px solid var(--focus-color);
+  --input-border: var(--oatmeal);
+  --input-border-focus: var(--botanical);
+  --input-border-error: var(--error-text);
+  --input-bg: var(--warm-white);
+}

@@ -1,0 +1,542 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="The Arrival v1 portable JSON Lines wire format and canonical record commitments.">
+  <title>Arrival Wire Format</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,400;0,9..144,500;1,9..144,300&amp;family=Source+Sans+3:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="assets/gruel.css">
+</head>
+<body class="technical-document">
+  <a class="doc-skip-link" href="#main-content">Skip to content</a>
+
+  <nav class="doc-suite-nav" aria-label="Arrival architecture documents">
+    <a class="doc-suite-brand" href="index.html">
+      <span class="doc-suite-brand-mark">Arrival</span>
+      Architecture
+    </a>
+    <div class="doc-suite-links">
+      <a href="index.html">Overview</a>
+      <a href="protocol.html">Protocol</a>
+      <a href="wire-format.html" aria-current="page">Wire format</a>
+      <a href="backend-contract.html">Backend contract</a>
+      <a href="witness-protocol.html">Witness protocol</a>
+    </div>
+  </nav>
+
+  <div class="doc-shell">
+    <aside class="doc-rail" aria-label="On this page">
+      <p class="doc-rail-label">Wire contents</p>
+      <ol class="doc-toc">
+        <li><a href="#role">Role and compatibility</a></li>
+        <li><a href="#framing">Framing</a></li>
+        <li><a href="#envelope">Record envelope</a></li>
+        <li><a href="#bodies">Core body profiles</a></li>
+        <li><a href="#canonicalization">Canonicalization and hashes</a></li>
+        <li><a href="#signatures">Signatures and keys</a></li>
+        <li><a href="#examples">Shape examples</a></li>
+        <li><a href="#streaming">Streaming and resume</a></li>
+        <li><a href="#export">Canonical export</a></li>
+        <li><a href="#validation">Validation and limits</a></li>
+        <li><a href="#evolution">Evolution</a></li>
+      </ol>
+    </aside>
+
+    <main class="doc-main" id="main-content">
+      <header class="doc-hero">
+        <p class="doc-eyebrow">Specification 02 · portable interchange</p>
+        <h1>Arrival <em>Wire Format</em></h1>
+        <p class="doc-lede">
+          A deterministic UTF-8 JSON Lines representation of Arrival records. It is the
+          reference interchange codec and file-backend format, not a mandatory second store.
+        </p>
+        <div class="doc-meta">
+          <span class="doc-badge">Wire v1</span>
+          <span>Branch-compatible envelope</span>
+          <span>26 August 2026</span>
+        </div>
+      </header>
+
+      <section class="doc-section" id="role">
+        <div class="doc-section-header">
+          <span class="doc-section-number">01</span>
+          <h2>Role and compatibility</h2>
+        </div>
+        <p>
+          Wire v1 starts from the envelope implemented by
+          <code>libs/engine/src/engine/arrival.py</code> on this branch, but does not freeze
+          it: <code>decision:design/arrival-wire-v1-seam-triage</code> (26 August 2026) pins
+          wire v1 as the <em>post-triage</em> envelope — drop <code>body.t</code>, re-spell
+          the tick <code>observer</code>, keep the dual signature. No shipped store exists in
+          the branch format, so the triage costs codec and fixture regeneration only; the
+          branch’s behavioral convergence does not reopen.
+        </p>
+
+        <div class="doc-callout">
+          <span class="doc-callout-label">Ruling</span>
+          <p>
+            A backend is conforming when it can validate and reproduce the logical records in
+            this format. Its tables and pages do not need to contain these exact line bytes.
+            A <code>.arrival</code> artifact is authoritative only when the explicit store
+            descriptor selects the file backend.
+          </p>
+        </div>
+
+        <div class="doc-table-wrap">
+          <table class="doc-spec-table">
+            <thead>
+              <tr><th>Concern</th><th>Current branch</th><th>Backend-neutral target</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>Envelope</td><td>JSON object with <code>v…rh</code></td><td>Preserved minus the two triage seams</td></tr>
+              <tr><td>Canonicalization</td><td>JCS / RFC 8785</td><td>Preserved</td></tr>
+              <tr><td>Record hash</td><td>SHA-256 over envelope without <code>rh</code></td><td>Preserved</td></tr>
+              <tr><td>Framing</td><td>One newline-terminated object per file line</td><td>Portable stream profile</td></tr>
+              <tr><td>Resume</td><td>Lineage + byte offset + ordinal</td><td>Portable head token; byte offset stays a file hint</td></tr>
+              <tr><td>Authority</td><td>File path implies the log</td><td>Explicit backend descriptor</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="doc-section" id="framing">
+        <div class="doc-section-header">
+          <span class="doc-section-number">02</span>
+          <h2>Framing and transport bytes</h2>
+        </div>
+        <ul>
+          <li>The decoded stream MUST be UTF-8.</li>
+          <li>Each record MUST be one JSON object followed by a single LF byte (<code>0x0a</code>).</li>
+          <li>A canonical emitter MUST use compact separators and JSON escapes so no raw newline occurs inside a record.</li>
+          <li>A decoder MUST reject duplicate object keys at every grammar level it interprets.</li>
+          <li>A finalized export MUST end with LF. An unterminated final record is a truncated export.</li>
+          <li>Blank lines, comments, byte-order marks, and non-record headers are not permitted.</li>
+        </ul>
+
+        <h3>Live file exception</h3>
+        <p>
+          A lock-free reader following a live file backend MAY temporarily ignore one
+          unterminated tail because it cannot distinguish an interrupted write from an append
+          in flight. Only a writer holding the backend’s append lock may truncate that tail.
+          This exception does not apply to a finalized import or archive.
+        </p>
+
+        <h3>Compression</h3>
+        <p>
+          A transport or archive MAY compress the stream. Compression is outside the record
+          format: after decompression, the same newline-framed bytes and manifest claims must
+          emerge. Filenames and content-encoding metadata identify the compression layer; the
+          record decoder does not guess.
+        </p>
+      </section>
+
+      <section class="doc-section" id="envelope">
+        <div class="doc-section-header">
+          <span class="doc-section-number">03</span>
+          <h2>The record envelope</h2>
+        </div>
+        <p>
+          A wire v1 record contains exactly the required fields below plus optional
+          <code>sig</code>. Unknown envelope fields are refused. <code>rh</code> is required on
+          read and computed last on construction.
+        </p>
+
+        <div class="doc-table-wrap">
+          <table class="doc-spec-table">
+            <thead>
+              <tr><th>Field</th><th>Type</th><th>Wire v1 rule</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><code>v</code></td><td>integer</td><td>Exactly <code>1</code>; this is the wire grammar version.</td></tr>
+              <tr><td><code>lin</code></td><td>string</td><td>Non-empty lineage identifier. Producers use a ULID.</td></tr>
+              <tr><td><code>ord</code></td><td>integer</td><td>0 through 2<sup>53</sup>−1; dense within the lineage.</td></tr>
+              <tr><td><code>prev</code></td><td>null or string</td><td>Null exactly at ordinal 0; otherwise 64 lowercase hex SHA-256 characters.</td></tr>
+              <tr><td><code>at</code></td><td>number</td><td>Finite Unix-seconds claim; signed content, never an ordering input.</td></tr>
+              <tr><td><code>k</code></td><td>string</td><td>Non-empty record kind.</td></tr>
+              <tr><td><code>observer</code></td><td>string</td><td>Non-empty producer/observer label under the record-kind profile.</td></tr>
+              <tr><td><code>origin</code></td><td>string</td><td>May be empty; opaque origin label.</td></tr>
+              <tr><td><code>body</code></td><td>object</td><td>A JSON object canonicalizable under JCS.</td></tr>
+              <tr><td><code>sig</code></td><td>string</td><td>Optional and non-empty. Absent means unsigned; null is forbidden.</td></tr>
+              <tr><td><code>rh</code></td><td>string</td><td>64 lowercase hex characters; MUST recompute from the record.</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3>Live-file reference order</h3>
+        <p>
+          The branch’s file emitter writes keys in this human-readable order:
+          <code>v, lin, ord, prev, at, k, observer, origin, body, sig, rh</code>.
+          <code>sig</code> is omitted when absent. This order is a transport convention;
+          hashing uses JCS and therefore does not depend on input key order.
+        </p>
+
+        <h3>Canonical interchange order</h3>
+        <p>
+          The canonical export profile <code>arrival-jcs-jsonl-v1</code> emits the RFC 8785
+          JCS bytes of the <em>complete</em> validated record, including <code>rh</code>, followed
+          by LF. JCS therefore selects recursive object order, number spelling, string escaping,
+          and whitespace. The existing decoder accepts both the readable live-file order and
+          this canonical interchange order; they commit the same logical record.
+        </p>
+      </section>
+
+      <section class="doc-section" id="bodies">
+        <div class="doc-section-header">
+          <span class="doc-section-number">04</span>
+          <h2>Core body profiles</h2>
+        </div>
+        <p>
+          These profiles document the branch envelope — the triage input. Under the ratified
+          wire v1 (<code>decision:design/arrival-wire-v1-seam-triage</code>), fact, batch,
+          and tick bodies drop the duplicated <code>t</code> discriminator (the envelope
+          <code>k</code> is the one spelling), and the tick record’s <code>observer</code>
+          receives an honest spelling still to be ruled.
+        </p>
+
+        <h3><code>genesis</code></h3>
+        <p>
+          A live-store genesis body contains <code>protocol</code> (integer 1),
+          <code>lineage</code> (exactly equal to <code>lin</code>), and <code>key</code>
+          (a base64 encoding of a raw 32-byte Ed25519 public key). It appears at ordinal 0,
+          has <code>prev: null</code>, and carries <code>sig</code>.
+        </p>
+
+        <h3><code>key</code></h3>
+        <p>
+          A key-introduction body contains <code>observer</code> and <code>key</code>. The named
+          observer is the identity the new raw-32-byte Ed25519 public key may speak for. The
+          outer record carries a signature resolvable to a key valid before this ordinal.
+        </p>
+
+        <h3><code>fact</code></h3>
+        <p>
+          The body is the existing canonical fact codec object. It contains
+          <code>t: "fact"</code>, then string fields <code>id</code>, <code>kind</code>,
+          <code>observer</code>, <code>origin</code>, and <code>payload</code>, plus finite numeric
+          <code>ts</code>. An optional inner <code>signature</code> preserves the fact-domain
+          signature. None of the required fields may be null.
+        </p>
+
+        <h3><code>batch</code></h3>
+        <p>
+          The body contains exactly <code>t: "batch"</code> and <code>rows</code>. Rows is an
+          array of at least two complete fact objects in emission order. Batches do not nest,
+          do not contain ticks, and do not repeat a fact ID within one batch. A one-row ceremony
+          uses <code>fact</code>; there is no second spelling as a one-row batch.
+        </p>
+
+        <h3><code>tick</code></h3>
+        <p>
+          The body is the canonical tick codec object: <code>t: "tick"</code>; string fields
+          <code>id</code>, <code>name</code>, <code>origin</code>, and <code>payload</code>;
+          finite numeric <code>ts</code>; nullable numeric <code>since</code>; nullable string
+          fields <code>prev_hash</code>, <code>window_start</code>, <code>fact_cursor</code>, and
+          <code>window_hash</code>; and optional inner <code>signature</code>.
+        </p>
+
+        <div class="doc-callout is-warning">
+          <span class="doc-callout-label">The v1 seams — ruled</span>
+          <p>
+            The draft bundled three seams here as “preserved for compatibility”;
+            <code>decision:design/arrival-wire-v1-seam-triage</code> ruled them individually.
+            The duplicated discriminator (<code>body.t</code> beside the outer <code>k</code>)
+            DROPS — the fact commitment covers
+            <code>(kind, ts, observer, origin, payload)</code>, no <code>t</code>, so no
+            preserved signature is invalidated. The tick writer’s name-as-<code>observer</code>
+            is RE-SPELLED — a name is not an authorship claim; the exact spelling is the open
+            sub-ruling. The inner fact-domain signature beside the outer arrival-content
+            signature KEEPS — two subjects (author content, custody record), a principled pair
+            rather than a seam.
+          </p>
+        </div>
+      </section>
+
+      <section class="doc-section" id="canonicalization">
+        <div class="doc-section-header">
+          <span class="doc-section-number">05</span>
+          <h2>Canonicalization and hashes</h2>
+        </div>
+        <p>
+          Every hash input is serialized with JSON Canonicalization Scheme (JCS), RFC 8785.
+          JSON object input order and insignificant whitespace therefore do not affect the
+          commitment. String values, array order, numeric value, field presence, and null do.
+        </p>
+
+        <div class="doc-equation">
+          rh = lowercase_hex( SHA-256( JCS(record with "rh" removed) ) )
+        </div>
+
+        <p>
+          The hash input includes <code>v</code>, lineage, ordinal, predecessor, authored time,
+          kind, observer, origin, body, and optional <code>sig</code>. It excludes only
+          <code>rh</code>, which cannot cover itself. At ordinal <em>n &gt; 0</em>,
+          <code>prev</code> must exactly equal the preceding record’s <code>rh</code>.
+        </p>
+
+        <h3>Numeric domain</h3>
+        <p>
+          Integers MUST be in the JCS interoperable range −(2<sup>53</sup>−1) through
+          2<sup>53</sup>−1. Floating-point values MUST be finite. NaN, positive or negative
+          infinity, and numbers that cannot be represented by the selected JCS implementation
+          are refused before hashing.
+        </p>
+
+        <h3>What the record hash is not</h3>
+        <p>
+          <code>rh</code> is not a checksum of the physical JSON line, database file, page, or
+          table. A harmless reformatting can produce different line bytes with the same logical
+          hash. Canonical export removes that freedom and emits one preferred byte spelling.
+        </p>
+      </section>
+
+      <section class="doc-section" id="signatures">
+        <div class="doc-section-header">
+          <span class="doc-section-number">06</span>
+          <h2>Signatures and key material</h2>
+        </div>
+        <p>The outer signature commits only the five authored-content fields:</p>
+
+        <div class="doc-equation">
+          commitment = lowercase_hex( SHA-256( JCS({ k, at, observer, origin, body }) ) )
+        </div>
+
+        <p>
+          Coordinate, predecessor, record hash, and signature are excluded. This is deliberate:
+          a source signature remains verifiable when a custodian assigns a different lineage and
+          ordinal. Custody is secured by the record chain and external head witness, not by
+          pretending the author selected the final storage position.
+        </p>
+
+        <div class="doc-table-wrap">
+          <table class="doc-spec-table">
+            <thead>
+              <tr><th>Value</th><th>Wire representation</th><th>Validation</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>Public key</td><td>Standard base64, raw 32-byte Ed25519 key</td><td>Decode strictly; exactly 32 bytes.</td></tr>
+              <tr><td>Signature</td><td>Non-empty string; base64 in the Ed25519 profile</td><td>Verify under the selected domain and resolved key.</td></tr>
+              <tr><td>Digest</td><td>64 lowercase hex characters</td><td>Recompute from JCS; do not trust sender.</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <p>
+          Wire grammar treats <code>sig</code> as opaque so cryptographic profiles can evolve
+          independently. A deployment profile MUST pin algorithm, key encoding, signature
+          encoding, and domain-separation string before it treats authorship as verified.
+        </p>
+      </section>
+
+      <section class="doc-section" id="examples">
+        <div class="doc-section-header">
+          <span class="doc-section-number">07</span>
+          <h2>Shape examples</h2>
+        </div>
+
+        <div class="doc-callout is-warning">
+          <span class="doc-callout-label">Illustrative, not a fixture</span>
+          <p>
+            Long keys, signatures, and hashes are replaced with angle-bracket labels below.
+            These examples show field shape and order; they intentionally do not pass the
+            digest-length or recomputation gates.
+          </p>
+        </div>
+
+        <div class="doc-code">
+          <div class="doc-code-label"><span>Genesis</span><span>pretty-printed for study</span></div>
+          <pre><code>{
+  "v": 1,
+  "lin": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+  "ord": 0,
+  "prev": null,
+  "at": 1787695200.0,
+  "k": "genesis",
+  "observer": "kyle",
+  "origin": "local",
+  "body": {
+    "protocol": 1,
+    "lineage": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+    "key": "&lt;raw-32-byte-ed25519-key-as-base64&gt;"
+  },
+  "sig": "&lt;base64-signature&gt;",
+  "rh": "&lt;64-lowercase-hex&gt;"
+}</code></pre>
+        </div>
+
+        <div class="doc-code">
+          <div class="doc-code-label"><span>Fact</span><span>pretty-printed for study</span></div>
+          <pre><code>{
+  "v": 1,
+  "lin": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+  "ord": 1,
+  "prev": "&lt;genesis-rh&gt;",
+  "at": 1787695262.125,
+  "k": "fact",
+  "observer": "kyle",
+  "origin": "notes.loops",
+  "body": {
+    "t": "fact",
+    "id": "01ARZ3NDEKTSV4RRFFQ69G5FAW",
+    "kind": "note",
+    "ts": 1787695262.125,
+    "observer": "kyle",
+    "origin": "notes.loops",
+    "payload": "{\"message\":\"Arrival is a protocol.\"}"
+  },
+  "sig": "&lt;base64-signature&gt;",
+  "rh": "&lt;64-lowercase-hex&gt;"
+}</code></pre>
+        </div>
+
+        <p>
+          Canonical files render each object on one compact line. Pretty printing is never the
+          canonical export spelling, although a decoder may accept it only if one complete JSON
+          object still occupies one physical line—which these multi-line study examples do not.
+        </p>
+      </section>
+
+      <section class="doc-section" id="streaming">
+        <div class="doc-section-header">
+          <span class="doc-section-number">08</span>
+          <h2>Streaming and resume</h2>
+        </div>
+        <p>
+          The portable resume token is a head tuple, not a byte offset. A consumer retains
+          <code>(lineage, ordinal, record_hash)</code>, asks the source for records after that
+          head, and verifies the first successor’s lineage, ordinal, and <code>prev</code> before
+          advancing.
+        </p>
+
+        <ol class="doc-steps">
+          <li>Capture and persist the last fully processed head.</li>
+          <li>On resume, ask the source to prove that exact coordinate still has the same hash.</li>
+          <li>If it does, stream from ordinal + 1 and verify every link.</li>
+          <li>If it is absent, lower, or different, report rollback or fork; never silently restart as if this were mere staleness.</li>
+        </ol>
+
+        <p>
+          A file adapter MAY retain a validated byte offset beside the portable token as a seek
+          optimization. The offset is trusted only when the record ending there matches all
+          three portable head fields. Database cursors, page IDs, row IDs, and LSNs are likewise
+          backend-private hints.
+        </p>
+      </section>
+
+      <section class="doc-section" id="export">
+        <div class="doc-section-header">
+          <span class="doc-section-number">09</span>
+          <h2>Canonical export and manifest</h2>
+        </div>
+        <p>
+          A canonical export captures one head, scans genesis through that head, validates every
+          stored <code>rh</code>, and emits <code>JCS(complete_record) + LF</code> under the
+          <code>arrival-jcs-jsonl-v1</code> profile. For the same logical prefix and profile,
+          conforming exporters MUST produce identical uncompressed bytes. A file backend
+          re-encodes its records for export; it does not merely copy its readable live-file lines.
+        </p>
+
+        <h3>Manifest claims</h3>
+        <ul>
+          <li>Manifest format version and Arrival wire version</li>
+          <li>Lineage, exported ordinal, and exported record hash</li>
+          <li>Total record count and optional per-kind counts</li>
+          <li>SHA-256 digest and byte length of the uncompressed stream</li>
+          <li>Export time as metadata, never as ledger order</li>
+          <li>Optional head attestation or reference to an external witness receipt</li>
+        </ul>
+
+        <div class="doc-callout">
+          <span class="doc-callout-label">Physical digest in its proper place</span>
+          <p>
+            The export-file digest answers “are these archive bytes unchanged?” The record head
+            answers “which logical history is this?” Both are useful, and neither should be
+            misrepresented as the other.
+          </p>
+        </div>
+      </section>
+
+      <section class="doc-section" id="validation">
+        <div class="doc-section-header">
+          <span class="doc-section-number">10</span>
+          <h2>Validation order and resource limits</h2>
+        </div>
+        <p>A streaming importer validates in this order so bad input fails before mutation:</p>
+
+        <ol class="doc-checklist">
+          <li>Transport encoding, framing, and configured decompression limits</li>
+          <li>JSON object shape with duplicate-key rejection</li>
+          <li>Known fields, required fields, types, nullability, and numeric domain</li>
+          <li>Body profile for the declared record kind</li>
+          <li>Record-hash recomputation</li>
+          <li>Genesis placement or successor lineage, ordinal, and predecessor</li>
+          <li>Required authorship verification and application admission policy</li>
+          <li>Atomic append to the destination</li>
+        </ol>
+
+        <p>
+          Implementations MUST expose configured maximum line size, body nesting, batch row
+          count, total import size, and decompression ratio. The base protocol does not invent a
+          universal small limit that would reject legitimate archives, but “unbounded” is not a
+          conforming security posture. A limit failure is a clean refusal with no partial record.
+        </p>
+
+        <h3>Unicode</h3>
+        <p>
+          JSON strings are Unicode scalar sequences as interpreted by the JSON and JCS profiles.
+          Wire v1 does not apply additional Unicode normalization: canonically equivalent human
+          text with different code-point sequences remains different content. Identifiers and
+          authorization names that need stronger equivalence rules must define them in their
+          application profile before signing.
+        </p>
+      </section>
+
+      <section class="doc-section" id="evolution">
+        <div class="doc-section-header">
+          <span class="doc-section-number">11</span>
+          <h2>Evolution and registration</h2>
+        </div>
+        <p>
+          The outer <code>v</code> versions the wire grammar. The genesis body’s
+          <code>protocol</code> versions ledger semantics. A v1 reader refuses an unsupported
+          outer version rather than guessing compatibility. Backends may store several wire
+          versions only when they can unambiguously select and verify the correct codec per
+          lineage.
+        </p>
+
+        <p>
+          A future wire version that changes the signature
+          commitment, adds domain separation to <code>rh</code>, or changes body representation
+          necessarily produces different record hashes. It therefore needs a new lineage or a
+          formally specified transition record and cannot masquerade as an in-place schema
+          upgrade.
+        </p>
+
+        <div class="doc-callout is-open">
+          <span class="doc-callout-label">Deferred registry work</span>
+          <p>
+            A final filename convention, media type, extension-kind registry, cryptographic
+            profile identifier, and executable golden corpus should be ratified alongside the
+            first independent backend. Until then, <code>.arrival</code> and “Arrival JSONL v1”
+            are project conventions rather than an external standards registration.
+          </p>
+        </div>
+      </section>
+
+      <nav class="doc-footer-nav" aria-label="Document pagination">
+        <a class="doc-footer-link" href="protocol.html">
+          <span>Previous</span>
+          <strong>← Arrival protocol</strong>
+        </a>
+        <a class="doc-footer-link" href="backend-contract.html">
+          <span>Next</span>
+          <strong>Backend contract →</strong>
+        </a>
+      </nav>
+      <p class="doc-footer-note">Arrival Wire Format · Draft wire v1 · Reference interchange profile</p>
+    </main>
+  </div>
+</body>
+</html>

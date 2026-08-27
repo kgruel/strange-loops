@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "package": "gruel-design-system",
+  "version": "1.0.0",
+  "entrypoint": "index.css",
+  "files": {
+    "animations.css": "sha256-TYpyv0aLGzCtjGO/H3NeN8zHKzBT0MWBJSppIyySfOA=",
+    "components/avatar.css": "sha256-ffl/vyYGJPZoT52rEVDx75H1Hm7vPO4UdW/y5hzpmIA=",
+    "components/plus-button.css": "sha256-TARJZD5d4AAOKoHr8boaMRNwsiqIqUWgkjF2Xwyv8Vo=",
+    "components/technical-document.css": "sha256-biJoUXlfuCXuEOC7IWlY0CKWJ67kEfEkKwoh7uxlEFo=",
+    "foundation.css": "sha256-1MXlvFduQtz+aerHwigcrQrnYHVDvYDQIN9dI7Gnoek=",
+    "index.css": "sha256-EcTAaIbMsKN/+l7LvDIdoOR90Za6A6k5O205SJpCw5Y=",
+    "themes.css": "sha256-98QKn1X42G3FyCmomp3SO/e1jbRWdggUGep/6DzH6Vs=",
+    "tokens.css": "sha256-TCqMlh5TcJInB+q9ifIRfBFAbZspL3FPKdBIAKJWjVE=",
+    "utilities.css": "sha256-NG5riCDx5KvzxmYbMtwQF7BnjVCVFlFneKlQ9oA1z+g="
+  }
+}

@@ -1,0 +1,640 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="The storage contract for authoritative Arrival backends, replicas, projections, and archives.">
+  <title>Arrival Backend Contract</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,400;0,9..144,500;1,9..144,300&amp;family=Source+Sans+3:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="assets/gruel.css">
+</head>
+<body class="technical-document">
+  <a class="doc-skip-link" href="#main-content">Skip to content</a>
+
+  <nav class="doc-suite-nav" aria-label="Arrival architecture documents">
+    <a class="doc-suite-brand" href="index.html">
+      <span class="doc-suite-brand-mark">Arrival</span>
+      Architecture
+    </a>
+    <div class="doc-suite-links">
+      <a href="index.html">Overview</a>
+      <a href="protocol.html">Protocol</a>
+      <a href="wire-format.html">Wire format</a>
+      <a href="backend-contract.html" aria-current="page">Backend contract</a>
+      <a href="witness-protocol.html">Witness protocol</a>
+    </div>
+  </nav>
+
+  <div class="doc-shell">
+    <aside class="doc-rail" aria-label="On this page">
+      <p class="doc-rail-label">Contract contents</p>
+      <ol class="doc-toc">
+        <li><a href="#purpose">Purpose and profiles</a></li>
+        <li><a href="#descriptor">Store descriptors</a></li>
+        <li><a href="#interfaces">Required interfaces</a></li>
+        <li><a href="#append">Append transaction</a></li>
+        <li><a href="#durability">Durability and failures</a></li>
+        <li><a href="#reads">Reads and snapshots</a></li>
+        <li><a href="#projections">Projections and queries</a></li>
+        <li><a href="#transfer">Replication and export</a></li>
+        <li><a href="#implementations">Implementation shapes</a></li>
+        <li><a href="#sidecar">Migration target</a></li>
+        <li><a href="#security">Administration and integrity</a></li>
+        <li><a href="#conformance">Conformance suite</a></li>
+      </ol>
+    </aside>
+
+    <main class="doc-main" id="main-content">
+      <header class="doc-hero">
+        <p class="doc-eyebrow">Specification 03 · storage implementations</p>
+        <h1>Arrival <em>Backend Contract</em></h1>
+        <p class="doc-lede">
+          The minimum guarantees a file, embedded database, SQL server, or remote service must
+          provide before it may hold a lineage’s authoritative append head.
+        </p>
+        <div class="doc-meta">
+          <span class="doc-badge">Draft v1</span>
+          <span>Storage-neutral authority</span>
+          <span>26 August 2026</span>
+        </div>
+      </header>
+
+      <section class="doc-section" id="purpose">
+        <div class="doc-section-header">
+          <span class="doc-section-number">01</span>
+          <h2>Purpose and conformance profiles</h2>
+        </div>
+        <p>
+          The backend contract turns the Arrival Protocol into a replaceable implementation
+          boundary. It is intentionally stricter for a backend that assigns ordinals than for
+          an archive that merely preserves bytes.
+        </p>
+
+        <div class="doc-table-wrap">
+          <table class="doc-spec-table">
+            <thead>
+              <tr><th>Profile</th><th>May assign new ordinals?</th><th>Required capabilities</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>Authority</td><td>Yes, when designated</td><td>Mint, full-head CAS append, durable atomic records (and groups to its declared limit), consistent scan, verify, canonical export</td></tr>
+              <tr><td>Replica</td><td>No</td><td>Exact-next replication, prefix verification, deterministic scan and export</td></tr>
+              <tr><td>Archive</td><td>No</td><td>Immutable prefix bundle, manifest and digest verification</td></tr>
+              <tr><td>Query</td><td>No ledger authority</td><td>Projection watermark, deterministic row expansion, rebuild or direct ledger query</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <p>
+          Profiles compose. A DuckDB adapter may implement Authority and Query. A PostgreSQL
+          service may implement Authority, Replica, and Query. A compressed object-store bundle
+          may implement only Archive. A weak store is still useful; it simply cannot advertise
+          guarantees it does not have.
+        </p>
+
+        <div class="doc-callout">
+          <span class="doc-callout-label">Authority is a role, not a species</span>
+          <p>
+            Supporting the Authority profile does not make every instance authoritative. The
+            store descriptor and control plane designate one instance for one lineage; all other
+            copies remain replicas until an explicit transfer.
+          </p>
+        </div>
+      </section>
+
+      <section class="doc-section" id="descriptor">
+        <div class="doc-section-header">
+          <span class="doc-section-number">02</span>
+          <h2>Explicit store descriptors</h2>
+        </div>
+        <p>
+          Backend selection MUST be explicit. Implementations must not infer authority,
+          canonical format, or migration behavior from <code>.arrival</code>, <code>.duckdb</code>,
+          <code>.db</code>, or another suffix. A descriptor resolves the logical store to an
+          adapter and location.
+        </p>
+
+        <div class="doc-code">
+          <div class="doc-code-label"><span>Illustrative descriptor</span><span>YAML shape, not yet a ratified file format</span></div>
+          <pre><code>arrival:
+  protocol: 1
+  backend: duckdb
+  location: ./personal.duckdb
+  lineage: 01ARZ3NDEKTSV4RRFFQ69G5FAV
+  role: authority
+  query: direct
+  witness: keychain://loops/arrival/personal</code></pre>
+        </div>
+
+        <h3>Descriptor requirements</h3>
+        <ul>
+          <li><code>backend</code> selects a registered adapter; it is never guessed.</li>
+          <li><code>location</code> is interpreted only by that adapter and may be a path, DSN reference, or service URL.</li>
+          <li><code>lineage</code>, when already known, is checked against genesis rather than trusted as a replacement for it.</li>
+          <li><code>role</code> expresses operator intent; the backend still verifies that it can safely perform the requested operation.</li>
+          <li>Secrets and raw credentials SHOULD be referenced from a secret provider, not embedded in the descriptor.</li>
+          <li>Descriptors that can mutate an authority require stronger filesystem or control-plane protection than ordinary read addresses.</li>
+        </ul>
+
+        <div class="doc-callout">
+          <span class="doc-callout-label">Ruled — descriptor residence</span>
+          <p>
+            Locally the descriptor dissolves into the <code>.vertex</code> <code>store</code>
+            clause, which was already the explicit declaration — nothing is sniffed from disk.
+            A standalone descriptor artifact earns its place only at the service boundary;
+            local cutover atomicity is an atomic replace of the declaring file
+            (<code>decision:design/arrival-suite-review-dispositions</code> §4).
+          </p>
+        </div>
+
+        <div class="doc-callout is-security">
+          <span class="doc-callout-label">No path-shaped privilege escalation</span>
+          <p>
+            Opening an exported <code>.arrival</code> path does not grant it authority merely
+            because the codec can append to such files. Authority comes from the active
+            descriptor plus the backend’s fencing checks.
+          </p>
+        </div>
+      </section>
+
+      <section class="doc-section" id="interfaces">
+        <div class="doc-section-header">
+          <span class="doc-section-number">03</span>
+          <h2>Required interfaces</h2>
+        </div>
+        <p>
+          Interface names below are conceptual. Language bindings may spell them differently,
+          but their inputs, outputs, and refusal semantics remain testable.
+        </p>
+
+        <div class="doc-code">
+          <div class="doc-code-label"><span>Core types</span><span>typed pseudocode</span></div>
+          <pre><code>Head = {
+  lineage: LineageId,
+  ordinal: Int,
+  record_hash: Digest
+}
+
+RecordDraft = {
+  kind, authored_at, observer, origin, body,
+  signature?: Signature
+}
+
+Commit = {
+  before: Head,
+  records: [Record, ...],
+  after: Head,
+  durability: DurabilityReceipt
+}</code></pre>
+        </div>
+
+        <div class="doc-table-wrap">
+          <table class="doc-spec-table">
+            <thead>
+              <tr><th>Operation</th><th>Profile</th><th>Contract</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><code>mint(options)</code></td><td>Authority</td><td>Exclusively create one signed genesis and return head 0.</td></tr>
+              <tr><td><code>head(lineage)</code></td><td>Authority / Replica</td><td>Return the currently complete head or a typed absence/corruption refusal.</td></tr>
+              <tr><td><code>append(expected, drafts)</code></td><td>Authority</td><td>Atomically compare the full head, then assign and commit records up to the declared atomic limit.</td></tr>
+              <tr><td><code>replicate(expected, records)</code></td><td>Authority / Replica</td><td>Atomically append exact pre-coordinated records; never rehash or re-sign.</td></tr>
+              <tr><td><code>read(coordinate)</code></td><td>Authority / Replica</td><td>Return the exact record after establishing its membership in the lineage.</td></tr>
+              <tr><td><code>scan(after, through)</code></td><td>Authority / Replica</td><td>Yield an ordered, consistent prefix range and no later record.</td></tr>
+              <tr><td><code>verify(scope)</code></td><td>Authority / Replica / Archive</td><td>Verify grammar, density, hashes, and optionally authorship through a named head.</td></tr>
+              <tr><td><code>export(through, codec)</code></td><td>Authority / Replica</td><td>Produce deterministic portable records and manifest for a captured prefix.</td></tr>
+              <tr><td><code>capabilities()</code></td><td>All</td><td>Report profiles, limits, concurrency scope, durability, codec, and query behavior.</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3>Ledger and query interfaces stay separate</h3>
+        <p>
+          <code>ArrivalLedger</code> owns custody operations. <code>ArrivalQuery</code> owns facts,
+          ticks, folds, search, and SQL-oriented reads. A query handle MUST NOT expose a generic
+          mutation escape hatch into the ledger. An implementation may share one database and
+          transaction engine beneath both without sharing their authority surface.
+        </p>
+      </section>
+
+      <section class="doc-section" id="append">
+        <div class="doc-section-header">
+          <span class="doc-section-number">04</span>
+          <h2>The append transaction</h2>
+        </div>
+        <p>
+          Correctness depends on making head comparison, coordinate assignment, record insertion,
+          and head advancement one indivisible transition for every accepted append. A backend
+          MUST support one record and MAY advertise a larger atomic-record limit. A database transaction, file lock plus
+          fsync, or service consensus step may implement it; the observable result is the same.
+        </p>
+
+        <ol class="doc-steps">
+          <li><strong>Fence the lineage.</strong> Acquire the backend’s serialization primitive for this lineage.</li>
+          <li><strong>Read and verify the actual head.</strong> Validate the adopted head record rather than trusting cached metadata alone.</li>
+          <li><strong>Compare all head fields.</strong> Lineage, ordinal, and record hash must match the request.</li>
+          <li><strong>Validate drafts.</strong> Recheck grammar, body profile, admission decision, signatures required by policy, and configured limits.</li>
+          <li><strong>Assign custody.</strong> Generate successive ordinals, predecessor links, and record hashes inside the fence.</li>
+          <li><strong>Persist the accepted unit.</strong> Insert every record in the request plus any required recovery metadata atomically; refuse before mutation when the request exceeds the backend’s limit.</li>
+          <li><strong>Advance the head.</strong> Update the authoritative head to the final inserted record in the same atomic transition.</li>
+          <li><strong>Establish durability.</strong> Do not report success until the declared durability profile is satisfied.</li>
+        </ol>
+
+        <div class="doc-equation">
+          append succeeds ⇔ actual_head == expected_head ∧ durable(all assigned records)
+        </div>
+
+        <h3>Atomic groups versus batch records</h3>
+        <p>
+          A backend with an atomic limit above one can append several ledger records in one
+          transaction for import efficiency. A backend whose safe limit is one remains
+          conforming and imports by verified single-record steps. A
+          <code>batch</code> record is different: it expresses one application ceremony whose
+          multiple fact rows share one ordinal. Backend batching must not rewrite one semantic
+          batch into several fact records or vice versa.
+        </p>
+
+        <h3>Network retries</h3>
+        <p>
+          A remote Authority SHOULD support an opaque idempotency key scoped to the lineage and
+          authenticated caller. Repeating the same key and request returns the original commit;
+          reusing it with different content refuses. The mapping is backend metadata, not a
+          ledger field. Without that capability, a lost response produces an “outcome unknown”
+          result and the caller reconciles by reading the expected successor and its authored
+          content commitment before deciding whether to retry.
+        </p>
+      </section>
+
+      <section class="doc-section" id="durability">
+        <div class="doc-section-header">
+          <span class="doc-section-number">05</span>
+          <h2>Durability and failure semantics</h2>
+        </div>
+        <p>
+          “Durable” is meaningless without a failure boundary. Every Authority reports a named
+          profile and its limits; callers may require a stronger profile than a backend offers.
+        </p>
+
+        <div class="doc-table-wrap">
+          <table class="doc-spec-table">
+            <thead>
+              <tr><th>Profile</th><th>Successful append survives</th><th>Typical mechanism</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>Process</td><td>Process failure</td><td>Kernel-persisted local write; not sufficient for canonical use by default</td></tr>
+              <tr><td>Host</td><td>Process and host restart / power loss under storage guarantees</td><td>File or database sync through durable local media</td></tr>
+              <tr><td>Replicated</td><td>Loss of one declared failure domain</td><td>Synchronous database or service replication</td></tr>
+              <tr><td>Archive</td><td>Immutable-object retention policy</td><td>Content digest, versioning, retention lock, redundant objects</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3>Crash outcomes</h3>
+        <ul>
+          <li>Before the atomic commit: no new complete record is visible.</li>
+          <li>After a confirmed commit: the entire accepted append unit is visible and the head names its last record.</li>
+          <li>When acknowledgment is lost: the client receives an unknown outcome and reconciles; it is not told the append failed.</li>
+          <li>A backend-specific torn staging fragment is never exposed as a complete logical record.</li>
+          <li>Recovery may discard only data proven never to have become a complete committed record under that backend’s protocol.</li>
+        </ul>
+
+        <div class="doc-callout is-warning">
+          <span class="doc-callout-label">Capability scope matters</span>
+          <p>
+            The current file adapter’s advisory <code>flock</code> contract is local POSIX
+            storage. It must advertise that scope and refuse unsupported network filesystems;
+            moving the same bytes onto NFS does not inherit safe multi-writer authority.
+          </p>
+        </div>
+      </section>
+
+      <section class="doc-section" id="reads">
+        <div class="doc-section-header">
+          <span class="doc-section-number">06</span>
+          <h2>Reads and consistent snapshots</h2>
+        </div>
+        <p>
+          A reader first captures a head. Every subsequent operation through that head observes
+          an immutable prefix, even while writers extend the lineage. Backends may implement this
+          with MVCC, a read transaction, a bounded file range, or a versioned service token.
+        </p>
+
+        <h3>Required properties</h3>
+        <ul>
+          <li><strong>Prefix consistency:</strong> a scan never mixes records from incompatible heads.</li>
+          <li><strong>Deterministic order:</strong> results are ascending by ordinal, independent of physical row or page order.</li>
+          <li><strong>Stable membership:</strong> a record returned at a coordinate recomputes to the hash committed by its successor or captured head.</li>
+          <li><strong>No silent gaps:</strong> absence before the captured head is corruption, not end of stream.</li>
+          <li><strong>Bounded paging:</strong> page tokens carry or bind to the captured head; ordinary row offsets are not portable continuation tokens.</li>
+        </ul>
+
+        <h3>Verification levels</h3>
+        <div class="doc-table-wrap">
+          <table class="doc-spec-table">
+            <thead>
+              <tr><th>Level</th><th>Work</th><th>Claim</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>Open</td><td>Genesis, stored head metadata, and adopted head record</td><td>The backend can identify a self-consistent current tip.</td></tr>
+              <tr><td>Incremental</td><td>Verified checkpoint to captured head</td><td>The suffix follows a previously fully verified prefix.</td></tr>
+              <tr><td>Full</td><td>Genesis through captured head</td><td>Grammar, density, lineage, and hash chain are intact for the complete prefix.</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>
+          Open-level checks are operational fast paths, not substitutes for full audit. A
+          backend MUST describe exactly which level each API invokes.
+        </p>
+      </section>
+
+      <section class="doc-section" id="projections">
+        <div class="doc-section-header">
+          <span class="doc-section-number">07</span>
+          <h2>Projections and query surfaces</h2>
+        </div>
+        <p>
+          Projection strategy is a capability choice, not part of the ledger’s physical
+          contract. The same canonical record storage can support views, generated columns,
+          selective indexes, asynchronously maintained materializations, or an external query
+          database.
+        </p>
+
+        <div class="doc-table-wrap">
+          <table class="doc-spec-table">
+            <thead>
+              <tr><th>Strategy</th><th>Storage cost</th><th>Freshness</th><th>Recovery</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>Direct record query</td><td>No duplicate projection rows</td><td>At captured head</td><td>No rebuild; query logic must understand bodies</td></tr>
+              <tr><td>Views / generated columns</td><td>Mostly indexes</td><td>At captured head</td><td>Recreate schema objects</td></tr>
+              <tr><td>Transactional materialization</td><td>Selected duplicated fields</td><td>At commit</td><td>Rebuild deterministically from ledger</td></tr>
+              <tr><td>Asynchronous projection</td><td>Separate query state</td><td>Explicit watermark</td><td>Resume from verified projected head</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3>Projection obligations</h3>
+        <ul>
+          <li>Every materialized row records or can derive <code>(arrival_ordinal, arrival_seq)</code>.</li>
+          <li>Batch expansion order is deterministic and shared by live indexing and full rebuild.</li>
+          <li>The projection stores a verified <code>projected_through</code> head, not merely a row count.</li>
+          <li>Rows beyond, missing before, or inconsistent with that watermark cause refusal or rebuild.</li>
+          <li>Projection state is never used to “repair” canonical ledger history.</li>
+          <li>Query results report the lineage and projected prefix they actually represent.</li>
+        </ul>
+
+        <div class="doc-callout">
+          <span class="doc-callout-label">DuckDB + Quack shape</span>
+          <p>
+            The personal backend can keep one canonical <code>arrival_records</code> relation,
+            expose Quack-friendly read views, and add only worthwhile indexes or materialized
+            columns. No companion <code>.arrival</code> file is required. Quack-facing access is
+            read-only with respect to ledger custody; writes use the admission API.
+          </p>
+        </div>
+      </section>
+
+      <section class="doc-section" id="transfer">
+        <div class="doc-section-header">
+          <span class="doc-section-number">08</span>
+          <h2>Replication, import, and export</h2>
+        </div>
+
+        <h3>Exact replication</h3>
+        <p>
+          A replica consumes pre-coordinated records. It verifies each record and atomically
+          compares its current full head before inserting the exact suffix. It never assigns a
+          new lineage, ordinal, predecessor, signature, or record hash. A conflicting same-height
+          record is a fork and stops replication.
+        </p>
+
+        <h3>Portable import</h3>
+        <p>
+          Import targets a new empty replica or staged authority by default. Importing into a
+          non-empty target requires exact prefix agreement through the target head. The importer
+          then appends only the verified remainder. “Merge” that re-coordinates content is an
+          admission operation into another lineage, not replication.
+        </p>
+
+        <h3>Canonical export</h3>
+        <p>
+          Export captures one head, scans its complete prefix in ordinal order, re-encodes each
+          record with the selected wire codec, and writes a manifest. An implementation that
+          stores typed columns MUST prove that the reconstructed logical JSON values reproduce
+          every stored <code>rh</code> before claiming export success.
+        </p>
+
+        <div class="doc-callout is-security">
+          <span class="doc-callout-label">Replica is not authority</span>
+          <p>
+            A successfully imported copy remains a replica. Letting it accept independent writes
+            without re-custody creates a fork even if both copies began byte-identical.
+          </p>
+        </div>
+      </section>
+
+      <section class="doc-section" id="implementations">
+        <div class="doc-section-header">
+          <span class="doc-section-number">09</span>
+          <h2>Reference implementation shapes</h2>
+        </div>
+
+        <div class="doc-card-grid">
+          <article class="doc-card">
+            <span class="doc-card-index">File authority</span>
+            <h3>JSONL + optional SQLite</h3>
+            <p>The current <code>ArrivalLog</code> becomes an adapter. Local lock, append, flush/fsync, verified tail, deterministic scan; SQLite remains a projection.</p>
+          </article>
+          <article class="doc-card">
+            <span class="doc-card-index">Personal authority</span>
+            <h3>DuckDB</h3>
+            <p>Typed lineage and record relations, transactionally updated head, views or light materializations, one controlled writer, Quack-oriented reads.</p>
+          </article>
+          <article class="doc-card">
+            <span class="doc-card-index">Team authority</span>
+            <h3>PostgreSQL</h3>
+            <p>Lineage row lock or equivalent fence, unique coordinates, JSON semantic bodies, transactional head and projection work, admission service in front.</p>
+          </article>
+          <article class="doc-card">
+            <span class="doc-card-index">Cold replica</span>
+            <h3>Object archive</h3>
+            <p>Canonical stream plus manifest, immutable retention and redundant copies. Excellent witness evidence; intentionally incapable of assigning ordinals.</p>
+          </article>
+        </div>
+
+        <h3>Illustrative relational core</h3>
+        <div class="doc-code">
+          <div class="doc-code-label"><span>Conceptual schema</span><span>not prescribed SQL</span></div>
+          <pre><code>arrival_lineage(
+  lineage PRIMARY KEY,
+  protocol_version,
+  head_ordinal,
+  head_hash,
+  authority_epoch
+)
+
+arrival_record(
+  lineage,
+  ordinal,
+  prev_hash,
+  authored_at,
+  kind,
+  observer,
+  origin,
+  body_json,
+  signature NULLABLE,
+  record_hash,
+  PRIMARY KEY (lineage, ordinal)
+)</code></pre>
+        </div>
+
+        <p>
+          This is a useful shape, not a normative schema. An adapter may use segments, columnar
+          storage, immutable objects, or a service log. It still must preserve missing-versus-null
+          distinctions, JCS numeric values, dense order, and deterministic reconstruction.
+        </p>
+      </section>
+
+      <section class="doc-section" id="sidecar">
+        <div class="doc-section-header">
+          <span class="doc-section-number">10</span>
+          <h2>The backend as a migration target</h2>
+        </div>
+        <p>
+          The migration sidecar sees only a generic staged target. That is the simplification
+          that makes a full break manageable: legacy-to-Arrival translation is written once;
+          File, DuckDB, and PostgreSQL each implement the same sink.
+        </p>
+
+        <div class="doc-code">
+          <div class="doc-code-label"><span>Sidecar-facing seam</span><span>pseudocode</span></div>
+          <pre><code>target = BackendRegistry.open(staging_descriptor)
+head = target.mint(migration_genesis)
+
+for group in legacy_source.groups():
+    drafts = transform(group)
+    commit = target.append(head, drafts)
+    head = commit.after
+
+target.verify(Full(through=head))
+target.export(through=head, codec="arrival-jsonl-v1")
+publish_descriptor_atomically(staging_descriptor)</code></pre>
+        </div>
+
+        <h3>Publication contract</h3>
+        <ul>
+          <li>The target is created at a staging location or namespace.</li>
+          <li>Ordinary application writers cannot address it during migration.</li>
+          <li>Verification compares stable source inventory to target logical records and projections.</li>
+          <li>A head witness is retained before cutover.</li>
+          <li>Publication atomically changes the authoritative descriptor, not every consumer independently.</li>
+          <li>The legacy source becomes read-only archival evidence and never resumes writes after successful cutover.</li>
+        </ul>
+      </section>
+
+      <section class="doc-section" id="security">
+        <div class="doc-section-header">
+          <span class="doc-section-number">11</span>
+          <h2>Administration and integrity boundaries</h2>
+        </div>
+        <p>
+          Backend permissions prevent ordinary clients from mutating canonical relations, but
+          the backend administrator remains capable of physical changes. The contract therefore
+          combines prevention, local detection, projection agreement, and external witnessing.
+        </p>
+
+        <div class="doc-layer-list">
+          <div class="doc-layer">
+            <div><strong>Prevent</strong><span>Least-privilege roles, read-only query endpoints, filesystem controls, transaction fencing, backups.</span></div>
+          </div>
+          <div class="doc-layer">
+            <div><strong>Detect local damage</strong><span>Grammar, unique coordinates, dense scan, predecessor links, record hashes, verified head metadata.</span></div>
+          </div>
+          <div class="doc-layer">
+            <div><strong>Detect projection edits</strong><span>Re-derive or compare materialized rows and their projected-through watermark against the ledger.</span></div>
+          </div>
+          <div class="doc-layer">
+            <div><strong>Detect rollback or rewrite</strong><span>Compare the presented history to a head retained outside the authority.</span></div>
+          </div>
+        </div>
+
+        <h3>Logical state commitment</h3>
+        <p>
+          A backend may expose a convenience state digest over protocol version, lineage, head,
+          and counts. It is quick to compare across implementations, but it does not replace the
+          chain or witness. The head hash already commits the complete dense prefix; counts make
+          operator reports and projection audits easier to interpret.
+        </p>
+
+        <div class="doc-equation">
+          state = SHA-256( "arrival/state/v1\0" || JCS({ lineage, head, counts }) )
+        </div>
+
+        <div class="doc-callout is-security">
+          <span class="doc-callout-label">Administrator deletion</span>
+          <p>
+            Deleting a canonical record creates a gap or broken chain. Deleting only a projected
+            fact creates ledger/projection disagreement. Deleting the tail leaves a valid shorter
+            prefix, so detection requires the external head defined by the Witness Protocol.
+          </p>
+        </div>
+      </section>
+
+      <section class="doc-section" id="conformance">
+        <div class="doc-section-header">
+          <span class="doc-section-number">12</span>
+          <h2>Conformance suite and capability report</h2>
+        </div>
+
+        <h3>Executable gates</h3>
+        <ul>
+          <li>Run one golden record corpus through every adapter and compare canonical export bytes.</li>
+          <li>Race two writers at one expected head; exactly one commit wins.</li>
+          <li>Inject a failure at every append stage and prove no partial logical group is visible.</li>
+          <li>Lose an acknowledgment and verify idempotent replay or explicit reconciliation behavior.</li>
+          <li>Replace head metadata, delete interior and tail records, and exercise every verification level.</li>
+          <li>Scan a captured prefix while another writer appends and prove snapshot consistency.</li>
+          <li>Rebuild projections after permuting physical row order; compare rows and watermarks.</li>
+          <li>Export, import into another backend, export again, and require byte-identical wire output.</li>
+          <li>Exercise configured record, batch, nesting, import, and decompression limits.</li>
+          <li>Compare to a retained witness head for rollback and same-height fork detection.</li>
+        </ul>
+
+        <h3>Capability report</h3>
+        <p>
+          <code>capabilities()</code> returns machine-readable protocol and wire versions,
+          supported profiles, maximum atomic append size, writer concurrency scope, snapshot
+          semantics, durability profile, verification levels, query watermark behavior,
+          idempotency support, export codecs, and configured resource limits. Deployment tooling
+          refuses an Authority assignment whose required guarantees are absent.
+        </p>
+
+        <div class="doc-callout is-open">
+          <span class="doc-callout-label">First implementation sequence</span>
+          <p>
+            Extract the current file behavior behind this interface first, preserving its tests.
+            Build the DuckDB adapter second and use cross-backend export as the conformance oracle.
+            Add PostgreSQL only after the contract has survived those two materially different
+            storage engines. A git-hosted file-backend profile — fast-forward-only push as
+            compare-and-append, checkout as a replica at a captured head — is seeded as the
+            Replica/Archive-side forcing consumer
+            (<code>thread:track-jsonl-store-for-worktree-parity</code>).
+          </p>
+        </div>
+      </section>
+
+      <nav class="doc-footer-nav" aria-label="Document pagination">
+        <a class="doc-footer-link" href="wire-format.html">
+          <span>Previous</span>
+          <strong>← Arrival wire format</strong>
+        </a>
+        <a class="doc-footer-link" href="witness-protocol.html">
+          <span>Next</span>
+          <strong>Witness protocol →</strong>
+        </a>
+      </nav>
+      <p class="doc-footer-note">Arrival Backend Contract · Draft v1 · Storage-neutral authority profile</p>
+    </main>
+  </div>
+</body>
+</html>

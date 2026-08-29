@@ -35,6 +35,7 @@ from engine.arrival_contract import (
     HeadMismatch,
     Incremental,
     NotAuthority,
+    NotSupported,
     Open,
     Profile,
     RecordDraft,
@@ -390,7 +391,7 @@ def test_append_refuses_a_pre_signed_draft(ledger):
         kind="note", authored_at=1.0, observer="kyle", body={},
         signature="c" * 86,
     )
-    with pytest.raises(NotImplementedError, match="unsigned"):
+    with pytest.raises(NotSupported, match="unsigned"):
         ledger.append(ledger.head(), [draft])
 
 
@@ -512,11 +513,46 @@ def test_incremental_verification_is_absent_rather_than_faked(ledger):
     mean walking to it — Full's work under a name promising less.
     """
     head = ledger.head()
-    with pytest.raises(NotImplementedError):
+    with pytest.raises(NotSupported):
         ledger.verify(Incremental(through=head, checkpoint=head))
     assert VerificationLevel.INCREMENTAL not in (
         ledger.capabilities().verification_levels
     )
+
+
+def test_both_deliberate_absences_refuse_under_the_contract_root(ledger):
+    """Ruling 2: deliberate absence is a CONTRACT refusal, not a builtin.
+
+    The claim is catchability at the root. A caller written against the
+    contract writes one ``except ContractRefusal`` and handles every refusal
+    the contract text names; ``NotImplementedError`` escapes that clause and
+    reads as "unfinished code" rather than "this backend does not offer it",
+    which is the opposite of what ``capabilities()`` already says about both
+    of these.
+
+    Both sites, in one test, because the ruling is about the ROOT covering
+    them — pinning each alone would let one drift back to a builtin while the
+    other kept the property.
+    """
+    signed = RecordDraft(
+        kind="note", authored_at=1.0, observer="kyle", body={},
+        signature="c" * 86,
+    )
+    head = ledger.head()
+
+    with pytest.raises(ContractRefusal) as pre_signed:
+        ledger.append(head, [signed])
+    assert isinstance(pre_signed.value, NotSupported)
+
+    with pytest.raises(ContractRefusal) as incremental:
+        ledger.verify(Incremental(through=head, checkpoint=head))
+    assert isinstance(incremental.value, NotSupported)
+
+    # And the root really is the contract's, not the file backend's family:
+    # a caller that never imported engine.arrival can still catch these.
+    from engine.arrival import ArrivalError
+
+    assert not issubclass(NotSupported, ArrivalError)
 
 
 def test_capabilities_claims_nothing_the_adapter_does_not_have(ledger):

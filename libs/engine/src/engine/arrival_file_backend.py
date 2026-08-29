@@ -68,6 +68,7 @@ from .arrival_contract import (
     HeadMismatch,
     Incremental,
     NotAuthority,
+    NotSupported,
     Open,
     Profile,
     RecordDraft,
@@ -292,7 +293,7 @@ class FileLedger:
             )
         for draft in drafts:
             if draft.signature is not None:
-                raise NotImplementedError(
+                raise NotSupported(
                     "this adapter's append builds unsigned records: its wrap "
                     "target, ArrivalLog.append_marked_many, assigns no "
                     "signature, and Entry deliberately carries no signer "
@@ -696,7 +697,7 @@ class FileLedger:
             return _head_of(self._log._tail_record())
 
         if isinstance(scope, Incremental):
-            raise NotImplementedError(
+            raise NotSupported(
                 "the file adapter offers OPEN and FULL verification only — a "
                 "verified suffix walk starts from a resume mark's byte "
                 "offset, and a Head does not carry one. capabilities() "

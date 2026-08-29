@@ -62,6 +62,7 @@ __all__ = [
     "NotAuthority",
     "UnknownBackend",
     "AtomicLimitExceeded",
+    "NotSupported",
 ]
 
 
@@ -486,4 +487,29 @@ class AtomicLimitExceeded(ContractRefusal):
     §04: refuse BEFORE mutation. A backend that accepted the request and split
     it across transactions would have turned one logical group into several,
     which is the outcome the atomic limit exists to make impossible.
+    """
+
+
+class NotSupported(ContractRefusal):
+    """A capability this backend deliberately does not offer.
+
+    §12 lets a backend advertise less than the whole surface, so deliberate
+    absence is a contract answer and not a fault: ``capabilities()`` says
+    which levels, codecs and limits exist, and asking for one that is absent
+    is refused the same way a stale head is. An adapter raising this is
+    telling the truth about itself, and the capability report says the same
+    thing in advance.
+
+    Under the root rather than :class:`NotImplementedError` because the root
+    is the whole promise of a backend-neutral contract: a caller catches
+    :class:`ContractRefusal` and handles every refusal the contract text
+    names. A builtin raised from an adapter's insides reads as "unfinished
+    code" to every caller, and escapes the one ``except`` clause written
+    against the contract (``decision:design/arrival-slice2-contract-text``,
+    ruling 2).
+
+    Deliberate absence only. A backend fault that the contract text does not
+    name stays backend-specific BY DESIGN — the root covers what the contract
+    asserts and no more, and widening it to mean "anything that went wrong"
+    would turn a location claim into a verdict.
     """

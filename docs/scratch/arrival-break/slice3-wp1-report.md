@@ -408,3 +408,33 @@ pins it.
 
 Both directions of the mirror are pinned: (i-a) removes the ambiguity verdict and (ii)
 resolves it toward absorption, and each fails the test written for it.
+
+
+## Sol-LOW round 2 — the prose sweep (`959e6d41`)
+
+`finding:s3wp1-sol-l2-stale-journal-unreadable-prose`. Runtime was fully verified this
+round; the finding is prose. Three contract-facing statements still documented the
+`JournalUnreadable` scope from two rounds ago — the exception's own docstring, the
+parser's docstring, and the write-path comment all said the reader refuses a journal whose
+entries have no header. It tolerates that now, reports the absence, and weakens the claim
+to a bound.
+
+**The sweep the finding asked for turned up four more.** Answering the question directly:
+yes, there were others, and one of them was worse than the three that were named.
+
+| Site | What it still said |
+|---|---|
+| `JournalRead.skipped` | "Lines this build could not use." A missing header is reported there too and is not a line. Now says so, and names non-empty as exactly the condition that weakens `known`. |
+| `established_head` | Refuses "when any epoch line was unreadable" — narrower than the code, which also refuses on an unclassifiable line and on a missing header. |
+| `_parse_entry`'s kindless branch | Still called a kindless object "the header, or a future sibling of it". **The most dangerous of the seven**: classification takes headers before this function is reached, so this comment described precisely the absorb-everything-kindless behaviour BLOCKING-1 removed. A reader trusting it would have restored the defect. |
+| `_PROTOCOL_VERSION` | Claimed a v1 journal "is never silently compared against a v2 head". Nothing reads these values back, so the promise is half kept. Not classification prose, but the same defect class — a comment asserting an enforcement the code does not perform — so it is fixed and the open gap is named at the site with wire v2 as its forcing consumer. |
+
+**Prose only, and mechanically checked rather than asserted:** the module's AST is
+identical to the previous commit once docstrings, attribute docstrings and comments are
+stripped. No test changed. Engine 2157, architecture 99, both unmoved.
+
+The pattern is now three-for-three in this file: every classification fix left prose
+behind that described the behaviour it replaced. That is the same overcorrection loop
+recorded after sol r1, seen from the documentation side — which is why the `_parse_entry`
+comment matters more than its size suggests. A stale comment at a branch is a defect with
+a delay.

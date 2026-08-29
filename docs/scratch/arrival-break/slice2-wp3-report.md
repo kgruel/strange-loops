@@ -105,6 +105,14 @@ files) and `… import _fact_commitment_hash` (two more) are unaffected.
    lives, in `sqlite_store`.
 9. **`APPEND_ATTEMPTS` moved with the loop** and became the op's default rather than a
    parameter merge passes; nothing outside `merge.py` referenced the old `_APPEND_ATTEMPTS`.
+10. **`merge.py`'s `engine.admission` import is module-level, breaking that module's
+    otherwise all-lazy import discipline.** A re-export cannot be lazy without
+    `__getattr__` machinery, and `store/__init__.py` already imports `store.merge`
+    eagerly, so the deferral would buy nothing. Measured rather than assumed: on the
+    `sdk.emit` path `rfc8785` costs ~0.4ms and `dataclasses` is already loaded before
+    `engine.admission` is reached, so `engine.admission` itself measures 968µs cumulative
+    with no child import attributed to it. Rule 16 is unaffected — it judges a bare
+    `import engine`, which stays lazy.
 
 ---
 

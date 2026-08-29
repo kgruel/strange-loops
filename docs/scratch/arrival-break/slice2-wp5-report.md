@@ -217,6 +217,31 @@ addition to the ruled language is the trailing
 §02's existing "Ruled — descriptor residence" callout uses. The §08 debt marker
 likewise leads with the brief's sentence verbatim.
 
+## Oracle status — full integrated suite, post-change
+
+| Suite | Baseline | After WP5 | Delta |
+|---|---|---|---|
+| engine | 2062 passed, 1 skipped | **2063 passed, 1 skipped** | **+1** — the new `test_both_deliberate_absences_refuse_under_the_contract_root`. Nothing else added, removed or renamed. |
+| store | 180 | **180** | 0 |
+| lang | 671 | **671** | 0 |
+| architecture | 99 | **99** | 0 |
+| apps | 2530 passed, 1 xfailed | **2530 passed, 1 xfailed** | 0 — no `NotImplementedError` pin exists in apps src or tests, so the refusal-type change does not reach it |
+
+Every delta is accounted for. Oracle 2's three mutation demos are in the two
+sections above; oracle 3's tag-balance check passes on all five arrival files;
+oracle 4 verified below.
+
+**Two extra sweep checks, both clean:**
+
+- `engine/__init__.py` does **not** re-export the contract refusal family (no
+  `arrival_contract` entry in `_LAZY_IMPORTS`), so `NotSupported` needing to
+  join a package-level export list does not arise. Its one slice-2 change is
+  WP3's `fact_commitment_hash` repoint to `engine.admission`, already correct.
+- No residual `"nine"` anywhere in `libs/engine/src/`, `libs/engine/tests/` or
+  `docs/architecture/`. The WP1–WP4 scratch reports still say nine and are left
+  alone — they are historical receipts of what was true when written, not
+  living claims.
+
 ## Deviations
 
 1. **Step 0 worktree (mechanical).** Recorded above and emitted as

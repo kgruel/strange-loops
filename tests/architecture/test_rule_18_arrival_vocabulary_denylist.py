@@ -7,7 +7,7 @@ import re
 
 import pytest
 
-from ._helpers import REPO_ROOT
+from ._helpers import REPO_ROOT, _rel
 
 # The ratified glossary (decision:design/arrival-slice0-record-grammar §4.1)
 # is small on purpose: arrival log, record, lineage, ordinal, coordinate,
@@ -59,6 +59,14 @@ _SCAN_TARGETS = (
     # definition, kept for the derived-log projection and the migration
     # sidecar, and its vocabulary is that mode's honest vocabulary.
     "libs/engine/src/engine/arrival_body.py",
+    # Slice 2 adds two. `arrival_contract` (the storage-neutral protocol) and
+    # `arrival_file_backend` (the adapter that first satisfies it) are NEW and
+    # born on the arrival surface, so they join at birth — and the contract
+    # module is the one that most needs it, because it is where the arrival
+    # vocabulary becomes the vocabulary every future backend inherits.
+    # `arrival_registry` is slice 2's WP4 and joins when it is born.
+    "libs/engine/src/engine/arrival_contract.py",
+    "libs/engine/src/engine/arrival_file_backend.py",
     "libs/engine/src/engine/arrival_projection.py",
     "libs/engine/src/engine/arrival_store.py",
     "libs/engine/src/engine/probe.py",
@@ -348,6 +356,42 @@ def _faults(source: str, rel: str) -> list[str]:
             continue
         found.append(f"{rel}:{lineno}: {term!r} — {_DENIED[term]}")
     return found
+
+
+# ---------------------------------------------------------------------------
+# The join-at-birth trigger, mechanized (GF-2,
+# `finding:slice1-gate-gf2-rule18-completeness`). A module born on the arrival
+# surface is named `arrival*.py` by construction, so the glob IS the birth
+# list: an unregistered one is a failure, not a silent gap. Shrink-only — an
+# entry needs a comment saying why that module is deliberately not held to the
+# glossary.
+#
+# Scope, deliberately narrow. This mechanizes the NAME-BORN trigger only. The
+# rule's other trigger — "custody moved into them", how merge.py, receive.py,
+# probe.py and residence.py joined — is a judgment about what a module DOES,
+# and a glob cannot make one; mechanizing it would turn a location claim into
+# a verdict claim. `jsonl_codec.py` and `jsonl_store.py` fall outside the glob
+# by construction, so their non-join needs no entry here at all — it is argued
+# in prose above, which is where a judgment belongs.
+# ---------------------------------------------------------------------------
+_NOT_SCANNED: dict[str, str] = {}
+
+
+def test_every_arrival_named_engine_module_is_scanned():
+    """A module born on the arrival surface joins _SCAN_TARGETS at birth."""
+    for path, reason in _NOT_SCANNED.items():
+        assert (REPO_ROOT / path).exists(), f"stale exception: {path}"
+        assert reason and reason.strip(), f"{path} has no reason"
+    born = {
+        _rel(p)
+        for p in (REPO_ROOT / "libs/engine/src/engine").glob("arrival*.py")
+    }
+    missing = sorted(born - set(_SCAN_TARGETS) - set(_NOT_SCANNED))
+    assert not missing, (
+        "Arrival-surface modules not held to the glossary:\n"
+        + "\n".join(f"  {m}" for m in missing)
+        + "\nAdd each to _SCAN_TARGETS, or to _NOT_SCANNED with a reason."
+    )
 
 
 def test_scan_targets_all_exist():

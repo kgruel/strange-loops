@@ -82,6 +82,7 @@ from .arrival_body import (
     body_of_fact_row,
     body_of_tick_row,
 )
+from .arrival_contract import Head
 from .arrival_projection import has_rows, licensed_own_lineage, rows_of_record
 from .jsonl_store import _as_int, _stamped_offset_current
 from .residence import canonical_for, index_path_for
@@ -548,13 +549,14 @@ class ArrivalStore(SqliteStore[T], Generic[T]):
         log's atomicity unit, so recovery can never expose a partial
         ceremony.
 
-        ``following`` pins the append to the head the ceremony reconciled
-        against: a record another writer lands mid-ceremony REFUSES the
-        append before any byte is written (``AppendRejected``), the
-        caller's transaction rolls back with the log byte-identical, and
-        the ceremony is simply retryable — unlike :meth:`_write`, this path
-        cannot resolve a gap after the fact, because the record it would
-        have made durable is the ceremony itself.
+        ``following`` pins the append to the FULL head the ceremony
+        reconciled against (:meth:`_pinned_head`): a record another writer
+        lands mid-ceremony REFUSES the append before any byte is written
+        (``StaleHead``, an ``AppendRejected``), the caller's transaction
+        rolls back with the log byte-identical, and the ceremony is simply
+        retryable — unlike :meth:`_write`, this path cannot resolve a gap
+        after the fact, because the record it would have made durable is the
+        ceremony itself.
         """
         persisted_rows = [
             r[:-2] if len(r) == len(FACT_ALL_COLUMNS) else r for r in rows
@@ -563,7 +565,6 @@ class ArrivalStore(SqliteStore[T], Generic[T]):
             k, body = "batch", body_of_batch(persisted_rows)
         else:
             k, body = "fact", body_of_fact_row(persisted_rows[0])
-        consumed = self._reconciled_mark
         _, mark = self._log.append_marked(
             k,
             body,
@@ -571,9 +572,45 @@ class ArrivalStore(SqliteStore[T], Generic[T]):
             origin=rows[0][4],
             at=rows[0][2],
             signer=self._fact_signer,
-            following=None if consumed is None else consumed.arrival_ordinal,
+            following=self._pinned_head(self._reconciled_mark),
         )
         self._stamp_mark(mark)
+
+    def _pinned_head(self, consumed: ResumeMark | None) -> Head | None:
+        """The full head a ceremony reconciled against, for the append's pin.
+
+        The resume mark carries a coordinate and a seek hint but no record
+        hash, and the compare-and-swap now pins all three head fields — so
+        the record the mark names is read back to supply the third.
+        :meth:`engine.arrival.ArrivalLog.anchor` is a seek to the mark's own
+        offset with the anchor checks applied, not a walk, so completing the
+        pin costs one read rather than a pass over the log.
+
+        A mark the log will not vouch for is a REFUSAL, never a quiet fall
+        back to an unpinned append. Dropping the pin because it could not be
+        completed is precisely the silent weakening the full-head compare
+        exists to prevent, and it would turn a store whose index disagrees
+        with its log into one that appends onto the disagreement.
+        """
+        if consumed is None:
+            return None
+        anchor = self._log.anchor(consumed)
+        if anchor is None:
+            raise ArrivalCanonicalUnsupported(
+                f"{self._path} reconciled against arrival ordinal "
+                f"{consumed.arrival_ordinal} of lineage "
+                f"{consumed.arrival_lineage}, but {self._log.path} does not "
+                "vouch for a record there — the index's mark and the log "
+                "disagree, and appending under an uncompletable pin would "
+                "write onto that disagreement. Run "
+                "engine.arrival_projection.rederive_projections("
+                f"{str(self._log.path)!r})"
+            )
+        return Head(
+            lineage=anchor["lin"],
+            ordinal=anchor["ord"],
+            record_hash=anchor["rh"],
+        )
 
     def _declaration_head_in_txn(
         self, conn: Any, lineage_id: str

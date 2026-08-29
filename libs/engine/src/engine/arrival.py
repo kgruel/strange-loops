@@ -57,6 +57,8 @@ from typing import NoReturn, TypeGuard
 import rfc8785
 from ulid import ULID
 
+from .arrival_contract import Head
+
 __all__ = [
     "ARRIVAL_SUFFIX",
     "LOCK_SUFFIX",
@@ -70,6 +72,7 @@ __all__ = [
     "ArrivalCorrupt",
     "GenesisRefused",
     "AppendRejected",
+    "StaleHead",
     "AuthorshipUnverified",
     "ArrivalLog",
     "Entry",
@@ -225,6 +228,80 @@ class AppendRejected(ArrivalError):
     head's ``rh`` is refused before a byte is written. A rejected append
     leaves the log exactly as it was.
     """
+
+
+class StaleHead(AppendRejected):
+    """The compare-and-swap pin no longer describes this log's head.
+
+    A SUBCLASS rather than a bare :class:`AppendRejected` because the parent
+    is raised for two different things: this, and the placement faults
+    :meth:`ArrivalLog._check_follows` finds in a candidate carried in from
+    elsewhere. An adapter that has to answer "was this a head mismatch?"
+    would otherwise be left sniffing messages, and a message is not a type.
+    Every existing ``except AppendRejected`` and ``raises(AppendRejected)``
+    keeps working, because this is one.
+    """
+
+
+def _refuse_stale_head(actual: dict, expected: Head | None) -> None:
+    """Refuse unless ``actual`` is the head the caller pinned.
+
+    ALL THREE coordinate fields, which is what makes this a compare-and-swap
+    over the log's identity rather than over its length. The ordinal alone
+    cannot tell "nothing arrived" from "the record at this ordinal was
+    replaced": a log truncated back and rewritten to the same height passes an
+    ordinal compare and fails this one, and that case is precisely the
+    rollback the backend contract asks a store to detect (§11).
+
+    Called from inside the fence at both append sites, never from outside it —
+    a compare that ran before the lock would be answering about a head some
+    other writer is free to move before the write lands. The two call sites
+    stay separate calls on purpose: each is independently the thing that makes
+    its own method a compare-and-swap, and each has its own test.
+    """
+    if expected is None:
+        return
+    if (
+        actual["lin"] == expected.lineage
+        and actual["ord"] == expected.ordinal
+        and actual[_RH] == expected.record_hash
+    ):
+        return
+    raise StaleHead(
+        f"the log's head is ({actual['lin']}, {actual['ord']}, {actual[_RH]}), "
+        f"not the expected ({expected.lineage}, {expected.ordinal}, "
+        f"{expected.record_hash}) — records arrived since the caller "
+        "reconciled, or this coordinate now holds a different record"
+    )
+
+
+def _checked_pin(following: object) -> Head | None:
+    """``following`` as a head pin, refusing anything weaker.
+
+    An ordinal is REFUSED rather than widened into a head, because widening
+    it here would mean this function inventing the two fields the caller did
+    not supply — and a pin the callee completed is not a pin. Construction
+    over detection (``decision:practice/construction-vs-detection-ratchets``):
+    there is no spelling of a weaker compare-and-swap for a caller to reach
+    for, so none can be reached for by accident.
+
+    :class:`ArrivalError` and deliberately not :class:`AppendRejected`: this
+    is a caller bug, and ``store.merge_store`` retries on
+    :class:`AppendRejected` — a type error caught by that loop would spin
+    instead of surfacing.
+    """
+    if following is None or isinstance(following, Head):
+        return following
+    if _is_int(following):
+        raise ArrivalError(
+            f"following must be a Head, not the bare ordinal {following!r} — "
+            "an ordinal-only pin cannot tell an untouched log from one "
+            "truncated and rewritten to the same height. Pass the full head "
+            "(engine.arrival_contract.Head), or None for an unpinned append"
+        )
+    raise ArrivalError(
+        f"following must be a Head or None, got {type(following).__name__}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1308,7 +1385,7 @@ class ArrivalLog:
         origin: str = "",
         at: float | None = None,
         signer: Signer | None = None,
-        following: int | None = None,
+        following: Head | None = None,
     ) -> tuple[dict, ResumeMark]:
         """:meth:`append`, also returning the mark that resumes just past it.
 
@@ -1319,20 +1396,17 @@ class ArrivalLog:
         through :meth:`walk_from`, which re-validates the anchor at the
         adoption site.
 
-        ``following`` names the head ordinal the caller expects. Checked
-        under the lock, so a record that landed since the caller last
-        looked refuses (:class:`AppendRejected`) BEFORE any byte is
-        written — the compare-and-swap shape for a consumer whose staged
-        state must not silently skip an interloper.
+        ``following`` names the FULL head the caller expects — lineage,
+        ordinal and record hash. Checked under the lock, so a record that
+        landed since the caller last looked refuses (:class:`StaleHead`)
+        BEFORE any byte is written — the compare-and-swap shape for a
+        consumer whose staged state must not silently skip an interloper. A
+        bare ordinal is refused rather than accepted: see :func:`_checked_pin`.
         """
+        pin = _checked_pin(following)
 
         def build(headr: dict) -> dict:
-            if following is not None and headr["ord"] != following:
-                raise AppendRejected(
-                    f"the log's head is at ordinal {headr['ord']}, not the "
-                    f"expected {following} — records arrived since the "
-                    "caller reconciled"
-                )
+            _refuse_stale_head(headr, pin)
             at_ = time.time() if at is None else at
             sig = (
                 signer(observer, content_commitment(k, at_, observer, origin, body))
@@ -1353,7 +1427,7 @@ class ArrivalLog:
         )
 
     def append_marked_many(
-        self, entries: Sequence[Entry], *, following: int | None = None
+        self, entries: Sequence[Entry], *, following: Head | None = None
     ) -> tuple[list[dict], ResumeMark]:
         """Append several records under ONE lock acquisition, ONE fsync.
 
@@ -1371,10 +1445,13 @@ class ArrivalLog:
         blocks within one process. Hence a primitive rather than a wrapper.
 
         ``following`` is the compare-and-swap pin, checked under the lock
-        before any byte is written: it names the head ordinal the caller
-        deduped against, so a record that landed since then REFUSES
-        (:class:`AppendRejected`) rather than letting a stale dedup decide
+        before any byte is written: it names the FULL head — lineage, ordinal
+        and record hash — the caller deduped against, so a record that landed
+        since then, or a coordinate that now holds a different record,
+        REFUSES (:class:`StaleHead`) rather than letting a stale dedup decide
         what to append. A caller that sees the refusal re-reads and retries.
+        A bare ordinal is refused rather than accepted: see
+        :func:`_checked_pin`.
 
         ONE trailing fsync is sound: a crash loses only an un-fsynced
         suffix, or leaves one torn tail line that the truncate-under-lock
@@ -1387,14 +1464,10 @@ class ArrivalLog:
                 "append_marked_many was handed no entries — an empty append "
                 "is a caller bug, not a no-op to absorb"
             )
+        pin = _checked_pin(following)
 
         with self._locked_head() as head:
-            if following is not None and head["ord"] != following:
-                raise AppendRejected(
-                    f"the log's head is at ordinal {head['ord']}, not the "
-                    f"expected {following} — records arrived since the "
-                    "caller reconciled"
-                )
+            _refuse_stale_head(head, pin)
             records: list[dict] = []
             encoded: list[str] = []
             for entry in entries:

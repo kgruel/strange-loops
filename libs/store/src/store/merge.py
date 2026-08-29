@@ -287,7 +287,7 @@ def _merge_into_arrival(
     registry = _source_registry(source_rows, verify)
 
     for _ in range(_APPEND_ATTEMPTS):
-        held, ordinal = _target_state(canonical)
+        held, consumed = _target_state(canonical)
         entries, added_facts, added_ticks, admitted = _entries_for(
             source_rows, held, log.genesis()["observer"]
         )
@@ -304,7 +304,7 @@ def _merge_into_arrival(
         if dry_run or not entries:
             return result
         try:
-            log.append_marked_many(entries, following=ordinal)
+            log.append_marked_many(entries, following=_pinned_head(log, consumed))
         except AppendRejected:
             # Another merger landed records in the compare-and-swap window,
             # so our dedup is stale. Re-read, re-dedup, retry: the next pass
@@ -324,17 +324,61 @@ def _merge_into_arrival(
     )
 
 
-def _target_state(canonical: Path) -> tuple[dict[str, tuple], int | None]:
-    """The target's held rows as ``id -> comparable body``, and the log head
-    it accounts for. Opening runs catch-up, so a target that cannot account
-    for its own log refuses HERE rather than being deduped against.
+def _pinned_head(log, consumed):
+    """The full head the dedup snapshot accounts for, or None when unmarked.
+
+    The compare-and-swap pins all three head fields, and the index's resume
+    mark carries only a coordinate and a seek hint — so the record the mark
+    names is read back through ``anchor`` (a seek, not a walk) to supply the
+    record hash. What that buys over the ordinal-only pin this replaced: a
+    target truncated and rewritten to the same height passes an ordinal
+    compare and fails this one, so a stale dedup can no longer decide what to
+    append onto a rolled-back log.
+
+    A mark the log will not vouch for REFUSES rather than falling back to an
+    unpinned append — completing a pin by dropping it is the weakening the
+    full-head compare exists to prevent. ``None`` in, ``None`` out stays
+    legal: an index with no mark has nothing to be stale about.
+    """
+    from engine.arrival_contract import Head
+
+    if consumed is None:
+        return None
+    anchor = log.anchor(consumed)
+    if anchor is None:
+        raise RuntimeError(
+            f"the merge target's index reconciled against arrival ordinal "
+            f"{consumed.arrival_ordinal} of lineage "
+            f"{consumed.arrival_lineage}, but {log.path} does not vouch for a "
+            "record there — the index and the log disagree, and a merge "
+            "cannot pin an append onto that disagreement"
+        )
+    return Head(
+        lineage=anchor["lin"], ordinal=anchor["ord"], record_hash=anchor["rh"]
+    )
+
+
+def _target_state(canonical: Path):
+    """The target's held rows as ``id -> comparable body``, and the resume
+    mark naming the log prefix it accounts for. Opening runs catch-up, so a
+    target that cannot account for its own log refuses HERE rather than being
+    deduped against.
+
+    The mark rather than its bare ordinal, because the compare-and-swap pin
+    is the full head now and completing it needs the mark's offset — see
+    :func:`_pinned_head`.
 
     The comparable is what dedup compares an incoming row against (see
     :func:`_comparable`): facts on their full authored body, ticks on the
     chainless base — chain columns and the tick signature are store-local
     custody the merge strips anyway, so they can never be grounds for a
     divergence claim."""
-    from engine.arrival_store import ARRIVAL_ORDINAL_KEY
+    from engine.arrival import ResumeMark
+    from engine.arrival_store import (
+        ARRIVAL_LINEAGE_KEY,
+        ARRIVAL_OFFSET_KEY,
+        ARRIVAL_ORDINAL_KEY,
+    )
     from engine.jsonl_store import open_canonical_store
     from engine.residence import index_path_for
 
@@ -359,12 +403,26 @@ def _target_state(canonical: Path) -> tuple[dict[str, tuple], int | None]:
                 "SELECT id, name, ts, since, origin, payload FROM ticks"
             )
         )
-        marker = conn.execute(
-            "SELECT value FROM store_meta WHERE key = ?", (ARRIVAL_ORDINAL_KEY,)
-        ).fetchone()
+        # All three mark fields or nothing — a partial mark is not a
+        # position, and ``anchor`` re-validates whatever this returns at the
+        # site that trusts it.
+        marks = {
+            key: conn.execute(
+                "SELECT value FROM store_meta WHERE key = ?", (key,)
+            ).fetchone()
+            for key in (
+                ARRIVAL_LINEAGE_KEY, ARRIVAL_OFFSET_KEY, ARRIVAL_ORDINAL_KEY
+            )
+        }
     finally:
         conn.close()
-    return held, None if marker is None else int(marker[0])
+    if any(row is None for row in marks.values()):
+        return held, None
+    return held, ResumeMark(
+        arrival_lineage=marks[ARRIVAL_LINEAGE_KEY][0],
+        arrival_offset=int(marks[ARRIVAL_OFFSET_KEY][0]),
+        arrival_ordinal=int(marks[ARRIVAL_ORDINAL_KEY][0]),
+    )
 
 
 @dataclass(frozen=True)

@@ -322,7 +322,15 @@ class StoreDescriptor:
 # beside the Protocol that declares them, so the custody/reads separation test
 # reads this list instead of re-typing it — a hand-copied list in a test is a
 # ratchet that silently stops covering the op added after it was written.
-LEDGER_MUTATIONS = frozenset({"mint", "append", "replicate"})
+#
+# `import_prefix` is a mutation and is therefore HERE, but it is deliberately
+# not declared on the Protocol below: §08 describes portable import in prose
+# and the ratified op table gives it no row, so an adapter that offers one is
+# offering more than the contract asks for. Growing the Protocol is a contract
+# decision; this set is the safety ratchet, and a mutating op that is not in it
+# is a hole in the custody/reads separation whether the contract names the op
+# or not.
+LEDGER_MUTATIONS = frozenset({"mint", "append", "replicate", "import_prefix"})
 
 
 @runtime_checkable

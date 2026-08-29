@@ -42,7 +42,7 @@ from engine.arrival_contract import (
     VerificationLevel,
     Watermark,
 )
-from engine.arrival_file_backend import FileLedger, FileQuery
+from engine.arrival_file_backend import EXPORT_CODEC, FileLedger, FileQuery
 from engine.arrival_store import ArrivalStore
 from tests.conftest import STUB_KEY as _KEY
 from tests.conftest import stub_sign as _sign
@@ -254,12 +254,21 @@ def test_the_ledger_satisfies_the_ledger_surface_it_claims(ledger):
     silently shrinking is a real failure mode, and this catches it.
     """
     offered = {op for op in dir(ledger) if not op.startswith("_")}
-    assert {"mint", "head", "append", "read", "scan", "verify", "capabilities"} <= offered
-    # WP2's, and deliberately absent rather than stubbed — see the module
-    # docstring. When WP2 lands these, this assertion is what tells it to
-    # update the capability report in the same change.
-    assert "replicate" not in offered and "export" not in offered
-    assert not isinstance(ledger, ArrivalLedger)
+    assert {
+        "mint", "head", "append", "replicate", "read", "scan", "verify",
+        "export", "capabilities",
+    } <= offered
+    # WP2 completed the surface, so the adapter now satisfies the Protocol.
+    # This is the assertion WP1 wrote inverted, and flipping it is what its
+    # comment asked WP2 to do.
+    assert isinstance(ledger, ArrivalLedger)
+    # `import_prefix` is offered and is NOT declared on the Protocol: §08
+    # describes portable import in prose and the ratified op table gives it no
+    # row. It is in LEDGER_MUTATIONS regardless, because the custody/reads
+    # ratchet covers what mutates, not what the Protocol happens to name.
+    assert "import_prefix" in offered
+    assert "import_prefix" not in ArrivalLedger.__protocol_attrs__
+    assert "import_prefix" in LEDGER_MUTATIONS
 
 
 def test_the_query_satisfies_the_query_surface(keys_and_store):
@@ -467,9 +476,11 @@ def test_capabilities_claims_nothing_the_adapter_does_not_have(ledger):
     """
     caps = ledger.capabilities()
     assert isinstance(caps, Capabilities)
-    assert caps.profiles == frozenset({Profile.AUTHORITY})
-    assert caps.export_codecs == (), "no codec until export exists (WP2)"
-    assert Profile.REPLICA not in caps.profiles, "no replicate until WP2"
+    assert caps.profiles == frozenset({Profile.AUTHORITY, Profile.REPLICA})
+    assert caps.export_codecs == (EXPORT_CODEC,)
+    assert Profile.ARCHIVE not in caps.profiles, (
+        "nothing here offers a read-only sealed mode"
+    )
     assert not caps.idempotency_keys
     assert caps.max_atomic_records is None
     assert "flock" in caps.writer_concurrency

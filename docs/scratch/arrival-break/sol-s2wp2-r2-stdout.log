@@ -1,0 +1,1515 @@
+Reading prompt from stdin...
+OpenAI Codex v0.150.1
+--------
+workdir: /Users/kaygee/Code/loops-s2wp2
+model: gpt-5.6-sol
+provider: openai
+approval: never
+sandbox: workspace-write [workdir, /tmp, $TMPDIR]
+reasoning effort: low
+reasoning summaries: none
+session id: 01a04f09-505a-7063-904f-334c7b450b0b
+--------
+user
+# Sol review brief — arrival-break slice 2 / WP2, round 2 (per-WP, LOW)
+
+Round 2 of your review of slice-2 WP2. Round 1 was NOT CONVERGED with blocking
+S2WP2-L-1 (short import accepted) and non-blocking S2WP2-L-2 (family-completeness not
+inventory). Both claimed fixed in one commit.
+
+## Anchor
+
+- Branch: `slice2/wp2-replicate`, NEW tip `b4d61809` (one commit over r1's `165d86ea`).
+- Diff to review: `git diff 165d86ea...b4d61809` in full.
+
+## Unverified fixes — verify empirically, this is the round's core
+
+| finding | claim | your job |
+|---|---|---|
+| L-1 | Length-first explicit check (`len(imported) < head.ordinal+1` → refuse), surviving zip `strict=True` over `imported[:overlap]`. Refusal = `HeadMismatch` naming both heights (deliberately NOT `SameHeightFork` — nothing disagrees at any height; re-export at/past the head is HeadMismatch's remedy). The old test asserting your repro as success was split: refusal test (your exact repro → HeadMismatch, log bytes and head unchanged) + same-length idempotent accept as negative control (green under fix AND mutation). | Re-run YOUR r1 repro against the fix. Re-run their mutation (restore strict=False acceptance → refusal test fails, control still green). Assess the HeadMismatch-vs-SameHeightFork choice against the taxonomy your r1 endorsed (ForkedHeight = different record at a height you'd fill; is "stops short, agrees everywhere" correctly NOT a fork?). Confirm log bytes + head untouched on refusal. |
+| L-2 | `VECTOR_INVENTORY`: exact per-family filenames, asserted both directions (missing fixture fails naming itself; unfiled vector fails; stems match family prefix). | Re-run their mutation (delete one fixture → fails naming it, siblings present). Try the reverse: add a stray `replicate-*.json` → must fail as unclassified. |
+
+## Scope check
+
+The commit must touch only `arrival_file_backend.py`, the two test files, and the
+report. Engine claimed 2034 (+1 net). Store 180, architecture 99 unchanged.
+
+## Seeded static diagnostics (assess, don't assume)
+
+Pyright on the current tip flags `arrival_file_backend.py:664` (`.ordinal` on a
+possibly-None value) and `:707` (unreachable code). WP1's gate proved an earlier
+sibling flag (:309) unreachable by construction — check whether these two are the same
+pattern or real (construct the None/unreachable case if reachable).
+
+## Verdict format
+
+Per fix: PASS/FAIL + evidence. New findings: `S2WP2-L-<n>` continuing your numbering.
+Then one line: **CONVERGED** or **NOT CONVERGED** (with the blocking list).
+
+codex
+I’ll review the exact one-commit diff, then run the targeted repros and both requested mutations in a reversible way. I’ll also trace the two Pyright diagnostics against reachable control flow and verify scope/count claims.
+exec
+/bin/zsh -lc 'git status --short && git diff --stat 165d86ea...b4d61809 && git diff --name-only 165d86ea...b4d61809 && git diff 165d86ea...b4d61809' in /Users/kaygee/Code/loops-s2wp2
+ succeeded in 0ms:
+ docs/scratch/arrival-break/slice2-wp2-report.md | 75 ++++++++++++++++++++++---
+ libs/engine/src/engine/arrival_file_backend.py  | 33 ++++++++++-
+ libs/engine/tests/test_arrival_transfer.py      | 43 ++++++++++++--
+ libs/engine/tests/test_conformance_replicate.py | 64 ++++++++++++++++-----
+ 4 files changed, 184 insertions(+), 31 deletions(-)
+docs/scratch/arrival-break/slice2-wp2-report.md
+libs/engine/src/engine/arrival_file_backend.py
+libs/engine/tests/test_arrival_transfer.py
+libs/engine/tests/test_conformance_replicate.py
+diff --git a/docs/scratch/arrival-break/slice2-wp2-report.md b/docs/scratch/arrival-break/slice2-wp2-report.md
+index f4d1505a..ee225b21 100644
+--- a/docs/scratch/arrival-break/slice2-wp2-report.md
++++ b/docs/scratch/arrival-break/slice2-wp2-report.md
+@@ -139,6 +139,28 @@ ordinal whose `rh` differs; only then is the verified remainder handed to `repli
+ An import that is a strict prefix of what the target already holds returns the target's
+ head unchanged. Nothing was missing — that is not a failure, and it is not a no-op to hide.
+ 
++**Sol S2WP2-L-1, fixed — a short import now refuses.** The first version compared with
++`zip(..., strict=False)` and nothing else, so an import that ended BEFORE the target's head
++stopped comparing at the import's end and fell through to the empty-remainder branch,
++returning the target's head. Sol's repro: target at ordinals 0–3, a valid manifest-clean
++export captured at ordinal 1, and `import_prefix` reported success. Everything the import
++carried DID agree, which is what made it dangerous rather than obvious — the operation was
++claiming agreement through ordinal 3 while ordinals 2–3 were never compared against anything.
++
++Per the arbiter's ruling it **refuses**, and accept-as-no-op is ruled out: §08 asks for
++agreement THROUGH the target's head, and a prefix that stops short structurally cannot
++establish that claim. `HeadMismatch` is the honest refusal — nothing disagrees anywhere, so
++it is not a fork; the export was simply captured at a head behind this target's, and
++re-exporting at or past that head is exactly the fix `HeadMismatch` tells a caller to make.
++The message names both heights.
++
++The length check is now explicit and runs FIRST, and the surviving `zip` compares
++`imported[:overlap]` under `strict=True` — so the property is stated by the code rather than
++inherited from a zip's truncation rule. My own test was pinning the bug: it asserted the
++short import returned the target's head. It is now split into the refusal (sol's repro) plus
++`test_re_importing_the_same_prefix_changes_nothing`, the same-length idempotent accept, which
++is the negative control that stops the new refusal from over-firing.
++
+ One edge stated rather than defended: importing into an **empty** target under a configured
+ `max_atomic_records` adopts the genesis and only then meets the limit refusal inside
+ `replicate`, leaving a genesis-only replica behind. That is a valid prefix and re-import is
+@@ -274,16 +296,16 @@ only name a contract refusal, so those cases are pinned by unit tests instead.
+ 
+ | Suite | Baseline | Now | Delta | Accounted by |
+ |---|---|---|---|---|
+-| engine | 1989 passed, 1 skipped | 2033 passed, 1 skipped | **+44** | `test_arrival_transfer.py` (+33), `test_conformance_replicate.py` (+11) |
++| engine | 1989 passed, 1 skipped | 2034 passed, 1 skipped | **+45** | `test_arrival_transfer.py` (+34), `test_conformance_replicate.py` (+11) |
+ | store | 180 | 180 | 0 | no store file touched |
+ | architecture | 99 | 99 | 0 | Rule 18 green with no new module born; no new `_SCAN_TARGETS` entry needed |
+ 
+-New-test breakdown, so the +44 is legible rather than a number:
++New-test breakdown, so the +45 is legible rather than a number:
+ 
+ | File | Count | Covers |
+ |---|---|---|
+-| `test_conformance_replicate.py` | 11 | the 10 vectors, plus a family-completeness check so a family that loses its last vector fails rather than passing vacuously |
+-| `test_arrival_transfer.py` | 33 | export ×5 (byte identity, streaming, clock-free manifest, codec refusal, captured-head bound), §12 byte-identity gate ×2, §12 snapshot-under-concurrent-writer gate ×1, import ×12 (empty replica, remainder-only, prefix no-op, agreement refusal, codec/framing, five manifest claims parametrized, suffix-as-prefix, tampered record), `adopt_genesis` ×3, replicate's own-family refusals ×8 (empty, wrong digest, foreign lineage, batch hole, atomic limit + the under-limit control, unpinned, fork type, empty batch), byte-identity at file and line level ×2 |
++| `test_conformance_replicate.py` | 11 | the 10 vectors, plus an exact-inventory check (§4.6) so a dropped fixture fails naming itself and an unclassified one fails too |
++| `test_arrival_transfer.py` | 34 | export ×5 (byte identity, streaming, clock-free manifest, codec refusal, captured-head bound), §12 byte-identity gate ×2, §12 snapshot-under-concurrent-writer gate ×1, import ×13 (empty replica, remainder-only, same-length idempotent accept, short-import refusal, agreement refusal, codec/framing, five manifest claims parametrized, suffix-as-prefix, tampered record), `adopt_genesis` ×3, replicate's own-family refusals ×8 (empty, wrong digest, foreign lineage, batch hole, atomic limit + the under-limit control, unpinned, fork type, empty batch), byte-identity at file and line level ×2 |
+ 
+ Vector families: 10 vectors across the three §D.2 families — exact-suffix (4),
+ same-height (3, including the negative control), catch-up (3).
+@@ -418,14 +440,53 @@ Worth reading off the second one: **only that assertion fired.**
+ `isinstance(ledger, ArrivalLedger)` stayed true, because the adapter offers a superset of a
+ shrunken Protocol — which is exactly why the surface needs an equality assertion of its own
+ and cannot be left to the runtime check. Restored after each; `git status --short` clean at
+-`arrival_contract.py`, engine **2033 passed, 1 skipped** at the tip.
++`arrival_contract.py`, engine **2034 passed, 1 skipped** at the tip.
+ 
+ The query-separation ratchet was not touched and still derives its op names from
+ `LEDGER_MUTATIONS` (`test_arrival_contract.py:183,191`).
+ 
+-### 4.5 Restoration
++### 4.5 Sol S2WP2-L-1 — the short-import refusal
++
++```python
++# revert, in FileLedger._refuse_disagreeing_prefix:
++-        if len(imported) < overlap:
+++        if False and len(imported) < overlap:
++             ...
++-            self.scan(through=head), imported[:overlap], strict=True
+++            self.scan(through=head), imported, strict=False
++```
++
++```
++FAILED test_arrival_transfer.py::test_import_refuses_a_prefix_that_ends_before_the_targets_head
++1 failed, 33 passed
++```
++
++Exactly the new test, and `test_re_importing_the_same_prefix_changes_nothing` stayed green
++under both the fix and the mutation — the refusal discriminates "stops short of the head"
++from "reaches the head with an empty remainder" rather than refusing every already-have-it
++import. Restored; `git status --short` clean at `arrival_file_backend.py`.
++
++### 4.6 Sol S2WP2-L-2 — the vector inventory
++
++The old family check asked only whether a family was non-empty, so it went green until a
++family lost its LAST vector. Now the inventory is exact, both directions.
++
++Removed `spec/conformance/vectors/replicate/replicate-catch-up-preserves-authored-time-and-origin.json`:
++
++```
++E   AssertionError: missing: ['replicate-catch-up-preserves-authored-time-and-origin'];
++E   unclassified: []
++```
++
++It fails naming itself, with two catch-up siblings still present. Worth noting which fixture
++sol's probe happened to delete: the **unsigned** catch-up vector is the one whose silent
++absence would have quietly gutted §4.3's evidence, since it is the control proving that an
++exact suffix without a signature cannot distinguish assigning from validating. Restored; the
++area is back to 10 vectors.
++
++### 4.7 Restoration
+ 
+ `git checkout libs/engine/src/engine/arrival.py` after each; `git status --short` empty, and
+-44 passed on the two files. Re-run at the branch tip after the last restore: engine **2033
++45 passed on the two files. Re-run at the branch tip after the last restore: engine **2034
+ passed, 1 skipped**, store 180, architecture 99 — the §3 counts, measured again rather than
+ inferred from the restore.
+diff --git a/libs/engine/src/engine/arrival_file_backend.py b/libs/engine/src/engine/arrival_file_backend.py
+index fdca745d..ec29f313 100644
+--- a/libs/engine/src/engine/arrival_file_backend.py
++++ b/libs/engine/src/engine/arrival_file_backend.py
+@@ -518,8 +518,10 @@ class FileLedger:
+             record for record in imported if record["ord"] > head.ordinal
+         ]
+         if not remainder:
+-            # The import is a prefix of what this target already holds. Not a
+-            # failure and not a no-op to hide: nothing was missing.
++            # The import reaches exactly this target's head and agrees with it
++            # the whole way. Nothing was missing — not a failure, and not a
++            # no-op to hide. An import that stopped SHORT of the head never
++            # gets here; it refuses above.
+             return head
+         return self.replicate(head, remainder).after
+ 
+@@ -539,8 +541,33 @@ class FileLedger:
+         to SKIP. Both say the histories disagree at a height; skipping an
+         overlap without checking it is how a replica silently acquires a
+         prefix it never verified.
++
++        **An import that ends BEFORE the target's head refuses.** §08 asks for
++        agreement THROUGH the head, and a prefix that stops short structurally
++        cannot establish that — there is nothing to compare the records above
++        it against. Reporting success would be a verdict this operation has no
++        evidence for: it would say "this target agrees with the import through
++        its head" while never having looked at the heights in between. The
++        length is therefore checked FIRST and explicitly, rather than left to a
++        zip that would silently stop at the shorter side.
+         """
+-        for mine, theirs in zip(self.scan(through=head), imported, strict=False):
++        # Dense from 0 (the manifest check establishes both), so the target's
++        # prefix is exactly this many records and the import must cover it.
++        overlap = head.ordinal + 1
++        if len(imported) < overlap:
++            captured = imported[-1]
++            raise HeadMismatch(
++                f"this import captures head ({captured['lin']}, "
++                f"{captured['ord']}, {captured['rh']}), which is behind "
++                f"{self._log.path}'s head ({head.lineage}, {head.ordinal}, "
++                f"{head.record_hash}) — §08 requires exact prefix agreement "
++                "THROUGH the target's head, and an import that stops short "
++                "cannot establish it. Export again at or past the target's head"
++            )
++
++        for mine, theirs in zip(
++            self.scan(through=head), imported[:overlap], strict=True
++        ):
+             if mine["rh"] != theirs["rh"]:
+                 raise SameHeightFork(
+                     f"ordinal {mine['ord']} of {self._log.path} holds rh "
+diff --git a/libs/engine/tests/test_arrival_transfer.py b/libs/engine/tests/test_arrival_transfer.py
+index 9147b203..67e94a73 100644
+--- a/libs/engine/tests/test_arrival_transfer.py
++++ b/libs/engine/tests/test_arrival_transfer.py
+@@ -296,22 +296,53 @@ def test_import_appends_only_the_remainder_to_an_agreeing_target(authority, tmp_
+     assert (tmp_path / "replica.arrival").read_bytes() == authority._log.path.read_bytes()
+ 
+ 
+-def test_import_of_a_prefix_the_target_already_holds_changes_nothing(authority, tmp_path):
+-    """Nothing was missing. Not a failure, and not a no-op to hide."""
++def test_re_importing_the_same_prefix_changes_nothing(authority, tmp_path):
++    """The idempotent case, and the negative control for the test below.
++
++    Agreement runs all the way THROUGH the target's head and the remainder is
++    empty, so there is nothing to do and nothing missing. This is the only
++    shape of "already have it" that §08 licenses, and the refusal added beside
++    it must not fire here.
++    """
+     replica = FileLedger(ArrivalLog(tmp_path / "replica.arrival"))
+     full = authority.head()
+     replica.import_prefix(authority.export(through=full, codec=EXPORT_CODEC))
+     before = (tmp_path / "replica.arrival").read_bytes()
+ 
+-    partial = Head(
+-        lineage=full.lineage, ordinal=1, record_hash=authority.read(1)["rh"]
+-    )
+     assert replica.import_prefix(
+-        authority.export(through=partial, codec=EXPORT_CODEC)
++        authority.export(through=full, codec=EXPORT_CODEC)
+     ) == full
+     assert (tmp_path / "replica.arrival").read_bytes() == before
+ 
+ 
++def test_import_refuses_a_prefix_that_ends_before_the_targets_head(authority, tmp_path):
++    """§08 asks for agreement THROUGH the head; a short import cannot give it.
++
++    The target holds ordinals 0-4 and the import is a valid, manifest-clean
++    export captured at ordinal 1. Everything it does carry agrees — that is
++    what makes this the dangerous case rather than an obvious one. Returning
++    the target's head would claim agreement through ordinal 4 while ordinals
++    2-4 were never compared against anything, which is a verdict this
++    operation has no evidence for.
++    """
++    replica = FileLedger(ArrivalLog(tmp_path / "replica.arrival"))
++    full = authority.head()
++    replica.import_prefix(authority.export(through=full, codec=EXPORT_CODEC))
++    before = (tmp_path / "replica.arrival").read_bytes()
++
++    short = Head(
++        lineage=full.lineage, ordinal=1, record_hash=authority.read(1)["rh"]
++    )
++    with pytest.raises(HeadMismatch) as caught:
++        replica.import_prefix(authority.export(through=short, codec=EXPORT_CODEC))
++
++    message = str(caught.value)
++    assert short.record_hash in message, "the refusal must name the import's head"
++    assert full.record_hash in message, "the refusal must name the target's head"
++    assert (tmp_path / "replica.arrival").read_bytes() == before
++    assert replica.head() == full
++
++
+ def test_import_refuses_a_target_that_disagrees_about_its_own_prefix(tmp_path):
+     """The §08 agreement gate, and it is a fork and not a stale head.
+ 
+diff --git a/libs/engine/tests/test_conformance_replicate.py b/libs/engine/tests/test_conformance_replicate.py
+index a9882035..62c178c5 100644
+--- a/libs/engine/tests/test_conformance_replicate.py
++++ b/libs/engine/tests/test_conformance_replicate.py
+@@ -43,13 +43,34 @@ REPLICATE_VECTORS_DIR = REPO_ROOT / "spec" / "conformance" / "vectors" / "replic
+ # claiming something the contract does not define, and KeyError says so loudly.
+ REFUSALS = {"SameHeightFork": SameHeightFork, "HeadMismatch": HeadMismatch}
+ 
+-# The three families §D.2 requires, by filename prefix. Asserted as a set so a
+-# family that silently loses its last vector fails rather than passing vacuously.
+-FAMILIES = (
+-    "replicate-exact-suffix-",
+-    "replicate-same-height-",
+-    "replicate-catch-up-",
+-)
++# The three families §D.2 requires, and the EXACT vector inventory of each.
++#
++# Filenames rather than a count, and a count rather than "at least one": a
++# family check that only asks whether the family is non-empty goes green when a
++# fixture is deleted, right up until the last one goes. That is the shape of
++# ratchet that stops ratcheting quietly — the vectors are the oracle, so a
++# vector that disappears takes a claim with it and must say which one.
++#
++# GROW this when a vector is added; shrink it only when a claim is genuinely
++# retired, and say which in the commit.
++VECTOR_INVENTORY: dict[str, frozenset[str]] = {
++    "replicate-exact-suffix-": frozenset({
++        "replicate-exact-suffix-single-record-accepted",
++        "replicate-exact-suffix-batch-lands-whole",
++        "replicate-exact-suffix-refuses-a-gap-above-the-head",
++        "replicate-exact-suffix-refuses-a-stale-full-head-pin",
++    }),
++    "replicate-same-height-": frozenset({
++        "replicate-same-height-fork-at-the-head-refuses",
++        "replicate-same-height-fork-below-the-head-refuses",
++        "replicate-same-height-agreement-is-not-a-fork",
++    }),
++    "replicate-catch-up-": frozenset({
++        "replicate-catch-up-preserves-signed-records-byte-for-byte",
++        "replicate-catch-up-preserves-authored-time-and-origin",
++        "replicate-catch-up-from-a-genesis-only-replica",
++    }),
++}
+ 
+ 
+ def _load_vectors(vectors_dir: Path) -> list[Path]:
+@@ -66,14 +87,27 @@ def _head(data: dict[str, Any] | None) -> Head | None:
+     )
+ 
+ 
+-def test_every_replicate_family_has_vectors():
+-    """§D.2 names three families; a family with no vectors proves nothing."""
+-    stems = [path.stem for path in _load_vectors(REPLICATE_VECTORS_DIR)]
+-    assert stems, "the replicate area holds no vectors at all"
+-    for family in FAMILIES:
+-        assert any(stem.startswith(family) for stem in stems), (
+-            f"no vector in the {family!r} family"
+-        )
++def test_the_replicate_vector_inventory_is_exactly_what_is_on_disk():
++    """Every named vector present, and no unclassified vector present.
++
++    Both directions. A missing fixture fails NAMING ITSELF, so a deleted
++    vector cannot go unnoticed while the family still has siblings; and a
++    vector belonging to no family fails too, so a new claim cannot be added
++    without being filed under the family it belongs to.
++    """
++    on_disk = {path.stem for path in _load_vectors(REPLICATE_VECTORS_DIR)}
++    expected = frozenset().union(*VECTOR_INVENTORY.values())
++
++    assert on_disk == expected, (
++        f"missing: {sorted(expected - on_disk)}; "
++        f"unclassified: {sorted(on_disk - expected)}"
++    )
++    for family, members in VECTOR_INVENTORY.items():
++        assert members, f"the {family!r} family names no vectors"
++        for stem in members:
++            assert stem.startswith(family), (
++                f"{stem!r} is filed under {family!r} but is not named for it"
++            )
+ 
+ 
+ @pytest.mark.parametrize(
+
+exec
+/bin/zsh -lc "rg --files -g 'AGENTS.md' -g 'pyproject.toml' -g 'pytest.ini' -g 'Makefile' | sort && sed -n '430,740p' libs/engine/src/engine/arrival_file_backend.py && sed -n '1,130p' libs/engine/tests/test_conformance_replicate.py" in /Users/kaygee/Code/loops-s2wp2
+ succeeded in 0ms:
+apps/loops/pyproject.toml
+libs/atoms/pyproject.toml
+libs/custody/pyproject.toml
+libs/engine/pyproject.toml
+libs/lang/pyproject.toml
+libs/sdk/pyproject.toml
+libs/sign/pyproject.toml
+libs/store/pyproject.toml
+pyproject.toml
+        ``through.ordinal + 1`` by density and needs no drain to compute — and
+        the drain proves it, because a walk that found a gap would have
+        refused before reaching the head.
+
+        A codec this backend does not have is a caller bug against
+        :meth:`capabilities`, not a contract refusal — the ratified set has no
+        member for it, and inventing one would be the over-claim §12 exists to
+        catch.
+        """
+        if codec != EXPORT_CODEC:
+            raise ValueError(
+                f"this backend exports {EXPORT_CODEC!r} and nothing else, but "
+                f"{codec!r} was asked for — capabilities().export_codecs is "
+                "the list to check against"
+            )
+
+        def lines() -> Iterator[bytes]:
+            for record in self.scan(through=through):
+                yield (encode_record(record) + "\n").encode("utf-8")
+
+        return ExportedPrefix(
+            head=through,
+            codec=codec,
+            records=lines(),
+            manifest={
+                "protocol": GRAMMAR_VERSION,
+                "codec": codec,
+                "framing": _FRAMING,
+                "lineage": through.lineage,
+                "through_ordinal": through.ordinal,
+                "through_record_hash": through.record_hash,
+                "count": through.ordinal + 1,
+            },
+        )
+
+    def import_prefix(self, prefix: ExportedPrefix) -> Head:
+        """The §08-default portable import, and nothing beyond it.
+
+        Two targets and no third: a log that does not exist yet, or one whose
+        every record agrees exactly with the import through its own head. Any
+        other target REFUSES. There is no merge arm here — content that has to
+        be re-coordinated to fit is being admitted into another lineage, and
+        admission is a different operation.
+
+        Returns the target's :class:`~engine.arrival_contract.Head` after the
+        import, and not a ``Commit``: an import into an empty replica has no
+        ``before`` to name, and manufacturing one would be the first lie a
+        replica told about where it came from.
+
+        **The manifest is checked, never trusted.** It travels with the bytes,
+        so it is exactly as trustworthy as they are; every field is
+        re-derived from the decoded records and compared. A manifest that
+        disagrees with its own records is a corrupt export, and reporting the
+        disagreement is the whole reason to carry one.
+
+        **Replica is not authority** (§08's callout). This method copies
+        records; it grants nothing. A store that then accepts independent
+        writes has forked, byte-identical start or not, and no flag here
+        prevents that — custody does.
+
+        The verified remainder is materialised, because it is handed to one
+        atomic :meth:`replicate`. That is the honest limit of a MINIMAL
+        importer: an import too large to hold is a resumable-transfer design,
+        and this is not one.
+        """
+        if prefix.codec != EXPORT_CODEC:
+            raise ValueError(
+                f"this backend imports {EXPORT_CODEC!r} and nothing else, but "
+                f"this export claims codec {prefix.codec!r}"
+            )
+        imported = _decoded(prefix)
+        _refuse_disagreeing_manifest(prefix, imported)
+
+        if not self._log.exists():
+            # A new empty replica. Genesis cannot be appended onto a head that
+            # is not there, and it must not be re-minted either: a replica
+            # whose ordinal 0 differed by one byte would be a different
+            # lineage wearing the same id.
+            log = ArrivalLog.adopt_genesis(self._log.path, imported[0])
+            self._log = log
+            head = _head_of(log.genesis())
+            if len(imported) == 1:
+                return head
+            return self.replicate(head, imported[1:]).after
+
+        head = self.head()
+        self._refuse_disagreeing_prefix(imported, head)
+        remainder = [
+            record for record in imported if record["ord"] > head.ordinal
+        ]
+        if not remainder:
+            # The import reaches exactly this target's head and agrees with it
+            # the whole way. Nothing was missing — not a failure, and not a
+            # no-op to hide. An import that stopped SHORT of the head never
+            # gets here; it refuses above.
+            return head
+        return self.replicate(head, remainder).after
+
+    def _refuse_disagreeing_prefix(
+        self, imported: Sequence[Mapping[str, Any]], head: Head
+    ) -> None:
+        """§08's exact-prefix-agreement gate for a non-empty target.
+
+        Over :meth:`scan`, which is the read op that already establishes the
+        target's prefix is intact — so this adds one comparison and no second
+        traversal of its own. Position by position against the import, so the
+        refusal names the ordinal the two disagree at rather than reporting
+        that they differ somewhere.
+
+        Distinct from the same-height fork :meth:`replicate` refuses: that one
+        fires on an overlap it was HANDED, this one on the overlap it is about
+        to SKIP. Both say the histories disagree at a height; skipping an
+        overlap without checking it is how a replica silently acquires a
+        prefix it never verified.
+
+        **An import that ends BEFORE the target's head refuses.** §08 asks for
+        agreement THROUGH the head, and a prefix that stops short structurally
+        cannot establish that — there is nothing to compare the records above
+        it against. Reporting success would be a verdict this operation has no
+        evidence for: it would say "this target agrees with the import through
+        its head" while never having looked at the heights in between. The
+        length is therefore checked FIRST and explicitly, rather than left to a
+        zip that would silently stop at the shorter side.
+        """
+        # Dense from 0 (the manifest check establishes both), so the target's
+        # prefix is exactly this many records and the import must cover it.
+        overlap = head.ordinal + 1
+        if len(imported) < overlap:
+            captured = imported[-1]
+            raise HeadMismatch(
+                f"this import captures head ({captured['lin']}, "
+                f"{captured['ord']}, {captured['rh']}), which is behind "
+                f"{self._log.path}'s head ({head.lineage}, {head.ordinal}, "
+                f"{head.record_hash}) — §08 requires exact prefix agreement "
+                "THROUGH the target's head, and an import that stops short "
+                "cannot establish it. Export again at or past the target's head"
+            )
+
+        for mine, theirs in zip(
+            self.scan(through=head), imported[:overlap], strict=True
+        ):
+            if mine["rh"] != theirs["rh"]:
+                raise SameHeightFork(
+                    f"ordinal {mine['ord']} of {self._log.path} holds rh "
+                    f"{mine['rh']}, but the import holds rh {theirs['rh']} at "
+                    f"ordinal {theirs['ord']} — this import is not a continuation "
+                    "of this log's history. Importing into a non-empty target "
+                    "requires exact prefix agreement through its head"
+                )
+
+    # -- reads through the ledger ------------------------------------------
+
+    def head(self, lineage: str | None = None) -> Head:
+        """The currently complete head.
+
+        Absence and corruption surface as this backend's own
+        ``GenesisRefused`` / ``ArrivalCorrupt`` — see :meth:`mint` for why
+        they are not translated. A ``lineage`` that is not this log's IS one
+        of the ratified refusals: asking a ledger about a lineage it does not
+        hold is an operation it may not perform.
+        """
+        record = self._log.head()
+        if lineage is not None and record["lin"] != lineage:
+            raise NotAuthority(
+                f"{self._log.path} holds lineage {record['lin']}, not the "
+                f"requested {lineage} — this ledger is not that lineage's "
+                "authority, and opening a path never makes it one"
+            )
+        return _head_of(record)
+
+    def head_at(self, watermark: Watermark) -> Head:
+        """The full head a projection's watermark names.
+
+        The resolution §07 needs and the query half cannot perform: a
+        watermark is a coordinate, and only the ledger holds the record whose
+        hash completes it. It answers or it refuses — a watermark the log
+        will not vouch for is a disagreement between projection and ledger,
+        and answering it with a manufactured head would hide exactly that.
+        """
+        record = self._log.read(watermark.ordinal)
+        if record["lin"] != watermark.lineage:
+            raise NotAuthority(
+                f"the projection reports lineage {watermark.lineage}, but "
+                f"{self._log.path} holds {record['lin']} — the projection is "
+                "not a projection of this log"
+            )
+        return _head_of(record)
+
+    def read(self, coordinate: int) -> Mapping[str, Any]:
+        """The exact record, after establishing its membership in the lineage.
+
+        Membership is not a lookup: the walk that reaches the coordinate has
+        verified that everything before it chains, because a record whose
+        predecessors do not chain is not at the coordinate it claims.
+        """
+        return self._log.read(coordinate)
+
+    def scan(
+        self, *, after: int | None = None, through: Head | None = None
+    ) -> Iterator[Mapping[str, Any]]:
+        """An ordered, consistent prefix range and no later record (§06).
+
+        ``through`` is a CAPTURED head, and capturing is what makes the range
+        a snapshot: the record found at that ordinal must be the one the
+        caller captured, or the prefix it is asking for is not the prefix
+        this log has. Absence before the captured head is corruption and not
+        end of stream, so a walk that ends early refuses rather than
+        returning short.
+
+        **This is a generator, so calling it checks nothing** — the same
+        caveat :meth:`engine.arrival.ArrivalLog.walk` carries, and for the
+        same reason. Every check below runs as records are pulled.
+        """
+        floor = -1 if after is None else after
+        reached = through is None
+        for record in self._log.walk():
+            if through is not None and record["ord"] == through.ordinal:
+                if (
+                    record["lin"] != through.lineage
+                    or record["rh"] != through.record_hash
+                ):
+                    raise HeadMismatch(
+                        f"ordinal {through.ordinal} of {self._log.path} holds "
+                        f"{record['lin']}/{record['rh']}, not the captured "
+                        f"{through.lineage}/{through.record_hash} — the "
+                        "snapshot this scan was asked for is not this log's"
+                    )
+                reached = True
+            if record["ord"] > floor:
+                yield record
+            if through is not None and record["ord"] >= through.ordinal:
+                break
+        if not reached:
+            raise HeadMismatch(
+                f"{self._log.path} ends before ordinal {through.ordinal} — "
+                "absence before a captured head is corruption, not end of "
+                "stream"
+            )
+
+    def verify(self, scope: VerifyScope) -> Head:
+        """Verify through a named head; return the head the claim covers.
+
+        **Verification reports; it never repairs.** Nothing here takes the
+        append lock, and the lock is the only thing that licenses truncating
+        a torn tail — so no path through this method can rewrite the log it
+        was asked to judge. (Whether that is a contract MUST is the F2
+        addendum Kyle rules on at the slice-2 gate; this adapter holds it
+        either way, because the alternative is reporting an agreement it just
+        manufactured.)
+
+        ``Incremental`` is NOT offered, and :meth:`capabilities` says so. A
+        verified suffix walk has to start somewhere, and this backend starts
+        one from a resume mark's byte offset — which a :class:`Head` does not
+        carry. Finding the checkpoint's position would mean walking to it,
+        making "incremental" the same work as ``Full`` under a name that
+        promises less. An honest absent level beats a level that lies about
+        its cost.
+        """
+        if isinstance(scope, Open):
+            # Genesis and the adopted head record — §06's Open level exactly.
+            # `_tail_record` and not the public `head()`: `head()` reaches its
+            # answer through a full walk, which would make this level a Full
+            # verification wearing an Open label. Reading the tail validates
+            # the genesis and the head record it adopts, and truncates
+            # nothing (that lives behind the lock, which this never takes).
+            self._log.genesis()
+            return _head_of(self._log._tail_record())
+
+        if isinstance(scope, Incremental):
+            raise NotImplementedError(
+                "the file adapter offers OPEN and FULL verification only — a "
+                "verified suffix walk starts from a resume mark's byte "
+                "offset, and a Head does not carry one. capabilities() "
+                "reports the two levels it actually has"
+            )
+
+        if not isinstance(scope, Full):
+            raise TypeError(f"not a verification scope: {scope!r}")
+
+        # Grammar, density, lineage and the hash chain for the complete
+        # prefix — `walk` IS that statement, and it is consumed to the end
+        # here rather than returned, because a generator nobody drains
+        # verifies nothing.
+        found: Mapping[str, Any] | None = None
+        for record in self._log.walk():
+            if record["ord"] == scope.through.ordinal:
+                found = record
+        if found is None:
+            raise HeadMismatch(
+                f"{self._log.path} holds no record at ordinal "
+                f"{scope.through.ordinal} — the head this verification was "
+                "asked about is not in this log"
+            )
+        head = _head_of(found)
+        if head != scope.through:
+            raise HeadMismatch(
+                f"ordinal {scope.through.ordinal} verifies as {head}, not the "
+                f"claimed {scope.through}"
+            )
+        return head
+
+    def capabilities(self) -> Capabilities:
+        """What this backend actually offers — no more (§12).
+
+        Deployment tooling refuses an assignment whose required guarantees are
+        absent, so an over-claim here is worse than a missing feature: it turns
+        a refusal into a runtime failure.
+
+        ``REPLICA`` joins ``AUTHORITY`` because :meth:`replicate` now exists —
+        the profile names what a store may be ASKED to do, and an adapter that
+        can consume pre-coordinated records without assigning any is what makes
+"""Conformance runner for exact replication (backend-contract.html §08).
+
+Loads all vectors from ``spec/conformance/vectors/replicate/*.json`` the way
+``test_conformance_replay.py`` loads its two areas — one glob, one parametrize,
+the envelope asserted before the body.
+
+Three properties every vector states, and each is checked here:
+
+1. **The outcome.** Accepted, or refused with a NAMED contract refusal. Only
+   contract refusals appear in a vector: a vector is language-neutral, and
+   naming this backend's ``AppendRejected`` in one would pin a Python class on
+   an implementation that has no such family. The malformed-batch cases live in
+   ``test_arrival_transfer.py`` as unit tests for exactly that reason.
+2. **The resulting bytes.** ``expected.log`` is the target's complete file,
+   line for line. For an accepted vector that is the byte-for-byte hash
+   preservation claim; for a refused one it equals ``input.target``, which is
+   the refuse-before-mutation claim. Both fall out of the same assertion.
+3. **The head.** Stated as well as derivable, so a store that produced the
+   right bytes through the wrong head would still be caught.
+
+Offered records are handed over as the plain objects ``json.load`` produced —
+deliberately NOT through ``decode_record``. Decoding here would recompute
+``rh`` and refuse a deliberately-wrong digest inside the harness, before the
+implementation ever got the chance to.
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+from engine.arrival import ArrivalLog
+from engine.arrival_contract import Head, HeadMismatch, SameHeightFork
+from engine.arrival_file_backend import FileLedger
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+REPLICATE_VECTORS_DIR = REPO_ROOT / "spec" / "conformance" / "vectors" / "replicate"
+
+# The refusals a vector may name. A refusal outside this mapping is a vector
+# claiming something the contract does not define, and KeyError says so loudly.
+REFUSALS = {"SameHeightFork": SameHeightFork, "HeadMismatch": HeadMismatch}
+
+# The three families §D.2 requires, and the EXACT vector inventory of each.
+#
+# Filenames rather than a count, and a count rather than "at least one": a
+# family check that only asks whether the family is non-empty goes green when a
+# fixture is deleted, right up until the last one goes. That is the shape of
+# ratchet that stops ratcheting quietly — the vectors are the oracle, so a
+# vector that disappears takes a claim with it and must say which one.
+#
+# GROW this when a vector is added; shrink it only when a claim is genuinely
+# retired, and say which in the commit.
+VECTOR_INVENTORY: dict[str, frozenset[str]] = {
+    "replicate-exact-suffix-": frozenset({
+        "replicate-exact-suffix-single-record-accepted",
+        "replicate-exact-suffix-batch-lands-whole",
+        "replicate-exact-suffix-refuses-a-gap-above-the-head",
+        "replicate-exact-suffix-refuses-a-stale-full-head-pin",
+    }),
+    "replicate-same-height-": frozenset({
+        "replicate-same-height-fork-at-the-head-refuses",
+        "replicate-same-height-fork-below-the-head-refuses",
+        "replicate-same-height-agreement-is-not-a-fork",
+    }),
+    "replicate-catch-up-": frozenset({
+        "replicate-catch-up-preserves-signed-records-byte-for-byte",
+        "replicate-catch-up-preserves-authored-time-and-origin",
+        "replicate-catch-up-from-a-genesis-only-replica",
+    }),
+}
+
+
+def _load_vectors(vectors_dir: Path) -> list[Path]:
+    return sorted(vectors_dir.glob("*.json"))
+
+
+def _head(data: dict[str, Any] | None) -> Head | None:
+    if data is None:
+        return None
+    return Head(
+        lineage=data["lineage"],
+        ordinal=data["ordinal"],
+        record_hash=data["record_hash"],
+    )
+
+
+def test_the_replicate_vector_inventory_is_exactly_what_is_on_disk():
+    """Every named vector present, and no unclassified vector present.
+
+    Both directions. A missing fixture fails NAMING ITSELF, so a deleted
+    vector cannot go unnoticed while the family still has siblings; and a
+    vector belonging to no family fails too, so a new claim cannot be added
+    without being filed under the family it belongs to.
+    """
+    on_disk = {path.stem for path in _load_vectors(REPLICATE_VECTORS_DIR)}
+    expected = frozenset().union(*VECTOR_INVENTORY.values())
+
+    assert on_disk == expected, (
+        f"missing: {sorted(expected - on_disk)}; "
+        f"unclassified: {sorted(on_disk - expected)}"
+    )
+    for family, members in VECTOR_INVENTORY.items():
+        assert members, f"the {family!r} family names no vectors"
+        for stem in members:
+            assert stem.startswith(family), (
+                f"{stem!r} is filed under {family!r} but is not named for it"
+            )
+
+
+@pytest.mark.parametrize(
+    "vector_path", _load_vectors(REPLICATE_VECTORS_DIR), ids=lambda p: p.stem
+)
+def test_conformance_replicate(vector_path: Path, tmp_path: Path) -> None:
+    with open(vector_path, encoding="utf-8") as f:
+        vector = json.load(f)
+
+    assert "name" in vector, f"Vector {vector_path} missing 'name'"
+    assert "description" in vector, f"Vector {vector_path} missing 'description'"
+    assert "input" in vector, f"Vector {vector_path} missing 'input'"
+    assert "expected" in vector, f"Vector {vector_path} missing 'expected'"
+    assert vector["name"] == vector_path.stem, "vector name must match its file stem"
+
+    target_lines = vector["input"]["target"]
+    offered = vector["input"]["records"]
+    expected = vector["expected"]
+
+    log_path = tmp_path / f"{vector['name']}.arrival"
+
+codex
+The diff is confined to the four allowed files. The new short-import guard is structurally before scanning/mutation, and the inventory assertion is genuinely bidirectional; I’m now testing those properties under the exact mutations rather than relying on the added tests’ prose.
+exec
+/bin/zsh -lc "sed -n '1,220p' pyproject.toml && sed -n '1,180p' libs/engine/pyproject.toml && nl -ba libs/engine/src/engine/arrival_file_backend.py | sed -n '630,725p' && rg -n \"pyright|architecture|2034|pytest\" Makefile pyproject.toml libs/engine -g '*.toml' -g '*.md' -g '*.yml' -g '*.yaml'" in /Users/kaygee/Code/loops-s2wp2
+ exited 2 in 0ms:
+[project]
+name = "strange-loops"
+version = "0.11.0"
+description = "A system for focusing attention"
+readme = "README.md"
+license = "MIT"
+authors = [{ name = "Kyle Gruel", email = "kylegruel@gmail.com" }]
+requires-python = ">=3.11"
+# This is a FLAT vendored build: hatchling bundles every libs/*/src into one
+# wheel (see [tool.hatch.build] below), so this list must mirror the UNION of
+# all vendored libs' third-party deps by hand — the root does not depend on the
+# workspace members, it inlines their source. A dep added to a lib's pyproject
+# (e.g. engine's rfc8785, added with the JCS migration) is invisible to
+# `uv tool install .` until it is also added here. `uv run --package` masks the
+# gap because it resolves the workspace env, not this flat wheel.
+dependencies = [
+    "painted>=0.12.1,<0.14",
+    "ckdl>=1.0",
+    "pyjwt[crypto]>=2.9",
+    "cryptography>=43",
+    "python-ulid>=3.0",
+    "rfc8785>=0.1.4",  # engine._canonical_bytes (JCS, RFC 8785)
+    # python-ulid 3.1.0 imports typing_extensions unconditionally but doesn't
+    # declare it. Pinning here until upstream (mdomke/python-ulid) fixes the
+    # metadata. Drop when that ships.
+    "typing_extensions>=4.0",
+]
+
+[project.scripts]
+sl = "loops.main:main"
+loops = "loops.main:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build]
+only-include = [
+    "libs/atoms/src/atoms",
+    "libs/custody/src/custody",
+    "libs/engine/src/engine",
+    "libs/lang/src/lang",
+    "libs/sdk/src/sdk",
+    "libs/sign/src/sign",
+    "libs/store/src/store",
+    "apps/loops/src/loops",
+    "README.md",
+    "LICENSE",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = [
+    "libs/atoms/src/atoms",
+    "libs/custody/src/custody",
+    "libs/engine/src/engine",
+    "libs/lang/src/lang",
+    "libs/sdk/src/sdk",
+    "libs/sign/src/sign",
+    "libs/store/src/store",
+    "apps/loops/src/loops",
+]
+
+# The root runs the tests that belong to no single package — the architecture
+# ratchets and tests/chaos — so it needs the same dev tooling every member
+# already declares. Without this, `uv run pytest` at the root resolves only the
+# flat wheel's runtime deps and dies with "Failed to spawn: pytest" on any
+# machine whose .venv was not already dirty from an earlier run. uv.lock is
+# gitignored, so CI resolves fresh every time and hit exactly that.
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=6.0",
+    "ruff>=0.8",
+]
+
+[tool.uv.workspace]
+members = [
+    "libs/atoms",
+    "libs/custody",
+    "libs/engine",
+    "libs/lang",
+    "libs/sdk",
+    "libs/sign",
+    "libs/store",
+    "apps/loops",
+]
+[project]
+name = "engine"
+version = "0.1.0"
+description = "Temporal infrastructure and identity — Tick, Vertex, Peer, Grant"
+readme = "README.md"
+authors = [{ name = "Kyle Gruel", email = "kylegruel@gmail.com" }]
+requires-python = ">=3.11"
+dependencies = [
+    "atoms",
+    "lang",
+    "python-ulid>=3.0",
+    "rfc8785>=0.1.4",
+]
+
+[tool.uv.sources]
+atoms = { workspace = true }
+lang = { workspace = true }
+sign = { workspace = true }
+
+[dependency-groups]
+dev = [
+    "hypothesis>=6.100",
+    "mutmut>=3.2",
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+    "pytest-cov>=6.0",
+    "ruff>=0.8",
+    # Test-only: real Ed25519 material for the injected-signer seam
+    # (conftest Custodian). Runtime engine never imports sign — custody
+    # is the composition layer; this group keeps the injection boundary.
+    "sign",
+    "ty>=0.0.1a11",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/engine"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+
+[tool.coverage.run]
+source = ["src/engine"]
+branch = true
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "\\.\\.\\.$",  # Protocol method stubs
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "PTH"]
+
+[tool.ty.environment]
+python-version = "3.11"
+
+[tool.mutmut]
+paths_to_mutate = ["src/engine/witness.py"]
+tests_dir = [
+    "tests/test_witness_position.py",
+    "tests/test_witness_address_helpers.py",
+    "tests/test_diff_interval_report.py",
+    "tests/test_fold_at.py",
+]
+also_copy = ["src"]
+   630	        """An ordered, consistent prefix range and no later record (§06).
+   631	
+   632	        ``through`` is a CAPTURED head, and capturing is what makes the range
+   633	        a snapshot: the record found at that ordinal must be the one the
+   634	        caller captured, or the prefix it is asking for is not the prefix
+   635	        this log has. Absence before the captured head is corruption and not
+   636	        end of stream, so a walk that ends early refuses rather than
+   637	        returning short.
+   638	
+   639	        **This is a generator, so calling it checks nothing** — the same
+   640	        caveat :meth:`engine.arrival.ArrivalLog.walk` carries, and for the
+   641	        same reason. Every check below runs as records are pulled.
+   642	        """
+   643	        floor = -1 if after is None else after
+   644	        reached = through is None
+   645	        for record in self._log.walk():
+   646	            if through is not None and record["ord"] == through.ordinal:
+   647	                if (
+   648	                    record["lin"] != through.lineage
+   649	                    or record["rh"] != through.record_hash
+   650	                ):
+   651	                    raise HeadMismatch(
+   652	                        f"ordinal {through.ordinal} of {self._log.path} holds "
+   653	                        f"{record['lin']}/{record['rh']}, not the captured "
+   654	                        f"{through.lineage}/{through.record_hash} — the "
+   655	                        "snapshot this scan was asked for is not this log's"
+   656	                    )
+   657	                reached = True
+   658	            if record["ord"] > floor:
+   659	                yield record
+   660	            if through is not None and record["ord"] >= through.ordinal:
+   661	                break
+   662	        if not reached:
+   663	            raise HeadMismatch(
+   664	                f"{self._log.path} ends before ordinal {through.ordinal} — "
+   665	                "absence before a captured head is corruption, not end of "
+   666	                "stream"
+   667	            )
+   668	
+   669	    def verify(self, scope: VerifyScope) -> Head:
+   670	        """Verify through a named head; return the head the claim covers.
+   671	
+   672	        **Verification reports; it never repairs.** Nothing here takes the
+   673	        append lock, and the lock is the only thing that licenses truncating
+   674	        a torn tail — so no path through this method can rewrite the log it
+   675	        was asked to judge. (Whether that is a contract MUST is the F2
+   676	        addendum Kyle rules on at the slice-2 gate; this adapter holds it
+   677	        either way, because the alternative is reporting an agreement it just
+   678	        manufactured.)
+   679	
+   680	        ``Incremental`` is NOT offered, and :meth:`capabilities` says so. A
+   681	        verified suffix walk has to start somewhere, and this backend starts
+   682	        one from a resume mark's byte offset — which a :class:`Head` does not
+   683	        carry. Finding the checkpoint's position would mean walking to it,
+   684	        making "incremental" the same work as ``Full`` under a name that
+   685	        promises less. An honest absent level beats a level that lies about
+   686	        its cost.
+   687	        """
+   688	        if isinstance(scope, Open):
+   689	            # Genesis and the adopted head record — §06's Open level exactly.
+   690	            # `_tail_record` and not the public `head()`: `head()` reaches its
+   691	            # answer through a full walk, which would make this level a Full
+   692	            # verification wearing an Open label. Reading the tail validates
+   693	            # the genesis and the head record it adopts, and truncates
+   694	            # nothing (that lives behind the lock, which this never takes).
+   695	            self._log.genesis()
+   696	            return _head_of(self._log._tail_record())
+   697	
+   698	        if isinstance(scope, Incremental):
+   699	            raise NotImplementedError(
+   700	                "the file adapter offers OPEN and FULL verification only — a "
+   701	                "verified suffix walk starts from a resume mark's byte "
+   702	                "offset, and a Head does not carry one. capabilities() "
+   703	                "reports the two levels it actually has"
+   704	            )
+   705	
+   706	        if not isinstance(scope, Full):
+   707	            raise TypeError(f"not a verification scope: {scope!r}")
+   708	
+   709	        # Grammar, density, lineage and the hash chain for the complete
+   710	        # prefix — `walk` IS that statement, and it is consumed to the end
+   711	        # here rather than returned, because a generator nobody drains
+   712	        # verifies nothing.
+   713	        found: Mapping[str, Any] | None = None
+   714	        for record in self._log.walk():
+   715	            if record["ord"] == scope.through.ordinal:
+   716	                found = record
+   717	        if found is None:
+   718	            raise HeadMismatch(
+   719	                f"{self._log.path} holds no record at ordinal "
+   720	                f"{scope.through.ordinal} — the head this verification was "
+   721	                "asked about is not in this log"
+   722	            )
+   723	        head = _head_of(found)
+   724	        if head != scope.through:
+   725	            raise HeadMismatch(
+rg: Makefile: No such file or directory (os error 2)
+pyproject.toml:63:# The root runs the tests that belong to no single package — the architecture
+pyproject.toml:65:# already declares. Without this, `uv run pytest` at the root resolves only the
+pyproject.toml:66:# flat wheel's runtime deps and dies with "Failed to spawn: pytest" on any
+pyproject.toml:71:    "pytest>=8.0",
+pyproject.toml:72:    "pytest-cov>=6.0",
+libs/engine/pyproject.toml:24:    "pytest>=8.0",
+libs/engine/pyproject.toml:25:    "pytest-asyncio>=0.24",
+libs/engine/pyproject.toml:26:    "pytest-cov>=6.0",
+libs/engine/pyproject.toml:42:[tool.pytest.ini_options]
+libs/engine/CLAUDE.md:291:uv run --package engine pytest libs/engine/tests
+libs/engine/CLAUDE.md:292:uv run --package engine pytest libs/engine/tests/test_vertex.py  # single file
+libs/engine/CLAUDE.md:303:| `observation:architecture/vertex-routing-narrative` | Routing, folding, branching — why Vertex replaced Stream |
+libs/engine/CLAUDE.md:304:| `observation:architecture/temporal-semantic-time` | Boundaries as semantic time, reset-vs-carry, nesting |
+libs/engine/CLAUDE.md:305:| `observation:architecture/persistence-conceptual-spine` | Persistence is configuration; replay is folding |
+libs/engine/CLAUDE.md:306:| `observation:architecture/identity-peer-as-atom-history` | Observer and gating — stance, naming, what's enforced |
+libs/engine/CLAUDE.md:308:Read with `sl read project observation/architecture/<name> -v`.
+
+exec
+/bin/zsh -lc 'UV_CACHE_DIR=/tmp/loops-s2wp2-uv-cache uv run --package engine pytest -q libs/engine/tests/test_arrival_transfer.py libs/engine/tests/test_conformance_replicate.py && UV_CACHE_DIR=/tmp/loops-s2wp2-uv-cache uv run --package engine pytest -q libs/engine/tests/test_arrival_transfer.py::test_import_refuses_a_prefix_that_ends_before_the_targets_head libs/engine/tests/test_arrival_transfer.py::test_re_importing_the_same_prefix_changes_nothing' in /Users/kaygee/Code/loops-s2wp2
+ succeeded in 1395ms:
+.............................................                            [100%]
+45 passed in 0.76s
+..                                                                       [100%]
+2 passed in 0.20s
+
+codex
+Baseline is green: 45/45 across the two changed test files, and the exact refusal/control pair is 2/2. The refusal test explicitly snapshots bytes and re-reads the head after the exception, so the unchanged-state claim is exercised directly. Next I’m restoring the old truncating comparison to confirm the refusal alone detects it.
+apply patch
+patch: completed
+/Users/kaygee/Code/loops-s2wp2/libs/engine/src/engine/arrival_file_backend.py
+diff --git a/libs/engine/src/engine/arrival_file_backend.py b/libs/engine/src/engine/arrival_file_backend.py
+index ec29f31323a15919e6013af3f6c601f8d8ca02dc..6c7b8cc8e8fbd3b2dfc1b65b4e8512dfe81a8f74
+--- a/libs/engine/src/engine/arrival_file_backend.py
++++ b/libs/engine/src/engine/arrival_file_backend.py
+@@ -554,7 +554,7 @@
+         # Dense from 0 (the manifest check establishes both), so the target's
+         # prefix is exactly this many records and the import must cover it.
+         overlap = head.ordinal + 1
+-        if len(imported) < overlap:
++        if False and len(imported) < overlap:
+             captured = imported[-1]
+             raise HeadMismatch(
+                 f"this import captures head ({captured['lin']}, "
+@@ -566,7 +566,7 @@
+             )
+ 
+         for mine, theirs in zip(
+-            self.scan(through=head), imported[:overlap], strict=True
++            self.scan(through=head), imported, strict=False
+         ):
+             if mine["rh"] != theirs["rh"]:
+                 raise SameHeightFork(
+
+diff --git a/libs/engine/src/engine/arrival_file_backend.py b/libs/engine/src/engine/arrival_file_backend.py
+index ec29f31323a15919e6013af3f6c601f8d8ca02dc..6c7b8cc8e8fbd3b2dfc1b65b4e8512dfe81a8f74
+--- a/libs/engine/src/engine/arrival_file_backend.py
++++ b/libs/engine/src/engine/arrival_file_backend.py
+@@ -554,7 +554,7 @@
+         # Dense from 0 (the manifest check establishes both), so the target's
+         # prefix is exactly this many records and the import must cover it.
+         overlap = head.ordinal + 1
+-        if len(imported) < overlap:
++        if False and len(imported) < overlap:
+             captured = imported[-1]
+             raise HeadMismatch(
+                 f"this import captures head ({captured['lin']}, "
+@@ -566,7 +566,7 @@
+             )
+ 
+         for mine, theirs in zip(
+-            self.scan(through=head), imported[:overlap], strict=True
++            self.scan(through=head), imported, strict=False
+         ):
+             if mine["rh"] != theirs["rh"]:
+                 raise SameHeightFork(
+
+exec
+/bin/zsh -lc 'UV_CACHE_DIR=/tmp/loops-s2wp2-uv-cache uv run --package engine pytest -q libs/engine/tests/test_arrival_transfer.py::test_import_refuses_a_prefix_that_ends_before_the_targets_head libs/engine/tests/test_arrival_transfer.py::test_re_importing_the_same_prefix_changes_nothing' in /Users/kaygee/Code/loops-s2wp2
+ exited 1 in 159ms:
+F.                                                                       [100%]
+=================================== FAILURES ===================================
+________ test_import_refuses_a_prefix_that_ends_before_the_targets_head ________
+
+authority = <engine.arrival_file_backend.FileLedger object at 0x10951ae40>
+tmp_path = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-14444/test_import_refuses_a_prefix_t0')
+
+    def test_import_refuses_a_prefix_that_ends_before_the_targets_head(authority, tmp_path):
+        """§08 asks for agreement THROUGH the head; a short import cannot give it.
+    
+        The target holds ordinals 0-4 and the import is a valid, manifest-clean
+        export captured at ordinal 1. Everything it does carry agrees — that is
+        what makes this the dangerous case rather than an obvious one. Returning
+        the target's head would claim agreement through ordinal 4 while ordinals
+        2-4 were never compared against anything, which is a verdict this
+        operation has no evidence for.
+        """
+        replica = FileLedger(ArrivalLog(tmp_path / "replica.arrival"))
+        full = authority.head()
+        replica.import_prefix(authority.export(through=full, codec=EXPORT_CODEC))
+        before = (tmp_path / "replica.arrival").read_bytes()
+    
+        short = Head(
+            lineage=full.lineage, ordinal=1, record_hash=authority.read(1)["rh"]
+        )
+>       with pytest.raises(HeadMismatch) as caught:
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE HeadMismatch
+
+libs/engine/tests/test_arrival_transfer.py:336: Failed
+=========================== short test summary info ============================
+FAILED libs/engine/tests/test_arrival_transfer.py::test_import_refuses_a_prefix_that_ends_before_the_targets_head
+1 failed, 1 passed in 0.13s
+
+diff --git a/libs/engine/src/engine/arrival_file_backend.py b/libs/engine/src/engine/arrival_file_backend.py
+index ec29f31323a15919e6013af3f6c601f8d8ca02dc..6c7b8cc8e8fbd3b2dfc1b65b4e8512dfe81a8f74
+--- a/libs/engine/src/engine/arrival_file_backend.py
++++ b/libs/engine/src/engine/arrival_file_backend.py
+@@ -554,7 +554,7 @@
+         # Dense from 0 (the manifest check establishes both), so the target's
+         # prefix is exactly this many records and the import must cover it.
+         overlap = head.ordinal + 1
+-        if len(imported) < overlap:
++        if False and len(imported) < overlap:
+             captured = imported[-1]
+             raise HeadMismatch(
+                 f"this import captures head ({captured['lin']}, "
+@@ -566,7 +566,7 @@
+             )
+ 
+         for mine, theirs in zip(
+-            self.scan(through=head), imported[:overlap], strict=True
++            self.scan(through=head), imported, strict=False
+         ):
+             if mine["rh"] != theirs["rh"]:
+                 raise SameHeightFork(
+
+apply patch
+patch: completed
+/Users/kaygee/Code/loops-s2wp2/libs/engine/src/engine/arrival_file_backend.py
+exec
+/bin/zsh -lc "fixture='spec/conformance/vectors/replicate/replicate-catch-up-preserves-authored-time-and-origin.json'; backup='/tmp/loops-s2wp2-missing-fixture.json'; mv \""'$fixture" "$backup"; UV_CACHE_DIR=/tmp/loops-s2wp2-uv-cache uv run --package engine pytest -q libs/engine/tests/test_conformance_replicate.py::test_the_replicate_vector_inventory_is_exactly_what_is_on_disk; code=$?; mv "$backup" "$fixture"; exit $code' in /Users/kaygee/Code/loops-s2wp2
+ exited 1 in 148ms:
+F                                                                        [100%]
+=================================== FAILURES ===================================
+________ test_the_replicate_vector_inventory_is_exactly_what_is_on_disk ________
+
+    def test_the_replicate_vector_inventory_is_exactly_what_is_on_disk():
+        """Every named vector present, and no unclassified vector present.
+    
+        Both directions. A missing fixture fails NAMING ITSELF, so a deleted
+        vector cannot go unnoticed while the family still has siblings; and a
+        vector belonging to no family fails too, so a new claim cannot be added
+        without being filed under the family it belongs to.
+        """
+        on_disk = {path.stem for path in _load_vectors(REPLICATE_VECTORS_DIR)}
+        expected = frozenset().union(*VECTOR_INVENTORY.values())
+    
+>       assert on_disk == expected, (
+            f"missing: {sorted(expected - on_disk)}; "
+            f"unclassified: {sorted(on_disk - expected)}"
+        )
+E       AssertionError: missing: ['replicate-catch-up-preserves-authored-time-and-origin']; unclassified: []
+E       assert {'replicate-c...ccepted', ...} == frozenset({'r...ad-pin', ...})
+E         
+E         Extra items in the right set:
+E         'replicate-catch-up-preserves-authored-time-and-origin'
+E         Use -v to get more diff
+
+libs/engine/tests/test_conformance_replicate.py:101: AssertionError
+=========================== short test summary info ============================
+FAILED libs/engine/tests/test_conformance_replicate.py::test_the_replicate_vector_inventory_is_exactly_what_is_on_disk
+1 failed in 0.09s
+
+apply patch
+patch: completed
+/Users/kaygee/Code/loops-s2wp2/spec/conformance/vectors/replicate/replicate-stray-review-probe.json
+diff --git a/spec/conformance/vectors/replicate/replicate-stray-review-probe.json b/spec/conformance/vectors/replicate/replicate-stray-review-probe.json
+new file mode 100644
+index 0000000000000000000000000000000000000000..0967ef424bce6791893e9a57bb952f80fd536e93
+--- /dev/null
++++ b/spec/conformance/vectors/replicate/replicate-stray-review-probe.json
+@@ -0,0 +1 @@
++{}
+
+diff --git a/spec/conformance/vectors/replicate/replicate-stray-review-probe.json b/spec/conformance/vectors/replicate/replicate-stray-review-probe.json
+new file mode 100644
+index 0000000000000000000000000000000000000000..0967ef424bce6791893e9a57bb952f80fd536e93
+--- /dev/null
++++ b/spec/conformance/vectors/replicate/replicate-stray-review-probe.json
+@@ -0,0 +1 @@
++{}
+
+exec
+/bin/zsh -lc 'UV_CACHE_DIR=/tmp/loops-s2wp2-uv-cache uv run --package engine pytest -q libs/engine/tests/test_conformance_replicate.py::test_the_replicate_vector_inventory_is_exactly_what_is_on_disk' in /Users/kaygee/Code/loops-s2wp2
+ exited 1 in 143ms:
+F                                                                        [100%]
+=================================== FAILURES ===================================
+________ test_the_replicate_vector_inventory_is_exactly_what_is_on_disk ________
+
+    def test_the_replicate_vector_inventory_is_exactly_what_is_on_disk():
+        """Every named vector present, and no unclassified vector present.
+    
+        Both directions. A missing fixture fails NAMING ITSELF, so a deleted
+        vector cannot go unnoticed while the family still has siblings; and a
+        vector belonging to no family fails too, so a new claim cannot be added
+        without being filed under the family it belongs to.
+        """
+        on_disk = {path.stem for path in _load_vectors(REPLICATE_VECTORS_DIR)}
+        expected = frozenset().union(*VECTOR_INVENTORY.values())
+    
+>       assert on_disk == expected, (
+            f"missing: {sorted(expected - on_disk)}; "
+            f"unclassified: {sorted(on_disk - expected)}"
+        )
+E       AssertionError: missing: []; unclassified: ['replicate-stray-review-probe']
+E       assert {'replicate-c...ead-pin', ...} == frozenset({'r...ad-pin', ...})
+E         
+E         Extra items in the left set:
+E         'replicate-stray-review-probe'
+E         Use -v to get more diff
+
+libs/engine/tests/test_conformance_replicate.py:101: AssertionError
+=========================== short test summary info ============================
+FAILED libs/engine/tests/test_conformance_replicate.py::test_the_replicate_vector_inventory_is_exactly_what_is_on_disk
+1 failed in 0.10s
+
+diff --git a/spec/conformance/vectors/replicate/replicate-stray-review-probe.json b/spec/conformance/vectors/replicate/replicate-stray-review-probe.json
+new file mode 100644
+index 0000000000000000000000000000000000000000..0967ef424bce6791893e9a57bb952f80fd536e93
+--- /dev/null
++++ b/spec/conformance/vectors/replicate/replicate-stray-review-probe.json
+@@ -0,0 +1 @@
++{}
+
+apply patch
+patch: completed
+/Users/kaygee/Code/loops-s2wp2/spec/conformance/vectors/replicate/replicate-stray-review-probe.json
+codex
+Both inventory mutations behave correctly: removing one catch-up fixture fails naming that exact stem while its siblings remain, and adding `replicate-stray-review-probe.json` fails as `unclassified`. Both probes have been restored. The two static flags now appear to be narrowing limitations, but I’m checking the declared scope types and running the configured checker before classifying them.
+exec
+/bin/zsh -lc 'rg -n "class (Open|Incremental|Full)|VerifyScope" libs/engine/src/engine/arrival_contract.py libs/engine/src/engine/arrival_file_backend.py && command -v pyright || true && UV_CACHE_DIR=/tmp/loops-s2wp2-uv-cache uv run --package engine ty check libs/engine/src/engine/arrival_file_backend.py' in /Users/kaygee/Code/loops-s2wp2
+ exited 1 in 971ms:
+error[invalid-argument-type]: Argument to function `encode_record` is incorrect
+   --> libs/engine/src/engine/arrival_file_backend.py:448:38
+    |
+448 |                 yield (encode_record(record) + "\n").encode("utf-8")
+    |                                      ^^^^^^ Expected `dict[Unknown, Unknown]`, found `Mapping[str, Any]`
+info: Function defined here
+   --> libs/engine/src/engine/arrival.py:728:5
+    |
+728 | def encode_record(record: dict) -> str:
+    |     ^^^^^^^^^^^^^ ------------ Parameter declared here
+
+error[unresolved-attribute]: Attribute `ordinal` is not defined on `None` in union `Head | None`
+   --> libs/engine/src/engine/arrival_file_backend.py:664:57
+    |
+664 |                 f"{self._log.path} ends before ordinal {through.ordinal} — "
+    |                                                         ^^^^^^^^^^^^^^^
+
+Found 2 diagnostics
+
+exec
+/bin/zsh -lc 'pyright libs/engine/src/engine/arrival_file_backend.py' in /Users/kaygee/Code/loops-s2wp2
+ exited 1 in 554ms:
+/Users/kaygee/Code/loops-s2wp2/libs/engine/src/engine/arrival_file_backend.py
+  /Users/kaygee/Code/loops-s2wp2/libs/engine/src/engine/arrival_file_backend.py:448:38 - error: Argument of type "Mapping[str, Any]" cannot be assigned to parameter "record" of type "dict[Unknown, Unknown]" in function "encode_record"
+    "Mapping[str, Any]" is not assignable to "dict[Unknown, Unknown]" (reportArgumentType)
+  /Users/kaygee/Code/loops-s2wp2/libs/engine/src/engine/arrival_file_backend.py:664:65 - error: "ordinal" is not a known attribute of "None" (reportOptionalMemberAccess)
+2 errors, 0 warnings, 0 informations
+
+exec
+/bin/zsh -lc "git status --short && git diff -- libs/engine/src/engine/arrival_file_backend.py spec/conformance/vectors/replicate && rg --files tests | sort | head -80 && rg -n \"architecture\" tests libs -g 'test_*.py' | head -80" in /Users/kaygee/Code/loops-s2wp2
+ succeeded in 0ms:
+tests/architecture/__init__.py
+tests/architecture/_helpers.py
+tests/architecture/test_rule_01_apps_no_store_reader.py
+tests/architecture/test_rule_02_apps_no_raw_sqlite.py
+tests/architecture/test_rule_03_libs_dont_import_apps.py
+tests/architecture/test_rule_04_lib_dependency_dag.py
+tests/architecture/test_rule_05_lib_dataclasses_frozen.py
+tests/architecture/test_rule_06_atoms_stdlib_only.py
+tests/architecture/test_rule_07_sqlite3_confined_to_engine_store.py
+tests/architecture/test_rule_08_domain_constants_in_custody_only.py
+tests/architecture/test_rule_09_resolve_local_vertex_ambiguity.py
+tests/architecture/test_rule_10_disclosure_renderers_no_store_io.py
+tests/architecture/test_rule_11_record_never_imports_surfacing.py
+tests/architecture/test_rule_12_render_register_is_offered_width.py
+tests/architecture/test_rule_13_production_never_imports_non_production.py
+tests/architecture/test_rule_14_mutation_survivors_shrink_only.py
+tests/architecture/test_rule_15_apps_import_only_sdk_and_painted.py
+tests/architecture/test_rule_16_hot_path_libs_import_footprint.py
+tests/architecture/test_rule_17_fold_order_prose_is_receipt_order.py
+tests/architecture/test_rule_18_arrival_vocabulary_denylist.py
+tests/chaos/test_sdk_faults.py
+tests/chaos/test_storage_faults.py
+tests/architecture/test_rule_08_domain_constants_in_custody_only.py:19:    format (design/architecture/custody-lib-extraction). This pin is
+tests/architecture/test_rule_11_record_never_imports_surfacing.py:49:        + " — assign a layer in _LIB_LAYER (tests/test_architecture.py) AND "
+libs/engine/tests/test_arrival_contract.py:10:   than a numbered architecture rule (one adapter is not yet a pattern).
+libs/engine/tests/test_jsonl_ceremonies.py:3:The acceptance oracle of design:architecture/jsonl-declaration-ceremony-
+libs/engine/tests/test_vertex_reader.py:145:        This is the proof that the architecture works: new kinds are driven
+libs/engine/tests/test_vertex_reader.py:293:    """SPEC §9.4 (S3, decision:architecture/internal-table-s3-read-exclusion):
+libs/engine/tests/test_witness_address_helpers.py:253:    # (architecture ratchet); this is where the store access lives now.
+libs/engine/tests/test_jsonl_golden_fixtures.py:3:Oracle #9 of design:architecture/jsonl-declaration-ceremony-encoding. The
+
+exec
+/bin/zsh -lc 'UV_CACHE_DIR=/tmp/loops-s2wp2-uv-cache uv run --package engine pytest -q libs/engine/tests && UV_CACHE_DIR=/tmp/loops-s2wp2-uv-cache uv run --package store pytest -q libs/store/tests && UV_CACHE_DIR=/tmp/loops-s2wp2-uv-cache uv run pytest -q tests/architecture' in /Users/kaygee/Code/loops-s2wp2
+codex
+The static cases are not constructible through the annotated API:
+
+- At line 664, `reached` can be false only if `through` started non-`None`; when `through is None`, it is initialized true and never reset. Pyright does not preserve that correlation across the generator loop.
+- At line 707, `VerifyScope` is exactly `Open | Incremental | Full`, and the preceding branches exhaust it. The `TypeError` is therefore intentionally defensive runtime validation outside the static domain, not reachable for a valid `VerifyScope`.
+
+The full count verification is still running; targeted evidence is already complete.
+ succeeded in 100754ms:
+........................................................................ [  3%]
+........................................................................ [  7%]
+........................................................................ [ 10%]
+........................................................................ [ 14%]
+........................................................................ [ 17%]
+........................................................................ [ 21%]
+........................................................................ [ 24%]
+.........................................................s.............. [ 28%]
+........................................................................ [ 31%]
+........................................................................ [ 35%]
+........................................................................ [ 38%]
+........................................................................ [ 42%]
+........................................................................ [ 45%]
+........................................................................ [ 49%]
+........................................................................ [ 53%]
+........................................................................ [ 56%]
+........................................................................ [ 60%]
+........................................................................ [ 63%]
+........................................................................ [ 67%]
+........................................................................ [ 70%]
+........................................................................ [ 74%]
+........................................................................ [ 77%]
+........................................................................ [ 81%]
+........................................................................ [ 84%]
+........................................................................ [ 88%]
+........................................................................ [ 91%]
+........................................................................ [ 95%]
+........................................................................ [ 99%]
+...................                                                      [100%]
+2034 passed, 1 skipped in 79.64s (0:01:19)
+........................................................................ [ 40%]
+........................................................................ [ 80%]
+....................................                                     [100%]
+180 passed in 15.37s
+........................................................................ [ 72%]
+...........................                                              [100%]
+99 passed in 4.80s
+
+exec
+/bin/zsh -lc 'git status --short && git rev-parse --short HEAD && git diff --name-only 165d86ea...b4d61809' in /Users/kaygee/Code/loops-s2wp2
+ succeeded in 0ms:
+b4d61809
+docs/scratch/arrival-break/slice2-wp2-report.md
+libs/engine/src/engine/arrival_file_backend.py
+libs/engine/tests/test_arrival_transfer.py
+libs/engine/tests/test_conformance_replicate.py
+
+codex
+S2WP2-L-1 — PASS
+
+- Exact repro now raises `HeadMismatch`.
+- Error names both imported and target heads/heights.
+- Log bytes and head remain unchanged.
+- Mutation restoring `strict=False` acceptance: refusal test fails; same-length idempotent control remains green.
+- Taxonomy is correct: “stops short, agrees everywhere supplied” contains no conflicting record at any height, so it is not `SameHeightFork`. `HeadMismatch` accurately describes an insufficiently recent export.
+
+S2WP2-L-2 — PASS
+
+- Removing one fixture fails naming that exact missing stem while sibling vectors remain.
+- Adding stray `replicate-stray-review-probe.json` fails naming it as unclassified.
+- Family-prefix membership is explicitly checked.
+
+Scope/counts — PASS
+
+- Diff touches only the two permitted source/test files and report.
+- Engine: 2034 passed, 1 skipped.
+- Store: 180 passed.
+- Architecture: 99 passed.
+- Worktree restored clean at `b4d61809`.
+
+Seeded diagnostics — no new finding
+
+- Line 664 is a narrowing false positive: `reached` can be false only when `through` was non-`None`.
+- Line 707 is unreachable for the declared exhaustive union `Open | Incremental | Full`; the branch is defensive runtime validation. Installed Pyright did not report it in this run.
+
+No new findings.
+
+**CONVERGED**
+tokens used
+82,478
+S2WP2-L-1 — PASS
+
+- Exact repro now raises `HeadMismatch`.
+- Error names both imported and target heads/heights.
+- Log bytes and head remain unchanged.
+- Mutation restoring `strict=False` acceptance: refusal test fails; same-length idempotent control remains green.
+- Taxonomy is correct: “stops short, agrees everywhere supplied” contains no conflicting record at any height, so it is not `SameHeightFork`. `HeadMismatch` accurately describes an insufficiently recent export.
+
+S2WP2-L-2 — PASS
+
+- Removing one fixture fails naming that exact missing stem while sibling vectors remain.
+- Adding stray `replicate-stray-review-probe.json` fails naming it as unclassified.
+- Family-prefix membership is explicitly checked.
+
+Scope/counts — PASS
+
+- Diff touches only the two permitted source/test files and report.
+- Engine: 2034 passed, 1 skipped.
+- Store: 180 passed.
+- Architecture: 99 passed.
+- Worktree restored clean at `b4d61809`.
+
+Seeded diagnostics — no new finding
+
+- Line 664 is a narrowing false positive: `reached` can be false only when `through` was non-`None`.
+- Line 707 is unreachable for the declared exhaustive union `Open | Incremental | Full`; the branch is defensive runtime validation. Installed Pyright did not report it in this run.
+
+No new findings.
+
+**CONVERGED**

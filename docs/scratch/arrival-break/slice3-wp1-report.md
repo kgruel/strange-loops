@@ -12,7 +12,7 @@ Contract: `docs/scratch/arrival-break/slice3-wp1-brief.md`; design
 | File | What |
 |---|---|
 | `libs/engine/src/engine/arrival_head_attestation.py` | the record, the journal, the classifier, the refusal family, the transitional binding |
-| `libs/engine/tests/test_arrival_head_attestation.py` | 91 unit tests |
+| `libs/engine/tests/test_arrival_head_attestation.py` | 94 unit tests |
 | `tests/architecture/test_rule_18_arrival_vocabulary_denylist.py` | `_SCAN_TARGETS` enrollment (same commit as the module, or the glob test fails) |
 
 ## Counts
@@ -24,7 +24,7 @@ usable baseline):
 
 | Suite | Baseline | After | Delta |
 |---|---|---|---|
-| engine | 2063 passed, 1 skipped | 2154 passed, 1 skipped | **+91**, all in `test_arrival_head_attestation.py` |
+| engine | 2063 passed, 1 skipped | 2157 passed, 1 skipped | **+94**, all in `test_arrival_head_attestation.py` |
 | architecture | 99 passed | 99 passed | **0** — Rule 18 is not parametrized per target, so enrolling a module adds no case |
 
 Every delta accounted for. `ruff check` passes on both new files. (`ruff format` would
@@ -311,11 +311,10 @@ and a comparison of `unchanged` where the truth is a rollback. The amended rulin
 "skipped and surfaced wherever it sits, never silently" defeated through a second byte
 pattern — same demonstration as before, two different bytes.
 
-Headers are now identified by **shape**, keyed on the type string a real header carries;
-every other kindless dict is a skipped line like any other. Keyed on the type alone rather
-than `protocol`/`wire` as well, so a later build that adds header fields is still
-recognized, while a header naming a *different* type is not treated as this journal's.
-The create-race two-headers test stays green.
+Headers are now identified by **shape** rather than by "is it kindless". **The sentence
+that first replaced it — "identified by type alone" — overclaimed, and sol r1 broke it;
+the honest spelling is the three-way rule below.** The create-race two-headers test stays
+green throughout.
 
 ### BLOCKING-2 — content present, nothing readable, silent trust-on-first-use
 
@@ -351,3 +350,61 @@ without naming the case; only the refusal below the bound survives.
 |---|---|---|
 | (1) | kindless dicts absorbed as headers again | **2 failed, 89 passed** — `test_a_kindless_dict_is_not_absorbed_as_a_header`, `test_a_header_naming_another_type_is_not_this_journals_header` |
 | (2) | the `HeadUnreadable` arm removed, so `known` falls through to `None` and TOFU | **3 failed, 88 passed** — `test_a_journal_of_nothing_but_later_build_entries_declines`, plus the two other reads that hold only unreadable content |
+
+
+## Sol-LOW round 1 — the three-way classification rule (`9b616e28`)
+
+`finding:s3wp1-sol-l1-header-classification-three-way`, blocking, and the fix was ruled
+three ways because the obvious repair has a mirror hazard. Everything else passed,
+including a two-process 2×2000-observation concurrency run that produced 4001
+independently parseable lines, and the equivocation seeds.
+
+**What broke.** Classification required the type marker **and** the absence of `kind`. A
+later build's header carrying a `kind` of its own was therefore unrecognized, fell through
+to the entry path, was skipped — and then the file was refused for holding entries with no
+header. An uncontracted version-skew refusal of the whole journal. My tests only covered
+headers with *added* fields, never one whose added field was named `kind`.
+
+**Why type-alone is not the fix.** It would let a future ENTRY that happens to carry the
+type marker be absorbed as a header, silently — the kindless-dict failure of BLOCKING-1
+reborn from the other side. The two obvious repairs fail in opposite directions, which is
+what makes the rule three-way rather than a predicate.
+
+**The rule, and it states its own limits:**
+
+| Line | Verdict |
+|---|---|
+| Kindless, bearing the type string | Header. Unchanged. |
+| Bearing **both** the type marker and an entry `kind` | **Unclassifiable by this build.** Skipped and reported naming the ambiguity. Never absorbed, never a header, never a reason to refuse the file. |
+| Anything else | Entry-shaped: read as an entry, or skipped as before. |
+
+The middle row is the whole point. It is a location claim about this build's ability to
+read the line — *not* a verdict about what the line is, which is exactly what this build
+cannot know. Classification never absorbs and never refuses the file.
+
+**Readable entries with no recognized header are now tolerated.** The entries are
+self-describing evidence that heads were accepted, and a weakened claim is available, so
+`known` falls to `HeadLowerBound` with the header's absence reported in `.skipped` —
+proceed-answers decline, rollback stays sound. Refusing there would be a verdict where a
+bound would do, which is the error `HeadUnreadable` was added to correct. The absence is
+reported without a line number, because an absence does not have one.
+
+**What still triggers `JournalUnreadable`, and why it is now the only thing.** Every
+structural condition the *parser* meets yields a weakened claim rather than a verdict, so
+the parser no longer raises it at all. What remains is the one case that leaves nothing to
+parse: the journal is there and cannot be read as text — a directory, a permission wall,
+bytes that are not text. Those previously escaped `read_journal` as raw `OSError` and
+`UnicodeDecodeError`, straight past any caller catching `AttestationRefusal`, so this
+narrowing also closes a latent gap rather than merely relocating the class. Its own test
+pins it.
+
+### Sol-round mutation demos
+
+| # | Mutation | Result (94 tests) |
+|---|---|---|
+| (i-a) | the kindless precondition restored, so there is no ambiguous verdict | **2 failed, 92 passed** — `test_a_header_carrying_its_own_kind_does_not_refuse_the_file`, `test_a_type_bearing_entry_is_never_absorbed_as_a_header` |
+| (i-b) | headerless entries refuse again (ruling 3 reverted) | **1 failed, 93 passed** — `test_entries_with_no_header_are_tolerated_as_a_weakened_claim` |
+| (ii) | type-plus-kind classified as a header (the absorption arm) | **2 failed, 92 passed** — the mirror test, plus sol's own demonstration |
+
+Both directions of the mirror are pinned: (i-a) removes the ambiguity verdict and (ii)
+resolves it toward absorption, and each fails the test written for it.

@@ -1,0 +1,2768 @@
+Reading prompt from stdin...
+OpenAI Codex v0.150.1
+--------
+workdir: /Users/kaygee/Code/loops-s2wp4
+model: gpt-5.6-sol
+provider: openai
+approval: never
+sandbox: workspace-write [workdir, /tmp, $TMPDIR]
+reasoning effort: low
+reasoning summaries: none
+session id: 01a04efa-e5b2-76a2-aa3a-b83b04fd608e
+--------
+user
+# Sol review brief — arrival-break slice 2 / WP4 (KDL backend arm + registry), round 1 (per-WP, LOW)
+
+You are the cross-family reviewer for slice-2 WP4. Review the WP diff adversarially for
+correctness against the design contract. You review and report — no fixes, no commits.
+Run tests and scripts to verify claims empirically (preferred over reading alone).
+
+## 1. Anchor
+
+- Repo checkout: this working directory (a git worktree of /Users/kaygee/Code/loops).
+- Branch: `slice2/wp4-kdl-registry`, tip `91835e7b` (6 commits over wave base `0d38c969`).
+- Diff spec: `git diff 0d38c969...91835e7b`. 14 files.
+- Suites: lang (`.venv/bin/python -m pytest libs/lang/tests -q`), engine, and
+  `tests/architecture` from the root env.
+
+## 2. Design contract (what the code must honor)
+
+From `design:arrival-break-slice2-backend-contract` (ratified,
+`01M177MHWHD5HM574VSTDE17X8`) §B + §D.4:
+
+1. KDL: `store "<path>" backend="file"` — location stays positional, `backend=` a
+   property; bare `store` keeps meaning what it means today. New frozen `BackendDecl` +
+   `VertexFile.store_backend`; **`VertexFile.store` UNTOUCHED**.
+2. Parse REFUSES: unknown property on `store`, a child block, empty/blank backend —
+   ParseError in the loader's established style (today's silent prop-discard was the
+   hazard). Stored backend name is stripped (pinned since 91835e7b).
+3. **The backend name is residence**: threads as a third residence parameter through
+   `documents_to_vertex` and `engine/declaration.py` (all rebuild sites, including
+   `_reattach_ingress` and `program.py`); it NEVER enters `_decl.*` payloads.
+4. `engine/arrival_registry.py`: three ruled arms — explicit wins, NO suffix
+   cross-check; inferred-arrival transitional (slice-5 deletion marker); jsonl/sqlite →
+   None, never routed through the registry. Plus the store-less fourth arm → None.
+   UnknownBackend raised only in `open`. No import-time registration; re-register
+   refuses; adapters imported lazily (subprocess-pinned).
+5. Parity probe over every tracked `.vertex` + minted fixtures covering both arrival
+   arms at two levels (descriptor names the same log; ledger is over it).
+6. `residence.py` diff-empty. No consumer rewiring (nothing in production paths calls
+   the registry). No role/lineage parsing (role= actively refuses). Rule 18: registry
+   registered (WP1's completeness ratchet forced it).
+
+## 3. Unverified fixes — verify empirically, top priority
+
+| commit | claim | your job |
+|---|---|---|
+| 91835e7b | Gate F2+F4: strip normalization pinned by a stored-value assertion (mutation demo: unstripped-store variant → exact BackendDecl mismatch failure; production loader.py diff EMPTY vs pre-gate — test-only fix); `_residence_stripped` docstring/spacing corrected. | Re-run the mutation (move the strip into the blank-check only) → the new test must fail; restore. Confirm `git diff ff86a2b4 91835e7b -- libs/lang/src libs/engine/src` is empty. |
+
+## 4. Prior review state (gate, already run — do not re-litigate; flag if unsound)
+
+Gate PASS at ff86a2b4: all four mutation demos reproduced (unknown-prop refusal;
+threading drop → 4 named failures; ingress-carry drop → ONLY its test across the full
+2016-test engine suite; Rule-18 ratchet naming the unregistered module); the
+`_frozen`-defeats-`dataclasses.replace` root cause confirmed empirically; builder.py
+non-carry bounded (no seeding path — nothing to lose); registry-open-needs-a-projection
+reproduced and correctly LEFT for the slice gate's F2 ruling; parity probe scoping
+verified honest (zero tracked arrival-canonical .vertex). Dispositioned: F1
+(descriptor_for call-time import via residence's pre-existing engine.arrival coupling)
+→ WP5 doc pass; F3 (KDL typed-value coercion, `backend=null` → a backend named 'None')
+→ slice 5 adopt design.
+
+## 5. Seeded review targets
+
+- The three rebuild sites (documents_to_vertex, _reattach_ingress, program.py): is
+  there a FOURTH path that reconstructs VertexFile and could drop store_backend —
+  including in tests' helpers or any `_replace`-alike? The finding's own generalization
+  (constructor-completeness ratchet) is slice-5 work; here just hunt for a missed site.
+- The transitional inferred arm: can it fire for a store that is NOT arrival-canonical
+  (e.g. a path whose canonical_mode misreads)? Construct edge paths.
+- Descriptor equality/identity: `descriptor_for` on the same vertex from two cwds —
+  relative-location resolution stable?
+- The registry refusal messages: do they leak filesystem paths into errors that might
+  end up in signed payloads anywhere?
+
+## 6. Verdict format
+
+Per §2 item: PASS/FAIL + evidence. §3: PASS/FAIL. New findings: `S2WP4-L-<n>`,
+file:line, severity (BLOCKING/NON-BLOCKING), concrete failure scenario, evidence.
+Then one line: **CONVERGED** or **NOT CONVERGED** (with the blocking list).
+
+codex
+I’ll perform this as a read-only adversarial review: verify the exact diff/tip, inspect constructor and registry paths, run the requested suites and targeted empirical probes, then execute and restore the strip mutation while checking the worktree remains unchanged.
+exec
+/bin/zsh -lc 'git status --short && git rev-parse HEAD && git diff --stat 0d38c969...91835e7b && git diff --name-only 0d38c969...91835e7b && git log --oneline --decorate -7' in /Users/kaygee/Code/loops-s2wp4
+ succeeded in 0ms:
+91835e7b555fd82ab68ea561bc4930abd96c6d1b
+ docs/scratch/arrival-break/slice2-wp4-report.md    | 293 +++++++++++++++
+ libs/engine/src/engine/arrival_registry.py         | 191 ++++++++++
+ libs/engine/src/engine/declaration.py              |  16 +-
+ libs/engine/src/engine/program.py                  |   1 +
+ libs/engine/tests/test_arrival_registry.py         | 394 +++++++++++++++++++++
+ libs/engine/tests/test_declaration_resolver.py     |  88 +++++
+ libs/lang/src/lang/__init__.py                     |   3 +
+ libs/lang/src/lang/ast.py                          |  30 ++
+ libs/lang/src/lang/document.py                     |  16 +-
+ libs/lang/src/lang/loader.py                       |  32 ++
+ libs/lang/tests/test_document.py                   | 107 +++++-
+ libs/lang/tests/test_loader.py                     |  87 +++++
+ .../test_rule_18_arrival_vocabulary_denylist.py    |   6 +-
+ 13 files changed, 1241 insertions(+), 23 deletions(-)
+docs/scratch/arrival-break/slice2-wp4-report.md
+libs/engine/src/engine/arrival_registry.py
+libs/engine/src/engine/declaration.py
+libs/engine/src/engine/program.py
+libs/engine/tests/test_arrival_registry.py
+libs/engine/tests/test_declaration_resolver.py
+libs/lang/src/lang/__init__.py
+libs/lang/src/lang/ast.py
+libs/lang/src/lang/document.py
+libs/lang/src/lang/loader.py
+libs/lang/tests/test_document.py
+libs/lang/tests/test_loader.py
+tests/architecture/test_rule_18_arrival_vocabulary_denylist.py
+91835e7b (HEAD -> slice2/wp4-kdl-registry) test(lang): pin the backend-name strip, and correct _residence_stripped
+ff86a2b4 docs(scratch): disclose the backend-name strip and the unfolded emit stray
+2e5f6319 docs(scratch): slice-2 WP4 report — counts, demos, findings, oracle status
+0398e919 feat(engine): add the backend registry and prove it names today's artifacts
+b36da4cf feat(engine): thread the backend arm through declaration resolution
+8543fd0b feat(lang): declare the store backend in the .vertex grammar
+0d38c969 (slice/arrival-backend-contract) test(engine,store): pin the pin-completion refusal at both F1 callers
+
+exec
+/bin/zsh -lc "git diff 0d38c969...91835e7b -- libs/lang/src libs/engine/src tests/architecture && rg -n \"VertexFile\\s*\\(|dataclasses\\.replace|\\breplace\\(|_replace\\(\" --glob '*.py' . && sed -n '1,260p' libs/engine/src/engine/arrival_registry.py && sed -n '1,240p' libs/lang/src/lang/loader.py" in /Users/kaygee/Code/loops-s2wp4
+ succeeded in 0ms:
+diff --git a/libs/engine/src/engine/arrival_registry.py b/libs/engine/src/engine/arrival_registry.py
+new file mode 100644
+index 00000000..f6cc963a
+--- /dev/null
++++ b/libs/engine/src/engine/arrival_registry.py
+@@ -0,0 +1,191 @@
++"""arrival_registry — which adapter opens which artifact.
++
++Slice 2 of the arrival break (``design:arrival-break-slice2-backend-contract``
++§B.4). Two halves, deliberately separable:
++
++* :func:`descriptor_for` reads a parsed ``.vertex`` and answers what
++  :class:`engine.arrival_contract.StoreDescriptor` — if any — describes its
++  store. Pure: AST fields plus path arithmetic, no I/O, no adapter import, and
++  no knowledge of which backends this process has. It can answer about a
++  ``backend="duckdb"`` vertex on a host with no DuckDB adapter installed,
++  which is the point of separating naming from opening.
++* :class:`BackendRegistry` maps a backend NAME to an opener. This is the half
++  that can fail with :class:`~engine.arrival_contract.UnknownBackend`, because
++  this is the half that knows what is registered.
++
++**Nothing calls this in production yet.** Slice 2 builds and proves the
++registry; wiring the CLI resolvers, the SDK's canonical surface and the ~30
++``open_canonical_store`` importers onto it is slice 5's, where the deletions
++it enables land too. Until then this is an ADDITIVE path, ``residence.py`` is
++untouched, and today's suffix dispatch keeps working unchanged — which is what
++makes that promise mechanical rather than a hope.
++
++The registry is not a singleton and does not register anything at import.
++Construct one with :meth:`BackendRegistry.with_builtin_backends`. A
++process-wide instance is a decision with no forcing consumer yet; slice 5's
++rewiring is where one would earn its keep.
++"""
++
++from __future__ import annotations
++
++from collections.abc import Callable
++from pathlib import Path
++from typing import TYPE_CHECKING
++
++from .arrival_contract import (
++    ArrivalLedger,
++    ArrivalQuery,
++    StoreDescriptor,
++    UnknownBackend,
++)
++
++if TYPE_CHECKING:  # pragma: no cover - typing only
++    from lang.ast import VertexFile
++
++__all__ = ["BackendOpener", "BackendRegistry", "descriptor_for"]
++
++
++#: What a registered adapter must be: given a descriptor, hand back the
++#: custody half and the reads half. The pair is the contract's own §03 split,
++#: so an adapter cannot register a single object that does both.
++BackendOpener = Callable[[StoreDescriptor], "tuple[ArrivalLedger, ArrivalQuery]"]
++
++#: The backend name the transitional arm synthesizes, and the name the file
++#: adapter registers under.
++FILE_BACKEND = "file"
++
++
++def descriptor_for(
++    ast: VertexFile, vertex_path: Path | None = None
++) -> StoreDescriptor | None:
++    """Which adapter opens this vertex's store, or None if no adapter does.
++
++    Four answers, and only the first two describe a ledger:
++
++    **Explicit** — the vertex declared ``backend=``. The declared name wins,
++    and there is NO cross-check against the location's suffix. A
++    ``backend="file"`` on a ``.duckdb``-named path is legal, because under §02
++    the suffix carries no meaning once the backend is declared; adding a "do
++    they agree?" check would re-admit inference through the back door on the
++    very change that removes it. An unregistered name is not this function's
++    to refuse — see :meth:`BackendRegistry.open`.
++
++    **Inferred** — no ``backend=``, and the location is ``.arrival``-canonical.
++    Synthesizes ``backend="file"``.
++
++    **Not a ledger** — the location is ``.jsonl``- or sqlite-canonical. Those
++    modes have no ledger and never route through a registry; they keep
++    resolving through :func:`engine.jsonl_store.open_canonical_store` exactly
++    as today. Answering None rather than raising is the honest shape: "no
++    adapter describes this" is a fact about the store, not a fault.
++
++    **No store at all** — an aggregate (``combine``) or a loops-only vertex
++    declares no location. Same answer, same reason.
++
++    ``lineage`` and ``role`` are left unset. The contract names them
++    (backend-contract.html:134-135) but nothing in slices 2-4 reads them, and
++    parsing fields nothing consumes is how speculative grammar ossifies. Their
++    forcing consumer is slice 5's adopt becoming a descriptor operation.
++    """
++    from .residence import canonical_mode, canonical_store_path
++
++    if ast.store is None:
++        return None
++
++    # Pure path arithmetic — resolves a relative locator against the vertex
++    # file's directory, never the process cwd. No mode dispatch, so it
++    # survives the break intact.
++    location = canonical_store_path(ast.store, vertex_path)
++
++    if ast.store_backend is not None:
++        return StoreDescriptor(
++            backend=ast.store_backend.name, location=str(location)
++        )
++
++    # TRANSITIONAL — DELETE IN SLICE 5.
++    # Inferring "file" from an .arrival suffix is exactly what explicit
++    # declaration exists to end. It exists here so slices 3-4 are not
++    # stranded: every .arrival store in the wild predates the grammar that
++    # would let it say so. Slice 5's adopt ceremony writes `backend="file"`
++    # into those vertices, and this arm dies with the last undeclared store.
++    # Its deletion is a residue sweep, not a behavior change: once every
++    # .arrival vertex declares its backend, the explicit arm above already
++    # answers every case this one does.
++    if canonical_mode(location) == "arrival":
++        return StoreDescriptor(backend=FILE_BACKEND, location=str(location))
++
++    return None
++
++
++def _open_file_backend(
++    descriptor: StoreDescriptor,
++) -> tuple[ArrivalLedger, ArrivalQuery]:
++    """Open the ``.arrival`` log and the projection beside it.
++
++    Imported lazily, inside the opener: ``import engine.arrival_registry``
++    must not drag sqlite3 and the whole arrival codec behind it for a caller
++    that only wants to NAME a descriptor. That is the same reason the contract
++    module is separate from the adapter, held one level up.
++    """
++    from .arrival import ArrivalLog
++    from .arrival_file_backend import FileLedger, FileQuery
++    from .residence import index_path_for
++
++    location = Path(descriptor.location)
++    return FileLedger(ArrivalLog(location)), FileQuery(index_path_for(location))
++
++
++class BackendRegistry:
++    """Backend name → opener, and nothing more.
++
++    A lookup table, not a cache: it holds no open handles and opening the
++    same descriptor twice yields two independent pairs. Custody lifetime
++    belongs to whoever asked for it.
++    """
++
++    def __init__(self) -> None:
++        self._openers: dict[str, BackendOpener] = {}
++
++    @classmethod
++    def with_builtin_backends(cls) -> BackendRegistry:
++        """A registry holding the adapters that ship in this package."""
++        registry = cls()
++        registry.register(FILE_BACKEND, _open_file_backend)
++        return registry
++
++    def register(self, name: str, opener: BackendOpener) -> None:
++        """Bind a backend name to its opener.
++
++        Re-registering a name refuses. A silent overwrite would let import
++        order decide which adapter answers to "file", and the failure would
++        surface as a store opening through the wrong codec rather than as an
++        error at the point of the mistake.
++        """
++        if name in self._openers:
++            raise ValueError(f"backend {name!r} is already registered")
++        self._openers[name] = opener
++
++    def registered(self) -> tuple[str, ...]:
++        """The backend names this registry answers to, sorted."""
++        return tuple(sorted(self._openers))
++
++    def open(
++        self, descriptor: StoreDescriptor
++    ) -> tuple[ArrivalLedger, ArrivalQuery]:
++        """The custody half and the reads half for this descriptor.
++
++        Refuses an unregistered name with
++        :class:`~engine.arrival_contract.UnknownBackend`, naming what IS
++        registered. Refusing is the whole point: §02 forbids inferring a
++        backend from a suffix, so an unregistered name has no fallback to
++        degrade into — and a registry that guessed would reintroduce
++        inference at the one seam built to remove it.
++        """
++        opener = self._openers.get(descriptor.backend)
++        if opener is None:
++            known = ", ".join(self.registered()) or "(none)"
++            raise UnknownBackend(
++                f"no adapter registered for backend {descriptor.backend!r} "
++                f"(registered: {known})"
++            )
++        return opener(descriptor)
+diff --git a/libs/engine/src/engine/declaration.py b/libs/engine/src/engine/declaration.py
+index fe79bdc0..5d79f9d6 100644
+--- a/libs/engine/src/engine/declaration.py
++++ b/libs/engine/src/engine/declaration.py
+@@ -498,6 +498,12 @@ def load_declaration_status(
+         return ast, status
+ 
+     store_field = file_ast.store
++    # The backend arm is residence, like the locator beside it: the documents
++    # do not carry it, so the file is the only place it can come from. A
++    # re-projection that supplied the locator but not the backend would hand
++    # back a vertex whose adapter designation had silently reverted to suffix
++    # inference — and nothing downstream would report that.
++    backend_field = file_ast.store_backend
+     if store_field is None:
+         return _finish(file_ast, "file-pre-genesis")
+ 
+@@ -509,11 +515,16 @@ def load_declaration_status(
+         store_path, as_of=as_of, at=at, timeout=store_timeout, on_locked=on_locked,
+     )
+     if isinstance(docs, list):
+-        resolved = documents_to_vertex(docs, path=vertex_path, store=store_field)
++        resolved = documents_to_vertex(
++            docs, path=vertex_path, store=store_field, store_backend=backend_field
++        )
+         return _finish(_reattach_ingress(resolved, file_ast), "store")
+     if isinstance(docs, Unhistorized):
+         resolved = documents_to_vertex(
+-            docs.documents, path=vertex_path, store=store_field
++            docs.documents,
++            path=vertex_path,
++            store=store_field,
++            store_backend=backend_field,
+         )
+         return _finish(_reattach_ingress(resolved, file_ast), "unhistorized")
+     return _finish(file_ast, "file-pre-genesis")
+@@ -893,6 +904,7 @@ def _reattach_ingress(resolved, file_ast):
+         name=resolved.name,
+         loops=resolved.loops,
+         store=resolved.store,
++        store_backend=resolved.store_backend,
+         discover=resolved.discover,
+         sources=resolved.sources,
+         vertices=resolved.vertices,
+diff --git a/libs/engine/src/engine/program.py b/libs/engine/src/engine/program.py
+index f877699d..d8a34f92 100644
+--- a/libs/engine/src/engine/program.py
++++ b/libs/engine/src/engine/program.py
+@@ -255,6 +255,7 @@ def _substitute_vertex_vars(ast: VertexFile, vars: dict[str, str]) -> VertexFile
+         name=ast.name,
+         loops=ast.loops,
+         store=ast.store,
++        store_backend=ast.store_backend,
+         discover=ast.discover,
+         sources=tuple(new_sources),
+         vertices=ast.vertices,
+diff --git a/libs/lang/src/lang/__init__.py b/libs/lang/src/lang/__init__.py
+index a9aab344..f5276b06 100644
+--- a/libs/lang/src/lang/__init__.py
++++ b/libs/lang/src/lang/__init__.py
+@@ -50,6 +50,8 @@ __all__ = [
+     "BoundaryCondition",
+     "BoundaryEvery",
+     "BoundaryWhen",
++    # AST types - Backend declarations
++    "BackendDecl",
+     # AST types - Combinatorial vertices
+     "CombineEntry",
+     # AST types - Lens declarations
+@@ -115,6 +117,7 @@ _LAZY_IMPORTS: dict[str, tuple[str, str]] = {}
+ 
+ # AST types
+ _AST_NAMES = [
++    "BackendDecl",
+     "Boundary", "BoundaryAfter", "BoundaryCondition", "BoundaryEvery", "BoundaryWhen",
+     "Coerce", "CombineEntry", "Duration", "EdgeDecl", "Explode", "Flatten",
+     "FoldAvg", "FoldBy", "FoldCollect", "FoldCount", "FoldDecl", "FoldLatest",
+diff --git a/libs/lang/src/lang/ast.py b/libs/lang/src/lang/ast.py
+index a6f39fb0..ff4f0cd8 100644
+--- a/libs/lang/src/lang/ast.py
++++ b/libs/lang/src/lang/ast.py
+@@ -672,6 +672,29 @@ class ObserverDecl:
+     # observer-name → public key, used to verify tick signatures)
+ 
+ 
++# -----------------------------------------------------------------------------
++# Backend Declaration (for .vertex files)
++# -----------------------------------------------------------------------------
++
++
++@dataclass(frozen=True)
++class BackendDecl:
++    """Which adapter opens the declared store.
++
++    The adapter designation, never the location: the location is the store
++    clause's positional argument and stays on ``VertexFile.store``. The two
++    cannot disagree because they are not two spellings of one value.
++
++    Backend selection is explicit — nothing here is inferred from a
++    ``.arrival``/``.duckdb`` suffix. A name this repo has no adapter for is
++    refused at open time by the registry, not at parse time: the grammar
++    admits any non-empty name so a vertex declaring a backend some other
++    deployment provides still parses.
++    """
++
++    name: str
++
++
+ # -----------------------------------------------------------------------------
+ # Top-level File ASTs
+ # -----------------------------------------------------------------------------
+@@ -703,6 +726,13 @@ class VertexFile:
+     name: str
+     loops: dict[str, LoopDef]
+     store: Path | None = None
++    # Residence's second half. `store` keeps meaning exactly what it meant
++    # before — the location — so every reader of it is unaffected by a
++    # declared backend. None means "not declared", which is not the same as
++    # "no backend": resolution of an undeclared store is the registry's, and
++    # the grammar's silence here is what lets legacy `store "<path>"` parse
++    # unchanged.
++    store_backend: BackendDecl | None = None
+     discover: str | None = None
+     sources: tuple[SourceEntry, ...] | None = None
+     vertices: tuple[Path, ...] | None = None
+diff --git a/libs/lang/src/lang/document.py b/libs/lang/src/lang/document.py
+index a4d751e9..a431be34 100644
+--- a/libs/lang/src/lang/document.py
++++ b/libs/lang/src/lang/document.py
+@@ -82,6 +82,7 @@ from pathlib import Path
+ from typing import Any, NamedTuple
+ 
+ from .ast import (
++    BackendDecl,
+     BoundaryAfter,
+     BoundaryCondition,
+     BoundaryEvery,
+@@ -891,12 +892,20 @@ def documents_to_vertex(
+     *,
+     path: Path | None = None,
+     store: Path | None = None,
++    store_backend: BackendDecl | None = None,
+ ) -> VertexFile:
+     """Project declaration documents back to a ``VertexFile`` AST.
+ 
+-    ``path`` and ``store`` are residence, supplied by the caller — they are
+-    not present in the documents. Pure inverse of :func:`vertex_to_documents`
+-    modulo those two fields.
++    ``path``, ``store`` and ``store_backend`` are residence, supplied by the
++    caller — they are not present in the documents. Pure inverse of
++    :func:`vertex_to_documents` modulo those three fields.
++
++    ``store_backend`` is residence for the same reason the locator is: which
++    adapter opens a store is an operational choice about where the vertex
++    lives, and putting an adapter name into signed declaration history would
++    make it part of the vertex's absorbed identity. It is threaded rather
++    than defaulted because a caller that drops it does not get an error — it
++    gets a vertex whose backend arm has silently reverted to inference.
+ 
+     Forward-compatible (normative, SPEC §9.2): unknown ``_decl.*`` kinds are
+     skipped, and unknown fields inside a known document are ignored, so a
+@@ -1008,6 +1017,7 @@ def documents_to_vertex(
+         name=name,
+         loops=loops,
+         store=store,
++        store_backend=store_backend,
+         discover=discover,
+         sources=sources,
+         vertices=vertices,
+diff --git a/libs/lang/src/lang/loader.py b/libs/lang/src/lang/loader.py
+index f3f65431..f55cff70 100644
+--- a/libs/lang/src/lang/loader.py
++++ b/libs/lang/src/lang/loader.py
+@@ -9,6 +9,7 @@ from __future__ import annotations
+ ckdl = None
+ 
+ from .ast import (
++    BackendDecl,
+     BoundaryAfter,
+     BoundaryEvery,
+     BoundaryWhen,
+@@ -767,6 +768,7 @@ def _load_vertex_file(doc: ckdl.Document, path: Path | None) -> VertexFile:
+     from pathlib import Path
+     name: str | None = None
+     store: Path | None = None
++    store_backend: BackendDecl | None = None
+     discover: str | None = None
+     sources: tuple[SourceEntry, ...] | None = None
+     vertices: tuple[Path, ...] | None = None
+@@ -786,7 +788,36 @@ def _load_vertex_file(doc: ckdl.Document, path: Path | None) -> VertexFile:
+         if key == "name":
+             name = _require_arg(node, 0, "name string", path)
+         elif key == "store":
++            # `store "<location>"` — legacy, still means exactly what it did.
++            # `store "<location>" backend="file"` — the location plus the
++            # adapter that opens it.
++            #
++            # The three refusals below exist because this handler used to read
++            # args[0] and nothing else: ckdl populated `properties` and
++            # `children` and they were silently discarded, so `backend=` one
++            # letter wrong parsed clean and the store degraded to suffix
++            # inference forever. Explicit declaration that a typo can silently
++            # undo is not explicit declaration.
+             store = Path(_require_arg(node, 0, "path", path))
++            for prop in node.properties:
++                if prop != "backend":
++                    raise _error(f"store: unknown property {prop!r}", path)
++            if node.children:
++                # Reserved, not rejected on principle: a child block is where
++                # adapter-specific options land when a second backend needs
++                # them. Refusing now costs nothing and keeps the grammar from
++                # accepting a shape nothing reads.
++                #
++                # An EMPTY `{ }` slips through, the same way it does for
++                # `preview` above: CKDL normalizes it to no children, so the
++                # loader cannot tell it from the no-block case. It declares
++                # nothing, so nothing is silently discarded.
++                raise _error("store: takes no child block", path)
++            if "backend" in node.properties:
++                backend_name = str(node.properties["backend"]).strip()
++                if not backend_name:
++                    raise _error("store: backend must not be empty", path)
++                store_backend = BackendDecl(name=backend_name)
+         elif key == "strict":
+             # `strict true` / `strict false` — when true, all emits to this vertex
+             # refuse on validation failures. No CLI override.
+@@ -878,6 +909,7 @@ def _load_vertex_file(doc: ckdl.Document, path: Path | None) -> VertexFile:
+         name=name,
+         loops=loops,
+         store=store,
++        store_backend=store_backend,
+         discover=discover,
+         sources=sources,
+         vertices=vertices,
+diff --git a/tests/architecture/test_rule_18_arrival_vocabulary_denylist.py b/tests/architecture/test_rule_18_arrival_vocabulary_denylist.py
+index dadd6ea2..c3348965 100644
+--- a/tests/architecture/test_rule_18_arrival_vocabulary_denylist.py
++++ b/tests/architecture/test_rule_18_arrival_vocabulary_denylist.py
+@@ -64,9 +64,13 @@ _SCAN_TARGETS = (
+     # born on the arrival surface, so they join at birth — and the contract
+     # module is the one that most needs it, because it is where the arrival
+     # vocabulary becomes the vocabulary every future backend inherits.
+-    # `arrival_registry` is slice 2's WP4 and joins when it is born.
++    # `arrival_registry` is slice 2's WP4 and joins when it is born — it is
++    # born here. It is the module that decides which adapter opens which
++    # artifact, so its names are the ones every future backend is registered
++    # under.
+     "libs/engine/src/engine/arrival_contract.py",
+     "libs/engine/src/engine/arrival_file_backend.py",
++    "libs/engine/src/engine/arrival_registry.py",
+     "libs/engine/src/engine/arrival_projection.py",
+     "libs/engine/src/engine/arrival_store.py",
+     "libs/engine/src/engine/probe.py",
+./apps/loops/src/loops/lenses/declarations.py:277:    fold_w = w([(k.get("fold_op") or "—").replace('"', "") for k in kinds], "FOLD")
+./apps/loops/src/loops/lenses/declarations.py:310:    fold_op = (k.get("fold_op") or "—").replace('"', "")
+./apps/loops/src/loops/lenses/declarations.py:522:    fold_op = (data.get("fold_op") or "").replace('"', "")
+./apps/loops/src/loops/surface.py:661:    return [replace(r, tier=_tier_for(r.salience, thresholds)) for r in rows]
+./apps/loops/src/loops/surface.py:1028:        replace(r, axis="event", level="fact")
+./apps/loops/src/loops/surface.py:1035:    window = replace(
+./apps/loops/src/loops/surface.py:1044:    return replace(surface, rows=row_tuple, window=window)
+./apps/loops/src/loops/surface.py:1076:    window = replace(
+./apps/loops/src/loops/surface.py:1081:    return replace(surface, rows=row_tuple, window=window)
+./apps/loops/src/loops/surface.py:1087:        replace(r, payload={k: r.payload[k] for k in fields if k in r.payload})
+./apps/loops/src/loops/surface.py:1090:    window = replace(surface.window, fields=tuple(fields))
+./apps/loops/src/loops/surface.py:1091:    return replace(surface, rows=rows, window=window)
+./apps/loops/src/loops/surface.py:1129:    window = replace(
+./apps/loops/src/loops/surface.py:1135:    return replace(surface, rows=row_tuple, window=window)
+./apps/loops/src/loops/surface.py:1196:    window = replace(
+./apps/loops/src/loops/surface.py:1206:    return replace(surface, rows=row_tuple, window=window)
+./apps/loops/src/loops/surface.py:1241:    window = replace(
+./apps/loops/src/loops/surface.py:1244:    return replace(surface, rows=rows, window=window)
+./apps/loops/src/loops/surface.py:1256:            return replace(r, granularity="whole")
+./apps/loops/src/loops/surface.py:1260:    window = replace(surface.window, granularity=_window_granularity(rows))
+./apps/loops/src/loops/surface.py:1261:    return replace(surface, rows=rows, window=window)
+./apps/loops/tests/test_review.py:382:            vpath.read_text().replace(
+./apps/loops/src/loops/tui/store_app.py:122:                self._state = replace(
+./apps/loops/src/loops/tui/store_app.py:146:            self._state = replace(state, focus=new_focus)
+./apps/loops/src/loops/tui/store_app.py:177:        new_state = replace(state, cursor=new_cursor)
+./apps/loops/src/loops/tui/store_app.py:183:                new_state = replace(
+./apps/loops/src/loops/tui/store_app.py:188:                new_state = replace(new_state, detail=None)
+./apps/loops/src/loops/tui/store_app.py:216:        self._state = replace(state, detail=detail)
+./apps/loops/src/loops/tui/store_app.py:236:        self._state = replace(
+./apps/loops/src/loops/tui/store_app.py:257:            self._state = replace(state, focus="list", fidelity=None)
+./apps/loops/src/loops/tui/store_app.py:271:                self._state = replace(
+./apps/loops/src/loops/tui/store_app.py:273:                    fidelity=replace(
+./apps/loops/src/loops/tui/store_app.py:284:                self._state = replace(
+./apps/loops/src/loops/tui/store_app.py:286:                    fidelity=replace(
+./apps/loops/src/loops/tui/store_app.py:309:        self._state = replace(state, fidelity=replace(fid, cursor=cursor))
+./apps/loops/src/loops/commands/fetch.py:67:        dt = dt.replace(tzinfo=timezone.utc)
+./apps/loops/src/loops/commands/fetch.py:174:                # dataclasses.replace, NOT a field-by-field rebuild: the rebuild
+./apps/loops/src/loops/commands/fetch.py:178:                # replace() is the ratchet — a new field can never be dropped
+./apps/loops/src/loops/commands/fetch.py:180:                filtered.append(replace(section, items=matches))
+./apps/loops/src/loops/commands/fetch.py:195:        # Same reason as the section rebuild above: replace() so a FoldState
+./apps/loops/src/loops/commands/fetch.py:197:        state = replace(
+./apps/loops/src/loops/lenses/gist.py:131:    collapsed = text.replace("\n", " ").strip()
+./apps/loops/src/loops/commands/init.py:152:        content = content.replace(
+./apps/loops/src/loops/commands/init.py:156:        content = content.replace(
+./apps/loops/src/loops/commands/init.py:366:            content = content.replace("__VERTEX__", vertex_path)
+./apps/loops/src/loops/commands/init.py:367:            content = content.replace("__BENCHMARK__", benchmark_cmd)
+./apps/loops/src/loops/commands/init.py:368:            content = content.replace("__METRIC__", primary_metric)
+./apps/loops/src/loops/commands/init.py:369:            content = content.replace("__SYSTEM_PROMPT__", str(system_prompt))
+./apps/loops/tests/test_completion_review_remediation.py:133:        vpath.write_text(vpath.read_text().replace("decision", "renamed"))
+./apps/loops/tests/test_completion_review_remediation.py:312:        vpath.write_text(vpath.read_text().replace("decision", "renamed"))
+./apps/loops/tests/test_completion_review_remediation.py:349:            vpath.read_text().replace('items "by" "topic"', 'items "by" "slug"')
+./apps/loops/tests/test_completion_review_remediation.py:430:        vpath.write_text(vpath.read_text().replace("decision", "renamed"))
+./apps/loops/src/loops/tui/autoresearch_app.py:581:                    self._state = replace(
+./apps/loops/src/loops/tui/autoresearch_app.py:594:                self._state = replace(
+./apps/loops/src/loops/tui/autoresearch_app.py:623:            self._state = replace(state, focus=new_focus)
+./apps/loops/src/loops/tui/autoresearch_app.py:649:            self._state = replace(state, focus="detail", detail_scroll=0)
+./apps/loops/src/loops/tui/autoresearch_app.py:654:            self._state = replace(state, cursor=cursor, detail_scroll=0)
+./apps/loops/src/loops/tui/autoresearch_app.py:680:            self._state = replace(state, detail_scroll=scroll)
+./apps/loops/src/loops/lenses/vertices.py:295:        target = raw.replace(home, "~") if raw.startswith(home) else raw
+./libs/store/src/store/rebirth.py:152:        return replace(row, id=deterministic_ulid(row.ts, row.id))
+./libs/store/src/store/rebirth.py:313:            mapped = replace(mapped, signature=None)
+./apps/loops/src/loops/lenses/_grammar.py:54:        return dt.replace(tzinfo=timezone.utc)
+./apps/loops/src/loops/lenses/store.py:217:    _epoch_min = datetime.min.replace(tzinfo=timezone.utc)
+./apps/loops/tests/test_tui.py:425:        state = replace(state, detail=None)
+./apps/loops/tests/test_tui.py:519:        fid = replace(state.fidelity, filtered=True, filter_kind="thread")
+./apps/loops/tests/test_tui.py:520:        state = replace(state, fidelity=fid)
+./apps/loops/tests/test_tui.py:675:        app._state = replace(app._state, focus="list")
+./apps/loops/tests/test_tui.py:677:        app._state = replace(app._state, focus="detail")
+./apps/loops/tests/test_tui.py:774:        state = replace(store_explorer_state, detail=None)
+./apps/loops/tests/test_tui.py:790:        state = replace(state, tick_names=["real", "ghost"], cursor=ListState().with_count(2))
+./apps/loops/tests/test_tui.py:815:        state = replace(StoreExplorerStateBuilder().ticks(["t"]).build(), fidelity=fid)
+./apps/loops/tests/test_tui.py:823:        state = replace(StoreExplorerStateBuilder().ticks(["t"]).build(), fidelity=fid)
+./apps/loops/tests/test_tui.py:833:        state = replace(StoreExplorerStateBuilder().ticks(["t"]).build(), fidelity=fid)
+./apps/loops/src/loops/cli/views/fold.py:507:        return entity.replace(":", "/", 1)
+./apps/loops/src/loops/cli/views/fold.py:561:    return _REVIEW_FLAG_OVERRIDE.get(dest, "--" + dest.replace("_", "-"))
+./apps/loops/src/loops/cli/views/fold.py:902:    fidelity = _replace(base, visible=frozenset(domain_visible))
+./apps/loops/tests/test_store_absorb.py:440:        renamed = _signed_vertex_text(key, ["a"]).replace('name "x"', 'name "renamed"', 1)
+./apps/loops/src/loops/cli/witness_address.py:148:        dt = dt.replace(tzinfo=timezone.utc)
+./tests/architecture/test_rule_18_arrival_vocabulary_denylist.py:130:_SQUASHED = {term.replace("_", ""): term for term in _DENIED}
+./apps/loops/src/loops/commands/add.py:240:    if not node_name.replace("-", "").replace("_", "").replace(".", "").isalnum():
+./libs/atoms/src/atoms/parse.py:356:        field_value = field_value.replace(old, new)
+./apps/loops/tests/test_cli.py:69:        result = main(["validate", str(FIXTURES / "minimal.loop").replace(".loop", ".txt")])
+./libs/atoms/src/atoms/fact.py:5:including dataclasses.replace() support via __replace__.
+./libs/atoms/src/atoms/fact.py:120:        """Support dataclasses.replace() and copy.replace()."""
+./apps/loops/tests/test_store_view.py:260:        state = replace(state, focus="fidelity", fidelity=fid)
+./apps/loops/tests/test_store_view.py:279:        fid = replace(
+./apps/loops/tests/test_store_view.py:306:        fid = replace(
+./apps/loops/tests/test_store_view.py:328:        state = replace(state, focus="fidelity", fidelity=fid)
+./apps/loops/tests/test_store_view.py:331:        state = replace(state, focus="list", fidelity=None)
+./libs/atoms/tests/test_parse.py:247:    def test_replace(self):
+./libs/engine/src/engine/vertex_reader.py:1400:        # dataclasses.replace, not a rebuild (the P2-b ratchet applies here
+./libs/engine/src/engine/vertex_reader.py:1403:        fold_state = replace(
+./apps/loops/tests/test_surface.py:1242:    state = replace(state, edge_facts=7, edge_since=42.0)
+./apps/loops/tests/builders.py:300:        state = replace(state, focus=self._focus)
+./apps/loops/tests/builders.py:306:                state = replace(state, detail=DataExplorerState(data=tick_data))
+./apps/loops/tests/builders.py:318:            state = replace(state, fidelity=fid)
+./libs/atoms/tests/test_fact.py:317:# --- dataclasses.replace ---
+./libs/atoms/tests/test_fact.py:323:        f2 = dataclasses.replace(f, kind="deploy")
+./libs/atoms/tests/test_fact.py:329:        f2 = dataclasses.replace(f, payload={"app": "web"})
+./libs/atoms/tests/test_fact.py:335:        dataclasses.replace(f, kind="deploy")
+./libs/atoms/tests/test_fact.py:340:        f2 = dataclasses.replace(f, observer="bob")
+./libs/atoms/tests/test_fact.py:418:    def test_dunder_replace(self):
+./apps/loops/tests/test_lifecycle_hide.py:77:        active_only = FoldState(sections=(replace(
+./apps/loops/tests/test_lifecycle_hide.py:108:            replace(r, depth=1) if r.key == "beta" else r for r in surf.rows
+./apps/loops/tests/test_lifecycle_hide.py:110:        out = hide_inactive(replace(surf, rows=rows))
+./apps/loops/tests/test_lifecycle_hide.py:118:            replace(r, level="fact", axis="event") if r.key == "beta" else r
+./apps/loops/tests/test_lifecycle_hide.py:121:        out = hide_inactive(replace(surf, rows=rows))
+./apps/loops/tests/test_lifecycle_hide.py:128:        surf = replace(surf, window=replace(surf.window, limited_by="limit"))
+./apps/loops/tests/test_declaration_seam.py:54:    vpath.write_text(vpath.read_text().replace("strict #true", "strict #false"))
+./apps/loops/tests/test_declaration_seam.py:64:    vpath.write_text(vpath.read_text().replace("decision {", "renamed {"))
+./apps/loops/tests/test_declaration_seam.py:81:    vpath.write_text(vpath.read_text().replace("strict #true", "strict #false"))
+./libs/lang/src/lang/document.py:1016:    return VertexFile(
+./libs/lang/src/lang/loader.py:908:    return VertexFile(
+./libs/lang/src/lang/vertex_mutation.py:140:    return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+./libs/engine/src/engine/arrival.py:922:            log.tmp_path.replace(log.path)
+./apps/loops/tests/test_edge_footer.py:30:    return replace(state, edge_facts=edge_facts, edge_since=edge_since)
+./libs/lang/tests/test_vertex_mutation.py:162:        assert "no full-LoopDef" in doc.replace("\n", " ").replace("    ", " ")
+./libs/lang/tests/test_vertex_mutation.py:644:        mangled = MULTI.replace("./data/test.db", "./else.db")
+./libs/lang/tests/test_document.py:416:    ast = VertexFile(
+./libs/lang/tests/test_document.py:617:    ast = VertexFile(
+./libs/lang/tests/test_document.py:644:    ast = VertexFile(
+./libs/lang/tests/test_document.py:673:    ast = VertexFile(
+./libs/lang/tests/test_document.py:759:    ast = VertexFile(
+./libs/lang/tests/test_document.py:778:    ast = VertexFile(
+./libs/lang/tests/test_document.py:798:    ast = VertexFile(name="x", loops=_one_loop(), routes={123: "c"})  # type: ignore[dict-item]
+./libs/lang/tests/test_document.py:833:    """Extract the constructor kwargs of a VertexFile (for rebuilding copies)."""
+./libs/lang/tests/test_document.py:857:    return VertexFile(**{**_vertex_kwargs(ast), **overrides})
+./libs/lang/tests/test_document.py:891:        # ast.py's custom frozen decorator defeats dataclasses.replace —
+./apps/loops/tests/golden/test_grammar_parity.py:161:    text = text.replace(str(vp.parent), "<TMP>")
+./libs/lang/tests/test_validator.py:333:        vertex = VertexFile(name="test", loops={"events": LoopDef(folds=(), boundary=None)})
+./libs/lang/tests/test_validator.py:542:        vertex = VertexFile(
+./libs/lang/tests/test_validator.py:735:        v = VertexFile(
+./libs/engine/tests/test_store_reader.py:332:    conn.executescript(_SCHEMA.replace(
+./libs/lang/tests/test_population.py:738:        v = VertexFile(
+./libs/lang/tests/test_population.py:754:        v = VertexFile(
+./libs/engine/tests/test_ceremony_orchestration.py:183:    other = world["base"].replace(
+./libs/engine/tests/test_ceremony_orchestration.py:261:        world["edit"].replace('c { fold { n "latest" } }', 'd { fold { n "latest" } }')
+./libs/engine/tests/test_ceremony_orchestration.py:438:        forced = dataclasses.replace(good_preview, applicable=True)
+./libs/engine/tests/test_ceremony_orchestration.py:523:        forced = dataclasses.replace(good_preview, applicable=True)
+./libs/engine/tests/test_ceremony_orchestration.py:612:    forced = dataclasses.replace(preview, applicable=True)
+./libs/engine/src/engine/program.py:254:    return VertexFile(
+./libs/engine/tests/test_declaration_resolver.py:130:        vpath.write_text(vpath.read_text().replace("strict #true", "strict #false"))
+./libs/engine/tests/test_declaration_resolver.py:141:            .replace("strict #true", "strict #false")
+./libs/engine/tests/test_declaration_resolver.py:142:            .replace("thread {", "friction {")
+./libs/engine/tests/test_declaration_resolver.py:143:            .replace('kyle { key "AAAA" }', 'eve { key "ZZZZ" }')
+./libs/engine/tests/test_declaration_resolver.py:422:        vpath.write_text(vpath.read_text().replace("strict #true", "strict #false"))
+./libs/engine/tests/test_declaration_resolver.py:507:        vpath.write_text(vpath.read_text().replace("hunter2", "rotated"))
+./libs/engine/tests/test_declaration_resolver.py:517:            vpath.read_text().replace('MODE="fast"', 'MODE="fast" EXTRA="new"')
+./libs/engine/tests/test_declaration_resolver.py:592:        loop.write_text(loop.read_text().replace("echo hi", "curl evil"))
+./libs/engine/tests/test_declaration_resolver.py:681:        one = two.replace('''  source "curl -s https://x.example" {{
+./libs/engine/tests/test_declaration_resolver.py:685:'''.replace("{{", "{").replace("}}", "}"), "")
+./libs/engine/tests/test_declaration_resolver.py:738:        split_blocks = two_one_block.replace('''  source "echo same" {
+./libs/engine/tests/test_declaration_resolver.py:883:        ``dataclasses.replace``), so it carries a hand-written field list.
+./libs/lang/tests/test_loader.py:2229:    def test_transform_replace(self):
+./libs/engine/tests/test_review_helpers.py:160:            vpath.read_text().replace(
+./libs/engine/tests/test_arrival_key_registry.py:161:    lines[1] = lines[1].replace('"n":1', '"n":2')
+./libs/engine/tests/test_arrival_grammar.py:110:        decode_record(line.replace('"amount":1', '"amount":9'))
+./libs/engine/tests/test_arrival_grammar.py:212:        decode_record(line.replace('"ord":1', '"ord":1,"ord":2'))
+./libs/engine/tests/test_arrival_gate.py:285:    _rewrite(log, 2, lambda line: line.replace(b'{"i":1}', b'{"i":9}'))
+./libs/engine/tests/test_program.py:241:    ast = VertexFile(
+./libs/engine/tests/test_program.py:295:    ast = VertexFile(name="test", loops={}, sources=())
+./libs/engine/tests/test_program.py:310:    ast = VertexFile(name="test", loops={}, sources=(plain,))
+./libs/engine/src/engine/ceremony.py:147:        Path(tmp).replace(path)
+./libs/engine/src/engine/builder.py:192:        return VertexFile(
+./libs/engine/tests/test_arrival_registry.py:372:        vpath.read_text().replace(
+./libs/engine/tests/test_arrival_registry.py:384:    ast = VertexFile(
+./libs/engine/src/engine/peer.py:72:    return replace(peer, horizon=new_horizon, potential=new_potential)
+./libs/engine/src/engine/peer.py:99:    return replace(peer, horizon=new_horizon, potential=new_potential)
+./libs/engine/src/engine/peer.py:115:    return replace(restricted, name=name)
+./libs/engine/src/engine/peer.py:144:    return replace(g, horizon=new_horizon, potential=new_potential)
+./libs/engine/src/engine/peer.py:171:    return replace(g, horizon=new_horizon, potential=new_potential)
+./libs/engine/src/engine/arrival_projection.py:300:    tmp.replace(target)
+./libs/engine/src/engine/jsonl_store.py:463:                self._path.replace(quarantine)  # atomic, evidence preserved
+./libs/engine/src/engine/sqlite_store.py:364:    return '"' + ident.replace('"', '""') + '"'
+./libs/engine/src/engine/handle.py:630:    return replace(item, payload=_deep_freeze(item.payload))
+./libs/engine/src/engine/handle.py:634:    return replace(
+./libs/engine/src/engine/declaration.py:901:    # ast.py's custom frozen decorator defeats dataclasses.replace — rebuild
+./libs/engine/src/engine/declaration.py:903:    return VertexFile(
+./libs/engine/tests/test_compiler.py:2302:    def test_replace(self):
+"""arrival_registry — which adapter opens which artifact.
+
+Slice 2 of the arrival break (``design:arrival-break-slice2-backend-contract``
+§B.4). Two halves, deliberately separable:
+
+* :func:`descriptor_for` reads a parsed ``.vertex`` and answers what
+  :class:`engine.arrival_contract.StoreDescriptor` — if any — describes its
+  store. Pure: AST fields plus path arithmetic, no I/O, no adapter import, and
+  no knowledge of which backends this process has. It can answer about a
+  ``backend="duckdb"`` vertex on a host with no DuckDB adapter installed,
+  which is the point of separating naming from opening.
+* :class:`BackendRegistry` maps a backend NAME to an opener. This is the half
+  that can fail with :class:`~engine.arrival_contract.UnknownBackend`, because
+  this is the half that knows what is registered.
+
+**Nothing calls this in production yet.** Slice 2 builds and proves the
+registry; wiring the CLI resolvers, the SDK's canonical surface and the ~30
+``open_canonical_store`` importers onto it is slice 5's, where the deletions
+it enables land too. Until then this is an ADDITIVE path, ``residence.py`` is
+untouched, and today's suffix dispatch keeps working unchanged — which is what
+makes that promise mechanical rather than a hope.
+
+The registry is not a singleton and does not register anything at import.
+Construct one with :meth:`BackendRegistry.with_builtin_backends`. A
+process-wide instance is a decision with no forcing consumer yet; slice 5's
+rewiring is where one would earn its keep.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Callable
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+from .arrival_contract import (
+    ArrivalLedger,
+    ArrivalQuery,
+    StoreDescriptor,
+    UnknownBackend,
+)
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from lang.ast import VertexFile
+
+__all__ = ["BackendOpener", "BackendRegistry", "descriptor_for"]
+
+
+#: What a registered adapter must be: given a descriptor, hand back the
+#: custody half and the reads half. The pair is the contract's own §03 split,
+#: so an adapter cannot register a single object that does both.
+BackendOpener = Callable[[StoreDescriptor], "tuple[ArrivalLedger, ArrivalQuery]"]
+
+#: The backend name the transitional arm synthesizes, and the name the file
+#: adapter registers under.
+FILE_BACKEND = "file"
+
+
+def descriptor_for(
+    ast: VertexFile, vertex_path: Path | None = None
+) -> StoreDescriptor | None:
+    """Which adapter opens this vertex's store, or None if no adapter does.
+
+    Four answers, and only the first two describe a ledger:
+
+    **Explicit** — the vertex declared ``backend=``. The declared name wins,
+    and there is NO cross-check against the location's suffix. A
+    ``backend="file"`` on a ``.duckdb``-named path is legal, because under §02
+    the suffix carries no meaning once the backend is declared; adding a "do
+    they agree?" check would re-admit inference through the back door on the
+    very change that removes it. An unregistered name is not this function's
+    to refuse — see :meth:`BackendRegistry.open`.
+
+    **Inferred** — no ``backend=``, and the location is ``.arrival``-canonical.
+    Synthesizes ``backend="file"``.
+
+    **Not a ledger** — the location is ``.jsonl``- or sqlite-canonical. Those
+    modes have no ledger and never route through a registry; they keep
+    resolving through :func:`engine.jsonl_store.open_canonical_store` exactly
+    as today. Answering None rather than raising is the honest shape: "no
+    adapter describes this" is a fact about the store, not a fault.
+
+    **No store at all** — an aggregate (``combine``) or a loops-only vertex
+    declares no location. Same answer, same reason.
+
+    ``lineage`` and ``role`` are left unset. The contract names them
+    (backend-contract.html:134-135) but nothing in slices 2-4 reads them, and
+    parsing fields nothing consumes is how speculative grammar ossifies. Their
+    forcing consumer is slice 5's adopt becoming a descriptor operation.
+    """
+    from .residence import canonical_mode, canonical_store_path
+
+    if ast.store is None:
+        return None
+
+    # Pure path arithmetic — resolves a relative locator against the vertex
+    # file's directory, never the process cwd. No mode dispatch, so it
+    # survives the break intact.
+    location = canonical_store_path(ast.store, vertex_path)
+
+    if ast.store_backend is not None:
+        return StoreDescriptor(
+            backend=ast.store_backend.name, location=str(location)
+        )
+
+    # TRANSITIONAL — DELETE IN SLICE 5.
+    # Inferring "file" from an .arrival suffix is exactly what explicit
+    # declaration exists to end. It exists here so slices 3-4 are not
+    # stranded: every .arrival store in the wild predates the grammar that
+    # would let it say so. Slice 5's adopt ceremony writes `backend="file"`
+    # into those vertices, and this arm dies with the last undeclared store.
+    # Its deletion is a residue sweep, not a behavior change: once every
+    # .arrival vertex declares its backend, the explicit arm above already
+    # answers every case this one does.
+    if canonical_mode(location) == "arrival":
+        return StoreDescriptor(backend=FILE_BACKEND, location=str(location))
+
+    return None
+
+
+def _open_file_backend(
+    descriptor: StoreDescriptor,
+) -> tuple[ArrivalLedger, ArrivalQuery]:
+    """Open the ``.arrival`` log and the projection beside it.
+
+    Imported lazily, inside the opener: ``import engine.arrival_registry``
+    must not drag sqlite3 and the whole arrival codec behind it for a caller
+    that only wants to NAME a descriptor. That is the same reason the contract
+    module is separate from the adapter, held one level up.
+    """
+    from .arrival import ArrivalLog
+    from .arrival_file_backend import FileLedger, FileQuery
+    from .residence import index_path_for
+
+    location = Path(descriptor.location)
+    return FileLedger(ArrivalLog(location)), FileQuery(index_path_for(location))
+
+
+class BackendRegistry:
+    """Backend name → opener, and nothing more.
+
+    A lookup table, not a cache: it holds no open handles and opening the
+    same descriptor twice yields two independent pairs. Custody lifetime
+    belongs to whoever asked for it.
+    """
+
+    def __init__(self) -> None:
+        self._openers: dict[str, BackendOpener] = {}
+
+    @classmethod
+    def with_builtin_backends(cls) -> BackendRegistry:
+        """A registry holding the adapters that ship in this package."""
+        registry = cls()
+        registry.register(FILE_BACKEND, _open_file_backend)
+        return registry
+
+    def register(self, name: str, opener: BackendOpener) -> None:
+        """Bind a backend name to its opener.
+
+        Re-registering a name refuses. A silent overwrite would let import
+        order decide which adapter answers to "file", and the failure would
+        surface as a store opening through the wrong codec rather than as an
+        error at the point of the mistake.
+        """
+        if name in self._openers:
+            raise ValueError(f"backend {name!r} is already registered")
+        self._openers[name] = opener
+
+    def registered(self) -> tuple[str, ...]:
+        """The backend names this registry answers to, sorted."""
+        return tuple(sorted(self._openers))
+
+    def open(
+        self, descriptor: StoreDescriptor
+    ) -> tuple[ArrivalLedger, ArrivalQuery]:
+        """The custody half and the reads half for this descriptor.
+
+        Refuses an unregistered name with
+        :class:`~engine.arrival_contract.UnknownBackend`, naming what IS
+        registered. Refusing is the whole point: §02 forbids inferring a
+        backend from a suffix, so an unregistered name has no fallback to
+        degrade into — and a registry that guessed would reintroduce
+        inference at the one seam built to remove it.
+        """
+        opener = self._openers.get(descriptor.backend)
+        if opener is None:
+            known = ", ".join(self.registered()) or "(none)"
+            raise UnknownBackend(
+                f"no adapter registered for backend {descriptor.backend!r} "
+                f"(registered: {known})"
+            )
+        return opener(descriptor)
+"""KDL-based loader for .loop and .vertex files.
+
+Parses KDL text via ckdl, maps nodes to AST dataclasses.
+"""
+
+from __future__ import annotations
+
+# ckdl deferred to parse functions to avoid loading enum (~3ms) at import time
+ckdl = None
+
+from .ast import (
+    BackendDecl,
+    BoundaryAfter,
+    BoundaryEvery,
+    BoundaryWhen,
+    Coerce,
+    CombineEntry,
+    Explode,
+    FoldAvg,
+    FoldBy,
+    FoldCollect,
+    FoldCount,
+    FoldDecl,
+    FoldLatest,
+    FoldMax,
+    FoldMin,
+    FoldSum,
+    FoldWindow,
+    Flatten,
+    FromFile,
+    GrantDecl,
+    InlineSource,
+    LensDecl,
+    LoopDef,
+    LoopFile,
+    LStrip,
+    ObserverDecl,
+    Pick,
+    Project,
+    Replace,
+    RStrip,
+    Select,
+    Skip,
+    SourceParams,
+    SourcesBlock,
+    Split,
+    Strip,
+    TemplateSource,
+    Transform,
+    Trigger,
+    VertexFile,
+    Where,
+)
+from .errors import Location, ParseError
+
+if False:  # TYPE_CHECKING — avoid importing typing (~1.4ms)
+    from .ast import Boundary, FoldOp, ParseStep, SourceEntry, TransformOp
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _error(msg: str, path: Path | None = None) -> ParseError:
+    return ParseError(msg, Location(path, 1))
+
+
+def _require_arg(node: ckdl.Node, index: int, label: str, path: Path | None = None) -> str:
+    """Get a required string argument from a node."""
+    if index >= len(node.args):
+        raise _error(f"{node.name}: missing required {label}", path)
+    val = node.args[index]
+    if not isinstance(val, str):
+        return str(val)
+    return val
+
+
+def _node_map(nodes: list[ckdl.Node]) -> dict[str, ckdl.Node]:
+    """Build name→node dict. For nodes that appear once (top-level keys)."""
+    result: dict[str, ckdl.Node] = {}
+    for node in nodes:
+        result[node.name] = node
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Parse step loaders
+# ---------------------------------------------------------------------------
+
+
+def _load_skip(node: ckdl.Node, path: Path | None) -> Skip:
+    return Skip(pattern=_require_arg(node, 0, "pattern", path))
+
+
+def _load_split(node: ckdl.Node, path: Path | None) -> Split:
+    delimiter = node.args[0] if node.args else None
+    return Split(delimiter=delimiter)
+
+
+def _load_pick(node: ckdl.Node, path: Path | None) -> Pick:
+    indices = tuple(int(a) for a in node.args)
+    names = None
+    for child in node.children:
+        if child.name == "names":
+            names = tuple(str(a) for a in child.args)
+            if len(names) != len(indices):
+                raise _error(f"pick: {len(indices)} indices but {len(names)} names", path)
+    return Pick(indices=indices, names=names)
+
+
+def _load_select(node: ckdl.Node, path: Path | None) -> Select:
+    if not node.args:
+        raise _error("select requires at least one field name", path)
+    return Select(fields=tuple(str(a) for a in node.args))
+
+
+def _load_transform_op(node: ckdl.Node, path: Path | None) -> TransformOp:
+    name = node.name
+    if name == "strip":
+        return Strip(chars=_require_arg(node, 0, "chars", path))
+    if name == "lstrip":
+        return LStrip(chars=_require_arg(node, 0, "chars", path))
+    if name == "rstrip":
+        return RStrip(chars=_require_arg(node, 0, "chars", path))
+    if name == "replace":
+        return Replace(
+            old=_require_arg(node, 0, "old string", path),
+            new=_require_arg(node, 1, "new string", path),
+        )
+    if name == "coerce":
+        type_str = _require_arg(node, 0, "type", path)
+        if type_str not in ("int", "float", "bool", "str"):
+            raise _error(f"coerce: invalid type {type_str!r}", path)
+        return Coerce(type=type_str)  # type: ignore[arg-type]
+    raise _error(f"Unknown transform operation: {name}", path)
+
+
+def _load_transform(node: ckdl.Node, path: Path | None) -> Transform:
+    field = _require_arg(node, 0, "field name", path)
+    ops = tuple(_load_transform_op(child, path) for child in node.children)
+    if not ops:
+        raise _error(f"transform {field!r}: no operations", path)
+    return Transform(field=field, operations=ops)
+
+
+def _load_explode(node: ckdl.Node, path: Path | None) -> Explode:
+    props = node.properties
+    explode_path = props.get("path")
+    if explode_path is None:
+        # Also accept as first argument
+        explode_path = node.args[0] if node.args else None
+    if explode_path is None:
+        raise _error("explode requires path= property or argument", path)
+    carry = None
+    carry_str = props.get("carry")
+    if carry_str is not None:
+        # Parse carry="name:group_name" or carry="name:group_name,other:alias"
+        carry = {}
+        for pair in str(carry_str).split(","):
+            parts = pair.strip().split(":")
+            if len(parts) == 2:
+                carry[parts[0].strip()] = parts[1].strip()
+    return Explode(path=str(explode_path), carry=carry)
+
+
+def _load_project(node: ckdl.Node, path: Path | None) -> Project:
+    fields = {}
+    for child in node.children:
+        field_name = child.name
+        field_path = child.properties.get("path")
+        if field_path is None:
+            raise _error(f"project field '{field_name}' requires path= property", path)
+        fields[field_name] = str(field_path)
+    if not fields:
+        raise _error("project requires at least one field", path)
+    return Project(fields=fields)
+
+
+def _load_where(node: ckdl.Node, path: Path | None) -> Where:
+    props = node.properties
+    where_path = props.get("path")
+    if where_path is None:
+        raise _error("where requires path= property", path)
+    if "equals" in props:
+        return Where(path=str(where_path), op="equals", value=str(props["equals"]))
+    if "not_equals" in props:
+        return Where(path=str(where_path), op="not_equals", value=str(props["not_equals"]))
+    if "exists" in props:
+        return Where(path=str(where_path), op="exists")
+    # in/not_in: where path="type" in "user" "assistant"
+    if node.args and str(node.args[0]) == "in":
+        values = tuple(str(a) for a in node.args[1:])
+        if not values:
+            raise _error("where 'in' requires at least one value", path)
+        return Where(path=str(where_path), op="in_", values=values)
+    if node.args and str(node.args[0]) == "not_in":
+        values = tuple(str(a) for a in node.args[1:])
+        if not values:
+            raise _error("where 'not_in' requires at least one value", path)
+        return Where(path=str(where_path), op="not_in", values=values)
+    # Default: exists check
+    return Where(path=str(where_path), op="exists")
+
+
+def _load_flatten(node: ckdl.Node, path: Path | None) -> Flatten:
+    """Load a flatten step: flatten "field" into="target" { extract "a" "b" }"""
+    if not node.args:
+        raise _error("flatten requires a field name argument", path)
+    field = str(node.args[0])
+    props = node.properties
+    into = props.get("into")
+    if into is None:
+        raise _error("flatten requires into= property", path)
+    # Extract fields from child 'extract' node
+    extract_fields: tuple[str, ...] = ()
+    for child in node.children:
+        if child.name == "extract":
+            extract_fields = tuple(str(a) for a in child.args)
+    if not extract_fields:
+        raise _error("flatten requires extract with at least one field name", path)
+    return Flatten(field=field, into=str(into), extract=extract_fields)
+
+
+_PARSE_STEP_LOADERS = {
+    "skip": _load_skip,
+    "split": _load_split,
+    "pick": _load_pick,
+    "select": _load_select,
+    "transform": _load_transform,
+    "explode": _load_explode,
+    "project": _load_project,
+    "where": _load_where,
+    "flatten": _load_flatten,
+}
+
+
+def _load_parse_block(node: ckdl.Node, path: Path | None) -> tuple[ParseStep, ...]:
+    steps: list[ParseStep] = []
+    for child in node.children:
+
+codex
+The checkout is clean and at the pinned tip. One anchor discrepancy is already visible: the stated “14 files” does not match Git’s 13-file diff; I’ll treat that as review metadata unless it conceals a missing deliverable. I’m now probing path classification/CWD stability and auditing every `VertexFile` reconstruction site beyond the three named ones.
+exec
+/bin/zsh -lc "rg -n \"VertexFile\\s*\\(\" --glob '*.py' --glob '"'!docs/**'"' .; sed -n '130,220p' libs/engine/src/engine/builder.py; rg -n \"def canonical_mode|def canonical_store_path|def _residence_stripped|arrival\" libs/engine/src/engine/residence.py; sed -n '1,220p' libs/engine/src/engine/residence.py; sed -n '1,460p' libs/engine/tests/test_arrival_registry.py; git diff --exit-code 0d38c969...91835e7b -- libs/engine/src/engine/residence.py; git diff --stat ff86a2b4 91835e7b -- libs/lang/src libs/engine/src; git diff ff86a2b4 91835e7b -- libs/lang/src libs/engine/src" in /Users/kaygee/Code/loops-s2wp4
+ succeeded in 0ms:
+./libs/lang/src/lang/document.py:1016:    return VertexFile(
+./libs/lang/src/lang/loader.py:908:    return VertexFile(
+./libs/lang/tests/test_document.py:416:    ast = VertexFile(
+./libs/lang/tests/test_document.py:617:    ast = VertexFile(
+./libs/lang/tests/test_document.py:644:    ast = VertexFile(
+./libs/lang/tests/test_document.py:673:    ast = VertexFile(
+./libs/lang/tests/test_document.py:759:    ast = VertexFile(
+./libs/lang/tests/test_document.py:778:    ast = VertexFile(
+./libs/lang/tests/test_document.py:798:    ast = VertexFile(name="x", loops=_one_loop(), routes={123: "c"})  # type: ignore[dict-item]
+./libs/lang/tests/test_document.py:833:    """Extract the constructor kwargs of a VertexFile (for rebuilding copies)."""
+./libs/lang/tests/test_document.py:857:    return VertexFile(**{**_vertex_kwargs(ast), **overrides})
+./libs/lang/tests/test_validator.py:333:        vertex = VertexFile(name="test", loops={"events": LoopDef(folds=(), boundary=None)})
+./libs/lang/tests/test_validator.py:542:        vertex = VertexFile(
+./libs/lang/tests/test_validator.py:735:        v = VertexFile(
+./libs/lang/tests/test_population.py:738:        v = VertexFile(
+./libs/lang/tests/test_population.py:754:        v = VertexFile(
+./libs/engine/src/engine/program.py:254:    return VertexFile(
+./libs/engine/src/engine/builder.py:192:        return VertexFile(
+./libs/engine/src/engine/declaration.py:903:    return VertexFile(
+./libs/engine/tests/test_arrival_registry.py:384:    ast = VertexFile(
+./libs/engine/tests/test_program.py:241:    ast = VertexFile(
+./libs/engine/tests/test_program.py:295:    ast = VertexFile(name="test", loops={}, sources=())
+./libs/engine/tests/test_program.py:310:    ast = VertexFile(name="test", loops={}, sources=(plain,))
+        return self._kind, LoopDef(
+            folds=tuple(self._folds),
+            boundary=self._boundary,
+            search=tuple(self._search),
+        )
+
+
+# ---------------------------------------------------------------------------
+# Vertex builder
+# ---------------------------------------------------------------------------
+
+class VertexBuilder:
+    """Fluent builder for VertexFile AST objects."""
+
+    def __init__(self, name: str):
+        self._name = name
+        self._store: Path | None = None
+        self._loops: list[tuple[str, LoopDef]] = []
+        self._routes: dict[str, str] | None = None
+        self._observer_scoped = False
+
+    def store(self, path: str) -> VertexBuilder:
+        """Set the store path."""
+        self._store = Path(path)
+        return self
+
+    def loop(self, kind: str, *folds: FoldDecl,
+             search: list[str] | None = None,
+             boundary_every: int | None = None,
+             boundary_after: int | None = None) -> VertexBuilder:
+        """Add a loop with folds and optional boundary/search."""
+        boundary = None
+        if boundary_every is not None:
+            boundary = BoundaryEvery(count=boundary_every)
+        elif boundary_after is not None:
+            boundary = BoundaryAfter(count=boundary_after)
+
+        self._loops.append((kind, LoopDef(
+            folds=tuple(folds),
+            boundary=boundary,
+            search=tuple(search or []),
+        )))
+        return self
+
+    def loop_builder(self, kind: str, *folds: FoldDecl) -> LoopBuilder:
+        """Return a LoopBuilder for complex loop config. Call .done() to add."""
+        return _AttachedLoopBuilder(self, kind, *folds)
+
+    def route(self, from_kind: str, to_kind: str) -> VertexBuilder:
+        """Add a kind route."""
+        if self._routes is None:
+            self._routes = {}
+        self._routes[from_kind] = to_kind
+        return self
+
+    def observer_scoped(self) -> VertexBuilder:
+        """Enable observer-scoped folds."""
+        self._observer_scoped = True
+        return self
+
+    def build(self) -> VertexFile:
+        """Build the VertexFile AST."""
+        return VertexFile(
+            name=self._name,
+            loops=dict(self._loops),
+            store=self._store,
+            routes=self._routes,
+            observer_scoped=self._observer_scoped,
+        )
+
+    def write(self, path: Path) -> VertexFile:
+        """Build the AST and write as KDL to the given path.
+
+        This round-trips through KDL serialization — useful for integration
+        tests that need a .vertex file on disk.
+        """
+        ast = self.build()
+        # Write a KDL representation
+        lines = [f'name "{self._name}"']
+        if self._store:
+            lines.append(f'store "{self._store}"')
+        if self._loops:
+            lines.append("loops {")
+            for kind, loop_def in self._loops:
+                lines.append(f"  {kind} {{")
+                if loop_def.folds:
+                    lines.append("    fold {")
+                    for fd in loop_def.folds:
+                        lines.append(f"      {_fold_to_kdl(fd)}")
+                    lines.append("    }")
+                if loop_def.search:
+8:``.arrival``     arrival-canonical (decision:design/arrival-sliceA-
+9:                 authority). The arrival log holds custody; the sqlite
+11:``.jsonl``       log-canonical, the pre-arrival shape. The log is the
+21:maintenance surface custody law forbids (arrival law 5).
+38:two modules is a naming rule that can disagree. The arrival companion-file
+39:names (``.arrival.lock``, ``.arrival.tmp``) have their one spelling in
+40::mod:`engine.arrival` and are re-exported, not re-derived.
+45:arrival law 1 permits exactly that. Only the *write* path cares which file
+57:from .arrival import ARRIVAL_SUFFIX, arrival_path_for, lock_path_for, tmp_path_for
+63:    "arrival_path_for",
+82:_MODE_SUFFIX = {"arrival": ARRIVAL_SUFFIX, "jsonl": CANONICAL_LOG_SUFFIX}
+85:def canonical_mode(declared: Path | str) -> str:
+88:    ``"arrival"`` | ``"jsonl"`` | ``"sqlite"`` — one function, three arms,
+102:        return "arrival"
+113:    # apps/ is diff-empty for the whole arrival wave, so the caller cannot
+115:    # allowlist entry for this line. Behavior-identical to the pre-arrival
+116:    # answer: an .arrival locator answers False (its agreement audit is a
+121:def canonical_store_path(declared: Path | str, vertex_path: Path | None) -> Path:
+136:    A log mode (arrival or jsonl) → the sibling ``.db``; sqlite mode →
+182:    Unchanged under the arrival mode BY DESIGN: reads execute through the
+183:    derived index in every mode (arrival law 1), which is what keeps every
+"""residence — where a vertex's store lives, and which file is authoritative.
+
+A vertex declares one ``store`` locator. That locator names the **canonical
+artifact**, and its extension is the mode switch — :func:`canonical_mode`,
+one function with three arms:
+
+===============  ==========================================================
+``.arrival``     arrival-canonical (decision:design/arrival-sliceA-
+                 authority). The arrival log holds custody; the sqlite
+                 index at the sibling ``.db`` is derived and rebuildable.
+``.jsonl``       log-canonical, the pre-arrival shape. The log is the
+                 store; the sqlite index is derived, at the sibling
+                 ``.db``.
+``.db``          sqlite-canonical (the original shape). No log.
+``.sqlite``
+===============  ==========================================================
+
+There is deliberately no stored mode flag, meta key, or configuration: the
+mode is the declared locator's suffix and nothing else. A mode that lived in
+two places could disagree, and a mode that lived in mutable state would be a
+maintenance surface custody law forbids (arrival law 5).
+
+Extension-as-switch is not new here: :func:`engine.compiler.materialize_vertex`
+already dispatched ``.db``/``.sqlite`` to ``SqliteStore`` and everything else
+to the flat ``EventStore``. This module states the rule once and gives every
+caller the paths it can want:
+
+- :func:`canonical_store_path` — the declared artifact, absolute.
+- :func:`index_path_for` — the sqlite file to *connect* to.
+- :func:`canonical_for` — its inverse, given an explicit mode. Under three
+  modes a ``.db`` has two possible canonical siblings, so a pure function of
+  the index path alone cannot answer; existence-based disambiguation is
+  :mod:`engine.probe`'s, where existence checks are legal.
+- :func:`resolve_store_path` — declared → index composed, the read path's
+  workhorse.
+
+Both directions of the sibling bijection live here: a naming rule stated in
+two modules is a naming rule that can disagree. The arrival companion-file
+names (``.arrival.lock``, ``.arrival.tmp``) have their one spelling in
+:mod:`engine.arrival` and are re-exported, not re-derived.
+
+Why the read path resolves to the index and not the canonical file: reads
+are sqlite reads (``StoreReader``, FTS, ``since``/``between``, direct
+``sqlite3.connect``) and execute through the projection in every mode —
+arrival law 1 permits exactly that. Only the *write* path cares which file
+is authoritative, and it asks :func:`canonical_mode`.
+
+Pure functions over paths — no I/O, no store construction. Materializing a
+missing index is :func:`engine.jsonl_store.ensure_index`, which needs I/O and
+therefore does not live here.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+from .arrival import ARRIVAL_SUFFIX, arrival_path_for, lock_path_for, tmp_path_for
+
+__all__ = [
+    "ARRIVAL_SUFFIX",
+    "CANONICAL_LOG_SUFFIX",
+    "SQLITE_SUFFIXES",
+    "arrival_path_for",
+    "canonical_for",
+    "canonical_mode",
+    "canonical_store_path",
+    "index_path_for",
+    "lock_path_for",
+    "resolve_store_path",
+    "sqlite_sidecars",
+    "tmp_path_for",
+]
+
+CANONICAL_LOG_SUFFIX = ".jsonl"
+SQLITE_SUFFIXES = (".db", ".sqlite")
+
+_INDEX_SUFFIX = ".db"
+
+# Which suffix a canonical mode's artifact carries — the sibling bijection's
+# one spelling, read by canonical_for. sqlite maps to itself: the index IS
+# the canonical artifact there.
+_MODE_SUFFIX = {"arrival": ARRIVAL_SUFFIX, "jsonl": CANONICAL_LOG_SUFFIX}
+
+
+def canonical_mode(declared: Path | str) -> str:
+    """Which artifact class is authoritative for a store locator.
+
+    ``"arrival"`` | ``"jsonl"`` | ``"sqlite"`` — one function, three arms,
+    callers compare. A family of per-mode booleans is how a two-mode
+    architecture creeps back in, so there isn't one.
+
+    Any suffix that is not a log suffix answers ``"sqlite"``: that is what
+    ``open_canonical_store`` does with such a path (connect to it as
+    sqlite) — with one named exception, ``engine.compiler``'s flat
+    ``EventStore`` fallback for suffixes outside the store family, which
+    checks the suffix itself before consulting this switch. "Is this a
+    loops artifact at all" is :func:`engine.probe.probe_target`'s question,
+    not a path function's.
+    """
+    suffix = Path(declared).suffix
+    if suffix == ARRIVAL_SUFFIX:
+        return "arrival"
+    if suffix == CANONICAL_LOG_SUFFIX:
+        return "jsonl"
+    return "sqlite"
+
+
+def is_jsonl_canonical(declared: Path | str) -> bool:  # noqa: D103 — shim, see below
+    # Retired alias, NOT exported and named by nothing else in libs: kept
+    # importable only for the lazy import at
+    # apps/loops/src/loops/commands/store.py:142, which executes before any
+    # mode check and would ImportError every store read verb if deleted —
+    # apps/ is diff-empty for the whole arrival wave, so the caller cannot
+    # move until the CLI-surface cut. Deleted there, together with Rule 18's
+    # allowlist entry for this line. Behavior-identical to the pre-arrival
+    # answer: an .arrival locator answers False (its agreement audit is a
+    # later cut's).
+    return canonical_mode(declared) == "jsonl"
+
+
+def canonical_store_path(declared: Path | str, vertex_path: Path | None) -> Path:
+    """The declared artifact as an absolute path.
+
+    Relative locators resolve against the *vertex file's* directory, never
+    the process cwd — a vertex is portable, a cwd is not.
+    """
+    path = Path(declared)
+    if not path.is_absolute() and vertex_path is not None:
+        path = (Path(vertex_path).parent / path).resolve()
+    return path
+
+
+def index_path_for(canonical: Path | str) -> Path:
+    """The sqlite file to connect to for a given canonical locator.
+
+    A log mode (arrival or jsonl) → the sibling ``.db``; sqlite mode →
+    itself. Idempotent: feeding an index path back through returns it
+    unchanged.
+    """
+    path = Path(canonical)
+    if canonical_mode(path) == "sqlite":
+        return path
+    return path.with_suffix(_INDEX_SUFFIX)
+
+
+def canonical_for(index_path: Path | str, mode: str) -> Path:
+    """The canonical artifact beside a store db, for an EXPLICIT mode.
+
+    The inverse of :func:`index_path_for`, and equally idempotent per mode.
+    The mode is a parameter because it cannot be a deduction: with three
+    modes, ``<name>.db`` has two possible canonical siblings, and which one
+    exists is an I/O question this module refuses to ask (probe's job). A
+    caller that knows its mode — and every writer does, from its declared
+    locator — gets the pure answer.
+    """
+    path = Path(index_path)
+    suffix = _MODE_SUFFIX.get(mode)
+    if suffix is None:
+        if mode != "sqlite":
+            raise ValueError(f"unknown canonical mode {mode!r}")
+        return path
+    return path.with_suffix(suffix)
+
+
+def sqlite_sidecars(path: Path | str) -> tuple[Path, ...]:
+    """The WAL/SHM sidecar paths sqlite may keep beside a db file.
+
+    The db itself is NOT included — callers that delete or size a store
+    spell it ``(path, *sqlite_sidecars(path))``. Pure path arithmetic, no
+    existence check: one spelling of the ``-wal``/``-shm`` naming rule.
+    """
+    path = Path(path)
+    return tuple(path.parent / (path.name + s) for s in ("-wal", "-shm"))
+
+
+def resolve_store_path(declared: Path | str, vertex_path: Path | None) -> Path:
+    """Declared locator → absolute sqlite path to read from.
+
+    The single translation point for the read path. Does not check
+    existence and does not materialize a missing index; callers that must
+    tolerate a fresh clone go through :func:`engine.jsonl_store.ensure_index`.
+    Unchanged under the arrival mode BY DESIGN: reads execute through the
+    derived index in every mode (arrival law 1), which is what keeps every
+    reader above this function mode-agnostic.
+    """
+    return index_path_for(canonical_store_path(declared, vertex_path))
+"""Which adapter opens which artifact — the registry, and the parity probe.
+
+Slice 2 / WP4 (``design:arrival-break-slice2-backend-contract`` §B.4, §D.4).
+
+The parity probe at the bottom is the exit criterion that makes slice 2's
+scope call safe. Slice 2 builds the registry; it rewires nothing. That is
+only defensible if the new path and the old path name the SAME artifact for
+every vertex in the repo — otherwise "additive" would be a claim rather than
+a fact, and slice 5 would be rewiring consumers onto a resolution nobody had
+compared against the one it replaces.
+"""
+
+from __future__ import annotations
+
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+from atoms import Fact
+from lang import parse_vertex, parse_vertex_file
+from lang.ast import BackendDecl, VertexFile
+
+from engine.arrival import ArrivalLog
+from engine.arrival_contract import (
+    ArrivalLedger,
+    ArrivalQuery,
+    StoreDescriptor,
+    UnknownBackend,
+)
+from engine.arrival_registry import BackendRegistry, descriptor_for
+from engine.arrival_store import ArrivalStore
+from engine.jsonl_store import open_canonical_store
+from engine.residence import canonical_mode, canonical_store_path, index_path_for
+from tests.conftest import STUB_KEY as _KEY
+from tests.conftest import stub_sign as _sign
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+
+
+def _vertex(tmp_path: Path, store_line: str) -> Path:
+    path = tmp_path / "t.vertex"
+    path.write_text(
+        f'name "t"\n{store_line}\nloops {{ ping {{ fold {{ n "inc" }} }} }}\n'
+    )
+    return path
+
+
+# ---------------------------------------------------------------------------
+# descriptor_for — the four arms
+# ---------------------------------------------------------------------------
+
+
+def test_explicit_backend_is_taken_at_its_word(tmp_path):
+    vpath = _vertex(tmp_path, 'store "./s.arrival" backend="file"')
+    descriptor = descriptor_for(parse_vertex_file(vpath), vpath)
+    assert descriptor == StoreDescriptor(
+        backend="file", location=str(tmp_path / "s.arrival")
+    )
+
+
+def test_explicit_backend_is_not_cross_checked_against_the_suffix(tmp_path):
+    """Explicit wins, and no suffix gets a vote.
+
+    Under §02 the suffix carries no meaning once the backend is declared. A
+    "do they agree?" check would re-admit inference through the back door on
+    the very change that removes it — so a declared backend that disagrees
+    with the suffix resolves to the DECLARED one, with no complaint.
+    """
+    vpath = _vertex(tmp_path, 'store "./s.arrival" backend="duckdb"')
+    descriptor = descriptor_for(parse_vertex_file(vpath), vpath)
+    assert descriptor is not None
+    assert descriptor.backend == "duckdb"
+
+
+def test_unregistered_backend_names_still_describe(tmp_path):
+    """Naming is separate from opening.
+
+    A vertex may declare a backend this host has no adapter for; describing
+    it must still work, because the refusal belongs to the registry that
+    knows what is installed, not to path arithmetic that does not.
+    """
+    ast = parse_vertex('name "t"\nstore "./s.pg" backend="postgres"\n'
+                       'loops { ping { fold { n "inc" } } }')
+    descriptor = descriptor_for(ast, None)
+    assert descriptor is not None
+    assert descriptor.backend == "postgres"
+
+
+def test_undeclared_arrival_store_infers_the_file_backend(tmp_path):
+    """The transitional arm that keeps slices 3-4 unstranded.
+
+    Every .arrival store in the wild predates the grammar that would let it
+    declare a backend. This arm dies in slice 5.
+    """
+    vpath = _vertex(tmp_path, 'store "./s.arrival"')
+    descriptor = descriptor_for(parse_vertex_file(vpath), vpath)
+    assert descriptor == StoreDescriptor(
+        backend="file", location=str(tmp_path / "s.arrival")
+    )
+
+
+@pytest.mark.parametrize("locator", ["./s.jsonl", "./s.db", "./s.sqlite"])
+def test_modes_with_no_ledger_describe_nothing(tmp_path, locator):
+    """None is the honest answer, not a refusal.
+
+    jsonl and sqlite stores have no ledger. "No adapter describes this" is a
+    fact about the store, not a fault — they keep resolving through
+    open_canonical_store exactly as today.
+    """
+    vpath = _vertex(tmp_path, f'store "{locator}"')
+    assert descriptor_for(parse_vertex_file(vpath), vpath) is None
+
+
+def test_a_vertex_with_no_store_describes_nothing():
+    """An aggregate or a loops-only vertex declares no location at all."""
+    ast = parse_vertex('name "agg"\ncombine {\n  vertex "/x/y.vertex"\n}\n')
+    assert ast.store is None
+    assert descriptor_for(ast, None) is None
+
+
+def test_a_relative_locator_resolves_against_the_vertex_not_the_cwd(tmp_path):
+    """A vertex is portable; a cwd is not."""
+    nested = tmp_path / "sub"
+    nested.mkdir()
+    vpath = _vertex(nested, 'store "./s.arrival" backend="file"')
+    descriptor = descriptor_for(parse_vertex_file(vpath), vpath)
+    assert descriptor is not None
+    assert Path(descriptor.location) == nested / "s.arrival"
+
+
+def test_role_and_lineage_are_left_unset(tmp_path):
+    """Deferred deliberately — nothing in slices 2-4 reads them."""
+    vpath = _vertex(tmp_path, 'store "./s.arrival" backend="file"')
+    descriptor = descriptor_for(parse_vertex_file(vpath), vpath)
+    assert descriptor is not None
+    assert descriptor.role is None
+    assert descriptor.lineage is None
+
+
+# ---------------------------------------------------------------------------
+# BackendRegistry
+# ---------------------------------------------------------------------------
+
+
+def test_an_unknown_backend_refuses_and_names_what_is_registered():
+    registry = BackendRegistry.with_builtin_backends()
+    descriptor = StoreDescriptor(backend="duckdb", location="/x/y.duckdb")
+    with pytest.raises(UnknownBackend) as excinfo:
+        registry.open(descriptor)
+    message = str(excinfo.value)
+    assert "duckdb" in message
+    assert "file" in message  # the refusal names the alternatives
+
+
+def test_an_empty_registry_refuses_everything():
+    registry = BackendRegistry()
+    assert registry.registered() == ()
+    with pytest.raises(UnknownBackend):
+        registry.open(StoreDescriptor(backend="file", location="/x/y.arrival"))
+
+
+def test_re_registering_a_name_refuses():
+    """A silent overwrite would let import order decide which adapter
+    answers to a name, and the failure would surface as a store opening
+    through the wrong codec rather than as an error at the mistake."""
+    registry = BackendRegistry.with_builtin_backends()
+    with pytest.raises(ValueError, match="already registered"):
+        registry.register("file", lambda d: (None, None))  # type: ignore[arg-type]
+
+
+def test_a_registered_opener_is_what_open_calls():
+    calls: list[StoreDescriptor] = []
+    registry = BackendRegistry()
+    registry.register("probe", lambda d: (calls.append(d), ("L", "Q"))[1])  # type: ignore[arg-type,return-value]
+    descriptor = StoreDescriptor(backend="probe", location="/x/y")
+    assert registry.open(descriptor) == ("L", "Q")
+    assert calls == [descriptor]
+
+
+def test_the_file_opener_hands_back_both_halves(tmp_path):
+    _vpath, log_path = _minted_arrival_vertex(tmp_path, 'store "./s.arrival"')
+    registry = BackendRegistry.with_builtin_backends()
+    ledger, query = registry.open(
+        StoreDescriptor(backend="file", location=str(log_path))
+    )
+    try:
+        # A location claim, not a conformance verdict: this says which ops
+        # the opener's custody half offers, never that they behave.
+        offered = {op for op in dir(ledger) if not op.startswith("_")}
+        assert {"mint", "head", "append", "read", "scan", "verify"} <= offered
+        # The ledger does NOT yet satisfy the full ArrivalLedger protocol:
+        # `replicate` and `export` are WP2's and are deliberately absent
+        # rather than stubbed, so the opener's declared return type is the
+        # surface it is FOR, not the surface it reaches today. WP2 closes
+        # the gap; WP1's own test pins the absence.
+        assert not isinstance(ledger, ArrivalLedger)
+        assert isinstance(query, ArrivalQuery)
+    finally:
+        query.close()
+
+
+def test_opening_a_store_whose_projection_is_absent_refuses(tmp_path):
+    """Observed behavior, pinned — NOT a policy this WP chose.
+
+    ``FileQuery`` builds a read handle over the sibling index, and
+    ``StoreReader`` refuses a path that does not exist. So a minted log with
+    no projection beside it cannot be opened through the registry, even
+    though its LEDGER half is perfectly openable.
+
+    Whether an absent projection should be materialized on the way in is
+    exactly the boundary the F2 addendum puts to Kyle at the slice-2 gate
+    ("absent ⇒ create is permitted; present ⇒ touch is forbidden"). Inventing
+    an answer here would be this WP ruling on a question it was not given, so
+    the adapter's behavior passes through unchanged and this test records
+    what it is. See finding:slice2-wp4-registry-open-needs-a-projection.
+    """
+    log_path = tmp_path / "s.arrival"
+    ArrivalLog.mint(log_path, observer="kyle", signer=_sign, key=_KEY)
+    registry = BackendRegistry.with_builtin_backends()
+    with pytest.raises(FileNotFoundError):
+        registry.open(StoreDescriptor(backend="file", location=str(log_path)))
+
+
+def test_importing_the_registry_does_not_drag_the_adapter_in():
+    """Adapters are imported lazily, inside their opener.
+
+    ``import engine.arrival_registry`` is what a caller reaches for to NAME a
+    descriptor. Naming must not cost a database driver and a file codec —
+    the same property that keeps the contract module separate from the
+    adapter, held one level up.
+    """
+    source = (
+        "import sys\n"
+        "import engine.arrival_registry\n"
+        "assert 'sqlite3' not in sys.modules, 'sqlite3 was imported'\n"
+        "assert 'engine.arrival' not in sys.modules, 'the adapter was imported'\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", source], capture_output=True, text=True
+    )
+    assert result.returncode == 0, result.stderr
+
+
+# ---------------------------------------------------------------------------
+# Parity probe (§D.4 exit 3)
+# ---------------------------------------------------------------------------
+
+
+def _tracked_vertices() -> list[Path]:
+    """Every ``.vertex`` git tracks, so the probe is hermetic.
+
+    A filesystem walk would sweep in ``.loops/`` — gitignored, machine-local,
+    and different on every checkout — which would make the probe's result
+    depend on whose machine ran it.
+    """
+    out = subprocess.run(
+        ["git", "ls-files", "-z", "*.vertex", ".vertex"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    return [REPO_ROOT / p for p in out.split("\0") if p]
+
+
+def test_the_probe_has_something_to_probe():
+    assert _tracked_vertices(), "no tracked .vertex files — the probe is vacuous"
+
+
+def test_every_tracked_vertex_resolves_identically_under_both_paths():
+    """The claim that makes "additive" a fact rather than a promise.
+
+    For every vertex the repo tracks: the registry either describes no
+    adapter (and the store keeps resolving through open_canonical_store
+    untouched), or it names exactly the artifact the legacy path names.
+
+    NOTE, stated so the gate is not surprised: no tracked vertex is
+    arrival-canonical today, so this sweep exercises the jsonl, sqlite and
+    no-store arms only. The arrival arm is covered by the minted fixtures
+    below, which is the only place it CAN be covered until a real vertex
+    declares one.
+    """
+    for vertex_path in _tracked_vertices():
+        ast = parse_vertex_file(vertex_path)
+        descriptor = descriptor_for(ast, vertex_path)
+        if ast.store is None:
+            assert descriptor is None, vertex_path
+            continue
+        canonical = canonical_store_path(ast.store, vertex_path)
+        if canonical_mode(canonical) in ("jsonl", "sqlite"):
+            assert descriptor is None, vertex_path
+        else:
+            assert descriptor is not None, vertex_path
+            assert Path(descriptor.location) == canonical, vertex_path
+
+
+def _minted_arrival_vertex(tmp_path: Path, store_line: str) -> tuple[Path, Path]:
+    """A vertex over a real minted .arrival store with a consumed projection."""
+    vpath = _vertex(tmp_path, store_line)
+    log_path = tmp_path / "s.arrival"
+    ArrivalLog.mint(log_path, observer="kyle", signer=_sign, key=_KEY)
+    store = ArrivalStore(
+        path=index_path_for(log_path),
+        log_path=log_path,
+        serialize=lambda f: f.to_dict(),
+        deserialize=Fact.from_dict,
+        fact_signer=_sign,
+    )
+    try:
+        store.append(Fact.of("note", "kyle", message="one"))
+    finally:
+        store.close()
+    return vpath, log_path
+
+
+@pytest.mark.parametrize(
+    "store_line",
+    [
+        'store "./s.arrival" backend="file"',  # explicit arm
+        'store "./s.arrival"',                 # transitional inferred arm
+    ],
+)
+def test_the_registry_opens_the_artifact_the_legacy_path_opens(
+    tmp_path, store_line
+):
+    """Both arrival arms name — and open — the same artifact as today's path."""
+    vpath, log_path = _minted_arrival_vertex(tmp_path, store_line)
+    ast = parse_vertex_file(vpath)
+
+    descriptor = descriptor_for(ast, vpath)
+    assert descriptor is not None
+    assert descriptor.backend == "file"
+
+    legacy = open_canonical_store(
+        canonical_store_path(ast.store, vpath),
+        serialize=lambda f: f.to_dict(),
+        deserialize=Fact.from_dict,
+    )
+    try:
+        assert isinstance(legacy, ArrivalStore)
+        # The naming half: the descriptor points at the same log, and its
+        # sibling index is the same index the legacy store opened.
+        assert Path(descriptor.location) == legacy.log_path
+        legacy_head = ArrivalLog(legacy.log_path).head()
+    finally:
+        legacy.close()
+
+    # The opening half: the ledger the registry hands back is over that
+    # artifact, not merely named after it.
+    ledger, query = BackendRegistry.with_builtin_backends().open(descriptor)
+    try:
+        assert ledger.head().ordinal == legacy_head["ord"]
+        watermark = query.projected_through()
+        assert watermark is not None
+        assert watermark.lineage == ArrivalLog(log_path).lineage()
+    finally:
+        query.close()
+
+
+def test_a_declared_backend_does_not_change_where_the_store_lives(tmp_path):
+    """Declaring the backend is not a relocation.
+
+    The same vertex with and without ``backend="file"`` must resolve to the
+    same location — the property that lets slice 5's adopt ceremony write the
+    arm into existing vertices without moving anybody's data.
+    """
+    vpath = _vertex(tmp_path, 'store "./s.arrival"')
+    inferred = descriptor_for(parse_vertex_file(vpath), vpath)
+
+    vpath.write_text(
+        vpath.read_text().replace(
+            'store "./s.arrival"', 'store "./s.arrival" backend="file"'
+        )
+    )
+    declared = descriptor_for(parse_vertex_file(vpath), vpath)
+
+    assert inferred == declared
+
+
+def test_a_vertex_file_constructed_in_memory_describes_the_same_way(tmp_path):
+    """descriptor_for reads the AST, not the file — so a resolved
+    declaration (which never touches disk as text) describes identically."""
+    ast = VertexFile(
+        name="t",
+        loops={},
+        store=Path("./s.arrival"),
+        store_backend=BackendDecl(name="file"),
+    )
+    vpath = tmp_path / "t.vertex"
+    descriptor = descriptor_for(ast, vpath)
+    assert descriptor == StoreDescriptor(
+        backend="file", location=str(tmp_path / "s.arrival")
+    )
+
+exec
+/bin/zsh -lc '.venv/bin/python -m pytest libs/lang/tests -q' in /Users/kaygee/Code/loops-s2wp4
+ succeeded in 8293ms:
+........................................................................ [ 10%]
+........................................................................ [ 21%]
+........................................................................ [ 32%]
+........................................................................ [ 42%]
+........................................................................ [ 53%]
+........................................................................ [ 64%]
+........................................................................ [ 75%]
+........................................................................ [ 85%]
+........................................................................ [ 96%]
+.......................                                                  [100%]
+671 passed in 8.04s
+
+exec
+/bin/zsh -lc '.venv/bin/python -m pytest libs/engine/tests -q' in /Users/kaygee/Code/loops-s2wp4
+codex
+The language suite passes (671 tests). The constructor audit finds only the expected production rebuilds plus `VertexBuilder`, which creates new ASTs from its own fluent state rather than rebuilding an existing vertex; test helper `_vertex_kwargs` derives fields dynamically and therefore carries the new field. The full engine suite is running now.
+ succeeded in 113217ms:
+........................................................................ [  3%]
+........................................................................ [  7%]
+........................................................................ [ 10%]
+........................................................................ [ 14%]
+........................................................................ [ 17%]
+........................................................................ [ 21%]
+........................................................................ [ 24%]
+..............................................s......................... [ 28%]
+........................................................................ [ 32%]
+........................................................................ [ 35%]
+........................................................................ [ 39%]
+........................................................................ [ 42%]
+........................................................................ [ 46%]
+........................................................................ [ 49%]
+........................................................................ [ 53%]
+........................................................................ [ 57%]
+........................................................................ [ 60%]
+........................................................................ [ 64%]
+........................................................................ [ 67%]
+........................................................................ [ 71%]
+........................................................................ [ 74%]
+........................................................................ [ 78%]
+........................................................................ [ 82%]
+........................................................................ [ 85%]
+........................................................................ [ 89%]
+........................................................................ [ 92%]
+........................................................................ [ 96%]
+........................................................................ [ 99%]
+.                                                                        [100%]
+2016 passed, 1 skipped in 112.56s (0:01:52)
+
+exec
+/bin/zsh -lc '.venv/bin/python -m pytest tests/architecture -q' in /Users/kaygee/Code/loops-s2wp4
+ succeeded in 7215ms:
+........................................................................ [ 72%]
+...........................                                              [100%]
+99 passed in 7.08s
+
+exec
+/bin/zsh -lc "rg -n \"strip|BackendDecl\" libs/lang/tests/test_loader.py | tail -30; sed -n '800,875p' libs/lang/tests/test_document.py; git status --short" in /Users/kaygee/Code/loops-s2wp4
+ succeeded in 0ms:
+8:    BackendDecl,
+155:        # transform "pct" { strip "%" coerce "int" }
+2008:        assert v.store_backend == BackendDecl(name="file")
+2020:        assert v.store_backend == BackendDecl(name="duckdb")
+2022:    def test_the_stored_backend_name_is_stripped(self):
+2026:        strips as well, so a variant that stripped only to decide emptiness
+2036:        assert v.store_backend == BackendDecl(name="file")
+2202:    def test_transform_lstrip(self):
+2210:    transform "path" { lstrip "/" }
+2216:    def test_transform_rstrip(self):
+2224:    transform "path" { rstrip "/" }
+        vertex_to_documents(ast)
+
+
+# ---------------------------------------------------------------------------
+# is_internal_kind truth table
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "kind,expected",
+    [
+        ("_decl.genesis", True),
+        ("_decl.kind-defined", True),
+        ("_decl.anything-future", True),
+        ("_decl.", True),
+        (DECL_PREFIX, True),
+        ("decision", False),
+        ("_topology", False),
+        ("_decl", False),  # no trailing dot — not in namespace
+        ("thing._decl.x", False),
+        ("", False),
+    ],
+)
+def test_is_internal_kind_truth_table(kind: str, expected: bool) -> None:
+    assert is_internal_kind(kind) is expected
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _vertex_kwargs(ast: VertexFile) -> dict:
+    """Extract the constructor kwargs of a VertexFile (for rebuilding copies)."""
+    return {
+        "name": ast.name,
+        "loops": ast.loops,
+        "store": ast.store,
+        "store_backend": ast.store_backend,
+        "discover": ast.discover,
+        "sources": ast.sources,
+        "vertices": ast.vertices,
+        "routes": ast.routes,
+        "emit": ast.emit,
+        "combine": ast.combine,
+        "sources_blocks": ast.sources_blocks,
+        "observers": ast.observers,
+        "lens": ast.lens,
+        "boundary": ast.boundary,
+        "observer_scoped": ast.observer_scoped,
+        "strict": ast.strict,
+        "path": ast.path,
+    }
+
+
+def _edit(ast: VertexFile, **overrides: object) -> VertexFile:
+    """A copy of ``ast`` with the given fields replaced (an in-memory edit)."""
+    return VertexFile(**{**_vertex_kwargs(ast), **overrides})
+
+
+def _residence_stripped(ast: VertexFile) -> VertexFile:
+    """``ast`` with the store locator and the backend arm cleared.
+
+    What :func:`_reproject` produces: it projects documents with no residence
+    supplied, and residence is exactly what documents do not carry. ``path``
+    is residence too but is not cleared here — every caller builds ``ast``
+    with :func:`parse_vertex` on text, so it is already None and clearing it
+    would state a transformation that never happens.
+
+    Named rather than spelled inline at each assertion so the cleared set
+    stays in one place: it grew from ``store`` alone to include
+    ``store_backend``, and an assertion that cleared only some of it would
+    pass while proving less.
+    """
+    return _edit(ast, store=None, store_backend=None)
+
+
+codex
+All three requested suites pass: lang 671, engine 2016 with 1 skip, architecture 99. I’m applying the prescribed temporary mutation now—using stripped text only for blank validation while storing the original value—then I’ll run the exact pinning test and restore the source byte-for-byte.
+apply patch
+patch: completed
+/Users/kaygee/Code/loops-s2wp4/libs/lang/src/lang/loader.py
+diff --git a/libs/lang/src/lang/loader.py b/libs/lang/src/lang/loader.py
+index f55cff70fbb3afd61bfd55ffdce2e4c5c20b28ca..656c3de3b99ba256a11afb98a0e9764434363835
+--- a/libs/lang/src/lang/loader.py
++++ b/libs/lang/src/lang/loader.py
+@@ -814,8 +814,8 @@
+                 # nothing, so nothing is silently discarded.
+                 raise _error("store: takes no child block", path)
+             if "backend" in node.properties:
+-                backend_name = str(node.properties["backend"]).strip()
+-                if not backend_name:
++                backend_name = str(node.properties["backend"])
++                if not backend_name.strip():
+                     raise _error("store: backend must not be empty", path)
+                 store_backend = BackendDecl(name=backend_name)
+         elif key == "strict":
+
+diff --git a/libs/lang/src/lang/loader.py b/libs/lang/src/lang/loader.py
+index f55cff70fbb3afd61bfd55ffdce2e4c5c20b28ca..656c3de3b99ba256a11afb98a0e9764434363835
+--- a/libs/lang/src/lang/loader.py
++++ b/libs/lang/src/lang/loader.py
+@@ -814,8 +814,8 @@
+                 # nothing, so nothing is silently discarded.
+                 raise _error("store: takes no child block", path)
+             if "backend" in node.properties:
+-                backend_name = str(node.properties["backend"]).strip()
+-                if not backend_name:
++                backend_name = str(node.properties["backend"])
++                if not backend_name.strip():
+                     raise _error("store: backend must not be empty", path)
+                 store_backend = BackendDecl(name=backend_name)
+         elif key == "strict":
+
+exec
+/bin/zsh -lc '.venv/bin/python -m pytest libs/lang/tests/test_loader.py::TestVertexLoader::test_the_stored_backend_name_is_stripped -q' in /Users/kaygee/Code/loops-s2wp4
+ exited 4 in 138ms:
+ERROR: not found: /Users/kaygee/Code/loops-s2wp4/libs/lang/tests/test_loader.py::TestVertexLoader::test_the_stored_backend_name_is_stripped
+(no match in any of [<Module test_loader.py>])
+
+
+no tests ran in 0.09s
+
+diff --git a/libs/lang/src/lang/loader.py b/libs/lang/src/lang/loader.py
+index f55cff70fbb3afd61bfd55ffdce2e4c5c20b28ca..656c3de3b99ba256a11afb98a0e9764434363835
+--- a/libs/lang/src/lang/loader.py
++++ b/libs/lang/src/lang/loader.py
+@@ -814,8 +814,8 @@
+                 # nothing, so nothing is silently discarded.
+                 raise _error("store: takes no child block", path)
+             if "backend" in node.properties:
+-                backend_name = str(node.properties["backend"]).strip()
+-                if not backend_name:
++                backend_name = str(node.properties["backend"])
++                if not backend_name.strip():
+                     raise _error("store: backend must not be empty", path)
+                 store_backend = BackendDecl(name=backend_name)
+         elif key == "strict":
+
+exec
+/bin/zsh -lc "sed -n '1970,2045p' libs/lang/tests/test_loader.py; rg -n '"'^class '"' libs/lang/tests/test_loader.py | tail -10" in /Users/kaygee/Code/loops-s2wp4
+ succeeded in 0ms:
+    def test_strict_omitted_defaults_false(self):
+        # Existing vertices without strict keyword must continue to parse
+        text = 'name "t"\nstore "./t.db"\nloops { x { fold { items "inc" } } }'
+        v = parse_vertex(text)
+        assert v.strict is False
+
+    def test_strict_bad_value_errors(self):
+        text = (
+            'name "t"\nstore "./t.db"\nstrict "maybe"\n'
+            'loops { x { fold { items "inc" } } }'
+        )
+        with pytest.raises(ParseError, match="strict requires a boolean"):
+            parse_vertex(text)
+
+
+class TestStoreBackend:
+    """Tests for the `backend=` property on the vertex-level store clause.
+
+    Two forms parse: the legacy bare `store "<location>"`, which keeps
+    meaning exactly what it meant, and `store "<location>" backend="<name>"`,
+    which names the adapter as well. The refusals are the load-bearing half —
+    before this arm the handler read args[0] and nothing else, so a mistyped
+    `backend=` parsed clean and left the store on suffix inference forever.
+    """
+
+    def test_bare_store_parses_with_no_backend(self):
+        text = 'name "t"\nstore "./t.db"\nloops { x { fold { items "inc" } } }'
+        v = parse_vertex(text)
+        assert v.store == Path("./t.db")
+        assert v.store_backend is None
+
+    def test_store_with_backend(self):
+        text = (
+            'name "t"\nstore "./t.arrival" backend="file"\n'
+            'loops { x { fold { items "inc" } } }'
+        )
+        v = parse_vertex(text)
+        assert v.store == Path("./t.arrival")
+        assert v.store_backend == BackendDecl(name="file")
+
+    def test_backend_name_is_not_cross_checked_against_the_suffix(self):
+        """Explicit wins. Once the backend is declared the suffix means
+        nothing, so a declared backend that disagrees with the suffix is
+        legal — a suffix cross-check would re-admit inference through the
+        back door on the very change that removes it."""
+        text = (
+            'name "t"\nstore "./t.arrival" backend="duckdb"\n'
+            'loops { x { fold { items "inc" } } }'
+        )
+        v = parse_vertex(text)
+        assert v.store_backend == BackendDecl(name="duckdb")
+
+    def test_the_stored_backend_name_is_stripped(self):
+        """Surrounding whitespace is not part of an adapter name.
+
+        Pins the STORED value, not just the refusal. The blank-value check
+        strips as well, so a variant that stripped only to decide emptiness
+        and stored the padded name passes every other test in this class —
+        and then hands the registry a name no adapter is registered under,
+        turning a cosmetic input into an UnknownBackend at open time.
+        """
+        text = (
+            'name "t"\nstore "./t.arrival" backend="  file  "\n'
+            'loops { x { fold { items "inc" } } }'
+        )
+        v = parse_vertex(text)
+        assert v.store_backend == BackendDecl(name="file")
+
+    def test_unknown_property_refused(self):
+        text = (
+            'name "t"\nstore "./t.arrival" bakcend="file"\n'
+            'loops { x { fold { items "inc" } } }'
+        )
+        with pytest.raises(ParseError, match="store: unknown property 'bakcend'"):
+            parse_vertex(text)
+
+1946:class TestStrictKeyword:
+1985:class TestStoreBackend:
+2071:class TestParseAtVertex:
+2184:class TestLoaderEdgeCoverage:
+2297:class TestErrorCoverage:
+2535:class TestAstCoverage:
+2982:class TestLoaderFinalEdges:
+3127:class TestEdgeDecl:
+3195:class TestLifecycleDecl:
+3368:class TestPreviewDecl:
+
+diff --git a/libs/lang/src/lang/loader.py b/libs/lang/src/lang/loader.py
+index f55cff70fbb3afd61bfd55ffdce2e4c5c20b28ca..656c3de3b99ba256a11afb98a0e9764434363835
+--- a/libs/lang/src/lang/loader.py
++++ b/libs/lang/src/lang/loader.py
+@@ -814,8 +814,8 @@
+                 # nothing, so nothing is silently discarded.
+                 raise _error("store: takes no child block", path)
+             if "backend" in node.properties:
+-                backend_name = str(node.properties["backend"]).strip()
+-                if not backend_name:
++                backend_name = str(node.properties["backend"])
++                if not backend_name.strip():
+                     raise _error("store: backend must not be empty", path)
+                 store_backend = BackendDecl(name=backend_name)
+         elif key == "strict":
+
+exec
+/bin/zsh -lc '.venv/bin/python -m pytest libs/lang/tests/test_loader.py::TestStoreBackend::test_the_stored_backend_name_is_stripped -q' in /Users/kaygee/Code/loops-s2wp4
+ exited 1 in 236ms:
+F                                                                        [100%]
+=================================== FAILURES ===================================
+__________ TestStoreBackend.test_the_stored_backend_name_is_stripped ___________
+
+self = <tests.test_loader.TestStoreBackend object at 0x109a7c050>
+
+    def test_the_stored_backend_name_is_stripped(self):
+        """Surrounding whitespace is not part of an adapter name.
+    
+        Pins the STORED value, not just the refusal. The blank-value check
+        strips as well, so a variant that stripped only to decide emptiness
+        and stored the padded name passes every other test in this class —
+        and then hands the registry a name no adapter is registered under,
+        turning a cosmetic input into an UnknownBackend at open time.
+        """
+        text = (
+            'name "t"\nstore "./t.arrival" backend="  file  "\n'
+            'loops { x { fold { items "inc" } } }'
+        )
+        v = parse_vertex(text)
+>       assert v.store_backend == BackendDecl(name="file")
+E       AssertionError: assert BackendDecl(name='  file  ') == BackendDecl(name='file')
+E        +  where BackendDecl(name='  file  ') = VertexFile(name='t', loops={'x': LoopDef(folds=(FoldDecl(target='items', op=FoldCount()),), boundary=None, search=(), ...bine=None, sources_blocks=None, observers=None, lens=None, boundary=(), observer_scoped=False, strict=False, path=None).store_backend
+E        +  and   BackendDecl(name='file') = BackendDecl(name='file')
+
+libs/lang/tests/test_loader.py:2036: AssertionError
+=========================== short test summary info ============================
+FAILED libs/lang/tests/test_loader.py::TestStoreBackend::test_the_stored_backend_name_is_stripped
+1 failed in 0.14s
+
+diff --git a/libs/lang/src/lang/loader.py b/libs/lang/src/lang/loader.py
+index f55cff70fbb3afd61bfd55ffdce2e4c5c20b28ca..656c3de3b99ba256a11afb98a0e9764434363835
+--- a/libs/lang/src/lang/loader.py
++++ b/libs/lang/src/lang/loader.py
+@@ -814,8 +814,8 @@
+                 # nothing, so nothing is silently discarded.
+                 raise _error("store: takes no child block", path)
+             if "backend" in node.properties:
+-                backend_name = str(node.properties["backend"]).strip()
+-                if not backend_name:
++                backend_name = str(node.properties["backend"])
++                if not backend_name.strip():
+                     raise _error("store: backend must not be empty", path)
+                 store_backend = BackendDecl(name=backend_name)
+         elif key == "strict":
+
+apply patch
+patch: completed
+/Users/kaygee/Code/loops-s2wp4/libs/lang/src/lang/loader.py
+exec
+/bin/zsh -lc "PYTHONPATH=libs/lang/src:libs/engine/src .venv/bin/python - <<'PY'
+import os, tempfile
+from pathlib import Path
+from lang import parse_vertex
+from engine.arrival_registry import descriptor_for, BackendRegistry
+from engine.arrival_contract import StoreDescriptor, UnknownBackend
+
+root = Path(tempfile.mkdtemp())
+vpath = root/'nested'/'t.vertex'; vpath.parent.mkdir()
+ast = parse_vertex('name \"t\"\\nstore \"../data.arrival\"\\nloops { x { fold { n \"inc\" } } }')
+seen=[]
+for cwd in (root, Path('/tmp')):
+    os.chdir(cwd); seen.append(descriptor_for(ast, vpath))
+assert seen[0] == seen[1]
+print('cwd-stable', seen[0])
+for locator, expected in [
+    ('x.arrival','file'), ('x.ARRIVAL',None), ('x.arrival/child',None),
+    ('x.arrival.','file'), ('x.jsonl/child.arrival','file'),
+    ('x.arrival.jsonl',None), ('x.arrival.db',None), ('.arrival','file')]:
+    candidate=parse_vertex(f'name \"t\"\\nstore \"{locator}\"\\nloops {{ x {{ fold {{ n \"inc\" }} }} }}')
+    got=descriptor_for(candidate, vpath)
+    actual=None if got is None else got.backend
+    print(locator, actual)
+    assert actual == expected, (locator, actual, expected)
+try:
+    BackendRegistry().open(StoreDescriptor(backend='missing', location='/secret/path.arrival'))
+except UnknownBackend as exc:
+    assert '/secret/path.arrival' not in str(exc)
+    print('unknown-error', str(exc))
+PY
+rg -n \"arrival_registry|descriptor_for|BackendRegistry\" --glob '*.py' --glob '"'!libs/engine/tests/**'"' --glob '"'!tests/**'"' .
+rg -n \"role=|lineage=\" libs/lang/tests/test_loader.py libs/engine/tests/test_arrival_registry.py
+git diff --exit-code ff86a2b4 91835e7b -- libs/lang/src libs/engine/src; git status --short" in /Users/kaygee/Code/loops-s2wp4
+ succeeded in 25ms:
+exec
+/bin/zsh -lc "PYTHONPATH=libs/lang/src:libs/engine/src .venv/bin/python - <<'PY'
+from pathlib import Path
+from lang import parse_vertex
+from lang.errors import ParseError
+from engine.arrival_registry import descriptor_for, BackendRegistry
+from engine.arrival_contract import StoreDescriptor, UnknownBackend
+vpath=Path('/tmp/nested/t.vertex')
+for locator in ('x.arrival','x.ARRIVAL','x.arrival/child','x.arrival.','x.jsonl/child.arrival','x.arrival.jsonl','x.arrival.db','.arrival'):
+    ast=parse_vertex(f'name \"t\"\\nstore \"{locator}\"\\nloops {{ x {{ fold {{ n \"inc\" }} }} }}')
+    got=descriptor_for(ast,vpath)
+    print(locator, None if got is None else got.backend, None if got is None else got.location)
+try:
+    BackendRegistry().open(StoreDescriptor(backend='missing', location='/secret/path.arrival'))
+except UnknownBackend as exc:
+    assert '/secret/path.arrival' not in str(exc)
+    print('unknown-error:', str(exc))
+for prop in ('role=\"source\"','lineage=\"abc\"'):
+    try: parse_vertex(f'name \"t\"\\nstore \"x.arrival\" {prop}\\nloops {{ x {{ fold {{ n \"inc\" }} }} }}')
+    except ParseError as exc: print('refused:', str(exc))
+    else: raise AssertionError(prop)
+PY
+git diff --exit-code ff86a2b4 91835e7b -- libs/lang/src libs/engine/src
+git diff --exit-code
+git status --short" in /Users/kaygee/Code/loops-s2wp4
+ succeeded in 0ms:
+x.arrival file /private/tmp/nested/x.arrival
+x.ARRIVAL None None
+x.arrival/child None None
+x.arrival. None None
+x.jsonl/child.arrival file /private/tmp/nested/x.jsonl/child.arrival
+x.arrival.jsonl None None
+x.arrival.db None None
+.arrival None None
+unknown-error: no adapter registered for backend 'missing' (registered: (none))
+refused: <input>:1: store: unknown property 'role'
+refused: <input>:1: store: unknown property 'lineage'
+
+codex
+The mutation behaves exactly as claimed: the pinning test fails with `BackendDecl(name='  file  ') != BackendDecl(name='file')`; the source is restored and the full worktree is clean. Edge-path probes showed no transitional-arm false positives beyond the established exact, case-sensitive `.arrival` suffix rule, descriptor equality stayed stable across CWD changes when naming the same vertex path, and unknown-backend errors omit `descriptor.location`.
+exec
+/bin/zsh -lc ".venv/bin/python -m pytest libs/lang/tests/test_loader.py::TestStoreBackend::test_the_stored_backend_name_is_stripped -q && nl -ba libs/lang/src/lang/loader.py | sed -n '780,830p' && nl -ba libs/engine/src/engine/arrival_registry.py | sed -n '55,115p;145,195p' && nl -ba libs/engine/src/engine/declaration.py | sed -n '490,535p;895,920p' && nl -ba libs/engine/src/engine/program.py | sed -n '245,275p' && nl -ba libs/lang/src/lang/document.py | sed -n '885,925p;1008,1025p' && git status --short" in /Users/kaygee/Code/loops-s2wp4
+ succeeded in 324ms:
+.                                                                        [100%]
+1 passed in 0.13s
+   780	    observers: tuple[ObserverDecl, ...] | None = None
+   781	    lens: LensDecl | None = None
+   782	    vertex_boundaries: list[Boundary] = []
+   783	    observer_scoped: bool = False
+   784	    strict: bool = False
+   785	
+   786	    for node in doc.nodes:
+   787	        key = node.name
+   788	        if key == "name":
+   789	            name = _require_arg(node, 0, "name string", path)
+   790	        elif key == "store":
+   791	            # `store "<location>"` — legacy, still means exactly what it did.
+   792	            # `store "<location>" backend="file"` — the location plus the
+   793	            # adapter that opens it.
+   794	            #
+   795	            # The three refusals below exist because this handler used to read
+   796	            # args[0] and nothing else: ckdl populated `properties` and
+   797	            # `children` and they were silently discarded, so `backend=` one
+   798	            # letter wrong parsed clean and the store degraded to suffix
+   799	            # inference forever. Explicit declaration that a typo can silently
+   800	            # undo is not explicit declaration.
+   801	            store = Path(_require_arg(node, 0, "path", path))
+   802	            for prop in node.properties:
+   803	                if prop != "backend":
+   804	                    raise _error(f"store: unknown property {prop!r}", path)
+   805	            if node.children:
+   806	                # Reserved, not rejected on principle: a child block is where
+   807	                # adapter-specific options land when a second backend needs
+   808	                # them. Refusing now costs nothing and keeps the grammar from
+   809	                # accepting a shape nothing reads.
+   810	                #
+   811	                # An EMPTY `{ }` slips through, the same way it does for
+   812	                # `preview` above: CKDL normalizes it to no children, so the
+   813	                # loader cannot tell it from the no-block case. It declares
+   814	                # nothing, so nothing is silently discarded.
+   815	                raise _error("store: takes no child block", path)
+   816	            if "backend" in node.properties:
+   817	                backend_name = str(node.properties["backend"]).strip()
+   818	                if not backend_name:
+   819	                    raise _error("store: backend must not be empty", path)
+   820	                store_backend = BackendDecl(name=backend_name)
+   821	        elif key == "strict":
+   822	            # `strict true` / `strict false` — when true, all emits to this vertex
+   823	            # refuse on validation failures. No CLI override.
+   824	            # ckdl returns Python bool for unquoted true/false; _require_arg
+   825	            # may stringify it. Accept either bool or the literal string.
+   826	            if not node.args:
+   827	                raise _error("strict: missing required boolean", path)
+   828	            raw = node.args[0]
+   829	            if raw is True or (isinstance(raw, str) and raw.lower() == "true"):
+   830	                strict = True
+    55	FILE_BACKEND = "file"
+    56	
+    57	
+    58	def descriptor_for(
+    59	    ast: VertexFile, vertex_path: Path | None = None
+    60	) -> StoreDescriptor | None:
+    61	    """Which adapter opens this vertex's store, or None if no adapter does.
+    62	
+    63	    Four answers, and only the first two describe a ledger:
+    64	
+    65	    **Explicit** — the vertex declared ``backend=``. The declared name wins,
+    66	    and there is NO cross-check against the location's suffix. A
+    67	    ``backend="file"`` on a ``.duckdb``-named path is legal, because under §02
+    68	    the suffix carries no meaning once the backend is declared; adding a "do
+    69	    they agree?" check would re-admit inference through the back door on the
+    70	    very change that removes it. An unregistered name is not this function's
+    71	    to refuse — see :meth:`BackendRegistry.open`.
+    72	
+    73	    **Inferred** — no ``backend=``, and the location is ``.arrival``-canonical.
+    74	    Synthesizes ``backend="file"``.
+    75	
+    76	    **Not a ledger** — the location is ``.jsonl``- or sqlite-canonical. Those
+    77	    modes have no ledger and never route through a registry; they keep
+    78	    resolving through :func:`engine.jsonl_store.open_canonical_store` exactly
+    79	    as today. Answering None rather than raising is the honest shape: "no
+    80	    adapter describes this" is a fact about the store, not a fault.
+    81	
+    82	    **No store at all** — an aggregate (``combine``) or a loops-only vertex
+    83	    declares no location. Same answer, same reason.
+    84	
+    85	    ``lineage`` and ``role`` are left unset. The contract names them
+    86	    (backend-contract.html:134-135) but nothing in slices 2-4 reads them, and
+    87	    parsing fields nothing consumes is how speculative grammar ossifies. Their
+    88	    forcing consumer is slice 5's adopt becoming a descriptor operation.
+    89	    """
+    90	    from .residence import canonical_mode, canonical_store_path
+    91	
+    92	    if ast.store is None:
+    93	        return None
+    94	
+    95	    # Pure path arithmetic — resolves a relative locator against the vertex
+    96	    # file's directory, never the process cwd. No mode dispatch, so it
+    97	    # survives the break intact.
+    98	    location = canonical_store_path(ast.store, vertex_path)
+    99	
+   100	    if ast.store_backend is not None:
+   101	        return StoreDescriptor(
+   102	            backend=ast.store_backend.name, location=str(location)
+   103	        )
+   104	
+   105	    # TRANSITIONAL — DELETE IN SLICE 5.
+   106	    # Inferring "file" from an .arrival suffix is exactly what explicit
+   107	    # declaration exists to end. It exists here so slices 3-4 are not
+   108	    # stranded: every .arrival store in the wild predates the grammar that
+   109	    # would let it say so. Slice 5's adopt ceremony writes `backend="file"`
+   110	    # into those vertices, and this arm dies with the last undeclared store.
+   111	    # Its deletion is a residue sweep, not a behavior change: once every
+   112	    # .arrival vertex declares its backend, the explicit arm above already
+   113	    # answers every case this one does.
+   114	    if canonical_mode(location) == "arrival":
+   115	        return StoreDescriptor(backend=FILE_BACKEND, location=str(location))
+   145	
+   146	    def __init__(self) -> None:
+   147	        self._openers: dict[str, BackendOpener] = {}
+   148	
+   149	    @classmethod
+   150	    def with_builtin_backends(cls) -> BackendRegistry:
+   151	        """A registry holding the adapters that ship in this package."""
+   152	        registry = cls()
+   153	        registry.register(FILE_BACKEND, _open_file_backend)
+   154	        return registry
+   155	
+   156	    def register(self, name: str, opener: BackendOpener) -> None:
+   157	        """Bind a backend name to its opener.
+   158	
+   159	        Re-registering a name refuses. A silent overwrite would let import
+   160	        order decide which adapter answers to "file", and the failure would
+   161	        surface as a store opening through the wrong codec rather than as an
+   162	        error at the point of the mistake.
+   163	        """
+   164	        if name in self._openers:
+   165	            raise ValueError(f"backend {name!r} is already registered")
+   166	        self._openers[name] = opener
+   167	
+   168	    def registered(self) -> tuple[str, ...]:
+   169	        """The backend names this registry answers to, sorted."""
+   170	        return tuple(sorted(self._openers))
+   171	
+   172	    def open(
+   173	        self, descriptor: StoreDescriptor
+   174	    ) -> tuple[ArrivalLedger, ArrivalQuery]:
+   175	        """The custody half and the reads half for this descriptor.
+   176	
+   177	        Refuses an unregistered name with
+   178	        :class:`~engine.arrival_contract.UnknownBackend`, naming what IS
+   179	        registered. Refusing is the whole point: §02 forbids inferring a
+   180	        backend from a suffix, so an unregistered name has no fallback to
+   181	        degrade into — and a registry that guessed would reintroduce
+   182	        inference at the one seam built to remove it.
+   183	        """
+   184	        opener = self._openers.get(descriptor.backend)
+   185	        if opener is None:
+   186	            known = ", ".join(self.registered()) or "(none)"
+   187	            raise UnknownBackend(
+   188	                f"no adapter registered for backend {descriptor.backend!r} "
+   189	                f"(registered: {known})"
+   190	            )
+   191	        return opener(descriptor)
+   490	        # membership/existence set is ALWAYS current — aggregation internal
+   491	        # tables are not built yet (SPEC §9.5) — so a historical read over an
+   492	        # aggregate is disclosed as ``aggregate-head`` even when the vertex ALSO
+   493	        # carries a self-knowledge store (whose ontology may resolve at the
+   494	        # cutoff). Without this override, a combine-with-store reported ``store``
+   495	        # and the membership derogation was silently lost.
+   496	        if historical and is_aggregate:
+   497	            return ast, "aggregate-head"
+   498	        return ast, status
+   499	
+   500	    store_field = file_ast.store
+   501	    # The backend arm is residence, like the locator beside it: the documents
+   502	    # do not carry it, so the file is the only place it can come from. A
+   503	    # re-projection that supplied the locator but not the backend would hand
+   504	    # back a vertex whose adapter designation had silently reverted to suffix
+   505	    # inference — and nothing downstream would report that.
+   506	    backend_field = file_ast.store_backend
+   507	    if store_field is None:
+   508	        return _finish(file_ast, "file-pre-genesis")
+   509	
+   510	    store_path = resolve_store_path(store_field, vertex_path)
+   511	    if not store_path.exists():
+   512	        return _finish(file_ast, "file-pre-genesis")
+   513	
+   514	    docs = resolve_declaration_documents(
+   515	        store_path, as_of=as_of, at=at, timeout=store_timeout, on_locked=on_locked,
+   516	    )
+   517	    if isinstance(docs, list):
+   518	        resolved = documents_to_vertex(
+   519	            docs, path=vertex_path, store=store_field, store_backend=backend_field
+   520	        )
+   521	        return _finish(_reattach_ingress(resolved, file_ast), "store")
+   522	    if isinstance(docs, Unhistorized):
+   523	        resolved = documents_to_vertex(
+   524	            docs.documents,
+   525	            path=vertex_path,
+   526	            store=store_field,
+   527	            store_backend=backend_field,
+   528	        )
+   529	        return _finish(_reattach_ingress(resolved, file_ast), "unhistorized")
+   530	    return _finish(file_ast, "file-pre-genesis")
+   531	
+   532	
+   533	def declaration_generation(
+   534	    vertex_path: Path,
+   535	    *,
+   895	        new_blocks.append(SourcesBlock(mode=block.mode, sources=tuple(new_sources)))
+   896	
+   897	    if not changed:
+   898	        return resolved
+   899	    from lang.ast import VertexFile
+   900	
+   901	    # ast.py's custom frozen decorator defeats dataclasses.replace — rebuild
+   902	    # through the constructor with the full explicit field list.
+   903	    return VertexFile(
+   904	        name=resolved.name,
+   905	        loops=resolved.loops,
+   906	        store=resolved.store,
+   907	        store_backend=resolved.store_backend,
+   908	        discover=resolved.discover,
+   909	        sources=resolved.sources,
+   910	        vertices=resolved.vertices,
+   911	        routes=resolved.routes,
+   912	        emit=resolved.emit,
+   913	        combine=resolved.combine,
+   914	        sources_blocks=tuple(new_blocks),
+   915	        observers=resolved.observers,
+   916	        lens=resolved.lens,
+   917	        boundary=resolved.boundary,
+   918	        observer_scoped=resolved.observer_scoped,
+   919	        strict=resolved.strict,
+   920	        path=resolved.path,
+   245	                    template=entry.template,
+   246	                    params=new_params,
+   247	                    from_=entry.from_,
+   248	                    loop=entry.loop,
+   249	                )
+   250	            )
+   251	        else:
+   252	            new_sources.append(entry)
+   253	
+   254	    return VertexFile(
+   255	        name=ast.name,
+   256	        loops=ast.loops,
+   257	        store=ast.store,
+   258	        store_backend=ast.store_backend,
+   259	        discover=ast.discover,
+   260	        sources=tuple(new_sources),
+   261	        vertices=ast.vertices,
+   262	        routes=ast.routes,
+   263	        emit=ast.emit,
+   264	        sources_blocks=ast.sources_blocks,
+   265	        path=ast.path,
+   266	    )
+   267	
+   268	
+   269	def load_vertex_program(
+   270	    vertex_path: Path,
+   271	    *,
+   272	    vars: dict[str, str] | None = None,
+   273	    fold_overrides: dict[str, FoldOverride] | None = None,
+   274	    default_fold_override: FoldOverride | None = None,
+   275	    validate_ast: bool = True,
+   885	        SourcesBlock(mode=mode_by_block[i], sources=tuple(by_block[i]))
+   886	        for i in order_seen
+   887	    )
+   888	
+   889	
+   890	def documents_to_vertex(
+   891	    documents: Any,
+   892	    *,
+   893	    path: Path | None = None,
+   894	    store: Path | None = None,
+   895	    store_backend: BackendDecl | None = None,
+   896	) -> VertexFile:
+   897	    """Project declaration documents back to a ``VertexFile`` AST.
+   898	
+   899	    ``path``, ``store`` and ``store_backend`` are residence, supplied by the
+   900	    caller — they are not present in the documents. Pure inverse of
+   901	    :func:`vertex_to_documents` modulo those three fields.
+   902	
+   903	    ``store_backend`` is residence for the same reason the locator is: which
+   904	    adapter opens a store is an operational choice about where the vertex
+   905	    lives, and putting an adapter name into signed declaration history would
+   906	    make it part of the vertex's absorbed identity. It is threaded rather
+   907	    than defaulted because a caller that drops it does not get an error — it
+   908	    gets a vertex whose backend arm has silently reverted to inference.
+   909	
+   910	    Forward-compatible (normative, SPEC §9.2): unknown ``_decl.*`` kinds are
+   911	    skipped, and unknown fields inside a known document are ignored, so a
+   912	    newer protocol's documents project safely under this reader.
+   913	    """
+   914	    name: str | None = None
+   915	    strict = False
+   916	    observer_scoped = False
+   917	    discover: str | None = None
+   918	    emit: str | None = None
+   919	    routes: dict[str, str] | None = None
+   920	    vertices: tuple[Path, ...] | None = None
+   921	    boundary: tuple[Any, ...] = ()
+   922	    sources_present = False
+   923	    # authoritative block structure from the vertex-defined singleton.
+   924	    source_blocks_decl: list[dict[str, Any]] | None = None
+   925	
+  1008	        sources = tuple(bare_sorted)
+  1009	    elif sources_present:
+  1010	        sources = ()  # empty `sources {}` block — the one reachable empty tuple
+  1011	    else:
+  1012	        sources = None
+  1013	
+  1014	    sources_blocks = _rebuild_sources_blocks(source_blocks_decl, inline_items)
+  1015	
+  1016	    return VertexFile(
+  1017	        name=name,
+  1018	        loops=loops,
+  1019	        store=store,
+  1020	        store_backend=store_backend,
+  1021	        discover=discover,
+  1022	        sources=sources,
+  1023	        vertices=vertices,
+  1024	        routes=routes,
+  1025	        emit=emit,
+
+codex
+## Contract verdict
+
+1. **PASS — KDL/AST shape.** `store` remains the positional location; `backend=` populates frozen `BackendDecl` and `VertexFile.store_backend`. `VertexFile.store` semantics are unchanged. Evidence: [loader.py](/Users/kaygee/Code/loops-s2wp4/libs/lang/src/lang/loader.py:790), [ast.py](/Users/kaygee/Code/loops-s2wp4/libs/lang/src/lang/ast.py:675).
+
+2. **PASS — parser refusals and normalization.** Unknown properties, non-empty child blocks, and blank backends raise `ParseError`; stored names are stripped. `role=` and `lineage=` were empirically refused as unknown properties. Note: CKDL makes an empty `{}` indistinguishable from no block, as already disclosed.
+
+3. **PASS — residence threading.** `store_backend` remains absent from `_decl.*` documents and is carried through `documents_to_vertex`, both declaration resolution branches, `_reattach_ingress`, and program substitution. Repository-wide constructor search found no missed rebuild path. `VertexBuilder` constructs new vertices from builder state and does not rebuild existing ASTs.
+
+4. **PASS — registry arms and behavior.** Explicit backend wins without suffix validation; undeclared exact `.arrival` locations infer `file`; JSONL/SQLite and store-less vertices return `None`. Edge probes included uppercase, compound suffixes, `.arrival` parent directories, trailing dots, and hidden `.arrival`; none caused a false-positive inference under `canonical_mode`. Unknown backends fail only in `open`; re-registration refuses; import laziness is subprocess-tested. See [arrival_registry.py](/Users/kaygee/Code/loops-s2wp4/libs/engine/src/engine/arrival_registry.py:58).
+
+5. **PASS — parity coverage.** The engine suite exercised every tracked `.vertex` plus minted explicit and inferred arrival fixtures at descriptor and ledger/opening levels.
+
+6. **PASS — scope constraints.** `residence.py` is diff-empty. Production search found no registry consumer. Role/lineage parsing refuses. Rule 18 includes the registry.
+
+## Gate-fix verification
+
+**§3 PASS.**
+
+The prescribed mutation—strip only for blank checking while storing the unstripped value—failed the new test exactly as required:
+
+```text
+BackendDecl(name='  file  ') != BackendDecl(name='file')
+```
+
+After restoration, the test passed. The worktree is clean. `git diff ff86a2b4 91835e7b -- libs/lang/src libs/engine/src` is empty.
+
+## Empirical results
+
+- Lang: **671 passed**
+- Engine: **2016 passed, 1 skipped**
+- Architecture: **99 passed**
+- CWD probe: identical descriptors for the same absolute vertex path from two working directories.
+- Registry refusal probe: error included the backend name and registered alternatives, but not `descriptor.location`. No production registry consumer exists that could place it into signed payloads.
+
+No new `S2WP4-L-*` findings.
+
+Administrative discrepancy: the brief says 14 changed files, while Git reports 13. This does not conceal a missing contractual artifact.
+
+**CONVERGED**
+tokens used
+56,659
+## Contract verdict
+
+1. **PASS — KDL/AST shape.** `store` remains the positional location; `backend=` populates frozen `BackendDecl` and `VertexFile.store_backend`. `VertexFile.store` semantics are unchanged. Evidence: [loader.py](/Users/kaygee/Code/loops-s2wp4/libs/lang/src/lang/loader.py:790), [ast.py](/Users/kaygee/Code/loops-s2wp4/libs/lang/src/lang/ast.py:675).
+
+2. **PASS — parser refusals and normalization.** Unknown properties, non-empty child blocks, and blank backends raise `ParseError`; stored names are stripped. `role=` and `lineage=` were empirically refused as unknown properties. Note: CKDL makes an empty `{}` indistinguishable from no block, as already disclosed.
+
+3. **PASS — residence threading.** `store_backend` remains absent from `_decl.*` documents and is carried through `documents_to_vertex`, both declaration resolution branches, `_reattach_ingress`, and program substitution. Repository-wide constructor search found no missed rebuild path. `VertexBuilder` constructs new vertices from builder state and does not rebuild existing ASTs.
+
+4. **PASS — registry arms and behavior.** Explicit backend wins without suffix validation; undeclared exact `.arrival` locations infer `file`; JSONL/SQLite and store-less vertices return `None`. Edge probes included uppercase, compound suffixes, `.arrival` parent directories, trailing dots, and hidden `.arrival`; none caused a false-positive inference under `canonical_mode`. Unknown backends fail only in `open`; re-registration refuses; import laziness is subprocess-tested. See [arrival_registry.py](/Users/kaygee/Code/loops-s2wp4/libs/engine/src/engine/arrival_registry.py:58).
+
+5. **PASS — parity coverage.** The engine suite exercised every tracked `.vertex` plus minted explicit and inferred arrival fixtures at descriptor and ledger/opening levels.
+
+6. **PASS — scope constraints.** `residence.py` is diff-empty. Production search found no registry consumer. Role/lineage parsing refuses. Rule 18 includes the registry.
+
+## Gate-fix verification
+
+**§3 PASS.**
+
+The prescribed mutation—strip only for blank checking while storing the unstripped value—failed the new test exactly as required:
+
+```text
+BackendDecl(name='  file  ') != BackendDecl(name='file')
+```
+
+After restoration, the test passed. The worktree is clean. `git diff ff86a2b4 91835e7b -- libs/lang/src libs/engine/src` is empty.
+
+## Empirical results
+
+- Lang: **671 passed**
+- Engine: **2016 passed, 1 skipped**
+- Architecture: **99 passed**
+- CWD probe: identical descriptors for the same absolute vertex path from two working directories.
+- Registry refusal probe: error included the backend name and registered alternatives, but not `descriptor.location`. No production registry consumer exists that could place it into signed payloads.
+
+No new `S2WP4-L-*` findings.
+
+Administrative discrepancy: the brief says 14 changed files, while Git reports 13. This does not conceal a missing contractual artifact.
+
+**CONVERGED**

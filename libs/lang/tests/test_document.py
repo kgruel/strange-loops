@@ -18,6 +18,7 @@ import pytest
 
 from lang import parse_vertex
 from lang.ast import (
+    BackendDecl,
     BoundaryCondition,
     BoundaryWhen,
     CombineEntry,
@@ -259,8 +260,21 @@ loops {
 }
 """
 
+# A declared backend, run through the whole round-trip battery below. The
+# name is "duckdb" and not "file" so the genesis-blob assertions have a
+# distinctive token to look for — "file" is a substring of too much to be
+# evidence of anything.
+BACKEND_DECLARED = """
+name "backed"
+store "./b.arrival" backend="duckdb"
+loops {
+  a { fold { n "inc" } }
+}
+"""
+
 SYNTH_CASES = {
     "kitchen_sink": KITCHEN_SINK,
+    "backend_declared": BACKEND_DECLARED,
     "where_variants": WHERE_VARIANTS,
     "template_sources": TEMPLATE_SOURCES,
     "sources_blocks": SOURCES_BLOCKS,
@@ -289,8 +303,12 @@ def test_roundtrip_via_documents(name: str) -> None:
     text = ALL_CASES[name]
     ast = parse_vertex(text)
     docs = vertex_to_documents(ast)
-    # Supply the original residence back at projection time.
-    projected = documents_to_vertex(docs, path=ast.path, store=ast.store)
+    # Supply the original residence back at projection time — all three
+    # fields. A caller that forgets store_backend gets no error, just a
+    # vertex whose backend arm has quietly reverted to inference.
+    projected = documents_to_vertex(
+        docs, path=ast.path, store=ast.store, store_backend=ast.store_backend
+    )
     assert projected == _ingress_stripped(ast)
 
 
@@ -301,7 +319,10 @@ def test_roundtrip_via_genesis(name: str) -> None:
     payload = genesis_payload(ast)
     assert payload["protocol"] == DECLARATION_PROTOCOL_VERSION
     projected = documents_to_vertex(
-        payload["documents"], path=ast.path, store=ast.store
+        payload["documents"],
+        path=ast.path,
+        store=ast.store,
+        store_backend=ast.store_backend,
     )
     assert projected == _ingress_stripped(ast)
 
@@ -311,7 +332,9 @@ def test_roundtrip_is_idempotent(name: str) -> None:
     """documents(project(documents(ast))) is byte-identical to documents(ast)."""
     ast = parse_vertex(ALL_CASES[name])
     docs1 = vertex_to_documents(ast)
-    ast2 = documents_to_vertex(docs1, path=ast.path, store=ast.store)
+    ast2 = documents_to_vertex(
+        docs1, path=ast.path, store=ast.store, store_backend=ast.store_backend
+    )
     docs2 = vertex_to_documents(ast2)
     assert [d.as_json() for d in docs1] == [d.as_json() for d in docs2]
 
@@ -385,12 +408,41 @@ def test_observer_public_key_enters_document() -> None:
 
 def test_store_and_path_never_enter_documents() -> None:
     ast = parse_vertex(KITCHEN_SINK)
-    # Parsed from text: path is None but store is set. Give it a path too so
-    # we prove neither leaks.
-    ast = VertexFile(**{**_vertex_kwargs(ast), "path": Path("/somewhere/x.vertex")})
+    # Parsed from text: path is None but store is set. Give it a path and a
+    # declared backend too, so we prove none of the three leaks. The backend
+    # name is residence for the same reason the locator is — an operational
+    # adapter choice in signed declaration history would make where a vertex
+    # is stored part of what the vertex IS.
+    ast = VertexFile(
+        **{
+            **_vertex_kwargs(ast),
+            "path": Path("/somewhere/x.vertex"),
+            "store_backend": BackendDecl(name="duckdb"),
+        }
+    )
     blob = json.dumps(genesis_payload(ast))
     assert "kitchen.db" not in blob  # the store locator
     assert "/somewhere/x.vertex" not in blob  # the residence path
+    assert "duckdb" not in blob  # the adapter designation
+
+
+def test_backend_survives_the_document_round_trip() -> None:
+    """The arm the declaration round-trip would otherwise silently drop.
+
+    ``loops add`` / ``loops rm`` re-project a vertex through its documents.
+    Residence is caller-supplied, so any residence field not threaded comes
+    back None — and a store whose backend arm came back None falls straight
+    back to suffix inference, which is the failure explicit declaration
+    exists to end. No pre-existing test would have caught it.
+    """
+    ast = parse_vertex(BACKEND_DECLARED)
+    assert ast.store_backend == BackendDecl(name="duckdb")
+    docs = vertex_to_documents(ast)
+    projected = documents_to_vertex(
+        docs, path=ast.path, store=ast.store, store_backend=ast.store_backend
+    )
+    assert projected.store_backend == BackendDecl(name="duckdb")
+    assert projected.store == ast.store
 
 
 def test_source_defined_for_each_source() -> None:
@@ -644,7 +696,9 @@ def test_order_preserved_after_shuffle(name: str) -> None:
     docs = vertex_to_documents(ast)
     shuffled = list(docs)
     random.Random(1234).shuffle(shuffled)
-    projected = documents_to_vertex(shuffled, path=ast.path, store=ast.store)
+    projected = documents_to_vertex(
+        shuffled, path=ast.path, store=ast.store, store_backend=ast.store_backend
+    )
     assert projected == _ingress_stripped(ast)
 
 
@@ -781,6 +835,7 @@ def _vertex_kwargs(ast: VertexFile) -> dict:
         "name": ast.name,
         "loops": ast.loops,
         "store": ast.store,
+        "store_backend": ast.store_backend,
         "discover": ast.discover,
         "sources": ast.sources,
         "vertices": ast.vertices,
@@ -800,6 +855,18 @@ def _vertex_kwargs(ast: VertexFile) -> dict:
 def _edit(ast: VertexFile, **overrides: object) -> VertexFile:
     """A copy of ``ast`` with the given fields replaced (an in-memory edit)."""
     return VertexFile(**{**_vertex_kwargs(ast), **overrides})
+
+def _residence_stripped(ast: VertexFile) -> VertexFile:
+    """``ast`` with every residence field cleared.
+
+    What :func:`_reproject` produces: it projects documents with no residence
+    supplied, and residence is exactly what documents do not carry. Named
+    rather than spelled inline at each assertion so the set stays in one
+    place — it grew from ``path``/``store`` to include ``store_backend``, and
+    an assertion that cleared only some of it would pass while proving less.
+    """
+    return _edit(ast, store=None, store_backend=None)
+
 
 def _ingress_stripped(ast: VertexFile) -> VertexFile:
     """``ast`` with ingress-class values blanked (env values, SPEC §9.5).
@@ -867,7 +934,7 @@ def test_diff_apply_roundtrip_add_kind(name: str) -> None:
     # The added kind is the only NEW subject; order-shift may re-emit others.
     added = [c for c in changes if c.annotation == "added"]
     assert [(c.kind, c.subject) for c in added] == [(DECL_KIND_DEFINED, "s4_added")]
-    assert _reproject(head, changes) == _ingress_stripped(_edit(b, store=None))
+    assert _reproject(head, changes) == _ingress_stripped(_residence_stripped(b))
 
 
 def test_diff_modify_kind_reemits_one_subject() -> None:
@@ -883,7 +950,7 @@ def test_diff_modify_kind_reemits_one_subject() -> None:
     assert [(c.kind, c.subject, c.annotation) for c in changes] == [
         (DECL_KIND_DEFINED, first, "modified")
     ]
-    assert _reproject(head, changes) == _ingress_stripped(_edit(b, store=None))
+    assert _reproject(head, changes) == _ingress_stripped(_residence_stripped(b))
 
 
 def test_diff_remove_kind_emits_tombstone() -> None:
@@ -895,7 +962,7 @@ def test_diff_remove_kind_emits_tombstone() -> None:
     assert [(c.kind, c.subject, c.payload) for c in removals] == [
         (DECL_KIND_RETIRED, "beta", None)
     ]
-    assert _reproject(head, changes) == _ingress_stripped(_edit(b, store=None))
+    assert _reproject(head, changes) == _ingress_stripped(_residence_stripped(b))
 
 
 def test_diff_remove_observer_emits_tombstone() -> None:
@@ -906,7 +973,7 @@ def test_diff_remove_observer_emits_tombstone() -> None:
     changes = diff_documents(head, vertex_to_documents(b))
     kinds = {(c.kind, c.annotation) for c in changes}
     assert (DECL_OBSERVER_RETIRED, "removed") in kinds
-    assert _reproject(head, changes) == _ingress_stripped(_edit(b, store=None))
+    assert _reproject(head, changes) == _ingress_stripped(_residence_stripped(b))
 
 
 def test_diff_remove_source_emits_tombstone() -> None:
@@ -917,7 +984,7 @@ def test_diff_remove_source_emits_tombstone() -> None:
     changes = diff_documents(head, vertex_to_documents(b))
     assert any(c.kind == DECL_SOURCE_RETIRED and c.annotation == "removed"
                for c in changes)
-    assert _reproject(head, changes) == _ingress_stripped(_edit(b, store=None))
+    assert _reproject(head, changes) == _ingress_stripped(_residence_stripped(b))
 
 
 def test_diff_remove_member_emits_tombstone() -> None:
@@ -928,7 +995,7 @@ def test_diff_remove_member_emits_tombstone() -> None:
     changes = diff_documents(head, vertex_to_documents(b))
     assert any(c.kind == DECL_MEMBER_REMOVED and c.annotation == "removed"
                for c in changes)
-    assert _reproject(head, changes) == _ingress_stripped(_edit(b, store=None))
+    assert _reproject(head, changes) == _ingress_stripped(_residence_stripped(b))
 
 
 def test_diff_modify_vertex_singleton() -> None:
@@ -941,7 +1008,7 @@ def test_diff_modify_vertex_singleton() -> None:
     assert [(c.kind, c.subject, c.annotation) for c in changes] == [
         (DECL_VERTEX_DEFINED, "x", "modified")
     ]
-    assert _reproject(head, changes) == _ingress_stripped(_edit(b, store=None))
+    assert _reproject(head, changes) == _ingress_stripped(_residence_stripped(b))
 
 
 def test_diff_lens_removal_refused() -> None:
@@ -963,7 +1030,7 @@ def test_diff_lens_modify_is_expressible() -> None:
     changes = diff_documents(head, vertex_to_documents(b))
     assert any(c.kind == DECL_LENS_DEFINED and c.annotation == "modified"
                for c in changes)
-    assert _reproject(head, changes) == _ingress_stripped(_edit(b, store=None))
+    assert _reproject(head, changes) == _ingress_stripped(_residence_stripped(b))
 
 
 def test_diff_vertex_rename_refused() -> None:
@@ -989,7 +1056,7 @@ def test_diff_annotations_are_the_minimal_vocabulary() -> None:
     head = [d.as_json() for d in vertex_to_documents(a)]
     changes = diff_documents(head, vertex_to_documents(b))
     assert {c.annotation for c in changes} <= {"added", "modified", "removed"}
-    assert _reproject(head, changes) == _ingress_stripped(_edit(b, store=None))
+    assert _reproject(head, changes) == _ingress_stripped(_residence_stripped(b))
 
 
 def test_change_is_namedtuple_shape() -> None:

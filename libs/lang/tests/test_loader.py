@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from lang import (
+    BackendDecl,
     BoundaryAfter,
     BoundaryEvery,
     BoundaryWhen,
@@ -1978,6 +1979,76 @@ class TestStrictKeyword:
             'loops { x { fold { items "inc" } } }'
         )
         with pytest.raises(ParseError, match="strict requires a boolean"):
+            parse_vertex(text)
+
+
+class TestStoreBackend:
+    """Tests for the `backend=` property on the vertex-level store clause.
+
+    Two forms parse: the legacy bare `store "<location>"`, which keeps
+    meaning exactly what it meant, and `store "<location>" backend="<name>"`,
+    which names the adapter as well. The refusals are the load-bearing half —
+    before this arm the handler read args[0] and nothing else, so a mistyped
+    `backend=` parsed clean and left the store on suffix inference forever.
+    """
+
+    def test_bare_store_parses_with_no_backend(self):
+        text = 'name "t"\nstore "./t.db"\nloops { x { fold { items "inc" } } }'
+        v = parse_vertex(text)
+        assert v.store == Path("./t.db")
+        assert v.store_backend is None
+
+    def test_store_with_backend(self):
+        text = (
+            'name "t"\nstore "./t.arrival" backend="file"\n'
+            'loops { x { fold { items "inc" } } }'
+        )
+        v = parse_vertex(text)
+        assert v.store == Path("./t.arrival")
+        assert v.store_backend == BackendDecl(name="file")
+
+    def test_backend_name_is_not_cross_checked_against_the_suffix(self):
+        """Explicit wins. Once the backend is declared the suffix means
+        nothing, so a declared backend that disagrees with the suffix is
+        legal — a suffix cross-check would re-admit inference through the
+        back door on the very change that removes it."""
+        text = (
+            'name "t"\nstore "./t.arrival" backend="duckdb"\n'
+            'loops { x { fold { items "inc" } } }'
+        )
+        v = parse_vertex(text)
+        assert v.store_backend == BackendDecl(name="duckdb")
+
+    def test_unknown_property_refused(self):
+        text = (
+            'name "t"\nstore "./t.arrival" bakcend="file"\n'
+            'loops { x { fold { items "inc" } } }'
+        )
+        with pytest.raises(ParseError, match="store: unknown property 'bakcend'"):
+            parse_vertex(text)
+
+    def test_child_block_refused(self):
+        text = (
+            'name "t"\nstore "./t.arrival" { backend "file"; }\n'
+            'loops { x { fold { items "inc" } } }'
+        )
+        with pytest.raises(ParseError, match="store: takes no child block"):
+            parse_vertex(text)
+
+    def test_empty_backend_refused(self):
+        text = (
+            'name "t"\nstore "./t.arrival" backend=""\n'
+            'loops { x { fold { items "inc" } } }'
+        )
+        with pytest.raises(ParseError, match="store: backend must not be empty"):
+            parse_vertex(text)
+
+    def test_blank_backend_refused(self):
+        text = (
+            'name "t"\nstore "./t.arrival" backend="   "\n'
+            'loops { x { fold { items "inc" } } }'
+        )
+        with pytest.raises(ParseError, match="store: backend must not be empty"):
             parse_vertex(text)
 
 

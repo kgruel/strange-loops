@@ -626,6 +626,13 @@ def admit_records(
     progress: it consumes the other writer's appends and skips whatever they
     already added.
 
+    The mapping ``target_state`` returns is NOT mutated — the op copies it and
+    dedups against the copy. That is a guarantee this side keeps, not a
+    freshness obligation placed on the caller: a backend answering out of an
+    owned cache is a legitimate implementation of the contract, and one that
+    had to return a fresh dict to stay correct would be relying on the
+    caller's vigilance to avoid a silent drop.
+
     ``dry_run`` runs steps 1-4 and reports the counts. It appends nothing and
     re-derives nothing — the log never rewrites, so a rollback is neither
     available nor needed. It verifies too: a dry run answers "what would this
@@ -646,6 +653,18 @@ def admit_records(
 
     for _ in range(attempts):
         held, pin = target_state()
+        # The caller's mapping is the caller's. `_drafts_for` writes every
+        # proposed id into the snapshot it dedups against — that is how one
+        # source carrying an id twice appends it once — but those writes are
+        # PROPOSALS, and the append that would make them true has not happened
+        # yet. Against a caller that hands back a fresh mapping per call this
+        # is invisible; against one that hands back an owned cache it is a
+        # silent drop: attempt 1 injects the ids, the compare-and-swap loses
+        # the race, and attempt 2 dedups the records away against its own
+        # proposals and reports them SKIPPED. One dict per attempt is noise
+        # against the I/O either way, and copying makes the failure
+        # inexpressible rather than documented.
+        held = dict(held)
         drafts, added_facts, added_ticks, admitted = _drafts_for(
             source, held, log.genesis()["observer"]
         )

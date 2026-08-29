@@ -17,14 +17,18 @@ Package-scoped runs, because a root `uv run pytest` misses each member's own dev
 
 | Suite | Command | Baseline | Final | Delta |
 |---|---|---|---|---|
-| engine | `uv run --package engine pytest libs/engine/tests -q -p no:randomly` | 1989 passed, 1 skipped | **1989 passed, 1 skipped** | 0 |
+| engine | `uv run --package engine pytest libs/engine/tests -q -p no:randomly` | 1989 passed, 1 skipped | **1990 passed, 1 skipped** | +1 |
 | store | `uv run --package store pytest libs/store/tests -q -p no:randomly` | 180 passed | **180 passed** | 0 |
 | architecture | `uv run pytest tests/architecture -q -p no:randomly` | 99 passed | **99 passed** | 0 |
 
-**Every delta is zero**, and that is the intended result: this WP moves code and adds no
-test. The three suites are the same tests over the same behaviour, which is what makes
-"green unmodified in intent" checkable — see §4 for the one test whose *scenario* did
-change, and how it was caught without a failure to point at.
+**The one delta is the sol-LOW r1 regression test** added in §7
+(`test_admission_callback_ownership.py`, one test). Every other delta is zero, and that is
+the intended result for an extraction: the suites are the same tests over the same
+behaviour, which is what makes "green unmodified in intent" checkable — see §4 for the one
+test whose *scenario* did change, and how it was caught without a failure to point at.
+
+*(At the original hand-off the engine suite was 1989 and every delta was zero; §7 landed
+after sol's review.)*
 
 Lint is not a CI gate for these packages (CI runs `ruff check libs/custody libs/sign`
 only), but the three touched source files were compared against their own baseline
@@ -214,3 +218,46 @@ brief's "e.g. break the op's refusal" licenses exactly the three above, which do
 | 4 | Mutation demo shows the op is on the live path | **yes** — §5, three mutations |
 | 5 | Full engine + store suites green, deltas accounted | **yes** — §0, all deltas zero |
 | 6 | `git ls-files` clean on all changes | **yes** |
+
+---
+
+## 7. sol-LOW r1 — S2WP3-L-1, the callback mapping was caller-owned
+
+**Blocking finding, fixed.** `_drafts_for` writes every proposed source id into the
+mapping it dedups against — that is how one source carrying an id twice appends it once —
+but it writes them *before* the compare-and-swap append that would make them true. While
+that code was private to `store.merge` the mapping was always a fresh `dict` built by a
+SELECT one call earlier, so the write could not reach anyone. **The extraction is what made
+it reachable**: ownership of a value that crosses a callback boundary is a question the
+boundary has to answer, and this one had not been asked. Neither the gate nor I could see
+it structurally, because the consumer it harms — a backend serving `target_state` out of an
+owned, incrementally-maintained cache — does not exist in-repo yet. It is exactly the
+second backend the contract exists for.
+
+Sol's repro: owned cache + a compare-and-swap interloper → attempt 1 injects the ids, loses
+the race, and attempt 2 dedups the records away against attempt 1's own proposals. Silent
+drop, reported as `AdmissionResult(facts_added=0, facts_skipped=2)`.
+
+**Fix arm, per the arbiter ruling: construction over detection.** `admit_records` takes a
+defensive copy of the mapping on entry, every attempt, so mutating caller-owned state
+becomes inexpressible. The documentation arm ("callbacks must return a fresh dict") was
+ruled out and not taken — it is vigilance, and it would have made a legitimate
+implementation of the contract silently wrong. One dict per attempt is noise against the
+I/O. The op's docstring now states the copy as a **guarantee this side keeps**, not as a
+freshness obligation on the caller.
+
+**Regression test:** `libs/engine/tests/test_admission_callback_ownership.py` — a fake
+backend whose `target_state` returns the SAME owned mapping on every call, seeded with one
+genuinely-held row, plus an interloper appending between the pin read and the append so
+attempt 1 is guaranteed to lose. It asserts both properties the finding names: both records
+land on the retry (`facts_added=2, facts_skipped=0`, and both ids present in the log), and
+the caller's mapping comes back exactly as it went in. The seeded row makes "unmutated"
+bidirectional — nothing injected, nothing removed.
+
+**Mutation demo:** removing `held = dict(held)` fails the new test with
+`assert (0, 2) == (2, 0)` — sol's counts, reproduced exactly. Restored; `git diff` clean;
+suites re-run (engine 1990, store 180, architecture 99).
+
+Sol's other finding (L-2, `rederive` raising after a successful append leaves the derived
+log stale) is verified pre-existing at the wave base and deferred to slice 5 — not touched
+here.

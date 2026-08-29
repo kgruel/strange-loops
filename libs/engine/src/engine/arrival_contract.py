@@ -393,9 +393,18 @@ class ArrivalLedger(Protocol):
     def verify(self, scope: VerifyScope) -> Head:
         """Verify through a named head; return the head the claim covers.
 
-        Verification reports; it does not repair. Whether that is a MUST is
-        the F2 addendum Kyle rules on at the slice-2 gate — until then the
-        obligation lives in the adapters that already hold it.
+        **Verification never repairs**, at any level, and §06 states it as a
+        MUST: no catch-up, no truncation, no rebuild of existing projection
+        state, no head re-stamp. An operation that repairs on the way to
+        reading has destroyed the evidence it was asked to judge and can
+        only report an agreement it just manufactured, so a backend whose
+        ordinary open path recovers MUST offer verification a route that
+        does not.
+
+        The one carve-out: materializing a projection that does not yet
+        exist is not repair — it destroys no prior state and can hide no
+        divergence (``decision:design/arrival-slice2-contract-text``,
+        ruling 1).
         """
         ...
 

@@ -209,12 +209,15 @@ def test_opening_a_store_whose_projection_is_absent_refuses(tmp_path):
     no projection beside it cannot be opened through the registry, even
     though its LEDGER half is perfectly openable.
 
-    Whether an absent projection should be materialized on the way in is
-    exactly the boundary the F2 addendum puts to Kyle at the slice-2 gate
-    ("absent ⇒ create is permitted; present ⇒ touch is forbidden"). Inventing
-    an answer here would be this WP ruling on a question it was not given, so
-    the adapter's behavior passes through unchanged and this test records
-    what it is. See finding:slice2-wp4-registry-open-needs-a-projection.
+    The boundary this sits beside is now RULED: absent ⇒ create is permitted,
+    present ⇒ touch is forbidden (``decision:design/arrival-slice2-contract-text``,
+    ruling 1, in backend-contract.html §06). Permitted is not required, and
+    the ruling is about VERIFICATION rather than opening — so this refusal
+    stays conforming, and the test still records observed behavior rather
+    than a policy anyone chose. Whether the registry's open path should
+    materialize an absent projection is a slice-5 rewiring question, where
+    the consumers that would care are. See
+    finding:slice2-wp4-registry-open-needs-a-projection.
     """
     log_path = tmp_path / "s.arrival"
     ArrivalLog.mint(log_path, observer="kyle", signer=_sign, key=_KEY)

@@ -197,6 +197,7 @@ Commit = {
             <tbody>
               <tr><td><code>mint(options)</code></td><td>Authority</td><td>Exclusively create one signed genesis and return head 0.</td></tr>
               <tr><td><code>head(lineage)</code></td><td>Authority / Replica</td><td>Return the currently complete head or a typed absence/corruption refusal.</td></tr>
+              <tr><td><code>head_at(watermark)</code></td><td>Authority / Replica</td><td>Resolve a projection watermark into the verified head it names, or refuse.</td></tr>
               <tr><td><code>append(expected, drafts)</code></td><td>Authority</td><td>Atomically compare the full head, then assign and commit records up to the declared atomic limit.</td></tr>
               <tr><td><code>replicate(expected, records)</code></td><td>Authority / Replica</td><td>Atomically append exact pre-coordinated records; never rehash or re-sign.</td></tr>
               <tr><td><code>read(coordinate)</code></td><td>Authority / Replica</td><td>Return the exact record after establishing its membership in the lineage.</td></tr>
@@ -262,6 +263,20 @@ Commit = {
           ledger field. Without that capability, a lost response produces an “outcome unknown”
           result and the caller reconciles by reading the expected successor and its authored
           content commitment before deciding whether to retry.
+        </p>
+
+        <h3>Typed refusals</h3>
+        <p>
+          The failure conditions this contract names — head mismatch, same-height fork, unknown
+          backend, atomic limit exceeded, and not-authority — surface as typed refusals under one
+          backend-neutral root, so a caller catches a refusal without knowing which adapter
+          produced it. A capability a backend deliberately does not offer is typed
+          <code>NotSupported</code> under that same root: an absence <code>capabilities()</code>
+          already reports is a contract answer, not a fault. Every other failure is
+          backend-specific BY DESIGN. The root covers exactly what the contract text asserts and
+          no more, because an adapter that lumped its own faults into these would be making a
+          claim the contract cannot back
+          (<code>decision:design/arrival-slice2-contract-text</code>, ruling 2).
         </p>
       </section>
 
@@ -345,6 +360,23 @@ Commit = {
           Open-level checks are operational fast paths, not substitutes for full audit. A
           backend MUST describe exactly which level each API invokes.
         </p>
+
+        <div class="doc-callout is-security">
+          <span class="doc-callout-label">Verification never repairs</span>
+          <p>
+            A <code>verify</code> at any level MUST NOT mutate the ledger, its projections, or
+            head metadata — no catch-up, no truncation, no rebuild of existing projection state,
+            no head re-stamp. A backend whose ordinary open path performs recovery MUST offer
+            verification a route that does not, because an operation that repairs on the way to
+            reading has destroyed the evidence it was asked to judge and can only report an
+            agreement it just manufactured. Materializing a projection that does not yet exist is
+            not repair: it destroys no prior state and can hide no divergence. Repair belongs to
+            open-time recovery and to explicit rebuild operations, which say so in their names.
+            This generalizes §07’s rule that projection state is never used to repair canonical
+            ledger history: neither direction of repair may travel under a verification verb
+            (<code>decision:design/arrival-slice2-contract-text</code>, ruling 1).
+          </p>
+        </div>
       </section>
 
       <section class="doc-section" id="projections">
@@ -382,6 +414,14 @@ Commit = {
           <li>Projection state is never used to “repair” canonical ledger history.</li>
           <li>Query results report the lineage and projected prefix they actually represent.</li>
         </ul>
+        <p>
+          A verified <code>projected_through</code> head is a claim the query surface cannot make
+          alone: a projection knows the coordinate it reached, and only custody holds the record
+          whose hash completes it. <code>head_at(watermark)</code> in §03 is that resolution — the
+          ledger-side read a projection calls to turn its watermark into a verified head, so
+          meeting this obligation never requires giving a query handle a route into custody
+          (<code>decision:design/arrival-slice2-contract-text</code>, ruling 3).
+        </p>
 
         <div class="doc-callout">
           <span class="doc-callout-label">DuckDB + Quack shape</span>
@@ -413,8 +453,25 @@ Commit = {
           Import targets a new empty replica or staged authority by default. Importing into a
           non-empty target requires exact prefix agreement through the target head. The importer
           then appends only the verified remainder. “Merge” that re-coordinates content is an
-          admission operation into another lineage, not replication.
+          admission operation into another lineage, not replication. Import is a procedure over
+          the operations §03 names, not an operation of its own: the table gives it no row, and
+          one backend’s import stays a convention until a second backend shows which of it is
+          shared (<code>decision:design/arrival-slice2-contract-text</code>, ruling 4).
         </p>
+
+        <div class="doc-callout is-open">
+          <span class="doc-callout-label">Contract debt — resumable import</span>
+          <p>
+            Resumable import is required for conforming limited backends; the reference file
+            backend does not yet implement it. A backend whose atomic limit is below the verified
+            remainder cannot land that remainder in one step, so a single-shot importer refuses
+            forever instead of progressing — §04 already says such a backend imports by verified
+            single-record steps, and §12 exercises import among the configured limits. The
+            importer that advances in bounded, resumable steps is therefore contract-implied, and
+            it is a design rather than a fix: build it when a limited backend exists
+            (<code>decision:design/arrival-slice2-contract-text</code>, ruling 5).
+          </p>
+        </div>
 
         <h3>Canonical export</h3>
         <p>

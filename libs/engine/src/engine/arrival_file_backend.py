@@ -673,10 +673,10 @@ class FileLedger:
         **Verification reports; it never repairs.** Nothing here takes the
         append lock, and the lock is the only thing that licenses truncating
         a torn tail — so no path through this method can rewrite the log it
-        was asked to judge. (Whether that is a contract MUST is the F2
-        addendum Kyle rules on at the slice-2 gate; this adapter holds it
-        either way, because the alternative is reporting an agreement it just
-        manufactured.)
+        was asked to judge. (§06 states that as a contract MUST as of
+        ``decision:design/arrival-slice2-contract-text`` ruling 1; this
+        adapter held it before the ruling, because the alternative is
+        reporting an agreement it just manufactured.)
 
         ``Incremental`` is NOT offered, and :meth:`capabilities` says so. A
         verified suffix walk has to start somewhere, and this backend starts

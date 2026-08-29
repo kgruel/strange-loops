@@ -124,9 +124,22 @@ discovering them in a vector:
 - `finding:s3wp1-epoch-scope-is-reset-inclusive` @ `01M17T5E7QNH221ZH9T05TJ5BH` —
   choice 1. **WP2 action:** vectors built from §B.3's literal wording would pin
   `first-contact` where the design wants `unchanged`.
-- `finding:s3wp1-mid-file-journal-damage-unstated` @ `01M17T5EGH8K3ZJCWK3MFMV3XB` —
-  choice 6. **Arbiter action:** confirm the conservative arm; the design left mid-file
-  damage unstated.
+- `finding:s3wp1-mid-file-journal-damage-unstated` @ `01M17TJQGWVVH3HZCKC9N1WQ8N`
+  (sharpened; first entry `01M17T5EGH8K3ZJCWK3MFMV3XB`) — choice 6. **Arbiter action:**
+  rule the policy. The sharpened entry carries the fact that changes the question: the
+  mid-file case is reachable from an ordinary crash, not only from tampering, so the
+  choice is whether a crash plus one commit escalates to a permanent incident. Three
+  options are laid out there; the narrowest tolerates only a line that is a *prefix* of
+  a well-formed entry.
+
+One further finding records work that needed no ruling:
+
+- `finding:s3wp1-journal-write-path-faults` @ `01M17TJQRND8G62YFXH7G5RWFG` — choices 17
+  and 18, self-caught and fixed in build at `444f6b3b`. Its general form is worth
+  carrying into WP3: **a read rule that closes a hazard can be reopened by the write
+  path**, because the reader only ever judges bytes that survived the write. Gate item 5
+  byte-compares an unchanged open; a concurrent-writer scenario deserves the same
+  treatment.
 
 Completion fact: `observation:implementation/arrival-slice3-wp1-head-attestation` @
 `01M17T4S61XZ8Q3ST4P8QWQBYV`.

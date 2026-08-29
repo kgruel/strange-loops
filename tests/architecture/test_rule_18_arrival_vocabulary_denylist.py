@@ -51,6 +51,15 @@ from ._helpers import REPO_ROOT, _rel
 # allowlist — the outcome the scope note below warns against. Its cut is the
 # one that retires `JsonlStore`.
 _SCAN_TARGETS = (
+    # Slice 2 / WP3 moved the admission decision into `admission.py` — the
+    # dedup-and-divergence refusal, the admission-set verification, the draft
+    # constructor, and the caller-side op that carries them. CUSTODY MOVED
+    # INTO IT, which is this rule's own stated trigger, so it joins in the
+    # same change. It is not `arrival*.py`-named, so the §F completeness
+    # ratchet below does not claim it — that asymmetry is deliberate: the
+    # ratchet's claim is about modules the naming convention can identify,
+    # and widening it to guess at custody would make it a verdict claim.
+    "libs/engine/src/engine/admission.py",
     "libs/engine/src/engine/arrival.py",
     # Wire v1 (slice 1) forked the arrival body encoding out of the legacy
     # line codec. `arrival_body` is NEW and born on the arrival surface, so

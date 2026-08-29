@@ -12,7 +12,7 @@ Contract: `docs/scratch/arrival-break/slice3-wp1-brief.md`; design
 | File | What |
 |---|---|
 | `libs/engine/src/engine/arrival_head_attestation.py` | the record, the journal, the classifier, the refusal family, the transitional binding |
-| `libs/engine/tests/test_arrival_head_attestation.py` | 77 unit tests |
+| `libs/engine/tests/test_arrival_head_attestation.py` | 80 unit tests |
 | `tests/architecture/test_rule_18_arrival_vocabulary_denylist.py` | `_SCAN_TARGETS` enrollment (same commit as the module, or the glob test fails) |
 
 ## Counts
@@ -24,7 +24,7 @@ usable baseline):
 
 | Suite | Baseline | After | Delta |
 |---|---|---|---|
-| engine | 2063 passed, 1 skipped | 2140 passed, 1 skipped | **+77**, all in `test_arrival_head_attestation.py` |
+| engine | 2063 passed, 1 skipped | 2143 passed, 1 skipped | **+80**, all in `test_arrival_head_attestation.py` |
 | architecture | 99 passed | 99 passed | **0** — Rule 18 is not parametrized per target, so enrolling a module adds no case |
 
 Every delta accounted for. `ruff check` passes on both new files. (`ruff format` would
@@ -100,7 +100,19 @@ where one refines a literal reading, the reason is stated.
     config; honoring it would let one variable move the memory back on top of the stores.
 16. **A new journal's header and first entry land in one write** (`O_CREAT|O_EXCL`), with
     plain `O_APPEND` thereafter. A create race is cheaper to survive on read than to
-    prevent on write.
+    prevent on write — but see 17: the create must still carry `O_APPEND`.
+17. **Every open carries `O_APPEND`, the exclusive create included** (fixed at
+    `444f6b3b`). Without it the creating writer's descriptor sits at offset zero, so a
+    writer that *lost* the create race can land a complete entry there first and have it
+    overwritten. The journal would silently forget a head, and a later restore to the
+    surviving ordinal would classify `unchanged` — the failure the maximum-ordinal read
+    rule exists to close, reached through the write path instead.
+18. **An append guards the line boundary** (same commit). A crash mid-append leaves a
+    fragment with no trailing newline; appending onto it glued the next entry into that
+    fragment, losing the new entry's bytes inside one unreadable line. The design
+    promises a torn tail costs at most the newest observation, so a crash plus one
+    commit must not cost the next one. `os.write`'s return is checked too — a short
+    write is a torn line this process inflicts on itself.
 
 ## Deviations
 
@@ -129,6 +141,10 @@ Completion fact: `observation:implementation/arrival-slice3-wp1-head-attestation
   `JournalRead.skipped` for surfacing tolerated losses. `append_entry` returns the
   journal path, and raises `OSError` outward — journal write failure is the caller's to
   surface, never swallowed (§D.4).
+- **`bindings.jsonl` matches `location` as an exact string.** The seam must pass one
+  canonical form — the descriptor's resolved location — or a symlinked or
+  relative path manufactures a first contact through the hole the binding exists to
+  close. WP3's to handle; named here so it is not discovered at the gate.
 - Nothing in this module reads the clock. `observed_at` is a caller-supplied argument
   everywhere, which is what keeps staleness reporting (WP3's) testable without freezing
   time here.
@@ -154,8 +170,14 @@ Each mutation applied to the working tree, the suite run, the mutation reverted,
 | (a) | classifier: the rollback arm returns `Outcome.UNCHANGED` | **2 failed, 75 passed** — `test_lower_ordinal_is_rollback` (`assert <Outcome.UNCHANGED: 'unchanged'> is <Outcome.ROLLBACK: 'rollback'>`) and `test_out_of_order_journal_writes_still_catch_a_restore` |
 | (b) | trust-epoch scoping: `_epoch_of` returns all entries (the epoch filter dropped) | **6 failed, 71 passed** — `test_after_a_trust_reset_the_known_head_is_the_reset_head` (K reads 100, the abandoned head), `test_after_a_trust_reset_the_restored_store_opens_unchanged` (the deadlock: `rollback` forever), `test_the_epoch_includes_the_reset_entry_itself`, `test_only_the_latest_reset_opens_the_current_epoch`, `test_equivocation_is_scoped_to_the_current_epoch`, `test_the_audit_check_does_not_fail_on_pre_reset_entries` |
 | (c) | journal read rule: `_known_of` returns `epoch[-1]` instead of the maximum-ordinal entry | **2 failed, 75 passed** — `test_the_known_head_is_the_maximum_ordinal_not_the_last_line` and `test_out_of_order_journal_writes_still_catch_a_restore` (a genuine restore to 5 classifies `unchanged`) |
+| (d) | write path: `O_APPEND` dropped from the exclusive create (choice 17 reverted) | **1 failed, 79 passed** — `test_a_create_race_does_not_overwrite_the_other_writers_entry` |
+| (e) | write path: `_torn_tail_guard` always returns `""` (choice 18 reverted) | **1 failed, 79 passed** — `test_a_torn_tail_does_not_glue_itself_to_the_next_entry` |
+
+Demos (a)-(c) were measured against the 77-test suite before the write-path fix; (d) and
+(e) against the 80-test suite after it. The three classifier and read-rule mutations are
+unaffected by that fix — it touches neither `compare` nor `_epoch_of`/`_known_of`.
 
 Each mutation is caught by the test written for it, naming the outcome; (a) and (c) are
 each also caught by a second test stating the operator-visible consequence, and (b) is
 caught across all three surfaces the epoch scope governs (K, equivocation, the audit).
-After each restore `git diff` was verified empty, and the suite is back to 77 passed.
+After each restore `git diff` was verified empty, and the suite is back to 80 passed.

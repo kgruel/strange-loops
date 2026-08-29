@@ -1,0 +1,2241 @@
+Reading prompt from stdin...
+OpenAI Codex v0.150.1
+--------
+workdir: /Users/kaygee/Code/loops-s2wp2
+model: gpt-5.6-sol
+provider: openai
+approval: never
+sandbox: workspace-write [workdir, /tmp, $TMPDIR]
+reasoning effort: low
+reasoning summaries: none
+session id: 01a04efe-7001-7740-ab5d-addbfc878642
+--------
+user
+# Sol review brief — arrival-break slice 2 / WP2 (replicate/export/import), round 1 (per-WP, LOW)
+
+You are the cross-family reviewer for slice-2 WP2. Review the WP diff adversarially for
+correctness against the design contract. You review and report — no fixes, no commits.
+Run tests and scripts to verify claims empirically (preferred over reading alone).
+
+## 1. Anchor
+
+- Repo checkout: this working directory (a git worktree of /Users/kaygee/Code/loops).
+- Branch: `slice2/wp2-replicate`, tip `165d86ea` (6 commits over wave base `0d38c969`).
+- Diff spec: `git diff 0d38c969...165d86ea`.
+- Suites: engine per-package (`.venv/bin/python -m pytest libs/engine/tests -q`).
+
+## 2. Design contract (what the code must honor)
+
+From `design:arrival-break-slice2-backend-contract` (ratified,
+`01M177MHWHD5HM574VSTDE17X8`) §A.2 + §D.2:
+
+1. **`replicate` is COMPOSITION, not greenfield** (SD-3): carried-in records pass the
+   same validates-never-assigns posture as `append_record` — supplied `rh` checked,
+   never trusted; full-head CAS pin; typed same-height-fork refusal (`ForkedHeight` →
+   `SameHeightFork`, deliberately NOT an `AppendRejected` so merge's retry family
+   cannot spin on a fork). No second appender: the batched machinery is the shared
+   `_append_many_under_lock` (a loop over `append_record` would deadlock — flock is
+   per open-file-description).
+2. F1's site-B CAS moved INTO that shared writer so replication inherits WP1's
+   full-head pin; site A untouched; both sites remain independently mutation-testable.
+3. `export`: dense prefix, byte-exact — `b"".join(records)` equals the log's own
+   prefix bytes; manifest carries no clock/host.
+4. Minimal portable import, §08 default ONLY: new empty replica (via `adopt_genesis`,
+   which SHARES mint's O_EXCL ceremony — no second genesis path) or exact prefix
+   agreement through the target's head, else refuse. Import does its OWN §08 agreement
+   check over `scan` (replicate's fork check only sees the overlap it is handed — an
+   empty remainder would bless a fork in silence).
+5. Three replicate vector families in `spec/conformance/vectors/replicate/`:
+   exact-suffix accept; same-height-fork refuse; catch-up preserves hashes
+   byte-for-byte. The signature is the discriminator that makes assign-vs-validate
+   observable on an exact suffix — stated in SCHEMA.md as a family property.
+6. `capabilities()` honest: REPLICA joined AUTHORITY, `export_codecs=("arrival-jsonl-v1",)`,
+   ARCHIVE absent. `import_prefix` off the Protocol (the ratified §03 table has nine
+   rows) but in `LEDGER_MUTATIONS`.
+
+**NON-NEGOTIABLES**: no second appender or genesis path; wire codec and
+`content_commitment` semantics untouched; the 14 arrival test files unmodified;
+store package untouched (store 180).
+
+## 3. Unverified fixes — verify empirically, top priority
+
+| commit | claim | your job |
+|---|---|---|
+| 165d86ea | Gate F-1 (test asserted on `__protocol_attrs__`, a 3.12+ typing internal, vs requires-python >=3.11): respelled via `_declared_surface()` — plain vars()+annotations introspection; RATIFIED_LEDGER_OPS a written-out literal; adapter subset vs Protocol exact-equality split; both mutation directions demonstrated (tenth op added → left-set failure; `export` dropped → right-set failure with isinstance still TRUE — the property the runtime check cannot buy). Test-only commit. | Re-run both mutation directions yourself. Confirm no typing internals remain (grep `__protocol_attrs__`). Confirm the commit touches only the test + report. Confirm the query-separation test still derives from `LEDGER_MUTATIONS`. |
+
+## 4. Prior review state (gate, already run — do not re-litigate; flag if unsound)
+
+Gate PASS at 1d0fc887: all three vector-family mutations reproduced with the negative
+controls green (the unsigned catch-up vector staying green under the re-coordination
+mutation is the signature-discriminator proof); F1 independence re-derived at both
+current homes; import's own agreement gate proven load-bearing (empty-remainder fork
+accepted in silence with it no-op'd); `adopt_genesis` single-ceremony verified;
+flock deadlock rationale proven by measurement (3s block); export byte-identity direct.
+Dispositioned: F-2 (import cannot progress while max_atomic_records < remainder —
+resumable import is contract-implied) → slice-gate contract-text package, with WP2-D1's
+op-row question. G-noted: `merge.py:308` retries on AppendRejected only, so ForkedHeight
+cannot spin (pre-emptive taxonomy — merge calls append_marked_many today).
+
+## 5. Seeded review targets
+
+- Torn-tail interaction: replicate/import onto a log whose tail is torn (partial last
+  line) — refusal or misbehavior? WP1's verify refuses; what do the new write paths do?
+- `import_prefix` into a target that is BEHIND the import's manifest but whose overlap
+  agrees — the catch-up path — is the agreement check over the full overlap or only
+  the head?
+- Concurrency: replicate racing an ordinary append — the CAS pin should refuse cleanly;
+  construct it.
+- The family-completeness check in test_conformance_replicate.py: does it actually fail
+  if a vector file is dropped from the directory?
+
+## 6. Verdict format
+
+Per §2 item: PASS/FAIL + evidence. §3: PASS/FAIL. New findings: `S2WP2-L-<n>`,
+file:line, severity (BLOCKING/NON-BLOCKING), concrete failure scenario, evidence.
+Then one line: **CONVERGED** or **NOT CONVERGED** (with the blocking list).
+
+codex
+I’ll inspect the exact anchored diff and repository guidance first, then run the specified suite and targeted empirical probes. I’ll keep this review read-only and won’t modify or commit anything.
+exec
+/bin/zsh -lc "pwd && rg --files -g 'AGENTS.md' -g '"'!**/.venv/**'"' .. | head -20 && git status --short && git rev-parse HEAD && git diff --stat 0d38c969...165d86ea && git show --stat --oneline 165d86ea" in /Users/kaygee/Code/loops-s2wp2
+ succeeded in 43ms:
+165d86eaf750cc4980b1c5ba403338d166deae76
+ docs/scratch/arrival-break/slice2-wp2-report.md    | 431 ++++++++++++++
+ libs/engine/src/engine/arrival.py                  | 306 ++++++++--
+ libs/engine/src/engine/arrival_contract.py         |  10 +-
+ libs/engine/src/engine/arrival_file_backend.py     | 373 +++++++++++-
+ libs/engine/tests/test_arrival_contract.py         |  72 ++-
+ libs/engine/tests/test_arrival_transfer.py         | 646 +++++++++++++++++++++
+ libs/engine/tests/test_conformance_replicate.py    | 113 ++++
+ spec/conformance/SCHEMA.md                         |  54 ++
+ spec/conformance/generate_replicate.py             | 349 +++++++++++
+ ...icate-catch-up-from-a-genesis-only-replica.json |  74 +++
+ ...atch-up-preserves-authored-time-and-origin.json |  60 ++
+ ...-up-preserves-signed-records-byte-for-byte.json |  78 +++
+ .../replicate-exact-suffix-batch-lands-whole.json  |  75 +++
+ ...-exact-suffix-refuses-a-gap-above-the-head.json |  46 ++
+ ...exact-suffix-refuses-a-stale-full-head-pin.json |  46 ++
+ ...licate-exact-suffix-single-record-accepted.json |  47 ++
+ ...licate-same-height-agreement-is-not-a-fork.json |  48 ++
+ ...icate-same-height-fork-at-the-head-refuses.json |  48 ++
+ ...te-same-height-fork-below-the-head-refuses.json |  64 ++
+ 19 files changed, 2871 insertions(+), 69 deletions(-)
+165d86ea fix(engine): pin the Protocol surface without a typing private (gate F-1)
+ docs/scratch/arrival-break/slice2-wp2-report.md | 82 ++++++++++++++++++++++++-
+ libs/engine/tests/test_arrival_contract.py      | 51 +++++++++++++--
+ 2 files changed, 125 insertions(+), 8 deletions(-)
+
+exec
+/bin/zsh -lc '.venv/bin/python -m pytest libs/engine/tests -q' in /Users/kaygee/Code/loops-s2wp2
+exec
+/bin/zsh -lc 'rg -n "__protocol_attrs__|RATIFIED_LEDGER_OPS|_declared_surface|LEDGER_MUTATIONS|def replicate|def import_prefix|def export|_append_many_under_lock|adopt_genesis|class SameHeightFork|class ForkedHeight|capabilities" libs/engine spec/conformance && git diff --name-only 165d86ea''^ 165d86ea && git diff 165d86ea''^ 165d86ea -- libs/engine/tests/test_arrival_contract.py' in /Users/kaygee/Code/loops-s2wp2
+ succeeded in 0ms:
+libs/engine/src/engine/arrival_contract.py:58:    "LEDGER_MUTATIONS",
+libs/engine/src/engine/arrival_contract.py:333:LEDGER_MUTATIONS = frozenset({"mint", "append", "replicate", "import_prefix"})
+libs/engine/src/engine/arrival_contract.py:359:    def replicate(
+libs/engine/src/engine/arrival_contract.py:384:    def export(self, *, through: Head, codec: str) -> ExportedPrefix:
+libs/engine/src/engine/arrival_contract.py:388:    def capabilities(self) -> Capabilities:
+libs/engine/src/engine/arrival_contract.py:439:class SameHeightFork(ContractRefusal):
+libs/engine/src/engine/arrival.py:247:class ForkedHeight(ArrivalError):
+libs/engine/src/engine/arrival.py:903:        :meth:`_publish_genesis`, shared with :meth:`adopt_genesis`.
+libs/engine/src/engine/arrival.py:934:    def adopt_genesis(cls, path: Path | str, record: dict) -> ArrivalLog:
+libs/engine/src/engine/arrival.py:971:        The one home for the ceremony :meth:`mint` and :meth:`adopt_genesis`
+libs/engine/src/engine/arrival.py:1559:        return self._append_many_under_lock(
+libs/engine/src/engine/arrival.py:1609:        return self._append_many_under_lock(
+libs/engine/src/engine/arrival.py:1678:    def _append_many_under_lock(
+libs/engine/src/engine/arrival_file_backend.py:38:``LEDGER_MUTATIONS``, because the custody/reads separation must cover every op
+libs/engine/src/engine/arrival_file_backend.py:337:    def replicate(
+libs/engine/src/engine/arrival_file_backend.py:410:    def export(self, *, through: Head, codec: str) -> ExportedPrefix:
+libs/engine/src/engine/arrival_file_backend.py:435:        :meth:`capabilities`, not a contract refusal — the ratified set has no
+libs/engine/src/engine/arrival_file_backend.py:442:                f"{codec!r} was asked for — capabilities().export_codecs is "
+libs/engine/src/engine/arrival_file_backend.py:465:    def import_prefix(self, prefix: ExportedPrefix) -> Head:
+libs/engine/src/engine/arrival_file_backend.py:508:            log = ArrivalLog.adopt_genesis(self._log.path, imported[0])
+libs/engine/src/engine/arrival_file_backend.py:653:        ``Incremental`` is NOT offered, and :meth:`capabilities` says so. A
+libs/engine/src/engine/arrival_file_backend.py:675:                "offset, and a Head does not carry one. capabilities() "
+libs/engine/src/engine/arrival_file_backend.py:704:    def capabilities(self) -> Capabilities:
+libs/engine/tests/test_arrival_contract.py:25:    LEDGER_MUTATIONS,
+libs/engine/tests/test_arrival_contract.py:176:    The op names come from LEDGER_MUTATIONS, beside the Protocol that
+libs/engine/tests/test_arrival_contract.py:183:        assert not (LEDGER_MUTATIONS & set(dir(query))), (
+libs/engine/tests/test_arrival_contract.py:191:            for op in LEDGER_MUTATIONS:
+libs/engine/tests/test_arrival_contract.py:252:RATIFIED_LEDGER_OPS = frozenset({
+libs/engine/tests/test_arrival_contract.py:254:    "export", "capabilities",
+libs/engine/tests/test_arrival_contract.py:258:def _declared_surface(protocol: type) -> frozenset[str]:
+libs/engine/tests/test_arrival_contract.py:262:    ``typing``'s ``__protocol_attrs__``, which is a private implementation
+libs/engine/tests/test_arrival_contract.py:296:    assert RATIFIED_LEDGER_OPS <= offered
+libs/engine/tests/test_arrival_contract.py:305:    assert _declared_surface(ArrivalLedger) == RATIFIED_LEDGER_OPS
+libs/engine/tests/test_arrival_contract.py:308:    # row. It is in LEDGER_MUTATIONS regardless, because the custody/reads
+libs/engine/tests/test_arrival_contract.py:311:    assert "import_prefix" not in _declared_surface(ArrivalLedger)
+libs/engine/tests/test_arrival_contract.py:312:    assert "import_prefix" in LEDGER_MUTATIONS
+libs/engine/tests/test_arrival_contract.py:389:    Unset the limit is unbounded and ``capabilities()`` says so; set, it is a
+libs/engine/tests/test_arrival_contract.py:507:        ledger.capabilities().verification_levels
+libs/engine/tests/test_arrival_contract.py:511:def test_capabilities_claims_nothing_the_adapter_does_not_have(ledger):
+libs/engine/tests/test_arrival_contract.py:518:    caps = ledger.capabilities()
+libs/engine/tests/test_arrival_contract.py:534:            f"capabilities and the adapter disagree about {op!r}"
+libs/engine/tests/test_arrival_transfer.py:156:    """A caller bug against ``capabilities()``, not a contract refusal.
+libs/engine/tests/test_arrival_transfer.py:163:    assert authority.capabilities().export_codecs == (EXPORT_CODEC,)
+libs/engine/tests/test_arrival_transfer.py:428:# --- adopt_genesis ----------------------------------------------------------
+libs/engine/tests/test_arrival_transfer.py:431:def test_adopt_genesis_refuses_a_record_that_is_not_one(tmp_path):
+libs/engine/tests/test_arrival_transfer.py:435:        ArrivalLog.adopt_genesis(tmp_path / "new.arrival", source.read(1))
+libs/engine/tests/test_arrival_transfer.py:439:def test_adopt_genesis_refuses_to_publish_over_an_existing_log(tmp_path):
+libs/engine/tests/test_arrival_transfer.py:445:        ArrivalLog.adopt_genesis(existing.path, other.genesis())
+libs/engine/tests/test_arrival_transfer.py:449:def test_adopt_genesis_checks_the_supplied_digest_rather_than_trusting_it(tmp_path):
+libs/engine/tests/test_arrival_transfer.py:454:        ArrivalLog.adopt_genesis(tmp_path / "new.arrival", tampered)
+libs/engine/tests/test_arrival_transfer.py:569:    assert limited.capabilities().max_atomic_records == 2
+libs/engine/tests/test_arrival_transfer.py:642:    replica_log = ArrivalLog.adopt_genesis(
+docs/scratch/arrival-break/slice2-wp2-report.md
+libs/engine/tests/test_arrival_contract.py
+diff --git a/libs/engine/tests/test_arrival_contract.py b/libs/engine/tests/test_arrival_contract.py
+index 05dd3b4c..2e899cc0 100644
+--- a/libs/engine/tests/test_arrival_contract.py
++++ b/libs/engine/tests/test_arrival_contract.py
+@@ -245,6 +245,45 @@ def _draft(i: int) -> RecordDraft:
+     )
+ 
+ 
++# The nine op rows of §A.2's table, written out rather than derived. Deriving
++# them from `ArrivalLedger` is what the assertion below is FOR, so a derived
++# expectation would agree with the Protocol no matter what the Protocol said.
++# This literal is the contract of record, standing beside the code.
++RATIFIED_LEDGER_OPS = frozenset({
++    "mint", "head", "append", "replicate", "read", "scan", "verify",
++    "export", "capabilities",
++})
++
++
++def _declared_surface(protocol: type) -> frozenset[str]:
++    """The public names a Protocol class declares, from its own namespace.
++
++    Plain class introspection — ``vars`` plus ``__annotations__`` — and NOT
++    ``typing``'s ``__protocol_attrs__``, which is a private implementation
++    detail that does not exist before Python 3.12. Both pyprojects declare
++    ``requires-python >= 3.11``, so a test reaching for that attribute passes
++    on the interpreter it was written on and errors on one the package
++    supports.
++
++    Annotations are included as well as callables so that an ATTRIBUTE added
++    to the Protocol is caught the same way a method would be: the claim being
++    pinned is "these nine rows and nothing else", and a row does not stop
++    counting by being spelled as data.
++    """
++    namespace = vars(protocol)
++    methods = {
++        name
++        for name, value in namespace.items()
++        if not name.startswith("_") and callable(value)
++    }
++    attributes = {
++        name
++        for name in namespace.get("__annotations__", {})
++        if not name.startswith("_")
++    }
++    return frozenset(methods | attributes)
++
++
+ def test_the_ledger_satisfies_the_ledger_surface_it_claims(ledger):
+     """A location claim, not a conformance verdict.
+ 
+@@ -254,20 +293,22 @@ def test_the_ledger_satisfies_the_ledger_surface_it_claims(ledger):
+     silently shrinking is a real failure mode, and this catches it.
+     """
+     offered = {op for op in dir(ledger) if not op.startswith("_")}
+-    assert {
+-        "mint", "head", "append", "replicate", "read", "scan", "verify",
+-        "export", "capabilities",
+-    } <= offered
++    assert RATIFIED_LEDGER_OPS <= offered
+     # WP2 completed the surface, so the adapter now satisfies the Protocol.
+     # This is the assertion WP1 wrote inverted, and flipping it is what its
+     # comment asked WP2 to do.
+     assert isinstance(ledger, ArrivalLedger)
++    # EXACT equality, both directions: an op declared beyond the ratified table
++    # fails this, and one dropped from it fails this. `<=` above is about the
++    # ADAPTER, which may legitimately offer more; this is about the PROTOCOL,
++    # which may not.
++    assert _declared_surface(ArrivalLedger) == RATIFIED_LEDGER_OPS
+     # `import_prefix` is offered and is NOT declared on the Protocol: §08
+     # describes portable import in prose and the ratified op table gives it no
+     # row. It is in LEDGER_MUTATIONS regardless, because the custody/reads
+     # ratchet covers what mutates, not what the Protocol happens to name.
+     assert "import_prefix" in offered
+-    assert "import_prefix" not in ArrivalLedger.__protocol_attrs__
++    assert "import_prefix" not in _declared_surface(ArrivalLedger)
+     assert "import_prefix" in LEDGER_MUTATIONS
+ 
+ 
+
+codex
+The full engine suite is running. The fix commit is correctly limited to the contract test and review report, and repository-wide search finds `__protocol_attrs__` only in explanatory prose—not as an attribute access. Next I’m exercising both claimed mutation directions in isolated temporary copies, then the torn-tail, catch-up-overlap, concurrency, and vector-deletion cases.
+exec
+/bin/zsh -lc "sed -n '320,550p' libs/engine/src/engine/arrival_file_backend.py && sed -n '1520,1745p' libs/engine/src/engine/arrival.py && sed -n '1,180p' libs/engine/tests/test_conformance_replicate.py && sed -n '180,280p' libs/engine/tests/test_conformance_replicate.py" in /Users/kaygee/Code/loops-s2wp2
+ succeeded in 0ms:
+            # is also raised for placement faults in a carried-in candidate,
+            # and mapping those to HeadMismatch would assert something about
+            # the head that the fault does not say.
+            raise HeadMismatch(str(exc)) from exc
+
+        first, last = records[0], records[-1]
+        return Commit(
+            before=Head(
+                lineage=first["lin"],
+                ordinal=first["ord"] - 1,
+                record_hash=first["prev"],
+            ),
+            records=tuple(records),
+            after=_head_of(last),
+            durability=_DURABILITY,
+        )
+
+    def replicate(
+        self, expected: Head | None, records: Sequence[Mapping[str, Any]]
+    ) -> Commit:
+        """Insert an exact suffix of pre-coordinated records (§08).
+
+        Composition, not a second appender: the whole transition is
+        :meth:`engine.arrival.ArrivalLog.append_records`, which is the batched
+        form of the primitive that has had the right posture all along —
+        append VALIDATES, it never assigns. Nothing here rehashes, re-signs,
+        or renumbers, so the records that land are byte-for-byte the records
+        that were offered, which is the one property replication exists to
+        keep. The same lock, the same full-head compare-and-swap and the same
+        single fsync as :meth:`append`, because they are literally the same
+        code path under a different build.
+
+        Two refusals, and they are different claims:
+
+        * :class:`~engine.arrival_contract.SameHeightFork` — the log already
+          holds a DIFFERENT record at a height this batch would fill. The two
+          histories disagree, retrying cannot make them agree, and choosing
+          between them would be admission into another lineage.
+        * :class:`~engine.arrival_contract.HeadMismatch` — the head is not
+          where this batch assumed, either because ``expected`` no longer
+          describes it or because the batch is not the suffix that follows it.
+          Re-read and recompute which records are missing.
+
+        A batch whose ordinals disagree with each other, or whose supplied
+        ``rh`` does not recompute, refuses as this backend's own
+        ``AppendRejected``/``ArrivalGrammarError``: the ratified refusal set
+        has no member for "this candidate is malformed", and picking one would
+        be a verdict the evidence does not support
+        (``finding:slice2-wp1-refusal-set-gaps``).
+        """
+        if not records:
+            raise ValueError(
+                "replicate was handed no records — an empty replication is a "
+                "caller bug, not a no-op to absorb"
+            )
+        if (
+            self._max_atomic_records is not None
+            and len(records) > self._max_atomic_records
+        ):
+            raise AtomicLimitExceeded(
+                f"{len(records)} records exceeds this backend's configured "
+                f"atomic limit of {self._max_atomic_records} — refused before "
+                "any mutation, because a partially applied suffix is the one "
+                "artifact a replica must never hold"
+            )
+        try:
+            landed, _mark = self._log.append_records(
+                [dict(record) for record in records], following=expected
+            )
+        except ForkedHeight as exc:
+            raise SameHeightFork(str(exc)) from exc
+        except StaleHead as exc:
+            # 1:1 from the CAS subclass only, for the reason `append` gives:
+            # the parent AppendRejected also covers placement faults, and
+            # mapping those to HeadMismatch would assert something about the
+            # head that the fault does not say.
+            raise HeadMismatch(str(exc)) from exc
+
+        first, last = landed[0], landed[-1]
+        return Commit(
+            before=Head(
+                lineage=first["lin"],
+                ordinal=first["ord"] - 1,
+                record_hash=first["prev"],
+            ),
+            records=tuple(landed),
+            after=_head_of(last),
+            durability=_DURABILITY,
+        )
+
+    def export(self, *, through: Head, codec: str) -> ExportedPrefix:
+        """Re-encode the complete prefix behind a captured head (§08).
+
+        Net-new over :meth:`scan` and
+        :func:`engine.arrival.encode_record`, and it is deliberately thin:
+        ``scan`` already refuses a head this log does not hold and already
+        stops at the captured ordinal, so the export inherits both without
+        restating either.
+
+        **Streaming.** ``records`` is a generator, so nothing is materialised
+        and nothing is read until it is drained — the same caveat
+        :meth:`scan` carries, and the reason an export of a large lineage is
+        runnable at all. Each element is one record's line INCLUDING its
+        newline, so ``b"".join(...)`` reproduces the log's own prefix bytes
+        exactly. The manifest says so rather than leaving it to be discovered.
+
+        **The manifest carries no clock and no host.** Everything in it is
+        derived from the captured head and the grammar, which is what makes
+        export → import → export byte-identical rather than
+        byte-identical-except-for-a-timestamp. ``count`` is
+        ``through.ordinal + 1`` by density and needs no drain to compute — and
+        the drain proves it, because a walk that found a gap would have
+        refused before reaching the head.
+
+        A codec this backend does not have is a caller bug against
+        :meth:`capabilities`, not a contract refusal — the ratified set has no
+        member for it, and inventing one would be the over-claim §12 exists to
+        catch.
+        """
+        if codec != EXPORT_CODEC:
+            raise ValueError(
+                f"this backend exports {EXPORT_CODEC!r} and nothing else, but "
+                f"{codec!r} was asked for — capabilities().export_codecs is "
+                "the list to check against"
+            )
+
+        def lines() -> Iterator[bytes]:
+            for record in self.scan(through=through):
+                yield (encode_record(record) + "\n").encode("utf-8")
+
+        return ExportedPrefix(
+            head=through,
+            codec=codec,
+            records=lines(),
+            manifest={
+                "protocol": GRAMMAR_VERSION,
+                "codec": codec,
+                "framing": _FRAMING,
+                "lineage": through.lineage,
+                "through_ordinal": through.ordinal,
+                "through_record_hash": through.record_hash,
+                "count": through.ordinal + 1,
+            },
+        )
+
+    def import_prefix(self, prefix: ExportedPrefix) -> Head:
+        """The §08-default portable import, and nothing beyond it.
+
+        Two targets and no third: a log that does not exist yet, or one whose
+        every record agrees exactly with the import through its own head. Any
+        other target REFUSES. There is no merge arm here — content that has to
+        be re-coordinated to fit is being admitted into another lineage, and
+        admission is a different operation.
+
+        Returns the target's :class:`~engine.arrival_contract.Head` after the
+        import, and not a ``Commit``: an import into an empty replica has no
+        ``before`` to name, and manufacturing one would be the first lie a
+        replica told about where it came from.
+
+        **The manifest is checked, never trusted.** It travels with the bytes,
+        so it is exactly as trustworthy as they are; every field is
+        re-derived from the decoded records and compared. A manifest that
+        disagrees with its own records is a corrupt export, and reporting the
+        disagreement is the whole reason to carry one.
+
+        **Replica is not authority** (§08's callout). This method copies
+        records; it grants nothing. A store that then accepts independent
+        writes has forked, byte-identical start or not, and no flag here
+        prevents that — custody does.
+
+        The verified remainder is materialised, because it is handed to one
+        atomic :meth:`replicate`. That is the honest limit of a MINIMAL
+        importer: an import too large to hold is a resumable-transfer design,
+        and this is not one.
+        """
+        if prefix.codec != EXPORT_CODEC:
+            raise ValueError(
+                f"this backend imports {EXPORT_CODEC!r} and nothing else, but "
+                f"this export claims codec {prefix.codec!r}"
+            )
+        imported = _decoded(prefix)
+        _refuse_disagreeing_manifest(prefix, imported)
+
+        if not self._log.exists():
+            # A new empty replica. Genesis cannot be appended onto a head that
+            # is not there, and it must not be re-minted either: a replica
+            # whose ordinal 0 differed by one byte would be a different
+            # lineage wearing the same id.
+            log = ArrivalLog.adopt_genesis(self._log.path, imported[0])
+            self._log = log
+            head = _head_of(log.genesis())
+            if len(imported) == 1:
+                return head
+            return self.replicate(head, imported[1:]).after
+
+        head = self.head()
+        self._refuse_disagreeing_prefix(imported, head)
+        remainder = [
+            record for record in imported if record["ord"] > head.ordinal
+        ]
+        if not remainder:
+            # The import is a prefix of what this target already holds. Not a
+            # failure and not a no-op to hide: nothing was missing.
+            return head
+        return self.replicate(head, remainder).after
+
+    def _refuse_disagreeing_prefix(
+        self, imported: Sequence[Mapping[str, Any]], head: Head
+    ) -> None:
+        """§08's exact-prefix-agreement gate for a non-empty target.
+
+        Over :meth:`scan`, which is the read op that already establishes the
+        target's prefix is intact — so this adds one comparison and no second
+        traversal of its own. Position by position against the import, so the
+        refusal names the ordinal the two disagree at rather than reporting
+        that they differ somewhere.
+
+        Distinct from the same-height fork :meth:`replicate` refuses: that one
+        fires on an overlap it was HANDED, this one on the overlap it is about
+        to SKIP. Both say the histories disagree at a height; skipping an
+        overlap without checking it is how a replica silently acquires a
+        prefix it never verified.
+        """
+        for mine, theirs in zip(self.scan(through=head), imported, strict=False):
+            if mine["rh"] != theirs["rh"]:
+                raise SameHeightFork(
+                    f"ordinal {mine['ord']} of {self._log.path} holds rh "
+                    f"{mine['rh']}, but the import holds rh {theirs['rh']} at "
+                    f"ordinal {theirs['ord']} — this import is not a continuation "
+                    "of this log's history. Importing into a non-empty target "
+                    "requires exact prefix agreement through its head"
+        twice, and every verb in this design refuses such a log. That is the
+        worst artifact this cut could mint, so the whole append phase holds
+        the lock.
+
+        An outer lock plus per-record :meth:`append_marked` DEADLOCKS instead
+        of helping: ``_append_under_lock`` opens a second descriptor on the
+        same lock file, and ``flock`` is per open-file-description, so it
+        blocks within one process. Hence a primitive rather than a wrapper.
+
+        ``following`` is the compare-and-swap pin, checked under the lock
+        before any byte is written: it names the FULL head — lineage, ordinal
+        and record hash — the caller deduped against, so a record that landed
+        since then, or a coordinate that now holds a different record,
+        REFUSES (:class:`StaleHead`) rather than letting a stale dedup decide
+        what to append. A caller that sees the refusal re-reads and retries.
+        A bare ordinal is refused rather than accepted: see
+        :func:`_checked_pin`.
+
+        ONE trailing fsync is sound: a crash loses only an un-fsynced
+        suffix, or leaves one torn tail line that the truncate-under-lock
+        rule removes. Recovery is "re-run the merge" — dedup makes it
+        idempotent, which is the whole story to tell an operator about an
+        interrupted merge.
+        """
+        if not entries:
+            raise ArrivalError(
+                "append_marked_many was handed no entries — an empty append "
+                "is a caller bug, not a no-op to absorb"
+            )
+
+        def assign(head: dict, index: int) -> dict:
+            entry = entries[index]
+            at_ = time.time() if entry.at is None else entry.at
+            return build_record(
+                lin=head["lin"], ordinal=head["ord"] + 1, prev=head[_RH],
+                k=entry.k, body=entry.body, observer=entry.observer,
+                origin=entry.origin, at=at_, sig=None,
+            )
+
+        return self._append_many_under_lock(
+            assign, len(entries), pin=_checked_pin(following)
+        )
+
+    def append_records(
+        self, records: Sequence[dict], *, following: Head | None = None
+    ) -> tuple[list[dict], ResumeMark]:
+        """Append pre-coordinated records under ONE lock acquisition.
+
+        :meth:`append_record`'s batched form, and the primitive exact
+        replication is composed from: every record already carries its
+        lineage, ordinal, ``prev``, signature and ``rh``, and this method
+        VALIDATES all of them rather than assigning any. Nothing here rehashes
+        or re-signs, so a suffix that lands is byte-identical to the suffix
+        that was offered — which is the whole property replication has to
+        keep, and the reason it cannot be expressed as a loop over
+        :meth:`append_marked_many` (that path assigns coordinates and builds
+        every record unsigned).
+
+        Batched rather than a loop over :meth:`append_record` for the reason
+        :meth:`append_marked_many` gives: ``_append_under_lock`` opens its own
+        descriptor on the lock file, and ``flock`` is per open-file-
+        description, so an outer lock plus per-record appends DEADLOCKS within
+        one process. A partially applied suffix is also the artifact a replica
+        must never hold, so the whole batch lands under one lock and one
+        fsync or none of it does.
+
+        ``following`` is the same full-head compare-and-swap pin every append
+        takes, checked inside the fence.
+
+        Two refusals before any byte is written, and they are different
+        claims: a candidate at a height this log already holds DIFFERENTLY is
+        a fork (:class:`ForkedHeight`, and retrying cannot clear it), while a
+        batch that simply does not follow the current head is a stale view of
+        it (:class:`StaleHead`, and re-reading is exactly the fix).
+        """
+        if not records:
+            raise ArrivalError(
+                "append_records was handed no records — an empty append is a "
+                "caller bug, not a no-op to absorb"
+            )
+        # Completed before the lock: the work is pure, and a malformed batch
+        # should refuse without ever having held the fence.
+        candidates = [_completed_candidate(record) for record in records]
+
+        def carry(head: dict, index: int) -> dict:
+            if index == 0:
+                self._refuse_divergent_batch(candidates, head)
+            return candidates[index]
+
+        return self._append_many_under_lock(
+            carry, len(candidates), pin=_checked_pin(following)
+        )
+
+    def _refuse_divergent_batch(self, candidates: list[dict], head: dict) -> None:
+        """Classify a carried-in batch against the head, before any mutation.
+
+        Called under the lock, so the head it judges against is the head the
+        write would land on. It names WHERE the disagreement is and refuses;
+        it never picks a winner.
+
+        Order matters: the fork check runs first. A batch that overlaps the
+        log divergently is also, trivially, a batch that does not follow the
+        head — reporting that as a stale head would tell the caller to
+        re-read and retry, and retrying a fork spins forever. The narrower,
+        more informative claim goes first.
+        """
+        occupied = sorted(
+            {
+                candidate["ord"]
+                for candidate in candidates
+                if _is_int(candidate.get("ord")) and candidate["ord"] <= head["ord"]
+            }
+        )
+        held = self._hashes_at(occupied, head)
+        for candidate in candidates:
+            ordinal = candidate.get("ord")
+            mine = held.get(ordinal) if _is_int(ordinal) else None
+            if mine is not None and mine != candidate.get(_RH):
+                raise ForkedHeight(
+                    f"ordinal {ordinal} of {self.path} holds rh {mine}, but "
+                    f"the offered record carries rh {candidate.get(_RH)} — the "
+                    "two histories disagree at this height, so this is a fork "
+                    "and not a suffix. Replication stops rather than choosing"
+                )
+        first = candidates[0]
+        if first.get("ord") != head["ord"] + 1 or first.get("prev") != head[_RH]:
+            raise StaleHead(
+                f"this batch starts at ({first.get('lin')}, {first.get('ord')}) "
+                f"with prev {first.get('prev')}, but the log's head is "
+                f"({head['lin']}, {head['ord']}, {head[_RH]}) — records arrived "
+                "since the caller computed the suffix, or it was computed "
+                "against a different log. Re-read the head and recompute which "
+                "records are missing"
+            )
+
+    def _hashes_at(self, ordinals: Sequence[int], head: dict) -> dict[int, str]:
+        """The ``rh`` this log holds at each of ``ordinals``.
+
+        The head is answered from the record already in hand; anything below
+        it costs one walk, which only a batch that overlaps the log pays for.
+        An ordinal the log does not reach is simply absent from the answer —
+        "there is nothing there to disagree with" is not a fork.
+        """
+        wanted = set(ordinals)
+        found: dict[int, str] = {}
+        if head["ord"] in wanted:
+            found[head["ord"]] = head[_RH]
+            wanted.discard(head["ord"])
+        if not wanted:
+            return found
+        for record in self.walk():
+            if record["ord"] in wanted:
+                found[record["ord"]] = record[_RH]
+                wanted.discard(record["ord"])
+                if not wanted:
+                    break
+        return found
+
+    def _append_many_under_lock(
+        self,
+        build_each: Callable[[dict, int], dict],
+        count: int,
+        *,
+        pin: Head | None,
+    ) -> tuple[list[dict], ResumeMark]:
+        """The whole batched write sequence, indivisible.
+
+        :meth:`_append_under_lock`'s batched twin, and the ONE place a group
+        of records becomes bytes. Both batched appends are this method under a
+        different ``build_each``: :meth:`append_marked_many` assigns each
+        record's coordinate from the running head, :meth:`append_records`
+        hands back a record that already carries one. Nothing else differs,
+        so nothing else is written twice — the fence, the compare-and-swap,
+        the per-record chain checks, the single write and the single fsync are
+        stated once and inherited by both.
+
+        ``build_each(head, index)`` is called with the head the record must
+        follow — the log's real head for index 0, the previous record after
+        that — so a build that needs to judge the batch against the log can do
+        it at index 0, still inside the fence and still before a byte moves.
+
+        ONE trailing fsync is sound for the reason
+        :meth:`append_marked_many` gives: a crash loses only an un-fsynced
+        suffix, or leaves one torn tail line that the truncate-under-lock rule
+        removes.
+        """
+        with self._locked_head() as head:
+            _refuse_stale_head(head, pin)
+            records: list[dict] = []
+            encoded: list[str] = []
+            for index in range(count):
+                record = build_each(head, index)
+                # Every record is held to the same head checks a single
+                # append is, against the record before it — the chain is
+                # built here, so it is validated here. `encode_record` is the
+                # grammar gate and the supplied-`rh` check both.
+                self._check_follows(record, head)
+                encoded.append(encode_record(record) + "\n")
+                records.append(record)
+                head = record
+            with self.path.open("ab") as fh:
+                fh.write("".join(encoded).encode("utf-8"))
+                fh.flush()
+                os.fsync(fh.fileno())
+                offset = fh.tell()
+        last = records[-1]
+        return records, ResumeMark(
+            arrival_lineage=last["lin"],
+            arrival_offset=offset,
+            arrival_ordinal=last["ord"],
+        )
+
+    def append_record(self, record: dict) -> dict:
+        """Append a record that already carries its coordinate.
+
+        The primitive the grammar describes: append VALIDATES, it never
+        assigns. A candidate assembled elsewhere — carried in from another
+        store, replayed, rebuilt — passes through exactly the same head
+        checks that :meth:`append` does. ``rh`` may be
+        omitted and is then computed over the validated object; supplied, it
+        must match, so a candidate carried in with its own digest is checked
+        rather than trusted.
+        """
+
+        return self._append_under_lock(lambda _head: _completed_candidate(record))[0]
+
+"""Conformance runner for exact replication (backend-contract.html §08).
+
+Loads all vectors from ``spec/conformance/vectors/replicate/*.json`` the way
+``test_conformance_replay.py`` loads its two areas — one glob, one parametrize,
+the envelope asserted before the body.
+
+Three properties every vector states, and each is checked here:
+
+1. **The outcome.** Accepted, or refused with a NAMED contract refusal. Only
+   contract refusals appear in a vector: a vector is language-neutral, and
+   naming this backend's ``AppendRejected`` in one would pin a Python class on
+   an implementation that has no such family. The malformed-batch cases live in
+   ``test_arrival_transfer.py`` as unit tests for exactly that reason.
+2. **The resulting bytes.** ``expected.log`` is the target's complete file,
+   line for line. For an accepted vector that is the byte-for-byte hash
+   preservation claim; for a refused one it equals ``input.target``, which is
+   the refuse-before-mutation claim. Both fall out of the same assertion.
+3. **The head.** Stated as well as derivable, so a store that produced the
+   right bytes through the wrong head would still be caught.
+
+Offered records are handed over as the plain objects ``json.load`` produced —
+deliberately NOT through ``decode_record``. Decoding here would recompute
+``rh`` and refuse a deliberately-wrong digest inside the harness, before the
+implementation ever got the chance to.
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+from engine.arrival import ArrivalLog
+from engine.arrival_contract import Head, HeadMismatch, SameHeightFork
+from engine.arrival_file_backend import FileLedger
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+REPLICATE_VECTORS_DIR = REPO_ROOT / "spec" / "conformance" / "vectors" / "replicate"
+
+# The refusals a vector may name. A refusal outside this mapping is a vector
+# claiming something the contract does not define, and KeyError says so loudly.
+REFUSALS = {"SameHeightFork": SameHeightFork, "HeadMismatch": HeadMismatch}
+
+# The three families §D.2 requires, by filename prefix. Asserted as a set so a
+# family that silently loses its last vector fails rather than passing vacuously.
+FAMILIES = (
+    "replicate-exact-suffix-",
+    "replicate-same-height-",
+    "replicate-catch-up-",
+)
+
+
+def _load_vectors(vectors_dir: Path) -> list[Path]:
+    return sorted(vectors_dir.glob("*.json"))
+
+
+def _head(data: dict[str, Any] | None) -> Head | None:
+    if data is None:
+        return None
+    return Head(
+        lineage=data["lineage"],
+        ordinal=data["ordinal"],
+        record_hash=data["record_hash"],
+    )
+
+
+def test_every_replicate_family_has_vectors():
+    """§D.2 names three families; a family with no vectors proves nothing."""
+    stems = [path.stem for path in _load_vectors(REPLICATE_VECTORS_DIR)]
+    assert stems, "the replicate area holds no vectors at all"
+    for family in FAMILIES:
+        assert any(stem.startswith(family) for stem in stems), (
+            f"no vector in the {family!r} family"
+        )
+
+
+@pytest.mark.parametrize(
+    "vector_path", _load_vectors(REPLICATE_VECTORS_DIR), ids=lambda p: p.stem
+)
+def test_conformance_replicate(vector_path: Path, tmp_path: Path) -> None:
+    with open(vector_path, encoding="utf-8") as f:
+        vector = json.load(f)
+
+    assert "name" in vector, f"Vector {vector_path} missing 'name'"
+    assert "description" in vector, f"Vector {vector_path} missing 'description'"
+    assert "input" in vector, f"Vector {vector_path} missing 'input'"
+    assert "expected" in vector, f"Vector {vector_path} missing 'expected'"
+    assert vector["name"] == vector_path.stem, "vector name must match its file stem"
+
+    target_lines = vector["input"]["target"]
+    offered = vector["input"]["records"]
+    expected = vector["expected"]
+
+    log_path = tmp_path / f"{vector['name']}.arrival"
+    log_path.write_text("\n".join(target_lines) + "\n", encoding="utf-8")
+
+    ledger = FileLedger(ArrivalLog(log_path))
+    if expected["outcome"] == "accepted":
+        commit = ledger.replicate(_head(vector["input"]["expected_head"]), offered)
+        assert commit.after == _head(expected["head"])
+        assert [dict(record) for record in commit.records] == offered, (
+            "the records the commit reports are not the records that were "
+            "offered — something was assigned"
+        )
+    else:
+        assert expected["outcome"] == "refused", expected["outcome"]
+        with pytest.raises(REFUSALS[expected["refusal"]]):
+            ledger.replicate(_head(vector["input"]["expected_head"]), offered)
+
+    assert log_path.read_text(encoding="utf-8").splitlines() == expected["log"]
+    assert ledger.head() == _head(expected["head"])
+
+exec
+/bin/zsh -lc "rg -n \"def _locked_head|truncate|torn\" libs/engine/src/engine/arrival.py | head -40 && sed -n '1250,1390p' libs/engine/src/engine/arrival.py && sed -n '240,335p' libs/engine/tests/test_arrival_contract.py && sed -n '160,210p' libs/engine/tests/test_arrival_contract.py" in /Users/kaygee/Code/loops-s2wp2
+ succeeded in 0ms:
+13:verification, torn-tail truncation, corrupt-interior refusal, and the resume
+29:* **The writer truncates, the reader never does.** Reads take no lock, so a
+30:  reader cannot distinguish "torn" from "an append is in flight right now";
+33:  conclude a tail is torn and cut it.
+177:    a state an appender can produce, so it is evidence of a torn write that
+268:    replaced": a log truncated back and rewritten to the same height passes an
+315:            "truncated and rewritten to the same height. Pass the full head "
+1078:        # Snapshot both fields before comparing: a torn read across threads
+1122:        naming the ordinal. Nothing is skipped and nothing is truncated.
+1168:                return  # in flight, or torn — either way not the reader's to judge
+1255:                    f"{self.path} ends mid-record — truncate the torn tail first"
+1539:        suffix, or leaves one torn tail line that the truncate-under-lock
+1703:        suffix, or leaves one torn tail line that the truncate-under-lock rule
+1747:    def _locked_head(self) -> Iterator[dict]:
+1750:        Every append opens this way: acquire, truncate any torn tail, read
+1753:        condition under which an unterminated tail can be called torn
+1761:            self._truncate_torn_tail()
+1814:    def _truncate_torn_tail(self) -> int:
+1832:            fh.truncate(cut)
+1837:    def truncate_torn_tail(self) -> int:
+1847:            return self._truncate_torn_tail()
+            # — so the check still runs against what is on disk right now.
+            lineage = self._lineage_from(fh)
+            fh.seek(size - 1)
+            if fh.read(1) != b"\n":
+                raise ArrivalError(
+                    f"{self.path} ends mid-record — truncate the torn tail first"
+                )
+            start = _last_newline_before(fh, size - 1)
+            fh.seek(start)
+            raw = fh.read(size - 1 - start)
+        try:
+            record = decode_record(raw)
+        except ArrivalGrammarError as exc:
+            raise ArrivalCorrupt(str(exc), -1) from exc
+        fault = _authority_fault(record, lineage)
+        if fault is not None:
+            raise ArrivalCorrupt(f"cannot append onto this head: {fault}", record["ord"])
+        return record
+
+    # -- resume --------------------------------------------------------
+
+    def resume_offset(self, mark: ResumeMark | None) -> int:
+        """The byte offset ``mark`` licenses, or 0 when it does not.
+
+        The checks live in :meth:`_anchor_for`, which is where the anchor is
+        actually adopted; this is the offset-only view of its answer.
+        Rejection is not an error — the reader restarts from ordinal 0.
+        """
+        adopted = self._anchor_for(mark)
+        return 0 if adopted is None else adopted[0]
+
+    def anchor(self, mark: ResumeMark | None) -> dict | None:
+        """The validated anchor record dict for ``mark``, or None on rejection.
+
+        Surfaces the existing :meth:`_anchor_for` validation machinery as a
+        public verb. The byte offset in ``mark`` is an internal verified seek
+        hint, trusted only after the record found there passes all anchor
+        checks (shape, lineage, ordinal, authority).
+
+        Anchor validation checks self-consistency only, never chaining back to
+        genesis. :meth:`walk` remains the integrity statement over full history.
+        """
+        adopted = self._anchor_for(mark)
+        return None if adopted is None else adopted[1]
+
+    def _anchor_for(self, mark: ResumeMark | None) -> tuple[int, dict, str] | None:
+        """Adopt ``mark``'s anchor, or None when the mark cannot be trusted.
+
+        The single adoption site for the resume path: it reads the anchor
+        once and applies every check, and both :meth:`resume_offset` and
+        :meth:`walk_from` consume its answer. They used to validate and
+        re-read separately, which meant the place where the anchor actually
+        became an authority was not the place the checks lived — the proxy
+        shape behind two rounds of findings.
+
+        Five checks, all of which must hold:
+
+        1. The mark's lineage is this log's. A mark from another lineage is
+           not stale, it is a mark about a different file, and pointing it
+           here is meaningless.
+        2. The offset is an integer inside ``0..size``. A negative offset is
+           not a seek position to try, it is metadata that cannot be true.
+        3. It lands strictly on a record boundary.
+        4. The record ending there carries the ordinal the mark claims.
+        5. That record may be adopted as an authority
+           (:func:`_authority_fault`) — its own lineage is the genesis's,
+           and it may sit where it claims to sit. Without the first half, a
+           crafted interior record with a foreign lineage and a recomputing
+           ``rh`` becomes the anchor and the tail walk verifies the rest of
+           the file against the attacker's lineage. Without the second, a
+           record the full walk refuses becomes a legal place to resume
+           from, and the resume path consumes straight past corruption the
+           read path stops at.
+
+        What these do NOT establish is in :func:`_authority_fault`: the
+        anchor is checked for self-consistency, never for chaining back to
+        genesis. The mark is a cheap boundary check; :meth:`walk` is the
+        integrity statement.
+
+        Returns ``(offset, anchor, lineage)``, the lineage always the
+        genesis's and never the anchor's.
+        """
+        if mark is None:
+            return None
+        if not self.path.exists():
+            return None
+        try:
+            lineage = self.lineage()
+        except (GenesisRefused, ArrivalError):
+            return None
+        if mark.arrival_lineage != lineage:
+            return None
+        if not _is_int(mark.arrival_offset) or not _is_int(mark.arrival_ordinal):
+            return None
+        if mark.arrival_offset == 0:
+            return None  # nothing consumed; identical to a fresh start
+        if not 0 <= mark.arrival_offset <= self.size():
+            return None
+        anchor = self._record_ending_at(mark.arrival_offset)
+        if anchor is None or anchor["ord"] != mark.arrival_ordinal:
+            return None
+        if _authority_fault(anchor, lineage) is not None:
+            return None
+        return mark.arrival_offset, anchor, lineage
+
+    def _record_ending_at(self, offset: int) -> dict | None:
+        """The record whose ``\\n`` is the byte before ``offset``, or None
+        when the offset is not a boundary or the record does not decode."""
+        with self.path.open("rb") as fh:
+            fh.seek(offset - 1)
+            if fh.read(1) != b"\n":
+                return None
+            start = _last_newline_before(fh, offset - 1)
+            fh.seek(start)
+            raw = fh.read(offset - 1 - start)
+        try:
+            return decode_record(raw)
+        except ArrivalGrammarError:
+            return None
+
+    def walk_from(self, mark: ResumeMark | None) -> tuple[int, Iterator[dict]]:
+        """Resume a consumption: the ordinal resumed at, and the records after.
+
+        :meth:`walk_marked` minus the marks — one adoption/verification
+        path, two projections of it. Returns ``(0, ...)`` whenever the mark
+        is rejected, so a caller that persists progress learns it is
+        starting over instead of discovering it by ordinal.
+        """
+        resumed, pairs = self.walk_marked(mark)
+        return resumed, _records_only(pairs)
+
+    def walk_marked(
+        self, mark: ResumeMark | None
+    ) -> tuple[int, Iterator[tuple[dict, ResumeMark]]]:
+        """:meth:`walk_from`, yielding each record WITH its resume mark.
+
+        For the consumer that indexes what it reads and must persist how far
+        it got: the mark beside each record is the one that licenses
+        resuming just past it, exact to the byte because the verification
+        loop tracked it. ``(0, ...)`` means the walk starts over — either no
+        mark was offered or the offered one was rejected, and the caller
+
+
+def _draft(i: int) -> RecordDraft:
+    return RecordDraft(
+        kind="note", authored_at=100.0 + i, observer="kyle", body={"i": i}
+    )
+
+
+# The nine op rows of §A.2's table, written out rather than derived. Deriving
+# them from `ArrivalLedger` is what the assertion below is FOR, so a derived
+# expectation would agree with the Protocol no matter what the Protocol said.
+# This literal is the contract of record, standing beside the code.
+RATIFIED_LEDGER_OPS = frozenset({
+    "mint", "head", "append", "replicate", "read", "scan", "verify",
+    "export", "capabilities",
+})
+
+
+def _declared_surface(protocol: type) -> frozenset[str]:
+    """The public names a Protocol class declares, from its own namespace.
+
+    Plain class introspection — ``vars`` plus ``__annotations__`` — and NOT
+    ``typing``'s ``__protocol_attrs__``, which is a private implementation
+    detail that does not exist before Python 3.12. Both pyprojects declare
+    ``requires-python >= 3.11``, so a test reaching for that attribute passes
+    on the interpreter it was written on and errors on one the package
+    supports.
+
+    Annotations are included as well as callables so that an ATTRIBUTE added
+    to the Protocol is caught the same way a method would be: the claim being
+    pinned is "these nine rows and nothing else", and a row does not stop
+    counting by being spelled as data.
+    """
+    namespace = vars(protocol)
+    methods = {
+        name
+        for name, value in namespace.items()
+        if not name.startswith("_") and callable(value)
+    }
+    attributes = {
+        name
+        for name in namespace.get("__annotations__", {})
+        if not name.startswith("_")
+    }
+    return frozenset(methods | attributes)
+
+
+def test_the_ledger_satisfies_the_ledger_surface_it_claims(ledger):
+    """A location claim, not a conformance verdict.
+
+    ``runtime_checkable`` compares METHOD NAMES only — Python cannot check
+    signatures — so this says "these ops are offered", never "they behave".
+    The vectors judge behaviour. It is asserted anyway because the surface
+    silently shrinking is a real failure mode, and this catches it.
+    """
+    offered = {op for op in dir(ledger) if not op.startswith("_")}
+    assert RATIFIED_LEDGER_OPS <= offered
+    # WP2 completed the surface, so the adapter now satisfies the Protocol.
+    # This is the assertion WP1 wrote inverted, and flipping it is what its
+    # comment asked WP2 to do.
+    assert isinstance(ledger, ArrivalLedger)
+    # EXACT equality, both directions: an op declared beyond the ratified table
+    # fails this, and one dropped from it fails this. `<=` above is about the
+    # ADAPTER, which may legitimately offer more; this is about the PROTOCOL,
+    # which may not.
+    assert _declared_surface(ArrivalLedger) == RATIFIED_LEDGER_OPS
+    # `import_prefix` is offered and is NOT declared on the Protocol: §08
+    # describes portable import in prose and the ratified op table gives it no
+    # row. It is in LEDGER_MUTATIONS regardless, because the custody/reads
+    # ratchet covers what mutates, not what the Protocol happens to name.
+    assert "import_prefix" in offered
+    assert "import_prefix" not in _declared_surface(ArrivalLedger)
+    assert "import_prefix" in LEDGER_MUTATIONS
+
+
+def test_the_query_satisfies_the_query_surface(keys_and_store):
+    index_path, _ = keys_and_store
+    query = FileQuery(index_path)
+    try:
+        assert isinstance(query, ArrivalQuery)
+    finally:
+        query.close()
+
+
+def test_append_returns_a_commit_that_names_both_ends(ledger):
+    """The shape §10's migration loop chains on (``head = commit.after``)."""
+    before = ledger.head()
+    commit = ledger.append(before, [_draft(1), _draft(2)])
+
+    assert isinstance(commit, Commit)
+    assert commit.before == before, "before must be the head it landed on"
+    assert commit.after == ledger.head()
+    assert commit.after.ordinal == before.ordinal + 2
+    assert len(commit.records) == 2
+    assert commit.durability.profile is DurabilityProfile.HOST
+
+    return found
+
+
+def test_no_ledger_mutating_op_is_reachable_from_a_query_handle(
+    tmp_path, keys_and_store
+):
+    """§A.2, and backend-contract.html:211-217.
+
+    "A query handle MUST NOT expose a generic mutation escape hatch into the
+    ledger." Asserted over everything the handle actually holds, transitively
+    — not just its own methods, because a handle that stored an ArrivalLog or
+    an ArrivalStore would satisfy a surface-only check while offering
+    ``append`` one attribute away. ``ArrivalStore`` is the specific hazard:
+    it is the projection's writer AND appends to the log, so a query built
+    from one would be a mutation escape hatch by construction.
+
+    The op names come from LEDGER_MUTATIONS, beside the Protocol that
+    declares them, so an operation added to the ledger later is covered here
+    without anyone remembering to copy it across.
+    """
+    index_path, _log_path = keys_and_store
+    query = FileQuery(index_path)
+    try:
+        assert not (LEDGER_MUTATIONS & set(dir(query))), (
+            "a query handle names a ledger mutation directly"
+        )
+        for path, value in _reachable(query):
+            assert not isinstance(value, (ArrivalLog, ArrivalStore)), (
+                f"{path} is a {type(value).__name__} — custody reachable "
+                "from a read handle"
+            )
+            for op in LEDGER_MUTATIONS:
+                assert not callable(getattr(value, op, None)), (
+                    f"{path} exposes {op!r}, a ledger mutation, from a query "
+                    "handle"
+                )
+    finally:
+        query.close()
+
+
+def test_a_query_cannot_be_constructed_from_a_ledger(tmp_path, keys_and_store):
+    """Construction over detection: there is no parameter to pass one through.
+
+    The separation above is a property of what FileQuery HOLDS. This is the
+    stronger statement — a caller holding an ArrivalLog has no way to hand it
+    to a query, so the reachable-attribute check cannot be defeated by a
+    caller doing something unusual.
+    """
+    index_path, log_path = keys_and_store
+    with pytest.raises((TypeError, AttributeError, OSError, ValueError)):
+        FileQuery(ArrivalLog(log_path))  # type: ignore[arg-type]
+
+exec
+/bin/zsh -lc ".venv/bin/python - <<'PY'
+from engine.arrival_contract import ArrivalLedger
+OPS=frozenset({'mint','head','append','replicate','read','scan','verify','export','capabilities'})
+def surface(p):
+ n=vars(p); return frozenset({k for k,v in n.items() if not k.startswith('_') and callable(v)}|{k for k in n.get('__annotations__',{}) if not k.startswith('_')})
+orig=ArrivalLedger.export
+ArrivalLedger.tenth=lambda self: None
+try:
+ print('add-tenth equality:', surface(ArrivalLedger)==OPS, 'left_extra:', sorted(surface(ArrivalLedger)-OPS))
+finally: del ArrivalLedger.tenth
+# Runtime protocol instance built structurally without invoking methods.
+class Adapter:
+ def mint(self): pass
+ def head(self): pass
+ def append(self): pass
+ def replicate(self): pass
+ def read(self): pass
+ def scan(self): pass
+ def verify(self): pass
+ def export(self): pass
+ def capabilities(self): pass
+adapter=Adapter()
+print('before-drop isinstance:', isinstance(adapter,ArrivalLedger))
+del ArrivalLedger.export
+try:
+ print('drop-export equality:', surface(ArrivalLedger)==OPS, 'right_missing:', sorted(OPS-surface(ArrivalLedger)))
+ print('after-drop isinstance:', isinstance(adapter,ArrivalLedger))
+finally: ArrivalLedger.export=orig
+PY
+
+git grep -n '__protocol_attrs__' 0d38c969...165d86ea -- ':"'!docs/scratch/**'"' || true
+
+git diff --name-only 0d38c969...165d86ea -- 'libs/store/**' 'libs/engine/tests/test_arrival*.py'" in /Users/kaygee/Code/loops-s2wp2
+ succeeded in 0ms:
+add-tenth equality: False left_extra: ['tenth']
+before-drop isinstance: True
+drop-export equality: False right_missing: ['export']
+after-drop isinstance: True
+fatal: unable to resolve revision: 0d38c969...165d86ea
+libs/engine/tests/test_arrival_contract.py
+libs/engine/tests/test_arrival_transfer.py
+
+exec
+/bin/zsh -lc "sed -n '820,960p' libs/engine/src/engine/arrival.py; sed -n '1,180p' libs/engine/tests/test_arrival_transfer.py; sed -n '700,735p' libs/engine/src/engine/arrival_file_backend.py; git diff --name-only 0d38c969...165d86ea | rg '"'^libs/store/'"' || true; git grep -n '__protocol_attrs__' 165d86ea -- ':"'!docs/scratch/**'"' || true; git diff --name-only 0d38c969...165d86ea -- libs/engine/tests | sort" in /Users/kaygee/Code/loops-s2wp2
+ succeeded in 0ms:
+    origin: str = ""
+    at: float | None = None
+
+
+def _records_only(pairs: Iterator[tuple[dict, object]]) -> Iterator[dict]:
+    """Project the record out of a ``(record, position)`` pair stream.
+
+    The one mark-stripping spelling: every public walk is a projection of
+    the position-carrying verification loop, never a second copy of it.
+    """
+    return (record for record, _ in pairs)
+
+
+# ---------------------------------------------------------------------------
+# The log
+# ---------------------------------------------------------------------------
+
+
+class ArrivalLog:
+    """One arrival log, addressed by its path.
+
+    Cheap to construct and holds no open file: every operation opens what it
+    needs. Appends across processes are mutually exclusive, enforced by an
+    advisory ``LOCK_EX`` on ``<name>.arrival.lock`` held for the whole
+    read-head, validate, write, fsync sequence. Reads take no lock and are
+    safe at any time against a concurrent append.
+
+    Exclusion rather than lock-free ``O_APPEND`` is forced by the addressing
+    scheme, not chosen for convenience: the ordinal follows from the head, so
+    correctness requires reading the head and writing to be indivisible. Two
+    processes that both read head ``ord=7`` would both write ``ord=8``, and a
+    duplicate coordinate is a corrupt interior that refuses forever.
+
+    ``flock`` specifically because it is released when the holding process
+    dies. A crashed writer must not wedge the store, which is the opposite of
+    what an ``O_EXCL`` lock file would give — that behaviour is right for the
+    one-shot genesis gate and wrong for an operation that runs constantly.
+    """
+
+    def __init__(self, path: Path | str) -> None:
+        self.path = Path(path)
+        self.lock_path = lock_path_for(self.path)
+        self.tmp_path = tmp_path_for(self.path)
+        # Memo for :meth:`_genesis_from`, keyed on the genesis line's bytes.
+        self._genesis_line: bytes | None = None
+        self._genesis_record: dict | None = None
+
+    # -- minting -------------------------------------------------------
+
+    @classmethod
+    def mint(
+        cls,
+        path: Path | str,
+        *,
+        observer: str,
+        signer: Signer,
+        key: str,
+        origin: str = "",
+        lineage: str | None = None,
+        at: float | None = None,
+    ) -> ArrivalLog:
+        """Open a new lineage: write genesis and publish it atomically.
+
+        The genesis record is self-naming — the lineage id it carries is the
+        one its own coordinate ``(lin, 0)`` opens — and it must be signed:
+        genesis is the lineage's attestation root, and the signature is over
+        the ACTUAL final body, so the body is assembled first and signed
+        second. The body is ``{protocol, lineage, key}`` and nothing else
+        (decision:design/arrival-sliceA-authority §2.3): ``key`` is the
+        founding PUBLIC key in the ratified wire format, self-signed at
+        ordinal 0 — the anchor every later authorship answer resolves back
+        to. The document set is movement 2, records at ordinal >= 1; era
+        pins dissolve under the dense ordinal; containment claims belong to
+        the migration sidecar's genesis, never to a live store's.
+
+        ``key`` and ``signer`` must correspond — the grammar checks the
+        key's shape here, and :func:`verify_authorship` is where the
+        self-certification is cryptographically established. A mint whose
+        signer does not hold ``key`` produces a log the verifier refuses at
+        ordinal 0.
+
+        Publishing — the ``O_EXCL`` staging mutex, the existence check held
+        under it, the fsync of both file and directory — is
+        :meth:`_publish_genesis`, shared with :meth:`adopt_genesis`.
+        """
+        log = cls(path)
+        log.path.parent.mkdir(parents=True, exist_ok=True)
+
+        key_fault = _key_shape_fault(key)
+        if key_fault is not None:
+            raise GenesisRefused(
+                f"genesis founding key is malformed ({key_fault}) — the "
+                "ratified wire format is a raw-32-byte base64 public key"
+            )
+        lin = mint_lineage() if lineage is None else lineage
+        body = {"protocol": GRAMMAR_VERSION, "lineage": lin, "key": key}
+        at = time.time() if at is None else at
+        sig = signer(observer, content_commitment(GENESIS_KIND, at, observer, origin, body))
+        if not sig:
+            raise GenesisRefused(
+                f"genesis for lineage {lin} is unsigned — genesis is the lineage's "
+                f"attestation root and observer {observer!r} produced no signature"
+            )
+        line = encode_record(
+            build_record(
+                lin=lin, ordinal=0, prev=None, k=GENESIS_KIND, body=body,
+                observer=observer, origin=origin, at=at, sig=sig,
+            )
+        )
+
+        log._publish_genesis(line)
+        return log
+
+    @classmethod
+    def adopt_genesis(cls, path: Path | str, record: dict) -> ArrivalLog:
+        """Open a lineage on a genesis record that was minted ELSEWHERE.
+
+        :meth:`mint`'s twin on the carried-in side, the way
+        :meth:`append_record` is :meth:`append`'s: mint builds and signs a
+        genesis, this one accepts the exact bytes of one that already exists.
+        Nothing is re-signed and nothing is rehashed — a replica whose ordinal
+        0 differed from the authority's by a single byte would be a different
+        lineage wearing the same id, so the record lands exactly as offered or
+        not at all.
+
+        The record is held to the same two gates a walk holds ordinal 0 to:
+        :func:`encode_record` (grammar, and the supplied ``rh`` CHECKED rather
+        than trusted) and :func:`_placement_fault` at ordinal 0 (genesis kind,
+        no ``prev``, signed, self-naming, well-formed founding key). Structural
+        gates only — whether the genesis signature verifies against its own
+        founding key is :func:`verify_authorship`'s question, asked with an
+        injected verifier, and this path stays as pure as :meth:`walk` is
+        about the same record.
+
+        Publishing is :meth:`mint`'s ceremony exactly, and shared with it:
+        staging wins ``O_EXCL`` first, so an existing log at this path refuses
+        with the mutex held rather than being overwritten.
+        """
+        log = cls(path)
+        log.path.parent.mkdir(parents=True, exist_ok=True)
+        candidate = _completed_candidate(record)
+"""The transfer half: replicate, export, and the §08-default portable import.
+
+Slice 2 / WP2 of the arrival break, against backend-contract.html §08 and
+`design:arrival-break-slice2-backend-contract` §D.2. The conformance vectors in
+``spec/conformance/vectors/replicate/`` state exact replication in a
+language-neutral form; this file holds everything a vector cannot:
+
+* the cases whose refusal is this BACKEND's own family rather than one of the
+  five ratified contract refusals — a malformed batch, a digest that does not
+  recompute, a foreign lineage. A language-neutral vector naming
+  ``AppendRejected`` would pin a Python class on a Go implementation, so those
+  live here (`finding:slice2-wp1-refusal-set-gaps`).
+* export and import, which are byte-level and file-level rather than
+  record-level claims.
+* the two §12 gates §D.2 names: export → import → export byte identity, and
+  snapshot consistency while another writer appends.
+"""
+
+from __future__ import annotations
+
+import json
+import threading
+from pathlib import Path
+
+import pytest
+
+from engine.arrival import (
+    AppendRejected,
+    ArrivalCorrupt,
+    ArrivalError,
+    ArrivalGrammarError,
+    ArrivalLog,
+    Entry,
+    ForkedHeight,
+    GenesisRefused,
+    build_record,
+    content_commitment,
+    encode_record,
+)
+from engine.arrival_contract import (
+    AtomicLimitExceeded,
+    ExportedPrefix,
+    Head,
+    HeadMismatch,
+    SameHeightFork,
+)
+from engine.arrival_file_backend import EXPORT_CODEC, FileLedger
+from tests.conftest import STUB_KEY as _KEY
+from tests.conftest import stub_sign as _sign
+
+
+def _head(log: ArrivalLog) -> Head:
+    record = log.head()
+    return Head(
+        lineage=record["lin"], ordinal=record["ord"], record_hash=record["rh"]
+    )
+
+
+def _mint(path: Path, *, lineage: str | None = None) -> ArrivalLog:
+    return ArrivalLog.mint(
+        path,
+        observer="kyle",
+        signer=_sign,
+        key=_KEY,
+        lineage=lineage,
+        at=1750000000.0,
+    )
+
+
+def _grow(log: ArrivalLog, count: int, *, tag: str = "a") -> ArrivalLog:
+    log.append_marked_many(
+        [
+            Entry(k="note", body={"i": i, "tag": tag}, observer="kyle", at=1750000100.0 + i)
+            for i in range(count)
+        ]
+    )
+    return log
+
+
+def _signed_onto(log: ArrivalLog, body: dict, *, at: float = 1750000900.0) -> dict:
+    """Append one SIGNED record and return it.
+
+    ``append_marked_many`` builds every record with ``sig=None`` — deliberately,
+    ``Entry`` has no signer field — so a signed record has to be assembled and
+    carried in. That is also why the catch-up vectors carry signatures: they are
+    the content an assigning path cannot reproduce.
+    """
+    head = log.head()
+    record = build_record(
+        lin=head["lin"],
+        ordinal=head["ord"] + 1,
+        prev=head["rh"],
+        k="note",
+        body=body,
+        observer="kyle",
+        origin="",
+        at=at,
+        sig=_sign("kyle", content_commitment("note", at, "kyle", "", body)),
+    )
+    log.append_record(record)
+    return record
+
+
+@pytest.fixture
+def authority(tmp_path: Path) -> FileLedger:
+    """A five-record authority whose tail is signed."""
+    log = _grow(_mint(tmp_path / "authority.arrival"), 3)
+    _signed_onto(log, {"tail": "signed"})
+    return FileLedger(log)
+
+
+# --- export ----------------------------------------------------------------
+
+
+def test_an_export_reproduces_the_logs_own_prefix_bytes(authority):
+    """The framing claim, checked rather than described.
+
+    Each element is one record's line INCLUDING its newline, so joining them is
+    the file. A reader can only rely on that if the export states it, which is
+    what the manifest's ``framing`` field is for.
+    """
+    prefix = authority.export(through=authority.head(), codec=EXPORT_CODEC)
+    assert b"".join(prefix.records) == authority._log.path.read_bytes()
+    assert prefix.manifest["framing"] == "newline-terminated"
+
+
+def test_an_export_streams_and_reads_nothing_until_it_is_drained(authority):
+    """``records`` is a generator, the same way ``scan`` and ``walk`` are.
+
+    Checked by asking for a head this log does NOT hold: constructing the
+    export must succeed and draining it must refuse, which is only true if the
+    work is deferred.
+    """
+    absent = Head(lineage=authority.head().lineage, ordinal=99, record_hash="f" * 64)
+    prefix = authority.export(through=absent, codec=EXPORT_CODEC)
+    with pytest.raises(HeadMismatch):
+        list(prefix.records)
+
+
+def test_an_export_manifest_carries_no_clock(authority):
+    """Two exports of one head are equal, field for field.
+
+    A manifest with a timestamp or a hostname in it would make
+    export → import → export byte-identical-except-for-the-parts-that-move,
+    which is not a byte-identity gate at all.
+    """
+    head = authority.head()
+    first = authority.export(through=head, codec=EXPORT_CODEC)
+    second = authority.export(through=head, codec=EXPORT_CODEC)
+    assert first.manifest == second.manifest
+    assert first.manifest["count"] == head.ordinal + 1
+    assert first.manifest["through_record_hash"] == head.record_hash
+
+
+def test_export_refuses_a_codec_this_backend_does_not_have(authority):
+    """A caller bug against ``capabilities()``, not a contract refusal.
+
+    The ratified refusal set has no member for "unsupported codec", and
+    picking one would be the over-claim §12's report exists to prevent.
+    """
+    with pytest.raises(ValueError, match=EXPORT_CODEC):
+        authority.export(through=authority.head(), codec="parquet-v9")
+    assert authority.capabilities().export_codecs == (EXPORT_CODEC,)
+
+
+def test_an_export_stops_at_the_captured_head_not_at_the_current_one(authority):
+    """§06: an ordered prefix range and NO later record."""
+    captured = Head(
+        lineage=authority.head().lineage,
+        ordinal=2,
+        record_hash=authority.read(2)["rh"],
+    )
+    _grow(authority._log, 2, tag="later")
+    lines = list(authority.export(through=captured, codec=EXPORT_CODEC).records)
+    assert len(lines) == 3
+    assert json.loads(lines[-1])["rh"] == captured.record_hash
+
+
+# --- §12 gate: export -> import -> export is byte-identical ------------------
+
+                f"claimed {scope.through}"
+            )
+        return head
+
+    def capabilities(self) -> Capabilities:
+        """What this backend actually offers — no more (§12).
+
+        Deployment tooling refuses an assignment whose required guarantees are
+        absent, so an over-claim here is worse than a missing feature: it turns
+        a refusal into a runtime failure.
+
+        ``REPLICA`` joins ``AUTHORITY`` because :meth:`replicate` now exists —
+        the profile names what a store may be ASKED to do, and an adapter that
+        can consume pre-coordinated records without assigning any is what makes
+        the replica role performable. ``ARCHIVE`` stays absent: nothing here
+        offers a read-only sealed mode, and claiming one would be exactly the
+        lie this report exists to make catchable.
+
+        The codec tuple grows to what :meth:`export` will actually produce, and
+        to nothing else. A test cross-checks both claims against the object.
+        """
+        return Capabilities(
+            protocol_version=GRAMMAR_VERSION,
+            profiles=frozenset({Profile.AUTHORITY, Profile.REPLICA}),
+            durability=DurabilityProfile.HOST,
+            verification_levels=frozenset(
+                {VerificationLevel.OPEN, VerificationLevel.FULL}
+            ),
+            writer_concurrency=(
+                "multi-process on one host, advisory flock; LOCAL POSIX "
+                "storage only — a store on NFS or another network filesystem "
+                "is out of contract"
+            ),
+            snapshot=(
+                "captured-head prefix; readers take no lock and see only "
+                "newline-terminated records, so an append in flight is "
+165d86ea:libs/engine/tests/test_arrival_contract.py:262:    ``typing``'s ``__protocol_attrs__``, which is a private implementation
+libs/engine/tests/test_arrival_contract.py
+libs/engine/tests/test_arrival_transfer.py
+libs/engine/tests/test_conformance_replicate.py
+
+exec
+/bin/zsh -lc "rg -n \"race|concurr|stale|torn|behind|overlap|shorter|prefix of\" libs/engine/tests/test_arrival_transfer.py libs/engine/tests/test_conformance_replicate.py libs/engine/tests/test_arrival*.py | head -100; sed -n '1740,1840p' libs/engine/src/engine/arrival.py" in /Users/kaygee/Code/loops-s2wp2
+ succeeded in 0ms:
+libs/engine/tests/test_arrival_cas_full_head.py:17:race (":592 — race two writers at one expected head; exactly one commit
+libs/engine/tests/test_arrival_cas_full_head.py:60:    the file is a valid shorter prefix afterwards, which is precisely why
+libs/engine/tests/test_arrival_cas_full_head.py:110:    another lineage is not stale, it is about a different log.
+libs/engine/tests/test_arrival_cas_full_head.py:257:# --- §12 gate: race two writers at one expected head ------------------------
+libs/engine/tests/test_arrival_cas_full_head.py:288:def test_a_real_race_of_many_writers_admits_exactly_one(tmp_path):
+libs/engine/tests/test_arrival_cas_full_head.py:289:    """The same gate under genuine concurrency.
+libs/engine/tests/test_arrival_cas_full_head.py:303:    def race(name: str) -> None:
+libs/engine/tests/test_arrival_cas_full_head.py:319:        threading.Thread(target=race, args=(str(i),)) for i in range(writers)
+libs/engine/tests/test_arrival_cas_full_head.py:340:# reason — dedup correctness across concurrent mergers — and its documented
+libs/engine/tests/test_arrival_cas_full_head.py:407:    """The log is a dense verified prefix of at most ``ceiling`` records.
+libs/engine/tests/test_arrival_cas_full_head.py:470:        # And the writer can always resume: truncating the torn tail under
+libs/engine/tests/test_arrival_cas_full_head.py:473:        ArrivalLog(log.path).truncate_torn_tail()
+libs/engine/tests/test_arrival_authority.py:60:def test_genesis_self_certifies_and_the_trace_names_ordinal_zero(tmp_path, kyle):
+libs/engine/tests/test_arrival_transfer.py:218:# --- §12 gate: snapshot consistency under a concurrent writer ---------------
+libs/engine/tests/test_arrival_transfer.py:226:    a genuine race rather than a serialised sequence; what makes the answer
+libs/engine/tests/test_arrival_transfer.py:316:    """The §08 agreement gate, and it is a fork and not a stale head.
+libs/engine/tests/test_arrival_transfer.py:320:    overlapped.
+libs/engine/tests/test_arrival_cas_head.py:73:    """A minted log and an opened lineage, with one edit ceremony behind it."""
+libs/engine/tests/test_arrival_cas_head.py:218:        # The pre-backdate token is stale and is refused...
+libs/engine/tests/test_arrival_cas_head.py:339:    at the tail could still be wrong everywhere behind it. The store's
+libs/engine/tests/test_arrival_transfer.py:218:# --- §12 gate: snapshot consistency under a concurrent writer ---------------
+libs/engine/tests/test_arrival_transfer.py:226:    a genuine race rather than a serialised sequence; what makes the answer
+libs/engine/tests/test_arrival_transfer.py:316:    """The §08 agreement gate, and it is a fork and not a stale head.
+libs/engine/tests/test_arrival_transfer.py:320:    overlapped.
+libs/engine/tests/test_arrival_authority_gate.py:9:G2 — the exclusivity trace: a second key introduced at a stated ordinal,
+libs/engine/tests/test_arrival_authority_gate.py:11:trace emitted as ``(key, lineage, ordinal)`` rows — and no key resolving
+libs/engine/tests/test_arrival_authority_gate.py:82:    for stale in (index, *sqlite_sidecars(index), log_path.with_suffix(".jsonl")):
+libs/engine/tests/test_arrival_authority_gate.py:83:        stale.unlink(missing_ok=True)
+libs/engine/tests/test_arrival_authority_gate.py:135:def test_g2_the_exclusivity_trace(tmp_path):
+libs/engine/tests/test_arrival_authority_gate.py:144:    # Every signature in the log is covered by exactly one trace row.
+libs/engine/tests/test_arrival_authority_gate.py:148:    # The trace: (key, lineage, ordinal) — every verifying key resolves
+libs/engine/tests/test_arrival_authority_gate.py:152:    trace = [(r.key, r.introduced_lineage, r.introduced_ordinal) for r in rows]
+libs/engine/tests/test_arrival_authority_gate.py:153:    assert all(lin == lineage for _, lin, _ in trace)
+libs/engine/tests/test_arrival_authority_gate.py:154:    assert set(trace) == {
+libs/engine/tests/test_arrival_authority_gate.py:160:    # The keys the trace names are IN the records at those coordinates —
+libs/engine/tests/test_arrival_derived_log.py:7:never on the append path, and it carries no staleness marker — its currency
+libs/engine/tests/test_arrival_derived_log.py:400:def test_a_torn_tail_is_short_rather_than_a_content_disagreement(
+libs/engine/tests/test_arrival_derived_log.py:417:def test_there_is_no_staleness_marker(tmp_path, keys, signer):
+libs/engine/tests/test_arrival_derived_log.py:437:    mode — so a store whose derived log is behind opens and reads normally."""
+libs/engine/tests/test_arrival_derived_log.py:440:    stale = jsonl.read_bytes()
+libs/engine/tests/test_arrival_derived_log.py:454:    assert jsonl.read_bytes() == stale
+libs/engine/tests/test_arrival_projection.py:230:def test_the_fts_projection_is_dropped_not_left_resolving_stale_text(tmp_path, keys, signer):
+libs/engine/tests/test_arrival_projection.py:232:    index would resolve stale text to new facts — the same reason the legacy
+libs/engine/tests/test_arrival_gate.py:4:concurrency or a crash is the subject. Threads would not do: they share a file
+libs/engine/tests/test_arrival_gate.py:6:point of these six is that the concurrency contract has never been exercised.
+libs/engine/tests/test_arrival_gate.py:119:def test_gate_concurrent_append_keeps_ordinals_dense(tmp_path):
+libs/engine/tests/test_arrival_gate.py:187:def test_gate_torn_tail_from_a_real_crash_truncates_exactly_the_partial_bytes(tmp_path):
+libs/engine/tests/test_arrival_gate.py:196:    torn = log.path.read_bytes()
+libs/engine/tests/test_arrival_gate.py:197:    assert not torn.endswith(b"\n"), "the append was not interrupted mid-record"
+libs/engine/tests/test_arrival_gate.py:200:    cut_point = torn.rfind(b"\n") + 1
+libs/engine/tests/test_arrival_gate.py:201:    partial = len(torn) - cut_point
+libs/engine/tests/test_arrival_gate.py:203:    prefix = torn[:cut_point]
+libs/engine/tests/test_arrival_gate.py:211:    assert log.truncate_torn_tail() == partial
+libs/engine/tests/test_arrival_gate.py:224:    §3.5 asks for a torn tail from a SIGKILL. Repeated real kills against a
+libs/engine/tests/test_arrival_gate.py:231:    That does NOT retire the torn-tail handling. A power cut can still leave
+libs/engine/tests/test_arrival_gate.py:233:    which is how the test above produces one. It does mean the torn tail is a
+libs/engine/tests/test_arrival_gate.py:248:            "longer holds, and the torn-tail path is now reachable from a crash"
+libs/engine/tests/test_arrival_gate.py:254:def test_a_torn_tail_is_truncated_by_the_next_append_before_it_writes(tmp_path):
+libs/engine/tests/test_arrival_gate.py:256:    append recovers a torn log without a separate ceremony."""
+libs/engine/tests/test_arrival_gate.py:492:    behind, and the test would pass whether or not the check it names
+libs/engine/tests/test_arrival_gate.py:510:# 4. Genesis race
+libs/engine/tests/test_arrival_gate.py:532:    path = tmp_path / "raced.arrival"
+libs/engine/tests/test_arrival_gate.py:533:    racers = [
+libs/engine/tests/test_arrival_gate.py:537:    results = [racer.communicate(timeout=60) for racer in racers]
+libs/engine/tests/test_arrival_gate.py:538:    codes = [racer.returncode for racer in racers]
+libs/engine/tests/test_arrival_gate.py:542:    assert not (tmp_path / "raced.arrival.tmp").exists(), "staging survived the race"
+libs/engine/tests/test_arrival_gate.py:549:def test_a_failed_mint_leaves_no_staging_behind(tmp_path):
+libs/engine/tests/test_arrival_gate.py:818:    possibly in flight rather than torn.
+libs/engine/tests/test_arrival_gate.py:822:    :func:`test_a_real_sigkill_cannot_tear_an_append`), a concurrent reader
+libs/engine/tests/test_arrival_gate.py:831:    :func:`test_the_read_path_leaves_a_torn_tail_alone`, which plants the
+libs/engine/tests/test_arrival_gate.py:872:def test_the_read_path_leaves_a_torn_tail_alone(tmp_path):
+libs/engine/tests/test_arrival_gate.py:874:    conclude a tail is torn."""
+libs/engine/tests/test_arrival_contract.py:346:    stale = ledger.head()
+libs/engine/tests/test_arrival_contract.py:347:    ledger.append(stale, [_draft(1)])
+libs/engine/tests/test_arrival_contract.py:350:        ledger.append(stale, [_draft(2)])
+libs/engine/tests/test_arrival_contract.py:450:def test_verify_refuses_a_torn_tail_rather_than_repairing_it(ledger):
+libs/engine/tests/test_arrival_contract.py:453:    A torn tail is left exactly as found. Verification takes no lock, and the
+libs/engine/tests/test_arrival_contract.py:454:    lock is the only thing that licenses calling a tail torn rather than in
+libs/engine/tests/test_arrival_contract.py:464:    path.write_bytes(path.read_bytes() + b'{"torn":')
+libs/engine/tests/test_arrival_contract.py:527:    assert "flock" in caps.writer_concurrency
+libs/engine/tests/test_arrival_contract.py:528:    assert "POSIX" in caps.writer_concurrency, (
+libs/engine/tests/test_arrival_store.py:349:# --- the reconcile->append race ----------------------------------------------
+libs/engine/tests/test_arrival_store.py:378:        # Freeze reconciliation at the pre-race mark — the reconcile "ran"
+libs/engine/tests/test_arrival_store.py:381:        # stale must be caught by the append's own coordinate.
+libs/engine/tests/test_arrival_store.py:382:        stale = store._read_mark()
+libs/engine/tests/test_arrival_store.py:383:        monkeypatch.setattr(store, "_reconcile", lambda: stale)
+libs/engine/tests/test_arrival_store.py:384:        _interloper(log, "raced", "01RACE0000000000000000000A")
+libs/engine/tests/test_arrival_store.py:412:        store.append(fact(message="raced-past-a-mint"))
+libs/engine/tests/test_arrival_store.py:433:        # The ceremony's reconcile "ran" and pinned the pre-race head; the
+libs/engine/tests/test_arrival_store.py:434:        # interloper lands after it — exactly the mid-ceremony race.
+libs/engine/tests/test_arrival_store.py:435:        stale = store._read_mark()
+libs/engine/tests/test_arrival_store.py:439:            lambda: setattr(store, "_reconciled_mark", stale),
+libs/engine/tests/test_arrival_store.py:441:        _interloper(log, "raced", "01RACE0000000000000000000B")
+        must match, so a candidate carried in with its own digest is checked
+        rather than trusted.
+        """
+
+        return self._append_under_lock(lambda _head: _completed_candidate(record))[0]
+
+    @contextlib.contextmanager
+    def _locked_head(self) -> Iterator[dict]:
+        """Hold the append lock and yield the head record.
+
+        Every append opens this way: acquire, truncate any torn tail, read
+        the head. Truncation lives here and only here — the lock is what
+        makes "no append is in progress" knowable, and it is the only
+        condition under which an unterminated tail can be called torn
+        instead of in flight. The lock is per open-file-description, so it
+        releases exactly when this ``with`` closes the descriptor; every
+        byte a caller writes must land inside the block.
+        """
+        self.lock_path.parent.mkdir(parents=True, exist_ok=True)
+        with self.lock_path.open("ab") as lock_fh:
+            fcntl.flock(lock_fh.fileno(), fcntl.LOCK_EX)
+            self._truncate_torn_tail()
+            yield self._tail_record()
+
+    def _append_under_lock(self, build: Callable[[dict], dict]) -> tuple[dict, int]:
+        """The whole write sequence, indivisible. Returns the record and the
+        byte offset just past its newline, both read under the lock.
+
+        Acquire and read the head (:meth:`_locked_head`), then build,
+        validate, encode, write, fsync, release.
+
+        fsync and not merely flush: the record must outlive a power cut, not
+        merely a process crash. That was strong reasoning when the line was
+        one of two copies; it is not optional now that it is the only one.
+        """
+        with self._locked_head() as head:
+            record = build(head)
+            self._check_follows(record, head)
+            line = encode_record(record)  # the grammar gate, rh included
+            with self.path.open("ab") as fh:
+                fh.write((line + "\n").encode("utf-8"))
+                fh.flush()
+                os.fsync(fh.fileno())
+                return record, fh.tell()
+
+    @staticmethod
+    def _check_follows(record: dict, head: dict) -> None:
+        """The head checks, plus placement. Refuse before a byte is written.
+
+        Placement is checked on the way IN as well as on the way out
+        (:meth:`walk`) because the two catch different things: the walk
+        catches a file someone hand-wrote, and this catches a caller — every
+        append funnels through here, so ``append`` and ``append_record``
+        are both covered.
+        """
+        if record["lin"] != head["lin"]:
+            raise AppendRejected(
+                f"candidate claims lineage {record['lin']!r}, "
+                f"but this log's lineage is {head['lin']!r}"
+            )
+        if record["ord"] != head["ord"] + 1:
+            raise AppendRejected(
+                f"candidate carries ord {record['ord']!r}, "
+                f"but the head is at {head['ord']} so {head['ord'] + 1} is due"
+            )
+        if record["prev"] != head[_RH]:
+            raise AppendRejected(
+                f"candidate's prev names {record['prev']!r}, "
+                f"but the head's rh is {head[_RH]!r}"
+            )
+        fault = _placement_fault(record, record["ord"])
+        if fault is not None:
+            raise AppendRejected(f"candidate refused: {fault}")
+
+    def _truncate_torn_tail(self) -> int:
+        """Drop an unterminated final record. Returns the bytes cut.
+
+        MUST be called with the append lock held — see
+        :meth:`_append_under_lock`. Truncation, not skipping: partial bytes
+        left at the tail would be concatenated onto by the next append, and
+        the result would be a corrupt interior that refuses forever.
+        """
+        size = self.size()
+        if size == 0:
+            return 0
+        with self.path.open("rb") as fh:
+            fh.seek(size - 1)
+            if fh.read(1) == b"\n":
+                return 0
+            cut = _last_newline_before(fh, size)
+        # cut is 0 when the whole file is one partial record.
+        with self.path.open("r+b") as fh:
+            fh.truncate(cut)
+            fh.flush()
+            os.fsync(fh.fileno())
+        return size - cut
+
+    def truncate_torn_tail(self) -> int:
+        """Take the lock and drop an unterminated final record.
+
+        The public spelling, for an opener that wants the log made
+
+exec
+/bin/zsh -lc ".venv/bin/python - <<'PY'
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from threading import Barrier, Thread
+from engine.arrival import ArrivalLog, Entry
+from engine.arrival_contract import Head, RecordDraft, HeadMismatch, SameHeightFork
+from engine.arrival_file_backend import FileLedger, EXPORT_CODEC
+from tests.conftest import STUB_KEY, stub_sign
+
+def mint(p): return ArrivalLog.mint(p,observer='kyle',signer=stub_sign,key=STUB_KEY,lineage='01TEST00000000000000000000',at=1.0)
+def head(log):
+ r=log.head(); return Head(r['lin'],r['ord'],r['rh'])
+def grow(log,tag): return log.append_marked(Entry(k='note',body={'tag':tag},observer='kyle',at=2.0))[0]
+with TemporaryDirectory() as d:
+ d=Path(d); src=mint(d/'src.arrival'); r1=grow(src,'a'); r2=grow(src,'b'); r3=grow(src,'c')
+ raw=src.path.read_bytes(); cuts=[]; pos=0
+ for _ in range(4): pos=raw.index(b'\\n',pos)+1; cuts.append(pos)
+ # behind agreeing target catches up (agreement spans ord 0..1)
+ p=d/'behind.arrival'; p.write_bytes(raw[:cuts[1]])
+ tgt=FileLedger(ArrivalLog(p)); pref=FileLedger(src).export(through=head(src),codec=EXPORT_CODEC)
+ print('behind catchup:', tgt.import_prefix(pref).ordinal, 'bytes_equal:',p.read_bytes()==raw)
+ # disagreement below target head is caught
+ q=d/'fork.arrival'; q.write_bytes(raw[:cuts[0]]); qlog=ArrivalLog(q); grow(qlog,'DIFFERENT')
+ try: FileLedger(qlog).import_prefix(FileLedger(src).export(through=head(src),codec=EXPORT_CODEC))
+ except Exception as e: print('full-overlap disagreement:',type(e).__name__)
+ # torn tail is repaired by replicate, not refused
+ t=d/'torn.arrival'; t.write_bytes(raw[:cuts[1]]+b'{\"partial\":')
+ tl=ArrivalLog(t); before=head(ArrivalLog(Path(str(t)))) # head() refuses torn, so pin from r1
+ pin=Head(r1['lin'],r1['ord'],r1['rh'])
+ c=FileLedger(tl).replicate(pin,[r2,r3])
+ print('torn replicate:',c.after.ordinal,'bytes_equal:',t.read_bytes()==raw)
+ # shorter imported prefix into ahead target
+ a=d/'ahead.arrival'; a.write_bytes(raw)
+ short_head=Head(r1['lin'],r1['ord'],r1['rh'])
+ short=FileLedger(src).export(through=short_head,codec=EXPORT_CODEC)
+ try:
+  got=FileLedger(ArrivalLog(a)).import_prefix(short)
+  print('short-import-into-ahead: ACCEPTED head',got.ordinal)
+ except Exception as e: print('short-import-into-ahead: REFUSED',type(e).__name__)
+ # real race: replicate vs ordinary append at same full pin
+ race=d/'race.arrival'; race.write_bytes(raw[:cuts[0]]); ledger=FileLedger(ArrivalLog(race)); pin=head(ArrivalLog(race)); barrier=Barrier(2); out=[]
+ def rep():
+  barrier.wait()
+  try: ledger.replicate(pin,[r1]); out.append(('rep','ok'))
+  except Exception as e: out.append(('rep',type(e).__name__))
+ def app():
+  barrier.wait()
+  try: ledger.append(pin,[RecordDraft(kind='note',authored_at=3.0,observer='kyle',body={'race':'append'})]); out.append(('append','ok'))
+  except Exception as e: out.append(('append',type(e).__name__))
+ ts=[Thread(target=rep),Thread(target=app)]; [x.start() for x in ts]; [x.join() for x in ts]
+ print('race:',sorted(out),'final_ord:',ledger.head().ordinal)
+PY" in /Users/kaygee/Code/loops-s2wp2
+ exited 1 in 66ms:
+Traceback (most recent call last):
+  File "<stdin>", line 7, in <module>
+ModuleNotFoundError: No module named 'tests.conftest'
+
+exec
+/bin/zsh -lc 'rg -n "STUB_KEY|def stub_sign" libs/engine/tests/conftest.py | head -10' in /Users/kaygee/Code/loops-s2wp2
+ succeeded in 0ms:
+38:STUB_KEY = base64.b64encode(b"k" * 32).decode()
+47:def stub_sign(observer: str, commitment: str) -> str:
+
+exec
+/bin/zsh -lc "sed -n '34,52p' libs/engine/tests/conftest.py" in /Users/kaygee/Code/loops-s2wp2
+ succeeded in 0ms:
+ARRIVAL_DOMAIN = "test-arrival-v1"
+
+# A shape-valid founding key (raw-32-byte base64 wire format) for tests that
+# only need the grammar's shape check; nothing verifies against it.
+STUB_KEY = base64.b64encode(b"k" * 32).decode()
+
+# The one vertex source the arrival store/gate suites declare.
+ARRIVAL_VERTEX_SRC = (
+    'name "x"\nstore "./x.arrival"\nloops {\n'
+    '  a { fold { n "inc" } }\n}\n'
+)
+
+
+def stub_sign(observer: str, commitment: str) -> str:
+    """A deterministic stand-in signer with the store's injected shape."""
+    return "sig:" + hashlib.sha256(f"{observer}/{commitment}".encode()).hexdigest()
+
+
+def ed25519_verify(key_b64: str, signature: str, digest: str) -> bool:
+
+ succeeded in 101360ms:
+........................................................................ [  3%]
+........................................................................ [  7%]
+........................................................................ [ 10%]
+........................................................................ [ 14%]
+........................................................................ [ 17%]
+........................................................................ [ 21%]
+........................................................................ [ 24%]
+........................................................s............... [ 28%]
+........................................................................ [ 31%]
+........................................................................ [ 35%]
+........................................................................ [ 38%]
+........................................................................ [ 42%]
+........................................................................ [ 46%]
+........................................................................ [ 49%]
+........................................................................ [ 53%]
+........................................................................ [ 56%]
+........................................................................ [ 60%]
+........................................................................ [ 63%]
+........................................................................ [ 67%]
+........................................................................ [ 70%]
+........................................................................ [ 74%]
+........................................................................ [ 77%]
+........................................................................ [ 81%]
+........................................................................ [ 84%]
+........................................................................ [ 88%]
+........................................................................ [ 92%]
+........................................................................ [ 95%]
+........................................................................ [ 99%]
+..................                                                       [100%]
+2033 passed, 1 skipped in 100.73s (0:01:40)
+
+exec
+/bin/zsh -lc ".venv/bin/python - <<'PY'
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from threading import Barrier, Thread
+import base64,hashlib
+from engine.arrival import ArrivalLog, Entry
+from engine.arrival_contract import Head, RecordDraft
+from engine.arrival_file_backend import FileLedger, EXPORT_CODEC
+KEY=base64.b64encode(b'k'*32).decode()
+def sign(o,c): return 'sig:'+hashlib.sha256(f'{o}/{c}'.encode()).hexdigest()
+def mint(p): return ArrivalLog.mint(p,observer='kyle',signer=sign,key=KEY,lineage='01TEST00000000000000000000',at=1.0)
+def head(log):
+ r=log.head(); return Head(r['lin'],r['ord'],r['rh'])
+def grow(log,tag): return log.append_marked(Entry(k='note',body={'tag':tag},observer='kyle',at=2.0))[0]
+with TemporaryDirectory() as td:
+ d=Path(td); src=mint(d/'src.arrival'); r1=grow(src,'a'); r2=grow(src,'b'); r3=grow(src,'c'); raw=src.path.read_bytes(); cuts=[]; pos=0
+ for _ in range(4): pos=raw.index(b'\\n',pos)+1; cuts.append(pos)
+ p=d/'behind.arrival'; p.write_bytes(raw[:cuts[1]]); tgt=FileLedger(ArrivalLog(p)); print('behind catchup:',tgt.import_prefix(FileLedger(src).export(through=head(src),codec=EXPORT_CODEC)).ordinal,'bytes_equal:',p.read_bytes()==raw)
+ q=d/'fork.arrival'; q.write_bytes(raw[:cuts[0]]); qlog=ArrivalLog(q); grow(qlog,'DIFFERENT')
+ try: FileLedger(qlog).import_prefix(FileLedger(src).export(through=head(src),codec=EXPORT_CODEC))
+ except Exception as e: print('full-overlap disagreement:',type(e).__name__)
+ t=d/'torn.arrival'; t.write_bytes(raw[:cuts[1]]+b'{\"partial\":'); pin=Head(r1['lin'],r1['ord'],r1['rh']); c=FileLedger(ArrivalLog(t)).replicate(pin,[r2,r3]); print('torn replicate:',c.after.ordinal,'bytes_equal:',t.read_bytes()==raw)
+ a=d/'ahead.arrival'; a.write_bytes(raw); short_head=Head(r1['lin'],r1['ord'],r1['rh'])
+ try: got=FileLedger(ArrivalLog(a)).import_prefix(FileLedger(src).export(through=short_head,codec=EXPORT_CODEC)); print('short-import-into-ahead: ACCEPTED head',got.ordinal)
+ except Exception as e: print('short-import-into-ahead: REFUSED',type(e).__name__)
+ race=d/'race.arrival'; race.write_bytes(raw[:cuts[0]]); ledger=FileLedger(ArrivalLog(race)); pin=head(ArrivalLog(race)); barrier=Barrier(2); out=[]
+ def rep():
+  barrier.wait()
+  try: ledger.replicate(pin,[r1]); out.append(('rep','ok'))
+  except Exception as e: out.append(('rep',type(e).__name__))
+ def app():
+  barrier.wait()
+  try: ledger.append(pin,[RecordDraft(kind='note',authored_at=3.0,observer='kyle',body={'race':'append'})]); out.append(('append','ok'))
+  except Exception as e: out.append(('append',type(e).__name__))
+ ts=[Thread(target=rep),Thread(target=app)]; [x.start() for x in ts]; [x.join() for x in ts]; print('race:',sorted(out),'final_ord:',ledger.head().ordinal)
+PY" in /Users/kaygee/Code/loops-s2wp2
+ exited 1 in 0ms:
+Traceback (most recent call last):
+  File "<stdin>", line 15, in <module>
+  File "<stdin>", line 13, in grow
+TypeError: ArrivalLog.append_marked() missing 1 required positional argument: 'body'
+
+exec
+/bin/zsh -lc "perl -0777 -pe 's/return log\\.append_marked\\(Entry\\(k=/return log.append_marked_many([Entry(k=/; s/,at=2\\.0\\)\\)\\[0\\]/,at=2.0)])[0][0]/' /dev/stdin <<'PY' | .venv/bin/python
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from threading import Barrier, Thread
+import base64,hashlib
+from engine.arrival import ArrivalLog, Entry
+from engine.arrival_contract import Head, RecordDraft
+from engine.arrival_file_backend import FileLedger, EXPORT_CODEC
+KEY=base64.b64encode(b'k'*32).decode()
+def sign(o,c): return 'sig:'+hashlib.sha256(f'{o}/{c}'.encode()).hexdigest()
+def mint(p): return ArrivalLog.mint(p,observer='kyle',signer=sign,key=KEY,lineage='01TEST00000000000000000000',at=1.0)
+def head(log):
+ r=log.head(); return Head(r['lin'],r['ord'],r['rh'])
+def grow(log,tag): return log.append_marked(Entry(k='note',body={'tag':tag},observer='kyle',at=2.0))[0]
+with TemporaryDirectory() as td:
+ d=Path(td); src=mint(d/'src.arrival'); r1=grow(src,'a'); r2=grow(src,'b'); r3=grow(src,'c'); raw=src.path.read_bytes(); cuts=[]; pos=0
+ for _ in range(4): pos=raw.index(b'\\n',pos)+1; cuts.append(pos)
+ p=d/'behind.arrival'; p.write_bytes(raw[:cuts[1]]); tgt=FileLedger(ArrivalLog(p)); print('behind catchup:',tgt.import_prefix(FileLedger(src).export(through=head(src),codec=EXPORT_CODEC)).ordinal,'bytes_equal:',p.read_bytes()==raw)
+ q=d/'fork.arrival'; q.write_bytes(raw[:cuts[0]]); qlog=ArrivalLog(q); grow(qlog,'DIFFERENT')
+ try: FileLedger(qlog).import_prefix(FileLedger(src).export(through=head(src),codec=EXPORT_CODEC))
+ except Exception as e: print('full-overlap disagreement:',type(e).__name__)
+ t=d/'torn.arrival'; t.write_bytes(raw[:cuts[1]]+b'{\"partial\":'); pin=Head(r1['lin'],r1['ord'],r1['rh']); c=FileLedger(ArrivalLog(t)).replicate(pin,[r2,r3]); print('torn replicate:',c.after.ordinal,'bytes_equal:',t.read_bytes()==raw)
+ a=d/'ahead.arrival'; a.write_bytes(raw); short_head=Head(r1['lin'],r1['ord'],r1['rh'])
+ try: got=FileLedger(ArrivalLog(a)).import_prefix(FileLedger(src).export(through=short_head,codec=EXPORT_CODEC)); print('short-import-into-ahead: ACCEPTED head',got.ordinal)
+ except Exception as e: print('short-import-into-ahead: REFUSED',type(e).__name__)
+ race=d/'race.arrival'; race.write_bytes(raw[:cuts[0]]); ledger=FileLedger(ArrivalLog(race)); pin=head(ArrivalLog(race)); barrier=Barrier(2); out=[]
+ def rep():
+  barrier.wait()
+  try: ledger.replicate(pin,[r1]); out.append(('rep','ok'))
+  except Exception as e: out.append(('rep',type(e).__name__))
+ def app():
+  barrier.wait()
+  try: ledger.append(pin,[RecordDraft(kind='note',authored_at=3.0,observer='kyle',body={'race':'append'})]); out.append(('append','ok'))
+  except Exception as e: out.append(('append',type(e).__name__))
+ ts=[Thread(target=rep),Thread(target=app)]; [x.start() for x in ts]; [x.join() for x in ts]; print('race:',sorted(out),'final_ord:',ledger.head().ordinal)
+PY" in /Users/kaygee/Code/loops-s2wp2
+ succeeded in 30ms:
+behind catchup: 3 bytes_equal: True
+full-overlap disagreement: SameHeightFork
+torn replicate: 3 bytes_equal: True
+short-import-into-ahead: ACCEPTED head 3
+race: [('append', 'ok'), ('rep', 'HeadMismatch')] final_ord: 1
+
+codex
+The targeted probes found one contract violation: importing a shorter agreeing prefix into a target already ahead is accepted, although the contract requires agreement through the target’s head. Catch-up from behind compares the entire overlap and succeeds byte-exactly; a disagreement below the head raises `SameHeightFork`. A torn tail is deliberately repaired under the writer lock before replication, and the append-vs-replicate race admitted exactly one writer with the loser receiving `HeadMismatch`.
+exec
+/bin/zsh -lc ".venv/bin/python - <<'PY'
+import importlib.util, shutil, tempfile
+from pathlib import Path
+p=Path('libs/engine/tests/test_conformance_replicate.py').resolve(); s=importlib.util.spec_from_file_location('tcr',p); m=importlib.util.module_from_spec(s); s.loader.exec_module(m)
+with tempfile.TemporaryDirectory() as td:
+ d=Path(td)
+ files=m._load_vectors(m.REPLICATE_VECTORS_DIR)
+ for f in files: shutil.copy2(f,d/f.name)
+ dropped=files[0].name; (d/dropped).unlink(); m.REPLICATE_VECTORS_DIR=d
+ try:
+  m.test_every_replicate_family_has_vectors(); print('drop-one:',dropped,'CHECK PASSED')
+ except Exception as e: print('drop-one:',dropped,'CHECK FAILED',type(e).__name__)
+ # remove remaining exact suffix vectors to demonstrate intended family loss gate
+ for f in list(d.glob('replicate-exact-suffix-*.json')): f.unlink()
+ try: m.test_every_replicate_family_has_vectors(); print('drop-family: CHECK PASSED')
+ except Exception as e: print('drop-family: CHECK FAILED',type(e).__name__,str(e))
+PY
+nl -ba libs/engine/src/engine/arrival_file_backend.py | sed -n '485,555p'
+nl -ba libs/engine/tests/test_conformance_replicate.py | sed -n '45,80p'
+rg -n \"signature|family property|assign|validate\" spec/conformance/SCHEMA.md
+
+git diff --name-only 0d38c969...165d86ea -- libs/engine/src/engine/arrival.py libs/engine/src/engine/arrival_contract.py libs/engine/src/engine/arrival_file_backend.py spec/conformance/SCHEMA.md spec/conformance/vectors/replicate | wc -l" in /Users/kaygee/Code/loops-s2wp2
+ succeeded in 147ms:
+drop-one: replicate-catch-up-from-a-genesis-only-replica.json CHECK PASSED
+drop-family: CHECK FAILED AssertionError no vector in the 'replicate-exact-suffix-' family
+   485	        **Replica is not authority** (§08's callout). This method copies
+   486	        records; it grants nothing. A store that then accepts independent
+   487	        writes has forked, byte-identical start or not, and no flag here
+   488	        prevents that — custody does.
+   489	
+   490	        The verified remainder is materialised, because it is handed to one
+   491	        atomic :meth:`replicate`. That is the honest limit of a MINIMAL
+   492	        importer: an import too large to hold is a resumable-transfer design,
+   493	        and this is not one.
+   494	        """
+   495	        if prefix.codec != EXPORT_CODEC:
+   496	            raise ValueError(
+   497	                f"this backend imports {EXPORT_CODEC!r} and nothing else, but "
+   498	                f"this export claims codec {prefix.codec!r}"
+   499	            )
+   500	        imported = _decoded(prefix)
+   501	        _refuse_disagreeing_manifest(prefix, imported)
+   502	
+   503	        if not self._log.exists():
+   504	            # A new empty replica. Genesis cannot be appended onto a head that
+   505	            # is not there, and it must not be re-minted either: a replica
+   506	            # whose ordinal 0 differed by one byte would be a different
+   507	            # lineage wearing the same id.
+   508	            log = ArrivalLog.adopt_genesis(self._log.path, imported[0])
+   509	            self._log = log
+   510	            head = _head_of(log.genesis())
+   511	            if len(imported) == 1:
+   512	                return head
+   513	            return self.replicate(head, imported[1:]).after
+   514	
+   515	        head = self.head()
+   516	        self._refuse_disagreeing_prefix(imported, head)
+   517	        remainder = [
+   518	            record for record in imported if record["ord"] > head.ordinal
+   519	        ]
+   520	        if not remainder:
+   521	            # The import is a prefix of what this target already holds. Not a
+   522	            # failure and not a no-op to hide: nothing was missing.
+   523	            return head
+   524	        return self.replicate(head, remainder).after
+   525	
+   526	    def _refuse_disagreeing_prefix(
+   527	        self, imported: Sequence[Mapping[str, Any]], head: Head
+   528	    ) -> None:
+   529	        """§08's exact-prefix-agreement gate for a non-empty target.
+   530	
+   531	        Over :meth:`scan`, which is the read op that already establishes the
+   532	        target's prefix is intact — so this adds one comparison and no second
+   533	        traversal of its own. Position by position against the import, so the
+   534	        refusal names the ordinal the two disagree at rather than reporting
+   535	        that they differ somewhere.
+   536	
+   537	        Distinct from the same-height fork :meth:`replicate` refuses: that one
+   538	        fires on an overlap it was HANDED, this one on the overlap it is about
+   539	        to SKIP. Both say the histories disagree at a height; skipping an
+   540	        overlap without checking it is how a replica silently acquires a
+   541	        prefix it never verified.
+   542	        """
+   543	        for mine, theirs in zip(self.scan(through=head), imported, strict=False):
+   544	            if mine["rh"] != theirs["rh"]:
+   545	                raise SameHeightFork(
+   546	                    f"ordinal {mine['ord']} of {self._log.path} holds rh "
+   547	                    f"{mine['rh']}, but the import holds rh {theirs['rh']} at "
+   548	                    f"ordinal {theirs['ord']} — this import is not a continuation "
+   549	                    "of this log's history. Importing into a non-empty target "
+   550	                    "requires exact prefix agreement through its head"
+   551	                )
+   552	
+   553	    # -- reads through the ledger ------------------------------------------
+   554	
+   555	    def head(self, lineage: str | None = None) -> Head:
+    45	
+    46	# The three families §D.2 requires, by filename prefix. Asserted as a set so a
+    47	# family that silently loses its last vector fails rather than passing vacuously.
+    48	FAMILIES = (
+    49	    "replicate-exact-suffix-",
+    50	    "replicate-same-height-",
+    51	    "replicate-catch-up-",
+    52	)
+    53	
+    54	
+    55	def _load_vectors(vectors_dir: Path) -> list[Path]:
+    56	    return sorted(vectors_dir.glob("*.json"))
+    57	
+    58	
+    59	def _head(data: dict[str, Any] | None) -> Head | None:
+    60	    if data is None:
+    61	        return None
+    62	    return Head(
+    63	        lineage=data["lineage"],
+    64	        ordinal=data["ordinal"],
+    65	        record_hash=data["record_hash"],
+    66	    )
+    67	
+    68	
+    69	def test_every_replicate_family_has_vectors():
+    70	    """§D.2 names three families; a family with no vectors proves nothing."""
+    71	    stems = [path.stem for path in _load_vectors(REPLICATE_VECTORS_DIR)]
+    72	    assert stems, "the replicate area holds no vectors at all"
+    73	    for family in FAMILIES:
+    74	        assert any(stem.startswith(family) for stem in stems), (
+    75	            f"no vector in the {family!r} family"
+    76	        )
+    77	
+    78	
+    79	@pytest.mark.parametrize(
+    80	    "vector_path", _load_vectors(REPLICATE_VECTORS_DIR), ids=lambda p: p.stem
+247:Given an append-ordered sequence of stored facts (which assign internal receipt ordinals / rowids), a conforming store replays facts filtered by kind strictly in **receipt order** (`rowid ASC`) — the order in which that store received them. The ULID `id` is stable identity only and `ts` is event-time metadata; neither orders the fold. `(ts, id)` survives only as an explicit read-path lens (see §9, Area `lens`). Each fact payload is augmented with system metadata fields (`_ts`, `_id`, `_observer`, `_origin`) and folded into the spec.
+359:The `replicate` area pins **exact replication** (backend-contract.html §08): the transfer operation that consumes records which already carry their coordinate. A conforming implementation VALIDATES what it is handed and assigns nothing — never a new lineage, ordinal, predecessor, signature, or record hash. Records land byte-for-byte as offered, or nothing lands.
+405:- **`replicate-catch-up-*`** — a stale replica brought forward, ending byte-identical to the authority. **At least one vector in this family carries SIGNED records, and that is a property of the family rather than an accident of its fixtures.** An implementation that re-coordinated an exact suffix would assign the same lineage, ordinal and predecessor and reproduce identical hashes — so an unsigned suffix cannot distinguish assigning from validating. A signature is content the assigning path does not carry, which is what makes the two observably different.
+      14
+
+exec
+/bin/zsh -lc "comm -23 <(git ls-tree -r --name-only 0d38c969 libs/engine/tests | rg '/test_arrival.*\\.py"'$'"' | sort) <(git diff --name-only 0d38c969...165d86ea | sort) | wc -l; git ls-tree -r --name-only 0d38c969 libs/engine/tests | rg '/test_arrival.*\\.py"'$'"' | wc -l; git diff --name-only 0d38c969...165d86ea | rg '"'^libs/engine/tests/test_arrival.*'"\\.py"'$'"'" in /Users/kaygee/Code/loops-s2wp2
+ succeeded in 0ms:
+      13
+      14
+libs/engine/tests/test_arrival_contract.py
+libs/engine/tests/test_arrival_transfer.py
+
+exec
+/bin/zsh -lc "sed -n '735,760p' libs/engine/src/engine/arrival_file_backend.py; git diff --name-status 0d38c969...165d86ea -- libs/store; git diff --name-only 165d86ea"'^ 165d86ea; git diff --check 0d38c969...165d86ea' in /Users/kaygee/Code/loops-s2wp2
+ succeeded in 0ms:
+                "newline-terminated records, so an append in flight is "
+                "invisible rather than partial"
+            ),
+            watermark=(
+                "the projection reports a (lineage, ordinal) coordinate; the "
+                "ledger attests the head at it"
+            ),
+            max_atomic_records=self._max_atomic_records,
+            idempotency_keys=False,
+            export_codecs=(EXPORT_CODEC,),
+            limits=(),
+        )
+
+
+def _meta(index_path: Path, key: str) -> str | None:
+    """One ``store_meta`` value, through a connection that cannot write.
+
+    Opened per call rather than held: the watermark advances as the
+    projection consumes, so a cached answer would be a stale claim about
+    freshness, which is the one thing a watermark must never be. Read-only by
+    URI, so this path cannot repair what it is reporting on even by accident.
+    """
+    if not index_path.exists():
+        return None
+    conn = sqlite3.connect(f"file:{index_path}?mode=ro", uri=True)
+    try:
+docs/scratch/arrival-break/slice2-wp2-report.md
+libs/engine/tests/test_arrival_contract.py
+
+codex
+## Contract review
+
+1. **PASS — replication composition and refusal taxonomy.** `replicate()` delegates to `ArrivalLog.append_records()`, which uses the shared `_append_many_under_lock`. Supplied hashes are validated, the full head is pinned under lock, and `ForkedHeight` maps to `SameHeightFork`, outside `AppendRejected`. A real append/replicate race admitted exactly one writer; the loser received `HeadMismatch`, leaving a valid ordinal-1 log.
+
+2. **PASS — shared site-B CAS.** Both carried-record and assigning batch paths converge on `_append_many_under_lock`; site A remains separate. Prior mutation evidence remains sound.
+
+3. **PASS — export.** Dense prefix framing is newline-terminated and byte-exact. Existing direct tests confirm `b"".join(prefix.records)` equals the log prefix. The manifest contains only deterministic protocol/codec/head metadata—no clock or host.
+
+4. **FAIL — portable import.** Empty-target import correctly uses `adopt_genesis`, and behind-target catch-up compared the entire overlap and reproduced the authority bytes exactly. However, an imported prefix ending before the target’s head is accepted without establishing agreement through that head. See S2WP2-L-1.
+
+5. **PASS — replication vectors.** All three required families exist and pass. `SCHEMA.md` explicitly requires a signed catch-up member as a family property, making assign-versus-validate observable. The overall suite, including vectors, passed.
+
+6. **PASS — capabilities and surfaces.** Capabilities advertise `AUTHORITY` plus `REPLICA`, exactly `arrival-jsonl-v1`, and no `ARCHIVE`. `import_prefix` is absent from the nine-operation Protocol but present in `LEDGER_MUTATIONS`.
+
+Non-negotiables checked: no store-package changes; no second appender or genesis ceremony found; codec and commitment semantics were untouched.
+
+## Gate F-1
+
+**PASS.**
+
+- Tip `165d86ea` changes only `libs/engine/tests/test_arrival_contract.py` and the WP report.
+- No executable use of `__protocol_attrs__` remains; the only occurrence is explanatory prose.
+- Added a tenth Protocol operation: exact equality failed with left-side extra `tenth`.
+- Removed `export`: exact equality failed with right-side missing `export`, while `isinstance(adapter, ArrivalLedger)` remained `True`.
+- The query-separation test still iterates directly over `LEDGER_MUTATIONS`.
+- `RATIFIED_LEDGER_OPS` is an independent written-out literal.
+
+## New findings
+
+**S2WP2-L-1** — [arrival_file_backend.py](/Users/kaygee/Code/loops-s2wp2/libs/engine/src/engine/arrival_file_backend.py:515), **BLOCKING**
+
+`_refuse_disagreeing_prefix()` uses `zip(..., strict=False)`. If the imported prefix ends before the target head, comparison stops at the imported end; lines 520–523 then explicitly accept it.
+
+Concrete reproduction: authority/target held ordinals 0–3, while the valid imported manifest ended at ordinal 1. `import_prefix()` returned the target head at ordinal 3 instead of refusing. Thus it did not establish exact agreement through the target’s head as required.
+
+**S2WP2-L-2** — [test_conformance_replicate.py](/Users/kaygee/Code/loops-s2wp2/libs/engine/tests/test_conformance_replicate.py:69), **NON-BLOCKING**
+
+The “family completeness” test detects only removal of the final vector in a family, not deletion of an individual fixture.
+
+Empirical reproduction: removed `replicate-catch-up-from-a-genesis-only-replica.json`; the completeness check still passed. Removing every exact-suffix vector made it fail. This protects the three-family requirement but not fixture inventory.
+
+Additional seeded result: adding a partial final line to a behind replica and then replicating caused the shared writer to truncate the torn bytes under lock and land the suffix byte-exactly. This is intentional writer recovery rather than refusal; verification remains read-only and refuses torn tails.
+
+Full suite: **2033 passed, 1 skipped** in 100.73s.
+
+**NOT CONVERGED — blocking: S2WP2-L-1.**
+tokens used
+78,028
+## Contract review
+
+1. **PASS — replication composition and refusal taxonomy.** `replicate()` delegates to `ArrivalLog.append_records()`, which uses the shared `_append_many_under_lock`. Supplied hashes are validated, the full head is pinned under lock, and `ForkedHeight` maps to `SameHeightFork`, outside `AppendRejected`. A real append/replicate race admitted exactly one writer; the loser received `HeadMismatch`, leaving a valid ordinal-1 log.
+
+2. **PASS — shared site-B CAS.** Both carried-record and assigning batch paths converge on `_append_many_under_lock`; site A remains separate. Prior mutation evidence remains sound.
+
+3. **PASS — export.** Dense prefix framing is newline-terminated and byte-exact. Existing direct tests confirm `b"".join(prefix.records)` equals the log prefix. The manifest contains only deterministic protocol/codec/head metadata—no clock or host.
+
+4. **FAIL — portable import.** Empty-target import correctly uses `adopt_genesis`, and behind-target catch-up compared the entire overlap and reproduced the authority bytes exactly. However, an imported prefix ending before the target’s head is accepted without establishing agreement through that head. See S2WP2-L-1.
+
+5. **PASS — replication vectors.** All three required families exist and pass. `SCHEMA.md` explicitly requires a signed catch-up member as a family property, making assign-versus-validate observable. The overall suite, including vectors, passed.
+
+6. **PASS — capabilities and surfaces.** Capabilities advertise `AUTHORITY` plus `REPLICA`, exactly `arrival-jsonl-v1`, and no `ARCHIVE`. `import_prefix` is absent from the nine-operation Protocol but present in `LEDGER_MUTATIONS`.
+
+Non-negotiables checked: no store-package changes; no second appender or genesis ceremony found; codec and commitment semantics were untouched.
+
+## Gate F-1
+
+**PASS.**
+
+- Tip `165d86ea` changes only `libs/engine/tests/test_arrival_contract.py` and the WP report.
+- No executable use of `__protocol_attrs__` remains; the only occurrence is explanatory prose.
+- Added a tenth Protocol operation: exact equality failed with left-side extra `tenth`.
+- Removed `export`: exact equality failed with right-side missing `export`, while `isinstance(adapter, ArrivalLedger)` remained `True`.
+- The query-separation test still iterates directly over `LEDGER_MUTATIONS`.
+- `RATIFIED_LEDGER_OPS` is an independent written-out literal.
+
+## New findings
+
+**S2WP2-L-1** — [arrival_file_backend.py](/Users/kaygee/Code/loops-s2wp2/libs/engine/src/engine/arrival_file_backend.py:515), **BLOCKING**
+
+`_refuse_disagreeing_prefix()` uses `zip(..., strict=False)`. If the imported prefix ends before the target head, comparison stops at the imported end; lines 520–523 then explicitly accept it.
+
+Concrete reproduction: authority/target held ordinals 0–3, while the valid imported manifest ended at ordinal 1. `import_prefix()` returned the target head at ordinal 3 instead of refusing. Thus it did not establish exact agreement through the target’s head as required.
+
+**S2WP2-L-2** — [test_conformance_replicate.py](/Users/kaygee/Code/loops-s2wp2/libs/engine/tests/test_conformance_replicate.py:69), **NON-BLOCKING**
+
+The “family completeness” test detects only removal of the final vector in a family, not deletion of an individual fixture.
+
+Empirical reproduction: removed `replicate-catch-up-from-a-genesis-only-replica.json`; the completeness check still passed. Removing every exact-suffix vector made it fail. This protects the three-family requirement but not fixture inventory.
+
+Additional seeded result: adding a partial final line to a behind replica and then replicating caused the shared writer to truncate the torn bytes under lock and land the suffix byte-exactly. This is intentional writer recovery rather than refusal; verification remains read-only and refuses torn tails.
+
+Full suite: **2033 passed, 1 skipped** in 100.73s.
+
+**NOT CONVERGED — blocking: S2WP2-L-1.**

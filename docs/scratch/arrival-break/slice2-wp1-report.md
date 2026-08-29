@@ -177,6 +177,8 @@ enumerated list (`Watermark`), and `head_at` on the ledger.
 
 ### D3 — types added beyond the brief's enumerated list
 
+`finding:slice2-wp1-types-beyond-enumerated-list` @ `01M179XT4AWQ7BKNBTDAQQNGCK`.
+
 The brief enumerates `Head`, `RecordDraft`, `Commit`, `DurabilityReceipt`, `Capabilities`,
 `VerifyScope`, `StoreDescriptor`. Three additions, each because a declared signature would
 otherwise have had to lie:
@@ -191,6 +193,8 @@ Avoided by contrast: `mint(options: Mapping[str, Any])` and `verify(scope) -> He
 new type, so none was invented for them.
 
 ### D4 — the ratified refusal set does not cover absence, corruption, or double-mint
+
+`finding:slice2-wp1-refusal-set-gaps` @ `01M179Y4PCEFY4V7CPJB7G3BEG`.
 
 The five typed refusals (`HeadMismatch`, `SameHeightFork`, `NotAuthority`,
 `UnknownBackend`, `AtomicLimitExceeded`) are the ratified set, so `head()` on an unminted

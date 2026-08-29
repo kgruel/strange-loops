@@ -5,10 +5,19 @@ Slice 2 of the arrival break (``design:arrival-break-slice2-backend-contract``
 
 * :func:`descriptor_for` reads a parsed ``.vertex`` and answers what
   :class:`engine.arrival_contract.StoreDescriptor` — if any — describes its
-  store. Pure: AST fields plus path arithmetic, no I/O, no adapter import, and
-  no knowledge of which backends this process has. It can answer about a
-  ``backend="duckdb"`` vertex on a host with no DuckDB adapter installed,
-  which is the point of separating naming from opening.
+  store. AST fields plus path arithmetic: no I/O, and no knowledge of which
+  backends this process has. It can answer about a ``backend="duckdb"`` vertex
+  on a host with no DuckDB adapter installed, which is the point of separating
+  naming from opening.
+
+  **"No adapter import" is an IMPORT-TIME claim, scoped deliberately**
+  (``finding:s2wp4-gate-f1-descriptor-for-calltime-import``): importing this
+  module drags in neither ``sqlite3`` nor the adapter, which is the property
+  ``test_importing_the_registry_does_not_drag_the_adapter_in`` pins. CALLING
+  :func:`descriptor_for` does reach :mod:`engine.residence`, which imports
+  :mod:`engine.arrival` at module level — pre-existing coupling this slice does
+  not touch, and slice 5's residence rewiring is where it goes. The adapter
+  SURFACE stays out either way; nothing here constructs a ledger.
 * :class:`BackendRegistry` maps a backend NAME to an opener. This is the half
   that can fail with :class:`~engine.arrival_contract.UnknownBackend`, because
   this is the half that knows what is registered.

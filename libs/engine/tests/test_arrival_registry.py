@@ -189,12 +189,13 @@ def test_the_file_opener_hands_back_both_halves(tmp_path):
         # the opener's custody half offers, never that they behave.
         offered = {op for op in dir(ledger) if not op.startswith("_")}
         assert {"mint", "head", "append", "read", "scan", "verify"} <= offered
-        # The ledger does NOT yet satisfy the full ArrivalLedger protocol:
-        # `replicate` and `export` are WP2's and are deliberately absent
-        # rather than stubbed, so the opener's declared return type is the
-        # surface it is FOR, not the surface it reaches today. WP2 closes
-        # the gap; WP1's own test pins the absence.
-        assert not isinstance(ledger, ArrivalLedger)
+        # WP2 landed `replicate` and `export`, so the opener's custody half
+        # now satisfies the full ArrivalLedger protocol. This pin was born as
+        # its negation ("WP2 closes the gap") while the WPs built in
+        # parallel; the surface test in test_arrival_contract.py owns the
+        # exact nine-op equality, this one just confirms the opener's return
+        # reaches the surface it declares.
+        assert isinstance(ledger, ArrivalLedger)
         assert isinstance(query, ArrivalQuery)
     finally:
         query.close()

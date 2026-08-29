@@ -1,0 +1,1726 @@
+Reading prompt from stdin...
+OpenAI Codex v0.150.1
+--------
+workdir: /Users/kaygee/Code/loops-s3wp1
+model: gpt-5.6-sol
+provider: openai
+approval: never
+sandbox: workspace-write [workdir, /tmp, $TMPDIR]
+reasoning effort: low
+reasoning summaries: none
+session id: 01a04fed-ed14-7991-8af0-ebdff051568b
+--------
+user
+# Sol review brief — arrival-break slice 3 / WP1, round 3 (per-WP, LOW — fast verify)
+
+Round 3, verifying your r2 finding S3WP1-L-2 (stale contract prose). Runtime was fully
+verified in r2 and nothing but prose changed since — this round is a prose-accuracy
+check, not a re-review.
+
+## Anchor
+
+- Branch: `slice3/arrival-witness`, NEW tip `5d24cf06` (two commits over r2's
+  `8ce304c6`). Diff: `git diff 8ce304c6...5d24cf06`.
+
+## The fix's claims — verify each
+
+1. PROSE-ONLY, proven mechanically: the module's AST is identical to 8ce304c6 once
+   docstrings and comments are stripped. Re-run that check yourself (parse both,
+   strip docstrings/comments, compare dumps). No test file touched; engine 2157+1s
+   and architecture 99 unmoved.
+2. Your three named sites (:184 region JournalUnreadable docstring, parser docstring,
+   write-path comment) now state the ruled behavior — JournalUnreadable only when
+   there is no text to parse; parse_journal_lines never refuses on structure;
+   the reader tolerates headerless journals.
+3. The impl's sweep found FOUR MORE stale statements and fixed them: JournalRead.skipped
+   wording (absence is not a line; non-empty is the weakening condition);
+   established_head's refusal condition (was narrower than the code); _parse_entry's
+   kindless-branch comment (described the absorb-everything behavior the gate's
+   BLOCKING-1 removed — a reader trusting it would restore the defect);
+   _PROTOCOL_VERSION's claim of an enforcement the code does not perform (now names
+   the open gap with wire v2 as forcing consumer).
+4. YOUR JOB beyond re-reading those seven: one independent sweep of the module for any
+   REMAINING statement that describes pre-ruling behavior (classification, refusal
+   scope, first-contact conditions, promise wording) — the file has now shown
+   three-for-three that every behavior fix leaves prose behind. If you find an eighth,
+   it is a finding; if not, say you looked.
+
+## Verdict format
+
+Fix: PASS/FAIL + evidence. Any new findings: `S3WP1-L-<n>`. Then one line:
+**CONVERGED** or **NOT CONVERGED**.
+
+codex
+I’ll verify the anchored diff and mechanical AST equivalence first, then audit the seven named prose sites and sweep the full changed module for any remaining pre-ruling claims.
+exec
+/bin/zsh -lc 'git status --short && git diff --stat 8ce304c6...5d24cf06 && git diff --name-only 8ce304c6...5d24cf06 && git diff --unified=40 8ce304c6...5d24cf06' in /Users/kaygee/Code/loops-s3wp1
+ succeeded in 0ms:
+ docs/scratch/arrival-break/slice3-wp1-report.md    | 30 ++++++++
+ libs/engine/src/engine/arrival_head_attestation.py | 86 ++++++++++++++--------
+ 2 files changed, 87 insertions(+), 29 deletions(-)
+docs/scratch/arrival-break/slice3-wp1-report.md
+libs/engine/src/engine/arrival_head_attestation.py
+diff --git a/docs/scratch/arrival-break/slice3-wp1-report.md b/docs/scratch/arrival-break/slice3-wp1-report.md
+index 23ba3ca1..dcebe48d 100644
+--- a/docs/scratch/arrival-break/slice3-wp1-report.md
++++ b/docs/scratch/arrival-break/slice3-wp1-report.md
+@@ -371,40 +371,70 @@ reborn from the other side. The two obvious repairs fail in opposite directions,
+ what makes the rule three-way rather than a predicate.
+ 
+ **The rule, and it states its own limits:**
+ 
+ | Line | Verdict |
+ |---|---|
+ | Kindless, bearing the type string | Header. Unchanged. |
+ | Bearing **both** the type marker and an entry `kind` | **Unclassifiable by this build.** Skipped and reported naming the ambiguity. Never absorbed, never a header, never a reason to refuse the file. |
+ | Anything else | Entry-shaped: read as an entry, or skipped as before. |
+ 
+ The middle row is the whole point. It is a location claim about this build's ability to
+ read the line — *not* a verdict about what the line is, which is exactly what this build
+ cannot know. Classification never absorbs and never refuses the file.
+ 
+ **Readable entries with no recognized header are now tolerated.** The entries are
+ self-describing evidence that heads were accepted, and a weakened claim is available, so
+ `known` falls to `HeadLowerBound` with the header's absence reported in `.skipped` —
+ proceed-answers decline, rollback stays sound. Refusing there would be a verdict where a
+ bound would do, which is the error `HeadUnreadable` was added to correct. The absence is
+ reported without a line number, because an absence does not have one.
+ 
+ **What still triggers `JournalUnreadable`, and why it is now the only thing.** Every
+ structural condition the *parser* meets yields a weakened claim rather than a verdict, so
+ the parser no longer raises it at all. What remains is the one case that leaves nothing to
+ parse: the journal is there and cannot be read as text — a directory, a permission wall,
+ bytes that are not text. Those previously escaped `read_journal` as raw `OSError` and
+ `UnicodeDecodeError`, straight past any caller catching `AttestationRefusal`, so this
+ narrowing also closes a latent gap rather than merely relocating the class. Its own test
+ pins it.
+ 
+ ### Sol-round mutation demos
+ 
+ | # | Mutation | Result (94 tests) |
+ |---|---|---|
+ | (i-a) | the kindless precondition restored, so there is no ambiguous verdict | **2 failed, 92 passed** — `test_a_header_carrying_its_own_kind_does_not_refuse_the_file`, `test_a_type_bearing_entry_is_never_absorbed_as_a_header` |
+ | (i-b) | headerless entries refuse again (ruling 3 reverted) | **1 failed, 93 passed** — `test_entries_with_no_header_are_tolerated_as_a_weakened_claim` |
+ | (ii) | type-plus-kind classified as a header (the absorption arm) | **2 failed, 92 passed** — the mirror test, plus sol's own demonstration |
+ 
+ Both directions of the mirror are pinned: (i-a) removes the ambiguity verdict and (ii)
+ resolves it toward absorption, and each fails the test written for it.
++
++
++## Sol-LOW round 2 — the prose sweep (`959e6d41`)
++
++`finding:s3wp1-sol-l2-stale-journal-unreadable-prose`. Runtime was fully verified this
++round; the finding is prose. Three contract-facing statements still documented the
++`JournalUnreadable` scope from two rounds ago — the exception's own docstring, the
++parser's docstring, and the write-path comment all said the reader refuses a journal whose
++entries have no header. It tolerates that now, reports the absence, and weakens the claim
++to a bound.
++
++**The sweep the finding asked for turned up four more.** Answering the question directly:
++yes, there were others, and one of them was worse than the three that were named.
++
++| Site | What it still said |
++|---|---|
++| `JournalRead.skipped` | "Lines this build could not use." A missing header is reported there too and is not a line. Now says so, and names non-empty as exactly the condition that weakens `known`. |
++| `established_head` | Refuses "when any epoch line was unreadable" — narrower than the code, which also refuses on an unclassifiable line and on a missing header. |
++| `_parse_entry`'s kindless branch | Still called a kindless object "the header, or a future sibling of it". **The most dangerous of the seven**: classification takes headers before this function is reached, so this comment described precisely the absorb-everything-kindless behaviour BLOCKING-1 removed. A reader trusting it would have restored the defect. |
++| `_PROTOCOL_VERSION` | Claimed a v1 journal "is never silently compared against a v2 head". Nothing reads these values back, so the promise is half kept. Not classification prose, but the same defect class — a comment asserting an enforcement the code does not perform — so it is fixed and the open gap is named at the site with wire v2 as its forcing consumer. |
++
++**Prose only, and mechanically checked rather than asserted:** the module's AST is
++identical to the previous commit once docstrings, attribute docstrings and comments are
++stripped. No test changed. Engine 2157, architecture 99, both unmoved.
++
++The pattern is now three-for-three in this file: every classification fix left prose
++behind that described the behaviour it replaced. That is the same overcorrection loop
++recorded after sol r1, seen from the documentation side — which is why the `_parse_entry`
++comment matters more than its size suggests. A stale comment at a branch is a defect with
++a delay.
+diff --git a/libs/engine/src/engine/arrival_head_attestation.py b/libs/engine/src/engine/arrival_head_attestation.py
+index 6e87d235..97fcebde 100644
+--- a/libs/engine/src/engine/arrival_head_attestation.py
++++ b/libs/engine/src/engine/arrival_head_attestation.py
+@@ -145,93 +145,99 @@ class HeadRewrite(AttestationRefusal):
+     The chain in front of us may verify perfectly and still be a different
+     history than the one we accepted. Checking only that a walk reached the
+     presented head answers nothing about continuity with what came before,
+     which is precisely the "never accept height as proof of continuity"
+     failure.
+     """
+ 
+ 
+ class LineageReplaced(AttestationRefusal):
+     """A different lineage is presented where a known one was expected.
+ 
+     Where the expected lineage is declared, the backend's own
+     ``NotAuthority`` fires first and is already correct. This exists because
+     the classifier owns the row the vectors exercise, and because a caller
+     that reached the comparison without a declared lineage still needs it.
+     """
+ 
+ 
+ class StoreLost(AttestationRefusal):
+     """The log is gone, but the journal remembers a head for it.
+ 
+     The attack matrix's "delete the store and every backup" row, where the
+     witness proves what was *lost* rather than its contents. It must refuse,
+     and in particular it must never permit a silent re-mint under a remembered
+     lineage: a fresh genesis at a location whose journal remembers ordinal
+     4217 is a replacement wearing the old name. Recovery is the explicit
+     trust-reset ceremony.
+     """
+ 
+ 
+ class JournalEquivocation(AttestationRefusal):
+     """The journal itself holds two incompatible histories.
+ 
+     Two entries at the maximum ordinal of the current trust epoch with
+     different record hashes. The journal has recorded both and it is not the
+     journal's place to choose between them.
+     """
+ 
+ 
+ class JournalUnreadable(AttestationRefusal):
+-    """Structural damage that breaks the read itself.
+-
+-    Scoped deliberately narrow: **entries with no header**. The header states
+-    the protocol and wire versions the record hashes derive under, so without
+-    it a comparison is not a weaker answer but a meaningless one.
+-
+-    It does NOT cover an unreadable *line*. Those are skipped and reported,
+-    and the loss they cause is carried in the result type
+-    (:class:`HeadLowerBound`) rather than converted into a verdict about the
+-    store. Refusing there made an ordinary crash a permanent incident, and it
+-    claimed a protection this location cannot deliver anyway — anyone able to
+-    corrupt a line in the journal can delete the journal instead and be met
+-    with trust-on-first-use.
++    """There is nothing to parse: the journal cannot be read as text at all.
++
++    A directory where the journal should be, a permission wall, bytes that
++    are not text. Distinct from an *absent* journal, which is first contact,
++    and from a journal whose *content* cannot be read, which is
++    :class:`HeadUnreadable`. Raised rather than let out as the underlying
++    ``OSError`` so that a caller catching :class:`AttestationRefusal` does not
++    have a builtin escape past it.
++
++    **This is the only thing that raises it, and the scope has narrowed
++    twice.** It once covered damage above the last line, then entries with no
++    header. Both are now tolerated: an unreadable line is skipped and
++    reported, a missing header is reported as an absence, and in each case the
++    loss is carried in the result type (:class:`HeadLowerBound`) instead of
++    converted into a verdict. Refusing made an ordinary crash a permanent
++    incident, and it claimed a protection this location cannot deliver anyway
++    — anyone able to corrupt the journal can delete it instead and be met with
++    trust-on-first-use. Where a weakened claim is available, a refusal is a
++    verdict the evidence does not support.
+     """
+ 
+ 
+ class IndeterminateComparison(AttestationRefusal):
+     """A full comparison was asked of a journal that could not be read in full.
+ 
+     Not a claim about the store. The journal's own record of what this machine
+     accepted has a hole in it, so "unchanged" is a question this journal can no
+     longer answer — while "rollback" is one it still can, for anything below
+     the bound. Raised by :meth:`JournalRead.established_head` so the cheap
+     unchanged shortcut cannot be taken by a caller who simply forgot to look.
+     """
+ 
+ 
+ class UnsafeLineageName(AttestationRefusal):
+     """This lineage cannot be used as a journal filename.
+ 
+     ``lin`` is validated only as a non-empty string on the wire, and while
+     ``mint_lineage()`` produces a ULID, a foreign or hostile genesis need not.
+     Scope-the-claim: this is a location claim ("this cache cannot key on that
+     string"), NOT a verdict about the store — refusing to resolve a path says
+     nothing about whether the store is trustworthy.
+     """
+ 
+ 
+ # ---------------------------------------------------------------------------
+ # The observation record (§B.2)
+ # ---------------------------------------------------------------------------
+ 
+ 
+ class Kind(Enum):
+     """Why this entry exists."""
+ 
+     BOOTSTRAP = "bootstrap"  # the first entry for a lineage
+     ADVANCE = "advance"  # the head moved
+     AUDIT = "audit"  # a full chain-plus-projection audit ran
+     TRUST_RESET = "trust-reset"  # an operator ceremony re-established trust
+ 
+ 
+ class Level(Enum):
+@@ -395,82 +401,88 @@ REFUSALS: dict[Outcome, type[AttestationRefusal]] = {
+ #: The same table for the absent-store split.
+ ABSENT_STORE_REFUSALS: dict[AbsentStoreOutcome, type[AttestationRefusal]] = {
+     AbsentStoreOutcome.STORE_LOST: StoreLost,
+ }
+ 
+ 
+ def refusal_for(
+     outcome: Outcome | AbsentStoreOutcome,
+ ) -> type[AttestationRefusal] | None:
+     """The refusal this outcome raises, or None if it proceeds."""
+     if isinstance(outcome, AbsentStoreOutcome):
+         return ABSENT_STORE_REFUSALS.get(outcome)
+     return REFUSALS.get(outcome)
+ 
+ 
+ # ---------------------------------------------------------------------------
+ # Where the journal lives (§A.3)
+ # ---------------------------------------------------------------------------
+ 
+ #: Conservative: a leading alphanumeric, then alphanumerics, dot, dash,
+ #: underscore. A ULID passes; a path separator, a leading dot, an empty
+ #: string, a traversal segment and a name long enough to trouble a filesystem
+ #: all fail. Narrow by intent — widening it later is additive, and every
+ #: character admitted is a character some filesystem treats specially.
+ _SAFE_LINEAGE = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9._-]{0,127}\Z")
+ 
+ #: Names the heads directory already spends on something else. ``bindings``
+ #: is the transitional binding file below, and a lineage literally named
+ #: "bindings" would otherwise write its observations into it. Compared
+ #: case-folded because the filesystems this runs on are commonly
+ #: case-insensitive, so ``BINDINGS`` collides just as hard.
+ _RESERVED_LINEAGE_NAMES = frozenset({"bindings"})
+ 
+ #: The journal grammar version. A literal rather than an import of
+ #: ``engine.arrival.GRAMMAR_VERSION``: reaching for it would drag the whole
+ #: file codec into a module whose readability must not depend on it, and the
+ #: two version each other independently anyway — this is the journal's
+ #: grammar, not the record grammar.
+ _JOURNAL_VERSION = 1
+ 
+-#: Stated in the header so a journal written under wire v1 is never silently
+-#: compared against a v2 head whose hashes derive differently.
++#: Written into the header so a journal's hash derivation is RECORDED. §B.3
++#: asks for more than that — that a v1 journal never be silently compared
++#: against a v2 head whose hashes derive differently — and nothing reads these
++#: back yet, so the promise is only half kept. Stated rather than implied,
++#: because a comment claiming the enforcement would be the same stale-prose
++#: defect this file has already paid for three times. The forcing consumer is
++#: wire v2; sol r1 made it concrete, since a v2-shaped header is now
++#: recognized as a header and its version ignored.
+ _PROTOCOL_VERSION = 1
+ _WIRE_VERSION = 1
+ 
+ #: The serialized ``type``. Never bare "attestation" — see the module
+ #: docstring's vocabulary note.
+ _OBSERVATION_TYPE = "arrival-head-observation"
+ 
+ 
+ def state_root() -> Path:
+     """The per-user state root for loops, honoring ``XDG_STATE_HOME``.
+ 
+     A *state* root, not a config root, and that separation is the whole
+     threat-model argument: the live config-level stores are themselves under
+     ``$XDG_CONFIG_HOME/loops``, so a memory kept there would share a restore
+     boundary with the very stores it witnesses. Same for a sibling file beside
+     the store, for ``.loops/state/``, and for git tracking as a sole home. A
+     state root is outside all of them.
+ 
+     Follows ``vertex_reader._loops_home()``'s idiom for the config root, with
+     the standard ``~/.local/state`` fallback, so tests can point it at a
+     temporary directory the way the CLI tests already do for config.
+     """
+     xdg = os.environ.get("XDG_STATE_HOME", str(Path.home() / ".local" / "state"))
+     return Path(xdg) / "loops"
+ 
+ 
+ def heads_dir() -> Path:
+     """Where head journals live: one file per lineage."""
+     return state_root() / "heads"
+ 
+ 
+ def journal_path(lineage: str) -> Path:
+     """The journal for this lineage, refusing a name it cannot safely key on.
+ 
+     **Keyed by lineage, not by path**, and that is the load-bearing half of
+     the design. A worktree gets no project store of its own, so a path-keyed
+     cache would manufacture a fresh first contact per worktree — silent
+     re-acceptance through the back door, on the most ordinary operation there
+     is. A restored old copy opened at a *new* path still presents its lineage,
+     still finds this journal, and is still classified a rollback.
+@@ -522,81 +534,85 @@ def _entry_line(entry: HeadAttestation) -> str:
+         "record_hash": entry.head.record_hash,
+         "observed_at": entry.observed_at,
+     }
+     if entry.location:
+         record["location"] = entry.location
+     if entry.note:
+         record["note"] = entry.note
+     return json.dumps(record, separators=(",", ":"), sort_keys=True) + "\n"
+ 
+ 
+ def _parse_entry(raw: object) -> HeadAttestation | None:
+     """One decoded JSON line as an entry, or None if this build cannot read it.
+ 
+     None means "a later build wrote something this one does not understand",
+     and the caller skips and reports it. It does **not** mean malformed —
+     malformed JSON never reaches here.
+ 
+     §B.3's forward-compatibility promise, **as re-scoped by the gate**: an
+     entry from a later build is skipped and reported, never refused *on its
+     own account*. That much survives verbatim, and it is what keeps a shared
+     journal from bricking an older build. What it never licensed is the
+     stronger reading — that a comparison holding **zero** readable evidence
+     should proceed. Declining there refuses no entry; it declines a question
+     nothing left in the journal can answer, and the alternative is
+     trust-on-first-use granted precisely because the journal became
+     unreadable (:class:`HeadUnreadable`).
+ 
+     The version-skew consequence, stated rather than hidden: an older build
+     reading a purely newer journal declines its comparisons. Resolution is
+     operator work — run the newer build, or the trust-reset ceremony.
+ 
+     Unknown *fields* need no handling at all: the journal is append-only and
+     never rewritten, so fields this build does not name are preserved on disk
+     by construction and ignored here.
+     """
+     if not isinstance(raw, dict):
+         return None
+     if raw.get("v") != _JOURNAL_VERSION:
+         return None
+     if "kind" not in raw:
+-        # The header, or a future sibling of it. Not an entry; not damage.
++        # NOT a header — :func:`_classify` has already taken those, and this
++        # function is only reached by lines it judged entry-shaped. A kindless
++        # object arriving here is one this build cannot name, and the caller
++        # reports it as a skipped line rather than absorbing it silently,
++        # which is the whole of BLOCKING-1.
+         return None
+     try:
+         kind = Kind(raw["kind"])
+         level = Level(raw["level"])
+     except (KeyError, ValueError):
+         return None
+     lineage = raw.get("lineage")
+     ordinal = raw.get("ordinal")
+     record_hash = raw.get("record_hash")
+     observed_at = raw.get("observed_at")
+     if (
+         not isinstance(lineage, str)
+         or not isinstance(ordinal, int)
+         or isinstance(ordinal, bool)
+         or not isinstance(record_hash, str)
+         or not isinstance(observed_at, (int, float))
+         or isinstance(observed_at, bool)
+     ):
+         return None
+     return HeadAttestation(
+         head=Head(lineage=lineage, ordinal=ordinal, record_hash=record_hash),
+         kind=kind,
+         level=level,
+         observed_at=float(observed_at),
+         location=raw["location"] if isinstance(raw.get("location"), str) else "",
+         note=raw["note"] if isinstance(raw.get("note"), str) else "",
+     )
+ 
+ 
+ # ---------------------------------------------------------------------------
+ # Reading the journal (§B.3's three read rules)
+ # ---------------------------------------------------------------------------
+ 
+ 
+ @dataclass(frozen=True)
+ class EstablishedHead:
+     """*K*, from an epoch every line of which was readable.
+ 
+     The head, full stop: a presented head equal to this one IS unchanged, and
+     all seven comparison rows are sound against it.
+@@ -659,91 +675,95 @@ class HeadUnreadable:
+     can at least refuse anything below its bound; here there is no bound, so
+     **every** comparison declines — rollback included. There is nothing to
+     compare against.
+     """
+ 
+     skipped: tuple[str, ...]
+ 
+ 
+ @dataclass(frozen=True)
+ class JournalRead:
+     """Everything a caller needs from one pass over a journal.
+ 
+     One structure because the ratified scope's three artifacts — a cached
+     head, a bootstrap receipt at migration, and a periodic full-audit entry —
+     dissolve into one append-only journal: the remembered head is the
+     highest-ordinal entry, the bootstrap receipt is the first entry, an audit
+     entry is an entry.
+     """
+ 
+     entries: tuple[HeadAttestation, ...]
+     """Every readable entry, in the order the file holds them."""
+ 
+     epoch: tuple[HeadAttestation, ...]
+     """The current trust epoch: the last trust-reset entry and everything after
+     it, or all entries when there has never been a reset."""
+ 
+     known: EstablishedHead | HeadLowerBound | HeadUnreadable | None
+     """*K*, and how much of a claim it is. See the two types.
+ 
+     Two types rather than a head plus a flag, deliberately: the weakened case
+     has no ``entry`` attribute at all, so there is no expression that reaches
+     a comparable head without first saying which case it is in."""
+ 
+     bootstrap: HeadAttestation | None
+     """The journal's first entry, whatever epoch it belongs to. A journal
+     beginning at :attr:`Level.MINT` was witnessed from genesis forward; one
+     beginning at :attr:`Level.FIRST_CONTACT` was trusted on sight, and that
+     label is permanent."""
+ 
+     skipped: tuple[str, ...]
+-    """Lines this build could not use, each with why. Reported rather than
+-    swallowed: a tolerated loss that nobody is told about is just a loss."""
++    """What this build could not use, each with why. Mostly lines; a missing
++    header is reported here too, without a line number, because an absence
++    does not have one. Reported rather than swallowed: a tolerated loss that
++    nobody is told about is just a loss. Non-empty is exactly the condition
++    that weakens :attr:`known` to a bound."""
+ 
+     def established_head(self) -> HeadAttestation | None:
+         """*K* for a full comparison, or a refusal if the read was incomplete.
+ 
+         This is the only way to obtain an argument for :func:`compare`, and it
+-        refuses rather than answering when any epoch line was unreadable. That
+-        refusal is the point: against an incomplete journal the cheap
+-        "presented equals *K*, therefore unchanged" shortcut is not merely
+-        discouraged, it is unobtainable.
++        refuses rather than answering whenever anything the read needed was
++        missing — an unreadable line, a line it could not classify, or the
++        header itself. That refusal is the point: against an incomplete
++        journal the cheap "presented equals *K*, therefore unchanged" shortcut
++        is not merely discouraged, it is unobtainable.
+         """
+         if isinstance(self.known, HeadLowerBound):
+             raise IndeterminateComparison(
+                 "this journal has unreadable lines in the current trust "
+                 f"epoch, so its head is only known to be at or above ordinal "
+                 f"{self.known.at_least.head.ordinal}; a presented head cannot "
+                 "be called unchanged or advanced against a bound. Unreadable: "
+                 + "; ".join(self.known.skipped)
+             )
+         if isinstance(self.known, HeadUnreadable):
+             raise IndeterminateComparison(
+                 "this journal holds content but none of it is readable by "
+                 "this build, so nothing is known about the head it accepted "
+                 "— not even a lower bound. This is NOT first contact: heads "
+                 "were accepted here. Unreadable: "
+                 + "; ".join(self.known.skipped)
+             )
+         return self.known.entry if self.known is not None else None
+ 
+ 
+ def _epoch_of(
+     entries: tuple[HeadAttestation, ...],
+ ) -> tuple[HeadAttestation, ...]:
+     """The entries in the current trust epoch, reset-INCLUSIVE.
+ 
+     Epoch scoping is what keeps the ceremony and the max-ordinal rule from
+     deadlocking each other. After an operator accepts a restore from ordinal
+     100 back to 90, the abandoned entries at 91-100 still hold the maximum
+     ordinal; unscoped, *K* would read as the head that was deliberately
+     abandoned and every subsequent open would refuse a rollback forever. Those
+     entries are retained as **evidence, not as claims** — which is the whole
+     point of recording the gap.
+ 
+     **Inclusive of the reset entry**, not merely the entries after it. The
+     reset entry carries the head the operator accepted; scoping it out would
+     leave a just-reset journal with an empty epoch, *K* of None, and a next
+     open classifying first contact — the deadlock's mirror image, and silent
+     re-acceptance by a different route.
+     """
+     for index in range(len(entries) - 1, -1, -1):
+@@ -795,84 +815,90 @@ def _classify(decoded: object) -> str:
+     * Treating any *kindless* dict as a header absorbed ``{}`` silently, with
+       no skip recorded, and so lost the line holding the epoch maximum
+       (``finding:s3wp1-gate-kindless-dict-absorbed-as-header``).
+     * Keying on the type string *alone* would let a future ENTRY that happens
+       to carry the type marker be absorbed as a header — the same class of
+       failure from the other side.
+     * Requiring the type string *and* the absence of ``kind`` refused the
+       whole file when a later build's header carried a ``kind`` of its own,
+       an uncontracted version-skew refusal
+       (``finding:s3wp1-sol-l1-header-classification-three-way``).
+ 
+     So an object carrying **both** markers is not classified at all. It is
+     reported as ambiguous and skipped, which is a location claim about this
+     build's ability to read the line — not a verdict about what the line is,
+     which is precisely what this build cannot know.
+     """
+     if isinstance(decoded, dict) and decoded.get("type") == _OBSERVATION_TYPE:
+         return _AMBIGUOUS if "kind" in decoded else _HEADER
+     return _ENTRY_SHAPED
+ 
+ 
+ def parse_journal_lines(lines: Iterable[str]) -> JournalRead:
+     """Read a journal from its raw lines. Pure — no filesystem.
+ 
+     The pure half is separate so the conformance vectors can hand it raw log
+     lines and so every read rule is testable without a temporary directory.
+ 
+     **Every unreadable line is skipped and reported, wherever it sits.** The
+     earlier design distinguished a torn final line from damage further up and
+     refused the latter, on the reasoning that skipping could silently lower
+     *K*. Skipping CAN lower *K* — concurrent writers journal out of order, so
+     the epoch maximum is not the last line and damage anywhere can take it
+     (``finding:s3wp1-epoch-ordinals-do-not-ascend-in-file-order``). But
+     refusing was the wrong answer to it. It made an ordinary crash a permanent
+     incident, and it claimed a protection this location cannot deliver: anyone
+     who can corrupt a line here can delete the whole journal instead and be
+     met with trust-on-first-use. So the loss is **carried in the result type**
+     — :class:`HeadLowerBound` — rather than converted into a verdict, and the
+     positional rule dissolves along with the distinction it enforced.
+ 
+-    :class:`JournalUnreadable` survives for structural damage that breaks the
+-    read itself: entries with no header. The header states the protocol and
+-    wire versions the hashes derive under, and comparing hashes whose
+-    derivation is unknown is not a weaker answer, it is a meaningless one.
++    **This function never refuses on structure.** Entries with no recognized
++    header are tolerated too: the entries are self-describing evidence that
++    heads were accepted, so what is lost — the protocol and wire versions the
++    hashes derive under — weakens the claim to :class:`HeadLowerBound` rather
++    than voiding the file. The absence is reported without a line number,
++    because an absence does not have one. Only
++    :class:`JournalEquivocation` is raised from here, and it is a statement
++    about the journal's content rather than its readability.
++    :class:`JournalUnreadable` belongs to :func:`read_journal`, where there
++    may be no text to hand this function at all.
+     """
+     entries: list[HeadAttestation] = []
+     skipped: list[str] = []
+     header_seen = False
+     for index, line in enumerate(lines):
+         stripped = line.strip()
+         if not stripped:
+             continue
+         try:
+             decoded = json.loads(stripped)
+         except ValueError as exc:
+             skipped.append(f"line {index + 1}: does not parse ({exc})")
+             continue
+         verdict = _classify(decoded)
+         if verdict is _HEADER:
+             # Not tracked by position: two writers racing to create the same
+             # journal can each write one, so "the header is line 1" is not a
+             # property this reader may assume.
+             header_seen = True
+             continue
+         if verdict is _AMBIGUOUS:
+             skipped.append(
+                 f"line {index + 1}: carries both the journal type marker and "
+                 "an entry kind, so this build cannot say which it is"
+             )
+             continue
+         entry = _parse_entry(decoded)
+         if entry is None:
+             skipped.append(f"line {index + 1}: not readable by this build")
+             continue
+         entries.append(entry)
+ 
+     frozen = tuple(entries)
+     if frozen and not header_seen:
+         # TOLERATED, not refused. The entries are self-describing evidence
+         # that heads were accepted, and a weakened claim is available — so
+         # refusing the file would be a verdict where a bound would do, which
+         # is the error `HeadUnreadable` was added to correct. What is lost is
+         # the protocol and wire versions the hashes derive under, and losing
+         # that is exactly what a lower bound is for. Reported without a line
+@@ -969,83 +995,85 @@ def _write_all(handle: int, payload: bytes) -> None:
+         if count <= 0:
+             raise OSError(
+                 f"journal write stalled after {written} of {len(payload)} bytes"
+             )
+         written += count
+ 
+ 
+ def append_entry(entry: HeadAttestation) -> Path:
+     """Append one observation. Returns the journal it landed in.
+ 
+     Append-only, so there is no read-modify-write, no torn partial update and
+     no lock. Retaining every previously accepted head is also what makes an
+     under-evidenced advance *recoverable* rather than a loss: *K* stays in the
+     journal forever, so the periodic audit can re-examine everything accepted
+     since the last reset. A single overwritten value could not offer that at
+     any price, because it would have forgotten *K* — and it could not hold the
+     bootstrap receipt either, since the first advance would erase it.
+ 
+     A brand-new journal gets its header and its first entry in one write. The
+     exclusive create keeps two racing writers from each emitting a header; the
+     reader tolerates a second one anyway, because a create race is cheaper to
+     survive than to prevent.
+ 
+     **Every open carries O_APPEND, including the exclusive create.** Without it
+     the creating writer's descriptor sits at offset zero, and a second writer
+     that lost the create race can land a complete entry there first — which the
+     creator then overwrites. The journal would have silently forgotten a head,
+     and a later restore to the surviving ordinal would classify UNCHANGED: the
+     exact failure the maximum-ordinal read rule exists to close, arriving
+     through the write path instead.
+     """
+     path = journal_path(entry.head.lineage)
+     path.parent.mkdir(parents=True, exist_ok=True)
+     line = _entry_line(entry)
+     try:
+         handle = os.open(
+             path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_APPEND, 0o600
+         )
+     except FileExistsError:
+         # An empty existing file is a creator that crashed between the
+-        # exclusive create and its write. Supplying the header here is what
+-        # keeps that crash from leaving a headerless journal, which the reader
+-        # refuses as structural damage.
++        # exclusive create and its write. Supplying the header here keeps that
++        # crash from leaving a journal with no header at all. The reader
++        # tolerates one and says so, but the header carries the protocol and
++        # wire versions, so a journal that HAS one keeps a claim it would
++        # otherwise have to weaken.
+         payload = _torn_tail_guard(path) + line
+         if path.exists() and path.stat().st_size == 0:
+             payload = _header_line() + line
+         handle = os.open(path, os.O_WRONLY | os.O_APPEND)
+     else:
+         payload = _header_line() + line
+     try:
+         _write_all(handle, payload.encode("utf-8"))
+     finally:
+         os.close(handle)
+     return path
+ 
+ 
+ # ---------------------------------------------------------------------------
+ # The audit's all-journaled-heads check (§C.4)
+ # ---------------------------------------------------------------------------
+ 
+ 
+ def unaccounted_heads(
+     epoch: Iterable[HeadAttestation],
+     at_ordinal: Callable[[int], Head | None],
+ ) -> tuple[HeadAttestation, ...]:
+     """Journaled heads the store can no longer account for.
+ 
+     The periodic audit does not merely re-verify the current chain — it checks
+     that every head journaled **in the current trust epoch** is still present
+     at its own ordinal with its own hash. That single walk is what makes the
+     cheap per-open check safe: an advance accepted today on partial evidence
+     is re-examined against the complete record of everything accepted since
+     the last reset.
+ 
+     The epoch scope is not a convenience. A legitimately accepted restore
+     leaves heads in the journal that the restored store does not and cannot
+     contain; auditing against those would fail permanently and train an
+     operator to ignore the audit, which is worse than not running one.
+ 
+     ``at_ordinal`` is injected rather than imported so this module never
+     reaches for a backend or a projection auditor. The audit producer that
+     supplies it is WP3's.
+     """
+
+codex
+The diff is confined to the report and module prose; no test path appears. The seven edits match the claimed locations at first pass. I’m now doing the independent full-module sweep and a docstring-stripped AST comparison that also removes attribute docstrings, not just function/class/module docstrings.
+exec
+/bin/zsh -lc "python - <<'PY'
+import ast, subprocess
+path='libs/engine/src/engine/arrival_head_attestation.py'
+
+def source(rev):
+    return subprocess.check_output(['git','show',f'{rev}:{path}'], text=True)
+
+def strip(tree):
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+            if node.body and isinstance(node.body[0], ast.Expr) and isinstance(node.body[0].value, ast.Constant) and isinstance(node.body[0].value.value, str):
+                node.body.pop(0)
+        if hasattr(node, 'body'):
+            body=node.body
+            i=0
+            while i+1 < len(body):
+                if isinstance(body[i], (ast.Assign, ast.AnnAssign)) and isinstance(body[i+1], ast.Expr) and isinstance(body[i+1].value, ast.Constant) and isinstance(body[i+1].value.value, str):
+                    body.pop(i+1)
+                i += 1
+    ast.fix_missing_locations(tree)
+    return tree
+
+a=strip(ast.parse(source('8ce304c6')))
+b=strip(ast.parse(source('5d24cf06')))
+da=ast.dump(a, annotate_fields=True, include_attributes=False)
+db=ast.dump(b, annotate_fields=True, include_attributes=False)
+print('AST_EQUAL', da == db)
+print('AST_DUMP_LENGTHS', len(da), len(db))
+PY
+rg -n -i \"refus|unread|header|first contact|first-contact|structur|promise|classif|skip|tolerat|protocol|wire|kindless|missing|absence|absent\" libs/engine/src/engine/arrival_head_attestation.py" in /Users/kaygee/Code/loops-s3wp1
+ succeeded in 0ms:
+zsh:1: command not found: python
+5:§§A-C; the protocol it implements a minimum of is
+6:``docs/architecture/arrival/witness-protocol.html``.
+20:its own readability to the health of the thing it is judging. The classifier is
+34:signed: no ``sig``, ``issuer``, ``key_id`` or chaining field, and their absence
+57:    "ABSENT_STORE_REFUSALS",
+58:    "AbsentStoreOutcome",
+59:    "AttestationRefusal",
+64:    "HeadUnreadable",
+70:    "JournalUnreadable",
+75:    "REFUSALS",
+82:    "compare_absent_store",
+88:    "refusal_for",
+95:# Typed refusals — rooted HERE, not under ContractRefusal
+99:class AttestationRefusal(Exception):
+100:    """Root of the head-comparison refusals.
+103:    :class:`~engine.arrival_contract.ContractRefusal`, which is the arbiter's
+107:    ``witness-protocol.html`` names, about a layer that sits *above* the
+110:    root would assert that every conforming backend owes these refusals, and
+115:class HeadRollback(AttestationRefusal):
+125:class HeadFork(AttestationRefusal):
+142:class HeadRewrite(AttestationRefusal):
+153:class LineageReplaced(AttestationRefusal):
+158:    the classifier owns the row the vectors exercise, and because a caller
+163:class StoreLost(AttestationRefusal):
+167:    witness proves what was *lost* rather than its contents. It must refuse,
+175:class JournalEquivocation(AttestationRefusal):
+184:class JournalUnreadable(AttestationRefusal):
+188:    are not text. Distinct from an *absent* journal, which is first contact,
+190:    :class:`HeadUnreadable`. Raised rather than let out as the underlying
+191:    ``OSError`` so that a caller catching :class:`AttestationRefusal` does not
+196:    header. Both are now tolerated: an unreadable line is skipped and
+197:    reported, a missing header is reported as an absence, and in each case the
+199:    converted into a verdict. Refusing made an ordinary crash a permanent
+202:    trust-on-first-use. Where a weakened claim is available, a refusal is a
+207:class IndeterminateComparison(AttestationRefusal):
+218:class UnsafeLineageName(AttestationRefusal):
+221:    ``lin`` is validated only as a non-empty string on the wire, and while
+224:    string"), NOT a verdict about the store — refusing to resolve a path says
+252:    FIRST_CONTACT = "first-contact"  # trust on first use; nothing was proven
+269:      claim. Absent from the type, not optional-and-unset.
+270:    * **Signed fields absent**, per the module docstring.
+271:    * **protocol/wire omitted from the record**, carried by the file header:
+274:    * **observed_at kept.** It is what makes a refusal actionable ("your
+300:    Seven for six states because §07 lists first contact separately from the
+307:    FIRST_CONTACT = "first-contact"  # proceed, trust on first use, labeled
+310:    ROLLBACK = "rollback"  # refuse
+311:    SAME_HEIGHT_FORK = "same-height-fork"  # refuse
+312:    REWRITE = "rewrite"  # refuse
+313:    LINEAGE_REPLACED = "lineage-replaced"  # refuse
+316:class AbsentStoreOutcome(Enum):
+321:    absent store is a different question, asked before there is a head to
+326:    STORE_LOST = "store-lost"  # refuse — the journal remembers what is gone
+370:def compare_absent_store(known: HeadAttestation | None) -> AbsentStoreOutcome:
+371:    """Judge a location whose log is absent or empty (§D.4).
+373:    ``verify(Open())`` on a missing or empty log refuses with
+374:    ``GenesisRefused``, so the seam must branch on that rather than treat it
+375:    as corruption — an absent store is the ordinary state of a location a
+379:    pre-genesis and refusing would make minting impossible; with a head
+384:        AbsentStoreOutcome.PRE_GENESIS
+386:        else AbsentStoreOutcome.STORE_LOST
+390:#: Which refusal each refusing outcome raises. The mapping lives here so the
+392:#: refuse" is one enumerable fact rather than a chain of ``if`` statements in
+393:#: whatever calls the classifier.
+394:REFUSALS: dict[Outcome, type[AttestationRefusal]] = {
+401:#: The same table for the absent-store split.
+402:ABSENT_STORE_REFUSALS: dict[AbsentStoreOutcome, type[AttestationRefusal]] = {
+403:    AbsentStoreOutcome.STORE_LOST: StoreLost,
+407:def refusal_for(
+408:    outcome: Outcome | AbsentStoreOutcome,
+409:) -> type[AttestationRefusal] | None:
+410:    """The refusal this outcome raises, or None if it proceeds."""
+411:    if isinstance(outcome, AbsentStoreOutcome):
+412:        return ABSENT_STORE_REFUSALS.get(outcome)
+413:    return REFUSALS.get(outcome)
+441:#: Written into the header so a journal's hash derivation is RECORDED. §B.3
+444:#: back yet, so the promise is only half kept. Stated rather than implied,
+447:#: wire v2; sol r1 made it concrete, since a v2-shaped header is now
+448:#: recognized as a header and its version ignored.
+449:_PROTOCOL_VERSION = 1
+450:_WIRE_VERSION = 1
+481:    """The journal for this lineage, refusing a name it cannot safely key on.
+485:    cache would manufacture a fresh first contact per worktree — silent
+488:    still finds this journal, and is still classified a rollback.
+504:def _header_line() -> str:
+511:                "protocol": _PROTOCOL_VERSION,
+512:                "wire": _WIRE_VERSION,
+525:    absent and empty carry the same (absence of a) claim, and leaving them out
+548:    and the caller skips and reports it. It does **not** mean malformed —
+551:    §B.3's forward-compatibility promise, **as re-scoped by the gate**: an
+552:    entry from a later build is skipped and reported, never refused *on its
+556:    should proceed. Declining there refuses no entry; it declines a question
+559:    unreadable (:class:`HeadUnreadable`).
+574:        # NOT a header — :func:`_classify` has already taken those, and this
+575:        # function is only reached by lines it judged entry-shaped. A kindless
+577:        # reports it as a skipped line rather than absorbing it silently,
+628:    An unreadable line carries no information about the ordinal it held, so
+648:      unobtainable; only the refusal below the bound survives.
+651:    walk verifies the store's own chain, and the missing fact is about what
+658:    skipped: tuple[str, ...]
+662:class HeadUnreadable:
+665:    The third state, and it is not the absence of one. An empty journal says
+666:    "nothing was ever accepted here" and first-contact TOFU is the honest
+670:    trusted on first use precisely because it became unreadable, which is the
+672:    (``finding:s3wp1-gate-all-entries-unreadable-silent-tofu``).
+675:    can at least refuse anything below its bound; here there is no bound, so
+680:    skipped: tuple[str, ...]
+687:    One structure because the ratified scope's three artifacts — a cached
+701:    known: EstablishedHead | HeadLowerBound | HeadUnreadable | None
+714:    skipped: tuple[str, ...]
+715:    """What this build could not use, each with why. Mostly lines; a missing
+716:    header is reported here too, without a line number, because an absence
+717:    does not have one. Reported rather than swallowed: a tolerated loss that
+722:        """*K* for a full comparison, or a refusal if the read was incomplete.
+725:        refuses rather than answering whenever anything the read needed was
+726:        missing — an unreadable line, a line it could not classify, or the
+727:        header itself. That refusal is the point: against an incomplete
+733:                "this journal has unreadable lines in the current trust "
+736:                "be called unchanged or advanced against a bound. Unreadable: "
+737:                + "; ".join(self.known.skipped)
+739:        if isinstance(self.known, HeadUnreadable):
+743:                "— not even a lower bound. This is NOT first contact: heads "
+744:                "were accepted here. Unreadable: "
+745:                + "; ".join(self.known.skipped)
+759:    abandoned and every subsequent open would refuse a rollback forever. Those
+766:    open classifying first contact — the deadlock's mirror image, and silent
+781:    Last-line semantics would then read K=5 and classify a genuine restore to
+803:#: line is classified" is the contract sentence this module got wrong twice.
+804:_HEADER = "header"
+809:def _classify(decoded: object) -> str:
+810:    """Header, ambiguous, or entry-shaped — by SHAPE, never by position.
+812:    **The rule never absorbs a line and never refuses the file.** Both halves
+815:    * Treating any *kindless* dict as a header absorbed ``{}`` silently, with
+816:      no skip recorded, and so lost the line holding the epoch maximum
+817:      (``finding:s3wp1-gate-kindless-dict-absorbed-as-header``).
+819:      to carry the type marker be absorbed as a header — the same class of
+821:    * Requiring the type string *and* the absence of ``kind`` refused the
+822:      whole file when a later build's header carried a ``kind`` of its own,
+823:      an uncontracted version-skew refusal
+824:      (``finding:s3wp1-sol-l1-header-classification-three-way``).
+826:    So an object carrying **both** markers is not classified at all. It is
+827:    reported as ambiguous and skipped, which is a location claim about this
+832:        return _AMBIGUOUS if "kind" in decoded else _HEADER
+842:    **Every unreadable line is skipped and reported, wherever it sits.** The
+844:    refused the latter, on the reasoning that skipping could silently lower
+845:    *K*. Skipping CAN lower *K* — concurrent writers journal out of order, so
+848:    refusing was the wrong answer to it. It made an ordinary crash a permanent
+855:    **This function never refuses on structure.** Entries with no recognized
+856:    header are tolerated too: the entries are self-describing evidence that
+857:    heads were accepted, so what is lost — the protocol and wire versions the
+859:    than voiding the file. The absence is reported without a line number,
+860:    because an absence does not have one. Only
+863:    :class:`JournalUnreadable` belongs to :func:`read_journal`, where there
+867:    skipped: list[str] = []
+868:    header_seen = False
+876:            skipped.append(f"line {index + 1}: does not parse ({exc})")
+878:        verdict = _classify(decoded)
+879:        if verdict is _HEADER:
+881:            # journal can each write one, so "the header is line 1" is not a
+883:            header_seen = True
+886:            skipped.append(
+893:            skipped.append(f"line {index + 1}: not readable by this build")
+898:    if frozen and not header_seen:
+899:        # TOLERATED, not refused. The entries are self-describing evidence
+901:        # refusing the file would be a verdict where a bound would do, which
+902:        # is the error `HeadUnreadable` was added to correct. What is lost is
+903:        # the protocol and wire versions the hashes derive under, and losing
+905:        # number because an absence does not have one.
+906:        skipped.append(
+907:            "header: absent, so the protocol and wire versions these record "
+912:    known: EstablishedHead | HeadLowerBound | HeadUnreadable | None
+915:            HeadLowerBound(at_least=best, skipped=tuple(skipped))
+916:            if skipped
+919:    elif skipped:
+920:        # Content was claimed and none of it could be read. NOT first contact.
+921:        known = HeadUnreadable(skipped=tuple(skipped))
+929:        skipped=tuple(skipped),
+936:    An absent journal is not a fault — it is first contact, and answering
+937:    with an empty read rather than raising is what lets the classifier say so.
+943:        # Absent is not a fault — it is first contact, and answering with an
+944:        # empty read is what lets the classifier say so.
+946:            entries=(), epoch=(), known=None, bootstrap=None, skipped=()
+952:        # refusal rather than let out as a builtin: a caller catching
+953:        # AttestationRefusal must not have an OSError escape past it.
+954:        raise JournalUnreadable(
+971:    producing ONE unreadable line — and the new entry's bytes would be lost
+972:    inside it. The design's promise is that a torn tail costs at most the
+976:    Conservative when it cannot tell: an unreadable file gets the newline. A
+977:    spurious blank line is skipped for free on read, while gluing is not
+1013:    A brand-new journal gets its header and its first entry in one write. The
+1014:    exclusive create keeps two racing writers from each emitting a header; the
+1015:    reader tolerates a second one anyway, because a create race is cheaper to
+1022:    and a later restore to the surviving ordinal would classify UNCHANGED: the
+1035:        # exclusive create and its write. Supplying the header here keeps that
+1036:        # crash from leaving a journal with no header at all. The reader
+1037:        # tolerates one and says so, but the header carries the protocol and
+1038:        # wire versions, so a journal that HAS one keeps a claim it would
+1042:            payload = _header_line() + line
+1045:        payload = _header_line() + line
+1089:# rewritten with a NEW lineage finds no journal, is classified first contact,
+1144:    DELETE IN SLICE 5. A malformed line is skipped rather than refused:
+1145:    unlike the head journal, this file makes no claim a skipped line could
+1146:    weaken — a missing binding degrades to first contact, which is the state
+
+exec
+/bin/zsh -lc "python3 - <<'PY'
+import ast, subprocess
+path='libs/engine/src/engine/arrival_head_attestation.py'
+
+def source(rev): return subprocess.check_output(['git','show',f'{rev}:{path}'], text=True)
+def isdoc(stmt): return isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Constant) and isinstance(stmt.value.value, str)
+def strip_body(body):
+    out=[]
+    for i, stmt in enumerate(body):
+        if isdoc(stmt) and (i == 0 or isinstance(body[i-1], (ast.Assign, ast.AnnAssign))):
+            continue
+        out.append(stmt)
+    return out
+
+def strip(tree):
+    for node in ast.walk(tree):
+        for field in ('body','orelse','finalbody'):
+            body=getattr(node,field,None)
+            if isinstance(body,list): setattr(node,field,strip_body(body))
+    ast.fix_missing_locations(tree)
+    return tree
+
+a=strip(ast.parse(source('8ce304c6'))); b=strip(ast.parse(source('5d24cf06')))
+da=ast.dump(a, include_attributes=False); db=ast.dump(b, include_attributes=False)
+print('AST_EQUAL', da == db)
+print('AST_DUMP_LENGTHS', len(da), len(db))
+PY
+sed -n '1,140p' libs/engine/src/engine/arrival_head_attestation.py
+sed -n '240,395p' libs/engine/src/engine/arrival_head_attestation.py
+sed -n '600,810p' libs/engine/src/engine/arrival_head_attestation.py
+sed -n '920,1000p' libs/engine/src/engine/arrival_head_attestation.py
+sed -n '1070,1170p' libs/engine/src/engine/arrival_head_attestation.py" in /Users/kaygee/Code/loops-s3wp1
+ succeeded in 0ms:
+AST_EQUAL True
+AST_DUMP_LENGTHS 48238 48238
+"""arrival_head_attestation — remembering a lineage's head across opens.
+
+Slice 3 of the arrival break (``design:arrival-break-slice3-witness-minimum``).
+The design of record is ``docs/scratch/arrival-break/slice3-design-proposal.md``
+§§A-C; the protocol it implements a minimum of is
+``docs/architecture/arrival/witness-protocol.html``.
+
+**What this module is for.** A backend can prove a log is internally consistent
+— genesis validates, every record links to its predecessor, the head is the
+last one. It cannot prove that the log in front of it is the *same* log this
+machine accepted yesterday, because every fact it could consult lives inside
+the boundary an attacker or a restore would move. So the memory of what was
+accepted has to live somewhere a single restore of the store cannot also
+revert, and comparing the two is what turns "this log is well-formed" into
+"this log is the one we know".
+
+**stdlib and** :mod:`engine.arrival_contract` **only.** Not a taste rule: this
+journal exists to stay readable when the store it witnesses cannot be opened at
+all, and a module that dragged the file codec and sqlite3 behind it would tie
+its own readability to the health of the thing it is judging. The classifier is
+pure, the journal is ``pathlib``/``json``/``os``, and
+``test_reading_a_head_journal_does_not_drag_the_adapter_in`` pins it.
+
+**The name is the Rule 18 join.** ``arrival*.py`` under ``engine/`` is globbed
+by ``test_every_arrival_named_engine_module_is_scanned``, so naming the module
+this way enrolls it in the arrival vocabulary ratchet by birth rather than by a
+``_SCAN_TARGETS`` edit somebody has to remember.
+
+**Vocabulary hazard.** "Attestation" already means something else here:
+``FactAttestation``/``TickAttestation`` are the *signed* receipt on a committed
+row. What this module writes is unsigned and local, so its serialized ``type``
+is ``arrival-head-observation`` — distinct types, distinct serialization names
+— which also leaves the future signed corpus unencumbered. Nothing here is
+signed: no ``sig``, ``issuer``, ``key_id`` or chaining field, and their absence
+is the point rather than an omission. An empty ``sig`` field would advertise a
+claim this slice does not make.
+
+**What is deliberately not here.** The seam that calls this on every open, the
+evidence gatherer that walks a backend for descent, the audit and trust-reset
+producers, and staleness reporting are WP3's. The conformance vectors are
+WP2's. This module holds the record, the journal, and the judgment.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+from collections.abc import Callable, Iterable
+from dataclasses import dataclass
+from enum import Enum
+from pathlib import Path
+
+from .arrival_contract import Head
+
+__all__ = [
+    "ABSENT_STORE_REFUSALS",
+    "AbsentStoreOutcome",
+    "AttestationRefusal",
+    "EstablishedHead",
+    "HeadAttestation",
+    "HeadFork",
+    "HeadLowerBound",
+    "HeadUnreadable",
+    "HeadRewrite",
+    "HeadRollback",
+    "IndeterminateComparison",
+    "JournalEquivocation",
+    "JournalRead",
+    "JournalUnreadable",
+    "Kind",
+    "Level",
+    "LineageReplaced",
+    "Outcome",
+    "REFUSALS",
+    "StoreLost",
+    "UnsafeLineageName",
+    "append_entry",
+    "bindings_path",
+    "bound_lineage",
+    "compare",
+    "compare_absent_store",
+    "heads_dir",
+    "journal_path",
+    "parse_journal_lines",
+    "read_journal",
+    "record_binding",
+    "refusal_for",
+    "state_root",
+    "unaccounted_heads",
+]
+
+
+# ---------------------------------------------------------------------------
+# Typed refusals — rooted HERE, not under ContractRefusal
+# ---------------------------------------------------------------------------
+
+
+class AttestationRefusal(Exception):
+    """Root of the head-comparison refusals.
+
+    Deliberately NOT a subclass of
+    :class:`~engine.arrival_contract.ContractRefusal`, which is the arbiter's
+    ruling 1 on the slice-3 design and applies the slice-2 narrow-form ruling
+    in its own words: the contract root "covers what the contract asserts, no
+    more". Rollback, fork, rewrite and replacement are conditions
+    ``witness-protocol.html`` names, about a layer that sits *above* the
+    backend contract and compares two heads it obtained through it —
+    ``backend-contract.html`` does not name one of them. Joining the contract
+    root would assert that every conforming backend owes these refusals, and
+    only a contract-text line can make that claim.
+    """
+
+
+class HeadRollback(AttestationRefusal):
+    """The presented head sits below the head this machine last accepted.
+
+    §11's response is to locate a replica or backup at or above the witnessed
+    head. Never move the witness backward to match the store: that is the
+    silent re-acceptance the journal exists to prevent, and the only licensed
+    way down is the explicit trust-reset ceremony (:attr:`Kind.TRUST_RESET`).
+    """
+
+
+class HeadFork(AttestationRefusal):
+    """Two different records claim the same ordinal in the same lineage.
+
+    Named ``HeadFork`` rather than ``SameHeightFork`` because
+    ``arrival_contract.SameHeightFork`` already exists and means something
+    adjacent but different — replication found a conflicting record at the
+    height it was about to fill. This is a comparison of two heads. Same
+    ratified *state* name (the outcome string stays ``same-height-fork``),
+    different operation, different type: the state machine's vocabulary is
+    preserved where it is normative and the Python names stay unambiguous
+    where a collision would bite.
+
+    §11's response is to freeze both branches and collect evidence. Never pick
+    the taller branch — height is not evidence of continuity.
+    """
+
+    TRUST_RESET = "trust-reset"  # an operator ceremony re-established trust
+
+
+class Level(Enum):
+    """What evidence backed this entry's head.
+
+    The one addition to §04's field table, and it is the scope-the-claim
+    field: it states how much was actually established, so an entry can never
+    be read as a stronger claim than the evidence behind it.
+    """
+
+    MINT = "mint"  # this process minted the genesis
+    FIRST_CONTACT = "first-contact"  # trust on first use; nothing was proven
+    COMMIT = "commit"  # appended by this process under the full-head fence
+    DESCENDANT = "descendant"  # a verified suffix walk from the previous head
+    FULL = "full"  # verified from genesis
+
+
+@dataclass(frozen=True)
+class HeadAttestation:
+    """One observation of a lineage's head, at a moment, with its evidence.
+
+    Field choices, against §04's table:
+
+    * **The whole** :class:`~engine.arrival_contract.Head`, **always.** §04's
+      lineage/ordinal/record_hash are exactly that type, and reusing it rather
+      than restating three fields means this comparison cannot drift from the
+      backend's own notion of a head.
+    * **Counts omitted** — projection corroboration smuggled into a custody
+      claim. Absent from the type, not optional-and-unset.
+    * **Signed fields absent**, per the module docstring.
+    * **protocol/wire omitted from the record**, carried by the file header:
+      they are properties of the journal, not of each entry, and a field
+      nothing reads is how speculative grammar ossifies.
+    * **observed_at kept.** It is what makes a refusal actionable ("your
+      remembered head is from three weeks ago") and what answers audit
+      staleness. Witness metadata, never ledger order.
+
+    ``location`` is diagnosis only and is **never** a key: journals are keyed
+    by lineage so that a worktree, a move, or a copy still finds the lineage's
+    memory. ``note`` carries the trust-reset gap description and the audit
+    result.
+    """
+
+    head: Head
+    kind: Kind
+    level: Level
+    observed_at: float
+    location: str = ""
+    note: str = ""
+
+
+# ---------------------------------------------------------------------------
+# The comparison state machine (§C)
+# ---------------------------------------------------------------------------
+
+
+class Outcome(Enum):
+    """The seven rows of the comparison.
+
+    Seven for six states because §07 lists first contact separately from the
+    five comparisons. The outcome *values* are what the conformance vectors
+    pin — never a Python exception type, for the reason the replicate family
+    gives: naming one implementation's exception family in a language-neutral
+    vector pins that family on every other implementation.
+    """
+
+    FIRST_CONTACT = "first-contact"  # proceed, trust on first use, labeled
+    UNCHANGED = "unchanged"  # proceed
+    ADVANCED = "advanced"  # proceed
+    ROLLBACK = "rollback"  # refuse
+    SAME_HEIGHT_FORK = "same-height-fork"  # refuse
+    REWRITE = "rewrite"  # refuse
+    LINEAGE_REPLACED = "lineage-replaced"  # refuse
+
+
+class AbsentStoreOutcome(Enum):
+    """The §D.4 split for a location whose log is not there at all.
+
+    Deliberately a separate enum rather than two more :class:`Outcome` rows.
+    :func:`compare` has exactly seven rows and the vectors pin those; an
+    absent store is a different question, asked before there is a head to
+    present, and folding it in would make "the seven rows" mean nine.
+    """
+
+    PRE_GENESIS = "pre-genesis"  # proceed — this is the sidecar about to mint
+    STORE_LOST = "store-lost"  # refuse — the journal remembers what is gone
+
+
+def compare(
+    known: HeadAttestation | None,
+    presented: Head,
+    at_known: Head | None,
+) -> Outcome:
+    """Judge a presented head against the one this machine remembers.
+
+    Pure, stdlib-only, no I/O — which is what makes it directly
+    vector-testable and what keeps the vectors free of any implementation's
+    exception family. This function only judges; the caller gathers.
+
+    ``at_known`` is the head the ledger vouches for at *K*'s coordinate, or
+    ``None`` when it will not vouch for anything there. It is the
+    advanced-versus-rewrite discriminator and it is the whole reason a walk
+    that merely reaches the presented head is not enough.
+
+    Guard order is load-bearing. Lineage is checked before any ordinal
+    arithmetic, because comparing heights across two different lineages is
+    comparing two unrelated number lines. ``at_known`` is consulted only on
+    the ascending branch: on the unchanged branch there is nothing to
+    discriminate, and asking would make the dominant case pay for evidence it
+    does not need.
+    """
+    if known is None:
+        return Outcome.FIRST_CONTACT
+
+    remembered = known.head
+    if presented.lineage != remembered.lineage:
+        return Outcome.LINEAGE_REPLACED
+    if presented == remembered:
+        return Outcome.UNCHANGED
+    if presented.ordinal < remembered.ordinal:
+        return Outcome.ROLLBACK
+    if presented.ordinal == remembered.ordinal:
+        # Equal ordinal, and not equal heads, so the hashes differ.
+        return Outcome.SAME_HEIGHT_FORK
+    if at_known != remembered:
+        return Outcome.REWRITE
+    return Outcome.ADVANCED
+
+
+def compare_absent_store(known: HeadAttestation | None) -> AbsentStoreOutcome:
+    """Judge a location whose log is absent or empty (§D.4).
+
+    ``verify(Open())`` on a missing or empty log refuses with
+    ``GenesisRefused``, so the seam must branch on that rather than treat it
+    as corruption — an absent store is the ordinary state of a location a
+    moment before it is minted into.
+
+    The split is on memory, not on the store: with nothing remembered this is
+    pre-genesis and refusing would make minting impossible; with a head
+    remembered it is a loss, and proceeding would license a silent re-mint
+    under a remembered lineage.
+    """
+    return (
+        AbsentStoreOutcome.PRE_GENESIS
+        if known is None
+        else AbsentStoreOutcome.STORE_LOST
+    )
+
+
+#: Which refusal each refusing outcome raises. The mapping lives here so the
+#: seam does not re-implement the posture table, and so "which outcomes
+#: refuse" is one enumerable fact rather than a chain of ``if`` statements in
+#: whatever calls the classifier.
+REFUSALS: dict[Outcome, type[AttestationRefusal]] = {
+    Outcome.ROLLBACK: HeadRollback,
+        kind=kind,
+        level=level,
+        observed_at=float(observed_at),
+        location=raw["location"] if isinstance(raw.get("location"), str) else "",
+        note=raw["note"] if isinstance(raw.get("note"), str) else "",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Reading the journal (§B.3's three read rules)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class EstablishedHead:
+    """*K*, from an epoch every line of which was readable.
+
+    The head, full stop: a presented head equal to this one IS unchanged, and
+    all seven comparison rows are sound against it.
+    """
+
+    entry: HeadAttestation
+
+
+@dataclass(frozen=True)
+class HeadLowerBound:
+    """*K* is **at least** this. Lines in the epoch could not be read.
+
+    An unreadable line carries no information about the ordinal it held, so
+    the readable entries bound the accepted head from below and nothing bounds
+    it from above. Deliberately **no** ``entry`` attribute: the field is named
+    ``at_least`` so that no expression reaches a head from this type without
+    naming the weaker claim, and so a caller cannot reach one uniformly across
+    both cases.
+
+    What a bound can and cannot answer:
+
+    * **Sound.** A presented head *below* the bound is a rollback — the
+      accepted head is at least the bound, so it is certainly above what is
+      being presented.
+    * **Unsound, and this is the trap.** A presented head *equal to* the bound
+      is not unchanged; it may be a rollback from the very entry that could
+      not be read.
+    * **Unsound for the same reason, one step further.** A presented head
+      *above* the bound is not an advance either. Nothing bounds the accepted
+      head from above, so a head at ordinal 95 may still sit below a lost
+      entry at 200 — and descent verified from the bound says nothing about
+      an entry that was never on the walk. Both proceed answers are
+      unobtainable; only the refusal below the bound survives.
+
+    **Gathering evidence from the store does not resolve any of this** — a
+    walk verifies the store's own chain, and the missing fact is about what
+    this machine previously ACCEPTED, which the store never knew. Recovering
+    it means repairing the journal or running the trust-reset ceremony, both
+    of which are operator work.
+    """
+
+    at_least: HeadAttestation
+    skipped: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class HeadUnreadable:
+    """The journal claimed content and **none of it** could be read.
+
+    The third state, and it is not the absence of one. An empty journal says
+    "nothing was ever accepted here" and first-contact TOFU is the honest
+    answer to it. A journal holding lines this build cannot read says
+    something else entirely: heads WERE accepted, and their ordinals are
+    exactly what has been lost. Collapsing the two would let a journal be
+    trusted on first use precisely because it became unreadable, which is the
+    silent re-acceptance every rule in this module exists to prevent
+    (``finding:s3wp1-gate-all-entries-unreadable-silent-tofu``).
+
+    Carries no ordinal, deliberately and by construction. :class:`HeadLowerBound`
+    can at least refuse anything below its bound; here there is no bound, so
+    **every** comparison declines — rollback included. There is nothing to
+    compare against.
+    """
+
+    skipped: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class JournalRead:
+    """Everything a caller needs from one pass over a journal.
+
+    One structure because the ratified scope's three artifacts — a cached
+    head, a bootstrap receipt at migration, and a periodic full-audit entry —
+    dissolve into one append-only journal: the remembered head is the
+    highest-ordinal entry, the bootstrap receipt is the first entry, an audit
+    entry is an entry.
+    """
+
+    entries: tuple[HeadAttestation, ...]
+    """Every readable entry, in the order the file holds them."""
+
+    epoch: tuple[HeadAttestation, ...]
+    """The current trust epoch: the last trust-reset entry and everything after
+    it, or all entries when there has never been a reset."""
+
+    known: EstablishedHead | HeadLowerBound | HeadUnreadable | None
+    """*K*, and how much of a claim it is. See the two types.
+
+    Two types rather than a head plus a flag, deliberately: the weakened case
+    has no ``entry`` attribute at all, so there is no expression that reaches
+    a comparable head without first saying which case it is in."""
+
+    bootstrap: HeadAttestation | None
+    """The journal's first entry, whatever epoch it belongs to. A journal
+    beginning at :attr:`Level.MINT` was witnessed from genesis forward; one
+    beginning at :attr:`Level.FIRST_CONTACT` was trusted on sight, and that
+    label is permanent."""
+
+    skipped: tuple[str, ...]
+    """What this build could not use, each with why. Mostly lines; a missing
+    header is reported here too, without a line number, because an absence
+    does not have one. Reported rather than swallowed: a tolerated loss that
+    nobody is told about is just a loss. Non-empty is exactly the condition
+    that weakens :attr:`known` to a bound."""
+
+    def established_head(self) -> HeadAttestation | None:
+        """*K* for a full comparison, or a refusal if the read was incomplete.
+
+        This is the only way to obtain an argument for :func:`compare`, and it
+        refuses rather than answering whenever anything the read needed was
+        missing — an unreadable line, a line it could not classify, or the
+        header itself. That refusal is the point: against an incomplete
+        journal the cheap "presented equals *K*, therefore unchanged" shortcut
+        is not merely discouraged, it is unobtainable.
+        """
+        if isinstance(self.known, HeadLowerBound):
+            raise IndeterminateComparison(
+                "this journal has unreadable lines in the current trust "
+                f"epoch, so its head is only known to be at or above ordinal "
+                f"{self.known.at_least.head.ordinal}; a presented head cannot "
+                "be called unchanged or advanced against a bound. Unreadable: "
+                + "; ".join(self.known.skipped)
+            )
+        if isinstance(self.known, HeadUnreadable):
+            raise IndeterminateComparison(
+                "this journal holds content but none of it is readable by "
+                "this build, so nothing is known about the head it accepted "
+                "— not even a lower bound. This is NOT first contact: heads "
+                "were accepted here. Unreadable: "
+                + "; ".join(self.known.skipped)
+            )
+        return self.known.entry if self.known is not None else None
+
+
+def _epoch_of(
+    entries: tuple[HeadAttestation, ...],
+) -> tuple[HeadAttestation, ...]:
+    """The entries in the current trust epoch, reset-INCLUSIVE.
+
+    Epoch scoping is what keeps the ceremony and the max-ordinal rule from
+    deadlocking each other. After an operator accepts a restore from ordinal
+    100 back to 90, the abandoned entries at 91-100 still hold the maximum
+    ordinal; unscoped, *K* would read as the head that was deliberately
+    abandoned and every subsequent open would refuse a rollback forever. Those
+    entries are retained as **evidence, not as claims** — which is the whole
+    point of recording the gap.
+
+    **Inclusive of the reset entry**, not merely the entries after it. The
+    reset entry carries the head the operator accepted; scoping it out would
+    leave a just-reset journal with an empty epoch, *K* of None, and a next
+    open classifying first contact — the deadlock's mirror image, and silent
+    re-acceptance by a different route.
+    """
+    for index in range(len(entries) - 1, -1, -1):
+        if entries[index].kind is Kind.TRUST_RESET:
+            return entries[index:]
+    return entries
+
+
+def _known_of(epoch: tuple[HeadAttestation, ...]) -> HeadAttestation | None:
+    """*K*: the maximum-ordinal entry of the epoch, not the last line.
+
+    Two writers append concurrently — the arrival lock serializes their
+    *appends*, not their journal writes — so lines can land out of order: A
+    commits ordinal 5, B commits 6 and journals it, A journals 5 last.
+    Last-line semantics would then read K=5 and classify a genuine restore to
+    5 as unchanged. Maximum-ordinal closes it, and duplicate entries at one
+    ordinal are harmless.
+    """
+    if not epoch:
+        return None
+    best = max(epoch, key=lambda entry: entry.head.ordinal)
+    tied = {
+        entry.head.record_hash
+        for entry in epoch
+        if entry.head.ordinal == best.head.ordinal
+    }
+    if len(tied) > 1:
+        raise JournalEquivocation(
+            f"journal holds {len(tied)} different records at ordinal "
+            f"{best.head.ordinal} in the current trust epoch: "
+            f"{', '.join(sorted(tied))}"
+        )
+    return best
+
+
+#: The three outcomes of looking at one decoded line. Named, because "how a
+#: line is classified" is the contract sentence this module got wrong twice.
+_HEADER = "header"
+_AMBIGUOUS = "ambiguous"
+_ENTRY_SHAPED = "entry-shaped"
+
+
+def _classify(decoded: object) -> str:
+    """Header, ambiguous, or entry-shaped — by SHAPE, never by position.
+        # Content was claimed and none of it could be read. NOT first contact.
+        known = HeadUnreadable(skipped=tuple(skipped))
+    else:
+        known = None
+    return JournalRead(
+        entries=frozen,
+        epoch=epoch,
+        known=known,
+        bootstrap=frozen[0] if frozen else None,
+        skipped=tuple(skipped),
+    )
+
+
+def read_journal(lineage: str) -> JournalRead:
+    """This lineage's journal, or an empty read if it has none.
+
+    An absent journal is not a fault — it is first contact, and answering
+    with an empty read rather than raising is what lets the classifier say so.
+    """
+    path = journal_path(lineage)
+    try:
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        # Absent is not a fault — it is first contact, and answering with an
+        # empty read is what lets the classifier say so.
+        return JournalRead(
+            entries=(), epoch=(), known=None, bootstrap=None, skipped=()
+        )
+    except (OSError, UnicodeDecodeError) as exc:
+        # The journal is THERE and cannot be read at all — a directory, a
+        # permission wall, bytes that are not text. Distinct from every case
+        # the parser handles, because there is nothing to parse. Raised as a
+        # refusal rather than let out as a builtin: a caller catching
+        # AttestationRefusal must not have an OSError escape past it.
+        raise JournalUnreadable(
+            f"the journal for lineage {lineage!r} exists but cannot be read "
+            f"as text at all: {exc}"
+        ) from exc
+    return parse_journal_lines(text.splitlines(keepends=True))
+
+
+# ---------------------------------------------------------------------------
+# Writing the journal
+# ---------------------------------------------------------------------------
+
+
+def _torn_tail_guard(path: Path) -> str:
+    """A newline when the file does not end in one, so an append cannot glue.
+
+    A crash mid-append leaves a fragment with no trailing newline. Appending
+    straight onto it would concatenate the next entry into that fragment,
+    producing ONE unreadable line — and the new entry's bytes would be lost
+    inside it. The design's promise is that a torn tail costs at most the
+    newest observation; without this guard an ordinary crash plus one commit
+    would cost the next observation too.
+
+    Conservative when it cannot tell: an unreadable file gets the newline. A
+    spurious blank line is skipped for free on read, while gluing is not
+    recoverable at all.
+    """
+    try:
+        with path.open("rb") as handle:
+            if handle.seek(0, os.SEEK_END) == 0:
+                return ""
+            handle.seek(-1, os.SEEK_END)
+            return "" if handle.read(1) == b"\n" else "\n"
+    except OSError:
+        return "\n"
+
+
+def _write_all(handle: int, payload: bytes) -> None:
+    """Write every byte, or raise. A short write is a self-inflicted torn line."""
+    written = 0
+    while written < len(payload):
+        count = os.write(handle, payload[written:])
+        if count <= 0:
+            raise OSError(
+                f"journal write stalled after {written} of {len(payload)} bytes"
+            )
+        written += count
+
+
+    The epoch scope is not a convenience. A legitimately accepted restore
+    leaves heads in the journal that the restored store does not and cannot
+    contain; auditing against those would fail permanently and train an
+    operator to ignore the audit, which is worse than not running one.
+
+    ``at_ordinal`` is injected rather than imported so this module never
+    reaches for a backend or a projection auditor. The audit producer that
+    supplies it is WP3's.
+    """
+    return tuple(
+        entry for entry in epoch if at_ordinal(entry.head.ordinal) != entry.head
+    )
+
+
+# ---------------------------------------------------------------------------
+# TRANSITIONAL — DELETE IN SLICE 5.
+#
+# Lineage-keying leaves exactly one hole: wholesale replacement. A store
+# rewritten with a NEW lineage finds no journal, is classified first contact,
+# and is trusted on sight — §07's "replacement or explicit re-custody" row
+# passing silently. Detecting it requires knowing which lineage a location
+# SHOULD present, and architecturally that is `StoreDescriptor.lineage`
+# ("when already known, is checked against genesis rather than trusted as a
+# replacement for it"). Slice 2 deliberately left that field unparsed with its
+# forcing consumer named as slice 5's adopt ceremony, and growing the `.vertex`
+# grammar out of sequence here would take a decision slice 3 was not given.
+#
+# So the binding lives here until the declared lineage supersedes it. Its
+# deletion is a residue sweep, not a behavior change: once every store's
+# vertex declares its lineage, `descriptor.lineage` answers every question
+# this file answers, from a source the operator can read and review. Slice 5
+# deletes this section, `bindings.jsonl`, and its tests together — the same
+# obligation `arrival_registry`'s transitional inference arm carries.
+# ---------------------------------------------------------------------------
+
+
+def bindings_path() -> Path:
+    """The transitional location-to-lineage bindings file. DELETE IN SLICE 5."""
+    return heads_dir() / "bindings.jsonl"
+
+
+def record_binding(location: str, lineage: str, observed_at: float) -> None:
+    """Remember which lineage this location presented. DELETE IN SLICE 5.
+
+    Append-only and keyed on nothing: the newest binding for a location wins
+    on read, and older ones stay as evidence of what it used to be.
+    """
+    path = bindings_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    line = (
+        json.dumps(
+            {
+                "v": _JOURNAL_VERSION,
+                "location": location,
+                "lineage": lineage,
+                "observed_at": observed_at,
+            },
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+        + "\n"
+    )
+    payload = _torn_tail_guard(path) + line
+    handle = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+    try:
+        _write_all(handle, payload.encode("utf-8"))
+    finally:
+        os.close(handle)
+
+
+def bound_lineage(location: str) -> str | None:
+    """The lineage this location most recently presented, if any.
+
+    DELETE IN SLICE 5. A malformed line is skipped rather than refused:
+    unlike the head journal, this file makes no claim a skipped line could
+    weaken — a missing binding degrades to first contact, which is the state
+    the binding exists to improve on, not to guarantee.
+    """
+    try:
+        text = bindings_path().read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return None
+    found: str | None = None
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        try:
+            decoded = json.loads(stripped)
+        except ValueError:
+            continue
+        if (
+            isinstance(decoded, dict)
+            and decoded.get("location") == location
+            and isinstance(decoded.get("lineage"), str)
+        ):
+            found = decoded["lineage"]
+    return found
+
+codex
+Fix: **FAIL**
+
+Evidence:
+
+- Mechanical check passed: after stripping module/class/function and attribute docstrings, AST dumps for `8ce304c6` and `5d24cf06` were identical (`48,238` characters each). Comments are absent from Python ASTs.
+- Diff contains only:
+  - `libs/engine/src/engine/arrival_head_attestation.py`
+  - `docs/scratch/arrival-break/slice3-wp1-report.md`
+- No tests or runtime code changed, so the previously verified engine `2157+1s` and architecture `99` suites are mechanically unmoved.
+- All seven named sites were updated consistently with the ruled behavior:
+  - `JournalUnreadable`: only failures leaving no text to parse.
+  - `parse_journal_lines`: no structural refusal; headerless journals weaken the claim.
+  - Write path: headerless journals are tolerated.
+  - `JournalRead.skipped`: includes absences; non-empty weakens `known`.
+  - `established_head` docstring: broader incomplete-read scope.
+  - `_parse_entry`: kindless entry-shaped data is skipped, not absorbed as a header.
+  - `_PROTOCOL_VERSION`: records versions but does not enforce them.
+
+`S3WP1-L-3` — Remaining stale lower-bound prose. `HeadLowerBound` still says “Lines in the epoch could not be read” and explains the bound solely through “An unreadable line.” A missing header also produces `HeadLowerBound`, despite every entry being readable. Likewise, `established_head()`’s emitted refusal says the journal “has unreadable lines” and labels the reasons “Unreadable,” even when the sole reason is `header: absent`. These statements still misdescribe the weakening condition after the ruling.
+
+**NOT CONVERGED**
+tokens used
+38,410
+Fix: **FAIL**
+
+Evidence:
+
+- Mechanical check passed: after stripping module/class/function and attribute docstrings, AST dumps for `8ce304c6` and `5d24cf06` were identical (`48,238` characters each). Comments are absent from Python ASTs.
+- Diff contains only:
+  - `libs/engine/src/engine/arrival_head_attestation.py`
+  - `docs/scratch/arrival-break/slice3-wp1-report.md`
+- No tests or runtime code changed, so the previously verified engine `2157+1s` and architecture `99` suites are mechanically unmoved.
+- All seven named sites were updated consistently with the ruled behavior:
+  - `JournalUnreadable`: only failures leaving no text to parse.
+  - `parse_journal_lines`: no structural refusal; headerless journals weaken the claim.
+  - Write path: headerless journals are tolerated.
+  - `JournalRead.skipped`: includes absences; non-empty weakens `known`.
+  - `established_head` docstring: broader incomplete-read scope.
+  - `_parse_entry`: kindless entry-shaped data is skipped, not absorbed as a header.
+  - `_PROTOCOL_VERSION`: records versions but does not enforce them.
+
+`S3WP1-L-3` — Remaining stale lower-bound prose. `HeadLowerBound` still says “Lines in the epoch could not be read” and explains the bound solely through “An unreadable line.” A missing header also produces `HeadLowerBound`, despite every entry being readable. Likewise, `established_head()`’s emitted refusal says the journal “has unreadable lines” and labels the reasons “Unreadable,” even when the sole reason is `header: absent`. These statements still misdescribe the weakening condition after the ruling.
+
+**NOT CONVERGED**

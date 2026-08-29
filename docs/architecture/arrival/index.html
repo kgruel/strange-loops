@@ -348,7 +348,7 @@
             <ul>
               <li>Arrival is a protocol, not a mandatory file.</li>
               <li>One authority exists per lineage.</li>
-              <li>The envelope becomes wire v1 after the seam triage — drop <code>body.t</code>, re-spell the tick <code>observer</code>, keep the dual signature (<code>decision:design/arrival-wire-v1-seam-triage</code>).</li>
+              <li>Wire v1 is pinned — <code>body.t</code> dropped, the tick <code>observer</code> re-spelled to the log's custodian, the dual signature kept, and a batch's rows held to one observer (<code>decision:design/arrival-wire-v1-seam-triage</code>).</li>
               <li>Ledger and query APIs remain separate.</li>
               <li>The sidecar owns legacy interpretation.</li>
               <li>External state is required for rollback detection.</li>
@@ -357,7 +357,7 @@
           <article class="doc-panel">
             <h3>Requires a later ruling</h3>
             <ul>
-              <li>The tick <code>observer</code> re-spelling — the one seam-triage sub-ruling still open</li>
+              <li>Tick outer signatures — deferred on purpose, so the tick's custodian label is currently a true but unverified claim</li>
               <li>Formal authority-transfer / re-custody ceremony</li>
               <li>Erasure and privacy profile</li>
               <li>Witness topology and retention policy</li>

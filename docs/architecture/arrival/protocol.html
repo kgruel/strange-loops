@@ -344,16 +344,30 @@
           <h2>Authorship and admission</h2>
         </div>
         <p>
-          Arrival separates what an observer authored from where a custodian placed it. The
-          optional record signature covers the content commitment—kind, authored timestamp,
-          observer, origin, and body—but not lineage, ordinal, predecessor, or record hash. A
-          signed fact can therefore move between custody lineages without fabricating a new
-          author signature.
+          Arrival separates what an observer authored from where a custodian placed it, and
+          it uses two different signatures to do so. The outer record signature is the
+          <strong>arrival-content signature, and it is per-lineage</strong>: it covers the
+          content commitment—kind, authored timestamp, observer, origin, and body—but not
+          lineage, ordinal, predecessor, or record hash, and it is minted only in the
+          lineage where the record first arrived.
         </p>
 
         <div class="doc-equation">
           content = SHA-256( JCS({ "k", "at", "observer", "origin", "body" }) )
         </div>
+
+        <p>
+          <strong>The signature that travels through re-custody is the inner one.</strong> A
+          fact row carries its own fact-domain signature inside <code>body</code>, over
+          <code>(kind, ts, observer, origin, payload)</code>, and that claim rides verbatim
+          into every lineage that admits the row — which is what makes admission legal
+          without anyone fabricating an author signature. The outer signature does not make
+          the trip: a merge appends records the target custodian did not sign, holds no key
+          for a foreign observer, and so drops the outer signature rather than re-minting
+          it. Reading the outer signature as the author's portable claim is the one mistake
+          this section exists to prevent
+          (<code>decision:design/arrival-wire-v1-seam-triage</code>, ruling 5).
+        </p>
 
         <p>
           Genesis introduces the founding public key and is self-certifying. A <code>key</code>

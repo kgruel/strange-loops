@@ -55,8 +55,8 @@
         </p>
         <div class="doc-meta">
           <span class="doc-badge">Wire v1</span>
-          <span>Branch-compatible envelope</span>
-          <span>26 August 2026</span>
+          <span>Pinned — seams ruled and executed</span>
+          <span>29 August 2026</span>
         </div>
       </header>
 
@@ -66,13 +66,16 @@
           <h2>Role and compatibility</h2>
         </div>
         <p>
-          Wire v1 starts from the envelope implemented by
-          <code>libs/engine/src/engine/arrival.py</code> on this branch, but does not freeze
-          it: <code>decision:design/arrival-wire-v1-seam-triage</code> (26 August 2026) pins
-          wire v1 as the <em>post-triage</em> envelope — drop <code>body.t</code>, re-spell
-          the tick <code>observer</code>, keep the dual signature. No shipped store exists in
-          the branch format, so the triage costs codec and fixture regeneration only; the
-          branch’s behavioral convergence does not reopen.
+          Wire v1 is PINNED. <code>decision:design/arrival-wire-v1-seam-triage</code>
+          ruled the three acknowledged seams individually (26 August 2026) and closed the
+          open tick-observer sub-ruling (29 August 2026); slice 1 of the arrival break
+          executed both. The envelope described below is the ruled one, not the branch
+          draft: <code>body.t</code> is dropped, the tick <code>observer</code> is the
+          destination log's genesis observer, and the dual signature is kept. No shipped
+          store existed in the branch format, which is why the seams could be closed on
+          correctness rather than deferred to compatibility — the first real
+          <code>.arrival</code> store is where envelope changes start costing lineage
+          breaks.
         </p>
 
         <div class="doc-callout">
@@ -156,7 +159,7 @@
               <tr><td><code>prev</code></td><td>null or string</td><td>Null exactly at ordinal 0; otherwise 64 lowercase hex SHA-256 characters.</td></tr>
               <tr><td><code>at</code></td><td>number</td><td>Finite Unix-seconds claim; signed content, never an ordering input.</td></tr>
               <tr><td><code>k</code></td><td>string</td><td>Non-empty record kind.</td></tr>
-              <tr><td><code>observer</code></td><td>string</td><td>Non-empty producer/observer label under the record-kind profile.</td></tr>
+              <tr><td><code>observer</code></td><td>string</td><td>Non-empty producer/observer label under the record-kind profile. For <code>fact</code> and <code>batch</code> it names the row author, and that value selects the signing key; for <code>tick</code> it names the log's custodian; for <code>genesis</code> and <code>key</code> it is the founding or introducing identity.</td></tr>
               <tr><td><code>origin</code></td><td>string</td><td>May be empty; opaque origin label.</td></tr>
               <tr><td><code>body</code></td><td>object</td><td>A JSON object canonicalizable under JCS.</td></tr>
               <tr><td><code>sig</code></td><td>string</td><td>Optional and non-empty. Absent means unsigned; null is forbidden.</td></tr>
@@ -189,11 +192,11 @@
           <h2>Core body profiles</h2>
         </div>
         <p>
-          These profiles document the branch envelope — the triage input. Under the ratified
-          wire v1 (<code>decision:design/arrival-wire-v1-seam-triage</code>), fact, batch,
-          and tick bodies drop the duplicated <code>t</code> discriminator (the envelope
-          <code>k</code> is the one spelling), and the tick record’s <code>observer</code>
-          receives an honest spelling still to be ruled.
+          These profiles are the ruled wire v1 bodies. A body never carries a record-class
+          discriminator: the envelope’s <code>k</code> is the one spelling, and a reader
+          decodes a body as the class its envelope already named. A body carrying the
+          retired <code>t</code> field is refused by the ordinary unknown-field rule — the
+          drop is enforced by the grammar, not tolerated by a compatibility mode.
         </p>
 
         <h3><code>genesis</code></h3>
@@ -213,43 +216,72 @@
 
         <h3><code>fact</code></h3>
         <p>
-          The body is the existing canonical fact codec object. It contains
-          <code>t: "fact"</code>, then string fields <code>id</code>, <code>kind</code>,
-          <code>observer</code>, <code>origin</code>, and <code>payload</code>, plus finite numeric
-          <code>ts</code>. An optional inner <code>signature</code> preserves the fact-domain
-          signature. None of the required fields may be null.
+          The body is the fact row as an object: string fields <code>id</code>,
+          <code>kind</code>, <code>observer</code>, <code>origin</code>, and
+          <code>payload</code>, plus finite numeric <code>ts</code>. An optional inner
+          <code>signature</code> preserves the fact-domain signature. None of the required
+          fields may be null. <code>payload</code> rides as the verbatim stored TEXT — a
+          JSON string, never re-serialized — which is what keeps every inner commitment
+          hash re-derivable byte-for-byte.
         </p>
 
         <h3><code>batch</code></h3>
         <p>
-          The body contains exactly <code>t: "batch"</code> and <code>rows</code>. Rows is an
-          array of at least two complete fact objects in emission order. Batches do not nest,
-          do not contain ticks, and do not repeat a fact ID within one batch. A one-row ceremony
-          uses <code>fact</code>; there is no second spelling as a one-row batch.
+          The body contains exactly <code>rows</code>: an array of at least two complete
+          fact bodies in emission order. Batches do not nest, do not contain ticks, and do
+          not repeat a fact ID within one batch. A one-row ceremony uses <code>fact</code>;
+          there is no second spelling as a one-row batch.
+        </p>
+        <p>
+          <strong>Every row in a batch names the same <code>observer</code>.</strong> This
+          is a grammar rule, refused in both directions, not a convention. The record’s
+          envelope <code>observer</code> is the batch’s single author, and the outer
+          signature made under that identity covers every row — so a batch spanning two
+          observers would be one author attesting to another’s facts. A multi-observer
+          ceremony is not one record.
         </p>
 
         <h3><code>tick</code></h3>
         <p>
-          The body is the canonical tick codec object: <code>t: "tick"</code>; string fields
-          <code>id</code>, <code>name</code>, <code>origin</code>, and <code>payload</code>;
-          finite numeric <code>ts</code>; nullable numeric <code>since</code>; nullable string
-          fields <code>prev_hash</code>, <code>window_start</code>, <code>fact_cursor</code>, and
-          <code>window_hash</code>; and optional inner <code>signature</code>.
+          The body is the tick row as an object: string fields <code>id</code>,
+          <code>name</code>, <code>origin</code>, and <code>payload</code>; finite numeric
+          <code>ts</code>; nullable numeric <code>since</code>; nullable string fields
+          <code>prev_hash</code>, <code>window_start</code>, <code>fact_cursor</code>, and
+          <code>window_hash</code>; and optional inner <code>signature</code>. The tick’s
+          name lives here, in the body, where it is data. It is not the record’s
+          <code>observer</code>.
         </p>
 
-        <div class="doc-callout is-warning">
-          <span class="doc-callout-label">The v1 seams — ruled</span>
+        <div class="doc-callout">
+          <span class="doc-callout-label">The v1 seams — ruled and closed</span>
           <p>
             The draft bundled three seams here as “preserved for compatibility”;
-            <code>decision:design/arrival-wire-v1-seam-triage</code> ruled them individually.
-            The duplicated discriminator (<code>body.t</code> beside the outer <code>k</code>)
-            DROPS — the fact commitment covers
-            <code>(kind, ts, observer, origin, payload)</code>, no <code>t</code>, so no
-            preserved signature is invalidated. The tick writer’s name-as-<code>observer</code>
-            is RE-SPELLED — a name is not an authorship claim; the exact spelling is the open
-            sub-ruling. The inner fact-domain signature beside the outer arrival-content
-            signature KEEPS — two subjects (author content, custody record), a principled pair
-            rather than a seam.
+            <code>decision:design/arrival-wire-v1-seam-triage</code> ruled them individually
+            and slice 1 executed the ruling. Nothing below is open.
+          </p>
+          <p>
+            <strong>The duplicated discriminator DROPPED.</strong> <code>body.t</code> beside
+            the outer <code>k</code> was the record class spelled twice with nothing keeping
+            the two honest. No preserved signature was invalidated: the fact commitment
+            covers <code>(kind, ts, observer, origin, payload)</code> and never named
+            <code>t</code>. The legacy line codec keeps its own <code>t</code> — it frames
+            the derived <code>.jsonl</code> projection and the migration sidecar, where a
+            line has nowhere else to carry its class.
+          </p>
+          <p>
+            <strong>The tick <code>observer</code> RE-SPELLED to the log’s custodian</strong>
+            — specifically, the destination log’s genesis observer. A tick has no author, and
+            its name is not an authorship claim anyone can make; the record says instead that
+            this custodian’s fold engine produced it. Tick outer signatures are deferred ON
+            PURPOSE, so wire v1 pins with ticks outer-unsigned by decision rather than by
+            omission — which makes the custodian label a claim that is true but, for now,
+            unverified. Fact and batch <code>observer</code> values are untouched, because
+            that field selects the signing key.
+          </p>
+          <p>
+            <strong>The dual signature KEPT.</strong> The inner fact-domain signature beside
+            the outer arrival-content signature is a principled two-subject pair, not a seam
+            — see section 06 of the protocol for which subject is which.
           </p>
         </div>
       </section>
@@ -378,7 +410,6 @@
   "observer": "kyle",
   "origin": "notes.loops",
   "body": {
-    "t": "fact",
     "id": "01ARZ3NDEKTSV4RRFFQ69G5FAW",
     "kind": "note",
     "ts": 1787695262.125,

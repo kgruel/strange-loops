@@ -12,6 +12,7 @@ corrupting the very memory the design exists to protect.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -377,6 +378,82 @@ def test_an_entry_carries_the_head_kind_level_and_time_and_nothing_signed():
         assert absent not in entry
     for corroboration in ("fact_count", "tick_count", "counts"):
         assert corroboration not in entry
+
+
+def test_a_create_race_does_not_overwrite_the_other_writers_entry():
+    """The creating writer must not land its bytes at offset zero.
+
+    Two writers reach an absent journal. A wins the exclusive create; B loses
+    it, opens for append, and lands a complete entry in the still-empty file.
+    If A's descriptor sat at offset zero it would write its header and entry
+    over B's — and the journal would have silently forgotten a head. A later
+    restore to A's ordinal would then classify unchanged, which is the failure
+    the maximum-ordinal rule exists to close, arriving through the write path.
+
+    The interleave is forced by letting B complete a whole append inside A's
+    write call, while A still holds the descriptor it created.
+    """
+    real_write = os.write
+    racing = []
+
+    def write_after_the_other_writer_lands(handle, payload):
+        if not racing:
+            racing.append(True)
+            append_entry(observation(9))  # B, start to finish
+        return real_write(handle, payload)
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(os, "write", write_after_the_other_writer_lands)
+        append_entry(observation(4, kind=Kind.BOOTSTRAP, level=Level.MINT))
+
+    result = read_journal(LINEAGE)
+    assert sorted(entry.head.ordinal for entry in result.entries) == [4, 9]
+    assert result.known is not None
+    assert result.known.head.ordinal == 9
+
+
+def test_a_torn_tail_does_not_glue_itself_to_the_next_entry():
+    """A crash costs the newest observation, and must not cost the next one.
+
+    Appending straight onto a fragment with no trailing newline would
+    concatenate the next entry into it — one unreadable line, with the new
+    entry's bytes lost inside. The guard keeps the fragment its own line.
+
+    The fragment then sits mid-file, so this read refuses under the
+    conservative policy of ``finding:s3wp1-mid-file-journal-damage-unstated``.
+    That escalation is asserted here as the honest current behavior, not
+    endorsed: it is the strongest fact the arbiter needs, because it shows the
+    mid-file case is reachable from an ordinary crash and not only from
+    tampering.
+    """
+    append_entry(observation(4))
+    with journal_path(LINEAGE).open("a") as handle:
+        handle.write('{"v":1,"kind":"adv')  # crash mid-append
+    append_entry(observation(5))
+
+    lines = journal_path(LINEAGE).read_text().splitlines()
+    assert lines[2] == '{"v":1,"kind":"adv'
+    assert json.loads(lines[3])["ordinal"] == 5
+
+    with pytest.raises(JournalUnreadable) as caught:
+        read_journal(LINEAGE)
+    assert "line 3" in str(caught.value)
+
+
+def test_a_short_write_still_lands_the_whole_line():
+    """A short write would be a torn line this process inflicted on itself."""
+    real_write = os.write
+
+    def one_byte_at_a_time(handle, payload):
+        return real_write(handle, payload[:1])
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(os, "write", one_byte_at_a_time)
+        append_entry(observation(4))
+
+    result = read_journal(LINEAGE)
+    assert result.known is not None
+    assert result.known.head == head(4)
 
 
 def test_the_header_is_written_once_however_many_entries_land():

@@ -719,6 +719,42 @@ def read_journal(lineage: str) -> JournalRead:
 # ---------------------------------------------------------------------------
 
 
+def _torn_tail_guard(path: Path) -> str:
+    """A newline when the file does not end in one, so an append cannot glue.
+
+    A crash mid-append leaves a fragment with no trailing newline. Appending
+    straight onto it would concatenate the next entry into that fragment,
+    producing ONE unreadable line — and the new entry's bytes would be lost
+    inside it. The design's promise is that a torn tail costs at most the
+    newest observation; without this guard an ordinary crash plus one commit
+    would cost the next observation too.
+
+    Conservative when it cannot tell: an unreadable file gets the newline. A
+    spurious blank line is skipped for free on read, while gluing is not
+    recoverable at all.
+    """
+    try:
+        with path.open("rb") as handle:
+            if handle.seek(0, os.SEEK_END) == 0:
+                return ""
+            handle.seek(-1, os.SEEK_END)
+            return "" if handle.read(1) == b"\n" else "\n"
+    except OSError:
+        return "\n"
+
+
+def _write_all(handle: int, payload: bytes) -> None:
+    """Write every byte, or raise. A short write is a self-inflicted torn line."""
+    written = 0
+    while written < len(payload):
+        count = os.write(handle, payload[written:])
+        if count <= 0:
+            raise OSError(
+                f"journal write stalled after {written} of {len(payload)} bytes"
+            )
+        written += count
+
+
 def append_entry(entry: HeadAttestation) -> Path:
     """Append one observation. Returns the journal it landed in.
 
@@ -731,22 +767,32 @@ def append_entry(entry: HeadAttestation) -> Path:
     bootstrap receipt either, since the first advance would erase it.
 
     A brand-new journal gets its header and its first entry in one write. The
-    exclusive create is what keeps two racing writers from each emitting a
-    header; the reader tolerates it anyway, because a create race is cheaper
-    to survive than to prevent.
+    exclusive create keeps two racing writers from each emitting a header; the
+    reader tolerates a second one anyway, because a create race is cheaper to
+    survive than to prevent.
+
+    **Every open carries O_APPEND, including the exclusive create.** Without it
+    the creating writer's descriptor sits at offset zero, and a second writer
+    that lost the create race can land a complete entry there first — which the
+    creator then overwrites. The journal would have silently forgotten a head,
+    and a later restore to the surviving ordinal would classify UNCHANGED: the
+    exact failure the maximum-ordinal read rule exists to close, arriving
+    through the write path instead.
     """
     path = journal_path(entry.head.lineage)
     path.parent.mkdir(parents=True, exist_ok=True)
     line = _entry_line(entry)
     try:
-        handle = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        handle = os.open(
+            path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_APPEND, 0o600
+        )
     except FileExistsError:
+        payload = _torn_tail_guard(path) + line
         handle = os.open(path, os.O_WRONLY | os.O_APPEND)
-        payload = line
     else:
         payload = _header_line() + line
     try:
-        os.write(handle, payload.encode("utf-8"))
+        _write_all(handle, payload.encode("utf-8"))
     finally:
         os.close(handle)
     return path
@@ -832,9 +878,10 @@ def record_binding(location: str, lineage: str, observed_at: float) -> None:
         )
         + "\n"
     )
+    payload = _torn_tail_guard(path) + line
     handle = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
     try:
-        os.write(handle, line.encode("utf-8"))
+        _write_all(handle, payload.encode("utf-8"))
     finally:
         os.close(handle)
 

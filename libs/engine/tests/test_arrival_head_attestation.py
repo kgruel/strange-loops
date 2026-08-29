@@ -25,8 +25,10 @@ from engine.arrival_head_attestation import (
     AttestationRefusal,
     HeadAttestation,
     HeadFork,
+    HeadLowerBound,
     HeadRewrite,
     HeadRollback,
+    IndeterminateComparison,
     JournalEquivocation,
     JournalUnreadable,
     Kind,
@@ -50,6 +52,9 @@ from engine.arrival_head_attestation import (
     unaccounted_heads,
 )
 
+HEADER = json.dumps(
+    {"v": 1, "type": "arrival-head-observation", "protocol": 1, "wire": 1}
+)
 LINEAGE = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
 OTHER_LINEAGE = "01BX5ZZKBKACTAV9WEVGEMMVRZ"
 
@@ -326,8 +331,8 @@ def test_the_journal_is_keyed_by_lineage_not_by_location():
     )
     result = read_journal(LINEAGE)
     assert len(result.entries) == 2
-    assert result.known is not None
-    assert result.known.head == head(5)
+    assert result.established_head() is not None
+    assert result.established_head().head == head(5)
 
 
 # ---------------------------------------------------------------------------
@@ -408,8 +413,8 @@ def test_a_create_race_does_not_overwrite_the_other_writers_entry():
 
     result = read_journal(LINEAGE)
     assert sorted(entry.head.ordinal for entry in result.entries) == [4, 9]
-    assert result.known is not None
-    assert result.known.head.ordinal == 9
+    assert result.established_head() is not None
+    assert result.established_head().head.ordinal == 9
 
 
 def test_a_torn_tail_does_not_glue_itself_to_the_next_entry():
@@ -419,12 +424,10 @@ def test_a_torn_tail_does_not_glue_itself_to_the_next_entry():
     concatenate the next entry into it — one unreadable line, with the new
     entry's bytes lost inside. The guard keeps the fragment its own line.
 
-    The fragment then sits mid-file, so this read refuses under the
-    conservative policy of ``finding:s3wp1-mid-file-journal-damage-unstated``.
-    That escalation is asserted here as the honest current behavior, not
-    endorsed: it is the strongest fact the arbiter needs, because it shows the
-    mid-file case is reachable from an ordinary crash and not only from
-    tampering.
+    Without the guard the fragment and the ordinal-5 entry would be one line,
+    so BOTH observations would be lost rather than just the torn one. This is
+    a bytes-level assertion: it is what the guard actually does, and the read
+    policy above is a separate decision layered on top of it.
     """
     append_entry(observation(4))
     with journal_path(LINEAGE).open("a") as handle:
@@ -435,9 +438,9 @@ def test_a_torn_tail_does_not_glue_itself_to_the_next_entry():
     assert lines[2] == '{"v":1,"kind":"adv'
     assert json.loads(lines[3])["ordinal"] == 5
 
-    with pytest.raises(JournalUnreadable) as caught:
-        read_journal(LINEAGE)
-    assert "line 3" in str(caught.value)
+    result = read_journal(LINEAGE)
+    assert isinstance(result.known, HeadLowerBound)
+    assert result.known.at_least.head.ordinal == 5
 
 
 def test_a_short_write_still_lands_the_whole_line():
@@ -452,8 +455,8 @@ def test_a_short_write_still_lands_the_whole_line():
         append_entry(observation(4))
 
     result = read_journal(LINEAGE)
-    assert result.known is not None
-    assert result.known.head == head(4)
+    assert result.established_head() is not None
+    assert result.established_head().head == head(4)
 
 
 def test_the_header_is_written_once_however_many_entries_land():
@@ -481,15 +484,15 @@ def test_the_known_head_is_the_maximum_ordinal_not_the_last_line():
     append_entry(observation(5))
     result = read_journal(LINEAGE)
     assert result.entries[-1].head.ordinal == 5
-    assert result.known is not None
-    assert result.known.head.ordinal == 6
+    assert result.established_head() is not None
+    assert result.established_head().head.ordinal == 6
 
 
 def test_out_of_order_journal_writes_still_catch_a_restore():
     """The consequence the read rule exists for, stated end to end."""
     append_entry(observation(6))
     append_entry(observation(5))
-    known = read_journal(LINEAGE).known
+    known = read_journal(LINEAGE).established_head()
     assert compare(known, head(5), None) is Outcome.ROLLBACK
 
 
@@ -497,8 +500,8 @@ def test_duplicate_entries_at_one_ordinal_are_harmless():
     append_entry(observation(6))
     append_entry(observation(6))
     result = read_journal(LINEAGE)
-    assert result.known is not None
-    assert result.known.head == head(6)
+    assert result.established_head() is not None
+    assert result.established_head().head == head(6)
 
 
 # ---------------------------------------------------------------------------
@@ -521,8 +524,8 @@ def test_disagreement_below_the_maximum_ordinal_is_not_equivocation():
     append_entry(observation(6, "b"))
     append_entry(observation(7, "c"))
     result = read_journal(LINEAGE)
-    assert result.known is not None
-    assert result.known.head == head(7, "c")
+    assert result.established_head() is not None
+    assert result.established_head().head == head(7, "c")
 
 
 # ---------------------------------------------------------------------------
@@ -552,15 +555,15 @@ def test_after_a_trust_reset_the_known_head_is_the_reset_head():
     """
     _journal_with_a_reset()
     result = read_journal(LINEAGE)
-    assert result.known is not None
-    assert result.known.head.ordinal == 90
-    assert result.known.kind is Kind.TRUST_RESET
+    assert result.established_head() is not None
+    assert result.established_head().head.ordinal == 90
+    assert result.established_head().kind is Kind.TRUST_RESET
 
 
 def test_after_a_trust_reset_the_restored_store_opens_unchanged():
     """The deadlock, stated as the behavior an operator would see."""
     _journal_with_a_reset()
-    known = read_journal(LINEAGE).known
+    known = read_journal(LINEAGE).established_head()
     assert compare(known, head(90), None) is Outcome.UNCHANGED
 
 
@@ -575,7 +578,7 @@ def test_the_epoch_includes_the_reset_entry_itself():
     result = read_journal(LINEAGE)
     assert len(result.epoch) == 1
     assert result.epoch[0].kind is Kind.TRUST_RESET
-    assert result.known is not None
+    assert result.established_head() is not None
 
 
 def test_pre_reset_entries_are_retained_as_evidence():
@@ -603,8 +606,8 @@ def test_only_the_latest_reset_opens_the_current_epoch():
     append_entry(observation(2, kind=Kind.TRUST_RESET, level=Level.FULL))
     result = read_journal(LINEAGE)
     assert [entry.head.ordinal for entry in result.epoch] == [2]
-    assert result.known is not None
-    assert result.known.head.ordinal == 2
+    assert result.established_head() is not None
+    assert result.established_head().head.ordinal == 2
 
 
 def test_equivocation_is_scoped_to_the_current_epoch():
@@ -613,8 +616,8 @@ def test_equivocation_is_scoped_to_the_current_epoch():
     append_entry(observation(6, "b"))
     append_entry(observation(4, kind=Kind.TRUST_RESET, level=Level.FULL))
     result = read_journal(LINEAGE)
-    assert result.known is not None
-    assert result.known.head == head(4)
+    assert result.established_head() is not None
+    assert result.established_head().head == head(4)
 
 
 # ---------------------------------------------------------------------------
@@ -655,27 +658,133 @@ def test_the_audit_check_does_not_fail_on_pre_reset_entries():
 
 
 def test_a_torn_final_line_is_tolerated_and_reported():
-    """A crash mid-append costs at most the newest observation."""
+    """A crash mid-append costs at most the newest observation.
+
+    Tolerated, but the head it leaves is a bound rather than a head — the
+    fragment carries no information about the ordinal it was recording.
+    """
     append_entry(observation(4))
     with journal_path(LINEAGE).open("a") as handle:
         handle.write('{"v":1,"kind":"advance","level":"comm')
     result = read_journal(LINEAGE)
-    assert result.known is not None
-    assert result.known.head.ordinal == 4
+    assert isinstance(result.known, HeadLowerBound)
+    assert result.known.at_least.head.ordinal == 4
     assert len(result.skipped) == 1
-    assert "torn final line" in result.skipped[0]
+    assert "does not parse" in result.skipped[0]
 
 
-def test_damage_before_the_last_line_refuses():
-    """Skipping it would silently lower the remembered head."""
+def test_damage_anywhere_is_tolerated_and_reported():
+    """Position carries no meaning, so the read rule does not consult it.
+
+    The earlier design refused damage above the last line, reasoning that
+    skipping could silently lower K. It can — but refusing was the wrong
+    answer to it, and the loss is carried in the result type instead.
+    """
     append_entry(observation(4))
     append_entry(observation(5))
     lines = journal_path(LINEAGE).read_text().splitlines()
     lines[1] = "{not json"
     journal_path(LINEAGE).write_text("\n".join(lines) + "\n")
+    result = read_journal(LINEAGE)
+    assert isinstance(result.known, HeadLowerBound)
+    assert result.known.at_least.head.ordinal == 5
+    assert "line 2" in result.skipped[0]
+
+
+def test_an_incomplete_read_cannot_be_asked_for_a_comparable_head():
+    """The cheap unchanged shortcut is unobtainable, not merely discouraged."""
+    append_entry(observation(4))
+    with journal_path(LINEAGE).open("a") as handle:
+        handle.write("{not json\n")
+    result = read_journal(LINEAGE)
+    with pytest.raises(IndeterminateComparison) as caught:
+        result.established_head()
+    assert "at or above ordinal 4" in str(caught.value)
+
+
+def test_an_incomplete_read_cannot_classify_a_restore_as_unchanged():
+    """The out-of-order case that refuted the ascending-ordinal invariant.
+
+    Writers journal out of order — the arrival lock serializes their appends,
+    not their journal writes — so the epoch maximum can sit above a later
+    line. Damage the line holding it, and the surviving maximum is 91 while
+    the truth is 92. A store presenting 91 after a genuine restore would
+    classify unchanged against a plain K; against a bound it cannot be
+    classified at all, which is the honest answer.
+
+    See ``finding:s3wp1-epoch-ordinals-do-not-ascend-in-file-order``.
+    """
+    append_entry(observation(90, kind=Kind.TRUST_RESET, level=Level.FULL))
+    append_entry(observation(92))  # writer B journals first
+    append_entry(observation(91))  # writer A journals last
+
+    assert read_journal(LINEAGE).established_head().head.ordinal == 92
+
+    lines = journal_path(LINEAGE).read_text().splitlines()
+    lines[2] = "{torn"  # the line holding the epoch maximum
+    journal_path(LINEAGE).write_text("\n".join(lines) + "\n")
+
+    result = read_journal(LINEAGE)
+    assert isinstance(result.known, HeadLowerBound)
+    assert result.known.at_least.head.ordinal == 91
+    assert 91 in [entry.head.ordinal for entry in result.entries]
+    with pytest.raises(IndeterminateComparison):
+        result.established_head()
+
+
+def test_a_bound_still_answers_rollback_soundly():
+    """The one comparison a lower bound can make: below the bound is below K."""
+    append_entry(observation(90))
+    append_entry(observation(91))
+    with journal_path(LINEAGE).open("a") as handle:
+        handle.write("{torn\n")
+    result = read_journal(LINEAGE)
+    assert isinstance(result.known, HeadLowerBound)
+    assert compare(result.known.at_least, head(5), None) is Outcome.ROLLBACK
+
+
+def test_the_deadlock_scenario_opens_cleanly_now():
+    """A crash, a commit, and every later open — the escalation, gone.
+
+    Under the refusal this sequence bricked the journal permanently: the
+    fragment became mid-file the moment anything followed it. Now the opens
+    proceed, reporting the loss.
+    """
+    append_entry(observation(4))
+    with journal_path(LINEAGE).open("a") as handle:
+        handle.write('{"v":1,"kind":"adv')  # crash mid-append
+    for ordinal in range(5, 9):
+        append_entry(observation(ordinal))  # ordinary commits, long after
+    result = read_journal(LINEAGE)
+    assert isinstance(result.known, HeadLowerBound)
+    assert result.known.at_least.head.ordinal == 8
+    assert len(result.skipped) == 1
+
+
+def test_entries_with_no_header_are_structural_damage():
+    """The header states how the hashes derive; without it a comparison is
+    not a weaker answer, it is a meaningless one."""
+    append_entry(observation(4))
+    lines = journal_path(LINEAGE).read_text().splitlines()
+    journal_path(LINEAGE).write_text("\n".join(lines[1:]) + "\n")
     with pytest.raises(JournalUnreadable) as caught:
         read_journal(LINEAGE)
-    assert "line 2" in str(caught.value)
+    assert "no header" in str(caught.value)
+
+
+def test_an_empty_journal_is_not_headerless_damage():
+    """No entries, no claim — nothing for a missing header to invalidate."""
+    assert parse_journal_lines([]).established_head() is None
+
+
+def test_a_creator_that_crashed_before_its_header_does_not_strand_the_journal():
+    """An empty existing file gets the header from whoever appends next."""
+    journal_path(LINEAGE).parent.mkdir(parents=True, exist_ok=True)
+    journal_path(LINEAGE).touch()  # creator won the create, then died
+    append_entry(observation(4))
+    result = read_journal(LINEAGE)
+    assert result.established_head() is not None
+    assert result.established_head().head.ordinal == 4
 
 
 def test_an_entry_from_a_later_build_is_skipped_and_reported_not_refused():
@@ -702,8 +811,8 @@ def test_an_entry_from_a_later_build_is_skipped_and_reported_not_refused():
         )
         handle.write(json.dumps({"v": 99, "kind": "advance"}) + "\n")
     result = read_journal(LINEAGE)
-    assert result.known is not None
-    assert result.known.head.ordinal == 4
+    assert isinstance(result.known, HeadLowerBound)
+    assert result.known.at_least.head.ordinal == 4
     assert len(result.skipped) == 2
 
 
@@ -711,6 +820,7 @@ def test_unknown_fields_are_ignored_on_read():
     """Append-only means they are preserved on disk by construction."""
     result = parse_journal_lines(
         [
+            HEADER,
             json.dumps(
                 {
                     "v": 1,
@@ -722,11 +832,11 @@ def test_unknown_fields_are_ignored_on_read():
                     "observed_at": 1.0,
                     "a_field_from_2027": {"nested": True},
                 }
-            )
+            ),
         ]
     )
-    assert result.known is not None
-    assert result.known.head == head(4)
+    assert result.established_head() is not None
+    assert result.established_head().head == head(4)
     assert result.skipped == ()
 
 
@@ -749,7 +859,7 @@ def test_a_second_header_from_a_create_race_is_not_damage():
             ),
         ]
     )
-    assert result.known is not None
+    assert result.established_head() is not None
     assert result.skipped == ()
 
 
@@ -769,7 +879,7 @@ def test_an_entry_with_a_non_integer_ordinal_is_not_read():
             )
         ]
     )
-    assert result.known is None
+    assert result.established_head() is None
     assert result.skipped != ()
 
 
@@ -781,9 +891,9 @@ def test_an_entry_with_a_non_integer_ordinal_is_not_read():
 def test_an_absent_journal_reads_empty_rather_than_raising():
     """An absent journal is first contact, not a fault."""
     result = read_journal(LINEAGE)
-    assert result.known is None
+    assert result.established_head() is None
     assert result.entries == ()
-    assert compare(result.known, head(0), None) is Outcome.FIRST_CONTACT
+    assert compare(result.established_head(), head(0), None) is Outcome.FIRST_CONTACT
 
 
 def test_the_bootstrap_receipt_is_the_first_entry_and_survives_every_advance():
@@ -826,7 +936,7 @@ def test_no_log_but_a_remembered_head_refuses():
     permit a silent re-mint under a remembered lineage.
     """
     append_entry(observation(4217))
-    known = read_journal(LINEAGE).known
+    known = read_journal(LINEAGE).established_head()
     assert compare_absent_store(known) is AbsentStoreOutcome.STORE_LOST
     assert refusal_for(AbsentStoreOutcome.STORE_LOST) is StoreLost
 
@@ -864,7 +974,7 @@ def test_the_binding_closes_the_wholesale_replacement_hole():
     append_entry(observation(9))
     expected = bound_lineage("/a/project.arrival")
     assert expected is not None
-    known = read_journal(expected).known
+    known = read_journal(expected).established_head()
     presented = head(0, "z", lineage=OTHER_LINEAGE)
     assert compare(known, presented, None) is Outcome.LINEAGE_REPLACED
 

@@ -57,10 +57,13 @@ __all__ = [
     "ABSENT_STORE_REFUSALS",
     "AbsentStoreOutcome",
     "AttestationRefusal",
+    "EstablishedHead",
     "HeadAttestation",
     "HeadFork",
+    "HeadLowerBound",
     "HeadRewrite",
     "HeadRollback",
+    "IndeterminateComparison",
     "JournalEquivocation",
     "JournalRead",
     "JournalUnreadable",
@@ -178,14 +181,30 @@ class JournalEquivocation(AttestationRefusal):
 
 
 class JournalUnreadable(AttestationRefusal):
-    """A journal line before the last one does not parse.
+    """Structural damage that breaks the read itself.
 
-    A torn *final* line is tolerated and reported — it costs at most the
-    newest observation, the same exposure the detection window already names,
-    and it is what a crash mid-append looks like. Damage anywhere earlier is
-    not a torn append; skipping it would silently lower the known head, which
-    is exactly the direction an attacker wants the cache moved. So the
-    conservative read is a refusal that names the line.
+    Scoped deliberately narrow: **entries with no header**. The header states
+    the protocol and wire versions the record hashes derive under, so without
+    it a comparison is not a weaker answer but a meaningless one.
+
+    It does NOT cover an unreadable *line*. Those are skipped and reported,
+    and the loss they cause is carried in the result type
+    (:class:`HeadLowerBound`) rather than converted into a verdict about the
+    store. Refusing there made an ordinary crash a permanent incident, and it
+    claimed a protection this location cannot deliver anyway — anyone able to
+    corrupt a line in the journal can delete the journal instead and be met
+    with trust-on-first-use.
+    """
+
+
+class IndeterminateComparison(AttestationRefusal):
+    """A full comparison was asked of a journal that could not be read in full.
+
+    Not a claim about the store. The journal's own record of what this machine
+    accepted has a hole in it, so "unchanged" is a question this journal can no
+    longer answer — while "rollback" is one it still can, for anything below
+    the bound. Raised by :meth:`JournalRead.established_head` so the cheap
+    unchanged shortcut cannot be taken by a caller who simply forgot to look.
     """
 
 
@@ -564,6 +583,46 @@ def _parse_entry(raw: object) -> HeadAttestation | None:
 
 
 @dataclass(frozen=True)
+class EstablishedHead:
+    """*K*, from an epoch every line of which was readable.
+
+    The head, full stop: a presented head equal to this one IS unchanged, and
+    all seven comparison rows are sound against it.
+    """
+
+    entry: HeadAttestation
+
+
+@dataclass(frozen=True)
+class HeadLowerBound:
+    """*K* is **at least** this. Lines in the epoch could not be read.
+
+    An unreadable line carries no information about the ordinal it held, so
+    the readable entries bound the accepted head from below and nothing bounds
+    it from above. Deliberately **no** ``entry`` attribute: the field is named
+    ``at_least`` so that no expression reaches a head from this type without
+    naming the weaker claim, and so a caller cannot reach one uniformly across
+    both cases.
+
+    What a bound can and cannot answer:
+
+    * **Sound.** A presented head *below* the bound is a rollback — the
+      accepted head is at least the bound, so it is certainly above what is
+      being presented.
+    * **Unsound, and this is the trap.** A presented head *equal to* the bound
+      is not unchanged; it may be a rollback from the very entry that could
+      not be read. **Gathering evidence from the store does not resolve this**
+      — a walk verifies the store's own chain, and the missing fact is about
+      what this machine previously ACCEPTED, which the store never knew.
+      Recovering it means repairing the journal or running the trust-reset
+      ceremony, both of which are operator work.
+    """
+
+    at_least: HeadAttestation
+    skipped: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class JournalRead:
     """Everything a caller needs from one pass over a journal.
 
@@ -581,8 +640,12 @@ class JournalRead:
     """The current trust epoch: the last trust-reset entry and everything after
     it, or all entries when there has never been a reset."""
 
-    known: HeadAttestation | None
-    """*K* — the maximum-ordinal entry of the current epoch."""
+    known: EstablishedHead | HeadLowerBound | None
+    """*K*, and how much of a claim it is. See the two types.
+
+    Two types rather than a head plus a flag, deliberately: the weakened case
+    has no ``entry`` attribute at all, so there is no expression that reaches
+    a comparable head without first saying which case it is in."""
 
     bootstrap: HeadAttestation | None
     """The journal's first entry, whatever epoch it belongs to. A journal
@@ -593,6 +656,25 @@ class JournalRead:
     skipped: tuple[str, ...]
     """Lines this build could not use, each with why. Reported rather than
     swallowed: a tolerated loss that nobody is told about is just a loss."""
+
+    def established_head(self) -> HeadAttestation | None:
+        """*K* for a full comparison, or a refusal if the read was incomplete.
+
+        This is the only way to obtain an argument for :func:`compare`, and it
+        refuses rather than answering when any epoch line was unreadable. That
+        refusal is the point: against an incomplete journal the cheap
+        "presented equals *K*, therefore unchanged" shortcut is not merely
+        discouraged, it is unobtainable.
+        """
+        if isinstance(self.known, HeadLowerBound):
+            raise IndeterminateComparison(
+                "this journal has unreadable lines in the current trust "
+                f"epoch, so its head is only known to be at or above ordinal "
+                f"{self.known.at_least.head.ordinal}; a presented head cannot "
+                "be called unchanged against a bound. Unreadable: "
+                + "; ".join(self.known.skipped)
+            )
+        return self.known.entry if self.known is not None else None
 
 
 def _epoch_of(
@@ -653,46 +735,67 @@ def parse_journal_lines(lines: Iterable[str]) -> JournalRead:
     The pure half is separate so the conformance vectors can hand it raw log
     lines and so every read rule is testable without a temporary directory.
 
-    A torn **final** line is tolerated and reported: it costs at most the
-    newest observation, and it is what a crash mid-append looks like. Damage
-    anywhere earlier refuses with :class:`JournalUnreadable`, because skipping
-    it would silently lower the remembered head, and that is the direction an
-    attacker wants this cache moved.
+    **Every unreadable line is skipped and reported, wherever it sits.** The
+    earlier design distinguished a torn final line from damage further up and
+    refused the latter, on the reasoning that skipping could silently lower
+    *K*. Skipping CAN lower *K* — concurrent writers journal out of order, so
+    the epoch maximum is not the last line and damage anywhere can take it
+    (``finding:s3wp1-epoch-ordinals-do-not-ascend-in-file-order``). But
+    refusing was the wrong answer to it. It made an ordinary crash a permanent
+    incident, and it claimed a protection this location cannot deliver: anyone
+    who can corrupt a line here can delete the whole journal instead and be
+    met with trust-on-first-use. So the loss is **carried in the result type**
+    — :class:`HeadLowerBound` — rather than converted into a verdict, and the
+    positional rule dissolves along with the distinction it enforced.
+
+    :class:`JournalUnreadable` survives for structural damage that breaks the
+    read itself: entries with no header. The header states the protocol and
+    wire versions the hashes derive under, and comparing hashes whose
+    derivation is unknown is not a weaker answer, it is a meaningless one.
     """
-    raw_lines = list(lines)
     entries: list[HeadAttestation] = []
     skipped: list[str] = []
-    for index, line in enumerate(raw_lines):
+    header_seen = False
+    for index, line in enumerate(lines):
         stripped = line.strip()
         if not stripped:
             continue
         try:
             decoded = json.loads(stripped)
         except ValueError as exc:
-            if index == len(raw_lines) - 1:
-                skipped.append(f"line {index + 1}: torn final line ({exc})")
-                continue
-            raise JournalUnreadable(
-                f"journal line {index + 1} does not parse and is not the last "
-                f"line, so it is damage rather than a torn append: {exc}"
-            ) from exc
+            skipped.append(f"line {index + 1}: does not parse ({exc})")
+            continue
+        if isinstance(decoded, dict) and "kind" not in decoded:
+            # A header. Not tracked by position: two writers racing to create
+            # the same journal can each write one, so "the header is line 1"
+            # is not a property this reader may assume.
+            header_seen = True
+            continue
         entry = _parse_entry(decoded)
         if entry is None:
-            if isinstance(decoded, dict) and "kind" not in decoded:
-                # A header. Skipped without comment: two writers racing to
-                # create the same journal can each write one, so "the header
-                # is line 1" is not a property this reader may assume.
-                continue
             skipped.append(f"line {index + 1}: not readable by this build")
             continue
         entries.append(entry)
 
     frozen = tuple(entries)
+    if frozen and not header_seen:
+        raise JournalUnreadable(
+            f"journal holds {len(frozen)} entries but no header, so the "
+            "protocol and wire versions their hashes derive under are unknown"
+        )
     epoch = _epoch_of(frozen)
+    best = _known_of(epoch)
+    known: EstablishedHead | HeadLowerBound | None = None
+    if best is not None:
+        known = (
+            HeadLowerBound(at_least=best, skipped=tuple(skipped))
+            if skipped
+            else EstablishedHead(entry=best)
+        )
     return JournalRead(
         entries=frozen,
         epoch=epoch,
-        known=_known_of(epoch),
+        known=known,
         bootstrap=frozen[0] if frozen else None,
         skipped=tuple(skipped),
     )
@@ -787,7 +890,13 @@ def append_entry(entry: HeadAttestation) -> Path:
             path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_APPEND, 0o600
         )
     except FileExistsError:
+        # An empty existing file is a creator that crashed between the
+        # exclusive create and its write. Supplying the header here is what
+        # keeps that crash from leaving a headerless journal, which the reader
+        # refuses as structural damage.
         payload = _torn_tail_guard(path) + line
+        if path.exists() and path.stat().st_size == 0:
+            payload = _header_line() + line
         handle = os.open(path, os.O_WRONLY | os.O_APPEND)
     else:
         payload = _header_line() + line

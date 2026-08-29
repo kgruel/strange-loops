@@ -505,3 +505,69 @@ itself applied. The fixes generalise past the two byte patterns I demonstrated, 
 carry their own mutation tests, the promise they re-scoped was corrected in the prose
 and the test names instead of being quietly left behind, and the create-race and
 header-only tolerances they had to preserve both survive. **GATE: PASS.**
+
+---
+
+# Re-check — round 2 (scoped), at `8ce304c6`
+
+Line classification changed under sol-LOW r1, so this re-runs **only my own two
+demonstrations** plus a re-assertion of the three-state shortcut attempt. Gate worktree
+rebased onto `8ce304c6`. Not a re-derivation of anything else.
+
+## Both demonstrations: verdicts UNCHANGED. **GATE stance holds: PASS.**
+
+**Demo 1 — the `{}` substitution on `[90 trust-reset, 92, 91]`.** Still
+`HeadLowerBound(91)`, still one recorded skip (`line 3: not readable by this build`),
+`established_head()` still raises, bound still refuses below itself. The whole
+generalisation set still holds: kindless-without-`type`, a different `type` string,
+`null` and a list are each skipped and recorded, none absorbed. Create-race tolerance
+and later-build-header recognition both survive. Under the new rule `{}` reaches the
+skip by a different route — `_classify` returns `entry-shaped` because it carries no
+type marker, and `_parse_entry` then declines it — but the observable outcome is
+identical, which is what the finding was about.
+
+**Demo 2 — the pure-skew journal.** Still `HeadUnreadable`, all three losses recorded,
+still no ordinal (`fields == ['skipped']`), `established_head()` still raises naming the
+lines and saying "This is NOT first contact", and the fresh-genesis-against-4217 case is
+still **declined**. Empty and header-only journals still classify `FIRST_CONTACT`
+honestly.
+
+**Three-state shortcut — re-asserted, unchanged.** The state types were not touched:
+`.entry` reaches only `EstablishedHead`, `.at_least` only `HeadLowerBound`,
+`.head`/`.ordinal`/`.value` none of the three, and `established_head()` raises on both
+weakened states.
+
+## Spot-check of the new rule, where it touches my finding's mechanism
+
+The three-way rule is a strict improvement on the two-way one I signed off, and it
+closes a hole the type-string fix opened in the other direction. Confirmed:
+
+- **The sol-LOW case.** A future header carrying its own `kind` no longer kills the
+  file: the journal survives as `HeadLowerBound` with K bounded at 5, and the ambiguity
+  is *named* — `line 3: carries both the journal type marker and an entry kind, so this
+  build cannot say which it is`. That is a location claim, not a verdict, which is the
+  right shape.
+- **`JournalUnreadable` narrowed to nothing-to-parse.** A directory where the journal
+  should be now raises `JournalUnreadable`, and it **is** an `AttestationRefusal` — so a
+  caller catching the family root holds it. Previously a raw `OSError`/`UnicodeDecodeError`
+  escaped past that root, which was a real leak in the refusal family I did not catch in
+  round 0.
+- An entry that acquires a type marker degrades to a *recorded* skip and therefore a
+  bound, never a silent loss — so the new ambiguous arm cannot become a third absorption
+  route.
+
+## One note, non-blocking, for the record
+
+**A round-0 Oracle line is now superseded by ruling.** Oracle item 6 named
+`headerless-entries-refuse` and I verified it PASS at `be8b6c5e`. At `8ce304c6` a
+headerless journal *with readable entries* no longer refuses — it yields
+`HeadLowerBound` with the absence reported as `header: absent, so the protocol and wire
+versions these record hashes derive under are unknown`, and still declines a full
+comparison. That is deliberate and consistent with the reasoning `HeadUnreadable` was
+built on (a weakened claim beats a verdict where a bound will do), and it is safe: the
+read still cannot answer unchanged. Flagging it only so the item-6 wording is known to
+be stale — **WP2's vectors must encode the bound, not a refusal**, if the family covers
+headerless reads.
+
+Counts at `8ce304c6`: engine **2157 passed, 1 skipped** (+3), new test file **94** (+3,
+so the three new tests are the three new cases), architecture **99**, ruff clean.

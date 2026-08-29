@@ -245,6 +245,45 @@ def _draft(i: int) -> RecordDraft:
     )
 
 
+# The nine op rows of §A.2's table, written out rather than derived. Deriving
+# them from `ArrivalLedger` is what the assertion below is FOR, so a derived
+# expectation would agree with the Protocol no matter what the Protocol said.
+# This literal is the contract of record, standing beside the code.
+RATIFIED_LEDGER_OPS = frozenset({
+    "mint", "head", "append", "replicate", "read", "scan", "verify",
+    "export", "capabilities",
+})
+
+
+def _declared_surface(protocol: type) -> frozenset[str]:
+    """The public names a Protocol class declares, from its own namespace.
+
+    Plain class introspection — ``vars`` plus ``__annotations__`` — and NOT
+    ``typing``'s ``__protocol_attrs__``, which is a private implementation
+    detail that does not exist before Python 3.12. Both pyprojects declare
+    ``requires-python >= 3.11``, so a test reaching for that attribute passes
+    on the interpreter it was written on and errors on one the package
+    supports.
+
+    Annotations are included as well as callables so that an ATTRIBUTE added
+    to the Protocol is caught the same way a method would be: the claim being
+    pinned is "these nine rows and nothing else", and a row does not stop
+    counting by being spelled as data.
+    """
+    namespace = vars(protocol)
+    methods = {
+        name
+        for name, value in namespace.items()
+        if not name.startswith("_") and callable(value)
+    }
+    attributes = {
+        name
+        for name in namespace.get("__annotations__", {})
+        if not name.startswith("_")
+    }
+    return frozenset(methods | attributes)
+
+
 def test_the_ledger_satisfies_the_ledger_surface_it_claims(ledger):
     """A location claim, not a conformance verdict.
 
@@ -254,20 +293,22 @@ def test_the_ledger_satisfies_the_ledger_surface_it_claims(ledger):
     silently shrinking is a real failure mode, and this catches it.
     """
     offered = {op for op in dir(ledger) if not op.startswith("_")}
-    assert {
-        "mint", "head", "append", "replicate", "read", "scan", "verify",
-        "export", "capabilities",
-    } <= offered
+    assert RATIFIED_LEDGER_OPS <= offered
     # WP2 completed the surface, so the adapter now satisfies the Protocol.
     # This is the assertion WP1 wrote inverted, and flipping it is what its
     # comment asked WP2 to do.
     assert isinstance(ledger, ArrivalLedger)
+    # EXACT equality, both directions: an op declared beyond the ratified table
+    # fails this, and one dropped from it fails this. `<=` above is about the
+    # ADAPTER, which may legitimately offer more; this is about the PROTOCOL,
+    # which may not.
+    assert _declared_surface(ArrivalLedger) == RATIFIED_LEDGER_OPS
     # `import_prefix` is offered and is NOT declared on the Protocol: §08
     # describes portable import in prose and the ratified op table gives it no
     # row. It is in LEDGER_MUTATIONS regardless, because the custody/reads
     # ratchet covers what mutates, not what the Protocol happens to name.
     assert "import_prefix" in offered
-    assert "import_prefix" not in ArrivalLedger.__protocol_attrs__
+    assert "import_prefix" not in _declared_surface(ArrivalLedger)
     assert "import_prefix" in LEDGER_MUTATIONS
 
 

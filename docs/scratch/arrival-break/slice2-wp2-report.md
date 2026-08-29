@@ -171,6 +171,37 @@ A codec this backend does not have raises `ValueError` — a caller bug against
 sealed mode. WP1's `test_capabilities_claims_nothing_the_adapter_does_not_have` cross-checks
 both claims against the object and still does.
 
+### 1.10 The Protocol-surface assertion is plain class introspection, not a typing internal
+
+**Gate F-1, fixed.** The first spelling asserted against
+`ArrivalLedger.__protocol_attrs__` — a `typing.Protocol` private that only exists on Python
+3.12+. Both pyprojects declare `requires-python >= 3.11`, so that assertion passed on the
+interpreter it was written on (3.13) and would have **errored** on one the package supports.
+A test that is a function of the interpreter is not a ratchet.
+
+The respelling is `_declared_surface(protocol)`: the public names in the class's own `vars()`
+that are callable, unioned with its non-underscore `__annotations__`. Nothing but plain class
+introspection, stable across every version in range. Annotations are folded in so that an
+ATTRIBUTE added to the Protocol is caught the same way a method would be — the claim is
+"these nine rows and nothing else", and a row does not stop counting by being spelled as data.
+
+Two assertions, and the distinction between them is the point:
+
+* `RATIFIED_LEDGER_OPS <= offered` is about the **adapter**, which may legitimately offer more
+  (`head_at`, `import_prefix`).
+* `_declared_surface(ArrivalLedger) == RATIFIED_LEDGER_OPS` is about the **Protocol**, which
+  may not. Exact equality, so both an extra row and a missing row fail.
+
+`RATIFIED_LEDGER_OPS` is written out as a literal rather than derived. Deriving it from
+`ArrivalLedger` is precisely what the assertion exists to check, so a derived expectation would
+agree with the Protocol no matter what the Protocol said. The literal is §A.2's table standing
+beside the code.
+
+The query-separation ratchet is untouched and still **derives** its op names from
+`LEDGER_MUTATIONS` rather than hand-copying them.
+
+---
+
 ## 2. Deviations
 
 Three, each also emitted as a `finding` fact so the report and the store can be cross-checked
@@ -217,8 +248,9 @@ anticipated by WP1 in the file itself.**
 * `test_the_ledger_satisfies_the_ledger_surface_it_claims` — WP1's inline comment says "When
   WP2 lands these, this assertion is what tells it to update the capability report in the same
   change." `assert not isinstance(ledger, ArrivalLedger)` became `assert isinstance(...)`, and
-  three assertions were added pinning that `import_prefix` is offered, is NOT on the Protocol,
-  and IS in `LEDGER_MUTATIONS`.
+  assertions were added pinning the Protocol surface at exactly §A.2's nine rows and that
+  `import_prefix` is offered, is NOT on the Protocol, and IS in `LEDGER_MUTATIONS`. Gate F-1
+  respelled the Protocol-surface assertion off a `typing` private — §1.10, evidence in §4.4.
 
 No other test file was modified. The fourteen arrival test files are green and unmodified.
 
@@ -347,7 +379,51 @@ record with `sig=None`). So the signature is not decoration in that family — i
 content that makes assigning observably different from validating, and a catch-up family
 without one would have passed this mutation.
 
-### 4.4 Restoration
+### 4.4 Gate F-1 — the Protocol-surface assertion, both directions
+
+The respelling (§1.10) has to keep the property the old one bought, so it is demonstrated in
+both directions rather than merely re-run.
+
+**Extra row — a tenth op declared on the Protocol:**
+
+```python
++    def import_prefix(self, prefix: ExportedPrefix) -> Head:
++        """A tenth op, declared beyond the ratified table."""
++        ...
+```
+
+```
+E   AssertionError: assert frozenset({...}) == frozenset({...})
+E     Extra items in the left set:
+E     'import_prefix'
+FAILED test_arrival_contract.py::test_the_ledger_satisfies_the_ledger_surface_it_claims
+```
+
+**Missing row — `export` dropped from the Protocol:**
+
+```python
+-    def export(self, *, through: Head, codec: str) -> ExportedPrefix:
+-        """Deterministic portable records plus a manifest, for a captured prefix."""
+-        ...
+```
+
+```
+E   AssertionError: assert frozenset({...}) == frozenset({...})
+E     Extra items in the right set:
+E     'export'
+1 failed, 28 passed
+```
+
+Worth reading off the second one: **only that assertion fired.**
+`isinstance(ledger, ArrivalLedger)` stayed true, because the adapter offers a superset of a
+shrunken Protocol — which is exactly why the surface needs an equality assertion of its own
+and cannot be left to the runtime check. Restored after each; `git status --short` clean at
+`arrival_contract.py`, engine **2033 passed, 1 skipped** at the tip.
+
+The query-separation ratchet was not touched and still derives its op names from
+`LEDGER_MUTATIONS` (`test_arrival_contract.py:183,191`).
+
+### 4.5 Restoration
 
 `git checkout libs/engine/src/engine/arrival.py` after each; `git status --short` empty, and
 44 passed on the two files. Re-run at the branch tip after the last restore: engine **2033

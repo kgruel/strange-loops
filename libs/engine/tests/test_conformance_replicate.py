@@ -43,13 +43,34 @@ REPLICATE_VECTORS_DIR = REPO_ROOT / "spec" / "conformance" / "vectors" / "replic
 # claiming something the contract does not define, and KeyError says so loudly.
 REFUSALS = {"SameHeightFork": SameHeightFork, "HeadMismatch": HeadMismatch}
 
-# The three families §D.2 requires, by filename prefix. Asserted as a set so a
-# family that silently loses its last vector fails rather than passing vacuously.
-FAMILIES = (
-    "replicate-exact-suffix-",
-    "replicate-same-height-",
-    "replicate-catch-up-",
-)
+# The three families §D.2 requires, and the EXACT vector inventory of each.
+#
+# Filenames rather than a count, and a count rather than "at least one": a
+# family check that only asks whether the family is non-empty goes green when a
+# fixture is deleted, right up until the last one goes. That is the shape of
+# ratchet that stops ratcheting quietly — the vectors are the oracle, so a
+# vector that disappears takes a claim with it and must say which one.
+#
+# GROW this when a vector is added; shrink it only when a claim is genuinely
+# retired, and say which in the commit.
+VECTOR_INVENTORY: dict[str, frozenset[str]] = {
+    "replicate-exact-suffix-": frozenset({
+        "replicate-exact-suffix-single-record-accepted",
+        "replicate-exact-suffix-batch-lands-whole",
+        "replicate-exact-suffix-refuses-a-gap-above-the-head",
+        "replicate-exact-suffix-refuses-a-stale-full-head-pin",
+    }),
+    "replicate-same-height-": frozenset({
+        "replicate-same-height-fork-at-the-head-refuses",
+        "replicate-same-height-fork-below-the-head-refuses",
+        "replicate-same-height-agreement-is-not-a-fork",
+    }),
+    "replicate-catch-up-": frozenset({
+        "replicate-catch-up-preserves-signed-records-byte-for-byte",
+        "replicate-catch-up-preserves-authored-time-and-origin",
+        "replicate-catch-up-from-a-genesis-only-replica",
+    }),
+}
 
 
 def _load_vectors(vectors_dir: Path) -> list[Path]:
@@ -66,14 +87,27 @@ def _head(data: dict[str, Any] | None) -> Head | None:
     )
 
 
-def test_every_replicate_family_has_vectors():
-    """§D.2 names three families; a family with no vectors proves nothing."""
-    stems = [path.stem for path in _load_vectors(REPLICATE_VECTORS_DIR)]
-    assert stems, "the replicate area holds no vectors at all"
-    for family in FAMILIES:
-        assert any(stem.startswith(family) for stem in stems), (
-            f"no vector in the {family!r} family"
-        )
+def test_the_replicate_vector_inventory_is_exactly_what_is_on_disk():
+    """Every named vector present, and no unclassified vector present.
+
+    Both directions. A missing fixture fails NAMING ITSELF, so a deleted
+    vector cannot go unnoticed while the family still has siblings; and a
+    vector belonging to no family fails too, so a new claim cannot be added
+    without being filed under the family it belongs to.
+    """
+    on_disk = {path.stem for path in _load_vectors(REPLICATE_VECTORS_DIR)}
+    expected = frozenset().union(*VECTOR_INVENTORY.values())
+
+    assert on_disk == expected, (
+        f"missing: {sorted(expected - on_disk)}; "
+        f"unclassified: {sorted(on_disk - expected)}"
+    )
+    for family, members in VECTOR_INVENTORY.items():
+        assert members, f"the {family!r} family names no vectors"
+        for stem in members:
+            assert stem.startswith(family), (
+                f"{stem!r} is filed under {family!r} but is not named for it"
+            )
 
 
 @pytest.mark.parametrize(

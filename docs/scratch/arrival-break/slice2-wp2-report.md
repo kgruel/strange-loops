@@ -139,6 +139,28 @@ ordinal whose `rh` differs; only then is the verified remainder handed to `repli
 An import that is a strict prefix of what the target already holds returns the target's
 head unchanged. Nothing was missing — that is not a failure, and it is not a no-op to hide.
 
+**Sol S2WP2-L-1, fixed — a short import now refuses.** The first version compared with
+`zip(..., strict=False)` and nothing else, so an import that ended BEFORE the target's head
+stopped comparing at the import's end and fell through to the empty-remainder branch,
+returning the target's head. Sol's repro: target at ordinals 0–3, a valid manifest-clean
+export captured at ordinal 1, and `import_prefix` reported success. Everything the import
+carried DID agree, which is what made it dangerous rather than obvious — the operation was
+claiming agreement through ordinal 3 while ordinals 2–3 were never compared against anything.
+
+Per the arbiter's ruling it **refuses**, and accept-as-no-op is ruled out: §08 asks for
+agreement THROUGH the target's head, and a prefix that stops short structurally cannot
+establish that claim. `HeadMismatch` is the honest refusal — nothing disagrees anywhere, so
+it is not a fork; the export was simply captured at a head behind this target's, and
+re-exporting at or past that head is exactly the fix `HeadMismatch` tells a caller to make.
+The message names both heights.
+
+The length check is now explicit and runs FIRST, and the surviving `zip` compares
+`imported[:overlap]` under `strict=True` — so the property is stated by the code rather than
+inherited from a zip's truncation rule. My own test was pinning the bug: it asserted the
+short import returned the target's head. It is now split into the refusal (sol's repro) plus
+`test_re_importing_the_same_prefix_changes_nothing`, the same-length idempotent accept, which
+is the negative control that stops the new refusal from over-firing.
+
 One edge stated rather than defended: importing into an **empty** target under a configured
 `max_atomic_records` adopts the genesis and only then meets the limit refusal inside
 `replicate`, leaving a genesis-only replica behind. That is a valid prefix and re-import is
@@ -274,16 +296,16 @@ only name a contract refusal, so those cases are pinned by unit tests instead.
 
 | Suite | Baseline | Now | Delta | Accounted by |
 |---|---|---|---|---|
-| engine | 1989 passed, 1 skipped | 2033 passed, 1 skipped | **+44** | `test_arrival_transfer.py` (+33), `test_conformance_replicate.py` (+11) |
+| engine | 1989 passed, 1 skipped | 2034 passed, 1 skipped | **+45** | `test_arrival_transfer.py` (+34), `test_conformance_replicate.py` (+11) |
 | store | 180 | 180 | 0 | no store file touched |
 | architecture | 99 | 99 | 0 | Rule 18 green with no new module born; no new `_SCAN_TARGETS` entry needed |
 
-New-test breakdown, so the +44 is legible rather than a number:
+New-test breakdown, so the +45 is legible rather than a number:
 
 | File | Count | Covers |
 |---|---|---|
-| `test_conformance_replicate.py` | 11 | the 10 vectors, plus a family-completeness check so a family that loses its last vector fails rather than passing vacuously |
-| `test_arrival_transfer.py` | 33 | export ×5 (byte identity, streaming, clock-free manifest, codec refusal, captured-head bound), §12 byte-identity gate ×2, §12 snapshot-under-concurrent-writer gate ×1, import ×12 (empty replica, remainder-only, prefix no-op, agreement refusal, codec/framing, five manifest claims parametrized, suffix-as-prefix, tampered record), `adopt_genesis` ×3, replicate's own-family refusals ×8 (empty, wrong digest, foreign lineage, batch hole, atomic limit + the under-limit control, unpinned, fork type, empty batch), byte-identity at file and line level ×2 |
+| `test_conformance_replicate.py` | 11 | the 10 vectors, plus an exact-inventory check (§4.6) so a dropped fixture fails naming itself and an unclassified one fails too |
+| `test_arrival_transfer.py` | 34 | export ×5 (byte identity, streaming, clock-free manifest, codec refusal, captured-head bound), §12 byte-identity gate ×2, §12 snapshot-under-concurrent-writer gate ×1, import ×13 (empty replica, remainder-only, same-length idempotent accept, short-import refusal, agreement refusal, codec/framing, five manifest claims parametrized, suffix-as-prefix, tampered record), `adopt_genesis` ×3, replicate's own-family refusals ×8 (empty, wrong digest, foreign lineage, batch hole, atomic limit + the under-limit control, unpinned, fork type, empty batch), byte-identity at file and line level ×2 |
 
 Vector families: 10 vectors across the three §D.2 families — exact-suffix (4),
 same-height (3, including the negative control), catch-up (3).
@@ -418,14 +440,53 @@ Worth reading off the second one: **only that assertion fired.**
 `isinstance(ledger, ArrivalLedger)` stayed true, because the adapter offers a superset of a
 shrunken Protocol — which is exactly why the surface needs an equality assertion of its own
 and cannot be left to the runtime check. Restored after each; `git status --short` clean at
-`arrival_contract.py`, engine **2033 passed, 1 skipped** at the tip.
+`arrival_contract.py`, engine **2034 passed, 1 skipped** at the tip.
 
 The query-separation ratchet was not touched and still derives its op names from
 `LEDGER_MUTATIONS` (`test_arrival_contract.py:183,191`).
 
-### 4.5 Restoration
+### 4.5 Sol S2WP2-L-1 — the short-import refusal
+
+```python
+# revert, in FileLedger._refuse_disagreeing_prefix:
+-        if len(imported) < overlap:
++        if False and len(imported) < overlap:
+             ...
+-            self.scan(through=head), imported[:overlap], strict=True
++            self.scan(through=head), imported, strict=False
+```
+
+```
+FAILED test_arrival_transfer.py::test_import_refuses_a_prefix_that_ends_before_the_targets_head
+1 failed, 33 passed
+```
+
+Exactly the new test, and `test_re_importing_the_same_prefix_changes_nothing` stayed green
+under both the fix and the mutation — the refusal discriminates "stops short of the head"
+from "reaches the head with an empty remainder" rather than refusing every already-have-it
+import. Restored; `git status --short` clean at `arrival_file_backend.py`.
+
+### 4.6 Sol S2WP2-L-2 — the vector inventory
+
+The old family check asked only whether a family was non-empty, so it went green until a
+family lost its LAST vector. Now the inventory is exact, both directions.
+
+Removed `spec/conformance/vectors/replicate/replicate-catch-up-preserves-authored-time-and-origin.json`:
+
+```
+E   AssertionError: missing: ['replicate-catch-up-preserves-authored-time-and-origin'];
+E   unclassified: []
+```
+
+It fails naming itself, with two catch-up siblings still present. Worth noting which fixture
+sol's probe happened to delete: the **unsigned** catch-up vector is the one whose silent
+absence would have quietly gutted §4.3's evidence, since it is the control proving that an
+exact suffix without a signature cannot distinguish assigning from validating. Restored; the
+area is back to 10 vectors.
+
+### 4.7 Restoration
 
 `git checkout libs/engine/src/engine/arrival.py` after each; `git status --short` empty, and
-44 passed on the two files. Re-run at the branch tip after the last restore: engine **2033
+45 passed on the two files. Re-run at the branch tip after the last restore: engine **2034
 passed, 1 skipped**, store 180, architecture 99 — the §3 counts, measured again rather than
 inferred from the restore.

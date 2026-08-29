@@ -296,20 +296,51 @@ def test_import_appends_only_the_remainder_to_an_agreeing_target(authority, tmp_
     assert (tmp_path / "replica.arrival").read_bytes() == authority._log.path.read_bytes()
 
 
-def test_import_of_a_prefix_the_target_already_holds_changes_nothing(authority, tmp_path):
-    """Nothing was missing. Not a failure, and not a no-op to hide."""
+def test_re_importing_the_same_prefix_changes_nothing(authority, tmp_path):
+    """The idempotent case, and the negative control for the test below.
+
+    Agreement runs all the way THROUGH the target's head and the remainder is
+    empty, so there is nothing to do and nothing missing. This is the only
+    shape of "already have it" that §08 licenses, and the refusal added beside
+    it must not fire here.
+    """
     replica = FileLedger(ArrivalLog(tmp_path / "replica.arrival"))
     full = authority.head()
     replica.import_prefix(authority.export(through=full, codec=EXPORT_CODEC))
     before = (tmp_path / "replica.arrival").read_bytes()
 
-    partial = Head(
-        lineage=full.lineage, ordinal=1, record_hash=authority.read(1)["rh"]
-    )
     assert replica.import_prefix(
-        authority.export(through=partial, codec=EXPORT_CODEC)
+        authority.export(through=full, codec=EXPORT_CODEC)
     ) == full
     assert (tmp_path / "replica.arrival").read_bytes() == before
+
+
+def test_import_refuses_a_prefix_that_ends_before_the_targets_head(authority, tmp_path):
+    """§08 asks for agreement THROUGH the head; a short import cannot give it.
+
+    The target holds ordinals 0-4 and the import is a valid, manifest-clean
+    export captured at ordinal 1. Everything it does carry agrees — that is
+    what makes this the dangerous case rather than an obvious one. Returning
+    the target's head would claim agreement through ordinal 4 while ordinals
+    2-4 were never compared against anything, which is a verdict this
+    operation has no evidence for.
+    """
+    replica = FileLedger(ArrivalLog(tmp_path / "replica.arrival"))
+    full = authority.head()
+    replica.import_prefix(authority.export(through=full, codec=EXPORT_CODEC))
+    before = (tmp_path / "replica.arrival").read_bytes()
+
+    short = Head(
+        lineage=full.lineage, ordinal=1, record_hash=authority.read(1)["rh"]
+    )
+    with pytest.raises(HeadMismatch) as caught:
+        replica.import_prefix(authority.export(through=short, codec=EXPORT_CODEC))
+
+    message = str(caught.value)
+    assert short.record_hash in message, "the refusal must name the import's head"
+    assert full.record_hash in message, "the refusal must name the target's head"
+    assert (tmp_path / "replica.arrival").read_bytes() == before
+    assert replica.head() == full
 
 
 def test_import_refuses_a_target_that_disagrees_about_its_own_prefix(tmp_path):

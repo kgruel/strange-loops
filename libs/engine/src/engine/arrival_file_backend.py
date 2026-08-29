@@ -518,8 +518,10 @@ class FileLedger:
             record for record in imported if record["ord"] > head.ordinal
         ]
         if not remainder:
-            # The import is a prefix of what this target already holds. Not a
-            # failure and not a no-op to hide: nothing was missing.
+            # The import reaches exactly this target's head and agrees with it
+            # the whole way. Nothing was missing — not a failure, and not a
+            # no-op to hide. An import that stopped SHORT of the head never
+            # gets here; it refuses above.
             return head
         return self.replicate(head, remainder).after
 
@@ -539,8 +541,33 @@ class FileLedger:
         to SKIP. Both say the histories disagree at a height; skipping an
         overlap without checking it is how a replica silently acquires a
         prefix it never verified.
+
+        **An import that ends BEFORE the target's head refuses.** §08 asks for
+        agreement THROUGH the head, and a prefix that stops short structurally
+        cannot establish that — there is nothing to compare the records above
+        it against. Reporting success would be a verdict this operation has no
+        evidence for: it would say "this target agrees with the import through
+        its head" while never having looked at the heights in between. The
+        length is therefore checked FIRST and explicitly, rather than left to a
+        zip that would silently stop at the shorter side.
         """
-        for mine, theirs in zip(self.scan(through=head), imported, strict=False):
+        # Dense from 0 (the manifest check establishes both), so the target's
+        # prefix is exactly this many records and the import must cover it.
+        overlap = head.ordinal + 1
+        if len(imported) < overlap:
+            captured = imported[-1]
+            raise HeadMismatch(
+                f"this import captures head ({captured['lin']}, "
+                f"{captured['ord']}, {captured['rh']}), which is behind "
+                f"{self._log.path}'s head ({head.lineage}, {head.ordinal}, "
+                f"{head.record_hash}) — §08 requires exact prefix agreement "
+                "THROUGH the target's head, and an import that stops short "
+                "cannot establish it. Export again at or past the target's head"
+            )
+
+        for mine, theirs in zip(
+            self.scan(through=head), imported[:overlap], strict=True
+        ):
             if mine["rh"] != theirs["rh"]:
                 raise SameHeightFork(
                     f"ordinal {mine['ord']} of {self._log.path} holds rh "

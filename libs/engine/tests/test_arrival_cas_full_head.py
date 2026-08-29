@@ -506,6 +506,57 @@ def test_a_multi_row_ceremony_is_one_record_so_it_is_never_partial(tmp_path):
             assert len(ceremonies[0]["body"]["rows"]) == 2
 
 
+# --- completing the pin: refuse, never fall back --------------------------
+#
+# The resume mark carries no record hash, so both F1 callers complete their
+# pin by reading the record the mark names (`ArrivalLog.anchor`). When the log
+# will not vouch for one, there is a fork in the road that the type system
+# cannot see: refuse, or quietly pass `following=None`. The second is a silent
+# downgrade to an UNPINNED append — the exact weakening F1 exists to prevent,
+# and it would be invisible in a green suite because an unpinned append
+# succeeds. So the branch is pinned here rather than argued in a docstring.
+
+
+def _unanchorable(log: ArrivalLog):
+    """A mark that is well-formed but that the log will not vouch for.
+
+    The offset lands mid-record rather than on a boundary, so `_anchor_for`
+    finds no record ending there and rejects. Chosen over a foreign lineage
+    because it is the shape a real disagreement takes — an index whose
+    recorded position the log cannot confirm.
+    """
+    from engine.arrival import ResumeMark
+
+    return ResumeMark(
+        arrival_lineage=log.lineage(), arrival_offset=3, arrival_ordinal=0
+    )
+
+
+def test_the_ceremony_refuses_an_unanchorable_mark_rather_than_unpinning(
+    tmp_path,
+):
+    """ArrivalStore's pin completion (F1 caller 2 — report §2 D1)."""
+    from atoms import Fact
+
+    from engine.arrival_store import ArrivalCanonicalUnsupported, ArrivalStore
+
+    log = _log(tmp_path)
+    store = ArrivalStore(
+        path=tmp_path / "s.db",
+        serialize=lambda f: f.to_dict(),
+        deserialize=Fact.from_dict,
+        fact_signer=_sign,
+    )
+    try:
+        with pytest.raises(ArrivalCanonicalUnsupported, match="does not "):
+            store._pinned_head(_unanchorable(log))
+        # And the refusal does not over-fire: no mark is still no pin, which
+        # is a different statement from a mark the log rejects.
+        assert store._pinned_head(None) is None
+    finally:
+        store.close()
+
+
 def test_fsync_is_the_stage_the_durability_claim_rests_on(tmp_path):
     """A guard on the injection above: `os.fsync` is genuinely called.
 

@@ -75,7 +75,7 @@ that ordinal, which only the ledger can attest — `FileLedger.head_at(watermark
 §A.2 pins, stated in the return types: the query half knows how far it has projected, and
 only the custody half can say what is there.
 
-Raised as a finding (§4.2) — closing the §07 gap is a doc/design decision for the gate and
+Raised as a finding (§2 D2) — closing the §07 gap is a doc/design decision for the gate and
 WP5, not WP1's to invent.
 
 ### 1.5 `FileLedger` is deliberately Protocol-incomplete until WP2
@@ -130,8 +130,6 @@ no evidence for.
 service URL". A `Path` would decide, in the neutral module, that every backend's location
 is a filesystem path.
 
----
-
 ### 1.11 Two Rule 18 joins, not three
 
 The brief says two (`arrival_registry.py` is WP4's — "do not create it"); §D.1 says
@@ -143,8 +141,9 @@ joins when WP4 gives birth to it, and the ratchet is now what makes that mechani
 
 ## 2. Deviations
 
-Both are reported as `finding` facts as well as here. Neither was optional; each is
-recorded so the gate can rule on it rather than discover it.
+All four are reported as `finding` facts as well as here, and each entry names its fact id
+so the report and the store can be cross-checked against each other. None was optional;
+each is recorded so the gate can rule on it rather than discover it.
 
 ### D1 — F1 has THREE callers, not the two the brief's blast radius names
 
@@ -210,9 +209,11 @@ silently absorbed; growing the refusal set is a contract decision, not WP1's.
 
 | Suite | Baseline | Now | Delta | Accounted by |
 |---|---|---|---|---|
-| engine | 1937 passed, 1 skipped | 1988 passed, 1 skipped | **+51** | `test_arrival_cas_full_head.py` (+22), `test_arrival_contract.py` (+29) |
-| store | 177 | 177 | **0** | `merge.py` changed behaviour-preservingly; no store test added |
+| engine | 1937 passed, 1 skipped | 1989 passed, 1 skipped | **+52** | `test_arrival_cas_full_head.py` (+23), `test_arrival_contract.py` (+29) |
+| store | 177 | 180 | **+3** | `test_arrival_merge_pin.py` (+3, gate G1) |
 | architecture | 98 | 99 | **+1** | `test_every_arrival_named_engine_module_is_scanned` (§F ratchet) |
+
+The +4 over the first gate submission is the G1 fix alone (§4.4).
 
 The 14 arrival test files are green and **unmodified** — `git diff --stat` shows no test
 file among the changes except the two new ones.
@@ -221,8 +222,9 @@ New-test breakdown, so the +51 is legible rather than a number:
 
 | File | Count | Covers |
 |---|---|---|
-| `test_arrival_cas_full_head.py` | 22 | F1 per-site (site A ×4, site B ×4), bare-ordinal refusal ×2, unpinned-still-legal ×2, §12 race gate ×2, §12 injected-failure gate ×5 stages + byte-wise write crash + ceremony atomicity + an fsync guard |
+| `test_arrival_cas_full_head.py` | 23 | F1 per-site (site A ×4, site B ×4), bare-ordinal refusal ×2, unpinned-still-legal ×2, §12 race gate ×2, §12 injected-failure gate ×5 stages + byte-wise write crash + ceremony atomicity + an fsync guard, **pin-completion refusal (G1)** |
 | `test_arrival_contract.py` | 29 | contract module properties (stdlib-only, static + subprocess), refusal rooting, `Head`/`StoreDescriptor` shape, **query-handle separation ×2**, adapter append/scan/verify/capabilities/limits, projection watermark ×4 |
+| `test_arrival_merge_pin.py` | 3 | **pin-completion refusal (G1)**, no-mark-is-still-no-pin, and the positive completion so neither can pass by refusing always |
 
 Wider net, all green and unchanged from baseline: root `tests/` 99, sdk 324, apps/loops
 2530+1xfail, lang 655, atoms 517, sign 37, custody 13, chaos 12.
@@ -304,6 +306,55 @@ recorded because the corrected versions are stronger claims:
 - **Opening an `ArrivalStore` over a freshly minted log consumes the genesis**, so the
   watermark is ordinal 0, not absent. The None branch is now tested where it genuinely
   occurs — a store with no arrival mark at all.
+
+### 4.4 Gate G1 — the pin-completion refusal, at both callers
+
+**The gate was right and the report was the evidence against itself.** §2 D1 argues twice
+that a mark the log will not vouch for must REFUSE rather than fall back to
+`following=None`, and nothing pinned it. The branch survived mutation with a green suite,
+which is the worst shape for a safety property: the fall-back is a silent downgrade to an
+UNPINNED append, and an unpinned append *succeeds*, so nothing would ever have gone red.
+
+Both callers now have the refusal pinned, plus — deliberately — the negative control that
+stops the refusal over-firing, since `following=None` for an unmarked index has to stay
+legal (§1.9).
+
+**Caller 1 — `ArrivalStore._pinned_head` (`arrival_store.py`)**
+
+```python
+# revert:
+-        if anchor is None:
+-            raise ArrivalCanonicalUnsupported(... rederive_projections ...)
++        if anchor is None:
++            return None
+```
+
+```
+FAILED test_arrival_cas_full_head.py::test_the_ceremony_refuses_an_unanchorable_mark_rather_than_unpinning
+  Failed: DID NOT RAISE ArrivalCanonicalUnsupported
+1 failed, 22 passed
+```
+
+**Caller 2 — `store.merge._pinned_head` (`merge.py`)**
+
+```python
+# revert:
+-    if anchor is None:
+-        raise RuntimeError(... does not vouch for a record there ...)
++    if anchor is None:
++        return None
+```
+
+```
+FAILED test_arrival_merge_pin.py::test_an_unanchorable_mark_refuses_rather_than_unpinning_the_append
+  Failed: DID NOT RAISE RuntimeError
+1 failed, 2 passed
+```
+
+Restored after each; `git diff` clean at both files. The unanchorable mark is well-formed
+with an offset landing mid-record rather than on a boundary — chosen over a foreign
+lineage because it is the shape a genuine index/log disagreement takes, and it exercises
+`_anchor_for`'s boundary check rather than its cheapest early return.
 
 ---
 

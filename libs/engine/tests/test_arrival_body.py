@@ -185,9 +185,16 @@ def test_a_batch_still_refuses_one_row_and_a_duplicate_id():
     ],
 )
 def test_encode_decode_encode_is_byte_stable(k, row, encode):
-    """The oracle's identity round trip, asserted on BYTES rather than on
-    dict equality — key order and JSON spelling are part of what a wire
-    format promises."""
+    """The identity round trip, asserted on canonical BYTES rather than on
+    dict equality: field presence, value spelling and null-vs-absent all
+    survive encode -> decode -> encode.
+
+    Serialized with sorted keys deliberately, which means encoder key ORDER
+    is NOT ratcheted here. That is the honest scope: commitments hash under
+    JCS, which sorts recursively, so a body's key order carries no wire
+    weight and pinning it would ratchet an implementation detail into a
+    format promise the format does not make.
+    """
     body = encode(row)
     once = json.dumps(body, sort_keys=True, separators=(",", ":"))
     (_t, decoded), = rows_of_body(k, json.loads(once))

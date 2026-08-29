@@ -856,14 +856,20 @@ def _edit(ast: VertexFile, **overrides: object) -> VertexFile:
     """A copy of ``ast`` with the given fields replaced (an in-memory edit)."""
     return VertexFile(**{**_vertex_kwargs(ast), **overrides})
 
+
 def _residence_stripped(ast: VertexFile) -> VertexFile:
-    """``ast`` with every residence field cleared.
+    """``ast`` with the store locator and the backend arm cleared.
 
     What :func:`_reproject` produces: it projects documents with no residence
-    supplied, and residence is exactly what documents do not carry. Named
-    rather than spelled inline at each assertion so the set stays in one
-    place — it grew from ``path``/``store`` to include ``store_backend``, and
-    an assertion that cleared only some of it would pass while proving less.
+    supplied, and residence is exactly what documents do not carry. ``path``
+    is residence too but is not cleared here — every caller builds ``ast``
+    with :func:`parse_vertex` on text, so it is already None and clearing it
+    would state a transformation that never happens.
+
+    Named rather than spelled inline at each assertion so the cleared set
+    stays in one place: it grew from ``store`` alone to include
+    ``store_backend``, and an assertion that cleared only some of it would
+    pass while proving less.
     """
     return _edit(ast, store=None, store_backend=None)
 

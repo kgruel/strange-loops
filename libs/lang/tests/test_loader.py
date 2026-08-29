@@ -2019,6 +2019,22 @@ class TestStoreBackend:
         v = parse_vertex(text)
         assert v.store_backend == BackendDecl(name="duckdb")
 
+    def test_the_stored_backend_name_is_stripped(self):
+        """Surrounding whitespace is not part of an adapter name.
+
+        Pins the STORED value, not just the refusal. The blank-value check
+        strips as well, so a variant that stripped only to decide emptiness
+        and stored the padded name passes every other test in this class —
+        and then hands the registry a name no adapter is registered under,
+        turning a cosmetic input into an UnknownBackend at open time.
+        """
+        text = (
+            'name "t"\nstore "./t.arrival" backend="  file  "\n'
+            'loops { x { fold { items "inc" } } }'
+        )
+        v = parse_vertex(text)
+        assert v.store_backend == BackendDecl(name="file")
+
     def test_unknown_property_refused(self):
         text = (
             'name "t"\nstore "./t.arrival" bakcend="file"\n'

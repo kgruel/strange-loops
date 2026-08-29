@@ -54,9 +54,10 @@ lang test files.
   declares nothing, so nothing is silently discarded. Noted at the refusal site.
 - **The loader stores the STRIPPED backend name.** `backend="  file  "` becomes
   `"file"` rather than reaching `open` as an unknown name. A normalization the brief
-  did not rule, named here rather than left for the gate to find: it follows from
-  refusing blank values with the same `.strip()`, and treating surrounding whitespace
-  as significant in an adapter name would be the surprising choice.
+  did not rule: it follows from refusing blank values with the same `.strip()`, and
+  treating surrounding whitespace as significant in an adapter name would be the
+  surprising choice. Disclosed here at first submission and **pinned at the gate
+  round** — see "Gate round" below; disclosure alone was not enough.
 - **`documents_to_vertex(..., store_backend=)` is a third residence parameter**, not a
   field read from documents. Backend is residence: an operational adapter name in
   signed declaration history would make a storage choice part of the vertex's
@@ -195,9 +196,17 @@ Three run, all restored, `git diff` clean after each.
 
 ## Full-suite check
 
-`./dev test` — **2530 passed, 1 xfailed. "All test suites passed."** (every workspace
-package, including `store` and `apps`, whose consumers of `documents_to_vertex` and the
-`.vertex` grammar are the ones an additive change could still break.)
+`./dev test` — **"All test suites passed."** Per package, so the numbers can be checked
+rather than trusted (an earlier draft of this report quoted the 2530 tail line as if it
+were the aggregate; it is the `loops` app package alone):
+
+| ratchets | atoms | custody | engine | lang | sdk | sign | store | loops |
+|---|---|---|---|---|---|---|---|---|
+| 99 | 517 | 13 | 2016 (+1 skip) | 671 | 324 | 37 | 180 | 2530 (+1 xfail) |
+
+6387 passed total. `store` and `loops` matter most here: their consumers of
+`documents_to_vertex` and the `.vertex` grammar are what an additive change could still
+break.
 
 ## Deviations
 
@@ -230,3 +239,55 @@ refusals, so no extra-positional-args refusal and no `BackendDecl.__post_init__`
 validation were added. Empty `store "…" { }` is accepted (CKDL normalizes an empty
 block to no children — the same known limitation already documented for `preview`);
 noted at the refusal site rather than worked around.
+
+## Gate round — F2 and F4 (post-PASS scoped fix)
+
+Gate verdict on first submission: **PASS, 0 blocking, 4 non-blocking.** Two routed back
+as one scoped fix; landed here. F1 (`descriptor_for`'s call-time import via `residence`'s
+pre-existing `engine.arrival` coupling) is deferred to WP5's doc pass and F3 (KDL typed-
+value coercion) to slice 5's adopt design — neither touched on this branch.
+
+### F2 — the strip was disclosed but unpinned
+
+The gate's finding was exactly right, and it is the more interesting half of the two.
+Reporting a normalization is not the same as pinning it: `.strip()` sat on the line that
+*also* feeds the blank check, so a variant that stripped only to decide emptiness and
+stored the padded name was invisible to the suite.
+
+Reproduced before fixing, to confirm the gate's claim rather than assume it: with the
+variant applied, **all 7 `TestStoreBackend` tests passed.** The normalization was load-
+bearing and untested.
+
+`test_the_stored_backend_name_is_stripped` now pins the STORED value. Mutation
+demonstration, run in one pass with the variant still in place:
+
+```
+E       AssertionError: assert BackendDecl(name='  file  ') == BackendDecl(name='file')
+FAILED ..::TestStoreBackend::test_the_stored_backend_name_is_stripped
+```
+
+Restored; `git diff` on `loader.py` is empty against the previous commit — the fix is a
+test-only addition, because the production behavior was already correct. That is the
+whole point of the finding: correct-but-unpinned behavior is one refactor from being
+incorrect-and-silent, and the padded name would have surfaced as an `UnknownBackend` at
+open time, far from the cosmetic input that caused it.
+
+Why the whitespace case was missed the first time: the seven tests covered the *ruled*
+inputs (both accepted forms, three refusals, the no-cross-check rule) and the strip was
+an unruled consequence I introduced. A disclosure line in a report is review vigilance;
+the assertion is the ratchet.
+
+### F4 — `_residence_stripped` cosmetics
+
+Two-blank-line spacing restored (the helper had one), and the docstring's "every
+residence field cleared" corrected. It overclaimed: `path` is residence too and is NOT
+cleared, because all nine call sites build their AST with `parse_vertex` on text, so
+`path` is already `None` and clearing it would state a transformation that never
+happens. The docstring now says which fields it clears and why `path` is not among them.
+
+### Verification after the fix
+
+lang **670 → 671 (+1**, the strip test); every other package unchanged. `./dev test`
+green across all nine suites (table above). `loader.py`, `ast.py`, `document.py`,
+`declaration.py`, `program.py`, `arrival_registry.py` and `residence.py` all carry a
+0-line diff against the pre-gate commit — nothing but tests and this report changed.

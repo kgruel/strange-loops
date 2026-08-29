@@ -12,7 +12,7 @@ Contract: `docs/scratch/arrival-break/slice3-wp1-brief.md`; design
 | File | What |
 |---|---|
 | `libs/engine/src/engine/arrival_head_attestation.py` | the record, the journal, the classifier, the refusal family, the transitional binding |
-| `libs/engine/tests/test_arrival_head_attestation.py` | 80 unit tests |
+| `libs/engine/tests/test_arrival_head_attestation.py` | 87 unit tests |
 | `tests/architecture/test_rule_18_arrival_vocabulary_denylist.py` | `_SCAN_TARGETS` enrollment (same commit as the module, or the glob test fails) |
 
 ## Counts
@@ -24,7 +24,7 @@ usable baseline):
 
 | Suite | Baseline | After | Delta |
 |---|---|---|---|
-| engine | 2063 passed, 1 skipped | 2143 passed, 1 skipped | **+80**, all in `test_arrival_head_attestation.py` |
+| engine | 2063 passed, 1 skipped | 2150 passed, 1 skipped | **+87**, all in `test_arrival_head_attestation.py` |
 | architecture | 99 passed | 99 passed | **0** — Rule 18 is not parametrized per target, so enrolling a module adds no case |
 
 Every delta accounted for. `ruff check` passes on both new files. (`ruff format` would
@@ -61,11 +61,10 @@ where one refines a literal reading, the reason is stated.
    Two writers racing `O_CREAT|O_EXCL` can each land a header, so "line 1 is the only
    header" is not a property the reader may assume. Duplicate-entry tolerance sets the
    precedent.
-6. **Torn-line policy split.** A torn *final* line is tolerated and reported (the
-   design's rule). Damage anywhere earlier refuses with `JournalUnreadable`: it is not a
-   torn append, and skipping it would silently lower the remembered head — the direction
-   an attacker wants this cache moved. Conservative read, reported here because the
-   design left mid-file damage unstated.
+6. **SUPERSEDED at `66df1e71`** — was "torn-line policy split", refusing damage above the
+   last line. The refutation and the amended ruling are in their own section below. Every
+   unreadable line is now skipped and reported wherever it sits, and the loss is carried
+   in the read's type as `HeadLowerBound` rather than converted into a verdict.
 7. **Skipped lines are reported on `JournalRead.skipped`**, not logged. A tolerated loss
    nobody is told about is just a loss; a field lets WP3's seam surface it without this
    module inventing a logging dependency.
@@ -85,9 +84,10 @@ where one refines a literal reading, the reason is stated.
     `arrival_contract.Profile`/`VerificationLevel`. The vectors pin `.value`, which is
     what "outcomes are strings" asks for; a `str` mixin would have departed from the
     sibling module for no gain.
-12. **Three refusals beyond §C.2's five.** `UnsafeLineageName` is demanded by §A.3
-    ("a typed refusal naming the lineage"); `JournalUnreadable` is choice 6's; `StoreLost`
-    is §D.4's "it must refuse". All root in `AttestationRefusal`.
+12. **Four refusals beyond §C.2's five.** `UnsafeLineageName` is demanded by §A.3
+    ("a typed refusal naming the lineage"); `StoreLost` is §D.4's "it must refuse";
+    `JournalUnreadable` is structural damage; `IndeterminateComparison` is what makes the
+    cheap shortcut unobtainable. All root in `AttestationRefusal`.
 13. **`REFUSALS`/`refusal_for` — the outcome-to-refusal table lives in this module.**
     So WP3's seam does not re-implement the posture, and "which outcomes refuse" is one
     enumerable fact rather than a chain of `if`s in whatever calls the classifier.
@@ -146,12 +146,30 @@ Completion fact: `observation:implementation/arrival-slice3-wp1-head-attestation
 
 ## Notes for WP2 and WP3
 
-- **WP2** consumes `parse_journal_lines` (pure, raw lines in) and `compare` (pure). Pin
-  `Outcome(...).value`, not the enum members. `AbsentStoreOutcome` is a separate enum
+- **WP2: no comparison vector shape changes.** `compare`'s signature and its seven rows
+  are untouched by the lower-bound work — the change is entirely in how a caller *obtains*
+  the `known` argument. Vectors still supply `input.known` as an entry and pin
+  `expected.outcome` as the state string. WP2 consumes `parse_journal_lines` (pure, raw
+  lines in) and `compare` (pure); pin `Outcome(...).value`, not the enum members. One new
+  input shape worth a vector if the family covers journal reads: a journal with an
+  unreadable line yields a bound rather than a head. `AbsentStoreOutcome` is a separate enum
   on purpose — see choice 2 — so decide deliberately whether the family covers it.
-- **WP3** gets `refusal_for()` (choice 13) so the seam does not re-implement the posture
-  table, `unaccounted_heads(epoch, at_ordinal)` for the audit producer, and
-  `JournalRead.skipped` for surfacing tolerated losses. `append_entry` returns the
+- **WP3 seam contract, amended.** The seam calls `JournalRead.established_head()` to get
+  its `compare` argument. On an incomplete read that call **raises**
+  `IndeterminateComparison`, and the seam must handle it rather than route around it: a
+  bound can still refuse anything below itself, but it cannot license proceeding. Note
+  what does NOT work — gathering evidence from the store does not resolve the
+  indeterminacy, because a walk verifies the store's chain while the missing fact is about
+  what this machine previously accepted. Proceeding therefore needs an operator decision
+  (journal repair or the trust-reset ceremony) or an explicitly labeled degradation; that
+  posture is WP3's to choose and is worth a gate item. WP3 also gets `refusal_for()`
+  (choice 13) so the seam does not re-implement the posture table,
+  `unaccounted_heads(epoch, at_ordinal)` for the audit producer, and `JournalRead.skipped`
+  for surfacing tolerated losses.
+- **Open and named, not built:** the header's `protocol`/`wire` values are written but
+  never read. §B.3 says a journal written under wire v1 must not be silently compared
+  against a v2 head whose hashes derive differently, and today nothing enforces that. Out
+  of WP1's scope as ruled; it belongs wherever wire v2 lands. `append_entry` returns the
   journal path, and raises `OSError` outward — journal write failure is the caller's to
   surface, never swallowed (§D.4).
 - **`bindings.jsonl` matches `location` as an exact string.** The seam must pass one
@@ -185,6 +203,8 @@ Each mutation applied to the working tree, the suite run, the mutation reverted,
 | (c) | journal read rule: `_known_of` returns `epoch[-1]` instead of the maximum-ordinal entry | **2 failed, 75 passed** — `test_the_known_head_is_the_maximum_ordinal_not_the_last_line` and `test_out_of_order_journal_writes_still_catch_a_restore` (a genuine restore to 5 classifies `unchanged`) |
 | (d) | write path: `O_APPEND` dropped from the exclusive create (choice 17 reverted) | **1 failed, 79 passed** — `test_a_create_race_does_not_overwrite_the_other_writers_entry` |
 | (e) | write path: `_torn_tail_guard` always returns `""` (choice 18 reverted) | **1 failed, 79 passed** — `test_a_torn_tail_does_not_glue_itself_to_the_next_entry` |
+| (i) | the refusal on unreadable lines restored (amended ruling reverted) | **7 failed, 80 passed** (87-test suite) — every tolerate test, led by `test_damage_anywhere_is_tolerated_and_reported` and `test_the_deadlock_scenario_opens_cleanly_now` |
+| (ii) | `HeadLowerBound` collapsed into a plain `EstablishedHead`, making the state ignorable | **8 failed, 79 passed** — including `test_an_incomplete_read_cannot_classify_a_restore_as_unchanged`, the cannot-claim-unchanged test the ruling named |
 
 Demos (a)-(c) were measured against the 77-test suite before the write-path fix; (d) and
 (e) against the 80-test suite after it. The three classifier and read-rule mutations are
@@ -195,7 +215,7 @@ each also caught by a second test stating the operator-visible consequence, and 
 caught across all three surfaces the epoch scope governs (K, equivocation, the audit).
 After each restore `git diff` was verified empty, and the suite is back to 80 passed.
 
-## Ruling verification — mid-file damage (NOT APPLIED, blocked on its own conditional)
+## Mid-file damage — refutation, amended ruling, and what was built
 
 The lead ruled TOLERATE AND REPORT for mid-file damage, conditional on verifying in code
 that within a trust epoch journaled ordinals ascend, so that a mid-file skip cannot lower
@@ -221,5 +241,42 @@ after a genuine restore from 92 then classifies `unchanged` where the truth is
 the maximum-ordinal rule was written to close. A mid-file skip therefore *can* lower `K`,
 and it is not strictly safer than the torn tail.
 
-The ruling's *reasoning* survives the break — see the reply to the lead for the narrowed
-form that keeps tolerate-and-report without letting `K` silently drop.
+### The amended ruling, and what it changed
+
+The lead accepted the refutation and amended the ruling to option (c), adding one
+requirement: the weakened state must be **unignorable by construction** in the read's
+type — not a boolean beside a plain `K` that WP3's seam could forget to consult. Built
+at `66df1e71`:
+
+- `JournalRead.known` is now `EstablishedHead | HeadLowerBound | None`. The weakened case
+  has **no `entry` attribute at all** — its field is `at_least` — so there is no
+  expression that reaches a comparable head without naming which case it is in.
+- `JournalRead.established_head()` is the only way to obtain a `compare` argument, and it
+  raises `IndeterminateComparison` on an incomplete read. The cheap "presented equals `K`,
+  therefore unchanged" shortcut is **unobtainable**, not discouraged.
+- A bound still answers `rollback` soundly (below the bound is below `K`), which is the
+  one comparison it can make.
+- **`compare`'s signature is untouched**, so no WP2 vector shape changes.
+
+Two corrections to my own option (c) as originally worded, both now in the type's
+docstring. First, "the seam gathers evidence instead" is **wrong as a repair**: a walk
+verifies the store's own chain, and the missing fact is about what this machine
+previously *accepted*, which the store never knew. Evidence gathering cannot resolve the
+indeterminacy — only journal repair or the trust-reset ceremony can, and both are
+operator work. Second, an unreadable line carries **no** information about the ordinal it
+held, so the readable entries bound `K` from below and nothing bounds it from above; that
+is why `advanced` is unsound against a bound too, not only `unchanged`.
+
+### What dissolved
+
+The positional torn-tail-versus-mid-file distinction is **gone**, and with it choice 6.
+Position was only ever a proxy for "is this a crash artifact", and it was a bad one —
+a fragment becomes mid-file the moment one commit follows it. Every unreadable line is
+now skipped and reported wherever it sits, and the read rule no longer consults an index.
+
+`JournalUnreadable` survives, rescoped to structural damage that breaks the read itself:
+**entries with no header**. The header states the protocol and wire versions the record
+hashes derive under, so without it a comparison is not a weaker answer but a meaningless
+one. That made one write-path case reachable — a creator that won the exclusive create
+and died before writing leaves an empty file — so an append now supplies the header when
+it finds one, and a crashed creator cannot strand a journal headerless.

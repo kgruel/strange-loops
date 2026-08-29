@@ -6,7 +6,7 @@ brief's unverified-fixes table. Remove entries only when a sol round has PASSed 
 
 | commit | finding | fix | arbiter verification |
 |---|---|---|---|
-| *(none open)* | | | |
+| e7513164 (wave branch) | slice-2 integration seam: WP4's WP2-anticipating pin (`assert not isinstance(ledger, ArrivalLedger)`) failed once WP2 landed replicate/export — WP2 flipped WP1's copies but could not reach WP4's parallel branch | pin flipped to positive form + comment rewritten | the pre-fix state IS the failing mutation, observed twice in the integrated engine suite; post-fix engine 2062+1s green. Rides the WP5 sol brief's unverified-fixes table |
 
 ## Verified (sol-PASSed, removed from the open table)
 

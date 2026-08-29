@@ -498,6 +498,12 @@ def load_declaration_status(
         return ast, status
 
     store_field = file_ast.store
+    # The backend arm is residence, like the locator beside it: the documents
+    # do not carry it, so the file is the only place it can come from. A
+    # re-projection that supplied the locator but not the backend would hand
+    # back a vertex whose adapter designation had silently reverted to suffix
+    # inference — and nothing downstream would report that.
+    backend_field = file_ast.store_backend
     if store_field is None:
         return _finish(file_ast, "file-pre-genesis")
 
@@ -509,11 +515,16 @@ def load_declaration_status(
         store_path, as_of=as_of, at=at, timeout=store_timeout, on_locked=on_locked,
     )
     if isinstance(docs, list):
-        resolved = documents_to_vertex(docs, path=vertex_path, store=store_field)
+        resolved = documents_to_vertex(
+            docs, path=vertex_path, store=store_field, store_backend=backend_field
+        )
         return _finish(_reattach_ingress(resolved, file_ast), "store")
     if isinstance(docs, Unhistorized):
         resolved = documents_to_vertex(
-            docs.documents, path=vertex_path, store=store_field
+            docs.documents,
+            path=vertex_path,
+            store=store_field,
+            store_backend=backend_field,
         )
         return _finish(_reattach_ingress(resolved, file_ast), "unhistorized")
     return _finish(file_ast, "file-pre-genesis")
@@ -893,6 +904,7 @@ def _reattach_ingress(resolved, file_ast):
         name=resolved.name,
         loops=resolved.loops,
         store=resolved.store,
+        store_backend=resolved.store_backend,
         discover=resolved.discover,
         sources=resolved.sources,
         vertices=resolved.vertices,

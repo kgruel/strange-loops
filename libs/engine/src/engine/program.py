@@ -255,6 +255,7 @@ def _substitute_vertex_vars(ast: VertexFile, vars: dict[str, str]) -> VertexFile
         name=ast.name,
         loops=ast.loops,
         store=ast.store,
+        store_backend=ast.store_backend,
         discover=ast.discover,
         sources=tuple(new_sources),
         vertices=ast.vertices,

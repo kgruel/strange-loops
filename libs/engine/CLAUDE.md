@@ -193,8 +193,10 @@ Protocols, and the `ContractRefusal` root each adapter translates its own
 faults into one-for-one. Stdlib and typing only — no sqlite3, no
 `engine.arrival` — so naming a `Head` costs nothing.
 `engine/arrival_file_backend.py` is the first adapter (`FileLedger` /
-`FileQuery` wrapping `ArrivalLog` plus the projection; `ArrivalStore` itself is
-untouched), and `engine/arrival_registry.py` answers which adapter opens which
+`FileQuery` wrapping `ArrivalLog` plus the projection — the adapter does not
+modify `ArrivalStore`, though the class did change in-slice: its ceremony
+append pins the FULL head through the new `_pinned_head`, and it imports `Head`
+from the contract), and `engine/arrival_registry.py` answers which adapter opens which
 artifact: `descriptor_for` NAMES (AST fields plus path arithmetic, no I/O — it
 can name a backend this host has no adapter for), `BackendRegistry` OPENS
 (that half is the one that refuses with `UnknownBackend`). Production still resolves through the suffix dispatch

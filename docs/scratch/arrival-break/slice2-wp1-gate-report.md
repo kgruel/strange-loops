@@ -120,6 +120,28 @@ to an ordinal compare.
 Every delta lands on a named new test; nothing is unaccounted. The claimed counts match
 the measured counts exactly — no mismatch to resolve.
 
+**The wider net ("others baseline"), reconciled rather than waved through.** The impl
+report also claims root `tests/` 99, sdk 324, apps/loops 2530+1xfail, lang 655, atoms 517,
+sign 37, custody 13, chaos 12. Resolved two ways.
+
+*By argument, for the suites not re-run.* The only behavior change outside the two new
+modules is F1's `following` widening. `grep -rn "following=" libs apps --include="*.py"`
+outside `libs/engine/` and `libs/store/` returns **nothing** — no consumer in apps, sdk,
+lang, atoms, sign, custody or chaos passes a CAS pin at all. The widened parameter is
+therefore unreachable from those suites, and `arrival_file_backend` is imported by nothing
+outside tests (§3). There is no mechanism by which they could move.
+
+*By spot-run, to anchor that argument.* Root `tests/` → **111 passed**; sdk → **324
+passed**, matching the sdk claim exactly.
+
+One report-accuracy nit falls out, and it is bookkeeping rather than a miscount: root
+`tests/` holds exactly two directories, `architecture` and `chaos`, so `pytest tests` is
+99 + 12 = **111**, not the "99" the impl lists beside a separate "chaos 12". The impl's
+"root tests/ 99" is the architecture count relabelled, and its "unchanged from baseline"
+is what tipped it off — architecture demonstrably went 98 → 99. Nothing is missing or
+double-failing: 111 reconciles to the component counts exactly, and 110 → 111 is the same
++1 ratchet test. Recorded for accuracy; no finding.
+
 ### 1.8 — All 5 new files committed (PASS)
 
 `git ls-tree -r 70f7f7d3 --name-only`: `arrival_contract.py`, `arrival_file_backend.py`,
@@ -263,10 +285,19 @@ an assertion rather than a guarantee. The identical branch in `merge.py:_pinned_
 
 Not blocking, for three reasons: the *headline* behavior (that the ceremony is pinned at
 all) IS caught; the branch is defensive against a state `catch_up()` already refuses on
-open, so it is near-unreachable in practice; and the raise is well-formed
-(`ArrivalCanonicalUnsupported` is defined in that module at `:119` — no latent `NameError`).
-A test that stubs `anchor` to return `None` and asserts the refusal would close it in a
-few lines.
+open, so it is near-unreachable in practice; and the branch **demonstrably works** — it is
+untested, not dead. Probed at runtime here with a stub whose `anchor` returns `None`:
+
+```
+RAISED ArrivalCanonicalUnsupported:
+  /tmp/idx.db reconciled against arrival ordinal 7 of lineage LIN123, but
+  /tmp/fake.arrival does not vouch for a record there — the index's mark and the
+  log disagree, and appending under an uncompletable pin would write onto that
+  disagreement. Run engine.arrival_projection.rederive_projections(...)
+```
+
+It fires, names both coordinates, and points at the remedy. That same five-line stub, as a
+test asserting the refusal, is all G1 needs to close.
 
 ### G2 — `head_at` is on `FileLedger`, not on the `ArrivalLedger` Protocol (NON-BLOCKING)
 

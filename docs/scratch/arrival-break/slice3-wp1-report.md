@@ -104,8 +104,34 @@ where one refines a literal reading, the reason is stated.
 
 ## Deviations
 
-None. Items 1 and 6 above refine underdetermined design text rather than departing from
-it; both are argued from the design's own exit criteria and stated at the site.
+**None from the brief's scope, oracle, or mechanics.** Two of the choices above depart
+from a *literal* reading of the design prose, both arguing from the design's own exit
+criteria, and both carry a finding fact so the gate and WP2 see them rather than
+discovering them in a vector:
+
+- `finding:s3wp1-epoch-scope-is-reset-inclusive` @ `01M17T5E7QNH221ZH9T05TJ5BH` —
+  choice 1. **WP2 action:** vectors built from §B.3's literal wording would pin
+  `first-contact` where the design wants `unchanged`.
+- `finding:s3wp1-mid-file-journal-damage-unstated` @ `01M17T5EGH8K3ZJCWK3MFMV3XB` —
+  choice 6. **Arbiter action:** confirm the conservative arm; the design left mid-file
+  damage unstated.
+
+Completion fact: `observation:implementation/arrival-slice3-wp1-head-attestation` @
+`01M17T4S61XZ8Q3ST4P8QWQBYV`.
+
+## Notes for WP2 and WP3
+
+- **WP2** consumes `parse_journal_lines` (pure, raw lines in) and `compare` (pure). Pin
+  `Outcome(...).value`, not the enum members. `AbsentStoreOutcome` is a separate enum
+  on purpose — see choice 2 — so decide deliberately whether the family covers it.
+- **WP3** gets `refusal_for()` (choice 13) so the seam does not re-implement the posture
+  table, `unaccounted_heads(epoch, at_ordinal)` for the audit producer, and
+  `JournalRead.skipped` for surfacing tolerated losses. `append_entry` returns the
+  journal path, and raises `OSError` outward — journal write failure is the caller's to
+  surface, never swallowed (§D.4).
+- Nothing in this module reads the clock. `observed_at` is a caller-supplied argument
+  everywhere, which is what keeps staleness reporting (WP3's) testable without freezing
+  time here.
 
 ## Oracle results
 

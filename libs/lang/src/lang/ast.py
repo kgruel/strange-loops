@@ -673,6 +673,29 @@ class ObserverDecl:
 
 
 # -----------------------------------------------------------------------------
+# Backend Declaration (for .vertex files)
+# -----------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class BackendDecl:
+    """Which adapter opens the declared store.
+
+    The adapter designation, never the location: the location is the store
+    clause's positional argument and stays on ``VertexFile.store``. The two
+    cannot disagree because they are not two spellings of one value.
+
+    Backend selection is explicit — nothing here is inferred from a
+    ``.arrival``/``.duckdb`` suffix. A name this repo has no adapter for is
+    refused at open time by the registry, not at parse time: the grammar
+    admits any non-empty name so a vertex declaring a backend some other
+    deployment provides still parses.
+    """
+
+    name: str
+
+
+# -----------------------------------------------------------------------------
 # Top-level File ASTs
 # -----------------------------------------------------------------------------
 
@@ -703,6 +726,13 @@ class VertexFile:
     name: str
     loops: dict[str, LoopDef]
     store: Path | None = None
+    # Residence's second half. `store` keeps meaning exactly what it meant
+    # before — the location — so every reader of it is unaffected by a
+    # declared backend. None means "not declared", which is not the same as
+    # "no backend": resolution of an undeclared store is the registry's, and
+    # the grammar's silence here is what lets legacy `store "<path>"` parse
+    # unchanged.
+    store_backend: BackendDecl | None = None
     discover: str | None = None
     sources: tuple[SourceEntry, ...] | None = None
     vertices: tuple[Path, ...] | None = None

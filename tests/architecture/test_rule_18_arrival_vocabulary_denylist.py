@@ -73,9 +73,13 @@ _SCAN_TARGETS = (
     # born on the arrival surface, so they join at birth — and the contract
     # module is the one that most needs it, because it is where the arrival
     # vocabulary becomes the vocabulary every future backend inherits.
-    # `arrival_registry` is slice 2's WP4 and joins when it is born.
+    # `arrival_registry` is slice 2's WP4 and joins when it is born — it is
+    # born here. It is the module that decides which adapter opens which
+    # artifact, so its names are the ones every future backend is registered
+    # under.
     "libs/engine/src/engine/arrival_contract.py",
     "libs/engine/src/engine/arrival_file_backend.py",
+    "libs/engine/src/engine/arrival_registry.py",
     "libs/engine/src/engine/arrival_projection.py",
     "libs/engine/src/engine/arrival_store.py",
     "libs/engine/src/engine/probe.py",

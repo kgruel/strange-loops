@@ -50,6 +50,8 @@ __all__ = [
     "BoundaryCondition",
     "BoundaryEvery",
     "BoundaryWhen",
+    # AST types - Backend declarations
+    "BackendDecl",
     # AST types - Combinatorial vertices
     "CombineEntry",
     # AST types - Lens declarations
@@ -115,6 +117,7 @@ _LAZY_IMPORTS: dict[str, tuple[str, str]] = {}
 
 # AST types
 _AST_NAMES = [
+    "BackendDecl",
     "Boundary", "BoundaryAfter", "BoundaryCondition", "BoundaryEvery", "BoundaryWhen",
     "Coerce", "CombineEntry", "Duration", "EdgeDecl", "Explode", "Flatten",
     "FoldAvg", "FoldBy", "FoldCollect", "FoldCount", "FoldDecl", "FoldLatest",

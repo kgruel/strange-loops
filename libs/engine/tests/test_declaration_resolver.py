@@ -809,3 +809,91 @@ loops''')
         agg.write_text(f'name "agg"\ncombine {{\n  vertex "{vpath}"\n}}\n')
         with pytest.raises(ValueError):
             vertex_fact_by_id(agg, "abc", kind="decision")
+
+
+# ---------------------------------------------------------------------------
+# Backend residence (slice 2 / WP4)
+# ---------------------------------------------------------------------------
+
+_BACKEND_VERTEX_KDL = '''name "t"
+store "{store}" backend="duckdb"
+loops {{
+  ping {{ fold {{ n "inc" }} }}
+}}
+observers {{
+  kyle {{ key "AAAA" }}
+}}
+'''
+
+# The same vertex plus env ingress, so resolution takes the OTHER path
+# through the resolver — the one that rebuilds the AST.
+_BACKEND_ENV_VERTEX_KDL = '''name "t"
+store "{store}" backend="duckdb"
+sources sequential {{
+  source "curl -s https://x.example" {{
+    kind "ping"
+    env TOKEN="hunter2"
+  }}
+}}
+loops {{
+  ping {{ fold {{ n "inc" }} }}
+}}
+observers {{
+  kyle {{ key "AAAA" }}
+}}
+'''
+
+
+class TestBackendResidence:
+    """The declared backend is residence: file-supplied, never absorbed.
+
+    Both halves matter. It must not reach the store — an operational adapter
+    name in signed declaration history would make a storage choice part of
+    the vertex's absorbed identity — and it must survive resolution, because
+    a store whose backend arm came back None falls straight back to suffix
+    inference and nothing reports that it happened.
+    """
+
+    def _scaffold(self, tmp_path, kdl=_BACKEND_VERTEX_KDL):
+        store = tmp_path / "t.db"
+        vpath = tmp_path / "t.vertex"
+        vpath.write_text(kdl.format(store=store))
+        return vpath, store
+
+    def test_backend_never_enters_store_payloads(self, tmp_path):
+        vpath, store = self._scaffold(tmp_path)
+        _absorb(vpath, store)
+        conn = sqlite3.connect(str(store))
+        payloads = [r[0] for r in conn.execute("SELECT payload FROM facts")]
+        conn.close()
+        assert not any("duckdb" in p for p in payloads)
+
+    def test_backend_survives_resolution_from_the_store(self, tmp_path):
+        vpath, store = self._scaffold(tmp_path)
+        _absorb(vpath, store)
+        resolved = load_declaration(vpath)
+        assert resolved.store_backend is not None
+        assert resolved.store_backend.name == "duckdb"
+
+    def test_backend_survives_ingress_reattachment(self, tmp_path):
+        """The rebuild path, which drops any field not explicitly carried.
+
+        Env-value re-attachment reconstructs the whole ``VertexFile`` through
+        the constructor (``ast.py``'s frozen decorator defeats
+        ``dataclasses.replace``), so it carries a hand-written field list.
+        Resolution without env ingress never reaches it, which is why this
+        case is separate rather than folded into the one above.
+        """
+        vpath, store = self._scaffold(tmp_path, _BACKEND_ENV_VERTEX_KDL)
+        _absorb(vpath, store)
+        resolved = load_declaration(vpath)
+        # Re-attachment did run: the value came back from the file, not "".
+        assert dict(resolved.sources_blocks[0].sources[0].env)["TOKEN"] == "hunter2"
+        assert resolved.store_backend is not None
+        assert resolved.store_backend.name == "duckdb"
+
+    def test_bare_store_resolves_with_no_backend(self, tmp_path):
+        vpath, store = _scaffold(tmp_path)  # module scaffold: no backend arm
+        _absorb(vpath, store)
+        resolved = load_declaration(vpath)
+        assert resolved.store_backend is None

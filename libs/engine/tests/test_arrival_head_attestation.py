@@ -762,15 +762,103 @@ def test_the_deadlock_scenario_opens_cleanly_now():
     assert len(result.skipped) == 1
 
 
-def test_entries_with_no_header_are_structural_damage():
-    """The header states how the hashes derive; without it a comparison is
-    not a weaker answer, it is a meaningless one."""
+def test_entries_with_no_header_are_tolerated_as_a_weakened_claim():
+    """A bound, not a refusal — the entries are still evidence.
+
+    Losing the header loses the protocol and wire versions these hashes
+    derive under, which is exactly what a lower bound is for. Refusing the
+    whole file would be a verdict where a weakened claim is available, which
+    is the error `HeadUnreadable` was added to correct.
+    """
     append_entry(observation(4))
+    append_entry(observation(5))
     lines = journal_path(LINEAGE).read_text().splitlines()
     journal_path(LINEAGE).write_text("\n".join(lines[1:]) + "\n")
+
+    result = read_journal(LINEAGE)
+    assert isinstance(result.known, HeadLowerBound)
+    assert result.known.at_least.head.ordinal == 5
+    assert any("header: absent" in note for note in result.skipped)
+    assert compare(result.known.at_least, head(2), None) is Outcome.ROLLBACK
+    with pytest.raises(IndeterminateComparison):
+        result.established_head()
+
+
+def test_a_header_carrying_its_own_kind_does_not_refuse_the_file():
+    """A later build's header with a `kind` of its own — sol's demonstration.
+
+    Requiring the type marker AND the absence of `kind` made this an
+    uncontracted version-skew refusal of the whole journal. It is now an
+    ambiguous line: skipped, reported, and the surrounding entries still read.
+    """
+    append_entry(observation(4))
+    append_entry(observation(5))
+    with journal_path(LINEAGE).open("a") as handle:
+        handle.write(
+            json.dumps(
+                {
+                    "v": 1,
+                    "type": "arrival-head-observation",
+                    "kind": "header-v2",
+                    "extra": 1,
+                }
+            )
+            + "\n"
+        )
+    append_entry(observation(6))
+
+    result = read_journal(LINEAGE)
+    assert [entry.head.ordinal for entry in result.entries] == [4, 5, 6]
+    assert any("both the journal type marker" in n for n in result.skipped)
+    assert isinstance(result.known, HeadLowerBound)
+    assert result.known.at_least.head.ordinal == 6
+    with pytest.raises(IndeterminateComparison):
+        result.established_head()
+
+
+def test_a_type_bearing_entry_is_never_absorbed_as_a_header():
+    """The mirror hazard, pinned.
+
+    Keying on the type string alone would swallow this whole — an entry that
+    happens to carry the marker, absorbed silently, which is the kindless-dict
+    failure from the other side. It must be skipped and reported instead.
+    """
+    entry_carrying_the_marker = json.dumps(
+        {
+            "v": 1,
+            "type": "arrival-head-observation",
+            "kind": "advance",
+            "level": "commit",
+            "lineage": LINEAGE,
+            "ordinal": 9999,
+            "record_hash": "e" * 64,
+            "observed_at": 1.0,
+        }
+    )
+    result = parse_journal_lines([HEADER, entry_carrying_the_marker])
+
+    assert result.entries == ()
+    assert any("both the journal type marker" in n for n in result.skipped)
+    assert isinstance(result.known, HeadUnreadable)
+    with pytest.raises(IndeterminateComparison):
+        result.established_head()
+
+
+def test_a_journal_that_cannot_be_read_as_text_at_all_refuses():
+    """What still triggers JournalUnreadable, and why it is the only thing.
+
+    Every structural condition the parser meets now yields a weakened claim
+    instead of a verdict. What remains is the case where there is nothing to
+    parse: the journal is there and cannot be read at all. Raised as a
+    refusal rather than let out as a builtin, so a caller catching
+    AttestationRefusal does not have an OSError escape past it.
+    """
+    path = journal_path(LINEAGE)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.mkdir()  # a directory where the journal should be
     with pytest.raises(JournalUnreadable) as caught:
         read_journal(LINEAGE)
-    assert "no header" in str(caught.value)
+    assert "cannot be read as text at all" in str(caught.value)
 
 
 def test_an_empty_journal_is_not_headerless_damage():

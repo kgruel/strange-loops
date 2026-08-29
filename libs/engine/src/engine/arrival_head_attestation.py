@@ -779,27 +779,38 @@ def _known_of(epoch: tuple[HeadAttestation, ...]) -> HeadAttestation | None:
     return best
 
 
-def _is_header(decoded: object) -> bool:
-    """Whether this line is a journal header — by SHAPE, never by position.
+#: The three outcomes of looking at one decoded line. Named, because "how a
+#: line is classified" is the contract sentence this module got wrong twice.
+_HEADER = "header"
+_AMBIGUOUS = "ambiguous"
+_ENTRY_SHAPED = "entry-shaped"
 
-    Keyed on the ``type`` string a header carries. An earlier version treated
-    ANY dict without ``kind`` as a header, which absorbed ``{}`` — and every
-    other kindless dict — **silently, with no skip recorded**: a second byte
-    pattern through which a line could be lost without being reported, and so
-    a second route to the classification the journal exists to prevent
-    (``finding:s3wp1-gate-kindless-dict-absorbed-as-header``). Anything that
-    is not this shape and is not an entry is a skipped line like any other.
 
-    Deliberately keyed on the type rather than on ``protocol``/``wire`` as
-    well, so a later build that adds header fields is still recognized. A
-    header naming a DIFFERENT type is not this journal's header and is not
-    treated as one.
+def _classify(decoded: object) -> str:
+    """Header, ambiguous, or entry-shaped — by SHAPE, never by position.
+
+    **The rule never absorbs a line and never refuses the file.** Both halves
+    are scar tissue from a fix that went wrong in each direction:
+
+    * Treating any *kindless* dict as a header absorbed ``{}`` silently, with
+      no skip recorded, and so lost the line holding the epoch maximum
+      (``finding:s3wp1-gate-kindless-dict-absorbed-as-header``).
+    * Keying on the type string *alone* would let a future ENTRY that happens
+      to carry the type marker be absorbed as a header — the same class of
+      failure from the other side.
+    * Requiring the type string *and* the absence of ``kind`` refused the
+      whole file when a later build's header carried a ``kind`` of its own,
+      an uncontracted version-skew refusal
+      (``finding:s3wp1-sol-l1-header-classification-three-way``).
+
+    So an object carrying **both** markers is not classified at all. It is
+    reported as ambiguous and skipped, which is a location claim about this
+    build's ability to read the line — not a verdict about what the line is,
+    which is precisely what this build cannot know.
     """
-    return (
-        isinstance(decoded, dict)
-        and "kind" not in decoded
-        and decoded.get("type") == _OBSERVATION_TYPE
-    )
+    if isinstance(decoded, dict) and decoded.get("type") == _OBSERVATION_TYPE:
+        return _AMBIGUOUS if "kind" in decoded else _HEADER
+    return _ENTRY_SHAPED
 
 
 def parse_journal_lines(lines: Iterable[str]) -> JournalRead:
@@ -838,11 +849,18 @@ def parse_journal_lines(lines: Iterable[str]) -> JournalRead:
         except ValueError as exc:
             skipped.append(f"line {index + 1}: does not parse ({exc})")
             continue
-        if _is_header(decoded):
+        verdict = _classify(decoded)
+        if verdict is _HEADER:
             # Not tracked by position: two writers racing to create the same
             # journal can each write one, so "the header is line 1" is not a
             # property this reader may assume.
             header_seen = True
+            continue
+        if verdict is _AMBIGUOUS:
+            skipped.append(
+                f"line {index + 1}: carries both the journal type marker and "
+                "an entry kind, so this build cannot say which it is"
+            )
             continue
         entry = _parse_entry(decoded)
         if entry is None:
@@ -852,9 +870,16 @@ def parse_journal_lines(lines: Iterable[str]) -> JournalRead:
 
     frozen = tuple(entries)
     if frozen and not header_seen:
-        raise JournalUnreadable(
-            f"journal holds {len(frozen)} entries but no header, so the "
-            "protocol and wire versions their hashes derive under are unknown"
+        # TOLERATED, not refused. The entries are self-describing evidence
+        # that heads were accepted, and a weakened claim is available — so
+        # refusing the file would be a verdict where a bound would do, which
+        # is the error `HeadUnreadable` was added to correct. What is lost is
+        # the protocol and wire versions the hashes derive under, and losing
+        # that is exactly what a lower bound is for. Reported without a line
+        # number because an absence does not have one.
+        skipped.append(
+            "header: absent, so the protocol and wire versions these record "
+            "hashes derive under are unknown"
         )
     epoch = _epoch_of(frozen)
     best = _known_of(epoch)
@@ -889,9 +914,21 @@ def read_journal(lineage: str) -> JournalRead:
     try:
         text = path.read_text(encoding="utf-8")
     except FileNotFoundError:
+        # Absent is not a fault — it is first contact, and answering with an
+        # empty read is what lets the classifier say so.
         return JournalRead(
             entries=(), epoch=(), known=None, bootstrap=None, skipped=()
         )
+    except (OSError, UnicodeDecodeError) as exc:
+        # The journal is THERE and cannot be read at all — a directory, a
+        # permission wall, bytes that are not text. Distinct from every case
+        # the parser handles, because there is nothing to parse. Raised as a
+        # refusal rather than let out as a builtin: a caller catching
+        # AttestationRefusal must not have an OSError escape past it.
+        raise JournalUnreadable(
+            f"the journal for lineage {lineage!r} exists but cannot be read "
+            f"as text at all: {exc}"
+        ) from exc
     return parse_journal_lines(text.splitlines(keepends=True))
 
 

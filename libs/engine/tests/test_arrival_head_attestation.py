@@ -784,6 +784,28 @@ def test_entries_with_no_header_are_tolerated_as_a_weakened_claim():
         result.established_head()
 
 
+def test_the_refusal_names_an_incomplete_read_not_unreadable_lines():
+    """A missing header weakens the claim with every entry perfectly readable.
+
+    The refusal message used to say the journal "has unreadable lines", which
+    is false here and was the eighth instance of prose naming one cause of the
+    weakened state as though it were the definition. The term is "incomplete
+    read" — about what the read LACKS, not about why — so a new cause joins it
+    without new vocabulary.
+    """
+    append_entry(observation(4))
+    lines = journal_path(LINEAGE).read_text().splitlines()
+    journal_path(LINEAGE).write_text("\n".join(lines[1:]) + "\n")
+
+    result = read_journal(LINEAGE)
+    with pytest.raises(IndeterminateComparison) as caught:
+        result.established_head()
+    message = str(caught.value)
+    assert "incomplete" in message
+    assert "unreadable lines" not in message
+    assert "header: absent" in message
+
+
 def test_a_header_carrying_its_own_kind_does_not_refuse_the_file():
     """A later build's header with a `kind` of its own — sol's demonstration.
 

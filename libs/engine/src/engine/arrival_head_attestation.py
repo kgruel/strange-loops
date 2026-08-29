@@ -205,7 +205,10 @@ class JournalUnreadable(AttestationRefusal):
 
 
 class IndeterminateComparison(AttestationRefusal):
-    """A full comparison was asked of a journal that could not be read in full.
+    """A full comparison was asked of a journal whose read was incomplete.
+
+    See :class:`HeadLowerBound` for what "incomplete" means and why the term
+    is not "unreadable".
 
     Not a claim about the store. The journal's own record of what this machine
     accepted has a hole in it, so "unchanged" is a question this journal can no
@@ -623,14 +626,32 @@ class EstablishedHead:
 
 @dataclass(frozen=True)
 class HeadLowerBound:
-    """*K* is **at least** this. Lines in the epoch could not be read.
+    """*K* is **at least** this, because the read was INCOMPLETE.
 
-    An unreadable line carries no information about the ordinal it held, so
-    the readable entries bound the accepted head from below and nothing bounds
-    it from above. Deliberately **no** ``entry`` attribute: the field is named
-    ``at_least`` so that no expression reaches a head from this type without
-    naming the weaker claim, and so a caller cannot reach one uniformly across
-    both cases.
+    **"Incomplete read" is this module's one term for the weakening
+    condition, and this is its definition:** the read needed something it did
+    not get — a line it could not parse, a line it could not classify, an
+    entry written by a later build, or the header itself. :attr:`JournalRead.skipped`
+    records exactly that set, and a non-empty ``skipped`` *is* the condition.
+    Prose here has drifted four times by naming one cause as though it were
+    the definition (unreadable lines, then damage past the last line, then a
+    missing header); the term is deliberately about what the read LACKS
+    rather than about why, so that a new cause joins it without new
+    vocabulary.
+
+    Not "unreadable" — that word belongs to text this build cannot read at
+    all (:class:`JournalUnreadable`, :class:`HeadUnreadable`), and a journal
+    with a missing header and every entry readable is incomplete without
+    being unreadable in any part. Not "unaccounted" either: :func:`unaccounted_heads`
+    already means heads the STORE can no longer account for, a different
+    question about a different party.
+
+    Whatever the read missed carries no information about the ordinal it
+    held, so the readable entries bound the accepted head from below and
+    nothing bounds it from above. Deliberately **no** ``entry`` attribute: the
+    field is named ``at_least`` so that no expression reaches a head from this
+    type without naming the weaker claim, and so a caller cannot reach one
+    uniformly across both cases.
 
     What a bound can and cannot answer:
 
@@ -638,8 +659,8 @@ class HeadLowerBound:
       accepted head is at least the bound, so it is certainly above what is
       being presented.
     * **Unsound, and this is the trap.** A presented head *equal to* the bound
-      is not unchanged; it may be a rollback from the very entry that could
-      not be read.
+      is not unchanged; it may be a rollback from the very entry the read
+      missed.
     * **Unsound for the same reason, one step further.** A presented head
       *above* the bound is not an advance either. Nothing bounds the accepted
       head from above, so a head at ordinal 95 may still sit below a lost
@@ -722,26 +743,27 @@ class JournalRead:
         """*K* for a full comparison, or a refusal if the read was incomplete.
 
         This is the only way to obtain an argument for :func:`compare`, and it
-        refuses rather than answering whenever anything the read needed was
-        missing — an unreadable line, a line it could not classify, or the
-        header itself. That refusal is the point: against an incomplete
+        refuses rather than answering whenever the read was incomplete — see
+        :class:`HeadLowerBound` for the definition of that term, which covers
+        a missing header as squarely as a torn line. That refusal is the
+        point: against an incomplete
         journal the cheap "presented equals *K*, therefore unchanged" shortcut
         is not merely discouraged, it is unobtainable.
         """
         if isinstance(self.known, HeadLowerBound):
             raise IndeterminateComparison(
-                "this journal has unreadable lines in the current trust "
-                f"epoch, so its head is only known to be at or above ordinal "
+                "this read of the journal is incomplete, so its head is "
+                "only known to be at or above ordinal "
                 f"{self.known.at_least.head.ordinal}; a presented head cannot "
-                "be called unchanged or advanced against a bound. Unreadable: "
-                + "; ".join(self.known.skipped)
+                "be called unchanged or advanced against a bound. The read "
+                "missed: " + "; ".join(self.known.skipped)
             )
         if isinstance(self.known, HeadUnreadable):
             raise IndeterminateComparison(
                 "this journal holds content but none of it is readable by "
                 "this build, so nothing is known about the head it accepted "
                 "— not even a lower bound. This is NOT first contact: heads "
-                "were accepted here. Unreadable: "
+                "were accepted here. The read missed: "
                 + "; ".join(self.known.skipped)
             )
         return self.known.entry if self.known is not None else None
@@ -839,7 +861,9 @@ def parse_journal_lines(lines: Iterable[str]) -> JournalRead:
     The pure half is separate so the conformance vectors can hand it raw log
     lines and so every read rule is testable without a temporary directory.
 
-    **Every unreadable line is skipped and reported, wherever it sits.** The
+    **Every line this build cannot use is skipped and reported, wherever it
+    sits** — which is half of what makes a read incomplete
+    (:class:`HeadLowerBound`); a missing header is the other half. The
     earlier design distinguished a torn final line from damage further up and
     refused the latter, on the reasoning that skipping could silently lower
     *K*. Skipping CAN lower *K* — concurrent writers journal out of order, so

@@ -139,6 +139,14 @@ ordinal whose `rh` differs; only then is the verified remainder handed to `repli
 An import that is a strict prefix of what the target already holds returns the target's
 head unchanged. Nothing was missing — that is not a failure, and it is not a no-op to hide.
 
+One edge stated rather than defended: importing into an **empty** target under a configured
+`max_atomic_records` adopts the genesis and only then meets the limit refusal inside
+`replicate`, leaving a genesis-only replica behind. That is a valid prefix and re-import is
+idempotent, so nothing is corrupt — but it is a place where "refuse before mutation" holds
+per-operation rather than across the pair. Pre-checking the limit in `import_prefix` would
+buy a tidier failure and duplicate the limit rule in a second place; not worth it for a
+minimal importer, and named so the gate can disagree.
+
 ### 1.8 The export codec frames records with their newline, and the manifest says so
 
 Each element of `ExportedPrefix.records` is one record's line **including** its `\n`, so
@@ -213,6 +221,13 @@ anticipated by WP1 in the file itself.**
   and IS in `LEDGER_MUTATIONS`.
 
 No other test file was modified. The fourteen arrival test files are green and unmodified.
+
+**One stray fact in the store, accounted for.** The first emit of D1 was malformed — the slug
+went in as a trailing word instead of `name=`, so it stored as
+`finding/<no-fold> @ 01M17E4T09ZPFME9D24C3QHYCG` and never folded. Its payload carries
+`agent=s2wp2-impl`, so a gate cross-checking report against store would otherwise find a
+WP2-stamped finding this report does not name. It is superseded in full by
+`01M17E5119XBNFF2RWFEG0KE2S` and carries no claim that fact does not.
 
 **A refusal-set gap was met and NOT re-filed.** A gap in a replication batch, a supplied `rh`
 that does not recompute, a foreign lineage: none has a member in the ratified five, so each
@@ -334,5 +349,7 @@ without one would have passed this mutation.
 
 ### 4.4 Restoration
 
-`git checkout libs/engine/src/engine/arrival.py` after each; `git status --short` empty,
-44 passed on the two files, and the full suites re-run green at the counts in §3.
+`git checkout libs/engine/src/engine/arrival.py` after each; `git status --short` empty, and
+44 passed on the two files. Re-run at the branch tip after the last restore: engine **2033
+passed, 1 skipped**, store 180, architecture 99 — the §3 counts, measured again rather than
+inferred from the restore.

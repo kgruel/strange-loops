@@ -52,6 +52,13 @@ from ._helpers import REPO_ROOT
 # one that retires `JsonlStore`.
 _SCAN_TARGETS = (
     "libs/engine/src/engine/arrival.py",
+    # Wire v1 (slice 1) forked the arrival body encoding out of the legacy
+    # line codec. `arrival_body` is NEW and born on the arrival surface, so
+    # it joins at birth — the same trigger `arrival_projection` joined on.
+    # `jsonl_codec` does NOT join and will not: it is the legacy framing by
+    # definition, kept for the derived-log projection and the migration
+    # sidecar, and its vocabulary is that mode's honest vocabulary.
+    "libs/engine/src/engine/arrival_body.py",
     "libs/engine/src/engine/arrival_projection.py",
     "libs/engine/src/engine/arrival_store.py",
     "libs/engine/src/engine/probe.py",

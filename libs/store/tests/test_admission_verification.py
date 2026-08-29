@@ -74,7 +74,6 @@ def fact_body(ident, message, *, observer="kyle", signed_by=None, ts=_TS):
     """
     payload = json.dumps({"message": message})
     body = {
-        "t": "fact",
         "id": ident,
         "kind": "note",
         "ts": ts,
@@ -329,7 +328,7 @@ class TestSplitBatchAndLegacySource:
         """G-D4-3, first half. Verification is per-ROW, so a batch that
         dedups down to a remainder needs no special case: the remainder is
         simply the rows in the admission set."""
-        from engine.jsonl_codec import serialize_batch
+        from engine.arrival_body import body_of_batch
 
         held_payload = json.dumps({"message": "shared"})
         held_sig = sign_with(
@@ -356,7 +355,7 @@ class TestSplitBatchAndLegacySource:
             ),
         ]
         log = minted(tmp_path, "s")
-        log.append("batch", json.loads(serialize_batch(rows)), observer="kyle")
+        log.append("batch", body_of_batch(rows), observer="kyle")
         source_db = indexed(log, tmp_path, "s")
 
         result = merge_store(target_db, source_db, verify=verify)
@@ -367,7 +366,7 @@ class TestSplitBatchAndLegacySource:
     def test_a_forged_survivor_in_a_split_batch_refuses(self, tmp_path):
         """Same split, forged remainder: the batch's atomicity buys the
         forgery nothing, because the claim is attached per row."""
-        from engine.jsonl_codec import serialize_batch
+        from engine.arrival_body import body_of_batch
 
         held_payload = json.dumps({"message": "shared"})
         already = fact_body("01CER0", "shared", signed_by=KYLE)
@@ -398,7 +397,7 @@ class TestSplitBatchAndLegacySource:
             ),
         ]
         log = minted(tmp_path, "s")
-        log.append("batch", json.loads(serialize_batch(rows)), observer="kyle")
+        log.append("batch", body_of_batch(rows), observer="kyle")
         source_db = indexed(log, tmp_path, "s")
         before = records(tmp_path / "t.arrival")
 

@@ -30,7 +30,6 @@ from tests.conftest import STUB_KEY, stub_sign
 
 def _fact(ident: str, message: str) -> dict:
     return {
-        "t": "fact",
         "id": ident,
         "kind": "note",
         "ts": 1.0,
@@ -135,7 +134,7 @@ def test_a_batch_line_unions_by_every_id_it_carries(tmp_path):
     inside a batch maps to the whole line. A row that is a plain fact on one
     side and rides inside a batch on the other is then a DETECTED divergence
     rather than a silent duplicate."""
-    from engine.jsonl_codec import serialize_batch
+    from engine.arrival_body import body_of_batch
 
     plain = _mint(tmp_path / "a.arrival")
     plain.append("fact", _fact("01INBATCH", "x"), observer="kyle")
@@ -147,7 +146,7 @@ def test_a_batch_line_unions_by_every_id_it_carries(tmp_path):
         ("01INBATCH", "note", 1.0, "kyle", "", json.dumps({"message": "x"}), None),
         ("01OTHER", "note", 1.0, "kyle", "", json.dumps({"message": "y"}), None),
     ]
-    batched.append("batch", json.loads(serialize_batch(rows)), observer="kyle")
+    batched.append("batch", body_of_batch(rows), observer="kyle")
     write_derived_log(tmp_path / "b.arrival")
     theirs = tmp_path / "b.jsonl"
 
@@ -158,10 +157,25 @@ def test_a_batch_line_unions_by_every_id_it_carries(tmp_path):
 def test_the_driver_never_opens_a_store_or_touches_an_arrival_log(tmp_path):
     """NON-NEGOTIABLE. It reads three files and writes one — so it works
     with no store and no arrival log anywhere near it."""
+    # Hand-written DERIVED-LOG lines, which are legacy-shaped and so carry
+    # the "t" wire v1 dropped from arrival bodies — the same restoration
+    # write_derived_log performs from the envelope's k.
+    from engine.arrival_body import legacy_object_of_body
+
     ours = tmp_path / "ours.jsonl"
     theirs = tmp_path / "theirs.jsonl"
-    ours.write_text(json.dumps(_fact("01A", "a"), separators=(",", ":")) + "\n")
-    theirs.write_text(json.dumps(_fact("01B", "b"), separators=(",", ":")) + "\n")
+    ours.write_text(
+        json.dumps(
+            legacy_object_of_body("fact", _fact("01A", "a")), separators=(",", ":")
+        )
+        + "\n"
+    )
+    theirs.write_text(
+        json.dumps(
+            legacy_object_of_body("fact", _fact("01B", "b")), separators=(",", ":")
+        )
+        + "\n"
+    )
 
     merge_derived_log(tmp_path / "no-base", ours, theirs)
 

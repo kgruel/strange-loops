@@ -37,7 +37,7 @@ from lang.document import (
 
 from engine.arrival import ArrivalLog
 from engine.arrival_store import ArrivalStore
-from engine.jsonl_codec import object_of_batch, object_of_fact_row
+from engine.arrival_body import body_of_batch, body_of_fact_row
 from engine.sqlite_store import StaleDeclarationHead
 from tests.conftest import Custodian
 
@@ -145,19 +145,21 @@ def newest_by_rowid(db: Path) -> str:
 def head_by_walking_the_log(log_path: Path, lineage: str) -> tuple[int, str] | None:
     """The head, from a from-scratch walk — the authority, independently read.
 
-    Bodies are expanded by hand (``t``/``rows``) instead of through
-    ``engine.arrival_projection.rows_of_record``, so agreeing with the store
-    is agreement between two readings of the log rather than one reading run
-    twice.
+    Bodies are expanded by hand (the envelope's ``k``, then ``rows``)
+    instead of through ``engine.arrival_projection.rows_of_record``, so
+    agreeing with the store is agreement between two readings of the log
+    rather than one reading run twice. The class is read off ``k`` because
+    wire v1 dropped ``body.t`` — which is exactly the reading this helper
+    is meant to do independently.
     """
     best: tuple[int, str] | None = None
     for record in ArrivalLog(log_path).walk():
         body = record["body"]
         if not isinstance(body, dict):
             continue
-        if body.get("t") == "batch":
+        if record["k"] == "batch":
             rows = body["rows"]
-        elif body.get("t") == "fact":
+        elif record["k"] == "fact":
             rows = [body]
         else:
             continue  # tick, or a structural record that carries no rows
@@ -197,7 +199,7 @@ def test_cas_token_rides_the_arrival_axis(tmp_path, keys, signer):
     backdated = "01BACKDATED0000000000000A"
     log.append(
         "fact",
-        object_of_fact_row(decl_row(backdated, lineage, "b", 1.0)),
+        body_of_fact_row(decl_row(backdated, lineage, "b", 1.0)),
         observer="kyle",
         at=1.0,
         signer=signer,
@@ -302,7 +304,7 @@ def test_rows_of_one_batch_share_an_ordinal_and_tie_break_by_id(
     log.append(
         "batch",
         # Larger id FIRST — so it is the lower rowid once the index consumes.
-        object_of_batch([
+        body_of_batch([
             decl_row(high, lineage, "a", 100.0),
             decl_row(low, lineage, "b", 100.0),
         ]),
@@ -396,7 +398,7 @@ def test_the_token_agrees_with_a_from_scratch_walk_of_the_log(
     # And a record from another writer, adopted on the next open.
     log.append(
         "fact",
-        object_of_fact_row(
+        body_of_fact_row(
             decl_row("01OTHERWRITER00000000000A", lineage, "c", 5.0)
         ),
         observer="kyle",
@@ -428,7 +430,7 @@ def test_a_foreign_lineage_declaration_is_not_the_head(tmp_path, keys, signer):
 
     log.append(
         "fact",
-        object_of_fact_row(
+        body_of_fact_row(
             decl_row("01FOREIGN000000000000000A", "some-other-lineage", "x", 500.0)
         ),
         observer="kyle",

@@ -120,7 +120,9 @@ def test_g1_everything_answers_from_the_arrival_file_alone(tmp_path):
     assert len(decl) == 1
     assert decl[0]["id"] == lineage  # own_lineage, re-derivable from the log
     assert set(json.loads(decl[0]["payload"])) == {"protocol", "documents"}
-    assert records[-1]["body"]["t"] == "tick"
+    # The record class is the envelope's, and the body no longer echoes it.
+    assert records[-1]["k"] == "tick"
+    assert "t" not in records[-1]["body"]
 
     # Authorship: every signature verifies from the log alone.
     rows = verify_authorship(log, _verify)

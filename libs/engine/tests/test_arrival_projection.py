@@ -329,7 +329,6 @@ def test_a_foreign_genesis_row_does_not_license_the_stamp(tmp_path, keys, signer
     log.append(
         "fact",
         {
-            "t": "fact",
             "id": "01FOREIGNGENESIS0000000000",
             "kind": DECL_GENESIS,
             "ts": 5.0,

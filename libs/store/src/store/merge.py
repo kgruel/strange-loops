@@ -288,7 +288,9 @@ def _merge_into_arrival(
 
     for _ in range(_APPEND_ATTEMPTS):
         held, ordinal = _target_state(canonical)
-        entries, added_facts, added_ticks, admitted = _entries_for(source_rows, held)
+        entries, added_facts, added_ticks, admitted = _entries_for(
+            source_rows, held, log.genesis()["observer"]
+        )
         skipped_facts = source_rows.fact_count - added_facts
         skipped_ticks = source_rows.tick_count - added_ticks
         result = MergeResult(
@@ -642,8 +644,13 @@ def _refuse_divergence(t: str, row: tuple, held_body: tuple) -> None:
     )
 
 
-def _entries_for(source_rows: _SourceRows, held: dict[str, tuple]):
+def _entries_for(source_rows: _SourceRows, held: dict[str, tuple], custodian: str):
     """The records to append, after dedup.
+
+    ``custodian`` is the TARGET log's genesis observer, threaded through to
+    :func:`_entry_for` for the tick envelopes it mints. It is read once per
+    merge attempt at the call site, where the target log is already open,
+    rather than re-derived per record.
 
     Returns ``(entries, facts, ticks, admitted)``, where ``admitted`` is the
     surviving FACT rows paired with the source position they arrived at —
@@ -684,22 +691,29 @@ def _entries_for(source_rows: _SourceRows, held: dict[str, tuple]):
                 admitted.append((ordinal, row))
             else:
                 ticks += 1
-        entries.append(_entry_for(kind, fresh))
+        entries.append(_entry_for(kind, fresh, custodian))
     return entries, facts, ticks, admitted
 
 
-def _entry_for(kind: str, rows: list[tuple[str, tuple]]):
+def _entry_for(kind: str, rows: list[tuple[str, tuple]], custodian: str):
     """One record for a group of surviving rows.
 
     Record shape, asymmetric between facts and ticks, and the asymmetry is
     inherited from the live write path rather than invented here:
 
-    * ``k`` is the row class, never a fact's own kind.
-    * ``observer``/``origin``/``at`` mirror the row's own columns, exactly as
-      the live path does. A merged fact's record claims its ORIGINAL
-      observer — the record describes the authored row, not the operator who
-      admitted it. A tick has no observer, so its record carries the tick's
-      name there, which is the authorship a tick has.
+    * ``k`` is the row class, never a fact's own kind. Since wire v1 dropped
+      ``body.t``, it is the only place that class is written.
+    * ``origin``/``at`` mirror the row's own columns. ``observer`` splits by
+      kind, exactly as the live write path splits it
+      (:meth:`engine.arrival_store.ArrivalStore._custodian`, ruling 2 of
+      decision:design/arrival-wire-v1-seam-triage). A merged FACT's record
+      claims its ORIGINAL observer — the record describes the authored row,
+      not the operator who admitted it. A merged TICK has no author, so its
+      record names THIS log's custodian: ``custodian`` is the TARGET's
+      genesis observer, not the source's, because the record being minted
+      is the target's own. This is the second, independently-encoded tick
+      mint site; a respell that landed only at the live path would leave
+      merge committing the retired convention with nothing to catch it.
     * **Fact bodies ride verbatim, the row's own signature included.** The
       fact signature is a per-observer authorship claim over content only,
       carried verbatim and never re-signed; era-aware NULL for a
@@ -728,13 +742,12 @@ def _entry_for(kind: str, rows: list[tuple[str, tuple]]):
     decides whether the merge happens, never what a record says.
     """
     from engine.arrival import Entry
-    from engine.jsonl_codec import (
-        TICK_CHAIN_FIELDS,
-        TICK_FIELDS,
-        object_of_batch,
-        object_of_fact_row,
-        object_of_tick_row,
+    from engine.arrival_body import (
+        body_of_batch,
+        body_of_fact_row,
+        body_of_tick_row,
     )
+    from engine.jsonl_codec import TICK_CHAIN_FIELDS, TICK_FIELDS
 
     if kind == "tick":
         _t, row = rows[0]
@@ -748,8 +761,8 @@ def _entry_for(kind: str, rows: list[tuple[str, tuple]]):
         stripped = (*row[:base], *(None,) * len(TICK_CHAIN_FIELDS))
         return Entry(
             k="tick",
-            body=object_of_tick_row(stripped),
-            observer=stripped[1],
+            body=body_of_tick_row(stripped),
+            observer=custodian,
             origin=stripped[4],
             at=stripped[2],
         )
@@ -757,7 +770,7 @@ def _entry_for(kind: str, rows: list[tuple[str, tuple]]):
     fact_rows = [row for _t, row in rows]
     first = fact_rows[0]
     k = "batch" if len(fact_rows) > 1 else "fact"
-    body = object_of_batch(fact_rows) if k == "batch" else object_of_fact_row(first)
+    body = body_of_batch(fact_rows) if k == "batch" else body_of_fact_row(first)
     return Entry(
         k=k, body=body, observer=first[3], origin=first[4], at=first[2]
     )

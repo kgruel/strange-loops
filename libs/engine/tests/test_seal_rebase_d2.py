@@ -37,7 +37,7 @@ from atoms import Fact
 from engine.arrival import ArrivalLog
 from engine.arrival_projection import rederive_projections
 from engine.arrival_store import ARRIVAL_LINEAGE_KEY, ArrivalStore
-from engine.jsonl_codec import object_of_batch, object_of_fact_row, object_of_tick_row
+from engine.arrival_body import body_of_batch, body_of_fact_row, body_of_tick_row
 from engine.projection import Projection
 from engine.replay import replay
 from engine.sqlite_store import (
@@ -172,7 +172,7 @@ class TestGD2_2_BatchBearingStoreRederivation:
             Fact.of("item", "kyle", item_id="b"),
             Fact.of("item", "kyle", item_id="c"),
         ]
-        batch_obj = object_of_batch(
+        batch_obj = body_of_batch(
             [(gen_id(), f.kind, f.ts, f.observer, f.origin, json.dumps(dict(f.payload))) for f in batch_facts]
         )
         log.append("batch", batch_obj, observer="kyle")
@@ -191,7 +191,7 @@ class TestGD2_2_BatchBearingStoreRederivation:
             Fact.of("metric", "kyle", v=10),
             Fact.of("metric", "kyle", v=20),
         ]
-        batch_obj_2 = object_of_batch(
+        batch_obj_2 = body_of_batch(
             [(gen_id(), f.kind, f.ts, f.observer, f.origin, json.dumps(dict(f.payload))) for f in batch_facts_2]
         )
         log.append("batch", batch_obj_2, observer="kyle")

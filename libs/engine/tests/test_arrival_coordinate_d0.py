@@ -37,10 +37,10 @@ from engine.arrival_store import (
     ArrivalCanonicalUnsupported,
     ArrivalStore,
 )
-from engine.jsonl_codec import (
-    object_of_batch,
-    object_of_fact_row,
-    object_of_tick_row,
+from engine.arrival_body import (
+    body_of_batch,
+    body_of_fact_row,
+    body_of_tick_row,
 )
 from engine.jsonl_store import JsonlStore
 from engine.sqlite_store import (
@@ -662,7 +662,7 @@ class TestBatchBearingArrivalMigration:
         f1_row = ("f-001", "note", 1000.0, "kyle", "", json.dumps({"n": 1}), None)
         _, mark1 = log.append_marked(
             "fact",
-            object_of_fact_row(f1_row),
+            body_of_fact_row(f1_row),
             observer="kyle",
             origin="",
             at=1000.0,
@@ -677,7 +677,7 @@ class TestBatchBearingArrivalMigration:
         ]
         _, mark2 = log.append_marked(
             "batch",
-            object_of_batch(f2_rows),
+            body_of_batch(f2_rows),
             observer="kyle",
             origin="",
             at=1001.0,
@@ -688,7 +688,7 @@ class TestBatchBearingArrivalMigration:
         t1_row = ("t-001", "seal", 1004.0, 0.0, "t", "{}", "", "", "", "h", None)
         _, mark3 = log.append_marked(
             "tick",
-            object_of_tick_row(t1_row),
+            body_of_tick_row(t1_row),
             observer="seal",
             origin="t",
             at=1004.0,
@@ -812,7 +812,7 @@ class TestArrivalStorePublicOpenMigration:
         f1_row = ("f-001", "note", 1000.0, "kyle", "", json.dumps({"n": 1}), None)
         _, mark1 = log.append_marked(
             "fact",
-            object_of_fact_row(f1_row),
+            body_of_fact_row(f1_row),
             observer="kyle",
             origin="",
             at=1000.0,
@@ -827,7 +827,7 @@ class TestArrivalStorePublicOpenMigration:
         ]
         _, mark2 = log.append_marked(
             "batch",
-            object_of_batch(f2_rows),
+            body_of_batch(f2_rows),
             observer="kyle",
             origin="",
             at=1001.0,
@@ -838,7 +838,7 @@ class TestArrivalStorePublicOpenMigration:
         t1_row = ("t-001", "seal", 1004.0, 0.0, "t", "{}", "", "", "", "h", None)
         _, mark3 = log.append_marked(
             "tick",
-            object_of_tick_row(t1_row),
+            body_of_tick_row(t1_row),
             observer="seal",
             origin="t",
             at=1004.0,
@@ -958,7 +958,7 @@ class TestRederiveProjectionsMigrationEquivalence:
             f1_row = ("f-001", "note", 1000.0, "kyle", "", json.dumps({"n": 1}), None)
             log.append_marked(
                 "fact",
-                object_of_fact_row(f1_row),
+                body_of_fact_row(f1_row),
                 observer="kyle",
                 origin="",
                 at=1000.0,
@@ -972,7 +972,7 @@ class TestRederiveProjectionsMigrationEquivalence:
             ]
             log.append_marked(
                 "batch",
-                object_of_batch(f2_rows),
+                body_of_batch(f2_rows),
                 observer="kyle",
                 origin="",
                 at=1001.0,
@@ -982,7 +982,7 @@ class TestRederiveProjectionsMigrationEquivalence:
             t1_row = ("t-001", "seal", 1004.0, 0.0, "t", "{}", "", "", "", "h", None)
             _, mark3 = log.append_marked(
                 "tick",
-                object_of_tick_row(t1_row),
+                body_of_tick_row(t1_row),
                 observer="seal",
                 origin="t",
                 at=1004.0,
@@ -1092,7 +1092,7 @@ class TestCrossTableIdCollision:
         f_row = (shared_id, "note", 1000.0, "kyle", "", json.dumps({"n": 1}), None)
         _, mark1 = log.append_marked(
             "fact",
-            object_of_fact_row(f_row),
+            body_of_fact_row(f_row),
             observer="kyle",
             origin="",
             at=1000.0,
@@ -1103,7 +1103,7 @@ class TestCrossTableIdCollision:
         t_row = (shared_id, "seal", 2000.0, 0.0, "t", "{}", "", "", "", "h", None)
         _, mark2 = log.append_marked(
             "tick",
-            object_of_tick_row(t_row),
+            body_of_tick_row(t_row),
             observer="seal",
             origin="t",
             at=2000.0,
@@ -1257,7 +1257,7 @@ class TestDivergentLegacyRederivation:
         f1_row = ("f-001", "note", 1000.0, "kyle", "", json.dumps({"n": 1}), None)
         log.append_marked(
             "fact",
-            object_of_fact_row(f1_row),
+            body_of_fact_row(f1_row),
             observer="kyle",
             origin="",
             at=1000.0,
@@ -1267,7 +1267,7 @@ class TestDivergentLegacyRederivation:
         t1_row = ("t-001", "seal", 1004.0, 0.0, "t", "{}", "", "", "", "h", None)
         _, mark2 = log.append_marked(
             "tick",
-            object_of_tick_row(t1_row),
+            body_of_tick_row(t1_row),
             observer="seal",
             origin="t",
             at=1004.0,
@@ -1356,7 +1356,7 @@ class TestDivergentLegacyRederivation:
         f1_row = ("f-100", "note", 1000.0, "kyle", "", json.dumps({"n": 100}), None)
         log.append_marked(
             "fact",
-            object_of_fact_row(f1_row),
+            body_of_fact_row(f1_row),
             observer="kyle",
             origin="",
             at=1000.0,
@@ -1366,7 +1366,7 @@ class TestDivergentLegacyRederivation:
         t1_row = ("t-100", "seal", 1004.0, 0.0, "t", "{}", "", "", "", "h", None)
         log.append_marked(
             "tick",
-            object_of_tick_row(t1_row),
+            body_of_tick_row(t1_row),
             observer="seal",
             origin="t",
             at=1004.0,
@@ -1431,7 +1431,7 @@ class TestDivergentLegacyRederivation:
         f1_row = ("f-001", "note", 1000.0, "kyle", "", json.dumps({"n": 1}), None)
         log.append_marked(
             "fact",
-            object_of_fact_row(f1_row),
+            body_of_fact_row(f1_row),
             observer="kyle",
             origin="",
             at=1000.0,
@@ -1441,7 +1441,7 @@ class TestDivergentLegacyRederivation:
         t1_row = ("t-001", "seal", 1004.0, 0.0, "t", "{}", "", "", "", "h", None)
         _, mark2 = log.append_marked(
             "tick",
-            object_of_tick_row(t1_row),
+            body_of_tick_row(t1_row),
             observer="seal",
             origin="t",
             at=1004.0,

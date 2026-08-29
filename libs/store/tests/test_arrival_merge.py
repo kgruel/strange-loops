@@ -33,7 +33,6 @@ _TS = 1700000000.0
 
 def _fact_body(ident, message, *, ts=_TS, observer="kyle", signature=None):
     body = {
-        "t": "fact",
         "id": ident,
         "kind": "note",
         "ts": ts,
@@ -48,7 +47,6 @@ def _fact_body(ident, message, *, ts=_TS, observer="kyle", signature=None):
 
 def _tick_body(ident, name="check", *, ts=_TS, chained=False):
     body = {
-        "t": "tick",
         "id": ident,
         "name": name,
         "ts": ts,
@@ -71,15 +69,26 @@ def _tick_body(ident, name="check", *, ts=_TS, chained=False):
     return body
 
 
-def arrival_store(tmp_path, name, facts=(), ticks=()):
-    """An arrival-canonical store: a minted log plus its built index."""
+def arrival_store(tmp_path, name, facts=(), ticks=(), observer="kyle"):
+    """An arrival-canonical store: a minted log plus its built index.
+
+    ``observer`` is the log's GENESIS observer — its custodian — which is
+    what every tick record it mints names. Parameterized so a test can give
+    two logs different custodians and tell whose label a merged record
+    carries.
+    """
     log = ArrivalLog.mint(
-        tmp_path / f"{name}.arrival", observer="kyle", signer=stub_sign, key=STUB_KEY
+        tmp_path / f"{name}.arrival", observer=observer, signer=stub_sign, key=STUB_KEY
     )
     for body in facts:
         log.append("fact", body, observer=body["observer"], at=body["ts"])
     for body in ticks:
-        log.append("tick", body, observer=body["name"], at=body["ts"])
+        # A tick's envelope names this log's CUSTODIAN (its genesis
+        # observer), never the tick's name — ruling 2 of
+        # decision:design/arrival-wire-v1-seam-triage. The fixture mints
+        # what the live write path would mint, so a merge reading it back
+        # is reading real records.
+        log.append("tick", body, observer=log.genesis()["observer"], at=body["ts"])
     from engine.arrival_store import ensure_arrival_index
 
     ensure_arrival_index(log.path)
@@ -285,6 +294,41 @@ def test_merged_tick_carries_no_foreign_chain(tmp_path):
         store.close()
 
 
+def test_a_merged_tick_names_the_TARGETS_custodian(tmp_path):
+    """Ruling 2 of decision:design/arrival-wire-v1-seam-triage, at the
+    SECOND mint site.
+
+    ``store.merge._entry_for`` encodes tick records independently of the
+    live write path, so the respell has to land in both places or merge
+    keeps committing the retired convention. Nothing pinned this before —
+    which is precisely how a one-site fix would have gone green and wrong.
+
+    The label names the log the record is being MINTED INTO, so a merged
+    tick carries the TARGET's custodian, not the source's: the target's
+    fold engine is not what produced the source's tick, but the target's
+    log is where this record is arriving, and the envelope describes the
+    record. Three-way distinct fixture (target custodian, source custodian,
+    tick name) so the assertion cannot pass by coincidence.
+    """
+    _, target_db = arrival_store(tmp_path, "t", observer="target-custodian")
+    _, source_db = arrival_store(
+        tmp_path,
+        "s",
+        observer="source-custodian",
+        ticks=[_tick_body("01K0", name="pulse")],
+    )
+
+    merge_store(target_db, source_db)
+
+    merged = [r for r in records(tmp_path / "t.arrival") if r["k"] == "tick"]
+    assert len(merged) == 1
+    assert merged[0]["observer"] == "target-custodian"
+    assert merged[0]["observer"] != "source-custodian"
+    assert merged[0]["observer"] != merged[0]["body"]["name"] == "pulse"
+    # And the body no longer echoes the record class.
+    assert "t" not in merged[0]["body"]
+
+
 def test_a_merged_record_carries_no_record_level_signature(tmp_path):
     """NON-NEGOTIABLE: merge_store takes no signer and never will. No store
     signs for an observer whose key it does not hold, and the grammar makes
@@ -305,7 +349,7 @@ def test_a_merged_record_carries_no_record_level_signature(tmp_path):
 
 
 def test_an_atomic_ceremony_stays_one_record_across_a_merge(tmp_path):
-    from engine.jsonl_codec import serialize_batch
+    from engine.arrival_body import body_of_batch
 
     rows = [
         ("01CER0", "_decl.defined", _TS, "kyle", "", json.dumps({"subject": "a"}), None),
@@ -313,7 +357,7 @@ def test_an_atomic_ceremony_stays_one_record_across_a_merge(tmp_path):
     ]
     _, target_db = arrival_store(tmp_path, "t", facts=[_fact_body("01T0", "t0")])
     source_log, source_db = arrival_store(tmp_path, "s")
-    source_log.append("batch", json.loads(serialize_batch(rows)), observer="kyle")
+    source_log.append("batch", body_of_batch(rows), observer="kyle")
     from engine.arrival_store import ensure_arrival_index
 
     ensure_arrival_index(source_log.path)
@@ -331,7 +375,7 @@ def test_a_partly_deduped_ceremony_appends_its_remainder(tmp_path):
     already in the target, the remainder is appended — as a batch when two
     or more survive, as a plain fact when one does (a one-row batch is a
     second spelling the codec refuses), and not at all when none do."""
-    from engine.jsonl_codec import serialize_batch
+    from engine.arrival_body import body_of_batch
 
     rows = [
         ("01CER0", "note", _TS, "kyle", "", json.dumps({"n": 0}), None),
@@ -343,7 +387,7 @@ def test_a_partly_deduped_ceremony_appends_its_remainder(tmp_path):
     # The target already holds 01CER0 with an IDENTICAL body, so it dedups;
     # a divergent body would refuse instead (TestDivergenceRefusal).
     source_log, source_db = arrival_store(tmp_path, "s")
-    source_log.append("batch", json.loads(serialize_batch(rows)), observer="kyle")
+    source_log.append("batch", body_of_batch(rows), observer="kyle")
     from engine.arrival_store import ensure_arrival_index
 
     ensure_arrival_index(source_log.path)

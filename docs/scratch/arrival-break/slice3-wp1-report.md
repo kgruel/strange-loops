@@ -12,7 +12,7 @@ Contract: `docs/scratch/arrival-break/slice3-wp1-brief.md`; design
 | File | What |
 |---|---|
 | `libs/engine/src/engine/arrival_head_attestation.py` | the record, the journal, the classifier, the refusal family, the transitional binding |
-| `libs/engine/tests/test_arrival_head_attestation.py` | 87 unit tests |
+| `libs/engine/tests/test_arrival_head_attestation.py` | 91 unit tests |
 | `tests/architecture/test_rule_18_arrival_vocabulary_denylist.py` | `_SCAN_TARGETS` enrollment (same commit as the module, or the glob test fails) |
 
 ## Counts
@@ -24,7 +24,7 @@ usable baseline):
 
 | Suite | Baseline | After | Delta |
 |---|---|---|---|
-| engine | 2063 passed, 1 skipped | 2150 passed, 1 skipped | **+87**, all in `test_arrival_head_attestation.py` |
+| engine | 2063 passed, 1 skipped | 2154 passed, 1 skipped | **+91**, all in `test_arrival_head_attestation.py` |
 | architecture | 99 passed | 99 passed | **0** — Rule 18 is not parametrized per target, so enrolling a module adds no case |
 
 Every delta accounted for. `ruff check` passes on both new files. (`ruff format` would
@@ -76,10 +76,12 @@ where one refines a literal reading, the reason is stated.
    fields this build does not name are preserved on disk by construction; the reader
    ignores them. That satisfies "preserved-and-ignored" without adding a field to the
    ratified record shape (§B.2's "nothing else").
-10. **An entry from a later build — unknown `kind`, `level`, or `v` — is skipped and
-    reported, never refused.** §B.3 requires that a later build's journal not make an
-    older build refuse to compare. Degrading to a shorter view of the same history is
-    honest; refusing outright would brick every older build against a shared journal.
+10. **RE-SCOPED at `1df5c8f4`.** An entry from a later build is skipped and reported,
+    never refused **on its own account** — that half survives verbatim and is what keeps
+    a shared journal from bricking an older build. What the promise never licensed is the
+    stronger reading it was written as: that a comparison holding **zero** readable
+    evidence should proceed. Declining there refuses no entry; it declines a question
+    nothing left in the journal can answer. See the gate section below.
 11. **`Outcome`/`Kind`/`Level` are plain `Enum` with string values**, matching
     `arrival_contract.Profile`/`VerificationLevel`. The vectors pin `.value`, which is
     what "outcomes are strings" asks for; a `str` mixin would have departed from the
@@ -166,6 +168,16 @@ Completion fact: `observation:implementation/arrival-slice3-wp1-head-attestation
   (choice 13) so the seam does not re-implement the posture table,
   `unaccounted_heads(epoch, at_ordinal)` for the audit producer, and `JournalRead.skipped`
   for surfacing tolerated losses.
+- **`.epoch` and `.entries` permit uniform `K` re-derivation.** §C.4's audit needs the
+  raw entries, so they are exposed and a caller *could* recompute a maximum from them
+  and bypass the bound. The unignorable-by-construction guarantee is therefore scoped to
+  the `known` / `established_head()` pair, which is the path a comparison takes; the
+  entry sequences are evidence for the audit, not a comparison surface. Non-blocking, and
+  named so WP3 does not re-derive `K` by hand.
+- **WP3 must treat `HeadLowerBound.at_least` as ROLLBACK-ONLY.** Implied by the type's
+  docstring, explicit here: it may be compared to refuse a presented head below it, and
+  it may never be used to answer `unchanged` or `advanced`. `HeadUnreadable` has no
+  ordinal at all, so it answers nothing.
 - **Open and named, not built:** the header's `protocol`/`wire` values are written but
   never read. §B.3 says a journal written under wire v1 must not be silently compared
   against a v2 head whose hashes derive differently, and today nothing enforces that. Out
@@ -280,3 +292,62 @@ hashes derive under, so without it a comparison is not a weaker answer but a mea
 one. That made one write-path case reachable — a creator that won the exclusive create
 and died before writing leaves an empty file — so an append now supplies the header when
 it finds one, and a crashed creator cannot strand a journal headerless.
+
+
+## Gate round 1 — two blocking findings, both closed at `1df5c8f4`
+
+Both sat **upstream of the lower-bound type split**: in deciding whether a line was lost
+at all, not in what the read does once it knows. The type design itself survived the
+gate's adversarial shortcut attempt, and the epoch scoping, write-path fixes, refusal
+rooting and test isolation all passed and are unchanged.
+
+### BLOCKING-1 — a kindless dict was absorbed as a header
+
+`finding:s3wp1-gate-kindless-dict-absorbed-as-header`. The reader treated **any** dict
+without `kind` as a header and skipped it recording nothing. On the same out-of-order
+journal that refuted the ascending-ordinal invariant, replacing the epoch maximum's line
+with `{}` produced an `EstablishedHead` at the surviving ordinal, an **empty** `.skipped`,
+and a comparison of `unchanged` where the truth is a rollback. The amended ruling's
+"skipped and surfaced wherever it sits, never silently" defeated through a second byte
+pattern — same demonstration as before, two different bytes.
+
+Headers are now identified by **shape**, keyed on the type string a real header carries;
+every other kindless dict is a skipped line like any other. Keyed on the type alone rather
+than `protocol`/`wire` as well, so a later build that adds header fields is still
+recognized, while a header naming a *different* type is not treated as this journal's.
+The create-race two-headers test stays green.
+
+### BLOCKING-2 — content present, nothing readable, silent trust-on-first-use
+
+`finding:s3wp1-gate-all-entries-unreadable-silent-tofu`, ruled. Content present with
+nothing readable (`skipped > 0`, epoch empty) fell through to `known = None` and was
+answered with first contact — a journal trusted on sight *precisely because* it had become
+unreadable.
+
+That is a **third state, not the absence of one**. An empty journal says nothing was ever
+accepted here, and TOFU is the honest answer to it. Unreadable content says heads *were*
+accepted and their ordinals are exactly what was lost. `HeadUnreadable` carries no ordinal
+by construction, so unlike a lower bound it cannot answer even `rollback` — every
+comparison declines. First-contact TOFU now requires a journal with no surviving-or-skipped
+content claims; a header-only journal still qualifies, and has its own test.
+
+§B.3's forward-compatibility promise **re-scopes rather than breaks** (choice 10 above,
+and the docstrings): individual later-build entries are skipped and reported, never refused
+on their own account; a comparison holding zero readable evidence declines, which refuses
+no entry. The version-skew consequence is stated openly rather than hidden — an older build
+against a purely newer journal declines its comparisons, and resolution is operator work
+(run the newer build, or the trust-reset ceremony).
+
+### Third item
+
+`HeadLowerBound.__doc__` completed with the second half of my own self-correction, which
+the gate found missing: nothing bounds the accepted head from **above**, so a presented
+head above the bound is not an advance either. Both proceed answers are unobtainable
+without naming the case; only the refusal below the bound survives.
+
+### Gate-round mutation demos
+
+| # | Mutation | Result (91 tests) |
+|---|---|---|
+| (1) | kindless dicts absorbed as headers again | **2 failed, 89 passed** — `test_a_kindless_dict_is_not_absorbed_as_a_header`, `test_a_header_naming_another_type_is_not_this_journals_header` |
+| (2) | the `HeadUnreadable` arm removed, so `known` falls through to `None` and TOFU | **3 failed, 88 passed** — `test_a_journal_of_nothing_but_later_build_entries_declines`, plus the two other reads that hold only unreadable content |

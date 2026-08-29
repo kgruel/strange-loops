@@ -1,0 +1,74 @@
+{
+  "name": "replicate-catch-up-from-a-genesis-only-replica",
+  "description": "The widest catch-up a replica can take without an import: it holds only the genesis it was opened on, and the whole remaining history arrives as one suffix.",
+  "input": {
+    "target": [
+      "{\"v\":1,\"lin\":\"01M2REPLICATEVECTORLINEAGE\",\"ord\":0,\"prev\":null,\"at\":1750000000.0,\"k\":\"genesis\",\"observer\":\"kyle\",\"origin\":\"\",\"body\":{\"protocol\":1,\"lineage\":\"01M2REPLICATEVECTORLINEAGE\",\"key\":\"a2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2s=\"},\"sig\":\"sig:5aab76c2b50fc8f9e25f90645aded7504583d0ecebad13bb5ba2a83cf1089f3f\",\"rh\":\"65fe9454f6be46ac8e39e2bf58e79502c60f8ab2c33d9d6a58f8fb1dc9a88ccb\"}"
+    ],
+    "records": [
+      {
+        "v": 1,
+        "lin": "01M2REPLICATEVECTORLINEAGE",
+        "ord": 1,
+        "prev": "65fe9454f6be46ac8e39e2bf58e79502c60f8ab2c33d9d6a58f8fb1dc9a88ccb",
+        "at": 1750000101.0,
+        "k": "note",
+        "observer": "kyle",
+        "origin": "",
+        "body": {
+          "i": 1
+        },
+        "sig": "sig:66b83e65f13c9d5b7cce8b547bd61a69b549688fa8418220c3f8e17f30cb064b",
+        "rh": "0dc849afd830074031e4270c9ec8614e6b2434c04f185c17ebabffab675ffcbf"
+      },
+      {
+        "v": 1,
+        "lin": "01M2REPLICATEVECTORLINEAGE",
+        "ord": 2,
+        "prev": "0dc849afd830074031e4270c9ec8614e6b2434c04f185c17ebabffab675ffcbf",
+        "at": 1750000102.0,
+        "k": "note",
+        "observer": "kyle",
+        "origin": "",
+        "body": {
+          "i": 2
+        },
+        "rh": "60baec9b7cbddaffe4a6997475c6d0ca41530b296eee612ffcec7deabb4f783e"
+      },
+      {
+        "v": 1,
+        "lin": "01M2REPLICATEVECTORLINEAGE",
+        "ord": 3,
+        "prev": "60baec9b7cbddaffe4a6997475c6d0ca41530b296eee612ffcec7deabb4f783e",
+        "at": 1750000103.0,
+        "k": "note",
+        "observer": "kyle",
+        "origin": "alcove",
+        "body": {
+          "i": 3
+        },
+        "rh": "5cf25010e74da6e911426299a14204a98a16ccfd942bedd85457387305e63bf9"
+      }
+    ],
+    "expected_head": {
+      "lineage": "01M2REPLICATEVECTORLINEAGE",
+      "ordinal": 0,
+      "record_hash": "65fe9454f6be46ac8e39e2bf58e79502c60f8ab2c33d9d6a58f8fb1dc9a88ccb"
+    }
+  },
+  "expected": {
+    "outcome": "accepted",
+    "refusal": null,
+    "head": {
+      "lineage": "01M2REPLICATEVECTORLINEAGE",
+      "ordinal": 3,
+      "record_hash": "5cf25010e74da6e911426299a14204a98a16ccfd942bedd85457387305e63bf9"
+    },
+    "log": [
+      "{\"v\":1,\"lin\":\"01M2REPLICATEVECTORLINEAGE\",\"ord\":0,\"prev\":null,\"at\":1750000000.0,\"k\":\"genesis\",\"observer\":\"kyle\",\"origin\":\"\",\"body\":{\"protocol\":1,\"lineage\":\"01M2REPLICATEVECTORLINEAGE\",\"key\":\"a2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2s=\"},\"sig\":\"sig:5aab76c2b50fc8f9e25f90645aded7504583d0ecebad13bb5ba2a83cf1089f3f\",\"rh\":\"65fe9454f6be46ac8e39e2bf58e79502c60f8ab2c33d9d6a58f8fb1dc9a88ccb\"}",
+      "{\"v\":1,\"lin\":\"01M2REPLICATEVECTORLINEAGE\",\"ord\":1,\"prev\":\"65fe9454f6be46ac8e39e2bf58e79502c60f8ab2c33d9d6a58f8fb1dc9a88ccb\",\"at\":1750000101.0,\"k\":\"note\",\"observer\":\"kyle\",\"origin\":\"\",\"body\":{\"i\":1},\"sig\":\"sig:66b83e65f13c9d5b7cce8b547bd61a69b549688fa8418220c3f8e17f30cb064b\",\"rh\":\"0dc849afd830074031e4270c9ec8614e6b2434c04f185c17ebabffab675ffcbf\"}",
+      "{\"v\":1,\"lin\":\"01M2REPLICATEVECTORLINEAGE\",\"ord\":2,\"prev\":\"0dc849afd830074031e4270c9ec8614e6b2434c04f185c17ebabffab675ffcbf\",\"at\":1750000102.0,\"k\":\"note\",\"observer\":\"kyle\",\"origin\":\"\",\"body\":{\"i\":2},\"rh\":\"60baec9b7cbddaffe4a6997475c6d0ca41530b296eee612ffcec7deabb4f783e\"}",
+      "{\"v\":1,\"lin\":\"01M2REPLICATEVECTORLINEAGE\",\"ord\":3,\"prev\":\"60baec9b7cbddaffe4a6997475c6d0ca41530b296eee612ffcec7deabb4f783e\",\"at\":1750000103.0,\"k\":\"note\",\"observer\":\"kyle\",\"origin\":\"alcove\",\"body\":{\"i\":3},\"rh\":\"5cf25010e74da6e911426299a14204a98a16ccfd942bedd85457387305e63bf9\"}"
+    ]
+  }
+}

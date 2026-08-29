@@ -351,3 +351,57 @@ Exactly one of the two fields is present.
 |---|---|---|---|
 | `lens_order` | array of strings | No | Ordered array of fact IDs in `(K(record), id ASC)` order under the declared ordering. Records missing the declared key are absent from this array. |
 | `error` | string | No | Present instead of `lens_order` when the declared ordering must REFUSE these records. `"OrderingError"` names the mixed-key-type refusal. |
+
+---
+
+## 10. Area: `replicate`
+
+The `replicate` area pins **exact replication** (backend-contract.html §08): the transfer operation that consumes records which already carry their coordinate. A conforming implementation VALIDATES what it is handed and assigns nothing — never a new lineage, ordinal, predecessor, signature, or record hash. Records land byte-for-byte as offered, or nothing lands.
+
+A vector states a target log, a batch of pre-coordinated records offered to it, and the full head the caller pins. Executing it means: open the target, replicate the batch under the pin, then compare the target's complete bytes and its head against `expected`.
+
+**Only contract refusals are named.** `SameHeightFork` and `HeadMismatch` are backend-neutral, so an implementation in any language can produce them. A malformed batch — non-monotonic ordinals, a supplied record hash that does not recompute, a foreign lineage — is out of this area's scope on purpose: the ratified refusal set has no member for it, and naming one implementation's exception family in a language-neutral vector would pin that family on every other implementation.
+
+**Two refusals, one axis.**
+
+| Refusal | The claim | Can a retry help? |
+|---|---|---|
+| `HeadMismatch` | The head is not where this batch assumed — the pin is stale, the batch starts above `head + 1`, or the batch re-sends records the target already holds and AGREES with. | Yes: re-read the head and recompute which records are missing. |
+| `SameHeightFork` | The target already holds a **different** record at a height this batch would fill. The two histories disagree about what happened there. | No. Choosing between them is admission into another lineage, which is a different operation. |
+
+A record offered at `head + 1` is never a fork, whatever it contains: nothing occupies that height to disagree with it. Replication is not authorship verification.
+
+### `input` Schema
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `target` | array of strings | Yes | The target log's complete lines in ordinal order, genesis first, each line without its terminating newline. |
+| `records` | array of Record Objects | Yes | The pre-coordinated records offered to `replicate`, in the order offered. Passed through as decoded JSON objects, NOT re-encoded by the harness — a vector may deliberately carry a record whose `rh` is wrong, and the implementation is what must refuse it. |
+| `expected_head` | Head Object \| null | Yes | The full-head compare-and-swap pin the caller passes. `null` is an unpinned replication. |
+
+### Head Object
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `lineage` | string | Yes | The lineage the head belongs to. |
+| `ordinal` | integer | Yes | The head record's ordinal. |
+| `record_hash` | string | Yes | The head record's `rh`. All three fields, always: an ordinal-only head cannot tell an untouched log from one rolled back and regrown to the same height. |
+
+### `expected` Schema
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `outcome` | string | Yes | `"accepted"` or `"refused"`. |
+| `refusal` | string \| null | Yes | `"SameHeightFork"` or `"HeadMismatch"` when refused; `null` when accepted. |
+| `head` | Head Object | Yes | The target's head after the operation. Unchanged from the pre-state on a refusal. |
+| `log` | array of strings | Yes | The target log's complete lines after the operation. On an accepted vector this is the byte-for-byte hash-preservation claim; on a refused one it equals `input.target`, which is the refuse-before-mutation claim. |
+
+### Families
+
+Three, and the file stem names which one a vector belongs to.
+
+- **`replicate-exact-suffix-*`** — the accept path, plus the two ways a batch fails to be the suffix that follows the head (a gap above it; a stale full-head pin).
+- **`replicate-same-height-*`** — a divergent record at an occupied height stops replication, at the head and below it. The family also carries its negative control (`replicate-same-height-agreement-is-not-a-fork`): an AGREEING record at an occupied height is a stale re-send and must refuse as `HeadMismatch`. A fork refusal that fires there has stopped meaning fork.
+- **`replicate-catch-up-*`** — a stale replica brought forward, ending byte-identical to the authority. **At least one vector in this family carries SIGNED records, and that is a property of the family rather than an accident of its fixtures.** An implementation that re-coordinated an exact suffix would assign the same lineage, ordinal and predecessor and reproduce identical hashes — so an unsigned suffix cannot distinguish assigning from validating. A signature is content the assigning path does not carry, which is what makes the two observably different.
+
+Vectors are frozen; regenerate with `uv run --package engine python spec/conformance/generate_replicate.py`.

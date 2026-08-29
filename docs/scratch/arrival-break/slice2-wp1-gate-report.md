@@ -370,3 +370,104 @@ ones — the torn-tail `verify` refusal in particular.
 Four non-blocking findings. G1 (untested refusal branch) is the one worth closing inside
 this arc; G2 is contract-text input that belongs with D2 for the arbiter and WP5; G3 adds
 evidence to D4's open question; G4 is a characterization that needs no action.
+
+---
+
+## 8. G1 re-check @ `0d38c969` — **G1 CLOSED**
+
+Scope: G1 only, per the lead. Nothing else reopens; §§1-7 above stand as written against
+`70f7f7d3`, and the delta below does not disturb any of them.
+
+Gate worktree rebased onto the new tip (`git rebase 0d38c969`), so the two report commits
+now sit on top of it. Tree clean before and after every experiment.
+
+### 8.1 The delta is tests only (PASS)
+
+`git diff 70f7f7d3..0d38c969 --stat` — three files, **no source file among them**:
+
+```
+docs/scratch/arrival-break/slice2-wp1-report.md | 67 ++++++++++++++++---
+libs/engine/tests/test_arrival_cas_full_head.py | 51 ++++++++++++++
+libs/store/tests/test_arrival_merge_pin.py      | 70 ++++++++++++++++++
+```
+
+That matters for the re-check's validity: the behavior G1 flagged as unpinned is byte-identical
+to what I mutated the first time, so the mutations below are testing the *tests*, which is
+exactly what closing G1 requires.
+
+The 14 arrival test files remain **byte-unmodified**. `libs/store/tests/test_arrival_merge.py`
+in particular is untouched — the new store tests went into a **separate file**
+(`test_arrival_merge_pin.py`) whose docstring names that constraint as the reason. That is
+the right call rather than a dodge: it closes the finding without spending the brief's
+unmodified-14 guarantee.
+
+### 8.2 Both mutation demos re-run here (PASS)
+
+| Caller | Mutation | Observed here |
+|---|---|---|
+| `ArrivalStore._pinned_head` (`arrival_store.py`) | `raise ArrivalCanonicalUnsupported` → `return None` | **1 failed**, `test_the_ceremony_refuses_an_unanchorable_mark_rather_than_unpinning` — `1 failed, 1988 passed, 1 skipped` |
+| `store.merge._pinned_head` (`merge.py`) | `raise RuntimeError` → `return None` | **1 failed**, `test_an_unanchorable_mark_refuses_rather_than_unpinning_the_append`, `Failed: DID NOT RAISE RuntimeError` — `1 failed, 179 passed` |
+
+Each fails **exactly** the named test and nothing else; `git checkout` restored each and
+`git status --porcelain` was empty after both. This is the same experiment that produced a
+fully green suite at `70f7f7d3` — it now goes red at both callers, which is the whole of
+what G1 asked for.
+
+### 8.3 The tests exercise the branch they claim (PASS)
+
+Checked rather than assumed, because a refusal test can pass for the wrong reason. Probed
+`ArrivalLog.anchor` directly with the fixtures the tests use:
+
+```
+anchor(offset=3, mid-record) -> None
+anchor(valid boundary)       -> ord 0 rh e2cdc5501d21
+```
+
+So the unanchorable mark genuinely drives `anchor` to `None` — the branch under test — rather
+than tripping some earlier validation, and a well-formed mark still resolves. The choice of a
+mid-record offset over a foreign lineage is the better one: it exercises `_anchor_for`'s
+boundary check instead of its cheapest early return, and it is the shape a real index/log
+disagreement takes.
+
+Both sites also carry the **negative control** that stops the refusal over-firing —
+`_pinned_head(None) is None` must stay legal (§1.9), asserted inline in the engine test and as
+`test_no_mark_is_still_no_pin` in the store file — plus a positive completion case
+(`test_a_vouched_mark_completes_into_the_full_head`) so neither refusal test can pass by
+refusing unconditionally. That is the shape a ratchet needs; nothing here is a tautology.
+
+### 8.4 Counts reconciled (PASS)
+
+| Suite | @ `70f7f7d3` | @ `0d38c969` | Delta | Accounted |
+|---|---|---|---|---|
+| engine | 1988 p + 1 s | **1989 p + 1 s** | +1 | the ceremony refusal test |
+| store | 177 | **180** | +3 | `test_arrival_merge_pin.py` (refusal + negative control + positive case) |
+| architecture | 99 | **99** | 0 | no architecture file changed |
+
+Every delta lands on a named new test. The impl's claimed counts (1989 / 180 / 99) match.
+
+### 8.5 The impl report's §4.4 records what actually happens (PASS)
+
+Compared line by line against my runs. Both failure lines are reproduced verbatim —
+`DID NOT RAISE ArrivalCanonicalUnsupported` and `DID NOT RAISE RuntimeError` — and both test
+names are correct. §4.4's per-file counts (`1 failed, 22 passed` and `1 failed, 2 passed`) are
+file-scoped where mine were suite-scoped; they reconcile exactly (23-test file, 3-test file).
+The section is also honest about *why* the gap mattered — "an unpinned append *succeeds*, so
+nothing would ever have gone red" — which is the correct diagnosis of why a green suite was
+not evidence.
+
+One residual report-accuracy nit, carried not raised: §3's prose still says the diff shows
+"no test file among the changes except **the two** new ones", but there are now **three**
+(`test_arrival_merge_pin.py` joined). The underlying claim — the 14 held unmodified — remains
+true and I verified it independently; only the count in the sentence is stale.
+
+### 8.6 Verdict
+
+**G1 CLOSED.** The refusal branch is pinned at both F1 callers, each mutation goes red at
+exactly the named test, the tests provably exercise the anchor-is-None path, and the negative
+and positive controls keep the claim scoped. The gate report's §6 G1 entry stands as the
+historical record of the finding; its recommendation ("a five-line stub test does it") was
+taken at both sites.
+
+**G2, G3 and G4 are untouched by this commit and remain open as previously characterized** —
+all still NON-BLOCKING. Overall verdict is unchanged: **GATE: PASS**, now with three
+non-blocking findings outstanding instead of four.

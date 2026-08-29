@@ -245,13 +245,17 @@ def _draft(i: int) -> RecordDraft:
     )
 
 
-# The nine op rows of §A.2's table, written out rather than derived. Deriving
-# them from `ArrivalLedger` is what the assertion below is FOR, so a derived
-# expectation would agree with the Protocol no matter what the Protocol said.
-# This literal is the contract of record, standing beside the code.
+# The TEN op rows of the ratified §03 table, written out rather than derived.
+# Deriving them from `ArrivalLedger` is what the assertion below is FOR, so a
+# derived expectation would agree with the Protocol no matter what the Protocol
+# said. This literal is the contract of record, standing beside the code.
+#
+# Nine came from §A.2's table; `head_at` is the tenth, ruled onto the contract
+# at the slice-2 gate (`decision:design/arrival-slice2-contract-text`, ruling 3)
+# because §07's `projected_through` obligation cannot be met without it.
 RATIFIED_LEDGER_OPS = frozenset({
-    "mint", "head", "append", "replicate", "read", "scan", "verify",
-    "export", "capabilities",
+    "mint", "head", "head_at", "append", "replicate", "read", "scan",
+    "verify", "export", "capabilities",
 })
 
 
@@ -267,7 +271,7 @@ def _declared_surface(protocol: type) -> frozenset[str]:
 
     Annotations are included as well as callables so that an ATTRIBUTE added
     to the Protocol is caught the same way a method would be: the claim being
-    pinned is "these nine rows and nothing else", and a row does not stop
+    pinned is "these ten rows and nothing else", and a row does not stop
     counting by being spelled as data.
     """
     namespace = vars(protocol)
@@ -310,6 +314,13 @@ def test_the_ledger_satisfies_the_ledger_surface_it_claims(ledger):
     assert "import_prefix" in offered
     assert "import_prefix" not in _declared_surface(ArrivalLedger)
     assert "import_prefix" in LEDGER_MUTATIONS
+    # `head_at` is the mirror case: ON the Protocol (ruling 3 gave it a row)
+    # and NOT in LEDGER_MUTATIONS, because resolving a watermark reads the
+    # record already there. Pinned rather than left to review memory — the two
+    # sets answer different questions, and a read filed as a mutation would
+    # make the custody/reads test refuse a handle that is allowed to hold it.
+    assert "head_at" in _declared_surface(ArrivalLedger)
+    assert "head_at" not in LEDGER_MUTATIONS
 
 
 def test_the_query_satisfies_the_query_surface(keys_and_store):

@@ -193,7 +193,7 @@ def test_the_file_opener_hands_back_both_halves(tmp_path):
         # now satisfies the full ArrivalLedger protocol. This pin was born as
         # its negation ("WP2 closes the gap") while the WPs built in
         # parallel; the surface test in test_arrival_contract.py owns the
-        # exact nine-op equality, this one just confirms the opener's return
+        # exact ten-op equality, this one just confirms the opener's return
         # reaches the surface it declares.
         assert isinstance(ledger, ArrivalLedger)
         assert isinstance(query, ArrivalQuery)

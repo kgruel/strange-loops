@@ -352,6 +352,23 @@ class ArrivalLedger(Protocol):
         """The currently complete head, or a typed absence/corruption refusal."""
         ...
 
+    def head_at(self, watermark: Watermark) -> Head:
+        """Resolve a projection's watermark into the verified head it names.
+
+        §07 asks a projection to store a verified ``projected_through`` head,
+        and a projection that holds a coordinate cannot produce one: only
+        custody holds the record whose hash completes it. So the resolution
+        is a ledger op, and the return type is what states the custody/reads
+        separation rather than prose. It answers or it refuses — a watermark
+        the ledger will not vouch for IS the projection/ledger disagreement,
+        and a manufactured head would hide exactly the thing being asked
+        about.
+
+        A read, not a mutation: deliberately absent from
+        :data:`LEDGER_MUTATIONS`.
+        """
+        ...
+
     def append(self, expected: Head | None, drafts: Sequence[RecordDraft]) -> Commit:
         """Compare the full head, then assign and commit, indivisibly (§04)."""
         ...

@@ -1,0 +1,1802 @@
+Reading prompt from stdin...
+OpenAI Codex v0.150.1
+--------
+workdir: /Users/kaygee/Code/loops-s2wp1
+model: gpt-5.6-sol
+provider: openai
+approval: never
+sandbox: workspace-write [workdir, /tmp, $TMPDIR]
+reasoning effort: low
+reasoning summaries: none
+session id: 01a04ebb-1bed-7a43-bbca-242afdef0f4c
+--------
+user
+# Sol review brief — arrival-break slice 2 / WP1, round 1 (per-WP, LOW)
+
+You are the cross-family reviewer for slice-2 WP1 of the arrival-break arc in the loops
+monorepo. Review the WP diff adversarially for correctness against the design contract.
+You review and report — you do not fix, refactor, or commit. Run tests and scripts to
+verify claims empirically (preferred over reading alone).
+
+## 1. Anchor
+
+- Repo checkout: this working directory (a git worktree of /Users/kaygee/Code/loops).
+- Branch: `slice/arrival-backend-contract` (the slice-2 wave branch), tip `0d38c969`
+  (7 commits over main `28654a96`).
+- Diff spec: `git diff 28654a96...0d38c969`. 12 files (+~3300).
+- Suites: per-package invocations (engine and store cannot share one pytest run —
+  pre-existing conftest collision). `.venv/bin/python -m pytest libs/engine/tests -q`
+  etc. from the worktree root.
+
+## 2. Design contract (what the code must honor)
+
+From `design:arrival-break-slice2-backend-contract` (ratified, fact
+`01M177MHWHD5HM574VSTDE17X8`) §A/§D.1/§F, and the WP1 brief
+(`docs/scratch/arrival-break/slice2-wp1-brief.md`):
+
+1. `engine/arrival_contract.py`: contract types + `ArrivalLedger`/`ArrivalQuery`
+   Protocols + typed refusals. **stdlib+typing only — no sqlite3, no runtime `arrival`
+   import.**
+2. `engine/arrival_file_backend.py`: `FileLedger`/`FileQuery` wrapping `ArrivalLog` +
+   the projection. Protocol-incomplete on purpose: replicate/export declared, absent
+   (WP2's); `capabilities()` must report honestly.
+3. **F1**: both CAS sites (`append_marked` + `append_marked_many`) compare the FULL
+   head; `following` is a `Head`; a bare int is REFUSED (`ArrivalError`, deliberately
+   not `AppendRejected` so merge's retry loop cannot spin on a type error);
+   `following=None` stays legal. A third caller (`ArrivalStore._ceremony_persist`) was
+   found mid-WP and closed too (deviation D1): marks complete to full pins via
+   `ArrivalLog.anchor`; an unvouched mark REFUSES rather than falling back unpinned.
+4. Rule 18: both new modules in `_SCAN_TARGETS` + the completeness ratchet (glob
+   `arrival*.py` vs the tuple, shrink-only `_NOT_SCANNED`, empty today).
+5. Query-handle separation: no ledger-mutating op reachable from a query handle,
+   derived from `LEDGER_MUTATIONS`, not hand-copied.
+
+**NON-NEGOTIABLES**: the 14 arrival test files byte-unmodified (13 engine + store's
+`test_arrival_merge.py`); wire codec + commitment machinery untouched (zero diff lines
+in `encode_record`/`content_commitment`/`_canonical_bytes`/`build_record`); the ONLY
+`ArrivalStore` behavior change is D1's pin completion; no registry module exists; no
+consumer rewiring (nothing outside tests imports `arrival_file_backend`); Rule 4 holds
+(no `engine`→`store` import).
+
+## 3. Unverified fixes — verify empirically, top priority
+
+| commit | claim | your job |
+|---|---|---|
+| 0d38c969 | Gate finding G1: the `anchor is None` → refuse branch survived mutation untested at BOTH sites. Fix: refusal tests at each site (engine `test_the_ceremony_refuses_an_unanchorable_mark_rather_than_unpinning`; store `test_arrival_merge_pin.py` ×3 with negative control and positive completion case) + two mutation demos (flip each raise to `return None` → named test fails). | Re-run both mutation demos yourself. Confirm the diff `70f7f7d3..0d38c969` touches only the two test files + the report. Confirm the negative control actually prevents an over-firing refusal (following=None legal). |
+
+## 4. Prior review state (independent gate, already run)
+
+Gate PASS, 0 blocking, at 70f7f7d3 (report `slice2-wp1-gate-report.md` on
+`slice/arrival-backend-contract-wp1-gate`): all oracle items re-run from scratch —
+CAS race genuine (barrier-threaded, asserted on the log), injected-failure gate
+byte-wise with fsync guard, Rule 18 ratchet 4-step demo, F1 mutations site-isolated,
+counts exact, contract module verified stdlib-only in a clean subprocess, Pyright
+`:309` shown unreachable by construction. Dispositioned findings — do NOT re-litigate
+the deferrals, but DO flag anything that makes one unsound:
+- G2 (`head_at` absent from the contract Protocol — file-adapter convention) and G3
+  (`NotImplementedError` outside the `ContractRefusal` root) + impl D4 (refusal-set
+  gaps): DEFERRED to the slice-2 gate's contract-text package (Kyle rules with F2).
+- G4 (merge partial-mark semantics): dismissed, matches pre-existing store semantics.
+- Impl deviations D1 (third F1 caller, closed), D2 (projection stores no head hash —
+  characterized), D3 (extra types, all consumed): verified by the gate.
+
+## 5. Verdict format
+
+Per §3 item: **PASS/FAIL + evidence**. New findings: numbered `S2WP1-L-<n>`, each with
+file:line, severity (BLOCKING/NON-BLOCKING), concrete failure scenario, evidence.
+Then one overall line: **CONVERGED** or **NOT CONVERGED** (with the blocking list).
+
+codex
+I’ll review the exact anchored diff, prioritize the two requested mutation demonstrations, then run focused and package-level suites. I’ll keep the worktree read-only apart from temporary mutation/revert steps and report only evidence—no fixes or commits.
+exec
+/bin/zsh -lc 'git status --short && git rev-parse --abbrev-ref HEAD && git rev-parse HEAD && git diff --stat 28654a96...0d38c969 && git diff --name-only 70f7f7d3..0d38c969' in /Users/kaygee/Code/loops-s2wp1
+ succeeded in 0ms:
+slice/arrival-backend-contract
+0d38c969509f18346cf2ab8be0642ccbdf415728
+ docs/scratch/arrival-break/slice2-wp1-report.md    | 371 +++++++++++++
+ libs/engine/src/engine/arrival.py                  | 117 +++-
+ libs/engine/src/engine/arrival_contract.py         | 464 ++++++++++++++++
+ libs/engine/src/engine/arrival_file_backend.py     | 485 +++++++++++++++++
+ libs/engine/src/engine/arrival_store.py            |  55 +-
+ libs/engine/tests/test_arrival_cas_full_head.py    | 584 ++++++++++++++++++++
+ libs/engine/tests/test_arrival_contract.py         | 597 +++++++++++++++++++++
+ libs/store/src/store/merge.py                      |  80 ++-
+ libs/store/tests/test_arrival_merge_pin.py         |  70 +++
+ .../test_rule_18_arrival_vocabulary_denylist.py    |  46 +-
+ 10 files changed, 2826 insertions(+), 43 deletions(-)
+docs/scratch/arrival-break/slice2-wp1-report.md
+libs/engine/tests/test_arrival_cas_full_head.py
+libs/store/tests/test_arrival_merge_pin.py
+
+exec
+/bin/zsh -lc 'rg -n "anchor is None|unanchorable|following=None|following = None|following=None" libs/engine/src libs/engine/tests/test_arrival_cas_full_head.py libs/store/tests/test_arrival_merge_pin.py && git diff --check 28654a96...0d38c969 && git diff --numstat 28654a96...0d38c969 -- libs/engine/tests/test_arrival*.py libs/store/tests/test_arrival_merge.py && git diff --unified=3 70f7f7d3..0d38c969 -- libs/engine/tests/test_arrival_cas_full_head.py libs/store/tests/test_arrival_merge_pin.py' in /Users/kaygee/Code/loops-s2wp1
+ succeeded in 0ms:
+libs/store/tests/test_arrival_merge_pin.py:10:``following=None``. The second is a silent downgrade to an UNPINNED append,
+libs/store/tests/test_arrival_merge_pin.py:33:def test_an_unanchorable_mark_refuses_rather_than_unpinning_the_append(log):
+libs/store/tests/test_arrival_merge_pin.py:41:    unanchorable = ResumeMark(
+libs/store/tests/test_arrival_merge_pin.py:45:        _pinned_head(log, unanchorable)
+libs/engine/tests/test_arrival_cas_full_head.py:242:    ``following=None`` is a caller that is not claiming to know the head.
+libs/engine/tests/test_arrival_cas_full_head.py:514:# cannot see: refuse, or quietly pass `following=None`. The second is a silent
+libs/engine/tests/test_arrival_cas_full_head.py:520:def _unanchorable(log: ArrivalLog):
+libs/engine/tests/test_arrival_cas_full_head.py:535:def test_the_ceremony_refuses_an_unanchorable_mark_rather_than_unpinning(
+libs/engine/tests/test_arrival_cas_full_head.py:552:            store._pinned_head(_unanchorable(log))
+libs/engine/src/engine/arrival_store.py:598:        if anchor is None:
+libs/engine/src/engine/arrival.py:1267:        if anchor is None or anchor["ord"] != mark.arrival_ordinal:
+584	0	libs/engine/tests/test_arrival_cas_full_head.py
+597	0	libs/engine/tests/test_arrival_contract.py
+diff --git a/libs/engine/tests/test_arrival_cas_full_head.py b/libs/engine/tests/test_arrival_cas_full_head.py
+index 74d90f11..97b87700 100644
+--- a/libs/engine/tests/test_arrival_cas_full_head.py
++++ b/libs/engine/tests/test_arrival_cas_full_head.py
+@@ -506,6 +506,57 @@ def test_a_multi_row_ceremony_is_one_record_so_it_is_never_partial(tmp_path):
+             assert len(ceremonies[0]["body"]["rows"]) == 2
+ 
+ 
++# --- completing the pin: refuse, never fall back --------------------------
++#
++# The resume mark carries no record hash, so both F1 callers complete their
++# pin by reading the record the mark names (`ArrivalLog.anchor`). When the log
++# will not vouch for one, there is a fork in the road that the type system
++# cannot see: refuse, or quietly pass `following=None`. The second is a silent
++# downgrade to an UNPINNED append — the exact weakening F1 exists to prevent,
++# and it would be invisible in a green suite because an unpinned append
++# succeeds. So the branch is pinned here rather than argued in a docstring.
++
++
++def _unanchorable(log: ArrivalLog):
++    """A mark that is well-formed but that the log will not vouch for.
++
++    The offset lands mid-record rather than on a boundary, so `_anchor_for`
++    finds no record ending there and rejects. Chosen over a foreign lineage
++    because it is the shape a real disagreement takes — an index whose
++    recorded position the log cannot confirm.
++    """
++    from engine.arrival import ResumeMark
++
++    return ResumeMark(
++        arrival_lineage=log.lineage(), arrival_offset=3, arrival_ordinal=0
++    )
++
++
++def test_the_ceremony_refuses_an_unanchorable_mark_rather_than_unpinning(
++    tmp_path,
++):
++    """ArrivalStore's pin completion (F1 caller 2 — report §2 D1)."""
++    from atoms import Fact
++
++    from engine.arrival_store import ArrivalCanonicalUnsupported, ArrivalStore
++
++    log = _log(tmp_path)
++    store = ArrivalStore(
++        path=tmp_path / "s.db",
++        serialize=lambda f: f.to_dict(),
++        deserialize=Fact.from_dict,
++        fact_signer=_sign,
++    )
++    try:
++        with pytest.raises(ArrivalCanonicalUnsupported, match="does not "):
++            store._pinned_head(_unanchorable(log))
++        # And the refusal does not over-fire: no mark is still no pin, which
++        # is a different statement from a mark the log rejects.
++        assert store._pinned_head(None) is None
++    finally:
++        store.close()
++
++
+ def test_fsync_is_the_stage_the_durability_claim_rests_on(tmp_path):
+     """A guard on the injection above: `os.fsync` is genuinely called.
+ 
+diff --git a/libs/store/tests/test_arrival_merge_pin.py b/libs/store/tests/test_arrival_merge_pin.py
+new file mode 100644
+index 00000000..98c4c102
+--- /dev/null
++++ b/libs/store/tests/test_arrival_merge_pin.py
+@@ -0,0 +1,70 @@
++"""The merge's compare-and-swap pin, where completing it can fail.
++
++F1 (``design:arrival-break-slice2-backend-contract`` SD-2) widened the append
++pin from an ordinal to a full head. The merge target's resume mark carries no
++record hash, so ``store.merge._pinned_head`` completes the pin by reading the
++record the mark names — and that read can come back empty, when the index's
++recorded position is one the log will not confirm.
++
++There is a fork there that no type signature shows: refuse, or quietly pass
++``following=None``. The second is a silent downgrade to an UNPINNED append,
++which is the weakening F1 exists to prevent, and it would hide in a green
++suite because an unpinned append succeeds. Hence this file. Separate from
++``test_arrival_merge.py`` because that file is one of the fourteen the slice-2
++brief holds unmodified.
++"""
++
++from __future__ import annotations
++
++import pytest
++from engine.arrival import ArrivalLog, ResumeMark
++
++from store.merge import _pinned_head
++from tests.conftest import STUB_KEY, stub_sign
++
++
++@pytest.fixture
++def log(tmp_path) -> ArrivalLog:
++    return ArrivalLog.mint(
++        tmp_path / "s.arrival", observer="kyle", signer=stub_sign, key=STUB_KEY
++    )
++
++
++def test_an_unanchorable_mark_refuses_rather_than_unpinning_the_append(log):
++    """A mark the log will not vouch for stops the merge.
++
++    The offset lands mid-record rather than on a boundary, so no record ends
++    there and the anchor is rejected — the shape a real index/log
++    disagreement takes. Appending onto that disagreement under a pin the
++    caller could not complete is what this refusal prevents.
++    """
++    unanchorable = ResumeMark(
++        arrival_lineage=log.lineage(), arrival_offset=3, arrival_ordinal=0
++    )
++    with pytest.raises(RuntimeError, match="does not vouch"):
++        _pinned_head(log, unanchorable)
++
++
++def test_no_mark_is_still_no_pin(log):
++    """The refusal must not over-fire — scope the claim.
++
++    An index with no mark has nothing to be stale about, and F1 refuses a
++    WEAKER pin rather than the absence of one. If this returned a refusal
++    too, a first merge into an unmarked target would be impossible.
++    """
++    assert _pinned_head(log, None) is None
++
++
++def test_a_vouched_mark_completes_into_the_full_head(log):
++    """The positive case, so the two above cannot pass by refusing always."""
++    record = log.append("note", {"i": 1}, observer="kyle")
++    mark = ResumeMark(
++        arrival_lineage=log.lineage(),
++        arrival_offset=log.path.stat().st_size,
++        arrival_ordinal=record["ord"],
++    )
++    head = _pinned_head(log, mark)
++    assert head is not None
++    assert (head.lineage, head.ordinal, head.record_hash) == (
++        record["lin"], record["ord"], record["rh"],
++    )
+
+exec
+/bin/zsh -lc "sed -n '570,615p' libs/engine/src/engine/arrival_store.py; sed -n '1240,1285p' libs/engine/src/engine/arrival.py; sed -n '1,240p' docs/scratch/arrival-break/slice2-wp1-report.md | rg -n \"mutation|anchorable|0d38|pytest\" -C 3; git log --oneline --decorate 28654a96..0d38c969" in /Users/kaygee/Code/loops-s2wp1
+ succeeded in 0ms:
+            body,
+            observer=rows[0][3],
+            origin=rows[0][4],
+            at=rows[0][2],
+            signer=self._fact_signer,
+            following=self._pinned_head(self._reconciled_mark),
+        )
+        self._stamp_mark(mark)
+
+    def _pinned_head(self, consumed: ResumeMark | None) -> Head | None:
+        """The full head a ceremony reconciled against, for the append's pin.
+
+        The resume mark carries a coordinate and a seek hint but no record
+        hash, and the compare-and-swap now pins all three head fields — so
+        the record the mark names is read back to supply the third.
+        :meth:`engine.arrival.ArrivalLog.anchor` is a seek to the mark's own
+        offset with the anchor checks applied, not a walk, so completing the
+        pin costs one read rather than a pass over the log.
+
+        A mark the log will not vouch for is a REFUSAL, never a quiet fall
+        back to an unpinned append. Dropping the pin because it could not be
+        completed is precisely the silent weakening the full-head compare
+        exists to prevent, and it would turn a store whose index disagrees
+        with its log into one that appends onto the disagreement.
+        """
+        if consumed is None:
+            return None
+        anchor = self._log.anchor(consumed)
+        if anchor is None:
+            raise ArrivalCanonicalUnsupported(
+                f"{self._path} reconciled against arrival ordinal "
+                f"{consumed.arrival_ordinal} of lineage "
+                f"{consumed.arrival_lineage}, but {self._log.path} does not "
+                "vouch for a record there — the index's mark and the log "
+                "disagree, and appending under an uncompletable pin would "
+                "write onto that disagreement. Run "
+                "engine.arrival_projection.rederive_projections("
+                f"{str(self._log.path)!r})"
+            )
+        return Head(
+            lineage=anchor["lin"],
+            ordinal=anchor["ord"],
+            record_hash=anchor["rh"],
+        )
+
+    def _declaration_head_in_txn(
+           read path stops at.
+
+        What these do NOT establish is in :func:`_authority_fault`: the
+        anchor is checked for self-consistency, never for chaining back to
+        genesis. The mark is a cheap boundary check; :meth:`walk` is the
+        integrity statement.
+
+        Returns ``(offset, anchor, lineage)``, the lineage always the
+        genesis's and never the anchor's.
+        """
+        if mark is None:
+            return None
+        if not self.path.exists():
+            return None
+        try:
+            lineage = self.lineage()
+        except (GenesisRefused, ArrivalError):
+            return None
+        if mark.arrival_lineage != lineage:
+            return None
+        if not _is_int(mark.arrival_offset) or not _is_int(mark.arrival_ordinal):
+            return None
+        if mark.arrival_offset == 0:
+            return None  # nothing consumed; identical to a fresh start
+        if not 0 <= mark.arrival_offset <= self.size():
+            return None
+        anchor = self._record_ending_at(mark.arrival_offset)
+        if anchor is None or anchor["ord"] != mark.arrival_ordinal:
+            return None
+        if _authority_fault(anchor, lineage) is not None:
+            return None
+        return mark.arrival_offset, anchor, lineage
+
+    def _record_ending_at(self, offset: int) -> dict | None:
+        """The record whose ``\\n`` is the byte before ``offset``, or None
+        when the offset is not a boundary or the record does not decode."""
+        with self.path.open("rb") as fh:
+            fh.seek(offset - 1)
+            if fh.read(1) != b"\n":
+                return None
+            start = _last_newline_before(fh, offset - 1)
+            fh.seek(start)
+            raw = fh.read(offset - 1 - start)
+        try:
+            return decode_record(raw)
+        except ArrivalGrammarError:
+7-`design:arrival-break-slice2-backend-contract` @ `01M177MHWHD5HM574VSTDE17X8`.
+8-
+9-Baselines measured on the branch before any edit, with the per-package invocation the
+10:repo actually uses (`uv run --package <pkg> pytest …` — a bare `uv run pytest` in a fresh
+11-worktree cannot collect `hypothesis`-dependent modules):
+12-
+13-| Suite | Baseline |
+--
+55-F1 sites raise `StaleHead`, a subclass, and `FileLedger` maps *that* 1:1.
+56-
+57-Nothing downstream changes: `isinstance(exc, AppendRejected)` still holds, and the
+58:existing `pytest.raises(AppendRejected, match="arrived since")` pins still pass, because
+59-the refusal message keeps the phrase "arrived since".
+60-
+61-### 1.4 `ProjectedThrough` is a `Watermark`, not a `Head` — the projection has no head hash
+--
+106-`append_marked_many` has no record limit today, so the honest `max_atomic_records` for the
+107-file adapter is "none configured". Rather than invent a fake limit or ship an unraisable
+108-refusal, `FileLedger` takes an optional `max_atomic_records`; unset it is unbounded and
+109:`capabilities()` says so, set it refuses before any mutation (§04's "refuse before mutation
+110-when the request exceeds the backend's limit") and §12's configured-limits gate has
+111-something real to exercise.
+112-
+0d38c969 (HEAD -> slice/arrival-backend-contract) test(engine,store): pin the pin-completion refusal at both F1 callers
+70f7f7d3 docs(scratch): carry the D3/D4 finding ids into the WP1 report
+4a7f1dfc docs(scratch): slice-2 WP1 report — design points, deviations, mutation evidence
+36d84fee test(architecture): Rule 18 joins at birth, and a ratchet that makes it so
+5ccddc7b feat(engine): arrival_file_backend — FileLedger/FileQuery over log + projection
+d4c18fc3 fix(engine): close F1 — the append CAS compares the full head at both sites
+dcec8474 feat(engine): arrival_contract — the storage-neutral authority protocol
+
+exec
+/bin/zsh -lc "rg -n \"def _pinned_head|does not vouch\" libs/store/src/store/merge.py && sed -n '90,130p' libs/store/src/store/merge.py; rg -n \"mutation demo|Mutation|return None\" docs/scratch/arrival-break/slice2-wp1-report.md" in /Users/kaygee/Code/loops-s2wp1
+ succeeded in 0ms:
+327:def _pinned_head(log, consumed):
+352:            f"{consumed.arrival_lineage}, but {log.path} does not vouch for a "
+            carried authorship claims with. **Exactly what a supplied
+            verifier establishes: every admitted signed fact row's
+            authorship claim verifies under the SOURCE's own key history.**
+            That is source self-consistency and nothing more — it is not a
+            statement that the target's operator trusts the source's keys,
+            which would require the target's key chain and a key-
+            introduction transport this merge does not have. A source with
+            no arrival log (a transport ``.db``) carries no key history to
+            check against, so it is admitted making NO such claim.
+
+    Returns:
+        MergeResult with counts of added and skipped facts/ticks.
+
+    Raises:
+        FileNotFoundError: If either store does not exist.
+        ValueError: If ``verify`` is supplied for a target whose canonical
+            artifact is not an arrival log. The admission set only exists as
+            a computable thing on the arrival arm; the sqlite arm decides it
+            inside ``INSERT OR IGNORE``. Refusing is the honest answer —
+            accepting the verifier and skipping the work would report a
+            verification that never ran.
+        AdmissionUnverified: If ``verify`` is supplied and either the
+            source's key history or an admitted signed row fails to verify.
+        The legacy log-canonical store's refusal: if the target's canonical
+            artifact is a legacy ``.jsonl`` log. (Named by class at the raise
+            site below rather than here — Rule 18 judges a docstring's
+            identifiers, and the retired vocabulary earns exactly one excused
+            mention in this module, at the line that cannot avoid it.)
+    """
+    from engine.probe import probe_target
+
+    target = Path(target)
+    source = Path(source)
+
+    info = probe_target(target)
+    arrival = (
+        info.canonical_mode == "arrival"
+        and info.canonical_path is not None
+        and info.canonical_path.is_file()
+    )
+    # An arrival target's custody is the log, and the .db beside it is a
+234:## 4. Mutation evidence
+329:+            return None
+345:+        return None
+
+exec
+/bin/zsh -lc "sed -n '320,365p' libs/store/src/store/merge.py; sed -n '220,370p' docs/scratch/arrival-break/slice2-wp1-report.md" in /Users/kaygee/Code/loops-s2wp1
+ succeeded in 0ms:
+    raise RuntimeError(
+        f"the append phase of a merge into {canonical} was outrun "
+        f"{_APPEND_ATTEMPTS} times — another writer is appending faster than "
+        "this merge can reconcile"
+    )
+
+
+def _pinned_head(log, consumed):
+    """The full head the dedup snapshot accounts for, or None when unmarked.
+
+    The compare-and-swap pins all three head fields, and the index's resume
+    mark carries only a coordinate and a seek hint — so the record the mark
+    names is read back through ``anchor`` (a seek, not a walk) to supply the
+    record hash. What that buys over the ordinal-only pin this replaced: a
+    target truncated and rewritten to the same height passes an ordinal
+    compare and fails this one, so a stale dedup can no longer decide what to
+    append onto a rolled-back log.
+
+    A mark the log will not vouch for REFUSES rather than falling back to an
+    unpinned append — completing a pin by dropping it is the weakening the
+    full-head compare exists to prevent. ``None`` in, ``None`` out stays
+    legal: an index with no mark has nothing to be stale about.
+    """
+    from engine.arrival_contract import Head
+
+    if consumed is None:
+        return None
+    anchor = log.anchor(consumed)
+    if anchor is None:
+        raise RuntimeError(
+            f"the merge target's index reconciled against arrival ordinal "
+            f"{consumed.arrival_ordinal} of lineage "
+            f"{consumed.arrival_lineage}, but {log.path} does not vouch for a "
+            "record there — the index and the log disagree, and a merge "
+            "cannot pin an append onto that disagreement"
+        )
+    return Head(
+        lineage=anchor["lin"], ordinal=anchor["ord"], record_hash=anchor["rh"]
+    )
+
+
+def _target_state(canonical: Path):
+    """The target's held rows as ``id -> comparable body``, and the resume
+    mark naming the log prefix it accounts for. Opening runs catch-up, so a
+    target that cannot account for its own log refuses HERE rather than being
+    deduped against.
+
+New-test breakdown, so the +51 is legible rather than a number:
+
+| File | Count | Covers |
+|---|---|---|
+| `test_arrival_cas_full_head.py` | 23 | F1 per-site (site A ×4, site B ×4), bare-ordinal refusal ×2, unpinned-still-legal ×2, §12 race gate ×2, §12 injected-failure gate ×5 stages + byte-wise write crash + ceremony atomicity + an fsync guard, **pin-completion refusal (G1)** |
+| `test_arrival_contract.py` | 29 | contract module properties (stdlib-only, static + subprocess), refusal rooting, `Head`/`StoreDescriptor` shape, **query-handle separation ×2**, adapter append/scan/verify/capabilities/limits, projection watermark ×4 |
+| `test_arrival_merge_pin.py` | 3 | **pin-completion refusal (G1)**, no-mark-is-still-no-pin, and the positive completion so neither can pass by refusing always |
+
+Wider net, all green and unchanged from baseline: root `tests/` 99, sdk 324, apps/loops
+2530+1xfail, lang 655, atoms 517, sign 37, custody 13, chaos 12.
+
+---
+
+## 4. Mutation evidence
+
+### 4.1 F1 — each site independently
+
+The two sites share `_refuse_stale_head` but keep **separate calls** to it, so the call
+site is the mutable unit and each can be reverted alone. Both reverts below replace the
+call with the ordinal-only compare F1 removed.
+
+**Site A — `append_marked` (`arrival.py`, inside `build`)**
+
+```python
+# revert:
+-            _refuse_stale_head(headr, pin)
++            if pin is not None and headr["ord"] != pin.ordinal:
++                raise StaleHead("records arrived since the caller reconciled")
+```
+
+```
+FAILED test_arrival_cas_full_head.py::test_site_a_refuses_a_head_rewritten_to_the_same_ordinal
+FAILED test_arrival_cas_full_head.py::test_site_a_refuses_a_head_from_another_lineage
+2 failed, 20 passed
+```
+
+Exactly the two site-A tests, and **no site-B test fired** — the sites are independently
+pinned.
+
+**Site B — `append_marked_many` (`arrival.py`, inside `_locked_head`)**
+
+```python
+# revert:
+-            _refuse_stale_head(head, pin)
++            if pin is not None and head["ord"] != pin.ordinal:
++                raise StaleHead("records arrived since the caller reconciled")
+```
+
+```
+FAILED test_arrival_cas_full_head.py::test_site_b_refuses_a_head_rewritten_to_the_same_ordinal
+FAILED test_arrival_cas_full_head.py::test_site_b_refuses_a_head_from_another_lineage
+2 failed, 20 passed
+```
+
+Restored after each; `git diff` clean, 22 passed.
+
+The discriminating case in both is the one an ordinal-only compare provably cannot see: a
+log rolled back in the bytes and re-grown to the **same ordinal with different content**
+(`_rewritten_to_the_same_height`, which asserts the heights agree and the hashes differ
+before the append is attempted, so the test cannot pass for the wrong reason).
+
+### 4.2 GF-2 ratchet — four steps
+
+An unregistered `libs/engine/src/engine/arrival_zzz.py`, then each escape in turn.
+
+| Step | State | Result |
+|---|---|---|
+| 1 | born, unregistered | **FAILS**, naming the file: `Arrival-surface modules not held to the glossary: libs/engine/src/engine/arrival_zzz.py` |
+| 2 | added to `_SCAN_TARGETS` | passes |
+| 3 | added to `_NOT_SCANNED` with a reason | passes — the shrink-only escape works |
+| 4 | file deleted, `_NOT_SCANNED` entry left | **FAILS**: `stale exception: libs/engine/src/engine/arrival_zzz.py` |
+
+Step 4 is the one §F does not spell out and is worth having: an escape hatch that outlives
+its subject is how a shrink-only list stops shrinking. `arrival_zzz.py` removed, Rule 18
+restored, architecture 99 green.
+
+### 4.3 Where the tests found real behaviour, not the behaviour I assumed
+
+Two assertions failed on first run and were corrected toward what the code actually does —
+recorded because the corrected versions are stronger claims:
+
+- **`verify(Open())` on a torn tail refuses** rather than returning a head:
+  `_tail_record` will not name a tip it would have to truncate to reach. That is better F2
+  evidence than the "returns a head, bytes unchanged" I first wrote, so the test now asserts
+  the refusal *and* the untouched bytes, plus that `Full` reads the clean prefix past it.
+- **Opening an `ArrivalStore` over a freshly minted log consumes the genesis**, so the
+  watermark is ordinal 0, not absent. The None branch is now tested where it genuinely
+  occurs — a store with no arrival mark at all.
+
+### 4.4 Gate G1 — the pin-completion refusal, at both callers
+
+**The gate was right and the report was the evidence against itself.** §2 D1 argues twice
+that a mark the log will not vouch for must REFUSE rather than fall back to
+`following=None`, and nothing pinned it. The branch survived mutation with a green suite,
+which is the worst shape for a safety property: the fall-back is a silent downgrade to an
+UNPINNED append, and an unpinned append *succeeds*, so nothing would ever have gone red.
+
+Both callers now have the refusal pinned, plus — deliberately — the negative control that
+stops the refusal over-firing, since `following=None` for an unmarked index has to stay
+legal (§1.9).
+
+**Caller 1 — `ArrivalStore._pinned_head` (`arrival_store.py`)**
+
+```python
+# revert:
+-        if anchor is None:
+-            raise ArrivalCanonicalUnsupported(... rederive_projections ...)
++        if anchor is None:
++            return None
+```
+
+```
+FAILED test_arrival_cas_full_head.py::test_the_ceremony_refuses_an_unanchorable_mark_rather_than_unpinning
+  Failed: DID NOT RAISE ArrivalCanonicalUnsupported
+1 failed, 22 passed
+```
+
+**Caller 2 — `store.merge._pinned_head` (`merge.py`)**
+
+```python
+# revert:
+-    if anchor is None:
+-        raise RuntimeError(... does not vouch for a record there ...)
++    if anchor is None:
++        return None
+```
+
+```
+FAILED test_arrival_merge_pin.py::test_an_unanchorable_mark_refuses_rather_than_unpinning_the_append
+  Failed: DID NOT RAISE RuntimeError
+1 failed, 2 passed
+```
+
+Restored after each; `git diff` clean at both files. The unanchorable mark is well-formed
+with an offset landing mid-record rather than on a boundary — chosen over a foreign
+lineage because it is the shape a genuine index/log disagreement takes, and it exercises
+`_anchor_for`'s boundary check rather than its cheapest early return.
+
+---
+
+## 5. What WP2/WP3/WP4 inherit
+
+- `FileLedger` gains `replicate` and `export`; **`capabilities()` must change in the same
+  commit** (`Profile.REPLICA`, `export_codecs`) — `test_capabilities_claims_nothing_the_adapter_does_not_have`
+  cross-checks the report against the object and will fail otherwise. That is deliberate.
+- `ExportedPrefix` is WP2's to refine if the manifest shape needs it.
+- `arrival_registry.py` joins `_SCAN_TARGETS` at birth; the §F ratchet now fails if WP4
+  forgets.
+- Open for the gate: D2's §07 gap, D4's refusal-set gap, and the absent `Incremental`
+  verification level (§1.5/§1.9 of the adapter docstring) — all three are contract-text
+
+codex
+The anchor and commit range match. The fix commit changes exactly the two stated test files plus the report. I also confirmed the controls are structurally meaningful: each refusal test uses a well-formed mid-record mark, while the engine test explicitly checks `None` and the store file separately checks both `None` and a valid mark. I’m now flipping each refusal branch independently and running only its named tests.
+apply patch
+patch: completed
+/Users/kaygee/Code/loops-s2wp1/libs/engine/src/engine/arrival_store.py
+diff --git a/libs/engine/src/engine/arrival_store.py b/libs/engine/src/engine/arrival_store.py
+index 0381cf23076115a30b0deaa28c8ddf29e1f56165..0ea69eaaa56d856252bd57f015dc2007cfac4025
+--- a/libs/engine/src/engine/arrival_store.py
++++ b/libs/engine/src/engine/arrival_store.py
+@@ -596,16 +596,7 @@
+             return None
+         anchor = self._log.anchor(consumed)
+         if anchor is None:
+-            raise ArrivalCanonicalUnsupported(
+-                f"{self._path} reconciled against arrival ordinal "
+-                f"{consumed.arrival_ordinal} of lineage "
+-                f"{consumed.arrival_lineage}, but {self._log.path} does not "
+-                "vouch for a record there — the index's mark and the log "
+-                "disagree, and appending under an uncompletable pin would "
+-                "write onto that disagreement. Run "
+-                "engine.arrival_projection.rederive_projections("
+-                f"{str(self._log.path)!r})"
+-            )
++            return None
+         return Head(
+             lineage=anchor["lin"],
+             ordinal=anchor["ord"],
+
+diff --git a/libs/engine/src/engine/arrival_store.py b/libs/engine/src/engine/arrival_store.py
+index 0381cf23076115a30b0deaa28c8ddf29e1f56165..0ea69eaaa56d856252bd57f015dc2007cfac4025
+--- a/libs/engine/src/engine/arrival_store.py
++++ b/libs/engine/src/engine/arrival_store.py
+@@ -596,16 +596,7 @@
+             return None
+         anchor = self._log.anchor(consumed)
+         if anchor is None:
+-            raise ArrivalCanonicalUnsupported(
+-                f"{self._path} reconciled against arrival ordinal "
+-                f"{consumed.arrival_ordinal} of lineage "
+-                f"{consumed.arrival_lineage}, but {self._log.path} does not "
+-                "vouch for a record there — the index's mark and the log "
+-                "disagree, and appending under an uncompletable pin would "
+-                "write onto that disagreement. Run "
+-                "engine.arrival_projection.rederive_projections("
+-                f"{str(self._log.path)!r})"
+-            )
++            return None
+         return Head(
+             lineage=anchor["lin"],
+             ordinal=anchor["ord"],
+
+exec
+/bin/zsh -lc '.venv/bin/python -m pytest libs/engine/tests/test_arrival_cas_full_head.py -q' in /Users/kaygee/Code/loops-s2wp1
+ exited 1 in 2564ms:
+.....................F.                                                  [100%]
+=================================== FAILURES ===================================
+_____ test_the_ceremony_refuses_an_unanchorable_mark_rather_than_unpinning _____
+
+tmp_path = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-14248/test_the_ceremony_refuses_an_u0')
+
+    def test_the_ceremony_refuses_an_unanchorable_mark_rather_than_unpinning(
+        tmp_path,
+    ):
+        """ArrivalStore's pin completion (F1 caller 2 — report §2 D1)."""
+        from atoms import Fact
+    
+        from engine.arrival_store import ArrivalCanonicalUnsupported, ArrivalStore
+    
+        log = _log(tmp_path)
+        store = ArrivalStore(
+            path=tmp_path / "s.db",
+            serialize=lambda f: f.to_dict(),
+            deserialize=Fact.from_dict,
+            fact_signer=_sign,
+        )
+        try:
+>           with pytest.raises(ArrivalCanonicalUnsupported, match="does not "):
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E           Failed: DID NOT RAISE ArrivalCanonicalUnsupported
+
+libs/engine/tests/test_arrival_cas_full_head.py:551: Failed
+=========================== short test summary info ============================
+FAILED libs/engine/tests/test_arrival_cas_full_head.py::test_the_ceremony_refuses_an_unanchorable_mark_rather_than_unpinning
+1 failed, 22 passed in 2.32s
+
+diff --git a/libs/engine/src/engine/arrival_store.py b/libs/engine/src/engine/arrival_store.py
+index 0381cf23076115a30b0deaa28c8ddf29e1f56165..0ea69eaaa56d856252bd57f015dc2007cfac4025
+--- a/libs/engine/src/engine/arrival_store.py
++++ b/libs/engine/src/engine/arrival_store.py
+@@ -596,16 +596,7 @@
+             return None
+         anchor = self._log.anchor(consumed)
+         if anchor is None:
+-            raise ArrivalCanonicalUnsupported(
+-                f"{self._path} reconciled against arrival ordinal "
+-                f"{consumed.arrival_ordinal} of lineage "
+-                f"{consumed.arrival_lineage}, but {self._log.path} does not "
+-                "vouch for a record there — the index's mark and the log "
+-                "disagree, and appending under an uncompletable pin would "
+-                "write onto that disagreement. Run "
+-                "engine.arrival_projection.rederive_projections("
+-                f"{str(self._log.path)!r})"
+-            )
++            return None
+         return Head(
+             lineage=anchor["lin"],
+             ordinal=anchor["ord"],
+
+apply patch
+patch: completed
+/Users/kaygee/Code/loops-s2wp1/libs/engine/src/engine/arrival_store.py
+apply patch
+patch: completed
+/Users/kaygee/Code/loops-s2wp1/libs/store/src/store/merge.py
+diff --git a/libs/store/src/store/merge.py b/libs/store/src/store/merge.py
+index 5be644b9bb09246577723ccabb4e5fb2ac1ec185..8628fe6641c402451628833dc257b4afba4517fc
+--- a/libs/store/src/store/merge.py
++++ b/libs/store/src/store/merge.py
+@@ -346,13 +346,7 @@
+         return None
+     anchor = log.anchor(consumed)
+     if anchor is None:
+-        raise RuntimeError(
+-            f"the merge target's index reconciled against arrival ordinal "
+-            f"{consumed.arrival_ordinal} of lineage "
+-            f"{consumed.arrival_lineage}, but {log.path} does not vouch for a "
+-            "record there — the index and the log disagree, and a merge "
+-            "cannot pin an append onto that disagreement"
+-        )
++        return None
+     return Head(
+         lineage=anchor["lin"], ordinal=anchor["ord"], record_hash=anchor["rh"]
+     )
+
+diff --git a/libs/store/src/store/merge.py b/libs/store/src/store/merge.py
+index 5be644b9bb09246577723ccabb4e5fb2ac1ec185..8628fe6641c402451628833dc257b4afba4517fc
+--- a/libs/store/src/store/merge.py
++++ b/libs/store/src/store/merge.py
+@@ -346,13 +346,7 @@
+         return None
+     anchor = log.anchor(consumed)
+     if anchor is None:
+-        raise RuntimeError(
+-            f"the merge target's index reconciled against arrival ordinal "
+-            f"{consumed.arrival_ordinal} of lineage "
+-            f"{consumed.arrival_lineage}, but {log.path} does not vouch for a "
+-            "record there — the index and the log disagree, and a merge "
+-            "cannot pin an append onto that disagreement"
+-        )
++        return None
+     return Head(
+         lineage=anchor["lin"], ordinal=anchor["ord"], record_hash=anchor["rh"]
+     )
+
+exec
+/bin/zsh -lc '.venv/bin/python -m pytest libs/store/tests/test_arrival_merge_pin.py -q' in /Users/kaygee/Code/loops-s2wp1
+ exited 1 in 341ms:
+F..                                                                      [100%]
+=================================== FAILURES ===================================
+______ test_an_unanchorable_mark_refuses_rather_than_unpinning_the_append ______
+
+log = <engine.arrival.ArrivalLog object at 0x1091b8830>
+
+    def test_an_unanchorable_mark_refuses_rather_than_unpinning_the_append(log):
+        """A mark the log will not vouch for stops the merge.
+    
+        The offset lands mid-record rather than on a boundary, so no record ends
+        there and the anchor is rejected — the shape a real index/log
+        disagreement takes. Appending onto that disagreement under a pin the
+        caller could not complete is what this refusal prevents.
+        """
+        unanchorable = ResumeMark(
+            arrival_lineage=log.lineage(), arrival_offset=3, arrival_ordinal=0
+        )
+>       with pytest.raises(RuntimeError, match="does not vouch"):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE RuntimeError
+
+libs/store/tests/test_arrival_merge_pin.py:44: Failed
+=========================== short test summary info ============================
+FAILED libs/store/tests/test_arrival_merge_pin.py::test_an_unanchorable_mark_refuses_rather_than_unpinning_the_append
+1 failed, 2 passed in 0.19s
+
+diff --git a/libs/store/src/store/merge.py b/libs/store/src/store/merge.py
+index 5be644b9bb09246577723ccabb4e5fb2ac1ec185..8628fe6641c402451628833dc257b4afba4517fc
+--- a/libs/store/src/store/merge.py
++++ b/libs/store/src/store/merge.py
+@@ -346,13 +346,7 @@
+         return None
+     anchor = log.anchor(consumed)
+     if anchor is None:
+-        raise RuntimeError(
+-            f"the merge target's index reconciled against arrival ordinal "
+-            f"{consumed.arrival_ordinal} of lineage "
+-            f"{consumed.arrival_lineage}, but {log.path} does not vouch for a "
+-            "record there — the index and the log disagree, and a merge "
+-            "cannot pin an append onto that disagreement"
+-        )
++        return None
+     return Head(
+         lineage=anchor["lin"], ordinal=anchor["ord"], record_hash=anchor["rh"]
+     )
+
+apply patch
+patch: completed
+/Users/kaygee/Code/loops-s2wp1/libs/store/src/store/merge.py
+exec
+/bin/zsh -lc 'git status --short && .venv/bin/python -m pytest libs/engine/tests/test_arrival_cas_full_head.py libs/engine/tests/test_arrival_contract.py -q && .venv/bin/python -m pytest libs/store/tests/test_arrival_merge_pin.py -q && .venv/bin/python -m pytest tests/test_rule_18_arrival_vocabulary_denylist.py -q' in /Users/kaygee/Code/loops-s2wp1
+ exited 4 in 2028ms:
+....................................................                     [100%]
+52 passed in 0.95s
+...                                                                      [100%]
+3 passed in 0.19s
+ERROR: file or directory not found: tests/test_rule_18_arrival_vocabulary_denylist.py
+
+
+no tests ran in 0.12s
+
+exec
+/bin/zsh -lc "rg --files | rg 'test_rule_18_arrival_vocabulary_denylist.py"'$|slice2-wp1-brief.md$'"'; git status --short; git diff --name-only 28654a96...0d38c969 | sort; git diff --name-only 28654a96...0d38c969 -- libs/engine/tests libs/store/tests | sort" in /Users/kaygee/Code/loops-s2wp1
+ succeeded in 0ms:
+tests/architecture/test_rule_18_arrival_vocabulary_denylist.py
+docs/scratch/arrival-break/slice2-wp1-brief.md
+docs/scratch/arrival-break/slice2-wp1-report.md
+libs/engine/src/engine/arrival.py
+libs/engine/src/engine/arrival_contract.py
+libs/engine/src/engine/arrival_file_backend.py
+libs/engine/src/engine/arrival_store.py
+libs/engine/tests/test_arrival_cas_full_head.py
+libs/engine/tests/test_arrival_contract.py
+libs/store/src/store/merge.py
+libs/store/tests/test_arrival_merge_pin.py
+tests/architecture/test_rule_18_arrival_vocabulary_denylist.py
+libs/engine/tests/test_arrival_cas_full_head.py
+libs/engine/tests/test_arrival_contract.py
+libs/store/tests/test_arrival_merge_pin.py
+
+codex
+Both mutation demonstrations reproduce exactly: engine `1 failed, 22 passed`; store `1 failed, 2 passed`. After restoration, the focused contract/CAS suite is `52 passed` and store pin suite `3 passed`; the worktree is clean. One architecture path in the brief’s shorthand was not literal, so I located the actual test under `tests/architecture/` and am continuing with that plus the isolated full engine/store suites.
+exec
+/bin/zsh -lc '.venv/bin/python -m pytest tests/architecture/test_rule_18_arrival_vocabulary_denylist.py -q && .venv/bin/python -m pytest libs/engine/tests -q' in /Users/kaygee/Code/loops-s2wp1
+codex
+Architecture is green (`35 passed`). The full engine suite has progressed past 60% with no failures so far; it includes one expected skip and is still running.
+ succeeded in 152966ms:
+...................................                                      [100%]
+35 passed in 0.40s
+........................................................................ [  3%]
+........................................................................ [  7%]
+........................................................................ [ 10%]
+........................................................................ [ 14%]
+........................................................................ [ 18%]
+........................................................................ [ 21%]
+........................................................................ [ 25%]
+.......................s................................................ [ 28%]
+........................................................................ [ 32%]
+........................................................................ [ 36%]
+........................................................................ [ 39%]
+........................................................................ [ 43%]
+........................................................................ [ 47%]
+........................................................................ [ 50%]
+........................................................................ [ 54%]
+........................................................................ [ 57%]
+........................................................................ [ 61%]
+........................................................................ [ 65%]
+........................................................................ [ 68%]
+........................................................................ [ 72%]
+........................................................................ [ 75%]
+........................................................................ [ 79%]
+........................................................................ [ 83%]
+........................................................................ [ 86%]
+........................................................................ [ 90%]
+........................................................................ [ 94%]
+........................................................................ [ 97%]
+..............................................                           [100%]
+1989 passed, 1 skipped in 151.16s (0:02:31)
+
+exec
+/bin/zsh -lc '.venv/bin/python -m pytest libs/store/tests -q' in /Users/kaygee/Code/loops-s2wp1
+ succeeded in 30183ms:
+........................................................................ [ 40%]
+........................................................................ [ 80%]
+....................................                                     [100%]
+180 passed in 29.60s
+
+exec
+/bin/zsh -lc "git diff --unified=20 28654a96...0d38c969 -- libs/engine/src/engine/arrival_store.py; git diff --unified=0 28654a96...0d38c969 -- libs/engine/src/engine/arrival.py | rg '"'^@@|''^[+-].*(def (encode_record|content_commitment|_canonical_bytes|build_record)|encode_record|content_commitment|_canonical_bytes|build_record)'"' || true; rg -n \"arrival_file_backend\" --glob '*.py'; rg -n \""'^(from store|import store)" libs/engine/src/engine --glob '"'*.py' || true; rg -n \"sqlite3|from engine\\.arrival|import engine\\.arrival|from \\.arrival|import arrival\" libs/engine/src/engine/arrival_contract.py || true; rg -n \"def (replicate|export)|class (FileLedger|FileQuery)|def capabilities|LEDGER_MUTATIONS\" libs/engine/src/engine/arrival_contract.py libs/engine/src/engine/arrival_file_backend.py" in /Users/kaygee/Code/loops-s2wp1
+ succeeded in 26ms:
+9:**stdlib and typing only.** Nothing here imports sqlite3, and nothing here
+11:separate module from the adapter: ``import engine.arrival_contract`` is what
+libs/engine/src/engine/arrival_contract.py:58:    "LEDGER_MUTATIONS",
+libs/engine/src/engine/arrival_contract.py:325:LEDGER_MUTATIONS = frozenset({"mint", "append", "replicate"})
+libs/engine/src/engine/arrival_contract.py:351:    def replicate(
+libs/engine/src/engine/arrival_contract.py:376:    def export(self, *, through: Head, codec: str) -> ExportedPrefix:
+libs/engine/src/engine/arrival_contract.py:380:    def capabilities(self) -> Capabilities:
+libs/engine/src/engine/arrival_file_backend.py:98:class FileLedger:
+libs/engine/src/engine/arrival_file_backend.py:376:    def capabilities(self) -> Capabilities:
+libs/engine/src/engine/arrival_file_backend.py:434:class FileQuery:
+
+exec
+/bin/zsh -lc "git ls-tree -r --name-only 28654a96 -- libs/engine/tests libs/store/tests | rg '/test_arrival.*\\.py"'$'"' | sort; git diff --name-only 28654a96...0d38c969 -- libs/engine/tests libs/store/tests | rg '/test_arrival.*\\.py"'$'"' | sort; git diff --name-only 28654a96...0d38c969 | wc -l; git diff --shortstat 28654a96...0d38c969; sed -n '300,470p' libs/engine/src/engine/arrival_contract.py; sed -n '90,465p' libs/engine/src/engine/arrival_file_backend.py | rg -n '"'^class |''^    def |LEDGER_MUTATIONS|setattr|delattr'"'" in /Users/kaygee/Code/loops-s2wp1
+ succeeded in 0ms:
+libs/engine/tests/test_arrival_authority.py
+libs/engine/tests/test_arrival_authority_gate.py
+libs/engine/tests/test_arrival_body.py
+libs/engine/tests/test_arrival_cas_head.py
+libs/engine/tests/test_arrival_coordinate_d0.py
+libs/engine/tests/test_arrival_derived_log.py
+libs/engine/tests/test_arrival_gate.py
+libs/engine/tests/test_arrival_grammar.py
+libs/engine/tests/test_arrival_key_registry.py
+libs/engine/tests/test_arrival_projection.py
+libs/engine/tests/test_arrival_rederivation_rowids.py
+libs/engine/tests/test_arrival_store.py
+libs/store/tests/test_arrival_merge.py
+libs/engine/tests/test_arrival_cas_full_head.py
+libs/engine/tests/test_arrival_contract.py
+libs/store/tests/test_arrival_merge_pin.py
+      10
+ 10 files changed, 2826 insertions(+), 43 deletions(-)
+    ``lineage``, when already known, is checked against genesis rather than
+    trusted as a replacement for it. ``role`` expresses operator intent; the
+    backend still verifies it can safely perform what is asked. Secrets are
+    referenced through ``witness``/a secret provider, never embedded.
+
+    Locally this descriptor dissolves into the ``.vertex`` store clause
+    (backend-contract.html:140-149) — WP4 builds that resolution.
+    """
+
+    backend: str
+    location: str
+    lineage: str | None = None
+    role: Profile | None = None
+    query: str | None = None
+    witness: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# Interfaces (§03)
+# ---------------------------------------------------------------------------
+
+# The ledger operations that can change what a lineage holds. Stated here,
+# beside the Protocol that declares them, so the custody/reads separation test
+# reads this list instead of re-typing it — a hand-copied list in a test is a
+# ratchet that silently stops covering the op added after it was written.
+LEDGER_MUTATIONS = frozenset({"mint", "append", "replicate"})
+
+
+@runtime_checkable
+class ArrivalLedger(Protocol):
+    """Custody: everything that can change what the lineage holds.
+
+    ``runtime_checkable`` so a conformance test can ask whether an adapter
+    satisfies the surface. That check is by method NAME only — Python's
+    protocol runtime check cannot judge signatures — so it is a location
+    claim ("this adapter offers these ops"), never a conformance verdict.
+    The vectors are what judge behaviour.
+    """
+
+    def mint(self, options: Mapping[str, Any]) -> Head:
+        """Exclusively create one signed genesis and return head 0."""
+        ...
+
+    def head(self, lineage: str | None = None) -> Head:
+        """The currently complete head, or a typed absence/corruption refusal."""
+        ...
+
+    def append(self, expected: Head | None, drafts: Sequence[RecordDraft]) -> Commit:
+        """Compare the full head, then assign and commit, indivisibly (§04)."""
+        ...
+
+    def replicate(
+        self, expected: Head | None, records: Sequence[Mapping[str, Any]]
+    ) -> Commit:
+        """Append exact pre-coordinated records; never rehash, never re-sign."""
+        ...
+
+    def read(self, coordinate: int) -> Mapping[str, Any]:
+        """The exact record, after establishing its membership in the lineage."""
+        ...
+
+    def scan(
+        self, *, after: int | None = None, through: Head | None = None
+    ) -> Iterator[Mapping[str, Any]]:
+        """An ordered, consistent prefix range and no later record (§06)."""
+        ...
+
+    def verify(self, scope: VerifyScope) -> Head:
+        """Verify through a named head; return the head the claim covers.
+
+        Verification reports; it does not repair. Whether that is a MUST is
+        the F2 addendum Kyle rules on at the slice-2 gate — until then the
+        obligation lives in the adapters that already hold it.
+        """
+        ...
+
+    def export(self, *, through: Head, codec: str) -> ExportedPrefix:
+        """Deterministic portable records plus a manifest, for a captured prefix."""
+        ...
+
+    def capabilities(self) -> Capabilities:
+        """Profiles, limits, concurrency scope, durability, codecs, query behaviour."""
+        ...
+
+
+@runtime_checkable
+class ArrivalQuery(Protocol):
+    """Reads: what a projection can answer, and how far it can answer it for.
+
+    §03 gives this half "facts, ticks, folds, search, and SQL-oriented reads",
+    and a query handle MUST NOT expose a generic mutation escape hatch into
+    the ledger. The row-shaped read surface stays each backend's own for now
+    and is deliberately not declared here — one adapter is not yet a pattern,
+    and the second backend is where a neutral spelling of "give me the facts"
+    earns its keep. What IS declared is §07's projection obligation, which
+    every backend owes regardless of how its rows are shaped: say which
+    lineage you are answering about, and how much of it you actually have.
+    """
+
+    def lineage(self) -> str | None:
+        """The lineage this projection represents, or None when it holds none."""
+        ...
+
+    def projected_through(self) -> Watermark | None:
+        """How much of the lineage this projection accounts for."""
+        ...
+
+
+# ---------------------------------------------------------------------------
+# Typed refusals
+# ---------------------------------------------------------------------------
+
+
+class ContractRefusal(Exception):
+    """Root of the backend-neutral refusals.
+
+    Rooted here rather than in any backend's family so a caller can catch a
+    refusal without knowing which adapter produced it.
+    """
+
+
+class HeadMismatch(ContractRefusal):
+    """The actual head is not the expected head; nothing was mutated.
+
+    §04: an append succeeds if and only if the actual head equals the expected
+    head and every assigned record is durable. This is the first half failing,
+    and it is raised BEFORE any mutation — a caller that sees it re-reads and
+    retries.
+    """
+
+
+class SameHeightFork(ContractRefusal):
+    """A conflicting record already occupies this coordinate (§08).
+
+    Not a stale head: replication found a *different* record at the height it
+    was about to fill. Replication stops rather than choosing, because
+    choosing is admission into another lineage and admission is a different
+    operation.
+    """
+
+
+class NotAuthority(ContractRefusal):
+    """This store may not perform the operation asked of it.
+
+    §02: opening an exported log does not grant it authority merely because
+    the codec can append to such files. Authority comes from the active
+    descriptor plus the backend's fencing checks.
+    """
+
+
+class UnknownBackend(ContractRefusal):
+    """No adapter is registered under the descriptor's backend name.
+
+    Refusing is the point: §02 forbids inferring a backend from a suffix, so
+    an unregistered name has no fallback to degrade into.
+    """
+
+
+class AtomicLimitExceeded(ContractRefusal):
+    """The request holds more records than this backend commits atomically.
+
+    §04: refuse BEFORE mutation. A backend that accepted the request and split
+    it across transactions would have turned one logical group into several,
+    which is the outcome the atomic limit exists to make impossible.
+    """
+9:class FileLedger:
+25:    def __init__(
+42:    def mint(self, options: Mapping[str, Any]) -> Head:
+60:    def append(
+138:    def head(self, lineage: str | None = None) -> Head:
+156:    def head_at(self, watermark: Watermark) -> Head:
+174:    def read(self, coordinate: int) -> Mapping[str, Any]:
+183:    def scan(
+225:    def verify(self, scope: VerifyScope) -> Head:
+287:    def capabilities(self) -> Capabilities:
+345:class FileQuery:
+364:    def __init__(self, index_path: Path | str) -> None:
+368:    def lineage(self) -> str | None:
+
+exec
+/bin/zsh -lc "rg -n \"14|byte|NON-NEGOTIABLE|test_arrival\" docs/scratch/arrival-break/slice2-wp1-brief.md -C 3; git diff --name-status 28654a96...0d38c969; git diff --unified=0 28654a96...0d38c969 -- libs/engine/src/engine/arrival.py | sed -n '1,240p'" in /Users/kaygee/Code/loops-s2wp1
+ succeeded in 0ms:
+31-No registry (WP4). No admission/sqlite_store/merge changes beyond the F1 caller at
+32-`merge.py:307` (WP3 owns that file otherwise). No replicate/export (WP2 — but your
+33-contract module DECLARES those ops on the Protocols). No consumer rewiring anywhere
+34:(SD-7). No coordinate-machinery moves (SD-1: it stays put). No new `_canonical_bytes`.
+35-
+36-## Oracle (the gate re-runs from scratch; make it pass honestly)
+37-
+38:1. All 14 arrival test files green, unmodified in intent (13 engine + store's
+39:   test_arrival_merge.py).
+40-2. CAS-race conformance gate with FULL-HEAD compare: two writers at one expected head,
+41-   exactly one commit wins.
+42-3. Injected-failure-per-append-stage gate: no partial logical group ever visible.
+A	docs/scratch/arrival-break/slice2-wp1-report.md
+M	libs/engine/src/engine/arrival.py
+A	libs/engine/src/engine/arrival_contract.py
+A	libs/engine/src/engine/arrival_file_backend.py
+M	libs/engine/src/engine/arrival_store.py
+A	libs/engine/tests/test_arrival_cas_full_head.py
+A	libs/engine/tests/test_arrival_contract.py
+M	libs/store/src/store/merge.py
+A	libs/store/tests/test_arrival_merge_pin.py
+M	tests/architecture/test_rule_18_arrival_vocabulary_denylist.py
+diff --git a/libs/engine/src/engine/arrival.py b/libs/engine/src/engine/arrival.py
+index 21968433..dbd12f69 100644
+--- a/libs/engine/src/engine/arrival.py
++++ b/libs/engine/src/engine/arrival.py
+@@ -59,0 +60,2 @@ from ulid import ULID
++from .arrival_contract import Head
++
+@@ -72,0 +75 @@ __all__ = [
++    "StaleHead",
+@@ -229,0 +233,74 @@ class AppendRejected(ArrivalError):
++class StaleHead(AppendRejected):
++    """The compare-and-swap pin no longer describes this log's head.
++
++    A SUBCLASS rather than a bare :class:`AppendRejected` because the parent
++    is raised for two different things: this, and the placement faults
++    :meth:`ArrivalLog._check_follows` finds in a candidate carried in from
++    elsewhere. An adapter that has to answer "was this a head mismatch?"
++    would otherwise be left sniffing messages, and a message is not a type.
++    Every existing ``except AppendRejected`` and ``raises(AppendRejected)``
++    keeps working, because this is one.
++    """
++
++
++def _refuse_stale_head(actual: dict, expected: Head | None) -> None:
++    """Refuse unless ``actual`` is the head the caller pinned.
++
++    ALL THREE coordinate fields, which is what makes this a compare-and-swap
++    over the log's identity rather than over its length. The ordinal alone
++    cannot tell "nothing arrived" from "the record at this ordinal was
++    replaced": a log truncated back and rewritten to the same height passes an
++    ordinal compare and fails this one, and that case is precisely the
++    rollback the backend contract asks a store to detect (§11).
++
++    Called from inside the fence at both append sites, never from outside it —
++    a compare that ran before the lock would be answering about a head some
++    other writer is free to move before the write lands. The two call sites
++    stay separate calls on purpose: each is independently the thing that makes
++    its own method a compare-and-swap, and each has its own test.
++    """
++    if expected is None:
++        return
++    if (
++        actual["lin"] == expected.lineage
++        and actual["ord"] == expected.ordinal
++        and actual[_RH] == expected.record_hash
++    ):
++        return
++    raise StaleHead(
++        f"the log's head is ({actual['lin']}, {actual['ord']}, {actual[_RH]}), "
++        f"not the expected ({expected.lineage}, {expected.ordinal}, "
++        f"{expected.record_hash}) — records arrived since the caller "
++        "reconciled, or this coordinate now holds a different record"
++    )
++
++
++def _checked_pin(following: object) -> Head | None:
++    """``following`` as a head pin, refusing anything weaker.
++
++    An ordinal is REFUSED rather than widened into a head, because widening
++    it here would mean this function inventing the two fields the caller did
++    not supply — and a pin the callee completed is not a pin. Construction
++    over detection (``decision:practice/construction-vs-detection-ratchets``):
++    there is no spelling of a weaker compare-and-swap for a caller to reach
++    for, so none can be reached for by accident.
++
++    :class:`ArrivalError` and deliberately not :class:`AppendRejected`: this
++    is a caller bug, and ``store.merge_store`` retries on
++    :class:`AppendRejected` — a type error caught by that loop would spin
++    instead of surfacing.
++    """
++    if following is None or isinstance(following, Head):
++        return following
++    if _is_int(following):
++        raise ArrivalError(
++            f"following must be a Head, not the bare ordinal {following!r} — "
++            "an ordinal-only pin cannot tell an untouched log from one "
++            "truncated and rewritten to the same height. Pass the full head "
++            "(engine.arrival_contract.Head), or None for an unpinned append"
++        )
++    raise ArrivalError(
++        f"following must be a Head or None, got {type(following).__name__}"
++    )
++
++
+@@ -1311 +1388 @@ class ArrivalLog:
+-        following: int | None = None,
++        following: Head | None = None,
+@@ -1322,5 +1399,6 @@ class ArrivalLog:
+-        ``following`` names the head ordinal the caller expects. Checked
+-        under the lock, so a record that landed since the caller last
+-        looked refuses (:class:`AppendRejected`) BEFORE any byte is
+-        written — the compare-and-swap shape for a consumer whose staged
+-        state must not silently skip an interloper.
++        ``following`` names the FULL head the caller expects — lineage,
++        ordinal and record hash. Checked under the lock, so a record that
++        landed since the caller last looked refuses (:class:`StaleHead`)
++        BEFORE any byte is written — the compare-and-swap shape for a
++        consumer whose staged state must not silently skip an interloper. A
++        bare ordinal is refused rather than accepted: see :func:`_checked_pin`.
+@@ -1327,0 +1406 @@ class ArrivalLog:
++        pin = _checked_pin(following)
+@@ -1330,6 +1409 @@ class ArrivalLog:
+-            if following is not None and headr["ord"] != following:
+-                raise AppendRejected(
+-                    f"the log's head is at ordinal {headr['ord']}, not the "
+-                    f"expected {following} — records arrived since the "
+-                    "caller reconciled"
+-                )
++            _refuse_stale_head(headr, pin)
+@@ -1356 +1430 @@ class ArrivalLog:
+-        self, entries: Sequence[Entry], *, following: int | None = None
++        self, entries: Sequence[Entry], *, following: Head | None = None
+@@ -1374,3 +1448,4 @@ class ArrivalLog:
+-        before any byte is written: it names the head ordinal the caller
+-        deduped against, so a record that landed since then REFUSES
+-        (:class:`AppendRejected`) rather than letting a stale dedup decide
++        before any byte is written: it names the FULL head — lineage, ordinal
++        and record hash — the caller deduped against, so a record that landed
++        since then, or a coordinate that now holds a different record,
++        REFUSES (:class:`StaleHead`) rather than letting a stale dedup decide
+@@ -1377,0 +1453,2 @@ class ArrivalLog:
++        A bare ordinal is refused rather than accepted: see
++        :func:`_checked_pin`.
+@@ -1389,0 +1467 @@ class ArrivalLog:
++        pin = _checked_pin(following)
+@@ -1392,6 +1470 @@ class ArrivalLog:
+-            if following is not None and head["ord"] != following:
+-                raise AppendRejected(
+-                    f"the log's head is at ordinal {head['ord']}, not the "
+-                    f"expected {following} — records arrived since the "
+-                    "caller reconciled"
+-                )
++            _refuse_stale_head(head, pin)
+
+exec
+/bin/zsh -lc "nl -ba libs/engine/src/engine/arrival.py | sed -n '233,310p;1380,1480p'; nl -ba libs/engine/src/engine/arrival_store.py | sed -n '565,612p'; nl -ba libs/store/src/store/merge.py | sed -n '327,365p'; nl -ba tests/architecture/test_rule_18_arrival_vocabulary_denylist.py | sed -n '50,110p'; nl -ba libs/engine/tests/test_arrival_contract.py | sed -n '270,340p'; git status --short" in /Users/kaygee/Code/loops-s2wp1
+ succeeded in 0ms:
+   233	class StaleHead(AppendRejected):
+   234	    """The compare-and-swap pin no longer describes this log's head.
+   235	
+   236	    A SUBCLASS rather than a bare :class:`AppendRejected` because the parent
+   237	    is raised for two different things: this, and the placement faults
+   238	    :meth:`ArrivalLog._check_follows` finds in a candidate carried in from
+   239	    elsewhere. An adapter that has to answer "was this a head mismatch?"
+   240	    would otherwise be left sniffing messages, and a message is not a type.
+   241	    Every existing ``except AppendRejected`` and ``raises(AppendRejected)``
+   242	    keeps working, because this is one.
+   243	    """
+   244	
+   245	
+   246	def _refuse_stale_head(actual: dict, expected: Head | None) -> None:
+   247	    """Refuse unless ``actual`` is the head the caller pinned.
+   248	
+   249	    ALL THREE coordinate fields, which is what makes this a compare-and-swap
+   250	    over the log's identity rather than over its length. The ordinal alone
+   251	    cannot tell "nothing arrived" from "the record at this ordinal was
+   252	    replaced": a log truncated back and rewritten to the same height passes an
+   253	    ordinal compare and fails this one, and that case is precisely the
+   254	    rollback the backend contract asks a store to detect (§11).
+   255	
+   256	    Called from inside the fence at both append sites, never from outside it —
+   257	    a compare that ran before the lock would be answering about a head some
+   258	    other writer is free to move before the write lands. The two call sites
+   259	    stay separate calls on purpose: each is independently the thing that makes
+   260	    its own method a compare-and-swap, and each has its own test.
+   261	    """
+   262	    if expected is None:
+   263	        return
+   264	    if (
+   265	        actual["lin"] == expected.lineage
+   266	        and actual["ord"] == expected.ordinal
+   267	        and actual[_RH] == expected.record_hash
+   268	    ):
+   269	        return
+   270	    raise StaleHead(
+   271	        f"the log's head is ({actual['lin']}, {actual['ord']}, {actual[_RH]}), "
+   272	        f"not the expected ({expected.lineage}, {expected.ordinal}, "
+   273	        f"{expected.record_hash}) — records arrived since the caller "
+   274	        "reconciled, or this coordinate now holds a different record"
+   275	    )
+   276	
+   277	
+   278	def _checked_pin(following: object) -> Head | None:
+   279	    """``following`` as a head pin, refusing anything weaker.
+   280	
+   281	    An ordinal is REFUSED rather than widened into a head, because widening
+   282	    it here would mean this function inventing the two fields the caller did
+   283	    not supply — and a pin the callee completed is not a pin. Construction
+   284	    over detection (``decision:practice/construction-vs-detection-ratchets``):
+   285	    there is no spelling of a weaker compare-and-swap for a caller to reach
+   286	    for, so none can be reached for by accident.
+   287	
+   288	    :class:`ArrivalError` and deliberately not :class:`AppendRejected`: this
+   289	    is a caller bug, and ``store.merge_store`` retries on
+   290	    :class:`AppendRejected` — a type error caught by that loop would spin
+   291	    instead of surfacing.
+   292	    """
+   293	    if following is None or isinstance(following, Head):
+   294	        return following
+   295	    if _is_int(following):
+   296	        raise ArrivalError(
+   297	            f"following must be a Head, not the bare ordinal {following!r} — "
+   298	            "an ordinal-only pin cannot tell an untouched log from one "
+   299	            "truncated and rewritten to the same height. Pass the full head "
+   300	            "(engine.arrival_contract.Head), or None for an unpinned append"
+   301	        )
+   302	    raise ArrivalError(
+   303	        f"following must be a Head or None, got {type(following).__name__}"
+   304	    )
+   305	
+   306	
+   307	# ---------------------------------------------------------------------------
+   308	# Path arithmetic
+   309	# ---------------------------------------------------------------------------
+   310	
+  1380	        self,
+  1381	        k: str,
+  1382	        body: dict,
+  1383	        *,
+  1384	        observer: str,
+  1385	        origin: str = "",
+  1386	        at: float | None = None,
+  1387	        signer: Signer | None = None,
+  1388	        following: Head | None = None,
+  1389	    ) -> tuple[dict, ResumeMark]:
+  1390	        """:meth:`append`, also returning the mark that resumes just past it.
+  1391	
+  1392	        The mark's offset is read under the append lock — the byte just past
+  1393	        this record's newline, exact by construction rather than a size read
+  1394	        that a concurrent append could land inside. A consumer that indexes
+  1395	        the record it just wrote persists this mark and later resumes
+  1396	        through :meth:`walk_from`, which re-validates the anchor at the
+  1397	        adoption site.
+  1398	
+  1399	        ``following`` names the FULL head the caller expects — lineage,
+  1400	        ordinal and record hash. Checked under the lock, so a record that
+  1401	        landed since the caller last looked refuses (:class:`StaleHead`)
+  1402	        BEFORE any byte is written — the compare-and-swap shape for a
+  1403	        consumer whose staged state must not silently skip an interloper. A
+  1404	        bare ordinal is refused rather than accepted: see :func:`_checked_pin`.
+  1405	        """
+  1406	        pin = _checked_pin(following)
+  1407	
+  1408	        def build(headr: dict) -> dict:
+  1409	            _refuse_stale_head(headr, pin)
+  1410	            at_ = time.time() if at is None else at
+  1411	            sig = (
+  1412	                signer(observer, content_commitment(k, at_, observer, origin, body))
+  1413	                if signer is not None
+  1414	                else None
+  1415	            )
+  1416	            return build_record(
+  1417	                lin=headr["lin"], ordinal=headr["ord"] + 1, prev=headr[_RH],
+  1418	                k=k, body=body, observer=observer, origin=origin, at=at_,
+  1419	                sig=sig or None,
+  1420	            )
+  1421	
+  1422	        record, offset = self._append_under_lock(build)
+  1423	        return record, ResumeMark(
+  1424	            arrival_lineage=record["lin"],
+  1425	            arrival_offset=offset,
+  1426	            arrival_ordinal=record["ord"],
+  1427	        )
+  1428	
+  1429	    def append_marked_many(
+  1430	        self, entries: Sequence[Entry], *, following: Head | None = None
+  1431	    ) -> tuple[list[dict], ResumeMark]:
+  1432	        """Append several records under ONE lock acquisition, ONE fsync.
+  1433	
+  1434	        Not an optimization — a correctness primitive. :meth:`append_marked`
+  1435	        takes the flock per call, so two processes replaying the same source
+  1436	        into one target would both pass their dedup pass against the
+  1437	        pre-merge snapshot and both append row X: the log would carry one id
+  1438	        twice, and every verb in this design refuses such a log. That is the
+  1439	        worst artifact this cut could mint, so the whole append phase holds
+  1440	        the lock.
+  1441	
+  1442	        An outer lock plus per-record :meth:`append_marked` DEADLOCKS instead
+  1443	        of helping: ``_append_under_lock`` opens a second descriptor on the
+  1444	        same lock file, and ``flock`` is per open-file-description, so it
+  1445	        blocks within one process. Hence a primitive rather than a wrapper.
+  1446	
+  1447	        ``following`` is the compare-and-swap pin, checked under the lock
+  1448	        before any byte is written: it names the FULL head — lineage, ordinal
+  1449	        and record hash — the caller deduped against, so a record that landed
+  1450	        since then, or a coordinate that now holds a different record,
+  1451	        REFUSES (:class:`StaleHead`) rather than letting a stale dedup decide
+  1452	        what to append. A caller that sees the refusal re-reads and retries.
+  1453	        A bare ordinal is refused rather than accepted: see
+  1454	        :func:`_checked_pin`.
+  1455	
+  1456	        ONE trailing fsync is sound: a crash loses only an un-fsynced
+  1457	        suffix, or leaves one torn tail line that the truncate-under-lock
+  1458	        rule removes. Recovery is "re-run the merge" — dedup makes it
+  1459	        idempotent, which is the whole story to tell an operator about an
+  1460	        interrupted merge.
+  1461	        """
+  1462	        if not entries:
+  1463	            raise ArrivalError(
+  1464	                "append_marked_many was handed no entries — an empty append "
+  1465	                "is a caller bug, not a no-op to absorb"
+  1466	            )
+  1467	        pin = _checked_pin(following)
+  1468	
+  1469	        with self._locked_head() as head:
+  1470	            _refuse_stale_head(head, pin)
+  1471	            records: list[dict] = []
+  1472	            encoded: list[str] = []
+  1473	            for entry in entries:
+  1474	                at_ = time.time() if entry.at is None else entry.at
+  1475	                record = build_record(
+  1476	                    lin=head["lin"], ordinal=head["ord"] + 1, prev=head[_RH],
+  1477	                    k=entry.k, body=entry.body, observer=entry.observer,
+  1478	                    origin=entry.origin, at=at_, sig=None,
+  1479	                )
+  1480	                # Every record is held to the same head checks a single
+   565	            k, body = "batch", body_of_batch(persisted_rows)
+   566	        else:
+   567	            k, body = "fact", body_of_fact_row(persisted_rows[0])
+   568	        _, mark = self._log.append_marked(
+   569	            k,
+   570	            body,
+   571	            observer=rows[0][3],
+   572	            origin=rows[0][4],
+   573	            at=rows[0][2],
+   574	            signer=self._fact_signer,
+   575	            following=self._pinned_head(self._reconciled_mark),
+   576	        )
+   577	        self._stamp_mark(mark)
+   578	
+   579	    def _pinned_head(self, consumed: ResumeMark | None) -> Head | None:
+   580	        """The full head a ceremony reconciled against, for the append's pin.
+   581	
+   582	        The resume mark carries a coordinate and a seek hint but no record
+   583	        hash, and the compare-and-swap now pins all three head fields — so
+   584	        the record the mark names is read back to supply the third.
+   585	        :meth:`engine.arrival.ArrivalLog.anchor` is a seek to the mark's own
+   586	        offset with the anchor checks applied, not a walk, so completing the
+   587	        pin costs one read rather than a pass over the log.
+   588	
+   589	        A mark the log will not vouch for is a REFUSAL, never a quiet fall
+   590	        back to an unpinned append. Dropping the pin because it could not be
+   591	        completed is precisely the silent weakening the full-head compare
+   592	        exists to prevent, and it would turn a store whose index disagrees
+   593	        with its log into one that appends onto the disagreement.
+   594	        """
+   595	        if consumed is None:
+   596	            return None
+   597	        anchor = self._log.anchor(consumed)
+   598	        if anchor is None:
+   599	            raise ArrivalCanonicalUnsupported(
+   600	                f"{self._path} reconciled against arrival ordinal "
+   601	                f"{consumed.arrival_ordinal} of lineage "
+   602	                f"{consumed.arrival_lineage}, but {self._log.path} does not "
+   603	                "vouch for a record there — the index's mark and the log "
+   604	                "disagree, and appending under an uncompletable pin would "
+   605	                "write onto that disagreement. Run "
+   606	                "engine.arrival_projection.rederive_projections("
+   607	                f"{str(self._log.path)!r})"
+   608	            )
+   609	        return Head(
+   610	            lineage=anchor["lin"],
+   611	            ordinal=anchor["ord"],
+   612	            record_hash=anchor["rh"],
+   327	def _pinned_head(log, consumed):
+   328	    """The full head the dedup snapshot accounts for, or None when unmarked.
+   329	
+   330	    The compare-and-swap pins all three head fields, and the index's resume
+   331	    mark carries only a coordinate and a seek hint — so the record the mark
+   332	    names is read back through ``anchor`` (a seek, not a walk) to supply the
+   333	    record hash. What that buys over the ordinal-only pin this replaced: a
+   334	    target truncated and rewritten to the same height passes an ordinal
+   335	    compare and fails this one, so a stale dedup can no longer decide what to
+   336	    append onto a rolled-back log.
+   337	
+   338	    A mark the log will not vouch for REFUSES rather than falling back to an
+   339	    unpinned append — completing a pin by dropping it is the weakening the
+   340	    full-head compare exists to prevent. ``None`` in, ``None`` out stays
+   341	    legal: an index with no mark has nothing to be stale about.
+   342	    """
+   343	    from engine.arrival_contract import Head
+   344	
+   345	    if consumed is None:
+   346	        return None
+   347	    anchor = log.anchor(consumed)
+   348	    if anchor is None:
+   349	        raise RuntimeError(
+   350	            f"the merge target's index reconciled against arrival ordinal "
+   351	            f"{consumed.arrival_ordinal} of lineage "
+   352	            f"{consumed.arrival_lineage}, but {log.path} does not vouch for a "
+   353	            "record there — the index and the log disagree, and a merge "
+   354	            "cannot pin an append onto that disagreement"
+   355	        )
+   356	    return Head(
+   357	        lineage=anchor["lin"], ordinal=anchor["ord"], record_hash=anchor["rh"]
+   358	    )
+   359	
+   360	
+   361	def _target_state(canonical: Path):
+   362	    """The target's held rows as ``id -> comparable body``, and the resume
+   363	    mark naming the log prefix it accounts for. Opening runs catch-up, so a
+   364	    target that cannot account for its own log refuses HERE rather than being
+   365	    deduped against.
+    50	# Adding it here would produce a standing failure resolvable only by a large
+    51	# allowlist — the outcome the scope note below warns against. Its cut is the
+    52	# one that retires `JsonlStore`.
+    53	_SCAN_TARGETS = (
+    54	    "libs/engine/src/engine/arrival.py",
+    55	    # Wire v1 (slice 1) forked the arrival body encoding out of the legacy
+    56	    # line codec. `arrival_body` is NEW and born on the arrival surface, so
+    57	    # it joins at birth — the same trigger `arrival_projection` joined on.
+    58	    # `jsonl_codec` does NOT join and will not: it is the legacy framing by
+    59	    # definition, kept for the derived-log projection and the migration
+    60	    # sidecar, and its vocabulary is that mode's honest vocabulary.
+    61	    "libs/engine/src/engine/arrival_body.py",
+    62	    # Slice 2 adds two. `arrival_contract` (the storage-neutral protocol) and
+    63	    # `arrival_file_backend` (the adapter that first satisfies it) are NEW and
+    64	    # born on the arrival surface, so they join at birth — and the contract
+    65	    # module is the one that most needs it, because it is where the arrival
+    66	    # vocabulary becomes the vocabulary every future backend inherits.
+    67	    # `arrival_registry` is slice 2's WP4 and joins when it is born.
+    68	    "libs/engine/src/engine/arrival_contract.py",
+    69	    "libs/engine/src/engine/arrival_file_backend.py",
+    70	    "libs/engine/src/engine/arrival_projection.py",
+    71	    "libs/engine/src/engine/arrival_store.py",
+    72	    "libs/engine/src/engine/probe.py",
+    73	    "libs/engine/src/engine/residence.py",
+    74	    "libs/sdk/src",
+    75	    "libs/store/src/store/derived_log_merge.py",
+    76	    "libs/store/src/store/merge.py",
+    77	    "libs/store/src/store/receive.py",
+    78	)
+    79	
+    80	# The seed denylist, §4.2, spelled in canonical snake_case (see _denied_term).
+    81	_DENIED = {
+    82	    "jsonl_canonical": "the retired canonical-store name",
+    83	    "jsonl_offset": "the retired offset meta key",
+    84	    "jsonl_fact_count": "the retired count meta key",
+    85	    "jsonl_tick_count": "the retired count meta key",
+    86	    "receipt_order": "ordering is by ordinal, not by an order concept",
+    87	    # Added at cut B, which retires the R1 doctrine whose vocabulary was "the
+    88	    # merged store's fold order". After B the ordering claim is the arrival
+    89	    # ordinal, so `fold_order` as an identifier on the arrival surface is the
+    90	    # retired model coming back. Unambiguous and single-concept, so it
+    91	    # mechanizes exactly the way `receipt_order` already does.
+    92	    "fold_order": "the ordering claim is the arrival ordinal, not a fold order",
+    93	    "receipt_mode": "there is no mode — custody is structural, not configured",
+    94	    "reanchor": "not an operation in the arrival model",
+    95	    "rewind": "not an operation in the arrival model",
+    96	    "mergeability": "not a property of custody",
+    97	    "union_discipline": "not a property of custody",
+    98	}
+    99	
+   100	# What §4.2 bans that this rule deliberately does NOT (review round 1, F3).
+   101	# The list also retires "event as an ordering concept", "merge as something
+   102	# that touches custody", and "receipt as an ordering or custody concept" —
+   103	# each qualified by the SENSE the word is used in. A token scanner cannot
+   104	# read sense, so banning the bare words would be a verdict claim ("this
+   105	# usage is the retired concept") where the evidence only supports a location
+   106	# claim. It would also fire on `libs/sdk`'s `EmitReceipt`, which is a
+   107	# write-result record and has nothing to do with custody ordering. The
+   108	# qualified bans stay a review responsibility; this rule holds the
+   109	# unambiguous ones. Named here so the gap reads as scoped, not missed.
+   110	_NOT_MECHANIZED = ("event", "merge", "receipt")
+   270	    finally:
+   271	        query.close()
+   272	
+   273	
+   274	def test_append_returns_a_commit_that_names_both_ends(ledger):
+   275	    """The shape §10's migration loop chains on (``head = commit.after``)."""
+   276	    before = ledger.head()
+   277	    commit = ledger.append(before, [_draft(1), _draft(2)])
+   278	
+   279	    assert isinstance(commit, Commit)
+   280	    assert commit.before == before, "before must be the head it landed on"
+   281	    assert commit.after == ledger.head()
+   282	    assert commit.after.ordinal == before.ordinal + 2
+   283	    assert len(commit.records) == 2
+   284	    assert commit.durability.profile is DurabilityProfile.HOST
+   285	
+   286	
+   287	def test_append_translates_only_the_cas_refusal(ledger):
+   288	    """StaleHead becomes HeadMismatch; a placement fault does not.
+   289	
+   290	    The reason StaleHead exists. ``AppendRejected`` covers both, and an
+   291	    adapter that mapped the parent would be claiming a head mismatch about a
+   292	    record that was refused for its shape.
+   293	    """
+   294	    from engine.arrival import AppendRejected, build_record
+   295	
+   296	    stale = ledger.head()
+   297	    ledger.append(stale, [_draft(1)])
+   298	
+   299	    with pytest.raises(HeadMismatch):
+   300	        ledger.append(stale, [_draft(2)])
+   301	
+   302	    # A placement fault reaches the caller as itself, not as HeadMismatch.
+   303	    head = ledger._log.head()
+   304	    with pytest.raises(AppendRejected) as caught:
+   305	        ledger._log.append_record(
+   306	            build_record(
+   307	                lin=head["lin"], ordinal=head["ord"] + 9, prev=head["rh"],
+   308	                k="note", body={}, observer="kyle",
+   309	            )
+   310	        )
+   311	    assert not isinstance(caught.value, HeadMismatch)
+   312	
+   313	
+   314	def test_append_refuses_an_empty_request(ledger):
+   315	    with pytest.raises(ValueError):
+   316	        ledger.append(ledger.head(), [])
+   317	
+   318	
+   319	def test_append_refuses_a_pre_signed_draft(ledger):
+   320	    """Named rather than silently dropped.
+   321	
+   322	    The wrap target assigns no signature and ``Entry`` carries no signer
+   323	    field, so honouring one would mean changing ``append_marked_many`` —
+   324	    which F1's widening is the only permitted change to in WP1. Refusing
+   325	    says what is missing; dropping the signature would produce a record whose
+   326	    author never attested it.
+   327	    """
+   328	    draft = RecordDraft(
+   329	        kind="note", authored_at=1.0, observer="kyle", body={},
+   330	        signature="c" * 86,
+   331	    )
+   332	    with pytest.raises(NotImplementedError, match="unsigned"):
+   333	        ledger.append(ledger.head(), [draft])
+   334	
+   335	
+   336	def test_a_configured_atomic_limit_refuses_before_any_mutation(tmp_path):
+   337	    """§04: refuse before mutation when the request exceeds the limit.
+   338	
+   339	    Unset the limit is unbounded and ``capabilities()`` says so; set, it is a
+   340	    real refusal with a real gate — which is why the ceiling is configurable
+
+codex
+1. **PASS — contract module.** [arrival_contract.py](/Users/kaygee/Code/loops-s2wp1/libs/engine/src/engine/arrival_contract.py:325) defines `LEDGER_MUTATIONS`, both Protocols, and typed refusals. Import inspection found no `sqlite3` or runtime `engine.arrival` dependency. Contract tests passed.
+
+2. **PASS — file backend.** [arrival_file_backend.py](/Users/kaygee/Code/loops-s2wp1/libs/engine/src/engine/arrival_file_backend.py:98) provides `FileLedger`/`FileQuery`. `replicate` and `export` remain absent intentionally; capability tests confirm they are not advertised.
+
+3. **PASS — F1 full-head CAS.** Both append sites validate a `Head` and compare lineage, ordinal, and record hash under the append fence at [arrival.py:246](/Users/kaygee/Code/loops-s2wp1/libs/engine/src/engine/arrival.py:246), [arrival.py:1406](/Users/kaygee/Code/loops-s2wp1/libs/engine/src/engine/arrival.py:1406), and [arrival.py:1467](/Users/kaygee/Code/loops-s2wp1/libs/engine/src/engine/arrival.py:1467). Bare integers raise `ArrivalError`, while `None` remains legal.
+
+   D1 pin completion is correctly implemented in [arrival_store.py:579](/Users/kaygee/Code/loops-s2wp1/libs/engine/src/engine/arrival_store.py:579) and [merge.py:327](/Users/kaygee/Code/loops-s2wp1/libs/store/src/store/merge.py:327).
+
+4. **PASS — Rule 18.** Both modules are in `_SCAN_TARGETS` at [test_rule_18_arrival_vocabulary_denylist.py:53](/Users/kaygee/Code/loops-s2wp1/tests/architecture/test_rule_18_arrival_vocabulary_denylist.py:53); the completeness/shrink-only ratchet passed: `35 passed`.
+
+5. **PASS — query-handle separation.** Separation is derived from `LEDGER_MUTATIONS`, not a copied mutation list. Contract tests passed.
+
+6. **PASS — G1 fix commit scope.** `git diff --name-only 70f7f7d3..0d38c969` contains exactly:
+
+   - `libs/engine/tests/test_arrival_cas_full_head.py`
+   - `libs/store/tests/test_arrival_merge_pin.py`
+   - `docs/scratch/arrival-break/slice2-wp1-report.md`
+
+7. **PASS — mutation demonstration, ArrivalStore.** Replaced the `anchor is None` raise with `return None`; result was exactly:
+
+   `1 failed, 22 passed`
+
+   The named failure was `test_the_ceremony_refuses_an_unanchorable_mark_rather_than_unpinning`.
+
+8. **PASS — mutation demonstration, merge.** Made the equivalent mutation in `store.merge._pinned_head`; result was exactly:
+
+   `1 failed, 2 passed`
+
+   The named failure was `test_an_unanchorable_mark_refuses_rather_than_unpinning_the_append`.
+
+9. **PASS — negative and positive controls.** `following=None` remains legal at both callers. The store test additionally proves a vouched mark becomes the complete three-field head, preventing an always-refuse implementation from passing.
+
+10. **PASS — non-negotiables.** The pre-existing arrival tests are absent from the anchored diff; only new arrival test files were added. No consumer imports the file backend outside tests, no registry exists, no `engine → store` import was found, and the `ArrivalStore` executable change is confined to D1. The anchored `arrival.py` diff does not modify `encode_record`, `content_commitment`, `_canonical_bytes`, or `build_record`.
+
+Test evidence:
+
+- Focused engine contract/CAS: `52 passed`
+- Focused store pin tests: `3 passed`
+- Architecture: `35 passed`
+- Full engine: `1989 passed, 1 skipped`
+- Full store: `180 passed`
+- `git diff --check`: clean
+- Worktree restored clean after mutations
+
+New findings: **none**.
+
+Note: the supplied anchor summary says 12 files/~3300 lines, but the actual anchored diff is 10 files, 2,826 insertions, 43 deletions. Review used the specified commit endpoints exactly.
+
+**CONVERGED**
+tokens used
+50,558
+1. **PASS — contract module.** [arrival_contract.py](/Users/kaygee/Code/loops-s2wp1/libs/engine/src/engine/arrival_contract.py:325) defines `LEDGER_MUTATIONS`, both Protocols, and typed refusals. Import inspection found no `sqlite3` or runtime `engine.arrival` dependency. Contract tests passed.
+
+2. **PASS — file backend.** [arrival_file_backend.py](/Users/kaygee/Code/loops-s2wp1/libs/engine/src/engine/arrival_file_backend.py:98) provides `FileLedger`/`FileQuery`. `replicate` and `export` remain absent intentionally; capability tests confirm they are not advertised.
+
+3. **PASS — F1 full-head CAS.** Both append sites validate a `Head` and compare lineage, ordinal, and record hash under the append fence at [arrival.py:246](/Users/kaygee/Code/loops-s2wp1/libs/engine/src/engine/arrival.py:246), [arrival.py:1406](/Users/kaygee/Code/loops-s2wp1/libs/engine/src/engine/arrival.py:1406), and [arrival.py:1467](/Users/kaygee/Code/loops-s2wp1/libs/engine/src/engine/arrival.py:1467). Bare integers raise `ArrivalError`, while `None` remains legal.
+
+   D1 pin completion is correctly implemented in [arrival_store.py:579](/Users/kaygee/Code/loops-s2wp1/libs/engine/src/engine/arrival_store.py:579) and [merge.py:327](/Users/kaygee/Code/loops-s2wp1/libs/store/src/store/merge.py:327).
+
+4. **PASS — Rule 18.** Both modules are in `_SCAN_TARGETS` at [test_rule_18_arrival_vocabulary_denylist.py:53](/Users/kaygee/Code/loops-s2wp1/tests/architecture/test_rule_18_arrival_vocabulary_denylist.py:53); the completeness/shrink-only ratchet passed: `35 passed`.
+
+5. **PASS — query-handle separation.** Separation is derived from `LEDGER_MUTATIONS`, not a copied mutation list. Contract tests passed.
+
+6. **PASS — G1 fix commit scope.** `git diff --name-only 70f7f7d3..0d38c969` contains exactly:
+
+   - `libs/engine/tests/test_arrival_cas_full_head.py`
+   - `libs/store/tests/test_arrival_merge_pin.py`
+   - `docs/scratch/arrival-break/slice2-wp1-report.md`
+
+7. **PASS — mutation demonstration, ArrivalStore.** Replaced the `anchor is None` raise with `return None`; result was exactly:
+
+   `1 failed, 22 passed`
+
+   The named failure was `test_the_ceremony_refuses_an_unanchorable_mark_rather_than_unpinning`.
+
+8. **PASS — mutation demonstration, merge.** Made the equivalent mutation in `store.merge._pinned_head`; result was exactly:
+
+   `1 failed, 2 passed`
+
+   The named failure was `test_an_unanchorable_mark_refuses_rather_than_unpinning_the_append`.
+
+9. **PASS — negative and positive controls.** `following=None` remains legal at both callers. The store test additionally proves a vouched mark becomes the complete three-field head, preventing an always-refuse implementation from passing.
+
+10. **PASS — non-negotiables.** The pre-existing arrival tests are absent from the anchored diff; only new arrival test files were added. No consumer imports the file backend outside tests, no registry exists, no `engine → store` import was found, and the `ArrivalStore` executable change is confined to D1. The anchored `arrival.py` diff does not modify `encode_record`, `content_commitment`, `_canonical_bytes`, or `build_record`.
+
+Test evidence:
+
+- Focused engine contract/CAS: `52 passed`
+- Focused store pin tests: `3 passed`
+- Architecture: `35 passed`
+- Full engine: `1989 passed, 1 skipped`
+- Full store: `180 passed`
+- `git diff --check`: clean
+- Worktree restored clean after mutations
+
+New findings: **none**.
+
+Note: the supplied anchor summary says 12 files/~3300 lines, but the actual anchored diff is 10 files, 2,826 insertions, 43 deletions. Review used the specified commit endpoints exactly.
+
+**CONVERGED**

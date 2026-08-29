@@ -12,7 +12,7 @@ Contract: `docs/scratch/arrival-break/slice3-wp1-brief.md`; design
 | File | What |
 |---|---|
 | `libs/engine/src/engine/arrival_head_attestation.py` | the record, the journal, the classifier, the refusal family, the transitional binding |
-| `libs/engine/tests/test_arrival_head_attestation.py` | 94 unit tests |
+| `libs/engine/tests/test_arrival_head_attestation.py` | 95 unit tests |
 | `tests/architecture/test_rule_18_arrival_vocabulary_denylist.py` | `_SCAN_TARGETS` enrollment (same commit as the module, or the glob test fails) |
 
 ## Counts
@@ -24,7 +24,7 @@ usable baseline):
 
 | Suite | Baseline | After | Delta |
 |---|---|---|---|
-| engine | 2063 passed, 1 skipped | 2157 passed, 1 skipped | **+94**, all in `test_arrival_head_attestation.py` |
+| engine | 2063 passed, 1 skipped | 2158 passed, 1 skipped | **+95**, all in `test_arrival_head_attestation.py` |
 | architecture | 99 passed | 99 passed | **0** — Rule 18 is not parametrized per target, so enrolling a module adds no case |
 
 Every delta accounted for. `ruff check` passes on both new files. (`ruff format` would
@@ -438,3 +438,55 @@ behind that described the behaviour it replaced. That is the same overcorrection
 recorded after sol r1, seen from the documentation side — which is why the `_parse_entry`
 comment matters more than its size suggests. A stale comment at a branch is a defect with
 a delay.
+
+
+## Sol-LOW round 3 — one term for the weakened state (`e3802124`)
+
+`finding:s3wp1-sol-l3-lower-bound-terminology`. The eighth stale phrase, and the ruling
+was to fix the **terminology** rather than the instance — correctly, because this was the
+fourth round of the same lag.
+
+**What was wrong.** `HeadLowerBound`'s docstring said "Lines in the epoch could not be
+read", and the refusal it raises said the journal "has unreadable lines" with `.skipped`
+labelled "Unreadable". But a missing header weakens the claim identically with every entry
+perfectly readable. The prose named one *cause* of the weakened state as though it were
+the *definition* — which is exactly how the previous three rounds went wrong too.
+
+**The term: "incomplete read."** Defined once, on the type the condition produces: the
+read needed something it did not get — a line it could not parse, a line it could not
+classify, an entry from a later build, or the header itself — and a non-empty `.skipped`
+**is** the condition. Deliberately about what the read *lacks* rather than about *why*, so
+a new cause joins it without new vocabulary. The docstring records the three names the
+prose drifted through, so the next reader sees why the term is shaped that way rather than
+re-deriving it.
+
+**Two candidate words rejected, with the reasons stated in place:**
+
+- **"unreadable"** belongs to text this build cannot read at all
+  (`JournalUnreadable`, `HeadUnreadable`). A journal with a missing header and every entry
+  readable is incomplete without being unreadable in any part.
+- **"could not account for"** — the phrasing the finding offered — collides with
+  `unaccounted_heads`, which already means heads **the store** can no longer account for.
+  A different question about a different party, and reusing the word would be precisely
+  the collision `HeadFork` was named around. Flagged rather than silently substituted.
+
+**This round is NOT prose-only**, unlike sol r2: the two emitted refusal messages change
+to "this read of the journal is incomplete" and "The read missed:". No existing test
+pinned that text, so nothing needed a dishonest update — checked before editing rather
+than after. One test was added, pinning the term for the case the old message actually
+misdescribed: a missing header with every entry readable, asserting the message says
+`incomplete` and does **not** say `unreadable lines`.
+
+**Post-fix sweep.** Every remaining occurrence of "unreadable" / "cannot be read" in the
+module is about text that genuinely cannot be read: the two exception classes, the
+per-line skip note, `read_journal`'s `OSError` arm, and the torn-tail guard. Listed rather
+than asserted, so r4's verification is a re-grep rather than a re-reading.
+
+### The lag, and why the term should end it
+
+Four rounds, one shape: the code learned a new cause of the weakened state, and the prose
+kept the old cause's name. Fixing instances made the next instance inevitable, because the
+vocabulary itself was the defect — a name for a cause cannot survive a second cause. That
+is the documentation-side twin of the sol-r1 finding, where a classifier forced to answer
+in two values lied in one of them. Same root: a name that encodes a closed set, meeting an
+open one.

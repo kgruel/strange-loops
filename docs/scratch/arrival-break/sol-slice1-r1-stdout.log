@@ -1,0 +1,2987 @@
+Reading prompt from stdin...
+OpenAI Codex v0.150.1
+--------
+workdir: /Users/kaygee/Code/loops-slice1
+model: gpt-5.6-sol
+provider: openai
+approval: never
+sandbox: workspace-write [workdir, /tmp, $TMPDIR]
+reasoning effort: low
+reasoning summaries: none
+session id: 01a04e5a-9521-79e0-bf5e-bb962fb5c139
+--------
+user
+# Sol review brief — arrival-break slice 1, round 1 (per-slice, LOW)
+
+You are the cross-family reviewer for slice 1 of the arrival-break arc in the loops
+monorepo. Review the slice diff adversarially for correctness against the design
+contract below. You review and report — you do not fix, refactor, or commit. You may
+run tests and scripts to verify claims empirically (preferred over reading alone).
+
+## 1. Anchor
+
+- Repo checkout: this working directory (a git worktree of /Users/kaygee/Code/loops).
+- Branch: `slice/arrival-wire-v1`, tip `c63ae5fd` (5 commits over main).
+- Diff spec: `git diff 68c7aa57...c63ae5fd` (main tip 68c7aa57). 23 files.
+- Suites: run from the worktree root with its venv (`.venv/bin/python -m pytest ...`
+  or `uv run pytest`). Per-package invocations for engine and store (they cannot share
+  one pytest run — pre-existing `tests.conftest` collision, verified on main).
+
+## 2. Design contract (what the code must honor)
+
+From `decision:design/arrival-wire-v1-seam-triage` (parent, 2026-08-26): **body.t
+DROPS** from arrival bodies (outer `k` discriminates; the LEGACY codec keeps `t` — the
+slice-4 migration sidecar needs it); **tick envelope observer RE-SPELLED**; **dual
+signature KEEPS, untouched**.
+
+From the sub-ruling (fact `01M172M74FZ9E27V34QKDF7Y77`, 2026-08-29), binding:
+
+1. **Candidate A**: tick envelope observer becomes a custody-producer label.
+   Fact/batch/genesis/key envelope observers UNCHANGED — the field remains
+   signer-selection plumbing for signed kinds (`fact_signer_for` resolves the AUTHOR's
+   per-observer key by it; `_resolve` verifies against it). No re-keying of anything.
+2. **The label = the destination log's genesis observer**, at BOTH mint sites in one
+   change: `engine/arrival_store.py` (the fact/tick ternary in `_write`) AND
+   `store/merge.py` `_entry_for` (second, independently-encoded mint site).
+3. **Tick outer signatures DEFERRED explicitly** — wire v1 pins with ticks
+   outer-unsigned ON PURPOSE. No tick signing may have been added.
+4. **Batch same-observer grammar ENFORCED** — "all rows in a batch share one observer"
+   is a wire-grammar refusal at the arrival seam (arrival-only; deliberately NOT added
+   to the legacy line codec).
+5. **Outer-sig law**: the outer signature is the PER-LINEAGE arrival-content signature;
+   the inner fact-domain signature is what travels through re-custody. protocol.html §06
+   was rewritten to state this.
+
+**NON-NEGOTIABLE**: no preserved inner signature may be invalidated. Inner fact
+commitments never covered `t` or the envelope observer. `content_commitment`,
+`arrival.py`, and `libs/custody/` must be absent from the diff.
+
+Non-goals (finding if violated): fact/batch/genesis/key observer semantics; tick
+signing; commitment shape; `arrival_ordinal`/`arrival_seq` renames; legacy codec's `t`;
+`FileStore`/`file_writer.py`; anything from `.loops/`.
+
+## 3. Unverified fixes — verify these empirically, top priority
+
+| commit | claim | your job |
+|---|---|---|
+| 8aa4c619 (pre-slice, on main) | Arbiter-applied, no independent gate yet: engine tests' masked dependency on `sign` fixed by declaring it in engine `dependency-groups.dev` + `tool.uv.sources`; runtime injection boundary untouched. Arbiter mutation-verified in a minimal `UV_PROJECT_ENVIRONMENT` closure. | This is the arc's first sol brief, so you are this fix's only independent verification. Confirm the dep declaration exists, engine tests import sign successfully, and the RUNTIME engine package does not depend on sign. |
+| c63ae5fd | Gate finding GF-1: docstring of `test_encode_decode_encode_is_byte_stable` claimed to pin "key order" while asserting under `sort_keys=True`; docstring corrected, no code change. | Confirm the commit touches only the docstring and the new text matches what the assertion actually checks. |
+
+## 4. Prior review state (independent gate, already run)
+
+An independent gate re-ran the full oracle from scratch and PASSed the slice: all
+suites green with reconciled counts (engine 1937p+1s, store 177, architecture 98,
+others baseline), all three mutation demonstrations reproduced (batch-rule revert → 2
+named failures; merge-site revert and store-site revert → 1 named failure each, in
+different packages), NON-NEGOTIABLE verified empirically and structurally, docs pass
+verified. Its report: `docs/scratch/arrival-break/slice1-gate-report.md` on branch
+`slice/arrival-wire-v1-gate`. Non-blocking findings GF-2 (Rule 18 completeness
+ratchet, deferred to slice 2) and GF-3 (mixed-observer batch re-mint boundary,
+deferred to slice 4) are already dispositioned — do not re-litigate their deferrals,
+but DO flag anything that makes a deferral unsound.
+
+## 5. Seeded review targets (static analysis surfaced these; assess, don't assume)
+
+- `engine/arrival_body.py` — Pyright: body handled as `object` (`.get` on `object`,
+  `Optional` flowing unnarrowed into `len`/`enumerate`/`set()` around lines 213–238).
+  Question: is the type-looseness masking a real input-validation hole — e.g. a batch
+  body whose `rows` is None, a non-list, or rows that are non-dicts: does the grammar
+  REFUSE cleanly with the typed error, or crash with TypeError? Construct the inputs
+  and check.
+- `engine/jsonl_codec.py:499` — Pyright: unreachable code. Real dead branch introduced
+  by the refactor, or analysis artifact? If real: is it residue of the
+  `_validate`→`row_object_fault` fault-returning refactor?
+- `store/merge.py:766` — Pyright: `origin` argument typed `Unknown | None` passed to a
+  parameter typed `str` on the `Entry` constructor. Can a None origin actually reach it
+  at runtime (what feeds that field on the merge path)?
+
+## 6. Verdict format
+
+Per item in §3: **PASS/FAIL + evidence** (command output where empirical).
+New findings: numbered `SOL1-L-<n>`, each with file:line, severity
+(BLOCKING/NON-BLOCKING), a concrete failure scenario, and the evidence you used.
+Then one overall line: **CONVERGED** (no blocking findings, contract honored) or
+**NOT CONVERGED** (with the blocking list).
+
+codex
+I’ll review only and leave the worktree untouched. I’ll first establish the exact diff and repository instructions, then test the two unverified fixes and probe the three seeded runtime questions with focused commands.
+exec
+/bin/zsh -lc "pwd && rg --files -g 'AGENTS.md' -g '"'!**/.venv/**'"' -g '"'!**/.git/**'"' && git status --short --branch && git log --oneline --decorate -8 && git diff --stat 68c7aa57...c63ae5fd" in /Users/kaygee/Code/loops-slice1
+ exited 1 in 0ms:
+/Users/kaygee/Code/loops-slice1
+
+exec
+/bin/zsh -lc 'find .. -name AGENTS.md -print
+
+git status --short --branch
+
+git log --oneline --decorate -8
+
+git diff --stat 68c7aa57...c63ae5fd' in /Users/kaygee/Code/loops-slice1
+ succeeded in 9610ms:
+../gruel-design-system/AGENTS.md
+../gruel-design-system/src/systems/bfc/AGENTS.md
+../gruel-design-system/src/systems/gruel/AGENTS.md
+../siftd/.claude/worktrees/agent-a8fe6b70abd9f1b4d/AGENTS.md
+../siftd/.claude/worktrees/agent-aa52e200cf2f868c8/AGENTS.md
+../siftd/.claude/worktrees/agent-a28c9114af11bc533/AGENTS.md
+../siftd/.claude/worktrees/agent-addd102867a41e12c/AGENTS.md
+../siftd/.claude/worktrees/agent-a05af84b050e52bed/AGENTS.md
+../siftd/.claude/worktrees/agent-ac32a0ce67f44f968/AGENTS.md
+../siftd/.claude/worktrees/agent-aa5f61ac29d2226dd/AGENTS.md
+../siftd/.claude/worktrees/agent-ac61aafd939cf466c/AGENTS.md
+../siftd/.claude/worktrees/agent-a04dad73f7428f503/AGENTS.md
+../siftd/.claude/worktrees/agent-a315ed004a2eca56b/AGENTS.md
+../siftd/.claude/worktrees/agent-a17ca90e2f28e7287/AGENTS.md
+../siftd/.claude/worktrees/agent-a322859c77dffca6b/AGENTS.md
+../siftd/.claude/worktrees/agent-a5fa440fa550aebaa/AGENTS.md
+../siftd/.claude/worktrees/agent-a76b788abf3381cbc/AGENTS.md
+../siftd/.claude/worktrees/agent-a36829c7b318717f5/AGENTS.md
+../siftd/.claude/worktrees/agent-a7bcedf209eb35fc7/AGENTS.md
+../siftd/.claude/worktrees/embed-rebuild/AGENTS.md
+../siftd/.claude/worktrees/scenario-ingestion/AGENTS.md
+../siftd/.claude/worktrees/agent-ad03e33d3f6939cf4/AGENTS.md
+../siftd/.claude/worktrees/agent-a202bc95ceb0dbd2a/AGENTS.md
+../siftd/.claude/worktrees/agent-ab38acdb32df40396/AGENTS.md
+../siftd/.claude/worktrees/agent-a7d43b96059fe7e84/AGENTS.md
+../siftd/.claude/worktrees/agent-a870f40c333ab2b42/AGENTS.md
+../siftd/.claude/worktrees/agent-ac4192bbe60bb77e5/AGENTS.md
+../siftd/.claude/worktrees/agent-ae53b53a7f187cd7d/AGENTS.md
+../siftd/.claude/worktrees/agent-a214def659c0528f7/AGENTS.md
+../siftd/.claude/worktrees/agent-ae494ee3e2ae6c7c8/AGENTS.md
+../siftd/.claude/worktrees/agent-adf3a70f57191db03/AGENTS.md
+../siftd/.claude/worktrees/agent-ab192f7d96e8dd686/AGENTS.md
+../siftd/.claude/worktrees/agent-adb73704c9d44d123/AGENTS.md
+../siftd/.claude/worktrees/agent-ace7559d1fc1cc57b/AGENTS.md
+../siftd/.claude/worktrees/agent-ac1aa6e4e63c1eedc/AGENTS.md
+../siftd/.claude/worktrees/agent-a61a6c326f739a440/AGENTS.md
+../siftd/.claude/worktrees/agent-a7810a018dff0198a/AGENTS.md
+../siftd/.claude/worktrees/agent-a5510fcb0947a94f2/AGENTS.md
+../siftd/.claude/worktrees/agent-a87f328e0dd481bb1/AGENTS.md
+../siftd/.claude/worktrees/changelog-0.10.0/AGENTS.md
+../siftd/.claude/worktrees/agent-aa8ca4a909002d5e3/AGENTS.md
+../siftd/.claude/worktrees/agent-abdb35f195355b3a7/AGENTS.md
+../siftd/.claude/worktrees/agent-ac916d07cd07b8514/AGENTS.md
+../siftd/.claude/worktrees/agent-a1e444f6c9305ee21/AGENTS.md
+../siftd/.claude/worktrees/agent-a6e9bdfed22fd8d5e/AGENTS.md
+../siftd/.claude/worktrees/agent-a0f0b1f21fc74b7b6/AGENTS.md
+../siftd/.claude/worktrees/agent-a0501a52312624261/AGENTS.md
+../siftd/.claude/worktrees/agent-a84f7d04ececb2235/AGENTS.md
+../siftd/.claude/worktrees/agent-a85470259093d1a7b/AGENTS.md
+../siftd/.claude/worktrees/agent-ac8c8e51689c15023/AGENTS.md
+../siftd/.claude/worktrees/agent-a3cbfcfac5a53a968/AGENTS.md
+../siftd/.claude/worktrees/agent-a36745e2697af4ae0/AGENTS.md
+../siftd/.claude/worktrees/agent-a422525b4f297b87e/AGENTS.md
+../siftd/.worktrees/docs-rework/AGENTS.md
+../siftd/AGENTS.md
+../idp-eval/.venv/lib/python3.13/site-packages/inspect_ai/_view/ts-mono/AGENTS.md
+../idp-eval/AGENTS.md
+../topstep/AGENTS.md
+../topstep-mig/AGENTS.md
+../forks/subtask/AGENTS.md
+../forks/Marinara-Engine/AGENTS.md
+../forks/HVM4/AGENTS.md
+../forks/SillyBunny/AGENTS.md
+../gruel.network/AGENTS.md
+../living-almanac/node_modules/fastify/AGENTS.md
+../living-almanac/AGENTS.md
+## slice/arrival-wire-v1
+c63ae5fd (HEAD -> slice/arrival-wire-v1) docs(engine): scope the byte-stability docstring to what it asserts
+83f8f323 docs(engine): sweep the line-codec wording out of the arrival write path
+527caa49 docs(scratch): slice-1 implementation report (wire v1 pin)
+2f444f8d docs(arrival): pin wire v1 and correct the outer-signature law
+680b241b feat(engine,store)!: pin arrival wire v1 — drop body.t, re-spell the tick observer
+68c7aa57 docs(scratch): slice-1 impl brief (wire v1 pin contract)
+7984a5de docs(scratch): slice-1 pre-session panel synthesis (envelope observer)
+d1792bf5 (origin/main, origin/HEAD) Merge pull request #9 from kgruel/feat/arrival-libs
+ docs/architecture/arrival/index.html               |   4 +-
+ docs/architecture/arrival/protocol.html            |  24 +-
+ docs/architecture/arrival/wire-format.html         | 113 +++++---
+ docs/scratch/arrival-break/slice1-impl-report.md   | 283 ++++++++++++++++++
+ libs/engine/src/engine/arrival_body.py             | 318 +++++++++++++++++++++
+ libs/engine/src/engine/arrival_projection.py       |  34 ++-
+ libs/engine/src/engine/arrival_store.py            |  92 ++++--
+ libs/engine/src/engine/jsonl_codec.py              | 111 +++++--
+ libs/engine/tests/test_arrival_authority_gate.py   |   4 +-
+ libs/engine/tests/test_arrival_body.py             | 267 +++++++++++++++++
+ libs/engine/tests/test_arrival_cas_head.py         |  24 +-
+ libs/engine/tests/test_arrival_coordinate_d0.py    |  42 +--
+ libs/engine/tests/test_arrival_derived_log.py      |  34 ++-
+ libs/engine/tests/test_arrival_projection.py       |   1 -
+ libs/engine/tests/test_arrival_store.py            |  53 +++-
+ libs/engine/tests/test_audit_rebase_d3.py          |   8 +-
+ libs/engine/tests/test_query_facts.py              |  12 +-
+ libs/engine/tests/test_seal_rebase_d2.py           |   6 +-
+ libs/store/src/store/merge.py                      |  51 ++--
+ libs/store/tests/test_admission_verification.py    |   9 +-
+ libs/store/tests/test_arrival_merge.py             |  64 ++++-
+ libs/store/tests/test_derived_log_merge.py         |  24 +-
+ .../test_rule_18_arrival_vocabulary_denylist.py    |   7 +
+ 23 files changed, 1373 insertions(+), 212 deletions(-)
+
+codex
+The checkout matches the requested branch and tip, and the diff is exactly 23 files. There is no repository-local `AGENTS.md` governing this worktree, so I’m proceeding directly against the supplied contract.
+exec
+/bin/zsh -lc 'git show --stat --oneline 8aa4c619
+git show --format=fuller --no-ext-diff 8aa4c619 -- libs/engine/pyproject.toml
+git show --stat --oneline c63ae5fd
+git show --format=fuller --no-ext-diff c63ae5fd
+git diff --name-only 68c7aa57...c63ae5fd
+git diff --check 68c7aa57...c63ae5fd' in /Users/kaygee/Code/loops-slice1
+ succeeded in 31ms:
+docs/architecture/arrival/index.html
+docs/architecture/arrival/protocol.html
+docs/architecture/arrival/wire-format.html
+docs/scratch/arrival-break/slice1-impl-report.md
+libs/engine/src/engine/arrival_body.py
+libs/engine/src/engine/arrival_projection.py
+libs/engine/src/engine/arrival_store.py
+libs/engine/src/engine/jsonl_codec.py
+libs/engine/tests/test_arrival_authority_gate.py
+libs/engine/tests/test_arrival_body.py
+libs/engine/tests/test_arrival_cas_head.py
+libs/engine/tests/test_arrival_coordinate_d0.py
+libs/engine/tests/test_arrival_derived_log.py
+libs/engine/tests/test_arrival_projection.py
+libs/engine/tests/test_arrival_store.py
+libs/engine/tests/test_audit_rebase_d3.py
+libs/engine/tests/test_query_facts.py
+libs/engine/tests/test_seal_rebase_d2.py
+libs/store/src/store/merge.py
+libs/store/tests/test_admission_verification.py
+libs/store/tests/test_arrival_merge.py
+libs/store/tests/test_derived_log_merge.py
+tests/architecture/test_rule_18_arrival_vocabulary_denylist.py
+
+exec
+/bin/zsh -lc "sed -n '1,360p' libs/engine/src/engine/arrival_body.py
+sed -n '430,540p' libs/engine/src/engine/jsonl_codec.py
+sed -n '700,800p' libs/store/src/store/merge.py
+rg -n \"class Entry|def _entry_for|origin\" libs/store/src libs/engine/src | head -100
+rg -n \"("'^|'"\\s)(import sign|from sign)\" libs/engine --glob '*.py' --glob '"'!tests/**'"'" in /Users/kaygee/Code/loops-slice1
+ succeeded in 0ms:
+"""arrival_body — the body grammar for arrival records.
+
+An arrival record's ``body`` is one committed store row — or, for a batch,
+the rows of one declaration ceremony — as a JSON object. It is deliberately
+NOT :mod:`engine.jsonl_codec`'s object for the same row, and the difference
+is one field.
+
+Why the fork
+------------
+A ``.jsonl`` line has nowhere but the object itself to say which record
+class it carries, so the line codec writes a ``"t"`` discriminator inside
+it. An arrival record already answers that question in its envelope's
+``k``, and the projection site holds ``k`` when it hands the body over. A
+body carrying ``t`` is therefore the record class spelled twice, with
+nothing keeping the two spellings honest — a record could claim ``k:"tick"``
+around a body claiming ``t:"fact"``, and every reader would have to pick a
+side. Wire v1 drops ``body.t``
+(decision:design/arrival-wire-v1-seam-triage).
+
+The drop is enforced BY THE GRAMMAR, not tolerated and not detected: ``t``
+is simply absent from the allowed field set, so a body still carrying it is
+refused by the same unknown-field rule that refuses any other stray key.
+There is no compat mode and nothing to sniff for — the full break has no
+``.arrival`` store to be compatible with, which is the whole reason the
+seam could be closed at all.
+
+What is shared, and what is not
+-------------------------------
+The ROW domain is shared: the field tuples, which fields may be null, and
+their type rules describe a sqlite row and belong to neither framing. They
+arrive here as :func:`engine.jsonl_codec.row_object_fault` so the two
+encodings cannot drift about what a well-formed row is. The line codec
+keeps its own ``t`` untouched — it still frames the derived ``.jsonl``
+projection (:func:`engine.arrival_projection.line_of_record`) and it is
+what the migration sidecar reads out of historical logs.
+
+The BATCH grammar is not shared, and one rule is the reason: all rows in a
+batch record share one observer (ruling 4 of the seam triage). The
+envelope's observer is read off row 0 and selects the key that signs an
+outer commitment covering every row, so a mixed-observer batch would have
+one author attesting to another's facts. That is a wire-grammar refusal at
+the ARRIVAL seam and nowhere else: adding it to the line codec would hold
+historical ``.jsonl`` logs to a rule that did not exist when they were
+written, and turn a migration into a refusal.
+
+**The load-bearing invariant is the line codec's, unchanged: payload rides
+as the VERBATIM stored TEXT string**, a JSON string value, never
+re-serialized and never parsed here. Every inner commitment hash embeds it
+that way, so a row round-tripped through this module re-derives
+byte-identical hashes and every existing fact signature keeps verifying.
+Nothing this module changed is covered by an inner signature:
+``_fact_commitment_hash`` is (kind, ts, observer, origin, payload) and
+never named ``t``.
+"""
+
+from __future__ import annotations
+
+from .jsonl_codec import (
+    FACT_FIELDS,
+    FACT_NULLABLE,
+    SIGNATURE_FIELD,
+    TICK_FIELDS,
+    TICK_NULLABLE,
+    row_object_fault,
+)
+
+__all__ = [
+    "BATCH_KIND",
+    "FACT_KIND",
+    "TICK_KIND",
+    "ROW_KINDS",
+    "ArrivalBodyError",
+    "body_of_batch",
+    "body_of_fact_row",
+    "body_of_tick_row",
+    "legacy_object_of_body",
+    "rows_of_body",
+]
+
+
+class ArrivalBodyError(ValueError):
+    """An arrival record's body does not match the wire v1 grammar.
+
+    Its own family, not the line codec's: a caller that catches this is
+    reasoning about an arrival record, and the two framings now refuse
+    different things (a body carrying ``t``, a batch spanning observers).
+    Sharing one exception name would make those refusals indistinguishable
+    from a legacy line's.
+    """
+
+
+FACT_KIND = "fact"
+TICK_KIND = "tick"
+BATCH_KIND = "batch"
+
+# The record classes that carry rows. The structural kinds (genesis, key
+# introduction) have bodies that are not row objects at all, and never reach
+# this module — :func:`engine.arrival_projection._projects` is where that
+# split is decided, once, for every consumer.
+ROW_KINDS = frozenset((FACT_KIND, TICK_KIND, BATCH_KIND))
+
+_ROWS = "rows"
+_BATCH_KEYS = frozenset((_ROWS,))
+_MIN_BATCH_ROWS = 2
+
+# Per row class: the fields, in sqlite column order, and which of them may be
+# null. ``allowed`` is fields + signature and NOTHING ELSE — no ``t``. That
+# omission is the wire v1 ruling, and it is why a t-carrying body is refused
+# without a line of code that mentions ``t``.
+_FIELDS = {FACT_KIND: FACT_FIELDS, TICK_KIND: TICK_FIELDS}
+_NULLABLE = {FACT_KIND: FACT_NULLABLE, TICK_KIND: TICK_NULLABLE}
+_ALLOWED = {
+    kind: frozenset((*fields, SIGNATURE_FIELD)) for kind, fields in _FIELDS.items()
+}
+
+
+def _bad(message: str):
+    raise ArrivalBodyError(message)
+
+
+def _row_fault(obj: object, kind: str) -> str | None:
+    """Why ``obj`` is not a well-formed ``kind`` body, or None when it is."""
+    if not isinstance(obj, dict):
+        return f"{kind} body must be a JSON object, got {type(obj).__name__}"
+    return row_object_fault(
+        obj,
+        t=kind,
+        frame="body",
+        fields=_FIELDS[kind],
+        allowed=_ALLOWED[kind],
+        nullable=_NULLABLE[kind],
+    )
+
+
+def _validate_row(obj: object, kind: str) -> None:
+    fault = _row_fault(obj, kind)
+    if fault is not None:
+        _bad(fault)
+
+
+def _row_of(obj: dict, kind: str) -> tuple:
+    """A VALIDATED body as its full-arity row tuple, signature last."""
+    return (*(obj[f] for f in _FIELDS[kind]), obj.get(SIGNATURE_FIELD))
+
+
+def _encode(row: tuple, kind: str) -> dict:
+    """Build the body for a row — and hold it to the decoder's rules.
+
+    ``encode(x)`` must always be decodable, the line codec's symmetry and
+    for its reason: a row with a *typed*-wrong field (a fact carrying
+    ``ts="1.0"``, which sqlite's REAL affinity accepts) would otherwise get
+    a durable arrival record its own reader then refuses. Validating the
+    built object puts the error at the append site, where it is
+    attributable to the caller that assembled the row.
+    """
+    fields = _FIELDS[kind]
+    n = len(fields)
+    if len(row) not in (n, n + 1):
+        _bad(f"{kind} row must have {n} or {n + 1} fields, got {len(row)}")
+    body: dict = dict(zip(fields, row[:n], strict=True))
+    if len(row) > n and row[n] is not None:
+        body[SIGNATURE_FIELD] = row[n]
+    _validate_row(body, kind)
+    return body
+
+
+def body_of_fact_row(row: tuple) -> dict:
+    """A fact row ``(id, kind, ts, observer, origin, payload[, signature])``
+    as its VALIDATED arrival body."""
+    return _encode(row, FACT_KIND)
+
+
+def body_of_tick_row(row: tuple) -> dict:
+    """A tick row (``_TICK_ROW_SQL`` order, signature optional) as its
+    VALIDATED arrival body."""
+    return _encode(row, TICK_KIND)
+
+
+def body_of_batch(rows: list[tuple]) -> dict:
+    """A multi-row ceremony as ONE record's VALIDATED arrival body.
+
+    ``rows`` are fact row tuples in emission order, two or more. A single
+    row does NOT collapse to a fact body here: the caller that has one row
+    is already choosing ``k="fact"`` for the envelope, and a collapse would
+    be this module deciding a record's kind behind it.
+    """
+    body = {_ROWS: [_encode(r, FACT_KIND) for r in rows]}
+    # Structural half only: every row object just came out of _encode, which
+    # already ran the field-level check.
+    _validate_batch(body, validate_rows=False)
+    return body
+
+
+def _validate_batch(body: object, *, validate_rows: bool = True) -> None:
+    """Hold a batch body to the structural rules — both directions.
+
+    Two halves. The STRUCTURAL rules always run: envelope keys, at least
+    two rows, every row a well-formed fact, no duplicate id within the
+    batch, and ONE OBSERVER ACROSS THE BATCH. The per-row FIELD validation
+    runs only when ``validate_rows`` — the decode path keeps it, the encode
+    path skips it because its rows were just built and validated.
+
+    Note what is NOT here and cannot be: the line codec refuses a nested
+    batch and a tick-inside-a-batch by reading each row's ``t``. Without a
+    discriminator there is no such claim to refuse — a nested batch is an
+    object with an unknown ``rows`` field and a tick is an object with
+    unknown ``name``/``since`` fields, and both fail the fact rules on
+    exactly those grounds. The refusals did not weaken; they stopped being
+    a separate rule.
+    """
+    if not isinstance(body, dict):
+        _bad(f"batch body must be a JSON object, got {type(body).__name__}")
+    unknown = sorted(set(body) - _BATCH_KEYS)
+    if unknown:
+        _bad(f"unknown field(s) in batch body: {unknown}")
+    rows = body.get(_ROWS)
+    if not isinstance(rows, list):
+        _bad(
+            "batch field 'rows' must be an array of fact bodies, got "
+            f"{type(rows).__name__}"
+        )
+    if len(rows) < _MIN_BATCH_ROWS:
+        _bad(
+            f"batch must carry at least {_MIN_BATCH_ROWS} rows, got "
+            f"{len(rows)} — a 1-row batch is a second spelling of a plain "
+            "fact record, and an empty one encodes nothing"
+        )
+    seen_ids: set = set()
+    for i, elem in enumerate(rows):
+        if validate_rows:
+            fault = _row_fault(elem, FACT_KIND)
+            if fault is not None:
+                _bad(f"batch row {i}: {fault}")
+        row_id = elem["id"]
+        if row_id in seen_ids:
+            _bad(f"duplicate id {row_id!r} within one batch")
+        seen_ids.add(row_id)
+    _refuse_mixed_observers(rows)
+
+
+def _refuse_mixed_observers(rows: list[dict]) -> None:
+    """Refuse a batch whose rows do not share one observer.
+
+    Ruling 4 of decision:design/arrival-wire-v1-seam-triage, and a
+    construction rule rather than a detection one. The record's envelope
+    observer is read off row 0, and that value selects the key that signs
+    an outer commitment covering EVERY row — so a batch spanning two
+    observers would have row 0's author attesting to another author's
+    facts. The envelope's row-0 read is honest exactly because this refusal
+    exists; without it the invariant lived only in the shape of the call
+    chain that happened to assemble every row against one observer
+    variable, which is a property no reader of the wire format can check.
+
+    One function, called on both the encode and the decode path, because a
+    grammar rule that holds in one direction is a rule a determined caller
+    routes around.
+    """
+    observers = {row["observer"] for row in rows}
+    if len(observers) > 1:
+        _bad(
+            f"batch rows span {len(observers)} observers "
+            f"({', '.join(sorted(repr(o) for o in observers))}) — every row "
+            "in a batch record shares one observer, because the record's "
+            "envelope names row 0's and its signature covers them all. A "
+            "multi-observer ceremony is not one record."
+        )
+
+
+def rows_of_body(k: str, body: object) -> list[tuple[str, tuple]]:
+    """The store rows one arrival body expands to, in on-the-wire order.
+
+    Dispatches on the ENVELOPE's ``k``, which is the whole point of dropping
+    ``t``: the record class is stated once, by the record, and the body is
+    read as whatever the envelope already said it is. A ``fact`` or ``tick``
+    yields one ``(t, row)``; a ``batch`` yields its rows expanded in array
+    order (always two or more).
+
+    The returned ``t`` is the ROW class, so a batch's rows come back as
+    ``"fact"`` — callers index rows, and a batch is an atomicity envelope,
+    not a row class.
+    """
+    if k == BATCH_KIND:
+        _validate_batch(body)
+        assert isinstance(body, dict)
+        return [(FACT_KIND, _row_of(elem, FACT_KIND)) for elem in body[_ROWS]]
+    if k not in _FIELDS:
+        _bad(
+            f"record kind {k!r} carries no rows — a body is read as the kind "
+            "its envelope names, and this one names no row class"
+        )
+    _validate_row(body, k)
+    assert isinstance(body, dict)
+    return [(k, _row_of(body, k))]
+
+
+def legacy_object_of_body(k: str, body: object) -> dict:
+    """An arrival body as the LINE CODEC's object for the same rows.
+
+    The one place the dropped discriminator is put back, and it exists for
+    one consumer: the derived ``.jsonl`` projection, which is a legacy-shaped
+    artifact on purpose — every last-0.x reader reads it, and the arrival
+    log is the store either way.
+
+    Validated as an arrival body FIRST, so a body that is malformed here
+    cannot be laundered into a well-formed line by having ``t`` bolted onto
+    it. The result is held to the line codec's own rules by
+    :func:`engine.jsonl_codec.serialize_object` at the point of use, which
+    also rebuilds key order — so this function's key order carries no
+    weight and the projection's bytes are unchanged by the drop.
+    """
+    rows_of_body(k, body)
+    assert isinstance(body, dict)
+    if k == BATCH_KIND:
+        return {
+            "t": BATCH_KIND,
+            _ROWS: [{"t": FACT_KIND, **elem} for elem in body[_ROWS]],
+        }
+    return {"t": k, **body}
+def _row_of(obj: dict, spec: _Spec) -> tuple:
+    """A VALIDATED record object as its full-arity row tuple."""
+    return (*(obj[f] for f in spec.fields), obj.get(_SIGNATURE))
+
+
+def _ordered(obj: dict, spec: _Spec) -> dict:
+    """A VALIDATED record object, rebuilt in canonical field order.
+
+    Same shape :func:`_encode_obj` builds from a row tuple — discriminator,
+    then the spec's fields in sqlite column order, then ``signature`` when
+    the row carries one. Rebuilt rather than re-dumped as-received because
+    key order in a decoded object is whatever its producer happened to use,
+    and :func:`serialize_object` promises the bytes the row serializers
+    produce.
+    """
+    out: dict = {"t": spec.t}
+    out.update((field, obj[field]) for field in spec.fields)
+    if obj.get(_SIGNATURE) is not None:
+        out[_SIGNATURE] = obj[_SIGNATURE]
+    return out
+
+
+def deserialize_row(line: str) -> tuple[str, tuple]:
+    """Decode a SINGLE-record line, dispatching on ``"t"``. Returns
+    ``(t, row)`` with the row at full arity (7 fact fields / 11 tick fields,
+    signature last). A ``"t":"batch"`` line carries several records and is
+    refused here — decode it with :func:`deserialize_records`.
+
+    Defined AS :func:`deserialize_records` plus the multi-record refusal
+    (a valid batch always expands to ≥ 2 rows), so decoding has exactly
+    one dispatch."""
+    records = deserialize_records(line)
+    if len(records) > 1:
+        raise JsonlCodecError(
+            "batch line carries multiple records — decode with "
+            "deserialize_records, not deserialize_row"
+        )
+    return records[0]
+
+
+def deserialize_records(line: str) -> list[tuple[str, tuple]]:
+    """Decode ANY line into its record sequence, in on-the-wire order.
+
+    A plain fact/tick line yields one ``(t, row)``; a batch line yields its
+    inner rows expanded in array order (always ≥ 2 — so ``len > 1`` is
+    exactly "this line was a batch"). This is the decode every log consumer
+    (replay, catch-up, rebuild, audit) reads through, so batch expansion has
+    one spelling.
+
+    Defined as the line decode composed with :func:`records_from_object`,
+    so decoding still has exactly one dispatch.
+    """
+    return records_from_object(_load(line))
+
+
+def records_from_object(obj: dict) -> list[tuple[str, tuple]]:
+    """:func:`deserialize_records` on an ALREADY-DECODED object.
+
+    An arrival record's ``body`` IS this codec's object for the row it
+    carries, so a consumer holding one has nothing to parse — before this
+    entry existed, ``arrival_store`` re-encoded the body just to hand a
+    string back to the line decoder.
+
+    The SAME validator runs: an object handed in is held to exactly the
+    domain a line is held to. What a line has and an object cannot is a
+    duplicate key, which the decode hook catches; everything downstream of
+    that hook is shared.
+    """
+    if not isinstance(obj, dict):
+        raise JsonlCodecError(
+            f"record must be a JSON object, got {type(obj).__name__}"
+        )
+    t = obj.get("t")
+    if t == _BATCH:
+        _validate_batch(obj)
+        fact = _SPEC["fact"]
+        return [("fact", _row_of(elem, fact)) for elem in obj[_ROWS]]
+    spec = _SPEC.get(t) if isinstance(t, str) else None
+    if spec is None:
+        raise JsonlCodecError(f"unknown record discriminator t={t!r}")
+    _validate(obj, spec)
+    return [(spec.t, _row_of(obj, spec))]
+
+
+def serialize_object(obj: dict) -> str:
+    """Encode an ALREADY-DECODED record object as one canonical line.
+
+    Validated through :func:`records_from_object` — the same domain a line
+    is held to — then dumped in canonical field order, so the result is
+    byte-identical to the ``serialize_*`` call that produced the object.
+    Field order is REBUILT rather than inherited: a decoded object's key
+    order is its producer's, and this function's contract is about the
+    codec's bytes, not the caller's dict.
+    """
+    records_from_object(obj)
+    t = obj["t"]
+    if t == _BATCH:
+        fact = _SPEC["fact"]
+        return _dump({"t": _BATCH, _ROWS: [_ordered(e, fact) for e in obj[_ROWS]]})
+    return _dump(_ordered(obj, _SPEC[t]))
+
+    Record shape, asymmetric between facts and ticks, and the asymmetry is
+    inherited from the live write path rather than invented here:
+
+    * ``k`` is the row class, never a fact's own kind. Since wire v1 dropped
+      ``body.t``, it is the only place that class is written.
+    * ``origin``/``at`` mirror the row's own columns. ``observer`` splits by
+      kind, exactly as the live write path splits it
+      (:meth:`engine.arrival_store.ArrivalStore._custodian`, ruling 2 of
+      decision:design/arrival-wire-v1-seam-triage). A merged FACT's record
+      claims its ORIGINAL observer — the record describes the authored row,
+      not the operator who admitted it. A merged TICK has no author, so its
+      record names THIS log's custodian: ``custodian`` is the TARGET's
+      genesis observer, not the source's, because the record being minted
+      is the target's own. This is the second, independently-encoded tick
+      mint site; a respell that landed only at the live path would leave
+      merge committing the retired convention with nothing to catch it.
+    * **Fact bodies ride verbatim, the row's own signature included.** The
+      fact signature is a per-observer authorship claim over content only,
+      carried verbatim and never re-signed; era-aware NULL for a
+      pre-signature source.
+    * **Tick bodies carry chain columns and the tick signature as
+      NULL/absent.** ``prev_hash``/``window_start``/``fact_cursor``/
+      ``window_hash`` are store-local custody: carrying them verbatim would
+      put ticks in the target whose links reference the SOURCE's chain, so
+      the target's chain verification would break on every merged tick. And
+      keeping the tick signature while nulling the chain would be a
+      verification lie, because the tick signature covers the chain fields.
+      The codec accepts all five as nullable — this is the pre-chain era
+      shape, honestly claimed.
+
+    There is no record-level signature. ``merge_store`` takes no signer and
+    never will: there is no key to sign with, and the target's operator holds
+    no key for a foreign observer anyway. The authorship claim that survives
+    is the fact row's own signature, riding in the body. An ADMISSION
+    attestation — the target custodian's own claim that it admitted this
+    record — is a later cut's.
+
+    Not signing is separate from not CHECKING: ``merge_store``'s opt-in
+    ``verify`` holds these carried signatures to the source's own key
+    history before any of this is assembled (:class:`AdmissionUnverified`).
+    Whether they were checked or not, they ride verbatim — verification
+    decides whether the merge happens, never what a record says.
+    """
+    from engine.arrival import Entry
+    from engine.arrival_body import (
+        body_of_batch,
+        body_of_fact_row,
+        body_of_tick_row,
+    )
+    from engine.jsonl_codec import TICK_CHAIN_FIELDS, TICK_FIELDS
+
+    if kind == "tick":
+        _t, row = rows[0]
+        # Nulling the chain is THIS module's decision (see above); how many
+        # columns that is, and where they sit, is the codec's — so the width
+        # is derived from its field tuples rather than counted here. The
+        # slice reads Nones back in, the source arrival row has them
+        # overwritten; both land at the codec's tick arity, signature
+        # dropped by riding one short of it.
+        base = len(TICK_FIELDS) - len(TICK_CHAIN_FIELDS)
+        stripped = (*row[:base], *(None,) * len(TICK_CHAIN_FIELDS))
+        return Entry(
+            k="tick",
+            body=body_of_tick_row(stripped),
+            observer=custodian,
+            origin=stripped[4],
+            at=stripped[2],
+        )
+
+    fact_rows = [row for _t, row in rows]
+    first = fact_rows[0]
+    k = "batch" if len(fact_rows) > 1 else "fact"
+    body = body_of_batch(fact_rows) if k == "batch" else body_of_fact_row(first)
+    return Entry(
+        k=k, body=body, observer=first[3], origin=first[4], at=first[2]
+    )
+
+
+def _rederive_after_append(canonical: Path) -> None:
+    """Bring both projections current after the append phase.
+
+    The index by CONSUME-FORWARD catch-up, not by re-derivation: the records
+    just appended are a suffix, so opening the store appends their rows and
+    never clears anything. Re-deriving the whole index per merge would be
+    O(n) for no reason, and it would renumber nothing but it would still
+    drop the search index.
+
+    The derived log by regeneration, because it is byte-sorted and an append
+    to a sorted file is not an append. It is written whether or not one was
+    there before: an ABSENT projection builds automatically, because
+    building it destroys nothing.
+    """
+    from engine.arrival_projection import write_derived_log
+    from engine.jsonl_store import open_canonical_store
+
+    open_canonical_store(
+        canonical, serialize=lambda d: d, deserialize=lambda d: d
+    ).close()
+    write_derived_log(canonical)
+libs/engine/src/engine/arrival_body.py:52:``_fact_commitment_hash`` is (kind, ts, observer, origin, payload) and
+libs/engine/src/engine/arrival_body.py:168:    """A fact row ``(id, kind, ts, observer, origin, payload[, signature])``
+libs/engine/src/engine/store_reader.py:231:        The other stored columns — ``kind``, ``observer``, ``origin`` — are
+libs/engine/src/engine/store_reader.py:264:            "SELECT id, kind, ts, observer, origin, payload FROM facts "
+libs/engine/src/engine/store_reader.py:463:            "SELECT name, ts, since, origin, payload FROM ticks "
+libs/engine/src/engine/store_reader.py:469:                {"name": r[0], "ts": r[1], "since": r[2], "origin": r[3], "payload": json.loads(r[4])}
+libs/engine/src/engine/store_reader.py:510:            f"SELECT name, ts, since, origin, payload{env_cols} FROM ticks "
+libs/engine/src/engine/store_reader.py:516:                {"name": r[0], "ts": r[1], "since": r[2], "origin": r[3], "payload": json.loads(r[4])}
+libs/engine/src/engine/store_reader.py:581:            "SELECT id, kind, ts, observer, origin, payload FROM facts "
+libs/engine/src/engine/store_reader.py:590:            "SELECT id, kind, ts, observer, origin, payload FROM facts "
+libs/engine/src/engine/store_reader.py:605:        """Convert a (id, kind, ts, observer, origin, payload) row to dict."""
+libs/engine/src/engine/store_reader.py:611:            "origin": r[4],
+libs/engine/src/engine/store_reader.py:648:                "SELECT id, kind, ts, observer, origin, payload FROM facts "
+libs/engine/src/engine/store_reader.py:655:                "SELECT id, kind, ts, observer, origin, payload FROM facts "
+libs/engine/src/engine/store_reader.py:692:            "SELECT id, kind, ts, observer, origin, payload FROM facts "
+libs/engine/src/engine/store_reader.py:702:                "origin": r[4],
+libs/engine/src/engine/store_reader.py:735:            "SELECT id, kind, ts, observer, origin, payload FROM facts "
+libs/engine/src/engine/store_reader.py:859:                "SELECT id, kind, ts, observer, origin, payload, arrival_ordinal, arrival_seq FROM facts "
+libs/engine/src/engine/store_reader.py:873:                        f"SELECT id, kind, ts, observer, origin, payload, arrival_ordinal, arrival_seq FROM facts "
+libs/engine/src/engine/store_reader.py:885:                        f"SELECT id, kind, ts, observer, origin, payload, arrival_ordinal, arrival_seq FROM facts "
+libs/engine/src/engine/store_reader.py:1002:            f"SELECT f.id, f.kind, f.ts, f.observer, f.origin, f.payload "
+libs/store/src/store/slice.py:33:    origins: list[str] | None = None,
+libs/store/src/store/slice.py:49:        origins: Include facts from these origins.
+libs/store/src/store/slice.py:84:                                     observers=observers, origins=origins)
+libs/store/src/store/slice.py:99:            "INSERT INTO slice.facts (id, kind, ts, observer, origin, payload, signature, arrival_ordinal, arrival_seq) "
+libs/store/src/store/slice.py:100:            f"SELECT id, kind, ts, observer, origin, payload, {sig_src}, "
+libs/store/src/store/slice.py:125:            "INSERT INTO slice.ticks (id, name, ts, since, origin, payload, arrival_ordinal, arrival_seq) "
+libs/store/src/store/slice.py:126:            f"SELECT id, name, ts, since, origin, payload, "
+libs/store/src/store/slice.py:150:    origins: list[str] | None = None,
+libs/store/src/store/slice.py:183:    if origins:
+libs/store/src/store/slice.py:184:        placeholders = ", ".join(["?"] * len(origins))
+libs/store/src/store/slice.py:185:        clauses.append(f"origin IN ({placeholders})")
+libs/store/src/store/slice.py:186:        params.extend(origins)
+libs/engine/src/engine/declaration.py:880:                        timeout=src.timeout, origin=src.origin, env=env,
+libs/engine/src/engine/jsonl_store.py:22:Write order (the receipt originates at the log)
+libs/engine/src/engine/jsonl_store.py:155:keeps the originals of — and still refuses with
+libs/engine/src/engine/jsonl_store.py:1019:            "while the canonical log kept the originals, so the index would "
+libs/engine/src/engine/vertex.py:270:        """Vertex name — stamped as origin on produced Ticks."""
+libs/engine/src/engine/vertex.py:348:        Derived fields are added alongside originals.
+libs/engine/src/engine/vertex.py:406:        Preserves the original API — all existing callers keep working.
+libs/engine/src/engine/vertex.py:547:        to the originating child, to prevent recursion).
+libs/engine/src/engine/vertex.py:736:            tick = loop.fire(fact_ts, origin=self._name)
+libs/engine/src/engine/vertex.py:771:        tick = target_loop.fire(fact_ts, origin=self._name,
+libs/engine/src/engine/vertex.py:798:            origin=self._name,
+libs/engine/src/engine/vertex.py:813:        return Tick(name=name, ts=ts, payload=state, origin=self._name)
+libs/engine/src/engine/vertex.py:1104:            tick = target_loop.fire(fact_ts, origin=self._name,
+libs/engine/src/engine/vertex.py:1161:            origin=tick.origin,
+libs/engine/src/engine/vertex.py:1238:            origin=tick.origin,
+libs/engine/src/engine/witness.py:39:  lineage), origin-guaranteed by the write path but not interchange-guaranteed;
+libs/engine/src/engine/compiler.py:310:        origin=loop.origin,
+libs/engine/src/engine/compiler.py:344:        origin=substitute_vars(loop_ast.origin, params) if loop_ast.origin else "",
+libs/engine/src/engine/compiler.py:501:        origin=inline.origin,
+libs/engine/src/engine/compiler.py:511:    construction (format, parse pipeline, origin, env). The SequentialSource
+libs/engine/src/engine/arrival_store.py:27:``origin``/``at`` mirror the row's own columns. ``observer`` splits by kind,
+libs/engine/src/engine/arrival_store.py:122:    the log kept the originals), and index states that only projection
+libs/engine/src/engine/arrival_store.py:507:                origin=committed_row[4],
+libs/engine/src/engine/arrival_store.py:571:            origin=rows[0][4],
+libs/engine/src/engine/arrival_store.py:699:            "while the arrival log kept the originals, so the index would "
+libs/engine/src/engine/residence.py:14:``.db``          sqlite-canonical (the original shape). No log.
+libs/engine/src/engine/arrival_projection.py:28:never partially, because reproducing the original rowids is what keeps
+libs/engine/src/engine/arrival_projection.py:482:    replay from empty reproduce the original assignment exactly, which is
+libs/store/src/store/rebirth.py:12:  envelope rides the payload VERBATIM — original payload TEXT, cursors,
+libs/store/src/store/rebirth.py:13:  signature — so a signed old tick still verifies against its original
+libs/store/src/store/rebirth.py:59:_TICK_BASE_COLS = ("id", "name", "ts", "since", "origin", "payload")
+libs/store/src/store/rebirth.py:76:    origin, payload): the original authorship claim no longer holds and
+libs/store/src/store/rebirth.py:84:    origin: str
+libs/store/src/store/rebirth.py:204:        "SELECT id, kind, ts, observer, origin, payload"
+libs/store/src/store/rebirth.py:256:    only verifies against its original bytes. Dereferencing old cursor
+libs/store/src/store/rebirth.py:276:        origin=d.get("origin", ""),
+libs/store/src/store/rebirth.py:293:        "SELECT id, kind, ts, observer, origin, payload"
+libs/store/src/store/rebirth.py:307:             mapped.origin, mapped.payload)
+libs/store/src/store/rebirth.py:308:            != (row.kind, row.ts, row.observer, row.origin, row.payload)
+libs/store/src/store/rebirth.py:361:            fact, origin on the genesis tick.
+libs/store/src/store/rebirth.py:433:            "INSERT INTO facts (id, kind, ts, observer, origin, payload, signature, arrival_ordinal, arrival_seq) "
+libs/store/src/store/rebirth.py:435:            [(r.id, r.kind, r.ts, r.observer, r.origin, r.payload, r.signature, idx + 1, 0)
+libs/store/src/store/rebirth.py:440:            "INSERT INTO facts (id, kind, ts, observer, origin, payload, arrival_ordinal, arrival_seq) "
+libs/store/src/store/rebirth.py:472:            origin=observer,
+libs/store/src/store/rebirth.py:582:                    "pass the original Transform explicitly"
+libs/store/src/store/rebirth.py:588:            "SELECT id, kind, ts, observer, origin, payload"
+libs/store/src/store/rebirth.py:624:        exp_tuple = (exp.id, exp.kind, exp.ts, exp.observer, exp.origin,
+libs/store/src/store/rebirth.py:627:            fields = ("id", "kind", "ts", "observer", "origin", "payload",
+libs/engine/src/engine/handle.py:141:    originating ``cause``."""
+libs/engine/src/engine/handle.py:229:    origin: str
+libs/engine/src/engine/handle.py:385:            "SELECT rowid, id, kind, ts, observer, origin, payload FROM facts "
+libs/engine/src/engine/handle.py:392:                origin=r[5], payload=_decode_payload(r[6]),
+libs/engine/src/engine/handle.py:521:    origin: str
+libs/engine/src/engine/handle.py:535:    sealed Tick (since/origin/chain) reads it via ``vertex_ticks``."""
+libs/engine/src/engine/handle.py:1206:            p["_origin"] = f.origin
+libs/engine/src/engine/handle.py:1409:                observer=f.observer, origin=f.origin, payload=f.payload,
+libs/engine/src/engine/probe.py:49:  (sqlite-canonical, the original shape).
+libs/engine/src/engine/loop.py:120:        origin: str = "",
+libs/engine/src/engine/loop.py:149:            origin=origin,
+libs/engine/src/engine/tick.py:19:    (origin). The tree of origins is reconstructable from nested
+libs/engine/src/engine/tick.py:36:    origin: str = ""
+libs/engine/src/engine/tick.py:45:            "origin": self.origin,
+libs/engine/src/engine/tick.py:58:            origin=d.get("origin", ""),
+libs/engine/src/engine/jsonl_codec.py:81:FACT_FIELDS = ("id", "kind", "ts", "observer", "origin", "payload")
+libs/engine/src/engine/jsonl_codec.py:82:_TICK_BASE_FIELDS = ("id", "name", "ts", "since", "origin", "payload")
+libs/engine/src/engine/jsonl_codec.py:190:    """A fact row ``(id, kind, ts, observer, origin, payload[, signature])`` as
+libs/engine/src/engine/jsonl_codec.py:233:    """Encode a fact row ``(id, kind, ts, observer, origin, payload[, signature])``."""
+libs/engine/tests/conftest.py:54:    from sign import ed25519
+libs/engine/tests/conftest.py:67:        from sign import ed25519
+libs/engine/tests/conftest.py:74:        from sign import ed25519
+libs/engine/tests/test_arrival_gate.py:16:import signal
+
+exec
+/bin/zsh -lc "nl -ba libs/engine/src/engine/jsonl_codec.py | sed -n '120,230p;470,515p'
+nl -ba libs/store/src/store/merge.py | sed -n '600,790p'
+nl -ba libs/engine/src/engine/arrival.py | sed -n '1,130p'
+sed -n '1,80p' libs/engine/pyproject.toml
+rg -n \"_entry_for\\(\" libs/store/src/store/merge.py libs/store/tests
+rg -n \"SELECT.*tick|_TICK|tick_rows|yield.*tick\" libs/store/src/store/merge.py" in /Users/kaygee/Code/loops-slice1
+ succeeded in 0ms:
+   120	
+   121	_SPEC = {
+   122	    "fact": _Spec("fact", FACT_FIELDS, FACT_NULLABLE),
+   123	    "tick": _Spec("tick", TICK_FIELDS, TICK_NULLABLE),
+   124	}
+   125	
+   126	# The third record type is STRUCTURAL, not field-shaped, so it does not fit
+   127	# _Spec: a ``"t":"batch"`` envelope carries ``rows`` — an array of ≥ 2
+   128	# ordinary fact record objects, each validated against ``_SPEC["fact"]`` in
+   129	# full (verbatim payload TEXT per row, so signatures and commitment hashes
+   130	# survive round-trip unchanged). One line is the log's atomicity unit, so a
+   131	# batch is how a multi-row ceremony (absorb_edit) lands atomically.
+   132	# Structural rules (design:architecture/jsonl-declaration-ceremony-encoding):
+   133	# no ticks inside (ticks are minted one-at-a-time and chain-linked), no
+   134	# nested batches, no duplicate id within one batch (otherwise a dup only
+   135	# surfaces three layers away as a rebuild-time PK collision), no envelope
+   136	# key besides t/rows. Same-ts across rows is deliberately NOT a codec rule
+   137	# (D1): it is the declaration ceremony's invariant, enforced by absorb_edit
+   138	# and asserted by audit_deep — baking it in here would block future
+   139	# batch-emit reuse with distinct ts.
+   140	_BATCH = "batch"
+   141	_ROWS = "rows"
+   142	_BATCH_KEYS = frozenset(("t", _ROWS))
+   143	_MIN_BATCH_ROWS = 2
+   144	
+   145	# JCS (RFC 8785) numeric domain — mirrors rfc8785._impl._INT_MIN/_INT_MAX.
+   146	# Integers outside it, and non-finite floats, are not canonicalizable, so a
+   147	# line carrying one cannot be hashed: reject at the codec gate rather than
+   148	# detonating inside the commitment hashers.
+   149	_JCS_INT_MAX = 2**53 - 1
+   150	_JCS_INT_MIN = -(2**53) + 1
+   151	
+   152	
+   153	def _dump(obj: dict) -> str:
+   154	    """Encode one line. ensure_ascii keeps lines 7-bit and free of raw
+   155	    U+2028/U+2029; allow_nan=False refuses non-JSON floats explicitly;
+   156	    separators drop insignificant whitespace. Key order is the dict's
+   157	    insertion order — sqlite column order — not sorted: this is a transport
+   158	    encoding, not a canonicalization (JCS lives in the hashers)."""
+   159	    return json.dumps(obj, ensure_ascii=True, allow_nan=False,
+   160	                      separators=(",", ":"))
+   161	
+   162	
+   163	def _encode_obj(row: tuple, spec: _Spec) -> dict:
+   164	    """Build the line object for a row — and hold it to the decoder's rules.
+   165	
+   166	    ``serialize(x)`` must always be decodable. Checking arity alone let a
+   167	    row with a *typed*-wrong field through: a fact carrying ``ts="1.0"``
+   168	    (a string, which sqlite's REAL affinity accepts) got a durable JSONL
+   169	    receipt, and then every subsequent open failed on decode — the store
+   170	    bricked by a line its own serializer wrote. Running the decoder's
+   171	    :func:`_validate` over the object before dumping makes the two
+   172	    directions symmetric by construction rather than by parallel
+   173	    maintenance, and puts the error at the append site, where it is
+   174	    attributable to the caller that built the row.
+   175	    """
+   176	    n = len(spec.fields)
+   177	    if len(row) not in (n, n + 1):
+   178	        raise JsonlCodecError(
+   179	            f"{spec.t} row must have {n} or {n + 1} fields, got {len(row)}"
+   180	        )
+   181	    obj: dict = {"t": spec.t}
+   182	    obj.update(zip(spec.fields, row[:n], strict=True))
+   183	    if len(row) > n and row[n] is not None:
+   184	        obj[_SIGNATURE] = row[n]
+   185	    _validate(obj, spec)
+   186	    return obj
+   187	
+   188	
+   189	def object_of_fact_row(row: tuple) -> dict:
+   190	    """A fact row ``(id, kind, ts, observer, origin, payload[, signature])`` as
+   191	    its VALIDATED record object."""
+   192	    return _encode_obj(row, _SPEC["fact"])
+   193	
+   194	
+   195	def object_of_tick_row(row: tuple) -> dict:
+   196	    """A tick row (``_TICK_ROW_SQL`` order, signature optional) as its
+   197	    VALIDATED record object."""
+   198	    return _encode_obj(row, _SPEC["tick"])
+   199	
+   200	
+   201	def object_of_batch(rows: list[tuple]) -> dict:
+   202	    """A multi-row ceremony as ONE atomic record object.
+   203	
+   204	    ``rows`` are fact row tuples in emission order. One row collapses to a
+   205	    plain fact object — a 1-row batch would be a second spelling of the same
+   206	    record (the "signature must be absent, not null" ethos), so the envelope
+   207	    exists only where multi-row atomicity does. Zero rows is a caller bug.
+   208	
+   209	    Same both-directions symmetry as the scalar encoders: the built envelope
+   210	    is held to :func:`_validate_batch`, so a bad row fails at the append
+   211	    site instead of bricking every later open.
+   212	    """
+   213	    if not rows:
+   214	        raise JsonlCodecError("batch requires at least one fact row")
+   215	    if len(rows) == 1:
+   216	        return object_of_fact_row(rows[0])
+   217	    obj = {"t": _BATCH, _ROWS: [_encode_obj(r, _SPEC["fact"]) for r in rows]}
+   218	    # Structural half only: every row object just came out of _encode_obj,
+   219	    # which already ran the field-level _validate — re-running it per row
+   220	    # would be the same check twice on the same object.
+   221	    _validate_batch(obj, validate_rows=False)
+   222	    return obj
+   223	
+   224	
+   225	# The three serializers are their encoders composed with the dump, mirroring
+   226	# the decode side (``deserialize_records`` is the load composed with
+   227	# ``records_from_object``). A consumer that already holds — or wants — the
+   228	# OBJECT calls the encoder directly rather than dumping a line only to parse
+   229	# it straight back; an arrival record's ``body`` is exactly that object.
+   230	
+   470	def deserialize_records(line: str) -> list[tuple[str, tuple]]:
+   471	    """Decode ANY line into its record sequence, in on-the-wire order.
+   472	
+   473	    A plain fact/tick line yields one ``(t, row)``; a batch line yields its
+   474	    inner rows expanded in array order (always ≥ 2 — so ``len > 1`` is
+   475	    exactly "this line was a batch"). This is the decode every log consumer
+   476	    (replay, catch-up, rebuild, audit) reads through, so batch expansion has
+   477	    one spelling.
+   478	
+   479	    Defined as the line decode composed with :func:`records_from_object`,
+   480	    so decoding still has exactly one dispatch.
+   481	    """
+   482	    return records_from_object(_load(line))
+   483	
+   484	
+   485	def records_from_object(obj: dict) -> list[tuple[str, tuple]]:
+   486	    """:func:`deserialize_records` on an ALREADY-DECODED object.
+   487	
+   488	    An arrival record's ``body`` IS this codec's object for the row it
+   489	    carries, so a consumer holding one has nothing to parse — before this
+   490	    entry existed, ``arrival_store`` re-encoded the body just to hand a
+   491	    string back to the line decoder.
+   492	
+   493	    The SAME validator runs: an object handed in is held to exactly the
+   494	    domain a line is held to. What a line has and an object cannot is a
+   495	    duplicate key, which the decode hook catches; everything downstream of
+   496	    that hook is shared.
+   497	    """
+   498	    if not isinstance(obj, dict):
+   499	        raise JsonlCodecError(
+   500	            f"record must be a JSON object, got {type(obj).__name__}"
+   501	        )
+   502	    t = obj.get("t")
+   503	    if t == _BATCH:
+   504	        _validate_batch(obj)
+   505	        fact = _SPEC["fact"]
+   506	        return [("fact", _row_of(elem, fact)) for elem in obj[_ROWS]]
+   507	    spec = _SPEC.get(t) if isinstance(t, str) else None
+   508	    if spec is None:
+   509	        raise JsonlCodecError(f"unknown record discriminator t={t!r}")
+   510	    _validate(obj, spec)
+   511	    return [(spec.t, _row_of(obj, spec))]
+   512	
+   513	
+   514	def serialize_object(obj: dict) -> str:
+   515	    """Encode an ALREADY-DECODED record object as one canonical line.
+   600	            "self-consistency — every admitted signed row's authorship claim "
+   601	            "verifies under the source's own key history — not target-"
+   602	            "operator trust in the source's keys."
+   603	        )
+   604	
+   605	
+   606	def _comparable(t: str, row: tuple) -> tuple:
+   607	    """One row's dedup-comparison body, shared by both sides of the merge.
+   608	
+   609	    Facts compare on the full authored 7-column body minus id. Ticks compare
+   610	    on the chainless base minus id: chain columns and the tick signature are
+   611	    store-local custody stripped by ``_entry_for`` on every merge, so the
+   612	    target's chain can never ground a divergence claim against a source
+   613	    tick that legitimately carries a different (or no) chain.
+   614	    """
+   615	    if t == "fact":
+   616	        return ("fact", *row[1:7])
+   617	    return ("tick", *row[1:6])
+   618	
+   619	
+   620	_COMPARED_FIELDS = {
+   621	    "fact": ("kind", "ts", "observer", "origin", "payload", "signature"),
+   622	    "tick": ("name", "ts", "since", "origin", "payload"),
+   623	}
+   624	
+   625	
+   626	def _refuse_divergence(t: str, row: tuple, held_body: tuple) -> None:
+   627	    incoming = _comparable(t, row)
+   628	    if held_body[0] != incoming[0]:
+   629	        diverging = ["row class"]
+   630	    else:
+   631	        diverging = [
+   632	            name
+   633	            for name, ours, theirs in zip(
+   634	                _COMPARED_FIELDS[t], held_body[1:], incoming[1:], strict=True
+   635	            )
+   636	            if ours != theirs
+   637	        ]
+   638	    raise MergeDivergence(
+   639	        f"{t} id {row[0]!r} exists on both sides with different content "
+   640	        f"(diverging: {', '.join(diverging) or 'row class'}) — at most one "
+   641	        "of them is what an arrival log says, and a merge that picked a "
+   642	        "side would re-mint identity. Nothing was appended. Resolve the "
+   643	        "contradiction at its source before merging."
+   644	    )
+   645	
+   646	
+   647	def _entries_for(source_rows: _SourceRows, held: dict[str, tuple], custodian: str):
+   648	    """The records to append, after dedup.
+   649	
+   650	    ``custodian`` is the TARGET log's genesis observer, threaded through to
+   651	    :func:`_entry_for` for the tick envelopes it mints. It is read once per
+   652	    merge attempt at the call site, where the target log is already open,
+   653	    rather than re-derived per record.
+   654	
+   655	    Returns ``(entries, facts, ticks, admitted)``, where ``admitted`` is the
+   656	    surviving FACT rows paired with the source position they arrived at —
+   657	    the admission set, which is exactly what admission verification is a
+   658	    claim about, and exactly what a deduplicated row is not in.
+   659	
+   660	    A row whose id the target holds is skipped ONLY when its comparison body
+   661	    matches the target's (:func:`_comparable`); the same id over different
+   662	    content raises :class:`MergeDivergence` before anything is appended.
+   663	    A group whose rows are ALL already in the target contributes no record.
+   664	    A batch group that is partly deduped contributes its remainder: two or
+   665	    more surviving rows still ride as one batch (the ceremony's atomicity is
+   666	    the reason the batch exists), a single survivor rides as a plain fact
+   667	    line, because a one-row batch is a second spelling the codec refuses.
+   668	    A split batch needs no special handling for verification: the admission
+   669	    set is per-ROW, so the remainder is simply the rows that are in it.
+   670	    """
+   671	    from engine.arrival import Entry
+   672	
+   673	    entries: list[Entry] = []
+   674	    admitted: list[tuple[int | None, tuple]] = []
+   675	    facts = ticks = 0
+   676	    for kind, rows, ordinal in source_rows.groups:
+   677	        fresh = []
+   678	        for t, row in rows:
+   679	            body = held.get(row[0])
+   680	            if body is not None:
+   681	                if body != _comparable(t, row):
+   682	                    _refuse_divergence(t, row, body)
+   683	                continue
+   684	            fresh.append((t, row))
+   685	        if not fresh:
+   686	            continue
+   687	        for t, row in fresh:
+   688	            held[row[0]] = _comparable(t, row)
+   689	            if t == "fact":
+   690	                facts += 1
+   691	                admitted.append((ordinal, row))
+   692	            else:
+   693	                ticks += 1
+   694	        entries.append(_entry_for(kind, fresh, custodian))
+   695	    return entries, facts, ticks, admitted
+   696	
+   697	
+   698	def _entry_for(kind: str, rows: list[tuple[str, tuple]], custodian: str):
+   699	    """One record for a group of surviving rows.
+   700	
+   701	    Record shape, asymmetric between facts and ticks, and the asymmetry is
+   702	    inherited from the live write path rather than invented here:
+   703	
+   704	    * ``k`` is the row class, never a fact's own kind. Since wire v1 dropped
+   705	      ``body.t``, it is the only place that class is written.
+   706	    * ``origin``/``at`` mirror the row's own columns. ``observer`` splits by
+   707	      kind, exactly as the live write path splits it
+   708	      (:meth:`engine.arrival_store.ArrivalStore._custodian`, ruling 2 of
+   709	      decision:design/arrival-wire-v1-seam-triage). A merged FACT's record
+   710	      claims its ORIGINAL observer — the record describes the authored row,
+   711	      not the operator who admitted it. A merged TICK has no author, so its
+   712	      record names THIS log's custodian: ``custodian`` is the TARGET's
+   713	      genesis observer, not the source's, because the record being minted
+   714	      is the target's own. This is the second, independently-encoded tick
+   715	      mint site; a respell that landed only at the live path would leave
+   716	      merge committing the retired convention with nothing to catch it.
+   717	    * **Fact bodies ride verbatim, the row's own signature included.** The
+   718	      fact signature is a per-observer authorship claim over content only,
+   719	      carried verbatim and never re-signed; era-aware NULL for a
+   720	      pre-signature source.
+   721	    * **Tick bodies carry chain columns and the tick signature as
+   722	      NULL/absent.** ``prev_hash``/``window_start``/``fact_cursor``/
+   723	      ``window_hash`` are store-local custody: carrying them verbatim would
+   724	      put ticks in the target whose links reference the SOURCE's chain, so
+   725	      the target's chain verification would break on every merged tick. And
+   726	      keeping the tick signature while nulling the chain would be a
+   727	      verification lie, because the tick signature covers the chain fields.
+   728	      The codec accepts all five as nullable — this is the pre-chain era
+   729	      shape, honestly claimed.
+   730	
+   731	    There is no record-level signature. ``merge_store`` takes no signer and
+   732	    never will: there is no key to sign with, and the target's operator holds
+   733	    no key for a foreign observer anyway. The authorship claim that survives
+   734	    is the fact row's own signature, riding in the body. An ADMISSION
+   735	    attestation — the target custodian's own claim that it admitted this
+   736	    record — is a later cut's.
+   737	
+   738	    Not signing is separate from not CHECKING: ``merge_store``'s opt-in
+   739	    ``verify`` holds these carried signatures to the source's own key
+   740	    history before any of this is assembled (:class:`AdmissionUnverified`).
+   741	    Whether they were checked or not, they ride verbatim — verification
+   742	    decides whether the merge happens, never what a record says.
+   743	    """
+   744	    from engine.arrival import Entry
+   745	    from engine.arrival_body import (
+   746	        body_of_batch,
+   747	        body_of_fact_row,
+   748	        body_of_tick_row,
+   749	    )
+   750	    from engine.jsonl_codec import TICK_CHAIN_FIELDS, TICK_FIELDS
+   751	
+   752	    if kind == "tick":
+   753	        _t, row = rows[0]
+   754	        # Nulling the chain is THIS module's decision (see above); how many
+   755	        # columns that is, and where they sit, is the codec's — so the width
+   756	        # is derived from its field tuples rather than counted here. The
+   757	        # slice reads Nones back in, the source arrival row has them
+   758	        # overwritten; both land at the codec's tick arity, signature
+   759	        # dropped by riding one short of it.
+   760	        base = len(TICK_FIELDS) - len(TICK_CHAIN_FIELDS)
+   761	        stripped = (*row[:base], *(None,) * len(TICK_CHAIN_FIELDS))
+   762	        return Entry(
+   763	            k="tick",
+   764	            body=body_of_tick_row(stripped),
+   765	            observer=custodian,
+   766	            origin=stripped[4],
+   767	            at=stripped[2],
+   768	        )
+   769	
+   770	    fact_rows = [row for _t, row in rows]
+   771	    first = fact_rows[0]
+   772	    k = "batch" if len(fact_rows) > 1 else "fact"
+   773	    body = body_of_batch(fact_rows) if k == "batch" else body_of_fact_row(first)
+   774	    return Entry(
+   775	        k=k, body=body, observer=first[3], origin=first[4], at=first[2]
+   776	    )
+   777	
+   778	
+   779	def _rederive_after_append(canonical: Path) -> None:
+   780	    """Bring both projections current after the append phase.
+   781	
+   782	    The index by CONSUME-FORWARD catch-up, not by re-derivation: the records
+   783	    just appended are a suffix, so opening the store appends their rows and
+   784	    never clears anything. Re-deriving the whole index per merge would be
+   785	    O(n) for no reason, and it would renumber nothing but it would still
+   786	    drop the search index.
+   787	
+   788	    The derived log by regeneration, because it is byte-sorted and an append
+   789	    to a sorted file is not an append. It is written whether or not one was
+   790	    there before: an ABSENT projection builds automatically, because
+     1	"""arrival — the append-only log that holds canonical custody for a store.
+     2	
+     3	Slice 0 of the arrival substrate (design fact
+     4	``decision:design/arrival-slice0-record-grammar``; the wire format is written
+     5	out in ``docs/dev/arrival-slice0-record-grammar-2026-08-17.md``). One file per
+     6	store, ``<name>.arrival``, one JSON object per line. A record's position in
+     7	that file — its **ordinal** — is its identity coordinate, paired with the
+     8	**lineage** the genesis record opens. Everything derived from the log is a
+     9	projection and is never authoritative.
+    10	
+    11	What slice 0 delivered: the record grammar, genesis minting, append under an
+    12	interprocess lock, read by ordinal, the walk with density and chain
+    13	verification, torn-tail truncation, corrupt-interior refusal, and the resume
+    14	mark. Cut A (decision:design/arrival-sliceA-authority) added the authority
+    15	half: the genesis carries the founding public key, self-signed at ordinal 0,
+    16	and :func:`verify_authorship` resolves every verifying key from a
+    17	``(lineage, ordinal)`` coordinate in the log — never from any artifact
+    18	outside it. Projection re-derivation, declared projection orders, and audit
+    19	re-basing are later slices and are not here.
+    20	
+    21	Two postures carry over from the existing store and are load-bearing:
+    22	
+    23	* **Truncate only what was never complete, and only at the tail.** A final
+    24	  line with no ``\\n`` is an interrupted append; anything else that fails to
+    25	  decode, fails its ``rh``, breaks the ordinal succession, or breaks the
+    26	  ``prev`` link is corruption, and the answer is a human look rather than a
+    27	  silent delete — the posture ``ceremony.IntentCorrupt`` already takes. On a
+    28	  file that is the only copy, silent recovery is data loss with extra steps.
+    29	* **The writer truncates, the reader never does.** Reads take no lock, so a
+    30	  reader cannot distinguish "torn" from "an append is in flight right now";
+    31	  it sees a complete newline-terminated record or it sees nothing yet. Only
+    32	  the appender, holding the lock and knowing no append is in progress, may
+    33	  conclude a tail is torn and cut it.
+    34	
+    35	Known limitation, stated rather than discovered: ``fcntl.flock`` is advisory
+    36	and its behaviour over NFS and some network filesystems is unreliable. The
+    37	concurrency contract below holds on a local POSIX filesystem. A store on a
+    38	network mount is out of contract.
+    39	"""
+    40	
+    41	from __future__ import annotations
+    42	
+    43	import base64
+    44	import binascii
+    45	import contextlib
+    46	import fcntl
+    47	import hashlib
+    48	import json
+    49	import math
+    50	import os
+    51	import time
+    52	from collections.abc import Callable, Iterator, Sequence
+    53	from dataclasses import dataclass
+    54	from pathlib import Path
+    55	from typing import NoReturn, TypeGuard
+    56	
+    57	import rfc8785
+    58	from ulid import ULID
+    59	
+    60	__all__ = [
+    61	    "ARRIVAL_SUFFIX",
+    62	    "LOCK_SUFFIX",
+    63	    "TMP_SUFFIX",
+    64	    "GRAMMAR_VERSION",
+    65	    "GENESIS_KIND",
+    66	    "KEY_INTRODUCTION_KIND",
+    67	    "RECORD_FIELDS",
+    68	    "ArrivalError",
+    69	    "ArrivalGrammarError",
+    70	    "ArrivalCorrupt",
+    71	    "GenesisRefused",
+    72	    "AppendRejected",
+    73	    "AuthorshipUnverified",
+    74	    "ArrivalLog",
+    75	    "Entry",
+    76	    "KeyRegistry",
+    77	    "KeyResolution",
+    78	    "ResumeMark",
+    79	    "Verify",
+    80	    "build_record",
+    81	    "key_registry",
+    82	    "verify_authorship",
+    83	    "arrival_path_for",
+    84	    "lock_path_for",
+    85	    "tmp_path_for",
+    86	    "content_commitment",
+    87	    "record_hash",
+    88	    "encode_record",
+    89	    "decode_record",
+    90	    "mint_lineage",
+    91	]
+    92	
+    93	ARRIVAL_SUFFIX = ".arrival"
+    94	LOCK_SUFFIX = ".lock"
+    95	TMP_SUFFIX = ".tmp"
+    96	
+    97	GRAMMAR_VERSION = 1
+    98	GENESIS_KIND = "genesis"
+    99	
+   100	# The kind that introduces a key into the log's own registry. Its body names
+   101	# the observer the key speaks for and the key itself; the record must be
+   102	# signed by a key that is ALREADY valid at its ordinal, which is what makes
+   103	# the registry a chain of custody rather than a mutable table.
+   104	KEY_INTRODUCTION_KIND = "key"
+   105	
+   106	# Emitted key order. Transport encoding, not canonicalization — the same
+   107	# posture ``jsonl_codec._dump`` documents; canonicalization for hashing is JCS
+   108	# and is independent of the order bytes come out in. ``rh`` is last purely as
+   109	# a reading convenience: it cannot cover itself, so it is computed over the
+   110	# object with ``rh`` removed.
+   111	RECORD_FIELDS = ("v", "lin", "ord", "prev", "at", "k", "observer", "origin", "body")
+   112	_SIG = "sig"
+   113	_RH = "rh"
+   114	_ALLOWED = frozenset((*RECORD_FIELDS, _SIG, _RH))
+   115	
+   116	# JCS (RFC 8785) numeric domain — mirrors the guard ``jsonl_codec`` puts at
+   117	# its own gate. An integer outside it is not canonicalizable, so a record
+   118	# carrying one cannot be hashed: refuse at the codec rather than detonate
+   119	# inside the hasher.
+   120	_JCS_INT_MAX = 2**53 - 1
+   121	_JCS_INT_MIN = -(2**53) + 1
+   122	
+   123	# Reverse scan granularity for finding a line boundary. Chunked so the scan
+   124	# never loads the whole log and never gives up as a function of line length.
+   125	_CHUNK = 64 * 1024
+   126	
+   127	_HEX = frozenset("0123456789abcdef")
+   128	
+   129	# A signer is injected, never imported: engine does not depend on ``sign``.
+   130	# Shape matches the store's ``fact_signer`` — (observer, commitment digest
+[project]
+name = "engine"
+version = "0.1.0"
+description = "Temporal infrastructure and identity — Tick, Vertex, Peer, Grant"
+readme = "README.md"
+authors = [{ name = "Kyle Gruel", email = "kylegruel@gmail.com" }]
+requires-python = ">=3.11"
+dependencies = [
+    "atoms",
+    "lang",
+    "python-ulid>=3.0",
+    "rfc8785>=0.1.4",
+]
+
+[tool.uv.sources]
+atoms = { workspace = true }
+lang = { workspace = true }
+sign = { workspace = true }
+
+[dependency-groups]
+dev = [
+    "hypothesis>=6.100",
+    "mutmut>=3.2",
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+    "pytest-cov>=6.0",
+    "ruff>=0.8",
+    # Test-only: real Ed25519 material for the injected-signer seam
+    # (conftest Custodian). Runtime engine never imports sign — custody
+    # is the composition layer; this group keeps the injection boundary.
+    "sign",
+    "ty>=0.0.1a11",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/engine"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+
+[tool.coverage.run]
+source = ["src/engine"]
+branch = true
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "\\.\\.\\.$",  # Protocol method stubs
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "PTH"]
+
+[tool.ty.environment]
+python-version = "3.11"
+
+[tool.mutmut]
+paths_to_mutate = ["src/engine/witness.py"]
+tests_dir = [
+    "tests/test_witness_position.py",
+    "tests/test_witness_address_helpers.py",
+    "tests/test_diff_interval_report.py",
+    "tests/test_fold_at.py",
+]
+also_copy = ["src"]
+libs/store/src/store/merge.py:694:        entries.append(_entry_for(kind, fresh, custodian))
+libs/store/src/store/merge.py:698:def _entry_for(kind: str, rows: list[tuple[str, tuple]], custodian: str):
+186:        src_ticks = conn.execute("SELECT COUNT(*) FROM src.ticks").fetchone()[0]
+218:            SELECT id, name, ts, since, origin, payload, COALESCE((SELECT MAX(arrival_ordinal) FROM ticks), 0) + ROW_NUMBER() OVER (ORDER BY ts, id), 0
+359:                "SELECT id, name, ts, since, origin, payload FROM ticks"
+456:        tick_rows = conn.execute(
+457:            f"SELECT id, name, ts, since, origin, payload FROM ticks ORDER BY {tick_order}"
+471:    groups.extend(("tick", [("tick", tuple(row))], None) for row in tick_rows)
+473:        groups=groups, fact_count=len(fact_rows), tick_count=len(tick_rows)
+
+exec
+/bin/zsh -lc "rg -n \"class Entry|@dataclass.*Entry|origin.*must|RECORD_FIELDS\" libs/engine/src/engine/arrival.py
+nl -ba libs/engine/src/engine/arrival.py | sed -n '145,250p;350,460p'
+nl -ba libs/store/src/store/merge.py | sed -n '320,490p'
+.venv/bin/python - <<'PY'
+from engine.arrival_body import rows_of_body, ArrivalBodyError
+base={\"id\":\"i\",\"kind\":\"k\",\"ts\":1.0,\"observer\":\"o\",\"origin\":\"x\",\"payload\":\"{}\"}
+for label, rows in [
+ (\"missing\", None), (\"null\", None), (\"object\", {}), (\"string\", \"xx\"),
+ (\"non-dict rows\", [1,2]), (\"one non-dict\", [base,1]),
+]:
+    body={} if label==\"missing\" else {\"rows\": rows}
+    try: rows_of_body(\"batch\",body)
+    except Exception as e: print(label, type(e).__name__, str(e))
+    else: print(label, \"ACCEPTED\")
+PY
+.venv/bin/python - <<'PY'
+from engine.jsonl_codec import records_from_object, JsonlCodecError
+for v in (None, [], 'x', 1):
+    try: records_from_object(v)
+    except Exception as e: print(repr(v), type(e).__name__, str(e))
+PY" in /Users/kaygee/Code/loops-slice1
+ succeeded in 0ms:
+67:    "RECORD_FIELDS",
+111:RECORD_FIELDS = ("v", "lin", "ord", "prev", "at", "k", "observer", "origin", "body")
+114:_ALLOWED = frozenset((*RECORD_FIELDS, _SIG, _RH))
+361:    missing = [f for f in RECORD_FIELDS if f not in record]
+393:        _bad(f"origin must be a string (may be empty), got {type(record['origin']).__name__}")
+627:    ordered = {key: record[key] for key in RECORD_FIELDS}
+688:class Entry:
+   145	_KEY_RAW_LEN = 32
+   146	
+   147	
+   148	# ---------------------------------------------------------------------------
+   149	# Errors
+   150	# ---------------------------------------------------------------------------
+   151	
+   152	
+   153	class ArrivalError(Exception):
+   154	    """Base for every refusal the arrival log raises."""
+   155	
+   156	
+   157	class ArrivalGrammarError(ArrivalError, ValueError):
+   158	    """A record object does not match the grammar.
+   159	
+   160	    Raised in BOTH directions from one validator: an encode is held to the
+   161	    same domain a decode enforces, so a wrongly typed field fails at the
+   162	    append site, where it is attributable, rather than becoming a durable
+   163	    line that bricks every later open.
+   164	    """
+   165	
+   166	
+   167	class ArrivalCorrupt(ArrivalError):
+   168	    """A complete record in the log is not intact, and the log refuses.
+   169	
+   170	    Corruption is anything a complete line can be wrong about: it fails to
+   171	    decode, its ``rh`` does not recompute, its ordinal breaks the dense
+   172	    succession, or its ``prev`` does not name its predecessor. None of it is
+   173	    a state an appender can produce, so it is evidence of a torn write that
+   174	    somehow survived, of an out-of-band edit, or of tampering — and the safe
+   175	    answer is a human look, not a silent skip or a truncation.
+   176	
+   177	    ``ordinal`` names where the walk stopped: the ordinal the record was
+   178	    expected to carry, so the human has a place to start reading.
+   179	    """
+   180	
+   181	    def __init__(self, message: str, ordinal: int) -> None:
+   182	        super().__init__(f"arrival log corrupt at ordinal {ordinal}: {message}")
+   183	        self.ordinal = ordinal
+   184	
+   185	
+   186	class GenesisRefused(ArrivalError):
+   187	    """A lineage cannot be opened, or a file cannot be read as an arrival log.
+   188	
+   189	    Three shapes, all refusals rather than repairs: the arrival file already
+   190	    exists (a lineage is minted exactly once, and overwriting one destroys a
+   191	    store); the genesis carries no signature (genesis is the lineage's
+   192	    attestation root — the existing unsignable-genesis rule, carried across);
+   193	    or the file's first record is not a valid genesis, in which case the file
+   194	    is not an arrival log and there is nothing to infer. Identity is never
+   195	    read out of content: position 0 is structural and cannot be forged into
+   196	    existence by appending.
+   197	    """
+   198	
+   199	
+   200	class AuthorshipUnverified(ArrivalError):
+   201	    """A signed record's authorship cannot be established from the log.
+   202	
+   203	    Raised by :func:`verify_authorship` when a signature fails to verify
+   204	    under every key that is valid for its observer at its position — the
+   205	    ruled rule: a key is valid at position N iff it was introduced at a
+   206	    position < N, or N is the genesis position and the record is
+   207	    self-certifying. A failure is evidence of a forged signature, a key
+   208	    introduction that never happened, or a self-certification attempted
+   209	    above ordinal 0 — never a state this module's own writers can produce.
+   210	
+   211	    ``ordinal`` names the record whose authorship failed.
+   212	    """
+   213	
+   214	    def __init__(self, message: str, ordinal: int) -> None:
+   215	        super().__init__(f"authorship unverified at ordinal {ordinal}: {message}")
+   216	        self.ordinal = ordinal
+   217	
+   218	
+   219	class AppendRejected(ArrivalError):
+   220	    """A candidate record does not follow the log's head.
+   221	
+   222	    Append validates, it does not assign: the coordinate is written into the
+   223	    record, so a candidate whose ``ord`` is not the head's plus one, whose
+   224	    ``lin`` is not the log's lineage, or whose ``prev`` does not name the
+   225	    head's ``rh`` is refused before a byte is written. A rejected append
+   226	    leaves the log exactly as it was.
+   227	    """
+   228	
+   229	
+   230	# ---------------------------------------------------------------------------
+   231	# Path arithmetic
+   232	# ---------------------------------------------------------------------------
+   233	
+   234	
+   235	def arrival_path_for(base: Path | str) -> Path:
+   236	    """The arrival log for a store base path: ``<name>.arrival``.
+   237	
+   238	    Suffix appended to the full name, never ``with_suffix`` — the residence
+   239	    and ceremony sidecar helpers do the same, so ``alcove.db`` and ``alcove``
+   240	    do not collapse onto one arrival path.
+   241	    """
+   242	    base = Path(base)
+   243	    return base.parent / (base.name + ARRIVAL_SUFFIX)
+   244	
+   245	
+   246	def lock_path_for(arrival_path: Path | str) -> Path:
+   247	    """The append-exclusion lock beside a log: ``<name>.arrival.lock``.
+   248	
+   249	    Distinct from the index quarantine lock in ``jsonl_store``: different
+   250	    resource, different holder, and the two must not be confused.
+   350	    :func:`decode_record` hands this whatever ``json.loads`` produced, which
+   351	    may be a list or a string, and the first check below is what refuses
+   352	    those. Narrowing the signature to ``dict`` would make that check look
+   353	    dead to a reader and to a type checker while it stayed live at runtime.
+   354	    """
+   355	    if not isinstance(record, dict):
+   356	        _bad(f"a record must be a JSON object, got {type(record).__name__}")
+   357	
+   358	    unknown = sorted(set(record) - _ALLOWED)
+   359	    if unknown:
+   360	        _bad(f"unknown record field(s): {', '.join(unknown)}")
+   361	    missing = [f for f in RECORD_FIELDS if f not in record]
+   362	    if missing:
+   363	        _bad(f"missing record field(s): {', '.join(missing)}")
+   364	    if require_rh and _RH not in record:
+   365	        _bad("missing record field: rh")
+   366	
+   367	    if not _is_int(record["v"]) or record["v"] != GRAMMAR_VERSION:
+   368	        _bad(f"unsupported grammar version {record['v']!r} (this build writes {GRAMMAR_VERSION})")
+   369	
+   370	    if not isinstance(record["lin"], str) or not record["lin"]:
+   371	        _bad("lin must be a non-empty string")
+   372	
+   373	    if not _is_int(record["ord"]) or record["ord"] < 0:
+   374	        _bad(f"ord must be an integer >= 0, got {record['ord']!r}")
+   375	    _check_jcs_number(record["ord"], "ord")
+   376	
+   377	    # prev is null exactly at ordinal 0 and a digest everywhere else. Both
+   378	    # directions are checked: a genesis carrying a prev is as wrong as a
+   379	    # successor carrying none.
+   380	    if record["ord"] == 0:
+   381	        if record["prev"] is not None:
+   382	            _bad("prev must be null at ordinal 0")
+   383	    else:
+   384	        _check_hex(record["prev"], "prev")
+   385	
+   386	    _check_jcs_number(record["at"], "at")
+   387	
+   388	    if not isinstance(record["k"], str) or not record["k"]:
+   389	        _bad("k must be a non-empty string")
+   390	    if not isinstance(record["observer"], str) or not record["observer"]:
+   391	        _bad("observer must be a non-empty string")
+   392	    if not isinstance(record["origin"], str):
+   393	        _bad(f"origin must be a string (may be empty), got {type(record['origin']).__name__}")
+   394	
+   395	    _check_body(record["body"])
+   396	
+   397	    # Absent, never null: a record with no signature and a record with
+   398	    # ``"sig":null`` must not both be spellable, or they hash differently
+   399	    # while meaning the same thing.
+   400	    if _SIG in record and (not isinstance(record[_SIG], str) or not record[_SIG]):
+   401	        _bad("sig, when present, must be a non-empty string")
+   402	
+   403	    if _RH in record:
+   404	        _check_hex(record[_RH], "rh")
+   405	
+   406	
+   407	def _key_shape_fault(value: object) -> str | None:
+   408	    """Why ``value`` is not a well-formed public key, or None when it is.
+   409	
+   410	    Shape only — raw-32-byte base64, the ratified wire format. Whether a
+   411	    signature actually verifies under it is the injected verifier's answer
+   412	    (:func:`verify_authorship`); the grammar refuses what could never be a
+   413	    key so a malformed one fails at the append site rather than bricking
+   414	    verification later.
+   415	    """
+   416	    if not isinstance(value, str) or not value:
+   417	        return f"key must be a non-empty string, got {type(value).__name__}"
+   418	    try:
+   419	        raw = base64.b64decode(value, validate=True)
+   420	    except (binascii.Error, ValueError) as exc:
+   421	        return f"key is not valid base64: {exc}"
+   422	    if len(raw) != _KEY_RAW_LEN:
+   423	        return f"key must decode to {_KEY_RAW_LEN} bytes, got {len(raw)}"
+   424	    return None
+   425	
+   426	
+   427	def _placement_fault(record: dict, ordinal: int) -> str | None:
+   428	    """Why ``record`` may not sit at ``ordinal``, or None when it may.
+   429	
+   430	    One rule stated once, in both directions: **the genesis kind belongs at
+   431	    ordinal 0 and nowhere else.** At 0 a record must satisfy every genesis
+   432	    rule; above 0 it must not claim to be a genesis at all. A key
+   433	    introduction (:data:`KEY_INTRODUCTION_KIND`) is held to its structural
+   434	    rules at any ordinal it appears: signed, and a body naming an observer
+   435	    and a well-formed key.
+   436	
+   437	    Structural rules only, deliberately: whether the genesis signature
+   438	    verifies against ``body["key"]`` — self-certification — and whether an
+   439	    introduction's signer was valid at its position are cryptographic
+   440	    questions, answered by :func:`verify_authorship` with an injected
+   441	    verifier. This function stays pure so every caller (walk, append, open)
+   442	    can run it without carrying one.
+   443	
+   444	    This exists as one function because the two directions were previously
+   445	    checked in four places with three different sets of rules, and the gaps
+   446	    between them were exactly the holes: a forged unsigned genesis walked
+   447	    clean because only :meth:`ArrivalLog.genesis` demanded a signature, and
+   448	    a second genesis could be appended at an interior ordinal because
+   449	    nothing checked the kind on the way in. Callers differ only in the error
+   450	    class they raise — opening a file that is not an arrival log, walking one
+   451	    that has been tampered with, and refusing an append are three different
+   452	    conversations about the same rule.
+   453	    """
+   454	    if ordinal == 0:
+   455	        if record["k"] != GENESIS_KIND:
+   456	            return f"first record has kind {record['k']!r}, not a genesis"
+   457	        if record["ord"] != 0:
+   458	            return f"first record carries ord {record['ord']!r}, not 0"
+   459	        if record["prev"] is not None:
+   460	            return "first record carries a prev — genesis opens the chain"
+   320	    raise RuntimeError(
+   321	        f"the append phase of a merge into {canonical} was outrun "
+   322	        f"{_APPEND_ATTEMPTS} times — another writer is appending faster than "
+   323	        "this merge can reconcile"
+   324	    )
+   325	
+   326	
+   327	def _target_state(canonical: Path) -> tuple[dict[str, tuple], int | None]:
+   328	    """The target's held rows as ``id -> comparable body``, and the log head
+   329	    it accounts for. Opening runs catch-up, so a target that cannot account
+   330	    for its own log refuses HERE rather than being deduped against.
+   331	
+   332	    The comparable is what dedup compares an incoming row against (see
+   333	    :func:`_comparable`): facts on their full authored body, ticks on the
+   334	    chainless base — chain columns and the tick signature are store-local
+   335	    custody the merge strips anyway, so they can never be grounds for a
+   336	    divergence claim."""
+   337	    from engine.arrival_store import ARRIVAL_ORDINAL_KEY
+   338	    from engine.jsonl_store import open_canonical_store
+   339	    from engine.residence import index_path_for
+   340	
+   341	    open_canonical_store(
+   342	        canonical, serialize=lambda d: d, deserialize=lambda d: d
+   343	    ).close()
+   344	
+   345	    conn = _open(index_path_for(canonical), read_only=True)
+   346	    try:
+   347	        fact_cols = {r[1] for r in conn.execute("PRAGMA table_info(facts)")}
+   348	        signature = "signature" if "signature" in fact_cols else "NULL"
+   349	        held: dict[str, tuple] = {
+   350	            row[0]: ("fact", *row[1:])
+   351	            for row in conn.execute(
+   352	                "SELECT id, kind, ts, observer, origin, payload, "
+   353	                f"{signature} FROM facts"
+   354	            )
+   355	        }
+   356	        held.update(
+   357	            (row[0], ("tick", *row[1:]))
+   358	            for row in conn.execute(
+   359	                "SELECT id, name, ts, since, origin, payload FROM ticks"
+   360	            )
+   361	        )
+   362	        marker = conn.execute(
+   363	            "SELECT value FROM store_meta WHERE key = ?", (ARRIVAL_ORDINAL_KEY,)
+   364	        ).fetchone()
+   365	    finally:
+   366	        conn.close()
+   367	    return held, None if marker is None else int(marker[0])
+   368	
+   369	
+   370	@dataclass(frozen=True)
+   371	class _SourceRows:
+   372	    """The source's rows, already in the order they will be replayed."""
+   373	
+   374	    groups: list[tuple[str, list[tuple[str, tuple]], int | None]]
+   375	    """``(record class, rows, source ordinal)`` — one entry per record that
+   376	    will be appended. A ``batch`` group carries the rows of one ceremony, so
+   377	    an atomic ceremony stays atomic across the merge. The ordinal is the
+   378	    POSITION the row occupied in the source's arrival log, which is what the
+   379	    key-validity clause is stated in terms of; ``None`` for a source that
+   380	    has no arrival log and therefore no positions."""
+   381	    fact_count: int
+   382	    tick_count: int
+   383	    canonical: Path | None = None
+   384	    """The source's arrival log, when it has one. The key history admission
+   385	    verification reads is the SOURCE's, so this is where it comes from."""
+   386	
+   387	
+   388	def _read_source(source: Path) -> _SourceRows:
+   389	    from engine.probe import probe_target
+   390	
+   391	    info = probe_target(source)
+   392	    if (
+   393	        info.canonical_mode == "arrival"
+   394	        and info.canonical_path is not None
+   395	        and info.canonical_path.is_file()
+   396	    ):
+   397	        return _read_arrival_source(info.canonical_path)
+   398	    return _read_index_source(source)
+   399	
+   400	
+   401	def _read_arrival_source(canonical: Path) -> _SourceRows:
+   402	    """Walk the source's arrival log from ordinal 0, in ORDINAL order.
+   403	
+   404	    NON-NEGOTIABLE. Merging is replaying the source's arrival into the
+   405	    target's arrival; it consumes no event-time input at all. Structural
+   406	    records expand to no rows and so contribute no group — a lineage's
+   407	    genesis and its key introductions belong to that lineage, and carrying
+   408	    them across would claim the target's log opened them.
+   409	    """
+   410	    from engine.arrival import ArrivalLog
+   411	    from engine.arrival_projection import rows_of_record
+   412	
+   413	    groups: list[tuple[str, list[tuple[str, tuple]], int | None]] = []
+   414	    facts = ticks = 0
+   415	    for record in ArrivalLog(canonical).walk():
+   416	        rows = rows_of_record(record)
+   417	        if not rows:
+   418	            continue
+   419	        groups.append((record["k"], rows, record["ord"]))
+   420	        for t, _row in rows:
+   421	            if t == "fact":
+   422	                facts += 1
+   423	            else:
+   424	                ticks += 1
+   425	    return _SourceRows(
+   426	        groups=groups, fact_count=facts, tick_count=ticks, canonical=canonical
+   427	    )
+   428	
+   429	
+   430	def _read_index_source(source: Path) -> _SourceRows:
+   431	    """Facts in ``rowid`` order, then ticks in ``rowid`` order — two passes.
+   432	
+   433	    The transport case: ``slice_store`` emits a plain ``.db``. Deterministic,
+   434	    and deliberately NOT routed through any event-time sort. Ticks after
+   435	    facts is safe because ticks never feed fold state.
+   436	    """
+   437	    conn = _open(source, read_only=True)
+   438	    try:
+   439	        fact_cols = {r[1] for r in conn.execute("PRAGMA table_info(facts)")}
+   440	        signature = "signature" if "signature" in fact_cols else "NULL"
+   441	        fact_order = (
+   442	            "arrival_ordinal, arrival_seq"
+   443	            if "arrival_ordinal" in fact_cols
+   444	            else "rowid"
+   445	        )
+   446	        fact_rows = conn.execute(
+   447	            "SELECT id, kind, ts, observer, origin, payload, "
+   448	            f"{signature} FROM facts ORDER BY {fact_order}"
+   449	        ).fetchall()
+   450	        tick_cols = {r[1] for r in conn.execute("PRAGMA table_info(ticks)")}
+   451	        tick_order = (
+   452	            "arrival_ordinal, arrival_seq"
+   453	            if "arrival_ordinal" in tick_cols
+   454	            else "rowid"
+   455	        )
+   456	        tick_rows = conn.execute(
+   457	            f"SELECT id, name, ts, since, origin, payload FROM ticks ORDER BY {tick_order}"
+   458	        ).fetchall()
+   459	    finally:
+   460	        conn.close()
+   461	
+   462	    # No arrival log, so no positions: every group's ordinal is None, which
+   463	    # is the shape the no-claim admission is expressed in.
+   464	    groups: list[tuple[str, list[tuple[str, tuple]], int | None]] = [
+   465	        ("fact", [("fact", tuple(row))], None) for row in fact_rows
+   466	    ]
+   467	    # The tick rows ride at BASE arity, chainless — this source shape has no
+   468	    # chain to carry, because chain state is store-local and a transport
+   469	    # slice never brought it. Padding to full arity here would be undone
+   470	    # immediately: _entry_for strips the chain off every tick it sees.
+   471	    groups.extend(("tick", [("tick", tuple(row))], None) for row in tick_rows)
+   472	    return _SourceRows(
+   473	        groups=groups, fact_count=len(fact_rows), tick_count=len(tick_rows)
+   474	    )
+   475	
+   476	
+   477	class MergeDivergence(Exception):
+   478	    """The same id carries DIFFERENT content on the two sides of a merge.
+   479	
+   480	    The admission table (decision:design/arrival-substrate-laws) is explicit:
+   481	    id collision with different bytes is identity corruption and is REJECTED,
+   482	    never resolved silently in either side's favour. Kyle's whole-branch r1
+   483	    ruling (CX-BR-01, decision:design/arrival-branch-r1-rulings) applies that
+   484	    law to this merge arm. The target-wins conformance vector pins the
+   485	    LEGACY SQLITE arm only (its harness populates plain SqliteStores) and
+   486	    its description now says so; this arrival arm's refusal is pinned by
+   487	    TestDivergenceRefusal.
+   488	
+   489	    Comparison is deliberately strict — the fact signature included, so an
+   490	    era-mixed pair (the same authored fact carried once with its signature
+missing ArrivalBodyError batch field 'rows' must be an array of fact bodies, got NoneType
+null ArrivalBodyError batch field 'rows' must be an array of fact bodies, got NoneType
+object ArrivalBodyError batch field 'rows' must be an array of fact bodies, got dict
+string ArrivalBodyError batch field 'rows' must be an array of fact bodies, got str
+non-dict rows ArrivalBodyError batch row 0: fact body must be a JSON object, got int
+one non-dict ArrivalBodyError batch row 1: fact body must be a JSON object, got int
+None JsonlCodecError record must be a JSON object, got NoneType
+[] JsonlCodecError record must be a JSON object, got list
+'x' JsonlCodecError record must be a JSON object, got str
+1 JsonlCodecError record must be a JSON object, got int
+
+codex
+The first seeded concern is an analyzer narrowing issue, not a runtime hole: missing/`null`/object/string `rows` and non-dict row elements all refuse as `ArrivalBodyError` with specific grammar messages. The JSONL “unreachable” guard is also demonstrably live when called with already-decoded non-object values. I’m now tracing whether nullable tick origins can be admitted from either source shape and whether failure occurs cleanly before append.
+exec
+/bin/zsh -lc "nl -ba libs/engine/src/engine/arrival.py | sed -n '675,730p'
+rg -n \"CREATE TABLE ticks|origin .*NOT NULL|ticks \\(\" libs -g '*.sql' -g '*.py' | head -120
+rg -n \"test_.*origin|origin=None|NULL.*origin|nullable.*origin\" libs/engine/tests libs/store/tests
+rg -n \"def row_object_fault|TICK_NULLABLE|FACT_NULLABLE\" libs/engine/src/engine/jsonl_codec.py
+nl -ba libs/engine/src/engine/jsonl_codec.py | sed -n '70,120p;300,430p'
+git diff 68c7aa57...c63ae5fd -- libs/engine/src/engine/arrival_store.py libs/store/src/store/merge.py libs/engine/src/engine/jsonl_codec.py libs/engine/src/engine/arrival_projection.py" in /Users/kaygee/Code/loops-slice1
+ succeeded in 41ms:
+    70	    "records_from_object",
+    71	]
+    72	
+    73	
+    74	class JsonlCodecError(ValueError):
+    75	    """A JSONL line does not match the canonical schema."""
+    76	
+    77	
+    78	# Column order — the one spelling of it. ``engine.sqlite_store`` builds its
+    79	# INSERT statements from these tuples, so a schema column and a log field can
+    80	# never drift apart.
+    81	FACT_FIELDS = ("id", "kind", "ts", "observer", "origin", "payload")
+    82	_TICK_BASE_FIELDS = ("id", "name", "ts", "since", "origin", "payload")
+    83	# The chain columns, named as a group because a consumer that carries a tick
+    84	# ACROSS stores must null them — they are store-local custody — and would
+    85	# otherwise re-count them by hand. The codec owns the COUNT; whether to null
+    86	# them is the consumer's decision, not this module's.
+    87	TICK_CHAIN_FIELDS = ("prev_hash", "window_start", "fact_cursor", "window_hash")
+    88	TICK_FIELDS = (*_TICK_BASE_FIELDS, *TICK_CHAIN_FIELDS)
+    89	SIGNATURE_FIELD = "signature"
+    90	_SIGNATURE = SIGNATURE_FIELD
+    91	
+    92	# Which fields of a row may be null, per row class. Named at module level —
+    93	# rather than inline in ``_SPEC`` — because they describe the SQLITE ROW, not
+    94	# this module's line framing: :mod:`engine.arrival_body` frames the same rows
+    95	# without a ``t`` discriminator and holds them to exactly this domain. One
+    96	# definition of "what a well-formed row is" is what keeps the two framings
+    97	# from drifting about it.
+    98	FACT_NULLABLE: frozenset[str] = frozenset()
+    99	TICK_NULLABLE: frozenset[str] = frozenset(("since", *TICK_CHAIN_FIELDS))
+   100	
+   101	_NUMERIC = ("ts", "since")
+   102	
+   103	
+   104	class _Spec:
+   105	    """Everything the codec knows about one record type, keyed by ``"t"``.
+   106	
+   107	    Fact and tick differ only in their field tuple and which fields may be
+   108	    null; both directions of both types then run one code path, so a rule
+   109	    added here cannot apply to one type and be forgotten for the other.
+   110	    """
+   111	
+   112	    __slots__ = ("t", "fields", "allowed", "nullable")
+   113	
+   114	    def __init__(self, t: str, fields: tuple[str, ...], nullable: frozenset[str]):
+   115	        self.t = t
+   116	        self.fields = fields
+   117	        self.allowed = frozenset((*fields, _SIGNATURE, "t"))
+   118	        self.nullable = nullable
+   119	
+   120	
+   300	    nullable: frozenset[str],
+   301	) -> str | None:
+   302	    """Why ``obj`` is not a well-formed row object, or None when it is.
+   303	
+   304	    The half the two row framings SHARE. A ``.jsonl`` line and an arrival
+   305	    record's body carry the same sqlite row and differ only in where the
+   306	    record class is written — inside the object as ``"t"`` for a line, in
+   307	    the envelope's ``k`` for an arrival body — so the field domain is one
+   308	    rule with two callers rather than two rules that must be kept in step.
+   309	    ``allowed`` is exactly where they fork: the line framing admits ``t``
+   310	    and the arrival body does not (decision:design/arrival-wire-v1-seam-triage).
+   311	
+   312	    Returns a fault string rather than raising, the shape
+   313	    :func:`engine.arrival._placement_fault` and
+   314	    :func:`engine.arrival._key_shape_fault` already use, so each framing
+   315	    raises its OWN error class over one set of rules. ``frame`` names the
+   316	    container in the two messages that mention it, so a body's refusal does
+   317	    not tell the reader to go looking for a line.
+   318	    """
+   319	    unknown = sorted(set(obj) - allowed)
+   320	    if unknown:
+   321	        return f"unknown field(s) in {t} {frame}: {unknown}"
+   322	    missing = [f for f in fields if f not in obj]
+   323	    if missing:
+   324	        return f"missing field(s) in {t} {frame}: {missing}"
+   325	    for field in fields:
+   326	        value = obj[field]
+   327	        if value is None:
+   328	            if field not in nullable:
+   329	                return f"{t} field {field!r} must not be null"
+   330	            continue
+   331	        if field in _NUMERIC:
+   332	            # bool is an int subclass — reject it explicitly.
+   333	            if isinstance(value, bool) or not isinstance(value, (int, float)):
+   334	                return (
+   335	                    f"{t} field {field!r} must be a number, got "
+   336	                    f"{type(value).__name__}"
+   337	                )
+   338	            # Standards-valid JSON can still spell a number outside the JCS
+   339	            # domain (``1e999`` overflows to inf; a 400-digit integer exceeds
+   340	            # the safe-integer bound). Range-check here — the literal parser
+   341	            # only sees the NaN/Infinity spellings.
+   342	            if isinstance(value, float):
+   343	                if not math.isfinite(value):
+   344	                    return (
+   345	                        f"{t} field {field!r} must be a finite number, got "
+   346	                        f"{value!r}"
+   347	                    )
+   348	            elif not (_JCS_INT_MIN <= value <= _JCS_INT_MAX):
+   349	                return (
+   350	                    f"{t} field {field!r} is outside the JCS safe-integer "
+   351	                    f"domain: {value}"
+   352	                )
+   353	        elif not isinstance(value, str):
+   354	            return (
+   355	                f"{t} field {field!r} must be a string, got "
+   356	                f"{type(value).__name__}"
+   357	            )
+   358	    if SIGNATURE_FIELD in obj and obj[SIGNATURE_FIELD] is None:
+   359	        # Absent IS the unsigned era; an explicit null is a second spelling
+   360	        # of the same state, so serialize stays the unique canonical form.
+   361	        return f"{t} field 'signature' must be absent, not null, when unsigned"
+   362	    sig = obj.get(SIGNATURE_FIELD)
+   363	    if sig is not None and not isinstance(sig, str):
+   364	        return f"{t} field 'signature' must be a string, got {type(sig).__name__}"
+   365	    return None
+   366	
+   367	
+   368	def _validate(obj: dict, spec: _Spec) -> None:
+   369	    fault = row_object_fault(
+   370	        obj,
+   371	        t=spec.t,
+   372	        frame="line",
+   373	        fields=spec.fields,
+   374	        allowed=spec.allowed,
+   375	        nullable=spec.nullable,
+   376	    )
+   377	    if fault is not None:
+   378	        raise JsonlCodecError(fault)
+   379	
+   380	
+   381	def _validate_batch(obj: dict, *, validate_rows: bool = True) -> None:
+   382	    """Hold a batch envelope to the structural rules — both directions.
+   383	
+   384	    Two halves: the STRUCTURAL rules (envelope keys, ≥ 2 rows, fact records
+   385	    only — no nesting, no ticks — and no duplicate id) always run; the
+   386	    per-row FIELD validation (``_validate``) runs only when
+   387	    ``validate_rows`` — the deserialize path keeps it, the serialize path
+   388	    skips it because its row objects were just built (and validated) by
+   389	    ``_encode_obj``.
+   390	    """
+   391	    unknown = sorted(set(obj) - _BATCH_KEYS)
+   392	    if unknown:
+   393	        raise JsonlCodecError(f"unknown field(s) in batch line: {unknown}")
+   394	    rows = obj.get(_ROWS)
+   395	    if not isinstance(rows, list):
+   396	        raise JsonlCodecError(
+   397	            "batch field 'rows' must be an array of fact records, got "
+   398	            f"{type(rows).__name__}"
+   399	        )
+   400	    if len(rows) < _MIN_BATCH_ROWS:
+   401	        raise JsonlCodecError(
+   402	            f"batch must carry at least {_MIN_BATCH_ROWS} rows, got "
+   403	            f"{len(rows)} — a 1-row batch is a second spelling of a plain "
+   404	            "fact line, and an empty one encodes nothing"
+   405	        )
+   406	    seen_ids: set = set()
+   407	    for i, elem in enumerate(rows):
+   408	        if not isinstance(elem, dict):
+   409	            raise JsonlCodecError(
+   410	                f"batch row {i} must be a JSON object, got {type(elem).__name__}"
+   411	            )
+   412	        t = elem.get("t")
+   413	        if t == _BATCH:
+   414	            raise JsonlCodecError(f"batch row {i} is a nested batch — batches do not nest")
+   415	        if t == "tick":
+   416	            raise JsonlCodecError(
+   417	                f"batch row {i} is a tick record — ticks are minted "
+   418	                "one-at-a-time and chain-linked, never batched"
+   419	            )
+   420	        if t != "fact":
+   421	            raise JsonlCodecError(f"batch row {i} has unknown record discriminator t={t!r}")
+   422	        if validate_rows:
+   423	            _validate(elem, _SPEC["fact"])
+   424	        row_id = elem["id"]
+   425	        if row_id in seen_ids:
+   426	            raise JsonlCodecError(f"duplicate id {row_id!r} within one batch")
+   427	        seen_ids.add(row_id)
+   428	
+   429	
+   430	def _row_of(obj: dict, spec: _Spec) -> tuple:
+diff --git a/libs/engine/src/engine/arrival_projection.py b/libs/engine/src/engine/arrival_projection.py
+index 9ab1f2c7..12d6296f 100644
+--- a/libs/engine/src/engine/arrival_projection.py
++++ b/libs/engine/src/engine/arrival_projection.py
+@@ -61,7 +61,8 @@ from pathlib import Path
+ from typing import Iterator, NoReturn
+ 
+ from .arrival import GENESIS_KIND, KEY_INTRODUCTION_KIND, ArrivalLog, ResumeMark
+-from .jsonl_codec import records_from_object, serialize_object
++from .arrival_body import ROW_KINDS, legacy_object_of_body, rows_of_body
++from .jsonl_codec import serialize_object
+ from .residence import canonical_for, index_path_for
+ from .sqlite_store import (
+     _SCHEMA_STMTS,
+@@ -87,10 +88,12 @@ __all__ = [
+ 
+ # Record classes that expand to index rows, and the structural kinds that
+ # expand to none. Anything else refuses: a kind this indexer does not know is
+-# not a kind it may silently drop. The row-class literals mirror the line
+-# codec's "t" discriminators; the structural kinds are the grammar's own
+-# constants.
+-_ROW_KINDS = frozenset(("fact", "tick", "batch"))
++# not a kind it may silently drop. The row classes are the arrival body
++# grammar's own set — since wire v1 dropped ``body.t``, the envelope's ``k``
++# is the ONLY place a record's class is written, so this module and the body
++# reader must agree about it by construction rather than by two matching
++# literals. The structural kinds are the record grammar's constants.
++_ROW_KINDS = ROW_KINDS
+ _STRUCTURAL_KINDS = frozenset((GENESIS_KIND, KEY_INTRODUCTION_KIND))
+ 
+ _OWN_LINEAGE_KEY = "own_lineage"
+@@ -162,10 +165,15 @@ def rows_of_record(record: dict) -> list[tuple[str, tuple]]:
+ 
+     Structural records expand to **no rows** — see :func:`_projects`, which
+     is also where an unknown kind is refused.
++
++    The body is read as the class its ENVELOPE names. Since wire v1 dropped
++    ``body.t``, ``k`` is the only place that class is written, and this is
++    the site the seam triage meant by "the projection site holds ``k`` when
++    it hands body over".
+     """
+     if not _projects(record):
+         return []
+-    return records_from_object(record["body"])
++    return rows_of_body(record["k"], record["body"])
+ 
+ 
+ # --- the derived .jsonl log --------------------------------------------------
+@@ -189,10 +197,14 @@ def line_of_record(record: dict) -> str | None:
+     """The derived log's line for one arrival record, or None for no line.
+ 
+     Row-class records (fact/tick/batch) each emit ONE line — the codec
+-    encoding of that record's ``body`` and of nothing else. Because the body
+-    IS the codec's object for the committed row, re-encoding it is an
+-    identity round trip and the payload keeps riding as verbatim stored
+-    TEXT. A batch record's body emits as one ``batch`` line, unchanged.
++    encoding of that record's ``body`` and of nothing else. The derived log
++    is a LEGACY-shaped artifact on purpose (every last-0.x reader reads it),
++    so the line keeps the ``t`` discriminator wire v1 dropped from the body:
++    :func:`engine.arrival_body.legacy_object_of_body` puts it back from the
++    envelope's ``k``, which is the only place it now lives. The rows
++    themselves are untouched, so the payload keeps riding as verbatim
++    stored TEXT and the emitted bytes are exactly what they were before the
++    drop. A batch record's body emits as one ``batch`` line, unchanged.
+ 
+     **NON-NEGOTIABLE: structural records (genesis, key introduction) have no
+     derived-log line**, exactly as the index skips them — their bodies are
+@@ -206,7 +218,7 @@ def line_of_record(record: dict) -> str | None:
+     """
+     if not _projects(record):
+         return None
+-    return serialize_object(record["body"])
++    return serialize_object(legacy_object_of_body(record["k"], record["body"]))
+ 
+ 
+ def canonical_line(line: str) -> str:
+diff --git a/libs/engine/src/engine/arrival_store.py b/libs/engine/src/engine/arrival_store.py
+index 70bc48b6..5ff21759 100644
+--- a/libs/engine/src/engine/arrival_store.py
++++ b/libs/engine/src/engine/arrival_store.py
+@@ -14,17 +14,22 @@ the committed row for free and inherits every read method unchanged.
+ 
+ How a row becomes a record
+ --------------------------
+-The arrival record's ``body`` is the line codec's object for the committed
+-row, verbatim — ``payload`` rides as the stored TEXT string inside it, so
++The arrival record's ``body`` is :mod:`engine.arrival_body`'s object for the
++committed row — ``payload`` rides as the stored TEXT string inside it, so
+ every existing fact signature and commitment hash survives the round trip,
+-and a later cut can rebuild the index by handing ``body`` straight back to
+-the codec. No second encoding exists to disagree with. The record's ``k``
+-is the row class (``fact`` / ``tick`` / ``batch``), never the fact's own
+-kind — a fact kind is data and rides inside ``body``, where it cannot
+-collide with the grammar's structural kinds (genesis, key introductions).
+-``observer``/``origin``/``at`` mirror the row's authorship columns (a tick
+-has no observer; its record carries the tick's name there, which is the
+-authorship a tick has).
++and the index rebuilds by handing ``body`` back to the same reader. No
++second encoding exists to disagree with. The record's ``k`` is the row
++class (``fact`` / ``tick`` / ``batch``), never the fact's own kind — a fact
++kind is data and rides inside ``body``, where it cannot collide with the
++grammar's structural kinds (genesis, key introductions). Since wire v1
++dropped ``body.t``, ``k`` is also the ONLY place the row class is written.
++
++``origin``/``at`` mirror the row's own columns. ``observer`` splits by kind,
++per decision:design/arrival-wire-v1-seam-triage: a FACT's names its author,
++because that value selects the key that signs the record; a TICK's names
++this log's custodian — the destination log's genesis observer — because a
++tick has no author and its name is not an authorship claim. See
++:meth:`ArrivalStore._custodian`.
+ 
+ Fact records are signed by the store's injected ``fact_signer`` over the
+ ARRIVAL content commitment — record-level attestation, resolvable by
+@@ -72,12 +77,12 @@ from .arrival import (
+     GenesisRefused,
+     ResumeMark,
+ )
+-from .arrival_projection import has_rows, licensed_own_lineage, rows_of_record
+-from .jsonl_codec import (
+-    object_of_batch,
+-    object_of_fact_row,
+-    object_of_tick_row,
++from .arrival_body import (
++    body_of_batch,
++    body_of_fact_row,
++    body_of_tick_row,
+ )
++from .arrival_projection import has_rows, licensed_own_lineage, rows_of_record
+ from .jsonl_store import _as_int, _stamped_offset_current
+ from .residence import canonical_for, index_path_for
+ from .sqlite_store import (
+@@ -415,13 +420,52 @@ class ArrivalStore(SqliteStore[T], Generic[T]):
+ 
+     # ---- the write path --------------------------------------------------
+ 
++    def _custodian(self) -> str:
++        """The label a record this store MINTS puts in its envelope observer.
++
++        The destination log's own genesis observer — ruling 2 of
++        decision:design/arrival-wire-v1-seam-triage. A tick has no author:
++        it is the custodian's fold engine producing a record, and the
++        envelope observer says so. The previous spelling put the tick's
++        NAME there, which read as an authorship claim a name cannot make.
++
++        Scoped to what it claims, and no further. The label is TRUE but
++        UNVERIFIED, on purpose: tick outer signatures are deferred (ruling
++        3), so no tick's envelope observer is ever looked up in the key
++        registry — ``_resolve`` gates on a signature being present and
++        every tick mint passes ``signer=None``. An unverified true claim is
++        what wire v1 pins; a verifiable one is a later design session's.
++
++        Fact records are untouched by this: their envelope observer stays
++        the row's author, because that value SELECTS THE SIGNING KEY
++        (``fact_signer_for`` resolves ``keys/<observer>/ed25519.key``) and
++        re-deriving it as custody would re-key every fact signature from
++        author to custodian — a decision explicitly not made here.
++
++        Reads through the genesis memo, so a store minting many ticks pays
++        one validation. The refusal is re-spelled rather than surfaced raw
++        for the reason :meth:`_genesis_lineage_id` re-spells its own: this
++        class promises an unminted log refuses appends with the mint-first
++        message, and "the log does not exist" is that state described from
++        the wrong end.
++        """
++        try:
++            return self._log.genesis()["observer"]
++        except GenesisRefused as exc:
++            raise GenesisRefused(
++                f"{self._log.path} is empty — mint a genesis first; a "
++                "record's envelope observer is the log's own genesis "
++                "observer, so there is no custodian to name until movement "
++                "1 has named one"
++            ) from exc
++
+     def _write(self, sql: str, row: tuple, encode_row, is_fact: bool) -> str | None:
+         """Stage the INSERT, make the record durable in the log, stamp, commit.
+ 
+         The INSERT runs first, uncommitted, so a rejected row fails before a
+         byte reaches the log and a refused write can never orphan a record.
+-        The record's body is the codec's object for the COMMITTED read-back
+-        row — the index and the log must derive-match. The record's arrival signature comes from
++        The record's body is the arrival body grammar's object for the
++        COMMITTED read-back row — the index and the log must derive-match. The record's arrival signature comes from
+         the injected ``fact_signer`` over the arrival commitment; the same
+         callable, a different digest, and the composing layer's
+         domain-separation prefix already binds both to this store family.
+@@ -437,9 +481,9 @@ class ArrivalStore(SqliteStore[T], Generic[T]):
+         re-inserts the identical row verbatim from the record's body.
+         """
+         consumed = self._reconcile()
+-        # Codec pre-flight on the ASSEMBLED row, NOT dead work: sqlite's
++        # Grammar pre-flight on the ASSEMBLED row, NOT dead work: sqlite's
+         # column affinity coerces (e.g. a string ts commits as REAL), so the
+-        # committed-row encode below would ACCEPT a row the codec refuses
++        # committed-row encode below would ACCEPT a row the grammar refuses
+         # — this is the gate that fails at the append site, where it is
+         # attributable, instead of laundering the value.
+         encode_row(row)
+@@ -459,7 +503,7 @@ class ArrivalStore(SqliteStore[T], Generic[T]):
+             record, mark = self._log.append_marked(
+                 "fact" if is_fact else "tick",
+                 body,
+-                observer=committed_row[3] if is_fact else committed_row[1],
++                observer=committed_row[3] if is_fact else self._custodian(),
+                 origin=committed_row[4],
+                 at=committed_row[2],
+                 signer=self._fact_signer if is_fact else None,
+@@ -490,10 +534,10 @@ class ArrivalStore(SqliteStore[T], Generic[T]):
+         return [(expected_ordinal, idx) for idx in range(count)]
+ 
+     def _write_fact_row(self, row: tuple) -> str | None:
+-        return self._write(FACT_INSERT_SQL, row, object_of_fact_row, True)
++        return self._write(FACT_INSERT_SQL, row, body_of_fact_row, True)
+ 
+     def _write_tick_row(self, row: tuple) -> str | None:
+-        return self._write(TICK_INSERT_SQL, row, object_of_tick_row, False)
++        return self._write(TICK_INSERT_SQL, row, body_of_tick_row, False)
+ 
+     def _ceremony_persist(self, rows: list[tuple]) -> None:
+         """Make a declaration ceremony canonical: ONE arrival record, stamped.
+@@ -516,9 +560,9 @@ class ArrivalStore(SqliteStore[T], Generic[T]):
+             r[:-2] if len(r) == len(FACT_ALL_COLUMNS) else r for r in rows
+         ]
+         if len(persisted_rows) > 1:
+-            k, body = "batch", object_of_batch(persisted_rows)
++            k, body = "batch", body_of_batch(persisted_rows)
+         else:
+-            k, body = "fact", object_of_fact_row(persisted_rows[0])
++            k, body = "fact", body_of_fact_row(persisted_rows[0])
+         consumed = self._reconciled_mark
+         _, mark = self._log.append_marked(
+             k,
+diff --git a/libs/engine/src/engine/jsonl_codec.py b/libs/engine/src/engine/jsonl_codec.py
+index 4fbc67ad..2755c221 100644
+--- a/libs/engine/src/engine/jsonl_codec.py
++++ b/libs/engine/src/engine/jsonl_codec.py
+@@ -26,6 +26,17 @@ Unknown, missing, or mistyped fields are rejected loudly
+ is not a place for silent tolerance. So is a duplicate key: JSON's last-wins
+ resolution would let one line carry two ids and a reader silently pick one.
+ 
++The ``t`` discriminator is THIS framing's, and it stays. A line has nowhere
++but the object itself to say which record class it carries; an arrival
++record says it in the envelope's ``k``, so wire v1 drops ``t`` from arrival
++bodies and :mod:`engine.arrival_body` frames the same rows without it
++(decision:design/arrival-wire-v1-seam-triage). This module keeps ``t``
++because it still has live consumers that need it: the derived ``.jsonl``
++projection every last-0.x reader reads, and the migration sidecar that
++reads historical logs. What the two framings share is the ROW domain —
++:func:`row_object_fault`, exported for exactly that — so they cannot drift
++about what a well-formed row is while disagreeing about how to frame one.
++
+ The rules run in **both** directions from one function. ``serialize`` holds
+ its object to the same domain ``deserialize`` enforces, so ``serialize(x)``
+ is always decodable — a wrongly typed field fails at the append site, where
+@@ -40,9 +51,13 @@ import math
+ 
+ __all__ = [
+     "FACT_FIELDS",
++    "FACT_NULLABLE",
++    "SIGNATURE_FIELD",
+     "TICK_FIELDS",
+     "TICK_CHAIN_FIELDS",
++    "TICK_NULLABLE",
+     "JsonlCodecError",
++    "row_object_fault",
+     "object_of_fact_row",
+     "object_of_tick_row",
+     "object_of_batch",
+@@ -71,7 +86,17 @@ _TICK_BASE_FIELDS = ("id", "name", "ts", "since", "origin", "payload")
+ # them is the consumer's decision, not this module's.
+ TICK_CHAIN_FIELDS = ("prev_hash", "window_start", "fact_cursor", "window_hash")
+ TICK_FIELDS = (*_TICK_BASE_FIELDS, *TICK_CHAIN_FIELDS)
+-_SIGNATURE = "signature"
++SIGNATURE_FIELD = "signature"
++_SIGNATURE = SIGNATURE_FIELD
++
++# Which fields of a row may be null, per row class. Named at module level —
++# rather than inline in ``_SPEC`` — because they describe the SQLITE ROW, not
++# this module's line framing: :mod:`engine.arrival_body` frames the same rows
++# without a ``t`` discriminator and holds them to exactly this domain. One
++# definition of "what a well-formed row is" is what keeps the two framings
++# from drifting about it.
++FACT_NULLABLE: frozenset[str] = frozenset()
++TICK_NULLABLE: frozenset[str] = frozenset(("since", *TICK_CHAIN_FIELDS))
+ 
+ _NUMERIC = ("ts", "since")
+ 
+@@ -94,12 +119,8 @@ class _Spec:
+ 
+ 
+ _SPEC = {
+-    "fact": _Spec("fact", FACT_FIELDS, frozenset()),
+-    "tick": _Spec(
+-        "tick",
+-        TICK_FIELDS,
+-        frozenset(("since", *TICK_CHAIN_FIELDS)),
+-    ),
++    "fact": _Spec("fact", FACT_FIELDS, FACT_NULLABLE),
++    "tick": _Spec("tick", TICK_FIELDS, TICK_NULLABLE),
+ }
+ 
+ # The third record type is STRUCTURAL, not field-shaped, so it does not fit
+@@ -269,24 +290,48 @@ def _load(line: str) -> dict:
+     return obj
+ 
+ 
+-def _validate(obj: dict, spec: _Spec) -> None:
+-    t = spec.t
+-    unknown = sorted(set(obj) - spec.allowed)
++def row_object_fault(
++    obj: dict,
++    *,
++    t: str,
++    frame: str,
++    fields: tuple[str, ...],
++    allowed: frozenset[str],
++    nullable: frozenset[str],
++) -> str | None:
++    """Why ``obj`` is not a well-formed row object, or None when it is.
++
++    The half the two row framings SHARE. A ``.jsonl`` line and an arrival
++    record's body carry the same sqlite row and differ only in where the
++    record class is written — inside the object as ``"t"`` for a line, in
++    the envelope's ``k`` for an arrival body — so the field domain is one
++    rule with two callers rather than two rules that must be kept in step.
++    ``allowed`` is exactly where they fork: the line framing admits ``t``
++    and the arrival body does not (decision:design/arrival-wire-v1-seam-triage).
++
++    Returns a fault string rather than raising, the shape
++    :func:`engine.arrival._placement_fault` and
++    :func:`engine.arrival._key_shape_fault` already use, so each framing
++    raises its OWN error class over one set of rules. ``frame`` names the
++    container in the two messages that mention it, so a body's refusal does
++    not tell the reader to go looking for a line.
++    """
++    unknown = sorted(set(obj) - allowed)
+     if unknown:
+-        raise JsonlCodecError(f"unknown field(s) in {t} line: {unknown}")
+-    missing = [f for f in spec.fields if f not in obj]
++        return f"unknown field(s) in {t} {frame}: {unknown}"
++    missing = [f for f in fields if f not in obj]
+     if missing:
+-        raise JsonlCodecError(f"missing field(s) in {t} line: {missing}")
+-    for field in spec.fields:
++        return f"missing field(s) in {t} {frame}: {missing}"
++    for field in fields:
+         value = obj[field]
+         if value is None:
+-            if field not in spec.nullable:
+-                raise JsonlCodecError(f"{t} field {field!r} must not be null")
++            if field not in nullable:
++                return f"{t} field {field!r} must not be null"
+             continue
+         if field in _NUMERIC:
+             # bool is an int subclass — reject it explicitly.
+             if isinstance(value, bool) or not isinstance(value, (int, float)):
+-                raise JsonlCodecError(
++                return (
+                     f"{t} field {field!r} must be a number, got "
+                     f"{type(value).__name__}"
+                 )
+@@ -296,31 +341,41 @@ def _validate(obj: dict, spec: _Spec) -> None:
+             # only sees the NaN/Infinity spellings.
+             if isinstance(value, float):
+                 if not math.isfinite(value):
+-                    raise JsonlCodecError(
++                    return (
+                         f"{t} field {field!r} must be a finite number, got "
+                         f"{value!r}"
+                     )
+             elif not (_JCS_INT_MIN <= value <= _JCS_INT_MAX):
+-                raise JsonlCodecError(
++                return (
+                     f"{t} field {field!r} is outside the JCS safe-integer "
+                     f"domain: {value}"
+                 )
+         elif not isinstance(value, str):
+-            raise JsonlCodecError(
++            return (
+                 f"{t} field {field!r} must be a string, got "
+                 f"{type(value).__name__}"
+             )
+-    if _SIGNATURE in obj and obj[_SIGNATURE] is None:
++    if SIGNATURE_FIELD in obj and obj[SIGNATURE_FIELD] is None:
+         # Absent IS the unsigned era; an explicit null is a second spelling
+         # of the same state, so serialize stays the unique canonical form.
+-        raise JsonlCodecError(
+-            f"{t} field 'signature' must be absent, not null, when unsigned"
+-        )
+-    sig = obj.get(_SIGNATURE)
++        return f"{t} field 'signature' must be absent, not null, when unsigned"
++    sig = obj.get(SIGNATURE_FIELD)
+     if sig is not None and not isinstance(sig, str):
+-        raise JsonlCodecError(
+-            f"{t} field 'signature' must be a string, got {type(sig).__name__}"
+-        )
++        return f"{t} field 'signature' must be a string, got {type(sig).__name__}"
++    return None
++
++
++def _validate(obj: dict, spec: _Spec) -> None:
++    fault = row_object_fault(
++        obj,
++        t=spec.t,
++        frame="line",
++        fields=spec.fields,
++        allowed=spec.allowed,
++        nullable=spec.nullable,
++    )
++    if fault is not None:
++        raise JsonlCodecError(fault)
+ 
+ 
+ def _validate_batch(obj: dict, *, validate_rows: bool = True) -> None:
+diff --git a/libs/store/src/store/merge.py b/libs/store/src/store/merge.py
+index 17a4eb2f..2435cbc3 100644
+--- a/libs/store/src/store/merge.py
++++ b/libs/store/src/store/merge.py
+@@ -288,7 +288,9 @@ def _merge_into_arrival(
+ 
+     for _ in range(_APPEND_ATTEMPTS):
+         held, ordinal = _target_state(canonical)
+-        entries, added_facts, added_ticks, admitted = _entries_for(source_rows, held)
++        entries, added_facts, added_ticks, admitted = _entries_for(
++            source_rows, held, log.genesis()["observer"]
++        )
+         skipped_facts = source_rows.fact_count - added_facts
+         skipped_ticks = source_rows.tick_count - added_ticks
+         result = MergeResult(
+@@ -642,9 +644,14 @@ def _refuse_divergence(t: str, row: tuple, held_body: tuple) -> None:
+     )
+ 
+ 
+-def _entries_for(source_rows: _SourceRows, held: dict[str, tuple]):
++def _entries_for(source_rows: _SourceRows, held: dict[str, tuple], custodian: str):
+     """The records to append, after dedup.
+ 
++    ``custodian`` is the TARGET log's genesis observer, threaded through to
++    :func:`_entry_for` for the tick envelopes it mints. It is read once per
++    merge attempt at the call site, where the target log is already open,
++    rather than re-derived per record.
++
+     Returns ``(entries, facts, ticks, admitted)``, where ``admitted`` is the
+     surviving FACT rows paired with the source position they arrived at —
+     the admission set, which is exactly what admission verification is a
+@@ -684,22 +691,29 @@ def _entries_for(source_rows: _SourceRows, held: dict[str, tuple]):
+                 admitted.append((ordinal, row))
+             else:
+                 ticks += 1
+-        entries.append(_entry_for(kind, fresh))
++        entries.append(_entry_for(kind, fresh, custodian))
+     return entries, facts, ticks, admitted
+ 
+ 
+-def _entry_for(kind: str, rows: list[tuple[str, tuple]]):
++def _entry_for(kind: str, rows: list[tuple[str, tuple]], custodian: str):
+     """One record for a group of surviving rows.
+ 
+     Record shape, asymmetric between facts and ticks, and the asymmetry is
+     inherited from the live write path rather than invented here:
+ 
+-    * ``k`` is the row class, never a fact's own kind.
+-    * ``observer``/``origin``/``at`` mirror the row's own columns, exactly as
+-      the live path does. A merged fact's record claims its ORIGINAL
+-      observer — the record describes the authored row, not the operator who
+-      admitted it. A tick has no observer, so its record carries the tick's
+-      name there, which is the authorship a tick has.
++    * ``k`` is the row class, never a fact's own kind. Since wire v1 dropped
++      ``body.t``, it is the only place that class is written.
++    * ``origin``/``at`` mirror the row's own columns. ``observer`` splits by
++      kind, exactly as the live write path splits it
++      (:meth:`engine.arrival_store.ArrivalStore._custodian`, ruling 2 of
++      decision:design/arrival-wire-v1-seam-triage). A merged FACT's record
++      claims its ORIGINAL observer — the record describes the authored row,
++      not the operator who admitted it. A merged TICK has no author, so its
++      record names THIS log's custodian: ``custodian`` is the TARGET's
++      genesis observer, not the source's, because the record being minted
++      is the target's own. This is the second, independently-encoded tick
++      mint site; a respell that landed only at the live path would leave
++      merge committing the retired convention with nothing to catch it.
+     * **Fact bodies ride verbatim, the row's own signature included.** The
+       fact signature is a per-observer authorship claim over content only,
+       carried verbatim and never re-signed; era-aware NULL for a
+@@ -728,13 +742,12 @@ def _entry_for(kind: str, rows: list[tuple[str, tuple]]):
+     decides whether the merge happens, never what a record says.
+     """
+     from engine.arrival import Entry
+-    from engine.jsonl_codec import (
+-        TICK_CHAIN_FIELDS,
+-        TICK_FIELDS,
+-        object_of_batch,
+-        object_of_fact_row,
+-        object_of_tick_row,
++    from engine.arrival_body import (
++        body_of_batch,
++        body_of_fact_row,
++        body_of_tick_row,
+     )
++    from engine.jsonl_codec import TICK_CHAIN_FIELDS, TICK_FIELDS
+ 
+     if kind == "tick":
+         _t, row = rows[0]
+@@ -748,8 +761,8 @@ def _entry_for(kind: str, rows: list[tuple[str, tuple]]):
+         stripped = (*row[:base], *(None,) * len(TICK_CHAIN_FIELDS))
+         return Entry(
+             k="tick",
+-            body=object_of_tick_row(stripped),
+-            observer=stripped[1],
++            body=body_of_tick_row(stripped),
++            observer=custodian,
+             origin=stripped[4],
+             at=stripped[2],
+         )
+@@ -757,7 +770,7 @@ def _entry_for(kind: str, rows: list[tuple[str, tuple]]):
+     fact_rows = [row for _t, row in rows]
+     first = fact_rows[0]
+     k = "batch" if len(fact_rows) > 1 else "fact"
+-    body = object_of_batch(fact_rows) if k == "batch" else object_of_fact_row(first)
++    body = body_of_batch(fact_rows) if k == "batch" else body_of_fact_row(first)
+     return Entry(
+         k=k, body=body, observer=first[3], origin=first[4], at=first[2]
+     )
+
+exec
+/bin/zsh -lc ".venv/bin/python -c \"import sign; print('sign import:', sign.__file__)\"
+.venv/bin/python -m pytest -q" in /Users/kaygee/Code/loops-slice1/libs/engine
+ exited 127 in 0ms:
+zsh:1: no such file or directory: .venv/bin/python
+zsh:2: no such file or directory: .venv/bin/python
+
+codex
+The first full-suite invocation used a root-relative venv path after changing into the package directory, so it failed before collection; no test result should be inferred from that. I’m rerunning with the absolute venv path and keeping engine/store isolated as required.
+exec
+/bin/zsh -lc "/Users/kaygee/Code/loops-slice1/.venv/bin/python -c \"import sign; print('sign import:', sign.__file__)\"
+/Users/kaygee/Code/loops-slice1/.venv/bin/python -m pytest -q" in /Users/kaygee/Code/loops-slice1/libs/engine
+codex
+The engine suite is still running past its fast unit-test portion (currently beyond 59% with no failures); I’m letting it complete rather than treating partial progress as evidence. Static tracing meanwhile shows both canonical engine/store tick schemas declare `origin TEXT NOT NULL`, while the arrival-body grammar independently rejects a null origin.
+ succeeded in 89487ms:
+........................................................................ [  3%]
+........................................................................ [  7%]
+........................................................................ [ 11%]
+........................................................................ [ 14%]
+........................................................................ [ 18%]
+........................................................................ [ 22%]
+...........................................s............................ [ 26%]
+........................................................................ [ 29%]
+........................................................................ [ 33%]
+........................................................................ [ 37%]
+........................................................................ [ 40%]
+........................................................................ [ 44%]
+........................................................................ [ 48%]
+........................................................................ [ 52%]
+........................................................................ [ 55%]
+........................................................................ [ 59%]
+........................................................................ [ 63%]
+........................................................................ [ 66%]
+........................................................................ [ 70%]
+........................................................................ [ 74%]
+........................................................................ [ 78%]
+........................................................................ [ 81%]
+........................................................................ [ 85%]
+........................................................................ [ 89%]
+........................................................................ [ 92%]
+........................................................................ [ 96%]
+..................................................................       [100%]
+1937 passed, 1 skipped in 88.69s (0:01:28)
+
+exec
+/bin/zsh -lc '/Users/kaygee/Code/loops-slice1/.venv/bin/python -m pytest -q' in /Users/kaygee/Code/loops-slice1/libs/store
+ succeeded in 27840ms:
+........................................................................ [ 40%]
+........................................................................ [ 81%]
+.................................                                        [100%]
+177 passed in 27.49s
+
+exec
+/bin/zsh -lc '/Users/kaygee/Code/loops-slice1/.venv/bin/python -m pytest -q tests/architecture' in /Users/kaygee/Code/loops-slice1
+ succeeded in 7500ms:
+........................................................................ [ 73%]
+..........................                                               [100%]
+98 passed in 7.35s
+
+exec
+/bin/zsh -lc ".venv/bin/python - <<'PY'
+from importlib.metadata import requires
+print('\\n'.join(requires('engine') or []))
+PY
+.venv/bin/python - <<'PY'
+from store.merge import _entry_for
+for origin in ('', None):
+    row=('id','name',1.0,None,origin,'{}')
+    try:
+        e=_entry_for('tick',[('tick',row)],'destination-observer')
+        print(repr(origin), 'OK', e)
+    except Exception as exc:
+        print(repr(origin), type(exc).__name__, str(exc))
+PY
+rg -n \"custodian|genesis observer|mixed.observer|outer.unsigned|signature.*absent|body.*t|test_.*tick.*observer|test_.*mixed\" libs/engine/tests/test_arrival_body.py libs/engine/tests/test_arrival_store.py libs/store/tests/test_arrival_merge.py docs/architecture/arrival/protocol.html
+
+git diff --unified=0 68c7aa57...c63ae5fd | rg -n \"content_commitment|arrival.py|libs/custody|fact_signer|signer=|signature|arrival_ordinal|arrival_seq|file_writer|FileStore|\\.loops\"" in /Users/kaygee/Code/loops-slice1
+ succeeded in 201ms:
+'' OK Entry(k='tick', body={'id': 'id', 'name': 'name', 'ts': 1.0, 'since': None, 'origin': '', 'payload': '{}', 'prev_hash': None, 'window_start': None, 'fact_cursor': None, 'window_hash': None}, observer='destination-observer', origin='', at=1.0)
+None ArrivalBodyError tick field 'origin' must not be null
+libs/engine/tests/test_arrival_store.py:121:    # dropped body.t, so a body carrying it is refused by the grammar.
+libs/engine/tests/test_arrival_store.py:123:    assert body["kind"] == "note"
+libs/engine/tests/test_arrival_store.py:125:    assert isinstance(body["payload"], str)
+libs/engine/tests/test_arrival_store.py:128:    # signature (over the fact commitment) rides inside body as data
+libs/engine/tests/test_arrival_store.py:130:    assert body.get("signature")
+libs/engine/tests/test_arrival_store.py:159:def test_ticks_ride_as_records_naming_the_custodian_not_the_tick(
+libs/engine/tests/test_arrival_store.py:164:    custodian whose fold engine produced the record — not the tick's own
+libs/engine/tests/test_arrival_store.py:168:    author's, so the assertion pins "the genesis observer" rather than
+libs/engine/tests/test_arrival_store.py:173:        observer="custodian",
+libs/engine/tests/test_arrival_store.py:188:    assert tick_record["observer"] == "custodian"
+libs/engine/tests/test_arrival_store.py:194:    # The record class is the envelope's; the body no longer echoes it.
+libs/engine/tests/test_arrival_store.py:201:    """The custodian label is read from the genesis, so an unminted log has
+libs/engine/tests/test_arrival_store.py:202:    no custodian to name. That state must still refuse the way the class
+libs/engine/tests/test_arrival_body.py:1:"""The arrival body grammar — wire v1's t-less row framing.
+libs/engine/tests/test_arrival_body.py:4:``body.t`` DROPS (the envelope's ``k`` is the only place a record's class is
+libs/engine/tests/test_arrival_body.py:20:from engine.arrival_body import (
+libs/engine/tests/test_arrival_body.py:22:    body_of_batch,
+libs/engine/tests/test_arrival_body.py:23:    body_of_fact_row,
+libs/engine/tests/test_arrival_body.py:24:    body_of_tick_row,
+libs/engine/tests/test_arrival_body.py:51:def test_no_encoded_body_carries_the_discriminator():
+libs/engine/tests/test_arrival_body.py:52:    assert "t" not in body_of_fact_row(fact_row())
+libs/engine/tests/test_arrival_body.py:53:    assert "t" not in body_of_tick_row(tick_row())
+libs/engine/tests/test_arrival_body.py:54:    batch = body_of_batch([fact_row("01A"), fact_row("01B")])
+libs/engine/tests/test_arrival_body.py:60:def test_a_body_still_carrying_t_is_refused_by_the_grammar(k):
+libs/engine/tests/test_arrival_body.py:62:    field, so a body carrying it fails the same unknown-field rule that
+libs/engine/tests/test_arrival_body.py:73:def test_a_batch_body_carrying_t_is_refused_at_the_envelope_and_in_its_rows():
+libs/engine/tests/test_arrival_body.py:76:        rows_of_body("batch", legacy)
+libs/engine/tests/test_arrival_body.py:81:        rows_of_body("batch", rows_carry_t)
+libs/engine/tests/test_arrival_body.py:97:    assert rows_of_body("fact", body_of_fact_row(fact_row())) == [
+libs/engine/tests/test_arrival_body.py:100:    assert rows_of_body("tick", body_of_tick_row(tick_row())) == [
+libs/engine/tests/test_arrival_body.py:103:    rows = rows_of_body("batch", body_of_batch([fact_row("01A"), fact_row("01B")]))
+libs/engine/tests/test_arrival_body.py:108:def test_a_body_read_as_the_wrong_class_refuses():
+libs/engine/tests/test_arrival_body.py:110:    mismatch is a refusal rather than a body that quietly disagrees with
+libs/engine/tests/test_arrival_body.py:114:        rows_of_body("tick", body_of_fact_row(fact_row()))
+libs/engine/tests/test_arrival_body.py:116:        rows_of_body("fact", body_of_tick_row(tick_row()))
+libs/engine/tests/test_arrival_body.py:121:        rows_of_body("genesis", {"protocol": 1, "lineage": "L", "key": "k"})
+libs/engine/tests/test_arrival_body.py:129:    key that signs a commitment covering every row, so a mixed-observer
+libs/engine/tests/test_arrival_body.py:133:        body_of_batch([fact_row("01A", observer="kyle"),
+libs/engine/tests/test_arrival_body.py:139:    caller routes around — here, by hand-assembling the body it could not
+libs/engine/tests/test_arrival_body.py:150:        rows_of_body("batch", forged)
+libs/engine/tests/test_arrival_body.py:154:    body = body_of_batch([fact_row("01A"), fact_row("01B"), fact_row("01C")])
+libs/engine/tests/test_arrival_body.py:155:    assert len(rows_of_body("batch", body)) == 3
+libs/engine/tests/test_arrival_body.py:163:    ``body_of_batch``."""
+libs/engine/tests/test_arrival_body.py:171:        body_of_batch([fact_row("01A")])
+libs/engine/tests/test_arrival_body.py:173:        body_of_batch([fact_row("01A"), fact_row("01A", message="other")])
+libs/engine/tests/test_arrival_body.py:182:        ("fact", fact_row(), body_of_fact_row),
+libs/engine/tests/test_arrival_body.py:183:        ("fact", fact_row(signature="sig:abc"), body_of_fact_row),
+libs/engine/tests/test_arrival_body.py:184:        ("tick", tick_row(), body_of_tick_row),
+libs/engine/tests/test_arrival_body.py:199:    once = json.dumps(body, sort_keys=True, separators=(",", ":"))
+libs/engine/tests/test_arrival_body.py:207:    once = json.dumps(body_of_batch(rows), sort_keys=True, separators=(",", ":"))
+libs/engine/tests/test_arrival_body.py:208:    decoded = [row for _t, row in rows_of_body("batch", json.loads(once))]
+libs/engine/tests/test_arrival_body.py:209:    twice = json.dumps(body_of_batch(decoded), sort_keys=True, separators=(",", ":"))
+libs/engine/tests/test_arrival_body.py:219:    body = body_of_fact_row(row)
+libs/engine/tests/test_arrival_body.py:221:    assert rows_of_body("fact", body)[0][1][5] == payload
+libs/engine/tests/test_arrival_body.py:228:    recovered from a t-less body, which is the row a verifier will hold."""
+libs/engine/tests/test_arrival_body.py:231:    (_t, recovered), = rows_of_body("fact", body_of_fact_row(row))
+libs/engine/tests/test_arrival_body.py:242:        ("fact", fact_row(), object_of_fact_row, body_of_fact_row),
+libs/engine/tests/test_arrival_body.py:243:        ("tick", tick_row(), object_of_tick_row, body_of_tick_row),
+libs/engine/tests/test_arrival_body.py:258:    restored = legacy_object_of_body("batch", body_of_batch(rows))
+libs/engine/tests/test_arrival_body.py:262:def test_restoring_a_malformed_body_refuses_rather_than_laundering_it():
+libs/engine/tests/test_arrival_body.py:263:    """``t`` is put back from ``k``, so a body that is malformed as an
+libs/engine/tests/test_arrival_body.py:264:    arrival body must not become well-formed merely by acquiring a
+libs/engine/tests/test_arrival_body.py:267:        legacy_object_of_body("fact", {"id": "01A"})
+docs/architecture/arrival/protocol.html:13:<body class="technical-document">
+docs/architecture/arrival/protocol.html:218:              <tr><td><code>batch</code></td><td>Carries one atomic fact ceremony</td><td>Expansion order is part of its body grammar.</td></tr>
+docs/architecture/arrival/protocol.html:235:            <div><strong>Content commitment</strong><span>Covers authored fields and remains stable when another custodian assigns a coordinate.</span></div>
+docs/architecture/arrival/protocol.html:347:          Arrival separates what an observer authored from where a custodian placed it, and
+docs/architecture/arrival/protocol.html:350:          content commitment—kind, authored timestamp, observer, origin, and body—but not
+docs/architecture/arrival/protocol.html:365:          the trip: a merge appends records the target custodian did not sign, holds no key
+docs/architecture/arrival/protocol.html:454:            The sidecar mints an ordinary signed target genesis under the migration custodian.
+libs/store/tests/test_arrival_merge.py:34:def _fact_body(ident, message, *, ts=_TS, observer="kyle", signature=None):
+libs/store/tests/test_arrival_merge.py:44:        body["signature"] = signature
+libs/store/tests/test_arrival_merge.py:48:def _tick_body(ident, name="check", *, ts=_TS, chained=False):
+libs/store/tests/test_arrival_merge.py:62:        body.update(
+libs/store/tests/test_arrival_merge.py:75:    ``observer`` is the log's GENESIS observer — its custodian — which is
+libs/store/tests/test_arrival_merge.py:77:    two logs different custodians and tell whose label a merged record
+libs/store/tests/test_arrival_merge.py:83:    for body in facts:
+libs/store/tests/test_arrival_merge.py:84:        log.append("fact", body, observer=body["observer"], at=body["ts"])
+libs/store/tests/test_arrival_merge.py:85:    for body in ticks:
+libs/store/tests/test_arrival_merge.py:91:        log.append("tick", body, observer=log.genesis()["observer"], at=body["ts"])
+libs/store/tests/test_arrival_merge.py:107:    for idx, body in enumerate(facts):
+libs/store/tests/test_arrival_merge.py:112:                body["id"], body["kind"], body["ts"], body["observer"],
+libs/store/tests/test_arrival_merge.py:113:                body["origin"], body["payload"], body.get("signature"),
+libs/store/tests/test_arrival_merge.py:152:    _, target_db = arrival_store(tmp_path, "t", facts=[_fact_body("01T0", "t0")])
+libs/store/tests/test_arrival_merge.py:159:            _fact_body("01S0", "s0", ts=_TS + 30),
+libs/store/tests/test_arrival_merge.py:160:            _fact_body("01S1", "s1", ts=_TS + 20),
+libs/store/tests/test_arrival_merge.py:161:            _fact_body("01S2", "s2", ts=_TS + 10),
+libs/store/tests/test_arrival_merge.py:178:    _, target_db = arrival_store(tmp_path, "t", facts=[_fact_body("01T0", "t0")])
+libs/store/tests/test_arrival_merge.py:180:        tmp_path, "s", facts=[_fact_body("01S0", "s0")], ticks=[_tick_body("01K0")]
+libs/store/tests/test_arrival_merge.py:211:    body_ids = [r["body"]["id"] for r in records(tmp_path / "t.arrival") if r["k"] == "fact"]
+libs/store/tests/test_arrival_merge.py:213:    assert len(body_ids) == len(set(body_ids))
+libs/store/tests/test_arrival_merge.py:219:    _, target_db = arrival_store(tmp_path, "t", facts=[_fact_body("01T0", "t0")])
+libs/store/tests/test_arrival_merge.py:231:def test_a_fact_body_rides_verbatim_with_its_own_signature(tmp_path):
+libs/store/tests/test_arrival_merge.py:234:    authored = _fact_body("01AUTH", "authored", observer="alice", signature="sig:alice")
+libs/store/tests/test_arrival_merge.py:235:    _, target_db = arrival_store(tmp_path, "t", facts=[_fact_body("01T0", "t0")])
+libs/store/tests/test_arrival_merge.py:245:    assert record["body"] == authored
+libs/store/tests/test_arrival_merge.py:263:    _, target_db = arrival_store(tmp_path, "t", facts=[_fact_body("01T0", "t0")])
+libs/store/tests/test_arrival_merge.py:274:    assert "signature" not in body  # absent, not null — the codec's rule
+libs/store/tests/test_arrival_merge.py:297:def test_a_merged_tick_names_the_TARGETS_custodian(tmp_path):
+libs/store/tests/test_arrival_merge.py:307:    tick carries the TARGET's custodian, not the source's: the target's
+libs/store/tests/test_arrival_merge.py:310:    record. Three-way distinct fixture (target custodian, source custodian,
+libs/store/tests/test_arrival_merge.py:313:    _, target_db = arrival_store(tmp_path, "t", observer="target-custodian")
+libs/store/tests/test_arrival_merge.py:317:        observer="source-custodian",
+libs/store/tests/test_arrival_merge.py:325:    assert merged[0]["observer"] == "target-custodian"
+libs/store/tests/test_arrival_merge.py:326:    assert merged[0]["observer"] != "source-custodian"
+libs/store/tests/test_arrival_merge.py:328:    # And the body no longer echoes the record class.
+libs/store/tests/test_arrival_merge.py:340:    _, target_db = arrival_store(tmp_path, "t", facts=[_fact_body("01T0", "t0")])
+libs/store/tests/test_arrival_merge.py:352:    from engine.arrival_body import body_of_batch
+libs/store/tests/test_arrival_merge.py:358:    _, target_db = arrival_store(tmp_path, "t", facts=[_fact_body("01T0", "t0")])
+libs/store/tests/test_arrival_merge.py:360:    source_log.append("batch", body_of_batch(rows), observer="kyle")
+libs/store/tests/test_arrival_merge.py:378:    from engine.arrival_body import body_of_batch
+libs/store/tests/test_arrival_merge.py:384:    already = dict(_fact_body("01CER0", "x", ts=_TS))
+libs/store/tests/test_arrival_merge.py:385:    already["payload"] = json.dumps({"n": 0})  # the SAME body the source carries
+libs/store/tests/test_arrival_merge.py:387:    # The target already holds 01CER0 with an IDENTICAL body, so it dedups;
+libs/store/tests/test_arrival_merge.py:388:    # a divergent body would refuse instead (TestDivergenceRefusal).
+libs/store/tests/test_arrival_merge.py:390:    source_log.append("batch", body_of_batch(rows), observer="kyle")
+libs/store/tests/test_arrival_merge.py:406:    _, target_db = arrival_store(tmp_path, "t", facts=[_fact_body("01T0", "t0")])
+libs/store/tests/test_arrival_merge.py:408:        tmp_path, "s", facts=[_fact_body("01T0", "t0"), _fact_body("01S0", "s0")]
+libs/store/tests/test_arrival_merge.py:420:    _, target_db = arrival_store(tmp_path, "t", facts=[_fact_body("01T0", "t0")])
+libs/store/tests/test_arrival_merge.py:432:    _, target_db = arrival_store(tmp_path, "t", facts=[_fact_body("01T0", "t0")])
+libs/store/tests/test_arrival_merge.py:437:            _fact_body("01B", "b", ts=_TS + 30),
+libs/store/tests/test_arrival_merge.py:438:            _fact_body("01A", "a", ts=_TS + 10),
+libs/store/tests/test_arrival_merge.py:439:            _fact_body("01C", "c", ts=_TS + 20),
+libs/store/tests/test_arrival_merge.py:454:    _, target_db = arrival_store(tmp_path, "t", facts=[_fact_body("01T0", "t0")])
+libs/store/tests/test_arrival_merge.py:482:    _, target_db = arrival_store(tmp_path, "t", facts=[_fact_body("01T0", "t0")])
+libs/store/tests/test_arrival_merge.py:503:    a_facts = [_fact_body("01A0", "a0"), _fact_body("01A1", "a1")]
+libs/store/tests/test_arrival_merge.py:504:    b_facts = [_fact_body("01B0", "b0"), _fact_body("01B1", "b1")]
+libs/store/tests/test_arrival_merge.py:538:            facts=[_fact_body("01B0", "b0"), _fact_body("01B1", "b1")],
+libs/store/tests/test_arrival_merge.py:542:            [r["body"]["id"] for r in records(tmp_path / f"a{trial}.arrival")
+libs/store/tests/test_arrival_merge.py:596:    _, target_db = arrival_store(tmp_path, "t", facts=[_fact_body("01T0", "t0")])
+libs/store/tests/test_arrival_merge.py:602:    assert [r["body"]["id"] for r in records(tmp_path / "t.arrival") if r["k"] == "fact"] == [
+libs/store/tests/test_arrival_merge.py:619:        tmp_path, "t", facts=[_fact_body("01T0", "t0"), _fact_body("01T1", "t1")]
+libs/store/tests/test_arrival_merge.py:624:        facts=[_fact_body("01S0", "s0"), _fact_body("01S1", "s1")],
+libs/store/tests/test_arrival_merge.py:688:    _, target_db = arrival_store(tmp_path, "t", facts=[_fact_body("01T0", "t0")])
+libs/store/tests/test_arrival_merge.py:718:        r["body"]["id"] for r in records(tmp_path / "t.arrival") if r["k"] == "fact"
+libs/store/tests/test_arrival_merge.py:720:    assert len(body_ids) == len(set(body_ids)), (
+libs/store/tests/test_arrival_merge.py:723:    assert sorted(body_ids) == sorted(["01T0", *(f"01S{n:03d}" for n in range(60))])
+libs/store/tests/test_arrival_merge.py:743:    _, target_db = arrival_store(tmp_path, "t", facts=[_fact_body("01T0", "t0")])
+libs/store/tests/test_arrival_merge.py:755:        tmp_path, "part", facts=[_fact_body("01S0", "s0"), _fact_body("01S1", "s1")]
+libs/store/tests/test_arrival_merge.py:786:            tmp_path, "t", facts=[_fact_body("01DIV", "target-body")]
+libs/store/tests/test_arrival_merge.py:790:            facts=[_fact_body("01FRESH", "fresh"), _fact_body("01DIV", "source-body")],
+libs/store/tests/test_arrival_merge.py:805:            tmp_path, "t", facts=[_fact_body("01SIG", "same", signature="sig:a")]
+libs/store/tests/test_arrival_merge.py:813:    def test_identical_body_still_dedups(self, tmp_path):
+libs/store/tests/test_arrival_merge.py:841:            tmp_path, "t", facts=[_fact_body("01DIV", "target-body")]
+6:-              <li>The envelope becomes wire v1 after the seam triage — drop <code>body.t</code>, re-spell the tick <code>observer</code>, keep the dual signature (<code>decision:design/arrival-wire-v1-seam-triage</code>).</li>
+7:+              <li>Wire v1 is pinned — <code>body.t</code> dropped, the tick <code>observer</code> re-spelled to the log's custodian, the dual signature kept, and a batch's rows held to one observer (<code>decision:design/arrival-wire-v1-seam-triage</code>).</li>
+10:+              <li>Tick outer signatures — deferred on purpose, so the tick's custodian label is currently a true but unverified claim</li>
+17:-          optional record signature covers the content commitment—kind, authored timestamp,
+20:-          author signature.
+22:+          it uses two different signatures to do so. The outer record signature is the
+23:+          <strong>arrival-content signature, and it is per-lineage</strong>: it covers the
+29:+          <strong>The signature that travels through re-custody is the inner one.</strong> A
+30:+          fact row carries its own fact-domain signature inside <code>body</code>, over
+33:+          without anyone fabricating an author signature. The outer signature does not make
+35:+          for a foreign observer, and so drops the outer signature rather than re-minting
+36:+          it. Reading the outer signature as the author's portable claim is the one mistake
+52:-          <code>libs/engine/src/engine/arrival.py</code> on this branch, but does not freeze
+55:-          the tick <code>observer</code>, keep the dual signature. No shipped store exists in
+63:+          destination log's genesis observer, and the dual signature is kept. No shipped
+86:-          <code>ts</code>. An optional inner <code>signature</code> preserves the fact-domain
+87:-          signature. None of the required fields may be null.
+91:+          <code>signature</code> preserves the fact-domain signature. None of the required
+109:+          signature made under that identity covers every row — so a batch spanning two
+117:-          <code>window_hash</code>; and optional inner <code>signature</code>.
+122:+          <code>window_hash</code>; and optional inner <code>signature</code>. The tick’s
+135:-            preserved signature is invalidated. The tick writer’s name-as-<code>observer</code>
+137:-            sub-ruling. The inner fact-domain signature beside the outer arrival-content
+138:-            signature KEEPS — two subjects (author content, custody record), a principled pair
+146:+            the two honest. No preserved signature was invalidated: the fact commitment
+156:+            this custodian’s fold engine produced it. Tick outer signatures are deferred ON
+163:+            <strong>The dual signature KEPT.</strong> The inner fact-domain signature beside
+164:+            the outer arrival-content signature is a principled two-subject pair, not a seam
+244:+implementing it there would force `arrival.py` to know the row-body grammar — a layer it
+245:+deliberately does not have. `arrival.py` treats `body` as opaque, checking only that it is
+343:+| `libs/custody/tests` | 13 | 13 | 0 | untouched |
+429:+2. **Inner-signature preservation** — `test_dropping_t_moves_no_inner_commitment` computes
+431:+   body, and asserts equality plus that the inner signature rides verbatim. No existing
+437:+5. **`git ls-files`** — verified from git's view; no `.loops/`, no store file, no `.jsonl`
+512:+byte-identical hashes and every existing fact signature keeps verifying.
+513:+Nothing this module changed is covered by an inner signature:
+569:+# null. ``allowed`` is fields + signature and NOTHING ELSE — no ``t``. That
+604:+    """A VALIDATED body as its full-arity row tuple, signature last."""
+630:+    """A fact row ``(id, kind, ts, observer, origin, payload[, signature])``
+636:+    """A tick row (``_TICK_ROW_SQL`` order, signature optional) as its
+726:+            "envelope names row 0's and its signature covers them all. A "
+834:@@ -20,8 +20,13 @@ every existing fact signature and commitment hash survives the round trip,
+879:+        UNVERIFIED, on purpose: tick outer signatures are deferred (ruling
+881:+        registry — ``_resolve`` gates on a signature being present and
+882:+        every tick mint passes ``signer=None``. An unverified true claim is
+887:+        (``fact_signer_for`` resolves ``keys/<observer>/ed25519.key``) and
+888:+        re-deriving it as custody would re-key every fact signature from
+910:-        row — the index and the log must derive-match. The record's arrival signature comes from
+912:+        COMMITTED read-back row — the index and the log must derive-match. The record's arrival signature comes from
+958:-_SIGNATURE = "signature"
+959:+SIGNATURE_FIELD = "signature"
+1042:-            f"{t} field 'signature' must be absent, not null, when unsigned"
+1045:+        return f"{t} field 'signature' must be absent, not null, when unsigned"
+1049:-            f"{t} field 'signature' must be a string, got {type(sig).__name__}"
+1051:+        return f"{t} field 'signature' must be a string, got {type(sig).__name__}"
+1089:+inner signature may be invalidated. The inner fact commitment is (kind, ts,
+1119:+def fact_row(ident="01F0", *, observer="kyle", message="m", signature=None):
+1121:+    return (*row, signature) if signature is not None else row
+1263:+        ("fact", fact_row(signature="sig:abc"), body_of_fact_row),
+1286:+    rows = [fact_row("01A"), fact_row("01B", signature="sig:b")]
+1306:+    origin, payload) — it never named ``t``, so a signature made before the
+1309:+    row = fact_row(signature="sig:preserved")
+1313:+    assert recovered[6] == "sig:preserved"  # and the signature rides verbatim
+1521:+        signer=signer,
+1694:@@ -36 +35,0 @@ def _fact_body(ident, message, *, ts=_TS, observer="kyle", signature=None):
+1710:-        tmp_path / f"{name}.arrival", observer="kyle", signer=stub_sign, key=STUB_KEY
+1711:+        tmp_path / f"{name}.arrival", observer=observer, signer=stub_sign, key=STUB_KEY
+
+codex
+## §3 unverified fixes
+
+**PASS — 8aa4c619, engine test dependency**
+
+Evidence:
+
+- `libs/engine/pyproject.toml` declares `"sign"` only in `dependency-groups.dev`.
+- `[tool.uv.sources]` maps `sign` to the workspace package.
+- Direct import succeeded:
+  `sign import: .../libs/sign/src/sign/__init__.py`
+- Engine suite: `1937 passed, 1 skipped in 88.69s`.
+- Installed runtime metadata lists only `atoms`, `lang`, `python-ulid`, and `rfc8785`.
+- No runtime engine source imports `sign`; only test fixtures do. The injected runtime boundary remains intact.
+
+**PASS — c63ae5fd, byte-stability docstring**
+
+Evidence:
+
+- `git show c63ae5fd` changes only the docstring of `test_encode_decode_encode_is_byte_stable`; executable statements are unchanged.
+- The revised text accurately describes the assertion: canonical bytes retain field presence, value spelling, and null-versus-absent across encode/decode/encode.
+- It correctly excludes input key ordering because both comparisons use `json.dumps(..., sort_keys=True)`.
+
+## Seeded targets
+
+- [arrival_body.py:213](/Users/kaygee/Code/loops-slice1/libs/engine/src/engine/arrival_body.py:213): analyzer looseness does not mask a validation hole. Missing/null/non-list `rows` and non-dict elements all raised `ArrivalBodyError`, not `TypeError`.
+- [jsonl_codec.py:499](/Users/kaygee/Code/loops-slice1/libs/engine/src/engine/jsonl_codec.py:499): the branch is live. Calling `records_from_object` with `None`, list, string, or integer raised the intended `JsonlCodecError`. The warning follows from the overly narrow `dict` annotation.
+- [merge.py:766](/Users/kaygee/Code/loops-slice1/libs/store/src/store/merge.py:766): canonical engine/store schemas declare tick origin `TEXT NOT NULL`. A deliberately supplied `None` can reach `_entry_for` only from a malformed/loosely-schemaed source, where `body_of_tick_row` refuses it as `ArrivalBodyError` before an `Entry` is returned or appended. Empty-string origin remains valid.
+
+## Contract verification
+
+- Diff contains none of `content_commitment`, `arrival.py`, or `libs/custody/`.
+- Arrival bodies drop `t`; the legacy JSONL codec retains it.
+- Live and merge tick mint sites use the destination genesis observer.
+- Tick outer signing remains absent.
+- Fact observer/signing behavior and carried inner signatures remain unchanged.
+- Batch same-observer grammar is enforced on encode and decode.
+- Protocol §06 states the per-lineage outer-signature and portable inner-signature distinction.
+- Verification suites:
+  - Engine: `1937 passed, 1 skipped`
+  - Store: `177 passed`
+  - Architecture: `98 passed`
+
+**New findings:** none.
+
+**CONVERGED** — no blocking findings; the slice honors the design contract.
+tokens used
+77,479
+## §3 unverified fixes
+
+**PASS — 8aa4c619, engine test dependency**
+
+Evidence:
+
+- `libs/engine/pyproject.toml` declares `"sign"` only in `dependency-groups.dev`.
+- `[tool.uv.sources]` maps `sign` to the workspace package.
+- Direct import succeeded:
+  `sign import: .../libs/sign/src/sign/__init__.py`
+- Engine suite: `1937 passed, 1 skipped in 88.69s`.
+- Installed runtime metadata lists only `atoms`, `lang`, `python-ulid`, and `rfc8785`.
+- No runtime engine source imports `sign`; only test fixtures do. The injected runtime boundary remains intact.
+
+**PASS — c63ae5fd, byte-stability docstring**
+
+Evidence:
+
+- `git show c63ae5fd` changes only the docstring of `test_encode_decode_encode_is_byte_stable`; executable statements are unchanged.
+- The revised text accurately describes the assertion: canonical bytes retain field presence, value spelling, and null-versus-absent across encode/decode/encode.
+- It correctly excludes input key ordering because both comparisons use `json.dumps(..., sort_keys=True)`.
+
+## Seeded targets
+
+- [arrival_body.py:213](/Users/kaygee/Code/loops-slice1/libs/engine/src/engine/arrival_body.py:213): analyzer looseness does not mask a validation hole. Missing/null/non-list `rows` and non-dict elements all raised `ArrivalBodyError`, not `TypeError`.
+- [jsonl_codec.py:499](/Users/kaygee/Code/loops-slice1/libs/engine/src/engine/jsonl_codec.py:499): the branch is live. Calling `records_from_object` with `None`, list, string, or integer raised the intended `JsonlCodecError`. The warning follows from the overly narrow `dict` annotation.
+- [merge.py:766](/Users/kaygee/Code/loops-slice1/libs/store/src/store/merge.py:766): canonical engine/store schemas declare tick origin `TEXT NOT NULL`. A deliberately supplied `None` can reach `_entry_for` only from a malformed/loosely-schemaed source, where `body_of_tick_row` refuses it as `ArrivalBodyError` before an `Entry` is returned or appended. Empty-string origin remains valid.
+
+## Contract verification
+
+- Diff contains none of `content_commitment`, `arrival.py`, or `libs/custody/`.
+- Arrival bodies drop `t`; the legacy JSONL codec retains it.
+- Live and merge tick mint sites use the destination genesis observer.
+- Tick outer signing remains absent.
+- Fact observer/signing behavior and carried inner signatures remain unchanged.
+- Batch same-observer grammar is enforced on encode and decode.
+- Protocol §06 states the per-lineage outer-signature and portable inner-signature distinction.
+- Verification suites:
+  - Engine: `1937 passed, 1 skipped`
+  - Store: `177 passed`
+  - Architecture: `98 passed`
+
+**New findings:** none.
+
+**CONVERGED** — no blocking findings; the slice honors the design contract.

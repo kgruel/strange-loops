@@ -6,4 +6,10 @@ brief's unverified-fixes table. Remove entries only when a sol round has PASSed 
 
 | commit | finding | fix | arbiter verification |
 |---|---|---|---|
-| 8aa4c619 | `finding:engine-tests-masked-sign-dependency` — PR #9 first per-package CI exposure: engine conftest imports sign.ed25519, masked by local workspace env | `sign` added to engine `dependency-groups.dev` + `tool.uv.sources`; runtime injection boundary untouched | Mutation-verified in minimal `UV_PROJECT_ENVIRONMENT` closure: reverted → CI's exact ModuleNotFoundError; applied → 1913+1skip green |
+| *(none open)* | | | |
+
+## Verified (sol-PASSed, removed from the open table)
+
+| commit | finding | sol round |
+|---|---|---|
+| 8aa4c619 | `finding:engine-tests-masked-sign-dependency` — engine conftest's masked dep on sign | slice-1 sol-LOW r1 PASS (2026-08-29): dep declared dev-only, runtime metadata clean, no runtime engine source imports sign — `sol-slice1-r1-stdout.log` |

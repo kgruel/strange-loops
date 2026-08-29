@@ -52,6 +52,11 @@ lang test files.
   no children, so the loader cannot distinguish it from the no-block case. Identical
   to the known limitation already documented for `preview` in `test_loader.py`. It
   declares nothing, so nothing is silently discarded. Noted at the refusal site.
+- **The loader stores the STRIPPED backend name.** `backend="  file  "` becomes
+  `"file"` rather than reaching `open` as an unknown name. A normalization the brief
+  did not rule, named here rather than left for the gate to find: it follows from
+  refusing blank values with the same `.strip()`, and treating surrounding whitespace
+  as significant in an adapter name would be the surprising choice.
 - **`documents_to_vertex(..., store_backend=)` is a third residence parameter**, not a
   field read from documents. Backend is residence: an operational adapter name in
   signed declaration history would make a storage choice part of the vertex's
@@ -212,6 +217,13 @@ Three things were reported rather than absorbed silently, each with a finding fa
    test records what it is.
 3. `finding:slice2-wp4-descriptor-for-fourth-arm-storeless-vertex` (low) — the
    store-less arm the design's three do not enumerate.
+
+**One emission stray, disclosed.** The first `finding` emit used `topic=` where the
+kind folds by `name=`, so it stored unfolded
+(`finding/<no-fold> @ 01M17DTEG4PVMM8VTNS8VZAGF9`). The corrected re-emit
+(`01M17DTQ69B5MEKHXJ03M0XRMA`) carries the same content and notes the supersession in
+its message. A reader of the project store will see one anomalous unfolded finding row;
+that is what it is.
 
 Scope discipline held where it was tempting not to: the brief names exactly three
 refusals, so no extra-positional-args refusal and no `BackendDecl.__post_init__`

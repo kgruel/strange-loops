@@ -182,19 +182,25 @@ class JournalEquivocation(AttestationRefusal):
 
 
 class JournalUnreadable(AttestationRefusal):
-    """Structural damage that breaks the read itself.
+    """There is nothing to parse: the journal cannot be read as text at all.
 
-    Scoped deliberately narrow: **entries with no header**. The header states
-    the protocol and wire versions the record hashes derive under, so without
-    it a comparison is not a weaker answer but a meaningless one.
+    A directory where the journal should be, a permission wall, bytes that
+    are not text. Distinct from an *absent* journal, which is first contact,
+    and from a journal whose *content* cannot be read, which is
+    :class:`HeadUnreadable`. Raised rather than let out as the underlying
+    ``OSError`` so that a caller catching :class:`AttestationRefusal` does not
+    have a builtin escape past it.
 
-    It does NOT cover an unreadable *line*. Those are skipped and reported,
-    and the loss they cause is carried in the result type
-    (:class:`HeadLowerBound`) rather than converted into a verdict about the
-    store. Refusing there made an ordinary crash a permanent incident, and it
-    claimed a protection this location cannot deliver anyway — anyone able to
-    corrupt a line in the journal can delete the journal instead and be met
-    with trust-on-first-use.
+    **This is the only thing that raises it, and the scope has narrowed
+    twice.** It once covered damage above the last line, then entries with no
+    header. Both are now tolerated: an unreadable line is skipped and
+    reported, a missing header is reported as an absence, and in each case the
+    loss is carried in the result type (:class:`HeadLowerBound`) instead of
+    converted into a verdict. Refusing made an ordinary crash a permanent
+    incident, and it claimed a protection this location cannot deliver anyway
+    — anyone able to corrupt the journal can delete it instead and be met with
+    trust-on-first-use. Where a weakened claim is available, a refusal is a
+    verdict the evidence does not support.
     """
 
 
@@ -432,8 +438,14 @@ _RESERVED_LINEAGE_NAMES = frozenset({"bindings"})
 #: grammar, not the record grammar.
 _JOURNAL_VERSION = 1
 
-#: Stated in the header so a journal written under wire v1 is never silently
-#: compared against a v2 head whose hashes derive differently.
+#: Written into the header so a journal's hash derivation is RECORDED. §B.3
+#: asks for more than that — that a v1 journal never be silently compared
+#: against a v2 head whose hashes derive differently — and nothing reads these
+#: back yet, so the promise is only half kept. Stated rather than implied,
+#: because a comment claiming the enforcement would be the same stale-prose
+#: defect this file has already paid for three times. The forcing consumer is
+#: wire v2; sol r1 made it concrete, since a v2-shaped header is now
+#: recognized as a header and its version ignored.
 _PROTOCOL_VERSION = 1
 _WIRE_VERSION = 1
 
@@ -559,7 +571,11 @@ def _parse_entry(raw: object) -> HeadAttestation | None:
     if raw.get("v") != _JOURNAL_VERSION:
         return None
     if "kind" not in raw:
-        # The header, or a future sibling of it. Not an entry; not damage.
+        # NOT a header — :func:`_classify` has already taken those, and this
+        # function is only reached by lines it judged entry-shaped. A kindless
+        # object arriving here is one this build cannot name, and the caller
+        # reports it as a skipped line rather than absorbing it silently,
+        # which is the whole of BLOCKING-1.
         return None
     try:
         kind = Kind(raw["kind"])
@@ -696,17 +712,21 @@ class JournalRead:
     label is permanent."""
 
     skipped: tuple[str, ...]
-    """Lines this build could not use, each with why. Reported rather than
-    swallowed: a tolerated loss that nobody is told about is just a loss."""
+    """What this build could not use, each with why. Mostly lines; a missing
+    header is reported here too, without a line number, because an absence
+    does not have one. Reported rather than swallowed: a tolerated loss that
+    nobody is told about is just a loss. Non-empty is exactly the condition
+    that weakens :attr:`known` to a bound."""
 
     def established_head(self) -> HeadAttestation | None:
         """*K* for a full comparison, or a refusal if the read was incomplete.
 
         This is the only way to obtain an argument for :func:`compare`, and it
-        refuses rather than answering when any epoch line was unreadable. That
-        refusal is the point: against an incomplete journal the cheap
-        "presented equals *K*, therefore unchanged" shortcut is not merely
-        discouraged, it is unobtainable.
+        refuses rather than answering whenever anything the read needed was
+        missing — an unreadable line, a line it could not classify, or the
+        header itself. That refusal is the point: against an incomplete
+        journal the cheap "presented equals *K*, therefore unchanged" shortcut
+        is not merely discouraged, it is unobtainable.
         """
         if isinstance(self.known, HeadLowerBound):
             raise IndeterminateComparison(
@@ -832,10 +852,16 @@ def parse_journal_lines(lines: Iterable[str]) -> JournalRead:
     — :class:`HeadLowerBound` — rather than converted into a verdict, and the
     positional rule dissolves along with the distinction it enforced.
 
-    :class:`JournalUnreadable` survives for structural damage that breaks the
-    read itself: entries with no header. The header states the protocol and
-    wire versions the hashes derive under, and comparing hashes whose
-    derivation is unknown is not a weaker answer, it is a meaningless one.
+    **This function never refuses on structure.** Entries with no recognized
+    header are tolerated too: the entries are self-describing evidence that
+    heads were accepted, so what is lost — the protocol and wire versions the
+    hashes derive under — weakens the claim to :class:`HeadLowerBound` rather
+    than voiding the file. The absence is reported without a line number,
+    because an absence does not have one. Only
+    :class:`JournalEquivocation` is raised from here, and it is a statement
+    about the journal's content rather than its readability.
+    :class:`JournalUnreadable` belongs to :func:`read_journal`, where there
+    may be no text to hand this function at all.
     """
     entries: list[HeadAttestation] = []
     skipped: list[str] = []
@@ -1006,9 +1032,11 @@ def append_entry(entry: HeadAttestation) -> Path:
         )
     except FileExistsError:
         # An empty existing file is a creator that crashed between the
-        # exclusive create and its write. Supplying the header here is what
-        # keeps that crash from leaving a headerless journal, which the reader
-        # refuses as structural damage.
+        # exclusive create and its write. Supplying the header here keeps that
+        # crash from leaving a journal with no header at all. The reader
+        # tolerates one and says so, but the header carries the protocol and
+        # wire versions, so a journal that HAS one keeps a claim it would
+        # otherwise have to weaken.
         payload = _torn_tail_guard(path) + line
         if path.exists() and path.stat().st_size == 0:
             payload = _header_line() + line

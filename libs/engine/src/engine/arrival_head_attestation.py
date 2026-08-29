@@ -61,6 +61,7 @@ __all__ = [
     "HeadAttestation",
     "HeadFork",
     "HeadLowerBound",
+    "HeadUnreadable",
     "HeadRewrite",
     "HeadRollback",
     "IndeterminateComparison",
@@ -533,10 +534,21 @@ def _parse_entry(raw: object) -> HeadAttestation | None:
 
     None means "a later build wrote something this one does not understand",
     and the caller skips and reports it. It does **not** mean malformed —
-    malformed JSON never reaches here. The journal outlives process restarts
-    and outlives the store, so a journal written by a later build must not
-    make an older build refuse to compare; degrading to a shorter view of the
-    same history is honest, refusing outright is not.
+    malformed JSON never reaches here.
+
+    §B.3's forward-compatibility promise, **as re-scoped by the gate**: an
+    entry from a later build is skipped and reported, never refused *on its
+    own account*. That much survives verbatim, and it is what keeps a shared
+    journal from bricking an older build. What it never licensed is the
+    stronger reading — that a comparison holding **zero** readable evidence
+    should proceed. Declining there refuses no entry; it declines a question
+    nothing left in the journal can answer, and the alternative is
+    trust-on-first-use granted precisely because the journal became
+    unreadable (:class:`HeadUnreadable`).
+
+    The version-skew consequence, stated rather than hidden: an older build
+    reading a purely newer journal declines its comparisons. Resolution is
+    operator work — run the newer build, or the trust-reset ceremony.
 
     Unknown *fields* need no handling at all: the journal is append-only and
     never rewritten, so fields this build does not name are preserved on disk
@@ -611,14 +623,44 @@ class HeadLowerBound:
       being presented.
     * **Unsound, and this is the trap.** A presented head *equal to* the bound
       is not unchanged; it may be a rollback from the very entry that could
-      not be read. **Gathering evidence from the store does not resolve this**
-      — a walk verifies the store's own chain, and the missing fact is about
-      what this machine previously ACCEPTED, which the store never knew.
-      Recovering it means repairing the journal or running the trust-reset
-      ceremony, both of which are operator work.
+      not be read.
+    * **Unsound for the same reason, one step further.** A presented head
+      *above* the bound is not an advance either. Nothing bounds the accepted
+      head from above, so a head at ordinal 95 may still sit below a lost
+      entry at 200 — and descent verified from the bound says nothing about
+      an entry that was never on the walk. Both proceed answers are
+      unobtainable; only the refusal below the bound survives.
+
+    **Gathering evidence from the store does not resolve any of this** — a
+    walk verifies the store's own chain, and the missing fact is about what
+    this machine previously ACCEPTED, which the store never knew. Recovering
+    it means repairing the journal or running the trust-reset ceremony, both
+    of which are operator work.
     """
 
     at_least: HeadAttestation
+    skipped: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class HeadUnreadable:
+    """The journal claimed content and **none of it** could be read.
+
+    The third state, and it is not the absence of one. An empty journal says
+    "nothing was ever accepted here" and first-contact TOFU is the honest
+    answer to it. A journal holding lines this build cannot read says
+    something else entirely: heads WERE accepted, and their ordinals are
+    exactly what has been lost. Collapsing the two would let a journal be
+    trusted on first use precisely because it became unreadable, which is the
+    silent re-acceptance every rule in this module exists to prevent
+    (``finding:s3wp1-gate-all-entries-unreadable-silent-tofu``).
+
+    Carries no ordinal, deliberately and by construction. :class:`HeadLowerBound`
+    can at least refuse anything below its bound; here there is no bound, so
+    **every** comparison declines — rollback included. There is nothing to
+    compare against.
+    """
+
     skipped: tuple[str, ...]
 
 
@@ -640,7 +682,7 @@ class JournalRead:
     """The current trust epoch: the last trust-reset entry and everything after
     it, or all entries when there has never been a reset."""
 
-    known: EstablishedHead | HeadLowerBound | None
+    known: EstablishedHead | HeadLowerBound | HeadUnreadable | None
     """*K*, and how much of a claim it is. See the two types.
 
     Two types rather than a head plus a flag, deliberately: the weakened case
@@ -671,7 +713,15 @@ class JournalRead:
                 "this journal has unreadable lines in the current trust "
                 f"epoch, so its head is only known to be at or above ordinal "
                 f"{self.known.at_least.head.ordinal}; a presented head cannot "
-                "be called unchanged against a bound. Unreadable: "
+                "be called unchanged or advanced against a bound. Unreadable: "
+                + "; ".join(self.known.skipped)
+            )
+        if isinstance(self.known, HeadUnreadable):
+            raise IndeterminateComparison(
+                "this journal holds content but none of it is readable by "
+                "this build, so nothing is known about the head it accepted "
+                "— not even a lower bound. This is NOT first contact: heads "
+                "were accepted here. Unreadable: "
                 + "; ".join(self.known.skipped)
             )
         return self.known.entry if self.known is not None else None
@@ -729,6 +779,29 @@ def _known_of(epoch: tuple[HeadAttestation, ...]) -> HeadAttestation | None:
     return best
 
 
+def _is_header(decoded: object) -> bool:
+    """Whether this line is a journal header — by SHAPE, never by position.
+
+    Keyed on the ``type`` string a header carries. An earlier version treated
+    ANY dict without ``kind`` as a header, which absorbed ``{}`` — and every
+    other kindless dict — **silently, with no skip recorded**: a second byte
+    pattern through which a line could be lost without being reported, and so
+    a second route to the classification the journal exists to prevent
+    (``finding:s3wp1-gate-kindless-dict-absorbed-as-header``). Anything that
+    is not this shape and is not an entry is a skipped line like any other.
+
+    Deliberately keyed on the type rather than on ``protocol``/``wire`` as
+    well, so a later build that adds header fields is still recognized. A
+    header naming a DIFFERENT type is not this journal's header and is not
+    treated as one.
+    """
+    return (
+        isinstance(decoded, dict)
+        and "kind" not in decoded
+        and decoded.get("type") == _OBSERVATION_TYPE
+    )
+
+
 def parse_journal_lines(lines: Iterable[str]) -> JournalRead:
     """Read a journal from its raw lines. Pure — no filesystem.
 
@@ -765,10 +838,10 @@ def parse_journal_lines(lines: Iterable[str]) -> JournalRead:
         except ValueError as exc:
             skipped.append(f"line {index + 1}: does not parse ({exc})")
             continue
-        if isinstance(decoded, dict) and "kind" not in decoded:
-            # A header. Not tracked by position: two writers racing to create
-            # the same journal can each write one, so "the header is line 1"
-            # is not a property this reader may assume.
+        if _is_header(decoded):
+            # Not tracked by position: two writers racing to create the same
+            # journal can each write one, so "the header is line 1" is not a
+            # property this reader may assume.
             header_seen = True
             continue
         entry = _parse_entry(decoded)
@@ -785,13 +858,18 @@ def parse_journal_lines(lines: Iterable[str]) -> JournalRead:
         )
     epoch = _epoch_of(frozen)
     best = _known_of(epoch)
-    known: EstablishedHead | HeadLowerBound | None = None
+    known: EstablishedHead | HeadLowerBound | HeadUnreadable | None
     if best is not None:
         known = (
             HeadLowerBound(at_least=best, skipped=tuple(skipped))
             if skipped
             else EstablishedHead(entry=best)
         )
+    elif skipped:
+        # Content was claimed and none of it could be read. NOT first contact.
+        known = HeadUnreadable(skipped=tuple(skipped))
+    else:
+        known = None
     return JournalRead(
         entries=frozen,
         epoch=epoch,

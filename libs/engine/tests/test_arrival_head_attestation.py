@@ -28,6 +28,7 @@ from engine.arrival_head_attestation import (
     HeadLowerBound,
     HeadRewrite,
     HeadRollback,
+    HeadUnreadable,
     IndeterminateComparison,
     JournalEquivocation,
     JournalUnreadable,
@@ -787,11 +788,18 @@ def test_a_creator_that_crashed_before_its_header_does_not_strand_the_journal():
     assert result.established_head().head.ordinal == 4
 
 
-def test_an_entry_from_a_later_build_is_skipped_and_reported_not_refused():
-    """A later build's journal must not make this one refuse to compare.
+def test_a_later_build_entry_is_never_refused_on_its_own_account():
+    """§B.3's forward-compatibility promise, as the gate re-scoped it.
 
-    Degrading to a shorter view of the same history is honest; refusing
-    outright would brick every older build against a journal it shares.
+    An entry this build cannot read is skipped and reported, never refused
+    *on its own account*, and readable entries around it still establish a
+    head. That is what keeps a shared journal from bricking an older build,
+    and it survives verbatim.
+
+    What the promise never licensed is the stronger reading — that a
+    comparison holding zero readable evidence should proceed. That case is
+    ``test_a_journal_of_nothing_but_later_build_entries_declines`` below;
+    declining there refuses no entry.
     """
     append_entry(observation(4))
     with journal_path(LINEAGE).open("a") as handle:
@@ -814,6 +822,99 @@ def test_an_entry_from_a_later_build_is_skipped_and_reported_not_refused():
     assert isinstance(result.known, HeadLowerBound)
     assert result.known.at_least.head.ordinal == 4
     assert len(result.skipped) == 2
+
+
+def test_a_kindless_dict_is_not_absorbed_as_a_header():
+    """Headers are identified by shape; everything else kindless is a loss.
+
+    Treating any kindless dict as a header absorbed ``{}`` with no skip
+    recorded — a second byte pattern through which a line vanished silently,
+    and so a second route to the classification this journal exists to
+    prevent. Same demonstration as the out-of-order case above, with a
+    different two bytes.
+
+    See ``finding:s3wp1-gate-kindless-dict-absorbed-as-header``.
+    """
+    append_entry(observation(90, kind=Kind.TRUST_RESET, level=Level.FULL))
+    append_entry(observation(92))  # writer B journals first
+    append_entry(observation(91))  # writer A journals last
+
+    lines = journal_path(LINEAGE).read_text().splitlines()
+    lines[2] = "{}"  # the line holding the epoch maximum
+    journal_path(LINEAGE).write_text("\n".join(lines) + "\n")
+
+    result = read_journal(LINEAGE)
+    assert isinstance(result.known, HeadLowerBound)
+    assert result.known.at_least.head.ordinal == 91
+    assert result.skipped != ()
+    assert "line 3" in result.skipped[0]
+    with pytest.raises(IndeterminateComparison):
+        result.established_head()
+
+
+def test_a_journal_of_nothing_but_later_build_entries_declines():
+    """Content claimed, none readable — NOT first contact.
+
+    An empty journal says nothing was ever accepted here, and trust on first
+    use is the honest answer to it. A journal holding lines this build cannot
+    read says heads WERE accepted and their ordinals are what was lost.
+    Collapsing the two would grant TOFU precisely because the journal became
+    unreadable.
+
+    The version-skew consequence is real and accepted: an older build against
+    a purely newer journal declines its comparisons, and resolution is
+    operator work. See ``finding:s3wp1-gate-all-entries-unreadable-silent-tofu``.
+    """
+    lines = [
+        json.dumps(
+            {
+                "v": 1,
+                "type": "arrival-head-observation",
+                "protocol": 2,
+                "wire": 2,
+            }
+        )
+    ]
+    for ordinal in (4215, 4216, 4217):
+        lines.append(
+            json.dumps(
+                {
+                    "v": 1,
+                    "kind": "checkpoint-from-the-future",
+                    "level": "full",
+                    "lineage": LINEAGE,
+                    "ordinal": ordinal,
+                    "record_hash": "d" * 64,
+                    "observed_at": 3.0,
+                }
+            )
+        )
+    result = parse_journal_lines(lines)
+
+    assert isinstance(result.known, HeadUnreadable)
+    assert len(result.skipped) == 3
+    assert result.entries == ()
+
+    # Every comparison declines — rollback included, because there is no bound.
+    with pytest.raises(IndeterminateComparison) as caught:
+        result.established_head()
+    assert "NOT first contact" in str(caught.value)
+    assert not hasattr(result.known, "at_least")
+
+
+def test_a_header_only_journal_is_still_first_contact():
+    """No surviving OR skipped content claims, so nothing was ever accepted."""
+    result = parse_journal_lines([HEADER])
+    assert result.known is None
+    assert compare(result.established_head(), head(0), None) is Outcome.FIRST_CONTACT
+
+
+def test_a_header_naming_another_type_is_not_this_journals_header():
+    result = parse_journal_lines(
+        [json.dumps({"v": 1, "type": "something-else", "protocol": 1})]
+    )
+    assert result.skipped != ()
+    assert isinstance(result.known, HeadUnreadable)
 
 
 def test_unknown_fields_are_ignored_on_read():
@@ -864,8 +965,10 @@ def test_a_second_header_from_a_create_race_is_not_damage():
 
 
 def test_an_entry_with_a_non_integer_ordinal_is_not_read():
+    """And a journal of nothing but such an entry claims content it lost."""
     result = parse_journal_lines(
         [
+            HEADER,
             json.dumps(
                 {
                     "v": 1,
@@ -876,11 +979,13 @@ def test_an_entry_with_a_non_integer_ordinal_is_not_read():
                     "record_hash": "a" * 64,
                     "observed_at": 1.0,
                 }
-            )
+            ),
         ]
     )
-    assert result.established_head() is None
+    assert isinstance(result.known, HeadUnreadable)
     assert result.skipped != ()
+    with pytest.raises(IndeterminateComparison):
+        result.established_head()
 
 
 # ---------------------------------------------------------------------------

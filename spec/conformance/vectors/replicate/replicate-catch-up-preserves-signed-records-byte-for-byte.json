@@ -1,0 +1,78 @@
+{
+  "name": "replicate-catch-up-preserves-signed-records-byte-for-byte",
+  "description": "A replica three records behind is brought forward with SIGNED records and ends byte-identical to the authority. The signature is the discriminator: an implementation that re-coordinated the suffix would rebuild each record without it, and every record hash from that height on would change.",
+  "input": {
+    "target": [
+      "{\"v\":1,\"lin\":\"01M2REPLICATEVECTORLINEAGE\",\"ord\":0,\"prev\":null,\"at\":1750000000.0,\"k\":\"genesis\",\"observer\":\"kyle\",\"origin\":\"\",\"body\":{\"protocol\":1,\"lineage\":\"01M2REPLICATEVECTORLINEAGE\",\"key\":\"a2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2s=\"},\"sig\":\"sig:5aab76c2b50fc8f9e25f90645aded7504583d0ecebad13bb5ba2a83cf1089f3f\",\"rh\":\"65fe9454f6be46ac8e39e2bf58e79502c60f8ab2c33d9d6a58f8fb1dc9a88ccb\"}",
+      "{\"v\":1,\"lin\":\"01M2REPLICATEVECTORLINEAGE\",\"ord\":1,\"prev\":\"65fe9454f6be46ac8e39e2bf58e79502c60f8ab2c33d9d6a58f8fb1dc9a88ccb\",\"at\":1750000101.0,\"k\":\"note\",\"observer\":\"kyle\",\"origin\":\"\",\"body\":{\"i\":1},\"sig\":\"sig:66b83e65f13c9d5b7cce8b547bd61a69b549688fa8418220c3f8e17f30cb064b\",\"rh\":\"0dc849afd830074031e4270c9ec8614e6b2434c04f185c17ebabffab675ffcbf\"}"
+    ],
+    "records": [
+      {
+        "v": 1,
+        "lin": "01M2REPLICATEVECTORLINEAGE",
+        "ord": 2,
+        "prev": "0dc849afd830074031e4270c9ec8614e6b2434c04f185c17ebabffab675ffcbf",
+        "at": 1750000102.0,
+        "k": "note",
+        "observer": "kyle",
+        "origin": "",
+        "body": {
+          "i": 2
+        },
+        "sig": "sig:750398c31ab288c6c78060fdb9affb1cd9926a8524a887caf31107916965b1e5",
+        "rh": "80ff124ad55a4cc3455c00d20c60ae246382678ad7b7f3c4ae8b2616f50c77e6"
+      },
+      {
+        "v": 1,
+        "lin": "01M2REPLICATEVECTORLINEAGE",
+        "ord": 3,
+        "prev": "80ff124ad55a4cc3455c00d20c60ae246382678ad7b7f3c4ae8b2616f50c77e6",
+        "at": 1750000103.0,
+        "k": "note",
+        "observer": "kyle",
+        "origin": "",
+        "body": {
+          "i": 3
+        },
+        "sig": "sig:25aea1e7da260a8c440815a9a4da51a38f25c6fe95792e5f44f4e2d7bdcbdbf2",
+        "rh": "e8734a755ce0a378e8a232a393071a3d8e518bc631b32d8630dea0b45d730b5b"
+      },
+      {
+        "v": 1,
+        "lin": "01M2REPLICATEVECTORLINEAGE",
+        "ord": 4,
+        "prev": "e8734a755ce0a378e8a232a393071a3d8e518bc631b32d8630dea0b45d730b5b",
+        "at": 1750000104.0,
+        "k": "note",
+        "observer": "kyle",
+        "origin": "",
+        "body": {
+          "i": 4
+        },
+        "sig": "sig:91ba9749f015b61d9a92b1bbda32ac454e9fa8c35beadddb9b4dbb09543bdb06",
+        "rh": "f5913ad1cd16161e312d3f96e5e353fac0a94c8efd26c74e5c7cc33f1ba302d2"
+      }
+    ],
+    "expected_head": {
+      "lineage": "01M2REPLICATEVECTORLINEAGE",
+      "ordinal": 1,
+      "record_hash": "0dc849afd830074031e4270c9ec8614e6b2434c04f185c17ebabffab675ffcbf"
+    }
+  },
+  "expected": {
+    "outcome": "accepted",
+    "refusal": null,
+    "head": {
+      "lineage": "01M2REPLICATEVECTORLINEAGE",
+      "ordinal": 4,
+      "record_hash": "f5913ad1cd16161e312d3f96e5e353fac0a94c8efd26c74e5c7cc33f1ba302d2"
+    },
+    "log": [
+      "{\"v\":1,\"lin\":\"01M2REPLICATEVECTORLINEAGE\",\"ord\":0,\"prev\":null,\"at\":1750000000.0,\"k\":\"genesis\",\"observer\":\"kyle\",\"origin\":\"\",\"body\":{\"protocol\":1,\"lineage\":\"01M2REPLICATEVECTORLINEAGE\",\"key\":\"a2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2s=\"},\"sig\":\"sig:5aab76c2b50fc8f9e25f90645aded7504583d0ecebad13bb5ba2a83cf1089f3f\",\"rh\":\"65fe9454f6be46ac8e39e2bf58e79502c60f8ab2c33d9d6a58f8fb1dc9a88ccb\"}",
+      "{\"v\":1,\"lin\":\"01M2REPLICATEVECTORLINEAGE\",\"ord\":1,\"prev\":\"65fe9454f6be46ac8e39e2bf58e79502c60f8ab2c33d9d6a58f8fb1dc9a88ccb\",\"at\":1750000101.0,\"k\":\"note\",\"observer\":\"kyle\",\"origin\":\"\",\"body\":{\"i\":1},\"sig\":\"sig:66b83e65f13c9d5b7cce8b547bd61a69b549688fa8418220c3f8e17f30cb064b\",\"rh\":\"0dc849afd830074031e4270c9ec8614e6b2434c04f185c17ebabffab675ffcbf\"}",
+      "{\"v\":1,\"lin\":\"01M2REPLICATEVECTORLINEAGE\",\"ord\":2,\"prev\":\"0dc849afd830074031e4270c9ec8614e6b2434c04f185c17ebabffab675ffcbf\",\"at\":1750000102.0,\"k\":\"note\",\"observer\":\"kyle\",\"origin\":\"\",\"body\":{\"i\":2},\"sig\":\"sig:750398c31ab288c6c78060fdb9affb1cd9926a8524a887caf31107916965b1e5\",\"rh\":\"80ff124ad55a4cc3455c00d20c60ae246382678ad7b7f3c4ae8b2616f50c77e6\"}",
+      "{\"v\":1,\"lin\":\"01M2REPLICATEVECTORLINEAGE\",\"ord\":3,\"prev\":\"80ff124ad55a4cc3455c00d20c60ae246382678ad7b7f3c4ae8b2616f50c77e6\",\"at\":1750000103.0,\"k\":\"note\",\"observer\":\"kyle\",\"origin\":\"\",\"body\":{\"i\":3},\"sig\":\"sig:25aea1e7da260a8c440815a9a4da51a38f25c6fe95792e5f44f4e2d7bdcbdbf2\",\"rh\":\"e8734a755ce0a378e8a232a393071a3d8e518bc631b32d8630dea0b45d730b5b\"}",
+      "{\"v\":1,\"lin\":\"01M2REPLICATEVECTORLINEAGE\",\"ord\":4,\"prev\":\"e8734a755ce0a378e8a232a393071a3d8e518bc631b32d8630dea0b45d730b5b\",\"at\":1750000104.0,\"k\":\"note\",\"observer\":\"kyle\",\"origin\":\"\",\"body\":{\"i\":4},\"sig\":\"sig:91ba9749f015b61d9a92b1bbda32ac454e9fa8c35beadddb9b4dbb09543bdb06\",\"rh\":\"f5913ad1cd16161e312d3f96e5e353fac0a94c8efd26c74e5c7cc33f1ba302d2\"}"
+    ]
+  }
+}

@@ -23,28 +23,38 @@ test pins it (``test_arrival_contract.py``). Deliberately a test and not a
 numbered architecture rule — one adapter is not yet a pattern, and the second
 backend is where such a rule would earn its keep.
 
-**What this adapter does not implement yet, stated rather than stubbed.**
-``replicate`` and ``export`` are declared on
-:class:`engine.arrival_contract.ArrivalLedger` and are absent here; WP2 builds
-them. :meth:`FileLedger.capabilities` matches that exactly — no Replica
-profile, no export codecs — because a capability report that advertised an
-operation the adapter does not have is the false claim §12's conformance suite
-exists to catch. An ``NotImplementedError`` stub would be the same lie with a
-traceback attached, plus residue for WP2 to sweep.
+**The transfer half (§08), and where its three verbs differ.** ``replicate``
+inserts an exact suffix of pre-coordinated records and assigns nothing;
+``export`` captures a head and re-encodes its complete prefix; ``import_prefix``
+is the §08-DEFAULT importer and nothing more — a new empty replica, or a
+non-empty target that agrees exactly through its own head, else it refuses. A
+"merge" that re-coordinates content is admission into another lineage, which is
+a different operation with different evidence behind it and is not here.
+
+``import_prefix`` is deliberately NOT declared on
+:class:`engine.arrival_contract.ArrivalLedger`: §08 describes portable import in
+prose, the ratified op table gives it no row, and growing the Protocol is a
+contract decision rather than an adapter's. It IS in
+``LEDGER_MUTATIONS``, because the custody/reads separation must cover every op
+that can change what a lineage holds whether the contract names it or not.
 """
 
 from __future__ import annotations
 
 import sqlite3
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
 from .arrival import (
     GRAMMAR_VERSION,
+    ArrivalCorrupt,
     ArrivalLog,
     Entry,
+    ForkedHeight,
     StaleHead,
+    decode_record,
+    encode_record,
 )
 from .arrival_contract import (
     AtomicLimitExceeded,
@@ -52,6 +62,7 @@ from .arrival_contract import (
     Commit,
     DurabilityProfile,
     DurabilityReceipt,
+    ExportedPrefix,
     Full,
     Head,
     HeadMismatch,
@@ -60,6 +71,7 @@ from .arrival_contract import (
     Open,
     Profile,
     RecordDraft,
+    SameHeightFork,
     VerificationLevel,
     VerifyScope,
     Watermark,
@@ -70,7 +82,19 @@ from .arrival_store import (
 )
 from .store_reader import StoreReader
 
-__all__ = ["FileLedger", "FileQuery"]
+__all__ = ["EXPORT_CODEC", "FileLedger", "FileQuery"]
+
+# The one wire codec this backend exports and imports. Named after the grammar
+# it is, and versioned separately from `GRAMMAR_VERSION` on purpose: the codec
+# is what an export FILE claims about its own framing, and a future codec that
+# packed the same records differently would leave the record grammar alone.
+EXPORT_CODEC = "arrival-jsonl-v1"
+
+# How the codec frames one record. A manifest field rather than a convention,
+# because "each element is one record's line INCLUDING its newline" is what
+# makes ``b"".join(prefix.records)`` byte-identical to the log's own prefix —
+# a property a reader can only rely on if the export states it.
+_FRAMING = "newline-terminated"
 
 
 # What an append has established before it reports success. The mechanism is
@@ -81,6 +105,93 @@ _DURABILITY = DurabilityReceipt(
     profile=DurabilityProfile.HOST,
     mechanism="advisory flock, one write, one fsync, on local POSIX storage",
 )
+
+
+def _decoded(prefix: ExportedPrefix) -> list[dict]:
+    """The export's records, decoded and held to the grammar.
+
+    :func:`engine.arrival.decode_record` is the gate, so a record whose ``rh``
+    does not recompute never reaches the import — the bytes travelled, and
+    anything that travelled has to be re-established rather than assumed.
+
+    Framing is read from the manifest and ENFORCED: a codec that says its
+    elements are newline-terminated and hands over one that is not has
+    contradicted itself, and quietly accepting either shape would make
+    ``b"".join(records)`` mean two different things.
+    """
+    framing = prefix.manifest.get("framing")
+    if framing != _FRAMING:
+        raise ValueError(
+            f"this backend reads {_FRAMING!r} framing and nothing else, but "
+            f"this export's manifest claims {framing!r}"
+        )
+    records: list[dict] = []
+    for index, line in enumerate(prefix.records):
+        if not line.endswith(b"\n"):
+            raise ArrivalCorrupt(
+                f"element {index} carries no newline, but the manifest claims "
+                f"{_FRAMING!r} framing",
+                index,
+            )
+        records.append(decode_record(line[:-1]))
+    return records
+
+
+def _refuse_disagreeing_manifest(
+    prefix: ExportedPrefix, imported: Sequence[Mapping[str, Any]]
+) -> None:
+    """Re-derive every manifest claim from the records and compare.
+
+    A manifest travels with the bytes it describes, so it is exactly as
+    trustworthy as they are: checking it is the only thing that makes carrying
+    one worth doing. Each claim is re-derived rather than sampled — a count
+    that matched while the head did not would still be a corrupt export.
+
+    Density is what makes this cheap: the prefix runs from ordinal 0 to the
+    captured head with nothing missing, so ``count`` is arithmetic and the
+    starting ordinal is a constant.
+    """
+    if not imported:
+        raise ArrivalCorrupt(
+            "this export holds no records — a prefix runs from genesis, so "
+            "the smallest honest export is one record",
+            0,
+        )
+    if prefix.manifest.get("protocol") != GRAMMAR_VERSION:
+        raise ArrivalCorrupt(
+            f"this export claims protocol {prefix.manifest.get('protocol')!r}, "
+            f"but this backend reads grammar {GRAMMAR_VERSION}",
+            0,
+        )
+    if imported[0]["ord"] != 0:
+        raise ArrivalCorrupt(
+            f"this export starts at ordinal {imported[0]['ord']}, not 0 — a "
+            "prefix that does not start at genesis is a suffix, and importing "
+            "one is replication, not import",
+            imported[0]["ord"],
+        )
+    last = imported[-1]
+    derived = Head(
+        lineage=last["lin"], ordinal=last["ord"], record_hash=last["rh"]
+    )
+    if derived != prefix.head:
+        raise ArrivalCorrupt(
+            f"this export's records end at {derived}, but it claims to capture "
+            f"{prefix.head}",
+            last["ord"],
+        )
+    claimed = (
+        prefix.manifest.get("lineage"),
+        prefix.manifest.get("through_ordinal"),
+        prefix.manifest.get("through_record_hash"),
+        prefix.manifest.get("count"),
+    )
+    if claimed != (derived.lineage, derived.ordinal, derived.record_hash, len(imported)):
+        raise ArrivalCorrupt(
+            f"this export's manifest claims {claimed}, but its records give "
+            f"{(derived.lineage, derived.ordinal, derived.record_hash, len(imported))}",
+            last["ord"],
+        )
 
 
 def _head_of(record: Mapping[str, Any]) -> Head:
@@ -98,8 +209,9 @@ def _head_of(record: Mapping[str, Any]) -> Head:
 class FileLedger:
     """Custody over one ``.arrival`` log, in the contract's vocabulary.
 
-    Satisfies :class:`engine.arrival_contract.ArrivalLedger` apart from
-    ``replicate`` and ``export``, which are WP2's — see the module docstring.
+    Satisfies :class:`engine.arrival_contract.ArrivalLedger` in full, and
+    offers one op beyond it — ``import_prefix``, which the Protocol
+    deliberately does not declare (see the module docstring).
 
     **Which verification level each operation invokes** (§06 requires a
     backend to say): :meth:`read`, :meth:`scan` and :meth:`head` all reach
@@ -221,6 +333,249 @@ class FileLedger:
             after=_head_of(last),
             durability=_DURABILITY,
         )
+
+    def replicate(
+        self, expected: Head | None, records: Sequence[Mapping[str, Any]]
+    ) -> Commit:
+        """Insert an exact suffix of pre-coordinated records (§08).
+
+        Composition, not a second appender: the whole transition is
+        :meth:`engine.arrival.ArrivalLog.append_records`, which is the batched
+        form of the primitive that has had the right posture all along —
+        append VALIDATES, it never assigns. Nothing here rehashes, re-signs,
+        or renumbers, so the records that land are byte-for-byte the records
+        that were offered, which is the one property replication exists to
+        keep. The same lock, the same full-head compare-and-swap and the same
+        single fsync as :meth:`append`, because they are literally the same
+        code path under a different build.
+
+        Two refusals, and they are different claims:
+
+        * :class:`~engine.arrival_contract.SameHeightFork` — the log already
+          holds a DIFFERENT record at a height this batch would fill. The two
+          histories disagree, retrying cannot make them agree, and choosing
+          between them would be admission into another lineage.
+        * :class:`~engine.arrival_contract.HeadMismatch` — the head is not
+          where this batch assumed, either because ``expected`` no longer
+          describes it or because the batch is not the suffix that follows it.
+          Re-read and recompute which records are missing.
+
+        A batch whose ordinals disagree with each other, or whose supplied
+        ``rh`` does not recompute, refuses as this backend's own
+        ``AppendRejected``/``ArrivalGrammarError``: the ratified refusal set
+        has no member for "this candidate is malformed", and picking one would
+        be a verdict the evidence does not support
+        (``finding:slice2-wp1-refusal-set-gaps``).
+        """
+        if not records:
+            raise ValueError(
+                "replicate was handed no records — an empty replication is a "
+                "caller bug, not a no-op to absorb"
+            )
+        if (
+            self._max_atomic_records is not None
+            and len(records) > self._max_atomic_records
+        ):
+            raise AtomicLimitExceeded(
+                f"{len(records)} records exceeds this backend's configured "
+                f"atomic limit of {self._max_atomic_records} — refused before "
+                "any mutation, because a partially applied suffix is the one "
+                "artifact a replica must never hold"
+            )
+        try:
+            landed, _mark = self._log.append_records(
+                [dict(record) for record in records], following=expected
+            )
+        except ForkedHeight as exc:
+            raise SameHeightFork(str(exc)) from exc
+        except StaleHead as exc:
+            # 1:1 from the CAS subclass only, for the reason `append` gives:
+            # the parent AppendRejected also covers placement faults, and
+            # mapping those to HeadMismatch would assert something about the
+            # head that the fault does not say.
+            raise HeadMismatch(str(exc)) from exc
+
+        first, last = landed[0], landed[-1]
+        return Commit(
+            before=Head(
+                lineage=first["lin"],
+                ordinal=first["ord"] - 1,
+                record_hash=first["prev"],
+            ),
+            records=tuple(landed),
+            after=_head_of(last),
+            durability=_DURABILITY,
+        )
+
+    def export(self, *, through: Head, codec: str) -> ExportedPrefix:
+        """Re-encode the complete prefix behind a captured head (§08).
+
+        Net-new over :meth:`scan` and
+        :func:`engine.arrival.encode_record`, and it is deliberately thin:
+        ``scan`` already refuses a head this log does not hold and already
+        stops at the captured ordinal, so the export inherits both without
+        restating either.
+
+        **Streaming.** ``records`` is a generator, so nothing is materialised
+        and nothing is read until it is drained — the same caveat
+        :meth:`scan` carries, and the reason an export of a large lineage is
+        runnable at all. Each element is one record's line INCLUDING its
+        newline, so ``b"".join(...)`` reproduces the log's own prefix bytes
+        exactly. The manifest says so rather than leaving it to be discovered.
+
+        **The manifest carries no clock and no host.** Everything in it is
+        derived from the captured head and the grammar, which is what makes
+        export → import → export byte-identical rather than
+        byte-identical-except-for-a-timestamp. ``count`` is
+        ``through.ordinal + 1`` by density and needs no drain to compute — and
+        the drain proves it, because a walk that found a gap would have
+        refused before reaching the head.
+
+        A codec this backend does not have is a caller bug against
+        :meth:`capabilities`, not a contract refusal — the ratified set has no
+        member for it, and inventing one would be the over-claim §12 exists to
+        catch.
+        """
+        if codec != EXPORT_CODEC:
+            raise ValueError(
+                f"this backend exports {EXPORT_CODEC!r} and nothing else, but "
+                f"{codec!r} was asked for — capabilities().export_codecs is "
+                "the list to check against"
+            )
+
+        def lines() -> Iterator[bytes]:
+            for record in self.scan(through=through):
+                yield (encode_record(record) + "\n").encode("utf-8")
+
+        return ExportedPrefix(
+            head=through,
+            codec=codec,
+            records=lines(),
+            manifest={
+                "protocol": GRAMMAR_VERSION,
+                "codec": codec,
+                "framing": _FRAMING,
+                "lineage": through.lineage,
+                "through_ordinal": through.ordinal,
+                "through_record_hash": through.record_hash,
+                "count": through.ordinal + 1,
+            },
+        )
+
+    def import_prefix(self, prefix: ExportedPrefix) -> Head:
+        """The §08-default portable import, and nothing beyond it.
+
+        Two targets and no third: a log that does not exist yet, or one whose
+        every record agrees exactly with the import through its own head. Any
+        other target REFUSES. There is no merge arm here — content that has to
+        be re-coordinated to fit is being admitted into another lineage, and
+        admission is a different operation.
+
+        Returns the target's :class:`~engine.arrival_contract.Head` after the
+        import, and not a ``Commit``: an import into an empty replica has no
+        ``before`` to name, and manufacturing one would be the first lie a
+        replica told about where it came from.
+
+        **The manifest is checked, never trusted.** It travels with the bytes,
+        so it is exactly as trustworthy as they are; every field is
+        re-derived from the decoded records and compared. A manifest that
+        disagrees with its own records is a corrupt export, and reporting the
+        disagreement is the whole reason to carry one.
+
+        **Replica is not authority** (§08's callout). This method copies
+        records; it grants nothing. A store that then accepts independent
+        writes has forked, byte-identical start or not, and no flag here
+        prevents that — custody does.
+
+        The verified remainder is materialised, because it is handed to one
+        atomic :meth:`replicate`. That is the honest limit of a MINIMAL
+        importer: an import too large to hold is a resumable-transfer design,
+        and this is not one.
+        """
+        if prefix.codec != EXPORT_CODEC:
+            raise ValueError(
+                f"this backend imports {EXPORT_CODEC!r} and nothing else, but "
+                f"this export claims codec {prefix.codec!r}"
+            )
+        imported = _decoded(prefix)
+        _refuse_disagreeing_manifest(prefix, imported)
+
+        if not self._log.exists():
+            # A new empty replica. Genesis cannot be appended onto a head that
+            # is not there, and it must not be re-minted either: a replica
+            # whose ordinal 0 differed by one byte would be a different
+            # lineage wearing the same id.
+            log = ArrivalLog.adopt_genesis(self._log.path, imported[0])
+            self._log = log
+            head = _head_of(log.genesis())
+            if len(imported) == 1:
+                return head
+            return self.replicate(head, imported[1:]).after
+
+        head = self.head()
+        self._refuse_disagreeing_prefix(imported, head)
+        remainder = [
+            record for record in imported if record["ord"] > head.ordinal
+        ]
+        if not remainder:
+            # The import reaches exactly this target's head and agrees with it
+            # the whole way. Nothing was missing — not a failure, and not a
+            # no-op to hide. An import that stopped SHORT of the head never
+            # gets here; it refuses above.
+            return head
+        return self.replicate(head, remainder).after
+
+    def _refuse_disagreeing_prefix(
+        self, imported: Sequence[Mapping[str, Any]], head: Head
+    ) -> None:
+        """§08's exact-prefix-agreement gate for a non-empty target.
+
+        Over :meth:`scan`, which is the read op that already establishes the
+        target's prefix is intact — so this adds one comparison and no second
+        traversal of its own. Position by position against the import, so the
+        refusal names the ordinal the two disagree at rather than reporting
+        that they differ somewhere.
+
+        Distinct from the same-height fork :meth:`replicate` refuses: that one
+        fires on an overlap it was HANDED, this one on the overlap it is about
+        to SKIP. Both say the histories disagree at a height; skipping an
+        overlap without checking it is how a replica silently acquires a
+        prefix it never verified.
+
+        **An import that ends BEFORE the target's head refuses.** §08 asks for
+        agreement THROUGH the head, and a prefix that stops short structurally
+        cannot establish that — there is nothing to compare the records above
+        it against. Reporting success would be a verdict this operation has no
+        evidence for: it would say "this target agrees with the import through
+        its head" while never having looked at the heights in between. The
+        length is therefore checked FIRST and explicitly, rather than left to a
+        zip that would silently stop at the shorter side.
+        """
+        # Dense from 0 (the manifest check establishes both), so the target's
+        # prefix is exactly this many records and the import must cover it.
+        overlap = head.ordinal + 1
+        if len(imported) < overlap:
+            captured = imported[-1]
+            raise HeadMismatch(
+                f"this import captures head ({captured['lin']}, "
+                f"{captured['ord']}, {captured['rh']}), which is behind "
+                f"{self._log.path}'s head ({head.lineage}, {head.ordinal}, "
+                f"{head.record_hash}) — §08 requires exact prefix agreement "
+                "THROUGH the target's head, and an import that stops short "
+                "cannot establish it. Export again at or past the target's head"
+            )
+
+        for mine, theirs in zip(
+            self.scan(through=head), imported[:overlap], strict=True
+        ):
+            if mine["rh"] != theirs["rh"]:
+                raise SameHeightFork(
+                    f"ordinal {mine['ord']} of {self._log.path} holds rh "
+                    f"{mine['rh']}, but the import holds rh {theirs['rh']} at "
+                    f"ordinal {theirs['ord']} — this import is not a continuation "
+                    "of this log's history. Importing into a non-empty target "
+                    "requires exact prefix agreement through its head"
+                )
 
     # -- reads through the ledger ------------------------------------------
 
@@ -376,14 +731,23 @@ class FileLedger:
     def capabilities(self) -> Capabilities:
         """What this backend actually offers — no more (§12).
 
-        ``AUTHORITY`` alone, and no export codecs, because ``replicate`` and
-        ``export`` are WP2's. Deployment tooling refuses an assignment whose
-        required guarantees are absent, so an over-claim here is worse than a
-        missing feature: it turns a refusal into a runtime failure.
+        Deployment tooling refuses an assignment whose required guarantees are
+        absent, so an over-claim here is worse than a missing feature: it turns
+        a refusal into a runtime failure.
+
+        ``REPLICA`` joins ``AUTHORITY`` because :meth:`replicate` now exists —
+        the profile names what a store may be ASKED to do, and an adapter that
+        can consume pre-coordinated records without assigning any is what makes
+        the replica role performable. ``ARCHIVE`` stays absent: nothing here
+        offers a read-only sealed mode, and claiming one would be exactly the
+        lie this report exists to make catchable.
+
+        The codec tuple grows to what :meth:`export` will actually produce, and
+        to nothing else. A test cross-checks both claims against the object.
         """
         return Capabilities(
             protocol_version=GRAMMAR_VERSION,
-            profiles=frozenset({Profile.AUTHORITY}),
+            profiles=frozenset({Profile.AUTHORITY, Profile.REPLICA}),
             durability=DurabilityProfile.HOST,
             verification_levels=frozenset(
                 {VerificationLevel.OPEN, VerificationLevel.FULL}
@@ -404,7 +768,7 @@ class FileLedger:
             ),
             max_atomic_records=self._max_atomic_records,
             idempotency_keys=False,
-            export_codecs=(),
+            export_codecs=(EXPORT_CODEC,),
             limits=(),
         )
 

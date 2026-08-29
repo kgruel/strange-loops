@@ -1,0 +1,60 @@
+{
+  "name": "replicate-catch-up-preserves-authored-time-and-origin",
+  "description": "Authored time and origin are the record author's, not the replica's. A suffix carrying times far from any clock the replica would stamp, and a non-empty origin, lands with both intact.",
+  "input": {
+    "target": [
+      "{\"v\":1,\"lin\":\"01M2REPLICATEVECTORLINEAGE\",\"ord\":0,\"prev\":null,\"at\":1750000000.0,\"k\":\"genesis\",\"observer\":\"kyle\",\"origin\":\"\",\"body\":{\"protocol\":1,\"lineage\":\"01M2REPLICATEVECTORLINEAGE\",\"key\":\"a2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2s=\"},\"sig\":\"sig:5aab76c2b50fc8f9e25f90645aded7504583d0ecebad13bb5ba2a83cf1089f3f\",\"rh\":\"65fe9454f6be46ac8e39e2bf58e79502c60f8ab2c33d9d6a58f8fb1dc9a88ccb\"}",
+      "{\"v\":1,\"lin\":\"01M2REPLICATEVECTORLINEAGE\",\"ord\":1,\"prev\":\"65fe9454f6be46ac8e39e2bf58e79502c60f8ab2c33d9d6a58f8fb1dc9a88ccb\",\"at\":1750000101.0,\"k\":\"note\",\"observer\":\"kyle\",\"origin\":\"\",\"body\":{\"i\":1},\"rh\":\"489c272f99326d3babefdb93dde418123dd7b80870f0ab5ba389275a7859f9f2\"}"
+    ],
+    "records": [
+      {
+        "v": 1,
+        "lin": "01M2REPLICATEVECTORLINEAGE",
+        "ord": 2,
+        "prev": "489c272f99326d3babefdb93dde418123dd7b80870f0ab5ba389275a7859f9f2",
+        "at": 1000000000.5,
+        "k": "note",
+        "observer": "kyle",
+        "origin": "alcove",
+        "body": {
+          "i": 2
+        },
+        "rh": "b7122b9420891c06b1afed25ef69f3b33138b4b1131be6a01e44ed265096572c"
+      },
+      {
+        "v": 1,
+        "lin": "01M2REPLICATEVECTORLINEAGE",
+        "ord": 3,
+        "prev": "b7122b9420891c06b1afed25ef69f3b33138b4b1131be6a01e44ed265096572c",
+        "at": 2000000000.25,
+        "k": "note",
+        "observer": "kyle",
+        "origin": "terra",
+        "body": {
+          "i": 3
+        },
+        "rh": "66360959fd368c85d2ca158f52a5040f4b08ab1f85315eaca0270f838fff84cb"
+      }
+    ],
+    "expected_head": {
+      "lineage": "01M2REPLICATEVECTORLINEAGE",
+      "ordinal": 1,
+      "record_hash": "489c272f99326d3babefdb93dde418123dd7b80870f0ab5ba389275a7859f9f2"
+    }
+  },
+  "expected": {
+    "outcome": "accepted",
+    "refusal": null,
+    "head": {
+      "lineage": "01M2REPLICATEVECTORLINEAGE",
+      "ordinal": 3,
+      "record_hash": "66360959fd368c85d2ca158f52a5040f4b08ab1f85315eaca0270f838fff84cb"
+    },
+    "log": [
+      "{\"v\":1,\"lin\":\"01M2REPLICATEVECTORLINEAGE\",\"ord\":0,\"prev\":null,\"at\":1750000000.0,\"k\":\"genesis\",\"observer\":\"kyle\",\"origin\":\"\",\"body\":{\"protocol\":1,\"lineage\":\"01M2REPLICATEVECTORLINEAGE\",\"key\":\"a2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2s=\"},\"sig\":\"sig:5aab76c2b50fc8f9e25f90645aded7504583d0ecebad13bb5ba2a83cf1089f3f\",\"rh\":\"65fe9454f6be46ac8e39e2bf58e79502c60f8ab2c33d9d6a58f8fb1dc9a88ccb\"}",
+      "{\"v\":1,\"lin\":\"01M2REPLICATEVECTORLINEAGE\",\"ord\":1,\"prev\":\"65fe9454f6be46ac8e39e2bf58e79502c60f8ab2c33d9d6a58f8fb1dc9a88ccb\",\"at\":1750000101.0,\"k\":\"note\",\"observer\":\"kyle\",\"origin\":\"\",\"body\":{\"i\":1},\"rh\":\"489c272f99326d3babefdb93dde418123dd7b80870f0ab5ba389275a7859f9f2\"}",
+      "{\"v\":1,\"lin\":\"01M2REPLICATEVECTORLINEAGE\",\"ord\":2,\"prev\":\"489c272f99326d3babefdb93dde418123dd7b80870f0ab5ba389275a7859f9f2\",\"at\":1000000000.5,\"k\":\"note\",\"observer\":\"kyle\",\"origin\":\"alcove\",\"body\":{\"i\":2},\"rh\":\"b7122b9420891c06b1afed25ef69f3b33138b4b1131be6a01e44ed265096572c\"}",
+      "{\"v\":1,\"lin\":\"01M2REPLICATEVECTORLINEAGE\",\"ord\":3,\"prev\":\"b7122b9420891c06b1afed25ef69f3b33138b4b1131be6a01e44ed265096572c\",\"at\":2000000000.25,\"k\":\"note\",\"observer\":\"kyle\",\"origin\":\"terra\",\"body\":{\"i\":3},\"rh\":\"66360959fd368c85d2ca158f52a5040f4b08ab1f85315eaca0270f838fff84cb\"}"
+    ]
+  }
+}

@@ -1,0 +1,812 @@
+Reading prompt from stdin...
+OpenAI Codex v0.150.1
+--------
+workdir: /Users/kaygee/Code/loops-s2wp3
+model: gpt-5.6-sol
+provider: openai
+approval: never
+sandbox: workspace-write [workdir, /tmp, $TMPDIR]
+reasoning effort: low
+reasoning summaries: none
+session id: 01a04ef9-09d0-79f3-a655-ae23d22dafca
+--------
+user
+# Sol review brief — arrival-break slice 2 / WP3, round 2 (per-WP, LOW)
+
+Round 2 of your review of slice-2 WP3 (admission extraction). Round 1 verdict was NOT
+CONVERGED with one blocking finding, S2WP3-L-1 (target_state mutation → silent record
+drop on CAS retry with a caller-owned cache), plus non-blocking S2WP3-L-2 (rederive
+failure staleness — verified pre-existing at wave base, DEFERRED to slice 5, correctly
+dispositioned, do not re-open unless the deferral is unsound).
+
+## Anchor
+
+- Branch: `slice2/wp3-admission`, NEW tip `18dc162b` (one commit over the r1 tip
+  `e8c93295`). Diff to review: `git diff e8c93295...18dc162b` in full, plus anything
+  your r1 flagged.
+
+## Unverified fix — verify empirically, this is the round's core
+
+| commit | claim | your job |
+|---|---|---|
+| 18dc162b | S2WP3-L-1 fixed by the arbiter-ruled construction arm: `admit_records` does `held = dict(held)` immediately after `target_state()`, every attempt; docstring states the copy as a guarantee this side keeps (NOT a caller freshness obligation). New test `test_admission_callback_ownership.py`: fake owned-cache backend (same mapping every call, seeded with one genuinely-held row) + CAS interloper → asserts facts_added=2/facts_skipped=0, both ids present by walking the log, caller mapping bidirectionally unmutated, exactly two attempts and one rederive. Mutation demo: removing the copy → `assert (0, 2) == (2, 0)` (your r1 counts). Engine 1990+1s (+1, the only branch delta). | Re-run YOUR OWN r1 repro against the fixed tip (your fake backend, not just theirs). Re-run their mutation demo. Check the copy is per-ATTEMPT (a stale-cache second attempt must also be protected). Check the test's assertions match the claim (bidirectional unmutated; retry proven not assumed). Confirm the diff contains nothing beyond the fix + test + report update. |
+
+## Verdict format
+
+Fix: PASS/FAIL + evidence. Any NEW findings: `S2WP3-L-<n>` continuing your numbering,
+file:line, severity, failure scenario, evidence. Then one line: **CONVERGED** or
+**NOT CONVERGED** (with the blocking list).
+
+codex
+I’ll inspect the exact commit range, recover the round-1 context from the repository if present, then independently reproduce the retry/cache scenario and mutation test before issuing the constrained verdict.
+exec
+/bin/zsh -lc 'git status --short && git diff --stat e8c93295...18dc162b && git diff --name-status e8c93295...18dc162b && git diff --check e8c93295...18dc162b && git diff e8c93295...18dc162b' in /Users/kaygee/Code/loops-s2wp3
+ succeeded in 0ms:
+ docs/scratch/arrival-break/slice2-wp3-report.md    |  57 +++++++++-
+ libs/engine/src/engine/admission.py                |  19 ++++
+ .../tests/test_admission_callback_ownership.py     | 120 +++++++++++++++++++++
+ 3 files changed, 191 insertions(+), 5 deletions(-)
+M	docs/scratch/arrival-break/slice2-wp3-report.md
+M	libs/engine/src/engine/admission.py
+A	libs/engine/tests/test_admission_callback_ownership.py
+diff --git a/docs/scratch/arrival-break/slice2-wp3-report.md b/docs/scratch/arrival-break/slice2-wp3-report.md
+index 89f4670a..7f882284 100644
+--- a/docs/scratch/arrival-break/slice2-wp3-report.md
++++ b/docs/scratch/arrival-break/slice2-wp3-report.md
+@@ -17,14 +17,18 @@ Package-scoped runs, because a root `uv run pytest` misses each member's own dev
+ 
+ | Suite | Command | Baseline | Final | Delta |
+ |---|---|---|---|---|
+-| engine | `uv run --package engine pytest libs/engine/tests -q -p no:randomly` | 1989 passed, 1 skipped | **1989 passed, 1 skipped** | 0 |
++| engine | `uv run --package engine pytest libs/engine/tests -q -p no:randomly` | 1989 passed, 1 skipped | **1990 passed, 1 skipped** | +1 |
+ | store | `uv run --package store pytest libs/store/tests -q -p no:randomly` | 180 passed | **180 passed** | 0 |
+ | architecture | `uv run pytest tests/architecture -q -p no:randomly` | 99 passed | **99 passed** | 0 |
+ 
+-**Every delta is zero**, and that is the intended result: this WP moves code and adds no
+-test. The three suites are the same tests over the same behaviour, which is what makes
+-"green unmodified in intent" checkable — see §4 for the one test whose *scenario* did
+-change, and how it was caught without a failure to point at.
++**The one delta is the sol-LOW r1 regression test** added in §7
++(`test_admission_callback_ownership.py`, one test). Every other delta is zero, and that is
++the intended result for an extraction: the suites are the same tests over the same
++behaviour, which is what makes "green unmodified in intent" checkable — see §4 for the one
++test whose *scenario* did change, and how it was caught without a failure to point at.
++
++*(At the original hand-off the engine suite was 1989 and every delta was zero; §7 landed
++after sol's review.)*
+ 
+ Lint is not a CI gate for these packages (CI runs `ruff check libs/custody libs/sign`
+ only), but the three touched source files were compared against their own baseline
+@@ -214,3 +218,46 @@ brief's "e.g. break the op's refusal" licenses exactly the three above, which do
+ | 4 | Mutation demo shows the op is on the live path | **yes** — §5, three mutations |
+ | 5 | Full engine + store suites green, deltas accounted | **yes** — §0, all deltas zero |
+ | 6 | `git ls-files` clean on all changes | **yes** |
++
++---
++
++## 7. sol-LOW r1 — S2WP3-L-1, the callback mapping was caller-owned
++
++**Blocking finding, fixed.** `_drafts_for` writes every proposed source id into the
++mapping it dedups against — that is how one source carrying an id twice appends it once —
++but it writes them *before* the compare-and-swap append that would make them true. While
++that code was private to `store.merge` the mapping was always a fresh `dict` built by a
++SELECT one call earlier, so the write could not reach anyone. **The extraction is what made
++it reachable**: ownership of a value that crosses a callback boundary is a question the
++boundary has to answer, and this one had not been asked. Neither the gate nor I could see
++it structurally, because the consumer it harms — a backend serving `target_state` out of an
++owned, incrementally-maintained cache — does not exist in-repo yet. It is exactly the
++second backend the contract exists for.
++
++Sol's repro: owned cache + a compare-and-swap interloper → attempt 1 injects the ids, loses
++the race, and attempt 2 dedups the records away against attempt 1's own proposals. Silent
++drop, reported as `AdmissionResult(facts_added=0, facts_skipped=2)`.
++
++**Fix arm, per the arbiter ruling: construction over detection.** `admit_records` takes a
++defensive copy of the mapping on entry, every attempt, so mutating caller-owned state
++becomes inexpressible. The documentation arm ("callbacks must return a fresh dict") was
++ruled out and not taken — it is vigilance, and it would have made a legitimate
++implementation of the contract silently wrong. One dict per attempt is noise against the
++I/O. The op's docstring now states the copy as a **guarantee this side keeps**, not as a
++freshness obligation on the caller.
++
++**Regression test:** `libs/engine/tests/test_admission_callback_ownership.py` — a fake
++backend whose `target_state` returns the SAME owned mapping on every call, seeded with one
++genuinely-held row, plus an interloper appending between the pin read and the append so
++attempt 1 is guaranteed to lose. It asserts both properties the finding names: both records
++land on the retry (`facts_added=2, facts_skipped=0`, and both ids present in the log), and
++the caller's mapping comes back exactly as it went in. The seeded row makes "unmutated"
++bidirectional — nothing injected, nothing removed.
++
++**Mutation demo:** removing `held = dict(held)` fails the new test with
++`assert (0, 2) == (2, 0)` — sol's counts, reproduced exactly. Restored; `git diff` clean;
++suites re-run (engine 1990, store 180, architecture 99).
++
++Sol's other finding (L-2, `rederive` raising after a successful append leaves the derived
++log stale) is verified pre-existing at the wave base and deferred to slice 5 — not touched
++here.
+diff --git a/libs/engine/src/engine/admission.py b/libs/engine/src/engine/admission.py
+index 905ff651..7e50b6b8 100644
+--- a/libs/engine/src/engine/admission.py
++++ b/libs/engine/src/engine/admission.py
+@@ -626,6 +626,13 @@ def admit_records(
+     progress: it consumes the other writer's appends and skips whatever they
+     already added.
+ 
++    The mapping ``target_state`` returns is NOT mutated — the op copies it and
++    dedups against the copy. That is a guarantee this side keeps, not a
++    freshness obligation placed on the caller: a backend answering out of an
++    owned cache is a legitimate implementation of the contract, and one that
++    had to return a fresh dict to stay correct would be relying on the
++    caller's vigilance to avoid a silent drop.
++
+     ``dry_run`` runs steps 1-4 and reports the counts. It appends nothing and
+     re-derives nothing — the log never rewrites, so a rollback is neither
+     available nor needed. It verifies too: a dry run answers "what would this
+@@ -646,6 +653,18 @@ def admit_records(
+ 
+     for _ in range(attempts):
+         held, pin = target_state()
++        # The caller's mapping is the caller's. `_drafts_for` writes every
++        # proposed id into the snapshot it dedups against — that is how one
++        # source carrying an id twice appends it once — but those writes are
++        # PROPOSALS, and the append that would make them true has not happened
++        # yet. Against a caller that hands back a fresh mapping per call this
++        # is invisible; against one that hands back an owned cache it is a
++        # silent drop: attempt 1 injects the ids, the compare-and-swap loses
++        # the race, and attempt 2 dedups the records away against its own
++        # proposals and reports them SKIPPED. One dict per attempt is noise
++        # against the I/O either way, and copying makes the failure
++        # inexpressible rather than documented.
++        held = dict(held)
+         drafts, added_facts, added_ticks, admitted = _drafts_for(
+             source, held, log.genesis()["observer"]
+         )
+diff --git a/libs/engine/tests/test_admission_callback_ownership.py b/libs/engine/tests/test_admission_callback_ownership.py
+new file mode 100644
+index 00000000..3b93046b
+--- /dev/null
++++ b/libs/engine/tests/test_admission_callback_ownership.py
+@@ -0,0 +1,120 @@
++"""The admission op does not mutate the mapping its caller hands it.
++
++`finding:slice2-wp3-callback-mapping-mutation` (sol-LOW r1, S2WP3-L-1). The
++dedup pass writes every PROPOSED id into the snapshot it is dedup'ing against
++— that is how one source carrying an id twice appends it once — but it writes
++them before the compare-and-swap append that would make them true. While that
++code was private to ``store.merge`` the mapping was always freshly built by a
++SELECT one call earlier, so the write could not reach anyone. Extraction made
++the mapping a value crossing a callback boundary, and ownership of a value
++that crosses a boundary is a question the boundary has to answer.
++
++It answers it by copying. A backend that serves ``target_state`` out of an
++owned, incrementally-maintained cache is a legitimate implementation of the
++contract — no clause forbids it, and the second backend the contract exists
++for is exactly the kind that would have one. Without the copy such a backend
++loses records SILENTLY: attempt 1 injects the proposed ids into the cache,
++the compare-and-swap loses a race, and attempt 2 dedups the records away
++against attempt 1's own proposals and reports them SKIPPED.
++
++The repro below is that sequence, with the interloper landing between the pin
++read and the append so the first attempt is guaranteed to lose.
++"""
++
++from __future__ import annotations
++
++import json
++from pathlib import Path
++
++from engine.admission import SourceRows, admit_records
++from engine.arrival import ArrivalLog, Entry
++from engine.arrival_contract import Head
++from tests.conftest import STUB_KEY as _KEY
++from tests.conftest import stub_sign as _sign
++
++# (id, kind, ts, observer, origin, payload, signature) — FACT_CONTENT_COLUMNS.
++_SOURCE_ROWS = [
++    ("01SRCA", "note", 1000.0, "kyle", "", json.dumps({"body": "a"}), None),
++    ("01SRCB", "note", 1001.0, "kyle", "", json.dumps({"body": "b"}), None),
++]
++
++# One row the target genuinely holds, so "unmutated" asserts both directions:
++# nothing was injected, and nothing the caller put there was removed.
++_ALREADY_HELD = {"01HELD": ("fact", "note", 900.0, "kyle", "", "{}", None)}
++
++
++def _source() -> SourceRows:
++    return SourceRows(
++        groups=[("fact", [("fact", row)], None) for row in _SOURCE_ROWS],
++        fact_count=len(_SOURCE_ROWS),
++        tick_count=0,
++    )
++
++
++def _head(log: ArrivalLog) -> Head:
++    record = log.head()
++    return Head(
++        lineage=record["lin"], ordinal=record["ord"], record_hash=record["rh"]
++    )
++
++
++def _interloper(log: ArrivalLog) -> None:
++    """Another writer lands a record, making any pin taken before it stale."""
++    log.append_marked_many(
++        [
++            Entry(
++                k="fact",
++                body={"id": "01OTHER", "k": "note", "at": 999.0, "p": "{}"},
++                observer="kyle",
++                origin="",
++                at=999.0,
++            )
++        ],
++        following=None,
++    )
++
++
++def test_an_owned_target_mapping_is_not_mutated_across_a_retry(tmp_path: Path):
++    """Sol's repro: owned cache + a compare-and-swap interloper.
++
++    Both records must land on the retry, and the caller's mapping must come
++    back exactly as it went in. Without the defensive copy this reports
++    ``facts_added=0, facts_skipped=2`` after a single append attempt, with
++    both source ids left injected in the caller's cache.
++    """
++    log = ArrivalLog.mint(
++        tmp_path / "t.arrival", observer="target-custodian", signer=_sign, key=_KEY
++    )
++    owned = dict(_ALREADY_HELD)  # THE SAME object is returned every call
++    attempts = []
++    rederives = []
++
++    def target_state() -> tuple[dict[str, tuple], Head | None]:
++        attempts.append(1)
++        pin = _head(log)
++        if len(attempts) == 1:
++            # Between the pin read and the append, so attempt 1 must lose.
++            _interloper(log)
++        return owned, pin
++
++    result = admit_records(
++        log,
++        _source(),
++        target_state=target_state,
++        rederive=lambda: rederives.append(1),
++    )
++
++    assert len(attempts) == 2, "the interloper must force exactly one retry"
++    assert (result.facts_added, result.facts_skipped) == (2, 0)
++    assert rederives == [1]
++
++    landed = {
++        record["body"]["id"]
++        for record in log.walk()
++        if record["k"] == "fact"
++    }
++    assert {"01SRCA", "01SRCB"} <= landed, "both records must reach the log"
++
++    assert owned == _ALREADY_HELD, (
++        "the op dedups against a copy — the caller's mapping is the caller's"
++    )
+
+codex
+The range is exactly three files: implementation, one focused regression test, and the report. The copy sits inside the retry loop immediately after every `target_state()` call, and the docstring correctly frames non-mutation as the operation’s guarantee. I’m now running the focused test plus an independent harness, then I’ll remove the line temporarily to verify the claimed failure and restore it.
+codex
+The first test invocation hit the sandboxed default `uv` cache, not a code failure. I’m rerunning with a cache under `/tmp`. For independence, I’m also adding a short-lived reviewer test with its own backend closure and distinct IDs; it will be removed after both fixed and mutated runs.
+apply patch
+patch: completed
+/Users/kaygee/Code/loops-s2wp3/review_repro_s2wp3.py
+diff --git a/review_repro_s2wp3.py b/review_repro_s2wp3.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..415089f37290e36c1a21768760fa63020e2ce2ae
+--- /dev/null
++++ b/review_repro_s2wp3.py
+@@ -0,0 +1,48 @@
++import json
++
++from engine.admission import SourceRows, admit_records
++from engine.arrival import ArrivalLog, Entry
++from engine.arrival_contract import Head
++from tests.conftest import STUB_KEY, stub_sign
++
++
++def test_reviewer_owned_cache_retry(tmp_path):
++    rows = [
++        ("01MINEA", "note", 11.0, "kyle", "", json.dumps({"n": 1}), None),
++        ("01MINEB", "note", 12.0, "kyle", "", json.dumps({"n": 2}), None),
++    ]
++    source = SourceRows(
++        groups=[("fact", [("fact", row)], None) for row in rows],
++        fact_count=2,
++        tick_count=0,
++    )
++    log = ArrivalLog.mint(tmp_path / "review.arrival", observer="review", signer=stub_sign, key=STUB_KEY)
++    sentinel = ("fact", "note", 1.0, "kyle", "", "{}", None)
++    caller_cache = {"01SENTINEL": sentinel}
++    original_identity = id(caller_cache)
++    state_calls = 0
++    rederive_calls = 0
++
++    def target_state():
++        nonlocal state_calls
++        state_calls += 1
++        head = log.head()
++        pin = Head(lineage=head["lin"], ordinal=head["ord"], record_hash=head["rh"])
++        if state_calls == 1:
++            log.append_marked_many([
++                Entry(k="fact", body={"id": "01RACER", "k": "note", "at": 10.0, "p": "{}"}, observer="kyle", origin="", at=10.0)
++            ], following=None)
++        assert id(caller_cache) == original_identity
++        return caller_cache, pin
++
++    def rederive():
++        nonlocal rederive_calls
++        rederive_calls += 1
++
++    result = admit_records(log, source, target_state=target_state, rederive=rederive)
++    assert (result.facts_added, result.facts_skipped) == (2, 0)
++    assert state_calls == 2
++    assert rederive_calls == 1
++    assert caller_cache == {"01SENTINEL": sentinel}
++    ids = {r["body"]["id"] for r in log.walk() if r["k"] == "fact"}
++    assert {"01MINEA", "01MINEB"}.issubset(ids)
+
+diff --git a/review_repro_s2wp3.py b/review_repro_s2wp3.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..415089f37290e36c1a21768760fa63020e2ce2ae
+--- /dev/null
++++ b/review_repro_s2wp3.py
+@@ -0,0 +1,48 @@
++import json
++
++from engine.admission import SourceRows, admit_records
++from engine.arrival import ArrivalLog, Entry
++from engine.arrival_contract import Head
++from tests.conftest import STUB_KEY, stub_sign
++
++
++def test_reviewer_owned_cache_retry(tmp_path):
++    rows = [
++        ("01MINEA", "note", 11.0, "kyle", "", json.dumps({"n": 1}), None),
++        ("01MINEB", "note", 12.0, "kyle", "", json.dumps({"n": 2}), None),
++    ]
++    source = SourceRows(
++        groups=[("fact", [("fact", row)], None) for row in rows],
++        fact_count=2,
++        tick_count=0,
++    )
++    log = ArrivalLog.mint(tmp_path / "review.arrival", observer="review", signer=stub_sign, key=STUB_KEY)
++    sentinel = ("fact", "note", 1.0, "kyle", "", "{}", None)
++    caller_cache = {"01SENTINEL": sentinel}
++    original_identity = id(caller_cache)
++    state_calls = 0
++    rederive_calls = 0
++
++    def target_state():
++        nonlocal state_calls
++        state_calls += 1
++        head = log.head()
++        pin = Head(lineage=head["lin"], ordinal=head["ord"], record_hash=head["rh"])
++        if state_calls == 1:
++            log.append_marked_many([
++                Entry(k="fact", body={"id": "01RACER", "k": "note", "at": 10.0, "p": "{}"}, observer="kyle", origin="", at=10.0)
++            ], following=None)
++        assert id(caller_cache) == original_identity
++        return caller_cache, pin
++
++    def rederive():
++        nonlocal rederive_calls
++        rederive_calls += 1
++
++    result = admit_records(log, source, target_state=target_state, rederive=rederive)
++    assert (result.facts_added, result.facts_skipped) == (2, 0)
++    assert state_calls == 2
++    assert rederive_calls == 1
++    assert caller_cache == {"01SENTINEL": sentinel}
++    ids = {r["body"]["id"] for r in log.walk() if r["k"] == "fact"}
++    assert {"01MINEA", "01MINEB"}.issubset(ids)
+
+exec
+/bin/zsh -lc 'test -f review_repro_s2wp3.py && UV_CACHE_DIR=/tmp/uv-cache-s2wp3 uv run --package engine pytest libs/engine/tests/test_admission_callback_ownership.py review_repro_s2wp3.py -q -p no:randomly' in /Users/kaygee/Code/loops-s2wp3
+ succeeded in 379ms:
+..                                                                       [100%]
+2 passed in 0.12s
+
+diff --git a/review_repro_s2wp3.py b/review_repro_s2wp3.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..415089f37290e36c1a21768760fa63020e2ce2ae
+--- /dev/null
++++ b/review_repro_s2wp3.py
+@@ -0,0 +1,48 @@
++import json
++
++from engine.admission import SourceRows, admit_records
++from engine.arrival import ArrivalLog, Entry
++from engine.arrival_contract import Head
++from tests.conftest import STUB_KEY, stub_sign
++
++
++def test_reviewer_owned_cache_retry(tmp_path):
++    rows = [
++        ("01MINEA", "note", 11.0, "kyle", "", json.dumps({"n": 1}), None),
++        ("01MINEB", "note", 12.0, "kyle", "", json.dumps({"n": 2}), None),
++    ]
++    source = SourceRows(
++        groups=[("fact", [("fact", row)], None) for row in rows],
++        fact_count=2,
++        tick_count=0,
++    )
++    log = ArrivalLog.mint(tmp_path / "review.arrival", observer="review", signer=stub_sign, key=STUB_KEY)
++    sentinel = ("fact", "note", 1.0, "kyle", "", "{}", None)
++    caller_cache = {"01SENTINEL": sentinel}
++    original_identity = id(caller_cache)
++    state_calls = 0
++    rederive_calls = 0
++
++    def target_state():
++        nonlocal state_calls
++        state_calls += 1
++        head = log.head()
++        pin = Head(lineage=head["lin"], ordinal=head["ord"], record_hash=head["rh"])
++        if state_calls == 1:
++            log.append_marked_many([
++                Entry(k="fact", body={"id": "01RACER", "k": "note", "at": 10.0, "p": "{}"}, observer="kyle", origin="", at=10.0)
++            ], following=None)
++        assert id(caller_cache) == original_identity
++        return caller_cache, pin
++
++    def rederive():
++        nonlocal rederive_calls
++        rederive_calls += 1
++
++    result = admit_records(log, source, target_state=target_state, rederive=rederive)
++    assert (result.facts_added, result.facts_skipped) == (2, 0)
++    assert state_calls == 2
++    assert rederive_calls == 1
++    assert caller_cache == {"01SENTINEL": sentinel}
++    ids = {r["body"]["id"] for r in log.walk() if r["k"] == "fact"}
++    assert {"01MINEA", "01MINEB"}.issubset(ids)
+
+apply patch
+patch: completed
+/Users/kaygee/Code/loops-s2wp3/libs/engine/src/engine/admission.py
+diff --git a/libs/engine/src/engine/admission.py b/libs/engine/src/engine/admission.py
+index 7e50b6b83024ad97aca34aed3f71116d8b440857..77f2435df4111d5bf63d7bba6e5b1c94dc94a34b
+--- a/libs/engine/src/engine/admission.py
++++ b/libs/engine/src/engine/admission.py
+@@ -664,7 +664,6 @@
+         # proposals and reports them SKIPPED. One dict per attempt is noise
+         # against the I/O either way, and copying makes the failure
+         # inexpressible rather than documented.
+-        held = dict(held)
+         drafts, added_facts, added_ticks, admitted = _drafts_for(
+             source, held, log.genesis()["observer"]
+         )
+diff --git a/review_repro_s2wp3.py b/review_repro_s2wp3.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..415089f37290e36c1a21768760fa63020e2ce2ae
+--- /dev/null
++++ b/review_repro_s2wp3.py
+@@ -0,0 +1,48 @@
++import json
++
++from engine.admission import SourceRows, admit_records
++from engine.arrival import ArrivalLog, Entry
++from engine.arrival_contract import Head
++from tests.conftest import STUB_KEY, stub_sign
++
++
++def test_reviewer_owned_cache_retry(tmp_path):
++    rows = [
++        ("01MINEA", "note", 11.0, "kyle", "", json.dumps({"n": 1}), None),
++        ("01MINEB", "note", 12.0, "kyle", "", json.dumps({"n": 2}), None),
++    ]
++    source = SourceRows(
++        groups=[("fact", [("fact", row)], None) for row in rows],
++        fact_count=2,
++        tick_count=0,
++    )
++    log = ArrivalLog.mint(tmp_path / "review.arrival", observer="review", signer=stub_sign, key=STUB_KEY)
++    sentinel = ("fact", "note", 1.0, "kyle", "", "{}", None)
++    caller_cache = {"01SENTINEL": sentinel}
++    original_identity = id(caller_cache)
++    state_calls = 0
++    rederive_calls = 0
++
++    def target_state():
++        nonlocal state_calls
++        state_calls += 1
++        head = log.head()
++        pin = Head(lineage=head["lin"], ordinal=head["ord"], record_hash=head["rh"])
++        if state_calls == 1:
++            log.append_marked_many([
++                Entry(k="fact", body={"id": "01RACER", "k": "note", "at": 10.0, "p": "{}"}, observer="kyle", origin="", at=10.0)
++            ], following=None)
++        assert id(caller_cache) == original_identity
++        return caller_cache, pin
++
++    def rederive():
++        nonlocal rederive_calls
++        rederive_calls += 1
++
++    result = admit_records(log, source, target_state=target_state, rederive=rederive)
++    assert (result.facts_added, result.facts_skipped) == (2, 0)
++    assert state_calls == 2
++    assert rederive_calls == 1
++    assert caller_cache == {"01SENTINEL": sentinel}
++    ids = {r["body"]["id"] for r in log.walk() if r["k"] == "fact"}
++    assert {"01MINEA", "01MINEB"}.issubset(ids)
+
+diff --git a/libs/engine/src/engine/admission.py b/libs/engine/src/engine/admission.py
+index 7e50b6b83024ad97aca34aed3f71116d8b440857..77f2435df4111d5bf63d7bba6e5b1c94dc94a34b
+--- a/libs/engine/src/engine/admission.py
++++ b/libs/engine/src/engine/admission.py
+@@ -664,7 +664,6 @@
+         # proposals and reports them SKIPPED. One dict per attempt is noise
+         # against the I/O either way, and copying makes the failure
+         # inexpressible rather than documented.
+-        held = dict(held)
+         drafts, added_facts, added_ticks, admitted = _drafts_for(
+             source, held, log.genesis()["observer"]
+         )
+diff --git a/review_repro_s2wp3.py b/review_repro_s2wp3.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..415089f37290e36c1a21768760fa63020e2ce2ae
+--- /dev/null
++++ b/review_repro_s2wp3.py
+@@ -0,0 +1,48 @@
++import json
++
++from engine.admission import SourceRows, admit_records
++from engine.arrival import ArrivalLog, Entry
++from engine.arrival_contract import Head
++from tests.conftest import STUB_KEY, stub_sign
++
++
++def test_reviewer_owned_cache_retry(tmp_path):
++    rows = [
++        ("01MINEA", "note", 11.0, "kyle", "", json.dumps({"n": 1}), None),
++        ("01MINEB", "note", 12.0, "kyle", "", json.dumps({"n": 2}), None),
++    ]
++    source = SourceRows(
++        groups=[("fact", [("fact", row)], None) for row in rows],
++        fact_count=2,
++        tick_count=0,
++    )
++    log = ArrivalLog.mint(tmp_path / "review.arrival", observer="review", signer=stub_sign, key=STUB_KEY)
++    sentinel = ("fact", "note", 1.0, "kyle", "", "{}", None)
++    caller_cache = {"01SENTINEL": sentinel}
++    original_identity = id(caller_cache)
++    state_calls = 0
++    rederive_calls = 0
++
++    def target_state():
++        nonlocal state_calls
++        state_calls += 1
++        head = log.head()
++        pin = Head(lineage=head["lin"], ordinal=head["ord"], record_hash=head["rh"])
++        if state_calls == 1:
++            log.append_marked_many([
++                Entry(k="fact", body={"id": "01RACER", "k": "note", "at": 10.0, "p": "{}"}, observer="kyle", origin="", at=10.0)
++            ], following=None)
++        assert id(caller_cache) == original_identity
++        return caller_cache, pin
++
++    def rederive():
++        nonlocal rederive_calls
++        rederive_calls += 1
++
++    result = admit_records(log, source, target_state=target_state, rederive=rederive)
++    assert (result.facts_added, result.facts_skipped) == (2, 0)
++    assert state_calls == 2
++    assert rederive_calls == 1
++    assert caller_cache == {"01SENTINEL": sentinel}
++    ids = {r["body"]["id"] for r in log.walk() if r["k"] == "fact"}
++    assert {"01MINEA", "01MINEB"}.issubset(ids)
+
+exec
+/bin/zsh -lc 'UV_CACHE_DIR=/tmp/uv-cache-s2wp3 uv run --package engine pytest libs/engine/tests/test_admission_callback_ownership.py review_repro_s2wp3.py -q -p no:randomly' in /Users/kaygee/Code/loops-s2wp3
+ exited 1 in 1143ms:
+FF                                                                       [100%]
+=================================== FAILURES ===================================
+__________ test_an_owned_target_mapping_is_not_mutated_across_a_retry __________
+
+tmp_path = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-14412/test_an_owned_target_mapping_i0')
+
+    def test_an_owned_target_mapping_is_not_mutated_across_a_retry(tmp_path: Path):
+        """Sol's repro: owned cache + a compare-and-swap interloper.
+    
+        Both records must land on the retry, and the caller's mapping must come
+        back exactly as it went in. Without the defensive copy this reports
+        ``facts_added=0, facts_skipped=2`` after a single append attempt, with
+        both source ids left injected in the caller's cache.
+        """
+        log = ArrivalLog.mint(
+            tmp_path / "t.arrival", observer="target-custodian", signer=_sign, key=_KEY
+        )
+        owned = dict(_ALREADY_HELD)  # THE SAME object is returned every call
+        attempts = []
+        rederives = []
+    
+        def target_state() -> tuple[dict[str, tuple], Head | None]:
+            attempts.append(1)
+            pin = _head(log)
+            if len(attempts) == 1:
+                # Between the pin read and the append, so attempt 1 must lose.
+                _interloper(log)
+            return owned, pin
+    
+        result = admit_records(
+            log,
+            _source(),
+            target_state=target_state,
+            rederive=lambda: rederives.append(1),
+        )
+    
+        assert len(attempts) == 2, "the interloper must force exactly one retry"
+>       assert (result.facts_added, result.facts_skipped) == (2, 0)
+E       assert (0, 2) == (2, 0)
+E         
+E         At index 0 diff: 0 != 2
+E         Use -v to get more diff
+
+libs/engine/tests/test_admission_callback_ownership.py:108: AssertionError
+_______________________ test_reviewer_owned_cache_retry ________________________
+
+tmp_path = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-14412/test_reviewer_owned_cache_retr0')
+
+    def test_reviewer_owned_cache_retry(tmp_path):
+        rows = [
+            ("01MINEA", "note", 11.0, "kyle", "", json.dumps({"n": 1}), None),
+            ("01MINEB", "note", 12.0, "kyle", "", json.dumps({"n": 2}), None),
+        ]
+        source = SourceRows(
+            groups=[("fact", [("fact", row)], None) for row in rows],
+            fact_count=2,
+            tick_count=0,
+        )
+        log = ArrivalLog.mint(tmp_path / "review.arrival", observer="review", signer=stub_sign, key=STUB_KEY)
+        sentinel = ("fact", "note", 1.0, "kyle", "", "{}", None)
+        caller_cache = {"01SENTINEL": sentinel}
+        original_identity = id(caller_cache)
+        state_calls = 0
+        rederive_calls = 0
+    
+        def target_state():
+            nonlocal state_calls
+            state_calls += 1
+            head = log.head()
+            pin = Head(lineage=head["lin"], ordinal=head["ord"], record_hash=head["rh"])
+            if state_calls == 1:
+                log.append_marked_many([
+                    Entry(k="fact", body={"id": "01RACER", "k": "note", "at": 10.0, "p": "{}"}, observer="kyle", origin="", at=10.0)
+                ], following=None)
+            assert id(caller_cache) == original_identity
+            return caller_cache, pin
+    
+        def rederive():
+            nonlocal rederive_calls
+            rederive_calls += 1
+    
+        result = admit_records(log, source, target_state=target_state, rederive=rederive)
+>       assert (result.facts_added, result.facts_skipped) == (2, 0)
+E       assert (0, 2) == (2, 0)
+E         
+E         At index 0 diff: 0 != 2
+E         Use -v to get more diff
+
+review_repro_s2wp3.py:43: AssertionError
+=========================== short test summary info ============================
+FAILED libs/engine/tests/test_admission_callback_ownership.py::test_an_owned_target_mapping_is_not_mutated_across_a_retry
+FAILED review_repro_s2wp3.py::test_reviewer_owned_cache_retry - assert (0, 2)...
+2 failed in 0.91s
+
+diff --git a/libs/engine/src/engine/admission.py b/libs/engine/src/engine/admission.py
+index 7e50b6b83024ad97aca34aed3f71116d8b440857..77f2435df4111d5bf63d7bba6e5b1c94dc94a34b
+--- a/libs/engine/src/engine/admission.py
++++ b/libs/engine/src/engine/admission.py
+@@ -664,7 +664,6 @@
+         # proposals and reports them SKIPPED. One dict per attempt is noise
+         # against the I/O either way, and copying makes the failure
+         # inexpressible rather than documented.
+-        held = dict(held)
+         drafts, added_facts, added_ticks, admitted = _drafts_for(
+             source, held, log.genesis()["observer"]
+         )
+diff --git a/review_repro_s2wp3.py b/review_repro_s2wp3.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..415089f37290e36c1a21768760fa63020e2ce2ae
+--- /dev/null
++++ b/review_repro_s2wp3.py
+@@ -0,0 +1,48 @@
++import json
++
++from engine.admission import SourceRows, admit_records
++from engine.arrival import ArrivalLog, Entry
++from engine.arrival_contract import Head
++from tests.conftest import STUB_KEY, stub_sign
++
++
++def test_reviewer_owned_cache_retry(tmp_path):
++    rows = [
++        ("01MINEA", "note", 11.0, "kyle", "", json.dumps({"n": 1}), None),
++        ("01MINEB", "note", 12.0, "kyle", "", json.dumps({"n": 2}), None),
++    ]
++    source = SourceRows(
++        groups=[("fact", [("fact", row)], None) for row in rows],
++        fact_count=2,
++        tick_count=0,
++    )
++    log = ArrivalLog.mint(tmp_path / "review.arrival", observer="review", signer=stub_sign, key=STUB_KEY)
++    sentinel = ("fact", "note", 1.0, "kyle", "", "{}", None)
++    caller_cache = {"01SENTINEL": sentinel}
++    original_identity = id(caller_cache)
++    state_calls = 0
++    rederive_calls = 0
++
++    def target_state():
++        nonlocal state_calls
++        state_calls += 1
++        head = log.head()
++        pin = Head(lineage=head["lin"], ordinal=head["ord"], record_hash=head["rh"])
++        if state_calls == 1:
++            log.append_marked_many([
++                Entry(k="fact", body={"id": "01RACER", "k": "note", "at": 10.0, "p": "{}"}, observer="kyle", origin="", at=10.0)
++            ], following=None)
++        assert id(caller_cache) == original_identity
++        return caller_cache, pin
++
++    def rederive():
++        nonlocal rederive_calls
++        rederive_calls += 1
++
++    result = admit_records(log, source, target_state=target_state, rederive=rederive)
++    assert (result.facts_added, result.facts_skipped) == (2, 0)
++    assert state_calls == 2
++    assert rederive_calls == 1
++    assert caller_cache == {"01SENTINEL": sentinel}
++    ids = {r["body"]["id"] for r in log.walk() if r["k"] == "fact"}
++    assert {"01MINEA", "01MINEB"}.issubset(ids)
+
+codex
+The mutation behaved exactly as claimed: both the submitted regression and my separate harness failed with `(0, 2)` versus `(2, 0)`. That also proves the retry happened rather than being assumed—the result is produced only after the second `target_state` call—and the focused fixed run had two attempts and one rederive. I’m restoring the copy, removing my temporary harness, and doing a final clean-state test/check.
+apply patch
+patch: completed
+/Users/kaygee/Code/loops-s2wp3/libs/engine/src/engine/admission.py
+/Users/kaygee/Code/loops-s2wp3/review_repro_s2wp3.py
+exec
+/bin/zsh -lc 'git status --short && git diff --exit-code && UV_CACHE_DIR=/tmp/uv-cache-s2wp3 uv run --package engine pytest libs/engine/tests/test_admission_callback_ownership.py -q -p no:randomly && git diff --check e8c93295...18dc162b && git show --stat --oneline --decorate --no-renames 18dc162b && git rev-parse HEAD' in /Users/kaygee/Code/loops-s2wp3
+ succeeded in 299ms:
+.                                                                        [100%]
+1 passed in 0.13s
+18dc162b (HEAD -> slice2/wp3-admission) fix(engine): admit_records dedups against a copy of the caller's mapping
+ docs/scratch/arrival-break/slice2-wp3-report.md    |  57 +++++++++-
+ libs/engine/src/engine/admission.py                |  19 ++++
+ .../tests/test_admission_callback_ownership.py     | 120 +++++++++++++++++++++
+ 3 files changed, 191 insertions(+), 5 deletions(-)
+18dc162ba75d856bab6d0ce14380963b04a830d4
+
+codex
+Fix: **PASS** — verified at `18dc162b`.
+
+- `held = dict(held)` executes inside the retry loop immediately after every `target_state()` call.
+- Independent owned-cache/CAS-interloper repro passed: 2 records added, 0 skipped, exactly 2 attempts, 1 rederive, both IDs logged, caller mapping unchanged.
+- Submitted regression test passed.
+- Removing the copy made both tests fail with `assert (0, 2) == (2, 0)`; restoring it returned the test to green.
+- The seeded held row verifies bidirectional non-mutation.
+- Diff contains only the fix, regression test, and report update. Worktree restored clean.
+- No new findings. S2WP3-L-2 remains deferred and was not reopened.
+
+**CONVERGED**
+tokens used
+32,298
+Fix: **PASS** — verified at `18dc162b`.
+
+- `held = dict(held)` executes inside the retry loop immediately after every `target_state()` call.
+- Independent owned-cache/CAS-interloper repro passed: 2 records added, 0 skipped, exactly 2 attempts, 1 rederive, both IDs logged, caller mapping unchanged.
+- Submitted regression test passed.
+- Removing the copy made both tests fail with `assert (0, 2) == (2, 0)`; restoring it returned the test to green.
+- The seeded held row verifies bidirectional non-mutation.
+- Diff contains only the fix, regression test, and report update. Worktree restored clean.
+- No new findings. S2WP3-L-2 remains deferred and was not reopened.
+
+**CONVERGED**

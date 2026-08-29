@@ -194,3 +194,32 @@ Each mutation is caught by the test written for it, naming the outcome; (a) and 
 each also caught by a second test stating the operator-visible consequence, and (b) is
 caught across all three surfaces the epoch scope governs (K, equivocation, the audit).
 After each restore `git diff` was verified empty, and the suite is back to 80 passed.
+
+## Ruling verification — mid-file damage (NOT APPLIED, blocked on its own conditional)
+
+The lead ruled TOLERATE AND REPORT for mid-file damage, conditional on verifying in code
+that within a trust epoch journaled ordinals ascend, so that a mid-file skip cannot lower
+*K* while a later well-formed entry survives. **The invariant does not hold, so per the
+ruling's own instruction the change was not applied.** Recorded as
+`finding:s3wp1-epoch-ordinals-do-not-ascend-in-file-order` @ `01M17TT02KN9XBWE1AWCJB159Q`.
+
+It fails for the reason this module documents in its own read rule 1. §B.3 rule 1 exists
+*because* ordinals do not ascend in file order: "two writers append concurrently (the
+arrival flock serializes their *appends*, not their journal writes), so lines can land
+out of order: A commits ordinal 5, B commits 6 and journals it, A journals 5 last."
+`append_entry` does no ordinal validation and cannot — the ordering it would have to
+enforce is exactly the ordering the design says the journal does not have. No exotic kind
+is needed; the plain `advance` path breaks it, and `audit` is a second instance, since
+§D.5's producer journals the head the audit *covered*, which a concurrent advance can
+already have exceeded.
+
+Verified against the real module. One epoch, journal in file order `[90 trust-reset, 92,
+91]`, true `K = 92`. Damage the ordinal-92 line — mid-file, with a later well-formed
+entry surviving after it — and tolerate-and-report yields `K = 91`. A store presenting 91
+after a genuine restore from 92 then classifies `unchanged` where the truth is
+`rollback`: the silent re-acceptance the journal exists to prevent, and the same failure
+the maximum-ordinal rule was written to close. A mid-file skip therefore *can* lower `K`,
+and it is not strictly safer than the torn tail.
+
+The ruling's *reasoning* survives the break — see the reply to the lead for the narrowed
+form that keeps tolerate-and-report without letting `K` silently drop.

@@ -9,7 +9,7 @@ atoms (data)  →  engine (runtime)  →  store (maintenance)  →  apps (CLI)
 Fact, Spec        SqliteStore writes    slice/merge/search     loops store/export
 ```
 
-Below: `libs/engine/` provides `SqliteStore` (write path) and `StoreReader` (read path). This lib operates on the same SQLite databases but for bulk maintenance — extracting subsets, combining stores, cross-DB queries.
+Below: `libs/engine/` provides `SqliteStore` (write path), `StoreReader` (read path), and — for the arrival arm of merge — `engine.admission`. This lib operates on the same SQLite databases but for bulk maintenance — extracting subsets, combining stores, cross-DB queries.
 Above: `apps/loops/` uses `export` and `store` commands that call into this lib.
 
 ---
@@ -41,6 +41,8 @@ result = merge_store(
 **Slice filters**: `since`, `before` (time), `kinds` (exact + prefix match), `observers`, `origins`. Ticks filtered by time only. Target must not exist (no accidental overwrite).
 
 **Merge dedup**: `INSERT OR IGNORE` on ULID primary key. Same fact across stores has the same ULID — globally unique IDs make dedup trivial. `dry_run=True` computes counts without committing.
+
+**Merge has three arms, chosen by the TARGET's canonical artifact** (`engine.probe.probe_target`), and only the first is the `INSERT OR IGNORE` above: a `sqlite` target is byte-identical to the pre-arrival ceremony; an `arrival` target APPENDS INTO THE LOG and re-derives the projection, never INSERTing into the index; a `jsonl` target is REFUSED, naming export-and-reopen as the recovery. **What a foreign row is allowed to become is not decided here** — as of slice 2 the arrival arm delegates to `engine.admission.admit_records`, because that decision is backend-neutral policy and this lib is one of its callers, not its owner.
 
 **Don't reach for yet**: Transport, receive, compact, schema internals.
 

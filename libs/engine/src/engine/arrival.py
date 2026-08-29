@@ -57,6 +57,8 @@ from typing import NoReturn, TypeGuard
 import rfc8785
 from ulid import ULID
 
+from .arrival_contract import Head
+
 __all__ = [
     "ARRIVAL_SUFFIX",
     "LOCK_SUFFIX",
@@ -70,6 +72,8 @@ __all__ = [
     "ArrivalCorrupt",
     "GenesisRefused",
     "AppendRejected",
+    "StaleHead",
+    "ForkedHeight",
     "AuthorshipUnverified",
     "ArrivalLog",
     "Entry",
@@ -225,6 +229,95 @@ class AppendRejected(ArrivalError):
     head's ``rh`` is refused before a byte is written. A rejected append
     leaves the log exactly as it was.
     """
+
+
+class StaleHead(AppendRejected):
+    """The compare-and-swap pin no longer describes this log's head.
+
+    A SUBCLASS rather than a bare :class:`AppendRejected` because the parent
+    is raised for two different things: this, and the placement faults
+    :meth:`ArrivalLog._check_follows` finds in a candidate carried in from
+    elsewhere. An adapter that has to answer "was this a head mismatch?"
+    would otherwise be left sniffing messages, and a message is not a type.
+    Every existing ``except AppendRejected`` and ``raises(AppendRejected)``
+    keeps working, because this is one.
+    """
+
+
+class ForkedHeight(ArrivalError):
+    """A candidate would fill a height this log already holds differently.
+
+    Deliberately NOT an :class:`AppendRejected`. That family means "the head
+    moved, re-read it and try again", and ``store.merge_store`` retries on it
+    — but a fork is the one refusal retrying cannot clear. The two histories
+    disagree about what happened at a coordinate, and no amount of re-reading
+    makes them agree; a retry loop would spin instead of surfacing.
+
+    Replication stops here rather than choosing between the two records,
+    because choosing is admission into another lineage, and admission is a
+    different operation with different evidence behind it.
+    """
+
+
+def _refuse_stale_head(actual: dict, expected: Head | None) -> None:
+    """Refuse unless ``actual`` is the head the caller pinned.
+
+    ALL THREE coordinate fields, which is what makes this a compare-and-swap
+    over the log's identity rather than over its length. The ordinal alone
+    cannot tell "nothing arrived" from "the record at this ordinal was
+    replaced": a log truncated back and rewritten to the same height passes an
+    ordinal compare and fails this one, and that case is precisely the
+    rollback the backend contract asks a store to detect (§11).
+
+    Called from inside the fence at both append sites, never from outside it —
+    a compare that ran before the lock would be answering about a head some
+    other writer is free to move before the write lands. The two call sites
+    stay separate calls on purpose: each is independently the thing that makes
+    its own method a compare-and-swap, and each has its own test.
+    """
+    if expected is None:
+        return
+    if (
+        actual["lin"] == expected.lineage
+        and actual["ord"] == expected.ordinal
+        and actual[_RH] == expected.record_hash
+    ):
+        return
+    raise StaleHead(
+        f"the log's head is ({actual['lin']}, {actual['ord']}, {actual[_RH]}), "
+        f"not the expected ({expected.lineage}, {expected.ordinal}, "
+        f"{expected.record_hash}) — records arrived since the caller "
+        "reconciled, or this coordinate now holds a different record"
+    )
+
+
+def _checked_pin(following: object) -> Head | None:
+    """``following`` as a head pin, refusing anything weaker.
+
+    An ordinal is REFUSED rather than widened into a head, because widening
+    it here would mean this function inventing the two fields the caller did
+    not supply — and a pin the callee completed is not a pin. Construction
+    over detection (``decision:practice/construction-vs-detection-ratchets``):
+    there is no spelling of a weaker compare-and-swap for a caller to reach
+    for, so none can be reached for by accident.
+
+    :class:`ArrivalError` and deliberately not :class:`AppendRejected`: this
+    is a caller bug, and ``store.merge_store`` retries on
+    :class:`AppendRejected` — a type error caught by that loop would spin
+    instead of surfacing.
+    """
+    if following is None or isinstance(following, Head):
+        return following
+    if _is_int(following):
+        raise ArrivalError(
+            f"following must be a Head, not the bare ordinal {following!r} — "
+            "an ordinal-only pin cannot tell an untouched log from one "
+            "truncated and rewritten to the same height. Pass the full head "
+            "(engine.arrival_contract.Head), or None for an unpinned append"
+        )
+    raise ArrivalError(
+        f"following must be a Head or None, got {type(following).__name__}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -611,6 +704,27 @@ def build_record(
     return record
 
 
+def _completed_candidate(record: dict) -> dict:
+    """A carried-in record, ready to be validated against a head.
+
+    :func:`build_record`'s twin on the other side of the grammar: that one
+    ASSIGNS a coordinate, this one accepts the coordinate a record already
+    carries. ``rh`` is computed only when it is absent; supplied, it is left
+    exactly as it arrived so :func:`encode_record` can CHECK it rather than
+    this function replacing it with one that trivially matches. That is where
+    "append validates, it never assigns" lives, so it has one spelling shared
+    by every carried-in path — a second copy is how one path quietly starts
+    trusting a digest the other checks.
+
+    A shallow copy, because the caller's dict is not this module's to mutate.
+    """
+    candidate = dict(record)
+    if _RH not in candidate:
+        _validate(candidate, require_rh=False)
+        candidate[_RH] = record_hash(candidate)
+    return candidate
+
+
 def encode_record(record: dict) -> str:
     """One line, no trailing newline.
 
@@ -784,19 +898,9 @@ class ArrivalLog:
         signer does not hold ``key`` produces a log the verifier refuses at
         ordinal 0.
 
-        Staging wins ``O_EXCL`` on ``<name>.arrival.tmp`` FIRST and only then
-        checks for an existing log. That order is what makes minting a race
-        safe: the tmp path is the mutex, so the existence check happens with
-        the mutex held. Checking before creating would leave a window where
-        both processes see no log and the second one's rename destroys the
-        first one's store.
-
-        The directory is fsync'd once, here. The file's own fsync is not
-        enough at creation: an fsync'd file whose directory entry never
-        reached disk is a store that vanishes on power loss, and unlike the
-        old design there is no second copy to re-export from. Per-append
-        directory fsync is not needed — the entry already exists and only the
-        file's size and content change after this.
+        Publishing — the ``O_EXCL`` staging mutex, the existence check held
+        under it, the fsync of both file and directory — is
+        :meth:`_publish_genesis`, shared with :meth:`adopt_genesis`.
         """
         log = cls(path)
         log.path.parent.mkdir(parents=True, exist_ok=True)
@@ -823,34 +927,89 @@ class ArrivalLog:
             )
         )
 
+        log._publish_genesis(line)
+        return log
+
+    @classmethod
+    def adopt_genesis(cls, path: Path | str, record: dict) -> ArrivalLog:
+        """Open a lineage on a genesis record that was minted ELSEWHERE.
+
+        :meth:`mint`'s twin on the carried-in side, the way
+        :meth:`append_record` is :meth:`append`'s: mint builds and signs a
+        genesis, this one accepts the exact bytes of one that already exists.
+        Nothing is re-signed and nothing is rehashed — a replica whose ordinal
+        0 differed from the authority's by a single byte would be a different
+        lineage wearing the same id, so the record lands exactly as offered or
+        not at all.
+
+        The record is held to the same two gates a walk holds ordinal 0 to:
+        :func:`encode_record` (grammar, and the supplied ``rh`` CHECKED rather
+        than trusted) and :func:`_placement_fault` at ordinal 0 (genesis kind,
+        no ``prev``, signed, self-naming, well-formed founding key). Structural
+        gates only — whether the genesis signature verifies against its own
+        founding key is :func:`verify_authorship`'s question, asked with an
+        injected verifier, and this path stays as pure as :meth:`walk` is
+        about the same record.
+
+        Publishing is :meth:`mint`'s ceremony exactly, and shared with it:
+        staging wins ``O_EXCL`` first, so an existing log at this path refuses
+        with the mutex held rather than being overwritten.
+        """
+        log = cls(path)
+        log.path.parent.mkdir(parents=True, exist_ok=True)
+        candidate = _completed_candidate(record)
+        line = encode_record(candidate)
+        fault = _placement_fault(candidate, 0)
+        if fault is not None:
+            raise GenesisRefused(f"cannot open a lineage on this record: {fault}")
+        log._publish_genesis(line)
+        return log
+
+    def _publish_genesis(self, line: str) -> None:
+        """Stage, write, fsync and publish one genesis line — atomically.
+
+        The one home for the ceremony :meth:`mint` and :meth:`adopt_genesis`
+        share. Staging wins ``O_EXCL`` on ``<name>.arrival.tmp`` FIRST and
+        only then checks for an existing log. That order is what makes opening
+        a lineage a race safe: the tmp path is the mutex, so the existence
+        check happens with the mutex held. Checking before creating would
+        leave a window where both processes see no log and the second one's
+        rename destroys the first one's store.
+
+        The directory is fsync'd once, here. The file's own fsync is not
+        enough at creation: an fsync'd file whose directory entry never
+        reached disk is a store that vanishes on power loss, and there is no
+        second copy to export from again. Per-append directory fsync is not
+        needed — the entry already exists and only the file's size and content
+        change after this.
+        """
         try:
-            fd = os.open(str(log.tmp_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+            fd = os.open(str(self.tmp_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
         except FileExistsError as exc:
             raise GenesisRefused(
-                f"{log.tmp_path} exists — another process is minting this lineage, "
-                "or a previous mint died mid-flight and left staging behind"
+                f"{self.tmp_path} exists — another process is opening this lineage, "
+                "or a previous attempt died mid-flight and left staging behind"
             ) from exc
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as fh:
                 # The existence check runs with the staging mutex held, which
                 # is what makes it authoritative rather than a fast path.
-                if log.path.exists():
+                if self.path.exists():
                     raise GenesisRefused(
-                        f"{log.path} already exists — a lineage is minted once, and "
+                        f"{self.path} already exists — a lineage is opened once, and "
                         "publishing over an existing log would destroy a store"
                     )
                 fh.write(line + "\n")
                 fh.flush()
                 os.fsync(fh.fileno())
-            log.tmp_path.replace(log.path)
+            self.tmp_path.replace(self.path)
         except BaseException:
             # The staging create won, but the bytes never became durable —
-            # leave zero residue behind the failed mint.
+            # leave zero residue behind the failed attempt.
             with contextlib.suppress(OSError):
-                log.tmp_path.unlink()
+                self.tmp_path.unlink()
             raise
-        _fsync_dir(log.path.parent)
-        return log
+        _fsync_dir(self.path.parent)
 
     # -- reading -------------------------------------------------------
 
@@ -1308,7 +1467,7 @@ class ArrivalLog:
         origin: str = "",
         at: float | None = None,
         signer: Signer | None = None,
-        following: int | None = None,
+        following: Head | None = None,
     ) -> tuple[dict, ResumeMark]:
         """:meth:`append`, also returning the mark that resumes just past it.
 
@@ -1319,20 +1478,17 @@ class ArrivalLog:
         through :meth:`walk_from`, which re-validates the anchor at the
         adoption site.
 
-        ``following`` names the head ordinal the caller expects. Checked
-        under the lock, so a record that landed since the caller last
-        looked refuses (:class:`AppendRejected`) BEFORE any byte is
-        written — the compare-and-swap shape for a consumer whose staged
-        state must not silently skip an interloper.
+        ``following`` names the FULL head the caller expects — lineage,
+        ordinal and record hash. Checked under the lock, so a record that
+        landed since the caller last looked refuses (:class:`StaleHead`)
+        BEFORE any byte is written — the compare-and-swap shape for a
+        consumer whose staged state must not silently skip an interloper. A
+        bare ordinal is refused rather than accepted: see :func:`_checked_pin`.
         """
+        pin = _checked_pin(following)
 
         def build(headr: dict) -> dict:
-            if following is not None and headr["ord"] != following:
-                raise AppendRejected(
-                    f"the log's head is at ordinal {headr['ord']}, not the "
-                    f"expected {following} — records arrived since the "
-                    "caller reconciled"
-                )
+            _refuse_stale_head(headr, pin)
             at_ = time.time() if at is None else at
             sig = (
                 signer(observer, content_commitment(k, at_, observer, origin, body))
@@ -1353,7 +1509,7 @@ class ArrivalLog:
         )
 
     def append_marked_many(
-        self, entries: Sequence[Entry], *, following: int | None = None
+        self, entries: Sequence[Entry], *, following: Head | None = None
     ) -> tuple[list[dict], ResumeMark]:
         """Append several records under ONE lock acquisition, ONE fsync.
 
@@ -1371,10 +1527,13 @@ class ArrivalLog:
         blocks within one process. Hence a primitive rather than a wrapper.
 
         ``following`` is the compare-and-swap pin, checked under the lock
-        before any byte is written: it names the head ordinal the caller
-        deduped against, so a record that landed since then REFUSES
-        (:class:`AppendRejected`) rather than letting a stale dedup decide
+        before any byte is written: it names the FULL head — lineage, ordinal
+        and record hash — the caller deduped against, so a record that landed
+        since then, or a coordinate that now holds a different record,
+        REFUSES (:class:`StaleHead`) rather than letting a stale dedup decide
         what to append. A caller that sees the refusal re-reads and retries.
+        A bare ordinal is refused rather than accepted: see
+        :func:`_checked_pin`.
 
         ONE trailing fsync is sound: a crash loses only an un-fsynced
         suffix, or leaves one torn tail line that the truncate-under-lock
@@ -1388,25 +1547,172 @@ class ArrivalLog:
                 "is a caller bug, not a no-op to absorb"
             )
 
-        with self._locked_head() as head:
-            if following is not None and head["ord"] != following:
-                raise AppendRejected(
-                    f"the log's head is at ordinal {head['ord']}, not the "
-                    f"expected {following} — records arrived since the "
-                    "caller reconciled"
+        def assign(head: dict, index: int) -> dict:
+            entry = entries[index]
+            at_ = time.time() if entry.at is None else entry.at
+            return build_record(
+                lin=head["lin"], ordinal=head["ord"] + 1, prev=head[_RH],
+                k=entry.k, body=entry.body, observer=entry.observer,
+                origin=entry.origin, at=at_, sig=None,
+            )
+
+        return self._append_many_under_lock(
+            assign, len(entries), pin=_checked_pin(following)
+        )
+
+    def append_records(
+        self, records: Sequence[dict], *, following: Head | None = None
+    ) -> tuple[list[dict], ResumeMark]:
+        """Append pre-coordinated records under ONE lock acquisition.
+
+        :meth:`append_record`'s batched form, and the primitive exact
+        replication is composed from: every record already carries its
+        lineage, ordinal, ``prev``, signature and ``rh``, and this method
+        VALIDATES all of them rather than assigning any. Nothing here rehashes
+        or re-signs, so a suffix that lands is byte-identical to the suffix
+        that was offered — which is the whole property replication has to
+        keep, and the reason it cannot be expressed as a loop over
+        :meth:`append_marked_many` (that path assigns coordinates and builds
+        every record unsigned).
+
+        Batched rather than a loop over :meth:`append_record` for the reason
+        :meth:`append_marked_many` gives: ``_append_under_lock`` opens its own
+        descriptor on the lock file, and ``flock`` is per open-file-
+        description, so an outer lock plus per-record appends DEADLOCKS within
+        one process. A partially applied suffix is also the artifact a replica
+        must never hold, so the whole batch lands under one lock and one
+        fsync or none of it does.
+
+        ``following`` is the same full-head compare-and-swap pin every append
+        takes, checked inside the fence.
+
+        Two refusals before any byte is written, and they are different
+        claims: a candidate at a height this log already holds DIFFERENTLY is
+        a fork (:class:`ForkedHeight`, and retrying cannot clear it), while a
+        batch that simply does not follow the current head is a stale view of
+        it (:class:`StaleHead`, and re-reading is exactly the fix).
+        """
+        if not records:
+            raise ArrivalError(
+                "append_records was handed no records — an empty append is a "
+                "caller bug, not a no-op to absorb"
+            )
+        # Completed before the lock: the work is pure, and a malformed batch
+        # should refuse without ever having held the fence.
+        candidates = [_completed_candidate(record) for record in records]
+
+        def carry(head: dict, index: int) -> dict:
+            if index == 0:
+                self._refuse_divergent_batch(candidates, head)
+            return candidates[index]
+
+        return self._append_many_under_lock(
+            carry, len(candidates), pin=_checked_pin(following)
+        )
+
+    def _refuse_divergent_batch(self, candidates: list[dict], head: dict) -> None:
+        """Classify a carried-in batch against the head, before any mutation.
+
+        Called under the lock, so the head it judges against is the head the
+        write would land on. It names WHERE the disagreement is and refuses;
+        it never picks a winner.
+
+        Order matters: the fork check runs first. A batch that overlaps the
+        log divergently is also, trivially, a batch that does not follow the
+        head — reporting that as a stale head would tell the caller to
+        re-read and retry, and retrying a fork spins forever. The narrower,
+        more informative claim goes first.
+        """
+        occupied = sorted(
+            {
+                candidate["ord"]
+                for candidate in candidates
+                if _is_int(candidate.get("ord")) and candidate["ord"] <= head["ord"]
+            }
+        )
+        held = self._hashes_at(occupied, head)
+        for candidate in candidates:
+            ordinal = candidate.get("ord")
+            mine = held.get(ordinal) if _is_int(ordinal) else None
+            if mine is not None and mine != candidate.get(_RH):
+                raise ForkedHeight(
+                    f"ordinal {ordinal} of {self.path} holds rh {mine}, but "
+                    f"the offered record carries rh {candidate.get(_RH)} — the "
+                    "two histories disagree at this height, so this is a fork "
+                    "and not a suffix. Replication stops rather than choosing"
                 )
+        first = candidates[0]
+        if first.get("ord") != head["ord"] + 1 or first.get("prev") != head[_RH]:
+            raise StaleHead(
+                f"this batch starts at ({first.get('lin')}, {first.get('ord')}) "
+                f"with prev {first.get('prev')}, but the log's head is "
+                f"({head['lin']}, {head['ord']}, {head[_RH]}) — records arrived "
+                "since the caller computed the suffix, or it was computed "
+                "against a different log. Re-read the head and recompute which "
+                "records are missing"
+            )
+
+    def _hashes_at(self, ordinals: Sequence[int], head: dict) -> dict[int, str]:
+        """The ``rh`` this log holds at each of ``ordinals``.
+
+        The head is answered from the record already in hand; anything below
+        it costs one walk, which only a batch that overlaps the log pays for.
+        An ordinal the log does not reach is simply absent from the answer —
+        "there is nothing there to disagree with" is not a fork.
+        """
+        wanted = set(ordinals)
+        found: dict[int, str] = {}
+        if head["ord"] in wanted:
+            found[head["ord"]] = head[_RH]
+            wanted.discard(head["ord"])
+        if not wanted:
+            return found
+        for record in self.walk():
+            if record["ord"] in wanted:
+                found[record["ord"]] = record[_RH]
+                wanted.discard(record["ord"])
+                if not wanted:
+                    break
+        return found
+
+    def _append_many_under_lock(
+        self,
+        build_each: Callable[[dict, int], dict],
+        count: int,
+        *,
+        pin: Head | None,
+    ) -> tuple[list[dict], ResumeMark]:
+        """The whole batched write sequence, indivisible.
+
+        :meth:`_append_under_lock`'s batched twin, and the ONE place a group
+        of records becomes bytes. Both batched appends are this method under a
+        different ``build_each``: :meth:`append_marked_many` assigns each
+        record's coordinate from the running head, :meth:`append_records`
+        hands back a record that already carries one. Nothing else differs,
+        so nothing else is written twice — the fence, the compare-and-swap,
+        the per-record chain checks, the single write and the single fsync are
+        stated once and inherited by both.
+
+        ``build_each(head, index)`` is called with the head the record must
+        follow — the log's real head for index 0, the previous record after
+        that — so a build that needs to judge the batch against the log can do
+        it at index 0, still inside the fence and still before a byte moves.
+
+        ONE trailing fsync is sound for the reason
+        :meth:`append_marked_many` gives: a crash loses only an un-fsynced
+        suffix, or leaves one torn tail line that the truncate-under-lock rule
+        removes.
+        """
+        with self._locked_head() as head:
+            _refuse_stale_head(head, pin)
             records: list[dict] = []
             encoded: list[str] = []
-            for entry in entries:
-                at_ = time.time() if entry.at is None else entry.at
-                record = build_record(
-                    lin=head["lin"], ordinal=head["ord"] + 1, prev=head[_RH],
-                    k=entry.k, body=entry.body, observer=entry.observer,
-                    origin=entry.origin, at=at_, sig=None,
-                )
+            for index in range(count):
+                record = build_each(head, index)
                 # Every record is held to the same head checks a single
                 # append is, against the record before it — the chain is
-                # built here, so it is validated here.
+                # built here, so it is validated here. `encode_record` is the
+                # grammar gate and the supplied-`rh` check both.
                 self._check_follows(record, head)
                 encoded.append(encode_record(record) + "\n")
                 records.append(record)
@@ -1435,14 +1741,7 @@ class ArrivalLog:
         rather than trusted.
         """
 
-        def build(_head: dict) -> dict:
-            candidate = dict(record)
-            if _RH not in candidate:
-                _validate(candidate, require_rh=False)
-                candidate[_RH] = record_hash(candidate)
-            return candidate
-
-        return self._append_under_lock(build)[0]
+        return self._append_under_lock(lambda _head: _completed_candidate(record))[0]
 
     @contextlib.contextmanager
     def _locked_head(self) -> Iterator[dict]:

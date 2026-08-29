@@ -25,10 +25,20 @@ from __future__ import annotations
 import hashlib
 import json
 
-import rfc8785
 import sqlite3
 
 from . import jsonl_codec
+
+# The fact-domain content commitment and its canonical encoding moved to
+# `admission` in slice 2: the inner signature travels through re-custody, so
+# it belongs beside the policy that checks it rather than in the module that
+# becomes a projection engine. Imported back under both historical names —
+# the mint paths below still call the private one, and it dies with them in
+# slice 5. Module-level is safe in this direction only: `admission` reaches
+# back for `FACT_COLUMN_INDEX` inside a function, never at import.
+from .admission import _canonical_bytes
+from .admission import fact_commitment_hash as _fact_commitment_hash
+from .admission import fact_commitment_hash as fact_commitment_hash  # re-export
 
 from ulid import ULID
 
@@ -155,23 +165,6 @@ _TICK_ROW_SQL = ", ".join(TICK_COLUMNS)
 _TICK_ROW_SQL_V1 = ", ".join(jsonl_codec.TICK_FIELDS)
 
 
-def _canonical_bytes(obj: object) -> bytes:
-    """Canonical encoding for commitment hashing: JCS, RFC 8785.
-
-    Upgraded from implementation-local json.dumps 2026-06-12
-    (decision design/attestation-canonicalization-jcs): the Go conformance
-    oracle is the federation-facing consumer the original docstring named
-    as the upgrade trigger, and cross-implementation hash divergence
-    renders as a false tamper alarm. Pre-JCS chains were re-anchored at
-    the swap (sl store reanchor), not grandfathered — SPEC §8.1.
-
-    Stored payload TEXT is still embedded verbatim as a string value, so
-    hashes detect byte-level tampering without re-serialization concerns
-    leaking in from payload content.
-    """
-    return rfc8785.dumps(obj)
-
-
 def _tick_envelope(row: tuple) -> dict:
     """The 10 commitment fields of a tick row (column order: _TICK_ROW_SQL)."""
     return {
@@ -266,37 +259,6 @@ def _fact_row_hash(row: tuple) -> str:
     if len(row) > 6 and row[6] is not None:
         envelope["signature"] = row[6]
     return hashlib.sha256(_canonical_bytes(envelope)).hexdigest()
-
-
-def _fact_commitment_hash(
-    kind: str, ts: float, observer: str, origin: str, payload_text: str
-) -> str:
-    """Hash the fact's CONTENT commitment — what the fact signer signs.
-
-    Content-only by design (design/fact-signature-at-store-column):
-    excludes id and arrival coordinates, which are custody context, not authored
-    content. This is what makes the signature transport-stable — any
-    store holding the row can re-derive the commitment and verify
-    authorship against the observer registry without trusting the
-    sender. Stored payload TEXT is embedded verbatim (same posture as
-    the tick envelope: byte-level tamper detection, no re-serialization).
-    Never includes the signature (a signature cannot sign itself).
-    """
-    envelope = {
-        "kind": kind, "ts": ts, "observer": observer,
-        "origin": origin, "payload": payload_text,
-    }
-    return hashlib.sha256(_canonical_bytes(envelope)).hexdigest()
-
-
-# Public name: the content commitment is a cross-lib contract —
-# libs/store's transport paths and any receive-side verifier must hash
-# the same envelope the signer signed. Same function, two names.
-def fact_commitment_hash(
-    kind: str, ts: float, observer: str, origin: str, payload_text: str
-) -> str:
-    """Content commitment hash for fact signing (see _fact_commitment_hash)."""
-    return _fact_commitment_hash(kind, ts, observer, origin, payload_text)
 
 
 from datetime import datetime, timezone as _tz

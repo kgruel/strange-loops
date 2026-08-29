@@ -9,6 +9,7 @@ from __future__ import annotations
 ckdl = None
 
 from .ast import (
+    BackendDecl,
     BoundaryAfter,
     BoundaryEvery,
     BoundaryWhen,
@@ -767,6 +768,7 @@ def _load_vertex_file(doc: ckdl.Document, path: Path | None) -> VertexFile:
     from pathlib import Path
     name: str | None = None
     store: Path | None = None
+    store_backend: BackendDecl | None = None
     discover: str | None = None
     sources: tuple[SourceEntry, ...] | None = None
     vertices: tuple[Path, ...] | None = None
@@ -786,7 +788,36 @@ def _load_vertex_file(doc: ckdl.Document, path: Path | None) -> VertexFile:
         if key == "name":
             name = _require_arg(node, 0, "name string", path)
         elif key == "store":
+            # `store "<location>"` — legacy, still means exactly what it did.
+            # `store "<location>" backend="file"` — the location plus the
+            # adapter that opens it.
+            #
+            # The three refusals below exist because this handler used to read
+            # args[0] and nothing else: ckdl populated `properties` and
+            # `children` and they were silently discarded, so `backend=` one
+            # letter wrong parsed clean and the store degraded to suffix
+            # inference forever. Explicit declaration that a typo can silently
+            # undo is not explicit declaration.
             store = Path(_require_arg(node, 0, "path", path))
+            for prop in node.properties:
+                if prop != "backend":
+                    raise _error(f"store: unknown property {prop!r}", path)
+            if node.children:
+                # Reserved, not rejected on principle: a child block is where
+                # adapter-specific options land when a second backend needs
+                # them. Refusing now costs nothing and keeps the grammar from
+                # accepting a shape nothing reads.
+                #
+                # An EMPTY `{ }` slips through, the same way it does for
+                # `preview` above: CKDL normalizes it to no children, so the
+                # loader cannot tell it from the no-block case. It declares
+                # nothing, so nothing is silently discarded.
+                raise _error("store: takes no child block", path)
+            if "backend" in node.properties:
+                backend_name = str(node.properties["backend"]).strip()
+                if not backend_name:
+                    raise _error("store: backend must not be empty", path)
+                store_backend = BackendDecl(name=backend_name)
         elif key == "strict":
             # `strict true` / `strict false` — when true, all emits to this vertex
             # refuse on validation failures. No CLI override.
@@ -878,6 +909,7 @@ def _load_vertex_file(doc: ckdl.Document, path: Path | None) -> VertexFile:
         name=name,
         loops=loops,
         store=store,
+        store_backend=store_backend,
         discover=discover,
         sources=sources,
         vertices=vertices,

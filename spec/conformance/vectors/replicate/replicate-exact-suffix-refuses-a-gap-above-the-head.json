@@ -1,0 +1,46 @@
+{
+  "name": "replicate-exact-suffix-refuses-a-gap-above-the-head",
+  "description": "A batch that starts above head+1 is not a suffix. The head is intact, so this is a stale view of it and not a fork: HeadMismatch, and the caller re-reads to find what it is missing.",
+  "input": {
+    "target": [
+      "{\"v\":1,\"lin\":\"01M2REPLICATEVECTORLINEAGE\",\"ord\":0,\"prev\":null,\"at\":1750000000.0,\"k\":\"genesis\",\"observer\":\"kyle\",\"origin\":\"\",\"body\":{\"protocol\":1,\"lineage\":\"01M2REPLICATEVECTORLINEAGE\",\"key\":\"a2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2s=\"},\"sig\":\"sig:5aab76c2b50fc8f9e25f90645aded7504583d0ecebad13bb5ba2a83cf1089f3f\",\"rh\":\"65fe9454f6be46ac8e39e2bf58e79502c60f8ab2c33d9d6a58f8fb1dc9a88ccb\"}",
+      "{\"v\":1,\"lin\":\"01M2REPLICATEVECTORLINEAGE\",\"ord\":1,\"prev\":\"65fe9454f6be46ac8e39e2bf58e79502c60f8ab2c33d9d6a58f8fb1dc9a88ccb\",\"at\":1750000101.0,\"k\":\"note\",\"observer\":\"kyle\",\"origin\":\"\",\"body\":{\"i\":1},\"rh\":\"489c272f99326d3babefdb93dde418123dd7b80870f0ab5ba389275a7859f9f2\"}",
+      "{\"v\":1,\"lin\":\"01M2REPLICATEVECTORLINEAGE\",\"ord\":2,\"prev\":\"489c272f99326d3babefdb93dde418123dd7b80870f0ab5ba389275a7859f9f2\",\"at\":1750000102.0,\"k\":\"note\",\"observer\":\"kyle\",\"origin\":\"\",\"body\":{\"i\":2},\"rh\":\"73420f09ece07e6a18924fe88fbed4c01c52b0ffc0d5ae50468628221d76db5e\"}"
+    ],
+    "records": [
+      {
+        "v": 1,
+        "lin": "01M2REPLICATEVECTORLINEAGE",
+        "ord": 4,
+        "prev": "7fbc51b18e0c9655047c8c75a28f170d46c299b9d5e5df82c9f0435e549282a5",
+        "at": 1750000104.0,
+        "k": "note",
+        "observer": "kyle",
+        "origin": "",
+        "body": {
+          "i": 4
+        },
+        "rh": "c0643b6522cd4b5d726ec4804fda85a0f97909d318d803ed91cee70ee889ebd0"
+      }
+    ],
+    "expected_head": {
+      "lineage": "01M2REPLICATEVECTORLINEAGE",
+      "ordinal": 2,
+      "record_hash": "73420f09ece07e6a18924fe88fbed4c01c52b0ffc0d5ae50468628221d76db5e"
+    }
+  },
+  "expected": {
+    "outcome": "refused",
+    "refusal": "HeadMismatch",
+    "head": {
+      "lineage": "01M2REPLICATEVECTORLINEAGE",
+      "ordinal": 2,
+      "record_hash": "73420f09ece07e6a18924fe88fbed4c01c52b0ffc0d5ae50468628221d76db5e"
+    },
+    "log": [
+      "{\"v\":1,\"lin\":\"01M2REPLICATEVECTORLINEAGE\",\"ord\":0,\"prev\":null,\"at\":1750000000.0,\"k\":\"genesis\",\"observer\":\"kyle\",\"origin\":\"\",\"body\":{\"protocol\":1,\"lineage\":\"01M2REPLICATEVECTORLINEAGE\",\"key\":\"a2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2s=\"},\"sig\":\"sig:5aab76c2b50fc8f9e25f90645aded7504583d0ecebad13bb5ba2a83cf1089f3f\",\"rh\":\"65fe9454f6be46ac8e39e2bf58e79502c60f8ab2c33d9d6a58f8fb1dc9a88ccb\"}",
+      "{\"v\":1,\"lin\":\"01M2REPLICATEVECTORLINEAGE\",\"ord\":1,\"prev\":\"65fe9454f6be46ac8e39e2bf58e79502c60f8ab2c33d9d6a58f8fb1dc9a88ccb\",\"at\":1750000101.0,\"k\":\"note\",\"observer\":\"kyle\",\"origin\":\"\",\"body\":{\"i\":1},\"rh\":\"489c272f99326d3babefdb93dde418123dd7b80870f0ab5ba389275a7859f9f2\"}",
+      "{\"v\":1,\"lin\":\"01M2REPLICATEVECTORLINEAGE\",\"ord\":2,\"prev\":\"489c272f99326d3babefdb93dde418123dd7b80870f0ab5ba389275a7859f9f2\",\"at\":1750000102.0,\"k\":\"note\",\"observer\":\"kyle\",\"origin\":\"\",\"body\":{\"i\":2},\"rh\":\"73420f09ece07e6a18924fe88fbed4c01c52b0ffc0d5ae50468628221d76db5e\"}"
+    ]
+  }
+}

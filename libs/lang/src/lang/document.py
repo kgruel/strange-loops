@@ -82,6 +82,7 @@ from pathlib import Path
 from typing import Any, NamedTuple
 
 from .ast import (
+    BackendDecl,
     BoundaryAfter,
     BoundaryCondition,
     BoundaryEvery,
@@ -891,12 +892,20 @@ def documents_to_vertex(
     *,
     path: Path | None = None,
     store: Path | None = None,
+    store_backend: BackendDecl | None = None,
 ) -> VertexFile:
     """Project declaration documents back to a ``VertexFile`` AST.
 
-    ``path`` and ``store`` are residence, supplied by the caller — they are
-    not present in the documents. Pure inverse of :func:`vertex_to_documents`
-    modulo those two fields.
+    ``path``, ``store`` and ``store_backend`` are residence, supplied by the
+    caller — they are not present in the documents. Pure inverse of
+    :func:`vertex_to_documents` modulo those three fields.
+
+    ``store_backend`` is residence for the same reason the locator is: which
+    adapter opens a store is an operational choice about where the vertex
+    lives, and putting an adapter name into signed declaration history would
+    make it part of the vertex's absorbed identity. It is threaded rather
+    than defaulted because a caller that drops it does not get an error — it
+    gets a vertex whose backend arm has silently reverted to inference.
 
     Forward-compatible (normative, SPEC §9.2): unknown ``_decl.*`` kinds are
     skipped, and unknown fields inside a known document are ignored, so a
@@ -1008,6 +1017,7 @@ def documents_to_vertex(
         name=name,
         loops=loops,
         store=store,
+        store_backend=store_backend,
         discover=discover,
         sources=sources,
         vertices=vertices,

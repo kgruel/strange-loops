@@ -845,9 +845,16 @@ class TestReanchor:
         ASCII. (Pure-ASCII envelopes hash identically under both canons —
         re-anchoring those is an idempotent no-op.)
         """
+        from engine import admission as adm
         from engine import sqlite_store as mod
         with monkeypatch.context() as m:
             m.setattr(mod, "_canonical_bytes", _old_canon)
+            # Two modules because the canon now has two readers: slice 2 moved
+            # the FACT content commitment to `admission`, so patching only the
+            # tick side would build a store that is old-canon in its chain and
+            # JCS in its fact signatures — a scenario this helper does not
+            # claim and no assertion here would catch.
+            m.setattr(adm, "_canonical_bytes", _old_canon)
             store = self._signed_store(path)
             store.append(Fact.of("note", "josé", body="café crème"))
             store.append(Fact.of("note", "josé", body="naïve"))
@@ -913,9 +920,16 @@ class TestReanchor:
         store._conn.commit()
         store.close()
 
+        from engine import admission as adm
         from engine import sqlite_store as mod
         with monkeypatch.context() as m:
             m.setattr(mod, "_canonical_bytes", _old_canon)
+            # Two modules because the canon now has two readers: slice 2 moved
+            # the FACT content commitment to `admission`, so patching only the
+            # tick side would build a store that is old-canon in its chain and
+            # JCS in its fact signatures — a scenario this helper does not
+            # claim and no assertion here would catch.
+            m.setattr(adm, "_canonical_bytes", _old_canon)
             store = self._signed_store(tmp_db)
             store.append(Fact.of("note", "tester", body="époque"))
             tick(store, "chained")

@@ -185,6 +185,33 @@ index cannot answer the only question a writer may ask.
 `open_canonical_store`, or a direct sqlite write becomes an out-of-band
 insert the log doesn't account for.
 
+**The backend contract is a second, ADDITIVE path — nothing routes through it
+yet.** `engine/arrival_contract.py` states
+`docs/architecture/arrival/backend-contract.html` §03 in Python: the `Head` /
+`Watermark` / `Commit` types, the `ArrivalLedger` (ten ops) and `ArrivalQuery`
+Protocols, and the `ContractRefusal` root each adapter translates its own
+faults into one-for-one. Stdlib and typing only — no sqlite3, no
+`engine.arrival` — so naming a `Head` costs nothing.
+`engine/arrival_file_backend.py` is the first adapter (`FileLedger` /
+`FileQuery` wrapping `ArrivalLog` plus the projection — the adapter does not
+modify `ArrivalStore`, though the class did change in-slice: its ceremony
+append pins the FULL head through the new `_pinned_head`, and it imports `Head`
+from the contract), and `engine/arrival_registry.py` answers which adapter opens which
+artifact: `descriptor_for` NAMES (AST fields plus path arithmetic, no I/O — it
+can name a backend this host has no adapter for), `BackendRegistry` OPENS
+(that half is the one that refuses with `UnknownBackend`). Production still resolves through the suffix dispatch
+above; pointing the CLI resolvers, the SDK and the `open_canonical_store`
+callers at the registry is slice 5's, and the deletions land with it.
+
+`engine/admission.py` holds the backend-NEUTRAL half of the contract's §04
+append transaction: `admit_records` — dedup, verification, and the
+compare-and-swap append that carries a batch of foreign rows into a lineage —
+plus `fact_commitment_hash` and the canonical encoding under it, the inner
+commitment that survives re-custody. The fence and the coordinate assignment
+deliberately stay in the adapter, because a fence is the one thing no two
+backends can share. `store/merge.py`'s arrival arm is its first caller and
+delegates rather than keeping its own copy.
+
 Open-time detection of such writes is cheap by design and correspondingly
 narrow: stamped row counts vs `COUNT(*)` catch **inserts**, the last-line
 integrity compare catches an edit to the **last consumed** row, and an
@@ -197,7 +224,12 @@ same custody boundary `verify_facts` documents for signature strips.
 
 **Verification is `engine/canonical_audit.py`, and it never opens a store.**
 Open-time detection *repairs* (catch-up, truncate, rebuild); an auditor that
-repaired would erase the evidence it exists to inspect. So `audit_agreement`
+repaired would erase the evidence it exists to inspect. This is no longer just
+this package's discipline: backend-contract.html §06 makes "verification never
+repairs" a MUST every adapter owes
+(`decision:design/arrival-slice2-contract-text`, ruling 1). The one carve-out
+is building a projection that does not exist yet — that destroys no prior state
+and can hide no divergence. So `audit_agreement`
 (offset parity, count parity, last-line agreement — the default gate every
 store read verb runs) and `audit_deep` (`sl store verify --deep`: every log
 line compared field-for-field and in order against the index, then the tick

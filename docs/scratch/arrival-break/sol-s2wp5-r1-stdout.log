@@ -1,0 +1,2189 @@
+Reading prompt from stdin...
+OpenAI Codex v0.150.1
+--------
+workdir: /Users/kaygee/Code/loops-s2wp5
+model: gpt-5.6-sol
+provider: openai
+approval: never
+sandbox: workspace-write [workdir, /tmp, $TMPDIR]
+reasoning effort: low
+reasoning summaries: none
+session id: 01a04f65-3570-7f43-8f39-9c090cc667ca
+--------
+user
+# Sol review brief — arrival-break slice 2 / WP5 (contract-text execution), round 1 (per-WP, LOW)
+
+You are the cross-family reviewer for slice-2 WP5 — the slice's closing WP: it executed
+the five contract-text rulings from the slice-gate sitting, plus the doc pass and
+residue sweep. You review and report — no fixes, no commits. Run tests/scripts to
+verify claims empirically.
+
+## 1. Anchor
+
+- Repo checkout: this working directory (a git worktree of /Users/kaygee/Code/loops).
+- Branch: `slice/arrival-backend-contract` (the integrated slice-2 wave), tip `c33ce97e`.
+- Diff to review: `git diff 3928632d...c33ce97e` — the arbiter's integration pin-flip
+  (e7513164), WP5's six commits (f9e1ea19), and the gate-fix commit (c33ce97e).
+- Suites: engine, store, lang per-package; `tests/architecture` from root.
+
+## 2. Design contract (what the diff must honor)
+
+The five sitting rulings, binding and quote-faithful (fact
+`01M17M3RJJGC79KXH776Z4DQBR`, grep .loops/data/project.jsonl for it):
+
+1. F2 "verification never repairs" enters backend-contract.html §06 as drafted in
+   slice2-design-proposal.md §E — five sentences INCLUDING the absent⇒create carve-out.
+2. Refusal root, narrow form: the five text-named conditions typed under
+   `ContractRefusal`; deliberate absence typed `NotSupported` (replacing
+   `NotImplementedError` at both WP1 sites); all else backend-specific by design.
+3. `head_at` joins the op table — ten rows; Protocol + §03 row + §07 sentence +
+   ten-row exact-equality surface literal; head_at NOT in LEDGER_MUTATIONS (it is a
+   read).
+4. §08 import op-row DEFERRED — no row; §08 prose tightened to state the property
+   arrival_contract.py:333 cites.
+5. §08 resumable-import debt marker, leading with the ruled sentence verbatim.
+
+Plus: the doc pass may not leave any claim slice 2 did not build; residue swept in the
+same change (CLAUDE.md updates, F2-question-is-open docstrings, WP4-F1 descriptor_for
+clause).
+
+## 3. Unverified fixes — verify empirically, top priority
+
+| commit | claim | your job |
+|---|---|---|
+| e7513164 | ARBITER-APPLIED, no independent gate — you are its only independent verification. Integration seam: WP4's WP2-anticipating pin (`assert not isinstance(ledger, ArrivalLedger)` in test_arrival_registry.py) flipped to positive form once WP2's replicate/export made the Protocol satisfied; comment rewritten. The pre-fix state is the failing mutation (observed twice in the integrated suite). | Verify the flip is exactly one assertion + comment (diff 3928632d..e7513164); verify the positive assertion is now load-bearing (temporarily remove `replicate` from FileLedger → it fails); verify the comment's claim that the exact-surface equality lives in test_arrival_contract.py. |
+| c33ce97e | WP5-gate F1: CLAUDE.md:~196 clause scoped ("adapter does not modify ArrivalStore, though the class did change in-slice"). | Confirm one file, one clause; confirm the scoped claim is true against `git diff main...c33ce97e -- libs/engine/src/engine/arrival_store.py`. |
+
+## 4. Prior review state (gate, already run — do not re-litigate; flag if unsound)
+
+WP5's gate PASSed 7/7 at f9e1ea19: its own strip-tags faithfulness diff of the §06
+callout (verbatim match, five sentences), all five refusal subclasses verified real,
+ten-row symmetric difference empty, all three mutation demos re-run (including the
+rejected `compact` variant proving the impl's footnote), cross-doc sweep 3/3, the
+`s2wp4-gate-f1` closure endorsed, and the raised-not-fixed wire-version finding
+verified true at source and correctly left (one-surface-addition ruling). The F1
+CLAUDE.md finding it raised is fixed in c33ce97e.
+
+## 5. Seeded review targets
+
+- The `NotSupported` change's blast: any caller anywhere (libs/, apps/, sdk/) that
+  caught `NotImplementedError` from these paths and now behaves differently?
+- The §08 prose tightening: does the new sentence accidentally promise import
+  semantics beyond §08's default (empty replica / exact-agreement-through-head)?
+- head_at's §03 row: Profile column says Authority/Replica — is that consistent with
+  how the other read rows are profiled, and does FileLedger.head_at actually verify
+  (not just read) the head it returns, as §07's "verified" requires?
+- The debt marker: does its sentence create an obligation on the FILE backend the
+  slice didn't build (it should bind "conforming limited backends" only — the file
+  backend is unlimited by default).
+
+## 6. Verdict format
+
+Per §2 ruling: PASS/FAIL + evidence. §3 fixes: PASS/FAIL each. New findings:
+`S2WP5-L-<n>`, file:line, severity (BLOCKING/NON-BLOCKING), concrete failure scenario,
+evidence. Then one line: **CONVERGED** or **NOT CONVERGED** (with the blocking list).
+
+codex
+I’ll review the pinned range without modifying the worktree, then use temporary copies/worktrees for the mutation check. I’ll first inspect repository guidance and the exact diffs, then run the targeted and package suites.
+exec
+/bin/zsh -lc "pwd && rg --files -g 'AGENTS.md' -g '"'!node_modules'"' -g '"'!target'"' .. | head -50 && git status --short && git branch --show-current && git rev-parse HEAD" in /Users/kaygee/Code/loops-s2wp5
+ succeeded in 0ms:
+/Users/kaygee/Code/loops-s2wp5
+../topstep-mig/AGENTS.md
+../living-almanac/AGENTS.md
+../idp-eval/AGENTS.md
+../topstep/AGENTS.md
+../gruel-design-system/AGENTS.md
+../gruel-design-system/src/systems/gruel/AGENTS.md
+../gruel-design-system/src/systems/bfc/AGENTS.md
+../forks/SillyBunny/AGENTS.md
+../forks/HVM4/AGENTS.md
+../forks/Marinara-Engine/AGENTS.md
+slice/arrival-backend-contract
+c33ce97e9860f26fe84fe6b1e008430aeb7b7c1e
+
+codex
+The arbiter diff is confined to the registry test, but its rewritten comment says “nine-op equality”; the current contract is ten rows. I’m checking whether that is merely stale commentary or contradicts the actual owning assertion, and I’ll include it if it is a concrete review finding.
+exec
+/bin/zsh -lc "nl -ba libs/engine/tests/test_arrival_contract.py | sed -n '1,180p'; nl -ba libs/engine/src/engine/arrival_file_backend.py | sed -n '270,315p;470,515p;580,625p;680,715p'; nl -ba libs/engine/src/engine/arrival_contract.py | sed -n '1,90p;320,375p;430,525p'; nl -ba docs/architecture/arrival/backend-contract.html | sed -n '175,215p;250,290p;395,480p'; nl -ba libs/engine/CLAUDE.md | sed -n '180,210p'; git diff main...c33ce97e -- libs/engine/src/engine/arrival_store.py; git diff c33ce97e"'^..c33ce97e --numstat -- && git diff c33ce97e''^..c33ce97e -- libs/engine/CLAUDE.md; rg -n -U '"'except["'^'"\\n]*(NotImplementedError|NotSupported)|catch["'^'"\\n]*(NotImplementedError|NotSupported)|pytest\\.raises\\((NotImplementedError|NotSupported)' libs apps sdk" in /Users/kaygee/Code/loops-s2wp5
+ exited 2 in 0ms:
+     1	"""The contract surface, and the file adapter that first satisfies it.
+     2	
+     3	``design:arrival-break-slice2-backend-contract`` §A. Two subjects here:
+     4	
+     5	1. :mod:`engine.arrival_contract` states backend-contract.html §03 in Python,
+     6	   and it must keep the properties that make it importable from anywhere —
+     7	   stdlib only, no sqlite3, no runtime dependency on the file backend.
+     8	2. :mod:`engine.arrival_file_backend` wraps ``ArrivalLog`` and the projection,
+     9	   including the custody/reads separation §A.2 pins with a unit test rather
+    10	   than a numbered architecture rule (one adapter is not yet a pattern).
+    11	"""
+    12	
+    13	from __future__ import annotations
+    14	
+    15	import ast
+    16	import subprocess
+    17	import sys
+    18	from pathlib import Path
+    19	
+    20	import pytest
+    21	from atoms import Fact
+    22	
+    23	from engine.arrival import ArrivalLog
+    24	from engine.arrival_contract import (
+    25	    LEDGER_MUTATIONS,
+    26	    ArrivalLedger,
+    27	    ArrivalQuery,
+    28	    AtomicLimitExceeded,
+    29	    Capabilities,
+    30	    Commit,
+    31	    ContractRefusal,
+    32	    DurabilityProfile,
+    33	    Full,
+    34	    Head,
+    35	    HeadMismatch,
+    36	    Incremental,
+    37	    NotAuthority,
+    38	    NotSupported,
+    39	    Open,
+    40	    Profile,
+    41	    RecordDraft,
+    42	    StoreDescriptor,
+    43	    VerificationLevel,
+    44	    Watermark,
+    45	)
+    46	from engine.arrival_file_backend import EXPORT_CODEC, FileLedger, FileQuery
+    47	from engine.arrival_store import ArrivalStore
+    48	from tests.conftest import STUB_KEY as _KEY
+    49	from tests.conftest import stub_sign as _sign
+    50	
+    51	CONTRACT = Path(__file__).resolve().parents[1] / "src/engine/arrival_contract.py"
+    52	
+    53	
+    54	# --- the contract module's own properties ----------------------------------
+    55	
+    56	
+    57	def test_the_contract_module_imports_no_sqlite_and_no_backend():
+    58	    """Static: nothing here reaches for a driver or for the file codec.
+    59	
+    60	    The property is what makes ``import engine.arrival_contract`` cheap
+    61	    enough for libs/store, libs/sdk and an out-of-tree adapter to all depend
+    62	    on it. Read from the AST rather than from ``sys.modules`` so a
+    63	    conditional or function-local import cannot pass by not executing.
+    64	    """
+    65	    tree = ast.parse(CONTRACT.read_text())
+    66	    imported: set[str] = set()
+    67	    for node in ast.walk(tree):
+    68	        if isinstance(node, ast.Import):
+    69	            imported.update(alias.name.split(".")[0] for alias in node.names)
+    70	        elif isinstance(node, ast.ImportFrom) and node.module:
+    71	            imported.add(node.module.split(".")[0])
+    72	        elif isinstance(node, ast.ImportFrom) and node.level:
+    73	            imported.add(f"<relative level {node.level}>")
+    74	
+    75	    assert "sqlite3" not in imported
+    76	    assert not any(name.startswith("<relative") for name in imported), (
+    77	        "a relative import is an import of this package's backend layer"
+    78	    )
+    79	    assert not {"arrival", "engine", "store", "lang", "atoms"} & imported
+    80	
+    81	
+    82	def test_importing_the_contract_pulls_in_no_backend_module():
+    83	    """Dynamic: the same claim, observed rather than parsed.
+    84	
+    85	    A fresh interpreter, because this one has long since imported the world.
+    86	    """
+    87	    prog = (
+    88	        "import sys; import engine.arrival_contract as c; "
+    89	        "print(int(any(m.startswith('engine.arrival.') or "
+    90	        "m == 'engine.arrival' or m == 'sqlite3' for m in sys.modules)))"
+    91	    )
+    92	    proc = subprocess.run(
+    93	        [sys.executable, "-c", prog], capture_output=True, text=True
+    94	    )
+    95	    assert proc.returncode == 0, proc.stderr
+    96	    assert proc.stdout.strip() == "0", (
+    97	        "importing the contract dragged the file backend or sqlite3 along"
+    98	    )
+    99	
+   100	
+   101	def test_every_contract_refusal_is_catchable_as_one():
+   102	    """A caller must be able to catch a refusal without naming the backend.
+   103	
+   104	    Rooted in ContractRefusal and NOT in engine.arrival.ArrivalError — a
+   105	    hierarchy rooted in the file backend's module could not serve a caller
+   106	    talking to DuckDB.
+   107	    """
+   108	    from engine.arrival import ArrivalError
+   109	
+   110	    for refusal in (HeadMismatch, NotAuthority, AtomicLimitExceeded):
+   111	        assert issubclass(refusal, ContractRefusal)
+   112	        assert not issubclass(refusal, ArrivalError)
+   113	
+   114	
+   115	def test_a_head_is_all_three_fields_and_compares_on_all_three():
+   116	    """The type is the argument: there is no two-field head to construct."""
+   117	    head = Head(lineage="L", ordinal=3, record_hash="a" * 64)
+   118	    assert head == Head(lineage="L", ordinal=3, record_hash="a" * 64)
+   119	    assert head != Head(lineage="L", ordinal=3, record_hash="b" * 64)
+   120	    assert head != Head(lineage="OTHER", ordinal=3, record_hash="a" * 64)
+   121	    with pytest.raises(TypeError):
+   122	        Head(lineage="L", ordinal=3)  # type: ignore[call-arg]
+   123	
+   124	
+   125	def test_a_descriptor_names_a_backend_and_never_infers_one():
+   126	    """§02: backend selection is explicit, and location is adapter-read.
+   127	
+   128	    ``location`` is a str rather than a Path because §02 lets it be a DSN
+   129	    reference or a service URL — typing it as a filesystem path would decide,
+   130	    in the neutral module, that every backend is a file.
+   131	    """
+   132	    descriptor = StoreDescriptor(backend="file", location="./s.arrival")
+   133	    assert isinstance(descriptor.location, str)
+   134	    assert descriptor.role is None and descriptor.lineage is None
+   135	    with pytest.raises(TypeError):
+   136	        StoreDescriptor(location="./s.arrival")  # type: ignore[call-arg]
+   137	
+   138	
+   139	# --- the custody / reads separation (§A.2) ---------------------------------
+   140	
+   141	
+   142	def _reachable(root: object, depth: int = 3) -> list[tuple[str, object]]:
+   143	    """Every attribute reachable from ``root`` within ``depth`` hops.
+   144	
+   145	    Instance state, not the class dictionary: the claim is about what a
+   146	    query HANDLE gives you, and a handle gives you what it holds.
+   147	    """
+   148	    seen: set[int] = set()
+   149	    found: list[tuple[str, object]] = []
+   150	
+   151	    def walk(obj: object, path: str, left: int) -> None:
+   152	        if left < 0 or id(obj) in seen:
+   153	            return
+   154	        seen.add(id(obj))
+   155	        for name, value in vars(obj).items():
+   156	            found.append((f"{path}.{name}", value))
+   157	            if hasattr(value, "__dict__"):
+   158	                walk(value, f"{path}.{name}", left - 1)
+   159	
+   160	    walk(root, "query", depth)
+   161	    return found
+   162	
+   163	
+   164	def test_no_ledger_mutating_op_is_reachable_from_a_query_handle(
+   165	    tmp_path, keys_and_store
+   166	):
+   167	    """§A.2, and backend-contract.html:211-217.
+   168	
+   169	    "A query handle MUST NOT expose a generic mutation escape hatch into the
+   170	    ledger." Asserted over everything the handle actually holds, transitively
+   171	    — not just its own methods, because a handle that stored an ArrivalLog or
+   172	    an ArrivalStore would satisfy a surface-only check while offering
+   173	    ``append`` one attribute away. ``ArrivalStore`` is the specific hazard:
+   174	    it is the projection's writer AND appends to the log, so a query built
+   175	    from one would be a mutation escape hatch by construction.
+   176	
+   177	    The op names come from LEDGER_MUTATIONS, beside the Protocol that
+   178	    declares them, so an operation added to the ledger later is covered here
+   179	    without anyone remembering to copy it across.
+   180	    """
+   270	        the append fence is ``flock``-based and per-open-file-description,
+   271	        and a second appender beside it would be a second way to be wrong.
+   272	
+   273	        ``before`` is derived rather than re-read: the first record's
+   274	        ``prev`` IS the predecessor's record hash and its ordinal minus one
+   275	        IS the predecessor's ordinal, so the head the append actually landed
+   276	        on is known exactly, without a second trip past a log another writer
+   277	        is free to extend.
+   278	        """
+   279	        if not drafts:
+   280	            raise ValueError(
+   281	                "append was handed no drafts — an empty append is a caller "
+   282	                "bug, not a no-op to absorb"
+   283	            )
+   284	        if (
+   285	            self._max_atomic_records is not None
+   286	            and len(drafts) > self._max_atomic_records
+   287	        ):
+   288	            raise AtomicLimitExceeded(
+   289	                f"{len(drafts)} records exceeds this backend's configured "
+   290	                f"atomic limit of {self._max_atomic_records} — refused before "
+   291	                "any mutation, because splitting the request across "
+   292	                "transactions would turn one logical group into several"
+   293	            )
+   294	        for draft in drafts:
+   295	            if draft.signature is not None:
+   296	                raise NotSupported(
+   297	                    "this adapter's append builds unsigned records: its wrap "
+   298	                    "target, ArrivalLog.append_marked_many, assigns no "
+   299	                    "signature, and Entry deliberately carries no signer "
+   300	                    "field. A record that must arrive with an authored "
+   301	                    "signature goes through the ceremony path, which injects "
+   302	                    "a signer, or arrives pre-coordinated through replicate"
+   303	                )
+   304	
+   305	        entries = [
+   306	            Entry(
+   307	                k=draft.kind,
+   308	                body=dict(draft.body),
+   309	                observer=draft.observer,
+   310	                origin=draft.origin,
+   311	                at=draft.authored_at,
+   312	            )
+   313	            for draft in drafts
+   314	        ]
+   315	        try:
+   470	        every record agrees exactly with the import through its own head. Any
+   471	        other target REFUSES. There is no merge arm here — content that has to
+   472	        be re-coordinated to fit is being admitted into another lineage, and
+   473	        admission is a different operation.
+   474	
+   475	        Returns the target's :class:`~engine.arrival_contract.Head` after the
+   476	        import, and not a ``Commit``: an import into an empty replica has no
+   477	        ``before`` to name, and manufacturing one would be the first lie a
+   478	        replica told about where it came from.
+   479	
+   480	        **The manifest is checked, never trusted.** It travels with the bytes,
+   481	        so it is exactly as trustworthy as they are; every field is
+   482	        re-derived from the decoded records and compared. A manifest that
+   483	        disagrees with its own records is a corrupt export, and reporting the
+   484	        disagreement is the whole reason to carry one.
+   485	
+   486	        **Replica is not authority** (§08's callout). This method copies
+   487	        records; it grants nothing. A store that then accepts independent
+   488	        writes has forked, byte-identical start or not, and no flag here
+   489	        prevents that — custody does.
+   490	
+   491	        The verified remainder is materialised, because it is handed to one
+   492	        atomic :meth:`replicate`. That is the honest limit of a MINIMAL
+   493	        importer: an import too large to hold is a resumable-transfer design,
+   494	        and this is not one.
+   495	        """
+   496	        if prefix.codec != EXPORT_CODEC:
+   497	            raise ValueError(
+   498	                f"this backend imports {EXPORT_CODEC!r} and nothing else, but "
+   499	                f"this export claims codec {prefix.codec!r}"
+   500	            )
+   501	        imported = _decoded(prefix)
+   502	        _refuse_disagreeing_manifest(prefix, imported)
+   503	
+   504	        if not self._log.exists():
+   505	            # A new empty replica. Genesis cannot be appended onto a head that
+   506	            # is not there, and it must not be re-minted either: a replica
+   507	            # whose ordinal 0 differed by one byte would be a different
+   508	            # lineage wearing the same id.
+   509	            log = ArrivalLog.adopt_genesis(self._log.path, imported[0])
+   510	            self._log = log
+   511	            head = _head_of(log.genesis())
+   512	            if len(imported) == 1:
+   513	                return head
+   514	            return self.replicate(head, imported[1:]).after
+   515	
+   580	
+   581	    # -- reads through the ledger ------------------------------------------
+   582	
+   583	    def head(self, lineage: str | None = None) -> Head:
+   584	        """The currently complete head.
+   585	
+   586	        Absence and corruption surface as this backend's own
+   587	        ``GenesisRefused`` / ``ArrivalCorrupt`` — see :meth:`mint` for why
+   588	        they are not translated. A ``lineage`` that is not this log's IS one
+   589	        of the ratified refusals: asking a ledger about a lineage it does not
+   590	        hold is an operation it may not perform.
+   591	        """
+   592	        record = self._log.head()
+   593	        if lineage is not None and record["lin"] != lineage:
+   594	            raise NotAuthority(
+   595	                f"{self._log.path} holds lineage {record['lin']}, not the "
+   596	                f"requested {lineage} — this ledger is not that lineage's "
+   597	                "authority, and opening a path never makes it one"
+   598	            )
+   599	        return _head_of(record)
+   600	
+   601	    def head_at(self, watermark: Watermark) -> Head:
+   602	        """The full head a projection's watermark names.
+   603	
+   604	        The resolution §07 needs and the query half cannot perform: a
+   605	        watermark is a coordinate, and only the ledger holds the record whose
+   606	        hash completes it. It answers or it refuses — a watermark the log
+   607	        will not vouch for is a disagreement between projection and ledger,
+   608	        and answering it with a manufactured head would hide exactly that.
+   609	        """
+   610	        record = self._log.read(watermark.ordinal)
+   611	        if record["lin"] != watermark.lineage:
+   612	            raise NotAuthority(
+   613	                f"the projection reports lineage {watermark.lineage}, but "
+   614	                f"{self._log.path} holds {record['lin']} — the projection is "
+   615	                "not a projection of this log"
+   616	            )
+   617	        return _head_of(record)
+   618	
+   619	    def read(self, coordinate: int) -> Mapping[str, Any]:
+   620	        """The exact record, after establishing its membership in the lineage.
+   621	
+   622	        Membership is not a lookup: the walk that reaches the coordinate has
+   623	        verified that everything before it chains, because a record whose
+   624	        predecessors do not chain is not at the coordinate it claims.
+   625	        """
+   680	
+   681	        ``Incremental`` is NOT offered, and :meth:`capabilities` says so. A
+   682	        verified suffix walk has to start somewhere, and this backend starts
+   683	        one from a resume mark's byte offset — which a :class:`Head` does not
+   684	        carry. Finding the checkpoint's position would mean walking to it,
+   685	        making "incremental" the same work as ``Full`` under a name that
+   686	        promises less. An honest absent level beats a level that lies about
+   687	        its cost.
+   688	        """
+   689	        if isinstance(scope, Open):
+   690	            # Genesis and the adopted head record — §06's Open level exactly.
+   691	            # `_tail_record` and not the public `head()`: `head()` reaches its
+   692	            # answer through a full walk, which would make this level a Full
+   693	            # verification wearing an Open label. Reading the tail validates
+   694	            # the genesis and the head record it adopts, and truncates
+   695	            # nothing (that lives behind the lock, which this never takes).
+   696	            self._log.genesis()
+   697	            return _head_of(self._log._tail_record())
+   698	
+   699	        if isinstance(scope, Incremental):
+   700	            raise NotSupported(
+   701	                "the file adapter offers OPEN and FULL verification only — a "
+   702	                "verified suffix walk starts from a resume mark's byte "
+   703	                "offset, and a Head does not carry one. capabilities() "
+   704	                "reports the two levels it actually has"
+   705	            )
+   706	
+   707	        if not isinstance(scope, Full):
+   708	            raise TypeError(f"not a verification scope: {scope!r}")
+   709	
+   710	        # Grammar, density, lineage and the hash chain for the complete
+   711	        # prefix — `walk` IS that statement, and it is consumed to the end
+   712	        # here rather than returned, because a generator nobody drains
+   713	        # verifies nothing.
+   714	        found: Mapping[str, Any] | None = None
+   715	        for record in self._log.walk():
+     1	"""arrival_contract — the storage-neutral authority protocol.
+     2	
+     3	Slice 2 of the arrival break (``design:arrival-break-slice2-backend-contract``).
+     4	The contract of record is ``docs/architecture/arrival/backend-contract.html``
+     5	(Draft v1); this module states its §03 core types and interfaces in Python so
+     6	adapters can be written against them. It designs nothing — where the two
+     7	disagree, the HTML is right and this file is a bug.
+     8	
+     9	**stdlib and typing only.** Nothing here imports sqlite3, and nothing here
+    10	imports :mod:`engine.arrival` at runtime. That is the whole reason this is a
+    11	separate module from the adapter: ``import engine.arrival_contract`` is what
+    12	:mod:`store`, :mod:`sdk` and the next arc's DuckDB adapter all reach for, and a
+    13	caller that only wants to name a :class:`Head` must not drag a file codec and a
+    14	database driver along behind it. It also removes a cycle by construction — the
+    15	adapter imports the contract, the registry imports both, and nothing imports
+    16	the registry from below.
+    17	
+    18	**Protocols, not abstract base classes.** The file adapter wraps concrete
+    19	classes that already exist rather than inheriting new engine machinery, and the
+    20	DuckDB adapter will live outside this package entirely. ``store.transport``'s
+    21	``Transport`` states a pluggable seam the same way.
+    22	
+    23	**The refusals are rooted here, not in one backend's exception family.**
+    24	:class:`ContractRefusal` deliberately does not descend from
+    25	``engine.arrival.ArrivalError``. A caller written against the contract must be
+    26	able to catch a head mismatch from a DuckDB or PostgreSQL authority, and a
+    27	hierarchy rooted in the file backend's module cannot offer that. Each adapter
+    28	translates its own family into these, one-for-one — a translation that lumps
+    29	several backend faults into one contract refusal is a verdict claim, and the
+    30	contract only licenses location claims.
+    31	"""
+    32	
+    33	from __future__ import annotations
+    34	
+    35	from collections.abc import Iterator, Mapping, Sequence
+    36	from dataclasses import dataclass, field
+    37	from enum import Enum
+    38	from typing import Any, Protocol, runtime_checkable
+    39	
+    40	__all__ = [
+    41	    "Profile",
+    42	    "DurabilityProfile",
+    43	    "VerificationLevel",
+    44	    "Head",
+    45	    "Watermark",
+    46	    "RecordDraft",
+    47	    "DurabilityReceipt",
+    48	    "Commit",
+    49	    "ExportedPrefix",
+    50	    "Capabilities",
+    51	    "Open",
+    52	    "Incremental",
+    53	    "Full",
+    54	    "VerifyScope",
+    55	    "StoreDescriptor",
+    56	    "ArrivalLedger",
+    57	    "ArrivalQuery",
+    58	    "LEDGER_MUTATIONS",
+    59	    "ContractRefusal",
+    60	    "HeadMismatch",
+    61	    "SameHeightFork",
+    62	    "NotAuthority",
+    63	    "UnknownBackend",
+    64	    "AtomicLimitExceeded",
+    65	    "NotSupported",
+    66	]
+    67	
+    68	
+    69	# ---------------------------------------------------------------------------
+    70	# Named vocabularies — the contract's own tables, typed
+    71	# ---------------------------------------------------------------------------
+    72	
+    73	
+    74	class Profile(Enum):
+    75	    """What a store is licensed to do (§03's Profile column).
+    76	
+    77	    Not a description of the software: a Replica running the same adapter as
+    78	    an Authority differs in what it may be *asked* to do, which is why §08
+    79	    ends "Replica is not authority" — a byte-identical copy that accepts
+    80	    independent writes has forked.
+    81	    """
+    82	
+    83	    AUTHORITY = "authority"
+    84	    REPLICA = "replica"
+    85	    ARCHIVE = "archive"
+    86	
+    87	
+    88	class DurabilityProfile(Enum):
+    89	    """What a successful append survives (§05's table).
+    90	
+   320	# ---------------------------------------------------------------------------
+   321	
+   322	# The ledger operations that can change what a lineage holds. Stated here,
+   323	# beside the Protocol that declares them, so the custody/reads separation test
+   324	# reads this list instead of re-typing it — a hand-copied list in a test is a
+   325	# ratchet that silently stops covering the op added after it was written.
+   326	#
+   327	# `import_prefix` is a mutation and is therefore HERE, but it is deliberately
+   328	# not declared on the Protocol below: §08 describes portable import in prose
+   329	# and the ratified op table gives it no row, so an adapter that offers one is
+   330	# offering more than the contract asks for. Growing the Protocol is a contract
+   331	# decision; this set is the safety ratchet, and a mutating op that is not in it
+   332	# is a hole in the custody/reads separation whether the contract names the op
+   333	# or not.
+   334	LEDGER_MUTATIONS = frozenset({"mint", "append", "replicate", "import_prefix"})
+   335	
+   336	
+   337	@runtime_checkable
+   338	class ArrivalLedger(Protocol):
+   339	    """Custody: everything that can change what the lineage holds.
+   340	
+   341	    ``runtime_checkable`` so a conformance test can ask whether an adapter
+   342	    satisfies the surface. That check is by method NAME only — Python's
+   343	    protocol runtime check cannot judge signatures — so it is a location
+   344	    claim ("this adapter offers these ops"), never a conformance verdict.
+   345	    The vectors are what judge behaviour.
+   346	    """
+   347	
+   348	    def mint(self, options: Mapping[str, Any]) -> Head:
+   349	        """Exclusively create one signed genesis and return head 0."""
+   350	        ...
+   351	
+   352	    def head(self, lineage: str | None = None) -> Head:
+   353	        """The currently complete head, or a typed absence/corruption refusal."""
+   354	        ...
+   355	
+   356	    def head_at(self, watermark: Watermark) -> Head:
+   357	        """Resolve a projection's watermark into the verified head it names.
+   358	
+   359	        §07 asks a projection to store a verified ``projected_through`` head,
+   360	        and a projection that holds a coordinate cannot produce one: only
+   361	        custody holds the record whose hash completes it. So the resolution
+   362	        is a ledger op, and the return type is what states the custody/reads
+   363	        separation rather than prose. It answers or it refuses — a watermark
+   364	        the ledger will not vouch for IS the projection/ledger disagreement,
+   365	        and a manufactured head would hide exactly the thing being asked
+   366	        about.
+   367	
+   368	        A read, not a mutation: deliberately absent from
+   369	        :data:`LEDGER_MUTATIONS`.
+   370	        """
+   371	        ...
+   372	
+   373	    def append(self, expected: Head | None, drafts: Sequence[RecordDraft]) -> Commit:
+   374	        """Compare the full head, then assign and commit, indivisibly (§04)."""
+   375	        ...
+   430	    every backend owes regardless of how its rows are shaped: say which
+   431	    lineage you are answering about, and how much of it you actually have.
+   432	    """
+   433	
+   434	    def lineage(self) -> str | None:
+   435	        """The lineage this projection represents, or None when it holds none."""
+   436	        ...
+   437	
+   438	    def projected_through(self) -> Watermark | None:
+   439	        """How much of the lineage this projection accounts for."""
+   440	        ...
+   441	
+   442	
+   443	# ---------------------------------------------------------------------------
+   444	# Typed refusals
+   445	# ---------------------------------------------------------------------------
+   446	
+   447	
+   448	class ContractRefusal(Exception):
+   449	    """Root of the backend-neutral refusals.
+   450	
+   451	    Rooted here rather than in any backend's family so a caller can catch a
+   452	    refusal without knowing which adapter produced it.
+   453	    """
+   454	
+   455	
+   456	class HeadMismatch(ContractRefusal):
+   457	    """The actual head is not the expected head; nothing was mutated.
+   458	
+   459	    §04: an append succeeds if and only if the actual head equals the expected
+   460	    head and every assigned record is durable. This is the first half failing,
+   461	    and it is raised BEFORE any mutation — a caller that sees it re-reads and
+   462	    retries.
+   463	    """
+   464	
+   465	
+   466	class SameHeightFork(ContractRefusal):
+   467	    """A conflicting record already occupies this coordinate (§08).
+   468	
+   469	    Not a stale head: replication found a *different* record at the height it
+   470	    was about to fill. Replication stops rather than choosing, because
+   471	    choosing is admission into another lineage and admission is a different
+   472	    operation.
+   473	    """
+   474	
+   475	
+   476	class NotAuthority(ContractRefusal):
+   477	    """This store may not perform the operation asked of it.
+   478	
+   479	    §02: opening an exported log does not grant it authority merely because
+   480	    the codec can append to such files. Authority comes from the active
+   481	    descriptor plus the backend's fencing checks.
+   482	    """
+   483	
+   484	
+   485	class UnknownBackend(ContractRefusal):
+   486	    """No adapter is registered under the descriptor's backend name.
+   487	
+   488	    Refusing is the point: §02 forbids inferring a backend from a suffix, so
+   489	    an unregistered name has no fallback to degrade into.
+   490	    """
+   491	
+   492	
+   493	class AtomicLimitExceeded(ContractRefusal):
+   494	    """The request holds more records than this backend commits atomically.
+   495	
+   496	    §04: refuse BEFORE mutation. A backend that accepted the request and split
+   497	    it across transactions would have turned one logical group into several,
+   498	    which is the outcome the atomic limit exists to make impossible.
+   499	    """
+   500	
+   501	
+   502	class NotSupported(ContractRefusal):
+   503	    """A capability this backend deliberately does not offer.
+   504	
+   505	    §12 lets a backend advertise less than the whole surface, so deliberate
+   506	    absence is a contract answer and not a fault: ``capabilities()`` says
+   507	    which levels, codecs and limits exist, and asking for one that is absent
+   508	    is refused the same way a stale head is. An adapter raising this is
+   509	    telling the truth about itself, and the capability report says the same
+   510	    thing in advance.
+   511	
+   512	    Under the root rather than :class:`NotImplementedError` because the root
+   513	    is the whole promise of a backend-neutral contract: a caller catches
+   514	    :class:`ContractRefusal` and handles every refusal the contract text
+   515	    names. A builtin raised from an adapter's insides reads as "unfinished
+   516	    code" to every caller, and escapes the one ``except`` clause written
+   517	    against the contract (``decision:design/arrival-slice2-contract-text``,
+   518	    ruling 2).
+   519	
+   520	    Deliberate absence only. A backend fault that the contract text does not
+   521	    name stays backend-specific BY DESIGN — the root covers what the contract
+   522	    asserts and no more, and widening it to mean "anything that went wrong"
+   523	    would turn a location claim into a verdict.
+   524	    """
+   175	  ordinal: Int,
+   176	  record_hash: Digest
+   177	}
+   178	
+   179	RecordDraft = {
+   180	  kind, authored_at, observer, origin, body,
+   181	  signature?: Signature
+   182	}
+   183	
+   184	Commit = {
+   185	  before: Head,
+   186	  records: [Record, ...],
+   187	  after: Head,
+   188	  durability: DurabilityReceipt
+   189	}</code></pre>
+   190	        </div>
+   191	
+   192	        <div class="doc-table-wrap">
+   193	          <table class="doc-spec-table">
+   194	            <thead>
+   195	              <tr><th>Operation</th><th>Profile</th><th>Contract</th></tr>
+   196	            </thead>
+   197	            <tbody>
+   198	              <tr><td><code>mint(options)</code></td><td>Authority</td><td>Exclusively create one signed genesis and return head 0.</td></tr>
+   199	              <tr><td><code>head(lineage)</code></td><td>Authority / Replica</td><td>Return the currently complete head or a typed absence/corruption refusal.</td></tr>
+   200	              <tr><td><code>head_at(watermark)</code></td><td>Authority / Replica</td><td>Resolve a projection watermark into the verified head it names, or refuse.</td></tr>
+   201	              <tr><td><code>append(expected, drafts)</code></td><td>Authority</td><td>Atomically compare the full head, then assign and commit records up to the declared atomic limit.</td></tr>
+   202	              <tr><td><code>replicate(expected, records)</code></td><td>Authority / Replica</td><td>Atomically append exact pre-coordinated records; never rehash or re-sign.</td></tr>
+   203	              <tr><td><code>read(coordinate)</code></td><td>Authority / Replica</td><td>Return the exact record after establishing its membership in the lineage.</td></tr>
+   204	              <tr><td><code>scan(after, through)</code></td><td>Authority / Replica</td><td>Yield an ordered, consistent prefix range and no later record.</td></tr>
+   205	              <tr><td><code>verify(scope)</code></td><td>Authority / Replica / Archive</td><td>Verify grammar, density, hashes, and optionally authorship through a named head.</td></tr>
+   206	              <tr><td><code>export(through, codec)</code></td><td>Authority / Replica</td><td>Produce deterministic portable records and manifest for a captured prefix.</td></tr>
+   207	              <tr><td><code>capabilities()</code></td><td>All</td><td>Report profiles, limits, concurrency scope, durability, codec, and query behavior.</td></tr>
+   208	            </tbody>
+   209	          </table>
+   210	        </div>
+   211	
+   212	        <h3>Ledger and query interfaces stay separate</h3>
+   213	        <p>
+   214	          <code>ArrivalLedger</code> owns custody operations. <code>ArrivalQuery</code> owns facts,
+   215	          ticks, folds, search, and SQL-oriented reads. A query handle MUST NOT expose a generic
+   250	          A backend with an atomic limit above one can append several ledger records in one
+   251	          transaction for import efficiency. A backend whose safe limit is one remains
+   252	          conforming and imports by verified single-record steps. A
+   253	          <code>batch</code> record is different: it expresses one application ceremony whose
+   254	          multiple fact rows share one ordinal. Backend batching must not rewrite one semantic
+   255	          batch into several fact records or vice versa.
+   256	        </p>
+   257	
+   258	        <h3>Network retries</h3>
+   259	        <p>
+   260	          A remote Authority SHOULD support an opaque idempotency key scoped to the lineage and
+   261	          authenticated caller. Repeating the same key and request returns the original commit;
+   262	          reusing it with different content refuses. The mapping is backend metadata, not a
+   263	          ledger field. Without that capability, a lost response produces an “outcome unknown”
+   264	          result and the caller reconciles by reading the expected successor and its authored
+   265	          content commitment before deciding whether to retry.
+   266	        </p>
+   267	
+   268	        <h3>Typed refusals</h3>
+   269	        <p>
+   270	          The failure conditions this contract names — head mismatch, same-height fork, unknown
+   271	          backend, atomic limit exceeded, and not-authority — surface as typed refusals under one
+   272	          backend-neutral root, so a caller catches a refusal without knowing which adapter
+   273	          produced it. A capability a backend deliberately does not offer is typed
+   274	          <code>NotSupported</code> under that same root: an absence <code>capabilities()</code>
+   275	          already reports is a contract answer, not a fault. Every other failure is
+   276	          backend-specific BY DESIGN. The root covers exactly what the contract text asserts and
+   277	          no more, because an adapter that lumped its own faults into these would be making a
+   278	          claim the contract cannot back
+   279	          (<code>decision:design/arrival-slice2-contract-text</code>, ruling 2).
+   280	        </p>
+   281	      </section>
+   282	
+   283	      <section class="doc-section" id="durability">
+   284	        <div class="doc-section-header">
+   285	          <span class="doc-section-number">05</span>
+   286	          <h2>Durability and failure semantics</h2>
+   287	        </div>
+   288	        <p>
+   289	          “Durable” is meaningless without a failure boundary. Every Authority reports a named
+   290	          profile and its limits; callers may require a stronger profile than a backend offers.
+   395	          <table class="doc-spec-table">
+   396	            <thead>
+   397	              <tr><th>Strategy</th><th>Storage cost</th><th>Freshness</th><th>Recovery</th></tr>
+   398	            </thead>
+   399	            <tbody>
+   400	              <tr><td>Direct record query</td><td>No duplicate projection rows</td><td>At captured head</td><td>No rebuild; query logic must understand bodies</td></tr>
+   401	              <tr><td>Views / generated columns</td><td>Mostly indexes</td><td>At captured head</td><td>Recreate schema objects</td></tr>
+   402	              <tr><td>Transactional materialization</td><td>Selected duplicated fields</td><td>At commit</td><td>Rebuild deterministically from ledger</td></tr>
+   403	              <tr><td>Asynchronous projection</td><td>Separate query state</td><td>Explicit watermark</td><td>Resume from verified projected head</td></tr>
+   404	            </tbody>
+   405	          </table>
+   406	        </div>
+   407	
+   408	        <h3>Projection obligations</h3>
+   409	        <ul>
+   410	          <li>Every materialized row records or can derive <code>(arrival_ordinal, arrival_seq)</code>.</li>
+   411	          <li>Batch expansion order is deterministic and shared by live indexing and full rebuild.</li>
+   412	          <li>The projection stores a verified <code>projected_through</code> head, not merely a row count.</li>
+   413	          <li>Rows beyond, missing before, or inconsistent with that watermark cause refusal or rebuild.</li>
+   414	          <li>Projection state is never used to “repair” canonical ledger history.</li>
+   415	          <li>Query results report the lineage and projected prefix they actually represent.</li>
+   416	        </ul>
+   417	        <p>
+   418	          A verified <code>projected_through</code> head is a claim the query surface cannot make
+   419	          alone: a projection knows the coordinate it reached, and only custody holds the record
+   420	          whose hash completes it. <code>head_at(watermark)</code> in §03 is that resolution — the
+   421	          ledger-side read a projection calls to turn its watermark into a verified head, so
+   422	          meeting this obligation never requires giving a query handle a route into custody
+   423	          (<code>decision:design/arrival-slice2-contract-text</code>, ruling 3).
+   424	        </p>
+   425	
+   426	        <div class="doc-callout">
+   427	          <span class="doc-callout-label">DuckDB + Quack shape</span>
+   428	          <p>
+   429	            The personal backend can keep one canonical <code>arrival_records</code> relation,
+   430	            expose Quack-friendly read views, and add only worthwhile indexes or materialized
+   431	            columns. No companion <code>.arrival</code> file is required. Quack-facing access is
+   432	            read-only with respect to ledger custody; writes use the admission API.
+   433	          </p>
+   434	        </div>
+   435	      </section>
+   436	
+   437	      <section class="doc-section" id="transfer">
+   438	        <div class="doc-section-header">
+   439	          <span class="doc-section-number">08</span>
+   440	          <h2>Replication, import, and export</h2>
+   441	        </div>
+   442	
+   443	        <h3>Exact replication</h3>
+   444	        <p>
+   445	          A replica consumes pre-coordinated records. It verifies each record and atomically
+   446	          compares its current full head before inserting the exact suffix. It never assigns a
+   447	          new lineage, ordinal, predecessor, signature, or record hash. A conflicting same-height
+   448	          record is a fork and stops replication.
+   449	        </p>
+   450	
+   451	        <h3>Portable import</h3>
+   452	        <p>
+   453	          Import targets a new empty replica or staged authority by default. Importing into a
+   454	          non-empty target requires exact prefix agreement through the target head. The importer
+   455	          then appends only the verified remainder. “Merge” that re-coordinates content is an
+   456	          admission operation into another lineage, not replication. Import is a procedure over
+   457	          the operations §03 names, not an operation of its own: the table gives it no row, and
+   458	          one backend’s import stays a convention until a second backend shows which of it is
+   459	          shared (<code>decision:design/arrival-slice2-contract-text</code>, ruling 4).
+   460	        </p>
+   461	
+   462	        <div class="doc-callout is-open">
+   463	          <span class="doc-callout-label">Contract debt — resumable import</span>
+   464	          <p>
+   465	            Resumable import is required for conforming limited backends; the reference file
+   466	            backend does not yet implement it. A backend whose atomic limit is below the verified
+   467	            remainder cannot land that remainder in one step, so a single-shot importer refuses
+   468	            forever instead of progressing — §04 already says such a backend imports by verified
+   469	            single-record steps, and §12 exercises import among the configured limits. The
+   470	            importer that advances in bounded, resumable steps is therefore contract-implied, and
+   471	            it is a design rather than a fix: build it when a limited backend exists
+   472	            (<code>decision:design/arrival-slice2-contract-text</code>, ruling 5).
+   473	          </p>
+   474	        </div>
+   475	
+   476	        <h3>Canonical export</h3>
+   477	        <p>
+   478	          Export captures one head, scans its complete prefix in ordinal order, re-encodes each
+   479	          record with the selected wire codec, and writes a manifest. An implementation that
+   480	          stores typed columns MUST prove that the reconstructed logical JSON values reproduce
+   180	index cannot answer the only question a writer may ask.
+   181	
+   182	`store "….arrival"` → `ArrivalStore` over the sibling `….db`; `store
+   183	"….jsonl"` → `JsonlStore` over the sibling `….db`; `store "….db"` → plain
+   184	`SqliteStore`. Never construct a store for a vertex by hand — go through
+   185	`open_canonical_store`, or a direct sqlite write becomes an out-of-band
+   186	insert the log doesn't account for.
+   187	
+   188	**The backend contract is a second, ADDITIVE path — nothing routes through it
+   189	yet.** `engine/arrival_contract.py` states
+   190	`docs/architecture/arrival/backend-contract.html` §03 in Python: the `Head` /
+   191	`Watermark` / `Commit` types, the `ArrivalLedger` (ten ops) and `ArrivalQuery`
+   192	Protocols, and the `ContractRefusal` root each adapter translates its own
+   193	faults into one-for-one. Stdlib and typing only — no sqlite3, no
+   194	`engine.arrival` — so naming a `Head` costs nothing.
+   195	`engine/arrival_file_backend.py` is the first adapter (`FileLedger` /
+   196	`FileQuery` wrapping `ArrivalLog` plus the projection — the adapter does not
+   197	modify `ArrivalStore`, though the class did change in-slice: its ceremony
+   198	append pins the FULL head through the new `_pinned_head`, and it imports `Head`
+   199	from the contract), and `engine/arrival_registry.py` answers which adapter opens which
+   200	artifact: `descriptor_for` NAMES (AST fields plus path arithmetic, no I/O — it
+   201	can name a backend this host has no adapter for), `BackendRegistry` OPENS
+   202	(that half is the one that refuses with `UnknownBackend`). Production still resolves through the suffix dispatch
+   203	above; pointing the CLI resolvers, the SDK and the `open_canonical_store`
+   204	callers at the registry is slice 5's, and the deletions land with it.
+   205	
+   206	`engine/admission.py` holds the backend-NEUTRAL half of the contract's §04
+   207	append transaction: `admit_records` — dedup, verification, and the
+   208	compare-and-swap append that carries a batch of foreign rows into a lineage —
+   209	plus `fact_commitment_hash` and the canonical encoding under it, the inner
+   210	commitment that survives re-custody. The fence and the coordinate assignment
+diff --git a/libs/engine/src/engine/arrival_store.py b/libs/engine/src/engine/arrival_store.py
+index 5ff21759..0381cf23 100644
+--- a/libs/engine/src/engine/arrival_store.py
++++ b/libs/engine/src/engine/arrival_store.py
+@@ -82,6 +82,7 @@ from .arrival_body import (
+     body_of_fact_row,
+     body_of_tick_row,
+ )
++from .arrival_contract import Head
+ from .arrival_projection import has_rows, licensed_own_lineage, rows_of_record
+ from .jsonl_store import _as_int, _stamped_offset_current
+ from .residence import canonical_for, index_path_for
+@@ -548,13 +549,14 @@ class ArrivalStore(SqliteStore[T], Generic[T]):
+         log's atomicity unit, so recovery can never expose a partial
+         ceremony.
+ 
+-        ``following`` pins the append to the head the ceremony reconciled
+-        against: a record another writer lands mid-ceremony REFUSES the
+-        append before any byte is written (``AppendRejected``), the
+-        caller's transaction rolls back with the log byte-identical, and
+-        the ceremony is simply retryable — unlike :meth:`_write`, this path
+-        cannot resolve a gap after the fact, because the record it would
+-        have made durable is the ceremony itself.
++        ``following`` pins the append to the FULL head the ceremony
++        reconciled against (:meth:`_pinned_head`): a record another writer
++        lands mid-ceremony REFUSES the append before any byte is written
++        (``StaleHead``, an ``AppendRejected``), the caller's transaction
++        rolls back with the log byte-identical, and the ceremony is simply
++        retryable — unlike :meth:`_write`, this path cannot resolve a gap
++        after the fact, because the record it would have made durable is the
++        ceremony itself.
+         """
+         persisted_rows = [
+             r[:-2] if len(r) == len(FACT_ALL_COLUMNS) else r for r in rows
+@@ -563,7 +565,6 @@ class ArrivalStore(SqliteStore[T], Generic[T]):
+             k, body = "batch", body_of_batch(persisted_rows)
+         else:
+             k, body = "fact", body_of_fact_row(persisted_rows[0])
+-        consumed = self._reconciled_mark
+         _, mark = self._log.append_marked(
+             k,
+             body,
+@@ -571,10 +572,46 @@ class ArrivalStore(SqliteStore[T], Generic[T]):
+             origin=rows[0][4],
+             at=rows[0][2],
+             signer=self._fact_signer,
+-            following=None if consumed is None else consumed.arrival_ordinal,
++            following=self._pinned_head(self._reconciled_mark),
+         )
+         self._stamp_mark(mark)
+ 
++    def _pinned_head(self, consumed: ResumeMark | None) -> Head | None:
++        """The full head a ceremony reconciled against, for the append's pin.
++
++        The resume mark carries a coordinate and a seek hint but no record
++        hash, and the compare-and-swap now pins all three head fields — so
++        the record the mark names is read back to supply the third.
++        :meth:`engine.arrival.ArrivalLog.anchor` is a seek to the mark's own
++        offset with the anchor checks applied, not a walk, so completing the
++        pin costs one read rather than a pass over the log.
++
++        A mark the log will not vouch for is a REFUSAL, never a quiet fall
++        back to an unpinned append. Dropping the pin because it could not be
++        completed is precisely the silent weakening the full-head compare
++        exists to prevent, and it would turn a store whose index disagrees
++        with its log into one that appends onto the disagreement.
++        """
++        if consumed is None:
++            return None
++        anchor = self._log.anchor(consumed)
++        if anchor is None:
++            raise ArrivalCanonicalUnsupported(
++                f"{self._path} reconciled against arrival ordinal "
++                f"{consumed.arrival_ordinal} of lineage "
++                f"{consumed.arrival_lineage}, but {self._log.path} does not "
++                "vouch for a record there — the index's mark and the log "
++                "disagree, and appending under an uncompletable pin would "
++                "write onto that disagreement. Run "
++                "engine.arrival_projection.rederive_projections("
++                f"{str(self._log.path)!r})"
++            )
++        return Head(
++            lineage=anchor["lin"],
++            ordinal=anchor["ord"],
++            record_hash=anchor["rh"],
++        )
++
+     def _declaration_head_in_txn(
+         self, conn: Any, lineage_id: str
+     ) -> tuple[int, str] | None:
+4	2	libs/engine/CLAUDE.md
+diff --git a/libs/engine/CLAUDE.md b/libs/engine/CLAUDE.md
+index eb35da48..7cc477d9 100644
+--- a/libs/engine/CLAUDE.md
++++ b/libs/engine/CLAUDE.md
+@@ -193,8 +193,10 @@ Protocols, and the `ContractRefusal` root each adapter translates its own
+ faults into one-for-one. Stdlib and typing only — no sqlite3, no
+ `engine.arrival` — so naming a `Head` costs nothing.
+ `engine/arrival_file_backend.py` is the first adapter (`FileLedger` /
+-`FileQuery` wrapping `ArrivalLog` plus the projection; `ArrivalStore` itself is
+-untouched), and `engine/arrival_registry.py` answers which adapter opens which
++`FileQuery` wrapping `ArrivalLog` plus the projection — the adapter does not
++modify `ArrivalStore`, though the class did change in-slice: its ceremony
++append pins the FULL head through the new `_pinned_head`, and it imports `Head`
++from the contract), and `engine/arrival_registry.py` answers which adapter opens which
+ artifact: `descriptor_for` NAMES (AST fields plus path arithmetic, no I/O — it
+ can name a backend this host has no adapter for), `BackendRegistry` OPENS
+ (that half is the one that refuses with `UnknownBackend`). Production still resolves through the suffix dispatch
+rg: sdk: No such file or directory (os error 2)
+libs/engine/tests/test_arrival_contract.py:394:    with pytest.raises(NotSupported, match="unsigned"):
+libs/engine/tests/test_arrival_contract.py:516:    with pytest.raises(NotSupported):
+libs/engine/tests/test_tick.py:239:        with pytest.raises(NotImplementedError):
+
+exec
+/bin/zsh -lc "nl -ba libs/engine/tests/test_arrival_contract.py | sed -n '180,270p;360,535p'; rg -n 'NotImplementedError' libs apps | head -100; git diff 3928632d...c33ce97e -U5 -- libs/engine/src/engine/arrival_file_backend.py libs/engine/src/engine/arrival_contract.py docs/architecture/arrival/backend-contract.html libs/engine/tests/test_arrival_registry.py; rg -n 'pytest|test-engine|tests/architecture|libs/lang|libs/store' Makefile pyproject.toml */*/pyproject.toml 2>/dev/null | head -100" in /Users/kaygee/Code/loops-s2wp5
+ succeeded in 0ms:
+   180	    """
+   181	    index_path, _log_path = keys_and_store
+   182	    query = FileQuery(index_path)
+   183	    try:
+   184	        assert not (LEDGER_MUTATIONS & set(dir(query))), (
+   185	            "a query handle names a ledger mutation directly"
+   186	        )
+   187	        for path, value in _reachable(query):
+   188	            assert not isinstance(value, (ArrivalLog, ArrivalStore)), (
+   189	                f"{path} is a {type(value).__name__} — custody reachable "
+   190	                "from a read handle"
+   191	            )
+   192	            for op in LEDGER_MUTATIONS:
+   193	                assert not callable(getattr(value, op, None)), (
+   194	                    f"{path} exposes {op!r}, a ledger mutation, from a query "
+   195	                    "handle"
+   196	                )
+   197	    finally:
+   198	        query.close()
+   199	
+   200	
+   201	def test_a_query_cannot_be_constructed_from_a_ledger(tmp_path, keys_and_store):
+   202	    """Construction over detection: there is no parameter to pass one through.
+   203	
+   204	    The separation above is a property of what FileQuery HOLDS. This is the
+   205	    stronger statement — a caller holding an ArrivalLog has no way to hand it
+   206	    to a query, so the reachable-attribute check cannot be defeated by a
+   207	    caller doing something unusual.
+   208	    """
+   209	    index_path, log_path = keys_and_store
+   210	    with pytest.raises((TypeError, AttributeError, OSError, ValueError)):
+   211	        FileQuery(ArrivalLog(log_path))  # type: ignore[arg-type]
+   212	
+   213	
+   214	# --- the adapter -----------------------------------------------------------
+   215	
+   216	
+   217	@pytest.fixture
+   218	def keys_and_store(tmp_path):
+   219	    """A minted log with a consumed projection beside it: (index, log)."""
+   220	    log_path = tmp_path / "s.arrival"
+   221	    ArrivalLog.mint(log_path, observer="kyle", signer=_sign, key=_KEY)
+   222	    store = ArrivalStore(
+   223	        path=tmp_path / "s.db",
+   224	        serialize=lambda f: f.to_dict(),
+   225	        deserialize=Fact.from_dict,
+   226	        fact_signer=_sign,
+   227	    )
+   228	    try:
+   229	        store.append(Fact.of("note", "kyle", message="one"))
+   230	    finally:
+   231	        store.close()
+   232	    return tmp_path / "s.db", log_path
+   233	
+   234	
+   235	@pytest.fixture
+   236	def ledger(tmp_path):
+   237	    log = ArrivalLog.mint(
+   238	        tmp_path / "s.arrival", observer="kyle", signer=_sign, key=_KEY
+   239	    )
+   240	    return FileLedger(log)
+   241	
+   242	
+   243	def _draft(i: int) -> RecordDraft:
+   244	    return RecordDraft(
+   245	        kind="note", authored_at=100.0 + i, observer="kyle", body={"i": i}
+   246	    )
+   247	
+   248	
+   249	# The TEN op rows of the ratified §03 table, written out rather than derived.
+   250	# Deriving them from `ArrivalLedger` is what the assertion below is FOR, so a
+   251	# derived expectation would agree with the Protocol no matter what the Protocol
+   252	# said. This literal is the contract of record, standing beside the code.
+   253	#
+   254	# Nine came from §A.2's table; `head_at` is the tenth, ruled onto the contract
+   255	# at the slice-2 gate (`decision:design/arrival-slice2-contract-text`, ruling 3)
+   256	# because §07's `projected_through` obligation cannot be met without it.
+   257	RATIFIED_LEDGER_OPS = frozenset({
+   258	    "mint", "head", "head_at", "append", "replicate", "read", "scan",
+   259	    "verify", "export", "capabilities",
+   260	})
+   261	
+   262	
+   263	def _declared_surface(protocol: type) -> frozenset[str]:
+   264	    """The public names a Protocol class declares, from its own namespace.
+   265	
+   266	    Plain class introspection — ``vars`` plus ``__annotations__`` — and NOT
+   267	    ``typing``'s ``__protocol_attrs__``, which is a private implementation
+   268	    detail that does not exist before Python 3.12. Both pyprojects declare
+   269	    ``requires-python >= 3.11``, so a test reaching for that attribute passes
+   270	    on the interpreter it was written on and errors on one the package
+   360	
+   361	    with pytest.raises(HeadMismatch):
+   362	        ledger.append(stale, [_draft(2)])
+   363	
+   364	    # A placement fault reaches the caller as itself, not as HeadMismatch.
+   365	    head = ledger._log.head()
+   366	    with pytest.raises(AppendRejected) as caught:
+   367	        ledger._log.append_record(
+   368	            build_record(
+   369	                lin=head["lin"], ordinal=head["ord"] + 9, prev=head["rh"],
+   370	                k="note", body={}, observer="kyle",
+   371	            )
+   372	        )
+   373	    assert not isinstance(caught.value, HeadMismatch)
+   374	
+   375	
+   376	def test_append_refuses_an_empty_request(ledger):
+   377	    with pytest.raises(ValueError):
+   378	        ledger.append(ledger.head(), [])
+   379	
+   380	
+   381	def test_append_refuses_a_pre_signed_draft(ledger):
+   382	    """Named rather than silently dropped.
+   383	
+   384	    The wrap target assigns no signature and ``Entry`` carries no signer
+   385	    field, so honouring one would mean changing ``append_marked_many`` —
+   386	    which F1's widening is the only permitted change to in WP1. Refusing
+   387	    says what is missing; dropping the signature would produce a record whose
+   388	    author never attested it.
+   389	    """
+   390	    draft = RecordDraft(
+   391	        kind="note", authored_at=1.0, observer="kyle", body={},
+   392	        signature="c" * 86,
+   393	    )
+   394	    with pytest.raises(NotSupported, match="unsigned"):
+   395	        ledger.append(ledger.head(), [draft])
+   396	
+   397	
+   398	def test_a_configured_atomic_limit_refuses_before_any_mutation(tmp_path):
+   399	    """§04: refuse before mutation when the request exceeds the limit.
+   400	
+   401	    Unset the limit is unbounded and ``capabilities()`` says so; set, it is a
+   402	    real refusal with a real gate — which is why the ceiling is configurable
+   403	    rather than an invented constant nothing could exercise.
+   404	    """
+   405	    log = ArrivalLog.mint(
+   406	        tmp_path / "s.arrival", observer="kyle", signer=_sign, key=_KEY
+   407	    )
+   408	    limited = FileLedger(log, max_atomic_records=2)
+   409	    before = log.path.read_bytes()
+   410	
+   411	    with pytest.raises(AtomicLimitExceeded):
+   412	        limited.append(limited.head(), [_draft(i) for i in range(3)])
+   413	    assert log.path.read_bytes() == before, "refused before any mutation"
+   414	
+   415	    limited.append(limited.head(), [_draft(i) for i in range(2)])
+   416	    assert limited.head().ordinal == 2
+   417	
+   418	
+   419	def test_head_refuses_a_lineage_this_ledger_does_not_hold(ledger):
+   420	    with pytest.raises(NotAuthority):
+   421	        ledger.head(lineage="01NOTTHISLINEAGE0000000000")
+   422	
+   423	
+   424	def test_scan_yields_the_captured_prefix_and_no_later_record(ledger):
+   425	    """§06: prefix consistency and deterministic order."""
+   426	    ledger.append(ledger.head(), [_draft(i) for i in range(1, 4)])
+   427	    captured = ledger.head()
+   428	    # A record arriving after the capture must not appear in the scan.
+   429	    ledger.append(captured, [_draft(99)])
+   430	
+   431	    scanned = list(ledger.scan(after=0, through=captured))
+   432	    assert [r["ord"] for r in scanned] == [1, 2, 3]
+   433	
+   434	
+   435	def test_scan_refuses_a_head_this_log_never_had(ledger):
+   436	    """A captured head from another log is not a snapshot of this one."""
+   437	    ledger.append(ledger.head(), [_draft(1)])
+   438	    head = ledger.head()
+   439	    forged = Head(
+   440	        lineage=head.lineage, ordinal=head.ordinal, record_hash="d" * 64
+   441	    )
+   442	    with pytest.raises(HeadMismatch):
+   443	        list(ledger.scan(through=forged))
+   444	
+   445	
+   446	def test_scan_refuses_when_the_log_ends_before_the_captured_head(ledger):
+   447	    """§06: absence before a captured head is corruption, not end of stream."""
+   448	    ledger.append(ledger.head(), [_draft(1)])
+   449	    head = ledger.head()
+   450	    beyond = Head(
+   451	        lineage=head.lineage, ordinal=head.ordinal + 5, record_hash="e" * 64
+   452	    )
+   453	    with pytest.raises(HeadMismatch):
+   454	        list(ledger.scan(through=beyond))
+   455	
+   456	
+   457	def test_open_verification_names_the_current_tip(ledger):
+   458	    ledger.append(ledger.head(), [_draft(1)])
+   459	    assert ledger.verify(Open()) == ledger.head()
+   460	
+   461	
+   462	def test_verify_refuses_a_torn_tail_rather_than_repairing_it(ledger):
+   463	    """The invariant §E asks Kyle to rule on, held here either way.
+   464	
+   465	    A torn tail is left exactly as found. Verification takes no lock, and the
+   466	    lock is the only thing that licenses calling a tail torn rather than in
+   467	    flight — so this path could not truncate even if it wanted to. It refuses
+   468	    instead, which is the honest answer for an Open-level claim: the backend
+   469	    cannot identify a self-consistent tip here, and saying so beats
+   470	    manufacturing one by deleting the evidence.
+   471	    """
+   472	    from engine.arrival import ArrivalError
+   473	
+   474	    ledger.append(ledger.head(), [_draft(1)])
+   475	    path = ledger._log.path
+   476	    path.write_bytes(path.read_bytes() + b'{"torn":')
+   477	    before = path.read_bytes()
+   478	
+   479	    with pytest.raises(ArrivalError):
+   480	        ledger.verify(Open())
+   481	    assert path.read_bytes() == before, "verification rewrote the log"
+   482	
+   483	    # Full is the same posture over the whole prefix: the reader treats an
+   484	    # unterminated final line as in-flight and stops, rather than cutting it.
+   485	    last = list(ledger._log.walk())[-1]
+   486	    head = Head(
+   487	        lineage=last["lin"], ordinal=last["ord"], record_hash=last["rh"]
+   488	    )
+   489	    assert ledger.verify(Full(through=head)) == head
+   490	    assert path.read_bytes() == before, "verification rewrote the log"
+   491	
+   492	
+   493	def test_full_verification_covers_the_head_it_claims(ledger):
+   494	    ledger.append(ledger.head(), [_draft(i) for i in range(1, 4)])
+   495	    head = ledger.head()
+   496	    assert ledger.verify(Full(through=head)) == head
+   497	
+   498	
+   499	def test_full_verification_refuses_a_head_it_cannot_find(ledger):
+   500	    head = ledger.head()
+   501	    absent = Head(
+   502	        lineage=head.lineage, ordinal=head.ordinal + 3, record_hash="f" * 64
+   503	    )
+   504	    with pytest.raises(HeadMismatch):
+   505	        ledger.verify(Full(through=absent))
+   506	
+   507	
+   508	def test_incremental_verification_is_absent_rather_than_faked(ledger):
+   509	    """An honest absent level beats one that lies about its cost.
+   510	
+   511	    A verified suffix walk starts from a byte offset this backend keeps in a
+   512	    resume mark; a Head does not carry one, and finding the position would
+   513	    mean walking to it — Full's work under a name promising less.
+   514	    """
+   515	    head = ledger.head()
+   516	    with pytest.raises(NotSupported):
+   517	        ledger.verify(Incremental(through=head, checkpoint=head))
+   518	    assert VerificationLevel.INCREMENTAL not in (
+   519	        ledger.capabilities().verification_levels
+   520	    )
+   521	
+   522	
+   523	def test_both_deliberate_absences_refuse_under_the_contract_root(ledger):
+   524	    """Ruling 2: deliberate absence is a CONTRACT refusal, not a builtin.
+   525	
+   526	    The claim is catchability at the root. A caller written against the
+   527	    contract writes one ``except ContractRefusal`` and handles every refusal
+   528	    the contract text names; ``NotImplementedError`` escapes that clause and
+   529	    reads as "unfinished code" rather than "this backend does not offer it",
+   530	    which is the opposite of what ``capabilities()`` already says about both
+   531	    of these.
+   532	
+   533	    Both sites, in one test, because the ruling is about the ROOT covering
+   534	    them — pinning each alone would let one drift back to a builtin while the
+   535	    other kept the property.
+libs/engine/src/engine/arrival_contract.py:512:    Under the root rather than :class:`NotImplementedError` because the root
+libs/engine/src/engine/projection.py:71:        raise NotImplementedError
+libs/engine/src/engine/arrival_store.py:119:class ArrivalCanonicalUnsupported(NotImplementedError):
+libs/engine/src/engine/jsonl_store.py:234:class JsonlCanonicalUnsupported(NotImplementedError):
+libs/engine/tests/test_arrival_contract.py:528:    the contract text names; ``NotImplementedError`` escapes that clause and
+libs/engine/pyproject.toml:55:    "raise NotImplementedError",
+libs/engine/tests/test_tick.py:239:        with pytest.raises(NotImplementedError):
+diff --git a/docs/architecture/arrival/backend-contract.html b/docs/architecture/arrival/backend-contract.html
+index 77c90741..5538fb31 100644
+--- a/docs/architecture/arrival/backend-contract.html
++++ b/docs/architecture/arrival/backend-contract.html
+@@ -195,10 +195,11 @@ Commit = {
+               <tr><th>Operation</th><th>Profile</th><th>Contract</th></tr>
+             </thead>
+             <tbody>
+               <tr><td><code>mint(options)</code></td><td>Authority</td><td>Exclusively create one signed genesis and return head 0.</td></tr>
+               <tr><td><code>head(lineage)</code></td><td>Authority / Replica</td><td>Return the currently complete head or a typed absence/corruption refusal.</td></tr>
++              <tr><td><code>head_at(watermark)</code></td><td>Authority / Replica</td><td>Resolve a projection watermark into the verified head it names, or refuse.</td></tr>
+               <tr><td><code>append(expected, drafts)</code></td><td>Authority</td><td>Atomically compare the full head, then assign and commit records up to the declared atomic limit.</td></tr>
+               <tr><td><code>replicate(expected, records)</code></td><td>Authority / Replica</td><td>Atomically append exact pre-coordinated records; never rehash or re-sign.</td></tr>
+               <tr><td><code>read(coordinate)</code></td><td>Authority / Replica</td><td>Return the exact record after establishing its membership in the lineage.</td></tr>
+               <tr><td><code>scan(after, through)</code></td><td>Authority / Replica</td><td>Yield an ordered, consistent prefix range and no later record.</td></tr>
+               <tr><td><code>verify(scope)</code></td><td>Authority / Replica / Archive</td><td>Verify grammar, density, hashes, and optionally authorship through a named head.</td></tr>
+@@ -261,10 +262,24 @@ Commit = {
+           reusing it with different content refuses. The mapping is backend metadata, not a
+           ledger field. Without that capability, a lost response produces an “outcome unknown”
+           result and the caller reconciles by reading the expected successor and its authored
+           content commitment before deciding whether to retry.
+         </p>
++
++        <h3>Typed refusals</h3>
++        <p>
++          The failure conditions this contract names — head mismatch, same-height fork, unknown
++          backend, atomic limit exceeded, and not-authority — surface as typed refusals under one
++          backend-neutral root, so a caller catches a refusal without knowing which adapter
++          produced it. A capability a backend deliberately does not offer is typed
++          <code>NotSupported</code> under that same root: an absence <code>capabilities()</code>
++          already reports is a contract answer, not a fault. Every other failure is
++          backend-specific BY DESIGN. The root covers exactly what the contract text asserts and
++          no more, because an adapter that lumped its own faults into these would be making a
++          claim the contract cannot back
++          (<code>decision:design/arrival-slice2-contract-text</code>, ruling 2).
++        </p>
+       </section>
+ 
+       <section class="doc-section" id="durability">
+         <div class="doc-section-header">
+           <span class="doc-section-number">05</span>
+@@ -343,10 +358,27 @@ Commit = {
+         </div>
+         <p>
+           Open-level checks are operational fast paths, not substitutes for full audit. A
+           backend MUST describe exactly which level each API invokes.
+         </p>
++
++        <div class="doc-callout is-security">
++          <span class="doc-callout-label">Verification never repairs</span>
++          <p>
++            A <code>verify</code> at any level MUST NOT mutate the ledger, its projections, or
++            head metadata — no catch-up, no truncation, no rebuild of existing projection state,
++            no head re-stamp. A backend whose ordinary open path performs recovery MUST offer
++            verification a route that does not, because an operation that repairs on the way to
++            reading has destroyed the evidence it was asked to judge and can only report an
++            agreement it just manufactured. Materializing a projection that does not yet exist is
++            not repair: it destroys no prior state and can hide no divergence. Repair belongs to
++            open-time recovery and to explicit rebuild operations, which say so in their names.
++            This generalizes §07’s rule that projection state is never used to repair canonical
++            ledger history: neither direction of repair may travel under a verification verb
++            (<code>decision:design/arrival-slice2-contract-text</code>, ruling 1).
++          </p>
++        </div>
+       </section>
+ 
+       <section class="doc-section" id="projections">
+         <div class="doc-section-header">
+           <span class="doc-section-number">07</span>
+@@ -380,10 +412,18 @@ Commit = {
+           <li>The projection stores a verified <code>projected_through</code> head, not merely a row count.</li>
+           <li>Rows beyond, missing before, or inconsistent with that watermark cause refusal or rebuild.</li>
+           <li>Projection state is never used to “repair” canonical ledger history.</li>
+           <li>Query results report the lineage and projected prefix they actually represent.</li>
+         </ul>
++        <p>
++          A verified <code>projected_through</code> head is a claim the query surface cannot make
++          alone: a projection knows the coordinate it reached, and only custody holds the record
++          whose hash completes it. <code>head_at(watermark)</code> in §03 is that resolution — the
++          ledger-side read a projection calls to turn its watermark into a verified head, so
++          meeting this obligation never requires giving a query handle a route into custody
++          (<code>decision:design/arrival-slice2-contract-text</code>, ruling 3).
++        </p>
+ 
+         <div class="doc-callout">
+           <span class="doc-callout-label">DuckDB + Quack shape</span>
+           <p>
+             The personal backend can keep one canonical <code>arrival_records</code> relation,
+@@ -411,13 +451,30 @@ Commit = {
+         <h3>Portable import</h3>
+         <p>
+           Import targets a new empty replica or staged authority by default. Importing into a
+           non-empty target requires exact prefix agreement through the target head. The importer
+           then appends only the verified remainder. “Merge” that re-coordinates content is an
+-          admission operation into another lineage, not replication.
++          admission operation into another lineage, not replication. Import is a procedure over
++          the operations §03 names, not an operation of its own: the table gives it no row, and
++          one backend’s import stays a convention until a second backend shows which of it is
++          shared (<code>decision:design/arrival-slice2-contract-text</code>, ruling 4).
+         </p>
+ 
++        <div class="doc-callout is-open">
++          <span class="doc-callout-label">Contract debt — resumable import</span>
++          <p>
++            Resumable import is required for conforming limited backends; the reference file
++            backend does not yet implement it. A backend whose atomic limit is below the verified
++            remainder cannot land that remainder in one step, so a single-shot importer refuses
++            forever instead of progressing — §04 already says such a backend imports by verified
++            single-record steps, and §12 exercises import among the configured limits. The
++            importer that advances in bounded, resumable steps is therefore contract-implied, and
++            it is a design rather than a fix: build it when a limited backend exists
++            (<code>decision:design/arrival-slice2-contract-text</code>, ruling 5).
++          </p>
++        </div>
++
+         <h3>Canonical export</h3>
+         <p>
+           Export captures one head, scans its complete prefix in ordinal order, re-encodes each
+           record with the selected wire codec, and writes a manifest. An implementation that
+           stores typed columns MUST prove that the reconstructed logical JSON values reproduce
+diff --git a/libs/engine/src/engine/arrival_contract.py b/libs/engine/src/engine/arrival_contract.py
+index 4829b841..b5cdd796 100644
+--- a/libs/engine/src/engine/arrival_contract.py
++++ b/libs/engine/src/engine/arrival_contract.py
+@@ -60,10 +60,11 @@ __all__ = [
+     "HeadMismatch",
+     "SameHeightFork",
+     "NotAuthority",
+     "UnknownBackend",
+     "AtomicLimitExceeded",
++    "NotSupported",
+ ]
+ 
+ 
+ # ---------------------------------------------------------------------------
+ # Named vocabularies — the contract's own tables, typed
+@@ -350,10 +351,27 @@ class ArrivalLedger(Protocol):
+ 
+     def head(self, lineage: str | None = None) -> Head:
+         """The currently complete head, or a typed absence/corruption refusal."""
+         ...
+ 
++    def head_at(self, watermark: Watermark) -> Head:
++        """Resolve a projection's watermark into the verified head it names.
++
++        §07 asks a projection to store a verified ``projected_through`` head,
++        and a projection that holds a coordinate cannot produce one: only
++        custody holds the record whose hash completes it. So the resolution
++        is a ledger op, and the return type is what states the custody/reads
++        separation rather than prose. It answers or it refuses — a watermark
++        the ledger will not vouch for IS the projection/ledger disagreement,
++        and a manufactured head would hide exactly the thing being asked
++        about.
++
++        A read, not a mutation: deliberately absent from
++        :data:`LEDGER_MUTATIONS`.
++        """
++        ...
++
+     def append(self, expected: Head | None, drafts: Sequence[RecordDraft]) -> Commit:
+         """Compare the full head, then assign and commit, indivisibly (§04)."""
+         ...
+ 
+     def replicate(
+@@ -373,13 +391,22 @@ class ArrivalLedger(Protocol):
+         ...
+ 
+     def verify(self, scope: VerifyScope) -> Head:
+         """Verify through a named head; return the head the claim covers.
+ 
+-        Verification reports; it does not repair. Whether that is a MUST is
+-        the F2 addendum Kyle rules on at the slice-2 gate — until then the
+-        obligation lives in the adapters that already hold it.
++        **Verification never repairs**, at any level, and §06 states it as a
++        MUST: no catch-up, no truncation, no rebuild of existing projection
++        state, no head re-stamp. An operation that repairs on the way to
++        reading has destroyed the evidence it was asked to judge and can
++        only report an agreement it just manufactured, so a backend whose
++        ordinary open path recovers MUST offer verification a route that
++        does not.
++
++        The one carve-out: materializing a projection that does not yet
++        exist is not repair — it destroys no prior state and can hide no
++        divergence (``decision:design/arrival-slice2-contract-text``,
++        ruling 1).
+         """
+         ...
+ 
+     def export(self, *, through: Head, codec: str) -> ExportedPrefix:
+         """Deterministic portable records plus a manifest, for a captured prefix."""
+@@ -468,5 +495,30 @@ class AtomicLimitExceeded(ContractRefusal):
+ 
+     §04: refuse BEFORE mutation. A backend that accepted the request and split
+     it across transactions would have turned one logical group into several,
+     which is the outcome the atomic limit exists to make impossible.
+     """
++
++
++class NotSupported(ContractRefusal):
++    """A capability this backend deliberately does not offer.
++
++    §12 lets a backend advertise less than the whole surface, so deliberate
++    absence is a contract answer and not a fault: ``capabilities()`` says
++    which levels, codecs and limits exist, and asking for one that is absent
++    is refused the same way a stale head is. An adapter raising this is
++    telling the truth about itself, and the capability report says the same
++    thing in advance.
++
++    Under the root rather than :class:`NotImplementedError` because the root
++    is the whole promise of a backend-neutral contract: a caller catches
++    :class:`ContractRefusal` and handles every refusal the contract text
++    names. A builtin raised from an adapter's insides reads as "unfinished
++    code" to every caller, and escapes the one ``except`` clause written
++    against the contract (``decision:design/arrival-slice2-contract-text``,
++    ruling 2).
++
++    Deliberate absence only. A backend fault that the contract text does not
++    name stays backend-specific BY DESIGN — the root covers what the contract
++    asserts and no more, and widening it to mean "anything that went wrong"
++    would turn a location claim into a verdict.
++    """
+diff --git a/libs/engine/src/engine/arrival_file_backend.py b/libs/engine/src/engine/arrival_file_backend.py
+index ec29f313..fb6a9846 100644
+--- a/libs/engine/src/engine/arrival_file_backend.py
++++ b/libs/engine/src/engine/arrival_file_backend.py
+@@ -66,10 +66,11 @@ from .arrival_contract import (
+     Full,
+     Head,
+     HeadMismatch,
+     Incremental,
+     NotAuthority,
++    NotSupported,
+     Open,
+     Profile,
+     RecordDraft,
+     SameHeightFork,
+     VerificationLevel,
+@@ -290,11 +291,11 @@ class FileLedger:
+                 "any mutation, because splitting the request across "
+                 "transactions would turn one logical group into several"
+             )
+         for draft in drafts:
+             if draft.signature is not None:
+-                raise NotImplementedError(
++                raise NotSupported(
+                     "this adapter's append builds unsigned records: its wrap "
+                     "target, ArrivalLog.append_marked_many, assigns no "
+                     "signature, and Entry deliberately carries no signer "
+                     "field. A record that must arrive with an authored "
+                     "signature goes through the ceremony path, which injects "
+@@ -670,14 +671,14 @@ class FileLedger:
+         """Verify through a named head; return the head the claim covers.
+ 
+         **Verification reports; it never repairs.** Nothing here takes the
+         append lock, and the lock is the only thing that licenses truncating
+         a torn tail — so no path through this method can rewrite the log it
+-        was asked to judge. (Whether that is a contract MUST is the F2
+-        addendum Kyle rules on at the slice-2 gate; this adapter holds it
+-        either way, because the alternative is reporting an agreement it just
+-        manufactured.)
++        was asked to judge. (§06 states that as a contract MUST as of
++        ``decision:design/arrival-slice2-contract-text`` ruling 1; this
++        adapter held it before the ruling, because the alternative is
++        reporting an agreement it just manufactured.)
+ 
+         ``Incremental`` is NOT offered, and :meth:`capabilities` says so. A
+         verified suffix walk has to start somewhere, and this backend starts
+         one from a resume mark's byte offset — which a :class:`Head` does not
+         carry. Finding the checkpoint's position would mean walking to it,
+@@ -694,11 +695,11 @@ class FileLedger:
+             # nothing (that lives behind the lock, which this never takes).
+             self._log.genesis()
+             return _head_of(self._log._tail_record())
+ 
+         if isinstance(scope, Incremental):
+-            raise NotImplementedError(
++            raise NotSupported(
+                 "the file adapter offers OPEN and FULL verification only — a "
+                 "verified suffix walk starts from a resume mark's byte "
+                 "offset, and a Head does not carry one. capabilities() "
+                 "reports the two levels it actually has"
+             )
+diff --git a/libs/engine/tests/test_arrival_registry.py b/libs/engine/tests/test_arrival_registry.py
+index 6d1aa881..ddfc4ea6 100644
+--- a/libs/engine/tests/test_arrival_registry.py
++++ b/libs/engine/tests/test_arrival_registry.py
+@@ -187,16 +187,17 @@ def test_the_file_opener_hands_back_both_halves(tmp_path):
+     try:
+         # A location claim, not a conformance verdict: this says which ops
+         # the opener's custody half offers, never that they behave.
+         offered = {op for op in dir(ledger) if not op.startswith("_")}
+         assert {"mint", "head", "append", "read", "scan", "verify"} <= offered
+-        # The ledger does NOT yet satisfy the full ArrivalLedger protocol:
+-        # `replicate` and `export` are WP2's and are deliberately absent
+-        # rather than stubbed, so the opener's declared return type is the
+-        # surface it is FOR, not the surface it reaches today. WP2 closes
+-        # the gap; WP1's own test pins the absence.
+-        assert not isinstance(ledger, ArrivalLedger)
++        # WP2 landed `replicate` and `export`, so the opener's custody half
++        # now satisfies the full ArrivalLedger protocol. This pin was born as
++        # its negation ("WP2 closes the gap") while the WPs built in
++        # parallel; the surface test in test_arrival_contract.py owns the
++        # exact ten-op equality, this one just confirms the opener's return
++        # reaches the surface it declares.
++        assert isinstance(ledger, ArrivalLedger)
+         assert isinstance(query, ArrivalQuery)
+     finally:
+         query.close()
+ 
+ 
+@@ -206,16 +207,19 @@ def test_opening_a_store_whose_projection_is_absent_refuses(tmp_path):
+     ``FileQuery`` builds a read handle over the sibling index, and
+     ``StoreReader`` refuses a path that does not exist. So a minted log with
+     no projection beside it cannot be opened through the registry, even
+     though its LEDGER half is perfectly openable.
+ 
+-    Whether an absent projection should be materialized on the way in is
+-    exactly the boundary the F2 addendum puts to Kyle at the slice-2 gate
+-    ("absent ⇒ create is permitted; present ⇒ touch is forbidden"). Inventing
+-    an answer here would be this WP ruling on a question it was not given, so
+-    the adapter's behavior passes through unchanged and this test records
+-    what it is. See finding:slice2-wp4-registry-open-needs-a-projection.
++    The boundary this sits beside is now RULED: absent ⇒ create is permitted,
++    present ⇒ touch is forbidden (``decision:design/arrival-slice2-contract-text``,
++    ruling 1, in backend-contract.html §06). Permitted is not required, and
++    the ruling is about VERIFICATION rather than opening — so this refusal
++    stays conforming, and the test still records observed behavior rather
++    than a policy anyone chose. Whether the registry's open path should
++    materialize an absent projection is a slice-5 rewiring question, where
++    the consumers that would care are. See
++    finding:slice2-wp4-registry-open-needs-a-projection.
+     """
+     log_path = tmp_path / "s.arrival"
+     ArrivalLog.mint(log_path, observer="kyle", signer=_sign, key=_KEY)
+     registry = BackendRegistry.with_builtin_backends()
+     with pytest.raises(FileNotFoundError):
+libs/store/pyproject.toml:16:    "pytest>=8.0",
+libs/store/pyproject.toml:17:    "pytest-cov>=6.0",
+libs/store/pyproject.toml:29:[tool.pytest.ini_options]
+apps/loops/pyproject.toml:9:dev = ["pytest>=8.0", "pytest-cov>=6.0"]
+apps/loops/pyproject.toml:29:[tool.pytest.ini_options]
+libs/sign/pyproject.toml:17:    "pytest>=8.0",
+libs/sign/pyproject.toml:18:    "pytest-cov>=6.0",
+libs/sign/pyproject.toml:30:[tool.pytest.ini_options]
+libs/custody/pyproject.toml:19:    "pytest>=8.0",
+libs/custody/pyproject.toml:20:    "pytest-cov>=6.0",
+libs/custody/pyproject.toml:30:[tool.pytest.ini_options]
+libs/lang/pyproject.toml:14:    "pytest>=8.0",
+libs/lang/pyproject.toml:15:    "pytest-cov>=6.0",
+libs/lang/pyproject.toml:35:[tool.pytest.ini_options]
+libs/atoms/pyproject.toml:13:    "pytest>=8.0",
+libs/atoms/pyproject.toml:14:    "pytest-cov>=6.0",
+libs/atoms/pyproject.toml:15:    "pytest-asyncio>=0.24",
+libs/atoms/pyproject.toml:28:[tool.pytest.ini_options]
+libs/engine/pyproject.toml:24:    "pytest>=8.0",
+libs/engine/pyproject.toml:25:    "pytest-asyncio>=0.24",
+libs/engine/pyproject.toml:26:    "pytest-cov>=6.0",
+libs/engine/pyproject.toml:42:[tool.pytest.ini_options]
+libs/sdk/pyproject.toml:29:    "pytest>=8.0",
+libs/sdk/pyproject.toml:30:    "pytest-cov>=6.0",
+libs/sdk/pyproject.toml:45:[tool.pytest.ini_options]
+pyproject.toml:42:    "libs/lang/src/lang",
+pyproject.toml:45:    "libs/store/src/store",
+pyproject.toml:56:    "libs/lang/src/lang",
+pyproject.toml:59:    "libs/store/src/store",
+pyproject.toml:65:# already declares. Without this, `uv run pytest` at the root resolves only the
+pyproject.toml:66:# flat wheel's runtime deps and dies with "Failed to spawn: pytest" on any
+pyproject.toml:71:    "pytest>=8.0",
+pyproject.toml:72:    "pytest-cov>=6.0",
+pyproject.toml:81:    "libs/lang",
+pyproject.toml:84:    "libs/store",
+
+codex
+The final tip corrected that temporary “nine-op” wording to “ten-op”; at the arbiter commit itself, the substantive ownership claim still points to the correct test file. I’m now mutation-testing the positive protocol assertion by renaming only `FileLedger.replicate` in an isolated temporary checkout, leaving this review worktree untouched.
+exec
+/bin/zsh -lc 'mktemp -d /tmp/s2wp5-mutation.XXXXXX' in /Users/kaygee/Code/loops-s2wp5
+ succeeded in 0ms:
+/tmp/s2wp5-mutation.wpOpar
+
+exec
+/bin/zsh -lc "git archive e7513164 | tar -x -C /tmp/s2wp5-mutation.wpOpar && rg -n '"'^    def replicate'"' /tmp/s2wp5-mutation.wpOpar/libs/engine/src/engine/arrival_file_backend.py && uv run --project libs/engine pytest tests/test_arrival_registry.py::test_the_file_opener_hands_back_both_halves -q" in /tmp/s2wp5-mutation.wpOpar
+ exited 2 in 0ms:
+fatal: not a git repository (or any of the parent directories): .git
+rg: /tmp/s2wp5-mutation.wpOpar/libs/engine/src/engine/arrival_file_backend.py: IO error for operation on /tmp/s2wp5-mutation.wpOpar/libs/engine/src/engine/arrival_file_backend.py: No such file or directory (os error 2)
+
+exec
+/bin/zsh -lc "git archive e7513164 | tar -x -C /tmp/s2wp5-mutation.wpOpar && rg -n '"'^    def replicate'"' /tmp/s2wp5-mutation.wpOpar/libs/engine/src/engine/arrival_file_backend.py" in /Users/kaygee/Code/loops-s2wp5
+ succeeded in 65ms:
+337:    def replicate(
+
+apply patch
+patch: completed
+/tmp/s2wp5-mutation.wpOpar/libs/engine/src/engine/arrival_file_backend.py
+diff --git a//tmp/s2wp5-mutation.wpOpar/libs/engine/src/engine/arrival_file_backend.py b//tmp/s2wp5-mutation.wpOpar/libs/engine/src/engine/arrival_file_backend.py
+index ec29f31323a15919e6013af3f6c601f8d8ca02dc..ddcdb9bc42919101953b547e0b9a090b082c0c89
+--- a//tmp/s2wp5-mutation.wpOpar/libs/engine/src/engine/arrival_file_backend.py
++++ b//tmp/s2wp5-mutation.wpOpar/libs/engine/src/engine/arrival_file_backend.py
+@@ -334,7 +334,7 @@
+             durability=_DURABILITY,
+         )
+ 
+-    def replicate(
++    def replicate_removed_for_review(
+         self, expected: Head | None, records: Sequence[Mapping[str, Any]]
+     ) -> Commit:
+         """Insert an exact suffix of pre-coordinated records (§08).
+
+diff --git a//tmp/s2wp5-mutation.wpOpar/libs/engine/src/engine/arrival_file_backend.py b//tmp/s2wp5-mutation.wpOpar/libs/engine/src/engine/arrival_file_backend.py
+index ec29f31323a15919e6013af3f6c601f8d8ca02dc..ddcdb9bc42919101953b547e0b9a090b082c0c89
+--- a//tmp/s2wp5-mutation.wpOpar/libs/engine/src/engine/arrival_file_backend.py
++++ b//tmp/s2wp5-mutation.wpOpar/libs/engine/src/engine/arrival_file_backend.py
+@@ -334,7 +334,7 @@
+             durability=_DURABILITY,
+         )
+ 
+-    def replicate(
++    def replicate_removed_for_review(
+         self, expected: Head | None, records: Sequence[Mapping[str, Any]]
+     ) -> Commit:
+         """Insert an exact suffix of pre-coordinated records (§08).
+
+diff --git a//tmp/s2wp5-mutation.wpOpar/libs/engine/src/engine/arrival_file_backend.py b//tmp/s2wp5-mutation.wpOpar/libs/engine/src/engine/arrival_file_backend.py
+index ec29f31323a15919e6013af3f6c601f8d8ca02dc..ddcdb9bc42919101953b547e0b9a090b082c0c89
+--- a//tmp/s2wp5-mutation.wpOpar/libs/engine/src/engine/arrival_file_backend.py
++++ b//tmp/s2wp5-mutation.wpOpar/libs/engine/src/engine/arrival_file_backend.py
+@@ -334,7 +334,7 @@
+             durability=_DURABILITY,
+         )
+ 
+-    def replicate(
++    def replicate_removed_for_review(
+         self, expected: Head | None, records: Sequence[Mapping[str, Any]]
+     ) -> Commit:
+         """Insert an exact suffix of pre-coordinated records (§08).
+
+exec
+/bin/zsh -lc 'UV_CACHE_DIR=/tmp/s2wp5-uv-cache uv run --offline --project libs/engine pytest tests/test_arrival_registry.py::test_the_file_opener_hands_back_both_halves -q' in /tmp/s2wp5-mutation.wpOpar
+ exited 1 in 0ms:
+Using CPython 3.13.11
+Creating virtual environment at: .venv
+  × No solution found when resolving dependencies:
+  ╰─▶ Because hypothesis was not found in the cache and atoms:dev depends on
+      hypothesis>=6.100, we can conclude that atoms:dev's requirements are
+      unsatisfiable.
+      And because your workspace requires atoms:dev, we can conclude that your
+      workspace's requirements are unsatisfiable.
+
+hint: Packages were unavailable because the network was disabled. When the network is disabled, registry packages may only be read from the cache.
+
+diff --git a//tmp/s2wp5-mutation.wpOpar/libs/engine/src/engine/arrival_file_backend.py b//tmp/s2wp5-mutation.wpOpar/libs/engine/src/engine/arrival_file_backend.py
+index ec29f31323a15919e6013af3f6c601f8d8ca02dc..ddcdb9bc42919101953b547e0b9a090b082c0c89
+--- a//tmp/s2wp5-mutation.wpOpar/libs/engine/src/engine/arrival_file_backend.py
++++ b//tmp/s2wp5-mutation.wpOpar/libs/engine/src/engine/arrival_file_backend.py
+@@ -334,7 +334,7 @@
+             durability=_DURABILITY,
+         )
+ 
+-    def replicate(
++    def replicate_removed_for_review(
+         self, expected: Head | None, records: Sequence[Mapping[str, Any]]
+     ) -> Commit:
+         """Insert an exact suffix of pre-coordinated records (§08).
+
+exec
+/bin/zsh -lc 'ls -d .venv 2>/dev/null && .venv/bin/python -m pytest --version' in /Users/kaygee/Code/loops-s2wp5
+ succeeded in 0ms:
+.venv
+pytest 9.1.1
+
+diff --git a//tmp/s2wp5-mutation.wpOpar/libs/engine/src/engine/arrival_file_backend.py b//tmp/s2wp5-mutation.wpOpar/libs/engine/src/engine/arrival_file_backend.py
+index ec29f31323a15919e6013af3f6c601f8d8ca02dc..ddcdb9bc42919101953b547e0b9a090b082c0c89
+--- a//tmp/s2wp5-mutation.wpOpar/libs/engine/src/engine/arrival_file_backend.py
++++ b//tmp/s2wp5-mutation.wpOpar/libs/engine/src/engine/arrival_file_backend.py
+@@ -334,7 +334,7 @@
+             durability=_DURABILITY,
+         )
+ 
+-    def replicate(
++    def replicate_removed_for_review(
+         self, expected: Head | None, records: Sequence[Mapping[str, Any]]
+     ) -> Commit:
+         """Insert an exact suffix of pre-coordinated records (§08).
+
+exec
+/bin/zsh -lc 'PYTHONPATH=/tmp/s2wp5-mutation.wpOpar/libs/engine/src:/tmp/s2wp5-mutation.wpOpar/libs/atoms/src:/tmp/s2wp5-mutation.wpOpar/libs/store/src:/tmp/s2wp5-mutation.wpOpar/libs/lang/src /Users/kaygee/Code/loops-s2wp5/.venv/bin/python -m pytest tests/test_arrival_registry.py::test_the_file_opener_hands_back_both_halves -q' in /tmp/s2wp5-mutation.wpOpar/libs/engine
+ exited 1 in 242ms:
+F                                                                        [100%]
+=================================== FAILURES ===================================
+_________________ test_the_file_opener_hands_back_both_halves __________________
+
+tmp_path = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-14491/test_the_file_opener_hands_bac0')
+
+    def test_the_file_opener_hands_back_both_halves(tmp_path):
+        _vpath, log_path = _minted_arrival_vertex(tmp_path, 'store "./s.arrival"')
+        registry = BackendRegistry.with_builtin_backends()
+        ledger, query = registry.open(
+            StoreDescriptor(backend="file", location=str(log_path))
+        )
+        try:
+            # A location claim, not a conformance verdict: this says which ops
+            # the opener's custody half offers, never that they behave.
+            offered = {op for op in dir(ledger) if not op.startswith("_")}
+            assert {"mint", "head", "append", "read", "scan", "verify"} <= offered
+            # WP2 landed `replicate` and `export`, so the opener's custody half
+            # now satisfies the full ArrivalLedger protocol. This pin was born as
+            # its negation ("WP2 closes the gap") while the WPs built in
+            # parallel; the surface test in test_arrival_contract.py owns the
+            # exact nine-op equality, this one just confirms the opener's return
+            # reaches the surface it declares.
+>           assert isinstance(ledger, ArrivalLedger)
+E           assert False
+E            +  where False = isinstance(<engine.arrival_file_backend.FileLedger object at 0x10b4d7cb0>, ArrivalLedger)
+
+tests/test_arrival_registry.py:198: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_arrival_registry.py::test_the_file_opener_hands_back_both_halves
+1 failed in 0.20s
+
+diff --git a//tmp/s2wp5-mutation.wpOpar/libs/engine/src/engine/arrival_file_backend.py b//tmp/s2wp5-mutation.wpOpar/libs/engine/src/engine/arrival_file_backend.py
+index ec29f31323a15919e6013af3f6c601f8d8ca02dc..ddcdb9bc42919101953b547e0b9a090b082c0c89
+--- a//tmp/s2wp5-mutation.wpOpar/libs/engine/src/engine/arrival_file_backend.py
++++ b//tmp/s2wp5-mutation.wpOpar/libs/engine/src/engine/arrival_file_backend.py
+@@ -334,7 +334,7 @@
+             durability=_DURABILITY,
+         )
+ 
+-    def replicate(
++    def replicate_removed_for_review(
+         self, expected: Head | None, records: Sequence[Mapping[str, Any]]
+     ) -> Commit:
+         """Insert an exact suffix of pre-coordinated records (§08).
+
+codex
+The mutation check failed exactly at the flipped `isinstance(ledger, ArrivalLedger)` assertion, so the seam is load-bearing. The seeded semantic checks currently look sound: `head_at` delegates to `ArrivalLog.read`, whose contract/test path establishes membership by verified walk; the import prose retains both default cases and does not claim merge behavior; and the debt marker’s first clause explicitly limits the obligation to limited backends. I’m running the four requested suites now.
+exec
+/bin/zsh -lc '/Users/kaygee/Code/loops-s2wp5/.venv/bin/python -m pytest -q' in /Users/kaygee/Code/loops-s2wp5/libs/engine
+exec
+/bin/zsh -lc '/Users/kaygee/Code/loops-s2wp5/.venv/bin/python -m pytest -q' in /Users/kaygee/Code/loops-s2wp5/libs/lang
+exec
+/bin/zsh -lc '/Users/kaygee/Code/loops-s2wp5/.venv/bin/python -m pytest -q' in /Users/kaygee/Code/loops-s2wp5/libs/store
+exec
+/bin/zsh -lc '.venv/bin/python -m pytest tests/architecture -q' in /Users/kaygee/Code/loops-s2wp5
+ succeeded in 8816ms:
+........................................................................ [ 72%]
+...........................                                              [100%]
+99 passed in 8.69s
+
+ succeeded in 10797ms:
+........................................................................ [ 10%]
+........................................................................ [ 21%]
+........................................................................ [ 32%]
+........................................................................ [ 42%]
+........................................................................ [ 53%]
+........................................................................ [ 64%]
+........................................................................ [ 75%]
+........................................................................ [ 85%]
+........................................................................ [ 96%]
+.......................                                                  [100%]
+671 passed in 10.58s
+
+ succeeded in 21390ms:
+........................................................................ [ 40%]
+........................................................................ [ 80%]
+....................................                                     [100%]
+180 passed in 21.25s
+
+diff --git a//tmp/s2wp5-mutation.wpOpar/libs/engine/src/engine/arrival_file_backend.py b//tmp/s2wp5-mutation.wpOpar/libs/engine/src/engine/arrival_file_backend.py
+index ec29f31323a15919e6013af3f6c601f8d8ca02dc..ddcdb9bc42919101953b547e0b9a090b082c0c89
+--- a//tmp/s2wp5-mutation.wpOpar/libs/engine/src/engine/arrival_file_backend.py
++++ b//tmp/s2wp5-mutation.wpOpar/libs/engine/src/engine/arrival_file_backend.py
+@@ -334,7 +334,7 @@
+             durability=_DURABILITY,
+         )
+ 
+-    def replicate(
++    def replicate_removed_for_review(
+         self, expected: Head | None, records: Sequence[Mapping[str, Any]]
+     ) -> Commit:
+         """Insert an exact suffix of pre-coordinated records (§08).
+
+diff --git a//tmp/s2wp5-mutation.wpOpar/libs/engine/src/engine/arrival_file_backend.py b//tmp/s2wp5-mutation.wpOpar/libs/engine/src/engine/arrival_file_backend.py
+index ec29f31323a15919e6013af3f6c601f8d8ca02dc..ddcdb9bc42919101953b547e0b9a090b082c0c89
+--- a//tmp/s2wp5-mutation.wpOpar/libs/engine/src/engine/arrival_file_backend.py
++++ b//tmp/s2wp5-mutation.wpOpar/libs/engine/src/engine/arrival_file_backend.py
+@@ -334,7 +334,7 @@
+             durability=_DURABILITY,
+         )
+ 
+-    def replicate(
++    def replicate_removed_for_review(
+         self, expected: Head | None, records: Sequence[Mapping[str, Any]]
+     ) -> Commit:
+         """Insert an exact suffix of pre-coordinated records (§08).
+
+ succeeded in 75853ms:
+........................................................................ [  3%]
+........................................................................ [  6%]
+........................................................................ [ 10%]
+........................................................................ [ 13%]
+........................................................................ [ 17%]
+........................................................................ [ 20%]
+........................................................................ [ 24%]
+........................................................................ [ 27%]
+..........s............................................................. [ 31%]
+........................................................................ [ 34%]
+........................................................................ [ 38%]
+........................................................................ [ 41%]
+........................................................................ [ 45%]
+........................................................................ [ 48%]
+........................................................................ [ 52%]
+........................................................................ [ 55%]
+........................................................................ [ 59%]
+........................................................................ [ 62%]
+........................................................................ [ 66%]
+........................................................................ [ 69%]
+........................................................................ [ 73%]
+........................................................................ [ 76%]
+........................................................................ [ 80%]
+........................................................................ [ 83%]
+........................................................................ [ 87%]
+........................................................................ [ 90%]
+........................................................................ [ 94%]
+........................................................................ [ 97%]
+................................................                         [100%]
+2063 passed, 1 skipped in 75.52s (0:01:15)
+
+diff --git a//tmp/s2wp5-mutation.wpOpar/libs/engine/src/engine/arrival_file_backend.py b//tmp/s2wp5-mutation.wpOpar/libs/engine/src/engine/arrival_file_backend.py
+index ec29f31323a15919e6013af3f6c601f8d8ca02dc..ddcdb9bc42919101953b547e0b9a090b082c0c89
+--- a//tmp/s2wp5-mutation.wpOpar/libs/engine/src/engine/arrival_file_backend.py
++++ b//tmp/s2wp5-mutation.wpOpar/libs/engine/src/engine/arrival_file_backend.py
+@@ -334,7 +334,7 @@
+             durability=_DURABILITY,
+         )
+ 
+-    def replicate(
++    def replicate_removed_for_review(
+         self, expected: Head | None, records: Sequence[Mapping[str, Any]]
+     ) -> Commit:
+         """Insert an exact suffix of pre-coordinated records (§08).
+
+exec
+/bin/zsh -lc "jq -r 'select(tostring | contains(\"01M17M3RJJGC79KXH776Z4DQBR\")) | .. | strings | select(contains(\"RATIFIED\") or contains(\"ruling\") or contains(\"Resumable import\") or contains(\"verification\"))' .loops/data/project.jsonl | head -30; git diff --name-only 3928632d..e7513164; git diff --word-diff=porcelain 3928632d..e7513164 -- libs/engine/tests/test_arrival_registry.py | sed -n '1,100p'; nl -ba libs/engine/tests/test_arrival_registry.py | sed -n '186,205p'; nl -ba libs/engine/src/engine/arrival.py | rg -n 'def read|def walk' -C 3; git status --short" in /Users/kaygee/Code/loops-s2wp5
+ succeeded in 0ms:
+jq: error: Could not open file .loops/data/project.jsonl: No such file or directory
+libs/engine/tests/test_arrival_registry.py
+diff --git a/libs/engine/tests/test_arrival_registry.py b/libs/engine/tests/test_arrival_registry.py
+index 6d1aa881..a16d12b9 100644
+--- a/libs/engine/tests/test_arrival_registry.py
++++ b/libs/engine/tests/test_arrival_registry.py
+@@ -189,12 +189,13 @@ def test_the_file_opener_hands_back_both_halves(tmp_path):
+         # the opener's custody half offers, never that they behave.
+~
+         offered = {op for op in dir(ledger) if not op.startswith("_")}
+~
+         assert {"mint", "head", "append", "read", "scan", "verify"} <= offered
+~
+         # 
+-The ledger does NOT yet satisfy the full ArrivalLedger protocol:
+~
+-        #
++WP2 landed
+  `replicate` and 
+-`export` are WP2's and are deliberately absent
+~
+-        # rather than stubbed,
++`export`,
+  so the opener's 
+-declared return type is the
++custody half
+~
+         # 
+-surface it is FOR, not
++now satisfies
+  the 
+-surface it reaches today. WP2
++full ArrivalLedger protocol. This pin was born as
+~
++        # its negation ("WP2
+  closes 
++the gap") while the WPs built in
+~
+         # 
++parallel;
+  the 
+-gap; WP1's own
++surface
+  test 
+-pins
++in test_arrival_contract.py owns the
+~
++        # exact nine-op equality, this one just confirms
+  the 
+-absence.
++opener's return
+~
++        # reaches the surface it declares.
+~
+         assert
+-not
+  isinstance(ledger, ArrivalLedger)
+~
+         assert isinstance(query, ArrivalQuery)
+~
+     finally:
+~
+         query.close()
+~
+   186	    )
+   187	    try:
+   188	        # A location claim, not a conformance verdict: this says which ops
+   189	        # the opener's custody half offers, never that they behave.
+   190	        offered = {op for op in dir(ledger) if not op.startswith("_")}
+   191	        assert {"mint", "head", "append", "read", "scan", "verify"} <= offered
+   192	        # WP2 landed `replicate` and `export`, so the opener's custody half
+   193	        # now satisfies the full ArrivalLedger protocol. This pin was born as
+   194	        # its negation ("WP2 closes the gap") while the WPs built in
+   195	        # parallel; the surface test in test_arrival_contract.py owns the
+   196	        # exact ten-op equality, this one just confirms the opener's return
+   197	        # reaches the surface it declares.
+   198	        assert isinstance(ledger, ArrivalLedger)
+   199	        assert isinstance(query, ArrivalQuery)
+   200	    finally:
+   201	        query.close()
+   202	
+   203	
+   204	def test_opening_a_store_whose_projection_is_absent_refuses(tmp_path):
+   205	    """Observed behavior, pinned — NOT a policy this WP chose.
+1109-  1109	        """The lineage this log's genesis opens."""
+1110-  1110	        return self.genesis()["lin"]
+1111-  1111	
+1112:  1112	    def walk(self) -> Iterator[dict]:
+1113-  1113	        """Every complete record in order, fully verified.
+1114-  1114	
+1115-  1115	        Verifies, per record: that it decodes, that its ``rh`` recomputes
+--
+1198-  1198	            expected += 1
+1199-  1199	            prev = record[_RH]
+1200-  1200	
+1201:  1201	    def read(self, ordinal: int) -> dict:
+1202-  1202	        """The record at ``ordinal``, reached by a verified walk.
+1203-  1203	
+1204-  1204	        The walk is the only way in on purpose: reading a coordinate means
+--
+1367-  1367	        except ArrivalGrammarError:
+1368-  1368	            return None
+1369-  1369	
+1370:  1370	    def walk_from(self, mark: ResumeMark | None) -> tuple[int, Iterator[dict]]:
+1371-  1371	        """Resume a consumption: the ordinal resumed at, and the records after.
+1372-  1372	
+1373-  1373	        :meth:`walk_marked` minus the marks — one adoption/verification
+--
+1378-  1378	        resumed, pairs = self.walk_marked(mark)
+1379-  1379	        return resumed, _records_only(pairs)
+1380-  1380	
+1381:  1381	    def walk_marked(
+1382-  1382	        self, mark: ResumeMark | None
+1383-  1383	    ) -> tuple[int, Iterator[tuple[dict, ResumeMark]]]:
+1384-  1384	        """:meth:`walk_from`, yielding each record WITH its resume mark.
+
+diff --git a//tmp/s2wp5-mutation.wpOpar/libs/engine/src/engine/arrival_file_backend.py b//tmp/s2wp5-mutation.wpOpar/libs/engine/src/engine/arrival_file_backend.py
+index ec29f31323a15919e6013af3f6c601f8d8ca02dc..ddcdb9bc42919101953b547e0b9a090b082c0c89
+--- a//tmp/s2wp5-mutation.wpOpar/libs/engine/src/engine/arrival_file_backend.py
++++ b//tmp/s2wp5-mutation.wpOpar/libs/engine/src/engine/arrival_file_backend.py
+@@ -334,7 +334,7 @@
+             durability=_DURABILITY,
+         )
+ 
+-    def replicate(
++    def replicate_removed_for_review(
+         self, expected: Head | None, records: Sequence[Mapping[str, Any]]
+     ) -> Commit:
+         """Insert an exact suffix of pre-coordinated records (§08).
+
+exec
+/bin/zsh -lc "ls -la .loops 2>&1; find .. -path '*/.loops/data/project.jsonl' -print 2>/dev/null | head; git show 3928632d:.loops/data/project.jsonl >/tmp/s2wp5-project.jsonl 2>/dev/null; wc -c /tmp/s2wp5-project.jsonl; jq -r 'select(tostring | contains(\"01M17M3RJJGC79KXH776Z4DQBR\")) | tostring' /tmp/s2wp5-project.jsonl | head -c 6000" in /Users/kaygee/Code/loops-s2wp5
+diff --git a//tmp/s2wp5-mutation.wpOpar/libs/engine/src/engine/arrival_file_backend.py b//tmp/s2wp5-mutation.wpOpar/libs/engine/src/engine/arrival_file_backend.py
+index ec29f31323a15919e6013af3f6c601f8d8ca02dc..ddcdb9bc42919101953b547e0b9a090b082c0c89
+--- a//tmp/s2wp5-mutation.wpOpar/libs/engine/src/engine/arrival_file_backend.py
++++ b//tmp/s2wp5-mutation.wpOpar/libs/engine/src/engine/arrival_file_backend.py
+@@ -334,7 +334,7 @@
+             durability=_DURABILITY,
+         )
+ 
+-    def replicate(
++    def replicate_removed_for_review(
+         self, expected: Head | None, records: Sequence[Mapping[str, Any]]
+     ) -> Commit:
+         """Insert an exact suffix of pre-coordinated records (§08).
+
+ succeeded in 11034ms:
+../siftd/.loops/data/project.jsonl
+../loops/.loops/data/project.jsonl
+       0 /tmp/s2wp5-project.jsonl
+
+exec
+/bin/zsh -lc "rg -n -o '.{0,100}01M17M3RJJGC79KXH776Z4DQBR.{0,1200}' /Users/kaygee/Code/loops/.loops/data/project.jsonl | head -5" in /Users/kaygee/Code/loops-s2wp5
+ succeeded in 0ms:
+4221:{"t":"fact","id":"01M17M3RJJGC79KXH776Z4DQBR","kind":"decision","ts":1788036112.184357,"observer":"","origin":"","payload":"{\"topic\": \"design/arrival-slice2-contract-text\", \"message\": \"RULED 2026-08-29 (Kyle, slice-2 gate sitting; brief at docs/scratch/arrival-break/slice2-gate-sitting-brief.md ef0ddd7f). Five rulings, WP5 executes: (1) F2 RATIFIED WITH THE CARVE-OUT \\u2014 'verification never repairs' enters backend-contract.html \\u00a706 as drafted: verify at any level must not mutate ledger/projections/head metadata; a backend whose open path recovers must offer verification a route that does not; materializing an ABSENT projection is not repair (destroys nothing, hides nothing); repair belongs to open-time recovery and explicitly-named rebuild ops. Ratifies the split the code already lives (write-path torn-tail recovery under lock vs lock-free refusing verify \\u2014 sol-verified). (2) REFUSAL ROOT, NARROW FORM \\u2014 conditions the contract text names (head mismatch, same-height fork, unknown backend, atomic limit, not-authority) surface as typed ContractRefusal subclasses; deliberately-absent capability gets typed NotSupported under the root (replacing NotImplementedError at the two WP1 sites); everything els
+4223:-contract,decision:design/arrival-slice2-contract-text\", \"ref_ref\": \"01M177MHWHD5HM574VSTDE17X8,01M17M3RJJGC79KXH776Z4DQBR\"}"}
+
+diff --git a//tmp/s2wp5-mutation.wpOpar/libs/engine/src/engine/arrival_file_backend.py b//tmp/s2wp5-mutation.wpOpar/libs/engine/src/engine/arrival_file_backend.py
+index ec29f31323a15919e6013af3f6c601f8d8ca02dc..ddcdb9bc42919101953b547e0b9a090b082c0c89
+--- a//tmp/s2wp5-mutation.wpOpar/libs/engine/src/engine/arrival_file_backend.py
++++ b//tmp/s2wp5-mutation.wpOpar/libs/engine/src/engine/arrival_file_backend.py
+@@ -334,7 +334,7 @@
+             durability=_DURABILITY,
+         )
+ 
+-    def replicate(
++    def replicate_removed_for_review(
+         self, expected: Head | None, records: Sequence[Mapping[str, Any]]
+     ) -> Commit:
+         """Insert an exact suffix of pre-coordinated records (§08).
+
+exec
+/bin/zsh -lc "jq -r 'select(.id==\"01M17M3RJJGC79KXH776Z4DQBR\") | .payload | fromjson | .message' /Users/kaygee/Code/loops/.loops/data/project.jsonl" in /Users/kaygee/Code/loops-s2wp5
+ succeeded in 2081ms:
+RULED 2026-08-29 (Kyle, slice-2 gate sitting; brief at docs/scratch/arrival-break/slice2-gate-sitting-brief.md ef0ddd7f). Five rulings, WP5 executes: (1) F2 RATIFIED WITH THE CARVE-OUT — 'verification never repairs' enters backend-contract.html §06 as drafted: verify at any level must not mutate ledger/projections/head metadata; a backend whose open path recovers must offer verification a route that does not; materializing an ABSENT projection is not repair (destroys nothing, hides nothing); repair belongs to open-time recovery and explicitly-named rebuild ops. Ratifies the split the code already lives (write-path torn-tail recovery under lock vs lock-free refusing verify — sol-verified). (2) REFUSAL ROOT, NARROW FORM — conditions the contract text names (head mismatch, same-height fork, unknown backend, atomic limit, not-authority) surface as typed ContractRefusal subclasses; deliberately-absent capability gets typed NotSupported under the root (replacing NotImplementedError at the two WP1 sites); everything else backend-specific BY DESIGN (scope-the-claim: the root covers what the contract asserts, no more). (3) head_at JOINS the op table — ten rows: read-side, coordinate/watermark -> verified Head; two in-arc consumers (slice-5 rewiring, slice-3 compare-on-open) are the forcing function; Protocol line + adapter method already written + WP2's exact-equality surface test updates to ten in the same change. (4) §08 IMPORT OP-ROW DEFERRED to the DuckDB arc — one backend's import is a convention; the second backend is where the row earns its keep (same logic as ledger/query separation staying a unit test); revisit if slice 5's _run_export repoint needs the symmetric verb. (5) RESUMABLE IMPORT = NAMED CONTRACT DEBT — §08 marker: required for conforming limited backends, reference file backend does not yet implement it; build when a limited backend exists. The debt is written where a conformance reader finds it, not carried in review memory.
+
+diff --git a//tmp/s2wp5-mutation.wpOpar/libs/engine/src/engine/arrival_file_backend.py b//tmp/s2wp5-mutation.wpOpar/libs/engine/src/engine/arrival_file_backend.py
+index ec29f31323a15919e6013af3f6c601f8d8ca02dc..ddcdb9bc42919101953b547e0b9a090b082c0c89
+--- a//tmp/s2wp5-mutation.wpOpar/libs/engine/src/engine/arrival_file_backend.py
++++ b//tmp/s2wp5-mutation.wpOpar/libs/engine/src/engine/arrival_file_backend.py
+@@ -334,7 +334,7 @@
+             durability=_DURABILITY,
+         )
+ 
+-    def replicate(
++    def replicate_removed_for_review(
+         self, expected: Head | None, records: Sequence[Mapping[str, Any]]
+     ) -> Commit:
+         """Insert an exact suffix of pre-coordinated records (§08).
+
+codex
+PASS — all five contract-text rulings are implemented faithfully.
+
+1. F2 verification rule: PASS. §06 contains all five drafted sentences, including the absent-projection carve-out. `verify()` remains non-mutating; its torn-tail test confirms bytes remain unchanged.
+2. Refusal root: PASS. The five named conditions and `NotSupported` inherit `ContractRefusal`. Both former `NotImplementedError` sites now raise `NotSupported`. No callers under `libs/`, `apps/`, or `libs/sdk/` catch `NotImplementedError` from these paths.
+3. `head_at`: PASS. §03 has ten rows; the Protocol and §07 prose are present; the exact ten-operation literal is enforced in `test_arrival_contract.py`; `head_at` is absent from `LEDGER_MUTATIONS`. `FileLedger.head_at()` uses `ArrivalLog.read()`, which reaches the coordinate through a fully verified walk.
+4. Import row deferral: PASS. §08 has no import operation row and accurately describes import as a procedure over existing operations. It preserves the empty-target and exact-prefix-agreement defaults without promising merge semantics.
+5. Resumable-import debt: PASS. The marker begins with the ruled sentence verbatim and binds only conforming limited backends. The file backend remains unlimited by default.
+
+§3 fixes:
+
+- e7513164: PASS. `git diff 3928632d..e7513164` changes only `test_arrival_registry.py`: the protocol assertion flips from negative to positive and its explanatory comment is rewritten. At that commit, `test_arrival_contract.py` owns the then-current exact nine-op equality; the reviewed tip updates it to ten. Mutation evidence: renaming only `FileLedger.replicate` makes `test_the_file_opener_hands_back_both_halves` fail at `assert isinstance(ledger, ArrivalLedger)`.
+- c33ce97e: PASS. The commit changes only one clause in `libs/engine/CLAUDE.md`. `git diff main...c33ce97e -- libs/engine/src/engine/arrival_store.py` confirms `ArrivalStore` changed in-slice through `Head`, `_pinned_head`, and full-head ceremony pinning, while the adapter itself does not modify the class.
+
+New findings: none.
+
+Verification suites:
+
+- engine: 2063 passed, 1 skipped
+- store: 180 passed
+- lang: 671 passed
+- architecture: 99 passed
+
+**CONVERGED**
+diff --git a//tmp/s2wp5-mutation.wpOpar/libs/engine/src/engine/arrival_file_backend.py b//tmp/s2wp5-mutation.wpOpar/libs/engine/src/engine/arrival_file_backend.py
+index ec29f31323a15919e6013af3f6c601f8d8ca02dc..ddcdb9bc42919101953b547e0b9a090b082c0c89
+--- a//tmp/s2wp5-mutation.wpOpar/libs/engine/src/engine/arrival_file_backend.py
++++ b//tmp/s2wp5-mutation.wpOpar/libs/engine/src/engine/arrival_file_backend.py
+@@ -334,7 +334,7 @@
+             durability=_DURABILITY,
+         )
+ 
+-    def replicate(
++    def replicate_removed_for_review(
+         self, expected: Head | None, records: Sequence[Mapping[str, Any]]
+     ) -> Commit:
+         """Insert an exact suffix of pre-coordinated records (§08).
+
+tokens used
+58,063
+PASS — all five contract-text rulings are implemented faithfully.
+
+1. F2 verification rule: PASS. §06 contains all five drafted sentences, including the absent-projection carve-out. `verify()` remains non-mutating; its torn-tail test confirms bytes remain unchanged.
+2. Refusal root: PASS. The five named conditions and `NotSupported` inherit `ContractRefusal`. Both former `NotImplementedError` sites now raise `NotSupported`. No callers under `libs/`, `apps/`, or `libs/sdk/` catch `NotImplementedError` from these paths.
+3. `head_at`: PASS. §03 has ten rows; the Protocol and §07 prose are present; the exact ten-operation literal is enforced in `test_arrival_contract.py`; `head_at` is absent from `LEDGER_MUTATIONS`. `FileLedger.head_at()` uses `ArrivalLog.read()`, which reaches the coordinate through a fully verified walk.
+4. Import row deferral: PASS. §08 has no import operation row and accurately describes import as a procedure over existing operations. It preserves the empty-target and exact-prefix-agreement defaults without promising merge semantics.
+5. Resumable-import debt: PASS. The marker begins with the ruled sentence verbatim and binds only conforming limited backends. The file backend remains unlimited by default.
+
+§3 fixes:
+
+- e7513164: PASS. `git diff 3928632d..e7513164` changes only `test_arrival_registry.py`: the protocol assertion flips from negative to positive and its explanatory comment is rewritten. At that commit, `test_arrival_contract.py` owns the then-current exact nine-op equality; the reviewed tip updates it to ten. Mutation evidence: renaming only `FileLedger.replicate` makes `test_the_file_opener_hands_back_both_halves` fail at `assert isinstance(ledger, ArrivalLedger)`.
+- c33ce97e: PASS. The commit changes only one clause in `libs/engine/CLAUDE.md`. `git diff main...c33ce97e -- libs/engine/src/engine/arrival_store.py` confirms `ArrivalStore` changed in-slice through `Head`, `_pinned_head`, and full-head ceremony pinning, while the adapter itself does not modify the class.
+
+New findings: none.
+
+Verification suites:
+
+- engine: 2063 passed, 1 skipped
+- store: 180 passed
+- lang: 671 passed
+- architecture: 99 passed
+
+**CONVERGED**

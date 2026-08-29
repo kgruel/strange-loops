@@ -165,12 +165,174 @@ both claims against the object and still does.
 
 ## 2. Deviations
 
-_(filled in as they arise)_
+Three, each also emitted as a `finding` fact so the report and the store can be cross-checked
+against each other. None was optional; each is recorded so the gate can rule on it rather than
+discover it.
+
+### D1 — WP2 edited WP1's contract module: `LEDGER_MUTATIONS` grew
+
+`finding:slice2-wp2-contract-module-grew-ledger-mutations` @ `01M17E5119XBNFF2RWFEG0KE2S`.
+
+Argued in §1.6. The op itself stays off the `ArrivalLedger` Protocol; only the mutation set
+grew, from three names to four. **Open for the gate:** should §08's portable import gain an
+op-table row in the contract, or stay adapter-level? WP2 took the narrower reading.
+
+### D2 — F1's site-B call moved into the shared batch writer
+
+`finding:slice2-wp2-f1-site-b-moved-into-shared-writer` @ `01M17E57EJG1NMYQJM550QSRWF`.
+
+Argued in §1.2. Behaviour is unchanged and both sites are still independently revertible;
+what is stale is the **line WP1's report cites** for the site-B revert. Named because a gate
+re-running WP1's mutation instructions verbatim would otherwise be confused by a hunk that no
+longer applies.
+
+### D3 — `adopt_genesis` is net-new arrival.py surface beyond replicate
+
+`finding:slice2-wp2-adopt-genesis-is-net-new-arrival-surface` @ `01M17E5EFB4KCABW4VZJJ0QEXW`.
+
+Argued in §1.5. The brief's scope item 3 (import into a new empty replica) cannot be built
+without it — `mint` builds and signs its own genesis and has no way to publish one that
+already exists. It is not a second appender: it cannot run on an existing log, and it shares
+`mint`'s `O_EXCL` ceremony rather than copying it. Named anyway, because a gate checking
+"did WP2 add primitives beyond replicate?" should find it announced.
+
+### Not deviations, recorded for the gate
+
+**Two tests in `test_arrival_contract.py` were edited, both intent-preserving and both
+anticipated by WP1 in the file itself.**
+
+* `test_capabilities_claims_nothing_the_adapter_does_not_have` — WP1's report §5 says
+  "`capabilities()` must change in the same commit … and will fail otherwise. That is
+  deliberate." The two WP2-anticipating assertions flipped to the positive claim; the
+  cross-check loop that makes the test a ratchet is untouched, and one assertion was added
+  (`ARCHIVE` stays absent).
+* `test_the_ledger_satisfies_the_ledger_surface_it_claims` — WP1's inline comment says "When
+  WP2 lands these, this assertion is what tells it to update the capability report in the same
+  change." `assert not isinstance(ledger, ArrivalLedger)` became `assert isinstance(...)`, and
+  three assertions were added pinning that `import_prefix` is offered, is NOT on the Protocol,
+  and IS in `LEDGER_MUTATIONS`.
+
+No other test file was modified. The fourteen arrival test files are green and unmodified.
+
+**A refusal-set gap was met and NOT re-filed.** A gap in a replication batch, a supplied `rh`
+that does not recompute, a foreign lineage: none has a member in the ratified five, so each
+surfaces as this backend's own family, untranslated. That is exactly the gap WP1 already
+raised as `finding:slice2-wp1-refusal-set-gaps` (D4), so it is cited rather than duplicated.
+Its consequence for WP2 is stated in §1.4 and is load-bearing for the vectors: a vector may
+only name a contract refusal, so those cases are pinned by unit tests instead.
+
+---
 
 ## 3. Test-count table
 
-_(filled in at the end)_
+| Suite | Baseline | Now | Delta | Accounted by |
+|---|---|---|---|---|
+| engine | 1989 passed, 1 skipped | 2033 passed, 1 skipped | **+44** | `test_arrival_transfer.py` (+33), `test_conformance_replicate.py` (+11) |
+| store | 180 | 180 | 0 | no store file touched |
+| architecture | 99 | 99 | 0 | Rule 18 green with no new module born; no new `_SCAN_TARGETS` entry needed |
+
+New-test breakdown, so the +44 is legible rather than a number:
+
+| File | Count | Covers |
+|---|---|---|
+| `test_conformance_replicate.py` | 11 | the 10 vectors, plus a family-completeness check so a family that loses its last vector fails rather than passing vacuously |
+| `test_arrival_transfer.py` | 33 | export ×5 (byte identity, streaming, clock-free manifest, codec refusal, captured-head bound), §12 byte-identity gate ×2, §12 snapshot-under-concurrent-writer gate ×1, import ×12 (empty replica, remainder-only, prefix no-op, agreement refusal, codec/framing, five manifest claims parametrized, suffix-as-prefix, tampered record), `adopt_genesis` ×3, replicate's own-family refusals ×8 (empty, wrong digest, foreign lineage, batch hole, atomic limit + the under-limit control, unpinned, fork type, empty batch), byte-identity at file and line level ×2 |
+
+Vector families: 10 vectors across the three §D.2 families — exact-suffix (4),
+same-height (3, including the negative control), catch-up (3).
+
+Wider net, all green and unchanged from WP1's baseline: sdk 324, apps/loops 2530 + 1 xfail,
+lang 655, atoms 517, sign 37, custody 13, chaos 12, `tests/architecture` 99. Root `tests/`
+runs 111 (the 99 architecture tests plus `tests/chaos`'s 12); no file under `tests/` was
+touched, which `git diff --name-only 0d38c969..HEAD` shows.
+
+---
 
 ## 4. Mutation evidence
 
-_(filled in at the end)_
+Both demonstrations the brief names, plus one extra arm because the fork refusal has two
+independently reachable halves. `git diff` clean and the suite re-green after each restore.
+
+### 4.1 (a) Weaken the same-height-fork refusal — the whole check
+
+```python
+# revert, in ArrivalLog._refuse_divergent_batch:
+-            if mine is not None and mine != candidate.get(_RH):
++            if False and mine is not None and mine != candidate.get(_RH):
+```
+
+```
+FAILED test_conformance_replicate.py::...[replicate-same-height-fork-at-the-head-refuses]
+FAILED test_conformance_replicate.py::...[replicate-same-height-fork-below-the-head-refuses]
+FAILED test_arrival_transfer.py::test_the_arrival_layer_raises_its_own_fork_type_not_the_contracts
+3 failed, 41 passed
+```
+
+Two things worth reading off this. The negative control
+(`replicate-same-height-agreement-is-not-a-fork`) **stayed green**, so the vectors are
+discriminating between fork and stale-head rather than firing on any overlap. And
+`test_import_refuses_a_target_that_disagrees_about_its_own_prefix` also stayed green — import's
+§08 prefix-agreement gate is a genuinely separate site (`FileLedger._refuse_disagreeing_prefix`)
+with its own pin, which is the honest answer to "is the fork logic duplicated?": there are two
+checks because they refuse two different things (the overlap you were HANDED versus the overlap
+you were about to SKIP), and each is independently covered.
+
+### 4.2 (a′) Narrow the fork check to the head ordinal only
+
+The sharper mutation, because it is the shape a plausible implementation would actually take:
+
+```python
+-                if _is_int(candidate.get("ord")) and candidate["ord"] <= head["ord"]
++                if _is_int(candidate.get("ord")) and candidate["ord"] == head["ord"]
+```
+
+```
+FAILED test_conformance_replicate.py::...[replicate-same-height-fork-below-the-head-refuses]
+FAILED test_arrival_transfer.py::test_the_arrival_layer_raises_its_own_fork_type_not_the_contracts
+2 failed, 42 passed
+```
+
+Exactly the below-the-head vector, and the at-the-head one stays green — the two arms of the
+fork check are independently pinned.
+
+### 4.3 (b) Make replicate re-coordinate (assign instead of validate)
+
+```python
+# revert, in ArrivalLog.append_records' build:
+-            return candidates[index]
++            c = candidates[index]
++            return build_record(
++                lin=head["lin"], ordinal=head["ord"] + 1, prev=head[_RH],
++                k=c["k"], body=c["body"], observer=c["observer"],
++                origin=c["origin"], at=c["at"], sig=None,
++            )
+```
+
+```
+FAILED test_conformance_replicate.py::...[replicate-catch-up-from-a-genesis-only-replica]
+FAILED test_conformance_replicate.py::...[replicate-catch-up-preserves-signed-records-byte-for-byte]
+FAILED test_arrival_transfer.py::test_export_import_export_is_byte_identical
+FAILED test_arrival_transfer.py::test_a_replica_preserves_a_carried_in_signature
+FAILED test_arrival_transfer.py::test_import_appends_only_the_remainder_to_an_agreeing_target
+FAILED test_arrival_transfer.py::test_import_of_a_prefix_the_target_already_holds_changes_nothing
+FAILED test_arrival_transfer.py::test_replicate_refuses_a_record_whose_supplied_digest_is_wrong
+FAILED test_arrival_transfer.py::test_replicate_refuses_a_foreign_lineage_as_this_backends_own_fault
+FAILED test_arrival_transfer.py::test_replicate_refuses_an_internally_inconsistent_batch_and_lands_none_of_it
+FAILED test_arrival_transfer.py::test_a_replicated_suffix_is_byte_identical_to_the_source_bytes
+10 failed, 34 passed
+```
+
+**The result that justifies the vector design.** Both failing catch-up vectors are the ones
+carrying SIGNED records. `replicate-catch-up-preserves-authored-time-and-origin` — an exact
+suffix with distinctive `at` and `origin` values and no signature — **stayed green**, because a
+re-coordinator assigning the same lineage, ordinal and predecessor to an exact suffix
+reproduces identical record hashes. `at` and `origin` survive the rebuild (`Entry` carries
+both); a signature does not (`Entry` has no signer field, and `append_marked_many` builds every
+record with `sig=None`). So the signature is not decoration in that family — it is the only
+content that makes assigning observably different from validating, and a catch-up family
+without one would have passed this mutation.
+
+### 4.4 Restoration
+
+`git checkout libs/engine/src/engine/arrival.py` after each; `git status --short` empty,
+44 passed on the two files, and the full suites re-run green at the counts in §3.

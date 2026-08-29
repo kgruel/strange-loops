@@ -343,3 +343,165 @@ uv run ruff check libs/engine/src/engine/arrival_head_attestation.py \
 BLOCKING-1 and BLOCKING-2 reproduce from `parse_journal_lines` alone, with no
 filesystem: substitute `{}` for an entry line in a `[90 trust-reset, 92, 91]` journal,
 and read a journal whose header and entries are all `"v": 2`.
+
+---
+
+# Re-check — round 1, at `fbdc5770`
+
+Target advanced to `slice3/arrival-witness` @ `fbdc5770` (two commits over `be8b6c5e`:
+`1df5c8f4` the fixes, `fbdc5770` the report). Gate worktree rebased onto it
+(`git rebase --onto fbdc5770 be8b6c5e slice3/wp1-gate`), so this report sits directly on
+the tip it judges. **Scope: only the two failed items and the docstring rider. Nothing
+else was reopened**, and nothing else needed to be — the diff touches exactly three
+files, `arrival_head_attestation.py`, its test file, and the impl report. No test,
+fixture, contract or architecture file outside that set moved, so items 1-4, 6 and 7
+stand on the round-0 evidence.
+
+## RE-CHECK VERDICT: both BLOCKING findings CLOSED. **GATE: PASS** for WP1.
+
+### BLOCKING-1 — kindless dict absorbed as a header — **CLOSED**
+
+The fix replaces the positional-ish `"kind" not in decoded` test with `_is_header`,
+which keys on the **type string**: a header is a kindless dict whose `type` is
+`arrival-head-observation`. Everything else falls through to the ordinary
+skip-and-report path.
+
+My original demonstration, re-run on the same `[90 trust-reset, 92, 91]` journal
+(true *K* = 92), now inverts:
+
+| The ordinal-92 line becomes | round 0 | round 1 (`fbdc5770`) |
+|---|---|---|
+| `{}` | `EstablishedHead(91)`, `.skipped` **empty**, `compare` → `unchanged` | **`HeadLowerBound(91)`**, 1 line recorded, `established_head()` **raises** |
+
+The recorded skip reads `line 3: not readable by this build`, the bound is 91, and the
+bound still refuses below itself (`compare(at_least, head(5), None) is ROLLBACK`). The
+refusal message was also widened to name **both** unobtainable answers — "cannot be
+called unchanged **or advanced** against a bound".
+
+Generalised beyond the one byte pattern I reported. Every non-header shape is now
+skipped and recorded, none absorbed:
+
+| line | result |
+|---|---|
+| `{}` | `HeadLowerBound`, skipped=1 |
+| `{"v":1,"protocol":1}` (kindless, no `type`) | `HeadLowerBound`, skipped=1 |
+| `{"v":1,"type":"something-else"}` (**different** type) | `HeadLowerBound`, skipped=1 |
+| `null` | `HeadLowerBound`, skipped=1 |
+| `[1,2]` | `HeadLowerBound`, skipped=1 |
+
+And the tolerance it had to preserve is intact: two real headers in one file still read
+clean (`EstablishedHead`, skipped=0), so the create-race case survives. The deliberate
+choice to key on `type` alone rather than on `protocol`/`wire` too is verified to do
+what it claims — a header with `"v":2`, `protocol` 9, `wire` 9 and an extra field is
+still recognised, so a later build adding header fields does not brick this reader.
+
+Pinned by `test_a_kindless_dict_is_not_absorbed_as_a_header` and
+`test_a_header_naming_another_type_is_not_this_journals_header`.
+
+### BLOCKING-2 — zero readable entries degraded to silent first contact — **CLOSED**
+
+A third `known` state, `HeadUnreadable`, now covers the corner the ruling did not
+enumerate: content was claimed and none of it could be read. It is **not** the absence
+of a state, and it is not `None`.
+
+My pure-skew demonstration (v2 header, v2 entries, no attacker — version skew alone):
+
+| | round 0 | round 1 |
+|---|---|---|
+| `known` | `None` | **`HeadUnreadable`** |
+| `established_head()` | returns `None` **silently** | **raises `IndeterminateComparison`** |
+| fresh genesis vs. a journal remembering **4217** | `first-contact` | **declined — no comparison obtainable** |
+
+`dataclasses.fields(HeadUnreadable)` is exactly `['skipped']` — **no ordinal, by
+construction**, so unlike `HeadLowerBound` it cannot even answer rollback, which is
+correct: there is no bound to be below. It has no `.entry`, no `.at_least`, no `.head`,
+no `.ordinal`. All three losses are recorded, and the refusal message states the point
+in words rather than leaving it to be inferred: *"…none of it is readable by this
+build, so nothing is known about the head it accepted — not even a lower bound. **This
+is NOT first contact: heads were accepted here.** Unreadable: line 2…"*
+
+First contact remains reachable exactly where it is honest: an empty journal and a
+**header-only** journal both give `known=None`, no skips, and classify `FIRST_CONTACT`
+(`test_a_header_only_journal_is_still_first_contact`).
+
+The re-scoped §B.3 promise landed in all three places claimed, and honestly. Report
+choice 10 now reads "never refused **on its own account** … what the promise never
+licensed is the stronger reading"; the `_parse_entry` docstring carries the same
+re-scoping plus the version-skew consequence stated rather than hidden ("an older build
+reading a purely newer journal declines its comparisons. Resolution is operator work");
+and the misleadingly-named test is **gone** — zero occurrences of
+`test_an_entry_from_a_later_build_is_skipped_and_reported_not_refused`, replaced by
+`test_a_later_build_entry_is_never_refused_on_its_own_account`, which is what the code
+actually does.
+
+### The adversarial shortcut, re-run against **three** states — still unobtainable
+
+No attribute reaches a comparable head across all three; each is reachable in exactly
+one state, and `established_head()` is the only uniform accessor:
+
+| expression | `EstablishedHead` | `HeadLowerBound` | `HeadUnreadable` |
+|---|---|---|---|
+| `.entry` | hit | — | — |
+| `.at_least` | — | hit | — |
+| `.head` / `.ordinal` / `.value` | — | — | — |
+| `established_head()` | returns | **raises** | **raises** |
+
+### Rider — `HeadLowerBound.__doc__` — **CLOSED**
+
+The docstring now carries the ADVANCED half explicitly: *"A presented head `*above*` the
+bound is not an advance either. Nothing bounds the accepted head from above, so a head
+at ordinal 95 may still sit below a lost entry at 200 … Both proceed answers are
+unobtainable; only the refusal below the bound survives."* That is the claim the report
+made in round 0 and the docstring did not support. (My automated check reported a miss
+on this line; that was my own substring assertion tripping over the `*above*` emphasis
+markers, not a gap — the text is present and I read it directly.)
+
+### Counts, lint, isolation
+
+| Suite | round 0 tip | `fbdc5770` | Delta |
+|---|---|---|---|
+| engine | 2150 passed, 1 skipped | **2154 passed, 1 skipped** | +4 |
+| architecture | 99 passed | **99 passed** | 0 |
+
+Matches the claim. The new test file collects **91** (was 87), so all four new tests are
+the four new cases and nothing else moved. `ruff check` clean on both files. The real
+`~/.local/state/loops` still does not exist and my `~/.local/state` snapshot is
+byte-identical to the pre-image taken before the first run of round 0, across every
+suite and mutation run in both rounds.
+
+### Both new mutation demos, re-run by me and restored clean
+
+| # | Mutation | My result | Named |
+|---|---|---|---|
+| (1) | `_is_header` reverted to "any kindless dict" | 2 failed, 89 passed | `test_a_kindless_dict_is_not_absorbed_as_a_header`, `test_a_header_naming_another_type_is_not_this_journals_header` ✓ |
+| (2) | `HeadUnreadable` arm removed (skipped-only → `None`) | 3 failed, 88 passed | led by `test_a_journal_of_nothing_but_later_build_entries_declines` ✓ |
+
+Both counts match the claim exactly. Module restored byte-for-byte after each,
+`git diff` empty.
+
+## One residual, an observation and NOT a finding
+
+Substituting a **well-formed header line** (`{"type":"arrival-head-observation"}`) for
+the ordinal-92 entry is still absorbed silently: `EstablishedHead`, skipped=0, *K*=91.
+This is **not a reopening of BLOCKING-1**, and it should not be treated as one. Deleting
+the line outright produces the identical result — `EstablishedHead`, skipped=0, *K*=91 —
+so header-substitution buys an attacker exactly nothing over line deletion, and line
+deletion is undetectable in an append-only journal with no integrity protection. That is
+the slice's *declared* posture: WP1 ships nothing signed (no `sig`, `issuer`, `key_id` or
+`previous`), and §B.2 states the absence is the point rather than an omission. Closing
+this class needs the deferred signed grammar, not a reader change.
+
+What made BLOCKING-1 blocking was never tamper-resistance — it was that an *arbitrary*
+non-entry dict vanished without being reported, breaking the amended ruling's own
+sentence and the module's own docstring invariant. That is fixed. The residual is worth
+one line wherever the signed-grammar work is scoped; it is not WP1's to close.
+
+## Standing assessment
+
+Both findings were closed at the level they were raised — BLOCKING-1 in the read
+classification rather than by widening a detector, and BLOCKING-2 in the result type
+rather than by a caller-vigilance rule, which is the same discipline the amended ruling
+itself applied. The fixes generalise past the two byte patterns I demonstrated, they
+carry their own mutation tests, the promise they re-scoped was corrected in the prose
+and the test names instead of being quietly left behind, and the create-race and
+header-only tolerances they had to preserve both survive. **GATE: PASS.**

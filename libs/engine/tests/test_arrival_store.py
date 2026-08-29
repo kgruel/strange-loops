@@ -117,7 +117,9 @@ def test_appends_land_in_the_log_first_as_records(tmp_path, keys, signer):
     records = records_of(tmp_path / "s.arrival")
     assert [r["k"] for r in records] == ["genesis", "fact", "fact"]
     body = records[1]["body"]
-    assert body["t"] == "fact"
+    # The record class rides in the envelope's k and NOWHERE else — wire v1
+    # dropped body.t, so a body carrying it is refused by the grammar.
+    assert "t" not in body
     assert body["kind"] == "note"
     # payload rides as the verbatim stored TEXT, never re-serialized
     assert isinstance(body["payload"], str)
@@ -154,8 +156,24 @@ def test_the_stamped_mark_is_the_ratified_three_fields_and_exact(
     assert not any(k.startswith("jsonl") for k in meta_keys)
 
 
-def test_ticks_ride_as_records_with_the_ticks_own_authorship(tmp_path, keys, signer):
-    mint(tmp_path, keys, signer)
+def test_ticks_ride_as_records_naming_the_custodian_not_the_tick(
+    tmp_path, keys, signer
+):
+    """Ruling 2 of decision:design/arrival-wire-v1-seam-triage: a tick's
+    envelope observer is the DESTINATION LOG'S GENESIS OBSERVER — the
+    custodian whose fold engine produced the record — not the tick's own
+    name, which is not an authorship claim anybody can make.
+
+    Minted under an observer that is neither the tick's name nor the fact
+    author's, so the assertion pins "the genesis observer" rather than
+    passing on a coincidence of fixture naming.
+    """
+    log = ArrivalLog.mint(
+        tmp_path / "s.arrival",
+        observer="custodian",
+        signer=signer,
+        key=keys.public,
+    )
     store = open_store(tmp_path)
     try:
         store.append(fact())
@@ -167,8 +185,31 @@ def test_ticks_ride_as_records_with_the_ticks_own_authorship(tmp_path, keys, sig
     records = records_of(tmp_path / "s.arrival")
     assert [r["k"] for r in records] == ["genesis", "fact", "tick"]
     tick_record = records[2]
-    assert tick_record["observer"] == "pulse"  # a tick's authorship is its name
-    assert tick_record["body"]["t"] == "tick"
+    assert tick_record["observer"] == "custodian"
+    assert tick_record["observer"] == log.genesis()["observer"]
+    assert tick_record["observer"] != tick_record["body"]["name"] == "pulse"
+    # The fact beside it is UNTOUCHED: its envelope still names its author,
+    # because that value selects the key that signs the record.
+    assert records[1]["observer"] == "kyle"
+    # The record class is the envelope's; the body no longer echoes it.
+    assert "t" not in tick_record["body"]
+
+
+def test_a_tick_on_an_unminted_log_still_refuses_with_the_mint_first_message(
+    tmp_path,
+):
+    """The custodian label is read from the genesis, so an unminted log has
+    no custodian to name. That state must still refuse the way the class
+    documents it — "mint a genesis first" — and not as an incidental
+    "the file does not exist" from the genesis read."""
+    store = open_store(tmp_path)
+    try:
+        with pytest.raises(GenesisRefused, match="mint a genesis first"):
+            store.append_tick(
+                Tick(name="pulse", ts=datetime.now(UTC), payload={"n": 1}, origin="t")
+            )
+    finally:
+        store.close()
 
 
 def test_a_rejected_insert_never_orphans_a_record(tmp_path, keys, signer):
@@ -222,7 +263,6 @@ def test_a_reopened_store_tails_records_appended_out_of_band(tmp_path, keys, sig
     # A second writer appends straight to the log (another process's store).
     row = json.dumps(
         {
-            "t": "fact",
             "id": "01TESTID000000000000000000",
             "kind": "note",
             "ts": 2.0,
@@ -314,7 +354,6 @@ def _interloper(log: ArrivalLog, message: str, ident: str) -> dict:
     return log.append(
         "fact",
         {
-            "t": "fact",
             "id": ident,
             "kind": "note",
             "ts": 2.0,

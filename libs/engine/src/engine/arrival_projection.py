@@ -61,7 +61,8 @@ from pathlib import Path
 from typing import Iterator, NoReturn
 
 from .arrival import GENESIS_KIND, KEY_INTRODUCTION_KIND, ArrivalLog, ResumeMark
-from .jsonl_codec import records_from_object, serialize_object
+from .arrival_body import ROW_KINDS, legacy_object_of_body, rows_of_body
+from .jsonl_codec import serialize_object
 from .residence import canonical_for, index_path_for
 from .sqlite_store import (
     _SCHEMA_STMTS,
@@ -87,10 +88,12 @@ __all__ = [
 
 # Record classes that expand to index rows, and the structural kinds that
 # expand to none. Anything else refuses: a kind this indexer does not know is
-# not a kind it may silently drop. The row-class literals mirror the line
-# codec's "t" discriminators; the structural kinds are the grammar's own
-# constants.
-_ROW_KINDS = frozenset(("fact", "tick", "batch"))
+# not a kind it may silently drop. The row classes are the arrival body
+# grammar's own set — since wire v1 dropped ``body.t``, the envelope's ``k``
+# is the ONLY place a record's class is written, so this module and the body
+# reader must agree about it by construction rather than by two matching
+# literals. The structural kinds are the record grammar's constants.
+_ROW_KINDS = ROW_KINDS
 _STRUCTURAL_KINDS = frozenset((GENESIS_KIND, KEY_INTRODUCTION_KIND))
 
 _OWN_LINEAGE_KEY = "own_lineage"
@@ -162,10 +165,15 @@ def rows_of_record(record: dict) -> list[tuple[str, tuple]]:
 
     Structural records expand to **no rows** — see :func:`_projects`, which
     is also where an unknown kind is refused.
+
+    The body is read as the class its ENVELOPE names. Since wire v1 dropped
+    ``body.t``, ``k`` is the only place that class is written, and this is
+    the site the seam triage meant by "the projection site holds ``k`` when
+    it hands body over".
     """
     if not _projects(record):
         return []
-    return records_from_object(record["body"])
+    return rows_of_body(record["k"], record["body"])
 
 
 # --- the derived .jsonl log --------------------------------------------------
@@ -189,10 +197,14 @@ def line_of_record(record: dict) -> str | None:
     """The derived log's line for one arrival record, or None for no line.
 
     Row-class records (fact/tick/batch) each emit ONE line — the codec
-    encoding of that record's ``body`` and of nothing else. Because the body
-    IS the codec's object for the committed row, re-encoding it is an
-    identity round trip and the payload keeps riding as verbatim stored
-    TEXT. A batch record's body emits as one ``batch`` line, unchanged.
+    encoding of that record's ``body`` and of nothing else. The derived log
+    is a LEGACY-shaped artifact on purpose (every last-0.x reader reads it),
+    so the line keeps the ``t`` discriminator wire v1 dropped from the body:
+    :func:`engine.arrival_body.legacy_object_of_body` puts it back from the
+    envelope's ``k``, which is the only place it now lives. The rows
+    themselves are untouched, so the payload keeps riding as verbatim
+    stored TEXT and the emitted bytes are exactly what they were before the
+    drop. A batch record's body emits as one ``batch`` line, unchanged.
 
     **NON-NEGOTIABLE: structural records (genesis, key introduction) have no
     derived-log line**, exactly as the index skips them — their bodies are
@@ -206,7 +218,7 @@ def line_of_record(record: dict) -> str | None:
     """
     if not _projects(record):
         return None
-    return serialize_object(record["body"])
+    return serialize_object(legacy_object_of_body(record["k"], record["body"]))
 
 
 def canonical_line(line: str) -> str:

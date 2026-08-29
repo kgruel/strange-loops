@@ -370,7 +370,7 @@ class TestSolHigh03AtomicRecordPageExtension:
         log_path = tmp_path / "batched.arrival"
         from engine.arrival import ArrivalLog
         from engine.arrival_store import ArrivalStore
-        from engine.jsonl_codec import object_of_batch, object_of_fact_row
+        from engine.arrival_body import body_of_batch, body_of_fact_row
 
         ArrivalLog.mint(
             log_path,
@@ -382,13 +382,13 @@ class TestSolHigh03AtomicRecordPageExtension:
         # record 1: 1 fact (ordinal 1, seq 0)
         log.append(
             "fact",
-            object_of_fact_row(("f-001", "note", 1700000001.0, "kyle", "", '{"msg": "one"}')),
+            body_of_fact_row(("f-001", "note", 1700000001.0, "kyle", "", '{"msg": "one"}')),
             observer="kyle",
         )
         # record 2: batch of 2 facts (ordinal 2, seq 0 and seq 1)
         log.append(
             "batch",
-            object_of_batch([
+            body_of_batch([
                 ("f-002a", "note", 1700000002.0, "kyle", "", '{"msg": "two-a"}'),
                 ("f-002b", "note", 1700000003.0, "kyle", "", '{"msg": "two-b"}'),
             ]),
@@ -397,7 +397,7 @@ class TestSolHigh03AtomicRecordPageExtension:
         # record 3: 1 fact (ordinal 3, seq 0)
         log.append(
             "fact",
-            object_of_fact_row(("f-003", "note", 1700000004.0, "kyle", "", '{"msg": "three"}')),
+            body_of_fact_row(("f-003", "note", 1700000004.0, "kyle", "", '{"msg": "three"}')),
             observer="kyle",
         )
         store = ArrivalStore(
@@ -453,7 +453,7 @@ class TestSolHigh03AtomicRecordPageExtension:
         log_path = tmp_path / "batch3.arrival"
         from engine.arrival import ArrivalLog
         from engine.arrival_store import ArrivalStore
-        from engine.jsonl_codec import object_of_batch
+        from engine.arrival_body import body_of_batch
 
         ArrivalLog.mint(
             log_path,
@@ -464,7 +464,7 @@ class TestSolHigh03AtomicRecordPageExtension:
         log = ArrivalLog(log_path)
         log.append(
             "batch",
-            object_of_batch([
+            body_of_batch([
                 ("b1", "note", 1700000001.0, "kyle", "", '{"i": 1}'),
                 ("b2", "note", 1700000002.0, "kyle", "", '{"i": 2}'),
                 ("b3", "note", 1700000003.0, "kyle", "", '{"i": 3}'),

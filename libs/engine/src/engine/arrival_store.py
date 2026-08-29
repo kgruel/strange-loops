@@ -14,17 +14,22 @@ the committed row for free and inherits every read method unchanged.
 
 How a row becomes a record
 --------------------------
-The arrival record's ``body`` is the line codec's object for the committed
-row, verbatim — ``payload`` rides as the stored TEXT string inside it, so
+The arrival record's ``body`` is :mod:`engine.arrival_body`'s object for the
+committed row — ``payload`` rides as the stored TEXT string inside it, so
 every existing fact signature and commitment hash survives the round trip,
-and a later cut can rebuild the index by handing ``body`` straight back to
-the codec. No second encoding exists to disagree with. The record's ``k``
-is the row class (``fact`` / ``tick`` / ``batch``), never the fact's own
-kind — a fact kind is data and rides inside ``body``, where it cannot
-collide with the grammar's structural kinds (genesis, key introductions).
-``observer``/``origin``/``at`` mirror the row's authorship columns (a tick
-has no observer; its record carries the tick's name there, which is the
-authorship a tick has).
+and the index rebuilds by handing ``body`` back to the same reader. No
+second encoding exists to disagree with. The record's ``k`` is the row
+class (``fact`` / ``tick`` / ``batch``), never the fact's own kind — a fact
+kind is data and rides inside ``body``, where it cannot collide with the
+grammar's structural kinds (genesis, key introductions). Since wire v1
+dropped ``body.t``, ``k`` is also the ONLY place the row class is written.
+
+``origin``/``at`` mirror the row's own columns. ``observer`` splits by kind,
+per decision:design/arrival-wire-v1-seam-triage: a FACT's names its author,
+because that value selects the key that signs the record; a TICK's names
+this log's custodian — the destination log's genesis observer — because a
+tick has no author and its name is not an authorship claim. See
+:meth:`ArrivalStore._custodian`.
 
 Fact records are signed by the store's injected ``fact_signer`` over the
 ARRIVAL content commitment — record-level attestation, resolvable by
@@ -72,12 +77,12 @@ from .arrival import (
     GenesisRefused,
     ResumeMark,
 )
-from .arrival_projection import has_rows, licensed_own_lineage, rows_of_record
-from .jsonl_codec import (
-    object_of_batch,
-    object_of_fact_row,
-    object_of_tick_row,
+from .arrival_body import (
+    body_of_batch,
+    body_of_fact_row,
+    body_of_tick_row,
 )
+from .arrival_projection import has_rows, licensed_own_lineage, rows_of_record
 from .jsonl_store import _as_int, _stamped_offset_current
 from .residence import canonical_for, index_path_for
 from .sqlite_store import (
@@ -415,13 +420,52 @@ class ArrivalStore(SqliteStore[T], Generic[T]):
 
     # ---- the write path --------------------------------------------------
 
+    def _custodian(self) -> str:
+        """The label a record this store MINTS puts in its envelope observer.
+
+        The destination log's own genesis observer — ruling 2 of
+        decision:design/arrival-wire-v1-seam-triage. A tick has no author:
+        it is the custodian's fold engine producing a record, and the
+        envelope observer says so. The previous spelling put the tick's
+        NAME there, which read as an authorship claim a name cannot make.
+
+        Scoped to what it claims, and no further. The label is TRUE but
+        UNVERIFIED, on purpose: tick outer signatures are deferred (ruling
+        3), so no tick's envelope observer is ever looked up in the key
+        registry — ``_resolve`` gates on a signature being present and
+        every tick mint passes ``signer=None``. An unverified true claim is
+        what wire v1 pins; a verifiable one is a later design session's.
+
+        Fact records are untouched by this: their envelope observer stays
+        the row's author, because that value SELECTS THE SIGNING KEY
+        (``fact_signer_for`` resolves ``keys/<observer>/ed25519.key``) and
+        re-deriving it as custody would re-key every fact signature from
+        author to custodian — a decision explicitly not made here.
+
+        Reads through the genesis memo, so a store minting many ticks pays
+        one validation. The refusal is re-spelled rather than surfaced raw
+        for the reason :meth:`_genesis_lineage_id` re-spells its own: this
+        class promises an unminted log refuses appends with the mint-first
+        message, and "the log does not exist" is that state described from
+        the wrong end.
+        """
+        try:
+            return self._log.genesis()["observer"]
+        except GenesisRefused as exc:
+            raise GenesisRefused(
+                f"{self._log.path} is empty — mint a genesis first; a "
+                "record's envelope observer is the log's own genesis "
+                "observer, so there is no custodian to name until movement "
+                "1 has named one"
+            ) from exc
+
     def _write(self, sql: str, row: tuple, encode_row, is_fact: bool) -> str | None:
         """Stage the INSERT, make the record durable in the log, stamp, commit.
 
         The INSERT runs first, uncommitted, so a rejected row fails before a
         byte reaches the log and a refused write can never orphan a record.
-        The record's body is the codec's object for the COMMITTED read-back
-        row — the index and the log must derive-match. The record's arrival signature comes from
+        The record's body is the arrival body grammar's object for the
+        COMMITTED read-back row — the index and the log must derive-match. The record's arrival signature comes from
         the injected ``fact_signer`` over the arrival commitment; the same
         callable, a different digest, and the composing layer's
         domain-separation prefix already binds both to this store family.
@@ -437,9 +481,9 @@ class ArrivalStore(SqliteStore[T], Generic[T]):
         re-inserts the identical row verbatim from the record's body.
         """
         consumed = self._reconcile()
-        # Codec pre-flight on the ASSEMBLED row, NOT dead work: sqlite's
+        # Grammar pre-flight on the ASSEMBLED row, NOT dead work: sqlite's
         # column affinity coerces (e.g. a string ts commits as REAL), so the
-        # committed-row encode below would ACCEPT a row the codec refuses
+        # committed-row encode below would ACCEPT a row the grammar refuses
         # — this is the gate that fails at the append site, where it is
         # attributable, instead of laundering the value.
         encode_row(row)
@@ -459,7 +503,7 @@ class ArrivalStore(SqliteStore[T], Generic[T]):
             record, mark = self._log.append_marked(
                 "fact" if is_fact else "tick",
                 body,
-                observer=committed_row[3] if is_fact else committed_row[1],
+                observer=committed_row[3] if is_fact else self._custodian(),
                 origin=committed_row[4],
                 at=committed_row[2],
                 signer=self._fact_signer if is_fact else None,
@@ -490,10 +534,10 @@ class ArrivalStore(SqliteStore[T], Generic[T]):
         return [(expected_ordinal, idx) for idx in range(count)]
 
     def _write_fact_row(self, row: tuple) -> str | None:
-        return self._write(FACT_INSERT_SQL, row, object_of_fact_row, True)
+        return self._write(FACT_INSERT_SQL, row, body_of_fact_row, True)
 
     def _write_tick_row(self, row: tuple) -> str | None:
-        return self._write(TICK_INSERT_SQL, row, object_of_tick_row, False)
+        return self._write(TICK_INSERT_SQL, row, body_of_tick_row, False)
 
     def _ceremony_persist(self, rows: list[tuple]) -> None:
         """Make a declaration ceremony canonical: ONE arrival record, stamped.
@@ -516,9 +560,9 @@ class ArrivalStore(SqliteStore[T], Generic[T]):
             r[:-2] if len(r) == len(FACT_ALL_COLUMNS) else r for r in rows
         ]
         if len(persisted_rows) > 1:
-            k, body = "batch", object_of_batch(persisted_rows)
+            k, body = "batch", body_of_batch(persisted_rows)
         else:
-            k, body = "fact", object_of_fact_row(persisted_rows[0])
+            k, body = "fact", body_of_fact_row(persisted_rows[0])
         consumed = self._reconciled_mark
         _, mark = self._log.append_marked(
             k,

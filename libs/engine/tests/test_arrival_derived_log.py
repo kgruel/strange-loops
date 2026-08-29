@@ -99,17 +99,35 @@ def test_structural_records_have_no_line(tmp_path, keys, signer):
     assert all(json.loads(line)["t"] in ("fact", "tick", "batch") for line in lines)
 
 
-def test_a_line_is_the_record_body_and_nothing_else(tmp_path, keys, signer):
+def test_a_line_is_the_record_body_plus_the_discriminator_and_nothing_else(
+    tmp_path, keys, signer
+):
+    """The derived log is a LEGACY-shaped artifact, so its lines carry the
+    ``t`` wire v1 dropped from arrival bodies — restored from the envelope's
+    ``k``, which is the only place the record class now lives. Nothing else
+    differs: strip ``t`` from a line and the body is back, exactly."""
     log, jsonl = build(tmp_path, keys, signer)
     write_derived_log(log.path)
 
-    bodies = [
-        r["body"] for r in ArrivalLog(log.path).walk() if r["k"] != "genesis"
-    ]
-    assert bodies  # not vacuous
-    # Every line decodes to exactly one record body, and to nothing else.
-    assert {json.dumps(json.loads(line), sort_keys=True) for line in read(jsonl)} == {
-        json.dumps(b, sort_keys=True) for b in bodies
+    records = [r for r in ArrivalLog(log.path).walk() if r["k"] != "genesis"]
+    assert records  # not vacuous
+    # No arrival body carries the discriminator; every derived line does,
+    # and the multiset of line discriminators is the multiset of record
+    # kinds — the restoration reads k and invents nothing.
+    assert all("t" not in r["body"] for r in records)
+    assert sorted(json.loads(line)["t"] for line in read(jsonl)) == sorted(
+        r["k"] for r in records
+    )
+
+    def stripped(line: str) -> dict:
+        obj = json.loads(line)
+        del obj["t"]
+        if obj.get("rows") is not None:
+            obj["rows"] = [{k: v for k, v in r.items() if k != "t"} for r in obj["rows"]]
+        return obj
+
+    assert {json.dumps(stripped(line), sort_keys=True) for line in read(jsonl)} == {
+        json.dumps(r["body"], sort_keys=True) for r in records
     }
 
 

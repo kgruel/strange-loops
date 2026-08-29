@@ -26,6 +26,17 @@ Unknown, missing, or mistyped fields are rejected loudly
 is not a place for silent tolerance. So is a duplicate key: JSON's last-wins
 resolution would let one line carry two ids and a reader silently pick one.
 
+The ``t`` discriminator is THIS framing's, and it stays. A line has nowhere
+but the object itself to say which record class it carries; an arrival
+record says it in the envelope's ``k``, so wire v1 drops ``t`` from arrival
+bodies and :mod:`engine.arrival_body` frames the same rows without it
+(decision:design/arrival-wire-v1-seam-triage). This module keeps ``t``
+because it still has live consumers that need it: the derived ``.jsonl``
+projection every last-0.x reader reads, and the migration sidecar that
+reads historical logs. What the two framings share is the ROW domain —
+:func:`row_object_fault`, exported for exactly that — so they cannot drift
+about what a well-formed row is while disagreeing about how to frame one.
+
 The rules run in **both** directions from one function. ``serialize`` holds
 its object to the same domain ``deserialize`` enforces, so ``serialize(x)``
 is always decodable — a wrongly typed field fails at the append site, where
@@ -40,9 +51,13 @@ import math
 
 __all__ = [
     "FACT_FIELDS",
+    "FACT_NULLABLE",
+    "SIGNATURE_FIELD",
     "TICK_FIELDS",
     "TICK_CHAIN_FIELDS",
+    "TICK_NULLABLE",
     "JsonlCodecError",
+    "row_object_fault",
     "object_of_fact_row",
     "object_of_tick_row",
     "object_of_batch",
@@ -71,7 +86,17 @@ _TICK_BASE_FIELDS = ("id", "name", "ts", "since", "origin", "payload")
 # them is the consumer's decision, not this module's.
 TICK_CHAIN_FIELDS = ("prev_hash", "window_start", "fact_cursor", "window_hash")
 TICK_FIELDS = (*_TICK_BASE_FIELDS, *TICK_CHAIN_FIELDS)
-_SIGNATURE = "signature"
+SIGNATURE_FIELD = "signature"
+_SIGNATURE = SIGNATURE_FIELD
+
+# Which fields of a row may be null, per row class. Named at module level —
+# rather than inline in ``_SPEC`` — because they describe the SQLITE ROW, not
+# this module's line framing: :mod:`engine.arrival_body` frames the same rows
+# without a ``t`` discriminator and holds them to exactly this domain. One
+# definition of "what a well-formed row is" is what keeps the two framings
+# from drifting about it.
+FACT_NULLABLE: frozenset[str] = frozenset()
+TICK_NULLABLE: frozenset[str] = frozenset(("since", *TICK_CHAIN_FIELDS))
 
 _NUMERIC = ("ts", "since")
 
@@ -94,12 +119,8 @@ class _Spec:
 
 
 _SPEC = {
-    "fact": _Spec("fact", FACT_FIELDS, frozenset()),
-    "tick": _Spec(
-        "tick",
-        TICK_FIELDS,
-        frozenset(("since", *TICK_CHAIN_FIELDS)),
-    ),
+    "fact": _Spec("fact", FACT_FIELDS, FACT_NULLABLE),
+    "tick": _Spec("tick", TICK_FIELDS, TICK_NULLABLE),
 }
 
 # The third record type is STRUCTURAL, not field-shaped, so it does not fit
@@ -269,24 +290,48 @@ def _load(line: str) -> dict:
     return obj
 
 
-def _validate(obj: dict, spec: _Spec) -> None:
-    t = spec.t
-    unknown = sorted(set(obj) - spec.allowed)
+def row_object_fault(
+    obj: dict,
+    *,
+    t: str,
+    frame: str,
+    fields: tuple[str, ...],
+    allowed: frozenset[str],
+    nullable: frozenset[str],
+) -> str | None:
+    """Why ``obj`` is not a well-formed row object, or None when it is.
+
+    The half the two row framings SHARE. A ``.jsonl`` line and an arrival
+    record's body carry the same sqlite row and differ only in where the
+    record class is written — inside the object as ``"t"`` for a line, in
+    the envelope's ``k`` for an arrival body — so the field domain is one
+    rule with two callers rather than two rules that must be kept in step.
+    ``allowed`` is exactly where they fork: the line framing admits ``t``
+    and the arrival body does not (decision:design/arrival-wire-v1-seam-triage).
+
+    Returns a fault string rather than raising, the shape
+    :func:`engine.arrival._placement_fault` and
+    :func:`engine.arrival._key_shape_fault` already use, so each framing
+    raises its OWN error class over one set of rules. ``frame`` names the
+    container in the two messages that mention it, so a body's refusal does
+    not tell the reader to go looking for a line.
+    """
+    unknown = sorted(set(obj) - allowed)
     if unknown:
-        raise JsonlCodecError(f"unknown field(s) in {t} line: {unknown}")
-    missing = [f for f in spec.fields if f not in obj]
+        return f"unknown field(s) in {t} {frame}: {unknown}"
+    missing = [f for f in fields if f not in obj]
     if missing:
-        raise JsonlCodecError(f"missing field(s) in {t} line: {missing}")
-    for field in spec.fields:
+        return f"missing field(s) in {t} {frame}: {missing}"
+    for field in fields:
         value = obj[field]
         if value is None:
-            if field not in spec.nullable:
-                raise JsonlCodecError(f"{t} field {field!r} must not be null")
+            if field not in nullable:
+                return f"{t} field {field!r} must not be null"
             continue
         if field in _NUMERIC:
             # bool is an int subclass — reject it explicitly.
             if isinstance(value, bool) or not isinstance(value, (int, float)):
-                raise JsonlCodecError(
+                return (
                     f"{t} field {field!r} must be a number, got "
                     f"{type(value).__name__}"
                 )
@@ -296,31 +341,41 @@ def _validate(obj: dict, spec: _Spec) -> None:
             # only sees the NaN/Infinity spellings.
             if isinstance(value, float):
                 if not math.isfinite(value):
-                    raise JsonlCodecError(
+                    return (
                         f"{t} field {field!r} must be a finite number, got "
                         f"{value!r}"
                     )
             elif not (_JCS_INT_MIN <= value <= _JCS_INT_MAX):
-                raise JsonlCodecError(
+                return (
                     f"{t} field {field!r} is outside the JCS safe-integer "
                     f"domain: {value}"
                 )
         elif not isinstance(value, str):
-            raise JsonlCodecError(
+            return (
                 f"{t} field {field!r} must be a string, got "
                 f"{type(value).__name__}"
             )
-    if _SIGNATURE in obj and obj[_SIGNATURE] is None:
+    if SIGNATURE_FIELD in obj and obj[SIGNATURE_FIELD] is None:
         # Absent IS the unsigned era; an explicit null is a second spelling
         # of the same state, so serialize stays the unique canonical form.
-        raise JsonlCodecError(
-            f"{t} field 'signature' must be absent, not null, when unsigned"
-        )
-    sig = obj.get(_SIGNATURE)
+        return f"{t} field 'signature' must be absent, not null, when unsigned"
+    sig = obj.get(SIGNATURE_FIELD)
     if sig is not None and not isinstance(sig, str):
-        raise JsonlCodecError(
-            f"{t} field 'signature' must be a string, got {type(sig).__name__}"
-        )
+        return f"{t} field 'signature' must be a string, got {type(sig).__name__}"
+    return None
+
+
+def _validate(obj: dict, spec: _Spec) -> None:
+    fault = row_object_fault(
+        obj,
+        t=spec.t,
+        frame="line",
+        fields=spec.fields,
+        allowed=spec.allowed,
+        nullable=spec.nullable,
+    )
+    if fault is not None:
+        raise JsonlCodecError(fault)
 
 
 def _validate_batch(obj: dict, *, validate_rows: bool = True) -> None:

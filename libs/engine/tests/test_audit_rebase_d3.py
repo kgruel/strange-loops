@@ -49,7 +49,7 @@ from engine.canonical_audit import (
     audit_agreement,
     audit_deep,
 )
-from engine.jsonl_codec import object_of_fact_row
+from engine.arrival_body import body_of_fact_row
 from engine.sqlite_store import gen_id
 from engine.tick import Tick
 
@@ -111,12 +111,12 @@ class TestGateD3_1_DetectionCoordinates:
         log = ArrivalLog(log_path)
         log.append(
             "fact",
-            object_of_fact_row((gen_id(), "note", 1700000000.0, "kyle", "", json.dumps({"n": 4}))),
+            body_of_fact_row((gen_id(), "note", 1700000000.0, "kyle", "", json.dumps({"n": 4}))),
             observer="kyle",
         )
         log.append(
             "fact",
-            object_of_fact_row((gen_id(), "note", 1700000001.0, "kyle", "", json.dumps({"n": 5}))),
+            body_of_fact_row((gen_id(), "note", 1700000001.0, "kyle", "", json.dumps({"n": 5}))),
             observer="kyle",
         )
 
@@ -447,7 +447,7 @@ class TestGateD3_2_BoundedWorkInstrumentation:
         for i in range(k_behind):
             log.append(
                 "fact",
-                object_of_fact_row((gen_id(), "note", 1700000000.0 + i, "kyle", "", json.dumps({"extra": i}))),
+                body_of_fact_row((gen_id(), "note", 1700000000.0 + i, "kyle", "", json.dumps({"extra": i}))),
                 observer="kyle",
             )
 

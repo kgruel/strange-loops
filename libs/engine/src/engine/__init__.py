@@ -206,7 +206,7 @@ _LAZY_IMPORTS: dict[str, tuple[str, str]] = {
     "JsonlStore": ("engine.jsonl_store", "JsonlStore"),
     "JsonlCanonicalUnsupported": ("engine.jsonl_store", "JsonlCanonicalUnsupported"),
     "gen_id": ("engine.sqlite_store", "gen_id"),
-    "fact_commitment_hash": ("engine.sqlite_store", "fact_commitment_hash"),
+    "fact_commitment_hash": ("engine.admission", "fact_commitment_hash"),
     "tick_row_hash": ("engine.sqlite_store", "tick_row_hash"),
     "JsonlCodecError": ("engine.jsonl_codec", "JsonlCodecError"),
     "serialize_fact_row": ("engine.jsonl_codec", "serialize_fact_row"),

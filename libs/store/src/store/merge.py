@@ -45,16 +45,21 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+# The admission half of the arrival arm lives in `engine.admission` as of
+# slice 2 (design:arrival-break-slice2-backend-contract §C.3): the decision
+# about what a foreign row is allowed to become is backend-neutral policy,
+# and `engine` may not import `store`, so the refusals it raises live there
+# too. Re-exported here because `store.MergeDivergence` is this lib's public
+# name for the refusal and callers keep catching it by that name.
+from engine.admission import AdmissionUnverified, MergeDivergence, SourceRows
+
 from ._conn import _open
 
 if TYPE_CHECKING:
-    from engine.arrival import KeyRegistry, Verify
+    from engine.arrival import ArrivalLog, Verify
+    from engine.arrival_contract import Head
 
-# How many times the append phase re-reads and retries after another merger
-# lands records in the compare-and-swap window. Each retry consumes the
-# other process's appends and re-runs dedup, so progress is guaranteed and a
-# bound is only a guard against a pathological hot loop.
-_APPEND_ATTEMPTS = 8
+__all__ = ["AdmissionUnverified", "MergeDivergence", "MergeResult", "merge_store"]
 
 
 @dataclass(frozen=True)
@@ -86,7 +91,7 @@ def merge_store(
             every merge that does not pass it still does, byte for byte.
             Supplied, it is the injected signature verifier
             (:data:`engine.arrival.Verify`) that
-            :func:`_verify_admitted_rows` checks the ADMITTED rows'
+            ``engine.admission._verify_admitted_rows`` checks the ADMITTED rows'
             carried authorship claims with. **Exactly what a supplied
             verifier establishes: every admitted signed fact row's
             authorship claim verifies under the SOURCE's own key history.**
@@ -244,37 +249,40 @@ def _merge_into_sqlite(target: Path, source: Path, *, dry_run: bool) -> MergeRes
 def _merge_into_arrival(
     canonical: Path, source: Path, *, dry_run: bool, verify: Verify | None
 ) -> MergeResult:
-    """Append the source's rows into the target's arrival log, then re-derive.
+    """Read both sides, hand them to admission, report the counts.
 
-    In order:
+    What stays here is what admission is not allowed to know: how to read a
+    source (:func:`_read_source`), how to read the target's INDEX and how to
+    rebuild it (:func:`_target_state`, :func:`_rederive_after_append`). Both
+    of those are the projection half's obligation, and ``engine`` cannot
+    import this lib to reach them — so they cross as the two callbacks
+    :func:`engine.admission.admit_records` documents, re-invoked per attempt.
+
+    In order, with the steps admission owns named where they land:
 
     1. **Bring the index current first**, by opening the target through
        ``open_canonical_store`` so catch-up runs. If catch-up refuses, the
        merge refuses — merging into an index that does not account for its
-       log would dedup against a lie.
+       log would dedup against a lie. That is inside ``target_state`` below,
+       so it re-runs on every attempt.
     2. Read the source in its own deterministic order (ordinal for an arrival
        source, ``rowid`` for a sqlite/jsonl one).
-    3. Dedup against what the target's index already holds. **The arrival log
-       must never carry one row id twice** — both the index primary key and
-       the legacy log indexer refuse such a log, and no verb in this design
-       can consume it.
-    4. Append the whole phase under ONE lock acquisition, pinned with
-       compare-and-swap to the head we deduped against, retrying on refusal.
-    5. Re-derive both projections: the index by consume-forward catch-up
+    3. Dedup, verify the admission set, append under one lock acquisition
+       pinned to the head the dedup snapshot accounts for, retry on refusal
+       — all of it ``admit_records``.
+    4. Re-derive both projections: the index by consume-forward catch-up
        (the appended records are a suffix, so this appends rows and never
-       clears), the derived log by regeneration.
+       clears), the derived log by regeneration. That is ``rederive``, which
+       admission calls once an append lands.
 
-    With a ``verify`` supplied, step 3 is followed by admission verification
-    (:func:`_verify_admitted_rows`) — INSIDE the retry loop, because a retry
-    re-runs dedup and the admission set it produces is the set the claim is
-    about. ``dry_run`` verifies too: a dry run answers "what would this merge
-    do", and reporting clean counts for a merge that would refuse is a lie.
-
-    ``dry_run`` runs steps 1–3 and reports the counts. It appends nothing —
-    the log never rewrites, so a rollback is neither available nor needed,
-    which is cleaner than the savepoint the sqlite arm needs.
+    ``dry_run`` reports the counts and appends nothing — the log never
+    rewrites, so a rollback is neither available nor needed, which is cleaner
+    than the savepoint the sqlite arm needs. It verifies too: a dry run
+    answers "what would this merge do", and reporting clean counts for a
+    merge that would refuse is a lie.
     """
-    from engine.arrival import AppendRejected, ArrivalLog
+    from engine.admission import admit_records
+    from engine.arrival import ArrivalLog
 
     log = ArrivalLog(canonical)
     if not log.exists() or log.size() == 0:
@@ -283,48 +291,27 @@ def _merge_into_arrival(
             "merge target; mint it (movement 1) before receiving records"
         )
 
-    source_rows = _read_source(source)
-    registry = _source_registry(source_rows, verify)
-
-    for _ in range(_APPEND_ATTEMPTS):
+    def target_state() -> tuple[dict[str, tuple], Head | None]:
         held, consumed = _target_state(canonical)
-        entries, added_facts, added_ticks, admitted = _entries_for(
-            source_rows, held, log.genesis()["observer"]
-        )
-        skipped_facts = source_rows.fact_count - added_facts
-        skipped_ticks = source_rows.tick_count - added_ticks
-        result = MergeResult(
-            facts_added=added_facts,
-            facts_skipped=skipped_facts,
-            ticks_added=added_ticks,
-            ticks_skipped=skipped_ticks,
-        )
-        if registry is not None and verify is not None:
-            _verify_admitted_rows(admitted, registry, verify)
-        if dry_run or not entries:
-            return result
-        try:
-            log.append_marked_many(entries, following=_pinned_head(log, consumed))
-        except AppendRejected:
-            # Another merger landed records in the compare-and-swap window,
-            # so our dedup is stale. Re-read, re-dedup, retry: the next pass
-            # sees their appends and skips whatever they already added. This
-            # loop is what makes concurrent merges exactly-once — the lock
-            # alone would not, because a second process that deduped against
-            # the pre-merge snapshot can append the moment the lock is
-            # released.
-            continue
-        _rederive_after_append(canonical)
-        return result
+        return held, _pinned_head(log, consumed)
 
-    raise RuntimeError(
-        f"the append phase of a merge into {canonical} was outrun "
-        f"{_APPEND_ATTEMPTS} times — another writer is appending faster than "
-        "this merge can reconcile"
+    counts = admit_records(
+        log,
+        _read_source(source),
+        target_state=target_state,
+        rederive=lambda: _rederive_after_append(canonical),
+        dry_run=dry_run,
+        verify=verify,
+    )
+    return MergeResult(
+        facts_added=counts.facts_added,
+        facts_skipped=counts.facts_skipped,
+        ticks_added=counts.ticks_added,
+        ticks_skipped=counts.ticks_skipped,
     )
 
 
-def _pinned_head(log, consumed):
+def _pinned_head(log: ArrivalLog, consumed) -> Head | None:
     """The full head the dedup snapshot accounts for, or None when unmarked.
 
     The compare-and-swap pins all three head fields, and the index's resume
@@ -369,10 +356,10 @@ def _target_state(canonical: Path):
     :func:`_pinned_head`.
 
     The comparable is what dedup compares an incoming row against (see
-    :func:`_comparable`): facts on their full authored body, ticks on the
-    chainless base — chain columns and the tick signature are store-local
-    custody the merge strips anyway, so they can never be grounds for a
-    divergence claim."""
+    ``engine.admission._comparable``): facts on their full authored body,
+    ticks on the chainless base — chain columns and the tick signature are
+    store-local custody the merge strips anyway, so they can never be grounds
+    for a divergence claim."""
     from engine.arrival import ResumeMark
     from engine.arrival_store import (
         ARRIVAL_LINEAGE_KEY,
@@ -425,25 +412,7 @@ def _target_state(canonical: Path):
     )
 
 
-@dataclass(frozen=True)
-class _SourceRows:
-    """The source's rows, already in the order they will be replayed."""
-
-    groups: list[tuple[str, list[tuple[str, tuple]], int | None]]
-    """``(record class, rows, source ordinal)`` — one entry per record that
-    will be appended. A ``batch`` group carries the rows of one ceremony, so
-    an atomic ceremony stays atomic across the merge. The ordinal is the
-    POSITION the row occupied in the source's arrival log, which is what the
-    key-validity clause is stated in terms of; ``None`` for a source that
-    has no arrival log and therefore no positions."""
-    fact_count: int
-    tick_count: int
-    canonical: Path | None = None
-    """The source's arrival log, when it has one. The key history admission
-    verification reads is the SOURCE's, so this is where it comes from."""
-
-
-def _read_source(source: Path) -> _SourceRows:
+def _read_source(source: Path) -> SourceRows:
     from engine.probe import probe_target
 
     info = probe_target(source)
@@ -456,7 +425,7 @@ def _read_source(source: Path) -> _SourceRows:
     return _read_index_source(source)
 
 
-def _read_arrival_source(canonical: Path) -> _SourceRows:
+def _read_arrival_source(canonical: Path) -> SourceRows:
     """Walk the source's arrival log from ordinal 0, in ORDINAL order.
 
     NON-NEGOTIABLE. Merging is replaying the source's arrival into the
@@ -480,12 +449,12 @@ def _read_arrival_source(canonical: Path) -> _SourceRows:
                 facts += 1
             else:
                 ticks += 1
-    return _SourceRows(
+    return SourceRows(
         groups=groups, fact_count=facts, tick_count=ticks, canonical=canonical
     )
 
 
-def _read_index_source(source: Path) -> _SourceRows:
+def _read_index_source(source: Path) -> SourceRows:
     """Facts in ``rowid`` order, then ticks in ``rowid`` order — two passes.
 
     The transport case: ``slice_store`` emits a plain ``.db``. Deterministic,
@@ -525,312 +494,11 @@ def _read_index_source(source: Path) -> _SourceRows:
     # The tick rows ride at BASE arity, chainless — this source shape has no
     # chain to carry, because chain state is store-local and a transport
     # slice never brought it. Padding to full arity here would be undone
-    # immediately: _entry_for strips the chain off every tick it sees.
+    # immediately: admission's draft constructor strips the chain off every
+    # tick it sees.
     groups.extend(("tick", [("tick", tuple(row))], None) for row in tick_rows)
-    return _SourceRows(
+    return SourceRows(
         groups=groups, fact_count=len(fact_rows), tick_count=len(tick_rows)
-    )
-
-
-class MergeDivergence(Exception):
-    """The same id carries DIFFERENT content on the two sides of a merge.
-
-    The admission table (decision:design/arrival-substrate-laws) is explicit:
-    id collision with different bytes is identity corruption and is REJECTED,
-    never resolved silently in either side's favour. Kyle's whole-branch r1
-    ruling (CX-BR-01, decision:design/arrival-branch-r1-rulings) applies that
-    law to this merge arm. The target-wins conformance vector pins the
-    LEGACY SQLITE arm only (its harness populates plain SqliteStores) and
-    its description now says so; this arrival arm's refusal is pinned by
-    TestDivergenceRefusal.
-
-    Comparison is deliberately strict — the fact signature included, so an
-    era-mixed pair (the same authored fact carried once with its signature
-    and once through a pre-signature-era slice) also refuses. Decided, not
-    accidental: a merge cannot tell that case apart from a stripped
-    signature, and the refusal message names the diverging field so the era
-    case is diagnosable at the site.
-    """
-
-
-class AdmissionUnverified(Exception):
-    """An opt-in admission verification failed. NOTHING was appended.
-
-    Raised for both halves of the one claim, because they are one claim:
-    the source's key history did not verify (a registry-forming record —
-    genesis or key introduction — whose signature no already-valid key
-    verifies), or an admitted signed fact row's carried authorship claim did
-    not verify under that history.
-
-    **The scope, exactly.** What the verifier establishes when it does NOT
-    raise is that every admitted signed row's authorship claim verifies
-    under the source's own key history — source self-consistency. It is NOT
-    a claim that the target's operator trusts those keys: that is a
-    different question, answered against the TARGET's key chain, and this
-    merge carries no key introductions across, so the target has nothing to
-    answer it with. It is also not a claim about rows the merge did not
-    admit: a deduplicated row is no part of the admission set and is never
-    verified, so a bad signature on a record the target already holds cannot
-    refuse a merge it is not part of.
-    """
-
-
-def _source_registry(
-    source_rows: _SourceRows, verify: Verify | None
-) -> KeyRegistry | None:
-    """The source's own key history, or ``None`` when there is no claim.
-
-    ``None`` in two cases, which the caller cannot tell apart and does not
-    need to: verification was not requested, or the source has no arrival
-    log. The second is the ruled D4-Q1 posture — a transport ``.db`` carries
-    rows and no key history, so there is nothing to verify them against and
-    the merge ADMITS THEM, making no authorship claim at all, rather than
-    refusing a source whose only fault is its era.
-    """
-    if verify is None or source_rows.canonical is None:
-        return None
-
-    from engine.arrival import ArrivalLog, AuthorshipUnverified, key_registry
-
-    try:
-        return key_registry(ArrivalLog(source_rows.canonical), verify)
-    except AuthorshipUnverified as exc:
-        raise AdmissionUnverified(
-            f"the source's key history does not verify at ordinal "
-            f"{exc.ordinal}: {exc.args[0]}. A registry-forming record — the "
-            "genesis or a key introduction — is what makes the source's "
-            "later authorship claims checkable, so a key history that does "
-            "not hold cannot be used to admit anything. Nothing was "
-            "appended. Note the scope this merge was asked for: source "
-            "self-consistency (every admitted signed row's authorship claim "
-            "verifies under the source's own key history), not target-"
-            "operator trust in the source's keys."
-        ) from exc
-
-
-def _verify_admitted_rows(
-    admitted: list[tuple[int | None, tuple]],
-    registry: KeyRegistry,
-    verify: Verify,
-) -> None:
-    """Hold every ADMITTED signed fact row to its carried authorship claim.
-
-    Per row, against :func:`engine.sqlite_store.fact_commitment_hash` — the
-    same content-only commitment the live emit path signs, which is what
-    makes a fact signature transport-stable in the first place. The key must
-    be one the source's log made valid for the ROW's OWN observer at the
-    position the row arrived at; a key valid for someone else, or introduced
-    only later, is no key at all here.
-
-    Unsigned admitted rows pass without a claim being made about them —
-    the same era-aware NULL posture the merge already documents for
-    pre-signature sources. Verifying nothing is honest; pretending an absent
-    signature is a failed one is not.
-    """
-    from engine.sqlite_store import FACT_COLUMN_INDEX, fact_commitment_hash
-
-    # Derived, not hardcoded (WP-1a F-4 / WP-5 W5-1).
-    col = FACT_COLUMN_INDEX
-    _kind, _ts, _observer, _origin, _payload, _sig = (
-        col["kind"], col["ts"], col["observer"], col["origin"],
-        col["payload"], col["signature"],
-    )
-
-    for ordinal, row in admitted:
-        signature = row[_sig] if len(row) > _sig else None
-        if signature is None:
-            continue
-        observer = row[_observer]
-        digest = fact_commitment_hash(
-            row[_kind], row[_ts], observer, row[_origin], row[_payload]
-        )
-        candidates = (
-            () if ordinal is None else registry.keys_valid_at(observer, ordinal)
-        )
-        if any(verify(key, signature, digest) for key, _introduced in candidates):
-            continue
-        raise AdmissionUnverified(
-            f"fact id {row[0]!r} is admitted by this merge and carries an "
-            f"authorship claim for observer {observer!r} that verifies under "
-            f"none of the {len(candidates)} key(s) the source's log made "
-            f"valid for that observer at its position ({ordinal}). Nothing "
-            "was appended. The scope of this check is source "
-            "self-consistency — every admitted signed row's authorship claim "
-            "verifies under the source's own key history — not target-"
-            "operator trust in the source's keys."
-        )
-
-
-def _comparable(t: str, row: tuple) -> tuple:
-    """One row's dedup-comparison body, shared by both sides of the merge.
-
-    Facts compare on the full authored 7-column body minus id. Ticks compare
-    on the chainless base minus id: chain columns and the tick signature are
-    store-local custody stripped by ``_entry_for`` on every merge, so the
-    target's chain can never ground a divergence claim against a source
-    tick that legitimately carries a different (or no) chain.
-    """
-    if t == "fact":
-        return ("fact", *row[1:7])
-    return ("tick", *row[1:6])
-
-
-_COMPARED_FIELDS = {
-    "fact": ("kind", "ts", "observer", "origin", "payload", "signature"),
-    "tick": ("name", "ts", "since", "origin", "payload"),
-}
-
-
-def _refuse_divergence(t: str, row: tuple, held_body: tuple) -> None:
-    incoming = _comparable(t, row)
-    if held_body[0] != incoming[0]:
-        diverging = ["row class"]
-    else:
-        diverging = [
-            name
-            for name, ours, theirs in zip(
-                _COMPARED_FIELDS[t], held_body[1:], incoming[1:], strict=True
-            )
-            if ours != theirs
-        ]
-    raise MergeDivergence(
-        f"{t} id {row[0]!r} exists on both sides with different content "
-        f"(diverging: {', '.join(diverging) or 'row class'}) — at most one "
-        "of them is what an arrival log says, and a merge that picked a "
-        "side would re-mint identity. Nothing was appended. Resolve the "
-        "contradiction at its source before merging."
-    )
-
-
-def _entries_for(source_rows: _SourceRows, held: dict[str, tuple], custodian: str):
-    """The records to append, after dedup.
-
-    ``custodian`` is the TARGET log's genesis observer, threaded through to
-    :func:`_entry_for` for the tick envelopes it mints. It is read once per
-    merge attempt at the call site, where the target log is already open,
-    rather than re-derived per record.
-
-    Returns ``(entries, facts, ticks, admitted)``, where ``admitted`` is the
-    surviving FACT rows paired with the source position they arrived at —
-    the admission set, which is exactly what admission verification is a
-    claim about, and exactly what a deduplicated row is not in.
-
-    A row whose id the target holds is skipped ONLY when its comparison body
-    matches the target's (:func:`_comparable`); the same id over different
-    content raises :class:`MergeDivergence` before anything is appended.
-    A group whose rows are ALL already in the target contributes no record.
-    A batch group that is partly deduped contributes its remainder: two or
-    more surviving rows still ride as one batch (the ceremony's atomicity is
-    the reason the batch exists), a single survivor rides as a plain fact
-    line, because a one-row batch is a second spelling the codec refuses.
-    A split batch needs no special handling for verification: the admission
-    set is per-ROW, so the remainder is simply the rows that are in it.
-    """
-    from engine.arrival import Entry
-
-    entries: list[Entry] = []
-    admitted: list[tuple[int | None, tuple]] = []
-    facts = ticks = 0
-    for kind, rows, ordinal in source_rows.groups:
-        fresh = []
-        for t, row in rows:
-            body = held.get(row[0])
-            if body is not None:
-                if body != _comparable(t, row):
-                    _refuse_divergence(t, row, body)
-                continue
-            fresh.append((t, row))
-        if not fresh:
-            continue
-        for t, row in fresh:
-            held[row[0]] = _comparable(t, row)
-            if t == "fact":
-                facts += 1
-                admitted.append((ordinal, row))
-            else:
-                ticks += 1
-        entries.append(_entry_for(kind, fresh, custodian))
-    return entries, facts, ticks, admitted
-
-
-def _entry_for(kind: str, rows: list[tuple[str, tuple]], custodian: str):
-    """One record for a group of surviving rows.
-
-    Record shape, asymmetric between facts and ticks, and the asymmetry is
-    inherited from the live write path rather than invented here:
-
-    * ``k`` is the row class, never a fact's own kind. Since wire v1 dropped
-      ``body.t``, it is the only place that class is written.
-    * ``origin``/``at`` mirror the row's own columns. ``observer`` splits by
-      kind, exactly as the live write path splits it
-      (:meth:`engine.arrival_store.ArrivalStore._custodian`, ruling 2 of
-      decision:design/arrival-wire-v1-seam-triage). A merged FACT's record
-      claims its ORIGINAL observer — the record describes the authored row,
-      not the operator who admitted it. A merged TICK has no author, so its
-      record names THIS log's custodian: ``custodian`` is the TARGET's
-      genesis observer, not the source's, because the record being minted
-      is the target's own. This is the second, independently-encoded tick
-      mint site; a respell that landed only at the live path would leave
-      merge committing the retired convention with nothing to catch it.
-    * **Fact bodies ride verbatim, the row's own signature included.** The
-      fact signature is a per-observer authorship claim over content only,
-      carried verbatim and never re-signed; era-aware NULL for a
-      pre-signature source.
-    * **Tick bodies carry chain columns and the tick signature as
-      NULL/absent.** ``prev_hash``/``window_start``/``fact_cursor``/
-      ``window_hash`` are store-local custody: carrying them verbatim would
-      put ticks in the target whose links reference the SOURCE's chain, so
-      the target's chain verification would break on every merged tick. And
-      keeping the tick signature while nulling the chain would be a
-      verification lie, because the tick signature covers the chain fields.
-      The codec accepts all five as nullable — this is the pre-chain era
-      shape, honestly claimed.
-
-    There is no record-level signature. ``merge_store`` takes no signer and
-    never will: there is no key to sign with, and the target's operator holds
-    no key for a foreign observer anyway. The authorship claim that survives
-    is the fact row's own signature, riding in the body. An ADMISSION
-    attestation — the target custodian's own claim that it admitted this
-    record — is a later cut's.
-
-    Not signing is separate from not CHECKING: ``merge_store``'s opt-in
-    ``verify`` holds these carried signatures to the source's own key
-    history before any of this is assembled (:class:`AdmissionUnverified`).
-    Whether they were checked or not, they ride verbatim — verification
-    decides whether the merge happens, never what a record says.
-    """
-    from engine.arrival import Entry
-    from engine.arrival_body import (
-        body_of_batch,
-        body_of_fact_row,
-        body_of_tick_row,
-    )
-    from engine.jsonl_codec import TICK_CHAIN_FIELDS, TICK_FIELDS
-
-    if kind == "tick":
-        _t, row = rows[0]
-        # Nulling the chain is THIS module's decision (see above); how many
-        # columns that is, and where they sit, is the codec's — so the width
-        # is derived from its field tuples rather than counted here. The
-        # slice reads Nones back in, the source arrival row has them
-        # overwritten; both land at the codec's tick arity, signature
-        # dropped by riding one short of it.
-        base = len(TICK_FIELDS) - len(TICK_CHAIN_FIELDS)
-        stripped = (*row[:base], *(None,) * len(TICK_CHAIN_FIELDS))
-        return Entry(
-            k="tick",
-            body=body_of_tick_row(stripped),
-            observer=custodian,
-            origin=stripped[4],
-            at=stripped[2],
-        )
-
-    fact_rows = [row for _t, row in rows]
-    first = fact_rows[0]
-    k = "batch" if len(fact_rows) > 1 else "fact"
-    body = body_of_batch(fact_rows) if k == "batch" else body_of_fact_row(first)
-    return Entry(
-        k=k, body=body, observer=first[3], origin=first[4], at=first[2]
     )
 
 

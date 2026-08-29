@@ -298,7 +298,7 @@ def test_a_merged_tick_names_the_TARGETS_custodian(tmp_path):
     """Ruling 2 of decision:design/arrival-wire-v1-seam-triage, at the
     SECOND mint site.
 
-    ``store.merge._entry_for`` encodes tick records independently of the
+    ``engine.admission._draft_for`` encodes tick records independently of the
     live write path, so the respell has to land in both places or merge
     keeps committing the retired convention. Nothing pinned this before —
     which is precisely how a one-site fix would have gone green and wrong.

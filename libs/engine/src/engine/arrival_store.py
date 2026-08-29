@@ -464,8 +464,8 @@ class ArrivalStore(SqliteStore[T], Generic[T]):
 
         The INSERT runs first, uncommitted, so a rejected row fails before a
         byte reaches the log and a refused write can never orphan a record.
-        The record's body is the codec's object for the COMMITTED read-back
-        row — the index and the log must derive-match. The record's arrival signature comes from
+        The record's body is the arrival body grammar's object for the
+        COMMITTED read-back row — the index and the log must derive-match. The record's arrival signature comes from
         the injected ``fact_signer`` over the arrival commitment; the same
         callable, a different digest, and the composing layer's
         domain-separation prefix already binds both to this store family.
@@ -481,9 +481,9 @@ class ArrivalStore(SqliteStore[T], Generic[T]):
         re-inserts the identical row verbatim from the record's body.
         """
         consumed = self._reconcile()
-        # Codec pre-flight on the ASSEMBLED row, NOT dead work: sqlite's
+        # Grammar pre-flight on the ASSEMBLED row, NOT dead work: sqlite's
         # column affinity coerces (e.g. a string ts commits as REAL), so the
-        # committed-row encode below would ACCEPT a row the codec refuses
+        # committed-row encode below would ACCEPT a row the grammar refuses
         # — this is the gate that fails at the append site, where it is
         # attributable, instead of laundering the value.
         encode_row(row)

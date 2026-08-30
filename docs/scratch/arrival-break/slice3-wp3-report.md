@@ -71,13 +71,13 @@ engine pytest libs/engine/tests`, and `tests/architecture` in its own run).
 
 | Suite | Baseline | After | Delta |
 |---|---|---|---|
-| engine | 2158 passed, 1 skipped | 2222 passed, 1 skipped | **+64** |
+| engine | 2158 passed, 1 skipped | 2229 passed, 1 skipped | **+71** |
 | architecture | 99 passed | 99 passed | **0** — Rule 18 is not parametrized per target |
 
 Every delta accounted for: **+57** in `test_arrival_head_seam.py`, **+1** in
 `test_arrival_registry.py` (`test_closing_a_query_that_never_read_does_not_build_a_reader`),
-and **+6** in `test_arrival_head_attestation.py` (sol r1's replay repro and its
-siblings). Three of the seam file's are the gate round's — the BLOCKING repro,
+and **+13** in `test_arrival_head_attestation.py` (sol r1's replay repro and its
+siblings, plus sol r2's context-replay family). Three of the seam file's are the gate round's — the BLOCKING repro,
 the second refusal behind the same write, and the AST ratchet — and seven are sol
 r1's alias work.
 The renamed §0.4 test is 1-for-1. `ruff check` passes on every file this WP wrote
@@ -200,6 +200,93 @@ proposal disagreed and the module won.
     and permitted is not required. `close()` consults the field rather than the
     property, or closing would be the thing that constructs the reader the fix
     deferred.
+
+## Sol r2 — L-1 passed; L-2 failed twice over, both closed
+
+### S3WP3-L-4 — identity was the right binding and the wrong amount of it
+
+Identity is a property of the bytes, so **bytes can carry it**. Sol replayed the
+historical predecessor *and* the reset as an ordered suffix: the copy names an
+entry that really is sitting in front of it, the recorded identity matches, and
+K went 8 → 5 with **no skip record**. Reproduced before changing anything.
+
+`follows` is now **(physical line, identity)**. The line is what closes the
+class rather than the instance: copied bytes appended later always land later,
+so a stale position claim is unavoidable no matter how much surrounding context
+is replayed with them. The two-line replay, a full-suffix replay and a wholesale
+journal concatenation now fail the same check for the same reason. Identity
+stays in the pair because position alone would accept a truncation that happens
+to realign a different entry onto the recorded line.
+
+**Physical line, never an index among parsed entries.** An index is a judgment:
+a future build that classifies one line differently renumbers every entry after
+it and silently voids every reset bound below. Physical line N is line N forever
+in a file that is only ever appended to. `_scan` therefore carries the file's own
+1-based line number for every entry, counted over lines this build skipped too,
+and `test_the_position_is_the_physical_line_not_an_index_of_parsed_entries`
+pins the distinction with an unreadable line sitting between a reset and its
+predecessor.
+
+**The obligation the position claim buys its protection with.** Binding to a
+line means reading the tail and then appending, and **there is no lock to hold
+across the two** — the journal is append-only precisely so that writers need
+none, so this is not an oversight to fix by taking one. A peer appending in that
+window leaves a legitimate, freshly written reset carrying an already-stale
+position, which a later reader declines to honor. The direction is safe (the
+higher abandoned head still stands, so opens keep refusing); what is not safe is
+silence, because an operator who saw the ceremony return believes their store
+will now open. So `trust_reset` reads its own entry back against the same
+judgment every reader applies and raises `TrustResetNotHonored` if it did not
+take. Emit-then-read-back, the store's own ethos: the append landing is not the
+same claim as the append counting.
+
+**Residual, documented at the site and here.** Truncating the journal and then
+replaying realigns positions, and this cannot detect it. That is journal-rollback
+territory — the known bound of unsigned local state, the same class as deleting
+the journal outright and being met with trust-on-first-use. The named upgrade is
+the deferred signed grammar, whose chained entries make a truncation detectable
+rather than merely disbelieved.
+
+### One number the ruling predicted, measured differently
+
+The ruling's regression asks that sol's repro leave **K at 8**. Measured on the
+fixed tree, **K settles at 10**, and the divergence is real rather than a fix
+that half-works:
+
+- The replayed **reset** is correctly rejected — skip record present, the epoch
+  is not reopened, and a store at 5 refuses as `ROLLBACK`. The attack is closed.
+- The replayed **predecessor** is an ordinary `advance` entry, and re-appending
+  it after the legitimate reset is, to the journal, a fresh claim that this
+  machine accepted ordinal 10. The maximum-ordinal rule then takes it, and a
+  store at the genuine head of 8 is refused too.
+
+Refusal-side, and no silent acceptance is reachable through it — a denial of
+service against one's own store, never a way into one. Not fixed here because
+the obvious symmetry does not work: every entry already *is* at its position, so
+a per-entry position check compares an entry against where it currently sits,
+which a copy trivially satisfies. What is missing is the ability to tell a
+re-assertion from a first assertion, and nothing unsigned can date an entry —
+`observed_at` is caller-supplied and copies carry it verbatim. Same named
+upgrade as the truncation bound. Pinned by
+`test_a_replayed_advance_reimports_an_abandoned_head`, and sol's repro test
+carries a comment pointing at it rather than burying the divergence in an
+assertion: `finding:s3wp3-replayed-advance-reimports-an-abandoned-head`.
+
+### S3WP3-L-3 — the previous round's fix was hollow
+
+Sol was right, and this one is a straightforward failure of mine. `trust_reset`
+still called `read_journal`; `last_entry` existed and **only test fixtures used
+it**. The seam edit that was supposed to wire the caller never applied — the
+script that made it died on a later assertion, before its write — and I reported
+it as done on the strength of a print that never ran.
+
+The test did not catch it because **the test pinned the helper, not the
+caller**, and its fixture built an *old-epoch* equivocation, which `read_journal`
+tolerates anyway. So it would have passed against a ceremony that was still
+bricked. The regression now builds a **current-epoch** equivocation — the state
+that actually refuses — and drives the real producer. That is also why the L-3
+mutation demo below reverts the **call site** rather than the helper: a
+helper-revert demo would prove nothing about the hole that existed.
 
 ## Sol r1 — two blocking findings, both closed
 
@@ -549,6 +636,8 @@ Each applied to the working tree, the suite run, the mutation reverted, and
 | (i) | `append_entry` reached through an attribute-style import instead of by name | **2 failed, 48 passed** — the ratchet's precondition assertion fails naming `['append_entry']`; also `test_a_journal_write_failure_after_a_commit_says_the_records_are_committed`, which monkeypatches the module attribute the mutation removes |
 | (L-1) | the object-identity sweep reverted in the binding arm | **1 failed, 56 passed** — `test_a_case_variant_spelling_of_a_bound_store_is_not_first_contact`: the replacement raises nothing and the alias spelling silently first-contacts |
 | (L-2) | read-time reset validation reverted in `_epoch_of` | **4 failed, 154 passed** — sol's repro leads, and *K* measured directly under the mutation is **5** where the journal reached 8; also the genuine-reset, crash-retry and unbound-reset tests |
+| (L-3) | `trust_reset`'s CALL SITE reverted to `read_journal` (the helper left correct and unused — the shape of the r2 hole) | **3 failed, 56 passed** — `test_the_ceremony_succeeds_on_an_equivocating_journal` leads, plus the gap-recording and epoch-scoped-staleness tests |
+| (L-4) | the POSITION half dropped from read-time validation, identity alone again | **2 failed, 104 passed** — both context-replay tests. Measured directly under the mutation: **K = 5, zero skip records, and a store at 5 opens `unchanged`** — sol's attack, reproduced |
 
 **NB-1 — two demos have a nondeterministic failure SET, and the earlier counts
 here were wrong twice over.** `test_two_writers_and_an_opener_leave_a_parseable_journal`

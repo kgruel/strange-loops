@@ -38,6 +38,7 @@ from migrate.refusals import (
     ReportHeadMismatchRefused,
     ReportMalformedRefused,
     ReportMissingTargetRefused,
+    ReportTargetUnopenableRefused,
     SourceChangedRefused,
     TargetMismatchOnResumeRefused,
     TargetUnopenable,
@@ -941,6 +942,24 @@ def test_verify_migration_report_causes(tmp_path: Path) -> None:
             verify=cust.verify,
             target_path=outcome.target_path,
         )
+
+    # 6. Target unopenable (torn-tail target) -> ReportTargetUnopenableRefused with engine type in chain
+    full_bytes = outcome.target_path.read_bytes()
+    try:
+        outcome.target_path.write_bytes(full_bytes + b'{"incomplete": "record"')
+        with pytest.raises(ReportTargetUnopenableRefused) as exc_info:
+            verify_migration_report(
+                outcome.report_path,
+                cust.public,
+                verify=cust.verify,
+                target_path=outcome.target_path,
+            )
+        assert not isinstance(exc_info.value, ReportHeadMismatchRefused)
+        assert exc_info.value.cause is not None
+        assert isinstance(exc_info.value.cause, (StoreLost, ArrivalTornTail))
+        assert isinstance(exc_info.value.__cause__, (StoreLost, ArrivalTornTail))
+    finally:
+        outcome.target_path.write_bytes(full_bytes)
 
 
 # ---------------------------------------------------------------------------

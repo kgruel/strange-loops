@@ -32,6 +32,7 @@ __all__ = [
     "ReportBadSignatureRefused",
     "ReportMissingTargetRefused",
     "ReportHeadMismatchRefused",
+    "ReportTargetUnopenableRefused",
 ]
 
 
@@ -296,4 +297,19 @@ class ReportMissingTargetRefused(ReportVerificationRefused):
 
 class ReportHeadMismatchRefused(ReportVerificationRefused):
     """Target arrival store head does not match the claim in migration report."""
+
+
+class ReportTargetUnopenableRefused(ReportVerificationRefused):
+    """Target arrival store referenced by migration report cannot be opened or read."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        target_path: str | None = None,
+        cause: BaseException | None = None,
+    ) -> None:
+        self.target_path = target_path
+        self.cause = cause
+        super().__init__(message)
 

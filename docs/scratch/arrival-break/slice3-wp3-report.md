@@ -201,6 +201,81 @@ proposal disagreed and the module won.
     property, or closing would be the thing that constructs the reader the fix
     deferred.
 
+## The binding probes — ruled, and a fourth site found while fixing
+
+Ruling on `finding:s3wp3-binding-probes-fail-acceptance-side`, shape as
+proposed. An **absent** bindings file or a nonexistent path stays "no binding"
+— those are answers, and the mint path depends on the second. An input that
+**exists and cannot be read** now refuses, typed.
+
+### The pattern got a name, because it has now appeared five times
+
+`ProbeUnanswered` is the parent; `FenceProbeUnanswered` and
+`BindingProbeUnanswered` sit under it. The defect is a *shape* — a probe whose
+own failure reads as the absence of what it probed for — and naming the shape is
+what lets a caller catch "I could not determine this" as one condition while the
+sites stay distinguishable underneath.
+
+It lives in `arrival_head_attestation` rather than the seam, because the binding
+unit lives there and because `bound_lineage` has to be able to raise it.
+**`BindingProbeUnanswered` dies with the binding unit at slice 5; the parent and
+the fence's subclass do not** — the sweep removes a leaf, not the concept. That
+is the deletion-story answer the routing asked for.
+
+### The fourth site, and it was the one that mattered
+
+Found while testing the fix, not by the original audit: `bound_lineage` let a
+**raw `OSError`** escape past every `except AttestationRefusal`. Refusing was
+already the right direction there, so it never showed up in an acceptance-side
+audit — but being untyped is the builtin-escape gap `JournalUnreadable` exists
+to close one file over. It also reads the bindings file **before**
+`aliased_lineage` does, so without fixing it the other three fixes were
+unreachable through an ordinary open. My first test run is what surfaced it: the
+refusal came out as a bare `OSError`.
+
+### Five per-site mutation demos, and two arms that had no test
+
+Two-guard, committed `c1a578c8` first, tree byte-clean after each revert.
+
+| Site | Reverted | Fails |
+|---|---|---|
+| 1 | `aliased_lineage` OSError | `test_the_alias_sweep_refuses_an_unreadable_bindings_file_on_its_own` |
+| 2 | `_identity_of` OSError | `test_a_recorded_location_that_will_not_stat_refuses` |
+| 3 | `aliased_lineage` ValueError | `test_the_alias_sweep_refuses_an_unparseable_line_on_its_own` |
+| 4a | `bound_lineage` OSError | `test_bound_lineage_refuses_an_unreadable_bindings_file_on_its_own` |
+| 4b | `bound_lineage` ValueError | `test_a_malformed_binding_line_refuses_rather_than_being_skipped` |
+
+The first pass had **no failing test for sites 3 and 4a**. Through an open,
+`bound_lineage` reads the file before `aliased_lineage` does, so reverting the
+inner arm broke nothing — the outer layer's correctness was what those tests
+measured. Defence in depth is only depth if each layer is pinned separately, so
+each arm now has a direct-call test of its own. The demos caught the gap; the
+integration tests never would have.
+
+### Test construction, and why it is not monkeypatched
+
+Real filesystem conditions: a permission wall on the bindings file, and a locked
+directory holding a recorded binding's path. Patching `Path.read_text` or
+`Path.stat` globally — my first attempt — also breaks the **ledger's** own file
+access, so the open fails earlier and the test passes for the wrong reason. That
+is exactly what happened: the stat patch made `verify(Open())` fail, the seam
+took the pre-genesis branch, and nothing refused at all.
+
+The alias is a **hard link**. A symlink resolves to its target and so yields the
+same canonical form, which means it never reaches the alias probe — the probe is
+only consulted when the presenting spelling has no exact binding. A hard link is
+two names, two canonical forms, one inode: precisely the state the identity probe
+exists for, and portable.
+
+Both permission tests skip as root, where `chmod` proves nothing.
+
+### One superseded WP1 test
+
+`test_a_malformed_binding_line_is_skipped_not_refused` pinned the skip, and the
+skip was the defect. Its stated reasoning — "a missing binding degrades to first
+contact, which it never guaranteed" — is true of an absent file and false of a
+line that will not parse. Renamed, inverted, and carrying why.
+
 ## S3I-L-3 — the fence's own probe failed open
 
 `finding:s3-fence-probe-fails-open`. The fence I built to close sol's

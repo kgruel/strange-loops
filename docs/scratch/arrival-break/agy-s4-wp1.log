@@ -1,0 +1,388 @@
+I have launched the test command in the background and am waiting for the execution to complete.
+# Slice 4 WP1 — `libs/migrate` + frozen LegacySource + GF-3 inventory-pass refusal
+
+## 1. What changed, file by file
+
+### New package `libs/migrate/**`:
+- [`libs/migrate/pyproject.toml`](file:///Users/kaygee/Code/loops-wt/s4-wp1/libs/migrate/pyproject.toml): Declares package `migrate` with workspace dependencies `engine`, `store`, `lang`, plus `python-ulid>=3.0` and standard dev tools (`pytest`, `pytest-cov`, `ruff`, `hypothesis`, `ty`), mirroring [`libs/store/pyproject.toml`](file:///Users/kaygee/Code/loops-wt/s4-wp1/libs/store/pyproject.toml).
+- [`libs/migrate/README.md`](file:///Users/kaygee/Code/loops-wt/s4-wp1/libs/migrate/README.md): Exactly three sentences defining the migration sidecar, stating the outward quarantine rule, and pointing to the design proposal / design fact.
+- [`libs/migrate/src/migrate/__init__.py`](file:///Users/kaygee/Code/loops-wt/s4-wp1/libs/migrate/src/migrate/__init__.py): Public package exports ([`inventory`](file:///Users/kaygee/Code/loops-wt/s4-wp1/libs/migrate/src/migrate/inventory.py#L78-L103), [`SourceInventory`](file:///Users/kaygee/Code/loops-wt/s4-wp1/libs/migrate/src/migrate/inventory.py#L49-L75), [`MigrationRefused`](file:///Users/kaygee/Code/loops-wt/s4-wp1/libs/migrate/src/migrate/refusals.py#L23-L28), [`MixedObserverBatchRefused`](file:///Users/kaygee/Code/loops-wt/s4-wp1/libs/migrate/src/migrate/refusals.py#L31-L60), [`AbsentObserverBatchRefused`](file:///Users/kaygee/Code/loops-wt/s4-wp1/libs/migrate/src/migrate/refusals.py#L62-L91), [`FactRow`](file:///Users/kaygee/Code/loops-wt/s4-wp1/libs/migrate/src/migrate/legacy_ids.py#L28-L44), [`Transform`](file:///Users/kaygee/Code/loops-wt/s4-wp1/libs/migrate/src/migrate/legacy_ids.py#L47-L61), [`is_ulid`](file:///Users/kaygee/Code/loops-wt/s4-wp1/libs/migrate/src/migrate/legacy_ids.py#L64-L66), [`deterministic_ulid`](file:///Users/kaygee/Code/loops-wt/s4-wp1/libs/migrate/src/migrate/legacy_ids.py#L69-L78), [`classify_id_era`](file:///Users/kaygee/Code/loops-wt/s4-wp1/libs/migrate/src/migrate/legacy_ids.py#L116-L122), etc.).
+- [`libs/migrate/src/migrate/refusals.py`](file:///Users/kaygee/Code/loops-wt/s4-wp1/libs/migrate/src/migrate/refusals.py): Refusal hierarchy rooted in [`MigrationRefused`](file:///Users/kaygee/Code/loops-wt/s4-wp1/libs/migrate/src/migrate/refusals.py#L23-L28) (independent from `ArrivalBodyError` and `ContractRefusal`). Subclass [`MixedObserverBatchRefused`](file:///Users/kaygee/Code/loops-wt/s4-wp1/libs/migrate/src/migrate/refusals.py#L31-L60) asserts the source location claim ("these source lines carry rows from more than one observer, which this transformer cannot map to one record"), carries structured `offending_lines: tuple[tuple[int, tuple[str, ...]], ...]`, and provides advisory operator prose in message only. [`AbsentObserverBatchRefused`](file:///Users/kaygee/Code/loops-wt/s4-wp1/libs/migrate/src/migrate/refusals.py#L62-L91) represents missing observer fields distinctly without folding `None` into observer sets.
+- [`libs/migrate/src/migrate/legacy_ids.py`](file:///Users/kaygee/Code/loops-wt/s4-wp1/libs/migrate/src/migrate/legacy_ids.py): Frozen ID migration primitives and historical era knowledge copied from `store.rebirth` (commit `affe92a6fc1a034b477cbc068cc563f6e5ca69e6`), providing [`is_ulid`](file:///Users/kaygee/Code/loops-wt/s4-wp1/libs/migrate/src/migrate/legacy_ids.py#L64-L66), [`deterministic_ulid`](file:///Users/kaygee/Code/loops-wt/s4-wp1/libs/migrate/src/migrate/legacy_ids.py#L69-L78), [`identity`](file:///Users/kaygee/Code/loops-wt/s4-wp1/libs/migrate/src/migrate/legacy_ids.py#L81-L83), [`ulid_migration`](file:///Users/kaygee/Code/loops-wt/s4-wp1/libs/migrate/src/migrate/legacy_ids.py#L86-L113), [`FactRow`](file:///Users/kaygee/Code/loops-wt/s4-wp1/libs/migrate/src/migrate/legacy_ids.py#L28-L44), [`Transform`](file:///Users/kaygee/Code/loops-wt/s4-wp1/libs/migrate/src/migrate/legacy_ids.py#L47-L61), and [`classify_id_era`](file:///Users/kaygee/Code/loops-wt/s4-wp1/libs/migrate/src/migrate/legacy_ids.py#L116-L122).
+- [`libs/migrate/src/migrate/legacy_jsonl.py`](file:///Users/kaygee/Code/loops-wt/s4-wp1/libs/migrate/src/migrate/legacy_jsonl.py): Frozen JSONL decode surface copied from `engine.jsonl_codec` (commit `affe92a6fc1a034b477cbc068cc563f6e5ca69e6`) with all encode paths stripped; legacy `body.t` knowledge lives here.
+- [`libs/migrate/src/migrate/legacy_sqlite.py`](file:///Users/kaygee/Code/loops-wt/s4-wp1/libs/migrate/src/migrate/legacy_sqlite.py): Frozen SQLite read spine copied from `store.rebirth` (commit `affe92a6fc1a034b477cbc068cc563f6e5ca69e6`), opening database files strictly read-only via `sqlite3.connect("file:...?mode=ro", uri=True)` without importing `store._conn`.
+- [`libs/migrate/src/migrate/inventory.py`](file:///Users/kaygee/Code/loops-wt/s4-wp1/libs/migrate/src/migrate/inventory.py): Implements [`inventory(source) -> SourceInventory`](file:///Users/kaygee/Code/loops-wt/s4-wp1/libs/migrate/src/migrate/inventory.py#L78-L103) over JSONL and SQLite sources. Contains no file write/creation paths (`assert 'open(..., "w")' not in source`). Computes source format, total lines/rows, per-kind counts, tick count, batch line count, observer census, verifiable witness-order content SHA-256, forensic file SHA-256, and ID era census. Enforces GF-3 mixed-observer batch refusal by enumerating all offending lines before any target admission.
+- [`libs/migrate/tests/__init__.py`](file:///Users/kaygee/Code/loops-wt/s4-wp1/libs/migrate/tests/__init__.py): Test package marker.
+- [`libs/migrate/tests/_fixtures.py`](file:///Users/kaygee/Code/loops-wt/s4-wp1/libs/migrate/tests/_fixtures.py): Test fixtures creating synthetic legacy sources across JSONL and SQLite formats with facts across all three ID eras, signed/unsigned rows, ticks, single-observer batches, and multi-observer/missing-observer test cases.
+- [`libs/migrate/tests/test_inventory.py`](file:///Users/kaygee/Code/loops-wt/s4-wp1/libs/migrate/tests/test_inventory.py): Inventory count verification against hand-computed expectations, JSONL vs SQLite content hash equivalence, GF-3 refusal with full line enumeration, absent-observer distinction, two-hash stability across SQLite VACUUM, and read-only verification.
+- [`libs/migrate/tests/test_legacy_readers.py`](file:///Users/kaygee/Code/loops-wt/s4-wp1/libs/migrate/tests/test_legacy_readers.py): Unit tests for legacy JSONL decoding, legacy SQLite querying, and deterministic ID migration.
+- [`libs/migrate/tests/test_refusals.py`](file:///Users/kaygee/Code/loops-wt/s4-wp1/libs/migrate/tests/test_refusals.py): Unit tests verifying the refusal hierarchy, lack of inheritance from `ArrivalBodyError`, and message/structured data contracts.
+
+### Scope-fenced changes outside `libs/migrate`:
+- [`pyproject.toml`](file:///Users/kaygee/Code/loops-wt/s4-wp1/pyproject.toml): Registered `"libs/migrate/src/migrate"` in `[tool.hatch.build] only-include`, `"libs/migrate/src/migrate"` in `[tool.hatch.build.targets.wheel] packages`, and `"libs/migrate"` in `[tool.uv.workspace] members`.
+- [`tests/architecture/test_rule_04_lib_dependency_dag.py`](file:///Users/kaygee/Code/loops-wt/s4-wp1/tests/architecture/test_rule_04_lib_dependency_dag.py): Added `"migrate": {"engine", "store", "lang"}` to `_LIB_ALLOWED_RUNTIME`.
+- [`tests/architecture/test_rule_07_sqlite3_confined_to_engine_store.py`](file:///Users/kaygee/Code/loops-wt/s4-wp1/tests/architecture/test_rule_07_sqlite3_confined_to_engine_store.py): Added `"migrate"` to `_SQLITE_ALLOWED_LIBS` with a comment naming the frozen sqlite-canonical reader.
+
+---
+
+## 2. Pasted evidence for acceptance checks and break/restore proofs
+
+### Committed State:
+```
+[slice4/wp1 6e39d84e] feat(migrate): WP1 — package skeleton, frozen legacy readers, inventory pass, GF-3 refusal
+ 16 files changed, 1782 insertions(+), 1 deletion(-)
+ create mode 100644 libs/migrate/README.md
+ create mode 100644 libs/migrate/pyproject.toml
+ create mode 100644 libs/migrate/src/migrate/__init__.py
+ create mode 100644 libs/migrate/src/migrate/inventory.py
+ create mode 100644 libs/migrate/src/migrate/legacy_ids.py
+ create mode 100644 libs/migrate/src/migrate/legacy_jsonl.py
+ create mode 100644 libs/migrate/src/migrate/legacy_sqlite.py
+ create mode 100644 libs/migrate/src/migrate/refusals.py
+ create mode 100644 libs/migrate/tests/__init__.py
+ create mode 100644 libs/migrate/tests/_fixtures.py
+ create mode 100644 libs/migrate/tests/test_inventory.py
+ create mode 100644 libs/migrate/tests/test_legacy_readers.py
+ create mode 100644 libs/migrate/tests/test_refusals.py
+```
+
+### Break/Restore Proof 1: Remove mixed-observer check from inventory pass
+**Broken output (pasted):**
+```
+============================= test session starts ==============================
+platform darwin -- Python 3.13.11, pytest-9.1.1, pluggy-1.6.0
+rootdir: /Users/kaygee/Code/loops-wt/s4-wp1/libs/migrate
+configfile: pyproject.toml
+plugins: cov-7.1.0
+collected 8 items / 7 deselected / 1 selected
+
+libs/migrate/tests/test_inventory.py F                                   [100%]
+
+=================================== FAILURES ===================================
+____ test_mixed_observer_batch_refuses_and_enumerates_every_offending_line _____
+
+tmp_path = PosixPath('/Users/kaygee/Code/loops-wt/s4-wp1/.tmp/pt/test_mixed_observer_batch_refu0')
+
+    def test_mixed_observer_batch_refuses_and_enumerates_every_offending_line(tmp_path: Path) -> None:
+        """GF-3 refusal: A JSONL source holding TWO mixed-observer batch lines raises
+        MixedObserverBatchRefused, enumerating BOTH lines with their observer sets,
+        and creates no target or temporary paths."""
+        source_file = build_mixed_observer_jsonl(tmp_path / "mixed.jsonl")
+    
+        # Record files in directory before inventory
+        files_before = set(tmp_path.iterdir())
+    
+>       with pytest.raises(MixedObserverBatchRefused) as exc_info:
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE MixedObserverBatchRefused
+
+libs/migrate/tests/test_inventory.py:74: Failed
+=========================== short test summary info ============================
+FAILED libs/migrate/tests/test_inventory.py::test_mixed_observer_batch_refuses_and_enumerates_every_offending_line
+======================= 1 failed, 7 deselected in 0.31s ========================
+```
+**Restored output (pasted):**
+```
+============================= test session starts ==============================
+platform darwin -- Python 3.13.11, pytest-9.1.1, pluggy-1.6.0
+rootdir: /Users/kaygee/Code/loops-wt/s4-wp1/libs/migrate
+configfile: pyproject.toml
+plugins: cov-7.1.0
+collected 8 items / 7 deselected / 1 selected
+
+libs/migrate/tests/test_inventory.py .                                   [100%]
+
+======================= 1 passed, 7 deselected in 0.11s ========================
+```
+
+### Break/Restore Proof 2: Make refusal report only the FIRST offending line
+**Broken output (pasted):**
+```
+============================= test session starts ==============================
+platform darwin -- Python 3.13.11, pytest-9.1.1, pluggy-1.6.0
+rootdir: /Users/kaygee/Code/loops-wt/s4-wp1/libs/migrate
+configfile: pyproject.toml
+plugins: cov-7.1.0
+collected 8 items / 7 deselected / 1 selected
+
+libs/migrate/tests/test_inventory.py F                                   [100%]
+
+=================================== FAILURES ===================================
+____ test_mixed_observer_batch_refuses_and_enumerates_every_offending_line _____
+
+tmp_path = PosixPath('/Users/kaygee/Code/loops-wt/s4-wp1/.tmp/pt/test_mixed_observer_batch_refu0')
+
+    def test_mixed_observer_batch_refuses_and_enumerates_every_offending_line(tmp_path: Path) -> None:
+        """GF-3 refusal: A JSONL source holding TWO mixed-observer batch lines raises
+        MixedObserverBatchRefused, enumerating BOTH lines with their observer sets,
+        and creates no target or temporary paths."""
+        source_file = build_mixed_observer_jsonl(tmp_path / "mixed.jsonl")
+    
+        # Record files in directory before inventory
+        files_before = set(tmp_path.iterdir())
+    
+        with pytest.raises(MixedObserverBatchRefused) as exc_info:
+            inventory(source_file)
+    
+        exc = exc_info.value
+        # Offending lines must contain BOTH line 2 and line 4 with their exact observer sets:
+>       assert len(exc.offending_lines) == 2
+E       assert 1 == 2
+E        +  where 1 = len(((2, ('kyle', 'someone-else')),))
+E        +    where ((2, ('kyle', 'someone-else')),) = MixedObserverBatchRefused("Migration refused for source '/Users/kaygee/Code/loops-wt/s4-wp1/.tmp/pt/test_mixed_observe...rs 'kyle', 'someone-else'\nAdvisory: repair the source line(s) by hand or re-run migration after a ruled re-ceremony.").offending_lines
+
+libs/migrate/tests/test_inventory.py:79: AssertionError
+=========================== short test summary info ============================
+FAILED libs/migrate/tests/test_inventory.py::test_mixed_observer_batch_refuses_and_enumerates_every_offending_line
+======================= 1 failed, 7 deselected in 0.12s ========================
+```
+**Restored output (pasted):**
+```
+============================= test session starts ==============================
+platform darwin -- Python 3.13.11, pytest-9.1.1, pluggy-1.6.0
+rootdir: /Users/kaygee/Code/loops-wt/s4-wp1/libs/migrate
+configfile: pyproject.toml
+plugins: cov-7.1.0
+collected 8 items / 7 deselected / 1 selected
+
+libs/migrate/tests/test_inventory.py .                                   [100%]
+
+======================= 1 passed, 7 deselected in 0.06s ========================
+```
+
+### Break/Restore Proof 3: Perturb one inventory count (off-by-one)
+**Broken output (pasted):**
+```
+============================= test session starts ==============================
+platform darwin -- Python 3.13.11, pytest-9.1.1, pluggy-1.6.0
+rootdir: /Users/kaygee/Code/loops-wt/s4-wp1/libs/migrate
+configfile: pyproject.toml
+plugins: cov-7.1.0
+collected 8 items / 6 deselected / 2 selected
+
+libs/migrate/tests/test_inventory.py F.                                  [100%]
+
+=================================== FAILURES ===================================
+__________ test_inventory_counts_vs_hand_computed_expectations[jsonl] __________
+
+tmp_path = PosixPath('/Users/kaygee/Code/loops-wt/s4-wp1/.tmp/pt/test_inventory_counts_vs_hand_0')
+fmt = 'jsonl'
+
+    @pytest.mark.parametrize("fmt", ["jsonl", "sqlite"])
+    def test_inventory_counts_vs_hand_computed_expectations(tmp_path: Path, fmt: str) -> None:
+        """Verify inventory counts against hand-computed expectations across all ID eras,
+        signed and unsigned rows, ticks, and batch lines."""
+        expected = EXPECTED_HAND_COMPUTED_COUNTS[fmt]
+    
+        if fmt == "jsonl":
+            source_file = build_synthetic_jsonl(tmp_path / "legacy.jsonl")
+        else:
+            source_file = build_synthetic_sqlite(tmp_path / "legacy.sqlite")
+    
+        inv = inventory(source_file)
+    
+        assert isinstance(inv, SourceInventory)
+        assert inv.source_format == expected["source_format"]
+        assert inv.total_lines == expected["total_lines"]
+        assert inv.per_kind_counts == expected["per_kind_counts"]
+        assert inv.per_kind_row_counts == expected["per_kind_counts"]
+>       assert inv.tick_count == expected["tick_count"]
+E       AssertionError: assert 3 == 2
+E        +  where 3 = SourceInventory(source_format='jsonl-canonical', total_lines=8, per_kind_counts={'concept': 3, 'claim': 3, 'event': 1}...756f7b2219557db25f24bb3a1ebe8288b61d980fdcd2ccd', id_era_census={'canonical-ulid': 4, 'lowercase-ulid': 1, 'uuid4': 2}).tick_count
+
+libs/migrate/tests/test_inventory.py:42: AssertionError
+=========================== short test summary info ============================
+FAILED libs/migrate/tests/test_inventory.py::test_inventory_counts_vs_hand_computed_expectations[jsonl]
+================== 1 failed, 1 passed, 6 deselected in 0.05s ===================
+```
+**Restored output (pasted):**
+```
+============================= test session starts ==============================
+platform darwin -- Python 3.13.11, pytest-9.1.1, pluggy-1.6.0
+rootdir: /Users/kaygee/Code/loops-wt/s4-wp1/libs/migrate
+configfile: pyproject.toml
+plugins: cov-7.1.0
+collected 8 items / 6 deselected / 2 selected
+
+libs/migrate/tests/test_inventory.py ..                                  [100%]
+
+======================= 2 passed, 6 deselected in 0.02s ========================
+```
+
+### Break/Restore Proof 4: Add `import migrate # rule-4 probe` to `libs/engine`
+**Broken output (pasted):**
+```
+F                                                                        [100%]
+=================================== FAILURES ===================================
+___________________________ test_lib_dependency_dag ____________________________
+
+    def test_lib_dependency_dag():
+        """Enforce the lib dependency DAG.
+    
+        Allowed runtime: engine -> lang, engine -> atoms (function-local).
+        All other cross-lib runtime imports are forbidden.
+        Relative imports (intra-package) are excluded by the collector.
+        """
+        violations = []
+        for lib_name in LIBS:
+            lib_dir = REPO_ROOT / "libs" / lib_name
+            if not lib_dir.is_dir():
+                continue
+            allowed = _LIB_ALLOWED_RUNTIME.get(lib_name, set())
+            for py_file in _src_py_files(lib_dir):
+                collector = _collect_imports(py_file)
+                for other_lib in LIBS:
+                    if other_lib == lib_name:
+                        continue
+                    if other_lib in allowed:
+                        continue
+                    lines = _imports_module(collector.runtime_modules, other_lib)
+                    for lineno in lines:
+                        violations.append(
+                            f"  {_rel(py_file)}:{lineno} — {lib_name} imports {other_lib} at runtime"
+                        )
+    
+>       assert not violations, (
+            "Lib dependency DAG violation (see _LIB_ALLOWED_RUNTIME):\n"
+            + "\n".join(violations)
+        )
+E       AssertionError: Lib dependency DAG violation (see _LIB_ALLOWED_RUNTIME):
+E           libs/engine/src/engine/__init__.py:20 — engine imports migrate at runtime
+E       assert not ['  libs/engine/src/engine/__init__.py:20 — engine imports migrate at runtime']
+
+tests/architecture/test_rule_04_lib_dependency_dag.py:74: AssertionError
+=========================== short test summary info ============================
+FAILED tests/architecture/test_rule_04_lib_dependency_dag.py::test_lib_dependency_dag
+1 failed in 0.25s
+```
+**Restored output (pasted):**
+```
+.                                                                        [100%]
+1 passed in 1.90s
+```
+
+### Break/Restore Proof 5: Fold missing observer into observer set as `None`
+**Broken output (pasted):**
+```
+============================= test session starts ==============================
+platform darwin -- Python 3.13.11, pytest-9.1.1, pluggy-1.6.0
+rootdir: /Users/kaygee/Code/loops-wt/s4-wp1/libs/migrate
+configfile: pyproject.toml
+plugins: cov-7.1.0
+collected 8 items / 7 deselected / 1 selected
+
+libs/migrate/tests/test_inventory.py F                                   [100%]
+
+=================================== FAILURES ===================================
+___________ test_absent_observer_batch_refusal_is_distinct_condition ___________
+
+tmp_path = PosixPath('/Users/kaygee/Code/loops-wt/s4-wp1/.tmp/pt/test_absent_observer_batch_ref0')
+
+    def test_absent_observer_batch_refusal_is_distinct_condition(tmp_path: Path) -> None:
+        """A batch line with a row missing the observer field raises AbsentObserverBatchRefused,
+        distinct from MixedObserverBatchRefused (None is not folded into observer set)."""
+        source_file = build_absent_observer_jsonl(tmp_path / "absent.jsonl")
+    
+        with pytest.raises(AbsentObserverBatchRefused) as exc_info:
+>           inventory(source_file)
+
+libs/migrate/tests/test_inventory.py:102: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+libs/migrate/src/migrate/inventory.py:102: in inventory
+    return _inventory_jsonl(source_path, file_hash)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+...
+        if mixed_observer_lines:
+>           raise MixedObserverBatchRefused(
+                offending_lines=mixed_observer_lines,
+                source=str(source_path),
+            )
+E           migrate.refusals.MixedObserverBatchRefused: Migration refused for source '/Users/kaygee/Code/loops-wt/s4-wp1/.tmp/pt/test_absent_observer_batch_ref0/absent.jsonl' (GF-3: mixed-observer batch lines found).
+E           The following source line(s) carry batch rows spanning more than one observer, which cannot map to a single Arrival record:
+E             line 2: observers 'None', 'alice'
+E           Advisory: repair the source line(s) by hand or re-run migration after a ruled re-ceremony.
+
+libs/migrate/src/migrate/inventory.py:242: MixedObserverBatchRefused
+=========================== short test summary info ============================
+FAILED libs/migrate/tests/test_inventory.py::test_absent_observer_batch_refusal_is_distinct_condition
+======================= 1 failed, 7 deselected in 0.07s ========================
+```
+**Restored output (pasted):**
+```
+============================= test session starts ==============================
+platform darwin -- Python 3.13.11, pytest-9.1.1, pluggy-1.6.0
+rootdir: /Users/kaygee/Code/loops-wt/s4-wp1/libs/migrate
+configfile: pyproject.toml
+plugins: cov-7.1.0
+collected 8 items / 7 deselected / 1 selected
+
+libs/migrate/tests/test_inventory.py .                                   [100%]
+
+======================= 1 passed, 7 deselected in 0.03s ========================
+```
+
+---
+
+### Final Repository Status and Diff
+`cd /Users/kaygee/Code/loops-wt/s4-wp1 && git status --short`:
+```
+?? .tmp/
+```
+`cd /Users/kaygee/Code/loops-wt/s4-wp1 && git diff`:
+```
+(empty)
+```
+
+---
+
+### Final Checks
+1. Forbidden import grep check:
+```bash
+grep -rn "from engine.jsonl\|import engine.jsonl\|from store.rebirth\|from store import.*rebirth\|from store._conn\|import jsonl_codec\|import jsonl_store" libs/migrate/src/
+```
+Output: (empty, exit code 1).
+
+2. Unit test suite and scoped architecture checks:
+```bash
+uv run pytest libs/migrate tests/architecture/test_rule_04_lib_dependency_dag.py tests/architecture/test_rule_07_sqlite3_confined_to_engine_store.py -q
+```
+Output:
+```
+................                                                         [100%]
+16 passed in 0.52s
+```
+
+---
+
+## 3. Root-pyproject registration: what was found and mirrored
+
+Inspected root [`pyproject.toml`](file:///Users/kaygee/Code/loops-wt/s4-wp1/pyproject.toml) and searched for occurrences of existing library entries (such as `"libs/store"` / `store`). Found three locations:
+1. `[tool.hatch.build] only-include`: list of bundled package source directories. Mirrored by adding `"libs/migrate/src/migrate",`.
+2. `[tool.hatch.build.targets.wheel] packages`: list of wheel source packages. Mirrored by adding `"libs/migrate/src/migrate",`.
+3. `[tool.uv.workspace] members`: list of workspace member paths. Mirrored by adding `"libs/migrate",`.
+
+No third-party runtime dependencies beyond those already declared at the root level (`python-ulid>=3.0`, `rfc8785`, etc.) were introduced.
+
+---
+
+## 4. Deviations from the contract
+
+None. All 5 rulings and deliverables were implemented without deviation.
+
+---
+
+## 5. Found-but-left-alone
+
+1. **Rule 11 Layer Ratchet (`test_every_lib_declares_a_layer` in [`tests/architecture/test_rule_11_record_never_imports_surfacing.py`](file:///Users/kaygee/Code/loops-wt/s4-wp1/tests/architecture/test_rule_11_record_never_imports_surfacing.py)):**
+   - **Finding:** Rule 11 derives `LIBS` dynamically via `(REPO_ROOT / "libs").iterdir()`. `test_every_lib_declares_a_layer` checks that every lib directory in `LIBS` is listed in `_LIB_LAYER` (and `ARCHITECTURE.md`). Adding `libs/migrate` auto-enrolled `migrate` into `LIBS`, causing `test_every_lib_declares_a_layer` to fail (`AssertionError: Lib without a layer assignment: migrate`).
+   - **Action taken:** Left untouched. The scope fence explicitly forbids editing `tests/architecture/test_rule_11_...` or `ARCHITECTURE.md` ("An out-of-scope edit is a failure of this task even if the edit is good"). The brief's explicit instruction to report findings rather than editing out-of-scope files was followed.
+
+---
+
+## 6. What was NOT verified
+
+1. **Future Transformer/Sink integration (WP2 & WP3):** WP1 implements and tests only the frozen readers, ID era taxonomy, GF-3 refusal, and read-only inventory pass. Conversion into Arrival `RecordDraft`, outer-unsigned envelopes, `mint` through `AttestedLedger`, and sink append loops belong to WP2/WP3 and were not tested against live Arrival backends.
+2. **Multi-gigabyte source performance:** Test fixtures verify equivalence and count correctness on synthetic multi-era legacy sources up to hundreds of rows; scalability on multi-gigabyte production logs was not benchmarked.
+3. **DuckDB / PostgreSQL target backends:** Tested only canonical `.jsonl` and SQLite `.sqlite` legacy sources as specified by the WP1 brief.

@@ -201,6 +201,78 @@ proposal disagreed and the module won.
     property, or closing would be the thing that constructs the reader the fix
     deferred.
 
+## S3I-L-3 — the fence's own probe failed open
+
+`finding:s3-fence-probe-fails-open`. The fence I built to close sol's
+acceptance loop contained a probe that lied on the acceptance side, and sol
+reproduced the entire self-erasing cycle through a transient `OSError`: descent
+verifies, the anchor probe raises, the advance is accepted **and journaled**,
+and the next open — on a perfectly healthy ledger — reads UNCHANGED.
+
+**The comment I wrote on that catch stated the error out loud**: *"no answer is
+no evidence of a touch."* Evidence absent is not absence of evidence. Every
+other broad catch in this seam is justified in the report by landing on the
+refusing branch, and I had written that rule three separate times without
+applying it at the one site where the fallback direction was acceptance.
+
+**The fix**: an unanswered probe raises `FenceProbeUnanswered`. A **sibling** of
+`AbandonedHistoryFenced` rather than an arm of it, because the claims differ and
+so do their remedies — one says *your history touches decreed-away ground* and
+is answered by the ceremony; this says *I could not determine whether it does*
+and is answered by retrying. Named for what the read lacks rather than for what
+failed, because a cause-name does not survive a second cause.
+
+**Not the degradation posture**, by that posture's own rule: it proceeds only
+after firing every refusal the evidence soundly supports, and an uncertified
+fence path is a refusal the evidence demands. Being wrong here costs one retried
+open; being wrong the other way costs silent re-acceptance of decreed-away
+history.
+
+### Probe audit — the fence
+
+The finding is about the pattern, so every site was checked rather than the one
+line. The fence has **exactly one** probe. Its lift check is pure ordinal and
+lineage comparison with no I/O, and its two early returns are structural
+conditions rather than probes, so neither can fail open. `_descent` and
+`_vouched_at` both catch broadly and both land on refusal, unchanged.
+
+### Mutation demo
+
+Two-guard: committed `333021bc` first, tree byte-clean after the revert.
+Catch-and-continue restored → **2 failed, 67 passed**, and the loop reproduced
+directly rather than inferred:
+
+```
+probe raises on the anchor, restore  => advanced
+journal now holds ordinal: 2
+next open, CLEAN ledger              => unchanged   <- the loop, via a transient error
+```
+
+The first attempt at this demo mis-constructed the probe — failing *every*
+`head_at` made `_descent` refuse first with `HeadRewrite`, which is the seam
+correctly failing refusal-side and proves nothing about the fence. The probe has
+to fail selectively, at the anchor ordinal only, for the fence to be the thing
+under test.
+
+### The same shape, outside the fence — reported, not fixed
+
+Scoped out of this round, but the pattern audit found it and it should be ruled
+rather than left: the **transitional binding unit** has three catches that all
+fail acceptance-side.
+
+| Site | Failure read as |
+|---|---|
+| `aliased_lineage`, `except OSError` | "no alias" — a bindings file that exists but cannot be read (permission wall, I/O error) means a replacement slips past `LineageReplaced` as first contact |
+| `_identity_of`, `except OSError` | "no identity" — defensible for a path that genuinely does not stat, but an I/O error at a path that does exist reads the same way |
+| the binding line loop, `except ValueError` | "skip" — a malformed line could be the very binding that named the alias |
+
+All three are the S3I-L-3 shape with a different consequence: not the
+self-erasing loop, but a silent first contact where a replacement should have
+refused. Left alone because this round is scoped to the fence and that unit
+carries its own `DELETE IN SLICE 5` marker — but it is the same finding, and the
+deletion is not a reason to leave it wrong in the meantime.
+`finding:s3wp3-binding-probes-fail-acceptance-side`.
+
 ## Design amendment #6 — the abandoned-history fence
 
 Sol's integration round escalated my own N+1-descendant flag from deferred to

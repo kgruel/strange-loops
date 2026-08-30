@@ -551,7 +551,7 @@ def aliased_lineage(location: str) -> str | None:
                 f"line {number} of {bindings_path()} does not parse ({exc}), "
                 "and a line that cannot be read may be the binding that names "
                 "this location. Nothing has been accepted or written — repair "
-                "or remove the line, then retry the open"
+                "or remove the line"
             ) from exc
         where = decoded.get("location") if isinstance(decoded, dict) else None
         lineage = decoded.get("lineage") if isinstance(decoded, dict) else None

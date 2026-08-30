@@ -1585,18 +1585,32 @@ def bound_lineage(location: str) -> str | None:
 
     DELETE IN SLICE 5.
 
-    **An ABSENT file answers None**, and that is the one degradation this makes:
-    nothing has ever been bound, so first contact is the honest state.
+    **The answer surface, in full.** Three outcomes, split by where a failure
+    happened rather than by what anyone should do about it:
 
-    Everything else REFUSES, which is the correction to what this docstring
-    used to claim. It said a malformed line is skipped because "this file makes
-    no claim a skipped line could weaken" — and that was wrong in the way that
-    mattered: the skipped line may be the very binding that names this
-    location, so skipping answers "nothing is bound here" on evidence that says
-    nothing of the kind, and a replaced store then opens as first contact
-    (``finding:s3wp3-binding-probes-fail-acceptance-side``). Unreadable content
-    raises :class:`BindingsUnreadable` and asks for repair; a transient read
-    failure raises :class:`BindingProbeUnanswered` and asks for a retry.
+    * **None** — the file is absent or empty, every line is blank, or the
+      bindings it holds are well-formed and name OTHER locations. Each of these
+      is an ANSWER: nothing is bound here, and first contact is the honest
+      state. A binding for a different store genuinely says nothing about this
+      one, and refusing on it would make every bindings file holding more than
+      one store unopenable.
+    * :class:`BindingsUnreadable` — the bytes arrived and could not be
+      interpreted as bindings: not UTF-8, not JSON, or JSON carrying no
+      location and lineage. None of those says anything about what this
+      location presented, so answering None on them reports an absence the
+      evidence does not support
+      (``finding:s3wp3-binding-probes-fail-acceptance-side``,
+      ``finding:s3-binding-shape-filter-silently-drops``).
+    * :class:`BindingProbeUnanswered` — storage would not yield the bytes at
+      all.
+
+    **No claim here about transience or remedy.** This docstring used to sort
+    the refusals into "asks for repair" and "asks for a retry", and that axis
+    is not decidable from an exception class — ``IsADirectoryError`` arrives
+    through the same door as a passing I/O fault
+    (``finding:s3-refusal-family-remedy-promise-undecidable``). Remedy is
+    advisory prose carried per cause in the message; the types assert only
+    where the failure happened.
     """
     try:
         text = bindings_path().read_text(encoding="utf-8")
@@ -1604,20 +1618,19 @@ def bound_lineage(location: str) -> str | None:
         # ABSENT is an answer: nothing has ever been bound.
         return None
     except UnicodeDecodeError as exc:
-        # PERMANENT, so not a probe failure: these bytes will decode the same
-        # way on every retry, and the honest advice is repair.
+        # CONTENT: the bytes arrived and could not be interpreted.
         raise BindingsUnreadable(
             f"the bindings file at {bindings_path()} is not valid UTF-8 "
             f"({exc}), so no location's recorded lineage can be read. Nothing "
             "has been accepted or written — repair or remove the file"
         ) from exc
     except OSError as exc:
-        # Was a RAW OSError escaping past every `except AttestationRefusal`,
-        # which is the builtin-escape gap `JournalUnreadable` exists to close
-        # one file over. Refusing is the right direction; being typed is what
-        # lets a caller catch it with the rest. TRANSIENT-flavoured, so it
-        # stays a probe failure: a permission wall can be lifted and an I/O
-        # error can pass.
+        # STORAGE: the bytes never arrived. Was a RAW OSError escaping past
+        # every `except AttestationRefusal`, which is the builtin-escape gap
+        # `JournalUnreadable` exists to close one file over. Refusing is the
+        # right direction; being typed is what lets a caller catch it with the
+        # rest, and `storage_advice` carries the remedy the type does not
+        # claim.
         raise BindingProbeUnanswered(
             f"the bindings file at {bindings_path()} exists and storage "
             f"would not yield it ({exc}), so this location's recorded lineage "
@@ -1636,7 +1649,7 @@ def bound_lineage(location: str) -> str | None:
                 f"a line of {bindings_path()} does not parse ({exc}), and a "
                 "line that cannot be read may be the binding that names this "
                 "location. Nothing has been accepted or written — repair or "
-                "remove the line, then retry the open"
+                "remove the line"
             ) from exc
         if not (
             isinstance(decoded, dict)
@@ -1653,9 +1666,9 @@ def bound_lineage(location: str) -> str | None:
                 "cannot be ruled out as this location's. Nothing has been "
                 "accepted or written — repair or remove the line"
             )
+        # A well-formed binding for a DIFFERENT store is the one legitimate
+        # skip left: it genuinely says nothing about this location. Newest
+        # wins, so the loop runs to the end rather than stopping at a match.
         if decoded["location"] == location:
-            # The one thing that survives as a legitimate skip: a well-formed
-            # binding for a DIFFERENT store genuinely says nothing about this
-            # one.
             found = decoded["lineage"]
     return found

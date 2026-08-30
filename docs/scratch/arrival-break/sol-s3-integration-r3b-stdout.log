@@ -1,0 +1,1562 @@
+Reading prompt from stdin...
+OpenAI Codex v0.150.1
+--------
+workdir: /Users/kaygee/Code/loops-s3wp1
+model: gpt-5.6-sol
+provider: openai
+approval: never
+sandbox: workspace-write [workdir, /tmp, $TMPDIR]
+reasoning effort: low
+reasoning summaries: none
+session id: 01a053b7-1edc-70f0-a9d4-a56c6223f6aa
+--------
+user
+# Sol review brief — arrival-break slice 3, integration round 3 (per-WP, LOW)
+
+Round 3, verifying the fixes for your r2 blocking finding S3I-L-3 (fence probe
+fails open) plus the pattern-audit follow-through it triggered.
+
+## 1. Anchor
+
+- Worktree: this directory (`~/Code/loops-s3wp1`), branch `slice3/arrival-witness`,
+  NEW tip `32234eac`. Diff since your r2: `git diff 4b1a14a4...32234eac`.
+- Suites: engine per-package, architecture SEPARATELY. Claimed at 0d9da45f:
+  engine 2295 passed + 1 skipped + 0 failed, arch 99, ruff clean.
+- ARBITER-APPLIED fix at the tip (prose-only, no independent gate — you are its
+  only verification): `32234eac` adds the fence's cost sentence to §04b (one
+  verified lookup per abandoned anchor on advancing opens; scales with ceremony
+  history; never paid on the dominant unchanged open) — your r2 perf residual.
+  Verify it against the implementation's actual cost shape and that it neither
+  under- nor over-claims.
+
+## 2. Unverified fixes, by commit
+
+- `333021bc` + `f85a5648` — S3I-L-3: `FenceProbeUnanswered`, a SIBLING of
+  `AbandonedHistoryFenced` (different claim, different remedy: "touches
+  decreed-away ground → ceremony" vs "could not determine → retry"). An
+  unanswered fence probe refuses, typed, before `_Earned`. Probe audit: exactly
+  one probe in the fence; lift check is pure comparison, no I/O.
+- `c1a578c8` + `0d9da45f` — the pattern audit's harvest, ruled fixed now
+  (finding:s3wp3-binding-probes-fail-acceptance-side): FOUR sites in the
+  transitional binding unit. Three read I/O/parse failure as "no alias found"
+  (silent first contact): `aliased_lineage` OSError, `_identity_of` OSError,
+  binding-line-loop ValueError. The FOURTH was found while testing and gated
+  the others' reachability: `bound_lineage` let a raw OSError ESCAPE UNTYPED
+  past every `except AttestationRefusal` (wrong by being untyped, not by
+  direction), and it reads the bindings file BEFORE `aliased_lineage`. Pattern
+  named: `ProbeUnanswered` parent; `BindingProbeUnanswered` dies with the unit
+  at slice 5, parent + fence subclass survive. One WP1 test inverted (it pinned
+  the malformed-line skip, and the skip was the defect).
+
+## 3. Verify each — empirically where possible
+
+1. **S3I-L-3 regression**: your repro — transient failure on the anchor lookup
+   → open REFUSED (`FenceProbeUnanswered`), journal AND binding byte-identical.
+   Re-run their test AND your own r2 construction. NOTE their demo lesson: the
+   probe must fail SELECTIVELY at the anchor ordinal — failing every `head_at`
+   makes `_descent` refuse first (`HeadRewrite`) and proves nothing about the
+   fence. Verify their selective construction actually isolates the fence.
+2. **Mutation demo**: catch-and-continue restored → 2 failed, the loop
+   reproduced (probe raises → advanced → journaled → next clean open
+   unchanged). Re-run.
+3. **The four binding sites**: per-site regressions (probe raises → typed
+   refusal, nothing journaled, no binding written) and FIVE per-site mutation
+   demos each failing EXACTLY ONE test — their first pass had no failing test
+   for two arms because `bound_lineage` refuses before `aliased_lineage` is
+   reached through an open; each arm now has a direct-call test. Verify the
+   demos still fail exactly one each (that is the depth-is-pinned-separately
+   claim — if a demo fails zero or several, the claim is broken).
+4. **Real-filesystem construction**: the tests use a permission wall and a
+   locked directory (skip as root), and the alias is a HARD LINK (a symlink
+   resolves to the same canonical form and never reaches the alias probe).
+   Verify the constructions actually exercise the probe paths claimed — and
+   that root-skip leaves each judgment covered by some other test on this
+   platform.
+5. **The inverted WP1 test**: its reasoning (absent file = no binding is fine;
+   unreadable LINE = refusal) — verify the inversion is right and no other test
+   still pins the old skip.
+6. **Typed-escape sweep**: `bound_lineage`'s raw-OSError escape was invisible
+   to an acceptance-side audit. Sweep the seam + attestation module for any
+   OTHER path where a builtin exception escapes past the typed-refusal
+   boundary (the `JournalUnreadable` pattern one file over is the model).
+7. Counts: engine 2295+1s+0f (+9 over r2), arch 99 separate, ruff clean,
+   `git diff --check` clean.
+
+## 4. Try-to-defeat seeds
+
+- **ProbeUnanswered as a new uniform-outcome surface**: two sibling refusal
+  types now say "retry". Can a caller catch the parent and retry FOREVER on a
+  permanent condition (deleted-then-recreated store dir, permanently
+  unreadable bindings file) — is there anything that distinguishes
+  transient-retry from permanent-operator-problem, and if not, is that honest
+  (documented) or a hole?
+- **The fence under probe-refusal pressure**: repeated FenceProbeUnanswered
+  opens (flaky NFS) — does anything degrade, cache, or give up in a way that
+  weakens the fence after N failures?
+- **Order dependence**: `bound_lineage` reads the bindings file before
+  `aliased_lineage`. Construct a state where the FIRST read succeeds and the
+  SECOND fails (file replaced between reads within one open) — typed refusal
+  or something worse?
+- **The §04b cost sentence**: is "never on the dominant unchanged open" true
+  under every path (including a fenced-then-retried open that lands unchanged)?
+
+## 5. Verdict format
+
+Per-item PASS/FAIL + evidence. New findings: `S3I-L-<n>` continuing, file:line,
+severity, concrete failure scenario. Then one line: **CONVERGED** or
+**NOT CONVERGED** (with the blocking list).
+
+codex
+I’ll verify the specified commit range, run the targeted regressions and mutation demos, then independently sweep the typed-refusal boundary and check the §04b cost claim against control flow. I’ll keep architecture and engine runs separate as requested.
+exec
+/bin/zsh -lc "pwd && rg --files -g 'AGENTS.md' -g '"'!**/.git/**'"' .. | head -50 && git status --short --branch && git log --oneline -8" in /Users/kaygee/Code/loops-s3wp1
+ succeeded in 251ms:
+../idp-eval/AGENTS.md
+../living-almanac/AGENTS.md
+../gruel-design-system/src/systems/gruel/AGENTS.md
+../topstep-mig/AGENTS.md
+../gruel-design-system/src/systems/bfc/AGENTS.md
+../topstep/AGENTS.md
+../gruel-design-system/AGENTS.md
+../forks/SillyBunny/AGENTS.md
+../forks/Marinara-Engine/AGENTS.md
+../forks/HVM4/AGENTS.md
+## slice3/arrival-witness
+32234eac docs(arrival): the fence's reach has a stated price
+0d9da45f docs(scratch): record the binding-probe ruling, the fourth site, and the demos
+01ebe44d test(engine): pin each probe layer separately
+c1a578c8 fix(engine): a binding probe that cannot answer refuses
+f85a5648 docs(scratch): record S3I-L-3, the probe audit, and the same shape elsewhere
+333021bc fix(engine): an unanswered fence probe refuses
+4b1a14a4 merge(slice3): doc rounds 3-4 — the fence supersedes the disclosure
+a3d5b913 docs(arrival): the fence detects something, so §02 says so
+
+exec
+/bin/zsh -lc 'git diff --stat 4b1a14a4...32234eac && git diff --check 4b1a14a4...32234eac && git diff --name-only 4b1a14a4...32234eac && git show --stat --oneline 32234eac' in /Users/kaygee/Code/loops-s3wp1
+ succeeded in 0ms:
+ docs/architecture/arrival/witness-protocol.html    |   6 +-
+ docs/scratch/arrival-break/slice3-wp3-report.md    | 147 ++++++++++
+ libs/engine/src/engine/arrival_head_attestation.py |  55 +++-
+ libs/engine/src/engine/arrival_head_seam.py        | 105 ++++++-
+ libs/engine/tests/test_arrival_head_attestation.py |  18 +-
+ libs/engine/tests/test_arrival_head_seam.py        | 304 +++++++++++++++++++++
+ 6 files changed, 616 insertions(+), 19 deletions(-)
+docs/architecture/arrival/witness-protocol.html
+docs/scratch/arrival-break/slice3-wp3-report.md
+libs/engine/src/engine/arrival_head_attestation.py
+libs/engine/src/engine/arrival_head_seam.py
+libs/engine/tests/test_arrival_head_attestation.py
+libs/engine/tests/test_arrival_head_seam.py
+32234eac docs(arrival): the fence's reach has a stated price
+ docs/architecture/arrival/witness-protocol.html | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+exec
+/bin/zsh -lc 'git diff 4b1a14a4...32234eac -- libs/engine/src/engine/arrival_head_attestation.py libs/engine/src/engine/arrival_head_seam.py docs/architecture/arrival/witness-protocol.html && rg -n "FenceProbeUnanswered|BindingProbeUnanswered|ProbeUnanswered|mutation|permission|hard link|hardlink|locked|unreadable" libs/engine/tests docs/scratch/arrival-break/slice3-wp3-report.md pyproject.toml libs/engine/pyproject.toml' in /Users/kaygee/Code/loops-s3wp1
+ succeeded in 0ms:
+diff --git a/docs/architecture/arrival/witness-protocol.html b/docs/architecture/arrival/witness-protocol.html
+index 47ed34c5..e153229e 100644
+--- a/docs/architecture/arrival/witness-protocol.html
++++ b/docs/architecture/arrival/witness-protocol.html
+@@ -442,7 +442,11 @@
+           re-advance at an abandoned ordinal under a different hash an ordinary advance. It reaches
+           <strong>every walked coordinate</strong> rather than the presented head alone, because an
+           abandoned branch grown offline presents <em>N+3</em> while the abandoned entry sits at
+-          <em>N+1</em>, and head-only checking waves it through. And it sits <strong>before
++          <em>N+1</em>, and head-only checking waves it through. That reach has a stated price: an
++          advancing open pays one verified lookup per abandoned anchor, so a journal an operator
++          has reset many times makes its own opens proportionally slower—cost that scales with
++          ceremony history, paid only on the ADVANCED branch, never on the dominant unchanged
++          open. And it sits <strong>before
+           anything is journaled</strong>, so a fenced open records nothing—the acceptance recording
+           was precisely what made the loop invisible.
+         </p>
+diff --git a/libs/engine/src/engine/arrival_head_attestation.py b/libs/engine/src/engine/arrival_head_attestation.py
+index 40fa4f89..63c00148 100644
+--- a/libs/engine/src/engine/arrival_head_attestation.py
++++ b/libs/engine/src/engine/arrival_head_attestation.py
+@@ -58,6 +58,7 @@ __all__ = [
+     "ABSENT_STORE_REFUSALS",
+     "AbsentStoreOutcome",
+     "AttestationRefusal",
++    "BindingProbeUnanswered",
+     "EstablishedHead",
+     "HeadAttestation",
+     "HeadFork",
+@@ -73,6 +74,7 @@ __all__ = [
+     "Level",
+     "LineageReplaced",
+     "Outcome",
++    "ProbeUnanswered",
+     "REFUSALS",
+     "StoreLost",
+     "UnsafeLineageName",
+@@ -221,6 +223,39 @@ class IndeterminateComparison(AttestationRefusal):
+     """
+ 
+ 
++class ProbeUnanswered(AttestationRefusal):
++    """A check a caller depends on could not be performed.
++
++    The general form, named because the defect it guards against is a SHAPE
++    rather than a site: a probe whose own failure gets read as the absence of
++    what it was probing for. Evidence absent is not absence of evidence, and a
++    probe that conflates the two answers its whole question wrongly, in the
++    acceptance direction (``finding:s3-fence-probe-fails-open``,
++    ``finding:s3wp3-binding-probes-fail-acceptance-side``).
++
++    Every subclass means the same thing — *I could not determine this*, which
++    is not a finding about the store — and asks for the same remedy, which is
++    to try again. That is what separates them from refusals reporting something
++    the evidence positively established.
++
++    An ABSENT input is never one of these. "There is no bindings file" and "the
++    log does not exist yet" are answers, and correct ones; only an input that
++    exists and cannot be read leaves the question open.
++
++    It lives here rather than in the seam because the binding unit does, and
++    because a subclass of it has to be raisable from this module.
++    """
++
++
++class BindingProbeUnanswered(ProbeUnanswered):
++    """The location binding could not be read, so replacement cannot be ruled out.
++
++    DELETE IN SLICE 5 with the binding unit it serves. :class:`ProbeUnanswered`
++    survives — it names a shape that outlives any one probe — so the sweep
++    removes a leaf, not the concept.
++    """
++
++
+ class UnsafeLineageName(AttestationRefusal):
+     """This lineage cannot be used as a journal filename.
+ 
+@@ -1499,7 +1534,18 @@ def bound_lineage(location: str) -> str | None:
+     try:
+         text = bindings_path().read_text(encoding="utf-8")
+     except FileNotFoundError:
++        # ABSENT is an answer: nothing has ever been bound.
+         return None
++    except OSError as exc:
++        # Was a RAW OSError escaping past every `except AttestationRefusal`,
++        # which is the builtin-escape gap `JournalUnreadable` exists to close
++        # one file over. Refusing is the right direction; being typed is what
++        # lets a caller catch it with the rest.
++        raise BindingProbeUnanswered(
++            f"the bindings file at {bindings_path()} exists and cannot be "
++            f"read ({exc}), so this location's recorded lineage is unknown. "
++            "Nothing has been accepted or written — retry the open"
++        ) from exc
+     found: str | None = None
+     for line in text.splitlines():
+         stripped = line.strip()
+@@ -1507,8 +1553,13 @@ def bound_lineage(location: str) -> str | None:
+             continue
+         try:
+             decoded = json.loads(stripped)
+-        except ValueError:
+-            continue
++        except ValueError as exc:
++            raise BindingProbeUnanswered(
++                f"a line of {bindings_path()} does not parse ({exc}), and a "
++                "line that cannot be read may be the binding that names this "
++                "location. Nothing has been accepted or written — repair or "
++                "remove the line, then retry the open"
++            ) from exc
+         if (
+             isinstance(decoded, dict)
+             and decoded.get("location") == location
+diff --git a/libs/engine/src/engine/arrival_head_seam.py b/libs/engine/src/engine/arrival_head_seam.py
+index cf48f509..bc1bc32a 100644
+--- a/libs/engine/src/engine/arrival_head_seam.py
++++ b/libs/engine/src/engine/arrival_head_seam.py
+@@ -64,6 +64,7 @@ from .arrival_contract import (
+ from .arrival_head_attestation import (
+     AbsentStoreOutcome,
+     AttestationRefusal,
++    BindingProbeUnanswered,
+     EstablishedHead,
+     HeadAttestation,
+     HeadFork,
+@@ -75,6 +76,7 @@ from .arrival_head_attestation import (
+     Level,
+     LineageReplaced,
+     Outcome,
++    ProbeUnanswered,
+     StoreLost,
+     append_entry,
+     bindings_path,
+@@ -92,6 +94,9 @@ from .arrival_head_attestation import (
+ __all__ = [
+     "AttestedLedger",
+     "AbandonedHistoryFenced",
++    "BindingProbeUnanswered",
++    "FenceProbeUnanswered",
++    "ProbeUnanswered",
+     "AuditFoundUnaccountedHeads",
+     "Compared",
+     "Indeterminate",
+@@ -157,6 +162,39 @@ class AbandonedHistoryFenced(AttestationRefusal):
+     """
+ 
+ 
++class FenceProbeUnanswered(ProbeUnanswered):
++    """The fence could not certify the walked path, so the open does not proceed.
++
++    A sibling of :class:`AbandonedHistoryFenced` rather than an arm of it,
++    because the two make different claims and ask for different things. That
++    one says *your history touches ground the operator decreed away* — a
++    positive finding, answered by the ceremony. This one says *I could not
++    determine whether it does*, which is not a finding at all, and is answered
++    by trying again.
++
++    Named for what the read LACKS rather than for what went wrong with it. A
++    cause-name does not survive a second cause, which is the lesson this
++    module's prose paid for four times over.
++
++    **Why an unanswered probe refuses instead of proceeding.** The fence exists
++    because verified descent is not the whole question, and a probe that
++    treated its own failure as "nothing there" would answer the whole question
++    wrongly in the acceptance direction — evidence absent read as absence of
++    evidence. A transient error then costs exactly what sol's loop cost:
++    the advance accepted, journaled, and every later open reading UNCHANGED,
++    with the acceptance having erased its own evidence
++    (``finding:s3-fence-probe-fails-open``).
++
++    This is not the degradation posture, and the distinction is the posture's
++    own rule: :meth:`AttestedLedger._degraded` proceeds only AFTER firing every
++    refusal the evidence soundly supports. An uncertified fence path is exactly
++    a refusal the evidence demands, not a question the evidence leaves open.
++
++    The cost of being wrong here is one retried open. The cost of being wrong
++    the other way is silent re-acceptance of decreed-away history.
++    """
++
++
+ class AuditFoundUnaccountedHeads(AttestationRefusal):
+     """The store can no longer account for heads journaled in this epoch.
+ 
+@@ -414,16 +452,26 @@ Identity = tuple[int, int]
+ 
+ 
+ def _identity_of(location: str) -> Identity | None:
+-    """What filesystem object this path names right now, or None.
+-
+-    None for a path that does not stat — it was deleted, the mount is gone, or
+-    permission was withdrawn. Those bindings are skipped rather than guessed
+-    at: a path that cannot be stat'd makes no claim about identity either way.
++    """What filesystem object this path names right now, or None if it is absent.
++
++    The split is between an ANSWER and an unanswered question, and the two used
++    to be one branch. A path that does not exist genuinely names no object —
++    that is None, and it is correct, and the mint path depends on it. A path
++    that DOES exist and will not stat (a permission wall, a transient I/O
++    error, a partially mounted volume) leaves the question open, and answering
++    None there means a store replaced under an aliased spelling opens as first
++    contact.
+     """
+     try:
+         stat = Path(location).stat()
+-    except OSError:
++    except FileNotFoundError:
+         return None
++    except OSError as exc:
++        raise BindingProbeUnanswered(
++            f"{location} exists but cannot be stat'd ({exc}), so this open "
++            "cannot tell whether it names the same store as a recorded "
++            "binding. Nothing has been accepted or written — retry the open"
++        ) from exc
+     return (stat.st_dev, stat.st_ino)
+ 
+ 
+@@ -472,18 +520,29 @@ def aliased_lineage(location: str) -> str | None:
+     try:
+         text = bindings_path().read_text(encoding="utf-8")
+     except FileNotFoundError:
++        # ABSENT is an answer: nothing has ever been bound here.
+         return None
+-    except OSError:
+-        return None
++    except OSError as exc:
++        raise BindingProbeUnanswered(
++            f"the bindings file at {bindings_path()} exists and cannot be "
++            f"read ({exc}), so this open cannot tell whether this location "
++            "already presented a different lineage. Nothing has been accepted "
++            "or written — retry the open"
++        ) from exc
+     recorded: list[tuple[str, str, Identity | None]] = []
+-    for line in text.splitlines():
++    for number, line in enumerate(text.splitlines(), start=1):
+         stripped = line.strip()
+         if not stripped:
+             continue
+         try:
+             decoded = json.loads(stripped)
+-        except ValueError:
+-            continue
++        except ValueError as exc:
++            raise BindingProbeUnanswered(
++                f"line {number} of {bindings_path()} does not parse ({exc}), "
++                "and a line that cannot be read may be the binding that names "
++                "this location. Nothing has been accepted or written — repair "
++                "or remove the line, then retry the open"
++            ) from exc
+         where = decoded.get("location") if isinstance(decoded, dict) else None
+         lineage = decoded.get("lineage") if isinstance(decoded, dict) else None
+         if isinstance(where, str) and isinstance(lineage, str):
+@@ -1232,6 +1291,12 @@ class AttestedLedger:
+         boundary is the one decree nothing has superseded, so it is the one
+         that speaks. Fences more, never less.
+ 
++        **An unanswered probe refuses.** Every branch of this method lands on
++        refusal or on a certified-clean path; there is no arm where a failure
++        becomes silence. That is the one-directional rule the rest of this seam
++        already states at its broad catches, and this method is where it was
++        first broken (:class:`FenceProbeUnanswered`).
++
+         Cost: one verified walk per fenced anchor ordinal, on the ADVANCED
+         branch only — which is rare by construction, because a writer journals
+         its own commit.
+@@ -1261,8 +1326,22 @@ class AttestedLedger:
+                 vouched = self._ledger.head_at(
+                     Watermark(lineage=presented.lineage, ordinal=ordinal)
+                 )
+-            except Exception:  # noqa: BLE001 — no answer is no evidence of a touch
+-                continue
++            except Exception as exc:  # noqa: BLE001 — see the refusal's docstring
++                # NO ANSWER IS NOT AN ANSWER. Continuing here would read
++                # evidence-absent as absence-of-touch and land the whole fence
++                # on the acceptance side — which is how sol reproduced the
++                # self-erasing loop straight through a transient error.
++                raise FenceProbeUnanswered(
++                    f"{self._canonical} presents {_head_text(presented)}, and "
++                    f"the ledger could not be asked what sits at ordinal "
++                    f"{ordinal}: {exc}. This machine's operator decreed away "
++                    f"history above ordinal {decree.head.ordinal}, and without "
++                    "that answer this open cannot certify the presented "
++                    "history is clear of it. Nothing is wrong with the store "
++                    "as far as this went, and nothing has been accepted or "
++                    "written — retry the open, and if it keeps failing the "
++                    "ledger is what needs looking at"
++                ) from exc
+             if vouched.record_hash in fenced[ordinal]:
+                 raise AbandonedHistoryFenced(
+                     f"{self._canonical} presents {_head_text(presented)}, whose "
+docs/scratch/arrival-break/slice3-wp3-report.md:45:  a journal whose content is unreadable gets no bootstrap receipt, so it is never
+docs/scratch/arrival-break/slice3-wp3-report.md:46:  trusted on sight *because* it became unreadable.
+docs/scratch/arrival-break/slice3-wp3-report.md:64:deviation, `721dd6c6` the bound-semantics tests and their mutations, `24a2539d` the
+docs/scratch/arrival-break/slice3-wp3-report.md:167:   mutation in `LEDGER_MUTATIONS` that the Protocol does not declare — is not
+docs/scratch/arrival-break/slice3-wp3-report.md:213:`ProbeUnanswered` is the parent; `FenceProbeUnanswered` and
+docs/scratch/arrival-break/slice3-wp3-report.md:214:`BindingProbeUnanswered` sit under it. The defect is a *shape* — a probe whose
+docs/scratch/arrival-break/slice3-wp3-report.md:221:**`BindingProbeUnanswered` dies with the binding unit at slice 5; the parent and
+docs/scratch/arrival-break/slice3-wp3-report.md:236:### Five per-site mutation demos, and two arms that had no test
+docs/scratch/arrival-break/slice3-wp3-report.md:242:| 1 | `aliased_lineage` OSError | `test_the_alias_sweep_refuses_an_unreadable_bindings_file_on_its_own` |
+docs/scratch/arrival-break/slice3-wp3-report.md:245:| 4a | `bound_lineage` OSError | `test_bound_lineage_refuses_an_unreadable_bindings_file_on_its_own` |
+docs/scratch/arrival-break/slice3-wp3-report.md:257:Real filesystem conditions: a permission wall on the bindings file, and a locked
+docs/scratch/arrival-break/slice3-wp3-report.md:264:The alias is a **hard link**. A symlink resolves to its target and so yields the
+docs/scratch/arrival-break/slice3-wp3-report.md:266:only consulted when the presenting spelling has no exact binding. A hard link is
+docs/scratch/arrival-break/slice3-wp3-report.md:270:Both permission tests skip as root, where `chmod` proves nothing.
+docs/scratch/arrival-break/slice3-wp3-report.md:293:**The fix**: an unanswered probe raises `FenceProbeUnanswered`. A **sibling** of
+docs/scratch/arrival-break/slice3-wp3-report.md:340:| `aliased_lineage`, `except OSError` | "no alias" — a bindings file that exists but cannot be read (permission wall, I/O error) means a replacement slips past `LineageReplaced` as first contact |
+docs/scratch/arrival-break/slice3-wp3-report.md:481:### One thing the mutation demo caught in my own prose
+docs/scratch/arrival-break/slice3-wp3-report.md:483:The healing test did **not** fail under the mutation, and the reason matters: a
+docs/scratch/arrival-break/slice3-wp3-report.md:491:file has paid for repeatedly, caught this time by running the mutation rather
+docs/scratch/arrival-break/slice3-wp3-report.md:513:unreadable line must still bound. Weight therefore lives on the cause. `_Skips`
+docs/scratch/arrival-break/slice3-wp3-report.md:516:`test_a_dedup_skip_beside_an_unreadable_line_still_bounds` is the composition
+docs/scratch/arrival-break/slice3-wp3-report.md:517:pin, and it fails in both directions under mutation.
+docs/scratch/arrival-break/slice3-wp3-report.md:616:pins the distinction with an unreadable line sitting between a reset and its
+docs/scratch/arrival-break/slice3-wp3-report.md:693:fire — and the mutation demo **caught the test**: dropping the position half
+docs/scratch/arrival-break/slice3-wp3-report.md:713:mutation demo below reverts the **call site** rather than the helper: a
+docs/scratch/arrival-break/slice3-wp3-report.md:890:the pre-fix state — mutation (i) applied *and* the precondition assertion removed
+docs/scratch/arrival-break/slice3-wp3-report.md:933:now has its own test **and its own mutation demo**, rather than resting on the
+docs/scratch/arrival-break/slice3-wp3-report.md:941:The gap this closed was real: mutation (c) — the *obtaining* bypass, re-deriving
+docs/scratch/arrival-break/slice3-wp3-report.md:1048:Each applied to the working tree, the suite run, the mutation reverted, and
+docs/scratch/arrival-break/slice3-wp3-report.md:1055:| (c) | the seam swallows `IndeterminateComparison` by re-deriving *K* from `read.epoch` — the bypass WP1 explicitly named as reachable | **3 failed, 43 passed** — `test_an_incomplete_read_proceeds_labeled_at_or_above_the_bound`, `test_a_journal_with_no_readable_content_is_not_granted_a_receipt` (a receipt is written for an unreadable journal — BLOCKING-2 reborn), `test_the_carried_refusal_is_the_one_the_journal_itself_raises` |
+docs/scratch/arrival-break/slice3-wp3-report.md:1061:| (i) | `append_entry` reached through an attribute-style import instead of by name | **2 failed, 48 passed** — the ratchet's precondition assertion fails naming `['append_entry']`; also `test_a_journal_write_failure_after_a_commit_says_the_records_are_committed`, which monkeypatches the module attribute the mutation removes |
+docs/scratch/arrival-break/slice3-wp3-report.md:1063:| (L-2) | read-time reset validation reverted in `_epoch_of` | **4 failed, 154 passed** — sol's repro leads, and *K* measured directly under the mutation is **5** where the journal reached 8; also the genuine-reset, crash-retry and unbound-reset tests |
+docs/scratch/arrival-break/slice3-wp3-report.md:1070:spawns three real processes, so it is an intermittent participant in mutations
+docs/scratch/arrival-break/slice3-wp3-report.md:1080:the mutation does not touch — so whether the journal's maximum-ordinal entry ends
+docs/scratch/arrival-break/slice3-wp3-report.md:1086:Neither conclusion depends on it: the deterministic failures kill each mutation on
+docs/scratch/arrival-break/slice3-wp3-report.md:1094:mutation. The numbers above are re-measured against the committed, fixed tree and
+docs/scratch/arrival-break/slice3-wp3-report.md:1095:agree with the gate's independent measurement. A mutation demo reporting a sampled
+docs/scratch/arrival-break/slice3-wp3-report.md:1102:refusals are pinned separately from its proceed branch, so a mutation resolving the
+libs/engine/tests/test_declaration_resolver.py:123:    """Post-genesis, the store is canonical and file mutations are inert."""
+libs/engine/tests/test_declaration_resolver.py:125:    def test_pre_genesis_file_mutation_takes_effect(self, tmp_path):
+libs/engine/tests/test_declaration_resolver.py:126:        # Before absorb, the file IS the authority — mutation is honored.
+libs/engine/tests/test_declaration_resolver.py:133:    def test_post_genesis_file_mutation_is_inert(self, tmp_path):
+libs/engine/tests/test_handle_open.py:375:            # nested list became a tuple — no in-place mutation
+libs/engine/tests/test_ceremony_orchestration.py:316:    blocked = plan_declaration_update(world["vertex"], proposed_text=world["edit"])
+libs/engine/tests/test_ceremony_orchestration.py:317:    assert not blocked.applicable
+libs/engine/tests/test_ceremony_orchestration.py:318:    assert blocked.pending_intent == intent_path_for(world["vertex"])
+libs/engine/tests/test_ceremony_orchestration.py:319:    res = apply_declaration_update(blocked, observer="obs", credentials=Creds())
+libs/engine/tests/test_ceremony_orchestration.py:321:    # A fresh-looking preview is equally blocked (apply re-checks the disk).
+libs/engine/tests/test_arrival_store.py:561:        # law, and the pin the receipt-extras seam is mutation-verified
+libs/engine/tests/test_handle_changes.py:273:        h.close()  # iterator sees CLOSED and returns — no store mutation
+libs/engine/tests/test_arrival_transfer.py:577:    """§04: refuse BEFORE mutation. A partially applied suffix is the one
+libs/engine/tests/test_arrival_contract.py:169:    "A query handle MUST NOT expose a generic mutation escape hatch into the
+libs/engine/tests/test_arrival_contract.py:175:    from one would be a mutation escape hatch by construction.
+libs/engine/tests/test_arrival_contract.py:185:            "a query handle names a ledger mutation directly"
+libs/engine/tests/test_arrival_contract.py:194:                    f"{path} exposes {op!r}, a ledger mutation, from a query "
+libs/engine/tests/test_arrival_contract.py:321:    # sets answer different questions, and a read filed as a mutation would
+libs/engine/tests/test_arrival_contract.py:398:def test_a_configured_atomic_limit_refuses_before_any_mutation(tmp_path):
+libs/engine/tests/test_arrival_contract.py:399:    """§04: refuse before mutation when the request exceeds the limit.
+libs/engine/tests/test_arrival_contract.py:413:    assert log.path.read_bytes() == before, "refused before any mutation"
+libs/engine/tests/test_vertex_reader.py:2805:                    # The held read transaction locked the writer out — the
+libs/engine/tests/test_jsonl_store.py:421:    with 'database is locked' — one bad open bricked the store forever.
+libs/engine/tests/test_jsonl_store.py:444:    # the db is not locked: a second attempt fails the same way, not worse
+libs/engine/tests/test_jsonl_store.py:1147:    is locked') is transient, not corruption. Both destructive-recovery
+libs/engine/tests/test_jsonl_store.py:1165:    def _locked_error():
+libs/engine/tests/test_jsonl_store.py:1166:        exc = sqlite3.OperationalError("database table is locked")
+libs/engine/tests/test_jsonl_store.py:1179:    def test_locked_at_initial_open_never_quarantines(
+libs/engine/tests/test_jsonl_store.py:1186:            raise TestRecoveryGuardsAreCodeAware._locked_error()
+libs/engine/tests/test_jsonl_store.py:1194:    def test_locked_at_under_lock_recheck_never_quarantines(
+libs/engine/tests/test_jsonl_store.py:1208:            raise TestRecoveryGuardsAreCodeAware._locked_error()
+libs/engine/tests/test_jsonl_store.py:1217:    def test_preflight_classifies_injected_locked_as_refused(
+libs/engine/tests/test_jsonl_store.py:1226:            raise TestRecoveryGuardsAreCodeAware._locked_error()
+libs/engine/tests/test_canonical_audit.py:282:def test_a_torn_tail_does_not_read_as_an_unreadable_final_line(tmp_path):
+libs/engine/tests/test_canonical_audit.py:290:    assert "incomplete or unreadable" not in report.summary()
+libs/engine/tests/test_vertex.py:414:    def test_restricted_grant_blocked_outside_potential(self):
+libs/engine/tests/test_vertex.py:426:        assert v.state("event") == 0  # blocked, not folded
+libs/engine/tests/test_vertex.py:532:        assert tick is None  # boundary blocked
+libs/engine/tests/MUTATION-admission.md:26:All 21 mutants in `engine.admission` are killed by the test suite (100% mutation kill rate, 0 surviving mutants).
+libs/engine/tests/MUTATION-witness.md:86:3. **Exception Substring Formatting Variations (16 mutants)**: Non-semantic uppercase or lowercase variants and `group_boundary: str = 'refuse'` default argument literal mutations (`'REFUSE'` / `'XXrefuseXX'`) where exact error classes and messages are pinned.
+libs/engine/tests/test_integration.py:121:        await stream.emit(Event(3))  # blocked
+libs/engine/tests/test_integration.py:123:        await stream.emit(Event(2))  # blocked
+libs/engine/tests/test_conformance_replicate.py:17:   the refuse-before-mutation claim. Both fall out of the same assertion.
+libs/engine/tests/test_arrival_gate.py:487:def _rechain_from(log: ArrivalLog, start: int, mutations: dict) -> None:
+libs/engine/tests/test_arrival_gate.py:488:    """Rewrite ordinals ``start``.. with ``mutations`` applied, re-linking
+libs/engine/tests/test_arrival_gate.py:499:        if ordinal in mutations:
+libs/engine/tests/test_arrival_gate.py:500:            raw = mutations[ordinal](raw)
+libs/engine/tests/test_arrival_gate.py:825:    stressed. What this test does exercise for real is that an unlocked
+libs/engine/tests/test_receipt_attestation.py:90:        """Oracle 2 + 5 (mutation check): signing is CONFIGURED (the signer
+libs/engine/tests/test_witness_rekey_d1.py:479:    an un-permuted store (rowid order == arrival order); any other permutation
+libs/engine/tests/test_witness_rekey_d1.py:569:        # Not vacuous: the permutation genuinely divorces the two axes.
+libs/engine/tests/test_arrival_registry.py:250:    Slice 3 chose. That refusal blocked ``mint`` through the registry, which
+libs/engine/tests/test_arrival_head_attestation.py:26:    BindingProbeUnanswered,
+libs/engine/tests/test_arrival_head_attestation.py:429:    concatenate the next entry into it — one unreadable line, with the new
+libs/engine/tests/test_arrival_head_attestation.py:847:def test_the_refusal_names_an_incomplete_read_not_unreadable_lines():
+libs/engine/tests/test_arrival_head_attestation.py:850:    The refusal message used to say the journal "has unreadable lines", which
+libs/engine/tests/test_arrival_head_attestation.py:865:    assert "unreadable lines" not in message
+libs/engine/tests/test_arrival_head_attestation.py:1032:    unreadable.
+libs/engine/tests/test_arrival_head_attestation.py:1036:    operator work. See ``finding:s3wp1-gate-all-entries-unreadable-silent-tofu``.
+libs/engine/tests/test_arrival_head_attestation.py:1278:    with pytest.raises(BindingProbeUnanswered):
+libs/engine/tests/test_arrival_head_attestation.py:1632:    An unreadable line sits between the predecessor and the reset here. It
+libs/engine/tests/test_arrival_head_attestation.py:1681:def test_a_dedup_skip_beside_an_unreadable_line_still_bounds():
+libs/engine/tests/test_arrival_head_attestation.py:1687:    because the unreadable line carries its own weight regardless of what else
+libs/engine/tests/test_arrival_head_seam.py:68:    BindingProbeUnanswered,
+libs/engine/tests/test_arrival_head_seam.py:70:    FenceProbeUnanswered,
+libs/engine/tests/test_arrival_head_seam.py:74:    ProbeUnanswered,
+libs/engine/tests/test_arrival_head_seam.py:474:    # `_witness` are the mutation paths, and each has nothing that can refuse
+libs/engine/tests/test_arrival_head_seam.py:1171:def test_an_unreadable_journal_with_the_log_gone_refuses_rather_than_proceeding(
+libs/engine/tests/test_arrival_head_seam.py:1179:    unreadable. Content present says heads WERE accepted, and that answers the
+libs/engine/tests/test_arrival_head_seam.py:1392:    """BLOCKING-2 at the seam: unreadable is not first contact.
+libs/engine/tests/test_arrival_head_seam.py:1398:    precisely because the memory became unreadable.
+libs/engine/tests/test_arrival_head_seam.py:1679:    ``import_prefix`` is a mutation the contract Protocol deliberately does not
+libs/engine/tests/test_arrival_head_seam.py:1682:    holds. A catch-all would forward it silently — a mutation reachable through
+libs/engine/tests/test_arrival_head_seam.py:1686:    The same construction covers ops that do not exist yet: a future mutation
+libs/engine/tests/test_arrival_head_seam.py:1710:    """The ratchet: a mutation reachable here is a mutation that is witnessed.
+libs/engine/tests/test_arrival_head_seam.py:2212:    # mutation demo.
+libs/engine/tests/test_arrival_head_seam.py:2266:    with pytest.raises(FenceProbeUnanswered) as excinfo:
+libs/engine/tests/test_arrival_head_seam.py:2305:    with pytest.raises(FenceProbeUnanswered):
+libs/engine/tests/test_arrival_head_seam.py:2338:    the same canonical string, while a hard link has no target to follow — two
+libs/engine/tests/test_arrival_head_seam.py:2368:    """chmod cannot stop root, so a permission test as root proves nothing."""
+libs/engine/tests/test_arrival_head_seam.py:2370:        pytest.skip("runs as root; chmod-based permission walls do not apply")
+libs/engine/tests/test_arrival_head_seam.py:2373:def test_an_unreadable_bindings_file_refuses_rather_than_first_contacting(tmp_path):
+libs/engine/tests/test_arrival_head_seam.py:2381:    A real permission wall rather than a patched reader: patching the reader
+libs/engine/tests/test_arrival_head_seam.py:2392:        with pytest.raises(BindingProbeUnanswered) as excinfo:
+libs/engine/tests/test_arrival_head_seam.py:2405:    The unstattable path is a RECORDED binding's, behind a locked directory,
+libs/engine/tests/test_arrival_head_seam.py:2412:    locked = tmp_path / "locked"
+libs/engine/tests/test_arrival_head_seam.py:2413:    locked.mkdir()
+libs/engine/tests/test_arrival_head_seam.py:2414:    hidden = locked / "other.arrival"
+libs/engine/tests/test_arrival_head_seam.py:2420:    locked.chmod(0o000)
+libs/engine/tests/test_arrival_head_seam.py:2422:        with pytest.raises(BindingProbeUnanswered):
+libs/engine/tests/test_arrival_head_seam.py:2425:        locked.chmod(0o700)
+libs/engine/tests/test_arrival_head_seam.py:2445:    with pytest.raises(BindingProbeUnanswered) as excinfo:
+libs/engine/tests/test_arrival_head_seam.py:2453:def test_the_alias_sweep_refuses_an_unreadable_bindings_file_on_its_own(tmp_path):
+libs/engine/tests/test_arrival_head_seam.py:2465:        with pytest.raises(BindingProbeUnanswered):
+libs/engine/tests/test_arrival_head_seam.py:2475:    reads the same file first and refuses there — so a mutation to this arm
+libs/engine/tests/test_arrival_head_seam.py:2483:    with pytest.raises(BindingProbeUnanswered):
+libs/engine/tests/test_arrival_head_seam.py:2487:def test_bound_lineage_refuses_an_unreadable_bindings_file_on_its_own(tmp_path):
+libs/engine/tests/test_arrival_head_seam.py:2498:        with pytest.raises(BindingProbeUnanswered):
+libs/engine/tests/test_arrival_head_seam.py:2508:    ``ProbeUnanswered``; the two sites stay distinguishable underneath. The
+libs/engine/tests/test_arrival_head_seam.py:2512:    assert issubclass(FenceProbeUnanswered, ProbeUnanswered)
+libs/engine/tests/test_arrival_head_seam.py:2513:    assert issubclass(BindingProbeUnanswered, ProbeUnanswered)
+libs/engine/tests/test_arrival_head_seam.py:2514:    assert issubclass(ProbeUnanswered, AttestationRefusal)
+libs/engine/tests/test_probe_preflight.py:49:    protocol, not a store mutation, and it happens on ``sl read`` too. The
+libs/engine/tests/test_probe_preflight.py:417:def test_recover_then_open_types_canonical_corruption_as_unreadable(
+libs/engine/tests/test_probe_preflight.py:421:    ``unreadable`` PreflightResult with the pre-recovery audit attached —
+libs/engine/tests/test_probe_preflight.py:432:    assert r.status == "unreadable"
+libs/engine/tests/test_probe_preflight.py:448:    assert (r.status, r.opened) == ("unreadable", False)
+libs/engine/tests/test_probe_preflight.py:501:            "unreadable", False, False, None,
+libs/engine/tests/test_probe_preflight.py:532:        pytest.skip("root ignores permission bits")
+libs/engine/tests/test_probe_preflight.py:556:        pytest.skip("root ignores permission bits")
+libs/engine/tests/test_probe_preflight.py:569:    """SOL-R3-03a: an unreadable/non-searchable (0222) store directory is a
+libs/engine/tests/test_probe_preflight.py:590:def test_recover_then_open_reports_busy_as_refused_not_unreadable(tmp_path):
+libs/engine/tests/test_probe_preflight.py:592:    a 'refused' (try again later), never 'unreadable' ('rebuilding from the
+libs/engine/tests/test_probe_preflight.py:632:    assert "busy" in result.reason or "locked" in result.reason
+libs/engine/tests/test_admission_callback_ownership.py:3:`finding:slice2-wp3-callback-mapping-mutation` (sol-LOW r1, S2WP3-L-1). The
+libs/engine/tests/test_review_helpers.py:116:    def test_read_only_no_mutation(self, tmp_path):
+libs/engine/tests/test_review_helpers.py:193:    def test_read_only_no_mutation(self, tmp_path):
+libs/engine/tests/test_properties_replay.py:132:    Replay order IS append order (``facts.rowid`` ASC). Permutation
+libs/engine/tests/test_properties_replay.py:231:        Under receipt order the ingest permutation IS the fold order, so
+libs/engine/tests/test_properties_replay.py:232:        cross-permutation invariance no longer holds. Determinism given a
+libs/engine/tests/test_arrival_cas_full_head.py:354:            "_locked_head",
+libs/engine/tests/test_seal_rebase_d2.py:15:- G-D2-4: Verification under permutation — verify_chain counts and verdicts identical
+libs/engine/tests/test_seal_rebase_d2.py:264:# G-D2-4: Verification under permutation
+libs/engine/tests/test_seal_rebase_d2.py:268:class TestGD2_4_VerificationUnderPermutation:
+libs/engine/tests/test_seal_rebase_d2.py:361:        # Live minting under permutation: predecessor-tick selection, newest-fact edge,
+libs/engine/tests/test_seal_rebase_d2.py:414:    def test_live_edge_agrees_with_verify_chain_under_permutation(self, tmp_path: Path) -> None:
+libs/engine/tests/test_conformance_comparison.py:73:    "unreadable": HeadUnreadable,
+libs/engine/tests/test_conformance_comparison.py:364:    # but also on the `none` and `unreadable` states, so it is not an
+libs/engine/tests/test_conformance_comparison.py:398:    assert (weakening > 0) == (state in {"bounded", "unreadable"}), (
+
+exec
+/bin/zsh -lc "sed -n '200,370p' docs/scratch/arrival-break/slice3-wp3-report.md && sed -n '2200,2530p' libs/engine/tests/test_arrival_head_seam.py && sed -n '1250,1290p' libs/engine/tests/test_arrival_head_attestation.py && rg -n \"\\[tool.pytest|architecture|ruff|testpaths|2295\" pyproject.toml libs/engine/pyproject.toml Makefile README.md docs/scratch/arrival-break/slice3-wp3-report.md" in /Users/kaygee/Code/loops-s3wp1
+ exited 2 in 0ms:
+    and permitted is not required. `close()` consults the field rather than the
+    property, or closing would be the thing that constructs the reader the fix
+    deferred.
+
+## The binding probes — ruled, and a fourth site found while fixing
+
+Ruling on `finding:s3wp3-binding-probes-fail-acceptance-side`, shape as
+proposed. An **absent** bindings file or a nonexistent path stays "no binding"
+— those are answers, and the mint path depends on the second. An input that
+**exists and cannot be read** now refuses, typed.
+
+### The pattern got a name, because it has now appeared five times
+
+`ProbeUnanswered` is the parent; `FenceProbeUnanswered` and
+`BindingProbeUnanswered` sit under it. The defect is a *shape* — a probe whose
+own failure reads as the absence of what it probed for — and naming the shape is
+what lets a caller catch "I could not determine this" as one condition while the
+sites stay distinguishable underneath.
+
+It lives in `arrival_head_attestation` rather than the seam, because the binding
+unit lives there and because `bound_lineage` has to be able to raise it.
+**`BindingProbeUnanswered` dies with the binding unit at slice 5; the parent and
+the fence's subclass do not** — the sweep removes a leaf, not the concept. That
+is the deletion-story answer the routing asked for.
+
+### The fourth site, and it was the one that mattered
+
+Found while testing the fix, not by the original audit: `bound_lineage` let a
+**raw `OSError`** escape past every `except AttestationRefusal`. Refusing was
+already the right direction there, so it never showed up in an acceptance-side
+audit — but being untyped is the builtin-escape gap `JournalUnreadable` exists
+to close one file over. It also reads the bindings file **before**
+`aliased_lineage` does, so without fixing it the other three fixes were
+unreachable through an ordinary open. My first test run is what surfaced it: the
+refusal came out as a bare `OSError`.
+
+### Five per-site mutation demos, and two arms that had no test
+
+Two-guard, committed `c1a578c8` first, tree byte-clean after each revert.
+
+| Site | Reverted | Fails |
+|---|---|---|
+| 1 | `aliased_lineage` OSError | `test_the_alias_sweep_refuses_an_unreadable_bindings_file_on_its_own` |
+| 2 | `_identity_of` OSError | `test_a_recorded_location_that_will_not_stat_refuses` |
+| 3 | `aliased_lineage` ValueError | `test_the_alias_sweep_refuses_an_unparseable_line_on_its_own` |
+| 4a | `bound_lineage` OSError | `test_bound_lineage_refuses_an_unreadable_bindings_file_on_its_own` |
+| 4b | `bound_lineage` ValueError | `test_a_malformed_binding_line_refuses_rather_than_being_skipped` |
+
+The first pass had **no failing test for sites 3 and 4a**. Through an open,
+`bound_lineage` reads the file before `aliased_lineage` does, so reverting the
+inner arm broke nothing — the outer layer's correctness was what those tests
+measured. Defence in depth is only depth if each layer is pinned separately, so
+each arm now has a direct-call test of its own. The demos caught the gap; the
+integration tests never would have.
+
+### Test construction, and why it is not monkeypatched
+
+Real filesystem conditions: a permission wall on the bindings file, and a locked
+directory holding a recorded binding's path. Patching `Path.read_text` or
+`Path.stat` globally — my first attempt — also breaks the **ledger's** own file
+access, so the open fails earlier and the test passes for the wrong reason. That
+is exactly what happened: the stat patch made `verify(Open())` fail, the seam
+took the pre-genesis branch, and nothing refused at all.
+
+The alias is a **hard link**. A symlink resolves to its target and so yields the
+same canonical form, which means it never reaches the alias probe — the probe is
+only consulted when the presenting spelling has no exact binding. A hard link is
+two names, two canonical forms, one inode: precisely the state the identity probe
+exists for, and portable.
+
+Both permission tests skip as root, where `chmod` proves nothing.
+
+### One superseded WP1 test
+
+`test_a_malformed_binding_line_is_skipped_not_refused` pinned the skip, and the
+skip was the defect. Its stated reasoning — "a missing binding degrades to first
+contact, which it never guaranteed" — is true of an absent file and false of a
+line that will not parse. Renamed, inverted, and carrying why.
+
+## S3I-L-3 — the fence's own probe failed open
+
+`finding:s3-fence-probe-fails-open`. The fence I built to close sol's
+acceptance loop contained a probe that lied on the acceptance side, and sol
+reproduced the entire self-erasing cycle through a transient `OSError`: descent
+verifies, the anchor probe raises, the advance is accepted **and journaled**,
+and the next open — on a perfectly healthy ledger — reads UNCHANGED.
+
+**The comment I wrote on that catch stated the error out loud**: *"no answer is
+no evidence of a touch."* Evidence absent is not absence of evidence. Every
+other broad catch in this seam is justified in the report by landing on the
+refusing branch, and I had written that rule three separate times without
+applying it at the one site where the fallback direction was acceptance.
+
+**The fix**: an unanswered probe raises `FenceProbeUnanswered`. A **sibling** of
+`AbandonedHistoryFenced` rather than an arm of it, because the claims differ and
+so do their remedies — one says *your history touches decreed-away ground* and
+is answered by the ceremony; this says *I could not determine whether it does*
+and is answered by retrying. Named for what the read lacks rather than for what
+failed, because a cause-name does not survive a second cause.
+
+**Not the degradation posture**, by that posture's own rule: it proceeds only
+after firing every refusal the evidence soundly supports, and an uncertified
+fence path is a refusal the evidence demands. Being wrong here costs one retried
+open; being wrong the other way costs silent re-acceptance of decreed-away
+history.
+
+### Probe audit — the fence
+
+The finding is about the pattern, so every site was checked rather than the one
+line. The fence has **exactly one** probe. Its lift check is pure ordinal and
+lineage comparison with no I/O, and its two early returns are structural
+conditions rather than probes, so neither can fail open. `_descent` and
+`_vouched_at` both catch broadly and both land on refusal, unchanged.
+
+### Mutation demo
+
+Two-guard: committed `333021bc` first, tree byte-clean after the revert.
+Catch-and-continue restored → **2 failed, 67 passed**, and the loop reproduced
+directly rather than inferred:
+
+```
+probe raises on the anchor, restore  => advanced
+journal now holds ordinal: 2
+next open, CLEAN ledger              => unchanged   <- the loop, via a transient error
+```
+
+The first attempt at this demo mis-constructed the probe — failing *every*
+`head_at` made `_descent` refuse first with `HeadRewrite`, which is the seam
+correctly failing refusal-side and proves nothing about the fence. The probe has
+to fail selectively, at the anchor ordinal only, for the fence to be the thing
+under test.
+
+### The same shape, outside the fence — reported, not fixed
+
+Scoped out of this round, but the pattern audit found it and it should be ruled
+rather than left: the **transitional binding unit** has three catches that all
+fail acceptance-side.
+
+| Site | Failure read as |
+|---|---|
+| `aliased_lineage`, `except OSError` | "no alias" — a bindings file that exists but cannot be read (permission wall, I/O error) means a replacement slips past `LineageReplaced` as first contact |
+| `_identity_of`, `except OSError` | "no identity" — defensible for a path that genuinely does not stat, but an I/O error at a path that does exist reads the same way |
+| the binding line loop, `except ValueError` | "skip" — a malformed line could be the very binding that named the alias |
+
+All three are the S3I-L-3 shape with a different consequence: not the
+self-erasing loop, but a silent first contact where a replacement should have
+refused. Left alone because this round is scoped to the fence and that unit
+carries its own `DELETE IN SLICE 5` marker — but it is the same finding, and the
+deletion is not a reason to leave it wrong in the meantime.
+`finding:s3wp3-binding-probes-fail-acceptance-side`.
+
+## Design amendment #6 — the abandoned-history fence
+
+Sol's integration round escalated my own N+1-descendant flag from deferred to
+blocking, and it was right to. I had reported the acceptance as an
+underdetermination; sol showed it was a **loop**.
+
+**The loop.** Reset from an abandoned *N+1* back to *N*, restore the authentic
+backup, and the open verifies descent **honestly** — the chain really does reach
+*N+1* from *N*. So it answered ADVANCED, **journaled** *N+1* back into the
+current epoch, and every later open read UNCHANGED. No refusal, no fork, ever,
+and repeatable indefinitely. The acceptance erased its own evidence by recording
+it, which is why nothing downstream could see it had happened.
+
+Verified descent was never the whole question. A chain can be perfectly intact
+and still be the history a ceremony put behind us — and machinery does not
+silently reverse an operator's decree.
+
+**The fence**: an ADVANCED outcome whose verified descent touches an entry
+journaled in an abandoned epoch is refused with `AbandonedHistoryFenced`, whose
+message teaches the ceremony as the acceptance path.
+        lines[0] + inserted + "\n" + "".join(lines[1:]), encoding="utf-8"
+    )
+
+    read = read_journal(lineage)
+    assert not any("byte-identical" in note for note in read.skipped), (
+        "dedup fired; this test would not be exercising the position claim"
+    )
+    notes = [note for note in read.skipped if "trust-reset" in note]
+    assert notes, read.skipped
+    # IDENTITY MATCHES on both sides — only the line differs. Asserted, because
+    # a construction that also broke identity would pass while proving nothing
+    # about the position half, which is exactly how this test failed its first
+    # mutation demo.
+    recorded, actual = notes[0].split("is not the entry that precedes it")
+    assert recorded.split("line ")[1].split("/")[1].strip() == (
+        actual.split("/")[1].split(")")[0].strip()
+    ), notes[0]
+
+
+# ---------------------------------------------------------------------------
+# The fence probe must not fail open (finding:s3-fence-probe-fails-open)
+# ---------------------------------------------------------------------------
+
+
+class ProbeFails:
+    """A ledger whose ``head_at`` raises for chosen ordinals.
+
+    Everything else delegates, so the descent verification still succeeds
+    honestly — which is the point: the store is fine, the walk is fine, and
+    only the fence's own question goes unanswered.
+    """
+
+    def __init__(self, inner: ArrivalLedger, failing: set[int]) -> None:
+        self._inner = inner
+        self._failing = failing
+        self.asked: list[int] = []
+
+    def head_at(self, watermark):
+        self.asked.append(watermark.ordinal)
+        if watermark.ordinal in self._failing:
+            raise OSError("transient: input/output error")
+        return self._inner.head_at(watermark)
+
+    def __getattr__(self, name):
+        return getattr(self._inner, name)
+
+
+def test_an_unanswered_fence_probe_refuses_rather_than_accepting(tmp_path):
+    """Sol's repro. The fence contained a probe that lied acceptance-side.
+
+    Descent verifies, the probe raises, and the old code continued as though
+    the abandoned coordinate simply was not there — so the advance was accepted
+    AND journaled, and every later open read UNCHANGED. The self-erasing loop,
+    reached through a transient error instead of through a restore.
+
+    Evidence absent is not absence of evidence, and this is the one place in
+    the seam where that had been written the wrong way round.
+    """
+    log_path, lineage, abandoned, backup = _reset_away_from(tmp_path)
+    log_path.write_bytes(backup)
+    before = journal_bytes(lineage)
+    bindings_before = bindings_path().read_bytes()
+
+    probing = ProbeFails(
+        FileLedger(ArrivalLog(log_path)), failing={abandoned.ordinal}
+    )
+    with pytest.raises(FenceProbeUnanswered) as excinfo:
+        AttestedLedger(probing, location=str(log_path))
+
+    assert "retry the open" in str(excinfo.value)
+    assert isinstance(excinfo.value.__cause__, OSError)
+    # Nothing accepted, and nothing written — the loop's fuel was the write.
+    assert journal_bytes(lineage) == before
+    assert bindings_path().read_bytes() == bindings_before
+
+
+def test_one_unanswered_anchor_of_several_refuses_the_whole_open(tmp_path):
+    """No partial certification.
+
+    With several fenced anchors, answering most of them says nothing about the
+    one that did not answer. A fence that refused only when it happened to get
+    an answer would be strongest exactly when it was least needed.
+    """
+    log_path = minted(tmp_path / "s.arrival")
+    append_legacy(log_path, "one", "two", "three")
+    abandoned = FileLedger(ArrivalLog(log_path)).verify(Open())
+    backup = log_path.read_bytes()
+    opened(log_path)
+
+    truncate_records(log_path, keep=1)
+    restored = FileLedger(ArrivalLog(log_path)).verify(Open())
+    trust_reset(
+        accepted=restored,
+        abandoned=abandoned,
+        refused=abandoned,
+        reason="incident",
+        location=str(log_path),
+        observed_at=5000.0,
+    )
+    log_path.write_bytes(backup)
+
+    # Fail the probe for the HIGHEST anchor only; the lower ones answer fine.
+    probing = ProbeFails(
+        FileLedger(ArrivalLog(log_path)), failing={abandoned.ordinal}
+    )
+    with pytest.raises(FenceProbeUnanswered):
+        AttestedLedger(probing, location=str(log_path))
+
+
+def test_a_probe_failure_outside_the_fenced_set_is_not_consulted(tmp_path):
+    """Scope the claim: only coordinates the fence actually asks about matter.
+
+    A probe that raises at an ordinal the fence has no anchor for is never
+    reached, so it cannot manufacture a refusal. The refusal says "I could not
+    certify what I needed to", and it must not grow into "something somewhere
+    failed".
+    """
+    log_path, _lineage, _abandoned, _backup = _reset_away_from(tmp_path)
+    index_path_for(log_path).unlink(missing_ok=True)
+    append_legacy(log_path, "a genuinely new record")
+
+    probing = ProbeFails(FileLedger(ArrivalLog(log_path)), failing={9999})
+    comparison = AttestedLedger(probing, location=str(log_path)).opened.comparison
+    assert isinstance(comparison, Compared)
+    assert comparison.outcome is Outcome.ADVANCED
+    assert 9999 not in probing.asked
+
+
+# ---------------------------------------------------------------------------
+# The binding probes (finding:s3wp3-binding-probes-fail-acceptance-side)
+# ---------------------------------------------------------------------------
+
+
+def _reached_by_an_alias(tmp_path: Path):
+    """A store bound under one spelling and reached under another.
+
+    A HARD LINK, because it is the one alias that is portable and genuinely
+    different: ``resolve()`` follows a symlink to its target and so produces
+    the same canonical string, while a hard link has no target to follow — two
+    names, two canonical forms, one inode. That is exactly the state the
+    identity probe exists for, and it is what puts the probe on the path at
+    all: with no exact binding for the presenting spelling, the alias sweep is
+    the only thing that can answer.
+    """
+    log_path = minted(tmp_path / "s.arrival")
+    append_legacy(log_path, "one")
+    opened(log_path)  # binds the canonical form of log_path
+    alias = tmp_path / "alias.arrival"
+    os.link(log_path, alias)
+    assert canonical_location(str(alias)) != canonical_location(str(log_path))
+    return log_path, alias, lineage_of(log_path)
+
+
+def test_the_alias_probe_answers_when_it_can(tmp_path):
+    """The baseline the three refusals below are departures from.
+
+    With every probe working, the aliased spelling is recognized as the same
+    store and the open proceeds normally — no first contact, no second binding.
+    """
+    _log_path, alias, lineage = _reached_by_an_alias(tmp_path)
+    before = journal_bytes(lineage)
+    comparison = opened(alias).opened.comparison
+    assert isinstance(comparison, Compared)
+    assert comparison.outcome is Outcome.UNCHANGED
+    assert journal_bytes(lineage) == before
+
+
+def _needs_unprivileged() -> None:
+    """chmod cannot stop root, so a permission test as root proves nothing."""
+    if os.geteuid() == 0:
+        pytest.skip("runs as root; chmod-based permission walls do not apply")
+
+
+def test_an_unreadable_bindings_file_refuses_rather_than_first_contacting(tmp_path):
+    """Site 1. A file that EXISTS and cannot be read is not "no binding".
+
+    Answering None hands the aliased spelling back as a first contact — which
+    writes a bootstrap receipt and a second binding for a store this machine
+    already knows, and would wave a replacement through the hole the alias
+    detection was added to close.
+
+    A real permission wall rather than a patched reader: patching the reader
+    globally also breaks the ledger's own file access, so the open would fail
+    somewhere else and the test would pass for the wrong reason.
+    """
+    _needs_unprivileged()
+    _log_path, alias, lineage = _reached_by_an_alias(tmp_path)
+    before = journal_bytes(lineage)
+    binding_bytes = bindings_path().read_bytes()
+
+    bindings_path().chmod(0o000)
+    try:
+        with pytest.raises(BindingProbeUnanswered) as excinfo:
+            opened(alias)
+    finally:
+        bindings_path().chmod(0o600)
+
+    assert "retry the open" in str(excinfo.value)
+    assert journal_bytes(lineage) == before
+    assert bindings_path().read_bytes() == binding_bytes
+
+
+def test_a_recorded_location_that_will_not_stat_refuses(tmp_path):
+    """Site 2. Existing-but-unstattable is a question, not an answer.
+
+    The unstattable path is a RECORDED binding's, behind a locked directory,
+    so the presenting store is untouched and the identity probe is the only
+    thing that fails. Locking the presenting store instead would break the
+    ledger read first and never reach the probe.
+    """
+    _needs_unprivileged()
+    _log_path, alias, lineage = _reached_by_an_alias(tmp_path)
+    locked = tmp_path / "locked"
+    locked.mkdir()
+    hidden = locked / "other.arrival"
+    hidden.write_text("x")
+    record_binding(str(hidden), "01BX5ZZKBKACTAV9WEVGEMMVRZ", 1.0)
+    before = journal_bytes(lineage)
+    binding_bytes = bindings_path().read_bytes()
+
+    locked.chmod(0o000)
+    try:
+        with pytest.raises(BindingProbeUnanswered):
+            opened(alias)
+    finally:
+        locked.chmod(0o700)
+
+    assert journal_bytes(lineage) == before
+    assert bindings_path().read_bytes() == binding_bytes
+
+
+def test_an_absent_path_still_answers_none(tmp_path):
+    """The arm that must NOT have moved: absent is an answer, and mint needs it."""
+    ledger = opened(tmp_path / "never-existed.arrival")
+    assert isinstance(ledger.opened.comparison, PreGenesis)
+
+
+def test_an_unparseable_binding_line_refuses_rather_than_being_skipped(tmp_path):
+    """Site 3. The line that cannot be read may be the one that names this store."""
+    _log_path, alias, lineage = _reached_by_an_alias(tmp_path)
+    before = journal_bytes(lineage)
+    with bindings_path().open("a", encoding="utf-8") as handle:
+        handle.write("{ this line does not parse\n")
+    binding_bytes = bindings_path().read_bytes()
+
+    with pytest.raises(BindingProbeUnanswered) as excinfo:
+        opened(alias)
+
+    assert "does not parse" in str(excinfo.value)
+    assert journal_bytes(lineage) == before
+    assert bindings_path().read_bytes() == binding_bytes
+
+
+def test_the_alias_sweep_refuses_an_unreadable_bindings_file_on_its_own(tmp_path):
+    """``aliased_lineage``'s own arm, reached directly.
+
+    Through the open path ``bound_lineage`` reads the same file first and
+    refuses there, so this arm is defence in depth rather than the front line —
+    but ``aliased_lineage`` is a public function and must not answer "no alias"
+    to a file it could not read, whoever calls it.
+    """
+    _needs_unprivileged()
+    _log_path, alias, _lineage = _reached_by_an_alias(tmp_path)
+    bindings_path().chmod(0o000)
+    try:
+        with pytest.raises(BindingProbeUnanswered):
+            aliased_lineage(canonical_location(str(alias)))
+    finally:
+        bindings_path().chmod(0o600)
+
+
+def test_the_alias_sweep_refuses_an_unparseable_line_on_its_own(tmp_path):
+    """``aliased_lineage``'s ValueError arm, reached directly.
+
+    Its own per-site pin, because through the open path ``bound_lineage``
+    reads the same file first and refuses there — so a mutation to this arm
+    alone breaks nothing that goes through an open. Defence in depth is only
+    depth if each layer is pinned separately; otherwise the outer layer's
+    correctness is what the test is measuring.
+    """
+    _log_path, alias, _lineage = _reached_by_an_alias(tmp_path)
+    with bindings_path().open("a", encoding="utf-8") as handle:
+        handle.write("{ this line does not parse\n")
+    with pytest.raises(BindingProbeUnanswered):
+        aliased_lineage(canonical_location(str(alias)))
+
+
+def test_bound_lineage_refuses_an_unreadable_bindings_file_on_its_own(tmp_path):
+    """The fourth site's OSError arm, pinned on its own for the same reason.
+
+    Through an open, ``aliased_lineage`` would refuse even if this arm were
+    reverted, so the integration test cannot tell the two apart. This one calls
+    the layer directly.
+    """
+    _needs_unprivileged()
+    record_binding("/a/project.arrival", "01ARZ3NDEKTSV4RRFFQ69G5FAV", 1.0)
+    bindings_path().chmod(0o000)
+    try:
+        with pytest.raises(BindingProbeUnanswered):
+            bound_lineage("/a/project.arrival")
+    finally:
+        bindings_path().chmod(0o600)
+
+
+def test_every_probe_refusal_is_one_family(tmp_path):
+    """The pattern is nameable, which is the point of giving it a parent.
+
+    A caller that wants "could not determine" as one condition catches
+    ``ProbeUnanswered``; the two sites stay distinguishable underneath. The
+    binding subclass dies with the binding unit at slice 5 and the parent does
+    not — the sweep removes a leaf, not the concept.
+    """
+    assert issubclass(FenceProbeUnanswered, ProbeUnanswered)
+    assert issubclass(BindingProbeUnanswered, ProbeUnanswered)
+    assert issubclass(ProbeUnanswered, AttestationRefusal)
+    expected = bound_lineage("/a/project.arrival")
+    assert expected is not None
+    known = read_journal(expected).established_head()
+    presented = head(0, "z", lineage=OTHER_LINEAGE)
+    assert compare(known, presented, None) is Outcome.LINEAGE_REPLACED
+
+
+def test_the_bindings_file_lives_beside_the_journals():
+    record_binding("/a/project.arrival", LINEAGE, 1.0)
+    assert bindings_path() == heads_dir() / "bindings.jsonl"
+    assert bindings_path().exists()
+
+
+def test_a_malformed_binding_line_refuses_rather_than_being_skipped():
+    """SUPERSEDED: this pinned the skip, and the skip was the defect.
+
+    The reasoning it carried — "a missing binding degrades to first contact,
+    which it never guaranteed" — is true of an ABSENT bindings file and false
+    of a line that will not parse. A skipped line may be the very binding that
+    names this location, so skipping answers "nothing is bound here" on
+    evidence that says nothing of the kind, and a replaced store then opens as
+    first contact (``finding:s3wp3-binding-probes-fail-acceptance-side``).
+
+    Absent still answers None, and its own test below is unchanged.
+    """
+    record_binding("/a/project.arrival", LINEAGE, 1.0)
+    with bindings_path().open("a") as handle:
+        handle.write("{not json\n")
+    with pytest.raises(BindingProbeUnanswered):
+        bound_lineage("/a/project.arrival")
+
+
+def test_the_transitional_binding_carries_its_deletion_marker():
+    """The residue sweep is written where slice 5 will find it.
+
+    Registry precedent: a transitional arm states its own deletion, so the
+    sweep is an obligation in the source rather than a memory somebody has.
+    """
+    source = Path(
+        "libs/engine/src/engine/arrival_head_attestation.py"
+    )
+rg: Makefile: No such file or directory (os error 2)
+pyproject.toml:63:# The root runs the tests that belong to no single package — the architecture
+pyproject.toml:73:    "ruff>=0.8",
+docs/scratch/arrival-break/slice3-wp3-report.md:61:| `tests/architecture/test_rule_18_arrival_vocabulary_denylist.py` | `_SCAN_TARGETS` enrollment (same commit, or the glob test fails) |
+docs/scratch/arrival-break/slice3-wp3-report.md:70:engine pytest libs/engine/tests`, and `tests/architecture` in its own run).
+docs/scratch/arrival-break/slice3-wp3-report.md:75:| architecture | 99 passed | 99 passed | **0** — Rule 18 is not parametrized per target |
+docs/scratch/arrival-break/slice3-wp3-report.md:83:The renamed §0.4 test is 1-for-1. `ruff check` passes on every file this WP wrote
+libs/engine/pyproject.toml:27:    "ruff>=0.8",
+libs/engine/pyproject.toml:42:[tool.pytest.ini_options]
+libs/engine/pyproject.toml:45:testpaths = ["tests"]
+libs/engine/pyproject.toml:59:[tool.ruff]
+libs/engine/pyproject.toml:63:[tool.ruff.lint]
+README.md:133:architecture — decisions, open threads, falsifiable predictions — and each
+
+exec
+/bin/zsh -lc "sed -n '1020,1120p' docs/scratch/arrival-break/slice3-wp3-report.md; sed -n '55,90p' pyproject.toml; sed -n '35,75p' libs/engine/pyproject.toml; git status --porcelain=v1" in /Users/kaygee/Code/loops-s3wp1
+ succeeded in 0ms:
+`test_two_writers_and_an_opener_leave_a_parseable_journal` spawns two writer
+processes and one opener process against one lineage. Verified independently that
+contention is real — 40 records land from two processes, 43 journal lines (header
++ 40 commits + 3 racing first-contact bootstraps), all independently parseable, the
+read is complete (`skipped == ()`), and the journal's established head equals the
+store's actual head. The test asserts both writers landed their full round count
+and that the head equals their sum, so a run where only one writer ever wrote fails
+rather than passing vacuously. This is the run that found the across-time defect.
+
+**4. The §0.4 fix.** `test_opening_a_store_whose_projection_is_absent_now_succeeds`
+— a minted log with no index opens, `ledger.head()` answers, `projected_through()`
+reports `None` rather than guessing, and `query.reader` **still** raises
+`FileNotFoundError`. The WP4 finding's pinning test was updated **honestly**: it was
+born as its own negation, recording observed behavior rather than a policy anyone
+chose, and the rename plus the retained-refusal assertions say exactly what changed
+and what did not. `test_closing_a_query_that_never_read_does_not_build_a_reader`
+covers the trap of moving the refusal into `close()`.
+
+**5. The IndeterminateComparison posture.** Six tests, listed in the finding.
+`test_the_carried_refusal_is_the_one_the_journal_itself_raises` is the one that
+proves the seam went through `established_head()` rather than around it.
+
+**6. Mutation demos** — below.
+
+**7. Suites green, counts reconciled, `git ls-files` clean.** Above and below.
+
+### Mutation demos
+
+Each applied to the working tree, the suite run, the mutation reverted, and
+`git diff --quiet` verified clean before the next.
+
+| # | Mutation | Result (46 tests) |
+|---|---|---|
+| (a) | journaling-on-commit dropped from `_witness` | **4 or 5 failed** — see NB-1 — the four deterministic are `test_commit_then_open_takes_the_o1_path_not_the_advance_path` (the next open observes an ADVANCE and pays two walks), `test_an_append_through_the_wrapper_journals_its_commit`, the `NotWitnessed` test, and the race pin |
+| (b) | `canonical_location` returns the location unchanged | **1 failed, 69 passed** (with the registry file) — `test_the_binding_matches_through_a_non_canonical_path`: the replacement goes undetected and the store is trusted on first contact |
+| (c) | the seam swallows `IndeterminateComparison` by re-deriving *K* from `read.epoch` — the bypass WP1 explicitly named as reachable | **3 failed, 43 passed** — `test_an_incomplete_read_proceeds_labeled_at_or_above_the_bound`, `test_a_journal_with_no_readable_content_is_not_granted_a_receipt` (a receipt is written for an unreadable journal — BLOCKING-2 reborn), `test_the_carried_refusal_is_the_one_the_journal_itself_raises` |
+| (d) | the across-time re-read removed | **2 or 3 failed** — see NB-1 — the two deterministic are `test_a_commit_racing_the_open_is_not_reported_as_a_rollback` and `test_a_genuine_rollback_survives_the_re_observation` (which pins the op count, so the fix cannot be faked by weakening the refusal) |
+| (e) | the earned bootstrap entry written inside `_observe`, before the projection comparison can refuse | **1 failed, 45 passed** — `test_the_refused_truncation_left_no_memory_claiming_it_was_accepted` |
+| (f) | the rollback-from-a-bound arm removed from `_degraded` | **1 failed, 46 passed** — `test_an_incomplete_read_still_refuses_a_head_below_the_bound` |
+| (g) | the bound treated as an established head, so the seam answers from it | **4 failed, 43 passed** — `test_an_incomplete_read_proceeds_labeled_at_or_above_the_bound` (answers `unchanged`), `test_an_incomplete_read_does_not_answer_advanced_above_the_bound` (answers `advanced`), plus the receipt and carried-refusal tests |
+| (h) | the pre-fix inline ADVANCE write restored in `_judge` | **3 failed, 47 passed** — `test_an_advance_is_not_journaled_when_the_projection_then_refuses`, `test_an_advance_is_not_journaled_when_the_projection_disowns_the_log`, and the AST ratchet `test_only_the_constructor_and_the_producers_write_to_the_journal` |
+| (i) | `append_entry` reached through an attribute-style import instead of by name | **2 failed, 48 passed** — the ratchet's precondition assertion fails naming `['append_entry']`; also `test_a_journal_write_failure_after_a_commit_says_the_records_are_committed`, which monkeypatches the module attribute the mutation removes |
+| (L-1) | the object-identity sweep reverted in the binding arm | **1 failed, 56 passed** — `test_a_case_variant_spelling_of_a_bound_store_is_not_first_contact`: the replacement raises nothing and the alias spelling silently first-contacts |
+| (L-2) | read-time reset validation reverted in `_epoch_of` | **4 failed, 154 passed** — sol's repro leads, and *K* measured directly under the mutation is **5** where the journal reached 8; also the genuine-reset, crash-retry and unbound-reset tests |
+| (L-3) | `trust_reset`'s CALL SITE reverted to `read_journal` (the helper left correct and unused — the shape of the r2 hole) | **3 failed, 56 passed** — `test_the_ceremony_succeeds_on_an_equivocating_journal` leads, plus the gap-recording and epoch-scoped-staleness tests |
+| (L-4) | the POSITION half dropped from read-time validation, identity alone again | **1 failed, 168 passed** — `test_a_reset_whose_predecessor_moved_lines_is_not_honored`, the fresh-bytes construction. (Before the dedup gate this failed the two context-replay tests instead; those now die on dedup first, which is why position needed a case of its own.) |
+| (L-5) | the byte-duplicate gate reverted | **9 failed, 160 passed** — and the sharp one is `test_a_restored_abandoned_backup_does_not_open_unchanged`, which fails with *the abandoned state opened unchanged*: the acceptance vector itself, reproduced |
+
+**NB-1 — two demos have a nondeterministic failure SET, and the earlier counts
+here were wrong twice over.** `test_two_writers_and_an_opener_leave_a_parseable_journal`
+spawns three real processes, so it is an intermittent participant in mutations
+**(a)** and **(d)** alike. Measured five runs each against the fixed tree:
+
+| Demo | Deterministic | Intermittent | Observed |
+|---|---|---|---|
+| (a) | 4 | the concurrent run (2 of 5) | 4 or 5 |
+| (d) | 2 | the concurrent run (2 of 5) | 2 or 3 |
+
+The causes are structural and differ per demo. Under **(a)** the opener subprocess
+still journals through its *own* ADVANCED branch — a different write path, which
+the mutation does not touch — so whether the journal's maximum-ordinal entry ends
+up equal to the store's final head depends on when that opener last ran relative
+to the two writers. Under **(d)** the opener can hit the false rollback the
+re-read exists to prevent, which exits its subprocess non-zero and trips the
+returncode assertion — but only when the interleaving actually occurs.
+
+Neither conclusion depends on it: the deterministic failures kill each mutation on
+their own, and the concurrent test is a bonus catcher in both.
+
+**Correcting my own record.** This entry first read "5 failed" for (a) — one
+sampled run reported as a stable fact — and was then "corrected" to "7 or 8",
+which was worse: those five samples were taken while the BLOCKING-1 fix was
+absent from the working tree (a `git checkout` during an earlier demo had reverted
+it), so three of the counted failures were the missing fix rather than the
+mutation. The numbers above are re-measured against the committed, fixed tree and
+agree with the gate's independent measurement. A mutation demo reporting a sampled
+count as a fact is the same defect class as prose asserting an enforcement the
+code does not perform — and a demo measured against a tree you have not verified
+is a worse one, because it looks like evidence.
+
+(b) and (c) each also have a mirror pinned: (b)'s canonical form is asserted
+directly through `bound_lineage(canonical_location(detour))`, and (c)'s two sound
+refusals are pinned separately from its proceed branch, so a mutation resolving the
+posture toward blanket refusal fails
+`test_an_incomplete_read_proceeds_labeled_at_or_above_the_bound` while one
+resolving it toward blanket proceed fails the rollback and fork tests.
+
+## Test isolation
+
+Every test in both touched suites runs under an autouse fixture pointing
+`$XDG_STATE_HOME` at `tmp_path`. **The registry suite needed one added**: slice 3
+made `BackendRegistry.open` compare on open, so every pre-existing test there that
+opens a store now reads — and on first contact writes — a head journal. Without the
+fixture the suite would have written into the developer's real
+`~/.local/state/loops`. Autouse rather than per-test, because one forgotten opt-in
+is invisible until after it has happened.
+
+`test_the_state_root_is_redirected_for_this_suite` asserts the redirection itself,
+so a fixture that silently stopped applying fails loudly instead of leaving every
+other test writing to the real root. Verified empirically after every full-suite
+run: `~/.local/state/loops` does not exist.
+    "libs/engine/src/engine",
+    "libs/lang/src/lang",
+    "libs/sdk/src/sdk",
+    "libs/sign/src/sign",
+    "libs/store/src/store",
+    "apps/loops/src/loops",
+]
+
+# The root runs the tests that belong to no single package — the architecture
+# ratchets and tests/chaos — so it needs the same dev tooling every member
+# already declares. Without this, `uv run pytest` at the root resolves only the
+# flat wheel's runtime deps and dies with "Failed to spawn: pytest" on any
+# machine whose .venv was not already dirty from an earlier run. uv.lock is
+# gitignored, so CI resolves fresh every time and hit exactly that.
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=6.0",
+    "ruff>=0.8",
+]
+
+[tool.uv.workspace]
+members = [
+    "libs/atoms",
+    "libs/custody",
+    "libs/engine",
+    "libs/lang",
+    "libs/sdk",
+    "libs/sign",
+    "libs/store",
+    "apps/loops",
+]
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/engine"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+
+[tool.coverage.run]
+source = ["src/engine"]
+branch = true
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "\\.\\.\\.$",  # Protocol method stubs
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "PTH"]
+
+[tool.ty.environment]
+python-version = "3.11"
+
+[tool.mutmut]
+paths_to_mutate = ["src/engine/witness.py"]
+tests_dir = [
+    "tests/test_witness_position.py",
+    "tests/test_witness_address_helpers.py",
+    "tests/test_diff_interval_report.py",
+    "tests/test_fold_at.py",
+
+codex
+The committed regression does isolate the anchor by failing only `abandoned.ordinal`; I’m now checking the actual call trace, because the test currently proves state immutability but does not itself assert which earlier `head_at` calls succeeded. I’ll also distinguish real-filesystem coverage from injected/direct-call coverage on this non-root host.
+exec
+/bin/zsh -lc "UV_CACHE_DIR=/tmp/loops-s3wp1-uv-cache uv run --package engine pytest -q libs/engine/tests/test_arrival_head_seam.py libs/engine/tests/test_arrival_head_attestation.py -k 'unanswered_fence_probe or one_unanswered_anchor or probe_failure_outside or alias_probe or unreadable_bindings or recorded_location_that_will_not_stat or unparseable_binding or malformed_binding_line or every_probe_refusal or absent_path'" in /Users/kaygee/Code/loops-s3wp1
+ succeeded in 1039ms:
+............                                                             [100%]
+12 passed, 183 deselected in 0.87s
+
+apply patch
+patch: completed
+/Users/kaygee/Code/loops-s3wp1/libs/engine/src/engine/arrival_head_seam.py
+diff --git a/libs/engine/src/engine/arrival_head_seam.py b/libs/engine/src/engine/arrival_head_seam.py
+index bc1bc32a5a3bf6f25a09b0052bfb277bc2596538..16b7012d656fba88deb89645252d878fdfc4c758
+--- a/libs/engine/src/engine/arrival_head_seam.py
++++ b/libs/engine/src/engine/arrival_head_seam.py
+@@ -1326,22 +1326,8 @@
+                 vouched = self._ledger.head_at(
+                     Watermark(lineage=presented.lineage, ordinal=ordinal)
+                 )
+-            except Exception as exc:  # noqa: BLE001 — see the refusal's docstring
+-                # NO ANSWER IS NOT AN ANSWER. Continuing here would read
+-                # evidence-absent as absence-of-touch and land the whole fence
+-                # on the acceptance side — which is how sol reproduced the
+-                # self-erasing loop straight through a transient error.
+-                raise FenceProbeUnanswered(
+-                    f"{self._canonical} presents {_head_text(presented)}, and "
+-                    f"the ledger could not be asked what sits at ordinal "
+-                    f"{ordinal}: {exc}. This machine's operator decreed away "
+-                    f"history above ordinal {decree.head.ordinal}, and without "
+-                    "that answer this open cannot certify the presented "
+-                    "history is clear of it. Nothing is wrong with the store "
+-                    "as far as this went, and nothing has been accepted or "
+-                    "written — retry the open, and if it keeps failing the "
+-                    "ledger is what needs looking at"
+-                ) from exc
++            except Exception:  # noqa: BLE001
++                continue
+             if vouched.record_hash in fenced[ordinal]:
+                 raise AbandonedHistoryFenced(
+                     f"{self._canonical} presents {_head_text(presented)}, whose "
+
+diff --git a/libs/engine/src/engine/arrival_head_seam.py b/libs/engine/src/engine/arrival_head_seam.py
+index bc1bc32a5a3bf6f25a09b0052bfb277bc2596538..16b7012d656fba88deb89645252d878fdfc4c758
+--- a/libs/engine/src/engine/arrival_head_seam.py
++++ b/libs/engine/src/engine/arrival_head_seam.py
+@@ -1326,22 +1326,8 @@
+                 vouched = self._ledger.head_at(
+                     Watermark(lineage=presented.lineage, ordinal=ordinal)
+                 )
+-            except Exception as exc:  # noqa: BLE001 — see the refusal's docstring
+-                # NO ANSWER IS NOT AN ANSWER. Continuing here would read
+-                # evidence-absent as absence-of-touch and land the whole fence
+-                # on the acceptance side — which is how sol reproduced the
+-                # self-erasing loop straight through a transient error.
+-                raise FenceProbeUnanswered(
+-                    f"{self._canonical} presents {_head_text(presented)}, and "
+-                    f"the ledger could not be asked what sits at ordinal "
+-                    f"{ordinal}: {exc}. This machine's operator decreed away "
+-                    f"history above ordinal {decree.head.ordinal}, and without "
+-                    "that answer this open cannot certify the presented "
+-                    "history is clear of it. Nothing is wrong with the store "
+-                    "as far as this went, and nothing has been accepted or "
+-                    "written — retry the open, and if it keeps failing the "
+-                    "ledger is what needs looking at"
+-                ) from exc
++            except Exception:  # noqa: BLE001
++                continue
+             if vouched.record_hash in fenced[ordinal]:
+                 raise AbandonedHistoryFenced(
+                     f"{self._canonical} presents {_head_text(presented)}, whose "
+
+exec
+/bin/zsh -lc 'UV_CACHE_DIR=/tmp/loops-s3wp1-uv-cache uv run --package engine pytest -q libs/engine/tests/test_arrival_head_seam.py' in /Users/kaygee/Code/loops-s3wp1
+ exited 1 in 783ms:
+..................................................................FF.... [ 92%]
+......                                                                   [100%]
+=================================== FAILURES ===================================
+_________ test_an_unanswered_fence_probe_refuses_rather_than_accepting _________
+
+tmp_path = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-14919/test_an_unanswered_fence_probe0')
+
+    def test_an_unanswered_fence_probe_refuses_rather_than_accepting(tmp_path):
+        """Sol's repro. The fence contained a probe that lied acceptance-side.
+    
+        Descent verifies, the probe raises, and the old code continued as though
+        the abandoned coordinate simply was not there — so the advance was accepted
+        AND journaled, and every later open read UNCHANGED. The self-erasing loop,
+        reached through a transient error instead of through a restore.
+    
+        Evidence absent is not absence of evidence, and this is the one place in
+        the seam where that had been written the wrong way round.
+        """
+        log_path, lineage, abandoned, backup = _reset_away_from(tmp_path)
+        log_path.write_bytes(backup)
+        before = journal_bytes(lineage)
+        bindings_before = bindings_path().read_bytes()
+    
+        probing = ProbeFails(
+            FileLedger(ArrivalLog(log_path)), failing={abandoned.ordinal}
+        )
+>       with pytest.raises(FenceProbeUnanswered) as excinfo:
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE FenceProbeUnanswered
+
+libs/engine/tests/test_arrival_head_seam.py:2266: Failed
+_________ test_one_unanswered_anchor_of_several_refuses_the_whole_open _________
+
+tmp_path = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-14919/test_one_unanswered_anchor_of_0')
+
+    def test_one_unanswered_anchor_of_several_refuses_the_whole_open(tmp_path):
+        """No partial certification.
+    
+        With several fenced anchors, answering most of them says nothing about the
+        one that did not answer. A fence that refused only when it happened to get
+        an answer would be strongest exactly when it was least needed.
+        """
+        log_path = minted(tmp_path / "s.arrival")
+        append_legacy(log_path, "one", "two", "three")
+        abandoned = FileLedger(ArrivalLog(log_path)).verify(Open())
+        backup = log_path.read_bytes()
+        opened(log_path)
+    
+        truncate_records(log_path, keep=1)
+        restored = FileLedger(ArrivalLog(log_path)).verify(Open())
+        trust_reset(
+            accepted=restored,
+            abandoned=abandoned,
+            refused=abandoned,
+            reason="incident",
+            location=str(log_path),
+            observed_at=5000.0,
+        )
+        log_path.write_bytes(backup)
+    
+        # Fail the probe for the HIGHEST anchor only; the lower ones answer fine.
+        probing = ProbeFails(
+            FileLedger(ArrivalLog(log_path)), failing={abandoned.ordinal}
+        )
+>       with pytest.raises(FenceProbeUnanswered):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE FenceProbeUnanswered
+
+libs/engine/tests/test_arrival_head_seam.py:2305: Failed
+=========================== short test summary info ============================
+FAILED libs/engine/tests/test_arrival_head_seam.py::test_an_unanswered_fence_probe_refuses_rather_than_accepting
+FAILED libs/engine/tests/test_arrival_head_seam.py::test_one_unanswered_anchor_of_several_refuses_the_whole_open
+2 failed, 76 passed in 0.58s
+
+diff --git a/libs/engine/src/engine/arrival_head_seam.py b/libs/engine/src/engine/arrival_head_seam.py
+index bc1bc32a5a3bf6f25a09b0052bfb277bc2596538..16b7012d656fba88deb89645252d878fdfc4c758
+--- a/libs/engine/src/engine/arrival_head_seam.py
++++ b/libs/engine/src/engine/arrival_head_seam.py
+@@ -1326,22 +1326,8 @@
+                 vouched = self._ledger.head_at(
+                     Watermark(lineage=presented.lineage, ordinal=ordinal)
+                 )
+-            except Exception as exc:  # noqa: BLE001 — see the refusal's docstring
+-                # NO ANSWER IS NOT AN ANSWER. Continuing here would read
+-                # evidence-absent as absence-of-touch and land the whole fence
+-                # on the acceptance side — which is how sol reproduced the
+-                # self-erasing loop straight through a transient error.
+-                raise FenceProbeUnanswered(
+-                    f"{self._canonical} presents {_head_text(presented)}, and "
+-                    f"the ledger could not be asked what sits at ordinal "
+-                    f"{ordinal}: {exc}. This machine's operator decreed away "
+-                    f"history above ordinal {decree.head.ordinal}, and without "
+-                    "that answer this open cannot certify the presented "
+-                    "history is clear of it. Nothing is wrong with the store "
+-                    "as far as this went, and nothing has been accepted or "
+-                    "written — retry the open, and if it keeps failing the "
+-                    "ledger is what needs looking at"
+-                ) from exc
++            except Exception:  # noqa: BLE001
++                continue
+             if vouched.record_hash in fenced[ordinal]:
+                 raise AbandonedHistoryFenced(
+                     f"{self._canonical} presents {_head_text(presented)}, whose "
+
+apply patch
+patch: completed
+/Users/kaygee/Code/loops-s3wp1/libs/engine/src/engine/arrival_head_seam.py
+codex
+The fence mutation reproduces exactly the claimed result: 2 failed, 76 passed, including the acceptance-side loop test. I restored the fix and am applying each of the five binding mutations independently against the full two-file test surface, checking the tree is restored between runs.
+apply patch
+patch: completed
+/Users/kaygee/Code/loops-s3wp1/libs/engine/src/engine/arrival_head_seam.py
+diff --git a/libs/engine/src/engine/arrival_head_seam.py b/libs/engine/src/engine/arrival_head_seam.py
+index bc1bc32a5a3bf6f25a09b0052bfb277bc2596538..87bf4ab3a36fbad3f30081bec8c8ec2742c87e0e
+--- a/libs/engine/src/engine/arrival_head_seam.py
++++ b/libs/engine/src/engine/arrival_head_seam.py
+@@ -522,13 +522,8 @@
+     except FileNotFoundError:
+         # ABSENT is an answer: nothing has ever been bound here.
+         return None
+-    except OSError as exc:
+-        raise BindingProbeUnanswered(
+-            f"the bindings file at {bindings_path()} exists and cannot be "
+-            f"read ({exc}), so this open cannot tell whether this location "
+-            "already presented a different lineage. Nothing has been accepted "
+-            "or written — retry the open"
+-        ) from exc
++    except OSError:
++        return None
+     recorded: list[tuple[str, str, Identity | None]] = []
+     for number, line in enumerate(text.splitlines(), start=1):
+         stripped = line.strip()
+
+diff --git a/libs/engine/src/engine/arrival_head_seam.py b/libs/engine/src/engine/arrival_head_seam.py
+index bc1bc32a5a3bf6f25a09b0052bfb277bc2596538..87bf4ab3a36fbad3f30081bec8c8ec2742c87e0e
+--- a/libs/engine/src/engine/arrival_head_seam.py
++++ b/libs/engine/src/engine/arrival_head_seam.py
+@@ -522,13 +522,8 @@
+     except FileNotFoundError:
+         # ABSENT is an answer: nothing has ever been bound here.
+         return None
+-    except OSError as exc:
+-        raise BindingProbeUnanswered(
+-            f"the bindings file at {bindings_path()} exists and cannot be "
+-            f"read ({exc}), so this open cannot tell whether this location "
+-            "already presented a different lineage. Nothing has been accepted "
+-            "or written — retry the open"
+-        ) from exc
++    except OSError:
++        return None
+     recorded: list[tuple[str, str, Identity | None]] = []
+     for number, line in enumerate(text.splitlines(), start=1):
+         stripped = line.strip()
+

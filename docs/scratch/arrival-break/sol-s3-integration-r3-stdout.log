@@ -1,0 +1,3070 @@
+Reading prompt from stdin...
+OpenAI Codex v0.150.1
+--------
+workdir: /Users/kaygee/Code/loops-s3wp1
+model: gpt-5.6-sol
+provider: openai
+approval: never
+sandbox: workspace-write [workdir, /tmp, $TMPDIR]
+reasoning effort: low
+reasoning summaries: none
+session id: 01a053b5-163c-7d71-96da-dc0b2f0f541b
+--------
+user
+# Sol review brief — arrival-break slice 3, integration round 3 (per-WP, LOW)
+
+Round 3, verifying the fixes for your r2 blocking finding S3I-L-3 (fence probe
+fails open) plus the pattern-audit follow-through it triggered.
+
+## 1. Anchor
+
+- Worktree: this directory (`~/Code/loops-s3wp1`), branch `slice3/arrival-witness`,
+  NEW tip `32234eac`. Diff since your r2: `git diff 4b1a14a4...32234eac`.
+- Suites: engine per-package, architecture SEPARATELY. Claimed at 0d9da45f:
+  engine 2295 passed + 1 skipped + 0 failed, arch 99, ruff clean.
+- ARBITER-APPLIED fix at the tip (prose-only, no independent gate — you are its
+  only verification): `32234eac` adds the fence's cost sentence to §04b (one
+  verified lookup per abandoned anchor on advancing opens; scales with ceremony
+  history; never paid on the dominant unchanged open) — your r2 perf residual.
+  Verify it against the implementation's actual cost shape and that it neither
+  under- nor over-claims.
+
+## 2. Unverified fixes, by commit
+
+- `333021bc` + `f85a5648` — S3I-L-3: `FenceProbeUnanswered`, a SIBLING of
+  `AbandonedHistoryFenced` (different claim, different remedy: "touches
+  decreed-away ground → ceremony" vs "could not determine → retry"). An
+  unanswered fence probe refuses, typed, before `_Earned`. Probe audit: exactly
+  one probe in the fence; lift check is pure comparison, no I/O.
+- `c1a578c8` + `0d9da45f` — the pattern audit's harvest, ruled fixed now
+  (finding:s3wp3-binding-probes-fail-acceptance-side): FOUR sites in the
+  transitional binding unit. Three read I/O/parse failure as "no alias found"
+  (silent first contact): `aliased_lineage` OSError, `_identity_of` OSError,
+  binding-line-loop ValueError. The FOURTH was found while testing and gated
+  the others' reachability: `bound_lineage` let a raw OSError ESCAPE UNTYPED
+  past every `except AttestationRefusal` (wrong by being untyped, not by
+  direction), and it reads the bindings file BEFORE `aliased_lineage`. Pattern
+  named: `ProbeUnanswered` parent; `BindingProbeUnanswered` dies with the unit
+  at slice 5, parent + fence subclass survive. One WP1 test inverted (it pinned
+  the malformed-line skip, and the skip was the defect).
+
+## 3. Verify each — empirically where possible
+
+1. **S3I-L-3 regression**: your repro — transient failure on the anchor lookup
+   → open REFUSED (`FenceProbeUnanswered`), journal AND binding byte-identical.
+   Re-run their test AND your own r2 construction. NOTE their demo lesson: the
+   probe must fail SELECTIVELY at the anchor ordinal — failing every `head_at`
+   makes `_descent` refuse first (`HeadRewrite`) and proves nothing about the
+   fence. Verify their selective construction actually isolates the fence.
+2. **Mutation demo**: catch-and-continue restored → 2 failed, the loop
+   reproduced (probe raises → advanced → journaled → next clean open
+   unchanged). Re-run.
+3. **The four binding sites**: per-site regressions (probe raises → typed
+   refusal, nothing journaled, no binding written) and FIVE per-site mutation
+   demos each failing EXACTLY ONE test — their first pass had no failing test
+   for two arms because `bound_lineage` refuses before `aliased_lineage` is
+   reached through an open; each arm now has a direct-call test. Verify the
+   demos still fail exactly one each (that is the depth-is-pinned-separately
+   claim — if a demo fails zero or several, the claim is broken).
+4. **Real-filesystem construction**: the tests use a permission wall and a
+   locked directory (skip as root), and the alias is a HARD LINK (a symlink
+   resolves to the same canonical form and never reaches the alias probe).
+   Verify the constructions actually exercise the probe paths claimed — and
+   that root-skip leaves each judgment covered by some other test on this
+   platform.
+5. **The inverted WP1 test**: its reasoning (absent file = no binding is fine;
+   unreadable LINE = refusal) — verify the inversion is right and no other test
+   still pins the old skip.
+6. **Typed-escape sweep**: `bound_lineage`'s raw-OSError escape was invisible
+   to an acceptance-side audit. Sweep the seam + attestation module for any
+   OTHER path where a builtin exception escapes past the typed-refusal
+   boundary (the `JournalUnreadable` pattern one file over is the model).
+7. Counts: engine 2295+1s+0f (+9 over r2), arch 99 separate, ruff clean,
+   `git diff --check` clean.
+
+## 4. Try-to-defeat seeds
+
+- **ProbeUnanswered as a new uniform-outcome surface**: two sibling refusal
+  types now say "retry". Can a caller catch the parent and retry FOREVER on a
+  permanent condition (deleted-then-recreated store dir, permanently
+  unreadable bindings file) — is there anything that distinguishes
+  transient-retry from permanent-operator-problem, and if not, is that honest
+  (documented) or a hole?
+- **The fence under probe-refusal pressure**: repeated FenceProbeUnanswered
+  opens (flaky NFS) — does anything degrade, cache, or give up in a way that
+  weakens the fence after N failures?
+- **Order dependence**: `bound_lineage` reads the bindings file before
+  `aliased_lineage`. Construct a state where the FIRST read succeeds and the
+  SECOND fails (file replaced between reads within one open) — typed refusal
+  or something worse?
+- **The §04b cost sentence**: is "never on the dominant unchanged open" true
+  under every path (including a fenced-then-retried open that lands unchanged)?
+
+## 5. Verdict format
+
+Per-item PASS/FAIL + evidence. New findings: `S3I-L-<n>` continuing, file:line,
+severity, concrete failure scenario. Then one line: **CONVERGED** or
+**NOT CONVERGED** (with the blocking list).
+
+codex
+I’ll audit the exact r2→tip diff, map the targeted tests/mutation hooks, then run the specified suites and independent constructions. I’ll keep architecture separate and treat the prose claim as an implementation-level assertion.
+exec
+/bin/zsh -lc 'git status --short && git log --oneline --decorate -8 && git diff --stat 4b1a14a4...32234eac && git diff --check 4b1a14a4...32234eac' in /Users/kaygee/Code/loops-s3wp1
+ succeeded in 0ms:
+32234eac (HEAD -> slice3/arrival-witness) docs(arrival): the fence's reach has a stated price
+0d9da45f docs(scratch): record the binding-probe ruling, the fourth site, and the demos
+01ebe44d test(engine): pin each probe layer separately
+c1a578c8 fix(engine): a binding probe that cannot answer refuses
+f85a5648 docs(scratch): record S3I-L-3, the probe audit, and the same shape elsewhere
+333021bc fix(engine): an unanswered fence probe refuses
+4b1a14a4 merge(slice3): doc rounds 3-4 — the fence supersedes the disclosure
+a3d5b913 (slice3/doc-catchup) docs(arrival): the fence detects something, so §02 says so
+ docs/architecture/arrival/witness-protocol.html    |   6 +-
+ docs/scratch/arrival-break/slice3-wp3-report.md    | 147 ++++++++++
+ libs/engine/src/engine/arrival_head_attestation.py |  55 +++-
+ libs/engine/src/engine/arrival_head_seam.py        | 105 ++++++-
+ libs/engine/tests/test_arrival_head_attestation.py |  18 +-
+ libs/engine/tests/test_arrival_head_seam.py        | 304 +++++++++++++++++++++
+ 6 files changed, 616 insertions(+), 19 deletions(-)
+
+exec
+/bin/zsh -lc "rg --files -g 'AGENTS.md' -g 'pyproject.toml' -g 'Makefile' -g 'tox.ini' -g 'noxfile.py' . .. | sort && git diff 4b1a14a4...32234eac -- libs/engine/src/engine/arrival_head_attestation.py libs/engine/src/engine/arrival_head_seam.py docs/architecture/arrival/witness-protocol.html" in /Users/kaygee/Code/loops-s3wp1
+ succeeded in 0ms:
+../3dmodels/pyproject.toml
+../acrhive/pyproject.toml
+../agent-auth/Makefile
+../agent-auth/grounding/idp-vouch/Makefile
+../backtesting/pyproject.toml
+../commission/pyproject.toml
+../discord-scraper/pyproject.toml
+../forks/HVM4/AGENTS.md
+../forks/Marinara-Engine/AGENTS.md
+../forks/SillyBunny/AGENTS.md
+../forks/substack_api/pyproject.toml
+../gruel-design-system/AGENTS.md
+../gruel-design-system/src/systems/bfc/AGENTS.md
+../gruel-design-system/src/systems/gruel/AGENTS.md
+../gruel.network/docs/pyproject.toml
+../hlab/pyproject.toml
+../idp-eval/AGENTS.md
+../idp-eval/pyproject.toml
+../living-almanac/AGENTS.md
+../llm-tools-gwk/pyproject.toml
+../loops-docs/apps/hlab/pyproject.toml
+../loops-docs/apps/loops/pyproject.toml
+../loops-docs/apps/tasks/pyproject.toml
+../loops-docs/libs/atoms/pyproject.toml
+../loops-docs/libs/custody/pyproject.toml
+../loops-docs/libs/engine/pyproject.toml
+../loops-docs/libs/lang/pyproject.toml
+../loops-docs/libs/sign/pyproject.toml
+../loops-docs/libs/store/pyproject.toml
+../loops-docs/pyproject.toml
+../loops-s3doc/apps/loops/pyproject.toml
+../loops-s3doc/libs/atoms/pyproject.toml
+../loops-s3doc/libs/custody/pyproject.toml
+../loops-s3doc/libs/engine/pyproject.toml
+../loops-s3doc/libs/lang/pyproject.toml
+../loops-s3doc/libs/sdk/pyproject.toml
+../loops-s3doc/libs/sign/pyproject.toml
+../loops-s3doc/libs/store/pyproject.toml
+../loops-s3doc/pyproject.toml
+../loops-s3wp1-base/apps/loops/pyproject.toml
+../loops-s3wp1-base/libs/atoms/pyproject.toml
+../loops-s3wp1-base/libs/custody/pyproject.toml
+../loops-s3wp1-base/libs/engine/pyproject.toml
+../loops-s3wp1-base/libs/lang/pyproject.toml
+../loops-s3wp1-base/libs/sdk/pyproject.toml
+../loops-s3wp1-base/libs/sign/pyproject.toml
+../loops-s3wp1-base/libs/store/pyproject.toml
+../loops-s3wp1-base/pyproject.toml
+../loops-s3wp1-gate/apps/loops/pyproject.toml
+../loops-s3wp1-gate/libs/atoms/pyproject.toml
+../loops-s3wp1-gate/libs/custody/pyproject.toml
+../loops-s3wp1-gate/libs/engine/pyproject.toml
+../loops-s3wp1-gate/libs/lang/pyproject.toml
+../loops-s3wp1-gate/libs/sdk/pyproject.toml
+../loops-s3wp1-gate/libs/sign/pyproject.toml
+../loops-s3wp1-gate/libs/store/pyproject.toml
+../loops-s3wp1-gate/pyproject.toml
+../loops-s3wp1/apps/loops/pyproject.toml
+../loops-s3wp1/libs/atoms/pyproject.toml
+../loops-s3wp1/libs/custody/pyproject.toml
+../loops-s3wp1/libs/engine/pyproject.toml
+../loops-s3wp1/libs/lang/pyproject.toml
+../loops-s3wp1/libs/sdk/pyproject.toml
+../loops-s3wp1/libs/sign/pyproject.toml
+../loops-s3wp1/libs/store/pyproject.toml
+../loops-s3wp1/pyproject.toml
+../loops-s3wp2-gate/apps/loops/pyproject.toml
+../loops-s3wp2-gate/libs/atoms/pyproject.toml
+../loops-s3wp2-gate/libs/custody/pyproject.toml
+../loops-s3wp2-gate/libs/engine/pyproject.toml
+../loops-s3wp2-gate/libs/lang/pyproject.toml
+../loops-s3wp2-gate/libs/sdk/pyproject.toml
+../loops-s3wp2-gate/libs/sign/pyproject.toml
+../loops-s3wp2-gate/libs/store/pyproject.toml
+../loops-s3wp2-gate/pyproject.toml
+../loops-s3wp2/apps/loops/pyproject.toml
+../loops-s3wp2/libs/atoms/pyproject.toml
+../loops-s3wp2/libs/custody/pyproject.toml
+../loops-s3wp2/libs/engine/pyproject.toml
+../loops-s3wp2/libs/lang/pyproject.toml
+../loops-s3wp2/libs/sdk/pyproject.toml
+../loops-s3wp2/libs/sign/pyproject.toml
+../loops-s3wp2/libs/store/pyproject.toml
+../loops-s3wp2/pyproject.toml
+../loops-s3wp3-gate/apps/loops/pyproject.toml
+../loops-s3wp3-gate/libs/atoms/pyproject.toml
+../loops-s3wp3-gate/libs/custody/pyproject.toml
+../loops-s3wp3-gate/libs/engine/pyproject.toml
+../loops-s3wp3-gate/libs/lang/pyproject.toml
+../loops-s3wp3-gate/libs/sdk/pyproject.toml
+../loops-s3wp3-gate/libs/sign/pyproject.toml
+../loops-s3wp3-gate/libs/store/pyproject.toml
+../loops-s3wp3-gate/pyproject.toml
+../loops-s3wp3/apps/loops/pyproject.toml
+../loops-s3wp3/libs/atoms/pyproject.toml
+../loops-s3wp3/libs/custody/pyproject.toml
+../loops-s3wp3/libs/engine/pyproject.toml
+../loops-s3wp3/libs/lang/pyproject.toml
+../loops-s3wp3/libs/sdk/pyproject.toml
+../loops-s3wp3/libs/sign/pyproject.toml
+../loops-s3wp3/libs/store/pyproject.toml
+../loops-s3wp3/pyproject.toml
+../loops-tasks/pyproject.toml
+../loops-wt/receipt-order-fold/apps/loops/pyproject.toml
+../loops-wt/receipt-order-fold/libs/atoms/pyproject.toml
+../loops-wt/receipt-order-fold/libs/custody/pyproject.toml
+../loops-wt/receipt-order-fold/libs/engine/pyproject.toml
+../loops-wt/receipt-order-fold/libs/lang/pyproject.toml
+../loops-wt/receipt-order-fold/libs/sdk/pyproject.toml
+../loops-wt/receipt-order-fold/libs/sign/pyproject.toml
+../loops-wt/receipt-order-fold/libs/store/pyproject.toml
+../loops-wt/receipt-order-fold/pyproject.toml
+../loops-wt/sliceD-explore/apps/loops/pyproject.toml
+../loops-wt/sliceD-explore/libs/atoms/pyproject.toml
+../loops-wt/sliceD-explore/libs/custody/pyproject.toml
+../loops-wt/sliceD-explore/libs/engine/pyproject.toml
+../loops-wt/sliceD-explore/libs/lang/pyproject.toml
+../loops-wt/sliceD-explore/libs/sdk/pyproject.toml
+../loops-wt/sliceD-explore/libs/sign/pyproject.toml
+../loops-wt/sliceD-explore/libs/store/pyproject.toml
+../loops-wt/sliceD-explore/pyproject.toml
+../loops/apps/loops/pyproject.toml
+../loops/libs/atoms/pyproject.toml
+../loops/libs/custody/pyproject.toml
+../loops/libs/engine/pyproject.toml
+../loops/libs/lang/pyproject.toml
+../loops/libs/sdk/pyproject.toml
+../loops/libs/sign/pyproject.toml
+../loops/libs/store/pyproject.toml
+../loops/pyproject.toml
+../mcp/comms-launcher/pyproject.toml
+../mcp/comms/pyproject.toml
+../painted/pyproject.toml
+../peers/pyproject.toml
+../pile/pyproject.toml
+../recorded/pyproject.toml
+../siftd/pyproject.toml
+../sqlmerge/pyproject.toml
+../tasked/pyproject.toml
+../topstep-mig/AGENTS.md
+../topstep-mig/Makefile
+../topstep/AGENTS.md
+../topstep/Makefile
+../vouch/pyproject.toml
+./apps/loops/pyproject.toml
+./libs/atoms/pyproject.toml
+./libs/custody/pyproject.toml
+./libs/engine/pyproject.toml
+./libs/lang/pyproject.toml
+./libs/sdk/pyproject.toml
+./libs/sign/pyproject.toml
+./libs/store/pyproject.toml
+./pyproject.toml
+diff --git a/docs/architecture/arrival/witness-protocol.html b/docs/architecture/arrival/witness-protocol.html
+index 47ed34c5..e153229e 100644
+--- a/docs/architecture/arrival/witness-protocol.html
++++ b/docs/architecture/arrival/witness-protocol.html
+@@ -442,7 +442,11 @@
+           re-advance at an abandoned ordinal under a different hash an ordinary advance. It reaches
+           <strong>every walked coordinate</strong> rather than the presented head alone, because an
+           abandoned branch grown offline presents <em>N+3</em> while the abandoned entry sits at
+-          <em>N+1</em>, and head-only checking waves it through. And it sits <strong>before
++          <em>N+1</em>, and head-only checking waves it through. That reach has a stated price: an
++          advancing open pays one verified lookup per abandoned anchor, so a journal an operator
++          has reset many times makes its own opens proportionally slower—cost that scales with
++          ceremony history, paid only on the ADVANCED branch, never on the dominant unchanged
++          open. And it sits <strong>before
+           anything is journaled</strong>, so a fenced open records nothing—the acceptance recording
+           was precisely what made the loop invisible.
+         </p>
+diff --git a/libs/engine/src/engine/arrival_head_attestation.py b/libs/engine/src/engine/arrival_head_attestation.py
+index 40fa4f89..63c00148 100644
+--- a/libs/engine/src/engine/arrival_head_attestation.py
++++ b/libs/engine/src/engine/arrival_head_attestation.py
+@@ -58,6 +58,7 @@ __all__ = [
+     "ABSENT_STORE_REFUSALS",
+     "AbsentStoreOutcome",
+     "AttestationRefusal",
++    "BindingProbeUnanswered",
+     "EstablishedHead",
+     "HeadAttestation",
+     "HeadFork",
+@@ -73,6 +74,7 @@ __all__ = [
+     "Level",
+     "LineageReplaced",
+     "Outcome",
++    "ProbeUnanswered",
+     "REFUSALS",
+     "StoreLost",
+     "UnsafeLineageName",
+@@ -221,6 +223,39 @@ class IndeterminateComparison(AttestationRefusal):
+     """
+ 
+ 
++class ProbeUnanswered(AttestationRefusal):
++    """A check a caller depends on could not be performed.
++
++    The general form, named because the defect it guards against is a SHAPE
++    rather than a site: a probe whose own failure gets read as the absence of
++    what it was probing for. Evidence absent is not absence of evidence, and a
++    probe that conflates the two answers its whole question wrongly, in the
++    acceptance direction (``finding:s3-fence-probe-fails-open``,
++    ``finding:s3wp3-binding-probes-fail-acceptance-side``).
++
++    Every subclass means the same thing — *I could not determine this*, which
++    is not a finding about the store — and asks for the same remedy, which is
++    to try again. That is what separates them from refusals reporting something
++    the evidence positively established.
++
++    An ABSENT input is never one of these. "There is no bindings file" and "the
++    log does not exist yet" are answers, and correct ones; only an input that
++    exists and cannot be read leaves the question open.
++
++    It lives here rather than in the seam because the binding unit does, and
++    because a subclass of it has to be raisable from this module.
++    """
++
++
++class BindingProbeUnanswered(ProbeUnanswered):
++    """The location binding could not be read, so replacement cannot be ruled out.
++
++    DELETE IN SLICE 5 with the binding unit it serves. :class:`ProbeUnanswered`
++    survives — it names a shape that outlives any one probe — so the sweep
++    removes a leaf, not the concept.
++    """
++
++
+ class UnsafeLineageName(AttestationRefusal):
+     """This lineage cannot be used as a journal filename.
+ 
+@@ -1499,7 +1534,18 @@ def bound_lineage(location: str) -> str | None:
+     try:
+         text = bindings_path().read_text(encoding="utf-8")
+     except FileNotFoundError:
++        # ABSENT is an answer: nothing has ever been bound.
+         return None
++    except OSError as exc:
++        # Was a RAW OSError escaping past every `except AttestationRefusal`,
++        # which is the builtin-escape gap `JournalUnreadable` exists to close
++        # one file over. Refusing is the right direction; being typed is what
++        # lets a caller catch it with the rest.
++        raise BindingProbeUnanswered(
++            f"the bindings file at {bindings_path()} exists and cannot be "
++            f"read ({exc}), so this location's recorded lineage is unknown. "
++            "Nothing has been accepted or written — retry the open"
++        ) from exc
+     found: str | None = None
+     for line in text.splitlines():
+         stripped = line.strip()
+@@ -1507,8 +1553,13 @@ def bound_lineage(location: str) -> str | None:
+             continue
+         try:
+             decoded = json.loads(stripped)
+-        except ValueError:
+-            continue
++        except ValueError as exc:
++            raise BindingProbeUnanswered(
++                f"a line of {bindings_path()} does not parse ({exc}), and a "
++                "line that cannot be read may be the binding that names this "
++                "location. Nothing has been accepted or written — repair or "
++                "remove the line, then retry the open"
++            ) from exc
+         if (
+             isinstance(decoded, dict)
+             and decoded.get("location") == location
+diff --git a/libs/engine/src/engine/arrival_head_seam.py b/libs/engine/src/engine/arrival_head_seam.py
+index cf48f509..bc1bc32a 100644
+--- a/libs/engine/src/engine/arrival_head_seam.py
++++ b/libs/engine/src/engine/arrival_head_seam.py
+@@ -64,6 +64,7 @@ from .arrival_contract import (
+ from .arrival_head_attestation import (
+     AbsentStoreOutcome,
+     AttestationRefusal,
++    BindingProbeUnanswered,
+     EstablishedHead,
+     HeadAttestation,
+     HeadFork,
+@@ -75,6 +76,7 @@ from .arrival_head_attestation import (
+     Level,
+     LineageReplaced,
+     Outcome,
++    ProbeUnanswered,
+     StoreLost,
+     append_entry,
+     bindings_path,
+@@ -92,6 +94,9 @@ from .arrival_head_attestation import (
+ __all__ = [
+     "AttestedLedger",
+     "AbandonedHistoryFenced",
++    "BindingProbeUnanswered",
++    "FenceProbeUnanswered",
++    "ProbeUnanswered",
+     "AuditFoundUnaccountedHeads",
+     "Compared",
+     "Indeterminate",
+@@ -157,6 +162,39 @@ class AbandonedHistoryFenced(AttestationRefusal):
+     """
+ 
+ 
++class FenceProbeUnanswered(ProbeUnanswered):
++    """The fence could not certify the walked path, so the open does not proceed.
++
++    A sibling of :class:`AbandonedHistoryFenced` rather than an arm of it,
++    because the two make different claims and ask for different things. That
++    one says *your history touches ground the operator decreed away* — a
++    positive finding, answered by the ceremony. This one says *I could not
++    determine whether it does*, which is not a finding at all, and is answered
++    by trying again.
++
++    Named for what the read LACKS rather than for what went wrong with it. A
++    cause-name does not survive a second cause, which is the lesson this
++    module's prose paid for four times over.
++
++    **Why an unanswered probe refuses instead of proceeding.** The fence exists
++    because verified descent is not the whole question, and a probe that
++    treated its own failure as "nothing there" would answer the whole question
++    wrongly in the acceptance direction — evidence absent read as absence of
++    evidence. A transient error then costs exactly what sol's loop cost:
++    the advance accepted, journaled, and every later open reading UNCHANGED,
++    with the acceptance having erased its own evidence
++    (``finding:s3-fence-probe-fails-open``).
++
++    This is not the degradation posture, and the distinction is the posture's
++    own rule: :meth:`AttestedLedger._degraded` proceeds only AFTER firing every
++    refusal the evidence soundly supports. An uncertified fence path is exactly
++    a refusal the evidence demands, not a question the evidence leaves open.
++
++    The cost of being wrong here is one retried open. The cost of being wrong
++    the other way is silent re-acceptance of decreed-away history.
++    """
++
++
+ class AuditFoundUnaccountedHeads(AttestationRefusal):
+     """The store can no longer account for heads journaled in this epoch.
+ 
+@@ -414,16 +452,26 @@ Identity = tuple[int, int]
+ 
+ 
+ def _identity_of(location: str) -> Identity | None:
+-    """What filesystem object this path names right now, or None.
+-
+-    None for a path that does not stat — it was deleted, the mount is gone, or
+-    permission was withdrawn. Those bindings are skipped rather than guessed
+-    at: a path that cannot be stat'd makes no claim about identity either way.
++    """What filesystem object this path names right now, or None if it is absent.
++
++    The split is between an ANSWER and an unanswered question, and the two used
++    to be one branch. A path that does not exist genuinely names no object —
++    that is None, and it is correct, and the mint path depends on it. A path
++    that DOES exist and will not stat (a permission wall, a transient I/O
++    error, a partially mounted volume) leaves the question open, and answering
++    None there means a store replaced under an aliased spelling opens as first
++    contact.
+     """
+     try:
+         stat = Path(location).stat()
+-    except OSError:
++    except FileNotFoundError:
+         return None
++    except OSError as exc:
++        raise BindingProbeUnanswered(
++            f"{location} exists but cannot be stat'd ({exc}), so this open "
++            "cannot tell whether it names the same store as a recorded "
++            "binding. Nothing has been accepted or written — retry the open"
++        ) from exc
+     return (stat.st_dev, stat.st_ino)
+ 
+ 
+@@ -472,18 +520,29 @@ def aliased_lineage(location: str) -> str | None:
+     try:
+         text = bindings_path().read_text(encoding="utf-8")
+     except FileNotFoundError:
++        # ABSENT is an answer: nothing has ever been bound here.
+         return None
+-    except OSError:
+-        return None
++    except OSError as exc:
++        raise BindingProbeUnanswered(
++            f"the bindings file at {bindings_path()} exists and cannot be "
++            f"read ({exc}), so this open cannot tell whether this location "
++            "already presented a different lineage. Nothing has been accepted "
++            "or written — retry the open"
++        ) from exc
+     recorded: list[tuple[str, str, Identity | None]] = []
+-    for line in text.splitlines():
++    for number, line in enumerate(text.splitlines(), start=1):
+         stripped = line.strip()
+         if not stripped:
+             continue
+         try:
+             decoded = json.loads(stripped)
+-        except ValueError:
+-            continue
++        except ValueError as exc:
++            raise BindingProbeUnanswered(
++                f"line {number} of {bindings_path()} does not parse ({exc}), "
++                "and a line that cannot be read may be the binding that names "
++                "this location. Nothing has been accepted or written — repair "
++                "or remove the line, then retry the open"
++            ) from exc
+         where = decoded.get("location") if isinstance(decoded, dict) else None
+         lineage = decoded.get("lineage") if isinstance(decoded, dict) else None
+         if isinstance(where, str) and isinstance(lineage, str):
+@@ -1232,6 +1291,12 @@ class AttestedLedger:
+         boundary is the one decree nothing has superseded, so it is the one
+         that speaks. Fences more, never less.
+ 
++        **An unanswered probe refuses.** Every branch of this method lands on
++        refusal or on a certified-clean path; there is no arm where a failure
++        becomes silence. That is the one-directional rule the rest of this seam
++        already states at its broad catches, and this method is where it was
++        first broken (:class:`FenceProbeUnanswered`).
++
+         Cost: one verified walk per fenced anchor ordinal, on the ADVANCED
+         branch only — which is rare by construction, because a writer journals
+         its own commit.
+@@ -1261,8 +1326,22 @@ class AttestedLedger:
+                 vouched = self._ledger.head_at(
+                     Watermark(lineage=presented.lineage, ordinal=ordinal)
+                 )
+-            except Exception:  # noqa: BLE001 — no answer is no evidence of a touch
+-                continue
++            except Exception as exc:  # noqa: BLE001 — see the refusal's docstring
++                # NO ANSWER IS NOT AN ANSWER. Continuing here would read
++                # evidence-absent as absence-of-touch and land the whole fence
++                # on the acceptance side — which is how sol reproduced the
++                # self-erasing loop straight through a transient error.
++                raise FenceProbeUnanswered(
++                    f"{self._canonical} presents {_head_text(presented)}, and "
++                    f"the ledger could not be asked what sits at ordinal "
++                    f"{ordinal}: {exc}. This machine's operator decreed away "
++                    f"history above ordinal {decree.head.ordinal}, and without "
++                    "that answer this open cannot certify the presented "
++                    "history is clear of it. Nothing is wrong with the store "
++                    "as far as this went, and nothing has been accepted or "
++                    "written — retry the open, and if it keeps failing the "
++                    "ledger is what needs looking at"
++                ) from exc
+             if vouched.record_hash in fenced[ordinal]:
+                 raise AbandonedHistoryFenced(
+                     f"{self._canonical} presents {_head_text(presented)}, whose "
+
+exec
+/bin/zsh -lc "sed -n '1,240p' docs/scratch/arrival-break/slice3-wp3-report.md && git diff 4b1a14a4...32234eac -- libs/engine/tests/test_arrival_head_seam.py libs/engine/tests/test_arrival_head_attestation.py && sed -n '1,220p' pyproject.toml" in /Users/kaygee/Code/loops-s3wp1
+ succeeded in 0ms:
+# Slice 3 / WP3 implementation report — the compare-on-open seam
+
+Branch: `slice3/wp3-seam`, off `slice3/arrival-witness` @ `9ed893fe` (WP1's landed
+module, four review rounds in). Worktree `~/Code/loops-s3wp3`. Merge-base verified
+`9ed893fe98703ea9c0f1888c28e7e09b6dbc8eae`.
+
+Contract: `docs/scratch/arrival-break/slice3-wp3-brief.md`; design
+`docs/scratch/arrival-break/slice3-design-proposal.md` §D, §E-WP3, §0.4; ratified fact
+`design:arrival-break-slice3-witness-minimum` @ `01M17S26ZC1JFC51VEVSG4ZA67`; WP1's
+module and its report's two HANDOFF sections, which are the truth where the design
+proposal lags.
+
+## READ FIRST — the flagged design point
+
+**The `IndeterminateComparison` posture: PROCEED UNDER AN EXPLICITLY LABELED
+DEGRADATION, after firing every refusal the incomplete read still soundly
+supports.** `finding:s3wp3-indeterminate-posture-proceed-labeled`; the argument
+lives in `AttestedLedger._degraded`'s docstring, which is written for the gate.
+
+The short form. Framed as proceed-versus-refuse this is the two-valued classifier
+the review lens warns about, and the third answer is the whole of it:
+
+- **Refusing outright is wrong**, and WP1 already proved it one level down. An
+  incomplete read is *permanent* — the journal is append-only and WP1's own
+  `_torn_tail_guard` **preserves** a crashed writer's fragment rather than removing
+  it, so a line lost to a crash sits in `skipped` forever. A seam refusing on it
+  makes one crashed writer a store that never opens again. That is verbatim the
+  argument the amended ruling used to reject refusing on mid-file damage. Refusing
+  at the seam would re-impose *at the composition boundary* the verdict the module
+  removed — a rule relaxed in a module, re-tightened by its caller.
+- **Proceeding alone would be dishonest, and this does not.** A bound is not
+  nothing, and **two of the four refusals stay sound against it and both fire**:
+  a presented head *below* the bound is a rollback; a presented head at the
+  bound's *ordinal with a different hash* is a same-height fork. Only the region
+  at-and-above the bound is genuinely indeterminate, and the seam claims neither
+  answer there.
+- **Never-silent, three ways, none of them a field somebody must remember to
+  read.** The degraded report is its own type with **no `outcome` attribute** —
+  WP1's unignorable-by-construction discipline applied one layer up. The
+  `IndeterminateComparison` *instance* `established_head()` actually raised is
+  carried, which is also what proves the seam went through WP1's door rather than
+  around it. And **nothing is written**: a degraded open journals no entry and
+  records no binding, so the degradation never launders itself into a memory. That
+  third one is also what keeps `HeadUnreadable` clear of the gate's BLOCKING-2 —
+  a journal whose content is unreadable gets no bootstrap receipt, so it is never
+  trusted on sight *because* it became unreadable.
+- **Adversarially it costs nothing.** Anyone who can corrupt a line can delete the
+  journal instead and be met with first contact, so a refusal buys nothing against
+  an attacker while costing everything against a crash. The refusals that survive
+  are exactly the ones damage cannot evade.
+
+## What landed
+
+| File | What |
+|---|---|
+| `libs/engine/src/engine/arrival_head_seam.py` | NEW — `AttestedLedger`, the open report types, the bootstrap/audit/trust-reset producers, staleness, the canonical location form |
+| `libs/engine/src/engine/arrival_registry.py` | `open` wraps the custody half, always |
+| `libs/engine/src/engine/arrival_file_backend.py` | §0.4: `FileQuery` builds its reader lazily |
+| `libs/engine/tests/test_arrival_head_seam.py` | NEW — 50 tests against real stores |
+| `libs/engine/tests/test_arrival_registry.py` | state-root isolation; two tests updated honestly; one added |
+| `tests/architecture/test_rule_18_arrival_vocabulary_denylist.py` | `_SCAN_TARGETS` enrollment (same commit, or the glob test fails) |
+
+Commits: `c99eae3b` the seam, `48671793` the report, `16b335a2` the fork-at-the-bound
+deviation, `721dd6c6` the bound-semantics tests and their mutations, `24a2539d` the
+gate's BLOCKING-1 fix, `2fd0e11e` the corrected claims and counts.
+
+## Counts
+
+Baseline measured on the branch point `9ed893fe`, the CI way (`uv run --package
+engine pytest libs/engine/tests`, and `tests/architecture` in its own run).
+
+| Suite | Baseline | After | Delta |
+|---|---|---|---|
+| engine | 2158 passed, 1 skipped | 2233 passed, 1 skipped | **+75** |
+| architecture | 99 passed | 99 passed | **0** — Rule 18 is not parametrized per target |
+
+Every delta accounted for: **+57** in `test_arrival_head_seam.py`, **+1** in
+`test_arrival_registry.py` (`test_closing_a_query_that_never_read_does_not_build_a_reader`),
+and **+13** in `test_arrival_head_attestation.py` (sol r1's replay repro and its
+siblings, plus sol r2's context-replay family). Three of the seam file's are the gate round's — the BLOCKING repro,
+the second refusal behind the same write, and the AST ratchet — and seven are sol
+r1's alias work.
+The renamed §0.4 test is 1-for-1. `ruff check` passes on every file this WP wrote
+or touched.
+
+**Pre-existing lint, not mine:** `arrival_file_backend.py` has an unused
+`collections.abc.Iterable` import. Verified present at `9ed893fe` by linting
+`git show 9ed893fe:...` — recorded here so the gate does not attribute it to the
+`close()` edit in the same file. Left alone as out of scope.
+
+## Design choices
+
+Places the design text underdetermined the code, or where the module and the
+proposal disagreed and the module won.
+
+1. **The seam is backend-neutral, and the per-backend evidence gatherer
+   dissolves.** §D.3 posits "a small function beside the adapter"; it is not
+   needed, because `verify(Open())`, `verify(Full(...))` and `head_at(...)` are all
+   contract ops returning contract types. No wire field, no adapter type, no
+   backend exception appears in the seam. Deviation, argued:
+   `finding:s3wp3-evidence-gatherer-dissolves`. Cost stated at the site — the
+   advance branch pays two verified walks where a backend-specific gatherer could
+   have paid one, on a branch §D.3 itself argues is rare by construction.
+2. **The seam never classifies WHY the ledger refused.** §D.4 needs an absent or
+   empty log to branch rather than read as corruption, and the adapter says so with
+   its own `GenesisRefused` — a backend exception. Importing it would drag the codec
+   behind a wrapper that wraps any backend. It is not needed: WP1's
+   `compare_absent_store` splits on **memory, not on the store**, so "did the ledger
+   name a head" and "does the journal remember one" answer the four cells without
+   asking why. A corrupt log lands on the no-head branch and lands correctly.
+   See `finding:s3wp3-contract-refusal-families-unnamed`.
+3. **The broad `except Exception` catches never land on an unearned proceed, and
+   each says so at its site.** *Corrected per the gate's NB2 — the earlier
+   wording, "every catch lands on the refusing branch", overclaimed.* Two of the
+   three do: `_descent`'s catch gives `at_known = None`, which classifies REWRITE
+   and refuses, and `_vouched_at`'s gives `None`, which makes a head unaccounted
+   and refuses the audit. **`_present`'s catch does not** — it hands the
+   absent-store split a "the ledger named no head", and that split refuses
+   (`StoreLost`) only when something is remembered here; with nothing remembered
+   it **proceeds** as `PreGenesis`. That is correct as designed rather than a
+   leak: refusing there would make minting impossible, which is §D.4's whole
+   point. What makes it safe is that proceeding on that branch claims *nothing* —
+   no comparison was made, no entry is written, and the ledger's own refusal is
+   carried on the report, so a corrupt log reaching this branch keeps refusing on
+   its own account at every operation. The property that actually holds across all
+   three is the weaker and true one: **no catch converts an unrecognized failure
+   into an acceptance**, which is the silent-acceptance hazard.
+4. **Ordering inside the open, and it is load-bearing at three points.** Present →
+   binding (replacement must be caught before the presented lineage's journal is
+   read, or the seam consults a journal that has never seen this location and
+   answers first contact through the hole the binding closes) → **journal
+   comparison** → **projection comparison**. Custody before projection, so an
+   ahead-of-the-ledger index is never reported as a rollback it is not, and so the
+   refusal an operator sees names the recovery they actually perform.
+5. **No journal write precedes any refusal — and this claim was FALSE as first
+   written.** *Corrected; see the BLOCKING section below.* The original build
+   deferred the first-contact entry through `pending` and wrote the ADVANCE entry
+   inline from `_judge`, so the claim held for one branch and not the other, and
+   a refused open could and did move the witness. What makes it true now is a
+   carrier rather than a promise: `_observe` returns an `_Earned` and the
+   constructor's `_write` is the open path's only write site. What keeps it true
+   is `test_only_the_constructor_and_the_producers_write_to_the_journal`, an AST
+   ratchet with a shrink-only allowlist — a branch added later that writes inline
+   fails by name. Mutation demos (e) and (h).
+6. **`Compared | Indeterminate | PreGenesis`, with no uniform `.outcome`.** WP1's
+   discipline carried up: the degraded case has no outcome attribute at all, and
+   `PreGenesis` has no presented head, so no expression reads an answer off a
+   report without first naming which case it is in.
+7. **`canonical_location` is `Path.resolve()`, and it is part of the DELETE IN
+   SLICE 5 unit.** Relative paths become absolute, `..` collapses, symlinks resolve
+   — so two routes to one log present one binding key. Scope-the-claim: it assumes
+   a location is a filesystem path, which §02 does not guarantee. Bounded and
+   stated at the site — the value is only ever the binding key and the diagnostic
+   `location` field, never a journal key, so a mangled DSN degrades to "no binding",
+   which is first contact, the state the binding improves on rather than
+   guarantees. The residual (a symlink whose target later changes is first contact
+   again) is why path-keying is transitional.
+8. **The audit's lookup cannot be supplied by a caller.** `unaccounted_heads` takes
+   an injected `at_ordinal`, and an injection point is where a fabricated head can
+   lie — a lookup answering from the journal, a cache, or the projection would
+   "confirm" every entry without the store being asked anything. So `audit` accepts
+   **no lookup parameter**; it builds one from `ledger.head_at`, a verified walk
+   from ordinal 0, obtained through custody rather than around it. Mechanized by
+   `test_the_audits_lookup_cannot_be_supplied_by_a_caller`, which pins the exact
+   parameter set rather than asserting the property in prose.
+9. **Delegation by explicit method, never `__getattr__`**, so `import_prefix` — a
+   mutation in `LEDGER_MUTATIONS` that the Protocol does not declare — is not
+   reachable through the attested handle, and neither is an op a future adapter
+   adds. A behavior narrowing, flagged rather than silently taken:
+   `finding:s3wp3-import-prefix-unreachable-through-the-seam`.
+10. **`NotWitnessed` is deliberately NOT an `AttestationRefusal`.** Every member of
+    that family means the operation did not happen; this one means the opposite —
+    the data is committed and durable — so a caller catching the refusal root to
+    mean "nothing changed" must not catch this. Propagating past those handlers is
+    the never-silent mechanism. §05's committed-versus-witnessed distinction,
+    uncollapsed.
+11. **`bootstrap` admits only `MINT` or `FIRST_CONTACT`.** Every other level names
+    evidence a first entry cannot have, because there was nothing before it to
+    descend from. It also records the binding itself, so the canonical form is
+    applied in exactly one place — a caller writing its own binding is how two
+    spellings diverge.
+12. **`trust_reset`'s `level` defaults to the WEAKEST claim.** A ceremony that
+    verified from genesis should pass `Level.FULL`; one that took a head from an
+    archive on an operator's word has proven nothing. A default that can only
+    under-claim costs a later audit some work; one that over-claims is a lie the
+    journal keeps forever. It also refuses an empty `reason` — recording the
+    abandonment without the evidence for it is not the ceremony.
+13. **Staleness is epoch-scoped**, like *K*: an audit that ran before a trust reset
+    covered a history the reset abandoned. `None` means "no audit has covered this
+    epoch", which is different from "the last one was long ago" — hence no age of
+    infinity.
+14. **`capabilities()` is delegated unchanged.** Everything it describes belongs to
+    the backend holding the bytes; amending it to mention the witness would
+    advertise a guarantee at the layer that does not provide it, and an over-claim
+    there turns a deployment refusal into a runtime failure.
+15. **The §0.4 fix moves the refusal, it does not remove it.** `FileQuery.reader`
+    is built on first access, so *opening* stops requiring a projection while
+    *asking for rows* still refuses with the same `FileNotFoundError` from the same
+    place. Nothing creates an index — the F2 carve-out permits materialising one
+    and permitted is not required. `close()` consults the field rather than the
+    property, or closing would be the thing that constructs the reader the fix
+    deferred.
+
+## The binding probes — ruled, and a fourth site found while fixing
+
+Ruling on `finding:s3wp3-binding-probes-fail-acceptance-side`, shape as
+proposed. An **absent** bindings file or a nonexistent path stays "no binding"
+— those are answers, and the mint path depends on the second. An input that
+**exists and cannot be read** now refuses, typed.
+
+### The pattern got a name, because it has now appeared five times
+
+`ProbeUnanswered` is the parent; `FenceProbeUnanswered` and
+`BindingProbeUnanswered` sit under it. The defect is a *shape* — a probe whose
+own failure reads as the absence of what it probed for — and naming the shape is
+what lets a caller catch "I could not determine this" as one condition while the
+sites stay distinguishable underneath.
+
+It lives in `arrival_head_attestation` rather than the seam, because the binding
+unit lives there and because `bound_lineage` has to be able to raise it.
+**`BindingProbeUnanswered` dies with the binding unit at slice 5; the parent and
+the fence's subclass do not** — the sweep removes a leaf, not the concept. That
+is the deletion-story answer the routing asked for.
+
+### The fourth site, and it was the one that mattered
+
+Found while testing the fix, not by the original audit: `bound_lineage` let a
+**raw `OSError`** escape past every `except AttestationRefusal`. Refusing was
+already the right direction there, so it never showed up in an acceptance-side
+audit — but being untyped is the builtin-escape gap `JournalUnreadable` exists
+to close one file over. It also reads the bindings file **before**
+`aliased_lineage` does, so without fixing it the other three fixes were
+unreachable through an ordinary open. My first test run is what surfaced it: the
+refusal came out as a bare `OSError`.
+
+### Five per-site mutation demos, and two arms that had no test
+
+Two-guard, committed `c1a578c8` first, tree byte-clean after each revert.
+
+| Site | Reverted | Fails |
+diff --git a/libs/engine/tests/test_arrival_head_attestation.py b/libs/engine/tests/test_arrival_head_attestation.py
+index d9ae70b2..8dd28ecc 100644
+--- a/libs/engine/tests/test_arrival_head_attestation.py
++++ b/libs/engine/tests/test_arrival_head_attestation.py
+@@ -23,6 +23,7 @@ from engine.arrival_contract import ContractRefusal, Head
+ from engine.arrival_head_attestation import (
+     AbsentStoreOutcome,
+     AttestationRefusal,
++    BindingProbeUnanswered,
+     EstablishedHead,
+     HeadAttestation,
+     HeadFork,
+@@ -1259,12 +1260,23 @@ def test_the_bindings_file_lives_beside_the_journals():
+     assert bindings_path().exists()
+ 
+ 
+-def test_a_malformed_binding_line_is_skipped_not_refused():
+-    """A missing binding degrades to first contact, which it never guaranteed."""
++def test_a_malformed_binding_line_refuses_rather_than_being_skipped():
++    """SUPERSEDED: this pinned the skip, and the skip was the defect.
++
++    The reasoning it carried — "a missing binding degrades to first contact,
++    which it never guaranteed" — is true of an ABSENT bindings file and false
++    of a line that will not parse. A skipped line may be the very binding that
++    names this location, so skipping answers "nothing is bound here" on
++    evidence that says nothing of the kind, and a replaced store then opens as
++    first contact (``finding:s3wp3-binding-probes-fail-acceptance-side``).
++
++    Absent still answers None, and its own test below is unchanged.
++    """
+     record_binding("/a/project.arrival", LINEAGE, 1.0)
+     with bindings_path().open("a") as handle:
+         handle.write("{not json\n")
+-    assert bound_lineage("/a/project.arrival") == LINEAGE
++    with pytest.raises(BindingProbeUnanswered):
++        bound_lineage("/a/project.arrival")
+ 
+ 
+ def test_the_transitional_binding_carries_its_deletion_marker():
+diff --git a/libs/engine/tests/test_arrival_head_seam.py b/libs/engine/tests/test_arrival_head_seam.py
+index da3ef3d0..7380e851 100644
+--- a/libs/engine/tests/test_arrival_head_seam.py
++++ b/libs/engine/tests/test_arrival_head_seam.py
+@@ -40,6 +40,7 @@ from engine.arrival_contract import (
+ )
+ from engine.arrival_file_backend import FileLedger, FileQuery
+ from engine.arrival_head_attestation import (
++    AttestationRefusal,
+     HeadAttestation,
+     HeadFork,
+     HeadRewrite,
+@@ -57,19 +58,24 @@ from engine.arrival_head_attestation import (
+     heads_dir,
+     journal_path,
+     read_journal,
++    record_binding,
+     state_root,
+ )
+ from engine.arrival_head_seam import (
+     AbandonedHistoryFenced,
+     AttestedLedger,
+     AuditFoundUnaccountedHeads,
++    BindingProbeUnanswered,
+     Compared,
++    FenceProbeUnanswered,
+     Indeterminate,
+     NotWitnessed,
+     PreGenesis,
++    ProbeUnanswered,
+     ProjectionAgreement,
+     ProjectionAheadOfLedger,
+     TrustResetNotHonored,
++    aliased_lineage,
+     audit,
+     bootstrap,
+     canonical_location,
+@@ -2208,3 +2214,301 @@ def test_a_reset_whose_predecessor_moved_lines_is_not_honored(tmp_path):
+     assert recorded.split("line ")[1].split("/")[1].strip() == (
+         actual.split("/")[1].split(")")[0].strip()
+     ), notes[0]
++
++
++# ---------------------------------------------------------------------------
++# The fence probe must not fail open (finding:s3-fence-probe-fails-open)
++# ---------------------------------------------------------------------------
++
++
++class ProbeFails:
++    """A ledger whose ``head_at`` raises for chosen ordinals.
++
++    Everything else delegates, so the descent verification still succeeds
++    honestly — which is the point: the store is fine, the walk is fine, and
++    only the fence's own question goes unanswered.
++    """
++
++    def __init__(self, inner: ArrivalLedger, failing: set[int]) -> None:
++        self._inner = inner
++        self._failing = failing
++        self.asked: list[int] = []
++
++    def head_at(self, watermark):
++        self.asked.append(watermark.ordinal)
++        if watermark.ordinal in self._failing:
++            raise OSError("transient: input/output error")
++        return self._inner.head_at(watermark)
++
++    def __getattr__(self, name):
++        return getattr(self._inner, name)
++
++
++def test_an_unanswered_fence_probe_refuses_rather_than_accepting(tmp_path):
++    """Sol's repro. The fence contained a probe that lied acceptance-side.
++
++    Descent verifies, the probe raises, and the old code continued as though
++    the abandoned coordinate simply was not there — so the advance was accepted
++    AND journaled, and every later open read UNCHANGED. The self-erasing loop,
++    reached through a transient error instead of through a restore.
++
++    Evidence absent is not absence of evidence, and this is the one place in
++    the seam where that had been written the wrong way round.
++    """
++    log_path, lineage, abandoned, backup = _reset_away_from(tmp_path)
++    log_path.write_bytes(backup)
++    before = journal_bytes(lineage)
++    bindings_before = bindings_path().read_bytes()
++
++    probing = ProbeFails(
++        FileLedger(ArrivalLog(log_path)), failing={abandoned.ordinal}
++    )
++    with pytest.raises(FenceProbeUnanswered) as excinfo:
++        AttestedLedger(probing, location=str(log_path))
++
++    assert "retry the open" in str(excinfo.value)
++    assert isinstance(excinfo.value.__cause__, OSError)
++    # Nothing accepted, and nothing written — the loop's fuel was the write.
++    assert journal_bytes(lineage) == before
++    assert bindings_path().read_bytes() == bindings_before
++
++
++def test_one_unanswered_anchor_of_several_refuses_the_whole_open(tmp_path):
++    """No partial certification.
++
++    With several fenced anchors, answering most of them says nothing about the
++    one that did not answer. A fence that refused only when it happened to get
++    an answer would be strongest exactly when it was least needed.
++    """
++    log_path = minted(tmp_path / "s.arrival")
++    append_legacy(log_path, "one", "two", "three")
++    abandoned = FileLedger(ArrivalLog(log_path)).verify(Open())
++    backup = log_path.read_bytes()
++    opened(log_path)
++
++    truncate_records(log_path, keep=1)
++    restored = FileLedger(ArrivalLog(log_path)).verify(Open())
++    trust_reset(
++        accepted=restored,
++        abandoned=abandoned,
++        refused=abandoned,
++        reason="incident",
++        location=str(log_path),
++        observed_at=5000.0,
++    )
++    log_path.write_bytes(backup)
++
++    # Fail the probe for the HIGHEST anchor only; the lower ones answer fine.
++    probing = ProbeFails(
++        FileLedger(ArrivalLog(log_path)), failing={abandoned.ordinal}
++    )
++    with pytest.raises(FenceProbeUnanswered):
++        AttestedLedger(probing, location=str(log_path))
++
++
++def test_a_probe_failure_outside_the_fenced_set_is_not_consulted(tmp_path):
++    """Scope the claim: only coordinates the fence actually asks about matter.
++
++    A probe that raises at an ordinal the fence has no anchor for is never
++    reached, so it cannot manufacture a refusal. The refusal says "I could not
++    certify what I needed to", and it must not grow into "something somewhere
++    failed".
++    """
++    log_path, _lineage, _abandoned, _backup = _reset_away_from(tmp_path)
++    index_path_for(log_path).unlink(missing_ok=True)
++    append_legacy(log_path, "a genuinely new record")
++
++    probing = ProbeFails(FileLedger(ArrivalLog(log_path)), failing={9999})
++    comparison = AttestedLedger(probing, location=str(log_path)).opened.comparison
++    assert isinstance(comparison, Compared)
++    assert comparison.outcome is Outcome.ADVANCED
++    assert 9999 not in probing.asked
++
++
++# ---------------------------------------------------------------------------
++# The binding probes (finding:s3wp3-binding-probes-fail-acceptance-side)
++# ---------------------------------------------------------------------------
++
++
++def _reached_by_an_alias(tmp_path: Path):
++    """A store bound under one spelling and reached under another.
++
++    A HARD LINK, because it is the one alias that is portable and genuinely
++    different: ``resolve()`` follows a symlink to its target and so produces
++    the same canonical string, while a hard link has no target to follow — two
++    names, two canonical forms, one inode. That is exactly the state the
++    identity probe exists for, and it is what puts the probe on the path at
++    all: with no exact binding for the presenting spelling, the alias sweep is
++    the only thing that can answer.
++    """
++    log_path = minted(tmp_path / "s.arrival")
++    append_legacy(log_path, "one")
++    opened(log_path)  # binds the canonical form of log_path
++    alias = tmp_path / "alias.arrival"
++    os.link(log_path, alias)
++    assert canonical_location(str(alias)) != canonical_location(str(log_path))
++    return log_path, alias, lineage_of(log_path)
++
++
++def test_the_alias_probe_answers_when_it_can(tmp_path):
++    """The baseline the three refusals below are departures from.
++
++    With every probe working, the aliased spelling is recognized as the same
++    store and the open proceeds normally — no first contact, no second binding.
++    """
++    _log_path, alias, lineage = _reached_by_an_alias(tmp_path)
++    before = journal_bytes(lineage)
++    comparison = opened(alias).opened.comparison
++    assert isinstance(comparison, Compared)
++    assert comparison.outcome is Outcome.UNCHANGED
++    assert journal_bytes(lineage) == before
++
++
++def _needs_unprivileged() -> None:
++    """chmod cannot stop root, so a permission test as root proves nothing."""
++    if os.geteuid() == 0:
++        pytest.skip("runs as root; chmod-based permission walls do not apply")
++
++
++def test_an_unreadable_bindings_file_refuses_rather_than_first_contacting(tmp_path):
++    """Site 1. A file that EXISTS and cannot be read is not "no binding".
++
++    Answering None hands the aliased spelling back as a first contact — which
++    writes a bootstrap receipt and a second binding for a store this machine
++    already knows, and would wave a replacement through the hole the alias
++    detection was added to close.
++
++    A real permission wall rather than a patched reader: patching the reader
++    globally also breaks the ledger's own file access, so the open would fail
++    somewhere else and the test would pass for the wrong reason.
++    """
++    _needs_unprivileged()
++    _log_path, alias, lineage = _reached_by_an_alias(tmp_path)
++    before = journal_bytes(lineage)
++    binding_bytes = bindings_path().read_bytes()
++
++    bindings_path().chmod(0o000)
++    try:
++        with pytest.raises(BindingProbeUnanswered) as excinfo:
++            opened(alias)
++    finally:
++        bindings_path().chmod(0o600)
++
++    assert "retry the open" in str(excinfo.value)
++    assert journal_bytes(lineage) == before
++    assert bindings_path().read_bytes() == binding_bytes
++
++
++def test_a_recorded_location_that_will_not_stat_refuses(tmp_path):
++    """Site 2. Existing-but-unstattable is a question, not an answer.
++
++    The unstattable path is a RECORDED binding's, behind a locked directory,
++    so the presenting store is untouched and the identity probe is the only
++    thing that fails. Locking the presenting store instead would break the
++    ledger read first and never reach the probe.
++    """
++    _needs_unprivileged()
++    _log_path, alias, lineage = _reached_by_an_alias(tmp_path)
++    locked = tmp_path / "locked"
++    locked.mkdir()
++    hidden = locked / "other.arrival"
++    hidden.write_text("x")
++    record_binding(str(hidden), "01BX5ZZKBKACTAV9WEVGEMMVRZ", 1.0)
++    before = journal_bytes(lineage)
++    binding_bytes = bindings_path().read_bytes()
++
++    locked.chmod(0o000)
++    try:
++        with pytest.raises(BindingProbeUnanswered):
++            opened(alias)
++    finally:
++        locked.chmod(0o700)
++
++    assert journal_bytes(lineage) == before
++    assert bindings_path().read_bytes() == binding_bytes
++
++
++def test_an_absent_path_still_answers_none(tmp_path):
++    """The arm that must NOT have moved: absent is an answer, and mint needs it."""
++    ledger = opened(tmp_path / "never-existed.arrival")
++    assert isinstance(ledger.opened.comparison, PreGenesis)
++
++
++def test_an_unparseable_binding_line_refuses_rather_than_being_skipped(tmp_path):
++    """Site 3. The line that cannot be read may be the one that names this store."""
++    _log_path, alias, lineage = _reached_by_an_alias(tmp_path)
++    before = journal_bytes(lineage)
++    with bindings_path().open("a", encoding="utf-8") as handle:
++        handle.write("{ this line does not parse\n")
++    binding_bytes = bindings_path().read_bytes()
++
++    with pytest.raises(BindingProbeUnanswered) as excinfo:
++        opened(alias)
++
++    assert "does not parse" in str(excinfo.value)
++    assert journal_bytes(lineage) == before
++    assert bindings_path().read_bytes() == binding_bytes
++
++
++def test_the_alias_sweep_refuses_an_unreadable_bindings_file_on_its_own(tmp_path):
++    """``aliased_lineage``'s own arm, reached directly.
++
++    Through the open path ``bound_lineage`` reads the same file first and
++    refuses there, so this arm is defence in depth rather than the front line —
++    but ``aliased_lineage`` is a public function and must not answer "no alias"
++    to a file it could not read, whoever calls it.
++    """
++    _needs_unprivileged()
++    _log_path, alias, _lineage = _reached_by_an_alias(tmp_path)
++    bindings_path().chmod(0o000)
++    try:
++        with pytest.raises(BindingProbeUnanswered):
++            aliased_lineage(canonical_location(str(alias)))
++    finally:
++        bindings_path().chmod(0o600)
++
++
++def test_the_alias_sweep_refuses_an_unparseable_line_on_its_own(tmp_path):
++    """``aliased_lineage``'s ValueError arm, reached directly.
++
++    Its own per-site pin, because through the open path ``bound_lineage``
++    reads the same file first and refuses there — so a mutation to this arm
++    alone breaks nothing that goes through an open. Defence in depth is only
++    depth if each layer is pinned separately; otherwise the outer layer's
++    correctness is what the test is measuring.
++    """
++    _log_path, alias, _lineage = _reached_by_an_alias(tmp_path)
++    with bindings_path().open("a", encoding="utf-8") as handle:
++        handle.write("{ this line does not parse\n")
++    with pytest.raises(BindingProbeUnanswered):
++        aliased_lineage(canonical_location(str(alias)))
++
++
++def test_bound_lineage_refuses_an_unreadable_bindings_file_on_its_own(tmp_path):
++    """The fourth site's OSError arm, pinned on its own for the same reason.
++
++    Through an open, ``aliased_lineage`` would refuse even if this arm were
++    reverted, so the integration test cannot tell the two apart. This one calls
++    the layer directly.
++    """
++    _needs_unprivileged()
++    record_binding("/a/project.arrival", "01ARZ3NDEKTSV4RRFFQ69G5FAV", 1.0)
++    bindings_path().chmod(0o000)
++    try:
++        with pytest.raises(BindingProbeUnanswered):
++            bound_lineage("/a/project.arrival")
++    finally:
++        bindings_path().chmod(0o600)
++
++
++def test_every_probe_refusal_is_one_family(tmp_path):
++    """The pattern is nameable, which is the point of giving it a parent.
++
++    A caller that wants "could not determine" as one condition catches
++    ``ProbeUnanswered``; the two sites stay distinguishable underneath. The
++    binding subclass dies with the binding unit at slice 5 and the parent does
++    not — the sweep removes a leaf, not the concept.
++    """
++    assert issubclass(FenceProbeUnanswered, ProbeUnanswered)
++    assert issubclass(BindingProbeUnanswered, ProbeUnanswered)
++    assert issubclass(ProbeUnanswered, AttestationRefusal)
+[project]
+name = "strange-loops"
+version = "0.11.0"
+description = "A system for focusing attention"
+readme = "README.md"
+license = "MIT"
+authors = [{ name = "Kyle Gruel", email = "kylegruel@gmail.com" }]
+requires-python = ">=3.11"
+# This is a FLAT vendored build: hatchling bundles every libs/*/src into one
+# wheel (see [tool.hatch.build] below), so this list must mirror the UNION of
+# all vendored libs' third-party deps by hand — the root does not depend on the
+# workspace members, it inlines their source. A dep added to a lib's pyproject
+# (e.g. engine's rfc8785, added with the JCS migration) is invisible to
+# `uv tool install .` until it is also added here. `uv run --package` masks the
+# gap because it resolves the workspace env, not this flat wheel.
+dependencies = [
+    "painted>=0.12.1,<0.14",
+    "ckdl>=1.0",
+    "pyjwt[crypto]>=2.9",
+    "cryptography>=43",
+    "python-ulid>=3.0",
+    "rfc8785>=0.1.4",  # engine._canonical_bytes (JCS, RFC 8785)
+    # python-ulid 3.1.0 imports typing_extensions unconditionally but doesn't
+    # declare it. Pinning here until upstream (mdomke/python-ulid) fixes the
+    # metadata. Drop when that ships.
+    "typing_extensions>=4.0",
+]
+
+[project.scripts]
+sl = "loops.main:main"
+loops = "loops.main:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build]
+only-include = [
+    "libs/atoms/src/atoms",
+    "libs/custody/src/custody",
+    "libs/engine/src/engine",
+    "libs/lang/src/lang",
+    "libs/sdk/src/sdk",
+    "libs/sign/src/sign",
+    "libs/store/src/store",
+    "apps/loops/src/loops",
+    "README.md",
+    "LICENSE",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = [
+    "libs/atoms/src/atoms",
+    "libs/custody/src/custody",
+    "libs/engine/src/engine",
+    "libs/lang/src/lang",
+    "libs/sdk/src/sdk",
+    "libs/sign/src/sign",
+    "libs/store/src/store",
+    "apps/loops/src/loops",
+]
+
+# The root runs the tests that belong to no single package — the architecture
+# ratchets and tests/chaos — so it needs the same dev tooling every member
+# already declares. Without this, `uv run pytest` at the root resolves only the
+# flat wheel's runtime deps and dies with "Failed to spawn: pytest" on any
+# machine whose .venv was not already dirty from an earlier run. uv.lock is
+# gitignored, so CI resolves fresh every time and hit exactly that.
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=6.0",
+    "ruff>=0.8",
+]
+
+[tool.uv.workspace]
+members = [
+    "libs/atoms",
+    "libs/custody",
+    "libs/engine",
+    "libs/lang",
+    "libs/sdk",
+    "libs/sign",
+    "libs/store",
+    "apps/loops",
+]
+
+exec
+/bin/zsh -lc "sed -n '240,430p' docs/scratch/arrival-break/slice3-wp3-report.md; sed -n '2450,2560p' libs/engine/tests/test_arrival_head_seam.py; rg -n \"FenceProbe|BindingProbe|catch-and-continue|mutation|malformed_binding|bindings file|except (Exception|OSError|ValueError|FileNotFoundError)|read_text|json.loads|\\.stat\\(\" libs/engine/src/engine/arrival_head_{seam,attestation}.py libs/engine/tests/test_arrival_head_{seam,attestation}.py" in /Users/kaygee/Code/loops-s3wp1
+ succeeded in 0ms:
+| Site | Reverted | Fails |
+|---|---|---|
+| 1 | `aliased_lineage` OSError | `test_the_alias_sweep_refuses_an_unreadable_bindings_file_on_its_own` |
+| 2 | `_identity_of` OSError | `test_a_recorded_location_that_will_not_stat_refuses` |
+| 3 | `aliased_lineage` ValueError | `test_the_alias_sweep_refuses_an_unparseable_line_on_its_own` |
+| 4a | `bound_lineage` OSError | `test_bound_lineage_refuses_an_unreadable_bindings_file_on_its_own` |
+| 4b | `bound_lineage` ValueError | `test_a_malformed_binding_line_refuses_rather_than_being_skipped` |
+
+The first pass had **no failing test for sites 3 and 4a**. Through an open,
+`bound_lineage` reads the file before `aliased_lineage` does, so reverting the
+inner arm broke nothing — the outer layer's correctness was what those tests
+measured. Defence in depth is only depth if each layer is pinned separately, so
+each arm now has a direct-call test of its own. The demos caught the gap; the
+integration tests never would have.
+
+### Test construction, and why it is not monkeypatched
+
+Real filesystem conditions: a permission wall on the bindings file, and a locked
+directory holding a recorded binding's path. Patching `Path.read_text` or
+`Path.stat` globally — my first attempt — also breaks the **ledger's** own file
+access, so the open fails earlier and the test passes for the wrong reason. That
+is exactly what happened: the stat patch made `verify(Open())` fail, the seam
+took the pre-genesis branch, and nothing refused at all.
+
+The alias is a **hard link**. A symlink resolves to its target and so yields the
+same canonical form, which means it never reaches the alias probe — the probe is
+only consulted when the presenting spelling has no exact binding. A hard link is
+two names, two canonical forms, one inode: precisely the state the identity probe
+exists for, and portable.
+
+Both permission tests skip as root, where `chmod` proves nothing.
+
+### One superseded WP1 test
+
+`test_a_malformed_binding_line_is_skipped_not_refused` pinned the skip, and the
+skip was the defect. Its stated reasoning — "a missing binding degrades to first
+contact, which it never guaranteed" — is true of an absent file and false of a
+line that will not parse. Renamed, inverted, and carrying why.
+
+## S3I-L-3 — the fence's own probe failed open
+
+`finding:s3-fence-probe-fails-open`. The fence I built to close sol's
+acceptance loop contained a probe that lied on the acceptance side, and sol
+reproduced the entire self-erasing cycle through a transient `OSError`: descent
+verifies, the anchor probe raises, the advance is accepted **and journaled**,
+and the next open — on a perfectly healthy ledger — reads UNCHANGED.
+
+**The comment I wrote on that catch stated the error out loud**: *"no answer is
+no evidence of a touch."* Evidence absent is not absence of evidence. Every
+other broad catch in this seam is justified in the report by landing on the
+refusing branch, and I had written that rule three separate times without
+applying it at the one site where the fallback direction was acceptance.
+
+**The fix**: an unanswered probe raises `FenceProbeUnanswered`. A **sibling** of
+`AbandonedHistoryFenced` rather than an arm of it, because the claims differ and
+so do their remedies — one says *your history touches decreed-away ground* and
+is answered by the ceremony; this says *I could not determine whether it does*
+and is answered by retrying. Named for what the read lacks rather than for what
+failed, because a cause-name does not survive a second cause.
+
+**Not the degradation posture**, by that posture's own rule: it proceeds only
+after firing every refusal the evidence soundly supports, and an uncertified
+fence path is a refusal the evidence demands. Being wrong here costs one retried
+open; being wrong the other way costs silent re-acceptance of decreed-away
+history.
+
+### Probe audit — the fence
+
+The finding is about the pattern, so every site was checked rather than the one
+line. The fence has **exactly one** probe. Its lift check is pure ordinal and
+lineage comparison with no I/O, and its two early returns are structural
+conditions rather than probes, so neither can fail open. `_descent` and
+`_vouched_at` both catch broadly and both land on refusal, unchanged.
+
+### Mutation demo
+
+Two-guard: committed `333021bc` first, tree byte-clean after the revert.
+Catch-and-continue restored → **2 failed, 67 passed**, and the loop reproduced
+directly rather than inferred:
+
+```
+probe raises on the anchor, restore  => advanced
+journal now holds ordinal: 2
+next open, CLEAN ledger              => unchanged   <- the loop, via a transient error
+```
+
+The first attempt at this demo mis-constructed the probe — failing *every*
+`head_at` made `_descent` refuse first with `HeadRewrite`, which is the seam
+correctly failing refusal-side and proves nothing about the fence. The probe has
+to fail selectively, at the anchor ordinal only, for the fence to be the thing
+under test.
+
+### The same shape, outside the fence — reported, not fixed
+
+Scoped out of this round, but the pattern audit found it and it should be ruled
+rather than left: the **transitional binding unit** has three catches that all
+fail acceptance-side.
+
+| Site | Failure read as |
+|---|---|
+| `aliased_lineage`, `except OSError` | "no alias" — a bindings file that exists but cannot be read (permission wall, I/O error) means a replacement slips past `LineageReplaced` as first contact |
+| `_identity_of`, `except OSError` | "no identity" — defensible for a path that genuinely does not stat, but an I/O error at a path that does exist reads the same way |
+| the binding line loop, `except ValueError` | "skip" — a malformed line could be the very binding that named the alias |
+
+All three are the S3I-L-3 shape with a different consequence: not the
+self-erasing loop, but a silent first contact where a replacement should have
+refused. Left alone because this round is scoped to the fence and that unit
+carries its own `DELETE IN SLICE 5` marker — but it is the same finding, and the
+deletion is not a reason to leave it wrong in the meantime.
+`finding:s3wp3-binding-probes-fail-acceptance-side`.
+
+## Design amendment #6 — the abandoned-history fence
+
+Sol's integration round escalated my own N+1-descendant flag from deferred to
+blocking, and it was right to. I had reported the acceptance as an
+underdetermination; sol showed it was a **loop**.
+
+**The loop.** Reset from an abandoned *N+1* back to *N*, restore the authentic
+backup, and the open verifies descent **honestly** — the chain really does reach
+*N+1* from *N*. So it answered ADVANCED, **journaled** *N+1* back into the
+current epoch, and every later open read UNCHANGED. No refusal, no fork, ever,
+and repeatable indefinitely. The acceptance erased its own evidence by recording
+it, which is why nothing downstream could see it had happened.
+
+Verified descent was never the whole question. A chain can be perfectly intact
+and still be the history a ceremony put behind us — and machinery does not
+silently reverse an operator's decree.
+
+**The fence**: an ADVANCED outcome whose verified descent touches an entry
+journaled in an abandoned epoch is refused with `AbandonedHistoryFenced`, whose
+message teaches the ceremony as the acceptance path.
+
+### The four pins
+
+1. **Identity-keyed anchors** — `(ordinal, hash)` against the abandoned epochs'
+   journaled entries, never ordinal spans. An operator who resets to 5 and lets
+   the store re-advance mints a **new** 6, 7 and 8 inside the abandoned span; a
+   span fence would refuse every one of them forever and make the ceremony a
+   store's last act. Pinned from the other side by
+   `test_a_legitimate_re_advance_inside_the_abandoned_span_is_accepted`, which
+   asserts the same ordinal with a different hash is still ADVANCED. The
+   abandoned entries remain readable in the file — epoch scoping excludes them
+   from *K*, never from the read — which is what makes them available as
+   anchors at all.
+2. **Reach across the whole descent**, not the head alone: a branch grown
+   offline presents *N+3* while the anchor sits at *N+1*. Asking `head_at` at
+   each fenced anchor's own coordinate is the complete form of that check —
+   an anchor can only be touched at its own ordinal — and it stays in contract
+   ops, so the fence is backend-neutral like the rest of the seam.
+3. **The lift rule**, or the ceremony re-bricks the store — L-3's shape exactly.
+   **Verified before building, as instructed**: `trust_reset` *can* decree a
+   head at or above current *K* (nothing guards it; confirmed by decreeing
+   ordinal 9 over a *K* of 3), and the reset entry *does* carry the decreed
+   coordinate, so the new epoch's *K* is the decreed head — the epoch is
+   reset-inclusive. Both yes, so the rule is buildable and I proceeded.
+4. **Placement** after ADVANCED and before anything is earned. `compare` stays
+   the pure seven-outcome machine, and a fenced open journals nothing —
+   `test_the_fenced_open_journals_nothing`, because the acceptance recording
+   itself is what made the loop invisible.
+
+### One narrowing of the lift rule's wording, and why
+
+The rule as written is "fenced only when NO later reset decrees at/above it".
+Read literally that reopens the loop with one extra step: reset to 10, then
+reset back to 5, and the entry at 10 is lifted by the decree the second ceremony
+overrode. Implemented against the **current boundary decree** only — the one
+decree nothing has superseded. It fences more, never less, and the recovery path
+is unaffected because a recovery decree *is* the boundary decree.
+
+### Mutation demo
+
+Two-guard: committed `4061f0c9` first, tree byte-clean after the revert. Fence
+reverted → **5 failed, 61 passed**, and sol's cycle reproduced directly rather
+than inferred:
+
+```
+restore of abandoned backup => advanced
+next open                   => unchanged   <- the cycle
+```
+
+### Consequence swept
+
+`trust_reset`'s disclosure sentence said verified descendants including
+re-presentations of abandoned history "are accepted". That is now false. It
+states the fence, names the one-ceremony recovery cost, and records what it used
+to say and why that was the loop.
+
+## Design amendment #5 — weakening is epoch-scoped by line position
+
+From my own verify-item-1 answer. Weight is now **cause × position**: the cause
+half already existed (a re-assertion never weighs); the position half is that a
+    assert bindings_path().read_bytes() == binding_bytes
+
+
+def test_the_alias_sweep_refuses_an_unreadable_bindings_file_on_its_own(tmp_path):
+    """``aliased_lineage``'s own arm, reached directly.
+
+    Through the open path ``bound_lineage`` reads the same file first and
+    refuses there, so this arm is defence in depth rather than the front line —
+    but ``aliased_lineage`` is a public function and must not answer "no alias"
+    to a file it could not read, whoever calls it.
+    """
+    _needs_unprivileged()
+    _log_path, alias, _lineage = _reached_by_an_alias(tmp_path)
+    bindings_path().chmod(0o000)
+    try:
+        with pytest.raises(BindingProbeUnanswered):
+            aliased_lineage(canonical_location(str(alias)))
+    finally:
+        bindings_path().chmod(0o600)
+
+
+def test_the_alias_sweep_refuses_an_unparseable_line_on_its_own(tmp_path):
+    """``aliased_lineage``'s ValueError arm, reached directly.
+
+    Its own per-site pin, because through the open path ``bound_lineage``
+    reads the same file first and refuses there — so a mutation to this arm
+    alone breaks nothing that goes through an open. Defence in depth is only
+    depth if each layer is pinned separately; otherwise the outer layer's
+    correctness is what the test is measuring.
+    """
+    _log_path, alias, _lineage = _reached_by_an_alias(tmp_path)
+    with bindings_path().open("a", encoding="utf-8") as handle:
+        handle.write("{ this line does not parse\n")
+    with pytest.raises(BindingProbeUnanswered):
+        aliased_lineage(canonical_location(str(alias)))
+
+
+def test_bound_lineage_refuses_an_unreadable_bindings_file_on_its_own(tmp_path):
+    """The fourth site's OSError arm, pinned on its own for the same reason.
+
+    Through an open, ``aliased_lineage`` would refuse even if this arm were
+    reverted, so the integration test cannot tell the two apart. This one calls
+    the layer directly.
+    """
+    _needs_unprivileged()
+    record_binding("/a/project.arrival", "01ARZ3NDEKTSV4RRFFQ69G5FAV", 1.0)
+    bindings_path().chmod(0o000)
+    try:
+        with pytest.raises(BindingProbeUnanswered):
+            bound_lineage("/a/project.arrival")
+    finally:
+        bindings_path().chmod(0o600)
+
+
+def test_every_probe_refusal_is_one_family(tmp_path):
+    """The pattern is nameable, which is the point of giving it a parent.
+
+    A caller that wants "could not determine" as one condition catches
+    ``ProbeUnanswered``; the two sites stay distinguishable underneath. The
+    binding subclass dies with the binding unit at slice 5 and the parent does
+    not — the sweep removes a leaf, not the concept.
+    """
+    assert issubclass(FenceProbeUnanswered, ProbeUnanswered)
+    assert issubclass(BindingProbeUnanswered, ProbeUnanswered)
+    assert issubclass(ProbeUnanswered, AttestationRefusal)
+libs/engine/tests/test_arrival_head_seam.py:68:    BindingProbeUnanswered,
+libs/engine/tests/test_arrival_head_seam.py:70:    FenceProbeUnanswered,
+libs/engine/tests/test_arrival_head_seam.py:441:        Path(engine.arrival_head_seam.__file__).read_text(encoding="utf-8")
+libs/engine/tests/test_arrival_head_seam.py:474:    # `_witness` are the mutation paths, and each has nothing that can refuse
+libs/engine/tests/test_arrival_head_seam.py:1028:    raw = journal_path(lineage).read_text(encoding="utf-8").splitlines()
+libs/engine/tests/test_arrival_head_seam.py:1030:        assert json.loads(line), f"line {index + 1} did not parse: {line!r}"
+libs/engine/tests/test_arrival_head_seam.py:1214:    lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
+libs/engine/tests/test_arrival_head_seam.py:1679:    ``import_prefix`` is a mutation the contract Protocol deliberately does not
+libs/engine/tests/test_arrival_head_seam.py:1682:    holds. A catch-all would forward it silently — a mutation reachable through
+libs/engine/tests/test_arrival_head_seam.py:1686:    The same construction covers ops that do not exist yet: a future mutation
+libs/engine/tests/test_arrival_head_seam.py:1710:    """The ratchet: a mutation reachable here is a mutation that is witnessed.
+libs/engine/tests/test_arrival_head_seam.py:2183:    text = journal_path(lineage).read_text(encoding="utf-8")
+libs/engine/tests/test_arrival_head_seam.py:2212:    # mutation demo.
+libs/engine/tests/test_arrival_head_seam.py:2266:    with pytest.raises(FenceProbeUnanswered) as excinfo:
+libs/engine/tests/test_arrival_head_seam.py:2305:    with pytest.raises(FenceProbeUnanswered):
+libs/engine/tests/test_arrival_head_seam.py:2392:        with pytest.raises(BindingProbeUnanswered) as excinfo:
+libs/engine/tests/test_arrival_head_seam.py:2422:        with pytest.raises(BindingProbeUnanswered):
+libs/engine/tests/test_arrival_head_seam.py:2445:    with pytest.raises(BindingProbeUnanswered) as excinfo:
+libs/engine/tests/test_arrival_head_seam.py:2465:        with pytest.raises(BindingProbeUnanswered):
+libs/engine/tests/test_arrival_head_seam.py:2475:    reads the same file first and refuses there — so a mutation to this arm
+libs/engine/tests/test_arrival_head_seam.py:2483:    with pytest.raises(BindingProbeUnanswered):
+libs/engine/tests/test_arrival_head_seam.py:2498:        with pytest.raises(BindingProbeUnanswered):
+libs/engine/tests/test_arrival_head_seam.py:2512:    assert issubclass(FenceProbeUnanswered, ProbeUnanswered)
+libs/engine/tests/test_arrival_head_seam.py:2513:    assert issubclass(BindingProbeUnanswered, ProbeUnanswered)
+libs/engine/tests/test_arrival_head_attestation.py:26:    BindingProbeUnanswered,
+libs/engine/tests/test_arrival_head_attestation.py:350:    lines = journal_path(LINEAGE).read_text().splitlines()
+libs/engine/tests/test_arrival_head_attestation.py:351:    assert json.loads(lines[0]) == {
+libs/engine/tests/test_arrival_head_attestation.py:362:    header = json.loads(journal_path(LINEAGE).read_text().splitlines()[0])
+libs/engine/tests/test_arrival_head_attestation.py:376:    entry = json.loads(journal_path(LINEAGE).read_text().splitlines()[1])
+libs/engine/tests/test_arrival_head_attestation.py:442:    lines = journal_path(LINEAGE).read_text().splitlines()
+libs/engine/tests/test_arrival_head_attestation.py:444:    assert json.loads(lines[3])["ordinal"] == 5
+libs/engine/tests/test_arrival_head_attestation.py:470:    lines = journal_path(LINEAGE).read_text().splitlines()
+libs/engine/tests/test_arrival_head_attestation.py:471:    headers = [line for line in lines if "type" in json.loads(line)]
+libs/engine/tests/test_arrival_head_attestation.py:746:    lines = journal_path(LINEAGE).read_text().splitlines()
+libs/engine/tests/test_arrival_head_attestation.py:784:    lines = journal_path(LINEAGE).read_text().splitlines()
+libs/engine/tests/test_arrival_head_attestation.py:835:    lines = journal_path(LINEAGE).read_text().splitlines()
+libs/engine/tests/test_arrival_head_attestation.py:857:    lines = journal_path(LINEAGE).read_text().splitlines()
+libs/engine/tests/test_arrival_head_attestation.py:1012:    lines = journal_path(LINEAGE).read_text().splitlines()
+libs/engine/tests/test_arrival_head_attestation.py:1263:def test_a_malformed_binding_line_refuses_rather_than_being_skipped():
+libs/engine/tests/test_arrival_head_attestation.py:1267:    which it never guaranteed" — is true of an ABSENT bindings file and false
+libs/engine/tests/test_arrival_head_attestation.py:1278:    with pytest.raises(BindingProbeUnanswered):
+libs/engine/tests/test_arrival_head_attestation.py:1292:    text = (repo_root / source).read_text()
+libs/engine/tests/test_arrival_head_attestation.py:1739:    lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
+libs/engine/tests/test_arrival_head_attestation.py:1818:    body = path.read_text(encoding="utf-8").splitlines(keepends=True)
+libs/engine/tests/test_arrival_head_attestation.py:1850:    lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
+libs/engine/src/engine/arrival_head_attestation.py:61:    "BindingProbeUnanswered",
+libs/engine/src/engine/arrival_head_attestation.py:241:    An ABSENT input is never one of these. "There is no bindings file" and "the
+libs/engine/src/engine/arrival_head_attestation.py:250:class BindingProbeUnanswered(ProbeUnanswered):
+libs/engine/src/engine/arrival_head_attestation.py:1162:            decoded = json.loads(stripped)
+libs/engine/src/engine/arrival_head_attestation.py:1163:        except ValueError as exc:
+libs/engine/src/engine/arrival_head_attestation.py:1217:        text = journal_path(lineage).read_text(encoding="utf-8")
+libs/engine/src/engine/arrival_head_attestation.py:1218:    except FileNotFoundError:
+libs/engine/src/engine/arrival_head_attestation.py:1326:        text = path.read_text(encoding="utf-8")
+libs/engine/src/engine/arrival_head_attestation.py:1327:    except FileNotFoundError:
+libs/engine/src/engine/arrival_head_attestation.py:1371:    except OSError:
+libs/engine/src/engine/arrival_head_attestation.py:1426:        if path.exists() and path.stat().st_size == 0:
+libs/engine/src/engine/arrival_head_attestation.py:1493:    """The transitional location-to-lineage bindings file. DELETE IN SLICE 5."""
+libs/engine/src/engine/arrival_head_attestation.py:1535:        text = bindings_path().read_text(encoding="utf-8")
+libs/engine/src/engine/arrival_head_attestation.py:1536:    except FileNotFoundError:
+libs/engine/src/engine/arrival_head_attestation.py:1539:    except OSError as exc:
+libs/engine/src/engine/arrival_head_attestation.py:1544:        raise BindingProbeUnanswered(
+libs/engine/src/engine/arrival_head_attestation.py:1545:            f"the bindings file at {bindings_path()} exists and cannot be "
+libs/engine/src/engine/arrival_head_attestation.py:1555:            decoded = json.loads(stripped)
+libs/engine/src/engine/arrival_head_attestation.py:1556:        except ValueError as exc:
+libs/engine/src/engine/arrival_head_attestation.py:1557:            raise BindingProbeUnanswered(
+libs/engine/src/engine/arrival_head_seam.py:67:    BindingProbeUnanswered,
+libs/engine/src/engine/arrival_head_seam.py:97:    "BindingProbeUnanswered",
+libs/engine/src/engine/arrival_head_seam.py:98:    "FenceProbeUnanswered",
+libs/engine/src/engine/arrival_head_seam.py:165:class FenceProbeUnanswered(ProbeUnanswered):
+libs/engine/src/engine/arrival_head_seam.py:231:    """The mutation COMMITTED, and the journal write for it failed.
+libs/engine/src/engine/arrival_head_seam.py:466:        stat = Path(location).stat()
+libs/engine/src/engine/arrival_head_seam.py:467:    except FileNotFoundError:
+libs/engine/src/engine/arrival_head_seam.py:469:    except OSError as exc:
+libs/engine/src/engine/arrival_head_seam.py:470:        raise BindingProbeUnanswered(
+libs/engine/src/engine/arrival_head_seam.py:521:        text = bindings_path().read_text(encoding="utf-8")
+libs/engine/src/engine/arrival_head_seam.py:522:    except FileNotFoundError:
+libs/engine/src/engine/arrival_head_seam.py:525:    except OSError as exc:
+libs/engine/src/engine/arrival_head_seam.py:526:        raise BindingProbeUnanswered(
+libs/engine/src/engine/arrival_head_seam.py:527:            f"the bindings file at {bindings_path()} exists and cannot be "
+libs/engine/src/engine/arrival_head_seam.py:538:            decoded = json.loads(stripped)
+libs/engine/src/engine/arrival_head_seam.py:539:        except ValueError as exc:
+libs/engine/src/engine/arrival_head_seam.py:540:            raise BindingProbeUnanswered(
+libs/engine/src/engine/arrival_head_seam.py:879:        except Exception:  # noqa: BLE001 — see the docstring: fails to REFUSE
+libs/engine/src/engine/arrival_head_seam.py:898:    would forward ``import_prefix`` — a mutation the contract Protocol
+libs/engine/src/engine/arrival_head_seam.py:901:    can change what a lineage holds. Forwarded silently, it would be a mutation
+libs/engine/src/engine/arrival_head_seam.py:1126:        except Exception as exc:  # noqa: BLE001 — see the docstring
+libs/engine/src/engine/arrival_head_seam.py:1298:        first broken (:class:`FenceProbeUnanswered`).
+libs/engine/src/engine/arrival_head_seam.py:1329:            except Exception as exc:  # noqa: BLE001 — see the refusal's docstring
+libs/engine/src/engine/arrival_head_seam.py:1334:                raise FenceProbeUnanswered(
+libs/engine/src/engine/arrival_head_seam.py:1382:        except Exception as exc:  # noqa: BLE001 — see the docstring
+libs/engine/src/engine/arrival_head_seam.py:1552:            except Exception as exc:  # noqa: BLE001 — the refusal IS the answer
+
+codex
+The selective fence test is constructed correctly: descent can query lower ordinals normally, while only the abandoned anchor ordinal raises; the failure therefore occurs inside `_fence_abandoned`, before `_Earned` and the constructor’s write. I’m now validating the targeted set and the filesystem skip/coverage behavior.
+exec
+/bin/zsh -lc "UV_CACHE_DIR=/private/tmp/loops-s3wp1-uv-cache uv run --package engine pytest -q libs/engine/tests/test_arrival_head_seam.py libs/engine/tests/test_arrival_head_attestation.py -k 'unanswered_fence_probe or unanswered_anchor or probe_failure_outside or alias_probe or recorded_location_that_will_not_stat or absent_path_still or unparseable_binding_line or bound_lineage_refuses or every_probe_refusal or malformed_binding_line'" in /Users/kaygee/Code/loops-s3wp1
+ succeeded in 381ms:
+..........                                                               [100%]
+10 passed, 185 deselected in 0.23s
+
+exec
+/bin/zsh -lc 'UV_CACHE_DIR=/private/tmp/loops-s3wp1-uv-cache uv run --package engine pytest -q libs/engine/tests' in /Users/kaygee/Code/loops-s3wp1
+exec
+/bin/zsh -lc "nl -ba libs/engine/src/engine/arrival_head_seam.py | sed -n '430,570p;830,910p;1080,1150p;1240,1410p;1510,1570p'; nl -ba libs/engine/src/engine/arrival_head_attestation.py | sed -n '1120,1445p;1480,1585p'" in /Users/kaygee/Code/loops-s3wp1
+ succeeded in 0ms:
+   430	    as first contact, and a replacement with a fresh lineage walks past
+   431	    :class:`~engine.arrival_head_attestation.LineageReplaced`. That hole is
+   432	    closed by :func:`aliased_lineage`, which asks the filesystem rather than
+   433	    the string.
+   434	
+   435	    Residuals, both stated rather than papered over: a store reached through a
+   436	    symlink whose target later changes presents a different canonical form and
+   437	    is first contact again; and two aliases that genuinely report DIFFERENT
+   438	    ``(st_dev, st_ino)`` — two network mounts of one export are the ordinary
+   439	    case — are beyond anything a client can detect from here. Path-keying is
+   440	    transitional for exactly these reasons, and the lineage-keyed journal is
+   441	    the memory that does not have them.
+   442	    """
+   443	    return str(Path(location).resolve())
+   444	
+   445	
+   446	#: A filesystem object's identity on this host: the device and inode a path
+   447	#: currently resolves to. Never RECORDED — inodes go stale when a file is
+   448	#: recreated and get recycled onto unrelated files, so a stored one is a claim
+   449	#: that rots into a false match. Only ever compared live, at the moment both
+   450	#: sides are stat'd.
+   451	Identity = tuple[int, int]
+   452	
+   453	
+   454	def _identity_of(location: str) -> Identity | None:
+   455	    """What filesystem object this path names right now, or None if it is absent.
+   456	
+   457	    The split is between an ANSWER and an unanswered question, and the two used
+   458	    to be one branch. A path that does not exist genuinely names no object —
+   459	    that is None, and it is correct, and the mint path depends on it. A path
+   460	    that DOES exist and will not stat (a permission wall, a transient I/O
+   461	    error, a partially mounted volume) leaves the question open, and answering
+   462	    None there means a store replaced under an aliased spelling opens as first
+   463	    contact.
+   464	    """
+   465	    try:
+   466	        stat = Path(location).stat()
+   467	    except FileNotFoundError:
+   468	        return None
+   469	    except OSError as exc:
+   470	        raise BindingProbeUnanswered(
+   471	            f"{location} exists but cannot be stat'd ({exc}), so this open "
+   472	            "cannot tell whether it names the same store as a recorded "
+   473	            "binding. Nothing has been accepted or written — retry the open"
+   474	        ) from exc
+   475	    return (stat.st_dev, stat.st_ino)
+   476	
+   477	
+   478	def match_identity(
+   479	    presenting: Identity | None,
+   480	    recorded: Sequence[tuple[str, str, Identity | None]],
+   481	) -> str | None:
+   482	    """The lineage bound to another spelling of the SAME filesystem object.
+   483	
+   484	    Pure, and separated from the stat calls on purpose: the alias this closes
+   485	    can only be CONSTRUCTED on a case-insensitive filesystem, so a test that
+   486	    builds one is skipped on a case-sensitive CI runner. The judgment is the
+   487	    part worth pinning everywhere, so it takes identities as arguments and is
+   488	    testable on any filesystem, while the construction test carries an honest
+   489	    skip.
+   490	
+   491	    ``recorded`` is (location, lineage, identity) in file order, so the newest
+   492	    binding for an aliased object wins — the same rule
+   493	    :func:`~engine.arrival_head_attestation.bound_lineage` applies to an exact
+   494	    location. An unstattable recorded path contributes nothing.
+   495	    """
+   496	    if presenting is None:
+   497	        return None
+   498	    found: str | None = None
+   499	    for _location, lineage, identity in recorded:
+   500	        if identity is not None and identity == presenting:
+   501	            found = lineage
+   502	    return found
+   503	
+   504	
+   505	def aliased_lineage(location: str) -> str | None:
+   506	    """The lineage bound to this store under a DIFFERENT spelling.
+   507	
+   508	    Consulted only when the presenting location has no binding of its own —
+   509	    which is the one moment the hole is open, and which keeps every subsequent
+   510	    open free of the sweep. It live-stats each recorded binding; a store bound
+   511	    under one spelling and opened under another is then NOT first contact, and
+   512	    a replacement at that location refuses.
+   513	
+   514	    The filesystem namespace is ambient authority: two names for one object is
+   515	    a property of the namespace rather than of the store, so asking the
+   516	    filesystem which object a name currently denotes is a location claim about
+   517	    this host and not a verdict about the store. DELETE IN SLICE 5 with the
+   518	    rest of the binding.
+   519	    """
+   520	    try:
+   521	        text = bindings_path().read_text(encoding="utf-8")
+   522	    except FileNotFoundError:
+   523	        # ABSENT is an answer: nothing has ever been bound here.
+   524	        return None
+   525	    except OSError as exc:
+   526	        raise BindingProbeUnanswered(
+   527	            f"the bindings file at {bindings_path()} exists and cannot be "
+   528	            f"read ({exc}), so this open cannot tell whether this location "
+   529	            "already presented a different lineage. Nothing has been accepted "
+   530	            "or written — retry the open"
+   531	        ) from exc
+   532	    recorded: list[tuple[str, str, Identity | None]] = []
+   533	    for number, line in enumerate(text.splitlines(), start=1):
+   534	        stripped = line.strip()
+   535	        if not stripped:
+   536	            continue
+   537	        try:
+   538	            decoded = json.loads(stripped)
+   539	        except ValueError as exc:
+   540	            raise BindingProbeUnanswered(
+   541	                f"line {number} of {bindings_path()} does not parse ({exc}), "
+   542	                "and a line that cannot be read may be the binding that names "
+   543	                "this location. Nothing has been accepted or written — repair "
+   544	                "or remove the line, then retry the open"
+   545	            ) from exc
+   546	        where = decoded.get("location") if isinstance(decoded, dict) else None
+   547	        lineage = decoded.get("lineage") if isinstance(decoded, dict) else None
+   548	        if isinstance(where, str) and isinstance(lineage, str):
+   549	            recorded.append((where, lineage, _identity_of(where)))
+   550	    return match_identity(_identity_of(location), recorded)
+   551	
+   552	
+   553	# ---------------------------------------------------------------------------
+   554	# Producers — the entries something other than an ordinary open writes
+   555	# ---------------------------------------------------------------------------
+   556	
+   557	
+   558	def bootstrap(
+   559	    head: Head, *, level: Level, location: str, observed_at: float
+   560	) -> Path:
+   561	    """The first entry for a lineage, plus its binding. Returns the journal.
+   562	
+   563	    ``Level.MINT`` when this process minted the genesis, ``Level.FIRST_CONTACT``
+   564	    when an already-existing store was opened for the first time. **Slice 6's
+   565	    verification depends on the distinction**: a journal beginning at ``mint``
+   566	    was witnessed from genesis forward and every head in it is accounted for;
+   567	    one beginning at ``first-contact`` was trusted on sight, and that label is
+   568	    permanent. Slice 4's sidecar must produce the former for every migrated
+   569	    store by minting through :class:`AttestedLedger`, and slice 6 checks it.
+   570	
+   830	    """A head for a human, or an explicit nothing."""
+   831	    if head is None:
+   832	        return "(none)"
+   833	    return f"{head.lineage}/{head.ordinal}/{head.record_hash}"
+   834	
+   835	
+   836	def _remembered_floor(read: JournalRead) -> int | None:
+   837	    """The lowest ordinal the journal already knows the accepted head is at.
+   838	
+   839	    One number for all three states of a read, which is what lets the
+   840	    across-time re-observation be decided in one place rather than repeated on
+   841	    each comparison branch. An established head knows its own ordinal; a bound
+   842	    knows at least its own; an unreadable read and an absent journal know
+   843	    nothing and answer ``None``, because a store cannot look like it went
+   844	    backward relative to a memory that holds no position.
+   845	    """
+   846	    known = read.known
+   847	    if isinstance(known, EstablishedHead):
+   848	        return known.entry.head.ordinal
+   849	    if isinstance(known, HeadLowerBound):
+   850	        return known.at_least.head.ordinal
+   851	    return None
+   852	
+   853	
+   854	def _vouched_at(
+   855	    ledger: ArrivalLedger, lineage: str
+   856	) -> Callable[[int], Head | None]:
+   857	    """A lookup that answers only what the LEDGER vouches for at an ordinal.
+   858	
+   859	    ``head_at`` resolves through a verified walk, so an answer here means the
+   860	    chain from genesis reaches that coordinate and holds that record. A refusal
+   861	    means the ledger will not vouch for anything there, and ``None`` is the
+   862	    honest spelling of that — the caller then treats the head as unaccounted,
+   863	    which is the refusing direction.
+   864	
+   865	    Broad catch, and it is safe in exactly one direction. The contract's
+   866	    ``head_at`` says it "answers or it refuses" without naming an exception
+   867	    family, and the file adapter's "no record at that ordinal" is its own
+   868	    backend error rather than a ``ContractRefusal``, so a neutral caller cannot
+   869	    enumerate the refusals without naming a backend
+   870	    (``finding:s3wp3-head-at-refusal-family-unnamed``). Catching broadly is
+   871	    sound here because every catch lands on "unaccounted", which REFUSES; the
+   872	    opposite default — treating an unrecognized failure as agreement — is the
+   873	    silent-acceptance hazard, and that is the direction this must never fail in.
+   874	    """
+   875	
+   876	    def at_ordinal(ordinal: int) -> Head | None:
+   877	        try:
+   878	            return ledger.head_at(Watermark(lineage=lineage, ordinal=ordinal))
+   879	        except Exception:  # noqa: BLE001 — see the docstring: fails to REFUSE
+   880	            return None
+   881	
+   882	    return at_ordinal
+   883	
+   884	
+   885	# ---------------------------------------------------------------------------
+   886	# The seam
+   887	# ---------------------------------------------------------------------------
+   888	
+   889	
+   890	class AttestedLedger:
+   891	    """An :class:`~engine.arrival_contract.ArrivalLedger` that remembers.
+   892	
+   893	    Two things, and no third: it compares at construction, and it journals
+   894	    after a successful ``mint``, ``append`` or ``replicate``. Everything else
+   895	    is delegation.
+   896	
+   897	    **Delegation is by explicit method, never** ``__getattr__``. A catch-all
+   898	    would forward ``import_prefix`` — a mutation the contract Protocol
+   899	    deliberately does not declare but which is in ``LEDGER_MUTATIONS``
+   900	    regardless, because the custody/reads separation must cover every op that
+   901	    can change what a lineage holds. Forwarded silently, it would be a mutation
+   902	    reachable through the attested handle that the seam does not journal: a
+   903	    hole in the witness, opened by a convenience nobody wrote down. It is
+   904	    therefore NOT reachable through this wrapper, and a future op added to the
+   905	    adapter is not reachable either until somebody decides how it is witnessed.
+   906	
+   907	    **The IndeterminateComparison posture** — the WP's flagged design point — is
+   908	    in :meth:`_degraded`, with the argument.
+   909	    """
+   910	
+  1080	        classified. One extra constant-time tail read, on the descending branch
+  1081	        only — the dominant unchanged case pays nothing, and the branch that
+  1082	        does pay is the one about to accuse an operator of losing data.
+  1083	
+  1084	        Terminating, not a retry loop, and the residual window fails SAFE. A
+  1085	        writer committing after the re-read is invisible to the journal read
+  1086	        that preceded it, so its effect can only be to make *K* lower than
+  1087	        reality — which classifies unchanged or advanced and pays a verified
+  1088	        walk, never a false refusal. A genuine rollback is stable across both
+  1089	        reads and survives.
+  1090	        """
+  1091	        floor = _remembered_floor(read)
+  1092	        if floor is None or presented.ordinal >= floor:
+  1093	            return presented
+  1094	        fresh, _refusal = self._present()
+  1095	        return presented if fresh is None else fresh
+  1096	
+  1097	    def _present(self) -> tuple[Head | None, BaseException | None]:
+  1098	        """The head the ledger names, or nothing and why.
+  1099	
+  1100	        ``verify(Open())`` and never ``head()``: the Open level is a
+  1101	        constant-time reverse tail read that validates the genesis and the
+  1102	        adopted head record, while ``head()`` reaches its answer through a full
+  1103	        walk — which would make every open pay a Full verification wearing an
+  1104	        Open label. That single choice is what makes the dominant unchanged
+  1105	        case O(1).
+  1106	
+  1107	        **The seam never classifies why the ledger refused**, and that is what
+  1108	        keeps it neutral. §D.4 needs an absent or empty log to branch rather
+  1109	        than read as corruption, and the adapter says so with its own
+  1110	        ``GenesisRefused`` — a backend exception this module would have to
+  1111	        import to recognize, dragging the codec into the seam and hard-coding
+  1112	        one adapter into a wrapper that wraps any. It does not need to: WP1's
+  1113	        :func:`~engine.arrival_head_attestation.compare_absent_store` splits on
+  1114	        MEMORY, not on the store. "Did the ledger name a head" and "does the
+  1115	        journal remember one" are two questions, and the four cells they make
+  1116	        are answerable without ever asking why.
+  1117	
+  1118	        A corrupt log lands on the no-head branch too, and lands correctly:
+  1119	        with a memory here it is a loss and refuses, and without one it is
+  1120	        pre-genesis with the refusal carried on the report — where the store's
+  1121	        own operations go on refusing on their own account. The refusal is
+  1122	        never swallowed either way.
+  1123	        """
+  1124	        try:
+  1125	            return self._ledger.verify(Open()), None
+  1126	        except Exception as exc:  # noqa: BLE001 — see the docstring
+  1127	            return None, exc
+  1128	
+  1129	    def _absent(self, ledger_refusal: BaseException | None) -> OpenReport:
+  1130	        """§D.4's split for a location whose ledger names no head.
+  1131	
+  1132	        Decided on memory alone. The binding says which lineage this location
+  1133	        last presented; that lineage's journal says whether anything was ever
+  1134	        accepted for it.
+  1135	
+  1136	        The third state is handled here rather than routed through
+  1137	        :func:`~engine.arrival_head_attestation.compare_absent_store`, which
+  1138	        takes an entry or ``None``: a journal holding content none of which is
+  1139	        readable has no entry to pass, and passing ``None`` would answer
+  1140	        pre-genesis — a store trusted as never-having-existed precisely because
+  1141	        its memory became unreadable. That is BLOCKING-2's silent
+  1142	        trust-on-first-use, reached through the absent-store door instead. It
+  1143	        refuses, and it needs no bound to do so: the question here is whether
+  1144	        anything was ever accepted, and unreadable content answers yes.
+  1145	        """
+  1146	        remembered_lineage = bound_lineage(self._canonical)
+  1147	        known = None if remembered_lineage is None else read_journal(
+  1148	            remembered_lineage
+  1149	        ).known
+  1150	
+  1240	            # The fence sits HERE: after the outcome, before anything is
+  1241	            # earned. `compare` stays the pure seven-outcome machine — the
+  1242	            # question the fence asks needs journal state its signature
+  1243	            # rightly does not carry.
+  1244	            self._refuse_abandoned_history(read, presented)
+  1245	            # RETURNED, never written here. `_projection` still runs after this
+  1246	            # and can refuse, and an advance written from inside the
+  1247	            # classification would be a memory recording a head the very same
+  1248	            # open went on to refuse.
+  1249	            return outcome, _Earned(
+  1250	                head=presented, kind=Kind.ADVANCE, level=Level.DESCENDANT
+  1251	            )
+  1252	        # UNCHANGED earns NOTHING. A read that touched the write path would
+  1253	        # make every open a writer, and the byte-compare that proves it is the
+  1254	        # rule keeping reads off that path.
+  1255	        return outcome, None
+  1256	
+  1257	    def _refuse_abandoned_history(
+  1258	        self, read: JournalRead, presented: Head
+  1259	    ) -> None:
+  1260	        """Refuse an advance that descends through decreed-away history.
+  1261	
+  1262	        **Identity-keyed, never ordinal spans.** The anchor set is
+  1263	        ``(ordinal, record_hash)`` taken from the entries the journal holds in
+  1264	        abandoned epochs — the same discriminator ``SAME_HEIGHT_FORK`` relies
+  1265	        on. A span would be either vacuous or catastrophic: an operator who
+  1266	        resets to 5 and lets the store re-advance mints a NEW 6, 7 and 8 inside
+  1267	        the abandoned span, and fencing by ordinal would refuse every one of
+  1268	        them forever. Only the exact records that were abandoned are fenced.
+  1269	
+  1270	        Those entries are still readable in the file — epoch scoping excludes
+  1271	        them from *K*, never from the read — which is what makes them available
+  1272	        to be the anchor set at all.
+  1273	
+  1274	        **Reach: every coordinate the descent passes, not just its head.** An
+  1275	        abandoned branch that grew offline presents *N+3* while the journal's
+  1276	        abandoned entry sits at *N+1*, and head-only checking waves it through.
+  1277	        Asking ``head_at`` at each fenced anchor's own coordinate is the
+  1278	        complete form of that check — an anchor can only be touched at its own
+  1279	        ordinal — and it is spelled in contract ops, so the fence stays
+  1280	        backend-neutral like the rest of the seam.
+  1281	
+  1282	        **The lift rule, and the one place it is narrower than its wording.**
+  1283	        A later decree supersedes an earlier abandonment, so an abandoned entry
+  1284	        is fenced only while no reset has decreed at or above it — otherwise
+  1285	        recovering the authentic history would be impossible and the ceremony
+  1286	        would re-brick the store, which is L-3's shape exactly. The narrowing:
+  1287	        only the CURRENT boundary decree lifts, not any later reset. Read
+  1288	        literally, an intermediate decree would lift an entry that a subsequent
+  1289	        decree then abandoned again — reset to 10, then reset back to 5, and
+  1290	        the 10 is un-fenced by the decree the second ceremony overrode. The
+  1291	        boundary is the one decree nothing has superseded, so it is the one
+  1292	        that speaks. Fences more, never less.
+  1293	
+  1294	        **An unanswered probe refuses.** Every branch of this method lands on
+  1295	        refusal or on a certified-clean path; there is no arm where a failure
+  1296	        becomes silence. That is the one-directional rule the rest of this seam
+  1297	        already states at its broad catches, and this method is where it was
+  1298	        first broken (:class:`FenceProbeUnanswered`).
+  1299	
+  1300	        Cost: one verified walk per fenced anchor ordinal, on the ADVANCED
+  1301	        branch only — which is rare by construction, because a writer journals
+  1302	        its own commit.
+  1303	        """
+  1304	        abandoned = read.entries[: len(read.entries) - len(read.epoch)]
+  1305	        if not abandoned:
+  1306	            return
+  1307	        decree = read.epoch[0] if read.epoch else None
+  1308	        if decree is None or decree.kind is not Kind.TRUST_RESET:
+  1309	            # No boundary decree means nothing was decreed away, so there is
+  1310	            # nothing to fence — abandoned entries only exist behind a reset.
+  1311	            return
+  1312	
+  1313	        fenced: dict[int, set[str]] = {}
+  1314	        for entry in abandoned:
+  1315	            head = entry.head
+  1316	            if head.lineage != presented.lineage:
+  1317	                continue
+  1318	            if head.ordinal <= decree.head.ordinal:
+  1319	                continue  # lifted: the standing decree reaches at or above it
+  1320	            if head.ordinal > presented.ordinal:
+  1321	                continue  # cannot be on this history's path at all
+  1322	            fenced.setdefault(head.ordinal, set()).add(head.record_hash)
+  1323	
+  1324	        for ordinal in sorted(fenced):
+  1325	            try:
+  1326	                vouched = self._ledger.head_at(
+  1327	                    Watermark(lineage=presented.lineage, ordinal=ordinal)
+  1328	                )
+  1329	            except Exception as exc:  # noqa: BLE001 — see the refusal's docstring
+  1330	                # NO ANSWER IS NOT AN ANSWER. Continuing here would read
+  1331	                # evidence-absent as absence-of-touch and land the whole fence
+  1332	                # on the acceptance side — which is how sol reproduced the
+  1333	                # self-erasing loop straight through a transient error.
+  1334	                raise FenceProbeUnanswered(
+  1335	                    f"{self._canonical} presents {_head_text(presented)}, and "
+  1336	                    f"the ledger could not be asked what sits at ordinal "
+  1337	                    f"{ordinal}: {exc}. This machine's operator decreed away "
+  1338	                    f"history above ordinal {decree.head.ordinal}, and without "
+  1339	                    "that answer this open cannot certify the presented "
+  1340	                    "history is clear of it. Nothing is wrong with the store "
+  1341	                    "as far as this went, and nothing has been accepted or "
+  1342	                    "written — retry the open, and if it keeps failing the "
+  1343	                    "ledger is what needs looking at"
+  1344	                ) from exc
+  1345	            if vouched.record_hash in fenced[ordinal]:
+  1346	                raise AbandonedHistoryFenced(
+  1347	                    f"{self._canonical} presents {_head_text(presented)}, whose "
+  1348	                    f"verified history holds {vouched.record_hash} at ordinal "
+  1349	                    f"{ordinal} — a record this machine's operator decreed away "
+  1350	                    f"when they reset trust to ordinal {decree.head.ordinal}. "
+  1351	                    "The chain is intact; that is not the question. Accepting it "
+  1352	                    "would silently reverse the decree, and journaling the "
+  1353	                    "advance would erase the evidence that it had been reversed. "
+  1354	                    "If this history is the one to keep, run the trust-reset "
+  1355	                    "ceremony to decree the recovered head — that is the "
+  1356	                    "licensed way, and it records the gap"
+  1357	                )
+  1358	
+  1359	    def _descent(
+  1360	        self, known: Head, presented: Head
+  1361	    ) -> tuple[Head | None, BaseException | None]:
+  1362	        """Was the presented head reached BY DESCENT from the remembered one?
+  1363	
+  1364	        Answers with the head the ledger vouches for at the remembered
+  1365	        coordinate, which is the ADVANCED/REWRITE discriminator, or ``None``
+  1366	        when it will not vouch for anything there.
+  1367	
+  1368	        Any failure of either walk answers ``None``, which classifies REWRITE,
+  1369	        which refuses — the same one-directional argument :func:`_vouched_at`
+  1370	        makes. A corrupt log therefore surfaces as a refusal with the
+  1371	        corruption chained as the cause, so the operator is told both things:
+  1372	        the comparison would not proceed, and here is what the walk hit.
+  1373	        """
+  1374	        try:
+  1375	            self._ledger.verify(Full(through=presented))
+  1376	            return (
+  1377	                self._ledger.head_at(
+  1378	                    Watermark(lineage=known.lineage, ordinal=known.ordinal)
+  1379	                ),
+  1380	                None,
+  1381	            )
+  1382	        except Exception as exc:  # noqa: BLE001 — see the docstring
+  1383	            return None, exc
+  1384	
+  1385	    def _degraded(
+  1386	        self,
+  1387	        read: JournalRead,
+  1388	        presented: Head,
+  1389	        refusal: IndeterminateComparison,
+  1390	    ) -> Indeterminate:
+  1391	        """**The IndeterminateComparison posture, and the argument for it.**
+  1392	
+  1393	        The choice: does the seam surface an incomplete journal read as a
+  1394	        refusal demanding an operator decision, or proceed under an explicitly
+  1395	        labeled degradation? **It proceeds — after firing every refusal the
+  1396	        incomplete read still soundly supports.** That is not the two-valued
+  1397	        question it looks like, and the third answer is the whole of it.
+  1398	
+  1399	        **Why not refuse.** An incomplete read persists until an operator
+  1400	        acts. The journal is append-only and never rewritten, and the torn-
+  1401	        tail guard preserves a crashed writer's fragment rather than removing
+  1402	        it, so a line lost to an ordinary crash sits in ``skipped`` on every
+  1403	        later read — recorded forever, weighed only until a trust-reset
+  1404	        ceremony decrees past it, since the epoch-scoped weighting stops
+  1405	        counting a loss the decree superseded. Until that ceremony, a seam
+  1406	        that refused on it would make one crashed writer a store that never
+  1407	        opens again — which is verbatim the argument WP1's amended ruling used
+  1408	        to REJECT refusing on mid-file damage, one level down: "it made an
+  1409	        ordinary crash a permanent incident, and it claimed a protection this
+  1410	        location cannot deliver anyway — anyone able to corrupt the journal can
+  1510	    def _projection(self, presented: Head) -> ProjectionReport | None:
+  1511	        """Compare what the projection accounts for against the presented head.
+  1512	
+  1513	        Comparing the watermark's ORDINAL is free and gives the whole
+  1514	        classification — behind (ordinary staleness, catch-up's job), level, or
+  1515	        ahead of the ledger, which is tail-truncation evidence that survives
+  1516	        independently of the journal. Only when they disagree does the seam
+  1517	        call ``head_at``, which turns the coordinate into a head the ledger
+  1518	        vouches for; on the ahead branch it refuses rather than answering,
+  1519	        because the log holds no record at that ordinal — and the refusal IS
+  1520	        the answer.
+  1521	
+  1522	        Behind is never a refusal. A projection that lags is the ordinary
+  1523	        state of a store between a commit and its next catch-up, and refusing
+  1524	        it would make the seam an availability problem rather than a witness.
+  1525	        """
+  1526	        if self._query is None:
+  1527	            return None
+  1528	        watermark = self._query.projected_through()
+  1529	        if watermark is None:
+  1530	            return ProjectionReport(
+  1531	                agreement=ProjectionAgreement.ABSENT, watermark=None
+  1532	            )
+  1533	
+  1534	        if watermark.lineage != presented.lineage:
+  1535	            # `head_at` refuses a watermark from another lineage with the
+  1536	            # contract's own NotAuthority, which is exactly the right answer:
+  1537	            # this projection is not a projection of this log. Letting it out
+  1538	            # keeps the refusal the contract names rather than restating it.
+  1539	            self._ledger.head_at(watermark)
+  1540	            raise ProjectionAheadOfLedger(
+  1541	                f"the projection beside {self._canonical} reports lineage "
+  1542	                f"{watermark.lineage} while the log presents "
+  1543	                f"{presented.lineage}, and the ledger vouched for the "
+  1544	                "watermark anyway — the projection and the ledger disagree "
+  1545	                "about which lineage this store is"
+  1546	            )
+  1547	
+  1548	        if watermark.ordinal > presented.ordinal:
+  1549	            cause: BaseException | None = None
+  1550	            try:
+  1551	                self._ledger.head_at(watermark)
+  1552	            except Exception as exc:  # noqa: BLE001 — the refusal IS the answer
+  1553	                cause = exc
+  1554	            raise ProjectionAheadOfLedger(
+  1555	                f"the projection beside {self._canonical} accounts for "
+  1556	                f"ordinal {watermark.ordinal} of lineage {watermark.lineage}, "
+  1557	                f"but the log presents only ordinal {presented.ordinal}. A "
+  1558	                "projection ahead of its ledger is what a truncated log looks "
+  1559	                "like from the outside. Re-derive the projection from the "
+  1560	                "ledger; never edit the ledger to match the projection"
+  1561	            ) from cause
+  1562	
+  1563	        return ProjectionReport(
+  1564	            agreement=(
+  1565	                ProjectionAgreement.LEVEL
+  1566	                if watermark.ordinal == presented.ordinal
+  1567	                else ProjectionAgreement.BEHIND
+  1568	            ),
+  1569	            watermark=watermark,
+  1570	        )
+  1120	        Never weighed at any position — the cause half of the weighting.
+  1121	        Still reported: a tolerated loss nobody is told about is just a loss,
+  1122	        and an operator seeing replayed lines in their journal wants to know.
+  1123	        What it must not do is weaken the claim, because a crash-retry
+  1124	        duplicate is byte-identical by construction and the journal is
+  1125	        append-only: one benign retry would otherwise bound every subsequent
+  1126	        read for the life of the file, and ``established_head()`` would raise
+  1127	        forever.
+  1128	        """
+  1129	        self.all.append(note)
+  1130	
+  1131	
+  1132	def _scan(
+  1133	    lines: Iterable[str],
+  1134	) -> tuple[list[tuple[int, HeadAttestation]], _Skips, bool]:
+  1135	    """Every readable entry with its PHYSICAL LINE ORDINAL, what was skipped,
+  1136	    and whether a header was seen.
+  1137	
+  1138	    The line number is the file's own, counted from 1 over every line including
+  1139	    ones this build skipped — never an index among the entries that happened to
+  1140	    parse. That distinction is the whole of the position claim: an index among
+  1141	    valid entries is a judgment, and a future build that classifies one line
+  1142	    differently renumbers every entry after it, silently voiding every reset
+  1143	    bound below. Physical line N is line N forever in a file that is only ever
+  1144	    appended to.
+  1145	
+  1146	    Split out of :func:`parse_journal_lines` so a caller can reach the entries
+  1147	    WITHOUT the judgment built on top of them. That judgment can refuse —
+  1148	    :func:`_known_of` raises on equivocation — and the trust-reset ceremony
+  1149	    needs the last entry precisely when the journal is in a state a full read
+  1150	    will not answer for. A recovery path that depended on the read it recovers
+  1151	    from would be unusable exactly when it is needed.
+  1152	    """
+  1153	    entries: list[tuple[int, HeadAttestation]] = []
+  1154	    skips = _Skips()
+  1155	    seen: dict[str, int] = {}
+  1156	    header_seen = False
+  1157	    for index, line in enumerate(lines):
+  1158	        stripped = line.strip()
+  1159	        if not stripped:
+  1160	            continue
+  1161	        try:
+  1162	            decoded = json.loads(stripped)
+  1163	        except ValueError as exc:
+  1164	            skips.missed(
+  1165	                f"line {index + 1}: does not parse ({exc})", line=index + 1
+  1166	            )
+  1167	            continue
+  1168	        verdict = _classify(decoded)
+  1169	        if verdict is _HEADER:
+  1170	            # Not tracked by position: two writers racing to create the same
+  1171	            # journal can each write one, so "the header is line 1" is not a
+  1172	            # property this reader may assume.
+  1173	            header_seen = True
+  1174	            continue
+  1175	        if verdict is _AMBIGUOUS:
+  1176	            skips.missed(
+  1177	                f"line {index + 1}: carries both the journal type marker and "
+  1178	                "an entry kind, so this build cannot say which it is",
+  1179	                line=index + 1,
+  1180	            )
+  1181	            continue
+  1182	        entry = _parse_entry(decoded)
+  1183	        if entry is None:
+  1184	            skips.missed(
+  1185	                f"line {index + 1}: not readable by this build", line=index + 1
+  1186	            )
+  1187	            continue
+  1188	        if stripped in seen:
+  1189	            # A LITERAL RE-ASSERTION: recorded, and WEIGHTLESS. The line's
+  1190	            # content is one this read already counted, so nothing about the
+  1191	            # accepted head is unknown because of it.
+  1192	            skips.re_asserted(
+  1193	                f"line {index + 1}: byte-identical to line {seen[stripped]}, "
+  1194	                "so it re-asserts an observation this journal already holds "
+  1195	                "rather than recording a new one — a replayed line cannot "
+  1196	                "count twice"
+  1197	            )
+  1198	            continue
+  1199	        seen[stripped] = index + 1
+  1200	        entries.append((index + 1, entry))
+  1201	
+  1202	    return entries, skips, header_seen
+  1203	
+  1204	
+  1205	def last_entry(lineage: str) -> tuple[int, HeadAttestation] | None:
+  1206	    """The last readable entry and its PHYSICAL LINE, or None if there is none.
+  1207	
+  1208	    Both halves, because a trust reset binds to both — see
+  1209	    :attr:`HeadAttestation.follows`. File order, not maximum ordinal: a reset
+  1210	    binds to the entry it is physically appended after, which is what a later
+  1211	    reader finds sitting in front of it.
+  1212	
+  1213	    Deliberately performs no epoch scoping, no equivocation check and no *K*
+  1214	    computation. That is not an optimization — see :func:`_scan`.
+  1215	    """
+  1216	    try:
+  1217	        text = journal_path(lineage).read_text(encoding="utf-8")
+  1218	    except FileNotFoundError:
+  1219	        return None
+  1220	    except (OSError, UnicodeDecodeError) as exc:
+  1221	        raise JournalUnreadable(
+  1222	            f"the journal for lineage {lineage!r} exists but cannot be read "
+  1223	            f"as text at all: {exc}"
+  1224	        ) from exc
+  1225	    scanned, _skips, _header = _scan(text.splitlines(keepends=True))
+  1226	    return scanned[-1] if scanned else None
+  1227	
+  1228	
+  1229	def parse_journal_lines(lines: Iterable[str]) -> JournalRead:
+  1230	    """Read a journal from its raw lines. Pure — no filesystem.
+  1231	
+  1232	    The pure half is separate so the conformance vectors can hand it raw log
+  1233	    lines and so every read rule is testable without a temporary directory.
+  1234	
+  1235	    **Every line this build cannot use is skipped and reported, wherever it
+  1236	    sits** — which is half of what makes a read incomplete
+  1237	    (:class:`HeadLowerBound`); a missing header is the other half. The
+  1238	    earlier design distinguished a torn final line from damage further up and
+  1239	    refused the latter, on the reasoning that skipping could silently lower
+  1240	    *K*. Skipping CAN lower *K* — concurrent writers journal out of order, so
+  1241	    the epoch maximum is not the last line and damage anywhere can take it
+  1242	    (``finding:s3wp1-epoch-ordinals-do-not-ascend-in-file-order``). But
+  1243	    refusing was the wrong answer to it. It made an ordinary crash a permanent
+  1244	    incident, and it claimed a protection this location cannot deliver: anyone
+  1245	    who can corrupt a line here can delete the whole journal instead and be
+  1246	    met with trust-on-first-use. So the loss is **carried in the result type**
+  1247	    — :class:`HeadLowerBound` — rather than converted into a verdict, and the
+  1248	    positional rule dissolves along with the distinction it enforced.
+  1249	
+  1250	    **This function never refuses on structure.** Entries with no recognized
+  1251	    header are tolerated too: the entries are self-describing evidence that
+  1252	    heads were accepted, so what is lost — the protocol and wire versions the
+  1253	    hashes derive under — weakens the claim to :class:`HeadLowerBound` rather
+  1254	    than voiding the file. The absence is reported without a line number,
+  1255	    because an absence does not have one. Only
+  1256	    :class:`JournalEquivocation` is raised from here, and it is a statement
+  1257	    about the journal's content rather than its readability.
+  1258	    :class:`JournalUnreadable` belongs to :func:`read_journal`, where there
+  1259	    may be no text to hand this function at all.
+  1260	    """
+  1261	    scanned, skips, header_seen = _scan(lines)
+  1262	    positions = tuple(line for line, _entry in scanned)
+  1263	    frozen = tuple(entry for _line, entry in scanned)
+  1264	    if frozen and not header_seen:
+  1265	        # TOLERATED, not refused. The entries are self-describing evidence
+  1266	        # that heads were accepted, and a weakened claim is available — so
+  1267	        # refusing the file would be a verdict where a bound would do, which
+  1268	        # is the error `HeadUnreadable` was added to correct. What is lost is
+  1269	        # the protocol and wire versions the hashes derive under, and losing
+  1270	        # that is exactly what a lower bound is for. Reported without a line
+  1271	        # number because an absence does not have one.
+  1272	        # STRUCTURAL, so no line and no exemption from weight: the header
+  1273	        # would be line 1 and would sit below every boundary, but its absence
+  1274	        # is a claim about the FILE rather than a line an operator decreed
+  1275	        # past. Reported without a line number because an absence does not
+  1276	        # have one — which is exactly what marks it structural here.
+  1277	        skips.missed(
+  1278	            "header: absent, so the protocol and wire versions these record "
+  1279	            "hashes derive under are unknown"
+  1280	        )
+  1281	    epoch, boundary, epoch_notes = _epoch_of(frozen, positions)
+  1282	    for line, note in epoch_notes:
+  1283	        # A voided reset KEEPS its cause-weight, ruled narrowly: the content of
+  1284	        # the line is known, but what the operator INTENDED by it is not, and
+  1285	        # that uncertainty is exactly what a bound represents.
+  1286	        #
+  1287	        # Its position is carried for uniformity, and it never exempts anything:
+  1288	        # `_epoch_of` walks BACKWARD and returns at the first valid reset, so
+  1289	        # every note it produces comes from a reset ABOVE the boundary by
+  1290	        # construction. A failed attempt followed by a successful re-run still
+  1291	        # heals — but through the walk short-circuiting past it, not through
+  1292	        # this weighting. Stated because a comment claiming the weighting does
+  1293	        # that work would describe a path nothing can reach.
+  1294	        skips.missed(note, line=line)
+  1295	    weakening = skips.weakening(boundary)
+  1296	    best = _known_of(epoch)
+  1297	    known: EstablishedHead | HeadLowerBound | HeadUnreadable | None
+  1298	    if best is not None:
+  1299	        known = (
+  1300	            HeadLowerBound(at_least=best, skipped=weakening)
+  1301	            if weakening
+  1302	            else EstablishedHead(entry=best)
+  1303	        )
+  1304	    elif weakening:
+  1305	        # Content was claimed and none of it could be read. NOT first contact.
+  1306	        known = HeadUnreadable(skipped=weakening)
+  1307	    else:
+  1308	        known = None
+  1309	    return JournalRead(
+  1310	        entries=frozen,
+  1311	        epoch=epoch,
+  1312	        known=known,
+  1313	        bootstrap=frozen[0] if frozen else None,
+  1314	        skipped=tuple(skips.all),
+  1315	    )
+  1316	
+  1317	
+  1318	def read_journal(lineage: str) -> JournalRead:
+  1319	    """This lineage's journal, or an empty read if it has none.
+  1320	
+  1321	    An absent journal is not a fault — it is first contact, and answering
+  1322	    with an empty read rather than raising is what lets the classifier say so.
+  1323	    """
+  1324	    path = journal_path(lineage)
+  1325	    try:
+  1326	        text = path.read_text(encoding="utf-8")
+  1327	    except FileNotFoundError:
+  1328	        # Absent is not a fault — it is first contact, and answering with an
+  1329	        # empty read is what lets the classifier say so.
+  1330	        return JournalRead(
+  1331	            entries=(), epoch=(), known=None, bootstrap=None, skipped=()
+  1332	        )
+  1333	    except (OSError, UnicodeDecodeError) as exc:
+  1334	        # The journal is THERE and cannot be read at all — a directory, a
+  1335	        # permission wall, bytes that are not text. Distinct from every case
+  1336	        # the parser handles, because there is nothing to parse. Raised as a
+  1337	        # refusal rather than let out as a builtin: a caller catching
+  1338	        # AttestationRefusal must not have an OSError escape past it.
+  1339	        raise JournalUnreadable(
+  1340	            f"the journal for lineage {lineage!r} exists but cannot be read "
+  1341	            f"as text at all: {exc}"
+  1342	        ) from exc
+  1343	    return parse_journal_lines(text.splitlines(keepends=True))
+  1344	
+  1345	
+  1346	# ---------------------------------------------------------------------------
+  1347	# Writing the journal
+  1348	# ---------------------------------------------------------------------------
+  1349	
+  1350	
+  1351	def _torn_tail_guard(path: Path) -> str:
+  1352	    """A newline when the file does not end in one, so an append cannot glue.
+  1353	
+  1354	    A crash mid-append leaves a fragment with no trailing newline. Appending
+  1355	    straight onto it would concatenate the next entry into that fragment,
+  1356	    producing ONE unreadable line — and the new entry's bytes would be lost
+  1357	    inside it. The design's promise is that a torn tail costs at most the
+  1358	    newest observation; without this guard an ordinary crash plus one commit
+  1359	    would cost the next observation too.
+  1360	
+  1361	    Conservative when it cannot tell: an unreadable file gets the newline. A
+  1362	    spurious blank line is skipped for free on read, while gluing is not
+  1363	    recoverable at all.
+  1364	    """
+  1365	    try:
+  1366	        with path.open("rb") as handle:
+  1367	            if handle.seek(0, os.SEEK_END) == 0:
+  1368	                return ""
+  1369	            handle.seek(-1, os.SEEK_END)
+  1370	            return "" if handle.read(1) == b"\n" else "\n"
+  1371	    except OSError:
+  1372	        return "\n"
+  1373	
+  1374	
+  1375	def _write_all(handle: int, payload: bytes) -> None:
+  1376	    """Write every byte, or raise. A short write is a self-inflicted torn line."""
+  1377	    written = 0
+  1378	    while written < len(payload):
+  1379	        count = os.write(handle, payload[written:])
+  1380	        if count <= 0:
+  1381	            raise OSError(
+  1382	                f"journal write stalled after {written} of {len(payload)} bytes"
+  1383	            )
+  1384	        written += count
+  1385	
+  1386	
+  1387	def append_entry(entry: HeadAttestation) -> Path:
+  1388	    """Append one observation. Returns the journal it landed in.
+  1389	
+  1390	    Append-only, so there is no read-modify-write, no torn partial update and
+  1391	    no lock. Retaining every previously accepted head is also what makes an
+  1392	    under-evidenced advance *recoverable* rather than a loss: *K* stays in the
+  1393	    journal forever, so the periodic audit can re-examine everything accepted
+  1394	    since the last reset. A single overwritten value could not offer that at
+  1395	    any price, because it would have forgotten *K* — and it could not hold the
+  1396	    bootstrap receipt either, since the first advance would erase it.
+  1397	
+  1398	    A brand-new journal gets its header and its first entry in one write. The
+  1399	    exclusive create keeps two racing writers from each emitting a header; the
+  1400	    reader tolerates a second one anyway, because a create race is cheaper to
+  1401	    survive than to prevent.
+  1402	
+  1403	    **Every open carries O_APPEND, including the exclusive create.** Without it
+  1404	    the creating writer's descriptor sits at offset zero, and a second writer
+  1405	    that lost the create race can land a complete entry there first — which the
+  1406	    creator then overwrites. The journal would have silently forgotten a head,
+  1407	    and a later restore to the surviving ordinal would classify UNCHANGED: the
+  1408	    exact failure the maximum-ordinal read rule exists to close, arriving
+  1409	    through the write path instead.
+  1410	    """
+  1411	    path = journal_path(entry.head.lineage)
+  1412	    path.parent.mkdir(parents=True, exist_ok=True)
+  1413	    line = _entry_line(entry)
+  1414	    try:
+  1415	        handle = os.open(
+  1416	            path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_APPEND, 0o600
+  1417	        )
+  1418	    except FileExistsError:
+  1419	        # An empty existing file is a creator that crashed between the
+  1420	        # exclusive create and its write. Supplying the header here keeps that
+  1421	        # crash from leaving a journal with no header at all. The reader
+  1422	        # tolerates one and says so, but the header carries the protocol and
+  1423	        # wire versions, so a journal that HAS one keeps a claim it would
+  1424	        # otherwise have to weaken.
+  1425	        payload = _torn_tail_guard(path) + line
+  1426	        if path.exists() and path.stat().st_size == 0:
+  1427	            payload = _header_line() + line
+  1428	        handle = os.open(path, os.O_WRONLY | os.O_APPEND)
+  1429	    else:
+  1430	        payload = _header_line() + line
+  1431	    try:
+  1432	        _write_all(handle, payload.encode("utf-8"))
+  1433	    finally:
+  1434	        os.close(handle)
+  1435	    return path
+  1436	
+  1437	
+  1438	# ---------------------------------------------------------------------------
+  1439	# The audit's all-journaled-heads check (§C.4)
+  1440	# ---------------------------------------------------------------------------
+  1441	
+  1442	
+  1443	def unaccounted_heads(
+  1444	    epoch: Iterable[HeadAttestation],
+  1445	    at_ordinal: Callable[[int], Head | None],
+  1480	# forcing consumer named as slice 5's adopt ceremony, and growing the `.vertex`
+  1481	# grammar out of sequence here would take a decision slice 3 was not given.
+  1482	#
+  1483	# So the binding lives here until the declared lineage supersedes it. Its
+  1484	# deletion is a residue sweep, not a behavior change: once every store's
+  1485	# vertex declares its lineage, `descriptor.lineage` answers every question
+  1486	# this file answers, from a source the operator can read and review. Slice 5
+  1487	# deletes this section, `bindings.jsonl`, and its tests together — the same
+  1488	# obligation `arrival_registry`'s transitional inference arm carries.
+  1489	# ---------------------------------------------------------------------------
+  1490	
+  1491	
+  1492	def bindings_path() -> Path:
+  1493	    """The transitional location-to-lineage bindings file. DELETE IN SLICE 5."""
+  1494	    return heads_dir() / "bindings.jsonl"
+  1495	
+  1496	
+  1497	def record_binding(location: str, lineage: str, observed_at: float) -> None:
+  1498	    """Remember which lineage this location presented. DELETE IN SLICE 5.
+  1499	
+  1500	    Append-only and keyed on nothing: the newest binding for a location wins
+  1501	    on read, and older ones stay as evidence of what it used to be.
+  1502	    """
+  1503	    path = bindings_path()
+  1504	    path.parent.mkdir(parents=True, exist_ok=True)
+  1505	    line = (
+  1506	        json.dumps(
+  1507	            {
+  1508	                "v": _JOURNAL_VERSION,
+  1509	                "location": location,
+  1510	                "lineage": lineage,
+  1511	                "observed_at": observed_at,
+  1512	            },
+  1513	            separators=(",", ":"),
+  1514	            sort_keys=True,
+  1515	        )
+  1516	        + "\n"
+  1517	    )
+  1518	    payload = _torn_tail_guard(path) + line
+  1519	    handle = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+  1520	    try:
+  1521	        _write_all(handle, payload.encode("utf-8"))
+  1522	    finally:
+  1523	        os.close(handle)
+  1524	
+  1525	
+  1526	def bound_lineage(location: str) -> str | None:
+  1527	    """The lineage this location most recently presented, if any.
+  1528	
+  1529	    DELETE IN SLICE 5. A malformed line is skipped rather than refused:
+  1530	    unlike the head journal, this file makes no claim a skipped line could
+  1531	    weaken — a missing binding degrades to first contact, which is the state
+  1532	    the binding exists to improve on, not to guarantee.
+  1533	    """
+  1534	    try:
+  1535	        text = bindings_path().read_text(encoding="utf-8")
+  1536	    except FileNotFoundError:
+  1537	        # ABSENT is an answer: nothing has ever been bound.
+  1538	        return None
+  1539	    except OSError as exc:
+  1540	        # Was a RAW OSError escaping past every `except AttestationRefusal`,
+  1541	        # which is the builtin-escape gap `JournalUnreadable` exists to close
+  1542	        # one file over. Refusing is the right direction; being typed is what
+  1543	        # lets a caller catch it with the rest.
+  1544	        raise BindingProbeUnanswered(
+  1545	            f"the bindings file at {bindings_path()} exists and cannot be "
+  1546	            f"read ({exc}), so this location's recorded lineage is unknown. "
+  1547	            "Nothing has been accepted or written — retry the open"
+  1548	        ) from exc
+  1549	    found: str | None = None
+  1550	    for line in text.splitlines():
+  1551	        stripped = line.strip()
+  1552	        if not stripped:
+  1553	            continue
+  1554	        try:
+  1555	            decoded = json.loads(stripped)
+  1556	        except ValueError as exc:
+  1557	            raise BindingProbeUnanswered(
+  1558	                f"a line of {bindings_path()} does not parse ({exc}), and a "
+  1559	                "line that cannot be read may be the binding that names this "
+  1560	                "location. Nothing has been accepted or written — repair or "
+  1561	                "remove the line, then retry the open"
+  1562	            ) from exc
+  1563	        if (
+  1564	            isinstance(decoded, dict)
+  1565	            and decoded.get("location") == location
+  1566	            and isinstance(decoded.get("lineage"), str)
+  1567	        ):
+  1568	            found = decoded["lineage"]
+  1569	    return found
+
+exec
+/bin/zsh -lc "sed -n '920,1080p' libs/engine/src/engine/arrival_head_seam.py; sed -n '1360,1580p' libs/engine/src/engine/arrival_head_seam.py; rg -n \"except AttestationRefusal|AttestationRefusal\" libs/engine/src/engine/arrival_head_seam.py libs/engine/src/engine/arrival_head_attestation.py" in /Users/kaygee/Code/loops-s3wp1
+ succeeded in 0ms:
+
+        ``clock`` is injected because WP1's module reads no clock — every
+        ``observed_at`` there is a caller-supplied argument — and this is the
+        caller. It is what keeps staleness reporting testable without freezing
+        time inside the journal.
+
+        **This is the ONLY place the open path writes**, and that is the whole
+        of "nothing writes until every refusal has had its chance". Observation
+        is pure with respect to the journal — it returns an :class:`_Earned`
+        and writes nothing — so an open that refuses anywhere leaves no memory
+        claiming it accepted the thing it refused.
+
+        Stating it per-branch was not enough: the first-contact branch deferred
+        while the advance branch wrote inline, and a store that passed the
+        journal comparison and then failed the projection one kept an
+        ``advance`` entry for the head it had just been refused
+        (``finding:s3wp3-gate-advance-journaled-before-projection-refusal``).
+        The rule is now carried by the return type, and
+        ``test_only_the_constructor_and_the_producers_write_to_the_journal``
+        pins it against the branch somebody adds next.
+        """
+        self._ledger = ledger
+        self._location = location
+        self._canonical = canonical_location(location)
+        self._query = query
+        self._clock = clock
+
+        report, earned = self._observe()
+        if earned is not None:
+            self._write(earned)
+        self.opened: OpenReport = report
+        """What the compare-on-open established. See :class:`OpenReport`."""
+
+    def _write(self, earned: _Earned) -> None:
+        """Write what an observation earned, once it has earned it.
+
+        A bootstrap goes through :func:`bootstrap` rather than straight to
+        ``append_entry`` so that the level validation and the binding stay on
+        one path — a seam that appended its own bootstrap would be the second
+        place the canonical form is applied, which is how two spellings
+        diverge.
+        """
+        if earned.kind is Kind.BOOTSTRAP:
+            bootstrap(
+                earned.head,
+                level=earned.level,
+                location=self._location,
+                observed_at=self._clock(),
+            )
+            return
+        append_entry(
+            HeadAttestation(
+                head=earned.head,
+                kind=earned.kind,
+                level=earned.level,
+                observed_at=self._clock(),
+                location=self._canonical,
+            )
+        )
+
+    # -- the comparison ----------------------------------------------------
+
+    def _observe(self) -> tuple[OpenReport, _Earned | None]:
+        """Everything the open judged, and the entry it earned — written by
+        the caller.
+
+        Order is load-bearing and every step of it is a refusal that must fire
+        before anything is remembered:
+
+        1. Ask the ledger for a head. No head is §D.4's absent-store split.
+        2. The location's binding — a DIFFERENT lineage here is replacement,
+           and it must be caught before the presented lineage's journal is
+           read, or the seam would consult a journal that has never seen this
+           location and answer first contact through the very hole the binding
+           closes.
+        3. The journal comparison — the custody claim, and the stronger one:
+           it is the out-of-band memory, and its refusals name the recovery an
+           operator actually performs.
+        4. The projection comparison, which §D.2 calls a second and separable
+           step. Separable is what keeps the seam working when the projection
+           is absent, and second is why an ahead-of-the-ledger index cannot be
+           reported as a rollback it is not.
+
+        None of these writes. The bootstrap entry a first contact earns is
+        RETURNED, so a store that passes the journal comparison and then fails
+        the projection one leaves no memory claiming its head was accepted.
+        """
+        presented, ledger_refusal = self._present()
+        if presented is None:
+            return self._absent(ledger_refusal), None
+
+        remembered_lineage = bound_lineage(self._canonical)
+        if remembered_lineage is None:
+            # No binding for THIS spelling. Before calling it first contact,
+            # ask the filesystem whether another spelling already names this
+            # same object — a case variant, or a second mount. Live-stat, and
+            # only here: once a binding exists for the spelling in use, the
+            # exact match above answers and this sweep never runs.
+            remembered_lineage = aliased_lineage(self._canonical)
+        if (
+            remembered_lineage is not None
+            and remembered_lineage != presented.lineage
+        ):
+            raise LineageReplaced(
+                f"{self._canonical} previously presented lineage "
+                f"{remembered_lineage} and now presents {presented.lineage} — "
+                "a fresh lineage at a location that already had one is a "
+                "replacement wearing the old name, not a new store. If this "
+                "replacement is intended, the licensed way to accept it is the "
+                "explicit trust-reset ceremony, which records the gap"
+            )
+
+        read = read_journal(presented.lineage)
+        presented = self._not_older_than_the_journal(read, presented)
+
+        try:
+            known = read.established_head()
+        except IndeterminateComparison as exc:
+            comparison: Compared | Indeterminate = self._degraded(
+                read, presented, exc
+            )
+            earned: _Earned | None = None
+        else:
+            outcome, earned = self._judge(known, presented, read)
+            comparison = Compared(
+                outcome=outcome, presented=presented, known=known
+            )
+
+        return (
+            OpenReport(
+                comparison=comparison,
+                projection=self._projection(presented),
+                days_since_audit=days_since_audit(read, self._clock()),
+            ),
+            earned,
+        )
+
+    def _not_older_than_the_journal(
+        self, read: JournalRead, presented: Head
+    ) -> Head:
+        """Re-observe the store when it looks like it went backward.
+
+        **The comparison is between two files read at two different moments,
+        and that gap is a hazard the read rules alone cannot close.** The store
+        is observed, then the journal is. A writer that commits and journals
+        in between leaves the journal holding a head the store's older
+        observation does not have — which is bit-for-bit what a rollback looks
+        like. Two processes appending to one lineage while a third opens it is
+        not exotic: it is the concurrency this backend advertises, and the
+        symptom is an operator told their store was rolled back by an ordinary
+        pair of concurrent writes (``finding:s3wp3-open-compares-across-time``).
+
+        This is WP1's write-path lesson at the next layer up. There the rule
+        was that a read rule closing a hazard can be reopened by a write path;
+        here a COMPARISON rule closed at read time is reopened by somebody
+        else's write between the two reads.
+
+        The fix is to make the refusing observation not older than the journal:
+        when the presented head sits below what the journal already knows, the
+        store is asked once more, and the fresher answer is what gets
+        classified. One extra constant-time tail read, on the descending branch
+        self, known: Head, presented: Head
+    ) -> tuple[Head | None, BaseException | None]:
+        """Was the presented head reached BY DESCENT from the remembered one?
+
+        Answers with the head the ledger vouches for at the remembered
+        coordinate, which is the ADVANCED/REWRITE discriminator, or ``None``
+        when it will not vouch for anything there.
+
+        Any failure of either walk answers ``None``, which classifies REWRITE,
+        which refuses — the same one-directional argument :func:`_vouched_at`
+        makes. A corrupt log therefore surfaces as a refusal with the
+        corruption chained as the cause, so the operator is told both things:
+        the comparison would not proceed, and here is what the walk hit.
+        """
+        try:
+            self._ledger.verify(Full(through=presented))
+            return (
+                self._ledger.head_at(
+                    Watermark(lineage=known.lineage, ordinal=known.ordinal)
+                ),
+                None,
+            )
+        except Exception as exc:  # noqa: BLE001 — see the docstring
+            return None, exc
+
+    def _degraded(
+        self,
+        read: JournalRead,
+        presented: Head,
+        refusal: IndeterminateComparison,
+    ) -> Indeterminate:
+        """**The IndeterminateComparison posture, and the argument for it.**
+
+        The choice: does the seam surface an incomplete journal read as a
+        refusal demanding an operator decision, or proceed under an explicitly
+        labeled degradation? **It proceeds — after firing every refusal the
+        incomplete read still soundly supports.** That is not the two-valued
+        question it looks like, and the third answer is the whole of it.
+
+        **Why not refuse.** An incomplete read persists until an operator
+        acts. The journal is append-only and never rewritten, and the torn-
+        tail guard preserves a crashed writer's fragment rather than removing
+        it, so a line lost to an ordinary crash sits in ``skipped`` on every
+        later read — recorded forever, weighed only until a trust-reset
+        ceremony decrees past it, since the epoch-scoped weighting stops
+        counting a loss the decree superseded. Until that ceremony, a seam
+        that refused on it would make one crashed writer a store that never
+        opens again — which is verbatim the argument WP1's amended ruling used
+        to REJECT refusing on mid-file damage, one level down: "it made an
+        ordinary crash a permanent incident, and it claimed a protection this
+        location cannot deliver anyway — anyone able to corrupt the journal can
+        delete it instead and be met with trust-on-first-use." Refusing here
+        would re-impose at the composition boundary the exact verdict the
+        module removed, which is WP1's own write-path lesson generalized: a
+        rule relaxed in a module can be re-tightened by its caller, undoing the
+        ruling without touching the code it was made about.
+
+        **Why "proceed" alone would be dishonest, and what makes it not that.**
+        A bound is not nothing. Two of the four refusals are still SOUND
+        against it and both are raised here:
+
+        * A presented head BELOW the bound is a rollback. The accepted head is
+          at least the bound, so it is certainly above what is being presented.
+        * A presented head at the bound's ordinal with a DIFFERENT hash is a
+          same-height fork. The bound is a real entry — a head this machine
+          accepted at that ordinal — and the store presents a different record
+          there. The lost lines cannot make that agree.
+
+        What remains indeterminate is the region at and above the bound:
+        equal is not unchanged (it may be a rollback from the very entry the
+        read missed) and higher is not advanced (nothing bounds the accepted
+        head from ABOVE, so a lost entry may sit above both). Those two proceed
+        answers are the ones that are unobtainable, and the seam does not claim
+        either — :class:`Indeterminate` carries no outcome at all.
+
+        **How never-silent is satisfied without a refusal.** Three ways, and
+        none of them is a field somebody has to remember to read:
+
+        * The report's degraded case is its own TYPE with no ``outcome``
+          attribute, so no expression reads an answer off it without naming the
+          case — WP1's unignorable-by-construction discipline, applied at the
+          seam's own boundary.
+        * The refusal that was not raised is carried on it, so a caller wanting
+          the strict posture raises it and nothing has to be reconstructed.
+        * **Nothing is written.** A degraded open journals no entry and records
+          no binding, so the degradation never launders itself into a memory,
+          and the bound never rises on evidence the read did not have. That
+          also keeps ``HeadUnreadable`` clear of BLOCKING-2: a journal holding
+          content none of which is readable is NOT granted the bootstrap
+          entry that first contact gets, so it is never trusted on sight
+          precisely because it became unreadable.
+
+        The evidence is durable without being written: ``skipped`` is derived
+        from the journal's own bytes, so every future open re-derives the same
+        degradation. Nothing is lost by not recording it, and a record would be
+        the one thing that could make a lost line look accounted for.
+
+        And it stays honest under the adversarial reading. An attacker who can
+        corrupt a line can delete the journal instead and get first contact,
+        so a refusal here buys nothing against one — while it costs everything
+        against a crash. The refusals that survive are the ones an attacker
+        cannot evade by damaging the journal, because damage cannot lower a
+        bound below what the surviving entries prove.
+        """
+        known = read.known
+        if not isinstance(known, HeadLowerBound):
+            # HeadUnreadable: no bound at all, so every comparison declines —
+            # rollback included. There is nothing to compare against.
+            return Indeterminate(
+                presented=presented,
+                refusal=refusal,
+                skipped=read.skipped,
+                at_least=None,
+            )
+
+        bound = known.at_least.head
+        missed = "; ".join(known.skipped)
+        # No lineage check: the journal is keyed by lineage, so every entry in
+        # it is this lineage's. Replacement is the binding's question and it
+        # was already asked, before this journal was opened.
+        if presented.ordinal < bound.ordinal:
+            raise HeadRollback(
+                f"{self._canonical} presents ordinal {presented.ordinal}, and "
+                f"this machine accepted at least ordinal {bound.ordinal} for "
+                f"lineage {presented.lineage}. This read of the journal is "
+                f"incomplete — it missed: {missed} — but a head below the "
+                "bound is below the accepted head whatever the read missed. "
+                "Locate a replica or backup at or above the accepted head; "
+                "never move the witness backward to match the store"
+            )
+        if (
+            presented.ordinal == bound.ordinal
+            and presented.record_hash != bound.record_hash
+        ):
+            raise HeadFork(
+                f"{self._canonical} presents {presented.record_hash} at "
+                f"ordinal {presented.ordinal}, and this machine accepted "
+                f"{bound.record_hash} at that same ordinal. Two different "
+                "records claim one height. This read of the journal is "
+                f"incomplete — it missed: {missed} — but the entry the bound "
+                "rests on is one the journal does hold. Freeze both branches "
+                "and collect evidence; never pick the taller branch"
+            )
+        return Indeterminate(
+            presented=presented,
+            refusal=refusal,
+            skipped=read.skipped,
+            at_least=bound,
+        )
+
+    def _projection(self, presented: Head) -> ProjectionReport | None:
+        """Compare what the projection accounts for against the presented head.
+
+        Comparing the watermark's ORDINAL is free and gives the whole
+        classification — behind (ordinary staleness, catch-up's job), level, or
+        ahead of the ledger, which is tail-truncation evidence that survives
+        independently of the journal. Only when they disagree does the seam
+        call ``head_at``, which turns the coordinate into a head the ledger
+        vouches for; on the ahead branch it refuses rather than answering,
+        because the log holds no record at that ordinal — and the refusal IS
+        the answer.
+
+        Behind is never a refusal. A projection that lags is the ordinary
+        state of a store between a commit and its next catch-up, and refusing
+        it would make the seam an availability problem rather than a witness.
+        """
+        if self._query is None:
+            return None
+        watermark = self._query.projected_through()
+        if watermark is None:
+            return ProjectionReport(
+                agreement=ProjectionAgreement.ABSENT, watermark=None
+            )
+
+        if watermark.lineage != presented.lineage:
+            # `head_at` refuses a watermark from another lineage with the
+            # contract's own NotAuthority, which is exactly the right answer:
+            # this projection is not a projection of this log. Letting it out
+            # keeps the refusal the contract names rather than restating it.
+            self._ledger.head_at(watermark)
+            raise ProjectionAheadOfLedger(
+                f"the projection beside {self._canonical} reports lineage "
+                f"{watermark.lineage} while the log presents "
+                f"{presented.lineage}, and the ledger vouched for the "
+                "watermark anyway — the projection and the ledger disagree "
+                "about which lineage this store is"
+            )
+
+        if watermark.ordinal > presented.ordinal:
+            cause: BaseException | None = None
+            try:
+                self._ledger.head_at(watermark)
+            except Exception as exc:  # noqa: BLE001 — the refusal IS the answer
+                cause = exc
+            raise ProjectionAheadOfLedger(
+                f"the projection beside {self._canonical} accounts for "
+                f"ordinal {watermark.ordinal} of lineage {watermark.lineage}, "
+                f"but the log presents only ordinal {presented.ordinal}. A "
+                "projection ahead of its ledger is what a truncated log looks "
+                "like from the outside. Re-derive the projection from the "
+                "ledger; never edit the ledger to match the projection"
+            ) from cause
+
+        return ProjectionReport(
+            agreement=(
+                ProjectionAgreement.LEVEL
+                if watermark.ordinal == presented.ordinal
+                else ProjectionAgreement.BEHIND
+            ),
+            watermark=watermark,
+        )
+
+    def _refusal_text(
+        self,
+        outcome: Outcome,
+        known: HeadAttestation | None,
+        presented: Head,
+        descent_refusal: BaseException | None,
+    ) -> str:
+        """A refusal that names §11's response, not just the state.
+
+libs/engine/src/engine/arrival_head_attestation.py:60:    "AttestationRefusal",
+libs/engine/src/engine/arrival_head_attestation.py:104:class AttestationRefusal(Exception):
+libs/engine/src/engine/arrival_head_attestation.py:120:class HeadRollback(AttestationRefusal):
+libs/engine/src/engine/arrival_head_attestation.py:130:class HeadFork(AttestationRefusal):
+libs/engine/src/engine/arrival_head_attestation.py:147:class HeadRewrite(AttestationRefusal):
+libs/engine/src/engine/arrival_head_attestation.py:158:class LineageReplaced(AttestationRefusal):
+libs/engine/src/engine/arrival_head_attestation.py:168:class StoreLost(AttestationRefusal):
+libs/engine/src/engine/arrival_head_attestation.py:180:class JournalEquivocation(AttestationRefusal):
+libs/engine/src/engine/arrival_head_attestation.py:189:class JournalUnreadable(AttestationRefusal):
+libs/engine/src/engine/arrival_head_attestation.py:196:    ``OSError`` so that a caller catching :class:`AttestationRefusal` does not
+libs/engine/src/engine/arrival_head_attestation.py:212:class IndeterminateComparison(AttestationRefusal):
+libs/engine/src/engine/arrival_head_attestation.py:226:class ProbeUnanswered(AttestationRefusal):
+libs/engine/src/engine/arrival_head_attestation.py:259:class UnsafeLineageName(AttestationRefusal):
+libs/engine/src/engine/arrival_head_attestation.py:478:REFUSALS: dict[Outcome, type[AttestationRefusal]] = {
+libs/engine/src/engine/arrival_head_attestation.py:486:ABSENT_STORE_REFUSALS: dict[AbsentStoreOutcome, type[AttestationRefusal]] = {
+libs/engine/src/engine/arrival_head_attestation.py:493:) -> type[AttestationRefusal] | None:
+libs/engine/src/engine/arrival_head_attestation.py:1338:        # AttestationRefusal must not have an OSError escape past it.
+libs/engine/src/engine/arrival_head_attestation.py:1540:        # Was a RAW OSError escaping past every `except AttestationRefusal`,
+libs/engine/src/engine/arrival_head_seam.py:66:    AttestationRefusal,
+libs/engine/src/engine/arrival_head_seam.py:127:class ProjectionAheadOfLedger(AttestationRefusal):
+libs/engine/src/engine/arrival_head_seam.py:144:class AbandonedHistoryFenced(AttestationRefusal):
+libs/engine/src/engine/arrival_head_seam.py:198:class AuditFoundUnaccountedHeads(AttestationRefusal):
+libs/engine/src/engine/arrival_head_seam.py:215:    Deliberately NOT an :class:`~engine.arrival_head_attestation.AttestationRefusal`,
+libs/engine/src/engine/arrival_head_seam.py:239:    **Deliberately NOT an** :class:`~engine.arrival_head_attestation.AttestationRefusal`.
+libs/engine/src/engine/arrival_head_seam.py:711:    except AttestationRefusal as exc:
+libs/engine/src/engine/arrival_head_seam.py:1642:        except (OSError, AttestationRefusal) as exc:
+libs/engine/src/engine/arrival_head_seam.py:1704:        except (OSError, AttestationRefusal) as exc:
+
+codex
+Targeted regressions pass on this non-root host, including both real permission constructions (so they did not skip here), the hard-link alias path, direct-call depth pins, and the inverted WP1 test. One stale implementation docstring still says malformed binding lines are skipped even though the code now refuses; I’m tracking that as a documentation defect while I complete mutation and boundary sweeps.
+apply patch
+patch: completed
+/Users/kaygee/Code/loops-s3wp1/libs/engine/src/engine/arrival_head_seam.py
+diff --git a/libs/engine/src/engine/arrival_head_seam.py b/libs/engine/src/engine/arrival_head_seam.py
+index bc1bc32a5a3bf6f25a09b0052bfb277bc2596538..9e7936ae9a1fe6ab699ecf34dcebe1be7e37ab61
+--- a/libs/engine/src/engine/arrival_head_seam.py
++++ b/libs/engine/src/engine/arrival_head_seam.py
+@@ -1326,22 +1326,12 @@
+                 vouched = self._ledger.head_at(
+                     Watermark(lineage=presented.lineage, ordinal=ordinal)
+                 )
+-            except Exception as exc:  # noqa: BLE001 — see the refusal's docstring
++            except Exception:  # noqa: BLE001 — mutation demo
+                 # NO ANSWER IS NOT AN ANSWER. Continuing here would read
+                 # evidence-absent as absence-of-touch and land the whole fence
+                 # on the acceptance side — which is how sol reproduced the
+                 # self-erasing loop straight through a transient error.
+-                raise FenceProbeUnanswered(
+-                    f"{self._canonical} presents {_head_text(presented)}, and "
+-                    f"the ledger could not be asked what sits at ordinal "
+-                    f"{ordinal}: {exc}. This machine's operator decreed away "
+-                    f"history above ordinal {decree.head.ordinal}, and without "
+-                    "that answer this open cannot certify the presented "
+-                    "history is clear of it. Nothing is wrong with the store "
+-                    "as far as this went, and nothing has been accepted or "
+-                    "written — retry the open, and if it keeps failing the "
+-                    "ledger is what needs looking at"
+-                ) from exc
++                continue
+             if vouched.record_hash in fenced[ordinal]:
+                 raise AbandonedHistoryFenced(
+                     f"{self._canonical} presents {_head_text(presented)}, whose "
+
+diff --git a/libs/engine/src/engine/arrival_head_seam.py b/libs/engine/src/engine/arrival_head_seam.py
+index bc1bc32a5a3bf6f25a09b0052bfb277bc2596538..9e7936ae9a1fe6ab699ecf34dcebe1be7e37ab61
+--- a/libs/engine/src/engine/arrival_head_seam.py
++++ b/libs/engine/src/engine/arrival_head_seam.py
+@@ -1326,22 +1326,12 @@
+                 vouched = self._ledger.head_at(
+                     Watermark(lineage=presented.lineage, ordinal=ordinal)
+                 )
+-            except Exception as exc:  # noqa: BLE001 — see the refusal's docstring
++            except Exception:  # noqa: BLE001 — mutation demo
+                 # NO ANSWER IS NOT AN ANSWER. Continuing here would read
+                 # evidence-absent as absence-of-touch and land the whole fence
+                 # on the acceptance side — which is how sol reproduced the
+                 # self-erasing loop straight through a transient error.
+-                raise FenceProbeUnanswered(
+-                    f"{self._canonical} presents {_head_text(presented)}, and "
+-                    f"the ledger could not be asked what sits at ordinal "
+-                    f"{ordinal}: {exc}. This machine's operator decreed away "
+-                    f"history above ordinal {decree.head.ordinal}, and without "
+-                    "that answer this open cannot certify the presented "
+-                    "history is clear of it. Nothing is wrong with the store "
+-                    "as far as this went, and nothing has been accepted or "
+-                    "written — retry the open, and if it keeps failing the "
+-                    "ledger is what needs looking at"
+-                ) from exc
++                continue
+             if vouched.record_hash in fenced[ordinal]:
+                 raise AbandonedHistoryFenced(
+                     f"{self._canonical} presents {_head_text(presented)}, whose "
+
+ERROR: Selected model is at capacity. Please try a different model.
+ERROR: Selected model is at capacity. Please try a different model.
+tokens used
+103,996

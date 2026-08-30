@@ -259,6 +259,43 @@ lineage-mismatch arm, where the adapter's own `NotAuthority` comes out). Mutatio
 (h) restores the inline write and fails all three — both behavior tests and the
 ratchet.
 
+## NB-3 — what the write-site ratchet claims, and what it does not
+
+The gate's last non-blocking item, and the disposition is the house rule: **scope
+the claim, do not widen the detection.**
+
+`test_only_the_constructor_and_the_producers_write_to_the_journal` matches
+DIRECT-NAME calls — `ast.Call` whose `func` is an `ast.Name`. Five spellings
+evade it, and the sharpest is entirely innocent: switching the module to
+attribute-style imports (`arrival_head_attestation.append_entry(...)`) leaves the
+scan **green with zero offenders** while every write site goes invisible.
+
+**Verified first-hand rather than taken from the gate's report.** Reconstructing
+the pre-fix state — mutation (i) applied *and* the precondition assertion removed
+— the ratchet passes. Silent blinding is the worst failure a ratchet can have,
+because it is indistinguishable from success.
+
+**Why the matcher was not widened.** A detector chasing every spelling would
+still miss one, and it would be asserting *"no write escapes"* — a verdict claim
+— where the evidence only supports *"no direct-name write escapes"*, a location
+claim. Growing it is the move that turns a ratchet into something that overclaims
+and then falls.
+
+**What was done instead.** The precondition the match depends on is now asserted
+before the scan that depends on it: every writing name must be a module-level
+binding, imported by name or defined here, because that is exactly what makes a
+call to it parse as `ast.Call(func=ast.Name)`. If one stops being bound that way,
+the test fails **loudly and names the import** rather than passing by detecting
+nothing. Mutation (i) demonstrates it: `['append_entry'] are no longer
+module-level bindings ... would pass by detecting nothing`. The docstring states
+the scope in the same terms.
+
+**The residual, stated.** The other spellings — an alias, a `getattr`, a call
+through a captured reference — remain undetected by this test and are covered
+today by the byte-compare behavior tests. The gap this ratchet exists for is a
+later branch that has no behavior test yet, and for that branch the direct-name
+form is the one somebody actually writes. That is the whole claim.
+
 ## This seam is where bound semantics become enforced behavior
 
 Raised by WP2's gate mid-build and folded in here. **Nothing upstream pins what a
@@ -405,6 +442,7 @@ Each applied to the working tree, the suite run, the mutation reverted, and
 | (f) | the rollback-from-a-bound arm removed from `_degraded` | **1 failed, 46 passed** — `test_an_incomplete_read_still_refuses_a_head_below_the_bound` |
 | (g) | the bound treated as an established head, so the seam answers from it | **4 failed, 43 passed** — `test_an_incomplete_read_proceeds_labeled_at_or_above_the_bound` (answers `unchanged`), `test_an_incomplete_read_does_not_answer_advanced_above_the_bound` (answers `advanced`), plus the receipt and carried-refusal tests |
 | (h) | the pre-fix inline ADVANCE write restored in `_judge` | **3 failed, 47 passed** — `test_an_advance_is_not_journaled_when_the_projection_then_refuses`, `test_an_advance_is_not_journaled_when_the_projection_disowns_the_log`, and the AST ratchet `test_only_the_constructor_and_the_producers_write_to_the_journal` |
+| (i) | `append_entry` reached through an attribute-style import instead of by name | **2 failed, 48 passed** — the ratchet's precondition assertion fails naming `['append_entry']`; also `test_a_journal_write_failure_after_a_commit_says_the_records_are_committed`, which monkeypatches the module attribute the mutation removes |
 
 **NB-1 — two demos have a nondeterministic failure SET, and the earlier counts
 here were wrong twice over.** `test_two_writers_and_an_opener_leave_a_parseable_journal`

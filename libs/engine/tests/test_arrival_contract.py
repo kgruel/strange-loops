@@ -378,21 +378,88 @@ def test_append_refuses_an_empty_request(ledger):
         ledger.append(ledger.head(), [])
 
 
-def test_append_refuses_a_pre_signed_draft(ledger):
-    """Named rather than silently dropped.
-
-    The wrap target assigns no signature and ``Entry`` carries no signer
-    field, so honouring one would mean changing ``append_marked_many`` —
-    which F1's widening is the only permitted change to in WP1. Refusing
-    says what is missing; dropping the signature would produce a record whose
-    author never attested it.
-    """
-    draft = RecordDraft(
-        kind="note", authored_at=1.0, observer="kyle", body={},
-        signature="c" * 86,
+def test_append_carries_pre_signed_draft_and_verifies_authorship(tmp_path):
+    """E1: RecordDraft.signature is carried through Entry and append_marked_many."""
+    from engine.arrival import (
+        KEY_INTRODUCTION_KIND,
+        content_commitment,
+        verify_authorship,
     )
-    with pytest.raises(NotSupported, match="unsigned"):
-        ledger.append(ledger.head(), [draft])
+    from tests.conftest import Custodian, ed25519_verify
+
+    kyle = Custodian(tmp_path, "kyle")
+    ana = Custodian(tmp_path, "ana")
+    log = ArrivalLog.mint(
+        tmp_path / "s.arrival", observer=kyle.name, signer=kyle.signer, key=kyle.public
+    )
+    ledger = FileLedger(log)
+
+    body = {"observer": ana.name, "key": ana.public}
+    commitment = content_commitment(KEY_INTRODUCTION_KIND, 1.0, kyle.name, "", body)
+    sig = kyle.signer(kyle.name, commitment)
+    assert sig is not None
+
+    draft = RecordDraft(
+        kind=KEY_INTRODUCTION_KIND,
+        authored_at=1.0,
+        observer=kyle.name,
+        origin="",
+        body=body,
+        signature=sig,
+    )
+    commit = ledger.append(ledger.head(), [draft])
+    assert commit.after.ordinal == 1
+    assert commit.records[0]["sig"] == sig
+
+    rows = verify_authorship(log, ed25519_verify)
+    assert len(rows) == 2
+    assert (rows[1].ordinal, rows[1].observer, rows[1].key) == (1, kyle.name, kyle.public)
+
+
+def test_append_unsigned_drafts_byte_identical_fixture(tmp_path):
+    """E1: Unsigned drafts produce byte-identical logs to manual build_record with sig=None."""
+    from engine.arrival import build_record, encode_record
+
+    log = ArrivalLog.mint(
+        tmp_path / "s.arrival", observer="kyle", signer=_sign, key=_KEY, at=0.0
+    )
+    ledger = FileLedger(log)
+
+    drafts = [
+        RecordDraft(
+            kind="note",
+            authored_at=float(i),
+            observer="kyle",
+            origin="",
+            body={"val": i},
+            signature=None,
+        )
+        for i in range(1, 4)
+    ]
+    commit = ledger.append(ledger.head(), drafts)
+    assert commit.after.ordinal == 3
+
+    ref_records = [log.genesis()]
+    prev_rh = log.genesis()["rh"]
+    for i in range(1, 4):
+        rec = build_record(
+            lin=log.lineage(),
+            ordinal=i,
+            prev=prev_rh,
+            k="note",
+            body={"val": i},
+            observer="kyle",
+            origin="",
+            at=float(i),
+            sig=None,
+        )
+        ref_records.append(rec)
+        prev_rh = rec["rh"]
+
+    expected_bytes = "".join(encode_record(r) + "\n" for r in ref_records).encode(
+        "utf-8"
+    )
+    assert log.path.read_bytes() == expected_bytes
 
 
 def test_a_configured_atomic_limit_refuses_before_any_mutation(tmp_path):
@@ -520,7 +587,7 @@ def test_incremental_verification_is_absent_rather_than_faked(ledger):
     )
 
 
-def test_both_deliberate_absences_refuse_under_the_contract_root(ledger):
+def test_deliberate_absence_refuses_under_the_contract_root(ledger):
     """Ruling 2: deliberate absence is a CONTRACT refusal, not a builtin.
 
     The claim is catchability at the root. A caller written against the
@@ -529,20 +596,8 @@ def test_both_deliberate_absences_refuse_under_the_contract_root(ledger):
     reads as "unfinished code" rather than "this backend does not offer it",
     which is the opposite of what ``capabilities()`` already says about both
     of these.
-
-    Both sites, in one test, because the ruling is about the ROOT covering
-    them — pinning each alone would let one drift back to a builtin while the
-    other kept the property.
     """
-    signed = RecordDraft(
-        kind="note", authored_at=1.0, observer="kyle", body={},
-        signature="c" * 86,
-    )
     head = ledger.head()
-
-    with pytest.raises(ContractRefusal) as pre_signed:
-        ledger.append(head, [signed])
-    assert isinstance(pre_signed.value, NotSupported)
 
     with pytest.raises(ContractRefusal) as incremental:
         ledger.verify(Incremental(through=head, checkpoint=head))

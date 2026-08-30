@@ -60,6 +60,7 @@ from engine.arrival_head_attestation import (
     state_root,
 )
 from engine.arrival_head_seam import (
+    AbandonedHistoryFenced,
     AttestedLedger,
     AuditFoundUnaccountedHeads,
     Compared,
@@ -1978,19 +1979,13 @@ def test_the_ceremony_reports_a_reset_that_did_not_take_effect(tmp_path):
     assert read_journal(lineage).known is not None
 
 
-def test_a_restored_abandoned_backup_does_not_open_unchanged(tmp_path):
-    """The acceptance vector, at the seam where an operator would meet it.
+def _reset_away_from(tmp_path: Path, keep: int = 1):
+    """A store reset back from its head, and the authentic backup of that head.
 
-    A replayed pre-reset ``advance`` used to raise K to an abandoned head that
-    was GENUINE, so the pre-reset backup presented it exactly and opened
-    ``unchanged`` — the unchanged arm gathers no descent evidence by design,
-    so nothing else was ever consulted. The ceremonially abandoned store simply
-    opened.
-
-    With the byte-duplicate gate the replayed line re-asserts rather than
-    records, K never reaches that head, and the restored backup is not equal to
-    anything remembered. Reverting the gate makes this open UNCHANGED again,
-    which is what makes it the sharp demo for it.
+    Returns (log_path, lineage, abandoned_head, backup_bytes). The backup is
+    the REAL pre-reset store — nothing forged, which is the whole difficulty:
+    its chain verifies perfectly and it descends honestly from the decreed
+    head. Only the decree makes it unacceptable.
     """
     log_path = minted(tmp_path / "s.arrival")
     append_legacy(log_path, "one", "two")
@@ -1998,8 +1993,8 @@ def test_a_restored_abandoned_backup_does_not_open_unchanged(tmp_path):
     abandoned = FileLedger(ArrivalLog(log_path)).verify(Open())
     backup = log_path.read_bytes()
 
-    opened(log_path)  # first contact at the pre-reset head
-    truncate_records(log_path, keep=1)
+    opened(log_path)  # first contact at the pre-reset head: it is now journaled
+    truncate_records(log_path, keep=keep)
     restored = FileLedger(ArrivalLog(log_path)).verify(Open())
     trust_reset(
         accepted=restored,
@@ -2009,33 +2004,150 @@ def test_a_restored_abandoned_backup_does_not_open_unchanged(tmp_path):
         location=str(log_path),
         observed_at=5000.0,
     )
-    assert isinstance(opened(log_path).opened.comparison, Compared)
+    return log_path, lineage, abandoned, backup
 
-    # The replay: the pre-reset observation, verbatim.
-    bootstrap_entry = read_journal(lineage).entries[0]
-    append_entry(bootstrap_entry)
 
-    log_path.write_bytes(backup)  # the abandoned backup, restored
+def test_restoring_the_abandoned_backup_is_refused_by_the_fence(tmp_path):
+    """Sol's silent loop, closed.
+
+    The loop: reset from an abandoned head back to *N*, restore the authentic
+    backup, and the open verifies descent HONESTLY — the chain really does
+    reach the abandoned head from the decreed one — so it answered ADVANCED,
+    journaled that head back into the current epoch, and every later open read
+    UNCHANGED. No refusal, no fork, repeatable forever, and the acceptance
+    erased its own evidence by recording it.
+
+    Verified descent was never the whole question. The chain is intact; what it
+    is not is the history this machine's operator decided to keep.
+    """
+    log_path, _lineage, abandoned, backup = _reset_away_from(tmp_path)
+
+    log_path.write_bytes(backup)
+    with pytest.raises(AbandonedHistoryFenced) as excinfo:
+        opened(log_path)
+
+    assert abandoned.record_hash in str(excinfo.value)
+    assert "trust-reset ceremony" in str(excinfo.value)
+
+
+def test_the_fenced_open_journals_nothing(tmp_path):
+    """The loop closed at its source: the acceptance is what erased the evidence.
+
+    A fenced open must leave the journal exactly as it found it, or the very
+    next open would compare against a head this one refused — which is how the
+    cycle became invisible in the first place.
+    """
+    log_path, lineage, _abandoned, backup = _reset_away_from(tmp_path)
+    before = journal_bytes(lineage)
+
+    log_path.write_bytes(backup)
+    with pytest.raises(AbandonedHistoryFenced):
+        opened(log_path)
+
+    assert journal_bytes(lineage) == before
+
+
+def test_a_new_decree_lifts_the_fence(tmp_path):
+    """The lift rule, end to end — and the reason the fence needs one.
+
+    Without it the ceremony re-bricks the store: an operator who genuinely
+    wants the recovered history back would have no way to say so, and the
+    remedy would be permanent refusal. A later decree supersedes the earlier
+    abandonment, so recovery costs exactly one ceremony.
+    """
+    log_path, lineage, abandoned, backup = _reset_away_from(tmp_path)
+    log_path.write_bytes(backup)
+    with pytest.raises(AbandonedHistoryFenced):
+        opened(log_path)
+
+    trust_reset(  # the operator decrees the recovered head
+        accepted=abandoned,
+        abandoned=None,
+        refused=None,
+        reason="the archive copy was the authentic history; adopting it",
+        location=str(log_path),
+        observed_at=6000.0,
+    )
+
     comparison = opened(log_path).opened.comparison
-    assert not (
-        isinstance(comparison, Compared)
-        and comparison.outcome is Outcome.UNCHANGED
-    ), "the abandoned state opened unchanged"
+    assert isinstance(comparison, Compared)
+    assert comparison.outcome is Outcome.UNCHANGED
+    assert read_journal(lineage).established_head().head == abandoned
 
-    # TIGHTENED, and the outcome is deterministic: a re-assertion carries no
-    # weight now, so the read is ESTABLISHED and the comparison completes
-    # rather than declining on a bound. It answers ADVANCED — not the REWRITE
-    # a divergent history would give — because THIS construction resets to a
-    # truncated PREFIX of the same history, so the restored backup really is a
-    # verified descendant of the accepted head: the full walk succeeds and the
-    # record at K's ordinal is K's. That is the honest answer for what is
-    # built here, and it is reached with descent verified rather than assumed.
-    #
-    # What the test pins either way is the L-5 vector: without the dedup gate
-    # K reaches the abandoned head, the backup compares EQUAL, and the
-    # unchanged arm gathers no evidence at all.
+
+def test_a_branch_grown_offline_past_the_abandoned_head_is_refused(tmp_path):
+    """Reach: every coordinate of the descent, not just the presented head.
+
+    The abandoned entry sits at *N+1* while the restored branch has grown on to
+    *N+3*, so the presented head is a coordinate the journal has never seen.
+    Checking only the head waves it straight through — the fence has to ask
+    about the path.
+    """
+    log_path, lineage, abandoned, backup = _reset_away_from(tmp_path)
+    log_path.write_bytes(backup)
+    append_legacy(log_path, "three", "four")  # the branch grew while away
+    grown = FileLedger(ArrivalLog(log_path)).verify(Open())
+    assert grown.ordinal > abandoned.ordinal
+
+    with pytest.raises(AbandonedHistoryFenced) as excinfo:
+        opened(log_path)
+    assert f"ordinal {abandoned.ordinal}" in str(excinfo.value)
+
+
+def test_a_legitimate_re_advance_inside_the_abandoned_span_is_accepted(tmp_path):
+    """Pin 1: identity-keyed, so the fence is not an ordinal span.
+
+    After a reset to *N* the store re-advances and mints a NEW *N+1* — a
+    different record at an ordinal the abandoned history also used. A span
+    fence would refuse this forever, which would make the ceremony a store's
+    last act. Only the exact abandoned records are fenced.
+    """
+    log_path, lineage, abandoned, _backup = _reset_away_from(tmp_path)
+
+    # The truncation left a projection holding a resume mark the shortened log
+    # rejects, so drop it and let the legacy path rebuild — a fixture concern,
+    # not the fence's.
+    index_path_for(log_path).unlink(missing_ok=True)
+    append_legacy(log_path, "a genuinely new record")
+    fresh = FileLedger(ArrivalLog(log_path)).verify(Open())
+    assert fresh.ordinal == abandoned.ordinal, "same ordinal, by construction"
+    assert fresh.record_hash != abandoned.record_hash
+
+    comparison = opened(log_path).opened.comparison
     assert isinstance(comparison, Compared)
     assert comparison.outcome is Outcome.ADVANCED
+
+
+def test_a_hash_identical_resync_is_refused_then_cured_by_ceremony(tmp_path):
+    """Disk-loss re-sync: the bytes are authentic and that is not enough.
+
+    A host that lost its store and re-synced the identical history from a peer
+    presents exactly the abandoned records — hash for hash, because they ARE
+    the same records. The fence refuses, and the operator's decree is what
+    resolves it, which is the honest shape: a machine cannot know whether the
+    re-sync or the decree reflects current intent, and only one of them is a
+    person.
+    """
+    log_path, lineage, abandoned, backup = _reset_away_from(tmp_path)
+    log_path.unlink()
+    index_path_for(log_path).unlink(missing_ok=True)
+    log_path.write_bytes(backup)  # re-synced from a peer, byte for byte
+
+    with pytest.raises(AbandonedHistoryFenced):
+        opened(log_path)
+
+    trust_reset(
+        accepted=abandoned,
+        abandoned=None,
+        refused=None,
+        reason="re-synced from the peer of record; adopting that history",
+        location=str(log_path),
+        observed_at=7000.0,
+    )
+    comparison = opened(log_path).opened.comparison
+    assert isinstance(comparison, Compared)
+    assert comparison.outcome is Outcome.UNCHANGED
+
 
 
 def test_a_reset_whose_predecessor_moved_lines_is_not_honored(tmp_path):

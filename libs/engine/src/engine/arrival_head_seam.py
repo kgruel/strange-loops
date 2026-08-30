@@ -91,6 +91,7 @@ from .arrival_head_attestation import (
 
 __all__ = [
     "AttestedLedger",
+    "AbandonedHistoryFenced",
     "AuditFoundUnaccountedHeads",
     "Compared",
     "Indeterminate",
@@ -132,6 +133,27 @@ class ProjectionAheadOfLedger(AttestationRefusal):
     the projection: the projection is derived state and the ledger is the
     authority, so an agreement manufactured by moving the authority is the one
     repair that destroys the evidence.
+    """
+
+
+class AbandonedHistoryFenced(AttestationRefusal):
+    """The advance descends through history an operator decreed away.
+
+    Sol's silent loop, and what makes it a loop rather than a single mistake:
+    reset from an abandoned *N+1* to *N*, restore the authentic *N+1* backup,
+    and the open verifies descent honestly — the chain really does reach *N+1*
+    from *N* — so it answers ADVANCED, **journals** *N+1* back into the current
+    epoch, and every later open reads UNCHANGED. No refusal, no fork, ever, and
+    repeatable indefinitely. The acceptance erases its own evidence by
+    recording it (``finding:s3-reset-descendant-silent-loop``).
+
+    Verified descent is not the whole question. A chain can be perfectly
+    intact and still be the history a ceremony put behind us — machinery must
+    never silently reverse an operator's decree.
+
+    The acceptance path is the ceremony, and it is one command: decree the
+    recovered head. That is the lift rule, and it is why this refusal names it
+    rather than leaving an operator to guess at a way forward.
     """
 
 
@@ -561,12 +583,16 @@ def trust_reset(
     refusal-side failure, and the reason the read-time half is the load-bearing
     one.
 
-    **What a reset does and does not fence out**, stated because it is
-    underdetermined rather than decided: a reset decrees trust in *N*; verified
-    descendants of *N*, including re-presentations of abandoned history, are
-    accepted; fencing out authentic history is not expressible unsigned. The
-    ceremony's semantics here are Kyle's call at the slice-6 gate
-    (``design:arrival-reset-descendant-acceptance``).
+    **What a reset fences out.** A reset decrees trust in *N*, and verified
+    descendants of *N* that pass through history the decree abandoned are
+    REFUSED (:class:`AbandonedHistoryFenced`) until a new decree reaches them.
+    Genuine recovery of that history therefore costs exactly one ceremony:
+    decree the recovered head, and the fence lifts.
+
+    This corrects what this docstring said before amendment #6, which was that
+    such descendants were accepted. They were, and that was the silent loop —
+    an accepted re-presentation journaled itself back into the current epoch and
+    every later open read UNCHANGED (``finding:s3-reset-descendant-silent-loop``).
 
     The CLI surface for the ceremony is slice 5's cut. This is the producer, so
     slices 4 and 6 have something to call.
@@ -955,7 +981,7 @@ class AttestedLedger:
             )
             earned: _Earned | None = None
         else:
-            outcome, earned = self._judge(known, presented)
+            outcome, earned = self._judge(known, presented, read)
             comparison = Compared(
                 outcome=outcome, presented=presented, known=known
             )
@@ -1100,7 +1126,10 @@ class AttestedLedger:
         )
 
     def _judge(
-        self, known: HeadAttestation | None, presented: Head
+        self,
+        known: HeadAttestation | None,
+        presented: Head,
+        read: JournalRead,
     ) -> tuple[Outcome, _Earned | None]:
         """Classify against a head the journal established in full.
 
@@ -1149,6 +1178,11 @@ class AttestedLedger:
                 head=presented, kind=Kind.BOOTSTRAP, level=Level.FIRST_CONTACT
             )
         if outcome is Outcome.ADVANCED:
+            # The fence sits HERE: after the outcome, before anything is
+            # earned. `compare` stays the pure seven-outcome machine — the
+            # question the fence asks needs journal state its signature
+            # rightly does not carry.
+            self._refuse_abandoned_history(read, presented)
             # RETURNED, never written here. `_projection` still runs after this
             # and can refuse, and an advance written from inside the
             # classification would be a memory recording a head the very same
@@ -1160,6 +1194,88 @@ class AttestedLedger:
         # make every open a writer, and the byte-compare that proves it is the
         # rule keeping reads off that path.
         return outcome, None
+
+    def _refuse_abandoned_history(
+        self, read: JournalRead, presented: Head
+    ) -> None:
+        """Refuse an advance that descends through decreed-away history.
+
+        **Identity-keyed, never ordinal spans.** The anchor set is
+        ``(ordinal, record_hash)`` taken from the entries the journal holds in
+        abandoned epochs — the same discriminator ``SAME_HEIGHT_FORK`` relies
+        on. A span would be either vacuous or catastrophic: an operator who
+        resets to 5 and lets the store re-advance mints a NEW 6, 7 and 8 inside
+        the abandoned span, and fencing by ordinal would refuse every one of
+        them forever. Only the exact records that were abandoned are fenced.
+
+        Those entries are still readable in the file — epoch scoping excludes
+        them from *K*, never from the read — which is what makes them available
+        to be the anchor set at all.
+
+        **Reach: every coordinate the descent passes, not just its head.** An
+        abandoned branch that grew offline presents *N+3* while the journal's
+        abandoned entry sits at *N+1*, and head-only checking waves it through.
+        Asking ``head_at`` at each fenced anchor's own coordinate is the
+        complete form of that check — an anchor can only be touched at its own
+        ordinal — and it is spelled in contract ops, so the fence stays
+        backend-neutral like the rest of the seam.
+
+        **The lift rule, and the one place it is narrower than its wording.**
+        A later decree supersedes an earlier abandonment, so an abandoned entry
+        is fenced only while no reset has decreed at or above it — otherwise
+        recovering the authentic history would be impossible and the ceremony
+        would re-brick the store, which is L-3's shape exactly. The narrowing:
+        only the CURRENT boundary decree lifts, not any later reset. Read
+        literally, an intermediate decree would lift an entry that a subsequent
+        decree then abandoned again — reset to 10, then reset back to 5, and
+        the 10 is un-fenced by the decree the second ceremony overrode. The
+        boundary is the one decree nothing has superseded, so it is the one
+        that speaks. Fences more, never less.
+
+        Cost: one verified walk per fenced anchor ordinal, on the ADVANCED
+        branch only — which is rare by construction, because a writer journals
+        its own commit.
+        """
+        abandoned = read.entries[: len(read.entries) - len(read.epoch)]
+        if not abandoned:
+            return
+        decree = read.epoch[0] if read.epoch else None
+        if decree is None or decree.kind is not Kind.TRUST_RESET:
+            # No boundary decree means nothing was decreed away, so there is
+            # nothing to fence — abandoned entries only exist behind a reset.
+            return
+
+        fenced: dict[int, set[str]] = {}
+        for entry in abandoned:
+            head = entry.head
+            if head.lineage != presented.lineage:
+                continue
+            if head.ordinal <= decree.head.ordinal:
+                continue  # lifted: the standing decree reaches at or above it
+            if head.ordinal > presented.ordinal:
+                continue  # cannot be on this history's path at all
+            fenced.setdefault(head.ordinal, set()).add(head.record_hash)
+
+        for ordinal in sorted(fenced):
+            try:
+                vouched = self._ledger.head_at(
+                    Watermark(lineage=presented.lineage, ordinal=ordinal)
+                )
+            except Exception:  # noqa: BLE001 — no answer is no evidence of a touch
+                continue
+            if vouched.record_hash in fenced[ordinal]:
+                raise AbandonedHistoryFenced(
+                    f"{self._canonical} presents {_head_text(presented)}, whose "
+                    f"verified history holds {vouched.record_hash} at ordinal "
+                    f"{ordinal} — a record this machine's operator decreed away "
+                    f"when they reset trust to ordinal {decree.head.ordinal}. "
+                    "The chain is intact; that is not the question. Accepting it "
+                    "would silently reverse the decree, and journaling the "
+                    "advance would erase the evidence that it had been reversed. "
+                    "If this history is the one to keep, run the trust-reset "
+                    "ceremony to decree the recovered head — that is the "
+                    "licensed way, and it records the gap"
+                )
 
     def _descent(
         self, known: Head, presented: Head

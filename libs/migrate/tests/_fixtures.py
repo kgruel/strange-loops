@@ -653,3 +653,33 @@ def build_codec_invalid_sqlite(path: Path) -> Path:
         conn.close()
     return path
 
+
+def build_unsafe_integer_ts_sqlite(path: Path) -> Path:
+    """Create a legacy SQLite database containing a fact row whose INTEGER ts holds 2**60."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists():
+        path.unlink()
+    conn = sqlite3.connect(path)
+    try:
+        conn.execute(
+            """
+            CREATE TABLE facts (
+                id TEXT PRIMARY KEY,
+                kind TEXT NOT NULL,
+                ts INTEGER NOT NULL,
+                observer TEXT NOT NULL,
+                origin TEXT NOT NULL,
+                payload TEXT NOT NULL,
+                signature TEXT
+            )
+            """
+        )
+        conn.execute(
+            "INSERT INTO facts VALUES ('01ARZ3NDEKTSV4RRFFQ69G5FA1', 'concept', ?, 'alice', 'origin', '{}', NULL)",
+            (2**60,),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return path
+

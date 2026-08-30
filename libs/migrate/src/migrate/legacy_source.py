@@ -24,7 +24,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import math
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -407,19 +406,25 @@ class LegacySource:
                     fact_id, kind, ts, observer, origin, payload = raw[1:7]
                     sig = raw[7] if sig_col else None
 
-                    fault: str | None = None
-                    if not isinstance(fact_id, str) or not fact_id:
-                        fault = f"fact field 'id' must be a non-empty string, got {type(fact_id).__name__}"
-                    elif not isinstance(kind, str) or not kind:
-                        fault = f"fact field 'kind' must be a non-empty string, got {type(kind).__name__}"
-                    elif isinstance(ts, bool) or not isinstance(ts, (int, float)) or not math.isfinite(ts):
-                        fault = f"fact field 'ts' must be a finite number, got {ts!r}"
-                    elif not isinstance(origin, str):
-                        fault = f"fact field 'origin' must be a string, got {type(origin).__name__}"
-                    elif not isinstance(payload, str):
-                        fault = f"fact field 'payload' must be a string, got {type(payload).__name__}"
-                    elif sig is not None and not isinstance(sig, str):
-                        fault = f"fact field 'signature' must be a string, got {type(sig).__name__}"
+                    obj = {
+                        "id": fact_id,
+                        "kind": kind,
+                        "ts": ts,
+                        "origin": origin,
+                        "payload": payload,
+                    }
+                    if sig is not None:
+                        obj["signature"] = sig
+
+                    fault = row_object_fault(
+                        obj,
+                        t="fact",
+                        frame="row",
+                        fields=FACT_FIELDS,
+                        allowed=_SPEC["fact"].allowed,
+                        nullable=FACT_NULLABLE,
+                        skip_fields=frozenset({"observer"}),
+                    )
 
                     if fault is not None:
                         codec_invalid_lines.append((rowid, fault))
@@ -458,33 +463,16 @@ class LegacySource:
                     for raw in conn.execute(query_ticks):
                         rowid = raw[0]
                         t_dict = dict(zip(cols, raw[1:], strict=True))
+                        obj = {k: v for k, v in t_dict.items() if k != "signature" or v is not None}
 
-                        fault = None
-                        t_id = t_dict.get("id")
-                        t_name = t_dict.get("name")
-                        t_ts = t_dict.get("ts")
-                        t_since = t_dict.get("since")
-                        t_origin = t_dict.get("origin")
-                        t_payload = t_dict.get("payload")
-
-                        if not isinstance(t_id, str) or not t_id:
-                            fault = f"tick field 'id' must be a non-empty string, got {type(t_id).__name__}"
-                        elif not isinstance(t_name, str) or not t_name:
-                            fault = f"tick field 'name' must be a non-empty string, got {type(t_name).__name__}"
-                        elif isinstance(t_ts, bool) or not isinstance(t_ts, (int, float)) or not math.isfinite(t_ts):
-                            fault = f"tick field 'ts' must be a finite number, got {t_ts!r}"
-                        elif t_since is not None and (isinstance(t_since, bool) or not isinstance(t_since, (int, float)) or not math.isfinite(t_since)):
-                            fault = f"tick field 'since' must be a finite number, got {t_since!r}"
-                        elif not isinstance(t_origin, str):
-                            fault = f"tick field 'origin' must be a string, got {type(t_origin).__name__}"
-                        elif not isinstance(t_payload, str):
-                            fault = f"tick field 'payload' must be a string, got {type(t_payload).__name__}"
-                        else:
-                            for cf in ("prev_hash", "window_start", "fact_cursor", "window_hash", "signature"):
-                                cv = t_dict.get(cf)
-                                if cv is not None and not isinstance(cv, str):
-                                    fault = f"tick field {cf!r} must be a string, got {type(cv).__name__}"
-                                    break
+                        fault = row_object_fault(
+                            obj,
+                            t="tick",
+                            frame="row",
+                            fields=TICK_FIELDS,
+                            allowed=_SPEC["tick"].allowed,
+                            nullable=TICK_NULLABLE,
+                        )
 
                         if fault is not None:
                             codec_invalid_lines.append((rowid, fault))

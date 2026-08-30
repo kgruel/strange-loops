@@ -21,6 +21,7 @@ _LIB_LAYER: dict[str, str] = {
     "lang": "record",
     "engine": "record",
     "store": "record",
+    "migrate": "record",
     "sign": "surfacing",
     "custody": "surfacing",
     "sdk": "surfacing",

@@ -60,9 +60,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
 
-from engine.arrival import KEY_INTRODUCTION_KIND, Signer, content_commitment
+from engine.arrival import (
+    KEY_INTRODUCTION_KIND,
+    Signer,
+    _key_shape_fault,
+    content_commitment,
+)
 from engine.arrival_body import (
     body_of_batch,
     body_of_fact_row,
@@ -72,31 +76,21 @@ from engine.arrival_contract import RecordDraft
 from lang import ObserverDecl, VertexFile, parse_vertex, parse_vertex_file
 
 from .legacy_ids import FactRow, Transform, identity
-from .legacy_jsonl import (
-    _BATCH,
-    _BATCH_KEYS,
-    _MIN_BATCH_ROWS,
-    _ROWS,
-    _SPEC,
-    FACT_FIELDS,
-    FACT_NULLABLE,
-    TICK_FIELDS,
-    TICK_NULLABLE,
-    JsonlCodecError,
-    load_line,
-    row_object_fault,
+from .legacy_source import BatchUnit, FlatFactUnit, LegacySource, TickUnit
+from .refusals import (
+    BatchRegroupRefused,
+    DeclarationKeyRefused,
+    LegacySourceRefused,
+    MigrationRefused,
+    MissingCustodianKeyRefused,
 )
-from .legacy_sqlite import (
-    open_legacy_sqlite,
-    read_facts,
-    read_ticks,
-)
-from .refusals import LegacySourceRefused
 
 __all__ = [
     "GenesisRequirements",
+    "DroppedUnit",
     "TransformExceptions",
     "TransformResult",
+    "coerce_vertex",
     "transform",
 ]
 
@@ -110,16 +104,27 @@ class GenesisRequirements:
 
 
 @dataclass(frozen=True)
+class DroppedUnit:
+    """A legacy record unit dropped entirely by a transform rule (§I.1)."""
+
+    coordinate: int
+    kind: str
+    rule: str
+
+
+@dataclass(frozen=True)
 class TransformExceptions:
     """Exception edges encountered during transformation (§G.3).
 
     Location claims about what the declaration and legacy source cover:
     - keyless_declared_observers: declared in .vertex with key=None (skipped from key introductions).
     - undeclared_row_observers: observed in migrated rows but absent from .vertex observers.
+    - dropped_units: units dropped entirely by a transform rule.
     """
 
     keyless_declared_observers: tuple[str, ...]
     undeclared_row_observers: tuple[str, ...]
+    dropped_units: tuple[DroppedUnit, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -131,12 +136,26 @@ class TransformResult:
     genesis: GenesisRequirements
 
 
+def coerce_vertex(vertex: VertexFile | Path | str) -> VertexFile:
+    """Explicit helper to coerce Path, str, or VertexFile into a VertexFile at the call boundary."""
+    if isinstance(vertex, VertexFile):
+        return vertex
+    if isinstance(vertex, Path):
+        return parse_vertex_file(vertex)
+    if isinstance(vertex, str):
+        p = Path(vertex)
+        if p.exists() and p.is_file():
+            return parse_vertex_file(p)
+        return parse_vertex(vertex)
+    raise TypeError(f"vertex must be VertexFile, Path, or str, got {type(vertex).__name__}")
+
+
 def transform(
     source: Path | str,
-    vertex: VertexFile | Path | str,
+    vertex: VertexFile,
     rule: Transform | None = None,
     *,
-    signer: Signer | None = None,
+    signer: Signer,
     custodian: str | None = None,
     custodian_key: str | None = None,
 ) -> TransformResult:
@@ -144,66 +163,70 @@ def transform(
 
     Args:
         source: Path to legacy .jsonl or .sqlite store.
-        vertex: Parsed VertexFile, Path to .vertex file, or .vertex KDL text.
+        vertex: Parsed VertexFile declaration. Use :func:`coerce_vertex` to parse from path/str.
         rule: Deterministic per-fact transform rule (defaults to identity()).
-        signer: Injected Signer for custodian signatures on key introductions.
+        signer: Required injected Signer for custodian signatures on key introductions.
         custodian: Custodian observer name override (defaults to vertex.name).
         custodian_key: Custodian public key override (defaults to declared key for custodian).
 
     Returns:
         TransformResult containing:
         - drafts: tuple of RecordDraft objects (key introductions followed by migrated records).
-        - exceptions: TransformExceptions tracking §G.3 edges (keyless declared, undeclared in rows).
+        - exceptions: TransformExceptions tracking §G.3 edges and dropped units.
         - genesis: GenesisRequirements naming the custodian identity and founding public key.
 
     Raises:
+        TypeError: If vertex is not a VertexFile.
         FileNotFoundError: If source does not exist.
         LegacySourceRefused: If source contains codec-invalid lines, mixed-observer batches,
-            or absent-observer batches.
-        ValueError: If custodian public key cannot be resolved from declaration.
+            or absent/empty-observer rows.
+        MissingCustodianKeyRefused: If custodian public key cannot be resolved from declaration.
+        DeclarationKeyRefused: If any declared observer key has an invalid shape.
+        BatchRegroupRefused: If a transform rule drops some but not all rows of a batch group.
     """
-    source_path = Path(source).resolve()
-    if not source_path.exists():
-        raise FileNotFoundError(f"Legacy source not found: {source_path}")
+    if not isinstance(vertex, VertexFile):
+        raise TypeError(
+            f"vertex must be VertexFile, got {type(vertex).__name__}. "
+            "Use coerce_vertex() to parse from a Path or str at the call boundary."
+        )
 
-    # 1. Resolve vertex declaration
-    if isinstance(vertex, VertexFile):
-        vf = vertex
-    elif isinstance(vertex, Path):
-        vf = parse_vertex_file(vertex)
-    elif isinstance(vertex, str):
-        p = Path(vertex)
-        if p.exists() and p.is_file():
-            vf = parse_vertex_file(p)
-        else:
-            vf = parse_vertex(vertex)
-    else:
-        raise TypeError(f"vertex must be VertexFile, Path, or str, got {type(vertex).__name__}")
-
-    # 2. Resolve transform rule
     t_rule = rule if rule is not None else identity()
 
-    # 3. Resolve custodian and founding key
-    cust_name = custodian or vf.name
+    cust_name = custodian or vertex.name
     decl_map: dict[str, ObserverDecl] = {
-        o.name: o for o in (vf.observers or ())
+        o.name: o for o in (vertex.observers or ())
     }
     cust_decl = decl_map.get(cust_name)
     cust_k = custodian_key or (cust_decl.key if cust_decl else None)
     if cust_k is None:
-        raise ValueError(
+        raise MissingCustodianKeyRefused(
             f"Custodian {cust_name!r} has no public key declared in .vertex observers block"
         )
+
+    # Validate declared key shapes (F5)
+    cust_key_fault = _key_shape_fault(cust_k)
+    if cust_key_fault is not None:
+        raise DeclarationKeyRefused(
+            f"Migration refused: declaration carries a key of the wrong shape for custodian {cust_name!r}: {cust_key_fault}"
+        )
+
+    for decl in (vertex.observers or ()):
+        if decl.key is not None:
+            fault = _key_shape_fault(decl.key)
+            if fault is not None:
+                raise DeclarationKeyRefused(
+                    f"Migration refused: declaration carries a key of the wrong shape for {decl.name!r}: {fault}"
+                )
+
     genesis_req = GenesisRequirements(custodian=cust_name, key=cust_k)
 
-    # 4. Build key introduction drafts and track keyless declared observers (§G.3 edge 1)
     drafts: list[RecordDraft] = []
     keyless_declared: list[str] = []
     declared_names = set(decl_map.keys())
 
-    for decl in (vf.observers or ()):
+    # Build key introduction drafts
+    for decl in (vertex.observers or ()):
         if decl.name == cust_name:
-            # Genesis at ordinal 0 establishes custodian's founding key
             continue
         if not decl.key:
             keyless_declared.append(decl.name)
@@ -216,7 +239,7 @@ def transform(
             "",
             body,
         )
-        sig = signer(cust_name, commitment) if signer is not None else None
+        sig = signer(cust_name, commitment)
         drafts.append(
             RecordDraft(
                 kind=KEY_INTRODUCTION_KIND,
@@ -228,334 +251,99 @@ def transform(
             )
         )
 
-    # 5. Transform source rows in ruled source order
+    # Read legacy source via shared validated stream layer
+    src = LegacySource.read(source)
+
     seen_observers: set[str] = set()
+    dropped_units: list[DroppedUnit] = []
 
-    with source_path.open("rb") as f_peek:
-        header = f_peek.read(16)
-    is_sqlite = header.startswith(b"SQLite format 3\x00") or source_path.suffix in (".sqlite", ".db")
-
-    if is_sqlite:
-        conn = open_legacy_sqlite(source_path)
-        try:
-            # Facts in rowid order
-            for fr in read_facts(conn):
-                if fr.observer:
-                    seen_observers.add(fr.observer)
-                mapped = t_rule.map_fact(fr)
-                if mapped is None:
-                    continue
-                row_tuple = (
-                    mapped.id,
-                    mapped.kind,
-                    mapped.ts,
-                    mapped.observer,
-                    mapped.origin,
-                    mapped.payload,
-                    mapped.signature,
+    for unit in src.units:
+        if isinstance(unit, FlatFactUnit):
+            seen_observers.add(unit.row.observer)
+            mapped = t_rule.map_fact(unit.row)
+            if mapped is None:
+                dropped_units.append(
+                    DroppedUnit(coordinate=unit.coordinate, kind="fact", rule=t_rule.rule)
                 )
-                body = body_of_fact_row(row_tuple)
-                drafts.append(
-                    RecordDraft(
-                        kind="fact",
-                        authored_at=mapped.ts,
-                        observer=mapped.observer,
-                        origin=mapped.origin,
-                        body=body,
-                        signature=None,
-                    )
+                continue
+            row_tuple = (
+                mapped.id,
+                mapped.kind,
+                mapped.ts,
+                mapped.observer,
+                mapped.origin,
+                mapped.payload,
+                mapped.signature,
+            )
+            body = body_of_fact_row(row_tuple)
+            drafts.append(
+                RecordDraft(
+                    kind="fact",
+                    authored_at=mapped.ts,
+                    observer=mapped.observer,
+                    origin=mapped.origin,
+                    body=body,
+                    signature=None,
                 )
-
-            # Ticks in rowid order (M-4 native tick records)
-            for t_dict in read_ticks(conn):
-                tick_tuple = (
-                    t_dict["id"],
-                    t_dict["name"],
-                    t_dict["ts"],
-                    t_dict.get("since"),
-                    t_dict["origin"],
-                    t_dict["payload"],
-                    t_dict.get("prev_hash"),
-                    t_dict.get("window_start"),
-                    t_dict.get("fact_cursor"),
-                    t_dict.get("window_hash"),
-                    t_dict.get("signature"),
-                )
-                body = body_of_tick_row(tick_tuple)
-                drafts.append(
-                    RecordDraft(
-                        kind="tick",
-                        authored_at=t_dict["ts"],
-                        observer=cust_name,
-                        origin=t_dict["origin"],
-                        body=body,
-                        signature=None,
-                    )
-                )
-        finally:
-            conn.close()
-
-    else:
-        # JSONL line order
-        codec_invalid_lines: list[tuple[int, str]] = []
-        mixed_observer_lines: list[tuple[int, tuple[str, ...], int]] = []
-        absent_observer_lines: list[tuple[int, int, tuple[str, ...]]] = []
-
-        with source_path.open("r", encoding="utf-8") as f:
-            for lineno, line in enumerate(f, start=1):
-                if not line.strip():
-                    continue
-                try:
-                    obj = load_line(line)
-                except JsonlCodecError as exc:
-                    codec_invalid_lines.append((lineno, str(exc)))
-                    continue
-
-                t = obj.get("t")
-                if t == "fact":
-                    fault = row_object_fault(
-                        obj,
-                        t="fact",
-                        frame="line",
-                        fields=FACT_FIELDS,
-                        allowed=_SPEC["fact"].allowed,
-                        nullable=FACT_NULLABLE,
-                    )
-                    if fault is not None:
-                        codec_invalid_lines.append((lineno, fault))
-                        continue
-                    obs = obj["observer"]
-                    if obs:
-                        seen_observers.add(obs)
-                    fr = FactRow(
-                        id=obj["id"],
-                        kind=obj["kind"],
-                        ts=obj["ts"],
-                        observer=obs,
-                        origin=obj["origin"],
-                        payload=obj["payload"],
-                        signature=obj.get("signature"),
-                    )
-                    mapped = t_rule.map_fact(fr)
-                    if mapped is None:
-                        continue
-                    row_tuple = (
-                        mapped.id,
-                        mapped.kind,
-                        mapped.ts,
-                        mapped.observer,
-                        mapped.origin,
-                        mapped.payload,
-                        mapped.signature,
-                    )
-                    body = body_of_fact_row(row_tuple)
-                    drafts.append(
-                        RecordDraft(
-                            kind="fact",
-                            authored_at=mapped.ts,
-                            observer=mapped.observer,
-                            origin=mapped.origin,
-                            body=body,
-                            signature=None,
-                        )
-                    )
-
-                elif t == "tick":
-                    fault = row_object_fault(
-                        obj,
-                        t="tick",
-                        frame="line",
-                        fields=TICK_FIELDS,
-                        allowed=_SPEC["tick"].allowed,
-                        nullable=TICK_NULLABLE,
-                    )
-                    if fault is not None:
-                        codec_invalid_lines.append((lineno, fault))
-                        continue
-                    tick_tuple = (
-                        obj["id"],
-                        obj["name"],
-                        obj["ts"],
-                        obj.get("since"),
-                        obj["origin"],
-                        obj["payload"],
-                        obj.get("prev_hash"),
-                        obj.get("window_start"),
-                        obj.get("fact_cursor"),
-                        obj.get("window_hash"),
-                        obj.get("signature"),
-                    )
-                    body = body_of_tick_row(tick_tuple)
-                    drafts.append(
-                        RecordDraft(
-                            kind="tick",
-                            authored_at=obj["ts"],
-                            observer=cust_name,
-                            origin=obj["origin"],
-                            body=body,
-                            signature=None,
-                        )
-                    )
-
-                elif t == _BATCH:
-                    # 1. Envelope validation
-                    unknown_env = sorted(set(obj) - _BATCH_KEYS)
-                    if unknown_env:
-                        codec_invalid_lines.append((lineno, f"unknown field(s) in batch line: {unknown_env}"))
-                        continue
-                    rows = obj.get(_ROWS)
-                    if not isinstance(rows, list):
-                        codec_invalid_lines.append(
-                            (
-                                lineno,
-                                f"batch field 'rows' must be an array of fact records, got {type(rows).__name__}",
-                            )
-                        )
-                        continue
-                    if len(rows) < _MIN_BATCH_ROWS:
-                        codec_invalid_lines.append(
-                            (
-                                lineno,
-                                f"batch must carry at least {_MIN_BATCH_ROWS} rows, got {len(rows)} — "
-                                "a 1-row batch is a second spelling of a plain fact line, and an empty one encodes nothing",
-                            )
-                        )
-                        continue
-
-                    # 2. Rows validation
-                    batch_fault: str | None = None
-                    seen_ids: set[str] = set()
-                    absent_count = 0
-                    present_observers: set[str] = set()
-                    for i, elem in enumerate(rows):
-                        if not isinstance(elem, dict):
-                            batch_fault = f"batch row {i} must be a JSON object, got {type(elem).__name__}"
-                            break
-                        elem_t = elem.get("t")
-                        if elem_t == _BATCH:
-                            batch_fault = f"batch row {i} is a nested batch — batches do not nest"
-                            break
-                        if elem_t == "tick":
-                            batch_fault = (
-                                f"batch row {i} is a tick record — ticks are minted one-at-a-time and chain-linked, never batched"
-                            )
-                            break
-                        if elem_t != "fact":
-                            batch_fault = f"batch row {i} has unknown record discriminator t={elem_t!r}"
-                            break
-                        fault = row_object_fault(
-                            elem,
-                            t="fact",
-                            frame="line",
-                            fields=FACT_FIELDS,
-                            allowed=_SPEC["fact"].allowed,
-                            nullable=FACT_NULLABLE,
-                            skip_fields=frozenset({"observer"}),
-                        )
-                        if fault is not None:
-                            batch_fault = fault
-                            break
-                        if "observer" not in elem or elem["observer"] is None:
-                            absent_count += 1
-                        else:
-                            obs_val = elem["observer"]
-                            if not isinstance(obs_val, str):
-                                batch_fault = f"fact field 'observer' must be a string, got {type(obs_val).__name__}"
-                                break
-                            present_observers.add(obs_val)
-
-                        row_id = elem["id"]
-                        if row_id in seen_ids:
-                            batch_fault = f"duplicate id {row_id!r} within one batch"
-                            break
-                        seen_ids.add(row_id)
-
-                    if batch_fault is not None:
-                        codec_invalid_lines.append((lineno, batch_fault))
-                        continue
-
-                    # 3. Observer conditions
-                    if len(present_observers) > 1:
-                        mixed_observer_lines.append(
-                            (lineno, tuple(sorted(present_observers)), absent_count)
-                        )
-                        continue
-                    if absent_count > 0:
-                        absent_observer_lines.append(
-                            (lineno, absent_count, tuple(sorted(present_observers)))
-                        )
-                        continue
-
-                    # 4. Valid single-observer batch
-                    batch_obs = next(iter(present_observers))
-                    seen_observers.add(batch_obs)
-
-                    mapped_rows: list[FactRow] = []
-                    for elem in rows:
-                        fr = FactRow(
-                            id=elem["id"],
-                            kind=elem["kind"],
-                            ts=elem["ts"],
-                            observer=elem["observer"],
-                            origin=elem["origin"],
-                            payload=elem["payload"],
-                            signature=elem.get("signature"),
-                        )
-                        mf = t_rule.map_fact(fr)
-                        if mf is not None:
-                            mapped_rows.append(mf)
-
-                    if not mapped_rows:
-                        continue
-                    if len(mapped_rows) == 1:
-                        r = mapped_rows[0]
-                        row_tuple = (r.id, r.kind, r.ts, r.observer, r.origin, r.payload, r.signature)
-                        body = body_of_fact_row(row_tuple)
-                        drafts.append(
-                            RecordDraft(
-                                kind="fact",
-                                authored_at=r.ts,
-                                observer=r.observer,
-                                origin=r.origin,
-                                body=body,
-                                signature=None,
-                            )
-                        )
-                    else:
-                        first = mapped_rows[0]
-                        row_tuples = [
-                            (r.id, r.kind, r.ts, r.observer, r.origin, r.payload, r.signature)
-                            for r in mapped_rows
-                        ]
-                        body = body_of_batch(row_tuples)
-                        drafts.append(
-                            RecordDraft(
-                                kind="batch",
-                                authored_at=first.ts,
-                                observer=first.observer,
-                                origin=first.origin,
-                                body=body,
-                                signature=None,
-                            )
-                        )
-
-                else:
-                    codec_invalid_lines.append((lineno, f"unknown record discriminator t={t!r}"))
-                    continue
-
-        if codec_invalid_lines or mixed_observer_lines or absent_observer_lines:
-            raise LegacySourceRefused(
-                codec_invalid_lines=codec_invalid_lines,
-                mixed_observer_lines=mixed_observer_lines,
-                absent_observer_lines=absent_observer_lines,
-                source=str(source_path),
             )
 
-    # 6. Build exception report (§G.3 edges)
+        elif isinstance(unit, BatchUnit):
+            seen_observers.add(unit.observer)
+            mapped_rows: list[FactRow] = []
+            for r in unit.rows:
+                mf = t_rule.map_fact(r)
+                if mf is not None:
+                    mapped_rows.append(mf)
+
+            if not mapped_rows:
+                dropped_units.append(
+                    DroppedUnit(coordinate=unit.coordinate, kind="batch", rule=t_rule.rule)
+                )
+                continue
+
+            if len(mapped_rows) != len(unit.rows):
+                raise BatchRegroupRefused(
+                    f"Transform rule {t_rule.rule!r} dropped {len(unit.rows) - len(mapped_rows)} "
+                    f"of {len(unit.rows)} rows in batch at line {unit.coordinate}. "
+                    "Dropping partial batch rows is refused: the sidecar cannot re-decide a ceremony's "
+                    "composition (refuse-not-split)."
+                )
+
+            first = mapped_rows[0]
+            row_tuples = [
+                (r.id, r.kind, r.ts, r.observer, r.origin, r.payload, r.signature)
+                for r in mapped_rows
+            ]
+            body = body_of_batch(row_tuples)
+            drafts.append(
+                RecordDraft(
+                    kind="batch",
+                    authored_at=first.ts,
+                    observer=first.observer,
+                    origin=first.origin,
+                    body=body,
+                    signature=None,
+                )
+            )
+
+        elif isinstance(unit, TickUnit):
+            body = body_of_tick_row(unit.tuple_form)
+            drafts.append(
+                RecordDraft(
+                    kind="tick",
+                    authored_at=unit.ts,
+                    observer=cust_name,
+                    origin=unit.origin,
+                    body=body,
+                    signature=None,
+                )
+            )
+
     undeclared_observers = tuple(sorted(seen_observers - declared_names))
     exceptions = TransformExceptions(
         keyless_declared_observers=tuple(keyless_declared),
         undeclared_row_observers=undeclared_observers,
+        dropped_units=tuple(dropped_units),
     )
 
     return TransformResult(

@@ -317,4 +317,22 @@ def test_sqlite_seam_defense_refuses_unsafe_integer_ts(tmp_path: Path) -> None:
     assert "outside the JCS safe-integer domain" in exc.codec_invalid_lines[0][1]
 
 
+def test_era1_sqlite_ticks_inventory(tmp_path: Path) -> None:
+    """An era-1 SQLite store whose ticks table lacks chain columns and since
+    inventories successfully with the right tick count."""
+    from ._fixtures import build_era1_sqlite
+
+    sqlite_file = build_era1_sqlite(tmp_path / "era1.sqlite")
+    inv = inventory(sqlite_file)
+
+    assert inv.source_format == "sqlite-canonical"
+    assert inv.total_rows == 3  # 1 fact + 2 ticks
+    assert inv.tick_count == 2
+    assert inv.per_kind_counts == {"concept": 1}
+    assert inv.observer_census == {"alice": 1}
+    assert inv.batch_line_count is None
+    assert inv.total_lines is None
+
+
+
 

@@ -16,12 +16,20 @@ from engine.arrival import (
 from engine.arrival_contract import RecordDraft
 from lang import ObserverDecl, VertexFile, parse_vertex
 
-from migrate.legacy_ids import identity, ulid_migration
-from migrate.refusals import LegacySourceRefused, MigrationRefused
+from migrate.legacy_ids import FactRow, Transform, identity, ulid_migration
+from migrate.refusals import (
+    BatchRegroupRefused,
+    DeclarationKeyRefused,
+    LegacySourceRefused,
+    MigrationRefused,
+    MissingCustodianKeyRefused,
+)
 from migrate.transform import (
+    DroppedUnit,
     GenesisRequirements,
     TransformExceptions,
     TransformResult,
+    coerce_vertex,
     transform,
 )
 
@@ -29,6 +37,8 @@ from ._fixtures import (
     ALL_FACT_ROWS,
     ALL_TICK_ROWS,
     BATCH_LINE_ALICE,
+    BATCH_ROW_1,
+    BATCH_ROW_2,
     FACT_CANONICAL_ULID_SIGNED,
     FACT_CANONICAL_ULID_UNSIGNED,
     FACT_UUID4_SIGNED,
@@ -36,7 +46,9 @@ from ._fixtures import (
     TICK_1,
     TICK_2,
     build_absent_observer_jsonl,
+    build_codec_invalid_sqlite,
     build_combined_defects_jsonl,
+    build_empty_observer_sqlite,
     build_flat_equivalent_jsonl,
     build_mixed_observer_jsonl,
     build_synthetic_jsonl,
@@ -134,6 +146,14 @@ def test_signature_byte_preservation_and_honest_absence(tmp_path: Path, kyle, al
     assert canonical_signed.body["signature"] == FACT_CANONICAL_ULID_SIGNED["signature"]
     assert canonical_signed.body["payload"] == FACT_CANONICAL_ULID_SIGNED["payload"]
     assert canonical_signed.signature is None  # outer-unsigned
+
+    # Check signed batch row carries exact signature bytes (F7b)
+    if fmt == "jsonl":
+        batch_draft = next(d for d in migrated_drafts if d.kind == "batch")
+        assert batch_draft.body["rows"][0]["id"] == BATCH_ROW_1["id"]
+        assert "signature" not in batch_draft.body["rows"][0]
+        assert batch_draft.body["rows"][1]["id"] == BATCH_ROW_2["id"]
+        assert batch_draft.body["rows"][1]["signature"] == "sig-alice-batch-2"
 
     # Check unsigned facts honestly omit signature
     uuid4_unsigned = next(d for d in migrated_drafts if d.body.get("id") == FACT_UUID4_UNSIGNED["id"])
@@ -423,3 +443,114 @@ def test_seam_defense_refuses_codec_invalid_batch(tmp_path: Path, kyle) -> None:
     exc = exc_info.value
     assert isinstance(exc, MigrationRefused)
     assert len(exc.codec_invalid_lines) == 1
+
+
+def test_intra_batch_row_order_preserved(tmp_path: Path, kyle, alice) -> None:
+    """F7a: A batch group's emitted draft preserves exact intra-batch source row order."""
+    source_path = build_synthetic_jsonl(tmp_path / "batch.jsonl")
+    vf = _make_vertex_file("kyle", [("kyle", kyle.public), ("alice", alice.public)])
+    result = transform(source_path, vf, rule=identity(), signer=kyle.signer)
+
+    batch_draft = next(d for d in result.drafts if d.kind == "batch")
+    assert [r["id"] for r in batch_draft.body["rows"]] == [BATCH_ROW_1["id"], BATCH_ROW_2["id"]]
+
+
+def test_partial_batch_drop_refused(tmp_path: Path, kyle, alice) -> None:
+    """F3: A rule that drops some rows of a batch group raises BatchRegroupRefused."""
+    source_path = build_synthetic_jsonl(tmp_path / "batch.jsonl")
+    vf = _make_vertex_file("kyle", [("kyle", kyle.public), ("alice", alice.public)])
+
+    def drop_one(row: FactRow) -> FactRow | None:
+        if row.id == BATCH_ROW_1["id"]:
+            return None
+        return row
+
+    partial_rule = Transform(rule="drop-one", map_fact=drop_one)
+    with pytest.raises(BatchRegroupRefused) as exc_info:
+        transform(source_path, vf, rule=partial_rule, signer=kyle.signer)
+
+    assert "dropped 1 of 2 rows in batch" in str(exc_info.value)
+
+
+def test_full_unit_drop_recorded_in_exception_report(tmp_path: Path, kyle, alice) -> None:
+    """F3: A rule dropping an entire unit records it in TransformExceptions.dropped_units."""
+    source_path = build_synthetic_jsonl(tmp_path / "batch.jsonl")
+    vf = _make_vertex_file("kyle", [("kyle", kyle.public), ("alice", alice.public)])
+
+    def drop_selected(row: FactRow) -> FactRow | None:
+        if row.id in (FACT_UUID4_SIGNED["id"], BATCH_ROW_1["id"], BATCH_ROW_2["id"]):
+            return None
+        return row
+
+    drop_rule = Transform(rule="drop-selected", map_fact=drop_selected)
+    result = transform(source_path, vf, rule=drop_rule, signer=kyle.signer)
+
+    dropped = result.exceptions.dropped_units
+    assert len(dropped) == 2
+    assert dropped[0] == DroppedUnit(coordinate=1, kind="fact", rule="drop-selected")
+    assert dropped[1] == DroppedUnit(coordinate=6, kind="batch", rule="drop-selected")
+
+    emitted_ids = {
+        d.body.get("id")
+        for d in result.drafts
+        if d.kind == "fact"
+    }
+    assert FACT_UUID4_SIGNED["id"] not in emitted_ids
+    assert not any(d.kind == "batch" for d in result.drafts)
+
+
+def test_transform_requires_signer(tmp_path: Path, kyle) -> None:
+    """F4: transform() requires signer parameter; omitting it raises TypeError."""
+    source_path = build_synthetic_jsonl(tmp_path / "test.jsonl")
+    vf = _make_vertex_file("kyle", [("kyle", kyle.public)])
+
+    with pytest.raises(TypeError):
+        transform(source_path, vf)  # type: ignore[call-arg]
+
+
+def test_malformed_declared_key_refused(tmp_path: Path, kyle) -> None:
+    """F5: A malformed declared key shape raises DeclarationKeyRefused at transform setup."""
+    source_path = build_synthetic_jsonl(tmp_path / "test.jsonl")
+    vf = _make_vertex_file("kyle", [("kyle", kyle.public), ("bob", "aW52YWxpZA==")])
+
+    with pytest.raises(DeclarationKeyRefused) as exc_info:
+        transform(source_path, vf, signer=kyle.signer)
+
+    assert "declaration carries a key of the wrong shape for 'bob'" in str(exc_info.value)
+
+
+def test_missing_custodian_key_refused(tmp_path: Path, kyle) -> None:
+    """F6e: Missing custodian key in .vertex raises MissingCustodianKeyRefused."""
+    source_path = build_synthetic_jsonl(tmp_path / "test.jsonl")
+    vf = _make_vertex_file("kyle", [("kyle", None)])
+
+    with pytest.raises(MissingCustodianKeyRefused):
+        transform(source_path, vf, signer=kyle.signer)
+
+
+def test_sqlite_seam_defense_refuses_empty_observer(tmp_path: Path, kyle) -> None:
+    """F1: Handing the transformer a SQLite store with observer='' raises LegacySourceRefused."""
+    source_path = build_empty_observer_sqlite(tmp_path / "empty_obs.sqlite")
+    vf = _make_vertex_file("kyle", [("kyle", kyle.public)])
+
+    with pytest.raises(LegacySourceRefused) as exc_info:
+        transform(source_path, vf, signer=kyle.signer)
+
+    exc = exc_info.value
+    assert isinstance(exc, MigrationRefused)
+    assert len(exc.absent_observer_lines) == 2
+
+
+def test_sqlite_seam_defense_refuses_codec_invalid_ts(tmp_path: Path, kyle) -> None:
+    """F1: Handing the transformer a SQLite store with ts as TEXT raises LegacySourceRefused."""
+    source_path = build_codec_invalid_sqlite(tmp_path / "bad_ts.sqlite")
+    vf = _make_vertex_file("kyle", [("kyle", kyle.public)])
+
+    with pytest.raises(LegacySourceRefused) as exc_info:
+        transform(source_path, vf, signer=kyle.signer)
+
+    exc = exc_info.value
+    assert isinstance(exc, MigrationRefused)
+    assert len(exc.codec_invalid_lines) == 1
+    assert "fact field 'ts' must be a finite number" in exc.codec_invalid_lines[0][1]
+

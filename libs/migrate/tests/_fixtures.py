@@ -71,7 +71,7 @@ BATCH_ROW_1 = {
     "origin": "origin-alice",
     "payload": '{"text":"batch fact 1"}',
 }
-# 7. batch row 2: canonical ULID, claim, alice, unsigned
+# 7. batch row 2: canonical ULID, claim, alice, signed (F7b)
 BATCH_ROW_2 = {
     "t": "fact",
     "id": "01ARZ3NDEKTSV4RRFFQ69G5FB2",
@@ -80,6 +80,7 @@ BATCH_ROW_2 = {
     "observer": "alice",
     "origin": "origin-alice",
     "payload": '{"text":"batch fact 2"}',
+    "signature": "sig-alice-batch-2",
 }
 BATCH_LINE_ALICE = {
     "t": "batch",
@@ -583,3 +584,72 @@ def build_flat_equivalent_jsonl(path: Path) -> Path:
         for obj in lines:
             f.write(json.dumps(obj, separators=(",", ":")) + "\n")
     return path
+
+
+def build_empty_observer_sqlite(path: Path) -> Path:
+    """Create a legacy SQLite database containing rows with observer=''."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists():
+        path.unlink()
+    conn = sqlite3.connect(path)
+    try:
+        conn.execute(
+            """
+            CREATE TABLE facts (
+                id TEXT PRIMARY KEY,
+                kind TEXT NOT NULL,
+                ts REAL NOT NULL,
+                observer TEXT NOT NULL,
+                origin TEXT NOT NULL,
+                payload TEXT NOT NULL,
+                signature TEXT
+            )
+            """
+        )
+        # Row 1: valid fact (alice)
+        conn.execute(
+            "INSERT INTO facts VALUES ('01ARZ3NDEKTSV4RRFFQ69G5FA1', 'concept', 100.0, 'alice', 'origin', '{}', NULL)"
+        )
+        # Row 2: empty observer ''
+        conn.execute(
+            "INSERT INTO facts VALUES ('01ARZ3NDEKTSV4RRFFQ69G5FA2', 'claim', 101.0, '', 'origin', '{}', NULL)"
+        )
+        # Row 3: empty observer ''
+        conn.execute(
+            "INSERT INTO facts VALUES ('01ARZ3NDEKTSV4RRFFQ69G5FA3', 'event', 102.0, '', 'origin', '{}', NULL)"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return path
+
+
+def build_codec_invalid_sqlite(path: Path) -> Path:
+    """Create a legacy SQLite database containing a row with ts as TEXT."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists():
+        path.unlink()
+    conn = sqlite3.connect(path)
+    try:
+        conn.execute(
+            """
+            CREATE TABLE facts (
+                id TEXT PRIMARY KEY,
+                kind TEXT NOT NULL,
+                ts REAL NOT NULL,
+                observer TEXT NOT NULL,
+                origin TEXT NOT NULL,
+                payload TEXT NOT NULL,
+                signature TEXT
+            )
+            """
+        )
+        # Row 1: ts stored as TEXT
+        conn.execute(
+            "INSERT INTO facts VALUES ('01ARZ3NDEKTSV4RRFFQ69G5FA1', 'concept', 'invalid-ts-text', 'alice', 'origin', '{}', NULL)"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return path
+

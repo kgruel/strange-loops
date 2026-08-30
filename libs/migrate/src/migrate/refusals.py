@@ -12,9 +12,14 @@ This hierarchy is strictly distinct from ``ArrivalBodyError`` and
 
 from __future__ import annotations
 
+from typing import Any
+
 __all__ = [
     "MigrationRefused",
     "LegacySourceRefused",
+    "BatchRegroupRefused",
+    "DeclarationKeyRefused",
+    "MissingCustodianKeyRefused",
 ]
 
 
@@ -24,6 +29,7 @@ def _format_refusal_message(
     codec_invalid_lines: tuple[tuple[int, str], ...],
     mixed_observer_lines: tuple[tuple[int, tuple[str, ...], int], ...],
     absent_observer_lines: tuple[tuple[int, int, tuple[str, ...]], ...],
+    absent_observer_spellings: dict[int, dict[str, int]] | None = None,
 ) -> str:
     source_prefix = f"for source {source!r} " if source else ""
     sections: list[str] = []
@@ -51,11 +57,25 @@ def _format_refusal_message(
         )
 
     if absent_observer_lines:
-        enum_absent = "\n".join(
-            f"  line {lineno}: {absent_count} row(s) missing 'observer' field"
-            + (f" (remaining observers: {', '.join(repr(o) for o in observers)})" if observers else "")
-            for lineno, absent_count, observers in absent_observer_lines
-        )
+        formatted_absent: list[str] = []
+        for lineno, absent_count, observers in absent_observer_lines:
+            spelling_map = (absent_observer_spellings or {}).get(lineno, {})
+            empty_cnt = spelling_map.get("empty", 0)
+            missing_cnt = spelling_map.get("missing", 0)
+
+            if empty_cnt > 0 and missing_cnt == 0:
+                desc = f"{absent_count} row(s) with observer='' (empty string)"
+            elif missing_cnt > 0 and empty_cnt == 0:
+                desc = f"{absent_count} row(s) missing 'observer' field"
+            elif empty_cnt > 0 and missing_cnt > 0:
+                desc = f"{absent_count} row(s) with absent/empty observer ({missing_cnt} missing, {empty_cnt} empty '')"
+            else:
+                desc = f"{absent_count} row(s) missing 'observer' field"
+
+            rem = f" (remaining observers: {', '.join(repr(o) for o in observers)})" if observers else ""
+            formatted_absent.append(f"  line {lineno}: {desc}{rem}")
+
+        enum_absent = "\n".join(formatted_absent)
         sections.append(
             "The following source line(s) carry batch rows missing the required 'observer' field:\n"
             f"{enum_absent}"
@@ -92,9 +112,10 @@ class LegacySourceRefused(MigrationRefused):
             | list[tuple[int, tuple[str, ...], int]]
         ) = (),
         absent_observer_lines: (
-            tuple[tuple[int, int, tuple[str, ...]], ...]
-            | list[tuple[int, int, tuple[str, ...]]]
+            tuple[Any, ...]
+            | list[Any]
         ) = (),
+        absent_observer_spellings: dict[int, dict[str, int]] | None = None,
         source: str | None = None,
     ) -> None:
         self.source = source
@@ -105,15 +126,40 @@ class LegacySourceRefused(MigrationRefused):
             (int(lineno), tuple(str(o) for o in observers), int(absent_count))
             for lineno, observers, absent_count in mixed_observer_lines
         )
-        self.absent_observer_lines: tuple[tuple[int, int, tuple[str, ...]], ...] = tuple(
-            (int(lineno), int(absent_count), tuple(str(o) for o in observers))
-            for lineno, absent_count, observers in absent_observer_lines
-        )
+
+        norm_absent: list[tuple[int, int, tuple[str, ...]]] = []
+        spellings = dict(absent_observer_spellings or {})
+        for item in absent_observer_lines:
+            lineno = int(item[0])
+            count = int(item[1])
+            obs = tuple(str(o) for o in item[2]) if len(item) > 2 else ()
+            if len(item) > 3 and isinstance(item[3], dict):
+                spellings[lineno] = item[3]
+            norm_absent.append((lineno, count, obs))
+
+        self.absent_observer_lines: tuple[tuple[int, int, tuple[str, ...]], ...] = tuple(norm_absent)
+        self.absent_observer_spellings: dict[int, dict[str, int]] = spellings
         message = _format_refusal_message(
             source=self.source,
             codec_invalid_lines=self.codec_invalid_lines,
             mixed_observer_lines=self.mixed_observer_lines,
             absent_observer_lines=self.absent_observer_lines,
+            absent_observer_spellings=self.absent_observer_spellings,
         )
         super().__init__(message)
+
+
+class BatchRegroupRefused(MigrationRefused):
+    """Transform rule dropped some but not all rows of a batch group.
+
+    Refused because the sidecar cannot re-decide a ceremony's composition.
+    """
+
+
+class DeclarationKeyRefused(MigrationRefused):
+    """A declared observer key has an invalid key shape."""
+
+
+class MissingCustodianKeyRefused(MigrationRefused):
+    """The custodian observer has no public key declared in .vertex."""
 

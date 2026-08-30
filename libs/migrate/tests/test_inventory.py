@@ -265,3 +265,39 @@ def test_inventory_is_behaviorally_read_only_on_success_and_refusal(tmp_path: Pa
     snap_after_refusal = _snapshot_dir(refusal_dir)
     assert snap_before_refusal == snap_after_refusal
 
+
+def test_sqlite_empty_observer_refuses_and_enumerates_rowids_distinct(tmp_path: Path) -> None:
+    """F2: A SQLite store containing rows with observer='' raises LegacySourceRefused,
+    enumerating offending rowids with the empty-string spelling distinct."""
+    from ._fixtures import build_empty_observer_sqlite
+
+    sqlite_file = build_empty_observer_sqlite(tmp_path / "empty_obs.sqlite")
+
+    with pytest.raises(LegacySourceRefused) as exc_info:
+        inventory(sqlite_file)
+
+    exc = exc_info.value
+    assert len(exc.absent_observer_lines) == 2
+    assert exc.absent_observer_lines[0][0] == 2  # rowid 2
+    assert exc.absent_observer_lines[1][0] == 3  # rowid 3
+
+    msg = str(exc)
+    assert "line 2: 1 row(s) with observer='' (empty string)" in msg
+    assert "line 3: 1 row(s) with observer='' (empty string)" in msg
+
+
+def test_sqlite_codec_invalid_ts_text_refuses_with_rowid(tmp_path: Path) -> None:
+    """F1: A SQLite store containing ts as TEXT raises LegacySourceRefused with rowid."""
+    from ._fixtures import build_codec_invalid_sqlite
+
+    sqlite_file = build_codec_invalid_sqlite(tmp_path / "bad_ts.sqlite")
+
+    with pytest.raises(LegacySourceRefused) as exc_info:
+        inventory(sqlite_file)
+
+    exc = exc_info.value
+    assert len(exc.codec_invalid_lines) == 1
+    assert exc.codec_invalid_lines[0][0] == 1  # rowid 1
+    assert "fact field 'ts' must be a finite number" in exc.codec_invalid_lines[0][1]
+
+

@@ -219,11 +219,10 @@ def _validate_batch(obj: dict, *, validate_rows: bool = True) -> None:
             raise JsonlCodecError(f"batch row {i} has unknown record discriminator t={t!r}")
         if validate_rows:
             _validate(elem, _SPEC["fact"])
-        row_id = elem.get("id")
+        row_id = elem["id"]
         if row_id in seen_ids:
             raise JsonlCodecError(f"duplicate id {row_id!r} within one batch")
-        if row_id is not None:
-            seen_ids.add(row_id)
+        seen_ids.add(row_id)
 
 
 def _row_of(obj: dict, spec: _Spec) -> tuple:

@@ -1976,3 +1976,99 @@ def test_the_ceremony_reports_a_reset_that_did_not_take_effect(tmp_path):
     assert "APPENDED and is NOT honored" in str(excinfo.value)
     # Safe direction: the higher head still stands, so opens keep refusing.
     assert read_journal(lineage).known is not None
+
+
+def test_a_restored_abandoned_backup_does_not_open_unchanged(tmp_path):
+    """The acceptance vector, at the seam where an operator would meet it.
+
+    A replayed pre-reset ``advance`` used to raise K to an abandoned head that
+    was GENUINE, so the pre-reset backup presented it exactly and opened
+    ``unchanged`` — the unchanged arm gathers no descent evidence by design,
+    so nothing else was ever consulted. The ceremonially abandoned store simply
+    opened.
+
+    With the byte-duplicate gate the replayed line re-asserts rather than
+    records, K never reaches that head, and the restored backup is not equal to
+    anything remembered. Reverting the gate makes this open UNCHANGED again,
+    which is what makes it the sharp demo for it.
+    """
+    log_path = minted(tmp_path / "s.arrival")
+    append_legacy(log_path, "one", "two")
+    lineage = lineage_of(log_path)
+    abandoned = FileLedger(ArrivalLog(log_path)).verify(Open())
+    backup = log_path.read_bytes()
+
+    opened(log_path)  # first contact at the pre-reset head
+    truncate_records(log_path, keep=1)
+    restored = FileLedger(ArrivalLog(log_path)).verify(Open())
+    trust_reset(
+        accepted=restored,
+        abandoned=abandoned,
+        refused=abandoned,
+        reason="restored from the archive after the incident",
+        location=str(log_path),
+        observed_at=5000.0,
+    )
+    assert isinstance(opened(log_path).opened.comparison, Compared)
+
+    # The replay: the pre-reset observation, verbatim.
+    bootstrap_entry = read_journal(lineage).entries[0]
+    append_entry(bootstrap_entry)
+
+    log_path.write_bytes(backup)  # the abandoned backup, restored
+    comparison = opened(log_path).opened.comparison
+    assert not (
+        isinstance(comparison, Compared)
+        and comparison.outcome is Outcome.UNCHANGED
+    ), "the abandoned state opened unchanged"
+    assert isinstance(comparison, Indeterminate)
+
+
+def test_a_reset_whose_predecessor_moved_lines_is_not_honored(tmp_path):
+    """Position-binding, exercised where dedup cannot reach it.
+
+    The replay tests now die on the byte-duplicate gate before the position
+    claim is ever consulted, so position needs a case of its own or its
+    coverage would be an illusion. This is that case: the predecessor's bytes
+    appear exactly ONCE, so nothing is a duplicate — but a line was inserted
+    ahead of it, so the reset's recorded line no longer names where its
+    predecessor sits. Identity still matches; only position catches it.
+    """
+    log_path = minted(tmp_path / "s.arrival")
+    append_legacy(log_path, "one")
+    lineage = lineage_of(log_path)
+    accepted = FileLedger(ArrivalLog(log_path)).verify(Open())
+    trust_reset(
+        accepted=accepted,
+        abandoned=None,
+        refused=None,
+        reason="archive restore",
+        location=str(log_path),
+        observed_at=5000.0,
+    )
+
+    text = journal_path(lineage).read_text(encoding="utf-8")
+    lines = text.splitlines(keepends=True)
+    # Insert one unrelated line ahead of the reset's predecessor. Every line
+    # below shifts, so the recorded position is stale while the recorded
+    # identity is still exactly right.
+    inserted = json.dumps(
+        {
+            "v": 1,
+            "kind": "advance",
+            "level": "commit",
+            "lineage": lineage,
+            "ordinal": 0,
+            "record_hash": "e" * 64,
+            "observed_at": 7.0,
+        }
+    )
+    journal_path(lineage).write_text(
+        lines[0] + inserted + "\n" + "".join(lines[1:]), encoding="utf-8"
+    )
+
+    read = read_journal(lineage)
+    assert not any("byte-identical" in note for note in read.skipped), (
+        "dedup fired; this test would not be exercising the position claim"
+    )
+    assert any("trust-reset" in note for note in read.skipped), read.skipped

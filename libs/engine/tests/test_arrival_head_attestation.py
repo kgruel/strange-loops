@@ -500,11 +500,38 @@ def test_out_of_order_journal_writes_still_catch_a_restore():
 
 
 def test_duplicate_entries_at_one_ordinal_are_harmless():
+    """Two entries at one ordinal with one head never equivocate.
+
+    That is the rule, and it is unchanged. What changed is which duplicates
+    reach it: a BYTE-IDENTICAL line is now a literal re-assertion and is
+    skipped, so the pair that survives to the equivocation check is one whose
+    entries agree on the head while differing somewhere in the line — the
+    ordinary case, since ``observed_at`` comes from the clock and two genuine
+    appends do not share an instant.
+    """
+    append_entry(observation(6))
+    append_entry(
+        HeadAttestation(
+            head=head(6),
+            kind=Kind.ADVANCE,
+            level=Level.COMMIT,
+            observed_at=1787779021.0,  # a second later: a different line
+        )
+    )
+    result = read_journal(LINEAGE)
+    assert result.skipped == ()
+    assert result.established_head() is not None
+    assert result.established_head().head == head(6)
+
+
+def test_a_byte_identical_duplicate_is_skipped_as_a_re_assertion():
+    """The same head twice in the same bytes is one observation, not two."""
     append_entry(observation(6))
     append_entry(observation(6))
     result = read_journal(LINEAGE)
-    assert result.established_head() is not None
-    assert result.established_head().head == head(6)
+    assert any("byte-identical" in note for note in result.skipped), result.skipped
+    assert isinstance(result.known, HeadLowerBound)
+    assert result.known.at_least.head == head(6)
 
 
 # ---------------------------------------------------------------------------
@@ -1302,15 +1329,21 @@ def test_a_replayed_trust_reset_does_not_reopen_the_epoch_it_closed():
     for ordinal in range(1, 11):
         append_entry(observation(ordinal))
     legitimate = append_reset(5, note="restored from archive; abandoned 10")
+    # A DIFFERENT digest after the restore: the store re-advances through a new
+    # history, so ordinal 6 after the reset is not the ordinal 6 before it.
+    # Modelling it as the same bytes would have been the fixture asserting a
+    # store no backend produces.
     for ordinal in (6, 7, 8):
-        append_entry(observation(ordinal))
+        append_entry(observation(ordinal, "b"))
 
     append_entry(legitimate)  # the replay: the very same entry, again
 
     result = read_journal(LINEAGE)
     assert isinstance(result.known, HeadLowerBound)
     assert result.known.at_least.head.ordinal == 8, "the replay moved K"
-    assert any("trust-reset" in note for note in result.skipped), result.skipped
+    # Caught by the byte-duplicate gate, which now fires BEFORE the position
+    # binding ever sees the line — a literal replay is literal bytes.
+    assert any("byte-identical" in note for note in result.skipped), result.skipped
     # And the sound refusal the bound still supports is the one that matters.
     assert compare(result.known.at_least, head(5), None) is Outcome.ROLLBACK
 
@@ -1325,16 +1358,14 @@ def test_the_genuine_reset_is_still_honored_after_the_replay_is_rejected():
     for ordinal in range(1, 11):
         append_entry(observation(ordinal))
     legitimate = append_reset(5)
-    append_entry(observation(8))
+    append_entry(observation(8, "b"))
     append_entry(legitimate)
 
     result = read_journal(LINEAGE)
-    # The epoch still opens at the legitimate reset. The replayed copy sits
-    # inside it as an ordinary entry — it parsed, so it is evidence, and the
-    # maximum-ordinal rule means an entry at 5 cannot lower a K of 8. What it
-    # is NOT is a boundary.
-    assert [entry.head.ordinal for entry in result.epoch] == [5, 8, 5]
-    assert result.epoch[0] is not result.entries[-1]
+    # The epoch still opens at the legitimate reset, and the replayed copy is
+    # not in it at all now: the byte-duplicate gate drops the line before it
+    # can be an entry, let alone a boundary.
+    assert [entry.head.ordinal for entry in result.epoch] == [5, 8]
     assert isinstance(result.known, HeadLowerBound)
     assert result.known.at_least.head.ordinal == 8
 
@@ -1354,7 +1385,7 @@ def test_a_crash_retry_duplicate_reset_is_skipped_and_never_refuses():
 
     result = read_journal(LINEAGE)  # does not raise
     assert result.known is not None
-    assert any("trust-reset" in note for note in result.skipped)
+    assert any("byte-identical" in note for note in result.skipped)
 
 
 def test_a_reset_opening_an_empty_journal_binds_to_nothing():
@@ -1412,7 +1443,7 @@ def _journal_reset_at_5_then_advanced_to_8() -> HeadAttestation:
         append_entry(observation(ordinal))
     legitimate = append_reset(5, note="restored from archive; abandoned 10")
     for ordinal in (6, 7, 8):
-        append_entry(observation(ordinal))
+        append_entry(observation(ordinal, "b"))  # a new history after the restore
     return legitimate
 
 
@@ -1436,19 +1467,14 @@ def test_replaying_the_predecessor_with_the_reset_does_not_reopen_the_epoch():
     append_entry(legitimate)  # and the reset behind it
 
     result = read_journal(LINEAGE)
-    assert any("trust-reset" in note for note in result.skipped), result.skipped
-    # The attack: a store rolled back to 5 must NOT open unchanged.
+    # BOTH copied lines are literal replays, so both are skipped — the reset
+    # and the advance that was replayed to give it its context. Neither the
+    # epoch nor K moves.
+    duplicates = [note for note in result.skipped if "byte-identical" in note]
+    assert len(duplicates) == 2, result.skipped
     assert isinstance(result.known, HeadLowerBound)
-    assert result.known.at_least.head.ordinal != 5
+    assert result.known.at_least.head.ordinal == 8
     assert compare(result.known.at_least, head(5), None) is Outcome.ROLLBACK
-
-    # MEASURED, and it is not the 8 the ruling predicted: K reads 10.
-    # Rejecting the replayed RESET is not the same as rejecting the replayed
-    # ADVANCE that came with it, and the latter re-imports an abandoned head
-    # by the ordinary maximum-ordinal rule. Refusal-side, and pinned on its own
-    # below rather than hidden inside this one
-    # (finding:s3wp3-replayed-advance-reimports-an-abandoned-head).
-    assert result.known.at_least.head.ordinal == 10
 
 
 def test_replaying_the_whole_suffix_does_not_reopen_the_epoch():
@@ -1461,35 +1487,68 @@ def test_replaying_the_whole_suffix_does_not_reopen_the_epoch():
 
     result = read_journal(LINEAGE)
     assert isinstance(result.known, HeadLowerBound)
-    assert result.known.at_least.head.ordinal != 5
+    assert result.known.at_least.head.ordinal == 8
     assert compare(result.known.at_least, head(5), None) is Outcome.ROLLBACK
-    assert any("trust-reset" in note for note in result.skipped)
+    assert any("byte-identical" in note for note in result.skipped)
 
 
-def test_a_replayed_advance_reimports_an_abandoned_head():
-    """The residual sol r2's repro exposed, pinned so it is visible.
+def test_a_replayed_advance_cannot_reimport_an_abandoned_head():
+    """The acceptance vector, and why direction was the wrong thing to judge by.
 
-    Binding a RESET to its position says nothing about a replayed ADVANCE. An
-    old ``advance`` entry appended after a reset is, to the journal, a fresh
-    claim that this machine accepted that ordinal — and the maximum-ordinal
-    rule then takes it. So *K* rises to an abandoned head and a store at the
-    genuine current head is refused as a rollback.
+    Re-appending an ``advance`` from before a reset used to raise *K* to an
+    abandoned head. I classified that as safe because *K* moved UP, and refused
+    more. That was the wrong axis. The head *K* then named was GENUINE — a real
+    head this machine really did accept — so a store restored from the pre-reset
+    backup presents it exactly, compares EQUAL, and the unchanged arm does no
+    descent verification by design. The ceremonially abandoned state opened
+    silently. A wrongly-raised *K* naming a real abandoned head is a landing
+    pad, not a wall.
 
-    Refusal-side, which is the direction this module must fail in, and no
-    silent acceptance is reachable through it. It is a denial of service
-    against one's own store, not a way into it. Recorded rather than fixed
-    because the fix is not a position binding on every entry — every entry
-    already IS its position, and the journal cannot tell a re-assertion from a
-    first assertion without the signed grammar that would date it.
+    The byte-duplicate gate closes it at the source: the replayed line is
+    literal bytes this journal already holds, so it re-asserts rather than
+    records, and *K* never moves.
     """
     _journal_reset_at_5_then_advanced_to_8()
     assert read_journal(LINEAGE).established_head().head.ordinal == 8
 
-    append_entry(observation(10))  # an abandoned head, re-asserted
+    append_entry(observation(10))  # an abandoned head, re-asserted verbatim
 
-    assert read_journal(LINEAGE).established_head().head.ordinal == 10
-    known = read_journal(LINEAGE).established_head()
-    assert compare(known, head(8), None) is Outcome.ROLLBACK
+    result = read_journal(LINEAGE)
+    assert any("byte-identical" in note for note in result.skipped)
+    assert isinstance(result.known, HeadLowerBound)
+    assert result.known.at_least.head.ordinal == 8, "K reached an abandoned head"
+    # And the restored abandoned backup is no longer equal to what is remembered.
+    assert result.known.at_least.head != head(10)
+
+
+def test_an_injected_collision_costs_a_walk_and_never_an_acceptance():
+    """Where the gate is wrong, it must be wrong on the verification side.
+
+    Two genuinely independent events that serialize to identical bytes are
+    indistinguishable from a replay, so the gate drops the later one. This
+    constructs exactly that — a post-reset entry whose bytes coincide with one
+    from the abandoned epoch — and pins the consequence, rather than resting on
+    the collision being improbable.
+
+    The consequence is that *K* reads LOWER than the truth. The store then
+    presents a head above it, which is an ADVANCE, and the advance branch is
+    the one that pays for a verified walk: descent from the remembered head is
+    established before anything is accepted. Cost, not credulity — the failure
+    lands on the verification side, never on acceptance.
+    """
+    for ordinal in (1, 2, 3):
+        append_entry(observation(ordinal))
+    append_reset(1)
+    append_entry(observation(3))  # a genuine new entry, colliding with line 4
+
+    result = read_journal(LINEAGE)
+    assert any("byte-identical" in note for note in result.skipped)
+    # K is the reset head, NOT the colliding 3 — lower than the truth.
+    assert result.known.at_least.head.ordinal == 1
+    # A store at the true head is therefore an ADVANCE, which must establish
+    # descent rather than be believed: with no vouched record at K, REWRITE.
+    assert compare(result.known.at_least, head(3), None) is Outcome.REWRITE
+    assert compare(result.known.at_least, head(3), head(1)) is Outcome.ADVANCED
 
 
 def test_concatenating_a_foreign_journal_does_not_import_its_resets():

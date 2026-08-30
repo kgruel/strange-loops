@@ -1013,6 +1013,7 @@ def _scan(
     """
     entries: list[tuple[int, HeadAttestation]] = []
     skipped: list[str] = []
+    seen: dict[str, int] = {}
     header_seen = False
     for index, line in enumerate(lines):
         stripped = line.strip()
@@ -1040,6 +1041,16 @@ def _scan(
         if entry is None:
             skipped.append(f"line {index + 1}: not readable by this build")
             continue
+        if stripped in seen:
+            # A LITERAL RE-ASSERTION. See the dedup note in the docstring.
+            skipped.append(
+                f"line {index + 1}: byte-identical to line {seen[stripped]}, "
+                "so it re-asserts an observation this journal already holds "
+                "rather than recording a new one — a replayed line cannot "
+                "count twice"
+            )
+            continue
+        seen[stripped] = index + 1
         entries.append((index + 1, entry))
 
     return entries, skipped, header_seen

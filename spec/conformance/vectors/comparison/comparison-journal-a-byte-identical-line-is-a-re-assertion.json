@@ -1,0 +1,32 @@
+{
+  "name": "comparison-journal-a-byte-identical-line-is-a-re-assertion",
+  "description": "The dedup rule, and the claim it makes is about ARITHMETIC rather than about damage. A line whose exact bytes duplicate an earlier line re-asserts an observation the journal already holds; it is not a fresh one, and it is skipped with a record before the epoch and the remembered head are computed. Without this, a replayed historical advance counts as a current observation, the maximum-ordinal rule takes it as the remembered head, and a store restored from a pre-reset backup presents that head exactly \u2014 answering UNCHANGED for ceremonially abandoned state. Type-agnostic and order-agnostic, but NOT applied to headers: two writers racing to create one journal each write a header, and that duplicate is the tolerated create-race artifact rather than a replay. Note what the skip costs here \u2014 a non-empty skip set is what weakens a read, so this journal yields a BOUND even though the duplicated line carried no information that was lost. That conservative direction is the ruled behavior as of this vector's writing, and it is the one place a reader knows exactly what the skipped line said; whether an information-free skip should weaken the read is an open question routed to the arbiter, and this vector is what would be regenerated if it is ruled the other way.",
+  "input": {
+    "form": "journal",
+    "journal": [
+      "{\"protocol\":1,\"type\":\"arrival-head-observation\",\"v\":1,\"wire\":1}",
+      "{\"kind\":\"bootstrap\",\"level\":\"mint\",\"lineage\":\"01M3COMPARISONVECTORLINEAGE\",\"location\":\"/vectors/comparison/project.arrival\",\"observed_at\":1788000000.0,\"ordinal\":0,\"record_hash\":\"8ac1d899262e830d2be319bd5ef28d03cfe847a108adaa1ec9288b7e2e0f2b00\",\"v\":1}",
+      "{\"kind\":\"advance\",\"level\":\"commit\",\"lineage\":\"01M3COMPARISONVECTORLINEAGE\",\"location\":\"/vectors/comparison/project.arrival\",\"observed_at\":1788000006.0,\"ordinal\":6,\"record_hash\":\"fd36ffd78406e2dbb820c9007bec1bfd1a17ba61a52c66fe14f0cab140f953f5\",\"v\":1}",
+      "{\"kind\":\"advance\",\"level\":\"commit\",\"lineage\":\"01M3COMPARISONVECTORLINEAGE\",\"location\":\"/vectors/comparison/project.arrival\",\"observed_at\":1788000006.0,\"ordinal\":6,\"record_hash\":\"fd36ffd78406e2dbb820c9007bec1bfd1a17ba61a52c66fe14f0cab140f953f5\",\"v\":1}"
+    ],
+    "presented": {
+      "lineage": "01M3COMPARISONVECTORLINEAGE",
+      "ordinal": 6,
+      "record_hash": "fd36ffd78406e2dbb820c9007bec1bfd1a17ba61a52c66fe14f0cab140f953f5"
+    },
+    "at_known": null
+  },
+  "expected": {
+    "read": "bounded",
+    "known": {
+      "lineage": "01M3COMPARISONVECTORLINEAGE",
+      "ordinal": 6,
+      "record_hash": "fd36ffd78406e2dbb820c9007bec1bfd1a17ba61a52c66fe14f0cab140f953f5"
+    },
+    "entries": 2,
+    "epoch": 2,
+    "skipped": 1,
+    "outcome": null,
+    "sound_answer": null
+  }
+}

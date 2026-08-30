@@ -112,7 +112,8 @@ VECTOR_INVENTORY: dict[str, frozenset[str]] = {
     "comparison-journal-": frozenset({
         "comparison-journal-the-known-head-is-the-maximum-ordinal",
         "comparison-journal-equivocation-refuses-the-read",
-        "comparison-journal-duplicate-entries-at-the-maximum-agree",
+        "comparison-journal-agreeing-entries-at-the-maximum-are-not-equivocation",
+        "comparison-journal-a-byte-identical-line-is-a-re-assertion",
         "comparison-journal-an-empty-journal-is-first-contact",
         "comparison-journal-a-header-only-journal-is-first-contact",
         "comparison-journal-unknown-fields-on-a-v1-entry-are-read",

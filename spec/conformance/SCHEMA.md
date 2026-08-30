@@ -460,6 +460,43 @@ Seven rows for six states, because §07 lists first contact separately from the 
 | `lineage`, `ordinal`, `record_hash` | — | The head, all three fields, always. |
 | `observed_at` | number | Witness metadata, never ledger order. |
 | `location` | string | Where it was seen. Diagnosis only, and **never a key** — journals are keyed by lineage so a worktree, a move, or a copy still finds the lineage's memory. |
+| `follows` | `[integer, string]` | **Required on `trust-reset`, absent on every other kind.** The PHYSICAL LINE and identity of the entry this reset was appended after. See below. |
+
+### The trust-reset binding (`follows`)
+
+A trust reset is the one entry that moves the read scope, which made it the one entry worth **replaying**: re-appending an old reset re-opened the epoch it had closed. So a reset carries the coordinates of the entry it was appended after, and a reader honors it only when they match what actually precedes it.
+
+| Element | Meaning |
+|---|---|
+| `follows[0]` | The predecessor's **physical line ordinal**, counted from 1 over **every** line in the file — including blank lines, lines this build skipped, and the header. Never an index among the entries that happened to parse. |
+| `follows[1]` | The predecessor's identity: a digest over that entry's own serialized line. |
+
+`[0, ""]` is the honest claim for a reset opening an empty journal: line numbers start at 1, so zero says *there was no predecessor* rather than *no claim was made*.
+
+**Position is what closes the class rather than the instance.** Binding to identity alone is defeated by replaying the predecessor and the reset together as an ordered suffix, which reproduces the identity exactly. Copied bytes appended later always land at a later line, so a stale position claim is unavoidable however much surrounding context travels with them — the two-line replay, a full-suffix replay and a wholesale journal concatenation all fail the same check for the same reason. Identity stays in the pair because position alone would accept a truncation that happens to realign a different entry onto the recorded line.
+
+**Physical, never an index among parsed entries**, because an index is a *judgment*: a future build that classifies one line differently renumbers every entry after it and silently voids every reset bound below. Physical line N is line N forever in a file that is only ever appended to.
+
+**A reset whose binding does not match is skipped with a record, never a refusal**, and the epoch walk continues to an earlier valid boundary. Refusing would brick opens on a benign crash-retry duplicate. The direction of the error is the safe one either way: an unhonored reset leaves the remembered head at the *higher* abandoned head, so the failure is a refusal rather than an acceptance. Note the consequence, which is deliberate — the skip record makes the read incomplete, so a journal holding a replayed reset still refuses anything below the bound.
+
+There is **no compatibility arm**: an unbound reset is not one any writer can produce. A reset whose `follows` is absent or malformed is simply not honored.
+
+The residual, stated rather than implied: truncating the journal and then replaying realigns positions, and this cannot detect it. That is the known bound of unsigned local state, the same class as deleting the journal outright and being met with trust on first use.
+
+### Byte-duplicate lines are re-assertions
+
+**A line whose exact bytes duplicate an earlier line in the file is skipped with a record, before the epoch and the remembered head are computed.** A replayed line re-asserts an observation the journal already holds; it is not a fresh one, and it cannot count twice.
+
+Without this, a replayed *historical advance* counts as a current observation, the maximum-ordinal rule takes it as the remembered head, and a store restored from a pre-reset backup presents that head exactly — answering `unchanged` for ceremonially abandoned state.
+
+- **Type-agnostic**: advances, audits and resets pass through one gate.
+- **Order-agnostic**: it survives the non-ascending write order concurrent journalling produces.
+- **Read-side only**: no record shape, producer, or locking change.
+- **Headers are exempt.** Two writers racing to create one journal each write a header, and that duplicate is the tolerated create-race artifact rather than a replay.
+
+Byte-identity is complete against literal replay, which is the unsigned threat model. A byte collision arising from a *genuine* re-assertion fails verification-side: the skip lowers the remembered head rather than raising it.
+
+**Agreement and byte-identity are different claims**, and the area pins both. Two entries at one ordinal carrying the same record hash but different `observed_at` are two observations of one head and are *not* equivocation; two lines with identical bytes are one observation asserted twice. A fixture that conflated them would no longer reach the equivocation control it was written to be, because dedup takes byte-identical lines before the equivocation check sees them.
 
 ### `expected` Schema
 
@@ -511,7 +548,7 @@ Five, and the file stem names which one a vector belongs to.
 
 - **`comparison-classify-*`** — the seven rows through the pure classifier, plus the guard-order claim that a foreign lineage at a *lower* ordinal is `lineage-replaced` and not `rollback`, and both ways the advance branch fails.
 - **`comparison-epoch-*`** — a trust-reset opens a new epoch and the epoch is **reset-inclusive**: the reset entry is the first entry of the epoch it opens. A journal ending at the reset compares against the reset head. Scoped exclusively instead, such a journal has an empty epoch and answers `first-contact` — silent re-acceptance on the most ordinary shape there is, an operator resetting and then opening. The family also carries the claim that epoch scope governs the equivocation check, so a ceremony can take effect over a conflict the operator already resolved.
-- **`comparison-journal-*`** — the maximum-ordinal rule (the remembered head is the epoch's highest ordinal, **not the last line**, because concurrent writers journal out of order), equivocation, and **both negative controls**: duplicate entries at the maximum that *agree* are not equivocation, and unknown fields on a current-grammar entry are read normally. A refusal that fires on agreement has stopped meaning what it says.
+- **`comparison-journal-*`** — the maximum-ordinal rule (the remembered head is the epoch's highest ordinal, **not the last line**, because concurrent writers journal out of order), equivocation, the byte-duplicate re-assertion rule, and **both negative controls**: entries at the maximum that *agree* without being byte-identical are not equivocation, and unknown fields on a current-grammar entry are read normally. A refusal that fires on agreement has stopped meaning what it says. Agreement and byte-identity are pinned as separate vectors on purpose — they were one fixture until dedup made them two different claims.
 - **`comparison-incomplete-*`** — the lower bound and the third state. **All three of the bound's cells are pinned** (below, equal, above), because two of them agree on `null` and a family that exercised only those two would pass an implementation that answered `advanced` above the bound. The family also carries the case an operator would actually meet: a fresh genesis arriving at a location whose journal remembers a far higher ordinal in unreadable form is a replacement wearing the old name, and it declines rather than passing as first contact.
 - **`comparison-header-*`** — the header's **three-way** classification. A kindless object bearing the type marker is a header. An object bearing **both** the type marker and an entry kind is *unclassifiable*: skipped and reported, never absorbed, never a reason to refuse the file. Anything else is entry-shaped. Both two-valued repairs fail in opposite directions — absorbing on the type marker alone silently loses an entry, and requiring the marker plus the absence of a kind refuses the whole file over ordinary version skew — so the stable rule admits a third verdict rather than choosing between two wrong certainties. The middle row is a **location claim** about this build's ability to read the line, not a verdict about what the line is, which is exactly what this build cannot know.
 

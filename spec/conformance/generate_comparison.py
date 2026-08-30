@@ -36,6 +36,13 @@ Five families, each answering a question the others cannot:
 Every vector is deterministic: one fixed lineage, fixed observation times, and
 record hashes derived from a fixed tag. Nothing here reads a clock.
 
+**Trust resets are position-bound, so fixture ORDER is now part of the frozen
+output.** A reset records the physical line its predecessor occupies, so
+inserting, removing or reordering a line in any fixture that contains a reset
+changes that reset's ``follows`` — by design, since a binding that survived
+being moved would not be a position claim. Regenerating after such an edit is
+correct and expected; a stale hand-edited vector is not.
+
 Well-formed journals are built through the real ``append_entry`` so the vectors
 pin the writer's actual bytes, under a TEMPORARY ``XDG_STATE_HOME`` that is
 asserted before the first append — this generator must never touch a real state
@@ -53,7 +60,7 @@ import json
 import os
 import tempfile
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -68,7 +75,9 @@ from engine.arrival_head_attestation import (
     Level,
     append_entry,
     compare,
+    entry_identity,
     journal_path,
+    last_entry,
     parse_journal_lines,
     state_root,
 )
@@ -115,12 +124,13 @@ def entry(
     kind: Kind = Kind.ADVANCE,
     level: Level = Level.COMMIT,
     tag: str | None = None,
+    observed_at: float | None = None,
 ) -> HeadAttestation:
     return HeadAttestation(
         head=head(ordinal, tag),
         kind=kind,
         level=level,
-        observed_at=OBSERVED_AT + ordinal,
+        observed_at=OBSERVED_AT + ordinal if observed_at is None else observed_at,
         location=LOCATION,
     )
 
@@ -136,6 +146,13 @@ def reset(ordinal: int) -> HeadAttestation:
     ``Level.FULL`` because an operator who ran the ceremony verified from
     genesis. Not load-bearing for any read rule: the epoch scope keys on
     ``Kind.TRUST_RESET`` alone.
+
+    **``follows`` is left unset here and bound at WRITE time** by
+    :func:`lines_for`, because the claim it carries — the physical line its
+    predecessor occupies — is a fact about the journal being built and not
+    about the ceremony. A reset constructed with a stale binding is exactly
+    what the read rejects, so the generator cannot guess it in advance any
+    more than an operator can.
     """
     return entry(ordinal, kind=Kind.TRUST_RESET, level=Level.FULL)
 
@@ -507,13 +524,51 @@ JOURNAL_CASES: tuple[JournalCase, ...] = (
         presented=head(6, "branch-a"),
     ),
     JournalCase(
-        name="comparison-journal-duplicate-entries-at-the-maximum-agree",
+        name="comparison-journal-agreeing-entries-at-the-maximum-are-not-equivocation",
         description=(
             "The negative control for equivocation. Two entries at the maximum "
             "ordinal carrying the SAME record hash are a duplicate observation, "
             "not a conflict — a writer journaling a head twice records nothing "
             "new and contradicts nothing. An equivocation refusal that fired here "
-            "would have stopped meaning equivocation."
+            "would have stopped meaning equivocation. The two lines differ in "
+            "``observed_at``, and that is now load-bearing rather than "
+            "incidental: agreement and BYTE-IDENTITY are different claims, and "
+            "since the dedup rule takes byte-identical lines before the "
+            "equivocation check ever sees them, a byte-identical fixture would "
+            "no longer reach the control it was written to be. Two observations "
+            "of one head made at different moments is what 'agreeing entries' "
+            "means once literal re-assertions are removed from the file."
+        ),
+        entries=(
+            bootstrap(),
+            entry(6, observed_at=OBSERVED_AT + 6),
+            entry(6, observed_at=OBSERVED_AT + 600),
+        ),
+        presented=head(6),
+    ),
+    JournalCase(
+        name="comparison-journal-a-byte-identical-line-is-a-re-assertion",
+        description=(
+            "The dedup rule, and the claim it makes is about ARITHMETIC rather "
+            "than about damage. A line whose exact bytes duplicate an earlier "
+            "line re-asserts an observation the journal already holds; it is not "
+            "a fresh one, and it is skipped with a record before the epoch and "
+            "the remembered head are computed. Without this, a replayed "
+            "historical advance counts as a current observation, the "
+            "maximum-ordinal rule takes it as the remembered head, and a store "
+            "restored from a pre-reset backup presents that head exactly — "
+            "answering UNCHANGED for ceremonially abandoned state. Type-agnostic "
+            "and order-agnostic, but NOT applied to headers: two writers racing "
+            "to create one journal each write a header, and that duplicate is "
+            "the tolerated create-race artifact rather than a replay. Note what "
+            "the skip costs here — a non-empty skip set is what weakens a read, "
+            "so this journal yields a BOUND even though the duplicated line "
+            "carried no information that was lost. That conservative direction "
+            "is the ruled behavior as of this vector's writing, and it is the "
+            "one place a reader knows exactly what the skipped line said; "
+            "whether an information-free skip should weaken the read is an open "
+            "question routed to the arbiter, and this vector is what would be "
+            "regenerated if it is ruled the other way."
         ),
         entries=(bootstrap(), entry(6), entry(6)),
         presented=head(6),
@@ -725,12 +780,29 @@ def lines_for(case: JournalCase) -> list[str]:
     Well-formed entries go through ``append_entry`` so the vectors pin the
     bytes the writer actually emits — including the header it writes on create.
     A transform then splices in what a correct writer would never produce.
+
+    **A trust reset is bound to its predecessor here**, from the journal as it
+    stands at the moment of the append: the physical line the previous entry
+    occupies and that entry's identity. This is the same computation
+    ``arrival_head_seam.trust_reset`` performs, spelled with the two primitives
+    the attestation module exports for it rather than by importing the seam —
+    the seam canonicalizes its ``location`` through ``Path.resolve()``, which
+    is a function of the machine the generator runs on and would make frozen
+    vectors non-reproducible.
     """
     if case.raw_lines is not None:
         return list(case.raw_lines)
     path = journal_path(LINEAGE)
     path.unlink(missing_ok=True)
     for item in case.entries:
+        if item.kind is Kind.TRUST_RESET:
+            previous = last_entry(LINEAGE)
+            item = replace(
+                item,
+                follows=(0, "")
+                if previous is None
+                else (previous[0], entry_identity(previous[1])),
+            )
         append_entry(item)
     lines = (
         path.read_text(encoding="utf-8").splitlines() if path.exists() else []

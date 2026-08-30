@@ -468,3 +468,130 @@ of the work: the question to ask next is *what is the weakest artifact that woul
 satisfy this check*, and whether that artifact would actually have caught the thing
 the check exists for. Sol's seeded-defeat method asks exactly that question, and it
 is the reason r1's fix was not the end of it.
+
+## 11. Integration round — amending the family to WP3's ruled semantics
+
+Wave branch `slice3/arrival-witness`, worktree `~/Code/loops-s3wp1`. Routed as
+`finding:slice3-integration-vectors-encode-preamendment-semantics`. Step 0 verified:
+two merge commits (`eab3742c` WP3, `b94413de` WP2) over `886d5619`/`9a4b0fa3`
+ancestry. (One untracked file, `slice3-crossdoc-report.md`, belongs to another agent
+and was left alone.)
+
+The family converged under WP1's journal semantics at `9ed893fe`. Amendments #2
+(position-bound resets) and #3 (byte-duplicate dedup) changed the journal-read
+contract the journal-form vectors execute, so its convergence does not carry. **The
+vectors are amended TO the ruled semantics; nothing was relaxed.**
+
+### Cause table — verified, and the routed diagnosis corrected in two places
+
+| Vector | Routed diagnosis | Verified cause |
+|---|---|---|
+| `comparison-epoch-ends-at-the-reset-entry-is-unchanged` | reset lacks `follows` → epoch never opens | **Confirmed.** Reset skipped as unbound; epoch = all 3 entries; K = 100 (the abandoned head); `read` bounded, not established |
+| `comparison-epoch-below-the-reset-head-is-rollback` | same | **Confirmed**, identical shape |
+| `comparison-epoch-scopes-the-equivocation-check-too` | same | **Same root, different symptom.** The unhonored reset puts the abandoned pair at ordinal 200 back in scope, so the read **raises `JournalEquivocation`** rather than returning a bounded read. Lumped with the other two in the routed diagnosis; the distinction matters because a raised refusal and a weakened read are different failures |
+| `comparison-journal-duplicate-entries-at-the-maximum-agree` | byte-identical duplicates now dedup | **Confirmed.** Line 4 byte-identical to line 3 → skipped; entries 2, bounded |
+| `comparison-incomplete-a-torn-line-yields-a-lower-bound` | "known-state class assertions failing against the reworked scan" | **Not a known-state failure at all.** `read` was `bounded` and the bound was 91 — both exactly as expected. What drifted was the **counts**: `epoch` 3 (not 2) and `skipped` 2 (not 1), because these fixtures *also contain a trust reset* which was likewise unbound |
+| `comparison-incomplete-a-bound-still-refuses-below-itself` | same | same |
+| `comparison-incomplete-a-bound-cannot-answer-above-itself` | same | same |
+
+**Six of the seven share ONE root cause** — fixture resets carry no `follows` — with
+three distinct symptoms: bounded-instead-of-established, a raised
+`JournalEquivocation`, and count drift. The three `comparison-incomplete-` vectors
+were collateral: their torn-line fixtures happen to contain a reset, so the reset
+defect showed up in their counts while the property each was written to pin (the
+bound and its cells) was never actually broken. Only the duplicate vector is a
+separate cause.
+
+### The fixes
+
+**1. Fixture resets are bound at write time.** `lines_for` now computes each reset's
+`follows` from the journal as it stands at the moment of the append — the physical
+line the previous entry occupies, and that entry's identity. This is the **same
+computation** `arrival_head_seam.trust_reset` performs, spelled with the two
+primitives the attestation module exports for it (`last_entry`, `entry_identity`)
+rather than by importing the seam. **Justification for not calling the seam producer
+directly:** it canonicalizes its `location` through `Path.resolve()`, which is a
+function of the machine the generator runs on, and frozen vectors must not be. The
+binding arithmetic is identical either way; only the location handling differs.
+
+`reset()` no longer sets `follows` at construction: the claim is a fact about the
+journal being built, not about the ceremony, and a reset constructed with a stale
+binding is precisely what the read rejects.
+
+**2. The duplicate vector became two vectors**, because dedup split one fixture into
+two different claims and this family's discipline is one claim per vector:
+
+- `comparison-journal-agreeing-entries-at-the-maximum-are-not-equivocation`
+  (renamed from `-duplicate-entries-at-the-maximum-agree`). Two entries at ordinal 6,
+  same record hash, **different `observed_at`**. Preserves the original negative
+  control. The differing timestamp is now load-bearing rather than incidental: dedup
+  takes byte-identical lines *before* the equivocation check sees them, so a
+  byte-identical fixture would no longer reach the control it was written to be.
+- `comparison-journal-a-byte-identical-line-is-a-re-assertion` (**new**). Pins
+  amendment #3 directly: entries 2, skipped 1, `read` bounded.
+
+Two vectors rather than one because "agreement is not equivocation" and "a replayed
+line cannot count twice" are independent claims that a single fixture can no longer
+carry — and the rename alone would have retired the first claim silently.
+
+**3. SCHEMA.md caught up**, normatively: the `follows` field in the Entry Object
+table, a section on the binding (physical-line semantics, `[0, ""]` at journal start,
+why position closes the class where identity closes only the instance, unbound =
+skipped-not-refused, no compat arm, the truncation-realignment residual), and a
+section on the dedup rule (type-agnostic, order-agnostic, read-side only, **headers
+exempt** as the tolerated create-race artifact, and the agreement-versus-byte-identity
+distinction).
+
+**4. Inventory** follows the rename and the addition. The cell-enumeration ratchet's
+coverage claim stays true: the new dedup vector is `bounded` at the *equal* cell, and
+the above cell is still held by `comparison-incomplete-a-bound-cannot-answer-above-itself`
+with its valid `at_known`.
+
+### Verification
+
+| Check | Result |
+|---|---|
+| family suite | **33 passed** (28 vectors + 5 non-parametrized), from 7 failed / 25 passed |
+| engine, wave worktree | **2266 passed, 1 skipped** |
+| architecture, separate process | **99 passed** |
+| generator byte-reproducible | regenerated twice, output digest **identical** |
+| `ruff check` | clean on generator and consumer |
+
+Post-fix values, each predicted before running and then confirmed:
+
+| Vector | entries | epoch | skipped | read |
+|---|---|---|---|---|
+| `comparison-epoch-ends-at-the-reset-entry-is-unchanged` | 3 | 1 | 0 | established |
+| `comparison-epoch-scopes-the-equivocation-check-too` | 5 | 2 | 0 | established |
+| the three `comparison-incomplete-` bound vectors | 3 | 2 | 1 | bounded |
+| `comparison-journal-agreeing-entries-…` | 3 | 3 | 0 | established |
+| `comparison-journal-a-byte-identical-line-…` | 2 | 2 | 1 | bounded |
+
+The three incomplete vectors return to exactly their pre-amendment expected values —
+now for the right reason, since their resets are bound rather than ignored — and the
+`skipped` set holds only the torn line.
+
+### Position binding makes fixture ORDER part of the frozen output
+
+Named in the generator's docstring rather than discovered later: a reset records the
+physical line its predecessor occupies, so inserting, removing or reordering any line
+in a fixture containing a reset changes that reset's `follows`. That is by design — a
+binding that survived being moved would not be a position claim — but it means
+regenerating after such an edit is mandatory, and a hand-edited vector JSON is
+guaranteed stale.
+
+### One finding, routed to the lead rather than fixed
+
+Engine behavior is not mine to change. Reported in full in the completion message:
+**a byte-identical crash-retry duplicate permanently weakens every subsequent read to
+a bound.** Verified — after the duplicate and four later legitimate commits,
+`established_head()` still raises, so `unchanged` and `advanced` stay unobtainable
+for the life of the journal, while the bound itself is *correct*. It is deliberately
+not emitted as a fold: the lead decides whether it enters the ledger, and it carries
+an arbiter-facing question.
+
+`comparison-journal-a-byte-identical-line-is-a-re-assertion` pins the ruled behavior
+as of now regardless, and its own description says the weighing question is open and
+that this vector is what would be regenerated if it is ruled the other way — a
+foreign implementer reading the family should know which of its claims is settled and
+which is under review.

@@ -1,0 +1,31 @@
+{
+  "name": "comparison-epoch-ends-at-the-reset-entry-is-unchanged",
+  "description": "The trust epoch is RESET-INCLUSIVE: the reset entry is the first entry of the epoch it opens, not excluded from it. A journal whose last entry is the reset therefore compares against the RESET head \u2014 unchanged \u2014 and not against the abandoned maximum above it. Read the epoch as 'the entries after the reset' and this journal has an empty epoch, nothing remembered, and first contact: silent re-acceptance on the most ordinary shape there is, an operator resetting and then opening. The abandoned entry stays in the journal as EVIDENCE, which is the whole point of recording the gap.",
+  "input": {
+    "form": "journal",
+    "journal": [
+      "{\"protocol\":1,\"type\":\"arrival-head-observation\",\"v\":1,\"wire\":1}",
+      "{\"kind\":\"bootstrap\",\"level\":\"mint\",\"lineage\":\"01M3COMPARISONVECTORLINEAGE\",\"location\":\"/vectors/comparison/project.arrival\",\"observed_at\":1788000000.0,\"ordinal\":0,\"record_hash\":\"8ac1d899262e830d2be319bd5ef28d03cfe847a108adaa1ec9288b7e2e0f2b00\",\"v\":1}",
+      "{\"kind\":\"advance\",\"level\":\"commit\",\"lineage\":\"01M3COMPARISONVECTORLINEAGE\",\"location\":\"/vectors/comparison/project.arrival\",\"observed_at\":1788000100.0,\"ordinal\":100,\"record_hash\":\"d532b3fc6629f8d578cdd1760ace04a0955cfd461d0f4801ee6f353ca41cd77b\",\"v\":1}",
+      "{\"kind\":\"trust-reset\",\"level\":\"full\",\"lineage\":\"01M3COMPARISONVECTORLINEAGE\",\"location\":\"/vectors/comparison/project.arrival\",\"observed_at\":1788000090.0,\"ordinal\":90,\"record_hash\":\"9ba847b1c3e2f92f410ac2264266c8506f0df0a9cee6575a27b6064957fc93ba\",\"v\":1}"
+    ],
+    "presented": {
+      "lineage": "01M3COMPARISONVECTORLINEAGE",
+      "ordinal": 90,
+      "record_hash": "9ba847b1c3e2f92f410ac2264266c8506f0df0a9cee6575a27b6064957fc93ba"
+    },
+    "at_known": null
+  },
+  "expected": {
+    "read": "established",
+    "known": {
+      "lineage": "01M3COMPARISONVECTORLINEAGE",
+      "ordinal": 90,
+      "record_hash": "9ba847b1c3e2f92f410ac2264266c8506f0df0a9cee6575a27b6064957fc93ba"
+    },
+    "entries": 3,
+    "epoch": 1,
+    "skipped": 0,
+    "outcome": "unchanged"
+  }
+}

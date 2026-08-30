@@ -1,0 +1,33 @@
+{
+  "name": "comparison-epoch-scopes-the-equivocation-check-too",
+  "description": "Epoch scoping governs all three surfaces, not just which entry is the remembered head. This journal holds an equivocating pair ABOVE the current epoch \u2014 two different records claiming ordinal 200 \u2014 and the read completes cleanly, because those entries were abandoned by the reset and are retained as evidence rather than as claims. Unscoped, the ceremony could never take effect: the journal would refuse forever over a conflict the operator already resolved.",
+  "input": {
+    "form": "journal",
+    "journal": [
+      "{\"protocol\":1,\"type\":\"arrival-head-observation\",\"v\":1,\"wire\":1}",
+      "{\"kind\":\"bootstrap\",\"level\":\"mint\",\"lineage\":\"01M3COMPARISONVECTORLINEAGE\",\"location\":\"/vectors/comparison/project.arrival\",\"observed_at\":1788000000.0,\"ordinal\":0,\"record_hash\":\"8ac1d899262e830d2be319bd5ef28d03cfe847a108adaa1ec9288b7e2e0f2b00\",\"v\":1}",
+      "{\"kind\":\"advance\",\"level\":\"commit\",\"lineage\":\"01M3COMPARISONVECTORLINEAGE\",\"location\":\"/vectors/comparison/project.arrival\",\"observed_at\":1788000200.0,\"ordinal\":200,\"record_hash\":\"481ec41a2eb7a16b2c8a50d78e7cf7e9c56f9eab65349ed60221186cf60ac310\",\"v\":1}",
+      "{\"kind\":\"advance\",\"level\":\"commit\",\"lineage\":\"01M3COMPARISONVECTORLINEAGE\",\"location\":\"/vectors/comparison/project.arrival\",\"observed_at\":1788000200.0,\"ordinal\":200,\"record_hash\":\"f09efa029d13ef1c2e3c8ba49f0bf7b95c2b186850928aa19e2dbff5d3d53abd\",\"v\":1}",
+      "{\"kind\":\"trust-reset\",\"level\":\"full\",\"lineage\":\"01M3COMPARISONVECTORLINEAGE\",\"location\":\"/vectors/comparison/project.arrival\",\"observed_at\":1788000090.0,\"ordinal\":90,\"record_hash\":\"9ba847b1c3e2f92f410ac2264266c8506f0df0a9cee6575a27b6064957fc93ba\",\"v\":1}",
+      "{\"kind\":\"advance\",\"level\":\"commit\",\"lineage\":\"01M3COMPARISONVECTORLINEAGE\",\"location\":\"/vectors/comparison/project.arrival\",\"observed_at\":1788000091.0,\"ordinal\":91,\"record_hash\":\"e2235df4281b93546c0177885f0677948fb368cf593fa3ec1fbd2d734e06bfe8\",\"v\":1}"
+    ],
+    "presented": {
+      "lineage": "01M3COMPARISONVECTORLINEAGE",
+      "ordinal": 91,
+      "record_hash": "e2235df4281b93546c0177885f0677948fb368cf593fa3ec1fbd2d734e06bfe8"
+    },
+    "at_known": null
+  },
+  "expected": {
+    "read": "established",
+    "known": {
+      "lineage": "01M3COMPARISONVECTORLINEAGE",
+      "ordinal": 91,
+      "record_hash": "e2235df4281b93546c0177885f0677948fb368cf593fa3ec1fbd2d734e06bfe8"
+    },
+    "entries": 5,
+    "epoch": 2,
+    "skipped": 0,
+    "outcome": "unchanged"
+  }
+}

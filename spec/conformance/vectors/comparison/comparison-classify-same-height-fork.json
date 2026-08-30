@@ -1,0 +1,25 @@
+{
+  "name": "comparison-classify-same-height-fork",
+  "description": "The same ordinal in the same lineage with a different record hash: two histories disagree about what happened at that height. Refuse and freeze both branches \u2014 never pick the taller one, since height is not evidence of continuity.",
+  "input": {
+    "form": "heads",
+    "known": {
+      "kind": "advance",
+      "level": "commit",
+      "lineage": "01M3COMPARISONVECTORLINEAGE",
+      "ordinal": 7,
+      "record_hash": "3e920d4564316dad7f9d4e63199b25110e7df8d6bcff99c5f02dbe1df3df5093",
+      "observed_at": 1788000007.0,
+      "location": "/vectors/comparison/project.arrival"
+    },
+    "presented": {
+      "lineage": "01M3COMPARISONVECTORLINEAGE",
+      "ordinal": 7,
+      "record_hash": "b077c85bc539998b05a31a4361eb2b2fa86d6ba99bc2c561c5262065b000a2fa"
+    },
+    "at_known": null
+  },
+  "expected": {
+    "outcome": "same-height-fork"
+  }
+}

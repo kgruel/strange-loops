@@ -1,0 +1,25 @@
+{
+  "name": "comparison-classify-lineage-replaced-outranks-a-lower-ordinal",
+  "description": "GUARD ORDER, stated as its own claim. A foreign lineage at a LOWER ordinal is a replacement, never a rollback: heights across two lineages are unrelated number lines. Answering rollback here would send an operator hunting for a backup of a lineage that was never involved.",
+  "input": {
+    "form": "heads",
+    "known": {
+      "kind": "advance",
+      "level": "commit",
+      "lineage": "01M3COMPARISONVECTORLINEAGE",
+      "ordinal": 7,
+      "record_hash": "3e920d4564316dad7f9d4e63199b25110e7df8d6bcff99c5f02dbe1df3df5093",
+      "observed_at": 1788000007.0,
+      "location": "/vectors/comparison/project.arrival"
+    },
+    "presented": {
+      "lineage": "01M3COMPARISONREPLACEMENT",
+      "ordinal": 4,
+      "record_hash": "56e7d0f1264becfe572263c363e2789f054e17fdf0053bf6fd72a84858d07da0"
+    },
+    "at_known": null
+  },
+  "expected": {
+    "outcome": "lineage-replaced"
+  }
+}

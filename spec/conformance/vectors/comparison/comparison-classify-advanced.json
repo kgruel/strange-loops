@@ -1,0 +1,29 @@
+{
+  "name": "comparison-classify-advanced",
+  "description": "A higher ordinal in the same lineage, AND the ledger vouches for the remembered head at its own coordinate. Both halves are required: at_known is what turns 'the chain reaches the presented head' into 'the chain still contains what we accepted'.",
+  "input": {
+    "form": "heads",
+    "known": {
+      "kind": "advance",
+      "level": "commit",
+      "lineage": "01M3COMPARISONVECTORLINEAGE",
+      "ordinal": 7,
+      "record_hash": "3e920d4564316dad7f9d4e63199b25110e7df8d6bcff99c5f02dbe1df3df5093",
+      "observed_at": 1788000007.0,
+      "location": "/vectors/comparison/project.arrival"
+    },
+    "presented": {
+      "lineage": "01M3COMPARISONVECTORLINEAGE",
+      "ordinal": 9,
+      "record_hash": "cf952fb90d4465760147cf4131e21c6b80d90bd627a655681006482db78529e8"
+    },
+    "at_known": {
+      "lineage": "01M3COMPARISONVECTORLINEAGE",
+      "ordinal": 7,
+      "record_hash": "3e920d4564316dad7f9d4e63199b25110e7df8d6bcff99c5f02dbe1df3df5093"
+    }
+  },
+  "expected": {
+    "outcome": "advanced"
+  }
+}

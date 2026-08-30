@@ -1,0 +1,31 @@
+{
+  "name": "comparison-journal-the-known-head-is-the-maximum-ordinal",
+  "description": "The remembered head is the epoch's MAXIMUM-ordinal entry, not the last line. Two writers append concurrently \u2014 the arrival lock serializes their appends, not their journal writes \u2014 so lines land out of order: A commits 5, B commits 6 and journals it, A journals 5 last. Here the store presents the head recorded at ordinal 5, which is a genuine restore from 6. Last-line semantics would read the remembered head as 5 and call this unchanged, which is exactly the silent re-acceptance the rule exists to close.",
+  "input": {
+    "form": "journal",
+    "journal": [
+      "{\"protocol\":1,\"type\":\"arrival-head-observation\",\"v\":1,\"wire\":1}",
+      "{\"kind\":\"bootstrap\",\"level\":\"mint\",\"lineage\":\"01M3COMPARISONVECTORLINEAGE\",\"location\":\"/vectors/comparison/project.arrival\",\"observed_at\":1788000000.0,\"ordinal\":0,\"record_hash\":\"8ac1d899262e830d2be319bd5ef28d03cfe847a108adaa1ec9288b7e2e0f2b00\",\"v\":1}",
+      "{\"kind\":\"advance\",\"level\":\"commit\",\"lineage\":\"01M3COMPARISONVECTORLINEAGE\",\"location\":\"/vectors/comparison/project.arrival\",\"observed_at\":1788000006.0,\"ordinal\":6,\"record_hash\":\"fd36ffd78406e2dbb820c9007bec1bfd1a17ba61a52c66fe14f0cab140f953f5\",\"v\":1}",
+      "{\"kind\":\"advance\",\"level\":\"commit\",\"lineage\":\"01M3COMPARISONVECTORLINEAGE\",\"location\":\"/vectors/comparison/project.arrival\",\"observed_at\":1788000005.0,\"ordinal\":5,\"record_hash\":\"ecf37a468403ec9d327ad68e53609eeda753c71dc62bb7081018389c3983de07\",\"v\":1}"
+    ],
+    "presented": {
+      "lineage": "01M3COMPARISONVECTORLINEAGE",
+      "ordinal": 5,
+      "record_hash": "ecf37a468403ec9d327ad68e53609eeda753c71dc62bb7081018389c3983de07"
+    },
+    "at_known": null
+  },
+  "expected": {
+    "read": "established",
+    "known": {
+      "lineage": "01M3COMPARISONVECTORLINEAGE",
+      "ordinal": 6,
+      "record_hash": "fd36ffd78406e2dbb820c9007bec1bfd1a17ba61a52c66fe14f0cab140f953f5"
+    },
+    "entries": 3,
+    "epoch": 3,
+    "skipped": 0,
+    "outcome": "rollback"
+  }
+}

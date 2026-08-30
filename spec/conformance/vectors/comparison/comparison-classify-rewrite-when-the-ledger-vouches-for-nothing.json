@@ -1,0 +1,25 @@
+{
+  "name": "comparison-classify-rewrite-when-the-ledger-vouches-for-nothing",
+  "description": "The second way the advance branch fails: descent was never established at all, so at_known is null. Absence of evidence is not evidence of descent \u2014 an unproven advance is a rewrite, not an advance with a caveat.",
+  "input": {
+    "form": "heads",
+    "known": {
+      "kind": "advance",
+      "level": "commit",
+      "lineage": "01M3COMPARISONVECTORLINEAGE",
+      "ordinal": 7,
+      "record_hash": "3e920d4564316dad7f9d4e63199b25110e7df8d6bcff99c5f02dbe1df3df5093",
+      "observed_at": 1788000007.0,
+      "location": "/vectors/comparison/project.arrival"
+    },
+    "presented": {
+      "lineage": "01M3COMPARISONVECTORLINEAGE",
+      "ordinal": 9,
+      "record_hash": "cf952fb90d4465760147cf4131e21c6b80d90bd627a655681006482db78529e8"
+    },
+    "at_known": null
+  },
+  "expected": {
+    "outcome": "rewrite"
+  }
+}

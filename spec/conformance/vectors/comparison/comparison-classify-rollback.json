@@ -1,0 +1,29 @@
+{
+  "name": "comparison-classify-rollback",
+  "description": "A lower ordinal in the same lineage. Refuse: the response is to locate a replica at or above the witnessed head, never to move the witness backward to match the store. at_known is supplied here and is deliberately not consulted \u2014 the descending branch needs no evidence beyond the height.",
+  "input": {
+    "form": "heads",
+    "known": {
+      "kind": "advance",
+      "level": "commit",
+      "lineage": "01M3COMPARISONVECTORLINEAGE",
+      "ordinal": 7,
+      "record_hash": "3e920d4564316dad7f9d4e63199b25110e7df8d6bcff99c5f02dbe1df3df5093",
+      "observed_at": 1788000007.0,
+      "location": "/vectors/comparison/project.arrival"
+    },
+    "presented": {
+      "lineage": "01M3COMPARISONVECTORLINEAGE",
+      "ordinal": 4,
+      "record_hash": "56e7d0f1264becfe572263c363e2789f054e17fdf0053bf6fd72a84858d07da0"
+    },
+    "at_known": {
+      "lineage": "01M3COMPARISONVECTORLINEAGE",
+      "ordinal": 7,
+      "record_hash": "3e920d4564316dad7f9d4e63199b25110e7df8d6bcff99c5f02dbe1df3df5093"
+    }
+  },
+  "expected": {
+    "outcome": "rollback"
+  }
+}

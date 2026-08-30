@@ -1,0 +1,33 @@
+{
+  "name": "comparison-incomplete-a-bound-still-refuses-below-itself",
+  "description": "What a bound CAN answer, which is the half a decline-only reading would lose. The accepted head is at least 91, so a store presenting 89 is certainly below it and that is a rollback on any reading. The bound is sound downward and unobtainable in both proceed directions: nothing bounds the accepted head from ABOVE either, so a head above the bound is not an advance \u2014 a lost entry may have sat at 200.",
+  "input": {
+    "form": "journal",
+    "journal": [
+      "{\"protocol\":1,\"type\":\"arrival-head-observation\",\"v\":1,\"wire\":1}",
+      "{\"kind\":\"bootstrap\",\"level\":\"mint\",\"lineage\":\"01M3COMPARISONVECTORLINEAGE\",\"location\":\"/vectors/comparison/project.arrival\",\"observed_at\":1788000000.0,\"ordinal\":0,\"record_hash\":\"8ac1d899262e830d2be319bd5ef28d03cfe847a108adaa1ec9288b7e2e0f2b00\",\"v\":1}",
+      "{\"kind\":\"trust-reset\",\"level\":\"full\",\"lineage\":\"01M3COMPARISONVECTORLINEAGE\",\"location\":\"/vectors/comparison/project.arrival\",\"observed_at\":1788000090.0,\"ordinal\":90,\"record_hash\":\"9ba847b1c3e2f92f410ac2264266c8506f0df0a9cee6575a27b6064957fc93ba\",\"v\":1}",
+      "{\"kind\":\"advance\",\"level\":\"commit\",\"lineage\":\"01M3COMPARISONVECTORLINEAGE\",\"location\":\"/vectors/comparison/project.arrival\",\"",
+      "{\"kind\":\"advance\",\"level\":\"commit\",\"lineage\":\"01M3COMPARISONVECTORLINEAGE\",\"location\":\"/vectors/comparison/project.arrival\",\"observed_at\":1788000091.0,\"ordinal\":91,\"record_hash\":\"e2235df4281b93546c0177885f0677948fb368cf593fa3ec1fbd2d734e06bfe8\",\"v\":1}"
+    ],
+    "presented": {
+      "lineage": "01M3COMPARISONVECTORLINEAGE",
+      "ordinal": 89,
+      "record_hash": "623f994637f1541c6ae8cb79aae131072e4963c06724a9eeb1fb7394fb24ae31"
+    },
+    "at_known": null
+  },
+  "expected": {
+    "read": "bounded",
+    "known": {
+      "lineage": "01M3COMPARISONVECTORLINEAGE",
+      "ordinal": 91,
+      "record_hash": "e2235df4281b93546c0177885f0677948fb368cf593fa3ec1fbd2d734e06bfe8"
+    },
+    "entries": 3,
+    "epoch": 2,
+    "skipped": 1,
+    "outcome": null,
+    "sound_answer": "rollback"
+  }
+}

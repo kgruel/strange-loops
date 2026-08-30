@@ -1,0 +1,26 @@
+{
+  "name": "comparison-incomplete-a-re-mint-against-lost-content-is-not-first-contact",
+  "description": "The consequence stated as its own vector, because it is the one an operator would meet. A fresh genesis at ordinal 0 arrives at a location whose journal remembers ordinal 4217 in unreadable form. That is a replacement wearing the old name \u2014 the case the store-lost refusal exists for \u2014 and reaching it through the forward-compatibility path would be a downgrade attack in the adversarial reading and silent re-acceptance in the ordinary one. It declines.",
+  "input": {
+    "form": "journal",
+    "journal": [
+      "{\"issuer\":\"a-later-build\",\"protocol\":2,\"type\":\"arrival-head-observation\",\"v\":2,\"wire\":2}",
+      "{\"custody\":{\"chain\":\"a-later-build\"},\"kind\":\"advance\",\"level\":\"commit\",\"lineage\":\"01M3COMPARISONVECTORLINEAGE\",\"observed_at\":1788004216.0,\"ordinal\":4216,\"record_hash\":\"fe006204847e0c589d1c2cdc7646c1fe2222e96c29802245fcbfcb23c2021f81\",\"v\":2}",
+      "{\"custody\":{\"chain\":\"a-later-build\"},\"kind\":\"advance\",\"level\":\"commit\",\"lineage\":\"01M3COMPARISONVECTORLINEAGE\",\"observed_at\":1788004217.0,\"ordinal\":4217,\"record_hash\":\"256f6ea40690cf118ab26a820207050cb57ae41ad4e5ce03b23564ff0a518c5d\",\"v\":2}"
+    ],
+    "presented": {
+      "lineage": "01M3COMPARISONVECTORLINEAGE",
+      "ordinal": 0,
+      "record_hash": "6c745bc8aad2cf97d9215f43d489ebd3fbbc89405cdfed9e87681fd220695349"
+    },
+    "at_known": null
+  },
+  "expected": {
+    "read": "unreadable",
+    "known": null,
+    "entries": 0,
+    "epoch": 0,
+    "skipped": 2,
+    "outcome": null
+  }
+}

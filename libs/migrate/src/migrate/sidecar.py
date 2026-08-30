@@ -73,16 +73,17 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-import rfc8785
+import ckdl
+
 from engine.arrival import (
     GENESIS_KIND,
     KEY_INTRODUCTION_KIND,
     ArrivalCorrupt,
-    ArrivalError,
+    ArrivalTornTail,
+    GenesisRefused,
     Signer,
     Verify,
     _canonical_bytes,
-    build_record,
     mint_lineage,
 )
 from engine.arrival_body import (
@@ -94,6 +95,7 @@ from engine.arrival_body import (
 from engine.arrival_contract import (
     Full,
     Head,
+    HeadMismatch,
     RecordDraft,
     StoreDescriptor,
 )
@@ -102,29 +104,29 @@ from engine.arrival_head_attestation import (
     Level,
     heads_dir,
     read_journal,
-    state_root,
 )
 from engine.arrival_head_seam import StoreLost
-from engine.arrival_registry import BackendRegistry, descriptor_for
-from lang import BackendDecl, VertexFile, parse_vertex, parse_vertex_file
+from engine.arrival_registry import BackendRegistry
+from lang import BackendDecl, VertexFile, parse_vertex
 
 from .inventory import SourceInventory, inventory
-from .legacy_ids import FactRow, Transform, identity
+from .legacy_ids import Transform, identity
 from .legacy_source import BatchUnit, FlatFactUnit, LegacySource, TickUnit
 from .refusals import (
     JournalPreflightRefused,
     LegacyStorageRefused,
-    MigrationRefused,
     PublishPreconditionRefused,
+    ReportBadSignatureRefused,
+    ReportHeadMismatchRefused,
+    ReportMalformedRefused,
+    ReportMissingTargetRefused,
     SourceChangedRefused,
     TargetMismatchOnResumeRefused,
+    TargetUnopenable,
     TornTailRefused,
 )
 from .transform import (
-    DroppedUnit,
-    GenesisRequirements,
     TransformExceptions,
-    TransformResult,
     coerce_vertex,
     transform,
 )
@@ -137,6 +139,8 @@ __all__ = [
     "verify_migration_report",
     "run_migration",
 ]
+
+ALLOWED_REPORT_KEYS = frozenset({"body", "signer", "signature"})
 
 
 @dataclass(frozen=True)
@@ -160,59 +164,17 @@ class EquivalenceResult:
     mismatches: tuple[str, ...] = ()
 
 
-def _is_torn_tail_error(exc: BaseException) -> bool:
-    """Determine whether an exception indicates an incomplete record or torn tail."""
-    curr: BaseException | None = exc
-    while curr is not None:
-        msg = str(curr)
-        if (
-            "ends mid-record" in msg
-            or "torn tail" in msg
-            or "truncated" in msg
-            or "no complete first record" in msg
-        ):
-            return True
-        curr = curr.__cause__ or curr.__context__
-    return False
-
-
-def _drafts_to_records(
-    lineage: str, start_head: Head, drafts: Sequence[RecordDraft]
-) -> list[dict[str, Any]]:
-    """Convert sequence of RecordDraft into full pre-coordinated records chaining onto start_head."""
-    records: list[dict[str, Any]] = []
-    prev_rh = start_head.record_hash
-    for i, d in enumerate(drafts):
-        ord_num = start_head.ordinal + 1 + i
-        rec = build_record(
-            lin=lineage,
-            ordinal=ord_num,
-            prev=prev_rh,
-            k=d.kind,
-            body=dict(d.body),
-            observer=d.observer,
-            origin=d.origin,
-            at=d.authored_at,
-            sig=d.signature,
-        )
-        records.append(rec)
-        prev_rh = rec["rh"]
-    return records
-
-
-def _append_drafts_through_wrapper(
+def _append_drafts(
     ledger: Any,
-    lineage: str,
     current_head: Head,
     drafts: Sequence[RecordDraft],
     chunk_size: int = 500,
 ) -> Head:
-    """Append drafts through AttestedLedger in chunks using the replication contract path."""
+    """Append drafts through AttestedLedger in chunks using ordinary contract append."""
     head = current_head
     for i in range(0, len(drafts), chunk_size):
         chunk_drafts = drafts[i : i + chunk_size]
-        chunk_records = _drafts_to_records(lineage, head, chunk_drafts)
-        commit = ledger.replicate(expected=head, records=chunk_records)
+        commit = ledger.append(expected=head, drafts=chunk_drafts)
         head = commit.after
     return head
 
@@ -259,7 +221,8 @@ def edit_vertex_store_clause(
         backend: Backend name (defaults to 'file').
 
     Raises:
-        PublishPreconditionRefused: If verification-by-re-parse fails.
+        PublishPreconditionRefused: If verification-by-re-parse fails or store clause
+            cannot be unambiguously located.
         FileNotFoundError: If vertex_path does not exist.
     """
     v_path = Path(vertex_path).resolve()
@@ -269,26 +232,64 @@ def edit_vertex_store_clause(
     original_text = v_path.read_text(encoding="utf-8")
     pre_ast = parse_vertex(original_text, v_path)
 
-    new_store_clause = f'store "{target_location}" backend="{backend}"'
-    if re.search(r"^[ \t]*store\b.*$", original_text, flags=re.MULTILINE):
-        edited_text = re.sub(
-            r"^[ \t]*store\b.*$",
-            new_store_clause,
-            original_text,
-            flags=re.MULTILINE,
-            count=1,
+    try:
+        doc = ckdl.parse(original_text)
+    except Exception as exc:
+        raise PublishPreconditionRefused(
+            f"Verification-by-re-parse failed: .vertex could not be parsed: {exc}. "
+            "Advisory: check .vertex file syntax.",
+            condition="vertex_reparse",
+        ) from exc
+
+    store_nodes = [node for node in doc.nodes if node.name == "store"]
+    if len(store_nodes) > 1:
+        raise PublishPreconditionRefused(
+            "the store clause cannot be unambiguously located for a surgical edit: "
+            f"found {len(store_nodes)} duplicate store nodes",
+            condition="vertex_store_duplicate_nodes",
         )
-    else:
-        if re.search(r'^[ \t]*name\s+"[^"]*".*$', original_text, flags=re.MULTILINE):
-            edited_text = re.sub(
-                r'(^[ \t]*name\s+"[^"]*".*$)',
-                r"\1\n" + new_store_clause,
-                original_text,
-                flags=re.MULTILINE,
-                count=1,
+
+    # Check for block comment spans /* ... */
+    block_comment_spans: list[tuple[int, int]] = [
+        (m.start(), m.end())
+        for m in re.finditer(r"/\*[\s\S]*?\*/", original_text)
+    ]
+
+    regex_matches = list(
+        re.finditer(r"^[ \t]*store\b.*$", original_text, flags=re.MULTILINE)
+    )
+    if len(regex_matches) != 1:
+        raise PublishPreconditionRefused(
+            "the store clause cannot be unambiguously located for a surgical edit: "
+            f"expected exactly 1 store line match, found {len(regex_matches)}",
+            condition="vertex_store_regex_match_count",
+        )
+
+    match = regex_matches[0]
+    match_start = match.start()
+    for c_start, c_end in block_comment_spans:
+        if c_start <= match_start < c_end:
+            raise PublishPreconditionRefused(
+                "the store clause cannot be unambiguously located for a surgical edit: "
+                "matched store line is inside a comment",
+                condition="vertex_store_in_comment",
             )
-        else:
-            edited_text = f"{new_store_clause}\n\n{original_text}"
+
+    if len(store_nodes) == 0:
+        raise PublishPreconditionRefused(
+            "the store clause cannot be unambiguously located for a surgical edit: "
+            "matched store line does not correspond to an effective store node",
+            condition="vertex_store_ineffective",
+        )
+
+    new_store_clause = f'store "{target_location}" backend="{backend}"'
+    edited_text = re.sub(
+        r"^[ \t]*store\b.*$",
+        new_store_clause,
+        original_text,
+        flags=re.MULTILINE,
+        count=1,
+    )
 
     # Verification-by-re-parse
     try:
@@ -300,43 +301,30 @@ def edit_vertex_store_clause(
             condition="vertex_reparse",
         ) from exc
 
+    if post_ast.store != Path(target_location):
+        raise PublishPreconditionRefused(
+            f"Verification-by-re-parse failed: expected store={Path(target_location)!r}, got {post_ast.store!r}. "
+            "Advisory: check store clause location property.",
+            condition="vertex_store_location",
+        )
+
     if post_ast.store_backend != BackendDecl(name=backend):
         raise PublishPreconditionRefused(
-            f"Verification-by-re-parse failed: expected store_backend={backend!r}, got {post_ast.store_backend!r}. "
+            f"Verification-by-re-parse failed: expected store_backend={BackendDecl(name=backend)!r}, got {post_ast.store_backend!r}. "
             "Advisory: check store clause backend property.",
             condition="vertex_store_backend",
         )
 
-    # Assert every non-store field is untouched
+    # Assert every non-store field is untouched (F7(a) via VertexFile.__match_args__)
+    ignored = {"store", "store_backend", "path"}
     field_mismatches: list[str] = []
-    if post_ast.name != pre_ast.name:
-        field_mismatches.append(f"name ({pre_ast.name!r} != {post_ast.name!r})")
-    if post_ast.loops != pre_ast.loops:
-        field_mismatches.append("loops")
-    if post_ast.discover != pre_ast.discover:
-        field_mismatches.append("discover")
-    if post_ast.sources != pre_ast.sources:
-        field_mismatches.append("sources")
-    if post_ast.vertices != pre_ast.vertices:
-        field_mismatches.append("vertices")
-    if post_ast.routes != pre_ast.routes:
-        field_mismatches.append("routes")
-    if post_ast.emit != pre_ast.emit:
-        field_mismatches.append("emit")
-    if post_ast.combine != pre_ast.combine:
-        field_mismatches.append("combine")
-    if post_ast.sources_blocks != pre_ast.sources_blocks:
-        field_mismatches.append("sources_blocks")
-    if post_ast.observers != pre_ast.observers:
-        field_mismatches.append("observers")
-    if post_ast.lens != pre_ast.lens:
-        field_mismatches.append("lens")
-    if post_ast.boundary != pre_ast.boundary:
-        field_mismatches.append("boundary")
-    if post_ast.observer_scoped != pre_ast.observer_scoped:
-        field_mismatches.append("observer_scoped")
-    if post_ast.strict != pre_ast.strict:
-        field_mismatches.append("strict")
+    for field in VertexFile.__match_args__:
+        if field in ignored:
+            continue
+        if getattr(post_ast, field) != getattr(pre_ast, field):
+            field_mismatches.append(
+                f"{field} ({getattr(pre_ast, field)!r} != {getattr(post_ast, field)!r})"
+            )
 
     if field_mismatches:
         raise PublishPreconditionRefused(
@@ -366,7 +354,6 @@ def _check_equivalence(
     source_path: Path,
     target_records: list[dict[str, Any]],
     rule: Transform,
-    custodian: str,
 ) -> EquivalenceResult:
     """Compare expected logical rows derived from unmodified source against target records."""
     src = LegacySource.read(source_path)
@@ -535,6 +522,19 @@ def _check_inventory_equality(
     expected_observer_census = dict(source_inv.observer_census)
     expected_tick_count = source_inv.tick_count
 
+    # Account for dropped units (F7(d))
+    for du in exceptions.dropped_units:
+        for fk in du.fact_kinds:
+            if fk in expected_per_kind:
+                expected_per_kind[fk] -= 1
+                if expected_per_kind[fk] == 0:
+                    del expected_per_kind[fk]
+        for obs in du.observers:
+            if obs in expected_observer_census:
+                expected_observer_census[obs] -= 1
+                if expected_observer_census[obs] == 0:
+                    del expected_observer_census[obs]
+
     mismatches: list[str] = []
     if dict(target_per_kind) != expected_per_kind:
         mismatches.append(
@@ -575,41 +575,62 @@ def verify_migration_report(
 
     Returns:
         True if the signature is valid and the target head claim matches live target.
+
+    Raises:
+        ReportMalformedRefused: If report is unreadable, not JSON, or carries unknown keys.
+        ReportBadSignatureRefused: If signature fails verification.
+        ReportMissingTargetRefused: If target store file does not exist.
+        ReportHeadMismatchRefused: If target store head does not match report claim.
     """
     r_path = Path(report_path).resolve()
     if not r_path.exists():
-        return False
+        raise ReportMissingTargetRefused(f"Migration report file does not exist: {r_path}")
 
     try:
         report_doc = json.loads(r_path.read_text(encoding="utf-8"))
-    except Exception:
-        return False
+    except Exception as exc:
+        raise ReportMalformedRefused(f"Migration report is not valid JSON: {exc}") from exc
+
+    if not isinstance(report_doc, dict):
+        raise ReportMalformedRefused("Migration report top-level document must be a JSON object")
+
+    unknown_keys = set(report_doc.keys()) - ALLOWED_REPORT_KEYS
+    if unknown_keys:
+        raise ReportMalformedRefused(
+            f"Migration report carries unknown top-level keys: {sorted(unknown_keys)}"
+        )
 
     body = report_doc.get("body")
     signature = report_doc.get("signature")
-    if not isinstance(body, dict) or not isinstance(signature, str):
-        return False
-
-    # Verify signature over canonical JSON bytes of body
-    canonical_bytes = _canonical_bytes(body)
-    digest = hashlib.sha256(canonical_bytes).hexdigest()
+    signer = report_doc.get("signer")
+    if not isinstance(body, dict) or not isinstance(signature, str) or not isinstance(signer, str):
+        raise ReportMalformedRefused(
+            "Migration report missing required top-level fields (body, signature, signer)"
+        )
 
     if verify is None:
         raise ValueError(
             "verify function must be provided (verify is injected per Rule 4/11)"
         )
 
+    # Verify signature over canonical JSON bytes of report minus signature field
+    signed_dict = {k: v for k, v in report_doc.items() if k != "signature"}
+    canonical_bytes = _canonical_bytes(signed_dict)
+    digest = hashlib.sha256(canonical_bytes).hexdigest()
+
     if not verify(public_key, signature, digest):
-        return False
+        raise ReportBadSignatureRefused(
+            f"Migration report signature failed verification for custodian key {public_key!r}"
+        )
 
     # Re-check target head claim against live target
     target_head_claim = body.get("target_head")
     if not isinstance(target_head_claim, dict):
-        return False
+        raise ReportMalformedRefused("Migration report body missing 'target_head' dictionary")
 
     lineage = target_head_claim.get("lineage")
     if not lineage:
-        return False
+        raise ReportMalformedRefused("Migration report 'target_head' missing 'lineage'")
 
     if target_path is None:
         t_path = r_path.parent / f"{lineage}.arrival"
@@ -617,22 +638,28 @@ def verify_migration_report(
         t_path = Path(target_path).resolve()
 
     if not t_path.exists():
-        return False
+        raise ReportMissingTargetRefused(f"Target arrival store does not exist: {t_path}")
 
     registry = BackendRegistry.with_builtin_backends()
     descriptor = StoreDescriptor(backend="file", location=str(t_path))
     try:
         ledger, _ = registry.open(descriptor)
         live_head = ledger.head()
-    except Exception:
-        return False
+    except Exception as exc:
+        raise ReportHeadMismatchRefused(
+            f"Cannot read head from target arrival store {t_path}: {exc}"
+        ) from exc
 
     if (
         live_head.lineage != target_head_claim.get("lineage")
         or live_head.ordinal != target_head_claim.get("ordinal")
         or live_head.record_hash != target_head_claim.get("record_hash")
     ):
-        return False
+        raise ReportHeadMismatchRefused(
+            f"Live target head ({live_head.lineage}, {live_head.ordinal}, {live_head.record_hash}) "
+            f"does not match report claim ({target_head_claim.get('lineage')}, "
+            f"{target_head_claim.get('ordinal')}, {target_head_claim.get('record_hash')})"
+        )
 
     return True
 
@@ -693,7 +720,7 @@ def run_migration(
     # Stage 1: Inventory pass (refusals fire here, before any target creation)
     try:
         inv = inventory(src_path)
-    except (sqlite3.OperationalError, sqlite3.DatabaseError) as exc:
+    except (sqlite3.OperationalError, sqlite3.DatabaseError, OSError, UnicodeDecodeError) as exc:
         raise LegacyStorageRefused(
             f"Legacy storage read failed for source {src_path!r}: {exc}. "
             "Advisory: inspect legacy store database schema or file integrity.",
@@ -713,7 +740,7 @@ def run_migration(
             custodian=custodian,
             custodian_key=custodian_key,
         )
-    except (sqlite3.OperationalError, sqlite3.DatabaseError) as exc:
+    except (sqlite3.OperationalError, sqlite3.DatabaseError, OSError, UnicodeDecodeError) as exc:
         raise LegacyStorageRefused(
             f"Legacy storage read failed during transform for source {src_path!r}: {exc}. "
             "Advisory: inspect legacy store database schema or file integrity.",
@@ -751,11 +778,9 @@ def run_migration(
         }
         current_head = ledger.mint(mint_options)
 
-        # Append drafts in append loop via wrapper
+        # Append drafts via ordinary contract append (F1)
         if drafts:
-            current_head = _append_drafts_through_wrapper(
-                ledger, lineage, current_head, drafts
-            )
+            current_head = _append_drafts(ledger, current_head, drafts)
 
     else:
         # Resume run (§D.1: Resume point derived from target head)
@@ -768,17 +793,19 @@ def run_migration(
         try:
             ledger, query = registry.open(descriptor)
             current_head = ledger.head()
-        except Exception as exc:
-            if _is_torn_tail_error(exc):
+        except (ArrivalTornTail, StoreLost, ArrivalCorrupt, GenesisRefused, OSError) as exc:
+            cause = exc.__cause__
+            if isinstance(exc, ArrivalTornTail) or isinstance(cause, ArrivalTornTail):
                 raise TornTailRefused(
                     f"Resume target {target_path} ends mid-record: {exc}. "
                     "Advisory: out-of-band truncate the torn tail or start a fresh migration.",
                     target_path=str(target_path),
                 ) from exc
-            raise TargetMismatchOnResumeRefused(
+            raise TargetUnopenable(
                 f"Resume target {target_path} cannot be opened: {exc}. "
                 "Advisory: inspect target store or start a fresh migration.",
                 target_path=str(target_path),
+                cause=exc,
             ) from exc
 
         lineage = current_head.lineage
@@ -786,17 +813,19 @@ def run_migration(
         # Scan existing records through current_head and diff prefix against expected drafts
         try:
             scanned_records = list(ledger.scan(through=current_head))
-        except Exception as exc:
-            if _is_torn_tail_error(exc):
+        except (ArrivalTornTail, StoreLost, ArrivalCorrupt, HeadMismatch, OSError) as exc:
+            cause = exc.__cause__
+            if isinstance(exc, ArrivalTornTail) or isinstance(cause, ArrivalTornTail):
                 raise TornTailRefused(
                     f"Resume target {target_path} ends mid-record during scan: {exc}. "
                     "Advisory: out-of-band truncate the torn tail or start a fresh migration.",
                     target_path=str(target_path),
                 ) from exc
-            raise TargetMismatchOnResumeRefused(
+            raise TargetUnopenable(
                 f"Resume target {target_path} failed scan at {current_head}: {exc}. "
                 "Advisory: inspect target store or start a fresh migration.",
                 target_path=str(target_path),
+                cause=exc,
             ) from exc
 
         if len(scanned_records) != current_head.ordinal + 1:
@@ -807,7 +836,7 @@ def run_migration(
                 target_path=str(target_path),
             )
 
-        # Check genesis at ordinal 0
+        # Check genesis at ordinal 0 against genesis_req (F3)
         genesis_rec = scanned_records[0]
         if (
             genesis_rec.get("k") != GENESIS_KIND
@@ -815,6 +844,24 @@ def run_migration(
         ):
             raise TargetMismatchOnResumeRefused(
                 f"Target at {target_path} genesis at ordinal 0 does not match lineage {lineage}. "
+                "Advisory: start a fresh migration.",
+                target_path=str(target_path),
+                ordinal=0,
+            )
+
+        if genesis_rec.get("observer") != genesis_req.custodian:
+            raise TargetMismatchOnResumeRefused(
+                f"Target at {target_path} genesis custodian {genesis_rec.get('observer')!r} "
+                f"does not match expected custodian {genesis_req.custodian!r}. "
+                "Advisory: start a fresh migration.",
+                target_path=str(target_path),
+                ordinal=0,
+            )
+
+        if genesis_rec.get("body", {}).get("key") != genesis_req.key:
+            raise TargetMismatchOnResumeRefused(
+                f"Target at {target_path} genesis public key {genesis_rec.get('body', {}).get('key')!r} "
+                f"does not match expected custodian public key {genesis_req.key!r}. "
                 "Advisory: start a fresh migration.",
                 target_path=str(target_path),
                 ordinal=0,
@@ -850,8 +897,8 @@ def run_migration(
         # Append remaining drafts beyond current_head
         if current_head.ordinal < len(drafts):
             remaining_drafts = drafts[current_head.ordinal :]
-            current_head = _append_drafts_through_wrapper(
-                ledger, lineage, current_head, remaining_drafts
+            current_head = _append_drafts(
+                ledger, current_head, remaining_drafts
             )
 
     # Stage 6: Verification (BOTH gates: Full verify + Equivalence re-run)
@@ -878,7 +925,7 @@ def run_migration(
 
     all_target_records = list(ledger.scan(through=current_head))
     equiv_res = _check_equivalence(
-        src_path, all_target_records, t_rule, genesis_req.custodian
+        src_path, all_target_records, t_rule
     )
     if not equiv_res.matched:
         raise PublishPreconditionRefused(
@@ -947,7 +994,11 @@ def run_migration(
         "custodian": genesis_req.custodian,
     }
 
-    canonical_bytes = _canonical_bytes(report_body)
+    report_doc = {
+        "body": report_body,
+        "signer": genesis_req.custodian,
+    }
+    canonical_bytes = _canonical_bytes(report_doc)
     digest = hashlib.sha256(canonical_bytes).hexdigest()
     report_signature = signer(genesis_req.custodian, digest)
     if report_signature is None:
@@ -958,13 +1009,25 @@ def run_migration(
         )
 
     report_document = {
-        "body": report_body,
+        **report_doc,
         "signature": report_signature,
-        "signer": genesis_req.custodian,
     }
-    report_path.write_text(
-        json.dumps(report_document, indent=2) + "\n", encoding="utf-8"
-    )
+
+    # Atomic write for report temp+fsync+replace (F7(c))
+    report_dir = report_path.parent
+    temp_report = report_dir / f".tmp_{report_path.name}_{uuid4().hex}"
+    try:
+        with temp_report.open("w", encoding="utf-8") as f:
+            f.write(json.dumps(report_document, indent=2) + "\n")
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(temp_report, report_path)
+    finally:
+        if temp_report.exists():
+            try:
+                temp_report.unlink()
+            except OSError:
+                pass
 
     # Stage 9: Atomic descriptor publish (§H)
     try:

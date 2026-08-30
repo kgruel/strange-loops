@@ -11,7 +11,9 @@ from unittest.mock import patch
 import pytest
 from engine.arrival import (
     GENESIS_KIND,
+    ArrivalCorrupt,
     ArrivalLog,
+    ArrivalTornTail,
     _canonical_bytes,
     build_record,
     mint_lineage,
@@ -19,11 +21,12 @@ from engine.arrival import (
 from engine.arrival_body import body_of_fact_row
 from engine.arrival_contract import Full, Head, RecordDraft, StoreDescriptor
 from engine.arrival_head_attestation import Kind, Level, heads_dir, read_journal
+from engine.arrival_head_seam import StoreLost
 from engine.arrival_registry import BackendRegistry, descriptor_for
 from lang import BackendDecl, ObserverDecl, VertexFile, parse_vertex_file
 from sign import ed25519
 
-from migrate.legacy_ids import FactRow, identity
+from migrate.legacy_ids import FactRow, Transform, identity, ulid_migration
 from migrate.legacy_source import LegacySource
 from migrate.refusals import (
     JournalPreflightRefused,
@@ -31,8 +34,13 @@ from migrate.refusals import (
     LegacyStorageRefused,
     MigrationRefused,
     PublishPreconditionRefused,
+    ReportBadSignatureRefused,
+    ReportHeadMismatchRefused,
+    ReportMalformedRefused,
+    ReportMissingTargetRefused,
     SourceChangedRefused,
     TargetMismatchOnResumeRefused,
+    TargetUnopenable,
     TornTailRefused,
 )
 from migrate.sidecar import (
@@ -366,7 +374,7 @@ def test_resume_against_tampered_target_refuses_no_repair(tmp_path: Path) -> Non
     target_path.write_bytes(tampered_bytes)
     recorded_tampered_bytes = target_path.read_bytes()
 
-    with pytest.raises(TargetMismatchOnResumeRefused):
+    with pytest.raises(TargetUnopenable) as exc_info:
         run_migration(
             source_path=source_path,
             vertex_path=v_path,
@@ -374,6 +382,9 @@ def test_resume_against_tampered_target_refuses_no_repair(tmp_path: Path) -> Non
             signer=cust.signer,
             resume_target=target_path,
         )
+
+    assert isinstance(exc_info.value.cause, StoreLost)
+    assert exc_info.value.target_path == str(target_path)
 
     # F2: Verification never repairs — target bytes MUST remain unchanged
     assert target_path.read_bytes() == recorded_tampered_bytes
@@ -699,3 +710,301 @@ def test_legacy_storage_operational_error_wrapped(tmp_path: Path) -> None:
             store_dir=store_dir,
             signer=cust.signer,
         )
+
+
+# ---------------------------------------------------------------------------
+# Test 11: F5 — The F2-resume-diff ratchet: valid chain with divergent content
+# ---------------------------------------------------------------------------
+
+
+def test_resume_against_divergent_valid_chain_refuses_target_mismatch(tmp_path: Path) -> None:
+    """F5: Target with valid chain whose content diverges at ordinal 3 -> TargetMismatchOnResumeRefused(ordinal=3)."""
+    store_dir = tmp_path / "data"
+    store_dir.mkdir(parents=True, exist_ok=True)
+    cust = CustodianFixture(tmp_path, "alice")
+    source_path = build_synthetic_jsonl(store_dir / "legacy.jsonl")
+    v_path = _make_vertex_file(
+        tmp_path,
+        custodian_name=cust.name,
+        custodian_key=cust.public,
+        other_observers=[],
+    )
+
+    t_res = transform(source_path, parse_vertex_file(v_path), signer=cust.signer)
+    lineage = mint_lineage()
+    target_path = store_dir / f"{lineage}.arrival"
+
+    registry = BackendRegistry.with_builtin_backends()
+    desc = StoreDescriptor(backend="file", location=str(target_path), lineage=lineage)
+    ledger, _ = registry.open(desc)
+    genesis_head = ledger.mint(
+        {
+            "observer": t_res.genesis.custodian,
+            "signer": cust.signer,
+            "key": t_res.genesis.key,
+            "lineage": lineage,
+            "at": 0.0,
+        }
+    )
+
+    # Append valid drafts 1 and 2 matching source
+    ledger.append(genesis_head, t_res.drafts[:2])
+    head_ord2 = ledger.head()
+
+    # Append ordinal 3 with divergent content
+    divergent_draft = RecordDraft(
+        kind="fact",
+        authored_at=9999.0,
+        observer="alice",
+        origin="",
+        body=body_of_fact_row(
+            (FACT_UUID4_SIGNED["id"], "concept", 9999.0, "alice", "", '{"divergent": "payload"}', None)
+        ),
+        signature=None,
+    )
+    ledger.append(head_ord2, [divergent_draft])
+    target_bytes_before = target_path.read_bytes()
+
+    with pytest.raises(TargetMismatchOnResumeRefused) as exc_info:
+        run_migration(
+            source_path=source_path,
+            vertex_path=v_path,
+            store_dir=store_dir,
+            signer=cust.signer,
+            resume_target=target_path,
+        )
+
+    assert exc_info.value.ordinal == 3
+    assert exc_info.value.target_path == str(target_path)
+    assert target_path.read_bytes() == target_bytes_before
+
+
+# ---------------------------------------------------------------------------
+# Test 12: F3 — Mallory foreign genesis rejected on resume
+# ---------------------------------------------------------------------------
+
+
+def test_resume_against_mallory_foreign_genesis_refuses(tmp_path: Path) -> None:
+    """F3: Target with foreign genesis (e.g. observer or key != custodian) -> TargetMismatchOnResumeRefused(ordinal=0)."""
+    store_dir = tmp_path / "data"
+    store_dir.mkdir(parents=True, exist_ok=True)
+    alice = CustodianFixture(tmp_path, "alice")
+    mallory = CustodianFixture(tmp_path, "mallory")
+    source_path = build_synthetic_jsonl(store_dir / "legacy.jsonl")
+    v_path = _make_vertex_file(
+        tmp_path,
+        custodian_name=alice.name,
+        custodian_key=alice.public,
+        other_observers=[],
+    )
+
+    lineage = mint_lineage()
+    target_path = store_dir / f"{lineage}.arrival"
+
+    registry = BackendRegistry.with_builtin_backends()
+    desc = StoreDescriptor(backend="file", location=str(target_path), lineage=lineage)
+    ledger, _ = registry.open(desc)
+    # Mallory mints the target instead of Alice
+    ledger.mint(
+        {
+            "observer": mallory.name,
+            "signer": mallory.signer,
+            "key": mallory.public,
+            "lineage": lineage,
+            "at": 0.0,
+        }
+    )
+
+    with pytest.raises(TargetMismatchOnResumeRefused) as exc_info:
+        run_migration(
+            source_path=source_path,
+            vertex_path=v_path,
+            store_dir=store_dir,
+            signer=alice.signer,
+            resume_target=target_path,
+        )
+
+    assert exc_info.value.ordinal == 0
+    assert "genesis custodian 'mallory' does not match" in str(exc_info.value) or "genesis public key" in str(exc_info.value)
+
+
+# ---------------------------------------------------------------------------
+# Test 13: F2 — Precondition refusals in edit_vertex_store_clause
+# ---------------------------------------------------------------------------
+
+
+def test_edit_vertex_store_clause_ambiguity_and_syntax_refusals(tmp_path: Path) -> None:
+    """F2: edit_vertex_store_clause refuses ambiguous, commented, or duplicate store clauses."""
+    loops_block = 'loops { concept { fold { items "collect" 100 } } }'
+    # (a) Duplicate store nodes
+    v_dup = tmp_path / "dup.vertex"
+    v_dup.write_text(
+        f'name "alice"\nstore "./data/a.jsonl"\nstore "./data/b.jsonl"\n{loops_block}\n',
+        encoding="utf-8",
+    )
+    with pytest.raises(PublishPreconditionRefused) as exc_info:
+        edit_vertex_store_clause(v_dup, "./data/target.arrival")
+    assert exc_info.value.condition == "vertex_store_duplicate_nodes"
+
+    # (b) Store inside block comment
+    v_comment = tmp_path / "comment.vertex"
+    v_comment.write_text(
+        f'name "alice"\n/*\nstore "./data/legacy.jsonl"\n*/\n{loops_block}\n',
+        encoding="utf-8",
+    )
+    with pytest.raises(PublishPreconditionRefused) as exc_info:
+        edit_vertex_store_clause(v_comment, "./data/target.arrival")
+    assert exc_info.value.condition in {"vertex_store_in_comment", "vertex_store_ineffective"}
+
+
+# ---------------------------------------------------------------------------
+# Test 14: F7(b) — verify_migration_report causes
+# ---------------------------------------------------------------------------
+
+
+def test_verify_migration_report_causes(tmp_path: Path) -> None:
+    """F7(b): verify_migration_report discriminates causes with typed refusals."""
+    import hashlib
+
+    store_dir = tmp_path / "data"
+    store_dir.mkdir(parents=True, exist_ok=True)
+    cust = CustodianFixture(tmp_path, "alice")
+    source_path = build_synthetic_jsonl(store_dir / "legacy.jsonl")
+    v_path = _make_vertex_file(
+        tmp_path,
+        custodian_name=cust.name,
+        custodian_key=cust.public,
+        other_observers=[],
+    )
+
+    outcome = run_migration(
+        source_path=source_path,
+        vertex_path=v_path,
+        store_dir=store_dir,
+        signer=cust.signer,
+    )
+
+    # 1. Valid report passes
+    assert verify_migration_report(
+        outcome.report_path,
+        cust.public,
+        verify=cust.verify,
+        target_path=outcome.target_path,
+    )
+
+    # 2. Bad signature -> ReportBadSignatureRefused
+    mallory = CustodianFixture(tmp_path, "mallory")
+    with pytest.raises(ReportBadSignatureRefused):
+        verify_migration_report(
+            outcome.report_path,
+            mallory.public,
+            verify=mallory.verify,
+            target_path=outcome.target_path,
+        )
+
+    # 3. Unknown top-level key -> ReportMalformedRefused
+    doc = json.loads(outcome.report_path.read_text(encoding="utf-8"))
+    doc["extra_top_level_key"] = "forbidden"
+    bad_report = tmp_path / "bad_keys.json"
+    bad_report.write_text(json.dumps(doc), encoding="utf-8")
+    with pytest.raises(ReportMalformedRefused):
+        verify_migration_report(
+            bad_report,
+            cust.public,
+            verify=cust.verify,
+            target_path=outcome.target_path,
+        )
+
+    # 4. Missing target -> ReportMissingTargetRefused
+    with pytest.raises(ReportMissingTargetRefused):
+        verify_migration_report(
+            outcome.report_path,
+            cust.public,
+            verify=cust.verify,
+            target_path=tmp_path / "nonexistent.arrival",
+        )
+
+    # 5. Head mismatch -> ReportHeadMismatchRefused
+    doc = json.loads(outcome.report_path.read_text(encoding="utf-8"))
+    doc["body"]["target_head"]["ordinal"] = 99999
+    # Re-sign the tampered doc
+    signed_dict = {k: v for k, v in doc.items() if k != "signature"}
+    digest = hashlib.sha256(_canonical_bytes(signed_dict)).hexdigest()
+    sig = cust.signer("alice", digest)
+    doc["signature"] = sig
+    mismatched_report = tmp_path / "mismatch.json"
+    mismatched_report.write_text(json.dumps(doc), encoding="utf-8")
+    with pytest.raises(ReportHeadMismatchRefused):
+        verify_migration_report(
+            mismatched_report,
+            cust.public,
+            verify=cust.verify,
+            target_path=outcome.target_path,
+        )
+
+
+# ---------------------------------------------------------------------------
+# Test 15: F7(d) — Dropped units and ulid_migration() inventory equality
+# ---------------------------------------------------------------------------
+
+
+def test_migration_with_dropped_units_and_ulid_migration(tmp_path: Path) -> None:
+    """F7(d): Migration succeeds with dropped units and with ulid_migration() rule."""
+    store_dir = tmp_path / "data"
+    store_dir.mkdir(parents=True, exist_ok=True)
+    cust = CustodianFixture(tmp_path, "alice")
+    bob_key = ed25519.load_or_generate(tmp_path / "keys" / "bob").public_b64
+    carol_key = ed25519.load_or_generate(tmp_path / "keys" / "carol").public_b64
+
+    source_path = build_synthetic_jsonl(store_dir / "legacy.jsonl")
+    v_path = _make_vertex_file(
+        tmp_path,
+        custodian_name=cust.name,
+        custodian_key=cust.public,
+        other_observers=[("bob", bob_key), ("carol", carol_key)],
+    )
+
+    # 1. Whole-unit-dropping rule
+    def drop_first_fact(row: FactRow) -> FactRow | None:
+        if row.id == FACT_UUID4_SIGNED["id"]:
+            return None
+        return row
+
+    drop_rule = Transform(rule="drop-first-fact", map_fact=drop_first_fact)
+    outcome_drop = run_migration(
+        source_path=source_path,
+        vertex_path=v_path,
+        store_dir=store_dir,
+        signer=cust.signer,
+        transform_rule=drop_rule,
+    )
+    assert len(outcome_drop.exceptions.dropped_units) == 1
+    assert outcome_drop.exceptions.dropped_units[0].fact_kinds == ("concept",)
+    assert verify_migration_report(
+        outcome_drop.report_path,
+        cust.public,
+        verify=cust.verify,
+        target_path=outcome_drop.target_path,
+    )
+
+    # 2. ulid_migration() rule
+    v_path2 = _make_vertex_file(
+        tmp_path,
+        custodian_name=cust.name,
+        custodian_key=cust.public,
+        other_observers=[("bob", bob_key), ("carol", carol_key)],
+    )
+    outcome_ulid = run_migration(
+        source_path=source_path,
+        vertex_path=v_path2,
+        store_dir=store_dir,
+        signer=cust.signer,
+        transform_rule=ulid_migration(),
+    )
+    assert outcome_ulid.target_path.exists()
+    assert verify_migration_report(
+        outcome_ulid.report_path,
+        cust.public,
+        verify=cust.verify,
+        target_path=outcome_ulid.target_path,
+    )

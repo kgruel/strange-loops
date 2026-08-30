@@ -108,6 +108,8 @@ class DroppedUnit:
     coordinate: int
     kind: str
     rule: str
+    fact_kinds: tuple[str, ...] = ()
+    observers: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -261,7 +263,13 @@ def transform(
             mapped = t_rule.map_fact(unit.row)
             if mapped is None:
                 dropped_units.append(
-                    DroppedUnit(coordinate=unit.coordinate, kind="fact", rule=t_rule.rule)
+                    DroppedUnit(
+                        coordinate=unit.coordinate,
+                        kind="fact",
+                        rule=t_rule.rule,
+                        fact_kinds=(unit.row.kind,),
+                        observers=(unit.row.observer,),
+                    )
                 )
                 continue
             row_tuple = (
@@ -295,7 +303,13 @@ def transform(
 
             if not mapped_rows:
                 dropped_units.append(
-                    DroppedUnit(coordinate=unit.coordinate, kind="batch", rule=t_rule.rule)
+                    DroppedUnit(
+                        coordinate=unit.coordinate,
+                        kind="batch",
+                        rule=t_rule.rule,
+                        fact_kinds=tuple(r.kind for r in unit.rows),
+                        observers=tuple(r.observer for r in unit.rows),
+                    )
                 )
                 continue
 

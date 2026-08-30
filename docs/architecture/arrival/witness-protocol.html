@@ -124,6 +124,7 @@
               <li>Replacement by an older backup</li>
               <li>Complete history rewrite and re-chaining</li>
               <li>Same-lineage equivocation between clients</li>
+              <li>Return to history a ceremony abandoned (§04b)</li>
             </ul>
           </article>
           <article class="doc-panel">
@@ -401,18 +402,60 @@
           belief the next open would contradict, and silence is the only unsafe part.
         </p>
         <p>
-          <strong>What a reset does and does not fence out</strong>, stated because it is
-          underdetermined rather than decided: a reset decrees trust in <em>N</em>; verified
-          descendants of <em>N</em>, including re-presentations of abandoned history, are
-          accepted; fencing out authentic history is not expressible unsigned. The ceremony’s
-          semantics here remain an open ruling
-          (<code>design:arrival-reset-descendant-acceptance</code>).
-        </p>
-        <p>
           The residual, stated rather than implied: truncating the journal and then replaying
           realigns every position, and nothing here detects it. That is the known bound of
           unsigned local state—the same class as deleting the journal outright and being met
           with first contact—and §04’s chained signed entries are the named upgrade.
+        </p>
+
+        <h3>What a reset fences out</h3>
+        <p>
+          A reset decrees trust in <em>N</em>, and an advance whose verified descent path passes
+          through history an operator decreed away is <strong>refused</strong>
+          (<code>AbandonedHistoryFenced</code>) until a new decree reaches it. Verified descent is
+          not the whole question: a chain can be perfectly intact and still be the history a
+          ceremony put behind us, and machinery must never silently reverse an operator’s decree. The acceptance path is the ceremony itself—decree
+          the recovered head and the fence lifts—so recovering genuinely wanted history costs
+          exactly one ceremony. The re-assertion rule below closes the same destination by a
+          different road: a replayed line would make the abandoned head <em>K</em> itself, and an
+          unchanged answer needs no descent at all.
+        </p>
+        <p>
+          This <strong>corrects what this document said before</strong>, which was that such
+          descendants were accepted and that fencing authentic history was not expressible
+          unsigned. They were accepted, and that was a silent loop rather than a bound worth
+          disclosing: reset from an abandoned <em>N+1</em> to <em>N</em>, restore the authentic
+          <em>N+1</em>, and the open verifies descent honestly, answers advanced, and
+          <em>journals</em> <em>N+1</em> back into the current epoch—after which every later open
+          reads unchanged, with no refusal and no fork, repeatable indefinitely. The acceptance
+          erased its own evidence by recording it
+          (<code>finding:s3-reset-descendant-silent-loop</code>).
+        </p>
+        <p>
+          Three properties make the fence hold. It is <strong>identity-keyed</strong>: the anchors
+          are (ordinal, record hash) pairs taken from the entries the journal still holds in
+          abandoned epochs—readable because epoch scoping excludes them from <em>K</em> and not
+          from the file (§07)—which is the same discriminator a same-height fork turns on. An
+          ordinal <em>span</em> would be vacuous or catastrophic instead: an operator who resets to
+          5 and lets the store re-advance mints a new 6, 7 and 8 inside the abandoned range, and a
+          span would refuse every one of them forever, where identity leaves a legitimate
+          re-advance at an abandoned ordinal under a different hash an ordinary advance. It reaches
+          <strong>every walked coordinate</strong> rather than the presented head alone, because an
+          abandoned branch grown offline presents <em>N+3</em> while the abandoned entry sits at
+          <em>N+1</em>, and head-only checking waves it through. And it sits <strong>before
+          anything is journaled</strong>, so a fenced open records nothing—the acceptance recording
+          was precisely what made the loop invisible.
+        </p>
+        <p>
+          The lift rule is narrower than it first reads. An abandoned entry is fenced only while no
+          decree reaches at or above it—otherwise recovery would be impossible and the ceremony
+          would re-brick the store—but the decree that lifts is the <strong>current boundary
+          decree</strong> alone, never merely some later one. Read loosely, an intermediate decree
+          would lift an entry that a subsequent decree had abandoned again: reset to 10, reset back
+          to 5, and the 10 stands unfenced by the very decree the second ceremony overrode. The
+          boundary is the one decree nothing has superseded, so it is the one that speaks. This
+          fences more, never less, and it costs recovery nothing, because a recovery decree
+          <em>is</em> the boundary decree.
         </p>
 
         <h3>A repeated line is a re-assertion</h3>
@@ -596,8 +639,10 @@
           100 back to 90, the abandoned entries at 91–100 still hold the maximum ordinal, so an
           unscoped <em>K</em> would name the head that was deliberately abandoned and every
           later open would refuse a rollback forever. Those entries stay in the journal as
-          <strong>evidence, not as claims</strong>. Equivocation is scoped the same way, so a
-          ceremony can take effect over a conflict the operator has already resolved.
+          <strong>evidence, not as claims</strong>—excluded from <em>K</em>, never from the file,
+          which is what lets them go on serving as the anchors §04b’s fence checks against.
+          Equivocation is scoped the same way, so a ceremony can take effect over a conflict the
+          operator has already resolved.
         </p>
 
         <h3>How much of a head the journal has</h3>
@@ -742,7 +787,7 @@
             <tbody>
               <tr><td>No known head</td><td>First contact</td><td>Establish trust from migration receipt, pinned witness, or explicit trust reset.</td></tr>
               <tr><td><code>P == K</code></td><td>Unchanged</td><td>Accept after local head validation.</td></tr>
-              <tr><td>Same lineage; P is a verified descendant of K</td><td>Advanced</td><td>Accept suffix, issue and retain the next receipt.</td></tr>
+              <tr><td>Same lineage; P is a verified descendant of K</td><td>Advanced</td><td>Accept suffix, issue and retain the next receipt—unless the path touches history a ceremony abandoned, which is fenced (§04b).</td></tr>
               <tr><td>Same lineage; <code>P.ordinal &lt; K.ordinal</code></td><td>Rollback</td><td>Refuse authority; investigate or restore forward.</td></tr>
               <tr><td>Same lineage and ordinal; different hash</td><td>Same-height fork</td><td>Refuse both as a single continuation; quarantine evidence.</td></tr>
               <tr><td>P is higher but suffix does not descend from K</td><td>History rewrite / fork</td><td>Refuse; never accept height as proof of continuity.</td></tr>
@@ -754,9 +799,12 @@
         <div class="doc-code">
           <div class="doc-code-label"><span>Verifier sketch</span><span>pseudocode</span></div>
           <pre><code>open(journal, presented, source):
-  read  = journal.read()            # established | lower bound | unreadable | none
-  known = read.established_head()   # INDETERMINATE on the weaker two states
-  return compare(known, presented, source)
+  read    = journal.read()          # established | lower bound | unreadable | none
+  known   = read.established_head() # INDETERMINATE on the weaker two states
+  outcome = compare(known, presented, source)
+  if outcome is ADVANCED:
+    fence(read, presented)          # refuse a descent through decreed-away history,
+  return outcome                    # before anything is journaled
 
 # the degraded arm: every refusal a bound still supports, then no answer
 on INDETERMINATE with lower bound B:
@@ -815,7 +863,8 @@ compare(known, presented, source):
               <tr><td>Rewrite head metadata only</td><td>Metadata disagrees with actual head record or dense scan</td><td>Known head assists diagnosis</td><td>Metadata corruption refusal</td></tr>
               <tr><td>Show two clients different descendants</td><td>Each branch may self-verify</td><td>Receipt gossip reveals incompatible hashes</td><td>Equivocation evidence</td></tr>
               <tr><td>Replay a journal line verbatim</td><td>Store untouched</td><td>Bytes already appear above it: a re-assertion, recorded and weightless (§04b)</td><td>Remembered head unmoved</td></tr>
-              <tr><td>Re-append an old trust reset to reopen a closed epoch</td><td>Store may present the abandoned head</td><td>A byte copy is a re-assertion; any copy lands at a new line and its recorded position is stale (§04b)</td><td>Reset opens no epoch; rollback refusal stands</td></tr>
+              <tr><td>Re-append an old trust reset to reopen a closed epoch</td><td>Store may present the abandoned head</td><td>A byte copy is a re-assertion; any copy lands at a new line and its recorded position is stale (§04b)</td><td>Reset opens no epoch; refusal stands—rollback below the remembered head, fence above it</td></tr>
+              <tr><td>Restore a backup of history a ceremony abandoned</td><td>Chain self-verifies, and descent from the decreed head is genuine</td><td>The journal still holds the abandoned entries as identity anchors</td><td>Abandoned-history fence; the ceremony is the acceptance path (§04b)</td></tr>
               <tr><td>Delete store and every backup</td><td>No history remains</td><td>Witness proves what was lost, not its contents</td><td>Detectable loss, not recovery</td></tr>
               <tr><td>Compromise backend and sole witness key</td><td>Replacement can self-verify</td><td>Attacker can forge receipts</td><td>Outside claimed protection</td></tr>
             </tbody>
@@ -950,7 +999,10 @@ compare(known, presented, source):
             being abandoned, what was refused, and why—and opens a new trust epoch that scopes
             every later comparison. Neither rewrites the old witness into agreement. The
             abandoned entries stay in the journal as evidence; what moves backward is the read
-            scope, not the history.
+            scope, not the history. Those retained entries keep working after the ceremony: they
+            are the anchors that fence a later advance back through the abandoned history (§04b),
+            so recovering it is a second deliberate decree rather than something a routine open
+            does quietly.
           </p>
         </div>
       </section>

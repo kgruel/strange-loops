@@ -397,28 +397,46 @@ Each applied to the working tree, the suite run, the mutation reverted, and
 
 | # | Mutation | Result (46 tests) |
 |---|---|---|
-| (a) | journaling-on-commit dropped from `_witness` | **7 or 8 failed** — see the note below — led by `test_commit_then_open_takes_the_o1_path_not_the_advance_path` (the next open observes an ADVANCE and pays two walks) and `test_an_append_through_the_wrapper_journals_its_commit`; also the `NotWitnessed` test and the race pin |
+| (a) | journaling-on-commit dropped from `_witness` | **4 or 5 failed** — see NB-1 — the four deterministic are `test_commit_then_open_takes_the_o1_path_not_the_advance_path` (the next open observes an ADVANCE and pays two walks), `test_an_append_through_the_wrapper_journals_its_commit`, the `NotWitnessed` test, and the race pin |
 | (b) | `canonical_location` returns the location unchanged | **1 failed, 69 passed** (with the registry file) — `test_the_binding_matches_through_a_non_canonical_path`: the replacement goes undetected and the store is trusted on first contact |
 | (c) | the seam swallows `IndeterminateComparison` by re-deriving *K* from `read.epoch` — the bypass WP1 explicitly named as reachable | **3 failed, 43 passed** — `test_an_incomplete_read_proceeds_labeled_at_or_above_the_bound`, `test_a_journal_with_no_readable_content_is_not_granted_a_receipt` (a receipt is written for an unreadable journal — BLOCKING-2 reborn), `test_the_carried_refusal_is_the_one_the_journal_itself_raises` |
-| (d) | the across-time re-read removed | **2 failed, 44 passed** — `test_a_commit_racing_the_open_is_not_reported_as_a_rollback` and `test_a_genuine_rollback_survives_the_re_observation` (which pins the op count, so the fix cannot be faked by weakening the refusal) |
+| (d) | the across-time re-read removed | **2 or 3 failed** — see NB-1 — the two deterministic are `test_a_commit_racing_the_open_is_not_reported_as_a_rollback` and `test_a_genuine_rollback_survives_the_re_observation` (which pins the op count, so the fix cannot be faked by weakening the refusal) |
 | (e) | the earned bootstrap entry written inside `_observe`, before the projection comparison can refuse | **1 failed, 45 passed** — `test_the_refused_truncation_left_no_memory_claiming_it_was_accepted` |
 | (f) | the rollback-from-a-bound arm removed from `_degraded` | **1 failed, 46 passed** — `test_an_incomplete_read_still_refuses_a_head_below_the_bound` |
 | (g) | the bound treated as an established head, so the seam answers from it | **4 failed, 43 passed** — `test_an_incomplete_read_proceeds_labeled_at_or_above_the_bound` (answers `unchanged`), `test_an_incomplete_read_does_not_answer_advanced_above_the_bound` (answers `advanced`), plus the receipt and carried-refusal tests |
 | (h) | the pre-fix inline ADVANCE write restored in `_judge` | **3 failed, 47 passed** — `test_an_advance_is_not_journaled_when_the_projection_then_refuses`, `test_an_advance_is_not_journaled_when_the_projection_disowns_the_log`, and the AST ratchet `test_only_the_constructor_and_the_producers_write_to_the_journal` |
 
-**Mutation (a)'s failure SET is nondeterministic, and the earlier "5 failed" was a
-single observation reported as though it were stable** (the gate's NB1). Measured
-over five runs: seven failures every time, plus
-`test_two_writers_and_an_opener_leave_a_parseable_journal` in one run of the five.
-The cause is structural rather than flakiness in the fix — with
-journaling-on-commit dropped, the concurrent run's journal holds only whatever
-ordinal the *opener* process happened to observe at first contact, so its
-`established.head == head` assertion passes exactly when the opener is scheduled
-after both writers finish. The conclusion is unchanged and does not rest on that
-test: the two deterministic catchers fail on every run, and the concurrency test
-is a bonus catcher rather than a load-bearing one. Recorded because a mutation
-demo reporting one sampled count as a fact is the same defect class as prose
-asserting an enforcement the code does not perform.
+**NB-1 — two demos have a nondeterministic failure SET, and the earlier counts
+here were wrong twice over.** `test_two_writers_and_an_opener_leave_a_parseable_journal`
+spawns three real processes, so it is an intermittent participant in mutations
+**(a)** and **(d)** alike. Measured five runs each against the fixed tree:
+
+| Demo | Deterministic | Intermittent | Observed |
+|---|---|---|---|
+| (a) | 4 | the concurrent run (2 of 5) | 4 or 5 |
+| (d) | 2 | the concurrent run (2 of 5) | 2 or 3 |
+
+The causes are structural and differ per demo. Under **(a)** the opener subprocess
+still journals through its *own* ADVANCED branch — a different write path, which
+the mutation does not touch — so whether the journal's maximum-ordinal entry ends
+up equal to the store's final head depends on when that opener last ran relative
+to the two writers. Under **(d)** the opener can hit the false rollback the
+re-read exists to prevent, which exits its subprocess non-zero and trips the
+returncode assertion — but only when the interleaving actually occurs.
+
+Neither conclusion depends on it: the deterministic failures kill each mutation on
+their own, and the concurrent test is a bonus catcher in both.
+
+**Correcting my own record.** This entry first read "5 failed" for (a) — one
+sampled run reported as a stable fact — and was then "corrected" to "7 or 8",
+which was worse: those five samples were taken while the BLOCKING-1 fix was
+absent from the working tree (a `git checkout` during an earlier demo had reverted
+it), so three of the counted failures were the missing fix rather than the
+mutation. The numbers above are re-measured against the committed, fixed tree and
+agree with the gate's independent measurement. A mutation demo reporting a sampled
+count as a fact is the same defect class as prose asserting an enforcement the
+code does not perform — and a demo measured against a tree you have not verified
+is a worse one, because it looks like evidence.
 
 (b) and (c) each also have a mirror pinned: (b)'s canonical form is asserted
 directly through `bound_lineage(canonical_location(detour))`, and (c)'s two sound

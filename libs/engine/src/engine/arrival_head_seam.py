@@ -268,6 +268,17 @@ class _Earned:
     (``finding:s3wp3-gate-advance-journaled-before-projection-refusal``). One
     branch honoring a rule the next branch does not is what a carrier removes
     and a comment does not.
+
+    **It is the same rule the degraded branch already obeys**, which is what
+    makes it one rule rather than two. A degraded open writes nothing because
+    the evidence behind the head was incomplete; a refused open must write
+    nothing because a later step invalidated it. Both hazards are one hazard —
+    *a journal entry recording a head this open did not actually establish* —
+    and both are closed the same way, by not writing until the judgment is
+    finished. ``test_an_incomplete_read_does_not_answer_advanced_above_the_bound``
+    and ``test_an_advance_is_not_journaled_when_the_projection_then_refuses``
+    are the same assertion about the same guarantee, reached down two different
+    branches.
     """
 
     head: Head

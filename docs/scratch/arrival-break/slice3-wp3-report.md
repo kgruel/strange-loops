@@ -213,9 +213,19 @@ the body rather than transcribing the routing's list:
 
 | Answer | When |
 |---|---|
+| **the lineage, as a `str`** | a well-formed binding names this exact location; newest match wins |
 | `None` | absent file, empty file, blank lines, and well-formed bindings naming OTHER locations |
 | `BindingsUnreadable` | bytes arrived, uninterpretable — not UTF-8, not JSON, or JSON with no location and lineage |
 | `BindingProbeUnanswered` | storage would not yield the bytes at all |
+
+**S3I-L-10 added the first row**, and it is the one the function exists for. My
+enumeration verified six failure conditions and omitted the seventh case — the
+one that returns. The lesson is small and worth keeping: I checked every row I
+was *given* and did not ask what was missing from the list, so a "surface in
+full" described only the ways it can fail. Verified against the body and
+empirically before writing it — no `break` in the loop, `found` reassigned on
+each match, and three recorded bindings across two locations return the newest
+of the matching pair as a `str`.
 
 And it says why there is no transience claim: that axis is not decidable from an
 exception class.

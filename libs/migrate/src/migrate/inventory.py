@@ -51,9 +51,8 @@ from .legacy_sqlite import (
     open_legacy_sqlite,
 )
 from .refusals import (
-    AbsentObserverBatchRefused,
+    LegacySourceRefused,
     MigrationRefused,
-    MixedObserverBatchRefused,
 )
 
 __all__ = [
@@ -420,17 +419,7 @@ def _inventory_jsonl(source_path: Path, file_hash: str) -> SourceInventory:
 
     # Refusals fire after full scan across all 3 classes:
     if codec_invalid_lines or mixed_observer_lines or absent_observer_lines:
-        if mixed_observer_lines and not absent_observer_lines and not codec_invalid_lines:
-            raise MixedObserverBatchRefused(
-                mixed_observer_lines=mixed_observer_lines,
-                source=str(source_path),
-            )
-        if absent_observer_lines and not mixed_observer_lines and not codec_invalid_lines:
-            raise AbsentObserverBatchRefused(
-                absent_observer_lines=absent_observer_lines,
-                source=str(source_path),
-            )
-        raise MigrationRefused(
+        raise LegacySourceRefused(
             codec_invalid_lines=codec_invalid_lines,
             mixed_observer_lines=mixed_observer_lines,
             absent_observer_lines=absent_observer_lines,

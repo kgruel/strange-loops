@@ -11,9 +11,8 @@ import pytest
 
 from migrate.inventory import SourceInventory, inventory
 from migrate.refusals import (
-    AbsentObserverBatchRefused,
+    LegacySourceRefused,
     MigrationRefused,
-    MixedObserverBatchRefused,
 )
 
 from ._fixtures import (
@@ -132,10 +131,10 @@ def test_sqlite_content_hash_stability_and_sensitivity(tmp_path: Path) -> None:
 
 def test_mixed_observer_batch_refuses_and_enumerates_every_offending_line(tmp_path: Path) -> None:
     """GF-3 refusal: A JSONL source holding TWO mixed-observer batch lines raises
-    MixedObserverBatchRefused, enumerating BOTH lines with their observer sets."""
+    LegacySourceRefused, enumerating BOTH lines with their observer sets."""
     source_file = build_mixed_observer_jsonl(tmp_path / "mixed.jsonl")
 
-    with pytest.raises(MixedObserverBatchRefused) as exc_info:
+    with pytest.raises(LegacySourceRefused) as exc_info:
         inventory(source_file)
 
     exc = exc_info.value
@@ -152,16 +151,16 @@ def test_mixed_observer_batch_refuses_and_enumerates_every_offending_line(tmp_pa
 
 
 def test_absent_observer_batch_refusal_is_distinct_condition(tmp_path: Path) -> None:
-    """A batch line with a row missing the observer field raises AbsentObserverBatchRefused,
-    distinct from MixedObserverBatchRefused."""
+    """A batch line with a row missing the observer field raises LegacySourceRefused
+    with absent_observer_lines populated."""
     source_file = build_absent_observer_jsonl(tmp_path / "absent.jsonl")
 
-    with pytest.raises(AbsentObserverBatchRefused) as exc_info:
+    with pytest.raises(LegacySourceRefused) as exc_info:
         inventory(source_file)
 
     exc = exc_info.value
-    assert isinstance(exc, AbsentObserverBatchRefused)
-    assert not isinstance(exc, MixedObserverBatchRefused)
+    assert isinstance(exc, LegacySourceRefused)
+    assert len(exc.mixed_observer_lines) == 0
     assert len(exc.absent_observer_lines) == 1
     assert exc.absent_observer_lines[0] == (2, 1, ("alice",))
     assert "1 row(s) missing 'observer' field" in str(exc)

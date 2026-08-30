@@ -427,3 +427,217 @@ either restore the Layers table or correct the message to point at the real sour
 - The sqlite arm cannot exercise GF-3 at all (`batch_line_count` is hardcoded `0` at
   `inventory.py:149`), which is defensible — a sqlite store has no batch grouping — but means
   the refusal is jsonl-only by construction, and nothing tests or documents that as intended.
+
+---
+
+# Round 2 — fix-round re-check (slice tip `fe2120ef`)
+
+**Re-checked:** 2026-08-30, same gate worktree, `slice4/wp1-gate` merged onto `fe2120ef`
+(round-1 report commit `b8b7b604` kept reachable).
+**Fix worker:** fresh agy, 6 commits `d19562d0`..`fe2120ef` on `slice4/wp1`.
+**Fix brief:** `docs/scratch/arrival-break/slice4-wp1-fix-brief.md` (F1–F9).
+
+## VERDICT: **PASS** — all six blocking findings verified fixed, no regressions, no new blockings
+
+Scope held again. Every round-1 probe that previously exposed a defect now behaves correctly,
+and I re-ran two mutation proofs by hand rather than trusting the worker's table.
+
+## Scope sweep (committed range `6e39d84e..fe2120ef`)
+
+13 files: 11 under `libs/migrate/**`, plus `tests/architecture/test_rule_11_...py` (F1, one
+line) and `tests/architecture/test_rule_04_...py` (F8, the `migrate` row). Exactly the fence.
+Worker worktree `git status --short`: `?? .tmp/` only. Gate worktree clean after all probes.
+
+## Acceptance
+
+```
+$ uv run pytest libs/migrate tests/architecture -q
+117 passed in 5.36s
+```
+
+Matches the worker's claim, Rule 11 included. Neighbours re-run per-project: `libs/store`
+180 passed; `libs/engine` 2303 passed, 1 skipped, 1 failed — the same
+`test_arrival_head_seam.py::test_the_state_root_is_redirected_for_this_suite` that reproduces
+on untouched `main` under a `TMPDIR` override (round-1 §2). Unchanged, still not attributable.
+
+## Re-check of each blocking finding
+
+### B1 (Rule 11 layer row) — **FIXED**
+`test_rule_11_record_never_imports_surfacing.py:24` now carries `"migrate": "record",`.
+Rule 11 green inside the 117.
+
+### B2 / reviewer B-1 / reviewer B-2 (refusal redesign) — **FIXED**
+
+I re-ran my round-1 probes plus the four families the arbiter specified, against the
+committed tree. All pass.
+
+**(a) 1 absent + 2 mixed — the round-1 preemption:**
+```
+type: MigrationRefused
+codec_invalid : ()
+mixed         : ((2, ('alice','bob'), 0), (3, ('carol','dave'), 0))
+absent        : ((1, 1, ('alice',)),)
+```
+All three lines enumerated in distinct classes. Round 1 reported only line 1; nothing is
+dropped now.
+
+**(b) the both-aspects line (alice, bob, one observerless row):**
+```
+mixed  : ((1, ('alice','bob'), 1))
+absent : ()
+message: line 1: observers 'alice', 'bob' (1 row(s) missing 'observer' field)
+```
+Reported once under the **mixed** class with the absent-row count visible. Round 1 showed
+this GF-3 violation to the operator as a missing-field problem; it no longer can.
+
+**(c) codec-invalid must not masquerade as mixed** — seven variants, all landing in the
+codec class with `mixed == ()` and `absent == ()`:
+
+| line shape | reported as |
+| --- | --- |
+| nested batch | `batch row 0 is a nested batch — batches do not nest` |
+| tick inside batch | `batch row 0 is a tick record — ticks are minted one-at-a-time…` |
+| unknown row field | `unknown field(s) in fact line: ['bogus']` |
+| duplicate id in batch | `duplicate id '…28' within one batch` |
+| unknown envelope key | `unknown field(s) in batch line: ['extra']` |
+| 1-row batch | `batch must carry at least 2 rows, got 1 — …` |
+| malformed JSON | `not valid JSON: Expecting ',' delimiter…` |
+
+**(d) observer typing — no raw `TypeError` escapes.** `observer` as dict / int / list, in a
+batch row and on a plain fact line, all produce a clean typed refusal naming field and type
+(`fact field 'observer' must be a string, got dict`). `observer: null` lands in the absent
+class, consistent with the original ruling that absent is not an author.
+
+The validate-then-refuse order is now explicit: `inventory.py:300-389` validates every batch
+row and collects a `batch_fault` before any observer decision at `:391-402`, and the single
+raise at `:421-438` fires only after the whole source is scanned.
+
+### B3 (frozen-copy divergence) — **FIXED**
+`legacy_jsonl.py:222-225` restores the origin exactly: `row_id = elem["id"]` with an
+unconditional `seen_ids.add(row_id)`. AST re-diff against `engine/jsonl_codec.py` — 10 shared
+functions, and the only two remaining differences are cosmetic:
+
+```
+_validate_batch:      - seen_ids: set = set()      + seen_ids: set[str] = set()
+deserialize_records:  - records_from_object(_load(line))
+                      + records_from_object(load_line(line))     (copy aliases _load = load_line)
+```
+No semantic divergence remains, and no new one was introduced.
+
+### B4 (era census overclaim) — **FIXED**
+```
+''                            -> other        '01ARZ3NDEKTSV4RRFFQ69G5FAV' -> canonical-ulid
+'hello'                       -> other        '01arz3ndektsv4rrffq69g5fav' -> lowercase-ulid
+'01A'                         -> other
+'c56a4180-65aa-42ec-…'        -> other        '01ARZ3NDEKTSV4RRFFQ69G5FA!' -> other
+```
+The bucket is now the supportable claim ("not a canonical or lowercase ULID"). The test that
+enshrined the overclaim is corrected: `test_legacy_readers.py:44-45` now pins `"other"` for
+both the uuid4-shaped id and `"01A"`.
+
+## Re-check of the non-blocking items the brief also ruled on
+
+**F5 (content-hash claim narrowed) — done.** The cross-format equality test is gone, replaced
+by `test_jsonl_content_hash_stability_and_sensitivity` and
+`test_sqlite_content_hash_stability_and_sensitivity` (same source re-inventoried → same hash;
+changed row → changed hash). The `SourceInventory.content_hash` docstring
+(`inventory.py:79-84`) now states each arm's ordering, that it does not witness batch
+grouping, and that it is not comparable across formats. Worth recording: the cross-format
+hashes still happen to be equal for the fixture (I measured `True`) — which is precisely the
+arbiter's point that the old test passed by fixture accident. Nothing asserts it now.
+
+**F6 (honest per-arm fields) — done and verified live:**
+```
+sqlite: total_rows=9  total_lines=None  batch_line_count=None
+jsonl : total_rows=9  total_lines=8     batch_line_count=1
+```
+Absent-is-not-zero on both sqlite fields, documented as such.
+
+**F7 (behavioral read-only) — hand-verified.** The source-text grep test is gone; the
+replacement snapshots the parent directory recursively (relative path, size, mtime_ns) before
+and after `inventory()`, on both the success and refusal paths. I applied the mkdir+append
+mutation myself:
+```
+E         {'gate_probe.log': (14, 1788125821912256739),
+E          'gate_probe_dir': (64, 1788125821912178739)}
+FAILED ...::test_inventory_is_behaviorally_read_only_on_success_and_refusal
+# after git restore: 10 passed
+```
+
+**F8 (dead code + Rule 4 shrink) — done.** `_chain_head` is gone, which removed the package's
+only cross-lib import. The Rule 4 row is now `"migrate": set(),  # WP2/WP3 grow it as real
+imports land; shrink-only discipline`, and that matches reality: `libs/migrate/src` imports
+only stdlib (`hashlib`, `json`, `math`, `sqlite3`, `pathlib`, `collections`, `dataclasses`)
+plus third-party `ulid`, plus intra-package relative imports. No `engine`, no `store`, no `lang`.
+
+**F9 (quarantine ratchet) — hand-verified, both import forms.** `tests/test_quarantine.py`
+walks `libs/migrate/src` with `ast` (real import statements, not text). My probes:
+```
+import engine.jsonl_codec  in legacy_sqlite.py
+  -> migrate/legacy_sqlite.py:17 imports forbidden legacy module 'engine.jsonl_codec'
+from store.rebirth import _content_sha256 as _x  in inventory.py
+  -> migrate/inventory.py:22 imports forbidden legacy module 'store.rebirth' (both the
+     symbol path and the module path reported)
+# after restore: 1 passed
+```
+The docstring records that the ratchet dissolves in slice 5 when the frozen originals are
+deleted. Note the round-1 grep now returns only the three docstring provenance citations —
+the AST ratchet correctly ignores those, which is why it is the right instrument.
+
+## New non-blocking observations (round 2)
+
+**R2-N1 — the batch-row validator is a hand-rolled second implementation of the grammar.**
+`inventory.py:306-385` reimplements `row_object_fault`/`_validate_batch` inline rather than
+calling the frozen copy. There is a real reason: the frozen grammar makes a missing `observer`
+a codec fault (`FACT_FIELDS` includes it, `FACT_NULLABLE` is empty), so reaching the
+absent-observer class requires validating with `observer` excluded — `req_fields` at `:330`
+does exactly that. But the consequence is two implementations of one grammar that can drift,
+which is the same hazard class as B3. Observable already: null-valued fields produce different
+text from the origin (`fact field 'kind' must be a string, got NoneType` where the origin says
+`must not be null`) — same class, different message. Recommend WP2 derive the batch validator
+from `row_object_fault` with the observer field parameterised out, rather than duplicating it.
+
+**R2-N2 — the refusal type depends on what else is in the file.** `inventory.py:422-438`
+raises `MixedObserverBatchRefused` only when mixed is the *sole* class present; add one
+codec-invalid line and the same GF-3 violation raises the root `MigrationRefused` instead:
+```
+mixed + codec-invalid together
+  type: MigrationRefused
+  isinstance MixedObserverBatchRefused: False
+  both classes enumerated: True
+```
+The brief's requirement is met (one refusal, all classes enumerated, nothing preempted) and
+`except MigrationRefused` catches every case. But a caller catching the subclass silently
+misses a real GF-3 violation depending on unrelated content. Worth a WP2 ruling on whether the
+two subclasses should survive at all, or whether one refusal carrying three classes is the
+honest surface.
+
+**R2-N3 — residue grew rather than shrank.** Round-1 N7 asked for a sweep; the fix round added
+to it instead. `refusals.py` constructors now accept both the old and new tuple shapes with
+`len(item) > 2` / `len(item) >= 3` normalisation branches (`:112-136`), a positional
+`offending_lines` compatibility parameter on both subclasses, and a `compat_lines` rebuild at
+`:189-197` — backward compatibility for a package that is two commits old and has no callers
+outside its own tests. `MissingObserverBatchRefused` is still aliased at `:247`, and the three
+`SourceInventory` pass-through properties survive at `:100-113`. Cheapest to sweep before WP2
+builds on the surface.
+
+## Round-2 summary
+
+| Finding | Status |
+| --- | --- |
+| B1 Rule 11 layer row | **fixed** — verified |
+| B2 absent-observer preempts GF-3 | **fixed** — probes (a) and (b) verified |
+| B3 frozen-copy divergence | **fixed** — AST re-diff clean |
+| B4 id-era census overclaims | **fixed** — verified, test corrected |
+| reviewer B-1 refusal decides on unvalidated rows | **fixed** — probe (c), 7 variants |
+| reviewer B-2 TypeError escapes inventory | **fixed** — probe (d), 6 variants |
+| R2-N1 grammar reimplemented inline | non-blocking, WP2 |
+| R2-N2 refusal type content-dependent | non-blocking, WP2 ruling |
+| R2-N3 compat residue grew | non-blocking, sweep before WP2 |
+
+## What I did not verify in round 2
+
+- Proofs 1, 2 and 5 of the fix worker's five (I hand-ran 3 and 4, the two the arbiter named).
+- The sqlite arm still cannot exercise GF-3 at all; now honestly reported as
+  `batch_line_count=None` rather than `0`, but still untested-by-construction.
+- No performance or large-source work; fixtures remain tens of rows.

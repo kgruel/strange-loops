@@ -71,13 +71,15 @@ engine pytest libs/engine/tests`, and `tests/architecture` in its own run).
 
 | Suite | Baseline | After | Delta |
 |---|---|---|---|
-| engine | 2158 passed, 1 skipped | 2209 passed, 1 skipped | **+51** |
+| engine | 2158 passed, 1 skipped | 2222 passed, 1 skipped | **+64** |
 | architecture | 99 passed | 99 passed | **0** — Rule 18 is not parametrized per target |
 
-Every delta accounted for: **+50** in `test_arrival_head_seam.py`, **+1** in
-`test_arrival_registry.py` (`test_closing_a_query_that_never_read_does_not_build_a_reader`).
-The last three of the fifty are the gate round's: the BLOCKING repro, the second
-refusal behind the same write, and the AST ratchet.
+Every delta accounted for: **+57** in `test_arrival_head_seam.py`, **+1** in
+`test_arrival_registry.py` (`test_closing_a_query_that_never_read_does_not_build_a_reader`),
+and **+6** in `test_arrival_head_attestation.py` (sol r1's replay repro and its
+siblings). Three of the seam file's are the gate round's — the BLOCKING repro,
+the second refusal behind the same write, and the AST ratchet — and seven are sol
+r1's alias work.
 The renamed §0.4 test is 1-for-1. `ruff check` passes on every file this WP wrote
 or touched.
 
@@ -198,6 +200,108 @@ proposal disagreed and the module won.
     and permitted is not required. `close()` consults the field rather than the
     property, or closing would be the thing that constructs the reader the fix
     deferred.
+
+## Sol r1 — two blocking findings, both closed
+
+### S3WP3-L-1 — a spelling is not an identity
+
+`finding:s3wp3-canonical-location-alias-first-contact`. `canonical_location`
+normalizes a path; it does not establish which filesystem object a path names.
+A case-variant spelling on a case-insensitive filesystem — the macOS default —
+or a second mount of one volume reaches the very same store through a string
+`resolve()` returns unchanged and different. Bound under one spelling and
+presented under the other, the store has no binding, reads as **first contact**,
+and a replacement with a fresh lineage walks past `LineageReplaced`.
+
+**Scope the claim, then detect at the boundary** — both halves, per the ruling.
+The docstring stops asserting identity and names the residual honestly: aliases
+that report genuinely *different* `(st_dev, st_ino)` — two network mounts of one
+export is the ordinary case — are beyond anything a client can detect from here.
+Then, and only when the presenting spelling has no binding of its own, the seam
+live-stats each recorded binding and compares device and inode. A match means
+this is not first contact, and the open routes through that existing binding —
+which refuses when the lineage differs.
+
+Three properties the ruling asked for, each held by construction:
+
+- **Live-stat, never record.** A stored inode goes stale when a file is
+  recreated and gets recycled onto unrelated files, so recording one turns a
+  fact into a claim that rots into a false match. `Identity` is only ever
+  computed at comparison time; bindings whose paths no longer stat are skipped,
+  because a path that cannot be stat'd makes no claim either way.
+- **Fires before anything is earned.** The check sits in the binding arm, ahead
+  of the journal read and well ahead of `_judge`, so it can only add a refusal
+  earlier — no new write site and no change to the `_write` path. The AST
+  ratchet cannot see an ordering regression here, so
+  `test_the_alias_refusal_leaves_the_journal_untouched` asserts it on bytes.
+- **Costs nothing on the dominant path.** Once a binding exists for the spelling
+  in use, the exact lookup answers and the sweep never runs; the unchanged open
+  still gathers only its single `verify(Open())`, asserted by op count.
+
+**The CI portability trap, handled as ruled.** The alias can only be
+*constructed* on a case-insensitive filesystem, so the end-to-end test probes
+the filesystem at run time and skips with a reason naming the portable test that
+covers the judgment. And the judgment is factored out: `match_identity` takes
+identities as arguments, so its logic — newest-binding-wins, unstattable paths
+skipped, absent presenting path answers nothing — is pinned on every platform by
+four unit tests. A green Linux run cannot mean the vector was never exercised.
+(On this macOS worktree the construction test genuinely runs and passes rather
+than skipping.)
+
+### S3WP3-L-2 — a trust reset was replayable
+
+`finding:s3wp3-trust-reset-replay`. An entry is bytes in an append-only file, so
+an old reset can simply be appended again. Under last-reset-wins it re-opens the
+epoch it had closed: sol's repro — a journal advanced to ordinal 8 carrying a
+legitimate reset that had accepted 5 — reads **K as 5** once the stale reset is
+replayed, so a store rolled back to 5 opens UNCHANGED and the abandoned epoch is
+resurrected. Silent re-acceptance through the one entry kind whose whole job is
+to be the licensed way down. Measured under the reverted fix: **K = 5**, exactly
+sol's number.
+
+**Construction over detection.** Each reset now names the entry it was appended
+after (`HeadAttestation.follows`), so a replayed copy is *inexpressible as
+valid* rather than merely detectable — at any other position the recorded
+predecessor is not the entry actually in front of it.
+
+- **Predecessor identity, not the effective head and not a count.** Two journal
+  states can share a head while differing in history, and a count is not a
+  history at all. The predecessor link is also this repo's own chain idiom.
+- **`follows` is deliberately NOT the deferred `previous`.** WP1's §B.2 defers
+  the signed grammar's per-entry chain link, and that stays absent. This is
+  unsigned, carried by exactly one kind, and makes exactly one claim.
+- **Read-time validation is the load-bearing half.** `_epoch_of` honors a reset
+  only if its binding matches; a mismatch is **not an epoch boundary** and the
+  scan keeps walking back for an earlier valid one — so rejecting a replay does
+  not reject the reset it was copied from, which would have reintroduced the
+  deadlock the epoch scoping exists to prevent.
+- **A mismatch is a skip record, never a refusal.** Refusing would brick every
+  open on a benign crash-retry duplicate, where the same reset is appended twice
+  and the second copy's predecessor is the first. The direction of the lie is
+  the safe one either way: misjudging a legitimate reset leaves *K* at the
+  HIGHER abandoned head, so the failure is refusal-side. Note the deliberate
+  consequence — a non-empty `skipped` weakens the read to a `HeadLowerBound`, so
+  a journal holding a replay still refuses anything below the bound, which is
+  the attack it was closing.
+- **The field is required; there is no binding-less compat arm.** The journal
+  format exists only on unmerged slice-3 branches, so an "unbound resets still
+  count" path would be a permanent hole built for deployed state that does not
+  exist.
+
+**One thing the fix nearly broke, caught by an existing test.** Binding at
+append first read the journal through `read_journal` — which *refuses* an
+equivocating journal. Equivocation is precisely one of the states an operator
+runs this ceremony to resolve, so the recovery path would have been unusable
+exactly when it is needed. The scan is now factored so `last_entry` reaches the
+entries without the judgment built on top of them, and
+`test_binding_a_reset_does_not_require_a_readable_head` pins it.
+
+**WP1's module is no longer byte-identical to `9ed893fe`**, and that departs from
+this WP's original non-goal ("no module changes; behaviors you believe wrong are
+FINDINGS"). It is deliberate and routed: the ruling names
+`arrival_head_attestation.py:791 _epoch_of` as the fix site, and the read-time
+half cannot live anywhere else. WP1's own reset fixtures were updated to bind,
+since an unbound reset is not one any writer can now produce.
 
 ## BLOCKING-1 — a refused open moved the witness (closed)
 
@@ -443,6 +547,8 @@ Each applied to the working tree, the suite run, the mutation reverted, and
 | (g) | the bound treated as an established head, so the seam answers from it | **4 failed, 43 passed** — `test_an_incomplete_read_proceeds_labeled_at_or_above_the_bound` (answers `unchanged`), `test_an_incomplete_read_does_not_answer_advanced_above_the_bound` (answers `advanced`), plus the receipt and carried-refusal tests |
 | (h) | the pre-fix inline ADVANCE write restored in `_judge` | **3 failed, 47 passed** — `test_an_advance_is_not_journaled_when_the_projection_then_refuses`, `test_an_advance_is_not_journaled_when_the_projection_disowns_the_log`, and the AST ratchet `test_only_the_constructor_and_the_producers_write_to_the_journal` |
 | (i) | `append_entry` reached through an attribute-style import instead of by name | **2 failed, 48 passed** — the ratchet's precondition assertion fails naming `['append_entry']`; also `test_a_journal_write_failure_after_a_commit_says_the_records_are_committed`, which monkeypatches the module attribute the mutation removes |
+| (L-1) | the object-identity sweep reverted in the binding arm | **1 failed, 56 passed** — `test_a_case_variant_spelling_of_a_bound_store_is_not_first_contact`: the replacement raises nothing and the alias spelling silently first-contacts |
+| (L-2) | read-time reset validation reverted in `_epoch_of` | **4 failed, 154 passed** — sol's repro leads, and *K* measured directly under the mutation is **5** where the journal reached 8; also the genuine-reset, crash-retry and unbound-reset tests |
 
 **NB-1 — two demos have a nondeterministic failure SET, and the earlier counts
 here were wrong twice over.** `test_two_writers_and_an_opener_leave_a_parseable_journal`

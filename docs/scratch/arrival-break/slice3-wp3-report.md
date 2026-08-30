@@ -56,11 +56,13 @@ the review lens warns about, and the third answer is the whole of it:
 | `libs/engine/src/engine/arrival_head_seam.py` | NEW — `AttestedLedger`, the open report types, the bootstrap/audit/trust-reset producers, staleness, the canonical location form |
 | `libs/engine/src/engine/arrival_registry.py` | `open` wraps the custody half, always |
 | `libs/engine/src/engine/arrival_file_backend.py` | §0.4: `FileQuery` builds its reader lazily |
-| `libs/engine/tests/test_arrival_head_seam.py` | NEW — 46 tests against real stores |
+| `libs/engine/tests/test_arrival_head_seam.py` | NEW — 50 tests against real stores |
 | `libs/engine/tests/test_arrival_registry.py` | state-root isolation; two tests updated honestly; one added |
 | `tests/architecture/test_rule_18_arrival_vocabulary_denylist.py` | `_SCAN_TARGETS` enrollment (same commit, or the glob test fails) |
 
-Commit `c99eae3b`.
+Commits: `c99eae3b` the seam, `48671793` the report, `16b335a2` the fork-at-the-bound
+deviation, `721dd6c6` the bound-semantics tests and their mutations, `24a2539d` the
+gate's BLOCKING-1 fix, `2fd0e11e` the corrected claims and counts.
 
 ## Counts
 

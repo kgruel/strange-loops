@@ -47,6 +47,7 @@ from .arrival_contract import (
     StoreDescriptor,
     UnknownBackend,
 )
+from .arrival_head_seam import AttestedLedger
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from lang.ast import VertexFile
@@ -144,6 +145,13 @@ def _open_file_backend(
     return FileLedger(ArrivalLog(location)), FileQuery(index_path_for(location))
 
 
+#: The opener performs no recovery, and that is what makes the seam above it
+#: honest rather than merely early. ``ArrivalLog`` construction does no I/O at
+#: all, and ``FileQuery`` now builds its read handle lazily (§0.4), so nothing
+#: on this path can catch up, truncate a torn tail, or rebuild an index before
+#: the comparison has seen the store as it actually is.
+
+
 class BackendRegistry:
     """Backend name → opener, and nothing more.
 
@@ -189,6 +197,23 @@ class BackendRegistry:
         backend from a suffix, so an unregistered name has no fallback to
         degrade into — and a registry that guessed would reintroduce
         inference at the one seam built to remove it.
+
+        **The custody half comes back wrapped, always, with no way to ask for
+        it unwrapped** (slice 3 §D.1). :class:`~engine.arrival_head_seam.AttestedLedger`
+        compares the head this store presents against the one this machine last
+        accepted, and journals every commit made through it. A configuration
+        switch for a safety property is a shape the arrival vocabulary
+        ratchet's own denylist rejects: custody is structural rather than
+        configured, so there is no flag here and no second opener that skips
+        the comparison.
+
+        The comparison happens at construction, which means **this method
+        raises what the comparison raises**: a rollback, a fork, a rewrite, a
+        replacement or a lost store refuses the open rather than being reported
+        afterwards by a caller who might not ask. This is also why the seam
+        sits here rather than deeper — the opener above performs no recovery,
+        so the comparison sees the store as it is rather than as a catch-up
+        just repaired it.
         """
         opener = self._openers.get(descriptor.backend)
         if opener is None:
@@ -197,4 +222,8 @@ class BackendRegistry:
                 f"no adapter registered for backend {descriptor.backend!r} "
                 f"(registered: {known})"
             )
-        return opener(descriptor)
+        ledger, query = opener(descriptor)
+        attested = AttestedLedger(
+            ledger, location=descriptor.location, query=query
+        )
+        return attested, query

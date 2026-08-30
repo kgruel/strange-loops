@@ -87,6 +87,12 @@ _SCAN_TARGETS = (
     # exactly that: the glob below enrolls it without anyone remembering to
     # edit this tuple.
     "libs/engine/src/engine/arrival_head_attestation.py",
+    # Slice 3 / WP3's other half: the seam that calls the comparison on every
+    # open, journals every commit made through it, and produces the bootstrap,
+    # audit and trust-reset entries. NEW and born on the arrival surface, so it
+    # joins at birth — and like its WP1 sibling the name was chosen so the glob
+    # below enrolls it without anyone remembering to edit this tuple.
+    "libs/engine/src/engine/arrival_head_seam.py",
     "libs/engine/src/engine/arrival_projection.py",
     "libs/engine/src/engine/arrival_store.py",
     "libs/engine/src/engine/probe.py",

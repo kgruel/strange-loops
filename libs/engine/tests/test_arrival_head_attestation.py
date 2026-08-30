@@ -43,8 +43,10 @@ from engine.arrival_head_attestation import (
     bound_lineage,
     compare,
     compare_absent_store,
+    entry_identity,
     heads_dir,
     journal_path,
+    last_entry,
     parse_journal_lines,
     read_journal,
     record_binding,
@@ -498,11 +500,38 @@ def test_out_of_order_journal_writes_still_catch_a_restore():
 
 
 def test_duplicate_entries_at_one_ordinal_are_harmless():
+    """Two entries at one ordinal with one head never equivocate.
+
+    That is the rule, and it is unchanged. What changed is which duplicates
+    reach it: a BYTE-IDENTICAL line is now a literal re-assertion and is
+    skipped, so the pair that survives to the equivocation check is one whose
+    entries agree on the head while differing somewhere in the line — the
+    ordinary case, since ``observed_at`` comes from the clock and two genuine
+    appends do not share an instant.
+    """
+    append_entry(observation(6))
+    append_entry(
+        HeadAttestation(
+            head=head(6),
+            kind=Kind.ADVANCE,
+            level=Level.COMMIT,
+            observed_at=1787779021.0,  # a second later: a different line
+        )
+    )
+    result = read_journal(LINEAGE)
+    assert result.skipped == ()
+    assert result.established_head() is not None
+    assert result.established_head().head == head(6)
+
+
+def test_a_byte_identical_duplicate_is_skipped_as_a_re_assertion():
+    """The same head twice in the same bytes is one observation, not two."""
     append_entry(observation(6))
     append_entry(observation(6))
     result = read_journal(LINEAGE)
-    assert result.established_head() is not None
-    assert result.established_head().head == head(6)
+    assert any("byte-identical" in note for note in result.skipped), result.skipped
+    assert isinstance(result.known, HeadLowerBound)
+    assert result.known.at_least.head == head(6)
 
 
 # ---------------------------------------------------------------------------
@@ -534,17 +563,44 @@ def test_disagreement_below_the_maximum_ordinal_is_not_equivocation():
 # ---------------------------------------------------------------------------
 
 
+def append_reset(
+    ordinal: int,
+    digest: str = "a",
+    *,
+    level: Level = Level.FULL,
+    lineage: str = LINEAGE,
+    note: str = "",
+) -> HeadAttestation:
+    """Append a trust reset BOUND to the entry it follows.
+
+    A reset now names the entry it was appended after, so a replayed copy
+    cannot satisfy the binding anywhere else. These tests construct resets by
+    hand rather than through the seam's producer, so they bind them the same
+    way the producer does — an unbound reset is not a valid reset and would be
+    a fixture asserting behavior no writer can produce.
+    """
+    previous = last_entry(lineage)
+    entry = HeadAttestation(
+        head=head(ordinal, digest, lineage),
+        kind=Kind.TRUST_RESET,
+        level=level,
+        observed_at=1787779020.0,
+        note=note,
+        follows=(0, "") if previous is None else (
+            previous[0],
+            entry_identity(previous[1]),
+        ),
+    )
+    append_entry(entry)
+    return entry
+
+
 def _journal_with_a_reset() -> None:
     """Ordinals 90-100 accepted, then an operator accepts a restore to 90."""
     for ordinal in range(90, 101):
         append_entry(observation(ordinal))
-    append_entry(
-        observation(
-            90,
-            kind=Kind.TRUST_RESET,
-            level=Level.FULL,
-            note="restored from archive; abandoned head was ordinal 100",
-        )
+    append_reset(
+        90, note="restored from archive; abandoned head was ordinal 100"
     )
 
 
@@ -602,9 +658,9 @@ def test_a_journal_with_no_reset_has_the_whole_history_as_its_epoch():
 
 def test_only_the_latest_reset_opens_the_current_epoch():
     append_entry(observation(5))
-    append_entry(observation(3, kind=Kind.TRUST_RESET, level=Level.FULL))
+    append_reset(3)
     append_entry(observation(4))
-    append_entry(observation(2, kind=Kind.TRUST_RESET, level=Level.FULL))
+    append_reset(2)
     result = read_journal(LINEAGE)
     assert [entry.head.ordinal for entry in result.epoch] == [2]
     assert result.established_head() is not None
@@ -615,7 +671,7 @@ def test_equivocation_is_scoped_to_the_current_epoch():
     """Two histories the operator already adjudicated are not a live conflict."""
     append_entry(observation(6, "a"))
     append_entry(observation(6, "b"))
-    append_entry(observation(4, kind=Kind.TRUST_RESET, level=Level.FULL))
+    append_reset(4)
     result = read_journal(LINEAGE)
     assert result.established_head() is not None
     assert result.established_head().head == head(4)
@@ -715,7 +771,7 @@ def test_an_incomplete_read_cannot_classify_a_restore_as_unchanged():
 
     See ``finding:s3wp1-epoch-ordinals-do-not-ascend-in-file-order``.
     """
-    append_entry(observation(90, kind=Kind.TRUST_RESET, level=Level.FULL))
+    append_reset(90)
     append_entry(observation(92))  # writer B journals first
     append_entry(observation(91))  # writer A journals last
 
@@ -945,7 +1001,7 @@ def test_a_kindless_dict_is_not_absorbed_as_a_header():
 
     See ``finding:s3wp1-gate-kindless-dict-absorbed-as-header``.
     """
-    append_entry(observation(90, kind=Kind.TRUST_RESET, level=Level.FULL))
+    append_reset(90)
     append_entry(observation(92))  # writer B journals first
     append_entry(observation(91))  # writer A journals last
 
@@ -1127,7 +1183,7 @@ def test_a_journal_that_began_at_first_contact_says_so_permanently():
     append_entry(observation(4, kind=Kind.BOOTSTRAP, level=Level.FIRST_CONTACT))
     for ordinal in range(5, 9):
         append_entry(observation(ordinal))
-    append_entry(observation(3, kind=Kind.TRUST_RESET, level=Level.FULL))
+    append_reset(3)
     result = read_journal(LINEAGE)
     assert result.bootstrap is not None
     assert result.bootstrap.level is Level.FIRST_CONTACT
@@ -1248,3 +1304,319 @@ def test_reading_a_head_journal_does_not_drag_the_adapter_in():
         [sys.executable, "-c", source], capture_output=True, text=True
     )
     assert result.returncode == 0, result.stderr
+
+
+# ---------------------------------------------------------------------------
+# Trust-reset replay (finding:s3wp3-trust-reset-replay)
+# ---------------------------------------------------------------------------
+
+
+def test_a_replayed_trust_reset_does_not_reopen_the_epoch_it_closed():
+    """Sol r1's repro. An entry is bytes, so an old reset can be re-appended.
+
+    A reset accepting head 5 legitimately closed the epoch that reached 10.
+    The journal then advanced to 8. Re-appending a byte-copy of that reset
+    would, on last-reset-wins, scope the epoch to it again and read *K* as 5 —
+    so a store rolled back to 5 opens UNCHANGED and the abandoned epoch is
+    resurrected. Silent re-acceptance, reached through the one entry kind whose
+    whole job is to be the licensed way down.
+
+    The binding makes the replay INEXPRESSIBLE rather than merely detectable:
+    the copy names the entry it originally followed, and at the end of the
+    journal that is not the entry in front of it. It is skipped and reported,
+    the genuine earlier reset still opens the epoch, and *K* stays at 8.
+    """
+    for ordinal in range(1, 11):
+        append_entry(observation(ordinal))
+    legitimate = append_reset(5, note="restored from archive; abandoned 10")
+    # A DIFFERENT digest after the restore: the store re-advances through a new
+    # history, so ordinal 6 after the reset is not the ordinal 6 before it.
+    # Modelling it as the same bytes would have been the fixture asserting a
+    # store no backend produces.
+    for ordinal in (6, 7, 8):
+        append_entry(observation(ordinal, "b"))
+
+    append_entry(legitimate)  # the replay: the very same entry, again
+
+    result = read_journal(LINEAGE)
+    assert isinstance(result.known, HeadLowerBound)
+    assert result.known.at_least.head.ordinal == 8, "the replay moved K"
+    # Caught by the byte-duplicate gate, which now fires BEFORE the position
+    # binding ever sees the line — a literal replay is literal bytes.
+    assert any("byte-identical" in note for note in result.skipped), result.skipped
+    # And the sound refusal the bound still supports is the one that matters.
+    assert compare(result.known.at_least, head(5), None) is Outcome.ROLLBACK
+
+
+def test_the_genuine_reset_is_still_honored_after_the_replay_is_rejected():
+    """Rejecting a replay must not reject the reset it was copied from.
+
+    The scan keeps walking back for an earlier valid boundary, so the epoch is
+    still the one the operator opened — otherwise closing the replay hole would
+    reintroduce the deadlock the epoch scoping exists to prevent.
+    """
+    for ordinal in range(1, 11):
+        append_entry(observation(ordinal))
+    legitimate = append_reset(5)
+    append_entry(observation(8, "b"))
+    append_entry(legitimate)
+
+    result = read_journal(LINEAGE)
+    # The epoch still opens at the legitimate reset, and the replayed copy is
+    # not in it at all now: the byte-duplicate gate drops the line before it
+    # can be an entry, let alone a boundary.
+    assert [entry.head.ordinal for entry in result.epoch] == [5, 8]
+    assert isinstance(result.known, HeadLowerBound)
+    assert result.known.at_least.head.ordinal == 8
+
+
+def test_a_crash_retry_duplicate_reset_is_skipped_and_never_refuses():
+    """The reason this is a skip record rather than a refusal.
+
+    Appending the same reset twice is what a crashed-and-retried ceremony
+    leaves. Refusing would brick every subsequent open on an operator's benign
+    retry; skipping keeps the journal readable and leaves *K* at the higher
+    head, which is the refusal-side failure.
+    """
+    for ordinal in range(1, 6):
+        append_entry(observation(ordinal))
+    entry = append_reset(3)
+    append_entry(entry)  # the retry lands a second copy
+
+    result = read_journal(LINEAGE)  # does not raise
+    assert result.known is not None
+    assert any("byte-identical" in note for note in result.skipped)
+
+
+def test_a_reset_opening_an_empty_journal_binds_to_nothing():
+    """There is no predecessor to name, and the empty binding says so."""
+    entry = append_reset(4)
+    assert entry.follows == (0, "")
+    result = read_journal(LINEAGE)
+    assert result.skipped == ()
+    assert result.epoch == (entry,)
+
+
+def test_a_reset_with_no_binding_is_not_an_epoch_boundary():
+    """The field is REQUIRED — there is no binding-less compat path.
+
+    The journal format exists only on unmerged slice-3 branches, so there is no
+    deployed state to migrate and an "unbound resets still count" arm would be
+    a permanent hole built for nobody.
+    """
+    append_entry(observation(1))
+    append_entry(observation(9))
+    append_entry(observation(2, kind=Kind.TRUST_RESET, level=Level.FULL))
+
+    result = read_journal(LINEAGE)
+    assert isinstance(result.known, HeadLowerBound)
+    assert result.known.at_least.head.ordinal == 9
+    assert any("(none)" in note for note in result.skipped), result.skipped
+
+
+def test_binding_a_reset_does_not_require_a_readable_head():
+    """The ceremony must work on the journals it exists to recover from.
+
+    An equivocating journal REFUSES a full read, and equivocation is one of the
+    states an operator runs this ceremony to resolve. Binding the reset
+    therefore reads the last entry without computing *K*, so producing one
+    stays possible exactly when it is needed.
+    """
+    append_entry(observation(6, "a"))
+    append_entry(observation(6, "b"))
+    with pytest.raises(JournalEquivocation):
+        read_journal(LINEAGE)
+
+    entry = append_reset(4)  # must not raise
+    assert entry.follows == (3, entry_identity(observation(6, "b")))
+    assert read_journal(LINEAGE).established_head() is not None
+
+
+# ---------------------------------------------------------------------------
+# Sol r2: replaying CONTEXT, not just the entry (finding:s3wp3-trust-reset-replay)
+# ---------------------------------------------------------------------------
+
+
+def _journal_reset_at_5_then_advanced_to_8() -> HeadAttestation:
+    """Ordinals 1-10, a legitimate reset accepting 5, then 6-8. Returns the reset."""
+    for ordinal in range(1, 11):
+        append_entry(observation(ordinal))
+    legitimate = append_reset(5, note="restored from archive; abandoned 10")
+    for ordinal in (6, 7, 8):
+        append_entry(observation(ordinal, "b"))  # a new history after the restore
+    return legitimate
+
+
+def test_replaying_the_predecessor_with_the_reset_does_not_reopen_the_epoch():
+    """Sol r2's repro. Identity alone was defeated by replaying CONTEXT.
+
+    Re-appending the historical predecessor and the reset as an ordered suffix
+    reproduces the recorded identity exactly — the entry the copy names really
+    is sitting in front of it. Identity was the right kind of binding and the
+    wrong amount of it: it is a property of the bytes, so bytes can carry it.
+
+    The physical line cannot be carried. Copied bytes appended later land
+    later, so the position claim is stale no matter how much surrounding
+    context comes with them, which is what makes this close the class rather
+    than the instance.
+    """
+    legitimate = _journal_reset_at_5_then_advanced_to_8()
+    predecessor = observation(10)
+
+    append_entry(predecessor)  # the context, replayed
+    append_entry(legitimate)  # and the reset behind it
+
+    result = read_journal(LINEAGE)
+    # BOTH copied lines are literal replays, so both are skipped — the reset
+    # and the advance that was replayed to give it its context. Neither the
+    # epoch nor K moves.
+    duplicates = [note for note in result.skipped if "byte-identical" in note]
+    assert len(duplicates) == 2, result.skipped
+    assert isinstance(result.known, HeadLowerBound)
+    assert result.known.at_least.head.ordinal == 8
+    assert compare(result.known.at_least, head(5), None) is Outcome.ROLLBACK
+
+
+def test_replaying_the_whole_suffix_does_not_reopen_the_epoch():
+    """The generalization: more context replayed is still a later position."""
+    _journal_reset_at_5_then_advanced_to_8()
+    suffix = list(read_journal(LINEAGE).entries)
+
+    for entry in suffix:
+        append_entry(entry)
+
+    result = read_journal(LINEAGE)
+    assert isinstance(result.known, HeadLowerBound)
+    assert result.known.at_least.head.ordinal == 8
+    assert compare(result.known.at_least, head(5), None) is Outcome.ROLLBACK
+    assert any("byte-identical" in note for note in result.skipped)
+
+
+def test_a_replayed_advance_cannot_reimport_an_abandoned_head():
+    """The acceptance vector, and why direction was the wrong thing to judge by.
+
+    Re-appending an ``advance`` from before a reset used to raise *K* to an
+    abandoned head. I classified that as safe because *K* moved UP, and refused
+    more. That was the wrong axis. The head *K* then named was GENUINE — a real
+    head this machine really did accept — so a store restored from the pre-reset
+    backup presents it exactly, compares EQUAL, and the unchanged arm does no
+    descent verification by design. The ceremonially abandoned state opened
+    silently. A wrongly-raised *K* naming a real abandoned head is a landing
+    pad, not a wall.
+
+    The byte-duplicate gate closes it at the source: the replayed line is
+    literal bytes this journal already holds, so it re-asserts rather than
+    records, and *K* never moves.
+    """
+    _journal_reset_at_5_then_advanced_to_8()
+    assert read_journal(LINEAGE).established_head().head.ordinal == 8
+
+    append_entry(observation(10))  # an abandoned head, re-asserted verbatim
+
+    result = read_journal(LINEAGE)
+    assert any("byte-identical" in note for note in result.skipped)
+    assert isinstance(result.known, HeadLowerBound)
+    assert result.known.at_least.head.ordinal == 8, "K reached an abandoned head"
+    # And the restored abandoned backup is no longer equal to what is remembered.
+    assert result.known.at_least.head != head(10)
+
+
+def test_an_injected_collision_costs_a_walk_and_never_an_acceptance():
+    """Where the gate is wrong, it must be wrong on the verification side.
+
+    Two genuinely independent events that serialize to identical bytes are
+    indistinguishable from a replay, so the gate drops the later one. This
+    constructs exactly that — a post-reset entry whose bytes coincide with one
+    from the abandoned epoch — and pins the consequence, rather than resting on
+    the collision being improbable.
+
+    The consequence is that *K* reads LOWER than the truth. The store then
+    presents a head above it, which is an ADVANCE, and the advance branch is
+    the one that pays for a verified walk: descent from the remembered head is
+    established before anything is accepted. Cost, not credulity — the failure
+    lands on the verification side, never on acceptance.
+    """
+    for ordinal in (1, 2, 3):
+        append_entry(observation(ordinal))
+    append_reset(1)
+    append_entry(observation(3))  # a genuine new entry, colliding with line 4
+
+    result = read_journal(LINEAGE)
+    assert any("byte-identical" in note for note in result.skipped)
+    # K is the reset head, NOT the colliding 3 — lower than the truth.
+    assert result.known.at_least.head.ordinal == 1
+    # A store at the true head is therefore an ADVANCE, which must establish
+    # descent rather than be believed: with no vouched record at K, REWRITE.
+    assert compare(result.known.at_least, head(3), None) is Outcome.REWRITE
+    assert compare(result.known.at_least, head(3), head(1)) is Outcome.ADVANCED
+
+
+def test_concatenating_a_foreign_journal_does_not_import_its_resets():
+    """The combine case. Every appended reset lands at a shifted line.
+
+    A journal pasted onto the end of another is the bulk form of a replay, and
+    it is the one an ordinary tool could do by accident. The foreign resets all
+    carry positions from the file they were written in, so none of them opens
+    an epoch here and *K* stays the local maximum.
+    """
+    for ordinal in (1, 2, 3):
+        append_entry(observation(ordinal))
+    local = append_reset(2)
+    append_entry(observation(9))
+
+    foreign_lines = [
+        HEADER,
+        json.dumps(
+            {
+                "v": 1,
+                "kind": "advance",
+                "level": "commit",
+                "lineage": LINEAGE,
+                "ordinal": 4,
+                "record_hash": "c" * 64,
+                "observed_at": 1.0,
+            }
+        ),
+        json.dumps(
+            {
+                "v": 1,
+                "kind": "trust-reset",
+                "level": "full",
+                "lineage": LINEAGE,
+                "ordinal": 4,
+                "record_hash": "c" * 64,
+                "observed_at": 1.0,
+                # A binding that was valid IN ITS OWN FILE, at line 2.
+                "follows": [2, "does-not-matter"],
+            }
+        ),
+    ]
+    with journal_path(LINEAGE).open("a", encoding="utf-8") as handle:
+        handle.write("\n".join(foreign_lines) + "\n")
+
+    result = read_journal(LINEAGE)
+    assert isinstance(result.known, HeadLowerBound)
+    assert result.known.at_least.head.ordinal == 9, "a foreign reset took hold"
+    assert any("trust-reset" in note for note in result.skipped)
+    assert local.head.ordinal == 2
+
+
+def test_the_position_is_the_physical_line_not_an_index_of_parsed_entries():
+    """A judgment-dependent index would drift; a file line does not.
+
+    An unreadable line sits between the predecessor and the reset here. It
+    occupies a physical line, so the predecessor's line number accounts for it
+    — where an index among successfully parsed entries would not, and would
+    renumber the moment a future build classified that line differently.
+    """
+    append_entry(observation(1))
+    with journal_path(LINEAGE).open("a", encoding="utf-8") as handle:
+        handle.write("{ not json at all\n")
+    entry = append_reset(1)
+
+    assert entry.follows is not None
+    # header(1), observation(2), damage(3) — so the predecessor is at line 2,
+    # while its index among parsed entries is 0.
+    assert entry.follows[0] == 2
+    result = read_journal(LINEAGE)
+    assert result.epoch == (entry,), "the reset was not honored"

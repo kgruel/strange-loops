@@ -162,7 +162,7 @@ def test_absent_observer_batch_refusal_is_distinct_condition(tmp_path: Path) -> 
     assert isinstance(exc, LegacySourceRefused)
     assert len(exc.mixed_observer_lines) == 0
     assert len(exc.absent_observer_lines) == 1
-    assert exc.absent_observer_lines[0] == (2, 1, ("alice",))
+    assert exc.absent_observer_lines[0] == (2, 1, ("alice",), {"missing": 1})
     assert "1 row(s) missing 'observer' field" in str(exc)
 
 
@@ -298,6 +298,23 @@ def test_sqlite_codec_invalid_ts_text_refuses_with_rowid(tmp_path: Path) -> None
     exc = exc_info.value
     assert len(exc.codec_invalid_lines) == 1
     assert exc.codec_invalid_lines[0][0] == 1  # rowid 1
-    assert "fact field 'ts' must be a finite number" in exc.codec_invalid_lines[0][1]
+    assert "fact field 'ts' must be a number" in exc.codec_invalid_lines[0][1]
+
+
+def test_sqlite_seam_defense_refuses_unsafe_integer_ts(tmp_path: Path) -> None:
+    """F1 (gate R2-B1): A SQLite store with ts holding 2**60 (outside JCS safe integer domain)
+    is refused by inventory as codec-invalid."""
+    from ._fixtures import build_unsafe_integer_ts_sqlite
+
+    sqlite_file = build_unsafe_integer_ts_sqlite(tmp_path / "unsafe_ts.sqlite")
+
+    with pytest.raises(LegacySourceRefused) as exc_info:
+        inventory(sqlite_file)
+
+    exc = exc_info.value
+    assert len(exc.codec_invalid_lines) == 1
+    assert exc.codec_invalid_lines[0][0] == 1  # rowid 1
+    assert "outside the JCS safe-integer domain" in exc.codec_invalid_lines[0][1]
+
 
 

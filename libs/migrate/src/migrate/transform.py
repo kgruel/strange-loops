@@ -80,8 +80,6 @@ from .legacy_source import BatchUnit, FlatFactUnit, LegacySource, TickUnit
 from .refusals import (
     BatchRegroupRefused,
     DeclarationKeyRefused,
-    LegacySourceRefused,
-    MigrationRefused,
     MissingCustodianKeyRefused,
 )
 

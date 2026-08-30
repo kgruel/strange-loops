@@ -54,6 +54,7 @@ from ._fixtures import (
     build_synthetic_jsonl,
     build_synthetic_sqlite,
     build_type_error_batch_jsonl,
+    build_unsafe_integer_ts_sqlite,
 )
 
 ARRIVAL_DOMAIN = "test-arrival-v1"
@@ -552,5 +553,22 @@ def test_sqlite_seam_defense_refuses_codec_invalid_ts(tmp_path: Path, kyle) -> N
     exc = exc_info.value
     assert isinstance(exc, MigrationRefused)
     assert len(exc.codec_invalid_lines) == 1
-    assert "fact field 'ts' must be a finite number" in exc.codec_invalid_lines[0][1]
+    assert "fact field 'ts' must be a number" in exc.codec_invalid_lines[0][1]
+
+
+def test_sqlite_seam_defense_refuses_unsafe_integer_ts(tmp_path: Path, kyle) -> None:
+    """F1 (gate R2-B1): Handing the transformer a SQLite store with ts=2**60 raises LegacySourceRefused
+    instead of leaking ArrivalBodyError."""
+    source_path = build_unsafe_integer_ts_sqlite(tmp_path / "unsafe_ts.sqlite")
+    vf = _make_vertex_file("kyle", [("kyle", kyle.public)])
+
+    with pytest.raises(LegacySourceRefused) as exc_info:
+        transform(source_path, vf, signer=kyle.signer)
+
+    exc = exc_info.value
+    assert isinstance(exc, MigrationRefused)
+    assert len(exc.codec_invalid_lines) == 1
+    assert exc.codec_invalid_lines[0][0] == 1  # rowid 1
+    assert "outside the JCS safe-integer domain" in exc.codec_invalid_lines[0][1]
+
 

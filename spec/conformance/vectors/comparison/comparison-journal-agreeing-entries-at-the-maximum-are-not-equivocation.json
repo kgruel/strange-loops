@@ -26,6 +26,7 @@
     "entries": 3,
     "epoch": 3,
     "skipped": 0,
+    "weakening": 0,
     "outcome": "unchanged"
   }
 }

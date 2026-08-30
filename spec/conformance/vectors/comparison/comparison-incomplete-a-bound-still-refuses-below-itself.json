@@ -27,6 +27,7 @@
     "entries": 3,
     "epoch": 2,
     "skipped": 1,
+    "weakening": 1,
     "outcome": null,
     "sound_answer": "rollback"
   }

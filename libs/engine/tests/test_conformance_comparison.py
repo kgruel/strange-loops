@@ -108,6 +108,7 @@ VECTOR_INVENTORY: dict[str, frozenset[str]] = {
         "comparison-epoch-ends-at-the-reset-entry-is-unchanged",
         "comparison-epoch-below-the-reset-head-is-rollback",
         "comparison-epoch-scopes-the-equivocation-check-too",
+        "comparison-epoch-a-reset-bound-to-the-wrong-line-does-not-open-one",
     }),
     "comparison-journal-": frozenset({
         "comparison-journal-the-known-head-is-the-maximum-ordinal",
@@ -120,6 +121,8 @@ VECTOR_INVENTORY: dict[str, frozenset[str]] = {
     }),
     "comparison-incomplete-": frozenset({
         "comparison-incomplete-a-torn-line-yields-a-lower-bound",
+        "comparison-incomplete-a-boundary-heals-damage-below-its-line",
+        "comparison-incomplete-weighting-is-per-skip-not-per-read",
         "comparison-incomplete-a-bound-still-refuses-below-itself",
         "comparison-incomplete-a-bound-cannot-answer-above-itself",
         "comparison-incomplete-a-headerless-journal-yields-a-bound",
@@ -334,6 +337,28 @@ def test_conformance_comparison(vector_path: Path) -> None:
     assert len(read.entries) == expected["entries"]
     assert len(read.epoch) == expected["epoch"]
     assert len(read.skipped) == expected["skipped"]
+
+    # RECORDED and WEAKENING are two different counts, and the gap between them
+    # is the whole of the weighting rule: weight is cause times position, so a
+    # re-assertion never weighs and a loss positioned below the epoch boundary
+    # weighs nothing either. A read can therefore record skips and still answer
+    # in full, which the pre-amendment schema could not express — it stated that
+    # a non-empty skip set was exactly the weakening condition, and that is no
+    # longer true.
+    weakening = (
+        len(read.known.skipped)
+        if isinstance(read.known, (HeadLowerBound, HeadUnreadable))
+        else 0
+    )
+    assert weakening == expected["weakening"]
+    assert weakening <= expected["skipped"], (
+        "more skips weigh than were recorded, which is not a state that exists"
+    )
+    assert (weakening > 0) == (state in {"bounded", "unreadable"}), (
+        "a read is weakened exactly when some recorded skip carries weight — "
+        "if these disagree, either a weightless skip bounded the read or a "
+        "weighted one was let through"
+    )
 
     # Each case is named separately BY DESIGN. There is no uniform accessor
     # that reaches a head across the three states — the weakened ones carry no

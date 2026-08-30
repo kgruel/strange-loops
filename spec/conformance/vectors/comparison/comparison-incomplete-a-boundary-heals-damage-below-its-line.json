@@ -1,0 +1,33 @@
+{
+  "name": "comparison-incomplete-a-boundary-heals-damage-below-its-line",
+  "description": "The ceremony HEALS, and this is what that means mechanically. A line this build could not read sits at a physical position BELOW the trust reset's own line, so it carries zero weight and the read is ESTABLISHED \u2014 the operator decreed trust in a head, and everything positionally behind that decree is what they decreed past. Without position scoping the damage would bound every read of this file forever, including every read after the very ceremony run to put it behind them, which would leave the recovery story with no recovery in it. Position is the coordinate because appends are tail-only, so a line's place in the file IS its place in time. Note this is ORDINALS' opposite: the journal's ordinals genuinely do not ascend in file order, because two writers interleave them \u2014 but positions cannot interleave, because the filesystem serializes them. The skip is still RECORDED; what it no longer does is weigh.",
+  "input": {
+    "form": "journal",
+    "journal": [
+      "{\"protocol\":1,\"type\":\"arrival-head-observation\",\"v\":1,\"wire\":1}",
+      "{\"kind\":\"bootstrap\",\"level\":\"mint\",\"lineage\":\"01M3COMPARISONVECTORLINEAGE\",\"location\":\"/vectors/comparison/project.arrival\",\"observed_at\":1788000000.0,\"ordinal\":0,\"record_hash\":\"8ac1d899262e830d2be319bd5ef28d03cfe847a108adaa1ec9288b7e2e0f2b00\",\"v\":1}",
+      "{\"kind\":\"advance\",\"level\":\"commit\",\"lineage\":\"01M3COMPARISONVECTORLINEAGE\",\"location\":\"/vectors/comparison/project.arrival\",\"o",
+      "{\"kind\":\"advance\",\"level\":\"commit\",\"lineage\":\"01M3COMPARISONVECTORLINEAGE\",\"location\":\"/vectors/comparison/project.arrival\",\"observed_at\":1788000101.0,\"ordinal\":101,\"record_hash\":\"acbc798fc2803ce8a55d82f63a71978ac143f43773dea6c7bd53e06bef146520\",\"v\":1}",
+      "{\"follows\":[4,\"6110b582a5077ba7d78c4fde123bb3270c219ebce11d2ab679c505e4b9bcd57e\"],\"kind\":\"trust-reset\",\"level\":\"full\",\"lineage\":\"01M3COMPARISONVECTORLINEAGE\",\"location\":\"/vectors/comparison/project.arrival\",\"observed_at\":1788000090.0,\"ordinal\":90,\"record_hash\":\"9ba847b1c3e2f92f410ac2264266c8506f0df0a9cee6575a27b6064957fc93ba\",\"v\":1}"
+    ],
+    "presented": {
+      "lineage": "01M3COMPARISONVECTORLINEAGE",
+      "ordinal": 90,
+      "record_hash": "9ba847b1c3e2f92f410ac2264266c8506f0df0a9cee6575a27b6064957fc93ba"
+    },
+    "at_known": null
+  },
+  "expected": {
+    "read": "established",
+    "known": {
+      "lineage": "01M3COMPARISONVECTORLINEAGE",
+      "ordinal": 90,
+      "record_hash": "9ba847b1c3e2f92f410ac2264266c8506f0df0a9cee6575a27b6064957fc93ba"
+    },
+    "entries": 3,
+    "epoch": 1,
+    "skipped": 1,
+    "weakening": 0,
+    "outcome": "unchanged"
+  }
+}

@@ -17,6 +17,7 @@
     "entries": 0,
     "epoch": 0,
     "skipped": 0,
+    "weakening": 0,
     "outcome": "first-contact"
   }
 }

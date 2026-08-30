@@ -595,3 +595,139 @@ as of now regardless, and its own description says the weighing question is open
 that this vector is what would be regenerated if it is ruled the other way — a
 foreign implementer reading the family should know which of its claims is settled and
 which is under review.
+
+## 12. Amendments #4 and #5 — the pre-wired flip, the mismatch path, the healing story
+
+Base `90fe36a1` on `slice3/arrival-witness`, step-0 verified (HEAD exactly the stated
+base; one red test, the pre-declared flip; the untracked crossdoc report left alone).
+
+**What changed in the contract.** Weight is now `f(cause) × g(position)`, decided per
+skip: a re-assertion carries zero cause-weight (#4), and a weakening-class skip
+positioned *before* the boundary reset's line carries zero position-weight (#5). So
+`skipped` (recorded) and the weakening set are no longer the same thing — and the
+schema had to grow to say so.
+
+### The schema grew a field, because a state exists that it could not express
+
+`expected.weakening` joins `expected.skipped` on every journal vector. The old schema
+stated, normatively, that *"non-empty `skipped` is exactly the condition that weakens
+the result to a bound"* — which amendments #4 and #5 made **false**. A read can now
+record skips and answer in full, and with only one count a vector could not
+distinguish an implementation that weighs correctly from one that weighs everything
+in a file whose skips happen to agree.
+
+The consumer asserts the count and two invariants it implies: `weakening <= skipped`
+(more skips weighing than were recorded is not a state that exists), and
+`weakening > 0` **iff** the read is `bounded` or `unreadable` — so a weightless skip
+that bounded a read, or a weighted one let through, fails naming which way it went.
+
+This is the same move as §2's read/outcome split, for the same reason: when the
+contract acquires an honest distinction, the vectors need a slot for it or they
+silently stop pinning it.
+
+### 1. The pre-wired flip
+
+`comparison-journal-a-byte-identical-line-is-a-re-assertion` regenerated
+`bounded → established`, exactly the one-vector regeneration its own description
+declared when it was written. The open-question language is out; it now states the
+settled claim — the skip is **recorded and carries zero weight**, because the bound
+machinery represents ignorance and a re-assertion is the one cause carrying none.
+Values: `skipped 1, weakening 0, established, unchanged`.
+
+That combination is the flip made observable. Under the old schema this vector could
+only have said `skipped: 1` and `bounded`; it now says `skipped: 1` **and**
+`weakening: 0`, which is the amendment stated in the artifact rather than in prose
+about it.
+
+### 2. The reset-mismatch path — and why this construction
+
+`comparison-epoch-a-reset-bound-to-the-wrong-line-does-not-open-one`, filed with the
+epoch family because the claim is about whether a reset opens an epoch.
+
+Values: `bounded`, K **101**, `skipped 1, weakening 1`, `sound_answer rollback`
+against a presented head of 90.
+
+**The construction removes an intervening line rather than corrupting one**, and that
+is the whole point. Deleting a line shifts every later line up by one, so the reset's
+recorded **identity still matches its predecessor exactly** and only its recorded
+**line** is stale. Ask the sol-r2 question — *what is the weakest implementation that
+passes this?* — and the answer is the discriminating one: an implementation checking
+identity alone, which is precisely the amendment-#1 shape that a replayed ordered
+suffix defeats, passes every identity-based fixture and **fails this vector**. A
+fixture that broke both halves at once would have been satisfied by either check.
+
+Three semantics land in one vector: the reset is skipped **with a record** and not
+refused; the walk continues and finds no earlier boundary; and K is computed as
+though the invalid reset were absent — so the store presenting the head the voided
+ceremony tried to install is **refused**, with the abandoned ordinal above it still
+remembered. The voided reset weighs in full, which is #4's narrow ruling: the line's
+content is readable, but the operator's *intent* is not, and that is real ignorance.
+
+A literal byte-identical replay of a reset would **not** reach this path at all — the
+dedup rule takes it first, as a zero-weight re-assertion. Position binding's live
+trigger is the fresh-bytes case, which is what this fixture is.
+
+### 3. The healing story — one new vector plus one already here
+
+`comparison-incomplete-a-boundary-heals-damage-below-its-line`: damage at a physical
+line *below* the reset's line carries zero weight, so the read is **established** and
+answers `unchanged` in full. Values: `entries 3, epoch 1, skipped 1, weakening 0`.
+This is amendment #5's reason for existing — without it an operator resets past
+damage and still gets a bounded read forever, from damage the reset was run to put
+behind them.
+
+**The contrast half was already in the family**, so it was not rebuilt.
+`comparison-incomplete-a-torn-line-yields-a-lower-bound` is damage at a position
+*after* the boundary and already pinned `bounded / weakening 1`. Its description now
+names that explicitly and points at its pair: same cause, same fixture family,
+opposite answer, **position the only difference**. Writing a second at/after vector
+would have duplicated a claim rather than added one.
+
+**A third vector earns its place on a distinct claim:**
+`comparison-incomplete-weighting-is-per-skip-not-per-read` carries two unreadable
+lines of the *same cause* at different positions — one below the boundary, one above
+— and is `bounded` with `skipped 2, weakening 1`. This is what tells per-skip
+weighting from per-read weighting, and neither of the other two can: an
+implementation deciding weight for the read as a whole must answer for both lines at
+once and gets one wrong either way. *"Any zero-weight skip means established"* answers
+established here and silently drops a real loss; *"any skip at all bounds"* answers
+bounded for the healing case and heals nothing. The `_Skips` accumulator's own
+docstring names that composition failure as the tempting wrong shape, so it is worth
+a vector rather than a comment.
+
+**Family placement**, since it was a judgment call: the mismatch vector went to
+`comparison-epoch-` (does a reset open an epoch?) and the two weighting vectors to
+`comparison-incomplete-` (what makes a read incomplete?). A new `comparison-weighting-`
+family was considered and rejected — the cause half already lives in
+`comparison-journal-` with the other read rules, so a new family would have split one
+mechanic across three prefixes instead of two, and renaming the dedup vector a second
+time in consecutive rounds is churn a reader pays for.
+
+### 4. SCHEMA.md
+
+New section **"Which skips weaken: weight is cause times position"** — the cause
+table, the position rule with its physical-line coordinate system (and why that is
+ordinals' opposite: writers interleave ordinals, the filesystem serializes
+positions), and all four pinned edges (structural absences exempt; the bound itself
+epoch-scoped; no boundary means full weight everywhere; "below" is physical line).
+Plus the note that a voided reset's own record can only come from above the boundary
+by construction, so a failed ceremony followed by a re-run heals through the walk
+short-circuiting rather than through the weighting — the two mechanisms are named
+separately because a reader who conflated them would look for the wrong one.
+
+The `skipped` row is corrected, `weakening` is added beside it, and the `bounded`
+read-state condition is reworded, since its meaning changed.
+
+### Verification
+
+| Check | Result |
+|---|---|
+| family suite | **36 passed** (31 vectors + 5 non-parametrized), from 33 with 1 red |
+| engine, wave worktree | **2278 passed, 1 skipped, zero failed** — the one red test at `90fe36a1` is green |
+| architecture, separate process | **99 passed** |
+| generator byte-reproducible | regenerated twice, digest **identical** |
+| `ruff check` | clean |
+| cell-enumeration ratchet | coverage claim still true — the mismatch vector lands in the *below* cell, the composite in *equal*, and the above cell is still held with its valid `at_known` |
+
+Nothing outside the pre-declared flip was red before the change, and nothing is red
+after it.

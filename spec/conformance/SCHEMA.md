@@ -507,7 +507,8 @@ Byte-identity is complete against literal replay, which is the unsigned threat m
 | `known` | Head Object \| null | `journal` only | The head the read established, or the bound it reached. `null` for the other states. |
 | `entries` | integer \| null | `journal` only | Readable entries. `null` when the read refused before counting. |
 | `epoch` | integer \| null | `journal` only | Entries in the current trust epoch. |
-| `skipped` | integer \| null | `journal` only | What the read could not use. **Non-empty is exactly the condition that weakens the result to a bound.** |
+| `skipped` | integer \| null | `journal` only | Every skip the read RECORDED. Non-empty does **not** by itself weaken the result — see the weighting rule below. |
+| `weakening` | integer | `journal` only | How many of those recorded skips actually carry weight. `0` on an `established` or `none` read. **`weakening > 0` is exactly the condition that weakens**, and `weakening <= skipped` always. |
 | `sound_answer` | string \| null | `bounded` only | What a bound may soundly answer: `"rollback"`, or `null` when nothing is answerable. |
 
 **`outcome: null` is not an eighth outcome.** It means the read declined and the classifier was never called, so there is no outcome to state; `read` carries why. A vector must never mint a string outside the ratified seven — a normative vector carrying something like `"declined"` would read to an implementer as a value to return.
@@ -522,11 +523,41 @@ Byte-identity is complete against literal replay, which is the unsigned threat m
 |---|---|---|
 | `none` | The journal claims nothing: empty, or a header and no entries. | `first-contact`. Trust on first use is the honest answer to "nothing was ever accepted here". |
 | `established` | Every line was usable. | All seven rows. |
-| `bounded` | The read was **incomplete** — it needed something it did not get. The remembered head is known only to be *at least* this. | Only `rollback`, below the bound. |
+| `bounded` | The read was **incomplete** — something it needed and did not get carried WEIGHT. The remembered head is known only to be *at least* this. | Only `rollback`, below the bound. |
 | `unreadable` | Content was claimed and **none** of it could be read. | Nothing. There is no bound, so even `rollback` is unanswerable. |
 | `equivocation` | Two entries at the epoch's maximum ordinal carry different record hashes. | Nothing; the read itself refuses. |
 
 **`bounded` is not `unreadable`, and neither is `none`.** These three are the area's central distinction. An empty journal says nothing was ever accepted here. A journal whose content cannot be read says heads *were* accepted and their ordinals are exactly what was lost — collapsing it into `none` would grant trust on first use *precisely because* the journal became unreadable. And a bound is weaker than an established head without being unreadable in any part: a journal with every entry readable and no header is incomplete, because the protocol and wire versions those hashes derive under are unknown.
+
+### Which skips weaken: weight is cause times position
+
+A recorded skip and a weakening skip are **not the same thing**, and `skipped` and `weakening` are separate counts for that reason. The bound machinery exists to represent *ignorance*; a skip that leaves the reader ignorant of nothing must not produce one. Weight is the product of two independent factors, and **both are decided per skip, never per read**.
+
+**The cause factor.**
+
+| Cause | Weight |
+|---|---|
+| a re-assertion (byte-duplicate line) | **zero** |
+| everything else — unparseable, unclassifiable, later-build, a voided reset, a missing header | full |
+
+A re-assertion is the one cause carrying no ignorance: the skipped line's content is a line this read already counted, so nothing about the accepted head is unknown because of it. Weighing it would let a single benign crash-retry duplicate degrade every read of an append-only file for the life of that file — an ordinary crash becoming a permanent incident, which is the shape this area's rules have repeatedly resolved against.
+
+A **voided reset keeps full weight**, and the distinction is worth stating: the line's *content* is perfectly readable, but what the operator INTENDED by it is not, and that intent uncertainty is real ignorance.
+
+**The position factor.** A weakening-class skip sitting at a physical line **before the boundary reset's line** carries zero weight. The ceremony decreed trust in a head, and everything positionally behind that decree is what it decreed past. At or after the boundary, the cause weight applies in full.
+
+Position is the coordinate — the same physical-line coordinate system `follows` uses, and ordinals never enter it. Appends are tail-only, so a line's position in the file **is** its place in time. This is precisely the opposite of ordinals, which genuinely do not ascend in file order because two writers interleave them; positions cannot interleave, because the filesystem serializes them.
+
+Without position scoping the ceremony heals nothing: an operator resets past damage and still gets a bounded read forever, from damage the reset was run to put behind them.
+
+**Four edges, each pinned:**
+
+1. **Structural absences are exempt from position scoping.** A missing header keeps full weight regardless of any boundary. The header would be line 1 and would sit below every boundary, but its absence is a claim about the FILE rather than a line an operator decreed past — which is also why it is reported without a line number.
+2. **A still-bounded read's bound is epoch-scoped too.** A file-wide bound inflated by an abandoned epoch's high ordinal would produce false rollback refusals against genuine current-epoch stores — wrong even though it errs refusal-side.
+3. **No valid reset means no boundary, and then every weakening cause keeps full weight.** "There is nothing to be after" is a different situation from "this is after it".
+4. **"Below" means physical line position before the boundary reset's line.** Not ordinal, not index among parsed entries.
+
+A voided reset's own note can only ever come from **above** the boundary, by construction: the epoch walk runs backward and stops at the first valid reset, so a failed ceremony attempt followed by a successful re-run heals through the walk short-circuiting past it rather than through the weighting.
 
 **A bound is sound downward only, and it has three cells — not two.** `sound_answer` is the executable statement of this table, and the area carries a vector for every row, because a rule stated only in prose is one a conforming implementation can pass while violating.
 
@@ -547,9 +578,9 @@ The third row is the one a two-valued reading loses, and losing it is not academ
 Five, and the file stem names which one a vector belongs to.
 
 - **`comparison-classify-*`** — the seven rows through the pure classifier, plus the guard-order claim that a foreign lineage at a *lower* ordinal is `lineage-replaced` and not `rollback`, and both ways the advance branch fails.
-- **`comparison-epoch-*`** — a trust-reset opens a new epoch and the epoch is **reset-inclusive**: the reset entry is the first entry of the epoch it opens. A journal ending at the reset compares against the reset head. Scoped exclusively instead, such a journal has an empty epoch and answers `first-contact` — silent re-acceptance on the most ordinary shape there is, an operator resetting and then opening. The family also carries the claim that epoch scope governs the equivocation check, so a ceremony can take effect over a conflict the operator already resolved.
+- **`comparison-epoch-*`** — including the **mismatch** path: a reset whose recorded predecessor is not the entry preceding it is skipped with a record, the walk continues for an earlier valid boundary, and the head is computed as though the invalid reset were absent — so the store presenting the head that reset tried to install is refused. That vector REMOVES an intervening line rather than altering one, so the reset's recorded IDENTITY still matches and only its recorded LINE is stale: an implementation checking identity alone passes every other fixture and fails that one. Otherwise: a trust-reset opens a new epoch and the epoch is **reset-inclusive**: the reset entry is the first entry of the epoch it opens. A journal ending at the reset compares against the reset head. Scoped exclusively instead, such a journal has an empty epoch and answers `first-contact` — silent re-acceptance on the most ordinary shape there is, an operator resetting and then opening. The family also carries the claim that epoch scope governs the equivocation check, so a ceremony can take effect over a conflict the operator already resolved.
 - **`comparison-journal-*`** — the maximum-ordinal rule (the remembered head is the epoch's highest ordinal, **not the last line**, because concurrent writers journal out of order), equivocation, the byte-duplicate re-assertion rule, and **both negative controls**: entries at the maximum that *agree* without being byte-identical are not equivocation, and unknown fields on a current-grammar entry are read normally. A refusal that fires on agreement has stopped meaning what it says. Agreement and byte-identity are pinned as separate vectors on purpose — they were one fixture until dedup made them two different claims.
-- **`comparison-incomplete-*`** — the lower bound and the third state. **All three of the bound's cells are pinned** (below, equal, above), because two of them agree on `null` and a family that exercised only those two would pass an implementation that answered `advanced` above the bound. The family also carries the case an operator would actually meet: a fresh genesis arriving at a location whose journal remembers a far higher ordinal in unreadable form is a replacement wearing the old name, and it declines rather than passing as first contact.
+- **`comparison-incomplete-*`** — the lower bound, the third state, and **the weighting rule's position half**: damage below a boundary reset's line leaves the read established (the ceremony heals), damage at or after it bounds the read, and a file carrying one of each is bounded with only one skip weighing — which is what tells per-skip weighting apart from per-read weighting. **All three of the bound's cells are pinned** (below, equal, above), because two of them agree on `null` and a family that exercised only those two would pass an implementation that answered `advanced` above the bound. The family also carries the case an operator would actually meet: a fresh genesis arriving at a location whose journal remembers a far higher ordinal in unreadable form is a replacement wearing the old name, and it declines rather than passing as first contact.
 - **`comparison-header-*`** — the header's **three-way** classification. A kindless object bearing the type marker is a header. An object bearing **both** the type marker and an entry kind is *unclassifiable*: skipped and reported, never absorbed, never a reason to refuse the file. Anything else is entry-shaped. Both two-valued repairs fail in opposite directions — absorbing on the type marker alone silently loses an entry, and requiring the marker plus the absence of a kind refuses the whole file over ordinary version skew — so the stable rule admits a third verdict rather than choosing between two wrong certainties. The middle row is a **location claim** about this build's ability to read the line, not a verdict about what the line is, which is exactly what this build cannot know.
 
 Vectors are frozen; regenerate with `uv run --package engine python spec/conformance/generate_comparison.py`.

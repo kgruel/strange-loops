@@ -207,6 +207,33 @@ def torn(ordinal: int) -> Callable[[list[str]], list[str]]:
     return apply
 
 
+def drop_line_holding(ordinal: int) -> Callable[[list[str]], list[str]]:
+    """Remove the line holding ``ordinal`` outright, renumbering what follows.
+
+    Distinct from tearing it: a torn line stays in the file and keeps its
+    position, while a removed one shifts every later line UP by one. That shift
+    is what makes a following reset's recorded position stale while its
+    recorded identity still matches.
+    """
+
+    def apply(lines: list[str]) -> list[str]:
+        return [line for line in lines if f'"ordinal":{ordinal},' not in line]
+
+    return apply
+
+
+def both(
+    first: Callable[[list[str]], list[str]],
+    second: Callable[[list[str]], list[str]],
+) -> Callable[[list[str]], list[str]]:
+    """Two transforms, applied in order."""
+
+    def apply(lines: list[str]) -> list[str]:
+        return second(first(lines))
+
+    return apply
+
+
 def replace_at(ordinal: int, raw: str) -> Callable[[list[str]], list[str]]:
     """Swap the line holding ``ordinal`` for a literal one."""
 
@@ -495,6 +522,32 @@ JOURNAL_CASES: tuple[JournalCase, ...] = (
         ),
         presented=head(91),
     ),
+    JournalCase(
+        name="comparison-epoch-a-reset-bound-to-the-wrong-line-does-not-open-one",
+        description=(
+            "A trust reset whose recorded predecessor is not the entry actually "
+            "preceding it. It is skipped WITH A RECORD — never a refusal — the "
+            "epoch walk keeps going for an earlier valid boundary, finds none, "
+            "and the remembered head is computed as though the invalid reset "
+            "were not there. So the store presenting the head the reset tried to "
+            "install is REFUSED: the abandoned ordinal above it is still what "
+            "this machine remembers. That is the whole of the replay defence — a "
+            "reset that cannot prove where it was appended cannot move the read "
+            "scope. THE CONSTRUCTION ISOLATES POSITION ON PURPOSE: an "
+            "intervening line has been removed, which shifts every later line up "
+            "by one, so the reset's recorded IDENTITY still matches its "
+            "predecessor exactly and only its recorded LINE is stale. An "
+            "implementation checking identity alone — the shape this rule "
+            "replaced, and the one a replayed ordered suffix defeats — passes "
+            "every identity-based fixture and fails this one. A voided reset is "
+            "also a WEAKENING-class skip: the line's content is known but what "
+            "the operator INTENDED by it is not, and that uncertainty is exactly "
+            "what a bound represents."
+        ),
+        entries=(bootstrap(), entry(100), entry(101), reset(90)),
+        transform=drop_line_holding(100),
+        presented=head(90),
+    ),
     # --- family: the read rules --------------------------------------------
     JournalCase(
         name="comparison-journal-the-known-head-is-the-maximum-ordinal",
@@ -560,15 +613,16 @@ JOURNAL_CASES: tuple[JournalCase, ...] = (
             "answering UNCHANGED for ceremonially abandoned state. Type-agnostic "
             "and order-agnostic, but NOT applied to headers: two writers racing "
             "to create one journal each write a header, and that duplicate is "
-            "the tolerated create-race artifact rather than a replay. Note what "
-            "the skip costs here — a non-empty skip set is what weakens a read, "
-            "so this journal yields a BOUND even though the duplicated line "
-            "carried no information that was lost. That conservative direction "
-            "is the ruled behavior as of this vector's writing, and it is the "
-            "one place a reader knows exactly what the skipped line said; "
-            "whether an information-free skip should weaken the read is an open "
-            "question routed to the arbiter, and this vector is what would be "
-            "regenerated if it is ruled the other way."
+            "the tolerated create-race artifact rather than a replay. **The "
+            "skip is recorded and carries ZERO weakening weight**, so the read "
+            "stays ESTABLISHED: the bound machinery represents ignorance, and a "
+            "re-assertion is the one cause that carries none, because the "
+            "skipped line's content is a line this read already counted. "
+            "Weighing it would let one benign crash-retry duplicate degrade "
+            "every read of an append-only file forever. So this journal records "
+            "a skip and still answers in full — recorded and weakening are two "
+            "different counts, and the gap between them is the whole of the "
+            "weighting rule."
         ),
         entries=(bootstrap(), entry(6), entry(6)),
         presented=head(6),
@@ -627,7 +681,15 @@ JOURNAL_CASES: tuple[JournalCase, ...] = (
             "— the file is not refused. Refusing would make an ordinary crash a "
             "permanent incident, and it claims a protection this location cannot "
             "deliver anyway, since anyone able to corrupt a line can delete the "
-            "journal instead and be met with trust on first use."
+            "journal instead and be met with trust on first use. THE DAMAGE "
+            "HERE SITS ABOVE THE BOUNDARY, and that is why it weighs: the torn "
+            "line's physical position is after the trust reset's own line, so "
+            "no decree stands between the operator and this loss. Read it "
+            "against its pair, "
+            "comparison-incomplete-a-boundary-heals-damage-below-its-line, "
+            "where the identical damage at a position BELOW the boundary "
+            "carries no weight at all — same cause, same fixture family, "
+            "opposite answer, and position is the only thing that differs."
         ),
         entries=(bootstrap(), reset(90), entry(92), entry(91)),
         transform=torn(92),
@@ -670,6 +732,57 @@ JOURNAL_CASES: tuple[JournalCase, ...] = (
         transform=torn(200),
         presented=head(95),
         at_known=head(91),
+    ),
+    JournalCase(
+        name="comparison-incomplete-a-boundary-heals-damage-below-its-line",
+        description=(
+            "The ceremony HEALS, and this is what that means mechanically. A "
+            "line this build could not read sits at a physical position BELOW "
+            "the trust reset's own line, so it carries zero weight and the read "
+            "is ESTABLISHED — the operator decreed trust in a head, and "
+            "everything positionally behind that decree is what they decreed "
+            "past. Without position scoping the damage would bound every read "
+            "of this file forever, including every read after the very ceremony "
+            "run to put it behind them, which would leave the recovery story "
+            "with no recovery in it. Position is the coordinate because appends "
+            "are tail-only, so a line's place in the file IS its place in time. "
+            "Note this is ORDINALS' opposite: the journal's ordinals genuinely "
+            "do not ascend in file order, because two writers interleave them — "
+            "but positions cannot interleave, because the filesystem serializes "
+            "them. The skip is still RECORDED; what it no longer does is weigh."
+        ),
+        entries=(bootstrap(), entry(100), entry(101), reset(90)),
+        transform=torn(100),
+        presented=head(90),
+    ),
+    JournalCase(
+        name="comparison-incomplete-weighting-is-per-skip-not-per-read",
+        description=(
+            "Weight is decided per skip, never per read, and this is the vector "
+            "that tells the two apart. The file carries TWO unreadable lines of "
+            "the same cause at different positions: one below the boundary, one "
+            "above it. The one below weighs nothing, the one above weighs in "
+            "full, and the read is BOUNDED — two skips recorded, one of them "
+            "weakening. An implementation that decided weight for the read as a "
+            "whole would have to answer for both lines at once and would get one "
+            "of them wrong whichever way it went: 'any zero-weight skip means "
+            "established' answers established here and silently drops a real "
+            "loss, while 'any skip at all bounds' answers bounded for the "
+            "healing case and heals nothing. The same argument holds across "
+            "causes — a journal holding a re-assertion AND an unreadable line "
+            "must still bound — which is why the two halves of the rule, cause "
+            "and position, are applied to each skip on its own."
+        ),
+        entries=(
+            bootstrap(),
+            entry(100),
+            entry(101),
+            reset(90),
+            entry(92),
+            entry(91),
+        ),
+        transform=both(torn(100), torn(92)),
+        presented=head(91),
     ),
     JournalCase(
         name="comparison-incomplete-a-headerless-journal-yields-a-bound",
@@ -842,6 +955,14 @@ def journal_expectation(case: JournalCase, lines: list[str]) -> dict[str, Any]:
         "entries": len(read.entries),
         "epoch": len(read.epoch),
         "skipped": len(read.skipped),
+        # RECORDED and WEAKENING are two different counts now, and the gap
+        # between them IS the weighting rule. A read can record skips and stay
+        # established, which the pre-amendment schema could not express.
+        "weakening": (
+            len(read.known.skipped)
+            if isinstance(read.known, (HeadLowerBound, HeadUnreadable))
+            else 0
+        ),
     }
 
     try:

@@ -20,6 +20,19 @@ __all__ = [
     "BatchRegroupRefused",
     "DeclarationKeyRefused",
     "MissingCustodianKeyRefused",
+    "JournalPreflightRefused",
+    "TargetMismatchOnResumeRefused",
+    "TargetUnopenable",
+    "TornTailRefused",
+    "PublishPreconditionRefused",
+    "SourceChangedRefused",
+    "LegacyStorageRefused",
+    "ReportVerificationRefused",
+    "ReportMalformedRefused",
+    "ReportBadSignatureRefused",
+    "ReportMissingTargetRefused",
+    "ReportHeadMismatchRefused",
+    "ReportTargetUnopenableRefused",
 ]
 
 
@@ -156,4 +169,147 @@ class DeclarationKeyRefused(MigrationRefused):
 
 class MissingCustodianKeyRefused(MigrationRefused):
     """The custodian observer has no public key declared in .vertex."""
+
+
+class JournalPreflightRefused(MigrationRefused):
+    """Journal directory or state root is not accessible or writable.
+
+    Asserts that the journal state root or heads directory cannot be probed
+    prior to minting genesis.
+    """
+
+    def __init__(self, message: str, *, path: str | None = None) -> None:
+        self.path = path
+        super().__init__(message)
+
+
+class TargetMismatchOnResumeRefused(MigrationRefused):
+    """Target log on resume does not match the deterministic transform prefix.
+
+    Asserts that records present in the resume target diverge from the
+    expected deterministic transform of the source.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        target_path: str | None = None,
+        ordinal: int | None = None,
+    ) -> None:
+        self.target_path = target_path
+        self.ordinal = ordinal
+        super().__init__(message)
+
+
+class TornTailRefused(MigrationRefused):
+    """Target log on resume ends with a torn tail or incomplete record.
+
+    Asserts that the resume target file ends mid-record and cannot be opened
+    safely under the contract.
+    """
+
+    def __init__(self, message: str, *, target_path: str | None = None) -> None:
+        self.target_path = target_path
+        super().__init__(message)
+
+
+class PublishPreconditionRefused(MigrationRefused):
+    """A required precondition for descriptor publication was not met.
+
+    Asserts failure of target verification, equivalence re-run, bootstrap
+    witness receipt verification, inventory equality, or source quiescence.
+    """
+
+    def __init__(self, message: str, *, condition: str | None = None) -> None:
+        self.condition = condition
+        super().__init__(message)
+
+
+class SourceChangedRefused(PublishPreconditionRefused):
+    """Source store content hash changed between snapshot and descriptor publish.
+
+    Asserts that the legacy source was modified during staging, violating
+    the quiescence precondition (two histories, not a migration).
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        source: str | None = None,
+        expected_hash: str | None = None,
+        actual_hash: str | None = None,
+    ) -> None:
+        self.source = source
+        self.expected_hash = expected_hash
+        self.actual_hash = actual_hash
+        super().__init__(message, condition="source_unchanged")
+
+
+class LegacyStorageRefused(MigrationRefused):
+    """Storage-level error encountered while reading legacy source store.
+
+    Asserts that the underlying storage (e.g. SQLite database schema or file)
+    failed at the database/filesystem level.
+    """
+
+    def __init__(self, message: str, *, source: str | None = None) -> None:
+        self.source = source
+        super().__init__(message)
+
+
+class TargetUnopenable(MigrationRefused):
+    """Target arrival store cannot be opened at the contract/storage seam.
+
+    Asserts that opening or reading the target store failed at the storage or
+    seam level (such as StoreLost, ArrivalCorrupt, or filesystem error), without
+    making claims about prefix mismatch or torn tail.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        target_path: str | None = None,
+        cause: BaseException | None = None,
+    ) -> None:
+        self.target_path = target_path
+        self.cause = cause
+        super().__init__(message)
+
+
+class ReportVerificationRefused(MigrationRefused):
+    """Base exception for migration report verification failures."""
+
+
+class ReportMalformedRefused(ReportVerificationRefused):
+    """Migration report document is malformed, not JSON, or carries unknown top-level keys."""
+
+
+class ReportBadSignatureRefused(ReportVerificationRefused):
+    """Migration report signature failed cryptographic verification."""
+
+
+class ReportMissingTargetRefused(ReportVerificationRefused):
+    """Target arrival store referenced by migration report does not exist."""
+
+
+class ReportHeadMismatchRefused(ReportVerificationRefused):
+    """Target arrival store head does not match the claim in migration report."""
+
+
+class ReportTargetUnopenableRefused(ReportVerificationRefused):
+    """Target arrival store referenced by migration report cannot be opened or read."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        target_path: str | None = None,
+        cause: BaseException | None = None,
+    ) -> None:
+        self.target_path = target_path
+        self.cause = cause
+        super().__init__(message)
 

@@ -10,6 +10,7 @@ dependencies = [
     "store",
     "lang",
     "python-ulid>=3.0",
+    "ckdl>=1.0",
 ]
 
 [tool.uv.sources]

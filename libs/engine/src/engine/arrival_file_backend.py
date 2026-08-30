@@ -291,17 +291,6 @@ class FileLedger:
                 "any mutation, because splitting the request across "
                 "transactions would turn one logical group into several"
             )
-        for draft in drafts:
-            if draft.signature is not None:
-                raise NotSupported(
-                    "this adapter's append builds unsigned records: its wrap "
-                    "target, ArrivalLog.append_marked_many, assigns no "
-                    "signature, and Entry deliberately carries no signer "
-                    "field. A record that must arrive with an authored "
-                    "signature goes through the ceremony path, which injects "
-                    "a signer, or arrives pre-coordinated through replicate"
-                )
-
         entries = [
             Entry(
                 k=draft.kind,
@@ -309,6 +298,7 @@ class FileLedger:
                 observer=draft.observer,
                 origin=draft.origin,
                 at=draft.authored_at,
+                signature=draft.signature,
             )
             for draft in drafts
         ]

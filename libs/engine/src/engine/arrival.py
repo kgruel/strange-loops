@@ -70,6 +70,7 @@ __all__ = [
     "ArrivalError",
     "ArrivalGrammarError",
     "ArrivalCorrupt",
+    "ArrivalTornTail",
     "GenesisRefused",
     "AppendRejected",
     "StaleHead",
@@ -185,6 +186,14 @@ class ArrivalCorrupt(ArrivalError):
     def __init__(self, message: str, ordinal: int) -> None:
         super().__init__(f"arrival log corrupt at ordinal {ordinal}: {message}")
         self.ordinal = ordinal
+
+
+class ArrivalTornTail(ArrivalError):
+    """The arrival log ends mid-record before a terminating newline.
+
+    The trailing bytes of the log do not end with a newline delimiter,
+    indicating that the final record was only partially written.
+    """
 
 
 class GenesisRefused(ArrivalError):
@@ -806,12 +815,6 @@ class Entry:
     it can only be assigned under the lock, which is exactly why a caller
     with several records to land hands over the parts it owns and lets
     :meth:`ArrivalLog.append_marked_many` chain them.
-
-    There is deliberately no signer field. The one consumer is
-    :func:`store.merge_store`, which takes no signer and never will: the
-    target's operator holds no key for a foreign observer, and the grammar
-    makes record signatures optional above ordinal 0. A signer here would be
-    a parameter with no caller and an invitation to fabricate authorship.
     """
 
     k: str
@@ -819,6 +822,7 @@ class Entry:
     observer: str
     origin: str = ""
     at: float | None = None
+    signature: str | None = None
 
 
 def _records_only(pairs: Iterator[tuple[dict, object]]) -> Iterator[dict]:
@@ -1251,7 +1255,7 @@ class ArrivalLog:
             lineage = self._lineage_from(fh)
             fh.seek(size - 1)
             if fh.read(1) != b"\n":
-                raise ArrivalError(
+                raise ArrivalTornTail(
                     f"{self.path} ends mid-record — truncate the torn tail first"
                 )
             start = _last_newline_before(fh, size - 1)
@@ -1553,7 +1557,7 @@ class ArrivalLog:
             return build_record(
                 lin=head["lin"], ordinal=head["ord"] + 1, prev=head[_RH],
                 k=entry.k, body=entry.body, observer=entry.observer,
-                origin=entry.origin, at=at_, sig=None,
+                origin=entry.origin, at=at_, sig=entry.signature,
             )
 
         return self._append_many_under_lock(

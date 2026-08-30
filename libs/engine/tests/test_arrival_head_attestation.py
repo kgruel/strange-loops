@@ -1294,6 +1294,31 @@ def test_a_non_utf8_bindings_file_refuses_rather_than_escaping_untyped():
     assert isinstance(excinfo.value.__cause__, UnicodeDecodeError)
 
 
+def test_an_unusable_shape_refuses_in_bound_lineage_itself():
+    """L-7 at this reader, pinned directly.
+
+    Through an open the seam's alias sweep also refuses an unusable shape, so
+    reverting this arm alone still produces a refusal and an integration test
+    cannot tell the two apart. The direct call is what makes this layer's
+    correctness the thing being measured — the third time that lesson has come
+    up in this unit, and the first time it was applied before the demo found it.
+    """
+    record_binding("/a/project.arrival", LINEAGE, 1.0)
+    with bindings_path().open("a") as handle:
+        handle.write("{}\n")
+    with pytest.raises(BindingsUnreadable) as excinfo:
+        bound_lineage("/a/project.arrival")
+    assert "carries no location and lineage" in str(excinfo.value)
+
+
+def test_a_binding_naming_another_location_is_still_skipped():
+    """The narrow survivor, at this reader too."""
+    record_binding("/a/project.arrival", LINEAGE, 1.0)
+    record_binding("/b/other.arrival", OTHER_LINEAGE, 2.0)
+    assert bound_lineage("/a/project.arrival") == LINEAGE
+    assert bound_lineage("/nothing/here.arrival") is None
+
+
 def test_the_transitional_binding_carries_its_deletion_marker():
     """The residue sweep is written where slice 5 will find it.
 

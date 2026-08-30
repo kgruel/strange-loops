@@ -201,6 +201,72 @@ proposal disagreed and the module won.
     property, or closing would be the thing that constructs the reader the fix
     deferred.
 
+## S3I-L-6 / L-7 — the family contract re-scoped, and the last silent door
+
+### L-6: my remedy split was a verdict claim
+
+Last round I split the refusal family by **remedy** — repair versus retry — and
+sol broke it with `IsADirectoryError`, which arrives through the same `OSError`
+door as a passing I/O fault and resolves nothing on retry. Reproduced before
+fixing: it landed in `BindingProbeUnanswered`, the family whose docstring
+promised retrying.
+
+The diagnosis is the one this project keeps arriving at: **transient versus
+permanent is not decidable from an exception class**, so a remedy taxonomy is a
+*verdict* claim and it falls to the next errno. The structurally decidable split
+is **content versus storage**, and my two types already implemented it
+mechanically — I had simply described them by the wrong axis.
+
+| Family | Means | Members |
+|---|---|---|
+| `BindingsUnreadable` | the bytes ARRIVED and could not be interpreted | decode, parse, **shape** |
+| `ProbeUnanswered` | the bytes NEVER arrived | the `OSError` family, `IsADirectoryError` included |
+
+So the types keep their members and change what they claim. The parent stops
+promising that retrying is the remedy; it says storage would not answer, and the
+cause carried in the message determines what to do. **Remedy is advisory prose
+per cause** now — a directory where the file should be says to remove it and
+says plainly that retrying will not help; a permission wall says to check
+permissions. Both families refuse, so a misfiled hint costs an operator some
+convenience and never costs an acceptance, which is exactly why advice can be
+offered where a promise could not be kept.
+
+**The family test asserts the cause→family mapping**, not inheritance:
+decode, parse, shape, permission wall, `IsADirectoryError`, unstattable path.
+Inheritance says the types are related, not that any given failure is filed
+correctly — which is precisely how `IsADirectoryError` ended up in a family
+promising retries.
+
+### L-7: valid JSON, no binding in it
+
+A `{}` or `[]` line was **read** and carries nothing a binding could be read out
+of, so it is a content failure and lands with the unparseable ones. Filtering it
+to `None` answered "nothing is bound here" on a line that says nothing of the
+kind, and a replaced store then opened as first contact.
+
+**The legitimate filter survives narrowly**: a well-formed binding naming a
+*different* location genuinely says nothing about this one, so it still skips to
+`None` — otherwise every bindings file holding more than one store would be
+unopenable, which is every real one. `bound_lineage`'s "everything else refuses"
+is now true rather than aspirational.
+
+### Mutation demos, and the lesson landing on the third try
+
+Two-guard, committed `f5166c01` first, tree byte-clean after each revert.
+
+| Reverted | Fails |
+|---|---|
+| shape refusal in `bound_lineage` | `test_an_unusable_shape_refuses_in_bound_lineage_itself` |
+| shape refusal in `aliased_lineage` | the alias-sweep shape test **and** the cause→family map |
+| advisory prose (flat retry text) | the cause→family map |
+
+The `bound_lineage` arm failed **nothing** on the first pass — through an open,
+the seam's sweep also refuses an unusable shape, so reverting one arm still
+produced a refusal and the integration test could not tell the two apart. Same
+masking that hid two arms last round. The direct-call pin was added and the
+demo then bit. Third occurrence of this exact lesson in this unit; the honest
+note is that I still had not applied it *before* running the demo, only after.
+
 ## S3I-L-4 — the decode escape, and an arm I had put in the wrong family
 
 `finding:s3-bindings-decode-escapes-untyped`. A non-UTF-8 `bindings.jsonl`

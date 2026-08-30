@@ -20,6 +20,13 @@ from .legacy_jsonl import (
     load_line,
     records_from_object,
 )
+from .legacy_source import (
+    BatchUnit,
+    FlatFactUnit,
+    LegacySource,
+    LegacyUnit,
+    TickUnit,
+)
 from .legacy_sqlite import (
     _content_sha256,
     _facts_have_signature,
@@ -29,28 +36,48 @@ from .legacy_sqlite import (
     read_ticks,
 )
 from .refusals import (
-    AbsentObserverBatchRefused,
+    BatchRegroupRefused,
+    DeclarationKeyRefused,
+    LegacySourceRefused,
     MigrationRefused,
-    MissingObserverBatchRefused,
-    MixedObserverBatchRefused,
+    MissingCustodianKeyRefused,
+)
+from .transform import (
+    DroppedUnit,
+    GenesisRequirements,
+    TransformExceptions,
+    TransformResult,
+    coerce_vertex,
+    transform,
 )
 
 __all__ = [
-    "AbsentObserverBatchRefused",
+    "BatchRegroupRefused",
+    "BatchUnit",
+    "DeclarationKeyRefused",
+    "DroppedUnit",
     "FACT_FIELDS",
     "FactRow",
+    "FlatFactUnit",
+    "GenesisRequirements",
     "JsonlCodecError",
+    "LegacySource",
+    "LegacySourceRefused",
+    "LegacyUnit",
     "MigrationRefused",
-    "MissingObserverBatchRefused",
-    "MixedObserverBatchRefused",
+    "MissingCustodianKeyRefused",
     "SIGNATURE_FIELD",
     "SourceInventory",
     "TICK_FIELDS",
+    "TickUnit",
     "Transform",
+    "TransformExceptions",
+    "TransformResult",
     "_content_sha256",
     "_facts_have_signature",
     "_tick_columns",
     "classify_id_era",
+    "coerce_vertex",
     "deserialize_records",
     "deserialize_row",
     "deterministic_ulid",
@@ -62,5 +89,6 @@ __all__ = [
     "read_facts",
     "read_ticks",
     "records_from_object",
+    "transform",
     "ulid_migration",
 ]

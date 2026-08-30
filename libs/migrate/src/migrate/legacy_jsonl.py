@@ -126,15 +126,24 @@ def row_object_fault(
     fields: tuple[str, ...],
     allowed: frozenset[str],
     nullable: frozenset[str],
+    skip_fields: frozenset[str] = frozenset(),
 ) -> str | None:
-    """Why ``obj`` is not a well-formed row object, or None when it is."""
+    """Why ``obj`` is not a well-formed row object, or None when it is.
+
+    Minimal seam: ``skip_fields`` allows callers (such as inventory batch
+    validation) to validate row structure, typing, and invariants while
+    excluding specific fields (e.g. ``observer``) from presence checks,
+    enabling inventory classification of absent vs mixed conditions without
+    duplicating the row grammar.
+    """
     unknown = sorted(set(obj) - allowed)
     if unknown:
         return f"unknown field(s) in {t} {frame}: {unknown}"
-    missing = [f for f in fields if f not in obj]
+    checked_fields = [f for f in fields if f not in skip_fields]
+    missing = [f for f in checked_fields if f not in obj]
     if missing:
         return f"missing field(s) in {t} {frame}: {missing}"
-    for field in fields:
+    for field in checked_fields:
         value = obj[field]
         if value is None:
             if field not in nullable:

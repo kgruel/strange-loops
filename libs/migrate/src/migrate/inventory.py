@@ -18,43 +18,12 @@ bytes, and never mutates the source.
 
 from __future__ import annotations
 
-import hashlib
-import json
-import math
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 
 from .legacy_ids import classify_id_era
-from .legacy_jsonl import (
-    _BATCH,
-    _BATCH_KEYS,
-    _JCS_INT_MAX,
-    _JCS_INT_MIN,
-    _MIN_BATCH_ROWS,
-    _ROWS,
-    _SPEC,
-    FACT_FIELDS,
-    FACT_NULLABLE,
-    SIGNATURE_FIELD,
-    TICK_FIELDS,
-    TICK_NULLABLE,
-    JsonlCodecError,
-    _load,
-    _row_of,
-    row_object_fault,
-)
-from .legacy_sqlite import (
-    _content_sha256,
-    _facts_have_signature,
-    _tick_columns,
-    open_legacy_sqlite,
-)
-from .refusals import (
-    AbsentObserverBatchRefused,
-    MigrationRefused,
-    MixedObserverBatchRefused,
-)
+from .legacy_source import BatchUnit, FlatFactUnit, LegacySource, TickUnit
 
 __all__ = [
     "SourceInventory",
@@ -125,76 +94,10 @@ def inventory(source: Path | str) -> SourceInventory:
     Raises:
         FileNotFoundError: If the source does not exist.
         MigrationRefused: If the source contains codec-invalid lines, GF-3 mixed-observer
-            batch lines, or absent-observer batch lines.
+            batch lines, or absent/empty-observer lines.
     """
-    source_path = Path(source).resolve()
-    if not source_path.exists():
-        raise FileNotFoundError(f"Legacy source not found: {source_path}")
+    src = LegacySource.read(source)
 
-    file_bytes = source_path.read_bytes()
-    file_hash = hashlib.sha256(file_bytes).hexdigest()
-
-    if file_bytes.startswith(b"SQLite format 3\x00") or source_path.suffix in (".sqlite", ".db"):
-        return _inventory_sqlite(source_path, file_hash)
-    return _inventory_jsonl(source_path, file_hash)
-
-
-def _inventory_sqlite(source_path: Path, file_hash: str) -> SourceInventory:
-    conn = open_legacy_sqlite(source_path)
-    try:
-        content_hash = _content_sha256(conn)
-
-        per_kind_counts: dict[str, int] = defaultdict(int)
-        observer_census: dict[str, int] = defaultdict(int)
-        id_era_census: dict[str, int] = {
-            "canonical-ulid": 0,
-            "lowercase-ulid": 0,
-            "other": 0,
-        }
-
-        sig_col = _facts_have_signature(conn)
-        total_facts = 0
-        for raw in conn.execute(
-            "SELECT id, kind, ts, observer, origin, payload"
-            + (", signature" if sig_col else "")
-            + " FROM facts ORDER BY rowid"
-        ):
-            total_facts += 1
-            fact_id = raw[0]
-            kind = raw[1]
-            observer = raw[3]
-
-            per_kind_counts[kind] += 1
-            if observer is not None:
-                observer_census[observer] += 1
-            era = classify_id_era(fact_id)
-            id_era_census[era] += 1
-
-        cols = _tick_columns(conn)
-        ticks_cursor = conn.execute(
-            f"SELECT {', '.join(cols)} FROM ticks ORDER BY rowid"
-        )
-        tick_count = len(ticks_cursor.fetchall())
-
-        total_rows = total_facts + tick_count
-
-        return SourceInventory(
-            source_format="sqlite-canonical",
-            total_rows=total_rows,
-            total_lines=None,
-            per_kind_counts=dict(per_kind_counts),
-            tick_count=tick_count,
-            batch_line_count=None,
-            observer_census=dict(observer_census),
-            content_hash=content_hash,
-            file_hash=file_hash,
-            id_era_census=id_era_census,
-        )
-    finally:
-        conn.close()
-
-
-def _inventory_jsonl(source_path: Path, file_hash: str) -> SourceInventory:
     per_kind_counts: dict[str, int] = defaultdict(int)
     observer_census: dict[str, int] = defaultdict(int)
     id_era_census: dict[str, int] = {
@@ -202,252 +105,36 @@ def _inventory_jsonl(source_path: Path, file_hash: str) -> SourceInventory:
         "lowercase-ulid": 0,
         "other": 0,
     }
-
     total_rows = 0
-    total_lines = 0
     tick_count = 0
-    batch_line_count = 0
-    hasher = hashlib.sha256()
 
-    codec_invalid_lines: list[tuple[int, str]] = []
-    mixed_observer_lines: list[tuple[int, tuple[str, ...], int]] = []
-    absent_observer_lines: list[tuple[int, int, tuple[str, ...]]] = []
-
-    with source_path.open("r", encoding="utf-8") as f:
-        for lineno, line in enumerate(f, start=1):
-            if not line.strip():
-                continue
-            total_lines += 1
-            try:
-                obj = _load(line)
-            except JsonlCodecError as exc:
-                codec_invalid_lines.append((lineno, str(exc)))
-                continue
-
-            t = obj.get("t")
-
-            if t == "fact":
-                fault = row_object_fault(
-                    obj,
-                    t="fact",
-                    frame="line",
-                    fields=FACT_FIELDS,
-                    allowed=_SPEC["fact"].allowed,
-                    nullable=FACT_NULLABLE,
-                )
-                if fault is not None:
-                    codec_invalid_lines.append((lineno, fault))
-                    continue
-
-                row = _row_of(obj, _SPEC["fact"])
-                row_for_hash = row if row[6] is not None else row[:6]
-                hasher.update(json.dumps(list(row_for_hash), separators=(",", ":")).encode())
-
-                per_kind_counts[obj["kind"]] += 1
-                if obj.get("observer") is not None:
-                    observer_census[obj["observer"]] += 1
-                era = classify_id_era(obj["id"])
+    for unit in src.units:
+        if isinstance(unit, FlatFactUnit):
+            total_rows += 1
+            per_kind_counts[unit.row.kind] += 1
+            observer_census[unit.row.observer] += 1
+            era = classify_id_era(unit.row.id)
+            id_era_census[era] += 1
+        elif isinstance(unit, BatchUnit):
+            total_rows += len(unit.rows)
+            for row in unit.rows:
+                per_kind_counts[row.kind] += 1
+                observer_census[row.observer] += 1
+                era = classify_id_era(row.id)
                 id_era_census[era] += 1
-                total_rows += 1
-
-            elif t == "tick":
-                fault = row_object_fault(
-                    obj,
-                    t="tick",
-                    frame="line",
-                    fields=TICK_FIELDS,
-                    allowed=_SPEC["tick"].allowed,
-                    nullable=TICK_NULLABLE,
-                )
-                if fault is not None:
-                    codec_invalid_lines.append((lineno, fault))
-                    continue
-
-                row = _row_of(obj, _SPEC["tick"])
-                hasher.update(json.dumps(list(row), separators=(",", ":")).encode())
-                tick_count += 1
-                total_rows += 1
-
-            elif t == _BATCH:
-                batch_line_count += 1
-
-                # 1. Validate envelope
-                unknown_env = sorted(set(obj) - _BATCH_KEYS)
-                if unknown_env:
-                    codec_invalid_lines.append((lineno, f"unknown field(s) in batch line: {unknown_env}"))
-                    continue
-
-                rows = obj.get(_ROWS)
-                if not isinstance(rows, list):
-                    codec_invalid_lines.append(
-                        (
-                            lineno,
-                            f"batch field 'rows' must be an array of fact records, got {type(rows).__name__}",
-                        )
-                    )
-                    continue
-
-                if len(rows) < _MIN_BATCH_ROWS:
-                    codec_invalid_lines.append(
-                        (
-                            lineno,
-                            f"batch must carry at least {_MIN_BATCH_ROWS} rows, got {len(rows)} — "
-                            "a 1-row batch is a second spelling of a plain fact line, and an empty one encodes nothing",
-                        )
-                    )
-                    continue
-
-                # 2. Validate batch rows FIRST (precondition for observer decisions)
-                batch_fault: str | None = None
-                seen_ids: set[str] = set()
-                absent_count = 0
-                present_observers: set[str] = set()
-
-                for i, elem in enumerate(rows):
-                    if not isinstance(elem, dict):
-                        batch_fault = f"batch row {i} must be a JSON object, got {type(elem).__name__}"
-                        break
-
-                    elem_t = elem.get("t")
-                    if elem_t == _BATCH:
-                        batch_fault = f"batch row {i} is a nested batch — batches do not nest"
-                        break
-                    if elem_t == "tick":
-                        batch_fault = (
-                            f"batch row {i} is a tick record — ticks are minted "
-                            "one-at-a-time and chain-linked, never batched"
-                        )
-                        break
-                    if elem_t != "fact":
-                        batch_fault = f"batch row {i} has unknown record discriminator t={elem_t!r}"
-                        break
-
-                    elem_unknown = sorted(set(elem) - _SPEC["fact"].allowed)
-                    if elem_unknown:
-                        batch_fault = f"unknown field(s) in fact line: {elem_unknown}"
-                        break
-
-                    req_fields = ("id", "kind", "ts", "origin", "payload")
-                    missing_req = [f for f in req_fields if f not in elem]
-                    if missing_req:
-                        batch_fault = f"missing field(s) in fact line: {missing_req}"
-                        break
-
-                    if not isinstance(elem["id"], str):
-                        batch_fault = f"fact field 'id' must be a string, got {type(elem['id']).__name__}"
-                        break
-                    if not isinstance(elem["kind"], str):
-                        batch_fault = f"fact field 'kind' must be a string, got {type(elem['kind']).__name__}"
-                        break
-
-                    ts_val = elem["ts"]
-                    if isinstance(ts_val, bool) or not isinstance(ts_val, (int, float)):
-                        batch_fault = f"fact field 'ts' must be a number, got {type(ts_val).__name__}"
-                        break
-                    if isinstance(ts_val, float):
-                        if not math.isfinite(ts_val):
-                            batch_fault = f"fact field 'ts' must be a finite number, got {ts_val!r}"
-                            break
-                    elif not (_JCS_INT_MIN <= ts_val <= _JCS_INT_MAX):
-                        batch_fault = f"fact field 'ts' is outside the JCS safe-integer domain: {ts_val}"
-                        break
-
-                    if not isinstance(elem["origin"], str):
-                        batch_fault = f"fact field 'origin' must be a string, got {type(elem['origin']).__name__}"
-                        break
-                    if not isinstance(elem["payload"], str):
-                        batch_fault = f"fact field 'payload' must be a string, got {type(elem['payload']).__name__}"
-                        break
-
-                    if SIGNATURE_FIELD in elem:
-                        sig_val = elem[SIGNATURE_FIELD]
-                        if sig_val is None:
-                            batch_fault = "fact field 'signature' must be absent, not null, when unsigned"
-                            break
-                        if not isinstance(sig_val, str):
-                            batch_fault = f"fact field 'signature' must be a string, got {type(sig_val).__name__}"
-                            break
-
-                    # Observer field checking: missing vs typed string
-                    if "observer" not in elem or elem["observer"] is None:
-                        absent_count += 1
-                    else:
-                        obs_val = elem["observer"]
-                        if not isinstance(obs_val, str):
-                            batch_fault = f"fact field 'observer' must be a string, got {type(obs_val).__name__}"
-                            break
-                        present_observers.add(obs_val)
-
-                    row_id = elem["id"]
-                    if row_id in seen_ids:
-                        batch_fault = f"duplicate id {row_id!r} within one batch"
-                        break
-                    seen_ids.add(row_id)
-
-                if batch_fault is not None:
-                    codec_invalid_lines.append((lineno, batch_fault))
-                    continue
-
-                # 3. Classify observer condition classes
-                if len(present_observers) > 1:
-                    mixed_observer_lines.append(
-                        (lineno, tuple(sorted(present_observers)), absent_count)
-                    )
-                    continue
-
-                if absent_count > 0:
-                    absent_observer_lines.append(
-                        (lineno, absent_count, tuple(sorted(present_observers)))
-                    )
-                    continue
-
-                # 4. Valid single-observer batch line
-                for elem in rows:
-                    row = _row_of(elem, _SPEC["fact"])
-                    row_for_hash = row if row[6] is not None else row[:6]
-                    hasher.update(json.dumps(list(row_for_hash), separators=(",", ":")).encode())
-
-                    per_kind_counts[elem["kind"]] += 1
-                    if "observer" in elem and elem["observer"] is not None:
-                        observer_census[elem["observer"]] += 1
-                    era = classify_id_era(elem["id"])
-                    id_era_census[era] += 1
-                    total_rows += 1
-
-            else:
-                codec_invalid_lines.append((lineno, f"unknown record discriminator t={t!r}"))
-                continue
-
-    # Refusals fire after full scan across all 3 classes:
-    if codec_invalid_lines or mixed_observer_lines or absent_observer_lines:
-        if mixed_observer_lines and not absent_observer_lines and not codec_invalid_lines:
-            raise MixedObserverBatchRefused(
-                mixed_observer_lines=mixed_observer_lines,
-                source=str(source_path),
-            )
-        if absent_observer_lines and not mixed_observer_lines and not codec_invalid_lines:
-            raise AbsentObserverBatchRefused(
-                absent_observer_lines=absent_observer_lines,
-                source=str(source_path),
-            )
-        raise MigrationRefused(
-            codec_invalid_lines=codec_invalid_lines,
-            mixed_observer_lines=mixed_observer_lines,
-            absent_observer_lines=absent_observer_lines,
-            source=str(source_path),
-        )
-
-    content_hash = hasher.hexdigest()
+        elif isinstance(unit, TickUnit):
+            total_rows += 1
+            tick_count += 1
 
     return SourceInventory(
-        source_format="jsonl-canonical",
+        source_format=src.source_format,
         total_rows=total_rows,
-        total_lines=total_lines,
+        total_lines=src.total_lines,
         per_kind_counts=dict(per_kind_counts),
         tick_count=tick_count,
-        batch_line_count=batch_line_count,
+        batch_line_count=src.batch_line_count,
         observer_census=dict(observer_census),
-        content_hash=content_hash,
-        file_hash=file_hash,
+        content_hash=src.content_hash,
+        file_hash=src.file_hash,
         id_era_census=id_era_census,
     )

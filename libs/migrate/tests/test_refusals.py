@@ -5,41 +5,36 @@ from __future__ import annotations
 from engine.arrival_body import ArrivalBodyError
 
 from migrate.refusals import (
-    AbsentObserverBatchRefused,
+    LegacySourceRefused,
     MigrationRefused,
-    MissingObserverBatchRefused,
-    MixedObserverBatchRefused,
 )
 
 
 def test_refusal_hierarchy_roots_in_migration_refused() -> None:
     """Refusals must root in MigrationRefused, distinct from
     ArrivalBodyError and ContractRefusal."""
-    assert issubclass(MixedObserverBatchRefused, MigrationRefused)
-    assert issubclass(AbsentObserverBatchRefused, MigrationRefused)
-    assert MissingObserverBatchRefused is AbsentObserverBatchRefused
+    assert issubclass(LegacySourceRefused, MigrationRefused)
 
     # Must NOT subclass or wrap ArrivalBodyError
     assert not issubclass(MigrationRefused, ArrivalBodyError)
-    assert not issubclass(MixedObserverBatchRefused, ArrivalBodyError)
-    assert not issubclass(AbsentObserverBatchRefused, ArrivalBodyError)
+    assert not issubclass(LegacySourceRefused, ArrivalBodyError)
 
     # Subclass of Exception
     assert issubclass(MigrationRefused, Exception)
 
 
-def test_mixed_observer_refusal_structured_data_and_message() -> None:
-    """MixedObserverBatchRefused carries structured offending_lines and advisory prose."""
-    offending = [
-        (10, ("alice", "bob")),
-        (25, ("kyle", "someone-else", "third")),
+def test_legacy_source_refused_mixed_observer_structured_data_and_message() -> None:
+    """LegacySourceRefused carries structured mixed_observer_lines and advisory prose."""
+    mixed = [
+        (10, ("alice", "bob"), 0),
+        (25, ("kyle", "someone-else", "third"), 0),
     ]
-    exc = MixedObserverBatchRefused(offending, source="/path/to/legacy.jsonl")
+    exc = LegacySourceRefused(mixed_observer_lines=mixed, source="/path/to/legacy.jsonl")
 
     assert exc.source == "/path/to/legacy.jsonl"
-    assert exc.offending_lines == (
-        (10, ("alice", "bob")),
-        (25, ("kyle", "someone-else", "third")),
+    assert exc.mixed_observer_lines == (
+        (10, ("alice", "bob"), 0),
+        (25, ("kyle", "someone-else", "third"), 0),
     )
 
     msg = str(exc)
@@ -49,18 +44,18 @@ def test_mixed_observer_refusal_structured_data_and_message() -> None:
     assert "Advisory: repair the source line(s) by hand or re-run migration" in msg
 
 
-def test_absent_observer_refusal_structured_data_and_message() -> None:
-    """AbsentObserverBatchRefused carries structured offending_lines and advisory prose."""
-    offending = [
-        (12, 1, ("alice",)),
-        (14, 2, ()),
+def test_legacy_source_refused_absent_observer_structured_data_and_message() -> None:
+    """LegacySourceRefused carries structured absent_observer_lines and advisory prose."""
+    absent = [
+        (12, 1, ("alice",), {"missing": 1}),
+        (14, 2, (), {"missing": 2}),
     ]
-    exc = AbsentObserverBatchRefused(offending, source="/path/to/legacy.jsonl")
+    exc = LegacySourceRefused(absent_observer_lines=absent, source="/path/to/legacy.jsonl")
 
     assert exc.source == "/path/to/legacy.jsonl"
     assert exc.absent_observer_lines == (
-        (12, 1, ("alice",)),
-        (14, 2, ()),
+        (12, 1, ("alice",), {"missing": 1}),
+        (14, 2, (), {"missing": 2}),
     )
 
     msg = str(exc)
@@ -70,12 +65,12 @@ def test_absent_observer_refusal_structured_data_and_message() -> None:
     assert "Advisory: repair the source line(s) by hand" in msg
 
 
-def test_migration_refused_multi_class_structured_data_and_message() -> None:
-    """MigrationRefused carries all 3 condition classes distinctly in structured data and message."""
-    exc = MigrationRefused(
+def test_legacy_source_refused_multi_class_structured_data_and_message() -> None:
+    """LegacySourceRefused carries all 3 condition classes distinctly in structured data and message."""
+    exc = LegacySourceRefused(
         codec_invalid_lines=[(2, "unknown field(s) in batch line: ['bad']")],
         mixed_observer_lines=[(4, ("kyle", "someone-else"), 0), (5, ("alice", "bob"), 1)],
-        absent_observer_lines=[(6, 1, ("carol",))],
+        absent_observer_lines=[(6, 1, ("carol",), {"missing": 1})],
         source="/path/to/source.jsonl",
     )
 
@@ -85,7 +80,7 @@ def test_migration_refused_multi_class_structured_data_and_message() -> None:
         (4, ("kyle", "someone-else"), 0),
         (5, ("alice", "bob"), 1),
     )
-    assert exc.absent_observer_lines == ((6, 1, ("carol",)),)
+    assert exc.absent_observer_lines == ((6, 1, ("carol",), {"missing": 1}),)
 
     msg = str(exc)
     assert "line 2: unknown field(s) in batch line: ['bad']" in msg
@@ -93,4 +88,23 @@ def test_migration_refused_multi_class_structured_data_and_message() -> None:
     assert "line 5: observers 'alice', 'bob' (1 row(s) missing 'observer' field)" in msg
     assert "line 6: 1 row(s) missing 'observer' field (remaining observers: 'carol')" in msg
     assert "Advisory: repair the source line(s) by hand or re-run migration after a ruled re-ceremony." in msg
+
+
+def test_legacy_source_refused_empty_observer_spelling_message() -> None:
+    """LegacySourceRefused formats empty-string vs missing observer spellings distinctly."""
+    absent = [
+        (20, 1, (), {"empty": 1}),
+        (22, 2, (), {"missing": 1, "empty": 1}),
+    ]
+    exc = LegacySourceRefused(absent_observer_lines=absent, source="/path/to/source.jsonl")
+
+    assert exc.absent_observer_lines == (
+        (20, 1, (), {"empty": 1}),
+        (22, 2, (), {"missing": 1, "empty": 1}),
+    )
+    msg = str(exc)
+    assert "line 20: 1 row(s) with observer='' (empty string)" in msg
+    assert "line 22: 2 row(s) with absent/empty observer (1 missing, 1 empty '')" in msg
+
+
 

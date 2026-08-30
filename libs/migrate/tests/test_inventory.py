@@ -11,9 +11,8 @@ import pytest
 
 from migrate.inventory import SourceInventory, inventory
 from migrate.refusals import (
-    AbsentObserverBatchRefused,
+    LegacySourceRefused,
     MigrationRefused,
-    MixedObserverBatchRefused,
 )
 
 from ._fixtures import (
@@ -132,10 +131,10 @@ def test_sqlite_content_hash_stability_and_sensitivity(tmp_path: Path) -> None:
 
 def test_mixed_observer_batch_refuses_and_enumerates_every_offending_line(tmp_path: Path) -> None:
     """GF-3 refusal: A JSONL source holding TWO mixed-observer batch lines raises
-    MixedObserverBatchRefused, enumerating BOTH lines with their observer sets."""
+    LegacySourceRefused, enumerating BOTH lines with their observer sets."""
     source_file = build_mixed_observer_jsonl(tmp_path / "mixed.jsonl")
 
-    with pytest.raises(MixedObserverBatchRefused) as exc_info:
+    with pytest.raises(LegacySourceRefused) as exc_info:
         inventory(source_file)
 
     exc = exc_info.value
@@ -152,18 +151,18 @@ def test_mixed_observer_batch_refuses_and_enumerates_every_offending_line(tmp_pa
 
 
 def test_absent_observer_batch_refusal_is_distinct_condition(tmp_path: Path) -> None:
-    """A batch line with a row missing the observer field raises AbsentObserverBatchRefused,
-    distinct from MixedObserverBatchRefused."""
+    """A batch line with a row missing the observer field raises LegacySourceRefused
+    with absent_observer_lines populated."""
     source_file = build_absent_observer_jsonl(tmp_path / "absent.jsonl")
 
-    with pytest.raises(AbsentObserverBatchRefused) as exc_info:
+    with pytest.raises(LegacySourceRefused) as exc_info:
         inventory(source_file)
 
     exc = exc_info.value
-    assert isinstance(exc, AbsentObserverBatchRefused)
-    assert not isinstance(exc, MixedObserverBatchRefused)
+    assert isinstance(exc, LegacySourceRefused)
+    assert len(exc.mixed_observer_lines) == 0
     assert len(exc.absent_observer_lines) == 1
-    assert exc.absent_observer_lines[0] == (2, 1, ("alice",))
+    assert exc.absent_observer_lines[0] == (2, 1, ("alice",), {"missing": 1})
     assert "1 row(s) missing 'observer' field" in str(exc)
 
 
@@ -265,4 +264,75 @@ def test_inventory_is_behaviorally_read_only_on_success_and_refusal(tmp_path: Pa
         inventory(refusal_file)
     snap_after_refusal = _snapshot_dir(refusal_dir)
     assert snap_before_refusal == snap_after_refusal
+
+
+def test_sqlite_empty_observer_refuses_and_enumerates_rowids_distinct(tmp_path: Path) -> None:
+    """F2: A SQLite store containing rows with observer='' raises LegacySourceRefused,
+    enumerating offending rowids with the empty-string spelling distinct."""
+    from ._fixtures import build_empty_observer_sqlite
+
+    sqlite_file = build_empty_observer_sqlite(tmp_path / "empty_obs.sqlite")
+
+    with pytest.raises(LegacySourceRefused) as exc_info:
+        inventory(sqlite_file)
+
+    exc = exc_info.value
+    assert len(exc.absent_observer_lines) == 2
+    assert exc.absent_observer_lines[0][0] == 2  # rowid 2
+    assert exc.absent_observer_lines[1][0] == 3  # rowid 3
+
+    msg = str(exc)
+    assert "line 2: 1 row(s) with observer='' (empty string)" in msg
+    assert "line 3: 1 row(s) with observer='' (empty string)" in msg
+
+
+def test_sqlite_codec_invalid_ts_text_refuses_with_rowid(tmp_path: Path) -> None:
+    """F1: A SQLite store containing ts as TEXT raises LegacySourceRefused with rowid."""
+    from ._fixtures import build_codec_invalid_sqlite
+
+    sqlite_file = build_codec_invalid_sqlite(tmp_path / "bad_ts.sqlite")
+
+    with pytest.raises(LegacySourceRefused) as exc_info:
+        inventory(sqlite_file)
+
+    exc = exc_info.value
+    assert len(exc.codec_invalid_lines) == 1
+    assert exc.codec_invalid_lines[0][0] == 1  # rowid 1
+    assert "fact field 'ts' must be a number" in exc.codec_invalid_lines[0][1]
+
+
+def test_sqlite_seam_defense_refuses_unsafe_integer_ts(tmp_path: Path) -> None:
+    """F1 (gate R2-B1): A SQLite store with ts holding 2**60 (outside JCS safe integer domain)
+    is refused by inventory as codec-invalid."""
+    from ._fixtures import build_unsafe_integer_ts_sqlite
+
+    sqlite_file = build_unsafe_integer_ts_sqlite(tmp_path / "unsafe_ts.sqlite")
+
+    with pytest.raises(LegacySourceRefused) as exc_info:
+        inventory(sqlite_file)
+
+    exc = exc_info.value
+    assert len(exc.codec_invalid_lines) == 1
+    assert exc.codec_invalid_lines[0][0] == 1  # rowid 1
+    assert "outside the JCS safe-integer domain" in exc.codec_invalid_lines[0][1]
+
+
+def test_era1_sqlite_ticks_inventory(tmp_path: Path) -> None:
+    """An era-1 SQLite store whose ticks table lacks chain columns and since
+    inventories successfully with the right tick count."""
+    from ._fixtures import build_era1_sqlite
+
+    sqlite_file = build_era1_sqlite(tmp_path / "era1.sqlite")
+    inv = inventory(sqlite_file)
+
+    assert inv.source_format == "sqlite-canonical"
+    assert inv.total_rows == 3  # 1 fact + 2 ticks
+    assert inv.tick_count == 2
+    assert inv.per_kind_counts == {"concept": 1}
+    assert inv.observer_census == {"alice": 1}
+    assert inv.batch_line_count is None
+    assert inv.total_lines is None
+
+
+
 

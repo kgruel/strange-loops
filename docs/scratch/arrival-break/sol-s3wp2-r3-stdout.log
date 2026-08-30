@@ -1,0 +1,1232 @@
+Reading prompt from stdin...
+OpenAI Codex v0.150.1
+--------
+workdir: /Users/kaygee/Code/loops-s3wp2
+model: gpt-5.6-sol
+provider: openai
+approval: never
+sandbox: workspace-write [workdir, /tmp, $TMPDIR]
+reasoning effort: low
+reasoning summaries: none
+session id: 01a05034-8fc4-7401-b043-cacf1ff1b7a2
+--------
+user
+# Sol review brief — arrival-break slice 3 / WP2, round 3 (per-WP, LOW — final verify)
+
+Round 3, verifying your r2 finding S3WP2-L-2 (hollow occupancy of the above cell).
+
+## Anchor
+
+- Branch: `slice3/wp2-vectors`, NEW tip `9a4b0fa3` (fix at aa042510).
+  Diff: `git diff 319bd076...9a4b0fa3`.
+
+## The fix's claims — verify each
+
+1. Vector-envelope assertion (not the cell ratchet — deliberate: the ratchet
+   reporting "unexercised: above" about a non-empty cell would be a true alarm with
+   a false reason): any bounded vector presenting above the bound must supply
+   `at_known` EQUAL to the bound's own coordinate and record hash. SHARPENED past
+   the routed "non-null": a wrong-head at_known is answered `rewrite` and is hollow
+   identically — their demo (ii) is the justification. Assess the sharpening and the
+   placement.
+2. Re-run both mutation demos on the disk JSON: (i) at_known → null → 1 failure
+   naming the fixture and at_known=None (your r2 defeat, now caught); (ii) at_known
+   → non-null wrong head → same assertion fails. Byte-clean restores.
+3. Try to defeat the strengthened predicate once more: any remaining artifact shape
+   that occupies the above cell while discriminating nothing? (e.g. games with
+   lineage, with the presented hash, with a second bounded vector.) If yes, finding.
+4. SCHEMA.md's normative obligation for the above cell: foreign-implementer clear?
+5. Counts unchanged (engine 2190+1s, arch 99, 27 vectors); generator untouched and
+   byte-reproducible; diff touches only consumer, SCHEMA.md, vector? (verify the
+   exact file set — the fix claims no new test, no new vector).
+
+## Verdict format
+
+Fix: PASS/FAIL + evidence. New findings: `S3WP2-L-<n>`. Then one line:
+**CONVERGED** or **NOT CONVERGED**.
+
+codex
+I’ll verify the anchored diff, inspect the strengthened predicate and schema wording, then run both on-disk mutations with hash/byte restoration checks and the claimed test/repro counts.
+exec
+/bin/zsh -lc 'git status --short && git diff --name-status 319bd076...9a4b0fa3 && git diff --stat 319bd076...9a4b0fa3 && git log -3 --oneline --decorate' in /Users/kaygee/Code/loops-s3wp2
+ succeeded in 0ms:
+M	docs/scratch/arrival-break/slice3-wp2-report.md
+M	libs/engine/tests/test_conformance_comparison.py
+M	spec/conformance/SCHEMA.md
+ docs/scratch/arrival-break/slice3-wp2-report.md  | 95 ++++++++++++++++++++++++
+ libs/engine/tests/test_conformance_comparison.py | 35 +++++++++
+ spec/conformance/SCHEMA.md                       |  4 +-
+ 3 files changed, 133 insertions(+), 1 deletion(-)
+9a4b0fa3 (HEAD -> slice3/wp2-vectors) docs(scratch): sol-round receipts, and the shell-mangled emit named
+aa042510 test(spec): the above-the-bound cell must be occupied by a vector that discriminates
+319bd076 test(spec): pin the bound's third cell — above is not an advance
+
+exec
+/bin/zsh -lc 'git diff 319bd076...9a4b0fa3 -- libs/engine/tests/test_conformance_comparison.py spec/conformance/SCHEMA.md docs/scratch/arrival-break/slice3-wp2-report.md && rg -n "2190|arch|27 vectors|byte|generator|at_known|above" docs/scratch/arrival-break/slice3-wp2-report.md libs/engine/tests/test_conformance_comparison.py spec/conformance/SCHEMA.md' in /Users/kaygee/Code/loops-s3wp2
+ succeeded in 0ms:
+diff --git a/docs/scratch/arrival-break/slice3-wp2-report.md b/docs/scratch/arrival-break/slice3-wp2-report.md
+index 8d36430b..07a81d8b 100644
+--- a/docs/scratch/arrival-break/slice3-wp2-report.md
++++ b/docs/scratch/arrival-break/slice3-wp2-report.md
+@@ -286,6 +286,10 @@ Two notes carried forward rather than encoded:
+ Completion fact: `observation:implementation/arrival-slice3-wp2-comparison-vectors` @
+ `01M180VC8K6N0HJC2GJVN3ZJVC`.
+ 
++Sol-round folds: `finding:s3wp2-l1-bound-above-cell-unpinned` @
++`01M182MZ64KRPXGRXTAEZ3TW5B`, and
++`finding:s3wp2-l2-hollow-occupancy-of-the-above-cell` @ `01M18369WBDCC52PNKP7R7CMBQ`.
++
+ **Store housekeeping, so a reader grepping the store is not puzzled.** The first emit
+ of that observation passed the topic as a positional slug rather than `topic=`, and
+ `observation` folds by `topic` — so `01M180TKTHEG60TG43D5A4QJVM` is stored with **no
+@@ -293,6 +297,16 @@ fold key** and carries an earlier, shorter draft of the same message. The store
+ append-only so it stays as written; `01M180VC8K6N0HJC2GJVN3ZJVC` is the one that folds
+ and the one to read. No finding: an emission-form slip, not a work product.
+ 
++The sol-r2 fold has the same shape of blemish for a different reason: its first emit
++(`01M1835CFX54PCX2ZDZGPVQH0D`) passed a backticked message through the shell, which
++substituted the backticks as commands and **silently dropped four words** — the two
++outcome names the argument turns on. Re-emitted under the same fold name via `--stdin`
++so nothing is interpreted, and `01M18369WBDCC52PNKP7R7CMBQ` is what the fold resolves
++to (verified by reading it back). The general lesson is worth one line for whoever
++emits next in this arc: **pass long fact bodies through `--stdin`, never as a shell
++argument** — a mangled receipt is worse than a missing one, because it still looks
++like a receipt.
++
+ ## 9. Sol-LOW round 1 — the unpinned third cell of the bound
+ 
+ `S3WP2-L-1`, BLOCKING, and correct. Everything else passed, including the coverage
+@@ -373,3 +387,84 @@ Exactly the scoped demo: the new vector fails, the others do not.
+ 
+ Generator still byte-reproducible (regenerate → empty diff); `ruff check` clean; 27
+ vector JSONs tracked.
++
++## 10. Sol-LOW round 2 — hollow occupancy of the above cell
++
++`S3WP2-L-2`, and the behavioral fix from r1 passed fully; what failed was the
++**ratchet's seeded defeat test**. Sol nulled the new vector's `at_known` and the cell
++ratchet still counted the above cell as exercised. The cell was occupied
++*nominally* — the hazard it exists for was unpinned.
++
++**Same shape as r1, one level up.** Round 1 said my enumeration was incomplete.
++Round 2 says the enumeration's **occupancy predicate** was too weak: it asked whether
++*a* vector sits in the cell, never whether that vector does the work the cell exists
++for. A ratchet is only as strong as its notion of "covered", and mine counted
++presence.
++
++**Why a hollow vector proves nothing.** The above-the-bound claim is a
++**counterfactual**: *even with descent fully established from the bound*, the proceed
++answer stays unobtainable. Strip `at_known` and that counterfactual is gone — the
++ordinary classifier answers `rewrite` for want of evidence, and
++`comparison-classify-rewrite-when-the-ledger-vouches-for-nothing` already pins
++exactly that. A hollow above-the-bound vector is therefore a duplicate of a classify
++row wearing an incomplete-read costume: it would pass an implementation that declines
++here for the *wrong reason* while still answering `advanced` wherever descent is
++genuinely proven.
++
++**The requirement, sharpened past the routed wording.** The route said "valid
++NON-NULL `at_known`". Non-null is not enough: a non-null `at_known` naming some
++*other* head is also answered `rewrite`, so it is hollow in the same way. The
++requirement is **equality with the bound's own coordinate and record hash** — the
++unique value that makes `advanced` the answer a bound-ignoring implementation reaches
++for. Both weakenings are demonstrated below.
++
++**Where it lives, and why not in the cell ratchet.** As a **vector-envelope assertion
++in the parametrized runner**, so it fails against the vector's own test id and can say
++which fixture is hollow and why. Folding it into the cell ratchet would have reported
++`unexercised bound cells: ['above']` about a cell that is not empty — a true alarm
++with a false reason, and the scope-the-claim error of a check asserting a verdict
++wider than what it observed. The two questions now fail differently on purpose:
++
++| Failure | Named by | Message |
++|---|---|---|
++| the cell is EMPTY | `test_every_cell_of_the_bound_is_exercised_by_some_vector` | `unexercised bound cells: ['above']` |
++| the cell's occupant is HOLLOW | `test_conformance_comparison[<the vector>]` | names the fixture, its `at_known`, and the reason |
++
++The cell ratchet's docstring now states this division explicitly, so a reader of
++either check finds the other.
++
++SCHEMA.md carries the obligation normatively: the three-cell table is followed by a
++paragraph stating that a vector occupying the third row must supply `at_known` equal
++to the bound's coordinate and hash — a requirement on the *fixture*, not on
++implementations — with the counterfactual spelled out.
++
++### Sol-round demo — both weakenings
++
++Applied to the vector JSON on disk (the true shape of a hollow fixture), suite run,
++file restored byte-clean.
++
++| # | Weakening | Result |
++|---|---|---|
++| (i) | `at_known` → `null` (sol's seeded defeat) | **1 failed, 31 passed** — `test_conformance_comparison[comparison-incomplete-a-bound-cannot-answer-above-itself]`, message naming `at_known=None` and the reason |
++| (ii) | `at_known` → non-null but NOT the bound's head (ordinal 91, hash `0`×64) | **1 failed, 31 passed** — the same assertion, which is why the requirement is equality rather than non-nullness |
++
++Restored: 32 passed, `git status` clean on the vector.
++
++### Counts after sol r2
++
++Unchanged: engine **2190 passed, 1 skipped**; architecture **99**. This round adds no
++test and no vector — it strengthens an existing assertion — so the deltas from §9
++stand. `ruff check` clean; generator untouched and still byte-reproducible; 27 vector
++JSONs tracked.
++
++### The general form, now twice
++
++Both rounds are the same defect at successive levels, and it is worth stating once
++rather than a third time. An enumerable ratchet has two parts — the set of cells and
++the predicate for "this cell is covered" — and **both** can be too weak. Round 1
++found a missing cell; round 2 found a predicate that accepted a fixture which
++occupied a cell without discriminating anything. Writing the ratchet is not the end
++of the work: the question to ask next is *what is the weakest artifact that would
++satisfy this check*, and whether that artifact would actually have caught the thing
++the check exists for. Sol's seeded-defeat method asks exactly that question, and it
++is the reason r1's fix was not the end of it.
+diff --git a/libs/engine/tests/test_conformance_comparison.py b/libs/engine/tests/test_conformance_comparison.py
+index 1e3c3201..159a370e 100644
+--- a/libs/engine/tests/test_conformance_comparison.py
++++ b/libs/engine/tests/test_conformance_comparison.py
+@@ -242,6 +242,17 @@ def test_every_cell_of_the_bound_is_exercised_by_some_vector():
+     is enumerated here, the same way the seven outcomes are, and deleting the
+     above-the-bound fixture reopens the hole by failing this test rather than
+     by going quietly green.
++
++    **This test asks only whether a cell is OCCUPIED, never whether its
++    occupant does any work**, and the two questions fail differently on
++    purpose. An empty cell is a gap in the enumeration and is named here. An
++    occupant that fills the cell without discriminating anything —
++    above-the-bound with no descent evidence — is a gap in the VECTOR, so it
++    is named in ``test_conformance_comparison`` against the vector's own id,
++    where the failure can say which fixture is hollow and why. Folding the
++    second question into this one would report "unexercised bound cells:
++    ['above']" about a cell that is not empty, which is a true alarm with a
++    false reason.
+     """
+     cells: set[str] = set()
+     for path in _load_vectors(COMPARISON_VECTORS_DIR):
+@@ -354,3 +365,27 @@ def test_conformance_comparison(vector_path: Path) -> None:
+         )
+         assert expected["sound_answer"] in SOUND_ANSWERS
+         assert expected["sound_answer"] == ("rollback" if below else None)
++
++        if presented.lineage == bound.lineage and presented.ordinal > bound.ordinal:
++            # An above-the-bound vector must carry descent evidence naming the
++            # BOUND'S OWN coordinate and hash — equality, not merely non-null.
++            # The vector's whole force is a counterfactual: even with descent
++            # fully established from the bound, the proceed answer stays
++            # unobtainable. Weaken at_known and the vector stops discriminating,
++            # because a declining implementation could be right for the wrong
++            # reason — with a null at_known the classifier answers `rewrite` for
++            # want of evidence, and with a non-matching one it answers `rewrite`
++            # too. Both are already pinned by the `comparison-classify-rewrite-`
++            # vectors, so a hollow above-the-bound vector is a duplicate of a
++            # classify row wearing an incomplete-read costume: it occupies the
++            # cell without ever making `advanced` the answer a bound-ignoring
++            # implementation would reach for.
++            assert at_known == bound, (
++                f"{vector_path.stem} presents a head above the bound but "
++                f"supplies at_known={vector['input']['at_known']!r}. An "
++                "above-the-bound vector must name the bound's own coordinate "
++                "and hash, or it cannot tell 'a bound cannot answer above "
++                "itself' from 'there was no descent evidence anyway' — an "
++                "implementation declining for the second reason would pass it "
++                "while still answering `advanced` wherever descent IS proven."
++            )
+diff --git a/spec/conformance/SCHEMA.md b/spec/conformance/SCHEMA.md
+index 7af26d61..fd28befd 100644
+--- a/spec/conformance/SCHEMA.md
++++ b/spec/conformance/SCHEMA.md
+@@ -499,7 +499,9 @@ Seven rows for six states, because §07 lists first contact separately from the
+ | **equal to** the bound | `null` | Not `unchanged`: it may be a rollback from the very entry the read missed. |
+ | **above** the bound | `null` | Not `advanced` either. Whatever the read missed carries **no information about the ordinal it held**, so nothing bounds the accepted head from above — a presented head at 95 may still sit far below a lost entry at 200. |
+ 
+-The third row is the one a two-valued reading loses, and losing it is not academic: an implementation that answered `advanced` above the bound would wave through precisely the loss the journal exists to catch. Supplying valid descent evidence does not rescue it — descent verified *from the bound* says nothing about an entry that was never on the walk. Gathering evidence from the store does not repair this either: a walk verifies the store's own chain, while the missing fact is about what this machine previously *accepted*, which the store never knew.
++The third row is the one a two-valued reading loses, and losing it is not academic: an implementation that answered `advanced` above the bound would wave through precisely the loss the journal exists to catch. Supplying valid descent evidence does not rescue it — descent verified *from the bound* says nothing about an entry that was never on the walk.
++
++**A vector occupying the third row must supply `at_known` equal to the bound's own coordinate and record hash.** This is a requirement on the *fixture*, not on implementations, and it is what gives the row its force: the claim being pinned is a counterfactual — *even with descent fully established from the bound*, the proceed answer stays unobtainable. A vector whose `at_known` is null, or names some other head, is answered `rewrite` by the ordinary classifier for want of evidence, which the `comparison-classify-rewrite-*` vectors already pin. Such a fixture fills the row without ever making `advanced` the answer a bound-ignoring implementation would reach for, so it would pass an implementation that declines here for the wrong reason while still answering `advanced` wherever descent is proven. Gathering evidence from the store does not repair this either: a walk verifies the store's own chain, while the missing fact is about what this machine previously *accepted*, which the store never knew.
+ 
+ **Damage is reported, never converted into a verdict.** An unusable line is skipped and surfaced wherever it sits, and the file is not refused. Refusing would make an ordinary crash a permanent incident, and it claims a protection this location cannot deliver anyway — anyone able to corrupt a line can delete the journal instead and be met with trust on first use.
+ 
+docs/scratch/arrival-break/slice3-wp2-report.md:19:| `heads` | `known` entry, `presented` head, `at_known` head | the seven rows of the pure `compare` |
+docs/scratch/arrival-break/slice3-wp2-report.md:111:`(known, presented, at_known)` shape at all. Its forcing consumer is WP3's seam, and
+docs/scratch/arrival-break/slice3-wp2-report.md:118:| `spec/conformance/generate_comparison.py` | the generator: 9 heads cases, 18 journal cases, deterministic |
+docs/scratch/arrival-break/slice3-wp2-report.md:166:   answers `advanced` above the bound. A per-vector assertion cannot see this: each
+docs/scratch/arrival-break/slice3-wp2-report.md:177:32 tests: 27 vectors + 5 non-parametrized. Both ratchet directions verified by doing
+docs/scratch/arrival-break/slice3-wp2-report.md:201:Run the CI way, engine and architecture in **separate** processes (WP1 measured 29
+docs/scratch/arrival-break/slice3-wp2-report.md:206:| engine | 2158 passed, 1 skipped | **2190 passed, 1 skipped** | **+32**, all in `test_conformance_comparison.py` |
+docs/scratch/arrival-break/slice3-wp2-report.md:207:| architecture | 99 passed | **99 passed** | **0** — Rule 17 scans generators by glob, so a new one adds no case |
+docs/scratch/arrival-break/slice3-wp2-report.md:216:tracked — matching the 27 the generator writes and the 27 the inventory names, three
+docs/scratch/arrival-break/slice3-wp2-report.md:223:1. **The family-vector shape split** — §1 above. Both forms, one family, `input.form`
+docs/scratch/arrival-break/slice3-wp2-report.md:241:   temporary `XDG_STATE_HOME` that the generator **asserts** before its first append
+docs/scratch/arrival-break/slice3-wp2-report.md:289:Sol-round folds: `finding:s3wp2-l1-bound-above-cell-unpinned` @
+docs/scratch/arrival-break/slice3-wp2-report.md:291:`finding:s3wp2-l2-hollow-occupancy-of-the-above-cell` @ `01M18369WBDCC52PNKP7R7CMBQ`.
+docs/scratch/arrival-break/slice3-wp2-report.md:316:one, which presented below it. Nothing presented a same-lineage head **above** the
+docs/scratch/arrival-break/slice3-wp2-report.md:327:So a foreign implementation doing **below → rollback, equal → decline, above →
+docs/scratch/arrival-break/slice3-wp2-report.md:329:"nothing bounds the accepted head from above", which is WP1's own self-correction.
+docs/scratch/arrival-break/slice3-wp2-report.md:336:three-valued — below, equal, above. Two of its cells agree on `null`, and that
+docs/scratch/arrival-break/slice3-wp2-report.md:340:**The fix.** One vector, `comparison-incomplete-a-bound-cannot-answer-above-itself`.
+docs/scratch/arrival-break/slice3-wp2-report.md:350:- `at_known` is supplied and valid (the bound's own head at 91), so descent from 91 to
+docs/scratch/arrival-break/slice3-wp2-report.md:353:  was never on the walk. This is also the first journal-form vector to use `at_known`,
+docs/scratch/arrival-break/slice3-wp2-report.md:362:`unexercised bound cells: ['above']` rather than going quietly green.
+docs/scratch/arrival-break/slice3-wp2-report.md:371:Sol's own foreign implementation (below → `rollback`, equal → `null`, above →
+docs/scratch/arrival-break/slice3-wp2-report.md:377:| as it is now | 6 | **CAUGHT by 1** — `comparison-incomplete-a-bound-cannot-answer-above-itself`, `vector=None adversary=advanced`; the other five stay green |
+docs/scratch/arrival-break/slice3-wp2-report.md:385:| engine | 2188 passed, 1 skipped | **2190 passed, 1 skipped** | **+2** — one vector, one ratchet |
+docs/scratch/arrival-break/slice3-wp2-report.md:386:| architecture | 99 passed | **99 passed** | 0 |
+docs/scratch/arrival-break/slice3-wp2-report.md:388:Generator still byte-reproducible (regenerate → empty diff); `ruff check` clean; 27
+docs/scratch/arrival-break/slice3-wp2-report.md:391:## 10. Sol-LOW round 2 — hollow occupancy of the above cell
+docs/scratch/arrival-break/slice3-wp2-report.md:394:**ratchet's seeded defeat test**. Sol nulled the new vector's `at_known` and the cell
+docs/scratch/arrival-break/slice3-wp2-report.md:395:ratchet still counted the above cell as exercised. The cell was occupied
+docs/scratch/arrival-break/slice3-wp2-report.md:404:**Why a hollow vector proves nothing.** The above-the-bound claim is a
+docs/scratch/arrival-break/slice3-wp2-report.md:406:answer stays unobtainable. Strip `at_known` and that counterfactual is gone — the
+docs/scratch/arrival-break/slice3-wp2-report.md:409:exactly that. A hollow above-the-bound vector is therefore a duplicate of a classify
+docs/scratch/arrival-break/slice3-wp2-report.md:415:NON-NULL `at_known`". Non-null is not enough: a non-null `at_known` naming some
+docs/scratch/arrival-break/slice3-wp2-report.md:424:`unexercised bound cells: ['above']` about a cell that is not empty — a true alarm
+docs/scratch/arrival-break/slice3-wp2-report.md:430:| the cell is EMPTY | `test_every_cell_of_the_bound_is_exercised_by_some_vector` | `unexercised bound cells: ['above']` |
+docs/scratch/arrival-break/slice3-wp2-report.md:431:| the cell's occupant is HOLLOW | `test_conformance_comparison[<the vector>]` | names the fixture, its `at_known`, and the reason |
+docs/scratch/arrival-break/slice3-wp2-report.md:437:paragraph stating that a vector occupying the third row must supply `at_known` equal
+docs/scratch/arrival-break/slice3-wp2-report.md:444:file restored byte-clean.
+docs/scratch/arrival-break/slice3-wp2-report.md:448:| (i) | `at_known` → `null` (sol's seeded defeat) | **1 failed, 31 passed** — `test_conformance_comparison[comparison-incomplete-a-bound-cannot-answer-above-itself]`, message naming `at_known=None` and the reason |
+docs/scratch/arrival-break/slice3-wp2-report.md:449:| (ii) | `at_known` → non-null but NOT the bound's head (ordinal 91, hash `0`×64) | **1 failed, 31 passed** — the same assertion, which is why the requirement is equality rather than non-nullness |
+docs/scratch/arrival-break/slice3-wp2-report.md:455:Unchanged: engine **2190 passed, 1 skipped**; architecture **99**. This round adds no
+docs/scratch/arrival-break/slice3-wp2-report.md:457:stand. `ruff check` clean; generator untouched and still byte-reproducible; 27 vector
+libs/engine/tests/test_conformance_comparison.py:9:"heads"`` hands a ``(known, presented, at_known)`` triple straight to the pure
+libs/engine/tests/test_conformance_comparison.py:82:# the accepted head from above, so neither proceed row is obtainable. Held as
+libs/engine/tests/test_conformance_comparison.py:123:        "comparison-incomplete-a-bound-cannot-answer-above-itself",
+libs/engine/tests/test_conformance_comparison.py:232:    """Below, equal, AND above. The third cell is the one a two-valued reading loses.
+libs/engine/tests/test_conformance_comparison.py:237:    ``advanced`` above it — passing every vector while violating the half of
+libs/engine/tests/test_conformance_comparison.py:238:    the ruling that says nothing bounds the accepted head from above.
+libs/engine/tests/test_conformance_comparison.py:243:    above-the-bound fixture reopens the hole by failing this test rather than
+libs/engine/tests/test_conformance_comparison.py:250:    above-the-bound with no descent evidence — is a gap in the VECTOR, so it
+libs/engine/tests/test_conformance_comparison.py:254:    ['above']" about a cell that is not empty, which is a true alarm with a
+libs/engine/tests/test_conformance_comparison.py:271:            cells.add("above")
+libs/engine/tests/test_conformance_comparison.py:273:    assert cells == {"below", "equal", "above"}, (
+libs/engine/tests/test_conformance_comparison.py:274:        f"unexercised bound cells: {sorted({'below', 'equal', 'above'} - cells)}"
+libs/engine/tests/test_conformance_comparison.py:307:    at_known = _head(vector["input"]["at_known"])
+libs/engine/tests/test_conformance_comparison.py:312:        outcome = compare(_entry(vector["input"]["known"]), presented, at_known)
+libs/engine/tests/test_conformance_comparison.py:355:        assert compare(known, presented, at_known).value == expected["outcome"]
+libs/engine/tests/test_conformance_comparison.py:370:            # An above-the-bound vector must carry descent evidence naming the
+libs/engine/tests/test_conformance_comparison.py:374:            # unobtainable. Weaken at_known and the vector stops discriminating,
+libs/engine/tests/test_conformance_comparison.py:376:            # reason — with a null at_known the classifier answers `rewrite` for
+libs/engine/tests/test_conformance_comparison.py:379:            # vectors, so a hollow above-the-bound vector is a duplicate of a
+libs/engine/tests/test_conformance_comparison.py:383:            assert at_known == bound, (
+libs/engine/tests/test_conformance_comparison.py:384:                f"{vector_path.stem} presents a head above the bound but "
+libs/engine/tests/test_conformance_comparison.py:385:                f"supplies at_known={vector['input']['at_known']!r}. An "
+libs/engine/tests/test_conformance_comparison.py:386:                "above-the-bound vector must name the bound's own coordinate "
+libs/engine/tests/test_conformance_comparison.py:387:                "and hash, or it cannot tell 'a bound cannot answer above "
+spec/conformance/SCHEMA.md:359:The `replicate` area pins **exact replication** (backend-contract.html §08): the transfer operation that consumes records which already carry their coordinate. A conforming implementation VALIDATES what it is handed and assigns nothing — never a new lineage, ordinal, predecessor, signature, or record hash. Records land byte-for-byte as offered, or nothing lands.
+spec/conformance/SCHEMA.md:361:A vector states a target log, a batch of pre-coordinated records offered to it, and the full head the caller pins. Executing it means: open the target, replicate the batch under the pin, then compare the target's complete bytes and its head against `expected`.
+spec/conformance/SCHEMA.md:369:| `HeadMismatch` | The head is not where this batch assumed — the pin is stale, the batch starts above `head + 1`, or the batch re-sends records the target already holds and AGREES with. | Yes: re-read the head and recompute which records are missing. |
+spec/conformance/SCHEMA.md:397:| `log` | array of strings | Yes | The target log's complete lines after the operation. On an accepted vector this is the byte-for-byte hash-preservation claim; on a refused one it equals `input.target`, which is the refuse-before-mutation claim. |
+spec/conformance/SCHEMA.md:403:- **`replicate-exact-suffix-*`** — the accept path, plus the two ways a batch fails to be the suffix that follows the head (a gap above it; a stale full-head pin).
+spec/conformance/SCHEMA.md:405:- **`replicate-catch-up-*`** — a stale replica brought forward, ending byte-identical to the authority. **At least one vector in this family carries SIGNED records, and that is a property of the family rather than an accident of its fixtures.** An implementation that re-coordinated an exact suffix would assign the same lineage, ordinal and predecessor and reproduce identical hashes — so an unsigned suffix cannot distinguish assigning from validating. A signature is content the assigning path does not carry, which is what makes the two observably different.
+spec/conformance/SCHEMA.md:442:`at_known` is the advanced-versus-rewrite discriminator, and it is why a walk that merely reaches the presented head is not enough: such a walk verifies the current chain while answering nothing about continuity with what was previously accepted. `at_known` is `null` when the ledger will not vouch for anything at that coordinate, and absence of evidence is not evidence of descent — an unproven advance is a `rewrite`.
+spec/conformance/SCHEMA.md:450:| `at_known` | Head Object \| null | Yes | What the ledger vouches for at the remembered head's ordinal. `null` means it vouches for nothing there. |
+spec/conformance/SCHEMA.md:468:| `outcome` | string \| null | Yes | One of the seven strings above, or `null`. |
+spec/conformance/SCHEMA.md:498:| **below** the bound | `"rollback"` | The accepted head is at least the bound, so it is certainly above what is being presented. |
+spec/conformance/SCHEMA.md:500:| **above** the bound | `null` | Not `advanced` either. Whatever the read missed carries **no information about the ordinal it held**, so nothing bounds the accepted head from above — a presented head at 95 may still sit far below a lost entry at 200. |
+spec/conformance/SCHEMA.md:502:The third row is the one a two-valued reading loses, and losing it is not academic: an implementation that answered `advanced` above the bound would wave through precisely the loss the journal exists to catch. Supplying valid descent evidence does not rescue it — descent verified *from the bound* says nothing about an entry that was never on the walk.
+spec/conformance/SCHEMA.md:504:**A vector occupying the third row must supply `at_known` equal to the bound's own coordinate and record hash.** This is a requirement on the *fixture*, not on implementations, and it is what gives the row its force: the claim being pinned is a counterfactual — *even with descent fully established from the bound*, the proceed answer stays unobtainable. A vector whose `at_known` is null, or names some other head, is answered `rewrite` by the ordinary classifier for want of evidence, which the `comparison-classify-rewrite-*` vectors already pin. Such a fixture fills the row without ever making `advanced` the answer a bound-ignoring implementation would reach for, so it would pass an implementation that declines here for the wrong reason while still answering `advanced` wherever descent is proven. Gathering evidence from the store does not repair this either: a walk verifies the store's own chain, while the missing fact is about what this machine previously *accepted*, which the store never knew.
+spec/conformance/SCHEMA.md:515:- **`comparison-incomplete-*`** — the lower bound and the third state. **All three of the bound's cells are pinned** (below, equal, above), because two of them agree on `null` and a family that exercised only those two would pass an implementation that answered `advanced` above the bound. The family also carries the case an operator would actually meet: a fresh genesis arriving at a location whose journal remembers a far higher ordinal in unreadable form is a replacement wearing the old name, and it declines rather than passing as first contact.
+
+codex
+The placement and schema text match the claim on inspection. I’m now testing the predicate adversarially against the actual fixture, including whether lineage/presented-hash or additional-vector shapes can bypass the assertion.
+exec
+/bin/zsh -lc "rg -l 'comparison-incomplete-a-bound-cannot-answer-above-itself' spec/conformance --glob '*.json' && sed -n '100,145p' libs/engine/tests/test_conformance_comparison.py && sed -n '290,395p' libs/engine/tests/test_conformance_comparison.py && rg -n '\\[tool.pytest|pytest|architecture|generate_comparison' pyproject.toml Makefile libs/engine/pyproject.toml docs/scratch/arrival-break/slice3-wp2-report.md" in /Users/kaygee/Code/loops-s3wp2
+ exited 2 in 0ms:
+spec/conformance/vectors/comparison/comparison-incomplete-a-bound-cannot-answer-above-itself.json
+        "comparison-classify-rollback",
+        "comparison-classify-same-height-fork",
+        "comparison-classify-rewrite-at-the-known-ordinal",
+        "comparison-classify-rewrite-when-the-ledger-vouches-for-nothing",
+        "comparison-classify-lineage-replaced",
+        "comparison-classify-lineage-replaced-outranks-a-lower-ordinal",
+    }),
+    "comparison-epoch-": frozenset({
+        "comparison-epoch-ends-at-the-reset-entry-is-unchanged",
+        "comparison-epoch-below-the-reset-head-is-rollback",
+        "comparison-epoch-scopes-the-equivocation-check-too",
+    }),
+    "comparison-journal-": frozenset({
+        "comparison-journal-the-known-head-is-the-maximum-ordinal",
+        "comparison-journal-equivocation-refuses-the-read",
+        "comparison-journal-duplicate-entries-at-the-maximum-agree",
+        "comparison-journal-an-empty-journal-is-first-contact",
+        "comparison-journal-a-header-only-journal-is-first-contact",
+        "comparison-journal-unknown-fields-on-a-v1-entry-are-read",
+    }),
+    "comparison-incomplete-": frozenset({
+        "comparison-incomplete-a-torn-line-yields-a-lower-bound",
+        "comparison-incomplete-a-bound-still-refuses-below-itself",
+        "comparison-incomplete-a-bound-cannot-answer-above-itself",
+        "comparison-incomplete-a-headerless-journal-yields-a-bound",
+        "comparison-incomplete-nothing-readable-declines-every-comparison",
+        "comparison-incomplete-a-re-mint-against-lost-content-is-not-first-contact",
+    }),
+    "comparison-header-": frozenset({
+        "comparison-header-a-kindless-object-is-not-absorbed",
+        "comparison-header-both-markers-together-are-unclassifiable",
+        "comparison-header-a-later-builds-header-is-still-a-header",
+    }),
+}
+
+
+def _load_vectors(vectors_dir: Path) -> list[Path]:
+    return sorted(vectors_dir.glob("*.json"))
+
+
+def _head(data: dict[str, Any] | None) -> Head | None:
+    if data is None:
+        return None
+    return Head(
+        lineage=data["lineage"],
+        ordinal=data["ordinal"],
+        assert impure not in reachable, f"the runner imports {impure!r}"
+
+
+@pytest.mark.parametrize(
+    "vector_path", _load_vectors(COMPARISON_VECTORS_DIR), ids=lambda p: p.stem
+)
+def test_conformance_comparison(vector_path: Path) -> None:
+    vector = _read_vector(vector_path)
+
+    assert "name" in vector, f"Vector {vector_path} missing 'name'"
+    assert "description" in vector, f"Vector {vector_path} missing 'description'"
+    assert "input" in vector, f"Vector {vector_path} missing 'input'"
+    assert "expected" in vector, f"Vector {vector_path} missing 'expected'"
+    assert vector["name"] == vector_path.stem, "vector name must match its file stem"
+
+    presented = _head(vector["input"]["presented"])
+    assert presented is not None, "every vector presents a head"
+    at_known = _head(vector["input"]["at_known"])
+    expected = vector["expected"]
+
+    form = vector["input"]["form"]
+    if form == "heads":
+        outcome = compare(_entry(vector["input"]["known"]), presented, at_known)
+        assert outcome.value == expected["outcome"]
+        return
+
+    # An unknown form must fail loudly rather than fall through to green.
+    assert form == "journal", f"{vector_path.stem} names form {form!r}"
+
+    lines = [line + "\n" for line in vector["input"]["journal"]]
+    state = expected["read"]
+
+    if state in READ_REFUSALS:
+        with pytest.raises(READ_REFUSALS[state]):
+            parse_journal_lines(lines)
+        assert expected["outcome"] is None, "a refused read produces no outcome"
+        return
+
+    read = parse_journal_lines(lines)
+    # KeyError on an unrecognized state, deliberately.
+    assert isinstance(read.known, KNOWN_STATES[state]), (
+        f"expected read state {state!r}, got {type(read.known).__name__}"
+    )
+    assert len(read.entries) == expected["entries"]
+    assert len(read.epoch) == expected["epoch"]
+    assert len(read.skipped) == expected["skipped"]
+
+    # Each case is named separately BY DESIGN. There is no uniform accessor
+    # that reaches a head across the three states — the weakened ones carry no
+    # ``entry`` attribute at all — and writing one here would rebuild the
+    # shortcut the type split exists to make unobtainable.
+    if state == "established":
+        assert read.known.entry.head == _head(expected["known"])
+    elif state == "bounded":
+        assert read.known.at_least.head == _head(expected["known"])
+    else:
+        assert expected["known"] is None
+
+    try:
+        known = read.established_head()
+    except IndeterminateComparison:
+        assert expected["outcome"] is None, (
+            "the read declined, but the vector states an outcome"
+        )
+    else:
+        assert compare(known, presented, at_known).value == expected["outcome"]
+
+    assert ("sound_answer" in expected) == (state == "bounded"), (
+        "only a bound carries a sound answer"
+    )
+    if state == "bounded":
+        bound = read.known.at_least.head
+        below = (
+            presented.lineage == bound.lineage
+            and presented.ordinal < bound.ordinal
+        )
+        assert expected["sound_answer"] in SOUND_ANSWERS
+        assert expected["sound_answer"] == ("rollback" if below else None)
+
+        if presented.lineage == bound.lineage and presented.ordinal > bound.ordinal:
+            # An above-the-bound vector must carry descent evidence naming the
+            # BOUND'S OWN coordinate and hash — equality, not merely non-null.
+            # The vector's whole force is a counterfactual: even with descent
+            # fully established from the bound, the proceed answer stays
+            # unobtainable. Weaken at_known and the vector stops discriminating,
+            # because a declining implementation could be right for the wrong
+            # reason — with a null at_known the classifier answers `rewrite` for
+            # want of evidence, and with a non-matching one it answers `rewrite`
+            # too. Both are already pinned by the `comparison-classify-rewrite-`
+            # vectors, so a hollow above-the-bound vector is a duplicate of a
+            # classify row wearing an incomplete-read costume: it occupies the
+            # cell without ever making `advanced` the answer a bound-ignoring
+            # implementation would reach for.
+            assert at_known == bound, (
+                f"{vector_path.stem} presents a head above the bound but "
+                f"supplies at_known={vector['input']['at_known']!r}. An "
+                "above-the-bound vector must name the bound's own coordinate "
+                "and hash, or it cannot tell 'a bound cannot answer above "
+                "itself' from 'there was no descent evidence anyway' — an "
+                "implementation declining for the second reason would pass it "
+                "while still answering `advanced` wherever descent IS proven."
+            )
+rg: Makefile: No such file or directory (os error 2)
+docs/scratch/arrival-break/slice3-wp2-report.md:118:| `spec/conformance/generate_comparison.py` | the generator: 9 heads cases, 18 journal cases, deterministic |
+docs/scratch/arrival-break/slice3-wp2-report.md:201:Run the CI way, engine and architecture in **separate** processes (WP1 measured 29
+docs/scratch/arrival-break/slice3-wp2-report.md:207:| architecture | 99 passed | **99 passed** | **0** — Rule 17 scans generators by glob, so a new one adds no case |
+docs/scratch/arrival-break/slice3-wp2-report.md:210:Rule 17 green with `generate_comparison.py` auto-enrolled by its `generate_*.py` name,
+docs/scratch/arrival-break/slice3-wp2-report.md:386:| architecture | 99 passed | **99 passed** | 0 |
+docs/scratch/arrival-break/slice3-wp2-report.md:455:Unchanged: engine **2190 passed, 1 skipped**; architecture **99**. This round adds no
+libs/engine/pyproject.toml:24:    "pytest>=8.0",
+libs/engine/pyproject.toml:25:    "pytest-asyncio>=0.24",
+libs/engine/pyproject.toml:26:    "pytest-cov>=6.0",
+libs/engine/pyproject.toml:42:[tool.pytest.ini_options]
+pyproject.toml:63:# The root runs the tests that belong to no single package — the architecture
+pyproject.toml:65:# already declares. Without this, `uv run pytest` at the root resolves only the
+pyproject.toml:66:# flat wheel's runtime deps and dies with "Failed to spawn: pytest" on any
+pyproject.toml:71:    "pytest>=8.0",
+pyproject.toml:72:    "pytest-cov>=6.0",
+
+exec
+/bin/zsh -lc "sed -n '190,220p' docs/scratch/arrival-break/slice3-wp2-report.md && sed -n '1,220p' spec/conformance/vectors/comparison/comparison-incomplete-a-bound-cannot-answer-above-itself.json && git diff 319bd076...9a4b0fa3 -- spec/conformance/generate_comparison.py spec/conformance/vectors && git status --short -- spec/conformance/vectors/comparison/comparison-incomplete-a-bound-cannot-answer-above-itself.json" in /Users/kaygee/Code/loops-s3wp2
+ succeeded in 0ms:
+|---|---|---|
+| (a) | classifier: the rollback arm returns `UNCHANGED` | **3 failed, 27 passed** — `comparison-classify-rollback`, `comparison-epoch-below-the-reset-head-is-rollback`, `comparison-journal-the-known-head-is-the-maximum-ordinal`. Caught in both forms and across three families. |
+| (b) | epoch reset-**EXCLUSIVE** (`entries[index + 1:]`) | **5 failed, 25 passed** — both `comparison-epoch-` reset vectors (the ends-at-reset journal falls to `read: none` and answers `first-contact`, which is the silent re-acceptance the fold named), plus the epoch counts on the equivocation-scope and two bound vectors. |
+| (b2) | the trust-epoch filter dropped entirely | **5 failed, 25 passed** — and `comparison-epoch-scopes-the-equivocation-check-too` fails by raising a **spurious `JournalEquivocation` at ordinal 200**, the abandoned pre-reset pair. The two epoch mutations fail differently, which is what shows the vectors pin the scope rather than one arithmetic. |
+| (c) | `established_head()` returns the bound instead of refusing | **5 failed, 25 passed** — every bounded vector: the two `comparison-incomplete-` bounds, the headerless one, and both `comparison-header-` bounds. `comparison-header-a-kindless-object-is-not-absorbed` fails with `assert 'unchanged' == None` against the head at ordinal 91 — which is BLOCKING-1's silent re-acceptance reproduced through a vector. |
+
+Mutation (b2) is beyond the brief's three; it is cheap and it separates the two ways
+epoch scoping can break, so it is reported rather than dropped.
+
+### 3. Suites green, counts reconciled
+
+Run the CI way, engine and architecture in **separate** processes (WP1 measured 29
+cross-suite pollution failures when they share one).
+
+| Suite | Baseline (`9ed893fe`) | After | Delta |
+|---|---|---|---|
+| engine | 2158 passed, 1 skipped | **2190 passed, 1 skipped** | **+32**, all in `test_conformance_comparison.py` |
+| architecture | 99 passed | **99 passed** | **0** — Rule 17 scans generators by glob, so a new one adds no case |
+
+Every delta accounted for: 27 parametrized vectors + 5 non-parametrized tests.
+Rule 17 green with `generate_comparison.py` auto-enrolled by its `generate_*.py` name,
+and Rule 18 unaffected (no engine module added).
+
+### 4. `git ls-files` — the gitignore trap
+
+`git check-ignore` reports the vectors are **not** ignored, and 27 vector JSONs are
+tracked — matching the 27 the generator writes and the 27 the inventory names, three
+independent counts agreeing.
+
+## 6. Design choices
+
+{
+  "name": "comparison-incomplete-a-bound-cannot-answer-above-itself",
+  "description": "The third cell of the bound, and the one a two-celled reading loses. Below the bound is a sound rollback and at the bound declines \u2014 but a head ABOVE the bound is not an advance either, because NOTHING BOUNDS THE ACCEPTED HEAD FROM ABOVE. Whatever the read missed carries no information about the ordinal it held. This fixture exhibits it rather than merely asserting it: the entry the crash tore held ordinal 200, so the head this machine actually accepted was 200, and a store presenting 95 is a ROLLBACK of 105 ordinals. An implementation answering 'advanced' because 95 exceeds the surviving bound of 91 would wave through exactly the loss the journal exists to catch. Note that at_known is supplied and valid \u2014 descent from 91 to 95 really is established \u2014 which is the point: descent verified from the bound says nothing about an entry that was never on the walk. Both proceed answers are unobtainable against a bound; only the refusal below it survives.",
+  "input": {
+    "form": "journal",
+    "journal": [
+      "{\"protocol\":1,\"type\":\"arrival-head-observation\",\"v\":1,\"wire\":1}",
+      "{\"kind\":\"bootstrap\",\"level\":\"mint\",\"lineage\":\"01M3COMPARISONVECTORLINEAGE\",\"location\":\"/vectors/comparison/project.arrival\",\"observed_at\":1788000000.0,\"ordinal\":0,\"record_hash\":\"8ac1d899262e830d2be319bd5ef28d03cfe847a108adaa1ec9288b7e2e0f2b00\",\"v\":1}",
+      "{\"kind\":\"trust-reset\",\"level\":\"full\",\"lineage\":\"01M3COMPARISONVECTORLINEAGE\",\"location\":\"/vectors/comparison/project.arrival\",\"observed_at\":1788000090.0,\"ordinal\":90,\"record_hash\":\"9ba847b1c3e2f92f410ac2264266c8506f0df0a9cee6575a27b6064957fc93ba\",\"v\":1}",
+      "{\"kind\":\"advance\",\"level\":\"commit\",\"lineage\":\"01M3COMPARISONVECTORLINEAGE\",\"location\":\"/vectors/comparison/project.arrival\",\"o",
+      "{\"kind\":\"advance\",\"level\":\"commit\",\"lineage\":\"01M3COMPARISONVECTORLINEAGE\",\"location\":\"/vectors/comparison/project.arrival\",\"observed_at\":1788000091.0,\"ordinal\":91,\"record_hash\":\"e2235df4281b93546c0177885f0677948fb368cf593fa3ec1fbd2d734e06bfe8\",\"v\":1}"
+    ],
+    "presented": {
+      "lineage": "01M3COMPARISONVECTORLINEAGE",
+      "ordinal": 95,
+      "record_hash": "f5524136b09dcdc36db8ce0e53f9fbab5e1b8254bcaed40822b1333cd4475d85"
+    },
+    "at_known": {
+      "lineage": "01M3COMPARISONVECTORLINEAGE",
+      "ordinal": 91,
+      "record_hash": "e2235df4281b93546c0177885f0677948fb368cf593fa3ec1fbd2d734e06bfe8"
+    }
+  },
+  "expected": {
+    "read": "bounded",
+    "known": {
+      "lineage": "01M3COMPARISONVECTORLINEAGE",
+      "ordinal": 91,
+      "record_hash": "e2235df4281b93546c0177885f0677948fb368cf593fa3ec1fbd2d734e06bfe8"
+    },
+    "entries": 3,
+    "epoch": 2,
+    "skipped": 1,
+    "outcome": null,
+    "sound_answer": null
+  }
+}
+
+exec
+/bin/zsh -lc 'shasum -a 256 spec/conformance/vectors/comparison/comparison-incomplete-a-bound-cannot-answer-above-itself.json' in /Users/kaygee/Code/loops-s3wp2
+ succeeded in 0ms:
+afa9c6b53840a0f3ed20defa00df6817ab6abb8381c5210067f0b8fe81a04a4d  spec/conformance/vectors/comparison/comparison-incomplete-a-bound-cannot-answer-above-itself.json
+
+apply patch
+patch: completed
+/Users/kaygee/Code/loops-s3wp2/spec/conformance/vectors/comparison/comparison-incomplete-a-bound-cannot-answer-above-itself.json
+diff --git a/spec/conformance/vectors/comparison/comparison-incomplete-a-bound-cannot-answer-above-itself.json b/spec/conformance/vectors/comparison/comparison-incomplete-a-bound-cannot-answer-above-itself.json
+index d1133ebd2ab8498952901b0bf9a65184564cbefb..0e38ddb55965d3a940b24e379e5e7c100f592935
+--- a/spec/conformance/vectors/comparison/comparison-incomplete-a-bound-cannot-answer-above-itself.json
++++ b/spec/conformance/vectors/comparison/comparison-incomplete-a-bound-cannot-answer-above-itself.json
+@@ -15,11 +15,7 @@
+       "ordinal": 95,
+       "record_hash": "f5524136b09dcdc36db8ce0e53f9fbab5e1b8254bcaed40822b1333cd4475d85"
+     },
+-    "at_known": {
+-      "lineage": "01M3COMPARISONVECTORLINEAGE",
+-      "ordinal": 91,
+-      "record_hash": "e2235df4281b93546c0177885f0677948fb368cf593fa3ec1fbd2d734e06bfe8"
+-    }
++    "at_known": null
+   },
+   "expected": {
+     "read": "bounded",
+
+diff --git a/spec/conformance/vectors/comparison/comparison-incomplete-a-bound-cannot-answer-above-itself.json b/spec/conformance/vectors/comparison/comparison-incomplete-a-bound-cannot-answer-above-itself.json
+index d1133ebd2ab8498952901b0bf9a65184564cbefb..0e38ddb55965d3a940b24e379e5e7c100f592935
+--- a/spec/conformance/vectors/comparison/comparison-incomplete-a-bound-cannot-answer-above-itself.json
++++ b/spec/conformance/vectors/comparison/comparison-incomplete-a-bound-cannot-answer-above-itself.json
+@@ -15,11 +15,7 @@
+       "ordinal": 95,
+       "record_hash": "f5524136b09dcdc36db8ce0e53f9fbab5e1b8254bcaed40822b1333cd4475d85"
+     },
+-    "at_known": {
+-      "lineage": "01M3COMPARISONVECTORLINEAGE",
+-      "ordinal": 91,
+-      "record_hash": "e2235df4281b93546c0177885f0677948fb368cf593fa3ec1fbd2d734e06bfe8"
+-    }
++    "at_known": null
+   },
+   "expected": {
+     "read": "bounded",
+
+diff --git a/spec/conformance/vectors/comparison/comparison-incomplete-a-bound-cannot-answer-above-itself.json b/spec/conformance/vectors/comparison/comparison-incomplete-a-bound-cannot-answer-above-itself.json
+index d1133ebd2ab8498952901b0bf9a65184564cbefb..0e38ddb55965d3a940b24e379e5e7c100f592935
+--- a/spec/conformance/vectors/comparison/comparison-incomplete-a-bound-cannot-answer-above-itself.json
++++ b/spec/conformance/vectors/comparison/comparison-incomplete-a-bound-cannot-answer-above-itself.json
+@@ -15,11 +15,7 @@
+       "ordinal": 95,
+       "record_hash": "f5524136b09dcdc36db8ce0e53f9fbab5e1b8254bcaed40822b1333cd4475d85"
+     },
+-    "at_known": {
+-      "lineage": "01M3COMPARISONVECTORLINEAGE",
+-      "ordinal": 91,
+-      "record_hash": "e2235df4281b93546c0177885f0677948fb368cf593fa3ec1fbd2d734e06bfe8"
+-    }
++    "at_known": null
+   },
+   "expected": {
+     "read": "bounded",
+
+codex
+The first test invocation hit the sandboxed global `uv` cache, not a code failure. I’m rerunning with a workspace-local temporary cache; the fixture mutation remains controlled and its original SHA-256 is recorded for byte-exact restoration.
+exec
+/bin/zsh -lc 'UV_CACHE_DIR=/private/tmp/loops-s3wp2-uv-cache uv run --project libs/engine pytest -q libs/engine/tests/test_conformance_comparison.py' in /Users/kaygee/Code/loops-s3wp2
+ exited 1 in 350ms:
+....................F...........                                         [100%]
+=================================== FAILURES ===================================
+_ test_conformance_comparison[comparison-incomplete-a-bound-cannot-answer-above-itself] _
+
+vector_path = PosixPath('/Users/kaygee/Code/loops-s3wp2/spec/conformance/vectors/comparison/comparison-incomplete-a-bound-cannot-answer-above-itself.json')
+
+    @pytest.mark.parametrize(
+        "vector_path", _load_vectors(COMPARISON_VECTORS_DIR), ids=lambda p: p.stem
+    )
+    def test_conformance_comparison(vector_path: Path) -> None:
+        vector = _read_vector(vector_path)
+    
+        assert "name" in vector, f"Vector {vector_path} missing 'name'"
+        assert "description" in vector, f"Vector {vector_path} missing 'description'"
+        assert "input" in vector, f"Vector {vector_path} missing 'input'"
+        assert "expected" in vector, f"Vector {vector_path} missing 'expected'"
+        assert vector["name"] == vector_path.stem, "vector name must match its file stem"
+    
+        presented = _head(vector["input"]["presented"])
+        assert presented is not None, "every vector presents a head"
+        at_known = _head(vector["input"]["at_known"])
+        expected = vector["expected"]
+    
+        form = vector["input"]["form"]
+        if form == "heads":
+            outcome = compare(_entry(vector["input"]["known"]), presented, at_known)
+            assert outcome.value == expected["outcome"]
+            return
+    
+        # An unknown form must fail loudly rather than fall through to green.
+        assert form == "journal", f"{vector_path.stem} names form {form!r}"
+    
+        lines = [line + "\n" for line in vector["input"]["journal"]]
+        state = expected["read"]
+    
+        if state in READ_REFUSALS:
+            with pytest.raises(READ_REFUSALS[state]):
+                parse_journal_lines(lines)
+            assert expected["outcome"] is None, "a refused read produces no outcome"
+            return
+    
+        read = parse_journal_lines(lines)
+        # KeyError on an unrecognized state, deliberately.
+        assert isinstance(read.known, KNOWN_STATES[state]), (
+            f"expected read state {state!r}, got {type(read.known).__name__}"
+        )
+        assert len(read.entries) == expected["entries"]
+        assert len(read.epoch) == expected["epoch"]
+        assert len(read.skipped) == expected["skipped"]
+    
+        # Each case is named separately BY DESIGN. There is no uniform accessor
+        # that reaches a head across the three states — the weakened ones carry no
+        # ``entry`` attribute at all — and writing one here would rebuild the
+        # shortcut the type split exists to make unobtainable.
+        if state == "established":
+            assert read.known.entry.head == _head(expected["known"])
+        elif state == "bounded":
+            assert read.known.at_least.head == _head(expected["known"])
+        else:
+            assert expected["known"] is None
+    
+        try:
+            known = read.established_head()
+        except IndeterminateComparison:
+            assert expected["outcome"] is None, (
+                "the read declined, but the vector states an outcome"
+            )
+        else:
+            assert compare(known, presented, at_known).value == expected["outcome"]
+    
+        assert ("sound_answer" in expected) == (state == "bounded"), (
+            "only a bound carries a sound answer"
+        )
+        if state == "bounded":
+            bound = read.known.at_least.head
+            below = (
+                presented.lineage == bound.lineage
+                and presented.ordinal < bound.ordinal
+            )
+            assert expected["sound_answer"] in SOUND_ANSWERS
+            assert expected["sound_answer"] == ("rollback" if below else None)
+    
+            if presented.lineage == bound.lineage and presented.ordinal > bound.ordinal:
+                # An above-the-bound vector must carry descent evidence naming the
+                # BOUND'S OWN coordinate and hash — equality, not merely non-null.
+                # The vector's whole force is a counterfactual: even with descent
+                # fully established from the bound, the proceed answer stays
+                # unobtainable. Weaken at_known and the vector stops discriminating,
+                # because a declining implementation could be right for the wrong
+                # reason — with a null at_known the classifier answers `rewrite` for
+                # want of evidence, and with a non-matching one it answers `rewrite`
+                # too. Both are already pinned by the `comparison-classify-rewrite-`
+                # vectors, so a hollow above-the-bound vector is a duplicate of a
+                # classify row wearing an incomplete-read costume: it occupies the
+                # cell without ever making `advanced` the answer a bound-ignoring
+                # implementation would reach for.
+>               assert at_known == bound, (
+                    f"{vector_path.stem} presents a head above the bound but "
+                    f"supplies at_known={vector['input']['at_known']!r}. An "
+                    "above-the-bound vector must name the bound's own coordinate "
+                    "and hash, or it cannot tell 'a bound cannot answer above "
+                    "itself' from 'there was no descent evidence anyway' — an "
+                    "implementation declining for the second reason would pass it "
+                    "while still answering `advanced` wherever descent IS proven."
+                )
+E               AssertionError: comparison-incomplete-a-bound-cannot-answer-above-itself presents a head above the bound but supplies at_known=None. An above-the-bound vector must name the bound's own coordinate and hash, or it cannot tell 'a bound cannot answer above itself' from 'there was no descent evidence anyway' — an implementation declining for the second reason would pass it while still answering `advanced` wherever descent IS proven.
+E               assert None == Head(lineage='01M3COMPARISONVECTORLINEAGE', ordinal=91, record_hash='e2235df4281b93546c0177885f0677948fb368cf593fa3ec1fbd2d734e06bfe8')
+
+libs/engine/tests/test_conformance_comparison.py:383: AssertionError
+=========================== short test summary info ============================
+FAILED libs/engine/tests/test_conformance_comparison.py::test_conformance_comparison[comparison-incomplete-a-bound-cannot-answer-above-itself]
+1 failed, 31 passed in 0.16s
+
+diff --git a/spec/conformance/vectors/comparison/comparison-incomplete-a-bound-cannot-answer-above-itself.json b/spec/conformance/vectors/comparison/comparison-incomplete-a-bound-cannot-answer-above-itself.json
+index d1133ebd2ab8498952901b0bf9a65184564cbefb..0e38ddb55965d3a940b24e379e5e7c100f592935
+--- a/spec/conformance/vectors/comparison/comparison-incomplete-a-bound-cannot-answer-above-itself.json
++++ b/spec/conformance/vectors/comparison/comparison-incomplete-a-bound-cannot-answer-above-itself.json
+@@ -15,11 +15,7 @@
+       "ordinal": 95,
+       "record_hash": "f5524136b09dcdc36db8ce0e53f9fbab5e1b8254bcaed40822b1333cd4475d85"
+     },
+-    "at_known": {
+-      "lineage": "01M3COMPARISONVECTORLINEAGE",
+-      "ordinal": 91,
+-      "record_hash": "e2235df4281b93546c0177885f0677948fb368cf593fa3ec1fbd2d734e06bfe8"
+-    }
++    "at_known": null
+   },
+   "expected": {
+     "read": "bounded",
+
+apply patch
+patch: completed
+/Users/kaygee/Code/loops-s3wp2/spec/conformance/vectors/comparison/comparison-incomplete-a-bound-cannot-answer-above-itself.json
+diff --git a/spec/conformance/vectors/comparison/comparison-incomplete-a-bound-cannot-answer-above-itself.json b/spec/conformance/vectors/comparison/comparison-incomplete-a-bound-cannot-answer-above-itself.json
+index d1133ebd2ab8498952901b0bf9a65184564cbefb..dfcf5b834469780e03b97d354fa1adaba0502da4
+--- a/spec/conformance/vectors/comparison/comparison-incomplete-a-bound-cannot-answer-above-itself.json
++++ b/spec/conformance/vectors/comparison/comparison-incomplete-a-bound-cannot-answer-above-itself.json
+@@ -18,7 +18,7 @@
+     "at_known": {
+       "lineage": "01M3COMPARISONVECTORLINEAGE",
+       "ordinal": 91,
+-      "record_hash": "e2235df4281b93546c0177885f0677948fb368cf593fa3ec1fbd2d734e06bfe8"
++      "record_hash": "0000000000000000000000000000000000000000000000000000000000000000"
+     }
+   },
+   "expected": {
+
+diff --git a/spec/conformance/vectors/comparison/comparison-incomplete-a-bound-cannot-answer-above-itself.json b/spec/conformance/vectors/comparison/comparison-incomplete-a-bound-cannot-answer-above-itself.json
+index d1133ebd2ab8498952901b0bf9a65184564cbefb..dfcf5b834469780e03b97d354fa1adaba0502da4
+--- a/spec/conformance/vectors/comparison/comparison-incomplete-a-bound-cannot-answer-above-itself.json
++++ b/spec/conformance/vectors/comparison/comparison-incomplete-a-bound-cannot-answer-above-itself.json
+@@ -18,7 +18,7 @@
+     "at_known": {
+       "lineage": "01M3COMPARISONVECTORLINEAGE",
+       "ordinal": 91,
+-      "record_hash": "e2235df4281b93546c0177885f0677948fb368cf593fa3ec1fbd2d734e06bfe8"
++      "record_hash": "0000000000000000000000000000000000000000000000000000000000000000"
+     }
+   },
+   "expected": {
+
+exec
+/bin/zsh -lc 'UV_CACHE_DIR=/private/tmp/loops-s3wp2-uv-cache uv run --project libs/engine pytest -q libs/engine/tests/test_conformance_comparison.py' in /Users/kaygee/Code/loops-s3wp2
+ exited 1 in 299ms:
+....................F...........                                         [100%]
+=================================== FAILURES ===================================
+_ test_conformance_comparison[comparison-incomplete-a-bound-cannot-answer-above-itself] _
+
+vector_path = PosixPath('/Users/kaygee/Code/loops-s3wp2/spec/conformance/vectors/comparison/comparison-incomplete-a-bound-cannot-answer-above-itself.json')
+
+    @pytest.mark.parametrize(
+        "vector_path", _load_vectors(COMPARISON_VECTORS_DIR), ids=lambda p: p.stem
+    )
+    def test_conformance_comparison(vector_path: Path) -> None:
+        vector = _read_vector(vector_path)
+    
+        assert "name" in vector, f"Vector {vector_path} missing 'name'"
+        assert "description" in vector, f"Vector {vector_path} missing 'description'"
+        assert "input" in vector, f"Vector {vector_path} missing 'input'"
+        assert "expected" in vector, f"Vector {vector_path} missing 'expected'"
+        assert vector["name"] == vector_path.stem, "vector name must match its file stem"
+    
+        presented = _head(vector["input"]["presented"])
+        assert presented is not None, "every vector presents a head"
+        at_known = _head(vector["input"]["at_known"])
+        expected = vector["expected"]
+    
+        form = vector["input"]["form"]
+        if form == "heads":
+            outcome = compare(_entry(vector["input"]["known"]), presented, at_known)
+            assert outcome.value == expected["outcome"]
+            return
+    
+        # An unknown form must fail loudly rather than fall through to green.
+        assert form == "journal", f"{vector_path.stem} names form {form!r}"
+    
+        lines = [line + "\n" for line in vector["input"]["journal"]]
+        state = expected["read"]
+    
+        if state in READ_REFUSALS:
+            with pytest.raises(READ_REFUSALS[state]):
+                parse_journal_lines(lines)
+            assert expected["outcome"] is None, "a refused read produces no outcome"
+            return
+    
+        read = parse_journal_lines(lines)
+        # KeyError on an unrecognized state, deliberately.
+        assert isinstance(read.known, KNOWN_STATES[state]), (
+            f"expected read state {state!r}, got {type(read.known).__name__}"
+        )
+        assert len(read.entries) == expected["entries"]
+        assert len(read.epoch) == expected["epoch"]
+        assert len(read.skipped) == expected["skipped"]
+    
+        # Each case is named separately BY DESIGN. There is no uniform accessor
+        # that reaches a head across the three states — the weakened ones carry no
+        # ``entry`` attribute at all — and writing one here would rebuild the
+        # shortcut the type split exists to make unobtainable.
+        if state == "established":
+            assert read.known.entry.head == _head(expected["known"])
+        elif state == "bounded":
+            assert read.known.at_least.head == _head(expected["known"])
+        else:
+            assert expected["known"] is None
+    
+        try:
+            known = read.established_head()
+        except IndeterminateComparison:
+            assert expected["outcome"] is None, (
+                "the read declined, but the vector states an outcome"
+            )
+        else:
+            assert compare(known, presented, at_known).value == expected["outcome"]
+    
+        assert ("sound_answer" in expected) == (state == "bounded"), (
+            "only a bound carries a sound answer"
+        )
+        if state == "bounded":
+            bound = read.known.at_least.head
+            below = (
+                presented.lineage == bound.lineage
+                and presented.ordinal < bound.ordinal
+            )
+            assert expected["sound_answer"] in SOUND_ANSWERS
+            assert expected["sound_answer"] == ("rollback" if below else None)
+    
+            if presented.lineage == bound.lineage and presented.ordinal > bound.ordinal:
+                # An above-the-bound vector must carry descent evidence naming the
+                # BOUND'S OWN coordinate and hash — equality, not merely non-null.
+                # The vector's whole force is a counterfactual: even with descent
+                # fully established from the bound, the proceed answer stays
+                # unobtainable. Weaken at_known and the vector stops discriminating,
+                # because a declining implementation could be right for the wrong
+                # reason — with a null at_known the classifier answers `rewrite` for
+                # want of evidence, and with a non-matching one it answers `rewrite`
+                # too. Both are already pinned by the `comparison-classify-rewrite-`
+                # vectors, so a hollow above-the-bound vector is a duplicate of a
+                # classify row wearing an incomplete-read costume: it occupies the
+                # cell without ever making `advanced` the answer a bound-ignoring
+                # implementation would reach for.
+>               assert at_known == bound, (
+                    f"{vector_path.stem} presents a head above the bound but "
+                    f"supplies at_known={vector['input']['at_known']!r}. An "
+                    "above-the-bound vector must name the bound's own coordinate "
+                    "and hash, or it cannot tell 'a bound cannot answer above "
+                    "itself' from 'there was no descent evidence anyway' — an "
+                    "implementation declining for the second reason would pass it "
+                    "while still answering `advanced` wherever descent IS proven."
+                )
+E               AssertionError: comparison-incomplete-a-bound-cannot-answer-above-itself presents a head above the bound but supplies at_known={'lineage': '01M3COMPARISONVECTORLINEAGE', 'ordinal': 91, 'record_hash': '0000000000000000000000000000000000000000000000000000000000000000'}. An above-the-bound vector must name the bound's own coordinate and hash, or it cannot tell 'a bound cannot answer above itself' from 'there was no descent evidence anyway' — an implementation declining for the second reason would pass it while still answering `advanced` wherever descent IS proven.
+E               assert Head(lineage=...000000000000') == Head(lineage=...2d734e06bfe8')
+E                 
+E                 Omitting 2 identical items, use -vv to show
+E                 Differing attributes:
+E                 ['record_hash']
+E                 
+E                 Drill down into differing attribute record_hash:
+E                   record_hash: '0000000000000000000000000000000000000000000000000000000000000000' != 'e2235df4281b93546c0177885f0677948fb368cf593fa3ec1fbd2d734e06bfe8'
+E                   - e2235df4281b93546c0177885f0677948fb368cf593fa3ec1fbd2d734e06bfe8
+E                   + 0000000000000000000000000000000000000000000000000000000000000000
+
+libs/engine/tests/test_conformance_comparison.py:383: AssertionError
+=========================== short test summary info ============================
+FAILED libs/engine/tests/test_conformance_comparison.py::test_conformance_comparison[comparison-incomplete-a-bound-cannot-answer-above-itself]
+1 failed, 31 passed in 0.11s
+
+diff --git a/spec/conformance/vectors/comparison/comparison-incomplete-a-bound-cannot-answer-above-itself.json b/spec/conformance/vectors/comparison/comparison-incomplete-a-bound-cannot-answer-above-itself.json
+index d1133ebd2ab8498952901b0bf9a65184564cbefb..dfcf5b834469780e03b97d354fa1adaba0502da4
+--- a/spec/conformance/vectors/comparison/comparison-incomplete-a-bound-cannot-answer-above-itself.json
++++ b/spec/conformance/vectors/comparison/comparison-incomplete-a-bound-cannot-answer-above-itself.json
+@@ -18,7 +18,7 @@
+     "at_known": {
+       "lineage": "01M3COMPARISONVECTORLINEAGE",
+       "ordinal": 91,
+-      "record_hash": "e2235df4281b93546c0177885f0677948fb368cf593fa3ec1fbd2d734e06bfe8"
++      "record_hash": "0000000000000000000000000000000000000000000000000000000000000000"
+     }
+   },
+   "expected": {
+
+apply patch
+patch: completed
+/Users/kaygee/Code/loops-s3wp2/spec/conformance/vectors/comparison/comparison-incomplete-a-bound-cannot-answer-above-itself.json
+exec
+/bin/zsh -lc "shasum -a 256 spec/conformance/vectors/comparison/comparison-incomplete-a-bound-cannot-answer-above-itself.json && git status --short && sed -n '1,100p' spec/conformance/generate_comparison.py && rg -n 'generate_comparison.py|architecture' .github pyproject.toml scripts tests --glob '*.yml' --glob '*.yaml' --glob '*.toml' --glob '*.py' 2>/dev/null" in /Users/kaygee/Code/loops-s3wp2
+ exited 2 in 0ms:
+afa9c6b53840a0f3ed20defa00df6817ab6abb8381c5210067f0b8fe81a04a4d  spec/conformance/vectors/comparison/comparison-incomplete-a-bound-cannot-answer-above-itself.json
+"""Generator for comparison conformance vectors.
+
+Builds golden vectors pinning the head-comparison state machine — slice 3 of the
+arrival break, ``witness-protocol.html`` §07 as amended by the slice-3 rulings.
+The question the area answers is the one no backend can answer about itself: *is
+the log in front of me the same log this machine accepted yesterday?*
+
+**Two vector forms, and the split is the area's design point.**
+
+- ``form: "heads"`` hands a ``(known, presented, at_known)`` triple straight to
+  the pure classifier. These pin the seven §07 rows with NO journal encoding,
+  because §B.3's journal is a local cache grammar rather than wire — it is
+  deliberately not the record codec, it versions independently, and no other
+  implementation is obliged to have one. Routing every row through a journal
+  fixture would pin this repo's cache format onto an implementation that owes
+  only the state machine.
+- ``form: "journal"`` hands raw lines to the pure reader and then attempts the
+  comparison. Every read rule lives here and NONE of them is reachable from the
+  classifier: trust-epoch scoping, the maximum-ordinal rule, equivocation, the
+  incomplete-read lower bound, the header's three-way classification.
+
+Five families, each answering a question the others cannot:
+
+- ``comparison-classify-*``: the seven rows, in isolation, plus the guard-order
+  claim that a foreign lineage is judged before any ordinal arithmetic.
+- ``comparison-epoch-*``: a trust-reset opens a new epoch, RESET-INCLUSIVE, and
+  the epoch scopes the equivocation check too.
+- ``comparison-journal-*``: the maximum-ordinal read rule, equivocation and its
+  agreement control, and the two journals that are honestly first contact.
+- ``comparison-incomplete-*``: an incomplete read yields a LOWER BOUND — sound
+  below itself, unable to answer either proceed row — and the third state where
+  content was claimed and nothing at all could be read.
+- ``comparison-header-*``: the three-way classification, which never absorbs a
+  line and never refuses the file.
+
+Every vector is deterministic: one fixed lineage, fixed observation times, and
+record hashes derived from a fixed tag. Nothing here reads a clock.
+
+Well-formed journals are built through the real ``append_entry`` so the vectors
+pin the writer's actual bytes, under a TEMPORARY ``XDG_STATE_HOME`` that is
+asserted before the first append — this generator must never touch a real state
+root. Damage, ambiguity and foreign-build lines are spliced in afterwards, since
+they are by definition what the writer would not produce.
+
+Run once to generate/regenerate frozen vector files:
+    uv run --package engine python spec/conformance/generate_comparison.py
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import tempfile
+from collections.abc import Callable
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+from engine.arrival_contract import Head
+from engine.arrival_head_attestation import (
+    HeadAttestation,
+    HeadLowerBound,
+    HeadUnreadable,
+    IndeterminateComparison,
+    JournalEquivocation,
+    Kind,
+    Level,
+    append_entry,
+    compare,
+    journal_path,
+    parse_journal_lines,
+    state_root,
+)
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+COMPARISON_DIR = REPO_ROOT / "spec" / "conformance" / "vectors" / "comparison"
+
+# One fixed lineage across the area, so a reader comparing two vectors is
+# comparing histories and not identifiers. The second exists only to be a
+# DIFFERENT one.
+LINEAGE = "01M3COMPARISONVECTORLINEAGE"
+OTHER_LINEAGE = "01M3COMPARISONREPLACEMENT"
+
+# Fixed observation times. Witness metadata, never ledger order — so they are
+# constants rather than a clock, and nothing in the area depends on their order.
+OBSERVED_AT = 1788000000.0
+LOCATION = "/vectors/comparison/project.arrival"
+
+# The serialized type marker, restated rather than imported from the module's
+# private constant: a vector generator that reached into a private name would
+# make the frozen artifacts a function of an implementation detail.
+OBSERVATION_TYPE = "arrival-head-observation"
+
+
+def rh(tag: str) -> str:
+    """A deterministic stand-in record hash: 64 hex, stable across runs.
+
+    The journal stores heads it was handed and validates no hash, so these need
+    to be well-shaped rather than real. Derived from a tag so that two vectors
+pyproject.toml:63:# The root runs the tests that belong to no single package — the architecture
+.github/workflows/ci.yml:10:  check-architecture:
+tests/architecture/_helpers.py:1:"""Shared infrastructure for architecture boundary tests."""
+tests/architecture/test_rule_11_record_never_imports_surfacing.py:49:        + " — assign a layer in _LIB_LAYER (tests/test_architecture.py) AND "
+tests/architecture/test_rule_08_domain_constants_in_custody_only.py:19:    format (design/architecture/custody-lib-extraction). This pin is
+
+codex
+Both mutations produced exactly one failure among 32, named the fixture, and the file is restored to its original SHA-256. The wrong-hash case confirms equality—not merely non-nullness—is necessary. I’m finishing with clean baseline/full-suite counts plus generator byte reproducibility and tracked-vector count.
+exec
+/bin/zsh -lc 'UV_CACHE_DIR=/private/tmp/loops-s3wp2-uv-cache uv run --project libs/engine pytest -q libs/engine/tests/test_conformance_comparison.py' in /Users/kaygee/Code/loops-s3wp2
+exec
+/bin/zsh -lc 'UV_CACHE_DIR=/private/tmp/loops-s3wp2-uv-cache uv run pytest -q tests/architecture' in /Users/kaygee/Code/loops-s3wp2
+exec
+/bin/zsh -lc 'UV_CACHE_DIR=/private/tmp/loops-s3wp2-uv-cache uv run --project libs/engine pytest -q libs/engine/tests' in /Users/kaygee/Code/loops-s3wp2
+ succeeded in 406ms:
+................................                                         [100%]
+32 passed in 0.15s
+
+ succeeded in 7999ms:
+........................................................................ [ 72%]
+...........................                                              [100%]
+99 passed in 7.75s
+
+exec
+/bin/zsh -lc 'UV_CACHE_DIR=/private/tmp/loops-s3wp2-uv-cache uv run --project libs/engine pytest -q libs/engine/tests' in /Users/kaygee/Code/loops-s3wp2
+ succeeded in 95620ms:
+........................................................................ [  3%]
+........................................................................ [  6%]
+........................................................................ [  9%]
+........................................................................ [ 13%]
+........................................................................ [ 16%]
+........................................................................ [ 19%]
+........................................................................ [ 23%]
+........................................................................ [ 26%]
+........................................................................ [ 29%]
+.................................s...................................... [ 32%]
+........................................................................ [ 36%]
+........................................................................ [ 39%]
+........................................................................ [ 42%]
+........................................................................ [ 46%]
+........................................................................ [ 49%]
+........................................................................ [ 52%]
+........................................................................ [ 55%]
+........................................................................ [ 59%]
+........................................................................ [ 62%]
+........................................................................ [ 65%]
+........................................................................ [ 69%]
+........................................................................ [ 72%]
+........................................................................ [ 75%]
+........................................................................ [ 78%]
+........................................................................ [ 82%]
+........................................................................ [ 85%]
+........................................................................ [ 88%]
+........................................................................ [ 92%]
+........................................................................ [ 95%]
+........................................................................ [ 98%]
+...............................                                          [100%]
+2190 passed, 1 skipped in 94.77s (0:01:34)
+
+ succeeded in 94017ms:
+........................................................................ [  3%]
+........................................................................ [  6%]
+........................................................................ [  9%]
+........................................................................ [ 13%]
+........................................................................ [ 16%]
+........................................................................ [ 19%]
+........................................................................ [ 23%]
+........................................................................ [ 26%]
+........................................................................ [ 29%]
+.................................s...................................... [ 32%]
+........................................................................ [ 36%]
+........................................................................ [ 39%]
+........................................................................ [ 42%]
+........................................................................ [ 46%]
+........................................................................ [ 49%]
+........................................................................ [ 52%]
+........................................................................ [ 55%]
+........................................................................ [ 59%]
+........................................................................ [ 62%]
+........................................................................ [ 65%]
+........................................................................ [ 69%]
+........................................................................ [ 72%]
+........................................................................ [ 75%]
+........................................................................ [ 78%]
+........................................................................ [ 82%]
+........................................................................ [ 85%]
+........................................................................ [ 88%]
+........................................................................ [ 92%]
+........................................................................ [ 95%]
+........................................................................ [ 98%]
+...............................                                          [100%]
+2190 passed, 1 skipped in 93.61s (0:01:33)
+
+exec
+/bin/zsh -lc "find spec/conformance/vectors/comparison -name '*.json' -type f -print0 | sort -z | xargs -0 shasum -a 256 | shasum -a 256; git ls-files 'spec/conformance/vectors/comparison/*.json' | wc -l; git diff --name-only 319bd076...9a4b0fa3; git diff --name-only 319bd076...9a4b0fa3 -- '*generate*' 'spec/conformance/vectors/**'" in /Users/kaygee/Code/loops-s3wp2
+ succeeded in 0ms:
+b4ebbd1712bb39583dd1221ed5640c0a5da160306615ea7b2c3ff2f9f7e53d14  -
+      27
+docs/scratch/arrival-break/slice3-wp2-report.md
+libs/engine/tests/test_conformance_comparison.py
+spec/conformance/SCHEMA.md
+
+exec
+/bin/zsh -lc 'UV_CACHE_DIR=/private/tmp/loops-s3wp2-uv-cache uv run --package engine python spec/conformance/generate_comparison.py' in /Users/kaygee/Code/loops-s3wp2
+ succeeded in 0ms:
+Wrote spec/conformance/vectors/comparison/comparison-classify-first-contact.json (first-contact)
+Wrote spec/conformance/vectors/comparison/comparison-classify-unchanged.json (unchanged)
+Wrote spec/conformance/vectors/comparison/comparison-classify-advanced.json (advanced)
+Wrote spec/conformance/vectors/comparison/comparison-classify-rollback.json (rollback)
+Wrote spec/conformance/vectors/comparison/comparison-classify-same-height-fork.json (same-height-fork)
+Wrote spec/conformance/vectors/comparison/comparison-classify-rewrite-at-the-known-ordinal.json (rewrite)
+Wrote spec/conformance/vectors/comparison/comparison-classify-rewrite-when-the-ledger-vouches-for-nothing.json (rewrite)
+Wrote spec/conformance/vectors/comparison/comparison-classify-lineage-replaced.json (lineage-replaced)
+Wrote spec/conformance/vectors/comparison/comparison-classify-lineage-replaced-outranks-a-lower-ordinal.json (lineage-replaced)
+Wrote spec/conformance/vectors/comparison/comparison-epoch-ends-at-the-reset-entry-is-unchanged.json (established / unchanged)
+Wrote spec/conformance/vectors/comparison/comparison-epoch-below-the-reset-head-is-rollback.json (established / rollback)
+Wrote spec/conformance/vectors/comparison/comparison-epoch-scopes-the-equivocation-check-too.json (established / unchanged)
+Wrote spec/conformance/vectors/comparison/comparison-journal-the-known-head-is-the-maximum-ordinal.json (established / rollback)
+Wrote spec/conformance/vectors/comparison/comparison-journal-equivocation-refuses-the-read.json (equivocation / None)
+Wrote spec/conformance/vectors/comparison/comparison-journal-duplicate-entries-at-the-maximum-agree.json (established / unchanged)
+Wrote spec/conformance/vectors/comparison/comparison-journal-an-empty-journal-is-first-contact.json (none / first-contact)
+Wrote spec/conformance/vectors/comparison/comparison-journal-a-header-only-journal-is-first-contact.json (none / first-contact)
+Wrote spec/conformance/vectors/comparison/comparison-journal-unknown-fields-on-a-v1-entry-are-read.json (established / unchanged)
+Wrote spec/conformance/vectors/comparison/comparison-incomplete-a-torn-line-yields-a-lower-bound.json (bounded / None)
+Wrote spec/conformance/vectors/comparison/comparison-incomplete-a-bound-still-refuses-below-itself.json (bounded / None)
+Wrote spec/conformance/vectors/comparison/comparison-incomplete-a-bound-cannot-answer-above-itself.json (bounded / None)
+Wrote spec/conformance/vectors/comparison/comparison-incomplete-a-headerless-journal-yields-a-bound.json (bounded / None)
+Wrote spec/conformance/vectors/comparison/comparison-incomplete-nothing-readable-declines-every-comparison.json (unreadable / None)
+Wrote spec/conformance/vectors/comparison/comparison-incomplete-a-re-mint-against-lost-content-is-not-first-contact.json (unreadable / None)
+Wrote spec/conformance/vectors/comparison/comparison-header-a-kindless-object-is-not-absorbed.json (bounded / None)
+Wrote spec/conformance/vectors/comparison/comparison-header-both-markers-together-are-unclassifiable.json (bounded / None)
+Wrote spec/conformance/vectors/comparison/comparison-header-a-later-builds-header-is-still-a-header.json (established / unchanged)
+
+exec
+/bin/zsh -lc "find spec/conformance/vectors/comparison -name '*.json' -type f -print0 | sort -z | xargs -0 shasum -a 256 | shasum -a 256; git status --short; git diff --exit-code -- spec/conformance/vectors/comparison" in /Users/kaygee/Code/loops-s3wp2
+ succeeded in 0ms:
+b4ebbd1712bb39583dd1221ed5640c0a5da160306615ea7b2c3ff2f9f7e53d14  -
+
+codex
+Fix: PASS.
+
+- Strengthened envelope assertion is correctly placed in the parametrized consumer runner and requires full `Head` equality with the parsed bound: lineage, ordinal, and record hash. Wrong-head `at_known` is therefore correctly treated as hollow.
+- Disk mutation (i), `at_known: null`: exactly `1 failed, 31 passed`; failure named `comparison-incomplete-a-bound-cannot-answer-above-itself` and displayed `at_known=None`.
+- Disk mutation (ii), same coordinate with wrong record hash: exactly `1 failed, 31 passed`; the same assertion failed and displayed the incorrect head.
+- Fixture restored byte-exact: SHA-256 before/after `afa9c6b53840a0f3ed20defa00df6817ab6abb8381c5210067f0b8fe81a04a4d`.
+- No remaining hollow-occupancy defeat found. Each bounded, same-lineage, above-bound vector is independently checked; adding a second vector cannot mask a hollow one. Foreign-lineage artifacts do not occupy the ordinal “above” cell, and presented-hash variation does not remove the discriminating counterfactual when `at_known == bound`.
+- `SCHEMA.md` clearly makes this a normative fixture obligation and explains both exact equality and its counterfactual purpose.
+- Focused consumer tests: `32 passed`.
+- Engine: `2190 passed, 1 skipped`.
+- Architecture: `99 passed`.
+- Generator reran successfully; aggregate vector hash was identical before and after: `b4ebbd1712bb39583dd1221ed5640c0a5da160306615ea7b2c3ff2f9f7e53d14`.
+- Exactly 27 tracked comparison vectors.
+- Exact diff file set is:
+  - `libs/engine/tests/test_conformance_comparison.py`
+  - `spec/conformance/SCHEMA.md`
+  - `docs/scratch/arrival-break/slice3-wp2-report.md`
+- No generator or vector changed. No new test or vector was added; the existing parametrized assertion was strengthened.
+
+New findings: none.
+
+**CONVERGED**
+tokens used
+35,970
+Fix: PASS.
+
+- Strengthened envelope assertion is correctly placed in the parametrized consumer runner and requires full `Head` equality with the parsed bound: lineage, ordinal, and record hash. Wrong-head `at_known` is therefore correctly treated as hollow.
+- Disk mutation (i), `at_known: null`: exactly `1 failed, 31 passed`; failure named `comparison-incomplete-a-bound-cannot-answer-above-itself` and displayed `at_known=None`.
+- Disk mutation (ii), same coordinate with wrong record hash: exactly `1 failed, 31 passed`; the same assertion failed and displayed the incorrect head.
+- Fixture restored byte-exact: SHA-256 before/after `afa9c6b53840a0f3ed20defa00df6817ab6abb8381c5210067f0b8fe81a04a4d`.
+- No remaining hollow-occupancy defeat found. Each bounded, same-lineage, above-bound vector is independently checked; adding a second vector cannot mask a hollow one. Foreign-lineage artifacts do not occupy the ordinal “above” cell, and presented-hash variation does not remove the discriminating counterfactual when `at_known == bound`.
+- `SCHEMA.md` clearly makes this a normative fixture obligation and explains both exact equality and its counterfactual purpose.
+- Focused consumer tests: `32 passed`.
+- Engine: `2190 passed, 1 skipped`.
+- Architecture: `99 passed`.
+- Generator reran successfully; aggregate vector hash was identical before and after: `b4ebbd1712bb39583dd1221ed5640c0a5da160306615ea7b2c3ff2f9f7e53d14`.
+- Exactly 27 tracked comparison vectors.
+- Exact diff file set is:
+  - `libs/engine/tests/test_conformance_comparison.py`
+  - `spec/conformance/SCHEMA.md`
+  - `docs/scratch/arrival-break/slice3-wp2-report.md`
+- No generator or vector changed. No new test or vector was added; the existing parametrized assertion was strengthened.
+
+New findings: none.
+
+**CONVERGED**

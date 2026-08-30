@@ -286,12 +286,26 @@ Two notes carried forward rather than encoded:
 Completion fact: `observation:implementation/arrival-slice3-wp2-comparison-vectors` @
 `01M180VC8K6N0HJC2GJVN3ZJVC`.
 
+Sol-round folds: `finding:s3wp2-l1-bound-above-cell-unpinned` @
+`01M182MZ64KRPXGRXTAEZ3TW5B`, and
+`finding:s3wp2-l2-hollow-occupancy-of-the-above-cell` @ `01M18369WBDCC52PNKP7R7CMBQ`.
+
 **Store housekeeping, so a reader grepping the store is not puzzled.** The first emit
 of that observation passed the topic as a positional slug rather than `topic=`, and
 `observation` folds by `topic` — so `01M180TKTHEG60TG43D5A4QJVM` is stored with **no
 fold key** and carries an earlier, shorter draft of the same message. The store is
 append-only so it stays as written; `01M180VC8K6N0HJC2GJVN3ZJVC` is the one that folds
 and the one to read. No finding: an emission-form slip, not a work product.
+
+The sol-r2 fold has the same shape of blemish for a different reason: its first emit
+(`01M1835CFX54PCX2ZDZGPVQH0D`) passed a backticked message through the shell, which
+substituted the backticks as commands and **silently dropped four words** — the two
+outcome names the argument turns on. Re-emitted under the same fold name via `--stdin`
+so nothing is interpreted, and `01M18369WBDCC52PNKP7R7CMBQ` is what the fold resolves
+to (verified by reading it back). The general lesson is worth one line for whoever
+emits next in this arc: **pass long fact bodies through `--stdin`, never as a shell
+argument** — a mangled receipt is worse than a missing one, because it still looks
+like a receipt.
 
 ## 9. Sol-LOW round 1 — the unpinned third cell of the bound
 

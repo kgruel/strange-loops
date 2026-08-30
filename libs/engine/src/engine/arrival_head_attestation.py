@@ -1585,9 +1585,15 @@ def bound_lineage(location: str) -> str | None:
 
     DELETE IN SLICE 5.
 
-    **The answer surface, in full.** Three outcomes, split by where a failure
-    happened rather than by what anyone should do about it:
+    **The answer surface, in full.** Four outcomes. The first is the one this
+    function exists for; the other three split by where a failure happened
+    rather than by what anyone should do about it:
 
+    * **The lineage, as a string** — a well-formed binding names this exact
+      location. The scan does not stop at the first match: it runs to the end
+      and keeps the last one, so the NEWEST binding wins, which is what makes
+      a re-bound location report what it presents now rather than what it
+      presented first.
     * **None** — the file is absent or empty, every line is blank, or the
       bindings it holds are well-formed and name OTHER locations. Each of these
       is an ANSWER: nothing is bound here, and first contact is the honest

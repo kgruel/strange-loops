@@ -64,6 +64,7 @@ from .arrival_contract import (
 from .arrival_head_attestation import (
     AbsentStoreOutcome,
     AttestationRefusal,
+    BindingProbeUnanswered,
     EstablishedHead,
     HeadAttestation,
     HeadFork,
@@ -75,6 +76,7 @@ from .arrival_head_attestation import (
     Level,
     LineageReplaced,
     Outcome,
+    ProbeUnanswered,
     StoreLost,
     append_entry,
     bindings_path,
@@ -92,7 +94,9 @@ from .arrival_head_attestation import (
 __all__ = [
     "AttestedLedger",
     "AbandonedHistoryFenced",
+    "BindingProbeUnanswered",
     "FenceProbeUnanswered",
+    "ProbeUnanswered",
     "AuditFoundUnaccountedHeads",
     "Compared",
     "Indeterminate",
@@ -158,7 +162,7 @@ class AbandonedHistoryFenced(AttestationRefusal):
     """
 
 
-class FenceProbeUnanswered(AttestationRefusal):
+class FenceProbeUnanswered(ProbeUnanswered):
     """The fence could not certify the walked path, so the open does not proceed.
 
     A sibling of :class:`AbandonedHistoryFenced` rather than an arm of it,
@@ -448,16 +452,26 @@ Identity = tuple[int, int]
 
 
 def _identity_of(location: str) -> Identity | None:
-    """What filesystem object this path names right now, or None.
+    """What filesystem object this path names right now, or None if it is absent.
 
-    None for a path that does not stat — it was deleted, the mount is gone, or
-    permission was withdrawn. Those bindings are skipped rather than guessed
-    at: a path that cannot be stat'd makes no claim about identity either way.
+    The split is between an ANSWER and an unanswered question, and the two used
+    to be one branch. A path that does not exist genuinely names no object —
+    that is None, and it is correct, and the mint path depends on it. A path
+    that DOES exist and will not stat (a permission wall, a transient I/O
+    error, a partially mounted volume) leaves the question open, and answering
+    None there means a store replaced under an aliased spelling opens as first
+    contact.
     """
     try:
         stat = Path(location).stat()
-    except OSError:
+    except FileNotFoundError:
         return None
+    except OSError as exc:
+        raise BindingProbeUnanswered(
+            f"{location} exists but cannot be stat'd ({exc}), so this open "
+            "cannot tell whether it names the same store as a recorded "
+            "binding. Nothing has been accepted or written — retry the open"
+        ) from exc
     return (stat.st_dev, stat.st_ino)
 
 
@@ -506,18 +520,29 @@ def aliased_lineage(location: str) -> str | None:
     try:
         text = bindings_path().read_text(encoding="utf-8")
     except FileNotFoundError:
+        # ABSENT is an answer: nothing has ever been bound here.
         return None
-    except OSError:
-        return None
+    except OSError as exc:
+        raise BindingProbeUnanswered(
+            f"the bindings file at {bindings_path()} exists and cannot be "
+            f"read ({exc}), so this open cannot tell whether this location "
+            "already presented a different lineage. Nothing has been accepted "
+            "or written — retry the open"
+        ) from exc
     recorded: list[tuple[str, str, Identity | None]] = []
-    for line in text.splitlines():
+    for number, line in enumerate(text.splitlines(), start=1):
         stripped = line.strip()
         if not stripped:
             continue
         try:
             decoded = json.loads(stripped)
-        except ValueError:
-            continue
+        except ValueError as exc:
+            raise BindingProbeUnanswered(
+                f"line {number} of {bindings_path()} does not parse ({exc}), "
+                "and a line that cannot be read may be the binding that names "
+                "this location. Nothing has been accepted or written — repair "
+                "or remove the line, then retry the open"
+            ) from exc
         where = decoded.get("location") if isinstance(decoded, dict) else None
         lineage = decoded.get("lineage") if isinstance(decoded, dict) else None
         if isinstance(where, str) and isinstance(lineage, str):

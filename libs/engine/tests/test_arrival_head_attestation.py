@@ -23,6 +23,7 @@ from engine.arrival_contract import ContractRefusal, Head
 from engine.arrival_head_attestation import (
     AbsentStoreOutcome,
     AttestationRefusal,
+    BindingProbeUnanswered,
     EstablishedHead,
     HeadAttestation,
     HeadFork,
@@ -1259,12 +1260,23 @@ def test_the_bindings_file_lives_beside_the_journals():
     assert bindings_path().exists()
 
 
-def test_a_malformed_binding_line_is_skipped_not_refused():
-    """A missing binding degrades to first contact, which it never guaranteed."""
+def test_a_malformed_binding_line_refuses_rather_than_being_skipped():
+    """SUPERSEDED: this pinned the skip, and the skip was the defect.
+
+    The reasoning it carried — "a missing binding degrades to first contact,
+    which it never guaranteed" — is true of an ABSENT bindings file and false
+    of a line that will not parse. A skipped line may be the very binding that
+    names this location, so skipping answers "nothing is bound here" on
+    evidence that says nothing of the kind, and a replaced store then opens as
+    first contact (``finding:s3wp3-binding-probes-fail-acceptance-side``).
+
+    Absent still answers None, and its own test below is unchanged.
+    """
     record_binding("/a/project.arrival", LINEAGE, 1.0)
     with bindings_path().open("a") as handle:
         handle.write("{not json\n")
-    assert bound_lineage("/a/project.arrival") == LINEAGE
+    with pytest.raises(BindingProbeUnanswered):
+        bound_lineage("/a/project.arrival")
 
 
 def test_the_transitional_binding_carries_its_deletion_marker():

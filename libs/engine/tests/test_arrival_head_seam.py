@@ -40,6 +40,7 @@ from engine.arrival_contract import (
 )
 from engine.arrival_file_backend import FileLedger, FileQuery
 from engine.arrival_head_attestation import (
+    AttestationRefusal,
     HeadAttestation,
     HeadFork,
     HeadRewrite,
@@ -57,20 +58,24 @@ from engine.arrival_head_attestation import (
     heads_dir,
     journal_path,
     read_journal,
+    record_binding,
     state_root,
 )
 from engine.arrival_head_seam import (
     AbandonedHistoryFenced,
     AttestedLedger,
     AuditFoundUnaccountedHeads,
+    BindingProbeUnanswered,
     Compared,
     FenceProbeUnanswered,
     Indeterminate,
     NotWitnessed,
     PreGenesis,
+    ProbeUnanswered,
     ProjectionAgreement,
     ProjectionAheadOfLedger,
     TrustResetNotHonored,
+    aliased_lineage,
     audit,
     bootstrap,
     canonical_location,
@@ -2318,3 +2323,159 @@ def test_a_probe_failure_outside_the_fenced_set_is_not_consulted(tmp_path):
     assert isinstance(comparison, Compared)
     assert comparison.outcome is Outcome.ADVANCED
     assert 9999 not in probing.asked
+
+
+# ---------------------------------------------------------------------------
+# The binding probes (finding:s3wp3-binding-probes-fail-acceptance-side)
+# ---------------------------------------------------------------------------
+
+
+def _reached_by_an_alias(tmp_path: Path):
+    """A store bound under one spelling and reached under another.
+
+    A HARD LINK, because it is the one alias that is portable and genuinely
+    different: ``resolve()`` follows a symlink to its target and so produces
+    the same canonical string, while a hard link has no target to follow — two
+    names, two canonical forms, one inode. That is exactly the state the
+    identity probe exists for, and it is what puts the probe on the path at
+    all: with no exact binding for the presenting spelling, the alias sweep is
+    the only thing that can answer.
+    """
+    log_path = minted(tmp_path / "s.arrival")
+    append_legacy(log_path, "one")
+    opened(log_path)  # binds the canonical form of log_path
+    alias = tmp_path / "alias.arrival"
+    os.link(log_path, alias)
+    assert canonical_location(str(alias)) != canonical_location(str(log_path))
+    return log_path, alias, lineage_of(log_path)
+
+
+def test_the_alias_probe_answers_when_it_can(tmp_path):
+    """The baseline the three refusals below are departures from.
+
+    With every probe working, the aliased spelling is recognized as the same
+    store and the open proceeds normally — no first contact, no second binding.
+    """
+    _log_path, alias, lineage = _reached_by_an_alias(tmp_path)
+    before = journal_bytes(lineage)
+    comparison = opened(alias).opened.comparison
+    assert isinstance(comparison, Compared)
+    assert comparison.outcome is Outcome.UNCHANGED
+    assert journal_bytes(lineage) == before
+
+
+def _needs_unprivileged() -> None:
+    """chmod cannot stop root, so a permission test as root proves nothing."""
+    if os.geteuid() == 0:
+        pytest.skip("runs as root; chmod-based permission walls do not apply")
+
+
+def test_an_unreadable_bindings_file_refuses_rather_than_first_contacting(tmp_path):
+    """Site 1. A file that EXISTS and cannot be read is not "no binding".
+
+    Answering None hands the aliased spelling back as a first contact — which
+    writes a bootstrap receipt and a second binding for a store this machine
+    already knows, and would wave a replacement through the hole the alias
+    detection was added to close.
+
+    A real permission wall rather than a patched reader: patching the reader
+    globally also breaks the ledger's own file access, so the open would fail
+    somewhere else and the test would pass for the wrong reason.
+    """
+    _needs_unprivileged()
+    _log_path, alias, lineage = _reached_by_an_alias(tmp_path)
+    before = journal_bytes(lineage)
+    binding_bytes = bindings_path().read_bytes()
+
+    bindings_path().chmod(0o000)
+    try:
+        with pytest.raises(BindingProbeUnanswered) as excinfo:
+            opened(alias)
+    finally:
+        bindings_path().chmod(0o600)
+
+    assert "retry the open" in str(excinfo.value)
+    assert journal_bytes(lineage) == before
+    assert bindings_path().read_bytes() == binding_bytes
+
+
+def test_a_recorded_location_that_will_not_stat_refuses(tmp_path):
+    """Site 2. Existing-but-unstattable is a question, not an answer.
+
+    The unstattable path is a RECORDED binding's, behind a locked directory,
+    so the presenting store is untouched and the identity probe is the only
+    thing that fails. Locking the presenting store instead would break the
+    ledger read first and never reach the probe.
+    """
+    _needs_unprivileged()
+    _log_path, alias, lineage = _reached_by_an_alias(tmp_path)
+    locked = tmp_path / "locked"
+    locked.mkdir()
+    hidden = locked / "other.arrival"
+    hidden.write_text("x")
+    record_binding(str(hidden), "01BX5ZZKBKACTAV9WEVGEMMVRZ", 1.0)
+    before = journal_bytes(lineage)
+    binding_bytes = bindings_path().read_bytes()
+
+    locked.chmod(0o000)
+    try:
+        with pytest.raises(BindingProbeUnanswered):
+            opened(alias)
+    finally:
+        locked.chmod(0o700)
+
+    assert journal_bytes(lineage) == before
+    assert bindings_path().read_bytes() == binding_bytes
+
+
+def test_an_absent_path_still_answers_none(tmp_path):
+    """The arm that must NOT have moved: absent is an answer, and mint needs it."""
+    ledger = opened(tmp_path / "never-existed.arrival")
+    assert isinstance(ledger.opened.comparison, PreGenesis)
+
+
+def test_an_unparseable_binding_line_refuses_rather_than_being_skipped(tmp_path):
+    """Site 3. The line that cannot be read may be the one that names this store."""
+    _log_path, alias, lineage = _reached_by_an_alias(tmp_path)
+    before = journal_bytes(lineage)
+    with bindings_path().open("a", encoding="utf-8") as handle:
+        handle.write("{ this line does not parse\n")
+    binding_bytes = bindings_path().read_bytes()
+
+    with pytest.raises(BindingProbeUnanswered) as excinfo:
+        opened(alias)
+
+    assert "does not parse" in str(excinfo.value)
+    assert journal_bytes(lineage) == before
+    assert bindings_path().read_bytes() == binding_bytes
+
+
+def test_the_alias_sweep_refuses_an_unreadable_bindings_file_on_its_own(tmp_path):
+    """``aliased_lineage``'s own arm, reached directly.
+
+    Through the open path ``bound_lineage`` reads the same file first and
+    refuses there, so this arm is defence in depth rather than the front line —
+    but ``aliased_lineage`` is a public function and must not answer "no alias"
+    to a file it could not read, whoever calls it.
+    """
+    _needs_unprivileged()
+    _log_path, alias, _lineage = _reached_by_an_alias(tmp_path)
+    bindings_path().chmod(0o000)
+    try:
+        with pytest.raises(BindingProbeUnanswered):
+            aliased_lineage(canonical_location(str(alias)))
+    finally:
+        bindings_path().chmod(0o600)
+
+
+def test_every_probe_refusal_is_one_family(tmp_path):
+    """The pattern is nameable, which is the point of giving it a parent.
+
+    A caller that wants "could not determine" as one condition catches
+    ``ProbeUnanswered``; the two sites stay distinguishable underneath. The
+    binding subclass dies with the binding unit at slice 5 and the parent does
+    not — the sweep removes a leaf, not the concept.
+    """
+    assert issubclass(FenceProbeUnanswered, ProbeUnanswered)
+    assert issubclass(BindingProbeUnanswered, ProbeUnanswered)
+    assert issubclass(ProbeUnanswered, AttestationRefusal)

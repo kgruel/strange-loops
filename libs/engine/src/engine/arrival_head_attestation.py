@@ -58,6 +58,7 @@ __all__ = [
     "ABSENT_STORE_REFUSALS",
     "AbsentStoreOutcome",
     "AttestationRefusal",
+    "BindingProbeUnanswered",
     "EstablishedHead",
     "HeadAttestation",
     "HeadFork",
@@ -73,6 +74,7 @@ __all__ = [
     "Level",
     "LineageReplaced",
     "Outcome",
+    "ProbeUnanswered",
     "REFUSALS",
     "StoreLost",
     "UnsafeLineageName",
@@ -218,6 +220,39 @@ class IndeterminateComparison(AttestationRefusal):
     longer answer — while "rollback" is one it still can, for anything below
     the bound. Raised by :meth:`JournalRead.established_head` so the cheap
     unchanged shortcut cannot be taken by a caller who simply forgot to look.
+    """
+
+
+class ProbeUnanswered(AttestationRefusal):
+    """A check a caller depends on could not be performed.
+
+    The general form, named because the defect it guards against is a SHAPE
+    rather than a site: a probe whose own failure gets read as the absence of
+    what it was probing for. Evidence absent is not absence of evidence, and a
+    probe that conflates the two answers its whole question wrongly, in the
+    acceptance direction (``finding:s3-fence-probe-fails-open``,
+    ``finding:s3wp3-binding-probes-fail-acceptance-side``).
+
+    Every subclass means the same thing — *I could not determine this*, which
+    is not a finding about the store — and asks for the same remedy, which is
+    to try again. That is what separates them from refusals reporting something
+    the evidence positively established.
+
+    An ABSENT input is never one of these. "There is no bindings file" and "the
+    log does not exist yet" are answers, and correct ones; only an input that
+    exists and cannot be read leaves the question open.
+
+    It lives here rather than in the seam because the binding unit does, and
+    because a subclass of it has to be raisable from this module.
+    """
+
+
+class BindingProbeUnanswered(ProbeUnanswered):
+    """The location binding could not be read, so replacement cannot be ruled out.
+
+    DELETE IN SLICE 5 with the binding unit it serves. :class:`ProbeUnanswered`
+    survives — it names a shape that outlives any one probe — so the sweep
+    removes a leaf, not the concept.
     """
 
 
@@ -1499,7 +1534,18 @@ def bound_lineage(location: str) -> str | None:
     try:
         text = bindings_path().read_text(encoding="utf-8")
     except FileNotFoundError:
+        # ABSENT is an answer: nothing has ever been bound.
         return None
+    except OSError as exc:
+        # Was a RAW OSError escaping past every `except AttestationRefusal`,
+        # which is the builtin-escape gap `JournalUnreadable` exists to close
+        # one file over. Refusing is the right direction; being typed is what
+        # lets a caller catch it with the rest.
+        raise BindingProbeUnanswered(
+            f"the bindings file at {bindings_path()} exists and cannot be "
+            f"read ({exc}), so this location's recorded lineage is unknown. "
+            "Nothing has been accepted or written — retry the open"
+        ) from exc
     found: str | None = None
     for line in text.splitlines():
         stripped = line.strip()
@@ -1507,8 +1553,13 @@ def bound_lineage(location: str) -> str | None:
             continue
         try:
             decoded = json.loads(stripped)
-        except ValueError:
-            continue
+        except ValueError as exc:
+            raise BindingProbeUnanswered(
+                f"a line of {bindings_path()} does not parse ({exc}), and a "
+                "line that cannot be read may be the binding that names this "
+                "location. Nothing has been accepted or written — repair or "
+                "remove the line, then retry the open"
+            ) from exc
         if (
             isinstance(decoded, dict)
             and decoded.get("location") == location

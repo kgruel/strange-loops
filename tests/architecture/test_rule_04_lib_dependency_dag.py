@@ -29,11 +29,7 @@ _LIB_ALLOWED_RUNTIME: dict[str, set[str]] = {
         "sign",    # Ed25519 primitives
         "engine",  # load_declaration — store-canonical observer-key registry
     },
-    "migrate": {
-        "engine",
-        "store",
-        "lang",
-    },
+    "migrate": set(),  # WP2/WP3 grow it as real imports land; shrink-only discipline
     "sdk": {
         "atoms",
         "custody",

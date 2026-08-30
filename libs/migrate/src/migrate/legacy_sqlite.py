@@ -6,8 +6,7 @@ Historical artifact copied from ``store.rebirth`` at commit
 This module provides the READ-ONLY SQLite spine for migration:
 - Open legacy SQLite databases strictly read-only (URI mode ``file:...?mode=ro``);
 - Compute witness-order content hash (verifiable claim);
-- Read historical fact rows and tick columns in witness (rowid) order;
-- Read chain head hash via ``engine.tick_row_hash``.
+- Read historical fact rows and tick columns in witness (rowid) order.
 """
 
 from __future__ import annotations
@@ -26,7 +25,6 @@ __all__ = [
     "_tick_columns",
     "_facts_have_signature",
     "_content_sha256",
-    "_chain_head",
 ]
 
 _TICK_BASE_COLS = ("id", "name", "ts", "since", "origin", "payload")
@@ -61,12 +59,12 @@ def _facts_have_signature(conn: sqlite3.Connection) -> bool:
 
 
 def _content_sha256(conn: sqlite3.Connection) -> str:
-    """Witness-order content hash: every fact row, then every tick row.
+    """Witness-order content hash: every fact row in rowid order, then every tick row.
 
-    This is the VERIFIABLE identity of a store's contents. The file
-    hash is not — WAL checkpoints, VACUUM, and page layout change bytes
-    without changing content, so a later re-hash of an untouched store
-    could false-alarm. Two claims, two fields (see receipt payload).
+    This is the SAME-FORMAT row-content identity of a SQLite store's contents.
+    It hashes all facts in rowid order, then all ticks in rowid order. It is
+    stable across re-reads and invariant to physical file rewrites (VACUUM),
+    but is NOT comparable across formats (JSONL hashes in line order).
     """
     h = hashlib.sha256()
     sig_col = _facts_have_signature(conn)
@@ -87,31 +85,6 @@ def _content_sha256(conn: sqlite3.Connection) -> str:
     ):
         h.update(json.dumps(list(row), separators=(",", ":")).encode())
     return h.hexdigest()
-
-
-def _chain_head(conn: sqlite3.Connection) -> str | None:
-    """Row-identity hash of the source's newest tick (None if no ticks).
-
-    Uses engine.tick_row_hash — the same function verify_chain walks
-    with — over the row padded to full chain width (missing era columns
-    hash as NULL, exactly as engine sees them).
-    """
-    from engine import tick_row_hash
-
-    cols = _tick_columns(conn)
-    order_sql = (
-        "ORDER BY arrival_ordinal DESC, arrival_seq DESC"
-        if "arrival_ordinal" in cols
-        else "ORDER BY rowid DESC"
-    )
-    row = conn.execute(
-        f"SELECT {', '.join(cols)} FROM ticks {order_sql} LIMIT 1"
-    ).fetchone()
-    if row is None:
-        return None
-    d = dict(zip(cols, row, strict=True))
-    padded = tuple(d.get(c) for c in (*_TICK_BASE_COLS, *_TICK_CHAIN_COLS))
-    return tick_row_hash(padded)
 
 
 def read_facts(conn: sqlite3.Connection) -> list[FactRow]:

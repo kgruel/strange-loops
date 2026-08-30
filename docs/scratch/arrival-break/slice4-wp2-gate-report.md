@@ -665,3 +665,98 @@ inventory parity — is preserved bit-for-bit.
 What blocks is the new edge the fix opened: making the sqlite arm share the JSONL grammar also
 made it share a presence check that the era-aware reader cannot satisfy. The correction is
 contained, one line plus a fixture, and does not disturb anything verified above.
+
+---
+
+# Round 4 — fix round 3 re-check (`58d3bf51`)
+
+**Verdict: PASS.** R3-B1 is fixed exactly as prescribed, with no collateral. **WP2's gate is
+closed.**
+
+Merged `58d3bf51` at `efca6db7`. Scope: one commit, four files, **zero** outside
+`libs/migrate/**`.
+
+## The fix
+
+The entire production change is four lines, all inside the tick arm:
+
+```diff
+-  obj = {k: v for k, v in t_dict.items() if k != "signature" or v is not None}
++  obj = {f: t_dict.get(f) for f in TICK_FIELDS}
++  if t_dict.get("signature") is not None:
++      obj["signature"] = t_dict["signature"]
+```
+
+An absent column now becomes a null field, which `TICK_NULLABLE` already licenses, instead of a
+missing one. The facts arm is byte-identical — the diff touches nothing else.
+
+## Re-checks
+
+**(1) The era-1 store, re-run.** The same store that migrated at `9c1a9372`, was refused at
+`5a531574`, and drove the R3-B1 finding:
+
+```
+inventory: OK — total_rows=2 tick_count=1
+transform: OK — 3 drafts, tick body = {'id': '01ARZ3NDEKTSV4RRFFQ69G5FT1', 'name': 'heartbeat',
+           'ts': 1006.0, 'since': 1000.0, 'origin': 'system', 'payload': '{}',
+           'prev_hash': None, 'window_start': None, 'fact_cursor': None, 'window_hash': None}
+```
+
+Byte-identical to the `9c1a9372` output — chain fields present and explicitly null, exactly what
+the grammar intends. Both surfaces agree.
+
+**(2) Break/restore, hand-verified.** Reverted the tick object to the era-blind comprehension:
+
+```
+E  migrate.refusals.LegacySourceRefused: line 1: missing field(s) in tick row:
+   ['since', 'prev_hash', 'window_start', 'fact_cursor', 'window_hash']
+FAILED test_inventory.py::test_era1_sqlite_ticks_inventory
+FAILED test_transform.py::test_era1_sqlite_ticks_transform_and_surface_agreement
+```
+
+Red on both surfaces, green on restore (`2 passed`), production diff empty. The
+`build_era1_sqlite` fixture is stricter than the store I probed with — it drops `since` as well
+as the four chain columns, covering a deeper era than the finding named.
+
+**(3) Facts arm untouched.** Confirmed by diff: the only changed lines in
+`legacy_source.py` are the three tick-object lines above.
+
+**(4) Suites and scope.** `libs/migrate tests/architecture` 143 passed (was 141),
+`tests/architecture` + quarantine 100 passed, `libs/engine` 2304 passed / 1 skipped,
+`libs/store` 180 passed. Rule-4 row untouched and still true; quarantine green; `ruff` unchanged
+but for the pre-existing `I001`. Working tree clean.
+
+**(5) No regression.** My full round-3 probe now returns **6 of 6 PASS**, including case 1c that
+previously failed. The central oracle is unchanged — 11 records, introductions at `[1, 2]`,
+migrated `3..10`, no outer signatures, resolutions `[(0,'kyle',0), (1,'kyle',0), (2,'kyle',0)]`,
+legacy tick signature `sig-tick-2` preserved. Determinism digest
+`ed75651d0f81ee30091b362ea4ca08097271dcc647dcabf3615110517fa3ba3e` and inventory content hash
+`74cf0fe33a72778679a14b98c1d500a18a0707d5c58cd69d9d3accda31314e69` are both **identical across
+rounds 2, 3 and 4**.
+
+---
+
+## Gate closed — WP2 summary across four rounds
+
+| round | commit | verdict | findings |
+|---|---|---|---|
+| 1 | `5f5149d9` | BLOCK | signer default, sqlite seam leak, silent regroup (+3 non-blocking) |
+| 2 | `9c1a9372` | BLOCK | sqlite arm grammar diverged, compat shims regressed |
+| 3 | `5a531574` | BLOCK | era-1 tick stores unmigratable |
+| 4 | `58d3bf51` | **PASS** | — |
+
+Everything the gate ever asserted about WP2 now holds simultaneously and is verified on the same
+HEAD: the transformer's drafts build a real arrival log that engine's own structural walk and
+authority walk accept, with introductions signed by the custodian at ordinals 1..k, migrated
+records outer-unsigned carrying author-echo envelopes, ticks carrying the custody-producer label
+and their legacy signatures byte-for-byte, and inner fact signatures never re-serialized. The
+group grammar never regroups — partial-batch drops refuse and whole-unit drops are reported with
+source coordinate and rule name. The legacy grammar exists in one place and governs both the
+JSONL and SQLite arms, which agree on every input I could make them disagree on. No raw
+`ArrivalBodyError` or `KeyError` escapes either public surface. Output is byte-deterministic
+across hash seeds, WP1's inventory semantics are preserved bit-for-bit, and the era-aware reader
+still reads every era it was written for.
+
+Three of the four rounds' blockers were defects the fix rounds introduced rather than defects in
+the original work — worth recording, because it is the case for gating fix commits as strictly
+as the first submission rather than spot-checking the diff.

@@ -275,3 +275,15 @@ Two notes carried forward rather than encoded:
   open with wire v2 as its forcing consumer. The area has the fixtures to pin it the
   day it lands: `comparison-header-a-later-builds-header-is-still-a-header` already
   carries a v2-shaped header whose versions are ignored today.
+
+## 8. Receipts
+
+Completion fact: `observation:implementation/arrival-slice3-wp2-comparison-vectors` @
+`01M180VC8K6N0HJC2GJVN3ZJVC`.
+
+**Store housekeeping, so a reader grepping the store is not puzzled.** The first emit
+of that observation passed the topic as a positional slug rather than `topic=`, and
+`observation` folds by `topic` — so `01M180TKTHEG60TG43D5A4QJVM` is stored with **no
+fold key** and carries an earlier, shorter draft of the same message. The store is
+append-only so it stays as written; `01M180VC8K6N0HJC2GJVN3ZJVC` is the one that folds
+and the one to read. No finding: an emission-form slip, not a work product.

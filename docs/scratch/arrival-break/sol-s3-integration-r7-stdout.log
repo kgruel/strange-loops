@@ -1,0 +1,711 @@
+Reading prompt from stdin...
+OpenAI Codex v0.150.1
+--------
+workdir: /Users/kaygee/Code/loops-s3wp1
+model: gpt-5.6-sol
+provider: openai
+approval: never
+sandbox: workspace-write [workdir, /tmp, $TMPDIR]
+reasoning effort: low
+reasoning summaries: none
+session id: 01a053e5-d930-7e02-9fcd-6c138e6ff347
+--------
+user
+# Sol review brief — arrival-break slice 3, integration round 7 (per-WP, LOW — minimal verify)
+
+Round 7, verifying the one-row fix for your r6 finding S3I-L-10 (success row
+omitted from the answer-surface enumeration).
+
+## Anchor
+
+- Worktree: this directory (`~/Code/loops-s3wp1`), branch `slice3/arrival-witness`,
+  NEW tip `f5a61299`. Diff since your r6: `git diff 215e1c2e...f5a61299`.
+- Claimed: prose only, AST unchanged, no message/literal edits; engine 2304+1s+0f,
+  arch 99, ruff clean.
+
+## Verify
+
+1. The success row now leads the enumeration: the lineage as a `str` when a
+   well-formed binding names this exact location, NEWEST match winning. The
+   impl verified no `break` in the loop and `found` reassigned per match, and
+   empirically: three recorded bindings across two locations return the newest
+   of the matching pair. Check the row against the body; check the enumeration
+   is now COMPLETE (your r6 standard — anything else the body can answer?).
+2. The diff's reach: prose only, AST byte-unchanged.
+3. Counts: engine 2304+1s+0f, arch 99 separate, ruff clean, worktree clean.
+
+## Verdict format
+
+PASS/FAIL + evidence per item. New findings: `S3I-L-<n>` continuing. Then one
+line: **CONVERGED** or **NOT CONVERGED**.
+
+codex
+I’ll inspect the targeted diff and implementation body, then run the minimal structural and test/count checks requested.
+exec
+/bin/zsh -lc 'git status --short --branch && git diff --stat 215e1c2e...f5a61299 && git diff --word-diff=plain 215e1c2e...f5a61299 && git diff --name-only 215e1c2e...f5a61299' in /Users/kaygee/Code/loops-s3wp1
+ succeeded in 0ms:
+## slice3/arrival-witness
+ docs/scratch/arrival-break/slice3-wp3-report.md    | 10 ++++++++++
+ libs/engine/src/engine/arrival_head_attestation.py | 12 +++++++++---
+ 2 files changed, 19 insertions(+), 3 deletions(-)
+diff --git a/docs/scratch/arrival-break/slice3-wp3-report.md b/docs/scratch/arrival-break/slice3-wp3-report.md
+index 960eb97e..7d23dd4a 100644
+--- a/docs/scratch/arrival-break/slice3-wp3-report.md
++++ b/docs/scratch/arrival-break/slice3-wp3-report.md
+@@ -213,10 +213,20 @@ the body rather than transcribing the routing's list:
+
+| Answer | When |
+|---|---|
+{+| **the lineage, as a `str`** | a well-formed binding names this exact location; newest match wins |+}
+| `None` | absent file, empty file, blank lines, and well-formed bindings naming OTHER locations |
+| `BindingsUnreadable` | bytes arrived, uninterpretable — not UTF-8, not JSON, or JSON with no location and lineage |
+| `BindingProbeUnanswered` | storage would not yield the bytes at all |
+
+{+**S3I-L-10 added the first row**, and it is the one the function exists for. My+}
+{+enumeration verified six failure conditions and omitted the seventh case — the+}
+{+one that returns. The lesson is small and worth keeping: I checked every row I+}
+{+was *given* and did not ask what was missing from the list, so a "surface in+}
+{+full" described only the ways it can fail. Verified against the body and+}
+{+empirically before writing it — no `break` in the loop, `found` reassigned on+}
+{+each match, and three recorded bindings across two locations return the newest+}
+{+of the matching pair as a `str`.+}
+
+And it says why there is no transience claim: that axis is not decidable from an
+exception class.
+
+diff --git a/libs/engine/src/engine/arrival_head_attestation.py b/libs/engine/src/engine/arrival_head_attestation.py
+index 59be6a26..16e3f8ef 100644
+--- a/libs/engine/src/engine/arrival_head_attestation.py
++++ b/libs/engine/src/engine/arrival_head_attestation.py
+@@ -1585,9 +1585,15 @@ def bound_lineage(location: str) -> str | None:
+
+    DELETE IN SLICE 5.
+
+    **The answer surface, in full.** [-Three outcomes,-]{+Four outcomes. The first is the one this+}
+{+    function exists for; the other three+} split by where a failure happened
+    rather than by what anyone should do about it:
+
+    {+* **The lineage, as a string** — a well-formed binding names this exact+}
+{+      location. The scan does not stop at the first match: it runs to the end+}
+{+      and keeps the last one, so the NEWEST binding wins, which is what makes+}
+{+      a re-bound location report what it presents now rather than what it+}
+{+      presented first.+}
+    * **None** — the file is absent or empty, every line is blank, or the
+      bindings it holds are well-formed and name OTHER locations. Each of these
+      is an ANSWER: nothing is bound here, and first contact is the honest
+docs/scratch/arrival-break/slice3-wp3-report.md
+libs/engine/src/engine/arrival_head_attestation.py
+
+codex
+The reach is two files, and the engine change appears confined to the function docstring; I’m now checking the actual control flow and comparing parsed ASTs at both revisions before running the named suites.
+exec
+/bin/zsh -lc "sed -n '1570,1665p' libs/engine/src/engine/arrival_head_attestation.py && rg -n \"engine 2304|arch 99|architecture|ruff\" pyproject.toml Makefile docs/scratch/arrival-break/slice3-wp3-report.md .github 2>/dev/null | head -120 && rg -n \"bound_lineage\" libs/engine tests libs | head -80" in /Users/kaygee/Code/loops-s3wp1
+ succeeded in 0ms:
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+        + "\n"
+    )
+    payload = _torn_tail_guard(path) + line
+    handle = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+    try:
+        _write_all(handle, payload.encode("utf-8"))
+    finally:
+        os.close(handle)
+
+
+def bound_lineage(location: str) -> str | None:
+    """The lineage this location most recently presented, if any.
+
+    DELETE IN SLICE 5.
+
+    **The answer surface, in full.** Four outcomes. The first is the one this
+    function exists for; the other three split by where a failure happened
+    rather than by what anyone should do about it:
+
+    * **The lineage, as a string** — a well-formed binding names this exact
+      location. The scan does not stop at the first match: it runs to the end
+      and keeps the last one, so the NEWEST binding wins, which is what makes
+      a re-bound location report what it presents now rather than what it
+      presented first.
+    * **None** — the file is absent or empty, every line is blank, or the
+      bindings it holds are well-formed and name OTHER locations. Each of these
+      is an ANSWER: nothing is bound here, and first contact is the honest
+      state. A binding for a different store genuinely says nothing about this
+      one, and refusing on it would make every bindings file holding more than
+      one store unopenable.
+    * :class:`BindingsUnreadable` — the bytes arrived and could not be
+      interpreted as bindings: not UTF-8, not JSON, or JSON carrying no
+      location and lineage. None of those says anything about what this
+      location presented, so answering None on them reports an absence the
+      evidence does not support
+      (``finding:s3wp3-binding-probes-fail-acceptance-side``,
+      ``finding:s3-binding-shape-filter-silently-drops``).
+    * :class:`BindingProbeUnanswered` — storage would not yield the bytes at
+      all.
+
+    **No claim here about transience or remedy.** This docstring used to sort
+    the refusals into "asks for repair" and "asks for a retry", and that axis
+    is not decidable from an exception class — ``IsADirectoryError`` arrives
+    through the same door as a passing I/O fault
+    (``finding:s3-refusal-family-remedy-promise-undecidable``). Remedy is
+    advisory prose carried per cause in the message; the types assert only
+    where the failure happened.
+    """
+    try:
+        text = bindings_path().read_text(encoding="utf-8")
+    except FileNotFoundError:
+        # ABSENT is an answer: nothing has ever been bound.
+        return None
+    except UnicodeDecodeError as exc:
+        # CONTENT: the bytes arrived and could not be interpreted.
+        raise BindingsUnreadable(
+            f"the bindings file at {bindings_path()} is not valid UTF-8 "
+            f"({exc}), so no location's recorded lineage can be read. Nothing "
+            "has been accepted or written — repair or remove the file"
+        ) from exc
+    except OSError as exc:
+        # STORAGE: the bytes never arrived. Was a RAW OSError escaping past
+        # every `except AttestationRefusal`, which is the builtin-escape gap
+        # `JournalUnreadable` exists to close one file over. Refusing is the
+        # right direction; being typed is what lets a caller catch it with the
+        # rest, and `storage_advice` carries the remedy the type does not
+        # claim.
+        raise BindingProbeUnanswered(
+            f"the bindings file at {bindings_path()} exists and storage "
+            f"would not yield it ({exc}), so this location's recorded lineage "
+            f"is unknown. Nothing has been accepted or written — "
+            f"{storage_advice(exc)}"
+        ) from exc
+    found: str | None = None
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        try:
+            decoded = json.loads(stripped)
+        except ValueError as exc:
+            raise BindingsUnreadable(
+                f"a line of {bindings_path()} does not parse ({exc}), and a "
+                "line that cannot be read may be the binding that names this "
+                "location. Nothing has been accepted or written — repair or "
+                "remove the line"
+            ) from exc
+        if not (
+            isinstance(decoded, dict)
+            and isinstance(decoded.get("location"), str)
+            and isinstance(decoded.get("lineage"), str)
+        ):
+            # READ, and not interpretable as a binding — a CONTENT failure,
+pyproject.toml:63:# The root runs the tests that belong to no single package — the architecture
+pyproject.toml:73:    "ruff>=0.8",
+docs/scratch/arrival-break/slice3-wp3-report.md:61:| `tests/architecture/test_rule_18_arrival_vocabulary_denylist.py` | `_SCAN_TARGETS` enrollment (same commit, or the glob test fails) |
+docs/scratch/arrival-break/slice3-wp3-report.md:70:engine pytest libs/engine/tests`, and `tests/architecture` in its own run).
+docs/scratch/arrival-break/slice3-wp3-report.md:75:| architecture | 99 passed | 99 passed | **0** — Rule 18 is not parametrized per target |
+docs/scratch/arrival-break/slice3-wp3-report.md:83:The renamed §0.4 test is 1-for-1. `ruff check` passes on every file this WP wrote
+.github/workflows/ci.yml:10:  check-architecture:
+.github/workflows/ci.yml:65:        run: uv run ruff check libs/custody libs/sign
+libs/engine/src/engine/arrival_head_attestation.py:84:    "bound_lineage",
+libs/engine/src/engine/arrival_head_attestation.py:1583:def bound_lineage(location: str) -> str | None:
+libs/engine/src/engine/arrival_head_seam.py:84:    bound_lineage,
+libs/engine/src/engine/arrival_head_seam.py:496:    :func:`~engine.arrival_head_attestation.bound_lineage` applies to an exact
+libs/engine/src/engine/arrival_head_seam.py:1029:        remembered_lineage = bound_lineage(self._canonical)
+libs/engine/src/engine/arrival_head_seam.py:1164:        remembered_lineage = bound_lineage(self._canonical)
+libs/engine/tests/test_arrival_head_seam.py:57:    bound_lineage,
+libs/engine/tests/test_arrival_head_seam.py:791:    assert bound_lineage(canonical_location(str(detour))) == first
+libs/engine/tests/test_arrival_head_seam.py:899:    assert bound_lineage(canonical_location(str(log_path))) == head.lineage
+libs/engine/tests/test_arrival_head_seam.py:2457:    Through the open path ``bound_lineage`` reads the same file first and
+libs/engine/tests/test_arrival_head_seam.py:2475:    Its own per-site pin, because through the open path ``bound_lineage``
+libs/engine/tests/test_arrival_head_seam.py:2488:def test_bound_lineage_refuses_an_unreadable_bindings_file_on_its_own(tmp_path):
+libs/engine/tests/test_arrival_head_seam.py:2500:            bound_lineage("/a/project.arrival")
+libs/engine/tests/test_arrival_head_seam.py:2529:    ``bound_lineage`` reads the file first through an open, so this arm needs a
+libs/engine/tests/test_arrival_head_seam.py:2656:    assert bound_lineage("/not/bound/at/all.arrival") is None
+libs/engine/src/engine/arrival_head_seam.py:84:    bound_lineage,
+libs/engine/src/engine/arrival_head_seam.py:496:    :func:`~engine.arrival_head_attestation.bound_lineage` applies to an exact
+libs/engine/src/engine/arrival_head_seam.py:1029:        remembered_lineage = bound_lineage(self._canonical)
+libs/engine/src/engine/arrival_head_seam.py:1164:        remembered_lineage = bound_lineage(self._canonical)
+libs/engine/src/engine/arrival_head_attestation.py:84:    "bound_lineage",
+libs/engine/src/engine/arrival_head_attestation.py:1583:def bound_lineage(location: str) -> str | None:
+libs/engine/tests/test_arrival_head_seam.py:57:    bound_lineage,
+libs/engine/tests/test_arrival_head_seam.py:791:    assert bound_lineage(canonical_location(str(detour))) == first
+libs/engine/tests/test_arrival_head_seam.py:899:    assert bound_lineage(canonical_location(str(log_path))) == head.lineage
+libs/engine/tests/test_arrival_head_seam.py:2457:    Through the open path ``bound_lineage`` reads the same file first and
+libs/engine/tests/test_arrival_head_seam.py:2475:    Its own per-site pin, because through the open path ``bound_lineage``
+libs/engine/tests/test_arrival_head_seam.py:2488:def test_bound_lineage_refuses_an_unreadable_bindings_file_on_its_own(tmp_path):
+libs/engine/tests/test_arrival_head_seam.py:2500:            bound_lineage("/a/project.arrival")
+libs/engine/tests/test_arrival_head_seam.py:2529:    ``bound_lineage`` reads the file first through an open, so this arm needs a
+libs/engine/tests/test_arrival_head_seam.py:2656:    assert bound_lineage("/not/bound/at/all.arrival") is None
+libs/engine/tests/test_arrival_head_attestation.py:45:    bound_lineage,
+libs/engine/tests/test_arrival_head_attestation.py:1235:    assert bound_lineage("/a/project.arrival") == LINEAGE
+libs/engine/tests/test_arrival_head_attestation.py:1236:    assert bound_lineage("/b/project.arrival") is None
+libs/engine/tests/test_arrival_head_attestation.py:1243:    assert bound_lineage("/a/project.arrival") == OTHER_LINEAGE
+libs/engine/tests/test_arrival_head_attestation.py:1250:    expected = bound_lineage("/a/project.arrival")
+libs/engine/tests/test_arrival_head_attestation.py:1279:        bound_lineage("/a/project.arrival")
+libs/engine/tests/test_arrival_head_attestation.py:1292:        bound_lineage("/a/project.arrival")
+libs/engine/tests/test_arrival_head_attestation.py:1297:def test_an_unusable_shape_refuses_in_bound_lineage_itself():
+libs/engine/tests/test_arrival_head_attestation.py:1310:        bound_lineage("/a/project.arrival")
+libs/engine/tests/test_arrival_head_attestation.py:1318:    assert bound_lineage("/a/project.arrival") == LINEAGE
+libs/engine/tests/test_arrival_head_attestation.py:1319:    assert bound_lineage("/nothing/here.arrival") is None
+libs/engine/tests/test_arrival_head_attestation.py:45:    bound_lineage,
+libs/engine/tests/test_arrival_head_attestation.py:1235:    assert bound_lineage("/a/project.arrival") == LINEAGE
+libs/engine/tests/test_arrival_head_attestation.py:1236:    assert bound_lineage("/b/project.arrival") is None
+libs/engine/tests/test_arrival_head_attestation.py:1243:    assert bound_lineage("/a/project.arrival") == OTHER_LINEAGE
+libs/engine/tests/test_arrival_head_attestation.py:1250:    expected = bound_lineage("/a/project.arrival")
+libs/engine/tests/test_arrival_head_attestation.py:1279:        bound_lineage("/a/project.arrival")
+libs/engine/tests/test_arrival_head_attestation.py:1292:        bound_lineage("/a/project.arrival")
+libs/engine/tests/test_arrival_head_attestation.py:1297:def test_an_unusable_shape_refuses_in_bound_lineage_itself():
+libs/engine/tests/test_arrival_head_attestation.py:1310:        bound_lineage("/a/project.arrival")
+libs/engine/tests/test_arrival_head_attestation.py:1318:    assert bound_lineage("/a/project.arrival") == LINEAGE
+libs/engine/tests/test_arrival_head_attestation.py:1319:    assert bound_lineage("/nothing/here.arrival") is None
+
+exec
+/bin/zsh -lc "sed -n '1665,1715p' libs/engine/src/engine/arrival_head_attestation.py; sed -n '1210,1260p' libs/engine/tests/test_arrival_head_attestation.py; sed -n '55,85p' pyproject.toml; git rev-parse HEAD; git status --porcelain=v1" in /Users/kaygee/Code/loops-s3wp1
+ succeeded in 0ms:
+            # READ, and not interpretable as a binding — a CONTENT failure,
+            # exactly like a line that is not JSON. Filtering it to None used
+            # to answer "nothing is bound here" on a line that says nothing of
+            # the kind (``finding:s3-binding-shape-filter-silently-drops``).
+            raise BindingsUnreadable(
+                f"a line of {bindings_path()} is valid JSON but carries no "
+                "location and lineage, so it cannot be read as a binding and "
+                "cannot be ruled out as this location's. Nothing has been "
+                "accepted or written — repair or remove the line"
+            )
+        # A well-formed binding for a DIFFERENT store is the one legitimate
+        # skip left: it genuinely says nothing about this location. Newest
+        # wins, so the loop runs to the end rather than stopping at a match.
+        if decoded["location"] == location:
+            found = decoded["lineage"]
+    return found
+    The witness proves what was lost, not its contents — and it must never
+    permit a silent re-mint under a remembered lineage.
+    """
+    append_entry(observation(4217))
+    known = read_journal(LINEAGE).established_head()
+    assert compare_absent_store(known) is AbsentStoreOutcome.STORE_LOST
+    assert refusal_for(AbsentStoreOutcome.STORE_LOST) is StoreLost
+
+
+def test_the_store_absent_split_is_not_folded_into_the_seven_rows():
+    """``compare`` has exactly seven rows and WP2's vectors pin those."""
+    assert not set(AbsentStoreOutcome) & set(Outcome)
+    assert {outcome.value for outcome in AbsentStoreOutcome} == {
+        "pre-genesis",
+        "store-lost",
+    }
+
+
+# ---------------------------------------------------------------------------
+# The transitional binding (§A.6) — DELETE IN SLICE 5 with the module's section
+# ---------------------------------------------------------------------------
+
+
+def test_a_binding_remembers_which_lineage_a_location_presented():
+    record_binding("/a/project.arrival", LINEAGE, 1.0)
+    assert bound_lineage("/a/project.arrival") == LINEAGE
+    assert bound_lineage("/b/project.arrival") is None
+
+
+def test_the_newest_binding_for_a_location_wins():
+    """Wholesale replacement: a new lineage at a location that had another."""
+    record_binding("/a/project.arrival", LINEAGE, 1.0)
+    record_binding("/a/project.arrival", OTHER_LINEAGE, 2.0)
+    assert bound_lineage("/a/project.arrival") == OTHER_LINEAGE
+
+
+def test_the_binding_closes_the_wholesale_replacement_hole():
+    """Lineage-keying alone would classify this first contact and accept it."""
+    record_binding("/a/project.arrival", LINEAGE, 1.0)
+    append_entry(observation(9))
+    expected = bound_lineage("/a/project.arrival")
+    assert expected is not None
+    known = read_journal(expected).established_head()
+    presented = head(0, "z", lineage=OTHER_LINEAGE)
+    assert compare(known, presented, None) is Outcome.LINEAGE_REPLACED
+
+
+def test_the_bindings_file_lives_beside_the_journals():
+    record_binding("/a/project.arrival", LINEAGE, 1.0)
+    assert bindings_path() == heads_dir() / "bindings.jsonl"
+    assert bindings_path().exists()
+    "libs/engine/src/engine",
+    "libs/lang/src/lang",
+    "libs/sdk/src/sdk",
+    "libs/sign/src/sign",
+    "libs/store/src/store",
+    "apps/loops/src/loops",
+]
+
+# The root runs the tests that belong to no single package — the architecture
+# ratchets and tests/chaos — so it needs the same dev tooling every member
+# already declares. Without this, `uv run pytest` at the root resolves only the
+# flat wheel's runtime deps and dies with "Failed to spawn: pytest" on any
+# machine whose .venv was not already dirty from an earlier run. uv.lock is
+# gitignored, so CI resolves fresh every time and hit exactly that.
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=6.0",
+    "ruff>=0.8",
+]
+
+[tool.uv.workspace]
+members = [
+    "libs/atoms",
+    "libs/custody",
+    "libs/engine",
+    "libs/lang",
+    "libs/sdk",
+    "libs/sign",
+    "libs/store",
+    "apps/loops",
+f5a61299e36140bad70d159858d31ab69eb0f4ee
+
+exec
+/bin/zsh -lc 'rg -n "AST|byte-unchanged|ast" docs/scratch/arrival-break/slice3-wp3-report.md | head -40; git diff --numstat 215e1c2e...f5a61299; git diff --check 215e1c2e...f5a61299' in /Users/kaygee/Code/loops-s3wp1
+ succeeded in 0ms:
+81:the second refusal behind the same write, and the AST ratchet — and seven are sol
+142:   is `test_only_the_constructor_and_the_producers_write_to_the_journal`, an AST
+174:    mean "nothing changed" must not catch this. Propagating past those handlers is
+190:    epoch", which is different from "the last one was long ago" — hence no age of
+246:AST was untouched.
+257:## S3I-L-6 / L-7 — the family contract re-scoped, and the last silent door
+261:Last round I split the refusal family by **remedy** — repair versus retry — and
+319:masking that hid two arms last round. The direct-call pin was added and the
+328:`OSError`, walking past every `except AttestationRefusal`. `read_journal` one
+337:JSON, which I had filed under that parent last round. **That made the parent's
+409:**raw `OSError`** escape past every `except AttestationRefusal`. Refusing was
+521:| `aliased_lineage`, `except OSError` | "no alias" — a bindings file that exists but cannot be read (permission wall, I/O error) means a replacement slips past `LineageReplaced` as first contact |
+559:   store's last act. Pinned from the other side by
+614:that decree is what it decreed past. Appends are tail-only, so a line's position
+624:2. **`at_least` is epoch-scoped** — verified, and it already was (below).
+653:### Edge 2 — `at_least` was already epoch-scoped
+658:with damage — `at_least` reads **92**, not 100. No fix was needed;
+839:gate's. That is a clean scope split, and I had talked myself past it.
+884:still called `read_journal`; `last_entry` existed and **only test fixtures used
+907:and a replacement with a fresh lineage walks past `LineageReplaced`.
+927:  earlier — no new write site and no change to the `_write` path. The AST
+947:an old reset can simply be appended again. Under last-reset-wins it re-opens the
+988:exactly when it is needed. The scan is now factored so `last_entry` reaches the
+1026:module AST and fails any call to `append_entry`, `record_binding`, `bootstrap`,
+1040:| `mint` | `bootstrap`/`mint` | nothing — the bootstrap is the last statement | safe |
+1061:The gate's last non-blocking item, and the disposition is the house rule: **scope
+1065:DIRECT-NAME calls — `ast.Call` whose `func` is an `ast.Name`. Five spellings
+1084:call to it parse as `ast.Call(func=ast.Name)`. If one stops being bound that way,
+1241:| (h) | the pre-fix inline ADVANCE write restored in `_judge` | **3 failed, 47 passed** — `test_an_advance_is_not_journaled_when_the_projection_then_refuses`, `test_an_advance_is_not_journaled_when_the_projection_disowns_the_log`, and the AST ratchet `test_only_the_constructor_and_the_producers_write_to_the_journal` |
+1262:up equal to the store's final head depends on when that opener last ran relative
+1314:4. **`.at_least` is used for one refusal beyond ROLLBACK, and this is a declared
+1315:   extension of brief item 7.** The brief says "`.at_least` is ROLLBACK-ONLY"; the
+1326:   neither: `at_least` is a real entry that survived the read and passed
+10	0	docs/scratch/arrival-break/slice3-wp3-report.md
+9	3	libs/engine/src/engine/arrival_head_attestation.py
+
+exec
+/bin/zsh -lc 'tmpbase=$(mktemp -d); git show 215e1c2e:libs/engine/src/engine/arrival_head_attestation.py > "$tmpbase/old.py"; git show f5a61299:libs/engine/src/engine/arrival_head_attestation.py > "$tmpbase/new.py"; python - "$tmpbase/old.py" "$tmpbase/new.py" <<'"'PY'
+import ast, sys
+
+def normalized(path):
+    tree = ast.parse(open(path, encoding='utf-8').read())
+    for node in ast.walk(tree):
+        body = getattr(node, 'body', None)
+        if body and isinstance(body[0], ast.Expr) and isinstance(body[0].value, ast.Constant) and isinstance(body[0].value.value, str):
+            body.pop(0)
+    return ast.dump(tree, include_attributes=True)
+a, b = map(normalized, sys.argv[1:])
+print('AST_WITHOUT_DOCSTRINGS_BYTE_IDENTICAL=' + str(a.encode() == b.encode()))
+PY" in /Users/kaygee/Code/loops-s3wp1
+ exited 127 in 0ms:
+zsh:1: command not found: python
+
+exec
+/bin/zsh -lc 'uv run pytest tests/architecture' in /Users/kaygee/Code/loops-s3wp1
+exec
+/bin/zsh -lc 'uv run ruff check libs/engine/src/engine/arrival_head_attestation.py docs/scratch/arrival-break/slice3-wp3-report.md' in /Users/kaygee/Code/loops-s3wp1
+ succeeded in 0ms:
+All checks passed!
+
+codex
+The first parallel engine invocation hit a sandboxed shared `uv` cache, not a test failure; ruff is clean and architecture collected exactly 99. I’m rerunning engine with a workspace-safe cache and completing the AST comparison with the available Python binary.
+ succeeded in 6571ms:
+============================= test session starts ==============================
+platform darwin -- Python 3.13.11, pytest-9.1.1, pluggy-1.6.0
+rootdir: /Users/kaygee/Code/loops-s3wp1
+configfile: pyproject.toml
+plugins: cov-7.1.0, asyncio-1.4.0, hypothesis-6.165.10
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 99 items
+
+tests/architecture/test_rule_01_apps_no_store_reader.py .                [  1%]
+tests/architecture/test_rule_02_apps_no_raw_sqlite.py .                  [  2%]
+tests/architecture/test_rule_03_libs_dont_import_apps.py .............   [ 15%]
+tests/architecture/test_rule_04_lib_dependency_dag.py .                  [ 16%]
+tests/architecture/test_rule_05_lib_dataclasses_frozen.py .              [ 17%]
+tests/architecture/test_rule_06_atoms_stdlib_only.py .                   [ 18%]
+tests/architecture/test_rule_07_sqlite3_confined_to_engine_store.py .    [ 19%]
+tests/architecture/test_rule_08_domain_constants_in_custody_only.py .    [ 20%]
+tests/architecture/test_rule_09_resolve_local_vertex_ambiguity.py .      [ 21%]
+tests/architecture/test_rule_10_disclosure_renderers_no_store_io.py .    [ 22%]
+tests/architecture/test_rule_11_record_never_imports_surfacing.py ..     [ 24%]
+tests/architecture/test_rule_12_render_register_is_offered_width.py .... [ 28%]
+..................                                                       [ 46%]
+tests/architecture/test_rule_13_production_never_imports_non_production.py . [ 47%]
+............                                                             [ 59%]
+tests/architecture/test_rule_14_mutation_survivors_shrink_only.py .      [ 60%]
+tests/architecture/test_rule_15_apps_import_only_sdk_and_painted.py .    [ 61%]
+tests/architecture/test_rule_16_hot_path_libs_import_footprint.py .      [ 62%]
+tests/architecture/test_rule_17_fold_order_prose_is_receipt_order.py ..  [ 64%]
+tests/architecture/test_rule_18_arrival_vocabulary_denylist.py ......... [ 73%]
+..........................                                               [100%]
+
+============================== 99 passed in 6.38s ==============================
+
+exec
+/bin/zsh -lc 'tmpbase=$(mktemp -d); git show 215e1c2e:libs/engine/src/engine/arrival_head_attestation.py > "$tmpbase/old.py"; git show f5a61299:libs/engine/src/engine/arrival_head_attestation.py > "$tmpbase/new.py"; python3 - "$tmpbase/old.py" "$tmpbase/new.py" <<'"'PY'
+import ast, sys
+
+def normalized(path):
+    tree = ast.parse(open(path, encoding='utf-8').read())
+    for node in ast.walk(tree):
+        body = getattr(node, 'body', None)
+        if body and isinstance(body[0], ast.Expr) and isinstance(body[0].value, ast.Constant) and isinstance(body[0].value.value, str):
+            body.pop(0)
+    return ast.dump(tree, include_attributes=True)
+a, b = map(normalized, sys.argv[1:])
+print('AST_WITHOUT_DOCSTRINGS_BYTE_IDENTICAL=' + str(a.encode() == b.encode()))
+PY" in /Users/kaygee/Code/loops-s3wp1
+ exited 1 in 0ms:
+Traceback (most recent call last):
+  File "<stdin>", line 10, in <module>
+  File "<stdin>", line 7, in normalized
+TypeError: 'Attribute' object is not subscriptable
+
+exec
+/bin/zsh -lc 'UV_CACHE_DIR=/private/tmp/loops-s3wp1-uv-engine uv run --package engine pytest libs/engine/tests' in /Users/kaygee/Code/loops-s3wp1
+exec
+/bin/zsh -lc 'tmpbase=$(mktemp -d); git show 215e1c2e:libs/engine/src/engine/arrival_head_attestation.py > "$tmpbase/old.py"; git show f5a61299:libs/engine/src/engine/arrival_head_attestation.py > "$tmpbase/new.py"; python3 - "$tmpbase/old.py" "$tmpbase/new.py" <<'"'PY'
+import ast, sys
+
+def normalized(path):
+    tree = ast.parse(open(path, encoding='utf-8').read())
+    for node in ast.walk(tree):
+        body = getattr(node, 'body', None)
+        if isinstance(body, list) and body and isinstance(body[0], ast.Expr) and isinstance(body[0].value, ast.Constant) and isinstance(body[0].value.value, str):
+            body.pop(0)
+    return ast.dump(tree, include_attributes=False).encode()
+a, b = map(normalized, sys.argv[1:])
+print('EXECUTABLE_AST_BYTE_IDENTICAL=' + str(a == b))
+PY
+
+git diff --word-diff=porcelain 215e1c2e...f5a61299 -- libs/engine/src/engine/arrival_head_attestation.py | sed -n '1,100p'
+git status --porcelain=v1" in /Users/kaygee/Code/loops-s3wp1
+ succeeded in 0ms:
+EXECUTABLE_AST_BYTE_IDENTICAL=True
+diff --git a/libs/engine/src/engine/arrival_head_attestation.py b/libs/engine/src/engine/arrival_head_attestation.py
+index 59be6a26..16e3f8ef 100644
+--- a/libs/engine/src/engine/arrival_head_attestation.py
++++ b/libs/engine/src/engine/arrival_head_attestation.py
+@@ -1585,9 +1585,15 @@ def bound_lineage(location: str) -> str | None:
+ 
+~
+     DELETE IN SLICE 5.
+~
+ 
+~
+     **The answer surface, in full.** 
+-Three outcomes,
++Four outcomes. The first is the one this
+~
++    function exists for; the other three
+  split by where a failure happened
+~
+     rather than by what anyone should do about it:
+~
+~
+     
++* **The lineage, as a string** — a well-formed binding names this exact
+~
++      location. The scan does not stop at the first match: it runs to the end
+~
++      and keeps the last one, so the NEWEST binding wins, which is what makes
+~
++      a re-bound location report what it presents now rather than what it
+~
++      presented first.
+~
+     * **None** — the file is absent or empty, every line is blank, or the
+~
+       bindings it holds are well-formed and name OTHER locations. Each of these
+~
+       is an ANSWER: nothing is bound here, and first contact is the honest
+~
+
+codex
+The body supports exactly the four documented outcomes: matching `str`, `None`, content refusal, and storage refusal. The normalized executable AST is byte-identical; only the docstring and report prose changed. Architecture is 99/99 and ruff passes; the 2,305-case engine run is still progressing normally.
+ succeeded in 101912ms:
+============================= test session starts ==============================
+platform darwin -- Python 3.13.11, pytest-9.1.1, pluggy-1.6.0
+rootdir: /Users/kaygee/Code/loops-s3wp1/libs/engine
+configfile: pyproject.toml
+plugins: cov-7.1.0, asyncio-1.4.0, hypothesis-6.165.10
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function
+collected 2305 items
+
+libs/engine/tests/test_absorb_edit.py .................                  [  0%]
+libs/engine/tests/test_absorb_genesis.py ........                        [  1%]
+libs/engine/tests/test_admission.py ...........................          [  2%]
+libs/engine/tests/test_admission_callback_ownership.py .                 [  2%]
+libs/engine/tests/test_aggregate_as_of_ontology.py ...                   [  2%]
+libs/engine/tests/test_arrival_authority.py ...............              [  3%]
+libs/engine/tests/test_arrival_authority_gate.py ...                     [  3%]
+libs/engine/tests/test_arrival_body.py .......................           [  4%]
+libs/engine/tests/test_arrival_cas_full_head.py .......................  [  5%]
+libs/engine/tests/test_arrival_cas_head.py ......                        [  5%]
+libs/engine/tests/test_arrival_contract.py ............................. [  6%]
+.                                                                        [  6%]
+libs/engine/tests/test_arrival_coordinate_d0.py ........................ [  7%]
+....................                                                     [  8%]
+libs/engine/tests/test_arrival_derived_log.py ....................       [  9%]
+libs/engine/tests/test_arrival_gate.py ................................. [ 10%]
+.....                                                                    [ 11%]
+libs/engine/tests/test_arrival_grammar.py .............................. [ 12%]
+.....................                                                    [ 13%]
+libs/engine/tests/test_arrival_head_attestation.py ..................... [ 14%]
+........................................................................ [ 17%]
+...........................                                              [ 18%]
+libs/engine/tests/test_arrival_head_seam.py ............................ [ 19%]
+........................................................                 [ 22%]
+libs/engine/tests/test_arrival_key_registry.py .........                 [ 22%]
+libs/engine/tests/test_arrival_projection.py .................           [ 23%]
+libs/engine/tests/test_arrival_rederivation_rowids.py .....              [ 23%]
+libs/engine/tests/test_arrival_registry.py ........................      [ 24%]
+libs/engine/tests/test_arrival_store.py ....................             [ 25%]
+libs/engine/tests/test_arrival_transfer.py ............................. [ 26%]
+.....                                                                    [ 26%]
+libs/engine/tests/test_audit_rebase_d3.py ..................             [ 27%]
+libs/engine/tests/test_behavior.py .............................         [ 29%]
+libs/engine/tests/test_builder.py ...............................        [ 30%]
+libs/engine/tests/test_cadence.py ..................................     [ 31%]
+libs/engine/tests/test_canonical_audit.py ............................   [ 33%]
+libs/engine/tests/test_ceremony_orchestration.py ....................... [ 34%]
+......s...................                                               [ 35%]
+libs/engine/tests/test_combined_read_ordering.py ....................... [ 36%]
+.....                                                                    [ 36%]
+libs/engine/tests/test_combined_tick_envelope.py ...                     [ 36%]
+libs/engine/tests/test_compiler.py ..................................... [ 38%]
+........................................................................ [ 41%]
+......                                                                   [ 41%]
+libs/engine/tests/test_conformance_comparison.py ....................... [ 42%]
+.............                                                            [ 43%]
+libs/engine/tests/test_conformance_lens.py .............                 [ 43%]
+libs/engine/tests/test_conformance_replay.py .......                     [ 43%]
+libs/engine/tests/test_conformance_replicate.py ...........              [ 44%]
+libs/engine/tests/test_declaration_resolver.py ......................... [ 45%]
+.................                                                        [ 46%]
+libs/engine/tests/test_diff_interval_report.py ............              [ 46%]
+libs/engine/tests/test_evaluate_boundaries.py ................           [ 47%]
+libs/engine/tests/test_executor.py ................................      [ 48%]
+libs/engine/tests/test_fact_signing.py ...................               [ 49%]
+libs/engine/tests/test_fold_as_of.py .......                             [ 49%]
+libs/engine/tests/test_fold_at.py ........                               [ 50%]
+libs/engine/tests/test_handle_bench.py ...                               [ 50%]
+libs/engine/tests/test_handle_changes.py ...............                 [ 51%]
+libs/engine/tests/test_handle_incremental.py ........                    [ 51%]
+libs/engine/tests/test_handle_open.py .................                  [ 52%]
+libs/engine/tests/test_handle_probe.py ...........                       [ 52%]
+libs/engine/tests/test_handle_receive.py ..........                      [ 53%]
+libs/engine/tests/test_integration.py .........................          [ 54%]
+libs/engine/tests/test_jsonl_ceremonies.py ...............               [ 54%]
+libs/engine/tests/test_jsonl_codec.py .................................. [ 56%]
+............................................................             [ 58%]
+libs/engine/tests/test_jsonl_golden_fixtures.py ..........               [ 59%]
+libs/engine/tests/test_jsonl_store.py .................................. [ 60%]
+.........                                                                [ 61%]
+libs/engine/tests/test_layer_boundaries.py ...                           [ 61%]
+libs/engine/tests/test_lens.py ............                              [ 61%]
+libs/engine/tests/test_loop.py ...................                       [ 62%]
+libs/engine/tests/test_observer.py ................                      [ 63%]
+libs/engine/tests/test_ontology_as_of.py .........                       [ 63%]
+libs/engine/tests/test_ordering_checkpoint_dispatch.py .........         [ 64%]
+libs/engine/tests/test_peer.py ...........................               [ 65%]
+libs/engine/tests/test_probe_arrival_matrix.py .............             [ 65%]
+libs/engine/tests/test_probe_preflight.py .............................. [ 67%]
+.....                                                                    [ 67%]
+libs/engine/tests/test_program.py ................                       [ 68%]
+libs/engine/tests/test_properties_replay.py ......                       [ 68%]
+libs/engine/tests/test_query_facts.py ...............................    [ 69%]
+libs/engine/tests/test_receipt.py ..................                     [ 70%]
+libs/engine/tests/test_receipt_attestation.py .......................    [ 71%]
+libs/engine/tests/test_recursive_sources.py .......                      [ 71%]
+libs/engine/tests/test_replay.py .......                                 [ 72%]
+libs/engine/tests/test_residence.py .......................              [ 73%]
+libs/engine/tests/test_review_helpers.py ............                    [ 73%]
+libs/engine/tests/test_seal_rebase_d2.py ........                        [ 73%]
+libs/engine/tests/test_source_protocol.py .....                          [ 74%]
+libs/engine/tests/test_sqlite_store.py ...........................       [ 75%]
+libs/engine/tests/test_store.py ...................                      [ 76%]
+libs/engine/tests/test_store_reader.py ................................. [ 77%]
+...........................................                              [ 79%]
+libs/engine/tests/test_tick.py ....................................      [ 81%]
+libs/engine/tests/test_tick_chain.py ................................... [ 82%]
+................                                                         [ 83%]
+libs/engine/tests/test_topology.py .........                             [ 83%]
+libs/engine/tests/test_vertex.py ....................................... [ 85%]
+...................................................                      [ 87%]
+libs/engine/tests/test_vertex_helpers.py ................                [ 88%]
+libs/engine/tests/test_vertex_nesting.py ......................          [ 89%]
+libs/engine/tests/test_vertex_reader.py ................................ [ 90%]
+........................................................................ [ 93%]
+..............................                                           [ 95%]
+libs/engine/tests/test_vertex_replay_coverage.py ....................... [ 96%]
+.....                                                                    [ 96%]
+libs/engine/tests/test_witness_address_helpers.py ...................... [ 97%]
+.                                                                        [ 97%]
+libs/engine/tests/test_witness_position.py ............................. [ 98%]
+...............                                                          [ 99%]
+libs/engine/tests/test_witness_rekey_d1.py ....................          [100%]
+
+================= 2304 passed, 1 skipped in 101.43s (0:01:41) ==================
+
+exec
+/bin/zsh -lc 'git status --porcelain=v1; git rev-parse --abbrev-ref HEAD; git rev-parse --short=8 HEAD' in /Users/kaygee/Code/loops-s3wp1
+ succeeded in 0ms:
+slice3/arrival-witness
+f5a61299
+
+codex
+PASS
+
+1. PASS — Success row matches the body: exact-location matches return `lineage` as `str`; the loop has no `break`, reassigns `found` for every match, and therefore returns the newest matching binding. The four-row enumeration is complete: `str`, `None`, `BindingsUnreadable`, or `BindingProbeUnanswered`.
+
+2. PASS — Diff reaches only the report and the function docstring. Executable AST is byte-identical after docstring normalization; no messages or other literals changed.
+
+3. PASS — Independently verified:
+
+   - Engine: 2304 passed, 1 skipped, 0 failed
+   - Architecture: 99 passed
+   - Ruff: clean
+   - Worktree: clean
+   - Branch/tip: `slice3/arrival-witness` at `f5a61299`
+
+New findings: none.
+
+**CONVERGED**
+tokens used
+43,850
+PASS
+
+1. PASS — Success row matches the body: exact-location matches return `lineage` as `str`; the loop has no `break`, reassigns `found` for every match, and therefore returns the newest matching binding. The four-row enumeration is complete: `str`, `None`, `BindingsUnreadable`, or `BindingProbeUnanswered`.
+
+2. PASS — Diff reaches only the report and the function docstring. Executable AST is byte-identical after docstring normalization; no messages or other literals changed.
+
+3. PASS — Independently verified:
+
+   - Engine: 2304 passed, 1 skipped, 0 failed
+   - Architecture: 99 passed
+   - Ruff: clean
+   - Worktree: clean
+   - Branch/tip: `slice3/arrival-witness` at `f5a61299`
+
+New findings: none.
+
+**CONVERGED**

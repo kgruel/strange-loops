@@ -522,3 +522,146 @@ a check that matters, producing both an uncaught `ArrivalBodyError` and an
 inventory/transform disagreement. R2-B2 is a ruled cleanup regressing, with tests pinned to a
 shape production does not use. Neither is a redesign; both are contained edits inside
 `libs/migrate`.
+
+---
+
+# Round 3 — fix round 2 re-check (`5a531574`)
+
+**Verdict: BLOCK** — both R2 findings are fully fixed and every ruled re-check passes, but the
+R2-B1 fix over-corrected and made an entire era of legacy SQLite store unmigratable. One
+regression, one line to fix.
+
+Merged `5a531574` at `c1e4e4a9`. Scope exact: one commit, eight files, **zero** outside
+`libs/migrate/**`. Suites: `libs/migrate tests/architecture` 141 passed, `tests/architecture` +
+quarantine 100 passed, `libs/engine` 2304 passed / 1 skipped, `libs/store` 180 passed. Working
+tree clean.
+
+## Ruled re-checks — all pass
+
+**(1) R2-B1, the 2**60 probe.** Both surfaces now return the typed migrate-family refusal, and
+their verdicts agree:
+
+```
+transform -> LegacySourceRefused: line 1: fact field 'ts' is outside the JCS
+             safe-integer domain: 1152921504606846976
+inventory -> LegacySourceRefused: (identical)
+verdicts AGREE: True
+```
+
+Swept six divergence cases (`ts` as TEXT, NULL observer, empty observer, `ts` NaN, payload as
+INT, empty id): no `ArrivalBodyError`, no `KeyError`, and `transform` and `inventory` agree on
+every one. The inventory/transform disagreement that made R2-B1 blocking is gone.
+
+**(2) R2-B2, the refusals surface.** `len(` count in `refusals.py` is **0**;
+`absent_observer_spellings` appears nowhere in the package; `typing.Any` is gone. The
+constructor takes four parameters (`codec_invalid_lines`, `mixed_observer_lines`,
+`absent_observer_lines`, `source`) with a precise
+`tuple[tuple[int, int, tuple[str, ...], dict[str, int]], ...]` annotation, and the spelling
+census now rides inside the 4-tuple rather than in a parallel dict — a cleaner shape than the
+one I asked for. `test_refusals.py` exercises the production shape, including spelling
+(`(20, 1, (), {"empty": 1})` and `(22, 2, (), {"missing": 1, "empty": 1})`). Live refusal
+objects carry 4-tuples: `((1, 1, (), {'empty': 1}),)`.
+
+**(3) F1 break/restore, hand-verified.** Reverted the sqlite fact arm to the old hand-rolled
+`isfinite` check:
+
+```
+E  engine.arrival_body.ArrivalBodyError: fact field 'ts' is outside the JCS
+   safe-integer domain: 1152921504606846976
+FAILED test_inventory.py::test_sqlite_seam_defense_refuses_unsafe_integer_ts
+FAILED test_transform.py::test_sqlite_seam_defense_refuses_unsafe_integer_ts
+```
+
+Red with the exact leak the finding named; restored → 2 passed; production diff empty.
+
+**(4) Hand-validator deleted, not bypassed.** `math.isfinite`, `import math`, and the
+hand-written `"must be a non-empty string, got"` messages are all gone from
+`legacy_source.py`; the `:410-422` and `:462-487` blocks are replaced by `row_object_fault`
+calls (5 call sites in the module).
+
+**(5) Scope.** Rule-4 row untouched and still true — `legacy_source.py` has zero cross-lib
+imports. Quarantine ratchet green. `ruff`: dead imports 4 → **0**, `E501` 36 → 23; one new
+`I001` (a stray blank line where `from typing import Any` was removed).
+
+**(6) Regression checks.** Central oracle still passes on HEAD — 11 records, introductions at
+`[1, 2]`, migrated `3..10`, no outer signatures, resolutions
+`[(0,'kyle',0), (1,'kyle',0), (2,'kyle',0)]`, legacy tick signature `sig-tick-2` preserved.
+Determinism digest `ed75651d…` and inventory output `74cf0fe3…` both **byte-identical to round
+2**.
+
+---
+
+## BLOCKING
+
+### R3-B1 — the sqlite tick arm now refuses era-1 stores that migrated cleanly one commit ago
+
+Routing the tick arm through `row_object_fault` was right, but the `obj` handed to it is built
+from `_tick_columns(conn)` — which is **era-aware** and returns only the columns the store
+actually has. `row_object_fault` checks for *absent* fields before it ever consults nullability:
+
+```python
+missing = [f for f in checked_fields if f not in obj]
+if missing:
+    return f"missing field(s) in {t} {frame}: {missing}"
+```
+
+`TICK_FIELDS` includes all four chain fields, so a ticks table predating them is refused —
+even though the frozen grammar explicitly licenses them as null:
+`TICK_NULLABLE = frozenset(("since", *TICK_CHAIN_FIELDS))`. Absence and null are being conflated
+in the one direction the grammar says they must not be.
+
+Same store, two commits, decisive:
+
+```
+AT 9c1a9372 (fix round 1)
+  inventory: OK — total_rows=2 tick_count=1
+  transform: OK — 3 drafts, tick body = {…, 'prev_hash': None, 'window_start': None,
+                                          'fact_cursor': None, 'window_hash': None}
+
+AT 5a531574 (HEAD)
+  inventory: REFUSED — line 1: missing field(s) in tick row:
+             ['prev_hash', 'window_start', 'fact_cursor', 'window_hash']
+  transform: REFUSED — (identical)
+```
+
+One commit ago this store migrated correctly, producing exactly the tick body the grammar
+intends: chain fields present and null. Now it cannot be migrated at all.
+
+This is not a hypothetical schema. `_tick_columns` exists solely to tolerate it — *"Tick columns
+present in this store, canonical order, era-aware"* — and `_content_sha256` in the same frozen
+module documents hashing that stays *"stable across the column's arrival."* The frozen reader
+was written knowing chain columns arrived partway through the store's history, which is the
+exact population a migration sidecar exists to serve. With slice 4 gating 1.0 on all live stores
+migrating, an era that refuses is blocking even though it fails loud rather than corrupting.
+
+Fix is one line — build the tick `obj` over the full field tuple so an absent column becomes a
+null field, which `TICK_NULLABLE` already permits:
+
+```python
+obj = {f: t_dict.get(f) for f in TICK_FIELDS}
+if t_dict.get("signature") is not None:
+    obj["signature"] = t_dict["signature"]
+```
+
+The facts arm needs no equivalent change: `FACT_FIELDS` has no nullable members, `signature` is
+not in `FACT_FIELDS`, and `_facts_have_signature` already handles that column's absence. (Noted
+in passing, not a finding: the facts query hardcodes the six base columns, so a store missing one
+would raise `sqlite3.OperationalError` outside the migrate family — pre-existing at
+`9c1a9372`, unchanged here, and out of this round's scope.)
+
+A test belongs with the fix: an era-1 sqlite fixture whose ticks table lacks the four chain
+columns, asserting it migrates to a tick body carrying explicit nulls.
+
+---
+
+## Disposition
+
+`s4wp2-sqlite-arm-grammar-diverged` and `s4wp2-compat-shims-regressed` are both **fixed** at
+`5a531574`, each verified by the probe that originally failed, with the hand-validator deleted
+rather than bypassed and the shims genuinely gone rather than relocated. The consolidation now
+has one grammar governing both arms, and every earlier property — central oracle, determinism,
+inventory parity — is preserved bit-for-bit.
+
+What blocks is the new edge the fix opened: making the sqlite arm share the JSONL grammar also
+made it share a presence check that the era-aware reader cannot satisfy. The correction is
+contained, one line plus a fixture, and does not disturb anything verified above.

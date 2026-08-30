@@ -376,3 +376,284 @@ end-to-end oracle all hold up under independent construction. What must not stan
 seam gap reported as compliance (B2) and the F2 power-proof that proves nothing (B3);
 those are report-integrity failures, not implementation failures, and they are the reason
 this is a REFUSE rather than a punch list.
+
+---
+
+# Round 2 — fix round 1 re-check
+
+**Range**: `main..slice4/wp3` = 4 commits (`40612844` E1, `fc708a09` E2, `8af7ef77` sink,
+`70a6dbb2` test touch-up), merged into this pointer branch at `a73f394e`; the merged tree
+is identical to `70a6dbb2` apart from this report.
+**Verdict**: **PASS.** All four of my blockings and all three reviewer blockings are fixed,
+each verified by my own round-1 method rather than by reading the worker's claims. Two new
+non-blocking findings (one of them a re-typing of the same class the round removed) and two
+minor notes, all recorded below for the slice tail.
+
+## R2.0 Scope — EXACT
+
+| Commit | Files | Ruled? |
+| --- | --- | --- |
+| `40612844` E1 | `arrival.py`, `arrival_file_backend.py`, `tests/test_arrival_contract.py` | exactly the ruled surfaces |
+| `fc708a09` E2 | `arrival.py`, `tests/test_arrival_gate.py` | exactly the ruled surfaces |
+| `8af7ef77` sink | 7 files, all `libs/migrate/**` | in fence |
+| `70a6dbb2` | `libs/migrate/tests/test_sidecar.py` | in fence |
+
+No other engine file touched; no drive-by cleanup in engine; Rule-4 file untouched
+(`git diff 68cc829f..HEAD -- tests/architecture/` empty); `git status --short` is `?? .tmp/`
+only. `ruff --select F401` on `sidecar.py`: **All checks passed** — the 13 unused imports
+from round 1 are gone (F7(e) done), and removing the `NotSupported` refusal arm left no
+dangling import (`NotSupported` still used at `arrival_file_backend.py:690`).
+
+## R2.1 E1 — signature carriage. The heaviest check, and it holds.
+
+The diff is four hunks and does exactly what was ruled. `Entry` gains
+`signature: str | None = None` — a **signature**, not a *signer*, which is the whole point:
+the adapter carries an authored attestation, it cannot manufacture one. The stale docstring
+paragraph asserting "there is deliberately no signer field … an invitation to fabricate
+authorship" is removed in the same commit rather than left to contradict the code (residue
+swept). `append_marked_many` passes `sig=entry.signature`; `FileLedger.append` drops the
+refusal arm and forwards `draft.signature`. **No new adapter-level validation was added** —
+the requirement that the adapter carry and never judge.
+
+My probe at the fix HEAD:
+
+```
+WP2 drafts: 8 total, 1 outer-signed, 7 unsigned
+[PASS] (b) append(all 8 drafts incl. signed key intro) -> ACCEPTED, head ord=8
+[PASS] (d) adapter CARRIED the draft signature verbatim (draft=8aeW9Y4x... record=8aeW9Y4x...)
+[PASS] (d) no signature invented for unsigned drafts (0 unsigned records carry a sig)
+[PASS] (c) verify_authorship over the log: 2 resolutions, 0 failing
+[PASS] (a) unsigned drafts: append == old self-coordinated replicate (3507 vs 3507 bytes)
+[PASS] (a) matches the round-1 gate measurement of 3507 bytes (got 3507)
+```
+
+Byte-preservation is exact against the figure I measured in round 1 — the gate assertion
+the brief named. The authority walk passes over a log whose key introduction arrived
+through the contract op.
+
+**E1 mutation** (`sig=entry.signature` → `sig=None`):
+
+```
+E   engine.arrival.AppendRejected: candidate refused: a key introduction carries no
+    signature — an introduction is vouched for by a key that is already valid, never
+    self-certifying above ordinal 0
+FAILED tests/test_arrival_contract.py::test_append_carries_pre_signed_draft_and_verifies_authorship
+1 failed, 1 passed
+```
+
+Red, and red *from the grammar* — `AppendRejected` out of `_validate`, not from a new
+adapter check. That is the cleanest possible evidence for "the adapter carries, the grammar
+judges". The byte-identity test stays green under the mutation, correctly, since it uses
+unsigned drafts.
+
+## R2.2 E2 — typed torn tail. Narrow and correctly scoped.
+
+`ArrivalTornTail(ArrivalError)` added to `__all__`, defined once, **raised at exactly one
+site** (`arrival.py:1258`; `grep` over `libs/engine/src/engine/` finds only the `__all__`
+entry, the class, and that raise). `ArrivalCorrupt` is untouched — the diff carries no `+`
+or `-` line on its class body. The docstring is a location claim: it says what the read
+lacks ("the log ends mid-record before a terminating newline … the final record was only
+partially written") and prescribes nothing.
+
+**E2 mutation** (`ArrivalTornTail` → bare `ArrivalError`):
+`FAILED tests/test_arrival_gate.py::test_tail_record_ending_mid_record_raises_typed_arrival_torn_tail`.
+Red as ruled.
+
+## R2.3 Suite reconciliation — exact, and nothing was deleted to make it balance
+
+| Suite | Base `68cc829f` | Fix HEAD | Delta |
+| --- | --- | --- | --- |
+| engine (`uv run --directory libs/engine pytest -q`) | 2304 passed, 1 skipped | 2306 passed, 1 skipped | +2 |
+| store | 180 passed | 180 passed | 0 |
+| migrate + architecture | 154 passed (round 1) | 159 passed | +5 |
+
+I diffed the collected node ids rather than trusting the totals:
+
+```
+=== ADDED at HEAD ===
+  test_append_carries_pre_signed_draft_and_verifies_authorship
+  test_append_unsigned_drafts_byte_identical_fixture
+  test_deliberate_absence_refuses_under_the_contract_root
+  test_tail_record_ending_mid_record_raises_typed_arrival_torn_tail
+=== REMOVED from base ===
+  test_append_refuses_a_pre_signed_draft
+  test_both_deliberate_absences_refuse_under_the_contract_root
+```
+
+Both removals are legitimate consequences of the ratified change rather than convenient
+deletions: the first pinned the refusal E1 was ruled to remove, and the second is a rename
+— with only one deliberate absence left (`Incremental`), "both absences" no longer names
+anything, and its now-false "both sites, in one test" rationale went with it. Three
+genuinely new tests pin E1 and E2. 2305 → 2307 collected.
+
+## R2.4 My four blockings, re-checked by my own round-1 methods
+
+**B1 — admission.** `grep` over `sidecar.py` for `replicate`, `_drafts_to_records`,
+`build_record`: **no hits**. The append loop is `ledger.append(expected=head, drafts=chunk_drafts)`
+(`sidecar.py:177`). Self-coordination is gone. **FIXED.**
+
+**B2 — the seam gap.** My round-1 all-8-drafts probe, which returned
+`REFUSED NotSupported` before, now returns `ACCEPTED, head ord=8` (R2.1). The signed key
+introduction is admitted through the contract op and `verify_authorship` accepts the
+result. **FIXED**, via the byte-preserving route (i).
+
+**B3 — the F2 ratchet.** I re-applied the *exact* round-1 mutation (`if False and (...)`
+on the resume prefix diff), the one that caught nothing:
+
+```
+FAILED libs/migrate/tests/test_sidecar.py::test_resume_against_divergent_valid_chain_refuses_target_mismatch
+1 failed, 59 passed
+```
+
+The ratchet now exists. **FIXED.**
+
+**B4 — state-root pollution.** `libs/migrate/tests/conftest.py` now redirects
+`XDG_STATE_HOME`. My round-1 measurement method, extended with a content hash over the
+whole directory:
+
+```
+BEFORE: files=267 bindings_bytes=59231 tree_hash=bb2cabd0538c8946b2b41102eae1cb946b5e8f57
+159 passed in 3.90s
+AFTER:  files=267 bindings_bytes=59231 tree_hash=bb2cabd0538c8946b2b41102eae1cb946b5e8f57
+DELTA files=0 bindings=0
+[PASS] B4: real state root BIT-IDENTICAL after full migrate+arch run
+```
+
+Zero delta, bit-identical. **FIXED.** (Housekeeping, not a finding: the 267 journals
+already written by round-1 and fix-round runs are still on this machine. The conftest stops
+new pollution but does not clean the existing residue; that is the user's real state
+directory, so I left it alone rather than deleting it.)
+
+## R2.5 Reviewer blockings, probed independently
+
+```
+===== (a) publish cannot no-op =====
+[PASS] duplicate store nodes REFUSE :: condition='vertex_store_duplicate_nodes'
+[PASS] duplicate case left descriptor unchanged
+[PASS] comment-shadowed store REFUSES :: condition='vertex_store_regex_match_count'
+[PASS] comment case left descriptor unchanged
+===== (b) resume genesis verification =====
+[PASS] mallory resume REFUSES :: TargetMismatchOnResumeRefused
+[PASS] refusal NAMES BOTH identities ("genesis custodian 'mallory' does not match expected custodian 'zoe'")
+[PASS] mallory target bytes unchanged
+[PASS] genesis-only RIGHT-lineage target resumes :: head ord=7, drafts=7
+===== (c) refusal typing =====
+[PASS] torn tail -> TornTailRefused
+[PASS] engine ArrivalTornTail present in the CAUSE chain (type, not substring)
+[PASS] torn tail: bytes unchanged
+[PASS] unreadable source -> LegacyStorageRefused
+[PASS] garbage source -> LegacyStorageRefused
+```
+
+`_is_torn_tail_error` is gone; `grep` finds no substring discrimination in `sidecar.py`
+(the surviving "ends mid-record" / "torn tail" strings are the sidecar's own advisory
+message prose, not predicates). The resume path catches explicit type tuples
+(`ArrivalTornTail`, `StoreLost`, `ArrivalCorrupt`, `GenesisRefused`/`HeadMismatch`,
+`OSError`), maps `ArrivalTornTail` → `TornTailRefused` and everything else →
+`TargetUnopenable` carrying the cause, and `TargetMismatchOnResumeRefused` is raised only
+by comparisons that actually ran. The two builtin escapes I found in round 1
+(`PermissionError`, `UnicodeDecodeError`) are now wrapped.
+
+F7(a) dissolved the 14-field enumeration into a loop over `VertexFile.__match_args__` minus
+`{store, store_backend, path}`, which removes the drift surface. F7(d) is real:
+`_check_inventory_equality` now consumes `exceptions.dropped_units` (the dead parameter is
+gone), and `DroppedUnit` carries `fact_kinds`/`observers` to make the accounting possible.
+
+**Power-proof spot check** (reviewer (a)'s wrong-location mutant): making the editor write
+a wrong path turns **7 tests red**, including `test_publish_atomicity_and_crash_simulation`.
+The post-edit `post_ast.store` assertion — the one field round 1 found unasserted — is
+load-bearing.
+
+## R2.6 Oracle and crash-restart, re-run at the fix HEAD
+
+Independent oracle on my own synthetic stores, both arms: **26/26 PASS**, unchanged from
+round 1. (One check needed updating on my side, not the code's: `verify_migration_report`
+now raises typed causes instead of returning `False`, which is exactly what F7(b) ruled, so
+my wrong-key assertion was stale.)
+
+Real SIGKILL mid-append, re-run against the admission path:
+
+```
+child rc=-9 (-9 == SIGKILL)  size_at_kill=189680
+resumed OK: head_ord=3000 bytes=1141181
+reference bytes=1141181
+[PASS] SIGKILL restart -> BYTE-IDENTICAL to uninterrupted run
+```
+
+Identical figures to round 1 — determinism survived the move from `replicate` to `append`,
+which is the practical confirmation of E1's byte-preservation claim end to end.
+
+## R2.7 New findings (non-blocking, for the slice tail)
+
+### N6 — `verify_migration_report` re-types an unopenable target as a head *mismatch*
+
+`sidecar.py:645-651` wraps the target open in a bare `except Exception` and raises
+`ReportHeadMismatchRefused`. That type asserts the head **differs** from the claim; a torn,
+corrupt or locked target means the head could not be **read** at all. Probed — the cause
+chain proves it:
+
+```
+[FINDING] an UNOPENABLE target is reported as ReportHeadMismatchRefused
+          (asserts the head DIFFERS, when it could not be READ).
+          cause chain: ReportHeadMismatchRefused <- StoreLost <- ArrivalTornTail
+```
+
+This is the same defect class F4 removed from `run_migration`, reintroduced under a new
+name in the newly written verifier — the "check the anti-pattern was not reintroduced" case.
+I weighed blocking and decided against it: the verifier still refuses (fails safe), the
+cause is preserved via `from exc` so the truth is one `__cause__` away, and the blast radius
+is an auditor reading a wrong label rather than an operator destroying evidence. The fix is
+small — a fifth distinct cause (`ReportTargetUnreadableRefused`, or reuse `TargetUnopenable`)
+and a typed catch instead of `except Exception`.
+
+### N7 — `migrate` imports `ckdl` directly, undeclared, bypassing `lang`
+
+`sidecar.py:76` adds `import ckdl` and `:236` calls `ckdl.parse` to count store nodes.
+`libs/migrate/pyproject.toml` declares `engine, store, lang, python-ulid` — **not `ckdl`**.
+It works only because `lang` depends on `ckdl>=1.0` and the workspace venv is shared. Two
+problems: the convention "declare what you import" is broken, and `lang` is the repo's KDL
+boundary, so the sink now holds a second, independent KDL parse path that will drift if
+`lang` ever changes parsers. Rule 4 does not catch it — that ratchet covers inter-lib
+imports only, so a third-party undeclared import is invisible to it. The dissolution-shaped
+fix is for `lang` to expose the store-node query (it already owns the AST) and for
+`migrate` to call that instead of parsing KDL itself.
+
+### N8 — partially-dropped batches are not accounted (fail-safe)
+
+`transform.py` records a `DroppedUnit` only when a batch maps to **no** rows
+(`if not mapped_rows`). A rule that drops *some* rows of a batch leaves the source
+inventory counting rows the target does not hold, with no exception to subtract, so
+`_check_inventory_equality` refuses. That is the safe direction — it refuses rather than
+publishing a claim it cannot support — but it means such a rule can never publish. Worth a
+line in the module docstring naming the limit, since F7(d) otherwise reads as complete.
+
+### N9 — the E2 engine test pins the type through a private method
+
+`test_tail_record_ending_mid_record_raises_typed_arrival_torn_tail` calls
+`log._tail_record()` directly and asserts `"ends mid-record" in str(...)`. It pins the type
+at the raise site but not that public callers see it, and it leans on the message substring
+that E2 exists to stop callers depending on. The end-to-end coverage does exist on the
+migrate side (my probe confirms `ArrivalTornTail` in the cause chain of a
+`TornTailRefused` raised through `registry.open`), so this is a note, not a gap.
+
+## R2.8 Round-2 verdict
+
+**PASS.** Findings to flip to fixed, with the commit that fixed each:
+
+| Finding | Fixed by |
+| --- | --- |
+| `s4wp3-replicate-instead-of-admission` | `8af7ef77` (enabled by `40612844`) |
+| `s4wp3-append-refuses-signed-key-intro` | `40612844` |
+| `s4wp3-f2-resume-diff-unratcheted` | `8af7ef77` |
+| `s4wp3-tests-pollute-real-state-root` | `8af7ef77` |
+| `s4wp3-publish-silent-noop` | `8af7ef77` |
+| `s4wp3-resume-genesis-tautology` | `8af7ef77` |
+| `s4wp3-refusal-types-assert-unchecked` | `8af7ef77` (enabled by `fc708a09`) |
+
+Carried forward as non-blocking: N6 (report verifier re-typing), N7 (undeclared `ckdl` /
+second KDL path), N8 (partial-batch drop accounting), N9 (E2 test reaches a private method).
+
+The two engine commits are the part I scrutinised hardest and they are the part I am most
+comfortable with: minimal, exactly scoped, residue swept, mutation-proven, and — the thing
+that matters most for an arc whose safety property is byte-level determinism — provably
+byte-preserving for every draft shape that existed before them.

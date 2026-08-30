@@ -2038,6 +2038,7 @@ def test_a_reset_whose_predecessor_moved_lines_is_not_honored(tmp_path):
     append_legacy(log_path, "one")
     lineage = lineage_of(log_path)
     accepted = FileLedger(ArrivalLog(log_path)).verify(Open())
+    opened(log_path)  # a bootstrap entry, so the reset binds to something real
     trust_reset(
         accepted=accepted,
         abandoned=None,
@@ -2071,4 +2072,13 @@ def test_a_reset_whose_predecessor_moved_lines_is_not_honored(tmp_path):
     assert not any("byte-identical" in note for note in read.skipped), (
         "dedup fired; this test would not be exercising the position claim"
     )
-    assert any("trust-reset" in note for note in read.skipped), read.skipped
+    notes = [note for note in read.skipped if "trust-reset" in note]
+    assert notes, read.skipped
+    # IDENTITY MATCHES on both sides — only the line differs. Asserted, because
+    # a construction that also broke identity would pass while proving nothing
+    # about the position half, which is exactly how this test failed its first
+    # mutation demo.
+    recorded, actual = notes[0].split("is not the entry that precedes it")
+    assert recorded.split("line ")[1].split("/")[1].strip() == (
+        actual.split("/")[1].split(")")[0].strip()
+    ), notes[0]

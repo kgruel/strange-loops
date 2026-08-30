@@ -120,6 +120,7 @@ VECTOR_INVENTORY: dict[str, frozenset[str]] = {
     "comparison-incomplete-": frozenset({
         "comparison-incomplete-a-torn-line-yields-a-lower-bound",
         "comparison-incomplete-a-bound-still-refuses-below-itself",
+        "comparison-incomplete-a-bound-cannot-answer-above-itself",
         "comparison-incomplete-a-headerless-journal-yields-a-bound",
         "comparison-incomplete-nothing-readable-declines-every-comparison",
         "comparison-incomplete-a-re-mint-against-lost-content-is-not-first-contact",
@@ -225,6 +226,42 @@ def test_every_ratified_outcome_is_exercised_by_some_vector():
     }
     missing = {outcome.value for outcome in Outcome} - reached
     assert not missing, f"no vector reaches: {sorted(missing)}"
+
+
+def test_every_cell_of_the_bound_is_exercised_by_some_vector():
+    """Below, equal, AND above. The third cell is the one a two-valued reading loses.
+
+    ``sound_answer`` has three cells and two of them answer ``null``, so a
+    family that exercised only *those* two would go green against an
+    implementation that is sound below the bound, declines at it, and answers
+    ``advanced`` above it — passing every vector while violating the half of
+    the ruling that says nothing bounds the accepted head from above.
+
+    A per-vector assertion cannot see this: each vector is individually
+    correct, and the hole is in which vectors EXIST. So coverage of the cells
+    is enumerated here, the same way the seven outcomes are, and deleting the
+    above-the-bound fixture reopens the hole by failing this test rather than
+    by going quietly green.
+    """
+    cells: set[str] = set()
+    for path in _load_vectors(COMPARISON_VECTORS_DIR):
+        vector = _read_vector(path)
+        expected = vector["expected"]
+        if expected.get("read") != "bounded":
+            continue
+        bound, presented = expected["known"], vector["input"]["presented"]
+        if presented["lineage"] != bound["lineage"]:
+            continue
+        if presented["ordinal"] < bound["ordinal"]:
+            cells.add("below")
+        elif presented["ordinal"] == bound["ordinal"]:
+            cells.add("equal")
+        else:
+            cells.add("above")
+
+    assert cells == {"below", "equal", "above"}, (
+        f"unexercised bound cells: {sorted({'below', 'equal', 'above'} - cells)}"
+    )
 
 
 def test_the_runner_stays_on_the_pure_surface():

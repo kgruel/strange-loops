@@ -115,9 +115,9 @@ WP3's empirical gate item 8 already covers both branches against real stores.
 
 | File | What |
 |---|---|
-| `spec/conformance/generate_comparison.py` | the generator: 9 heads cases, 17 journal cases, deterministic |
-| `spec/conformance/vectors/comparison/*.json` | 26 frozen vectors in five families |
-| `libs/engine/tests/test_conformance_comparison.py` | the consumer: `VECTOR_INVENTORY` two-way, three further ratchets, one parametrized runner |
+| `spec/conformance/generate_comparison.py` | the generator: 9 heads cases, 18 journal cases, deterministic |
+| `spec/conformance/vectors/comparison/*.json` | 27 frozen vectors in five families |
+| `libs/engine/tests/test_conformance_comparison.py` | the consumer: `VECTOR_INVENTORY` two-way, four further ratchets, one parametrized runner |
 | `spec/conformance/SCHEMA.md` §11 | the area's normative description, both forms |
 
 ### The five families
@@ -127,7 +127,7 @@ WP3's empirical gate item 8 already covers both branches against real stores.
 | `comparison-classify-` | 9 | the seven §07 rows through the pure classifier, plus guard order |
 | `comparison-epoch-` | 3 | reset-inclusive epoch scoping, across all the surfaces it governs |
 | `comparison-journal-` | 6 | the maximum-ordinal rule, equivocation, and both negative controls |
-| `comparison-incomplete-` | 5 | the lower bound and the third state |
+| `comparison-incomplete-` | 6 | the lower bound (all three cells) and the third state |
 | `comparison-header-` | 3 | the three-way classification |
 
 ### Every behavior the brief named, and the vector that encodes it
@@ -149,7 +149,7 @@ ends-at-the-reset journal where the module answers `unchanged`; §B.3's mid-file
 prose and the round-0 oracle's `headerless-entries-refuse` both pin refusals the
 module no longer raises. The vectors follow the module and the folds.
 
-## 4. Three ratchets beside the inventory
+## 4. Four ratchets beside the inventory
 
 The two-way `VECTOR_INVENTORY` is the replicate tier's own ratchet and it is carried
 verbatim. Three more, because each pins something a reviewer would otherwise have to
@@ -160,7 +160,12 @@ notice:
    strings" non-goal as an enumerable property rather than review vigilance.
 2. `test_every_ratified_outcome_is_exercised_by_some_vector` — a row no vector reaches
    is a row this family does not test. Adding a row without a vector fails.
-3. `test_the_runner_stays_on_the_pure_surface` — the runner's namespace is checked for
+3. `test_every_cell_of_the_bound_is_exercised_by_some_vector` — **added in sol r1**
+   (§9). The bound's answer surface has three cells and two of them answer `null`, so
+   a family exercising only those two goes green against an implementation that
+   answers `advanced` above the bound. A per-vector assertion cannot see this: each
+   vector is individually correct and the hole is in which vectors *exist*.
+4. `test_the_runner_stays_on_the_pure_surface` — the runner's namespace is checked for
    the impure names, so no test here can resolve a path into a real `$XDG_STATE_HOME`.
    Checked against the module's actual namespace, not its source, so it cannot be
    satisfied by a name that merely looks absent.
@@ -169,7 +174,7 @@ notice:
 
 ### 1. Vectors green; inventory exact in both directions
 
-30 tests: 26 vectors + 4 non-parametrized. Both ratchet directions verified by doing
+32 tests: 27 vectors + 5 non-parametrized. Both ratchet directions verified by doing
 it, and each names the vector:
 
 - **Drop a fixture** → `missing: ['comparison-epoch-below-the-reset-head-is-rollback']`
@@ -198,18 +203,18 @@ cross-suite pollution failures when they share one).
 
 | Suite | Baseline (`9ed893fe`) | After | Delta |
 |---|---|---|---|
-| engine | 2158 passed, 1 skipped | **2188 passed, 1 skipped** | **+30**, all in `test_conformance_comparison.py` |
+| engine | 2158 passed, 1 skipped | **2190 passed, 1 skipped** | **+32**, all in `test_conformance_comparison.py` |
 | architecture | 99 passed | **99 passed** | **0** — Rule 17 scans generators by glob, so a new one adds no case |
 
-Every delta accounted for: 26 parametrized vectors + 4 non-parametrized tests.
+Every delta accounted for: 27 parametrized vectors + 5 non-parametrized tests.
 Rule 17 green with `generate_comparison.py` auto-enrolled by its `generate_*.py` name,
 and Rule 18 unaffected (no engine module added).
 
 ### 4. `git ls-files` — the gitignore trap
 
-`git check-ignore` reports the vectors are **not** ignored, and 26 vector JSONs are
-tracked at `ebe8616e` — matching the 26 the generator writes and the 26 the inventory
-names, three independent counts agreeing.
+`git check-ignore` reports the vectors are **not** ignored, and 27 vector JSONs are
+tracked — matching the 27 the generator writes and the 27 the inventory names, three
+independent counts agreeing.
 
 ## 6. Design choices
 
@@ -287,3 +292,84 @@ of that observation passed the topic as a positional slug rather than `topic=`, 
 fold key** and carries an earlier, shorter draft of the same message. The store is
 append-only so it stays as written; `01M180VC8K6N0HJC2GJVN3ZJVC` is the one that folds
 and the one to read. No finding: an emission-form slip, not a work product.
+
+## 9. Sol-LOW round 1 — the unpinned third cell of the bound
+
+`S3WP2-L-1`, BLOCKING, and correct. Everything else passed, including the coverage
+matrix and the foreign-implementer reading of SCHEMA.md.
+
+**What was wrong.** Every bounded vector presented a head exactly AT the bound except
+one, which presented below it. Nothing presented a same-lineage head **above** the
+bound. Verified before acting, across all five bounded vectors:
+
+| Vector | bound | presented | cell |
+|---|---|---|---|
+| `comparison-incomplete-a-torn-line-yields-a-lower-bound` | 91 | 91 | at |
+| `comparison-incomplete-a-bound-still-refuses-below-itself` | 91 | 89 | below |
+| `comparison-incomplete-a-headerless-journal-yields-a-bound` | 6 | 6 | at |
+| `comparison-header-a-kindless-object-is-not-absorbed` | 91 | 91 | at |
+| `comparison-header-both-markers-together-are-unclassifiable` | 91 | 91 | at |
+
+So a foreign implementation doing **below → rollback, equal → decline, above →
+advanced** passed all 26 vectors while violating the amended ruling's second half —
+"nothing bounds the accepted head from above", which is WP1's own self-correction.
+SCHEMA.md's prose forbade it in two places, and **prose is not executable**.
+
+**This is my own review lens landing on me.** §2 records applying
+`observation:practice/two-valued-classifiers-lie-in-one-direction` to the *outcome*
+field, where I found the third honest answer and split the schema for it. I did not
+apply it to `sound_answer`, which is the bound's own answer surface and is equally
+three-valued — below, equal, above. Two of its cells agree on `null`, and that
+agreement is exactly what hid the missing one: the family looked like it covered the
+bound because every vector it had was right.
+
+**The fix.** One vector, `comparison-incomplete-a-bound-cannot-answer-above-itself`.
+
+- Same family shape as the existing torn-line fixture — reset, a torn higher entry, a
+  surviving lower entry — but the **torn entry holds ordinal 200 rather than 92**.
+  Reportable deviation from the routed wording ("same `[90-reset, 92-torn, 91]`
+  shape"), and the reason is substantive: with 200, the fixture *exhibits* the hazard
+  instead of merely asserting the rule. The head this machine actually accepted was
+  200, so a store presenting 95 is a rollback of 105 ordinals, and the naive
+  `advanced` answer is provably wrong **on this very fixture** rather than only
+  disallowed by ruling. The read cannot see 200 — that is the point.
+- `at_known` is supplied and valid (the bound's own head at 91), so descent from 91 to
+  95 really is established. An implementation cannot excuse `advanced` by pleading
+  missing evidence; descent verified *from the bound* says nothing about an entry that
+  was never on the walk. This is also the first journal-form vector to use `at_known`,
+  a field the schema already carried.
+- Expected: `read: bounded`, `outcome: null`, `sound_answer: null`.
+
+**And a ratchet, because sol found this by reading.** Reviewer vigilance caught the
+hole once; the enumerable property keeps it caught.
+`test_every_cell_of_the_bound_is_exercised_by_some_vector` asserts the bounded vectors
+collectively reach all three cells. Demonstrated by restoring the hole — dropping the
+vector *and* its inventory entry — which fails with
+`unexercised bound cells: ['above']` rather than going quietly green.
+
+SCHEMA.md's bound paragraph is now a **three-row table** stating each cell and its
+reason, with the note that the area carries a vector for every row; the
+`comparison-incomplete-*` family blurb says all three cells are pinned and why two of
+them agreeing is the trap.
+
+### Sol-round demo — the adversarial implementation, before and after
+
+Sol's own foreign implementation (below → `rollback`, equal → `null`, above →
+`advanced`), run as a throwaway shim over the family's bounded vectors:
+
+| Family | Bounded vectors | Result |
+|---|---|---|
+| as it was at `9735ce3f` | 5 | **NOT CAUGHT** — the adversary passes every one |
+| as it is now | 6 | **CAUGHT by 1** — `comparison-incomplete-a-bound-cannot-answer-above-itself`, `vector=None adversary=advanced`; the other five stay green |
+
+Exactly the scoped demo: the new vector fails, the others do not.
+
+### Counts after sol r1
+
+| Suite | Before sol r1 | After | Delta |
+|---|---|---|---|
+| engine | 2188 passed, 1 skipped | **2190 passed, 1 skipped** | **+2** — one vector, one ratchet |
+| architecture | 99 passed | **99 passed** | 0 |
+
+Generator still byte-reproducible (regenerate → empty diff); `ruff check` clean; 27
+vector JSONs tracked.

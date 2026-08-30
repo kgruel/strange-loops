@@ -593,6 +593,30 @@ JOURNAL_CASES: tuple[JournalCase, ...] = (
         presented=head(89),
     ),
     JournalCase(
+        name="comparison-incomplete-a-bound-cannot-answer-above-itself",
+        description=(
+            "The third cell of the bound, and the one a two-celled reading "
+            "loses. Below the bound is a sound rollback and at the bound "
+            "declines — but a head ABOVE the bound is not an advance either, "
+            "because NOTHING BOUNDS THE ACCEPTED HEAD FROM ABOVE. Whatever the "
+            "read missed carries no information about the ordinal it held. This "
+            "fixture exhibits it rather than merely asserting it: the entry the "
+            "crash tore held ordinal 200, so the head this machine actually "
+            "accepted was 200, and a store presenting 95 is a ROLLBACK of "
+            "105 ordinals. An implementation answering 'advanced' because 95 "
+            "exceeds the surviving bound of 91 would wave through exactly the "
+            "loss the journal exists to catch. Note that at_known is supplied "
+            "and valid — descent from 91 to 95 really is established — which is "
+            "the point: descent verified from the bound says nothing about an "
+            "entry that was never on the walk. Both proceed answers are "
+            "unobtainable against a bound; only the refusal below it survives."
+        ),
+        entries=(bootstrap(), reset(90), entry(200), entry(91)),
+        transform=torn(200),
+        presented=head(95),
+        at_known=head(91),
+    ),
+    JournalCase(
         name="comparison-incomplete-a-headerless-journal-yields-a-bound",
         description=(
             "Readable entries with no header. This once refused the whole file; "

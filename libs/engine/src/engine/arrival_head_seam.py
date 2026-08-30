@@ -82,6 +82,7 @@ from .arrival_head_attestation import (
     compare,
     compare_absent_store,
     entry_identity,
+    last_entry,
     read_journal,
     record_binding,
     refusal_for,
@@ -94,6 +95,7 @@ __all__ = [
     "Compared",
     "Indeterminate",
     "NotWitnessed",
+    "TrustResetNotHonored",
     "OpenReport",
     "PreGenesis",
     "ProjectionAgreement",
@@ -145,6 +147,24 @@ class AuditFoundUnaccountedHeads(AttestationRefusal):
     def __init__(self, message: str, *, heads: tuple[HeadAttestation, ...]) -> None:
         super().__init__(message)
         self.heads = heads
+
+
+class TrustResetNotHonored(Exception):
+    """The reset was appended and does not open an epoch.
+
+    Deliberately NOT an :class:`~engine.arrival_head_attestation.AttestationRefusal`,
+    for the reason :class:`NotWitnessed` is not one: that family means the
+    operation did not happen, and this one means it happened without taking
+    effect. The entry is in the journal as evidence either way.
+
+    The failure it reports is safe in direction and dishonest only if silent —
+    an unhonored reset leaves the higher abandoned head standing, so opens keep
+    refusing, and the harm is an operator who believes otherwise.
+    """
+
+    def __init__(self, message: str, *, entry: HeadAttestation) -> None:
+        super().__init__(message)
+        self.entry = entry
 
 
 class NotWitnessed(Exception):
@@ -544,8 +564,10 @@ def trust_reset(
     The CLI surface for the ceremony is slice 5's cut. This is the producer, so
     slices 4 and 6 have something to call.
     """
-    read = read_journal(accepted.lineage)
-    follows = "" if not read.entries else entry_identity(read.entries[-1])
+    previous = last_entry(accepted.lineage)
+    follows = (
+        (0, "") if previous is None else (previous[0], entry_identity(previous[1]))
+    )
     if not reason.strip():
         raise ValueError(
             "a trust reset records the gap it opens — an empty reason would "
@@ -558,17 +580,59 @@ def trust_reset(
         f"{accepted.lineage}/{accepted.ordinal}/{accepted.record_hash}. "
         f"{reason.strip()}"
     )
-    return append_entry(
-        HeadAttestation(
-            head=accepted,
-            kind=Kind.TRUST_RESET,
-            level=level,
-            observed_at=observed_at,
-            location=canonical_location(location),
-            note=note,
-            follows=follows,
-        )
+    entry = HeadAttestation(
+        head=accepted,
+        kind=Kind.TRUST_RESET,
+        level=level,
+        observed_at=observed_at,
+        location=canonical_location(location),
+        note=note,
+        follows=follows,
     )
+    path = append_entry(entry)
+    _confirm_reset_took_effect(entry)
+    return path
+
+
+def _confirm_reset_took_effect(entry: HeadAttestation) -> None:
+    """Read the ceremony back, and say so loudly if it did not take.
+
+    The position claim buys its protection with an obligation. Binding a reset
+    to the line it follows means reading the tail and then appending, and there
+    is NO lock to hold across the two — the journal is append-only precisely so
+    that writers need none. So an automated append (an ordinary open, an audit)
+    landing in that window leaves a legitimate, freshly written reset carrying a
+    position that is already stale, and a later reader will decline to honor it.
+
+    The direction is safe — an unhonored reset leaves *K* at the higher
+    abandoned head, which refuses rather than accepts. What is NOT safe is
+    silence: an operator who ran the ceremony, saw it return, and believes their
+    store will now open is holding a false belief that the next open will
+    contradict. So the entry is read back and checked against the same judgment
+    every reader applies, and a ceremony that did not take effect raises.
+
+    Emit-then-read-back rather than trust-the-write, which is the store's own
+    ethos: the append landing is not the same claim as the append counting.
+    """
+    try:
+        epoch = read_journal(entry.head.lineage).epoch
+    except AttestationRefusal as exc:
+        raise TrustResetNotHonored(
+            "the trust reset was APPENDED, and the journal could not then be "
+            f"read back to confirm it took effect: {exc}. The entry is in the "
+            "file as evidence; whether it opens an epoch is unconfirmed",
+            entry=entry,
+        ) from exc
+    if not epoch or epoch[0] != entry:
+        raise TrustResetNotHonored(
+            "the trust reset was APPENDED and is NOT honored as an epoch "
+            "boundary — another entry landed between reading the tail and "
+            "writing, so the position this reset records is already stale. "
+            "Nothing was lost and nothing was wrongly accepted: the previous "
+            "head still stands, so opens keep refusing. Run the ceremony again "
+            "against the journal as it now is",
+            entry=entry,
+        )
 
 
 def audit(

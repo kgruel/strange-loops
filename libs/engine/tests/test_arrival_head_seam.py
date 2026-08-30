@@ -45,6 +45,7 @@ from engine.arrival_head_attestation import (
     HeadRewrite,
     HeadRollback,
     IndeterminateComparison,
+    JournalEquivocation,
     Kind,
     Level,
     LineageReplaced,
@@ -67,6 +68,7 @@ from engine.arrival_head_seam import (
     PreGenesis,
     ProjectionAgreement,
     ProjectionAheadOfLedger,
+    TrustResetNotHonored,
     audit,
     bootstrap,
     canonical_location,
@@ -1854,3 +1856,123 @@ def test_the_alias_refusal_leaves_the_journal_untouched(tmp_path):
     assert journal_bytes(first) == before
     assert bindings_path().read_bytes() == bindings_before
     assert not journal_path(lineage_of(log_path)).exists()
+
+
+# ---------------------------------------------------------------------------
+# The ceremony itself (finding:s3wp3-trust-reset-ceremony-bricked-on-equivocation)
+# ---------------------------------------------------------------------------
+
+
+def _equivocating_journal(lineage: str) -> None:
+    """Two different records at one ordinal, in the CURRENT epoch.
+
+    The state an operator runs the ceremony to resolve, and the one a full read
+    refuses outright. Current-epoch on purpose: an equivocation before a reset
+    is scoped out and tolerated, so a fixture built that way would pass against
+    a ceremony that is still bricked — which is exactly how the first fix here
+    passed while the caller was never wired.
+    """
+    for digest in ("a", "b"):
+        append_entry(
+            HeadAttestation(
+                head=Head(lineage=lineage, ordinal=6, record_hash=digest * 64),
+                kind=Kind.ADVANCE,
+                level=Level.COMMIT,
+                observed_at=1.0,
+            )
+        )
+
+
+def test_the_ceremony_succeeds_on_an_equivocating_journal(tmp_path):
+    """The producer must work on the journals it exists to recover from.
+
+    ``read_journal`` REFUSES an equivocating journal, and equivocation is one
+    of the states §11 sends an operator to this ceremony to resolve. A producer
+    that read the journal that way would be unusable exactly when it is needed
+    — a recovery path gated on the condition it recovers from.
+    """
+    log_path = minted(tmp_path / "s.arrival")
+    append_legacy(log_path, "one")
+    lineage = lineage_of(log_path)
+    _equivocating_journal(lineage)
+    with pytest.raises(JournalEquivocation):
+        read_journal(lineage)
+
+    accepted = FileLedger(ArrivalLog(log_path)).verify(Open())
+    trust_reset(  # must not raise
+        accepted=accepted,
+        abandoned=Head(lineage=lineage, ordinal=6, record_hash="a" * 64),
+        refused=None,
+        reason="operator adjudicated the fork and accepted the archive copy",
+        location=str(log_path),
+        observed_at=9000.0,
+    )
+
+    # And the ceremony took effect: the journal reads again, scoped to it.
+    read = read_journal(lineage)
+    assert read.epoch[0].kind is Kind.TRUST_RESET
+    assert read.established_head() is not None
+    assert read.established_head().head == accepted
+
+
+def test_the_ceremony_reports_a_reset_that_did_not_take_effect(tmp_path):
+    """The obligation the position claim buys its protection with.
+
+    Binding to a line means reading the tail and then appending, with no lock
+    to hold across the two — the journal is append-only precisely so writers
+    need none. An automated append landing in that window leaves a legitimate,
+    freshly written reset carrying a stale position, which a later reader
+    declines to honor.
+
+    The direction is safe: the higher abandoned head still stands, so opens
+    keep refusing. What would not be safe is silence — an operator who saw the
+    ceremony return believes their store will now open. So the entry is read
+    back against the same judgment every reader applies, and a ceremony that
+    did not take raises.
+    """
+    log_path = minted(tmp_path / "s.arrival")
+    append_legacy(log_path, "one")
+    lineage = lineage_of(log_path)
+    accepted = FileLedger(ArrivalLog(log_path)).verify(Open())
+    append_entry(
+        HeadAttestation(
+            head=Head(lineage=lineage, ordinal=9, record_hash="a" * 64),
+            kind=Kind.ADVANCE,
+            level=Level.COMMIT,
+            observed_at=1.0,
+        )
+    )
+
+    # A peer appends between the tail read and the write.
+    real_last_entry = engine.arrival_head_seam.last_entry
+
+    def racing_last_entry(name: str):
+        answer = real_last_entry(name)
+        append_entry(
+            HeadAttestation(
+                head=Head(lineage=name, ordinal=10, record_hash="b" * 64),
+                kind=Kind.ADVANCE,
+                level=Level.COMMIT,
+                observed_at=2.0,
+            )
+        )
+        return answer
+
+    engine.arrival_head_seam.last_entry = racing_last_entry
+    try:
+        with pytest.raises(TrustResetNotHonored) as excinfo:
+            trust_reset(
+                accepted=accepted,
+                abandoned=None,
+                refused=None,
+                reason="restored from archive",
+                location=str(log_path),
+                observed_at=9000.0,
+            )
+    finally:
+        engine.arrival_head_seam.last_entry = real_last_entry
+
+    assert excinfo.value.entry.kind is Kind.TRUST_RESET
+    assert "APPENDED and is NOT honored" in str(excinfo.value)
+    # Safe direction: the higher head still stands, so opens keep refusing.
+    assert read_journal(lineage).known is not None

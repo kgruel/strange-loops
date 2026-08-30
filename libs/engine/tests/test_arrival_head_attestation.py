@@ -559,7 +559,10 @@ def append_reset(
         level=level,
         observed_at=1787779020.0,
         note=note,
-        follows="" if previous is None else entry_identity(previous),
+        follows=(0, "") if previous is None else (
+            previous[0],
+            entry_identity(previous[1]),
+        ),
     )
     append_entry(entry)
     return entry
@@ -1357,7 +1360,7 @@ def test_a_crash_retry_duplicate_reset_is_skipped_and_never_refuses():
 def test_a_reset_opening_an_empty_journal_binds_to_nothing():
     """There is no predecessor to name, and the empty binding says so."""
     entry = append_reset(4)
-    assert entry.follows == ""
+    assert entry.follows == (0, "")
     result = read_journal(LINEAGE)
     assert result.skipped == ()
     assert result.epoch == (entry,)
@@ -1394,5 +1397,167 @@ def test_binding_a_reset_does_not_require_a_readable_head():
         read_journal(LINEAGE)
 
     entry = append_reset(4)  # must not raise
-    assert entry.follows == entry_identity(observation(6, "b"))
+    assert entry.follows == (3, entry_identity(observation(6, "b")))
     assert read_journal(LINEAGE).established_head() is not None
+
+
+# ---------------------------------------------------------------------------
+# Sol r2: replaying CONTEXT, not just the entry (finding:s3wp3-trust-reset-replay)
+# ---------------------------------------------------------------------------
+
+
+def _journal_reset_at_5_then_advanced_to_8() -> HeadAttestation:
+    """Ordinals 1-10, a legitimate reset accepting 5, then 6-8. Returns the reset."""
+    for ordinal in range(1, 11):
+        append_entry(observation(ordinal))
+    legitimate = append_reset(5, note="restored from archive; abandoned 10")
+    for ordinal in (6, 7, 8):
+        append_entry(observation(ordinal))
+    return legitimate
+
+
+def test_replaying_the_predecessor_with_the_reset_does_not_reopen_the_epoch():
+    """Sol r2's repro. Identity alone was defeated by replaying CONTEXT.
+
+    Re-appending the historical predecessor and the reset as an ordered suffix
+    reproduces the recorded identity exactly — the entry the copy names really
+    is sitting in front of it. Identity was the right kind of binding and the
+    wrong amount of it: it is a property of the bytes, so bytes can carry it.
+
+    The physical line cannot be carried. Copied bytes appended later land
+    later, so the position claim is stale no matter how much surrounding
+    context comes with them, which is what makes this close the class rather
+    than the instance.
+    """
+    legitimate = _journal_reset_at_5_then_advanced_to_8()
+    predecessor = observation(10)
+
+    append_entry(predecessor)  # the context, replayed
+    append_entry(legitimate)  # and the reset behind it
+
+    result = read_journal(LINEAGE)
+    assert any("trust-reset" in note for note in result.skipped), result.skipped
+    # The attack: a store rolled back to 5 must NOT open unchanged.
+    assert isinstance(result.known, HeadLowerBound)
+    assert result.known.at_least.head.ordinal != 5
+    assert compare(result.known.at_least, head(5), None) is Outcome.ROLLBACK
+
+    # MEASURED, and it is not the 8 the ruling predicted: K reads 10.
+    # Rejecting the replayed RESET is not the same as rejecting the replayed
+    # ADVANCE that came with it, and the latter re-imports an abandoned head
+    # by the ordinary maximum-ordinal rule. Refusal-side, and pinned on its own
+    # below rather than hidden inside this one
+    # (finding:s3wp3-replayed-advance-reimports-an-abandoned-head).
+    assert result.known.at_least.head.ordinal == 10
+
+
+def test_replaying_the_whole_suffix_does_not_reopen_the_epoch():
+    """The generalization: more context replayed is still a later position."""
+    _journal_reset_at_5_then_advanced_to_8()
+    suffix = list(read_journal(LINEAGE).entries)
+
+    for entry in suffix:
+        append_entry(entry)
+
+    result = read_journal(LINEAGE)
+    assert isinstance(result.known, HeadLowerBound)
+    assert result.known.at_least.head.ordinal != 5
+    assert compare(result.known.at_least, head(5), None) is Outcome.ROLLBACK
+    assert any("trust-reset" in note for note in result.skipped)
+
+
+def test_a_replayed_advance_reimports_an_abandoned_head():
+    """The residual sol r2's repro exposed, pinned so it is visible.
+
+    Binding a RESET to its position says nothing about a replayed ADVANCE. An
+    old ``advance`` entry appended after a reset is, to the journal, a fresh
+    claim that this machine accepted that ordinal — and the maximum-ordinal
+    rule then takes it. So *K* rises to an abandoned head and a store at the
+    genuine current head is refused as a rollback.
+
+    Refusal-side, which is the direction this module must fail in, and no
+    silent acceptance is reachable through it. It is a denial of service
+    against one's own store, not a way into it. Recorded rather than fixed
+    because the fix is not a position binding on every entry — every entry
+    already IS its position, and the journal cannot tell a re-assertion from a
+    first assertion without the signed grammar that would date it.
+    """
+    _journal_reset_at_5_then_advanced_to_8()
+    assert read_journal(LINEAGE).established_head().head.ordinal == 8
+
+    append_entry(observation(10))  # an abandoned head, re-asserted
+
+    assert read_journal(LINEAGE).established_head().head.ordinal == 10
+    known = read_journal(LINEAGE).established_head()
+    assert compare(known, head(8), None) is Outcome.ROLLBACK
+
+
+def test_concatenating_a_foreign_journal_does_not_import_its_resets():
+    """The combine case. Every appended reset lands at a shifted line.
+
+    A journal pasted onto the end of another is the bulk form of a replay, and
+    it is the one an ordinary tool could do by accident. The foreign resets all
+    carry positions from the file they were written in, so none of them opens
+    an epoch here and *K* stays the local maximum.
+    """
+    for ordinal in (1, 2, 3):
+        append_entry(observation(ordinal))
+    local = append_reset(2)
+    append_entry(observation(9))
+
+    foreign_lines = [
+        HEADER,
+        json.dumps(
+            {
+                "v": 1,
+                "kind": "advance",
+                "level": "commit",
+                "lineage": LINEAGE,
+                "ordinal": 4,
+                "record_hash": "c" * 64,
+                "observed_at": 1.0,
+            }
+        ),
+        json.dumps(
+            {
+                "v": 1,
+                "kind": "trust-reset",
+                "level": "full",
+                "lineage": LINEAGE,
+                "ordinal": 4,
+                "record_hash": "c" * 64,
+                "observed_at": 1.0,
+                # A binding that was valid IN ITS OWN FILE, at line 2.
+                "follows": [2, "does-not-matter"],
+            }
+        ),
+    ]
+    with journal_path(LINEAGE).open("a", encoding="utf-8") as handle:
+        handle.write("\n".join(foreign_lines) + "\n")
+
+    result = read_journal(LINEAGE)
+    assert isinstance(result.known, HeadLowerBound)
+    assert result.known.at_least.head.ordinal == 9, "a foreign reset took hold"
+    assert any("trust-reset" in note for note in result.skipped)
+    assert local.head.ordinal == 2
+
+
+def test_the_position_is_the_physical_line_not_an_index_of_parsed_entries():
+    """A judgment-dependent index would drift; a file line does not.
+
+    An unreadable line sits between the predecessor and the reset here. It
+    occupies a physical line, so the predecessor's line number accounts for it
+    — where an index among successfully parsed entries would not, and would
+    renumber the moment a future build classified that line differently.
+    """
+    append_entry(observation(1))
+    with journal_path(LINEAGE).open("a", encoding="utf-8") as handle:
+        handle.write("{ not json at all\n")
+    entry = append_reset(1)
+
+    assert entry.follows is not None
+    # header(1), observation(2), damage(3) — so the predecessor is at line 2,
+    # while its index among parsed entries is 0.
+    assert entry.follows[0] == 2
+    result = read_journal(LINEAGE)
+    assert result.epoch == (entry,), "the reset was not honored"

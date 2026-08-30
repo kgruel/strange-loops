@@ -293,30 +293,49 @@ class HeadAttestation:
     observed_at: float
     location: str = ""
     note: str = ""
-    follows: str = ""
-    """Which entry this one was appended after — REQUIRED on a trust reset,
-    empty on every other kind and on a reset that opens an empty journal.
+    follows: tuple[int, str] | None = None
+    """The PHYSICAL LINE and identity of the entry this one was appended after
+    — REQUIRED on a trust reset, ``None`` on every other kind.
+
+    ``(0, "")`` is the honest claim for a reset that opens an empty journal:
+    line numbers start at 1, so zero says "there was no predecessor" rather
+    than "no claim was made", which is what ``None`` says and what makes an
+    unbound reset invalid.
 
     **Not the deferred** ``previous``. That one is the signed grammar's
     per-entry chain link over the whole journal, and it stays absent: this is
     unsigned, it is carried by exactly one kind, and it makes exactly one
-    claim — the entry this reset actually followed when it was written.
+    claim — where this reset sat, and what sat in front of it.
 
-    It exists because a trust reset was REPLAYABLE. An entry is just bytes in
-    an append-only file, so re-appending an old reset re-opened the epoch it
-    had closed: a journal through ordinal 8 with a stale 10-to-5 reset appended
-    reads *K* as 5, and a store rolled back to 5 then opens UNCHANGED — the
-    abandoned epoch resurrected, and the silent re-acceptance the whole module
-    exists to prevent (``finding:s3wp3-trust-reset-replay``). Binding the reset
-    to its predecessor makes a replay INEXPRESSIBLE as valid rather than
-    merely detectable: at any other position the recorded predecessor is not
-    the entry actually there.
+    It exists because a trust reset was REPLAYABLE, and it took two rounds to
+    get right. An entry is just bytes in an append-only file, so re-appending
+    an old reset re-opened the epoch it had closed
+    (``finding:s3wp3-trust-reset-replay``). Binding the reset to its
+    predecessor's IDENTITY closed the one-line replay — and sol r2 defeated
+    that too, by replaying the historical predecessor AND the reset as an
+    ordered suffix, which reproduces the recorded identity exactly.
 
-    Predecessor IDENTITY, not the effective head and not an entry count. Two
-    journal states can share a head while differing in history, and a count is
-    not a history at all; the predecessor link is also the chain idiom this
-    repo already uses, where a record names its predecessor's hash.
+    **The position is what closes the class rather than the instance.** Copied
+    bytes appended later always land at a later line, so a stale position
+    claim is unavoidable no matter how much surrounding context is replayed
+    with them: the two-line replay, a full-suffix replay and a wholesale
+    journal concatenation all fail the same check for the same reason. Identity
+    stays in the pair because position alone would accept a truncation that
+    happens to realign a different entry onto the recorded line.
+
+    Physical LINE, never an index among parsed entries: an index is a judgment,
+    and a future build that classifies one line differently renumbers every
+    entry after it and silently voids every reset bound below.
+
+    The residual, stated rather than implied: truncating the journal and then
+    replaying realigns positions, and this cannot detect it. That is
+    journal-rollback territory — the known bound of unsigned local state, the
+    same class as deleting the journal outright and being met with
+    trust-on-first-use. The named upgrade is the deferred signed grammar, whose
+    chained entries make a truncation detectable rather than merely
+    disbelieved.
     """
+
 
 
 # ---------------------------------------------------------------------------
@@ -568,9 +587,27 @@ def _entry_line(entry: HeadAttestation) -> str:
         record["location"] = entry.location
     if entry.note:
         record["note"] = entry.note
-    if entry.follows:
-        record["follows"] = entry.follows
+    if entry.follows is not None:
+        record["follows"] = [entry.follows[0], entry.follows[1]]
     return json.dumps(record, separators=(",", ":"), sort_keys=True) + "\n"
+
+
+def _follows_of(raw: object) -> tuple[int, str] | None:
+    """A predecessor claim off the wire, or None if there is not a valid one.
+
+    A malformed claim reads as ABSENT rather than as a claim that fails to
+    match. Both end at the same place — the reset is not honored — and absent
+    is the honest description of bytes this build cannot read as a pair.
+    """
+    if (
+        isinstance(raw, list)
+        and len(raw) == 2
+        and isinstance(raw[0], int)
+        and not isinstance(raw[0], bool)
+        and isinstance(raw[1], str)
+    ):
+        return (raw[0], raw[1])
+    return None
 
 
 def _parse_entry(raw: object) -> HeadAttestation | None:
@@ -634,7 +671,7 @@ def _parse_entry(raw: object) -> HeadAttestation | None:
         observed_at=float(observed_at),
         location=raw["location"] if isinstance(raw.get("location"), str) else "",
         note=raw["note"] if isinstance(raw.get("note"), str) else "",
-        follows=raw["follows"] if isinstance(raw.get("follows"), str) else "",
+        follows=_follows_of(raw.get("follows")),
     )
 
 
@@ -801,6 +838,7 @@ class JournalRead:
 
 def _epoch_of(
     entries: tuple[HeadAttestation, ...],
+    positions: tuple[int, ...],
 ) -> tuple[tuple[HeadAttestation, ...], tuple[str, ...]]:
     """The entries in the current trust epoch, reset-INCLUSIVE.
 
@@ -818,10 +856,12 @@ def _epoch_of(
     open classifying first contact — the deadlock's mirror image, and silent
     re-acceptance by a different route.
 
-    **A reset is honored only if its recorded predecessor is the entry
-    actually preceding it**, which is what makes a replayed reset
-    inexpressible as valid rather than merely detectable. See
-    :attr:`HeadAttestation.follows`.
+    **A reset is honored only if its recorded predecessor — LINE and identity
+    both — is the entry actually preceding it**, which is what makes a replayed
+    reset inexpressible as valid rather than merely detectable. Identity alone
+    was not enough: replaying the historical predecessor together with the
+    reset reproduces it exactly. The line cannot be reproduced, because copied
+    bytes appended later land later. See :attr:`HeadAttestation.follows`.
 
     A reset whose binding does not match is **not an epoch boundary**, and the
     scan keeps walking back for an earlier valid one. It is reported through
@@ -844,18 +884,31 @@ def _epoch_of(
         entry = entries[index]
         if entry.kind is not Kind.TRUST_RESET:
             continue
-        expected = "" if index == 0 else entry_identity(entries[index - 1])
+        expected: tuple[int, str] = (
+            (0, "")
+            if index == 0
+            else (positions[index - 1], entry_identity(entries[index - 1]))
+        )
         if entry.follows == expected:
             return entries[index:], tuple(notes)
         notes.append(
             f"trust-reset at ordinal {entry.head.ordinal}: recorded "
-            f"predecessor {entry.follows or '(none)'} is not the entry that "
-            f"precedes it ({expected or '(none)'}), so it does not open an "
-            "epoch — a reset is bound to the entry it was appended after, and "
-            "one that has been copied or replayed cannot satisfy that binding "
-            "anywhere else"
+            f"predecessor {_claim_text(entry.follows)} is not the entry that "
+            f"precedes it ({_claim_text(expected)}), so it does not open an "
+            "epoch — a reset is bound to the line it was appended after and to "
+            "what sat there, and bytes copied to any other position cannot "
+            "satisfy both"
         )
     return entries, tuple(notes)
+
+
+def _claim_text(claim: tuple[int, str] | None) -> str:
+    """A predecessor claim for an operator reading a skip record."""
+    if claim is None:
+        return "(none)"
+    if claim == (0, ""):
+        return "(start of journal)"
+    return f"line {claim[0]}/{claim[1][:12]}"
 
 
 def entry_identity(entry: HeadAttestation) -> str:
@@ -939,9 +992,17 @@ def _classify(decoded: object) -> str:
 
 def _scan(
     lines: Iterable[str],
-) -> tuple[list[HeadAttestation], list[str], bool]:
-    """Every readable entry in file order, what was skipped, and whether a
-    header was seen.
+) -> tuple[list[tuple[int, HeadAttestation]], list[str], bool]:
+    """Every readable entry with its PHYSICAL LINE ORDINAL, what was skipped,
+    and whether a header was seen.
+
+    The line number is the file's own, counted from 1 over every line including
+    ones this build skipped — never an index among the entries that happened to
+    parse. That distinction is the whole of the position claim: an index among
+    valid entries is a judgment, and a future build that classifies one line
+    differently renumbers every entry after it, silently voiding every reset
+    bound below. Physical line N is line N forever in a file that is only ever
+    appended to.
 
     Split out of :func:`parse_journal_lines` so a caller can reach the entries
     WITHOUT the judgment built on top of them. That judgment can refuse —
@@ -950,7 +1011,7 @@ def _scan(
     will not answer for. A recovery path that depended on the read it recovers
     from would be unusable exactly when it is needed.
     """
-    entries: list[HeadAttestation] = []
+    entries: list[tuple[int, HeadAttestation]] = []
     skipped: list[str] = []
     header_seen = False
     for index, line in enumerate(lines):
@@ -979,18 +1040,21 @@ def _scan(
         if entry is None:
             skipped.append(f"line {index + 1}: not readable by this build")
             continue
-        entries.append(entry)
+        entries.append((index + 1, entry))
 
     return entries, skipped, header_seen
 
 
-def last_entry(lineage: str) -> HeadAttestation | None:
-    """The last readable entry in this lineage's journal, or None.
+def last_entry(lineage: str) -> tuple[int, HeadAttestation] | None:
+    """The last readable entry and its PHYSICAL LINE, or None if there is none.
 
-    File order, not maximum ordinal: a trust reset binds to the entry it is
-    physically appended after, which is what a later reader will find sitting
-    in front of it. Deliberately performs no epoch scoping, no equivocation
-    check and no K computation — see :func:`_scan`.
+    Both halves, because a trust reset binds to both — see
+    :attr:`HeadAttestation.follows`. File order, not maximum ordinal: a reset
+    binds to the entry it is physically appended after, which is what a later
+    reader finds sitting in front of it.
+
+    Deliberately performs no epoch scoping, no equivocation check and no *K*
+    computation. That is not an optimization — see :func:`_scan`.
     """
     try:
         text = journal_path(lineage).read_text(encoding="utf-8")
@@ -1001,8 +1065,8 @@ def last_entry(lineage: str) -> HeadAttestation | None:
             f"the journal for lineage {lineage!r} exists but cannot be read "
             f"as text at all: {exc}"
         ) from exc
-    entries, _skipped, _header = _scan(text.splitlines(keepends=True))
-    return entries[-1] if entries else None
+    scanned, _skipped, _header = _scan(text.splitlines(keepends=True))
+    return scanned[-1] if scanned else None
 
 
 def parse_journal_lines(lines: Iterable[str]) -> JournalRead:
@@ -1037,8 +1101,9 @@ def parse_journal_lines(lines: Iterable[str]) -> JournalRead:
     :class:`JournalUnreadable` belongs to :func:`read_journal`, where there
     may be no text to hand this function at all.
     """
-    entries, skipped, header_seen = _scan(lines)
-    frozen = tuple(entries)
+    scanned, skipped, header_seen = _scan(lines)
+    positions = tuple(line for line, _entry in scanned)
+    frozen = tuple(entry for _line, entry in scanned)
     if frozen and not header_seen:
         # TOLERATED, not refused. The entries are self-describing evidence
         # that heads were accepted, and a weakened claim is available — so
@@ -1051,7 +1116,7 @@ def parse_journal_lines(lines: Iterable[str]) -> JournalRead:
             "header: absent, so the protocol and wire versions these record "
             "hashes derive under are unknown"
         )
-    epoch, epoch_notes = _epoch_of(frozen)
+    epoch, epoch_notes = _epoch_of(frozen, positions)
     skipped.extend(epoch_notes)
     best = _known_of(epoch)
     known: EstablishedHead | HeadLowerBound | HeadUnreadable | None

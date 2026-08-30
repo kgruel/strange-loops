@@ -69,10 +69,10 @@ engine pytest libs/engine/tests`, and `tests/architecture` in its own run).
 
 | Suite | Baseline | After | Delta |
 |---|---|---|---|
-| engine | 2158 passed, 1 skipped | 2205 passed, 1 skipped | **+47** |
+| engine | 2158 passed, 1 skipped | 2206 passed, 1 skipped | **+48** |
 | architecture | 99 passed | 99 passed | **0** — Rule 18 is not parametrized per target |
 
-Every delta accounted for: **+46** in `test_arrival_head_seam.py`, **+1** in
+Every delta accounted for: **+47** in `test_arrival_head_seam.py`, **+1** in
 `test_arrival_registry.py` (`test_closing_a_query_that_never_read_does_not_build_a_reader`).
 The renamed §0.4 test is 1-for-1. `ruff check` passes on every file this WP wrote
 or touched.
@@ -180,6 +180,46 @@ proposal disagreed and the module won.
     property, or closing would be the thing that constructs the reader the fix
     deferred.
 
+## This seam is where bound semantics become enforced behavior
+
+Raised by WP2's gate mid-build and folded in here. **Nothing upstream pins what a
+`HeadLowerBound` may answer.** Verified in this tree rather than taken on report:
+
+- `dir(HeadLowerBound)` has **no public names at all** — no methods, nothing that
+  could refuse a misuse. It is a data carrier.
+- `JournalRead.established_head()` *refuses* rather than answering on a bound, so
+  the module's only comparison door is shut rather than guarded — a caller that
+  goes around it meets nothing.
+- WP2's `comparison` vector family is not in this tree (parallel WP, no file
+  overlap), and per its gate the runner recomputes the bound arithmetic
+  internally, so `compare` is never reached on a bound. The `sound_answer` field
+  in those vectors is a statement *about* the semantics, not an enforcement of
+  them.
+
+So the seam is the first real consumer of bound semantics and, today, the only
+place they are executable. Two behaviors are therefore load-bearing here and each
+now has its own test **and its own mutation demo**, rather than resting on the
+posture tests that happen to cover them:
+
+| Rule | Test | Mutation |
+|---|---|---|
+| A bound MAY refuse below itself | `test_an_incomplete_read_still_refuses_a_head_below_the_bound` | (f) |
+| A bound may NOT answer `unchanged` or `advanced` | `test_an_incomplete_read_proceeds_labeled_at_or_above_the_bound`, `test_an_incomplete_read_does_not_answer_advanced_above_the_bound` | (g) |
+
+The gap this closed was real: mutation (c) — the *obtaining* bypass, re-deriving
+*K* from `read.epoch` — leaves the rollback-from-a-bound test **passing**, because
+the re-derived head is the same entry the bound rests on. (c) attacks how a caller
+gets a head; (f) and (g) attack what the bound is allowed to say once it has one,
+and only the latter two hold the semantics. The `advanced` half in particular had
+no dedicated test before this: "below the bound is a rollback" is easy to believe
+and get right, while "above the bound is an advance" *feels* equally safe and is
+the unsound one, since nothing bounds the accepted head from above.
+
+`HeadUnreadable` needs none of this. It carries no ordinal by construction, so
+every comparison declines including rollback, and
+`test_a_journal_with_no_readable_content_is_not_granted_a_receipt` pins the
+consequence that matters.
+
 ## The defect the gate item found — and it was found by running it
 
 `finding:s3wp3-open-compares-across-time`, resolved in build.
@@ -283,6 +323,8 @@ Each applied to the working tree, the suite run, the mutation reverted, and
 | (c) | the seam swallows `IndeterminateComparison` by re-deriving *K* from `read.epoch` — the bypass WP1 explicitly named as reachable | **3 failed, 43 passed** — `test_an_incomplete_read_proceeds_labeled_at_or_above_the_bound`, `test_a_journal_with_no_readable_content_is_not_granted_a_receipt` (a receipt is written for an unreadable journal — BLOCKING-2 reborn), `test_the_carried_refusal_is_the_one_the_journal_itself_raises` |
 | (d) | the across-time re-read removed | **2 failed, 44 passed** — `test_a_commit_racing_the_open_is_not_reported_as_a_rollback` and `test_a_genuine_rollback_survives_the_re_observation` (which pins the op count, so the fix cannot be faked by weakening the refusal) |
 | (e) | the earned bootstrap entry written inside `_observe`, before the projection comparison can refuse | **1 failed, 45 passed** — `test_the_refused_truncation_left_no_memory_claiming_it_was_accepted` |
+| (f) | the rollback-from-a-bound arm removed from `_degraded` | **1 failed, 46 passed** — `test_an_incomplete_read_still_refuses_a_head_below_the_bound` |
+| (g) | the bound treated as an established head, so the seam answers from it | **4 failed, 43 passed** — `test_an_incomplete_read_proceeds_labeled_at_or_above_the_bound` (answers `unchanged`), `test_an_incomplete_read_does_not_answer_advanced_above_the_bound` (answers `advanced`), plus the receipt and carried-refusal tests |
 
 (b) and (c) each also have a mirror pinned: (b)'s canonical form is asserted
 directly through `bound_lineage(canonical_location(detour))`, and (c)'s two sound

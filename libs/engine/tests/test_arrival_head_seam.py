@@ -1098,6 +1098,47 @@ def test_an_incomplete_read_proceeds_labeled_at_or_above_the_bound(tmp_path):
     assert ledger.head().ordinal == 1
 
 
+def test_an_incomplete_read_does_not_answer_advanced_above_the_bound(tmp_path):
+    """The second unsound proceed-answer, and the one a reader talks themselves
+    into.
+
+    "Below the bound is a rollback" is easy to believe and easy to get right.
+    "Above the bound is an advance" *feels* equally safe and is not: nothing
+    bounds the accepted head from ABOVE, so a presented head at ordinal 3 may
+    still sit below an entry at 200 that the read missed, and descent verified
+    from the bound says nothing about an entry that was never on the walk.
+
+    **This seam is where that rule becomes enforced behavior.** Nothing
+    upstream pins it — ``established_head()`` refuses rather than answering,
+    ``HeadLowerBound`` has no public methods at all, and the comparison vectors
+    recompute the arithmetic in their own runner rather than driving the
+    module. So a caller that reached for ``at_least`` and compared it like a
+    head would meet nothing that objected, which is exactly why the assertion
+    lives here.
+
+    The write assertion is the other half: journaling a ``DESCENDANT`` entry at
+    the presented head would raise the bound on evidence the read did not have,
+    which is how a degraded open launders itself into a memory.
+    """
+    log_path = minted(tmp_path / "s.arrival")
+    append_legacy(log_path, "one")
+    opened(log_path)
+    lineage = lineage_of(log_path)
+    append_entry_for_damage(lineage)
+    damage_a_line(lineage, "damage-me")
+    before = journal_bytes(lineage)
+
+    append_legacy(log_path, "two", "three")
+    ledger = opened(log_path)
+
+    comparison = ledger.opened.comparison
+    assert isinstance(comparison, Indeterminate), "an advance was claimed"
+    assert comparison.presented.ordinal == 3
+    assert comparison.at_least is not None
+    assert comparison.at_least.ordinal == 1
+    assert journal_bytes(lineage) == before, "the bound was raised on nothing"
+
+
 def test_a_degraded_open_writes_nothing(tmp_path):
     """The degradation never launders itself into a memory.
 

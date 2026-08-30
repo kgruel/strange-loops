@@ -757,7 +757,9 @@ def test_resume_against_divergent_valid_chain_refuses_target_mismatch(tmp_path: 
         authored_at=9999.0,
         observer="alice",
         origin="",
-        body={"text": "divergent fact at ordinal 3"},
+        body=body_of_fact_row(
+            (FACT_UUID4_SIGNED["id"], "concept", 9999.0, "alice", "", '{"divergent": "payload"}', None)
+        ),
         signature=None,
     )
     ledger.append(head_ord2, [divergent_draft])

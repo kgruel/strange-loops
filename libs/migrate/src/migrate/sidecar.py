@@ -73,6 +73,7 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+# INTERIM: direct ckdl parse pending the ruled dissolution — lang exposing its effective-store-clause query (finding s4wp3-migrate-undeclared-ckdl-bypasses-lang); do not add further ckdl call sites.
 import ckdl
 
 from engine.arrival import (
@@ -120,6 +121,7 @@ from .refusals import (
     ReportHeadMismatchRefused,
     ReportMalformedRefused,
     ReportMissingTargetRefused,
+    ReportTargetUnopenableRefused,
     SourceChangedRefused,
     TargetMismatchOnResumeRefused,
     TargetUnopenable,
@@ -580,6 +582,7 @@ def verify_migration_report(
         ReportMalformedRefused: If report is unreadable, not JSON, or carries unknown keys.
         ReportBadSignatureRefused: If signature fails verification.
         ReportMissingTargetRefused: If target store file does not exist.
+        ReportTargetUnopenableRefused: If target store cannot be opened or read.
         ReportHeadMismatchRefused: If target store head does not match report claim.
     """
     r_path = Path(report_path).resolve()
@@ -645,9 +648,11 @@ def verify_migration_report(
     try:
         ledger, _ = registry.open(descriptor)
         live_head = ledger.head()
-    except Exception as exc:
-        raise ReportHeadMismatchRefused(
-            f"Cannot read head from target arrival store {t_path}: {exc}"
+    except (StoreLost, ArrivalTornTail, ArrivalCorrupt, GenesisRefused, OSError) as exc:
+        raise ReportTargetUnopenableRefused(
+            f"Cannot open or read head from target arrival store {t_path}: {exc}",
+            target_path=str(t_path),
+            cause=exc,
         ) from exc
 
     if (

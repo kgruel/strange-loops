@@ -201,6 +201,81 @@ proposal disagreed and the module won.
     property, or closing would be the thing that constructs the reader the fix
     deferred.
 
+## Design amendment #5 — weakening is epoch-scoped by line position
+
+From my own verify-item-1 answer. Weight is now **cause × position**: the cause
+half already existed (a re-assertion never weighs); the position half is that a
+line-positioned loss sitting **before the boundary reset's line** carries zero
+weight. The ceremony decreed trust in a head, and everything positionally behind
+that decree is what it decreed past. Appends are tail-only, so a line's position
+in the file is its place in time — the non-ascending order this journal
+documents is about **ordinals**, which two writers interleave, never about
+positions, which the filesystem serializes.
+
+The four edges, each stated in code rather than left to fall out of a
+comparison:
+
+1. **Structural absences are exempt.** A missing header carries no line, which
+   is what marks it structural; it keeps full weight at any boundary.
+2. **`at_least` is epoch-scoped** — verified, and it already was (below).
+3. **No valid reset → no boundary → full weight everywhere**, spelled out,
+   because "there is nothing to be after" is a different situation from "this is
+   after it".
+4. **Below means physical line**, the same coordinate system as `follows`.
+   Ordinals never enter it.
+
+**Mutation demo** (committed `d39e6cfa` first, tree byte-clean after revert):
+position scoping reverted → **2 failed, 176 passed** —
+`test_damage_behind_the_boundary_no_longer_weakens_the_read` and
+`test_damage_on_both_sides_bounds_from_the_current_epoch_only`.
+
+### Edge 1 — what the header actually carries, and why it changes nothing here
+
+The header holds `v`, `type`, `protocol` and `wire`. The exemption is right on
+its own terms: the absence is a claim about the file rather than about a line.
+
+But the concrete claim it protects is **not enforced anywhere today**. Grepping
+the module, `_PROTOCOL_VERSION` and `_WIRE_VERSION` appear at their definitions
+and at the single write site, and **nowhere else** — nothing reads them back, so
+"a v1 journal is never silently compared against a v2 head" is still the half-kept
+promise WP1 named, with wire v2 as its forcing consumer. So a headerless journal
+today weakens a read on the strength of a check that does not yet exist.
+
+That does not change the implementation — an unenforced claim is exactly the kind
+that should keep its weight until the enforcement lands, and exempting it would
+mean re-deciding when wire v2 arrives. Reported because you asked whether it
+changes the picture: it changes the *reason*, not the *ruling*.
+
+### Edge 2 — `at_least` was already epoch-scoped
+
+Verified rather than assumed. `best = _known_of(epoch)` takes the epoch, not the
+file, so an abandoned-epoch high ordinal cannot inflate the bound. Confirmed
+empirically: abandoned epoch reaching 100, reset to 90, current epoch at 91-92
+with damage — `at_least` reads **92**, not 100. No fix was needed;
+`test_damage_on_both_sides_bounds_from_the_current_epoch_only` pins it so it
+cannot regress.
+
+### One thing the mutation demo caught in my own prose
+
+The healing test did **not** fail under the mutation, and the reason matters: a
+voided-reset note can only come from a reset **above** the boundary, because
+`_epoch_of` walks backward and returns at the first valid one. So the position
+filter never exempts a voided reset — and the comment I had written, saying a
+failed attempt behind a later successful one "weighs nothing", described a path
+nothing can reach. Corrected at the site and in the test's docstring: that
+construction heals through the walk short-circuiting, and position scoping is
+exercised by the damage tests instead. It is the same stale-prose failure this
+file has paid for repeatedly, caught this time by running the mutation rather
+than by reading.
+
+### The disclosure sentence
+
+Carried in `trust_reset`'s docstring, with the open question named: a reset
+decrees trust in *N*; verified descendants of *N*, including re-presentations of
+abandoned history, are accepted; fencing out authentic history is not
+expressible unsigned. Ledgered as
+`design:arrival-reset-descendant-acceptance`, Kyle's call at the slice-6 gate.
+
 ## Design amendment #4 — a re-assertion is recorded, and carries no weight
 
 `finding:s3-dedup-skip-weakens-read-permanently`. WP2's integration found the

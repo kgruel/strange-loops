@@ -1247,11 +1247,15 @@ def parse_journal_lines(lines: Iterable[str]) -> JournalRead:
     for line, note in epoch_notes:
         # A voided reset KEEPS its cause-weight, ruled narrowly: the content of
         # the line is known, but what the operator INTENDED by it is not, and
-        # that uncertainty is exactly what a bound represents. It is positioned
-        # like any other line, so a voided attempt sitting behind a LATER
-        # successful reset weighs nothing — which is what lets a re-run of the
-        # ceremony heal the journal instead of leaving its own failed attempt
-        # bounding every read.
+        # that uncertainty is exactly what a bound represents.
+        #
+        # Its position is carried for uniformity, and it never exempts anything:
+        # `_epoch_of` walks BACKWARD and returns at the first valid reset, so
+        # every note it produces comes from a reset ABOVE the boundary by
+        # construction. A failed attempt followed by a successful re-run still
+        # heals — but through the walk short-circuiting past it, not through
+        # this weighting. Stated because a comment claiming the weighting does
+        # that work would describe a path nothing can reach.
         skips.missed(note, line=line)
     weakening = skips.weakening(boundary)
     best = _known_of(epoch)

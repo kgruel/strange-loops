@@ -1765,11 +1765,15 @@ def test_damage_at_or_after_the_boundary_still_weakens():
 def test_a_failed_ceremony_attempt_does_not_bound_a_successful_rerun():
     """The healing story end to end.
 
-    A reset whose binding did not match is a weakening cause — but it is a
-    positioned one, so a later successful reset puts it behind the boundary and
-    the journal reads cleanly again. Otherwise the ceremony's own failed
-    attempt would bound every read after it, and the operator's remedy would be
-    the thing that broke them.
+    A reset whose binding did not match is a weakening cause, so the operator's
+    own failed attempt could otherwise bound every read after it — the remedy
+    being the thing that broke them.
+
+    It heals through the epoch walk rather than through position weighting, and
+    the distinction matters for anyone reading this as coverage of the latter:
+    ``_epoch_of`` walks BACKWARD and returns at the first valid reset, so the
+    voided attempt below it is never examined and produces no note at all.
+    Position scoping is exercised by the damage tests, not by this one.
     """
     append_entry(observation(1))
     append_entry(observation(9))

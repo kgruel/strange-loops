@@ -4,7 +4,7 @@ Historical artifact copied from ``store.rebirth`` at commit
 ``affe92a6fc1a034b477cbc068cc563f6e5ca69e6``.
 
 Quarantined verbatim in ``migrate`` to preserve legacy ID era knowledge:
-- uuid4 era (2026-03-15..05-16): hex IDs;
+- other (non-ULID IDs, uuid4, etc.): legacy hex IDs and non-canonical forms;
 - lowercase-ULID era (sqlite-ulid C extension): lowercase Crockford base32;
 - canonical ULID era (python-ulid): uppercase Crockford base32.
 """
@@ -121,9 +121,9 @@ def ulid_migration() -> Transform:
 
 
 def classify_id_era(id_str: str) -> str:
-    """Classify an ID into its historical era: canonical-ulid, lowercase-ulid, or uuid4."""
+    """Classify an ID into its historical era: canonical-ulid, lowercase-ulid, or other."""
     if is_ulid(id_str):
         return "canonical-ulid"
     if len(id_str) == 26 and all(c in _CROCKFORD_LOWER for c in id_str):
         return "lowercase-ulid"
-    return "uuid4"
+    return "other"

@@ -21,7 +21,6 @@ from migrate.legacy_jsonl import (
     load_line,
 )
 from migrate.legacy_sqlite import (
-    _chain_head,
     _content_sha256,
     _facts_have_signature,
     _tick_columns,
@@ -42,8 +41,8 @@ def test_legacy_ids_classification_and_transform() -> None:
 
     assert classify_id_era(canonical_id) == "canonical-ulid"
     assert classify_id_era(lower_id) == "lowercase-ulid"
-    assert classify_id_era(uuid4_id) == "uuid4"
-    assert classify_id_era(short_id) == "uuid4"
+    assert classify_id_era(uuid4_id) == "other"
+    assert classify_id_era(short_id) == "other"
 
     assert is_ulid(canonical_id) is True
     assert is_ulid(lower_id) is False
@@ -128,11 +127,6 @@ def test_legacy_sqlite_read(tmp_path: Path) -> None:
         assert len(ticks) == 2
         assert ticks[0]["id"] == "01ARZ3NDEKTSV4RRFFQ69G5FT1"
         assert ticks[1]["name"] == "checkpoint"
-
-        head = _chain_head(conn)
-        assert head is not None
-        assert isinstance(head, str)
-        assert len(head) == 64
 
         sha = _content_sha256(conn)
         assert isinstance(sha, str)

@@ -317,6 +317,35 @@ run: `~/.local/state/loops` does not exist.
    fixed in build: the across-time comparison
    (`finding:s3wp3-open-compares-across-time`). Not a module change — WP1's module
    is untouched.
+4. **`.at_least` is used for one refusal beyond ROLLBACK, and this is a declared
+   extension of brief item 7.** The brief says "`.at_least` is ROLLBACK-ONLY"; the
+   seam also raises `HeadFork` when the presented head sits at the bound's ordinal
+   with a different `record_hash`. Stated plainly so the gate rules it rather than
+   discovers it.
+
+   Why it is inside the handoff's actual rule. WP1's rule is about which **answers**
+   a bound may license: "it may be compared to refuse a presented head below it,
+   and it may **never be used to answer `unchanged` or `advanced`**." Both
+   forbidden answers are *proceed* answers, and the reason is stated in
+   `HeadLowerBound`'s docstring — nothing bounds the accepted head from above, so
+   equal-may-be-a-rollback and higher-may-be-below-a-lost-entry. A fork refusal is
+   neither: `at_least` is a real entry that survived the read and passed
+   `_known_of`'s equivocation check, so it *is* a head this machine accepted at
+   that ordinal, and a store presenting a different record at that same ordinal is
+   two records at one height. The lines the read missed cannot make that agree,
+   because they carry no information about **this** ordinal that could reconcile
+   two different hashes at it.
+
+   And it fails in the safe direction: the extension is strictly *more* refusing,
+   so a wrong call here costs an operator a false incident, never a silent
+   acceptance — the opposite of the direction every other rule in this module
+   guards. If the arbiter prefers the literal reading, deleting the fork arm in
+   `_degraded` is a four-line removal and `test_an_incomplete_read_still_refuses_a_fork_at_the_bound`
+   is the test that would go with it; nothing else depends on it.
+
+   **`HeadUnreadable` needed no such judgment and got none** — it carries no
+   ordinal by construction, so every comparison declines, rollback included. That
+   half is honored exactly as written.
 
 **No module changes.** `arrival_head_attestation.py` is byte-identical to
 `9ed893fe`; everything WP3 needed from it was already on its API, including

@@ -2468,6 +2468,39 @@ def test_the_alias_sweep_refuses_an_unreadable_bindings_file_on_its_own(tmp_path
         bindings_path().chmod(0o600)
 
 
+def test_the_alias_sweep_refuses_an_unparseable_line_on_its_own(tmp_path):
+    """``aliased_lineage``'s ValueError arm, reached directly.
+
+    Its own per-site pin, because through the open path ``bound_lineage``
+    reads the same file first and refuses there — so a mutation to this arm
+    alone breaks nothing that goes through an open. Defence in depth is only
+    depth if each layer is pinned separately; otherwise the outer layer's
+    correctness is what the test is measuring.
+    """
+    _log_path, alias, _lineage = _reached_by_an_alias(tmp_path)
+    with bindings_path().open("a", encoding="utf-8") as handle:
+        handle.write("{ this line does not parse\n")
+    with pytest.raises(BindingProbeUnanswered):
+        aliased_lineage(canonical_location(str(alias)))
+
+
+def test_bound_lineage_refuses_an_unreadable_bindings_file_on_its_own(tmp_path):
+    """The fourth site's OSError arm, pinned on its own for the same reason.
+
+    Through an open, ``aliased_lineage`` would refuse even if this arm were
+    reverted, so the integration test cannot tell the two apart. This one calls
+    the layer directly.
+    """
+    _needs_unprivileged()
+    record_binding("/a/project.arrival", "01ARZ3NDEKTSV4RRFFQ69G5FAV", 1.0)
+    bindings_path().chmod(0o000)
+    try:
+        with pytest.raises(BindingProbeUnanswered):
+            bound_lineage("/a/project.arrival")
+    finally:
+        bindings_path().chmod(0o600)
+
+
 def test_every_probe_refusal_is_one_family(tmp_path):
     """The pattern is nameable, which is the point of giving it a parent.
 

@@ -2021,7 +2021,21 @@ def test_a_restored_abandoned_backup_does_not_open_unchanged(tmp_path):
         isinstance(comparison, Compared)
         and comparison.outcome is Outcome.UNCHANGED
     ), "the abandoned state opened unchanged"
-    assert isinstance(comparison, Indeterminate)
+
+    # TIGHTENED, and the outcome is deterministic: a re-assertion carries no
+    # weight now, so the read is ESTABLISHED and the comparison completes
+    # rather than declining on a bound. It answers ADVANCED — not the REWRITE
+    # a divergent history would give — because THIS construction resets to a
+    # truncated PREFIX of the same history, so the restored backup really is a
+    # verified descendant of the accepted head: the full walk succeeds and the
+    # record at K's ordinal is K's. That is the honest answer for what is
+    # built here, and it is reached with descent verified rather than assumed.
+    #
+    # What the test pins either way is the L-5 vector: without the dedup gate
+    # K reaches the abandoned head, the backup compares EQUAL, and the
+    # unchanged arm gathers no evidence at all.
+    assert isinstance(comparison, Compared)
+    assert comparison.outcome is Outcome.ADVANCED
 
 
 def test_a_reset_whose_predecessor_moved_lines_is_not_honored(tmp_path):

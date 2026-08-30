@@ -699,7 +699,8 @@ class HeadLowerBound:
     condition, and this is its definition:** the read needed something it did
     not get — a line it could not parse, a line it could not classify, an
     entry written by a later build, or the header itself. :attr:`JournalRead.skipped`
-    records exactly that set, and a non-empty ``skipped`` *is* the condition.
+    :attr:`skipped` records every skip, and the WEAKENING ones — every cause
+    except a literal re-assertion — are what produce this type.
     Prose here has drifted four times by naming one cause as though it were
     the definition (unreadable lines, then damage past the last line, then a
     missing header); the term is deliberately about what the read LACKS
@@ -803,8 +804,18 @@ class JournalRead:
     """What this build could not use, each with why. Mostly lines; a missing
     header is reported here too, without a line number, because an absence
     does not have one. Reported rather than swallowed: a tolerated loss that
-    nobody is told about is just a loss. Non-empty is exactly the condition
-    that weakens :attr:`known` to a bound."""
+    nobody is told about is just a loss.
+
+    **Non-empty no longer implies a weakened claim**, and that is the one thing
+    to carry away from this field. Skips are weighted per cause: a line that is
+    byte-identical to an earlier one is a re-assertion, recorded here and
+    carrying NO weight, because its content is a line this read already
+    counted. Every other cause weakens. A crash-retry duplicate is
+    byte-identical by construction, and the journal is append-only, so
+    weighting it would have bounded every subsequent read for the life of the
+    file (``finding:s3-dedup-skip-weakens-read-permanently``).
+    :class:`HeadLowerBound` carries only the weakening subset, so the causes of
+    a bound are readable off the bound itself."""
 
     def established_head(self) -> HeadAttestation | None:
         """*K* for a full comparison, or a refusal if the read was incomplete.
@@ -874,10 +885,11 @@ def _epoch_of(
     acceptance.
 
     Note the consequence, which is deliberate and not a side effect: a
-    rejected reset puts a note in ``skipped``, and a non-empty ``skipped`` is
-    exactly the condition that weakens the read to a
-    :class:`HeadLowerBound`. So a journal holding a replayed reset still
-    refuses anything below the bound, which is the attack it was closing.
+    rejected reset puts a WEAKENING note in ``skipped`` — resets keep their
+    weight, ruled narrowly, because a voided reset leaves the operator's intent
+    uncertain even where the line's content is known. So a journal holding a
+    replayed reset still refuses anything below the bound, which is the attack
+    it was closing.
     """
     notes: list[str] = []
     for index in range(len(entries) - 1, -1, -1):
@@ -990,9 +1002,56 @@ def _classify(decoded: object) -> str:
     return _ENTRY_SHAPED
 
 
+class _Skips:
+    """Skip records, and which of them actually represent IGNORANCE.
+
+    A plain class rather than a dataclass, deliberately. Rule 5 asks lib
+    dataclasses to be frozen because they are value objects; this is an
+    ACCUMULATOR, and it lives only inside one parse. Declaring it frozen with
+    mutable lists inside would satisfy the rule's letter while holding exactly
+    the mutable state the rule is about — the shape of gaming a ratchet rather
+    than answering it.
+
+    **Per-cause, deliberately not per-read.** The tempting shape is "a read
+    whose only skips are re-assertions is established", and it does not
+    compose: a journal holding a duplicate AND an unreadable line must still
+    bound, and it does so here because the unreadable line carries its own
+    weight regardless of what else is in the file. Each call site names its
+    cause by which method it calls, so a new cause has to choose.
+
+    The bound machinery exists to represent ignorance. A re-assertion is the
+    one cause that carries none — the skipped line's content is a line this
+    read already counted, so nothing about the accepted head is unknown because
+    of it (``finding:s3-dedup-skip-weakens-read-permanently``). Everything else
+    is something the read needed and did not get.
+    """
+
+    def __init__(self) -> None:
+        self.all: list[str] = []
+        self.weakening: list[str] = []
+
+    def missed(self, note: str) -> None:
+        """The read needed something and did not get it. Recorded, and it counts."""
+        self.all.append(note)
+        self.weakening.append(note)
+
+    def re_asserted(self, note: str) -> None:
+        """The read got something it already had. Recorded, and it does NOT count.
+
+        Still reported — a tolerated loss nobody is told about is just a loss,
+        and an operator seeing replayed lines in their journal wants to know.
+        What it must not do is weaken the claim, because a crash-retry
+        duplicate is byte-identical by construction and the journal is
+        append-only: one benign retry would otherwise bound every subsequent
+        read for the life of the file, and ``established_head()`` would raise
+        forever.
+        """
+        self.all.append(note)
+
+
 def _scan(
     lines: Iterable[str],
-) -> tuple[list[tuple[int, HeadAttestation]], list[str], bool]:
+) -> tuple[list[tuple[int, HeadAttestation]], _Skips, bool]:
     """Every readable entry with its PHYSICAL LINE ORDINAL, what was skipped,
     and whether a header was seen.
 
@@ -1012,7 +1071,7 @@ def _scan(
     from would be unusable exactly when it is needed.
     """
     entries: list[tuple[int, HeadAttestation]] = []
-    skipped: list[str] = []
+    skips = _Skips()
     seen: dict[str, int] = {}
     header_seen = False
     for index, line in enumerate(lines):
@@ -1022,7 +1081,7 @@ def _scan(
         try:
             decoded = json.loads(stripped)
         except ValueError as exc:
-            skipped.append(f"line {index + 1}: does not parse ({exc})")
+            skips.missed(f"line {index + 1}: does not parse ({exc})")
             continue
         verdict = _classify(decoded)
         if verdict is _HEADER:
@@ -1032,18 +1091,20 @@ def _scan(
             header_seen = True
             continue
         if verdict is _AMBIGUOUS:
-            skipped.append(
+            skips.missed(
                 f"line {index + 1}: carries both the journal type marker and "
                 "an entry kind, so this build cannot say which it is"
             )
             continue
         entry = _parse_entry(decoded)
         if entry is None:
-            skipped.append(f"line {index + 1}: not readable by this build")
+            skips.missed(f"line {index + 1}: not readable by this build")
             continue
         if stripped in seen:
-            # A LITERAL RE-ASSERTION. See the dedup note in the docstring.
-            skipped.append(
+            # A LITERAL RE-ASSERTION: recorded, and WEIGHTLESS. The line's
+            # content is one this read already counted, so nothing about the
+            # accepted head is unknown because of it.
+            skips.re_asserted(
                 f"line {index + 1}: byte-identical to line {seen[stripped]}, "
                 "so it re-asserts an observation this journal already holds "
                 "rather than recording a new one — a replayed line cannot "
@@ -1053,7 +1114,7 @@ def _scan(
         seen[stripped] = index + 1
         entries.append((index + 1, entry))
 
-    return entries, skipped, header_seen
+    return entries, skips, header_seen
 
 
 def last_entry(lineage: str) -> tuple[int, HeadAttestation] | None:
@@ -1076,7 +1137,7 @@ def last_entry(lineage: str) -> tuple[int, HeadAttestation] | None:
             f"the journal for lineage {lineage!r} exists but cannot be read "
             f"as text at all: {exc}"
         ) from exc
-    scanned, _skipped, _header = _scan(text.splitlines(keepends=True))
+    scanned, _skips, _header = _scan(text.splitlines(keepends=True))
     return scanned[-1] if scanned else None
 
 
@@ -1112,7 +1173,7 @@ def parse_journal_lines(lines: Iterable[str]) -> JournalRead:
     :class:`JournalUnreadable` belongs to :func:`read_journal`, where there
     may be no text to hand this function at all.
     """
-    scanned, skipped, header_seen = _scan(lines)
+    scanned, skips, header_seen = _scan(lines)
     positions = tuple(line for line, _entry in scanned)
     frozen = tuple(entry for _line, entry in scanned)
     if frozen and not header_seen:
@@ -1123,23 +1184,27 @@ def parse_journal_lines(lines: Iterable[str]) -> JournalRead:
         # the protocol and wire versions the hashes derive under, and losing
         # that is exactly what a lower bound is for. Reported without a line
         # number because an absence does not have one.
-        skipped.append(
+        skips.missed(
             "header: absent, so the protocol and wire versions these record "
             "hashes derive under are unknown"
         )
     epoch, epoch_notes = _epoch_of(frozen, positions)
-    skipped.extend(epoch_notes)
+    for note in epoch_notes:
+        # A voided reset KEEPS its weight, ruled narrowly: the content of the
+        # line is known, but what the operator INTENDED by it is not, and that
+        # uncertainty is exactly what a bound represents.
+        skips.missed(note)
     best = _known_of(epoch)
     known: EstablishedHead | HeadLowerBound | HeadUnreadable | None
     if best is not None:
         known = (
-            HeadLowerBound(at_least=best, skipped=tuple(skipped))
-            if skipped
+            HeadLowerBound(at_least=best, skipped=tuple(skips.weakening))
+            if skips.weakening
             else EstablishedHead(entry=best)
         )
-    elif skipped:
+    elif skips.weakening:
         # Content was claimed and none of it could be read. NOT first contact.
-        known = HeadUnreadable(skipped=tuple(skipped))
+        known = HeadUnreadable(skipped=tuple(skips.weakening))
     else:
         known = None
     return JournalRead(
@@ -1147,7 +1212,7 @@ def parse_journal_lines(lines: Iterable[str]) -> JournalRead:
         epoch=epoch,
         known=known,
         bootstrap=frozen[0] if frozen else None,
-        skipped=tuple(skipped),
+        skipped=tuple(skips.all),
     )
 
 

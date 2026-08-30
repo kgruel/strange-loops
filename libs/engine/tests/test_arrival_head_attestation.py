@@ -23,6 +23,7 @@ from engine.arrival_contract import ContractRefusal, Head
 from engine.arrival_head_attestation import (
     AbsentStoreOutcome,
     AttestationRefusal,
+    EstablishedHead,
     HeadAttestation,
     HeadFork,
     HeadLowerBound,
@@ -530,8 +531,10 @@ def test_a_byte_identical_duplicate_is_skipped_as_a_re_assertion():
     append_entry(observation(6))
     result = read_journal(LINEAGE)
     assert any("byte-identical" in note for note in result.skipped), result.skipped
-    assert isinstance(result.known, HeadLowerBound)
-    assert result.known.at_least.head == head(6)
+    # RECORDED, and weightless: the skipped line's content is a line this read
+    # already counted, so nothing about the accepted head is unknown.
+    assert isinstance(result.known, EstablishedHead)
+    assert result.established_head().head == head(6)
 
 
 # ---------------------------------------------------------------------------
@@ -1339,13 +1342,14 @@ def test_a_replayed_trust_reset_does_not_reopen_the_epoch_it_closed():
     append_entry(legitimate)  # the replay: the very same entry, again
 
     result = read_journal(LINEAGE)
-    assert isinstance(result.known, HeadLowerBound)
-    assert result.known.at_least.head.ordinal == 8, "the replay moved K"
+    # A replay is recorded and weightless, so the read stays ESTABLISHED — one
+    # replayed line must not cost the journal its O(1) unchanged opens.
+    assert isinstance(result.known, EstablishedHead)
+    assert result.established_head().head.ordinal == 8, "the replay moved K"
     # Caught by the byte-duplicate gate, which now fires BEFORE the position
     # binding ever sees the line — a literal replay is literal bytes.
     assert any("byte-identical" in note for note in result.skipped), result.skipped
-    # And the sound refusal the bound still supports is the one that matters.
-    assert compare(result.known.at_least, head(5), None) is Outcome.ROLLBACK
+    assert compare(result.established_head(), head(5), None) is Outcome.ROLLBACK
 
 
 def test_the_genuine_reset_is_still_honored_after_the_replay_is_rejected():
@@ -1366,8 +1370,8 @@ def test_the_genuine_reset_is_still_honored_after_the_replay_is_rejected():
     # not in it at all now: the byte-duplicate gate drops the line before it
     # can be an entry, let alone a boundary.
     assert [entry.head.ordinal for entry in result.epoch] == [5, 8]
-    assert isinstance(result.known, HeadLowerBound)
-    assert result.known.at_least.head.ordinal == 8
+    assert isinstance(result.known, EstablishedHead)
+    assert result.established_head().head.ordinal == 8
 
 
 def test_a_crash_retry_duplicate_reset_is_skipped_and_never_refuses():
@@ -1472,9 +1476,9 @@ def test_replaying_the_predecessor_with_the_reset_does_not_reopen_the_epoch():
     # epoch nor K moves.
     duplicates = [note for note in result.skipped if "byte-identical" in note]
     assert len(duplicates) == 2, result.skipped
-    assert isinstance(result.known, HeadLowerBound)
-    assert result.known.at_least.head.ordinal == 8
-    assert compare(result.known.at_least, head(5), None) is Outcome.ROLLBACK
+    assert isinstance(result.known, EstablishedHead)
+    assert result.established_head().head.ordinal == 8
+    assert compare(result.established_head(), head(5), None) is Outcome.ROLLBACK
 
 
 def test_replaying_the_whole_suffix_does_not_reopen_the_epoch():
@@ -1486,9 +1490,9 @@ def test_replaying_the_whole_suffix_does_not_reopen_the_epoch():
         append_entry(entry)
 
     result = read_journal(LINEAGE)
-    assert isinstance(result.known, HeadLowerBound)
-    assert result.known.at_least.head.ordinal == 8
-    assert compare(result.known.at_least, head(5), None) is Outcome.ROLLBACK
+    assert isinstance(result.known, EstablishedHead)
+    assert result.established_head().head.ordinal == 8
+    assert compare(result.established_head(), head(5), None) is Outcome.ROLLBACK
     assert any("byte-identical" in note for note in result.skipped)
 
 
@@ -1515,10 +1519,14 @@ def test_a_replayed_advance_cannot_reimport_an_abandoned_head():
 
     result = read_journal(LINEAGE)
     assert any("byte-identical" in note for note in result.skipped)
-    assert isinstance(result.known, HeadLowerBound)
-    assert result.known.at_least.head.ordinal == 8, "K reached an abandoned head"
-    # And the restored abandoned backup is no longer equal to what is remembered.
-    assert result.known.at_least.head != head(10)
+    assert isinstance(result.known, EstablishedHead)
+    known = result.established_head()
+    assert known.head.ordinal == 8, "K reached an abandoned head"
+    # And the restored abandoned backup is no longer equal to what is
+    # remembered — it is now a REWRITE, refused on a full comparison rather
+    # than declined on a bound.
+    assert known.head != head(10)
+    assert compare(known, head(10), None) is Outcome.REWRITE
 
 
 def test_an_injected_collision_costs_a_walk_and_never_an_acceptance():
@@ -1543,12 +1551,17 @@ def test_an_injected_collision_costs_a_walk_and_never_an_acceptance():
 
     result = read_journal(LINEAGE)
     assert any("byte-identical" in note for note in result.skipped)
-    # K is the reset head, NOT the colliding 3 — lower than the truth.
-    assert result.known.at_least.head.ordinal == 1
+    # K is the reset head, NOT the colliding 3 — lower than the truth. And the
+    # read is now ESTABLISHED at that low K, which is what makes the dedup
+    # predicate acceptance-load-bearing: a false match discards a real line and
+    # still claims to know the head. This is the pin for that weight.
+    known = result.established_head()
+    assert known is not None
+    assert known.head.ordinal == 1
     # A store at the true head is therefore an ADVANCE, which must establish
     # descent rather than be believed: with no vouched record at K, REWRITE.
-    assert compare(result.known.at_least, head(3), None) is Outcome.REWRITE
-    assert compare(result.known.at_least, head(3), head(1)) is Outcome.ADVANCED
+    assert compare(known, head(3), None) is Outcome.REWRITE
+    assert compare(known, head(3), head(1)) is Outcome.ADVANCED
 
 
 def test_concatenating_a_foreign_journal_does_not_import_its_resets():
@@ -1620,3 +1633,77 @@ def test_the_position_is_the_physical_line_not_an_index_of_parsed_entries():
     assert entry.follows[0] == 2
     result = read_journal(LINEAGE)
     assert result.epoch == (entry,), "the reset was not honored"
+
+
+# ---------------------------------------------------------------------------
+# Per-cause skip weighting (finding:s3-dedup-skip-weakens-read-permanently)
+# ---------------------------------------------------------------------------
+
+
+def test_a_crash_retry_duplicate_does_not_weaken_the_read_forever():
+    """The empirical case: one benign retry must not cost the file its O(1) opens.
+
+    A crash-retry duplicate is byte-identical BY CONSTRUCTION — the same entry,
+    written again — and the journal is append-only, so the duplicate line is
+    there for the life of the file. Weighting it would have bounded every
+    subsequent read forever: ``established_head()`` raising for good, and the
+    unchanged-open design gone, from a crash that lost nothing.
+
+    The skip record stays. What it stops doing is representing ignorance,
+    because the content it skipped is a line this read already counted.
+    """
+    append_entry(observation(1))
+    append_entry(observation(1))  # the retry, byte-identical
+    for ordinal in (2, 3, 4, 5):
+        append_entry(observation(ordinal))
+
+    result = read_journal(LINEAGE)
+    assert any("byte-identical" in note for note in result.skipped), result.skipped
+    known = result.established_head()  # ANSWERS rather than raising
+    assert known is not None
+    assert known.head == head(5)
+    assert compare(known, head(5), None) is Outcome.UNCHANGED
+    assert compare(known, head(7), known.head) is Outcome.ADVANCED
+
+
+def test_a_dedup_skip_beside_an_unreadable_line_still_bounds():
+    """Per-CAUSE, not per-read — and this is the case that tells them apart.
+
+    "A read whose only skips are re-assertions is established" is the wrong
+    shape: it does not compose. Here a weightless re-assertion sits beside a
+    line that genuinely could not be read, and the read must still bound —
+    because the unreadable line carries its own weight regardless of what else
+    is in the file.
+    """
+    append_entry(observation(1))
+    append_entry(observation(1))  # weightless
+    with journal_path(LINEAGE).open("a", encoding="utf-8") as handle:
+        handle.write("{ not json at all\n")  # carries weight
+    append_entry(observation(2))
+
+    result = read_journal(LINEAGE)
+    assert any("byte-identical" in note for note in result.skipped)
+    assert any("does not parse" in note for note in result.skipped)
+    assert isinstance(result.known, HeadLowerBound)
+    # The bound names only the causes that produced it, not every skip.
+    assert all("byte-identical" not in note for note in result.known.skipped)
+    with pytest.raises(IndeterminateComparison):
+        result.established_head()
+
+
+def test_a_voided_reset_keeps_its_weight():
+    """Ruled narrowly: only a re-assertion is weightless.
+
+    A reset whose binding does not match is a line whose CONTENT is perfectly
+    readable — so the tempting generalization is that it carries no ignorance
+    either. It does: what is unknown is not the bytes but what the operator
+    meant by them, and a bound is exactly how that uncertainty is represented.
+    """
+    append_entry(observation(1))
+    append_entry(observation(9))
+    append_entry(observation(2, kind=Kind.TRUST_RESET, level=Level.FULL))
+
+    result = read_journal(LINEAGE)
+    assert isinstance(result.known, HeadLowerBound)
+    assert result.known.at_least.head.ordinal == 9
+    assert any("trust-reset" in note for note in result.known.skipped)

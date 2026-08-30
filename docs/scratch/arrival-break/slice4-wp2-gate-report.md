@@ -314,3 +314,211 @@ explicitly declined to decide for its callers (B3). B2 and N1 share a root — t
 re-parses the source instead of consuming a frozen reader, which is both why the grammar is
 duplicated a third time and why the sqlite half of the seam went undefended. Addressing that
 structurally would likely resolve both.
+
+---
+
+# Round 2 — fix round 1 re-check (`9c1a9372`)
+
+**Verdict: BLOCK** — every ruled re-check passes and all four round-1 findings are genuinely
+fixed, but scrutiny of the consolidation itself surfaced 2 new blocking defects and 2
+non-blocking ones.
+
+Merged `9c1a9372` into `slice4/wp2-gate` at `3abc1278`; the round-1 report commit `542c4ba3`
+stays reachable. Engine-suite runs used `TMPDIR=/private/tmp/s4wp2-gate-tmp` per the round-1
+protocol note; the sandbox permits it, so nothing was skipped.
+
+## Scope
+
+Exactly one commit. Eight files, all under `libs/migrate/**`. `tests/architecture/` untouched
+(`git diff 5f5149d9..HEAD -- tests/architecture/` is empty), so the Rule-4 row is unchanged —
+and still true: `legacy_source.py` has **zero** cross-lib imports, and the only `engine`/`lang`
+imports in the package remain in `transform.py`. Working tree clean but `.tmp/`.
+
+| suite | result | reconciles |
+|---|---|---|
+| `libs/migrate tests/architecture` | 138 passed (was 128) | yes |
+| `libs/engine` | 2304 passed, 1 skipped | yes |
+| `libs/store` | 180 passed | yes |
+| `tests/architecture` + quarantine ratchet | 100 passed | yes |
+
+## Ruled re-checks — all pass
+
+**F4, signer required.** `transform()` without a signer now raises
+`TypeError: missing 1 required keyword-only argument: 'signer'` at the call site;
+`inspect.signature` confirms `KEYWORD_ONLY` with no default. Zero unsigned introductions are
+constructible on the happy path.
+
+**B2, sqlite seam (as filed).** Both probes that originally failed now return the typed
+migrate-family refusal:
+
+```
+ts-as-TEXT    -> LegacySourceRefused: line 1: fact field 'ts' must be a finite number,
+                 got 'not-a-number'
+NULL observer -> LegacySourceRefused: line 1: 1 row(s) missing 'observer' field
+```
+
+**F3, drop semantics.** Partial-batch drop raises
+`BatchRegroupRefused: Transform rule 'drop-one' dropped 1 of 2 rows in batch at line 6 …
+(refuse-not-split)`. Whole-unit drop yields
+`DroppedUnit(coordinate=6, kind='batch', rule='drop-whole')` — source coordinate, kind and rule
+name all present. The collapse code is gone: `len(mapped_rows) == 1` no longer appears in
+`transform.py`.
+
+**Reviewer B1, empty-observer cohort.** A sqlite store with rows at rowids 1, 3 (`observer=''`)
+and 4 (`observer=NULL`), plus a legitimate alice row at rowid 2, is refused by **`inventory`
+before transform** and by `transform`, enumerating exactly `[1, 3, 4]`. The two spellings stay
+distinct in the census — `{1: {'empty': 1}, 3: {'empty': 1}, 4: {'missing': 1}}` — and render
+distinctly in the message (`1 row(s) with observer='' (empty string)` vs
+`1 row(s) missing 'observer' field`). No re-attribution path exists: the `if fr.observer:`
+census guards are gone from both modules and `transform` adds the observer unconditionally.
+
+**Central oracle, re-run end-to-end on the post-refactor transformer.** Drafts → real
+`ArrivalLog` → engine `walk()` + `verify_authorship()`:
+
+```
+records: 11   intro ordinals: [1, 2]   migrated: 3..10
+migrated with outer sig: []
+resolutions: [(0,'kyle',0), (1,'kyle',0), (2,'kyle',0)]
+tick envelope observers: ['kyle']   fact envelope observers: ['alice','bob','carol']
+signed legacy tick body preserved verbatim, signature "sig-tick-2" + all four chain fields
+```
+
+Unchanged from round 1 — the refactor did not disturb the authority walk, the envelope
+observers, or byte-preservation.
+
+**Grammar duplication collapsed.** Round 1 measured 59 of 82 normalised lines shared between
+`inventory.py` and `transform.py`. Both consumers now contain **zero** grammar markers — no
+`_MIN_BATCH_ROWS`, no `row_object_fault(`, no nested-batch or tick-in-batch refusal, no
+`present_observers`. They survive only in `legacy_source.py` (the single shared layer) and
+`legacy_jsonl.py` (the deliberately frozen historical artifact). The consolidation is real.
+
+**Determinism.** Byte-identical in-process, and identical across four `PYTHONHASHSEED` values
+(0, 1, 12345, 98765): `ed75651d0f81ee30091b362ea4ca08097271dcc647dcabf3615110517fa3ba3e`. The
+rebuilt iteration paths introduce no hash-order dependence.
+
+**Inventory parity vs pre-fix.** The first comparison was confounded — `_fixtures.py` changed in
+this commit, so both hashes moved. Re-run controlled, building the fixtures **once** from a
+worktree at `5f5149d9` and running both versions' `inventory()` over the *same bytes*: every
+field is byte-identical on both arms, `content_hash` and `file_hash` included
+(`0ad1bac69dd94f241c01c30fba946c8858977b5555b7a3a67151f7271a5aaa7b`). WP1's landed semantics are
+preserved exactly.
+
+**Break/restore proofs, both hand-verified.**
+
+*F3* — restored the batch→fact collapse in place of the refusal:
+`Failed: DID NOT RAISE BatchRegroupRefused` → `test_partial_batch_drop_refused` red; restored →
+green; production diff empty.
+
+*F2* — removed the `== ""` clause from all three empty-observer sites so an empty string counts
+as a real observer: `Failed: DID NOT RAISE LegacySourceRefused`, taking down both
+`test_sqlite_empty_observer_refuses_and_enumerates_rowids_distinct` and
+`test_sqlite_seam_defense_refuses_empty_observer`; restored → 2 passed; production diff empty.
+
+---
+
+## BLOCKING (new, found in the fix itself)
+
+### R2-B1 — the sqlite arm re-implements the grammar by hand, and has already diverged; `ArrivalBodyError` still escapes
+
+`legacy_source.py` puts the JSONL grammar in one place, but its **sqlite arm does not use it**.
+Lines 410–422 and 462–487 are a hand-written field validator that never calls
+`row_object_fault`. It has already drifted on a real check: `row_object_fault` enforces the JCS
+safe-integer domain (`_JCS_INT_MIN`/`_JCS_INT_MAX`); the sqlite arm checks only
+`math.isfinite`.
+
+Probe — a sqlite store with an `INTEGER`-affinity `ts` column holding `2**60`:
+
+```
+transform -> ArrivalBodyError LEAKED: fact field 'ts' is outside the JCS safe-integer
+             domain: 1152921504606846976
+inventory -> NO refusal; returns SourceInventory(total_rows=1, observer_census={'alice': 1}, …)
+```
+
+Two things are wrong. First, the new module's own docstring states: *"No raw exceptions
+(`ArrivalBodyError`, `JsonlCodecError`, `KeyError`, `TypeError`) escape the public
+inventory/transform surfaces."* That claim is false as written. Second — and worse for the
+consolidation's premise — `inventory` **accepts** a source that `transform` then crashes on. One
+shared stream layer producing two different verdicts for the same input is exactly the
+divergence the consolidation was sold on eliminating.
+
+Narrow in practice: real legacy stores declare `ts REAL`, and REAL affinity coerces to float,
+where `isfinite` and the body check agree. But the frozen reader is deliberately era-aware about
+schema and the sidecar exists to meet stores it did not create. Round-1 N1 said the grammar
+should exist once; it now exists once *for JSONL* and a second time, by hand, for sqlite.
+
+Fix is small: route the sqlite arm's field checks through `row_object_fault` (frame `"row"`,
+`skip_fields={"observer"}`) as the JSONL arm does, or — if the two arms must stay separate —
+narrow the docstring claim to what the code actually guarantees.
+
+### R2-B2 — P2's ruled compat-shim sweep has regressed
+
+Round 1 verified: *"no `len()`-based normalisation survives anywhere in the file."* It is back,
+in `refusals.py`:
+
+```python
+absent_observer_lines: tuple[Any, ...] | list[Any] = (),
+absent_observer_spellings: dict[int, dict[str, int]] | None = None,
+...
+obs = tuple(str(o) for o in item[2]) if len(item) > 2 else ()
+if len(item) > 3 and isinstance(item[3], dict):
+    spellings[lineno] = item[3]
+```
+
+`LegacySourceRefused` now accepts 2-, 3- and 4-element tuples with `len()` dispatch, plus a
+parallel `absent_observer_spellings` parameter that does the same job by another route, under a
+`tuple[Any, ...]` annotation that gives up the shape entirely. This is P2's exact wording —
+*"constructors currently accept old and new tuple shapes with len-based normalisation and a
+positional compat parameter — a package days old with no external callers. One constructor, one
+tuple shape."*
+
+Both production call sites (`legacy_source.py:368` and `:513`) pass 4-tuples.
+`absent_observer_spellings` is passed by **nobody**. The only callers of the 3-tuple arm are the
+tests: `test_refusals.py:53` and `:74` still pass 3-tuples.
+
+That is what makes this more than hygiene. The shim was added so un-updated tests would keep
+passing, which means `test_refusals.py` now exercises a constructor shape production never
+produces — and the spelling data that is the entire substance of the reviewer-B1 fix is
+untested at the constructor level. Fix: update the two test call sites to 4-tuples, delete the
+`len()` arms, the dead parameter, and the `Any` annotation.
+
+---
+
+## Non-blocking
+
+### R2-N1 — `_key_shape_fault` is a private engine symbol crossing the lib boundary
+
+`transform.py:67` imports `_key_shape_fault` from `engine.arrival`. It is underscore-prefixed
+and absent from engine's `__all__`. Rule 4 governs lib-level dependencies, not symbol privacy,
+so nothing catches this. F5's requirement is right and reusing engine's own shape check is the
+right instinct — but it should be reached through a public surface, or engine should export it.
+Flagged rather than fixed since promoting an engine symbol is outside the WP2 fence.
+
+### R2-N2 — the residue sweep (F6) went backwards on line length
+
+| check | pre-fix `5f5149d9` | HEAD | |
+|---|---|---|---|
+| `F401` unused import | 6 | 4 | improved |
+| `E501` line-too-long | 19 | 36 | **worse** |
+| `SIM108` | 1 | 0 | fixed |
+
+Four dead imports remain — `LegacySourceRefused` and `MigrationRefused` are now unused in *both*
+`inventory.py` and `transform.py` (`transform.py` still lists both in its refusals import block
+while raising neither). `ruff` is not a CI gate for `libs/migrate`, so nothing else will catch
+them.
+
+---
+
+## Disposition
+
+Round-1 `s4wp2-signer-none-unsigned-introductions`, `s4wp2-sqlite-seam-arrivalbodyerror-leak`,
+`s4wp2-silent-regroup-batch-collapse` and the reviewer's `s4wp2-empty-observer-cohort-unmigratable`
+are all **fixed** at `9c1a9372`, each verified by the probe that originally failed. The
+consolidation is a genuine structural improvement: the grammar duplication is gone, WP1's
+inventory semantics are preserved byte-for-byte, and the central oracle still passes end-to-end.
+
+What blocks is narrow and cheap. R2-B1 is the round-1 N1 criticism relocated rather than
+dissolved — the sqlite arm kept its own copy of the grammar and has already diverged from it on
+a check that matters, producing both an uncaught `ArrivalBodyError` and an
+inventory/transform disagreement. R2-B2 is a ruled cleanup regressing, with tests pinned to a
+shape production does not use. Neither is a redesign; both are contained edits inside
+`libs/migrate`.

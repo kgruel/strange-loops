@@ -201,6 +201,49 @@ proposal disagreed and the module won.
     property, or closing would be the thing that constructs the reader the fix
     deferred.
 
+## S3I-L-8 — the docstring catches up, and so does the prose under it
+
+`finding:s3-bound-lineage-docstring-remedy-residue`. `bound_lineage`'s docstring
+still sorted refusals into "asks for repair" and "asks for a retry" — one level
+below the parent that had stopped making that claim — and its "everything else
+REFUSES" did not account for the legitimate skips.
+
+It now enumerates the **actual answer surface**, and I verified each row against
+the body rather than transcribing the routing's list:
+
+| Answer | When |
+|---|---|
+| `None` | absent file, empty file, blank lines, and well-formed bindings naming OTHER locations |
+| `BindingsUnreadable` | bytes arrived, uninterpretable — not UTF-8, not JSON, or JSON with no location and lineage |
+| `BindingProbeUnanswered` | storage would not yield the bytes at all |
+
+And it says why there is no transience claim: that axis is not decidable from an
+exception class.
+
+**Swept the same residue in the same unit**, rather than leaving it a line below
+a corrected docstring — which is exactly how this file has been burned four
+times. Three more sites carried the superseded axis: the decode comment said
+`PERMANENT`, the `OSError` comment said `TRANSIENT-flavoured`, and the comment
+on the match branch described the *skip* branch it was not attached to.
+
+**Not prose-only, and the difference is worth naming.** Two content-side
+messages dropped a trailing "then retry the open" — remedy-axis residue sitting
+inside a content refusal, where retrying is precisely what will not help. I
+checked before editing that nothing pinned the text, and after: the two tests
+asserting "retry the open" are both **storage**-side and still pass on
+`storage_advice`'s prose. That is the same distinction WP1's own sol round had
+to draw, and it is worth stating rather than letting "prose sweep" imply the
+AST was untouched.
+
+**Deliberately left**: `_identity_of`'s docstring names "a permission wall, a
+transient I/O error" as example causes. That is description of what can happen,
+not a claim about which family promises what, so it stays. Named so the next
+reader does not take it for residue I missed.
+
+S3I-L-9 was refuted by the lead and I made no change: both failures of the alias
+mutation name the same arm, so localization holds and the mapping test stays as
+it is.
+
 ## S3I-L-6 / L-7 — the family contract re-scoped, and the last silent door
 
 ### L-6: my remedy split was a verdict claim

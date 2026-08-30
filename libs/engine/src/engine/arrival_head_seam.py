@@ -40,6 +40,7 @@ that cost something.
 
 from __future__ import annotations
 
+import json
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
@@ -76,9 +77,11 @@ from .arrival_head_attestation import (
     Outcome,
     StoreLost,
     append_entry,
+    bindings_path,
     bound_lineage,
     compare,
     compare_absent_store,
+    entry_identity,
     read_journal,
     record_binding,
     refusal_for,
@@ -98,8 +101,10 @@ __all__ = [
     "ProjectionReport",
     "audit",
     "bootstrap",
+    "aliased_lineage",
     "canonical_location",
     "days_since_audit",
+    "match_identity",
     "trust_reset",
 ]
 
@@ -335,12 +340,113 @@ def canonical_location(location: str) -> str:
     guarantees. The file adapter is the only registered backend, and slice 5
     removes the binding before a second one can arrive.
 
-    The residual, stated: a store reached through a symlink whose target later
-    changes presents a different canonical form and is first contact again.
-    Path-keying is transitional for exactly this reason; the lineage-keyed
-    journal is the memory that does not have this property.
+    **This is a SPELLING, not an identity**, and the difference is the whole of
+    ``finding:s3wp3-canonical-location-alias-first-contact``. ``resolve()``
+    normalizes a path; it does not establish which filesystem object a path
+    names. A case-variant spelling on a case-insensitive filesystem — the macOS
+    default — or a second mount of the same volume reaches the very same store
+    through a string this function returns unchanged and different. Bound under
+    one spelling and presented under the other, the store has no binding, reads
+    as first contact, and a replacement with a fresh lineage walks past
+    :class:`~engine.arrival_head_attestation.LineageReplaced`. That hole is
+    closed by :func:`aliased_lineage`, which asks the filesystem rather than
+    the string.
+
+    Residuals, both stated rather than papered over: a store reached through a
+    symlink whose target later changes presents a different canonical form and
+    is first contact again; and two aliases that genuinely report DIFFERENT
+    ``(st_dev, st_ino)`` — two network mounts of one export are the ordinary
+    case — are beyond anything a client can detect from here. Path-keying is
+    transitional for exactly these reasons, and the lineage-keyed journal is
+    the memory that does not have them.
     """
     return str(Path(location).resolve())
+
+
+#: A filesystem object's identity on this host: the device and inode a path
+#: currently resolves to. Never RECORDED — inodes go stale when a file is
+#: recreated and get recycled onto unrelated files, so a stored one is a claim
+#: that rots into a false match. Only ever compared live, at the moment both
+#: sides are stat'd.
+Identity = tuple[int, int]
+
+
+def _identity_of(location: str) -> Identity | None:
+    """What filesystem object this path names right now, or None.
+
+    None for a path that does not stat — it was deleted, the mount is gone, or
+    permission was withdrawn. Those bindings are skipped rather than guessed
+    at: a path that cannot be stat'd makes no claim about identity either way.
+    """
+    try:
+        stat = Path(location).stat()
+    except OSError:
+        return None
+    return (stat.st_dev, stat.st_ino)
+
+
+def match_identity(
+    presenting: Identity | None,
+    recorded: Sequence[tuple[str, str, Identity | None]],
+) -> str | None:
+    """The lineage bound to another spelling of the SAME filesystem object.
+
+    Pure, and separated from the stat calls on purpose: the alias this closes
+    can only be CONSTRUCTED on a case-insensitive filesystem, so a test that
+    builds one is skipped on a case-sensitive CI runner. The judgment is the
+    part worth pinning everywhere, so it takes identities as arguments and is
+    testable on any filesystem, while the construction test carries an honest
+    skip.
+
+    ``recorded`` is (location, lineage, identity) in file order, so the newest
+    binding for an aliased object wins — the same rule
+    :func:`~engine.arrival_head_attestation.bound_lineage` applies to an exact
+    location. An unstattable recorded path contributes nothing.
+    """
+    if presenting is None:
+        return None
+    found: str | None = None
+    for _location, lineage, identity in recorded:
+        if identity is not None and identity == presenting:
+            found = lineage
+    return found
+
+
+def aliased_lineage(location: str) -> str | None:
+    """The lineage bound to this store under a DIFFERENT spelling.
+
+    Consulted only when the presenting location has no binding of its own —
+    which is the one moment the hole is open, and which keeps every subsequent
+    open free of the sweep. It live-stats each recorded binding; a store bound
+    under one spelling and opened under another is then NOT first contact, and
+    a replacement at that location refuses.
+
+    The filesystem namespace is ambient authority: two names for one object is
+    a property of the namespace rather than of the store, so asking the
+    filesystem which object a name currently denotes is a location claim about
+    this host and not a verdict about the store. DELETE IN SLICE 5 with the
+    rest of the binding.
+    """
+    try:
+        text = bindings_path().read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return None
+    except OSError:
+        return None
+    recorded: list[tuple[str, str, Identity | None]] = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        try:
+            decoded = json.loads(stripped)
+        except ValueError:
+            continue
+        where = decoded.get("location") if isinstance(decoded, dict) else None
+        lineage = decoded.get("lineage") if isinstance(decoded, dict) else None
+        if isinstance(where, str) and isinstance(lineage, str):
+            recorded.append((where, lineage, _identity_of(where)))
+    return match_identity(_identity_of(location), recorded)
 
 
 # ---------------------------------------------------------------------------
@@ -424,9 +530,22 @@ def trust_reset(
     under-claims costs a later audit some work while one that over-claims is a
     lie the journal keeps forever.
 
+    **The reset is bound to the entry it is appended after**, which is what
+    makes a replayed copy inexpressible as valid — see
+    :attr:`~engine.arrival_head_attestation.HeadAttestation.follows`. Binding
+    it here is the FOOTGUN GUARD, not the protection: an operator constructing
+    an entry by hand still produces one, and the protection is the read-time
+    validation in ``_epoch_of``, which is what every reader performs. A writer
+    that raced another appender between this read and its own write produces a
+    binding that no longer matches, and that reset is then not honored — the
+    refusal-side failure, and the reason the read-time half is the load-bearing
+    one.
+
     The CLI surface for the ceremony is slice 5's cut. This is the producer, so
     slices 4 and 6 have something to call.
     """
+    read = read_journal(accepted.lineage)
+    follows = "" if not read.entries else entry_identity(read.entries[-1])
     if not reason.strip():
         raise ValueError(
             "a trust reset records the gap it opens — an empty reason would "
@@ -447,6 +566,7 @@ def trust_reset(
             observed_at=observed_at,
             location=canonical_location(location),
             note=note,
+            follows=follows,
         )
     )
 
@@ -733,6 +853,13 @@ class AttestedLedger:
             return self._absent(ledger_refusal), None
 
         remembered_lineage = bound_lineage(self._canonical)
+        if remembered_lineage is None:
+            # No binding for THIS spelling. Before calling it first contact,
+            # ask the filesystem whether another spelling already names this
+            # same object — a case variant, or a second mount. Live-stat, and
+            # only here: once a binding exists for the spelling in use, the
+            # exact match above answers and this sweep never runs.
+            remembered_lineage = aliased_lineage(self._canonical)
         if (
             remembered_lineage is not None
             and remembered_lineage != presented.lineage

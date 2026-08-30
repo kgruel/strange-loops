@@ -51,6 +51,7 @@ from engine.arrival_head_attestation import (
     Outcome,
     StoreLost,
     append_entry,
+    bindings_path,
     bound_lineage,
     heads_dir,
     journal_path,
@@ -70,6 +71,7 @@ from engine.arrival_head_seam import (
     bootstrap,
     canonical_location,
     days_since_audit,
+    match_identity,
     trust_reset,
 )
 from engine.arrival_registry import BackendRegistry
@@ -1710,3 +1712,145 @@ def test_every_mutating_op_on_the_wrapper_journals_or_is_absent(tmp_path):
     for op in reachable:
         source = getattr(type(ledger), op).__doc__ or ""
         assert source, f"{op} is undocumented"
+
+
+# ---------------------------------------------------------------------------
+# Alias spellings of one store (finding:s3wp3-canonical-location-alias-first-contact)
+# ---------------------------------------------------------------------------
+
+
+def test_match_identity_finds_another_spelling_of_the_same_object():
+    """The judgment, unit-tested portably.
+
+    The alias this closes can only be CONSTRUCTED on a case-insensitive
+    filesystem, so the end-to-end test below has to skip on a case-sensitive
+    runner. The judgment is the part worth pinning everywhere, so it takes
+    identities as arguments and is exercised on every platform — a green Linux
+    run must not mean the logic was never checked.
+    """
+    presenting = (2049, 8675309)
+    recorded = [
+        ("/other/store.arrival", "LIN-OTHER", (2049, 111)),
+        ("/Data/Store.arrival", "LIN-BOUND", presenting),
+    ]
+    assert match_identity(presenting, recorded) == "LIN-BOUND"
+
+
+def test_match_identity_takes_the_newest_binding_for_one_object():
+    """Same rule the exact-location lookup applies: last write wins."""
+    presenting = (2049, 8675309)
+    recorded = [
+        ("/a.arrival", "LIN-OLD", presenting),
+        ("/A.arrival", "LIN-NEW", presenting),
+    ]
+    assert match_identity(presenting, recorded) == "LIN-NEW"
+
+
+def test_match_identity_skips_bindings_that_no_longer_stat():
+    """A path that cannot be stat'd makes no claim about identity either way.
+
+    Never RECORD an inode to avoid this: a recorded one goes stale when the
+    file is recreated and gets recycled onto an unrelated file, so it becomes a
+    claim that rots into a false match. Absent is the honest answer.
+    """
+    presenting = (2049, 8675309)
+    recorded = [("/gone.arrival", "LIN-GONE", None)]
+    assert match_identity(presenting, recorded) is None
+
+
+def test_match_identity_answers_nothing_when_the_presenting_path_is_gone():
+    assert match_identity(None, [("/a", "LIN", (1, 2))]) is None
+
+
+def _filesystem_is_case_insensitive(tmp_path: Path) -> bool:
+    """Probe rather than assume — the answer is a property of the mount."""
+    probe = tmp_path / "CaseProbe"
+    probe.write_text("x")
+    try:
+        return (tmp_path / "caseprobe").exists()
+    finally:
+        probe.unlink()
+
+
+def test_a_case_variant_spelling_of_a_bound_store_is_not_first_contact(tmp_path):
+    """The alias, end to end: a replacement must not walk past the binding.
+
+    ``canonical_location`` returns a normalized STRING, and a case-variant
+    spelling on a case-insensitive filesystem reaches the very same store
+    through a different one. Bound under one spelling and presented under the
+    other, the store had no binding, read as first contact, and a replacement
+    with a fresh lineage sailed past ``LineageReplaced``.
+
+    Skipped honestly where the alias cannot be built — a green run on a
+    case-sensitive runner must not be read as this vector having passed. The
+    judgment itself is pinned portably by the ``match_identity`` tests above.
+    """
+    if not _filesystem_is_case_insensitive(tmp_path):
+        pytest.skip(
+            "case-insensitive filesystem required to construct a case-variant "
+            "alias; the identity judgment is covered portably by "
+            "test_match_identity_finds_another_spelling_of_the_same_object"
+        )
+
+    log_path = minted(tmp_path / "store.arrival")
+    append_legacy(log_path, "one")
+    opened(log_path)
+    first = lineage_of(log_path)
+
+    log_path.unlink()
+    index_path_for(log_path).unlink(missing_ok=True)
+    minted(log_path)
+    assert lineage_of(log_path) != first
+
+    variant = tmp_path / "STORE.arrival"
+    assert canonical_location(str(variant)) != canonical_location(str(log_path))
+    with pytest.raises(LineageReplaced):
+        opened(variant)
+
+
+def test_the_alias_sweep_runs_only_when_the_spelling_has_no_binding(tmp_path):
+    """Cost, and the reason it is not paid on the dominant path.
+
+    Once a binding exists for the spelling in use, the exact-location lookup
+    answers and the live-stat sweep never runs. So the sweep is a first-open
+    cost per spelling rather than a per-open cost, and the unchanged path still
+    gathers only its single Open verification.
+    """
+    log_path = minted(tmp_path / "s.arrival")
+    append_legacy(log_path, "one")
+    opened(log_path)  # records the binding for this spelling
+
+    recorder = Recorder(FileLedger(ArrivalLog(log_path)))
+    ledger = AttestedLedger(recorder, location=str(log_path))
+    assert isinstance(ledger.opened.comparison, Compared)
+    assert ledger.opened.comparison.outcome is Outcome.UNCHANGED
+    assert recorder.calls == ["verify:open"], recorder.calls
+
+
+def test_the_alias_refusal_leaves_the_journal_untouched(tmp_path):
+    """The check fires before anything is earned, and adds only refusals.
+
+    It sits in the binding arm, ahead of the journal read and well ahead of
+    ``_judge``, so it cannot introduce a write site — it can only refuse
+    earlier. Asserted on bytes because the AST ratchet cannot see an ordering
+    regression here.
+    """
+    nested = tmp_path / "d"
+    nested.mkdir()
+    log_path = minted(nested / "s.arrival")
+    append_legacy(log_path, "one")
+    opened(log_path)
+    first = lineage_of(log_path)
+
+    log_path.unlink()
+    index_path_for(log_path).unlink(missing_ok=True)
+    minted(log_path)
+    before = journal_bytes(first)
+    bindings_before = bindings_path().read_bytes()
+
+    with pytest.raises(LineageReplaced):
+        opened(tmp_path / "d" / ".." / "d" / "s.arrival")
+
+    assert journal_bytes(first) == before
+    assert bindings_path().read_bytes() == bindings_before
+    assert not journal_path(lineage_of(log_path)).exists()

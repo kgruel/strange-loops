@@ -43,6 +43,7 @@ WP2's. This module holds the record, the journal, and the judgment.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -82,7 +83,9 @@ __all__ = [
     "compare_absent_store",
     "heads_dir",
     "journal_path",
+    "last_entry",
     "parse_journal_lines",
+    "entry_identity",
     "read_journal",
     "record_binding",
     "refusal_for",
@@ -290,6 +293,30 @@ class HeadAttestation:
     observed_at: float
     location: str = ""
     note: str = ""
+    follows: str = ""
+    """Which entry this one was appended after — REQUIRED on a trust reset,
+    empty on every other kind and on a reset that opens an empty journal.
+
+    **Not the deferred** ``previous``. That one is the signed grammar's
+    per-entry chain link over the whole journal, and it stays absent: this is
+    unsigned, it is carried by exactly one kind, and it makes exactly one
+    claim — the entry this reset actually followed when it was written.
+
+    It exists because a trust reset was REPLAYABLE. An entry is just bytes in
+    an append-only file, so re-appending an old reset re-opened the epoch it
+    had closed: a journal through ordinal 8 with a stale 10-to-5 reset appended
+    reads *K* as 5, and a store rolled back to 5 then opens UNCHANGED — the
+    abandoned epoch resurrected, and the silent re-acceptance the whole module
+    exists to prevent (``finding:s3wp3-trust-reset-replay``). Binding the reset
+    to its predecessor makes a replay INEXPRESSIBLE as valid rather than
+    merely detectable: at any other position the recorded predecessor is not
+    the entry actually there.
+
+    Predecessor IDENTITY, not the effective head and not an entry count. Two
+    journal states can share a head while differing in history, and a count is
+    not a history at all; the predecessor link is also the chain idiom this
+    repo already uses, where a record names its predecessor's hash.
+    """
 
 
 # ---------------------------------------------------------------------------
@@ -541,6 +568,8 @@ def _entry_line(entry: HeadAttestation) -> str:
         record["location"] = entry.location
     if entry.note:
         record["note"] = entry.note
+    if entry.follows:
+        record["follows"] = entry.follows
     return json.dumps(record, separators=(",", ":"), sort_keys=True) + "\n"
 
 
@@ -605,6 +634,7 @@ def _parse_entry(raw: object) -> HeadAttestation | None:
         observed_at=float(observed_at),
         location=raw["location"] if isinstance(raw.get("location"), str) else "",
         note=raw["note"] if isinstance(raw.get("note"), str) else "",
+        follows=raw["follows"] if isinstance(raw.get("follows"), str) else "",
     )
 
 
@@ -771,7 +801,7 @@ class JournalRead:
 
 def _epoch_of(
     entries: tuple[HeadAttestation, ...],
-) -> tuple[HeadAttestation, ...]:
+) -> tuple[tuple[HeadAttestation, ...], tuple[str, ...]]:
     """The entries in the current trust epoch, reset-INCLUSIVE.
 
     Epoch scoping is what keeps the ceremony and the max-ordinal rule from
@@ -787,11 +817,63 @@ def _epoch_of(
     leave a just-reset journal with an empty epoch, *K* of None, and a next
     open classifying first contact — the deadlock's mirror image, and silent
     re-acceptance by a different route.
+
+    **A reset is honored only if its recorded predecessor is the entry
+    actually preceding it**, which is what makes a replayed reset
+    inexpressible as valid rather than merely detectable. See
+    :attr:`HeadAttestation.follows`.
+
+    A reset whose binding does not match is **not an epoch boundary**, and the
+    scan keeps walking back for an earlier valid one. It is reported through
+    the ordinary skipped channel rather than refused, for the reason every
+    other tolerated loss here is: refusing would brick opens on a benign
+    crash-retry duplicate, where the same reset is appended twice and the
+    second copy's predecessor is the first. The direction of the lie is the
+    safe one either way — misjudging a legitimate reset leaves *K* at the
+    HIGHER abandoned head, so the failure is a refusal rather than an
+    acceptance.
+
+    Note the consequence, which is deliberate and not a side effect: a
+    rejected reset puts a note in ``skipped``, and a non-empty ``skipped`` is
+    exactly the condition that weakens the read to a
+    :class:`HeadLowerBound`. So a journal holding a replayed reset still
+    refuses anything below the bound, which is the attack it was closing.
     """
+    notes: list[str] = []
     for index in range(len(entries) - 1, -1, -1):
-        if entries[index].kind is Kind.TRUST_RESET:
-            return entries[index:]
-    return entries
+        entry = entries[index]
+        if entry.kind is not Kind.TRUST_RESET:
+            continue
+        expected = "" if index == 0 else entry_identity(entries[index - 1])
+        if entry.follows == expected:
+            return entries[index:], tuple(notes)
+        notes.append(
+            f"trust-reset at ordinal {entry.head.ordinal}: recorded "
+            f"predecessor {entry.follows or '(none)'} is not the entry that "
+            f"precedes it ({expected or '(none)'}), so it does not open an "
+            "epoch — a reset is bound to the entry it was appended after, and "
+            "one that has been copied or replayed cannot satisfy that binding "
+            "anywhere else"
+        )
+    return entries, tuple(notes)
+
+
+def entry_identity(entry: HeadAttestation) -> str:
+    """What a trust reset names when it binds itself to its predecessor.
+
+    A digest over the entry's own serialized line, which is deterministic —
+    :func:`_entry_line` sorts keys and omits empty optionals — so an appender
+    and a reader compute the same value from the same entry without the raw
+    bytes having to be carried around.
+
+    Derived from the PARSED entry rather than the file's bytes, and the
+    residual is stated: an entry written by a later build carries fields this
+    one drops, so its digest here differs from the digest its own build would
+    compute. A reset bound to such an entry is therefore not honored, *K*
+    stays at the higher head, and the note says so — the refusal-side failure
+    again, which is the side this must fail on.
+    """
+    return hashlib.sha256(_entry_line(entry).rstrip("\n").encode("utf-8")).hexdigest()
 
 
 def _known_of(epoch: tuple[HeadAttestation, ...]) -> HeadAttestation | None:
@@ -855,37 +937,18 @@ def _classify(decoded: object) -> str:
     return _ENTRY_SHAPED
 
 
-def parse_journal_lines(lines: Iterable[str]) -> JournalRead:
-    """Read a journal from its raw lines. Pure — no filesystem.
+def _scan(
+    lines: Iterable[str],
+) -> tuple[list[HeadAttestation], list[str], bool]:
+    """Every readable entry in file order, what was skipped, and whether a
+    header was seen.
 
-    The pure half is separate so the conformance vectors can hand it raw log
-    lines and so every read rule is testable without a temporary directory.
-
-    **Every line this build cannot use is skipped and reported, wherever it
-    sits** — which is half of what makes a read incomplete
-    (:class:`HeadLowerBound`); a missing header is the other half. The
-    earlier design distinguished a torn final line from damage further up and
-    refused the latter, on the reasoning that skipping could silently lower
-    *K*. Skipping CAN lower *K* — concurrent writers journal out of order, so
-    the epoch maximum is not the last line and damage anywhere can take it
-    (``finding:s3wp1-epoch-ordinals-do-not-ascend-in-file-order``). But
-    refusing was the wrong answer to it. It made an ordinary crash a permanent
-    incident, and it claimed a protection this location cannot deliver: anyone
-    who can corrupt a line here can delete the whole journal instead and be
-    met with trust-on-first-use. So the loss is **carried in the result type**
-    — :class:`HeadLowerBound` — rather than converted into a verdict, and the
-    positional rule dissolves along with the distinction it enforced.
-
-    **This function never refuses on structure.** Entries with no recognized
-    header are tolerated too: the entries are self-describing evidence that
-    heads were accepted, so what is lost — the protocol and wire versions the
-    hashes derive under — weakens the claim to :class:`HeadLowerBound` rather
-    than voiding the file. The absence is reported without a line number,
-    because an absence does not have one. Only
-    :class:`JournalEquivocation` is raised from here, and it is a statement
-    about the journal's content rather than its readability.
-    :class:`JournalUnreadable` belongs to :func:`read_journal`, where there
-    may be no text to hand this function at all.
+    Split out of :func:`parse_journal_lines` so a caller can reach the entries
+    WITHOUT the judgment built on top of them. That judgment can refuse —
+    :func:`_known_of` raises on equivocation — and the trust-reset ceremony
+    needs the last entry precisely when the journal is in a state a full read
+    will not answer for. A recovery path that depended on the read it recovers
+    from would be unusable exactly when it is needed.
     """
     entries: list[HeadAttestation] = []
     skipped: list[str] = []
@@ -918,6 +981,63 @@ def parse_journal_lines(lines: Iterable[str]) -> JournalRead:
             continue
         entries.append(entry)
 
+    return entries, skipped, header_seen
+
+
+def last_entry(lineage: str) -> HeadAttestation | None:
+    """The last readable entry in this lineage's journal, or None.
+
+    File order, not maximum ordinal: a trust reset binds to the entry it is
+    physically appended after, which is what a later reader will find sitting
+    in front of it. Deliberately performs no epoch scoping, no equivocation
+    check and no K computation — see :func:`_scan`.
+    """
+    try:
+        text = journal_path(lineage).read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return None
+    except (OSError, UnicodeDecodeError) as exc:
+        raise JournalUnreadable(
+            f"the journal for lineage {lineage!r} exists but cannot be read "
+            f"as text at all: {exc}"
+        ) from exc
+    entries, _skipped, _header = _scan(text.splitlines(keepends=True))
+    return entries[-1] if entries else None
+
+
+def parse_journal_lines(lines: Iterable[str]) -> JournalRead:
+    """Read a journal from its raw lines. Pure — no filesystem.
+
+    The pure half is separate so the conformance vectors can hand it raw log
+    lines and so every read rule is testable without a temporary directory.
+
+    **Every line this build cannot use is skipped and reported, wherever it
+    sits** — which is half of what makes a read incomplete
+    (:class:`HeadLowerBound`); a missing header is the other half. The
+    earlier design distinguished a torn final line from damage further up and
+    refused the latter, on the reasoning that skipping could silently lower
+    *K*. Skipping CAN lower *K* — concurrent writers journal out of order, so
+    the epoch maximum is not the last line and damage anywhere can take it
+    (``finding:s3wp1-epoch-ordinals-do-not-ascend-in-file-order``). But
+    refusing was the wrong answer to it. It made an ordinary crash a permanent
+    incident, and it claimed a protection this location cannot deliver: anyone
+    who can corrupt a line here can delete the whole journal instead and be
+    met with trust-on-first-use. So the loss is **carried in the result type**
+    — :class:`HeadLowerBound` — rather than converted into a verdict, and the
+    positional rule dissolves along with the distinction it enforced.
+
+    **This function never refuses on structure.** Entries with no recognized
+    header are tolerated too: the entries are self-describing evidence that
+    heads were accepted, so what is lost — the protocol and wire versions the
+    hashes derive under — weakens the claim to :class:`HeadLowerBound` rather
+    than voiding the file. The absence is reported without a line number,
+    because an absence does not have one. Only
+    :class:`JournalEquivocation` is raised from here, and it is a statement
+    about the journal's content rather than its readability.
+    :class:`JournalUnreadable` belongs to :func:`read_journal`, where there
+    may be no text to hand this function at all.
+    """
+    entries, skipped, header_seen = _scan(lines)
     frozen = tuple(entries)
     if frozen and not header_seen:
         # TOLERATED, not refused. The entries are self-describing evidence
@@ -931,7 +1051,8 @@ def parse_journal_lines(lines: Iterable[str]) -> JournalRead:
             "header: absent, so the protocol and wire versions these record "
             "hashes derive under are unknown"
         )
-    epoch = _epoch_of(frozen)
+    epoch, epoch_notes = _epoch_of(frozen)
+    skipped.extend(epoch_notes)
     best = _known_of(epoch)
     known: EstablishedHead | HeadLowerBound | HeadUnreadable | None
     if best is not None:

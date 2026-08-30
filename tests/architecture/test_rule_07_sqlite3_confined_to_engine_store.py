@@ -10,7 +10,11 @@ from ._helpers import (
     _src_py_files,
 )
 
-_SQLITE_ALLOWED_LIBS = {"engine", "store"}
+_SQLITE_ALLOWED_LIBS = {
+    "engine",
+    "store",
+    "migrate",  # frozen sqlite-canonical reader
+}
 
 
 def test_sqlite3_confined_to_engine_store():

@@ -26,6 +26,7 @@ from typing import Any
 import pytest
 from atoms import Fact
 
+import engine.arrival_head_seam
 from engine.arrival import ArrivalLog
 from engine.arrival_contract import (
     ArrivalLedger,
@@ -35,6 +36,7 @@ from engine.arrival_contract import (
     Open,
     RecordDraft,
     StoreDescriptor,
+    Watermark,
 )
 from engine.arrival_file_backend import FileLedger, FileQuery
 from engine.arrival_head_attestation import (
@@ -290,6 +292,172 @@ def test_the_refused_truncation_left_no_memory_claiming_it_was_accepted(tmp_path
 
     assert not journal_path(lineage).exists()
     assert not heads_dir().exists() or list(heads_dir().glob("*.jsonl")) == []
+
+
+def test_an_advance_is_not_journaled_when_the_projection_then_refuses(tmp_path):
+    """The gate's BLOCKING repro. A refused open must not move the witness.
+
+    The headline cell above, in REMEMBERED form: the journal knows ordinal 1,
+    an unjournaled writer took the store to 3, and the tail is then truncated
+    back to 2. The journal comparison answers ADVANCED — legitimately, the
+    descent from 1 to 2 verifies — and only then does the projection, still
+    accounting for 3, refuse.
+
+    Written from inside the classification, that advance entry survived the
+    refusal: the journal permanently recorded that this machine accepted
+    ordinal 2, at the very open that refused it, and the next open would
+    compare against the truncation as though it were the accepted history.
+
+    The claim "nothing writes until every refusal has had its chance" was true
+    of the first-contact branch, which deferred, and false of this one, which
+    did not — which is exactly why the rule now lives in a return type and a
+    ratchet rather than in each branch's good intentions
+    (``finding:s3wp3-gate-advance-journaled-before-projection-refusal``).
+    """
+    log_path = minted(tmp_path / "s.arrival")
+    append_legacy(log_path, "one")
+    opened(log_path)  # first contact at ordinal 1
+    append_legacy(log_path, "two", "three")  # unjournaled, to ordinal 3
+    truncate_records(log_path, keep=2)
+
+    lineage = lineage_of(log_path)
+    before = journal_bytes(lineage)
+    index_before = digest(index_path_for(log_path))
+
+    with pytest.raises(ProjectionAheadOfLedger):
+        through_registry(log_path)
+
+    assert journal_bytes(lineage) == before, (
+        "a refused open advanced the witness"
+    )
+    assert digest(index_path_for(log_path)) == index_before
+
+
+class ForeignWatermarkQuery:
+    """A projection reporting a lineage that is not the log's.
+
+    A double for the query half only — the ledger stays real, so the
+    ``NotAuthority`` this provokes is the adapter's own refusal rather than a
+    manufactured one. Building this state from real artifacts would mean
+    swapping a log out from under a consumed index, which tests the swap rather
+    than the branch.
+    """
+
+    def __init__(self, watermark: Watermark) -> None:
+        self._watermark = watermark
+
+    def lineage(self) -> str | None:
+        return self._watermark.lineage
+
+    def projected_through(self) -> Watermark | None:
+        return self._watermark
+
+    def close(self) -> None:
+        return None
+
+
+def test_an_advance_is_not_journaled_when_the_projection_disowns_the_log(
+    tmp_path,
+):
+    """The second refusal sitting behind the same write.
+
+    ``_projection``'s lineage-mismatch arm lets the adapter's ``NotAuthority``
+    out — the projection is not a projection of this log — and it runs after
+    the journal comparison just as the ahead-of-ledger arm does. Enumerated
+    with it rather than left to be found later, because "the refusal I happened
+    to test" is not the property; "every refusal that can follow a write" is.
+    """
+    log_path = minted(tmp_path / "s.arrival")
+    append_legacy(log_path, "one")
+    opened(log_path)
+    append_legacy(log_path, "two")  # unjournaled: the open will earn an ADVANCE
+
+    lineage = lineage_of(log_path)
+    before = journal_bytes(lineage)
+    foreign = ForeignWatermarkQuery(
+        Watermark(lineage="01BX5ZZKBKACTAV9WEVGEMMVRZ", ordinal=2)
+    )
+
+    with pytest.raises(ContractRefusal):  # NotAuthority, the adapter's own
+        AttestedLedger(
+            FileLedger(ArrivalLog(log_path)),
+            location=str(log_path),
+            query=foreign,
+        )
+
+    assert journal_bytes(lineage) == before
+
+
+def test_only_the_constructor_and_the_producers_write_to_the_journal(tmp_path):
+    """The rule as an enumerable property, not as review vigilance.
+
+    The gate's finding was not that one branch was wrong — it was that "nothing
+    writes until every refusal has had its chance" lived in prose, so the
+    branch added second simply did not honor it. A per-branch rule fails
+    whenever somebody adds a branch.
+
+    So every call to a journal-writing name in this module must sit inside one
+    of the functions allowed to write. The allowlist is SHRINK-ONLY: a new
+    branch that writes inline fails here by name, and the fix is to return an
+    ``_Earned`` rather than to widen the list.
+    """
+    import ast
+
+    source = (
+        Path(engine.arrival_head_seam.__file__).read_text(encoding="utf-8")
+    )
+    tree = ast.parse(source)
+
+    writing = {"append_entry", "record_binding", "bootstrap", "trust_reset", "audit"}
+    # The producers write BY DEFINITION — each is the one place its entry kind
+    # is created. `_write` is the open path's single write site, `mint` and
+    # `_witness` are the mutation paths, and each has nothing that can refuse
+    # after it (mint's bootstrap is last; `_witness` runs after the append has
+    # already committed, which is what `NotWitnessed` exists to report).
+    may_write = {
+        "bootstrap",
+        "trust_reset",
+        "audit",
+        "AttestedLedger._write",
+        "AttestedLedger.mint",
+        "AttestedLedger._witness",
+    }
+
+    offenders: list[str] = []
+
+    def walk(node, scope: str) -> None:
+        for child in ast.iter_child_nodes(node):
+            if isinstance(
+                child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
+            ):
+                walk(child, f"{scope}.{child.name}" if scope else child.name)
+            else:
+                if (
+                    isinstance(child, ast.Call)
+                    and isinstance(child.func, ast.Name)
+                    and child.func.id in writing
+                    and scope not in may_write
+                ):
+                    offenders.append(f"{child.func.id}() called from {scope}")
+                walk(child, scope)
+
+    walk(tree, "")
+    assert not offenders, (
+        "journal writes outside the constructor's write site and the "
+        "producers:\n  " + "\n  ".join(offenders) + "\nReturn an _Earned "
+        "instead — see finding:s3wp3-gate-advance-journaled-before-projection-refusal"
+    )
+    # The allowlist must not rot into a list of things that no longer exist:
+    # an entry naming a function somebody renamed would silently stop
+    # permitting anything, and the next inline write would be caught for the
+    # wrong reason or not at all.
+    defined = {
+        node.name
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+    stale = {name.split(".")[-1] for name in may_write} - defined
+    assert not stale, f"allowlist names functions that no longer exist: {stale}"
 
 
 def test_a_truncation_below_a_remembered_head_refuses_as_a_rollback(tmp_path):

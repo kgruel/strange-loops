@@ -251,6 +251,31 @@ class ProjectionReport:
 
 
 @dataclass(frozen=True)
+class _Earned:
+    """An entry an observation earned but did not write.
+
+    The carrier that makes "nothing writes until every refusal has had its
+    chance" a property of the control flow rather than a rule each branch has
+    to remember. Observation is pure with respect to the journal: it RETURNS
+    one of these, and :meth:`AttestedLedger.__init__` writes it only once
+    observation has returned without raising.
+
+    It exists because the per-branch version of the rule failed. The
+    first-contact branch deferred correctly while the advance branch wrote
+    inline, so a store that passed the journal comparison and then failed the
+    projection one left an ``advance``/``descendant`` entry recording a head
+    the very same open refused
+    (``finding:s3wp3-gate-advance-journaled-before-projection-refusal``). One
+    branch honoring a rule the next branch does not is what a carrier removes
+    and a comment does not.
+    """
+
+    head: Head
+    kind: Kind
+    level: Level
+
+
+@dataclass(frozen=True)
 class OpenReport:
     """Everything one compare-on-open established.
 
@@ -611,11 +636,20 @@ class AttestedLedger:
         caller. It is what keeps staleness reporting testable without freezing
         time inside the journal.
 
-        The write is here rather than inside :meth:`_observe` on purpose: the
-        observation is pure with respect to the journal, so "no refusal is
-        raised after a write" is a property of the control flow rather than a
-        rule somebody has to keep remembering. An open that refuses leaves no
-        memory claiming it accepted the thing it refused.
+        **This is the ONLY place the open path writes**, and that is the whole
+        of "nothing writes until every refusal has had its chance". Observation
+        is pure with respect to the journal — it returns an :class:`_Earned`
+        and writes nothing — so an open that refuses anywhere leaves no memory
+        claiming it accepted the thing it refused.
+
+        Stating it per-branch was not enough: the first-contact branch deferred
+        while the advance branch wrote inline, and a store that passed the
+        journal comparison and then failed the projection one kept an
+        ``advance`` entry for the head it had just been refused
+        (``finding:s3wp3-gate-advance-journaled-before-projection-refusal``).
+        The rule is now carried by the return type, and
+        ``test_only_the_constructor_and_the_producers_write_to_the_journal``
+        pins it against the branch somebody adds next.
         """
         self._ledger = ledger
         self._location = location
@@ -623,18 +657,42 @@ class AttestedLedger:
         self._query = query
         self._clock = clock
 
-        report, pending = self._observe()
-        if pending is not None:
-            head, level = pending
-            bootstrap(
-                head, level=level, location=location, observed_at=self._clock()
-            )
+        report, earned = self._observe()
+        if earned is not None:
+            self._write(earned)
         self.opened: OpenReport = report
         """What the compare-on-open established. See :class:`OpenReport`."""
 
+    def _write(self, earned: _Earned) -> None:
+        """Write what an observation earned, once it has earned it.
+
+        A bootstrap goes through :func:`bootstrap` rather than straight to
+        ``append_entry`` so that the level validation and the binding stay on
+        one path — a seam that appended its own bootstrap would be the second
+        place the canonical form is applied, which is how two spellings
+        diverge.
+        """
+        if earned.kind is Kind.BOOTSTRAP:
+            bootstrap(
+                earned.head,
+                level=earned.level,
+                location=self._location,
+                observed_at=self._clock(),
+            )
+            return
+        append_entry(
+            HeadAttestation(
+                head=earned.head,
+                kind=earned.kind,
+                level=earned.level,
+                observed_at=self._clock(),
+                location=self._canonical,
+            )
+        )
+
     # -- the comparison ----------------------------------------------------
 
-    def _observe(self) -> tuple[OpenReport, tuple[Head, Level] | None]:
+    def _observe(self) -> tuple[OpenReport, _Earned | None]:
         """Everything the open judged, and the entry it earned — written by
         the caller.
 
@@ -686,9 +744,9 @@ class AttestedLedger:
             comparison: Compared | Indeterminate = self._degraded(
                 read, presented, exc
             )
-            pending: tuple[Head, Level] | None = None
+            earned: _Earned | None = None
         else:
-            outcome, pending = self._judge(known, presented)
+            outcome, earned = self._judge(known, presented)
             comparison = Compared(
                 outcome=outcome, presented=presented, known=known
             )
@@ -699,7 +757,7 @@ class AttestedLedger:
                 projection=self._projection(presented),
                 days_since_audit=days_since_audit(read, self._clock()),
             ),
-            pending,
+            earned,
         )
 
     def _not_older_than_the_journal(
@@ -834,7 +892,7 @@ class AttestedLedger:
 
     def _judge(
         self, known: HeadAttestation | None, presented: Head
-    ) -> tuple[Outcome, tuple[Head, Level] | None]:
+    ) -> tuple[Outcome, _Earned | None]:
         """Classify against a head the journal established in full.
 
         ``at_known`` is gathered ONLY on the ascending branch — same lineage,
@@ -878,18 +936,18 @@ class AttestedLedger:
             ) from descent_refusal
 
         if outcome is Outcome.FIRST_CONTACT:
-            return outcome, (presented, Level.FIRST_CONTACT)
-        if outcome is Outcome.ADVANCED:
-            append_entry(
-                HeadAttestation(
-                    head=presented,
-                    kind=Kind.ADVANCE,
-                    level=Level.DESCENDANT,
-                    observed_at=self._clock(),
-                    location=self._canonical,
-                )
+            return outcome, _Earned(
+                head=presented, kind=Kind.BOOTSTRAP, level=Level.FIRST_CONTACT
             )
-        # UNCHANGED writes NOTHING. A read that touched the write path would
+        if outcome is Outcome.ADVANCED:
+            # RETURNED, never written here. `_projection` still runs after this
+            # and can refuse, and an advance written from inside the
+            # classification would be a memory recording a head the very same
+            # open went on to refuse.
+            return outcome, _Earned(
+                head=presented, kind=Kind.ADVANCE, level=Level.DESCENDANT
+            )
+        # UNCHANGED earns NOTHING. A read that touched the write path would
         # make every open a writer, and the byte-compare that proves it is the
         # rule keeping reads off that path.
         return outcome, None

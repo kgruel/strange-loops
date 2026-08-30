@@ -103,11 +103,22 @@ proposal disagreed and the module won.
    name a head" and "does the journal remember one" answer the four cells without
    asking why. A corrupt log lands on the no-head branch and lands correctly.
    See `finding:s3wp3-contract-refusal-families-unnamed`.
-3. **The broad `except Exception` catches are sound in exactly one direction, and
-   each says so.** Every catch lands on the refusing branch — `at_known = None`
-   classifies REWRITE, an unaccounted head refuses the audit, a ledger that names
-   no head takes the absent-store split. The opposite default, treating an
-   unrecognized failure as agreement, is the silent-acceptance hazard.
+3. **The broad `except Exception` catches never land on an unearned proceed, and
+   each says so at its site.** *Corrected per the gate's NB2 — the earlier
+   wording, "every catch lands on the refusing branch", overclaimed.* Two of the
+   three do: `_descent`'s catch gives `at_known = None`, which classifies REWRITE
+   and refuses, and `_vouched_at`'s gives `None`, which makes a head unaccounted
+   and refuses the audit. **`_present`'s catch does not** — it hands the
+   absent-store split a "the ledger named no head", and that split refuses
+   (`StoreLost`) only when something is remembered here; with nothing remembered
+   it **proceeds** as `PreGenesis`. That is correct as designed rather than a
+   leak: refusing there would make minting impossible, which is §D.4's whole
+   point. What makes it safe is that proceeding on that branch claims *nothing* —
+   no comparison was made, no entry is written, and the ledger's own refusal is
+   carried on the report, so a corrupt log reaching this branch keeps refusing on
+   its own account at every operation. The property that actually holds across all
+   three is the weaker and true one: **no catch converts an unrecognized failure
+   into an acceptance**, which is the silent-acceptance hazard.
 4. **Ordering inside the open, and it is load-bearing at three points.** Present →
    binding (replacement must be caught before the presented lineage's journal is
    read, or the seam consults a journal that has never seen this location and
@@ -115,12 +126,16 @@ proposal disagreed and the module won.
    comparison** → **projection comparison**. Custody before projection, so an
    ahead-of-the-ledger index is never reported as a rollback it is not, and so the
    refusal an operator sees names the recovery they actually perform.
-5. **No journal write precedes any refusal, structurally rather than by
-   discipline.** `_observe` is pure with respect to the journal: it *returns* the
-   entry a first contact earned and writes nothing, and the constructor performs
-   the write only after observation returns without raising. So a store that passes
-   the journal comparison and then fails the projection one leaves no memory
-   claiming its head was accepted. Mutation demo (e).
+5. **No journal write precedes any refusal — and this claim was FALSE as first
+   written.** *Corrected; see the BLOCKING section below.* The original build
+   deferred the first-contact entry through `pending` and wrote the ADVANCE entry
+   inline from `_judge`, so the claim held for one branch and not the other, and
+   a refused open could and did move the witness. What makes it true now is a
+   carrier rather than a promise: `_observe` returns an `_Earned` and the
+   constructor's `_write` is the open path's only write site. What keeps it true
+   is `test_only_the_constructor_and_the_producers_write_to_the_journal`, an AST
+   ratchet with a shrink-only allowlist — a branch added later that writes inline
+   fails by name. Mutation demos (e) and (h).
 6. **`Compared | Indeterminate | PreGenesis`, with no uniform `.outcome`.** WP1's
    discipline carried up: the degraded case has no outcome attribute at all, and
    `PreGenesis` has no presented head, so no expression reads an answer off a
@@ -179,6 +194,66 @@ proposal disagreed and the module won.
     and permitted is not required. `close()` consults the field rather than the
     property, or closing would be the thing that constructs the reader the fix
     deferred.
+
+## BLOCKING-1 — a refused open moved the witness (closed)
+
+`finding:s3wp3-gate-advance-journaled-before-projection-refusal`. The gate was
+right, and the defect was in the exact place my own design claim said it could not
+be.
+
+**What was wrong.** "Nothing writes until every refusal has had its chance" was
+stated per-branch, and only one branch honored it. The first-contact entry was
+deferred through `pending` and written by the constructor; the ADVANCE entry was
+written *inline* from `_judge`, and `_projection` — which can refuse — runs after.
+Reproduced before fixing: mint → append to 1 → open (first contact) → unjournaled
+append to 3 → truncate to 2 → open ⇒ `ProjectionAheadOfLedger` raised **and** the
+journal grew an `advance`/`descendant`/2 entry. The headline cell, in remembered
+form: the witness permanently recorded that this machine accepted ordinal 2, at the
+open that refused it, and the next open would have compared against the truncation
+as though it were the accepted history.
+
+**Why the per-branch form was the actual defect.** The rule was correct and the
+first implementation of it was correct; the second branch simply did not know about
+it. A rule that each branch must remember fails whenever somebody adds a branch —
+which is the same shape as WP1's four-round prose lag and the same shape as the
+ratchet principle: an invariant that lives only in review vigilance drifts.
+
+**The fix, structural.** `_observe` now returns an `_Earned` for both branches and
+writes nothing; `AttestedLedger._write` is the open path's single write site. The
+rule is then held by
+`test_only_the_constructor_and_the_producers_write_to_the_journal`, which walks the
+module AST and fails any call to `append_entry`, `record_binding`, `bootstrap`,
+`trust_reset` or `audit` from outside a shrink-only allowlist of six functions. A
+branch added later that writes inline fails **by name**, and the fix it points at
+is "return an `_Earned`", not "widen the list". The allowlist is itself checked
+against the module's defined functions, so a rename cannot quietly empty it.
+
+**The sweep the fix was scoped to — every write site against every refusal that can
+follow it.** Enumerated rather than spot-checked:
+
+| Write site | Entry | What can refuse after it | Verdict |
+|---|---|---|---|
+| open path, first contact | `bootstrap`/`first-contact` | `_projection`: `ProjectionAheadOfLedger`, `NotAuthority` | **was already deferred**; still deferred |
+| open path, advance | `advance`/`descendant` | same two | **WAS THE DEFECT** — now deferred |
+| open path, unchanged / degraded / pre-genesis | none earned | — | nothing to defer |
+| `mint` | `bootstrap`/`mint` | nothing — the bootstrap is the last statement | safe |
+| `append` / `replicate` → `_witness` | `advance`/`commit` | nothing — the append has already committed, which is precisely what `NotWitnessed` reports | safe |
+| `audit` producer | `audit`/`full` | nothing — `verify(Full)` and the unaccounted-heads check both run *before* the append, and `AuditFoundUnaccountedHeads` replaces the entry rather than accompanying it | safe |
+| `trust_reset` producer | `trust-reset` | nothing — the empty-reason refusal precedes the append | safe |
+
+Everything upstream of the journal read (`_present`, the binding check,
+`read_journal`'s own `JournalUnreadable` / `JournalEquivocation` /
+`UnsafeLineageName`) refuses before any entry is earned at all, and
+`days_since_audit` is pure and cannot raise.
+
+**Both refusals behind the write are tested**, not just the one the repro used:
+`test_an_advance_is_not_journaled_when_the_projection_then_refuses` (the gate's
+exact repro, asserting the journal is **byte-identical** across the refused open,
+and the index too) and
+`test_an_advance_is_not_journaled_when_the_projection_disowns_the_log` (the
+lineage-mismatch arm, where the adapter's own `NotAuthority` comes out). Mutation
+(h) restores the inline write and fails all three — both behavior tests and the
+ratchet.
 
 ## This seam is where bound semantics become enforced behavior
 

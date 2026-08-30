@@ -64,6 +64,7 @@ from engine.arrival_head_seam import (
     AttestedLedger,
     AuditFoundUnaccountedHeads,
     Compared,
+    FenceProbeUnanswered,
     Indeterminate,
     NotWitnessed,
     PreGenesis,
@@ -2208,3 +2209,112 @@ def test_a_reset_whose_predecessor_moved_lines_is_not_honored(tmp_path):
     assert recorded.split("line ")[1].split("/")[1].strip() == (
         actual.split("/")[1].split(")")[0].strip()
     ), notes[0]
+
+
+# ---------------------------------------------------------------------------
+# The fence probe must not fail open (finding:s3-fence-probe-fails-open)
+# ---------------------------------------------------------------------------
+
+
+class ProbeFails:
+    """A ledger whose ``head_at`` raises for chosen ordinals.
+
+    Everything else delegates, so the descent verification still succeeds
+    honestly — which is the point: the store is fine, the walk is fine, and
+    only the fence's own question goes unanswered.
+    """
+
+    def __init__(self, inner: ArrivalLedger, failing: set[int]) -> None:
+        self._inner = inner
+        self._failing = failing
+        self.asked: list[int] = []
+
+    def head_at(self, watermark):
+        self.asked.append(watermark.ordinal)
+        if watermark.ordinal in self._failing:
+            raise OSError("transient: input/output error")
+        return self._inner.head_at(watermark)
+
+    def __getattr__(self, name):
+        return getattr(self._inner, name)
+
+
+def test_an_unanswered_fence_probe_refuses_rather_than_accepting(tmp_path):
+    """Sol's repro. The fence contained a probe that lied acceptance-side.
+
+    Descent verifies, the probe raises, and the old code continued as though
+    the abandoned coordinate simply was not there — so the advance was accepted
+    AND journaled, and every later open read UNCHANGED. The self-erasing loop,
+    reached through a transient error instead of through a restore.
+
+    Evidence absent is not absence of evidence, and this is the one place in
+    the seam where that had been written the wrong way round.
+    """
+    log_path, lineage, abandoned, backup = _reset_away_from(tmp_path)
+    log_path.write_bytes(backup)
+    before = journal_bytes(lineage)
+    bindings_before = bindings_path().read_bytes()
+
+    probing = ProbeFails(
+        FileLedger(ArrivalLog(log_path)), failing={abandoned.ordinal}
+    )
+    with pytest.raises(FenceProbeUnanswered) as excinfo:
+        AttestedLedger(probing, location=str(log_path))
+
+    assert "retry the open" in str(excinfo.value)
+    assert isinstance(excinfo.value.__cause__, OSError)
+    # Nothing accepted, and nothing written — the loop's fuel was the write.
+    assert journal_bytes(lineage) == before
+    assert bindings_path().read_bytes() == bindings_before
+
+
+def test_one_unanswered_anchor_of_several_refuses_the_whole_open(tmp_path):
+    """No partial certification.
+
+    With several fenced anchors, answering most of them says nothing about the
+    one that did not answer. A fence that refused only when it happened to get
+    an answer would be strongest exactly when it was least needed.
+    """
+    log_path = minted(tmp_path / "s.arrival")
+    append_legacy(log_path, "one", "two", "three")
+    abandoned = FileLedger(ArrivalLog(log_path)).verify(Open())
+    backup = log_path.read_bytes()
+    opened(log_path)
+
+    truncate_records(log_path, keep=1)
+    restored = FileLedger(ArrivalLog(log_path)).verify(Open())
+    trust_reset(
+        accepted=restored,
+        abandoned=abandoned,
+        refused=abandoned,
+        reason="incident",
+        location=str(log_path),
+        observed_at=5000.0,
+    )
+    log_path.write_bytes(backup)
+
+    # Fail the probe for the HIGHEST anchor only; the lower ones answer fine.
+    probing = ProbeFails(
+        FileLedger(ArrivalLog(log_path)), failing={abandoned.ordinal}
+    )
+    with pytest.raises(FenceProbeUnanswered):
+        AttestedLedger(probing, location=str(log_path))
+
+
+def test_a_probe_failure_outside_the_fenced_set_is_not_consulted(tmp_path):
+    """Scope the claim: only coordinates the fence actually asks about matter.
+
+    A probe that raises at an ordinal the fence has no anchor for is never
+    reached, so it cannot manufacture a refusal. The refusal says "I could not
+    certify what I needed to", and it must not grow into "something somewhere
+    failed".
+    """
+    log_path, _lineage, _abandoned, _backup = _reset_away_from(tmp_path)
+    index_path_for(log_path).unlink(missing_ok=True)
+    append_legacy(log_path, "a genuinely new record")
+
+    probing = ProbeFails(FileLedger(ArrivalLog(log_path)), failing={9999})
+    comparison = AttestedLedger(probing, location=str(log_path)).opened.comparison
+    assert isinstance(comparison, Compared)
+    assert comparison.outcome is Outcome.ADVANCED
+    assert 9999 not in probing.asked

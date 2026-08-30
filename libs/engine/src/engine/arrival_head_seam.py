@@ -92,6 +92,7 @@ from .arrival_head_attestation import (
 __all__ = [
     "AttestedLedger",
     "AbandonedHistoryFenced",
+    "FenceProbeUnanswered",
     "AuditFoundUnaccountedHeads",
     "Compared",
     "Indeterminate",
@@ -154,6 +155,39 @@ class AbandonedHistoryFenced(AttestationRefusal):
     The acceptance path is the ceremony, and it is one command: decree the
     recovered head. That is the lift rule, and it is why this refusal names it
     rather than leaving an operator to guess at a way forward.
+    """
+
+
+class FenceProbeUnanswered(AttestationRefusal):
+    """The fence could not certify the walked path, so the open does not proceed.
+
+    A sibling of :class:`AbandonedHistoryFenced` rather than an arm of it,
+    because the two make different claims and ask for different things. That
+    one says *your history touches ground the operator decreed away* — a
+    positive finding, answered by the ceremony. This one says *I could not
+    determine whether it does*, which is not a finding at all, and is answered
+    by trying again.
+
+    Named for what the read LACKS rather than for what went wrong with it. A
+    cause-name does not survive a second cause, which is the lesson this
+    module's prose paid for four times over.
+
+    **Why an unanswered probe refuses instead of proceeding.** The fence exists
+    because verified descent is not the whole question, and a probe that
+    treated its own failure as "nothing there" would answer the whole question
+    wrongly in the acceptance direction — evidence absent read as absence of
+    evidence. A transient error then costs exactly what sol's loop cost:
+    the advance accepted, journaled, and every later open reading UNCHANGED,
+    with the acceptance having erased its own evidence
+    (``finding:s3-fence-probe-fails-open``).
+
+    This is not the degradation posture, and the distinction is the posture's
+    own rule: :meth:`AttestedLedger._degraded` proceeds only AFTER firing every
+    refusal the evidence soundly supports. An uncertified fence path is exactly
+    a refusal the evidence demands, not a question the evidence leaves open.
+
+    The cost of being wrong here is one retried open. The cost of being wrong
+    the other way is silent re-acceptance of decreed-away history.
     """
 
 
@@ -1232,6 +1266,12 @@ class AttestedLedger:
         boundary is the one decree nothing has superseded, so it is the one
         that speaks. Fences more, never less.
 
+        **An unanswered probe refuses.** Every branch of this method lands on
+        refusal or on a certified-clean path; there is no arm where a failure
+        becomes silence. That is the one-directional rule the rest of this seam
+        already states at its broad catches, and this method is where it was
+        first broken (:class:`FenceProbeUnanswered`).
+
         Cost: one verified walk per fenced anchor ordinal, on the ADVANCED
         branch only — which is rare by construction, because a writer journals
         its own commit.
@@ -1261,8 +1301,22 @@ class AttestedLedger:
                 vouched = self._ledger.head_at(
                     Watermark(lineage=presented.lineage, ordinal=ordinal)
                 )
-            except Exception:  # noqa: BLE001 — no answer is no evidence of a touch
-                continue
+            except Exception as exc:  # noqa: BLE001 — see the refusal's docstring
+                # NO ANSWER IS NOT AN ANSWER. Continuing here would read
+                # evidence-absent as absence-of-touch and land the whole fence
+                # on the acceptance side — which is how sol reproduced the
+                # self-erasing loop straight through a transient error.
+                raise FenceProbeUnanswered(
+                    f"{self._canonical} presents {_head_text(presented)}, and "
+                    f"the ledger could not be asked what sits at ordinal "
+                    f"{ordinal}: {exc}. This machine's operator decreed away "
+                    f"history above ordinal {decree.head.ordinal}, and without "
+                    "that answer this open cannot certify the presented "
+                    "history is clear of it. Nothing is wrong with the store "
+                    "as far as this went, and nothing has been accepted or "
+                    "written — retry the open, and if it keeps failing the "
+                    "ledger is what needs looking at"
+                ) from exc
             if vouched.record_hash in fenced[ordinal]:
                 raise AbandonedHistoryFenced(
                     f"{self._canonical} presents {_head_text(presented)}, whose "

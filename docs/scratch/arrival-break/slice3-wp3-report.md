@@ -71,7 +71,7 @@ engine pytest libs/engine/tests`, and `tests/architecture` in its own run).
 
 | Suite | Baseline | After | Delta |
 |---|---|---|---|
-| engine | 2158 passed, 1 skipped | 2229 passed, 1 skipped | **+71** |
+| engine | 2158 passed, 1 skipped | 2233 passed, 1 skipped | **+75** |
 | architecture | 99 passed | 99 passed | **0** — Rule 18 is not parametrized per target |
 
 Every delta accounted for: **+57** in `test_arrival_head_seam.py`, **+1** in
@@ -247,30 +247,66 @@ the journal outright and being met with trust-on-first-use. The named upgrade is
 the deferred signed grammar, whose chained entries make a truncation detectable
 rather than merely disbelieved.
 
-### One number the ruling predicted, measured differently
+### The number that differed — and the acceptance vector behind it
 
-The ruling's regression asks that sol's repro leave **K at 8**. Measured on the
-fixed tree, **K settles at 10**, and the divergence is real rather than a fix
-that half-works:
+**SUPERSEDED. My analysis of this was wrong, and the ruling is FIX.**
 
-- The replayed **reset** is correctly rejected — skip record present, the epoch
-  is not reopened, and a store at 5 refuses as `ROLLBACK`. The attack is closed.
-- The replayed **predecessor** is an ordinary `advance` entry, and re-appending
-  it after the legitimate reset is, to the journal, a fresh claim that this
-  machine accepted ordinal 10. The maximum-ordinal rule then takes it, and a
-  store at the genuine head of 8 is refused too.
+I reported that sol's repro left *K* at 10 rather than the predicted 8, and
+classified it as safe because *K* had moved **up**. That is the wrong axis. The
+axis that matters is *K*'s **referent**: the head it then named was a
+**genuine** head this machine really did accept, so a store restored from the
+pre-reset backup presents it exactly, compares **equal**, and the unchanged arm
+gathers no descent evidence by design — nothing else is ever consulted. The
+ceremonially abandoned state simply opened. Verified at source before fixing: on
+the pre-fix tree, `compare(K, head(10), None)` answers `unchanged`. A
+wrongly-raised *K* naming a real abandoned head is a landing pad, not a wall.
 
-Refusal-side, and no silent acceptance is reachable through it — a denial of
-service against one's own store, never a way into one. Not fixed here because
-the obvious symmetry does not work: every entry already *is* at its position, so
-a per-entry position check compares an entry against where it currently sits,
-which a copy trivially satisfies. What is missing is the ability to tell a
-re-assertion from a first assertion, and nothing unsigned can date an entry —
-`observed_at` is caller-supplied and copies carry it verbatim. Same named
-upgrade as the truncation bound. Pinned by
-`test_a_replayed_advance_reimports_an_abandoned_head`, and sol's repro test
-carries a comment pointing at it rather than burying the divergence in an
-assertion: `finding:s3wp3-replayed-advance-reimports-an-abandoned-head`.
+My second claim was wrong in the same direction. "Nothing unsigned can tell a
+re-assertion from a first assertion" is true in general and false for the case
+that matters: **bytes can**, for a *literal* replay — and literal replay of
+existing bytes is precisely the threat model. Anything that modifies the bytes
+is forgery, which is the deferred signed grammar's territory and not this
+gate's. That is a clean scope split, and I had talked myself past it.
+
+**The fix: a line byte-identical to an earlier line is a re-assertion**, skipped
+through the existing skip channel. Per-line and **type-agnostic** — a replayed
+`audit` carrying an abandoned covered head poisons *K* exactly as an `advance`
+or a `trust-reset` does, so a per-type rule would be a list that grows.
+Order-agnostic (it compares bytes and never consults an ordinal, so the
+non-ascending write order is irrelevant), read-side only, and it changes no
+record shape, producer or lock. **Headers are exempt** and that is not a
+per-type carve-out: a header carries no claim about any head, and two of them is
+an explicitly tolerated create-race artifact, so deduping one would turn a race
+this design chose to survive into a permanently weakened read.
+
+**Collision direction, pinned rather than argued from improbability.** Two
+genuinely independent events that serialize identically are indistinguishable
+from a replay, so the gate drops the later line and *K* reads **lower** than the
+truth. The store then presents a head above it — an ADVANCE — and the advance
+branch is the one that pays for a verified walk before anything is accepted.
+Cost, not credulity: the failure lands on the verification side.
+`test_an_injected_collision_costs_a_walk_and_never_an_acceptance` constructs the
+collision rather than assuming it cannot happen.
+
+**Reconciled, not left contradicting.** Sol's repro flips back to **K = 8 with
+two skip records** — both copied lines are literal replays — and the divergence
+comment, the finding pointer and the 10-assertion are all updated to that truth.
+The residual test flips into the acceptance-vector test it had been hiding.
+
+**Two of my own fixtures were wrong, and the gate found them**: they modelled a
+post-reset advance as byte-identical to a pre-reset one, which no real store
+produces — after a restore the store re-advances through a *different* history.
+
+**Position-binding needed its own case, and its first one was fake.** The replay
+tests now die on the byte-duplicate gate before the position claim is consulted,
+so position's coverage would have been an illusion. I wrote a dedicated case —
+a line inserted ahead of a reset's predecessor, bytes unique so dedup cannot
+fire — and the mutation demo **caught the test**: dropping the position half
+failed nothing, because my construction broke *identity* too and would have
+passed against a build with no position check at all. Corrected so identity
+matches on both sides and only the line moves, and the test now asserts that
+equality itself, so a construction that stops isolating position fails here
+instead of passing quietly.
 
 ### S3WP3-L-3 — the previous round's fix was hollow
 
@@ -637,7 +673,8 @@ Each applied to the working tree, the suite run, the mutation reverted, and
 | (L-1) | the object-identity sweep reverted in the binding arm | **1 failed, 56 passed** — `test_a_case_variant_spelling_of_a_bound_store_is_not_first_contact`: the replacement raises nothing and the alias spelling silently first-contacts |
 | (L-2) | read-time reset validation reverted in `_epoch_of` | **4 failed, 154 passed** — sol's repro leads, and *K* measured directly under the mutation is **5** where the journal reached 8; also the genuine-reset, crash-retry and unbound-reset tests |
 | (L-3) | `trust_reset`'s CALL SITE reverted to `read_journal` (the helper left correct and unused — the shape of the r2 hole) | **3 failed, 56 passed** — `test_the_ceremony_succeeds_on_an_equivocating_journal` leads, plus the gap-recording and epoch-scoped-staleness tests |
-| (L-4) | the POSITION half dropped from read-time validation, identity alone again | **2 failed, 104 passed** — both context-replay tests. Measured directly under the mutation: **K = 5, zero skip records, and a store at 5 opens `unchanged`** — sol's attack, reproduced |
+| (L-4) | the POSITION half dropped from read-time validation, identity alone again | **1 failed, 168 passed** — `test_a_reset_whose_predecessor_moved_lines_is_not_honored`, the fresh-bytes construction. (Before the dedup gate this failed the two context-replay tests instead; those now die on dedup first, which is why position needed a case of its own.) |
+| (L-5) | the byte-duplicate gate reverted | **9 failed, 160 passed** — and the sharp one is `test_a_restored_abandoned_backup_does_not_open_unchanged`, which fails with *the abandoned state opened unchanged*: the acceptance vector itself, reproduced |
 
 **NB-1 — two demos have a nondeterministic failure SET, and the earlier counts
 here were wrong twice over.** `test_two_writers_and_an_opener_leave_a_parseable_journal`

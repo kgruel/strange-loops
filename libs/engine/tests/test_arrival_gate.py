@@ -902,3 +902,18 @@ def test_the_lock_lives_beside_the_log_and_survives_a_crashed_holder(tmp_path):
 
     log.append("note", {"after": "the crash"}, observer="kyle")
     assert log.head()["ord"] == 2
+
+
+def test_tail_record_ending_mid_record_raises_typed_arrival_torn_tail(tmp_path):
+    """E2: Log ending mid-record raises ArrivalTornTail specifically from _tail_record."""
+    from engine.arrival import ArrivalTornTail
+
+    log = _mint(tmp_path)
+    with log.path.open("ab") as fh:
+        fh.write(b'{"incomplete": "record"')
+
+    with pytest.raises(ArrivalTornTail) as exc_info:
+        log._tail_record()
+
+    assert type(exc_info.value) is ArrivalTornTail
+    assert "ends mid-record" in str(exc_info.value)

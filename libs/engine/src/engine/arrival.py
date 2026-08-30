@@ -70,6 +70,7 @@ __all__ = [
     "ArrivalError",
     "ArrivalGrammarError",
     "ArrivalCorrupt",
+    "ArrivalTornTail",
     "GenesisRefused",
     "AppendRejected",
     "StaleHead",
@@ -185,6 +186,14 @@ class ArrivalCorrupt(ArrivalError):
     def __init__(self, message: str, ordinal: int) -> None:
         super().__init__(f"arrival log corrupt at ordinal {ordinal}: {message}")
         self.ordinal = ordinal
+
+
+class ArrivalTornTail(ArrivalError):
+    """The arrival log ends mid-record before a terminating newline.
+
+    The trailing bytes of the log do not end with a newline delimiter,
+    indicating that the final record was only partially written.
+    """
 
 
 class GenesisRefused(ArrivalError):
@@ -1246,7 +1255,7 @@ class ArrivalLog:
             lineage = self._lineage_from(fh)
             fh.seek(size - 1)
             if fh.read(1) != b"\n":
-                raise ArrivalError(
+                raise ArrivalTornTail(
                     f"{self.path} ends mid-record — truncate the torn tail first"
                 )
             start = _last_newline_before(fh, size - 1)

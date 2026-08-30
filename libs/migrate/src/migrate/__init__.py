@@ -32,10 +32,17 @@ from .refusals import (
     LegacySourceRefused,
     MigrationRefused,
 )
+from .transform import (
+    GenesisRequirements,
+    TransformExceptions,
+    TransformResult,
+    transform,
+)
 
 __all__ = [
     "FACT_FIELDS",
     "FactRow",
+    "GenesisRequirements",
     "JsonlCodecError",
     "LegacySourceRefused",
     "MigrationRefused",
@@ -43,6 +50,8 @@ __all__ = [
     "SourceInventory",
     "TICK_FIELDS",
     "Transform",
+    "TransformExceptions",
+    "TransformResult",
     "_content_sha256",
     "_facts_have_signature",
     "_tick_columns",
@@ -58,5 +67,6 @@ __all__ = [
     "read_facts",
     "read_ticks",
     "records_from_object",
+    "transform",
     "ulid_migration",
 ]

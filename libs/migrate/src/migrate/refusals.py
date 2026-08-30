@@ -22,10 +22,16 @@ __all__ = [
     "MissingCustodianKeyRefused",
     "JournalPreflightRefused",
     "TargetMismatchOnResumeRefused",
+    "TargetUnopenable",
     "TornTailRefused",
     "PublishPreconditionRefused",
     "SourceChangedRefused",
     "LegacyStorageRefused",
+    "ReportVerificationRefused",
+    "ReportMalformedRefused",
+    "ReportBadSignatureRefused",
+    "ReportMissingTargetRefused",
+    "ReportHeadMismatchRefused",
 ]
 
 
@@ -250,4 +256,44 @@ class LegacyStorageRefused(MigrationRefused):
     def __init__(self, message: str, *, source: str | None = None) -> None:
         self.source = source
         super().__init__(message)
+
+
+class TargetUnopenable(MigrationRefused):
+    """Target arrival store cannot be opened at the contract/storage seam.
+
+    Asserts that opening or reading the target store failed at the storage or
+    seam level (such as StoreLost, ArrivalCorrupt, or filesystem error), without
+    making claims about prefix mismatch or torn tail.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        target_path: str | None = None,
+        cause: BaseException | None = None,
+    ) -> None:
+        self.target_path = target_path
+        self.cause = cause
+        super().__init__(message)
+
+
+class ReportVerificationRefused(MigrationRefused):
+    """Base exception for migration report verification failures."""
+
+
+class ReportMalformedRefused(ReportVerificationRefused):
+    """Migration report document is malformed, not JSON, or carries unknown top-level keys."""
+
+
+class ReportBadSignatureRefused(ReportVerificationRefused):
+    """Migration report signature failed cryptographic verification."""
+
+
+class ReportMissingTargetRefused(ReportVerificationRefused):
+    """Target arrival store referenced by migration report does not exist."""
+
+
+class ReportHeadMismatchRefused(ReportVerificationRefused):
+    """Target arrival store head does not match the claim in migration report."""
 

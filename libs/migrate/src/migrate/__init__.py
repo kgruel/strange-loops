@@ -46,6 +46,7 @@ from .refusals import (
     PublishPreconditionRefused,
     SourceChangedRefused,
     TargetMismatchOnResumeRefused,
+    TargetUnopenable,
     TornTailRefused,
 )
 from .sidecar import (
@@ -90,6 +91,7 @@ __all__ = [
     "SourceInventory",
     "TICK_FIELDS",
     "TargetMismatchOnResumeRefused",
+    "TargetUnopenable",
     "TickUnit",
     "TornTailRefused",
     "Transform",

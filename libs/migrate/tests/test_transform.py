@@ -489,8 +489,20 @@ def test_full_unit_drop_recorded_in_exception_report(tmp_path: Path, kyle, alice
 
     dropped = result.exceptions.dropped_units
     assert len(dropped) == 2
-    assert dropped[0] == DroppedUnit(coordinate=1, kind="fact", rule="drop-selected")
-    assert dropped[1] == DroppedUnit(coordinate=6, kind="batch", rule="drop-selected")
+    assert dropped[0] == DroppedUnit(
+        coordinate=1,
+        kind="fact",
+        rule="drop-selected",
+        fact_kinds=("concept",),
+        observers=("alice",),
+    )
+    assert dropped[1] == DroppedUnit(
+        coordinate=6,
+        kind="batch",
+        rule="drop-selected",
+        fact_kinds=("concept", "claim"),
+        observers=("alice", "alice"),
+    )
 
     emitted_ids = {
         d.body.get("id")

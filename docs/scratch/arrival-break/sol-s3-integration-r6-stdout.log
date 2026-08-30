@@ -1,0 +1,1459 @@
+Reading prompt from stdin...
+OpenAI Codex v0.150.1
+--------
+workdir: /Users/kaygee/Code/loops-s3wp1
+model: gpt-5.6-sol
+provider: openai
+approval: never
+sandbox: workspace-write [workdir, /tmp, $TMPDIR]
+reasoning effort: low
+reasoning summaries: none
+session id: 01a053e0-7612-7ce1-96f0-6b7c1ad73802
+--------
+user
+# Sol review brief — arrival-break slice 3, integration round 6 (per-WP, LOW — short verify)
+
+Round 6, verifying the fix for your r5 finding S3I-L-8 (bound_lineage docstring
+remedy residue) and presenting the arbiter's REFUTATION of S3I-L-9 for your
+contest.
+
+## 1. Anchor
+
+- Worktree: this directory (`~/Code/loops-s3wp1`), branch `slice3/arrival-witness`,
+  NEW tip `215e1c2e`. Diff since your r5: `git diff 63028677...215e1c2e`.
+- Claimed: engine 2304 passed + 1 skipped + 0 failed, arch 99 separately, ruff
+  clean. No test changes.
+
+## 2. The S3I-L-9 refutation — contest it if wrong
+
+The arbiter DISMISSED S3I-L-9 with the overclaim located in the arbiter's own
+r5 brief: "exactly one failure" conflated demo LOCALIZATION (both failing
+tests name the same arm — satisfied) with single-responsibility purism (whose
+"fix" would narrow the six-cause mapping test to one reader, weakening it).
+The guarded defect class is fails-ZERO (masking); fails-several-all-naming-one-
+arm is redundant detection in the failing direction. No change was made to the
+mapping test. If you believe overlapping test responsibilities here cause a
+REAL problem the refutation misses (a scenario where the overlap misleads a
+maintainer or hides a regression), say so with the scenario; otherwise confirm
+the dismissal.
+
+## 3. Unverified fix (`25b0a078` + `215e1c2e`)
+
+S3I-L-8, WITH A DISCLOSED CAVEAT — not strictly prose-only:
+
+- `bound_lineage`'s docstring now enumerates the actual answer surface, each
+  row verified against the body by the impl: absent → None (FileNotFoundError
+  arm); empty → None (loop never runs); blank line → skipped
+  (`if not stripped: continue`); foreign binding → None (location comparison);
+  uninterpretable content → `BindingsUnreadable`; unanswerable storage →
+  `BindingProbeUnanswered`. States why there is no transience claim.
+- THREE more sites swept in the same unit: a decode comment saying PERMANENT,
+  an OSError comment saying TRANSIENT-flavoured (the superseded axis one line
+  below the docstring correcting it), and a match-branch comment describing
+  the skip branch it wasn't attached to.
+- THE CAVEAT: two content-side refusal MESSAGES dropped a trailing "then retry
+  the open" — remedy-axis residue inside content refusals where retry cannot
+  help. The impl verified nothing pinned the text (the two tests asserting
+  "retry the open" are storage-side, on `storage_advice` prose, and pass).
+- Deliberately LEFT: `_identity_of`'s docstring names "a permission wall, a
+  transient I/O error" as example causes — description of what can happen,
+  not a family-promise claim. Named so you don't read it as missed residue.
+
+## 4. Verify
+
+1. The docstring's six rows against the body — is the enumeration exhaustively
+   true now (your r5 construction set plus anything else the body can answer)?
+2. The two message edits: content-side refusals no longer advise retry;
+   storage-side advisories still do where retry can help; nothing else in the
+   diff beyond prose/messages (verify the diff's actual reach).
+3. The three swept comment sites and the deliberately-left descriptive prose —
+   is the left prose genuinely descriptive rather than promissory?
+4. Counts: engine 2304+1s+0f (unchanged — no test changes), arch 99 separate,
+   ruff clean, `git diff --check` clean, worktree clean.
+
+## 5. Verdict format
+
+Per-item PASS/FAIL + evidence. New findings: `S3I-L-<n>` continuing. Then one
+line: **CONVERGED** or **NOT CONVERGED** (with the blocking list).
+
+codex
+I’ll verify the anchored commit and scoped diff, trace each documented outcome through the implementation, then run the requested checks. I’ll also evaluate the L-9 refutation against concrete regression scenarios.
+exec
+/bin/zsh -lc 'git status --short --branch && git rev-parse HEAD && git diff --stat 63028677...215e1c2e && git diff --check 63028677...215e1c2e && git diff --name-status 63028677...215e1c2e && git diff 63028677...215e1c2e' in /Users/kaygee/Code/loops-s3wp1
+ succeeded in 0ms:
+## slice3/arrival-witness
+215e1c2e78291dee56d2e0eed258d8cddc5e5711
+ docs/scratch/arrival-break/slice3-wp3-report.md    | 43 +++++++++++++++
+ libs/engine/src/engine/arrival_head_attestation.py | 61 +++++++++++++---------
+ libs/engine/src/engine/arrival_head_seam.py        |  2 +-
+ 3 files changed, 81 insertions(+), 25 deletions(-)
+M	docs/scratch/arrival-break/slice3-wp3-report.md
+M	libs/engine/src/engine/arrival_head_attestation.py
+M	libs/engine/src/engine/arrival_head_seam.py
+diff --git a/docs/scratch/arrival-break/slice3-wp3-report.md b/docs/scratch/arrival-break/slice3-wp3-report.md
+index 4b0f612e..960eb97e 100644
+--- a/docs/scratch/arrival-break/slice3-wp3-report.md
++++ b/docs/scratch/arrival-break/slice3-wp3-report.md
+@@ -201,6 +201,49 @@ proposal disagreed and the module won.
+     property, or closing would be the thing that constructs the reader the fix
+     deferred.
+ 
++## S3I-L-8 — the docstring catches up, and so does the prose under it
++
++`finding:s3-bound-lineage-docstring-remedy-residue`. `bound_lineage`'s docstring
++still sorted refusals into "asks for repair" and "asks for a retry" — one level
++below the parent that had stopped making that claim — and its "everything else
++REFUSES" did not account for the legitimate skips.
++
++It now enumerates the **actual answer surface**, and I verified each row against
++the body rather than transcribing the routing's list:
++
++| Answer | When |
++|---|---|
++| `None` | absent file, empty file, blank lines, and well-formed bindings naming OTHER locations |
++| `BindingsUnreadable` | bytes arrived, uninterpretable — not UTF-8, not JSON, or JSON with no location and lineage |
++| `BindingProbeUnanswered` | storage would not yield the bytes at all |
++
++And it says why there is no transience claim: that axis is not decidable from an
++exception class.
++
++**Swept the same residue in the same unit**, rather than leaving it a line below
++a corrected docstring — which is exactly how this file has been burned four
++times. Three more sites carried the superseded axis: the decode comment said
++`PERMANENT`, the `OSError` comment said `TRANSIENT-flavoured`, and the comment
++on the match branch described the *skip* branch it was not attached to.
++
++**Not prose-only, and the difference is worth naming.** Two content-side
++messages dropped a trailing "then retry the open" — remedy-axis residue sitting
++inside a content refusal, where retrying is precisely what will not help. I
++checked before editing that nothing pinned the text, and after: the two tests
++asserting "retry the open" are both **storage**-side and still pass on
++`storage_advice`'s prose. That is the same distinction WP1's own sol round had
++to draw, and it is worth stating rather than letting "prose sweep" imply the
++AST was untouched.
++
++**Deliberately left**: `_identity_of`'s docstring names "a permission wall, a
++transient I/O error" as example causes. That is description of what can happen,
++not a claim about which family promises what, so it stays. Named so the next
++reader does not take it for residue I missed.
++
++S3I-L-9 was refuted by the lead and I made no change: both failures of the alias
++mutation name the same arm, so localization holds and the mapping test stays as
++it is.
++
+ ## S3I-L-6 / L-7 — the family contract re-scoped, and the last silent door
+ 
+ ### L-6: my remedy split was a verdict claim
+diff --git a/libs/engine/src/engine/arrival_head_attestation.py b/libs/engine/src/engine/arrival_head_attestation.py
+index 7decd7bb..59be6a26 100644
+--- a/libs/engine/src/engine/arrival_head_attestation.py
++++ b/libs/engine/src/engine/arrival_head_attestation.py
+@@ -1585,18 +1585,32 @@ def bound_lineage(location: str) -> str | None:
+ 
+     DELETE IN SLICE 5.
+ 
+-    **An ABSENT file answers None**, and that is the one degradation this makes:
+-    nothing has ever been bound, so first contact is the honest state.
+-
+-    Everything else REFUSES, which is the correction to what this docstring
+-    used to claim. It said a malformed line is skipped because "this file makes
+-    no claim a skipped line could weaken" — and that was wrong in the way that
+-    mattered: the skipped line may be the very binding that names this
+-    location, so skipping answers "nothing is bound here" on evidence that says
+-    nothing of the kind, and a replaced store then opens as first contact
+-    (``finding:s3wp3-binding-probes-fail-acceptance-side``). Unreadable content
+-    raises :class:`BindingsUnreadable` and asks for repair; a transient read
+-    failure raises :class:`BindingProbeUnanswered` and asks for a retry.
++    **The answer surface, in full.** Three outcomes, split by where a failure
++    happened rather than by what anyone should do about it:
++
++    * **None** — the file is absent or empty, every line is blank, or the
++      bindings it holds are well-formed and name OTHER locations. Each of these
++      is an ANSWER: nothing is bound here, and first contact is the honest
++      state. A binding for a different store genuinely says nothing about this
++      one, and refusing on it would make every bindings file holding more than
++      one store unopenable.
++    * :class:`BindingsUnreadable` — the bytes arrived and could not be
++      interpreted as bindings: not UTF-8, not JSON, or JSON carrying no
++      location and lineage. None of those says anything about what this
++      location presented, so answering None on them reports an absence the
++      evidence does not support
++      (``finding:s3wp3-binding-probes-fail-acceptance-side``,
++      ``finding:s3-binding-shape-filter-silently-drops``).
++    * :class:`BindingProbeUnanswered` — storage would not yield the bytes at
++      all.
++
++    **No claim here about transience or remedy.** This docstring used to sort
++    the refusals into "asks for repair" and "asks for a retry", and that axis
++    is not decidable from an exception class — ``IsADirectoryError`` arrives
++    through the same door as a passing I/O fault
++    (``finding:s3-refusal-family-remedy-promise-undecidable``). Remedy is
++    advisory prose carried per cause in the message; the types assert only
++    where the failure happened.
+     """
+     try:
+         text = bindings_path().read_text(encoding="utf-8")
+@@ -1604,20 +1618,19 @@ def bound_lineage(location: str) -> str | None:
+         # ABSENT is an answer: nothing has ever been bound.
+         return None
+     except UnicodeDecodeError as exc:
+-        # PERMANENT, so not a probe failure: these bytes will decode the same
+-        # way on every retry, and the honest advice is repair.
++        # CONTENT: the bytes arrived and could not be interpreted.
+         raise BindingsUnreadable(
+             f"the bindings file at {bindings_path()} is not valid UTF-8 "
+             f"({exc}), so no location's recorded lineage can be read. Nothing "
+             "has been accepted or written — repair or remove the file"
+         ) from exc
+     except OSError as exc:
+-        # Was a RAW OSError escaping past every `except AttestationRefusal`,
+-        # which is the builtin-escape gap `JournalUnreadable` exists to close
+-        # one file over. Refusing is the right direction; being typed is what
+-        # lets a caller catch it with the rest. TRANSIENT-flavoured, so it
+-        # stays a probe failure: a permission wall can be lifted and an I/O
+-        # error can pass.
++        # STORAGE: the bytes never arrived. Was a RAW OSError escaping past
++        # every `except AttestationRefusal`, which is the builtin-escape gap
++        # `JournalUnreadable` exists to close one file over. Refusing is the
++        # right direction; being typed is what lets a caller catch it with the
++        # rest, and `storage_advice` carries the remedy the type does not
++        # claim.
+         raise BindingProbeUnanswered(
+             f"the bindings file at {bindings_path()} exists and storage "
+             f"would not yield it ({exc}), so this location's recorded lineage "
+@@ -1636,7 +1649,7 @@ def bound_lineage(location: str) -> str | None:
+                 f"a line of {bindings_path()} does not parse ({exc}), and a "
+                 "line that cannot be read may be the binding that names this "
+                 "location. Nothing has been accepted or written — repair or "
+-                "remove the line, then retry the open"
++                "remove the line"
+             ) from exc
+         if not (
+             isinstance(decoded, dict)
+@@ -1653,9 +1666,9 @@ def bound_lineage(location: str) -> str | None:
+                 "cannot be ruled out as this location's. Nothing has been "
+                 "accepted or written — repair or remove the line"
+             )
++        # A well-formed binding for a DIFFERENT store is the one legitimate
++        # skip left: it genuinely says nothing about this location. Newest
++        # wins, so the loop runs to the end rather than stopping at a match.
+         if decoded["location"] == location:
+-            # The one thing that survives as a legitimate skip: a well-formed
+-            # binding for a DIFFERENT store genuinely says nothing about this
+-            # one.
+             found = decoded["lineage"]
+     return found
+diff --git a/libs/engine/src/engine/arrival_head_seam.py b/libs/engine/src/engine/arrival_head_seam.py
+index ef21c595..1356289d 100644
+--- a/libs/engine/src/engine/arrival_head_seam.py
++++ b/libs/engine/src/engine/arrival_head_seam.py
+@@ -551,7 +551,7 @@ def aliased_lineage(location: str) -> str | None:
+                 f"line {number} of {bindings_path()} does not parse ({exc}), "
+                 "and a line that cannot be read may be the binding that names "
+                 "this location. Nothing has been accepted or written — repair "
+-                "or remove the line, then retry the open"
++                "or remove the line"
+             ) from exc
+         where = decoded.get("location") if isinstance(decoded, dict) else None
+         lineage = decoded.get("lineage") if isinstance(decoded, dict) else None
+
+codex
+The anchored diff is clean and limited to one report plus two production modules; there are no test-file changes. One nuance I’m checking closely is whether “six rows” really covers mixed files and valid duplicate bindings, since the implementation’s return value can be a lineage string as well as `None` or refusal types.
+exec
+/bin/zsh -lc "sed -n '1490,1690p' libs/engine/src/engine/arrival_head_attestation.py && sed -n '500,580p' libs/engine/src/engine/arrival_head_seam.py && rg -n \"bound_lineage|retry the open|storage_advice|_identity_of|permission wall|transient I/O\" libs/engine/src libs/engine/tests tests pyproject.toml Makefile 2>/dev/null | head -n 300 && rg -n \"2304|arch 99|ruff\" docs/scratch/arrival-break .github pyproject.toml Makefile 2>/dev/null | head -n 120" in /Users/kaygee/Code/loops-s3wp1
+ succeeded in 0ms:
+    finally:
+        os.close(handle)
+    return path
+
+
+# ---------------------------------------------------------------------------
+# The audit's all-journaled-heads check (§C.4)
+# ---------------------------------------------------------------------------
+
+
+def unaccounted_heads(
+    epoch: Iterable[HeadAttestation],
+    at_ordinal: Callable[[int], Head | None],
+) -> tuple[HeadAttestation, ...]:
+    """Journaled heads the store can no longer account for.
+
+    The periodic audit does not merely re-verify the current chain — it checks
+    that every head journaled **in the current trust epoch** is still present
+    at its own ordinal with its own hash. That single walk is what makes the
+    cheap per-open check safe: an advance accepted today on partial evidence
+    is re-examined against the complete record of everything accepted since
+    the last reset.
+
+    The epoch scope is not a convenience. A legitimately accepted restore
+    leaves heads in the journal that the restored store does not and cannot
+    contain; auditing against those would fail permanently and train an
+    operator to ignore the audit, which is worse than not running one.
+
+    ``at_ordinal`` is injected rather than imported so this module never
+    reaches for a backend or a projection auditor. The audit producer that
+    supplies it is WP3's.
+    """
+    return tuple(
+        entry for entry in epoch if at_ordinal(entry.head.ordinal) != entry.head
+    )
+
+
+# ---------------------------------------------------------------------------
+# TRANSITIONAL — DELETE IN SLICE 5.
+#
+# Lineage-keying leaves exactly one hole: wholesale replacement. A store
+# rewritten with a NEW lineage finds no journal, is classified first contact,
+# and is trusted on sight — §07's "replacement or explicit re-custody" row
+# passing silently. Detecting it requires knowing which lineage a location
+# SHOULD present, and architecturally that is `StoreDescriptor.lineage`
+# ("when already known, is checked against genesis rather than trusted as a
+# replacement for it"). Slice 2 deliberately left that field unparsed with its
+# forcing consumer named as slice 5's adopt ceremony, and growing the `.vertex`
+# grammar out of sequence here would take a decision slice 3 was not given.
+#
+# So the binding lives here until the declared lineage supersedes it. Its
+# deletion is a residue sweep, not a behavior change: once every store's
+# vertex declares its lineage, `descriptor.lineage` answers every question
+# this file answers, from a source the operator can read and review. Slice 5
+# deletes this section, `bindings.jsonl`, and its tests together — the same
+# obligation `arrival_registry`'s transitional inference arm carries.
+# ---------------------------------------------------------------------------
+
+
+def bindings_path() -> Path:
+    """The transitional location-to-lineage bindings file. DELETE IN SLICE 5."""
+    return heads_dir() / "bindings.jsonl"
+
+
+def record_binding(location: str, lineage: str, observed_at: float) -> None:
+    """Remember which lineage this location presented. DELETE IN SLICE 5.
+
+    Append-only and keyed on nothing: the newest binding for a location wins
+    on read, and older ones stay as evidence of what it used to be.
+    """
+    path = bindings_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    line = (
+        json.dumps(
+            {
+                "v": _JOURNAL_VERSION,
+                "location": location,
+                "lineage": lineage,
+                "observed_at": observed_at,
+            },
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+        + "\n"
+    )
+    payload = _torn_tail_guard(path) + line
+    handle = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+    try:
+        _write_all(handle, payload.encode("utf-8"))
+    finally:
+        os.close(handle)
+
+
+def bound_lineage(location: str) -> str | None:
+    """The lineage this location most recently presented, if any.
+
+    DELETE IN SLICE 5.
+
+    **The answer surface, in full.** Three outcomes, split by where a failure
+    happened rather than by what anyone should do about it:
+
+    * **None** — the file is absent or empty, every line is blank, or the
+      bindings it holds are well-formed and name OTHER locations. Each of these
+      is an ANSWER: nothing is bound here, and first contact is the honest
+      state. A binding for a different store genuinely says nothing about this
+      one, and refusing on it would make every bindings file holding more than
+      one store unopenable.
+    * :class:`BindingsUnreadable` — the bytes arrived and could not be
+      interpreted as bindings: not UTF-8, not JSON, or JSON carrying no
+      location and lineage. None of those says anything about what this
+      location presented, so answering None on them reports an absence the
+      evidence does not support
+      (``finding:s3wp3-binding-probes-fail-acceptance-side``,
+      ``finding:s3-binding-shape-filter-silently-drops``).
+    * :class:`BindingProbeUnanswered` — storage would not yield the bytes at
+      all.
+
+    **No claim here about transience or remedy.** This docstring used to sort
+    the refusals into "asks for repair" and "asks for a retry", and that axis
+    is not decidable from an exception class — ``IsADirectoryError`` arrives
+    through the same door as a passing I/O fault
+    (``finding:s3-refusal-family-remedy-promise-undecidable``). Remedy is
+    advisory prose carried per cause in the message; the types assert only
+    where the failure happened.
+    """
+    try:
+        text = bindings_path().read_text(encoding="utf-8")
+    except FileNotFoundError:
+        # ABSENT is an answer: nothing has ever been bound.
+        return None
+    except UnicodeDecodeError as exc:
+        # CONTENT: the bytes arrived and could not be interpreted.
+        raise BindingsUnreadable(
+            f"the bindings file at {bindings_path()} is not valid UTF-8 "
+            f"({exc}), so no location's recorded lineage can be read. Nothing "
+            "has been accepted or written — repair or remove the file"
+        ) from exc
+    except OSError as exc:
+        # STORAGE: the bytes never arrived. Was a RAW OSError escaping past
+        # every `except AttestationRefusal`, which is the builtin-escape gap
+        # `JournalUnreadable` exists to close one file over. Refusing is the
+        # right direction; being typed is what lets a caller catch it with the
+        # rest, and `storage_advice` carries the remedy the type does not
+        # claim.
+        raise BindingProbeUnanswered(
+            f"the bindings file at {bindings_path()} exists and storage "
+            f"would not yield it ({exc}), so this location's recorded lineage "
+            f"is unknown. Nothing has been accepted or written — "
+            f"{storage_advice(exc)}"
+        ) from exc
+    found: str | None = None
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        try:
+            decoded = json.loads(stripped)
+        except ValueError as exc:
+            raise BindingsUnreadable(
+                f"a line of {bindings_path()} does not parse ({exc}), and a "
+                "line that cannot be read may be the binding that names this "
+                "location. Nothing has been accepted or written — repair or "
+                "remove the line"
+            ) from exc
+        if not (
+            isinstance(decoded, dict)
+            and isinstance(decoded.get("location"), str)
+            and isinstance(decoded.get("lineage"), str)
+        ):
+            # READ, and not interpretable as a binding — a CONTENT failure,
+            # exactly like a line that is not JSON. Filtering it to None used
+            # to answer "nothing is bound here" on a line that says nothing of
+            # the kind (``finding:s3-binding-shape-filter-silently-drops``).
+            raise BindingsUnreadable(
+                f"a line of {bindings_path()} is valid JSON but carries no "
+                "location and lineage, so it cannot be read as a binding and "
+                "cannot be ruled out as this location's. Nothing has been "
+                "accepted or written — repair or remove the line"
+            )
+        # A well-formed binding for a DIFFERENT store is the one legitimate
+        # skip left: it genuinely says nothing about this location. Newest
+        # wins, so the loop runs to the end rather than stopping at a match.
+        if decoded["location"] == location:
+            found = decoded["lineage"]
+    return found
+        return None
+    found: str | None = None
+    for _location, lineage, identity in recorded:
+        if identity is not None and identity == presenting:
+            found = lineage
+    return found
+
+
+def aliased_lineage(location: str) -> str | None:
+    """The lineage bound to this store under a DIFFERENT spelling.
+
+    Consulted only when the presenting location has no binding of its own —
+    which is the one moment the hole is open, and which keeps every subsequent
+    open free of the sweep. It live-stats each recorded binding; a store bound
+    under one spelling and opened under another is then NOT first contact, and
+    a replacement at that location refuses.
+
+    The filesystem namespace is ambient authority: two names for one object is
+    a property of the namespace rather than of the store, so asking the
+    filesystem which object a name currently denotes is a location claim about
+    this host and not a verdict about the store. DELETE IN SLICE 5 with the
+    rest of the binding.
+    """
+    try:
+        text = bindings_path().read_text(encoding="utf-8")
+    except FileNotFoundError:
+        # ABSENT is an answer: nothing has ever been bound here.
+        return None
+    except UnicodeDecodeError as exc:
+        raise BindingsUnreadable(
+            f"the bindings file at {bindings_path()} is not valid UTF-8 "
+            f"({exc}), so this open cannot tell whether another spelling of "
+            "this store is already bound. Nothing has been accepted or "
+            "written — repair or remove the file"
+        ) from exc
+    except OSError as exc:
+        raise BindingProbeUnanswered(
+            f"the bindings file at {bindings_path()} exists and storage "
+            f"would not yield it ({exc}), so this open cannot tell whether "
+            "this location already presented a different lineage. Nothing has "
+            f"been accepted or written — {storage_advice(exc)}"
+        ) from exc
+    recorded: list[tuple[str, str, Identity | None]] = []
+    for number, line in enumerate(text.splitlines(), start=1):
+        stripped = line.strip()
+        if not stripped:
+            continue
+        try:
+            decoded = json.loads(stripped)
+        except ValueError as exc:
+            raise BindingsUnreadable(
+                f"line {number} of {bindings_path()} does not parse ({exc}), "
+                "and a line that cannot be read may be the binding that names "
+                "this location. Nothing has been accepted or written — repair "
+                "or remove the line"
+            ) from exc
+        where = decoded.get("location") if isinstance(decoded, dict) else None
+        lineage = decoded.get("lineage") if isinstance(decoded, dict) else None
+        if not (isinstance(where, str) and isinstance(lineage, str)):
+            # READ, and not interpretable as a binding — a CONTENT failure.
+            raise BindingsUnreadable(
+                f"line {number} of {bindings_path()} is valid JSON but "
+                "carries no location and lineage, so it cannot be read as a "
+                "binding and cannot be ruled out as naming this store. "
+                "Nothing has been accepted or written — repair or remove the "
+                "line"
+            )
+        recorded.append((where, lineage, _identity_of(where)))
+    return match_identity(_identity_of(location), recorded)
+
+
+# ---------------------------------------------------------------------------
+# Producers — the entries something other than an ordinary open writes
+# ---------------------------------------------------------------------------
+
+
+def bootstrap(
+    head: Head, *, level: Level, location: str, observed_at: float
+) -> Path:
+    """The first entry for a lineage, plus its binding. Returns the journal.
+
+libs/engine/src/engine/arrival_head_attestation.py:84:    "bound_lineage",
+libs/engine/src/engine/arrival_head_attestation.py:96:    "storage_advice",
+libs/engine/src/engine/arrival_head_attestation.py:194:    A directory where the journal should be, a permission wall, bytes that
+libs/engine/src/engine/arrival_head_attestation.py:266:def storage_advice(exc: BaseException) -> str:
+libs/engine/src/engine/arrival_head_attestation.py:279:        return "check the permissions on the path, then retry the open"
+libs/engine/src/engine/arrival_head_attestation.py:280:    return "the failure may be transient — retry the open"
+libs/engine/src/engine/arrival_head_attestation.py:1392:        # permission wall, bytes that are not text. Distinct from every case
+libs/engine/src/engine/arrival_head_attestation.py:1583:def bound_lineage(location: str) -> str | None:
+libs/engine/src/engine/arrival_head_attestation.py:1632:        # rest, and `storage_advice` carries the remedy the type does not
+libs/engine/src/engine/arrival_head_attestation.py:1638:            f"{storage_advice(exc)}"
+libs/engine/tests/test_arrival_head_attestation.py:45:    bound_lineage,
+libs/engine/tests/test_arrival_head_attestation.py:1235:    assert bound_lineage("/a/project.arrival") == LINEAGE
+libs/engine/tests/test_arrival_head_attestation.py:1236:    assert bound_lineage("/b/project.arrival") is None
+libs/engine/tests/test_arrival_head_attestation.py:1243:    assert bound_lineage("/a/project.arrival") == OTHER_LINEAGE
+libs/engine/tests/test_arrival_head_attestation.py:1250:    expected = bound_lineage("/a/project.arrival")
+libs/engine/tests/test_arrival_head_attestation.py:1279:        bound_lineage("/a/project.arrival")
+libs/engine/tests/test_arrival_head_attestation.py:1292:        bound_lineage("/a/project.arrival")
+libs/engine/tests/test_arrival_head_attestation.py:1297:def test_an_unusable_shape_refuses_in_bound_lineage_itself():
+libs/engine/tests/test_arrival_head_attestation.py:1310:        bound_lineage("/a/project.arrival")
+libs/engine/tests/test_arrival_head_attestation.py:1318:    assert bound_lineage("/a/project.arrival") == LINEAGE
+libs/engine/tests/test_arrival_head_attestation.py:1319:    assert bound_lineage("/nothing/here.arrival") is None
+libs/engine/src/engine/arrival_head_seam.py:84:    bound_lineage,
+libs/engine/src/engine/arrival_head_seam.py:92:    storage_advice,
+libs/engine/src/engine/arrival_head_seam.py:456:def _identity_of(location: str) -> Identity | None:
+libs/engine/src/engine/arrival_head_seam.py:462:    that DOES exist and will not stat (a permission wall, a transient I/O
+libs/engine/src/engine/arrival_head_seam.py:476:            f"{storage_advice(exc)}"
+libs/engine/src/engine/arrival_head_seam.py:496:    :func:`~engine.arrival_head_attestation.bound_lineage` applies to an exact
+libs/engine/src/engine/arrival_head_seam.py:540:            f"been accepted or written — {storage_advice(exc)}"
+libs/engine/src/engine/arrival_head_seam.py:567:        recorded.append((where, lineage, _identity_of(where)))
+libs/engine/src/engine/arrival_head_seam.py:568:    return match_identity(_identity_of(location), recorded)
+libs/engine/src/engine/arrival_head_seam.py:1029:        remembered_lineage = bound_lineage(self._canonical)
+libs/engine/src/engine/arrival_head_seam.py:1164:        remembered_lineage = bound_lineage(self._canonical)
+libs/engine/src/engine/arrival_head_seam.py:1360:                    "written — retry the open, and if it keeps failing the "
+libs/engine/tests/test_arrival_head_seam.py:57:    bound_lineage,
+libs/engine/tests/test_arrival_head_seam.py:791:    assert bound_lineage(canonical_location(str(detour))) == first
+libs/engine/tests/test_arrival_head_seam.py:899:    assert bound_lineage(canonical_location(str(log_path))) == head.lineage
+libs/engine/tests/test_arrival_head_seam.py:2270:    assert "retry the open" in str(excinfo.value)
+libs/engine/tests/test_arrival_head_seam.py:2371:        pytest.skip("runs as root; chmod-based permission walls do not apply")
+libs/engine/tests/test_arrival_head_seam.py:2382:    A real permission wall rather than a patched reader: patching the reader
+libs/engine/tests/test_arrival_head_seam.py:2398:    assert "retry the open" in str(excinfo.value)
+libs/engine/tests/test_arrival_head_seam.py:2457:    Through the open path ``bound_lineage`` reads the same file first and
+libs/engine/tests/test_arrival_head_seam.py:2475:    Its own per-site pin, because through the open path ``bound_lineage``
+libs/engine/tests/test_arrival_head_seam.py:2488:def test_bound_lineage_refuses_an_unreadable_bindings_file_on_its_own(tmp_path):
+libs/engine/tests/test_arrival_head_seam.py:2500:            bound_lineage("/a/project.arrival")
+libs/engine/tests/test_arrival_head_seam.py:2529:    ``bound_lineage`` reads the file first through an open, so this arm needs a
+libs/engine/tests/test_arrival_head_seam.py:2570:        with pytest.raises(BindingProbeUnanswered):  # permission wall
+libs/engine/tests/test_arrival_head_seam.py:2656:    assert bound_lineage("/not/bound/at/all.arrival") is None
+pyproject.toml:73:    "ruff>=0.8",
+.github/workflows/ci.yml:65:        run: uv run ruff check libs/custody libs/sign
+docs/scratch/arrival-break/slice2-wp3-report.md:33:Lint is not a CI gate for these packages (CI runs `ruff check libs/custody libs/sign`
+docs/scratch/arrival-break/slice2-wp3-report.md:37:scratchpad directory, resolved a different ruff config and produced a meaningless
+docs/scratch/arrival-break/slice3-wp3-report.md:83:The renamed §0.4 test is 1-for-1. `ruff check` passes on every file this WP wrote
+docs/scratch/arrival-break/sol-s2wp3-r2-stdout.log:78: Lint is not a CI gate for these packages (CI runs `ruff check libs/custody libs/sign`
+docs/scratch/arrival-break/sol-slice1-r1-stdout.log:1398:    "ruff>=0.8",
+docs/scratch/arrival-break/sol-slice1-r1-stdout.log:1430:[tool.ruff]
+docs/scratch/arrival-break/sol-slice1-r1-stdout.log:1434:[tool.ruff.lint]
+docs/scratch/arrival-break/slice2-wp1-gate-report.md:252:## 5. The impl's ruff claim — VERIFIED
+docs/scratch/arrival-break/slice2-wp1-gate-report.md:254:Same binary (`~/Code/loops-s2wp1-gate/.venv/bin/ruff`), each tree's own config, A/B:
+docs/scratch/arrival-break/slice2-wp1-gate-report.md:264:Claim confirmed. Worth noting for the arc: CI's ruff gate only covers `libs/custody` and
+docs/scratch/arrival-break/slice2-wp1-gate-report.md:360:conformance checks pass, the Pyright diagnostic is a false positive, and the ruff claim
+docs/scratch/arrival-break/slice2-wp3-gate-report.md:62:churn — which also keeps the ruff comparison in item 7 honest.
+docs/scratch/arrival-break/slice2-wp3-gate-report.md:222:| ruff 61 → 60 findings | **61 → 60** ✓ |
+docs/scratch/arrival-break/slice2-wp4-report.md:148:  No static type checker runs over `engine` in CI (`ruff` covers `libs/custody` and
+docs/scratch/arrival-break/slice3-wp1-report.md:30:Every delta accounted for. `ruff check` passes on both new files. (`ruff format` would
+docs/scratch/arrival-break/slice3-wp2-report.md:258:11. **`ruff check` clean.** One rule initially fired on `json.load(open(...))`; the
+docs/scratch/arrival-break/slice3-wp2-report.md:388:Generator still byte-reproducible (regenerate → empty diff); `ruff check` clean; 27
+docs/scratch/arrival-break/slice3-wp2-report.md:457:stand. `ruff check` clean; generator untouched and still byte-reproducible; 27 vector
+docs/scratch/arrival-break/slice3-wp2-report.md:558:| `ruff check` | clean on generator and consumer |
+docs/scratch/arrival-break/slice3-wp2-report.md:729:| `ruff check` | clean |
+docs/scratch/arrival-break/slice3-wp2-report.md:817:| `ruff check` | clean |
+docs/scratch/arrival-break/sol-s2wp2-r2-stdout.log:904:    "ruff>=0.8",
+docs/scratch/arrival-break/sol-s2wp2-r2-stdout.log:944:    "ruff>=0.8",
+docs/scratch/arrival-break/sol-s2wp2-r2-stdout.log:976:[tool.ruff]
+docs/scratch/arrival-break/sol-s2wp2-r2-stdout.log:980:[tool.ruff.lint]
+
+exec
+/bin/zsh -lc "sed -n '170,290p' libs/engine/src/engine/arrival_head_attestation.py && sed -n '440,485p' libs/engine/src/engine/arrival_head_seam.py && sed -n '1210,1330p' libs/engine/tests/test_arrival_head_attestation.py && rg -n \"pytest.*engine|test_arch|architecture|arch\" README.md pyproject.toml docs/scratch/arrival-break/slice3-wp3-report.md .github/workflows libs/engine | head -n 200 && find . -maxdepth 3 -type f \\( -name 'test*arch*' -o -name '*architecture*' \\) -print" in /Users/kaygee/Code/loops-s3wp1
+ succeeded in 0ms:
+class StoreLost(AttestationRefusal):
+    """The log is gone, but the journal remembers a head for it.
+
+    The attack matrix's "delete the store and every backup" row, where the
+    witness proves what was *lost* rather than its contents. It must refuse,
+    and in particular it must never permit a silent re-mint under a remembered
+    lineage: a fresh genesis at a location whose journal remembers ordinal
+    4217 is a replacement wearing the old name. Recovery is the explicit
+    trust-reset ceremony.
+    """
+
+
+class JournalEquivocation(AttestationRefusal):
+    """The journal itself holds two incompatible histories.
+
+    Two entries at the maximum ordinal of the current trust epoch with
+    different record hashes. The journal has recorded both and it is not the
+    journal's place to choose between them.
+    """
+
+
+class JournalUnreadable(AttestationRefusal):
+    """There is nothing to parse: the journal cannot be read as text at all.
+
+    A directory where the journal should be, a permission wall, bytes that
+    are not text. Distinct from an *absent* journal, which is first contact,
+    and from a journal whose *content* cannot be read, which is
+    :class:`HeadUnreadable`. Raised rather than let out as the underlying
+    ``OSError`` so that a caller catching :class:`AttestationRefusal` does not
+    have a builtin escape past it.
+
+    **This is the only thing that raises it, and the scope has narrowed
+    twice.** It once covered damage above the last line, then entries with no
+    header. Both are now tolerated: an unreadable line is skipped and
+    reported, a missing header is reported as an absence, and in each case the
+    loss is carried in the result type (:class:`HeadLowerBound`) instead of
+    converted into a verdict. Refusing made an ordinary crash a permanent
+    incident, and it claimed a protection this location cannot deliver anyway
+    — anyone able to corrupt the journal can delete it instead and be met with
+    trust-on-first-use. Where a weakened claim is available, a refusal is a
+    verdict the evidence does not support.
+    """
+
+
+class IndeterminateComparison(AttestationRefusal):
+    """A full comparison was asked of a journal whose read was incomplete.
+
+    See :class:`HeadLowerBound` for what "incomplete" means and why the term
+    is not "unreadable".
+
+    Not a claim about the store. The journal's own record of what this machine
+    accepted has a hole in it, so "unchanged" is a question this journal can no
+    longer answer — while "rollback" is one it still can, for anything below
+    the bound. Raised by :meth:`JournalRead.established_head` so the cheap
+    unchanged shortcut cannot be taken by a caller who simply forgot to look.
+    """
+
+
+class ProbeUnanswered(AttestationRefusal):
+    """Storage would not answer, so a check a caller depends on did not happen.
+
+    The general form, named because the defect it guards against is a SHAPE
+    rather than a site: a probe whose own failure gets read as the absence of
+    what it was probing for. Evidence absent is not absence of evidence, and a
+    probe that conflates the two answers its whole question wrongly, in the
+    acceptance direction (``finding:s3-fence-probe-fails-open``,
+    ``finding:s3wp3-binding-probes-fail-acceptance-side``).
+
+    **The line is CONTENT versus STORAGE, and that is the whole of it.** This
+    family means the bytes never arrived: the read could not get an answer out
+    of storage at all. Its sibling :class:`BindingsUnreadable` means the bytes
+    DID arrive and could not be interpreted. That split is decidable from where
+    the failure happened, which is why it can be a type.
+
+    **It used to promise that retrying is the remedy, and that promise was not
+    the type's to make.** Transient-versus-permanent is not decidable from an
+    exception class: ``IsADirectoryError`` arrives through the same ``OSError``
+    door as a passing I/O fault, and retrying a directory resolves nothing. A
+    remedy taxonomy is a verdict claim, and it falls to the next errno
+    (``finding:s3-refusal-family-remedy-promise-undecidable``).
+
+    So the remedy is **advisory prose in the message**, chosen per cause, and
+    the type asserts only what the read lacks. Both families refuse, so a
+    misfiled hint costs an operator some convenience and never costs an
+    acceptance — which is exactly why advice can be offered here where a
+    promise could not.
+
+    An ABSENT input is never one of these. "There is no bindings file" and "the
+    log does not exist yet" are answers, and correct ones; only an input that
+    exists and will not yield leaves the question open.
+
+    It lives here rather than in the seam because the binding unit does, and
+    because a subclass of it has to be raisable from this module.
+    """
+
+
+def storage_advice(exc: BaseException) -> str:
+    """What an operator might try, given how storage refused.
+
+    Advisory, never a claim the type makes. Each arm is a guess that costs
+    convenience if it is wrong, which is the standard prose can meet and a type
+    could not.
+    """
+    if isinstance(exc, IsADirectoryError):
+        return (
+            "a directory sits where this file should be — remove it; retrying "
+            "will not resolve that"
+        )
+    if isinstance(exc, PermissionError):
+        return "check the permissions on the path, then retry the open"
+    return "the failure may be transient — retry the open"
+
+
+class BindingsUnreadable(AttestationRefusal):
+    """The bytes arrived and could not be interpreted as bindings.
+
+    The CONTENT half of the split :class:`ProbeUnanswered` describes: bytes
+    that are not UTF-8, a line that is not JSON, and a line that is JSON but
+    carries nothing a binding could be read out of. All three were read
+    successfully and none of them says anything about which lineage a location
+    presented.
+    ``(st_dev, st_ino)`` — two network mounts of one export are the ordinary
+    case — are beyond anything a client can detect from here. Path-keying is
+    transitional for exactly these reasons, and the lineage-keyed journal is
+    the memory that does not have them.
+    """
+    return str(Path(location).resolve())
+
+
+#: A filesystem object's identity on this host: the device and inode a path
+#: currently resolves to. Never RECORDED — inodes go stale when a file is
+#: recreated and get recycled onto unrelated files, so a stored one is a claim
+#: that rots into a false match. Only ever compared live, at the moment both
+#: sides are stat'd.
+Identity = tuple[int, int]
+
+
+def _identity_of(location: str) -> Identity | None:
+    """What filesystem object this path names right now, or None if it is absent.
+
+    The split is between an ANSWER and an unanswered question, and the two used
+    to be one branch. A path that does not exist genuinely names no object —
+    that is None, and it is correct, and the mint path depends on it. A path
+    that DOES exist and will not stat (a permission wall, a transient I/O
+    error, a partially mounted volume) leaves the question open, and answering
+    None there means a store replaced under an aliased spelling opens as first
+    contact.
+    """
+    try:
+        stat = Path(location).stat()
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        raise BindingProbeUnanswered(
+            f"{location} exists and storage would not stat it ({exc}), so "
+            "this open cannot tell whether it names the same store as a "
+            "recorded binding. Nothing has been accepted or written — "
+            f"{storage_advice(exc)}"
+        ) from exc
+    return (stat.st_dev, stat.st_ino)
+
+
+def match_identity(
+    presenting: Identity | None,
+    recorded: Sequence[tuple[str, str, Identity | None]],
+) -> str | None:
+    """The lineage bound to another spelling of the SAME filesystem object.
+    The witness proves what was lost, not its contents — and it must never
+    permit a silent re-mint under a remembered lineage.
+    """
+    append_entry(observation(4217))
+    known = read_journal(LINEAGE).established_head()
+    assert compare_absent_store(known) is AbsentStoreOutcome.STORE_LOST
+    assert refusal_for(AbsentStoreOutcome.STORE_LOST) is StoreLost
+
+
+def test_the_store_absent_split_is_not_folded_into_the_seven_rows():
+    """``compare`` has exactly seven rows and WP2's vectors pin those."""
+    assert not set(AbsentStoreOutcome) & set(Outcome)
+    assert {outcome.value for outcome in AbsentStoreOutcome} == {
+        "pre-genesis",
+        "store-lost",
+    }
+
+
+# ---------------------------------------------------------------------------
+# The transitional binding (§A.6) — DELETE IN SLICE 5 with the module's section
+# ---------------------------------------------------------------------------
+
+
+def test_a_binding_remembers_which_lineage_a_location_presented():
+    record_binding("/a/project.arrival", LINEAGE, 1.0)
+    assert bound_lineage("/a/project.arrival") == LINEAGE
+    assert bound_lineage("/b/project.arrival") is None
+
+
+def test_the_newest_binding_for_a_location_wins():
+    """Wholesale replacement: a new lineage at a location that had another."""
+    record_binding("/a/project.arrival", LINEAGE, 1.0)
+    record_binding("/a/project.arrival", OTHER_LINEAGE, 2.0)
+    assert bound_lineage("/a/project.arrival") == OTHER_LINEAGE
+
+
+def test_the_binding_closes_the_wholesale_replacement_hole():
+    """Lineage-keying alone would classify this first contact and accept it."""
+    record_binding("/a/project.arrival", LINEAGE, 1.0)
+    append_entry(observation(9))
+    expected = bound_lineage("/a/project.arrival")
+    assert expected is not None
+    known = read_journal(expected).established_head()
+    presented = head(0, "z", lineage=OTHER_LINEAGE)
+    assert compare(known, presented, None) is Outcome.LINEAGE_REPLACED
+
+
+def test_the_bindings_file_lives_beside_the_journals():
+    record_binding("/a/project.arrival", LINEAGE, 1.0)
+    assert bindings_path() == heads_dir() / "bindings.jsonl"
+    assert bindings_path().exists()
+
+
+def test_a_malformed_binding_line_refuses_rather_than_being_skipped():
+    """SUPERSEDED: this pinned the skip, and the skip was the defect.
+
+    The reasoning it carried — "a missing binding degrades to first contact,
+    which it never guaranteed" — is true of an ABSENT bindings file and false
+    of a line that will not parse. A skipped line may be the very binding that
+    names this location, so skipping answers "nothing is bound here" on
+    evidence that says nothing of the kind, and a replaced store then opens as
+    first contact (``finding:s3wp3-binding-probes-fail-acceptance-side``).
+
+    Absent still answers None, and its own test below is unchanged.
+    """
+    record_binding("/a/project.arrival", LINEAGE, 1.0)
+    with bindings_path().open("a") as handle:
+        handle.write("{not json\n")
+    with pytest.raises(BindingsUnreadable):
+        bound_lineage("/a/project.arrival")
+
+
+def test_a_non_utf8_bindings_file_refuses_rather_than_escaping_untyped():
+    """Sol r3's repro at the layer the open reaches first.
+
+    A raw ``UnicodeDecodeError`` walked past every ``except AttestationRefusal``
+    — the same builtin-escape gap ``JournalUnreadable`` closes for the journal,
+    which already catches ``UnicodeDecodeError`` alongside ``OSError``.
+    """
+    record_binding("/a/project.arrival", LINEAGE, 1.0)
+    bindings_path().write_bytes(b"\xff\xfe")
+    with pytest.raises(BindingsUnreadable) as excinfo:
+        bound_lineage("/a/project.arrival")
+    assert "not valid UTF-8" in str(excinfo.value)
+    assert isinstance(excinfo.value.__cause__, UnicodeDecodeError)
+
+
+def test_an_unusable_shape_refuses_in_bound_lineage_itself():
+    """L-7 at this reader, pinned directly.
+
+    Through an open the seam's alias sweep also refuses an unusable shape, so
+    reverting this arm alone still produces a refusal and an integration test
+    cannot tell the two apart. The direct call is what makes this layer's
+    correctness the thing being measured — the third time that lesson has come
+    up in this unit, and the first time it was applied before the demo found it.
+    """
+    record_binding("/a/project.arrival", LINEAGE, 1.0)
+    with bindings_path().open("a") as handle:
+        handle.write("{}\n")
+    with pytest.raises(BindingsUnreadable) as excinfo:
+        bound_lineage("/a/project.arrival")
+    assert "carries no location and lineage" in str(excinfo.value)
+
+
+def test_a_binding_naming_another_location_is_still_skipped():
+    """The narrow survivor, at this reader too."""
+    record_binding("/a/project.arrival", LINEAGE, 1.0)
+    record_binding("/b/other.arrival", OTHER_LINEAGE, 2.0)
+    assert bound_lineage("/a/project.arrival") == LINEAGE
+    assert bound_lineage("/nothing/here.arrival") is None
+
+
+def test_the_transitional_binding_carries_its_deletion_marker():
+    """The residue sweep is written where slice 5 will find it.
+
+    Registry precedent: a transitional arm states its own deletion, so the
+    sweep is an obligation in the source rather than a memory somebody has.
+    """
+    source = Path(
+        "libs/engine/src/engine/arrival_head_attestation.py"
+    )
+pyproject.toml:63:# The root runs the tests that belong to no single package — the architecture
+docs/scratch/arrival-break/slice3-wp3-report.md:61:| `tests/architecture/test_rule_18_arrival_vocabulary_denylist.py` | `_SCAN_TARGETS` enrollment (same commit, or the glob test fails) |
+docs/scratch/arrival-break/slice3-wp3-report.md:70:engine pytest libs/engine/tests`, and `tests/architecture` in its own run).
+docs/scratch/arrival-break/slice3-wp3-report.md:75:| architecture | 99 passed | 99 passed | **0** — Rule 18 is not parametrized per target |
+docs/scratch/arrival-break/slice3-wp3-report.md:184:    archive on an operator's word has proven nothing. A default that can only
+README.md:133:architecture — decisions, open threads, falsifiable predictions — and each
+README.md:168:separations found through work — and the search for kindred thinking came
+README.md:169:later, to give the rest of the thinking form. What the search found:
+README.md:191:These are confirmations, not blueprints. Each search happened after the
+.github/workflows/ci.yml:10:  check-architecture:
+libs/engine/src/engine/arrival_contract.py:4:The contract of record is ``docs/architecture/arrival/backend-contract.html``
+libs/engine/src/engine/arrival_contract.py:27:hierarchy rooted in the file backend's module cannot offer that. Each adapter
+libs/engine/src/engine/arrival_contract.py:85:    ARCHIVE = "archive"
+libs/engine/src/engine/arrival_contract.py:99:    ARCHIVE = "archive"
+libs/engine/src/engine/arrival_contract.py:424:    §03 gives this half "facts, ticks, folds, search, and SQL-oriented reads",
+libs/engine/src/engine/jsonl_codec.py:8:The load-bearing invariant (design/architecture/jsonl-canonical-store):
+libs/engine/src/engine/jsonl_codec.py:132:# Structural rules (design:architecture/jsonl-declaration-ceremony-encoding):
+libs/engine/src/engine/arrival_head_seam.py:633:    archives or operator ceremony and record the gap"* — against the unsafe
+libs/engine/src/engine/arrival_head_seam.py:646:    ``Level.FULL``; one that took a head from an archive on an operator's word
+libs/engine/src/engine/builder.py:12:        .loop("heartbeat", fold_count("n"), search=["service"])
+libs/engine/src/engine/builder.py:98:        self._search: list[str] = []
+libs/engine/src/engine/builder.py:105:    def search(self, *fields: str) -> LoopBuilder:
+libs/engine/src/engine/builder.py:106:        """Add searchable payload fields."""
+libs/engine/src/engine/builder.py:107:        self._search.extend(fields)
+libs/engine/src/engine/builder.py:133:            search=tuple(self._search),
+libs/engine/src/engine/builder.py:157:             search: list[str] | None = None,
+libs/engine/src/engine/builder.py:160:        """Add a loop with folds and optional boundary/search."""
+libs/engine/src/engine/builder.py:170:            search=tuple(search or []),
+libs/engine/src/engine/builder.py:220:                if loop_def.search:
+libs/engine/src/engine/builder.py:221:                    fields = " ".join(f'"{f}"' for f in loop_def.search)
+libs/engine/src/engine/builder.py:222:                    lines.append(f"    search {fields}")
+libs/engine/src/engine/sqlite_store.py:20:project decision architecture/id-primitive-python-ulid.
+libs/engine/src/engine/sqlite_store.py:370:            if re.search(
+libs/engine/src/engine/sqlite_store.py:793:                if re.search(rf"\b{re.escape(target)}\b", v_sql, re.IGNORECASE):
+libs/engine/autoresearch.md:1:# Autoresearch: optimize engine.Vertex hot path
+libs/engine/autoresearch.md:13:`./autoresearch.sh`
+libs/engine/autoresearch.md:61:A 50-run autoresearch session improved the mixed benchmark from **67.692 ms** to **58.394 ms** at best (~13.7% faster).
+libs/engine/autoresearch.md:83:Do **not** spend another session chasing tiny branch-shape tweaks first. The successful experiments point to a clearer architectural direction:
+libs/engine/src/engine/probe.py:488:    even stat (e.g. inside a non-searchable ``0222`` directory) is a
+libs/engine/src/engine/__init__.py:80:    "collect_search_fields",
+libs/engine/src/engine/__init__.py:108:    "vertex_search",
+libs/engine/src/engine/__init__.py:109:    "vertex_search_coverage",
+libs/engine/src/engine/__init__.py:251:    "collect_search_fields": ("engine.compiler", "collect_search_fields"),
+libs/engine/src/engine/__init__.py:278:    "vertex_search": ("engine.vertex_reader", "vertex_search"),
+libs/engine/src/engine/__init__.py:279:    "vertex_search_coverage": ("engine.vertex_reader", "vertex_search_coverage"),
+libs/engine/src/engine/residence.py:90:    architecture creeps back in, so there isn't one.
+libs/engine/CLAUDE.md:190:`docs/architecture/arrival/backend-contract.html` §03 in Python: the `Head` /
+libs/engine/CLAUDE.md:323:uv run --package engine pytest libs/engine/tests
+libs/engine/CLAUDE.md:324:uv run --package engine pytest libs/engine/tests/test_vertex.py  # single file
+libs/engine/CLAUDE.md:335:| `observation:architecture/vertex-routing-narrative` | Routing, folding, branching — why Vertex replaced Stream |
+libs/engine/CLAUDE.md:336:| `observation:architecture/temporal-semantic-time` | Boundaries as semantic time, reset-vs-carry, nesting |
+libs/engine/CLAUDE.md:337:| `observation:architecture/persistence-conceptual-spine` | Persistence is configuration; replay is folding |
+libs/engine/CLAUDE.md:338:| `observation:architecture/identity-peer-as-atom-history` | Observer and gating — stance, naming, what's enforced |
+libs/engine/CLAUDE.md:340:Read with `sl read project observation/architecture/<name> -v`.
+libs/engine/src/engine/vertex.py:728:        Extracted from receive() — the autoresearch proved empirically that
+libs/engine/src/engine/jsonl_store.py:3:The authority flip of design/architecture/jsonl-canonical-store. Today a
+libs/engine/src/engine/jsonl_store.py:142:design:architecture/jsonl-declaration-ceremony-encoding: the base ceremonies
+libs/engine/src/engine/jsonl_store.py:238:    the index is a function of the log (design/architecture/jsonl-canonical
+libs/engine/src/engine/jsonl_store.py:992:        re-indexed row. Dropping it makes search report ``missing`` (the
+libs/engine/src/engine/store_reader.py:944:    def search_facts(
+libs/engine/src/engine/store_reader.py:954:        """FTS5 search over fact payloads.
+libs/engine/src/engine/store_reader.py:973:        # kinds get no search fields so they never ENTER the index, but a
+libs/engine/src/engine/store_reader.py:974:        # mis-registered declaration must still not LEAVE it via search —
+libs/engine/src/engine/store_reader.py:1049:    importing ``StoreReader`` directly (the architecture ratchet).
+libs/engine/src/engine/arrival_file_backend.py:23:numbered architecture rule — one adapter is not yet a pattern, and the second
+libs/engine/src/engine/arrival_head_attestation.py:6:``docs/architecture/arrival/witness-protocol.html``.
+libs/engine/src/engine/arrival_head_attestation.py:1534:# SHOULD present, and architecturally that is `StoreDescriptor.lineage`
+libs/engine/tests/test_jsonl_ceremonies.py:3:The acceptance oracle of design:architecture/jsonl-declaration-ceremony-
+libs/engine/src/engine/observer.py:7:Matching rules (flat phase — no hierarchical walk):
+libs/engine/tests/test_fold_as_of.py:34:             search "message" }}
+libs/engine/tests/test_fold_as_of.py:203:            payload={"order": 0, "search": ["message"],
+libs/engine/tests/test_handle_open.py:38:             search "message" }}
+libs/engine/tests/test_handle_open.py:335:                    "payload": {"order": 0, "search": ["message"], "folds": [
+libs/engine/src/engine/compiler.py:361:    return LoopDef(folds=loop_def.folds, boundary=boundary, search=loop_def.search, parse=loop_def.parse)
+libs/engine/src/engine/compiler.py:846:def collect_search_fields(
+libs/engine/src/engine/compiler.py:849:    """Collect search field declarations from a vertex and its templates.
+libs/engine/src/engine/compiler.py:851:    Returns {kind: (field1, field2, ...)} for kinds that declare search.
+libs/engine/src/engine/compiler.py:852:    Used by vertex_search to know which payload fields to extract for FTS5.
+libs/engine/src/engine/compiler.py:858:        if loop_def.search:
+libs/engine/src/engine/compiler.py:859:            fields[kind] = loop_def.search
+libs/engine/src/engine/compiler.py:864:            if source_entry.loop and source_entry.loop.search:
+libs/engine/src/engine/compiler.py:876:                        fields[kind] = source_entry.loop.search
+libs/engine/src/engine/arrival_projection.py:33:stale text to new facts. Search then reports ``missing``, the honest "run
+libs/engine/src/engine/vertex_reader.py:1:"""Vertex reader — query-time fold materialization and search.
+libs/engine/src/engine/vertex_reader.py:7:vertex_facts(), vertex_ticks(), vertex_summary(), and vertex_search() instead.
+libs/engine/src/engine/vertex_reader.py:835:def _combined_search(
+libs/engine/src/engine/vertex_reader.py:848:    """Search across combined children by delegating vertex_search to each child.
+libs/engine/src/engine/vertex_reader.py:853:    cursor for its own ``search`` fields — ``as_of`` is a shared wall-clock
+libs/engine/src/engine/vertex_reader.py:856:    ``kinds`` is forwarded to each child's own ``vertex_search`` call
+libs/engine/src/engine/vertex_reader.py:875:        # (discover children need their own vertex files for search fields)
+libs/engine/src/engine/vertex_reader.py:878:        # Can't recurse without vertex paths; discover is not yet supported for search
+libs/engine/src/engine/vertex_reader.py:888:        child_results = vertex_search(
+libs/engine/src/engine/vertex_reader.py:1513:    For combinatorial vertices, searches across all combined stores.
+libs/engine/src/engine/vertex_reader.py:1522:    # Combinatorial/aggregation vertex: search across stores
+libs/engine/src/engine/vertex_reader.py:1836:    """Extract a search field value from a payload, handling nested paths and polymorphic values.
+libs/engine/src/engine/vertex_reader.py:1878:    ``vertex_search_coverage`` certifies freshness AGAINST a generation; if the
+libs/engine/src/engine/vertex_reader.py:1893:    store (never reindexed, or nothing declared searchable). When True, NO
+libs/engine/src/engine/vertex_reader.py:1898:    ``stale_kinds`` — kinds that DO have search declared and an index that
+libs/engine/src/engine/vertex_reader.py:1913:    :func:`vertex_search` as ``require_generation`` so the query runs under
+libs/engine/src/engine/vertex_reader.py:1918:def vertex_search_coverage(vertex_path: Path) -> FtsCoverage:
+libs/engine/src/engine/vertex_reader.py:1921:    Callers (``surface.search``) consult this BEFORE calling
+libs/engine/src/engine/vertex_reader.py:1922:    :func:`vertex_search`, to decide which present kinds are trustworthy to
+libs/engine/src/engine/vertex_reader.py:1930:    ``surface.search``'s handling, capstone sol P2).
+libs/engine/src/engine/vertex_reader.py:1936:       newly-searchable kind, or changed ``search`` fields on an
+libs/engine/src/engine/vertex_reader.py:1946:       declared-searchable kind as stale — whole-declaration-set
+libs/engine/src/engine/vertex_reader.py:1959:    LOCKSTEP NOTE: this recursion mirrors ``_combined_search``'s and
+libs/engine/src/engine/vertex_reader.py:1977:    from .compiler import collect_search_fields
+libs/engine/src/engine/vertex_reader.py:1980:    search_fields = collect_search_fields(ast, base_dir)
+libs/engine/src/engine/vertex_reader.py:1981:    if not search_fields:
+libs/engine/src/engine/vertex_reader.py:1984:    declared_kinds = tuple(search_fields.keys())
+libs/engine/src/engine/vertex_reader.py:2050:    """``vertex_search_coverage`` recursion over combine/discover children."""
+libs/engine/src/engine/vertex_reader.py:2057:        # discover is not yet supported for search — matches _combined_search's
+libs/engine/src/engine/vertex_reader.py:2069:        child_coverage = vertex_search_coverage(vpath)
+libs/engine/src/engine/vertex_reader.py:2080:    path (``vertex_search``, ``vertex_search_coverage``) ever opens a
+libs/engine/src/engine/vertex_reader.py:2082:    (closes friction:search-read-mutates-canonical-store).
+libs/engine/src/engine/vertex_reader.py:2086:    friction:fts-search-declaration-not-retroactive for free. A newly
+libs/engine/src/engine/vertex_reader.py:2087:    declared ``search`` field on an already-populated kind is fully
+libs/engine/src/engine/vertex_reader.py:2088:    searchable after one reindex, including facts written before the
+libs/engine/src/engine/vertex_reader.py:2091:    ever advanced past what was searchable at scan time. This is O(all
+libs/engine/src/engine/vertex_reader.py:2096:    ``_combined_search``'s read-side recursion — see the lockstep note on
+libs/engine/src/engine/vertex_reader.py:2097:    :func:`vertex_search_coverage`), so reindexing an aggregate never
+libs/engine/src/engine/vertex_reader.py:2105:    searchable kind with zero new facts, or changed ``search`` fields on an
+libs/engine/src/engine/vertex_reader.py:2110:    :func:`vertex_search_coverage` detect that drift too: see its docstring
+libs/engine/src/engine/vertex_reader.py:2137:    from .compiler import collect_search_fields
+libs/engine/src/engine/vertex_reader.py:2139:    search_fields = collect_search_fields(ast, base_dir)
+libs/engine/src/engine/vertex_reader.py:2140:    if not search_fields:
+libs/engine/src/engine/vertex_reader.py:2144:            "reason": "no search fields declared",
+libs/engine/src/engine/vertex_reader.py:2180:            fields = search_fields.get(kind)
+libs/engine/src/engine/vertex_reader.py:2182:                continue  # No search declaration — nothing to index for this kind.
+libs/engine/src/engine/vertex_reader.py:2207:        # nothing stale to clear) makes vertex_search_coverage treat this
+libs/engine/src/engine/vertex_reader.py:2245:        # discover is not yet supported for search — matches _combined_search's
+libs/engine/src/engine/vertex_reader.py:2250:            "reason": "discover is not yet supported for search",
+libs/engine/src/engine/vertex_reader.py:2270:def vertex_search(
+libs/engine/src/engine/vertex_reader.py:2283:    """Search fact payloads in a vertex's store via FTS5. STRICTLY READ-ONLY.
+libs/engine/src/engine/vertex_reader.py:2285:    Uses spec-declared search fields — only kinds with a ``search``
+libs/engine/src/engine/vertex_reader.py:2292:    consult :func:`vertex_search_coverage` FIRST: if the index for the
+libs/engine/src/engine/vertex_reader.py:2293:    kind(s) being searched is missing or stale, ``search_facts`` (via
+libs/engine/src/engine/vertex_reader.py:2309:            ``surface.search`` excluding stale-index kinds) MUST pass this
+libs/engine/src/engine/vertex_reader.py:2320:            at the caller (``surface.search``'s ``Window.truncated``), not
+libs/engine/src/engine/vertex_reader.py:2325:            resolution — which ``search`` fields are indexed is the as-of
+libs/engine/src/engine/vertex_reader.py:2328:            a historical search is honest about *which facts* fall in the
+libs/engine/src/engine/vertex_reader.py:2344:    # round 2). The reported case: a new declaration removes the last `search`
+libs/engine/src/engine/vertex_reader.py:2345:    # field, so `collect_search_fields` comes back empty and the old code
+libs/engine/src/engine/vertex_reader.py:2358:        return _combined_search(
+libs/engine/src/engine/vertex_reader.py:2375:    from .compiler import collect_search_fields
+libs/engine/src/engine/vertex_reader.py:2379:            search_fields = collect_search_fields(ast, base_dir)
+libs/engine/src/engine/vertex_reader.py:2380:            if not search_fields:
+libs/engine/src/engine/vertex_reader.py:2382:            facts = reader.search_facts(
+libs/engine/src/engine/vertex_reader.py:2401:            #   * the DECLARATION — a decl edit that removes a `search` field
+libs/engine/src/engine/vertex_reader.py:2402:            #     changes which kinds are searchable while leaving the built
+libs/engine/src/engine/vertex_reader.py:2421:            # Resolved INSIDE the verified snapshot: which kinds are searchable
+libs/engine/src/engine/vertex_reader.py:2424:            search_fields = collect_search_fields(ast, base_dir)
+libs/engine/src/engine/vertex_reader.py:2425:            if not search_fields:
+libs/engine/src/engine/vertex_reader.py:2427:            facts = reader.search_facts(
+libs/engine/tests/test_aggregate_as_of_ontology.py:31:             search "message" }}
+libs/engine/tests/test_aggregate_as_of_ontology.py:82:        payload={"order": 0, "search": ["message"],
+libs/engine/tests/test_store_reader.py:341:        ("d4", "decision", 400.0, "kyle", '{"topic": "arch/x"}', "sig"),
+libs/engine/tests/test_store_reader.py:359:        assert ks["arch/x"]["count"] == 1
+libs/engine/tests/test_store_reader.py:383:        assert prefixes == ["arch/", "design/"]
+libs/engine/tests/test_store_reader.py:392:            keys = reader.key_prefixes("decision", "topic", prefix="arch/")
+libs/engine/tests/test_store_reader.py:393:        assert keys == ["arch/x"]
+libs/engine/tests/test_arrival_head_seam.py:1585:        reason="operator restored from the archive",
+libs/engine/tests/test_arrival_head_seam.py:1617:        reason="restored from the 2026-08-01 archive after disk loss",
+libs/engine/tests/test_arrival_head_seam.py:1914:        reason="operator adjudicated the fork and accepted the archive copy",
+libs/engine/tests/test_arrival_head_seam.py:1976:                reason="restored from archive",
+libs/engine/tests/test_arrival_head_seam.py:2010:        reason="restored from the archive after the incident",
+libs/engine/tests/test_arrival_head_seam.py:2074:        reason="the archive copy was the authentic history; adopting it",
+libs/engine/tests/test_arrival_head_seam.py:2179:        reason="archive restore",
+libs/engine/src/engine/handle.py:75:# Error hierarchy — typed failures, never a bare Exception the caller can't
+libs/engine/tests/test_ceremony_orchestration.py:559:def test_apply_on_non_searchable_store_dir_refuses_typed_no_intent(split_world):
+libs/engine/tests/test_ceremony_orchestration.py:561:    write-only/non-searchable (0222) — apply must return a typed refusal
+libs/engine/tests/test_ceremony_orchestration.py:573:            pytest.skip("cannot make dir non-searchable here (running as root?)")
+libs/engine/tests/test_declaration_resolver.py:56:             search "message" }}
+libs/engine/tests/test_fold_at.py:39:             search "message" }}
+libs/engine/tests/test_fold_at.py:180:            payload={"order": 0, "search": ["message"],
+libs/engine/tests/test_vertex_reader.py:145:        This is the proof that the architecture works: new kinds are driven
+libs/engine/tests/test_vertex_reader.py:293:    """SPEC §9.4 (S3, decision:architecture/internal-table-s3-read-exclusion):
+libs/engine/tests/test_vertex_reader.py:437:def _create_search_vertex(tmp_path: Path, name: str, loops_kdl: str) -> Path:
+libs/engine/tests/test_vertex_reader.py:438:    """Write a .vertex file with search declarations."""
+libs/engine/tests/test_vertex_reader.py:445:class TestVertexSearch:
+libs/engine/tests/test_vertex_reader.py:446:    """vertex_search: FTS5 full-text search through the vertex interface."""
+libs/engine/tests/test_vertex_reader.py:448:    def test_basic_search(self, tmp_path):
+libs/engine/tests/test_vertex_reader.py:449:        """Finds facts by keyword in declared search fields."""
+libs/engine/tests/test_vertex_reader.py:450:        from engine import vertex_reindex, vertex_search
+libs/engine/tests/test_vertex_reader.py:452:        vpath = _create_search_vertex(
+libs/engine/tests/test_vertex_reader.py:455:            '  exchange {\n    fold { items "by" "conversation_id" }\n    search "prompt" "response"\n  }',
+libs/engine/tests/test_vertex_reader.py:467:        results = vertex_search(vpath, "quantum")
+libs/engine/tests/test_vertex_reader.py:473:        from engine import vertex_reindex, vertex_search
+libs/engine/tests/test_vertex_reader.py:475:        vpath = _create_search_vertex(
+libs/engine/tests/test_vertex_reader.py:476:            tmp_path, "test", '  note {\n    search "text"\n  }',
+libs/engine/tests/test_vertex_reader.py:484:        results = vertex_search(vpath, "test")
+libs/engine/tests/test_vertex_reader.py:489:        """Kind parameter narrows search to specific kinds."""
+libs/engine/tests/test_vertex_reader.py:490:        from engine import vertex_reindex, vertex_search
+libs/engine/tests/test_vertex_reader.py:492:        vpath = _create_search_vertex(
+libs/engine/tests/test_vertex_reader.py:495:            '  decision {\n    fold { items "by" "topic" }\n    search "summary"\n  }\n'
+libs/engine/tests/test_vertex_reader.py:496:            '  thread {\n    fold { items "by" "name" }\n    search "notes"\n  }',
+libs/engine/tests/test_vertex_reader.py:504:        results = vertex_search(vpath, "vertex", kind="decision")
+libs/engine/tests/test_vertex_reader.py:509:        """Since/until narrows search to time window."""
+libs/engine/tests/test_vertex_reader.py:510:        from engine import vertex_reindex, vertex_search
+libs/engine/tests/test_vertex_reader.py:512:        vpath = _create_search_vertex(
+
+codex
+The implementation trace exposes a substantive L-8 miss: the docstring calls its list the answer surface “in full” but omits the normal `str` result when a well-formed row matches the requested location (including newest-match-wins). I’ll still complete all gates and report this as a scoped documentation finding unless another check changes the conclusion.
+exec
+/bin/zsh -lc 'UV_CACHE_DIR=/private/tmp/loops-s3wp1-uv-cache uv run --package engine pytest libs/engine/tests' in /Users/kaygee/Code/loops-s3wp1
+ succeeded in 76517ms:
+============================= test session starts ==============================
+platform darwin -- Python 3.13.11, pytest-9.1.1, pluggy-1.6.0
+rootdir: /Users/kaygee/Code/loops-s3wp1/libs/engine
+configfile: pyproject.toml
+plugins: cov-7.1.0, asyncio-1.4.0, hypothesis-6.165.10
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function
+collected 2305 items
+
+libs/engine/tests/test_absorb_edit.py .................                  [  0%]
+libs/engine/tests/test_absorb_genesis.py ........                        [  1%]
+libs/engine/tests/test_admission.py ...........................          [  2%]
+libs/engine/tests/test_admission_callback_ownership.py .                 [  2%]
+libs/engine/tests/test_aggregate_as_of_ontology.py ...                   [  2%]
+libs/engine/tests/test_arrival_authority.py ...............              [  3%]
+libs/engine/tests/test_arrival_authority_gate.py ...                     [  3%]
+libs/engine/tests/test_arrival_body.py .......................           [  4%]
+libs/engine/tests/test_arrival_cas_full_head.py .......................  [  5%]
+libs/engine/tests/test_arrival_cas_head.py ......                        [  5%]
+libs/engine/tests/test_arrival_contract.py ............................. [  6%]
+.                                                                        [  6%]
+libs/engine/tests/test_arrival_coordinate_d0.py ........................ [  7%]
+....................                                                     [  8%]
+libs/engine/tests/test_arrival_derived_log.py ....................       [  9%]
+libs/engine/tests/test_arrival_gate.py ................................. [ 10%]
+.....                                                                    [ 11%]
+libs/engine/tests/test_arrival_grammar.py .............................. [ 12%]
+.....................                                                    [ 13%]
+libs/engine/tests/test_arrival_head_attestation.py ..................... [ 14%]
+........................................................................ [ 17%]
+...........................                                              [ 18%]
+libs/engine/tests/test_arrival_head_seam.py ............................ [ 19%]
+........................................................                 [ 22%]
+libs/engine/tests/test_arrival_key_registry.py .........                 [ 22%]
+libs/engine/tests/test_arrival_projection.py .................           [ 23%]
+libs/engine/tests/test_arrival_rederivation_rowids.py .....              [ 23%]
+libs/engine/tests/test_arrival_registry.py ........................      [ 24%]
+libs/engine/tests/test_arrival_store.py ....................             [ 25%]
+libs/engine/tests/test_arrival_transfer.py ............................. [ 26%]
+.....                                                                    [ 26%]
+libs/engine/tests/test_audit_rebase_d3.py ..................             [ 27%]
+libs/engine/tests/test_behavior.py .............................         [ 29%]
+libs/engine/tests/test_builder.py ...............................        [ 30%]
+libs/engine/tests/test_cadence.py ..................................     [ 31%]
+libs/engine/tests/test_canonical_audit.py ............................   [ 33%]
+libs/engine/tests/test_ceremony_orchestration.py ....................... [ 34%]
+......s...................                                               [ 35%]
+libs/engine/tests/test_combined_read_ordering.py ....................... [ 36%]
+.....                                                                    [ 36%]
+libs/engine/tests/test_combined_tick_envelope.py ...                     [ 36%]
+libs/engine/tests/test_compiler.py ..................................... [ 38%]
+........................................................................ [ 41%]
+......                                                                   [ 41%]
+libs/engine/tests/test_conformance_comparison.py ....................... [ 42%]
+.............                                                            [ 43%]
+libs/engine/tests/test_conformance_lens.py .............                 [ 43%]
+libs/engine/tests/test_conformance_replay.py .......                     [ 43%]
+libs/engine/tests/test_conformance_replicate.py ...........              [ 44%]
+libs/engine/tests/test_declaration_resolver.py ......................... [ 45%]
+.................                                                        [ 46%]
+libs/engine/tests/test_diff_interval_report.py ............              [ 46%]
+libs/engine/tests/test_evaluate_boundaries.py ................           [ 47%]
+libs/engine/tests/test_executor.py ................................      [ 48%]
+libs/engine/tests/test_fact_signing.py ...................               [ 49%]
+libs/engine/tests/test_fold_as_of.py .......                             [ 49%]
+libs/engine/tests/test_fold_at.py ........                               [ 50%]
+libs/engine/tests/test_handle_bench.py ...                               [ 50%]
+libs/engine/tests/test_handle_changes.py ...............                 [ 51%]
+libs/engine/tests/test_handle_incremental.py ........                    [ 51%]
+libs/engine/tests/test_handle_open.py .................                  [ 52%]
+libs/engine/tests/test_handle_probe.py ...........                       [ 52%]
+libs/engine/tests/test_handle_receive.py ..........                      [ 53%]
+libs/engine/tests/test_integration.py .........................          [ 54%]
+libs/engine/tests/test_jsonl_ceremonies.py ...............               [ 54%]
+libs/engine/tests/test_jsonl_codec.py .................................. [ 56%]
+............................................................             [ 58%]
+libs/engine/tests/test_jsonl_golden_fixtures.py ..........               [ 59%]
+libs/engine/tests/test_jsonl_store.py .................................. [ 60%]
+.........                                                                [ 61%]
+libs/engine/tests/test_layer_boundaries.py ...                           [ 61%]
+libs/engine/tests/test_lens.py ............                              [ 61%]
+libs/engine/tests/test_loop.py ...................                       [ 62%]
+libs/engine/tests/test_observer.py ................                      [ 63%]
+libs/engine/tests/test_ontology_as_of.py .........                       [ 63%]
+libs/engine/tests/test_ordering_checkpoint_dispatch.py .........         [ 64%]
+libs/engine/tests/test_peer.py ...........................               [ 65%]
+libs/engine/tests/test_probe_arrival_matrix.py .............             [ 65%]
+libs/engine/tests/test_probe_preflight.py .............................. [ 67%]
+.....                                                                    [ 67%]
+libs/engine/tests/test_program.py ................                       [ 68%]
+libs/engine/tests/test_properties_replay.py ......                       [ 68%]
+libs/engine/tests/test_query_facts.py ...............................    [ 69%]
+libs/engine/tests/test_receipt.py ..................                     [ 70%]
+libs/engine/tests/test_receipt_attestation.py .......................    [ 71%]
+libs/engine/tests/test_recursive_sources.py .......                      [ 71%]
+libs/engine/tests/test_replay.py .......                                 [ 72%]
+libs/engine/tests/test_residence.py .......................              [ 73%]
+libs/engine/tests/test_review_helpers.py ............                    [ 73%]
+libs/engine/tests/test_seal_rebase_d2.py ........                        [ 73%]
+libs/engine/tests/test_source_protocol.py .....                          [ 74%]
+libs/engine/tests/test_sqlite_store.py ...........................       [ 75%]
+libs/engine/tests/test_store.py ...................                      [ 76%]
+libs/engine/tests/test_store_reader.py ................................. [ 77%]
+...........................................                              [ 79%]
+libs/engine/tests/test_tick.py ....................................      [ 81%]
+libs/engine/tests/test_tick_chain.py ................................... [ 82%]
+................                                                         [ 83%]
+libs/engine/tests/test_topology.py .........                             [ 83%]
+libs/engine/tests/test_vertex.py ....................................... [ 85%]
+...................................................                      [ 87%]
+libs/engine/tests/test_vertex_helpers.py ................                [ 88%]
+libs/engine/tests/test_vertex_nesting.py ......................          [ 89%]
+libs/engine/tests/test_vertex_reader.py ................................ [ 90%]
+........................................................................ [ 93%]
+..............................                                           [ 95%]
+libs/engine/tests/test_vertex_replay_coverage.py ....................... [ 96%]
+.....                                                                    [ 96%]
+libs/engine/tests/test_witness_address_helpers.py ...................... [ 97%]
+.                                                                        [ 97%]
+libs/engine/tests/test_witness_position.py ............................. [ 98%]
+...............                                                          [ 99%]
+libs/engine/tests/test_witness_rekey_d1.py ....................          [100%]
+
+================== 2304 passed, 1 skipped in 76.00s (0:01:16) ==================
+
+codex
+Engine verification matches the claim exactly: 2304 passed, 1 skipped, 0 failed. The message split also holds: both edited content refusals end with repair/remove, while the storage paths still delegate to errno-sensitive `storage_advice`, whose permission/default arms recommend retry and directory arm explicitly does not.
+exec
+/bin/zsh -lc 'UV_CACHE_DIR=/private/tmp/loops-s3wp1-uv-cache uv run ruff check libs/engine/src/engine/arrival_head_attestation.py libs/engine/src/engine/arrival_head_seam.py' in /Users/kaygee/Code/loops-s3wp1
+ succeeded in 0ms:
+All checks passed!
+
+exec
+/bin/zsh -lc 'UV_CACHE_DIR=/private/tmp/loops-s3wp1-uv-cache uv run pytest tests/architecture' in /Users/kaygee/Code/loops-s3wp1
+ succeeded in 5731ms:
+============================= test session starts ==============================
+platform darwin -- Python 3.13.11, pytest-9.1.1, pluggy-1.6.0
+rootdir: /Users/kaygee/Code/loops-s3wp1
+configfile: pyproject.toml
+plugins: cov-7.1.0, asyncio-1.4.0, hypothesis-6.165.10
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 99 items
+
+tests/architecture/test_rule_01_apps_no_store_reader.py .                [  1%]
+tests/architecture/test_rule_02_apps_no_raw_sqlite.py .                  [  2%]
+tests/architecture/test_rule_03_libs_dont_import_apps.py .............   [ 15%]
+tests/architecture/test_rule_04_lib_dependency_dag.py .                  [ 16%]
+tests/architecture/test_rule_05_lib_dataclasses_frozen.py .              [ 17%]
+tests/architecture/test_rule_06_atoms_stdlib_only.py .                   [ 18%]
+tests/architecture/test_rule_07_sqlite3_confined_to_engine_store.py .    [ 19%]
+tests/architecture/test_rule_08_domain_constants_in_custody_only.py .    [ 20%]
+tests/architecture/test_rule_09_resolve_local_vertex_ambiguity.py .      [ 21%]
+tests/architecture/test_rule_10_disclosure_renderers_no_store_io.py .    [ 22%]
+tests/architecture/test_rule_11_record_never_imports_surfacing.py ..     [ 24%]
+tests/architecture/test_rule_12_render_register_is_offered_width.py .... [ 28%]
+..................                                                       [ 46%]
+tests/architecture/test_rule_13_production_never_imports_non_production.py . [ 47%]
+............                                                             [ 59%]
+tests/architecture/test_rule_14_mutation_survivors_shrink_only.py .      [ 60%]
+tests/architecture/test_rule_15_apps_import_only_sdk_and_painted.py .    [ 61%]
+tests/architecture/test_rule_16_hot_path_libs_import_footprint.py .      [ 62%]
+tests/architecture/test_rule_17_fold_order_prose_is_receipt_order.py ..  [ 64%]
+tests/architecture/test_rule_18_arrival_vocabulary_denylist.py ......... [ 73%]
+..........................                                               [100%]
+
+============================== 99 passed in 5.61s ==============================
+
+exec
+/bin/zsh -lc "git diff --check && git status --porcelain=v1 && git diff --name-only 63028677...215e1c2e -- '*/tests/*' 'tests/*' && nl -ba libs/engine/src/engine/arrival_head_attestation.py | sed -n '1583,1678p' && nl -ba libs/engine/src/engine/arrival_head_seam.py | sed -n '456,478p;526,558p'" in /Users/kaygee/Code/loops-s3wp1
+ succeeded in 0ms:
+  1583	def bound_lineage(location: str) -> str | None:
+  1584	    """The lineage this location most recently presented, if any.
+  1585	
+  1586	    DELETE IN SLICE 5.
+  1587	
+  1588	    **The answer surface, in full.** Three outcomes, split by where a failure
+  1589	    happened rather than by what anyone should do about it:
+  1590	
+  1591	    * **None** — the file is absent or empty, every line is blank, or the
+  1592	      bindings it holds are well-formed and name OTHER locations. Each of these
+  1593	      is an ANSWER: nothing is bound here, and first contact is the honest
+  1594	      state. A binding for a different store genuinely says nothing about this
+  1595	      one, and refusing on it would make every bindings file holding more than
+  1596	      one store unopenable.
+  1597	    * :class:`BindingsUnreadable` — the bytes arrived and could not be
+  1598	      interpreted as bindings: not UTF-8, not JSON, or JSON carrying no
+  1599	      location and lineage. None of those says anything about what this
+  1600	      location presented, so answering None on them reports an absence the
+  1601	      evidence does not support
+  1602	      (``finding:s3wp3-binding-probes-fail-acceptance-side``,
+  1603	      ``finding:s3-binding-shape-filter-silently-drops``).
+  1604	    * :class:`BindingProbeUnanswered` — storage would not yield the bytes at
+  1605	      all.
+  1606	
+  1607	    **No claim here about transience or remedy.** This docstring used to sort
+  1608	    the refusals into "asks for repair" and "asks for a retry", and that axis
+  1609	    is not decidable from an exception class — ``IsADirectoryError`` arrives
+  1610	    through the same door as a passing I/O fault
+  1611	    (``finding:s3-refusal-family-remedy-promise-undecidable``). Remedy is
+  1612	    advisory prose carried per cause in the message; the types assert only
+  1613	    where the failure happened.
+  1614	    """
+  1615	    try:
+  1616	        text = bindings_path().read_text(encoding="utf-8")
+  1617	    except FileNotFoundError:
+  1618	        # ABSENT is an answer: nothing has ever been bound.
+  1619	        return None
+  1620	    except UnicodeDecodeError as exc:
+  1621	        # CONTENT: the bytes arrived and could not be interpreted.
+  1622	        raise BindingsUnreadable(
+  1623	            f"the bindings file at {bindings_path()} is not valid UTF-8 "
+  1624	            f"({exc}), so no location's recorded lineage can be read. Nothing "
+  1625	            "has been accepted or written — repair or remove the file"
+  1626	        ) from exc
+  1627	    except OSError as exc:
+  1628	        # STORAGE: the bytes never arrived. Was a RAW OSError escaping past
+  1629	        # every `except AttestationRefusal`, which is the builtin-escape gap
+  1630	        # `JournalUnreadable` exists to close one file over. Refusing is the
+  1631	        # right direction; being typed is what lets a caller catch it with the
+  1632	        # rest, and `storage_advice` carries the remedy the type does not
+  1633	        # claim.
+  1634	        raise BindingProbeUnanswered(
+  1635	            f"the bindings file at {bindings_path()} exists and storage "
+  1636	            f"would not yield it ({exc}), so this location's recorded lineage "
+  1637	            f"is unknown. Nothing has been accepted or written — "
+  1638	            f"{storage_advice(exc)}"
+  1639	        ) from exc
+  1640	    found: str | None = None
+  1641	    for line in text.splitlines():
+  1642	        stripped = line.strip()
+  1643	        if not stripped:
+  1644	            continue
+  1645	        try:
+  1646	            decoded = json.loads(stripped)
+  1647	        except ValueError as exc:
+  1648	            raise BindingsUnreadable(
+  1649	                f"a line of {bindings_path()} does not parse ({exc}), and a "
+  1650	                "line that cannot be read may be the binding that names this "
+  1651	                "location. Nothing has been accepted or written — repair or "
+  1652	                "remove the line"
+  1653	            ) from exc
+  1654	        if not (
+  1655	            isinstance(decoded, dict)
+  1656	            and isinstance(decoded.get("location"), str)
+  1657	            and isinstance(decoded.get("lineage"), str)
+  1658	        ):
+  1659	            # READ, and not interpretable as a binding — a CONTENT failure,
+  1660	            # exactly like a line that is not JSON. Filtering it to None used
+  1661	            # to answer "nothing is bound here" on a line that says nothing of
+  1662	            # the kind (``finding:s3-binding-shape-filter-silently-drops``).
+  1663	            raise BindingsUnreadable(
+  1664	                f"a line of {bindings_path()} is valid JSON but carries no "
+  1665	                "location and lineage, so it cannot be read as a binding and "
+  1666	                "cannot be ruled out as this location's. Nothing has been "
+  1667	                "accepted or written — repair or remove the line"
+  1668	            )
+  1669	        # A well-formed binding for a DIFFERENT store is the one legitimate
+  1670	        # skip left: it genuinely says nothing about this location. Newest
+  1671	        # wins, so the loop runs to the end rather than stopping at a match.
+  1672	        if decoded["location"] == location:
+  1673	            found = decoded["lineage"]
+  1674	    return found
+   456	def _identity_of(location: str) -> Identity | None:
+   457	    """What filesystem object this path names right now, or None if it is absent.
+   458	
+   459	    The split is between an ANSWER and an unanswered question, and the two used
+   460	    to be one branch. A path that does not exist genuinely names no object —
+   461	    that is None, and it is correct, and the mint path depends on it. A path
+   462	    that DOES exist and will not stat (a permission wall, a transient I/O
+   463	    error, a partially mounted volume) leaves the question open, and answering
+   464	    None there means a store replaced under an aliased spelling opens as first
+   465	    contact.
+   466	    """
+   467	    try:
+   468	        stat = Path(location).stat()
+   469	    except FileNotFoundError:
+   470	        return None
+   471	    except OSError as exc:
+   472	        raise BindingProbeUnanswered(
+   473	            f"{location} exists and storage would not stat it ({exc}), so "
+   474	            "this open cannot tell whether it names the same store as a "
+   475	            "recorded binding. Nothing has been accepted or written — "
+   476	            f"{storage_advice(exc)}"
+   477	        ) from exc
+   478	    return (stat.st_dev, stat.st_ino)
+   526	        # ABSENT is an answer: nothing has ever been bound here.
+   527	        return None
+   528	    except UnicodeDecodeError as exc:
+   529	        raise BindingsUnreadable(
+   530	            f"the bindings file at {bindings_path()} is not valid UTF-8 "
+   531	            f"({exc}), so this open cannot tell whether another spelling of "
+   532	            "this store is already bound. Nothing has been accepted or "
+   533	            "written — repair or remove the file"
+   534	        ) from exc
+   535	    except OSError as exc:
+   536	        raise BindingProbeUnanswered(
+   537	            f"the bindings file at {bindings_path()} exists and storage "
+   538	            f"would not yield it ({exc}), so this open cannot tell whether "
+   539	            "this location already presented a different lineage. Nothing has "
+   540	            f"been accepted or written — {storage_advice(exc)}"
+   541	        ) from exc
+   542	    recorded: list[tuple[str, str, Identity | None]] = []
+   543	    for number, line in enumerate(text.splitlines(), start=1):
+   544	        stripped = line.strip()
+   545	        if not stripped:
+   546	            continue
+   547	        try:
+   548	            decoded = json.loads(stripped)
+   549	        except ValueError as exc:
+   550	            raise BindingsUnreadable(
+   551	                f"line {number} of {bindings_path()} does not parse ({exc}), "
+   552	                "and a line that cannot be read may be the binding that names "
+   553	                "this location. Nothing has been accepted or written — repair "
+   554	                "or remove the line"
+   555	            ) from exc
+   556	        where = decoded.get("location") if isinstance(decoded, dict) else None
+   557	        lineage = decoded.get("lineage") if isinstance(decoded, dict) else None
+   558	        if not (isinstance(where, str) and isinstance(lineage, str)):
+
+codex
+1. **FAIL — S3I-L-10.** The claimed “answer surface, in full” omits the successful `str` outcome. A well-formed matching binding assigns `found = decoded["lineage"]`, with the newest matching row winning, then returns that lineage at [arrival_head_attestation.py](/Users/kaygee/Code/loops-s3wp1/libs/engine/src/engine/arrival_head_attestation.py:1640). The docstring enumerates only `None`, `BindingsUnreadable`, and `BindingProbeUnanswered` at [arrival_head_attestation.py](/Users/kaygee/Code/loops-s3wp1/libs/engine/src/engine/arrival_head_attestation.py:1588). Add the matching-binding → newest lineage-string row. The other documented cases agree with the body.
+
+2. **PASS.** Both content-side parse refusals dropped “then retry the open”; UTF-8 and invalid-shape content refusals likewise recommend repair/removal only. Storage-side failures still use `storage_advice`, which recommends retry for permission or potentially transient failures and explicitly rejects retry for `IsADirectoryError`. The anchored diff changes only documentation, comments, and exception-message literals—no executable control flow—and changes no tests.
+
+3. **PASS.** All three swept comments now accurately describe their attached code: decode as content failure, `OSError` as storage failure, and the foreign-binding comment above the correct branch. `_identity_of`’s examples are genuinely descriptive causes of an unanswered `stat`, not a promise that the exception family is transient or retryable.
+
+4. **PASS.**
+
+   - Engine: **2304 passed, 1 skipped, 0 failed**
+   - Architecture: **99 passed**
+   - Ruff on both changed production modules: **clean**
+   - `git diff --check`: **clean**
+   - Worktree: **clean**
+   - HEAD: `215e1c2e78291dee56d2e0eed258d8cddc5e5711`
+
+5. **PASS — S3I-L-9 dismissal confirmed.** The overlap does not mask the guarded fails-zero regression, and both failures localize the same arm. Requiring exactly one failing test would weaken the six-cause mapping coverage without improving diagnosis.
+
+**NOT CONVERGED** — blocking: **S3I-L-10**.
+tokens used
+41,900
+1. **FAIL — S3I-L-10.** The claimed “answer surface, in full” omits the successful `str` outcome. A well-formed matching binding assigns `found = decoded["lineage"]`, with the newest matching row winning, then returns that lineage at [arrival_head_attestation.py](/Users/kaygee/Code/loops-s3wp1/libs/engine/src/engine/arrival_head_attestation.py:1640). The docstring enumerates only `None`, `BindingsUnreadable`, and `BindingProbeUnanswered` at [arrival_head_attestation.py](/Users/kaygee/Code/loops-s3wp1/libs/engine/src/engine/arrival_head_attestation.py:1588). Add the matching-binding → newest lineage-string row. The other documented cases agree with the body.
+
+2. **PASS.** Both content-side parse refusals dropped “then retry the open”; UTF-8 and invalid-shape content refusals likewise recommend repair/removal only. Storage-side failures still use `storage_advice`, which recommends retry for permission or potentially transient failures and explicitly rejects retry for `IsADirectoryError`. The anchored diff changes only documentation, comments, and exception-message literals—no executable control flow—and changes no tests.
+
+3. **PASS.** All three swept comments now accurately describe their attached code: decode as content failure, `OSError` as storage failure, and the foreign-binding comment above the correct branch. `_identity_of`’s examples are genuinely descriptive causes of an unanswered `stat`, not a promise that the exception family is transient or retryable.
+
+4. **PASS.**
+
+   - Engine: **2304 passed, 1 skipped, 0 failed**
+   - Architecture: **99 passed**
+   - Ruff on both changed production modules: **clean**
+   - `git diff --check`: **clean**
+   - Worktree: **clean**
+   - HEAD: `215e1c2e78291dee56d2e0eed258d8cddc5e5711`
+
+5. **PASS — S3I-L-9 dismissal confirmed.** The overlap does not mask the guarded fails-zero regression, and both failures localize the same arm. Requiring exactly one failing test would weaken the six-cause mapping coverage without improving diagnosis.
+
+**NOT CONVERGED** — blocking: **S3I-L-10**.

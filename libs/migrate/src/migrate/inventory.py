@@ -321,51 +321,18 @@ def _inventory_jsonl(source_path: Path, file_hash: str) -> SourceInventory:
                         batch_fault = f"batch row {i} has unknown record discriminator t={elem_t!r}"
                         break
 
-                    elem_unknown = sorted(set(elem) - _SPEC["fact"].allowed)
-                    if elem_unknown:
-                        batch_fault = f"unknown field(s) in fact line: {elem_unknown}"
+                    fault = row_object_fault(
+                        elem,
+                        t="fact",
+                        frame="line",
+                        fields=FACT_FIELDS,
+                        allowed=_SPEC["fact"].allowed,
+                        nullable=FACT_NULLABLE,
+                        skip_fields=frozenset({"observer"}),
+                    )
+                    if fault is not None:
+                        batch_fault = fault
                         break
-
-                    req_fields = ("id", "kind", "ts", "origin", "payload")
-                    missing_req = [f for f in req_fields if f not in elem]
-                    if missing_req:
-                        batch_fault = f"missing field(s) in fact line: {missing_req}"
-                        break
-
-                    if not isinstance(elem["id"], str):
-                        batch_fault = f"fact field 'id' must be a string, got {type(elem['id']).__name__}"
-                        break
-                    if not isinstance(elem["kind"], str):
-                        batch_fault = f"fact field 'kind' must be a string, got {type(elem['kind']).__name__}"
-                        break
-
-                    ts_val = elem["ts"]
-                    if isinstance(ts_val, bool) or not isinstance(ts_val, (int, float)):
-                        batch_fault = f"fact field 'ts' must be a number, got {type(ts_val).__name__}"
-                        break
-                    if isinstance(ts_val, float):
-                        if not math.isfinite(ts_val):
-                            batch_fault = f"fact field 'ts' must be a finite number, got {ts_val!r}"
-                            break
-                    elif not (_JCS_INT_MIN <= ts_val <= _JCS_INT_MAX):
-                        batch_fault = f"fact field 'ts' is outside the JCS safe-integer domain: {ts_val}"
-                        break
-
-                    if not isinstance(elem["origin"], str):
-                        batch_fault = f"fact field 'origin' must be a string, got {type(elem['origin']).__name__}"
-                        break
-                    if not isinstance(elem["payload"], str):
-                        batch_fault = f"fact field 'payload' must be a string, got {type(elem['payload']).__name__}"
-                        break
-
-                    if SIGNATURE_FIELD in elem:
-                        sig_val = elem[SIGNATURE_FIELD]
-                        if sig_val is None:
-                            batch_fault = "fact field 'signature' must be absent, not null, when unsigned"
-                            break
-                        if not isinstance(sig_val, str):
-                            batch_fault = f"fact field 'signature' must be a string, got {type(sig_val).__name__}"
-                            break
 
                     # Observer field checking: missing vs typed string
                     if "observer" not in elem or elem["observer"] is None:

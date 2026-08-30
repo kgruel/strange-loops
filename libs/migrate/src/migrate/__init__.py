@@ -21,7 +21,6 @@ from .legacy_jsonl import (
     records_from_object,
 )
 from .legacy_sqlite import (
-    _chain_head,
     _content_sha256,
     _facts_have_signature,
     _tick_columns,
@@ -48,7 +47,6 @@ __all__ = [
     "SourceInventory",
     "TICK_FIELDS",
     "Transform",
-    "_chain_head",
     "_content_sha256",
     "_facts_have_signature",
     "_tick_columns",

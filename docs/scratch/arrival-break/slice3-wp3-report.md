@@ -201,6 +201,68 @@ proposal disagreed and the module won.
     property, or closing would be the thing that constructs the reader the fix
     deferred.
 
+## S3I-L-4 — the decode escape, and an arm I had put in the wrong family
+
+`finding:s3-bindings-decode-escapes-untyped`. A non-UTF-8 `bindings.jsonl`
+(`b"\xff\xfe"`) raised a raw `UnicodeDecodeError` through **both**
+`bound_lineage` and `aliased_lineage` — the same builtin-escape class as the
+`OSError`, walking past every `except AttestationRefusal`. `read_journal` one
+file over already models the answer, catching `(OSError, UnicodeDecodeError)`
+together. Reproduced through both functions before fixing.
+
+### The arm, and why it moved two existing cases with it
+
+The routing left the arm to me and pointed at the reason. `ProbeUnanswered`'s
+own docstring promises that every subclass *asks to be retried*. Bytes that are
+not UTF-8 read the same way on every retry — and so does a line that is not
+JSON, which I had filed under that parent last round. **That made the parent's
+promise false**, and a family name that does not carry its promise has stopped
+carrying information.
+
+So the split is **by remedy, not by site**:
+
+| Refusal | Causes | Remedy |
+|---|---|---|
+| `BindingsUnreadable` (sibling of `ProbeUnanswered`) | non-UTF-8 file, unparseable line | **repair** — permanent |
+| `BindingProbeUnanswered` (under `ProbeUnanswered`) | permission wall, I/O error, unstattable path | **retry** — transient |
+
+`BindingsUnreadable` is the parallel of `JournalUnreadable` one file over, and
+makes the same claim about the same kind of loss: the file is *there* and cannot
+be read. Both stay catchable as one `AttestationRefusal`, and
+`test_repair_flavoured_and_retry_flavoured_refusals_are_distinct` asserts the
+split rather than leaving it to the docstrings.
+
+This is a correction to the previous round, not only an addition — the malformed
+-line arms moved, and three tests moved with them.
+
+### Mutation demos
+
+Two-guard, committed `1cf379fe` first, tree byte-clean after each revert. Each
+decode arm reverted separately, since `bound_lineage` reads the file first
+through an open and would otherwise mask the seam's arm:
+
+| Reverted | Fails |
+|---|---|
+| `bound_lineage`'s decode arm | the open-path repro **and** the direct `bound_lineage` repro |
+| `aliased_lineage`'s decode arm | the direct alias-sweep repro |
+
+And the escape itself reproduced rather than inferred: with the arm removed, a
+caller reaching for `AttestationRefusal` gets `ESCAPED untyped:
+UnicodeDecodeError`.
+
+### Docstring sweep
+
+`bound_lineage`'s was the stale one, and it was stale in the worst way: it
+carried *the defect's own reasoning* — "a malformed line is skipped rather than
+refused: this file makes no claim a skipped line could weaken". That claim is
+true of an absent file and false of an unreadable line, which is exactly the
+confusion the finding was about. It now says absent answers None, everything
+else refuses, and which refusal asks for what.
+
+The other "skipped" prose in the module was checked and left: it describes the
+**journal's** line handling, which genuinely still skips and reports, and that
+behavior is unchanged.
+
 ## The binding probes — ruled, and a fourth site found while fixing
 
 Ruling on `finding:s3wp3-binding-probes-fail-acceptance-side`, shape as

@@ -1,0 +1,22 @@
+{
+  "name": "comparison-journal-an-empty-journal-is-first-contact",
+  "description": "No lines at all. An empty journal says nothing was ever accepted here, and trust on first use is the honest answer to it. This is the boundary the third state sits against: content claimed and unreadable is NOT this.",
+  "input": {
+    "form": "journal",
+    "journal": [],
+    "presented": {
+      "lineage": "01M3COMPARISONVECTORLINEAGE",
+      "ordinal": 0,
+      "record_hash": "e733827070bd8164c14a41f69bcd91f4b86906aefe021929ce91619a3adf5dce"
+    },
+    "at_known": null
+  },
+  "expected": {
+    "read": "none",
+    "known": null,
+    "entries": 0,
+    "epoch": 0,
+    "skipped": 0,
+    "outcome": "first-contact"
+  }
+}

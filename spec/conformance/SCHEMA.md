@@ -405,3 +405,114 @@ Three, and the file stem names which one a vector belongs to.
 - **`replicate-catch-up-*`** — a stale replica brought forward, ending byte-identical to the authority. **At least one vector in this family carries SIGNED records, and that is a property of the family rather than an accident of its fixtures.** An implementation that re-coordinated an exact suffix would assign the same lineage, ordinal and predecessor and reproduce identical hashes — so an unsigned suffix cannot distinguish assigning from validating. A signature is content the assigning path does not carry, which is what makes the two observably different.
 
 Vectors are frozen; regenerate with `uv run --package engine python spec/conformance/generate_replicate.py`.
+
+---
+
+## 11. Area: `comparison`
+
+The `comparison` area pins the **head-comparison state machine** (witness-protocol.html §07): the judgment that answers the one question no backend can answer about itself — *is the log in front of me the same log this machine accepted before?* A backend can prove a log is internally consistent; it cannot prove it is the same log, because every fact it could consult lives inside the boundary a restore or an attacker would move. The comparison is what turns "this log is well-formed" into "this log is the one we know".
+
+### Two forms, and the split is deliberate
+
+A vector's `input.form` says which question it asks. **An implementation must fail loudly on a form it does not recognize**, never skip it.
+
+| Form | Input | What it pins |
+|---|---|---|
+| `heads` | a remembered entry, a presented head, and what the ledger vouches for at the remembered coordinate | the seven §07 rows, in isolation |
+| `journal` | the journal's raw lines | the read rules, and the comparison that follows from reading them |
+
+**Why `heads` exists.** The witness journal is a *local cache grammar*, not wire. It is deliberately not the record codec — it must stay readable when the store it witnesses cannot be opened at all — it versions independently of the record grammar, and no conforming implementation is obliged to have one. Routing every row through a journal fixture would pin one repo's cache encoding onto an implementation that owes only the state machine.
+
+**Why `journal` exists.** Every read rule is unreachable from the classifier: trust-epoch scoping, the maximum-ordinal rule, journal equivocation, the incomplete-read lower bound, and the header's three-way classification. A `heads`-only area would pin the seven rows and none of the rules that decide *which* head is handed to them.
+
+### The seven outcomes
+
+Seven rows for six states, because §07 lists first contact separately from the five comparisons. Guard order is normative: **lineage is judged before any ordinal arithmetic**, because heights in two different lineages are unrelated number lines.
+
+| Outcome | Condition | Posture |
+|---|---|---|
+| `first-contact` | nothing is remembered | proceed, trust on first use, labeled |
+| `unchanged` | the presented head equals the remembered one | proceed |
+| `advanced` | same lineage, higher ordinal, **and** the ledger vouches for the remembered head at its own coordinate | proceed |
+| `rollback` | same lineage, lower ordinal | refuse |
+| `same-height-fork` | same lineage and ordinal, different record hash | refuse |
+| `rewrite` | higher ordinal, but the record at the remembered ordinal is not the remembered one — including when descent was never established at all | refuse |
+| `lineage-replaced` | a different lineage | refuse |
+
+`at_known` is the advanced-versus-rewrite discriminator, and it is why a walk that merely reaches the presented head is not enough: such a walk verifies the current chain while answering nothing about continuity with what was previously accepted. `at_known` is `null` when the ledger will not vouch for anything at that coordinate, and absence of evidence is not evidence of descent — an unproven advance is a `rewrite`.
+
+### `input` Schema
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `form` | string | Yes | `"heads"` or `"journal"`. An unrecognized form must fail, not skip. |
+| `presented` | Head Object | Yes | The head the store presents on this open. |
+| `at_known` | Head Object \| null | Yes | What the ledger vouches for at the remembered head's ordinal. `null` means it vouches for nothing there. |
+| `known` | Entry Object \| null | `heads` only | The remembered observation. `null` is first contact. |
+| `journal` | array of strings | `journal` only | The journal's complete lines, each without its terminating newline. May be empty. |
+
+### Entry Object
+
+| Field | Type | Description |
+|---|---|---|
+| `kind` | string | Why the entry exists: `bootstrap`, `advance`, `audit`, `trust-reset`. |
+| `level` | string | What evidence backed it: `mint`, `first-contact`, `commit`, `descendant`, `full`. States how much was actually established, so an entry can never be read as a stronger claim than the evidence behind it. |
+| `lineage`, `ordinal`, `record_hash` | — | The head, all three fields, always. |
+| `observed_at` | number | Witness metadata, never ledger order. |
+| `location` | string | Where it was seen. Diagnosis only, and **never a key** — journals are keyed by lineage so a worktree, a move, or a copy still finds the lineage's memory. |
+
+### `expected` Schema
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `outcome` | string \| null | Yes | One of the seven strings above, or `null`. |
+| `read` | string | `journal` only | How far the read got: `none`, `established`, `bounded`, `unreadable`, `equivocation`. |
+| `known` | Head Object \| null | `journal` only | The head the read established, or the bound it reached. `null` for the other states. |
+| `entries` | integer \| null | `journal` only | Readable entries. `null` when the read refused before counting. |
+| `epoch` | integer \| null | `journal` only | Entries in the current trust epoch. |
+| `skipped` | integer \| null | `journal` only | What the read could not use. **Non-empty is exactly the condition that weakens the result to a bound.** |
+| `sound_answer` | string \| null | `bounded` only | What a bound may soundly answer: `"rollback"`, or `null` when nothing is answerable. |
+
+**`outcome: null` is not an eighth outcome.** It means the read declined and the classifier was never called, so there is no outcome to state; `read` carries why. A vector must never mint a string outside the ratified seven — a normative vector carrying something like `"declined"` would read to an implementer as a value to return.
+
+**Counts, not messages.** The `skipped` slot is a count rather than the reasons themselves. A skip reason is human-facing prose in whatever language the implementation speaks, and one of them necessarily embeds the host's own JSON parser error text; pinning it would be the same overreach as naming an exception class.
+
+**`read` names what the read reached, never why.** A bound produced by a torn line and a bound produced by a missing header are one state, and a new cause joins it without a new value. A field whose values enumerated causes would have to grow every time a cause was discovered — which is exactly how this state's vocabulary drifted three times before it was named for what the read *lacks*.
+
+### The read states
+
+| State | Meaning | What it can answer |
+|---|---|---|
+| `none` | The journal claims nothing: empty, or a header and no entries. | `first-contact`. Trust on first use is the honest answer to "nothing was ever accepted here". |
+| `established` | Every line was usable. | All seven rows. |
+| `bounded` | The read was **incomplete** — it needed something it did not get. The remembered head is known only to be *at least* this. | Only `rollback`, below the bound. |
+| `unreadable` | Content was claimed and **none** of it could be read. | Nothing. There is no bound, so even `rollback` is unanswerable. |
+| `equivocation` | Two entries at the epoch's maximum ordinal carry different record hashes. | Nothing; the read itself refuses. |
+
+**`bounded` is not `unreadable`, and neither is `none`.** These three are the area's central distinction. An empty journal says nothing was ever accepted here. A journal whose content cannot be read says heads *were* accepted and their ordinals are exactly what was lost — collapsing it into `none` would grant trust on first use *precisely because* the journal became unreadable. And a bound is weaker than an established head without being unreadable in any part: a journal with every entry readable and no header is incomplete, because the protocol and wire versions those hashes derive under are unknown.
+
+**A bound is sound downward only, and it has three cells — not two.** `sound_answer` is the executable statement of this table, and the area carries a vector for every row, because a rule stated only in prose is one a conforming implementation can pass while violating.
+
+| Presented, same lineage | `sound_answer` | Why |
+|---|---|---|
+| **below** the bound | `"rollback"` | The accepted head is at least the bound, so it is certainly above what is being presented. |
+| **equal to** the bound | `null` | Not `unchanged`: it may be a rollback from the very entry the read missed. |
+| **above** the bound | `null` | Not `advanced` either. Whatever the read missed carries **no information about the ordinal it held**, so nothing bounds the accepted head from above — a presented head at 95 may still sit far below a lost entry at 200. |
+
+The third row is the one a two-valued reading loses, and losing it is not academic: an implementation that answered `advanced` above the bound would wave through precisely the loss the journal exists to catch. Supplying valid descent evidence does not rescue it — descent verified *from the bound* says nothing about an entry that was never on the walk.
+
+**A vector occupying the third row must supply `at_known` equal to the bound's own coordinate and record hash.** This is a requirement on the *fixture*, not on implementations, and it is what gives the row its force: the claim being pinned is a counterfactual — *even with descent fully established from the bound*, the proceed answer stays unobtainable. A vector whose `at_known` is null, or names some other head, is answered `rewrite` by the ordinary classifier for want of evidence, which the `comparison-classify-rewrite-*` vectors already pin. Such a fixture fills the row without ever making `advanced` the answer a bound-ignoring implementation would reach for, so it would pass an implementation that declines here for the wrong reason while still answering `advanced` wherever descent is proven. Gathering evidence from the store does not repair this either: a walk verifies the store's own chain, while the missing fact is about what this machine previously *accepted*, which the store never knew.
+
+**Damage is reported, never converted into a verdict.** An unusable line is skipped and surfaced wherever it sits, and the file is not refused. Refusing would make an ordinary crash a permanent incident, and it claims a protection this location cannot deliver anyway — anyone able to corrupt a line can delete the journal instead and be met with trust on first use.
+
+### Families
+
+Five, and the file stem names which one a vector belongs to.
+
+- **`comparison-classify-*`** — the seven rows through the pure classifier, plus the guard-order claim that a foreign lineage at a *lower* ordinal is `lineage-replaced` and not `rollback`, and both ways the advance branch fails.
+- **`comparison-epoch-*`** — a trust-reset opens a new epoch and the epoch is **reset-inclusive**: the reset entry is the first entry of the epoch it opens. A journal ending at the reset compares against the reset head. Scoped exclusively instead, such a journal has an empty epoch and answers `first-contact` — silent re-acceptance on the most ordinary shape there is, an operator resetting and then opening. The family also carries the claim that epoch scope governs the equivocation check, so a ceremony can take effect over a conflict the operator already resolved.
+- **`comparison-journal-*`** — the maximum-ordinal rule (the remembered head is the epoch's highest ordinal, **not the last line**, because concurrent writers journal out of order), equivocation, and **both negative controls**: duplicate entries at the maximum that *agree* are not equivocation, and unknown fields on a current-grammar entry are read normally. A refusal that fires on agreement has stopped meaning what it says.
+- **`comparison-incomplete-*`** — the lower bound and the third state. **All three of the bound's cells are pinned** (below, equal, above), because two of them agree on `null` and a family that exercised only those two would pass an implementation that answered `advanced` above the bound. The family also carries the case an operator would actually meet: a fresh genesis arriving at a location whose journal remembers a far higher ordinal in unreadable form is a replacement wearing the old name, and it declines rather than passing as first contact.
+- **`comparison-header-*`** — the header's **three-way** classification. A kindless object bearing the type marker is a header. An object bearing **both** the type marker and an entry kind is *unclassifiable*: skipped and reported, never absorbed, never a reason to refuse the file. Anything else is entry-shaped. Both two-valued repairs fail in opposite directions — absorbing on the type marker alone silently loses an entry, and requiring the marker plus the absence of a kind refuses the whole file over ordinary version skew — so the stable rule admits a third verdict rather than choosing between two wrong certainties. The middle row is a **location claim** about this build's ability to read the line, not a verdict about what the line is, which is exactly what this build cannot know.
+
+Vectors are frozen; regenerate with `uv run --package engine python spec/conformance/generate_comparison.py`.

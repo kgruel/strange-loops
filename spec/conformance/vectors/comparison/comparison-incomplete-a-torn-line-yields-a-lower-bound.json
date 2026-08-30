@@ -1,0 +1,33 @@
+{
+  "name": "comparison-incomplete-a-torn-line-yields-a-lower-bound",
+  "description": "The fixture that refuted 'a mid-file skip is strictly safer than a torn tail'. One epoch in file order [reset 90, 92, 91], true remembered head 92; the line holding 92 is torn by a crash, and a later well-formed entry survives after it. Skipping quietly would lower the remembered head to 91 and call a genuine restore from 92 UNCHANGED. So the loss is carried in the read's own type instead: the head is known only to be AT LEAST 91, and a presented head EQUAL to the bound cannot be called unchanged, because it may be a rollback from the very entry the read missed. Note what is NOT done \u2014 the file is not refused. Refusing would make an ordinary crash a permanent incident, and it claims a protection this location cannot deliver anyway, since anyone able to corrupt a line can delete the journal instead and be met with trust on first use.",
+  "input": {
+    "form": "journal",
+    "journal": [
+      "{\"protocol\":1,\"type\":\"arrival-head-observation\",\"v\":1,\"wire\":1}",
+      "{\"kind\":\"bootstrap\",\"level\":\"mint\",\"lineage\":\"01M3COMPARISONVECTORLINEAGE\",\"location\":\"/vectors/comparison/project.arrival\",\"observed_at\":1788000000.0,\"ordinal\":0,\"record_hash\":\"8ac1d899262e830d2be319bd5ef28d03cfe847a108adaa1ec9288b7e2e0f2b00\",\"v\":1}",
+      "{\"kind\":\"trust-reset\",\"level\":\"full\",\"lineage\":\"01M3COMPARISONVECTORLINEAGE\",\"location\":\"/vectors/comparison/project.arrival\",\"observed_at\":1788000090.0,\"ordinal\":90,\"record_hash\":\"9ba847b1c3e2f92f410ac2264266c8506f0df0a9cee6575a27b6064957fc93ba\",\"v\":1}",
+      "{\"kind\":\"advance\",\"level\":\"commit\",\"lineage\":\"01M3COMPARISONVECTORLINEAGE\",\"location\":\"/vectors/comparison/project.arrival\",\"",
+      "{\"kind\":\"advance\",\"level\":\"commit\",\"lineage\":\"01M3COMPARISONVECTORLINEAGE\",\"location\":\"/vectors/comparison/project.arrival\",\"observed_at\":1788000091.0,\"ordinal\":91,\"record_hash\":\"e2235df4281b93546c0177885f0677948fb368cf593fa3ec1fbd2d734e06bfe8\",\"v\":1}"
+    ],
+    "presented": {
+      "lineage": "01M3COMPARISONVECTORLINEAGE",
+      "ordinal": 91,
+      "record_hash": "e2235df4281b93546c0177885f0677948fb368cf593fa3ec1fbd2d734e06bfe8"
+    },
+    "at_known": null
+  },
+  "expected": {
+    "read": "bounded",
+    "known": {
+      "lineage": "01M3COMPARISONVECTORLINEAGE",
+      "ordinal": 91,
+      "record_hash": "e2235df4281b93546c0177885f0677948fb368cf593fa3ec1fbd2d734e06bfe8"
+    },
+    "entries": 3,
+    "epoch": 2,
+    "skipped": 1,
+    "outcome": null,
+    "sound_answer": null
+  }
+}

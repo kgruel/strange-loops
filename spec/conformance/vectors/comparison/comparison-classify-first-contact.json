@@ -1,0 +1,17 @@
+{
+  "name": "comparison-classify-first-contact",
+  "description": "Nothing is remembered, so there is nothing to compare against. \u00a707 lists first contact separately from the five comparisons, and it is trust on first use \u2014 labeled, never silent. Refusing instead would make a fresh clone unable to read anything.",
+  "input": {
+    "form": "heads",
+    "known": null,
+    "presented": {
+      "lineage": "01M3COMPARISONVECTORLINEAGE",
+      "ordinal": 0,
+      "record_hash": "e733827070bd8164c14a41f69bcd91f4b86906aefe021929ce91619a3adf5dce"
+    },
+    "at_known": null
+  },
+  "expected": {
+    "outcome": "first-contact"
+  }
+}

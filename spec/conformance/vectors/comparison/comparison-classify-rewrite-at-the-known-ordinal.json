@@ -1,0 +1,29 @@
+{
+  "name": "comparison-classify-rewrite-at-the-known-ordinal",
+  "description": "The head advanced, but the record now sitting at the REMEMBERED ordinal is not the one we accepted. The chain in front of us may verify perfectly and still be a different history; a walk that only checks it reached the presented head answers nothing about continuity with what came before.",
+  "input": {
+    "form": "heads",
+    "known": {
+      "kind": "advance",
+      "level": "commit",
+      "lineage": "01M3COMPARISONVECTORLINEAGE",
+      "ordinal": 7,
+      "record_hash": "3e920d4564316dad7f9d4e63199b25110e7df8d6bcff99c5f02dbe1df3df5093",
+      "observed_at": 1788000007.0,
+      "location": "/vectors/comparison/project.arrival"
+    },
+    "presented": {
+      "lineage": "01M3COMPARISONVECTORLINEAGE",
+      "ordinal": 9,
+      "record_hash": "cf952fb90d4465760147cf4131e21c6b80d90bd627a655681006482db78529e8"
+    },
+    "at_known": {
+      "lineage": "01M3COMPARISONVECTORLINEAGE",
+      "ordinal": 7,
+      "record_hash": "585ad762f6c6794e35f78395b77d32be575f4fd779c65ea6116b4af7cda9c287"
+    }
+  },
+  "expected": {
+    "outcome": "rewrite"
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "name": "comparison-journal-a-header-only-journal-is-first-contact",
+  "description": "A header and no entries. Still first contact: the header describes the file's grammar and claims no head, so nothing has been accepted here and nothing has been lost. First contact must stay reachable wherever it is honest, or the third state would have swallowed it.",
+  "input": {
+    "form": "journal",
+    "journal": [
+      "{\"protocol\":1,\"type\":\"arrival-head-observation\",\"v\":1,\"wire\":1}"
+    ],
+    "presented": {
+      "lineage": "01M3COMPARISONVECTORLINEAGE",
+      "ordinal": 0,
+      "record_hash": "e733827070bd8164c14a41f69bcd91f4b86906aefe021929ce91619a3adf5dce"
+    },
+    "at_known": null
+  },
+  "expected": {
+    "read": "none",
+    "known": null,
+    "entries": 0,
+    "epoch": 0,
+    "skipped": 0,
+    "outcome": "first-contact"
+  }
+}

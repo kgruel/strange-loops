@@ -1,0 +1,25 @@
+{
+  "name": "comparison-classify-unchanged",
+  "description": "The presented head equals the remembered one in all three fields. The dominant case, and it is answered without consulting at_known: there is nothing to discriminate, so asking would make the common path pay for evidence it does not need.",
+  "input": {
+    "form": "heads",
+    "known": {
+      "kind": "advance",
+      "level": "commit",
+      "lineage": "01M3COMPARISONVECTORLINEAGE",
+      "ordinal": 7,
+      "record_hash": "3e920d4564316dad7f9d4e63199b25110e7df8d6bcff99c5f02dbe1df3df5093",
+      "observed_at": 1788000007.0,
+      "location": "/vectors/comparison/project.arrival"
+    },
+    "presented": {
+      "lineage": "01M3COMPARISONVECTORLINEAGE",
+      "ordinal": 7,
+      "record_hash": "3e920d4564316dad7f9d4e63199b25110e7df8d6bcff99c5f02dbe1df3df5093"
+    },
+    "at_known": null
+  },
+  "expected": {
+    "outcome": "unchanged"
+  }
+}

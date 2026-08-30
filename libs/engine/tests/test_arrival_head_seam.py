@@ -400,6 +400,29 @@ def test_only_the_constructor_and_the_producers_write_to_the_journal(tmp_path):
     of the functions allowed to write. The allowlist is SHRINK-ONLY: a new
     branch that writes inline fails here by name, and the fix is to return an
     ``_Earned`` rather than to widen the list.
+
+    **Scope of the claim, stated because the matcher has a precondition.** This
+    detects DIRECT-NAME calls — ``ast.Call`` whose ``func`` is an ``ast.Name``.
+    It does not see a write reached through an attribute
+    (``arrival_head_attestation.append_entry(...)``), through an alias, or
+    through ``getattr``. That is deliberately not fixed by growing the matcher:
+    a detector that chased every spelling would still miss one, and it would be
+    claiming "no write escapes" — a verdict it cannot support — where the
+    honest claim is "no direct-name write escapes".
+
+    What IS closed is the innocent evasion, and it is closed by pinning the
+    precondition rather than widening the detection. Switching this module to
+    attribute-style imports would leave the scan green with zero offenders
+    while every write site went invisible — a silent blinding, which is the
+    worst failure a ratchet can have. So the precondition is asserted first: if
+    a writing name stops being a module-level binding, this test fails LOUDLY
+    and names the import, instead of quietly detecting nothing.
+
+    The other spellings are caught today by the byte-compare behavior tests
+    (`test_an_advance_is_not_journaled_when_the_projection_then_refuses` and
+    its sibling). The residual this ratchet exists for is a later branch that
+    has no behavior test yet, and for that branch the direct-name form is the
+    one somebody actually writes.
     """
     import ast
 
@@ -409,6 +432,32 @@ def test_only_the_constructor_and_the_producers_write_to_the_journal(tmp_path):
     tree = ast.parse(source)
 
     writing = {"append_entry", "record_binding", "bootstrap", "trust_reset", "audit"}
+
+    # THE PRECONDITION, asserted before the scan that depends on it. Every
+    # writing name must be a module-level binding — imported by name, or
+    # defined here — because that is what makes a call to it parse as
+    # `ast.Call(func=ast.Name)`. If one stops being bound this way, the scan
+    # below silently stops seeing its call sites, so the failure has to happen
+    # HERE and name the import rather than there and name nothing.
+    bound = {
+        alias.asname or alias.name.split(".")[0]
+        for node in tree.body
+        if isinstance(node, (ast.Import, ast.ImportFrom))
+        for alias in node.names
+    } | {
+        node.name
+        for node in tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+    unbound = writing - bound
+    assert not unbound, (
+        f"{sorted(unbound)} are no longer module-level bindings in "
+        "arrival_head_seam.py, so this ratchet can no longer see calls to "
+        "them and would pass by detecting nothing. If the module moved to "
+        "attribute-style imports, that is the change to reconsider — the "
+        "scan matches direct-name calls only, by design (see the docstring)."
+    )
+
     # The producers write BY DEFINITION — each is the one place its entry kind
     # is created. `_write` is the open path's single write site, `mint` and
     # `_witness` are the mutation paths, and each has nothing that can refuse

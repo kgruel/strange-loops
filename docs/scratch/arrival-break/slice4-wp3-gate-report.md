@@ -657,3 +657,115 @@ The two engine commits are the part I scrutinised hardest and they are the part 
 comfortable with: minimal, exactly scoped, residue swept, mutation-proven, and — the thing
 that matters most for an arc whose safety property is byte-level determinism — provably
 byte-preserving for every draft shape that existed before them.
+
+---
+
+# Round 3 — fix round 2 re-check (closing)
+
+**Range**: one commit, `0ce53b2a`, merged into this pointer branch.
+**Verdict**: **PASS. WP3's gate is closed.**
+
+## R3.1 Scope — one commit, `libs/migrate` only
+
+Five files: `pyproject.toml`, `__init__.py`, `refusals.py`, `sidecar.py`,
+`tests/test_sidecar.py`. No engine change, nothing outside `libs/migrate/**`. I read the
+full production diff; there is no change beyond the two ruled items.
+`git status --short` is `?? .tmp/`; production diff empty after my break/restore.
+
+## R3.2 The verifier fix — exactly the recommended shape
+
+`ReportTargetUnopenableRefused` is added as the fifth distinct cause, carrying
+`target_path` and `cause`. The bare `except Exception` is replaced with the same typed
+tuple the resume path uses — `(StoreLost, ArrivalTornTail, ArrivalCorrupt, GenesisRefused,
+OSError)` — so an unrecognized exception now propagates as itself instead of being
+re-labelled. `ReportHeadMismatchRefused` survives only on the path after the real
+head comparison, which is the whole point: the type that asserts a mismatch is now reachable
+only when a mismatch was actually observed.
+
+My round-2 probe, re-run — the check that produced the finding now inverts:
+
+```
+===== re-typing check: verify_migration_report on an UNOPENABLE target =====
+[PASS] unopenable target -> ReportTargetUnopenableRefused (not re-typed as a mismatch)
+```
+
+(Round 2 read: `[FINDING] ... reported as ReportHeadMismatchRefused ... cause chain
+ReportHeadMismatchRefused <- StoreLost <- ArrivalTornTail`.)
+
+Every other round-2 probe still passes unchanged: publish no-op (both evasions refuse,
+descriptor unchanged), mallory resume naming both identities with bytes unchanged,
+genesis-only right-lineage resume, torn tail discriminated by TYPE with `ArrivalTornTail`
+in the cause chain, and both storage-fault wraps.
+
+**Hand-verified break/restore** — I restored the exact round-2 defect (bare `except
+Exception` re-typed as `ReportHeadMismatchRefused`):
+
+```
+FAILED libs/migrate/tests/test_sidecar.py::test_verify_migration_report_causes
+1 failed, 59 passed
+```
+
+Red. Restored; production diff empty. The ratchet is real.
+
+The new coverage was added as a sixth case inside the existing
+`test_verify_migration_report_causes` rather than as a new test function — which is why the
+suite total stays 159 while the test file grew. That is the right home for it (the test
+enumerates the distinct causes), and the assertions pin the regression precisely: the type,
+`not isinstance(..., ReportHeadMismatchRefused)`, and the engine type present in **both**
+`.cause` and `__cause__`.
+
+## R3.3 `ckdl` — declared, fenced, and deliberately still open
+
+`libs/migrate/pyproject.toml` now declares `ckdl>=1.0`, matching `lang`'s own constraint
+exactly, so the two cannot drift apart on version. The import site carries the interim
+comment naming the finding and fencing the debt:
+
+```
+# INTERIM: direct ckdl parse pending the ruled dissolution — lang exposing its
+# effective-store-clause query (finding s4wp3-migrate-undeclared-ckdl-bypasses-lang);
+# do not add further ckdl call sites.
+import ckdl
+```
+
+`ckdl.` appears at exactly one call site, so the fence is currently true rather than
+aspirational.
+
+**`finding:s4wp3-migrate-undeclared-ckdl-bypasses-lang` stays OPEN by ruling.** This commit
+fixes the undeclared-dependency half; the architectural half — `migrate` holding a second
+KDL parse path outside `lang`'s boundary — is ruled to the slice tail, where the
+dissolution-shaped fix belongs: `lang` exposes the effective-store-clause query it already
+has the AST for, and the sink's check becomes a property of what `lang` already knows
+rather than a second parser. The comment above is what keeps that debt from spreading in
+the meantime.
+
+Worth carrying forward separately: Rule 4 covers inter-lib workspace imports only, so it
+could not have caught this. A third-party undeclared import is invisible to every ratchet
+the repo currently has — the declaration is enforced by review alone, which is exactly the
+condition the ratchet test says drifts.
+
+## R3.4 Suites
+
+`uv run pytest libs/migrate tests/architecture -q` → **159 passed**, unchanged from round 2
+(the new case rides inside an existing test). Engine and store were untouched by this
+commit and were reconciled exactly in round 2 (2306+1s and 180).
+
+Lint note, not a finding: `ruff --select F401,E501` on the two changed source files reports
+17 E501 line-length hits and zero unused imports. `libs/migrate` carried this same
+long-line debt before WP3 (120 findings at round 1) and `ruff` does not gate this lib, so
+this is pre-existing house style rather than anything this commit introduced — though the
+new interim comment is itself one of the long lines.
+
+## R3.5 Closing verdict
+
+**PASS — WP3's gate is closed.** `finding:s4wp3-report-verifier-retypes-unopenable` flips
+to fixed at `0ce53b2a`. `finding:s4wp3-migrate-undeclared-ckdl-bypasses-lang` stays open by
+ruling, fenced by the interim comment, for the slice tail.
+
+Across three rounds this WP went from a sink that produced the right bytes through the
+wrong contract op — with an invalid F2 proof, an unreported seam gap, and a test suite
+writing into the user's live state root — to one that admits through the ratified op,
+carries authored signatures byte-preservingly, discriminates every refusal by type, and
+proves each of those with a mutation that goes red. The two engine edits it forced (E1
+signature carriage, E2 the typed torn tail) are the durable part: both were gaps the arc
+would have hit again at the next consumer, and both are now closed with the narrowest
+possible change.

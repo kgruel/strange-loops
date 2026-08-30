@@ -683,3 +683,49 @@ def build_unsafe_integer_ts_sqlite(path: Path) -> Path:
         conn.close()
     return path
 
+
+def build_era1_sqlite(path: Path) -> Path:
+    """Create an era-1 legacy SQLite database whose ticks table lacks chain columns and since."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists():
+        path.unlink()
+    conn = sqlite3.connect(path)
+    try:
+        conn.execute(
+            """
+            CREATE TABLE facts (
+                id TEXT PRIMARY KEY,
+                kind TEXT NOT NULL,
+                ts REAL NOT NULL,
+                observer TEXT NOT NULL,
+                origin TEXT NOT NULL,
+                payload TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE ticks (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                ts REAL NOT NULL,
+                origin TEXT NOT NULL,
+                payload TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            "INSERT INTO facts VALUES ('01ARZ3NDEKTSV4RRFFQ69G5FA1', 'concept', 1000.0, 'alice', 'origin-alice', '{\"text\":\"fact 1\"}')"
+        )
+        conn.execute(
+            "INSERT INTO ticks VALUES ('01ARZ3NDEKTSV4RRFFQ69G5FT1', 'heartbeat', 1006.0, 'system', '{\"seq\":1}')"
+        )
+        conn.execute(
+            "INSERT INTO ticks VALUES ('01ARZ3NDEKTSV4RRFFQ69G5FT2', 'checkpoint', 1007.0, 'system', '{\"seq\":2}')"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return path
+
+

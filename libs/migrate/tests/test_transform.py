@@ -55,6 +55,7 @@ from ._fixtures import (
     build_synthetic_sqlite,
     build_type_error_batch_jsonl,
     build_unsafe_integer_ts_sqlite,
+    build_era1_sqlite,
 )
 
 ARRIVAL_DOMAIN = "test-arrival-v1"
@@ -570,5 +571,66 @@ def test_sqlite_seam_defense_refuses_unsafe_integer_ts(tmp_path: Path, kyle) -> 
     assert len(exc.codec_invalid_lines) == 1
     assert exc.codec_invalid_lines[0][0] == 1  # rowid 1
     assert "outside the JCS safe-integer domain" in exc.codec_invalid_lines[0][1]
+
+
+def test_era1_sqlite_ticks_transform_and_surface_agreement(tmp_path: Path, kyle, alice) -> None:
+    """An era-1 SQLite store whose ticks table lacks chain columns and since:
+    (a) inventory succeeds with the right tick count,
+    (b) transform produces tick bodies carrying explicit nulls for the chain fields and since,
+    (c) both surfaces agree.
+    """
+    from migrate.inventory import inventory
+
+    sqlite_file = build_era1_sqlite(tmp_path / "era1.sqlite")
+
+    # (a) inventory succeeds with the right tick count
+    inv = inventory(sqlite_file)
+    assert inv.tick_count == 2
+    assert inv.total_rows == 3
+
+    # (b) transform produces a tick body carrying explicit nulls for the chain fields
+    vf = _make_vertex_file("kyle", [("kyle", kyle.public), ("alice", alice.public)])
+    result = transform(sqlite_file, vf, signer=kyle.signer)
+
+    migrated_drafts = [d for d in result.drafts if d.kind != KEY_INTRODUCTION_KIND]
+    tick_drafts = [d for d in result.drafts if d.kind == "tick"]
+    assert len(tick_drafts) == 2
+
+    t1 = next(d for d in tick_drafts if d.body["id"] == "01ARZ3NDEKTSV4RRFFQ69G5FT1")
+    assert t1.observer == "kyle"
+    assert t1.body["name"] == "heartbeat"
+    assert t1.body["ts"] == 1006.0
+    assert t1.body["since"] is None
+    assert t1.body["origin"] == "system"
+    assert t1.body["payload"] == '{"seq":1}'
+    assert t1.body["prev_hash"] is None
+    assert t1.body["window_start"] is None
+    assert t1.body["fact_cursor"] is None
+    assert t1.body["window_hash"] is None
+    assert "signature" not in t1.body
+    assert t1.signature is None
+
+    t2 = next(d for d in tick_drafts if d.body["id"] == "01ARZ3NDEKTSV4RRFFQ69G5FT2")
+    assert t2.observer == "kyle"
+    assert t2.body["name"] == "checkpoint"
+    assert t2.body["ts"] == 1007.0
+    assert t2.body["since"] is None
+    assert t2.body["origin"] == "system"
+    assert t2.body["payload"] == '{"seq":2}'
+    assert t2.body["prev_hash"] is None
+    assert t2.body["window_start"] is None
+    assert t2.body["fact_cursor"] is None
+    assert t2.body["window_hash"] is None
+    assert "signature" not in t2.body
+    assert t2.signature is None
+
+    # (c) both surfaces agree
+    assert inv.tick_count == len(tick_drafts)
+    assert inv.total_rows == len(migrated_drafts)
+    assert inv.source_format == "sqlite-canonical"
+    assert len(result.exceptions.dropped_units) == 0
+    assert len(result.exceptions.keyless_declared_observers) == 0
+    assert len(result.exceptions.undeclared_row_observers) == 0
+
 
 

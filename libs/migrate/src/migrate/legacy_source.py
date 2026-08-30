@@ -463,7 +463,9 @@ class LegacySource:
                     for raw in conn.execute(query_ticks):
                         rowid = raw[0]
                         t_dict = dict(zip(cols, raw[1:], strict=True))
-                        obj = {k: v for k, v in t_dict.items() if k != "signature" or v is not None}
+                        obj = {f: t_dict.get(f) for f in TICK_FIELDS}
+                        if t_dict.get("signature") is not None:
+                            obj["signature"] = t_dict["signature"]
 
                         fault = row_object_fault(
                             obj,

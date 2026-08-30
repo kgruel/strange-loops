@@ -508,8 +508,12 @@ Byte-identity is complete against literal replay, which is the unsigned threat m
 | `entries` | integer \| null | `journal` only | Readable entries. `null` when the read refused before counting. |
 | `epoch` | integer \| null | `journal` only | Entries in the current trust epoch. |
 | `skipped` | integer \| null | `journal` only | Every skip the read RECORDED. Non-empty does **not** by itself weaken the result — see the weighting rule below. |
-| `weakening` | integer | `journal` only | How many of those recorded skips actually carry weight. `0` on an `established` or `none` read. **`weakening > 0` is exactly the condition that weakens**, and `weakening <= skipped` always. |
+| `weakening` | integer \| null | `journal` only | How many of those recorded skips actually carry weight. `0` on an `established` or `none` read. **`weakening > 0` is exactly the condition that weakens**, and `weakening <= skipped` always. |
 | `sound_answer` | string \| null | `bounded` only | What a bound may soundly answer: `"rollback"`, or `null` when nothing is answerable. |
+
+**The four counts travel together.** `entries`, `epoch`, `skipped` and `weakening` are stated by **every** journal vector, and they are all-or-nothing: a read that refused before reaching them states `null` for all four, and a read that completed states an integer for all four. There is no vector in which one of them is absent and no vector in which they disagree about whether the read got that far.
+
+Stated as a rule rather than left to each vector, because **absent and `null` say different things**. `null` is a claim — *the read never got far enough to count this* — while an absent field says nothing at all, and a schema-validating consumer cannot tell "not applicable here" from "the generator forgot". Exempting refused reads from the field would have made that ambiguity legal instead of removing it, and would have left the next field added to decide the question again.
 
 **`outcome: null` is not an eighth outcome.** It means the read declined and the classifier was never called, so there is no outcome to state; `read` carries why. A vector must never mint a string outside the ratified seven — a normative vector carrying something like `"declined"` would read to an implementer as a value to return.
 

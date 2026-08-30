@@ -22,6 +22,7 @@
     "entries": null,
     "epoch": null,
     "skipped": null,
+    "weakening": null,
     "outcome": null
   }
 }

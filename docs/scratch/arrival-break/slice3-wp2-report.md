@@ -731,3 +731,90 @@ read-state condition is reworded, since its meaning changed.
 
 Nothing outside the pre-declared flip was red before the change, and nothing is red
 after it.
+
+## 13. Sol S3I-L-2 — the refused-read branch skipped its schema obligations
+
+Base `970fc490`, step-0 verified (HEAD exactly the base, clean tree; the two fence
+commits above my batch touched the seam and docs, no vector-family file).
+
+**What was wrong.** `comparison-journal-equivocation-refuses-the-read` stated no
+`expected.weakening`, although the field is schema-required on journal vectors — and
+the consumer returned from the refusal branch before checking it, so nothing noticed.
+A schema-validating cross-language consumer could reject the vector, and weighting
+drift on the equivocation path was unasserted.
+
+**The real defect is the second half.** The missing field is one vector's typo; the
+early return is what made typos of that shape *invisible*. Schema obligations were
+enforced on completed reads only, so any journal vector whose read refused could omit
+any required field and stay green. Fixing only the vector would have left the hole.
+
+### The choice: emit the field, with `null` — not exempt refused reads
+
+Three reasons, and the second is the one that decides it.
+
+1. **Uniformity.** `weakening` is one of four counts describing one read. The other
+   three — `entries`, `epoch`, `skipped` — are already `integer | null` and already
+   present on refused-read vectors stating `null`. Exempting the fourth would create a
+   special case a foreign implementer has to learn, for nothing.
+2. **Absent and `null` say different things, and the exemption would have made the
+   bug's shape LEGAL.** `null` is a claim — *the read never got far enough to count
+   this*. An absent field says nothing at all, and a schema-validating consumer cannot
+   tell "not applicable here" from "the generator forgot" — which is precisely the
+   confusion that produced this finding. Exempting refused reads would have blessed
+   that ambiguity rather than removing it. This is the same call §2 made for
+   `outcome`: `null` where the classifier was never invoked, rather than omitting the
+   key.
+3. **Exemption invites drift.** A rule scoped to one field means the next field added
+   must decide the question again. "All four counts are present; `null` when the read
+   never reached them" needs no per-field decision, ever.
+
+### The consumer is uniform now, and that is the part that ratchets
+
+The refusal branch no longer returns before the envelope is judged. Every journal
+vector, refused or not, now passes:
+
+- an **exact key set** — `read`, `known`, `outcome`, the four counts, plus
+  `sound_answer` iff the read is `bounded`. Exact rather than a presence check, so a
+  *stray* field fails too, and it subsumes the separate sound-answer assertion that
+  used to sit further down.
+- an **all-or-nothing rule on the counts**, asserted in **both** directions: a refused
+  read states `null` for all four, a completed read states an integer for all four.
+
+`known` is deliberately outside that rule and the code says so: it is `null` on a
+refused read but also on the `none` and `unreadable` states, so it is not an
+if-and-only-if the way the counts are.
+
+The heads form got the same treatment — its `expected` must be exactly `{"outcome"}`.
+
+`JOURNAL_COUNTS` is a module-level tuple, so the obligation is **one enumerable fact**
+rather than four assertions that can drift apart — which is how one of them went
+missing in the first place. This is the r1/r2 lesson a third time: the finding was a
+missing artifact, and the durable fix is the enumeration that makes its absence fail.
+
+### Demonstrated, both directions
+
+| # | Seeded defect | Result |
+|---|---|---|
+| (i) | drop `weakening` from the refused vector (sol's exact finding) | **1 failed, 35 passed** — `…states fields off the schema: ['weakening']…` naming the vector |
+| (ii) | a **completed** read stating `weakening: null` | **1 failed, 35 passed** — `'weakening' is None on a read that completed…` |
+
+Restored byte-clean after each.
+
+### SCHEMA.md
+
+`weakening`'s type becomes `integer | null`, and the field table now carries the rule
+in prose: **the four counts travel together**, stated by every journal vector,
+all-or-nothing, with the reason absent and `null` are not interchangeable.
+
+### Verification
+
+| Check | Result |
+|---|---|
+| family suite | **36 passed** (31 vectors + 5) — unchanged, no test added |
+| engine | **2283 passed, 1 skipped** |
+| architecture, separate process | **99 passed** |
+| generator byte-reproducible | regenerated, digest **identical** |
+| `ruff check` | clean |
+
+No count delta: this round changed one vector's payload and tightened existing
+assertions rather than adding vectors or tests.

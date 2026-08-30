@@ -77,6 +77,12 @@ KNOWN_STATES: dict[str, type] = {
 # in a vector, for the reason the replicate family gives.
 READ_REFUSALS: dict[str, type[Exception]] = {"equivocation": JournalEquivocation}
 
+# The four counts every journal vector states. A refused read reaches none of
+# them and states null for all four; a completed read states an integer for all
+# four. Held as a tuple so the obligation is one enumerable fact rather than
+# four assertions that can drift apart — which is how one of them went missing.
+JOURNAL_COUNTS: tuple[str, ...] = ("entries", "epoch", "skipped", "weakening")
+
 # What a LOWER BOUND may soundly answer. ROLLBACK-ONLY, as ruled: a presented
 # head below the bound is certainly below the accepted head, and nothing bounds
 # the accepted head from above, so neither proceed row is obtainable. Held as
@@ -313,6 +319,10 @@ def test_conformance_comparison(vector_path: Path) -> None:
 
     form = vector["input"]["form"]
     if form == "heads":
+        assert set(expected) == {"outcome"}, (
+            f"a heads vector states only an outcome; this one adds "
+            f"{sorted(set(expected) - {'outcome'})}"
+        )
         outcome = compare(_entry(vector["input"]["known"]), presented, at_known)
         assert outcome.value == expected["outcome"]
         return
@@ -323,10 +333,41 @@ def test_conformance_comparison(vector_path: Path) -> None:
     lines = [line + "\n" for line in vector["input"]["journal"]]
     state = expected["read"]
 
-    if state in READ_REFUSALS:
+    # --- schema obligations, judged for EVERY journal vector ---------------
+    #
+    # Uniform on purpose. A refused read used to return from this function
+    # before reaching any of the checks below, so a journal vector's schema
+    # obligations were enforced on completed reads ONLY — and a required field
+    # could go missing from a refused-read vector and stay green, which is
+    # exactly what happened
+    # (``finding:s3-equivocation-vector-missing-weakening-field``). Whatever a
+    # branch does afterwards, the envelope is judged first.
+    refused = state in READ_REFUSALS
+    required = {"read", "known", "outcome", *JOURNAL_COUNTS}
+    if state == "bounded":
+        # Only a bound carries a sound answer.
+        required.add("sound_answer")
+    assert set(expected) == required, (
+        f"{vector_path.stem} states fields off the schema: "
+        f"{sorted(set(expected) ^ required)}. Every journal vector carries the "
+        "same fields, and a count the read never reached is stated NULL rather "
+        "than left out — an absent field cannot be told from a forgotten one."
+    )
+    for field in JOURNAL_COUNTS:
+        assert (expected[field] is None) == refused, (
+            f"{field!r} is {expected[field]!r} on a read that "
+            f"{'refused' if refused else 'completed'} — a refused read reaches "
+            "none of the counts and states null for all four; a completed read "
+            "states an integer for all four"
+        )
+    # `known` is deliberately NOT in that rule: it is null on a refused read
+    # but also on the `none` and `unreadable` states, so it is not an
+    # if-and-only-if the way the counts are.
+    if refused:
+        assert expected["known"] is None, "a refused read establishes nothing"
+        assert expected["outcome"] is None, "a refused read produces no outcome"
         with pytest.raises(READ_REFUSALS[state]):
             parse_journal_lines(lines)
-        assert expected["outcome"] is None, "a refused read produces no outcome"
         return
 
     read = parse_journal_lines(lines)
@@ -380,9 +421,6 @@ def test_conformance_comparison(vector_path: Path) -> None:
     else:
         assert compare(known, presented, at_known).value == expected["outcome"]
 
-    assert ("sound_answer" in expected) == (state == "bounded"), (
-        "only a bound carries a sound answer"
-    )
     if state == "bounded":
         bound = read.known.at_least.head
         below = (

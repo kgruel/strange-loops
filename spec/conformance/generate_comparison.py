@@ -937,6 +937,12 @@ def journal_expectation(case: JournalCase, lines: list[str]) -> dict[str, Any]:
             "entries": None,
             "epoch": None,
             "skipped": None,
+            # Present and null, exactly like its three sibling counts. A
+            # refused read reached none of them, and null SAYS that, where an
+            # absent field says nothing at all — a schema-validating consumer
+            # could not tell "not applicable" from "the generator forgot"
+            # (``finding:s3-equivocation-vector-missing-weakening-field``).
+            "weakening": None,
             "outcome": None,
         }
 

@@ -201,6 +201,82 @@ proposal disagreed and the module won.
     property, or closing would be the thing that constructs the reader the fix
     deferred.
 
+## Design amendment #6 — the abandoned-history fence
+
+Sol's integration round escalated my own N+1-descendant flag from deferred to
+blocking, and it was right to. I had reported the acceptance as an
+underdetermination; sol showed it was a **loop**.
+
+**The loop.** Reset from an abandoned *N+1* back to *N*, restore the authentic
+backup, and the open verifies descent **honestly** — the chain really does reach
+*N+1* from *N*. So it answered ADVANCED, **journaled** *N+1* back into the
+current epoch, and every later open read UNCHANGED. No refusal, no fork, ever,
+and repeatable indefinitely. The acceptance erased its own evidence by recording
+it, which is why nothing downstream could see it had happened.
+
+Verified descent was never the whole question. A chain can be perfectly intact
+and still be the history a ceremony put behind us — and machinery does not
+silently reverse an operator's decree.
+
+**The fence**: an ADVANCED outcome whose verified descent touches an entry
+journaled in an abandoned epoch is refused with `AbandonedHistoryFenced`, whose
+message teaches the ceremony as the acceptance path.
+
+### The four pins
+
+1. **Identity-keyed anchors** — `(ordinal, hash)` against the abandoned epochs'
+   journaled entries, never ordinal spans. An operator who resets to 5 and lets
+   the store re-advance mints a **new** 6, 7 and 8 inside the abandoned span; a
+   span fence would refuse every one of them forever and make the ceremony a
+   store's last act. Pinned from the other side by
+   `test_a_legitimate_re_advance_inside_the_abandoned_span_is_accepted`, which
+   asserts the same ordinal with a different hash is still ADVANCED. The
+   abandoned entries remain readable in the file — epoch scoping excludes them
+   from *K*, never from the read — which is what makes them available as
+   anchors at all.
+2. **Reach across the whole descent**, not the head alone: a branch grown
+   offline presents *N+3* while the anchor sits at *N+1*. Asking `head_at` at
+   each fenced anchor's own coordinate is the complete form of that check —
+   an anchor can only be touched at its own ordinal — and it stays in contract
+   ops, so the fence is backend-neutral like the rest of the seam.
+3. **The lift rule**, or the ceremony re-bricks the store — L-3's shape exactly.
+   **Verified before building, as instructed**: `trust_reset` *can* decree a
+   head at or above current *K* (nothing guards it; confirmed by decreeing
+   ordinal 9 over a *K* of 3), and the reset entry *does* carry the decreed
+   coordinate, so the new epoch's *K* is the decreed head — the epoch is
+   reset-inclusive. Both yes, so the rule is buildable and I proceeded.
+4. **Placement** after ADVANCED and before anything is earned. `compare` stays
+   the pure seven-outcome machine, and a fenced open journals nothing —
+   `test_the_fenced_open_journals_nothing`, because the acceptance recording
+   itself is what made the loop invisible.
+
+### One narrowing of the lift rule's wording, and why
+
+The rule as written is "fenced only when NO later reset decrees at/above it".
+Read literally that reopens the loop with one extra step: reset to 10, then
+reset back to 5, and the entry at 10 is lifted by the decree the second ceremony
+overrode. Implemented against the **current boundary decree** only — the one
+decree nothing has superseded. It fences more, never less, and the recovery path
+is unaffected because a recovery decree *is* the boundary decree.
+
+### Mutation demo
+
+Two-guard: committed `4061f0c9` first, tree byte-clean after the revert. Fence
+reverted → **5 failed, 61 passed**, and sol's cycle reproduced directly rather
+than inferred:
+
+```
+restore of abandoned backup => advanced
+next open                   => unchanged   <- the cycle
+```
+
+### Consequence swept
+
+`trust_reset`'s disclosure sentence said verified descendants including
+re-presentations of abandoned history "are accepted". That is now false. It
+states the fence, names the one-ceremony recovery cost, and records what it used
+to say and why that was the loop.
+
 ## Design amendment #5 — weakening is epoch-scoped by line position
 
 From my own verify-item-1 answer. Weight is now **cause × position**: the cause

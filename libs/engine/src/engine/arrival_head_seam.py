@@ -89,6 +89,7 @@ from .arrival_head_attestation import (
     read_journal,
     record_binding,
     refusal_for,
+    storage_advice,
     unaccounted_heads,
 )
 
@@ -469,9 +470,10 @@ def _identity_of(location: str) -> Identity | None:
         return None
     except OSError as exc:
         raise BindingProbeUnanswered(
-            f"{location} exists but cannot be stat'd ({exc}), so this open "
-            "cannot tell whether it names the same store as a recorded "
-            "binding. Nothing has been accepted or written — retry the open"
+            f"{location} exists and storage would not stat it ({exc}), so "
+            "this open cannot tell whether it names the same store as a "
+            "recorded binding. Nothing has been accepted or written — "
+            f"{storage_advice(exc)}"
         ) from exc
     return (stat.st_dev, stat.st_ino)
 
@@ -532,10 +534,10 @@ def aliased_lineage(location: str) -> str | None:
         ) from exc
     except OSError as exc:
         raise BindingProbeUnanswered(
-            f"the bindings file at {bindings_path()} exists and cannot be "
-            f"read ({exc}), so this open cannot tell whether this location "
-            "already presented a different lineage. Nothing has been accepted "
-            "or written — retry the open"
+            f"the bindings file at {bindings_path()} exists and storage "
+            f"would not yield it ({exc}), so this open cannot tell whether "
+            "this location already presented a different lineage. Nothing has "
+            f"been accepted or written — {storage_advice(exc)}"
         ) from exc
     recorded: list[tuple[str, str, Identity | None]] = []
     for number, line in enumerate(text.splitlines(), start=1):
@@ -553,8 +555,16 @@ def aliased_lineage(location: str) -> str | None:
             ) from exc
         where = decoded.get("location") if isinstance(decoded, dict) else None
         lineage = decoded.get("lineage") if isinstance(decoded, dict) else None
-        if isinstance(where, str) and isinstance(lineage, str):
-            recorded.append((where, lineage, _identity_of(where)))
+        if not (isinstance(where, str) and isinstance(lineage, str)):
+            # READ, and not interpretable as a binding — a CONTENT failure.
+            raise BindingsUnreadable(
+                f"line {number} of {bindings_path()} is valid JSON but "
+                "carries no location and lineage, so it cannot be read as a "
+                "binding and cannot be ruled out as naming this store. "
+                "Nothing has been accepted or written — repair or remove the "
+                "line"
+            )
+        recorded.append((where, lineage, _identity_of(where)))
     return match_identity(_identity_of(location), recorded)
 
 

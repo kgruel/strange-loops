@@ -2536,27 +2536,121 @@ def test_a_non_utf8_bindings_file_refuses_through_the_alias_sweep(tmp_path):
         aliased_lineage(canonical_location(str(alias)))
 
 
-def test_repair_flavoured_and_retry_flavoured_refusals_are_distinct(tmp_path):
-    """The arm split, asserted rather than left to the docstrings.
+def test_each_concrete_cause_lands_in_the_family_its_failure_happened_in(tmp_path):
+    """The split is CONTENT versus STORAGE, asserted by cause not by inheritance.
 
-    ``ProbeUnanswered`` promises that retrying is the remedy. Bytes that are
-    not UTF-8, and a line that is not JSON, read the same way on every retry —
-    so filing them under that parent would make its own promise false. They are
-    a sibling, and both remain catchable as one ``AttestationRefusal``.
+    Inheritance alone says the types are related, not that any particular
+    failure is filed correctly — which is exactly how ``IsADirectoryError``
+    ended up in a family promising that retrying would help. The mapping IS the
+    claim, so the mapping is what gets tested.
     """
+    _needs_unprivileged()
+    _log_path, alias, _lineage = _reached_by_an_alias(tmp_path)
+    canonical = canonical_location(str(alias))
+    good = bindings_path().read_bytes()
+
+    def family_for(payload: bytes):
+        bindings_path().write_bytes(payload)
+        try:
+            aliased_lineage(canonical)
+        except AttestationRefusal as exc:
+            return type(exc)
+        return None
+
+    # CONTENT — the bytes arrived and could not be interpreted.
+    assert family_for(b"\xff\xfe") is BindingsUnreadable  # decode
+    assert family_for(good + b"{ not json\n") is BindingsUnreadable  # parse
+    assert family_for(good + b"{}\n") is BindingsUnreadable  # shape
+    assert family_for(good + b"[]\n") is BindingsUnreadable  # shape
+
+    # STORAGE — the bytes never arrived.
+    bindings_path().write_bytes(good)
+    bindings_path().chmod(0o000)
+    try:
+        with pytest.raises(BindingProbeUnanswered):  # permission wall
+            aliased_lineage(canonical)
+    finally:
+        bindings_path().chmod(0o600)
+
+    bindings_path().unlink()
+    bindings_path().mkdir()
+    try:
+        with pytest.raises(BindingProbeUnanswered) as excinfo:
+            aliased_lineage(canonical)
+    finally:
+        bindings_path().rmdir()
+    # A storage failure — and the ADVICE says retrying will not help, where the
+    # old remedy-keyed family promised it would.
+    assert isinstance(excinfo.value.__cause__, IsADirectoryError)
+    assert "directory sits where this file should be" in str(excinfo.value)
+    assert "retrying will not resolve that" in str(excinfo.value)
+
+    bindings_path().write_bytes(good)
+    locked = tmp_path / "locked"
+    locked.mkdir()
+    hidden = locked / "other.arrival"
+    hidden.write_text("x")
+    record_binding(str(hidden), "01BX5ZZKBKACTAV9WEVGEMMVRZ", 1.0)
+    locked.chmod(0o000)
+    try:
+        with pytest.raises(BindingProbeUnanswered):  # unstattable path
+            aliased_lineage(canonical)
+    finally:
+        locked.chmod(0o700)
+
+
+def test_the_two_families_stay_catchable_as_one():
+    """Different claims, one root."""
     assert issubclass(BindingProbeUnanswered, ProbeUnanswered)
+    assert issubclass(FenceProbeUnanswered, ProbeUnanswered)
     assert not issubclass(BindingsUnreadable, ProbeUnanswered)
     assert issubclass(BindingsUnreadable, AttestationRefusal)
-
-
-def test_every_probe_refusal_is_one_family(tmp_path):
-    """The pattern is nameable, which is the point of giving it a parent.
-
-    A caller that wants "could not determine" as one condition catches
-    ``ProbeUnanswered``; the two sites stay distinguishable underneath. The
-    binding subclass dies with the binding unit at slice 5 and the parent does
-    not — the sweep removes a leaf, not the concept.
-    """
-    assert issubclass(FenceProbeUnanswered, ProbeUnanswered)
-    assert issubclass(BindingProbeUnanswered, ProbeUnanswered)
     assert issubclass(ProbeUnanswered, AttestationRefusal)
+
+
+def test_an_unusable_shape_refuses_through_the_open(tmp_path):
+    """L-7: the last silent door. Valid JSON with no binding in it.
+
+    A ``{}`` line was READ; it simply carries nothing a binding could be read
+    out of. Filtering it to None answered "nothing is bound here" on a line
+    that says nothing of the kind, and a replaced store opened as first
+    contact.
+    """
+    _log_path, alias, lineage = _reached_by_an_alias(tmp_path)
+    before = journal_bytes(lineage)
+    with bindings_path().open("a", encoding="utf-8") as handle:
+        handle.write("{}\n")
+    binding_bytes = bindings_path().read_bytes()
+
+    with pytest.raises(BindingsUnreadable) as excinfo:
+        opened(alias)
+
+    assert "carries no location and lineage" in str(excinfo.value)
+    assert journal_bytes(lineage) == before
+    assert bindings_path().read_bytes() == binding_bytes
+
+
+def test_a_bare_list_line_refuses_through_the_alias_sweep(tmp_path):
+    """The other shape, and the second reader — pinned on its own."""
+    _log_path, alias, _lineage = _reached_by_an_alias(tmp_path)
+    with bindings_path().open("a", encoding="utf-8") as handle:
+        handle.write("[]\n")
+    with pytest.raises(BindingsUnreadable):
+        aliased_lineage(canonical_location(str(alias)))
+
+
+def test_a_binding_for_another_store_is_still_a_legitimate_skip(tmp_path):
+    """The filter survives NARROWLY, and this keeps it honest.
+
+    A well-formed binding naming a DIFFERENT location genuinely says nothing
+    about this one, so it is skipped and answers None. Refusing here would make
+    every bindings file holding more than one store unopenable — which is every
+    real one.
+    """
+    _log_path, alias, _lineage = _reached_by_an_alias(tmp_path)
+    record_binding("/somewhere/else.arrival", "01BX5ZZKBKACTAV9WEVGEMMVRZ", 1.0)
+
+    comparison = opened(alias).opened.comparison
+    assert isinstance(comparison, Compared)
+    assert comparison.outcome is Outcome.UNCHANGED
+    assert bound_lineage("/not/bound/at/all.arrival") is None

@@ -93,6 +93,7 @@ __all__ = [
     "record_binding",
     "refusal_for",
     "state_root",
+    "storage_advice",
     "unaccounted_heads",
 ]
 
@@ -225,7 +226,7 @@ class IndeterminateComparison(AttestationRefusal):
 
 
 class ProbeUnanswered(AttestationRefusal):
-    """A check a caller depends on could not be performed.
+    """Storage would not answer, so a check a caller depends on did not happen.
 
     The general form, named because the defect it guards against is a SHAPE
     rather than a site: a probe whose own failure gets read as the absence of
@@ -234,42 +235,70 @@ class ProbeUnanswered(AttestationRefusal):
     acceptance direction (``finding:s3-fence-probe-fails-open``,
     ``finding:s3wp3-binding-probes-fail-acceptance-side``).
 
-    Every subclass means the same thing — *I could not determine this*, which
-    is not a finding about the store — and asks for the same remedy, which is
-    to try again. That is what separates them from refusals reporting something
-    the evidence positively established.
+    **The line is CONTENT versus STORAGE, and that is the whole of it.** This
+    family means the bytes never arrived: the read could not get an answer out
+    of storage at all. Its sibling :class:`BindingsUnreadable` means the bytes
+    DID arrive and could not be interpreted. That split is decidable from where
+    the failure happened, which is why it can be a type.
+
+    **It used to promise that retrying is the remedy, and that promise was not
+    the type's to make.** Transient-versus-permanent is not decidable from an
+    exception class: ``IsADirectoryError`` arrives through the same ``OSError``
+    door as a passing I/O fault, and retrying a directory resolves nothing. A
+    remedy taxonomy is a verdict claim, and it falls to the next errno
+    (``finding:s3-refusal-family-remedy-promise-undecidable``).
+
+    So the remedy is **advisory prose in the message**, chosen per cause, and
+    the type asserts only what the read lacks. Both families refuse, so a
+    misfiled hint costs an operator some convenience and never costs an
+    acceptance — which is exactly why advice can be offered here where a
+    promise could not.
 
     An ABSENT input is never one of these. "There is no bindings file" and "the
     log does not exist yet" are answers, and correct ones; only an input that
-    exists and cannot be read leaves the question open.
+    exists and will not yield leaves the question open.
 
     It lives here rather than in the seam because the binding unit does, and
     because a subclass of it has to be raisable from this module.
     """
 
 
+def storage_advice(exc: BaseException) -> str:
+    """What an operator might try, given how storage refused.
+
+    Advisory, never a claim the type makes. Each arm is a guess that costs
+    convenience if it is wrong, which is the standard prose can meet and a type
+    could not.
+    """
+    if isinstance(exc, IsADirectoryError):
+        return (
+            "a directory sits where this file should be — remove it; retrying "
+            "will not resolve that"
+        )
+    if isinstance(exc, PermissionError):
+        return "check the permissions on the path, then retry the open"
+    return "the failure may be transient — retry the open"
+
+
 class BindingsUnreadable(AttestationRefusal):
-    """The bindings file's CONTENT cannot be read, so it must be repaired.
+    """The bytes arrived and could not be interpreted as bindings.
 
-    A sibling of :class:`ProbeUnanswered` rather than a member of it, and the
-    split is the family's own promise: every ``ProbeUnanswered`` says *I could
-    not determine this* and asks to be **retried**. Bytes that are not UTF-8,
-    or a line that is not JSON, will read exactly the same way on every retry —
-    they ask to be **repaired**. Filing them under a parent that promises
-    retrying would make that parent's docstring false, which is how a family
-    name stops carrying information.
+    The CONTENT half of the split :class:`ProbeUnanswered` describes: bytes
+    that are not UTF-8, a line that is not JSON, and a line that is JSON but
+    carries nothing a binding could be read out of. All three were read
+    successfully and none of them says anything about which lineage a location
+    presented.
 
-    This corrects the previous round rather than only adding to it: the
-    malformed-line arms were typed :class:`BindingProbeUnanswered`, and a
-    malformed line is permanent. The transient causes — a permission wall, an
-    I/O error, an unstattable path — stay there, where retrying is the honest
-    advice.
+    Decidable from where the failure happened rather than from a guess about
+    whether it will recur, which is what makes it a type at all — the earlier
+    split by remedy was not
+    (``finding:s3-refusal-family-remedy-promise-undecidable``).
 
     The parallel one file over is :class:`JournalUnreadable`, and it is the
-    same claim about the same kind of loss: the file is THERE and cannot be
-    read. Raised rather than let out as the underlying ``UnicodeDecodeError``
-    so a caller catching :class:`AttestationRefusal` has no builtin escape past
-    it (``finding:s3-bindings-decode-escapes-untyped``).
+    same claim about the same kind of loss. Raised rather than let out as the
+    underlying ``UnicodeDecodeError`` or ``ValueError`` so a caller catching
+    :class:`AttestationRefusal` has no builtin escape past it
+    (``finding:s3-bindings-decode-escapes-untyped``).
 
     DELETE IN SLICE 5 with the binding unit it serves.
     """
@@ -1590,9 +1619,10 @@ def bound_lineage(location: str) -> str | None:
         # stays a probe failure: a permission wall can be lifted and an I/O
         # error can pass.
         raise BindingProbeUnanswered(
-            f"the bindings file at {bindings_path()} exists and cannot be "
-            f"read ({exc}), so this location's recorded lineage is unknown. "
-            "Nothing has been accepted or written — retry the open"
+            f"the bindings file at {bindings_path()} exists and storage "
+            f"would not yield it ({exc}), so this location's recorded lineage "
+            f"is unknown. Nothing has been accepted or written — "
+            f"{storage_advice(exc)}"
         ) from exc
     found: str | None = None
     for line in text.splitlines():
@@ -1608,10 +1638,24 @@ def bound_lineage(location: str) -> str | None:
                 "location. Nothing has been accepted or written — repair or "
                 "remove the line, then retry the open"
             ) from exc
-        if (
+        if not (
             isinstance(decoded, dict)
-            and decoded.get("location") == location
+            and isinstance(decoded.get("location"), str)
             and isinstance(decoded.get("lineage"), str)
         ):
+            # READ, and not interpretable as a binding — a CONTENT failure,
+            # exactly like a line that is not JSON. Filtering it to None used
+            # to answer "nothing is bound here" on a line that says nothing of
+            # the kind (``finding:s3-binding-shape-filter-silently-drops``).
+            raise BindingsUnreadable(
+                f"a line of {bindings_path()} is valid JSON but carries no "
+                "location and lineage, so it cannot be read as a binding and "
+                "cannot be ruled out as this location's. Nothing has been "
+                "accepted or written — repair or remove the line"
+            )
+        if decoded["location"] == location:
+            # The one thing that survives as a legitimate skip: a well-formed
+            # binding for a DIFFERENT store genuinely says nothing about this
+            # one.
             found = decoded["lineage"]
     return found

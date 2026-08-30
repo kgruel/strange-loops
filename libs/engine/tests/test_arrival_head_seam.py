@@ -66,6 +66,7 @@ from engine.arrival_head_seam import (
     AttestedLedger,
     AuditFoundUnaccountedHeads,
     BindingProbeUnanswered,
+    BindingsUnreadable,
     Compared,
     FenceProbeUnanswered,
     Indeterminate,
@@ -2442,7 +2443,7 @@ def test_an_unparseable_binding_line_refuses_rather_than_being_skipped(tmp_path)
         handle.write("{ this line does not parse\n")
     binding_bytes = bindings_path().read_bytes()
 
-    with pytest.raises(BindingProbeUnanswered) as excinfo:
+    with pytest.raises(BindingsUnreadable) as excinfo:
         opened(alias)
 
     assert "does not parse" in str(excinfo.value)
@@ -2480,7 +2481,7 @@ def test_the_alias_sweep_refuses_an_unparseable_line_on_its_own(tmp_path):
     _log_path, alias, _lineage = _reached_by_an_alias(tmp_path)
     with bindings_path().open("a", encoding="utf-8") as handle:
         handle.write("{ this line does not parse\n")
-    with pytest.raises(BindingProbeUnanswered):
+    with pytest.raises(BindingsUnreadable):
         aliased_lineage(canonical_location(str(alias)))
 
 
@@ -2499,6 +2500,53 @@ def test_bound_lineage_refuses_an_unreadable_bindings_file_on_its_own(tmp_path):
             bound_lineage("/a/project.arrival")
     finally:
         bindings_path().chmod(0o600)
+
+
+def test_a_non_utf8_bindings_file_refuses_through_the_open(tmp_path):
+    """Sol r3's repro. Raw ``UnicodeDecodeError`` was escaping untyped.
+
+    Same class as the ``OSError`` escape, and ``read_journal`` one file over
+    already modelled the answer by catching both. A caller reaching for
+    ``AttestationRefusal`` had a builtin walking straight past it.
+    """
+    _log_path, alias, lineage = _reached_by_an_alias(tmp_path)
+    before = journal_bytes(lineage)
+    bindings_path().write_bytes(b"\xff\xfe")
+    binding_bytes = bindings_path().read_bytes()
+
+    with pytest.raises(BindingsUnreadable) as excinfo:
+        opened(alias)
+
+    assert "not valid UTF-8" in str(excinfo.value)
+    assert isinstance(excinfo.value.__cause__, UnicodeDecodeError)
+    assert journal_bytes(lineage) == before
+    assert bindings_path().read_bytes() == binding_bytes
+
+
+def test_a_non_utf8_bindings_file_refuses_through_the_alias_sweep(tmp_path):
+    """The second entry point, pinned on its own.
+
+    ``bound_lineage`` reads the file first through an open, so this arm needs a
+    direct call or the outer layer is what the test measures — the same lesson
+    the per-arm demos taught last round.
+    """
+    _log_path, alias, _lineage = _reached_by_an_alias(tmp_path)
+    bindings_path().write_bytes(b"\xff\xfe")
+    with pytest.raises(BindingsUnreadable):
+        aliased_lineage(canonical_location(str(alias)))
+
+
+def test_repair_flavoured_and_retry_flavoured_refusals_are_distinct(tmp_path):
+    """The arm split, asserted rather than left to the docstrings.
+
+    ``ProbeUnanswered`` promises that retrying is the remedy. Bytes that are
+    not UTF-8, and a line that is not JSON, read the same way on every retry —
+    so filing them under that parent would make its own promise false. They are
+    a sibling, and both remain catchable as one ``AttestationRefusal``.
+    """
+    assert issubclass(BindingProbeUnanswered, ProbeUnanswered)
+    assert not issubclass(BindingsUnreadable, ProbeUnanswered)
+    assert issubclass(BindingsUnreadable, AttestationRefusal)
 
 
 def test_every_probe_refusal_is_one_family(tmp_path):

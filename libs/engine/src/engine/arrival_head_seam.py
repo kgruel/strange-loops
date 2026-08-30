@@ -65,6 +65,7 @@ from .arrival_head_attestation import (
     AbsentStoreOutcome,
     AttestationRefusal,
     BindingProbeUnanswered,
+    BindingsUnreadable,
     EstablishedHead,
     HeadAttestation,
     HeadFork,
@@ -522,6 +523,13 @@ def aliased_lineage(location: str) -> str | None:
     except FileNotFoundError:
         # ABSENT is an answer: nothing has ever been bound here.
         return None
+    except UnicodeDecodeError as exc:
+        raise BindingsUnreadable(
+            f"the bindings file at {bindings_path()} is not valid UTF-8 "
+            f"({exc}), so this open cannot tell whether another spelling of "
+            "this store is already bound. Nothing has been accepted or "
+            "written — repair or remove the file"
+        ) from exc
     except OSError as exc:
         raise BindingProbeUnanswered(
             f"the bindings file at {bindings_path()} exists and cannot be "
@@ -537,7 +545,7 @@ def aliased_lineage(location: str) -> str | None:
         try:
             decoded = json.loads(stripped)
         except ValueError as exc:
-            raise BindingProbeUnanswered(
+            raise BindingsUnreadable(
                 f"line {number} of {bindings_path()} does not parse ({exc}), "
                 "and a line that cannot be read may be the binding that names "
                 "this location. Nothing has been accepted or written — repair "

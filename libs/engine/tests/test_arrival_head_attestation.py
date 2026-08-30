@@ -23,7 +23,7 @@ from engine.arrival_contract import ContractRefusal, Head
 from engine.arrival_head_attestation import (
     AbsentStoreOutcome,
     AttestationRefusal,
-    BindingProbeUnanswered,
+    BindingsUnreadable,
     EstablishedHead,
     HeadAttestation,
     HeadFork,
@@ -1275,8 +1275,23 @@ def test_a_malformed_binding_line_refuses_rather_than_being_skipped():
     record_binding("/a/project.arrival", LINEAGE, 1.0)
     with bindings_path().open("a") as handle:
         handle.write("{not json\n")
-    with pytest.raises(BindingProbeUnanswered):
+    with pytest.raises(BindingsUnreadable):
         bound_lineage("/a/project.arrival")
+
+
+def test_a_non_utf8_bindings_file_refuses_rather_than_escaping_untyped():
+    """Sol r3's repro at the layer the open reaches first.
+
+    A raw ``UnicodeDecodeError`` walked past every ``except AttestationRefusal``
+    — the same builtin-escape gap ``JournalUnreadable`` closes for the journal,
+    which already catches ``UnicodeDecodeError`` alongside ``OSError``.
+    """
+    record_binding("/a/project.arrival", LINEAGE, 1.0)
+    bindings_path().write_bytes(b"\xff\xfe")
+    with pytest.raises(BindingsUnreadable) as excinfo:
+        bound_lineage("/a/project.arrival")
+    assert "not valid UTF-8" in str(excinfo.value)
+    assert isinstance(excinfo.value.__cause__, UnicodeDecodeError)
 
 
 def test_the_transitional_binding_carries_its_deletion_marker():

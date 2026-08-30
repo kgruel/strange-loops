@@ -59,6 +59,7 @@ __all__ = [
     "AbsentStoreOutcome",
     "AttestationRefusal",
     "BindingProbeUnanswered",
+    "BindingsUnreadable",
     "EstablishedHead",
     "HeadAttestation",
     "HeadFork",
@@ -244,6 +245,33 @@ class ProbeUnanswered(AttestationRefusal):
 
     It lives here rather than in the seam because the binding unit does, and
     because a subclass of it has to be raisable from this module.
+    """
+
+
+class BindingsUnreadable(AttestationRefusal):
+    """The bindings file's CONTENT cannot be read, so it must be repaired.
+
+    A sibling of :class:`ProbeUnanswered` rather than a member of it, and the
+    split is the family's own promise: every ``ProbeUnanswered`` says *I could
+    not determine this* and asks to be **retried**. Bytes that are not UTF-8,
+    or a line that is not JSON, will read exactly the same way on every retry —
+    they ask to be **repaired**. Filing them under a parent that promises
+    retrying would make that parent's docstring false, which is how a family
+    name stops carrying information.
+
+    This corrects the previous round rather than only adding to it: the
+    malformed-line arms were typed :class:`BindingProbeUnanswered`, and a
+    malformed line is permanent. The transient causes — a permission wall, an
+    I/O error, an unstattable path — stay there, where retrying is the honest
+    advice.
+
+    The parallel one file over is :class:`JournalUnreadable`, and it is the
+    same claim about the same kind of loss: the file is THERE and cannot be
+    read. Raised rather than let out as the underlying ``UnicodeDecodeError``
+    so a caller catching :class:`AttestationRefusal` has no builtin escape past
+    it (``finding:s3-bindings-decode-escapes-untyped``).
+
+    DELETE IN SLICE 5 with the binding unit it serves.
     """
 
 
@@ -1526,21 +1554,41 @@ def record_binding(location: str, lineage: str, observed_at: float) -> None:
 def bound_lineage(location: str) -> str | None:
     """The lineage this location most recently presented, if any.
 
-    DELETE IN SLICE 5. A malformed line is skipped rather than refused:
-    unlike the head journal, this file makes no claim a skipped line could
-    weaken — a missing binding degrades to first contact, which is the state
-    the binding exists to improve on, not to guarantee.
+    DELETE IN SLICE 5.
+
+    **An ABSENT file answers None**, and that is the one degradation this makes:
+    nothing has ever been bound, so first contact is the honest state.
+
+    Everything else REFUSES, which is the correction to what this docstring
+    used to claim. It said a malformed line is skipped because "this file makes
+    no claim a skipped line could weaken" — and that was wrong in the way that
+    mattered: the skipped line may be the very binding that names this
+    location, so skipping answers "nothing is bound here" on evidence that says
+    nothing of the kind, and a replaced store then opens as first contact
+    (``finding:s3wp3-binding-probes-fail-acceptance-side``). Unreadable content
+    raises :class:`BindingsUnreadable` and asks for repair; a transient read
+    failure raises :class:`BindingProbeUnanswered` and asks for a retry.
     """
     try:
         text = bindings_path().read_text(encoding="utf-8")
     except FileNotFoundError:
         # ABSENT is an answer: nothing has ever been bound.
         return None
+    except UnicodeDecodeError as exc:
+        # PERMANENT, so not a probe failure: these bytes will decode the same
+        # way on every retry, and the honest advice is repair.
+        raise BindingsUnreadable(
+            f"the bindings file at {bindings_path()} is not valid UTF-8 "
+            f"({exc}), so no location's recorded lineage can be read. Nothing "
+            "has been accepted or written — repair or remove the file"
+        ) from exc
     except OSError as exc:
         # Was a RAW OSError escaping past every `except AttestationRefusal`,
         # which is the builtin-escape gap `JournalUnreadable` exists to close
         # one file over. Refusing is the right direction; being typed is what
-        # lets a caller catch it with the rest.
+        # lets a caller catch it with the rest. TRANSIENT-flavoured, so it
+        # stays a probe failure: a permission wall can be lifted and an I/O
+        # error can pass.
         raise BindingProbeUnanswered(
             f"the bindings file at {bindings_path()} exists and cannot be "
             f"read ({exc}), so this location's recorded lineage is unknown. "
@@ -1554,7 +1602,7 @@ def bound_lineage(location: str) -> str | None:
         try:
             decoded = json.loads(stripped)
         except ValueError as exc:
-            raise BindingProbeUnanswered(
+            raise BindingsUnreadable(
                 f"a line of {bindings_path()} does not parse ({exc}), and a "
                 "line that cannot be read may be the binding that names this "
                 "location. Nothing has been accepted or written — repair or "

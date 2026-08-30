@@ -201,6 +201,97 @@ proposal disagreed and the module won.
     property, or closing would be the thing that constructs the reader the fix
     deferred.
 
+## Design amendment #4 — a re-assertion is recorded, and carries no weight
+
+`finding:s3-dedup-skip-weakens-read-permanently`. WP2's integration found the
+cost of the dedup gate I shipped: a byte-identical crash-retry duplicate is
+byte-identical **by construction**, and the journal is append-only, so weighting
+its skip bounded every subsequent read **for the life of the file** —
+`established_head()` raising forever, and the O(1) unchanged-open design gone,
+from a crash that lost nothing.
+
+**Per cause, not per read.** The tempting shape is "a read whose only skips are
+re-assertions is established", and it does not compose: a duplicate beside an
+unreadable line must still bound. Weight therefore lives on the cause. `_Skips`
+offers `missed()` and `re_asserted()`, so a call site names its cause by which
+method it calls and a new cause has to choose rather than inherit a default.
+`test_a_dedup_skip_beside_an_unreadable_line_still_bounds` is the composition
+pin, and it fails in both directions under mutation.
+
+Grounds, in one line: the bound machinery represents **ignorance**, and a
+re-assertion is the one cause that carries none — the skipped line's content is
+a line this read already counted. Held narrowly as ruled: a voided reset keeps
+its weight, because what is unknown there is not the bytes but what the operator
+meant by them (`test_a_voided_reset_keeps_its_weight`).
+
+`HeadLowerBound` now carries only the **weakening** subset, so the causes of a
+bound are readable off the bound itself, while `JournalRead.skipped` keeps the
+full record. Three prose sites said a non-empty `skipped` *is* the weakening
+condition; all three are swept — the same stale-prose trap this file has already
+paid for four times.
+
+`_Skips` is a plain class rather than a dataclass. Rule 5 flagged it, and it was
+right: lib dataclasses are frozen because they are value objects, and this is an
+accumulator. Declaring it `frozen=True` with mutable lists inside would have
+satisfied the rule's letter while holding exactly the state the rule is about —
+gaming a ratchet instead of answering it.
+
+**Mutation demo** (two-guard: committed at `fa1d4d87` first, tree byte-clean
+after the revert): re-assertions weigh again → **10 failed, 162 passed**, led by
+`test_a_crash_retry_duplicate_does_not_weaken_the_read_forever` failing with the
+permanent bound — `established_head()` refusing on an incomplete read.
+
+### Verify-item 1 — is skip weakening epoch-scoped? **No.**
+
+**Reported, not fixed, per the routing.** Weakening is **file-scoped**. The code
+path: `_scan` accumulates skips over *every line of the file*, with no epoch
+notion available to it at all — the epoch is not computed until
+`parse_journal_lines` calls `_epoch_of`, well after the scan has finished — and
+`known` is then weakened by testing that whole-file set
+(`parse_journal_lines`, the `if skips.weakening` branch).
+
+Confirmed empirically as well as by reading: a journal with a damaged line at
+line 3, a trust reset later, and a clean advance after it, reads
+`HeadLowerBound` even though the damage sits **below** the current epoch
+boundary.
+
+The consequence is the one the routing anticipated: **mid-file damage and
+TOCTOU-voided reset lines are unhealable, even by the reset ceremony.** An
+operator who runs the ceremony to recover gets a new epoch whose *K* is correct,
+and a read that is still bounded by a line the ceremony deliberately put behind
+it. That is a question back to you rather than an edit.
+
+### Verify-item 2 — the abandoned-backup regression: **ADVANCED, not REWRITE**
+
+It did strengthen — the read is now ESTABLISHED, so the comparison **completes**
+rather than declining on a bound — but the outcome is `ADVANCED`, not the
+`REWRITE` the routing predicted, and the reason is my construction rather than
+the ruling. The test resets to a truncated **prefix** of the same history, so
+the restored backup genuinely *is* a verified descendant of the accepted head:
+the full walk succeeds and the record at *K*'s ordinal is *K*'s. `REWRITE` is
+what a genuinely divergent abandoned history would give.
+
+Deterministic, so the assertion is tightened from "not UNCHANGED" to
+`Outcome.ADVANCED`. L-5 stays closed: without the dedup gate, *K* still reaches
+the abandoned head, the backup still compares EQUAL, and the unchanged arm still
+gathers no evidence — the vector the test exists for is unchanged.
+
+**One observation this surfaced, flagged rather than actioned** (out of scope,
+and a question for you): after a reset to head *N*, restoring a backup at head
+*N+1* that is a valid descendant of *N* is **accepted** through the advance
+path, even when *N+1* is precisely the head the ceremony abandoned. The reset's
+`note` records the gap; nothing compares against it. Same family as the
+replayed-advance vector, and not reachable through the dedup gate.
+
+### Known consequence, preserved rather than fixed
+
+The dedup match predicate is now **acceptance-load-bearing**: a false match
+discards a real line and the read still claims to be established.
+`test_an_injected_collision_costs_a_walk_and_never_an_acceptance` carries that
+weight and now pins it explicitly — established at a LOW *K*, so the store
+presents an advance, and the advance branch demands a vouched `at_known` before
+anything is accepted. Verification-side, never acceptance.
+
 ## Sol r2 — L-1 passed; L-2 failed twice over, both closed
 
 ### S3WP3-L-4 — identity was the right binding and the wrong amount of it

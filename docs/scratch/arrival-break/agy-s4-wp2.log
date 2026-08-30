@@ -1,0 +1,201 @@
+# Slice 4 WP2 — the Transformer (`design:arrival-break-slice4-migration-sidecar`)
+
+## Executive Summary & Deliverables
+
+All pre-work items (**P1**, **P2**, **P3**) and WP2 deliverables have been implemented, tested, and committed in `libs/migrate/` on branch `slice4/wp2`.
+
+1. **Pre-work P1 & P2**:
+   - Collapsed the inventory/transform refusal type lattice to one concrete subclass: [`LegacySourceRefused(MigrationRefused)`](file:///Users/kaygee/Code/loops-wt/s4-wp2/libs/migrate/src/migrate/refusals.py#L32-L75).
+   - Swept all backward-compat shims and dead aliases in [`refusals.py`](file:///Users/kaygee/Code/loops-wt/s4-wp2/libs/migrate/src/migrate/refusals.py) and [`__init__.py`](file:///Users/kaygee/Code/loops-wt/s4-wp2/libs/migrate/src/migrate/__init__.py).
+   - Committed as `c966d981`: `refactor(migrate): collapse refusal lattice to LegacySourceRefused and sweep compat shims (P1, P2)`.
+2. **Pre-work P3**:
+   - Parameterized [`row_object_fault`](file:///Users/kaygee/Code/loops-wt/s4-wp2/libs/migrate/src/migrate/legacy_jsonl.py#L121-L135) with `skip_fields: frozenset[str] = frozenset()` as an explicit seam.
+   - Replaced duplicate hand-rolled batch row validator in [`inventory.py`](file:///Users/kaygee/Code/loops-wt/s4-wp2/libs/migrate/src/migrate/inventory.py#L320-L335) with `row_object_fault(..., skip_fields=frozenset({"observer"}))`.
+   - Committed as `536f737f`: `refactor(migrate): parameterise row_object_fault to deduplicate batch validation (P3)`.
+3. **WP2 Deliverables**:
+   - Implemented [`migrate.transform`](file:///Users/kaygee/Code/loops-wt/s4-wp2/libs/migrate/src/migrate/transform.py) with [`transform()`](file:///Users/kaygee/Code/loops-wt/s4-wp2/libs/migrate/src/migrate/transform.py#L115), [`GenesisRequirements`](file:///Users/kaygee/Code/loops-wt/s4-wp2/libs/migrate/src/migrate/transform.py#L86-L90), [`TransformExceptions`](file:///Users/kaygee/Code/loops-wt/s4-wp2/libs/migrate/src/migrate/transform.py#L93-L104), and [`TransformResult`](file:///Users/kaygee/Code/loops-wt/s4-wp2/libs/migrate/src/migrate/transform.py#L107-L112).
+   - Implemented group grammar (single-observer batch line → 1 batch record; flat rows → fact records; never regroup).
+   - Implemented M-4 native-tick conversion with verbatim signed envelope byte preservation.
+   - Implemented key introduction construction signed by custodian per Arrival engine authority grammar (`arrival.py:1962-1970`).
+   - Implemented §G.3 exception edges (`keyless_declared_observers`, `undeclared_row_observers`).
+   - Updated Rule 4 dependency DAG in [`tests/architecture/test_rule_04_lib_dependency_dag.py`](file:///Users/kaygee/Code/loops-wt/s4-wp2/tests/architecture/test_rule_04_lib_dependency_dag.py#L32-L35) for `"migrate": {"engine", "lang"}`.
+   - Implemented comprehensive test suite in [`libs/migrate/tests/test_transform.py`](file:///Users/kaygee/Code/loops-wt/s4-wp2/libs/migrate/tests/test_transform.py).
+   - Committed as `5f5149d9`: `feat(migrate): implement Transformer for legacy to arrival drafts (WP2)`.
+
+---
+
+## Security & Authority Model Rationale
+
+Documented in the module docstring of [`libs/migrate/src/migrate/transform.py`](file:///Users/kaygee/Code/loops-wt/s4-wp2/libs/migrate/src/migrate/transform.py#L1-L55):
+
+> **Why Migrated Records are OUTER-UNSIGNED**
+> The migration sidecar holds only one private key: the vertex's own self-observer key. The `.vertex` observers block carries public keys for observers. Under the wire-v1 pin (`decision:design/arrival-wire-v1-pin`), an ordinary fact or batch record's envelope `observer` field is the author echo, and `verify_authorship` verifies an envelope's signature strictly against keys valid for that record's own envelope observer (`engine.arrival`).
+>
+> The sidecar cannot sign a migrated fact or batch envelope without either forging an authorship claim or misrepresenting the envelope observer as the custodian. It does not have to: unsigned ordinary records are legal under the Arrival protocol and are skipped by the authority walk (`arrival.py:2044-2045`). Only genesis and key introductions are structurally required to carry an envelope signature.
+>
+> 1. Authored fact inner signatures ride in the row body verbatim (byte-for-byte), never re-serialized, never re-signed.
+> 2. Key introductions establish the key registry for **future live writes** to the migrated store — they do **not** validate migrated content.
+> 3. A reader who assumes key introductions validate migrated legacy content has the security model backwards: legacy content authorship is proven by inner fact-domain signatures verified by the existing fact verifier.
+> 4. The custody claim over the migration as a whole is established by the signed genesis minted under the custodian plus the bootstrap witness receipt.
+
+---
+
+## Five Break / Restore Acceptance Proofs
+
+### Proof 1: Byte-preservation
+*Make the transformer re-serialize payload text → the signature byte-comparison test fails.*
+
+**1. Break introduced:**
+```python
+re_serialized_payload = json.dumps(json.loads(mapped.payload), indent=2)
+```
+**2. Failing pytest output:**
+```
+=================================== FAILURES ===================================
+__________ test_signature_byte_preservation_and_honest_absence[jsonl] __________
+    uuid4_signed = next(d for d in migrated_drafts if d.body.get("id") == FACT_UUID4_SIGNED["id"])
+    assert uuid4_signed.body["signature"] == FACT_UUID4_SIGNED["signature"]
+>   assert uuid4_signed.body["payload"] == FACT_UUID4_SIGNED["payload"]
+E   assert '{\n  "text": "fact 1"\n}' == '{"text":"fact 1"}'
+E     + {
+E     - {"text":"fact 1"}
+E     +   "text": "fact 1"
+E     + }
+FAILED libs/migrate/tests/test_transform.py::test_signature_byte_preservation_and_honest_absence[jsonl]
+FAILED libs/migrate/tests/test_transform.py::test_signature_byte_preservation_and_honest_absence[sqlite]
+2 failed, 9 deselected in 0.12s
+```
+**3. Restored:** `git checkout libs/migrate/src/migrate/transform.py`
+**4. Green output:**
+```
+libs/migrate/tests/test_transform.py ..                                  [100%]
+2 passed, 9 deselected in 0.05s
+```
+**5. Diff after restore:** Empty (`git diff libs/migrate/src/migrate/transform.py` returned 0).
+
+---
+
+### Proof 2: Grouping
+*Make the transformer split a batch into per-row fact records → the grouping test fails.*
+
+**1. Break introduced:**
+Emitted individual `RecordDraft(kind="fact", ...)` for each row in batch instead of `RecordDraft(kind="batch", ...)`.
+**2. Failing pytest output:**
+```
+=================================== FAILURES ===================================
+_____________________ test_grouping_grammar_batch_vs_flat ______________________
+    batch_drafts = [d for d in batch_result.drafts if d.kind == "batch"]
+>   assert len(batch_drafts) == 1
+E   assert 0 == 1
+E    +  where 0 = len([])
+FAILED libs/migrate/tests/test_transform.py::test_grouping_grammar_batch_vs_flat
+1 failed, 10 deselected in 0.06s
+```
+**3. Restored:** `git checkout libs/migrate/src/migrate/transform.py`
+**4. Green output:**
+```
+libs/migrate/tests/test_transform.py .                                   [100%]
+1 passed, 10 deselected in 0.04s
+```
+**5. Diff after restore:** Empty.
+
+---
+
+### Proof 3: Ordering
+*Emit a migrated record before the key introductions → the authority-ordering test fails.*
+
+**1. Break introduced:**
+Deferred key introduction drafts until after migrated records.
+**2. Failing pytest output:**
+```
+=================================== FAILURES ===================================
+____________ test_key_introduction_ordering_and_authority_validity _____________
+    draft_alice = result.drafts[0]
+>   assert draft_alice.kind == KEY_INTRODUCTION_KIND
+E   AssertionError: assert 'fact' == 'key'
+E     - key
+E     + fact
+FAILED libs/migrate/tests/test_transform.py::test_key_introduction_ordering_and_authority_validity
+1 failed, 10 deselected in 0.06s
+```
+**3. Restored:** `git checkout libs/migrate/src/migrate/transform.py`
+**4. Green output:**
+```
+libs/migrate/tests/test_transform.py .                                   [100%]
+1 passed, 10 deselected in 0.05s
+```
+**5. Diff after restore:** Empty.
+
+---
+
+### Proof 4: Determinism
+*Introduce a `set()` iteration or timestamp into the draft path → the determinism test fails.*
+
+**1. Break introduced:**
+`authored_at=time.time()` on fact drafts.
+**2. Failing pytest output:**
+```
+=================================== FAILURES ===================================
+________________ test_transform_determinism_and_ulid_migration _________________
+>   assert res1.drafts == res2.drafts
+E   assert (RecordDraft(...re=None), ...) == (RecordDraft(...re=None), ...)
+E     At index 1 diff: RecordDraft(kind='fact', authored_at=1788126629.609306, ...) != RecordDraft(kind='fact', authored_at=1788126629.6096199, ...)
+FAILED libs/migrate/tests/test_transform.py::test_transform_determinism_and_ulid_migration
+1 failed, 10 deselected in 0.06s
+```
+**3. Restored:** `git checkout libs/migrate/src/migrate/transform.py`
+**4. Green output:**
+```
+libs/migrate/tests/test_transform.py .                                   [100%]
+1 passed, 10 deselected in 0.05s
+```
+**5. Diff after restore:** Empty.
+
+---
+
+### Proof 5: M-4 Native Ticks
+*Convert ticks to `tick.<name>` facts (the old rebirth shape) → the native-tick test fails.*
+
+**1. Break introduced:**
+Mapped legacy ticks to `RecordDraft(kind="fact", body={"kind": f"tick.{t_dict['name']}", ...})`.
+**2. Failing pytest output:**
+```
+=================================== FAILURES ===================================
+_______ test_m4_native_tick_conversion_with_envelope_preservation[jsonl] _______
+    tick_drafts = [d for d in result.drafts if d.kind == "tick"]
+>   assert len(tick_drafts) == 2
+E   assert 0 == 2
+E    +  where 0 = len([])
+FAILED libs/migrate/tests/test_transform.py::test_m4_native_tick_conversion_with_envelope_preservation[jsonl]
+FAILED libs/migrate/tests/test_transform.py::test_m4_native_tick_conversion_with_envelope_preservation[sqlite]
+2 failed, 9 deselected in 0.06s
+```
+**3. Restored:** `git checkout libs/migrate/src/migrate/transform.py`
+**4. Green output:**
+```
+libs/migrate/tests/test_transform.py ..                                  [100%]
+2 passed, 9 deselected in 0.05s
+```
+**5. Diff after restore:** Empty.
+
+---
+
+## Final Verification & Status
+
+```bash
+$ cd /Users/kaygee/Code/loops-wt/s4-wp2 && TMPDIR=/Users/kaygee/Code/loops-wt/s4-wp2/.tmp uv run pytest --basetemp=/Users/kaygee/Code/loops-wt/s4-wp2/.tmp/pt libs/migrate tests/architecture -q
+........................................................................ [ 56%]
+........................................................                 [100%]
+128 passed in 5.31s
+
+$ cd /Users/kaygee/Code/loops-wt/s4-wp2 && git status --short
+?? .tmp/
+
+$ cd /Users/kaygee/Code/loops-wt/s4-wp2 && TMPDIR=/Users/kaygee/Code/loops-wt/s4-wp2/.tmp uv run pytest --basetemp=/Users/kaygee/Code/loops-wt/s4-wp2/.tmp/pt libs/migrate/tests/test_quarantine.py -v
+libs/migrate/tests/test_quarantine.py::test_quarantine_no_forbidden_legacy_imports PASSED [100%]
+
+$ cd /Users/kaygee/Code/loops-wt/s4-wp2 && git log -n 3 --oneline
+5f5149d9 feat(migrate): implement Transformer for legacy to arrival drafts (WP2)
+536f737f refactor(migrate): parameterise row_object_fault to deduplicate batch validation (P3)
+c966d981 refactor(migrate): collapse refusal lattice to LegacySourceRefused and sweep compat shims (P1, P2)
+```

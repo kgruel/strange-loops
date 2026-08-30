@@ -1,0 +1,132 @@
+## Verification & Working Directory
+
+```
+$ cd /Users/kaygee/Code/loops-wt/s4-wp2 && pwd && git branch --show-current && git log --oneline -1
+/Users/kaygee/Code/loops-wt/s4-wp2
+slice4/wp2
+5a531574 fix(migrate): route sqlite arm through row_object_fault and remove constructor shims
+```
+
+---
+
+## The Change
+
+In [`libs/migrate/src/migrate/legacy_source.py`](file:///Users/kaygee/Code/loops-wt/s4-wp2/libs/migrate/src/migrate/legacy_source.py#L463-L476), the SQLite tick reader arm built `obj` from only the columns present in the SQLite schema (`t_dict.items()`). When evaluating pre-chain SQLite stores (era-1) where `since` or `(prev_hash, window_start, fact_cursor, window_hash)` columns do not exist on the table, `row_object_fault` rejected the row for missing fields before checking `TICK_NULLABLE`.
+
+We updated the tick arm object builder to construct the row object over all canonical `TICK_FIELDS`:
+```python
+obj = {f: t_dict.get(f) for f in TICK_FIELDS}
+if t_dict.get("signature") is not None:
+    obj["signature"] = t_dict["signature"]
+```
+Absent SQLite columns evaluate to `None`, which `TICK_NULLABLE` (`frozenset(("since", *TICK_CHAIN_FIELDS))`) explicitly permits.
+
+Alongside, added [`build_era1_sqlite`](file:///Users/kaygee/Code/loops-wt/s4-wp2/libs/migrate/tests/_fixtures.py#L687-L728) in `_fixtures.py` and test coverage in [`test_inventory.py`](file:///Users/kaygee/Code/loops-wt/s4-wp2/libs/migrate/tests/test_inventory.py#L320-L334) and [`test_transform.py`](file:///Users/kaygee/Code/loops-wt/s4-wp2/libs/migrate/tests/test_transform.py#L576-L633).
+
+---
+
+## Commit
+
+Committed at `58d3bf51`:
+```
+[slice4/wp2 58d3bf51] fix(migrate): allow absent tick chain columns and since as nullable fields in SQLite reader (R3-B1)
+ 4 files changed, 129 insertions(+), 1 deletion(-)
+```
+
+---
+
+## Break / Restore Proof Evidence
+
+### 1. Break Proof (reverting to columns-present-only dict)
+
+Reverting line 466 of `legacy_source.py` back to `obj = {k: v for k, v in t_dict.items() if k != "signature" or v is not None}`:
+
+```
+$ TMPDIR=/Users/kaygee/Code/loops-wt/s4-wp2/.tmp uv run pytest libs/migrate/tests/test_inventory.py::test_era1_sqlite_ticks_inventory libs/migrate/tests/test_transform.py::test_era1_sqlite_ticks_transform_and_surface_agreement -vv --basetemp=/Users/kaygee/Code/loops-wt/s4-wp2/.tmp/pt
+
+=================================== FAILURES ===================================
+________________________ test_era1_sqlite_ticks_inventory _________________________
+...
+>               raise LegacySourceRefused(
+                    codec_invalid_lines=codec_invalid_lines,
+                    mixed_observer_lines=mixed_observer_lines,
+                    absent_observer_lines=absent_observer_lines,
+                    source=str(source_path),
+                )
+E               migrate.refusals.LegacySourceRefused: Migration refused for source '/Users/kaygee/Code/loops-wt/s4-wp2/.tmp/pt/test_era1_sqlite_ticks_invento0/era1.sqlite' (legacy source defects found).
+E               The following source line(s) failed codec validation:
+E                 line 1: missing field(s) in tick row: ['since', 'prev_hash', 'window_start', 'fact_cursor', 'window_hash']
+E                 line 2: missing field(s) in tick row: ['since', 'prev_hash', 'window_start', 'fact_cursor', 'window_hash']
+E               Advisory: repair the source line(s) by hand or re-run migration after a ruled re-ceremony.
+
+libs/migrate/src/migrate/legacy_source.py:501: LegacySourceRefused
+_________________ test_era1_sqlite_ticks_transform_and_surface_agreement _________________
+...
+E               migrate.refusals.LegacySourceRefused: Migration refused for source '/Users/kaygee/Code/loops-wt/s4-wp2/.tmp/pt/test_era1_sqlite_ticks_transfo0/era1.sqlite' (legacy source defects found).
+E               The following source line(s) failed codec validation:
+E                 line 1: missing field(s) in tick row: ['since', 'prev_hash', 'window_start', 'fact_cursor', 'window_hash']
+E                 line 2: missing field(s) in tick row: ['since', 'prev_hash', 'window_start', 'fact_cursor', 'window_hash']
+E               Advisory: repair the source line(s) by hand or re-run migration after a ruled re-ceremony.
+
+libs/migrate/src/migrate/legacy_source.py:501: LegacySourceRefused
+=========================== short test summary info ============================
+FAILED libs/migrate/tests/test_inventory.py::test_era1_sqlite_ticks_inventory - migrate.refusals.LegacySourceRefused: Migration refused for source '/Users/kaygee/Code/loops-wt/s4-wp2/.tmp/pt/test_era1_sqlite_ticks_invento0/era1.sqlite' (legacy source defects found).
+The following source line(s) failed codec validation:
+  line 1: missing field(s) in tick row: ['since', 'prev_hash', 'window_start', 'fact_cursor', 'window_hash']
+  line 2: missing field(s) in tick row: ['since', 'prev_hash', 'window_start', 'fact_cursor', 'window_hash']
+Advisory: repair the source line(s) by hand or re-run migration after a ruled re-ceremony.
+FAILED libs/migrate/tests/test_transform.py::test_era1_sqlite_ticks_transform_and_surface_agreement - migrate.refusals.LegacySourceRefused: Migration refused for source '/Users/kaygee/Code/loops-wt/s4-wp2/.tmp/pt/test_era1_sqlite_ticks_transfo0/era1.sqlite' (legacy source defects found).
+The following source line(s) failed codec validation:
+  line 1: missing field(s) in tick row: ['since', 'prev_hash', 'window_start', 'fact_cursor', 'window_hash']
+  line 2: missing field(s) in tick row: ['since', 'prev_hash', 'window_start', 'fact_cursor', 'window_hash']
+Advisory: repair the source line(s) by hand or re-run migration after a ruled re-ceremony.
+============================== 2 failed in 0.25s ===============================
+```
+
+### 2. Restore Proof & Empty Production Diff
+
+```
+$ git restore libs/migrate/src/migrate/legacy_source.py
+$ git diff
+(empty)
+```
+
+Running restored tests:
+```
+$ TMPDIR=/Users/kaygee/Code/loops-wt/s4-wp2/.tmp uv run pytest libs/migrate/tests/test_inventory.py::test_era1_sqlite_ticks_inventory libs/migrate/tests/test_transform.py::test_era1_sqlite_ticks_transform_and_surface_agreement -vv --basetemp=/Users/kaygee/Code/loops-wt/s4-wp2/.tmp/pt
+============================= test session starts ==============================
+platform darwin -- Python 3.13.11, pytest-9.1.1, pluggy-1.6.0 -- /Users/kaygee/Code/loops-wt/s4-wp2/.venv/bin/python
+cachedir: .pytest_cache
+rootdir: /Users/kaygee/Code/loops-wt/s4-wp2/libs/migrate
+configfile: pyproject.toml
+plugins: cov-7.1.0
+collecting ... collected 2 items
+
+libs/migrate/tests/test_inventory.py::test_era1_sqlite_ticks_inventory PASSED [ 50%]
+libs/migrate/tests/test_transform.py::test_era1_sqlite_ticks_transform_and_surface_agreement PASSED [100%]
+
+============================== 2 passed in 0.05s ===============================
+```
+
+---
+
+## Final Acceptance Run
+
+```
+$ cd /Users/kaygee/Code/loops-wt/s4-wp2 && TMPDIR=/Users/kaygee/Code/loops-wt/s4-wp2/.tmp uv run pytest libs/migrate tests/architecture -q --basetemp=/Users/kaygee/Code/loops-wt/s4-wp2/.tmp/pt
+........................................................................ [ 50%]
+.......................................................................  [100%]
+143 passed in 5.59s
+```
+
+```
+$ cd /Users/kaygee/Code/loops-wt/s4-wp2 && git status --short
+?? .tmp/
+```
+
+---
+
+## Anything Else Observed & Honest Gaps
+
+- **Facts arm symmetry**: Verified that `FACT_FIELDS` does not include `signature` and has no nullable members; `_facts_have_signature` handles the presence or absence of the signature column on the `facts` table cleanly.
+- **No honest gaps**: The regression is fully fixed, era-1 store inventory and transformation now accept absent chain columns as explicit `None` fields, and the break/restore proof isolates the failure mode.

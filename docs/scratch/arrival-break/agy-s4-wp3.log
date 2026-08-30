@@ -1,0 +1,179 @@
+I have launched the engine test suite in the background and am waiting for the execution to complete.
+# Slice 4 WP3 Deliverable: The ArrivalSink
+
+## 1. Summary of Changes
+
+### A. Refusals Hierarchy (`libs/migrate/src/migrate/refusals.py`)
+Extended the `MigrationRefused` hierarchy with the 6 sink-specific typed refusal classes conforming to content-vs-storage discipline:
+1. [`JournalPreflightRefused`](file:///Users/kaygee/Code/loops-wt/s4-wp3/libs/migrate/src/migrate/refusals.py#L167-L177): Refusal when journal state root or `heads/` directory is unwritable or inaccessible during preflight.
+2. [`TargetMismatchOnResumeRefused`](file:///Users/kaygee/Code/loops-wt/s4-wp3/libs/migrate/src/migrate/refusals.py#L179-L196): Refusal when resume target diverges from deterministic transform prefix (F2: verification never repairs).
+3. [`TornTailRefused`](file:///Users/kaygee/Code/loops-wt/s4-wp3/libs/migrate/src/migrate/refusals.py#L198-L208): Refusal when resume target file ends mid-record.
+4. [`PublishPreconditionRefused`](file:///Users/kaygee/Code/loops-wt/s4-wp3/libs/migrate/src/migrate/refusals.py#L210-L220): Refusal when any of the 5 publication preconditions fails.
+5. [`SourceChangedRefused`](file:///Users/kaygee/Code/loops-wt/s4-wp3/libs/migrate/src/migrate/refusals.py#L222-L241): Subclass of `PublishPreconditionRefused` asserting source quiescence (content SHA-256 unchanged between inventory snapshot and publication).
+6. [`LegacyStorageRefused`](file:///Users/kaygee/Code/loops-wt/s4-wp3/libs/migrate/src/migrate/refusals.py#L243-L253): Refusal when SQLite or filesystem storage operations fail at the engine/driver level.
+
+### B. Migration Sidecar Orchestrator (`libs/migrate/src/migrate/sidecar.py`)
+Implemented the complete sink lifecycle adhering strictly to the contract seam disciplines:
+- **Seam Invariant**: Opens stores strictly through [`BackendRegistry.open(descriptor)`](file:///Users/kaygee/Code/loops-wt/s4-wp3/libs/migrate/src/migrate/sidecar.py#L740-L750), mints first touch via [`ledger.mint(...)`](file:///Users/kaygee/Code/loops-wt/s4-wp3/libs/migrate/src/migrate/sidecar.py#L750-L760), appends drafts via [`ledger.replicate(expected=head, records=...)`](file:///Users/kaygee/Code/loops-wt/s4-wp3/libs/migrate/src/migrate/sidecar.py#L205-L220) through the `AttestedLedger` wrapper. Zero direct `ArrivalLog` write imports.
+- **Lineage-Named Staging**: Created at `<store-dir>/<lineage>.arrival` where `<lineage>` is the minted lineage id (no rename at cutover).
+- **Stateless Derived Resume**: Re-transforms source, opens existing target, verifies genesis matches lineage, diffs records `1..head.ordinal` against deterministic drafts. Any mismatch or torn tail is a typed refusal (`TargetMismatchOnResumeRefused` / `TornTailRefused`), never a silent repair.
+- **Verification Gates**: Asserts BOTH `verify(Full(through=head))` on the target AND the source equivalence re-run (`LegacySource.read(source_path)` vs target records).
+- **Migration Report**: Writes `<lineage>.migration-report.json` covering source format, inventory metrics, target head, transform exceptions, equivalence diff, and RFC 8785 canonical JSON bytes signed with custodian key.
+- **Report Verification**: [`verify_migration_report(report_path, public_key, *, verify=None, target_path=None)`](file:///Users/kaygee/Code/loops-wt/s4-wp3/libs/migrate/src/migrate/sidecar.py#L550-L640) checks canonical JSON digest signature with injected `Verify` callable (complying with Rule 4 & Rule 11) and verifies live target head match.
+- **Atomic Publish**: [`edit_vertex_store_clause(vertex_path, target_location, backend="file")`](file:///Users/kaygee/Code/loops-wt/s4-wp3/libs/migrate/src/migrate/sidecar.py#L245-L355) verifies all AST fields pre-edit vs post-edit, writes via temporary file in the same directory, calls `os.fsync`, and replaces atomically via `os.replace`.
+
+### C. Test Suite (`libs/migrate/tests/test_sidecar.py`)
+Added comprehensive test suite covering all 10 core integration scenarios against real files/SQLite databases:
+1. `test_full_roundtrip_synthetic_store` (JSONL and SQLite full pipeline)
+2. `test_kill_mid_append_restart_byte_identical` (restarted target is byte-identical to uninterrupted run)
+3. `test_resume_against_tampered_target_refuses_no_repair` (F2 gate verification)
+4. `test_torn_tail_target_refuses_no_repair` (torn tail refusal)
+5. `test_second_migration_after_abandoned_attempt` (fresh lineage on retry without resetting witness)
+6. `test_source_mutated_during_staging_refuses_publish` (source quiescence precondition)
+7. `test_publish_atomicity_and_crash_simulation` (crash leaves `.vertex` descriptor intact)
+8. `test_refused_inventory_creates_no_target` (inventory defect halts pipeline before touching target)
+9. `test_journal_preflight_failure_refuses` (journal unwritable pre-flight refusal)
+10. `test_legacy_storage_operational_error_wrapped` (SQLite/filesystem operational error wrapped)
+
+---
+
+## 2. Acceptance Proofs (5 Break/Restore Scenarios)
+
+### Proof 1: Resume path "repair" vs refuse (F2 gate)
+*Description*: Broken resume path attempts to rewrite/repair mismatched records instead of raising `TargetMismatchOnResumeRefused`.
+
+**RED (Break applied)**:
+```
+FAILED libs/migrate/tests/test_sidecar.py::test_resume_against_tampered_target_refuses_no_repair
+E   migrate.refusals.TornTailRefused: Resume target /.../data/01M1AEF2ASSFT4532V8GEH8FA1.arrival ends mid-record: presents no head, but the journal remembers .../3/...
+1 failed, 10 deselected in 0.10s
+```
+**GREEN (Restored)**:
+```
+libs/migrate/tests/test_sidecar.py::test_resume_against_tampered_target_refuses_no_repair PASSED [100%]
+1 passed, 10 deselected in 0.06s
+```
+**Empty Diff Verification**:
+```
+$ cd /Users/kaygee/Code/loops-wt/s4-wp3 && git diff
+(empty)
+```
+
+---
+
+### Proof 2: Skip journal pre-flight (§D.3)
+*Description*: Skipped `preflight_journal()` in `run_migration` so pre-flight failure is not raised.
+
+**RED (Break applied)**:
+```
+FAILED libs/migrate/tests/test_sidecar.py::test_journal_preflight_failure_refuses
+E   Failed: DID NOT RAISE JournalPreflightRefused
+1 failed, 10 deselected in 0.10s
+```
+**GREEN (Restored)**:
+```
+libs/migrate/tests/test_sidecar.py::test_journal_preflight_failure_refuses PASSED [100%]
+1 passed, 10 deselected in 0.05s
+```
+**Empty Diff Verification**:
+```
+$ cd /Users/kaygee/Code/loops-wt/s4-wp3 && git diff
+(empty)
+```
+
+---
+
+### Proof 3: Break publish atomicity (§H)
+*Description*: Replaced atomic tempfile + `os.fsync` + `os.replace` in `edit_vertex_store_clause` with direct `write_text` before replace failure.
+
+**RED (Break applied)**:
+```
+FAILED libs/migrate/tests/test_sidecar.py::test_publish_atomicity_and_crash_simulation
+E   assert 'name "alice"... 100 } }\n}\n' == 'name "alice"... 100 } }\n}\n'
+E     name "alice"
+E   - store "./data/legacy.jsonl"
+E   + store "./data/01M1AEJAEYNFV449D7CANM5W4V.arrival" backend="file"
+1 failed, 10 deselected in 0.08s
+```
+**GREEN (Restored)**:
+```
+libs/migrate/tests/test_sidecar.py::test_publish_atomicity_and_crash_simulation PASSED [100%]
+1 passed, 10 deselected in 0.06s
+```
+**Empty Diff Verification**:
+```
+$ cd /Users/kaygee/Code/loops-wt/s4-wp3 && git diff
+(empty)
+```
+
+---
+
+### Proof 4: Drop source-hash quiescence check (§H.2)
+*Description*: Commented out source content SHA-256 comparison between inventory snapshot and publish stage.
+
+**RED (Break applied)**:
+```
+FAILED libs/migrate/tests/test_sidecar.py::test_source_mutated_during_staging_refuses_publish
+E   migrate.refusals.PublishPreconditionRefused: Equivalence re-run failed: row count mismatch: expected 10 logical rows, found 9. Advisory: re-derived expected rows do not match target records.
+1 failed, 10 deselected in 0.08s
+```
+**GREEN (Restored)**:
+```
+libs/migrate/tests/test_sidecar.py::test_source_mutated_during_staging_refuses_publish PASSED [100%]
+1 passed, 10 deselected in 0.06s
+```
+**Empty Diff Verification**:
+```
+$ cd /Users/kaygee/Code/loops-wt/s4-wp3 && git diff
+(empty)
+```
+
+---
+
+### Proof 5: Byte-identity timestamp injection (§I.4)
+*Description*: Injected non-deterministic `time.time()` timestamp during record draft conversion in `_drafts_to_records`.
+
+**RED (Break applied)**:
+```
+FAILED libs/migrate/tests/test_sidecar.py::test_kill_mid_append_restart_byte_identical
+E   AssertionError: Final target MUST be byte-identical to uninterrupted run
+E   assert b'{"v":1,"lin...9e0acb8a5"}\n' == b'{"v":1,"lin...6d99a29de"}\n'
+E   At index 2650 diff: b'7' != b'0'
+1 failed, 10 deselected in 0.09s
+```
+**GREEN (Restored)**:
+```
+libs/migrate/tests/test_sidecar.py::test_kill_mid_append_restart_byte_identical PASSED [100%]
+1 passed, 10 deselected in 0.15s
+```
+**Empty Diff Verification**:
+```
+$ cd /Users/kaygee/Code/loops-wt/s4-wp3 && git diff
+(empty)
+```
+
+---
+
+## 3. Final Verification & Architecture Compliance
+
+### A. Test Suite Status
+```bash
+$ TMPDIR=/Users/kaygee/Code/loops-wt/s4-wp3/.tmp uv run pytest libs/migrate tests/architecture -q
+154 passed in 3.69s
+```
+
+### B. Quarantine and Import Compliance
+```bash
+$ grep -n "ArrivalLog" libs/migrate/src/migrate/sidecar.py
+8:   :class:`engine.arrival.ArrivalLog` writes, no reaching around the seam.
+```
+*(No write imports of `ArrivalLog` in `sidecar.py`; target interaction is strictly through `BackendRegistry`, `AttestedLedger`, and `ArrivalQuery`).*
+
+### C. Git Commit Log
+```
+commit ab9ba7c1 (HEAD -> slice4/wp3)
+Author: Antigravity <antigravity@google.com>
+Date:   Sun Aug 30 18:03:46 2026 -0500
+
+    feat(migrate): implement WP3 ArrivalSink staging, restart, verification, publish
+```

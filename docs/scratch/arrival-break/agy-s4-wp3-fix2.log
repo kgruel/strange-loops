@@ -1,0 +1,134 @@
+# Slice 4 WP3 — Fix Round 2 Report
+
+## Working Directory & Environment Verification
+```
+cd /Users/kaygee/Code/loops-wt/s4-wp3 && pwd && git branch --show-current && git log --oneline -1
+```
+Output:
+```
+/Users/kaygee/Code/loops-wt/s4-wp3
+slice4/wp3
+70a6dbb2 test(migrate): use body_of_fact_row for divergent draft in resume test
+```
+
+---
+
+## Changes Implemented
+
+### 1. Fix 1 (`s4wp3-report-verifier-retypes-unopenable`)
+- **Root Cause**: [`verify_migration_report`](file:///Users/kaygee/Code/loops-wt/s4-wp3/libs/migrate/src/migrate/sidecar.py#L560-L666) was catching bare `Exception` around opening and probing the target arrival ledger and re-typing any failure as [`ReportHeadMismatchRefused`](file:///Users/kaygee/Code/loops-wt/s4-wp3/libs/migrate/src/migrate/refusals.py#L297-L299), asserting that the head differs when the store could not be opened or read (e.g. `StoreLost` from `ArrivalTornTail`).
+- **Fix**:
+  - Introduced [`ReportTargetUnopenableRefused`](file:///Users/kaygee/Code/loops-wt/s4-wp3/libs/migrate/src/migrate/refusals.py#L302-L314) (subclass of [`ReportVerificationRefused`](file:///Users/kaygee/Code/loops-wt/s4-wp3/libs/migrate/src/migrate/refusals.py#L281-L283)) carrying `target_path` and `cause`.
+  - Replaced the bare `except Exception` with a typed catch: `except (StoreLost, ArrivalTornTail, ArrivalCorrupt, GenesisRefused, OSError) as exc: raise ReportTargetUnopenableRefused(...) from exc`.
+  - [`ReportHeadMismatchRefused`](file:///Users/kaygee/Code/loops-wt/s4-wp3/libs/migrate/src/migrate/refusals.py#L297-L299) is now raised exclusively after a successful ledger open and head read when the claimed head tuple does not match the live head.
+  - Exported [`ReportTargetUnopenableRefused`](file:///Users/kaygee/Code/loops-wt/s4-wp3/libs/migrate/src/migrate/__init__.py#L49-L100) from [`migrate`](file:///Users/kaygee/Code/loops-wt/s4-wp3/libs/migrate/src/migrate/__init__.py) and [`migrate.refusals`](file:///Users/kaygee/Code/loops-wt/s4-wp3/libs/migrate/src/migrate/refusals.py).
+  - Added test in [`test_verify_migration_report_causes`](file:///Users/kaygee/Code/loops-wt/s4-wp3/libs/migrate/tests/test_sidecar.py#L946-L962) against a torn-tail target verifying `ReportTargetUnopenableRefused` is raised and carries `StoreLost` / `ArrivalTornTail` in the cause chain rather than `ReportHeadMismatchRefused`.
+
+### 2. Fix 2 (`s4wp3-migrate-undeclared-ckdl-bypasses-lang`)
+- **Fix**:
+  - Added `"ckdl>=1.0"` matching `libs/lang/pyproject.toml` to dependencies in [`libs/migrate/pyproject.toml`](file:///Users/kaygee/Code/loops-wt/s4-wp3/libs/migrate/pyproject.toml#L8-L14).
+  - Added required loud comment at the direct import site in [`libs/migrate/src/migrate/sidecar.py`](file:///Users/kaygee/Code/loops-wt/s4-wp3/libs/migrate/src/migrate/sidecar.py#L76-L77):
+    ```python
+    # INTERIM: direct ckdl parse pending the ruled dissolution — lang exposing its effective-store-clause query (finding s4wp3-migrate-undeclared-ckdl-bypasses-lang); do not add further ckdl call sites.
+    import ckdl
+    ```
+
+---
+
+## Proof Evidence
+
+### 1. Initial Commit
+Commit SHA: `0ce53b2a` (`fix(migrate): discriminate unopenable target in report verifier and declare ckdl dependency`)
+
+### 2. Fix-1 Mutation Proof (Red / Green)
+
+#### A. Mutation (Restore bare-except re-type)
+```python
+    registry = BackendRegistry.with_builtin_backends()
+    descriptor = StoreDescriptor(backend="file", location=str(t_path))
+    try:
+        ledger, _ = registry.open(descriptor)
+        live_head = ledger.head()
+    except Exception as exc:
+        raise ReportHeadMismatchRefused(
+            f"Cannot read head from target arrival store {t_path}: {exc}"
+        ) from exc
+```
+
+#### B. Red Run
+```
+cd /Users/kaygee/Code/loops-wt/s4-wp3 && TMPDIR=/Users/kaygee/Code/loops-wt/s4-wp3/.tmp uv run pytest libs/migrate/tests/test_sidecar.py -k test_verify_migration_report_causes --basetemp=/Users/kaygee/Code/loops-wt/s4-wp3/.tmp/pt -q
+```
+Output:
+```
+F                                                                        [100%]
+=================================== FAILURES ===================================
+_____________________ test_verify_migration_report_causes ______________________
+...
+    # 6. Target unopenable (torn-tail target) -> ReportTargetUnopenableRefused with engine type in chain
+    full_bytes = outcome.target_path.read_bytes()
+    try:
+        outcome.target_path.write_bytes(full_bytes + b'{"incomplete": "record"')
+        with pytest.raises(ReportTargetUnopenableRefused) as exc_info:
+>           verify_migration_report(
+                outcome.report_path,
+                cust.public,
+                verify=cust.verify,
+                target_path=outcome.target_path,
+            )
+...
+E   migrate.refusals.ReportHeadMismatchRefused: Cannot read head from target arrival store ... presents no head, but the journal for lineage ... remembers ...
+libs/migrate/src/migrate/sidecar.py:652: ReportHeadMismatchRefused
+=========================== short test summary info ============================
+FAILED libs/migrate/tests/test_sidecar.py::test_verify_migration_report_causes
+1 failed, 15 deselected in 0.20s
+```
+
+#### C. Restore & Empty Production Diff
+```
+cd /Users/kaygee/Code/loops-wt/s4-wp3 && git restore libs/migrate/src/migrate/sidecar.py && git diff
+```
+Output:
+```
+(empty)
+```
+
+#### D. Green Run
+```
+cd /Users/kaygee/Code/loops-wt/s4-wp3 && TMPDIR=/Users/kaygee/Code/loops-wt/s4-wp3/.tmp uv run pytest libs/migrate/tests/test_sidecar.py -k test_verify_migration_report_causes --basetemp=/Users/kaygee/Code/loops-wt/s4-wp3/.tmp/pt -q
+```
+Output:
+```
+.                                                                        [100%]
+1 passed, 15 deselected in 0.12s
+```
+
+---
+
+## Final Acceptance
+
+### Full Test Suite Run
+```
+cd /Users/kaygee/Code/loops-wt/s4-wp3 && TMPDIR=/Users/kaygee/Code/loops-wt/s4-wp3/.tmp uv run pytest libs/migrate tests/architecture --basetemp=/Users/kaygee/Code/loops-wt/s4-wp3/.tmp/pt -q
+```
+Output:
+```
+........................................................................ [ 45%]
+........................................................................ [ 90%]
+...............                                                          [100%]
+159 passed in 4.82s
+```
+
+### Git Status
+```
+cd /Users/kaygee/Code/loops-wt/s4-wp3 && git status --short
+```
+Output:
+```
+?? .tmp/
+```
+
+---
+
+## Honest Gaps
+- None within the WP3 scope fence. All modified files are strictly confined to `libs/migrate/**`. No `.loops/` files were modified and no `sl/loops emit` was run.

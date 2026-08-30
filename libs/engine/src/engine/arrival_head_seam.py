@@ -1201,13 +1201,15 @@ class AttestedLedger:
         incomplete read still soundly supports.** That is not the two-valued
         question it looks like, and the third answer is the whole of it.
 
-        **Why not refuse.** An incomplete read is PERMANENT. The journal is
-        append-only and never rewritten, and the torn-tail guard preserves a
-        crashed writer's fragment rather than removing it, so a line lost to an
-        ordinary crash sits in ``skipped`` forever and every later read of that
-        journal is incomplete too. A seam that refused on it would make one
-        crashed writer a store that never opens again until an operator
-        intervenes — which is verbatim the argument WP1's amended ruling used
+        **Why not refuse.** An incomplete read persists until an operator
+        acts. The journal is append-only and never rewritten, and the torn-
+        tail guard preserves a crashed writer's fragment rather than removing
+        it, so a line lost to an ordinary crash sits in ``skipped`` on every
+        later read — recorded forever, weighed only until a trust-reset
+        ceremony decrees past it, since the epoch-scoped weighting stops
+        counting a loss the decree superseded. Until that ceremony, a seam
+        that refused on it would make one crashed writer a store that never
+        opens again — which is verbatim the argument WP1's amended ruling used
         to REJECT refusing on mid-file damage, one level down: "it made an
         ordinary crash a permanent incident, and it claimed a protection this
         location cannot deliver anyway — anyone able to corrupt the journal can

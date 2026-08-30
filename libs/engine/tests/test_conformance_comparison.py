@@ -242,6 +242,17 @@ def test_every_cell_of_the_bound_is_exercised_by_some_vector():
     is enumerated here, the same way the seven outcomes are, and deleting the
     above-the-bound fixture reopens the hole by failing this test rather than
     by going quietly green.
+
+    **This test asks only whether a cell is OCCUPIED, never whether its
+    occupant does any work**, and the two questions fail differently on
+    purpose. An empty cell is a gap in the enumeration and is named here. An
+    occupant that fills the cell without discriminating anything —
+    above-the-bound with no descent evidence — is a gap in the VECTOR, so it
+    is named in ``test_conformance_comparison`` against the vector's own id,
+    where the failure can say which fixture is hollow and why. Folding the
+    second question into this one would report "unexercised bound cells:
+    ['above']" about a cell that is not empty, which is a true alarm with a
+    false reason.
     """
     cells: set[str] = set()
     for path in _load_vectors(COMPARISON_VECTORS_DIR):
@@ -354,3 +365,27 @@ def test_conformance_comparison(vector_path: Path) -> None:
         )
         assert expected["sound_answer"] in SOUND_ANSWERS
         assert expected["sound_answer"] == ("rollback" if below else None)
+
+        if presented.lineage == bound.lineage and presented.ordinal > bound.ordinal:
+            # An above-the-bound vector must carry descent evidence naming the
+            # BOUND'S OWN coordinate and hash — equality, not merely non-null.
+            # The vector's whole force is a counterfactual: even with descent
+            # fully established from the bound, the proceed answer stays
+            # unobtainable. Weaken at_known and the vector stops discriminating,
+            # because a declining implementation could be right for the wrong
+            # reason — with a null at_known the classifier answers `rewrite` for
+            # want of evidence, and with a non-matching one it answers `rewrite`
+            # too. Both are already pinned by the `comparison-classify-rewrite-`
+            # vectors, so a hollow above-the-bound vector is a duplicate of a
+            # classify row wearing an incomplete-read costume: it occupies the
+            # cell without ever making `advanced` the answer a bound-ignoring
+            # implementation would reach for.
+            assert at_known == bound, (
+                f"{vector_path.stem} presents a head above the bound but "
+                f"supplies at_known={vector['input']['at_known']!r}. An "
+                "above-the-bound vector must name the bound's own coordinate "
+                "and hash, or it cannot tell 'a bound cannot answer above "
+                "itself' from 'there was no descent evidence anyway' — an "
+                "implementation declining for the second reason would pass it "
+                "while still answering `advanced` wherever descent IS proven."
+            )

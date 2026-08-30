@@ -373,3 +373,84 @@ Exactly the scoped demo: the new vector fails, the others do not.
 
 Generator still byte-reproducible (regenerate → empty diff); `ruff check` clean; 27
 vector JSONs tracked.
+
+## 10. Sol-LOW round 2 — hollow occupancy of the above cell
+
+`S3WP2-L-2`, and the behavioral fix from r1 passed fully; what failed was the
+**ratchet's seeded defeat test**. Sol nulled the new vector's `at_known` and the cell
+ratchet still counted the above cell as exercised. The cell was occupied
+*nominally* — the hazard it exists for was unpinned.
+
+**Same shape as r1, one level up.** Round 1 said my enumeration was incomplete.
+Round 2 says the enumeration's **occupancy predicate** was too weak: it asked whether
+*a* vector sits in the cell, never whether that vector does the work the cell exists
+for. A ratchet is only as strong as its notion of "covered", and mine counted
+presence.
+
+**Why a hollow vector proves nothing.** The above-the-bound claim is a
+**counterfactual**: *even with descent fully established from the bound*, the proceed
+answer stays unobtainable. Strip `at_known` and that counterfactual is gone — the
+ordinary classifier answers `rewrite` for want of evidence, and
+`comparison-classify-rewrite-when-the-ledger-vouches-for-nothing` already pins
+exactly that. A hollow above-the-bound vector is therefore a duplicate of a classify
+row wearing an incomplete-read costume: it would pass an implementation that declines
+here for the *wrong reason* while still answering `advanced` wherever descent is
+genuinely proven.
+
+**The requirement, sharpened past the routed wording.** The route said "valid
+NON-NULL `at_known`". Non-null is not enough: a non-null `at_known` naming some
+*other* head is also answered `rewrite`, so it is hollow in the same way. The
+requirement is **equality with the bound's own coordinate and record hash** — the
+unique value that makes `advanced` the answer a bound-ignoring implementation reaches
+for. Both weakenings are demonstrated below.
+
+**Where it lives, and why not in the cell ratchet.** As a **vector-envelope assertion
+in the parametrized runner**, so it fails against the vector's own test id and can say
+which fixture is hollow and why. Folding it into the cell ratchet would have reported
+`unexercised bound cells: ['above']` about a cell that is not empty — a true alarm
+with a false reason, and the scope-the-claim error of a check asserting a verdict
+wider than what it observed. The two questions now fail differently on purpose:
+
+| Failure | Named by | Message |
+|---|---|---|
+| the cell is EMPTY | `test_every_cell_of_the_bound_is_exercised_by_some_vector` | `unexercised bound cells: ['above']` |
+| the cell's occupant is HOLLOW | `test_conformance_comparison[<the vector>]` | names the fixture, its `at_known`, and the reason |
+
+The cell ratchet's docstring now states this division explicitly, so a reader of
+either check finds the other.
+
+SCHEMA.md carries the obligation normatively: the three-cell table is followed by a
+paragraph stating that a vector occupying the third row must supply `at_known` equal
+to the bound's coordinate and hash — a requirement on the *fixture*, not on
+implementations — with the counterfactual spelled out.
+
+### Sol-round demo — both weakenings
+
+Applied to the vector JSON on disk (the true shape of a hollow fixture), suite run,
+file restored byte-clean.
+
+| # | Weakening | Result |
+|---|---|---|
+| (i) | `at_known` → `null` (sol's seeded defeat) | **1 failed, 31 passed** — `test_conformance_comparison[comparison-incomplete-a-bound-cannot-answer-above-itself]`, message naming `at_known=None` and the reason |
+| (ii) | `at_known` → non-null but NOT the bound's head (ordinal 91, hash `0`×64) | **1 failed, 31 passed** — the same assertion, which is why the requirement is equality rather than non-nullness |
+
+Restored: 32 passed, `git status` clean on the vector.
+
+### Counts after sol r2
+
+Unchanged: engine **2190 passed, 1 skipped**; architecture **99**. This round adds no
+test and no vector — it strengthens an existing assertion — so the deltas from §9
+stand. `ruff check` clean; generator untouched and still byte-reproducible; 27 vector
+JSONs tracked.
+
+### The general form, now twice
+
+Both rounds are the same defect at successive levels, and it is worth stating once
+rather than a third time. An enumerable ratchet has two parts — the set of cells and
+the predicate for "this cell is covered" — and **both** can be too weak. Round 1
+found a missing cell; round 2 found a predicate that accepted a fixture which
+occupied a cell without discriminating anything. Writing the ratchet is not the end
+of the work: the question to ask next is *what is the weakest artifact that would
+satisfy this check*, and whether that artifact would actually have caught the thing
+the check exists for. Sol's seeded-defeat method asks exactly that question, and it
+is the reason r1's fix was not the end of it.

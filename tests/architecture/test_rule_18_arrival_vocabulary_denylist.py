@@ -80,6 +80,19 @@ _SCAN_TARGETS = (
     "libs/engine/src/engine/arrival_contract.py",
     "libs/engine/src/engine/arrival_file_backend.py",
     "libs/engine/src/engine/arrival_registry.py",
+    # Slice 3 adds one. `arrival_head_attestation` is the witness minimum —
+    # the record, the journal and the comparison that turn "this log is
+    # well-formed" into "this log is the one we know". NEW and born on the
+    # arrival surface, so it joins at birth, and the name was chosen for
+    # exactly that: the glob below enrolls it without anyone remembering to
+    # edit this tuple.
+    "libs/engine/src/engine/arrival_head_attestation.py",
+    # Slice 3 / WP3's other half: the seam that calls the comparison on every
+    # open, journals every commit made through it, and produces the bootstrap,
+    # audit and trust-reset entries. NEW and born on the arrival surface, so it
+    # joins at birth — and like its WP1 sibling the name was chosen so the glob
+    # below enrolls it without anyone remembering to edit this tuple.
+    "libs/engine/src/engine/arrival_head_seam.py",
     "libs/engine/src/engine/arrival_projection.py",
     "libs/engine/src/engine/arrival_store.py",
     "libs/engine/src/engine/probe.py",

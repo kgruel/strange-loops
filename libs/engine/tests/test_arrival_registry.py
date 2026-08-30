@@ -28,6 +28,7 @@ from engine.arrival_contract import (
     StoreDescriptor,
     UnknownBackend,
 )
+from engine.arrival_head_seam import AttestedLedger, PreGenesis
 from engine.arrival_registry import BackendRegistry, descriptor_for
 from engine.arrival_store import ArrivalStore
 from engine.jsonl_store import open_canonical_store
@@ -36,6 +37,22 @@ from tests.conftest import STUB_KEY as _KEY
 from tests.conftest import stub_sign as _sign
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
+
+
+@pytest.fixture(autouse=True)
+def _isolated_state_root(tmp_path, monkeypatch):
+    """Point the head-journal state root at a temporary directory.
+
+    Slice 3 made ``BackendRegistry.open`` compare on open, so every test here
+    that opens a store now reads — and on first contact writes — a head
+    journal under ``$XDG_STATE_HOME``. Autouse rather than per-test: one
+    forgotten opt-in is one test writing head observations into the
+    developer's real ``~/.local/state/loops``, corrupting the very memory the
+    design exists to protect, and that failure would be invisible until after
+    it had happened.
+    """
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    return tmp_path / "state"
 
 
 def _vertex(tmp_path: Path, store_line: str) -> Path:
@@ -169,13 +186,32 @@ def test_re_registering_a_name_refuses():
         registry.register("file", lambda d: (None, None))  # type: ignore[arg-type]
 
 
-def test_a_registered_opener_is_what_open_calls():
+def test_a_registered_opener_is_what_open_calls(tmp_path):
+    """The registered opener is called, and its custody half comes back wrapped.
+
+    Slice 3 §D.1 put the compare-on-open seam here, so ``open`` no longer
+    returns the opener's pair verbatim: the custody half is wrapped in
+    ``AttestedLedger`` and the reads half passes through untouched. The claim
+    this test was written to make — that the registry calls the opener it was
+    given, with the descriptor it was given — is unchanged, so it is asserted
+    directly rather than through an equality that also happened to pin the
+    absence of a wrapper.
+
+    The stub's halves are strings, which name no head: the seam asks a ledger
+    for one, gets an ``AttributeError`` instead, and — with nothing remembered
+    for this location — reports pre-genesis and writes nothing. That is the
+    same no-claim branch a location about to be minted into takes, and it is
+    exercised properly against real stores below.
+    """
     calls: list[StoreDescriptor] = []
     registry = BackendRegistry()
     registry.register("probe", lambda d: (calls.append(d), ("L", "Q"))[1])  # type: ignore[arg-type,return-value]
-    descriptor = StoreDescriptor(backend="probe", location="/x/y")
-    assert registry.open(descriptor) == ("L", "Q")
+    descriptor = StoreDescriptor(backend="probe", location=str(tmp_path / "y"))
+    ledger, query = registry.open(descriptor)
     assert calls == [descriptor]
+    assert query == "Q"
+    assert isinstance(ledger, AttestedLedger)
+    assert isinstance(ledger.opened.comparison, PreGenesis)
 
 
 def test_the_file_opener_hands_back_both_halves(tmp_path):
@@ -201,29 +237,64 @@ def test_the_file_opener_hands_back_both_halves(tmp_path):
         query.close()
 
 
-def test_opening_a_store_whose_projection_is_absent_refuses(tmp_path):
-    """Observed behavior, pinned — NOT a policy this WP chose.
+def test_opening_a_store_whose_projection_is_absent_now_succeeds(tmp_path):
+    """The §0.4 fix, and what it did and did not change.
 
-    ``FileQuery`` builds a read handle over the sibling index, and
-    ``StoreReader`` refuses a path that does not exist. So a minted log with
-    no projection beside it cannot be opened through the registry, even
-    though its LEDGER half is perfectly openable.
+    This test was born as its own negation. It pinned the OBSERVED behavior
+    that ``FileQuery`` built its read handle eagerly and ``StoreReader``
+    refuses a path that does not exist, so a minted log with no projection
+    beside it could not be opened through the registry at all — recorded as
+    ``finding:slice2-wp4-registry-open-needs-a-projection``, explicitly as
+    behavior rather than as a policy anyone chose.
 
-    The boundary this sits beside is now RULED: absent ⇒ create is permitted,
-    present ⇒ touch is forbidden (``decision:design/arrival-slice2-contract-text``,
-    ruling 1, in backend-contract.html §06). Permitted is not required, and
-    the ruling is about VERIFICATION rather than opening — so this refusal
-    stays conforming, and the test still records observed behavior rather
-    than a policy anyone chose. Whether the registry's open path should
-    materialize an absent projection is a slice-5 rewiring question, where
-    the consumers that would care are. See
-    finding:slice2-wp4-registry-open-needs-a-projection.
+    Slice 3 chose. That refusal blocked ``mint`` through the registry, which
+    is the path slice 4's sidecar takes to get its bootstrap receipt, and it
+    sat against the F2 carve-out that explicitly anticipates an absent
+    projection. The reader is now built on first use, so **opening** no longer
+    requires a projection.
+
+    What did NOT change is the honest half, and it is asserted here so the
+    update is not a quiet widening: asking for rows still refuses with the
+    same ``FileNotFoundError`` from the same place, because nothing creates an
+    index — the carve-out permits materialising one and permitted is not
+    required. The projection reports no position rather than guessing at one.
     """
     log_path = tmp_path / "s.arrival"
     ArrivalLog.mint(log_path, observer="kyle", signer=_sign, key=_KEY)
     registry = BackendRegistry.with_builtin_backends()
-    with pytest.raises(FileNotFoundError):
-        registry.open(StoreDescriptor(backend="file", location=str(log_path)))
+
+    ledger, query = registry.open(
+        StoreDescriptor(backend="file", location=str(log_path))
+    )
+    try:
+        # The ledger half is reachable and answers about the minted genesis —
+        # the whole point of the fix, and what makes `mint` reachable.
+        assert ledger.head().ordinal == 0
+        # A projection that has consumed nothing represents no lineage and
+        # reports no watermark. Saying so is different from guessing.
+        assert query.projected_through() is None
+        assert query.lineage() is None
+        # And the refusal that remains, unmoved: rows still need an index.
+        with pytest.raises(FileNotFoundError):
+            _ = query.reader
+    finally:
+        query.close()
+
+
+def test_closing_a_query_that_never_read_does_not_build_a_reader(tmp_path):
+    """Closing must not be what constructs the thing the fix deferred.
+
+    A ``close()`` that went through the property would raise
+    ``FileNotFoundError`` for a query opened over an absent projection and
+    never read — moving the refusal to a stranger place rather than removing
+    it, and breaking every ``finally: query.close()`` in the suite.
+    """
+    log_path = tmp_path / "s.arrival"
+    ArrivalLog.mint(log_path, observer="kyle", signer=_sign, key=_KEY)
+    _ledger, query = BackendRegistry.with_builtin_backends().open(
+        StoreDescriptor(backend="file", location=str(log_path))
+    )
+    query.close()  # no reader was ever built, so there is nothing to close
 
 
 def test_importing_the_registry_does_not_drag_the_adapter_in():

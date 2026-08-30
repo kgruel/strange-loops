@@ -1,0 +1,32 @@
+{
+  "name": "comparison-epoch-below-the-reset-head-is-rollback",
+  "description": "The other half of the same claim, and the one that proves the comparison is against the reset head rather than merely against SOMETHING. A store presenting a head below the accepted restore point still refuses. A ceremony that re-established trust at 90 did not license everything beneath it.",
+  "input": {
+    "form": "journal",
+    "journal": [
+      "{\"protocol\":1,\"type\":\"arrival-head-observation\",\"v\":1,\"wire\":1}",
+      "{\"kind\":\"bootstrap\",\"level\":\"mint\",\"lineage\":\"01M3COMPARISONVECTORLINEAGE\",\"location\":\"/vectors/comparison/project.arrival\",\"observed_at\":1788000000.0,\"ordinal\":0,\"record_hash\":\"8ac1d899262e830d2be319bd5ef28d03cfe847a108adaa1ec9288b7e2e0f2b00\",\"v\":1}",
+      "{\"kind\":\"advance\",\"level\":\"commit\",\"lineage\":\"01M3COMPARISONVECTORLINEAGE\",\"location\":\"/vectors/comparison/project.arrival\",\"observed_at\":1788000100.0,\"ordinal\":100,\"record_hash\":\"d532b3fc6629f8d578cdd1760ace04a0955cfd461d0f4801ee6f353ca41cd77b\",\"v\":1}",
+      "{\"follows\":[3,\"ba3f4e6a19fd6ed8070a2b40344320f7fbc010c173a5295bbff49a9772284960\"],\"kind\":\"trust-reset\",\"level\":\"full\",\"lineage\":\"01M3COMPARISONVECTORLINEAGE\",\"location\":\"/vectors/comparison/project.arrival\",\"observed_at\":1788000090.0,\"ordinal\":90,\"record_hash\":\"9ba847b1c3e2f92f410ac2264266c8506f0df0a9cee6575a27b6064957fc93ba\",\"v\":1}"
+    ],
+    "presented": {
+      "lineage": "01M3COMPARISONVECTORLINEAGE",
+      "ordinal": 89,
+      "record_hash": "623f994637f1541c6ae8cb79aae131072e4963c06724a9eeb1fb7394fb24ae31"
+    },
+    "at_known": null
+  },
+  "expected": {
+    "read": "established",
+    "known": {
+      "lineage": "01M3COMPARISONVECTORLINEAGE",
+      "ordinal": 90,
+      "record_hash": "9ba847b1c3e2f92f410ac2264266c8506f0df0a9cee6575a27b6064957fc93ba"
+    },
+    "entries": 3,
+    "epoch": 1,
+    "skipped": 0,
+    "weakening": 0,
+    "outcome": "rollback"
+  }
+}

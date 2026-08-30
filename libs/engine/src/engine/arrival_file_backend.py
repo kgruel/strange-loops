@@ -813,11 +813,41 @@ class FileQuery:
     :class:`engine.arrival_contract.ArrivalQuery`. One adapter is not a
     pattern, and a neutral spelling of "give me the facts" invented against a
     single implementation would be an invention, not a contract.
+
+    **The reader is built on first use, not at construction** (slice 3 §0.4).
+    It used to be built eagerly, and ``StoreReader`` refuses a path that does
+    not exist — so a store whose projection had never been materialised could
+    not be opened through the registry AT ALL, even though its ledger half was
+    perfectly openable. That blocked ``mint`` through the registry, which is
+    the path slice 4's sidecar takes to get its bootstrap receipt, and it sat
+    against the ratified F2 carve-out, which explicitly anticipates an absent
+    projection ("materialising a projection that does not yet exist is not
+    repair"). Deferring the construction is the whole fix: **opening** stops
+    requiring a projection, while **asking for rows** still refuses honestly
+    with the same ``FileNotFoundError`` from the same place. Nothing here
+    creates an index — permitted is not required, and creating one on the way
+    to a read would be the adapter deciding a materialisation policy that
+    belongs to whoever asked.
     """
 
     def __init__(self, index_path: Path | str) -> None:
         self._path = Path(index_path)
-        self.reader = StoreReader(self._path)
+        self._reader: StoreReader | None = None
+
+    @property
+    def reader(self) -> StoreReader:
+        """The row-shaped read surface, built on first access and then held.
+
+        Held rather than rebuilt per call, unlike :func:`_meta`'s connection:
+        that one is re-opened every time because a cached watermark would be a
+        stale claim about freshness, which is the one thing a watermark must
+        never be. A row reader has no such obligation — it answers about rows,
+        not about how far it has consumed — so one handle per query object is
+        the same lifetime it had when this was an attribute.
+        """
+        if self._reader is None:
+            self._reader = StoreReader(self._path)
+        return self._reader
 
     def lineage(self) -> str | None:
         """The lineage this projection represents, or None when it holds none.
@@ -846,5 +876,13 @@ class FileQuery:
         return Watermark(lineage=lineage, ordinal=int(ordinal))
 
     def close(self) -> None:
-        """Close the read handle this query built."""
-        self.reader.close()
+        """Close the read handle this query built, if it ever built one.
+
+        Closing must not be the thing that CONSTRUCTS a reader — a query opened
+        over an absent projection and closed without being read would then
+        raise from ``close()``, turning the lazy fix into a refusal moved to a
+        stranger place. So this consults the field rather than the property.
+        """
+        if self._reader is not None:
+            self._reader.close()
+            self._reader = None

@@ -1,0 +1,38 @@
+{
+  "name": "comparison-incomplete-a-bound-cannot-answer-above-itself",
+  "description": "The third cell of the bound, and the one a two-celled reading loses. Below the bound is a sound rollback and at the bound declines \u2014 but a head ABOVE the bound is not an advance either, because NOTHING BOUNDS THE ACCEPTED HEAD FROM ABOVE. Whatever the read missed carries no information about the ordinal it held. This fixture exhibits it rather than merely asserting it: the entry the crash tore held ordinal 200, so the head this machine actually accepted was 200, and a store presenting 95 is a ROLLBACK of 105 ordinals. An implementation answering 'advanced' because 95 exceeds the surviving bound of 91 would wave through exactly the loss the journal exists to catch. Note that at_known is supplied and valid \u2014 descent from 91 to 95 really is established \u2014 which is the point: descent verified from the bound says nothing about an entry that was never on the walk. Both proceed answers are unobtainable against a bound; only the refusal below it survives.",
+  "input": {
+    "form": "journal",
+    "journal": [
+      "{\"protocol\":1,\"type\":\"arrival-head-observation\",\"v\":1,\"wire\":1}",
+      "{\"kind\":\"bootstrap\",\"level\":\"mint\",\"lineage\":\"01M3COMPARISONVECTORLINEAGE\",\"location\":\"/vectors/comparison/project.arrival\",\"observed_at\":1788000000.0,\"ordinal\":0,\"record_hash\":\"8ac1d899262e830d2be319bd5ef28d03cfe847a108adaa1ec9288b7e2e0f2b00\",\"v\":1}",
+      "{\"follows\":[2,\"1ca00fe6c1ae4747e07b5371b8c27cd6ab8696333989d646009ebc554a40030c\"],\"kind\":\"trust-reset\",\"level\":\"full\",\"lineage\":\"01M3COMPARISONVECTORLINEAGE\",\"location\":\"/vectors/comparison/project.arrival\",\"observed_at\":1788000090.0,\"ordinal\":90,\"record_hash\":\"9ba847b1c3e2f92f410ac2264266c8506f0df0a9cee6575a27b6064957fc93ba\",\"v\":1}",
+      "{\"kind\":\"advance\",\"level\":\"commit\",\"lineage\":\"01M3COMPARISONVECTORLINEAGE\",\"location\":\"/vectors/comparison/project.arrival\",\"o",
+      "{\"kind\":\"advance\",\"level\":\"commit\",\"lineage\":\"01M3COMPARISONVECTORLINEAGE\",\"location\":\"/vectors/comparison/project.arrival\",\"observed_at\":1788000091.0,\"ordinal\":91,\"record_hash\":\"e2235df4281b93546c0177885f0677948fb368cf593fa3ec1fbd2d734e06bfe8\",\"v\":1}"
+    ],
+    "presented": {
+      "lineage": "01M3COMPARISONVECTORLINEAGE",
+      "ordinal": 95,
+      "record_hash": "f5524136b09dcdc36db8ce0e53f9fbab5e1b8254bcaed40822b1333cd4475d85"
+    },
+    "at_known": {
+      "lineage": "01M3COMPARISONVECTORLINEAGE",
+      "ordinal": 91,
+      "record_hash": "e2235df4281b93546c0177885f0677948fb368cf593fa3ec1fbd2d734e06bfe8"
+    }
+  },
+  "expected": {
+    "read": "bounded",
+    "known": {
+      "lineage": "01M3COMPARISONVECTORLINEAGE",
+      "ordinal": 91,
+      "record_hash": "e2235df4281b93546c0177885f0677948fb368cf593fa3ec1fbd2d734e06bfe8"
+    },
+    "entries": 3,
+    "epoch": 2,
+    "skipped": 1,
+    "weakening": 1,
+    "outcome": null,
+    "sound_answer": null
+  }
+}

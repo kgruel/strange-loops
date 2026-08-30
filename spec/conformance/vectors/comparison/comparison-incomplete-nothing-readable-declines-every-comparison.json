@@ -1,0 +1,27 @@
+{
+  "name": "comparison-incomplete-nothing-readable-declines-every-comparison",
+  "description": "The third state, and it is not the absence of one. This journal was written entirely by a later build \u2014 its own header, its own entries \u2014 so no attacker is involved, only version skew. Content was claimed and none of it could be read, which says heads WERE accepted here and their ordinals are precisely what was lost. There is no bound, so unlike an incomplete read this cannot even answer rollback: every comparison declines. Collapsing this into first contact would grant trust on first use PRECISELY BECAUSE the journal became unreadable.",
+  "input": {
+    "form": "journal",
+    "journal": [
+      "{\"issuer\":\"a-later-build\",\"protocol\":2,\"type\":\"arrival-head-observation\",\"v\":2,\"wire\":2}",
+      "{\"custody\":{\"chain\":\"a-later-build\"},\"kind\":\"advance\",\"level\":\"commit\",\"lineage\":\"01M3COMPARISONVECTORLINEAGE\",\"observed_at\":1788004216.0,\"ordinal\":4216,\"record_hash\":\"fe006204847e0c589d1c2cdc7646c1fe2222e96c29802245fcbfcb23c2021f81\",\"v\":2}",
+      "{\"custody\":{\"chain\":\"a-later-build\"},\"kind\":\"advance\",\"level\":\"commit\",\"lineage\":\"01M3COMPARISONVECTORLINEAGE\",\"observed_at\":1788004217.0,\"ordinal\":4217,\"record_hash\":\"256f6ea40690cf118ab26a820207050cb57ae41ad4e5ce03b23564ff0a518c5d\",\"v\":2}"
+    ],
+    "presented": {
+      "lineage": "01M3COMPARISONVECTORLINEAGE",
+      "ordinal": 4217,
+      "record_hash": "256f6ea40690cf118ab26a820207050cb57ae41ad4e5ce03b23564ff0a518c5d"
+    },
+    "at_known": null
+  },
+  "expected": {
+    "read": "unreadable",
+    "known": null,
+    "entries": 0,
+    "epoch": 0,
+    "skipped": 2,
+    "weakening": 2,
+    "outcome": null
+  }
+}

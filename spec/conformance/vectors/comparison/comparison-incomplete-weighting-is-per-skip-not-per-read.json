@@ -1,0 +1,36 @@
+{
+  "name": "comparison-incomplete-weighting-is-per-skip-not-per-read",
+  "description": "Weight is decided per skip, never per read, and this is the vector that tells the two apart. The file carries TWO unreadable lines of the same cause at different positions: one below the boundary, one above it. The one below weighs nothing, the one above weighs in full, and the read is BOUNDED \u2014 two skips recorded, one of them weakening. An implementation that decided weight for the read as a whole would have to answer for both lines at once and would get one of them wrong whichever way it went: 'any zero-weight skip means established' answers established here and silently drops a real loss, while 'any skip at all bounds' answers bounded for the healing case and heals nothing. The same argument holds across causes \u2014 a journal holding a re-assertion AND an unreadable line must still bound \u2014 which is why the two halves of the rule, cause and position, are applied to each skip on its own.",
+  "input": {
+    "form": "journal",
+    "journal": [
+      "{\"protocol\":1,\"type\":\"arrival-head-observation\",\"v\":1,\"wire\":1}",
+      "{\"kind\":\"bootstrap\",\"level\":\"mint\",\"lineage\":\"01M3COMPARISONVECTORLINEAGE\",\"location\":\"/vectors/comparison/project.arrival\",\"observed_at\":1788000000.0,\"ordinal\":0,\"record_hash\":\"8ac1d899262e830d2be319bd5ef28d03cfe847a108adaa1ec9288b7e2e0f2b00\",\"v\":1}",
+      "{\"kind\":\"advance\",\"level\":\"commit\",\"lineage\":\"01M3COMPARISONVECTORLINEAGE\",\"location\":\"/vectors/comparison/project.arrival\",\"o",
+      "{\"kind\":\"advance\",\"level\":\"commit\",\"lineage\":\"01M3COMPARISONVECTORLINEAGE\",\"location\":\"/vectors/comparison/project.arrival\",\"observed_at\":1788000101.0,\"ordinal\":101,\"record_hash\":\"acbc798fc2803ce8a55d82f63a71978ac143f43773dea6c7bd53e06bef146520\",\"v\":1}",
+      "{\"follows\":[4,\"6110b582a5077ba7d78c4fde123bb3270c219ebce11d2ab679c505e4b9bcd57e\"],\"kind\":\"trust-reset\",\"level\":\"full\",\"lineage\":\"01M3COMPARISONVECTORLINEAGE\",\"location\":\"/vectors/comparison/project.arrival\",\"observed_at\":1788000090.0,\"ordinal\":90,\"record_hash\":\"9ba847b1c3e2f92f410ac2264266c8506f0df0a9cee6575a27b6064957fc93ba\",\"v\":1}",
+      "{\"kind\":\"advance\",\"level\":\"commit\",\"lineage\":\"01M3COMPARISONVECTORLINEAGE\",\"location\":\"/vectors/comparison/project.arrival\",\"",
+      "{\"kind\":\"advance\",\"level\":\"commit\",\"lineage\":\"01M3COMPARISONVECTORLINEAGE\",\"location\":\"/vectors/comparison/project.arrival\",\"observed_at\":1788000091.0,\"ordinal\":91,\"record_hash\":\"e2235df4281b93546c0177885f0677948fb368cf593fa3ec1fbd2d734e06bfe8\",\"v\":1}"
+    ],
+    "presented": {
+      "lineage": "01M3COMPARISONVECTORLINEAGE",
+      "ordinal": 91,
+      "record_hash": "e2235df4281b93546c0177885f0677948fb368cf593fa3ec1fbd2d734e06bfe8"
+    },
+    "at_known": null
+  },
+  "expected": {
+    "read": "bounded",
+    "known": {
+      "lineage": "01M3COMPARISONVECTORLINEAGE",
+      "ordinal": 91,
+      "record_hash": "e2235df4281b93546c0177885f0677948fb368cf593fa3ec1fbd2d734e06bfe8"
+    },
+    "entries": 4,
+    "epoch": 2,
+    "skipped": 2,
+    "weakening": 1,
+    "outcome": null,
+    "sound_answer": null
+  }
+}

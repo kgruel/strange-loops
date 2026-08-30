@@ -1,0 +1,33 @@
+{
+  "name": "comparison-epoch-a-reset-bound-to-the-wrong-line-does-not-open-one",
+  "description": "A trust reset whose recorded predecessor is not the entry actually preceding it. It is skipped WITH A RECORD \u2014 never a refusal \u2014 the epoch walk keeps going for an earlier valid boundary, finds none, and the remembered head is computed as though the invalid reset were not there. So the store presenting the head the reset tried to install is REFUSED: the abandoned ordinal above it is still what this machine remembers. That is the whole of the replay defence \u2014 a reset that cannot prove where it was appended cannot move the read scope. THE CONSTRUCTION ISOLATES POSITION ON PURPOSE: an intervening line has been removed, which shifts every later line up by one, so the reset's recorded IDENTITY still matches its predecessor exactly and only its recorded LINE is stale. An implementation checking identity alone \u2014 the shape this rule replaced, and the one a replayed ordered suffix defeats \u2014 passes every identity-based fixture and fails this one. A voided reset is also a WEAKENING-class skip: the line's content is known but what the operator INTENDED by it is not, and that uncertainty is exactly what a bound represents.",
+  "input": {
+    "form": "journal",
+    "journal": [
+      "{\"protocol\":1,\"type\":\"arrival-head-observation\",\"v\":1,\"wire\":1}",
+      "{\"kind\":\"bootstrap\",\"level\":\"mint\",\"lineage\":\"01M3COMPARISONVECTORLINEAGE\",\"location\":\"/vectors/comparison/project.arrival\",\"observed_at\":1788000000.0,\"ordinal\":0,\"record_hash\":\"8ac1d899262e830d2be319bd5ef28d03cfe847a108adaa1ec9288b7e2e0f2b00\",\"v\":1}",
+      "{\"kind\":\"advance\",\"level\":\"commit\",\"lineage\":\"01M3COMPARISONVECTORLINEAGE\",\"location\":\"/vectors/comparison/project.arrival\",\"observed_at\":1788000101.0,\"ordinal\":101,\"record_hash\":\"acbc798fc2803ce8a55d82f63a71978ac143f43773dea6c7bd53e06bef146520\",\"v\":1}",
+      "{\"follows\":[4,\"6110b582a5077ba7d78c4fde123bb3270c219ebce11d2ab679c505e4b9bcd57e\"],\"kind\":\"trust-reset\",\"level\":\"full\",\"lineage\":\"01M3COMPARISONVECTORLINEAGE\",\"location\":\"/vectors/comparison/project.arrival\",\"observed_at\":1788000090.0,\"ordinal\":90,\"record_hash\":\"9ba847b1c3e2f92f410ac2264266c8506f0df0a9cee6575a27b6064957fc93ba\",\"v\":1}"
+    ],
+    "presented": {
+      "lineage": "01M3COMPARISONVECTORLINEAGE",
+      "ordinal": 90,
+      "record_hash": "9ba847b1c3e2f92f410ac2264266c8506f0df0a9cee6575a27b6064957fc93ba"
+    },
+    "at_known": null
+  },
+  "expected": {
+    "read": "bounded",
+    "known": {
+      "lineage": "01M3COMPARISONVECTORLINEAGE",
+      "ordinal": 101,
+      "record_hash": "acbc798fc2803ce8a55d82f63a71978ac143f43773dea6c7bd53e06bef146520"
+    },
+    "entries": 3,
+    "epoch": 3,
+    "skipped": 1,
+    "weakening": 1,
+    "outcome": null,
+    "sound_answer": "rollback"
+  }
+}

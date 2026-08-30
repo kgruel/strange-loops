@@ -1,0 +1,33 @@
+{
+  "name": "comparison-header-both-markers-together-are-unclassifiable",
+  "description": "The middle row of the three-way rule, and the whole reason the rule is three-way rather than a predicate. A line carrying BOTH the journal type marker and an entry kind is not classified at all: never absorbed as a header (which would silently lose an entry), never a reason to refuse the file (which would be an uncontracted version-skew refusal of everything). It is skipped and reported naming the ambiguity \u2014 a location claim about this build's ability to read the line, NOT a verdict about what the line is, which is exactly what this build cannot know. Both obvious repairs fail in opposite directions; admitting a third verdict is what makes the reader stop having to choose between two wrong certainties.",
+  "input": {
+    "form": "journal",
+    "journal": [
+      "{\"protocol\":1,\"type\":\"arrival-head-observation\",\"v\":1,\"wire\":1}",
+      "{\"kind\":\"bootstrap\",\"level\":\"mint\",\"lineage\":\"01M3COMPARISONVECTORLINEAGE\",\"location\":\"/vectors/comparison/project.arrival\",\"observed_at\":1788000000.0,\"ordinal\":0,\"record_hash\":\"8ac1d899262e830d2be319bd5ef28d03cfe847a108adaa1ec9288b7e2e0f2b00\",\"v\":1}",
+      "{\"kind\":\"advance\",\"level\":\"commit\",\"lineage\":\"01M3COMPARISONVECTORLINEAGE\",\"observed_at\":1788000092.0,\"ordinal\":92,\"record_hash\":\"139f06e99d147450f6d0f98c923f3ea1c78302f9d6b9b0d895221149a7524e5f\",\"type\":\"arrival-head-observation\",\"v\":1}",
+      "{\"kind\":\"advance\",\"level\":\"commit\",\"lineage\":\"01M3COMPARISONVECTORLINEAGE\",\"location\":\"/vectors/comparison/project.arrival\",\"observed_at\":1788000091.0,\"ordinal\":91,\"record_hash\":\"e2235df4281b93546c0177885f0677948fb368cf593fa3ec1fbd2d734e06bfe8\",\"v\":1}"
+    ],
+    "presented": {
+      "lineage": "01M3COMPARISONVECTORLINEAGE",
+      "ordinal": 91,
+      "record_hash": "e2235df4281b93546c0177885f0677948fb368cf593fa3ec1fbd2d734e06bfe8"
+    },
+    "at_known": null
+  },
+  "expected": {
+    "read": "bounded",
+    "known": {
+      "lineage": "01M3COMPARISONVECTORLINEAGE",
+      "ordinal": 91,
+      "record_hash": "e2235df4281b93546c0177885f0677948fb368cf593fa3ec1fbd2d734e06bfe8"
+    },
+    "entries": 2,
+    "epoch": 2,
+    "skipped": 1,
+    "weakening": 1,
+    "outcome": null,
+    "sound_answer": null
+  }
+}

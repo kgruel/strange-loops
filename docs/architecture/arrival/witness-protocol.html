@@ -35,6 +35,7 @@
         <li><a href="#threats">Threat model</a></li>
         <li><a href="#chain">Record-chain claim</a></li>
         <li><a href="#attestation">Head attestation</a></li>
+        <li><a href="#journal">The shipped head journal</a></li>
         <li><a href="#issuance">Issuance and receipts</a></li>
         <li><a href="#topologies">Witness topologies</a></li>
         <li><a href="#comparison">Comparison state machine</a></li>
@@ -123,6 +124,7 @@
               <li>Replacement by an older backup</li>
               <li>Complete history rewrite and re-chaining</li>
               <li>Same-lineage equivocation between clients</li>
+              <li>Return to history a ceremony abandoned (§04b)</li>
             </ul>
           </article>
           <article class="doc-panel">
@@ -135,6 +137,8 @@
               <li>Detection when all witnesses and keys collude</li>
               <li>Availability of a remote witness</li>
               <li>Confidentiality of record content</li>
+              <li>Aliases of one store reporting distinct filesystem identity, such as two mounts of one export</li>
+              <li>Journal truncation followed by replay, which realigns recorded line positions</li>
             </ul>
           </article>
         </div>
@@ -206,6 +210,13 @@
           claim is the prefix, not its projection); the final wire object will need its own
           golden corpus.
         </p>
+        <p>
+          This grammar is <strong>deferred</strong> (§13). It is the signed upgrade of the
+          unsigned head journal in §04b — which is what the adopted minimum actually ships —
+          rather than an alternative to it: one design at two assurance levels. The shipped
+          records deliberately carry a different <code>type</code> so that this corpus stays
+          unencumbered by an unsigned one.
+        </p>
 
         <div class="doc-table-wrap">
           <table class="doc-spec-table">
@@ -266,6 +277,246 @@
           fields never include backend page state. An optional extension may name a backend or
           authority epoch for operations, but logical comparison keys on lineage, ordinal, and
           record hash.
+        </p>
+      </section>
+
+      <section class="doc-section" id="journal">
+        <div class="doc-section-header">
+          <span class="doc-section-number">04b</span>
+          <h2>The shipped head journal</h2>
+        </div>
+        <p>
+          What the adopted minimum ships is a smaller artifact serving §04’s purpose: a local,
+          unsigned, append-only journal, one file per lineage, held in a per-user state root
+          outside every store’s restore boundary. Nothing in it is signed, and the absence of
+          <code>sig</code>, <code>issuer</code>, and <code>key_id</code> is the claim rather
+          than an omission—an empty signature field would advertise a transferability this
+          artifact does not have. Its records carry the serialized type
+          <code>arrival-head-observation</code>, distinct from §04’s <code>arrival-head</code>.
+        </p>
+        <p>
+          Entries are keyed by <strong>lineage, never by path</strong>. A path-keyed memory
+          manufactures a fresh first contact per worktree, which is silent re-acceptance
+          through the most ordinary operation there is; a restored old copy opened at a new
+          path still presents its lineage, still finds this journal, and is still classified a
+          rollback. The field-level detail is normative in
+          <code>spec/conformance/SCHEMA.md</code> §11 and the <code>comparison</code> vector
+          family and is not restated here. What follows is the model those vectors pin.
+        </p>
+
+        <h3>Header, entry, or neither</h3>
+        <p>
+          A journal opens with a header line naming the grammar, protocol, and wire versions its
+          record hashes derive under; every later line is one observation. Lines are classified
+          by <strong>shape, never by position</strong>, because a reader may not assume the
+          header is line 1: two writers racing to create the same journal each write one, and a
+          doubled header is a tolerated artifact of that race rather than a fault.
+        </p>
+
+        <div class="doc-table-wrap">
+          <table class="doc-spec-table">
+            <thead>
+              <tr><th>Line carries</th><th>Classification</th><th>Read action</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>The type marker, no entry kind</td><td>Header</td><td>Record the versions; it is not an observation.</td></tr>
+              <tr><td>The type marker <em>and</em> an entry kind</td><td>Unclassifiable</td><td>Skip and record. Never absorb it, never refuse the file.</td></tr>
+              <tr><td>Anything else</td><td>Entry-shaped</td><td>Parse as an observation; skip and record one this build cannot read.</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <p>
+          The middle row exists because both two-valued repairs fail in opposite directions.
+          Keying on the type marker alone lets a future entry that happens to carry it be
+          absorbed as a header, silently losing the line that held the epoch maximum; requiring
+          the marker plus the absence of a kind refuses the whole file when a later build’s
+          header carries a kind of its own, which is an uncontracted version-skew refusal. So a
+          line bearing both markers is not classified at all. That is a <strong>location
+          claim</strong> about this build’s ability to read the line, not a verdict about what
+          the line is—which is precisely what this build cannot know.
+        </p>
+        <p>
+          A journal holding entries but <em>no</em> header is tolerated on the same reasoning.
+          The entries are self-describing evidence that heads were accepted, so what is lost—the
+          versions those hashes derive under—weakens the read rather than voiding the file. The
+          absence is reported without a line number, because an absence does not have one—which
+          is also what marks it <em>structural</em>, and a structural absence weighs no matter
+          where a ceremony boundary sits (§07).
+        </p>
+
+        <h3>What an incomplete read costs</h3>
+        <p>
+          Every line this build cannot use is skipped and reported, wherever in the file it sits.
+          Being recorded and carrying weight are different things: a skip weakens the read only
+          if its cause and its position both say it should, and §07 carries that weighting
+          together with the four resulting states. An incomplete read never refuses the journal;
+          it weakens what the journal can be asked.
+        </p>
+
+        <h3>Position-bound trust resets</h3>
+        <p>
+          A trust-reset entry (§11) carries a required <code>follows</code>: the
+          <strong>physical line ordinal</strong> of the entry it was appended after, together
+          with that entry’s identity. The line is the file’s own, counted from 1 over every
+          line including the ones this build skipped—never an index among the entries that
+          happened to parse. An index is a judgment, and a later build that classified one line
+          differently would renumber every entry after it and silently void every reset bound
+          below.
+        </p>
+        <p>
+          An entry is only bytes in an append-only file, so an old reset re-appended would
+          otherwise re-open the epoch it had closed. Binding to the predecessor’s identity alone
+          does not close that: replaying the predecessor and the reset together as an ordered
+          suffix reproduces the recorded identity exactly. The position cannot be reproduced.
+          Copied bytes appended later always land at a later line, so the two-line replay, a
+          full-suffix replay, and a wholesale journal concatenation all fail one check for one
+          reason. Identity stays in the pair because position alone would accept a truncation
+          that happened to realign a different entry onto the recorded line.
+        </p>
+        <p>
+          A reset whose binding does not match is <strong>not an epoch boundary, and not a
+          refusal</strong>. It is skipped and recorded through the ordinary channel, and the
+          scan keeps walking back for an earlier valid one; refusing would brick every later
+          open on a benign crash-retry duplicate, where the same reset is appended twice and
+          the second copy’s predecessor is the first. The direction of the error is the safe one
+          either way—misjudging a legitimate reset leaves <em>K</em> at the higher abandoned
+          head, so the failure is a refusal rather than an acceptance. And a voided reset’s note
+          <em>weighs</em>—ruled narrowly, because the line’s content is readable while the
+          operator’s intent for it is not, and that uncertainty is real ignorance (§07)—so a
+          journal holding a replayed reset still refuses everything below the resulting bound,
+          which is the attack the binding was closing.
+        </p>
+        <p>
+          The ceremony reads the journal’s tail <strong>judgment-free</strong>—last readable
+          entry and its line, with no epoch scoping, no equivocation check, and no head
+          computation—because a recovery path that depended on the read it recovers from would
+          be unusable at exactly the moment it is needed, which is a journal already
+          equivocating. The position claim then buys its protection with an obligation: there is
+          no lock across read-tail-then-append, so an automated append landing in that window
+          leaves a freshly written, legitimate reset carrying a position that is already stale.
+          The ceremony therefore reads its own entry back and raises
+          <code>TrustResetNotHonored</code> when it did not take effect. Nothing is lost and
+          nothing is wrongly accepted in that case—the previous head still stands and opens keep
+          refusing—but an operator who believes their store will now open is holding a false
+          belief the next open would contradict, and silence is the only unsafe part.
+        </p>
+        <p>
+          The residual, stated rather than implied: truncating the journal and then replaying
+          realigns every position, and nothing here detects it. That is the known bound of
+          unsigned local state—the same class as deleting the journal outright and being met
+          with first contact—and §04’s chained signed entries are the named upgrade.
+        </p>
+
+        <h3>What a reset fences out</h3>
+        <p>
+          A reset decrees trust in <em>N</em>, and an advance whose verified descent path passes
+          through history an operator decreed away is <strong>refused</strong>
+          (<code>AbandonedHistoryFenced</code>) until a new decree reaches it. Verified descent is
+          not the whole question: a chain can be perfectly intact and still be the history a
+          ceremony put behind us, and machinery must never silently reverse an operator’s decree. The acceptance path is the ceremony itself—decree
+          the recovered head and the fence lifts—so recovering genuinely wanted history costs
+          exactly one ceremony. The re-assertion rule below closes the same destination by a
+          different road: a replayed line would make the abandoned head <em>K</em> itself, and an
+          unchanged answer needs no descent at all.
+        </p>
+        <p>
+          This <strong>corrects what this document said before</strong>, which was that such
+          descendants were accepted and that fencing authentic history was not expressible
+          unsigned. They were accepted, and that was a silent loop rather than a bound worth
+          disclosing: reset from an abandoned <em>N+1</em> to <em>N</em>, restore the authentic
+          <em>N+1</em>, and the open verifies descent honestly, answers advanced, and
+          <em>journals</em> <em>N+1</em> back into the current epoch—after which every later open
+          reads unchanged, with no refusal and no fork, repeatable indefinitely. The acceptance
+          erased its own evidence by recording it
+          (<code>finding:s3-reset-descendant-silent-loop</code>).
+        </p>
+        <p>
+          Three properties make the fence hold. It is <strong>identity-keyed</strong>: the anchors
+          are (ordinal, record hash) pairs taken from the entries the journal still holds in
+          abandoned epochs—readable because epoch scoping excludes them from <em>K</em> and not
+          from the file (§07)—which is the same discriminator a same-height fork turns on. An
+          ordinal <em>span</em> would be vacuous or catastrophic instead: an operator who resets to
+          5 and lets the store re-advance mints a new 6, 7 and 8 inside the abandoned range, and a
+          span would refuse every one of them forever, where identity leaves a legitimate
+          re-advance at an abandoned ordinal under a different hash an ordinary advance. It reaches
+          <strong>every walked coordinate</strong> rather than the presented head alone, because an
+          abandoned branch grown offline presents <em>N+3</em> while the abandoned entry sits at
+          <em>N+1</em>, and head-only checking waves it through. That reach has a stated price: an
+          advancing open pays one verified lookup per distinct, currently fenced anchor
+          ordinal—other lineages, lifted anchors and coordinates above the presented head are
+          excluded first, and multiple hashes at one ordinal share a lookup—so the cost grows
+          with the eligible abandoned coordinates ceremony history retains, paid only on the
+          ADVANCED branch, never on the dominant unchanged open. And it sits <strong>before
+          anything is journaled</strong>, so a fenced open records nothing—the acceptance recording
+          was precisely what made the loop invisible.
+        </p>
+        <p>
+          The lift rule is narrower than it first reads. An abandoned entry is fenced only while no
+          decree reaches at or above it—otherwise recovery would be impossible and the ceremony
+          would re-brick the store—but the decree that lifts is the <strong>current boundary
+          decree</strong> alone, never merely some later one. Read loosely, an intermediate decree
+          would lift an entry that a subsequent decree had abandoned again: reset to 10, reset back
+          to 5, and the 10 stands unfenced by the very decree the second ceremony overrode. The
+          boundary is the one decree nothing has superseded, so it is the one that speaks. This
+          fences more, never less, and it costs recovery nothing, because a recovery decree
+          <em>is</em> the boundary decree.
+        </p>
+
+        <h3>A repeated line is a re-assertion</h3>
+        <p>
+          A line whose stripped text duplicates an earlier line in the same file is skipped and
+          recorded <em>before</em> the head is computed: it re-asserts an observation the
+          journal already holds rather than recording a new one, and a replayed line cannot
+          count twice. The rule is type-agnostic—advances, audits, and resets pass one gate—and
+          order-agnostic, so it survives the non-ascending write order §07 describes. It is
+          read-side only: no record shape, producer, or locking changes. Header lines never enter
+          it, which is why the create-race duplicate above is tolerated rather than deduplicated.
+        </p>
+        <p>
+          The record <strong>carries no weight</strong> (§07): its content is a line this read
+          already counted, so nothing about the accepted head is unknown because of it, and a
+          journal whose only losses are re-assertions still reads as established.
+        </p>
+
+        <div class="doc-callout is-security">
+          <span class="doc-callout-label">Why bytes, and why before <em>K</em></span>
+          <p>
+            <em>K</em> is the maximum ordinal of the current epoch, so a replayed historical
+            advance would be taken as current and would name a head an operator had deliberately
+            abandoned. A store restored from the pre-reset backup then presents exactly that
+            head, and “unchanged” carries no descent check by design—so ceremonially abandoned
+            state would be re-accepted in silence. Literal replay of existing bytes is the
+            unsigned threat model, and byte identity is complete against it. Because the skip
+            carries no weight, the match predicate is acceptance-load-bearing, which is worth
+            saying plainly: a false match discards a real line, lowers <em>K</em>, and still
+            reads as established. What holds the line there is that an advance demands a
+            verified descendant rather than mere height.
+          </p>
+        </div>
+
+        <h3>First contact and the object behind a name</h3>
+        <p>
+          A location is bound to its lineage when first witnessed, and the binding key is a
+          resolved path—relative segments made absolute, <code>..</code> collapsed, symlinks
+          followed—so that two vertices reaching one log by different routes present one key.
+          That key is a <strong>spelling, not an identity</strong>. Resolving a path normalizes
+          it; it does not establish which filesystem object the path names. A case-variant
+          spelling on a case-insensitive filesystem, or a second mount of the same volume,
+          reaches the very same store through a string that resolution leaves untouched and
+          therefore still distinct from the one already bound.
+        </p>
+        <p>
+          So before a presenting location with no binding of its own is minted as first contact,
+          each recorded binding is live-stat’d and its device and inode compared. A match routes
+          the open through the existing binding, where a replacement bearing a fresh lineage
+          meets a lineage-replaced refusal instead of walking past it. That identity is compared
+          live and never recorded: inodes go stale when a file is recreated and are recycled
+          onto unrelated files, so a stored one is a claim that rots into a false match. Asking
+          the filesystem which object a name currently denotes is legitimate here because the
+          filesystem namespace is ambient authority—two names for one object is a property of
+          the namespace, not of the store—and the answer is a location claim about this host
+          rather than a verdict about the store.
         </p>
       </section>
 
@@ -371,8 +622,166 @@
           <h2>Head comparison state machine</h2>
         </div>
         <p>
-          Let <em>K</em> be the last known or attested head and <em>P</em> the head now presented by
-          the authority. Comparison uses lineage, ordinal, and record hash—never timestamp alone.
+          Let <em>K</em> be the head this verifier already accepted and <em>P</em> the head now
+          presented by the authority. Comparison uses lineage, ordinal, and record hash—never
+          timestamp alone.
+        </p>
+        <p>
+          <em>K</em> is the <strong>maximum-ordinal entry of the current trust epoch</strong>,
+          and both halves of that are load-bearing. Not the last entry written: appends are
+          serialized, journal writes are not, so two writers can leave a file holding ordinals
+          90, 92, 91 in that order. Last-write semantics would read <em>K</em> = 91 there and
+          call a genuine restore to 91 unchanged. Duplicate entries at the maximum are harmless;
+          two entries at the maximum with <em>different</em> record hashes are equivocation, and
+          the journal has recorded both rather than choosing between them.
+        </p>
+        <p>
+          Not unscoped, either. A trust epoch is the last honored trust-reset entry and
+          everything after it, <strong>inclusive of the reset entry itself</strong>, which
+          carries the head the operator accepted—scoping it out would leave a just-reset journal
+          with an empty epoch and a next open classifying first contact. Omitting the epoch
+          altogether is the mirror deadlock: after an operator accepts a restore from ordinal
+          100 back to 90, the abandoned entries at 91–100 still hold the maximum ordinal, so an
+          unscoped <em>K</em> would name the head that was deliberately abandoned and every
+          later open would refuse a rollback forever. Those entries stay in the journal as
+          <strong>evidence, not as claims</strong>—excluded from <em>K</em>, never from the file,
+          which is what lets them go on serving as the anchors §04b’s fence checks against.
+          Equivocation is scoped the same way, so a ceremony can take effect over a conflict the
+          operator has already resolved.
+        </p>
+
+        <h3>How much of a head the journal has</h3>
+        <p>
+          <em>K</em> is not head-or-nothing. Reading the journal (§04b) yields one of four
+          states, and the weaker ones must not be collapsed into the others: a journal holding
+          content none of which can be read says something quite different from an empty one,
+          and trusting a store on first use <em>because</em> its journal became unreadable is
+          the silent re-acceptance this protocol exists to prevent.
+        </p>
+
+        <div class="doc-table-wrap">
+          <table class="doc-spec-table">
+            <thead>
+              <tr><th>Read state</th><th>When</th><th>What it supports</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>Established head</td><td>Nothing the read missed carried weight</td><td>All seven comparisons below.</td></tr>
+              <tr><td>Head lower bound—<em>at least</em> this</td><td>The read missed something that carried weight</td><td>Rollback below the bound; same-height fork at the bound with a differing hash. Equal is not unchanged and higher is not advanced.</td></tr>
+              <tr><td>Head unreadable</td><td>Content was claimed and none of it could be read</td><td>Nothing—there is no bound to compare against, rollback included. Not first contact: heads <em>were</em> accepted here.</td></tr>
+              <tr><td>No head</td><td>The journal is absent, or holds only a header</td><td>First contact.</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <p>
+          A read is <strong>incomplete</strong> when it lacked something it needed <em>and</em>
+          that loss carried weight—a line that did not parse, a line that could not be
+          classified, an entry written by a later build, a voided reset, or the header. The term
+          names what the read lacked rather than why, so a new cause joins it without new
+          vocabulary. “Incomplete,” never “torn”—damage at the end of the file is not a
+          privileged case. Because journal writes do not ascend in file order, damage anywhere
+          can take the epoch maximum, so a weighing loss mid-file yields a lower bound by
+          construction rather than by concession.
+        </p>
+        <p>
+          Nothing bounds the accepted head from <em>above</em>, and that asymmetry is the trap.
+          A presented head equal to the bound may be a rollback from the very entry the read
+          missed; one above the bound may still sit below a lost entry higher still, and descent
+          verified from the bound says nothing about an entry that was never on the walk.
+          Gathering more evidence from the store repairs neither, because the missing fact is
+          about what this machine previously <em>accepted</em>, which the store never knew.
+          Recovering it is operator work: repair the journal, or run the trust-reset ceremony.
+        </p>
+
+        <h3>Which skips weaken: weight is cause times position</h3>
+        <p>
+          A recorded skip and a weakening skip are not the same thing. The bound exists to
+          represent <em>ignorance</em>, so a skip that leaves the reader ignorant of nothing must
+          not produce one. Weight is the product of two factors, and both are decided
+          <strong>per skip, never per read</strong>: a journal holding one weightless skip and
+          one weighing skip is bounded, by the second alone.
+        </p>
+        <p>
+          <strong>Cause.</strong> A re-assertion (§04b) carries zero weight—the skipped line’s
+          content is a line this read already counted, so nothing about the accepted head is
+          unknown because of it. Every other cause weighs in full. Weighing a re-assertion would
+          let one benign crash-retry duplicate bound every read of an append-only file for the
+          life of that file, which is the ordinary-crash-becomes-permanent-incident shape these
+          rules keep resolving against. A <em>voided reset</em> does weigh, and the distinction
+          is worth stating: its line is perfectly readable, but what the operator intended by it
+          is not, and that intent uncertainty is real ignorance.
+        </p>
+        <p>
+          <strong>Position.</strong> A weakening-class skip sitting at a physical line
+          <em>before the boundary reset’s line</em> carries zero weight. The ceremony decreed
+          trust in a head, and everything positionally behind that decree is what it decreed
+          past; at or after the boundary, the cause weight applies in full. Without this the
+          ceremony heals nothing—an operator resets past a damaged line and still gets a bounded
+          read forever, from the very damage the reset was run to put behind them.
+        </p>
+
+        <div class="doc-callout is-warning">
+          <span class="doc-callout-label">Position is not ordinal</span>
+          <p>
+            The coordinate here is the physical line, the same one a reset’s binding uses, and
+            ordinals never enter it. That is the exact opposite of the rule stated above for
+            <em>K</em>, and both are true for one reason: ordinals do not ascend in file order
+            because two writers interleave them, while positions cannot interleave, because the
+            filesystem serializes appends. Appends are tail-only, so a line’s position in the
+            file <em>is</em> its place in time.
+          </p>
+        </div>
+
+        <p>
+          Three further edges, each a case the rule would otherwise get wrong. A
+          <strong>structural absence is exempt from position scoping</strong>: a missing header
+          weighs regardless of any boundary, because the header would be line 1 and sit below
+          every boundary, yet its absence is a claim about the file rather than a line an
+          operator decreed past—which is also why it is reported without a line number.
+          <strong>No valid reset means no boundary</strong>, and then every weakening cause keeps
+          full weight; “there is nothing to be after” is a different situation from “this is
+          after it.” And a bound that survives all this is <strong>epoch-scoped like <em>K</em>
+          itself</strong>—a file-wide bound inflated by an abandoned epoch’s high ordinal would
+          manufacture rollback refusals against genuine current-epoch stores, which is wrong even
+          though it errs on the refusal side.
+        </p>
+        <p>
+          <strong>Two mechanisms heal, not one</strong>, and they cover different damage.
+          Positioned damage heals through the weighting above. A ceremony attempt voided by the
+          race described in §04b heals through the epoch walk instead: the walk runs backward and
+          returns at the first valid reset it meets, so a re-run ceremony’s own entry ends the
+          walk before the failed attempt below it is ever examined, and no note is produced for
+          it at all. The corollary is that any voided-reset note a read <em>does</em> carry comes
+          from above the boundary by construction, which is why position scoping never exempts
+          one. Unhealed degradation is honest; healed degradation is decreed.
+        </p>
+        <p>
+          The distinction is executable rather than prose: the conformance vectors count recorded
+          skips and weighing skips separately (<code>skipped</code> and <code>weakening</code> in
+          <code>spec/conformance/SCHEMA.md</code> §11), so an implementation cannot satisfy them
+          while collapsing the two.
+        </p>
+
+        <div class="doc-callout is-security">
+          <span class="doc-callout-label">Degrade with a label; do not refuse</span>
+          <p>
+            An incomplete read persists until an operator acts—the journal is append-only, so a
+            lost line stays lost and keeps its weight until a ceremony decrees past it—and
+            refusing on one would therefore make a single crashed writer a store that never opens
+            again without intervention. It would also buy nothing against an adversary, who can
+            delete the journal outright and be met with first contact. An open against a bound therefore fires
+            every refusal the bound still soundly supports and then proceeds under an explicitly
+            labeled degradation that claims no comparison outcome at all. It writes nothing—no
+            journal entry, no binding—so the degradation never launders itself into a memory and
+            the bound never rises on evidence the read did not have.
+          </p>
+        </div>
+
+        <h3>The seven comparisons</h3>
+        <p>
+          Sound against an established head. Guard order is normative: lineage is judged before
+          any ordinal arithmetic, because heights in two different lineages are unrelated number
+          lines.
         </p>
 
         <div class="doc-table-wrap">
@@ -383,7 +792,7 @@
             <tbody>
               <tr><td>No known head</td><td>First contact</td><td>Establish trust from migration receipt, pinned witness, or explicit trust reset.</td></tr>
               <tr><td><code>P == K</code></td><td>Unchanged</td><td>Accept after local head validation.</td></tr>
-              <tr><td>Same lineage; P is a verified descendant of K</td><td>Advanced</td><td>Accept suffix, issue and retain the next receipt.</td></tr>
+              <tr><td>Same lineage; P is a verified descendant of K</td><td>Advanced</td><td>Accept suffix, issue and retain the next receipt—unless the path touches history a ceremony abandoned, which is fenced (§04b).</td></tr>
               <tr><td>Same lineage; <code>P.ordinal &lt; K.ordinal</code></td><td>Rollback</td><td>Refuse authority; investigate or restore forward.</td></tr>
               <tr><td>Same lineage and ordinal; different hash</td><td>Same-height fork</td><td>Refuse both as a single continuation; quarantine evidence.</td></tr>
               <tr><td>P is higher but suffix does not descend from K</td><td>History rewrite / fork</td><td>Refuse; never accept height as proof of continuity.</td></tr>
@@ -394,7 +803,23 @@
 
         <div class="doc-code">
           <div class="doc-code-label"><span>Verifier sketch</span><span>pseudocode</span></div>
-          <pre><code>compare(known, presented, source):
+          <pre><code>open(journal, presented, source):
+  read    = journal.read()          # established | lower bound | unreadable | none
+  known   = read.established_head() # INDETERMINATE on the weaker two states
+  outcome = compare(known, presented, source)
+  if outcome is ADVANCED:
+    fence(read, presented)          # refuse a descent through decreed-away history,
+  return outcome                    # before anything is journaled
+
+# the degraded arm: every refusal a bound still supports, then no answer
+on INDETERMINATE with lower bound B:
+  if presented.ordinal &lt; B.ordinal:
+    return ROLLBACK
+  if presented.ordinal == B.ordinal and presented.hash != B.hash:
+    return FORK
+  proceed labeled degraded; claim no outcome, write nothing
+
+compare(known, presented, source):
   if known is None:
     return FIRST_CONTACT
   if presented.lineage != known.lineage:
@@ -414,6 +839,11 @@
           lineage from a carefully constructed replacement. Migration should therefore emit a
           bootstrap receipt, and new devices should retrieve a checkpoint from an already trusted
           device or witness rather than trusting only the database they are meant to audit.
+        </p>
+        <p>
+          First contact is also a state a verifier can reach by accident, through a store it has
+          in fact seen before under another spelling of the same location. §04b covers the
+          identity check that closes that route before a first contact is minted.
         </p>
       </section>
 
@@ -437,6 +867,9 @@
               <tr><td>Edit and rehash all later records</td><td>Forged chain self-verifies</td><td>Same or later height does not descend from known hash</td><td>Fork / rewrite refusal</td></tr>
               <tr><td>Rewrite head metadata only</td><td>Metadata disagrees with actual head record or dense scan</td><td>Known head assists diagnosis</td><td>Metadata corruption refusal</td></tr>
               <tr><td>Show two clients different descendants</td><td>Each branch may self-verify</td><td>Receipt gossip reveals incompatible hashes</td><td>Equivocation evidence</td></tr>
+              <tr><td>Replay a journal line verbatim</td><td>Store untouched</td><td>Bytes already appear above it: a re-assertion, recorded and weightless (§04b)</td><td>Remembered head unmoved</td></tr>
+              <tr><td>Re-append an old trust reset to reopen a closed epoch</td><td>Store may present the abandoned head</td><td>A byte copy is a re-assertion; any copy lands at a new line and its recorded position is stale (§04b)</td><td>Reset opens no epoch; refusal stands—rollback below the remembered head, fence above it</td></tr>
+              <tr><td>Restore a backup of history a ceremony abandoned</td><td>Chain self-verifies, and descent from the decreed head is genuine</td><td>The journal still holds the abandoned entries as identity anchors</td><td>Abandoned-history fence; the ceremony is the acceptance path (§04b)</td></tr>
               <tr><td>Delete store and every backup</td><td>No history remains</td><td>Witness proves what was lost, not its contents</td><td>Detectable loss, not recovery</td></tr>
               <tr><td>Compromise backend and sole witness key</td><td>Replacement can self-verify</td><td>Attacker can forge receipts</td><td>Outside claimed protection</td></tr>
             </tbody>
@@ -563,8 +996,18 @@
           <span class="doc-callout-label">Witnesses move forward</span>
           <p>
             Normal operation never decreases a witnessed ordinal and never changes the hash at a
-            witnessed coordinate. A repair that intentionally starts a new lineage is explicit
-            and retains a transition report; it does not rewrite the old witness into agreement.
+            witnessed coordinate, and no automatic path may abandon a refusal. Two explicit
+            exceptions exist, and each is a decision an operator makes and records. A repair that
+            intentionally starts a <em>new lineage</em> retains a transition report. And within
+            the <em>same</em> lineage, the trust-reset ceremony (§04b) is the licensed way down:
+            an operator accepting a restore from ordinal 100 back to 90 records the gap—what is
+            being abandoned, what was refused, and why—and opens a new trust epoch that scopes
+            every later comparison. Neither rewrites the old witness into agreement. The
+            abandoned entries stay in the journal as evidence; what moves backward is the read
+            scope, not the history. Those retained entries keep working after the ceremony: they
+            are the anchors that fence a later advance back through the abandoned history (§04b),
+            so recovering it is a second deliberate decree rather than something a routine open
+            does quietly.
           </p>
         </div>
       </section>
@@ -627,6 +1070,13 @@
           <li>Projection row delete, duplicate, edit, and coordinate permutation</li>
           <li>Cross-backend verification of the same logical head</li>
         </ul>
+        <p>
+          The list above is the deferred signed grammar’s corpus. The shipped journal’s read
+          rules are already pinned by the <code>comparison</code> vector family
+          (<code>spec/conformance/SCHEMA.md</code> §11): header classification, incomplete reads
+          and per-skip weighting, epoch scoping, the trust-reset binding and its mismatch path,
+          byte-duplicate re-assertions, and the seven comparisons.
+        </p>
 
         <h3>Open deployment rulings</h3>
         <div class="doc-card-grid">
@@ -657,7 +1107,10 @@
           <p>
             Adopted as the v1 scope (<code>decision:design/arrival-suite-review-dispositions</code> §1):
             cache one head outside every authority, emit a bootstrap receipt during migration,
-            compare on every open, and perform a periodic full chain-plus-projection audit.
+            compare on every open, and perform a periodic full chain-plus-projection audit. All
+            four dissolve into the one append-only journal of §04b: the remembered head is its
+            highest-ordinal entry, the bootstrap receipt is its first, and an audit entry is an
+            entry.
             The signed-attestation grammar, notary, and quorum apparatus is deferred until a
             consumer forces it. That closes the deletion concern without forcing a universal
             database file hash or a premature transparency-log service.

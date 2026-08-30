@@ -1,0 +1,2245 @@
+Reading prompt from stdin...
+OpenAI Codex v0.150.1
+--------
+workdir: /Users/kaygee/Code/loops-s3wp2
+model: gpt-5.6-sol
+provider: openai
+approval: never
+sandbox: workspace-write [workdir, /tmp, $TMPDIR]
+reasoning effort: low
+reasoning summaries: none
+session id: 01a05020-3011-7480-b3b3-8e776d3318ca
+--------
+user
+# Sol review brief — arrival-break slice 3 / WP2 (comparison vectors), round 1 (per-WP, LOW)
+
+You are the cross-family reviewer for slice-3 WP2 — the comparison conformance family.
+These vectors outlive this repo (a Go implementer builds against them with no access
+to the Python module), so your review target is the FAMILY AS A CONTRACT: does it pin
+the ratified state machine and the fought-over rulings, and nothing repo-specific?
+You review and report — no fixes, no commits.
+
+## 1. Anchor
+
+- Repo checkout: this working directory (a git worktree of /Users/kaygee/Code/loops).
+- Branch: `slice3/wp2-vectors`, tip `9735ce3f` (3 commits over WP1's `9ed893fe`).
+- Diff spec: `git diff 9ed893fe...9735ce3f`. Generator + 26 vectors + consumer +
+  SCHEMA.md §11 + report.
+- Suites: engine per-package; architecture SEPARATELY (cross-suite pollution).
+
+## 2. Design contract
+
+`design:arrival-break-slice3-witness-minimum` §C/§E-WP2 + the finding folds (the
+rulings are NEWER than the design doc): reset-INCLUSIVE epochs; incomplete reads yield
+an unignorable lower bound (rollback-only); headerless-with-entries = bound;
+content-present-nothing-readable declines everything incl. re-mint; three-way header
+classification. Vectors pin outcome STRINGS from the ratified seven (∪ null for
+declining reads — deliberately NOT an eighth string); `expected.read` names what the
+read reached; `skipped` is a count; `sound_answer` scoped {"rollback", null} and
+lineage-replaced-against-a-bound is deliberately INEXPRESSIBLE (arbiter deferral —
+finding:s3wp2-lineage-replaced-against-bound).
+
+## 3. Unverified fixes
+
+None — no post-gate fixes. Gate PASSed at the reviewed tip: all four mutation demos
+re-run with exact counts, both inventory directions, schema defeat-tests (an
+outcome:"declined" vector fails twice; the SOUND_ANSWERS frozenset trips on
+lineage-replaced), fixture-byte reads for all five fold behaviors, purity hostile-run.
+Its two NB findings are dispositioned (sound_answer enforcement relayed to WP3;
+purity-ratchet aliasing dismissed on scope-the-claim).
+
+## 4. Seeded review targets — the cross-family angle only you can take
+
+- **Foreign-implementer ambiguity**: read SCHEMA.md §11 AS the Go implementer — is
+  any field's semantics underdetermined without reading the Python module? (e.g. what
+  exactly must an implementation DO for `read: "bounded"` — is the rollback-only rule
+  stated in the schema or only in this repo's rulings? If a conforming implementation
+  could answer `advanced` from a bound and still pass every vector, say so — that is
+  the gap between what the family PINS and what the contract MEANS.)
+- **Coverage holes in the state machine**: the seven outcomes × the read states —
+  enumerate the meaningful combinations and check each is either covered by a vector
+  or provably inexpressible. The gate verified the named behaviors; you hunt the
+  UNNAMED cells.
+- **Fixture realism**: the journal-form fixtures were built through the real
+  append_entry — are any damage splices producing byte patterns a real crash/editor
+  could not produce (i.e. vectors pinning implausible states)?
+- **The heads/journal split boundary**: is there any ruling that ONLY the journal form
+  encodes but that a heads-form-only implementation would silently miss — and does
+  SCHEMA.md tell the implementer both forms are mandatory?
+
+## 5. Verdict format
+
+Per §2 behavior: PASS/FAIL + evidence. New findings: `S3WP2-L-<n>`, file:line,
+severity (BLOCKING/NON-BLOCKING), concrete failure scenario, evidence. Then one line:
+**CONVERGED** or **NOT CONVERGED** (with the blocking list).
+
+codex
+I’ll audit the family strictly from the published diff and schema, then independently map the outcome/read-state matrix and inspect fixture construction at the byte level. I’ll keep architecture checks separate from package-suite evidence and make no workspace changes.
+exec
+/bin/zsh -lc 'git status --short --branch && git log --oneline --decorate -5 && git diff --stat 9ed893fe...9735ce3f && git diff --name-only 9ed893fe...9735ce3f' in /Users/kaygee/Code/loops-s3wp2
+ succeeded in 14ms:
+docs/scratch/arrival-break/slice3-wp2-report.md
+libs/engine/tests/test_conformance_comparison.py
+spec/conformance/SCHEMA.md
+spec/conformance/generate_comparison.py
+spec/conformance/vectors/comparison/comparison-classify-advanced.json
+spec/conformance/vectors/comparison/comparison-classify-first-contact.json
+spec/conformance/vectors/comparison/comparison-classify-lineage-replaced-outranks-a-lower-ordinal.json
+spec/conformance/vectors/comparison/comparison-classify-lineage-replaced.json
+spec/conformance/vectors/comparison/comparison-classify-rewrite-at-the-known-ordinal.json
+spec/conformance/vectors/comparison/comparison-classify-rewrite-when-the-ledger-vouches-for-nothing.json
+spec/conformance/vectors/comparison/comparison-classify-rollback.json
+spec/conformance/vectors/comparison/comparison-classify-same-height-fork.json
+spec/conformance/vectors/comparison/comparison-classify-unchanged.json
+spec/conformance/vectors/comparison/comparison-epoch-below-the-reset-head-is-rollback.json
+spec/conformance/vectors/comparison/comparison-epoch-ends-at-the-reset-entry-is-unchanged.json
+spec/conformance/vectors/comparison/comparison-epoch-scopes-the-equivocation-check-too.json
+spec/conformance/vectors/comparison/comparison-header-a-kindless-object-is-not-absorbed.json
+spec/conformance/vectors/comparison/comparison-header-a-later-builds-header-is-still-a-header.json
+spec/conformance/vectors/comparison/comparison-header-both-markers-together-are-unclassifiable.json
+spec/conformance/vectors/comparison/comparison-incomplete-a-bound-still-refuses-below-itself.json
+spec/conformance/vectors/comparison/comparison-incomplete-a-headerless-journal-yields-a-bound.json
+spec/conformance/vectors/comparison/comparison-incomplete-a-re-mint-against-lost-content-is-not-first-contact.json
+spec/conformance/vectors/comparison/comparison-incomplete-a-torn-line-yields-a-lower-bound.json
+spec/conformance/vectors/comparison/comparison-incomplete-nothing-readable-declines-every-comparison.json
+spec/conformance/vectors/comparison/comparison-journal-a-header-only-journal-is-first-contact.json
+spec/conformance/vectors/comparison/comparison-journal-an-empty-journal-is-first-contact.json
+spec/conformance/vectors/comparison/comparison-journal-duplicate-entries-at-the-maximum-agree.json
+spec/conformance/vectors/comparison/comparison-journal-equivocation-refuses-the-read.json
+spec/conformance/vectors/comparison/comparison-journal-the-known-head-is-the-maximum-ordinal.json
+spec/conformance/vectors/comparison/comparison-journal-unknown-fields-on-a-v1-entry-are-read.json
+
+exec
+/bin/zsh -lc "nl -ba spec/conformance/SCHEMA.md | sed -n '1,260p'
+nl -ba libs/engine/tests/test_conformance_comparison.py | sed -n '1,380p'" in /Users/kaygee/Code/loops-s3wp2
+ succeeded in 0ms:
+     1	# Conformance Test Vector Schema
+     2	
+     3	This document defines the language-neutral schema for conformance golden vectors.
+     4	Future implementations (e.g. loops-go) can prove semantic equivalence with the reference implementation by replaying these vectors.
+     5	
+     6	---
+     7	
+     8	## 1. Vector Envelope
+     9	
+    10	Every vector file is a single JSON document located at:
+    11	`spec/conformance/vectors/<area>/<name>.json`
+    12	
+    13	### Envelope Fields
+    14	
+    15	| Field | Type | Required | Description |
+    16	|---|---|---|---|
+    17	| `name` | string | Yes | Short kebab-case identifier matching the file stem (e.g. `fold-key-string-projection-merge`). |
+    18	| `description` | string | Yes | One sentence: what semantic decision this pins and why it exists. Must mention relevant decision tags when applicable. |
+    19	| `input` | object | Yes | Area-specific input parameters. |
+    20	| `expected` | object \| array \| primitive | Yes | The exact expected output after executing the input on the system under test. |
+    21	
+    22	### Envelope Example
+    23	
+    24	```json
+    25	{
+    26	  "name": "example-vector",
+    27	  "description": "Pins a specific edge semantic under replay.",
+    28	  "input": {
+    29	    "spec": { ... },
+    30	    "payloads": [ ... ]
+    31	  },
+    32	  "expected": { ... }
+    33	}
+    34	```
+    35	
+    36	---
+    37	
+    38	## 2. Area: `fold`
+    39	
+    40	The `fold` area pins the execution semantics of `atoms.Spec.replay`: given a Spec definition and an ordered sequence of fact payloads, it produces the exact accumulated final state.
+    41	
+    42	### `input` Schema
+    43	
+    44	| Field | Type | Required | Description |
+    45	|---|---|---|---|
+    46	| `spec` | Spec Object | Yes | The spec definition defining state fields and fold operations. |
+    47	| `payloads` | array of objects | Yes | Ordered sequence of event payload dictionaries to replay. Payloads may include `_ts`, `ref`, and arbitrary application fields. |
+    48	
+    49	### `expected` Schema
+    50	
+    51	An object representing the final state dictionary. Every key in the dictionary corresponds to either a declared `state_fields` target, an auxiliary state key generated by a fold operation (e.g., `{target}_sum`, `{target}_count` for `avg`), or an error-rejection counter (e.g., `{target}_rejected`).
+    52	
+    53	---
+    54	
+    55	## 3. Spec Encoding
+    56	
+    57	A `Spec` defines data contracts and fold rules.
+    58	
+    59	### Spec Object
+    60	
+    61	| Field | Type | Required | Description |
+    62	|---|---|---|---|
+    63	| `name` | string | Yes | Unique identifier for the spec. |
+    64	| `about` | string | No | Human-readable description (default: `""`). |
+    65	| `input_fields` | array of Field Objects | No | Input field declarations (default: `[]`). |
+    66	| `state_fields` | array of Field Objects | Yes | State field declarations. |
+    67	| `folds` | array of FoldOp Objects | Yes | Ordered fold transformations to apply to incoming payloads. |
+    68	
+    69	### Field Object
+    70	
+    71	| Field | Type | Required | Description |
+    72	|---|---|---|---|
+    73	| `name` | string | Yes | Field identifier. |
+    74	| `kind` | string | Yes | Type name: `"str"`, `"int"`, `"float"`, `"bool"`, `"dict"`, `"list"`, `"set"`, `"datetime"`. |
+    75	| `optional` | boolean | No | Whether the field may be absent (default: `false`). |
+    76	
+    77	---
+    78	
+    79	## 4. Fold Operations (`FoldOp`)
+    80	
+    81	Each fold operation is a JSON object with a discriminator field `"op"`.
+    82	
+    83	### `latest`
+    84	Stores the timestamp `_ts` of the latest event. If `_ts` is missing or `null`, the payload is rejected and increments `{target}_rejected` (decision: `fold-off-type-skip-with-counter`).
+    85	
+    86	```json
+    87	{
+    88	  "op": "latest",
+    89	  "target": "last_seen"
+    90	}
+    91	```
+    92	
+    93	### `count`
+    94	Increments an integer counter in `{target}` on every payload.
+    95	
+    96	```json
+    97	{
+    98	  "op": "count",
+    99	  "target": "events"
+   100	}
+   101	```
+   102	
+   103	### `sum`
+   104	Adds numeric `payload[field]` to `{target}`.
+   105	- If `field` is absent / `null`: silently skipped.
+   106	- If `field` value is non-numeric or boolean: skipped, increments `{target}_rejected`.
+   107	
+   108	```json
+   109	{
+   110	  "op": "sum",
+   111	  "target": "total",
+   112	  "field": "amount"
+   113	}
+   114	```
+   115	
+   116	### `collect`
+   117	Appends incoming payload to `{target}` (list).
+   118	- If `ref` field is present on payload, it is parsed (comma-separated, whitespace-trimmed) into sorted unique `_refs` array on the stored entry.
+   119	- If `max` > 0 and list length exceeds `max`, oldest items are dropped (bounded buffer).
+   120	
+   121	```json
+   122	{
+   123	  "op": "collect",
+   124	  "target": "history",
+   125	  "max": 100
+   126	}
+   127	```
+   128	
+   129	### `upsert`
+   130	Inserts or updates an entry in `{target}` (dict) keyed by `payload[key]`.
+   131	- **String projection** (`decision:design/fold-key-string-projection`): The key is projected using `str(payload[key])`.
+   132	- **Null key**: If `payload[key]` is `null` or missing, the payload is skipped.
+   133	- **Merge default** (`decision:design/fold-merge-default`): New fields overlay existing entry fields; unmentioned prior fields persist.
+   134	- **Observation count `_n`**: Incremented on each upsert for the key.
+   135	- **Ref accumulation**: If `ref` is present on payload, comma-separated tokens are accumulated into `_refs` (sorted list of unique tokens across all upserts for this key).
+   136	
+   137	```json
+   138	{
+   139	  "op": "upsert",
+   140	  "target": "users",
+   141	  "key": "id"
+   142	}
+   143	```
+   144	
+   145	### `top_n`
+   146	Maintains a dictionary in `{target}` with top `n` items ranked by numeric `by` field, keyed by `payload[key]`.
+   147	- Key is string-projected (`str(key)`).
+   148	- If `key` or `by` is absent / `null`: silently skipped.
+   149	- If `by` is off-type (non-numeric / bool): skipped, increments `{target}_rejected`.
+   150	- Ties preserve insertion order under stable sort.
+   151	
+   152	```json
+   153	{
+   154	  "op": "top_n",
+   155	  "target": "leaderboard",
+   156	  "key": "player",
+   157	  "by": "score",
+   158	  "n": 10,
+   159	  "desc": true
+   160	}
+   161	```
+   162	
+   163	### `min`
+   164	Tracks minimum numeric value in `{target}`.
+   165	- Replaces initial `null` with first valid number.
+   166	- Non-numeric / boolean values increment `{target}_rejected`.
+   167	- Missing fields are silently skipped.
+   168	
+   169	```json
+   170	{
+   171	  "op": "min",
+   172	  "target": "coldest",
+   173	  "field": "temp"
+   174	}
+   175	```
+   176	
+   177	### `max`
+   178	Tracks maximum numeric value in `{target}`.
+   179	- Replaces initial `null` with first valid number.
+   180	- Non-numeric / boolean values increment `{target}_rejected`.
+   181	- Missing fields are silently skipped.
+   182	
+   183	```json
+   184	{
+   185	  "op": "max",
+   186	  "target": "warmest",
+   187	  "field": "temp"
+   188	}
+   189	```
+   190	
+   191	### `avg`
+   192	Tracks incremental running average in `{target}`.
+   193	- Maintains hidden state keys `{target}_sum` (float) and `{target}_count` (int).
+   194	- Off-type values increment `{target}_rejected` and do not bump `{target}_count`.
+   195	- Missing fields are silently skipped.
+   196	
+   197	```json
+   198	{
+   199	  "op": "avg",
+   200	  "target": "mean_latency",
+   201	  "field": "latency"
+   202	}
+   203	```
+   204	
+   205	### `window`
+   206	Sliding FIFO window of field values in `{target}` (list).
+   207	- Appends `payload[field]` to list.
+   208	- If list length exceeds `size`, oldest values are dropped.
+   209	- Missing fields are silently skipped.
+   210	
+   211	```json
+   212	{
+   213	  "op": "window",
+   214	  "target": "recent_intervals",
+   215	  "field": "interval",
+   216	  "size": 10
+   217	}
+   218	```
+   219	
+   220	---
+   221	
+   222	## 5. Fact Encoding
+   223	
+   224	A `Fact` is an intentional observation with a routing kind, timestamp, payload, observer, and origin. In `replay` and `witness` vectors, facts are provided in append order as `[fact_id, Fact Object]` pairs.
+   225	
+   226	### `[fact_id, Fact Object]` Pair
+   227	
+   228	A 2-element JSON array: `[string, object]`
+   229	- Index 0: `fact_id` (string) — 26-character canonical identifier (e.g. Crockford ULID).
+   230	- Index 1: Fact Object (object) — serialized representation of the fact.
+   231	
+   232	### Fact Object
+   233	
+   234	| Field | Type | Required | Description |
+   235	|---|---|---|---|
+   236	| `kind` | string | Yes | Routing key matching the target spec (e.g. `"decision"`, `"item"`). |
+   237	| `ts` | float | Yes | Unix epoch timestamp in seconds. Sub-millisecond precision is preserved. |
+   238	| `payload` | object | Yes | Domain application payload dictionary. |
+   239	| `observer` | string | No | Identifier of the producing observer (default: `""`). |
+   240	| `origin` | string | No | Origin loop or vertex identifier (default: `""`). |
+   241	
+   242	---
+   243	
+   244	## 6. Area: `replay`
+   245	
+   246	The `replay` area pins store-level replay ordering on top of pure Spec folds.
+   247	Given an append-ordered sequence of stored facts (which assign internal receipt ordinals / rowids), a conforming store replays facts filtered by kind strictly in **receipt order** (`rowid ASC`) — the order in which that store received them. The ULID `id` is stable identity only and `ts` is event-time metadata; neither orders the fold. `(ts, id)` survives only as an explicit read-path lens (see §9, Area `lens`). Each fact payload is augmented with system metadata fields (`_ts`, `_id`, `_observer`, `_origin`) and folded into the spec.
+   248	
+   249	### `input` Schema
+   250	
+   251	| Field | Type | Required | Description |
+   252	|---|---|---|---|
+   253	| `spec` | Spec Object | Yes | The spec definition defining state fields and fold operations. |
+   254	| `facts` | array of `[fact_id, Fact Object]` | Yes | Sequence of facts in APPEND order (store insertion order). |
+   255	
+   256	### `expected` Schema
+   257	
+   258	An object representing the final accumulated state dictionary after full replay in receipt order (`rowid ASC`).
+   259	
+   260	---
+     1	"""Conformance runner for head comparison (witness-protocol.html §07).
+     2	
+     3	Loads all vectors from ``spec/conformance/vectors/comparison/*.json`` the way
+     4	``test_conformance_replicate.py`` loads its three families — one glob, one
+     5	parametrize, the envelope asserted before the body, and an inventory that must
+     6	equal what is on disk in BOTH directions.
+     7	
+     8	**Two vector forms, and the split is this area's design point.** ``form:
+     9	"heads"`` hands a ``(known, presented, at_known)`` triple straight to the pure
+    10	classifier, pinning the seven §07 rows with no journal encoding at all — §B.3's
+    11	journal is a local cache grammar, not wire, and no other implementation is
+    12	obliged to have one. ``form: "journal"`` hands raw lines to the pure reader and
+    13	then attempts the comparison, because every read rule (trust-epoch scoping, the
+    14	maximum-ordinal rule, equivocation, the incomplete-read lower bound, the
+    15	header's three-way classification) is unreachable from the classifier.
+    16	
+    17	**Outcome strings, never exception types.** A vector names an outcome by its
+    18	ratified §07 string. The one place a vector must speak of a refusal — a journal
+    19	that equivocates — it names the READ STATE ``"equivocation"``, and the mapping
+    20	to this implementation's class lives in ``READ_REFUSALS`` here, exactly as
+    21	``test_conformance_replicate.py`` maps its two contract refusals. Naming a
+    22	Python exception family in a language-neutral vector would pin that family on
+    23	every other implementation.
+    24	
+    25	**The outcome slot holds the seven ratified strings or null.** Null means
+    26	``established_head()`` refused and ``compare`` was never called, so there is no
+    27	outcome to state; ``expected.read`` carries why. Deliberately not an eighth
+    28	string: a normative vector carrying ``"declined"`` would read to a foreign
+    29	implementer as a value to return.
+    30	
+    31	**Pure functions only, and that is what keeps the real state root untouched.**
+    32	This runner calls ``parse_journal_lines``, ``established_head`` and ``compare``
+    33	and nothing else — none of which resolves a path — so no test here can reach
+    34	``$XDG_STATE_HOME`` even if one is set. ``test_the_runner_stays_on_the_pure_surface``
+    35	pins it rather than leaving it to reviewer vigilance.
+    36	"""
+    37	
+    38	from __future__ import annotations
+    39	
+    40	import json
+    41	from pathlib import Path
+    42	from typing import Any
+    43	
+    44	import pytest
+    45	
+    46	from engine.arrival_contract import Head
+    47	from engine.arrival_head_attestation import (
+    48	    EstablishedHead,
+    49	    HeadAttestation,
+    50	    HeadLowerBound,
+    51	    HeadUnreadable,
+    52	    IndeterminateComparison,
+    53	    JournalEquivocation,
+    54	    Kind,
+    55	    Level,
+    56	    Outcome,
+    57	    compare,
+    58	    parse_journal_lines,
+    59	)
+    60	
+    61	REPO_ROOT = Path(__file__).resolve().parents[3]
+    62	COMPARISON_VECTORS_DIR = (
+    63	    REPO_ROOT / "spec" / "conformance" / "vectors" / "comparison"
+    64	)
+    65	
+    66	# The read states a vector may name, and the type each one claims. A state
+    67	# outside this mapping is a vector claiming something this area does not
+    68	# define, and KeyError says so loudly rather than skipping the vector green.
+    69	KNOWN_STATES: dict[str, type] = {
+    70	    "none": type(None),
+    71	    "established": EstablishedHead,
+    72	    "bounded": HeadLowerBound,
+    73	    "unreadable": HeadUnreadable,
+    74	}
+    75	
+    76	# The one read state that is a refusal rather than a result. Mapped here, never
+    77	# in a vector, for the reason the replicate family gives.
+    78	READ_REFUSALS: dict[str, type[Exception]] = {"equivocation": JournalEquivocation}
+    79	
+    80	# What a LOWER BOUND may soundly answer. ROLLBACK-ONLY, as ruled: a presented
+    81	# head below the bound is certainly below the accepted head, and nothing bounds
+    82	# the accepted head from above, so neither proceed row is obtainable. Held as
+    83	# an enumerable set so widening it is a visible edit to a ratified posture.
+    84	SOUND_ANSWERS: frozenset[str | None] = frozenset({None, "rollback"})
+    85	
+    86	# The three families of the seven-row classifier and the four families of the
+    87	# read, and the EXACT vector inventory of each.
+    88	#
+    89	# Filenames rather than a count, and a count rather than "at least one": a
+    90	# family check that only asks whether the family is non-empty goes green when a
+    91	# fixture is deleted, right up until the last one goes.
+    92	#
+    93	# GROW this when a vector is added; shrink it only when a claim is genuinely
+    94	# retired, and say which in the commit.
+    95	VECTOR_INVENTORY: dict[str, frozenset[str]] = {
+    96	    "comparison-classify-": frozenset({
+    97	        "comparison-classify-first-contact",
+    98	        "comparison-classify-unchanged",
+    99	        "comparison-classify-advanced",
+   100	        "comparison-classify-rollback",
+   101	        "comparison-classify-same-height-fork",
+   102	        "comparison-classify-rewrite-at-the-known-ordinal",
+   103	        "comparison-classify-rewrite-when-the-ledger-vouches-for-nothing",
+   104	        "comparison-classify-lineage-replaced",
+   105	        "comparison-classify-lineage-replaced-outranks-a-lower-ordinal",
+   106	    }),
+   107	    "comparison-epoch-": frozenset({
+   108	        "comparison-epoch-ends-at-the-reset-entry-is-unchanged",
+   109	        "comparison-epoch-below-the-reset-head-is-rollback",
+   110	        "comparison-epoch-scopes-the-equivocation-check-too",
+   111	    }),
+   112	    "comparison-journal-": frozenset({
+   113	        "comparison-journal-the-known-head-is-the-maximum-ordinal",
+   114	        "comparison-journal-equivocation-refuses-the-read",
+   115	        "comparison-journal-duplicate-entries-at-the-maximum-agree",
+   116	        "comparison-journal-an-empty-journal-is-first-contact",
+   117	        "comparison-journal-a-header-only-journal-is-first-contact",
+   118	        "comparison-journal-unknown-fields-on-a-v1-entry-are-read",
+   119	    }),
+   120	    "comparison-incomplete-": frozenset({
+   121	        "comparison-incomplete-a-torn-line-yields-a-lower-bound",
+   122	        "comparison-incomplete-a-bound-still-refuses-below-itself",
+   123	        "comparison-incomplete-a-headerless-journal-yields-a-bound",
+   124	        "comparison-incomplete-nothing-readable-declines-every-comparison",
+   125	        "comparison-incomplete-a-re-mint-against-lost-content-is-not-first-contact",
+   126	    }),
+   127	    "comparison-header-": frozenset({
+   128	        "comparison-header-a-kindless-object-is-not-absorbed",
+   129	        "comparison-header-both-markers-together-are-unclassifiable",
+   130	        "comparison-header-a-later-builds-header-is-still-a-header",
+   131	    }),
+   132	}
+   133	
+   134	
+   135	def _load_vectors(vectors_dir: Path) -> list[Path]:
+   136	    return sorted(vectors_dir.glob("*.json"))
+   137	
+   138	
+   139	def _head(data: dict[str, Any] | None) -> Head | None:
+   140	    if data is None:
+   141	        return None
+   142	    return Head(
+   143	        lineage=data["lineage"],
+   144	        ordinal=data["ordinal"],
+   145	        record_hash=data["record_hash"],
+   146	    )
+   147	
+   148	
+   149	def _entry(data: dict[str, Any] | None) -> HeadAttestation | None:
+   150	    if data is None:
+   151	        return None
+   152	    return HeadAttestation(
+   153	        head=Head(
+   154	            lineage=data["lineage"],
+   155	            ordinal=data["ordinal"],
+   156	            record_hash=data["record_hash"],
+   157	        ),
+   158	        kind=Kind(data["kind"]),
+   159	        level=Level(data["level"]),
+   160	        observed_at=data["observed_at"],
+   161	        location=data.get("location", ""),
+   162	    )
+   163	
+   164	
+   165	def _read_vector(path: Path) -> dict[str, Any]:
+   166	    return json.loads(path.read_text(encoding="utf-8"))
+   167	
+   168	
+   169	def test_the_comparison_vector_inventory_is_exactly_what_is_on_disk():
+   170	    """Every named vector present, and no unclassified vector present.
+   171	
+   172	    Both directions. A missing fixture fails NAMING ITSELF, so a deleted vector
+   173	    cannot go unnoticed while the family still has siblings; and a vector
+   174	    belonging to no family fails too, so a new claim cannot be added without
+   175	    being filed under the family it belongs to.
+   176	    """
+   177	    on_disk = {path.stem for path in _load_vectors(COMPARISON_VECTORS_DIR)}
+   178	    expected = frozenset().union(*VECTOR_INVENTORY.values())
+   179	
+   180	    assert on_disk == expected, (
+   181	        f"missing: {sorted(expected - on_disk)}; "
+   182	        f"unclassified: {sorted(on_disk - expected)}"
+   183	    )
+   184	    for family, members in VECTOR_INVENTORY.items():
+   185	        assert members, f"the {family!r} family names no vectors"
+   186	        for stem in members:
+   187	            assert stem.startswith(family), (
+   188	                f"{stem!r} is filed under {family!r} but is not named for it"
+   189	            )
+   190	
+   191	
+   192	def test_the_outcome_slot_holds_only_the_seven_ratified_strings():
+   193	    """Seven rows, and the vectors may mint no eighth.
+   194	
+   195	    Two directions, both enumerable rather than reviewed. An implementation
+   196	    that grew a new outcome would ship a state the vectors never pin, and a
+   197	    vector naming a string outside the set would ask conforming
+   198	    implementations for a value §07 never ratified.
+   199	    """
+   200	    assert {outcome.value for outcome in Outcome} == {
+   201	        "first-contact",
+   202	        "unchanged",
+   203	        "advanced",
+   204	        "rollback",
+   205	        "same-height-fork",
+   206	        "rewrite",
+   207	        "lineage-replaced",
+   208	    }
+   209	    permitted = {outcome.value for outcome in Outcome} | {None}
+   210	    for path in _load_vectors(COMPARISON_VECTORS_DIR):
+   211	        outcome = _read_vector(path)["expected"]["outcome"]
+   212	        assert outcome in permitted, f"{path.stem} names {outcome!r}"
+   213	
+   214	
+   215	def test_every_ratified_outcome_is_exercised_by_some_vector():
+   216	    """Coverage of the seven as a property, not as a promise in a report.
+   217	
+   218	    The area exists to pin the state machine, so a row no vector reaches is a
+   219	    row this family does not actually test. Enumerated here so that adding a
+   220	    row without a vector fails rather than passing quietly.
+   221	    """
+   222	    reached = {
+   223	        _read_vector(path)["expected"]["outcome"]
+   224	        for path in _load_vectors(COMPARISON_VECTORS_DIR)
+   225	    }
+   226	    missing = {outcome.value for outcome in Outcome} - reached
+   227	    assert not missing, f"no vector reaches: {sorted(missing)}"
+   228	
+   229	
+   230	def test_the_runner_stays_on_the_pure_surface():
+   231	    """No vector test may reach a real state root, and not by convention.
+   232	
+   233	    The pure trio resolves no path, so a runner built on it cannot touch
+   234	    ``$XDG_STATE_HOME`` whatever the environment holds. Checked against this
+   235	    module's actual namespace rather than its source, so the assertion cannot
+   236	    be satisfied by a name that merely looks absent — and the impure surface is
+   237	    enumerated so that importing one later fails a test instead of quietly
+   238	    putting fixture journals in an operator's own memory.
+   239	    """
+   240	    reachable = set(globals())
+   241	    for impure in ("read_journal", "append_entry", "state_root", "journal_path"):
+   242	        assert impure not in reachable, f"the runner imports {impure!r}"
+   243	
+   244	
+   245	@pytest.mark.parametrize(
+   246	    "vector_path", _load_vectors(COMPARISON_VECTORS_DIR), ids=lambda p: p.stem
+   247	)
+   248	def test_conformance_comparison(vector_path: Path) -> None:
+   249	    vector = _read_vector(vector_path)
+   250	
+   251	    assert "name" in vector, f"Vector {vector_path} missing 'name'"
+   252	    assert "description" in vector, f"Vector {vector_path} missing 'description'"
+   253	    assert "input" in vector, f"Vector {vector_path} missing 'input'"
+   254	    assert "expected" in vector, f"Vector {vector_path} missing 'expected'"
+   255	    assert vector["name"] == vector_path.stem, "vector name must match its file stem"
+   256	
+   257	    presented = _head(vector["input"]["presented"])
+   258	    assert presented is not None, "every vector presents a head"
+   259	    at_known = _head(vector["input"]["at_known"])
+   260	    expected = vector["expected"]
+   261	
+   262	    form = vector["input"]["form"]
+   263	    if form == "heads":
+   264	        outcome = compare(_entry(vector["input"]["known"]), presented, at_known)
+   265	        assert outcome.value == expected["outcome"]
+   266	        return
+   267	
+   268	    # An unknown form must fail loudly rather than fall through to green.
+   269	    assert form == "journal", f"{vector_path.stem} names form {form!r}"
+   270	
+   271	    lines = [line + "\n" for line in vector["input"]["journal"]]
+   272	    state = expected["read"]
+   273	
+   274	    if state in READ_REFUSALS:
+   275	        with pytest.raises(READ_REFUSALS[state]):
+   276	            parse_journal_lines(lines)
+   277	        assert expected["outcome"] is None, "a refused read produces no outcome"
+   278	        return
+   279	
+   280	    read = parse_journal_lines(lines)
+   281	    # KeyError on an unrecognized state, deliberately.
+   282	    assert isinstance(read.known, KNOWN_STATES[state]), (
+   283	        f"expected read state {state!r}, got {type(read.known).__name__}"
+   284	    )
+   285	    assert len(read.entries) == expected["entries"]
+   286	    assert len(read.epoch) == expected["epoch"]
+   287	    assert len(read.skipped) == expected["skipped"]
+   288	
+   289	    # Each case is named separately BY DESIGN. There is no uniform accessor
+   290	    # that reaches a head across the three states — the weakened ones carry no
+   291	    # ``entry`` attribute at all — and writing one here would rebuild the
+   292	    # shortcut the type split exists to make unobtainable.
+   293	    if state == "established":
+   294	        assert read.known.entry.head == _head(expected["known"])
+   295	    elif state == "bounded":
+   296	        assert read.known.at_least.head == _head(expected["known"])
+   297	    else:
+   298	        assert expected["known"] is None
+   299	
+   300	    try:
+   301	        known = read.established_head()
+   302	    except IndeterminateComparison:
+   303	        assert expected["outcome"] is None, (
+   304	            "the read declined, but the vector states an outcome"
+   305	        )
+   306	    else:
+   307	        assert compare(known, presented, at_known).value == expected["outcome"]
+   308	
+   309	    assert ("sound_answer" in expected) == (state == "bounded"), (
+   310	        "only a bound carries a sound answer"
+   311	    )
+   312	    if state == "bounded":
+   313	        bound = read.known.at_least.head
+   314	        below = (
+   315	            presented.lineage == bound.lineage
+   316	            and presented.ordinal < bound.ordinal
+   317	        )
+   318	        assert expected["sound_answer"] in SOUND_ANSWERS
+   319	        assert expected["sound_answer"] == ("rollback" if below else None)
+
+exec
+/bin/zsh -lc "rg -n '"'^## 11|comparison|sound_answer|bounded|journal'"' spec/conformance/SCHEMA.md | tail -80
+nl -ba spec/conformance/SCHEMA.md | sed -n '500,680p'
+for f in spec/conformance/vectors/comparison/*.json; do jq -c '[.name,.input.form,.expected.read,.expected.outcome,.expected.sound_answer,.expected.entries,.expected.epoch,.expected.skipped]' \""'$f"; done' in /Users/kaygee/Code/loops-s3wp2
+ succeeded in 92ms:
+["comparison-header-a-kindless-object-is-not-absorbed","journal","bounded",null,null,2,2,1]
+["comparison-header-a-later-builds-header-is-still-a-header","journal","established","unchanged",null,2,2,0]
+["comparison-header-both-markers-together-are-unclassifiable","journal","bounded",null,null,2,2,1]
+["comparison-incomplete-a-bound-still-refuses-below-itself","journal","bounded",null,"rollback",3,2,1]
+["comparison-incomplete-a-headerless-journal-yields-a-bound","journal","bounded",null,null,2,2,1]
+["comparison-incomplete-a-re-mint-against-lost-content-is-not-first-contact","journal","unreadable",null,null,0,0,2]
+["comparison-incomplete-a-torn-line-yields-a-lower-bound","journal","bounded",null,null,3,2,1]
+["comparison-incomplete-nothing-readable-declines-every-comparison","journal","unreadable",null,null,0,0,2]
+["comparison-journal-a-header-only-journal-is-first-contact","journal","none","first-contact",null,0,0,0]
+["comparison-journal-an-empty-journal-is-first-contact","journal","none","first-contact",null,0,0,0]
+["comparison-journal-duplicate-entries-at-the-maximum-agree","journal","established","unchanged",null,3,3,0]
+["comparison-journal-equivocation-refuses-the-read","journal","equivocation",null,null,null,null,null]
+["comparison-journal-the-known-head-is-the-maximum-ordinal","journal","established","rollback",null,3,3,0]
+["comparison-journal-unknown-fields-on-a-v1-entry-are-read","journal","established","unchanged",null,2,2,0]
+
+exec
+/bin/zsh -lc "nl -ba spec/conformance/SCHEMA.md | sed -n '405,510p'
+rg -n 'append_entry|splice|torn|headerless|unreadable|damage|journal =' spec/conformance/generate_comparison.py" in /Users/kaygee/Code/loops-s3wp2
+ succeeded in 0ms:
+   405	- **`replicate-catch-up-*`** — a stale replica brought forward, ending byte-identical to the authority. **At least one vector in this family carries SIGNED records, and that is a property of the family rather than an accident of its fixtures.** An implementation that re-coordinated an exact suffix would assign the same lineage, ordinal and predecessor and reproduce identical hashes — so an unsigned suffix cannot distinguish assigning from validating. A signature is content the assigning path does not carry, which is what makes the two observably different.
+   406	
+   407	Vectors are frozen; regenerate with `uv run --package engine python spec/conformance/generate_replicate.py`.
+   408	
+   409	---
+   410	
+   411	## 11. Area: `comparison`
+   412	
+   413	The `comparison` area pins the **head-comparison state machine** (witness-protocol.html §07): the judgment that answers the one question no backend can answer about itself — *is the log in front of me the same log this machine accepted before?* A backend can prove a log is internally consistent; it cannot prove it is the same log, because every fact it could consult lives inside the boundary a restore or an attacker would move. The comparison is what turns "this log is well-formed" into "this log is the one we know".
+   414	
+   415	### Two forms, and the split is deliberate
+   416	
+   417	A vector's `input.form` says which question it asks. **An implementation must fail loudly on a form it does not recognize**, never skip it.
+   418	
+   419	| Form | Input | What it pins |
+   420	|---|---|---|
+   421	| `heads` | a remembered entry, a presented head, and what the ledger vouches for at the remembered coordinate | the seven §07 rows, in isolation |
+   422	| `journal` | the journal's raw lines | the read rules, and the comparison that follows from reading them |
+   423	
+   424	**Why `heads` exists.** The witness journal is a *local cache grammar*, not wire. It is deliberately not the record codec — it must stay readable when the store it witnesses cannot be opened at all — it versions independently of the record grammar, and no conforming implementation is obliged to have one. Routing every row through a journal fixture would pin one repo's cache encoding onto an implementation that owes only the state machine.
+   425	
+   426	**Why `journal` exists.** Every read rule is unreachable from the classifier: trust-epoch scoping, the maximum-ordinal rule, journal equivocation, the incomplete-read lower bound, and the header's three-way classification. A `heads`-only area would pin the seven rows and none of the rules that decide *which* head is handed to them.
+   427	
+   428	### The seven outcomes
+   429	
+   430	Seven rows for six states, because §07 lists first contact separately from the five comparisons. Guard order is normative: **lineage is judged before any ordinal arithmetic**, because heights in two different lineages are unrelated number lines.
+   431	
+   432	| Outcome | Condition | Posture |
+   433	|---|---|---|
+   434	| `first-contact` | nothing is remembered | proceed, trust on first use, labeled |
+   435	| `unchanged` | the presented head equals the remembered one | proceed |
+   436	| `advanced` | same lineage, higher ordinal, **and** the ledger vouches for the remembered head at its own coordinate | proceed |
+   437	| `rollback` | same lineage, lower ordinal | refuse |
+   438	| `same-height-fork` | same lineage and ordinal, different record hash | refuse |
+   439	| `rewrite` | higher ordinal, but the record at the remembered ordinal is not the remembered one — including when descent was never established at all | refuse |
+   440	| `lineage-replaced` | a different lineage | refuse |
+   441	
+   442	`at_known` is the advanced-versus-rewrite discriminator, and it is why a walk that merely reaches the presented head is not enough: such a walk verifies the current chain while answering nothing about continuity with what was previously accepted. `at_known` is `null` when the ledger will not vouch for anything at that coordinate, and absence of evidence is not evidence of descent — an unproven advance is a `rewrite`.
+   443	
+   444	### `input` Schema
+   445	
+   446	| Field | Type | Required | Description |
+   447	|---|---|---|---|
+   448	| `form` | string | Yes | `"heads"` or `"journal"`. An unrecognized form must fail, not skip. |
+   449	| `presented` | Head Object | Yes | The head the store presents on this open. |
+   450	| `at_known` | Head Object \| null | Yes | What the ledger vouches for at the remembered head's ordinal. `null` means it vouches for nothing there. |
+   451	| `known` | Entry Object \| null | `heads` only | The remembered observation. `null` is first contact. |
+   452	| `journal` | array of strings | `journal` only | The journal's complete lines, each without its terminating newline. May be empty. |
+   453	
+   454	### Entry Object
+   455	
+   456	| Field | Type | Description |
+   457	|---|---|---|
+   458	| `kind` | string | Why the entry exists: `bootstrap`, `advance`, `audit`, `trust-reset`. |
+   459	| `level` | string | What evidence backed it: `mint`, `first-contact`, `commit`, `descendant`, `full`. States how much was actually established, so an entry can never be read as a stronger claim than the evidence behind it. |
+   460	| `lineage`, `ordinal`, `record_hash` | — | The head, all three fields, always. |
+   461	| `observed_at` | number | Witness metadata, never ledger order. |
+   462	| `location` | string | Where it was seen. Diagnosis only, and **never a key** — journals are keyed by lineage so a worktree, a move, or a copy still finds the lineage's memory. |
+   463	
+   464	### `expected` Schema
+   465	
+   466	| Field | Type | Required | Description |
+   467	|---|---|---|---|
+   468	| `outcome` | string \| null | Yes | One of the seven strings above, or `null`. |
+   469	| `read` | string | `journal` only | How far the read got: `none`, `established`, `bounded`, `unreadable`, `equivocation`. |
+   470	| `known` | Head Object \| null | `journal` only | The head the read established, or the bound it reached. `null` for the other states. |
+   471	| `entries` | integer \| null | `journal` only | Readable entries. `null` when the read refused before counting. |
+   472	| `epoch` | integer \| null | `journal` only | Entries in the current trust epoch. |
+   473	| `skipped` | integer \| null | `journal` only | What the read could not use. **Non-empty is exactly the condition that weakens the result to a bound.** |
+   474	| `sound_answer` | string \| null | `bounded` only | What a bound may soundly answer: `"rollback"`, or `null` when nothing is answerable. |
+   475	
+   476	**`outcome: null` is not an eighth outcome.** It means the read declined and the classifier was never called, so there is no outcome to state; `read` carries why. A vector must never mint a string outside the ratified seven — a normative vector carrying something like `"declined"` would read to an implementer as a value to return.
+   477	
+   478	**Counts, not messages.** The `skipped` slot is a count rather than the reasons themselves. A skip reason is human-facing prose in whatever language the implementation speaks, and one of them necessarily embeds the host's own JSON parser error text; pinning it would be the same overreach as naming an exception class.
+   479	
+   480	**`read` names what the read reached, never why.** A bound produced by a torn line and a bound produced by a missing header are one state, and a new cause joins it without a new value. A field whose values enumerated causes would have to grow every time a cause was discovered — which is exactly how this state's vocabulary drifted three times before it was named for what the read *lacks*.
+   481	
+   482	### The read states
+   483	
+   484	| State | Meaning | What it can answer |
+   485	|---|---|---|
+   486	| `none` | The journal claims nothing: empty, or a header and no entries. | `first-contact`. Trust on first use is the honest answer to "nothing was ever accepted here". |
+   487	| `established` | Every line was usable. | All seven rows. |
+   488	| `bounded` | The read was **incomplete** — it needed something it did not get. The remembered head is known only to be *at least* this. | Only `rollback`, below the bound. |
+   489	| `unreadable` | Content was claimed and **none** of it could be read. | Nothing. There is no bound, so even `rollback` is unanswerable. |
+   490	| `equivocation` | Two entries at the epoch's maximum ordinal carry different record hashes. | Nothing; the read itself refuses. |
+   491	
+   492	**`bounded` is not `unreadable`, and neither is `none`.** These three are the area's central distinction. An empty journal says nothing was ever accepted here. A journal whose content cannot be read says heads *were* accepted and their ordinals are exactly what was lost — collapsing it into `none` would grant trust on first use *precisely because* the journal became unreadable. And a bound is weaker than an established head without being unreadable in any part: a journal with every entry readable and no header is incomplete, because the protocol and wire versions those hashes derive under are unknown.
+   493	
+   494	**A bound is sound downward only.** A presented head below it is certainly below the accepted head. A presented head *equal* to it is not `unchanged` — it may be a rollback from the very entry the read missed. A presented head *above* it is not `advanced` either, because whatever the read missed carries no information about the ordinal it held, so nothing bounds the accepted head from above. Gathering evidence from the store does not repair this: a walk verifies the store's own chain, while the missing fact is about what this machine previously *accepted*, which the store never knew.
+   495	
+   496	**Damage is reported, never converted into a verdict.** An unusable line is skipped and surfaced wherever it sits, and the file is not refused. Refusing would make an ordinary crash a permanent incident, and it claims a protection this location cannot deliver anyway — anyone able to corrupt a line can delete the journal instead and be met with trust on first use.
+   497	
+   498	### Families
+   499	
+   500	Five, and the file stem names which one a vector belongs to.
+   501	
+   502	- **`comparison-classify-*`** — the seven rows through the pure classifier, plus the guard-order claim that a foreign lineage at a *lower* ordinal is `lineage-replaced` and not `rollback`, and both ways the advance branch fails.
+   503	- **`comparison-epoch-*`** — a trust-reset opens a new epoch and the epoch is **reset-inclusive**: the reset entry is the first entry of the epoch it opens. A journal ending at the reset compares against the reset head. Scoped exclusively instead, such a journal has an empty epoch and answers `first-contact` — silent re-acceptance on the most ordinary shape there is, an operator resetting and then opening. The family also carries the claim that epoch scope governs the equivocation check, so a ceremony can take effect over a conflict the operator already resolved.
+   504	- **`comparison-journal-*`** — the maximum-ordinal rule (the remembered head is the epoch's highest ordinal, **not the last line**, because concurrent writers journal out of order), equivocation, and **both negative controls**: duplicate entries at the maximum that *agree* are not equivocation, and unknown fields on a current-grammar entry are read normally. A refusal that fires on agreement has stopped meaning what it says.
+   505	- **`comparison-incomplete-*`** — the lower bound and the third state, including the case an operator would actually meet: a fresh genesis arriving at a location whose journal remembers a far higher ordinal in unreadable form is a replacement wearing the old name, and it declines rather than passing as first contact.
+   506	- **`comparison-header-*`** — the header's **three-way** classification. A kindless object bearing the type marker is a header. An object bearing **both** the type marker and an entry kind is *unclassifiable*: skipped and reported, never absorbed, never a reason to refuse the file. Anything else is entry-shaped. Both two-valued repairs fail in opposite directions — absorbing on the type marker alone silently loses an entry, and requiring the marker plus the absence of a kind refuses the whole file over ordinary version skew — so the stable rule admits a third verdict rather than choosing between two wrong certainties. The middle row is a **location claim** about this build's ability to read the line, not a verdict about what the line is, which is exactly what this build cannot know.
+   507	
+   508	Vectors are frozen; regenerate with `uv run --package engine python spec/conformance/generate_comparison.py`.
+39:Well-formed journals are built through the real ``append_entry`` so the vectors
+42:root. Damage, ambiguity and foreign-build lines are spliced in afterwards, since
+69:    append_entry,
+181:def torn(ordinal: int) -> Callable[[list[str]], list[str]]:
+527:            "unreadable is NOT this."
+561:        name="comparison-incomplete-a-torn-line-yields-a-lower-bound",
+564:            "torn tail'. One epoch in file order [reset 90, 92, 91], true "
+565:            "remembered head 92; the line holding 92 is torn by a crash, and a "
+578:        transform=torn(92),
+592:        transform=torn(92),
+596:        name="comparison-incomplete-a-headerless-journal-yields-a-bound",
+620:            "trust on first use PRECISELY BECAUSE the journal became unreadable."
+630:            "location whose journal remembers ordinal 4217 in unreadable form. "
+683:            "unrecognized, its entries headerless, and the file weakened over "
+701:    Well-formed entries go through ``append_entry`` so the vectors pin the
+703:    A transform then splices in what a correct writer would never produce.
+710:        append_entry(item)
+737:        state, known = "unreadable", None
+
+exec
+/bin/zsh -lc "for f in spec/conformance/vectors/comparison/*.json; do jq -c '{name,input:{form:.input.form,presented:.input.presented,at_known:.input.at_known,known:.input.known},expected}' \""'$f"; done
+nl -ba spec/conformance/generate_comparison.py | sed -n '"'1,230p'
+nl -ba spec/conformance/generate_comparison.py | sed -n '480,760p'" in /Users/kaygee/Code/loops-s3wp2
+ succeeded in 129ms:
+{"name":"comparison-epoch-ends-at-the-reset-entry-is-unchanged","input":{"form":"journal","presented":{"lineage":"01M3COMPARISONVECTORLINEAGE","ordinal":90,"record_hash":"9ba847b1c3e2f92f410ac2264266c8506f0df0a9cee6575a27b6064957fc93ba"},"at_known":null,"known":null},"expected":{"read":"established","known":{"lineage":"01M3COMPARISONVECTORLINEAGE","ordinal":90,"record_hash":"9ba847b1c3e2f92f410ac2264266c8506f0df0a9cee6575a27b6064957fc93ba"},"entries":3,"epoch":1,"skipped":0,"outcome":"unchanged"}}
+{"name":"comparison-epoch-scopes-the-equivocation-check-too","input":{"form":"journal","presented":{"lineage":"01M3COMPARISONVECTORLINEAGE","ordinal":91,"record_hash":"e2235df4281b93546c0177885f0677948fb368cf593fa3ec1fbd2d734e06bfe8"},"at_known":null,"known":null},"expected":{"read":"established","known":{"lineage":"01M3COMPARISONVECTORLINEAGE","ordinal":91,"record_hash":"e2235df4281b93546c0177885f0677948fb368cf593fa3ec1fbd2d734e06bfe8"},"entries":5,"epoch":2,"skipped":0,"outcome":"unchanged"}}
+{"name":"comparison-header-a-kindless-object-is-not-absorbed","input":{"form":"journal","presented":{"lineage":"01M3COMPARISONVECTORLINEAGE","ordinal":91,"record_hash":"e2235df4281b93546c0177885f0677948fb368cf593fa3ec1fbd2d734e06bfe8"},"at_known":null,"known":null},"expected":{"read":"bounded","known":{"lineage":"01M3COMPARISONVECTORLINEAGE","ordinal":91,"record_hash":"e2235df4281b93546c0177885f0677948fb368cf593fa3ec1fbd2d734e06bfe8"},"entries":2,"epoch":2,"skipped":1,"outcome":null,"sound_answer":null}}
+{"name":"comparison-header-a-later-builds-header-is-still-a-header","input":{"form":"journal","presented":{"lineage":"01M3COMPARISONVECTORLINEAGE","ordinal":6,"record_hash":"fd36ffd78406e2dbb820c9007bec1bfd1a17ba61a52c66fe14f0cab140f953f5"},"at_known":null,"known":null},"expected":{"read":"established","known":{"lineage":"01M3COMPARISONVECTORLINEAGE","ordinal":6,"record_hash":"fd36ffd78406e2dbb820c9007bec1bfd1a17ba61a52c66fe14f0cab140f953f5"},"entries":2,"epoch":2,"skipped":0,"outcome":"unchanged"}}
+{"name":"comparison-header-both-markers-together-are-unclassifiable","input":{"form":"journal","presented":{"lineage":"01M3COMPARISONVECTORLINEAGE","ordinal":91,"record_hash":"e2235df4281b93546c0177885f0677948fb368cf593fa3ec1fbd2d734e06bfe8"},"at_known":null,"known":null},"expected":{"read":"bounded","known":{"lineage":"01M3COMPARISONVECTORLINEAGE","ordinal":91,"record_hash":"e2235df4281b93546c0177885f0677948fb368cf593fa3ec1fbd2d734e06bfe8"},"entries":2,"epoch":2,"skipped":1,"outcome":null,"sound_answer":null}}
+{"name":"comparison-incomplete-a-bound-still-refuses-below-itself","input":{"form":"journal","presented":{"lineage":"01M3COMPARISONVECTORLINEAGE","ordinal":89,"record_hash":"623f994637f1541c6ae8cb79aae131072e4963c06724a9eeb1fb7394fb24ae31"},"at_known":null,"known":null},"expected":{"read":"bounded","known":{"lineage":"01M3COMPARISONVECTORLINEAGE","ordinal":91,"record_hash":"e2235df4281b93546c0177885f0677948fb368cf593fa3ec1fbd2d734e06bfe8"},"entries":3,"epoch":2,"skipped":1,"outcome":null,"sound_answer":"rollback"}}
+{"name":"comparison-incomplete-a-headerless-journal-yields-a-bound","input":{"form":"journal","presented":{"lineage":"01M3COMPARISONVECTORLINEAGE","ordinal":6,"record_hash":"fd36ffd78406e2dbb820c9007bec1bfd1a17ba61a52c66fe14f0cab140f953f5"},"at_known":null,"known":null},"expected":{"read":"bounded","known":{"lineage":"01M3COMPARISONVECTORLINEAGE","ordinal":6,"record_hash":"fd36ffd78406e2dbb820c9007bec1bfd1a17ba61a52c66fe14f0cab140f953f5"},"entries":2,"epoch":2,"skipped":1,"outcome":null,"sound_answer":null}}
+{"name":"comparison-incomplete-a-re-mint-against-lost-content-is-not-first-contact","input":{"form":"journal","presented":{"lineage":"01M3COMPARISONVECTORLINEAGE","ordinal":0,"record_hash":"6c745bc8aad2cf97d9215f43d489ebd3fbbc89405cdfed9e87681fd220695349"},"at_known":null,"known":null},"expected":{"read":"unreadable","known":null,"entries":0,"epoch":0,"skipped":2,"outcome":null}}
+{"name":"comparison-incomplete-a-torn-line-yields-a-lower-bound","input":{"form":"journal","presented":{"lineage":"01M3COMPARISONVECTORLINEAGE","ordinal":91,"record_hash":"e2235df4281b93546c0177885f0677948fb368cf593fa3ec1fbd2d734e06bfe8"},"at_known":null,"known":null},"expected":{"read":"bounded","known":{"lineage":"01M3COMPARISONVECTORLINEAGE","ordinal":91,"record_hash":"e2235df4281b93546c0177885f0677948fb368cf593fa3ec1fbd2d734e06bfe8"},"entries":3,"epoch":2,"skipped":1,"outcome":null,"sound_answer":null}}
+{"name":"comparison-incomplete-nothing-readable-declines-every-comparison","input":{"form":"journal","presented":{"lineage":"01M3COMPARISONVECTORLINEAGE","ordinal":4217,"record_hash":"256f6ea40690cf118ab26a820207050cb57ae41ad4e5ce03b23564ff0a518c5d"},"at_known":null,"known":null},"expected":{"read":"unreadable","known":null,"entries":0,"epoch":0,"skipped":2,"outcome":null}}
+{"name":"comparison-journal-a-header-only-journal-is-first-contact","input":{"form":"journal","presented":{"lineage":"01M3COMPARISONVECTORLINEAGE","ordinal":0,"record_hash":"e733827070bd8164c14a41f69bcd91f4b86906aefe021929ce91619a3adf5dce"},"at_known":null,"known":null},"expected":{"read":"none","known":null,"entries":0,"epoch":0,"skipped":0,"outcome":"first-contact"}}
+{"name":"comparison-journal-an-empty-journal-is-first-contact","input":{"form":"journal","presented":{"lineage":"01M3COMPARISONVECTORLINEAGE","ordinal":0,"record_hash":"e733827070bd8164c14a41f69bcd91f4b86906aefe021929ce91619a3adf5dce"},"at_known":null,"known":null},"expected":{"read":"none","known":null,"entries":0,"epoch":0,"skipped":0,"outcome":"first-contact"}}
+{"name":"comparison-journal-duplicate-entries-at-the-maximum-agree","input":{"form":"journal","presented":{"lineage":"01M3COMPARISONVECTORLINEAGE","ordinal":6,"record_hash":"fd36ffd78406e2dbb820c9007bec1bfd1a17ba61a52c66fe14f0cab140f953f5"},"at_known":null,"known":null},"expected":{"read":"established","known":{"lineage":"01M3COMPARISONVECTORLINEAGE","ordinal":6,"record_hash":"fd36ffd78406e2dbb820c9007bec1bfd1a17ba61a52c66fe14f0cab140f953f5"},"entries":3,"epoch":3,"skipped":0,"outcome":"unchanged"}}
+{"name":"comparison-journal-equivocation-refuses-the-read","input":{"form":"journal","presented":{"lineage":"01M3COMPARISONVECTORLINEAGE","ordinal":6,"record_hash":"481ec41a2eb7a16b2c8a50d78e7cf7e9c56f9eab65349ed60221186cf60ac310"},"at_known":null,"known":null},"expected":{"read":"equivocation","known":null,"entries":null,"epoch":null,"skipped":null,"outcome":null}}
+{"name":"comparison-journal-the-known-head-is-the-maximum-ordinal","input":{"form":"journal","presented":{"lineage":"01M3COMPARISONVECTORLINEAGE","ordinal":5,"record_hash":"ecf37a468403ec9d327ad68e53609eeda753c71dc62bb7081018389c3983de07"},"at_known":null,"known":null},"expected":{"read":"established","known":{"lineage":"01M3COMPARISONVECTORLINEAGE","ordinal":6,"record_hash":"fd36ffd78406e2dbb820c9007bec1bfd1a17ba61a52c66fe14f0cab140f953f5"},"entries":3,"epoch":3,"skipped":0,"outcome":"rollback"}}
+{"name":"comparison-journal-unknown-fields-on-a-v1-entry-are-read","input":{"form":"journal","presented":{"lineage":"01M3COMPARISONVECTORLINEAGE","ordinal":6,"record_hash":"fd36ffd78406e2dbb820c9007bec1bfd1a17ba61a52c66fe14f0cab140f953f5"},"at_known":null,"known":null},"expected":{"read":"established","known":{"lineage":"01M3COMPARISONVECTORLINEAGE","ordinal":6,"record_hash":"fd36ffd78406e2dbb820c9007bec1bfd1a17ba61a52c66fe14f0cab140f953f5"},"entries":2,"epoch":2,"skipped":0,"outcome":"unchanged"}}
+     1	"""Generator for comparison conformance vectors.
+     2	
+     3	Builds golden vectors pinning the head-comparison state machine — slice 3 of the
+     4	arrival break, ``witness-protocol.html`` §07 as amended by the slice-3 rulings.
+     5	The question the area answers is the one no backend can answer about itself: *is
+     6	the log in front of me the same log this machine accepted yesterday?*
+     7	
+     8	**Two vector forms, and the split is the area's design point.**
+     9	
+    10	- ``form: "heads"`` hands a ``(known, presented, at_known)`` triple straight to
+    11	  the pure classifier. These pin the seven §07 rows with NO journal encoding,
+    12	  because §B.3's journal is a local cache grammar rather than wire — it is
+    13	  deliberately not the record codec, it versions independently, and no other
+    14	  implementation is obliged to have one. Routing every row through a journal
+    15	  fixture would pin this repo's cache format onto an implementation that owes
+    16	  only the state machine.
+    17	- ``form: "journal"`` hands raw lines to the pure reader and then attempts the
+    18	  comparison. Every read rule lives here and NONE of them is reachable from the
+    19	  classifier: trust-epoch scoping, the maximum-ordinal rule, equivocation, the
+    20	  incomplete-read lower bound, the header's three-way classification.
+    21	
+    22	Five families, each answering a question the others cannot:
+    23	
+    24	- ``comparison-classify-*``: the seven rows, in isolation, plus the guard-order
+    25	  claim that a foreign lineage is judged before any ordinal arithmetic.
+    26	- ``comparison-epoch-*``: a trust-reset opens a new epoch, RESET-INCLUSIVE, and
+    27	  the epoch scopes the equivocation check too.
+    28	- ``comparison-journal-*``: the maximum-ordinal read rule, equivocation and its
+    29	  agreement control, and the two journals that are honestly first contact.
+    30	- ``comparison-incomplete-*``: an incomplete read yields a LOWER BOUND — sound
+    31	  below itself, unable to answer either proceed row — and the third state where
+    32	  content was claimed and nothing at all could be read.
+    33	- ``comparison-header-*``: the three-way classification, which never absorbs a
+    34	  line and never refuses the file.
+    35	
+    36	Every vector is deterministic: one fixed lineage, fixed observation times, and
+    37	record hashes derived from a fixed tag. Nothing here reads a clock.
+    38	
+    39	Well-formed journals are built through the real ``append_entry`` so the vectors
+    40	pin the writer's actual bytes, under a TEMPORARY ``XDG_STATE_HOME`` that is
+    41	asserted before the first append — this generator must never touch a real state
+    42	root. Damage, ambiguity and foreign-build lines are spliced in afterwards, since
+    43	they are by definition what the writer would not produce.
+    44	
+    45	Run once to generate/regenerate frozen vector files:
+    46	    uv run --package engine python spec/conformance/generate_comparison.py
+    47	"""
+    48	
+    49	from __future__ import annotations
+    50	
+    51	import hashlib
+    52	import json
+    53	import os
+    54	import tempfile
+    55	from collections.abc import Callable
+    56	from dataclasses import dataclass
+    57	from pathlib import Path
+    58	from typing import Any
+    59	
+    60	from engine.arrival_contract import Head
+    61	from engine.arrival_head_attestation import (
+    62	    HeadAttestation,
+    63	    HeadLowerBound,
+    64	    HeadUnreadable,
+    65	    IndeterminateComparison,
+    66	    JournalEquivocation,
+    67	    Kind,
+    68	    Level,
+    69	    append_entry,
+    70	    compare,
+    71	    journal_path,
+    72	    parse_journal_lines,
+    73	    state_root,
+    74	)
+    75	
+    76	REPO_ROOT = Path(__file__).resolve().parents[2]
+    77	COMPARISON_DIR = REPO_ROOT / "spec" / "conformance" / "vectors" / "comparison"
+    78	
+    79	# One fixed lineage across the area, so a reader comparing two vectors is
+    80	# comparing histories and not identifiers. The second exists only to be a
+    81	# DIFFERENT one.
+    82	LINEAGE = "01M3COMPARISONVECTORLINEAGE"
+    83	OTHER_LINEAGE = "01M3COMPARISONREPLACEMENT"
+    84	
+    85	# Fixed observation times. Witness metadata, never ledger order — so they are
+    86	# constants rather than a clock, and nothing in the area depends on their order.
+    87	OBSERVED_AT = 1788000000.0
+    88	LOCATION = "/vectors/comparison/project.arrival"
+    89	
+    90	# The serialized type marker, restated rather than imported from the module's
+    91	# private constant: a vector generator that reached into a private name would
+    92	# make the frozen artifacts a function of an implementation detail.
+    93	OBSERVATION_TYPE = "arrival-head-observation"
+    94	
+    95	
+    96	def rh(tag: str) -> str:
+    97	    """A deterministic stand-in record hash: 64 hex, stable across runs.
+    98	
+    99	    The journal stores heads it was handed and validates no hash, so these need
+   100	    to be well-shaped rather than real. Derived from a tag so that two vectors
+   101	    naming the same tag mean the same head and a reader can see it.
+   102	    """
+   103	    return hashlib.sha256(f"comparison-vector/{tag}".encode()).hexdigest()
+   104	
+   105	
+   106	def head(ordinal: int, tag: str | None = None, lineage: str = LINEAGE) -> Head:
+   107	    return Head(
+   108	        lineage=lineage, ordinal=ordinal, record_hash=rh(tag or f"ord-{ordinal}")
+   109	    )
+   110	
+   111	
+   112	def entry(
+   113	    ordinal: int,
+   114	    *,
+   115	    kind: Kind = Kind.ADVANCE,
+   116	    level: Level = Level.COMMIT,
+   117	    tag: str | None = None,
+   118	) -> HeadAttestation:
+   119	    return HeadAttestation(
+   120	        head=head(ordinal, tag),
+   121	        kind=kind,
+   122	        level=level,
+   123	        observed_at=OBSERVED_AT + ordinal,
+   124	        location=LOCATION,
+   125	    )
+   126	
+   127	
+   128	def bootstrap() -> HeadAttestation:
+   129	    """The first entry, at Level.MINT — this process minted the genesis."""
+   130	    return entry(0, kind=Kind.BOOTSTRAP, level=Level.MINT)
+   131	
+   132	
+   133	def reset(ordinal: int) -> HeadAttestation:
+   134	    """An operator ceremony accepting a restore back to ``ordinal``.
+   135	
+   136	    ``Level.FULL`` because an operator who ran the ceremony verified from
+   137	    genesis. Not load-bearing for any read rule: the epoch scope keys on
+   138	    ``Kind.TRUST_RESET`` alone.
+   139	    """
+   140	    return entry(ordinal, kind=Kind.TRUST_RESET, level=Level.FULL)
+   141	
+   142	
+   143	def head_json(value: Head | None) -> dict[str, Any] | None:
+   144	    if value is None:
+   145	        return None
+   146	    return {
+   147	        "lineage": value.lineage,
+   148	        "ordinal": value.ordinal,
+   149	        "record_hash": value.record_hash,
+   150	    }
+   151	
+   152	
+   153	def entry_json(value: HeadAttestation | None) -> dict[str, Any] | None:
+   154	    if value is None:
+   155	        return None
+   156	    return {
+   157	        "kind": value.kind.value,
+   158	        "level": value.level.value,
+   159	        "lineage": value.head.lineage,
+   160	        "ordinal": value.head.ordinal,
+   161	        "record_hash": value.head.record_hash,
+   162	        "observed_at": value.observed_at,
+   163	        "location": value.location,
+   164	    }
+   165	
+   166	
+   167	# ---------------------------------------------------------------------------
+   168	# Line transforms — what a correct writer would never produce
+   169	# ---------------------------------------------------------------------------
+   170	
+   171	
+   172	def drop_header(lines: list[str]) -> list[str]:
+   173	    """Remove the header, leaving readable entries with nothing describing them."""
+   174	    return [line for line in lines if '"kind"' in line]
+   175	
+   176	
+   177	def keep_header_only(lines: list[str]) -> list[str]:
+   178	    return [line for line in lines if '"kind"' not in line]
+   179	
+   180	
+   181	def torn(ordinal: int) -> Callable[[list[str]], list[str]]:
+   182	    """Truncate the line holding ``ordinal`` mid-JSON, as a crash would."""
+   183	
+   184	    def apply(lines: list[str]) -> list[str]:
+   185	        return [
+   186	            line[: len(line) // 2] if f'"ordinal":{ordinal},' in line else line
+   187	            for line in lines
+   188	        ]
+   189	
+   190	    return apply
+   191	
+   192	
+   193	def replace_at(ordinal: int, raw: str) -> Callable[[list[str]], list[str]]:
+   194	    """Swap the line holding ``ordinal`` for a literal one."""
+   195	
+   196	    def apply(lines: list[str]) -> list[str]:
+   197	        return [
+   198	            raw if f'"ordinal":{ordinal},' in line else line for line in lines
+   199	        ]
+   200	
+   201	    return apply
+   202	
+   203	
+   204	def replace_header(raw: str) -> Callable[[list[str]], list[str]]:
+   205	    def apply(lines: list[str]) -> list[str]:
+   206	        return [raw if '"kind"' not in line else line for line in lines]
+   207	
+   208	    return apply
+   209	
+   210	
+   211	def add_unknown_fields(ordinal: int) -> Callable[[list[str]], list[str]]:
+   212	    """Give one v1 entry fields this build has never heard of."""
+   213	
+   214	    def apply(lines: list[str]) -> list[str]:
+   215	        out = []
+   216	        for line in lines:
+   217	            if f'"ordinal":{ordinal},' in line:
+   218	                decoded = json.loads(line)
+   219	                decoded["issued_by"] = "a-later-build"
+   220	                decoded["corroboration"] = {"facts": 41, "ticks": 7}
+   221	                line = json.dumps(decoded, separators=(",", ":"), sort_keys=True)
+   222	            out.append(line)
+   223	        return out
+   224	
+   225	    return apply
+   226	
+   227	
+   228	#: A header written by a build after this one: kindless, bearing the type
+   229	#: marker, carrying fields this build does not know. Still a header.
+   230	LATER_BUILD_HEADER = json.dumps(
+   480	    ),
+   481	    # --- family: the read rules --------------------------------------------
+   482	    JournalCase(
+   483	        name="comparison-journal-the-known-head-is-the-maximum-ordinal",
+   484	        description=(
+   485	            "The remembered head is the epoch's MAXIMUM-ordinal entry, not the "
+   486	            "last line. Two writers append concurrently — the arrival lock "
+   487	            "serializes their appends, not their journal writes — so lines land "
+   488	            "out of order: A commits 5, B commits 6 and journals it, A journals 5 "
+   489	            "last. Here the store presents the head recorded at ordinal 5, which "
+   490	            "is a genuine restore from 6. Last-line semantics would read the "
+   491	            "remembered head as 5 and call this unchanged, which is exactly the "
+   492	            "silent re-acceptance the rule exists to close."
+   493	        ),
+   494	        entries=(bootstrap(), entry(6), entry(5)),
+   495	        presented=head(5),
+   496	    ),
+   497	    JournalCase(
+   498	        name="comparison-journal-equivocation-refuses-the-read",
+   499	        description=(
+   500	            "Two entries at the epoch's maximum ordinal with DIFFERENT record "
+   501	            "hashes. The journal has recorded two incompatible histories and it "
+   502	            "is not the journal's place to choose between them, so the read "
+   503	            "refuses before any comparison — there is no outcome, because the "
+   504	            "question of which head was accepted has no answer here."
+   505	        ),
+   506	        entries=(bootstrap(), entry(6, tag="branch-a"), entry(6, tag="branch-b")),
+   507	        presented=head(6, "branch-a"),
+   508	    ),
+   509	    JournalCase(
+   510	        name="comparison-journal-duplicate-entries-at-the-maximum-agree",
+   511	        description=(
+   512	            "The negative control for equivocation. Two entries at the maximum "
+   513	            "ordinal carrying the SAME record hash are a duplicate observation, "
+   514	            "not a conflict — a writer journaling a head twice records nothing "
+   515	            "new and contradicts nothing. An equivocation refusal that fired here "
+   516	            "would have stopped meaning equivocation."
+   517	        ),
+   518	        entries=(bootstrap(), entry(6), entry(6)),
+   519	        presented=head(6),
+   520	    ),
+   521	    JournalCase(
+   522	        name="comparison-journal-an-empty-journal-is-first-contact",
+   523	        description=(
+   524	            "No lines at all. An empty journal says nothing was ever accepted "
+   525	            "here, and trust on first use is the honest answer to it. This is the "
+   526	            "boundary the third state sits against: content claimed and "
+   527	            "unreadable is NOT this."
+   528	        ),
+   529	        entries=(),
+   530	        presented=head(0, "genesis"),
+   531	    ),
+   532	    JournalCase(
+   533	        name="comparison-journal-a-header-only-journal-is-first-contact",
+   534	        description=(
+   535	            "A header and no entries. Still first contact: the header describes "
+   536	            "the file's grammar and claims no head, so nothing has been accepted "
+   537	            "here and nothing has been lost. First contact must stay reachable "
+   538	            "wherever it is honest, or the third state would have swallowed it."
+   539	        ),
+   540	        entries=(bootstrap(),),
+   541	        transform=keep_header_only,
+   542	        presented=head(0, "genesis"),
+   543	    ),
+   544	    JournalCase(
+   545	        name="comparison-journal-unknown-fields-on-a-v1-entry-are-read",
+   546	        description=(
+   547	            "The second negative control. An entry at THIS journal grammar "
+   548	            "version carrying fields this build has never heard of is read "
+   549	            "normally — the journal is append-only and never rewritten, so "
+   550	            "unknown fields are preserved on disk by construction and ignored on "
+   551	            "read. What makes an entry unusable is the grammar version, not "
+   552	            "unfamiliar content; a reader that skipped on unfamiliar fields would "
+   553	            "weaken its own claim over nothing."
+   554	        ),
+   555	        entries=(bootstrap(), entry(6)),
+   556	        transform=add_unknown_fields(6),
+   557	        presented=head(6),
+   558	    ),
+   559	    # --- family: the incomplete read ---------------------------------------
+   560	    JournalCase(
+   561	        name="comparison-incomplete-a-torn-line-yields-a-lower-bound",
+   562	        description=(
+   563	            "The fixture that refuted 'a mid-file skip is strictly safer than a "
+   564	            "torn tail'. One epoch in file order [reset 90, 92, 91], true "
+   565	            "remembered head 92; the line holding 92 is torn by a crash, and a "
+   566	            "later well-formed entry survives after it. Skipping quietly would "
+   567	            "lower the remembered head to 91 and call a genuine restore from 92 "
+   568	            "UNCHANGED. So the loss is carried in the read's own type instead: "
+   569	            "the head is known only to be AT LEAST 91, and a presented head EQUAL "
+   570	            "to the bound cannot be called unchanged, because it may be a "
+   571	            "rollback from the very entry the read missed. Note what is NOT done "
+   572	            "— the file is not refused. Refusing would make an ordinary crash a "
+   573	            "permanent incident, and it claims a protection this location cannot "
+   574	            "deliver anyway, since anyone able to corrupt a line can delete the "
+   575	            "journal instead and be met with trust on first use."
+   576	        ),
+   577	        entries=(bootstrap(), reset(90), entry(92), entry(91)),
+   578	        transform=torn(92),
+   579	        presented=head(91),
+   580	    ),
+   581	    JournalCase(
+   582	        name="comparison-incomplete-a-bound-still-refuses-below-itself",
+   583	        description=(
+   584	            "What a bound CAN answer, which is the half a decline-only reading "
+   585	            "would lose. The accepted head is at least 91, so a store presenting "
+   586	            "89 is certainly below it and that is a rollback on any reading. The "
+   587	            "bound is sound downward and unobtainable in both proceed directions: "
+   588	            "nothing bounds the accepted head from ABOVE either, so a head above "
+   589	            "the bound is not an advance — a lost entry may have sat at 200."
+   590	        ),
+   591	        entries=(bootstrap(), reset(90), entry(92), entry(91)),
+   592	        transform=torn(92),
+   593	        presented=head(89),
+   594	    ),
+   595	    JournalCase(
+   596	        name="comparison-incomplete-a-headerless-journal-yields-a-bound",
+   597	        description=(
+   598	            "Readable entries with no header. This once refused the whole file; "
+   599	            "it yields a BOUND instead, with the absence reported without a line "
+   600	            "number because an absence does not have one. The entries are "
+   601	            "self-describing evidence that heads were accepted, and what was lost "
+   602	            "— the protocol and wire versions those record hashes derive under — "
+   603	            "is exactly the kind of loss a lower bound is for. Refusing here would "
+   604	            "be a verdict where a bound will do."
+   605	        ),
+   606	        entries=(bootstrap(), entry(6)),
+   607	        transform=drop_header,
+   608	        presented=head(6),
+   609	    ),
+   610	    JournalCase(
+   611	        name="comparison-incomplete-nothing-readable-declines-every-comparison",
+   612	        description=(
+   613	            "The third state, and it is not the absence of one. This journal was "
+   614	            "written entirely by a later build — its own header, its own entries "
+   615	            "— so no attacker is involved, only version skew. Content was claimed "
+   616	            "and none of it could be read, which says heads WERE accepted here and "
+   617	            "their ordinals are precisely what was lost. There is no bound, so "
+   618	            "unlike an incomplete read this cannot even answer rollback: every "
+   619	            "comparison declines. Collapsing this into first contact would grant "
+   620	            "trust on first use PRECISELY BECAUSE the journal became unreadable."
+   621	        ),
+   622	        raw_lines=PURE_SKEW_JOURNAL,
+   623	        presented=head(4217, "skew-4217"),
+   624	    ),
+   625	    JournalCase(
+   626	        name="comparison-incomplete-a-re-mint-against-lost-content-is-not-first-contact",
+   627	        description=(
+   628	            "The consequence stated as its own vector, because it is the one an "
+   629	            "operator would meet. A fresh genesis at ordinal 0 arrives at a "
+   630	            "location whose journal remembers ordinal 4217 in unreadable form. "
+   631	            "That is a replacement wearing the old name — the case the store-lost "
+   632	            "refusal exists for — and reaching it through the "
+   633	            "forward-compatibility path would be a downgrade attack in the "
+   634	            "adversarial reading and silent re-acceptance in the ordinary one. It "
+   635	            "declines."
+   636	        ),
+   637	        raw_lines=PURE_SKEW_JOURNAL,
+   638	        presented=head(0, "re-mint"),
+   639	    ),
+   640	    # --- family: the three-way header classification ------------------------
+   641	    JournalCase(
+   642	        name="comparison-header-a-kindless-object-is-not-absorbed",
+   643	        description=(
+   644	            "A bare kindless object where an entry should be. Treating any "
+   645	            "kindless dict as a header absorbed this silently, recording NO skip "
+   646	            "— and on an out-of-order journal that quietly dropped the line "
+   647	            "holding the epoch maximum, turning a rollback into unchanged. It is "
+   648	            "an entry this build cannot name, so it is skipped and reported, and "
+   649	            "the read weakens to a bound that refuses to answer unchanged."
+   650	        ),
+   651	        entries=(bootstrap(), entry(92), entry(91)),
+   652	        transform=replace_at(92, "{}"),
+   653	        presented=head(91),
+   654	    ),
+   655	    JournalCase(
+   656	        name="comparison-header-both-markers-together-are-unclassifiable",
+   657	        description=(
+   658	            "The middle row of the three-way rule, and the whole reason the rule "
+   659	            "is three-way rather than a predicate. A line carrying BOTH the "
+   660	            "journal type marker and an entry kind is not classified at all: "
+   661	            "never absorbed as a header (which would silently lose an entry), "
+   662	            "never a reason to refuse the file (which would be an uncontracted "
+   663	            "version-skew refusal of everything). It is skipped and reported "
+   664	            "naming the ambiguity — a location claim about this build's ability to "
+   665	            "read the line, NOT a verdict about what the line is, which is exactly "
+   666	            "what this build cannot know. Both obvious repairs fail in opposite "
+   667	            "directions; admitting a third verdict is what makes the reader stop "
+   668	            "having to choose between two wrong certainties."
+   669	        ),
+   670	        entries=(bootstrap(), entry(92), entry(91)),
+   671	        transform=replace_at(92, AMBIGUOUS_LINE),
+   672	        presented=head(91),
+   673	    ),
+   674	    JournalCase(
+   675	        name="comparison-header-a-later-builds-header-is-still-a-header",
+   676	        description=(
+   677	            "The complement, and the case that keeps a shared journal from "
+   678	            "bricking an older build. A header from a later grammar — kindless, "
+   679	            "bearing the type marker, carrying fields this build does not know — "
+   680	            "is recognized as the header it is. Nothing is skipped, the read is "
+   681	            "complete, and the comparison answers in full. Requiring the type "
+   682	            "marker AND the absence of a kind would leave a later header "
+   683	            "unrecognized, its entries headerless, and the file weakened over "
+   684	            "ordinary version skew."
+   685	        ),
+   686	        entries=(bootstrap(), entry(6)),
+   687	        transform=replace_header(LATER_BUILD_HEADER),
+   688	        presented=head(6),
+   689	    ),
+   690	)
+   691	
+   692	
+   693	# ---------------------------------------------------------------------------
+   694	# Deriving the expectations by running the real module
+   695	# ---------------------------------------------------------------------------
+   696	
+   697	
+   698	def lines_for(case: JournalCase) -> list[str]:
+   699	    """The journal this case presents, built through the real writer.
+   700	
+   701	    Well-formed entries go through ``append_entry`` so the vectors pin the
+   702	    bytes the writer actually emits — including the header it writes on create.
+   703	    A transform then splices in what a correct writer would never produce.
+   704	    """
+   705	    if case.raw_lines is not None:
+   706	        return list(case.raw_lines)
+   707	    path = journal_path(LINEAGE)
+   708	    path.unlink(missing_ok=True)
+   709	    for item in case.entries:
+   710	        append_entry(item)
+   711	    lines = (
+   712	        path.read_text(encoding="utf-8").splitlines() if path.exists() else []
+   713	    )
+   714	    return case.transform(lines) if case.transform else lines
+   715	
+   716	
+   717	def journal_expectation(case: JournalCase, lines: list[str]) -> dict[str, Any]:
+   718	    """Read, then compare, and state exactly how far each got."""
+   719	    try:
+   720	        read = parse_journal_lines(line + "\n" for line in lines)
+   721	    except JournalEquivocation:
+   722	        # The read never reached a head, so there is nothing to count and no
+   723	        # outcome to state. Null rather than zero: the read did not find none
+   724	        # of these things, it never got far enough to look.
+   725	        return {
+   726	            "read": "equivocation",
+   727	            "known": None,
+   728	            "entries": None,
+   729	            "epoch": None,
+   730	            "skipped": None,
+   731	            "outcome": None,
+   732	        }
+   733	
+   734	    if isinstance(read.known, HeadLowerBound):
+   735	        state, known = "bounded", read.known.at_least.head
+   736	    elif isinstance(read.known, HeadUnreadable):
+   737	        state, known = "unreadable", None
+   738	    elif read.known is None:
+   739	        state, known = "none", None
+   740	    else:
+   741	        state, known = "established", read.known.entry.head
+   742	
+   743	    expected: dict[str, Any] = {
+   744	        "read": state,
+   745	        "known": head_json(known),
+   746	        "entries": len(read.entries),
+   747	        "epoch": len(read.epoch),
+   748	        "skipped": len(read.skipped),
+   749	    }
+   750	
+   751	    try:
+   752	        outcome = compare(read.established_head(), case.presented, case.at_known)
+   753	    except IndeterminateComparison:
+   754	        expected["outcome"] = None
+   755	    else:
+   756	        expected["outcome"] = outcome.value
+   757	
+   758	    if state == "bounded":
+   759	        # The positive half of lower-bound semantics. ROLLBACK-ONLY, as ruled:
+   760	        # a presented head below the bound is certainly below the accepted head,
+
+codex
+The schema does state rollback-only bound semantics explicitly, so the meaning is not trapped in Python. I’ve found a sharper distinction to verify: the frozen inputs may not exercise every non-answerable bound partition even though the prose defines it; I’m checking whether a conformer could return an illicit verdict on an unnamed input and still pass all 26 vectors.
+exec
+/bin/zsh -lc "rg -n 'architecture|pytest.*engine|test_conformance_comparison' pyproject.toml Makefile README.md libs/engine/pyproject.toml .github 2>/dev/null | head -120
+find . -maxdepth 3 -type f \\( -iname '*architecture*' -o -iname '*arch*test*' \\) -print" in /Users/kaygee/Code/loops-s3wp2
+ succeeded in 0ms:
+README.md:133:architecture — decisions, open threads, falsifiable predictions — and each
+pyproject.toml:63:# The root runs the tests that belong to no single package — the architecture
+.github/workflows/ci.yml:10:  check-architecture:
+
+exec
+/bin/zsh -lc "sed -n '45,85p' pyproject.toml
+sed -n '1,100p' .github/workflows/ci.yml
+sed -n '1,180p' libs/engine/pyproject.toml
+rg --files tests | head -80" in /Users/kaygee/Code/loops-s3wp2
+ succeeded in 0ms:
+    "libs/store/src/store",
+    "apps/loops/src/loops",
+    "README.md",
+    "LICENSE",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = [
+    "libs/atoms/src/atoms",
+    "libs/custody/src/custody",
+    "libs/engine/src/engine",
+    "libs/lang/src/lang",
+    "libs/sdk/src/sdk",
+    "libs/sign/src/sign",
+    "libs/store/src/store",
+    "apps/loops/src/loops",
+]
+
+# The root runs the tests that belong to no single package — the architecture
+# ratchets and tests/chaos — so it needs the same dev tooling every member
+# already declares. Without this, `uv run pytest` at the root resolves only the
+# flat wheel's runtime deps and dies with "Failed to spawn: pytest" on any
+# machine whose .venv was not already dirty from an earlier run. uv.lock is
+# gitignored, so CI resolves fresh every time and hit exactly that.
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=6.0",
+    "ruff>=0.8",
+]
+
+[tool.uv.workspace]
+members = [
+    "libs/atoms",
+    "libs/custody",
+    "libs/engine",
+    "libs/lang",
+    "libs/sdk",
+    "libs/sign",
+    "libs/store",
+    "apps/loops",
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  check-architecture:
+    name: Architecture Ratchets (Rule 16)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Run Architecture Ratchets
+        run: ./dev check
+
+  chaos-recovery:
+    name: Chaos & Fault Injection
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Run Chaos Tests
+        run: ./dev chaos
+
+  lint:
+    name: Lint (libs/custody, libs/sign)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Run Ruff Check
+        run: uv run ruff check libs/custody libs/sign
+
+  discover:
+    name: Discover Packages
+    runs-on: ubuntu-latest
+    outputs:
+      packages: ${{ steps.discover.outputs.packages }}
+    steps:
+      - uses: actions/checkout@v4
+      # libs only, deliberately. apps/* is out of scope for CI: apps/loops is
+      # slated for replacement, and the focus is the core libraries it will be
+      # rebuilt on. Discovery is still a glob rather than a list, so a new
+      # library reaches CI without editing this file — the point was never to
+      # enumerate, it was to stop enumerating.
+      - name: Discover libraries with tests
+        id: discover
+        run: |
+          pkgs=$(python3 -c 'import json, sys; print(json.dumps(sys.argv[1:]))' $(for dir in libs/*/; do [ -d "${dir}tests" ] && basename "$dir"; done))
+          echo "packages=$pkgs" >> "$GITHUB_OUTPUT"
+
+  test-packages:
+    name: Test (${{ matrix.package }})
+    needs: discover
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        package: ${{ fromJson(needs.discover.outputs.packages) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+
+[project]
+name = "engine"
+version = "0.1.0"
+description = "Temporal infrastructure and identity — Tick, Vertex, Peer, Grant"
+readme = "README.md"
+authors = [{ name = "Kyle Gruel", email = "kylegruel@gmail.com" }]
+requires-python = ">=3.11"
+dependencies = [
+    "atoms",
+    "lang",
+    "python-ulid>=3.0",
+    "rfc8785>=0.1.4",
+]
+
+[tool.uv.sources]
+atoms = { workspace = true }
+lang = { workspace = true }
+sign = { workspace = true }
+
+[dependency-groups]
+dev = [
+    "hypothesis>=6.100",
+    "mutmut>=3.2",
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+    "pytest-cov>=6.0",
+    "ruff>=0.8",
+    # Test-only: real Ed25519 material for the injected-signer seam
+    # (conftest Custodian). Runtime engine never imports sign — custody
+    # is the composition layer; this group keeps the injection boundary.
+    "sign",
+    "ty>=0.0.1a11",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/engine"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+
+[tool.coverage.run]
+source = ["src/engine"]
+branch = true
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "\\.\\.\\.$",  # Protocol method stubs
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "PTH"]
+
+[tool.ty.environment]
+python-version = "3.11"
+
+[tool.mutmut]
+paths_to_mutate = ["src/engine/witness.py"]
+tests_dir = [
+    "tests/test_witness_position.py",
+    "tests/test_witness_address_helpers.py",
+    "tests/test_diff_interval_report.py",
+    "tests/test_fold_at.py",
+]
+also_copy = ["src"]
+tests/chaos/test_sdk_faults.py
+tests/chaos/test_storage_faults.py
+tests/architecture/test_rule_04_lib_dependency_dag.py
+tests/architecture/test_rule_09_resolve_local_vertex_ambiguity.py
+tests/architecture/_helpers.py
+tests/architecture/test_rule_05_lib_dataclasses_frozen.py
+tests/architecture/test_rule_18_arrival_vocabulary_denylist.py
+tests/architecture/test_rule_16_hot_path_libs_import_footprint.py
+tests/architecture/test_rule_06_atoms_stdlib_only.py
+tests/architecture/test_rule_03_libs_dont_import_apps.py
+tests/architecture/test_rule_08_domain_constants_in_custody_only.py
+tests/architecture/__init__.py
+tests/architecture/test_rule_02_apps_no_raw_sqlite.py
+tests/architecture/test_rule_13_production_never_imports_non_production.py
+tests/architecture/test_rule_12_render_register_is_offered_width.py
+tests/architecture/test_rule_14_mutation_survivors_shrink_only.py
+tests/architecture/test_rule_10_disclosure_renderers_no_store_io.py
+tests/architecture/test_rule_15_apps_import_only_sdk_and_painted.py
+tests/architecture/test_rule_07_sqlite3_confined_to_engine_store.py
+tests/architecture/test_rule_11_record_never_imports_surfacing.py
+tests/architecture/test_rule_01_apps_no_store_reader.py
+tests/architecture/test_rule_17_fold_order_prose_is_receipt_order.py
+
+exec
+/bin/zsh -lc 'uv run pytest tests/architecture' in /Users/kaygee/Code/loops-s3wp2
+exec
+/bin/zsh -lc 'UV_CACHE_DIR=/private/tmp/loops-s3wp2-uv-cache uv run --package engine pytest' in /Users/kaygee/Code/loops-s3wp2
+ succeeded in 8650ms:
+============================= test session starts ==============================
+platform darwin -- Python 3.13.11, pytest-9.1.1, pluggy-1.6.0
+rootdir: /Users/kaygee/Code/loops-s3wp2
+configfile: pyproject.toml
+plugins: hypothesis-6.166.0, cov-7.1.0, asyncio-1.4.0
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 99 items
+
+tests/architecture/test_rule_01_apps_no_store_reader.py .                [  1%]
+tests/architecture/test_rule_02_apps_no_raw_sqlite.py .                  [  2%]
+tests/architecture/test_rule_03_libs_dont_import_apps.py .............   [ 15%]
+tests/architecture/test_rule_04_lib_dependency_dag.py .                  [ 16%]
+tests/architecture/test_rule_05_lib_dataclasses_frozen.py .              [ 17%]
+tests/architecture/test_rule_06_atoms_stdlib_only.py .                   [ 18%]
+tests/architecture/test_rule_07_sqlite3_confined_to_engine_store.py .    [ 19%]
+tests/architecture/test_rule_08_domain_constants_in_custody_only.py .    [ 20%]
+tests/architecture/test_rule_09_resolve_local_vertex_ambiguity.py .      [ 21%]
+tests/architecture/test_rule_10_disclosure_renderers_no_store_io.py .    [ 22%]
+tests/architecture/test_rule_11_record_never_imports_surfacing.py ..     [ 24%]
+tests/architecture/test_rule_12_render_register_is_offered_width.py .... [ 28%]
+..................                                                       [ 46%]
+tests/architecture/test_rule_13_production_never_imports_non_production.py . [ 47%]
+............                                                             [ 59%]
+tests/architecture/test_rule_14_mutation_survivors_shrink_only.py .      [ 60%]
+tests/architecture/test_rule_15_apps_import_only_sdk_and_painted.py .    [ 61%]
+tests/architecture/test_rule_16_hot_path_libs_import_footprint.py .      [ 62%]
+tests/architecture/test_rule_17_fold_order_prose_is_receipt_order.py ..  [ 64%]
+tests/architecture/test_rule_18_arrival_vocabulary_denylist.py ......... [ 73%]
+..........................                                               [100%]
+
+============================== 99 passed in 8.44s ==============================
+
+ exited 2 in 5943ms:
+============================= test session starts ==============================
+platform darwin -- Python 3.13.11, pytest-9.1.1, pluggy-1.6.0
+rootdir: /Users/kaygee/Code/loops-s3wp2
+configfile: pyproject.toml
+plugins: hypothesis-6.166.0, cov-7.1.0, asyncio-1.4.0
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 2979 items / 29 errors
+
+==================================== ERRORS ====================================
+______________ ERROR collecting libs/atoms/tests/test_address.py _______________
+ImportError while importing test module '/Users/kaygee/Code/loops-s3wp2/libs/atoms/tests/test_address.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+../../.local/share/uv/python/cpython-3.13-macos-aarch64-none/lib/python3.13/importlib/__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   ModuleNotFoundError: No module named 'tests.test_address'
+______________ ERROR collecting libs/atoms/tests/test_boundary.py ______________
+ImportError while importing test module '/Users/kaygee/Code/loops-s3wp2/libs/atoms/tests/test_boundary.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+../../.local/share/uv/python/cpython-3.13-macos-aarch64-none/lib/python3.13/importlib/__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   ModuleNotFoundError: No module named 'tests.test_boundary'
+__________ ERROR collecting libs/atoms/tests/test_conformance_fold.py __________
+ImportError while importing test module '/Users/kaygee/Code/loops-s3wp2/libs/atoms/tests/test_conformance_fold.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+../../.local/share/uv/python/cpython-3.13-macos-aarch64-none/lib/python3.13/importlib/__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   ModuleNotFoundError: No module named 'tests.test_conformance_fold'
+________________ ERROR collecting libs/atoms/tests/test_fact.py ________________
+ImportError while importing test module '/Users/kaygee/Code/loops-s3wp2/libs/atoms/tests/test_fact.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+../../.local/share/uv/python/cpython-3.13-macos-aarch64-none/lib/python3.13/importlib/__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   ModuleNotFoundError: No module named 'tests.test_fact'
+___________ ERROR collecting libs/atoms/tests/test_fold_rejection.py ___________
+ImportError while importing test module '/Users/kaygee/Code/loops-s3wp2/libs/atoms/tests/test_fold_rejection.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+../../.local/share/uv/python/cpython-3.13-macos-aarch64-none/lib/python3.13/importlib/__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   ModuleNotFoundError: No module named 'tests.test_fold_rejection'
+_____________ ERROR collecting libs/atoms/tests/test_fold_state.py _____________
+ImportError while importing test module '/Users/kaygee/Code/loops-s3wp2/libs/atoms/tests/test_fold_state.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+../../.local/share/uv/python/cpython-3.13-macos-aarch64-none/lib/python3.13/importlib/__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   ModuleNotFoundError: No module named 'tests.test_fold_state'
+_____________ ERROR collecting libs/atoms/tests/test_fold_typed.py _____________
+ImportError while importing test module '/Users/kaygee/Code/loops-s3wp2/libs/atoms/tests/test_fold_typed.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+../../.local/share/uv/python/cpython-3.13-macos-aarch64-none/lib/python3.13/importlib/__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   ModuleNotFoundError: No module named 'tests.test_fold_typed'
+______________ ERROR collecting libs/atoms/tests/test_ordering.py ______________
+ImportError while importing test module '/Users/kaygee/Code/loops-s3wp2/libs/atoms/tests/test_ordering.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+../../.local/share/uv/python/cpython-3.13-macos-aarch64-none/lib/python3.13/importlib/__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   ModuleNotFoundError: No module named 'tests.test_ordering'
+_______________ ERROR collecting libs/atoms/tests/test_parse.py ________________
+ImportError while importing test module '/Users/kaygee/Code/loops-s3wp2/libs/atoms/tests/test_parse.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+../../.local/share/uv/python/cpython-3.13-macos-aarch64-none/lib/python3.13/importlib/__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   ModuleNotFoundError: No module named 'tests.test_parse'
+___________ ERROR collecting libs/atoms/tests/test_parse_coverage.py ___________
+ImportError while importing test module '/Users/kaygee/Code/loops-s3wp2/libs/atoms/tests/test_parse_coverage.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+../../.local/share/uv/python/cpython-3.13-macos-aarch64-none/lib/python3.13/importlib/__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   ModuleNotFoundError: No module named 'tests.test_parse_coverage'
+__________ ERROR collecting libs/atoms/tests/test_properties_atoms.py __________
+ImportError while importing test module '/Users/kaygee/Code/loops-s3wp2/libs/atoms/tests/test_properties_atoms.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+../../.local/share/uv/python/cpython-3.13-macos-aarch64-none/lib/python3.13/importlib/__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   ModuleNotFoundError: No module named 'tests.test_properties_atoms'
+______________ ERROR collecting libs/atoms/tests/test_protocol.py ______________
+ImportError while importing test module '/Users/kaygee/Code/loops-s3wp2/libs/atoms/tests/test_protocol.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+../../.local/share/uv/python/cpython-3.13-macos-aarch64-none/lib/python3.13/importlib/__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   ModuleNotFoundError: No module named 'tests.test_protocol'
+_______________ ERROR collecting libs/atoms/tests/test_replay.py _______________
+ImportError while importing test module '/Users/kaygee/Code/loops-s3wp2/libs/atoms/tests/test_replay.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+../../.local/share/uv/python/cpython-3.13-macos-aarch64-none/lib/python3.13/importlib/__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   ModuleNotFoundError: No module named 'tests.test_replay'
+_______________ ERROR collecting libs/atoms/tests/test_shapes.py _______________
+ImportError while importing test module '/Users/kaygee/Code/loops-s3wp2/libs/atoms/tests/test_shapes.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+../../.local/share/uv/python/cpython-3.13-macos-aarch64-none/lib/python3.13/importlib/__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   ModuleNotFoundError: No module named 'tests.test_shapes'
+_______________ ERROR collecting libs/atoms/tests/test_source.py _______________
+ImportError while importing test module '/Users/kaygee/Code/loops-s3wp2/libs/atoms/tests/test_source.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+../../.local/share/uv/python/cpython-3.13-macos-aarch64-none/lib/python3.13/importlib/__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   ModuleNotFoundError: No module named 'tests.test_source'
+_______________ ERROR collecting libs/atoms/tests/test_ticks.py ________________
+ImportError while importing test module '/Users/kaygee/Code/loops-s3wp2/libs/atoms/tests/test_ticks.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+../../.local/share/uv/python/cpython-3.13-macos-aarch64-none/lib/python3.13/importlib/__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   ModuleNotFoundError: No module named 'tests.test_ticks'
+______________________ ERROR collecting libs/engine/tests ______________________
+.venv/lib/python3.13/site-packages/_pytest/config/__init__.py:758: in _importconftest
+    mod = import_path(
+.venv/lib/python3.13/site-packages/_pytest/pathlib.py:619: in import_path
+    raise ImportPathMismatchError(module_name, module_file, path)
+E   _pytest.pathlib.ImportPathMismatchError: ('tests.conftest', '/Users/kaygee/Code/loops-s3wp2/apps/loops/tests/conftest.py', PosixPath('/Users/kaygee/Code/loops-s3wp2/libs/engine/tests/conftest.py'))
+______________ ERROR collecting libs/lang/tests/test_document.py _______________
+ImportError while importing test module '/Users/kaygee/Code/loops-s3wp2/libs/lang/tests/test_document.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+../../.local/share/uv/python/cpython-3.13-macos-aarch64-none/lib/python3.13/importlib/__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   ModuleNotFoundError: No module named 'tests.test_document'
+_____________ ERROR collecting libs/lang/tests/test_kdl_splice.py ______________
+ImportError while importing test module '/Users/kaygee/Code/loops-s3wp2/libs/lang/tests/test_kdl_splice.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+../../.local/share/uv/python/cpython-3.13-macos-aarch64-none/lib/python3.13/importlib/__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   ModuleNotFoundError: No module named 'tests.test_kdl_splice'
+_______________ ERROR collecting libs/lang/tests/test_loader.py ________________
+ImportError while importing test module '/Users/kaygee/Code/loops-s3wp2/libs/lang/tests/test_loader.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+../../.local/share/uv/python/cpython-3.13-macos-aarch64-none/lib/python3.13/importlib/__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   ModuleNotFoundError: No module named 'tests.test_loader'
+_____________ ERROR collecting libs/lang/tests/test_population.py ______________
+import file mismatch:
+imported module 'tests.test_population' has this __file__ attribute:
+  /Users/kaygee/Code/loops-s3wp2/apps/loops/tests/test_population.py
+which is not the same as the test file we want to collect:
+  /Users/kaygee/Code/loops-s3wp2/libs/lang/tests/test_population.py
+HINT: remove __pycache__ / .pyc files and/or use a unique basename for your test file modules
+________ ERROR collecting libs/lang/tests/test_properties_roundtrip.py _________
+ImportError while importing test module '/Users/kaygee/Code/loops-s3wp2/libs/lang/tests/test_properties_roundtrip.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+../../.local/share/uv/python/cpython-3.13-macos-aarch64-none/lib/python3.13/importlib/__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   ModuleNotFoundError: No module named 'tests.test_properties_roundtrip'
+______________ ERROR collecting libs/lang/tests/test_validator.py ______________
+ImportError while importing test module '/Users/kaygee/Code/loops-s3wp2/libs/lang/tests/test_validator.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+../../.local/share/uv/python/cpython-3.13-macos-aarch64-none/lib/python3.13/importlib/__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   ModuleNotFoundError: No module named 'tests.test_validator'
+___________ ERROR collecting libs/lang/tests/test_vertex_mutation.py ___________
+ImportError while importing test module '/Users/kaygee/Code/loops-s3wp2/libs/lang/tests/test_vertex_mutation.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+../../.local/share/uv/python/cpython-3.13-macos-aarch64-none/lib/python3.13/importlib/__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   ModuleNotFoundError: No module named 'tests.test_vertex_mutation'
+_______________ ERROR collecting libs/sign/tests/test_ed25519.py _______________
+ImportError while importing test module '/Users/kaygee/Code/loops-s3wp2/libs/sign/tests/test_ed25519.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+../../.local/share/uv/python/cpython-3.13-macos-aarch64-none/lib/python3.13/importlib/__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   ModuleNotFoundError: No module named 'tests.test_ed25519'
+________________ ERROR collecting libs/sign/tests/test_jwks.py _________________
+ImportError while importing test module '/Users/kaygee/Code/loops-s3wp2/libs/sign/tests/test_jwks.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+../../.local/share/uv/python/cpython-3.13-macos-aarch64-none/lib/python3.13/importlib/__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   ModuleNotFoundError: No module named 'tests.test_jwks'
+_________________ ERROR collecting libs/sign/tests/test_jwt.py _________________
+ImportError while importing test module '/Users/kaygee/Code/loops-s3wp2/libs/sign/tests/test_jwt.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+../../.local/share/uv/python/cpython-3.13-macos-aarch64-none/lib/python3.13/importlib/__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   ModuleNotFoundError: No module named 'tests.test_jwt'
+________________ ERROR collecting libs/sign/tests/test_keys.py _________________
+ImportError while importing test module '/Users/kaygee/Code/loops-s3wp2/libs/sign/tests/test_keys.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+../../.local/share/uv/python/cpython-3.13-macos-aarch64-none/lib/python3.13/importlib/__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   ModuleNotFoundError: No module named 'tests.test_keys'
+______________________ ERROR collecting libs/store/tests _______________________
+.venv/lib/python3.13/site-packages/_pytest/config/__init__.py:758: in _importconftest
+    mod = import_path(
+.venv/lib/python3.13/site-packages/_pytest/pathlib.py:619: in import_path
+    raise ImportPathMismatchError(module_name, module_file, path)
+E   _pytest.pathlib.ImportPathMismatchError: ('tests.conftest', '/Users/kaygee/Code/loops-s3wp2/apps/loops/tests/conftest.py', PosixPath('/Users/kaygee/Code/loops-s3wp2/libs/store/tests/conftest.py'))
+=========================== short test summary info ============================
+ERROR libs/atoms/tests/test_address.py
+ERROR libs/atoms/tests/test_boundary.py
+ERROR libs/atoms/tests/test_conformance_fold.py
+ERROR libs/atoms/tests/test_fact.py
+ERROR libs/atoms/tests/test_fold_rejection.py
+ERROR libs/atoms/tests/test_fold_state.py
+ERROR libs/atoms/tests/test_fold_typed.py
+ERROR libs/atoms/tests/test_ordering.py
+ERROR libs/atoms/tests/test_parse.py
+ERROR libs/atoms/tests/test_parse_coverage.py
+ERROR libs/atoms/tests/test_properties_atoms.py
+ERROR libs/atoms/tests/test_protocol.py
+ERROR libs/atoms/tests/test_replay.py
+ERROR libs/atoms/tests/test_shapes.py
+ERROR libs/atoms/tests/test_source.py
+ERROR libs/atoms/tests/test_ticks.py
+ERROR libs/engine/tests - _pytest.pathlib.ImportPathMismatchError: ('tests.co...
+ERROR libs/lang/tests/test_document.py
+ERROR libs/lang/tests/test_kdl_splice.py
+ERROR libs/lang/tests/test_loader.py
+ERROR libs/lang/tests/test_population.py
+ERROR libs/lang/tests/test_properties_roundtrip.py
+ERROR libs/lang/tests/test_validator.py
+ERROR libs/lang/tests/test_vertex_mutation.py
+ERROR libs/sign/tests/test_ed25519.py
+ERROR libs/sign/tests/test_jwks.py
+ERROR libs/sign/tests/test_jwt.py
+ERROR libs/sign/tests/test_keys.py
+ERROR libs/store/tests - _pytest.pathlib.ImportPathMismatchError: ('tests.con...
+!!!!!!!!!!!!!!!!!!! Interrupted: 29 errors during collection !!!!!!!!!!!!!!!!!!!
+============================== 29 errors in 5.45s ==============================
+
+exec
+/bin/zsh -lc 'UV_CACHE_DIR=/private/tmp/loops-s3wp2-uv-cache uv run pytest' in /Users/kaygee/Code/loops-s3wp2/libs/engine
+codex
+The separate architecture suite is clean (99 passed). The full engine package is still running through its property-heavy tail; the comparison family itself has already passed all 30 collected checks. Fixture splices so far correspond to plausible crash, concurrent-writer, editor, or forward-version-skew states—none requires an impossible byte history.
+ succeeded in 94257ms:
+============================= test session starts ==============================
+platform darwin -- Python 3.13.11, pytest-9.1.1, pluggy-1.6.0
+rootdir: /Users/kaygee/Code/loops-s3wp2/libs/engine
+configfile: pyproject.toml
+testpaths: tests
+plugins: hypothesis-6.166.0, cov-7.1.0, asyncio-1.4.0
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function
+collected 2189 items
+
+tests/test_absorb_edit.py .................                              [  0%]
+tests/test_absorb_genesis.py ........                                    [  1%]
+tests/test_admission.py ...........................                      [  2%]
+tests/test_admission_callback_ownership.py .                             [  2%]
+tests/test_aggregate_as_of_ontology.py ...                               [  2%]
+tests/test_arrival_authority.py ...............                          [  3%]
+tests/test_arrival_authority_gate.py ...                                 [  3%]
+tests/test_arrival_body.py .......................                       [  4%]
+tests/test_arrival_cas_full_head.py .......................              [  5%]
+tests/test_arrival_cas_head.py ......                                    [  5%]
+tests/test_arrival_contract.py ..............................            [  7%]
+tests/test_arrival_coordinate_d0.py .................................... [  8%]
+........                                                                 [  9%]
+tests/test_arrival_derived_log.py ....................                   [ 10%]
+tests/test_arrival_gate.py ......................................        [ 11%]
+tests/test_arrival_grammar.py .......................................... [ 13%]
+.........                                                                [ 14%]
+tests/test_arrival_head_attestation.py ................................. [ 15%]
+..............................................................           [ 18%]
+tests/test_arrival_key_registry.py .........                             [ 18%]
+tests/test_arrival_projection.py .................                       [ 19%]
+tests/test_arrival_rederivation_rowids.py .....                          [ 19%]
+tests/test_arrival_registry.py .......................                   [ 20%]
+tests/test_arrival_store.py ....................                         [ 21%]
+tests/test_arrival_transfer.py ..................................        [ 23%]
+tests/test_audit_rebase_d3.py ..................                         [ 24%]
+tests/test_behavior.py .............................                     [ 25%]
+tests/test_builder.py ...............................                    [ 26%]
+tests/test_cadence.py ..................................                 [ 28%]
+tests/test_canonical_audit.py ............................               [ 29%]
+tests/test_ceremony_orchestration.py .............................s..... [ 31%]
+..............                                                           [ 32%]
+tests/test_combined_read_ordering.py ............................        [ 33%]
+tests/test_combined_tick_envelope.py ...                                 [ 33%]
+tests/test_compiler.py ................................................. [ 35%]
+..................................................................       [ 38%]
+tests/test_conformance_comparison.py ..............................      [ 40%]
+tests/test_conformance_lens.py .............                             [ 40%]
+tests/test_conformance_replay.py .......                                 [ 40%]
+tests/test_conformance_replicate.py ...........                          [ 41%]
+tests/test_declaration_resolver.py ..................................... [ 43%]
+.....                                                                    [ 43%]
+tests/test_diff_interval_report.py ............                          [ 43%]
+tests/test_evaluate_boundaries.py ................                       [ 44%]
+tests/test_executor.py ................................                  [ 46%]
+tests/test_fact_signing.py ...................                           [ 47%]
+tests/test_fold_as_of.py .......                                         [ 47%]
+tests/test_fold_at.py ........                                           [ 47%]
+tests/test_handle_bench.py ...                                           [ 47%]
+tests/test_handle_changes.py ...............                             [ 48%]
+tests/test_handle_incremental.py ........                                [ 48%]
+tests/test_handle_open.py .................                              [ 49%]
+tests/test_handle_probe.py ...........                                   [ 50%]
+tests/test_handle_receive.py ..........                                  [ 50%]
+tests/test_integration.py .........................                      [ 51%]
+tests/test_jsonl_ceremonies.py ...............                           [ 52%]
+tests/test_jsonl_codec.py .............................................. [ 54%]
+................................................                         [ 56%]
+tests/test_jsonl_golden_fixtures.py ..........                           [ 57%]
+tests/test_jsonl_store.py ...........................................    [ 59%]
+tests/test_layer_boundaries.py ...                                       [ 59%]
+tests/test_lens.py ............                                          [ 59%]
+tests/test_loop.py ...................                                   [ 60%]
+tests/test_observer.py ................                                  [ 61%]
+tests/test_ontology_as_of.py .........                                   [ 61%]
+tests/test_ordering_checkpoint_dispatch.py .........                     [ 62%]
+tests/test_peer.py ...........................                           [ 63%]
+tests/test_probe_arrival_matrix.py .............                         [ 64%]
+tests/test_probe_preflight.py ...................................        [ 65%]
+tests/test_program.py ................                                   [ 66%]
+tests/test_properties_replay.py ......                                   [ 66%]
+tests/test_query_facts.py ...............................                [ 68%]
+tests/test_receipt.py ..................                                 [ 68%]
+tests/test_receipt_attestation.py .......................                [ 69%]
+tests/test_recursive_sources.py .......                                  [ 70%]
+tests/test_replay.py .......                                             [ 70%]
+tests/test_residence.py .......................                          [ 71%]
+tests/test_review_helpers.py ............                                [ 72%]
+tests/test_seal_rebase_d2.py ........                                    [ 72%]
+tests/test_source_protocol.py .....                                      [ 72%]
+tests/test_sqlite_store.py ...........................                   [ 74%]
+tests/test_store.py ...................                                  [ 74%]
+tests/test_store_reader.py ............................................. [ 76%]
+...............................                                          [ 78%]
+tests/test_tick.py ....................................                  [ 80%]
+tests/test_tick_chain.py ............................................... [ 82%]
+....                                                                     [ 82%]
+tests/test_topology.py .........                                         [ 82%]
+tests/test_vertex.py ................................................... [ 85%]
+.......................................                                  [ 86%]
+tests/test_vertex_helpers.py ................                            [ 87%]
+tests/test_vertex_nesting.py ......................                      [ 88%]
+tests/test_vertex_reader.py ............................................ [ 90%]
+........................................................................ [ 93%]
+..................                                                       [ 94%]
+tests/test_vertex_replay_coverage.py ............................        [ 96%]
+tests/test_witness_address_helpers.py .......................            [ 97%]
+tests/test_witness_position.py ......................................... [ 98%]
+...                                                                      [ 99%]
+tests/test_witness_rekey_d1.py ....................                      [100%]
+
+================== 2188 passed, 1 skipped in 93.02s (0:01:33) ==================
+
+exec
+/bin/zsh -lc "nl -ba spec/conformance/vectors/comparison/comparison-incomplete-a-torn-line-yields-a-lower-bound.json
+nl -ba spec/conformance/vectors/comparison/comparison-incomplete-a-bound-still-refuses-below-itself.json
+nl -ba spec/conformance/vectors/comparison/comparison-incomplete-a-headerless-journal-yields-a-bound.json
+nl -ba spec/conformance/vectors/comparison/comparison-incomplete-nothing-readable-declines-every-comparison.json | sed -n '1,45p'
+git status --short" in /Users/kaygee/Code/loops-s3wp2
+ succeeded in 0ms:
+     1	{
+     2	  "name": "comparison-incomplete-a-torn-line-yields-a-lower-bound",
+     3	  "description": "The fixture that refuted 'a mid-file skip is strictly safer than a torn tail'. One epoch in file order [reset 90, 92, 91], true remembered head 92; the line holding 92 is torn by a crash, and a later well-formed entry survives after it. Skipping quietly would lower the remembered head to 91 and call a genuine restore from 92 UNCHANGED. So the loss is carried in the read's own type instead: the head is known only to be AT LEAST 91, and a presented head EQUAL to the bound cannot be called unchanged, because it may be a rollback from the very entry the read missed. Note what is NOT done \u2014 the file is not refused. Refusing would make an ordinary crash a permanent incident, and it claims a protection this location cannot deliver anyway, since anyone able to corrupt a line can delete the journal instead and be met with trust on first use.",
+     4	  "input": {
+     5	    "form": "journal",
+     6	    "journal": [
+     7	      "{\"protocol\":1,\"type\":\"arrival-head-observation\",\"v\":1,\"wire\":1}",
+     8	      "{\"kind\":\"bootstrap\",\"level\":\"mint\",\"lineage\":\"01M3COMPARISONVECTORLINEAGE\",\"location\":\"/vectors/comparison/project.arrival\",\"observed_at\":1788000000.0,\"ordinal\":0,\"record_hash\":\"8ac1d899262e830d2be319bd5ef28d03cfe847a108adaa1ec9288b7e2e0f2b00\",\"v\":1}",
+     9	      "{\"kind\":\"trust-reset\",\"level\":\"full\",\"lineage\":\"01M3COMPARISONVECTORLINEAGE\",\"location\":\"/vectors/comparison/project.arrival\",\"observed_at\":1788000090.0,\"ordinal\":90,\"record_hash\":\"9ba847b1c3e2f92f410ac2264266c8506f0df0a9cee6575a27b6064957fc93ba\",\"v\":1}",
+    10	      "{\"kind\":\"advance\",\"level\":\"commit\",\"lineage\":\"01M3COMPARISONVECTORLINEAGE\",\"location\":\"/vectors/comparison/project.arrival\",\"",
+    11	      "{\"kind\":\"advance\",\"level\":\"commit\",\"lineage\":\"01M3COMPARISONVECTORLINEAGE\",\"location\":\"/vectors/comparison/project.arrival\",\"observed_at\":1788000091.0,\"ordinal\":91,\"record_hash\":\"e2235df4281b93546c0177885f0677948fb368cf593fa3ec1fbd2d734e06bfe8\",\"v\":1}"
+    12	    ],
+    13	    "presented": {
+    14	      "lineage": "01M3COMPARISONVECTORLINEAGE",
+    15	      "ordinal": 91,
+    16	      "record_hash": "e2235df4281b93546c0177885f0677948fb368cf593fa3ec1fbd2d734e06bfe8"
+    17	    },
+    18	    "at_known": null
+    19	  },
+    20	  "expected": {
+    21	    "read": "bounded",
+    22	    "known": {
+    23	      "lineage": "01M3COMPARISONVECTORLINEAGE",
+    24	      "ordinal": 91,
+    25	      "record_hash": "e2235df4281b93546c0177885f0677948fb368cf593fa3ec1fbd2d734e06bfe8"
+    26	    },
+    27	    "entries": 3,
+    28	    "epoch": 2,
+    29	    "skipped": 1,
+    30	    "outcome": null,
+    31	    "sound_answer": null
+    32	  }
+    33	}
+     1	{
+     2	  "name": "comparison-incomplete-a-bound-still-refuses-below-itself",
+     3	  "description": "What a bound CAN answer, which is the half a decline-only reading would lose. The accepted head is at least 91, so a store presenting 89 is certainly below it and that is a rollback on any reading. The bound is sound downward and unobtainable in both proceed directions: nothing bounds the accepted head from ABOVE either, so a head above the bound is not an advance \u2014 a lost entry may have sat at 200.",
+     4	  "input": {
+     5	    "form": "journal",
+     6	    "journal": [
+     7	      "{\"protocol\":1,\"type\":\"arrival-head-observation\",\"v\":1,\"wire\":1}",
+     8	      "{\"kind\":\"bootstrap\",\"level\":\"mint\",\"lineage\":\"01M3COMPARISONVECTORLINEAGE\",\"location\":\"/vectors/comparison/project.arrival\",\"observed_at\":1788000000.0,\"ordinal\":0,\"record_hash\":\"8ac1d899262e830d2be319bd5ef28d03cfe847a108adaa1ec9288b7e2e0f2b00\",\"v\":1}",
+     9	      "{\"kind\":\"trust-reset\",\"level\":\"full\",\"lineage\":\"01M3COMPARISONVECTORLINEAGE\",\"location\":\"/vectors/comparison/project.arrival\",\"observed_at\":1788000090.0,\"ordinal\":90,\"record_hash\":\"9ba847b1c3e2f92f410ac2264266c8506f0df0a9cee6575a27b6064957fc93ba\",\"v\":1}",
+    10	      "{\"kind\":\"advance\",\"level\":\"commit\",\"lineage\":\"01M3COMPARISONVECTORLINEAGE\",\"location\":\"/vectors/comparison/project.arrival\",\"",
+    11	      "{\"kind\":\"advance\",\"level\":\"commit\",\"lineage\":\"01M3COMPARISONVECTORLINEAGE\",\"location\":\"/vectors/comparison/project.arrival\",\"observed_at\":1788000091.0,\"ordinal\":91,\"record_hash\":\"e2235df4281b93546c0177885f0677948fb368cf593fa3ec1fbd2d734e06bfe8\",\"v\":1}"
+    12	    ],
+    13	    "presented": {
+    14	      "lineage": "01M3COMPARISONVECTORLINEAGE",
+    15	      "ordinal": 89,
+    16	      "record_hash": "623f994637f1541c6ae8cb79aae131072e4963c06724a9eeb1fb7394fb24ae31"
+    17	    },
+    18	    "at_known": null
+    19	  },
+    20	  "expected": {
+    21	    "read": "bounded",
+    22	    "known": {
+    23	      "lineage": "01M3COMPARISONVECTORLINEAGE",
+    24	      "ordinal": 91,
+    25	      "record_hash": "e2235df4281b93546c0177885f0677948fb368cf593fa3ec1fbd2d734e06bfe8"
+    26	    },
+    27	    "entries": 3,
+    28	    "epoch": 2,
+    29	    "skipped": 1,
+    30	    "outcome": null,
+    31	    "sound_answer": "rollback"
+    32	  }
+    33	}
+     1	{
+     2	  "name": "comparison-incomplete-a-headerless-journal-yields-a-bound",
+     3	  "description": "Readable entries with no header. This once refused the whole file; it yields a BOUND instead, with the absence reported without a line number because an absence does not have one. The entries are self-describing evidence that heads were accepted, and what was lost \u2014 the protocol and wire versions those record hashes derive under \u2014 is exactly the kind of loss a lower bound is for. Refusing here would be a verdict where a bound will do.",
+     4	  "input": {
+     5	    "form": "journal",
+     6	    "journal": [
+     7	      "{\"kind\":\"bootstrap\",\"level\":\"mint\",\"lineage\":\"01M3COMPARISONVECTORLINEAGE\",\"location\":\"/vectors/comparison/project.arrival\",\"observed_at\":1788000000.0,\"ordinal\":0,\"record_hash\":\"8ac1d899262e830d2be319bd5ef28d03cfe847a108adaa1ec9288b7e2e0f2b00\",\"v\":1}",
+     8	      "{\"kind\":\"advance\",\"level\":\"commit\",\"lineage\":\"01M3COMPARISONVECTORLINEAGE\",\"location\":\"/vectors/comparison/project.arrival\",\"observed_at\":1788000006.0,\"ordinal\":6,\"record_hash\":\"fd36ffd78406e2dbb820c9007bec1bfd1a17ba61a52c66fe14f0cab140f953f5\",\"v\":1}"
+     9	    ],
+    10	    "presented": {
+    11	      "lineage": "01M3COMPARISONVECTORLINEAGE",
+    12	      "ordinal": 6,
+    13	      "record_hash": "fd36ffd78406e2dbb820c9007bec1bfd1a17ba61a52c66fe14f0cab140f953f5"
+    14	    },
+    15	    "at_known": null
+    16	  },
+    17	  "expected": {
+    18	    "read": "bounded",
+    19	    "known": {
+    20	      "lineage": "01M3COMPARISONVECTORLINEAGE",
+    21	      "ordinal": 6,
+    22	      "record_hash": "fd36ffd78406e2dbb820c9007bec1bfd1a17ba61a52c66fe14f0cab140f953f5"
+    23	    },
+    24	    "entries": 2,
+    25	    "epoch": 2,
+    26	    "skipped": 1,
+    27	    "outcome": null,
+    28	    "sound_answer": null
+    29	  }
+    30	}
+     1	{
+     2	  "name": "comparison-incomplete-nothing-readable-declines-every-comparison",
+     3	  "description": "The third state, and it is not the absence of one. This journal was written entirely by a later build \u2014 its own header, its own entries \u2014 so no attacker is involved, only version skew. Content was claimed and none of it could be read, which says heads WERE accepted here and their ordinals are precisely what was lost. There is no bound, so unlike an incomplete read this cannot even answer rollback: every comparison declines. Collapsing this into first contact would grant trust on first use PRECISELY BECAUSE the journal became unreadable.",
+     4	  "input": {
+     5	    "form": "journal",
+     6	    "journal": [
+     7	      "{\"issuer\":\"a-later-build\",\"protocol\":2,\"type\":\"arrival-head-observation\",\"v\":2,\"wire\":2}",
+     8	      "{\"custody\":{\"chain\":\"a-later-build\"},\"kind\":\"advance\",\"level\":\"commit\",\"lineage\":\"01M3COMPARISONVECTORLINEAGE\",\"observed_at\":1788004216.0,\"ordinal\":4216,\"record_hash\":\"fe006204847e0c589d1c2cdc7646c1fe2222e96c29802245fcbfcb23c2021f81\",\"v\":2}",
+     9	      "{\"custody\":{\"chain\":\"a-later-build\"},\"kind\":\"advance\",\"level\":\"commit\",\"lineage\":\"01M3COMPARISONVECTORLINEAGE\",\"observed_at\":1788004217.0,\"ordinal\":4217,\"record_hash\":\"256f6ea40690cf118ab26a820207050cb57ae41ad4e5ce03b23564ff0a518c5d\",\"v\":2}"
+    10	    ],
+    11	    "presented": {
+    12	      "lineage": "01M3COMPARISONVECTORLINEAGE",
+    13	      "ordinal": 4217,
+    14	      "record_hash": "256f6ea40690cf118ab26a820207050cb57ae41ad4e5ce03b23564ff0a518c5d"
+    15	    },
+    16	    "at_known": null
+    17	  },
+    18	  "expected": {
+    19	    "read": "unreadable",
+    20	    "known": null,
+    21	    "entries": 0,
+    22	    "epoch": 0,
+    23	    "skipped": 2,
+    24	    "outcome": null
+    25	  }
+    26	}
+
+codex
+FAIL — one blocking coverage hole.
+
+### S3WP2-L-1
+
+- File: [comparison-incomplete-a-bound-still-refuses-below-itself.json](/Users/kaygee/Code/loops-s3wp2/spec/conformance/vectors/comparison/comparison-incomplete-a-bound-still-refuses-below-itself.json:13)
+- Severity: BLOCKING
+- Scenario: A foreign implementation handles a bound as follows: below → `rollback`, equal → decline, above with valid `at_known` → `advanced`. It passes every current vector while violating rollback-only semantics.
+- Evidence: The schema correctly says a bound can answer only rollback ([SCHEMA.md](/Users/kaygee/Code/loops-s3wp2/spec/conformance/SCHEMA.md:488)) and explicitly forbids `advanced` above the bound ([SCHEMA.md](/Users/kaygee/Code/loops-s3wp2/spec/conformance/SCHEMA.md:494)). However, every bounded/null vector presents a head exactly equal to the bound; the only unequal bounded vector presents ordinal 89 below bound 91 and expects `sound_answer: "rollback"`. No vector presents a same-lineage head above the bound. Thus the fought-over “nothing bounds the accepted head from above” ruling exists in prose and a description, but is not pinned by executable vector input/output.
+
+Coverage matrix:
+
+| Read state | Meaningful result cells | Coverage |
+|---|---|---|
+| `none` | `first-contact` | Covered by empty and header-only journals |
+| `established` | All seven outcomes | Covered through the documented composition with the `heads` classifier |
+| `bounded` | rollback below bound; otherwise no outcome | Below and equal covered; above-bound decline missing; lineage-replaced deliberately inexpressible |
+| `unreadable` | no outcome | Covered, including re-mint |
+| `equivocation` | read refusal, no outcome | Covered |
+
+Other seeded targets pass:
+
+- Foreign semantics are documented without requiring Python, including `read`, counts, rollback-only bounds, reset-inclusive epochs, and the three-way header rule.
+- Both vector forms are mandatory replay questions under §11’s fail-loudly rule. “No implementation is obliged to have [a journal]” refers to production persistence/encoding, not permission to omit the journal-form conformance cases.
+- No journal-only ruling is silently lost: §11 explicitly enumerates epoch scoping, maximum ordinal, equivocation, incomplete reads, and header classification.
+- Damage fixtures are realistic: truncated writes followed by concurrent appends, deleted headers, editor corruption, and later-version lines are all producible histories.
+- Verification: engine `2188 passed, 1 skipped`; architecture separately `99 passed`. Workspace unchanged.
+
+**NOT CONVERGED** — blocking: `S3WP2-L-1`.
+tokens used
+106,327
+FAIL — one blocking coverage hole.
+
+### S3WP2-L-1
+
+- File: [comparison-incomplete-a-bound-still-refuses-below-itself.json](/Users/kaygee/Code/loops-s3wp2/spec/conformance/vectors/comparison/comparison-incomplete-a-bound-still-refuses-below-itself.json:13)
+- Severity: BLOCKING
+- Scenario: A foreign implementation handles a bound as follows: below → `rollback`, equal → decline, above with valid `at_known` → `advanced`. It passes every current vector while violating rollback-only semantics.
+- Evidence: The schema correctly says a bound can answer only rollback ([SCHEMA.md](/Users/kaygee/Code/loops-s3wp2/spec/conformance/SCHEMA.md:488)) and explicitly forbids `advanced` above the bound ([SCHEMA.md](/Users/kaygee/Code/loops-s3wp2/spec/conformance/SCHEMA.md:494)). However, every bounded/null vector presents a head exactly equal to the bound; the only unequal bounded vector presents ordinal 89 below bound 91 and expects `sound_answer: "rollback"`. No vector presents a same-lineage head above the bound. Thus the fought-over “nothing bounds the accepted head from above” ruling exists in prose and a description, but is not pinned by executable vector input/output.
+
+Coverage matrix:
+
+| Read state | Meaningful result cells | Coverage |
+|---|---|---|
+| `none` | `first-contact` | Covered by empty and header-only journals |
+| `established` | All seven outcomes | Covered through the documented composition with the `heads` classifier |
+| `bounded` | rollback below bound; otherwise no outcome | Below and equal covered; above-bound decline missing; lineage-replaced deliberately inexpressible |
+| `unreadable` | no outcome | Covered, including re-mint |
+| `equivocation` | read refusal, no outcome | Covered |
+
+Other seeded targets pass:
+
+- Foreign semantics are documented without requiring Python, including `read`, counts, rollback-only bounds, reset-inclusive epochs, and the three-way header rule.
+- Both vector forms are mandatory replay questions under §11’s fail-loudly rule. “No implementation is obliged to have [a journal]” refers to production persistence/encoding, not permission to omit the journal-form conformance cases.
+- No journal-only ruling is silently lost: §11 explicitly enumerates epoch scoping, maximum ordinal, equivocation, incomplete reads, and header classification.
+- Damage fixtures are realistic: truncated writes followed by concurrent appends, deleted headers, editor corruption, and later-version lines are all producible histories.
+- Verification: engine `2188 passed, 1 skipped`; architecture separately `99 passed`. Workspace unchanged.
+
+**NOT CONVERGED** — blocking: `S3WP2-L-1`.

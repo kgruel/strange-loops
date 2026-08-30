@@ -561,6 +561,13 @@ def trust_reset(
     refusal-side failure, and the reason the read-time half is the load-bearing
     one.
 
+    **What a reset does and does not fence out**, stated because it is
+    underdetermined rather than decided: a reset decrees trust in *N*; verified
+    descendants of *N*, including re-presentations of abandoned history, are
+    accepted; fencing out authentic history is not expressible unsigned. The
+    ceremony's semantics here are Kyle's call at the slice-6 gate
+    (``design:arrival-reset-descendant-acceptance``).
+
     The CLI surface for the ceremony is slice 5's cut. This is the producer, so
     slices 4 and 6 have something to call.
     """

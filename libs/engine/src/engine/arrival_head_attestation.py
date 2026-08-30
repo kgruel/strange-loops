@@ -850,7 +850,7 @@ class JournalRead:
 def _epoch_of(
     entries: tuple[HeadAttestation, ...],
     positions: tuple[int, ...],
-) -> tuple[tuple[HeadAttestation, ...], tuple[str, ...]]:
+) -> tuple[tuple[HeadAttestation, ...], int | None, tuple[tuple[int, str], ...]]:
     """The entries in the current trust epoch, reset-INCLUSIVE.
 
     Epoch scoping is what keeps the ceremony and the max-ordinal rule from
@@ -891,7 +891,7 @@ def _epoch_of(
     replayed reset still refuses anything below the bound, which is the attack
     it was closing.
     """
-    notes: list[str] = []
+    notes: list[tuple[int, str]] = []
     for index in range(len(entries) - 1, -1, -1):
         entry = entries[index]
         if entry.kind is not Kind.TRUST_RESET:
@@ -902,16 +902,17 @@ def _epoch_of(
             else (positions[index - 1], entry_identity(entries[index - 1]))
         )
         if entry.follows == expected:
-            return entries[index:], tuple(notes)
-        notes.append(
+            return entries[index:], positions[index], tuple(notes)
+        notes.append((
+            positions[index],
             f"trust-reset at ordinal {entry.head.ordinal}: recorded "
             f"predecessor {_claim_text(entry.follows)} is not the entry that "
             f"precedes it ({_claim_text(expected)}), so it does not open an "
             "epoch — a reset is bound to the line it was appended after and to "
             "what sat there, and bytes copied to any other position cannot "
-            "satisfy both"
-        )
-    return entries, tuple(notes)
+            "satisfy both",
+        ))
+    return entries, None, tuple(notes)
 
 
 def _claim_text(claim: tuple[int, str] | None) -> str:
@@ -1028,17 +1029,61 @@ class _Skips:
 
     def __init__(self) -> None:
         self.all: list[str] = []
-        self.weakening: list[str] = []
+        self._weighted: list[tuple[int | None, str]] = []
 
-    def missed(self, note: str) -> None:
-        """The read needed something and did not get it. Recorded, and it counts."""
+    def missed(self, note: str, *, line: int | None = None) -> None:
+        """The read needed something and did not get it. Recorded, and it counts.
+
+        ``line`` is the physical line the loss sits at, or ``None`` for a
+        STRUCTURAL absence — something missing from the file as a whole rather
+        than at a position in it. Structural losses are exempt from the
+        position scoping below, because there is no position for a decree to
+        be "after".
+        """
         self.all.append(note)
-        self.weakening.append(note)
+        self._weighted.append((line, note))
+
+    def weakening(self, boundary: int | None) -> tuple[str, ...]:
+        """The skips that actually weaken the read, given the epoch boundary.
+
+        **Weight is cause times position.** A re-assertion never reaches here
+        at all — that is the cause half, and it is why
+        :meth:`re_asserted` records without weighing. This is the position
+        half: a line-positioned loss sitting BEFORE the boundary reset's line
+        carries zero weight, because the ceremony decreed trust in a head and
+        everything positionally behind that decree is what it decreed past.
+        Appends are tail-only, so a line's position in the file IS its place in
+        time — the non-ascending order this journal documents is about
+        ORDINALS, which two writers can interleave, never about positions,
+        which the filesystem serializes.
+
+        Without it the ceremony cannot heal: an operator resets past a damaged
+        line and still gets a bounded read forever, from damage the reset was
+        run to put behind them (``design amendment #5``).
+
+        Structural absences (``line is None``) keep their weight regardless.
+        The header is line 1 and would sit below every boundary, but its
+        absence is a claim about the FILE rather than a line anyone decreed
+        past.
+
+        **No valid reset means no boundary, and then every weakening cause
+        keeps full weight** — stated here rather than left to fall out of a
+        comparison, because "there is nothing to be after" is a different
+        situation from "this is after it".
+        """
+        if boundary is None:
+            return tuple(note for _line, note in self._weighted)
+        return tuple(
+            note
+            for line, note in self._weighted
+            if line is None or line >= boundary
+        )
 
     def re_asserted(self, note: str) -> None:
         """The read got something it already had. Recorded, and it does NOT count.
 
-        Still reported — a tolerated loss nobody is told about is just a loss,
+        Never weighed at any position — the cause half of the weighting.
+        Still reported: a tolerated loss nobody is told about is just a loss,
         and an operator seeing replayed lines in their journal wants to know.
         What it must not do is weaken the claim, because a crash-retry
         duplicate is byte-identical by construction and the journal is
@@ -1081,7 +1126,9 @@ def _scan(
         try:
             decoded = json.loads(stripped)
         except ValueError as exc:
-            skips.missed(f"line {index + 1}: does not parse ({exc})")
+            skips.missed(
+                f"line {index + 1}: does not parse ({exc})", line=index + 1
+            )
             continue
         verdict = _classify(decoded)
         if verdict is _HEADER:
@@ -1093,12 +1140,15 @@ def _scan(
         if verdict is _AMBIGUOUS:
             skips.missed(
                 f"line {index + 1}: carries both the journal type marker and "
-                "an entry kind, so this build cannot say which it is"
+                "an entry kind, so this build cannot say which it is",
+                line=index + 1,
             )
             continue
         entry = _parse_entry(decoded)
         if entry is None:
-            skips.missed(f"line {index + 1}: not readable by this build")
+            skips.missed(
+                f"line {index + 1}: not readable by this build", line=index + 1
+            )
             continue
         if stripped in seen:
             # A LITERAL RE-ASSERTION: recorded, and WEIGHTLESS. The line's
@@ -1184,27 +1234,37 @@ def parse_journal_lines(lines: Iterable[str]) -> JournalRead:
         # the protocol and wire versions the hashes derive under, and losing
         # that is exactly what a lower bound is for. Reported without a line
         # number because an absence does not have one.
+        # STRUCTURAL, so no line and no exemption from weight: the header
+        # would be line 1 and would sit below every boundary, but its absence
+        # is a claim about the FILE rather than a line an operator decreed
+        # past. Reported without a line number because an absence does not
+        # have one — which is exactly what marks it structural here.
         skips.missed(
             "header: absent, so the protocol and wire versions these record "
             "hashes derive under are unknown"
         )
-    epoch, epoch_notes = _epoch_of(frozen, positions)
-    for note in epoch_notes:
-        # A voided reset KEEPS its weight, ruled narrowly: the content of the
-        # line is known, but what the operator INTENDED by it is not, and that
-        # uncertainty is exactly what a bound represents.
-        skips.missed(note)
+    epoch, boundary, epoch_notes = _epoch_of(frozen, positions)
+    for line, note in epoch_notes:
+        # A voided reset KEEPS its cause-weight, ruled narrowly: the content of
+        # the line is known, but what the operator INTENDED by it is not, and
+        # that uncertainty is exactly what a bound represents. It is positioned
+        # like any other line, so a voided attempt sitting behind a LATER
+        # successful reset weighs nothing — which is what lets a re-run of the
+        # ceremony heal the journal instead of leaving its own failed attempt
+        # bounding every read.
+        skips.missed(note, line=line)
+    weakening = skips.weakening(boundary)
     best = _known_of(epoch)
     known: EstablishedHead | HeadLowerBound | HeadUnreadable | None
     if best is not None:
         known = (
-            HeadLowerBound(at_least=best, skipped=tuple(skips.weakening))
-            if skips.weakening
+            HeadLowerBound(at_least=best, skipped=weakening)
+            if weakening
             else EstablishedHead(entry=best)
         )
-    elif skips.weakening:
+    elif weakening:
         # Content was claimed and none of it could be read. NOT first contact.
-        known = HeadUnreadable(skipped=tuple(skips.weakening))
+        known = HeadUnreadable(skipped=weakening)
     else:
         known = None
     return JournalRead(

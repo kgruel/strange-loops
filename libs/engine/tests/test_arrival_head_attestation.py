@@ -1707,3 +1707,140 @@ def test_a_voided_reset_keeps_its_weight():
     assert isinstance(result.known, HeadLowerBound)
     assert result.known.at_least.head.ordinal == 9
     assert any("trust-reset" in note for note in result.known.skipped)
+
+
+# ---------------------------------------------------------------------------
+# Amendment #5: weakening is epoch-scoped by physical line position
+# ---------------------------------------------------------------------------
+
+
+def _damaged_then_reset_then_clean() -> None:
+    """Damage at line 3, a reset later, then a clean advance.
+
+    The construction from my own verify-item-1 report, which is what produced
+    the ruling: the operator ran the ceremony precisely to put the damage
+    behind them.
+    """
+    append_entry(observation(1))
+    append_entry(observation(2))
+    path = journal_path(LINEAGE)
+    lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
+    lines.insert(2, "{ damaged line\n")
+    path.write_text("".join(lines), encoding="utf-8")
+    append_reset(2)
+    append_entry(observation(3, "b"))
+
+
+def test_damage_behind_the_boundary_no_longer_weakens_the_read():
+    """The healing story, and the regression this amendment exists for.
+
+    A line-positioned loss sitting BEFORE the boundary reset's line carries no
+    weight: the ceremony decreed trust in a head, and everything positionally
+    behind that decree is what it decreed past. Without this the operator runs
+    the ceremony, gets a correct K, and is still handed a bounded read forever
+    from damage the reset was run to put behind them.
+    """
+    _damaged_then_reset_then_clean()
+    result = read_journal(LINEAGE)
+    assert any("does not parse" in note for note in result.skipped)
+    known = result.established_head()  # ANSWERS
+    assert known is not None
+    assert known.head == head(3, "b")
+
+
+def test_damage_at_or_after_the_boundary_still_weakens():
+    """Position scoping is not an amnesty. Only what is BEHIND the decree."""
+    append_entry(observation(1))
+    append_reset(1)
+    append_entry(observation(2, "b"))
+    with journal_path(LINEAGE).open("a", encoding="utf-8") as handle:
+        handle.write("{ damaged line\n")  # after the boundary
+
+    result = read_journal(LINEAGE)
+    assert isinstance(result.known, HeadLowerBound)
+    with pytest.raises(IndeterminateComparison):
+        result.established_head()
+
+
+def test_a_failed_ceremony_attempt_does_not_bound_a_successful_rerun():
+    """The healing story end to end.
+
+    A reset whose binding did not match is a weakening cause — but it is a
+    positioned one, so a later successful reset puts it behind the boundary and
+    the journal reads cleanly again. Otherwise the ceremony's own failed
+    attempt would bound every read after it, and the operator's remedy would be
+    the thing that broke them.
+    """
+    append_entry(observation(1))
+    append_entry(observation(9))
+    append_entry(observation(2, kind=Kind.TRUST_RESET, level=Level.FULL))  # voided
+    assert isinstance(read_journal(LINEAGE).known, HeadLowerBound)
+
+    append_reset(9)  # the operator re-runs it, correctly this time
+
+    result = read_journal(LINEAGE)
+    known = result.established_head()  # healed
+    assert known is not None
+    assert known.head.ordinal == 9
+    # The voided attempt is not even reported, and that is the backward walk
+    # short-circuiting at the first valid boundary rather than a loss: the
+    # operator was already told at the time, because `trust_reset` reads its
+    # own entry back and raises `TrustResetNotHonored` when it does not take.
+    assert not any("trust-reset" in note for note in result.skipped)
+
+
+def test_a_missing_header_weakens_regardless_of_any_boundary():
+    """Edge 1: a structural absence has no position to be decreed past.
+
+    The header would be line 1 and would sit below every boundary, so position
+    scoping would silently exempt the one loss that is a claim about the FILE
+    rather than about a line. Structural losses carry no line and keep their
+    weight.
+    """
+    append_entry(observation(1))
+    path = journal_path(LINEAGE)
+    body = path.read_text(encoding="utf-8").splitlines(keepends=True)
+    path.write_text("".join(body[1:]), encoding="utf-8")  # drop the header
+    append_reset(1)
+
+    result = read_journal(LINEAGE)
+    assert any("header" in note for note in result.skipped)
+    assert isinstance(result.known, HeadLowerBound)
+    assert any("header" in note for note in result.known.skipped)
+
+
+def test_with_no_valid_reset_every_weakening_cause_keeps_full_weight():
+    """Edge 3: "nothing to be after" is not the same as "after it"."""
+    append_entry(observation(1))
+    with journal_path(LINEAGE).open("a", encoding="utf-8") as handle:
+        handle.write("{ damaged line\n")
+    append_entry(observation(2))
+
+    result = read_journal(LINEAGE)
+    assert isinstance(result.known, HeadLowerBound)
+    assert result.known.at_least.head.ordinal == 2
+
+
+def test_damage_on_both_sides_bounds_from_the_current_epoch_only():
+    """Mixed: the abandoned side is weightless, the current side bounds.
+
+    And ``at_least`` comes from the epoch, so an abandoned high ordinal cannot
+    inflate the bound into false rollback refusals against a genuine
+    current-epoch store.
+    """
+    for ordinal in (98, 99, 100):
+        append_entry(observation(ordinal))
+    path = journal_path(LINEAGE)
+    lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
+    lines.insert(2, "{ abandoned-epoch damage\n")
+    path.write_text("".join(lines), encoding="utf-8")
+    append_reset(90)
+    append_entry(observation(91, "b"))
+    with journal_path(LINEAGE).open("a", encoding="utf-8") as handle:
+        handle.write("{ current-epoch damage\n")
+
+    result = read_journal(LINEAGE)
+    assert isinstance(result.known, HeadLowerBound)
+    assert result.known.at_least.head.ordinal == 91, "an abandoned ordinal leaked in"
+    assert len(result.known.skipped) == 1, result.known.skipped
+    assert "current-epoch damage" not in result.known.skipped[0]

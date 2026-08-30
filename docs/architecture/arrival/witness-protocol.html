@@ -442,7 +442,11 @@
           re-advance at an abandoned ordinal under a different hash an ordinary advance. It reaches
           <strong>every walked coordinate</strong> rather than the presented head alone, because an
           abandoned branch grown offline presents <em>N+3</em> while the abandoned entry sits at
-          <em>N+1</em>, and head-only checking waves it through. And it sits <strong>before
+          <em>N+1</em>, and head-only checking waves it through. That reach has a stated price: an
+          advancing open pays one verified lookup per abandoned anchor, so a journal an operator
+          has reset many times makes its own opens proportionally slower—cost that scales with
+          ceremony history, paid only on the ADVANCED branch, never on the dominant unchanged
+          open. And it sits <strong>before
           anything is journaled</strong>, so a fenced open records nothing—the acceptance recording
           was precisely what made the loop invisible.
         </p>

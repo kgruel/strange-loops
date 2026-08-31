@@ -2,10 +2,11 @@
 
 Contract & Architectural Discipline
 -----------------------------------
-1. Ordinary contract path only: The target opens through :class:`engine.arrival_registry.BackendRegistry`
-   on a staging descriptor; drafts append through the registry-wrapped
-   :class:`engine.arrival_head_seam.AttestedLedger`. No privileged path, no direct
-   :class:`engine.arrival.ArrivalLog` writes, no reaching around the seam.
+1. Ordinary contract path only: The target opens through
+   :class:`engine.arrival_registry.BackendRegistry` on a staging descriptor; drafts
+   append through the registry-wrapped :class:`engine.arrival_head_seam.AttestedLedger`.
+   No privileged path, no direct :class:`engine.arrival.ArrivalLog` writes, no reaching
+   around the seam.
 
 2. First touch is mint() through the wrapper: Never open-then-mint, never a direct
    bootstrap() call. Minting writes the bootstrap journal entry at Level.MINT.
@@ -34,8 +35,9 @@ Contract & Architectural Discipline
 
 6. Verification = BOTH gates (§I.2): verify(Full(through=head)) on the target (internal
    consistency) AND the equivalence re-run (re-derive expected rows from the unmodified
-   source, compare row by row over logical row fields `(kind, ts, observer, origin, payload_text, signature)`
-   with transform id mapping; framing/ordinals excluded). Both run; the report carries both.
+   source, compare row by row over logical row fields
+   `(kind, ts, observer, origin, payload_text, signature)` with transform id mapping;
+   framing/ordinals excluded). Both run; the report carries both.
 
 7. Atomic descriptor publish (§H): Surgical `.vertex` store-clause edit, then re-parse and
    assert: parses, names the new location and backend, and every other parsed field equals
@@ -49,18 +51,20 @@ Contract & Architectural Discipline
 
 8. The migration report (§I.1, ratified M-3): `<lineage>.migration-report.json` beside
    the target, signed by the custodian, referenced by nothing in the ledger.
-   Signing covers the canonical JSON bytes (RFC 8785 JCS) of the report body dictionary:
-   `canonical_bytes = _canonical_bytes(report_body)`
+   Signing covers the canonical JSON bytes (RFC 8785 JCS) of the report envelope:
+   `report_doc = {"body": report_body, "signer": custodian}`
+   `canonical_bytes = _canonical_bytes(report_doc)`
    `digest = sha256(canonical_bytes).hexdigest()`
    `sig = signer(custodian, digest)`
    Report file format:
-   `{"body": report_body, "signature": sig, "signer": custodian}`
+   `{"body": report_body, "signer": custodian, "signature": sig}`
 
 9. Legacy store is never mutated and never deleted: Remains read-only archival evidence.
 """
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import os
@@ -71,6 +75,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
+
 from engine.arrival import (
     GENESIS_KIND,
     KEY_INTRODUCTION_KIND,
@@ -268,14 +273,16 @@ def edit_vertex_store_clause(
 
     if post_ast.store != Path(target_location):
         raise PublishPreconditionRefused(
-            f"Verification-by-re-parse failed: expected store={Path(target_location)!r}, got {post_ast.store!r}. "
-            "Advisory: check store clause location property.",
+            f"Verification-by-re-parse failed: expected store={Path(target_location)!r}, "
+            f"got {post_ast.store!r}. Advisory: check store clause location property.",
             condition="vertex_store_location",
         )
 
     if post_ast.store_backend != BackendDecl(name=backend):
         raise PublishPreconditionRefused(
-            f"Verification-by-re-parse failed: expected store_backend={BackendDecl(name=backend)!r}, got {post_ast.store_backend!r}. "
+            "Verification-by-re-parse failed: "
+            f"expected store_backend={BackendDecl(name=backend)!r}, "
+            f"got {post_ast.store_backend!r}. "
             "Advisory: check store clause backend property.",
             condition="vertex_store_backend",
         )
@@ -293,8 +300,8 @@ def edit_vertex_store_clause(
 
     if field_mismatches:
         raise PublishPreconditionRefused(
-            f"Verification-by-re-parse failed: non-store fields modified during surgical edit: {', '.join(field_mismatches)}. "
-            "Advisory: verify .vertex file format.",
+            "Verification-by-re-parse failed: non-store fields modified during surgical edit: "
+            f"{', '.join(field_mismatches)}. Advisory: verify .vertex file format.",
             condition="vertex_fields_equality",
         )
 
@@ -306,13 +313,11 @@ def edit_vertex_store_clause(
             f.write(edited_text)
             f.flush()
             os.fsync(f.fileno())
-        os.replace(temp_path, v_path)
+        temp_path.replace(v_path)
     finally:
         if temp_path.exists():
-            try:
+            with contextlib.suppress(OSError):
                 temp_path.unlink()
-            except OSError:
-                pass
 
 
 def _check_equivalence(
@@ -432,7 +437,8 @@ def _check_equivalence(
     mismatches: list[str] = []
     if len(expected_rows) != len(target_rows):
         mismatches.append(
-            f"row count mismatch: expected {len(expected_rows)} logical rows, found {len(target_rows)}"
+            f"row count mismatch: expected {len(expected_rows)} logical rows, "
+            f"found {len(target_rows)}"
         )
     else:
         for i, (exp, tgt) in enumerate(zip(expected_rows, target_rows, strict=True)):
@@ -506,15 +512,18 @@ def _check_inventory_equality(
     mismatches: list[str] = []
     if dict(target_per_kind) != expected_per_kind:
         mismatches.append(
-            f"per-kind counts mismatch: source/expected={expected_per_kind} != target={dict(target_per_kind)}"
+            "per-kind counts mismatch: "
+            f"source/expected={expected_per_kind} != target={dict(target_per_kind)}"
         )
     if dict(target_observer_census) != expected_observer_census:
         mismatches.append(
-            f"observer census mismatch: source/expected={expected_observer_census} != target={dict(target_observer_census)}"
+            "observer census mismatch: "
+            f"source/expected={expected_observer_census} != target={dict(target_observer_census)}"
         )
     if target_tick_count != expected_tick_count:
         mismatches.append(
-            f"tick count mismatch: source/expected={expected_tick_count} != target={target_tick_count}"
+            "tick count mismatch: "
+            f"source/expected={expected_tick_count} != target={target_tick_count}"
         )
 
     if mismatches:
@@ -643,8 +652,6 @@ def run_migration(
     signer: Signer,
     transform_rule: Transform | None = None,
     resume_target: Path | str | None = None,
-    custodian: str | None = None,
-    custodian_key: str | None = None,
     tool_version: str = "0.1.0",
 ) -> MigrationOutcome:
     """Run full migration pipeline from legacy store to Arrival store.
@@ -667,8 +674,6 @@ def run_migration(
         signer: Injected Signer for custodian signatures.
         transform_rule: Deterministic fact transform rule (defaults to identity()).
         resume_target: Explicit staging target path when resuming an interrupted migration.
-        custodian: Custodian observer name override (defaults to vertex name).
-        custodian_key: Custodian public key override (defaults to declared key).
         tool_version: Tool version string for report metadata.
 
     Returns:
@@ -708,8 +713,6 @@ def run_migration(
             vertex=vertex_ast,
             rule=t_rule,
             signer=signer,
-            custodian=custodian,
-            custodian_key=custodian_key,
         )
     except (sqlite3.OperationalError, sqlite3.DatabaseError, OSError, UnicodeDecodeError) as exc:
         raise LegacyStorageRefused(
@@ -781,6 +784,16 @@ def run_migration(
 
         lineage = current_head.lineage
 
+        expected_filename = f"{lineage}.arrival"
+        if target_path.name != expected_filename:
+            raise TargetMismatchOnResumeRefused(
+                f"Resume target filename {target_path.name!r} does not match "
+                f"genesis lineage {lineage!r} (expected {expected_filename!r}). "
+                "Advisory: target arrival stores must be lineage-named "
+                "(<lineage>.arrival per M-2); rename target file or start a fresh migration.",
+                target_path=str(target_path),
+            )
+
         # Scan existing records through current_head and diff prefix against expected drafts
         try:
             scanned_records = list(ledger.scan(through=current_head))
@@ -830,8 +843,9 @@ def run_migration(
             )
 
         if genesis_rec.get("body", {}).get("key") != genesis_req.key:
+            actual_key = genesis_rec.get("body", {}).get("key")
             raise TargetMismatchOnResumeRefused(
-                f"Target at {target_path} genesis public key {genesis_rec.get('body', {}).get('key')!r} "
+                f"Target at {target_path} genesis public key {actual_key!r} "
                 f"does not match expected custodian public key {genesis_req.key!r}. "
                 "Advisory: start a fresh migration.",
                 target_path=str(target_path),
@@ -857,10 +871,14 @@ def run_migration(
                 or target_rec.get("observer") != exp_draft.observer
                 or target_rec.get("origin") != exp_draft.origin
                 or target_rec.get("body") != exp_draft.body
+                or target_rec.get("at") != exp_draft.authored_at
+                or target_rec.get("sig") != exp_draft.signature
             ):
                 raise TargetMismatchOnResumeRefused(
-                    f"Target record at ordinal {ord_idx} diverges from expected deterministic draft. "
-                    "Advisory: target log content does not match source transform; start a fresh migration.",
+                    f"Target record at ordinal {ord_idx} diverges from "
+                    "expected deterministic draft. "
+                    "Advisory: target log content does not match source transform; "
+                    "start a fresh migration.",
                     target_path=str(target_path),
                     ordinal=ord_idx,
                 )
@@ -876,8 +894,8 @@ def run_migration(
     verified_head = ledger.verify(Full(through=current_head))
     if verified_head != current_head:
         raise PublishPreconditionRefused(
-            f"Target verification failed: verified head {verified_head} != current head {current_head}. "
-            "Advisory: internal log consistency check failed.",
+            f"Target verification failed: verified head {verified_head} != "
+            f"current head {current_head}. Advisory: internal log consistency check failed.",
             condition="target_verify_full",
         )
 
@@ -917,7 +935,8 @@ def run_migration(
     ):
         first_entry = j_read.entries[0] if j_read.entries else None
         raise PublishPreconditionRefused(
-            f"Journal first entry for lineage {lineage} is not bootstrap/MINT (found: {first_entry}). "
+            f"Journal first entry for lineage {lineage} is not bootstrap/MINT "
+            f"(found: {first_entry}). "
             "Advisory: target lineage was not minted through AttestedLedger.",
             condition="journal_first_entry_mint",
         )
@@ -992,13 +1011,11 @@ def run_migration(
             f.write(json.dumps(report_document, indent=2) + "\n")
             f.flush()
             os.fsync(f.fileno())
-        os.replace(temp_report, report_path)
+        temp_report.replace(report_path)
     finally:
         if temp_report.exists():
-            try:
+            with contextlib.suppress(OSError):
                 temp_report.unlink()
-            except OSError:
-                pass
 
     # Stage 9: Atomic descriptor publish (§H)
     try:

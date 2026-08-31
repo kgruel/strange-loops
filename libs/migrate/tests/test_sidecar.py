@@ -9,9 +9,8 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+from custody.signing import ARRIVAL_DOMAIN
 from engine.arrival import (
-    GENESIS_KIND,
-    ArrivalCorrupt,
     ArrivalLog,
     ArrivalTornTail,
     _canonical_bytes,
@@ -20,19 +19,17 @@ from engine.arrival import (
 )
 from engine.arrival_body import body_of_fact_row
 from engine.arrival_contract import Full, Head, RecordDraft, StoreDescriptor
-from engine.arrival_head_attestation import Kind, Level, heads_dir, read_journal
+from engine.arrival_head_attestation import Kind, Level, read_journal
 from engine.arrival_head_seam import StoreLost
 from engine.arrival_registry import BackendRegistry, descriptor_for
-from lang import BackendDecl, ObserverDecl, VertexFile, parse_vertex, parse_vertex_file
+from lang import BackendDecl, parse_vertex, parse_vertex_file
 from sign import ed25519
 
-from migrate.legacy_ids import FactRow, Transform, identity, ulid_migration
-from migrate.legacy_source import LegacySource
+from migrate.legacy_ids import FactRow, Transform, ulid_migration
 from migrate.refusals import (
     JournalPreflightRefused,
     LegacySourceRefused,
     LegacyStorageRefused,
-    MigrationRefused,
     PublishPreconditionRefused,
     ReportBadSignatureRefused,
     ReportHeadMismatchRefused,
@@ -45,26 +42,18 @@ from migrate.refusals import (
     TornTailRefused,
 )
 from migrate.sidecar import (
-    MigrationOutcome,
     edit_vertex_store_clause,
-    preflight_journal,
     run_migration,
     verify_migration_report,
 )
 from migrate.transform import transform
 
 from ._fixtures import (
-    ALL_FACT_ROWS,
-    ALL_TICK_ROWS,
-    BATCH_LINE_ALICE,
-    FACT_CANONICAL_ULID_SIGNED,
     FACT_UUID4_SIGNED,
     build_mixed_observer_jsonl,
     build_synthetic_jsonl,
     build_synthetic_sqlite,
 )
-
-from custody.signing import ARRIVAL_DOMAIN
 
 
 class CustodianFixture:
@@ -94,7 +83,7 @@ def _make_vertex_file(
     store_rel_path: str = "./data/legacy.jsonl",
 ) -> Path:
     """Create a valid .vertex file on disk."""
-    v_path = tmp_path / "project.vertex"
+    v_path = tmp_path / f"{custodian_name}.vertex"
     obs_lines = [
         f'  {custodian_name} {{\n    key "{custodian_key}"\n  }}',
     ]
@@ -468,7 +457,7 @@ def test_torn_tail_target_refuses_no_repair(tmp_path: Path) -> None:
 
 
 def test_second_migration_after_abandoned_attempt(tmp_path: Path) -> None:
-    """(5) Second migration after an abandoned attempt -> fresh lineage, fresh path, no StoreLost."""
+    """(5) Second migration after an abandoned attempt -> fresh lineage, no StoreLost."""
     store_dir = tmp_path / "data"
     store_dir.mkdir(parents=True, exist_ok=True)
     cust = CustodianFixture(tmp_path, "alice")
@@ -551,14 +540,16 @@ def test_source_mutated_during_staging_refuses_publish(tmp_path: Path) -> None:
             f.write(extra_line + "\n")
         return res
 
-    with patch("migrate.sidecar.transform", side_effect=mutating_transform):
-        with pytest.raises(SourceChangedRefused) as exc_info:
-            run_migration(
-                source_path=source_path,
-                vertex_path=v_path,
-                store_dir=store_dir,
-                signer=cust.signer,
-            )
+    with (
+        patch("migrate.sidecar.transform", side_effect=mutating_transform),
+        pytest.raises(SourceChangedRefused) as exc_info,
+    ):
+        run_migration(
+            source_path=source_path,
+            vertex_path=v_path,
+            store_dir=store_dir,
+            signer=cust.signer,
+        )
 
     assert "two histories, not a migration" in str(exc_info.value)
     # Descriptor MUST remain unchanged
@@ -596,14 +587,13 @@ def test_publish_atomicity_and_crash_simulation(tmp_path: Path) -> None:
             raise OSError("Simulated crash between write and replace")
         return orig_replace(src, dst, *args, **kwargs)
 
-    with patch("os.replace", side_effect=failing_replace):
-        with pytest.raises(OSError):
-            run_migration(
-                source_path=source_path,
-                vertex_path=v_path,
-                store_dir=store_dir,
-                signer=cust.signer,
-            )
+    with patch("os.replace", side_effect=failing_replace), pytest.raises(OSError):
+        run_migration(
+            source_path=source_path,
+            vertex_path=v_path,
+            store_dir=store_dir,
+            signer=cust.signer,
+        )
 
     # Old descriptor remains completely intact
     assert v_path.read_text(encoding="utf-8") == pre_text
@@ -665,14 +655,16 @@ def test_journal_preflight_failure_refuses(tmp_path: Path) -> None:
     def failing_probe(path: Path):
         raise OSError("Permission denied: simulated unwritable state root")
 
-    with patch("migrate.sidecar.heads_dir", side_effect=OSError("Unwritable")):
-        with pytest.raises(JournalPreflightRefused):
-            run_migration(
-                source_path=source_path,
-                vertex_path=v_path,
-                store_dir=store_dir,
-                signer=cust.signer,
-            )
+    with (
+        patch("migrate.sidecar.heads_dir", side_effect=OSError("Unwritable")),
+        pytest.raises(JournalPreflightRefused),
+    ):
+        run_migration(
+            source_path=source_path,
+            vertex_path=v_path,
+            store_dir=store_dir,
+            signer=cust.signer,
+        )
 
     arrival_files = list(store_dir.glob("*.arrival"))
     assert arrival_files == [], "Preflight failure must create no target file"
@@ -719,7 +711,8 @@ def test_legacy_storage_operational_error_wrapped(tmp_path: Path) -> None:
 
 
 def test_resume_against_divergent_valid_chain_refuses_target_mismatch(tmp_path: Path) -> None:
-    """F5: Target with valid chain whose content diverges at ordinal 3 -> TargetMismatchOnResumeRefused(ordinal=3)."""
+    """F5: Target with valid chain whose content diverges at ordinal 3
+    -> TargetMismatchOnResumeRefused(ordinal=3)."""
     store_dir = tmp_path / "data"
     store_dir.mkdir(parents=True, exist_ok=True)
     cust = CustodianFixture(tmp_path, "alice")
@@ -759,7 +752,15 @@ def test_resume_against_divergent_valid_chain_refuses_target_mismatch(tmp_path: 
         observer="alice",
         origin="",
         body=body_of_fact_row(
-            (FACT_UUID4_SIGNED["id"], "concept", 9999.0, "alice", "", '{"divergent": "payload"}', None)
+            (
+                FACT_UUID4_SIGNED["id"],
+                "concept",
+                9999.0,
+                "alice",
+                "",
+                '{"divergent": "payload"}',
+                None,
+            )
         ),
         signature=None,
     )
@@ -780,13 +781,176 @@ def test_resume_against_divergent_valid_chain_refuses_target_mismatch(tmp_path: 
     assert target_path.read_bytes() == target_bytes_before
 
 
+def test_resume_refuses_when_target_record_differs_only_in_signature(tmp_path: Path) -> None:
+    """F2: A resume target whose record differs ONLY in signature
+    raises TargetMismatchOnResumeRefused."""
+    store_dir = tmp_path / "data"
+    store_dir.mkdir(parents=True, exist_ok=True)
+    cust = CustodianFixture(tmp_path, "alice")
+    source_path = build_synthetic_jsonl(store_dir / "legacy.jsonl")
+    v_path = _make_vertex_file(
+        tmp_path,
+        custodian_name=cust.name,
+        custodian_key=cust.public,
+        other_observers=[],
+    )
+
+    t_res = transform(source_path, parse_vertex_file(v_path), signer=cust.signer)
+    lineage = mint_lineage()
+    target_path = store_dir / f"{lineage}.arrival"
+
+    registry = BackendRegistry.with_builtin_backends()
+    desc = StoreDescriptor(backend="file", location=str(target_path), lineage=lineage)
+    ledger, _ = registry.open(desc)
+    genesis_head = ledger.mint(
+        {
+            "observer": t_res.genesis.custodian,
+            "signer": cust.signer,
+            "key": t_res.genesis.key,
+            "lineage": lineage,
+            "at": 0.0,
+        }
+    )
+
+    exp_draft = t_res.drafts[0]
+    assert exp_draft.signature is None  # expected-unsigned
+
+    # Construct an outer-signed version of the EXACT same draft
+    outer_signed_draft = RecordDraft(
+        kind=exp_draft.kind,
+        authored_at=exp_draft.authored_at,
+        observer=exp_draft.observer,
+        origin=exp_draft.origin,
+        body=exp_draft.body,
+        signature="fake-outer-signature-bytes",
+    )
+    ledger.append(genesis_head, [outer_signed_draft])
+
+    with pytest.raises(TargetMismatchOnResumeRefused) as exc_info:
+        run_migration(
+            source_path=source_path,
+            vertex_path=v_path,
+            store_dir=store_dir,
+            signer=cust.signer,
+            resume_target=target_path,
+        )
+
+    assert exc_info.value.ordinal == 1
+    assert exc_info.value.target_path == str(target_path)
+
+
+def test_resume_refuses_when_target_record_differs_only_in_authored_at(
+    tmp_path: Path,
+) -> None:
+    """F2: A resume target whose record differs ONLY in authored_at
+    raises TargetMismatchOnResumeRefused."""
+    store_dir = tmp_path / "data"
+    store_dir.mkdir(parents=True, exist_ok=True)
+    cust = CustodianFixture(tmp_path, "alice")
+    source_path = build_synthetic_jsonl(store_dir / "legacy.jsonl")
+    v_path = _make_vertex_file(
+        tmp_path,
+        custodian_name=cust.name,
+        custodian_key=cust.public,
+        other_observers=[],
+    )
+
+    t_res = transform(source_path, parse_vertex_file(v_path), signer=cust.signer)
+    lineage = mint_lineage()
+    target_path = store_dir / f"{lineage}.arrival"
+
+    registry = BackendRegistry.with_builtin_backends()
+    desc = StoreDescriptor(backend="file", location=str(target_path), lineage=lineage)
+    ledger, _ = registry.open(desc)
+    genesis_head = ledger.mint(
+        {
+            "observer": t_res.genesis.custodian,
+            "signer": cust.signer,
+            "key": t_res.genesis.key,
+            "lineage": lineage,
+            "at": 0.0,
+        }
+    )
+
+    exp_draft = t_res.drafts[0]
+    divergent_at_draft = RecordDraft(
+        kind=exp_draft.kind,
+        authored_at=exp_draft.authored_at + 123.456,
+        observer=exp_draft.observer,
+        origin=exp_draft.origin,
+        body=exp_draft.body,
+        signature=exp_draft.signature,
+    )
+    ledger.append(genesis_head, [divergent_at_draft])
+
+    with pytest.raises(TargetMismatchOnResumeRefused) as exc_info:
+        run_migration(
+            source_path=source_path,
+            vertex_path=v_path,
+            store_dir=store_dir,
+            signer=cust.signer,
+            resume_target=target_path,
+        )
+
+    assert exc_info.value.ordinal == 1
+    assert exc_info.value.target_path == str(target_path)
+
+
+def test_resume_refuses_when_target_filename_does_not_match_lineage(tmp_path: Path) -> None:
+    """F3: Resuming against a target whose filename is not <genesis-lineage>.arrival
+    (e.g. friendly-name target like 'friendly.arrival') raises TargetMismatchOnResumeRefused
+    naming both filename and lineage."""
+    store_dir = tmp_path / "data"
+    store_dir.mkdir(parents=True, exist_ok=True)
+    cust = CustodianFixture(tmp_path, "alice")
+    source_path = build_synthetic_jsonl(store_dir / "legacy.jsonl")
+    v_path = _make_vertex_file(
+        tmp_path,
+        custodian_name=cust.name,
+        custodian_key=cust.public,
+        other_observers=[],
+    )
+
+    t_res = transform(source_path, parse_vertex_file(v_path), signer=cust.signer)
+    lineage = mint_lineage()
+    target_path = store_dir / "friendly.arrival"
+
+    registry = BackendRegistry.with_builtin_backends()
+    desc = StoreDescriptor(backend="file", location=str(target_path), lineage=lineage)
+    ledger, _ = registry.open(desc)
+    ledger.mint(
+        {
+            "observer": t_res.genesis.custodian,
+            "signer": cust.signer,
+            "key": t_res.genesis.key,
+            "lineage": lineage,
+            "at": 0.0,
+        }
+    )
+
+    with pytest.raises(TargetMismatchOnResumeRefused) as exc_info:
+        run_migration(
+            source_path=source_path,
+            vertex_path=v_path,
+            store_dir=store_dir,
+            signer=cust.signer,
+            resume_target=target_path,
+        )
+
+    msg = str(exc_info.value)
+    assert "friendly.arrival" in msg
+    assert lineage in msg
+    assert exc_info.value.target_path == str(target_path)
+
+
 # ---------------------------------------------------------------------------
 # Test 12: F3 — Mallory foreign genesis rejected on resume
 # ---------------------------------------------------------------------------
 
 
 def test_resume_against_mallory_foreign_genesis_refuses(tmp_path: Path) -> None:
-    """F3: Target with foreign genesis (e.g. observer or key != custodian) -> TargetMismatchOnResumeRefused(ordinal=0)."""
+    """F3: Target with foreign genesis (observer/key != custodian)
+    -> TargetMismatchOnResumeRefused(ordinal=0)."""
     store_dir = tmp_path / "data"
     store_dir.mkdir(parents=True, exist_ok=True)
     alice = CustodianFixture(tmp_path, "alice")
@@ -826,7 +990,10 @@ def test_resume_against_mallory_foreign_genesis_refuses(tmp_path: Path) -> None:
         )
 
     assert exc_info.value.ordinal == 0
-    assert "genesis custodian 'mallory' does not match" in str(exc_info.value) or "genesis public key" in str(exc_info.value)
+    assert (
+        "genesis custodian 'mallory' does not match" in str(exc_info.value)
+        or "genesis public key" in str(exc_info.value)
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -872,6 +1039,23 @@ def test_edit_vertex_store_clause_comment_shadowed_active_store(tmp_path: Path) 
     assert 'store "./data/legacy.jsonl"' in text
     assert 'store "./data/target.arrival" backend="file"' in text
     post_ast = parse_vertex(text, v_shadow)
+    assert post_ast.store == Path("./data/target.arrival")
+    assert post_ast.store_backend == BackendDecl(name="file")
+
+
+def test_edit_vertex_store_clause_preserves_same_line_comments(tmp_path: Path) -> None:
+    """F5: Same-line comments trailing the store clause (e.g. store "./a.jsonl" // KEEP)
+    survive the surgical edit byte-for-byte."""
+    loops_block = 'loops { concept { fold { items "collect" 100 } } }'
+    v_comment = tmp_path / "keep.vertex"
+    v_comment.write_text(
+        f'name "alice"\nstore "./data/a.jsonl" // KEEP\n{loops_block}\n',
+        encoding="utf-8",
+    )
+    edit_vertex_store_clause(v_comment, "./data/target.arrival", backend="file")
+    text = v_comment.read_text(encoding="utf-8")
+    assert 'store "./data/target.arrival" backend="file" // KEEP' in text
+    post_ast = parse_vertex(text, v_comment)
     assert post_ast.store == Path("./data/target.arrival")
     assert post_ast.store_backend == BackendDecl(name="file")
 
@@ -961,7 +1145,7 @@ def test_verify_migration_report_causes(tmp_path: Path) -> None:
             target_path=outcome.target_path,
         )
 
-    # 6. Target unopenable (torn-tail target) -> ReportTargetUnopenableRefused with engine type in chain
+    # 6. Target unopenable (torn-tail target) -> ReportTargetUnopenableRefused
     full_bytes = outcome.target_path.read_bytes()
     try:
         outcome.target_path.write_bytes(full_bytes + b'{"incomplete": "record"')
@@ -1044,4 +1228,43 @@ def test_migration_with_dropped_units_and_ulid_migration(tmp_path: Path) -> None
         cust.public,
         verify=cust.verify,
         target_path=outcome_ulid.target_path,
+    )
+
+
+def test_migration_with_display_name_differing_from_stem(tmp_path: Path) -> None:
+    """F4: run_migration on a vertex whose declared name differs from filename stem
+    derives custodian from stem and migrates successfully."""
+    store_dir = tmp_path / "data"
+    store_dir.mkdir(parents=True, exist_ok=True)
+    cust = CustodianFixture(tmp_path, "kyle")
+    source_path = build_synthetic_jsonl(store_dir / "legacy.jsonl")
+    v_path = tmp_path / "kyle.vertex"
+    v_content = f"""name "Display Name Project"
+store "./data/legacy.jsonl"
+
+observers {{
+  kyle {{
+    key "{cust.public}"
+  }}
+}}
+
+loops {{
+  concept {{ fold {{ items "collect" 100 }} }}
+}}
+"""
+    v_path.write_text(v_content, encoding="utf-8")
+
+    outcome = run_migration(
+        source_path=source_path,
+        vertex_path=v_path,
+        store_dir=store_dir,
+        signer=cust.signer,
+    )
+    assert outcome.target_path.exists()
+    assert outcome.report_path.exists()
+    assert verify_migration_report(
+        outcome.report_path,
+        cust.public,
+        verify=cust.verify,
+        target_path=outcome.target_path,
     )

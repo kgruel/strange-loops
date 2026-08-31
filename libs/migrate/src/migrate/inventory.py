@@ -47,10 +47,12 @@ class SourceInventory:
         observer_census: Map from observer string to row count.
         content_hash: SAME-FORMAT row-content identity only (verifiable witness-order SHA-256).
             JSONL arm hashes rows in line order (facts, ticks, and batch rows in envelope order).
-            SQLite arm hashes all facts in rowid order, then all ticks in rowid order.
-            It does NOT witness batch grouping (a 2-row batch and the same rows flat hash identically)
-            and is NOT comparable across formats. Migration equivalence rests on the re-run diff
-            (WP3), never on comparing these hashes across a format change.
+            SQLite arm hashes all facts in rowid order, then all ticks in
+            rowid order.
+            It does NOT witness batch grouping (a 2-row batch and the same rows
+            flat hash identically) and is NOT comparable across formats. Migration
+            equivalence rests on the re-run diff (WP3), never on comparing these
+            hashes across a format change.
         file_hash: Forensic raw file byte SHA-256.
         id_era_census: Census across ID eras ('canonical-ulid', 'lowercase-ulid', 'other').
     """

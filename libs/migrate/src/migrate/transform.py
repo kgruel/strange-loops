@@ -117,7 +117,8 @@ class TransformExceptions:
     """Exception edges encountered during transformation (§G.3).
 
     Location claims about what the declaration and legacy source cover:
-    - keyless_declared_observers: declared in .vertex with key=None (skipped from key introductions).
+    - keyless_declared_observers: declared in .vertex with key=None
+      (skipped from key introductions).
     - undeclared_row_observers: observed in migrated rows but absent from .vertex observers.
     - dropped_units: units dropped entirely by a transform rule.
     """
@@ -156,18 +157,17 @@ def transform(
     rule: Transform | None = None,
     *,
     signer: Signer,
-    custodian: str | None = None,
-    custodian_key: str | None = None,
 ) -> TransformResult:
     """Transform legacy store rows into an ordered, deterministic sequence of arrival record drafts.
+
+    The custodian identity is derived from the custody self-observer definition
+    (the vertex file stem, as custody/signing.py defines it).
 
     Args:
         source: Path to legacy .jsonl or .sqlite store.
         vertex: Parsed VertexFile declaration. Use :func:`coerce_vertex` to parse from path/str.
         rule: Deterministic per-fact transform rule (defaults to identity()).
         signer: Required injected Signer for custodian signatures on key introductions.
-        custodian: Custodian observer name override (defaults to vertex.name).
-        custodian_key: Custodian public key override (defaults to declared key for custodian).
 
     Returns:
         TransformResult containing:
@@ -192,12 +192,12 @@ def transform(
 
     t_rule = rule if rule is not None else identity()
 
-    cust_name = custodian or vertex.name
+    cust_name = vertex.path.stem if vertex.path is not None else vertex.name
     decl_map: dict[str, ObserverDecl] = {
         o.name: o for o in (vertex.observers or ())
     }
     cust_decl = decl_map.get(cust_name)
-    cust_k = custodian_key or (cust_decl.key if cust_decl else None)
+    cust_k = cust_decl.key if cust_decl else None
     if cust_k is None:
         raise MissingCustodianKeyRefused(
             f"Custodian {cust_name!r} has no public key declared in .vertex observers block"
@@ -207,7 +207,8 @@ def transform(
     cust_key_fault = _key_shape_fault(cust_k)
     if cust_key_fault is not None:
         raise DeclarationKeyRefused(
-            f"Migration refused: declaration carries a key of the wrong shape for custodian {cust_name!r}: {cust_key_fault}"
+            "Migration refused: declaration carries a key of the wrong shape for "
+            f"custodian {cust_name!r}: {cust_key_fault}"
         )
 
     for decl in (vertex.observers or ()):
@@ -215,7 +216,8 @@ def transform(
             fault = _key_shape_fault(decl.key)
             if fault is not None:
                 raise DeclarationKeyRefused(
-                    f"Migration refused: declaration carries a key of the wrong shape for {decl.name!r}: {fault}"
+                    "Migration refused: declaration carries a key of the wrong shape for "
+                    f"{decl.name!r}: {fault}"
                 )
 
     genesis_req = GenesisRequirements(custodian=cust_name, key=cust_k)
@@ -317,8 +319,8 @@ def transform(
                 raise BatchRegroupRefused(
                     f"Transform rule {t_rule.rule!r} dropped {len(unit.rows) - len(mapped_rows)} "
                     f"of {len(unit.rows)} rows in batch at line {unit.coordinate}. "
-                    "Dropping partial batch rows is refused: the sidecar cannot re-decide a ceremony's "
-                    "composition (refuse-not-split)."
+                    "Dropping partial batch rows is refused: the sidecar cannot re-decide a "
+                    "ceremony's composition (refuse-not-split)."
                 )
 
             first = mapped_rows[0]

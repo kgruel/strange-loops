@@ -26,15 +26,15 @@ def test_refusal_hierarchy_roots_in_migration_refused() -> None:
 def test_legacy_source_refused_mixed_observer_structured_data_and_message() -> None:
     """LegacySourceRefused carries structured mixed_observer_lines and advisory prose."""
     mixed = [
-        (10, ("alice", "bob"), 0),
-        (25, ("kyle", "someone-else", "third"), 0),
+        (10, ("alice", "bob"), {"empty": 0, "missing": 0}),
+        (25, ("kyle", "someone-else", "third"), {"empty": 0, "missing": 0}),
     ]
     exc = LegacySourceRefused(mixed_observer_lines=mixed, source="/path/to/legacy.jsonl")
 
     assert exc.source == "/path/to/legacy.jsonl"
     assert exc.mixed_observer_lines == (
-        (10, ("alice", "bob"), 0),
-        (25, ("kyle", "someone-else", "third"), 0),
+        (10, ("alice", "bob"), {"empty": 0, "missing": 0}),
+        (25, ("kyle", "someone-else", "third"), {"empty": 0, "missing": 0}),
     )
 
     msg = str(exc)
@@ -62,14 +62,21 @@ def test_legacy_source_refused_absent_observer_structured_data_and_message() -> 
     assert "missing the required 'observer' field" in msg
     assert "line 12: 1 row(s) missing 'observer' field (remaining observers: 'alice')" in msg
     assert "line 14: 2 row(s) missing 'observer' field" in msg
-    assert "Advisory: repair the source line(s) by hand" in msg
+    assert (
+        "Advisory: repair the source line(s) by hand or re-run migration "
+        "after a ruled re-ceremony." in msg
+    )
 
 
 def test_legacy_source_refused_multi_class_structured_data_and_message() -> None:
-    """LegacySourceRefused carries all 3 condition classes distinctly in structured data and message."""
+    """LegacySourceRefused carries all 3 condition classes distinctly in
+    structured data and message."""
     exc = LegacySourceRefused(
         codec_invalid_lines=[(2, "unknown field(s) in batch line: ['bad']")],
-        mixed_observer_lines=[(4, ("kyle", "someone-else"), 0), (5, ("alice", "bob"), 1)],
+        mixed_observer_lines=[
+            (4, ("kyle", "someone-else"), {"empty": 0, "missing": 0}),
+            (5, ("alice", "bob"), {"empty": 0, "missing": 1}),
+        ],
         absent_observer_lines=[(6, 1, ("carol",), {"missing": 1})],
         source="/path/to/source.jsonl",
     )
@@ -77,8 +84,8 @@ def test_legacy_source_refused_multi_class_structured_data_and_message() -> None
     assert exc.source == "/path/to/source.jsonl"
     assert exc.codec_invalid_lines == ((2, "unknown field(s) in batch line: ['bad']"),)
     assert exc.mixed_observer_lines == (
-        (4, ("kyle", "someone-else"), 0),
-        (5, ("alice", "bob"), 1),
+        (4, ("kyle", "someone-else"), {"empty": 0, "missing": 0}),
+        (5, ("alice", "bob"), {"empty": 0, "missing": 1}),
     )
     assert exc.absent_observer_lines == ((6, 1, ("carol",), {"missing": 1}),)
 
@@ -87,7 +94,10 @@ def test_legacy_source_refused_multi_class_structured_data_and_message() -> None
     assert "line 4: observers 'kyle', 'someone-else'" in msg
     assert "line 5: observers 'alice', 'bob' (1 row(s) missing 'observer' field)" in msg
     assert "line 6: 1 row(s) missing 'observer' field (remaining observers: 'carol')" in msg
-    assert "Advisory: repair the source line(s) by hand or re-run migration after a ruled re-ceremony." in msg
+    assert (
+        "Advisory: repair the source line(s) by hand or re-run migration "
+        "after a ruled re-ceremony." in msg
+    )
 
 
 def test_legacy_source_refused_empty_observer_spelling_message() -> None:

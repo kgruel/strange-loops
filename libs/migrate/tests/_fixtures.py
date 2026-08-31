@@ -485,8 +485,17 @@ def build_combined_defects_jsonl(path: Path) -> Path:
         "payload": "{}",
     }
     path.parent.mkdir(parents=True, exist_ok=True)
+    objects = [
+        line_1,
+        line_2_codec_invalid,
+        line_3,
+        line_4_mixed,
+        line_5,
+        line_6_absent,
+        line_7,
+    ]
     with path.open("w", encoding="utf-8") as f:
-        for obj in [line_1, line_2_codec_invalid, line_3, line_4_mixed, line_5, line_6_absent, line_7]:
+        for obj in objects:
             f.write(json.dumps(obj, separators=(",", ":")) + "\n")
     return path
 
@@ -530,6 +539,48 @@ def build_both_aspects_batch_jsonl(path: Path) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as f:
         f.write(json.dumps(line_both_aspects, separators=(",", ":")) + "\n")
+    return path
+
+
+def build_both_aspects_empty_observer_batch_jsonl(path: Path) -> Path:
+    """Build a JSONL file with a batch exhibiting BOTH mixed and empty-observer aspects:
+    rows with alice, bob, and one observer="" row.
+    """
+    line_both_empty = {
+        "t": "batch",
+        "rows": [
+            {
+                "t": "fact",
+                "id": "01ARZ3NDEKTSV4RRFFQ69G5FE1",
+                "kind": "concept",
+                "ts": 100.0,
+                "observer": "alice",
+                "origin": "origin",
+                "payload": "{}",
+            },
+            {
+                "t": "fact",
+                "id": "01ARZ3NDEKTSV4RRFFQ69G5FE2",
+                "kind": "claim",
+                "ts": 100.0,
+                "observer": "bob",
+                "origin": "origin",
+                "payload": "{}",
+            },
+            {
+                "t": "fact",
+                "id": "01ARZ3NDEKTSV4RRFFQ69G5FE3",
+                "kind": "event",
+                "ts": 100.0,
+                "observer": "",
+                "origin": "origin",
+                "payload": "{}",
+            },
+        ],
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as f:
+        f.write(json.dumps(line_both_empty, separators=(",", ":")) + "\n")
     return path
 
 
@@ -608,15 +659,18 @@ def build_empty_observer_sqlite(path: Path) -> Path:
         )
         # Row 1: valid fact (alice)
         conn.execute(
-            "INSERT INTO facts VALUES ('01ARZ3NDEKTSV4RRFFQ69G5FA1', 'concept', 100.0, 'alice', 'origin', '{}', NULL)"
+            "INSERT INTO facts VALUES (?, ?, ?, ?, ?, ?, ?)",
+            ("01ARZ3NDEKTSV4RRFFQ69G5FA1", "concept", 100.0, "alice", "origin", "{}", None),
         )
         # Row 2: empty observer ''
         conn.execute(
-            "INSERT INTO facts VALUES ('01ARZ3NDEKTSV4RRFFQ69G5FA2', 'claim', 101.0, '', 'origin', '{}', NULL)"
+            "INSERT INTO facts VALUES (?, ?, ?, ?, ?, ?, ?)",
+            ("01ARZ3NDEKTSV4RRFFQ69G5FA2", "claim", 101.0, "", "origin", "{}", None),
         )
         # Row 3: empty observer ''
         conn.execute(
-            "INSERT INTO facts VALUES ('01ARZ3NDEKTSV4RRFFQ69G5FA3', 'event', 102.0, '', 'origin', '{}', NULL)"
+            "INSERT INTO facts VALUES (?, ?, ?, ?, ?, ?, ?)",
+            ("01ARZ3NDEKTSV4RRFFQ69G5FA3", "event", 102.0, "", "origin", "{}", None),
         )
         conn.commit()
     finally:
@@ -646,7 +700,16 @@ def build_codec_invalid_sqlite(path: Path) -> Path:
         )
         # Row 1: ts stored as TEXT
         conn.execute(
-            "INSERT INTO facts VALUES ('01ARZ3NDEKTSV4RRFFQ69G5FA1', 'concept', 'invalid-ts-text', 'alice', 'origin', '{}', NULL)"
+            "INSERT INTO facts VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (
+                "01ARZ3NDEKTSV4RRFFQ69G5FA1",
+                "concept",
+                "invalid-ts-text",
+                "alice",
+                "origin",
+                "{}",
+                None,
+            ),
         )
         conn.commit()
     finally:
@@ -675,8 +738,8 @@ def build_unsafe_integer_ts_sqlite(path: Path) -> Path:
             """
         )
         conn.execute(
-            "INSERT INTO facts VALUES ('01ARZ3NDEKTSV4RRFFQ69G5FA1', 'concept', ?, 'alice', 'origin', '{}', NULL)",
-            (2**60,),
+            "INSERT INTO facts VALUES (?, ?, ?, ?, ?, ?, ?)",
+            ("01ARZ3NDEKTSV4RRFFQ69G5FA1", "concept", 2**60, "alice", "origin", "{}", None),
         )
         conn.commit()
     finally:
@@ -715,13 +778,23 @@ def build_era1_sqlite(path: Path) -> Path:
             """
         )
         conn.execute(
-            "INSERT INTO facts VALUES ('01ARZ3NDEKTSV4RRFFQ69G5FA1', 'concept', 1000.0, 'alice', 'origin-alice', '{\"text\":\"fact 1\"}')"
+            "INSERT INTO facts VALUES (?, ?, ?, ?, ?, ?)",
+            (
+                "01ARZ3NDEKTSV4RRFFQ69G5FA1",
+                "concept",
+                1000.0,
+                "alice",
+                "origin-alice",
+                '{"text":"fact 1"}',
+            ),
         )
         conn.execute(
-            "INSERT INTO ticks VALUES ('01ARZ3NDEKTSV4RRFFQ69G5FT1', 'heartbeat', 1006.0, 'system', '{\"seq\":1}')"
+            "INSERT INTO ticks VALUES (?, ?, ?, ?, ?)",
+            ("01ARZ3NDEKTSV4RRFFQ69G5FT1", "heartbeat", 1006.0, "system", '{"seq":1}'),
         )
         conn.execute(
-            "INSERT INTO ticks VALUES ('01ARZ3NDEKTSV4RRFFQ69G5FT2', 'checkpoint', 1007.0, 'system', '{\"seq\":2}')"
+            "INSERT INTO ticks VALUES (?, ?, ?, ?, ?)",
+            ("01ARZ3NDEKTSV4RRFFQ69G5FT2", "checkpoint", 1007.0, "system", '{"seq":2}'),
         )
         conn.commit()
     finally:

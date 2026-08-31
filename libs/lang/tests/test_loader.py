@@ -3514,7 +3514,18 @@ name "alice"
         assert span.count == 1
         assert span.span is not None
         start, end = span.span
-        assert text[start:end] == '\t  store   "./data/store.jsonl"   backend="file"  '
+        assert text[start:end] == 'store   "./data/store.jsonl"   backend="file"'
+
+    def test_store_clause_with_trailing_same_line_comment(self):
+        text = """\
+name "alice"
+store "./data/store.jsonl" // KEEP
+"""
+        span = effective_store_clause(text)
+        assert span.count == 1
+        assert span.span is not None
+        start, end = span.span
+        assert text[start:end] == 'store "./data/store.jsonl"'
 
     def test_comment_shadowed_clause(self):
         text = """\

@@ -50,7 +50,9 @@ def test_quarantine_no_forbidden_legacy_imports() -> None:
             for forbidden in FORBIDDEN_MODULES:
                 if name == forbidden or name.startswith(f"{forbidden}."):
                     rel = py_file.relative_to(src_dir)
-                    violations.append(f"{rel}:{lineno} imports forbidden legacy module {forbidden!r} ({name})")
+                    violations.append(
+                        f"{rel}:{lineno} imports forbidden legacy module {forbidden!r} ({name})"
+                    )
 
     assert not violations, (
         "Quarantine ratchet violation: forbidden legacy imports detected under libs/migrate/src:\n"

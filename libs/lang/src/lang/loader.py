@@ -971,20 +971,108 @@ def parse_vertex_file(path: Path) -> VertexFile:
     return parse_vertex(text, path)
 
 
+def _scan_kdl_node_end(text: str, start_pos: int) -> int:
+    """Scan forward from start_pos (start of node name) to find the end character offset
+    of the node's arguments and properties (excluding trailing whitespace/comments/terminators).
+    """
+    i = start_pos
+    n = len(text)
+    node_end = start_pos
+
+    while i < n:
+        ch = text[i]
+
+        # Check for line comment or newline or semicolon or child block
+        if ch in ("\n", "\r", ";", "{", "}"):
+            break
+        if ch == "/" and i + 1 < n and text[i + 1] == "/":
+            break
+
+        # Check for whitespace
+        if ch.isspace():
+            i += 1
+            continue
+
+        # Check for block comment /* ... */
+        if ch == "/" and i + 1 < n and text[i + 1] == "*":
+            bc_depth = 1
+            i += 2
+            while i < n and bc_depth > 0:
+                if text[i] == "/" and i + 1 < n and text[i + 1] == "*":
+                    bc_depth += 1
+                    i += 2
+                elif text[i] == "*" and i + 1 < n and text[i + 1] == "/":
+                    bc_depth -= 1
+                    i += 2
+                else:
+                    i += 1
+            continue
+
+        # Check for string token
+        if ch == '"':
+            i += 1
+            while i < n:
+                if text[i] == "\\":
+                    i += 2
+                elif text[i] == '"':
+                    i += 1
+                    break
+                else:
+                    i += 1
+            node_end = i
+            continue
+
+        # Raw string: r"..." or r#"..."#
+        if ch == "r" and i + 1 < n and (text[i + 1] == '"' or text[i + 1] == "#"):
+            hashes = 0
+            idx = i + 1
+            while idx < n and text[idx] == "#":
+                hashes += 1
+                idx += 1
+            if idx < n and text[idx] == '"':
+                i = idx + 1
+                end_pat = '"' + ("#" * hashes)
+                found = text.find(end_pat, i)
+                if found != -1:
+                    i = found + len(end_pat)
+                else:
+                    i = n
+                node_end = i
+                continue
+
+        # Bare token / property (key=val or arg)
+        tok_start = i
+        while i < n and not text[i].isspace() and text[i] not in (";", "{", "}", "\n", "\r"):
+            if text[i] == "/" and i + 1 < n and (text[i + 1] in ("/", "*")):
+                break
+            if text[i] == '"':
+                # Embedded string in property like backend="file"
+                i += 1
+                while i < n:
+                    if text[i] == "\\":
+                        i += 2
+                    elif text[i] == '"':
+                        i += 1
+                        break
+                    else:
+                        i += 1
+            else:
+                i += 1
+        node_end = i
+
+    return node_end
+
+
 def effective_store_clause(text: str, path: Path | None = None) -> StoreClauseSpan:
     """Locate the single effective top-level store clause in a .vertex document.
 
     Parses the KDL document to count top-level store nodes, and scans the source
-    text (quote- and comment-aware) to locate the line character span
-    of the effective clause.
-
-    Note: ``span`` covers the character offsets of the entire line containing the
-    effective store clause (excluding trailing newline). Any same-line comments
-    trailing the store clause are within this span and will be replaced upon rewrite.
+    text (quote- and comment-aware) to locate the sub-line character span
+    (node name through end of its arguments/properties) of the effective clause.
 
     Returns:
         StoreClauseSpan with:
-        - span: (start_char, end_char) line slice in text if exactly 1 effective store node exists, else None
+        - span: (start_char, end_char) character slice in text if exactly 1 effective store node exists, else None
         - count: total number of top-level store nodes in the parsed document
 
     Raises:
@@ -1010,20 +1098,7 @@ def effective_store_clause(text: str, path: Path | None = None) -> StoreClauseSp
     brace_depth = 0
     slashdash = False
 
-    lines = text.splitlines(keepends=True)
-    line_starts: list[int] = []
-    curr = 0
-    for l in lines:
-        line_starts.append(curr)
-        curr += len(l)
-
-    def line_for_pos(pos: int) -> tuple[int, int]:
-        for idx in range(len(line_starts) - 1, -1, -1):
-            if pos >= line_starts[idx]:
-                return idx + 1, line_starts[idx]
-        return 1, 0
-
-    matches: list[tuple[int, tuple[int, int], str]] = []
+    matches: list[tuple[int, int]] = []
     i = 0
     n = len(text)
     while i < n:
@@ -1075,15 +1150,12 @@ def effective_store_clause(text: str, path: Path | None = None) -> StoreClauseSp
                 i -= 1
                 if ident == "store" and brace_depth == 0:
                     if not slashdash:
-                        l_no, l_start = line_for_pos(id_start)
-                        l_text = lines[l_no - 1]
-                        l_end = l_start + len(l_text.rstrip("\r\n"))
-                        matches.append((l_no, (l_start, l_end), l_text.rstrip("\r\n")))
+                        clause_end = _scan_kdl_node_end(text, id_start)
+                        matches.append((id_start, clause_end))
                     else:
                         slashdash = False
         i += 1
 
     if len(matches) == 1:
-        _l_no, span, _raw = matches[0]
-        return StoreClauseSpan(span=span, count=count)
+        return StoreClauseSpan(span=matches[0], count=count)
     return StoreClauseSpan(span=None, count=count)

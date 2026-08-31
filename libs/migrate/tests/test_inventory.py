@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import sqlite3
 from pathlib import Path
@@ -140,8 +139,8 @@ def test_mixed_observer_batch_refuses_and_enumerates_every_offending_line(tmp_pa
     exc = exc_info.value
     assert len(exc.mixed_observer_lines) == 2
     assert exc.mixed_observer_lines == (
-        (2, ("kyle", "someone-else"), 0),
-        (4, ("alice", "bob"), 0),
+        (2, ("kyle", "someone-else"), {"empty": 0, "missing": 0}),
+        (4, ("alice", "bob"), {"empty": 0, "missing": 0}),
     )
 
     msg = str(exc)
@@ -166,7 +165,9 @@ def test_absent_observer_batch_refusal_is_distinct_condition(tmp_path: Path) -> 
     assert "1 row(s) missing 'observer' field" in str(exc)
 
 
-def test_combined_defects_scan_collects_all_three_classes_without_preemption(tmp_path: Path) -> None:
+def test_combined_defects_scan_collects_all_three_classes_without_preemption(
+    tmp_path: Path,
+) -> None:
     """Combined defect fixture with codec-invalid + mixed + absent lines together.
     Whole source is scanned before raising, and all 3 classes are enumerated without preemption."""
     source_file = build_combined_defects_jsonl(tmp_path / "combined.jsonl")
@@ -182,8 +183,7 @@ def test_combined_defects_scan_collects_all_three_classes_without_preemption(tmp
 
     # Assert line 4 is mixed-observer
     assert len(exc.mixed_observer_lines) == 1
-    assert exc.mixed_observer_lines[0][0] == 4
-    assert exc.mixed_observer_lines[0][1] == ("kyle", "someone-else")
+    assert exc.mixed_observer_lines[0] == (4, ("kyle", "someone-else"), {"empty": 0, "missing": 0})
 
     # Assert line 6 is absent-observer
     assert len(exc.absent_observer_lines) == 1
@@ -210,10 +210,32 @@ def test_both_aspects_batch_reported_once_under_mixed_class(tmp_path: Path) -> N
     assert len(exc.codec_invalid_lines) == 0
     assert len(exc.absent_observer_lines) == 0
     assert len(exc.mixed_observer_lines) == 1
-    assert exc.mixed_observer_lines[0] == (1, ("alice", "bob"), 1)
+    assert exc.mixed_observer_lines[0] == (1, ("alice", "bob"), {"empty": 0, "missing": 1})
 
     msg = str(exc)
     assert "line 1: observers 'alice', 'bob' (1 row(s) missing 'observer' field)" in msg
+
+
+def test_both_aspects_empty_observer_batch_reported_under_mixed_with_spelling_census(
+    tmp_path: Path,
+) -> None:
+    """Probe case: a batch of alice+bob+'' -> mixed entry names ('alice', 'bob'),
+    absent-aspect census {'empty': 1, 'missing': 0}, message says observer is the empty string."""
+    from ._fixtures import build_both_aspects_empty_observer_batch_jsonl
+
+    source_file = build_both_aspects_empty_observer_batch_jsonl(tmp_path / "both_empty.jsonl")
+
+    with pytest.raises(MigrationRefused) as exc_info:
+        inventory(source_file)
+
+    exc = exc_info.value
+    assert len(exc.codec_invalid_lines) == 0
+    assert len(exc.absent_observer_lines) == 0
+    assert len(exc.mixed_observer_lines) == 1
+    assert exc.mixed_observer_lines[0] == (1, ("alice", "bob"), {"empty": 1, "missing": 0})
+
+    msg = str(exc)
+    assert "line 1: observers 'alice', 'bob' (1 row(s) with observer='' (empty string))" in msg
 
 
 def test_type_error_in_observer_lands_in_codec_invalid_class(tmp_path: Path) -> None:

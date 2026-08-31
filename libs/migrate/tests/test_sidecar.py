@@ -1035,6 +1035,23 @@ def test_edit_vertex_store_clause_comment_shadowed_active_store(tmp_path: Path) 
     assert post_ast.store_backend == BackendDecl(name="file")
 
 
+def test_edit_vertex_store_clause_preserves_same_line_comments(tmp_path: Path) -> None:
+    """F5: Same-line comments trailing the store clause (e.g. store "./a.jsonl" // KEEP)
+    survive the surgical edit byte-for-byte."""
+    loops_block = 'loops { concept { fold { items "collect" 100 } } }'
+    v_comment = tmp_path / "keep.vertex"
+    v_comment.write_text(
+        f'name "alice"\nstore "./data/a.jsonl" // KEEP\n{loops_block}\n',
+        encoding="utf-8",
+    )
+    edit_vertex_store_clause(v_comment, "./data/target.arrival", backend="file")
+    text = v_comment.read_text(encoding="utf-8")
+    assert 'store "./data/target.arrival" backend="file" // KEEP' in text
+    post_ast = parse_vertex(text, v_comment)
+    assert post_ast.store == Path("./data/target.arrival")
+    assert post_ast.store_backend == BackendDecl(name="file")
+
+
 # ---------------------------------------------------------------------------
 # Test 14: F7(b) — verify_migration_report causes
 # ---------------------------------------------------------------------------

@@ -1,0 +1,131 @@
+I have launched the apps test suite in the background and will wait for it to complete.
+I have launched the store test suite and will wait for it to complete.
+I have launched the engine test suite and will wait for it to complete.
+I will wait for the engine test suite to finish.
+I am waiting for the apps test suite to finish.
+I am waiting for the store test suite to finish.
+I am waiting for the engine test suite to finish.
+I will wait for the engine test suite to complete.
+# Slice 4 WP5 — Fix Round 1 Report
+
+## Summary of Changes (In-Order Execution)
+
+### [Commit 844d2994](file:///Users/kaygee/Code/loops-wt/s4-wp5/tests/architecture/test_rule_19_third_party_imports_declared.py) — F1 (Gate B3): Shrink-Forcing Rule 19 Allowlist
+- Updated [`test_rule_19_allowlist_is_minimal`](file:///Users/kaygee/Code/loops-wt/s4-wp5/tests/architecture/test_rule_19_third_party_imports_declared.py#L191-L228) in [test_rule_19_third_party_imports_declared.py](file:///Users/kaygee/Code/loops-wt/s4-wp5/tests/architecture/test_rule_19_third_party_imports_declared.py) to assert that each allowlist entry is still an active violation (`module not in declared` for that package's dependencies / dev-group). Any declared-but-allowlisted dependency now immediately fails the test as redundant.
+
+### [Commit 7af93238](file:///Users/kaygee/Code/loops-wt/s4-wp5/apps/loops/pyproject.toml) — F2 (Gate B4): Package Declarations & Allowlist Shrink
+- Added `"rfc8785>=0.1.4"` to `[dependency-groups].dev` in [apps/loops/pyproject.toml](file:///Users/kaygee/Code/loops-wt/s4-wp5/apps/loops/pyproject.toml#L9).
+- Added `atoms = { workspace = true }` and `lang = { workspace = true }` to `[tool.uv.sources]`, and added `"atoms"`, `"lang"` to `[dependency-groups].dev` in [libs/store/pyproject.toml](file:///Users/kaygee/Code/loops-wt/s4-wp5/libs/store/pyproject.toml#L9-L23) (runtime dependencies unchanged; Rule 4 row untouched).
+- Shrunk `_ALLOWLIST` in [test_rule_19_third_party_imports_declared.py](file:///Users/kaygee/Code/loops-wt/s4-wp5/tests/architecture/test_rule_19_third_party_imports_declared.py#L60-L68) from 9 entries to 2 (only the shipped testing strategies for `atoms` and `lang` remain).
+
+### [Commit 4a127827](file:///Users/kaygee/Code/loops-wt/s4-wp5/libs/migrate/src/migrate/sidecar.py) — F3 (Gate B1+B2): Sweep Residue & Simplify Store Clause Span
+- In [libs/migrate/src/migrate/sidecar.py](file:///Users/kaygee/Code/loops-wt/s4-wp5/libs/migrate/src/migrate/sidecar.py#L241-L255): Deleted unused `import re` and removed the vestigial regex and block comment checks (`block_comment_spans` / `regex_matches`). The refusal branches collapsed directly to the AST-driven `store_span.count > 1` and `store_span.count == 0 or store_span.span is None` checks.
+- In [libs/lang/src/lang/ast.py](file:///Users/kaygee/Code/loops-wt/s4-wp5/libs/lang/src/lang/ast.py#L698-L707) & [libs/lang/src/lang/loader.py](file:///Users/kaygee/Code/loops-wt/s4-wp5/libs/lang/src/lang/loader.py#L974-L1090): Dropped unused fields `.line` and `.raw` from [`StoreClauseSpan`](file:///Users/kaygee/Code/loops-wt/s4-wp5/libs/lang/src/lang/ast.py#L698-L707), updated [`effective_store_clause`](file:///Users/kaygee/Code/loops-wt/s4-wp5/libs/lang/src/lang/loader.py#L974) docstrings to clearly state that `span` is a line span, and updated [`TestEffectiveStoreClause`](file:///Users/kaygee/Code/loops-wt/s4-wp5/libs/lang/tests/test_loader.py#L3480-L3626) in [libs/lang/tests/test_loader.py](file:///Users/kaygee/Code/loops-wt/s4-wp5/libs/lang/tests/test_loader.py).
+
+### [Commit b3ba0bae](file:///Users/kaygee/Code/loops-wt/s4-wp5/libs/migrate/CLAUDE.md) — F4 (Gate B5+B6): Documentation Alignment
+- Corrected staging naming to `<store_dir>/<lineage>.arrival` (removed all `.staging.arrival` suffixes) in [libs/migrate/CLAUDE.md](file:///Users/kaygee/Code/loops-wt/s4-wp5/libs/migrate/CLAUDE.md), [docs/architecture/arrival/protocol.html](file:///Users/kaygee/Code/loops-wt/s4-wp5/docs/architecture/arrival/protocol.html), and [docs/architecture/arrival/backend-contract.html](file:///Users/kaygee/Code/loops-wt/s4-wp5/docs/architecture/arrival/backend-contract.html).
+- Corrected report path to `<store_dir>/<lineage>.migration-report.json` across examples and design points.
+- Clarified that the 5 publish preconditions belong to `libs/migrate` (`target_verify_full`, `source_unchanged`, `equivalence_rerun`, `inventory_equality`, `journal_first_entry_mint`), whereas the already-migrated guard is an apps-layer preflight in [`apps/loops/src/loops/commands/store.py`](file:///Users/kaygee/Code/loops-wt/s4-wp5/apps/loops/src/loops/commands/store.py#L819-L824).
+- Clarified that `run_migration` verifies signer signature return, while `verify_migration_report` exists for external auditor verification.
+- Updated the quarantine and injection rules in [libs/migrate/CLAUDE.md](file:///Users/kaygee/Code/loops-wt/s4-wp5/libs/migrate/CLAUDE.md): cited the AST ratchet in [libs/migrate/tests/test_quarantine.py](file:///Users/kaygee/Code/loops-wt/s4-wp5/libs/migrate/tests/test_quarantine.py), documented frozen legacy readers and slice-5 dissolution, noted that `src` never imports `custody`/`sign`, and replaced "nothing imports migrate" with "migrate imports no legacy modules and has no write path into a live store".
+
+### [Commit 8ce590a9](file:///Users/kaygee/Code/loops-wt/s4-wp5/libs/migrate/tests/test_sidecar.py) — F5: Clean Stray Import
+- Removed duplicate `from lang import BackendDecl, parse_vertex` line at [libs/migrate/tests/test_sidecar.py:30](file:///Users/kaygee/Code/loops-wt/s4-wp5/libs/migrate/tests/test_sidecar.py#L26), folding [`parse_vertex`](file:///Users/kaygee/Code/loops-wt/s4-wp5/libs/migrate/tests/test_sidecar.py#L26) into the top import.
+
+---
+
+## Proof Evidence
+
+### 1. F1 / F2 Allowlist Ratchet Evidence
+Mid-sequence execution (after adding pyproject declarations in F2, prior to shrinking the allowlist in `test_rule_19_third_party_imports_declared.py`):
+
+```
+=================================== FAILURES ===================================
+______________________ test_rule_19_allowlist_is_minimal _______________________
+
+    def test_rule_19_allowlist_is_minimal():
+...
+>       assert not stale, (
+            "Rule 19: Stale _ALLOWLIST entries — the import they excused is no longer a violation:\n"
+            + "\n".join(stale)
+        )
+E       AssertionError: Rule 19: Stale _ALLOWLIST entries — the import they excused is no longer a violation:
+E           apps/loops/tests/test_store_migrate.py: 'rfc8785' is declared in loops/pyproject.toml (allowlist entry is redundant and must be removed)
+E           libs/store/tests/strategies.py: 'atoms' is declared in store/pyproject.toml (allowlist entry is redundant and must be removed)
+E           libs/store/tests/test_conformance_merge.py: 'atoms' is declared in store/pyproject.toml (allowlist entry is redundant and must be removed)
+E           libs/store/tests/test_fact_signature_transport.py: 'atoms' is declared in store/pyproject.toml (allowlist entry is redundant and must be removed)
+E           libs/store/tests/test_permuted_transport.py: 'atoms' is declared in store/pyproject.toml (allowlist entry is redundant and must be removed)
+E           libs/store/tests/test_properties_merge.py: 'atoms' is declared in store/pyproject.toml (allowlist entry is redundant and must be removed)
+E           libs/store/tests/test_properties_merge.py: 'lang' is declared in store/pyproject.toml (allowlist entry is redundant and must be removed)
+
+========================= 1 failed, 1 passed in 1.35s ==========================
+```
+
+Post-shrink execution:
+```
+tests/architecture/test_rule_19_third_party_imports_declared.py ..       [100%]
+============================== 2 passed in 1.55s ===============================
+```
+
+### 2. F3 Sidecar Residue Removal & Grep Verification
+Grep evidence in [libs/migrate/src/migrate/sidecar.py](file:///Users/kaygee/Code/loops-wt/s4-wp5/libs/migrate/src/migrate/sidecar.py):
+- Grep `regex_matches`: No results found.
+- Grep `block_comment_spans`: No results found.
+- Grep `store_span.count == 0`: Exactly 1 match (`if store_span.count == 0 or store_span.span is None:`).
+
+Labels-as-set test execution:
+```
+$ uv run pytest --basetemp=/private/tmp/s4wp5-tmp/pt libs/migrate/tests/test_sidecar.py -k "test_edit_vertex_store_clause"
+collected 17 items / 15 deselected / 2 selected
+
+libs/migrate/tests/test_sidecar.py ..                                    [100%]
+======================= 2 passed, 15 deselected in 0.13s =======================
+```
+
+### 3. Fresh-Environment Collection Verification (Gate's `UV_PROJECT_ENVIRONMENT`)
+```
+$ UV_PROJECT_ENVIRONMENT=/private/tmp/s4wp5-tmp/fresh-env uv sync --all-packages --all-groups
+Resolved 47 packages in 4ms
+Prepared 3 packages in 345ms
+Installed 25 packages in 59ms
+
+$ UV_PROJECT_ENVIRONMENT=/private/tmp/s4wp5-tmp/fresh-env uv run pytest --basetemp=/private/tmp/s4wp5-tmp/pt --collect-only apps/loops/tests && UV_PROJECT_ENVIRONMENT=/private/tmp/s4wp5-tmp/fresh-env uv run pytest --basetemp=/private/tmp/s4wp5-tmp/pt --collect-only libs/migrate/tests && UV_PROJECT_ENVIRONMENT=/private/tmp/s4wp5-tmp/fresh-env uv run pytest --basetemp=/private/tmp/s4wp5-tmp/pt --collect-only libs/store/tests
+...
+======================= 2540 tests collected in 1.15s =======================
+========================= 70 tests collected in 0.18s =========================
+========================= 180 tests collected in 0.21s =========================
+```
+
+---
+
+## Final Test Suite Results
+
+All suites executed with the prescribed environment configuration:
+
+1. **Apps Suite** (`uv run pytest --basetemp=/private/tmp/s4wp5-tmp/pt apps/loops/tests`):
+   ```
+   ======================= 2539 passed, 1 xfailed in 13.37s =======================
+   ```
+2. **Migrate + Custody + Architecture Suite** (`uv run pytest --basetemp=/private/tmp/s4wp5-tmp/pt libs/migrate/tests libs/custody/tests tests/architecture`):
+   ```
+   ============================= 181 passed in 6.06s ==============================
+   ```
+3. **Lang Suite** (`TMPDIR=/private/tmp/s4wp5-tmp uv run --directory libs/lang pytest -q --basetemp=/private/tmp/s4wp5-tmp/pt`):
+   ```
+   682 passed in 4.27s
+   ```
+4. **Store Suite** (`uv run pytest --basetemp=/private/tmp/s4wp5-tmp/pt libs/store/tests`):
+   ```
+   ============================= 180 passed in 17.90s =============================
+   ```
+5. **Engine Suite** (`TMPDIR=/private/tmp/s4wp5-tmp uv run --directory libs/engine pytest -q --basetemp=/private/tmp/s4wp5-tmp/pt`):
+   ```
+   2306 passed, 1 skipped in 77.40s (0:01:17)
+   ```
+
+Git status: Clean working tree.
+
+---
+
+## Honest Gaps
+- None. All six blockings resolved in sequence within the strict scope fence, verified by shrink-forcing assertions, unit tests, and full test suite executions across all workspace packages.

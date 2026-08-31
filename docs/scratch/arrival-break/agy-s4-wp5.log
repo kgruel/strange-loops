@@ -1,0 +1,219 @@
+I have launched the engine test suite and am waiting for it to complete.
+I am waiting for the engine suite task to finish.
+Waiting for the engine test suite to finish.
+Waiting for the test suite to finish.
+I have launched the test suites (migrate, custody, lang, architecture) and will wait for them to finish.
+I have launched `uv run pytest apps/loops -q` and am waiting for it to finish.
+Waiting for `apps/loops` test suite to finish.
+Waiting for task-520 to finish.
+# Slice 4 WP5 — Completion Report
+
+## 1. Commit List
+
+```
+7b7c9ff1 docs(arrival,migrate,store): add migration as-built notes and CLAUDE.md guides
+158b5668 test(architecture): add Rule 19 ratchet for declared dependencies
+72c1136e feat(lang,migrate): add effective_store_clause query to lang and dissolve ckdl from migrate
+70f7cdd5 docs(engine): rewrite stale sidecar genesis and containment docstrings in arrival.py
+```
+
+---
+
+## 2. Work Summary (W1 – W4)
+
+### **W1 — Stale-Prose Sweep in [`arrival.py`](file:///Users/kaygee/Code/loops-wt/s4-wp5/libs/engine/src/engine/arrival.py)**
+- **Files Modified:** [`libs/engine/src/engine/arrival.py`](file:///Users/kaygee/Code/loops-wt/s4-wp5/libs/engine/src/engine/arrival.py#L575-L585)
+- **Changes:**
+  1. Rewrote the keyless genesis refusal message at line 577 to state that every genesis introduces the founding public key at ordinal 0 and the core grammar admits no keyless genesis.
+  2. Rewrote the [`ArrivalLog.mint`](file:///Users/kaygee/Code/loops-wt/s4-wp5/libs/engine/src/engine/arrival.py#L890-L900) docstring at line 895 to clarify that source fingerprints and equivalence claims live in the signed migration report and bootstrap receipt, never in a containment-only genesis.
+  3. Audited all 5 other occurrences of `"migration sidecar"` across `libs/engine/src/engine/*.py` and confirmed each is accurate and active.
+- **Verification:** Ran engine test suite before and after with `TMPDIR=/private/tmp/s4wp5-tmp uv run pytest libs/engine -q`; counts identical (`2306 passed, 1 skipped`).
+
+---
+
+### **W2 — Lang Store-Clause Query Dissolution**
+- **Files Modified:**
+  - [`libs/lang/src/lang/ast.py`](file:///Users/kaygee/Code/loops-wt/s4-wp5/libs/lang/src/lang/ast.py#L698-L706): Added frozen [`StoreClauseSpan`](file:///Users/kaygee/Code/loops-wt/s4-wp5/libs/lang/src/lang/ast.py#L698-L706) dataclass (`line`, `span`, `count`, `raw`).
+  - [`libs/lang/src/lang/loader.py`](file:///Users/kaygee/Code/loops-wt/s4-wp5/libs/lang/src/lang/loader.py#L973-L1095): Implemented [`effective_store_clause`](file:///Users/kaygee/Code/loops-wt/s4-wp5/libs/lang/src/lang/loader.py#L973-L1095) performing KDL AST parse to count top-level store nodes and quote/comment/slashdash-aware single-pass source scanning to locate the exact line and character span.
+  - [`libs/lang/src/lang/__init__.py`](file:///Users/kaygee/Code/loops-wt/s4-wp5/libs/lang/src/lang/__init__.py#L8-L125): Exported [`StoreClauseSpan`](file:///Users/kaygee/Code/loops-wt/s4-wp5/libs/lang/src/lang/ast.py#L698-L706) and [`effective_store_clause`](file:///Users/kaygee/Code/loops-wt/s4-wp5/libs/lang/src/lang/loader.py#L973-L1095).
+  - [`libs/lang/tests/test_loader.py`](file:///Users/kaygee/Code/loops-wt/s4-wp5/libs/lang/tests/test_loader.py#L3478-L3625): Added comprehensive [`TestEffectiveStoreClause`](file:///Users/kaygee/Code/loops-wt/s4-wp5/libs/lang/tests/test_loader.py#L3478-L3625) test suite (clean single clause, backend property, comment-shadowed clause, duplicate clauses, unusual spacing, no store clause, strings named `"store"`, syntax error).
+  - [`libs/migrate/src/migrate/sidecar.py`](file:///Users/kaygee/Code/loops-wt/s4-wp5/libs/migrate/src/migrate/sidecar.py#L70-L330): Dissolved `import ckdl` and interim comment; updated [`edit_vertex_store_clause`](file:///Users/kaygee/Code/loops-wt/s4-wp5/libs/migrate/src/migrate/sidecar.py#L225-L330) to query `lang.effective_store_clause` and perform surgical slice replacement by span.
+  - [`libs/migrate/tests/test_sidecar.py`](file:///Users/kaygee/Code/loops-wt/s4-wp5/libs/migrate/tests/test_sidecar.py#L860-L878): Added [`test_edit_vertex_store_clause_comment_shadowed_active_store`](file:///Users/kaygee/Code/loops-wt/s4-wp5/libs/migrate/tests/test_sidecar.py#L860-L878).
+- **Verification:** Ran `uv run pytest libs/lang libs/migrate -q` (682 passed in lang, 61 passed in migrate). Verified `grep -rn "import ckdl" libs/migrate/src/` is empty. Executed mutation proof.
+
+---
+
+### **W3 — Imports ⊆ Declared-Deps Ratchet (Rule 19)**
+- **Files Modified:**
+  - [`tests/architecture/test_rule_19_third_party_imports_declared.py`](file:///Users/kaygee/Code/loops-wt/s4-wp5/tests/architecture/test_rule_19_third_party_imports_declared.py): Created new architecture test asserting that all runtime imports in `src/` appear in `project.dependencies`, and all runtime imports in `tests/` appear in `project.dependencies` or `dependency-groups.dev` (for packages declaring a `dev` group). Includes shrink-only allowlist validation.
+- **Verification:** Ran `uv run pytest tests/architecture -q` (101 passed). Executed proof by removing `sign` from `migrate`'s `dev` group.
+
+---
+
+### **W4 — Small Ruled Residue**
+- **Files Modified:**
+  - [`libs/migrate/src/migrate/sidecar.py`](file:///Users/kaygee/Code/loops-wt/s4-wp5/libs/migrate/src/migrate/sidecar.py#L481-L495): Added partial-batch drops refusal note to [`_check_inventory_equality`](file:///Users/kaygee/Code/loops-wt/s4-wp5/libs/migrate/src/migrate/sidecar.py#L481-L495) docstring.
+  - [`libs/migrate/CLAUDE.md`](file:///Users/kaygee/Code/loops-wt/s4-wp5/libs/migrate/CLAUDE.md): Created new reference guide (sidecar purpose, quarantine rule, injection rule, 9 pipeline stages §A–§I, and design facts pointer F1–F7).
+  - [`libs/store/CLAUDE.md`](file:///Users/kaygee/Code/loops-wt/s4-wp5/libs/store/CLAUDE.md#L115-L125): Added deprecation and slice-5 disposition status note to Level 1.5 Rebirth section.
+  - [`docs/architecture/arrival/protocol.html`](file:///Users/kaygee/Code/loops-wt/s4-wp5/docs/architecture/arrival/protocol.html#L498-L515): Added "As-built (Slice 4)" callout to §08/09 migration section.
+  - [`docs/architecture/arrival/backend-contract.html`](file:///Users/kaygee/Code/loops-wt/s4-wp5/docs/architecture/arrival/backend-contract.html#L588-L605): Added "As-built (Slice 4)" callout to §10/11 migration section.
+- **Verification:** All tests and documentation links verified.
+
+---
+
+## 3. Proof Logs
+
+### **Proof 1: W2 Mutation Proof (First-vs-Effective Clause)**
+Mutated `effective_store_clause` in `libs/lang/src/lang/loader.py` to return the first regex match in the document rather than the active un-commented store clause.
+
+#### **RED Output:**
+```
+$ uv run pytest libs/migrate/tests/test_sidecar.py -k test_edit_vertex_store_clause_comment_shadowed_active_store
+============================= test session starts ==============================
+platform darwin -- Python 3.13.11, pytest-9.1.1, pluggy-1.6.0
+rootdir: /Users/kaygee/Code/loops-wt/s4-wp5/libs/migrate
+configfile: pyproject.toml
+collected 17 items / 16 deselected / 1 selected
+
+libs/migrate/tests/test_sidecar.py F                                     [100%]
+
+=================================== FAILURES ===================================
+_________ test_edit_vertex_store_clause_comment_shadowed_active_store __________
+...
+>   raise PublishPreconditionRefused(
+        f"Verification-by-re-parse failed: expected store={Path(target_location)!r}, got {post_ast.store!r}. "
+        "Advisory: check store clause location property.",
+        condition="vertex_store_location",
+    )
+E   migrate.refusals.PublishPreconditionRefused: Verification-by-re-parse failed: expected store=PosixPath('data/target.arrival'), got PosixPath('data/active.jsonl'). Advisory: check store clause location property.
+
+libs/migrate/src/migrate/sidecar.py:298: PublishPreconditionRefused
+=========================== short test summary info ============================
+FAILED libs/migrate/tests/test_sidecar.py::test_edit_vertex_store_clause_comment_shadowed_active_store
+======================= 1 failed, 16 deselected in 0.20s =======================
+```
+
+#### **Restored & GREEN Output:**
+```
+$ uv run pytest libs/migrate/tests/test_sidecar.py -k test_edit_vertex_store_clause_comment_shadowed_active_store
+============================= test session starts ==============================
+platform darwin -- Python 3.13.11, pytest-9.1.1, pluggy-1.6.0
+rootdir: /Users/kaygee/Code/loops-wt/s4-wp5/libs/migrate
+configfile: pyproject.toml
+collected 17 items / 16 deselected / 1 selected
+
+libs/migrate/tests/test_sidecar.py .                                     [100%]
+
+======================= 1 passed, 16 deselected in 0.18s =======================
+```
+
+#### **Production Diff:**
+```
+$ git diff libs/lang/src/lang/loader.py
+(empty)
+```
+
+---
+
+### **Proof 2: W3 Dependency Ratchet Proof (Remove `sign` from `migrate` dev group)**
+Temporarily removed `"sign"` from `[dependency-groups].dev` in `libs/migrate/pyproject.toml`.
+
+#### **RED Output:**
+```
+$ uv run pytest tests/architecture/test_rule_19_third_party_imports_declared.py
+============================= test session starts ==============================
+platform darwin -- Python 3.13.11, pytest-9.1.1, pluggy-1.6.0
+rootdir: /Users/kaygee/Code/loops-wt/s4-wp5
+configfile: pyproject.toml
+collected 2 items
+
+tests/architecture/test_rule_19_third_party_imports_declared.py F.       [100%]
+
+=================================== FAILURES ===================================
+______________ test_third_party_and_interpackage_imports_declared ______________
+...
+>       assert not violations, (
+            "Rule 19: Undeclared import violation (imports ⊆ declared dependencies):\n"
+            + "\n".join(violations)
+        )
+E       AssertionError: Rule 19: Undeclared import violation (imports ⊆ declared dependencies):
+E           libs/migrate/tests/test_sidecar.py:27 — migrate tests import 'sign' (undeclared in migrate/pyproject.toml dependencies or dev group)
+E           libs/migrate/tests/test_transform.py:65 — migrate tests import 'sign' (undeclared in migrate/pyproject.toml dependencies or dev group)
+E           libs/migrate/tests/test_transform.py:78 — migrate tests import 'sign' (undeclared in migrate/pyproject.toml dependencies or dev group)
+E           libs/migrate/tests/test_transform.py:85 — migrate tests import 'sign' (undeclared in migrate/pyproject.toml dependencies or dev group)
+
+tests/architecture/test_rule_19_third_party_imports_declared.py:185: AssertionError
+=========================== short test summary info ============================
+FAILED tests/architecture/test_rule_19_third_party_imports_declared.py::test_third_party_and_interpackage_imports_declared
+========================= 1 failed, 1 passed in 1.14s ==========================
+```
+
+#### **Restored & GREEN Output:**
+```
+$ uv run pytest tests/architecture/test_rule_19_third_party_imports_declared.py
+============================= test session starts ==============================
+platform darwin -- Python 3.13.11, pytest-9.1.1, pluggy-1.6.0
+rootdir: /Users/kaygee/Code/loops-wt/s4-wp5
+configfile: pyproject.toml
+collected 2 items
+
+tests/architecture/test_rule_19_third_party_imports_declared.py ..       [100%]
+
+============================== 2 passed in 1.22s ===============================
+```
+
+#### **Production Diff:**
+```
+$ git diff libs/migrate/pyproject.toml
+(empty)
+```
+
+---
+
+## 4. Final Checks Output
+
+### **1. Engine Test Suite (Before vs. After W1)**
+- **Before W1:** `2306 passed, 1 skipped in 80.45s`
+- **After W1..W4:** `2306 passed, 1 skipped in 81.09s`
+
+### **2. `libs/migrate`, `libs/custody`, `libs/lang`, `tests/architecture`**
+```
+$ uv run pytest libs/migrate -q && uv run pytest libs/custody -q && uv run pytest libs/lang -q && uv run pytest tests/architecture -q
+61 passed in 0.27s
+19 passed in 0.11s
+682 passed in 4.18s
+101 passed in 5.86s
+```
+
+### **3. `apps/loops` Test Suite (Workspace Root)**
+```
+$ uv run pytest apps/loops -q
+2539 passed, 1 xfailed in 13.92s
+```
+
+### **4. Verification of `ckdl` Removal in Migrate Source**
+```
+$ grep -rn "import ckdl" libs/migrate/src/
+(empty — exit code 1)
+```
+
+### **5. Workspace Status**
+```
+$ git status --short
+(clean)
+```
+
+---
+
+## 5. Rule 19 Allowlists, Anomalies & Scope Integrity
+
+### **Allowlist Entries in Rule 19 (`_ALLOWLIST`)**
+The following structural exceptions were identified across the existing codebase and documented in [`test_rule_19_third_party_imports_declared.py`](file:///Users/kaygee/Code/loops-wt/s4-wp5/tests/architecture/test_rule_19_third_party_imports_declared.py#L46-L65):
+1. `libs/atoms/src/atoms/testing/strategies.py` (`hypothesis`): `atoms.testing` ships shared Hypothesis strategies for downstream test suites (the `numpy.testing` pattern, matching Rule 6); `hypothesis` is declared in `atoms`'s `dev` group rather than production `dependencies`.
+2. `libs/lang/src/lang/testing/strategies.py` (`hypothesis`): `lang.testing` ships shared Hypothesis strategies for downstream test suites; `hypothesis` is declared in `lang`'s `dev` group rather than production `dependencies`.
+3. `apps/loops/tests/test_store_migrate.py` (`rfc8785`): Migration test directly checks RFC 8785 canonical report signatures; `rfc8785` is in root dependencies and `engine`'s dependencies, but undeclared in `apps/loops` dev dependencies.
+4. `libs/store/tests/*` (`atoms`, `lang`): `store` tests import `atoms` and `lang` for legacy test fixtures and assertions; slated for slice-5 disposition when store tests migrate.
+
+### **Scope Integrity**
+- No unpermitted files were modified.
+- No modifications were made to `.loops/` or real stores; no `sl`/`loops emit` commands were run.

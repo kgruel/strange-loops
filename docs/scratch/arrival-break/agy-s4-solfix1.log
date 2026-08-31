@@ -1,0 +1,119 @@
+I have launched the engine tests to verify the baseline and will wait for completion.
+Waiting for engine tests baseline to finish.
+Waiting for the baseline engine tests to finish.
+Waiting for apps/loops baseline tests to complete.
+I've launched the test suite for `libs/lang` and am waiting for the results.
+I have launched the `libs/engine` pytest suite in the background and am waiting for the results.
+I'll wait for the `libs/engine` test execution to complete.
+I'll wait for the `libs/engine` test suite to finish.
+I'll continue waiting for the `libs/engine` test execution to complete.
+# Slice 4 — Sol Integration R1 Remediation Report
+
+All 5 blocking findings (F1–F5) and 2 ride-along findings (F6–F7) have been resolved, committed individually, and verified against the full test suites.
+
+---
+
+## 1. Commit History (1 commit per F-item)
+
+```text
+6fb119ff style(migrate): clean ruff lint errors (F7)
+61d41b90 docs(migrate): align CLAUDE.md and sidecar docstrings with implementation (F6)
+06844e55 fix(lang,migrate): sub-line span for store clause preserves trailing comments (F5)
+5486c84b fix(migrate): derive custodian from vertex stem and remove override parameters (F4)
+5a634bd4 fix(migrate): refuse resume on invalid target lineage filename (F3)
+463810a6 fix(migrate): check authored_at and signature in resume prefix diff (F2)
+81b6d5d6 fix(migrate): spelling-distinct absent census in mixed observer entries (F1)
+```
+
+---
+
+## 2. Summary of Changes
+
+### F1: Mixed-Observer Entries Carry Spelling-Distinct Absent-Observer Census (`81b6d5d6`)
+- **Files Modified**:
+  - [`libs/migrate/src/migrate/refusals.py`](file:///Users/kaygee/Code/loops-wt/s4-solfix1/libs/migrate/src/migrate/refusals.py)
+  - [`libs/migrate/src/migrate/legacy_source.py`](file:///Users/kaygee/Code/loops-wt/s4-solfix1/libs/migrate/src/migrate/legacy_source.py)
+  - [`libs/migrate/tests/test_refusals.py`](file:///Users/kaygee/Code/loops-wt/s4-solfix1/libs/migrate/tests/test_refusals.py)
+  - [`libs/migrate/tests/test_inventory.py`](file:///Users/kaygee/Code/loops-wt/s4-solfix1/libs/migrate/tests/test_inventory.py)
+- **Changes**:
+  - Changed `mixed_observer_lines` tuple shape from `(lineno, tuple[str, ...])` to `(lineno, tuple[str, ...], dict[str, int])` so each mixed entry retains its absent-observer census (`{'missing': M, 'empty': E}`).
+  - Formatted messages distinguish empty-string vs missing-field absent-observer rows in mixed-observer lines.
+
+---
+
+### F2: Target Resume Scan Diffs `at` and `sig` Fields Against Expected Drafts (`463810a6`)
+- **Files Modified**:
+  - [`libs/migrate/src/migrate/sidecar.py`](file:///Users/kaygee/Code/loops-wt/s4-solfix1/libs/migrate/src/migrate/sidecar.py)
+  - [`libs/migrate/tests/test_sidecar.py`](file:///Users/kaygee/Code/loops-wt/s4-solfix1/libs/migrate/tests/test_sidecar.py)
+- **Changes**:
+  - Added checks for `target_rec.get("at") != exp_draft.authored_at` and `target_rec.get("sig") != exp_draft.signature` in the resume prefix verification loop.
+  - Added tests verifying that resume targets diverging solely in outer signature or `authored_at` raise [`TargetMismatchOnResumeRefused`](file:///Users/kaygee/Code/loops-wt/s4-solfix1/libs/migrate/src/migrate/refusals.py#L90). Mutation proof confirmed RED on omitting the check, GREEN on restoring.
+
+---
+
+### F3: Resume Re-Attaches M-2 Target Lineage-Naming Door Check (`5a634bd4`)
+- **Files Modified**:
+  - [`libs/migrate/src/migrate/sidecar.py`](file:///Users/kaygee/Code/loops-wt/s4-solfix1/libs/migrate/src/migrate/sidecar.py)
+  - [`libs/migrate/tests/test_sidecar.py`](file:///Users/kaygee/Code/loops-wt/s4-solfix1/libs/migrate/tests/test_sidecar.py)
+- **Changes**:
+  - Added validation on resume targets: `if target_path.name != f"{lineage}.arrival": raise TargetMismatchOnResumeRefused(...)`.
+  - Added tests checking that friendly or mismatched target filenames are refused on resume.
+
+---
+
+### F4: Custodian Derived Strictly from Vertex File Stem (`5486c84b`)
+- **Files Modified**:
+  - [`libs/migrate/src/migrate/transform.py`](file:///Users/kaygee/Code/loops-wt/s4-solfix1/libs/migrate/src/migrate/transform.py)
+  - [`libs/migrate/src/migrate/sidecar.py`](file:///Users/kaygee/Code/loops-wt/s4-solfix1/libs/migrate/src/migrate/sidecar.py)
+  - [`apps/loops/src/loops/commands/store.py`](file:///Users/kaygee/Code/loops-wt/s4-solfix1/apps/loops/src/loops/commands/store.py)
+  - [`libs/migrate/tests/test_transform.py`](file:///Users/kaygee/Code/loops-wt/s4-solfix1/libs/migrate/tests/test_transform.py)
+  - [`libs/migrate/tests/test_sidecar.py`](file:///Users/kaygee/Code/loops-wt/s4-solfix1/libs/migrate/tests/test_sidecar.py)
+- **Changes**:
+  - Removed `custodian` and `custodian_key` override arguments from [`transform(...)`](file:///Users/kaygee/Code/loops-wt/s4-solfix1/libs/migrate/src/migrate/transform.py#L153) and [`run_migration(...)`](file:///Users/kaygee/Code/loops-wt/s4-solfix1/libs/migrate/src/migrate/sidecar.py#L670).
+  - Derived custodian identity strictly from `vertex.path.stem` (fallback `vertex.name` if in-memory).
+  - Added tests asserting vertices with human display names differing from their file stem migrate under the file-stem custodian.
+
+---
+
+### F5: Surgical Store Clause Edit Uses Sub-Line Character Span (`06844e55`)
+- **Files Modified**:
+  - [`libs/lang/src/lang/loader.py`](file:///Users/kaygee/Code/loops-wt/s4-solfix1/libs/lang/src/lang/loader.py)
+  - [`libs/lang/tests/test_loader.py`](file:///Users/kaygee/Code/loops-wt/s4-solfix1/libs/lang/tests/test_loader.py)
+  - [`libs/migrate/tests/test_sidecar.py`](file:///Users/kaygee/Code/loops-wt/s4-solfix1/libs/migrate/tests/test_sidecar.py)
+- **Changes**:
+  - Enhanced [`effective_store_clause`](file:///Users/kaygee/Code/loops-wt/s4-solfix1/libs/lang/src/lang/loader.py) to return a precise sub-line span `(start_char, end_char)` for the store clause using [`_scan_kdl_node_end`](file:///Users/kaygee/Code/loops-wt/s4-solfix1/libs/lang/src/lang/loader.py), excluding trailing comments/terminators/whitespace.
+  - Added tests proving trailing comments (e.g. `store "./a.jsonl" // KEEP`) survive the rewrite byte-for-byte.
+  - Mutation test confirmed that reverting to whole-line replacement failed RED with `AssertionError`, and sub-line replacement succeeded GREEN.
+
+---
+
+### F6: Documentation Truth Drift Alignment (`61d41b90`)
+- **Files Modified**:
+  - [`libs/migrate/CLAUDE.md`](file:///Users/kaygee/Code/loops-wt/s4-solfix1/libs/migrate/CLAUDE.md)
+  - [`libs/migrate/src/migrate/sidecar.py`](file:///Users/kaygee/Code/loops-wt/s4-solfix1/libs/migrate/src/migrate/sidecar.py)
+- **Changes**:
+  - Updated `CLAUDE.md` to reflect random minted lineage ULIDs in Stage 2 and non-None signature checks in Stage 7.
+  - Corrected module docstring in `sidecar.py` to document the actual signed envelope format `{"body": report_body, "signer": custodian}`.
+
+---
+
+### F7: Full Ruff Lint Cleanup in `libs/migrate` (`6fb119ff`)
+- **Files Modified**: All Python modules and test files across `libs/migrate/src/**` and `libs/migrate/tests/**`.
+- **Changes**:
+  - Fixed E501 line length violations (<100 characters).
+  - Fixed PTH105 (replaced `os.replace` with `Path.replace`).
+  - Fixed SIM105 (`contextlib.suppress(OSError)` for temp unlinking) and SIM117 (merged nested `with` statements).
+  - Output of `uv run ruff check libs/migrate`: `All checks passed!`.
+
+---
+
+## 3. Test Suite Verification Results
+
+| Test Target | Command | Result |
+| :--- | :--- | :--- |
+| **`libs/migrate`** | `TMPDIR=/private/tmp/s4solfix-tmp uv run --directory libs/migrate pytest -q --basetemp=/private/tmp/s4solfix-tmp/pt` | **68 passed** |
+| **`libs/custody`** | `TMPDIR=/private/tmp/s4solfix-tmp uv run --directory libs/custody pytest -q --basetemp=/private/tmp/s4solfix-tmp/pt` | **19 passed** |
+| **`libs/lang`** | `TMPDIR=/private/tmp/s4solfix-tmp uv run --directory libs/lang pytest -q --basetemp=/private/tmp/s4solfix-tmp/pt` | **683 passed** |
+| **`libs/engine`** | `TMPDIR=/private/tmp/s4solfix-tmp uv run --directory libs/engine pytest -q --basetemp=/private/tmp/s4solfix-tmp/pt` | **2306 passed, 1 skipped** |
+| **`apps/loops` (migrate CLI)** | `TMPDIR=/private/tmp/s4solfix-tmp uv run pytest apps/loops/tests/test_store_migrate.py -q --basetemp=/private/tmp/s4solfix-tmp/pt` | **9 passed** |
+| **Ruff Linter** | `uv run ruff check libs/migrate` | **0 errors (All checks passed)** |

@@ -469,6 +469,11 @@ def cmd_init(args: argparse.Namespace, *, reporter: "Reporter | None" = None) ->
     # instead of waiting for a later manual absorb. Best-effort: a failure
     # (no signing available for exotic setups) leaves the pre-genesis file
     # authoritative and prints guidance rather than failing init.
+    # slice-5: this best-effort absorb-genesis call is the call site that
+    # names `loops store migrate`'s sidecar mint as its successor — once
+    # init composes over a legacy-free arrival store, opening the lineage
+    # here becomes the sidecar's mint rather than absorb's genesis mode.
+    # Ruled disposition: design:arrival-break-slice4-migration-sidecar §F.
     from loops.commands.store import _run_absorb
 
     try:

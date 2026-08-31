@@ -42,10 +42,14 @@ def _refuse_store(msg: str, *, label: str | None = None) -> int:
     module renders it the same way so the exit code cannot drift between
     subcommands.
     """
-    from painted import Block, Style, paint
+    from painted import Block, Style, join_vertical, paint
 
-    head = f"✗ {label}: {msg}" if label else f"✗ {msg}"
-    paint(Block.text(head, Style()), file=sys.stderr)
+    lines = msg.splitlines() or [""]
+    head = f"✗ {label}: {lines[0]}" if label else f"✗ {lines[0]}"
+    blocks = [Block.text(head, Style())]
+    for line in lines[1:]:
+        blocks.append(Block.text(line, Style()))
+    paint(join_vertical(*blocks), file=sys.stderr)
     return 2
 
 
@@ -739,6 +743,158 @@ def _run_rebirth(argv: list[str], *, vertex_path: Path | None = None) -> int:
     return 0 if verification.ok else 1
 
 
+def _run_migrate(argv: list[str], *, vertex_path: Path | None = None) -> int:
+    """Migrate a legacy store into a fresh arrival lineage (ratified
+    ``design:arrival-break-slice4-migration-sidecar`` §F, §J.1 WP4).
+
+    A thin wrapper over ``migrate.sidecar.run_migration`` — no privileged
+    path of its own. Mints a signed genesis under the target ``.vertex``'s
+    own self-observer (the migration custodian: the only identity whose
+    private key this process holds), introduces every keyed declared
+    observer, replays the legacy source deterministically, verifies the
+    result (Full + equivalence re-run), and atomically publishes by
+    surgically editing the ``.vertex`` store clause onto the minted
+    lineage. ``--resume`` targets an interrupted run explicitly — resuming
+    is a deliberate act, never inferred from an existing staged file.
+    """
+    import argparse
+
+    p = argparse.ArgumentParser(
+        prog="loops store migrate",
+        description="Migrate a legacy .jsonl/.sqlite store into a fresh "
+                    "arrival lineage, with a signed migration report and "
+                    "an atomic .vertex store-clause publish.",
+    )
+    p.add_argument("source", help="Legacy store .jsonl or .sqlite file")
+    p.add_argument(
+        "--vertex", required=True,
+        help="Target .vertex file or vertex name",
+    )
+    p.add_argument(
+        "--rule", default="ulid-migration", choices=["identity", "ulid-migration"],
+        help="Transform: identity (verbatim) or ulid-migration "
+             "(deterministically migrate uuid4-era ids to event-time ULIDs)",
+    )
+    p.add_argument(
+        "--resume", default=None, metavar="TARGET",
+        help="Resume an interrupted migration at TARGET .arrival file "
+             "(deliberate — never inferred)",
+    )
+    p.add_argument("--json", action="store_true", help="JSON outcome")
+    # -h/--help is owned by argparse (add_help=True): parse_args prints the
+    # help built from this parser and exits 0 natively. No hand-rolled block.
+    args = p.parse_args(argv)
+
+    if vertex_path is not None and args.vertex is not None:
+        pos_target = _resolve_target(None, vertex_path).resolve()
+        flag_target = _resolve_target(args.vertex, None).resolve()
+        if pos_target != flag_target:
+            return _refuse_store(
+                f"positional vertex target '{vertex_path}' conflicts with --vertex '{args.vertex}' — "
+                f"targets resolve to different vertices ({pos_target.name} != {flag_target.name})",
+                label="store migrate",
+            )
+        vertex_target = flag_target
+    else:
+        vertex_target = _resolve_target(args.vertex, vertex_path).resolve()
+
+    if vertex_target.suffix != ".vertex":
+        raise ValueError(
+            "migrate requires a .vertex target — the custodian signer and "
+            "observer registry live in the custody context, not a raw .db"
+        )
+
+    from lang import ParseError, parse_vertex_file
+    from engine.residence import canonical_mode
+
+    try:
+        pre_ast = parse_vertex_file(vertex_target)
+    except ParseError as exc:
+        return _refuse_store(
+            f"the vertex file cannot be parsed: {exc}",
+            label=vertex_target.stem,
+        )
+
+    if pre_ast.store is not None:
+        if canonical_mode(pre_ast.store) == "arrival":
+            return _refuse_store(
+                f"already on an arrival lineage ({pre_ast.store}) — "
+                "re-migration would orphan it; deliberate re-migration is a slice-6 ceremony",
+                label=vertex_target.stem,
+            )
+
+    source_path = Path(args.source).resolve()
+    if not source_path.exists():
+        raise FileNotFoundError(f"{source_path} does not exist")
+
+    from custody import arrival_signer_for
+
+    signer = arrival_signer_for(vertex_target)
+    if signer is None or signer(vertex_target.stem, "0" * 64) is None:
+        return _refuse_store(
+            "no signing key for the vertex's self-observer — migration "
+            "must sign the custodian genesis and key introductions "
+            "(loops add <vertex> observer --keygen)",
+            label=vertex_target.stem,
+        )
+
+    from migrate.legacy_ids import identity, ulid_migration
+    from migrate.refusals import MigrationRefused
+    from migrate.sidecar import run_migration
+
+    transform_rule = {"identity": identity, "ulid-migration": ulid_migration}[args.rule]()
+
+    try:
+        outcome = run_migration(
+            source_path, vertex_target,
+            store_dir=vertex_target.parent,
+            signer=signer,
+            transform_rule=transform_rule,
+            resume_target=args.resume,
+        )
+    except MigrationRefused as exc:
+        return _refuse_store(str(exc), label=vertex_target.stem)
+
+    if args.json:
+        import dataclasses
+        import json as _json
+
+        report = {
+            "target_path": str(outcome.target_path),
+            "lineage": outcome.lineage,
+            "head": dataclasses.asdict(outcome.head),
+            "report_path": str(outcome.report_path),
+            "exceptions": dataclasses.asdict(outcome.exceptions),
+        }
+        print(_json.dumps(report, indent=2))  # noqa: T201 — machine output path
+        return 0
+
+    from painted import Block, Style, join_vertical, paint
+
+    exc_lines = []
+    if outcome.exceptions.keyless_declared_observers:
+        exc_lines.append(
+            f"  keyless observers (skipped): "
+            f"{', '.join(outcome.exceptions.keyless_declared_observers)}"
+        )
+    if outcome.exceptions.undeclared_row_observers:
+        exc_lines.append(
+            f"  undeclared observers in rows: "
+            f"{', '.join(outcome.exceptions.undeclared_row_observers)}"
+        )
+    if outcome.exceptions.dropped_units:
+        exc_lines.append(f"  dropped units: {len(outcome.exceptions.dropped_units)}")
+    lines = [
+        f"✓ {source_path.name} → {vertex_target.stem}: migrated (rule={args.rule})",
+        f"  lineage: {outcome.lineage} · head {outcome.head.ordinal} "
+        f"{outcome.head.record_hash[:16]}…",
+        f"  target: {outcome.target_path.name}",
+        f"  report: {outcome.report_path.name}",
+    ] + exc_lines
+    paint(join_vertical(*(Block.text(ln, Style(dim=False)) for ln in lines)))
+    return 0
+
+
 def _run_export(argv: list[str], *, vertex_path: Path | None = None) -> int:
     """Refuse ``store export``: the sqlite-to-JSONL bridge it drove is gone.
 
@@ -768,6 +924,13 @@ def _run_export(argv: list[str], *, vertex_path: Path | None = None) -> int:
 
 
 def _run_reanchor(argv: list[str], *, vertex_path: Path | None = None) -> int:
+    # slice-5: reanchor dies outright — no ceremony successor. It rewrites
+    # chain rows in place, which an append-only hash-chained ledger cannot
+    # do; its purpose (re-deriving the attestation layer after a key
+    # change) already has an arrival successor in the key-introduction
+    # record, and migrated records are never re-signed (inner signatures
+    # ride verbatim). Ruled disposition:
+    # design:arrival-break-slice4-migration-sidecar §F.
     """Re-anchor a store's attestation layer under the current canonical
     encoding (SPEC §8.1: canon migrations re-anchor, never grandfather).
 
@@ -1069,6 +1232,11 @@ def _absorb_genesis_mode(
     dry_run: bool,
     as_json: bool,
 ) -> int:
+    # slice-5: absorb-genesis dissolves into the sidecar's mint. It is not
+    # a ceremony the sidecar offers; it is a thing the sidecar's genesis
+    # makes unnecessary — under arrival there are no genesisless stores,
+    # so nothing calls this path. Ruled disposition:
+    # design:arrival-break-slice4-migration-sidecar §F.
     """Genesis mode — open the store's lineage (SPEC §9.2 era opening, S1).
 
     Unchanged from the original ``absorb`` behavior; extracted so the bimodal
@@ -1776,6 +1944,8 @@ def _dispatch_store(
         return _run_verify(argv[1:], vertex_path=vertex_path)
     if argv and argv[0] == "rebirth":
         return _run_rebirth(argv[1:], vertex_path=vertex_path)
+    if argv and argv[0] == "migrate":
+        return _run_migrate(argv[1:], vertex_path=vertex_path)
     if argv and argv[0] == "reanchor":
         return _run_reanchor(argv[1:], vertex_path=vertex_path)
     if argv and argv[0] == "export":
@@ -1877,6 +2047,9 @@ def _dispatch_store(
             "'loops store verify [target]' checks the tick hash chain; "
             "'loops store rebirth <source> <target>' replays a store "
             "through a transform with a verifiable receipt; "
+            "'loops store migrate <source> --vertex <target>' migrates a "
+            "legacy store into a fresh arrival lineage with a signed "
+            "migration report; "
             "'loops store reanchor <vertex>' recomputes chain hashes; "
             "'loops store absorb <vertex>' opens the declaration lineage "
             "with a signed genesis event; "

@@ -1,8 +1,5 @@
 # Sol integration review — slice 4 (migration sidecar), round 1
 
-DRAFT SKELETON — finalize after WP4/WP5 merge: fill the diff spec's commit count, the
-WP4/WP5 rows, and the unverified-fixes table's tail before invoking.
-
 ## 1. Anchor
 
 Repo: /Users/kaygee/Code/loops, branch main.
@@ -16,7 +13,7 @@ rules: Rule 4 row (`migrate`), Rule 7 (`migrate`), Rule 11 `_LIB_LAYER`.
 ## 2. Design contract (quote-verbatim set)
 
 `design:arrival-break-slice4-migration-sidecar` (ratified 2026-08-30, Kyle; six rulings
-M-1..M-6) plus amendments #1 and #2 (same topic, later fold entries). NON-NEGOTIABLE
+M-1..M-6) plus amendments #1-#3 (same topic, later fold entries: #1 publish asserts location+backend only; #2 append honors RecordDraft.signature; #3 the arrival custody domain). NON-NEGOTIABLE
 lines for this review:
 
 - GF-3: mixed-observer batch lines REFUSE at inventory, before any target bytes; the
@@ -90,9 +87,9 @@ possible):
 
 ## 4. Known-open items (do not re-report; verify containment only)
 
-- finding/s4wp3-migrate-undeclared-ckdl-bypasses-lang: OPEN by ruling — interim =
-  declared dep + fenced single call site; the lang store-clause-query dissolution is
-  slice-tail work. Verify the fence holds (one ckdl call site), nothing more.
+- finding/s4wp3-migrate-undeclared-ckdl-bypasses-lang: CLOSED by WP5's dissolution
+  (lang owns effective_store_clause; migrate's ckdl import gone). Verify the closure
+  holds (`grep -rn "import ckdl" libs/migrate/src/` empty), nothing more.
 - State-root test residue from pre-conftest runs (~267 journals in the user's real
   heads dir): operator cleanup, out of scope.
 - One transient engine failure at the WP5 post-merge run (2306+1s on immediate
@@ -100,7 +97,7 @@ possible):
   finding; a clean run confirms the flake reading.
 - lang counts differ by env profile (682 worktree / 706+3s main checkout) — known,
   not a finding unless the FAIL SET is nonempty.
-- Rule 4 cannot see third-party imports (ratchet idea parked for tests/architecture).
+- Rule 19 (imports ⊆ declared deps) landed in WP5 — the former Rule-4 gap is closed; its allowlist is shrink-forcing with exactly two entries.
 
 ## 5. Verdict format
 

@@ -892,6 +892,53 @@ def test_resume_refuses_when_target_record_differs_only_in_authored_at(tmp_path:
     assert exc_info.value.target_path == str(target_path)
 
 
+def test_resume_refuses_when_target_filename_does_not_match_lineage(tmp_path: Path) -> None:
+    """F3: Resuming against a target whose filename is not <genesis-lineage>.arrival
+    (e.g. friendly-name target like 'friendly.arrival') raises TargetMismatchOnResumeRefused
+    naming both filename and lineage."""
+    store_dir = tmp_path / "data"
+    store_dir.mkdir(parents=True, exist_ok=True)
+    cust = CustodianFixture(tmp_path, "alice")
+    source_path = build_synthetic_jsonl(store_dir / "legacy.jsonl")
+    v_path = _make_vertex_file(
+        tmp_path,
+        custodian_name=cust.name,
+        custodian_key=cust.public,
+        other_observers=[],
+    )
+
+    t_res = transform(source_path, parse_vertex_file(v_path), signer=cust.signer)
+    lineage = mint_lineage()
+    target_path = store_dir / "friendly.arrival"
+
+    registry = BackendRegistry.with_builtin_backends()
+    desc = StoreDescriptor(backend="file", location=str(target_path), lineage=lineage)
+    ledger, _ = registry.open(desc)
+    ledger.mint(
+        {
+            "observer": t_res.genesis.custodian,
+            "signer": cust.signer,
+            "key": t_res.genesis.key,
+            "lineage": lineage,
+            "at": 0.0,
+        }
+    )
+
+    with pytest.raises(TargetMismatchOnResumeRefused) as exc_info:
+        run_migration(
+            source_path=source_path,
+            vertex_path=v_path,
+            store_dir=store_dir,
+            signer=cust.signer,
+            resume_target=target_path,
+        )
+
+    msg = str(exc_info.value)
+    assert "friendly.arrival" in msg
+    assert lineage in msg
+    assert exc_info.value.target_path == str(target_path)
+
+
 # ---------------------------------------------------------------------------
 # Test 12: F3 — Mallory foreign genesis rejected on resume
 # ---------------------------------------------------------------------------

@@ -781,6 +781,16 @@ def run_migration(
 
         lineage = current_head.lineage
 
+        expected_filename = f"{lineage}.arrival"
+        if target_path.name != expected_filename:
+            raise TargetMismatchOnResumeRefused(
+                f"Resume target filename {target_path.name!r} does not match genesis lineage {lineage!r} "
+                f"(expected {expected_filename!r}). "
+                "Advisory: target arrival stores must be lineage-named (<lineage>.arrival per M-2); "
+                "rename target file or start a fresh migration.",
+                target_path=str(target_path),
+            )
+
         # Scan existing records through current_head and diff prefix against expected drafts
         try:
             scanned_records = list(ledger.scan(through=current_head))

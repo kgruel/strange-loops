@@ -17,9 +17,14 @@ dependencies = [
 engine = { workspace = true }
 store = { workspace = true }
 lang = { workspace = true }
+custody = { workspace = true }
+sign = { workspace = true }
 
 [dependency-groups]
 dev = [
+    # Test-only: real Ed25519 material and domain constants for migration verification
+    "custody",
+    "sign",
     "hypothesis>=6.100",
     "pytest>=8.0",
     "pytest-cov>=6.0",

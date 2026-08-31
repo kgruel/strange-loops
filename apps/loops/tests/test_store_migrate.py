@@ -17,7 +17,7 @@ from hashlib import sha256
 from pathlib import Path
 
 import pytest
-from custody.signing import arrival_verifier_for, fact_verifier_for
+from custody import arrival_verifier_for, fact_verifier_for
 from engine.arrival import ArrivalLog, content_commitment
 from lang import parse_vertex_file
 from sign import ed25519
@@ -271,3 +271,14 @@ loops {
                 vertex_path=None,
             )
         assert excinfo.value.code == 2
+
+    def test_migrate_refuses_unparseable_vertex(self, tmp_path, capsys):
+        vpath = tmp_path / "broken.vertex"
+        vpath.write_text("invalid { syntax\n", encoding="utf-8")
+        source = _write_jsonl(tmp_path / "legacy.jsonl", [_FACT_SIGNED])
+
+        rc = _run_migrate([str(source), "--vertex", str(vpath)], vertex_path=None)
+        assert rc == 2
+        stderr = capsys.readouterr().err
+        assert "the vertex file cannot be parsed" in stderr
+        assert list(tmp_path.glob("*.arrival")) == []

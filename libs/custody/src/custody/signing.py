@@ -101,25 +101,10 @@ def observer_keys_dir_for(vertex_path: Path, observer: str) -> Path:
     return keys_dir_for(vertex_path) / observer
 
 
-def fact_signer_for(vertex_path: Path):
-    """Build the per-observer fact signer for a vertex, or None when the
-    vertex has no key material at all.
-
-    Returns a callable (observer str, content digest str) -> signature
-    str | None, matching engine's fact_signer contract
-    (design/fact-signing-per-observer-keys). Key resolution per observer:
-
-    1. ``keys/<observer>/ed25519.key`` — the per-observer layout;
-    2. flat ``keys/ed25519.key`` — ONLY for the self-observer (the
-       vertex's own name), delta-2 back-compat;
-    3. otherwise None — that observer's facts append unsigned (honest
-       per-observer pre-signature era).
-
-    Keypairs are loaded lazily and cached per observer for the life of
-    the signer (one CLI invocation). Returns None (no signer at all)
-    when the keys/ directory doesn't exist — structurally identical to
-    the pre-signature era, same posture as tick_signer_for.
-    """
+def _scoped_signer_for(
+    vertex_path: Path, domain: str
+) -> Callable[[str, str], str | None] | None:
+    """Build a per-observer signer under an explicit domain."""
     keys_root = keys_dir_for(vertex_path)
     if not keys_root.exists():
         return None
@@ -151,12 +136,34 @@ def fact_signer_for(vertex_path: Path):
         keypair = _keypair(observer)
         if keypair is None:
             return None
-        return ed25519.sign(keypair, digest.encode(), domain=FACT_DOMAIN)
+        return ed25519.sign(keypair, digest.encode(), domain=domain)
 
     return signer
 
 
-def arrival_signer_for(vertex_path: Path):
+def fact_signer_for(vertex_path: Path) -> Callable[[str, str], str | None] | None:
+    """Build the per-observer fact signer for a vertex, or None when the
+    vertex has no key material at all.
+
+    Returns a callable (observer str, content digest str) -> signature
+    str | None, matching engine's fact_signer contract
+    (design/fact-signing-per-observer-keys). Key resolution per observer:
+
+    1. ``keys/<observer>/ed25519.key`` — the per-observer layout;
+    2. flat ``keys/ed25519.key`` — ONLY for the self-observer (the
+       vertex's own name), delta-2 back-compat;
+    3. otherwise None — that observer's facts append unsigned (honest
+       per-observer pre-signature era).
+
+    Keypairs are loaded lazily and cached per observer for the life of
+    the signer (one CLI invocation). Returns None (no signer at all)
+    when the keys/ directory doesn't exist — structurally identical to
+    the pre-signature era, same posture as tick_signer_for.
+    """
+    return _scoped_signer_for(vertex_path, domain=FACT_DOMAIN)
+
+
+def arrival_signer_for(vertex_path: Path) -> Callable[[str, str], str | None] | None:
     """Build the per-observer arrival attestation signer for a vertex, or None
     when the vertex has no key material at all.
 
@@ -171,36 +178,32 @@ def arrival_signer_for(vertex_path: Path):
 
     Signatures mint under ARRIVAL_DOMAIN (loops-arrival-v1).
     """
-    keys_root = keys_dir_for(vertex_path)
-    if not keys_root.exists():
-        return None
+    return _scoped_signer_for(vertex_path, domain=ARRIVAL_DOMAIN)
+
+
+def _scoped_verifier_for(
+    vertex_path: Path, domain: str
+) -> tuple[Callable[[str, str, str], bool] | None, dict[str, str]]:
+    """Build an observer verifier under an explicit domain."""
+    keys = declared_observer_keys(vertex_path)
+    if not keys:
+        return None, keys
     from sign import ed25519
 
-    self_observer = vertex_path.stem
-    cache: dict[str, ed25519.Keypair | None] = {}
+    publics = {}
+    for name, b64 in keys.items():
+        try:
+            publics[name] = ed25519.public_key_from_b64(b64)
+        except ValueError:
+            continue  # malformed declared key: cannot verify against it
 
-    def _keypair(observer: str):
-        if not observer or ".." in observer.split("/"):
-            return None
-        if observer in cache:
-            return cache[observer]
-        key_dir = keys_root / observer
-        if not (key_dir / _KEY_FILE).exists():
-            if observer == self_observer and (keys_root / _KEY_FILE).exists():
-                key_dir = keys_root
-            else:
-                cache[observer] = None
-                return None
-        cache[observer] = ed25519.load_or_generate(key_dir)
-        return cache[observer]
+    def verifier(observer: str, signature: str, digest: str) -> bool:
+        pub = publics.get(observer)
+        if pub is None:
+            return False
+        return ed25519.verify(pub, signature, digest.encode(), domain=domain)
 
-    def signer(observer: str, digest: str) -> str | None:
-        keypair = _keypair(observer)
-        if keypair is None:
-            return None
-        return ed25519.sign(keypair, digest.encode(), domain=ARRIVAL_DOMAIN)
-
-    return signer
+    return verifier, keys
 
 
 def fact_verifier_for(
@@ -218,25 +221,7 @@ def fact_verifier_for(
     verify reports as a break — the registry is the trust anchor).
     None when the registry declares no keys.
     """
-    keys = declared_observer_keys(vertex_path)
-    if not keys:
-        return None, keys
-    from sign import ed25519
-
-    publics = {}
-    for name, b64 in keys.items():
-        try:
-            publics[name] = ed25519.public_key_from_b64(b64)
-        except ValueError:
-            continue  # malformed declared key: cannot verify against it
-
-    def verifier(observer: str, signature: str, digest: str) -> bool:
-        pub = publics.get(observer)
-        if pub is None:
-            return False
-        return ed25519.verify(pub, signature, digest.encode(), domain=FACT_DOMAIN)
-
-    return verifier, keys
+    return _scoped_verifier_for(vertex_path, domain=FACT_DOMAIN)
 
 
 def arrival_verifier_for(
@@ -249,25 +234,7 @@ def arrival_verifier_for(
     THAT observer's declared key EXACTLY under ARRIVAL_DOMAIN.
     None when the registry declares no keys.
     """
-    keys = declared_observer_keys(vertex_path)
-    if not keys:
-        return None, keys
-    from sign import ed25519
-
-    publics = {}
-    for name, b64 in keys.items():
-        try:
-            publics[name] = ed25519.public_key_from_b64(b64)
-        except ValueError:
-            continue  # malformed declared key: cannot verify against it
-
-    def verifier(observer: str, signature: str, digest: str) -> bool:
-        pub = publics.get(observer)
-        if pub is None:
-            return False
-        return ed25519.verify(pub, signature, digest.encode(), domain=ARRIVAL_DOMAIN)
-
-    return verifier, keys
+    return _scoped_verifier_for(vertex_path, domain=ARRIVAL_DOMAIN)
 
 
 def declared_observer_keys(vertex_path: Path) -> dict[str, str]:

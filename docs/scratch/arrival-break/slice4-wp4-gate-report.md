@@ -904,3 +904,160 @@ single-sourcing of the string.
 - I did not run the real CI workflow, only reproduced its per-package install form
   locally via `UV_PROJECT_ENVIRONMENT`. The failure mode is a module-resolution one, so
   the local reproduction should be faithful, but a CI run is the only proof.
+
+---
+
+# Round 3 — fix round 2 re-check (closing)
+
+**Range**: `e1edaa24` (migrate dev deps), `b226adce` (compose by domain), `042f9504`
+(package-root exports), `080ff470` (guard honesty + dead disjunct + pyproject ordering),
+merged into `slice4/wp4-gate` at `4835e459`.
+
+## VERDICT: **PASS** — WP4's gate closes
+
+All four items land, every round-2 finding is fixed, and no regression appeared in the
+behaviour the earlier rounds established. Nothing new found.
+
+## Re-check 1 — B3, with my own fresh-env method ✅ FIXED, and more completely than asked
+
+`libs/migrate/pyproject.toml` gains `custody` and `sign` in the **dev** group (correct
+placement — they are test-only; src must never import them under Rule 11) plus both in
+`[tool.uv.sources]`, with a comment naming why they are there.
+
+Re-running the exact probe that produced the finding — a fresh environment via
+`UV_PROJECT_ENVIRONMENT`, which is what CI's per-package matrix gets:
+
+    uv run --package migrate pytest libs/migrate/tests -q
+    Creating virtual environment at: .tmp/freshvenv
+    Installed 26 packages in 17ms
+    60 passed in 1.49s
+
+Both causes are gone: the `custody` one this arc introduced **and** the pre-existing
+`sign` one that predated `e1de3a4b`. The migrate CI job goes from failing collection to
+green, which is a better outcome than the finding strictly required — I had flagged
+`sign` as out-of-fence and recommended taking it anyway; the worker took it.
+
+Rule 11 still clean at the source:
+
+    grep -rnE "^\s*(from|import)\s+(custody|sign)\b" libs/migrate/src/
+    → NONE — src imports neither custody nor sign
+
+## Re-check 2 — F2, behaviour-preserving composition ✅
+
+**The shape.** `_scoped_signer_for(vertex_path, domain)` and
+`_scoped_verifier_for(vertex_path, domain)` now hold the one copy of each resolution
+path; `fact_signer_for`, `arrival_signer_for`, `fact_verifier_for` and
+`arrival_verifier_for` are one-line wrappers that pass their domain constant. Four
+public names, two implementations — the duplication N5 named is gone rather than
+documented, and there is no longer a second resolver that *can* drift.
+
+**The comments came with it.** This was the specific erosion I flagged, so I checked the
+shared body rather than trusting the diff summary. `_scoped_signer_for` carries all
+three rationale comments the arrival copy had dropped:
+
+    # An empty observer must never sign: ``keys_root / ""`` collapses
+    # to the flat layout, which would mint the VERTEX key's authorship
+    # claim for an anonymous writer. Same guard for path traversal —
+    # an observer name is a key, not a path expression.
+    ...
+                key_dir = keys_root  # flat delta-2 layout = self-observer
+    ...
+        cache[observer] = ed25519.load_or_generate(key_dir)  # exists → pure load
+
+and `_scoped_verifier_for` keeps the malformed-declared-key note. The full per-observer
+resolution contracts stay on the public wrappers, where a caller reads them.
+
+**Behaviour unchanged at HEAD.** I re-ran the round-2 three-class live probe, rebuilding
+the two-observer store (flat self-key alice, `keys/bob/`) so a key-introduction record
+would actually be minted:
+
+    package-root import of the arrival pair: OK | 'loops-arrival-v1' 'loops-fact-v1'
+
+    -- LEDGER RECORDS --
+      @0 kind=genesis    observer=alice  arrival=True   fact=False
+      @1 kind=key        observer=alice  arrival=True   fact=False
+    -- MIGRATION REPORT --
+      arrival=True  fact=False
+
+Identical to round 2 in every cell. Domain separation survived the refactor across all
+three attestation classes, both directions.
+
+## Re-check 3 — F4, guard honesty ✅ FIXED
+
+The bare `except Exception: pre_ast = None` is replaced by `except ParseError` returning
+a typed refusal, and the unreachable second disjunct is deleted — the condition is now
+just `canonical_mode(pre_ast.store) == "arrival"`. (`ParseError` is a real `lang` export,
+listed in its `__all__`, not an accidental re-export.)
+
+Re-running my round-2 probe, which then produced a three-frame `lang.errors.ParseError`
+traceback at exit 1:
+
+    EXIT=2
+    ✗ broken: the vertex file cannot be parsed: broken.vertex:1: Unexpected token, expected node
+    Traceback count: 0
+    artifacts: 0 | journals: 0
+
+The guard no longer fails open — it refuses, at the CLI, in the module's own refusal
+idiom, naming the parse error. Exit 2 rather than the previous exit 1, which is right:
+this is a refusal, not a crash.
+
+Regression sanity on the two behaviours the refactor touched around:
+
+    keys/bob, no self-key → EXIT=2, clean refusal, 0 tracebacks
+    second migrate        → EXIT=2, "already on an arrival lineage (…) — re-migration
+                            would orphan it; deliberate re-migration is a slice-6 ceremony"
+
+## Re-check 4 — break/restore, hand-verified ✅
+
+The mutation that tests whether the composition actually preserved domain separation is
+making the shared resolver ignore its `domain` argument:
+
+    baseline: 28 passed
+    BREAK: _scoped_signer_for → ed25519.sign(..., domain=FACT_DOMAIN)   [ignores `domain`]
+      FAILED custody …::TestArrivalSigner::test_signs_under_arrival_domain_and_roundtrips
+      FAILED custody …::TestArrivalSigner::test_fact_and_arrival_mutually_refuse
+      FAILED apps …::test_migrate_through_cli_mints_lineage_and_updates_descriptor
+      3 failed, 25 passed
+    RESTORE: git diff --stat EMPTY; 28 passed
+
+Three tests at two layers — the custody source pin and the apps e2e pin — so the
+composition is covered from both ends, not just where it was written.
+
+## Re-check 5 — suites and scope ✅
+
+    uv run pytest apps/loops -q                                  → 2539 passed, 1 xfailed
+    uv run pytest libs/custody libs/migrate tests/architecture -q → 178 passed
+
+Apps goes 2538 → **2539**, delta +1, and the one is
+`test_migrate_refuses_unparseable_vertex` (that module now runs 9). The 178 is unchanged
+because F2 is a pure refactor and F3 adds exports without new cases — libs/custody 19,
+libs/migrate 60, tests/architecture 99, same as round 2.
+
+State root byte-identical across all three suites (268 entries, same listing hash),
+measured per-suite. One measurement note: invoking apps and libs test dirs in a *single*
+pytest run raises `ImportPathMismatchError` on the two `conftest.py` basenames — a
+rootdir artifact of my combined command, not a defect; each suite is clean on its own,
+which is how CI and the gate run them.
+
+**Scope**: exactly four commits, six files, all inside the widened fence.
+
+    libs/migrate/pyproject.toml              (e1edaa24)
+    libs/custody/src/custody/signing.py      (b226adce)
+    libs/custody/src/custody/__init__.py     (042f9504)
+    apps/loops/src/loops/commands/store.py   (042f9504, 080ff470)
+    apps/loops/tests/test_store_migrate.py   (042f9504, 080ff470)
+    apps/loops/pyproject.toml                (080ff470)
+
+Gate worktree clean but `.tmp/`.
+
+## Round-2 findings: disposition
+
+| Finding | Status | Fixing commit | Verified by |
+|---|---|---|---|
+| `s4wp4-migrate-tests-undeclared-custody` (B3) | **fixed** | `e1edaa24` | fresh-env `uv run --package migrate` → 60 passed; both causes gone |
+| N5 (arrival pair duplicated) | fixed | `b226adce` | composition read; guard comments confirmed carried; domain-ignore break/restore |
+| N6 (pair not exported) | fixed | `042f9504` | `from custody import arrival_verifier_for` exercised in my own probe |
+| N7 (bare except fails open; dead disjunct) | fixed | `080ff470` | unparseable-vertex probe → typed refusal, exit 2, no traceback |
+| F6 ordering nit | fixed | `080ff470` | `…, "store", "migrate", "painted"` |
+
+All eleven WP4 findings across three rounds are now closed. Nothing is left open.

@@ -449,3 +449,178 @@ worker defect; the brief should carry `--directory` for lang and engine.
   the primary worktree was out of this gate's fence).
 - The 5-precondition enumeration was reconciled against `sidecar.py`'s module docstring and
   the executing code; I did not cross-check it against the proposal's §H.2 text.
+
+---
+---
+
+# Round 2 — fix-round re-check: **PASS**
+
+**Range:** `7b7c9ff1..8ce590a9` (5 commits), merged into `slice4/wp5-gate` at `fa436aed`
+`844d2994` F1 · `7af93238` F2 · `4a127827` F3 · `b3ba0bae` F4 · `8ce590a9` F5
+
+**All six blocking findings are fixed and independently re-verified.** Three small
+non-blocking items carry forward, one of them a *new* inaccuracy introduced by the truth
+pass itself. None holds the gate; all three should ride along with whatever touches these
+files next.
+
+## Scope
+
+11 files, all inside the fence (`apps/loops/pyproject.toml` and `libs/store/pyproject.toml`
+are new to the fence and are exactly the two files the round-1 prescription named). Exactly
+5 commits. `git status --short` clean.
+
+## Suites — all re-run, with the corrected env forms
+
+| Suite | Form | Result |
+|---|---|---|
+| engine | `--directory libs/engine`, basetemp outside worktree | 2306 passed, 1 skipped |
+| lang | `--directory libs/lang`, basetemp outside worktree | 682 passed |
+| apps (workspace root) | `uv run pytest apps/loops -q` | 2539 passed, 1 xfailed |
+| migrate + custody + architecture | workspace root | 181 passed |
+| **store — FRESH ENV** | `UV_PROJECT_ENVIRONMENT=<new> --directory libs/store` | 180 passed |
+| **migrate — FRESH ENV** | `UV_PROJECT_ENVIRONMENT=<new> --directory libs/migrate` | 61 passed |
+| **apps — FRESH ENV** | `UV_PROJECT_ENVIRONMENT=<new> --directory apps/loops tests/test_store_migrate.py` | `Installed 25 packages` → 9 passed |
+
+The three fresh-env runs are the ones that matter for F2: they resolve each package's
+declared dependencies from scratch rather than inheriting a workspace `.venv` that already
+happened to contain `atoms`, `lang`, and `rfc8785`. The apps run installing 25 packages into
+an empty environment and then passing `test_store_migrate.py` is direct evidence that the
+new `rfc8785` dev declaration actually resolves.
+
+## B3 — the ratchet now ratchets (**inversion confirmed**)
+
+`test_rule_19_allowlist_is_minimal` gained a third staleness cause: an entry whose module is
+now *declared* is redundant and fails. I re-ran my own round-1 probe in inverted form, twice:
+
+```
+re-add ("apps/loops/tests/test_store_migrate.py", "rfc8785")
+→ FAILED: 'rfc8785' is declared in loops/pyproject.toml (allowlist entry is redundant and must be removed)
+
+re-add ("libs/store/tests/strategies.py", "atoms")
+→ FAILED: 'atoms' is declared in store/pyproject.toml (allowlist entry is redundant and must be removed)
+```
+
+The exact probe that stayed green in round 1 now goes red. Both round-1 causes (file gone,
+module no longer imported) are retained. The two surviving entries are **not** falsely
+flagged — the redundancy check passes `include_dev=is_test`, so a `src/` entry is measured
+against production dependencies only, which is why `hypothesis`-in-a-dev-group correctly
+still needs its exemption. Baseline: 2 passed.
+
+## B4 — declarations landed, allowlist 10 → 2
+
+`_ALLOWLIST` now holds exactly the two `testing/strategies.py` rows, both with their
+`numpy.testing`-pattern rationale intact. `apps/loops` dev gained `"rfc8785>=0.1.4"`;
+`libs/store` gained `atoms`/`lang` as workspace sources plus `"atoms"`, `"lang"` in the dev
+group, with runtime `dependencies` left as `["engine", "python-ulid>=3.0"]` — the Rule 4 row
+is unchanged, as prescribed.
+
+## B1 — residue swept
+
+`grep` over `sidecar.py` for `block_comment_spans`, `regex_matches`, `import re`,
+`re.finditer`, `re.sub`, `re.MULTILINE` is **empty**. The `import re` went with it, which is
+the trail-clearing the round-1 finding asked for. `edit_vertex_store_clause` now carries
+three guards and no dead disjuncts: `vertex_reparse`, `vertex_store_duplicate_nodes`,
+`vertex_store_ineffective`. The `and store_span.count == 0` welds are gone because the
+branches they neutered are gone.
+
+**Mutation proof re-run against the swept code**: patching the query to return the first
+`^[ \t]*store\b.*$` line still turns the comment-shadow editor test red; restore → green.
+
+## B2 — `StoreClauseSpan` on a diet
+
+Verified at runtime, not by reading the diff:
+
+```
+type: <class 'lang.ast.StoreClauseSpan'>
+public attrs: ['count', 'span']
+has line: False   has raw: False
+repr: StoreClauseSpan(span=(9, 26), count=1)
+```
+
+**And the docstring is now honest about N2** — both `ast.py` and `loader.py` state that
+`span` covers the whole line and that "any same-line comments trailing the store clause are
+within this span and will be replaced upon rewrite." That converts round-1's silent
+data-loss surprise into a documented, discoverable property. Good fix; better than the
+minimum I asked for.
+
+**Behaviour preserved through the diet**: I re-ran the full 17-input probe set against the
+slimmed API. Every result is byte-identical to round 1 — same located slices, same
+refuse-shaped `span=None` for duplicates, `store=`-property, and quoted-node-name.
+
+## B5 — the four as-built claims, re-checked against source
+
+| Claim | Now reads | Code | |
+|---|---|---|---|
+| staging path | `<store_dir>/<lineage>.arrival`, "there is no `.staging.arrival` suffix" | `sidecar.py:762`, `:633` | ✓ |
+| report filename | `<store_dir>/<lineage>.migration-report.json` | `sidecar.py:954` | ✓ |
+| the five preconditions | `target_verify_full`, `source_unchanged`, `equivalence_rerun`, `inventory_equality`, `journal_first_entry_mint` | matches the condition strings verbatim | ✓ |
+| signed vs verified | "verify that the injected signer returned a valid signature", `verify_migration_report` called out as a *separate* auditor entry point | `sidecar.py:1004` | ✓ |
+| guard's layer | "an apps-layer pre-flight in `loops/commands/store.py:819-821`", and F6 renamed to "5 code-level publish preconditions … and apps-layer already-migrated guard" | `store.py:819-821` | ✓ |
+
+All three documents now agree with each other and with the code. The CLAUDE.md went further
+than asked and corrected a claim I had not flagged: the `verify_migration_report` example
+signature, which had invented a `verifier=` kwarg and a `MigrationReportVerification` return.
+Checked against `sidecar.py:528-534` — `(report_path, public_key, *, verify=None,
+target_path=None) -> bool` — the new example is correct.
+
+## B6 — CLAUDE.md ruled contents present
+
+Quarantine Rule 1 now carries the ratchet citation (`libs/migrate/tests/test_quarantine.py`),
+its slice-5 dissolution, "migrate imports no legacy modules and has no write path into a live
+store" (the corrected phrasing — the stale "nothing imports migrate" was *not* reintroduced),
+and the no-`.staging`-suffix correction. Injection Rule 2 now states that `migrate/src` never
+imports `custody` or `sign` and that both live in the dev group for tests — verified true:
+`libs/migrate/pyproject.toml:24-27` declares both under a "Test-only" comment, and no
+`custody`/`sign` import exists under `src/`. The abstraction chain was also corrected to note
+that `apps/loops` imports `migrate.refusals`.
+
+---
+
+## Carry-forward (non-blocking, all one-liners)
+
+**C1 — a new inaccuracy introduced by the truth pass.** CLAUDE.md Rule 1 now says "Legacy
+source readers in `legacy_source.py` and `inventory.py` are frozen copies." Those are the
+two modules that are **not** frozen copies. Per their own first docstring lines, the frozen
+modules are:
+
+```
+legacy_ids.py     "Legacy ID migration and era knowledge — frozen transform primitives."
+legacy_jsonl.py   "Legacy JSONL reader — frozen decode surface for canonical JSONL stores."
+legacy_sqlite.py  "Legacy SQLite reader — frozen read spine for canonical SQLite stores."
+legacy_source.py  "Validated row-stream layer for pre-Arrival legacy stores."      ← not frozen
+inventory.py      "Source inventory pass for pre-Arrival legacy stores."           ← not frozen
+```
+
+A reader would come away believing the wrong two files are untouchable. Nothing behavioural
+depends on it — `test_quarantine.py` walks *all* of `src/` — so this does not hold the gate,
+but it is the same claim-accuracy class as B5 and should be corrected: name
+`legacy_jsonl.py`, `legacy_sqlite.py`, and `legacy_ids.py`.
+
+Related, lower stakes: CLAUDE.md now cites `loops/commands/store.py:819-821` by line number.
+Accurate today, guaranteed to drift. A symbol-level reference would age better.
+
+**C2 — ruff is at 8, not back to base 7.** The F5 commit removed the duplicate import, which
+cleared the `F811`; the isort `I001` at line 3 is pre-existing and unchanged. But one new
+`E501` survives:
+
+```
+BASE  7 errors   I001:3 · E501 at 471, 722, 762, 789, 829, 946
+HEAD  8 errors   I001:3 · E501 at 471, 722, 762, 789, 829, 963  +  E501:866 (107 > 100)
+```
+
+Line 866 is the comment-shadow test's `write_text` f-string. Correcting the record: the fix
+round did not restore parity, it went 9 → 8.
+
+**C3 — one retired label survives in a test assertion.** `test_sidecar.py:858` still reads
+`condition in {"vertex_store_in_comment", "vertex_store_ineffective"}`, but
+`vertex_store_in_comment` no longer exists in production — it is residue of the detector B1
+removed. I narrowed it to `== "vertex_store_ineffective"` and the test still passes, so the
+set membership is buying nothing except a weaker assertion. Same rule that produced B1;
+worth sweeping with it.
+
+## Honest unverified (round 2)
+
+- No mutation campaign beyond the one ruled proof, re-run.
+- HTML checked as text; not rendered.
+- The five precondition *names* were reconciled against the code's `condition=` strings and
+  the module docstring; still not cross-checked against the proposal's §H.2 prose.

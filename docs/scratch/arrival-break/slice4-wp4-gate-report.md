@@ -459,3 +459,448 @@ oversight.
   user's registered vertices and the operation rewrites a live `.vertex`. The
   dispatch chain to `vertex_path` is read from source (`app.py:461-463`,
   `_vertex_first`, `views/store.py:38`) and is unambiguous.
+
+---
+
+# Round 2 — fix round 1 re-check
+
+**Range**: `44a14cea` (custody: arrival signing domain + verifier) and `df17edd3`
+(CLI F1–F8), merged into `slice4/wp4-gate` at `c4743d58`.
+
+## VERDICT: **FIX ROUND** — all five open findings verifiably FIXED, one NEW blocking regression
+
+Every one of the five open WP4 findings is fixed, and I verified each by re-running my
+own round-1 probe rather than by reading the tests. The new blocking item is a defect
+this round *introduced*, not a failure of any of the five: the F3 dissolution made
+`libs/migrate`'s tests import `custody` without declaring it, so migrate's test suite
+is no longer independently installable.
+
+### N3 withdrawn
+
+The impl report exists — committed on `main` at `a8d89d45`
+(`docs/scratch/arrival-break/s4-wp4-impl-report.md`); the impl filed to the main
+checkout, not the slice branch. I looked only on the branch and in the worker's
+worktree. My round-1 N3 was wrong; the arc's paper trail is complete.
+
+## Suites and reconciliation ✅
+
+    uv run pytest apps/loops -q                                  → 2538 passed, 1 xfailed
+    uv run pytest libs/custody libs/migrate tests/architecture -q → 178 passed
+
+Base was 2533 + 1 xfailed; delta is **+5**, and the five are exactly the new cases in
+`test_store_migrate.py` (positional/flag agreeing, positional/flag disagreeing, required
+flag, keys/bob capability, already-migrated). That module now runs 8. Split of the 178:
+libs/custody 19 (was 13, +6 arrival cases), libs/migrate 60, tests/architecture 99.
+
+Rule checks the arbiter asked for, both confirmed:
+
+- **No migrate-src → custody import.** `grep -rn custody libs/migrate/src/` returns one
+  hit and it is prose in `transform.py:30`'s docstring, not an import. Rule 11 clean.
+- **Rule 4's migrate row unchanged** — still `{engine, lang}`. Neither rule file was
+  touched by either commit (`git diff --stat e1de3a4b..df17edd3 -- tests/` is empty).
+
+Both rules scope to `root/src/` only (`_src_py_files`, `_helpers.py:152-157`), so the
+worker's F3(3) arm — dissolving migrate's test-local `ARRIVAL_DOMAIN` against the
+product constant — is legal under the rules as written. That reading is correct. What
+it missed is the packaging consequence, below.
+
+## Re-check 1 — my B1 probe ✅ FIXED
+
+Same probe as round 1, two throwaway vertices:
+
+    positional aaa + --vertex bbb  → rc 2
+      ✗ store migrate: positional vertex target '…/a/aaa.vertex' conflicts with
+        --vertex '…/b/bbb.vertex' — targets resolve to different vertices
+        (aaa.vertex != bbb.vertex)
+      aaa store clause: 'store "./legacy.jsonl"'   ← unchanged
+      bbb store clause: 'store "./legacy.jsonl"'   ← unchanged
+      *.arrival in a/: []   in b/: []
+
+    positional aaa + --vertex aaa  → rc 0, aaa republished onto the minted lineage
+
+The refusal names both spellings and the resolved basenames. Nothing migrated, nothing
+created. Agreement proceeds. Exactly the ruled behaviour.
+
+Minor ordering note (not a finding): when the `--vertex` target does not exist,
+`_resolve_target` raises `FileNotFoundError` before the conflict check can run, so the
+user sees "ghost.vertex does not exist" rather than the conflict message. That is the
+right error and it renders cleanly at exit 1 through the app boundary.
+
+## Re-check 2 — reviewer's B2, `--vertex` required ✅ FIXED
+
+    loops store migrate <src>          (no flag)
+    EXIT=2
+    usage: loops store migrate [-h] --vertex VERTEX [--rule {identity,ulid-migration}]
+                               [--resume TARGET] [--json] source
+    loops store migrate: error: the following arguments are required: --vertex
+    Traceback count: 0
+
+`--vertex VERTEX` appears unbracketed in the usage line (required), and the misleading
+"default: resolve like other store verbs" help string is gone from the source. Clean
+exit 2, no traceback.
+
+Scoping one thing so it is not mistaken for a regression: `loops store migrate -h`
+prints the *store*-level help, not migrate's own parser help. That is painted's
+intercepted `-h` walk and it behaves identically for `loops store rebirth -h` (verified
+side by side) — pre-existing, documented in `store_args.py`'s module docstring, and not
+introduced here. Migrate's real flag help is reachable through the usage line above.
+
+## Re-check 3 — AMENDMENT #3, the heavy item ✅ FIXED (with a non-blocking structural note)
+
+**The domain constant.** `ARRIVAL_DOMAIN = "loops-arrival-v1"` sits beside
+`TICK_DOMAIN = "loops-tick-v1"` and `FACT_DOMAIN = "loops-fact-v1"`, matching the
+established `loops-<layer>-v1` spelling exactly, and it lives in custody — which is
+where the module header says domain constants belong ("the domain-separation constant
+lives HERE, not in libs/sign … and not in engine"). Correct on both counts.
+
+**Key resolution mirrors the fact pair exactly.** Reading two near-identical functions
+side by side is not proof, so I parsed both and compared their ASTs with the domain
+constant normalised to a placeholder and docstrings stripped:
+
+    fact_signer_for   vs arrival_signer_for   : AST-identical modulo domain -> True
+    fact_verifier_for vs arrival_verifier_for : AST-identical modulo domain -> True
+
+So there is no divergent resolution path today: the per-observer layout, the
+self-observer-only flat fallback, the empty-observer and `..` traversal guards, the
+per-observer cache, and the malformed-declared-key skip are all bit-identical.
+
+**Live probe, both directions.** I migrated a fresh store through the installed CLI and
+checked every attestation the sidecar mints:
+
+    ARRIVAL_DOMAIN = 'loops-arrival-v1' | FACT_DOMAIN = 'loops-fact-v1'
+
+    -- MIGRATION REPORT --
+      arrival_verifier_for -> True     fact_verifier_for -> False
+    -- GENESIS RECORD (kind=genesis, observer=alice) --
+      arrival_verifier_for -> True     fact_verifier_for -> False
+
+This is the exact inversion of my round-1 oracle, which verified the report through
+`fact_verifier_for` and got `True`. It now returns `False`, as required.
+
+I also built a **two-observer** store (flat self-key for alice, `keys/bob/` for bob) so
+a key-introduction record would actually be minted, since the report and genesis alone
+would not have covered that class:
+
+      @0 kind=genesis  observer=alice  arrival=True  fact=False
+      @1 kind=key      observer=alice  arrival=True  fact=False
+
+All three attestation classes — genesis, key-introduction, migration report — now carry
+`loops-arrival-v1`.
+
+**Custody's own mutual-refusal pin, break/restore verified** (re-check 3's second arm):
+
+    baseline: libs/custody 19 passed
+    BREAK: ARRIVAL_DOMAIN = "loops-arrival-v1" → "loops-fact-v1"
+      FAILED test_signing.py::TestArrivalSigner::test_fact_and_arrival_mutually_refuse
+      E  assert fact_verifier("x", arr_sig, digest) is False
+      E  AssertionError: assert True is False
+      1 failed, 18 passed
+    RESTORE: git diff --stat EMPTY; 19 passed
+
+The pin is real and it fires at the source, in both directions (the test asserts all
+four cells of the two-by-two, not just one).
+
+### NON-BLOCKING N5 — the arrival pair is a copy of the fact pair, not a composition
+
+The AST-identity above is what the ruling asked for, and it is also the finding: the
+two pairs are identical because one was **duplicated** from the other. Four functions
+now exist where two parameterised ones would do, and "identical today" is precisely the
+state that decays — the twin-resolvers hazard is not avoided by the copy, it is created
+by it and merely not yet realised.
+
+The evidence that erosion has already begun is in the copies themselves: `fact_signer_for`
+carries the rationale for its guards —
+
+    # An empty observer must never sign: ``keys_root / ""`` collapses
+    # to the flat layout, which would mint the VERTEX key's authorship
+    # claim for an anonymous writer. Same guard for path traversal —
+    # an observer name is a key, not a path expression.
+
+and `# exists → pure load` on the cache line. `arrival_signer_for` has the *code* for
+both guards and **neither comment**. A future reader of the arrival copy sees a guard
+with no reason attached, which is how the copy loses it.
+
+This is the dissolution test: the arrival signer is the fact signer with a different
+domain constant. Prescription — collapse to one private resolver each and keep the four
+public names as thin wrappers, a pure refactor with the existing 19 custody tests plus
+the new mutual-refusal pin as the net:
+
+```python
+def _observer_signer_for(vertex_path: Path, *, domain: str): ...   # today's body
+def fact_signer_for(v):    return _observer_signer_for(v, domain=FACT_DOMAIN)
+def arrival_signer_for(v): return _observer_signer_for(v, domain=ARRIVAL_DOMAIN)
+```
+
+If the duplication is deliberate, the ratchet alternative is to make the mirror
+enumerable rather than hoped-for: a rule test asserting the `*_signer_for` /
+`*_verifier_for` families are AST-identical modulo their domain constant — which is
+the check I ran by hand above and would take about fifteen lines.
+
+### NON-BLOCKING N6 — the new pair is not exported from the package
+
+`fact_signer_for`, `fact_verifier_for`, `tick_signer_for` and `tick_verifier_for` are
+all re-exported from `custody/__init__.py` and listed in `__all__`.
+`arrival_signer_for` and `arrival_verifier_for` are not. The consequence is visible at
+the call site: every other custody use in the app reads `from custody import ...`
+(eleven of them across `emit.py`, `sync.py`, `seal.py`, `add.py`, `store.py`), while the
+new one reads `from custody.signing import arrival_signer_for` (`store.py:829`) — the
+only submodule-reaching custody import in the app. Residue from the new pair, one line
+in `__init__.py` plus one in `__all__`.
+
+## Re-check 4 — my B2 probe ✅ FIXED
+
+Same construction as round 1: `keys/` exists holding only `keys/bob/ed25519.key`, no key
+for the self-observer.
+
+    EXIT=2
+    ✗ alice: no signing key for the vertex's self-observer — migration must sign the
+      custodian genesis and key introductions (loops add <vertex> observer --keygen)
+    Traceback count: 0
+    .arrival / .migration-report.json created: 0
+    head journals written: 0
+    store clause: 'store "./legacy.jsonl"'   ← untouched
+
+The guard now probes capability (`signer(vertex_target.stem, "0"*64) is None`), so the
+message is true of the evidence. The `GenesisRefused` traceback is gone.
+
+## Re-check 5 — F5, F6, F7, F8
+
+**F5 — multi-line refusal ✅.** Same mixed-observer source as round 1:
+
+    stderr line count: 4   (round 1: 1)
+    ✗ alice: Migration refused for source '…/legacy.jsonl' (legacy source defects found).
+    The following source line(s) carry batch rows spanning more than one observer
+    (GF-3 violation), which cannot map to a single Arrival record:
+      line 1: observers 'alice', 'someone-else'
+    Advisory: repair the source line(s) by hand or re-run migration after a ruled re-ceremony.
+
+The structure survives, including the indented enumeration. `_refuse_store` still
+returns 2 and single-line callers render unchanged.
+
+**F6 — pyproject idiom ✅.** `"migrate"` added to `dependencies` and
+`migrate = { workspace = true }` added under `[tool.uv.sources]`, both matching the
+file's existing form exactly. Cosmetic nit only: `migrate` was appended *after*
+`painted`, so the list now reads `…, "store", "painted", "migrate"` where every other
+workspace dep precedes the one external dep. Ordering, nothing more.
+
+**F7 — e2e strength ✅, verified by the mutation my round-1 report said the old
+assertion would miss.** The test now pins `resolve_canonical_path(vpath) == target_path`
+and opens the store through `main([str(vpath), "store", "stats", "--json"])`, asserting
+the fact count.
+
+    baseline: 8 passed
+    BREAK: publish target_location="./WRONG-NOT-THE-TARGET.arrival" (backend still "file")
+      FAILED test_migrate_through_cli_mints_lineage_and_updates_descriptor
+      E  assert PosixPath('…/WRONG-NOT-THE-TARGET.arrival')
+              == PosixPath('…/01M1AV7WG6N74HFMG75DD8V3G2.arrival')
+      1 failed, 7 passed
+    RESTORE: git diff --stat EMPTY; 8 passed
+
+That mutation passed the old backend-name-only assertion. It does not pass now.
+
+**F8 — already-migrated guard ✅.** Second migrate on the vertex republished in
+re-check 1:
+
+    EXIT=2
+    ✗ aaa: already on an arrival lineage (01M1AV4QE15V17H33KN0Q1QAFX.arrival) —
+      re-migration would orphan it; deliberate re-migration is a slice-6 ceremony
+    Traceback count: 0
+    .arrival files in the store dir: 1        store clause: unchanged
+
+### NON-BLOCKING N7 — F8's guard has a bare `except` that fails open, and a dead disjunct
+
+Two things in the seven lines of the F8 pre-flight.
+
+*The bare except.* `parse_vertex_file` is wrapped in `except Exception: pre_ast = None`,
+and `None` skips the guard entirely — a guard that fails open on any parse failure. This
+is the anti-pattern the arc already ruled on and fixed in WP3
+(`s4wp3-report-verifier-retypes-unopenable`: bare `except Exception` in a newly written
+verifier), reappearing in a newly written guard one work package later.
+
+I sized it rather than asserting it is harmless. A `.vertex` that fails to parse but
+whose store clause says `./x.arrival` does bypass the guard — but it then fails again
+inside the sidecar's own `parse_vertex_file` with `lang.errors.ParseError`, exit 1, and
+nothing is persisted (0 artifacts, 0 journals). So the cost is a traceback three frames
+deeper instead of a clean refusal, not a wrong migration. Prescription: drop the
+try/except (a malformed descriptor is an error either way), or catch
+`lang.errors.ParseError` explicitly and route it through `_refuse_store`.
+
+*The dead disjunct.* The condition is
+
+```python
+if canonical_mode(pre_ast.store) == "arrival" or (
+    pre_ast.store_backend is not None and pre_ast.store.suffix == ".arrival"
+):
+```
+
+but `ARRIVAL_SUFFIX == ".arrival"` and `canonical_mode` returns `"arrival"` **exactly**
+when the suffix is `ARRIVAL_SUFFIX` — so the second arm can never be reached when the
+first is False. Verified:
+
+    ARRIVAL_SUFFIX = '.arrival';  canonical_mode("x.arrival") = arrival
+    second disjunct reachable? False
+
+`canonical_mode`'s own docstring warns about this shape: "A family of per-mode booleans
+is how a two-mode architecture creeps back in, so there isn't one." Drop the disjunct.
+
+## Re-check 6 — break/restore, hand-verified ✅ (four, not two)
+
+The arbiter asked for two. The amendment warranted more, so I ran four; all four went
+red on my own break, restored to an empty production diff, and re-greened.
+
+| # | What I broke | Test that went red |
+|---|---|---|
+| P1 | `ARRIVAL_DOMAIN` string → `"loops-fact-v1"` | `custody …::test_fact_and_arrival_mutually_refuse` |
+| P2 | CLI back to `fact_signer_for` | `apps …::test_migrate_through_cli_mints_lineage_and_updates_descriptor` (arrival verify → False) |
+| P3 | F1 silent precedence restored | `apps …::test_migrate_positional_and_flag_disagreeing_refuses` |
+| P4 | publish to `./WRONG-NOT-THE-TARGET.arrival` | same e2e, on the F7 location pin |
+
+P3 is worth one extra line: with the silent precedence restored, the failing test's
+captured stdout shows `✓ legacy.jsonl → alice: migrated` — the round-1 bug reproducing
+exactly as described, which is the cleanest confirmation that F1's test targets the real
+defect and not a proxy for it.
+
+## Re-check 7 — state-root hygiene ✅
+
+    BEFORE count=268 sha=bf1ef11538c59f45f153b1af8dc3dfabc3f71981
+    (env -u XDG_STATE_HOME; test_store_migrate.py + libs/custody → 27 passed)
+    AFTER  count=268 sha=bf1ef11538c59f45f153b1af8dc3dfabc3f71981
+    → REAL STATE ROOT UNTOUCHED
+
+The five new apps cases and the six new custody cases all stay inside their tmp state
+roots. (The 267→268 drift since round 1 happened outside my measurement window; both
+of my before/after pairs are internally identical.)
+
+## Re-check 8 — scope ✅
+
+Exactly two commits. Files touched across both:
+
+    apps/loops/pyproject.toml
+    apps/loops/src/loops/commands/store.py
+    apps/loops/tests/test_store_migrate.py
+    libs/custody/src/custody/signing.py
+    libs/custody/tests/test_signing.py
+    libs/migrate/tests/test_sidecar.py
+    libs/migrate/tests/test_transform.py
+
+All inside the fix brief's fence. One note against the arbiter's phrasing: the custody
+commit was expected to touch "only signing.py + custody tests", and it also touches the
+two `libs/migrate/tests/` files. That is correct — it is F3(3)'s dissolution arm, which
+the brief explicitly permitted under `libs/migrate/**` — but it is where the new
+blocking finding lives. Gate worktree clean but `.tmp/`.
+
+---
+
+# Round 2 findings
+
+## BLOCKING
+
+### B3 — F3's dissolution made `libs/migrate`'s tests import `custody` without declaring it, and migrate's tests are no longer independently installable
+
+`libs/migrate/tests/test_sidecar.py` and `test_transform.py` now do
+`from custody.signing import ARRIVAL_DOMAIN` (commit `44a14cea`), but
+`libs/migrate/pyproject.toml` declares neither `custody` in `dependencies` nor in
+`[dependency-groups] dev`, and has no `custody = { workspace = true }` in
+`[tool.uv.sources]`.
+
+This is invisible in the workspace venv for exactly the reason I documented for N2 in
+round 1 — `_editable_impl_strange_loops.pth` appends all nine `libs/*/src` paths to
+`sys.path`, so any import of any lib succeeds here. **It is the same undeclared-import
+defect F6 fixed for `apps/loops`, reintroduced in `libs/migrate`'s test tree by the same
+fix round.**
+
+Unlike N2, this one has a live consumer. CI's `test-packages` matrix job runs
+per-package, in a fresh checkout with no root install:
+
+    uv run --package ${{ matrix.package }} pytest "libs/${{ matrix.package }}/tests" -q
+    — .github/workflows/ci.yml:105-111
+
+Reproduced by pointing uv at a fresh environment
+(`UV_PROJECT_ENVIRONMENT=.tmp/freshvenv`), which is what CI gets:
+
+    libs/migrate/tests/test_transform.py:61: from custody.signing import ARRIVAL_DOMAIN
+    E   ModuleNotFoundError: No module named 'custody'
+
+**Scoping the claim, because it matters here.** This round does **not** newly break a
+green job. I ran the identical fresh-env probe on the pre-fix base `e1de3a4b` and the
+migrate job was *already* failing collection, for a different undeclared dependency:
+
+    base e1de3a4b:  1 collection error
+      libs/migrate/tests/test_sidecar.py:27: from sign import ed25519
+      E   ModuleNotFoundError: No module named 'sign'
+
+    after the fix round: 2 collection errors — that pre-existing `sign` one, plus the
+      new `custody` one
+
+So `sign` is pre-existing (an earlier WP's residue, outside WP4's fence) and `custody`
+is this round's. I am calling it blocking anyway: the fix is two lines, it is in-fence,
+it is caused by this round, and it violates the discipline the same round's F6
+established one directory over. Letting it ride means slice 5 inherits a second
+undeclared cross-lib dependency in a suite the arc's "CI 11/11 green" milestone depends
+on.
+
+**Prescription** — `libs/migrate/pyproject.toml`. Custody is a *test-only* dependency of
+migrate (src must never import it, Rule 11), so it belongs in the dev group, not
+`dependencies`:
+
+```toml
+[dependency-groups]
+dev = [
+    "custody",
+    "sign",          # pre-existing gap — see below
+    "hypothesis>=6.100",
+    ...
+]
+
+[tool.uv.sources]
+engine = { workspace = true }
+store = { workspace = true }
+lang = { workspace = true }
+custody = { workspace = true }
+sign = { workspace = true }
+```
+
+I recommend fixing `sign` in the same change even though it is outside WP4's fence:
+it is one more line in the same list, and declaring only `custody` leaves the migrate
+CI job red for the other reason — a half-fix that looks like a fix. Flagging rather
+than assuming: if the arbiter would rather keep the fence clean, `sign` should become
+its own item so it is not lost.
+
+*Alternative, if declaring custody in migrate is unwanted:* take F3(3)'s other arm —
+restore migrate's test-local constant and keep the cross-check only in apps tests, where
+the import is already legal and already exists. That arm is already carrying the
+domain-separation pin (verified in re-check 3), so nothing would be lost but the
+single-sourcing of the string.
+
+## NON-BLOCKING (round 2)
+
+- **N5** — arrival pair duplicated rather than composed; guard rationale comments
+  dropped in the copies. Prescription: one parameterised resolver each, or an
+  AST-identity ratchet test.
+- **N6** — `arrival_signer_for` / `arrival_verifier_for` missing from
+  `custody/__init__.py` and `__all__`; the only submodule-reaching custody import in the
+  app.
+- **N7** — F8's bare `except Exception` fails the guard open (bounded: the sidecar's own
+  parse still stops it, nothing persists); and its second disjunct is unreachable dead
+  code.
+- **F6 nit** — `"migrate"` appended after `"painted"`, breaking the
+  workspace-deps-then-external ordering.
+
+## Round-1 findings: disposition
+
+| Finding | Status | Fixing commit | Verified by |
+|---|---|---|---|
+| `s4wp4-vertex-flag-silently-discarded` (= `-dropped`, same defect, both seats) | **fixed** | `df17edd3` | re-check 1 probe + P3 break/restore |
+| `s4wp4-signer-guard-overclaims-keys-dir` | **fixed** | `df17edd3` | re-check 4 probe |
+| `s4wp4-attestations-signed-fact-domain` | **fixed** | `44a14cea` + `df17edd3` | re-check 3 live probe (both directions, three attestation classes) + P1/P2 |
+| `s4wp4-flagless-default-unreachable` | **fixed** | `df17edd3` | re-check 2 |
+| N1 (multi-line refusal) / N2 (apps pyproject) | fixed | `df17edd3` | F5 / F6 above |
+| N3 (missing impl report) | **withdrawn** | — | exists on main at `a8d89d45` |
+
+## What I could not verify
+
+- The `sign` gap in B3 is pre-existing and I did not trace which work package introduced
+  it; I established only that it predates `e1de3a4b`.
+- I did not run the real CI workflow, only reproduced its per-package install form
+  locally via `UV_PROJECT_ENVIRONMENT`. The failure mode is a module-resolution one, so
+  the local reproduction should be faithful, but a CI run is the only proof.

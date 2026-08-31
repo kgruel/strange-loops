@@ -65,16 +65,6 @@ _ALLOWLIST: set[tuple[str, str]] = {
     # lang.testing ships shared Hypothesis strategies for downstream libs' test suites;
     # hypothesis is declared in lang's dev group rather than production dependencies.
     ("libs/lang/src/lang/testing/strategies.py", "hypothesis"),
-    # apps/loops migration test verifies RFC 8785 canonical JSON report signatures.
-    ("apps/loops/tests/test_store_migrate.py", "rfc8785"),
-    # store tests import atoms and lang for test fixtures and assertions;
-    # slated for slice-5 disposition when store tests migrate to arrival format.
-    ("libs/store/tests/test_fact_signature_transport.py", "atoms"),
-    ("libs/store/tests/strategies.py", "atoms"),
-    ("libs/store/tests/test_properties_merge.py", "atoms"),
-    ("libs/store/tests/test_properties_merge.py", "lang"),
-    ("libs/store/tests/test_permuted_transport.py", "atoms"),
-    ("libs/store/tests/test_conformance_merge.py", "atoms"),
 }
 
 

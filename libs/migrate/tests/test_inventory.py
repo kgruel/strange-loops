@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import sqlite3
 from pathlib import Path
@@ -166,7 +165,9 @@ def test_absent_observer_batch_refusal_is_distinct_condition(tmp_path: Path) -> 
     assert "1 row(s) missing 'observer' field" in str(exc)
 
 
-def test_combined_defects_scan_collects_all_three_classes_without_preemption(tmp_path: Path) -> None:
+def test_combined_defects_scan_collects_all_three_classes_without_preemption(
+    tmp_path: Path,
+) -> None:
     """Combined defect fixture with codec-invalid + mixed + absent lines together.
     Whole source is scanned before raising, and all 3 classes are enumerated without preemption."""
     source_file = build_combined_defects_jsonl(tmp_path / "combined.jsonl")
@@ -215,7 +216,9 @@ def test_both_aspects_batch_reported_once_under_mixed_class(tmp_path: Path) -> N
     assert "line 1: observers 'alice', 'bob' (1 row(s) missing 'observer' field)" in msg
 
 
-def test_both_aspects_empty_observer_batch_reported_under_mixed_with_spelling_census(tmp_path: Path) -> None:
+def test_both_aspects_empty_observer_batch_reported_under_mixed_with_spelling_census(
+    tmp_path: Path,
+) -> None:
     """Probe case: a batch of alice+bob+'' -> mixed entry names ('alice', 'bob'),
     absent-aspect census {'empty': 1, 'missing': 0}, message says observer is the empty string."""
     from ._fixtures import build_both_aspects_empty_observer_batch_jsonl

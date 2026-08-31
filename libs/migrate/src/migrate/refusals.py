@@ -12,8 +12,6 @@ This hierarchy is strictly distinct from ``ArrivalBodyError`` and
 
 from __future__ import annotations
 
-
-
 __all__ = [
     "MigrationRefused",
     "LegacySourceRefused",
@@ -46,7 +44,10 @@ def _format_absent_desc(spelling_map: dict[str, int]) -> str:
     elif missing_cnt > 0 and empty_cnt == 0:
         return f"{absent_count} row(s) missing 'observer' field"
     elif empty_cnt > 0 and missing_cnt > 0:
-        return f"{absent_count} row(s) with absent/empty observer ({missing_cnt} missing, {empty_cnt} empty '')"
+        return (
+            f"{absent_count} row(s) with absent/empty observer "
+            f"({missing_cnt} missing, {empty_cnt} empty '')"
+        )
     else:
         return f"{absent_count} row(s) missing 'observer' field"
 
@@ -92,7 +93,10 @@ def _format_refusal_message(
         formatted_absent: list[str] = []
         for lineno, _absent_count, observers, spelling_map in absent_observer_lines:
             desc = _format_absent_desc(spelling_map)
-            rem = f" (remaining observers: {', '.join(repr(o) for o in observers)})" if observers else ""
+            if observers:
+                rem = f" (remaining observers: {', '.join(repr(o) for o in observers)})"
+            else:
+                rem = ""
             formatted_absent.append(f"  line {lineno}: {desc}{rem}")
 
         enum_absent = "\n".join(formatted_absent)

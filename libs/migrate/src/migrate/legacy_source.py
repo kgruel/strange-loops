@@ -192,13 +192,17 @@ class LegacySource:
                     obs = obj["observer"]
                     if not isinstance(obs, str):
                         codec_invalid_lines.append(
-                            (lineno, f"fact field 'observer' must be a string, got {type(obs).__name__}")
+                            (
+                                lineno,
+                                f"fact field 'observer' must be a string, got {type(obs).__name__}",
+                            )
                         )
                         continue
 
                     row = _row_of(obj, _SPEC["fact"])
                     row_for_hash = row if row[6] is not None else row[:6]
-                    content_hasher.update(json.dumps(list(row_for_hash), separators=(",", ":")).encode())
+                    row_bytes = json.dumps(list(row_for_hash), separators=(",", ":")).encode()
+                    content_hasher.update(row_bytes)
 
                     fr = FactRow(
                         id=obj["id"],
@@ -248,13 +252,19 @@ class LegacySource:
 
                     unknown_env = sorted(set(obj) - _BATCH_KEYS)
                     if unknown_env:
-                        codec_invalid_lines.append((lineno, f"unknown field(s) in batch line: {unknown_env}"))
+                        codec_invalid_lines.append(
+                            (lineno, f"unknown field(s) in batch line: {unknown_env}")
+                        )
                         continue
 
                     rows = obj.get(_ROWS)
                     if not isinstance(rows, list):
                         codec_invalid_lines.append(
-                            (lineno, f"batch field 'rows' must be an array of fact records, got {type(rows).__name__}")
+                            (
+                                lineno,
+                                "batch field 'rows' must be an array of fact records, "
+                                f"got {type(rows).__name__}",
+                            )
                         )
                         continue
 
@@ -262,8 +272,10 @@ class LegacySource:
                         codec_invalid_lines.append(
                             (
                                 lineno,
-                                f"batch must carry at least {_MIN_BATCH_ROWS} rows, got {len(rows)} — "
-                                "a 1-row batch is a second spelling of a plain fact line, and an empty one encodes nothing",
+                                f"batch must carry at least {_MIN_BATCH_ROWS} rows, "
+                                f"got {len(rows)} — "
+                                "a 1-row batch is a second spelling of a plain fact line, "
+                                "and an empty one encodes nothing",
                             )
                         )
                         continue
@@ -276,7 +288,9 @@ class LegacySource:
 
                     for i, elem in enumerate(rows):
                         if not isinstance(elem, dict):
-                            batch_fault = f"batch row {i} must be a JSON object, got {type(elem).__name__}"
+                            batch_fault = (
+                                f"batch row {i} must be a JSON object, got {type(elem).__name__}"
+                            )
                             break
 
                         elem_t = elem.get("t")
@@ -290,7 +304,9 @@ class LegacySource:
                             )
                             break
                         if elem_t != "fact":
-                            batch_fault = f"batch row {i} has unknown record discriminator t={elem_t!r}"
+                            batch_fault = (
+                                f"batch row {i} has unknown record discriminator t={elem_t!r}"
+                            )
                             break
 
                         fault = row_object_fault(
@@ -306,14 +322,18 @@ class LegacySource:
                             batch_fault = fault
                             break
 
-                        if "observer" not in elem or elem["observer"] is None or elem["observer"] == "":
+                        obs_missing = "observer" not in elem or elem["observer"] is None
+                        if obs_missing or elem["observer"] == "":
                             absent_count += 1
                             spelling = "empty" if elem.get("observer") == "" else "missing"
                             spelling_counts[spelling] += 1
                         else:
                             obs_val = elem["observer"]
                             if not isinstance(obs_val, str):
-                                batch_fault = f"fact field 'observer' must be a string, got {type(obs_val).__name__}"
+                                batch_fault = (
+                                    "fact field 'observer' must be a string, "
+                                    f"got {type(obs_val).__name__}"
+                                )
                                 break
                             present_observers.add(obs_val)
 
@@ -336,7 +356,12 @@ class LegacySource:
                     if absent_count > 0:
                         non_zero_spellings = {k: v for k, v in spelling_counts.items() if v > 0}
                         absent_observer_lines.append(
-                            (lineno, absent_count, tuple(sorted(present_observers)), non_zero_spellings)
+                            (
+                                lineno,
+                                absent_count,
+                                tuple(sorted(present_observers)),
+                                non_zero_spellings,
+                            )
                         )
                         continue
 
@@ -345,7 +370,8 @@ class LegacySource:
                     for elem in rows:
                         row = _row_of(elem, _SPEC["fact"])
                         row_for_hash = row if row[6] is not None else row[:6]
-                        content_hasher.update(json.dumps(list(row_for_hash), separators=(",", ":")).encode())
+                        row_bytes = json.dumps(list(row_for_hash), separators=(",", ":")).encode()
+                        content_hasher.update(row_bytes)
                         batch_rows.append(
                             FactRow(
                                 id=elem["id"],
@@ -357,7 +383,9 @@ class LegacySource:
                                 signature=elem.get("signature"),
                             )
                         )
-                    units.append(BatchUnit(coordinate=lineno, rows=tuple(batch_rows), observer=batch_obs))
+                    units.append(
+                        BatchUnit(coordinate=lineno, rows=tuple(batch_rows), observer=batch_obs)
+                    )
 
                 else:
                     codec_invalid_lines.append((lineno, f"unknown record discriminator t={t!r}"))
@@ -437,13 +465,18 @@ class LegacySource:
 
                     if not isinstance(observer, str):
                         codec_invalid_lines.append(
-                            (rowid, f"fact field 'observer' must be a string, got {type(observer).__name__}")
+                            (
+                                rowid,
+                                "fact field 'observer' must be a string, "
+                                f"got {type(observer).__name__}",
+                            )
                         )
                         continue
 
                     row_tuple = (fact_id, kind, ts, observer, origin, payload, sig)
                     row_for_hash = row_tuple if (sig_col and sig is not None) else row_tuple[:6]
-                    content_hasher.update(json.dumps(list(row_for_hash), separators=(",", ":")).encode())
+                    row_bytes = json.dumps(list(row_for_hash), separators=(",", ":")).encode()
+                    content_hasher.update(row_bytes)
 
                     fr = FactRow(
                         id=fact_id,
@@ -481,7 +514,8 @@ class LegacySource:
                             continue
 
                         row_for_hash = tuple(raw[1:])
-                        content_hasher.update(json.dumps(list(row_for_hash), separators=(",", ":")).encode())
+                        row_bytes = json.dumps(list(row_for_hash), separators=(",", ":")).encode()
+                        content_hasher.update(row_bytes)
 
                         tu = TickUnit(
                             coordinate=rowid,

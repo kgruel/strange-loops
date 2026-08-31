@@ -9,9 +9,8 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+from custody.signing import ARRIVAL_DOMAIN
 from engine.arrival import (
-    GENESIS_KIND,
-    ArrivalCorrupt,
     ArrivalLog,
     ArrivalTornTail,
     _canonical_bytes,
@@ -20,19 +19,17 @@ from engine.arrival import (
 )
 from engine.arrival_body import body_of_fact_row
 from engine.arrival_contract import Full, Head, RecordDraft, StoreDescriptor
-from engine.arrival_head_attestation import Kind, Level, heads_dir, read_journal
+from engine.arrival_head_attestation import Kind, Level, read_journal
 from engine.arrival_head_seam import StoreLost
 from engine.arrival_registry import BackendRegistry, descriptor_for
-from lang import BackendDecl, ObserverDecl, VertexFile, parse_vertex, parse_vertex_file
+from lang import BackendDecl, parse_vertex, parse_vertex_file
 from sign import ed25519
 
-from migrate.legacy_ids import FactRow, Transform, identity, ulid_migration
-from migrate.legacy_source import LegacySource
+from migrate.legacy_ids import FactRow, Transform, ulid_migration
 from migrate.refusals import (
     JournalPreflightRefused,
     LegacySourceRefused,
     LegacyStorageRefused,
-    MigrationRefused,
     PublishPreconditionRefused,
     ReportBadSignatureRefused,
     ReportHeadMismatchRefused,
@@ -45,26 +42,18 @@ from migrate.refusals import (
     TornTailRefused,
 )
 from migrate.sidecar import (
-    MigrationOutcome,
     edit_vertex_store_clause,
-    preflight_journal,
     run_migration,
     verify_migration_report,
 )
 from migrate.transform import transform
 
 from ._fixtures import (
-    ALL_FACT_ROWS,
-    ALL_TICK_ROWS,
-    BATCH_LINE_ALICE,
-    FACT_CANONICAL_ULID_SIGNED,
     FACT_UUID4_SIGNED,
     build_mixed_observer_jsonl,
     build_synthetic_jsonl,
     build_synthetic_sqlite,
 )
-
-from custody.signing import ARRIVAL_DOMAIN
 
 
 class CustodianFixture:
@@ -468,7 +457,7 @@ def test_torn_tail_target_refuses_no_repair(tmp_path: Path) -> None:
 
 
 def test_second_migration_after_abandoned_attempt(tmp_path: Path) -> None:
-    """(5) Second migration after an abandoned attempt -> fresh lineage, fresh path, no StoreLost."""
+    """(5) Second migration after an abandoned attempt -> fresh lineage, no StoreLost."""
     store_dir = tmp_path / "data"
     store_dir.mkdir(parents=True, exist_ok=True)
     cust = CustodianFixture(tmp_path, "alice")
@@ -551,14 +540,16 @@ def test_source_mutated_during_staging_refuses_publish(tmp_path: Path) -> None:
             f.write(extra_line + "\n")
         return res
 
-    with patch("migrate.sidecar.transform", side_effect=mutating_transform):
-        with pytest.raises(SourceChangedRefused) as exc_info:
-            run_migration(
-                source_path=source_path,
-                vertex_path=v_path,
-                store_dir=store_dir,
-                signer=cust.signer,
-            )
+    with (
+        patch("migrate.sidecar.transform", side_effect=mutating_transform),
+        pytest.raises(SourceChangedRefused) as exc_info,
+    ):
+        run_migration(
+            source_path=source_path,
+            vertex_path=v_path,
+            store_dir=store_dir,
+            signer=cust.signer,
+        )
 
     assert "two histories, not a migration" in str(exc_info.value)
     # Descriptor MUST remain unchanged
@@ -596,14 +587,13 @@ def test_publish_atomicity_and_crash_simulation(tmp_path: Path) -> None:
             raise OSError("Simulated crash between write and replace")
         return orig_replace(src, dst, *args, **kwargs)
 
-    with patch("os.replace", side_effect=failing_replace):
-        with pytest.raises(OSError):
-            run_migration(
-                source_path=source_path,
-                vertex_path=v_path,
-                store_dir=store_dir,
-                signer=cust.signer,
-            )
+    with patch("os.replace", side_effect=failing_replace), pytest.raises(OSError):
+        run_migration(
+            source_path=source_path,
+            vertex_path=v_path,
+            store_dir=store_dir,
+            signer=cust.signer,
+        )
 
     # Old descriptor remains completely intact
     assert v_path.read_text(encoding="utf-8") == pre_text
@@ -665,14 +655,16 @@ def test_journal_preflight_failure_refuses(tmp_path: Path) -> None:
     def failing_probe(path: Path):
         raise OSError("Permission denied: simulated unwritable state root")
 
-    with patch("migrate.sidecar.heads_dir", side_effect=OSError("Unwritable")):
-        with pytest.raises(JournalPreflightRefused):
-            run_migration(
-                source_path=source_path,
-                vertex_path=v_path,
-                store_dir=store_dir,
-                signer=cust.signer,
-            )
+    with (
+        patch("migrate.sidecar.heads_dir", side_effect=OSError("Unwritable")),
+        pytest.raises(JournalPreflightRefused),
+    ):
+        run_migration(
+            source_path=source_path,
+            vertex_path=v_path,
+            store_dir=store_dir,
+            signer=cust.signer,
+        )
 
     arrival_files = list(store_dir.glob("*.arrival"))
     assert arrival_files == [], "Preflight failure must create no target file"
@@ -719,7 +711,8 @@ def test_legacy_storage_operational_error_wrapped(tmp_path: Path) -> None:
 
 
 def test_resume_against_divergent_valid_chain_refuses_target_mismatch(tmp_path: Path) -> None:
-    """F5: Target with valid chain whose content diverges at ordinal 3 -> TargetMismatchOnResumeRefused(ordinal=3)."""
+    """F5: Target with valid chain whose content diverges at ordinal 3
+    -> TargetMismatchOnResumeRefused(ordinal=3)."""
     store_dir = tmp_path / "data"
     store_dir.mkdir(parents=True, exist_ok=True)
     cust = CustodianFixture(tmp_path, "alice")
@@ -759,7 +752,15 @@ def test_resume_against_divergent_valid_chain_refuses_target_mismatch(tmp_path: 
         observer="alice",
         origin="",
         body=body_of_fact_row(
-            (FACT_UUID4_SIGNED["id"], "concept", 9999.0, "alice", "", '{"divergent": "payload"}', None)
+            (
+                FACT_UUID4_SIGNED["id"],
+                "concept",
+                9999.0,
+                "alice",
+                "",
+                '{"divergent": "payload"}',
+                None,
+            )
         ),
         signature=None,
     )
@@ -781,7 +782,7 @@ def test_resume_against_divergent_valid_chain_refuses_target_mismatch(tmp_path: 
 
 
 def test_resume_refuses_when_target_record_differs_only_in_signature(tmp_path: Path) -> None:
-    """F2: A resume target whose record differs ONLY in signature (outer-signed vs expected-unsigned)
+    """F2: A resume target whose record differs ONLY in signature
     raises TargetMismatchOnResumeRefused."""
     store_dir = tmp_path / "data"
     store_dir.mkdir(parents=True, exist_ok=True)
@@ -838,8 +839,11 @@ def test_resume_refuses_when_target_record_differs_only_in_signature(tmp_path: P
     assert exc_info.value.target_path == str(target_path)
 
 
-def test_resume_refuses_when_target_record_differs_only_in_authored_at(tmp_path: Path) -> None:
-    """F2: A resume target whose record differs ONLY in authored_at raises TargetMismatchOnResumeRefused."""
+def test_resume_refuses_when_target_record_differs_only_in_authored_at(
+    tmp_path: Path,
+) -> None:
+    """F2: A resume target whose record differs ONLY in authored_at
+    raises TargetMismatchOnResumeRefused."""
     store_dir = tmp_path / "data"
     store_dir.mkdir(parents=True, exist_ok=True)
     cust = CustodianFixture(tmp_path, "alice")
@@ -945,7 +949,8 @@ def test_resume_refuses_when_target_filename_does_not_match_lineage(tmp_path: Pa
 
 
 def test_resume_against_mallory_foreign_genesis_refuses(tmp_path: Path) -> None:
-    """F3: Target with foreign genesis (e.g. observer or key != custodian) -> TargetMismatchOnResumeRefused(ordinal=0)."""
+    """F3: Target with foreign genesis (observer/key != custodian)
+    -> TargetMismatchOnResumeRefused(ordinal=0)."""
     store_dir = tmp_path / "data"
     store_dir.mkdir(parents=True, exist_ok=True)
     alice = CustodianFixture(tmp_path, "alice")
@@ -985,7 +990,10 @@ def test_resume_against_mallory_foreign_genesis_refuses(tmp_path: Path) -> None:
         )
 
     assert exc_info.value.ordinal == 0
-    assert "genesis custodian 'mallory' does not match" in str(exc_info.value) or "genesis public key" in str(exc_info.value)
+    assert (
+        "genesis custodian 'mallory' does not match" in str(exc_info.value)
+        or "genesis public key" in str(exc_info.value)
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1137,7 +1145,7 @@ def test_verify_migration_report_causes(tmp_path: Path) -> None:
             target_path=outcome.target_path,
         )
 
-    # 6. Target unopenable (torn-tail target) -> ReportTargetUnopenableRefused with engine type in chain
+    # 6. Target unopenable (torn-tail target) -> ReportTargetUnopenableRefused
     full_bytes = outcome.target_path.read_bytes()
     try:
         outcome.target_path.write_bytes(full_bytes + b'{"incomplete": "record"')

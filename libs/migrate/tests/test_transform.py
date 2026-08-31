@@ -2,19 +2,16 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
+from custody.signing import ARRIVAL_DOMAIN
 from engine.arrival import (
-    GENESIS_KIND,
     KEY_INTRODUCTION_KIND,
     ArrivalLog,
-    AuthorshipUnverified,
     verify_authorship,
 )
-from engine.arrival_contract import RecordDraft
-from lang import ObserverDecl, VertexFile, parse_vertex
+from lang import ObserverDecl, VertexFile
 
 from migrate.legacy_ids import FactRow, Transform, identity, ulid_migration
 from migrate.refusals import (
@@ -27,16 +24,10 @@ from migrate.refusals import (
 from migrate.transform import (
     DroppedUnit,
     GenesisRequirements,
-    TransformExceptions,
-    TransformResult,
-    coerce_vertex,
     transform,
 )
 
 from ._fixtures import (
-    ALL_FACT_ROWS,
-    ALL_TICK_ROWS,
-    BATCH_LINE_ALICE,
     BATCH_ROW_1,
     BATCH_ROW_2,
     FACT_CANONICAL_ULID_SIGNED,
@@ -47,18 +38,15 @@ from ._fixtures import (
     TICK_2,
     build_absent_observer_jsonl,
     build_codec_invalid_sqlite,
-    build_combined_defects_jsonl,
     build_empty_observer_sqlite,
+    build_era1_sqlite,
     build_flat_equivalent_jsonl,
     build_mixed_observer_jsonl,
     build_synthetic_jsonl,
     build_synthetic_sqlite,
     build_type_error_batch_jsonl,
     build_unsafe_integer_ts_sqlite,
-    build_era1_sqlite,
 )
-
-from custody.signing import ARRIVAL_DOMAIN
 
 
 def _ed25519_verify(key_b64: str, signature: str, digest: str) -> bool:
@@ -123,7 +111,9 @@ def bob(tmp_path: Path) -> CustodianFixture:
 
 
 @pytest.mark.parametrize("fmt", ["jsonl", "sqlite"])
-def test_signature_byte_preservation_and_honest_absence(tmp_path: Path, kyle, alice, bob, fmt: str) -> None:
+def test_signature_byte_preservation_and_honest_absence(
+    tmp_path: Path, kyle, alice, bob, fmt: str
+) -> None:
     """Authored inner fact signatures ride verbatim byte-for-byte; unsigned rows stay unsigned;
     payload text is preserved verbatim without re-serialization.
     """
@@ -132,7 +122,9 @@ def test_signature_byte_preservation_and_honest_absence(tmp_path: Path, kyle, al
     else:
         source_path = build_synthetic_sqlite(tmp_path / "legacy.sqlite")
 
-    vf = _make_vertex_file("kyle", [("kyle", kyle.public), ("alice", alice.public), ("bob", bob.public)])
+    vf = _make_vertex_file(
+        "kyle", [("kyle", kyle.public), ("alice", alice.public), ("bob", bob.public)]
+    )
     result = transform(source_path, vf, rule=identity(), signer=kyle.signer)
 
     # Key introductions are first 2 drafts (alice, bob)
@@ -144,7 +136,9 @@ def test_signature_byte_preservation_and_honest_absence(tmp_path: Path, kyle, al
     assert uuid4_signed.body["payload"] == FACT_UUID4_SIGNED["payload"]
     assert uuid4_signed.signature is None  # outer-unsigned
 
-    canonical_signed = next(d for d in migrated_drafts if d.body.get("id") == FACT_CANONICAL_ULID_SIGNED["id"])
+    canonical_signed = next(
+        d for d in migrated_drafts if d.body.get("id") == FACT_CANONICAL_ULID_SIGNED["id"]
+    )
     assert canonical_signed.body["signature"] == FACT_CANONICAL_ULID_SIGNED["signature"]
     assert canonical_signed.body["payload"] == FACT_CANONICAL_ULID_SIGNED["payload"]
     assert canonical_signed.signature is None  # outer-unsigned
@@ -158,12 +152,16 @@ def test_signature_byte_preservation_and_honest_absence(tmp_path: Path, kyle, al
         assert batch_draft.body["rows"][1]["signature"] == "sig-alice-batch-2"
 
     # Check unsigned facts honestly omit signature
-    uuid4_unsigned = next(d for d in migrated_drafts if d.body.get("id") == FACT_UUID4_UNSIGNED["id"])
+    uuid4_unsigned = next(
+        d for d in migrated_drafts if d.body.get("id") == FACT_UUID4_UNSIGNED["id"]
+    )
     assert "signature" not in uuid4_unsigned.body
     assert uuid4_unsigned.body["payload"] == FACT_UUID4_UNSIGNED["payload"]
     assert uuid4_unsigned.signature is None
 
-    canonical_unsigned = next(d for d in migrated_drafts if d.body.get("id") == FACT_CANONICAL_ULID_UNSIGNED["id"])
+    canonical_unsigned = next(
+        d for d in migrated_drafts if d.body.get("id") == FACT_CANONICAL_ULID_UNSIGNED["id"]
+    )
     assert "signature" not in canonical_unsigned.body
     assert canonical_unsigned.body["payload"] == FACT_CANONICAL_ULID_UNSIGNED["payload"]
     assert canonical_unsigned.signature is None
@@ -179,7 +177,9 @@ def test_key_introduction_ordering_and_authority_validity(tmp_path: Path, kyle, 
     and verify against Arrival authority semantics (verify_authorship).
     """
     source_path = build_synthetic_jsonl(tmp_path / "legacy.jsonl")
-    vf = _make_vertex_file("kyle", [("kyle", kyle.public), ("alice", alice.public), ("bob", bob.public)])
+    vf = _make_vertex_file(
+        "kyle", [("kyle", kyle.public), ("alice", alice.public), ("bob", bob.public)]
+    )
 
     result = transform(source_path, vf, rule=identity(), signer=kyle.signer)
 
@@ -227,13 +227,37 @@ def test_key_introduction_ordering_and_authority_validity(tmp_path: Path, kyle, 
     resolutions = verify_authorship(log, _ed25519_verify)
     # Ordinal 0 (genesis), ordinal 1 (intro alice), ordinal 2 (intro bob)
     assert len(resolutions) == 3
-    assert (resolutions[0].ordinal, resolutions[0].observer, resolutions[0].key) == (0, "kyle", kyle.public)
-    assert (resolutions[1].ordinal, resolutions[1].observer, resolutions[1].key) == (1, "kyle", kyle.public)
-    assert (resolutions[2].ordinal, resolutions[2].observer, resolutions[2].key) == (2, "kyle", kyle.public)
+    assert (resolutions[0].ordinal, resolutions[0].observer, resolutions[0].key) == (
+        0,
+        "kyle",
+        kyle.public,
+    )
+    assert (resolutions[1].ordinal, resolutions[1].observer, resolutions[1].key) == (
+        1,
+        "kyle",
+        kyle.public,
+    )
+    assert (resolutions[2].ordinal, resolutions[2].observer, resolutions[2].key) == (
+        2,
+        "kyle",
+        kyle.public,
+    )
 
     # After ordinal 2, alice and bob keys are valid in the log!
-    # Append a live record signed by alice and verify it resolves under alice's key introduced at ordinal 1
-    log.append("fact", {"id": "01ARZ3NDEKTSV4RRFFQ69G5F99", "kind": "event", "ts": 2000.0, "observer": "alice", "origin": "live", "payload": "{}"}, observer="alice", signer=alice.signer)
+    # Append a live record signed by alice and verify it resolves under introduced key
+    log.append(
+        "fact",
+        {
+            "id": "01ARZ3NDEKTSV4RRFFQ69G5F99",
+            "kind": "event",
+            "ts": 2000.0,
+            "observer": "alice",
+            "origin": "live",
+            "payload": "{}",
+        },
+        observer="alice",
+        signer=alice.signer,
+    )
     resolutions_after = verify_authorship(log, _ed25519_verify)
     assert len(resolutions_after) == 4
     live_res = resolutions_after[3]
@@ -247,14 +271,16 @@ def test_key_introduction_ordering_and_authority_validity(tmp_path: Path, kyle, 
 # ---------------------------------------------------------------------------
 
 
-def test_section_g3_exception_edges_land_in_report_and_do_not_refuse(tmp_path: Path, kyle, alice) -> None:
+def test_section_g3_exception_edges_land_in_report_and_do_not_refuse(
+    tmp_path: Path, kyle, alice
+) -> None:
     """§G.3 edges:
     - Declared observer with key=None -> skipped from intros, in keyless_declared_observers
     - Undeclared observer appearing in rows (carol) -> admitted, in undeclared_row_observers
     Neither causes a refusal.
     """
     source_path = build_synthetic_jsonl(tmp_path / "legacy.jsonl")
-    # bob is declared with key=None (dan is also declared with key=None); carol is undeclared in .vertex
+    # bob is declared with key=None (dan also with key=None); carol is undeclared in .vertex
     vf = _make_vertex_file(
         "kyle",
         [
@@ -268,11 +294,13 @@ def test_section_g3_exception_edges_land_in_report_and_do_not_refuse(tmp_path: P
     # Edge 1: dan in keyless_declared_observers
     assert "dan" in result.exceptions.keyless_declared_observers
     # dan has no key introduction draft
-    intro_observers = [d.body["observer"] for d in result.drafts if d.kind == KEY_INTRODUCTION_KIND]
+    intro_observers = [
+        d.body["observer"] for d in result.drafts if d.kind == KEY_INTRODUCTION_KIND
+    ]
     assert "dan" not in intro_observers
     assert "alice" in intro_observers
 
-    # Edge 2: bob and carol appear in legacy source rows (FACT_UUID4_UNSIGNED is bob, FACT_CANONICAL_ULID_UNSIGNED is carol)
+    # Edge 2: bob and carol appear in legacy source rows
     # Both bob and carol are undeclared in vf.observers:
     assert "bob" in result.exceptions.undeclared_row_observers
     assert "carol" in result.exceptions.undeclared_row_observers
@@ -323,7 +351,9 @@ def test_grouping_grammar_batch_vs_flat(tmp_path: Path, kyle, alice) -> None:
 
 
 @pytest.mark.parametrize("fmt", ["jsonl", "sqlite"])
-def test_m4_native_tick_conversion_with_envelope_preservation(tmp_path: Path, kyle, alice, fmt: str) -> None:
+def test_m4_native_tick_conversion_with_envelope_preservation(
+    tmp_path: Path, kyle, alice, fmt: str
+) -> None:
     """Legacy ticks convert to native Arrival 'tick' records (not 'tick.<name>' facts).
     The tick's signed envelope and chain fields round-trip verbatim.
     """
@@ -570,8 +600,8 @@ def test_sqlite_seam_defense_refuses_codec_invalid_ts(tmp_path: Path, kyle) -> N
 
 
 def test_sqlite_seam_defense_refuses_unsafe_integer_ts(tmp_path: Path, kyle) -> None:
-    """F1 (gate R2-B1): Handing the transformer a SQLite store with ts=2**60 raises LegacySourceRefused
-    instead of leaking ArrivalBodyError."""
+    """F1 (gate R2-B1): Handing the transformer a SQLite store with ts=2**60
+    raises LegacySourceRefused instead of leaking ArrivalBodyError."""
     source_path = build_unsafe_integer_ts_sqlite(tmp_path / "unsafe_ts.sqlite")
     vf = _make_vertex_file("kyle", [("kyle", kyle.public)])
 
@@ -645,8 +675,10 @@ def test_era1_sqlite_ticks_transform_and_surface_agreement(tmp_path: Path, kyle,
     assert len(result.exceptions.undeclared_row_observers) == 0
 
 
-def test_vertex_with_different_declared_name_migrates_under_stem_custodian(tmp_path: Path, kyle, alice) -> None:
-    """F4: A vertex whose declared name ("My Human Project") differs from its filename ("kyle.vertex")
+def test_vertex_with_different_declared_name_migrates_under_stem_custodian(
+    tmp_path: Path, kyle, alice
+) -> None:
+    """F4: A vertex whose declared name ("My Human Project") differs from filename ("kyle.vertex")
     migrates fine — the custodian is derived from the vertex file stem ('kyle')."""
     from lang import parse_vertex_file
 

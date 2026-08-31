@@ -826,7 +826,7 @@ def _run_migrate(argv: list[str], *, vertex_path: Path | None = None) -> int:
     if not source_path.exists():
         raise FileNotFoundError(f"{source_path} does not exist")
 
-    from custody.signing import arrival_signer_for
+    from custody import arrival_signer_for
 
     signer = arrival_signer_for(vertex_target)
     if signer is None or signer(vertex_target.stem, "0" * 64) is None:

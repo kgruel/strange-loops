@@ -17,7 +17,7 @@ from hashlib import sha256
 from pathlib import Path
 
 import pytest
-from custody.signing import arrival_verifier_for, fact_verifier_for
+from custody import arrival_verifier_for, fact_verifier_for
 from engine.arrival import ArrivalLog, content_commitment
 from lang import parse_vertex_file
 from sign import ed25519

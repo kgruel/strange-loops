@@ -780,6 +780,118 @@ def test_resume_against_divergent_valid_chain_refuses_target_mismatch(tmp_path: 
     assert target_path.read_bytes() == target_bytes_before
 
 
+def test_resume_refuses_when_target_record_differs_only_in_signature(tmp_path: Path) -> None:
+    """F2: A resume target whose record differs ONLY in signature (outer-signed vs expected-unsigned)
+    raises TargetMismatchOnResumeRefused."""
+    store_dir = tmp_path / "data"
+    store_dir.mkdir(parents=True, exist_ok=True)
+    cust = CustodianFixture(tmp_path, "alice")
+    source_path = build_synthetic_jsonl(store_dir / "legacy.jsonl")
+    v_path = _make_vertex_file(
+        tmp_path,
+        custodian_name=cust.name,
+        custodian_key=cust.public,
+        other_observers=[],
+    )
+
+    t_res = transform(source_path, parse_vertex_file(v_path), signer=cust.signer)
+    lineage = mint_lineage()
+    target_path = store_dir / f"{lineage}.arrival"
+
+    registry = BackendRegistry.with_builtin_backends()
+    desc = StoreDescriptor(backend="file", location=str(target_path), lineage=lineage)
+    ledger, _ = registry.open(desc)
+    genesis_head = ledger.mint(
+        {
+            "observer": t_res.genesis.custodian,
+            "signer": cust.signer,
+            "key": t_res.genesis.key,
+            "lineage": lineage,
+            "at": 0.0,
+        }
+    )
+
+    exp_draft = t_res.drafts[0]
+    assert exp_draft.signature is None  # expected-unsigned
+
+    # Construct an outer-signed version of the EXACT same draft
+    outer_signed_draft = RecordDraft(
+        kind=exp_draft.kind,
+        authored_at=exp_draft.authored_at,
+        observer=exp_draft.observer,
+        origin=exp_draft.origin,
+        body=exp_draft.body,
+        signature="fake-outer-signature-bytes",
+    )
+    ledger.append(genesis_head, [outer_signed_draft])
+
+    with pytest.raises(TargetMismatchOnResumeRefused) as exc_info:
+        run_migration(
+            source_path=source_path,
+            vertex_path=v_path,
+            store_dir=store_dir,
+            signer=cust.signer,
+            resume_target=target_path,
+        )
+
+    assert exc_info.value.ordinal == 1
+    assert exc_info.value.target_path == str(target_path)
+
+
+def test_resume_refuses_when_target_record_differs_only_in_authored_at(tmp_path: Path) -> None:
+    """F2: A resume target whose record differs ONLY in authored_at raises TargetMismatchOnResumeRefused."""
+    store_dir = tmp_path / "data"
+    store_dir.mkdir(parents=True, exist_ok=True)
+    cust = CustodianFixture(tmp_path, "alice")
+    source_path = build_synthetic_jsonl(store_dir / "legacy.jsonl")
+    v_path = _make_vertex_file(
+        tmp_path,
+        custodian_name=cust.name,
+        custodian_key=cust.public,
+        other_observers=[],
+    )
+
+    t_res = transform(source_path, parse_vertex_file(v_path), signer=cust.signer)
+    lineage = mint_lineage()
+    target_path = store_dir / f"{lineage}.arrival"
+
+    registry = BackendRegistry.with_builtin_backends()
+    desc = StoreDescriptor(backend="file", location=str(target_path), lineage=lineage)
+    ledger, _ = registry.open(desc)
+    genesis_head = ledger.mint(
+        {
+            "observer": t_res.genesis.custodian,
+            "signer": cust.signer,
+            "key": t_res.genesis.key,
+            "lineage": lineage,
+            "at": 0.0,
+        }
+    )
+
+    exp_draft = t_res.drafts[0]
+    divergent_at_draft = RecordDraft(
+        kind=exp_draft.kind,
+        authored_at=exp_draft.authored_at + 123.456,
+        observer=exp_draft.observer,
+        origin=exp_draft.origin,
+        body=exp_draft.body,
+        signature=exp_draft.signature,
+    )
+    ledger.append(genesis_head, [divergent_at_draft])
+
+    with pytest.raises(TargetMismatchOnResumeRefused) as exc_info:
+        run_migration(
+            source_path=source_path,
+            vertex_path=v_path,
+            store_dir=store_dir,
+            signer=cust.signer,
+            resume_target=target_path,
+        )
+
+    assert exc_info.value.ordinal == 1
+    assert exc_info.value.target_path == str(target_path)
+
+
 # ---------------------------------------------------------------------------
 # Test 12: F3 — Mallory foreign genesis rejected on resume
 # ---------------------------------------------------------------------------

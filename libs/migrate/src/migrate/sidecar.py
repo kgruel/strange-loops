@@ -857,6 +857,8 @@ def run_migration(
                 or target_rec.get("observer") != exp_draft.observer
                 or target_rec.get("origin") != exp_draft.origin
                 or target_rec.get("body") != exp_draft.body
+                or target_rec.get("at") != exp_draft.authored_at
+                or target_rec.get("sig") != exp_draft.signature
             ):
                 raise TargetMismatchOnResumeRefused(
                     f"Target record at ordinal {ord_idx} diverges from expected deterministic draft. "

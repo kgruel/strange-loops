@@ -64,7 +64,7 @@ from ._fixtures import (
     build_synthetic_sqlite,
 )
 
-ARRIVAL_DOMAIN = "test-arrival-v1"
+from custody.signing import ARRIVAL_DOMAIN
 
 
 class CustodianFixture:

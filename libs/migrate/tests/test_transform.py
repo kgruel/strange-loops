@@ -58,7 +58,7 @@ from ._fixtures import (
     build_era1_sqlite,
 )
 
-ARRIVAL_DOMAIN = "test-arrival-v1"
+from custody.signing import ARRIVAL_DOMAIN
 
 
 def _ed25519_verify(key_b64: str, signature: str, digest: str) -> bool:

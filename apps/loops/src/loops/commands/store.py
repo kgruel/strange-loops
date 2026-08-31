@@ -42,10 +42,14 @@ def _refuse_store(msg: str, *, label: str | None = None) -> int:
     module renders it the same way so the exit code cannot drift between
     subcommands.
     """
-    from painted import Block, Style, paint
+    from painted import Block, Style, join_vertical, paint
 
-    head = f"✗ {label}: {msg}" if label else f"✗ {msg}"
-    paint(Block.text(head, Style()), file=sys.stderr)
+    lines = msg.splitlines() or [""]
+    head = f"✗ {label}: {lines[0]}" if label else f"✗ {lines[0]}"
+    blocks = [Block.text(head, Style())]
+    for line in lines[1:]:
+        blocks.append(Block.text(line, Style()))
+    paint(join_vertical(*blocks), file=sys.stderr)
     return 2
 
 
@@ -763,9 +767,8 @@ def _run_migrate(argv: list[str], *, vertex_path: Path | None = None) -> int:
     )
     p.add_argument("source", help="Legacy store .jsonl or .sqlite file")
     p.add_argument(
-        "--vertex", default=None,
-        help="Target .vertex file or vertex name (default: resolve like "
-             "other store verbs)",
+        "--vertex", required=True,
+        help="Target .vertex file or vertex name",
     )
     p.add_argument(
         "--rule", default="ulid-migration", choices=["identity", "ulid-migration"],
@@ -782,20 +785,51 @@ def _run_migrate(argv: list[str], *, vertex_path: Path | None = None) -> int:
     # help built from this parser and exits 0 natively. No hand-rolled block.
     args = p.parse_args(argv)
 
-    vertex_target = _resolve_target(args.vertex, vertex_path).resolve()
+    if vertex_path is not None and args.vertex is not None:
+        pos_target = _resolve_target(None, vertex_path).resolve()
+        flag_target = _resolve_target(args.vertex, None).resolve()
+        if pos_target != flag_target:
+            return _refuse_store(
+                f"positional vertex target '{vertex_path}' conflicts with --vertex '{args.vertex}' — "
+                f"targets resolve to different vertices ({pos_target.name} != {flag_target.name})",
+                label="store migrate",
+            )
+        vertex_target = flag_target
+    else:
+        vertex_target = _resolve_target(args.vertex, vertex_path).resolve()
+
     if vertex_target.suffix != ".vertex":
         raise ValueError(
             "migrate requires a .vertex target — the custodian signer and "
             "observer registry live in the custody context, not a raw .db"
         )
+
+    from lang import parse_vertex_file
+    from engine.residence import canonical_mode
+
+    try:
+        pre_ast = parse_vertex_file(vertex_target)
+    except Exception:
+        pre_ast = None
+
+    if pre_ast is not None and pre_ast.store is not None:
+        if canonical_mode(pre_ast.store) == "arrival" or (
+            pre_ast.store_backend is not None and pre_ast.store.suffix == ".arrival"
+        ):
+            return _refuse_store(
+                f"already on an arrival lineage ({pre_ast.store}) — "
+                "re-migration would orphan it; deliberate re-migration is a slice-6 ceremony",
+                label=vertex_target.stem,
+            )
+
     source_path = Path(args.source).resolve()
     if not source_path.exists():
         raise FileNotFoundError(f"{source_path} does not exist")
 
-    from custody import fact_signer_for
+    from custody.signing import arrival_signer_for
 
-    signer = fact_signer_for(vertex_target)
-    if signer is None:
+    signer = arrival_signer_for(vertex_target)
+    if signer is None or signer(vertex_target.stem, "0" * 64) is None:
         return _refuse_store(
             "no signing key for the vertex's self-observer — migration "
             "must sign the custodian genesis and key introductions "

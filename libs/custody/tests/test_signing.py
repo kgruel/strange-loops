@@ -18,6 +18,12 @@ from custody import (
     observer_keys_dir_for,
     tick_signer_for,
 )
+from custody.signing import (
+    ARRIVAL_DOMAIN,
+    arrival_signer_for,
+    arrival_verifier_for,
+    fact_verifier_for,
+)
 from sign import ed25519
 
 
@@ -104,3 +110,65 @@ class TestFactSigner:
         v = _vertex(tmp_path)
         ensure_signing_key(v)
         assert fact_signer_for(v)("../x", "digest") is None
+
+
+class TestArrivalSigner:
+    def test_none_without_keys_dir(self, tmp_path):
+        assert arrival_signer_for(_vertex(tmp_path)) is None
+
+    def test_signs_under_arrival_domain_and_roundtrips(self, tmp_path):
+        v = tmp_path / "x.vertex"
+        kp = ensure_signing_key(v)
+        v.write_text(
+            f'name "x"\nstore "./x.arrival" backend="file"\nobservers {{\n  x {{\n    key "{kp.public_b64}"\n  }}\n}}\nloops {{\n  concept {{ fold {{ items "collect" 100 }} }}\n}}\n'
+        )
+        signer = arrival_signer_for(v)
+        assert signer is not None
+        sig = signer("x", "0" * 64)
+        assert sig is not None
+        pub = ed25519.public_key_from_b64(kp.public_b64)
+        assert ed25519.verify(pub, sig, ("0" * 64).encode(), domain=ARRIVAL_DOMAIN)
+
+        verifier, keys = arrival_verifier_for(v)
+        assert verifier is not None
+        assert verifier("x", sig, "0" * 64) is True
+
+    def test_fact_and_arrival_mutually_refuse(self, tmp_path):
+        v = tmp_path / "x.vertex"
+        kp = ensure_signing_key(v)
+        v.write_text(
+            f'name "x"\nstore "./x.arrival" backend="file"\nobservers {{\n  x {{\n    key "{kp.public_b64}"\n  }}\n}}\nloops {{\n  concept {{ fold {{ items "collect" 100 }} }}\n}}\n'
+        )
+        arr_signer = arrival_signer_for(v)
+        fact_signer = fact_signer_for(v)
+        arr_verifier, _ = arrival_verifier_for(v)
+        fact_verifier, _ = fact_verifier_for(v)
+
+        digest = "a" * 64
+        arr_sig = arr_signer("x", digest)
+        fact_sig = fact_signer("x", digest)
+
+        # Arrival signature verifies under arrival, fails under fact
+        assert arr_verifier("x", arr_sig, digest) is True
+        assert fact_verifier("x", arr_sig, digest) is False
+
+        # Fact signature verifies under fact, fails under arrival
+        assert fact_verifier("x", fact_sig, digest) is True
+        assert arr_verifier("x", fact_sig, digest) is False
+
+    def test_flat_key_is_self_observer_only(self, tmp_path):
+        v = _vertex(tmp_path)
+        ensure_signing_key(v)
+        signer = arrival_signer_for(v)
+        assert signer("x", "digest") is not None
+        assert signer("stranger", "digest") is None
+
+    def test_empty_observer_never_signs(self, tmp_path):
+        v = _vertex(tmp_path)
+        ensure_signing_key(v)
+        assert arrival_signer_for(v)("", "digest") is None
+
+    def test_path_traversal_guarded(self, tmp_path):
+        v = _vertex(tmp_path)
+        ensure_signing_key(v)
+        assert arrival_signer_for(v)("../x", "digest") is None

@@ -53,12 +53,12 @@ is_valid = verify_migration_report(
 ## Level 1 — The 9 Pipeline Stages (§A–§I)
 
 1. **Stage 1 (§A) Legacy Source & Inventory**: Open legacy JSONL or SQLite source via `LegacySource`, scan and compute `SourceInventory` (fact counts, tick counts, observer census, first/last timestamps). Empty sources are refused.
-2. **Stage 2 (§B) Descriptor Resolution**: Derive the deterministic lineage identifier and target path (`<store_dir>/<lineage>.arrival`).
+2. **Stage 2 (§B) Descriptor Resolution**: Mint the lineage identifier (random ULID) and derive target path (`<store_dir>/<lineage>.arrival`). Determinism belongs to the transform.
 3. **Stage 3 (§C) Transform Pipeline**: Apply deterministic transforms (e.g. `ulid_migration()`). Whole-unit drops are recorded in `TransformExceptions`; partial-batch drops are refused upstream.
 4. **Stage 4 (§D) Target Initialization & Preflight**: Pre-flight head journal permissions (`preflight_journal()`). Check for existing valid targets or resume staging logs safely (divergent logs are refused with no in-place repair).
 5. **Stage 5 (§E) Genesis & Key Introductions**: Mint ordinal 0 genesis introducing founding public key under arrival domain (`loops-arrival-v1`), followed by key introduction records for all declared observers.
 6. **Stage 6 (§F) Sequential Append**: Build outer-unsigned record drafts (`batch`, `fact`, `tick`) with deterministic SHA-256 hash chaining and append them sequentially.
-7. **Stage 7 (§G) Signed Migration Report**: Compile the comprehensive migration report (`<store_dir>/<lineage>.migration-report.json` beside target) containing source fingerprints, target head, and exceptions; verify that the injected signer returned a valid signature. (`verify_migration_report` exists separately for external auditor verification).
+7. **Stage 7 (§G) Signed Migration Report**: Compile the comprehensive migration report (`<store_dir>/<lineage>.migration-report.json` beside target) containing source fingerprints, target head, and exceptions; verify that the injected signer returned a non-None signature. (`verify_migration_report` exists separately for external auditor verification).
 8. **Stage 8 (§H) Inventory Equality**: Assert exact inventory equality between source inventory and target projection across all kinds and observers (accounting for whole-unit drops; record count comparison is deliberately excluded).
 9. **Stage 9 (§I) Atomic Descriptor Publish**: Verify the five code-level publish preconditions:
    - `target_verify_full`: Target log verifies `Full(through=head)`

@@ -49,12 +49,13 @@ Contract & Architectural Discipline
 
 8. The migration report (§I.1, ratified M-3): `<lineage>.migration-report.json` beside
    the target, signed by the custodian, referenced by nothing in the ledger.
-   Signing covers the canonical JSON bytes (RFC 8785 JCS) of the report body dictionary:
-   `canonical_bytes = _canonical_bytes(report_body)`
+   Signing covers the canonical JSON bytes (RFC 8785 JCS) of the report envelope:
+   `report_doc = {"body": report_body, "signer": custodian}`
+   `canonical_bytes = _canonical_bytes(report_doc)`
    `digest = sha256(canonical_bytes).hexdigest()`
    `sig = signer(custodian, digest)`
    Report file format:
-   `{"body": report_body, "signature": sig, "signer": custodian}`
+   `{"body": report_body, "signer": custodian, "signature": sig}`
 
 9. Legacy store is never mutated and never deleted: Remains read-only archival evidence.
 """

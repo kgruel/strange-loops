@@ -23,11 +23,10 @@ from engine.arrival_contract import Full, Head, RecordDraft, StoreDescriptor
 from engine.arrival_head_attestation import Kind, Level, heads_dir, read_journal
 from engine.arrival_head_seam import StoreLost
 from engine.arrival_registry import BackendRegistry, descriptor_for
-from lang import BackendDecl, ObserverDecl, VertexFile, parse_vertex_file
+from lang import BackendDecl, ObserverDecl, VertexFile, parse_vertex, parse_vertex_file
 from sign import ed25519
 
 from migrate.legacy_ids import FactRow, Transform, identity, ulid_migration
-from lang import BackendDecl, parse_vertex
 from migrate.legacy_source import LegacySource
 from migrate.refusals import (
     JournalPreflightRefused,

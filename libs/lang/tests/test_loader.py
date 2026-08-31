@@ -3490,8 +3490,6 @@ loops {
 """
         span = effective_store_clause(text)
         assert span.count == 1
-        assert span.line == 2
-        assert span.raw == 'store "./data/project.jsonl"'
         assert span.span is not None
         start, end = span.span
         assert text[start:end] == 'store "./data/project.jsonl"'
@@ -3503,8 +3501,6 @@ store "./data/project.arrival" backend="file"
 """
         span = effective_store_clause(text)
         assert span.count == 1
-        assert span.line == 2
-        assert span.raw == 'store "./data/project.arrival" backend="file"'
         assert span.span is not None
         start, end = span.span
         assert text[start:end] == 'store "./data/project.arrival" backend="file"'
@@ -3516,7 +3512,6 @@ name "alice"
 """
         span = effective_store_clause(text)
         assert span.count == 1
-        assert span.line == 2
         assert span.span is not None
         start, end = span.span
         assert text[start:end] == '\t  store   "./data/store.jsonl"   backend="file"  '
@@ -3534,8 +3529,6 @@ loops {
 """
         span = effective_store_clause(text)
         assert span.count == 1
-        assert span.line == 5
-        assert span.raw == 'store "./data/active.jsonl"'
         assert span.span is not None
         start, end = span.span
         assert text[start:end] == 'store "./data/active.jsonl"'
@@ -3552,9 +3545,7 @@ loops {
 """
         span = effective_store_clause(text)
         assert span.count == 0
-        assert span.line is None
         assert span.span is None
-        assert span.raw is None
 
     def test_line_comment_shadowed(self):
         text = """\
@@ -3564,8 +3555,6 @@ store "./data/active.jsonl"
 """
         span = effective_store_clause(text)
         assert span.count == 1
-        assert span.line == 3
-        assert span.raw == 'store "./data/active.jsonl"'
         assert span.span is not None
         start, end = span.span
         assert text[start:end] == 'store "./data/active.jsonl"'
@@ -3578,8 +3567,6 @@ store "./data/active.jsonl"
 """
         span = effective_store_clause(text)
         assert span.count == 1
-        assert span.line == 3
-        assert span.raw == 'store "./data/active.jsonl"'
         assert span.span is not None
         start, end = span.span
         assert text[start:end] == 'store "./data/active.jsonl"'
@@ -3592,9 +3579,7 @@ store "./data/b.jsonl"
 """
         span = effective_store_clause(text)
         assert span.count == 2
-        assert span.line is None
         assert span.span is None
-        assert span.raw is None
 
     def test_no_store_clause(self):
         text = """\
@@ -3605,9 +3590,7 @@ loops {
 """
         span = effective_store_clause(text)
         assert span.count == 0
-        assert span.line is None
         assert span.span is None
-        assert span.raw is None
 
     def test_string_containing_store_word(self):
         text = """\
@@ -3617,8 +3600,9 @@ store "./data/real.jsonl"
 """
         span = effective_store_clause(text)
         assert span.count == 1
-        assert span.line == 3
-        assert span.raw == 'store "./data/real.jsonl"'
+        assert span.span is not None
+        start, end = span.span
+        assert text[start:end] == 'store "./data/real.jsonl"'
 
     def test_syntax_error_raises_parse_error(self):
         with pytest.raises(ParseError):

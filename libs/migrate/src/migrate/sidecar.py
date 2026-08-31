@@ -64,7 +64,6 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import re
 import sqlite3
 from collections import defaultdict
 from collections.abc import Sequence
@@ -245,33 +244,6 @@ def edit_vertex_store_clause(
             f"found {store_span.count} duplicate store nodes",
             condition="vertex_store_duplicate_nodes",
         )
-
-    # Check for block comment spans /* ... */
-    block_comment_spans: list[tuple[int, int]] = [
-        (m.start(), m.end())
-        for m in re.finditer(r"/\*[\s\S]*?\*/", original_text)
-    ]
-
-    regex_matches = list(
-        re.finditer(r"^[ \t]*store\b.*$", original_text, flags=re.MULTILINE)
-    )
-    if len(regex_matches) != 1 and store_span.count == 0:
-        raise PublishPreconditionRefused(
-            "the store clause cannot be unambiguously located for a surgical edit: "
-            f"expected exactly 1 store line match, found {len(regex_matches)}",
-            condition="vertex_store_regex_match_count",
-        )
-
-    if regex_matches:
-        match = regex_matches[0]
-        match_start = match.start()
-        for c_start, c_end in block_comment_spans:
-            if c_start <= match_start < c_end and store_span.count == 0:
-                raise PublishPreconditionRefused(
-                    "the store clause cannot be unambiguously located for a surgical edit: "
-                    "matched store line is inside a comment",
-                    condition="vertex_store_in_comment",
-                )
 
     if store_span.count == 0 or store_span.span is None:
         raise PublishPreconditionRefused(

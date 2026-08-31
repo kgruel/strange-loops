@@ -65,16 +65,6 @@ _ALLOWLIST: set[tuple[str, str]] = {
     # lang.testing ships shared Hypothesis strategies for downstream libs' test suites;
     # hypothesis is declared in lang's dev group rather than production dependencies.
     ("libs/lang/src/lang/testing/strategies.py", "hypothesis"),
-    # apps/loops migration test verifies RFC 8785 canonical JSON report signatures.
-    ("apps/loops/tests/test_store_migrate.py", "rfc8785"),
-    # store tests import atoms and lang for test fixtures and assertions;
-    # slated for slice-5 disposition when store tests migrate to arrival format.
-    ("libs/store/tests/test_fact_signature_transport.py", "atoms"),
-    ("libs/store/tests/strategies.py", "atoms"),
-    ("libs/store/tests/test_properties_merge.py", "atoms"),
-    ("libs/store/tests/test_properties_merge.py", "lang"),
-    ("libs/store/tests/test_permuted_transport.py", "atoms"),
-    ("libs/store/tests/test_conformance_merge.py", "atoms"),
 }
 
 
@@ -189,9 +179,14 @@ def test_third_party_and_interpackage_imports_declared():
 
 
 def test_rule_19_allowlist_is_minimal():
-    """Assert every entry in _ALLOWLIST corresponds to an actual import site."""
+    """Assert every entry in _ALLOWLIST corresponds to an active undeclared import violation.
+
+    The allowlist is shrink-only: an entry must be an actual import AND must still be
+    undeclared in its package dependencies (or dev group for test files). If an import is
+    properly declared in pyproject.toml, its allowlist entry is redundant and fails the test.
+    """
     stale: list[str] = []
-    for rel_path, module in _ALLOWLIST:
+    for rel_path, module in sorted(_ALLOWLIST):
         target = REPO_ROOT / rel_path
         if not target.exists():
             stale.append(f"  {rel_path}: file no longer exists")
@@ -200,8 +195,23 @@ def test_rule_19_allowlist_is_minimal():
         imported_tops = {m.split(".")[0] for m, _ in collector.runtime_modules}
         if module not in imported_tops:
             stale.append(f"  {rel_path}: {module!r} is no longer imported")
+            continue
+
+        parts = Path(rel_path).parts
+        if len(parts) >= 2 and parts[0] in ("libs", "apps"):
+            pkg_dir = REPO_ROOT / parts[0] / parts[1]
+            is_test = "tests" in parts
+            declared = _get_package_declared_modules(pkg_dir, include_dev=is_test)
+            if is_test:
+                declared.add("pytest")
+                declared.add("_pytest")
+            if module in declared:
+                stale.append(
+                    f"  {rel_path}: {module!r} is declared in {pkg_dir.name}/pyproject.toml "
+                    f"(allowlist entry is redundant and must be removed)"
+                )
 
     assert not stale, (
-        "Rule 19: Stale _ALLOWLIST entries — the import they excused is gone:\n"
+        "Rule 19: Stale _ALLOWLIST entries — the import they excused is no longer a violation:\n"
         + "\n".join(stale)
     )

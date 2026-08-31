@@ -3618,3 +3618,71 @@ store "./data/real.jsonl"
     def test_syntax_error_raises_parse_error(self):
         with pytest.raises(ParseError):
             effective_store_clause('store "unclosed string\n')
+
+    def test_raw_string_property_with_trailing_comment_preserves_tail(self):
+        """(a) store with backend=r#"..."# and trailing comment containing quote preserves comment."""
+        text = """\
+name "alice"
+store "./legacy.jsonl" backend=r#"fi" fake"# // KEEP OPERATOR " tail
+loops {
+  concept { fold { items "collect" 100 } }
+}
+"""
+        span = effective_store_clause(text)
+        assert span.count == 1
+        assert span.span is not None
+        start, end = span.span
+        assert text[start:end] == 'store "./legacy.jsonl" backend=r#"fi" fake"#'
+        edited = text[:start] + 'store "./target.arrival" backend="file"' + text[end:]
+        assert 'store "./target.arrival" backend="file" // KEEP OPERATOR " tail\n' in edited
+
+    def test_raw_string_property_no_old_property_leak_on_rewrite(self):
+        """(b) store with backend=r#"..."# without comment leaks no old property bytes on rewrite."""
+        text = """\
+name "alice"
+store "./legacy.jsonl" backend=r#"fi" fake"#
+loops {
+  concept { fold { items "collect" 100 } }
+}
+"""
+        span = effective_store_clause(text)
+        assert span.count == 1
+        assert span.span is not None
+        start, end = span.span
+        assert text[start:end] == 'store "./legacy.jsonl" backend=r#"fi" fake"#'
+        edited = text[:start] + 'store "./target.arrival" backend="file"' + text[end:]
+        assert 'fake"#' not in edited
+        assert 'r#"' not in edited
+        assert edited == """\
+name "alice"
+store "./target.arrival" backend="file"
+loops {
+  concept { fold { items "collect" 100 } }
+}
+"""
+
+    def test_nested_hash_raw_string_property(self):
+        """(c) nested-hash form r##"..."## with embedded "#."""
+        text = """\
+name "alice"
+store "./legacy.jsonl" backend=r##"fi "# fake"## // KEEP OPERATOR " tail
+loops {
+  concept { fold { items "collect" 100 } }
+}
+"""
+        span = effective_store_clause(text)
+        assert span.count == 1
+        assert span.span is not None
+        start, end = span.span
+        assert text[start:end] == 'store "./legacy.jsonl" backend=r##"fi "# fake"##'
+        edited = text[:start] + 'store "./target.arrival" backend="file"' + text[end:]
+        assert 'store "./target.arrival" backend="file" // KEEP OPERATOR " tail\n' in edited
+
+    def test_unterminated_raw_string_raises_parse_error(self):
+        """(d) unterminated raw string in store clause raises ParseError."""
+        with pytest.raises(ParseError):
+            effective_store_clause('store "./legacy.jsonl" backend=r#"unterminated\n')
+        with pytest.raises(ParseError):
+            effective_store_clause('store r#"unterminated\n')
+        with pytest.raises(ParseError):
+            effective_store_clause('store "./legacy.jsonl" backend=r##"unterminated"#\n')

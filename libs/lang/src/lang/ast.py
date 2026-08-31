@@ -697,11 +697,12 @@ class BackendDecl:
 
 @dataclass(frozen=True)
 class StoreClauseSpan:
-    """Line span and multiplicity of the effective store clause in a .vertex document.
+    """Sub-line span and multiplicity of the effective store clause in a .vertex document.
 
-    Note: ``span`` covers the character offsets of the entire line containing the
-    effective store clause (excluding trailing newline). Any same-line comments
-    trailing the store clause are within this span and will be replaced upon rewrite.
+    Note: ``span`` covers the sub-line character offsets from the start of the
+    ``store`` node name through the end of its arguments and properties (excluding
+    trailing whitespace, comments, or line terminators). Trailing bytes on the same
+    line (such as comments) are preserved upon rewrite.
     """
 
     span: tuple[int, int] | None

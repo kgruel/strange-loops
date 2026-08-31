@@ -971,6 +971,26 @@ def parse_vertex_file(path: Path) -> VertexFile:
     return parse_vertex(text, path)
 
 
+def _scan_raw_string(text: str, i: int, n: int) -> int | None:
+    """If text[i:] starts a raw string (r"..." or r#"..."#), return the index after its
+    closing delimiter, or n if unterminated. Otherwise return None.
+    """
+    if text[i] == "r" and i + 1 < n and (text[i + 1] == '"' or text[i + 1] == "#"):
+        hashes = 0
+        idx = i + 1
+        while idx < n and text[idx] == "#":
+            hashes += 1
+            idx += 1
+        if idx < n and text[idx] == '"':
+            idx += 1
+            end_pat = '"' + ("#" * hashes)
+            found = text.find(end_pat, idx)
+            if found != -1:
+                return found + len(end_pat)
+            return n
+    return None
+
+
 def _scan_kdl_node_end(text: str, start_pos: int) -> int:
     """Scan forward from start_pos (start of node name) to find the end character offset
     of the node's arguments and properties (excluding trailing whitespace/comments/terminators).
@@ -1023,22 +1043,11 @@ def _scan_kdl_node_end(text: str, start_pos: int) -> int:
             continue
 
         # Raw string: r"..." or r#"..."#
-        if ch == "r" and i + 1 < n and (text[i + 1] == '"' or text[i + 1] == "#"):
-            hashes = 0
-            idx = i + 1
-            while idx < n and text[idx] == "#":
-                hashes += 1
-                idx += 1
-            if idx < n and text[idx] == '"':
-                i = idx + 1
-                end_pat = '"' + ("#" * hashes)
-                found = text.find(end_pat, i)
-                if found != -1:
-                    i = found + len(end_pat)
-                else:
-                    i = n
-                node_end = i
-                continue
+        raw_end = _scan_raw_string(text, i, n)
+        if raw_end is not None:
+            i = raw_end
+            node_end = i
+            continue
 
         # Bare token / property (key=val or arg)
         tok_start = i
@@ -1057,7 +1066,11 @@ def _scan_kdl_node_end(text: str, start_pos: int) -> int:
                     else:
                         i += 1
             else:
-                i += 1
+                raw_end = _scan_raw_string(text, i, n)
+                if raw_end is not None:
+                    i = raw_end
+                else:
+                    i += 1
         node_end = i
 
     return node_end
@@ -1123,7 +1136,10 @@ def effective_store_clause(text: str, path: Path | None = None) -> StoreClauseSp
                 if bc_depth == 0:
                     state = _CODE
         else:  # _CODE
-            if ch == '"':
+            raw_end = _scan_raw_string(text, i, n)
+            if raw_end is not None:
+                i = raw_end - 1
+            elif ch == '"':
                 state = _STRING
             elif ch == "/" and i + 1 < n and text[i + 1] == "/":
                 state = _LINE_COMMENT

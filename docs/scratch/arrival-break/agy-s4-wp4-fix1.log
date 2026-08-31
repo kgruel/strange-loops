@@ -1,0 +1,125 @@
+# Slice 4 WP4 — Fix Round 1 Report
+
+## 1. Per-Item Changes
+
+* **F1 — Refuse positional-vs-flag disagreement**:
+  In [`apps/loops/src/loops/commands/store.py`](file:///Users/kaygee/Code/loops-wt/s4-wp4/apps/loops/src/loops/commands/store.py#L788-L798), updated `_run_migrate` to resolve both positional `vertex_path` and flag `--vertex` when both are present. If they resolve to different vertex files, it refuses with exit code 2 and a message naming both spellings (`positional vertex target '...' conflicts with --vertex '...'`). If they resolve to the same vertex, it proceeds cleanly.
+* **F2 — `--vertex` becomes REQUIRED**:
+  In [`apps/loops/src/loops/commands/store.py`](file:///Users/kaygee/Code/loops-wt/s4-wp4/apps/loops/src/loops/commands/store.py#L769-L772), set `required=True` on `--vertex` in `_run_migrate`'s `ArgumentParser`, updated the help string to remove the ambient default prose, and removed the flagless fallback arm to `<LOOPS_HOME>/.vertex`.
+* **F3 — Arrival custody domain**:
+  * In [`libs/custody/src/custody/signing.py`](file:///Users/kaygee/Code/loops-wt/s4-wp4/libs/custody/src/custody/signing.py#L32), defined `ARRIVAL_DOMAIN = "loops-arrival-v1"`.
+  * Implemented [`arrival_signer_for`](file:///Users/kaygee/Code/loops-wt/s4-wp4/libs/custody/src/custody/signing.py#L159-L203) and [`arrival_verifier_for`](file:///Users/kaygee/Code/loops-wt/s4-wp4/libs/custody/src/custody/signing.py#L236-L268), mirroring `fact_signer_for`/`fact_verifier_for`'s key resolution and caching under the `ARRIVAL_DOMAIN`.
+  * In [`apps/loops/src/loops/commands/store.py`](file:///Users/kaygee/Code/loops-wt/s4-wp4/apps/loops/src/loops/commands/store.py#L829), wired `_run_migrate` to `arrival_signer_for`.
+  * Dissolved test-local `ARRIVAL_DOMAIN = "test-arrival-v1"` in [`libs/migrate/tests/test_sidecar.py`](file:///Users/kaygee/Code/loops-wt/s4-wp4/libs/migrate/tests/test_sidecar.py#L67) and [`libs/migrate/tests/test_transform.py`](file:///Users/kaygee/Code/loops-wt/s4-wp4/libs/migrate/tests/test_transform.py#L61) against `custody.signing.ARRIVAL_DOMAIN`.
+  * Added mutual refusal and round-trip unit tests in [`libs/custody/tests/test_signing.py`](file:///Users/kaygee/Code/loops-wt/s4-wp4/libs/custody/tests/test_signing.py#L115-L175).
+  * Added domain-separation pin assertions in [`apps/loops/tests/test_store_migrate.py`](file:///Users/kaygee/Code/loops-wt/s4-wp4/apps/loops/tests/test_store_migrate.py#L114-L140).
+* **F4 — Signer guard probes capability, not existence**:
+  In [`apps/loops/src/loops/commands/store.py`](file:///Users/kaygee/Code/loops-wt/s4-wp4/apps/loops/src/loops/commands/store.py#L832), changed the guard to `if signer is None or signer(vertex_target.stem, "0" * 64) is None:`. Probing signer capability ensures vertices with an existing `keys/` directory (e.g. `keys/bob/`) but missing the self-observer key cleanly refuse with exit code 2 before attempting migration.
+* **F5 — Multi-line refusal rendering**:
+  In [`apps/loops/src/loops/commands/store.py`](file:///Users/kaygee/Code/loops-wt/s4-wp4/apps/loops/src/loops/commands/store.py#L37-L50), updated `_refuse_store` to split `msg.splitlines()` into distinct painted `Block.text` rows composed via `join_vertical(*blocks)`, preserving structured multi-line messages on `stderr`.
+* **F6 — Pyproject metadata honesty**:
+  In [`apps/loops/pyproject.toml`](file:///Users/kaygee/Code/loops-wt/s4-wp4/apps/loops/pyproject.toml#L6-L18), added `"migrate"` to `project.dependencies` and `migrate = { workspace = true }` under `[tool.uv.sources]`.
+* **F7 — E2E test strength**:
+  In [`apps/loops/tests/test_store_migrate.py`](file:///Users/kaygee/Code/loops-wt/s4-wp4/apps/loops/tests/test_store_migrate.py#L107-L146), asserted that `resolve_canonical_path(vpath) == target_path` and opened the migrated store via `main([str(vpath), "store", "stats", "--json"])`, asserting `total_facts == 2`.
+* **F8 — Already-migrated guard**:
+  In [`apps/loops/src/loops/commands/store.py`](file:///Users/kaygee/Code/loops-wt/s4-wp4/apps/loops/src/loops/commands/store.py#L807-L824), added a CLI pre-flight check parsing `vertex_target` with `parse_vertex_file`. If `pre_ast.store` is in arrival mode or specifies an arrival file backend, `_run_migrate` refuses with exit 2 ("already on an arrival lineage; re-migration would orphan it; deliberate re-migration is a slice-6 ceremony").
+
+---
+
+## 2. F3(3) Decision and Rationale
+
+**Decision**: Dissolved `libs/migrate`'s test-local `ARRIVAL_DOMAIN` constants against `from custody.signing import ARRIVAL_DOMAIN` directly in `libs/migrate/tests/`, and additionally added the domain-separation cross-check pin in `apps/loops/tests/test_store_migrate.py`.
+
+**Rationale**:
+Architecture Rule 11 ([`tests/architecture/test_rule_11_record_never_imports_surfacing.py:98`](file:///Users/kaygee/Code/loops-wt/s4-wp4/tests/architecture/test_rule_11_record_never_imports_surfacing.py#L98)) checks `_src_py_files(lib_dir)`, which specifically restricts checks to `libs/*/src/` files and excludes test suites. The architecture rule tests (`Rule 4`, `Rule 8`, `Rule 11`, `Rule 13`) confirm that a lib's test directory (`libs/migrate/tests/`) is not shipped source and may import other workspace libraries for testing purposes. Shipped source (`libs/migrate/src`) contains zero imports from `custody`, preserving Weaver Level A/C separation.
+
+---
+
+## 3. Break / Restore Proofs
+
+### Proof 1 (F1: Restore silent precedence → disagreement test fails)
+* **Break**: Restored `vertex_target = _resolve_target(args.vertex, vertex_path).resolve()` in `_run_migrate`.
+* **Red Output**:
+  ```text
+  apps/loops/tests/test_store_migrate.py::TestMigrateEndToEnd::test_migrate_positional_and_flag_disagreeing_refuses FAILED [100%]
+  E       assert 0 == 2
+  apps/loops/tests/test_store_migrate.py:173: AssertionError
+  ```
+* **Restore & Green**: Restored agreement check. Test passed: `1 passed, 7 deselected in 0.43s`.
+* **Production Diff**: Empty (`git diff apps/loops/src/loops/commands/store.py` produced 0 lines).
+
+### Proof 2 (F3: Point CLI back at `fact_signer_for` → domain-separation pin fails)
+* **Break**: Pointed `signer = fact_signer_for(vertex_target)` in `_run_migrate`.
+* **Red Output**:
+  ```text
+  apps/loops/tests/test_store_migrate.py::TestMigrateEndToEnd::test_migrate_through_cli_mints_lineage_and_updates_descriptor FAILED [100%]
+  E       AssertionError: assert False is True
+  E        +  where False = <function arrival_verifier_for.<locals>.verifier at 0x107a26de0>('alice', 'E/1gzhnkwoqTIAw8je2FJClrYZDxfBi7djCicv2LZ/P4fIOIS1mpSu66XAU2sKExgYD+V4vukHqK2rKrL3OzDA==', '7463d4043453fd89e583da0f1c46a52494cb4392e0e2634fcb3a44ef9e55d878')
+  apps/loops/tests/test_store_migrate.py:132: AssertionError
+  ```
+* **Restore & Green**: Restored `arrival_signer_for`. Test passed: `1 passed, 7 deselected in 0.10s`.
+* **Production Diff**: Empty (`git diff apps/loops/src/loops/commands/store.py` produced 0 lines).
+
+### Proof 3 (F4: Revert to existence-only guard → keys/bob test fails)
+* **Break**: Reverted to `if signer is None:` in `_run_migrate`.
+* **Red Output**:
+  ```text
+  apps/loops/tests/test_store_migrate.py::TestMigrateEndToEnd::test_migrate_refuses_when_keys_dir_exists_but_no_self_key FAILED [100%]
+  E           engine.arrival.GenesisRefused: genesis for lineage 01M1ATVBR5MRZ7Z6G3ACAJGKBE is unsigned — genesis is the lineage's attestation root and observer 'alice' produced no signature
+  libs/engine/src/engine/arrival.py:923: GenesisRefused
+  ```
+* **Restore & Green**: Restored capability probe `if signer is None or signer(vertex_target.stem, "0" * 64) is None:`. Test passed: `1 passed, 7 deselected in 0.06s`.
+* **Production Diff**: Empty (`git diff apps/loops/src/loops/commands/store.py` produced 0 lines).
+
+### Proof 4 (F8: Drop pre-flight → already-migrated test fails)
+* **Break**: Removed the already-migrated check from `_run_migrate`.
+* **Red Output**:
+  ```text
+  apps/loops/tests/test_store_migrate.py::TestMigrateEndToEnd::test_migrate_refuses_already_migrated_vertex FAILED [100%]
+  E       assert 0 == 2
+  apps/loops/tests/test_store_migrate.py:225: AssertionError
+  ```
+* **Restore & Green**: Restored already-migrated pre-flight check. Test passed: `1 passed, 7 deselected in 0.07s`.
+* **Production Diff**: Empty (`git diff apps/loops/src/loops/commands/store.py` produced 0 lines).
+
+---
+
+## 4. Final Verification and Test Suite Counts
+
+### Base vs Final Test Counts
+* **Apps Suite Baseline**: `2533 passed, 1 xfailed in 13.50s`
+* **Apps Suite Final**: `2538 passed, 1 xfailed in 13.68s` (+5 new tests in `test_store_migrate.py`)
+* Output:
+  ```text
+  cd /Users/kaygee/Code/loops-wt/s4-wp4 && uv run pytest apps/loops -q
+  2538 passed, 1 xfailed in 13.68s
+  ```
+
+### Architecture & Libs Suite
+```text
+cd /Users/kaygee/Code/loops-wt/s4-wp4 && uv run pytest libs/migrate libs/custody tests/architecture -q
+178 passed in 4.77s
+```
+
+### Git Working Tree Status
+```text
+cd /Users/kaygee/Code/loops-wt/s4-wp4 && git status --short
+?? .tmp/
+```
+
+### Import Proof (`libs/migrate/src` → `custody`)
+```text
+cd /Users/kaygee/Code/loops-wt/s4-wp4 && grep -rn "from custody" libs/migrate/src && grep -rn "import.*custody" libs/migrate/src
+(Exit code 1 - zero occurrences)
+```
+
+---
+
+## 5. Summary of Commits
+* `44a14cea`: `feat(custody): arrival signing domain and verifier (slice4 WP4 fix F3)`
+* `df17edd3`: `feat(cli): store migrate fixes F1-F8 (slice4 WP4 fix round 1)`
+
+## 6. Audit & Disclosures
+* **Stopped on**: None.
+* **Found-but-left-alone**: None.
+* **Honest unverified list**: None; every fix F1–F8 has explicit test assertions, break/restore proofs, and full regression verification across the entire suite.

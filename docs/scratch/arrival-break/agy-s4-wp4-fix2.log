@@ -1,0 +1,160 @@
+I have launched the baseline tests in the foreground and will proceed as soon as the test run finishes.
+I have launched the `apps/loops` full test suite in the foreground and will wait for it to complete.
+### Per-Fix Summary
+
+#### F1 — Declare Test-Only Dev Dependencies in `libs/migrate`
+* **File:** [`libs/migrate/pyproject.toml`](file:///Users/kaygee/Code/loops-wt/s4-wp4/libs/migrate/pyproject.toml)
+* **Changes:**
+  * Added `custody = { workspace = true }` and `sign = { workspace = true }` to `[tool.uv.sources]`.
+  * Added `"custody"` and `"sign"` to `[dependency-groups] dev`.
+* **Grep Proof (src runtime independence):** Verified that [`libs/migrate/src`](file:///Users/kaygee/Code/loops-wt/s4-wp4/libs/migrate/src) has zero imports of `custody` or `sign`:
+  ```bash
+  git grep -E '^\s*(from|import)\s+(custody|sign)\b' libs/migrate/src
+  # Output: NO RUNTIME IMPORTS (exit code 0)
+  ```
+* **Commit:** `e1edaa24` (`fix(migrate): declare test-only dev deps custody and sign (F1)`)
+
+---
+
+#### F2 — Compose Fact and Arrival Signer/Verifier in `custody`
+* **File:** [`libs/custody/src/custody/signing.py`](file:///Users/kaygee/Code/loops-wt/s4-wp4/libs/custody/src/custody/signing.py)
+* **Changes:**
+  * Refactored duplicate implementations into single private domain-parameterized resolvers:
+    * [`_scoped_signer_for(vertex_path: Path, domain: str)`](file:///Users/kaygee/Code/loops-wt/s4-wp4/libs/custody/src/custody/signing.py#L104-L139)
+    * [`_scoped_verifier_for(vertex_path: Path, domain: str)`](file:///Users/kaygee/Code/loops-wt/s4-wp4/libs/custody/src/custody/signing.py#L175-L198)
+  * Made [`fact_signer_for`](file:///Users/kaygee/Code/loops-wt/s4-wp4/libs/custody/src/custody/signing.py#L141), [`arrival_signer_for`](file:///Users/kaygee/Code/loops-wt/s4-wp4/libs/custody/src/custody/signing.py#L161), [`fact_verifier_for`](file:///Users/kaygee/Code/loops-wt/s4-wp4/libs/custody/src/custody/signing.py#L201), and [`arrival_verifier_for`](file:///Users/kaygee/Code/loops-wt/s4-wp4/libs/custody/src/custody/signing.py#L221) thin public wrappers delegating to the scoped resolvers with `FACT_DOMAIN` and `ARRIVAL_DOMAIN`.
+* **Commit:** `b226adce` (`refactor(custody): compose arrival and fact resolvers by domain (F2)`)
+
+---
+
+#### F3 — Export Arrival Signer and Verifier from `custody` Root
+* **Files:**
+  * [`libs/custody/src/custody/__init__.py`](file:///Users/kaygee/Code/loops-wt/s4-wp4/libs/custody/src/custody/__init__.py)
+  * [`apps/loops/src/loops/commands/store.py`](file:///Users/kaygee/Code/loops-wt/s4-wp4/apps/loops/src/loops/commands/store.py#L829)
+  * [`apps/loops/tests/test_store_migrate.py`](file:///Users/kaygee/Code/loops-wt/s4-wp4/apps/loops/tests/test_store_migrate.py#L20)
+* **Changes:**
+  * Exported [`ARRIVAL_DOMAIN`](file:///Users/kaygee/Code/loops-wt/s4-wp4/libs/custody/src/custody/signing.py#L32), [`arrival_signer_for`](file:///Users/kaygee/Code/loops-wt/s4-wp4/libs/custody/src/custody/signing.py#L161), and [`arrival_verifier_for`](file:///Users/kaygee/Code/loops-wt/s4-wp4/libs/custody/src/custody/signing.py#L221) in [`custody/__init__.py`](file:///Users/kaygee/Code/loops-wt/s4-wp4/libs/custody/src/custody/__init__.py) and listed them in `__all__`.
+  * Normalized imports in [`store.py`](file:///Users/kaygee/Code/loops-wt/s4-wp4/apps/loops/src/loops/commands/store.py#L829) and [`test_store_migrate.py`](file:///Users/kaygee/Code/loops-wt/s4-wp4/apps/loops/tests/test_store_migrate.py#L20) to `from custody import ...`.
+* **Commit:** `042f9504` (`feat(custody): export arrival signer and verifier from package root (F3)`)
+
+---
+
+#### F4 — Honest Parse Refusal, Suffix Disjunct Removal, and Dep Ordering
+* **Files:**
+  * [`apps/loops/src/loops/commands/store.py`](file:///Users/kaygee/Code/loops-wt/s4-wp4/apps/loops/src/loops/commands/store.py#L807-L824)
+  * [`apps/loops/pyproject.toml`](file:///Users/kaygee/Code/loops-wt/s4-wp4/apps/loops/pyproject.toml#L6)
+  * [`apps/loops/tests/test_store_migrate.py`](file:///Users/kaygee/Code/loops-wt/s4-wp4/apps/loops/tests/test_store_migrate.py#L275-L284)
+* **Changes:**
+  * **(a)** Replaced bare `except Exception: pre_ast = None` in [`_run_migrate`](file:///Users/kaygee/Code/loops-wt/s4-wp4/apps/loops/src/loops/commands/store.py#L746) with explicit `except ParseError as exc:` refusing cleanly with `_refuse_store(f"the vertex file cannot be parsed: {exc}", label=vertex_target.stem)` (exit code 2).
+  * **(b)** Removed the unreachable second disjunct `(pre_ast.store_backend is not None and pre_ast.store.suffix == ".arrival")` since [`canonical_mode(pre_ast.store) == "arrival"`](file:///Users/kaygee/Code/loops-wt/s4-wp4/libs/engine/src/engine/residence.py#L85) is the single authoritative mode switch.
+  * **(c)** Reordered `dependencies` in [`apps/loops/pyproject.toml`](file:///Users/kaygee/Code/loops-wt/s4-wp4/apps/loops/pyproject.toml#L6) so `"migrate"` sits with the workspace dependencies before third-party `"painted"`.
+  * **(d)** Added [`test_migrate_refuses_unparseable_vertex`](file:///Users/kaygee/Code/loops-wt/s4-wp4/apps/loops/tests/test_store_migrate.py#L275-L284) to [`test_store_migrate.py`](file:///Users/kaygee/Code/loops-wt/s4-wp4/apps/loops/tests/test_store_migrate.py).
+* **Commit:** `080ff470` (`fix(cli): store migrate honest parse error refusal and unreachable disjunct removal (F4)`)
+
+---
+
+### Proof Evidence (Red → Restore → Green → Empty Diff)
+
+#### Proof 1: F2 Domain Separation Mutation
+Mutated [`_scoped_signer_for`](file:///Users/kaygee/Code/loops-wt/s4-wp4/libs/custody/src/custody/signing.py#L104) to ignore `domain` and always sign under `FACT_DOMAIN`.
+
+* **Red Output:**
+  ```text
+  $ TMPDIR=/Users/kaygee/Code/loops-wt/s4-wp4/.tmp uv run pytest libs/custody/tests/test_signing.py -k test_fact_and_arrival_mutually_refuse --basetemp=/Users/kaygee/Code/loops-wt/s4-wp4/.tmp/pt -q
+  F                                                                        [100%]
+  =================================== FAILURES ===================================
+  ___________ TestArrivalSigner.test_fact_and_arrival_mutually_refuse ____________
+  ...
+  >       assert arr_verifier("x", arr_sig, digest) is True
+  E       AssertionError: assert False is True
+  E        +  where False = <function _scoped_verifier_for.<locals>.verifier at 0x10ad407c0>('x', '...', '...')
+  libs/custody/tests/test_signing.py:152: AssertionError
+  1 failed, 18 deselected in 0.05s
+  ```
+* **Restore & Green:**
+  ```bash
+  git checkout libs/custody/src/custody/signing.py
+  TMPDIR=/Users/kaygee/Code/loops-wt/s4-wp4/.tmp uv run pytest libs/custody/tests/test_signing.py -k test_fact_and_arrival_mutually_refuse --basetemp=/Users/kaygee/Code/loops-wt/s4-wp4/.tmp/pt -q
+  # Output:
+  .                                                                        [100%]
+  1 passed, 18 deselected in 0.03s
+  ```
+
+---
+
+#### Proof 2: F4a Fail-Open Mutation
+Mutated [`_run_migrate`](file:///Users/kaygee/Code/loops-wt/s4-wp4/apps/loops/src/loops/commands/store.py#L746) to restore `try: pre_ast = parse_vertex_file(...); except Exception: pre_ast = None`.
+
+* **Red Output:**
+  ```text
+  $ TMPDIR=/Users/kaygee/Code/loops-wt/s4-wp4/.tmp uv run pytest apps/loops/tests/test_store_migrate.py -k test_migrate_refuses_unparseable_vertex --basetemp=/Users/kaygee/Code/loops-wt/s4-wp4/.tmp/pt -q
+  F                                                                        [100%]
+  =================================== FAILURES ===================================
+  _________ TestMigrateEndToEnd.test_migrate_refuses_unparseable_vertex __________
+  ...
+      rc = _run_migrate([str(source), "--vertex", str(vpath)], vertex_path=None)
+      assert rc == 2
+      stderr = capsys.readouterr().err
+  >   assert "the vertex file cannot be parsed" in stderr
+  E   assert 'the vertex file cannot be parsed' in "✗ broken: no signing key for the vertex's self-observer — migration must sign the custodian genesis and key introductions (loops add <vertex> observer --keygen)\n"
+  apps/loops/tests/test_store_migrate.py:283: AssertionError
+  1 failed, 8 deselected in 0.06s
+  ```
+* **Restore & Green:**
+  ```bash
+  git checkout apps/loops/src/loops/commands/store.py
+  TMPDIR=/Users/kaygee/Code/loops-wt/s4-wp4/.tmp uv run pytest apps/loops/tests/test_store_migrate.py -k test_migrate_refuses_unparseable_vertex --basetemp=/Users/kaygee/Code/loops-wt/s4-wp4/.tmp/pt -q
+  # Output:
+  .                                                                        [100%]
+  1 passed, 8 deselected in 0.07s
+  ```
+
+---
+
+### Final Acceptance Verification
+
+#### 1. Full `apps/loops` Suite
+```bash
+TMPDIR=/Users/kaygee/Code/loops-wt/s4-wp4/.tmp uv run pytest apps/loops --basetemp=/Users/kaygee/Code/loops-wt/s4-wp4/.tmp/pt -q
+```
+* **Result:** `2539 passed, 1 xfailed in 16.82s` (exactly +1 test vs 2538+1x base, matching newly added [`test_migrate_refuses_unparseable_vertex`](file:///Users/kaygee/Code/loops-wt/s4-wp4/apps/loops/tests/test_store_migrate.py#L275)).
+
+#### 2. Libs & Architecture Suite
+```bash
+TMPDIR=/Users/kaygee/Code/loops-wt/s4-wp4/.tmp uv run pytest libs/migrate libs/custody tests/architecture --basetemp=/Users/kaygee/Code/loops-wt/s4-wp4/.tmp/pt -q
+```
+* **Result:** `178 passed in 4.97s`.
+
+#### 3. Fresh Virtualenv `libs/migrate` Isolation Collection
+```bash
+rm -rf .tmp/migrate_fresh_env && uv venv .tmp/migrate_fresh_env && UV_PROJECT_ENVIRONMENT=/Users/kaygee/Code/loops-wt/s4-wp4/.tmp/migrate_fresh_env uv run --package migrate pytest libs/migrate --basetemp=/Users/kaygee/Code/loops-wt/s4-wp4/.tmp/pt -q
+```
+* **Output:**
+  ```text
+  Using CPython 3.13.11
+  Creating virtual environment at: .tmp/migrate_fresh_env
+  Activate with: source .tmp/migrate_fresh_env/bin/activate
+  Installed 26 packages in 18ms
+  ............................................................             [100%]
+  60 passed in 1.44s
+  ```
+
+#### 4. Git Status & Commit History
+```text
+On branch slice4/wp4
+Untracked files:
+	.tmp/
+nothing added to commit but untracked files present
+
+Commit Log:
+080ff470 fix(cli): store migrate honest parse error refusal and unreachable disjunct removal (F4)
+042f9504 feat(custody): export arrival signer and verifier from package root (F3)
+b226adce refactor(custody): compose arrival and fact resolvers by domain (F2)
+e1edaa24 fix(migrate): declare test-only dev deps custody and sign (F1)
+df17edd3 feat(cli): store migrate fixes F1-F8 (slice4 WP4 fix round 1)
+```
+
+---
+
+### Honest Gaps
+* None within the scope fence. All four ruled fixes are committed with mutation proofs, full suites green, clean repo state, and zero production diff.

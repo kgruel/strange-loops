@@ -715,4 +715,21 @@ loops {{
     assert intro_alice.body == {"observer": "alice", "key": alice.public}
 
 
+def test_custodian_is_derived_never_caller_supplied() -> None:
+    """The custodian identity cannot be supplied by a caller (sol r1 finding
+    s4-sol-r1-custodian-authority-source, arm b): it derives from the custody
+    self-observer. This pins the public surfaces against a reintroduced
+    override parameter — a caller-suppliable custodian is the bypass sol
+    constructed (a mallory genesis under an alice declaration)."""
+    import inspect
 
+    from migrate.sidecar import run_migration
+    from migrate.transform import transform
+
+    for fn in (run_migration, transform):
+        for name in inspect.signature(fn).parameters:
+            assert "custodian" not in name, (
+                f"{fn.__name__} grew a caller-supplied custodian parameter "
+                f"({name!r}) — the custodian is derived from the declaration, "
+                "never supplied"
+            )

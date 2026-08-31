@@ -22,9 +22,11 @@ from lang import (
     Pick,
     Skip,
     Split,
+    StoreClauseSpan,
     Strip,
     Transform,
     Trigger,
+    effective_store_clause,
     parse_loop,
     parse_loop_file,
     parse_vertex,
@@ -3473,3 +3475,135 @@ loops {
 }
 """)
         assert vertex.loops["friction"].preview_fields == ("status",)
+
+
+class TestEffectiveStoreClause:
+    """Tests for effective_store_clause query in lang."""
+
+    def test_simple_store_clause(self):
+        text = """\
+name "alice"
+store "./data/project.jsonl"
+loops {
+  concept { fold { items "collect" 100 } }
+}
+"""
+        span = effective_store_clause(text)
+        assert span.count == 1
+        assert span.span is not None
+        start, end = span.span
+        assert text[start:end] == 'store "./data/project.jsonl"'
+
+    def test_store_clause_with_backend(self):
+        text = """\
+name "alice"
+store "./data/project.arrival" backend="file"
+"""
+        span = effective_store_clause(text)
+        assert span.count == 1
+        assert span.span is not None
+        start, end = span.span
+        assert text[start:end] == 'store "./data/project.arrival" backend="file"'
+
+    def test_unusual_spacing_and_indentation(self):
+        text = """\
+name "alice"
+\t  store   "./data/store.jsonl"   backend="file"  
+"""
+        span = effective_store_clause(text)
+        assert span.count == 1
+        assert span.span is not None
+        start, end = span.span
+        assert text[start:end] == '\t  store   "./data/store.jsonl"   backend="file"  '
+
+    def test_comment_shadowed_clause(self):
+        text = """\
+name "alice"
+/*
+store "./data/legacy.jsonl"
+*/
+store "./data/active.jsonl"
+loops {
+  concept { fold { items "collect" 100 } }
+}
+"""
+        span = effective_store_clause(text)
+        assert span.count == 1
+        assert span.span is not None
+        start, end = span.span
+        assert text[start:end] == 'store "./data/active.jsonl"'
+
+    def test_only_commented_clause(self):
+        text = """\
+name "alice"
+/*
+store "./data/legacy.jsonl"
+*/
+loops {
+  concept { fold { items "collect" 100 } }
+}
+"""
+        span = effective_store_clause(text)
+        assert span.count == 0
+        assert span.span is None
+
+    def test_line_comment_shadowed(self):
+        text = """\
+name "alice"
+// store "./data/legacy.jsonl"
+store "./data/active.jsonl"
+"""
+        span = effective_store_clause(text)
+        assert span.count == 1
+        assert span.span is not None
+        start, end = span.span
+        assert text[start:end] == 'store "./data/active.jsonl"'
+
+    def test_slashdash_shadowed(self):
+        text = """\
+name "alice"
+/- store "./data/legacy.jsonl"
+store "./data/active.jsonl"
+"""
+        span = effective_store_clause(text)
+        assert span.count == 1
+        assert span.span is not None
+        start, end = span.span
+        assert text[start:end] == 'store "./data/active.jsonl"'
+
+    def test_duplicate_clauses(self):
+        text = """\
+name "alice"
+store "./data/a.jsonl"
+store "./data/b.jsonl"
+"""
+        span = effective_store_clause(text)
+        assert span.count == 2
+        assert span.span is None
+
+    def test_no_store_clause(self):
+        text = """\
+name "alice"
+loops {
+  concept { fold { items "collect" 100 } }
+}
+"""
+        span = effective_store_clause(text)
+        assert span.count == 0
+        assert span.span is None
+
+    def test_string_containing_store_word(self):
+        text = """\
+name "store"
+discover "store/*.loop"
+store "./data/real.jsonl"
+"""
+        span = effective_store_clause(text)
+        assert span.count == 1
+        assert span.span is not None
+        start, end = span.span
+        assert text[start:end] == 'store "./data/real.jsonl"'
+
+    def test_syntax_error_raises_parse_error(self):
+        with pytest.raises(ParseError):
+            effective_store_clause('store "unclosed string\n')

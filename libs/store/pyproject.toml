@@ -9,10 +9,14 @@ dependencies = ["engine", "python-ulid>=3.0"]
 
 [tool.uv.sources]
 engine = { workspace = true }
+atoms = { workspace = true }
+lang = { workspace = true }
 
 [dependency-groups]
 dev = [
+    "atoms",
     "hypothesis>=6.100",
+    "lang",
     "pytest>=8.0",
     "pytest-cov>=6.0",
     "ruff>=0.8",

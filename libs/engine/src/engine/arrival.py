@@ -575,9 +575,8 @@ def _placement_fault(record: dict, ordinal: int) -> str | None:
         if key_fault is not None:
             return (
                 f"genesis carries no well-formed founding key ({key_fault}) — "
-                "a live-store genesis introduces the founding public key at "
-                "ordinal 0; a keyless genesis belongs to the migration "
-                "sidecar, not to this grammar"
+                "every genesis introduces the founding public key at "
+                "ordinal 0; the core grammar admits no keyless genesis"
             )
         return None
     if record["k"] == GENESIS_KIND:
@@ -893,8 +892,9 @@ class ArrivalLog:
         founding PUBLIC key in the ratified wire format, self-signed at
         ordinal 0 — the anchor every later authorship answer resolves back
         to. The document set is movement 2, records at ordinal >= 1; era
-        pins dissolve under the dense ordinal; containment claims belong to
-        the migration sidecar's genesis, never to a live store's.
+        pins dissolve under the dense ordinal; source fingerprints and
+        equivalence claims live in the signed migration report and bootstrap
+        receipt, never in a containment-only genesis.
 
         ``key`` and ``signer`` must correspond — the grammar checks the
         key's shape here, and :func:`verify_authorship` is where the

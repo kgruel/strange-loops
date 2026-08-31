@@ -64,7 +64,6 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import re
 import sqlite3
 from collections import defaultdict
 from collections.abc import Sequence
@@ -72,10 +71,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
-
-# INTERIM: direct ckdl parse pending the ruled dissolution — lang exposing its effective-store-clause query (finding s4wp3-migrate-undeclared-ckdl-bypasses-lang); do not add further ckdl call sites.
-import ckdl
-
 from engine.arrival import (
     GENESIS_KIND,
     KEY_INTRODUCTION_KIND,
@@ -108,7 +103,7 @@ from engine.arrival_head_attestation import (
 )
 from engine.arrival_head_seam import StoreLost
 from engine.arrival_registry import BackendRegistry
-from lang import BackendDecl, VertexFile, parse_vertex
+from lang import BackendDecl, VertexFile, effective_store_clause, parse_vertex
 
 from .inventory import SourceInventory, inventory
 from .legacy_ids import Transform, identity
@@ -235,7 +230,7 @@ def edit_vertex_store_clause(
     pre_ast = parse_vertex(original_text, v_path)
 
     try:
-        doc = ckdl.parse(original_text)
+        store_span = effective_store_clause(original_text, v_path)
     except Exception as exc:
         raise PublishPreconditionRefused(
             f"Verification-by-re-parse failed: .vertex could not be parsed: {exc}. "
@@ -243,55 +238,23 @@ def edit_vertex_store_clause(
             condition="vertex_reparse",
         ) from exc
 
-    store_nodes = [node for node in doc.nodes if node.name == "store"]
-    if len(store_nodes) > 1:
+    if store_span.count > 1:
         raise PublishPreconditionRefused(
             "the store clause cannot be unambiguously located for a surgical edit: "
-            f"found {len(store_nodes)} duplicate store nodes",
+            f"found {store_span.count} duplicate store nodes",
             condition="vertex_store_duplicate_nodes",
         )
 
-    # Check for block comment spans /* ... */
-    block_comment_spans: list[tuple[int, int]] = [
-        (m.start(), m.end())
-        for m in re.finditer(r"/\*[\s\S]*?\*/", original_text)
-    ]
-
-    regex_matches = list(
-        re.finditer(r"^[ \t]*store\b.*$", original_text, flags=re.MULTILINE)
-    )
-    if len(regex_matches) != 1:
-        raise PublishPreconditionRefused(
-            "the store clause cannot be unambiguously located for a surgical edit: "
-            f"expected exactly 1 store line match, found {len(regex_matches)}",
-            condition="vertex_store_regex_match_count",
-        )
-
-    match = regex_matches[0]
-    match_start = match.start()
-    for c_start, c_end in block_comment_spans:
-        if c_start <= match_start < c_end:
-            raise PublishPreconditionRefused(
-                "the store clause cannot be unambiguously located for a surgical edit: "
-                "matched store line is inside a comment",
-                condition="vertex_store_in_comment",
-            )
-
-    if len(store_nodes) == 0:
+    if store_span.count == 0 or store_span.span is None:
         raise PublishPreconditionRefused(
             "the store clause cannot be unambiguously located for a surgical edit: "
             "matched store line does not correspond to an effective store node",
             condition="vertex_store_ineffective",
         )
 
+    start, end = store_span.span
     new_store_clause = f'store "{target_location}" backend="{backend}"'
-    edited_text = re.sub(
-        r"^[ \t]*store\b.*$",
-        new_store_clause,
-        original_text,
-        flags=re.MULTILINE,
-        count=1,
-    )
+    edited_text = original_text[:start] + new_store_clause + original_text[end:]
 
     # Verification-by-re-parse
     try:
@@ -496,6 +459,9 @@ def _check_inventory_equality(
 
     Compares per-kind row counts, tick count, and observer census (accounting for
     dropped units). Record counts are deliberately NOT compared (§I.3).
+
+    Partial-batch drops are refused upstream by the transformer, so its dropped-units
+    accounting covers whole-unit drops only.
 
     Raises:
         PublishPreconditionRefused: If any inventory metric diverges.

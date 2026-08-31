@@ -3,7 +3,7 @@ name = "loops"
 version = "0.1.0"
 description = "CLI for .loop and .vertex files"
 requires-python = ">=3.11"
-dependencies = ["lang", "atoms", "engine", "custody", "sign", "store", "painted", "migrate"]
+dependencies = ["lang", "atoms", "engine", "custody", "sign", "store", "migrate", "painted"]
 
 [dependency-groups]
 dev = ["pytest>=8.0", "pytest-cov>=6.0"]

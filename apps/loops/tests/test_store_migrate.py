@@ -271,3 +271,14 @@ loops {
                 vertex_path=None,
             )
         assert excinfo.value.code == 2
+
+    def test_migrate_refuses_unparseable_vertex(self, tmp_path, capsys):
+        vpath = tmp_path / "broken.vertex"
+        vpath.write_text("invalid { syntax\n", encoding="utf-8")
+        source = _write_jsonl(tmp_path / "legacy.jsonl", [_FACT_SIGNED])
+
+        rc = _run_migrate([str(source), "--vertex", str(vpath)], vertex_path=None)
+        assert rc == 2
+        stderr = capsys.readouterr().err
+        assert "the vertex file cannot be parsed" in stderr
+        assert list(tmp_path.glob("*.arrival")) == []

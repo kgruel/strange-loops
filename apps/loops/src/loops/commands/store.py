@@ -804,18 +804,19 @@ def _run_migrate(argv: list[str], *, vertex_path: Path | None = None) -> int:
             "observer registry live in the custody context, not a raw .db"
         )
 
-    from lang import parse_vertex_file
+    from lang import ParseError, parse_vertex_file
     from engine.residence import canonical_mode
 
     try:
         pre_ast = parse_vertex_file(vertex_target)
-    except Exception:
-        pre_ast = None
+    except ParseError as exc:
+        return _refuse_store(
+            f"the vertex file cannot be parsed: {exc}",
+            label=vertex_target.stem,
+        )
 
-    if pre_ast is not None and pre_ast.store is not None:
-        if canonical_mode(pre_ast.store) == "arrival" or (
-            pre_ast.store_backend is not None and pre_ast.store.suffix == ".arrival"
-        ):
+    if pre_ast.store is not None:
+        if canonical_mode(pre_ast.store) == "arrival":
             return _refuse_store(
                 f"already on an arrival lineage ({pre_ast.store}) — "
                 "re-migration would orphan it; deliberate re-migration is a slice-6 ceremony",

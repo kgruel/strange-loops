@@ -7,7 +7,7 @@ WP4/WP5 rows, and the unverified-fixes table's tail before invoking.
 
 Repo: /Users/kaygee/Code/loops, branch main.
 Diff under review: `git diff 8a3ed22d...HEAD` (slice-4 territory: everything since the
-slice-3 close). Commit count: <FILL>. New package: `libs/migrate` (entire). Engine
+slice-3 close). Commit count: 95 (five WPs, each merged --no-ff with its gate-report pointer branch). New package: `libs/migrate` (entire). Engine
 touches: `arrival.py` (Entry signature carriage; typed ArrivalTornTail),
 `arrival_file_backend.py` (append signed-draft carriage). CLI: `commands/store.py`
 (migrate verb), `store_args.py`, `commands/init.py` (comment markers). Architecture
@@ -63,8 +63,30 @@ possible):
 - WP3: 40612844 (E1 engine signature carriage), fc708a09 (E2 typed ArrivalTornTail),
   8af7ef77 (sink F1-F7), 70a6dbb2 (test touch-up), 0ce53b2a (verifier typed catch +
   interim ckdl declaration).
-- WP4: <FILL>
-- WP5: <FILL>
+- WP4 (impl was a SONNET Claude agent — quota interlude; all others agy/Gemini):
+  e1de3a4b (verb + staged dispositions), then fixes 44a14cea (custody arrival domain +
+  arrival_signer_for/arrival_verifier_for — AMENDMENT #3), df17edd3 (CLI F1-F8:
+  honor-or-refuse on positional-vs---vertex, --vertex REQUIRED, capability-probing
+  signer guard, multi-line refusal render, pyproject metadata, e2e location pin,
+  already-migrated pre-flight), e1edaa24 (migrate test-deps custody+sign declared),
+  b226adce (custody compose-by-domain — one resolver per direction, four thin
+  wrappers), 042f9504 (package-root exports), 080ff470 (parse-error refusal + dead
+  disjunct removal + pyproject ordering).
+- WP5: 70f7cdd5 (L.2 stale-prose sweep in engine, AST-verified prose-only),
+  72c1136e (lang effective_store_clause query; migrate's ckdl import dissolved),
+  158b5668 (Rule 19: third-party+workspace-test imports ⊆ declared deps),
+  7b7c9ff1 (CLAUDE.md files + as-built HTML notes), then fixes 844d2994 (allowlist
+  made SHRINK-FORCING), 7af93238 (rfc8785→apps dev group; atoms+lang→store dev
+  group; allowlist 10→2), 4a127827 (vestigial regex locator swept;
+  StoreClauseSpan drops .line/.raw), b3ba0bae (docs truth pass: staging path,
+  report filename, the five preconditions verbatim, signed-not-verified, guard
+  layering), 8ce590a9 (duplicate import).
+- ARBITER-APPLIED TAIL (033063c2, no independent gate — sol is the only
+  independent verification, check these FIRST): C1 libs/migrate/CLAUDE.md frozen-
+  module names corrected (legacy_jsonl/legacy_sqlite/legacy_ids are the frozen
+  three; legacy_source/inventory are live — the prior truth pass had it backwards)
+  + line-number cite → symbol cite; C2 one E501 wrap in test_sidecar.py; C3
+  test_sidecar.py:858 retired-label set narrowed to == "vertex_store_ineffective".
 
 ## 4. Known-open items (do not re-report; verify containment only)
 
@@ -73,6 +95,11 @@ possible):
   slice-tail work. Verify the fence holds (one ckdl call site), nothing more.
 - State-root test residue from pre-conftest runs (~267 journals in the user's real
   heads dir): operator cleanup, out of scope.
+- One transient engine failure at the WP5 post-merge run (2306+1s on immediate
+  re-run, name not captured): if you can reproduce ANY engine failure, that is a
+  finding; a clean run confirms the flake reading.
+- lang counts differ by env profile (682 worktree / 706+3s main checkout) — known,
+  not a finding unless the FAIL SET is nonempty.
 - Rule 4 cannot see third-party imports (ratchet idea parked for tests/architecture).
 
 ## 5. Verdict format

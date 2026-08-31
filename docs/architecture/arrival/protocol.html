@@ -498,6 +498,20 @@
           record hashes, and the witnessed head rather than admitting the content into a new
           lineage.
         </p>
+
+        <div class="doc-callout">
+          <span class="doc-callout-label">As-built (Slice 4)</span>
+          <p>
+            The offline migration sidecar in <code>libs/migrate</code> realizes this boundary:
+          </p>
+          <ul>
+            <li><strong>Lineage-named staging:</strong> Writes to <code>&lt;lineage&gt;.staging.arrival</code> before atomic cutover, enabling safe resume or discard.</li>
+            <li><strong>Custody domain separation:</strong> Genesis, key introduction, and report signatures are sealed under the arrival domain <code>loops-arrival-v1</code>.</li>
+            <li><strong>Outer-unsigned migrated records:</strong> Legacy fact/batch/tick records retain original content and inner signatures verbatim; hash chaining binds them into the ledger.</li>
+            <li><strong>Signed migration report beside target:</strong> A standalone JSON report (<code>&lt;target&gt;.migration-report.json</code>) captures source fingerprints, target head, exceptions, and custodian Ed25519 signature.</li>
+            <li><strong>5 publish preconditions &amp; already-migrated guard:</strong> Preconditions (source unchanged, target valid, head match, inventory equality, verified report) must pass before surgical descriptor edit in <code>.vertex</code>; existing arrival targets are refused re-migration.</li>
+          </ul>
+        </div>
       </section>
 
       <section class="doc-section" id="change">

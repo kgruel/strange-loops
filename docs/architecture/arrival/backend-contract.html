@@ -587,6 +587,19 @@ publish_descriptor_atomically(staging_descriptor)</code></pre>
           <li>Publication atomically changes the authoritative descriptor, not every consumer independently.</li>
           <li>The legacy source becomes read-only archival evidence and never resumes writes after successful cutover.</li>
         </ul>
+
+        <div class="doc-callout">
+          <span class="doc-callout-label">As-built (Slice 4)</span>
+          <p>
+            The <code>libs/migrate</code> sidecar implements the staged target protocol:
+          </p>
+          <ul>
+            <li><strong>Lineage-named staging:</strong> Targets are staged at <code>&lt;lineage&gt;.staging.arrival</code>; clean resumes verify head and hash chain without in-place repair.</li>
+            <li><strong>5 publish preconditions:</strong> Publication requires: (1) source fingerprint unchanged, (2) target openable through head, (3) target head matches scan head, (4) source/target inventory equality (accounting for whole-unit drops), and (5) valid signed report. An already-migrated guard protects existing Arrival descriptors.</li>
+            <li><strong>Domain separation &amp; outer-unsigned records:</strong> Arrival custody uses <code>loops-arrival-v1</code>; migrated records preserve legacy payload structures verbatim under ledger hash chaining.</li>
+            <li><strong>Report beside target:</strong> <code>&lt;target&gt;.migration-report.json</code> sits beside the target log for external auditing and verification.</li>
+          </ul>
+        </div>
       </section>
 
       <section class="doc-section" id="security">

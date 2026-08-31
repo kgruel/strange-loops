@@ -116,6 +116,8 @@ verifiable claim), `source_file_sha256` (forensic), `source_chain_head`
 
 CLI: `loops store rebirth <source> <target> --rule ulid-migration` (auto-verifies; `--check` re-verifies later).
 
+**Status**: Rebirth is sqlite→sqlite only. It is superseded for migration to arrival logs by `libs/migrate` (the offline migration sidecar) and slated for slice-5 disposition. Do not grow its use or extend it to new storage formats.
+
 **Don't reach for yet**: Schema internals, connection management.
 
 ---

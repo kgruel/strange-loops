@@ -488,6 +488,9 @@ def _check_inventory_equality(
     Compares per-kind row counts, tick count, and observer census (accounting for
     dropped units). Record counts are deliberately NOT compared (§I.3).
 
+    Partial-batch drops are refused upstream by the transformer, so its dropped-units
+    accounting covers whole-unit drops only.
+
     Raises:
         PublishPreconditionRefused: If any inventory metric diverges.
     """

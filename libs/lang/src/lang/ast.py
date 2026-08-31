@@ -695,6 +695,16 @@ class BackendDecl:
     name: str
 
 
+@dataclass(frozen=True)
+class StoreClauseSpan:
+    """Location and multiplicity of the effective store clause in a .vertex document."""
+
+    line: int | None
+    span: tuple[int, int] | None
+    count: int
+    raw: str | None = None
+
+
 # -----------------------------------------------------------------------------
 # Top-level File ASTs
 # -----------------------------------------------------------------------------

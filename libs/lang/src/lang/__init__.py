@@ -5,7 +5,13 @@ Uses lazy imports via __getattr__ so that importing a single symbol
 """
 
 # Eagerly import only the loader (lightweight after ast.py optimization)
-from .loader import parse_loop, parse_loop_file, parse_vertex, parse_vertex_file
+from .loader import (
+    effective_store_clause,
+    parse_loop,
+    parse_loop_file,
+    parse_vertex,
+    parse_vertex_file,
+)
 
 # validator deferred — imported on first access via __getattr__
 
@@ -52,6 +58,7 @@ __all__ = [
     "BoundaryWhen",
     # AST types - Backend declarations
     "BackendDecl",
+    "StoreClauseSpan",
     # AST types - Combinatorial vertices
     "CombineEntry",
     # AST types - Lens declarations
@@ -73,6 +80,7 @@ __all__ = [
     "parse_loop_file",
     "parse_vertex",
     "parse_vertex_file",
+    "effective_store_clause",
     # Errors
     "DSLError",
     "LexError",
@@ -125,7 +133,7 @@ _AST_NAMES = [
     "FromFile", "FromSource", "GrantDecl", "InlineSource", "LensDecl",
     "LifecycleDecl", "LoopDef", "LoopFile", "LStrip", "ObserverDecl", "ParseStep",
     "Pick", "Project", "Replace", "RStrip", "Skip",
-    "SourceEntry", "SourceParams", "SourcesBlock", "Split", "Strip",
+    "SourceEntry", "SourceParams", "SourcesBlock", "Split", "StoreClauseSpan", "Strip",
     "TemplateSource", "Transform", "TransformOp", "Trigger", "VertexFile", "Where",
 ]
 for _n in _AST_NAMES:

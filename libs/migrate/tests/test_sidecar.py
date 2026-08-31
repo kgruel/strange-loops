@@ -27,6 +27,7 @@ from lang import BackendDecl, ObserverDecl, VertexFile, parse_vertex_file
 from sign import ed25519
 
 from migrate.legacy_ids import FactRow, Transform, identity, ulid_migration
+from lang import BackendDecl, parse_vertex
 from migrate.legacy_source import LegacySource
 from migrate.refusals import (
     JournalPreflightRefused,
@@ -856,6 +857,23 @@ def test_edit_vertex_store_clause_ambiguity_and_syntax_refusals(tmp_path: Path) 
     with pytest.raises(PublishPreconditionRefused) as exc_info:
         edit_vertex_store_clause(v_comment, "./data/target.arrival")
     assert exc_info.value.condition in {"vertex_store_in_comment", "vertex_store_ineffective"}
+
+
+def test_edit_vertex_store_clause_comment_shadowed_active_store(tmp_path: Path) -> None:
+    """Comment-shadowed store clause: effective store is edited, commented one preserved."""
+    loops_block = 'loops { concept { fold { items "collect" 100 } } }'
+    v_shadow = tmp_path / "shadow.vertex"
+    v_shadow.write_text(
+        f'name "alice"\n/*\nstore "./data/legacy.jsonl"\n*/\nstore "./data/active.jsonl"\n{loops_block}\n',
+        encoding="utf-8",
+    )
+    edit_vertex_store_clause(v_shadow, "./data/target.arrival", backend="file")
+    text = v_shadow.read_text(encoding="utf-8")
+    assert 'store "./data/legacy.jsonl"' in text
+    assert 'store "./data/target.arrival" backend="file"' in text
+    post_ast = parse_vertex(text, v_shadow)
+    assert post_ast.store == Path("./data/target.arrival")
+    assert post_ast.store_backend == BackendDecl(name="file")
 
 
 # ---------------------------------------------------------------------------

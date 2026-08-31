@@ -44,6 +44,7 @@ from .ast import (
     SourceParams,
     SourcesBlock,
     Split,
+    StoreClauseSpan,
     Strip,
     TemplateSource,
     Transform,
@@ -968,3 +969,119 @@ def parse_vertex_file(path: Path) -> VertexFile:
     """Parse a .vertex file from path."""
     text = path.read_text()
     return parse_vertex(text, path)
+
+
+def effective_store_clause(text: str, path: Path | None = None) -> StoreClauseSpan:
+    """Locate the single effective top-level store clause in a .vertex document.
+
+    Parses the KDL document to count top-level store nodes, and scans the source
+    text (quote- and comment-aware) to locate the exact line and character span
+    of the effective clause.
+
+    Returns:
+        StoreClauseSpan with:
+        - line: 1-based line number if exactly 1 effective store node exists, else None
+        - span: (start_char, end_char) slice in text if exactly 1 effective store node exists, else None
+        - count: total number of top-level store nodes in the parsed document
+        - raw: matching line content (without trailing newline) if exactly 1 effective store node exists, else None
+
+    Raises:
+        ParseError: If the document contains invalid KDL syntax.
+    """
+    _ensure_ckdl()
+    try:
+        doc = ckdl.parse(text)
+    except ckdl.ParseError as e:
+        raise ParseError(str(e), Location(path, 1)) from e
+    except Exception as e:
+        raise ParseError(str(e), Location(path, 1)) from e
+
+    store_nodes = [node for node in doc.nodes if node.name == "store"]
+    count = len(store_nodes)
+    if count != 1:
+        return StoreClauseSpan(line=None, span=None, count=count, raw=None)
+
+    _CODE, _STRING, _BLOCK_COMMENT, _LINE_COMMENT = 0, 1, 2, 3
+    state = _CODE
+    esc = False
+    bc_depth = 0
+    brace_depth = 0
+    slashdash = False
+
+    lines = text.splitlines(keepends=True)
+    line_starts: list[int] = []
+    curr = 0
+    for l in lines:
+        line_starts.append(curr)
+        curr += len(l)
+
+    def line_for_pos(pos: int) -> tuple[int, int]:
+        for idx in range(len(line_starts) - 1, -1, -1):
+            if pos >= line_starts[idx]:
+                return idx + 1, line_starts[idx]
+        return 1, 0
+
+    matches: list[tuple[int, tuple[int, int], str]] = []
+    i = 0
+    n = len(text)
+    while i < n:
+        ch = text[i]
+        if state == _STRING:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                state = _CODE
+        elif state == _LINE_COMMENT:
+            if ch == "\n":
+                state = _CODE
+        elif state == _BLOCK_COMMENT:
+            if ch == "/" and i + 1 < n and text[i + 1] == "*":
+                bc_depth += 1
+                i += 1
+            elif ch == "*" and i + 1 < n and text[i + 1] == "/":
+                bc_depth -= 1
+                i += 1
+                if bc_depth == 0:
+                    state = _CODE
+        else:  # _CODE
+            if ch == '"':
+                state = _STRING
+            elif ch == "/" and i + 1 < n and text[i + 1] == "/":
+                state = _LINE_COMMENT
+                i += 1
+            elif ch == "/" and i + 1 < n and text[i + 1] == "*":
+                bc_depth = 1
+                state = _BLOCK_COMMENT
+                i += 1
+            elif ch == "/" and i + 1 < n and text[i + 1] == "-":
+                slashdash = True
+                i += 1
+            elif ch == "{":
+                brace_depth += 1
+            elif ch == "}":
+                if brace_depth > 0:
+                    brace_depth -= 1
+            elif ch == "\n" or ch == ";":
+                slashdash = False
+            elif ch.isalpha() or ch in ("_", "-"):
+                id_start = i
+                while i < n and (text[i].isalnum() or text[i] in ("_", "-", ".")):
+                    i += 1
+                ident = text[id_start:i]
+                i -= 1
+                if ident == "store" and brace_depth == 0:
+                    if not slashdash:
+                        l_no, l_start = line_for_pos(id_start)
+                        l_text = lines[l_no - 1]
+                        l_end = l_start + len(l_text.rstrip("\r\n"))
+                        matches.append((l_no, (l_start, l_end), l_text.rstrip("\r\n")))
+                    else:
+                        slashdash = False
+        i += 1
+
+    if len(matches) == 1:
+        l_no, span, raw = matches[0]
+        return StoreClauseSpan(line=l_no, span=span, count=count, raw=raw)
+    return StoreClauseSpan(line=None, span=None, count=count, raw=None)

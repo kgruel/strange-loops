@@ -149,7 +149,7 @@ class LegacySource:
     @classmethod
     def _read_jsonl(cls, source_path: Path, file_hash: str) -> LegacySource:
         codec_invalid_lines: list[tuple[int, str]] = []
-        mixed_observer_lines: list[tuple[int, tuple[str, ...], int]] = []
+        mixed_observer_lines: list[tuple[int, tuple[str, ...], dict[str, int]]] = []
         absent_observer_lines: list[tuple[int, int, tuple[str, ...], dict[str, int]]] = []
         units: list[LegacyUnit] = []
         content_hasher = hashlib.sha256()
@@ -329,7 +329,7 @@ class LegacySource:
 
                     if len(present_observers) > 1:
                         mixed_observer_lines.append(
-                            (lineno, tuple(sorted(present_observers)), absent_count)
+                            (lineno, tuple(sorted(present_observers)), dict(spelling_counts))
                         )
                         continue
 
@@ -386,7 +386,7 @@ class LegacySource:
         conn = open_legacy_sqlite(source_path)
         try:
             codec_invalid_lines: list[tuple[int, str]] = []
-            mixed_observer_lines: list[tuple[int, tuple[str, ...], int]] = []
+            mixed_observer_lines: list[tuple[int, tuple[str, ...], dict[str, int]]] = []
             absent_observer_lines: list[tuple[int, int, tuple[str, ...], dict[str, int]]] = []
             units: list[LegacyUnit] = []
             content_hasher = hashlib.sha256()

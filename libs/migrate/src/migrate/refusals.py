@@ -36,11 +36,26 @@ __all__ = [
 ]
 
 
+def _format_absent_desc(spelling_map: dict[str, int]) -> str:
+    empty_cnt = spelling_map.get("empty", 0)
+    missing_cnt = spelling_map.get("missing", 0)
+    absent_count = empty_cnt + missing_cnt
+
+    if empty_cnt > 0 and missing_cnt == 0:
+        return f"{absent_count} row(s) with observer='' (empty string)"
+    elif missing_cnt > 0 and empty_cnt == 0:
+        return f"{absent_count} row(s) missing 'observer' field"
+    elif empty_cnt > 0 and missing_cnt > 0:
+        return f"{absent_count} row(s) with absent/empty observer ({missing_cnt} missing, {empty_cnt} empty '')"
+    else:
+        return f"{absent_count} row(s) missing 'observer' field"
+
+
 def _format_refusal_message(
     *,
     source: str | None,
     codec_invalid_lines: tuple[tuple[int, str], ...],
-    mixed_observer_lines: tuple[tuple[int, tuple[str, ...], int], ...],
+    mixed_observer_lines: tuple[tuple[int, tuple[str, ...], dict[str, int]], ...],
     absent_observer_lines: tuple[tuple[int, int, tuple[str, ...], dict[str, int]], ...],
 ) -> str:
     source_prefix = f"for source {source!r} " if source else ""
@@ -57,11 +72,16 @@ def _format_refusal_message(
         )
 
     if mixed_observer_lines:
-        enum_mixed = "\n".join(
-            f"  line {lineno}: observers {', '.join(repr(o) for o in observers)}"
-            + (f" ({absent_count} row(s) missing 'observer' field)" if absent_count > 0 else "")
-            for lineno, observers, absent_count in mixed_observer_lines
-        )
+        formatted_mixed: list[str] = []
+        for lineno, observers, spelling_map in mixed_observer_lines:
+            obs_str = ", ".join(repr(o) for o in observers)
+            total_absent = sum(spelling_map.values())
+            if total_absent > 0:
+                desc = _format_absent_desc(spelling_map)
+                formatted_mixed.append(f"  line {lineno}: observers {obs_str} ({desc})")
+            else:
+                formatted_mixed.append(f"  line {lineno}: observers {obs_str}")
+        enum_mixed = "\n".join(formatted_mixed)
         sections.append(
             "The following source line(s) carry batch rows spanning more than one observer "
             "(GF-3 violation), which cannot map to a single Arrival record:\n"
@@ -70,19 +90,8 @@ def _format_refusal_message(
 
     if absent_observer_lines:
         formatted_absent: list[str] = []
-        for lineno, absent_count, observers, spelling_map in absent_observer_lines:
-            empty_cnt = spelling_map.get("empty", 0)
-            missing_cnt = spelling_map.get("missing", 0)
-
-            if empty_cnt > 0 and missing_cnt == 0:
-                desc = f"{absent_count} row(s) with observer='' (empty string)"
-            elif missing_cnt > 0 and empty_cnt == 0:
-                desc = f"{absent_count} row(s) missing 'observer' field"
-            elif empty_cnt > 0 and missing_cnt > 0:
-                desc = f"{absent_count} row(s) with absent/empty observer ({missing_cnt} missing, {empty_cnt} empty '')"
-            else:
-                desc = f"{absent_count} row(s) missing 'observer' field"
-
+        for lineno, _absent_count, observers, spelling_map in absent_observer_lines:
+            desc = _format_absent_desc(spelling_map)
             rem = f" (remaining observers: {', '.join(repr(o) for o in observers)})" if observers else ""
             formatted_absent.append(f"  line {lineno}: {desc}{rem}")
 
@@ -119,7 +128,9 @@ class LegacySourceRefused(MigrationRefused):
         *,
         codec_invalid_lines: tuple[tuple[int, str], ...] | list[tuple[int, str]] = (),
         mixed_observer_lines: (
-            tuple[tuple[int, tuple[str, ...], int], ...]
+            tuple[tuple[int, tuple[str, ...], dict[str, int]], ...]
+            | list[tuple[int, tuple[str, ...], dict[str, int]]]
+            | tuple[tuple[int, tuple[str, ...], int], ...]
             | list[tuple[int, tuple[str, ...], int]]
         ) = (),
         absent_observer_lines: (
@@ -132,10 +143,20 @@ class LegacySourceRefused(MigrationRefused):
         self.codec_invalid_lines: tuple[tuple[int, str], ...] = tuple(
             (int(lineno), str(msg)) for lineno, msg in codec_invalid_lines
         )
-        self.mixed_observer_lines: tuple[tuple[int, tuple[str, ...], int], ...] = tuple(
-            (int(lineno), tuple(str(o) for o in observers), int(absent_count))
-            for lineno, observers, absent_count in mixed_observer_lines
-        )
+        parsed_mixed: list[tuple[int, tuple[str, ...], dict[str, int]]] = []
+        for item in mixed_observer_lines:
+            lineno = int(item[0])
+            observers = tuple(str(o) for o in item[1])
+            if isinstance(item[2], int):
+                spellings = {"empty": 0, "missing": item[2]}
+            elif isinstance(item[2], dict):
+                spellings = dict(item[2])
+            else:
+                spellings = dict(item[2])
+            parsed_mixed.append((lineno, observers, spellings))
+        self.mixed_observer_lines: tuple[
+            tuple[int, tuple[str, ...], dict[str, int]], ...
+        ] = tuple(parsed_mixed)
         self.absent_observer_lines: tuple[
             tuple[int, int, tuple[str, ...], dict[str, int]], ...
         ] = tuple(

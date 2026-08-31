@@ -533,6 +533,48 @@ def build_both_aspects_batch_jsonl(path: Path) -> Path:
     return path
 
 
+def build_both_aspects_empty_observer_batch_jsonl(path: Path) -> Path:
+    """Build a JSONL file with a batch exhibiting BOTH mixed and empty-observer aspects:
+    rows with alice, bob, and one observer="" row.
+    """
+    line_both_empty = {
+        "t": "batch",
+        "rows": [
+            {
+                "t": "fact",
+                "id": "01ARZ3NDEKTSV4RRFFQ69G5FE1",
+                "kind": "concept",
+                "ts": 100.0,
+                "observer": "alice",
+                "origin": "origin",
+                "payload": "{}",
+            },
+            {
+                "t": "fact",
+                "id": "01ARZ3NDEKTSV4RRFFQ69G5FE2",
+                "kind": "claim",
+                "ts": 100.0,
+                "observer": "bob",
+                "origin": "origin",
+                "payload": "{}",
+            },
+            {
+                "t": "fact",
+                "id": "01ARZ3NDEKTSV4RRFFQ69G5FE3",
+                "kind": "event",
+                "ts": 100.0,
+                "observer": "",
+                "origin": "origin",
+                "payload": "{}",
+            },
+        ],
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as f:
+        f.write(json.dumps(line_both_empty, separators=(",", ":")) + "\n")
+    return path
+
+
 def build_type_error_batch_jsonl(path: Path) -> Path:
     """Build a JSONL file with a batch having a non-string observer (dict),
     which must land cleanly in codec-invalid rather than raising TypeError.

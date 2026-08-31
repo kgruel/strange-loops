@@ -1,0 +1,233 @@
+# Slice 4 — Sol R2 Remediation Report
+
+## 1. Working Directory & Branch Verification
+
+```bash
+$ cd /Users/kaygee/Code/loops-wt/s4-solfix2 && pwd && git branch --show-current && git log --oneline -1
+/Users/kaygee/Code/loops-wt/s4-solfix2
+slice4/sol-fix2
+80a9e65c docs(scratch): sol integration brief r2
+```
+
+---
+
+## 2. Changes Summary
+
+### Scope Fence Adherence
+Only files within the designated scope fence were modified:
+- [`libs/lang/src/lang/loader.py`](file:///Users/kaygee/Code/loops-wt/s4-solfix2/libs/lang/src/lang/loader.py)
+- [`libs/lang/src/lang/ast.py`](file:///Users/kaygee/Code/loops-wt/s4-solfix2/libs/lang/src/lang/ast.py)
+- [`libs/lang/tests/test_loader.py`](file:///Users/kaygee/Code/loops-wt/s4-solfix2/libs/lang/tests/test_loader.py)
+
+### Fix 1 (`s4-sol-r2-hash-raw-store-span`): Scanner Hash-Raw String Recognition
+- In [`libs/lang/src/lang/loader.py`](file:///Users/kaygee/Code/loops-wt/s4-solfix2/libs/lang/src/lang/loader.py), added [`_scan_raw_string`](file:///Users/kaygee/Code/loops-wt/s4-solfix2/libs/lang/src/lang/loader.py#L974-L990) to parse arbitrary hash-count raw strings (`r"..."`, `r#"..."#`, `r##"..."##`, etc.) and return the index after closing delimiter (or `n` if unterminated).
+- Updated [`_scan_kdl_node_end`](file:///Users/kaygee/Code/loops-wt/s4-solfix2/libs/lang/src/lang/loader.py#L993-L1075) to recognize raw strings both at token start and embedded inside bare tokens/properties (e.g. `backend=r#"fi" fake"#`).
+- Updated [`effective_store_clause`](file:///Users/kaygee/Code/loops-wt/s4-solfix2/libs/lang/src/lang/loader.py#L1078-L1174) top-level state machine to atomically skip raw strings in `_CODE` state.
+
+### Fix 2 (`s4-sol-r2-storeclausespan-doc-stale`): `StoreClauseSpan` Docstring Truth
+- In [`libs/lang/src/lang/ast.py`](file:///Users/kaygee/Code/loops-wt/s4-solfix2/libs/lang/src/lang/ast.py#L698-L710), updated the docstring of [`StoreClauseSpan`](file:///Users/kaygee/Code/loops-wt/s4-solfix2/libs/lang/src/lang/ast.py#L698-L710) to describe the true sub-line clause span behavior where trailing bytes (comments, terminators) are preserved on rewrite.
+
+### Regression Tests Added
+Added four tests to [`TestEffectiveStoreClause`](file:///Users/kaygee/Code/loops-wt/s4-solfix2/libs/lang/tests/test_loader.py#L3480-L3688) in [`libs/lang/tests/test_loader.py`](file:///Users/kaygee/Code/loops-wt/s4-solfix2/libs/lang/tests/test_loader.py):
+- `(a)` [`test_raw_string_property_with_trailing_comment_preserves_tail`](file:///Users/kaygee/Code/loops-wt/s4-solfix2/libs/lang/tests/test_loader.py#L3622-L3637): Span ends at `"#` and rewrite preserves trailing same-line comment `// KEEP OPERATOR " tail` byte-for-byte.
+- `(b)` [`test_raw_string_property_no_old_property_leak_on_rewrite`](file:///Users/kaygee/Code/loops-wt/s4-solfix2/libs/lang/tests/test_loader.py#L3639-L3660): Span ends at `"#` and rewrite leaves no leaked old-property bytes (`fake"#`, etc.).
+- `(c)` [`test_nested_hash_raw_string_property`](file:///Users/kaygee/Code/loops-wt/s4-solfix2/libs/lang/tests/test_loader.py#L3662-L3679): Nested hash form `r##"..."##` with embedded `"#` correctly scanned and preserved.
+- `(d)` [`test_unterminated_raw_string_raises_parse_error`](file:///Users/kaygee/Code/loops-wt/s4-solfix2/libs/lang/tests/test_loader.py#L3681-L3688): Unterminated raw strings (`backend=r#"unterminated`, `store r#"unterminated`, `backend=r##"unterminated"#`) produce refuse-shaped `ParseError`.
+
+---
+
+## 3. Commit Evidence
+
+Committed prior to mutation verification:
+```bash
+commit 38c2583ac62a35af5ed8248715e6f2240d1cf605
+Author: Kyle Gruel <kylegruel@gmail.com>
+Date:   Sun Aug 30 23:58:02 2026 -0500
+
+    fix(lang): scan raw strings in property values and fix StoreClauseSpan doc
+
+ libs/lang/src/lang/ast.py      |  9 +++---
+ libs/lang/src/lang/loader.py   | 52 +++++++++++++++++++++-----------
+ libs/lang/tests/test_loader.py | 68 ++++++++++++++++++++++++++++++++++++++++++
+ 3 files changed, 107 insertions(+), 22 deletions(-)
+```
+
+---
+
+## 4. Mutation Proof
+
+### A. Reverting to Token-Initial-Only Recognition (`git checkout HEAD~1 -- libs/lang/src/lang/loader.py`)
+
+Running `uv run --directory libs/lang pytest tests/test_loader.py -k "raw_string" --basetemp /private/tmp/s4solfix-tmp/pt2 -v`:
+
+```
+============================= test session starts ==============================
+platform darwin -- Python 3.13.11, pytest-9.1.1, pluggy-1.6.0 -- /Users/kaygee/Code/loops-wt/s4-solfix2/.venv/bin/python
+cachedir: .pytest_cache
+hypothesis profile 'default'
+rootdir: /Users/kaygee/Code/loops-wt/s4-solfix2/libs/lang
+configfile: pyproject.toml
+plugins: cov-7.1.0, hypothesis-6.167.1
+collecting ... collected 254 items / 249 deselected / 5 selected
+
+tests/test_loader.py::TestParseLoopMinimal::test_source_raw_string PASSED [ 20%]
+tests/test_loader.py::TestEffectiveStoreClause::test_raw_string_property_with_trailing_comment_preserves_tail FAILED [ 40%]
+tests/test_loader.py::TestEffectiveStoreClause::test_raw_string_property_no_old_property_leak_on_rewrite FAILED [ 60%]
+tests/test_loader.py::TestEffectiveStoreClause::test_nested_hash_raw_string_property FAILED [ 80%]
+tests/test_loader.py::TestEffectiveStoreClause::test_unterminated_raw_string_raises_parse_error PASSED [100%]
+
+=================================== FAILURES ===================================
+_ TestEffectiveStoreClause.test_raw_string_property_with_trailing_comment_preserves_tail _
+
+self = <tests.test_loader.TestEffectiveStoreClause object at 0x10b651e10>
+
+        def test_raw_string_property_with_trailing_comment_preserves_tail(self):
+            """(a) store with backend=r#"..."# and trailing comment containing quote preserves comment."""
+            text = """\
+    name "alice"
+    store "./legacy.jsonl" backend=r#"fi" fake"# // KEEP OPERATOR " tail
+    loops {
+      concept { fold { items "collect" 100 } }
+    }
+    """
+            span = effective_store_clause(text)
+            assert span.count == 1
+            assert span.span is not None
+            start, end = span.span
+>           assert text[start:end] == 'store "./legacy.jsonl" backend=r#"fi" fake"#'
+E           assert 'store "./leg...ERATOR " tail' == 'store "./leg...r#"fi" fake"#'
+E             
+E             - store "./legacy.jsonl" backend=r#"fi" fake"#
+E             + store "./legacy.jsonl" backend=r#"fi" fake"# // KEEP OPERATOR " tail
+E             ?                                             ++++++++++++++++++++++++
+
+tests/test_loader.py:3635: AssertionError
+_ TestEffectiveStoreClause.test_raw_string_property_no_old_property_leak_on_rewrite _
+
+self = <tests.test_loader.TestEffectiveStoreClause object at 0x10b5ac7a0>
+
+        def test_raw_string_property_no_old_property_leak_on_rewrite(self):
+            """(b) store with backend=r#"..."# without comment leaks no old property bytes on rewrite."""
+            text = """\
+    name "alice"
+    store "./legacy.jsonl" backend=r#"fi" fake"#
+    loops {
+      concept { fold { items "collect" 100 } }
+    }
+    """
+            span = effective_store_clause(text)
+            assert span.count == 1
+            assert span.span is not None
+            start, end = span.span
+>           assert text[start:end] == 'store "./legacy.jsonl" backend=r#"fi" fake"#'
+E           assert 'store "./leg... 100 } }\n}\n' == 'store "./leg...r#"fi" fake"#'
+E             
+E             - store "./legacy.jsonl" backend=r#"fi" fake"#
+E             + store "./legacy.jsonl" backend=r#"fi" fake"#
+E             ?                                             +
+E             + loops {
+E             +   concept { fold { items "collect" 100 } }
+E             + }
+
+tests/test_loader.py:3652: AssertionError
+________ TestEffectiveStoreClause.test_nested_hash_raw_string_property _________
+
+self = <tests.test_loader.TestEffectiveStoreClause object at 0x10b5350d0>
+
+        def test_nested_hash_raw_string_property(self):
+            """(c) nested-hash form r##"..."## with embedded "#."""
+            text = """\
+    name "alice"
+    store "./legacy.jsonl" backend=r##"fi "# fake"## // KEEP OPERATOR " tail
+    loops {
+      concept { fold { items "collect" 100 } }
+    }
+    """
+            span = effective_store_clause(text)
+            assert span.count == 1
+            assert span.span is not None
+            start, end = span.span
+>           assert text[start:end] == 'store "./legacy.jsonl" backend=r##"fi "# fake"##'
+E           assert 'store "./leg...ERATOR " tail' == 'store "./leg...fi "# fake"##'
+E             
+E             - store "./legacy.jsonl" backend=r##"fi "# fake"##
+E             + store "./legacy.jsonl" backend=r##"fi "# fake"## // KEEP OPERATOR " tail
+E             ?                                                 ++++++++++++++++++++++++
+
+tests/test_loader.py:3677: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_loader.py::TestEffectiveStoreClause::test_raw_string_property_with_trailing_comment_preserves_tail
+FAILED tests/test_loader.py::TestEffectiveStoreClause::test_raw_string_property_no_old_property_leak_on_rewrite
+FAILED tests/test_loader.py::TestEffectiveStoreClause::test_nested_hash_raw_string_property
+================= 3 failed, 2 passed, 249 deselected in 0.21s ==================
+```
+
+### B. Restoring Committed Fix (`git checkout HEAD -- libs/lang/src/lang/loader.py`)
+
+Running `uv run --directory libs/lang pytest tests/test_loader.py -k "raw_string" --basetemp /private/tmp/s4solfix-tmp/pt2 -v`:
+
+```
+============================= test session starts ==============================
+platform darwin -- Python 3.13.11, pytest-9.1.1, pluggy-1.6.0 -- /Users/kaygee/Code/loops-wt/s4-solfix2/.venv/bin/python
+cachedir: .pytest_cache
+hypothesis profile 'default'
+rootdir: /Users/kaygee/Code/loops-wt/s4-solfix2/libs/lang
+configfile: pyproject.toml
+plugins: cov-7.1.0, hypothesis-6.167.1
+collecting ... collected 254 items / 249 deselected / 5 selected
+
+tests/test_loader.py::TestParseLoopMinimal::test_source_raw_string PASSED [ 20%]
+tests/test_loader.py::TestEffectiveStoreClause::test_raw_string_property_with_trailing_comment_preserves_tail PASSED [ 40%]
+tests/test_loader.py::TestEffectiveStoreClause::test_raw_string_property_no_old_property_leak_on_rewrite PASSED [ 60%]
+tests/test_loader.py::TestEffectiveStoreClause::test_nested_hash_raw_string_property PASSED [ 80%]
+tests/test_loader.py::TestEffectiveStoreClause::test_unterminated_raw_string_raises_parse_error PASSED [100%]
+
+====================== 5 passed, 249 deselected in 0.09s =======================
+```
+
+---
+
+## 5. Final Test Suite & Repository State
+
+### `libs/lang` Pytest
+```bash
+$ cd /Users/kaygee/Code/loops-wt/s4-solfix2 && uv run --directory libs/lang pytest --basetemp /private/tmp/s4solfix-tmp/pt2 -q
+........................................................................ [ 10%]
+........................................................................ [ 20%]
+........................................................................ [ 31%]
+........................................................................ [ 41%]
+........................................................................ [ 52%]
+........................................................................ [ 62%]
+........................................................................ [ 73%]
+........................................................................ [ 83%]
+........................................................................ [ 94%]
+.......................................                                  [100%]
+687 passed in 6.03s
+```
+
+### `libs/migrate` & `tests/architecture` Pytest
+```bash
+$ cd /Users/kaygee/Code/loops-wt/s4-solfix2 && uv run pytest libs/migrate tests/architecture --basetemp /private/tmp/s4solfix-tmp/pt2 -q
+........................................................................ [ 42%]
+........................................................................ [ 84%]
+..........................                                               [100%]
+170 passed in 6.90s
+```
+
+### Git Diff Against HEAD & Status
+```bash
+$ cd /Users/kaygee/Code/loops-wt/s4-solfix2 && git diff
+# (empty output)
+
+$ cd /Users/kaygee/Code/loops-wt/s4-solfix2 && git status
+On branch slice4/sol-fix2
+nothing to commit, working tree clean
+```
+
+---
+
+## 6. Honest Gaps & Observations
+
+- **Scope discipline**: Zero files outside `libs/lang/src/lang/loader.py`, `libs/lang/src/lang/ast.py`, and `libs/lang/tests/test_loader.py` were modified.
+- **Pre-existing lints**: Pre-existing line-length and import ordering notices exist elsewhere in `libs/lang/src/lang/loader.py` and `test_loader.py`; no new linter violations were introduced by our changes.
+- **CKDL dependency**: `ckdl` correctly handles raw strings conforming to the KDL specification during the parse pass, and our hand-rolled scanner now mirrors this behavior accurately during the span-identification pass without consuming comments or subsequent nodes.

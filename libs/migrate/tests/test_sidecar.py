@@ -94,7 +94,7 @@ def _make_vertex_file(
     store_rel_path: str = "./data/legacy.jsonl",
 ) -> Path:
     """Create a valid .vertex file on disk."""
-    v_path = tmp_path / "project.vertex"
+    v_path = tmp_path / f"{custodian_name}.vertex"
     obs_lines = [
         f'  {custodian_name} {{\n    key "{custodian_key}"\n  }}',
     ]
@@ -1203,4 +1203,43 @@ def test_migration_with_dropped_units_and_ulid_migration(tmp_path: Path) -> None
         cust.public,
         verify=cust.verify,
         target_path=outcome_ulid.target_path,
+    )
+
+
+def test_migration_with_display_name_differing_from_stem(tmp_path: Path) -> None:
+    """F4: run_migration on a vertex whose declared name differs from filename stem
+    derives custodian from stem and migrates successfully."""
+    store_dir = tmp_path / "data"
+    store_dir.mkdir(parents=True, exist_ok=True)
+    cust = CustodianFixture(tmp_path, "kyle")
+    source_path = build_synthetic_jsonl(store_dir / "legacy.jsonl")
+    v_path = tmp_path / "kyle.vertex"
+    v_content = f"""name "Display Name Project"
+store "./data/legacy.jsonl"
+
+observers {{
+  kyle {{
+    key "{cust.public}"
+  }}
+}}
+
+loops {{
+  concept {{ fold {{ items "collect" 100 }} }}
+}}
+"""
+    v_path.write_text(v_content, encoding="utf-8")
+
+    outcome = run_migration(
+        source_path=source_path,
+        vertex_path=v_path,
+        store_dir=store_dir,
+        signer=cust.signer,
+    )
+    assert outcome.target_path.exists()
+    assert outcome.report_path.exists()
+    assert verify_migration_report(
+        outcome.report_path,
+        cust.public,
+        verify=cust.verify,
+        target_path=outcome.target_path,
     )

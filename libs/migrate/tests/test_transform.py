@@ -645,4 +645,42 @@ def test_era1_sqlite_ticks_transform_and_surface_agreement(tmp_path: Path, kyle,
     assert len(result.exceptions.undeclared_row_observers) == 0
 
 
+def test_vertex_with_different_declared_name_migrates_under_stem_custodian(tmp_path: Path, kyle, alice) -> None:
+    """F4: A vertex whose declared name ("My Human Project") differs from its filename ("kyle.vertex")
+    migrates fine — the custodian is derived from the vertex file stem ('kyle')."""
+    from lang import parse_vertex_file
+
+    source_path = build_synthetic_jsonl(tmp_path / "legacy.jsonl")
+    v_path = tmp_path / "kyle.vertex"
+    v_content = f"""name "My Human Project"
+store "./legacy.jsonl"
+
+observers {{
+  kyle {{
+    key "{kyle.public}"
+  }}
+  alice {{
+    key "{alice.public}"
+  }}
+}}
+
+loops {{
+  concept {{ fold {{ items "collect" 100 }} }}
+}}
+"""
+    v_path.write_text(v_content, encoding="utf-8")
+    vf = parse_vertex_file(v_path)
+    assert vf.name == "My Human Project"
+    assert vf.path.stem == "kyle"
+
+    result = transform(source_path, vf, rule=identity(), signer=kyle.signer)
+    assert result.genesis.custodian == "kyle"
+    assert result.genesis.key == kyle.public
+
+    # Key introduction for alice signed by kyle
+    intro_alice = next(d for d in result.drafts if d.kind == KEY_INTRODUCTION_KIND)
+    assert intro_alice.observer == "kyle"
+    assert intro_alice.body == {"observer": "alice", "key": alice.public}
+
+
 

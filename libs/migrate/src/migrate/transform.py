@@ -156,18 +156,17 @@ def transform(
     rule: Transform | None = None,
     *,
     signer: Signer,
-    custodian: str | None = None,
-    custodian_key: str | None = None,
 ) -> TransformResult:
     """Transform legacy store rows into an ordered, deterministic sequence of arrival record drafts.
+
+    The custodian identity is derived from the custody self-observer definition
+    (the vertex file stem, as custody/signing.py defines it).
 
     Args:
         source: Path to legacy .jsonl or .sqlite store.
         vertex: Parsed VertexFile declaration. Use :func:`coerce_vertex` to parse from path/str.
         rule: Deterministic per-fact transform rule (defaults to identity()).
         signer: Required injected Signer for custodian signatures on key introductions.
-        custodian: Custodian observer name override (defaults to vertex.name).
-        custodian_key: Custodian public key override (defaults to declared key for custodian).
 
     Returns:
         TransformResult containing:
@@ -192,12 +191,12 @@ def transform(
 
     t_rule = rule if rule is not None else identity()
 
-    cust_name = custodian or vertex.name
+    cust_name = vertex.path.stem if vertex.path is not None else vertex.name
     decl_map: dict[str, ObserverDecl] = {
         o.name: o for o in (vertex.observers or ())
     }
     cust_decl = decl_map.get(cust_name)
-    cust_k = custodian_key or (cust_decl.key if cust_decl else None)
+    cust_k = cust_decl.key if cust_decl else None
     if cust_k is None:
         raise MissingCustodianKeyRefused(
             f"Custodian {cust_name!r} has no public key declared in .vertex observers block"

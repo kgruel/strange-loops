@@ -643,8 +643,6 @@ def run_migration(
     signer: Signer,
     transform_rule: Transform | None = None,
     resume_target: Path | str | None = None,
-    custodian: str | None = None,
-    custodian_key: str | None = None,
     tool_version: str = "0.1.0",
 ) -> MigrationOutcome:
     """Run full migration pipeline from legacy store to Arrival store.
@@ -667,8 +665,6 @@ def run_migration(
         signer: Injected Signer for custodian signatures.
         transform_rule: Deterministic fact transform rule (defaults to identity()).
         resume_target: Explicit staging target path when resuming an interrupted migration.
-        custodian: Custodian observer name override (defaults to vertex name).
-        custodian_key: Custodian public key override (defaults to declared key).
         tool_version: Tool version string for report metadata.
 
     Returns:
@@ -708,8 +704,6 @@ def run_migration(
             vertex=vertex_ast,
             rule=t_rule,
             signer=signer,
-            custodian=custodian,
-            custodian_key=custodian_key,
         )
     except (sqlite3.OperationalError, sqlite3.DatabaseError, OSError, UnicodeDecodeError) as exc:
         raise LegacyStorageRefused(

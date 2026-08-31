@@ -975,15 +975,17 @@ def effective_store_clause(text: str, path: Path | None = None) -> StoreClauseSp
     """Locate the single effective top-level store clause in a .vertex document.
 
     Parses the KDL document to count top-level store nodes, and scans the source
-    text (quote- and comment-aware) to locate the exact line and character span
+    text (quote- and comment-aware) to locate the line character span
     of the effective clause.
+
+    Note: ``span`` covers the character offsets of the entire line containing the
+    effective store clause (excluding trailing newline). Any same-line comments
+    trailing the store clause are within this span and will be replaced upon rewrite.
 
     Returns:
         StoreClauseSpan with:
-        - line: 1-based line number if exactly 1 effective store node exists, else None
-        - span: (start_char, end_char) slice in text if exactly 1 effective store node exists, else None
+        - span: (start_char, end_char) line slice in text if exactly 1 effective store node exists, else None
         - count: total number of top-level store nodes in the parsed document
-        - raw: matching line content (without trailing newline) if exactly 1 effective store node exists, else None
 
     Raises:
         ParseError: If the document contains invalid KDL syntax.
@@ -999,7 +1001,7 @@ def effective_store_clause(text: str, path: Path | None = None) -> StoreClauseSp
     store_nodes = [node for node in doc.nodes if node.name == "store"]
     count = len(store_nodes)
     if count != 1:
-        return StoreClauseSpan(line=None, span=None, count=count, raw=None)
+        return StoreClauseSpan(span=None, count=count)
 
     _CODE, _STRING, _BLOCK_COMMENT, _LINE_COMMENT = 0, 1, 2, 3
     state = _CODE
@@ -1082,6 +1084,6 @@ def effective_store_clause(text: str, path: Path | None = None) -> StoreClauseSp
         i += 1
 
     if len(matches) == 1:
-        l_no, span, raw = matches[0]
-        return StoreClauseSpan(line=l_no, span=span, count=count, raw=raw)
-    return StoreClauseSpan(line=None, span=None, count=count, raw=None)
+        _l_no, span, _raw = matches[0]
+        return StoreClauseSpan(span=span, count=count)
+    return StoreClauseSpan(span=None, count=count)

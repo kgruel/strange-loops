@@ -855,7 +855,7 @@ def test_edit_vertex_store_clause_ambiguity_and_syntax_refusals(tmp_path: Path) 
     )
     with pytest.raises(PublishPreconditionRefused) as exc_info:
         edit_vertex_store_clause(v_comment, "./data/target.arrival")
-    assert exc_info.value.condition in {"vertex_store_in_comment", "vertex_store_ineffective"}
+    assert exc_info.value.condition == "vertex_store_ineffective"
 
 
 def test_edit_vertex_store_clause_comment_shadowed_active_store(tmp_path: Path) -> None:
@@ -863,7 +863,8 @@ def test_edit_vertex_store_clause_comment_shadowed_active_store(tmp_path: Path) 
     loops_block = 'loops { concept { fold { items "collect" 100 } } }'
     v_shadow = tmp_path / "shadow.vertex"
     v_shadow.write_text(
-        f'name "alice"\n/*\nstore "./data/legacy.jsonl"\n*/\nstore "./data/active.jsonl"\n{loops_block}\n',
+        f'name "alice"\n/*\nstore "./data/legacy.jsonl"\n*/\n'
+        f'store "./data/active.jsonl"\n{loops_block}\n',
         encoding="utf-8",
     )
     edit_vertex_store_clause(v_shadow, "./data/target.arrival", backend="file")

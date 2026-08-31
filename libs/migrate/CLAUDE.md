@@ -16,7 +16,7 @@ Above: `apps/loops/` provides the `loops store migrate` CLI command (importing `
 
 ## Architectural Rules
 
-1. **Quarantine Rule**: The migration sidecar runs strictly offline outside the running loops engine/daemon. migrate imports no legacy modules and has no write path into a live store. Legacy source readers in `legacy_source.py` and `inventory.py` are frozen copies; an AST quarantine ratchet (enforced in `libs/migrate/tests/test_quarantine.py`) guards against forbidden legacy imports until its ruled slice-5 dissolution when legacy modules are removed. Staging logs are lineage-named directly at `<store_dir>/<lineage>.arrival` (there is no `.staging.arrival` suffix; staging IS the lineage-named target before `.vertex` descriptor publication).
+1. **Quarantine Rule**: The migration sidecar runs strictly offline outside the running loops engine/daemon. migrate imports no legacy modules and has no write path into a live store. The frozen legacy copies are `legacy_jsonl.py` (decode surface), `legacy_sqlite.py` (read spine), and `legacy_ids.py` (transform primitives) — `legacy_source.py` (validated row stream) and `inventory.py` (inventory pass) are live code; an AST quarantine ratchet (enforced in `libs/migrate/tests/test_quarantine.py`) guards against forbidden legacy imports until its ruled slice-5 dissolution when legacy modules are removed. Staging logs are lineage-named directly at `<store_dir>/<lineage>.arrival` (there is no `.staging.arrival` suffix; staging IS the lineage-named target before `.vertex` descriptor publication).
 2. **Injection Rule**: The sidecar never reads private keys directly from disk or key stores, and `migrate/src` never imports `custody` or `sign` (which are declared in `dev` only for tests). Callers MUST inject an Ed25519 signer callback (`(observer, digest) -> signature | None`).
 3. **Verification-by-Re-run**: Verification is an active operation, not a trust claim. The sidecar re-derives projections, re-computes inventories, and validates signed artifacts end-to-end.
 
@@ -66,7 +66,7 @@ is_valid = verify_migration_report(
    - `equivalence_rerun`: Re-derived expected rows match target records logical row-by-row
    - `inventory_equality`: Target projection matches source inventory
    - `journal_first_entry_mint`: First journal entry for lineage is `bootstrap`/`MINT`
-   (Note: The already-migrated guard is an apps-layer pre-flight in `loops/commands/store.py:819-821`, not a `libs/migrate` precondition).
+   (Note: The already-migrated guard is an apps-layer pre-flight in `loops/commands/store.py` (`_run_migrate`'s already-on-arrival pre-flight), not a `libs/migrate` precondition).
    Then surgically update `.vertex` store clause using `lang.effective_store_clause` with verification-by-re-parse.
 
 ---

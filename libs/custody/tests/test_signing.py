@@ -129,7 +129,7 @@ class TestArrivalSigner:
         pub = ed25519.public_key_from_b64(kp.public_b64)
         assert ed25519.verify(pub, sig, ("0" * 64).encode(), domain=ARRIVAL_DOMAIN)
 
-        verifier, keys = arrival_verifier_for(v)
+        verifier, _keys = arrival_verifier_for(v)
         assert verifier is not None
         assert verifier("x", sig, "0" * 64) is True
 

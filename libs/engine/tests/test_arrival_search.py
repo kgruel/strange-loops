@@ -19,7 +19,7 @@ from engine.arrival_contract import (
     SearchStale,
     StoreDescriptor,
 )
-from engine.arrival_file_backend import FileLedger, FileQuery
+from engine.arrival_file_backend import FileLedger, FileQuery, FileSearchMaintenance
 from engine.arrival_registry import BackendRegistry
 from engine.arrival_search import SearchIndexSyncError, sync_search_index
 from engine.arrival_store import ArrivalStore
@@ -148,6 +148,10 @@ def test_search_fields_hash_and_failed_build_retain_explicit_coverage(
         sync_search_index(registry, descriptor, spec)
     assert raised.value.coverage_before is not None
     assert raised.value.observed_after == raised.value.coverage_before
+    assert raised.value.coordinator_phase == "derived-sync"
+    assert raised.value.effects == {
+        "derived": {"attempt": "entered", "state": "unknown"}
+    }
 
     snapshot = FileQuery(database).open_snapshot(
         captured_head=first.target,
@@ -157,6 +161,52 @@ def test_search_fields_hash_and_failed_build_retain_explicit_coverage(
         assert snapshot.search(SearchRequest("alpha", spec.fields_hash)).total_matches == 2
     finally:
         snapshot.close()
+
+
+@pytest.mark.parametrize("failure_point", ("snapshot", "provider", "coverage"))
+def test_search_prebuild_failures_prove_derived_mutation_not_entered(
+    tmp_path, keys, signer, monkeypatch, failure_point
+):
+    _log, _database, descriptor = _target(tmp_path, keys, signer)
+    registry = BackendRegistry.with_builtin_backends()
+
+    def fail(*_args, **_kwargs):
+        raise RuntimeError(f"injected {failure_point} failure")
+
+    if failure_point == "snapshot":
+        monkeypatch.setattr(FileQuery, "open_snapshot", fail)
+    elif failure_point == "provider":
+        monkeypatch.setattr(BackendRegistry, "_search_maintenance_for", fail)
+    else:
+        monkeypatch.setattr(FileSearchMaintenance, "coverage", fail)
+
+    with pytest.raises(SearchIndexSyncError) as raised:
+        sync_search_index(registry, descriptor, _spec())
+
+    assert raised.value.coordinator_phase == "derived-sync"
+    assert raised.value.effects == {
+        "derived": {"attempt": "not-entered", "state": "not-attempted"}
+    }
+    assert isinstance(raised.value.cause, RuntimeError)
+
+
+def test_search_build_control_flow_exception_keeps_identity(
+    tmp_path, keys, signer, monkeypatch
+):
+    _log, _database, descriptor = _target(tmp_path, keys, signer)
+    interruption = KeyboardInterrupt("stop")
+
+    def interrupt(*_args, **_kwargs):
+        raise interruption
+
+    monkeypatch.setattr(FileSearchMaintenance, "build", interrupt)
+
+    with pytest.raises(KeyboardInterrupt) as raised:
+        sync_search_index(
+            BackendRegistry.with_builtin_backends(), descriptor, _spec()
+        )
+
+    assert raised.value is interruption
 
 
 def test_search_rebuild_invalidates_fact_continuations_by_schema_generation(

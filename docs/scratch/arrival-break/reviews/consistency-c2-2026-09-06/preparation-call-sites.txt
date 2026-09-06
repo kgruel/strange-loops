@@ -1,0 +1,43 @@
+104:def _preparation_refused(
+550:def _plan_from_intent(
+635:def _descriptor_location(target: Path, ast: Any, descriptor: StoreDescriptor) -> str:
+638:        raise _preparation_refused(
+643:            raise _preparation_refused(
+648:        raise _preparation_refused(
+654:def _validate_residence(target: Path, ast: Any, descriptor: StoreDescriptor) -> None:
+656:        raise _preparation_refused(
+660:        raise _preparation_refused(
+670:        raise _preparation_refused(
+673:    if _descriptor_location(target, ast, descriptor) != descriptor.location:
+674:        raise _preparation_refused(
+694:def _signed_with_existing_key(
+705:        raise _preparation_refused(f"missing {label} signer")
+708:        raise _preparation_refused(
+713:        raise _preparation_refused(f"missing {label} signature")
+715:        raise _preparation_refused(
+722:def _declaration_row(
+745:    inner_signature = _signed_with_existing_key(
+766:def _key_draft(
+779:    signature = _signed_with_existing_key(
+821:        raise _preparation_refused("proposed declaration text is empty")
+825:        raise _preparation_refused(
+829:        raise _preparation_refused(
+836:        raise _preparation_refused(
+839:    _validate_residence(target_path, ast, descriptor)
+855:                raise _preparation_refused(
+858:            raise _preparation_refused(
+862:            raise _preparation_refused(
+866:            raise _preparation_refused(
+890:            raise _preparation_refused(
+895:            raise _preparation_refused(
+902:            lineage_refusal=lambda message: _preparation_refused(message),
+903:            conflict_refusal=lambda message: _preparation_refused(message),
+928:                raise _preparation_refused(
+932:                raise _preparation_refused(
+944:        raise _preparation_refused(
+978:        raise _preparation_refused(
+985:        fact_id, row = _declaration_row(
+1002:    outer_signature = _signed_with_existing_key(
+1028:            raise _preparation_refused(
+1041:            _key_draft(
+1300:    plan = _plan_from_intent(data, drafts)

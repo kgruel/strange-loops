@@ -7,7 +7,7 @@ handle and asks it to advance derived state through one verified full head.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from contextlib import suppress
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
@@ -103,12 +103,16 @@ class ProjectionSyncError(Exception):
         projected_before: Head | None,
         observed_after: Head | None,
         cause: BaseException,
+        coordinator_phase: str | None = None,
+        effects: Mapping[str, Mapping[str, str]] | None = None,
     ) -> None:
         super().__init__(message)
         self.target = target
         self.projected_before = projected_before
         self.observed_after = observed_after
         self.cause = cause
+        self.coordinator_phase = coordinator_phase
+        self.effects = effects
 
 
 def _close_quietly(handle: object) -> None:
@@ -291,6 +295,10 @@ def sync_projection(
                 projected_before=projected_before,
                 observed_after=observed_after,
                 cause=cause,
+                coordinator_phase="derived-sync",
+                effects={
+                    "derived": {"attempt": "entered", "state": "unknown"}
+                },
             ) from cause
     finally:
         if maintenance is not None:

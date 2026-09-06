@@ -298,6 +298,19 @@ Descriptor-first reads also surface engine contract refusals (for example, a
 missing or behind projection or an invalid continuation) and declaration
 resolution errors. These keep the adapter's evidence-bearing refusal intact.
 
+Arrival `sync_target` and `sync_search_index` normalize maintenance failures as
+`ProjectionOutcomeUnknown`. Their optional `details.evidence` object uses
+`loops.sdk/evidence/v1`: it records the coordinator phase, resource effects,
+available head/coverage coordinates, and up to two explicit causal exceptions.
+Search failures before the build call report derived state as
+`not-entered`/`not-attempted`; failures after entering build or projection
+catch-up report `entered`/`unknown`. A nested refusal does not prove that an
+adapter left derived state unchanged. Existing error outcomes, source types,
+and operation-specific `details.phase` remain intact. Cause messages are capped
+at 512 characters; record bodies and implicit exception context are excluded.
+Declaration preparation refusals carry preparation evidence without claiming a
+custody append. Cancellation and process-control exceptions propagate unchanged.
+
 ## Restore an existing exact copy
 
 ```python

@@ -219,3 +219,100 @@ def test_search_maintenance_keeps_first_declaration_capture_when_reopen_is_later
     assert result.coordinator_captured_head.ordinal > initial.ordinal
     assert result.coverage_after is not None
     assert result.coverage_after["through"]["ordinal"] == initial.ordinal
+
+
+@pytest.mark.parametrize("failure_stage", ["coverage", "after-build"])
+def test_search_failure_evidence_tracks_real_file_build_boundary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure_stage: str
+) -> None:
+    from engine.arrival_contract import HeadMismatch
+    from engine.arrival_file_backend import FileSearchMaintenance
+
+    from sdk.errors import ProjectionOutcomeUnknown
+
+    vertex, log = _arrival_target(tmp_path, monkeypatch)
+    head = FileLedger(log).head()
+    cause = HeadMismatch("injected maintenance refusal")
+    entered: list[Head] = []
+    original_build = FileSearchMaintenance.build
+
+    def build_then_fail(maintenance, through, spec):
+        entered.append(through)
+        original_build(maintenance, through, spec)
+        raise cause
+
+    def coverage_failure(_maintenance):
+        raise cause
+
+    monkeypatch.setattr(FileSearchMaintenance, "build", build_then_fail)
+    if failure_stage == "coverage":
+        monkeypatch.setattr(FileSearchMaintenance, "coverage", coverage_failure)
+
+    with pytest.raises(ProjectionOutcomeUnknown) as failed:
+        sync_search_index(vertex)
+
+    error = failed.value
+    evidence = error.details["evidence"]
+    assert error.__cause__.cause is cause
+    assert evidence["cause"]["type"] == "HeadMismatch"
+    assert evidence["phase"] == "derived-sync"
+    assert evidence["basis"]["target"]["record_hash"] == head.record_hash
+    assert "custody" not in evidence["effects"]
+    assert "commit" not in error.details
+    assert FileLedger(log).head() == head
+    if failure_stage == "coverage":
+        assert entered == []
+        assert evidence["effects"]["derived"] == {
+            "attempt": "not-entered", "state": "not-attempted"
+        }
+        assert evidence["basis"]["observed_after"] is None
+    else:
+        assert entered == [head]
+        assert evidence["effects"]["derived"] == {"attempt": "entered", "state": "unknown"}
+        assert evidence["basis"]["observed_after"]["through"]["record_hash"] == head.record_hash
+        # The adapter really built an index before raising the same refusal
+        # class used in preflight. That class cannot establish no effect.
+        assert search_facts(vertex, "alpha").total_matches == 1
+    json.dumps(error.as_dict(), allow_nan=False)
+
+
+def test_projection_failure_after_real_catch_up_retains_observed_head(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from engine.arrival_contract import HeadMismatch
+    from engine.arrival_file_backend import FileProjectionMaintenance
+
+    from sdk.errors import ProjectionOutcomeUnknown
+
+    vertex, log = _arrival_target(tmp_path, monkeypatch)
+    prior = FileLedger(log).head()
+    log.append(
+        "fact",
+        _signed_fact_body("unprojected", "note", 10.0, "kyle", "test", '{"body":"later"}'),
+        observer="kyle", origin="test", at=10.0, signer=_sign,
+    )
+    head = FileLedger(log).head()
+    original_catch_up = FileProjectionMaintenance.catch_up
+    cause = HeadMismatch("failed after catch-up committed")
+
+    def catch_up_then_fail(maintenance, through):
+        original_catch_up(maintenance, through)
+        raise cause
+
+    monkeypatch.setattr(FileProjectionMaintenance, "catch_up", catch_up_then_fail)
+    with pytest.raises(ProjectionOutcomeUnknown) as failed:
+        sync_target(vertex)
+
+    evidence = failed.value.details["evidence"]
+    assert failed.value.__cause__.cause is cause
+    assert evidence["effects"] == {"derived": {"attempt": "entered", "state": "unknown"}}
+    assert evidence["basis"]["target"]["record_hash"] == head.record_hash
+    assert evidence["basis"]["projected_before"]["record_hash"] == prior.record_hash
+    assert evidence["basis"]["observed_after"]["record_hash"] == head.record_hash
+    assert "commit" not in failed.value.details
+    assert FileLedger(log).head() == head
+    # The next sync can observe coverage without entering catch-up again.
+    current = sync_target(vertex)
+    assert current.target == head and current.projected_after == head
+    assert current.changed is False
+    json.dumps(failed.value.as_dict(), allow_nan=False)

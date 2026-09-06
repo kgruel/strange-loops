@@ -3,13 +3,14 @@
 Status: source-backed audit and work order; C3/C8a implementation is tracked in the
 [first consistency slice](consistency-slice1-2026-09-06.md), and C1 in the
 [registry consistency slice](consistency-c1-2026-09-06.md). C8b is implemented in the
-[collection slice](consistency-c8b-2026-09-06.md); C2 has an
-[evidence design](consistency-c2-evidence-design-2026-09-06.md), awaiting implementation.
+[collection slice](consistency-c8b-2026-09-06.md); C2 is implemented in the
+[evidence slice](consistency-c2-2026-09-06.md), accepted after Fable-low follow-up.
 Remaining items are recommendations.
 Sol audited reads and transfer, Terra audited identity, Luna audited writes and
 recovery, and root reconciled their findings against the current implementation.
 The worktree is `loops-wt/arrival-finish` on `arrival/finish`; prior correctness
-remediation and C1/C3/C8a are committed in `cfb26920`; the C8b/C2 pass is uncommitted.
+remediation and C1/C3/C8a are committed in `cfb26920`; C8b and the C2 design
+are checkpointed in `8a045f1f`. The C2 implementation pass is uncommitted.
 
 Updated after [Fable-low review and root triage](reviews/consistency-2026-09-06/primary-triage.md).
 Fable reviewed frozen copies; root's subsequent changes below are separately
@@ -114,7 +115,7 @@ test where the question concerns an injected backend.
 | ID / order | Finding and disposition | Bounded next change and acceptance |
 | --- | --- | --- |
 | C1 / implemented; review tracked separately | `resolve_entity`, `read_timeline`, and `inspect_declaration` accept optional registry injection. Timeline forwards it across local aggregation and effective-root member capture, retaining the opened root. | See the [C1 report](consistency-c1-2026-09-06.md) for registered opaque-backend and refusal coverage, validation and review status. Existing entity/inspection aggregate restrictions remain; C7 is separate. |
-| C2 / design complete; implementation next | Source-confirmed: `sync_target` bypasses `ProjectionSyncError -> ProjectionOutcomeUnknown`; ordinary reads also vary in normalization. Maintenance wrappers can contain both adapter preflight failures and uncertain effects; SDK serialization can lose the underlying cause. | Use the [C2 evidence design](consistency-c2-evidence-design-2026-09-06.md): additive versioned `details.evidence`, operation-local phase, resource-scoped attempt/effect proof and safe causal evidence before expanding normalization. Preserve known pre-mutation refusal only when established; never infer it just from a nested exception class. Retain source/cause type, IDs, H/Commit, cancellation and admission detail. Declaration preparation currently wraps `ProjectionBehind` in `DeclarationPreparationRefused` with cause; preserve that evidence while deciding future classification. Keep structured source-tier results. A sync coverage boolean is not full projection-content audit; equality with target is not required when another maintainer legitimately advanced further. |
+| C2 / implemented | Arrival `sync_target` now uses existing SDK maintenance normalization; wrappers carry explicit attempt/effect proof and bounded causal diagnostics. | [C2 implementation](consistency-c2-2026-09-06.md) preserves v1 errors, outcome/source type and existing phase, adds optional `details.evidence`, and distinguishes search pre-build non-entry from uncertain entered mutation. Declaration preparation retains captured/projected coordinates and custody non-entry proof. Cancellation, actual receipts, legacy wrappers without proof and structured source tiers remain intact. Valid advanced projection coverage remains supported without claiming a full row audit. |
 | C3 / implemented in slice 1 | Fresh read, runtime capture and declaration preparation now use one custody-completion rule before clamping: lineage, membership, returned coordinate, equal-height full-head agreement. | See the [slice report](consistency-slice1-2026-09-06.md) for regressions and review. The same-height comparison checks two custody answers, not projected row contents. Continuation token/generation policy is retained; extending the helper to the resumed snapshot watermark remains a bounded follow-up, with prior H/P and legitimate advance preserved. |
 | C4 / next | Source-confirmed: SDK `CustodyCredentialProvider.key_dir` is accepted and unused. | Recommend clear refusal of non-None configuration until a consistent override exists; keep ordinary default behavior. Document compatibility impact. The later mapped provider must cover public-key registration and all signing domains. |
 | C5 / next | Confirmed architectural ambiguity: local vertex ticks and same-named loops share production/interpretation keys, even without a loop boundary trigger. | Recommend initially refusing every loop/vertex name equality in supported Arrival runtime materialization/planning and proposed declarations; explicitly document this compatibility restriction. Include passive/count/reset/boundary cases. Preserve evidence reads/export; later relaxation requires proof of unambiguous interpretation. See D4. |

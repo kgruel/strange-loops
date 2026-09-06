@@ -15,6 +15,7 @@ from engine.arrival_body import body_of_fact_row
 from engine.arrival_contract import (
     FactRequest,
     Full,
+    Head,
     HeadMismatch,
     NotSupported,
     Profile,
@@ -486,6 +487,10 @@ def test_mid_projection_failure_rolls_back_rows_and_watermark(
         sync_projection(BackendRegistry.with_builtin_backends(), descriptor)
 
     assert isinstance(caught.value.cause, RuntimeError)
+    assert caught.value.coordinator_phase == "derived-sync"
+    assert caught.value.effects == {
+        "derived": {"attempt": "entered", "state": "unknown"}
+    }
     assert caught.value.projected_before is None
     assert caught.value.observed_after is None
     conn = sqlite3.connect(index_path_for(log.path))
@@ -500,3 +505,17 @@ def test_mid_projection_failure_rolls_back_rows_and_watermark(
     recovered = sync_projection(BackendRegistry.with_builtin_backends(), descriptor)
     assert recovered.changed is True
     assert recovered.projected_after.ordinal == 2
+
+
+def test_projection_sync_error_legacy_constructor_has_no_coordinator_proof() -> None:
+    target = Head("lineage", 1, "hash")
+    error = ProjectionSyncError(
+        "legacy",
+        target=target,
+        projected_before=None,
+        observed_after=None,
+        cause=RuntimeError("failure"),
+    )
+
+    assert error.coordinator_phase is None
+    assert error.effects is None

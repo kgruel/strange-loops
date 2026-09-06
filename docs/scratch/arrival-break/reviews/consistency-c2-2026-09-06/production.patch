@@ -1,0 +1,588 @@
+diff --git a/libs/engine/src/engine/arrival_declarations.py b/libs/engine/src/engine/arrival_declarations.py
+index bd4860da..d7dee4fd 100644
+--- a/libs/engine/src/engine/arrival_declarations.py
++++ b/libs/engine/src/engine/arrival_declarations.py
+@@ -84,6 +84,37 @@ class DeclarationPreparationError(ArrivalError):
+ class DeclarationPreparationRefused(DeclarationPreparationError):
+     """A declaration edit input or signed draft failed a preparation gate."""
+ 
++    def __init__(
++        self,
++        *args: object,
++        coordinator_phase: str | None = None,
++        effects: Mapping[str, Mapping[str, str]] | None = None,
++        captured_head: Head | None = None,
++        projected_head: Head | None = None,
++    ) -> None:
++        super().__init__(*args)
++        self.coordinator_phase = coordinator_phase
++        self.effects = effects
++        self.captured_head = captured_head
++        self.projected_head = projected_head
++
++
++def _preparation_refused(
++    message: str,
++    *,
++    captured_head: Head | None = None,
++    projected_head: Head | None = None,
++) -> DeclarationPreparationRefused:
++    return DeclarationPreparationRefused(
++        message,
++        coordinator_phase="prepare",
++        effects={
++            "custody": {"attempt": "not-entered", "state": "not-attempted"}
++        },
++        captured_head=captured_head,
++        projected_head=projected_head,
++    )
++
+ 
+ class DeclarationApplyError(ArrivalError):
+     """A declaration apply or recovery operation could not complete."""
+@@ -602,17 +633,17 @@ def _plan_from_intent(
+ def _descriptor_location(target: Path, ast: Any, descriptor: StoreDescriptor) -> str:
+     backend = ast.store_backend
+     if backend is None:
+-        raise DeclarationPreparationRefused(
++        raise _preparation_refused(
+             "proposed declaration has no explicit store backend"
+         )
+     if descriptor.backend == "file":
+         if ast.store is None:
+-            raise DeclarationPreparationRefused(
++            raise _preparation_refused(
+                 "proposed file declaration has no store location"
+             )
+         return str((target.parent / str(ast.store)).resolve())
+     if ast.store_location is None:
+-        raise DeclarationPreparationRefused(
++        raise _preparation_refused(
+             "proposed non-file declaration has no opaque store location"
+         )
+     return str(ast.store_location)
+@@ -620,11 +651,11 @@ def _descriptor_location(target: Path, ast: Any, descriptor: StoreDescriptor) ->
+ 
+ def _validate_residence(target: Path, ast: Any, descriptor: StoreDescriptor) -> None:
+     if descriptor.role is not Profile.AUTHORITY:
+-        raise DeclarationPreparationRefused(
++        raise _preparation_refused(
+             "declaration edits require an Authority descriptor"
+         )
+     if descriptor.lineage is None:
+-        raise DeclarationPreparationRefused(
++        raise _preparation_refused(
+             "declaration edit descriptor must pin a lineage"
+         )
+     backend = ast.store_backend
+@@ -634,11 +665,11 @@ def _validate_residence(target: Path, ast: Any, descriptor: StoreDescriptor) ->
+         or backend.lineage != descriptor.lineage
+         or backend.role != Profile.AUTHORITY.value
+     ):
+-        raise DeclarationPreparationRefused(
++        raise _preparation_refused(
+             "proposed declaration residence must preserve backend, lineage and authority role"
+         )
+     if _descriptor_location(target, ast, descriptor) != descriptor.location:
+-        raise DeclarationPreparationRefused(
++        raise _preparation_refused(
+             "proposed declaration residence must preserve the descriptor location"
+         )
+ 
+@@ -669,17 +700,17 @@ def _signed_with_existing_key(
+     label: str,
+ ) -> str:
+     if not callable(signer):
+-        raise DeclarationPreparationRefused(f"missing {label} signer")
++        raise _preparation_refused(f"missing {label} signer")
+     keys = _valid_author_keys(registry, author, head)
+     if not keys:
+-        raise DeclarationPreparationRefused(
++        raise _preparation_refused(
+             f"edit author {author!r} has no key valid at the captured Arrival head"
+         )
+     signature = signer(author, digest)
+     if not signature:
+-        raise DeclarationPreparationRefused(f"missing {label} signature")
++        raise _preparation_refused(f"missing {label} signature")
+     if not any(verifier(key, signature, digest) for key in keys):
+-        raise DeclarationPreparationRefused(
++        raise _preparation_refused(
+             f"{label} signature does not verify under a key valid for edit author "
+             f"{author!r} at the captured Arrival head"
+         )
+@@ -785,22 +816,22 @@ def prepare_declaration_edit(
+     """
+     target_path = Path(target).resolve()
+     if not isinstance(proposed_text, str) or not proposed_text:
+-        raise DeclarationPreparationRefused("proposed declaration text is empty")
++        raise _preparation_refused("proposed declaration text is empty")
+     try:
+         old_cache_bytes = target_path.read_bytes()
+     except OSError as exc:
+-        raise DeclarationPreparationRefused(
++        raise _preparation_refused(
+             f"cannot read declaration cache {target_path}: {exc}"
+         ) from exc
+     if source_cache_bytes is not None and old_cache_bytes != source_cache_bytes:
+-        raise DeclarationPreparationRefused(
++        raise _preparation_refused(
+             "declaration cache changed while preparing the requested splice"
+         )
+     try:
+         ast = parse_vertex(proposed_text, path=target_path)
+         validate_vertex(ast)
+     except Exception as exc:
+-        raise DeclarationPreparationRefused(
++        raise _preparation_refused(
+             f"proposed declaration is not valid Vertex grammar/semantics: {exc}"
+         ) from exc
+     _validate_residence(target_path, ast, descriptor)
+@@ -812,24 +843,25 @@ def prepare_declaration_edit(
+     query: ArrivalQuery | None = None
+     snapshot: Any | None = None
+     atomic_limit: int | None = None
++    captured_head: Head | None = None
+     try:
+         ledger, query = registry.open(descriptor)
+         report = getattr(ledger, "opened", None)
+         comparison = getattr(report, "comparison", None)
+         if isinstance(comparison, PreGenesis):
+             if comparison.ledger_refusal is not None:
+-                raise DeclarationPreparationRefused(
++                raise _preparation_refused(
+                     f"Arrival ledger is not opened: {comparison.ledger_refusal}"
+                 )
+-            raise DeclarationPreparationRefused(
++            raise _preparation_refused(
+                 "Arrival ledger has no captured head for declaration editing"
+             )
+         if isinstance(comparison, Indeterminate):
+-            raise DeclarationPreparationRefused(
++            raise _preparation_refused(
+                 f"Arrival head attestation is indeterminate: {comparison.refusal}"
+             )
+         if not isinstance(comparison, Compared):
+-            raise DeclarationPreparationRefused(
++            raise _preparation_refused(
+                 "registry opener did not provide a compared Arrival head"
+             )
+         captured_head = comparison.presented
+@@ -853,25 +885,28 @@ def prepare_declaration_edit(
+             snapshot.declaration_anchor, facts
+         )
+         if documents is None or isinstance(documents, Unhistorized):
+-            raise DeclarationPreparationRefused(
++            raise _preparation_refused(
+                 "the CURRENT Arrival snapshot has no historized declaration"
+             )
+         represented = snapshot.represented
+         if represented is None:
+-            raise DeclarationPreparationRefused(
++            raise _preparation_refused(
+                 "the CURRENT declaration snapshot has no matching lineage basis"
+             )
+         projected = complete_projection_custody(
+             ledger,
+             captured=captured_head,
+             represented=represented,
+-            lineage_refusal=lambda message: DeclarationPreparationRefused(message),
+-            conflict_refusal=lambda message: DeclarationPreparationRefused(message),
++            lineage_refusal=lambda message: _preparation_refused(message),
++            conflict_refusal=lambda message: _preparation_refused(message),
+         )
+         if projected.ordinal < captured_head.ordinal:
+-            raise ProjectionBehind(
++            behind = ProjectionBehind(
+                 "the CURRENT declaration snapshot is behind the captured Arrival head"
+             )
++            behind.captured_head = captured_head
++            behind.projected_head = projected
++            raise behind
+         basis = ReadBasis(
+             lineage=captured_head.lineage,
+             captured_head=captured_head,
+@@ -888,11 +923,11 @@ def prepare_declaration_edit(
+                     document.as_json() for document in vertex_to_documents(local_ast)
+                 )
+             except Exception as exc:
+-                raise DeclarationPreparationRefused(
++                raise _preparation_refused(
+                     f"current declaration cache is not valid for this splice: {exc}"
+                 ) from exc
+             if local_documents != before_documents:
+-                raise DeclarationPreparationRefused(
++                raise _preparation_refused(
+                     "declaration cache differs from CURRENT Arrival history; "
+                     "convenience mutation refused"
+                 )
+@@ -904,8 +939,10 @@ def prepare_declaration_edit(
+     except DeclarationPreparationError:
+         raise
+     except Exception as exc:
+-        raise DeclarationPreparationRefused(
+-            f"cannot establish declaration preparation basis: {exc}"
++        raise _preparation_refused(
++            f"cannot establish declaration preparation basis: {exc}",
++            captured_head=captured_head,
++            projected_head=getattr(exc, "projected_head", None),
+         ) from exc
+     finally:
+         _close_quietly(snapshot)
+@@ -936,7 +973,7 @@ def prepare_declaration_edit(
+         )
+ 
+     if credentials is None:
+-        raise DeclarationPreparationRefused(
++        raise _preparation_refused(
+             "declaration edits require fact and Arrival signers"
+         )
+     authored_at = time.time()
+@@ -986,7 +1023,7 @@ def prepare_declaration_edit(
+         if key is None:
+             continue
+         if not _key_is_well_formed(key):
+-            raise DeclarationPreparationRefused(
++            raise _preparation_refused(
+                 f"observer {document['subject']!r} carries a malformed public key"
+             )
+         proposed_keys[str(document["subject"])] = str(key)
+diff --git a/libs/engine/src/engine/arrival_maintenance.py b/libs/engine/src/engine/arrival_maintenance.py
+index e1dbd124..77b4c15e 100644
+--- a/libs/engine/src/engine/arrival_maintenance.py
++++ b/libs/engine/src/engine/arrival_maintenance.py
+@@ -7,7 +7,7 @@ handle and asks it to advance derived state through one verified full head.
+ 
+ from __future__ import annotations
+ 
+-from collections.abc import Callable
++from collections.abc import Callable, Mapping
+ from contextlib import suppress
+ from dataclasses import dataclass
+ from typing import TYPE_CHECKING, Protocol, runtime_checkable
+@@ -103,12 +103,16 @@ class ProjectionSyncError(Exception):
+         projected_before: Head | None,
+         observed_after: Head | None,
+         cause: BaseException,
++        coordinator_phase: str | None = None,
++        effects: Mapping[str, Mapping[str, str]] | None = None,
+     ) -> None:
+         super().__init__(message)
+         self.target = target
+         self.projected_before = projected_before
+         self.observed_after = observed_after
+         self.cause = cause
++        self.coordinator_phase = coordinator_phase
++        self.effects = effects
+ 
+ 
+ def _close_quietly(handle: object) -> None:
+@@ -291,6 +295,10 @@ def sync_projection(
+                 projected_before=projected_before,
+                 observed_after=observed_after,
+                 cause=cause,
++                coordinator_phase="derived-sync",
++                effects={
++                    "derived": {"attempt": "entered", "state": "unknown"}
++                },
+             ) from cause
+     finally:
+         if maintenance is not None:
+diff --git a/libs/engine/src/engine/arrival_search.py b/libs/engine/src/engine/arrival_search.py
+index f157c52c..057f8890 100644
+--- a/libs/engine/src/engine/arrival_search.py
++++ b/libs/engine/src/engine/arrival_search.py
+@@ -2,7 +2,7 @@
+ 
+ from __future__ import annotations
+ 
+-from collections.abc import Callable
++from collections.abc import Callable, Mapping
+ from contextlib import suppress
+ from dataclasses import dataclass
+ from typing import TYPE_CHECKING, Protocol, runtime_checkable
+@@ -85,6 +85,8 @@ class SearchIndexSyncError(Exception):
+         observed_after: SearchCoverage | None,
+         fields_hash: str,
+         cause: BaseException,
++        coordinator_phase: str | None = None,
++        effects: Mapping[str, Mapping[str, str]] | None = None,
+     ) -> None:
+         super().__init__(message)
+         self.target = target
+@@ -92,6 +94,8 @@ class SearchIndexSyncError(Exception):
+         self.observed_after = observed_after
+         self.fields_hash = fields_hash
+         self.cause = cause
++        self.coordinator_phase = coordinator_phase
++        self.effects = effects
+ 
+ 
+ def _close_quietly(handle: object) -> None:
+@@ -161,6 +165,7 @@ def sync_search_index(
+     ledger = query = maintenance = snapshot = None
+     before = None
+     target: Head | None = None
++    build_entered = False
+     try:
+         ledger, query = registry.open(descriptor)
+         if not isinstance(ledger, AttestedLedger):
+@@ -175,6 +180,7 @@ def sync_search_index(
+         snapshot = None
+         maintenance = registry._search_maintenance_for(descriptor)
+         before = maintenance.coverage()
++        build_entered = True
+         build = maintenance.build(target, spec)
+         if build.after.through != target or build.after.fields_hash != spec.fields_hash:
+             raise HeadMismatch("search maintainer returned coverage other than its target/spec")
+@@ -200,6 +206,13 @@ def sync_search_index(
+             observed_after=observed_after,
+             fields_hash=spec.fields_hash,
+             cause=cause,
++            coordinator_phase="derived-sync",
++            effects={
++                "derived": {
++                    "attempt": "entered" if build_entered else "not-entered",
++                    "state": "unknown" if build_entered else "not-attempted",
++                }
++            },
+         ) from cause
+     finally:
+         _close_quietly(snapshot)
+diff --git a/libs/sdk/README.md b/libs/sdk/README.md
+index b6a3dc01..20dbf3be 100644
+--- a/libs/sdk/README.md
++++ b/libs/sdk/README.md
+@@ -298,6 +298,19 @@ Descriptor-first reads also surface engine contract refusals (for example, a
+ missing or behind projection or an invalid continuation) and declaration
+ resolution errors. These keep the adapter's evidence-bearing refusal intact.
+ 
++Arrival `sync_target` and `sync_search_index` normalize maintenance failures as
++`ProjectionOutcomeUnknown`. Their optional `details.evidence` object uses
++`loops.sdk/evidence/v1`: it records the coordinator phase, resource effects,
++available head/coverage coordinates, and up to two explicit causal exceptions.
++Search failures before the build call report derived state as
++`not-entered`/`not-attempted`; failures after entering build or projection
++catch-up report `entered`/`unknown`. A nested refusal does not prove that an
++adapter left derived state unchanged. Existing error outcomes, source types,
++and operation-specific `details.phase` remain intact. Cause messages are capped
++at 512 characters; record bodies and implicit exception context are excluded.
++Declaration preparation refusals carry preparation evidence without claiming a
++custody append. Cancellation and process-control exceptions propagate unchanged.
++
+ ## Restore an existing exact copy
+ 
+ ```python
+diff --git a/libs/sdk/src/sdk/errors.py b/libs/sdk/src/sdk/errors.py
+index 453dd477..eb494e49 100644
+--- a/libs/sdk/src/sdk/errors.py
++++ b/libs/sdk/src/sdk/errors.py
+@@ -9,6 +9,7 @@ refusal or an outcome that may already have committed.
+ from __future__ import annotations
+ 
+ from collections.abc import Mapping
++from pathlib import PurePath
+ from typing import Any
+ 
+ from engine.admission import AdmissionError
+@@ -57,10 +58,10 @@ __all__ = [
+ def _json_value(value: Any) -> Any:
+     if value is None or isinstance(value, (str, int, float, bool)):
+         return value
+-    try:
++    if isinstance(value, PurePath):
+         return str(value)
+-    except Exception:  # pragma: no cover - pathological diagnostic object
+-        return repr(value)
++    # Identity diagnostics must never stringify arbitrary record/payload objects.
++    return None
+ 
+ 
+ def _head_dict(value: Any) -> dict[str, Any] | None:
+@@ -99,6 +100,9 @@ def _identity_details(exc: BaseException) -> dict[str, Any]:
+         "lineage",
+         "intent_path",
+         "phase",
++        "fields_hash",
++        "view_generation",
++        "tier_index",
+     ):
+         value = getattr(exc, name, None)
+         if value is not None:
+@@ -127,6 +131,7 @@ def _identity_details(exc: BaseException) -> dict[str, Any]:
+         "target",
+         "projected_before",
+         "observed_after",
++        "projected_head",
+     ):
+         value = getattr(exc, name, None)
+         if value is None:
+@@ -139,11 +144,14 @@ def _identity_details(exc: BaseException) -> dict[str, Any]:
+         coverage = _coverage_dict(value)
+         if coverage is not None:
+             details[name] = coverage
+-    # A pre-mint unknown outcome deliberately has no captured head.  Preserve
+-    # that explicit state in the public diagnostic instead of making it look
+-    # like the field was never part of the outcome contract.
+-    if hasattr(exc, "captured_head") and exc.captured_head is None:
+-        details["captured_head"] = None
++    # Preserve an explicitly unavailable coordinate without claiming a head or
++    # coverage. Missing attributes on older wrappers still remain omitted.
++    for name in (
++        "captured_head", "projected_head", "projected_before", "observed_after",
++        "coverage_before", "coverage_after",
++    ):
++        if hasattr(exc, name) and getattr(exc, name) is None:
++            details[name] = None
+     commit = getattr(exc, "commit", None)
+     if commit is not None:
+         before = _head_dict(getattr(commit, "before", None))
+@@ -158,6 +166,93 @@ def _identity_details(exc: BaseException) -> dict[str, Any]:
+     return details
+ 
+ 
++def _causal_exception(exc: BaseException) -> BaseException | None:
++    cause = getattr(exc, "cause", None)
++    if isinstance(cause, BaseException):
++        return cause
++    return exc.__cause__ if isinstance(exc.__cause__, BaseException) else None
++
++
++def _cause_details(exc: BaseException) -> dict[str, Any] | None:
++    """Two explicit causal nodes, never implicit context or record bodies."""
++    seen = {id(exc)}
++    result: dict[str, Any] | None = None
++    parent: dict[str, Any] | None = None
++    for _ in range(2):
++        cause = _causal_exception(exc)
++        if cause is None or id(cause) in seen:
++            break
++        seen.add(id(cause))
++        try:
++            message = str(cause)
++        except Exception:
++            message = "<message unavailable>"
++        node: dict[str, Any] = {
++            "type": type(cause).__name__,
++            "message": message[:512],
++            "details": _identity_details(cause),
++        }
++        if len(message) > 512:
++            node["truncated"] = True
++        if parent is None:
++            result = node
++        else:
++            parent["cause"] = node
++        parent = node
++        exc = cause
++    return result
++
++
++def _evidence_details(exc: BaseException, details: Mapping[str, Any]) -> dict[str, Any] | None:
++    """Expose coordinator proofs without deriving effects from error classes."""
++    evidence: dict[str, Any] = {}
++    phase = getattr(exc, "coordinator_phase", None)
++    if isinstance(phase, str):
++        evidence["phase"] = phase
++    effects = getattr(exc, "effects", None)
++    if isinstance(effects, Mapping):
++        safe_effects = {}
++        for resource in ("custody", "witness", "derived", "cache", "artifact", "dispatch"):
++            effect = effects.get(resource)
++            if not isinstance(effect, Mapping):
++                continue
++            state = effect.get("state")
++            attempt = effect.get("attempt")
++            if state not in (
++                "not-attempted", "known-none", "committed", "unknown", "completed", "incomplete"
++            ):
++                continue
++            if attempt == "not-entered" and state != "not-attempted":
++                continue
++            safe_effect = {"state": state}
++            if attempt in ("not-entered", "entered"):
++                safe_effect["attempt"] = attempt
++            safe_effects[resource] = safe_effect
++        if safe_effects:
++            evidence["effects"] = safe_effects
++    cause = _cause_details(exc)
++    if cause is not None:
++        evidence["cause"] = cause
++    if not evidence:
++        return None
++    evidence["schema"] = "loops.sdk/evidence/v1"
++    basis_fields = (
++        "head", "captured_head", "presented", "target", "projected_before", "projected_head",
++        "observed_after", "coverage_before", "coverage_after", "fields_hash", "view_generation",
++    )
++    identity_fields = (
++        "fact_id", "tick_id", "fact_ids", "tick_ids", "items", "item_index", "tier_index",
++        "ordinal", "observer", "kind", "vertex", "lineage", "commit",
++    )
++    basis = {name: details[name] for name in basis_fields if name in details}
++    identities = {name: details[name] for name in identity_fields if name in details}
++    if basis:
++        evidence["basis"] = basis
++    if identities:
++        evidence["identities"] = identities
++    return evidence
++
++
+ def _context_detail(name: str, value: Any) -> Any:
+     """Serialize only stable identity fields supplied by an SDK operation."""
+     if name in {"fact_ids", "tick_ids"}:
+@@ -297,7 +392,7 @@ def normalize_exception(
+     Existing SDK errors are returned unchanged.  Classification is by the
+     engine's public exception types, never by message text.
+     """
+-    if isinstance(exc, SdkError):
++    if not isinstance(exc, Exception) or isinstance(exc, SdkError):
+         return exc
+     details = _identity_details(exc)
+     context_fields = {
+@@ -314,6 +409,9 @@ def normalize_exception(
+             continue
+         details[name] = _context_detail(name, value)
+     details["source_type"] = type(exc).__name__
++    evidence = _evidence_details(exc, details)
++    if evidence is not None:
++        details["evidence"] = evidence
+     if isinstance(exc, (BatchWriteCommitUnknown, WriteCommitUnknown)):
+         return CommittedOutcomeUnknown(str(exc), source_type=type(exc).__name__, details=details)
+     if isinstance(exc, InitializationOutcomeUnknown):
+@@ -372,7 +470,6 @@ def normalize_exception(
+             AttestationRefusal,
+             ContractRefusal,
+             ArrivalError,
+-            ProjectionSyncError,
+             RuntimeWriteRefused,
+         ),
+     ):
+diff --git a/libs/sdk/src/sdk/read.py b/libs/sdk/src/sdk/read.py
+index 316a4b35..63b916b4 100644
+--- a/libs/sdk/src/sdk/read.py
++++ b/libs/sdk/src/sdk/read.py
+@@ -1822,11 +1822,19 @@ def sync_target(
+     if arrival is not None:
+         from engine.arrival_maintenance import sync_projection
+ 
++        from .errors import normalize_exception
++
+         _path, _ast, descriptor = arrival
+-        result = sync_projection(
+-            registry if registry is not None else BackendRegistry.with_builtin_backends(),
+-            descriptor,
+-        )
++        try:
++            result = sync_projection(
++                registry if registry is not None else BackendRegistry.with_builtin_backends(),
++                descriptor,
++            )
++        except BaseException as exc:
++            normalized = normalize_exception(exc)
++            if normalized is exc:
++                raise
++            raise normalized from exc
+         t1 = time.perf_counter()
+         return SyncResult(
+             read_path="arrival",

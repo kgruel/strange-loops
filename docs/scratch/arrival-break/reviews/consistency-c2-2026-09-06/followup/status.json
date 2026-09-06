@@ -1,0 +1,84 @@
+{
+  "due_at": "2026-09-06T18:15:43.939642+00:00",
+  "model": "claude-fable-5-1[1m]",
+  "effort": "low",
+  "worktree": "/Users/kaygee/Code/loops-wt/arrival-finish",
+  "results": "/Users/kaygee/Code/loops-wt/arrival-finish/docs/scratch/arrival-break/reviews/consistency-c2-2026-09-06/followup",
+  "jobs": [
+    {
+      "name": "followup",
+      "packet": "/Users/kaygee/Code/loops-wt/arrival-finish/docs/scratch/arrival-break/reviews/consistency-c2-2026-09-06/followup/followup-prompt.txt",
+      "sha256": "a7e5cb6256f2626ce9b14fec614963d2bcf9bd139559e8769b0466e0070a673a",
+      "sources": {
+        "docs/scratch/arrival-break/reviews/consistency-c2-2026-09-06/c2-findings.md": "ebb4d2f5adb3083abd1d9cc46f354b69c547151398d220b6a2e939ba5d047b81",
+        "docs/scratch/arrival-break/reviews/consistency-c2-2026-09-06/primary-triage.md": "0bf20f9ec41e329537a7eaf0c9255c0201098aa8a950cb97183a3d0939aa7a98",
+        "docs/scratch/arrival-break/reviews/consistency-c2-2026-09-06/preparation-call-sites.txt": "e3719d43f064adf403cd957e181280622992b7d7f4cd3d5e2342cd1c9b53c182",
+        "docs/scratch/arrival-break/consistency-c2-2026-09-06.md": "6464f4ca1064e16e3aac50b2822602292fa43d530e70fb9a5b5a58db3850e19e",
+        "docs/scratch/arrival-break/consistency-c2-validation-2026-09-06.md": "1346ca07348116ea420c058afe3647f19eb0bfa547eb56d4df6996e5d6c7e2ee",
+        "libs/sdk/src/sdk/errors.py": "d956636a83ce14c0ad90f931e19e2f8c3154d31e57c152562422fa32609a9db4",
+        "libs/sdk/src/sdk/read.py": "7db73bf6c487abf0f59502b091eedf652a84fd0aaf0bfee0ce5066c50376d161",
+        "libs/sdk/tests/test_arrival_evidence.py": "9d93414c51b1d63f720d8e820f52ea4b61dca7c517a2f6eaff8f67c31f67de2d",
+        "libs/engine/src/engine/arrival_declarations.py": "ac3a0b7ba465dfc1bf247224cda29284cf4ade582c030d7b022d41c99a9c10ce",
+        "libs/engine/src/engine/arrival_initialization.py": "ba51c7c1d138a22cec50ccaf8be546791298d0bf14e2dd57fdf603fc9e192e34",
+        "libs/engine/tests/test_arrival_declaration_custody.py": "fad63d441b6bcae4c9876b2cb9a8e563234047027556553f970deb893927079e"
+      },
+      "status": "reviewed-awaiting-triage",
+      "packet_characters": 137352,
+      "started_at": "2026-09-06T18:15:50.951597+00:00",
+      "effort": "low",
+      "source_drift": [],
+      "command": [
+        "/Users/kaygee/.local/bin/claude",
+        "-p",
+        "--safe-mode",
+        "--model",
+        "claude-fable-5-1[1m]",
+        "--effort",
+        "low",
+        "--no-session-persistence",
+        "--tools",
+        "",
+        "--output-format",
+        "json"
+      ],
+      "returncode": 0,
+      "model_usage": {
+        "claude-haiku-4-5-20251001": {
+          "inputTokens": 41571,
+          "outputTokens": 21,
+          "cacheReadInputTokens": 0,
+          "cacheCreationInputTokens": 0,
+          "webSearchRequests": 0,
+          "costUSD": 0.041676,
+          "contextWindow": 200000,
+          "maxOutputTokens": 32000,
+          "thinkingTokens": 0,
+          "canonicalModel": "claude-haiku-4-5",
+          "provider": "firstParty",
+          "costBasis": "list"
+        },
+        "claude-fable-5-1": {
+          "inputTokens": 2,
+          "outputTokens": 3164,
+          "cacheReadInputTokens": 3264,
+          "cacheCreationInputTokens": 54193,
+          "webSearchRequests": 0,
+          "costUSD": 1.242896,
+          "contextWindow": 1000000,
+          "maxOutputTokens": 64000,
+          "thinkingTokens": 1681,
+          "canonicalModel": "claude-fable-5-1",
+          "provider": "firstParty",
+          "costBasis": "list"
+        }
+      },
+      "response_subtype": "success",
+      "finished_at": "2026-09-06T18:16:34.733434+00:00"
+    }
+  ],
+  "status": "reviews-finished-awaiting-triage",
+  "pid": 24518,
+  "updated_at": "2026-09-06T18:16:34.733438+00:00",
+  "started_at": "2026-09-06T18:15:50.951424+00:00",
+  "finished_at": "2026-09-06T18:16:34.733730+00:00"
+}

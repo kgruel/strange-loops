@@ -1,3 +1,29 @@
+## September 6 checkpoint: C2 implementation complete and accepted
+
+C2 is implemented using Sol/Terra/Luna and root. Arrival projection/search
+maintenance errors carry explicit mutation-attempt evidence, declaration
+preparation retains its proven custody non-entry and behind-projection heads,
+and the SDK adds bounded causal diagnostics while preserving v1 errors and
+existing phases. Arrival `sync_target` now uses the maintenance normalization
+boundary. See the [C2 report](consistency-c2-2026-09-06.md),
+[validation](consistency-c2-validation-2026-09-06.md), and
+[review triage](reviews/consistency-c2-2026-09-06/primary-triage.md).
+
+Two Fable 5.1 low-effort reviews completed. The initial review found an
+absent-versus-null context issue and two serializer refinements, all corrected.
+Its speculative preparation-helper reuse concern was disproved by the full
+call graph; the follow-up accepted that rebuttal and the final source. One
+optional captured-head enrichment on other declaration-refusal branches is
+recorded as future work. No reviews or validation jobs remain.
+
+Final validation on unchanged production/test bytes: engine 2,550 passed / 1
+skipped, SDK 525 passed, architecture 101 passed, scoped Ruff clean. The C8b
+implementation and C2 design were checkpointed at `8a045f1f`; this C2
+implementation remains uncommitted on `arrival/finish`. Main is clean. Nothing
+pushed or applied to live stores. The next bounded consistency candidate is C4:
+refuse a configured credential `key_dir` override until an explicit mapping is
+supported, instead of silently ignoring it.
+
 ## September 6 checkpoint: C8b complete; C2 design accepted
 
 The C8b collection slice is implemented using Sol/Terra/Luna and root, with

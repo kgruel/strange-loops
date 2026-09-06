@@ -9,6 +9,7 @@ refusal or an outcome that may already have committed.
 from __future__ import annotations
 
 from collections.abc import Mapping
+from pathlib import PurePath
 from typing import Any
 
 from engine.admission import AdmissionError
@@ -57,10 +58,10 @@ __all__ = [
 def _json_value(value: Any) -> Any:
     if value is None or isinstance(value, (str, int, float, bool)):
         return value
-    try:
+    if isinstance(value, PurePath):
         return str(value)
-    except Exception:  # pragma: no cover - pathological diagnostic object
-        return repr(value)
+    # Identity diagnostics must never stringify arbitrary record/payload objects.
+    return None
 
 
 def _head_dict(value: Any) -> dict[str, Any] | None:
@@ -99,10 +100,15 @@ def _identity_details(exc: BaseException) -> dict[str, Any]:
         "lineage",
         "intent_path",
         "phase",
+        "fields_hash",
+        "view_generation",
+        "tier_index",
     ):
         value = getattr(exc, name, None)
         if value is not None:
-            details[name] = _json_value(value)
+            coordinate = _json_value(value)
+            if coordinate is not None:
+                details[name] = coordinate
     for name in ("fact_ids", "tick_ids"):
         value = getattr(exc, name, None)
         if value is not None:
@@ -127,6 +133,7 @@ def _identity_details(exc: BaseException) -> dict[str, Any]:
         "target",
         "projected_before",
         "observed_after",
+        "projected_head",
     ):
         value = getattr(exc, name, None)
         if value is None:
@@ -139,11 +146,14 @@ def _identity_details(exc: BaseException) -> dict[str, Any]:
         coverage = _coverage_dict(value)
         if coverage is not None:
             details[name] = coverage
-    # A pre-mint unknown outcome deliberately has no captured head.  Preserve
-    # that explicit state in the public diagnostic instead of making it look
-    # like the field was never part of the outcome contract.
-    if hasattr(exc, "captured_head") and exc.captured_head is None:
-        details["captured_head"] = None
+    # Preserve an explicitly unavailable coordinate without claiming a head or
+    # coverage. Missing attributes on older wrappers still remain omitted.
+    for name in (
+        "captured_head", "projected_head", "projected_before", "observed_after",
+        "coverage_before", "coverage_after",
+    ):
+        if hasattr(exc, name) and getattr(exc, name) is None:
+            details[name] = None
     commit = getattr(exc, "commit", None)
     if commit is not None:
         before = _head_dict(getattr(commit, "before", None))
@@ -156,6 +166,95 @@ def _identity_details(exc: BaseException) -> dict[str, Any]:
         if commit_details:
             details["commit"] = commit_details
     return details
+
+
+def _causal_exception(exc: BaseException) -> BaseException | None:
+    cause = getattr(exc, "cause", None)
+    if isinstance(cause, BaseException):
+        return cause
+    return exc.__cause__ if isinstance(exc.__cause__, BaseException) else None
+
+
+def _cause_details(exc: BaseException) -> dict[str, Any] | None:
+    """Two explicit causal nodes, never implicit context or record bodies."""
+    seen = {id(exc)}
+    result: dict[str, Any] | None = None
+    parent: dict[str, Any] | None = None
+    for _ in range(2):
+        cause = _causal_exception(exc)
+        if cause is None or id(cause) in seen:
+            break
+        seen.add(id(cause))
+        try:
+            message = str(cause)
+        except Exception:
+            message = "<message unavailable>"
+        node: dict[str, Any] = {
+            "type": type(cause).__name__,
+            "message": message[:512],
+            "details": _identity_details(cause),
+        }
+        if len(message) > 512:
+            node["truncated"] = True
+        if parent is None:
+            result = node
+        else:
+            parent["cause"] = node
+        parent = node
+        exc = cause
+    return result
+
+
+def _evidence_details(exc: BaseException, details: Mapping[str, Any]) -> dict[str, Any] | None:
+    """Expose coordinator proofs without deriving effects from error classes."""
+    evidence: dict[str, Any] = {}
+    phase = getattr(exc, "coordinator_phase", None)
+    if isinstance(phase, str):
+        evidence["phase"] = phase
+    effects = getattr(exc, "effects", None)
+    if isinstance(effects, Mapping):
+        safe_effects = {}
+        for resource in ("custody", "witness", "derived", "cache", "artifact", "dispatch"):
+            effect = effects.get(resource)
+            if not isinstance(effect, Mapping):
+                continue
+            state = effect.get("state")
+            attempt = effect.get("attempt")
+            if state not in (
+                "not-attempted", "known-none", "committed", "unknown", "completed", "incomplete"
+            ):
+                continue
+            if attempt == "not-entered" and state != "not-attempted":
+                continue
+            if attempt == "entered" and state == "not-attempted":
+                continue
+            safe_effect = {"state": state}
+            if attempt in ("not-entered", "entered"):
+                safe_effect["attempt"] = attempt
+            safe_effects[resource] = safe_effect
+        if safe_effects:
+            evidence["effects"] = safe_effects
+    cause = _cause_details(exc)
+    if cause is not None:
+        evidence["cause"] = cause
+    if not evidence:
+        return None
+    evidence["schema"] = "loops.sdk/evidence/v1"
+    basis_fields = (
+        "head", "captured_head", "presented", "target", "projected_before", "projected_head",
+        "observed_after", "coverage_before", "coverage_after", "fields_hash", "view_generation",
+    )
+    identity_fields = (
+        "fact_id", "tick_id", "fact_ids", "tick_ids", "items", "item_index", "tier_index",
+        "ordinal", "observer", "kind", "vertex", "lineage", "commit",
+    )
+    basis = {name: details[name] for name in basis_fields if name in details}
+    identities = {name: details[name] for name in identity_fields if name in details}
+    if basis:
+        evidence["basis"] = basis
+    if identities:
+        evidence["identities"] = identities
+    return evidence
 
 
 def _context_detail(name: str, value: Any) -> Any:
@@ -297,7 +396,7 @@ def normalize_exception(
     Existing SDK errors are returned unchanged.  Classification is by the
     engine's public exception types, never by message text.
     """
-    if isinstance(exc, SdkError):
+    if not isinstance(exc, Exception) or isinstance(exc, SdkError):
         return exc
     details = _identity_details(exc)
     context_fields = {
@@ -312,8 +411,13 @@ def normalize_exception(
     for name, value in (context or {}).items():
         if name in details or name not in context_fields:
             continue
-        details[name] = _context_detail(name, value)
+        coordinate = _context_detail(name, value)
+        if coordinate is not None or value is None:
+            details[name] = coordinate
     details["source_type"] = type(exc).__name__
+    evidence = _evidence_details(exc, details)
+    if evidence is not None:
+        details["evidence"] = evidence
     if isinstance(exc, (BatchWriteCommitUnknown, WriteCommitUnknown)):
         return CommittedOutcomeUnknown(str(exc), source_type=type(exc).__name__, details=details)
     if isinstance(exc, InitializationOutcomeUnknown):
@@ -372,7 +476,6 @@ def normalize_exception(
             AttestationRefusal,
             ContractRefusal,
             ArrivalError,
-            ProjectionSyncError,
             RuntimeWriteRefused,
         ),
     ):

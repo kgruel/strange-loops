@@ -1,0 +1,7 @@
+Command: uv run pytest tests/test_arrival_declaration_custody.py -q
+Cwd: /Users/kaygee/Code/loops-wt/arrival-finish/libs/engine
+..........                                                               [100%]
+10 passed in 0.68s
+
+Scoped Ruff for arrival_declarations.py and test_arrival_declaration_custody.py passed.
+An earlier command also named nonexistent tests/test_arrival_declarations.py and collected no tests; corrected above.

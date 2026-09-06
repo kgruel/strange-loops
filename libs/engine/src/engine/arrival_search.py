@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from contextlib import suppress
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
@@ -85,6 +85,8 @@ class SearchIndexSyncError(Exception):
         observed_after: SearchCoverage | None,
         fields_hash: str,
         cause: BaseException,
+        coordinator_phase: str | None = None,
+        effects: Mapping[str, Mapping[str, str]] | None = None,
     ) -> None:
         super().__init__(message)
         self.target = target
@@ -92,6 +94,8 @@ class SearchIndexSyncError(Exception):
         self.observed_after = observed_after
         self.fields_hash = fields_hash
         self.cause = cause
+        self.coordinator_phase = coordinator_phase
+        self.effects = effects
 
 
 def _close_quietly(handle: object) -> None:
@@ -161,6 +165,7 @@ def sync_search_index(
     ledger = query = maintenance = snapshot = None
     before = None
     target: Head | None = None
+    build_entered = False
     try:
         ledger, query = registry.open(descriptor)
         if not isinstance(ledger, AttestedLedger):
@@ -175,6 +180,7 @@ def sync_search_index(
         snapshot = None
         maintenance = registry._search_maintenance_for(descriptor)
         before = maintenance.coverage()
+        build_entered = True
         build = maintenance.build(target, spec)
         if build.after.through != target or build.after.fields_hash != spec.fields_hash:
             raise HeadMismatch("search maintainer returned coverage other than its target/spec")
@@ -200,6 +206,13 @@ def sync_search_index(
             observed_after=observed_after,
             fields_hash=spec.fields_hash,
             cause=cause,
+            coordinator_phase="derived-sync",
+            effects={
+                "derived": {
+                    "attempt": "entered" if build_entered else "not-entered",
+                    "state": "unknown" if build_entered else "not-attempted",
+                }
+            },
         ) from cause
     finally:
         _close_quietly(snapshot)

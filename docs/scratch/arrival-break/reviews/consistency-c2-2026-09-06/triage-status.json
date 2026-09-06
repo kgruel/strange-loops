@@ -1,0 +1,47 @@
+{
+  "status": "complete",
+  "pending_reviews": 0,
+  "initial_review": "needs-correction",
+  "initial_packet_sha256": "2975dce5a9b22a68c027e5d75f63e2d27ff01743932b6346cfd29a108d45f697",
+  "initial_source_drift_at_start": [],
+  "source_changes_after_initial_review": [
+    "libs/sdk/src/sdk/errors.py",
+    "libs/engine/src/engine/arrival_declarations.py",
+    "libs/sdk/tests/test_arrival_evidence.py",
+    "libs/engine/tests/test_arrival_declaration_custody.py"
+  ],
+  "findings": [
+    {
+      "id": 1,
+      "status": "rejected-as-current-bug",
+      "reason": "Exhaustive callgraph confines proof factory to preparation; no apply or recovery caller."
+    },
+    {
+      "id": 2,
+      "status": "fixed",
+      "reason": "Declaration absent head attributes no longer suppress caller context; explicit initialization null remains authoritative."
+    },
+    {
+      "id": 3,
+      "status": "fixed",
+      "reason": "Unsupported scalar coordinates omitted; repo exception coordinate audit found primitive/path fields, no Enum-valued identities."
+    },
+    {
+      "id": 4,
+      "status": "fixed",
+      "reason": "Both contradictory attempt/state pairs rejected."
+    }
+  ],
+  "final_review": "accept",
+  "followup_packet_sha256": "a7e5cb6256f2626ce9b14fec614963d2bcf9bd139559e8769b0466e0070a673a",
+  "source_drift_before_final_triage": [],
+  "production_matches_final_validation": true,
+  "committed": false,
+  "followup_findings": [
+    {
+      "id": 1,
+      "status": "deferred-optional",
+      "reason": "Enrich captured head on other preparation refusal branches; no regression found and outside current behind-path scope."
+    }
+  ]
+}

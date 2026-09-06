@@ -14,6 +14,7 @@ from engine.arrival_contract import (
     FactPage,
     Head,
     Profile,
+    ProjectionBehind,
     StoreDescriptor,
     Watermark,
 )
@@ -72,7 +73,11 @@ def _declaration_fixture(tmp_path, *, case: str, changed: bool):
     )
     represented = Watermark(
         "foreign" if case == "foreign" else captured.lineage,
-        advanced.ordinal if case in {"advance", "missing"} else captured.ordinal,
+        (
+            advanced.ordinal
+            if case in {"advance", "missing"}
+            else captured.ordinal - 1 if case == "behind" else captured.ordinal
+        ),
     )
     snapshot = _Snapshot(represented, genesis)
     activity: list[str] = []
@@ -95,6 +100,8 @@ def _declaration_fixture(tmp_path, *, case: str, changed: bool):
                 return Head(captured.lineage, captured.ordinal, "replacement")
             if case == "wrong-coordinate":
                 return Head(captured.lineage, captured.ordinal - 1, "wrong")
+            if case == "behind":
+                return Head(captured.lineage, captured.ordinal - 1, "behind")
             return advanced
 
         def scan(self, **kwargs):
@@ -109,6 +116,8 @@ def _declaration_fixture(tmp_path, *, case: str, changed: bool):
 
     class Query:
         def open_snapshot(self, **kwargs):
+            if case == "snapshot-behind":
+                raise ProjectionBehind("projection is behind")
             return snapshot
 
         def close(self):
@@ -198,3 +207,72 @@ def test_declaration_preparation_refuses_unvouched_projection_before_signing_or_
     assert "scan" not in activity
     assert activity[-2:] == ["query-close", "ledger-close"]
     assert snapshot.closed
+
+
+def test_declaration_projection_behind_retains_prepare_and_custody_evidence(
+    tmp_path,
+):
+    registry, descriptor, target, proposed, captured, snapshot, activity, _ = (
+        _declaration_fixture(tmp_path, case="behind", changed=True)
+    )
+
+    with pytest.raises(DeclarationPreparationRefused) as raised:
+        prepare_declaration_edit(
+            registry,
+            descriptor,
+            target=target,
+            proposed_text=proposed,
+            observer="alice",
+            credentials=None,
+            fact_verify=lambda *_args: True,
+            arrival_verify=lambda *_args: True,
+        )
+
+    refusal = raised.value
+    assert refusal.coordinator_phase == "prepare"
+    assert refusal.effects == {
+        "custody": {"attempt": "not-entered", "state": "not-attempted"}
+    }
+    assert refusal.captured_head == captured
+    assert refusal.projected_head == Head(
+        captured.lineage, captured.ordinal - 1, "behind"
+    )
+    assert isinstance(refusal.__cause__, ProjectionBehind)
+    assert refusal.__cause__.captured_head == refusal.captured_head
+    assert refusal.__cause__.projected_head == refusal.projected_head
+    assert activity[-2:] == ["query-close", "ledger-close"]
+    assert snapshot.closed
+
+
+def test_snapshot_projection_behind_retains_actual_captured_head(tmp_path) -> None:
+    registry, descriptor, target, proposed, captured, _, activity, _ = (
+        _declaration_fixture(tmp_path, case="snapshot-behind", changed=True)
+    )
+
+    with pytest.raises(DeclarationPreparationRefused) as raised:
+        prepare_declaration_edit(
+            registry,
+            descriptor,
+            target=target,
+            proposed_text=proposed,
+            observer="alice",
+            credentials=None,
+            fact_verify=lambda *_args: True,
+            arrival_verify=lambda *_args: True,
+        )
+
+    refusal = raised.value
+    assert refusal.captured_head == captured
+    assert getattr(refusal, "projected_head", None) is None
+    assert isinstance(refusal.__cause__, ProjectionBehind)
+    assert activity[-2:] == ["query-close", "ledger-close"]
+
+
+@pytest.mark.parametrize("args", [(), ("message",), ("message", "detail")])
+def test_preparation_refusal_preserves_inherited_exception_arguments(args) -> None:
+    refusal = DeclarationPreparationRefused(*args)
+    assert refusal.args == args
+    assert refusal.coordinator_phase is None
+    assert refusal.effects is None
+    assert not hasattr(refusal, "captured_head")
+    assert not hasattr(refusal, "projected_head")

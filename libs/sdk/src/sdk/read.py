@@ -1822,11 +1822,19 @@ def sync_target(
     if arrival is not None:
         from engine.arrival_maintenance import sync_projection
 
+        from .errors import normalize_exception
+
         _path, _ast, descriptor = arrival
-        result = sync_projection(
-            registry if registry is not None else BackendRegistry.with_builtin_backends(),
-            descriptor,
-        )
+        try:
+            result = sync_projection(
+                registry if registry is not None else BackendRegistry.with_builtin_backends(),
+                descriptor,
+            )
+        except BaseException as exc:
+            normalized = normalize_exception(exc)
+            if normalized is exc:
+                raise
+            raise normalized from exc
         t1 = time.perf_counter()
         return SyncResult(
             read_path="arrival",

@@ -1,0 +1,88 @@
+{
+  "due_at": "2026-09-06T18:08:02.570983+00:00",
+  "model": "claude-fable-5-1[1m]",
+  "effort": "low",
+  "worktree": "/Users/kaygee/Code/loops-wt/arrival-finish",
+  "results": "/Users/kaygee/Code/loops-wt/arrival-finish/docs/scratch/arrival-break/reviews/consistency-c2-2026-09-06",
+  "jobs": [
+    {
+      "name": "c2",
+      "packet": "/Users/kaygee/Code/loops-wt/arrival-finish/docs/scratch/arrival-break/reviews/consistency-c2-2026-09-06/c2-prompt.txt",
+      "sha256": "2975dce5a9b22a68c027e5d75f63e2d27ff01743932b6346cfd29a108d45f697",
+      "sources": {
+        "docs/scratch/arrival-break/consistency-c2-evidence-design-2026-09-06.md": "317f7631cb636dfa3d9f5206459a216fe4dafa3021ee0bdcf088557b418c31fe",
+        "docs/scratch/arrival-break/consistency-c2-2026-09-06.md": "909a78839c2bcbf912187052f603501dddcbf436559a55411567d359d92c61f9",
+        "docs/scratch/arrival-break/consistency-c2-validation-2026-09-06.md": "d778bcd1fb58ae164d3e96719cb75602ab6f46443427a7bf0e24e5c1bb80580e",
+        "libs/sdk/src/sdk/errors.py": "0dcd38320db94d2ee23ded75d6e59c468eabe43504a131313cd411ddf2af60ea",
+        "libs/sdk/src/sdk/read.py": "7db73bf6c487abf0f59502b091eedf652a84fd0aaf0bfee0ce5066c50376d161",
+        "libs/engine/src/engine/arrival_maintenance.py": "bcec160590cb9d3d18797e63171e6651dd6118e49077c111ee94d9749a06d8ed",
+        "libs/engine/src/engine/arrival_search.py": "edbc31f71addca3aa9c23d286c896f9a51ce3c8cb01a63ac3a859c2b7fbf3064",
+        "libs/engine/src/engine/arrival_declarations.py": "b006e0900cbb79f68aab47adb8207d1529a64f79de4d9be015b68a6eb331e732",
+        "libs/engine/src/engine/arrival_head_seam.py": "98aa31cc74654852f64f74b8a5d2465ab9efb0022f4d018c1c31ed40f334393b",
+        "libs/sdk/tests/test_arrival_evidence.py": "a4c5f34b14d652771d23e3793fcecd0e3daef19b7ebd9f699f4a29f1435777d9",
+        "libs/sdk/tests/test_arrival_search.py": "3a6426f58a595b9ce6b6d6e7da212aa2d21455b867b1f89234fe40b79b0f59bb",
+        "libs/sdk/tests/test_errors.py": "bbfe275d97c85b76aa7c50d01485272ee098d447bc0cd1ab3f73fbd530a4ab89",
+        "libs/engine/tests/test_arrival_maintenance.py": "4d6256c10353e12116434e8a395a78b123ad164151d4636c5917e170200f9229",
+        "libs/engine/tests/test_arrival_search.py": "1608a4ef4222fc1686930a3ba8e26645323cb3b310986a6329d6c503c1611367",
+        "libs/engine/tests/test_arrival_declaration_custody.py": "ef1057d573cab0e9bb55727c582aa07001fab0a0f39ff399bef416bbaf1c2254"
+      },
+      "status": "reviewed-awaiting-triage",
+      "packet_characters": 195227,
+      "started_at": "2026-09-06T18:08:10.548627+00:00",
+      "effort": "low",
+      "source_drift": [],
+      "command": [
+        "/Users/kaygee/.local/bin/claude",
+        "-p",
+        "--safe-mode",
+        "--model",
+        "claude-fable-5-1[1m]",
+        "--effort",
+        "low",
+        "--no-session-persistence",
+        "--tools",
+        "",
+        "--output-format",
+        "json"
+      ],
+      "returncode": 0,
+      "model_usage": {
+        "claude-haiku-4-5-20251001": {
+          "inputTokens": 58276,
+          "outputTokens": 14,
+          "cacheReadInputTokens": 0,
+          "cacheCreationInputTokens": 0,
+          "webSearchRequests": 0,
+          "costUSD": 0.058346,
+          "contextWindow": 200000,
+          "maxOutputTokens": 32000,
+          "thinkingTokens": 0,
+          "canonicalModel": "claude-haiku-4-5",
+          "provider": "firstParty",
+          "costBasis": "list"
+        },
+        "claude-fable-5-1": {
+          "inputTokens": 2,
+          "outputTokens": 6348,
+          "cacheReadInputTokens": 3264,
+          "cacheCreationInputTokens": 76961,
+          "webSearchRequests": 0,
+          "costUSD": 1.857456,
+          "contextWindow": 1000000,
+          "maxOutputTokens": 64000,
+          "thinkingTokens": 4442,
+          "canonicalModel": "claude-fable-5-1",
+          "provider": "firstParty",
+          "costBasis": "list"
+        }
+      },
+      "response_subtype": "success",
+      "finished_at": "2026-09-06T18:09:38.066562+00:00"
+    }
+  ],
+  "status": "reviews-finished-awaiting-triage",
+  "pid": 22152,
+  "updated_at": "2026-09-06T18:09:38.066567+00:00",
+  "started_at": "2026-09-06T18:08:10.548413+00:00",
+  "finished_at": "2026-09-06T18:09:38.066934+00:00"
+}

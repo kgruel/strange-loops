@@ -84,6 +84,39 @@ class DeclarationPreparationError(ArrivalError):
 class DeclarationPreparationRefused(DeclarationPreparationError):
     """A declaration edit input or signed draft failed a preparation gate."""
 
+    def __init__(
+        self,
+        *args: object,
+        coordinator_phase: str | None = None,
+        effects: Mapping[str, Mapping[str, str]] | None = None,
+        captured_head: Head | None = None,
+        projected_head: Head | None = None,
+    ) -> None:
+        super().__init__(*args)
+        self.coordinator_phase = coordinator_phase
+        self.effects = effects
+        if captured_head is not None:
+            self.captured_head = captured_head
+        if projected_head is not None:
+            self.projected_head = projected_head
+
+
+def _preparation_refused(
+    message: str,
+    *,
+    captured_head: Head | None = None,
+    projected_head: Head | None = None,
+) -> DeclarationPreparationRefused:
+    return DeclarationPreparationRefused(
+        message,
+        coordinator_phase="prepare",
+        effects={
+            "custody": {"attempt": "not-entered", "state": "not-attempted"}
+        },
+        captured_head=captured_head,
+        projected_head=projected_head,
+    )
+
 
 class DeclarationApplyError(ArrivalError):
     """A declaration apply or recovery operation could not complete."""
@@ -602,17 +635,17 @@ def _plan_from_intent(
 def _descriptor_location(target: Path, ast: Any, descriptor: StoreDescriptor) -> str:
     backend = ast.store_backend
     if backend is None:
-        raise DeclarationPreparationRefused(
+        raise _preparation_refused(
             "proposed declaration has no explicit store backend"
         )
     if descriptor.backend == "file":
         if ast.store is None:
-            raise DeclarationPreparationRefused(
+            raise _preparation_refused(
                 "proposed file declaration has no store location"
             )
         return str((target.parent / str(ast.store)).resolve())
     if ast.store_location is None:
-        raise DeclarationPreparationRefused(
+        raise _preparation_refused(
             "proposed non-file declaration has no opaque store location"
         )
     return str(ast.store_location)
@@ -620,11 +653,11 @@ def _descriptor_location(target: Path, ast: Any, descriptor: StoreDescriptor) ->
 
 def _validate_residence(target: Path, ast: Any, descriptor: StoreDescriptor) -> None:
     if descriptor.role is not Profile.AUTHORITY:
-        raise DeclarationPreparationRefused(
+        raise _preparation_refused(
             "declaration edits require an Authority descriptor"
         )
     if descriptor.lineage is None:
-        raise DeclarationPreparationRefused(
+        raise _preparation_refused(
             "declaration edit descriptor must pin a lineage"
         )
     backend = ast.store_backend
@@ -634,11 +667,11 @@ def _validate_residence(target: Path, ast: Any, descriptor: StoreDescriptor) -> 
         or backend.lineage != descriptor.lineage
         or backend.role != Profile.AUTHORITY.value
     ):
-        raise DeclarationPreparationRefused(
+        raise _preparation_refused(
             "proposed declaration residence must preserve backend, lineage and authority role"
         )
     if _descriptor_location(target, ast, descriptor) != descriptor.location:
-        raise DeclarationPreparationRefused(
+        raise _preparation_refused(
             "proposed declaration residence must preserve the descriptor location"
         )
 
@@ -669,17 +702,17 @@ def _signed_with_existing_key(
     label: str,
 ) -> str:
     if not callable(signer):
-        raise DeclarationPreparationRefused(f"missing {label} signer")
+        raise _preparation_refused(f"missing {label} signer")
     keys = _valid_author_keys(registry, author, head)
     if not keys:
-        raise DeclarationPreparationRefused(
+        raise _preparation_refused(
             f"edit author {author!r} has no key valid at the captured Arrival head"
         )
     signature = signer(author, digest)
     if not signature:
-        raise DeclarationPreparationRefused(f"missing {label} signature")
+        raise _preparation_refused(f"missing {label} signature")
     if not any(verifier(key, signature, digest) for key in keys):
-        raise DeclarationPreparationRefused(
+        raise _preparation_refused(
             f"{label} signature does not verify under a key valid for edit author "
             f"{author!r} at the captured Arrival head"
         )
@@ -785,22 +818,22 @@ def prepare_declaration_edit(
     """
     target_path = Path(target).resolve()
     if not isinstance(proposed_text, str) or not proposed_text:
-        raise DeclarationPreparationRefused("proposed declaration text is empty")
+        raise _preparation_refused("proposed declaration text is empty")
     try:
         old_cache_bytes = target_path.read_bytes()
     except OSError as exc:
-        raise DeclarationPreparationRefused(
+        raise _preparation_refused(
             f"cannot read declaration cache {target_path}: {exc}"
         ) from exc
     if source_cache_bytes is not None and old_cache_bytes != source_cache_bytes:
-        raise DeclarationPreparationRefused(
+        raise _preparation_refused(
             "declaration cache changed while preparing the requested splice"
         )
     try:
         ast = parse_vertex(proposed_text, path=target_path)
         validate_vertex(ast)
     except Exception as exc:
-        raise DeclarationPreparationRefused(
+        raise _preparation_refused(
             f"proposed declaration is not valid Vertex grammar/semantics: {exc}"
         ) from exc
     _validate_residence(target_path, ast, descriptor)
@@ -812,24 +845,25 @@ def prepare_declaration_edit(
     query: ArrivalQuery | None = None
     snapshot: Any | None = None
     atomic_limit: int | None = None
+    captured_head: Head | None = None
     try:
         ledger, query = registry.open(descriptor)
         report = getattr(ledger, "opened", None)
         comparison = getattr(report, "comparison", None)
         if isinstance(comparison, PreGenesis):
             if comparison.ledger_refusal is not None:
-                raise DeclarationPreparationRefused(
+                raise _preparation_refused(
                     f"Arrival ledger is not opened: {comparison.ledger_refusal}"
                 )
-            raise DeclarationPreparationRefused(
+            raise _preparation_refused(
                 "Arrival ledger has no captured head for declaration editing"
             )
         if isinstance(comparison, Indeterminate):
-            raise DeclarationPreparationRefused(
+            raise _preparation_refused(
                 f"Arrival head attestation is indeterminate: {comparison.refusal}"
             )
         if not isinstance(comparison, Compared):
-            raise DeclarationPreparationRefused(
+            raise _preparation_refused(
                 "registry opener did not provide a compared Arrival head"
             )
         captured_head = comparison.presented
@@ -853,25 +887,28 @@ def prepare_declaration_edit(
             snapshot.declaration_anchor, facts
         )
         if documents is None or isinstance(documents, Unhistorized):
-            raise DeclarationPreparationRefused(
+            raise _preparation_refused(
                 "the CURRENT Arrival snapshot has no historized declaration"
             )
         represented = snapshot.represented
         if represented is None:
-            raise DeclarationPreparationRefused(
+            raise _preparation_refused(
                 "the CURRENT declaration snapshot has no matching lineage basis"
             )
         projected = complete_projection_custody(
             ledger,
             captured=captured_head,
             represented=represented,
-            lineage_refusal=lambda message: DeclarationPreparationRefused(message),
-            conflict_refusal=lambda message: DeclarationPreparationRefused(message),
+            lineage_refusal=lambda message: _preparation_refused(message),
+            conflict_refusal=lambda message: _preparation_refused(message),
         )
         if projected.ordinal < captured_head.ordinal:
-            raise ProjectionBehind(
+            behind = ProjectionBehind(
                 "the CURRENT declaration snapshot is behind the captured Arrival head"
             )
+            behind.captured_head = captured_head
+            behind.projected_head = projected
+            raise behind
         basis = ReadBasis(
             lineage=captured_head.lineage,
             captured_head=captured_head,
@@ -888,11 +925,11 @@ def prepare_declaration_edit(
                     document.as_json() for document in vertex_to_documents(local_ast)
                 )
             except Exception as exc:
-                raise DeclarationPreparationRefused(
+                raise _preparation_refused(
                     f"current declaration cache is not valid for this splice: {exc}"
                 ) from exc
             if local_documents != before_documents:
-                raise DeclarationPreparationRefused(
+                raise _preparation_refused(
                     "declaration cache differs from CURRENT Arrival history; "
                     "convenience mutation refused"
                 )
@@ -904,8 +941,10 @@ def prepare_declaration_edit(
     except DeclarationPreparationError:
         raise
     except Exception as exc:
-        raise DeclarationPreparationRefused(
-            f"cannot establish declaration preparation basis: {exc}"
+        raise _preparation_refused(
+            f"cannot establish declaration preparation basis: {exc}",
+            captured_head=captured_head,
+            projected_head=getattr(exc, "projected_head", None),
         ) from exc
     finally:
         _close_quietly(snapshot)
@@ -936,7 +975,7 @@ def prepare_declaration_edit(
         )
 
     if credentials is None:
-        raise DeclarationPreparationRefused(
+        raise _preparation_refused(
             "declaration edits require fact and Arrival signers"
         )
     authored_at = time.time()
@@ -986,7 +1025,7 @@ def prepare_declaration_edit(
         if key is None:
             continue
         if not _key_is_well_formed(key):
-            raise DeclarationPreparationRefused(
+            raise _preparation_refused(
                 f"observer {document['subject']!r} carries a malformed public key"
             )
         proposed_keys[str(document["subject"])] = str(key)

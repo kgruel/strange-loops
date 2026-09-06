@@ -26,7 +26,7 @@ from engine.arrival_contract import (
     Tick,
     TickRequest,
 )
-from engine.arrival_registry import BackendRegistry, descriptor_for
+from engine.arrival_registry import BackendRegistry
 from engine.compiler import compile_vertex
 from engine.declaration import (
     Unhistorized,
@@ -50,7 +50,7 @@ from engine.vertex_reader import (
     vertex_ticks,
 )
 from engine.witness import resolve_witness_position
-from lang import documents_to_vertex, parse_vertex_file, vertex_to_documents
+from lang import documents_to_vertex, vertex_to_documents
 
 from .aggregate import has_local_descriptor_aggregate, open_aggregate_read
 from .target import (
@@ -117,30 +117,8 @@ def _open_arrival_read(
 def _aggregate_aware_arrival_descriptor(
     target: Path,
 ) -> tuple[Path, Any, Any] | None:
-    """Name a descriptor root whose execution shape remains adopted evidence.
-
-    The transitional target helper quite properly refuses locator aggregates
-    for its single-store callers.  Summary, state, and timeline instead open
-    the descriptor once and decide the shape from its bounded declaration.
-    This narrow bridge only relaxes that local-shape refusal; explicit role
-    validation remains the target helper's established rule.
-    """
-    try:
-        return _arrival_descriptor(target)
-    except TargetUnsupported as refusal:
-        path = target.resolve()
-        try:
-            ast = parse_vertex_file(path)
-        except Exception:
-            raise
-        descriptor = descriptor_for(ast, path)
-        if descriptor is None or (ast.combine is None and ast.discover is None):
-            raise
-        if descriptor.role is None:
-            raise SdkValueError(
-                f"Arrival target {path} must declare store role explicitly"
-            ) from refusal
-        return path, ast, descriptor
+    """Resolve one descriptor root while deferring shape to adopted evidence."""
+    return _arrival_descriptor(target, allow_aggregate=True)
 
 
 def _fact_as_dict(fact: Fact) -> dict[str, Any]:

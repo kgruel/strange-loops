@@ -1,3 +1,48 @@
+## September 6: C7 resolver continuation complete; handoff to D0 → D2
+
+C7 is checkpointed as `f5563d2f` (`feat(arrival): inspect bounded aggregate
+declarations`). The user then authorized the small aggregate-read resolver
+continuation before compaction. This follow-up checkpoint contains the bridge
+simplification, public regressions, native validation and Fable-low acceptance.
+
+Summary/state/timeline now use the explicit aggregate descriptor opt-in rather
+than catching refusal and reparsing. Tests replace the locator with another
+valid descriptor during the target parser and retain the original residence,
+lineage and effective plain-root results. An in-memory pre-fix function probe
+fails all 3 by opening the replacement missing residence; current code passes.
+The earlier storeless predicate and later aggregate planner remain separate
+observations. No claim of an entire read using one filesystem snapshot is made.
+
+Validation: focused surrounding tests **65 passed**, full SDK **562 passed**,
+architecture **101 passed**, scoped Ruff clean. After a test-only refinement
+making the replacement syntactically valid, all **3** regressions and scoped
+lint passed again; production was unchanged. All continuation validation used
+process-level temporary state/config/Loops home paths. The inherited suite is
+not assumed isolated just because the new test module has an autouse fixture.
+
+Fable 5.1 LOW returned ACCEPT, no blockers. Root corrected an over-broad reviewer
+claim that downstream aggregate execution never rereads the locator; the
+accepted guarantee is limited to the descriptor bridge. No post-review code
+changes or pending jobs. Reports:
+[continuation](consistency-c7-followup-2026-09-06.md),
+[validation](consistency-c7-followup-validation-2026-09-06.md),
+[review triage](reviews/consistency-c7-followup-2026-09-06/primary-triage.md).
+
+**Next after compaction: D0 design → D2 implementation/compatibility.** Start
+with [identity decisions D0/D2](identity-decisions-2026-09-06.md). D0 defines
+provider-owned explicit custody namespace + exact observer + signing domain,
+separate from captured-lineage/H/successor verification context. D2 persists
+verifiable bindings, preserves existing flat/nested keys and ambiguity refusals,
+and specifies concurrent creation/recovery. C4's key-dir refusal is already
+implemented; older recommendation language in D2 is historical. No credentials,
+keys, live stores, or D0/D2 code were changed in this continuation. Nothing pushed.
+
+The established Sol/Terra/Luna delegation and Fable review pattern continues;
+C6's HIGH design review was explicitly requested for C6, not a standing HIGH
+requirement. Do not start D0/D2 until the user resumes after compaction.
+
+Earlier entries below retain historical status.
+
 ## September 6: C7 checkpoint; aggregate-resolver continuation next
 
 The user requested checkpointing C7, then finishing the small aggregate-read

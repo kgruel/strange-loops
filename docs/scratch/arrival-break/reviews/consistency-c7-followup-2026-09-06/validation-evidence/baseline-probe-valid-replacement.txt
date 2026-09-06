@@ -1,0 +1,109 @@
+FFF                                                                      [100%]
+=================================== FAILURES ===================================
+_ test_aggregate_aware_reads_keep_original_parsed_descriptor[read_summary-<lambda>] _
+../engine/src/engine/arrival.py:1052: in genesis
+    with self.path.open("rb") as fh:
+         ^^^^^^^^^^^^^^^^^^^^
+/Users/kaygee/.local/share/uv/python/cpython-3.13-macos-aarch64-none/lib/python3.13/pathlib/_local.py:537: in open
+    return io.open(self, mode, buffering, encoding, errors, newline)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   FileNotFoundError: [Errno 2] No such file or directory: '/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-913/test_aggregate_aware_reads_kee0/missing.arrival'
+
+The above exception was the direct cause of the following exception:
+tests/test_arrival_aggregate_resolution.py:140: in test_aggregate_aware_reads_keep_original_parsed_descriptor
+    result = operation(root)
+             ^^^^^^^^^^^^^^^
+src/sdk/read.py:528: in read_summary
+    with _open_arrival_read(arrival, registry=registry) as (
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/Users/kaygee/.local/share/uv/python/cpython-3.13-macos-aarch64-none/lib/python3.13/contextlib.py:141: in __enter__
+    return next(self.gen)
+           ^^^^^^^^^^^^^^
+src/sdk/read.py:105: in _open_arrival_read
+    opened = open_read(
+../engine/src/engine/arrival_consumer.py:141: in open_read
+    raise comparison.ledger_refusal
+../engine/src/engine/arrival_head_seam.py:1165: in _present
+    return self._evidence.verify(Open()), None
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+../engine/src/engine/arrival_registry.py:337: in verify
+    head = self._ledger.verify(scope)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+../engine/src/engine/arrival_file_backend.py:746: in verify
+    self._log.genesis()
+../engine/src/engine/arrival.py:1055: in genesis
+    raise GenesisRefused(f"{self.path} does not exist") from exc
+E   engine.arrival.GenesisRefused: /private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-913/test_aggregate_aware_reads_kee0/missing.arrival does not exist
+_ test_aggregate_aware_reads_keep_original_parsed_descriptor[read_state-<lambda>] _
+../engine/src/engine/arrival.py:1052: in genesis
+    with self.path.open("rb") as fh:
+         ^^^^^^^^^^^^^^^^^^^^
+/Users/kaygee/.local/share/uv/python/cpython-3.13-macos-aarch64-none/lib/python3.13/pathlib/_local.py:537: in open
+    return io.open(self, mode, buffering, encoding, errors, newline)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   FileNotFoundError: [Errno 2] No such file or directory: '/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-913/test_aggregate_aware_reads_kee1/missing.arrival'
+
+The above exception was the direct cause of the following exception:
+tests/test_arrival_aggregate_resolution.py:140: in test_aggregate_aware_reads_keep_original_parsed_descriptor
+    result = operation(root)
+             ^^^^^^^^^^^^^^^
+src/sdk/read.py:951: in read_state
+    with _open_arrival_read(arrival, registry=registry) as (
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/Users/kaygee/.local/share/uv/python/cpython-3.13-macos-aarch64-none/lib/python3.13/contextlib.py:141: in __enter__
+    return next(self.gen)
+           ^^^^^^^^^^^^^^
+src/sdk/read.py:105: in _open_arrival_read
+    opened = open_read(
+../engine/src/engine/arrival_consumer.py:141: in open_read
+    raise comparison.ledger_refusal
+../engine/src/engine/arrival_head_seam.py:1165: in _present
+    return self._evidence.verify(Open()), None
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+../engine/src/engine/arrival_registry.py:337: in verify
+    head = self._ledger.verify(scope)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+../engine/src/engine/arrival_file_backend.py:746: in verify
+    self._log.genesis()
+../engine/src/engine/arrival.py:1055: in genesis
+    raise GenesisRefused(f"{self.path} does not exist") from exc
+E   engine.arrival.GenesisRefused: /private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-913/test_aggregate_aware_reads_kee1/missing.arrival does not exist
+_ test_aggregate_aware_reads_keep_original_parsed_descriptor[read_timeline-<lambda>] _
+../engine/src/engine/arrival.py:1052: in genesis
+    with self.path.open("rb") as fh:
+         ^^^^^^^^^^^^^^^^^^^^
+/Users/kaygee/.local/share/uv/python/cpython-3.13-macos-aarch64-none/lib/python3.13/pathlib/_local.py:537: in open
+    return io.open(self, mode, buffering, encoding, errors, newline)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   FileNotFoundError: [Errno 2] No such file or directory: '/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-913/test_aggregate_aware_reads_kee2/missing.arrival'
+
+The above exception was the direct cause of the following exception:
+tests/test_arrival_aggregate_resolution.py:140: in test_aggregate_aware_reads_keep_original_parsed_descriptor
+    result = operation(root)
+             ^^^^^^^^^^^^^^^
+src/sdk/read.py:1493: in read_timeline
+    with _open_arrival_read(arrival, registry=registry) as (
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/Users/kaygee/.local/share/uv/python/cpython-3.13-macos-aarch64-none/lib/python3.13/contextlib.py:141: in __enter__
+    return next(self.gen)
+           ^^^^^^^^^^^^^^
+src/sdk/read.py:105: in _open_arrival_read
+    opened = open_read(
+../engine/src/engine/arrival_consumer.py:141: in open_read
+    raise comparison.ledger_refusal
+../engine/src/engine/arrival_head_seam.py:1165: in _present
+    return self._evidence.verify(Open()), None
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+../engine/src/engine/arrival_registry.py:337: in verify
+    head = self._ledger.verify(scope)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+../engine/src/engine/arrival_file_backend.py:746: in verify
+    self._log.genesis()
+../engine/src/engine/arrival.py:1055: in genesis
+    raise GenesisRefused(f"{self.path} does not exist") from exc
+E   engine.arrival.GenesisRefused: /private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-913/test_aggregate_aware_reads_kee2/missing.arrival does not exist
+=========================== short test summary info ============================
+FAILED tests/test_arrival_aggregate_resolution.py::test_aggregate_aware_reads_keep_original_parsed_descriptor[read_summary-<lambda>]
+FAILED tests/test_arrival_aggregate_resolution.py::test_aggregate_aware_reads_keep_original_parsed_descriptor[read_state-<lambda>]
+FAILED tests/test_arrival_aggregate_resolution.py::test_aggregate_aware_reads_keep_original_parsed_descriptor[read_timeline-<lambda>]
+3 failed in 0.27s

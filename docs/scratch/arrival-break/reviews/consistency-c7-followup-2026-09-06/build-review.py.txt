@@ -1,0 +1,66 @@
+from pathlib import Path
+from datetime import datetime, timezone
+import ast
+import hashlib
+import json
+import shutil
+import subprocess
+
+root = Path('/Users/kaygee/Code/loops-wt/arrival-finish')
+review = root / 'docs/scratch/arrival-break/reviews/consistency-c7-followup-2026-09-06'
+review.mkdir(parents=True, exist_ok=True)
+packet = review / 'c7-followup-prompt.txt'
+assert not packet.exists(), 'Packet already frozen'
+changed = subprocess.check_output(['git', 'diff', '--name-only', 'f5563d2f'], cwd=root, text=True).splitlines()
+untracked = subprocess.check_output(['git', 'ls-files', '--others', '--exclude-standard'], cwd=root, text=True).splitlines()
+code = sorted(name for name in changed + untracked if name.startswith(('libs/', 'tests/')))
+patches = []
+for name in code:
+    args = ['git', 'diff', 'f5563d2f', '--', name] if name in changed else ['git', 'diff', '--no-index', '--', '/dev/null', name]
+    result = subprocess.run(args, cwd=root, capture_output=True, text=True)
+    assert result.returncode in (0, 1), result.stderr
+    patches.append(result.stdout)
+patch = ''.join(patches)
+(review / 'implementation.patch').write_text(patch)
+sections = [
+    ('docs/scratch/arrival-break/consistency-c7-followup-2026-09-06.md', None),
+    ('docs/scratch/arrival-break/consistency-c7-followup-validation-2026-09-06.md', None),
+    ('libs/sdk/src/sdk/target.py', {'_arrival_definition', '_arrival_descriptor'}),
+    ('libs/sdk/src/sdk/read.py', {'_aggregate_aware_arrival_descriptor', '_open_arrival_read', '_arrival_declaration', 'read_summary', 'read_state', 'read_timeline'}),
+    ('libs/sdk/src/sdk/aggregate.py', {'has_local_descriptor_aggregate', 'open_aggregate_read'}),
+]
+
+parts = ['''You are Fable 5.1 at LOW effort doing an adversarial static implementation review of the small C7 aggregate-descriptor resolver continuation. Return ACCEPT or REVISE, concrete blockers with source/counterexample, then optional notes. No tools, do not claim to run tests. Keep output under 1000 words.
+
+C7 bounded declaration inspection was checkpointed f5563d2f after your ACCEPT. You noted that the older summary/state/timeline descriptor bridge still caught aggregate refusal and reparsed. User authorized fixing that small follow-up before D0/D2. The change reuses _arrival_descriptor(..., allow_aggregate=True), whose C7 helper retains one parsed root. It removes unused imports and adds public replacement-during-target-parse regressions. Preserve explicit role checks, unknown registry refusals, default single-store restrictions, effective-root topology selection, CURRENT basis/custody behavior.
+
+Scope is this descriptor bridge, not a global transaction across every local filesystem observation. Existing has_local_descriptor_aggregate pre-classification and later aggregate/member captures remain separate; do not claim whole operation parses only once. Tests should prove that replacement during the target parser cannot cause the bridge to reinterpret new residence. Existing malformed/legacy fallback remains. No new wire schema, credentials, topology semantics, or C9 work. Review the complete production/test patch plus call chain and reported validation. Prior C7 test-isolation mistake was disclosed; this continuation runs with process-wide temp state/config/home plus isolated new fixtures.
+''']
+sources = {}
+for name, names in sections:
+    data = (root / name).read_bytes()
+    sources[name] = hashlib.sha256(data).hexdigest()
+    lines = data.decode().splitlines()
+    parts.append('\n===== ' + name + ' =====\n')
+    if names is None:
+        ranges = [(1, len(lines))]
+    else:
+        nodes = [node for node in ast.walk(ast.parse(data.decode())) if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and node.name in names]
+        assert {node.name for node in nodes} == names, (name, names - {node.name for node in nodes})
+        ranges = [(node.lineno, node.end_lineno) for node in sorted(nodes, key=lambda node: node.lineno)]
+    for start, end in ranges:
+        parts.append('\n'.join(f'{i}: {lines[i-1]}' if lines[i-1] else f'{i}:' for i in range(start, end + 1)))
+parts.append('\n===== COMPLETE C7 PRODUCTION/TEST PATCH =====\n' + patch)
+for name in code:
+    sources[name] = hashlib.sha256((root / name).read_bytes()).hexdigest()
+packet.write_text('\n'.join(parts) + '\n')
+manifest = {'model': 'claude-fable-5-1[1m]', 'effort': 'low', 'worktree': str(root), 'results': str(review), 'due_at': datetime.now(timezone.utc).isoformat(), 'baseline': 'f5563d2f', 'scope': 'C7 aggregate resolver follow-up', 'jobs': [{'name': 'c7-followup', 'packet': str(packet), 'sha256': hashlib.sha256(packet.read_bytes()).hexdigest(), 'sources': sources, 'status': 'pending'}]}
+(review / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
+(review / 'build-review.py.txt').write_bytes(Path(__file__).read_bytes())
+(review / 'validation-evidence').mkdir()
+for evidence in Path('/tmp/loops-arrival-c7-followup-2026-09-06/validation').iterdir():
+    if evidence.is_file():
+        shutil.copy2(evidence, review / 'validation-evidence' / evidence.name)
+for name in ('baseline_probe.py', 'baseline-probe-valid-replacement.txt'):
+    shutil.copy2(Path('/tmp/loops-arrival-c7-followup-2026-09-06') / name, review / 'validation-evidence' / name)
+print(json.dumps({'packet_bytes': packet.stat().st_size, 'sha256': manifest['jobs'][0]['sha256'], 'manifest': str(review / 'manifest.json')}, indent=2))

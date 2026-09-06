@@ -1,0 +1,80 @@
+{
+  "model": "claude-fable-5-1[1m]",
+  "effort": "low",
+  "worktree": "/Users/kaygee/Code/loops-wt/arrival-finish",
+  "results": "/Users/kaygee/Code/loops-wt/arrival-finish/docs/scratch/arrival-break/reviews/consistency-c7-followup-2026-09-06",
+  "due_at": "2026-09-06T22:38:46.860515+00:00",
+  "baseline": "f5563d2f",
+  "scope": "C7 aggregate resolver follow-up",
+  "jobs": [
+    {
+      "name": "c7-followup",
+      "packet": "/Users/kaygee/Code/loops-wt/arrival-finish/docs/scratch/arrival-break/reviews/consistency-c7-followup-2026-09-06/c7-followup-prompt.txt",
+      "sha256": "6a9782c20ad0120d9c41f13f4f8c2ecb27821fab315979d23a56c48cebb221c2",
+      "sources": {
+        "docs/scratch/arrival-break/consistency-c7-followup-2026-09-06.md": "f96f4353bdaf31c5ca7c0a36352b38549e0e29cdbb68b6e1c47cf67fbdfc30f5",
+        "docs/scratch/arrival-break/consistency-c7-followup-validation-2026-09-06.md": "542ccaa3a58552ea94401501803118a3435e8cde2494fdca6765dcba1b08a515",
+        "libs/sdk/src/sdk/target.py": "5e7dbeb993dc0788d242749b7730419e349af8418d4b659134d7180c72841dc8",
+        "libs/sdk/src/sdk/read.py": "cf5d37367cd20b20560f051fd307ac521e3c3651c970b75069473096936b37de",
+        "libs/sdk/src/sdk/aggregate.py": "35d4e140df6f920c435698489b70cc5a2f9545fc6c51e9ecc7e2756d49ce9568",
+        "libs/sdk/tests/test_arrival_aggregate_resolution.py": "c501632a54563e3645b2bbd0861226bd7cb181433a5f26f7517f73dd1e01f8f0"
+      },
+      "status": "reviewed-awaiting-triage",
+      "started_at": "2026-09-06T22:38:55.882106+00:00",
+      "effort": "low",
+      "source_drift": [],
+      "command": [
+        "/Users/kaygee/.local/bin/claude",
+        "-p",
+        "--safe-mode",
+        "--model",
+        "claude-fable-5-1[1m]",
+        "--effort",
+        "low",
+        "--no-session-persistence",
+        "--tools",
+        "",
+        "--output-format",
+        "json"
+      ],
+      "returncode": 0,
+      "model_usage": {
+        "claude-haiku-4-5-20251001": {
+          "inputTokens": 14994,
+          "outputTokens": 14,
+          "cacheReadInputTokens": 0,
+          "cacheCreationInputTokens": 0,
+          "webSearchRequests": 0,
+          "costUSD": 0.015064000000000001,
+          "contextWindow": 200000,
+          "maxOutputTokens": 32000,
+          "thinkingTokens": 0,
+          "canonicalModel": "claude-haiku-4-5",
+          "provider": "firstParty",
+          "costBasis": "list"
+        },
+        "claude-fable-5-1": {
+          "inputTokens": 2,
+          "outputTokens": 2273,
+          "cacheReadInputTokens": 3264,
+          "cacheCreationInputTokens": 19499,
+          "webSearchRequests": 0,
+          "costUSD": 0.504466,
+          "contextWindow": 1000000,
+          "maxOutputTokens": 64000,
+          "thinkingTokens": 1329,
+          "canonicalModel": "claude-fable-5-1",
+          "provider": "firstParty",
+          "costBasis": "list"
+        }
+      },
+      "response_subtype": "success",
+      "finished_at": "2026-09-06T22:39:26.827428+00:00"
+    }
+  ],
+  "status": "reviews-finished-awaiting-triage",
+  "pid": 88418,
+  "updated_at": "2026-09-06T22:39:26.827433+00:00",
+  "started_at": "2026-09-06T22:38:55.881930+00:00",
+  "finished_at": "2026-09-06T22:39:26.827939+00:00"
+}

@@ -1,0 +1,16 @@
+{
+  "baseline": "f5563d2f",
+  "production_and_tests_match_review": true,
+  "packet_sha256": "6a9782c20ad0120d9c41f13f4f8c2ecb27821fab315979d23a56c48cebb221c2",
+  "changed_after_review": [
+    "docs/scratch/arrival-break/consistency-c7-followup-2026-09-06.md"
+  ],
+  "final_sources": {
+    "docs/scratch/arrival-break/consistency-c7-followup-2026-09-06.md": "3ecec60242b20cacae57a6f31a02530593e37c3ff803b4252cc3015f644a77b6",
+    "docs/scratch/arrival-break/consistency-c7-followup-validation-2026-09-06.md": "542ccaa3a58552ea94401501803118a3435e8cde2494fdca6765dcba1b08a515",
+    "libs/sdk/src/sdk/target.py": "5e7dbeb993dc0788d242749b7730419e349af8418d4b659134d7180c72841dc8",
+    "libs/sdk/src/sdk/read.py": "cf5d37367cd20b20560f051fd307ac521e3c3651c970b75069473096936b37de",
+    "libs/sdk/src/sdk/aggregate.py": "35d4e140df6f920c435698489b70cc5a2f9545fc6c51e9ecc7e2756d49ce9568",
+    "libs/sdk/tests/test_arrival_aggregate_resolution.py": "c501632a54563e3645b2bbd0861226bd7cb181433a5f26f7517f73dd1e01f8f0"
+  }
+}

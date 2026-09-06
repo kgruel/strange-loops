@@ -1,0 +1,9 @@
+{
+  "status": "complete",
+  "review_verdict": "ACCEPT",
+  "primary_accepted": true,
+  "blockers": 0,
+  "pending": [],
+  "scope_correction": "single parsed descriptor bridge; later aggregate planning remains separate",
+  "post_review_code_changes": false
+}

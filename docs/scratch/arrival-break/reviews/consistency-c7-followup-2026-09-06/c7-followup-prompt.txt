@@ -1,0 +1,1105 @@
+You are Fable 5.1 at LOW effort doing an adversarial static implementation review of the small C7 aggregate-descriptor resolver continuation. Return ACCEPT or REVISE, concrete blockers with source/counterexample, then optional notes. No tools, do not claim to run tests. Keep output under 1000 words.
+
+C7 bounded declaration inspection was checkpointed f5563d2f after your ACCEPT. You noted that the older summary/state/timeline descriptor bridge still caught aggregate refusal and reparsed. User authorized fixing that small follow-up before D0/D2. The change reuses _arrival_descriptor(..., allow_aggregate=True), whose C7 helper retains one parsed root. It removes unused imports and adds public replacement-during-target-parse regressions. Preserve explicit role checks, unknown registry refusals, default single-store restrictions, effective-root topology selection, CURRENT basis/custody behavior.
+
+Scope is this descriptor bridge, not a global transaction across every local filesystem observation. Existing has_local_descriptor_aggregate pre-classification and later aggregate/member captures remain separate; do not claim whole operation parses only once. Tests should prove that replacement during the target parser cannot cause the bridge to reinterpret new residence. Existing malformed/legacy fallback remains. No new wire schema, credentials, topology semantics, or C9 work. Review the complete production/test patch plus call chain and reported validation. Prior C7 test-isolation mistake was disclosed; this continuation runs with process-wide temp state/config/home plus isolated new fixtures.
+
+
+===== docs/scratch/arrival-break/consistency-c7-followup-2026-09-06.md =====
+
+1: # C7 continuation: aggregate descriptor resolution
+2:
+3: Status: implementation/native validation complete; Fable-low review pending.
+4: Based on C7 checkpoint `f5563d2f` on
+5: `arrival/finish`. The user requested this continuation before compaction for
+6: D0 → D2. Terra implements, Luna independently audits and validates, and root
+7: owns scope and Fable-low review triage.
+8:
+9: ## Contract and change
+10:
+11: Summary, state and timeline already capture an explicit root descriptor and
+12: choose execution topology from its bounded effective declaration. Their
+13: `_aggregate_aware_arrival_descriptor` bridge previously caught the default
+14: single-store aggregate refusal and reparsed the local file. Replacing the
+15: file between those parses could switch the selected descriptor or fail a
+16: read that had already parsed a valid root.
+17:
+18: The bridge now delegates to `_arrival_descriptor(target, allow_aggregate=True)`.
+19: This reuses C7's retained parsed-root logic and explicit-role checks. The
+20: original parsed descriptor remains the selected residence if the local file
+21: is subsequently replaced. Default single-store callers still refuse local
+22: aggregate descriptors. The result models, effective declaration selection,
+23: registry routing and custody/projection requirements do not change.
+24:
+25: This is a fix to the descriptor bridge, not a claim that entire aggregate
+26: planning is one filesystem transaction. The earlier storeless-descendant
+27: predicate and later aggregate definition/member captures remain distinct
+28: observations. Recursive storeless planning, credential bindings and C9 remain
+29: outside this continuation.
+30:
+31: ## Acceptance and review
+32:
+33: Public summary/state/timeline regression tests replace the locator after the
+34: target parser returns its first AST. Reads must retain the original descriptor
+35: and captured effective declaration. Existing aggregate, registry injection,
+36: read and target tests cover the unchanged surrounding contracts.
+37:
+38: All validation invocations must isolate state/config/Loops home at process
+39: level, as well as keeping the new module's autouse state fixture. The C7 test
+40: isolation fix covered its new module; that alone does not establish isolation
+41: for every inherited SDK test. This continuation explicitly isolates the full
+42: suite rather than relying on individual historical fixtures.
+43:
+44: Validation: **562 SDK tests**, **101 architecture checks**, and scoped Ruff
+45: pass. A later test-only refinement makes the replacement a valid aggregate
+46: descriptor, and all 3 refined public regressions pass. The full suite precedes
+47: that fixture refinement; production is unchanged. See the
+48: [validation report](consistency-c7-followup-validation-2026-09-06.md).
+49:
+50: Root also loaded only the committed pre-fix resolver function into memory and
+51: ran those same refined regressions: all **3 failed**, attempting to open the
+52: replacement `missing.arrival` residence. The current resolver passes all 3.
+53: No source file was reverted for this probe. Its script and observed failures
+54: are retained with review evidence.
+55:
+56: Fable-low implementation review is pending. C7's frozen review artifacts remain
+57: untouched.
+
+===== docs/scratch/arrival-break/consistency-c7-followup-validation-2026-09-06.md =====
+
+1: # C7 aggregate resolver continuation: validation
+2:
+3: All commands used these process environment overrides, recorded in
+4: `/tmp/loops-arrival-c7-followup-2026-09-06/validation/environment.txt`:
+5:
+6: ```text
+7: XDG_STATE_HOME=/tmp/loops-arrival-c7-followup-2026-09-06/validation/state
+8: XDG_CONFIG_HOME=/tmp/loops-arrival-c7-followup-2026-09-06/validation/config
+9: LOOPS_HOME=/tmp/loops-arrival-c7-followup-2026-09-06/validation/loops
+10: ```
+11:
+12: The requested focused follow-up set passed:
+13:
+14: ```text
+15: uv run --package sdk pytest \
+16:   libs/sdk/tests/test_arrival_aggregate_resolution.py \
+17:   libs/sdk/tests/test_arrival_aggregate.py \
+18:   libs/sdk/tests/test_arrival_registry_injection.py \
+19:   libs/sdk/tests/test_arrival_read.py libs/sdk/tests/test_target.py -q
+20: 65 passed in 1.32s
+21: ```
+22:
+23: The full SDK and architecture suites also passed:
+24:
+25: ```text
+26: # cwd: libs/sdk
+27: uv run pytest -q
+28: 562 passed in 20.30s
+29:
+30: # cwd: worktree root
+31: uv run pytest tests/architecture -q
+32: 101 passed in 6.02s
+33: ```
+34:
+35: Scoped Ruff and `git diff --check` passed. The raw outputs and manifests are
+36: under `/tmp/loops-arrival-c7-followup-2026-09-06/validation/`:
+37:
+38: - `focused.txt`, `focused-after-fixture.txt`
+39: - `sdk-full.txt`, `architecture.txt`
+40: - `ruff.txt`, `ruff-after-fixture.txt`, `diff-check.txt`
+41: - `hashes-before.txt`, `hashes-after.txt`
+42:
+43: The final source/test hashes are:
+44:
+45: ```text
+46: cf5d37367cd20b20560f051fd307ac521e3c3651c970b75069473096936b37de  libs/sdk/src/sdk/read.py
+47: c501632a54563e3645b2bbd0861226bd7cb181433a5f26f7517f73dd1e01f8f0  libs/sdk/tests/test_arrival_aggregate_resolution.py
+48: ```
+49:
+50: The full SDK run preceded the final one-line fixture correction that made the
+51: replacement file syntactically a valid aggregate locator. The three focused
+52: follow-up cases were rerun afterward and passed (`3 passed in 0.26s`); the
+53: production source hash was unchanged. The correction improves the regression
+54: because the old resolver now fails by opening the replacement residence, while
+55: the new bridge retains the original parsed descriptor.
+56:
+57: The independent baseline probe at
+58: `/tmp/loops-arrival-c7-followup-2026-09-06/baseline-probe-valid-replacement.txt`
+59: records all three pre-fix failures as `GenesisRefused` on the replacement
+60: location; the current implementation passes all three. This is source/test
+61: evidence only and uses disposable fixture stores.
+62:
+63: No C7 follow-up blocker was found. The bridge remains limited to preserving
+64: the root descriptor parse; aggregate member custody and recursive topology
+65: validation remain outside this continuation.
+
+===== libs/sdk/src/sdk/target.py =====
+
+62: def _arrival_definition(
+63:     target: Path | str, *, allow_aggregate: bool = False
+64: ) -> tuple[Path, Any, StoreDescriptor | None] | None:
+65:     """Parse one Arrival-capable root without probing or opening its residence.
+66:
+67:     ``TargetInfo`` is a legacy filesystem classification and necessarily turns
+68:     a store spelling into a ``Path``. Descriptor resolution instead parses the
+69:     vertex locator directly, so another backend's DSN or service URL remains
+70:     byte-for-byte opaque until that named adapter receives it. Aggregate shape
+71:     remains refused by default; declaration inspection may opt in because it
+72:     reports bounded root structure without claiming one basis for the aggregate.
+73:
+74:     A valid storeless vertex retains its parsed AST with ``descriptor=None`` so
+75:     a structural caller can make its descriptor/storeless decision from these
+76:     same bytes. Malformed and non-vertex targets retain the legacy ``None``
+77:     classification.
+78:     """
+79:     path = Path(target).resolve()
+80:     if path.suffix.lower() != ".vertex":
+81:         return None
+82:     if not path.exists():
+83:         raise TargetNotFound(f"target path does not exist: {path}")
+84:     try:
+85:         ast = parse_vertex_file(path)
+86:     except Exception:
+87:         return None  # the legacy resolver owns malformed-target classification
+88:     descriptor = descriptor_for(ast, path)
+89:     if descriptor is None:
+90:         return path, ast, None
+91:     if descriptor.role is None:
+92:         raise SdkValueError(
+93:             f"Arrival target {path} must declare store role explicitly"
+94:         )
+95:     if not allow_aggregate and (ast.combine is not None or ast.discover is not None):
+96:         raise TargetUnsupported(
+97:             f"Arrival target {path} is an aggregate; member-basis reads are not "
+98:             "implemented in this single-store stage"
+99:         )
+100:     return path, ast, descriptor
+103: def _arrival_descriptor(
+104:     target: Path | str, *, allow_aggregate: bool = False
+105: ) -> tuple[Path, Any, StoreDescriptor] | None:
+106:     """Resolve and require an explicitly declared Arrival descriptor."""
+107:     resolved = _arrival_definition(target, allow_aggregate=allow_aggregate)
+108:     if resolved is None:
+109:         return None
+110:     path, ast, descriptor = resolved
+111:     if descriptor is None:
+112:         return None
+113:     return path, ast, descriptor
+
+===== libs/sdk/src/sdk/read.py =====
+
+95: def _open_arrival_read(
+96:     resolved: tuple[Path, Any, Any],
+97:     *,
+98:     registry: BackendRegistry | None,
+99:     continuation: Continuation | None = None,
+100: ):
+101:     """Open and close one descriptor-first read without exposing custody."""
+102:     from engine.arrival_consumer import open_read
+103:
+104:     _path, ast, descriptor = resolved
+105:     opened = open_read(
+106:         registry if registry is not None else BackendRegistry.with_builtin_backends(),
+107:         descriptor,
+108:         requirement=ProjectionRequirement.CURRENT,
+109:         continuation=continuation,
+110:     )
+111:     try:
+112:         yield ast, descriptor, opened
+113:     finally:
+114:         opened.close()
+117: def _aggregate_aware_arrival_descriptor(
+118:     target: Path,
+119: ) -> tuple[Path, Any, Any] | None:
+120:     """Resolve one descriptor root while deferring shape to adopted evidence."""
+121:     return _arrival_descriptor(target, allow_aggregate=True)
+194: def _arrival_declaration(
+195:     locator_ast: Any,
+196:     target_path: Path,
+197:     opened: Any,
+198:     *,
+199:     include_user_facts: bool = False,
+200:     allow_aggregate: bool = False,
+201: ) -> tuple[Any, str, tuple[Fact, ...], str]:
+202:     """Resolve effective declarations from the same bounded read snapshot."""
+203:     facts = opened.snapshot.facts(
+204:         FactRequest(
+205:             limit=None,
+206:             kind=None if include_user_facts else "_decl",
+207:             include_internal=True,
+208:             order="oldest",
+209:         )
+210:     ).items
+211:     anchor = opened.snapshot.declaration_anchor
+212:     documents = resolve_declaration_documents_from_snapshot(anchor, facts)
+213:     if documents is None:
+214:         raise SdkError(
+215:             "the Arrival snapshot has no adopted declaration; refusing to "
+216:             "substitute the current vertex file as store history"
+217:         )
+218:     status = "unhistorized" if isinstance(documents, Unhistorized) else "store"
+219:     document_rows = documents.documents if isinstance(documents, Unhistorized) else documents
+220:     effective_ast = documents_to_vertex(
+221:         document_rows,
+222:         path=target_path,
+223:         store=locator_ast.store,
+224:         store_backend=locator_ast.store_backend,
+225:         store_location=locator_ast.store_location,
+226:     )
+227:     if not allow_aggregate and (
+228:         effective_ast.combine is not None or effective_ast.discover is not None
+229:     ):
+230:         raise TargetUnsupported(
+231:             "the bounded Arrival declaration is an aggregate; member-basis reads "
+232:             "are not implemented in this single-store stage"
+233:         )
+234:     if anchor.own_lineage is None:
+235:         raise SdkError("resolved declaration has no own lineage anchor")
+236:     return effective_ast, status, facts, anchor.own_lineage
+506: def read_summary(
+507:     target: Path | str,
+508:     *,
+509:     include_internal: bool = False,
+510:     registry: BackendRegistry | None = None,
+511: ) -> ReadSummary:
+512:     """Read domain-neutral statistical inventory of a target artifact.
+513:
+514:     Parameters:
+515:         target: Path to .vertex, .jsonl, or .db artifact.
+516:         include_internal: Whether to include reserved `_decl.*` kinds.
+517:
+518:     Returns:
+519:         ReadSummary containing fact/tick totals, kind distribution, and agreement.
+520:     """
+521:     target_path = Path(target).resolve()
+522:     if has_local_descriptor_aggregate(target_path):
+523:         return _aggregate_summary(
+524:             target_path, include_internal=include_internal, registry=registry
+525:         )
+526:     arrival = _aggregate_aware_arrival_descriptor(target_path)
+527:     if arrival is not None:
+528:         with _open_arrival_read(arrival, registry=registry) as (
+529:             locator_ast,
+530:             descriptor,
+531:             opened,
+532:         ):
+533:             raw = opened.snapshot.summary(
+534:                 SummaryRequest(include_internal=include_internal)
+535:             )
+536:             effective_ast, declaration_status, _facts, _own_lineage = _arrival_declaration(
+537:                 locator_ast, target_path, opened, allow_aggregate=True
+538:             )
+539:             if effective_ast.combine is not None or effective_ast.discover is not None:
+540:                 with open_aggregate_read(
+541:                     target_path, registry=registry, opened_root=opened
+542:                 ) as aggregate:
+543:                     return _aggregate_summary_from(
+544:                         aggregate, target_path, include_internal=include_internal
+545:                     )
+546:             kinds = {name: dict(stats) for name, stats in raw.fact_kinds.items()}
+547:             return ReadSummary(
+548:                 read_path="arrival",
+549:                 basis=opened.basis,
+550:                 store=StoreDescriptorInfo.from_descriptor(descriptor),
+551:                 target_type="vertex",
+552:                 target_path=str(target_path),
+553:                 fact_total=raw.fact_total,
+554:                 tick_total=raw.tick_total,
+555:                 latest_ts=_latest_timestamp(raw.fact_kinds),
+556:                 kinds=kinds,
+557:                 ticks={name: dict(stats) for name, stats in raw.tick_names.items()},
+558:                 agreement=None,
+559:                 declaration_status=declaration_status,
+560:                 unfolded_kinds=[
+561:                     name
+562:                     for name in kinds
+563:                     if name not in effective_ast.loops and not name.startswith("_decl.")
+564:                 ],
+565:                 signed_count=raw.signed_count,
+566:                 unsigned_count=raw.unsigned_count,
+567:             )
+568:
+569:     _refuse_arrival_aggregate_members(target_path)
+570:     info = resolve_target(target)
+571:     if info.target_type == "vertex":
+572:         decl_ast, decl_status = load_declaration_status(target_path)
+573:         is_aggregate = decl_ast is not None and (
+574:             decl_ast.combine is not None or decl_ast.discover is not None
+575:         )
+576:
+577:         if not is_aggregate and (info.canonical_path is None or not info.canonical_path.exists()):
+578:             return ReadSummary(
+579:                 target_type="vertex",
+580:                 target_path=str(target_path),
+581:                 canonical_mode=info.canonical_mode or "unknown",
+582:                 canonical_path=str(info.canonical_path) if info.canonical_path else None,
+583:                 index_path=str(info.index_path) if info.index_path else None,
+584:                 declaration_status=decl_status or "unknown",
+585:                 fact_total=0,
+586:                 tick_total=0,
+587:                 latest_ts=None,
+588:                 kinds={},
+589:                 unfolded_kinds=[],
+590:                 agreement=True,
+591:                 signed_count=0,
+592:                 unsigned_count=0,
+593:             )
+594:
+595:         if is_aggregate:
+596:             raw_sum = vertex_summary(target_path, include_internal=include_internal)
+597:             fact_total = raw_sum.get("facts", {}).get("total", 0)
+598:             tick_total = raw_sum.get("ticks", {}).get("total", 0)
+599:             kinds_raw = raw_sum.get("facts", {}).get("kinds", {})
+600:             kinds = {
+601:                 k: {
+602:                     "count": v.get("count", 0),
+603:                     "earliest": v.get("earliest"),
+604:                     "latest": v.get("latest"),
+605:                 }
+606:                 for k, v in kinds_raw.items()
+607:             }
+608:             return ReadSummary(
+609:                 target_type="vertex",
+610:                 target_path=str(target_path),
+611:                 canonical_mode=info.canonical_mode or "aggregate",
+612:                 canonical_path=str(info.canonical_path) if info.canonical_path else None,
+613:                 index_path=str(info.index_path) if info.index_path else None,
+614:                 declaration_status=decl_status or "aggregate-head",
+615:                 fact_total=fact_total,
+616:                 tick_total=tick_total,
+617:                 latest_ts=None,
+618:                 kinds=kinds,
+619:                 unfolded_kinds=[],
+620:                 agreement=True,
+621:                 signed_count=0,
+622:                 unsigned_count=fact_total,
+623:             )
+624:
+625:         canonical = info.canonical_path or target_path
+626:         index_path = info.index_path or canonical
+627:         reader, agreed = _ensure_reader(canonical, index_path)
+628:         try:
+629:             fact_total, tick_total, latest_ts, kinds, signed_counts = _compute_summary_stats(
+630:                 reader, include_internal=include_internal
+631:             )
+632:             unfolded = [
+633:                 k
+634:                 for k in kinds
+635:                 if decl_ast is not None and k not in decl_ast.loops and not k.startswith("_decl.")
+636:             ]
+637:             # signed_counts is (signed, TOTAL) — unsigned is the difference
+638:             signed_count = signed_counts[0] if signed_counts else 0
+639:             unsigned_count = (signed_counts[1] - signed_counts[0]) if signed_counts else 0
+640:
+641:             return ReadSummary(
+642:                 target_type="vertex",
+643:                 target_path=str(target_path),
+644:                 canonical_mode=info.canonical_mode or "unknown",
+645:                 canonical_path=str(canonical),
+646:                 index_path=str(index_path),
+647:                 declaration_status=decl_status or "unknown",
+648:                 fact_total=fact_total,
+649:                 tick_total=tick_total,
+650:                 latest_ts=latest_ts,
+651:                 kinds=kinds,
+652:                 unfolded_kinds=unfolded,
+653:                 agreement=agreed,
+654:                 signed_count=signed_count,
+655:                 unsigned_count=unsigned_count,
+656:             )
+657:         finally:
+658:             reader.close()
+659:
+660:     # Bare store (.jsonl or .db)
+661:     canonical = info.canonical_path or target_path
+662:     index_path = info.index_path or canonical
+663:     reader, agreed = _ensure_reader(canonical, index_path)
+664:     try:
+665:         fact_total, tick_total, latest_ts, kinds, signed_counts = _compute_summary_stats(
+666:             reader, include_internal=include_internal
+667:         )
+668:         # signed_counts is (signed, TOTAL) — unsigned is the difference
+669:         signed_count = signed_counts[0] if signed_counts else 0
+670:         unsigned_count = (signed_counts[1] - signed_counts[0]) if signed_counts else 0
+671:
+672:         return ReadSummary(
+673:             target_type=info.target_type,
+674:             target_path=str(target_path),
+675:             canonical_mode=info.canonical_mode or "unknown",
+676:             canonical_path=str(canonical),
+677:             index_path=str(index_path),
+678:             declaration_status=None,
+679:             fact_total=fact_total,
+680:             tick_total=tick_total,
+681:             latest_ts=latest_ts,
+682:             kinds=kinds,
+683:             unfolded_kinds=[],
+684:             agreement=agreed,
+685:             signed_count=signed_count,
+686:             unsigned_count=unsigned_count,
+687:         )
+688:     finally:
+689:         reader.close()
+927: def read_state(
+928:     target: Path | str,
+929:     *,
+930:     kind: str | None = None,
+931:     observer: str | None = None,
+932:     registry: BackendRegistry | None = None,
+933: ) -> FoldStateResult:
+934:     """Reconstruct live fold state by replaying facts through declared vertex folds.
+935:
+936:     Parameters:
+937:         target: Path to .vertex artifact.
+938:         kind: Optional single-kind filter.
+939:         observer: Optional observer view filter.
+940:
+941:     Returns:
+942:         FoldStateResult containing reconstructed state sections and generation info.
+943:     """
+944:     target_path = Path(target).resolve()
+945:     if has_local_descriptor_aggregate(target_path):
+946:         return _aggregate_state(
+947:             target_path, kind=kind, observer=observer, registry=registry
+948:         )
+949:     arrival = _aggregate_aware_arrival_descriptor(target_path)
+950:     if arrival is not None:
+951:         with _open_arrival_read(arrival, registry=registry) as (
+952:             locator_ast,
+953:             descriptor,
+954:             opened,
+955:         ):
+956:             effective_ast, declaration_status, facts, own_lineage = _arrival_declaration(
+957:                 locator_ast,
+958:                 target_path,
+959:                 opened,
+960:                 include_user_facts=True,
+961:                 allow_aggregate=True,
+962:             )
+963:             if effective_ast.combine is not None or effective_ast.discover is not None:
+964:                 with open_aggregate_read(
+965:                     target_path, registry=registry, opened_root=opened
+966:                 ) as aggregate:
+967:                     return _aggregate_state_from(
+968:                         aggregate, target_path, kind=kind, observer=observer
+969:                     )
+970:             specs = compile_vertex(effective_ast)
+971:             sections: dict[str, Any] = {}
+972:             for section_name, spec in specs.items():
+973:                 if kind is not None and section_name != kind:
+974:                     continue
+975:                 selected = [
+976:                     fact
+977:                     for fact in facts
+978:                     if fact.kind == section_name
+979:                     and (observer is None or observer_matches(fact.observer, observer))
+980:                 ]
+981:                 payloads: list[dict[str, Any]] = []
+982:                 for fact in selected:
+983:                     payload = dict(fact.payload)
+984:                     payload.update(
+985:                         {
+986:                             "_ts": fact.ts,
+987:                             "_observer": fact.observer,
+988:                             "_origin": fact.origin,
+989:                             "_id": fact.id,
+990:                         }
+991:                     )
+992:                     payloads.append(payload)
+993:                 sections[section_name] = _serialize_fold_section(spec.replay(payloads))
+994:
+995:             return FoldStateResult(
+996:                 read_path="arrival",
+997:                 basis=opened.basis,
+998:                 store=StoreDescriptorInfo.from_descriptor(descriptor),
+999:                 vertex_name=effective_ast.name,
+1000:                 target_path=str(target_path),
+1001:                 declaration_status=declaration_status,
+1002:                 generation=_arrival_generation(
+1003:                     effective_ast, facts, own_lineage, declaration_status
+1004:                 ),
+1005:                 sections=sections,
+1006:             )
+1007:
+1008:     _refuse_arrival_aggregate_members(target_path)
+1009:     info = resolve_target(target)
+1010:     if info.target_type != "vertex":
+1011:         raise TargetUnsupported(f"read_state requires a .vertex target, got {info.target_type}")
+1012:
+1013:     decl_ast, decl_status = load_declaration_status(target_path)
+1014:     vertex_path = target_path
+1015:
+1016:     if info.canonical_path is None or not info.canonical_path.exists():
+1017:         return FoldStateResult(
+1018:             vertex_name=decl_ast.name if decl_ast else vertex_path.stem,
+1019:             target_path=str(vertex_path),
+1020:             declaration_status=decl_status or "unknown",
+1021:             generation={},
+1022:             sections={},
+1023:         )
+1024:
+1025:     state_dict = vertex_read(vertex_path, observer=observer)
+1026:     if not isinstance(state_dict, dict):
+1027:         state_dict = {}
+1028:
+1029:     sections: dict[str, Any] = {}
+1030:     for sec_name, sec_val in state_dict.items():
+1031:         if kind is not None and sec_name != kind:
+1032:             continue
+1033:         sections[sec_name] = _serialize_fold_section(sec_val)
+1034:
+1035:     gen = getattr(decl_ast, "generation", {}) if decl_ast else {}
+1036:
+1037:     generation_as_dict = getattr(gen, "as_dict", None)
+1038:     return FoldStateResult(
+1039:         vertex_name=decl_ast.name if decl_ast else vertex_path.stem,
+1040:         target_path=str(vertex_path),
+1041:         declaration_status=decl_status or "unknown",
+1042:         generation=generation_as_dict() if callable(generation_as_dict) else gen,
+1043:         sections=sections,
+1044:     )
+1449: def read_timeline(
+1450:     target: Path | str,
+1451:     *,
+1452:     start_ts: float | None = None,
+1453:     end_ts: float | None = None,
+1454:     limit: int = 100,
+1455:     order: str = "oldest",
+1456:     registry: BackendRegistry | None = None,
+1457: ) -> TimelineResult:
+1458:     """Read an interleaved, chronological stream of both facts and sealed ticks.
+1459:
+1460:     Parameters:
+1461:         target: Path to .vertex, .jsonl, or .db artifact.
+1462:         start_ts: Optional lower timestamp bound (inclusive).
+1463:         end_ts: Optional upper timestamp bound (inclusive).
+1464:         limit: Maximum number of events to return.
+1465:         order: Sort order ('oldest' for chronological, 'newest' for reverse chronological).
+1466:         registry: Optional Arrival backend registry used for root and member opens.
+1467:
+1468:     Ordering is by event time (``ts``) — facts and ticks are interleaved on the
+1469:     only axis they share, so the timeline is an event-time read lens, not the
+1470:     store's fold order. A backdated fact appears where its ``ts`` puts it here
+1471:     and folds last; ``read_facts`` is the receipt-ordered view.
+1472:
+1473:     Returns:
+1474:         TimelineResult containing merged events with honest total counts and truncation markers.
+1475:     """
+1476:     if order not in ("oldest", "newest"):
+1477:         raise SdkValueError(f"invalid order '{order}': expected 'oldest' or 'newest'")
+1478:
+1479:     target_path = Path(target).resolve()
+1480:     if has_local_descriptor_aggregate(target_path):
+1481:         return _aggregate_timeline(
+1482:             target_path,
+1483:             start_ts=start_ts,
+1484:             end_ts=end_ts,
+1485:             limit=limit,
+1486:             order=order,
+1487:             registry=registry,
+1488:         )
+1489:     arrival = _aggregate_aware_arrival_descriptor(target_path)
+1490:     if arrival is not None:
+1491:         since = start_ts if start_ts is not None else 0.0
+1492:         until = end_ts if end_ts is not None else float("inf")
+1493:         with _open_arrival_read(arrival, registry=registry) as (
+1494:             locator_ast,
+1495:             descriptor,
+1496:             opened,
+1497:         ):
+1498:             effective_ast, _status, _facts, _lineage = _arrival_declaration(
+1499:                 locator_ast, target_path, opened, allow_aggregate=True
+1500:             )
+1501:             if effective_ast.combine is not None or effective_ast.discover is not None:
+1502:                 with open_aggregate_read(
+1503:                     target_path, registry=registry, opened_root=opened
+1504:                 ) as aggregate:
+1505:                     return _aggregate_timeline_from(
+1506:                         aggregate,
+1507:                         start_ts=start_ts,
+1508:                         end_ts=end_ts,
+1509:                         limit=limit,
+1510:                         order=order,
+1511:                     )
+1512:             facts = opened.snapshot.facts(
+1513:                 FactRequest(limit=None, include_internal=False, order="oldest")
+1514:             ).items
+1515:             ticks = opened.snapshot.ticks(TickRequest(since=since, until=until))
+1516:             events: list[tuple[TimelineEvent, int, int]] = []
+1517:             for fact in facts:
+1518:                 if since <= fact.ts <= until:
+1519:                     events.append(
+1520:                         (
+1521:                             TimelineEvent(
+1522:                                 event_type="fact",
+1523:                                 id=fact.id,
+1524:                                 kind_or_name=fact.kind,
+1525:                                 ts=fact.ts,
+1526:                                 observer=fact.observer,
+1527:                                 origin=fact.origin,
+1528:                                 payload=dict(fact.payload),
+1529:                             ),
+1530:                             fact.arrival_ordinal,
+1531:                             fact.arrival_seq,
+1532:                         )
+1533:                     )
+1534:             for tick in ticks:
+1535:                 events.append(
+1536:                     (
+1537:                         TimelineEvent(
+1538:                             event_type="tick",
+1539:                             id=tick.id,
+1540:                             kind_or_name=tick.name,
+1541:                             ts=tick.ts,
+1542:                             origin=tick.origin,
+1543:                             payload=dict(tick.payload),
+1544:                         ),
+1545:                         tick.arrival_ordinal,
+1546:                         tick.arrival_seq,
+1547:                     )
+1548:                 )
+1549:             events.sort(
+1550:                 key=lambda item: (item[0].ts, item[1], item[2], item[0].id),
+1551:                 reverse=(order == "newest"),
+1552:             )
+1553:             total_events = len(events)
+1554:             capped = events[:limit]
+1555:             return TimelineResult(
+1556:                 read_path="arrival",
+1557:                 basis=opened.basis,
+1558:                 store=StoreDescriptorInfo.from_descriptor(descriptor),
+1559:                 events=[event for event, _ordinal, _seq in capped],
+1560:                 start_ts=start_ts,
+1561:                 end_ts=end_ts,
+1562:                 total_events=total_events,
+1563:                 truncated=total_events > len(capped),
+1564:                 order=order,
+1565:             )
+1566:
+1567:     _refuse_arrival_aggregate_members(target_path)
+1568:     info = resolve_target(target)
+1569:     events: list[TimelineEvent] = []
+1570:
+1571:     since = start_ts if start_ts is not None else 0.0
+1572:     until = end_ts if end_ts is not None else float("inf")
+1573:
+1574:     if info.target_type == "vertex":
+1575:         decl_ast, _ = load_declaration_status(target_path)
+1576:         is_aggregate = decl_ast is not None and (
+1577:             decl_ast.combine is not None or decl_ast.discover is not None
+1578:         )
+1579:
+1580:         if is_aggregate or (info.canonical_path is not None and info.canonical_path.exists()):
+1581:             raw_facts = vertex_facts(target_path, since_ts=since, until_ts=until)
+1582:             for f in raw_facts:
+1583:                 f_ts = (
+1584:                     f["ts"].timestamp()
+1585:                     if hasattr(f.get("ts"), "timestamp")
+1586:                     else float(f.get("ts", 0.0))
+1587:                 )
+1588:                 events.append(
+1589:                     TimelineEvent(
+1590:                         event_type="fact",
+1591:                         id=f.get("id", ""),
+1592:                         kind_or_name=f.get("kind", ""),
+1593:                         ts=f_ts,
+1594:                         observer=f.get("observer", ""),
+1595:                         origin=f.get("origin", ""),
+1596:                         payload=dict(f.get("payload", {})),
+1597:                     )
+1598:                 )
+1599:
+1600:             raw_ticks = vertex_ticks(target_path, since, until)
+1601:             for raw_tick in raw_ticks:
+1602:                 t: Any = raw_tick
+1603:                 t_ts = (
+1604:                     t.ts.timestamp()
+1605:                     if hasattr(t, "ts") and hasattr(t.ts, "timestamp")
+1606:                     else float(getattr(t, "ts", 0.0) if hasattr(t, "ts") else t.get("ts", 0.0))
+1607:                 )
+1608:                 t_id = getattr(t, "tick_id", getattr(t, "id", ""))
+1609:                 t_name = getattr(t, "name", "")
+1610:                 events.append(
+1611:                     TimelineEvent(
+1612:                         event_type="tick",
+1613:                         id=t_id,
+1614:                         kind_or_name=t_name,
+1615:                         ts=t_ts,
+1616:                         observer="",
+1617:                         origin="",
+1618:                         payload=dict(t.payload)
+1619:                         if hasattr(t, "payload") and t.payload
+1620:                         else dict(t.get("payload", {})),
+1621:                     )
+1622:                 )
+1623:
+1624:             # Event-time lens: ts is the only axis facts and ticks share.
+1625:             events.sort(key=lambda e: e.ts, reverse=(order == "newest"))
+1626:             total_events = len(events)
+1627:             capped = events[:limit]
+1628:             truncated = total_events > len(capped)
+1629:
+1630:             return TimelineResult(
+1631:                 events=capped,
+1632:                 start_ts=start_ts,
+1633:                 end_ts=end_ts,
+1634:                 total_events=total_events,
+1635:                 truncated=truncated,
+1636:                 order=order,
+1637:             )
+1638:
+1639:         return TimelineResult(
+1640:             events=[],
+1641:             start_ts=start_ts,
+1642:             end_ts=end_ts,
+1643:             total_events=0,
+1644:             truncated=False,
+1645:             order=order,
+1646:         )
+1647:
+1648:     canonical = info.canonical_path or target_path
+1649:     index_path = info.index_path or canonical
+1650:     reader, _ = _ensure_reader(canonical, index_path)
+1651:     try:
+1652:         raw_facts = reader.facts_between(since_ts=since, until_ts=until)
+1653:         ticks = reader.ticks_between(since, until)
+1654:
+1655:         for f in raw_facts:
+1656:             f_ts = (
+1657:                 f["ts"].timestamp()
+1658:                 if hasattr(f.get("ts"), "timestamp")
+1659:                 else float(f.get("ts", 0.0))
+1660:             )
+1661:             events.append(
+1662:                 TimelineEvent(
+1663:                     event_type="fact",
+1664:                     id=f.get("id", ""),
+1665:                     kind_or_name=f.get("kind", ""),
+1666:                     ts=f_ts,
+1667:                     observer=f.get("observer", ""),
+1668:                     origin=f.get("origin", ""),
+1669:                     payload=dict(f.get("payload", {})),
+1670:                 )
+1671:             )
+1672:
+1673:         for raw_tick in ticks:
+1674:             t: Any = raw_tick
+1675:             t_ts = (
+1676:                 t.ts.timestamp()
+1677:                 if hasattr(t, "ts") and hasattr(t.ts, "timestamp")
+1678:                 else float(getattr(t, "ts", 0.0) if hasattr(t, "ts") else t.get("ts", 0.0))
+1679:             )
+1680:             t_id = getattr(t, "tick_id", getattr(t, "id", ""))
+1681:             t_name = getattr(t, "name", "")
+1682:             events.append(
+1683:                 TimelineEvent(
+1684:                     event_type="tick",
+1685:                     id=t_id,
+1686:                     kind_or_name=t_name,
+1687:                     ts=t_ts,
+1688:                     observer="",
+1689:                     origin="",
+1690:                     payload=dict(t.payload)
+1691:                     if hasattr(t, "payload") and t.payload
+1692:                     else dict(t.get("payload", {})),
+1693:                 )
+1694:             )
+1695:
+1696:         # Event-time lens: ts is the only axis facts and ticks share.
+1697:         events.sort(key=lambda e: e.ts, reverse=(order == "newest"))
+1698:         total_events = len(events)
+1699:         capped = events[:limit]
+1700:         truncated = total_events > len(capped)
+1701:
+1702:         return TimelineResult(
+1703:             events=capped,
+1704:             start_ts=start_ts,
+1705:             end_ts=end_ts,
+1706:             total_events=total_events,
+1707:             truncated=truncated,
+1708:             order=order,
+1709:         )
+1710:     finally:
+1711:         reader.close()
+
+===== libs/sdk/src/sdk/aggregate.py =====
+
+371: def open_aggregate_read(
+372:     target: Path,
+373:     *,
+374:     registry: BackendRegistry | None = None,
+375:     opened_root: OpenedRead | None = None,
+376: ) -> Iterator[AggregateRead]:
+377:     """Plan exact local topology, then retain all descriptor snapshots."""
+378:     resolver = _Resolver()
+379:     capture = capture_aggregate(
+380:         registry if registry is not None else BackendRegistry.with_builtin_backends(),
+381:         resolver.root(target),
+382:         resolver,
+383:         opened_root=opened_root,
+384:     )
+385:     try:
+386:         yield AggregateRead(capture)
+387:     finally:
+388:         capture.close()
+402: def has_local_descriptor_aggregate(target: Path) -> bool:
+403:     """Route a *storeless* local composition with Arrival descendants.
+404:
+405:     A descriptor-bearing root must first open its ledger and resolve the
+406:     adopted declaration at a bounded head.  Its locator can be ahead of (or
+407:     behind) that declaration, so using local ``combine``/``discover`` here
+408:     would silently change the execution shape before adoption.  Storeless
+409:     roots have no adopted declaration to consult; their local topology is the
+410:     honest planner input and this predicate keeps their Arrival descendants
+411:     out of the legacy reader.
+412:     """
+413:     root = target.resolve()
+414:     if root.suffix.lower() != ".vertex" or not root.exists():
+415:         return False
+416:     try:
+417:         root_ast = parse_vertex(root.read_text(encoding="utf-8"), path=root)
+418:     except Exception:
+419:         return False
+420:     if descriptor_for(root_ast, root) is not None:
+421:         return False
+422:     if root_ast.combine is None and root_ast.discover is None:
+423:         return False
+424:
+425:     seen: set[Path] = set()
+426:
+427:     def visit(path: Path) -> bool:
+428:         path = path.resolve()
+429:         if path in seen or not path.exists():
+430:             return False
+431:         seen.add(path)
+432:         try:
+433:             ast = parse_vertex(path.read_text(encoding="utf-8"), path=path)
+434:         except Exception:
+435:             return False
+436:         if descriptor_for(ast, path) is not None:
+437:             return True
+438:         if ast.combine is not None:
+439:             for entry in ast.combine:
+440:                 child = resolve_vertex(entry.name, _loops_home())
+441:                 if not child.is_absolute():
+442:                     child = path.parent / child
+443:                 if visit(child):
+444:                     return True
+445:         elif ast.discover is not None:
+446:             for child in path.parent.glob(ast.discover):
+447:                 if child.suffix == ".vertex" and child.resolve() != path and visit(child):
+448:                     return True
+449:         return False
+450:
+451:     return visit(root)
+
+===== COMPLETE C7 PRODUCTION/TEST PATCH =====
+diff --git a/libs/sdk/src/sdk/read.py b/libs/sdk/src/sdk/read.py
+index 63b916b4..d3d59543 100644
+--- a/libs/sdk/src/sdk/read.py
++++ b/libs/sdk/src/sdk/read.py
+@@ -26,7 +26,7 @@ from engine.arrival_contract import (
+     Tick,
+     TickRequest,
+ )
+-from engine.arrival_registry import BackendRegistry, descriptor_for
++from engine.arrival_registry import BackendRegistry
+ from engine.compiler import compile_vertex
+ from engine.declaration import (
+     Unhistorized,
+@@ -50,7 +50,7 @@ from engine.vertex_reader import (
+     vertex_ticks,
+ )
+ from engine.witness import resolve_witness_position
+-from lang import documents_to_vertex, parse_vertex_file, vertex_to_documents
++from lang import documents_to_vertex, vertex_to_documents
+ 
+ from .aggregate import has_local_descriptor_aggregate, open_aggregate_read
+ from .target import (
+@@ -117,30 +117,8 @@ def _open_arrival_read(
+ def _aggregate_aware_arrival_descriptor(
+     target: Path,
+ ) -> tuple[Path, Any, Any] | None:
+-    """Name a descriptor root whose execution shape remains adopted evidence.
+-
+-    The transitional target helper quite properly refuses locator aggregates
+-    for its single-store callers.  Summary, state, and timeline instead open
+-    the descriptor once and decide the shape from its bounded declaration.
+-    This narrow bridge only relaxes that local-shape refusal; explicit role
+-    validation remains the target helper's established rule.
+-    """
+-    try:
+-        return _arrival_descriptor(target)
+-    except TargetUnsupported as refusal:
+-        path = target.resolve()
+-        try:
+-            ast = parse_vertex_file(path)
+-        except Exception:
+-            raise
+-        descriptor = descriptor_for(ast, path)
+-        if descriptor is None or (ast.combine is None and ast.discover is None):
+-            raise
+-        if descriptor.role is None:
+-            raise SdkValueError(
+-                f"Arrival target {path} must declare store role explicitly"
+-            ) from refusal
+-        return path, ast, descriptor
++    """Resolve one descriptor root while deferring shape to adopted evidence."""
++    return _arrival_descriptor(target, allow_aggregate=True)
+ 
+ 
+ def _fact_as_dict(fact: Fact) -> dict[str, Any]:
+diff --git a/libs/sdk/tests/test_arrival_aggregate_resolution.py b/libs/sdk/tests/test_arrival_aggregate_resolution.py
+new file mode 100644
+index 00000000..a315ac93
+--- /dev/null
++++ b/libs/sdk/tests/test_arrival_aggregate_resolution.py
+@@ -0,0 +1,147 @@
++"""Aggregate-aware Arrival reads retain their first parsed root descriptor."""
++
++from __future__ import annotations
++
++import base64
++import json
++from collections.abc import Callable
++from pathlib import Path
++
++import pytest
++from engine.admission import fact_commitment_hash
++from engine.arrival import ArrivalLog
++from engine.arrival_body import body_of_fact_row
++from lang import genesis_payload, parse_vertex_file
++
++import sdk.target as sdk_target
++from sdk import read_state, read_summary, read_timeline, sync_target
++
++
++def _sign(_observer: str, commitment: str) -> str:
++    return "test-signature:" + commitment
++
++
++@pytest.fixture(autouse=True)
++def _isolated_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
++    """Keep every registry witness and file adapter under this fixture."""
++    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
++
++
++def _fact_body(
++    identifier: str, kind: str, ts: float, payload: str, *, observer: str = "alice"
++) -> dict[str, object]:
++    return body_of_fact_row(
++        (
++            identifier,
++            kind,
++            ts,
++            observer,
++            "fixture",
++            payload,
++            _sign(observer, fact_commitment_hash(kind, ts, observer, "fixture", payload)),
++        )
++    )
++
++
++def _root_with_adopted_plain_history(tmp_path: Path) -> tuple[Path, ArrivalLog]:
++    """Build a plain adopted root, then make only its local cache aggregate."""
++    log = ArrivalLog.mint(
++        tmp_path / "original.arrival",
++        observer="physical-custodian",
++        signer=_sign,
++        key=base64.b64encode(b"k" * 32).decode(),
++        at=1.0,
++    )
++    root = tmp_path / "root.vertex"
++    root.write_text(
++        f'name "original"\nstore "{log.path}" backend="file" '
++        f'lineage="{log.lineage()}" role="authority"\n'
++        'loops { note { fold { n "count" } } }\n',
++        encoding="utf-8",
++    )
++    declaration = json.dumps(genesis_payload(parse_vertex_file(root)))
++    log.append(
++        "fact",
++        _fact_body(
++            log.lineage(),
++            "_decl.genesis",
++            2.0,
++            declaration,
++            observer="physical-custodian",
++        ),
++        observer="physical-custodian",
++        origin="fixture",
++        at=2.0,
++        signer=_sign,
++    )
++    log.append(
++        "fact",
++        _fact_body("original-note", "note", 3.0, json.dumps({"value": "original"})),
++        observer="alice",
++        origin="fixture",
++        at=3.0,
++        signer=_sign,
++    )
++    sync_target(root)
++    root.write_text(
++        f'name "original"\nstore "{log.path}" backend="file" '
++        f'lineage="{log.lineage()}" role="authority"\n'
++        'discover "*.member.vertex"\n',
++        encoding="utf-8",
++    )
++    return root, log
++
++
++@pytest.mark.parametrize(
++    ("operation", "assert_original"),
++    [
++        (
++            read_summary,
++            lambda result: (
++                result.fact_total == 1 and result.unfolded_kinds == []
++            ),
++        ),
++        (
++            read_state,
++            lambda result: result.sections["note"]["n"] == 1,
++        ),
++        (
++            read_timeline,
++            lambda result: [event.id for event in result.events] == ["original-note"],
++        ),
++    ],
++)
++def test_aggregate_aware_reads_keep_original_parsed_descriptor(
++    tmp_path: Path,
++    monkeypatch: pytest.MonkeyPatch,
++    operation: Callable[[Path], object],
++    assert_original: Callable[[object], bool],
++) -> None:
++    """Replacing the locator after initial parsing cannot redirect this read."""
++    root, log = _root_with_adopted_plain_history(tmp_path)
++    original_parse = sdk_target.parse_vertex_file
++    calls = 0
++
++    def replace_after_parse(path: Path):
++        nonlocal calls
++        calls += 1
++        ast = original_parse(path)
++        root.write_text(
++            'name "replacement"\n'
++            'store "missing.arrival" backend="file" '
++            'lineage="replacement" role="authority"\n'
++            'discover "replacement/*.vertex"\n',
++            encoding="utf-8",
++        )
++        return ast
++
++    monkeypatch.setattr(sdk_target, "parse_vertex_file", replace_after_parse)
++
++    result = operation(root)
++
++    assert calls == 1
++    assert result.read_path == "arrival"
++    assert result.store is not None and result.store.location == str(log.path)
++    assert result.basis is not None
++    assert result.basis.captured_head.lineage == log.lineage()
++    assert assert_original(result)
+

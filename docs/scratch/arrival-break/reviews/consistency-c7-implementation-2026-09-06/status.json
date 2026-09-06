@@ -1,0 +1,90 @@
+{
+  "model": "claude-fable-5-1[1m]",
+  "effort": "low",
+  "worktree": "/Users/kaygee/Code/loops-wt/arrival-finish",
+  "results": "/Users/kaygee/Code/loops-wt/arrival-finish/docs/scratch/arrival-break/reviews/consistency-c7-implementation-2026-09-06",
+  "due_at": "2026-09-06T22:25:10.185011+00:00",
+  "baseline": "1c37ca65",
+  "scope": "C7 implementation",
+  "jobs": [
+    {
+      "name": "c7-implementation",
+      "packet": "/Users/kaygee/Code/loops-wt/arrival-finish/docs/scratch/arrival-break/reviews/consistency-c7-implementation-2026-09-06/c7-implementation-prompt.txt",
+      "sha256": "0c52a207c76f9d4ecc6ab5479104a90fee991636eeafb3afa0924ab9d78c4c8f",
+      "sources": {
+        "docs/scratch/arrival-break/consistency-c7-2026-09-06.md": "0003c87272bb33142eb3d0b517f1735aa987ff54f68b00da7ea56e38de67ae96",
+        "docs/scratch/arrival-break/consistency-c7-validation-2026-09-06.md": "bc314a918ffb3c0de81aaee00f981a312f5d3b96a16878618055101bda427679",
+        "docs/scratch/arrival-break/consistency-c7-inspection-notes-2026-09-06.md": "575301c3b013ac75daa1b209549238d83171101587972102bc518ff1237eb752",
+        "docs/scratch/arrival-break/consistency-c7-resolution-notes-2026-09-06.md": "313afdc9b8b6f78c16485efc25977d0260117fc18298ad0b423e73c494b679b1",
+        "docs/scratch/arrival-break/consistency-c7-audit-notes-2026-09-06.md": "8cc5989eb616dbd5c356283be0ea4b7015db325c6888eb7fbdd90ee629fc55c8",
+        "libs/sdk/src/sdk/target.py": "5e7dbeb993dc0788d242749b7730419e349af8418d4b659134d7180c72841dc8",
+        "libs/sdk/src/sdk/declare.py": "afe6a0aaaad3667c85209ee378d1444db4caef4b64b30141ef988d53b242a5b9",
+        "libs/sdk/src/sdk/types.py": "c1ff576595d20953fe5a328a2c528beec9c085c307b1ef0a3b019e7e1775108e",
+        "libs/sdk/src/sdk/read.py": "7db73bf6c487abf0f59502b091eedf652a84fd0aaf0bfee0ce5066c50376d161",
+        "libs/engine/src/engine/arrival_registry.py": "33e80522d0919a05ced14360c6bf28a3bb049a7f7fda7d12eb11b49f302a2113",
+        "libs/engine/src/engine/arrival_consumer.py": "9bbbafef0b17614ec945d5565fd71c0306ad7459c1d167360205e930dbd2ddc4",
+        "libs/engine/src/engine/declaration.py": "565a1b661ccaae1ed21ae38b53c245a4811c6629ac4143a2dd1ec399a0161b1b",
+        "libs/sdk/tests/test_arrival_inspect.py": "c5b7277512ddfe910bc555610977950d395d4ae6eddaa46362a1ce81f56ceaf5",
+        "libs/sdk/tests/test_arrival_inspect_contract.py": "9de038506f3a9e23c630245daf1571fabf731966c9691cab38d2195a4247d0fb",
+        "libs/sdk/tests/test_target.py": "3922ee2ef35c64101cf5c4da996ac8b8700f49ae9937989e7cc3e5dacb3c0c66",
+        "libs/sdk/tests/test_types.py": "ce48a6f443cd17748e5b84739843156cd2a4523a1837726f3aabb9984728d72d"
+      },
+      "status": "reviewed-awaiting-triage",
+      "started_at": "2026-09-06T22:25:23.394917+00:00",
+      "effort": "low",
+      "source_drift": [],
+      "command": [
+        "/Users/kaygee/.local/bin/claude",
+        "-p",
+        "--safe-mode",
+        "--model",
+        "claude-fable-5-1[1m]",
+        "--effort",
+        "low",
+        "--no-session-persistence",
+        "--tools",
+        "",
+        "--output-format",
+        "json"
+      ],
+      "returncode": 0,
+      "model_usage": {
+        "claude-haiku-4-5-20251001": {
+          "inputTokens": 27324,
+          "outputTokens": 15,
+          "cacheReadInputTokens": 0,
+          "cacheCreationInputTokens": 0,
+          "webSearchRequests": 0,
+          "costUSD": 0.027399,
+          "contextWindow": 200000,
+          "maxOutputTokens": 32000,
+          "thinkingTokens": 0,
+          "canonicalModel": "claude-haiku-4-5",
+          "provider": "firstParty",
+          "costBasis": "list"
+        },
+        "claude-fable-5-1": {
+          "inputTokens": 2,
+          "outputTokens": 3003,
+          "cacheReadInputTokens": 3264,
+          "cacheCreationInputTokens": 37215,
+          "webSearchRequests": 0,
+          "costUSD": 0.895286,
+          "contextWindow": 1000000,
+          "maxOutputTokens": 64000,
+          "thinkingTokens": 1683,
+          "canonicalModel": "claude-fable-5-1",
+          "provider": "firstParty",
+          "costBasis": "list"
+        }
+      },
+      "response_subtype": "success",
+      "finished_at": "2026-09-06T22:26:02.772168+00:00"
+    }
+  ],
+  "status": "reviews-finished-awaiting-triage",
+  "pid": 87011,
+  "updated_at": "2026-09-06T22:26:02.772173+00:00",
+  "started_at": "2026-09-06T22:25:23.394749+00:00",
+  "finished_at": "2026-09-06T22:26:02.772465+00:00"
+}

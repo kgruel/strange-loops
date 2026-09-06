@@ -1,0 +1,2127 @@
+You are Fable 5.1 at LOW effort conducting an adversarial implementation review of C7 bounded aggregate declaration inspection. Static packet only: no tools, do not claim test execution. Return ACCEPT or REVISE with concrete blockers (severity, counterexample, source/line) and optional notes. Keep output under 1800 words.
+
+Selected contract: inspect only root declaration topology. Descriptor-backed roots get one CURRENT root H/P/G and effective declaration bounded to that snapshot; no member resolution, discover glob, member opens, or synthetic aggregate Head. Local/effective shape disagreement must work in both directions. Explicit role checks and opaque registry injection remain. Default/private and public target resolution restrictions remain except purpose-specific inspection opt-in. Storeless aggregate root returns frozen local semantic evidence and no custody basis. This is declared topology, not recursive graph validation. Existing legacy behavior stays compatibility-only. D0/D2 credential work and C9 legacy removal are out of scope.
+
+Review actual code/tests, especially descriptor gating, local/effective topology, storeless classification, frozen local evidence, root resource lifetime, CURRENT failures, absence of member opens, default reader/writer behavior, DTO semantics. Existing resolver returns None on parse errors and existing legacy inspection reports syntax-invalid; do not treat that established behavior alone as a new bypass without an actual open/authority consequence. Registry attestation may write witnesses; no zero-filesystem-write guarantee. Semantic fingerprints are not byte hashes.
+
+
+===== docs/scratch/arrival-break/consistency-c7-2026-09-06.md =====
+
+1: # C7: bounded aggregate declaration inspection
+2:
+3: Status: implementation and final validation complete; external review pending
+4: on `arrival/finish`, based on C6 checkpoint
+5: `1c37ca65`. Sol owns descriptor resolution, Terra inspection/DTOs and integration
+6: tests, Luna independently audits and validates, and root owns contract decisions
+7: and final Fable-low review triage. Nothing has been committed or pushed for C7.
+8:
+9: ## Contract
+10:
+11: `inspect_declaration` inspects a root declaration. For a descriptor-backed root,
+12: it opens that root once through the supplied registry, earns a CURRENT bounded
+13: snapshot, and reports the effective declaration from that snapshot. Its basis
+14: is the root's H/P/G. It does not expand combine names, glob discover patterns,
+15: open members, or claim a complete aggregate topology or global Head.
+16:
+17: Inspection explicitly opts into local aggregate descriptor resolution and
+18: effective aggregate declaration reconstruction. Default target resolution and
+19: other single-store operations keep their existing restrictions. Explicit
+20: descriptor roles remain mandatory; missing roles refuse before opening.
+21:
+22: The v2 inspection DTO gains additive local/effective combine and discover
+23: fields. Combine entries preserve order, names and aliases; discover retains
+24: the literal pattern. Null and an explicitly empty combine remain distinct.
+25: These fields describe declared references, not authenticated member evidence.
+26: Both local-aggregate/effective-plain and local-plain/effective-aggregate roots
+27: are valid inspection inputs; the effective fields follow captured history.
+28:
+29: A storeless aggregate has no adopted root custody to capture. Inspection uses
+30: one retained parsed local definition, returns `read_path="local-frozen"`, no
+31: store or basis, and an explicitly local status. Local/effective semantic
+32: fingerprints and shape may coincide because that frozen definition is the
+33: only interpretation available. A semantic fingerprint does not claim exact
+34: file bytes or a receipt history. No child availability or validity is asserted.
+35:
+36: Existing non-storeless legacy inspection remains a compatibility path.
+37: Ordinary descriptor attestation may advance witness evidence; inspection does
+38: not promise zero filesystem writes or authorize projection repair.
+39:
+40: ## Native review corrections
+41:
+42: Root and Sol identified a file-replacement race in the first storeless draft:
+43: discarding a no-descriptor AST and parsing again could redirect inspection
+44: through legacy probing. The shared `_arrival_definition` helper now retains
+45: the parsed root even when it has no descriptor. Inspection uses that same AST
+46: to choose and render the storeless path before any legacy probe. Descriptor
+47: absence alone is insufficient: a legacy stored root also has no descriptor,
+48: so local-frozen admission separately requires `ast.store is None`.
+49:
+50: Storeless local/effective combine lists are independently detached so mutating
+51: one exposed view cannot mutate the other. The DTO remains shallowly frozen,
+52: as before; its lists are not advertised as immutable. New optional fields
+53: follow the existing fields to preserve positional construction compatibility.
+54:
+55: ## Acceptance and scope
+56:
+57: Focused integration tests must exercise both topology drift directions,
+58: literal combine aliases/discover patterns, root-only registry use and closure,
+59: storeless evidence, explicit-role refusal, and CURRENT absent/behind refusal.
+60: Existing SDK aggregate reads, single-store readers/writers and DTO serialization
+61: must remain compatible. Full SDK and architecture checks cover the composition
+62: change; engine implementation is not expected to change.
+63:
+64: This does not add recursive graph validation, aggregate entity/fact inspection,
+65: an aggregate custody basis, credential bindings (D0/D2), or legacy retirement
+66: (C9). A missing member can be declared and inspected successfully; opening an
+67: aggregate read remains the operation that needs member evidence.
+68:
+69: ## Evidence
+70:
+71: - [Inspection implementation notes](consistency-c7-inspection-notes-2026-09-06.md)
+72: - [Resolution notes](consistency-c7-resolution-notes-2026-09-06.md)
+73: - [Independent audit](consistency-c7-audit-notes-2026-09-06.md)
+74: - [Validation](consistency-c7-validation-2026-09-06.md)
+75:
+76: Focused target checks passed (23), as did inspection/DTO checks (27) and the
+77: independent contract tests (5). Final SDK validation passed **559**, architecture
+78: **101**, and scoped Ruff passed. Final source/test hashes match before and after
+79: the SDK run. Engine source is unchanged.
+80:
+81: Early independent tests omitted state isolation and created four synthetic
+82: test witness journals plus four shared binding rows in the default user state
+83: directory. The final tests use an autouse temporary-state fixture. The
+84: [validation report](consistency-c7-validation-2026-09-06.md) records the artifacts;
+85: they were preserved without rewriting the shared witness journal. No Arrival
+86: operation was directed at real project stores.
+
+===== docs/scratch/arrival-break/consistency-c7-validation-2026-09-06.md =====
+
+1: # C7 independent validation
+2:
+3: Validation was run in `/Users/kaygee/Code/loops-wt/arrival-finish` after the
+4: inspection source and tests were frozen. Engine production is unchanged by
+5: C7.
+6:
+7: ## Results
+8:
+9: From `libs/sdk`:
+10:
+11: ```text
+12: uv run pytest -q
+13: 559 passed in 19.32s
+14:
+15: uv run ruff check src/sdk/declare.py src/sdk/target.py src/sdk/types.py \
+16:   tests/test_arrival_inspect.py tests/test_target.py tests/test_types.py \
+17:   tests/test_arrival_inspect_contract.py
+18: All checks passed!
+19: ```
+20:
+21: The independent contract file also passes in isolation:
+22:
+23: ```text
+24: uv run pytest -q tests/test_arrival_inspect_contract.py
+25: 5 passed in 0.19s
+26: ```
+27:
+28: From the worktree root, architecture validation passed:
+29:
+30: ```text
+31: uv run pytest tests/architecture -q
+32: 101 passed in 5.48s
+33: ```
+34:
+35: The architecture run occurred before the final test-only sentinel edit; no
+36: production or architecture-sensitive import changed afterward. The raw logs
+37: are retained under `/tmp/loops-arrival-c7-2026-09-06/validation/`:
+38:
+39: - `sdk-full-final.txt`
+40: - `architecture-full.txt`
+41: - `ruff-sdk-final.txt`
+42: - `hashes-before-final.txt`
+43: - `hashes-after-final.txt`
+44:
+45: The final source/test hashes in `hashes-after-final.txt` are unchanged from
+46: `hashes-before-final.txt`, because the final validation rerun followed the
+47: last test edit. The independent test file was edited once after its first
+48: focused run to add the required `XDG_STATE_HOME` isolation fixture and once
+49: to add a `Path.glob` sentinel; the first unisolated run is disclosed below.
+50:
+51: ## Acceptance evidence
+52:
+53: `test_arrival_inspect_contract.py` covers both local/effective aggregate
+54: directions through one opaque registered root. The opener records one exact
+55: root locator, rejects any member locator, and the test patches `Path.glob` so
+56: discover expansion fails immediately. Query and ledger closure are observed
+57: on success and when effective declaration resolution refuses; snapshot closure
+58: is additionally verified by source inspection of `OpenedRead.close`, which
+59: closes snapshot, query, and ledger idempotently.
+60:
+61: Role and unknown-backend cases patch the legacy probe to fail if reached.
+62: Storeless discover inspection patches both `probe_target` and
+63: `load_declaration_status` to fail, proving the frozen local branch does not
+64: consult legacy storage. Results retain `store=None`/`basis=None` for that
+65: branch and serialize under `allow_nan=False`; literal null topology fields
+66: remain distinct from ordered combine evidence.
+67:
+68: The owner tests cover effective/local topology drift, aliases, changing-file
+69: detachment, current projection refusals and byte preservation. The shared
+70: `_arrival_definition` parser (`sdk/target.py:62-110`) retains one parsed AST,
+71: including valid storeless roots, so inspection does not reparse before its
+72: frozen branch or probe a replacement residence.
+73:
+74: ## Unisolated test disclosure
+75:
+76: Before the test isolation fixture was added, early focused runs created four
+77: temporary test lineage journals in the user's default attestation state and
+78: four corresponding entries in its shared bindings journal:
+79:
+80: ```text
+81: /Users/kaygee/.local/state/loops/heads/01M1WCGR8JG2900Y6AVXQ8W4K6.jsonl
+82: /Users/kaygee/.local/state/loops/heads/01M1WCH8971C4KKD31WFRHMX09.jsonl
+83: /Users/kaygee/.local/state/loops/heads/01M1WCH89P6JJSMAKWVCFCJAH1.jsonl
+84: /Users/kaygee/.local/state/loops/heads/01M1WCH89ZZFCW359GAHFXQWJN.jsonl
+85: /Users/kaygee/.local/state/loops/heads/bindings.jsonl
+86: ```
+87:
+88: Root independently verified all four binding rows: one uses the initial
+89: `opaque://tenant//root?projection=contract` locator, and three use the
+90: `opaque://tenant//root-test_inspection_*?projection=contract` locators.
+91: Each listed head file contains a header and one test bootstrap observation.
+92: These test artifacts and the shared bindings journal were left intact; no
+93: existing journal was deleted or rewritten. All subsequent focused and full
+94: runs used pytest-scoped `XDG_STATE_HOME` directories. The new test module now
+95: has an autouse isolation fixture. This disclosure concerns synthetic test
+96: witnesses; no Arrival operation was directed at a real project store.
+97:
+98: No C7 blocker was found. The scope remains bounded root inspection: aggregate
+99: member custody, aggregate entity/fact semantics, topology validity and
+100: legacy retirement are outside this result.
+
+===== docs/scratch/arrival-break/consistency-c7-inspection-notes-2026-09-06.md =====
+
+1: # C7: bounded aggregate declaration inspection
+2:
+3: ## Decision
+4:
+5: `inspect_declaration` reports the **root declaration's topology**, not an
+6: aggregate read. A descriptor-bearing root first earns one CURRENT
+7: `OpenedRead`; its effective declaration at that captured root H/P/G selects
+8: whether the result is ordinary or aggregate. It never calls
+9: `open_aggregate_read`, expands combine/discover, opens a member, or returns a
+10: synthetic/global aggregate head.
+11:
+12: Target resolution needs one purpose-specific opt-in:
+13: `_arrival_definition(path, allow_aggregate=True)`, used only by inspection.
+14: It makes one root parse and returns its AST with an optional explicit
+15: descriptor. Inspection chooses descriptor-backed versus storeless from that
+16: same AST; the storeless branch additionally requires `store is None`.
+17: It does not use local `combine`/`discover` to choose a descriptor read
+18: shape. The default single-store descriptor resolver keeps refusing aggregate
+19: locators. An explicit descriptor with a missing role still refuses before any
+20: open.
+21:
+22: ## Result evidence
+23:
+24: Keep `DeclarationInspectionResult` v2 additive. In addition to the current
+25: `is_aggregate`, expose the unexpanded effective root shape:
+26:
+27: - `effective_combine`: ordered entries with `name` and optional `alias`,
+28:   or null;
+29: - `effective_discover`: the literal pattern, or null;
+30: - `local_combine` and `local_discover` with the same form.
+31:
+32: These are declaration evidence only. They do not assert members exist, were
+33: opened, or form a complete topology. Existing local/effective fingerprints
+34: continue to identify the exact parsed documents used for each view. For a
+35: descriptor root, `read_path="arrival"`, `store`, and `basis` remain the
+36: single root descriptor/H/P/G from the one attested read. There is no
+37: `aggregate_members` field or aggregate Head.
+38:
+39: For a storeless aggregate root, parse the target bytes once and construct the existing
+40: inspection fields plus local shape/fingerprint from that AST. Return
+41: `read_path="local-frozen"`, `store=None`, `basis=None`,
+42: `local_status="frozen-local"`, `effective_status="local-only"`, and make
+43: effective shape/fingerprint equal to the retained local evidence. This is
+44: honestly local-only: it has no adopted declaration or CURRENT basis. The
+45: fingerprint is semantic-document evidence, not a claim that an exact file byte
+46: hash was retained. The result must retain plain detached lists/dicts/strings
+47: so a later file edit cannot mutate the returned evidence.
+48:
+49: ## SDK route
+50:
+51: In the explicit-descriptor branch, call
+52: `_open_arrival_read(arrival, registry=registry)` once and, while it is open,
+53: call `_arrival_declaration(locator_ast, path, opened, allow_aggregate=True)`.
+54: Pass its effective AST to the existing inspection-field and topology serializers.
+55: The local AST returned from resolver is the only local comparison input. This
+56: preserves CURRENT refusal and registry error behavior before any legacy probe
+57: or aggregate planner. No read-time materialization or repair is permitted.
+58: Inspection does not write a projection, though opening a registry may perform
+59: the established witness/attestation advancement.
+60:
+61: For a no-descriptor stored vertex, retain current syntax/legacy handling. Only
+62: the already parsed storeless aggregate AST takes the frozen branch; it must not
+63: recursively inspect local children.
+64:
+65: ## Acceptance
+66:
+67: 1. Descriptor root whose local locator is aggregate but captured effective
+68:    declaration is plain: returns one root Arrival basis and plain effective
+69:    shape; a member-open sentinel is untouched.
+70: 2. Descriptor root whose local locator is plain but captured effective
+71:    declaration is aggregate: returns root Arrival basis and its effective
+72:    combine/discover evidence; nonexistent/effectively declared child locations
+73:    do not cause opens.
+74: 3. The two results report both local and effective shapes/fingerprints, proving
+75:    neither local direction silently selects execution topology.
+76: 4. A storeless local aggregate returns `local-frozen`, no basis/store, and
+77:    detached unexpanded evidence. Changing the source file after return changes
+78:    no returned value.
+79: 5. Existing explicit-role validation and missing/behind CURRENT-projection
+80:    refusals remain before legacy fallback; an injected unknown backend remains
+81:    an adapter refusal, not a legacy result.
+82:
+83: This slice deliberately does not promise topology validity, member custody,
+84: or aggregate state/fold semantics.
+
+===== docs/scratch/arrival-break/consistency-c7-resolution-notes-2026-09-06.md =====
+
+1: # C7 target-resolution notes
+2:
+3: The descriptor resolver had one shape policy embedded in its common parsing
+4: path: any explicit Arrival descriptor whose local locator also declared
+5: `combine` or `discover` was refused. That is correct for single-store reads,
+6: writes, sources, transfer, verification, and the public
+7: `resolve_arrival_target` result, but it also prevented declaration inspection
+8: from opening the root store to inspect its bounded effective declaration.
+9:
+10: The narrow parsed-root seam is
+11: `_arrival_definition(target, *, allow_aggregate=False)`. It returns one valid
+12: parsed local AST together with its descriptor, or `descriptor=None` when no
+13: backend is explicit (including storeless and legacy stored roots). Declaration
+14: inspection separately requires `ast.store is None` for local-frozen evidence
+15: and uses this retained definition for both
+16: classification and local evidence, avoiding a second parse that could observe
+17: a different file. The existing `_arrival_descriptor` delegates to this seam,
+18: filters out roots without a descriptor, and preserves its default aggregate refusal for
+19: all existing callers. Inspection explicitly passes `allow_aggregate=True`.
+20: Neither helper discovers or opens members. Inspection supplies no aggregate
+21: head or member basis, only the captured root basis and unexpanded effective
+22: topology.
+23: The public `resolve_arrival_target` remains single-store.
+24:
+25: Descriptor resolution and role enforcement remain unchanged in substance:
+26: the store location is passed through opaquely by `descriptor_for`, and an
+27: explicit role is required. Role validation now precedes the local aggregate
+28: shape policy, so an aggregate descriptor missing its role reports the more
+29: fundamental SDK configuration error instead of the later member-basis refusal.
+30: Malformed roles remain parser failures and therefore follow the existing
+31: malformed-target fallback behavior.
+32:
+33: The caller audit covered SDK read, emit, source, declaration edit, kind,
+34: verification, export, and restore paths. None opts in implicitly. This slice
+35: does not make aggregate entity resolution, aggregate writes, aggregate
+36: transfer, or aggregate verification supported, and it does not decide whether
+37: local or effective aggregate topology controls inspection output.
+
+===== docs/scratch/arrival-break/consistency-c7-audit-notes-2026-09-06.md =====
+
+1: # C7 independent audit: bounded declaration inspection
+2:
+3: This audit checks the C7 contract against the current implementation in the
+4: shared worktree. The inspection operation is a root declaration inspection;
+5: it must not become an aggregate member read or manufacture a global aggregate
+6: head.
+7:
+8: ## Source-backed acceptance conditions
+9:
+10: `sdk.declare.inspect_declaration` now uses the shared
+11: `sdk.target._arrival_definition(..., allow_aggregate=True)` parser and calls
+12: `sdk.read._arrival_declaration(..., allow_aggregate=True)` while one
+13: `_open_arrival_read` context is held (`declare.py:692-737`). This is the right
+14: shape: the root earns one attested CURRENT basis, while the effective
+15: declaration is reconstructed from that root snapshot. The inspection path
+16: does not call `open_aggregate_read`, `capture_aggregate`, member resolution,
+17: or glob expansion. A missing or malformed child therefore remains outside
+18: this operation's I/O surface.
+19:
+20: The target resolver keeps the opt-in narrow (`target.py:62-95`). All other
+21: callers retain the default aggregate refusal. Explicit role validation occurs
+22: before the aggregate policy and before registry open (`target.py:83-94`), so a
+23: missing role is a configuration refusal rather than a member-basis refusal.
+24: An unknown backend still reaches the supplied registry and cannot fall through
+25: to legacy probing.
+26:
+27: The effective and local topology fields are literal root evidence: ordered
+28: combine names/aliases and the discover pattern (`declare.py:857-870`,
+29: `types.py:983-986`). They do not claim member existence or a shared aggregate
+30: basis. This preserves both topology disagreement directions: local aggregate
+31: /effective plain and local plain/effective aggregate. The root basis remains
+32: the only `basis` in the result.
+33:
+34: The storeless aggregate branch is now before `probe_target` and
+35: `load_declaration_status` (`declare.py:739-760,803-841`). It retains one parsed
+36: AST, returns `read_path="local-frozen"`, no store/basis, and creates detached
+37: topology/fingerprint evidence. This prevents legacy probing from opening a
+38: replacement or unrelated store and makes later source-file mutation unable
+39: to mutate the returned result. Plain storeless legacy declarations remain on
+40: the compatibility path by design.
+41:
+42: `_open_arrival_read` closes the returned `OpenedRead` in its `finally` block
+43: (`read.py:95-115`); `OpenedRead.close` is idempotent and quiet for snapshot,
+44: query, and ledger resources (`arrival_consumer.py:52-111`). Thus effective
+45: declaration failures still release the one root open. No member resource is
+46: created or needs closing.
+47:
+48: ## Acceptance evidence and disposition
+49:
+50: The independent contract file exercises both topology disagreement directions
+51: through an opaque registry. It observes exactly one root open and query/ledger
+52: closure on success and effective-declaration refusal. A poisoned `Path.glob`
+53: proves discovery is not expanded. Snapshot closure is source-reviewed through
+54: `OpenedRead.close`, rather than separately instrumented in the tests.
+55:
+56: The storeless discover test poisons both legacy probe and declaration loader.
+57: Missing role and unknown backend tests poison legacy fallback. Existing
+58: inspection tests retain CURRENT absent/behind refusal with custody/index byte
+59: preservation; owner tests add aliases, file-replacement detachment and legacy
+60: stored-aggregate compatibility. JSON serialization covers the independent
+61: results and storeless combine result. Null topology and nonempty ordered
+62: combine entries are exercised; the parser forbids an empty local combine, so
+63: there is no claim of a public empty-combine integration test.
+64:
+65: Final focused independent validation, from `libs/sdk`:
+66:
+67: ```text
+68: uv run pytest -q tests/test_arrival_inspect_contract.py
+69: 5 passed in 0.19s
+70: ```
+71:
+72: Final package validation and the early unisolated test-run disclosure are in
+73: [the validation report](consistency-c7-validation-2026-09-06.md). Engine source
+74: is unchanged by this slice.
+75:
+76: ## Limits and compatibility boundaries
+77:
+78: This slice does not validate aggregate entity/fact semantics, member custody,
+79: aggregate state/fold behavior, topology validity, credential mapping, or
+80: legacy retirement. Opening an aggregate read remains the operation that may
+81: resolve members and require per-member evidence. Inspection can report a
+82: declared child that does not exist. Attestation/witness advancement during
+83: the single root open remains an established custody behavior; "inspection"
+84: does not mean zero journal writes.
+
+===== libs/sdk/src/sdk/target.py =====
+
+1: """Target resolution and probing."""
+2:
+3: from __future__ import annotations
+4:
+5: import os
+6: from pathlib import Path
+7: from typing import Any
+8:
+9: from engine.arrival_contract import StoreDescriptor
+10: from engine.arrival_registry import descriptor_for
+11: from engine.probe import TargetInfo, probe_target
+12: from lang import parse_vertex_file, resolve_vertex
+13:
+14: from .types import (
+15:     ArrivalTarget,
+16:     SdkValueError,
+17:     StoreDescriptorInfo,
+18:     TargetNotFound,
+19:     TargetUnsupported,
+20: )
+21:
+22: __all__ = ["resolve_target", "resolve_arrival_target", "discover_targets", "TargetInfo"]
+23:
+24: _IGNORE_DIRS = frozenset(
+25:     {
+26:         ".git",
+27:         ".venv",
+28:         "__pycache__",
+29:         ".pytest_cache",
+30:         ".ruff_cache",
+31:         ".hypothesis",
+32:         ".gemini",
+33:         ".claude",
+34:         ".subtask",
+35:         ".uv-cache",
+36:         "node_modules",
+37:     }
+38: )
+39:
+40:
+41: def resolve_target(target: Path | str) -> TargetInfo:
+42:     """Resolve and probe a target path without modifying it or opening SQLite.
+43:
+44:     Returns `TargetInfo` describing target type, canonical path, and mode.
+45:     Raises `TargetNotFound` if the path doesn't exist, or `TargetUnsupported`
+46:     if the target cannot be classified as a loops artifact.
+47:     """
+48:     path = Path(target).resolve()
+49:     if not path.exists():
+50:         raise TargetNotFound(f"target path does not exist: {path}")
+51:
+52:     info = probe_target(path)
+53:     if info.target_type == "unknown":
+54:         raise TargetUnsupported(
+55:             f"target {path} is not a recognized loops artifact "
+56:             "(accepted: .vertex, .jsonl, .db, .sqlite)"
+57:         )
+58:
+59:     return info
+60:
+61:
+62: def _arrival_definition(
+63:     target: Path | str, *, allow_aggregate: bool = False
+64: ) -> tuple[Path, Any, StoreDescriptor | None] | None:
+65:     """Parse one Arrival-capable root without probing or opening its residence.
+66:
+67:     ``TargetInfo`` is a legacy filesystem classification and necessarily turns
+68:     a store spelling into a ``Path``. Descriptor resolution instead parses the
+69:     vertex locator directly, so another backend's DSN or service URL remains
+70:     byte-for-byte opaque until that named adapter receives it. Aggregate shape
+71:     remains refused by default; declaration inspection may opt in because it
+72:     reports bounded root structure without claiming one basis for the aggregate.
+73:
+74:     A valid storeless vertex retains its parsed AST with ``descriptor=None`` so
+75:     a structural caller can make its descriptor/storeless decision from these
+76:     same bytes. Malformed and non-vertex targets retain the legacy ``None``
+77:     classification.
+78:     """
+79:     path = Path(target).resolve()
+80:     if path.suffix.lower() != ".vertex":
+81:         return None
+82:     if not path.exists():
+83:         raise TargetNotFound(f"target path does not exist: {path}")
+84:     try:
+85:         ast = parse_vertex_file(path)
+86:     except Exception:
+87:         return None  # the legacy resolver owns malformed-target classification
+88:     descriptor = descriptor_for(ast, path)
+89:     if descriptor is None:
+90:         return path, ast, None
+91:     if descriptor.role is None:
+92:         raise SdkValueError(
+93:             f"Arrival target {path} must declare store role explicitly"
+94:         )
+95:     if not allow_aggregate and (ast.combine is not None or ast.discover is not None):
+96:         raise TargetUnsupported(
+97:             f"Arrival target {path} is an aggregate; member-basis reads are not "
+98:             "implemented in this single-store stage"
+99:         )
+100:     return path, ast, descriptor
+101:
+102:
+103: def _arrival_descriptor(
+104:     target: Path | str, *, allow_aggregate: bool = False
+105: ) -> tuple[Path, Any, StoreDescriptor] | None:
+106:     """Resolve and require an explicitly declared Arrival descriptor."""
+107:     resolved = _arrival_definition(target, allow_aggregate=allow_aggregate)
+108:     if resolved is None:
+109:         return None
+110:     path, ast, descriptor = resolved
+111:     if descriptor is None:
+112:         return None
+113:     return path, ast, descriptor
+114:
+115:
+116: def _refuse_arrival_aggregate_members(target: Path | str) -> None:
+117:     """Keep legacy aggregate composition from opening descriptor members."""
+118:     root = Path(target).resolve()
+119:     if root.suffix.lower() != ".vertex" or not root.exists():
+120:         return
+121:
+122:     config_home = Path(
+123:         os.environ.get(
+124:             "LOOPS_HOME",
+125:             Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "loops",
+126:         )
+127:     )
+128:     visited: set[Path] = set()
+129:
+130:     def visit(path: Path) -> None:
+131:         path = path.resolve()
+132:         if path in visited or not path.exists():
+133:             return
+134:         visited.add(path)
+135:         try:
+136:             ast = parse_vertex_file(path)
+137:         except Exception:
+138:             return  # legacy resolver reports malformed targets in its own taxonomy
+139:
+140:         if path != root and ast.store_backend is not None:
+141:             raise TargetUnsupported(
+142:                 f"aggregate target {root} includes descriptor-backed member {path}; "
+143:                 "member-basis Arrival reads are not implemented"
+144:             )
+145:
+146:         members: list[Path] = []
+147:         if ast.discover is not None:
+148:             members.extend(
+149:                 match.resolve()
+150:                 for match in sorted(path.parent.glob(ast.discover))
+151:                 if match.suffix.lower() == ".vertex" and match.resolve() != path
+152:             )
+153:         elif ast.combine is not None:
+154:             for entry in ast.combine:
+155:                 member = resolve_vertex(entry.name, config_home)
+156:                 if not member.is_absolute():
+157:                     member = (path.parent / member).resolve()
+158:                 members.append(member)
+159:         for member in members:
+160:             visit(member)
+161:
+162:     visit(root)
+163:
+164:
+165: def resolve_arrival_target(target: Path | str) -> ArrivalTarget:
+166:     """Resolve the supported descriptor-first Arrival target.
+167:
+168:     Bare stores and vertices without ``backend=`` remain legacy inputs. They
+169:     are deliberately refused here instead of being inferred from a suffix.
+170:     """
+171:     resolved = _arrival_descriptor(target)
+172:     if resolved is None:
+173:         path = Path(target).resolve()
+174:         raise TargetUnsupported(
+175:             f"target {path} does not declare an Arrival backend and role"
+176:         )
+177:     path, ast, descriptor = resolved
+178:     return ArrivalTarget(
+179:         target_path=str(path),
+180:         vertex_name=ast.name,
+181:         store=StoreDescriptorInfo.from_descriptor(descriptor),
+182:     )
+183:
+184:
+185: def discover_targets(
+186:     root_path: Path | str = ".",
+187:     *,
+188:     recursive: bool = True,
+189:     include_bare: bool = True,
+190: ) -> list[TargetInfo]:
+191:     """Discover all Loops targets (vertices and bare stores) within a directory.
+192:
+193:     Parameters:
+194:         root_path: Root directory path to start scanning from.
+195:         recursive: Whether to search subdirectories recursively.
+196:         include_bare: Whether to include bare .jsonl / .db stores.
+197:
+198:     Returns:
+199:         Sorted list of TargetInfo descriptors for all discovered artifacts.
+200:     """
+201:     root = Path(root_path).resolve()
+202:     if not root.exists() or not root.is_dir():
+203:         return []
+204:
+205:     discovered: list[TargetInfo] = []
+206:     seen_paths: set[Path] = set()
+207:
+208:     def _scan_dir(dir_path: Path) -> None:
+209:         try:
+210:             entries = sorted(dir_path.iterdir(), key=lambda p: p.name)
+211:         except OSError:
+212:             return
+213:
+214:         for entry in entries:
+215:             if entry.is_dir():
+216:                 if entry.name in _IGNORE_DIRS or entry.name.startswith("."):
+217:                     continue
+218:                 if recursive:
+219:                     _scan_dir(entry)
+220:             elif entry.is_file():
+221:                 suffix = entry.suffix.lower()
+222:                 if suffix == ".vertex":
+223:                     try:
+224:                         info = resolve_target(entry)
+225:                         if entry not in seen_paths:
+226:                             seen_paths.add(entry)
+227:                             discovered.append(info)
+228:                     except Exception:
+229:                         continue
+230:                 elif include_bare and suffix in (".jsonl", ".db", ".sqlite"):
+231:                     # Avoid adding .loops/data derived indices
+232:                     if ".loops" in entry.parts:
+233:                         continue
+234:                     try:
+235:                         info = resolve_target(entry)
+236:                         if entry not in seen_paths:
+237:                             seen_paths.add(entry)
+238:                             discovered.append(info)
+239:                     except Exception:
+240:                         continue
+241:
+242:     _scan_dir(root)
+243:     discovered.sort(key=lambda t: str(t.canonical_path) if t.canonical_path else "")
+244:     return discovered
+
+===== libs/sdk/src/sdk/declare.py =====
+
+669: def inspect_declaration(
+670:     target: Path | str,
+671:     *,
+672:     registry: BackendRegistry | None = None,
+673: ) -> DeclarationInspectionResult:
+674:     """Inspect a .vertex declaration without materializing its projection.
+675:
+676:     Parameters:
+677:         target: Path to the .vertex file.
+678:         registry: Optional Arrival backend registry used for descriptor opens.
+679:
+680:     Returns:
+681:         DeclarationInspectionResult containing AST metadata, admission rules, and syntax health.
+682:     """
+683:     path = Path(target).resolve()
+684:     if not path.exists():
+685:         raise TargetNotFound(f"target path does not exist: {path}")
+686:
+687:     # A descriptor is residence, not a legacy probe hint. Establish its
+688:     # attested bounded snapshot before considering the compatibility branch.
+689:     from .read import _arrival_declaration, _open_arrival_read
+690:     from .target import _arrival_definition
+691:
+692:     definition = _arrival_definition(path, allow_aggregate=True)
+693:     if definition is not None and definition[2] is not None:
+694:         definition_path, definition_ast, descriptor = definition
+695:         arrival = (definition_path, definition_ast, descriptor)
+696:         with _open_arrival_read(arrival, registry=registry) as (
+697:             locator_ast,
+698:             descriptor,
+699:             opened,
+700:         ):
+701:             effective_ast, effective_status, _facts, _own_lineage = _arrival_declaration(
+702:                 locator_ast, path, opened, allow_aggregate=True
+703:             )
+704:             local_fingerprint = _document_fingerprint(locator_ast)
+705:             effective_fingerprint = _document_fingerprint(effective_ast)
+706:             declared_kinds, declared_observers, cadence_ticks, strict, is_aggregate = (
+707:                 _inspection_fields(effective_ast)
+708:             )
+709:             local_combine, local_discover = _inspection_topology(locator_ast)
+710:             effective_combine, effective_discover = _inspection_topology(effective_ast)
+711:             return DeclarationInspectionResult(
+712:                 read_path="arrival",
+713:                 store=StoreDescriptorInfo.from_descriptor(descriptor),
+714:                 basis=opened.basis,
+715:                 target_path=str(path),
+716:                 name=effective_ast.name,
+717:                 status=effective_status,
+718:                 local_status=(
+719:                     "matches-effective"
+720:                     if local_fingerprint == effective_fingerprint
+721:                     else "drifted"
+722:                 ),
+723:                 effective_status=effective_status,
+724:                 local_fingerprint=local_fingerprint,
+725:                 effective_fingerprint=effective_fingerprint,
+726:                 store_mode=descriptor.backend,
+727:                 store_path=descriptor.location,
+728:                 declared_kinds=declared_kinds,
+729:                 declared_observers=declared_observers,
+730:                 cadence_ticks=cadence_ticks,
+731:                 strict=strict,
+732:                 is_aggregate=is_aggregate,
+733:                 local_combine=local_combine,
+734:                 local_discover=local_discover,
+735:                 effective_combine=effective_combine,
+736:                 effective_discover=effective_discover,
+737:                 syntax_valid=True,
+738:                 errors=[],
+739:             )
+740:
+741:     # A valid storeless aggregate has no adopted declaration to consult. Its
+742:     # root AST is the exact one just parsed by the target resolver, avoiding a
+743:     # second file read before a legacy probe could observe replacement bytes.
+744:     if (
+745:         definition is not None
+746:         and definition[2] is None
+747:         and definition[1].store is None
+748:         and (definition[1].combine is not None or definition[1].discover is not None)
+749:     ):
+750:         return _frozen_local_aggregate_inspection(definition[0], definition[1])
+751:
+752:     probe = probe_target(path)
+753:     if probe.target_type != "vertex":
+754:         raise SdkValueError(
+755:             f"inspect_declaration requires a .vertex target, got {probe.target_type}"
+756:         )
+757:
+758:     errors: list[str] = []
+759:     syntax_valid = True
+760:     file_ast = None
+761:     try:
+762:         file_ast = parse_vertex_file(path)
+763:     except Exception as exc:
+764:         syntax_valid = False
+765:         errors.append(str(exc))
+766:
+767:     decl_status = None
+768:     if syntax_valid:
+769:         try:
+770:             decl_ast, decl_status = load_declaration_status(path)
+771:         except Exception as exc:
+772:             errors.append(str(exc))
+773:
+774:     v_name = getattr(file_ast, "name", path.stem) if file_ast else path.stem
+775:     store_mode = probe.canonical_mode
+776:     store_path = str(probe.canonical_path) if probe.canonical_path else None
+777:
+778:     declared_kinds, declared_observers, cadence_ticks, strict, is_aggregate = _inspection_fields(
+779:         file_ast
+780:     )
+781:     local_combine, local_discover = _inspection_topology(file_ast)
+782:
+783:     return DeclarationInspectionResult(
+784:         target_path=str(path),
+785:         name=v_name,
+786:         status=decl_status or "uninitialized",
+787:         local_status=decl_status if syntax_valid else "syntax-invalid",
+788:         effective_status=decl_status,
+789:         store_mode=store_mode,
+790:         store_path=store_path,
+791:         declared_kinds=declared_kinds,
+792:         declared_observers=declared_observers,
+793:         cadence_ticks=cadence_ticks,
+794:         strict=strict,
+795:         is_aggregate=is_aggregate,
+796:         local_combine=local_combine,
+797:         local_discover=local_discover,
+798:         syntax_valid=syntax_valid,
+799:         errors=errors,
+800:     )
+803: def _frozen_local_aggregate_inspection(
+804:     path: Path, ast: Any
+805: ) -> DeclarationInspectionResult:
+806:     """Return storeless aggregate topology from one retained local AST."""
+807:     declared_kinds, declared_observers, cadence_ticks, strict, is_aggregate = (
+808:         _inspection_fields(ast)
+809:     )
+810:     combine, discover = _inspection_topology(ast)
+811:     fingerprint = _document_fingerprint(ast)
+812:     return DeclarationInspectionResult(
+813:         read_path="local-frozen",
+814:         target_path=str(path),
+815:         name=ast.name,
+816:         status="local-only",
+817:         local_status="frozen-local",
+818:         effective_status="local-only",
+819:         local_fingerprint=fingerprint,
+820:         effective_fingerprint=fingerprint,
+821:         declared_kinds=declared_kinds,
+822:         declared_observers=declared_observers,
+823:         cadence_ticks=cadence_ticks,
+824:         strict=strict,
+825:         is_aggregate=is_aggregate,
+826:         local_combine=combine,
+827:         local_discover=discover,
+828:         effective_combine=None if combine is None else [dict(entry) for entry in combine],
+829:         effective_discover=discover,
+830:         syntax_valid=True,
+831:         errors=[],
+832:     )
+835: def _inspection_fields(ast: Any | None) -> tuple[list[str], list[str], list[str], bool, bool]:
+836:     """Extract public declaration fields from one already-chosen AST."""
+837:     if ast is None:
+838:         return [], [], [], False, False
+839:     return (
+840:         sorted(ast.loops.keys()) if getattr(ast, "loops", None) else [],
+841:         (
+842:             sorted(observer.name for observer in ast.observers)
+843:             if getattr(ast, "observers", None)
+844:             else []
+845:         ),
+846:         sorted(tick.name for tick in ast.cadence) if getattr(ast, "cadence", None) else [],
+847:         getattr(ast, "strict", False),
+848:         getattr(ast, "combine", None) is not None or getattr(ast, "discover", None) is not None,
+849:     )
+852: def _inspection_topology(
+853:     ast: Any | None,
+854: ) -> tuple[list[dict[str, str | None]] | None, str | None]:
+855:     """Serialize only one declaration root's unexpanded aggregate shape."""
+856:     if ast is None:
+857:         return None, None
+858:     combine = getattr(ast, "combine", None)
+859:     return (
+860:         None
+861:         if combine is None
+862:         else [{"name": entry.name, "alias": entry.alias} for entry in combine],
+863:         getattr(ast, "discover", None),
+864:     )
+867: def _document_fingerprint(ast: Any) -> str:
+868:     """Hash semantic declaration documents, deliberately excluding residence."""
+869:     from lang import vertex_to_documents
+870:
+871:     documents = vertex_to_documents(ast)
+872:     canonical = json.dumps(
+873:         [document.as_json() for document in documents],
+874:         sort_keys=True,
+875:         separators=(",", ":"),
+876:     )
+877:     return "sha256:" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+===== libs/sdk/src/sdk/types.py =====
+
+962: class DeclarationInspectionResult:
+963:     """Root declaration evidence without aggregate-member capture.
+964:
+965:     An Arrival result has one root ``basis`` only; unexpanded combine/discover
+966:     fields describe that captured effective root and never assert member
+967:     custody. ``read_path="local-frozen"`` has no adopted store or basis and
+968:     reports the one parsed storeless aggregate definition instead.
+969:     """
+970:
+971:     schema: str = "loops.sdk/declaration-inspection/v2"
+972:     read_path: str = "legacy"
+973:     store: StoreDescriptorInfo | None = None
+974:     basis: ReadBasis | None = None
+975:     target_path: str = ""
+976:     name: str = ""
+977:     status: str = ""
+978:     local_status: str | None = None
+979:     effective_status: str | None = None
+980:     local_fingerprint: str | None = None
+981:     effective_fingerprint: str | None = None
+982:     store_mode: str | None = None
+983:     store_path: str | None = None
+984:     declared_kinds: list[str] = field(default_factory=list)
+985:     declared_observers: list[str] = field(default_factory=list)
+986:     cadence_ticks: list[str] = field(default_factory=list)
+987:     strict: bool = False
+988:     is_aggregate: bool = False
+989:     syntax_valid: bool = True
+990:     errors: list[str] = field(default_factory=list)
+991:     local_combine: list[dict[str, str | None]] | None = None
+992:     local_discover: str | None = None
+993:     effective_combine: list[dict[str, str | None]] | None = None
+994:     effective_discover: str | None = None
+995:
+996:     def as_dict(self) -> dict[str, Any]:
+997:         return asdict(self)
+
+===== libs/sdk/src/sdk/read.py =====
+
+95: def _open_arrival_read(
+96:     resolved: tuple[Path, Any, Any],
+97:     *,
+98:     registry: BackendRegistry | None,
+99:     continuation: Continuation | None = None,
+100: ):
+101:     """Open and close one descriptor-first read without exposing custody."""
+102:     from engine.arrival_consumer import open_read
+103:
+104:     _path, ast, descriptor = resolved
+105:     opened = open_read(
+106:         registry if registry is not None else BackendRegistry.with_builtin_backends(),
+107:         descriptor,
+108:         requirement=ProjectionRequirement.CURRENT,
+109:         continuation=continuation,
+110:     )
+111:     try:
+112:         yield ast, descriptor, opened
+113:     finally:
+114:         opened.close()
+117: def _aggregate_aware_arrival_descriptor(
+118:     target: Path,
+119: ) -> tuple[Path, Any, Any] | None:
+120:     """Name a descriptor root whose execution shape remains adopted evidence.
+121:
+122:     The transitional target helper quite properly refuses locator aggregates
+123:     for its single-store callers.  Summary, state, and timeline instead open
+124:     the descriptor once and decide the shape from its bounded declaration.
+125:     This narrow bridge only relaxes that local-shape refusal; explicit role
+126:     validation remains the target helper's established rule.
+127:     """
+128:     try:
+129:         return _arrival_descriptor(target)
+130:     except TargetUnsupported as refusal:
+131:         path = target.resolve()
+132:         try:
+133:             ast = parse_vertex_file(path)
+134:         except Exception:
+135:             raise
+136:         descriptor = descriptor_for(ast, path)
+137:         if descriptor is None or (ast.combine is None and ast.discover is None):
+138:             raise
+139:         if descriptor.role is None:
+140:             raise SdkValueError(
+141:                 f"Arrival target {path} must declare store role explicitly"
+142:             ) from refusal
+143:         return path, ast, descriptor
+216: def _arrival_declaration(
+217:     locator_ast: Any,
+218:     target_path: Path,
+219:     opened: Any,
+220:     *,
+221:     include_user_facts: bool = False,
+222:     allow_aggregate: bool = False,
+223: ) -> tuple[Any, str, tuple[Fact, ...], str]:
+224:     """Resolve effective declarations from the same bounded read snapshot."""
+225:     facts = opened.snapshot.facts(
+226:         FactRequest(
+227:             limit=None,
+228:             kind=None if include_user_facts else "_decl",
+229:             include_internal=True,
+230:             order="oldest",
+231:         )
+232:     ).items
+233:     anchor = opened.snapshot.declaration_anchor
+234:     documents = resolve_declaration_documents_from_snapshot(anchor, facts)
+235:     if documents is None:
+236:         raise SdkError(
+237:             "the Arrival snapshot has no adopted declaration; refusing to "
+238:             "substitute the current vertex file as store history"
+239:         )
+240:     status = "unhistorized" if isinstance(documents, Unhistorized) else "store"
+241:     document_rows = documents.documents if isinstance(documents, Unhistorized) else documents
+242:     effective_ast = documents_to_vertex(
+243:         document_rows,
+244:         path=target_path,
+245:         store=locator_ast.store,
+246:         store_backend=locator_ast.store_backend,
+247:         store_location=locator_ast.store_location,
+248:     )
+249:     if not allow_aggregate and (
+250:         effective_ast.combine is not None or effective_ast.discover is not None
+251:     ):
+252:         raise TargetUnsupported(
+253:             "the bounded Arrival declaration is an aggregate; member-basis reads "
+254:             "are not implemented in this single-store stage"
+255:         )
+256:     if anchor.own_lineage is None:
+257:         raise SdkError("resolved declaration has no own lineage anchor")
+258:     return effective_ast, status, facts, anchor.own_lineage
+
+===== libs/engine/src/engine/arrival_registry.py =====
+
+121: def descriptor_for(
+122:     ast: VertexFile, vertex_path: Path | None = None
+123: ) -> StoreDescriptor | None:
+124:     """Which adapter opens this vertex's store, or None if no adapter does.
+125:
+126:     Two answers, and only the first describes a ledger:
+127:
+128:     **Explicit** — the vertex declared ``backend=``. The declared name wins,
+129:     and there is NO cross-check against the location's suffix. A
+130:     ``backend="file"`` on a ``.duckdb``-named path is legal, because under §02
+131:     the suffix carries no meaning once the backend is declared; adding a "do
+132:     they agree?" check would re-admit inference through the back door on the
+133:     very change that removes it. An unregistered name is not this function's
+134:     to refuse — see :meth:`BackendRegistry.open`.
+135:
+136:     **No descriptor** — a bare legacy store, an aggregate (``combine``), or a
+137:     loops-only vertex has no explicit adapter declaration. Suffix inference
+138:     ends here: a ``.arrival`` suffix does not synthesize ``backend="file"``.
+139:
+140:     ``lineage`` and ``role`` are declaration claims, not grants. The registry
+141:     checks them against the presented genesis and backend capabilities, then
+142:     keeps enforcing them on the returned custody handle.
+143:     """
+144:     if ast.store is None or ast.store_backend is None:
+145:         return None
+146:
+147:     declaration = ast.store_backend
+148:     if declaration.name == FILE_BACKEND:
+149:         # This is the built-in file adapter's interpretation of a location:
+150:         # relative paths are relative to the declaring vertex, never cwd.
+151:         from .residence import canonical_store_path
+152:
+153:         location = str(canonical_store_path(ast.store, vertex_path))
+154:     else:
+155:         # No pathlib round-trip for another adapter. A DSN or service URL is
+156:         # opaque, including repeated slashes and query text.
+157:         if ast.store_location is None:
+158:             raise ValueError(
+159:                 f"non-file backend {declaration.name!r} has no opaque store "
+160:                 "location; construct it by parsing a descriptor declaration"
+161:             )
+162:         location = ast.store_location
+163:
+164:     role = None if declaration.role is None else Profile(declaration.role)
+165:     return StoreDescriptor(
+166:         backend=declaration.name,
+167:         location=location,
+168:         lineage=declaration.lineage,
+169:         role=role,
+170:     )
+
+===== libs/engine/src/engine/arrival_consumer.py =====
+
+52: class OpenedRead:
+53:     """A closeable query snapshot plus its custody-completed read basis.
+54:
+55:     ``_query`` and ``_ledger`` are deliberately private. The former may own
+56:     adapter resources and the latter can append; exposing either would make a
+57:     read opener an authority escape hatch.
+58:     """
+59:
+60:     def __init__(
+61:         self,
+62:         snapshot: QuerySnapshot,
+63:         basis: ReadBasis,
+64:         report: OpenReport,
+65:         _query: object,
+66:         _ledger: object,
+67:     ) -> None:
+68:         self.snapshot = snapshot
+69:         self.basis = basis
+70:         self.report = report
+71:         self._query = _query
+72:         self._ledger = _ledger
+73:         self._closed = False
+74:
+75:     def continuation(
+76:         self, request: FactRequest, page: FactPage
+77:     ) -> Continuation | None:
+78:         """Bind ``page.cursor`` to the exact facts request that produced it."""
+79:         if page.cursor is None:
+80:             return None
+81:         if self.basis.projected_through is None:
+82:             raise ProjectionAbsent("an unrepresented projection cannot continue")
+83:         if self.basis.view_generation is None:
+84:             raise InvalidContinuation(
+85:                 "this query adapter cannot prove a stable derived view for resume"
+86:             )
+87:         return Continuation(
+88:             captured_head=self.basis.captured_head,
+89:             projected_through=self.basis.projected_through,
+90:             request=request,
+91:             cursor=page.cursor,
+92:             view_generation=self.basis.view_generation,
+93:         )
+94:
+95:     def close(self) -> None:
+96:         """Close snapshot, query handle, then custody handle without leaking."""
+97:         if self._closed:
+98:             return
+99:         self._closed = True
+100:         _close_quietly(self.snapshot)
+101:         _close_quietly(self._query)
+102:         _close_quietly(self._ledger)
+103:
+104:     def __enter__(self) -> OpenedRead:
+105:         return self
+106:
+107:     def __exit__(self, *exc: object) -> None:
+108:         self.close()
+120: def open_read(
+121:     registry: BackendRegistry,
+122:     descriptor: StoreDescriptor,
+123:     *,
+124:     requirement: ProjectionRequirement = ProjectionRequirement.CURRENT,
+125:     continuation: Continuation | None = None,
+126: ) -> OpenedRead:
+127:     """Open one descriptor-first, attested, bounded read without writer access."""
+128:     if descriptor.role is None:
+129:         raise NotAuthority(
+130:             "the supported SDK read path requires an explicit descriptor role"
+131:         )
+132:     ledger, query = registry.open(descriptor)
+133:     snapshot: QuerySnapshot | None = None
+134:     try:
+135:         if not isinstance(ledger, AttestedLedger):
+136:             raise TypeError("BackendRegistry.open must return an AttestedLedger")
+137:         report = ledger.opened
+138:         comparison = report.comparison
+139:         if isinstance(comparison, PreGenesis):
+140:             if comparison.ledger_refusal is not None:
+141:                 raise comparison.ledger_refusal
+142:             raise ProjectionAbsent("a pre-genesis ledger has no captured read head")
+143:         if isinstance(comparison, Indeterminate):
+144:             raise comparison.refusal
+145:         if not isinstance(comparison, Compared):  # defensive against future report arms
+146:             raise TypeError(f"unsupported head comparison {comparison!r}")
+147:
+148:         if continuation is None:
+149:             captured = comparison.presented
+150:             represented_from_token = None
+151:         else:
+152:             if continuation.view_generation is None:
+153:                 raise InvalidContinuation(
+154:                     "continuations require a derived-view generation"
+155:                 )
+156:             captured = _head_at(ledger, continuation.captured_head, label="continuation captured")
+157:             represented_from_token = _head_at(
+158:                 ledger, continuation.projected_through, label="continuation represented"
+159:             )
+160:             if represented_from_token.ordinal > captured.ordinal:
+161:                 raise InvalidContinuation(
+162:                     "continuation represented prefix exceeds its captured head"
+163:                 )
+164:
+165:         snapshot = query.open_snapshot(
+166:             captured_head=captured,
+167:             requirement=requirement,
+168:             continuation=continuation,
+169:         )
+170:         watermark = snapshot.represented
+171:         validate_arrival_declaration_anchor(snapshot.declaration_anchor, captured)
+172:         if watermark is None:
+173:             if represented_from_token is not None:
+174:                 raise InvalidContinuation(
+175:                     "projection disappeared since this continuation was issued"
+176:                 )
+177:             basis = ReadBasis(
+178:                 lineage=captured.lineage,
+179:                 captured_head=captured,
+180:                 projected_through=None,
+181:                 view_generation=snapshot.view_generation,
+182:             )
+183:         elif watermark.lineage != captured.lineage:
+184:             raise NotAuthority(
+185:                 f"query snapshot represents {watermark.lineage}, not {captured.lineage}"
+186:             )
+187:         else:
+188:             # The query transaction can observe a projection written after the
+189:             # seam captured H, including while resuming a prior page. Every
+190:             # reported watermark still needs custody membership validation.
+191:             observed = complete_projection_custody(
+192:                 ledger,
+193:                 captured=captured,
+194:                 represented=watermark,
+195:                 lineage_refusal=NotAuthority,
+196:                 conflict_refusal=HeadMismatch,
+197:             )
+198:             if (
+199:                 continuation is not None
+200:                 and snapshot.view_generation != continuation.view_generation
+201:             ):
+202:                 raise InvalidContinuation(
+203:                     "projection view changed since this continuation was issued"
+204:                 )
+205:             if represented_from_token is not None:
+206:                 if watermark.ordinal < represented_from_token.ordinal:
+207:                     raise InvalidContinuation(
+208:                         "projection no longer reaches the continuation prefix"
+209:                     )
+210:                 basis = ReadBasis(
+211:                     lineage=captured.lineage,
+212:                     captured_head=captured,
+213:                     projected_through=represented_from_token,
+214:                     view_generation=snapshot.view_generation,
+215:                 )
+216:             elif watermark.ordinal > captured.ordinal:
+217:                 basis = ReadBasis(
+218:                     lineage=captured.lineage,
+219:                     captured_head=captured,
+220:                     projected_through=captured,
+221:                     view_generation=snapshot.view_generation,
+222:                 )
+223:             else:
+224:                 basis = ReadBasis(
+225:                     lineage=captured.lineage,
+226:                     captured_head=captured,
+227:                     projected_through=observed,
+228:                     view_generation=snapshot.view_generation,
+229:                 )
+230:         return OpenedRead(
+231:             snapshot=snapshot, basis=basis, report=report, _query=query, _ledger=ledger
+232:         )
+233:     except BaseException:
+234:         if snapshot is not None:
+235:             _close_quietly(snapshot)
+236:         _close_quietly(query)
+237:         _close_quietly(ledger)
+238:         raise
+
+===== libs/engine/src/engine/declaration.py =====
+
+221: def resolve_declaration_documents_from_snapshot(
+222:     anchor: DeclarationAnchor, facts: list[Fact] | tuple[Fact, ...]
+223: ) -> list[dict[str, Any]] | None | Unhistorized:
+224:     """Fold declaration documents from one already-bounded query snapshot.
+225:
+226:     This is the pure sibling of :func:`resolve_declaration_documents`. The
+227:     caller supplies internal facts through its query prefix and the exact
+228:     store-local identity anchor observed on that same transaction. It therefore
+229:     never opens SQLite, does not consult a vertex file, and never guesses which
+230:     ``_decl.genesis`` is self from rows that may have arrived by merge.
+231:     """
+232:     internal = sorted(
+233:         (fact for fact in facts if is_internal_kind(fact.kind)),
+234:         key=lambda fact: (fact.arrival_ordinal, fact.arrival_seq),
+235:     )
+236:     if anchor.own_lineage is None:
+237:         if any(fact.kind == DECL_GENESIS for fact in internal):
+238:             raise UnadoptedLineage(
+239:                 "declaration genesis rows occur in this snapshot without an "
+240:                 "own_lineage identity marker; facts cannot identify self"
+241:             )
+242:         return None
+243:     genesis = anchor.genesis
+244:     if genesis is None or genesis.id != anchor.own_lineage or genesis.kind != DECL_GENESIS:
+245:         raise DeclarationResolutionError(
+246:             f"own_lineage marker {anchor.own_lineage!r} has no matching "
+247:             "_decl.genesis row in this snapshot"
+248:         )
+249:     payload = genesis.payload
+250:     protocol = payload.get("protocol", 1)
+251:     if protocol > DECLARATION_PROTOCOL_VERSION:
+252:         raise UnsupportedProtocol(
+253:             f"genesis protocol {protocol} exceeds supported {DECLARATION_PROTOCOL_VERSION}"
+254:         )
+255:     if genesis.arrival_ordinal > max((fact.arrival_ordinal for fact in internal), default=-1):
+256:         return Unhistorized(list(payload.get("documents", ())))
+257:
+258:     docs: dict[tuple[str, str], dict[str, Any]] = {}
+259:     for document in payload.get("documents", ()):
+260:         docs[(document["kind"], document["subject"])] = document
+261:     for fact in internal:
+262:         if fact.kind == DECL_GENESIS:
+263:             continue
+264:         row_payload = fact.payload
+265:         if row_payload.get("lineage") != anchor.own_lineage:
+266:             continue
+267:         if fact.kind in _TOMBSTONE_OF_DEFINED:
+268:             docs.pop((_TOMBSTONE_OF_DEFINED[fact.kind], row_payload.get("subject")), None)
+269:         elif fact.kind in _DEFINED_KINDS:
+270:             subject = row_payload.get("subject")
+271:             docs[(fact.kind, subject)] = {
+272:                 "kind": fact.kind,
+273:                 "subject": subject,
+274:                 "payload": row_payload.get("payload", {}),
+275:             }
+276:     return list(docs.values())
+
+===== COMPLETE C7 PRODUCTION/TEST PATCH =====
+diff --git a/libs/sdk/src/sdk/declare.py b/libs/sdk/src/sdk/declare.py
+index aeff929b..f08171cc 100644
+--- a/libs/sdk/src/sdk/declare.py
++++ b/libs/sdk/src/sdk/declare.py
+@@ -671,7 +671,7 @@ def inspect_declaration(
+     *,
+     registry: BackendRegistry | None = None,
+ ) -> DeclarationInspectionResult:
+-    """Deeply inspect and validate a .vertex declaration without side effects.
++    """Inspect a .vertex declaration without materializing its projection.
+ 
+     Parameters:
+         target: Path to the .vertex file.
+@@ -687,23 +687,27 @@ def inspect_declaration(
+     # A descriptor is residence, not a legacy probe hint. Establish its
+     # attested bounded snapshot before considering the compatibility branch.
+     from .read import _arrival_declaration, _open_arrival_read
+-    from .target import _arrival_descriptor
++    from .target import _arrival_definition
+ 
+-    arrival = _arrival_descriptor(path)
+-    if arrival is not None:
++    definition = _arrival_definition(path, allow_aggregate=True)
++    if definition is not None and definition[2] is not None:
++        definition_path, definition_ast, descriptor = definition
++        arrival = (definition_path, definition_ast, descriptor)
+         with _open_arrival_read(arrival, registry=registry) as (
+             locator_ast,
+             descriptor,
+             opened,
+         ):
+             effective_ast, effective_status, _facts, _own_lineage = _arrival_declaration(
+-                locator_ast, path, opened
++                locator_ast, path, opened, allow_aggregate=True
+             )
+             local_fingerprint = _document_fingerprint(locator_ast)
+             effective_fingerprint = _document_fingerprint(effective_ast)
+             declared_kinds, declared_observers, cadence_ticks, strict, is_aggregate = (
+                 _inspection_fields(effective_ast)
+             )
++            local_combine, local_discover = _inspection_topology(locator_ast)
++            effective_combine, effective_discover = _inspection_topology(effective_ast)
+             return DeclarationInspectionResult(
+                 read_path="arrival",
+                 store=StoreDescriptorInfo.from_descriptor(descriptor),
+@@ -726,10 +730,25 @@ def inspect_declaration(
+                 cadence_ticks=cadence_ticks,
+                 strict=strict,
+                 is_aggregate=is_aggregate,
++                local_combine=local_combine,
++                local_discover=local_discover,
++                effective_combine=effective_combine,
++                effective_discover=effective_discover,
+                 syntax_valid=True,
+                 errors=[],
+             )
+ 
++    # A valid storeless aggregate has no adopted declaration to consult. Its
++    # root AST is the exact one just parsed by the target resolver, avoiding a
++    # second file read before a legacy probe could observe replacement bytes.
++    if (
++        definition is not None
++        and definition[2] is None
++        and definition[1].store is None
++        and (definition[1].combine is not None or definition[1].discover is not None)
++    ):
++        return _frozen_local_aggregate_inspection(definition[0], definition[1])
++
+     probe = probe_target(path)
+     if probe.target_type != "vertex":
+         raise SdkValueError(
+@@ -759,6 +778,7 @@ def inspect_declaration(
+     declared_kinds, declared_observers, cadence_ticks, strict, is_aggregate = _inspection_fields(
+         file_ast
+     )
++    local_combine, local_discover = _inspection_topology(file_ast)
+ 
+     return DeclarationInspectionResult(
+         target_path=str(path),
+@@ -773,11 +793,45 @@ def inspect_declaration(
+         cadence_ticks=cadence_ticks,
+         strict=strict,
+         is_aggregate=is_aggregate,
++        local_combine=local_combine,
++        local_discover=local_discover,
+         syntax_valid=syntax_valid,
+         errors=errors,
+     )
+ 
+ 
++def _frozen_local_aggregate_inspection(
++    path: Path, ast: Any
++) -> DeclarationInspectionResult:
++    """Return storeless aggregate topology from one retained local AST."""
++    declared_kinds, declared_observers, cadence_ticks, strict, is_aggregate = (
++        _inspection_fields(ast)
++    )
++    combine, discover = _inspection_topology(ast)
++    fingerprint = _document_fingerprint(ast)
++    return DeclarationInspectionResult(
++        read_path="local-frozen",
++        target_path=str(path),
++        name=ast.name,
++        status="local-only",
++        local_status="frozen-local",
++        effective_status="local-only",
++        local_fingerprint=fingerprint,
++        effective_fingerprint=fingerprint,
++        declared_kinds=declared_kinds,
++        declared_observers=declared_observers,
++        cadence_ticks=cadence_ticks,
++        strict=strict,
++        is_aggregate=is_aggregate,
++        local_combine=combine,
++        local_discover=discover,
++        effective_combine=None if combine is None else [dict(entry) for entry in combine],
++        effective_discover=discover,
++        syntax_valid=True,
++        errors=[],
++    )
++
++
+ def _inspection_fields(ast: Any | None) -> tuple[list[str], list[str], list[str], bool, bool]:
+     """Extract public declaration fields from one already-chosen AST."""
+     if ast is None:
+@@ -795,6 +849,21 @@ def _inspection_fields(ast: Any | None) -> tuple[list[str], list[str], list[str]
+     )
+ 
+ 
++def _inspection_topology(
++    ast: Any | None,
++) -> tuple[list[dict[str, str | None]] | None, str | None]:
++    """Serialize only one declaration root's unexpanded aggregate shape."""
++    if ast is None:
++        return None, None
++    combine = getattr(ast, "combine", None)
++    return (
++        None
++        if combine is None
++        else [{"name": entry.name, "alias": entry.alias} for entry in combine],
++        getattr(ast, "discover", None),
++    )
++
++
+ def _document_fingerprint(ast: Any) -> str:
+     """Hash semantic declaration documents, deliberately excluding residence."""
+     from lang import vertex_to_documents
+diff --git a/libs/sdk/src/sdk/target.py b/libs/sdk/src/sdk/target.py
+index 33a49ec3..1cf29409 100644
+--- a/libs/sdk/src/sdk/target.py
++++ b/libs/sdk/src/sdk/target.py
+@@ -59,13 +59,22 @@ def resolve_target(target: Path | str) -> TargetInfo:
+     return info
+ 
+ 
+-def _arrival_descriptor(target: Path | str) -> tuple[Path, Any, StoreDescriptor] | None:
+-    """Resolve an explicitly declared descriptor without probing its location.
++def _arrival_definition(
++    target: Path | str, *, allow_aggregate: bool = False
++) -> tuple[Path, Any, StoreDescriptor | None] | None:
++    """Parse one Arrival-capable root without probing or opening its residence.
+ 
+     ``TargetInfo`` is a legacy filesystem classification and necessarily turns
+     a store spelling into a ``Path``. Descriptor resolution instead parses the
+     vertex locator directly, so another backend's DSN or service URL remains
+-    byte-for-byte opaque until that named adapter receives it.
++    byte-for-byte opaque until that named adapter receives it. Aggregate shape
++    remains refused by default; declaration inspection may opt in because it
++    reports bounded root structure without claiming one basis for the aggregate.
++
++    A valid storeless vertex retains its parsed AST with ``descriptor=None`` so
++    a structural caller can make its descriptor/storeless decision from these
++    same bytes. Malformed and non-vertex targets retain the legacy ``None``
++    classification.
+     """
+     path = Path(target).resolve()
+     if path.suffix.lower() != ".vertex":
+@@ -78,16 +87,29 @@ def _arrival_descriptor(target: Path | str) -> tuple[Path, Any, StoreDescriptor]
+         return None  # the legacy resolver owns malformed-target classification
+     descriptor = descriptor_for(ast, path)
+     if descriptor is None:
+-        return None
+-    if ast.combine is not None or ast.discover is not None:
+-        raise TargetUnsupported(
+-            f"Arrival target {path} is an aggregate; member-basis reads are not "
+-            "implemented in this single-store stage"
+-        )
++        return path, ast, None
+     if descriptor.role is None:
+         raise SdkValueError(
+             f"Arrival target {path} must declare store role explicitly"
+         )
++    if not allow_aggregate and (ast.combine is not None or ast.discover is not None):
++        raise TargetUnsupported(
++            f"Arrival target {path} is an aggregate; member-basis reads are not "
++            "implemented in this single-store stage"
++        )
++    return path, ast, descriptor
++
++
++def _arrival_descriptor(
++    target: Path | str, *, allow_aggregate: bool = False
++) -> tuple[Path, Any, StoreDescriptor] | None:
++    """Resolve and require an explicitly declared Arrival descriptor."""
++    resolved = _arrival_definition(target, allow_aggregate=allow_aggregate)
++    if resolved is None:
++        return None
++    path, ast, descriptor = resolved
++    if descriptor is None:
++        return None
+     return path, ast, descriptor
+ 
+ 
+diff --git a/libs/sdk/src/sdk/types.py b/libs/sdk/src/sdk/types.py
+index 5be9d0d9..0c80c77b 100644
+--- a/libs/sdk/src/sdk/types.py
++++ b/libs/sdk/src/sdk/types.py
+@@ -960,7 +960,13 @@ class InitVertexResult:
+ 
+ @dataclass(frozen=True)
+ class DeclarationInspectionResult:
+-    """Deep structural inspection of a .vertex file."""
++    """Root declaration evidence without aggregate-member capture.
++
++    An Arrival result has one root ``basis`` only; unexpanded combine/discover
++    fields describe that captured effective root and never assert member
++    custody. ``read_path="local-frozen"`` has no adopted store or basis and
++    reports the one parsed storeless aggregate definition instead.
++    """
+ 
+     schema: str = "loops.sdk/declaration-inspection/v2"
+     read_path: str = "legacy"
+@@ -982,6 +988,10 @@ class DeclarationInspectionResult:
+     is_aggregate: bool = False
+     syntax_valid: bool = True
+     errors: list[str] = field(default_factory=list)
++    local_combine: list[dict[str, str | None]] | None = None
++    local_discover: str | None = None
++    effective_combine: list[dict[str, str | None]] | None = None
++    effective_discover: str | None = None
+ 
+     def as_dict(self) -> dict[str, Any]:
+         return asdict(self)
+diff --git a/libs/sdk/tests/test_arrival_inspect.py b/libs/sdk/tests/test_arrival_inspect.py
+index 989b13cf..cc8b2a08 100644
+--- a/libs/sdk/tests/test_arrival_inspect.py
++++ b/libs/sdk/tests/test_arrival_inspect.py
+@@ -12,9 +12,12 @@ from engine.arrival import ArrivalLog
+ from engine.arrival_body import body_of_fact_row
+ from engine.arrival_contract import Head, ProjectionAbsent, ProjectionBehind
+ from engine.arrival_file_backend import FileQuery
++from engine.arrival_maintenance import sync_projection
++from engine.arrival_registry import BackendRegistry, descriptor_for
+ from engine.residence import index_path_for
+ from lang import genesis_payload, parse_vertex_file
+ 
++import sdk.target as sdk_target
+ from sdk import inspect_declaration, sync_target
+ 
+ 
+@@ -81,6 +84,47 @@ def _arrival_target(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Pa
+     return vertex, log
+ 
+ 
++def _arrival_discover_target(
++    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
++) -> tuple[Path, ArrivalLog]:
++    """Create an adopted descriptor root whose effective docs discover members."""
++    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
++    log = ArrivalLog.mint(
++        tmp_path / "inspect-discover.arrival",
++        observer="physical-custodian",
++        signer=_sign,
++        key=base64.b64encode(b"k" * 32).decode(),
++        at=1.0,
++    )
++    vertex = tmp_path / "inspect-discover.vertex"
++    vertex.write_text(
++        f'name "locator"\nstore "{log.path}" backend="file" '
++        f'lineage="{log.lineage()}" role="authority"\n'
++        'discover "*.member.vertex"\n',
++        encoding="utf-8",
++    )
++    declaration = json.dumps(genesis_payload(parse_vertex_file(vertex)))
++    log.append(
++        "fact",
++        _signed_fact_body(
++            log.lineage(),
++            "_decl.genesis",
++            2.0,
++            "physical-custodian",
++            "test",
++            declaration,
++        ),
++        observer="physical-custodian",
++        origin="test",
++        at=2.0,
++        signer=_sign,
++    )
++    descriptor = descriptor_for(parse_vertex_file(vertex), vertex)
++    assert descriptor is not None
++    sync_projection(BackendRegistry.with_builtin_backends(), descriptor)
++    return vertex, log
++
++
+ def _later_kind_payload(log: ArrivalLog) -> str:
+     documents = genesis_payload(parse_vertex_file(log.path.parent / "inspect.vertex"))["documents"]
+     document = next(
+@@ -146,6 +190,139 @@ def test_arrival_inspect_uses_effective_snapshot_not_locator_drift(
+     json.dumps(result.as_dict(), allow_nan=False)
+ 
+ 
++def test_arrival_inspect_descriptor_root_uses_effective_plain_shape(
++    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
++) -> None:
++    """A local discovery cache cannot open members before adopted inspection."""
++    vertex, log = _arrival_target(tmp_path, monkeypatch)
++    (tmp_path / "ignored.member.vertex").write_text(
++        'name "ignored"\n'
++        'store "missing.arrival" backend="file" lineage="missing" role="authority"\n',
++        encoding="utf-8",
++    )
++    vertex.write_text(
++        vertex.read_text(encoding="utf-8") + 'discover "*.member.vertex"\n',
++        encoding="utf-8",
++    )
++
++    result = inspect_declaration(vertex)
++
++    assert result.read_path == "arrival"
++    assert result.basis is not None and result.basis.captured_head.lineage == log.lineage()
++    assert result.is_aggregate is False
++    assert result.local_discover == "*.member.vertex"
++    assert result.effective_discover is None
++    assert result.local_combine is None and result.effective_combine is None
++
++
++def test_arrival_inspect_descriptor_root_reports_effective_discovery_only(
++    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
++) -> None:
++    """Effective discovery is root evidence, never a request to open children."""
++    vertex, log = _arrival_discover_target(tmp_path, monkeypatch)
++    (tmp_path / "unopened.member.vertex").write_text(
++        'name "unopened"\n'
++        'store "missing.arrival" backend="file" lineage="missing" role="authority"\n',
++        encoding="utf-8",
++    )
++    vertex.write_text(
++        f'name "local-cache"\nstore "{log.path}" backend="file" '
++        f'lineage="{log.lineage()}" role="authority"\n'
++        'loops { local { fold { items "collect" 2 } } }\n',
++        encoding="utf-8",
++    )
++
++    result = inspect_declaration(vertex)
++
++    assert result.read_path == "arrival"
++    assert result.basis is not None and result.basis.captured_head.lineage == log.lineage()
++    assert result.name == "locator" and result.is_aggregate is True
++    assert result.local_discover is None
++    assert result.effective_discover == "*.member.vertex"
++    assert result.local_combine is None and result.effective_combine is None
++
++
++def test_arrival_inspect_storeless_aggregate_freezes_local_shape(tmp_path: Path) -> None:
++    """Storeless composition carries semantic local evidence, never a basis."""
++    vertex = tmp_path / "storeless.vertex"
++    vertex.write_text(
++        'name "storeless"\n'
++        'combine {\n'
++        '  vertex "left" as="first"\n'
++        '  vertex "right"\n'
++        '}\n',
++        encoding="utf-8",
++    )
++
++    result = inspect_declaration(vertex)
++    vertex.write_text('name "changed"\ndiscover "*.vertex"\n', encoding="utf-8")
++
++    assert result.read_path == "local-frozen"
++    assert result.status == result.effective_status == "local-only"
++    assert result.local_status == "frozen-local"
++    assert result.store is None and result.basis is None
++    assert result.is_aggregate
++    assert result.local_combine == [
++        {"name": "left", "alias": "first"},
++        {"name": "right", "alias": None},
++    ]
++    assert result.effective_combine == result.local_combine
++    assert result.local_combine is not result.effective_combine
++    assert result.local_discover is None and result.effective_discover is None
++    assert result.local_fingerprint == result.effective_fingerprint
++    json.dumps(result.as_dict(), allow_nan=False)
++
++
++def test_arrival_inspect_storeless_shape_uses_one_parsed_root(
++    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
++) -> None:
++    """A replacement after target parsing cannot redirect frozen inspection."""
++    vertex = tmp_path / "raced.vertex"
++    vertex.write_text('name "frozen"\ndiscover "*.vertex"\n', encoding="utf-8")
++    original_parse = sdk_target.parse_vertex_file
++    calls = 0
++
++    def replace_after_parse(path: Path):
++        nonlocal calls
++        calls += 1
++        ast = original_parse(path)
++        vertex.write_text(
++            'name "replacement"\n'
++            'store "later.arrival" backend="file" lineage="later" role="authority"\n',
++            encoding="utf-8",
++        )
++        return ast
++
++    monkeypatch.setattr(sdk_target, "parse_vertex_file", replace_after_parse)
++
++    result = inspect_declaration(vertex)
++
++    assert calls == 1
++    assert result.read_path == "local-frozen"
++    assert result.name == "frozen"
++    assert result.effective_discover == "*.vertex"
++
++
++def test_arrival_inspect_legacy_stored_aggregate_remains_legacy(tmp_path: Path) -> None:
++    """A bare legacy store is not made storeless by lack of backend=."""
++    vertex = tmp_path / "legacy-discover.vertex"
++    vertex.write_text(
++        'name "legacy-discover"\n'
++        'store "legacy.db"\n'
++        'discover "*.member.vertex"\n',
++        encoding="utf-8",
++    )
++
++    result = inspect_declaration(vertex)
++
++    assert result.read_path == "legacy"
++    assert result.basis is None
++    assert result.store_path is not None and result.store_path.endswith("legacy.db")
++    assert result.status == "file-pre-genesis"
++    assert result.local_discover == "*.member.vertex"
++    assert result.effective_discover is None
++
++
+ def test_arrival_inspect_capture_excludes_later_declaration(
+     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+ ) -> None:
+diff --git a/libs/sdk/tests/test_arrival_inspect_contract.py b/libs/sdk/tests/test_arrival_inspect_contract.py
+new file mode 100644
+index 00000000..d1b506d9
+--- /dev/null
++++ b/libs/sdk/tests/test_arrival_inspect_contract.py
+@@ -0,0 +1,260 @@
++"""Independent C7 contract checks for bounded Arrival inspection."""
++
++from __future__ import annotations
++
++import base64
++import json
++from pathlib import Path
++
++import pytest
++from engine.admission import fact_commitment_hash
++from engine.arrival import ArrivalLog
++from engine.arrival_body import body_of_fact_row
++from engine.arrival_contract import UnknownBackend
++from engine.arrival_file_backend import (
++    FileLedger,
++    FileProjectionMaintenance,
++    FileQuery,
++)
++from engine.arrival_registry import BackendRegistry
++from engine.residence import index_path_for
++from lang import genesis_payload, parse_vertex_file
++
++from sdk import SdkError, SdkValueError, inspect_declaration
++
++
++@pytest.fixture(autouse=True)
++def _isolated_attestation(
++    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
++) -> None:
++    """Keep opaque binding journals inside pytest's disposable directory."""
++    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
++
++
++def _sign(_observer: str, commitment: str) -> str:
++    return "test-signature:" + commitment
++
++
++def _append_genesis(log: ArrivalLog, vertex: Path) -> None:
++    documents = genesis_payload(parse_vertex_file(vertex))["documents"]
++    payload = json.dumps(
++        {"protocol": 1, "documents": documents},
++        sort_keys=True,
++        separators=(",", ":"),
++    )
++    commitment = fact_commitment_hash(
++        "_decl.genesis", 2.0, "custodian", "contract-test", payload
++    )
++    log.append(
++        "fact",
++        body_of_fact_row(
++            (
++                log.lineage(),
++                "_decl.genesis",
++                2.0,
++                "custodian",
++                "contract-test",
++                payload,
++                _sign("custodian", commitment),
++            )
++        ),
++        observer="custodian",
++        origin="contract-test",
++        at=2.0,
++        signer=_sign,
++    )
++    maintenance = FileProjectionMaintenance(log.path, index_path_for(log.path))
++    try:
++        maintenance.catch_up(FileLedger(log).head())
++    finally:
++        maintenance.close()
++
++
++def _opaque_root(
++    tmp_path: Path, *, effective_aggregate: bool = False
++) -> tuple[Path, ArrivalLog, str]:
++    log = ArrivalLog.mint(
++        tmp_path / "root.arrival",
++        observer="custodian",
++        signer=_sign,
++        key=base64.b64encode(b"k" * 32).decode(),
++        at=1.0,
++    )
++    # Keep the binding identity unique across parametrized tests: the
++    # attestation journal is intentionally persistent for an opaque locator.
++    locator = f"opaque://tenant//root-{tmp_path.name}?projection=contract"
++    vertex = tmp_path / "root.vertex"
++    shape = 'discover "missing/*.vertex"\n' if effective_aggregate else ""
++    vertex.write_text(
++        f'name "root"\nstore "{locator}" backend="opaque" '
++        f'lineage="{log.lineage()}" role="authority"\n'
++        + shape
++        + 'loops { note { fold { items "collect" 5 } } }\n',
++        encoding="utf-8",
++    )
++    _append_genesis(log, vertex)
++    return vertex, log, locator
++
++
++class _TrackingLedger(FileLedger):
++    def __init__(self, log: ArrivalLog, events: list[str]) -> None:
++        super().__init__(log)
++        self._events = events
++
++    def close(self) -> None:
++        self._events.append("ledger")
++        super().close()
++
++
++class _TrackingQuery(FileQuery):
++    def __init__(self, path: Path, events: list[str]) -> None:
++        super().__init__(path)
++        self._events = events
++
++    def close(self) -> None:
++        self._events.append("query")
++        super().close()
++
++
++def _registry(
++    locator: str, log: ArrivalLog, events: list[str], calls: list[str]
++) -> BackendRegistry:
++    registry = BackendRegistry()
++
++    def opener(descriptor):
++        calls.append(descriptor.location)
++        if descriptor.location != locator:
++            raise AssertionError(f"member open attempted: {descriptor.location!r}")
++        return _TrackingLedger(log, events), _TrackingQuery(
++            index_path_for(log.path), events
++        )
++
++    registry.register("opaque", opener)
++    return registry
++
++
++@pytest.mark.parametrize("effective_aggregate", (False, True))
++def test_inspection_opens_only_root_and_closes_on_success(
++    tmp_path: Path,
++    monkeypatch: pytest.MonkeyPatch,
++    effective_aggregate: bool,
++) -> None:
++    vertex, log, locator = _opaque_root(
++        tmp_path, effective_aggregate=effective_aggregate
++    )
++    if effective_aggregate:
++        # The adopted declaration is aggregate, while the current locator is
++        # plain. Inspection must report both shapes without resolving a child.
++        vertex.write_text(
++            vertex.read_text(encoding="utf-8").replace(
++                'discover "missing/*.vertex"\n', ""
++            ),
++            encoding="utf-8",
++        )
++    else:
++        # The current locator is aggregate, while the adopted declaration is
++        # plain. A missing child must remain completely outside this read.
++        vertex.write_text(
++            vertex.read_text(encoding="utf-8")
++            + 'discover "missing/*.vertex"\n',
++            encoding="utf-8",
++        )
++
++    events: list[str] = []
++    calls: list[str] = []
++    monkeypatch.setattr(
++        Path,
++        "glob",
++        lambda *_args, **_kwargs: pytest.fail(
++            "bounded inspection attempted discover/member glob"
++        ),
++    )
++    result = inspect_declaration(
++        vertex, registry=_registry(locator, log, events, calls)
++    )
++
++    assert calls == [locator]
++    assert events == ["query", "ledger"]
++    assert result.basis is not None
++    assert result.store is not None and result.store.location == locator
++    assert result.effective_discover == (
++        "missing/*.vertex" if effective_aggregate else None
++    )
++    assert result.local_discover == (
++        None if effective_aggregate else "missing/*.vertex"
++    )
++    assert result.effective_combine is None
++    assert result.local_combine is None
++    json.dumps(result.as_dict(), allow_nan=False)
++
++
++def test_inspection_closes_root_when_effective_declaration_refuses(
++    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
++) -> None:
++    vertex, log, locator = _opaque_root(tmp_path)
++    events: list[str] = []
++    calls: list[str] = []
++
++    def refuse(*_args, **_kwargs):
++        raise SdkError("effective declaration refused")
++
++    monkeypatch.setattr("sdk.read._arrival_declaration", refuse)
++    with pytest.raises(SdkError, match="effective declaration refused"):
++        inspect_declaration(vertex, registry=_registry(locator, log, events, calls))
++
++    assert calls == [locator]
++    assert events == ["query", "ledger"]
++
++
++def test_inspection_role_and_unknown_backend_refuse_before_legacy_probe(
++    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
++) -> None:
++    missing_role = tmp_path / "missing-role.vertex"
++    missing_role.write_text(
++        'name "root"\nstore "opaque://root" backend="opaque" '
++        'lineage="lineage"\ndiscover "missing/*.vertex"\n',
++        encoding="utf-8",
++    )
++    unknown_backend = tmp_path / "unknown.vertex"
++    unknown_backend.write_text(
++        'name "root"\nstore "remote://root" backend="remote" '
++        'lineage="lineage" role="authority"\n'
++        'discover "missing/*.vertex"\n',
++        encoding="utf-8",
++    )
++    monkeypatch.setattr(
++        "sdk.declare.probe_target",
++        lambda _path: pytest.fail("descriptor refusal fell through to legacy probe"),
++    )
++
++    with pytest.raises(SdkValueError, match="must declare store role"):
++        inspect_declaration(missing_role, registry=BackendRegistry())
++    with pytest.raises(UnknownBackend, match="remote"):
++        inspect_declaration(unknown_backend, registry=BackendRegistry())
++
++
++def test_storeless_discover_never_uses_legacy_probe_or_store_loader(
++    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
++) -> None:
++    vertex = tmp_path / "storeless.vertex"
++    vertex.write_text(
++        'name "root"\ndiscover "missing/*.vertex"\n', encoding="utf-8"
++    )
++    monkeypatch.setattr(
++        "sdk.declare.probe_target",
++        lambda _path: pytest.fail("storeless root was sent through probe_target"),
++    )
++    monkeypatch.setattr(
++        "sdk.declare.load_declaration_status",
++        lambda *_args, **_kwargs: pytest.fail(
++            "storeless root was sent through load_declaration_status"
++        ),
++    )
++
++    result = inspect_declaration(vertex)
++
++    assert result.read_path == "local-frozen"
++    assert result.store is None and result.basis is None
++    assert result.local_discover == result.effective_discover == "missing/*.vertex"
++    assert result.local_combine is result.effective_combine is None
++    json.dumps(result.as_dict(), allow_nan=False)
+diff --git a/libs/sdk/tests/test_target.py b/libs/sdk/tests/test_target.py
+index 49753e0d..fa33e657 100644
+--- a/libs/sdk/tests/test_target.py
++++ b/libs/sdk/tests/test_target.py
+@@ -7,6 +7,7 @@ from pathlib import Path
+ import pytest
+ 
+ from sdk import (
++    SdkValueError,
+     TargetInfo,
+     TargetNotFound,
+     TargetUnsupported,
+@@ -157,8 +158,6 @@ def test_resolve_arrival_target_preserves_opaque_location(tmp_path: Path) -> Non
+ 
+ 
+ def test_resolve_arrival_target_requires_explicit_role(tmp_path: Path) -> None:
+-    from sdk import SdkValueError
+-
+     vertex_path = tmp_path / "unassigned.vertex"
+     vertex_path.write_text(
+         'name "unassigned"\n'
+@@ -204,6 +203,78 @@ def test_resolve_arrival_target_refuses_aggregate_with_own_descriptor(tmp_path:
+         resolve_arrival_target(vertex_path)
+ 
+ 
++def test_arrival_descriptor_allows_aggregate_only_by_explicit_opt_in(tmp_path: Path) -> None:
++    from sdk.target import _arrival_descriptor
++
++    vertex_path = tmp_path / "aggregate.vertex"
++    vertex_path.write_text(
++        'name "aggregate"\n'
++        'store "svc://tenant//root?q=a%2Fb" backend="remote" '
++        'lineage="lin-1" role="replica"\n'
++        'discover "members/*.vertex"\n',
++        encoding="utf-8",
++    )
++
++    with pytest.raises(TargetUnsupported, match="member-basis reads"):
++        _arrival_descriptor(vertex_path)
++
++    resolved = _arrival_descriptor(vertex_path, allow_aggregate=True)
++    assert resolved is not None
++    path, ast, descriptor = resolved
++    assert path == vertex_path.resolve()
++    assert ast.discover == "members/*.vertex"
++    assert descriptor.location == "svc://tenant//root?q=a%2Fb"
++    assert descriptor.lineage == "lin-1"
++    assert descriptor.role is not None
++    assert descriptor.role.value == "replica"
++
++
++def test_arrival_descriptor_aggregate_opt_in_still_requires_valid_role(
++    tmp_path: Path,
++) -> None:
++    from sdk.target import _arrival_descriptor
++
++    missing_role = tmp_path / "missing-role.vertex"
++    missing_role.write_text(
++        'name "aggregate"\n'
++        'store "opaque:self" backend="remote" lineage="lin-1"\n'
++        'discover "members/*.vertex"\n',
++        encoding="utf-8",
++    )
++    with pytest.raises(SdkValueError, match="must declare store role"):
++        _arrival_descriptor(missing_role, allow_aggregate=True)
++
++    invalid_role = tmp_path / "invalid-role.vertex"
++    invalid_role.write_text(
++        'name "aggregate"\n'
++        'store "opaque:self" backend="remote" lineage="lin-1" role="writer"\n'
++        'discover "members/*.vertex"\n',
++        encoding="utf-8",
++    )
++    assert _arrival_descriptor(invalid_role, allow_aggregate=True) is None
++
++
++def test_arrival_definition_retains_one_storeless_aggregate_parse(tmp_path: Path) -> None:
++    from sdk.target import _arrival_definition, _arrival_descriptor
++
++    vertex_path = tmp_path / "storeless.vertex"
++    vertex_path.write_text(
++        'name "aggregate"\ncombine { vertex "member" as="alias" }\n',
++        encoding="utf-8",
++    )
++
++    resolved = _arrival_definition(vertex_path, allow_aggregate=True)
++    assert resolved is not None
++    path, ast, descriptor = resolved
++    assert path == vertex_path.resolve()
++    assert descriptor is None
++    assert ast.combine is not None
++    assert [(entry.name, entry.alias) for entry in ast.combine] == [
++        ("member", "alias")
++    ]
++    assert _arrival_descriptor(vertex_path, allow_aggregate=True) is None
++
++
+ def test_discover_targets_tree(tmp_path: Path) -> None:
+     """discover_targets scans directories and finds vertices and stores."""
+     # Create workspace tree
+diff --git a/libs/sdk/tests/test_types.py b/libs/sdk/tests/test_types.py
+index dd677ed5..3392f523 100644
+--- a/libs/sdk/tests/test_types.py
++++ b/libs/sdk/tests/test_types.py
+@@ -507,7 +507,9 @@ def test_declaration_inspection_result_model() -> None:
+         declared_observers=["alice"],
+         cadence_ticks=["daily"],
+         strict=True,
+-        is_aggregate=False,
++        is_aggregate=True,
++        local_combine=[{"name": "child", "alias": "c"}],
++        effective_discover="*.vertex",
+         syntax_valid=True,
+         errors=[],
+     )
+@@ -519,6 +521,8 @@ def test_declaration_inspection_result_model() -> None:
+     assert d["read_path"] == "legacy"
+     assert d["store"] is None and d["basis"] is None
+     assert d["local_fingerprint"] is None and d["effective_fingerprint"] is None
++    assert d["local_combine"] == [{"name": "child", "alias": "c"}]
++    assert d["effective_discover"] == "*.vertex"
+     assert d["declared_kinds"] == ["note", "task"]
+     assert d["strict"] is True
+     assert d["syntax_valid"] is True
+

@@ -1,0 +1,12 @@
+ M docs/scratch/arrival-break/consistency-contract-matrix-2026-09-06.md
+ M libs/sdk/src/sdk/declare.py
+ M libs/sdk/src/sdk/target.py
+ M libs/sdk/src/sdk/types.py
+ M libs/sdk/tests/test_arrival_inspect.py
+ M libs/sdk/tests/test_target.py
+ M libs/sdk/tests/test_types.py
+?? docs/scratch/arrival-break/consistency-c7-2026-09-06.md
+?? docs/scratch/arrival-break/consistency-c7-audit-notes-2026-09-06.md
+?? docs/scratch/arrival-break/consistency-c7-inspection-notes-2026-09-06.md
+?? docs/scratch/arrival-break/consistency-c7-resolution-notes-2026-09-06.md
+?? libs/sdk/tests/test_arrival_inspect_contract.py

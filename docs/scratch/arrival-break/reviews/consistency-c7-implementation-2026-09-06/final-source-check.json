@@ -1,0 +1,30 @@
+{
+  "baseline": "1c37ca65",
+  "reviewed_packet_sha256": "0c52a207c76f9d4ecc6ab5479104a90fee991636eeafb3afa0924ab9d78c4c8f",
+  "production_matches_review": true,
+  "changed_after_review": [
+    "docs/scratch/arrival-break/consistency-c7-2026-09-06.md",
+    "docs/scratch/arrival-break/consistency-c7-validation-2026-09-06.md",
+    "libs/sdk/tests/test_arrival_inspect_contract.py"
+  ],
+  "post_review_test_change": "exact two assertions verified against reviewed hash",
+  "final_sources": {
+    "docs/scratch/arrival-break/consistency-c7-2026-09-06.md": "af848318db8753f53b5f284df0fd7c84b3717f2ee1ab5855be8f8554d6503600",
+    "docs/scratch/arrival-break/consistency-c7-validation-2026-09-06.md": "5e1493c9d887abf10f5f64b011642daaccea952f3502acd6dc5d423248fba81b",
+    "docs/scratch/arrival-break/consistency-c7-inspection-notes-2026-09-06.md": "575301c3b013ac75daa1b209549238d83171101587972102bc518ff1237eb752",
+    "docs/scratch/arrival-break/consistency-c7-resolution-notes-2026-09-06.md": "313afdc9b8b6f78c16485efc25977d0260117fc18298ad0b423e73c494b679b1",
+    "docs/scratch/arrival-break/consistency-c7-audit-notes-2026-09-06.md": "8cc5989eb616dbd5c356283be0ea4b7015db325c6888eb7fbdd90ee629fc55c8",
+    "libs/sdk/src/sdk/target.py": "5e7dbeb993dc0788d242749b7730419e349af8418d4b659134d7180c72841dc8",
+    "libs/sdk/src/sdk/declare.py": "afe6a0aaaad3667c85209ee378d1444db4caef4b64b30141ef988d53b242a5b9",
+    "libs/sdk/src/sdk/types.py": "c1ff576595d20953fe5a328a2c528beec9c085c307b1ef0a3b019e7e1775108e",
+    "libs/sdk/src/sdk/read.py": "7db73bf6c487abf0f59502b091eedf652a84fd0aaf0bfee0ce5066c50376d161",
+    "libs/engine/src/engine/arrival_registry.py": "33e80522d0919a05ced14360c6bf28a3bb049a7f7fda7d12eb11b49f302a2113",
+    "libs/engine/src/engine/arrival_consumer.py": "9bbbafef0b17614ec945d5565fd71c0306ad7459c1d167360205e930dbd2ddc4",
+    "libs/engine/src/engine/declaration.py": "565a1b661ccaae1ed21ae38b53c245a4811c6629ac4143a2dd1ec399a0161b1b",
+    "libs/sdk/tests/test_arrival_inspect.py": "c5b7277512ddfe910bc555610977950d395d4ae6eddaa46362a1ce81f56ceaf5",
+    "libs/sdk/tests/test_arrival_inspect_contract.py": "1fce69ef0771689a2e754a8e55ad52522be65fc66a30b742401ecb7eacb51dbe",
+    "libs/sdk/tests/test_target.py": "3922ee2ef35c64101cf5c4da996ac8b8700f49ae9937989e7cc3e5dacb3c0c66",
+    "libs/sdk/tests/test_types.py": "ce48a6f443cd17748e5b84739843156cd2a4523a1837726f3aabb9984728d72d"
+  },
+  "checkpoint_note": "Root verified all final hashes before checkpoint-only report wording changes; production and tests unchanged."
+}

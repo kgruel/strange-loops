@@ -1,0 +1,67 @@
+from pathlib import Path
+from datetime import datetime, timezone
+import ast
+import hashlib
+import json
+import shutil
+import subprocess
+
+root = Path('/Users/kaygee/Code/loops-wt/arrival-finish')
+review = root / 'docs/scratch/arrival-break/reviews/consistency-c7-implementation-2026-09-06'
+review.mkdir(parents=True, exist_ok=True)
+packet = review / 'c7-implementation-prompt.txt'
+assert not packet.exists(), 'Packet already frozen'
+changed = subprocess.check_output(['git', 'diff', '--name-only', '1c37ca65'], cwd=root, text=True).splitlines()
+untracked = subprocess.check_output(['git', 'ls-files', '--others', '--exclude-standard'], cwd=root, text=True).splitlines()
+code = sorted(name for name in changed + untracked if name.startswith(('libs/', 'tests/')))
+patches = []
+for name in code:
+    args = ['git', 'diff', '1c37ca65', '--', name] if name in changed else ['git', 'diff', '--no-index', '--', '/dev/null', name]
+    result = subprocess.run(args, cwd=root, capture_output=True, text=True)
+    assert result.returncode in (0, 1), result.stderr
+    patches.append(result.stdout)
+patch = ''.join(patches)
+(review / 'implementation.patch').write_text(patch)
+sections = [
+    ('docs/scratch/arrival-break/consistency-c7-2026-09-06.md', None),
+    ('docs/scratch/arrival-break/consistency-c7-validation-2026-09-06.md', None),
+    ('docs/scratch/arrival-break/consistency-c7-inspection-notes-2026-09-06.md', None),
+    ('docs/scratch/arrival-break/consistency-c7-resolution-notes-2026-09-06.md', None),
+    ('docs/scratch/arrival-break/consistency-c7-audit-notes-2026-09-06.md', None),
+    ('libs/sdk/src/sdk/target.py', None),
+    ('libs/sdk/src/sdk/declare.py', {'inspect_declaration', '_inspection_fields', '_document_fingerprint', '_inspection_topology', '_frozen_local_aggregate_inspection'}),
+    ('libs/sdk/src/sdk/types.py', {'DeclarationInspectionResult'}),
+    ('libs/sdk/src/sdk/read.py', {'_open_arrival_read', '_arrival_declaration', '_aggregate_aware_arrival_descriptor'}),
+    ('libs/engine/src/engine/arrival_registry.py', {'descriptor_for'}),
+    ('libs/engine/src/engine/arrival_consumer.py', {'OpenedRead', 'open_read'}),
+    ('libs/engine/src/engine/declaration.py', {'resolve_declaration_documents_from_snapshot'}),
+]
+parts = ['''You are Fable 5.1 at LOW effort conducting an adversarial implementation review of C7 bounded aggregate declaration inspection. Static packet only: no tools, do not claim test execution. Return ACCEPT or REVISE with concrete blockers (severity, counterexample, source/line) and optional notes. Keep output under 1800 words.
+
+Selected contract: inspect only root declaration topology. Descriptor-backed roots get one CURRENT root H/P/G and effective declaration bounded to that snapshot; no member resolution, discover glob, member opens, or synthetic aggregate Head. Local/effective shape disagreement must work in both directions. Explicit role checks and opaque registry injection remain. Default/private and public target resolution restrictions remain except purpose-specific inspection opt-in. Storeless aggregate root returns frozen local semantic evidence and no custody basis. This is declared topology, not recursive graph validation. Existing legacy behavior stays compatibility-only. D0/D2 credential work and C9 legacy removal are out of scope.
+
+Review actual code/tests, especially descriptor gating, local/effective topology, storeless classification, frozen local evidence, root resource lifetime, CURRENT failures, absence of member opens, default reader/writer behavior, DTO semantics. Existing resolver returns None on parse errors and existing legacy inspection reports syntax-invalid; do not treat that established behavior alone as a new bypass without an actual open/authority consequence. Registry attestation may write witnesses; no zero-filesystem-write guarantee. Semantic fingerprints are not byte hashes.
+''']
+sources = {}
+for name, names in sections:
+    data = (root / name).read_bytes()
+    sources[name] = hashlib.sha256(data).hexdigest()
+    lines = data.decode().splitlines()
+    parts.append('\n===== ' + name + ' =====\n')
+    if names is None:
+        ranges = [(1, len(lines))]
+    else:
+        nodes = [node for node in ast.walk(ast.parse(data.decode())) if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and node.name in names]
+        assert {node.name for node in nodes} == names, (name, names - {node.name for node in nodes})
+        ranges = [(node.lineno, node.end_lineno) for node in sorted(nodes, key=lambda node: node.lineno)]
+    for start, end in ranges:
+        parts.append('\n'.join(f'{i}: {lines[i-1]}' if lines[i-1] else f'{i}:' for i in range(start, end + 1)))
+parts.append('\n===== COMPLETE C7 PRODUCTION/TEST PATCH =====\n' + patch)
+for name in code:
+    sources[name] = hashlib.sha256((root / name).read_bytes()).hexdigest()
+packet.write_text('\n'.join(parts) + '\n')
+manifest = {'model': 'claude-fable-5-1[1m]', 'effort': 'low', 'worktree': str(root), 'results': str(review), 'due_at': datetime.now(timezone.utc).isoformat(), 'baseline': '1c37ca65', 'scope': 'C7 implementation', 'jobs': [{'name': 'c7-implementation', 'packet': str(packet), 'sha256': hashlib.sha256(packet.read_bytes()).hexdigest(), 'sources': sources, 'status': 'pending'}]}
+(review / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
+(review / 'build-review.py.txt').write_bytes(Path(__file__).read_bytes())
+shutil.copytree('/tmp/loops-arrival-c7-2026-09-06/validation', review / 'validation-evidence')
+print(json.dumps({'packet_bytes': packet.stat().st_size, 'sha256': manifest['jobs'][0]['sha256'], 'manifest': str(review / 'manifest.json')}, indent=2))

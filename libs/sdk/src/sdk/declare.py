@@ -671,7 +671,7 @@ def inspect_declaration(
     *,
     registry: BackendRegistry | None = None,
 ) -> DeclarationInspectionResult:
-    """Deeply inspect and validate a .vertex declaration without side effects.
+    """Inspect a .vertex declaration without materializing its projection.
 
     Parameters:
         target: Path to the .vertex file.
@@ -687,23 +687,27 @@ def inspect_declaration(
     # A descriptor is residence, not a legacy probe hint. Establish its
     # attested bounded snapshot before considering the compatibility branch.
     from .read import _arrival_declaration, _open_arrival_read
-    from .target import _arrival_descriptor
+    from .target import _arrival_definition
 
-    arrival = _arrival_descriptor(path)
-    if arrival is not None:
+    definition = _arrival_definition(path, allow_aggregate=True)
+    if definition is not None and definition[2] is not None:
+        definition_path, definition_ast, descriptor = definition
+        arrival = (definition_path, definition_ast, descriptor)
         with _open_arrival_read(arrival, registry=registry) as (
             locator_ast,
             descriptor,
             opened,
         ):
             effective_ast, effective_status, _facts, _own_lineage = _arrival_declaration(
-                locator_ast, path, opened
+                locator_ast, path, opened, allow_aggregate=True
             )
             local_fingerprint = _document_fingerprint(locator_ast)
             effective_fingerprint = _document_fingerprint(effective_ast)
             declared_kinds, declared_observers, cadence_ticks, strict, is_aggregate = (
                 _inspection_fields(effective_ast)
             )
+            local_combine, local_discover = _inspection_topology(locator_ast)
+            effective_combine, effective_discover = _inspection_topology(effective_ast)
             return DeclarationInspectionResult(
                 read_path="arrival",
                 store=StoreDescriptorInfo.from_descriptor(descriptor),
@@ -726,9 +730,24 @@ def inspect_declaration(
                 cadence_ticks=cadence_ticks,
                 strict=strict,
                 is_aggregate=is_aggregate,
+                local_combine=local_combine,
+                local_discover=local_discover,
+                effective_combine=effective_combine,
+                effective_discover=effective_discover,
                 syntax_valid=True,
                 errors=[],
             )
+
+    # A valid storeless aggregate has no adopted declaration to consult. Its
+    # root AST is the exact one just parsed by the target resolver, avoiding a
+    # second file read before a legacy probe could observe replacement bytes.
+    if (
+        definition is not None
+        and definition[2] is None
+        and definition[1].store is None
+        and (definition[1].combine is not None or definition[1].discover is not None)
+    ):
+        return _frozen_local_aggregate_inspection(definition[0], definition[1])
 
     probe = probe_target(path)
     if probe.target_type != "vertex":
@@ -759,6 +778,7 @@ def inspect_declaration(
     declared_kinds, declared_observers, cadence_ticks, strict, is_aggregate = _inspection_fields(
         file_ast
     )
+    local_combine, local_discover = _inspection_topology(file_ast)
 
     return DeclarationInspectionResult(
         target_path=str(path),
@@ -773,8 +793,42 @@ def inspect_declaration(
         cadence_ticks=cadence_ticks,
         strict=strict,
         is_aggregate=is_aggregate,
+        local_combine=local_combine,
+        local_discover=local_discover,
         syntax_valid=syntax_valid,
         errors=errors,
+    )
+
+
+def _frozen_local_aggregate_inspection(
+    path: Path, ast: Any
+) -> DeclarationInspectionResult:
+    """Return storeless aggregate topology from one retained local AST."""
+    declared_kinds, declared_observers, cadence_ticks, strict, is_aggregate = (
+        _inspection_fields(ast)
+    )
+    combine, discover = _inspection_topology(ast)
+    fingerprint = _document_fingerprint(ast)
+    return DeclarationInspectionResult(
+        read_path="local-frozen",
+        target_path=str(path),
+        name=ast.name,
+        status="local-only",
+        local_status="frozen-local",
+        effective_status="local-only",
+        local_fingerprint=fingerprint,
+        effective_fingerprint=fingerprint,
+        declared_kinds=declared_kinds,
+        declared_observers=declared_observers,
+        cadence_ticks=cadence_ticks,
+        strict=strict,
+        is_aggregate=is_aggregate,
+        local_combine=combine,
+        local_discover=discover,
+        effective_combine=None if combine is None else [dict(entry) for entry in combine],
+        effective_discover=discover,
+        syntax_valid=True,
+        errors=[],
     )
 
 
@@ -792,6 +846,21 @@ def _inspection_fields(ast: Any | None) -> tuple[list[str], list[str], list[str]
         sorted(tick.name for tick in ast.cadence) if getattr(ast, "cadence", None) else [],
         getattr(ast, "strict", False),
         getattr(ast, "combine", None) is not None or getattr(ast, "discover", None) is not None,
+    )
+
+
+def _inspection_topology(
+    ast: Any | None,
+) -> tuple[list[dict[str, str | None]] | None, str | None]:
+    """Serialize only one declaration root's unexpanded aggregate shape."""
+    if ast is None:
+        return None, None
+    combine = getattr(ast, "combine", None)
+    return (
+        None
+        if combine is None
+        else [{"name": entry.name, "alias": entry.alias} for entry in combine],
+        getattr(ast, "discover", None),
     )
 
 

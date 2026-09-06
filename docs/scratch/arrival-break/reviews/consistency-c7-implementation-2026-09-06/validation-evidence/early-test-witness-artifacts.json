@@ -1,0 +1,55 @@
+{
+  "scope": "C7 synthetic test witness artifacts from early runs before XDG_STATE_HOME fixture; preserved, no shared-journal rewriting",
+  "bindings": [
+    {
+      "lineage": "01M1WCGR8JG2900Y6AVXQ8W4K6",
+      "location": "backend:6:opaque:41:opaque://tenant//root?projection=contract",
+      "observed_at": 1788732793.1172538,
+      "v": 1
+    },
+    {
+      "lineage": "01M1WCH8971C4KKD31WFRHMX09",
+      "location": "backend:6:opaque:73:opaque://tenant//root-test_inspection_opens_only_roo0?projection=contract",
+      "observed_at": 1788732809.525082,
+      "v": 1
+    },
+    {
+      "lineage": "01M1WCH89P6JJSMAKWVCFCJAH1",
+      "location": "backend:6:opaque:73:opaque://tenant//root-test_inspection_opens_only_roo1?projection=contract",
+      "observed_at": 1788732809.5338812,
+      "v": 1
+    },
+    {
+      "lineage": "01M1WCH89ZZFCW359GAHFXQWJN",
+      "location": "backend:6:opaque:73:opaque://tenant//root-test_inspection_closes_root_wh0?projection=contract",
+      "observed_at": 1788732809.542131,
+      "v": 1
+    }
+  ],
+  "journals": [
+    {
+      "path": "/Users/kaygee/.local/state/loops/heads/01M1WCGR8JG2900Y6AVXQ8W4K6.jsonl",
+      "bytes": 355,
+      "sha256": "c62013e0b3670b5777b9ac7ec0b1bc9cecf1f9ccd0edef37b11e53c160f10d50",
+      "lines": 2
+    },
+    {
+      "path": "/Users/kaygee/.local/state/loops/heads/01M1WCH8971C4KKD31WFRHMX09.jsonl",
+      "bytes": 386,
+      "sha256": "ef74a6788be06806b04d25e30e83b61c11233a0e4d246935d697c26532afe331",
+      "lines": 2
+    },
+    {
+      "path": "/Users/kaygee/.local/state/loops/heads/01M1WCH89P6JJSMAKWVCFCJAH1.jsonl",
+      "bytes": 387,
+      "sha256": "689750c7b66ab1200a6f12305f5a7370a1f7aee294ed5b59b2ad8be1be05de6e",
+      "lines": 2
+    },
+    {
+      "path": "/Users/kaygee/.local/state/loops/heads/01M1WCH89ZZFCW359GAHFXQWJN.jsonl",
+      "bytes": 386,
+      "sha256": "83fb5d5713f4383a52c7943906c45712d3d7903af028b45c45f0229e0bff99c3",
+      "lines": 2
+    }
+  ]
+}

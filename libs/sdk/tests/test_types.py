@@ -507,7 +507,9 @@ def test_declaration_inspection_result_model() -> None:
         declared_observers=["alice"],
         cadence_ticks=["daily"],
         strict=True,
-        is_aggregate=False,
+        is_aggregate=True,
+        local_combine=[{"name": "child", "alias": "c"}],
+        effective_discover="*.vertex",
         syntax_valid=True,
         errors=[],
     )
@@ -519,6 +521,8 @@ def test_declaration_inspection_result_model() -> None:
     assert d["read_path"] == "legacy"
     assert d["store"] is None and d["basis"] is None
     assert d["local_fingerprint"] is None and d["effective_fingerprint"] is None
+    assert d["local_combine"] == [{"name": "child", "alias": "c"}]
+    assert d["effective_discover"] == "*.vertex"
     assert d["declared_kinds"] == ["note", "task"]
     assert d["strict"] is True
     assert d["syntax_valid"] is True

@@ -1,0 +1,11 @@
+--- a/libs/sdk/tests/test_arrival_inspect_contract.py
++++ b/libs/sdk/tests/test_arrival_inspect_contract.py
+@@ -177,6 +177,8 @@
+     assert events == ["query", "ledger"]
+     assert result.basis is not None
+     assert result.store is not None and result.store.location == locator
++    assert result.local_status == "drifted"
++    assert result.local_fingerprint != result.effective_fingerprint
+     assert result.effective_discover == (
+         "missing/*.vertex" if effective_aggregate else None
+     )

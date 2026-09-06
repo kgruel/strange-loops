@@ -59,13 +59,22 @@ def resolve_target(target: Path | str) -> TargetInfo:
     return info
 
 
-def _arrival_descriptor(target: Path | str) -> tuple[Path, Any, StoreDescriptor] | None:
-    """Resolve an explicitly declared descriptor without probing its location.
+def _arrival_definition(
+    target: Path | str, *, allow_aggregate: bool = False
+) -> tuple[Path, Any, StoreDescriptor | None] | None:
+    """Parse one Arrival-capable root without probing or opening its residence.
 
     ``TargetInfo`` is a legacy filesystem classification and necessarily turns
     a store spelling into a ``Path``. Descriptor resolution instead parses the
     vertex locator directly, so another backend's DSN or service URL remains
-    byte-for-byte opaque until that named adapter receives it.
+    byte-for-byte opaque until that named adapter receives it. Aggregate shape
+    remains refused by default; declaration inspection may opt in because it
+    reports bounded root structure without claiming one basis for the aggregate.
+
+    A valid storeless vertex retains its parsed AST with ``descriptor=None`` so
+    a structural caller can make its descriptor/storeless decision from these
+    same bytes. Malformed and non-vertex targets retain the legacy ``None``
+    classification.
     """
     path = Path(target).resolve()
     if path.suffix.lower() != ".vertex":
@@ -78,16 +87,29 @@ def _arrival_descriptor(target: Path | str) -> tuple[Path, Any, StoreDescriptor]
         return None  # the legacy resolver owns malformed-target classification
     descriptor = descriptor_for(ast, path)
     if descriptor is None:
-        return None
-    if ast.combine is not None or ast.discover is not None:
-        raise TargetUnsupported(
-            f"Arrival target {path} is an aggregate; member-basis reads are not "
-            "implemented in this single-store stage"
-        )
+        return path, ast, None
     if descriptor.role is None:
         raise SdkValueError(
             f"Arrival target {path} must declare store role explicitly"
         )
+    if not allow_aggregate and (ast.combine is not None or ast.discover is not None):
+        raise TargetUnsupported(
+            f"Arrival target {path} is an aggregate; member-basis reads are not "
+            "implemented in this single-store stage"
+        )
+    return path, ast, descriptor
+
+
+def _arrival_descriptor(
+    target: Path | str, *, allow_aggregate: bool = False
+) -> tuple[Path, Any, StoreDescriptor] | None:
+    """Resolve and require an explicitly declared Arrival descriptor."""
+    resolved = _arrival_definition(target, allow_aggregate=allow_aggregate)
+    if resolved is None:
+        return None
+    path, ast, descriptor = resolved
+    if descriptor is None:
+        return None
     return path, ast, descriptor
 
 

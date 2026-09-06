@@ -1,0 +1,16 @@
+{
+  "status": "complete",
+  "review_verdict": "ACCEPT",
+  "primary_accepted": true,
+  "blockers": 0,
+  "pending": [],
+  "optional_followups": [
+    "older aggregate-read resolver simplification",
+    "C9 client local-only evidence handling"
+  ],
+  "post_review_validation": {
+    "focused_passed": 5,
+    "ruff": "passed",
+    "production_changed": false
+  }
+}

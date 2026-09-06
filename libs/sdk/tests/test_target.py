@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from sdk import (
+    SdkValueError,
     TargetInfo,
     TargetNotFound,
     TargetUnsupported,
@@ -157,8 +158,6 @@ def test_resolve_arrival_target_preserves_opaque_location(tmp_path: Path) -> Non
 
 
 def test_resolve_arrival_target_requires_explicit_role(tmp_path: Path) -> None:
-    from sdk import SdkValueError
-
     vertex_path = tmp_path / "unassigned.vertex"
     vertex_path.write_text(
         'name "unassigned"\n'
@@ -202,6 +201,78 @@ def test_resolve_arrival_target_refuses_aggregate_with_own_descriptor(tmp_path: 
 
     with pytest.raises(TargetUnsupported, match="member-basis reads"):
         resolve_arrival_target(vertex_path)
+
+
+def test_arrival_descriptor_allows_aggregate_only_by_explicit_opt_in(tmp_path: Path) -> None:
+    from sdk.target import _arrival_descriptor
+
+    vertex_path = tmp_path / "aggregate.vertex"
+    vertex_path.write_text(
+        'name "aggregate"\n'
+        'store "svc://tenant//root?q=a%2Fb" backend="remote" '
+        'lineage="lin-1" role="replica"\n'
+        'discover "members/*.vertex"\n',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(TargetUnsupported, match="member-basis reads"):
+        _arrival_descriptor(vertex_path)
+
+    resolved = _arrival_descriptor(vertex_path, allow_aggregate=True)
+    assert resolved is not None
+    path, ast, descriptor = resolved
+    assert path == vertex_path.resolve()
+    assert ast.discover == "members/*.vertex"
+    assert descriptor.location == "svc://tenant//root?q=a%2Fb"
+    assert descriptor.lineage == "lin-1"
+    assert descriptor.role is not None
+    assert descriptor.role.value == "replica"
+
+
+def test_arrival_descriptor_aggregate_opt_in_still_requires_valid_role(
+    tmp_path: Path,
+) -> None:
+    from sdk.target import _arrival_descriptor
+
+    missing_role = tmp_path / "missing-role.vertex"
+    missing_role.write_text(
+        'name "aggregate"\n'
+        'store "opaque:self" backend="remote" lineage="lin-1"\n'
+        'discover "members/*.vertex"\n',
+        encoding="utf-8",
+    )
+    with pytest.raises(SdkValueError, match="must declare store role"):
+        _arrival_descriptor(missing_role, allow_aggregate=True)
+
+    invalid_role = tmp_path / "invalid-role.vertex"
+    invalid_role.write_text(
+        'name "aggregate"\n'
+        'store "opaque:self" backend="remote" lineage="lin-1" role="writer"\n'
+        'discover "members/*.vertex"\n',
+        encoding="utf-8",
+    )
+    assert _arrival_descriptor(invalid_role, allow_aggregate=True) is None
+
+
+def test_arrival_definition_retains_one_storeless_aggregate_parse(tmp_path: Path) -> None:
+    from sdk.target import _arrival_definition, _arrival_descriptor
+
+    vertex_path = tmp_path / "storeless.vertex"
+    vertex_path.write_text(
+        'name "aggregate"\ncombine { vertex "member" as="alias" }\n',
+        encoding="utf-8",
+    )
+
+    resolved = _arrival_definition(vertex_path, allow_aggregate=True)
+    assert resolved is not None
+    path, ast, descriptor = resolved
+    assert path == vertex_path.resolve()
+    assert descriptor is None
+    assert ast.combine is not None
+    assert [(entry.name, entry.alias) for entry in ast.combine] == [
+        ("member", "alias")
+    ]
+    assert _arrival_descriptor(vertex_path, allow_aggregate=True) is None
 
 
 def test_discover_targets_tree(tmp_path: Path) -> None:

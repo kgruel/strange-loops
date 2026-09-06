@@ -960,7 +960,13 @@ class InitVertexResult:
 
 @dataclass(frozen=True)
 class DeclarationInspectionResult:
-    """Deep structural inspection of a .vertex file."""
+    """Root declaration evidence without aggregate-member capture.
+
+    An Arrival result has one root ``basis`` only; unexpanded combine/discover
+    fields describe that captured effective root and never assert member
+    custody. ``read_path="local-frozen"`` has no adopted store or basis and
+    reports the one parsed storeless aggregate definition instead.
+    """
 
     schema: str = "loops.sdk/declaration-inspection/v2"
     read_path: str = "legacy"
@@ -982,6 +988,10 @@ class DeclarationInspectionResult:
     is_aggregate: bool = False
     syntax_valid: bool = True
     errors: list[str] = field(default_factory=list)
+    local_combine: list[dict[str, str | None]] | None = None
+    local_discover: str | None = None
+    effective_combine: list[dict[str, str | None]] | None = None
+    effective_discover: str | None = None
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)

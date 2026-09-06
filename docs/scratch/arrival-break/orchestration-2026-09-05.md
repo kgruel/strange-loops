@@ -1,3 +1,55 @@
+## September 6: C7 checkpoint; aggregate-resolver continuation next
+
+The user requested checkpointing C7, then finishing the small aggregate-read
+resolver continuation before compacting for D0 → D2. This checkpoint contains
+C7 production/tests, validation, Fable-low acceptance and complete triage.
+The continuation has not begun in this commit. Nothing pushed.
+
+Next continuation: reuse the explicit aggregate descriptor opt-in in
+summary/state/timeline resolution, replacing the catch-and-reparse bridge.
+Test replacement during parsing and preserve role/default single-store guards.
+Use the established delegation and Fable-low review pattern. D0/D2 starts only
+after the user's planned compaction.
+
+Earlier entries below retain their historical status.
+
+## September 6: C7 complete and accepted; ready to checkpoint
+
+C7 bounded aggregate declaration inspection is complete on `arrival/finish`,
+based on C6 `1c37ca65`. Sol implemented shared parsed-root resolution, Terra
+inspection/DTOs and integration tests, Luna independent acceptance/validation,
+and root reconciled the contract and adversarial findings. Fable 5.1 LOW
+returned ACCEPT, no blockers; all four optional notes are triaged.
+
+Descriptor-backed inspection captures only the root CURRENT H/P/G and reports
+unexpanded local/effective topology. Storeless aggregates carry local-frozen
+semantic evidence and no custody basis. No members are resolved or opened.
+Native review fixed a file-replacement classification race, independently
+detached local/effective lists, and preserved legacy stored-root and positional
+DTO compatibility. Default single-store restrictions remain.
+
+Final SDK **559 passed**, architecture **101 passed**, scoped Ruff passes.
+Production remains identical to Fable's accepted packet. Two post-review drift
+assertions passed the 5 focused contract tests and scoped lint; the external
+review predates those assertions. Reports:
+[C7](consistency-c7-2026-09-06.md),
+[validation](consistency-c7-validation-2026-09-06.md),
+[review triage](reviews/consistency-c7-implementation-2026-09-06/primary-triage.md).
+
+Early independent tests omitted state isolation and created four synthetic
+witness journals/four binding rows under the default user state directory.
+The validation report identifies them; shared witness history was preserved.
+The test module now isolates state with an autouse fixture. No Arrival
+operation was directed at a real project store. No review/test jobs remain.
+
+C7 is uncommitted; nothing pushed. Next: checkpoint when requested, then D0
+credential request design and D2 persisted binding/compatibility. The Fable
+notes record a smaller follow-up to simplify the older aggregate-read resolver
+with the new opt-in and concurrent-replacement tests. C9 remains the later
+client/legacy transition.
+
+Earlier entries below retain their historical status.
+
 ## September 6: C6 checkpoint; handoff to C7
 
 The user requested a C6 checkpoint before compaction. This commit contains C6

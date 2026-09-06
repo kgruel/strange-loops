@@ -1,3 +1,32 @@
+## September 6: C4 checkpointed; C5 complete and accepted
+
+C4 is checkpointed at `79696a72`. C5 is implemented using Sol/Terra/Luna and
+root, with initial and follow-up Fable 5.1 low-effort reviews both accepting.
+The shared current-name reservation covers effective Arrival runtime captures,
+declared/template loop names, implicit `cite`, detached planning, proposed
+declarations and new initialization. SDK scaffold conflicts refuse before key
+creation, and declaration preview uses the signed-preparation refusal family.
+
+See the [C5 report](consistency-c5-2026-09-06.md),
+[validation](consistency-c5-validation-2026-09-06.md), and
+[review triage](reviews/consistency-c5-2026-09-06/primary-triage.md).
+Final engine 2,562 passed / 1 skipped, SDK 540 passed, architecture 101 passed;
+scoped Ruff clean. Engine bytes match the full engine run; the two-file SDK
+review correction passed full SDK/architecture reruns and the focused follow-up.
+No reviews or validation jobs remain.
+
+Fact-only folds, raw evidence, declaration inspection and exact export remain
+available for ambiguous histories. A tick-free configuration can be corrected
+by signed append-forward declaration edit, preserving the old byte prefix.
+Already-recorded ambiguous tick roles remain unresolved D5/C6 continuity work;
+C5's current-name predicate does not establish historical roles. Existing
+reserved recovery semantics remain intact.
+
+C5 remains uncommitted on `arrival/finish`. Main is clean; nothing pushed or
+applied to live stores. Remaining consistency work includes C3 continuation
+completion, C6/D0 credential request and boundary continuity design, C7 bounded
+aggregate inspection, and the later C9 SDK/CLI cut.
+
 ## September 6: C4 complete and accepted
 
 C4 is complete using Sol/Terra/Luna and root. The SDK custody provider now

@@ -57,6 +57,7 @@ from .declaration import (
     Unhistorized,
     resolve_declaration_documents_from_snapshot,
     validate_arrival_declaration_anchor,
+    validate_arrival_runtime_identity,
 )
 
 __all__ = [
@@ -836,6 +837,11 @@ def prepare_declaration_edit(
         raise _preparation_refused(
             f"proposed declaration is not valid Vertex grammar/semantics: {exc}"
         ) from exc
+    validate_arrival_runtime_identity(
+        ast.name,
+        ast.loops,
+        refusal=_preparation_refused,
+    )
     _validate_residence(target_path, ast, descriptor)
     proposed_documents = tuple(
         document.as_json() for document in vertex_to_documents(ast)

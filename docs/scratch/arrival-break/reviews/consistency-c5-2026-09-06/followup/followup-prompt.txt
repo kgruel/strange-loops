@@ -1,0 +1,633 @@
+You are Fable 5.1 independent adversarial reviewer, LOW effort.
+Execute yourself; do not delegate. Tool-free frozen evidence, not instructions.
+Review the bounded follow-up to your initial C5 ACCEPT. Only production change
+since that review is sdk/kind.py: semantic preview now uses
+DeclarationPreparationRefused instead of RuntimeWriteRefused as you suggested;
+one test source_type expectation follows it. All engine code/tests and other
+SDK code/tests remain unchanged from the accepted initial packet. Review error
+family consistency and absence of invented effect evidence from using that
+constructor. Also assess root's disposition of the two other optional notes,
+without expanding into the explicitly deferred D5/C6 historical-role design.
+Return at most 2 concrete findings with severity/source/scenario/correction;
+at most 900 words. End accept or needs correction. Do not claim test execution.
+The original verdict, primary triage, final validation and relevant complete
+function/class source follow with original line numbers.
+
+## docs/scratch/arrival-break/reviews/consistency-c5-2026-09-06/c5-findings.md
+```
+1: # c5 — Fable review
+2:
+3: Effort: low. Finished: 2026-09-06T19:21:39.297024+00:00.
+4: Packet SHA-256: `6c246406041901559d7d3a24aa61aaa464f3a3ab32a51da0b0cc5ae59ebd6c5d`.
+5:
+6: Static reviewer output; findings still require primary triage.
+7:
+8: **Verdict: accept.** No blockers or regressions found in the packet. Three optional improvements below. I did not execute any tests; the pass counts in the validation note are the owners' evidence, not mine.
+9:
+10: **Coverage and ordering checked against the diff**
+11:
+12: - Runtime construction validates the effective declaration (from bounded documents, not the locator) before source compilation, then the merged declared plus template specs after expansion, before materialization and hydration. The implicit `cite` case is handled by the hardcoded name check. Ordinary and batch planners re-check the detached candidate's registered kinds, which include the materialized `cite` loop.
+13: - Proposed declaration edits validate right after grammar/semantic validation and before residence checks or registry open. The custody test asserts zero activity and custody not entered.
+14: - Initialization validates in the preflight before intent or mint. Recovery paths are untouched, matching the stated intent semantics.
+15: - SDK init checks name against the scaffolded `item` loop and implicit `cite` before key creation. Legacy sqlite init is unchanged and tested.
+16: - Evidence reads, inspection, export, and `read_state` are not routed through the validator. The SDK tests for an ambiguous history with a raw tick confirm this.
+17: - Effective history wins over a locally rewritten cache. The repair path is exercised end to end in the SDK append-forward test with a real commit.
+18: - Exact-label comparison is tested with the case-distinct `X` case.
+19:
+20: **Optional improvements**
+21:
+22: 1. **Refusal family mismatch in the SDK kind preview.** Severity: low. Source: `libs/sdk/src/sdk/kind.py:123-125`. Trigger: `plan_kind_mutation(target, "add", "<vertex name>")` without credentials. Consequence: the preview surfaces `RuntimeWriteRefused` for a declaration-shaped operation, while the signed execution of the same edit surfaces `DeclarationPreparationRefused` from `prepare_declaration_edit`. Same condition, two families, and the preview module now imports the runtime-write module only for the exception class. The bounded policy says callers keep their operation-specific family. Correction: raise the declaration-preparation family here (or the SDK's own value error) and update the test expectation in `test_arrival_kind_preview_refuses_new_vertex_name_loop_collision` accordingly.
+23:
+24: 2. **Implicit-loop knowledge is duplicated.** Severity: low. Source: `libs/engine/src/engine/declaration.py:866` hardcodes `"cite"`; the authority is `materialize_vertex` at `compiler.py:1008`. Trigger: a future change to the implicit-loop set in the compiler. Consequence: the preflight validator (declaration prep, init, SDK init) silently drifts from the runtime; the post-expansion runtime check would still catch collisions, but preflight would no longer refuse before custody. Correction: expose the implicit loop names as a module constant next to `materialize_vertex` and have the validator union that constant into `loop_names`.
+25:
+26: 3. **Engine repair test proves only that the gate is reached.** Severity: low. Source: `test_arrival_declaration_custody.py:301-328`. Trigger: none at runtime; this is test strength. Consequence: the engine-level test stops at the "require signers" refusal, so it does not show the resulting plan tombstones the colliding loop. The SDK test `test_tick_free_collision_can_be_corrected_by_signed_append_forward` does cover the full path with a real commit, so the gap is engine-local. Correction: either leave as is and note the SDK test as the acceptance evidence, or extend the fixture ledger's `scan` to return a key registration so the plan can be built and `changes` inspected.
+27:
+28: **Scope statements that hold**
+29:
+30: The README and C5 note accurately describe what is and is not covered: no wire change, no key mapping, no rename, no history rewrite, no retroactive role assignment for recorded ambiguous ticks, and no template compilation solely for declaration validation. The D5/C6 continuity audit remains explicitly open.
+```
+
+## docs/scratch/arrival-break/reviews/consistency-c5-2026-09-06/primary-triage.md
+```
+1: # C5 Fable-low primary triage — September 6, 2026
+2:
+3: Status: initial review accepted with no blockers. One optional consistency
+4: improvement is implemented and validated; a focused follow-up review is pending.
+5:
+6: ## Initial review
+7:
+8: Fable 5.1 at low effort reviewed packet SHA-256
+9: `6c246406041901559d7d3a24aa61aaa464f3a3ab32a51da0b0cc5ae59ebd6c5d`
+10: (175,673 bytes), finishing at `2026-09-06T19:21:39Z`. The tool-free CLI runner
+11: verified substantive Fable output; a 13-token CLI Haiku helper was not the
+12: reviewer. Source drift was empty at review start and initial primary triage.
+13: Raw findings/model usage and the initial packet are preserved unchanged.
+14:
+15: 1. **Low: declaration preview refusal family. Accepted and fixed.** The SDK's
+16:    semantic preview originally passed `RuntimeWriteRefused` to the shared
+17:    validator, while signed preparation used `DeclarationPreparationRefused`.
+18:    Both normalized to `ArrivalRefusal`, but their `source_type` values differed.
+19:    Preview now uses `DeclarationPreparationRefused`, and its public regression
+20:    expects that family. The constructor carries no automatic phase/effect
+21:    proof, so using it in preview invents no preparation receipt or custody
+22:    evidence. Only `sdk/kind.py` and its SDK test changed after the initial review.
+23:
+24: 2. **Low: duplicated implicit-loop knowledge. Optional, deferred.** `cite` is
+25:    known to both materialization and the pure name validator. A future addition
+26:    to the compiler's implicit loop set must update this policy and its tests;
+27:    extracting a common low-level definition is a maintenance option. Importing
+28:    the compiler into declaration validation solely for that constant would
+29:    expand dependencies for a preflight predicate. No current implicit name is
+30:    missed. The review overstates the future fallback: the spec check precedes
+31:    materialization, so it would not see a newly inserted implicit loop; the
+32:    later candidate check is not a substitute for refusing before hydration.
+33:    This maintenance boundary remains explicit rather than claiming automatic
+34:    protection against future compiler changes.
+35:
+36: 3. **Low: engine repair test stops at signer requirements. Covered by SDK
+37:    acceptance; no further test needed.** The engine test isolates acceptance
+38:    of a collision-free proposed result against tick-free ambiguous history.
+39:    The real file-backed SDK test
+40:    `test_tick_free_collision_can_be_corrected_by_signed_append_forward`
+41:    supplies actual domain signers, receives a Commit, checks the old byte prefix,
+42:    confirms removal through inspection and successfully emits afterward. It is
+43:    the end-to-end acceptance evidence; duplicating that in the engine fixture
+44:    would add no missing contract coverage.
+45:
+46: ## Validation and limits
+47:
+48: Initial final runs passed engine 2,562 / 1 skipped, SDK 540 and architecture
+49: 101, with scoped Ruff clean. Engine source/tests remain unchanged after that
+50: run. After the two-file preview taxonomy correction, final SDK **540 passed**
+51: in 22.70s, architecture **101 passed** in 7.05s and scoped SDK Ruff passed.
+52: Final follow-up review will be recorded below.
+53:
+54: The current-name reservation does not retroactively determine an old ambiguous
+55: tick's role. D5/C6 historical continuity remains explicit, and declaration or
+56: initialization recovery retains reserved intent semantics. Fact-only folds and
+57: raw evidence reads/export remain available. These scope statements were
+58: accepted by the initial reviewer.
+```
+
+## docs/scratch/arrival-break/consistency-c5-validation-2026-09-06.md
+```
+1: # C5 independent validation — Arrival loop/vertex name identity
+2:
+3: Date: 2026-09-06. This is a read-only source audit of the C5/D4 decision. The
+4: audit began before the owner changes landed; the current implementation is
+5: also described below so the acceptance boundary is reviewable.
+6:
+7: ## Final validation
+8:
+9: Final frozen-tree checks, run from the owning package directories or repository
+10: root as shown, were green:
+11:
+12: - `cd libs/engine && uv run pytest -q` — **2,562 passed, 1 skipped** in 73.34s.
+13: - `cd libs/sdk && uv run pytest -q` — **540 passed** in 33.88s.
+14: - `uv run pytest tests/architecture -q` — **101 passed** in 8.48s.
+15: - Engine scoped Ruff from `libs/engine` over the four changed engine sources
+16:   and three changed engine tests — **clean**.
+17: - SDK scoped Ruff from `libs/sdk` over the two changed SDK sources and four
+18:   changed SDK tests — **clean**.
+19:
+20: After the final preview-error taxonomy correction in `sdk/kind.py` and its
+21: focused SDK assertion, the follow-up checks remained green:
+22:
+23: - `cd libs/sdk && uv run pytest -q` — **540 passed** in 22.70s.
+24: - `uv run pytest tests/architecture -q` — **101 passed** in 7.05s.
+25: - `cd libs/sdk && uv run ruff check src/sdk/kind.py tests/test_arrival_declarations.py`
+26:   — **clean**.
+27:
+28: The raw transcripts are in
+29: `/tmp/loops-arrival-c5-2026-09-06/{engine-full,sdk-full,architecture-full,ruff-engine,ruff-sdk}.txt`;
+30: follow-up transcripts are `sdk-reviewed-final.txt`,
+31: `architecture-reviewed-final.txt`, and `ruff-sdk-reviewed-final.txt`.
+32: The original start scope contained six production Python files, seven test
+33: Python files, and `libs/sdk/README.md`. Those 14 hashes were stable through
+34: the initial full validation. Root then made the stated preview correction,
+35: changing only `sdk/kind.py` and `tests/test_arrival_declarations.py`; the
+36: follow-up hash and final 14-file manifest capture that intentional delta. The
+37: hash manifests are
+38: `/tmp/loops-arrival-c5-2026-09-06/{sha256-start,scope-hashes-end,final14-hashes}.txt`.
+39: The final preview correction's hashes are in
+40: `followup-changed-hashes.txt`.
+41: The parent edited the consistency matrix during validation; that documentation
+42: change is outside the 14-file implementation/test hash scope and did not alter
+43: the tested sources.
+44:
+45: ## Contract and construction call graph
+46:
+47: The current wire shape gives a tick a `name` and `origin`, but no durable role
+48: (`loop` versus `vertex`). D4 therefore reserves the vertex name from every
+49: loop name in the supported Arrival runtime and in proposed declarations. The
+50: restriction is about interpretation; it does not make an ambiguous existing
+51: log unreadable as evidence.
+52:
+53: The supported Arrival runtime is constructed through
+54: `engine.runtime_write.capture_runtime` (`runtime_write.py:959`), which opens
+55: the registered descriptor, opens a CURRENT snapshot, and calls
+56: `_build_effective_arrival_candidate` (`runtime_write.py:722`). That helper
+57: reconstructs the declaration from bounded `_decl` documents, reattaches only
+58: locator ingress, compiles sources/specs, calls `materialize_vertex`, and then
+59: hydrates facts and ticks (`runtime_write.py:741-782`). Source capture then
+60: calls `plan_pending_boundaries` on a detached candidate (`runtime_write.py:992-1000`).
+61: `prepare_ordinary_write`, `prepare_batch_write`, and
+62: `arrival_sources.prepare_source_invocation` all inherit this path. The guard
+63: must run before planning/interpretation, against the effective declaration,
+64: and again after source/template expansion because `materialize_vertex`
+65: unconditionally adds a `cite` loop when one is absent (`compiler.py:1038-1058`).
+66: Thus a vertex named `cite` can create a collision that is not visible in the
+67: declared `loops` block.
+68:
+69: The concrete ambiguity is present today. `Vertex.register_loop` accepts a loop
+70: whose name equals `Vertex._name` (`vertex.py:425-447`). In
+71: `hydrate_snapshot`, an owned tick first dispatches to `self._loops[tick.name]`
+72: and then independently treats `tick.name == self._name` as the vertex period
+73: edge (`vertex.py:807-820`). This lets a same-named passive/reset loop be reset
+74: by a vertex tick, and lets a loop tick advance the vertex period. Count
+75: bookkeeping also keys `ticked_loops` by that same name (`vertex.py:835-846`).
+76: `plan_pending_boundaries` similarly keys its closing edges by tick name and
+77: uses the vertex name for vertex consumption (`vertex.py:1288-1310`), so a
+78: foreign interpretation cannot be repaired by an origin-only check. The
+79: legacy `replay` path also recovers vertex period from `last_tick_ts(self._name)`
+80: (`vertex.py:1139-1152`); it must remain legacy behavior rather than receive a
+81: supported-Arrival guard by modifying the generic `Vertex` API.
+82:
+83: Declaration preparation (`arrival_declarations.prepare_declaration_edit`,
+84: `arrival_declarations.py:798-925`) parses and semantically validates proposed
+85: text, checks residence, and compares the current effective documents. Its
+86: proposed AST must pass the same collision predicate before signing or applying.
+87: `arrival_initialization._validate_declaration` (`arrival_initialization.py:458-490`)
+88: already validates the parsed declaration before durable intent/mint and must
+89: use the predicate there too. SDK convenience kind/grant/revoke operations
+90: route through `_edit_arrival_declaration` (`sdk/declare.py:186-235`) and need
+91: the same preparation guard; they cannot validate only the local cache when
+92: the adopted effective declaration differs.
+93:
+94: The validator must inspect `effective.name` and the final loop/spec names, not
+95: the mutable locator file. `effective_declaration_from_documents` explicitly
+96: uses bounded documents for structure and locator data only for residence and
+97: source ingress (`engine/declaration.py:897-923`). Compiling source files just
+98: to perform declaration-preparation validation would introduce source I/O and
+99: missing-file failures before the operation has a reason to execute; the
+100: preflight guard should cover declared/effective names, while the runtime
+101: candidate guard covers expanded specs.
+102:
+103: ## Evidence-read and compatibility boundaries
+104:
+105: `arrival_consumer.open_read` opens custody and a bounded snapshot, but does
+106: not materialize a runtime (`arrival_consumer.py:120-190`). The following SDK
+107: Arrival operations are evidence reads and should continue to expose an
+108: ambiguous historical log: `read_summary`, `read_facts`, `read_ticks`,
+109: `read_fact_by_id`, `resolve_entity`, and `read_timeline`. They call
+110: `_open_arrival_read` and snapshot methods (`sdk/read.py:95-145`,
+111: `read.py:548-590`, `714-850`, `1069-1125`, `1356-1418`, `1471-1535`).
+112: `inspect_declaration` likewise reports the effective declaration and local
+113: drift from the bounded read (`sdk/declare.py:669-731`), so it must not turn
+114: the report into an execution refusal. `arrival_transfer.open_export` only
+115: verifies/captures an exact prefix and does not require a projection
+116: (`arrival_transfer.py:99-125`); export must remain available.
+117:
+118: `read_state` compiles the effective declaration and replays only fact payloads
+119: through specs (`sdk/read.py:949-1017`); it never materializes/hydrates a
+120: `Vertex` or interprets ticks. It therefore does not cross the C5 ambiguity seam
+121: and should remain available for evidence-derived state. Search similarly
+122: derives fields from the effective declaration but does not interpret boundary
+123: ticks (`sdk/read.py:250-283`). Aggregate fold paths should be checked
+124: individually, since they may compile member declarations, but the guard must
+125: not be applied broadly at `open_read`, or raw facts/ticks/export and inspection
+126: would be lost. Legacy `Vertex` replay and legacy storage readers must remain
+127: callable for compatibility.
+128:
+129: ## Current implementation review
+130:
+131: The owner added `validate_arrival_runtime_identity` in
+132: `engine/declaration.py:851-870`. It is called by proposed declaration prep,
+133: initialization preflight, effective Arrival candidate construction before and
+134: after compilation, and the direct ordinary/batch planners. This covers the
+135: required effective-AST, implicit-`cite`, and detached-candidate seams while
+136: leaving generic `materialize_vertex`, `register_loop`, and legacy replay
+137: unchanged. SDK Arrival initialization also rejects the generated `item`/`cite`
+138: collisions before custody setup, and SDK convenience kind operations route to
+139: the signed declaration preparation path with the cache-basis guard.
+140:
+141: The focused tests now cover passive, `after`, `every`, and `when` same-name
+142: loops, implicit `cite`, a template-generated spec, direct planning before a
+143: signer call, proposed declaration zero-open refusal, and initializer refusal
+144: before intent/mint (`test_runtime_write.py:420-462`,
+145: `test_arrival_declaration_custody.py:271-303`,
+146: `test_arrival_initialization.py:125-170`). The remaining acceptance question
+147: is boundary placement in any newly added caller: a future Arrival constructor
+148: must invoke the helper before hydration/planning, and any new compiler-added
+149: loop must be checked after expansion. No production bypass was found in the
+150: current supported write/source call graph after these call sites were added.
+151:
+152: ## Acceptance checks and concrete risks
+153:
+154: The implementation should have one shared helper with a typed supported-Arrival
+155: refusal and explicit call sites for: effective candidate before compile,
+156: expanded candidate/specs after implicit additions, declaration preparation,
+157: and initialization before intent/mint. It should cover passive, count/reset,
+158: loop-boundary, and vertex-boundary forms with a single name-equality rule.
+159: Tests should establish that a same-named proposed declaration performs zero
+160: signing/append/cache mutation; an adopted same-named declaration refuses
+161: runtime state/write preparation while `read_facts`, `read_ticks`, fact lookup,
+162: inspection, timeline, and export still succeed; and a vertex named `cite`
+163: refuses after implicit-cite expansion. A legacy `Vertex` with the same names
+164: should retain its existing behavior. Also verify a non-collision declaration
+165: with an unrelated foreign-origin tick remains evidence-visible and does not
+166: become a collision refusal: C5 is a local declaration identity gate, while
+167: origin ownership remains the boundary-consumption rule.
+168:
+169: No dynamic filesystem/store fixture was opened by this audit. The focused tests
+170: listed above are owner-provided evidence, not tests authored by this validator;
+171: the final package and architecture checks above are the independent validation
+172: run. Historical continuity and role interpretation for already-recorded
+173: ambiguous ticks remain D5/C6 design questions; C5 correctly refuses new
+174: supported execution while retaining evidence access.
+```
+
+## libs/sdk/src/sdk/kind.py
+```
+76: def _arrival_semantic_preview(
+77:     vertex_path: Path,
+78:     proposed_text: str,
+79:     *,
+80:     registry: Any | None,
+81: ) -> DeclarationPlanResult:
+82:     """Preview a splice only after confirming the cache matches CURRENT."""
+83:     from engine.arrival_declarations import DeclarationPreparationRefused
+84:     from engine.declaration import validate_arrival_runtime_identity
+85:     from lang import diff_documents, parse_vertex, validate_vertex, vertex_to_documents
+86:
+87:     from .declare import DeclarationPreviewResult
+88:     from .errors import normalize_exception
+89:     from .read import _arrival_declaration, _open_arrival_read
+90:
+91:     resolved = _arrival_descriptor_for(vertex_path)
+92:     if resolved is None:
+93:         raise TargetUnsupported(f"not an explicit Arrival target: {vertex_path}")
+94:     _path, locator_ast, descriptor = resolved
+95:     active = registry or BackendRegistry.with_builtin_backends()
+96:     try:
+97:         local_ast = parse_vertex(vertex_path.read_text(encoding="utf-8"), path=vertex_path)
+98:         with _open_arrival_read(resolved, registry=active) as (_locator, _descriptor, opened):
+99:             effective_ast, _status, _facts, _lineage = _arrival_declaration(
+100:                 locator_ast, vertex_path, opened
+101:             )
+102:             local_docs = [doc.as_json() for doc in vertex_to_documents(local_ast)]
+103:             effective_docs = [doc.as_json() for doc in vertex_to_documents(effective_ast)]
+104:             if local_docs != effective_docs:
+105:                 return DeclarationPreviewResult(
+106:                     applicable=False,
+107:                     reason="declaration cache differs from CURRENT Arrival history",
+108:                     mode="arrival-semantic-preview",
+109:                     vertex_path=str(vertex_path),
+110:                     generation_before={"captured_head": opened.basis.captured_head},
+111:                     changes=[],
+112:                     store=StoreDescriptorInfo.from_descriptor(descriptor),
+113:                     basis=asdict(opened.basis),
+114:                     captured_head={
+115:                         "lineage": opened.basis.captured_head.lineage,
+116:                         "ordinal": opened.basis.captured_head.ordinal,
+117:                         "record_hash": opened.basis.captured_head.record_hash,
+118:                     },
+119:                     lineage=opened.basis.lineage,
+120:                 )
+121:             proposed_ast = parse_vertex(proposed_text, path=vertex_path)
+122:             validate_vertex(proposed_ast)
+123:             validate_arrival_runtime_identity(
+124:                 proposed_ast.name, proposed_ast.loops, refusal=DeclarationPreparationRefused
+125:             )
+126:             proposed_docs = [
+127:                 doc.as_json() for doc in vertex_to_documents(proposed_ast)
+128:             ]
+129:             changes = diff_documents(local_docs, proposed_docs)
+130:             return DeclarationPreviewResult(
+131:                 applicable=True,
+132:                 reason="semantic preview only; signed execution requires observer credentials",
+133:                 mode="arrival-semantic-preview",
+134:                 vertex_path=str(vertex_path),
+135:                 generation_before={"captured_head": opened.basis.captured_head},
+136:                 changes=[c.as_dict() if hasattr(c, "as_dict") else str(c) for c in changes],
+137:                 store=StoreDescriptorInfo.from_descriptor(descriptor),
+138:                 basis=asdict(opened.basis),
+139:                 captured_head={
+140:                     "lineage": opened.basis.captured_head.lineage,
+141:                     "ordinal": opened.basis.captured_head.ordinal,
+142:                     "record_hash": opened.basis.captured_head.record_hash,
+143:                 },
+144:                 lineage=opened.basis.lineage,
+145:             )
+146:     except Exception as exc:
+147:         normalized = normalize_exception(exc)
+148:         if normalized is exc:
+149:             raise
+150:         raise normalized from exc
+```
+
+## libs/sdk/tests/test_arrival_declarations.py
+```
+702: def test_arrival_kind_preview_refuses_new_vertex_name_loop_collision(tmp_path: Path):
+703:     """A proposed loop cannot take the exact effective vertex name."""
+704:     target, descriptor, _credentials = _fixture(tmp_path)
+705:     before = Path(descriptor.location).read_bytes()
+706:
+707:     with pytest.raises(ArrivalRefusal) as caught:
+708:         plan_kind_mutation(target, "add", "x")
+709:
+710:     assert caught.value.source_type == "DeclarationPreparationRefused"
+711:     assert str(caught.value) == (
+712:         "Arrival runtime reserves vertex name 'x' from the loop-name namespace"
+713:     )
+714:     assert Path(descriptor.location).read_bytes() == before
+717: def test_arrival_kind_preview_keeps_case_distinct_loop_names(tmp_path: Path):
+718:     """The reservation compares declared labels exactly; it does not rename them."""
+719:     target, _descriptor, _credentials = _fixture(tmp_path)
+720:
+721:     preview = plan_kind_mutation(target, "add", "X")
+722:
+723:     assert preview.applicable is True
+```
+
+## libs/engine/src/engine/arrival_declarations.py
+```
+81: class DeclarationPreparationError(ArrivalError):
+82:     """The declaration edit could not be prepared without mutation."""
+85: class DeclarationPreparationRefused(DeclarationPreparationError):
+86:     """A declaration edit input or signed draft failed a preparation gate."""
+87:
+88:     def __init__(
+89:         self,
+90:         *args: object,
+91:         coordinator_phase: str | None = None,
+92:         effects: Mapping[str, Mapping[str, str]] | None = None,
+93:         captured_head: Head | None = None,
+94:         projected_head: Head | None = None,
+95:     ) -> None:
+96:         super().__init__(*args)
+97:         self.coordinator_phase = coordinator_phase
+98:         self.effects = effects
+99:         if captured_head is not None:
+100:             self.captured_head = captured_head
+101:         if projected_head is not None:
+102:             self.projected_head = projected_head
+105: def _preparation_refused(
+106:     message: str,
+107:     *,
+108:     captured_head: Head | None = None,
+109:     projected_head: Head | None = None,
+110: ) -> DeclarationPreparationRefused:
+111:     return DeclarationPreparationRefused(
+112:         message,
+113:         coordinator_phase="prepare",
+114:         effects={
+115:             "custody": {"attempt": "not-entered", "state": "not-attempted"}
+116:         },
+117:         captured_head=captured_head,
+118:         projected_head=projected_head,
+119:     )
+```
+
+## libs/engine/src/engine/declaration.py
+```
+852: def validate_arrival_runtime_identity(
+853:     vertex_name: str,
+854:     loop_names: Iterable[str],
+855:     *,
+856:     refusal: Callable[[str], BaseException],
+857: ) -> None:
+858:     """Refuse loop identities ambiguous under the current Arrival tick profile.
+859:
+860:     Arrival runtime interpretation reserves the vertex name from every local
+861:     loop name. ``cite`` is included because materialization installs that
+862:     implicit loop even when it is absent from the declaration. Callers supply
+863:     their operation-specific pre-mutation refusal family; evidence-only
+864:     declaration reconstruction deliberately does not invoke this validator.
+865:     """
+866:     if vertex_name == "cite" or vertex_name in loop_names:
+867:         raise refusal(
+868:             f"Arrival runtime reserves vertex name {vertex_name!r} "
+869:             "from the loop-name namespace"
+870:         )
+```
+
+## libs/sdk/src/sdk/errors.py
+```
+208: def _evidence_details(exc: BaseException, details: Mapping[str, Any]) -> dict[str, Any] | None:
+209:     """Expose coordinator proofs without deriving effects from error classes."""
+210:     evidence: dict[str, Any] = {}
+211:     phase = getattr(exc, "coordinator_phase", None)
+212:     if isinstance(phase, str):
+213:         evidence["phase"] = phase
+214:     effects = getattr(exc, "effects", None)
+215:     if isinstance(effects, Mapping):
+216:         safe_effects = {}
+217:         for resource in ("custody", "witness", "derived", "cache", "artifact", "dispatch"):
+218:             effect = effects.get(resource)
+219:             if not isinstance(effect, Mapping):
+220:                 continue
+221:             state = effect.get("state")
+222:             attempt = effect.get("attempt")
+223:             if state not in (
+224:                 "not-attempted", "known-none", "committed", "unknown", "completed", "incomplete"
+225:             ):
+226:                 continue
+227:             if attempt == "not-entered" and state != "not-attempted":
+228:                 continue
+229:             if attempt == "entered" and state == "not-attempted":
+230:                 continue
+231:             safe_effect = {"state": state}
+232:             if attempt in ("not-entered", "entered"):
+233:                 safe_effect["attempt"] = attempt
+234:             safe_effects[resource] = safe_effect
+235:         if safe_effects:
+236:             evidence["effects"] = safe_effects
+237:     cause = _cause_details(exc)
+238:     if cause is not None:
+239:         evidence["cause"] = cause
+240:     if not evidence:
+241:         return None
+242:     evidence["schema"] = "loops.sdk/evidence/v1"
+243:     basis_fields = (
+244:         "head", "captured_head", "presented", "target", "projected_before", "projected_head",
+245:         "observed_after", "coverage_before", "coverage_after", "fields_hash", "view_generation",
+246:     )
+247:     identity_fields = (
+248:         "fact_id", "tick_id", "fact_ids", "tick_ids", "items", "item_index", "tier_index",
+249:         "ordinal", "observer", "kind", "vertex", "lineage", "commit",
+250:     )
+251:     basis = {name: details[name] for name in basis_fields if name in details}
+252:     identities = {name: details[name] for name in identity_fields if name in details}
+253:     if basis:
+254:         evidence["basis"] = basis
+255:     if identities:
+256:         evidence["identities"] = identities
+257:     return evidence
+391: def normalize_exception(
+392:     exc: BaseException, *, context: Mapping[str, Any] | None = None
+393: ) -> BaseException:
+394:     """Return a stable SDK exception for engine boundary failures.
+395:
+396:     Existing SDK errors are returned unchanged.  Classification is by the
+397:     engine's public exception types, never by message text.
+398:     """
+399:     if not isinstance(exc, Exception) or isinstance(exc, SdkError):
+400:         return exc
+401:     details = _identity_details(exc)
+402:     context_fields = {
+403:         "captured_head",
+404:         "fact_id",
+405:         "tick_id",
+406:         "fact_ids",
+407:         "tick_ids",
+408:         "items",
+409:         "item_index",
+410:     }
+411:     for name, value in (context or {}).items():
+412:         if name in details or name not in context_fields:
+413:             continue
+414:         coordinate = _context_detail(name, value)
+415:         if coordinate is not None or value is None:
+416:             details[name] = coordinate
+417:     details["source_type"] = type(exc).__name__
+418:     evidence = _evidence_details(exc, details)
+419:     if evidence is not None:
+420:         details["evidence"] = evidence
+421:     if isinstance(exc, (BatchWriteCommitUnknown, WriteCommitUnknown)):
+422:         return CommittedOutcomeUnknown(str(exc), source_type=type(exc).__name__, details=details)
+423:     if isinstance(exc, InitializationOutcomeUnknown):
+424:         return CommittedOutcomeUnknown(str(exc), source_type=type(exc).__name__, details=details)
+425:     if isinstance(exc, (DeclarationOutcomeUnknown, RestoreForwardUnknown)):
+426:         return CommittedOutcomeUnknown(str(exc), source_type=type(exc).__name__, details=details)
+427:     if isinstance(exc, InitializationUnwitnessed):
+428:         return CommittedUnwitnessed(str(exc), source_type=type(exc).__name__, details=details)
+429:     if isinstance(exc, DeclarationUnwitnessed):
+430:         return CommittedUnwitnessed(str(exc), source_type=type(exc).__name__, details=details)
+431:     if isinstance(exc, InitializationCommittedIncomplete):
+432:         return CommittedIncomplete(str(exc), source_type=type(exc).__name__, details=details)
+433:     if isinstance(exc, (DeclarationCommittedIncomplete, RestoreForwardIncomplete)):
+434:         return CommittedIncomplete(str(exc), source_type=type(exc).__name__, details=details)
+435:     if isinstance(exc, NotWitnessed):
+436:         return CommittedUnwitnessed(str(exc), source_type=type(exc).__name__, details=details)
+437:     if isinstance(exc, DeclarationStale):
+438:         return ArrivalRefusal(str(exc), source_type=type(exc).__name__, details=details)
+439:     if isinstance(exc, BatchPostCommitProjectionFailed):
+440:         return CommittedProjectionFailed(str(exc), source_type=type(exc).__name__, details=details)
+441:     if isinstance(exc, PostCommitProjectionFailed):
+442:         return CommittedProjectionFailed(str(exc), source_type=type(exc).__name__, details=details)
+443:     if isinstance(exc, ProjectionSyncError):
+444:         return ProjectionOutcomeUnknown(str(exc), source_type=type(exc).__name__, details=details)
+445:     if isinstance(exc, SearchIndexSyncError):
+446:         return ProjectionOutcomeUnknown(str(exc), source_type=type(exc).__name__, details=details)
+447:     if isinstance(exc, BatchWritePreparationRefused):
+448:         fact = exc.item.fact
+449:         if exc.item.fact_id is not None:
+450:             details.setdefault("fact_id", exc.item.fact_id)
+451:         details.setdefault("observer", fact.observer)
+452:         details.setdefault("kind", fact.kind)
+453:         details.setdefault("vertex", exc.effective_declaration.name)
+454:         if exc.admission_refused:
+455:             return AdmissionRefusal(
+456:                 str(exc),
+457:                 source_type=type(exc).__name__,
+458:                 details=details,
+459:                 observer=fact.observer,
+460:                 kind=fact.kind,
+461:                 vertex=exc.effective_declaration.name,
+462:             )
+463:         return ArrivalRefusal(str(exc), source_type=type(exc).__name__, details=details)
+464:     if isinstance(exc, AdmissionError):
+465:         return AdmissionRefusal(
+466:             str(exc),
+467:             source_type=type(exc).__name__,
+468:             details=details,
+469:             observer=getattr(exc, "observer", None),
+470:             kind=getattr(exc, "kind", None),
+471:             vertex=getattr(exc, "vertex", None),
+472:         )
+473:     if isinstance(
+474:         exc,
+475:         (
+476:             AttestationRefusal,
+477:             ContractRefusal,
+478:             ArrivalError,
+479:             RuntimeWriteRefused,
+480:         ),
+481:     ):
+482:         return ArrivalRefusal(str(exc), source_type=type(exc).__name__, details=details)
+483:     return exc
+```
+
+## libs/sdk/tests/test_arrival_emit.py
+```
+249: def test_tick_free_collision_can_be_corrected_by_signed_append_forward(
+250:     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+251: ) -> None:
+252:     vertex, log = _make_target(
+253:         tmp_path, monkeypatch, vertex_name="collision", loop_name="collision",
+254:         extra_loop_names=("safe",),
+255:     )
+256:     assert read_ticks(vertex).items == []
+257:     before = log.path.read_bytes()
+258:     keypair = ed25519.load(tmp_path / "fixture-keys")
+259:
+260:     def fact_sign(_observer: str, digest: str) -> str:
+261:         return ed25519.sign(keypair, digest.encode(), domain=FACT_DOMAIN)
+262:
+263:     repaired = edit_declaration(
+264:         vertex,
+265:         remove_vertex_kind(vertex.read_text(encoding="utf-8"), "collision"),
+266:         observer="physical-custodian",
+267:         credentials=WriteCredentials(fact_signer=fact_sign, arrival_signer=_sign),
+268:     )
+269:     assert repaired.commit is not None
+270:     assert repaired.file_written is True
+271:     assert log.path.read_bytes().startswith(before)
+272:     assert read_ticks(vertex).items == []
+273:     assert "collision" not in inspect_declaration(vertex).declared_kinds
+274:     emitted = emit_fact(vertex, "safe", {"value": 1}, observer="alice")
+275:     assert emitted.commit is not None
+276:     assert emitted.commit.after.ordinal > repaired.commit.after.ordinal
+277:     assert log.path.read_bytes().startswith(before)
+```

@@ -463,6 +463,13 @@ def _validate_declaration(
         raise InitializationConflict(
             f"declaration text is not valid Vertex grammar: {exc}"
         ) from exc
+    from .declaration import validate_arrival_runtime_identity
+
+    validate_arrival_runtime_identity(
+        ast.name,
+        ast.loops,
+        refusal=InitializationConflict,
+    )
     parsed_documents = [document.as_json() for document in vertex_to_documents(ast)]
     if [dict(document) for document in documents] != parsed_documents:
         raise InitializationConflict(

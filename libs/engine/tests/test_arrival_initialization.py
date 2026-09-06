@@ -122,6 +122,51 @@ def test_fresh_init_mints_signed_genesis_and_declaration(tmp_path: Path) -> None
         ledger.close()
 
 
+@pytest.mark.parametrize("vertex_name", ("item", "cite"))
+def test_initialization_refuses_reserved_runtime_identity_before_mint(
+    tmp_path: Path,
+    vertex_name: str,
+) -> None:
+    (
+        target,
+        location,
+        public,
+        arrival_signer,
+        fact_signer,
+        descriptor,
+        _documents,
+        _declaration_text,
+    ) = _inputs(tmp_path)
+    declaration_text = _declaration(descriptor, name=vertex_name)
+    documents = [
+        document.as_json()
+        for document in vertex_to_documents(
+            parse_vertex(declaration_text, path=target)
+        )
+    ]
+
+    with pytest.raises(
+        InitializationConflict,
+        match=f"reserves vertex name '{vertex_name}' from the loop-name namespace",
+    ):
+        initialize_arrival(
+            BackendRegistry.with_builtin_backends(),
+            descriptor,
+            target=target,
+            documents=documents,
+            declaration_text=declaration_text,
+            observer="alice",
+            public_key=public,
+            signer=arrival_signer,
+            fact_signer=fact_signer,
+            arrival_signer=arrival_signer,
+        )
+
+    assert not target.exists()
+    assert not location.exists()
+    assert not arrival_intent_path(target).exists()
+
+
 def _initialize_with_declared_key(
     tmp_path: Path, *, failure_hook=None, declared_observer="bob", key_override=None
 ):

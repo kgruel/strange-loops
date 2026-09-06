@@ -412,6 +412,7 @@ def _init_arrival(
         new_lineage,
         recover_arrival_initialization,
     )
+    from engine.declaration import validate_arrival_runtime_identity
     from lang import parse_vertex, vertex_to_documents
 
     from .errors import normalize_exception
@@ -465,6 +466,10 @@ def _init_arrival(
     if location is None:
         location = store_path
     v_name = name or vertex_path.stem
+    if not recover:
+        # The SDK scaffold declares item, and the runtime also adds cite.
+        # Refuse these collisions before the default custody path creates keys.
+        validate_arrival_runtime_identity(v_name, ("item",), refusal=SdkValueError)
     chosen_backend = backend or "file"
     if location is None:
         relative_location = f".loops/data/{v_name}.arrival"

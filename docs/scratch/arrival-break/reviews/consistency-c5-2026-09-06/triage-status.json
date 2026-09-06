@@ -1,0 +1,41 @@
+{
+  "status": "complete",
+  "pending_reviews": 0,
+  "initial_review": "accept",
+  "initial_packet_sha256": "6c246406041901559d7d3a24aa61aaa464f3a3ab32a51da0b0cc5ae59ebd6c5d",
+  "initial_source_drift_at_start": [],
+  "source_changes_after_initial_review": [
+    "libs/sdk/src/sdk/kind.py",
+    "libs/sdk/tests/test_arrival_declarations.py"
+  ],
+  "findings": [
+    {
+      "id": 1,
+      "status": "fixed",
+      "reason": "Declaration preview and signed preparation now share DeclarationPreparationRefused source_type, without invented effect proof."
+    },
+    {
+      "id": 2,
+      "status": "deferred-optional",
+      "reason": "Shared implicit-loop definition is future maintenance; current cite is covered and pre-hydration versus later planner fallback distinction is explicit."
+    },
+    {
+      "id": 3,
+      "status": "covered-by-sdk-acceptance",
+      "reason": "Realfile signed append-forward correction already exercises actual Commit, preserved prefix and subsequent emission."
+    }
+  ],
+  "final_review": "accept",
+  "followup_packet_sha256": "134669568db92c9551c664588a7e6baab46d267f548fac6280c36d632554d554",
+  "source_drift_before_final_triage": [],
+  "followup_findings": [
+    {
+      "id": 1,
+      "status": "documentation-clarified",
+      "reason": "Future implicit names can reach later planner refusal, which does not replace refusal before hydration."
+    }
+  ],
+  "production_matches_final_validation": true,
+  "production_tests_readme_unchanged_after_followup": true,
+  "committed": false
+}

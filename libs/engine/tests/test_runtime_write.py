@@ -413,6 +413,110 @@ def test_hydrated_candidate_ignores_stale_runtime_state_and_uses_prior_tick_cont
     assert plan.drafts[1].body["since"] == 3.0
 
 
+@pytest.mark.parametrize(
+    "boundary",
+    ("", "boundary after=2", "boundary every=2", 'boundary when="close"'),
+)
+def test_hydration_refuses_effective_vertex_loop_identity_collision(boundary):
+    head = _head()
+    effective = parse_vertex(
+        'name "same"\nloops {\n  same {\n    fold { count "inc" }\n'
+        f"    {boundary}\n  }}\n}}\n"
+    )
+    locator = parse_vertex(
+        'name "locator"\nloops { distinct { fold { count "inc" } } }\n'
+    )
+    documents = [document.as_json() for document in vertex_to_documents(effective)]
+    snapshot = Snapshot(head, documents=documents)
+    snapshot._facts = (snapshot.declaration_anchor.genesis,)
+
+    with pytest.raises(
+        RuntimeWriteRefused,
+        match="reserves vertex name 'same' from the loop-name namespace",
+    ):
+        hydrate_arrival_candidate(
+            snapshot,
+            ReadBasis(head.lineage, head, head, "test-view"),
+            locator,
+        )
+
+
+def test_hydration_refuses_implicit_cite_loop_identity() -> None:
+    head = _head()
+    effective = parse_vertex('name "cite"\nloops { note { fold { count "inc" } } }\n')
+    documents = [document.as_json() for document in vertex_to_documents(effective)]
+    snapshot = Snapshot(head, documents=documents)
+    snapshot._facts = (snapshot.declaration_anchor.genesis,)
+
+    with pytest.raises(RuntimeWriteRefused, match="vertex name 'cite'"):
+        hydrate_arrival_candidate(
+            snapshot,
+            ReadBasis(head.lineage, head, head, "test-view"),
+            parse_vertex(
+                'name "locator"\nloops { distinct { fold { count "inc" } } }\n'
+            ),
+        )
+
+
+def test_hydration_refuses_template_generated_loop_identity(tmp_path) -> None:
+    head = _head()
+    (tmp_path / "template.loop").write_text(
+        'source #"echo ok"#\nkind "{{kind}}"\nobserver "kyle"\nformat "json"\n'
+    )
+    effective = parse_vertex(
+        'name "generated"\n'
+        'sources {\n  template "template.loop" {\n'
+        '    with kind="generated"\n'
+        '    loop { fold { count "inc" } }\n'
+        "  }\n}\n",
+        path=tmp_path / "effective.vertex",
+    )
+    documents = [document.as_json() for document in vertex_to_documents(effective)]
+    snapshot = Snapshot(head, documents=documents)
+    snapshot._facts = (snapshot.declaration_anchor.genesis,)
+
+    with pytest.raises(RuntimeWriteRefused, match="vertex name 'generated'"):
+        hydrate_arrival_candidate(
+            snapshot,
+            ReadBasis(head.lineage, head, head, "test-view"),
+            parse_vertex(
+                'name "locator"\nloops { distinct { fold { count "inc" } } }\n',
+                path=tmp_path / "locator.vertex",
+            ),
+        )
+
+
+@pytest.mark.parametrize("reset", (False, True))
+def test_direct_planner_refuses_runtime_loop_identity_before_signing(reset) -> None:
+    head = _head()
+    candidate = Vertex("same")
+    candidate.register_loop(
+        Loop("same", {}, lambda state, _payload: state, reset=reset)
+    )
+    signing_attempted = False
+
+    def signer(*_args):
+        nonlocal signing_attempted
+        signing_attempted = True
+        return "signature"
+
+    with pytest.raises(RuntimeWriteRefused, match="vertex name 'same'"):
+        plan_ordinary_write(
+            Snapshot(head),
+            ReadBasis(head.lineage, head, head, "test-view"),
+            candidate,
+            AtomFact("note", 1.0, {}, observer="kyle"),
+            grant=None,
+            credentials=WriteCredentials(
+                fact_signer=signer,
+                arrival_signer=signer,
+            ),
+            custodian="kyle",
+        )
+
+    assert signing_attempted is False
+
+
 def test_hydration_refuses_child_topology_before_any_authoritative_store_open(
     monkeypatch,
 ):

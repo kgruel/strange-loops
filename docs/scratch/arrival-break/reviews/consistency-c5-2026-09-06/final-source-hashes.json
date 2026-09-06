@@ -1,0 +1,16 @@
+{
+  "libs/engine/src/engine/arrival_declarations.py": "8e3b52ef2884db464cd61bdd215542a031b3d984d8d63fb11c6de213bb2129a5",
+  "libs/engine/src/engine/arrival_initialization.py": "49cd10b3fce2a0170c7105cce06cd09b3d7a7b6a300624a3244ae12e27faaf39",
+  "libs/engine/src/engine/declaration.py": "565a1b661ccaae1ed21ae38b53c245a4811c6629ac4143a2dd1ec399a0161b1b",
+  "libs/engine/src/engine/runtime_write.py": "021e09cac4975cf950c3d4c9bf699d632612a4a33557e528a0686090ce2a7758",
+  "libs/engine/tests/test_arrival_declaration_custody.py": "917ecfb81abd637145002aebe48d1348575fc0e54382efe28a575a0f11248484",
+  "libs/engine/tests/test_arrival_initialization.py": "ce919b6f231da7cd4b367958f149851943b615738fdc9538c09b515f9e22affa",
+  "libs/engine/tests/test_runtime_write.py": "a6cd869b6ba5625eee93d78f12ad09a81ab546ab563d207f923b19244d68379e",
+  "libs/sdk/README.md": "9a45ffff92f400fb0c13ec96039ffbdc184fcba7e979eb8e6ca6909b395801a9",
+  "libs/sdk/src/sdk/declare.py": "86b29b4494c3263fc52362c986781d879f2511f2a59b2e5223fc84c7c85344ed",
+  "libs/sdk/src/sdk/kind.py": "1eaffc5d16cc90f857aa6ae36bdcbcb6fb99bc59237f6d6cd4f28e219c0aec75",
+  "libs/sdk/tests/test_arrival_declarations.py": "b40a7b6dcf1449c5db9ee2d323a66fb74e89ba0de7f9899f46e38f3f2754546f",
+  "libs/sdk/tests/test_arrival_emit.py": "cfdeb1b634dcd5b95469a15925568c9d5fdfdb8b194ec8d79af992582b7e7976",
+  "libs/sdk/tests/test_arrival_init.py": "5e46bb3a6985608f89c009d0ec5f4813c61796461b3d61fe34195ac6d829c084",
+  "libs/sdk/tests/test_arrival_sources.py": "0beedb7a0d7fcc0b5b6e2c7cd1322a3a23e9acb43f1878fc5f83b20ca561b4cf"
+}

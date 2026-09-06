@@ -27,6 +27,7 @@ from engine.handle import WriteCredentials
 from engine.residence import index_path_for
 from engine.runtime_write import BatchWriteCommitUnknown, WriteCommitUnknown
 from lang import genesis_payload, parse_vertex_file
+from lang.vertex_mutation import remove_vertex_kind
 from sign import ed25519
 
 from sdk import (
@@ -37,11 +38,17 @@ from sdk import (
     CommittedUnwitnessed,
     InvalidEmissionRequest,
     TargetUnsupported,
+    edit_declaration,
     emit_batch,
     emit_fact,
+    export_target,
     init_vertex,
+    inspect_declaration,
+    plan_kind_mutation,
     preview_emission,
     read_fact_by_id,
+    read_state,
+    read_summary,
     read_ticks,
     read_timeline,
     resolve_entity,
@@ -64,6 +71,9 @@ def _make_target(
     *,
     boundary: str = "",
     observers: tuple[str, ...] = ("alice",),
+    vertex_name: str = "locator",
+    loop_name: str = "note",
+    extra_loop_names: tuple[str, ...] = (),
 ) -> tuple[Path, ArrivalLog]:
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     keypair = ed25519.load_or_generate(tmp_path / "fixture-keys")
@@ -86,16 +96,23 @@ def _make_target(
     )
     vertex = tmp_path / "emit.vertex"
     observer_nodes = "".join(f"  {name} {{ }}\n" for name in observers)
+    extra_loops = "".join(
+        "  " + name + " {\n"
+        '    fold { items "collect" 5 }\n'
+        "  }\n"
+        for name in extra_loop_names
+    )
     vertex.write_text(
-        f'name "locator"\nstore "{log.path}" backend="file" '
+        f'name "{vertex_name}"\nstore "{log.path}" backend="file" '
         f'lineage="{log.lineage()}" role="authority"\n'
         "strict true\n"
         f"observers {{\n{observer_nodes}}}\n"
         "loops {\n"
-        "  note {\n"
+        f"  {loop_name} {{\n"
         '    fold { items "collect" 5 }\n'
         f"    {boundary}\n"
         "  }\n"
+        f"{extra_loops}"
         "}\n",
         encoding="utf-8",
     )
@@ -128,6 +145,136 @@ def _make_target(
 @pytest.fixture
 def arrival_emit_target(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, ArrivalLog]:
     return _make_target(tmp_path, monkeypatch)
+
+
+@pytest.mark.parametrize("boundary", ("", "boundary every=2"), ids=("passive", "count"))
+def test_arrival_runtime_identity_collision_refuses_public_writes_before_effects(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, boundary: str
+) -> None:
+    """A historized loop matching its vertex name cannot plan any Arrival write."""
+    vertex, log = _make_target(
+        tmp_path,
+        monkeypatch,
+        vertex_name="collision",
+        loop_name="collision",
+        boundary=boundary,
+    )
+    before = log.path.read_bytes()
+
+    for invoke in (
+        lambda: preview_emission(vertex, "collision", {}, observer="alice"),
+        lambda: emit_fact(vertex, "collision", {}, observer="alice"),
+        lambda: emit_batch(vertex, [_batch_item("collision", 3.0)]),
+    ):
+        with pytest.raises(ArrivalRefusal) as caught:
+            invoke()
+        assert caught.value.source_type == "RuntimeWriteRefused"
+        assert str(caught.value) == (
+            "Arrival runtime reserves vertex name 'collision' from the loop-name namespace"
+        )
+
+    assert log.path.read_bytes() == before
+    assert not (vertex.parent / "keys").exists()
+
+
+def test_arrival_runtime_identity_uses_effective_history_and_allows_repair_preview(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A safe local cache cannot bypass a collision adopted in Arrival history."""
+    vertex, log = _make_target(
+        tmp_path,
+        monkeypatch,
+        vertex_name="collision",
+        loop_name="collision",
+        extra_loop_names=("safe",),
+    )
+    repair = plan_kind_mutation(vertex, "remove", "collision")
+    assert repair.applicable is True
+
+    local_text = remove_vertex_kind(vertex.read_text(encoding="utf-8"), "collision")
+    vertex.write_text(
+        local_text.replace('name "collision"', 'name "local-only"'), encoding="utf-8"
+    )
+    local = parse_vertex_file(vertex)
+    assert local.name not in local.loops
+    evidence = read_summary(vertex)
+    assert evidence.read_path == "arrival" and evidence.basis is not None
+    state = read_state(vertex)
+    assert state.read_path == "arrival" and state.basis == evidence.basis
+
+    before = log.path.read_bytes()
+    with pytest.raises(ArrivalRefusal) as caught:
+        emit_fact(vertex, "safe", {}, observer="alice")
+    assert caught.value.source_type == "RuntimeWriteRefused"
+    assert log.path.read_bytes() == before
+
+
+def test_collision_history_keeps_tick_evidence_inspection_and_exact_export(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    vertex, log = _make_target(
+        tmp_path, monkeypatch, vertex_name="collision", loop_name="collision"
+    )
+    log.append(
+        "fact",
+        body_of_fact_row(
+            ("historical-fact", "collision", 2.5, "alice", "collision", "{}", None)
+        ),
+        observer="physical-custodian", origin="collision", at=2.5, signer=_sign,
+    )
+    log.append(
+        "tick",
+        body_of_tick_row(
+            ("ambiguous-tick", "collision", 3.0, None, "collision", "{}",
+             None, None, None, None, None)
+        ),
+        observer="physical-custodian", origin="collision", at=3.0, signer=_sign,
+    )
+    sync_target(vertex)
+    before = log.path.read_bytes()
+    ticks = read_ticks(vertex)
+    assert [tick["id"] for tick in ticks.items] == ["ambiguous-tick"]
+    assert ticks.items[0]["name"] == ticks.items[0]["origin"] == "collision"
+    assert read_fact_by_id(vertex, "historical-fact").fact["kind"] == "collision"
+    assert "ambiguous-tick" in {event.id for event in read_timeline(vertex).events}
+    assert "collision" in inspect_declaration(vertex).declared_kinds
+    output = tmp_path / "ambiguous-export.jsonl"
+    exported = export_target(vertex, output)
+    assert output.read_bytes() == before == log.path.read_bytes()
+    assert exported.head == ticks.basis.captured_head
+    with pytest.raises(ArrivalRefusal, match="reserves vertex name 'collision'"):
+        preview_emission(vertex, "collision", {}, observer="alice")
+
+
+def test_tick_free_collision_can_be_corrected_by_signed_append_forward(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    vertex, log = _make_target(
+        tmp_path, monkeypatch, vertex_name="collision", loop_name="collision",
+        extra_loop_names=("safe",),
+    )
+    assert read_ticks(vertex).items == []
+    before = log.path.read_bytes()
+    keypair = ed25519.load(tmp_path / "fixture-keys")
+
+    def fact_sign(_observer: str, digest: str) -> str:
+        return ed25519.sign(keypair, digest.encode(), domain=FACT_DOMAIN)
+
+    repaired = edit_declaration(
+        vertex,
+        remove_vertex_kind(vertex.read_text(encoding="utf-8"), "collision"),
+        observer="physical-custodian",
+        credentials=WriteCredentials(fact_signer=fact_sign, arrival_signer=_sign),
+    )
+    assert repaired.commit is not None
+    assert repaired.file_written is True
+    assert log.path.read_bytes().startswith(before)
+    assert read_ticks(vertex).items == []
+    assert "collision" not in inspect_declaration(vertex).declared_kinds
+    emitted = emit_fact(vertex, "safe", {"value": 1}, observer="alice")
+    assert emitted.commit is not None
+    assert emitted.commit.after.ordinal > repaired.commit.after.ordinal
+    assert log.path.read_bytes().startswith(before)
 
 
 def test_arrival_resolve_entity_uses_receipt_order_and_keeps_basis_on_miss(

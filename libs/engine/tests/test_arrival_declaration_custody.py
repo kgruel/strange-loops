@@ -268,6 +268,66 @@ def test_snapshot_projection_behind_retains_actual_captured_head(tmp_path) -> No
     assert activity[-2:] == ["query-close", "ledger-close"]
 
 
+def test_proposed_declaration_refuses_vertex_loop_identity_before_open(
+    tmp_path,
+) -> None:
+    registry, descriptor, target, proposed, _, _, activity, _ = (
+        _declaration_fixture(tmp_path, case="advance", changed=True)
+    )
+    proposed = proposed.replace("  item {", "  x {")
+
+    with pytest.raises(
+        DeclarationPreparationRefused,
+        match="reserves vertex name 'x' from the loop-name namespace",
+    ) as raised:
+        prepare_declaration_edit(
+            registry,
+            descriptor,
+            target=target,
+            proposed_text=proposed,
+            observer="alice",
+            credentials=None,
+            fact_verify=lambda *_args: True,
+            arrival_verify=lambda *_args: True,
+        )
+
+    assert raised.value.coordinator_phase == "prepare"
+    assert raised.value.effects == {
+        "custody": {"attempt": "not-entered", "state": "not-attempted"}
+    }
+    assert activity == []
+
+
+def test_proposed_declaration_can_repair_ambiguous_effective_history(
+    tmp_path,
+) -> None:
+    registry, descriptor, target, proposed, _, snapshot, activity, _ = (
+        _declaration_fixture(tmp_path, case="advance", changed=True)
+    )
+    ambiguous = target.read_text().replace("  item {", "  x {")
+    snapshot._genesis.payload["documents"] = [
+        document.as_json()
+        for document in vertex_to_documents(parse_vertex(ambiguous, path=target))
+    ]
+
+    with pytest.raises(
+        DeclarationPreparationRefused,
+        match="declaration edits require fact and Arrival signers",
+    ):
+        prepare_declaration_edit(
+            registry,
+            descriptor,
+            target=target,
+            proposed_text=proposed,
+            observer="alice",
+            credentials=None,
+            fact_verify=lambda *_args: True,
+            arrival_verify=lambda *_args: True,
+        )
+
+    assert "scan" in activity
+
+
 @pytest.mark.parametrize("args", [(), ("message",), ("message", "detail")])
 def test_preparation_refusal_preserves_inherited_exception_arguments(args) -> None:
     refusal = DeclarationPreparationRefused(*args)

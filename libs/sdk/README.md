@@ -177,6 +177,26 @@ can use the provider. Callers that need another credential source can continue
 to supply a custom `CredentialProvider`; that interface does not itself create
 an observer mapping or register public keys.
 
+Supported Arrival execution reserves the vertex name from its loop names.
+Every exact name collision refuses, including passive loops, reset/carry loops,
+and count- or event-triggered boundaries. The runtime also adds an implicit
+`cite` loop, so a vertex named `cite` cannot execute under this restriction.
+Runtime capture checks the historized effective declaration and expanded
+template loop names before hydration and planning; editing only the local cache
+cannot bypass it. New and proposed declarations check their declared loops and
+the implicit `cite` loop. The SDK initializer also refuses the name `item`,
+because its scaffold declares an `item` loop, before creating custody keys.
+External template sources are expanded and checked at runtime; declaration
+editing does not load them solely to enforce this rule.
+
+This is an Arrival execution compatibility restriction. Existing histories
+remain available through evidence reads, declaration inspection and export.
+A collision-free declaration can be appended to correct an ambiguous current
+declaration; prior facts and ticks retain their original names and bytes.
+This does not establish which role an already-recorded ambiguous tick had;
+historical boundary continuity remains a separate limitation.
+Legacy runtime behavior and the wire format retain their existing rules.
+
 ---
 
 ### 4. Arrival Source Execution

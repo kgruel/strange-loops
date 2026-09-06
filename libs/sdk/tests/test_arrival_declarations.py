@@ -699,6 +699,30 @@ def test_sdk_kind_entrypoint_uses_arrival_coordinator(tmp_path: Path):
     assert result.file_written is True
 
 
+def test_arrival_kind_preview_refuses_new_vertex_name_loop_collision(tmp_path: Path):
+    """A proposed loop cannot take the exact effective vertex name."""
+    target, descriptor, _credentials = _fixture(tmp_path)
+    before = Path(descriptor.location).read_bytes()
+
+    with pytest.raises(ArrivalRefusal) as caught:
+        plan_kind_mutation(target, "add", "x")
+
+    assert caught.value.source_type == "DeclarationPreparationRefused"
+    assert str(caught.value) == (
+        "Arrival runtime reserves vertex name 'x' from the loop-name namespace"
+    )
+    assert Path(descriptor.location).read_bytes() == before
+
+
+def test_arrival_kind_preview_keeps_case_distinct_loop_names(tmp_path: Path):
+    """The reservation compares declared labels exactly; it does not rename them."""
+    target, _descriptor, _credentials = _fixture(tmp_path)
+
+    preview = plan_kind_mutation(target, "add", "X")
+
+    assert preview.applicable is True
+
+
 def test_arrival_kind_preview_refuses_drifted_cache(tmp_path: Path):
     target, _descriptor, _credentials = _fixture(tmp_path)
     target.write_text(target.read_text().replace('items "collect" 100', 'items "collect" 101'))

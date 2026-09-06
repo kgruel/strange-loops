@@ -41,6 +41,7 @@ def _target(
     definitions: tuple[tuple[str, str], ...],
     *,
     boundary_by_kind: dict[str, str] | None = None,
+    vertex_name: str = "sources",
 ) -> tuple[Path, ArrivalLog]:
     tmp_path.mkdir(parents=True, exist_ok=True)
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
@@ -82,7 +83,7 @@ def _target(
     )
     vertex = tmp_path / "sources.vertex"
     vertex.write_text(
-        f'name "sources"\nstore "{log.path}" backend="file" '
+        f'name "{vertex_name}"\nstore "{log.path}" backend="file" '
         f'lineage="{log.lineage()}" role="authority"\n'
         "strict true\n"
         "observers {\n  kyle { }\n  alice { }\n}\n"
@@ -170,6 +171,41 @@ def test_sdk_run_sources_serializes_fixed_tiers_and_actual_commits(
         lookup = read_fact_by_id(vertex, fact_id)
         assert lookup.found and lookup.basis is not None
     json.dumps(wire)
+
+
+def test_sdk_sources_collision_refuses_before_collector_or_append(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The source coordinator rejects ambiguous effective runtime identity first."""
+    vertex, log = _target(
+        tmp_path,
+        monkeypatch,
+        (("sources", ""),),
+        vertex_name="sources",
+    )
+    collector_calls: list[str] = []
+
+    def factory(source):
+        collector_calls.append(source.kind)
+        raise AssertionError("identity refusal must precede collector construction")
+
+    before = log.path.read_bytes()
+    with pytest.raises(ArrivalRefusal) as caught:
+        asyncio.run(
+            run_sources(
+                vertex,
+                observer="alice",
+                collector_factory=factory,
+                evaluated_at=9.0,
+            )
+        )
+    assert caught.value.source_type == "RuntimeWriteRefused"
+    assert str(caught.value) == (
+        "Arrival runtime reserves vertex name 'sources' from the loop-name namespace"
+    )
+    assert collector_calls == []
+    assert log.path.read_bytes() == before
+    assert not (vertex.parent / "keys").exists()
 
 
 def test_sdk_source_error_is_durable_error_not_interrupted(

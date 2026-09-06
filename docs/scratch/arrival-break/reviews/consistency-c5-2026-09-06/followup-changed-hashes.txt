@@ -1,0 +1,2 @@
+1eaffc5d16cc90f857aa6ae36bdcbcb6fb99bc59237f6d6cd4f28e219c0aec75  libs/sdk/src/sdk/kind.py
+b40a7b6dcf1449c5db9ee2d323a66fb74e89ba0de7f9899f46e38f3f2754546f  libs/sdk/tests/test_arrival_declarations.py

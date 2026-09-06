@@ -732,6 +732,7 @@ def _build_effective_arrival_candidate(
         effective_declaration_from_documents,
         resolve_declaration_documents_from_snapshot,
         validate_arrival_declaration_anchor,
+        validate_arrival_runtime_identity,
     )
 
     validate_arrival_declaration_anchor(snapshot.declaration_anchor, basis.captured_head)
@@ -741,6 +742,11 @@ def _build_effective_arrival_candidate(
     effective = effective_declaration_from_documents(documents, locator)
     if effective.vertices or effective.discover or effective.combine is not None:
         raise RuntimeWriteRefused("multi-store child execution is not in stage 3A")
+    validate_arrival_runtime_identity(
+        effective.name,
+        effective.loops,
+        refusal=RuntimeWriteRefused,
+    )
     from .compiler import (
         CompiledVertex,
         compile_parse_pipelines,
@@ -757,6 +763,11 @@ def _build_effective_arrival_candidate(
         sources.append(compile_sources_block(block, effective.name))
     specs = map_vertex_file(effective)
     specs.update(template_specs)
+    validate_arrival_runtime_identity(
+        effective.name,
+        specs,
+        refusal=RuntimeWriteRefused,
+    )
     if sources:
         from .executor import validate_dependency_graph
 
@@ -832,6 +843,13 @@ def plan_ordinary_write(
         raise RuntimeWriteRefused("ordinary planning requires a detached vertex")
     if getattr(vertex, "_has_children", False):
         raise RuntimeWriteRefused("multi-store child execution is not in stage 3A")
+    from .declaration import validate_arrival_runtime_identity
+
+    validate_arrival_runtime_identity(
+        vertex.name,
+        vertex.kinds,
+        refusal=RuntimeWriteRefused,
+    )
     anchor = snapshot.declaration_anchor
     if anchor.own_lineage is None or anchor.genesis is None:
         raise RuntimeWriteRefused("ordinary emission requires a declaration anchor")
@@ -1287,6 +1305,13 @@ def plan_batch_from_capture(
     basis = capture.basis
     effective = capture._effective_declaration
     candidate = capture._candidate_copy(after_pending_boundaries=include_pending_boundaries)
+    from .declaration import validate_arrival_runtime_identity
+
+    validate_arrival_runtime_identity(
+        candidate.name,
+        candidate.kinds,
+        refusal=RuntimeWriteRefused,
+    )
     facts = copy.deepcopy(capture._facts)
     ticks = copy.deepcopy(capture._ticks)
     logical: list[RecordDraft] = []

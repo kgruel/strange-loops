@@ -81,7 +81,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -99,8 +99,9 @@ from .arrival_contract import DeclarationAnchor, Fact, Head, NotAuthority
 from .residence import resolve_store_path
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
-    from engine.witness import WitnessPosition
     from lang.ast import VertexFile
+
+    from engine.witness import WitnessPosition
 
 # ---------------------------------------------------------------------------
 # Tombstone vocabulary: which "*-defined" subject a "*-retired/-removed" row
@@ -846,6 +847,27 @@ class SourceDrift(DeclarationResolutionError):
     runtime do another (the §9.1 lie at the execution tier). Surfaced, never
     auto-enacted: re-absorb to accept the drift into the lineage.
     """
+
+
+def validate_arrival_runtime_identity(
+    vertex_name: str,
+    loop_names: Iterable[str],
+    *,
+    refusal: Callable[[str], BaseException],
+) -> None:
+    """Refuse loop identities ambiguous under the current Arrival tick profile.
+
+    Arrival runtime interpretation reserves the vertex name from every local
+    loop name. ``cite`` is included because materialization installs that
+    implicit loop even when it is absent from the declaration. Callers supply
+    their operation-specific pre-mutation refusal family; evidence-only
+    declaration reconstruction deliberately does not invoke this validator.
+    """
+    if vertex_name == "cite" or vertex_name in loop_names:
+        raise refusal(
+            f"Arrival runtime reserves vertex name {vertex_name!r} "
+            "from the loop-name namespace"
+        )
 
 
 def verify_source_pins_from_documents(

@@ -1,0 +1,27 @@
+{
+  "due_at": "2026-09-06T19:25:17.963080+00:00",
+  "model": "claude-fable-5-1[1m]",
+  "effort": "low",
+  "worktree": "/Users/kaygee/Code/loops-wt/arrival-finish",
+  "results": "/Users/kaygee/Code/loops-wt/arrival-finish/docs/scratch/arrival-break/reviews/consistency-c5-2026-09-06/followup",
+  "jobs": [
+    {
+      "name": "followup",
+      "packet": "/Users/kaygee/Code/loops-wt/arrival-finish/docs/scratch/arrival-break/reviews/consistency-c5-2026-09-06/followup/followup-prompt.txt",
+      "sha256": "134669568db92c9551c664588a7e6baab46d267f548fac6280c36d632554d554",
+      "sources": {
+        "docs/scratch/arrival-break/reviews/consistency-c5-2026-09-06/c5-findings.md": "447b26015374a8dc804db32e76f865cc1a7d2ce8b8479bcada29d22c6aa7977a",
+        "docs/scratch/arrival-break/reviews/consistency-c5-2026-09-06/primary-triage.md": "b01f8d87f03069e7d483a0f13d93724665bb5ae8f2504d6b88a7f41e00059e08",
+        "docs/scratch/arrival-break/consistency-c5-validation-2026-09-06.md": "812708144f8ce4b8c3f860465dafb5d2f454a7d699da55166f14adb08c075ef4",
+        "libs/sdk/src/sdk/kind.py": "1eaffc5d16cc90f857aa6ae36bdcbcb6fb99bc59237f6d6cd4f28e219c0aec75",
+        "libs/sdk/tests/test_arrival_declarations.py": "b40a7b6dcf1449c5db9ee2d323a66fb74e89ba0de7f9899f46e38f3f2754546f",
+        "libs/engine/src/engine/arrival_declarations.py": "8e3b52ef2884db464cd61bdd215542a031b3d984d8d63fb11c6de213bb2129a5",
+        "libs/engine/src/engine/declaration.py": "565a1b661ccaae1ed21ae38b53c245a4811c6629ac4143a2dd1ec399a0161b1b",
+        "libs/sdk/src/sdk/errors.py": "d956636a83ce14c0ad90f931e19e2f8c3154d31e57c152562422fa32609a9db4",
+        "libs/sdk/tests/test_arrival_emit.py": "cfdeb1b634dcd5b95469a15925568c9d5fdfdb8b194ec8d79af992582b7e7976"
+      },
+      "status": "pending",
+      "packet_bytes": 37069
+    }
+  ]
+}

@@ -98,6 +98,35 @@ def test_custom_arrival_and_fact_signers_use_separate_domains(tmp_path: Path) ->
     assert result.store.lineage == result.lineage
 
 
+@pytest.mark.parametrize("name", ("item", "cite"))
+def test_arrival_init_refuses_scaffold_or_implicit_loop_name_before_custody(
+    tmp_path: Path, name: str
+) -> None:
+    """Arrival scaffolding reserves its explicit item and implicit cite loops."""
+    target = tmp_path / f"{name}.vertex"
+
+    with pytest.raises(SdkValueError) as caught:
+        init_vertex(target, name=name, store_type="arrival", observer="alice")
+
+    assert str(caught.value) == (
+        f"Arrival runtime reserves vertex name {name!r} from the loop-name namespace"
+    )
+    assert not target.exists()
+    assert not (target.parent / "keys").exists()
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.parametrize("name", ("item", "cite"))
+def test_legacy_init_keeps_colliding_name_compatibility(tmp_path: Path, name: str) -> None:
+    """The Arrival restriction does not reinterpret existing legacy initialization."""
+    target = tmp_path / f"{name}.vertex"
+
+    result = init_vertex(target, name=name, store_type="sqlite")
+
+    assert result.name == name
+    assert target.exists()
+
+
 def test_wrong_domain_and_mismatched_key_refuse_before_intent_or_mint(tmp_path: Path) -> None:
     target = tmp_path / "wrong-domain.vertex"
     keypair = ensure_signing_key(target, observer="alice")

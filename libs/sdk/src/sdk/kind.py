@@ -80,6 +80,8 @@ def _arrival_semantic_preview(
     registry: Any | None,
 ) -> DeclarationPlanResult:
     """Preview a splice only after confirming the cache matches CURRENT."""
+    from engine.arrival_declarations import DeclarationPreparationRefused
+    from engine.declaration import validate_arrival_runtime_identity
     from lang import diff_documents, parse_vertex, validate_vertex, vertex_to_documents
 
     from .declare import DeclarationPreviewResult
@@ -118,6 +120,9 @@ def _arrival_semantic_preview(
                 )
             proposed_ast = parse_vertex(proposed_text, path=vertex_path)
             validate_vertex(proposed_ast)
+            validate_arrival_runtime_identity(
+                proposed_ast.name, proposed_ast.loops, refusal=DeclarationPreparationRefused
+            )
             proposed_docs = [
                 doc.as_json() for doc in vertex_to_documents(proposed_ast)
             ]

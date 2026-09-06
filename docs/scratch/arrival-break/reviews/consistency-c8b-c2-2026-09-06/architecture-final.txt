@@ -1,0 +1,128 @@
+................F....................................................... [ 71%]
+...........................F.                                            [100%]
+=================================== FAILURES ===================================
+_________________________ test_lib_dataclasses_frozen __________________________
+
+    def test_lib_dataclasses_frozen():
+        """Lib dataclasses must use @dataclass(frozen=True).
+    
+        Convention: "Immutable by default — frozen dataclasses, pure functions."
+        Mutable state belongs in local variables and closures, not data types.
+        """
+        EXCEPTIONS: set[tuple[str, str]] = {
+            # Legitimately mutable — accumulator/collector patterns
+            ("libs/lang/src/lang/validator.py", "ValidationContext"),  # error accumulator
+            ("libs/engine/src/engine/loop.py", "Loop"),  # _period_start timing state
+            # TODO: freeze — these are config/output holders, not accumulators
+            ("libs/atoms/src/atoms/source.py", "Source"),
+            ("libs/engine/src/engine/compiler.py", "CompiledVertex"),
+            ("libs/engine/src/engine/stream.py", "Tap"),
+            ("libs/lang/src/lang/validator.py", "Shape"),
+            ("libs/lang/src/lang/errors.py", "Location"),
+            # Accumulated while the ratchet was red (found 2026-07-16):
+            ("libs/engine/src/engine/executor.py", "SyncResult"),  # output holder — freezable
+            ("libs/engine/src/engine/executor.py", "Executor"),  # runtime coordinator
+        }
+        # Validate exception paths still exist
+        for rel_path, _cls in EXCEPTIONS:
+            assert (REPO_ROOT / rel_path).exists(), f"Stale exception: {rel_path}"
+    
+        violations = []
+        for lib_dir in (REPO_ROOT / "libs").iterdir():
+            if not lib_dir.is_dir():
+                continue
+            for py_file in _src_py_files(lib_dir):
+                rel = _rel(py_file)
+                for cls_name, lineno in _collect_unfrozen_dataclasses(py_file):
+                    if (rel, cls_name) in EXCEPTIONS:
+                        continue
+                    violations.append(f"  {rel}:{lineno} class {cls_name}")
+    
+>       assert not violations, (
+            "Lib dataclasses must use @dataclass(frozen=True):\n"
+            + "\n".join(violations)
+        )
+E       AssertionError: Lib dataclasses must use @dataclass(frozen=True):
+E           libs/engine/src/engine/arrival_sources.py:251 class _CollectionState
+E       assert not ['  libs/engine/src/engine/arrival_sources.py:251 class _CollectionState']
+
+tests/architecture/test_rule_05_lib_dataclasses_frozen.py:48: AssertionError
+______________ test_third_party_and_interpackage_imports_declared ______________
+
+    def test_third_party_and_interpackage_imports_declared():
+        """Every imported module must appear in pyproject.toml declared dependencies."""
+        packages = [REPO_ROOT / "apps" / "loops"] + [REPO_ROOT / "libs" / lib for lib in LIBS]
+        violations: list[str] = []
+    
+        for pkg_dir in packages:
+            if not pkg_dir.is_dir():
+                continue
+            pkg_name = pkg_dir.name
+    
+            # Determine own root module names in src/
+            src_dir = pkg_dir / "src"
+            own_modules: set[str] = set()
+            if src_dir.is_dir():
+                for item in src_dir.iterdir():
+                    if not item.name.startswith((".", "_")):
+                        own_modules.add(item.stem if item.is_file() else item.name)
+    
+            src_declared = _get_package_declared_modules(pkg_dir, include_dev=False)
+            test_declared = _get_package_declared_modules(pkg_dir, include_dev=True)
+            test_declared.add("pytest")
+            test_declared.add("_pytest")
+    
+            # 1. Check production src/ against [project].dependencies
+            for py_file in _src_py_files(pkg_dir):
+                rel = _rel(py_file)
+                collector = _collect_imports(py_file)
+                for mod, lineno in collector.runtime_modules:
+                    top = mod.split(".")[0]
+                    if top in _STDLIB_MODULES or top in own_modules:
+                        continue
+                    if (rel, top) in _ALLOWLIST:
+                        continue
+                    if top not in src_declared:
+                        violations.append(
+                            f"  {rel}:{lineno} — {pkg_name} imports {top!r} "
+                            f"(undeclared in {pkg_name}/pyproject.toml dependencies)"
+                        )
+    
+            # 2. Check tests/ against dependencies + dev group (if dev group declared)
+            pyproject = pkg_dir / "pyproject.toml"
+            if pyproject.exists():
+                with open(pyproject, "rb") as f:
+                    data = tomllib.load(f)
+                if data.get("dependency-groups", {}).get("dev"):
+                    for py_file in _test_py_files(pkg_dir):
+                        rel = _rel(py_file)
+                        collector = _collect_imports(py_file)
+                        for mod, lineno in collector.runtime_modules:
+                            top = mod.split(".")[0]
+                            if (
+                                top in _STDLIB_MODULES
+                                or top in own_modules
+                                or top in ("tests", "conftest", "test_read", "_fixtures")
+                            ):
+                                continue
+                            if (rel, top) in _ALLOWLIST:
+                                continue
+                            if top not in test_declared:
+                                violations.append(
+                                    f"  {rel}:{lineno} — {pkg_name} tests import {top!r} "
+                                    f"(undeclared in {pkg_name}/pyproject.toml dependencies or dev group)"
+                                )
+    
+>       assert not violations, (
+            "Rule 19: Undeclared import violation (imports ⊆ declared dependencies):\n"
+            + "\n".join(violations)
+        )
+E       AssertionError: Rule 19: Undeclared import violation (imports ⊆ declared dependencies):
+E           libs/sdk/tests/test_arrival_sources_c8b.py:10 — sdk tests import 'test_arrival_sources' (undeclared in sdk/pyproject.toml dependencies or dev group)
+E       assert not ["  libs/sdk/tests/test_arrival_sources_c8b.py:10 — sdk tests import 'test_arrival_sources' (undeclared in sdk/pyproject.toml dependencies or dev group)"]
+
+tests/architecture/test_rule_19_third_party_imports_declared.py:175: AssertionError
+=========================== short test summary info ============================
+FAILED tests/architecture/test_rule_05_lib_dataclasses_frozen.py::test_lib_dataclasses_frozen
+FAILED tests/architecture/test_rule_19_third_party_imports_declared.py::test_third_party_and_interpackage_imports_declared
+2 failed, 99 passed in 7.81s

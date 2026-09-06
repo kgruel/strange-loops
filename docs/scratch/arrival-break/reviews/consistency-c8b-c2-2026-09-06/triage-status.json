@@ -1,0 +1,17 @@
+{
+  "status": "complete",
+  "completed_at": "2026-09-06T17:48:44.832491+00:00",
+  "pending_reviews": 0,
+  "reviews": {
+    "c8b": "accepted after triage and follow-up",
+    "c2-design": "corrected; follow-up accepted",
+    "followup": "accepted; three low findings adjudicated"
+  },
+  "production_drift_after_accepted_review": [],
+  "postreview_changes": [
+    "C2 acceptance test explicitly names pre-build maintenance.coverage failure",
+    "completion documentation and triage"
+  ],
+  "commit_base": "cfb26920",
+  "committed": false
+}

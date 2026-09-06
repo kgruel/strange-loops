@@ -1,0 +1,507 @@
+diff --git a/libs/engine/src/engine/arrival_sources.py b/libs/engine/src/engine/arrival_sources.py
+index 2d297a1e..b31f9004 100644
+--- a/libs/engine/src/engine/arrival_sources.py
++++ b/libs/engine/src/engine/arrival_sources.py
+@@ -49,9 +49,11 @@ __all__ = [
+     "DispatchFailed",
+     "DispatchIntent",
+     "InvalidSourceOutput",
++    "PartialCollectedSource",
+     "SourceInvocationPlan",
+     "SourceInvocationResult",
+     "SourcePreparationRefused",
++    "SourceTierCollectionFailed",
+     "SourceTierPreparationRefused",
+     "TierCommitted",
+     "collect_source_tier",
+@@ -189,6 +191,28 @@ class CollectedSource:
+     invalid_output: InvalidSourceOutput | None = None
+ 
+ 
++@dataclass(frozen=True)
++class PartialCollectedSource:
++    """Paired observations retained when coordinator collection did not finish."""
++
++    source_index: int
++    kind: str
++    command: str
++    source_observer: str
++    pairs: tuple[tuple[Fact, str], ...]
++    phase: Literal["bookkeeping", "cleanup", "cancelled"]
++    error_type: str | None = None
++    error_message: str | None = None
++
++    @property
++    def facts(self) -> tuple[Fact, ...]:
++        return tuple(fact for fact, _fact_id in self.pairs)
++
++    @property
++    def fact_ids(self) -> tuple[str, ...]:
++        return tuple(fact_id for _fact, fact_id in self.pairs)
++
++
+ @dataclass(frozen=True)
+ class CollectedTier:
+     """Deterministically ordered results from one concurrently collected tier."""
+@@ -199,6 +223,68 @@ class CollectedTier:
+     include_pending_boundaries: bool
+ 
+ 
++class SourceTierCollectionFailed(Exception):
++    """Coordinator work failed after retaining an exactly paired partial tier."""
++
++    def __init__(
++        self,
++        *,
++        tier_index: int,
++        basis: ReadBasis,
++        completed_sources: tuple[CollectedSource, ...],
++        failed_sources: tuple[PartialCollectedSource, ...],
++        cancelled_sources: tuple[PartialCollectedSource, ...],
++        cause: Exception,
++    ) -> None:
++        super().__init__(
++            f"source tier {tier_index} collection coordinator failed: {cause}"
++        )
++        self.tier_index = tier_index
++        self.basis = basis
++        self.completed_sources = completed_sources
++        self.failed_sources = failed_sources
++        self.cancelled_sources = cancelled_sources
++        self.cause = cause
++
++
++@dataclass
++class _CollectionState:
++    source_index: int
++    kind: str
++    command: str
++    source_observer: str
++    pairs: list[tuple[Fact, str]]
++
++    def partial(
++        self,
++        phase: Literal["bookkeeping", "cleanup", "cancelled"],
++        error: Exception | None = None,
++    ) -> PartialCollectedSource:
++        return PartialCollectedSource(
++            source_index=self.source_index,
++            kind=self.kind,
++            command=self.command,
++            source_observer=self.source_observer,
++            pairs=tuple(self.pairs),
++            phase=phase,
++            error_type=None if error is None else type(error).__name__,
++            error_message=None if error is None else str(error),
++        )
++
++
++class _CollectionStepFailed(Exception):
++    def __init__(
++        self,
++        state: _CollectionState,
++        phase: Literal["bookkeeping", "cleanup"],
++        cause: Exception,
++    ) -> None:
++        super().__init__(str(cause))
++        self.state = state
++        self.phase = phase
++        self.cause = cause
++
++
+ @dataclass(frozen=True)
+ class DispatchIntent:
+     """Captured run-clause command plus the exact durable tick evidence."""
+@@ -448,89 +534,144 @@ def prepare_source_invocation(
+     )
+ 
+ 
++async def _close_owned_streams(
++    stream: object | None,
++    iterator: object | None,
++    *,
++    primary: BaseException | None,
++) -> Exception | None:
++    """Attempt async close on the iterator and owner before propagating interruption.
++
++    This releases Python iterator resources only. It does not claim that an
++    underlying collector reversed or terminated any external effect.
++    """
++    failures: list[Exception] = []
++    handles: list[object] = []
++    deferred_interrupt: BaseException | None = None
++    primary_is_interrupt = primary is not None and not isinstance(primary, Exception)
++    for handle in (iterator, stream):
++        if handle is None or any(handle is existing for existing in handles):
++            continue
++        handles.append(handle)
++        try:
++            close = getattr(handle, "aclose", None)
++            if not callable(close):
++                continue
++            await close()
++        except Exception as exc:
++            failures.append(exc)
++        except BaseException as exc:
++            if not primary_is_interrupt and deferred_interrupt is None:
++                deferred_interrupt = exc
++    if deferred_interrupt is not None:
++        raise deferred_interrupt
++    return failures[0] if failures else None
++
++
+ async def _collect_one(
+     invocation: SourceInvocationPlan,
+-    source_index: int,
++    state: _CollectionState,
+     source: Any,
+     collector_factory: CollectorFactory | None,
+     *,
+     clock: Callable[[], float],
+     id_factory: Callable[[], str],
+ ) -> CollectedSource:
+-    facts: list[Fact] = []
+-    fact_ids: list[str] = []
+     status: Literal["ok", "error", "invalid"] = "ok"
+     stderr = ""
+     returncode: int | None = None
+     error_type: str | None = None
+     error_message: str | None = None
+     invalid: InvalidSourceOutput | None = None
++    stream: object | None = None
++    iterator: object | None = None
++    primary: BaseException | None = None
+     try:
+         stream = source.collect() if collector_factory is None else collector_factory(source)
+-        try:
+-            async for value in stream:
+-                if not isinstance(value, Fact):
+-                    invalid = InvalidSourceOutput(source_index, value)
+-                    status = "invalid"
+-                    break
+-                facts.append(value)
+-                fact_ids.append(id_factory())
+-        finally:
+-            if invalid is not None:
+-                close = getattr(stream, "aclose", None)
+-                if close is not None:
+-                    await close()
++        iterator = aiter(stream)
++        async for value in iterator:
++            if not isinstance(value, Fact):
++                invalid = InvalidSourceOutput(state.source_index, value)
++                primary = invalid
++                status = "invalid"
++                break
++            try:
++                fact_id = id_factory()
++                state.pairs.append((value, fact_id))
++            except Exception as exc:
++                failure = _CollectionStepFailed(state, "bookkeeping", exc)
++                primary = failure
++                raise failure from exc
++    except _CollectionStepFailed:
++        raise
++    except asyncio.CancelledError as exc:
++        primary = exc
++        raise
+     except SourceError as exc:
++        primary = exc
+         status = "error"
+         stderr = exc.stderr
+         returncode = exc.returncode
+         error_type = type(exc).__name__
+         error_message = str(exc)
+     except Exception as exc:
++        primary = exc
+         status = "error"
+         error_type = type(exc).__name__
+         error_message = str(exc)
++    except BaseException as exc:
++        primary = exc
++        raise
++    finally:
++        cleanup_error = await _close_owned_streams(
++            stream, iterator, primary=primary
++        )
++        if cleanup_error is not None and primary is None:
++            raise _CollectionStepFailed(state, "cleanup", cleanup_error) from cleanup_error
+ 
+-    payload: dict[str, Any] = {
+-        "command": source.command,
+-        "status": "error" if status != "ok" else "ok",
+-        "count": len(facts),
+-        "invocation_id": invocation.invocation_id,
+-        "source_index": source_index,
+-    }
+-    if stderr:
+-        payload["stderr"] = stderr
+-    if returncode is not None:
+-        payload["returncode"] = returncode
+-    if error_type is not None:
+-        payload["error_type"] = error_type
+-    if error_message is not None:
+-        payload["error"] = error_message
+-    if invalid is not None:
+-        payload["error_type"] = type(invalid).__name__
+-        payload["error"] = str(invalid)
+-    lifecycle = Fact(
+-        f"_sync.{source.kind}",
+-        clock(),
+-        payload,
+-        observer=invocation.observer,
+-    )
+-    return CollectedSource(
+-        source_index=source_index,
+-        kind=source.kind,
+-        command=source.command,
+-        source_observer=source.observer,
+-        facts=tuple(facts),
+-        fact_ids=tuple(fact_ids),
+-        lifecycle_fact=lifecycle,
+-        lifecycle_id=invocation.lifecycle_ids[source_index],
+-        status=status,
+-        stderr=stderr,
+-        returncode=returncode,
+-        error_type=error_type,
+-        error_message=error_message,
+-        invalid_output=invalid,
+-    )
++    try:
++        payload: dict[str, Any] = {
++            "command": state.command,
++            "status": "error" if status != "ok" else "ok",
++            "count": len(state.pairs),
++            "invocation_id": invocation.invocation_id,
++            "source_index": state.source_index,
++        }
++        if stderr:
++            payload["stderr"] = stderr
++        if returncode is not None:
++            payload["returncode"] = returncode
++        if error_type is not None:
++            payload["error_type"] = error_type
++        if error_message is not None:
++            payload["error"] = error_message
++        if invalid is not None:
++            payload["error_type"] = type(invalid).__name__
++            payload["error"] = str(invalid)
++        lifecycle = Fact(
++            f"_sync.{state.kind}",
++            clock(),
++            payload,
++            observer=invocation.observer,
++        )
++        return CollectedSource(
++            source_index=state.source_index,
++            kind=state.kind,
++            command=state.command,
++            source_observer=state.source_observer,
++            facts=tuple(fact for fact, _fact_id in state.pairs),
++            fact_ids=tuple(fact_id for _fact, fact_id in state.pairs),
++            lifecycle_fact=lifecycle,
++            lifecycle_id=invocation.lifecycle_ids[state.source_index],
++            status=status,
++            stderr=stderr,
++            returncode=returncode,
++            error_type=error_type,
++            error_message=error_message,
++            invalid_output=invalid,
++        )
++    except Exception as exc:
++        raise _CollectionStepFailed(state, "bookkeeping", exc) from exc
+ 
+ 
+ async def collect_source_tier(
+@@ -545,18 +686,63 @@ async def collect_source_tier(
+     """Collect one fixed tier concurrently while retaining source-list order."""
+     indices = invocation.tiers[tier_index]
+     sources = invocation.initial_capture.sources
+-    tasks = [
+-        _collect_one(
+-            invocation,
+-            index,
+-            sources[index][0],
+-            collector_factory,
+-            clock=clock,
+-            id_factory=id_factory,
++    states = [
++        _CollectionState(
++            source_index=index,
++            kind=sources[index][0].kind,
++            command=sources[index][0].command,
++            source_observer=sources[index][0].observer,
++            pairs=[],
+         )
+         for index in indices
+     ]
+-    collected = tuple(await asyncio.gather(*tasks))
++    tasks = [
++        asyncio.create_task(
++            _collect_one(
++                invocation,
++                state,
++                sources[state.source_index][0],
++                collector_factory,
++                clock=clock,
++                id_factory=id_factory,
++            )
++        )
++        for state in states
++    ]
++    try:
++        collected = tuple(await asyncio.gather(*tasks))
++    except _CollectionStepFailed as primary:
++        for task in tasks:
++            if not task.done():
++                task.cancel()
++        settled = await asyncio.gather(*tasks, return_exceptions=True)
++        completed = tuple(
++            result for result in settled if isinstance(result, CollectedSource)
++        )
++        failed = tuple(
++            result.state.partial(result.phase, result.cause)
++            for result in settled
++            if isinstance(result, _CollectionStepFailed)
++        )
++        cancelled = tuple(
++            state.partial("cancelled")
++            for state, result in zip(states, settled, strict=True)
++            if isinstance(result, asyncio.CancelledError)
++        )
++        raise SourceTierCollectionFailed(
++            tier_index=tier_index,
++            basis=capture.basis,
++            completed_sources=completed,
++            failed_sources=failed,
++            cancelled_sources=cancelled,
++            cause=primary.cause,
++        ) from primary.cause
++    except BaseException:
++        for task in tasks:
++            if not task.done():
++                task.cancel()
++        await asyncio.gather(*tasks, return_exceptions=True)
++        raise
+     return CollectedTier(
+         tier_index=tier_index,
+         basis=capture.basis,
+@@ -790,14 +976,23 @@ async def execute_source_invocation(
+         bases.append(current_capture.basis)
+ 
+         if invocation.tiers:
+-            tier = await collect_source_tier(
+-                invocation,
+-                current_capture,
+-                tier_index,
+-                collector_factory,
+-                clock=clock,
+-                id_factory=id_factory,
+-            )
++            try:
++                tier = await collect_source_tier(
++                    invocation,
++                    current_capture,
++                    tier_index,
++                    collector_factory,
++                    clock=clock,
++                    id_factory=id_factory,
++                )
++            except SourceTierCollectionFailed as exc:
++                return _result(
++                    invocation,
++                    bases=bases,
++                    collected=collected_tiers,
++                    durable=durable_tiers,
++                    terminal=exc,
++                )
+         else:
+             tier = CollectedTier(
+                 tier_index=0,
+@@ -807,12 +1002,12 @@ async def execute_source_invocation(
+             )
+         collected_tiers.append(tier)
+         final_tier = tier_index == len(tiers) - 1
+-        overall = (
+-            _overall_fact(invocation, collected_tiers, now=clock())
+-            if final_tier
+-            else None
+-        )
+         try:
++            overall = (
++                _overall_fact(invocation, collected_tiers, now=clock())
++                if final_tier
++                else None
++            )
+             batch_plan = prepare_collected_tier(
+                 current_capture,
+                 tier,
+diff --git a/libs/sdk/README.md b/libs/sdk/README.md
+index 8bfacc7c..b6a3dc01 100644
+--- a/libs/sdk/README.md
++++ b/libs/sdk/README.md
+@@ -186,6 +186,8 @@ for tier in result.tiers:
+ 
+   A source error after yielding observations returns `status="error"` after its error lifecycle fact becomes durable. Interrupted results retain prior commits and distinguish `known_uncommitted` collection from an append whose durability is `unknown`; collectors are not rerun. When `dispatcher` is omitted, captured tick run intents remain visible with `dispatch_status="not-requested"` and `attempted=False`. This operation supports explicit single-store Arrival Authority descriptors only and never falls through to legacy source execution.
+ 
++  Coordinator failures during ID allocation, lifecycle construction, or otherwise successful collector cleanup return an incomplete result with terminal category `collection-failed`. `terminal.details.collection` contains the current tier's basis, `custody="not-attempted"`, completed siblings, and paired partial observations from failed or cancelled siblings. Incomplete attempts have no lifecycle fact; prior tiers keep their commits. These partial observations live in terminal evidence, not `known_uncommitted`, which describes a fully collected tier. Owned iterators and distinct iterable owners receive `aclose()` when available; caller cancellation propagates after sibling cleanup. Closing a collector does not undo its external effects or guarantee subprocess termination.
++
+ ### 5. Declaration, Scaffolding & Ceremonies
+ 
+ ```python
+diff --git a/libs/sdk/src/sdk/sources.py b/libs/sdk/src/sdk/sources.py
+index 72a7e6ef..df1c63df 100644
+--- a/libs/sdk/src/sdk/sources.py
++++ b/libs/sdk/src/sdk/sources.py
+@@ -18,8 +18,10 @@ from engine.arrival_sources import (
+     DispatchFailed,
+     DispatchIntent,
+     InvalidSourceOutput,
++    PartialCollectedSource,
+     SourceInvocationResult,
+     SourcePreparationRefused,
++    SourceTierCollectionFailed,
+     SourceTierPreparationRefused,
+     TierCommitted,
+     execute_source_invocation,
+@@ -265,7 +267,9 @@ def _terminal_result(exc: BaseException | None) -> SourceTerminalResult | None:
+     if exc is None:
+         return None
+     category = "failed"
+-    if isinstance(exc, BatchWriteCommitUnknown):
++    if isinstance(exc, SourceTierCollectionFailed):
++        category = "collection-failed"
++    elif isinstance(exc, BatchWriteCommitUnknown):
+         category = "unknown"
+     elif isinstance(exc, NotWitnessed):
+         category = "committed-unwitnessed" if exc.commit is not None else "unwitnessed"
+@@ -285,6 +289,29 @@ def _terminal_result(exc: BaseException | None) -> SourceTerminalResult | None:
+ 
+     cause = getattr(exc, "cause", None)
+     details: dict[str, Any] = {}
++    if isinstance(exc, SourceTierCollectionFailed):
++        def partial_source(source: PartialCollectedSource) -> dict[str, Any]:
++            return SourceCollectedResult(
++                source_index=source.source_index,
++                kind=source.kind,
++                command=source.command,
++                source_observer=source.source_observer,
++                facts=tuple(_source_fact(fact, identifier) for fact, identifier in source.pairs),
++                status=source.phase,
++                error_type=source.error_type,
++                error_message=source.error_message,
++            ).as_dict()
++
++        details["collection"] = {
++            "tier_index": exc.tier_index,
++            "basis": _safe_detail(exc.basis),
++            "custody": "not-attempted",
++            "completed_sources": [
++                _collected_source(source).as_dict() for source in exc.completed_sources
++            ],
++            "failed_sources": [partial_source(source) for source in exc.failed_sources],
++            "cancelled_sources": [partial_source(source) for source in exc.cancelled_sources],
++        }
+     for name in (
+         "captured_head",
+         "head",

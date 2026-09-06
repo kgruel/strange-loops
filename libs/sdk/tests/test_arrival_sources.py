@@ -515,3 +515,94 @@ def test_sdk_run_sources_uses_no_legacy_fallback_or_key_creation(
     )
     with pytest.raises(TargetUnsupported):
         asyncio.run(run_sources(legacy, observer="alice"))
+
+
+@pytest.mark.parametrize("prior_tier", [False, True])
+def test_collection_failure_serializes_partial_pairs_and_prior_commits(
+    tmp_path, monkeypatch, prior_tier
+):
+    import sdk.sources as sources
+
+    definitions = (("a", ""), ("b", 'on "_sync.a"\n')) if prior_tier else (("b", ""),)
+    vertex, log = _target(tmp_path, monkeypatch, definitions)
+    original_head = log.head()
+    execute = sources.execute_source_invocation
+    generated = []
+    closed = []
+
+    def identifier():
+        if len(generated) == (2 if prior_tier else 1):
+            raise OSError("ID service unavailable")
+        value = f"observation-{len(generated)}"
+        generated.append(value)
+        return value
+
+    async def injected_execute(*args, **kwargs):
+        return await execute(*args, **kwargs, id_factory=identifier)
+
+    monkeypatch.setattr(sources, "execute_source_invocation", injected_execute)
+
+    def factory(source):
+        async def collect():
+            try:
+                yield Fact(source.kind, 10.0, {"value": "retained"}, observer="kyle")
+                if source.kind == "b":
+                    yield Fact("b", 11.0, {"value": "without-id"}, observer="kyle")
+            finally:
+                closed.append(source.kind)
+
+        return collect()
+
+    result = asyncio.run(
+        run_sources(
+            vertex,
+            observer="alice",
+            force=True,
+            credentials=_UnsignedCredentials(),
+            collector_factory=factory,
+        )
+    )
+    assert result.status == "incomplete"
+    assert result.terminal.category == "collection-failed"
+    assert result.terminal.source_type == "SourceTierCollectionFailed"
+    assert result.terminal.cause_type == "OSError"
+    assert result.unknown is None
+    assert result.durable_error_lifecycle_ids == ()
+    evidence = result.terminal.details["collection"]
+    assert evidence["tier_index"] == int(prior_tier)
+    assert evidence["basis"] == {
+        "lineage": result.bases[-1].lineage,
+        "captured_head": {
+            "lineage": result.bases[-1].captured_head.lineage,
+            "ordinal": result.bases[-1].captured_head.ordinal,
+            "record_hash": result.bases[-1].captured_head.record_hash,
+        },
+        "projected_through": {
+            "lineage": result.bases[-1].projected_through.lineage,
+            "ordinal": result.bases[-1].projected_through.ordinal,
+            "record_hash": result.bases[-1].projected_through.record_hash,
+        },
+        "view_generation": result.bases[-1].view_generation,
+    }
+    assert evidence["custody"] == "not-attempted"
+    assert evidence["completed_sources"] == []
+    assert evidence["cancelled_sources"] == []
+    partial, = evidence["failed_sources"]
+    assert partial["status"] == "bookkeeping"
+    assert partial["lifecycle_fact"] is None
+    assert partial["lifecycle_id"] == ""
+    fact, = partial["facts"]
+    assert fact["id"] == generated[-1]
+    assert fact["payload"] == {"value": "retained"}
+    assert not read_fact_by_id(vertex, generated[-1]).found
+    assert len(result.tiers) == int(prior_tier)
+    if prior_tier:
+        assert result.tiers[0].commit is not None
+        assert read_fact_by_id(vertex, generated[0]).found
+        assert log.head()["ord"] == result.tiers[0].commit.after.ordinal
+    else:
+        assert log.head() == original_head
+    assert closed == (["a", "b"] if prior_tier else ["b"])
+    # The same paired partial observations reach a process caller as JSON.
+    encoded = json.loads(json.dumps(result.as_dict()))
+    assert encoded["terminal"]["details"]["collection"] == evidence

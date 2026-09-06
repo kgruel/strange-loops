@@ -18,8 +18,10 @@ from engine.arrival_sources import (
     DispatchFailed,
     DispatchIntent,
     InvalidSourceOutput,
+    PartialCollectedSource,
     SourceInvocationResult,
     SourcePreparationRefused,
+    SourceTierCollectionFailed,
     SourceTierPreparationRefused,
     TierCommitted,
     execute_source_invocation,
@@ -265,7 +267,9 @@ def _terminal_result(exc: BaseException | None) -> SourceTerminalResult | None:
     if exc is None:
         return None
     category = "failed"
-    if isinstance(exc, BatchWriteCommitUnknown):
+    if isinstance(exc, SourceTierCollectionFailed):
+        category = "collection-failed"
+    elif isinstance(exc, BatchWriteCommitUnknown):
         category = "unknown"
     elif isinstance(exc, NotWitnessed):
         category = "committed-unwitnessed" if exc.commit is not None else "unwitnessed"
@@ -285,6 +289,29 @@ def _terminal_result(exc: BaseException | None) -> SourceTerminalResult | None:
 
     cause = getattr(exc, "cause", None)
     details: dict[str, Any] = {}
+    if isinstance(exc, SourceTierCollectionFailed):
+        def partial_source(source: PartialCollectedSource) -> dict[str, Any]:
+            return SourceCollectedResult(
+                source_index=source.source_index,
+                kind=source.kind,
+                command=source.command,
+                source_observer=source.source_observer,
+                facts=tuple(_source_fact(fact, identifier) for fact, identifier in source.pairs),
+                status=source.phase,
+                error_type=source.error_type,
+                error_message=source.error_message,
+            ).as_dict()
+
+        details["collection"] = {
+            "tier_index": exc.tier_index,
+            "basis": _safe_detail(exc.basis),
+            "custody": "not-attempted",
+            "completed_sources": [
+                _collected_source(source).as_dict() for source in exc.completed_sources
+            ],
+            "failed_sources": [partial_source(source) for source in exc.failed_sources],
+            "cancelled_sources": [partial_source(source) for source in exc.cancelled_sources],
+        }
     for name in (
         "captured_head",
         "head",

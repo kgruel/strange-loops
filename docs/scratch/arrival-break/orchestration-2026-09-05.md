@@ -1,3 +1,24 @@
+## September 6 checkpoint: C8b complete; C2 design accepted
+
+The C8b collection slice is implemented using Sol/Terra/Luna and root, with
+three Fable 5.1 low-effort reviews including one combined follow-up. All
+findings are triaged and no reviews remain. See the
+[C8b report](consistency-c8b-2026-09-06.md),
+[C2 evidence design](consistency-c2-evidence-design-2026-09-06.md), and
+[review triage](reviews/consistency-c8b-c2-2026-09-06/primary-triage.md).
+
+Owned iterator cleanup, paired partial collection evidence, coordinator failure
+classification and earlier durable tiers now survive the SDK boundary. C2 is
+an accepted design, not a normalization implementation. The next bounded step
+is maintenance/search evidence and cause serialization, followed by Arrival
+`sync_target` normalization using those proofs.
+
+Validation: engine 2,540 passed/1 skipped, SDK 509, architecture 101; final
+explicit-cause preservation additionally passed 30 engine source tests. Scoped
+Ruff passes. Production matches the accepted follow-up packet. Prior Arrival
+work is committed at `cfb26920`; this C8b/C2 pass remains uncommitted on
+`arrival/finish`. Main is clean; nothing pushed or applied to live stores.
+
 ## September 6 checkpoint: C1 registry consistency accepted
 
 C1 is complete using Sol/Terra/Luna and one Fable 5.1 low-effort review.

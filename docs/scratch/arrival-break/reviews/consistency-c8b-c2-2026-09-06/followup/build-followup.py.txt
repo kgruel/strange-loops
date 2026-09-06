@@ -1,0 +1,21 @@
+from pathlib import Path
+prefix = Path('/tmp/loops-arrival-c8b-2026-09-06/build_review.py').read_text().split("\nbuild('c8b'")[0]
+exec(compile(prefix, '<review-builder-helpers>', 'exec'))
+out = root / 'docs/scratch/arrival-break/reviews/consistency-c8b-c2-2026-09-06/followup'
+out.mkdir(parents=True, exist_ok=True)
+build('followup', '''Review only final corrections after initial Fable-low C8b accept and C2 needs-correction. Root triage below adjudicates the findings. C8b unexpected sibling control exceptions must propagate after settlement retaining identity and explicit cause; private state envelope frozen, coroutine-owned pair list mutable. SDK tests moved into existing module for architecture compatibility; explicit basis fields checked. No new secondary-cleanup diagnostics are intended. C2 remains DESIGN ONLY: distinct coordinator_phase, existing details.phase unchanged, scoped attempt/state proof, search pre-build not-entered versus projection catch-up entered, bounded safe cause traversal, preserve unmatched errors. Check whether prior findings are adequately resolved and whether these changes introduce defects. Max 1000 words, at most 3 actionable findings, end accept/needs correction. Validation counts and timing are submitted evidence, not your execution.\n''', [
+ ('docs/scratch/arrival-break/reviews/consistency-c8b-c2-2026-09-06/primary-triage.md',None),
+ ('docs/scratch/arrival-break/consistency-c8b-validation-2026-09-06.md',None),
+ ('docs/scratch/arrival-break/consistency-c2-evidence-design-2026-09-06.md',None),
+ ('libs/engine/src/engine/arrival_sources.py',['PartialCollectedSource','SourceTierCollectionFailed','_CollectionState','_CollectionStepFailed','_close_owned_streams','_collect_one','collect_source_tier','execute_source_invocation']),
+ ('libs/engine/tests/test_arrival_sources_c8b.py',None),
+ ('libs/sdk/src/sdk/sources.py',['_source_fact','_collected_source','_safe_detail','_terminal_result']),
+ ('libs/sdk/tests/test_arrival_sources.py',['test_collection_failure_serializes_partial_pairs_and_prior_commits']),
+ ('libs/sdk/src/sdk/errors.py',['_identity_details','normalize_exception']),
+ ('libs/engine/src/engine/arrival_search.py',['sync_search_index']),
+ ('libs/engine/src/engine/arrival_maintenance.py',['sync_projection']),
+])
+manifest = dict(due_at=datetime.datetime.now(datetime.timezone.utc).isoformat(),model='claude-fable-5-1[1m]',effort='low',worktree=str(root),results=str(out),jobs=jobs)
+(out/'manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
+(out/'build-followup.py.txt').write_text(Path(__file__).read_text())
+print(json.dumps([dict(name=j['name'],characters=j['packet_characters']) for j in jobs]))

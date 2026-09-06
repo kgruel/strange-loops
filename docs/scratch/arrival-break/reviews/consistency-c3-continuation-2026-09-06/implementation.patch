@@ -1,0 +1,266 @@
+diff --git a/libs/engine/src/engine/arrival_consumer.py b/libs/engine/src/engine/arrival_consumer.py
+index a5df592c..6d7ac84e 100644
+--- a/libs/engine/src/engine/arrival_consumer.py
++++ b/libs/engine/src/engine/arrival_consumer.py
+@@ -188,16 +188,12 @@ def open_read(
+             # The query transaction can observe a projection written after the
+             # seam captured H, including while resuming a prior page. Every
+             # reported watermark still needs custody membership validation.
+-            observed = (
+-                complete_projection_custody(
+-                    ledger,
+-                    captured=captured,
+-                    represented=watermark,
+-                    lineage_refusal=NotAuthority,
+-                    conflict_refusal=HeadMismatch,
+-                )
+-                if continuation is None
+-                else ledger.head_at(watermark)
++            observed = complete_projection_custody(
++                ledger,
++                captured=captured,
++                represented=watermark,
++                lineage_refusal=NotAuthority,
++                conflict_refusal=HeadMismatch,
+             )
+             if (
+                 continuation is not None
+diff --git a/libs/engine/tests/test_arrival_consumer.py b/libs/engine/tests/test_arrival_consumer.py
+index c72a8775..729048d6 100644
+--- a/libs/engine/tests/test_arrival_consumer.py
++++ b/libs/engine/tests/test_arrival_consumer.py
+@@ -19,6 +19,7 @@ from engine.arrival_contract import (
+     Continuation,
+     DeclarationAnchor,
+     Fact,
++    FactCursor,
+     FactRequest,
+     Head,
+     HeadMismatch,
+@@ -462,6 +463,176 @@ def test_consumer_resumes_continuation_after_ledger_advance(tmp_path, keys, sign
+         assert [fact.payload["number"] for fact in resumed.snapshot.facts(request).items] == [1]
+ 
+ 
++@pytest.mark.parametrize(
++    "case",
++    (
++        "foreign",
++        "missing",
++        "substitution",
++        "wrong-coordinate",
++        "wrong-lineage-coordinate",
++    ),
++)
++def test_resumed_consumer_completes_new_snapshot_watermark_custody(
++    monkeypatch, case
++):
++    captured = Head("lineage", 3, "captured")
++    projected = Head("lineage", 2, "projected")
++    represented = Watermark(
++        "foreign" if case == "foreign" else captured.lineage,
++        (
++            captured.ordinal + 1
++            if case in {"missing", "wrong-coordinate", "wrong-lineage-coordinate"}
++            else captured.ordinal
++        ),
++    )
++    closed: list[str] = []
++    snapshot = SimpleNamespace(
++        represented=represented,
++        declaration_anchor=DeclarationAnchor(None, None),
++        view_generation="view",
++        close=lambda: closed.append("snapshot"),
++    )
++
++    class MissingPrefix(Exception):
++        pass
++
++    missing = MissingPrefix("reported prefix is absent")
++
++    class Ledger:
++        def __init__(self):
++            self.opened = SimpleNamespace(
++                comparison=Compared(Outcome.UNCHANGED, captured, None)
++            )
++            self.lookups = 0
++
++        def head_at(self, watermark):
++            self.lookups += 1
++            if self.lookups == 1:
++                assert watermark == Watermark(captured.lineage, captured.ordinal)
++                return captured
++            if self.lookups == 2:
++                assert watermark == Watermark(projected.lineage, projected.ordinal)
++                return projected
++            if case == "missing":
++                raise missing
++            if case == "substitution":
++                return Head(captured.lineage, captured.ordinal, "replacement")
++            if case == "wrong-coordinate":
++                return Head(captured.lineage, captured.ordinal, "wrong-coordinate")
++            if case == "wrong-lineage-coordinate":
++                return Head("other-lineage", represented.ordinal, "wrong-lineage")
++            raise AssertionError("foreign watermark reached custody lookup")
++
++        def close(self):
++            closed.append("ledger")
++
++    class Query:
++        def open_snapshot(self, **kwargs):
++            return snapshot
++
++        def close(self):
++            closed.append("query")
++
++    class Registry:
++        def open(self, descriptor):
++            return Ledger(), Query()
++
++    monkeypatch.setattr("engine.arrival_consumer.AttestedLedger", Ledger)
++    request = FactRequest(limit=1, order="oldest")
++    continuation = Continuation(
++        captured,
++        projected,
++        request,
++        FactCursor(1, 0, "first"),
++        "view",
++    )
++    expected = {
++        "foreign": NotAuthority,
++        "missing": MissingPrefix,
++        "substitution": HeadMismatch,
++        "wrong-coordinate": HeadMismatch,
++        "wrong-lineage-coordinate": HeadMismatch,
++    }[case]
++
++    with pytest.raises(expected) as raised:
++        open_read(
++            Registry(),
++            StoreDescriptor("file", "unused", role=Profile.AUTHORITY),
++            requirement=ProjectionRequirement.ALLOW_BEHIND,
++            continuation=continuation,
++        )
++
++    if case == "missing":
++        assert raised.value is missing
++    assert closed == ["snapshot", "query", "ledger"]
++
++
++def test_resumed_consumer_accepts_vouched_projection_advance_but_keeps_token_bounds(
++    monkeypatch,
++):
++    captured = Head("lineage", 3, "captured")
++    projected = Head("lineage", 2, "projected")
++    advanced = Head("lineage", 4, "advanced")
++    closed: list[str] = []
++    snapshot = SimpleNamespace(
++        represented=Watermark(advanced.lineage, advanced.ordinal),
++        declaration_anchor=DeclarationAnchor(None, None),
++        view_generation="view",
++        close=lambda: closed.append("snapshot"),
++    )
++
++    class Ledger:
++        def __init__(self):
++            self.opened = SimpleNamespace(
++                comparison=Compared(Outcome.UNCHANGED, advanced, None)
++            )
++
++        def head_at(self, watermark):
++            return {
++                Watermark(captured.lineage, captured.ordinal): captured,
++                Watermark(projected.lineage, projected.ordinal): projected,
++                Watermark(advanced.lineage, advanced.ordinal): advanced,
++            }[watermark]
++
++        def close(self):
++            closed.append("ledger")
++
++    class Query:
++        def open_snapshot(self, **kwargs):
++            assert kwargs["captured_head"] == captured
++            return snapshot
++
++        def close(self):
++            closed.append("query")
++
++    class Registry:
++        def open(self, descriptor):
++            return Ledger(), Query()
++
++    monkeypatch.setattr("engine.arrival_consumer.AttestedLedger", Ledger)
++    request = FactRequest(limit=1, order="oldest")
++    token = Continuation(
++        captured,
++        projected,
++        request,
++        FactCursor(1, 0, "first"),
++        "view",
++    )
++
++    with open_read(
++        Registry(),
++        StoreDescriptor("file", "unused", role=Profile.AUTHORITY),
++        requirement=ProjectionRequirement.ALLOW_BEHIND,
++        continuation=token,
++    ) as resumed:
++        assert resumed.basis.captured_head == token.captured_head
++        assert resumed.basis.projected_through == token.projected_through
++        assert resumed.basis.view_generation == token.view_generation
++
++    assert closed == ["snapshot", "query", "ledger"]
++
++
+ def test_fresh_consumer_clamps_a_custody_proven_projection_advance(monkeypatch):
+     captured = Head("lineage", 3, "captured")
+     advanced = Head("lineage", 4, "advanced")
+diff --git a/libs/sdk/tests/test_arrival_read.py b/libs/sdk/tests/test_arrival_read.py
+index 3fb86aec..ed7a6845 100644
+--- a/libs/sdk/tests/test_arrival_read.py
++++ b/libs/sdk/tests/test_arrival_read.py
+@@ -614,13 +614,43 @@ def test_sdk_arrival_fact_pagination_hard_bounds_packed_batch(
+     first = read_facts(vertex, limit=1, order="oldest")
+     assert [item["id"] for item in first.items] == ["page-0"]
+     assert first.truncated is True and isinstance(first.next_cursor, Continuation)
+-    second = read_facts(vertex, limit=1, order="oldest", after=first.next_cursor)
++    token = first.next_cursor
++    original_basis = first.basis
++    assert original_basis is not None
++    assert token.captured_head == original_basis.captured_head
++    assert token.projected_through == original_basis.projected_through
++
++    log.append(
++        "batch",
++        body_of_batch(
++            [
++                ("later-0", "note", 20.0, "kyle", "", json.dumps({"n": 3})),
++                ("later-1", "note", 21.0, "kyle", "", json.dumps({"n": 4})),
++            ]
++        ),
++        observer="kyle",
++        at=21.0,
++    )
++    advanced = sync_target(vertex)
++    assert advanced.captured_head.ordinal > original_basis.captured_head.ordinal
++    assert advanced.projected_after.ordinal > original_basis.projected_through.ordinal
++
++    second = read_facts(vertex, limit=1, order="oldest", after=token)
+     assert [item["id"] for item in second.items] == ["page-1"]
+     assert second.truncated is True and isinstance(second.next_cursor, Continuation)
+     third = read_facts(vertex, limit=1, order="oldest", after=second.next_cursor)
+     assert [item["id"] for item in third.items] == ["page-2"]
+     assert third.truncated is False and third.next_cursor is None
+-    assert third.basis is not None and third.basis == first.basis
++    assert third.basis is not None and third.basis == original_basis
++
++    current = read_facts(vertex, limit=10, order="oldest")
++    assert [item["id"] for item in current.items] == [
++        "page-0",
++        "page-1",
++        "page-2",
++        "later-0",
++        "later-1",
++    ]
+ 
+ 
+ def test_sdk_arrival_fact_lookup_accepts_literal_arbitrary_id_prefixes(

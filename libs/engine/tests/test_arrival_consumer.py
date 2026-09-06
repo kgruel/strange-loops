@@ -19,6 +19,7 @@ from engine.arrival_contract import (
     Continuation,
     DeclarationAnchor,
     Fact,
+    FactCursor,
     FactRequest,
     Head,
     HeadMismatch,
@@ -460,6 +461,176 @@ def test_consumer_resumes_continuation_after_ledger_advance(tmp_path, keys, sign
     log.append("note", {"message": "after-page-one"}, observer="kyle")
     with open_read(registry, descriptor, continuation=token) as resumed:
         assert [fact.payload["number"] for fact in resumed.snapshot.facts(request).items] == [1]
+
+
+@pytest.mark.parametrize(
+    "case",
+    (
+        "foreign",
+        "missing",
+        "substitution",
+        "wrong-coordinate",
+        "wrong-lineage-coordinate",
+    ),
+)
+def test_resumed_consumer_completes_new_snapshot_watermark_custody(
+    monkeypatch, case
+):
+    captured = Head("lineage", 3, "captured")
+    projected = Head("lineage", 2, "projected")
+    represented = Watermark(
+        "foreign" if case == "foreign" else captured.lineage,
+        (
+            captured.ordinal + 1
+            if case in {"missing", "wrong-coordinate", "wrong-lineage-coordinate"}
+            else captured.ordinal
+        ),
+    )
+    closed: list[str] = []
+    snapshot = SimpleNamespace(
+        represented=represented,
+        declaration_anchor=DeclarationAnchor(None, None),
+        view_generation="view",
+        close=lambda: closed.append("snapshot"),
+    )
+
+    class MissingPrefix(Exception):
+        pass
+
+    missing = MissingPrefix("reported prefix is absent")
+
+    class Ledger:
+        def __init__(self):
+            self.opened = SimpleNamespace(
+                comparison=Compared(Outcome.UNCHANGED, captured, None)
+            )
+            self.lookups = 0
+
+        def head_at(self, watermark):
+            self.lookups += 1
+            if self.lookups == 1:
+                assert watermark == Watermark(captured.lineage, captured.ordinal)
+                return captured
+            if self.lookups == 2:
+                assert watermark == Watermark(projected.lineage, projected.ordinal)
+                return projected
+            if case == "missing":
+                raise missing
+            if case == "substitution":
+                return Head(captured.lineage, captured.ordinal, "replacement")
+            if case == "wrong-coordinate":
+                return Head(captured.lineage, captured.ordinal, "wrong-coordinate")
+            if case == "wrong-lineage-coordinate":
+                return Head("other-lineage", represented.ordinal, "wrong-lineage")
+            raise AssertionError("foreign watermark reached custody lookup")
+
+        def close(self):
+            closed.append("ledger")
+
+    class Query:
+        def open_snapshot(self, **kwargs):
+            return snapshot
+
+        def close(self):
+            closed.append("query")
+
+    class Registry:
+        def open(self, descriptor):
+            return Ledger(), Query()
+
+    monkeypatch.setattr("engine.arrival_consumer.AttestedLedger", Ledger)
+    request = FactRequest(limit=1, order="oldest")
+    continuation = Continuation(
+        captured,
+        projected,
+        request,
+        FactCursor(1, 0, "first"),
+        "view",
+    )
+    expected = {
+        "foreign": NotAuthority,
+        "missing": MissingPrefix,
+        "substitution": HeadMismatch,
+        "wrong-coordinate": HeadMismatch,
+        "wrong-lineage-coordinate": HeadMismatch,
+    }[case]
+
+    with pytest.raises(expected) as raised:
+        open_read(
+            Registry(),
+            StoreDescriptor("file", "unused", role=Profile.AUTHORITY),
+            requirement=ProjectionRequirement.ALLOW_BEHIND,
+            continuation=continuation,
+        )
+
+    if case == "missing":
+        assert raised.value is missing
+    assert closed == ["snapshot", "query", "ledger"]
+
+
+def test_resumed_consumer_accepts_vouched_projection_advance_but_keeps_token_bounds(
+    monkeypatch,
+):
+    captured = Head("lineage", 3, "captured")
+    projected = Head("lineage", 2, "projected")
+    advanced = Head("lineage", 4, "advanced")
+    closed: list[str] = []
+    snapshot = SimpleNamespace(
+        represented=Watermark(advanced.lineage, advanced.ordinal),
+        declaration_anchor=DeclarationAnchor(None, None),
+        view_generation="view",
+        close=lambda: closed.append("snapshot"),
+    )
+
+    class Ledger:
+        def __init__(self):
+            self.opened = SimpleNamespace(
+                comparison=Compared(Outcome.UNCHANGED, advanced, None)
+            )
+
+        def head_at(self, watermark):
+            return {
+                Watermark(captured.lineage, captured.ordinal): captured,
+                Watermark(projected.lineage, projected.ordinal): projected,
+                Watermark(advanced.lineage, advanced.ordinal): advanced,
+            }[watermark]
+
+        def close(self):
+            closed.append("ledger")
+
+    class Query:
+        def open_snapshot(self, **kwargs):
+            assert kwargs["captured_head"] == captured
+            return snapshot
+
+        def close(self):
+            closed.append("query")
+
+    class Registry:
+        def open(self, descriptor):
+            return Ledger(), Query()
+
+    monkeypatch.setattr("engine.arrival_consumer.AttestedLedger", Ledger)
+    request = FactRequest(limit=1, order="oldest")
+    token = Continuation(
+        captured,
+        projected,
+        request,
+        FactCursor(1, 0, "first"),
+        "view",
+    )
+
+    with open_read(
+        Registry(),
+        StoreDescriptor("file", "unused", role=Profile.AUTHORITY),
+        requirement=ProjectionRequirement.ALLOW_BEHIND,
+        continuation=token,
+    ) as resumed:
+        assert resumed.basis.captured_head == token.captured_head
+        assert resumed.basis.projected_through == token.projected_through
+        assert resumed.basis.view_generation == token.view_generation
+
+    assert closed == ["snapshot", "query", "ledger"]
 
 
 def test_fresh_consumer_clamps_a_custody_proven_projection_advance(monkeypatch):

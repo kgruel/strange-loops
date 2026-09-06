@@ -188,16 +188,12 @@ def open_read(
             # The query transaction can observe a projection written after the
             # seam captured H, including while resuming a prior page. Every
             # reported watermark still needs custody membership validation.
-            observed = (
-                complete_projection_custody(
-                    ledger,
-                    captured=captured,
-                    represented=watermark,
-                    lineage_refusal=NotAuthority,
-                    conflict_refusal=HeadMismatch,
-                )
-                if continuation is None
-                else ledger.head_at(watermark)
+            observed = complete_projection_custody(
+                ledger,
+                captured=captured,
+                represented=watermark,
+                lineage_refusal=NotAuthority,
+                conflict_refusal=HeadMismatch,
             )
             if (
                 continuation is not None

@@ -1,3 +1,26 @@
+## September 6: C5 checkpointed; C3 continuation complete and accepted
+
+C5 is checkpointed at `bacaeb96`. The C3 continuation follow-up is complete
+using Sol/Terra/Luna and root, with Fable 5.1 low-effort acceptance and no
+blockers. Resumed snapshots now use common custody completion while preserving
+original token H/P, generation checks and valid projection advancement.
+
+See the [implementation report](consistency-c3-continuation-2026-09-06.md),
+[validation](consistency-c3-continuation-validation-2026-09-06.md), and
+[review triage](reviews/consistency-c3-continuation-2026-09-06/primary-triage.md).
+Final engine 2,568 passed / 1 skipped, SDK 540 passed, architecture 101 passed;
+scoped Ruff clean. Production/test hashes match validation and review. No
+review or validation jobs remain. The two optional review notes are triaged.
+
+C3 continuation changes remain uncommitted on `arrival/finish`; nothing pushed
+or applied to live stores. Remaining consistency work includes C6/D5 boundary
+continuity and D0 credential request design, C7 bounded aggregate inspection,
+and the later C9 SDK/CLI cut. C3 no longer has an implementation follow-up.
+The optional intermediate/regressed-watermark test coverage remains recorded
+in its review triage.
+
+The entries below retain their historical checkpoint status.
+
 ## September 6: C4 checkpointed; C5 complete and accepted
 
 C4 is checkpointed at `79696a72`. C5 is implemented using Sol/Terra/Luna and

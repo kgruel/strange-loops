@@ -614,13 +614,43 @@ def test_sdk_arrival_fact_pagination_hard_bounds_packed_batch(
     first = read_facts(vertex, limit=1, order="oldest")
     assert [item["id"] for item in first.items] == ["page-0"]
     assert first.truncated is True and isinstance(first.next_cursor, Continuation)
-    second = read_facts(vertex, limit=1, order="oldest", after=first.next_cursor)
+    token = first.next_cursor
+    original_basis = first.basis
+    assert original_basis is not None
+    assert token.captured_head == original_basis.captured_head
+    assert token.projected_through == original_basis.projected_through
+
+    log.append(
+        "batch",
+        body_of_batch(
+            [
+                ("later-0", "note", 20.0, "kyle", "", json.dumps({"n": 3})),
+                ("later-1", "note", 21.0, "kyle", "", json.dumps({"n": 4})),
+            ]
+        ),
+        observer="kyle",
+        at=21.0,
+    )
+    advanced = sync_target(vertex)
+    assert advanced.captured_head.ordinal > original_basis.captured_head.ordinal
+    assert advanced.projected_after.ordinal > original_basis.projected_through.ordinal
+
+    second = read_facts(vertex, limit=1, order="oldest", after=token)
     assert [item["id"] for item in second.items] == ["page-1"]
     assert second.truncated is True and isinstance(second.next_cursor, Continuation)
     third = read_facts(vertex, limit=1, order="oldest", after=second.next_cursor)
     assert [item["id"] for item in third.items] == ["page-2"]
     assert third.truncated is False and third.next_cursor is None
-    assert third.basis is not None and third.basis == first.basis
+    assert third.basis is not None and third.basis == original_basis
+
+    current = read_facts(vertex, limit=10, order="oldest")
+    assert [item["id"] for item in current.items] == [
+        "page-0",
+        "page-1",
+        "page-2",
+        "later-0",
+        "later-1",
+    ]
 
 
 def test_sdk_arrival_fact_lookup_accepts_literal_arbitrary_id_prefixes(

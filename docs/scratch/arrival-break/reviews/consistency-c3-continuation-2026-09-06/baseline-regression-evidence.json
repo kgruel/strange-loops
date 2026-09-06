@@ -1,0 +1,19 @@
+{
+  "provenance": "Sol agent tool transcript; raw command output was not redirected to a retained file",
+  "baseline": "bacaeb96",
+  "isolated_baseline_package": "/tmp/loops-c3-continuation-final-baseline.6iu6JC/engine",
+  "consumer_sha256": "7ade5e7a10110bcbad033a70e3e40976879c46c7cd32ab690d9d594809b50a20",
+  "root_verified_baseline_consumer_bytes": true,
+  "command": "PYTHONPATH=/tmp/loops-c3-continuation-final-baseline.6iu6JC uv run pytest libs/engine/tests/test_arrival_consumer.py -q -k resumed_consumer_completes_new_snapshot_watermark_custody",
+  "reported_result": {
+    "failed": 3,
+    "passed": 2,
+    "deselected": 26
+  },
+  "failures": [
+    "same-height hash substitution accepted",
+    "wrong ordinal accepted",
+    "wrong returned lineage accepted"
+  ],
+  "current_focused_reported_result": "31 passed; scoped Ruff and diff check clean"
+}

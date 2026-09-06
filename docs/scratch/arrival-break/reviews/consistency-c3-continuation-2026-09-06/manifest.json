@@ -1,0 +1,27 @@
+{
+  "due_at": "2026-09-06T19:57:42.775806+00:00",
+  "model": "claude-fable-5-1[1m]",
+  "effort": "low",
+  "worktree": "/Users/kaygee/Code/loops-wt/arrival-finish",
+  "results": "/Users/kaygee/Code/loops-wt/arrival-finish/docs/scratch/arrival-break/reviews/consistency-c3-continuation-2026-09-06",
+  "jobs": [
+    {
+      "name": "c3-continuation",
+      "packet": "/Users/kaygee/Code/loops-wt/arrival-finish/docs/scratch/arrival-break/reviews/consistency-c3-continuation-2026-09-06/c3-continuation-prompt.txt",
+      "sha256": "4e8101465c55c506e779583ab5f6aa91f745efe6317d1733a9c31c91663a97d4",
+      "sources": {
+        "libs/engine/src/engine/arrival_consumer.py": "9bbbafef0b17614ec945d5565fd71c0306ad7459c1d167360205e930dbd2ddc4",
+        "libs/engine/tests/test_arrival_consumer.py": "fc56f8db3f2150310043eae9f4c503971b94b0956fc11498bb44e566f1d7db90",
+        "libs/sdk/tests/test_arrival_read.py": "7640514ca302eb0bada0135092c93b3ac1364c9619521d65e11f7d72958206a7",
+        "libs/engine/src/engine/arrival_head_seam.py": "98aa31cc74654852f64f74b8a5d2465ab9efb0022f4d018c1c31ed40f334393b",
+        "libs/engine/src/engine/arrival_contract.py": "4859b8935a34c4ee08fb0cd75064bdd1360ce85e43647263ae08be86ddef2a1d",
+        "libs/engine/src/engine/arrival_file_backend.py": "196db6be0bd6c06794e7935946d102def55cc5b48832f1b0cc4147932c047dbe",
+        "libs/sdk/src/sdk/read.py": "7db73bf6c487abf0f59502b091eedf652a84fd0aaf0bfee0ce5066c50376d161",
+        "docs/scratch/arrival-break/consistency-c3-continuation-2026-09-06.md": "5c839c09e39dbf5918c825ce4b1f894e1f37e9a8ab7d9f327a8beadcb62e3ca0",
+        "docs/scratch/arrival-break/consistency-c3-continuation-validation-2026-09-06.md": "db9ffa7140ff352932ba7216d2f912531cd973040c0040facfabad9c95ffc2e9"
+      },
+      "status": "pending",
+      "packet_bytes": 96800
+    }
+  ]
+}

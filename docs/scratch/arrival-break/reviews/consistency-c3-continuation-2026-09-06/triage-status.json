@@ -1,0 +1,26 @@
+{
+  "status": "complete",
+  "pending_reviews": 0,
+  "review": "accept",
+  "packet_sha256": "4e8101465c55c506e779583ab5f6aa91f745efe6317d1733a9c31c91663a97d4",
+  "packet_bytes": 96800,
+  "source_drift_at_review_start": [],
+  "production_test_drift_at_final_triage": [],
+  "completion_document_changes_after_review": [
+    "docs/scratch/arrival-break/consistency-c3-continuation-2026-09-06.md"
+  ],
+  "findings": [
+    {
+      "id": 1,
+      "status": "deferred-optional-test-coverage",
+      "reason": "Unchanged intermediate/regressed watermark policy source-traced; direct consumer tests would strengthen later adapter conformance."
+    },
+    {
+      "id": 2,
+      "status": "resolved-source-and-executed-validation",
+      "reason": "SyncResult.projected_after exists and successful sync populates it; final SDK suite passed."
+    }
+  ],
+  "production_tests_match_validation_and_review": true,
+  "committed": false
+}

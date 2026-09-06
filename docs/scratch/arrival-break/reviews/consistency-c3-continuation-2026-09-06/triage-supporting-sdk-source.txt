@@ -1,0 +1,60 @@
+libs/sdk/src/sdk/types.py
+SHA256 19f6f884ec80c8c7ac08d253da057e383e63c8c36895aecbf6d483b09a71020d
+878: @dataclass(frozen=True)
+879: class SyncResult:
+880:     """Result of one explicit derived-projection synchronization."""
+881: 
+882:     schema: str = "loops.sdk/sync-result/v2"
+883:     read_path: str = "legacy"
+884:     store: StoreDescriptorInfo | None = None
+885:     target_path: str = ""
+886:     status: str = "synced"
+887:     captured_head: Head | None = None
+888:     target: Head | None = None
+889:     projected_before: Head | None = None
+890:     projected_after: Head | None = None
+891:     view_generation: str | None = None
+892:     changed: bool | None = None
+893:     rebuilt: bool = False
+894:     indexed_facts: int | None = 0
+895:     agreement: bool | None = True
+896:     duration_ms: float = 0.0
+897: 
+898:     def as_dict(self) -> dict[str, Any]:
+899:         return asdict(self)
+900: 
+901: 
+902: @dataclass(frozen=True)
+903: class VerifyResult:
+
+libs/sdk/src/sdk/read.py
+SHA256 7db73bf6c487abf0f59502b091eedf652a84fd0aaf0bfee0ce5066c50376d161
+1832:             )
+1833:         except BaseException as exc:
+1834:             normalized = normalize_exception(exc)
+1835:             if normalized is exc:
+1836:                 raise
+1837:             raise normalized from exc
+1838:         t1 = time.perf_counter()
+1839:         return SyncResult(
+1840:             read_path="arrival",
+1841:             store=StoreDescriptorInfo.from_descriptor(descriptor),
+1842:             target_path=str(target_path),
+1843:             status="caught-up" if result.changed else "current",
+1844:             captured_head=result.captured_head,
+1845:             target=result.target,
+1846:             projected_before=result.projected_before,
+1847:             projected_after=result.projected_after,
+1848:             view_generation=result.view_generation,
+1849:             changed=result.changed,
+1850:             rebuilt=result.rebuilt,
+1851:             indexed_facts=None,
+1852:             agreement=result.projected_after.ordinal >= result.target.ordinal,
+1853:             duration_ms=(t1 - t0) * 1000.0,
+1854:         )
+1855: 
+1856:     _refuse_arrival_aggregate_members(target_path)
+1857:     info = resolve_target(target)
+1858: 
+1859:     if info.target_type == "vertex":
+1860:         res = vertex_reindex(target_path)

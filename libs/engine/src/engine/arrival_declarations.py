@@ -31,6 +31,11 @@ from .arrival import (
     key_registry_from_records,
 )
 from .arrival_body import body_of_batch, body_of_fact_row
+from .arrival_boundary_continuity import (
+    BoundaryContinuityConflict,
+    analyze_boundary_continuity,
+    collect_verified_parameter_rows,
+)
 from .arrival_contract import (
     ArrivalLedger,
     ArrivalQuery,
@@ -43,6 +48,7 @@ from .arrival_contract import (
     ReadBasis,
     RecordDraft,
     StoreDescriptor,
+    TickRequest,
     Watermark,
 )
 from .arrival_head_seam import (
@@ -940,12 +946,33 @@ def prepare_declaration_edit(
                     "convenience mutation refused"
                 )
         changes = tuple(diff_documents(before_documents, proposed_documents))
+        continuity_ticks = tuple(
+            snapshot.ticks(TickRequest(since=float("-inf")))
+        )
+        verified_params = collect_verified_parameter_rows(
+            snapshot.declaration_anchor,
+            facts,
+            target_documents=proposed_documents,
+            base_dir=target_path.parent,
+        )
+        analyze_boundary_continuity(
+            snapshot.declaration_anchor,
+            facts,
+            continuity_ticks,
+            target_documents=proposed_documents,
+            verified_params=verified_params,
+        )
         key_registry, _key_evidence = key_registry_from_records(
             ledger.scan(through=captured_head), arrival_verify
         )
         atomic_limit = ledger.capabilities().max_atomic_records
     except DeclarationPreparationError:
         raise
+    except BoundaryContinuityConflict as exc:
+        raise _preparation_refused(
+            f"boundary continuity refuses declaration preparation: {exc}",
+            captured_head=captured_head,
+        ) from exc
     except Exception as exc:
         raise _preparation_refused(
             f"cannot establish declaration preparation basis: {exc}",

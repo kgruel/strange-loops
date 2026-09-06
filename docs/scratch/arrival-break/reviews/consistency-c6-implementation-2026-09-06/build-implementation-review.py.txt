@@ -1,0 +1,71 @@
+from pathlib import Path
+from datetime import datetime,timezone
+import ast,hashlib,json,subprocess,shutil
+root=Path('/Users/kaygee/Code/loops-wt/arrival-finish')
+review=root/'docs/scratch/arrival-break/reviews/consistency-c6-implementation-2026-09-06'
+review.mkdir(parents=True,exist_ok=True)
+packet=review/'c6-implementation-prompt.txt'
+assert not packet.exists(),'Packet already frozen'
+files=[
+ 'libs/engine/src/engine/arrival_boundary_continuity.py',
+ 'libs/engine/src/engine/arrival_declarations.py',
+ 'libs/engine/src/engine/compiler.py',
+ 'libs/engine/src/engine/runtime_write.py',
+ 'libs/engine/tests/test_arrival_boundary_continuity.py',
+ 'libs/engine/tests/test_arrival_declaration_custody.py',
+ 'libs/engine/tests/test_runtime_capture.py',
+ 'libs/sdk/src/sdk/kind.py',
+ 'libs/sdk/tests/test_arrival_boundary_continuity.py',
+ 'tests/architecture/test_rule_18_arrival_vocabulary_denylist.py',
+]
+patches=[]
+for name in files:
+ tracked=subprocess.run(['git','ls-files','--error-unmatch','--',name],cwd=root,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL).returncode==0
+ cmd=['git','diff','ef8b21b2','--',name] if tracked else ['git','diff','--no-index','--','/dev/null',name]
+ p=subprocess.run(cmd,cwd=root,capture_output=True,text=True)
+ assert p.returncode in (0,1),(name,p.stderr)
+ patches.append(p.stdout)
+patch=''.join(patches)
+(review/'implementation.patch').write_text(patch)
+sections=[
+ ('docs/scratch/arrival-break/consistency-c6-2026-09-06.md',None),
+ ('docs/scratch/arrival-break/consistency-c6-validation-2026-09-06.md',None),
+ ('docs/scratch/arrival-break/consistency-c6-boundary-design-2026-09-06.md',None),
+ ('libs/engine/src/engine/arrival_boundary_continuity.py',None),
+ ('libs/engine/src/engine/runtime_write.py',{'RuntimeWriteRefused','BoundaryContinuityRefused','_build_effective_arrival_candidate','_hydrate_effective_arrival_candidate','capture_runtime','plan_ordinary_write'}),
+ ('libs/engine/src/engine/arrival_declarations.py',{'DeclarationPreparationRefused','_preparation_refused','prepare_declaration_edit'}),
+ ('libs/engine/src/engine/compiler.py',{'parse_source_params_bytes','_load_params_file','_resolve_param_indirection','compile_sources','materialize_vertex','map_boundary'}),
+ ('libs/engine/src/engine/declaration.py',{'resolve_declaration_documents_from_snapshot','verify_source_pins_from_documents','effective_declaration_from_documents','validate_arrival_runtime_identity'}),
+ ('libs/engine/src/engine/loop.py',None),
+ ('libs/engine/src/engine/vertex.py',{'_owns_tick','hydrate_snapshot','plan_pending_boundaries','_fire_vertex_boundary'}),
+ ('libs/sdk/src/sdk/kind.py',{'_arrival_semantic_preview'}),
+ ('libs/sdk/src/sdk/errors.py',{'_identity_details','_causal_exception','_cause_details','_evidence_details','normalize_exception'}),
+]
+intro='''You are Fable 5.1 at LOW effort doing an adversarial IMPLEMENTATION review of C6 boundary continuity. No tools; do not claim to run tests. Inspect frozen actual code and tests, not merely design. Return ACCEPT or REVISE, blockers with severity + concrete counterexample + source/line, then optional notes. Keep output under 2200 words.
+
+User authorized Sol/Terra/Luna implementation and Fable review; two HIGH design reviews already occurred before code. Root resolved valid findings and rejected the follow-up missing-param-pin-gate premise with source and tests. The complete existing pin-verification call chain is included here. The selected policy is in-place inheritance of boundary edges; retirement/recreation with consumed old ticks refuses, as do unproven historical roles. Historical vertex ambiguity is consumer-scoped. No tick payload is restored as current fold state. Refer to the authoritative current design.
+
+Review especially: full self-declaration receipt history including intermediate/atomic revisions; every relevant tick, vertex identity scope, pregenesis and negative time; implicit cite; role-specific consumer gating; three-valued generated names and verified historical parameter evidence; parser same-read hashing/decoding; compiled names in both directions; scalar/cause/basis effect evidence; correct declaration fact identity in a multi-document revision; shared SDK preview/preparation/runtime proof; refusal before hydrate/sign/collect/append; existing continuation/CAS/read/legacy scope preserved. Newly exposed APIs are internal engine support, not new wire identifiers. Do not demand a restart/incarnation protocol or credential D0/D2 migration inside this bounded slice. Legacy attached replay/CLI retirement remains outside scope.
+
+Full validation evidence is below, but tests passing do not substitute for reading code. Baseline probes are labeled fake-query where appropriate; real engine/SDK acceptance is in the patch. Identify a real mismatch with the selected contract or a concrete implementation defect. Do not repeat resolved policy alternatives as blockers.
+'''
+parts=[intro];sources={}
+for name,names in sections:
+ p=root/name;data=p.read_bytes();sources[name]=hashlib.sha256(data).hexdigest();text=data.decode();lines=text.splitlines()
+ parts.append('\n\n===== '+name+' =====\n')
+ if names is None: ranges=[(1,len(lines))]
+ else:
+  tree=ast.parse(text);nodes=[n for n in ast.walk(tree) if isinstance(n,(ast.FunctionDef,ast.AsyncFunctionDef,ast.ClassDef)) and n.name in names]
+  found={n.name for n in nodes};assert found==names,(name,names-found)
+  ranges=[(n.lineno,n.end_lineno) for n in sorted(nodes,key=lambda n:n.lineno)]
+ for start,end in ranges:
+  parts.append('\n'.join(f'{i}: {lines[i-1]}' for i in range(start,end+1)))
+parts.append('\n\n===== COMPLETE C6 PRODUCTION/TEST PATCH (includes all new files) =====\n'+patch)
+for name in files:sources[name]=hashlib.sha256((root/name).read_bytes()).hexdigest()
+packet.write_text('\n'.join(parts)+'\n')
+manifest={'model':'claude-fable-5-1[1m]','effort':'low','worktree':str(root),'results':str(review),'due_at':datetime.now(timezone.utc).isoformat(),'baseline':'ef8b21b2','scope':'C6 implementation after high-effort design triage','jobs':[{'name':'c6-implementation','packet':str(packet),'sha256':hashlib.sha256(packet.read_bytes()).hexdigest(),'sources':sources,'status':'pending'}]}
+(review/'manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
+(review/'build-implementation-review.py.txt').write_bytes(Path(__file__).read_bytes())
+validation=Path('/tmp/loops-arrival-c6-2026-09-06/final-validation')
+shutil.copytree(validation, review/'validation-evidence', dirs_exist_ok=False)
+print(json.dumps({'packet_bytes':packet.stat().st_size,'sha256':manifest['jobs'][0]['sha256'],'manifest':str(review/'manifest.json')},indent=2))

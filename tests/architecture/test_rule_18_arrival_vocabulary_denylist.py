@@ -106,6 +106,7 @@ _SCAN_TARGETS = (
     "libs/engine/src/engine/arrival_aggregate.py",
     "libs/engine/src/engine/arrival_transfer.py",
     "libs/engine/src/engine/arrival_restore.py",
+    "libs/engine/src/engine/arrival_boundary_continuity.py",
     "libs/engine/src/engine/arrival_declarations.py",
     "libs/engine/src/engine/arrival_search.py",
     "libs/engine/src/engine/arrival_sources.py",

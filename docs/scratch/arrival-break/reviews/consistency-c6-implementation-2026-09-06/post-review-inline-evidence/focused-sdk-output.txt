@@ -1,0 +1,6 @@
+Command:
+uv run --package sdk pytest libs/sdk/tests/test_arrival_boundary_continuity.py -q
+
+Observed output:
+......                                                                   [100%]
+6 passed in 0.60s

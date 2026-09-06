@@ -1,0 +1,33 @@
+from __future__ import annotations
+import json, sqlite3
+from pathlib import Path
+from engine.arrival_contract import FactRequest, Head, ProjectionRequirement, TickRequest
+from engine.arrival_file_backend import FileQuery
+from engine.arrival_projection import _ensure_index_schema
+from engine.file_projection_schema import FACT_INSERT_SQL, TICK_INSERT_SQL, ARRIVAL_LINEAGE_KEY, ARRIVAL_ORDINAL_KEY
+from engine.sql_util import kind_subtree_predicate
+
+path = Path('/tmp/loops-arrival-c6-2026-09-06/negative-query.db')
+if path.exists(): path.unlink()
+conn = sqlite3.connect(path)
+_ensure_index_schema(conn)
+conn.execute('INSERT INTO store_meta(key,value) VALUES (?,?)', (ARRIVAL_LINEAGE_KEY, 'L'))
+conn.execute('INSERT INTO store_meta(key,value) VALUES (?,?)', (ARRIVAL_ORDINAL_KEY, '2'))
+conn.execute(FACT_INSERT_SQL, ('f1', '_decl.genesis', 0.0, 'o', '', '{}', None, 1, 0))
+conn.execute(FACT_INSERT_SQL, ('f2', '_decl.kind-defined', 1.0, 'o', '', '{}', None, 2, 0))
+conn.execute(FACT_INSERT_SQL, ('f3', '_declx.not-subtree', 1.0, 'o', '', '{}', None, 2, 1))
+conn.execute(TICK_INSERT_SQL, ('tneg', 'pulse', -1.0, None, 'v', '{}', None, None, None, None, None, 1, 0))
+conn.execute(TICK_INSERT_SQL, ('tpos', 'pulse', 1.0, None, 'v', '{}', None, None, None, None, None, 2, 0))
+conn.commit(); conn.close()
+query = FileQuery(path)
+snapshot = query.open_snapshot(captured_head=Head('L', 2, 'hash'), requirement=ProjectionRequirement.CURRENT)
+try:
+    normal = snapshot.ticks(TickRequest())
+    full = snapshot.ticks(TickRequest(since=float('-inf')))
+    decl = snapshot.facts(FactRequest(limit=None, kind='_decl', include_internal=True, order='oldest')).items
+    print('tick-default-since', [t.id for t in normal])
+    print('tick-explicit-minus-inf', [t.id for t in full])
+    print('decl-prefix', [f.kind for f in decl])
+finally:
+    snapshot.close(); query.close()
+print('kind-predicate', kind_subtree_predicate('_decl'))

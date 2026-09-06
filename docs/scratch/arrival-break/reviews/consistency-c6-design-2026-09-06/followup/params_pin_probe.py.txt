@@ -1,0 +1,36 @@
+from __future__ import annotations
+import hashlib
+from pathlib import Path
+from lang.loader import parse_vertex
+from lang.document import vertex_to_documents
+from engine.declaration import SourceDrift, effective_declaration_from_documents
+
+root = Path('/tmp/loops-arrival-c6-2026-09-06/params-pin')
+root.mkdir(parents=True, exist_ok=True)
+locator_path = root / 'v.vertex'
+template = root / 'template.loop'
+params = root / 'params.csv'
+template.write_text('kind "{{kind}}"\nobserver "alice"\nsource "echo ok"\n', encoding='utf-8')
+params.write_text('kind\nold\n', encoding='utf-8')
+locator_path.write_text('name "v"\nloops { base { fold { n "count" } } }\n', encoding='utf-8')
+locator = parse_vertex(locator_path.read_text(), path=locator_path)
+docs = [d.as_json() for d in vertex_to_documents(locator)]
+docs.append({
+    'kind': '_decl.source-defined', 'subject': 'template', 'payload': {
+        'form': 'template', 'template': 'template.loop',
+        'content_sha256': hashlib.sha256(template.read_bytes()).hexdigest(),
+        'params': [], 'from': {
+            'strategy': 'file', 'path': 'params.csv',
+            'params_sha256': hashlib.sha256(params.read_bytes()).hexdigest(),
+        }, 'loop': None,
+    },
+})
+effective_declaration_from_documents(docs, locator)
+print('params-pin-unchanged', 'accepted')
+params.write_text('kind\nnew\n', encoding='utf-8')
+try:
+    effective_declaration_from_documents(docs, locator)
+except SourceDrift as exc:
+    print('params-pin-drift', type(exc).__name__, str(exc))
+else:
+    raise AssertionError('params drift was accepted')

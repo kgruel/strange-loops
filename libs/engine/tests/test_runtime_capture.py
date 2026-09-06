@@ -7,8 +7,10 @@ import json
 
 import pytest
 from atoms import Fact as AtomFact
+from lang import parse_vertex
+from lang.document import DECL_KIND_DEFINED, DECL_KIND_RETIRED, vertex_to_documents
 
-from engine.arrival_body import body_of_fact_row
+from engine.arrival_body import body_of_fact_row, body_of_tick_row
 from engine.arrival_file_backend import FileLedger
 from engine.arrival_maintenance import sync_projection
 from engine.declaration import SourceDrift, verify_source_pins_from_documents
@@ -16,11 +18,13 @@ from engine.handle import WriteCredentials
 from engine.row_commitment import tick_row_hash
 from engine.runtime_write import (
     BatchFactInput,
+    BoundaryContinuityRefused,
     RuntimeWriteRefused,
     capture_runtime,
     execute_batch_write,
     plan_batch_from_capture,
 )
+from engine.vertex import Vertex
 from tests.test_runtime_batch_write import _make_target
 
 
@@ -51,6 +55,196 @@ def _sync(target) -> None:
         target.descriptor,
         through=FileLedger(target.log).head(),
     )
+
+
+def _append_declaration_fact(target, identifier, kind, payload, ts, signer):
+    _append_fact(
+        target,
+        identifier,
+        kind,
+        ts,
+        signer,
+        {"lineage": target.log.lineage(), **payload},
+    )
+
+
+def _append_tick(target, identifier, name, ts, signer):
+    target.log.append(
+        "tick",
+        body_of_tick_row(
+            (
+                identifier,
+                name,
+                ts,
+                None,
+                target.locator.name,
+                "{}",
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+        ),
+        observer="kyle",
+        origin=target.locator.name,
+        at=abs(ts) + 3.0,
+        signer=signer,
+    )
+
+
+@pytest.mark.parametrize("source_mode", [False, True])
+@pytest.mark.parametrize("tick_ts", [-1.0, 3.0])
+def test_capture_refuses_ticked_retirement_and_recreation_from_full_tick_prefix(
+    tmp_path, monkeypatch, keys, signer, source_mode, tick_ts
+):
+    target = _make_target(tmp_path, monkeypatch, keys, signer)
+    _append_tick(target, "old-note-edge", "note", tick_ts, signer)
+    _append_declaration_fact(
+        target,
+        "retire-note",
+        DECL_KIND_RETIRED,
+        {"subject": "note"},
+        4.0,
+        signer,
+    )
+    note_document = next(
+        document
+        for document in vertex_to_documents(target.locator)
+        if document.kind == DECL_KIND_DEFINED and document.subject == "note"
+    )
+    _append_declaration_fact(
+        target,
+        "redefine-note",
+        DECL_KIND_DEFINED,
+        {"subject": "note", "payload": note_document.payload},
+        5.0,
+        signer,
+    )
+    _sync(target)
+    before = target.log.path.read_bytes()
+    hydration_calls = []
+    original_hydrate = Vertex.hydrate_snapshot
+
+    def hydrate_spy(self, facts, ticks):
+        hydration_calls.append((facts, ticks))
+        return original_hydrate(self, facts, ticks)
+
+    monkeypatch.setattr(Vertex, "hydrate_snapshot", hydrate_spy)
+
+    with pytest.raises(BoundaryContinuityRefused) as raised:
+        capture_runtime(
+            target.registry,
+            target.descriptor,
+            target.locator,
+            source_mode=source_mode,
+        )
+
+    assert raised.value.issue.reason == "prior-incarnation"
+    assert raised.value.tick_id == "old-note-edge"
+    assert raised.value.fact_id == "retire-note"
+    assert raised.value.basis.captured_head == FileLedger(target.log).head()
+    assert raised.value.coordinator_phase == "prepare"
+    assert raised.value.effects["custody"]["attempt"] == "not-entered"
+    assert hydration_calls == []
+    assert target.log.path.read_bytes() == before
+
+
+def test_in_place_every_edit_inherits_tick_and_post_tick_count(
+    tmp_path, monkeypatch, keys, signer
+):
+    target = _make_target(
+        tmp_path, monkeypatch, keys, signer, boundary="boundary every=10"
+    )
+    _append_tick(target, "old-every-edge", "note", 3.0, signer)
+    for offset in range(7):
+        _append_fact(
+            target,
+            f"after-edge-{offset}",
+            "note",
+            4.0 + offset,
+            signer,
+        )
+    edited = parse_vertex(
+        target.vertex.read_text().replace("every=10", "every=5"),
+        path=target.vertex,
+    )
+    note_document = next(
+        document
+        for document in vertex_to_documents(edited)
+        if document.kind == DECL_KIND_DEFINED and document.subject == "note"
+    )
+    _append_declaration_fact(
+        target,
+        "edit-every",
+        DECL_KIND_DEFINED,
+        {"subject": "note", "payload": note_document.payload},
+        12.0,
+        signer,
+    )
+    _sync(target)
+
+    capture = capture_runtime(target.registry, target.descriptor, target.locator)
+    plan = plan_batch_from_capture(
+        capture,
+        (
+            BatchFactInput(
+                AtomFact("note", 13.0, {}, observer="kyle"),
+                fact_id="next-note",
+            ),
+        ),
+        credentials=WriteCredentials(),
+    )
+
+    assert plan.items[0].tick_name == "note"
+    assert [draft.kind for draft in plan.drafts] == ["fact", "tick"]
+
+
+def test_unticked_every_uses_modulo_and_ticked_after_stays_exhausted(
+    tmp_path, monkeypatch, keys, signer
+):
+    repeating = _make_target(
+        tmp_path / "every", monkeypatch, keys, signer, boundary="boundary every=5"
+    )
+    for offset in range(7):
+        _append_fact(
+            repeating,
+            f"replayed-{offset}",
+            "note",
+            3.0 + offset,
+            signer,
+        )
+    _sync(repeating)
+    repeating_plan = plan_batch_from_capture(
+        capture_runtime(repeating.registry, repeating.descriptor, repeating.locator),
+        tuple(
+            BatchFactInput(
+                AtomFact("note", 10.0 + offset, {}, observer="kyle"),
+                fact_id=f"next-{offset}",
+            )
+            for offset in range(3)
+        ),
+        credentials=WriteCredentials(),
+    )
+    assert [item.tick_name for item in repeating_plan.items] == [None, None, "note"]
+
+    one_shot = _make_target(
+        tmp_path / "after", monkeypatch, keys, signer, boundary="boundary after=5"
+    )
+    _append_tick(one_shot, "old-after-edge", "note", 3.0, signer)
+    _append_fact(one_shot, "later", "note", 4.0, signer)
+    _sync(one_shot)
+    exhausted_plan = plan_batch_from_capture(
+        capture_runtime(one_shot.registry, one_shot.descriptor, one_shot.locator),
+        (
+            BatchFactInput(
+                AtomFact("note", 5.0, {}, observer="kyle"),
+                fact_id="still-exhausted",
+            ),
+        ),
+        credentials=WriteCredentials(),
+    )
+    assert exhausted_plan.items[0].tick_id is None
 
 
 @pytest.mark.parametrize("damage", ["marker", "genesis", "both"])

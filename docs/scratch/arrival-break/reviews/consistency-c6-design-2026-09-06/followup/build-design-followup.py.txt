@@ -1,0 +1,45 @@
+from pathlib import Path
+from datetime import datetime, timezone
+import hashlib,json
+root=Path('/Users/kaygee/Code/loops-wt/arrival-finish')
+parent='docs/scratch/arrival-break/reviews/consistency-c6-design-2026-09-06'
+review=root/parent/'followup'
+review.mkdir(parents=True,exist_ok=True)
+packet=review/'c6-design-followup-prompt.txt'
+assert not packet.exists()
+sections=[
+ ('docs/scratch/arrival-break/consistency-c6-boundary-design-2026-09-06.md',None),
+ (parent+'/primary-triage.md',None),
+ (parent+'/c6-design-findings.md',None),
+ ('docs/scratch/arrival-break/consistency-c6-engine-design-notes-2026-09-06.md',None),
+ ('docs/scratch/arrival-break/consistency-c6-sdk-design-notes-2026-09-06.md',None),
+ ('libs/engine/src/engine/arrival_body.py',[(179,239),(270,297)]),
+ ('libs/engine/src/engine/arrival.py',[(1552,1568)]),
+ ('libs/engine/src/engine/declaration.py',[(195,280)]),
+ ('libs/engine/src/engine/vertex.py',[(653,692),(769,850),(934,965),(1170,1210),(1260,1394)]),
+ ('libs/engine/src/engine/loop.py',[(85,168)]),
+ ('libs/engine/src/engine/compiler.py',[(350,500),(981,1045)]),
+ ('libs/lang/src/lang/document.py',[(578,637),(929,1000)]),
+ ('libs/engine/src/engine/runtime_write.py',[(90,153),(715,791),(977,1035)]),
+ ('libs/engine/src/engine/arrival_declarations.py',[(78,124),(875,967)]),
+ ('libs/sdk/src/sdk/kind.py',[(76,164)]),
+ ('libs/sdk/src/sdk/errors.py',[(70,256),(430,485)]),
+ ('libs/engine/src/engine/arrival_file_backend.py',[(1122,1137),(1227,1241)]),
+]
+intro='''You are Fable 5.1 at HIGH effort, performing a follow-up DESIGN review before implementation. No C6 production/test code has been written. No tools; do not claim to run tests. User authorized design+implementation via Sol/Terra/Luna and requested HIGH design review. Root's optional policy question remains unanswered; proceed on explicitly recommended in-place inheritance, which your first review endorsed. Keep credentials/legacy runtime/new restart wire ceremonies out of scope.
+
+Review the revised root design and root triage against your original B1-B5 findings and algorithm questions. All source shown is current BASELINE, not implementation. Root corrected the premise of B2: wire batch rows are facts only; a multi-draft CAS assigns separate record ordinals. A defensive contradictory-query-shape guard is nevertheless now explicit. B1 is consumer-scoped. B3 specifies typed runtime evidence plus existing declaration __cause__ serialization. B4 has exact ticked/unticked count behavior. B5 admits verified historical parameter bytes via a shared caller-side collector and pure classifier; it hashes/parses the same read, shares the current parser, and never treats env values as historical proof. All three entrypoints have the same proof capability.
+
+Return ACCEPT or REVISE first. Identify any remaining MUST-FIX design issue with concrete counterexample and smallest fix. Do not demand implementation tests have already run; design review intentionally precedes implementation. Separate optional tests, consciously deferred compatibility, and genuinely unresolved implementation-contract rules. Root design overrides alternatives in supporting notes. Keep answer under 1800 words, emphasizing resolution/new blockers rather than repetition.
+'''
+parts=[intro];sources={}
+for name,ranges in sections:
+ p=root/name;data=p.read_bytes();sources[name]=hashlib.sha256(data).hexdigest();lines=data.decode().splitlines()
+ parts.append('\n\n===== '+name+' =====\n')
+ for start,end in ranges or [(1,len(lines))]:
+  parts.append('\n'.join(f'{i}: {lines[i-1]}' for i in range(start,min(end,len(lines))+1)))
+packet.write_text('\n'.join(parts)+'\n')
+manifest={'model':'claude-fable-5-1[1m]','effort':'high','worktree':str(root),'results':str(review),'due_at':datetime.now(timezone.utc).isoformat(),'baseline':'ef8b21b2','scope':'C6 revised design only, before implementation','jobs':[{'name':'c6-design-followup','packet':str(packet),'sha256':hashlib.sha256(packet.read_bytes()).hexdigest(),'sources':sources,'status':'pending'}]}
+(review/'manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
+(review/'build-design-followup.py.txt').write_bytes(Path(__file__).read_bytes())
+print(json.dumps({'packet_bytes':packet.stat().st_size,'sha256':manifest['jobs'][0]['sha256'],'manifest':str(review/'manifest.json')},indent=2))

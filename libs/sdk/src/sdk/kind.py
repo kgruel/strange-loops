@@ -80,6 +80,12 @@ def _arrival_semantic_preview(
     registry: Any | None,
 ) -> DeclarationPlanResult:
     """Preview a splice only after confirming the cache matches CURRENT."""
+    from engine.arrival_boundary_continuity import (
+        BoundaryContinuityConflict,
+        analyze_boundary_continuity,
+        collect_verified_parameter_rows,
+    )
+    from engine.arrival_contract import TickRequest
     from engine.arrival_declarations import DeclarationPreparationRefused
     from engine.declaration import validate_arrival_runtime_identity
     from lang import diff_documents, parse_vertex, validate_vertex, vertex_to_documents
@@ -127,6 +133,33 @@ def _arrival_semantic_preview(
                 doc.as_json() for doc in vertex_to_documents(proposed_ast)
             ]
             changes = diff_documents(local_docs, proposed_docs)
+            try:
+                verified_params = collect_verified_parameter_rows(
+                    opened.snapshot.declaration_anchor,
+                    _facts,
+                    target_documents=proposed_docs,
+                    base_dir=vertex_path.parent,
+                )
+                analyze_boundary_continuity(
+                    opened.snapshot.declaration_anchor,
+                    _facts,
+                    opened.snapshot.ticks(TickRequest(since=float("-inf"))),
+                    target_documents=proposed_docs,
+                    verified_params=verified_params,
+                )
+            except BoundaryContinuityConflict as conflict:
+                refusal = DeclarationPreparationRefused(
+                    f"boundary continuity refuses declaration preview: {conflict}",
+                    coordinator_phase="prepare",
+                    effects={
+                        "custody": {
+                            "attempt": "not-entered",
+                            "state": "not-attempted",
+                        }
+                    },
+                    captured_head=opened.basis.captured_head,
+                )
+                raise refusal from conflict
             return DeclarationPreviewResult(
                 applicable=True,
                 reason="semantic preview only; signed execution requires observer credentials",

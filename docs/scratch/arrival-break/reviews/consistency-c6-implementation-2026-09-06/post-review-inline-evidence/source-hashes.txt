@@ -1,0 +1,2 @@
+df66c2f6c5f986d72ece95d37d6b491f26f0b422ad09c32fa9177607397ea68d  libs/sdk/src/sdk/kind.py
+d7eca43eb2a52045e2684bb0d64a65d28335691fb3ff6088a48911ddf13eaee3  libs/sdk/tests/test_arrival_boundary_continuity.py

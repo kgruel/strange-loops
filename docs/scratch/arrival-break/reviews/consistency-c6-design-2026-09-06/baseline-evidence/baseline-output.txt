@@ -1,0 +1,4 @@
+retire-redefine {'accepted': True, 'name': 'vertex', 'kinds': ['pulse', 'cite']}
+historical-collision-repaired {'accepted': True, 'name': 'same', 'kinds': ['cite'], 'vertex_period_start': datetime.datetime(1970, 1, 1, 0, 0, 2, tzinfo=datetime.timezone.utc)}
+historical-collision-with-vertex-consumer {'accepted': True, 'name': 'same', 'kinds': ['cite'], 'has_vertex_boundary': True, 'vertex_period_start': datetime.datetime(1970, 1, 1, 0, 0, 2, tzinfo=datetime.timezone.utc)}
+every-to-after {'accepted': True, 'boundary_mode': 'after', 'exhausted': True}

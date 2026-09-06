@@ -1,0 +1,819 @@
+E402 Module level import not at top of file
+  --> src/engine/compiler.py:16:1
+   |
+14 |   TYPE_CHECKING = False
+15 |
+16 | / from lang.ast import (
+17 | |     BoundaryAfter,
+18 | |     BoundaryEvery,
+19 | |     BoundaryWhen,
+20 | |     FoldAvg,
+21 | |     FoldBy,
+22 | |     FoldCollect,
+23 | |     FoldCount,
+24 | |     FoldLatest,
+25 | |     FoldMax,
+26 | |     FoldMin,
+27 | |     FoldSum,
+28 | |     FoldWindow,
+29 | |     FromFile,
+30 | |     InlineSource,
+31 | |     LoopDef,
+32 | |     LoopFile,
+33 | |     Pick,
+34 | |     Select,
+35 | |     Skip,
+36 | |     SourceParams,
+37 | |     SourcesBlock,
+38 | |     Split,
+39 | |     TemplateSource,
+40 | |     Transform,
+41 | |     VertexFile,
+42 | | )
+   | |_^
+43 |   from lang.ast import Flatten as DslFlatten
+44 |   from lang.ast import Explode as DslExplode
+   |
+help: Move module level imports to top of file
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> src/engine/compiler.py:16:1
+   |
+14 |   TYPE_CHECKING = False
+15 |
+16 | / from lang.ast import (
+17 | |     BoundaryAfter,
+18 | |     BoundaryEvery,
+19 | |     BoundaryWhen,
+20 | |     FoldAvg,
+21 | |     FoldBy,
+22 | |     FoldCollect,
+23 | |     FoldCount,
+24 | |     FoldLatest,
+25 | |     FoldMax,
+26 | |     FoldMin,
+27 | |     FoldSum,
+28 | |     FoldWindow,
+29 | |     FromFile,
+30 | |     InlineSource,
+31 | |     LoopDef,
+32 | |     LoopFile,
+33 | |     Pick,
+34 | |     Select,
+35 | |     Skip,
+36 | |     SourceParams,
+37 | |     SourcesBlock,
+38 | |     Split,
+39 | |     TemplateSource,
+40 | |     Transform,
+41 | |     VertexFile,
+42 | | )
+43 | | from lang.ast import Flatten as DslFlatten
+44 | | from lang.ast import Explode as DslExplode
+45 | | from lang.ast import Project as DslProject
+46 | | from lang.ast import Where as DslWhere
+47 | | from lang.ast import Coerce as DslCoerce
+48 | | from lang.ast import FoldOp as DslFoldOp
+49 | | from lang.ast import LStrip as DslLStrip
+50 | | from lang.ast import ParseStep as DslParseStep
+51 | | from lang.ast import Replace as DslReplace
+52 | | from lang.ast import RStrip as DslRStrip
+53 | | from lang.ast import Strip as DslStrip
+   | |______________________________________^
+54 |
+55 |   if TYPE_CHECKING:
+   |
+help: Organize imports
+   |
+42 | )
+43 + from lang.ast import Coerce as DslCoerce
+44 + from lang.ast import Explode as DslExplode
+45 | from lang.ast import Flatten as DslFlatten
+   - from lang.ast import Explode as DslExplode
+   - from lang.ast import Project as DslProject
+   - from lang.ast import Where as DslWhere
+   - from lang.ast import Coerce as DslCoerce
+46 | from lang.ast import FoldOp as DslFoldOp
+47 | from lang.ast import LStrip as DslLStrip
+48 | from lang.ast import ParseStep as DslParseStep
+49 + from lang.ast import Project as DslProject
+50 | from lang.ast import Replace as DslReplace
+51 | from lang.ast import RStrip as DslRStrip
+52 | from lang.ast import Strip as DslStrip
+53 + from lang.ast import Where as DslWhere
+54 |
+   |
+
+E402 Module level import not at top of file
+  --> src/engine/compiler.py:43:1
+   |
+41 |     VertexFile,
+42 | )
+43 | from lang.ast import Flatten as DslFlatten
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+44 | from lang.ast import Explode as DslExplode
+45 | from lang.ast import Project as DslProject
+   |
+help: Move module level imports to top of file
+
+E402 Module level import not at top of file
+  --> src/engine/compiler.py:44:1
+   |
+42 | )
+43 | from lang.ast import Flatten as DslFlatten
+44 | from lang.ast import Explode as DslExplode
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+45 | from lang.ast import Project as DslProject
+46 | from lang.ast import Where as DslWhere
+   |
+help: Move module level imports to top of file
+
+E402 Module level import not at top of file
+  --> src/engine/compiler.py:45:1
+   |
+43 | from lang.ast import Flatten as DslFlatten
+44 | from lang.ast import Explode as DslExplode
+45 | from lang.ast import Project as DslProject
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+46 | from lang.ast import Where as DslWhere
+47 | from lang.ast import Coerce as DslCoerce
+   |
+help: Move module level imports to top of file
+
+E402 Module level import not at top of file
+  --> src/engine/compiler.py:46:1
+   |
+44 | from lang.ast import Explode as DslExplode
+45 | from lang.ast import Project as DslProject
+46 | from lang.ast import Where as DslWhere
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+47 | from lang.ast import Coerce as DslCoerce
+48 | from lang.ast import FoldOp as DslFoldOp
+   |
+help: Move module level imports to top of file
+
+E402 Module level import not at top of file
+  --> src/engine/compiler.py:47:1
+   |
+45 | from lang.ast import Project as DslProject
+46 | from lang.ast import Where as DslWhere
+47 | from lang.ast import Coerce as DslCoerce
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+48 | from lang.ast import FoldOp as DslFoldOp
+49 | from lang.ast import LStrip as DslLStrip
+   |
+help: Move module level imports to top of file
+
+E402 Module level import not at top of file
+  --> src/engine/compiler.py:48:1
+   |
+46 | from lang.ast import Where as DslWhere
+47 | from lang.ast import Coerce as DslCoerce
+48 | from lang.ast import FoldOp as DslFoldOp
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+49 | from lang.ast import LStrip as DslLStrip
+50 | from lang.ast import ParseStep as DslParseStep
+   |
+help: Move module level imports to top of file
+
+E402 Module level import not at top of file
+  --> src/engine/compiler.py:49:1
+   |
+47 | from lang.ast import Coerce as DslCoerce
+48 | from lang.ast import FoldOp as DslFoldOp
+49 | from lang.ast import LStrip as DslLStrip
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+50 | from lang.ast import ParseStep as DslParseStep
+51 | from lang.ast import Replace as DslReplace
+   |
+help: Move module level imports to top of file
+
+E402 Module level import not at top of file
+  --> src/engine/compiler.py:50:1
+   |
+48 | from lang.ast import FoldOp as DslFoldOp
+49 | from lang.ast import LStrip as DslLStrip
+50 | from lang.ast import ParseStep as DslParseStep
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+51 | from lang.ast import Replace as DslReplace
+52 | from lang.ast import RStrip as DslRStrip
+   |
+help: Move module level imports to top of file
+
+E402 Module level import not at top of file
+  --> src/engine/compiler.py:51:1
+   |
+49 | from lang.ast import LStrip as DslLStrip
+50 | from lang.ast import ParseStep as DslParseStep
+51 | from lang.ast import Replace as DslReplace
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+52 | from lang.ast import RStrip as DslRStrip
+53 | from lang.ast import Strip as DslStrip
+   |
+help: Move module level imports to top of file
+
+E402 Module level import not at top of file
+  --> src/engine/compiler.py:52:1
+   |
+50 | from lang.ast import ParseStep as DslParseStep
+51 | from lang.ast import Replace as DslReplace
+52 | from lang.ast import RStrip as DslRStrip
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+53 | from lang.ast import Strip as DslStrip
+   |
+help: Move module level imports to top of file
+
+E402 Module level import not at top of file
+  --> src/engine/compiler.py:53:1
+   |
+51 | from lang.ast import Replace as DslReplace
+52 | from lang.ast import RStrip as DslRStrip
+53 | from lang.ast import Strip as DslStrip
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+54 |
+55 | if TYPE_CHECKING:
+   |
+help: Move module level imports to top of file
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> src/engine/compiler.py:56:5
+   |
+55 |   if TYPE_CHECKING:
+56 | /     from atoms import Boundary, Source, Spec
+57 | |     from atoms import Coerce as RuntimeCoerce
+58 | |     from atoms import FoldOp as RuntimeFoldOp
+59 | |     from atoms import ParseOp as RuntimeParseOp
+60 | |     from atoms import Pick as RuntimePick
+61 | |     from atoms import Rename as RuntimeRename
+62 | |     from atoms import Select as RuntimeSelect
+63 | |     from atoms import Skip as RuntimeSkip
+64 | |     from atoms import Split as RuntimeSplit
+65 | |     from atoms import Transform as RuntimeTransform
+66 | |     from .vertex import Vertex
+   | |______________________________^
+help: Organize imports
+   |
+65 |     from atoms import Transform as RuntimeTransform
+66 +
+67 |     from .vertex import Vertex
+   |
+
+UP037 [*] Remove quotes from type annotation
+   --> src/engine/compiler.py:176:38
+    |
+176 | def map_explode(step: DslExplode) -> "RuntimeParseOp":
+    |                                      ^^^^^^^^^^^^^^^^
+177 |     """Map DSL Explode to runtime Explode."""
+178 |     from atoms import Explode as RuntimeExplode
+    |
+help: Remove quotes
+    |
+175 |
+    - def map_explode(step: DslExplode) -> "RuntimeParseOp":
+176 + def map_explode(step: DslExplode) -> RuntimeParseOp:
+177 |     """Map DSL Explode to runtime Explode."""
+    |
+
+UP037 [*] Remove quotes from type annotation
+   --> src/engine/compiler.py:183:38
+    |
+183 | def map_project(step: DslProject) -> "RuntimeParseOp":
+    |                                      ^^^^^^^^^^^^^^^^
+184 |     """Map DSL Project to runtime Project."""
+185 |     from atoms import Project as RuntimeProject
+    |
+help: Remove quotes
+    |
+182 |
+    - def map_project(step: DslProject) -> "RuntimeParseOp":
+183 + def map_project(step: DslProject) -> RuntimeParseOp:
+184 |     """Map DSL Project to runtime Project."""
+    |
+
+UP037 [*] Remove quotes from type annotation
+   --> src/engine/compiler.py:190:34
+    |
+190 | def map_where(step: DslWhere) -> "RuntimeParseOp":
+    |                                  ^^^^^^^^^^^^^^^^
+191 |     """Map DSL Where to runtime Where."""
+192 |     from atoms import Where as RuntimeWhere
+    |
+help: Remove quotes
+    |
+189 |
+    - def map_where(step: DslWhere) -> "RuntimeParseOp":
+190 + def map_where(step: DslWhere) -> RuntimeParseOp:
+191 |     """Map DSL Where to runtime Where."""
+    |
+
+UP037 [*] Remove quotes from type annotation
+   --> src/engine/compiler.py:197:38
+    |
+197 | def map_flatten(step: DslFlatten) -> "RuntimeParseOp":
+    |                                      ^^^^^^^^^^^^^^^^
+198 |     """Map DSL Flatten to runtime Flatten."""
+199 |     from atoms import Flatten as RuntimeFlatten
+    |
+help: Remove quotes
+    |
+196 |
+    - def map_flatten(step: DslFlatten) -> "RuntimeParseOp":
+197 + def map_flatten(step: DslFlatten) -> RuntimeParseOp:
+198 |     """Map DSL Flatten to runtime Flatten."""
+    |
+
+F821 Undefined name `Callable`
+   --> src/engine/compiler.py:239:29
+    |
+239 | _FOLD_MAP: dict[type, tuple[Callable, str]] | None = None
+    |                             ^^^^^^^^
+
+F821 Undefined name `Callable`
+   --> src/engine/compiler.py:242:41
+    |
+242 | def _get_fold_map() -> dict[type, tuple[Callable, str]]:
+    |                                         ^^^^^^^^
+243 |     """Lazy-build the DSL→runtime fold dispatch table."""
+244 |     global _FOLD_MAP  # noqa: PLW0603
+    |
+
+E501 Line too long (103 > 100)
+   --> src/engine/compiler.py:345:101
+    |
+343 |         timeout=substitute_vars(loop_ast.timeout, params),
+344 |         origin=substitute_vars(loop_ast.origin, params) if loop_ast.origin else "",
+345 |         env={k: substitute_vars(v, params) for k, v in loop_ast.env.items()} if loop_ast.env else None,
+    |                                                                                                     ^^^
+346 |         parse=loop_ast.parse,
+347 |         path=loop_ast.path,
+    |
+
+E501 Line too long (105 > 100)
+   --> src/engine/compiler.py:361:101
+    |
+359 |         boundary = BoundaryWhen(kind=new_kind)
+360 |
+361 |     return LoopDef(folds=loop_def.folds, boundary=boundary, search=loop_def.search, parse=loop_def.parse)
+    |                                                                                                     ^^^^^
+
+F821 Undefined name `Path`
+   --> src/engine/compiler.py:365:35
+    |
+364 | def parse_source_params_bytes(
+365 |     data: bytes, *, source: str | Path = "<params>"
+    |                                   ^^^^
+366 | ) -> list[SourceParams]:
+367 |     """Parse one exact parameter-file byte snapshot.
+    |
+
+F821 Undefined name `Path`
+   --> src/engine/compiler.py:411:34
+    |
+411 | def _load_params_file(file_path: Path) -> list[SourceParams]:
+    |                                  ^^^^
+412 |     """Load parameter rows through the exact-byte parser."""
+413 |     return parse_source_params_bytes(file_path.read_bytes(), source=file_path)
+    |
+
+F821 Undefined name `Path`
+   --> src/engine/compiler.py:447:15
+    |
+445 | def compile_sources(
+446 |     vertex: VertexFile,
+447 |     base_dir: Path,
+    |               ^^^^
+448 | ) -> tuple[list[tuple["Source", "Cadence"]], dict[str, "Spec"]]:
+449 |     """Compile sources from a vertex, handling both paths and templates.
+    |
+
+UP037 [*] Remove quotes from type annotation
+   --> src/engine/compiler.py:448:23
+    |
+446 |     vertex: VertexFile,
+447 |     base_dir: Path,
+448 | ) -> tuple[list[tuple["Source", "Cadence"]], dict[str, "Spec"]]:
+    |                       ^^^^^^^^
+449 |     """Compile sources from a vertex, handling both paths and templates.
+    |
+help: Remove quotes
+    |
+447 |     base_dir: Path,
+    - ) -> tuple[list[tuple["Source", "Cadence"]], dict[str, "Spec"]]:
+448 + ) -> tuple[list[tuple[Source, "Cadence"]], dict[str, "Spec"]]:
+449 |     """Compile sources from a vertex, handling both paths and templates.
+    |
+
+UP037 [*] Remove quotes from type annotation
+   --> src/engine/compiler.py:448:33
+    |
+446 |     vertex: VertexFile,
+447 |     base_dir: Path,
+448 | ) -> tuple[list[tuple["Source", "Cadence"]], dict[str, "Spec"]]:
+    |                                 ^^^^^^^^^
+449 |     """Compile sources from a vertex, handling both paths and templates.
+    |
+help: Remove quotes
+    |
+447 |     base_dir: Path,
+    - ) -> tuple[list[tuple["Source", "Cadence"]], dict[str, "Spec"]]:
+448 + ) -> tuple[list[tuple["Source", Cadence]], dict[str, "Spec"]]:
+449 |     """Compile sources from a vertex, handling both paths and templates.
+    |
+
+F821 Undefined name `Cadence`
+   --> src/engine/compiler.py:448:34
+    |
+446 |     vertex: VertexFile,
+447 |     base_dir: Path,
+448 | ) -> tuple[list[tuple["Source", "Cadence"]], dict[str, "Spec"]]:
+    |                                  ^^^^^^^
+449 |     """Compile sources from a vertex, handling both paths and templates.
+    |
+
+UP037 [*] Remove quotes from type annotation
+   --> src/engine/compiler.py:448:56
+    |
+446 |     vertex: VertexFile,
+447 |     base_dir: Path,
+448 | ) -> tuple[list[tuple["Source", "Cadence"]], dict[str, "Spec"]]:
+    |                                                        ^^^^^^
+449 |     """Compile sources from a vertex, handling both paths and templates.
+    |
+help: Remove quotes
+    |
+447 |     base_dir: Path,
+    - ) -> tuple[list[tuple["Source", "Cadence"]], dict[str, "Spec"]]:
+448 + ) -> tuple[list[tuple["Source", "Cadence"]], dict[str, Spec]]:
+449 |     """Compile sources from a vertex, handling both paths and templates.
+    |
+
+UP037 [*] Remove quotes from type annotation
+   --> src/engine/compiler.py:457:23
+    |
+455 |     from lang import parse_loop_file
+456 |
+457 |     pairs: list[tuple["Source", "Cadence"]] = []
+    |                       ^^^^^^^^
+458 |     specs: dict[str, "Spec"] = {}
+    |
+help: Remove quotes
+    |
+456 |
+    -     pairs: list[tuple["Source", "Cadence"]] = []
+457 +     pairs: list[tuple[Source, "Cadence"]] = []
+458 |     specs: dict[str, "Spec"] = {}
+    |
+
+UP037 [*] Remove quotes from type annotation
+   --> src/engine/compiler.py:457:33
+    |
+455 |     from lang import parse_loop_file
+456 |
+457 |     pairs: list[tuple["Source", "Cadence"]] = []
+    |                                 ^^^^^^^^^
+458 |     specs: dict[str, "Spec"] = {}
+    |
+help: Remove quotes
+    |
+456 |
+    -     pairs: list[tuple["Source", "Cadence"]] = []
+457 +     pairs: list[tuple["Source", Cadence]] = []
+458 |     specs: dict[str, "Spec"] = {}
+    |
+
+F821 Undefined name `Cadence`
+   --> src/engine/compiler.py:457:34
+    |
+455 |     from lang import parse_loop_file
+456 |
+457 |     pairs: list[tuple["Source", "Cadence"]] = []
+    |                                  ^^^^^^^
+458 |     specs: dict[str, "Spec"] = {}
+    |
+
+UP037 [*] Remove quotes from type annotation
+   --> src/engine/compiler.py:458:22
+    |
+457 |     pairs: list[tuple["Source", "Cadence"]] = []
+458 |     specs: dict[str, "Spec"] = {}
+    |                      ^^^^^^
+459 |
+460 |     for source_entry in vertex.sources or []:
+    |
+help: Remove quotes
+    |
+457 |     pairs: list[tuple["Source", "Cadence"]] = []
+    -     specs: dict[str, "Spec"] = {}
+458 +     specs: dict[str, Spec] = {}
+459 |
+    |
+
+UP037 [*] Remove quotes from type annotation
+   --> src/engine/compiler.py:523:75
+    |
+523 | def compile_sources_block(block: SourcesBlock, vertex_name: str) -> tuple["SequentialSource", "Cadence"]:
+    |                                                                           ^^^^^^^^^^^^^^^^^^
+524 |     """Compile a sources block with execution mode into a (SequentialSource, Cadence) pair.
+    |
+help: Remove quotes
+    |
+522 |
+    - def compile_sources_block(block: SourcesBlock, vertex_name: str) -> tuple["SequentialSource", "Cadence"]:
+523 + def compile_sources_block(block: SourcesBlock, vertex_name: str) -> tuple[SequentialSource, "Cadence"]:
+524 |     """Compile a sources block with execution mode into a (SequentialSource, Cadence) pair.
+    |
+
+F821 Undefined name `SequentialSource`
+   --> src/engine/compiler.py:523:76
+    |
+523 | def compile_sources_block(block: SourcesBlock, vertex_name: str) -> tuple["SequentialSource", "Cadence"]:
+    |                                                                            ^^^^^^^^^^^^^^^^
+524 |     """Compile a sources block with execution mode into a (SequentialSource, Cadence) pair.
+    |
+
+UP037 [*] Remove quotes from type annotation
+   --> src/engine/compiler.py:523:95
+    |
+523 | def compile_sources_block(block: SourcesBlock, vertex_name: str) -> tuple["SequentialSource", "Cadence"]:
+    |                                                                                               ^^^^^^^^^
+524 |     """Compile a sources block with execution mode into a (SequentialSource, Cadence) pair.
+    |
+help: Remove quotes
+    |
+522 |
+    - def compile_sources_block(block: SourcesBlock, vertex_name: str) -> tuple["SequentialSource", "Cadence"]:
+523 + def compile_sources_block(block: SourcesBlock, vertex_name: str) -> tuple["SequentialSource", Cadence]:
+524 |     """Compile a sources block with execution mode into a (SequentialSource, Cadence) pair.
+    |
+
+F821 Undefined name `Cadence`
+   --> src/engine/compiler.py:523:96
+    |
+523 | def compile_sources_block(block: SourcesBlock, vertex_name: str) -> tuple["SequentialSource", "Cadence"]:
+    |                                                                                                ^^^^^^^
+524 |     """Compile a sources block with execution mode into a (SequentialSource, Cadence) pair.
+    |
+
+E501 Line too long (105 > 100)
+   --> src/engine/compiler.py:523:101
+    |
+523 | def compile_sources_block(block: SourcesBlock, vertex_name: str) -> tuple["SequentialSource", "Cadence"]:
+    |                                                                                                     ^^^^^
+524 |     """Compile a sources block with execution mode into a (SequentialSource, Cadence) pair.
+    |
+
+I001 [*] Import block is un-sorted or un-formatted
+   --> src/engine/compiler.py:533:5
+    |
+531 |       restrictive (first source's cadence), since they run as a unit.
+532 |       """
+533 | /     from atoms import SequentialSource
+534 | |     from .cadence import Cadence
+    | |________________________________^
+535 |
+536 |       inner_sources = []
+    |
+help: Organize imports
+    |
+533 |     from atoms import SequentialSource
+534 +
+535 |     from .cadence import Cadence
+    |
+
+UP037 [*] Remove quotes from type annotation
+   --> src/engine/compiler.py:623:67
+    |
+623 | def compile_parse_pipelines(vertex: VertexFile) -> dict[str, list["RuntimeParseOp"]] | None:
+    |                                                                   ^^^^^^^^^^^^^^^^
+624 |     """Compile per-kind parse pipelines from LoopDef.parse declarations.
+    |
+help: Remove quotes
+    |
+622 |
+    - def compile_parse_pipelines(vertex: VertexFile) -> dict[str, list["RuntimeParseOp"]] | None:
+623 + def compile_parse_pipelines(vertex: VertexFile) -> dict[str, list[RuntimeParseOp]] | None:
+624 |     """Compile per-kind parse pipelines from LoopDef.parse declarations.
+    |
+
+UP037 [*] Remove quotes from type annotation
+   --> src/engine/compiler.py:628:31
+    |
+626 |     Returns a dict mapping kind → list[ParseOp], or None if no loop has parse.
+627 |     """
+628 |     pipelines: dict[str, list["RuntimeParseOp"]] = {}
+    |                               ^^^^^^^^^^^^^^^^
+629 |     for name, loop_def in vertex.loops.items():
+630 |         if loop_def.parse:
+    |
+help: Remove quotes
+    |
+627 |     """
+    -     pipelines: dict[str, list["RuntimeParseOp"]] = {}
+628 +     pipelines: dict[str, list[RuntimeParseOp]] = {}
+629 |     for name, loop_def in vertex.loops.items():
+    |
+
+F821 Undefined name `Path`
+   --> src/engine/compiler.py:654:25
+    |
+652 |                  children: dict[str, CompiledVertex],
+653 |                  routes: dict[str, str] | None = None,
+654 |                  store: Path | None = None, path: Path | None = None,
+    |                         ^^^^
+655 |                  sources: list | None = None,
+656 |                  template_specs: dict | None = None,
+    |
+
+F821 Undefined name `Path`
+   --> src/engine/compiler.py:654:51
+    |
+652 |                  children: dict[str, CompiledVertex],
+653 |                  routes: dict[str, str] | None = None,
+654 |                  store: Path | None = None, path: Path | None = None,
+    |                                                   ^^^^
+655 |                  sources: list | None = None,
+656 |                  template_specs: dict | None = None,
+    |
+
+F821 Undefined name `Path`
+   --> src/engine/compiler.py:696:30
+    |
+694 |     """Raised when vertex composition creates a cycle."""
+695 |
+696 |     def __init__(self, path: Path, chain: list[Path]) -> None:
+    |                              ^^^^
+697 |         chain_str = " → ".join(str(p) for p in chain)
+698 |         super().__init__(f"Circular vertex reference: {chain_str} → {path}")
+    |
+
+F821 Undefined name `Path`
+   --> src/engine/compiler.py:696:48
+    |
+694 |     """Raised when vertex composition creates a cycle."""
+695 |
+696 |     def __init__(self, path: Path, chain: list[Path]) -> None:
+    |                                                ^^^^
+697 |         chain_str = " → ".join(str(p) for p in chain)
+698 |         super().__init__(f"Circular vertex reference: {chain_str} → {path}")
+    |
+
+F821 Undefined name `Path`
+   --> src/engine/compiler.py:706:19
+    |
+704 |     vertex: VertexFile,
+705 |     *,
+706 |     _visited: set[Path] | None = None,
+    |                   ^^^^
+707 |     _chain: list[Path] | None = None,
+708 | ) -> CompiledVertex:
+    |
+
+F821 Undefined name `Path`
+   --> src/engine/compiler.py:707:18
+    |
+705 |     *,
+706 |     _visited: set[Path] | None = None,
+707 |     _chain: list[Path] | None = None,
+    |                  ^^^^
+708 | ) -> CompiledVertex:
+709 |     """Recursively compile a .vertex file and all child vertices.
+    |
+
+PTH207 Replace `glob` with `Path.glob` or `Path.rglob`
+   --> src/engine/compiler.py:769:27
+    |
+767 |     if vertex.discover:
+768 |         pattern = str(base_dir / vertex.discover)
+769 |         for discovered in globfn(pattern, recursive=True):
+    |                           ^^^^^^
+770 |             discovered_path = Path(discovered)
+771 |             # Only include .vertex files from discover pattern
+    |
+
+UP037 [*] Remove quotes from type annotation
+   --> src/engine/compiler.py:829:53
+    |
+829 | def compile_source(loop: LoopFile) -> tuple[Source, "Cadence"]:
+    |                                                     ^^^^^^^^^
+830 |     """Compile a .loop file to a (Source, Cadence) pair.
+    |
+help: Remove quotes
+    |
+828 |
+    - def compile_source(loop: LoopFile) -> tuple[Source, "Cadence"]:
+829 + def compile_source(loop: LoopFile) -> tuple[Source, Cadence]:
+830 |     """Compile a .loop file to a (Source, Cadence) pair.
+    |
+
+F821 Undefined name `Cadence`
+   --> src/engine/compiler.py:829:54
+    |
+829 | def compile_source(loop: LoopFile) -> tuple[Source, "Cadence"]:
+    |                                                      ^^^^^^^
+830 |     """Compile a .loop file to a (Source, Cadence) pair.
+    |
+
+I001 [*] Import block is un-sorted or un-formatted
+   --> src/engine/compiler.py:835:5
+    |
+833 |       Cadence: store predicate (when to run)
+834 |       """
+835 | /     from .cadence import Cadence
+836 | |     from lang.ast import Duration
+    | |_________________________________^
+837 |
+838 |       source = map_loop_file(loop)
+    |
+help: Organize imports
+    |
+834 |     """
+    -     from .cadence import Cadence
+835 |     from lang.ast import Duration
+836 |
+837 +     from .cadence import Cadence
+838 +
+839 |     source = map_loop_file(loop)
+    |
+
+F821 Undefined name `Path`
+   --> src/engine/compiler.py:863:35
+    |
+862 | def collect_search_fields(
+863 |     vertex: VertexFile, base_dir: Path
+    |                                   ^^^^
+864 | ) -> dict[str, tuple[str, ...]]:
+865 |     """Collect search field declarations from a vertex and its templates.
+    |
+
+SIM102 Use a single `if` statement instead of nested `if` statements
+   --> src/engine/compiler.py:879:9
+    |
+877 |       # Template loops — resolve params to get actual kind names
+878 |       for source_entry in vertex.sources or []:
+879 | /         if isinstance(source_entry, TemplateSource):
+880 | |             if source_entry.loop and source_entry.loop.search:
+    | |______________________________________________________________^
+881 |                   all_params: list[SourceParams] = []
+882 |                   if isinstance(source_entry.from_, FromFile):
+    |
+help: Combine `if` statements using `and`
+
+F821 Undefined name `Callable`
+   --> src/engine/compiler.py:902:29
+    |
+902 | FoldOverride = tuple[dict, "Callable[[dict, dict], dict]"]
+    |                             ^^^^^^^^
+903 | """A fold override: (initial_state, fold_function)."""
+    |
+
+UP037 [*] Remove quotes from type annotation
+   --> src/engine/compiler.py:913:6
+    |
+911 |     fact_signer=None,
+912 |     attach_store: bool = True,
+913 | ) -> "Vertex":
+    |      ^^^^^^^^
+914 |     """Instantiate a runtime Vertex tree from a CompiledVertex.
+    |
+help: Remove quotes
+    |
+912 |     attach_store: bool = True,
+    - ) -> "Vertex":
+913 + ) -> Vertex:
+914 |     """Instantiate a runtime Vertex tree from a CompiledVertex.
+    |
+
+I001 [*] Import block is un-sorted or un-formatted
+    --> src/engine/compiler.py:1025:9
+     |
+1023 |       # emit receipt emits a WARN for every cite to an undeclared vertex.
+1024 |       if "cite" not in compiled.specs:
+1025 | /         from atoms import Collect
+1026 | |         from atoms.spec import Spec as _Spec
+1027 | |         from atoms.facet import Field as _Field
+     | |_______________________________________________^
+1028 |
+1029 |           _cite_spec = _Spec(
+     |
+help: Organize imports
+     |
+1025 |         from atoms import Collect
+1026 +         from atoms.facet import Field as _Field
+1027 |         from atoms.spec import Spec as _Spec
+     -         from atoms.facet import Field as _Field
+1028 |
+     |
+
+B007 Loop control variable `child_name` not used within loop body
+    --> src/engine/compiler.py:1063:9
+     |
+1062 |     # Recursively materialize and attach children
+1063 |     for child_name, child_compiled in compiled.children.items():
+     |         ^^^^^^^^^^
+1064 |         # Pass down any overrides that match child kinds
+1065 |         child_overrides = {
+     |
+help: Rename unused `child_name` to `_child_name`
+
+Found 57 errors.
+[*] 21 fixable with the `--fix` option (1 hidden fix can be enabled with the `--unsafe-fixes` option).

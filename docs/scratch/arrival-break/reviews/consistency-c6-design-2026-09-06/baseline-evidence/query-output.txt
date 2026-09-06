@@ -1,0 +1,4 @@
+tick-default-since ['tpos']
+tick-explicit-minus-inf ['tneg', 'tpos']
+decl-prefix ['_decl.genesis', '_decl.kind-defined']
+kind-predicate ("(kind = ? OR substr(kind, 1, length(?) + 1) = ? || '.')", ['_decl', '_decl', '_decl'])

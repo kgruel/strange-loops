@@ -1,0 +1,19 @@
+{
+  "status": "complete",
+  "pending_reviews": 0,
+  "design_decision": "accepted-by-primary-after-review-triage",
+  "external_verdicts": [
+    "REVISE",
+    "REVISE"
+  ],
+  "initial_findings": "B1,B3,B4,B5 accepted and revised; B2 legal-wire premise rejected, explicit adapter-contradiction rule accepted",
+  "followup_blocker": "rejected-factual-premise: existing params-pin gate verified by source, tests and disposable probe",
+  "accepted_design_hashes": {
+    "docs/scratch/arrival-break/consistency-c6-boundary-design-2026-09-06.md": "91b13aa3bf9ac56cb892bbd9afa6977eff5d1a94e07e81d06b56b18125279a15",
+    "docs/scratch/arrival-break/consistency-c6-engine-design-notes-2026-09-06.md": "321f22e2212ba36b7851b8ed655b220b8e4e3f96faacbf26021f041d695331f9",
+    "docs/scratch/arrival-break/consistency-c6-sdk-design-notes-2026-09-06.md": "7b06a5108da67fa41c60fcae95044d4f313fad7c8a8a641994e2101c12c999d9"
+  },
+  "baseline": "ef8b21b2",
+  "implementation_started_at_triage": false,
+  "committed": false
+}

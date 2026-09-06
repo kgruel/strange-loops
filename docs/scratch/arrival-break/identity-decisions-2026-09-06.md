@@ -202,24 +202,33 @@ new observer, lineage, or boundary. Capture records the effective declaration
 used for that operation; a later read may apply a later declaration and reach
 a different conclusion honestly.
 
-Boundary consumption and state replay need their own continuity policy.
-Keep an unchanged boundary identity's established consumption edge by
-default. A request to restart a boundary, remove and later recreate it as a
-new incarnation, or reinterpret old tick payloads under an incompatible fold
-must be explicit. The exact restart/incarnation representation is deferred.
-Do not substitute a declaration hash as a boundary ID: every cosmetic or
-unrelated edit would then risk reopening consumed observations.
+The accepted [C6 boundary design](consistency-c6-boundary-design-2026-09-06.md)
+defines that continuity policy; the [implementation](consistency-c6-2026-09-06.md)
+is complete and accepted after Fable-low review. An ordinary
+in-place trigger/count/mode, fold, parse, route, or presentation edit inherits
+the existing boundary's recorded consumption. Current replay folds facts under
+the new interpretation; it does not deserialize old tick payloads as state.
+An old tick can therefore exhaust a newly selected `after` mode, while a changed
+repeating count resumes from that recorded edge and subsequent routed facts.
+The C6 conformance table states these behaviors without inventing a restart.
 
-Before broadening runtime rename/reset support, test declaration changes
-against pending boundaries, reset/carry hydration, and historical reads. This
-pass recommends the policy; it does not claim the present runtime implements
-all of those transitions or that an existing schema can express every reset.
-Current hydration associates historical local ticks with current loop names,
-so remove/recreate and incompatible same-name edits can reuse an old loop's
-boundary history. Define compatibility and historical detection before
-promising continuity for such edits. The conservative interim direction is
-to refuse ambiguous transitions, not to guess a reset; the predicate and
-coverage for existing histories remain an explicit design task.
+A runtime name removed and later recreated cannot silently consume ticks from
+its former membership interval. History analysis includes intermediate
+self-lineage declaration revisions, implicit `cite`, and generated names whose
+membership can be established from recorded literals or verified pinned
+parameter bytes. Environment-derived historical names remain unproven.
+A historical loop/vertex collision refuses when the target consumes its
+ambiguous vertex-period stream. A corrected target without that consumer can
+run; reintroducing the consumer does not recover the missing role evidence.
+Evidence reads remain available.
+
+Explicit restart, state carry, same-name incarnation cutover, and semantic
+vertex rename still need a separately recorded transition design. A fresh loop
+name establishes a distinct future tick identity but no cutoff for old facts.
+Do not substitute a declaration hash as boundary identity: unrelated or cosmetic
+edits must not reopen consumed observations. The existing post-genesis vertex
+rename refusal remains. Credential-request and persisted-binding work in D0/D2
+is separate from this boundary implementation.
 
 ## D6 — Result identity describes evidence and actions separately
 

@@ -1,0 +1,5 @@
+Command:
+uv run --package sdk ruff check libs/sdk/tests/test_arrival_boundary_continuity.py
+
+Observed output:
+All checks passed!

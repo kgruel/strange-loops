@@ -1,0 +1,87 @@
+--- reviewed/libs/sdk/tests/test_arrival_boundary_continuity.py
++++ final/libs/sdk/tests/test_arrival_boundary_continuity.py
+@@ -11,7 +11,7 @@
+ from engine.arrival import ArrivalLog
+ from engine.arrival_body import body_of_fact_row, body_of_tick_row
+ from engine.handle import WriteCredentials
+-from lang import genesis_payload, parse_vertex_file
++from lang import genesis_payload, parse_vertex, parse_vertex_file, vertex_to_documents
+ from lang.ast import FoldCollect, FoldDecl, LoopDef
+ from lang.vertex_mutation import add_vertex_kind, remove_vertex_kind
+ from sign import ed25519
+@@ -168,6 +168,47 @@
+     return target
+ 
+ 
++def _inline_generated_ticked_target(tmp_path: Path) -> Path:
++    """Declare a generated loop whose literal row is embedded in history."""
++    (tmp_path / "template.loop").write_text(
++        'source #"echo never-executed"#\n'
++        'kind "{{kind}}"\n'
++        'observer "alice"\n'
++        'format "json"\n',
++        encoding="utf-8",
++    )
++    target = tmp_path / "inlinehistory.vertex"
++    init_vertex(target, store_type="arrival", observer="alice")
++    current = target.read_text(encoding="utf-8")
++    declared = current.replace(
++        "loops {",
++        'sources {\n'
++        '  template "template.loop" {\n'
++        '    with kind="inline_generated"\n'
++        '    loop {\n'
++        '      fold { count "inc" }\n'
++        '      boundary every=1\n'
++        '    }\n'
++        '  }\n'
++        '}\n\nloops {',
++    )
++    source_document = next(
++        document.as_json()
++        for document in vertex_to_documents(parse_vertex(declared, path=target))
++        if document.kind == "_decl.source-defined"
++    )
++    assert source_document["payload"]["params"] == [
++        {"values": {"kind": "inline_generated"}}
++    ]
++    adopted = edit_declaration(target, declared, observer="alice")
++    assert adopted.commit is not None
++    sealed = emit_fact(
++        target, "inline_generated", {"n": 1}, observer="alice", ts=1.0
++    )
++    assert sealed.tick_id is not None
++    return target
++
++
+ def test_ticked_retirement_refuses_same_name_readd_without_writing_and_keeps_evidence(
+     tmp_path: Path,
+ ) -> None:
+@@ -265,6 +306,27 @@
+     ]
+ 
+ 
++def test_inline_parameter_rows_license_generated_ticked_loop_across_preview_edit_and_runtime(
++    tmp_path: Path,
++) -> None:
++    """Literal ``with`` rows use the exact source-document payload shape."""
++    target = _inline_generated_ticked_target(tmp_path)
++
++    preview = plan_kind_mutation(target, "add", "unrelated")
++    assert preview.applicable is True
++    changed = add_kind(target, "unrelated", observer="alice")
++    assert changed.commit is not None
++
++    again = emit_fact(
++        target, "inline_generated", {"n": 2}, observer="alice", ts=2.0
++    )
++    assert again.tick_id is not None and again.tick_mark == "inline_generated"
++    assert [tick["name"] for tick in read_ticks(target).items] == [
++        "inline_generated",
++        "inline_generated",
++    ]
++
++
+ def test_ambiguous_vertex_tick_allows_consumer_removal_but_refuses_readdition(
+     tmp_path: Path,
+ ) -> None:

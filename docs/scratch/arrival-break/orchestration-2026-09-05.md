@@ -1,3 +1,90 @@
+## September 6: C6 checkpoint; handoff to C7
+
+The user requested a C6 checkpoint before compaction. This commit contains C6
+production, tests, design decisions, validation, and all frozen Fable review
+and primary-triage evidence. C3 remains its immediate predecessor `ef8b21b2`.
+No C7 implementation has begun. Nothing pushed or applied to live stores.
+
+Next: **C7 bounded aggregate inspection**, using the established Sol/Terra/Luna
+implementation and Fable review pattern. Start from the C7 row in the
+[consistency matrix](consistency-contract-matrix-2026-09-06.md). Address both
+local aggregate descriptor resolution and the single-store inspection guard;
+report bounded effective-root topology without inventing a global head or
+opening members for it. Specify storeless-root evidence, preserve descriptor
+role checks, and test both directions of local/effective topology disagreement.
+D0/D2 credential binding and C9 remain separate follow-on work.
+
+C6 accepted production hashes still match Fable's reviewed code. The sole
+post-review code-tree addition is the inline-parameter SDK test, validated by
+6 focused / 546 full SDK tests. Engine remains 2,597 passed / 1 skipped;
+architecture 101 passed. Final evidence is retained with the C6 report.
+No review or validation jobs remain.
+
+Earlier entries below retain their historical status.
+
+## September 6: C6 complete and accepted; C3 checkpoint retained
+
+C6 is complete with Sol/Terra/Luna implementation and native validation. Two
+Fable 5.1 high-effort design reviews preceded implementation; the final
+Fable-low implementation review returned **ACCEPT**, no blockers. All six
+optional notes are triaged. A post-review SDK test verifies inline generated
+parameters across preview, signed edit and later emission; production remains
+byte-identical to the accepted external review.
+
+See the [C6 report](consistency-c6-2026-09-06.md),
+[validation](consistency-c6-validation-2026-09-06.md), and
+[implementation review triage](reviews/consistency-c6-implementation-2026-09-06/primary-triage.md).
+Final engine **2,597 passed / 1 skipped**, SDK **546 passed**, architecture
+**101 passed**. Scoped Ruff passes; broad compiler lint reproduces 57 baseline
+findings. Captured validation/review hashes and the additional test are retained.
+No review or validation jobs remain.
+
+Ordinary same-name edits inherit boundary edges. Whole-loop retirement and
+recreation cannot consume old owned ticks; ambiguous vertex roles are checked
+only for a target that consumes them. Historical generated names require
+literal or verified pinned evidence. Typed refusals retain basis and C2 effect
+proof, with declaration IDs only when a relevant row can be established.
+
+C3 remains checkpointed at `ef8b21b2`; C6 is uncommitted on `arrival/finish`.
+Nothing pushed or applied to live stores/keys. Next bounded candidate is C7
+aggregate inspection; D0/D2 credentials, explicit restart/carry and the later
+C9 SDK/CLI transition remain separate. Review follow-ups also record the
+existing resolver's pre-genesis overlay policy and possible imported vertex
+singleton validation without changing read compatibility in C6.
+
+Prior entries below retain their historical checkpoint and review status.
+
+## September 6: C3 checkpointed; C6 design accepted and implementation started
+
+C3 continuation and its retained validation/review evidence are checkpointed
+at `ef8b21b2` (`fix(arrival): validate continuation snapshot custody`) following
+the user's explicit checkpoint request during C6 design. Nothing pushed.
+
+The user authorized C6 with Sol/Terra/Luna and Fable 5.1 high effort on the
+design before implementation. Two high reviews completed. Root accepted the
+[revised boundary continuity design](consistency-c6-boundary-design-2026-09-06.md)
+after native/source/test-backed [review triage](reviews/consistency-c6-design-2026-09-06/primary-triage.md).
+Both raw external verdicts remain REVISE: the first produced accepted design
+corrections; the second resolved them and raised a missing-pin-gate claim that
+source and existing tests disproved. This is primary acceptance after triage,
+not an assertion of an external ACCEPT verdict.
+
+In-place boundary edits inherit recorded consumption. The guard refuses
+relevant tick-bearing retirement/recreation, historically ambiguous roles, and
+unprovable generated membership. A target without the ambiguous vertex-boundary
+consumer may run. Verified historical parameter bytes establish declared rows;
+environment values do not. D0/D2 credentials and explicit restart/carry remain
+separate. Root asked an optional inherit-versus-strict-refusal preference; no
+answer arrived, so implementation uses the stated recommended inherit policy.
+
+Sol owns engine implementation and integration tests, Terra SDK integration
+and real acceptance, Luna pure-history tests and independent audit/validation,
+and root documentation/integration/review triage. C6 implementation is now
+in progress; no production/test changes preceded design triage. After focused
+and full validation, the implementation gets the established Fable-low review.
+The design packets and accepted snapshots remain frozen with their review.
+Prior entries below retain their historical checkpoint status.
+
 ## September 6: C5 checkpointed; C3 continuation complete and accepted
 
 C5 is checkpointed at `bacaeb96`. The C3 continuation follow-up is complete

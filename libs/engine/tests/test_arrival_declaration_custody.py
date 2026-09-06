@@ -8,6 +8,7 @@ import pytest
 from lang.document import vertex_to_documents
 from lang.loader import parse_vertex
 
+from engine.arrival_boundary_continuity import BoundaryContinuityConflict
 from engine.arrival_contract import (
     DeclarationAnchor,
     Fact,
@@ -16,6 +17,7 @@ from engine.arrival_contract import (
     Profile,
     ProjectionBehind,
     StoreDescriptor,
+    Tick,
     Watermark,
 )
 from engine.arrival_declarations import (
@@ -32,10 +34,15 @@ class _Snapshot:
         self.view_generation = "view"
         self.declaration_anchor = DeclarationAnchor(genesis.id, genesis)
         self._genesis = genesis
+        self._facts = [genesis]
+        self._ticks = []
         self.closed = False
 
     def facts(self, request):
-        return FactPage((self._genesis,), None, False, request.order)
+        return FactPage(tuple(self._facts), None, False, request.order)
+
+    def ticks(self, _request):
+        return tuple(self._ticks)
 
     def close(self):
         self.closed = True
@@ -326,6 +333,83 @@ def test_proposed_declaration_can_repair_ambiguous_effective_history(
         )
 
     assert "scan" in activity
+
+
+def test_declaration_preparation_refuses_ticked_reincarnation_before_scan(
+    tmp_path,
+) -> None:
+    registry, descriptor, target, proposed, captured, snapshot, activity, _ = (
+        _declaration_fixture(tmp_path, case="advance", changed=True)
+    )
+    item_document = next(
+        document
+        for document in snapshot._genesis.payload["documents"]
+        if document["kind"] == "_decl.kind-defined"
+        and document["subject"] == "item"
+    )
+    snapshot._ticks.append(
+        Tick(
+            id="old-item-edge",
+            name="item",
+            ts=-1.0,
+            since=None,
+            origin="x",
+            payload={},
+            arrival_ordinal=1,
+            arrival_seq=0,
+            payload_text="{}",
+        )
+    )
+    snapshot._facts.extend(
+        (
+            Fact(
+                id="retire-item",
+                kind="_decl.kind-retired",
+                ts=2.0,
+                observer="alice",
+                origin="",
+                payload={"lineage": captured.lineage, "subject": "item"},
+                arrival_ordinal=2,
+                arrival_seq=0,
+                payload_text="{}",
+            ),
+            Fact(
+                id="redefine-item",
+                kind="_decl.kind-defined",
+                ts=3.0,
+                observer="alice",
+                origin="",
+                payload={
+                    "lineage": captured.lineage,
+                    "subject": "item",
+                    "payload": item_document["payload"],
+                },
+                arrival_ordinal=3,
+                arrival_seq=0,
+                payload_text="{}",
+            ),
+        )
+    )
+
+    with pytest.raises(DeclarationPreparationRefused) as raised:
+        prepare_declaration_edit(
+            registry,
+            descriptor,
+            target=target,
+            proposed_text=proposed,
+            observer="alice",
+            credentials=None,
+            fact_verify=lambda *_args: True,
+            arrival_verify=lambda *_args: True,
+        )
+
+    assert "boundary continuity refuses" in str(raised.value)
+    assert isinstance(raised.value.__cause__, BoundaryContinuityConflict)
+    assert raised.value.__cause__.tick_id == "old-item-edge"
+    assert raised.value.__cause__.fact_id == "retire-item"
+    assert raised.value.captured_head == captured
+    assert activity == ["head_at", "query-close", "ledger-close"]
+    assert snapshot.closed
 
 
 @pytest.mark.parametrize("args", [(), ("message",), ("message", "detail")])

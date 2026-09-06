@@ -69,6 +69,7 @@ __all__ = [
     "BatchWritePlan",
     "BatchWriteCommitUnknown",
     "BatchWritePreparationRefused",
+    "BoundaryContinuityRefused",
     "CommittedBatchWrite",
     "OrdinaryWritePlan",
     "OrdinaryWritePreparationRefused",
@@ -89,6 +90,33 @@ __all__ = [
 
 class RuntimeWriteRefused(Exception):
     """The runtime writer cannot establish a safe pre-append plan."""
+
+
+class BoundaryContinuityRefused(RuntimeWriteRefused):
+    """Current replay would consume an unlicensed historical boundary edge."""
+
+    def __init__(
+        self,
+        *,
+        issue: Any,
+        basis: ReadBasis,
+        effective_declaration: VertexFile,
+        cause: Exception,
+    ) -> None:
+        super().__init__(str(cause))
+        self.issue = issue
+        self.basis = basis
+        self.captured_head = basis.captured_head
+        self.effective_declaration = effective_declaration
+        self.tick_id = issue.tick_id
+        self.ordinal = issue.tick_ordinal
+        self.fact_id = issue.declaration_fact_id
+        self.vertex = issue.vertex_name
+        self.coordinator_phase = "prepare"
+        self.effects = {
+            "custody": {"attempt": "not-entered", "state": "not-attempted"}
+        }
+        self.cause = cause
 
 
 class OrdinaryWritePreparationRefused(RuntimeWriteRefused):
@@ -718,7 +746,14 @@ def _build_effective_arrival_candidate(
     locator: VertexFile,
     *,
     fold_overrides: dict[str, FoldOverride] | None = None,
-) -> tuple[Vertex, VertexFile, tuple[dict[str, Any], ...], tuple[Any, ...]]:
+) -> tuple[
+    Vertex,
+    VertexFile,
+    tuple[dict[str, Any], ...],
+    tuple[Any, ...],
+    tuple[SnapshotFact, ...],
+    tuple[SnapshotTick, ...],
+]:
     """Build a fresh, storeless candidate from this exact bounded snapshot.
 
     The locator contributes only ingress/residence fields. Effective documents,
@@ -772,6 +807,36 @@ def _build_effective_arrival_candidate(
         from .executor import validate_dependency_graph
 
         validate_dependency_graph(sources)
+    runtime_ticks = tuple(snapshot.ticks(TickRequest()))
+    continuity_ticks = tuple(snapshot.ticks(TickRequest(since=float("-inf"))))
+    from .arrival_boundary_continuity import (
+        BoundaryContinuityConflict,
+        analyze_boundary_continuity,
+        collect_verified_parameter_rows,
+    )
+
+    verified_params = collect_verified_parameter_rows(
+        snapshot.declaration_anchor,
+        facts,
+        target_documents=documents,
+        base_dir=base_dir,
+    )
+    try:
+        analyze_boundary_continuity(
+            snapshot.declaration_anchor,
+            facts,
+            continuity_ticks,
+            target_documents=documents,
+            verified_params=verified_params,
+            compiled_loop_names=set(specs) | {"cite"},
+        )
+    except BoundaryContinuityConflict as exc:
+        raise BoundaryContinuityRefused(
+            issue=exc.issue,
+            basis=basis,
+            effective_declaration=effective,
+            cause=exc,
+        ) from exc
     compiled = CompiledVertex(
         name=effective.name,
         specs=specs,
@@ -786,8 +851,15 @@ def _build_effective_arrival_candidate(
         template_specs=template_specs or None,
     )
     candidate = materialize_vertex(compiled, fold_overrides=fold_overrides, attach_store=False)
-    candidate.hydrate_snapshot(facts, snapshot.ticks(TickRequest()))
-    return candidate, effective, tuple(copy.deepcopy(documents)), tuple(copy.deepcopy(sources))
+    candidate.hydrate_snapshot(facts, runtime_ticks)
+    return (
+        candidate,
+        effective,
+        tuple(copy.deepcopy(documents)),
+        tuple(copy.deepcopy(sources)),
+        tuple(copy.deepcopy(facts)),
+        tuple(copy.deepcopy(runtime_ticks)),
+    )
 
 
 def _hydrate_effective_arrival_candidate(
@@ -797,8 +869,10 @@ def _hydrate_effective_arrival_candidate(
     *,
     fold_overrides: dict[str, FoldOverride] | None = None,
 ) -> tuple[Vertex, VertexFile]:
-    candidate, effective, _documents, _sources = _build_effective_arrival_candidate(
-        snapshot, basis, locator, fold_overrides=fold_overrides
+    candidate, effective, _documents, _sources, _facts, _ticks = (
+        _build_effective_arrival_candidate(
+            snapshot, basis, locator, fold_overrides=fold_overrides
+        )
     )
     return candidate, effective
 
@@ -1005,13 +1079,11 @@ def capture_runtime(
             captured_head=captured, requirement=ProjectionRequirement.CURRENT
         )
         basis = _current_write_basis(ledger, snapshot, captured)
-        candidate, effective, documents, sources = _build_effective_arrival_candidate(
-            snapshot, basis, locator, fold_overrides=fold_overrides
+        candidate, effective, documents, sources, facts, ticks = (
+            _build_effective_arrival_candidate(
+                snapshot, basis, locator, fold_overrides=fold_overrides
+            )
         )
-        facts = tuple(
-            snapshot.facts(FactRequest(limit=None, include_internal=True, order="oldest")).items
-        )
-        ticks = tuple(snapshot.ticks(TickRequest()))
         at = time.time() if evaluated_at is None else evaluated_at
         post_boundary_candidate = candidate.detached_copy() if source_mode else None
         pending = (

@@ -1,0 +1,57 @@
+from pathlib import Path
+from datetime import datetime, timezone
+import hashlib,json
+root=Path('/Users/kaygee/Code/loops-wt/arrival-finish')
+review=root/'docs/scratch/arrival-break/reviews/consistency-c6-design-2026-09-06'
+review.mkdir(parents=True,exist_ok=True)
+packet=review/'c6-design-prompt.txt'
+assert not packet.exists(), 'Review packet already frozen'
+sections=[
+ ('docs/scratch/arrival-break/consistency-c6-boundary-design-2026-09-06.md',None),
+ ('docs/scratch/arrival-break/consistency-c6-engine-design-notes-2026-09-06.md',None),
+ ('docs/scratch/arrival-break/consistency-c6-sdk-design-notes-2026-09-06.md',None),
+ ('docs/scratch/arrival-break/consistency-c6-audit-notes-2026-09-06.md',None),
+ ('docs/scratch/arrival-break/identity-decisions-2026-09-06.md',[(167,270)]),
+ ('libs/engine/src/engine/declaration.py',[(185,281),(852,956)]),
+ ('libs/engine/src/engine/runtime_write.py',[(90,153),(680,850),(977,1118),(1300,1330)]),
+ ('libs/engine/src/engine/arrival_declarations.py',[(78,125),(800,1030)]),
+ ('libs/engine/src/engine/vertex.py',[(769,850),(934,970),(1260,1357)]),
+ ('libs/engine/src/engine/loop.py',[(26,175)]),
+ ('libs/engine/src/engine/compiler.py',[(350,500),(541,617),(890,1045)]),
+ ('libs/lang/src/lang/document.py',[(134,180),(407,510),(578,637),(699,829),(929,1045),(1100,1160)]),
+ ('libs/engine/src/engine/arrival_contract.py',[(195,267),(385,414),(666,710)]),
+ ('libs/sdk/src/sdk/kind.py',[(72,168)]),
+ ('libs/sdk/src/sdk/read.py',[(90,115),(213,263)]),
+]
+intro='''You are Fable 5.1 acting as an adversarial architecture/design reviewer at HIGH effort.
+This is a DESIGN review before any C6 implementation. No tools are available; all relevant evidence is below. Do not execute code or claim to have run tests. Do not edit files.
+
+User intent: fixed append-only facts/ticks, first-class observers, observer-owned reinterpretation, SDK independent of CLI; ordinary edits should not silently reset history. User requested Sol/Terra/Luna implementation pattern and explicitly Fable HIGH review of C6 design before implementation. C3 accepted checkpoint is ef8b21b2. C6 production/test changes have not started.
+
+The root design is authoritative proposal; agent notes record supporting audits/alternatives. Root has asked the user an optional policy preference (inherit in-place trigger/count edges vs conservative refusal), with no answer yet. Review the proposed inherit policy on its merits and separate architectural choice from a bug. All code excerpts are CURRENT BASELINE, not implementation of the proposed guard. General legacy CLI/replay retirement and credential D0/D2 are outside this bounded slice.
+
+Review the design for implementability, observable semantics, correctness bypasses, and unnecessary restrictions on interpretation. Specifically inspect: in-place mode/count/trigger inheritance; whole-loop retirement/recreate; tick-free history; intermediate declaration revisions and atomic multi-document batches; implicit cite; historically ambiguous vertex-name ticks; unknown local tick membership; generated template names including current/intervening/history env/file uncertainty; full receipt range vs event timestamps; effective/history/local cache disagreement; pure classifier reuse across runtime and SDK declaration preview/prepare; permissible forward correction; custody/effect evidence and legacy/public scope.
+
+Return: ACCEPT or REVISE first, then blockers with severity, concrete counterexample, source/design citation and smallest needed fix. Separate optional improvements, open user-policy decisions, and limitations that are already explicitly scoped. Do not invent a wire reset/incarnation scheme as a hidden prerequisite. A conservative refusal must be justified and precisely bounded. Identify any missing algorithm detail needed before implementation. Keep final response under 2500 words; spend effort on analysis, not repeating the packet.
+'''
+parts=[intro]
+sources={}
+for name,ranges in sections:
+ p=root/name
+ data=p.read_bytes()
+ sources[name]=hashlib.sha256(data).hexdigest()
+ lines=data.decode().splitlines()
+ parts.append('\n\n===== '+name+' =====\n')
+ for start,end in ranges or [(1,len(lines))]:
+  parts.append('\n'.join(f'{i}: {lines[i-1]}' for i in range(start,min(end,len(lines))+1)))
+packet.write_text('\n'.join(parts)+'\n')
+manifest={
+ 'model':'claude-fable-5-1[1m]', 'effort':'high',
+ 'worktree':str(root), 'results':str(review),
+ 'due_at':datetime.now(timezone.utc).isoformat(),
+ 'baseline':'ef8b21b2', 'scope':'C6 design only, before implementation',
+ 'jobs':[{'name':'c6-design','packet':str(packet),'sha256':hashlib.sha256(packet.read_bytes()).hexdigest(),'sources':sources,'status':'pending'}]
+}
+(review/'manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
+(review/'build-design-review.py.txt').write_bytes(Path(__file__).read_bytes())
+print(json.dumps({'packet_bytes':packet.stat().st_size,'sha256':manifest['jobs'][0]['sha256'],'manifest':str(review/'manifest.json')},indent=2))

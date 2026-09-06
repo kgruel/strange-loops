@@ -1,0 +1,178 @@
+from __future__ import annotations
+
+from types import SimpleNamespace
+
+from lang.document import vertex_to_documents
+from lang.loader import parse_vertex
+
+from engine.arrival_contract import DeclarationAnchor, Fact, FactPage, Head, ReadBasis, Tick, TickRequest, Watermark
+from engine.loop import Loop
+from engine.runtime_write import hydrate_arrival_candidate
+from engine.vertex import Vertex
+
+
+class Snapshot:
+    def __init__(self, head: Head, documents, facts=(), ticks=()):
+        self.represented = Watermark(head.lineage, head.ordinal)
+        self.view_generation = "baseline"
+        genesis = Fact(
+            id=head.lineage,
+            kind="_decl.genesis",
+            ts=0.0,
+            observer="alice",
+            origin="",
+            payload={"protocol": 1, "documents": documents},
+            arrival_ordinal=0,
+            arrival_seq=0,
+            payload_text="{}",
+        )
+        self.declaration_anchor = DeclarationAnchor(head.lineage, genesis)
+        self._facts = tuple(facts)
+        self._ticks = tuple(ticks)
+
+    def facts(self, request):
+        return FactPage(self._facts, None, False, request.order)
+
+    def ticks(self, request):
+        return self._ticks
+
+
+def basis(head):
+    return ReadBasis(head.lineage, head, head, "baseline")
+
+
+def fact(fid, kind, payload, ordinal):
+    return Fact(
+        id=fid,
+        kind=kind,
+        ts=float(ordinal),
+        observer="alice",
+        origin="",
+        payload=payload,
+        arrival_ordinal=ordinal,
+        arrival_seq=0,
+        payload_text="{}",
+    )
+
+
+def tick(tid, name, origin, ordinal, ts=2.0):
+    return Tick(
+        id=tid,
+        name=name,
+        ts=ts,
+        since=None,
+        origin=origin,
+        payload={},
+        arrival_ordinal=ordinal,
+        arrival_seq=0,
+        payload_text="{}",
+    )
+
+
+def probe_retire_redefine():
+    head = Head("lineage-retire", 4, "head-retire")
+    source = 'name "vertex"\nloops {\n  pulse { fold { values "collect" 20 } }\n}\n'
+    current = parse_vertex(source)
+    docs = [doc.as_json() for doc in vertex_to_documents(current)]
+    facts = (
+        fact("retire", "_decl.kind-retired", {"lineage": head.lineage, "subject": "pulse"}, 2),
+        fact(
+            "redefine",
+            "_decl.kind-defined",
+            {
+                "lineage": head.lineage,
+                "subject": "pulse",
+                "payload": next(d["payload"] for d in docs if d["subject"] == "pulse"),
+            },
+            3,
+        ),
+    )
+    old_tick = tick("old-pulse-tick", "pulse", "vertex", 1)
+    snapshot = Snapshot(head, docs, facts=facts, ticks=(old_tick,))
+    candidate = hydrate_arrival_candidate(snapshot, basis(head), current)
+    print("retire-redefine", {"accepted": True, "name": candidate.name, "kinds": candidate.kinds})
+
+
+def probe_historical_collision_repaired():
+    head = Head("lineage-collision", 3, "head-collision")
+    historical = parse_vertex(
+        'name "same"\nloops {\n  same { fold { values "collect" 20 } }\n}\n'
+    )
+    repaired = parse_vertex('name "same"\nloops {\n  other { fold { values "collect" 20 } }\n}\n')
+    historical_docs = [doc.as_json() for doc in vertex_to_documents(historical)]
+    repaired_payload = next(d["payload"] for d in historical_docs if d["subject"] == "same" and d["kind"] == "_decl.kind-defined")
+    facts = (
+        fact(
+            "retire-same",
+            "_decl.kind-retired",
+            {"lineage": head.lineage, "subject": "same"},
+            2,
+        ),
+    )
+    old_collision_tick = tick("old-collision-tick", "same", "same", 1)
+    snapshot = Snapshot(head, historical_docs, facts=facts, ticks=(old_collision_tick,))
+    candidate = hydrate_arrival_candidate(snapshot, basis(head), repaired)
+    print(
+        "historical-collision-repaired",
+        {"accepted": True, "name": candidate.name, "kinds": candidate.kinds, "vertex_period_start": candidate._vertex_period_start},
+    )
+
+
+def probe_historical_collision_with_vertex_consumer():
+    head = Head("lineage-collision-consumer", 3, "head-collision-consumer")
+    historical = parse_vertex(
+        'name "same"\nloops {\n  boundary when="seal"\n'
+        '  same { fold { values "collect" 20 } }\n}\n'
+    )
+    repaired = parse_vertex(
+        'name "same"\nloops {\n  boundary when="seal"\n'
+        '  other { fold { values "collect" 20 } }\n}\n'
+    )
+    historical_docs = [doc.as_json() for doc in vertex_to_documents(historical)]
+    facts = (
+        fact(
+            "retire-same-consumer",
+            "_decl.kind-retired",
+            {"lineage": head.lineage, "subject": "same"},
+            2,
+        ),
+    )
+    old_collision_tick = tick("old-collision-consumer-tick", "same", "same", 1)
+    snapshot = Snapshot(head, historical_docs, facts=facts, ticks=(old_collision_tick,))
+    candidate = hydrate_arrival_candidate(snapshot, basis(head), repaired)
+    print(
+        "historical-collision-with-vertex-consumer",
+        {
+            "accepted": True,
+            "name": candidate.name,
+            "kinds": candidate.kinds,
+            "has_vertex_boundary": candidate._has_vertex_boundary,
+            "vertex_period_start": candidate._vertex_period_start,
+        },
+    )
+
+
+def probe_every_to_after():
+    vertex = Vertex("v")
+    loop = Loop(
+        name="pulse",
+        initial={"n": 0},
+        fold=lambda state, _payload: state,
+        boundary_count=1,
+        boundary_mode="after",
+    )
+    vertex.register_loop(loop)
+    vertex.hydrate_snapshot(
+        (),
+        (SimpleNamespace(id="old", name="pulse", ts=1.0, origin="v", arrival_ordinal=1, arrival_seq=0),),
+    )
+    print(
+        "every-to-after",
+        {"accepted": True, "boundary_mode": loop.boundary_mode, "exhausted": loop._boundary_exhausted},
+    )
+
+
+probe_retire_redefine()
+probe_historical_collision_repaired()
+probe_historical_collision_with_vertex_consumer()
+probe_every_to_after()

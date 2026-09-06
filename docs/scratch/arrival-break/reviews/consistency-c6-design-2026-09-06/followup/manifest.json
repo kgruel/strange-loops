@@ -1,0 +1,36 @@
+{
+  "model": "claude-fable-5-1[1m]",
+  "effort": "high",
+  "worktree": "/Users/kaygee/Code/loops-wt/arrival-finish",
+  "results": "/Users/kaygee/Code/loops-wt/arrival-finish/docs/scratch/arrival-break/reviews/consistency-c6-design-2026-09-06/followup",
+  "due_at": "2026-09-06T20:41:30.808159+00:00",
+  "baseline": "ef8b21b2",
+  "scope": "C6 revised design only, before implementation",
+  "jobs": [
+    {
+      "name": "c6-design-followup",
+      "packet": "/Users/kaygee/Code/loops-wt/arrival-finish/docs/scratch/arrival-break/reviews/consistency-c6-design-2026-09-06/followup/c6-design-followup-prompt.txt",
+      "sha256": "f03a1ca5123fc1b49282c29f8c11cc5e83171ec229954d2249a403a413c94269",
+      "sources": {
+        "docs/scratch/arrival-break/consistency-c6-boundary-design-2026-09-06.md": "8e582f33064b32533fbd5b2cf6bede328c98c74720287ff6fbe64606101d1a55",
+        "docs/scratch/arrival-break/reviews/consistency-c6-design-2026-09-06/primary-triage.md": "2891ac429b249c2aaf6219bed24fcca2753305a8f558f86016720e1be4d615ec",
+        "docs/scratch/arrival-break/reviews/consistency-c6-design-2026-09-06/c6-design-findings.md": "7adae0b031a2de689be70e9277cb15c6b12a5e744a00e38e524466bcbad58b1d",
+        "docs/scratch/arrival-break/consistency-c6-engine-design-notes-2026-09-06.md": "220e8f81eb1aeff19b111742a5a3363b68827e3d19a2ce24114dc8960caaea5e",
+        "docs/scratch/arrival-break/consistency-c6-sdk-design-notes-2026-09-06.md": "7387a961d11e04c42024e2c0677070df462aba0c2732b931efe059c44543df54",
+        "libs/engine/src/engine/arrival_body.py": "b702384a17fa2a93abade023c82dd432e81aa4a069efd2f384e7f4c5b4d4a143",
+        "libs/engine/src/engine/arrival.py": "8e37f3cbbcf652133ee23db9edf724635e896f13ce42051c6ee8f3b63064846c",
+        "libs/engine/src/engine/declaration.py": "565a1b661ccaae1ed21ae38b53c245a4811c6629ac4143a2dd1ec399a0161b1b",
+        "libs/engine/src/engine/vertex.py": "acf72ed52646de8132d250a2d9c909eef8889ee8e919a1c769472eb844c21b28",
+        "libs/engine/src/engine/loop.py": "2c950faed8f75cbb7600d0b78f4805aeae2f66a9450a8de37acbeeff28dd741f",
+        "libs/engine/src/engine/compiler.py": "b2ec8bbb1ebd12bb1d0113300c3cb506e22d481965c64237a8fbe2789e99663f",
+        "libs/lang/src/lang/document.py": "68f8e36fe4449335515dbcb189eb5e1e0aca53644c2879705a6acd7f75e03a1a",
+        "libs/engine/src/engine/runtime_write.py": "021e09cac4975cf950c3d4c9bf699d632612a4a33557e528a0686090ce2a7758",
+        "libs/engine/src/engine/arrival_declarations.py": "8e3b52ef2884db464cd61bdd215542a031b3d984d8d63fb11c6de213bb2129a5",
+        "libs/sdk/src/sdk/kind.py": "1eaffc5d16cc90f857aa6ae36bdcbcb6fb99bc59237f6d6cd4f28e219c0aec75",
+        "libs/sdk/src/sdk/errors.py": "d956636a83ce14c0ad90f931e19e2f8c3154d31e57c152562422fa32609a9db4",
+        "libs/engine/src/engine/arrival_file_backend.py": "196db6be0bd6c06794e7935946d102def55cc5b48832f1b0cc4147932c047dbe"
+      },
+      "status": "pending"
+    }
+  ]
+}

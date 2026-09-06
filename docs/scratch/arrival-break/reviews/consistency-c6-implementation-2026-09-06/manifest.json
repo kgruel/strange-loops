@@ -1,0 +1,36 @@
+{
+  "model": "claude-fable-5-1[1m]",
+  "effort": "low",
+  "worktree": "/Users/kaygee/Code/loops-wt/arrival-finish",
+  "results": "/Users/kaygee/Code/loops-wt/arrival-finish/docs/scratch/arrival-break/reviews/consistency-c6-implementation-2026-09-06",
+  "due_at": "2026-09-06T21:32:12.360092+00:00",
+  "baseline": "ef8b21b2",
+  "scope": "C6 implementation after high-effort design triage",
+  "jobs": [
+    {
+      "name": "c6-implementation",
+      "packet": "/Users/kaygee/Code/loops-wt/arrival-finish/docs/scratch/arrival-break/reviews/consistency-c6-implementation-2026-09-06/c6-implementation-prompt.txt",
+      "sha256": "790d16340d92c25d5d394db28c1539178fd234d66fe96e48ef225fd31d1ceacc",
+      "sources": {
+        "docs/scratch/arrival-break/consistency-c6-2026-09-06.md": "be732f7ecc60d64d47a150d33eb75b6f98d2cdb19d84f4cd4ced564694f21025",
+        "docs/scratch/arrival-break/consistency-c6-validation-2026-09-06.md": "1eced2e05c946b91ab88d5928fdbbbd227a432db0dbe3c5c1542f26c1bd6ce7e",
+        "docs/scratch/arrival-break/consistency-c6-boundary-design-2026-09-06.md": "91b13aa3bf9ac56cb892bbd9afa6977eff5d1a94e07e81d06b56b18125279a15",
+        "libs/engine/src/engine/arrival_boundary_continuity.py": "f40ec43cb43cc17b473bf47df72d8fc46ec2407f70a695576b889ee06c8d3cef",
+        "libs/engine/src/engine/runtime_write.py": "8e95338b936b884112553f3f17603310444bedc540f5779cb8653a67df9437a3",
+        "libs/engine/src/engine/arrival_declarations.py": "ec142ac85023601964aabf3d031b557b5a4ecb72a731a5b77b384eaba4862ef1",
+        "libs/engine/src/engine/compiler.py": "b282fdf164631fbbce16372e28c25e85f99b6121321fde3734af8893ff2bf43d",
+        "libs/engine/src/engine/declaration.py": "565a1b661ccaae1ed21ae38b53c245a4811c6629ac4143a2dd1ec399a0161b1b",
+        "libs/engine/src/engine/loop.py": "2c950faed8f75cbb7600d0b78f4805aeae2f66a9450a8de37acbeeff28dd741f",
+        "libs/engine/src/engine/vertex.py": "acf72ed52646de8132d250a2d9c909eef8889ee8e919a1c769472eb844c21b28",
+        "libs/sdk/src/sdk/kind.py": "df66c2f6c5f986d72ece95d37d6b491f26f0b422ad09c32fa9177607397ea68d",
+        "libs/sdk/src/sdk/errors.py": "d956636a83ce14c0ad90f931e19e2f8c3154d31e57c152562422fa32609a9db4",
+        "libs/engine/tests/test_arrival_boundary_continuity.py": "209d6f25def94265e486b9ae36a5aec5a19355477882fc3256f23d713d1240c4",
+        "libs/engine/tests/test_arrival_declaration_custody.py": "36214f2f2174065b7212a52cb6de3b229d603b5b37b4c95ac688849cfb2e0fc4",
+        "libs/engine/tests/test_runtime_capture.py": "81e7c0dffc9c8e7e2a84b0b5a21e90d1dac23f6bca50b41fdd5cc7b4e0b81284",
+        "libs/sdk/tests/test_arrival_boundary_continuity.py": "e5fd3a1fc25f43392255c40a21ff764a3bf1e6633090701ccf7780839110da9c",
+        "tests/architecture/test_rule_18_arrival_vocabulary_denylist.py": "35478ee2085e4b2cbbce6f430098744cc1c61e63dd3ea0910a07fc63e5889204"
+      },
+      "status": "pending"
+    }
+  ]
+}

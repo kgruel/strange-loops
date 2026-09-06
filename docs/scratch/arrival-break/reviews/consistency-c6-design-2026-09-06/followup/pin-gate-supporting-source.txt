@@ -1,0 +1,223 @@
+libs/engine/src/engine/declaration.py
+875: ) -> None:
+876:     """Verify source file pins using already-bounded declaration documents.
+877: 
+878:     This is the pure Arrival runtime boundary: callers supply the declaration
+879:     documents captured from their attested snapshot and the locator's ingress
+880:     directory. It never opens a store or resolves declaration state again.
+881:     """
+882:     import hashlib
+883: 
+884:     from lang.document import DECL_SOURCE_DEFINED
+885: 
+886:     def _check(ref: str, pinned: str, what: str) -> None:
+887:         path = Path(ref)
+888:         candidate = path if path.is_absolute() else (base_dir / path)
+889:         try:
+890:             current = hashlib.sha256(candidate.read_bytes()).hexdigest()
+891:         except OSError:
+892:             raise SourceDrift(
+893:                 f"{what} {ref} is pinned in the declaration but unreadable — "
+894:                 "restore it or re-absorb"
+895:             ) from None
+896:         if current != pinned:
+897:             raise SourceDrift(
+898:                 f"{what} {ref} has drifted from its declaration pin — the "
+899:                 "store's ontology no longer describes this file; run "
+900:                 "`loops store absorb` to declare the change (never "
+901:                 "auto-enacted)"
+902:             )
+903: 
+904:     for document in documents:
+905:         if document.get("kind") != DECL_SOURCE_DEFINED:
+906:             continue
+907:         payload = document.get("payload", {})
+908:         pinned = payload.get("content_sha256")
+909:         if pinned:
+910:             ref = payload.get("template") or payload.get("path")
+911:             if ref:
+912:                 _check(ref, pinned, "source")
+913:         from_document = payload.get("from") or {}
+914:         params_pin = from_document.get("params_sha256")
+915:         if params_pin and from_document.get("path"):
+916:             _check(from_document["path"], params_pin, "params file")
+917: 
+918: 
+919: def effective_declaration_from_documents(
+920:     documents: Sequence[Mapping[str, Any]],
+921:     locator: VertexFile,
+922:     *,
+923:     verify_pins: bool = True,
+924: ) -> VertexFile:
+925:     """Rebuild effective declaration state using only bounded documents.
+926: 
+927:     Residence and source environment ingress come from the already-parsed
+928:     locator. Source structure remains document-authoritative, and optional pin
+929:     verification reads source files only after the bounded declaration has
+930:     selected their expected hashes. No projection or declaration store opens.
+931:     """
+932:     import copy
+933: 
+934:     resolved = documents_to_vertex(
+935:         copy.deepcopy(list(documents)),
+936:         path=locator.path,
+937:         store=locator.store,
+938:         store_backend=locator.store_backend,
+939:         store_location=locator.store_location,
+940:     )
+941:     effective = _reattach_ingress(resolved, locator)
+942:     if verify_pins:
+943:         base_dir = locator.path.parent if locator.path is not None else Path.cwd()
+944:         verify_source_pins_from_documents(documents, base_dir)
+945:     return effective
+946: 
+947: 
+948: def verify_source_pins(vertex_path: Path) -> None:
+949:     """Refuse to run over drifted pinned sources (SPEC §9.2, no-auto-enact).
+950: 
+
+libs/engine/src/engine/runtime_write.py
+739:     documents = resolve_declaration_documents_from_snapshot(snapshot.declaration_anchor, facts)
+740:     if documents is None or isinstance(documents, Unhistorized):
+741:         raise RuntimeWriteRefused("ordinary emission requires historized effective declarations")
+742:     effective = effective_declaration_from_documents(documents, locator)
+743:     if effective.vertices or effective.discover or effective.combine is not None:
+744:         raise RuntimeWriteRefused("multi-store child execution is not in stage 3A")
+745:     validate_arrival_runtime_identity(
+746:         effective.name,
+747:         effective.loops,
+748:         refusal=RuntimeWriteRefused,
+749:     )
+750:     from .compiler import (
+751:         CompiledVertex,
+752:         compile_parse_pipelines,
+753:         compile_sources,
+754:         compile_sources_block,
+755:         map_boundary,
+756:         map_vertex_file,
+757:         materialize_vertex,
+758:     )
+759: 
+760:     base_dir = locator.path.parent if locator.path is not None else Path.cwd()
+761:     sources, template_specs = compile_sources(effective, base_dir)
+762:     for block in effective.sources_blocks or ():
+763:         sources.append(compile_sources_block(block, effective.name))
+
+libs/engine/tests/test_runtime_capture.py
+424: def test_source_capture_reattaches_ingress_merges_template_specs_and_pins(
+425:     tmp_path, monkeypatch, keys, signer
+426: ):
+427:     template = tmp_path / "feed.loop"
+428:     template.write_text(
+429:         'source "echo generated"\nkind "{{kind}}"\nobserver "kyle"\n',
+430:         encoding="utf-8",
+431:     )
+432:     source_text = """sources {
+433:   template "./feed.loop" {
+434:     with kind="generated"
+435:     loop {
+436:       fold {
+437:         items "collect" 5
+438:       }
+439:     }
+440:   }
+441: }
+442: """
+443:     target = _make_target(
+444:         tmp_path,
+445:         monkeypatch,
+446:         keys,
+447:         signer,
+448:         source_text=source_text,
+449:     )
+450:     capture = capture_runtime(
+451:         target.registry,
+452:         target.descriptor,
+453:         target.locator,
+454:         source_mode=True,
+455:         evaluated_at=3.0,
+456:     )
+457:     assert [source.kind for source, _cadence in capture.sources] == ["generated"]
+458:     plan = plan_batch_from_capture(
+459:         capture,
+460:         (
+461:             BatchFactInput(
+462:                 AtomFact("generated", 4.0, {}, observer="kyle"),
+463:                 fact_id="generated-fact",
+464:             ),
+465:         ),
+466:         credentials=WriteCredentials(),
+467:     )
+468:     assert plan.items[0].fact_id == "generated-fact"
+469: 
+470:     ingress = _make_target(
+471:         tmp_path / "ingress",
+472:         monkeypatch,
+473:         keys,
+474:         signer,
+475:         source_text="""sources "sequential" {
+476:   source "echo inline" {
+477:     kind "inline"
+478:     observer "kyle"
+479:     env TOKEN="captured-secret"
+480:   }
+481: }
+482: """,
+483:     )
+484:     ingress_capture = capture_runtime(
+485:         ingress.registry,
+486:         ingress.descriptor,
+487:         ingress.locator,
+488:         source_mode=True,
+489:         evaluated_at=3.0,
+490:     )
+491:     sequential = ingress_capture.sources[0][0]
+492:     assert sequential.sources[0].env == {"TOKEN": "captured-secret"}
+493:     caller_source = ingress.locator.sources_blocks[0].sources[0]
+494:     object.__setattr__(caller_source, "env", (("TOKEN", "mutated-after-capture"),))
+495:     ingress.locator.loops.clear()
+496:     assert ingress_capture.sources[0][0].sources[0].env == {
+497:         "TOKEN": "captured-secret"
+498:     }
+499:     assert ingress_capture.effective_declaration.sources_blocks[0].sources[0].env == (
+500:         ("TOKEN", "captured-secret"),
+501:     )
+502: 
+503:     template.write_text(template.read_text().replace("generated", "drifted"))
+504:     assert plan_batch_from_capture(
+505:         capture,
+506:         (
+507:             BatchFactInput(
+508:                 AtomFact("generated", 4.0, {}, observer="kyle"),
+509:                 fact_id="generated-fact",
+510:             ),
+511:         ),
+512:         credentials=WriteCredentials(),
+513:     ) == plan
+514:     with pytest.raises(SourceDrift):
+515:         capture_runtime(
+516:             target.registry,
+517:             target.descriptor,
+518:             target.locator,
+519:             source_mode=True,
+520:             evaluated_at=3.0,
+521:         )
+522: 
+523: 
+524: def test_document_pin_helper_never_opens_a_store(tmp_path) -> None:
+525:     source = tmp_path / "source.loop"
+526:     source.write_text("stable", encoding="utf-8")
+527:     documents = [
+528:         {
+529:             "kind": "_decl.source-defined",
+530:             "subject": "source",
+531:             "payload": {
+532:                 "path": "source.loop",
+533:                 "content_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
+534:             },
+535:         }
+536:     ]
+537:     verify_source_pins_from_documents(documents, tmp_path)
+538:     source.write_text("changed", encoding="utf-8")
+539:     with pytest.raises(SourceDrift):
+540:         verify_source_pins_from_documents(documents, tmp_path)

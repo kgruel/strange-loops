@@ -1,0 +1,31 @@
+ M docs/scratch/arrival-break/consistency-contract-matrix-2026-09-06.md
+ M docs/scratch/arrival-break/identity-decisions-2026-09-06.md
+ M docs/scratch/arrival-break/orchestration-2026-09-05.md
+ M libs/engine/src/engine/arrival_declarations.py
+ M libs/engine/src/engine/compiler.py
+ M libs/engine/src/engine/runtime_write.py
+ M libs/engine/tests/test_arrival_declaration_custody.py
+ M libs/engine/tests/test_runtime_capture.py
+ M libs/sdk/src/sdk/kind.py
+ M tests/architecture/test_rule_18_arrival_vocabulary_denylist.py
+?? docs/scratch/arrival-break/consistency-c6-2026-09-06.md
+?? docs/scratch/arrival-break/consistency-c6-audit-notes-2026-09-06.md
+?? docs/scratch/arrival-break/consistency-c6-boundary-design-2026-09-06.md
+?? docs/scratch/arrival-break/consistency-c6-engine-design-notes-2026-09-06.md
+?? docs/scratch/arrival-break/consistency-c6-sdk-design-notes-2026-09-06.md
+?? docs/scratch/arrival-break/reviews/consistency-c6-design-2026-09-06/
+?? libs/engine/src/engine/arrival_boundary_continuity.py
+?? libs/engine/tests/test_arrival_boundary_continuity.py
+?? libs/sdk/tests/test_arrival_boundary_continuity.py
+
+tracked/untracked source-test paths:
+libs/engine/src/engine/arrival_boundary_continuity.py
+libs/engine/src/engine/arrival_declarations.py
+libs/engine/src/engine/compiler.py
+libs/engine/src/engine/runtime_write.py
+libs/engine/tests/test_arrival_boundary_continuity.py
+libs/engine/tests/test_arrival_declaration_custody.py
+libs/engine/tests/test_runtime_capture.py
+libs/sdk/src/sdk/kind.py
+libs/sdk/tests/test_arrival_boundary_continuity.py
+tests/architecture/test_rule_18_arrival_vocabulary_denylist.py

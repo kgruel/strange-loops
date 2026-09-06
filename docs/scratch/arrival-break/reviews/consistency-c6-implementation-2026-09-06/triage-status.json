@@ -1,0 +1,20 @@
+{
+  "status": "complete",
+  "external_verdict": "ACCEPT",
+  "primary_decision": "accepted",
+  "blockers": 0,
+  "pending_notes": [],
+  "completed_notes": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6
+  ],
+  "post_review_change": "SDK inline-parameter acceptance test only",
+  "deferred_followups": [
+    "Audit snapshot resolver treatment of self-scoped pre-genesis overlays; preserve read compatibility.",
+    "Consider imported vertex singleton/subject-name validation alongside identity transition design."
+  ]
+}

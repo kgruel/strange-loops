@@ -1,0 +1,26 @@
+{
+  "scope": "Disposable source-backed fake-query baseline; query probe uses isolated temporary SQLite. Not a live-store or full SDK acceptance test.",
+  "baseline": "ef8b21b2",
+  "runner": "Luna stage_validation",
+  "commands": [
+    "PYTHONPATH=libs/engine/src:libs/lang/src:libs/atoms/src uv run --package engine python /tmp/loops-arrival-c6-2026-09-06/baseline_probe.py",
+    "PYTHONPATH=libs/engine/src:libs/lang/src:libs/atoms/src uv run --package engine python /tmp/loops-arrival-c6-2026-09-06/query_probe.py"
+  ],
+  "cwd": "/Users/kaygee/Code/loops-wt/arrival-finish",
+  "negative_cases": [
+    "retire-redefine accepted old ticks",
+    "historical collision with vertex consumer accepted ambiguous tick"
+  ],
+  "desired_positive_cases": [
+    "historical collision repaired without vertex consumer accepted",
+    "every-to-after inherits exhaustion"
+  ],
+  "files": {
+    "query_probe.py.txt": "68d073c721e4394d6b7f118199f1b2dc41a55181e0d4c1bc643d691cdeb56f44",
+    "query-output.txt": "32d230ea210358e550ca192e7036e6c095ef4fb9010953f8b0d13ff31e0a2a41",
+    "baseline-output.txt": "0883e5469ae550afc7f6f32944de04d4aca3034ad187395a2d1bcefad5479558",
+    "probe-hashes.txt": "eacc8bac3d1bde87f0ccb39b32135f6a2c2337e64e2686accd8925c6b70e5f9e",
+    "source-hashes.txt": "a315de7e1fc91f56229d7aab4dc34bf6853ddf897ce4ddfb26c0f9a9d1cf5b9e",
+    "baseline_probe.py.txt": "5ee0a0c6efbc4d9388733ec11355f35596b2808b4a5e62ca48012f2214f1a202"
+  }
+}

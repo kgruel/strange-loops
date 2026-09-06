@@ -361,8 +361,10 @@ def substitute_loop_def(loop_def: LoopDef, params: dict[str, str]) -> LoopDef:
     return LoopDef(folds=loop_def.folds, boundary=boundary, search=loop_def.search, parse=loop_def.parse)
 
 
-def _load_params_file(file_path: Path) -> list[SourceParams]:
-    """Load parameter rows from an external file.
+def parse_source_params_bytes(
+    data: bytes, *, source: str | Path = "<params>"
+) -> list[SourceParams]:
+    """Parse one exact parameter-file byte snapshot.
 
     File format:
     - Lines starting with # are comments
@@ -370,8 +372,17 @@ def _load_params_file(file_path: Path) -> list[SourceParams]:
     - First content line is the header (whitespace-separated column names)
     - Subsequent lines are data rows
     - Last column gets remainder (handles URLs with query strings)
+
+    Decode with the same locale encoding ``Path.read_text()`` historically
+    used.  Accepting bytes lets declaration-history validation hash and parse
+    one immutable read rather than verify a path and reopen different bytes.
     """
-    text = file_path.read_text()
+    import io
+
+    # TextIOWrapper with no explicit encoding/newline is the in-memory sibling
+    # of Path.open()/Path.read_text() defaults, including Python UTF-8 mode.
+    with io.TextIOWrapper(io.BytesIO(data)) as stream:
+        text = stream.read()
     lines = text.splitlines()
 
     header: list[str] | None = None
@@ -390,11 +401,16 @@ def _load_params_file(file_path: Path) -> list[SourceParams]:
         parts = line.split(None, len(header) - 1)
         if len(parts) != len(header):
             raise ValueError(
-                f"{file_path}:{lineno}: expected {len(header)} columns, got {len(parts)}"
+                f"{source}:{lineno}: expected {len(header)} columns, got {len(parts)}"
             )
-        params.append(SourceParams(values=dict(zip(header, parts))))
+        params.append(SourceParams(values=dict(zip(header, parts, strict=True))))
 
     return params
+
+
+def _load_params_file(file_path: Path) -> list[SourceParams]:
+    """Load parameter rows through the exact-byte parser."""
+    return parse_source_params_bytes(file_path.read_bytes(), source=file_path)
 
 
 def _resolve_param_indirection(values: dict[str, str]) -> dict[str, str]:

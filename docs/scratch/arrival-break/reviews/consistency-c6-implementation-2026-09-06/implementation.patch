@@ -1,0 +1,2170 @@
+diff --git a/libs/engine/src/engine/arrival_boundary_continuity.py b/libs/engine/src/engine/arrival_boundary_continuity.py
+new file mode 100644
+index 00000000..3ac7442b
+--- /dev/null
++++ b/libs/engine/src/engine/arrival_boundary_continuity.py
+@@ -0,0 +1,634 @@
++"""Pure declaration-history checks for Arrival boundary consumption edges.
++
++The supported Arrival runtime rebuilds current fold state from facts, but old
++owned ticks remain reset/count/period edges.  This module establishes that a
++current consumer has one continuous declared role for each edge it will use.
++It deliberately performs no custody, projection, signing, or source execution.
++"""
++
++from __future__ import annotations
++
++import copy
++import hashlib
++import re
++from collections.abc import Collection, Mapping, Sequence
++from dataclasses import dataclass
++from pathlib import Path
++from typing import Any, Literal
++
++from lang.document import (
++    DECL_GENESIS,
++    DECL_KIND_DEFINED,
++    DECL_LENS_DEFINED,
++    DECL_SOURCE_DEFINED,
++    DECL_VERTEX_DEFINED,
++    DECLARATION_PROTOCOL_VERSION,
++    DEFINED_TO_TOMBSTONE,
++    is_internal_kind,
++)
++
++from .arrival_contract import DeclarationAnchor, Fact, Tick
++from .declaration import (
++    DeclarationResolutionError,
++    UnadoptedLineage,
++    UnsupportedProtocol,
++)
++
++__all__ = [
++    "BoundaryContinuityConflict",
++    "BoundaryContinuityIssue",
++    "BoundaryContinuityResult",
++    "DeclarationDocumentRevision",
++    "analyze_boundary_continuity",
++    "collect_verified_parameter_rows",
++    "declaration_document_revisions",
++]
++
++
++BoundaryContinuityReason = Literal[
++    "prior-incarnation",
++    "ambiguous-tick-role",
++    "unproven-loop-role",
++    "unproven-generated-incarnation",
++    "invalid-projection-shape",
++    "runtime-namespace-mismatch",
++    "reserved-runtime-name",
++]
++
++
++@dataclass(frozen=True)
++class BoundaryContinuityIssue:
++    """Stable, payload-free evidence for one refused continuity claim."""
++
++    reason: BoundaryContinuityReason
++    vertex_name: str
++    loop_name: str | None = None
++    tick_id: str | None = None
++    tick_ordinal: int | None = None
++    tick_seq: int | None = None
++    declaration_fact_id: str | None = None
++    declaration_ordinal: int | None = None
++    detail: str = ""
++
++
++class BoundaryContinuityConflict(Exception):
++    """The bounded declaration/tick evidence cannot license current replay."""
++
++    def __init__(self, issue: BoundaryContinuityIssue) -> None:
++        super().__init__(issue.detail or issue.reason.replace("-", " "))
++        self.issue = issue
++        self.tick_id = issue.tick_id
++        self.ordinal = issue.tick_ordinal
++        self.fact_id = issue.declaration_fact_id
++        self.vertex = issue.vertex_name
++
++
++@dataclass(frozen=True)
++class BoundaryContinuityResult:
++    """The target namespace established by the analyzed document history."""
++
++    provable_names: frozenset[str]
++    has_unknown_generators: bool
++    vertex_name: str
++    has_vertex_boundary: bool
++
++
++@dataclass(frozen=True)
++class DeclarationDocumentRevision:
++    """One atomically observable own-declaration namespace revision."""
++
++    arrival_ordinal: int | None
++    fact_ids: tuple[str, ...]
++    document_fact_ids: tuple[tuple[str, str, str], ...]
++    documents: tuple[Mapping[str, Any], ...]
++    proposed: bool = False
++
++
++@dataclass(frozen=True)
++class _Namespace:
++    names: frozenset[str]
++    unknown_generator: bool
++    vertex_name: str
++    has_vertex_boundary: bool
++
++    def membership(self, name: str) -> Literal["present", "absent", "unknown"]:
++        if name in self.names:
++            return "present"
++        return "unknown" if self.unknown_generator else "absent"
++
++
++_TOMBSTONE_TO_DEFINED = {
++    tombstone: defined for defined, tombstone in DEFINED_TO_TOMBSTONE.items()
++}
++_DEFINED_KINDS = frozenset(DEFINED_TO_TOMBSTONE) | {
++    DECL_LENS_DEFINED,
++    DECL_VERTEX_DEFINED,
++}
++_ENV_VALUE = re.compile(r"\$[A-Za-z_][A-Za-z0-9_]*\Z")
++
++
++def _copy_documents(
++    documents: Sequence[Mapping[str, Any]],
++) -> tuple[Mapping[str, Any], ...]:
++    return tuple(copy.deepcopy(dict(document)) for document in documents)
++
++
++def _document_map(
++    documents: Sequence[Mapping[str, Any]],
++) -> dict[tuple[str, str], dict[str, Any]]:
++    mapped: dict[tuple[str, str], dict[str, Any]] = {}
++    for document in documents:
++        kind = document["kind"]
++        subject = document["subject"]
++        mapped[(kind, subject)] = copy.deepcopy(dict(document))
++    return mapped
++
++
++def _documents_tuple(
++    mapped: Mapping[tuple[str, str], Mapping[str, Any]],
++) -> tuple[Mapping[str, Any], ...]:
++    return tuple(copy.deepcopy(dict(document)) for document in mapped.values())
++
++
++def declaration_document_revisions(
++    anchor: DeclarationAnchor,
++    facts: Sequence[Fact],
++    *,
++    target_documents: Sequence[Mapping[str, Any]] | None = None,
++) -> tuple[DeclarationDocumentRevision, ...]:
++    """Return genesis, own-overlay groups, and an optional proposed target.
++
++    Foreign declaration rows are intentionally excluded before any caller can
++    inspect their source paths.  Rows sharing an Arrival ordinal are applied in
++    sequence and exposed as one observable revision.
++    """
++    internal = sorted(
++        (fact for fact in facts if is_internal_kind(fact.kind)),
++        key=lambda fact: (fact.arrival_ordinal, fact.arrival_seq),
++    )
++    if anchor.own_lineage is None:
++        if any(fact.kind == DECL_GENESIS for fact in internal):
++            raise UnadoptedLineage(
++                "declaration genesis rows occur without an own-lineage marker"
++            )
++        raise DeclarationResolutionError(
++            "boundary continuity requires a historized own declaration"
++        )
++    genesis = anchor.genesis
++    if (
++        genesis is None
++        or genesis.id != anchor.own_lineage
++        or genesis.kind != DECL_GENESIS
++    ):
++        raise DeclarationResolutionError(
++            "own-lineage declaration marker has no matching genesis"
++        )
++    protocol = genesis.payload.get("protocol", 1)
++    if protocol > DECLARATION_PROTOCOL_VERSION:
++        raise UnsupportedProtocol(
++            f"genesis protocol {protocol} exceeds supported "
++            f"{DECLARATION_PROTOCOL_VERSION}"
++        )
++
++    mapped = _document_map(genesis.payload.get("documents", ()))
++    revisions = [
++        DeclarationDocumentRevision(
++            arrival_ordinal=genesis.arrival_ordinal,
++            fact_ids=(genesis.id,),
++            document_fact_ids=(),
++            documents=_documents_tuple(mapped),
++        )
++    ]
++    grouped: dict[int, list[Fact]] = {}
++    for fact in internal:
++        if fact.kind == DECL_GENESIS:
++            continue
++        if fact.arrival_ordinal < genesis.arrival_ordinal:
++            # A self-scoped overlay cannot establish a runtime definition
++            # before the declaration genesis that licenses its lineage.
++            continue
++        payload = fact.payload
++        if payload.get("lineage") != anchor.own_lineage:
++            continue
++        if fact.kind not in _DEFINED_KINDS and fact.kind not in _TOMBSTONE_TO_DEFINED:
++            continue
++        grouped.setdefault(fact.arrival_ordinal, []).append(fact)
++
++    for ordinal in sorted(grouped):
++        group = grouped[ordinal]
++        for fact in group:
++            payload = fact.payload
++            subject = payload.get("subject")
++            if fact.kind in _TOMBSTONE_TO_DEFINED:
++                mapped.pop((_TOMBSTONE_TO_DEFINED[fact.kind], subject), None)
++            else:
++                mapped[(fact.kind, subject)] = {
++                    "kind": fact.kind,
++                    "subject": subject,
++                    "payload": copy.deepcopy(payload.get("payload", {})),
++                }
++        revisions.append(
++            DeclarationDocumentRevision(
++                arrival_ordinal=ordinal,
++                fact_ids=tuple(fact.id for fact in group),
++                document_fact_ids=tuple(
++                    (fact.kind, str(fact.payload.get("subject")), fact.id)
++                    for fact in group
++                ),
++                documents=_documents_tuple(mapped),
++            )
++        )
++
++    if target_documents is not None:
++        target = _copy_documents(target_documents)
++        if not revisions or target != revisions[-1].documents:
++            revisions.append(
++                DeclarationDocumentRevision(
++                    arrival_ordinal=None,
++                    fact_ids=(),
++                    document_fact_ids=(),
++                    documents=target,
++                    proposed=True,
++                )
++            )
++    return tuple(revisions)
++
++
++def collect_verified_parameter_rows(
++    anchor: DeclarationAnchor,
++    facts: Sequence[Fact],
++    *,
++    target_documents: Sequence[Mapping[str, Any]],
++    base_dir: Path,
++) -> dict[str, tuple[Mapping[str, str], ...]]:
++    """Read, hash, and parse own historical pinned parameter snapshots.
++
++    Missing, changed, unpinned, or malformed historical inputs remain unknown;
++    they do not poison an unrelated direct loop.  Current runtime pin checks
++    remain a separate existing gate.
++    """
++    from .compiler import parse_source_params_bytes
++
++    verified: dict[str, tuple[Mapping[str, str], ...]] = {}
++    revisions = declaration_document_revisions(
++        anchor, facts, target_documents=target_documents
++    )
++    for revision in revisions:
++        for document in revision.documents:
++            if document.get("kind") != DECL_SOURCE_DEFINED:
++                continue
++            payload = document.get("payload", {})
++            if payload.get("form") != "template" or payload.get("loop") is None:
++                continue
++            from_document = payload.get("from")
++            if not isinstance(from_document, Mapping):
++                continue
++            pin = from_document.get("params_sha256")
++            path_text = from_document.get("path")
++            if not isinstance(pin, str) or not isinstance(path_text, str):
++                continue
++            if pin in verified:
++                continue
++            path = Path(path_text)
++            candidate = path if path.is_absolute() else base_dir / path
++            try:
++                data = candidate.read_bytes()
++                if hashlib.sha256(data).hexdigest() != pin:
++                    continue
++                rows = parse_source_params_bytes(data, source=candidate)
++            except (OSError, UnicodeError, ValueError):
++                continue
++            verified[pin] = tuple(dict(row.values) for row in rows)
++    return verified
++
++
++def _literal_kind(value: object) -> tuple[str | None, bool]:
++    if not isinstance(value, str) or not value:
++        return None, False
++    if value.startswith("$$"):
++        return value[1:], False
++    if _ENV_VALUE.fullmatch(value):
++        return None, True
++    return value, False
++
++
++def _namespace(
++    documents: Sequence[Mapping[str, Any]],
++    verified_params: Mapping[str, Sequence[Mapping[str, str]]],
++) -> _Namespace:
++    names = {"cite"}
++    unknown = False
++    vertex_name: str | None = None
++    has_vertex_boundary = False
++    for document in documents:
++        kind = document.get("kind")
++        subject = document.get("subject")
++        payload = document.get("payload", {})
++        if kind == DECL_VERTEX_DEFINED:
++            candidate = payload.get("name")
++            if not isinstance(candidate, str) or not candidate:
++                raise DeclarationResolutionError(
++                    "vertex declaration has no explicit runtime name"
++                )
++            vertex_name = candidate
++            has_vertex_boundary = bool(payload.get("boundary", ()))
++        elif kind == DECL_KIND_DEFINED and isinstance(subject, str):
++            names.add(subject)
++        elif kind == DECL_SOURCE_DEFINED:
++            if payload.get("form") != "template" or payload.get("loop") is None:
++                continue
++            rows: list[Mapping[str, str]] = []
++            for param in payload.get("params", ()):
++                if isinstance(param, Mapping) and isinstance(param.get("values"), Mapping):
++                    rows.append(param["values"])
++            from_document = payload.get("from")
++            if isinstance(from_document, Mapping):
++                pin = from_document.get("params_sha256")
++                if isinstance(pin, str) and pin in verified_params:
++                    rows.extend(verified_params[pin])
++                else:
++                    unknown = True
++            for row in rows:
++                literal, indirect = _literal_kind(row.get("kind"))
++                if literal is not None:
++                    names.add(literal)
++                unknown = unknown or indirect
++    if vertex_name is None:
++        raise DeclarationResolutionError(
++            "declaration documents have no vertex identity"
++        )
++    return _Namespace(
++        names=frozenset(names),
++        unknown_generator=unknown,
++        vertex_name=vertex_name,
++        has_vertex_boundary=has_vertex_boundary,
++    )
++
++
++def _issue(
++    reason: BoundaryContinuityReason,
++    *,
++    vertex: str,
++    loop: str | None = None,
++    tick: Tick | None = None,
++    revision: DeclarationDocumentRevision | None = None,
++    declaration_fact_id: str | None = None,
++    declaration_kind: str | None = None,
++    detail: str,
++) -> BoundaryContinuityConflict:
++    return BoundaryContinuityConflict(
++        BoundaryContinuityIssue(
++            reason=reason,
++            vertex_name=vertex,
++            loop_name=loop,
++            tick_id=tick.id if tick is not None else None,
++            tick_ordinal=tick.arrival_ordinal if tick is not None else None,
++            tick_seq=tick.arrival_seq if tick is not None else None,
++            declaration_fact_id=(
++                declaration_fact_id
++                if declaration_fact_id is not None
++                else _revision_fact_id(revision, loop, declaration_kind)
++            ),
++            declaration_ordinal=(
++                revision.arrival_ordinal if revision is not None else None
++            ),
++            detail=detail,
++        )
++    )
++
++
++def _revision_fact_id(
++    revision: DeclarationDocumentRevision | None,
++    loop_name: str | None,
++    declaration_kind: str | None,
++) -> str | None:
++    if revision is None:
++        return None
++    if not revision.document_fact_ids:
++        # Genesis is the one row that establishes every seed document.
++        return revision.fact_ids[0] if len(revision.fact_ids) == 1 else None
++    if declaration_kind is not None:
++        for kind, _subject, fact_id in reversed(revision.document_fact_ids):
++            if kind == declaration_kind:
++                return fact_id
++        return None
++    if loop_name is not None:
++        loop_kinds = {
++            DECL_KIND_DEFINED,
++            DEFINED_TO_TOMBSTONE[DECL_KIND_DEFINED],
++        }
++        for kind, subject, fact_id in reversed(revision.document_fact_ids):
++            if kind in loop_kinds and subject == loop_name:
++                return fact_id
++    return None
++
++
++def analyze_boundary_continuity(
++    anchor: DeclarationAnchor,
++    facts: Sequence[Fact],
++    ticks: Sequence[Tick],
++    *,
++    target_documents: Sequence[Mapping[str, Any]],
++    verified_params: Mapping[str, Sequence[Mapping[str, str]]] | None = None,
++    compiled_loop_names: Collection[str] | None = None,
++) -> BoundaryContinuityResult:
++    """Validate every owned edge consumed by the target declaration."""
++    verified = verified_params or {}
++    revisions = declaration_document_revisions(
++        anchor, facts, target_documents=target_documents
++    )
++    namespaces = tuple(_namespace(revision.documents, verified) for revision in revisions)
++    target = namespaces[-1]
++
++    if target.vertex_name in target.names:
++        raise _issue(
++            "reserved-runtime-name",
++            vertex=target.vertex_name,
++            loop=target.vertex_name,
++            detail=(
++                f"loop name {target.vertex_name!r} is reserved for the vertex "
++                "boundary role"
++            ),
++        )
++
++    if compiled_loop_names is not None:
++        compiled = frozenset(compiled_loop_names)
++        missing = target.names - compiled
++        extra = compiled - target.names
++        if missing or (extra and not target.unknown_generator):
++            parts = []
++            if missing:
++                parts.append(f"missing {sorted(missing)!r}")
++            if extra:
++                parts.append(f"unproved {sorted(extra)!r}")
++            raise _issue(
++                "runtime-namespace-mismatch",
++                vertex=target.vertex_name,
++                detail="compiled runtime namespace disagrees with declaration: "
++                + "; ".join(parts),
++            )
++
++    own_declaration_facts = tuple(
++        fact
++        for fact in facts
++        if (
++            fact.kind == DECL_GENESIS
++            and fact.id == anchor.own_lineage
++        )
++        or (
++            is_internal_kind(fact.kind)
++            and fact.payload.get("lineage") == anchor.own_lineage
++        )
++    )
++    own_declaration_by_ordinal = {
++        fact.arrival_ordinal: fact for fact in own_declaration_facts
++    }
++    owned_ticks = tuple(tick for tick in ticks if tick.origin == target.vertex_name)
++    for tick in owned_ticks:
++        if tick.arrival_ordinal in own_declaration_by_ordinal:
++            fact = own_declaration_by_ordinal[tick.arrival_ordinal]
++            conflicting = DeclarationDocumentRevision(
++                arrival_ordinal=fact.arrival_ordinal,
++                fact_ids=(fact.id,),
++                document_fact_ids=(
++                    (fact.kind, str(fact.payload.get("subject")), fact.id),
++                ),
++                documents=(),
++            )
++            raise _issue(
++                "invalid-projection-shape",
++                vertex=target.vertex_name,
++                loop=tick.name,
++                tick=tick,
++                revision=conflicting,
++                declaration_fact_id=fact.id,
++                detail=(
++                    "owned tick shares an Arrival ordinal with an own-lineage "
++                    "declaration fact"
++                ),
++            )
++
++    genesis_ordinal = revisions[0].arrival_ordinal
++
++    def revision_at_tick(tick: Tick) -> int | None:
++        if genesis_ordinal is None or tick.arrival_ordinal < genesis_ordinal:
++            return None
++        selected: int | None = None
++        for index, revision in enumerate(revisions):
++            if revision.proposed:
++                break
++            ordinal = revision.arrival_ordinal
++            if ordinal is not None and ordinal <= tick.arrival_ordinal:
++                selected = index
++        return selected
++
++    for tick in owned_ticks:
++        start = revision_at_tick(tick)
++        if tick.name == target.vertex_name and target.has_vertex_boundary:
++            if start is None:
++                raise _issue(
++                    "ambiguous-tick-role",
++                    vertex=target.vertex_name,
++                    loop=tick.name,
++                    tick=tick,
++                    detail="vertex-period tick predates declaration genesis",
++                )
++            if namespaces[start].vertex_name != target.vertex_name:
++                raise _issue(
++                    "ambiguous-tick-role",
++                    vertex=target.vertex_name,
++                    loop=tick.name,
++                    tick=tick,
++                    revision=revisions[start],
++                    declaration_kind=DECL_VERTEX_DEFINED,
++                    detail="vertex-period tick was received under another vertex identity",
++                )
++            for index in range(start, len(revisions)):
++                if namespaces[index].vertex_name != target.vertex_name:
++                    raise _issue(
++                        "prior-incarnation",
++                        vertex=target.vertex_name,
++                        loop=tick.name,
++                        tick=tick,
++                        revision=revisions[index],
++                        declaration_kind=DECL_VERTEX_DEFINED,
++                        detail=(
++                            f"vertex-period tick {tick.id!r} crosses a declaration "
++                            "vertex identity discontinuity"
++                        ),
++                    )
++            at_receipt = namespaces[start].membership(tick.name)
++            if at_receipt != "absent":
++                raise _issue(
++                    "ambiguous-tick-role",
++                    vertex=target.vertex_name,
++                    loop=tick.name,
++                    tick=tick,
++                    revision=revisions[start],
++                    detail=(
++                        "vertex-name tick had a present or unprovable same-name "
++                        "loop role at receipt"
++                    ),
++                )
++
++            # A current vertex boundary consumes this as a vertex-period edge.
++            # Current C5/runtime namespace checks separately prevent an actual
++            # same-name loop, so do not also reinterpret it as a loop edge.
++            continue
++        if tick.name == target.vertex_name:
++            # With no current vertex-boundary consumer, the saved period value
++            # has no supported detached-runtime effect.  Keep the row as
++            # evidence and re-check it if a later proposal adds that consumer.
++            continue
++
++        target_membership = target.membership(tick.name)
++        if target_membership == "absent":
++            continue
++        if start is None:
++            raise _issue(
++                "unproven-loop-role",
++                vertex=target.vertex_name,
++                loop=tick.name,
++                tick=tick,
++                detail="owned loop tick predates declaration genesis",
++            )
++        for index in range(start, len(revisions)):
++            if namespaces[index].vertex_name != target.vertex_name:
++                raise _issue(
++                    "unproven-loop-role" if index == start else "prior-incarnation",
++                    vertex=target.vertex_name,
++                    loop=tick.name,
++                    tick=tick,
++                    revision=revisions[index],
++                    detail=(
++                        f"owned tick {tick.id!r} crosses a declaration vertex "
++                        "identity discontinuity"
++                    ),
++                )
++            membership = namespaces[index].membership(tick.name)
++            if membership == "present":
++                continue
++            if membership == "absent":
++                reason: BoundaryContinuityReason = (
++                    "unproven-loop-role" if index == start else "prior-incarnation"
++                )
++            else:
++                reason = "unproven-generated-incarnation"
++            raise _issue(
++                reason,
++                vertex=target.vertex_name,
++                loop=tick.name,
++                tick=tick,
++                revision=revisions[index],
++                detail=(
++                    f"owned tick {tick.id!r} cannot be consumed by current loop "
++                    f"{tick.name!r}: declared membership became {membership}"
++                ),
++            )
++
++    return BoundaryContinuityResult(
++        provable_names=target.names,
++        has_unknown_generators=target.unknown_generator,
++        vertex_name=target.vertex_name,
++        has_vertex_boundary=target.has_vertex_boundary,
++    )
+diff --git a/libs/engine/src/engine/arrival_declarations.py b/libs/engine/src/engine/arrival_declarations.py
+index 99d10145..4fb36a58 100644
+--- a/libs/engine/src/engine/arrival_declarations.py
++++ b/libs/engine/src/engine/arrival_declarations.py
+@@ -31,6 +31,11 @@ from .arrival import (
+     key_registry_from_records,
+ )
+ from .arrival_body import body_of_batch, body_of_fact_row
++from .arrival_boundary_continuity import (
++    BoundaryContinuityConflict,
++    analyze_boundary_continuity,
++    collect_verified_parameter_rows,
++)
+ from .arrival_contract import (
+     ArrivalLedger,
+     ArrivalQuery,
+@@ -43,6 +48,7 @@ from .arrival_contract import (
+     ReadBasis,
+     RecordDraft,
+     StoreDescriptor,
++    TickRequest,
+     Watermark,
+ )
+ from .arrival_head_seam import (
+@@ -940,12 +946,33 @@ def prepare_declaration_edit(
+                     "convenience mutation refused"
+                 )
+         changes = tuple(diff_documents(before_documents, proposed_documents))
++        continuity_ticks = tuple(
++            snapshot.ticks(TickRequest(since=float("-inf")))
++        )
++        verified_params = collect_verified_parameter_rows(
++            snapshot.declaration_anchor,
++            facts,
++            target_documents=proposed_documents,
++            base_dir=target_path.parent,
++        )
++        analyze_boundary_continuity(
++            snapshot.declaration_anchor,
++            facts,
++            continuity_ticks,
++            target_documents=proposed_documents,
++            verified_params=verified_params,
++        )
+         key_registry, _key_evidence = key_registry_from_records(
+             ledger.scan(through=captured_head), arrival_verify
+         )
+         atomic_limit = ledger.capabilities().max_atomic_records
+     except DeclarationPreparationError:
+         raise
++    except BoundaryContinuityConflict as exc:
++        raise _preparation_refused(
++            f"boundary continuity refuses declaration preparation: {exc}",
++            captured_head=captured_head,
++        ) from exc
+     except Exception as exc:
+         raise _preparation_refused(
+             f"cannot establish declaration preparation basis: {exc}",
+diff --git a/libs/engine/src/engine/compiler.py b/libs/engine/src/engine/compiler.py
+index 470fcb3b..86afdadb 100644
+--- a/libs/engine/src/engine/compiler.py
++++ b/libs/engine/src/engine/compiler.py
+@@ -361,8 +361,10 @@ def substitute_loop_def(loop_def: LoopDef, params: dict[str, str]) -> LoopDef:
+     return LoopDef(folds=loop_def.folds, boundary=boundary, search=loop_def.search, parse=loop_def.parse)
+ 
+ 
+-def _load_params_file(file_path: Path) -> list[SourceParams]:
+-    """Load parameter rows from an external file.
++def parse_source_params_bytes(
++    data: bytes, *, source: str | Path = "<params>"
++) -> list[SourceParams]:
++    """Parse one exact parameter-file byte snapshot.
+ 
+     File format:
+     - Lines starting with # are comments
+@@ -370,8 +372,17 @@ def _load_params_file(file_path: Path) -> list[SourceParams]:
+     - First content line is the header (whitespace-separated column names)
+     - Subsequent lines are data rows
+     - Last column gets remainder (handles URLs with query strings)
++
++    Decode with the same locale encoding ``Path.read_text()`` historically
++    used.  Accepting bytes lets declaration-history validation hash and parse
++    one immutable read rather than verify a path and reopen different bytes.
+     """
+-    text = file_path.read_text()
++    import io
++
++    # TextIOWrapper with no explicit encoding/newline is the in-memory sibling
++    # of Path.open()/Path.read_text() defaults, including Python UTF-8 mode.
++    with io.TextIOWrapper(io.BytesIO(data)) as stream:
++        text = stream.read()
+     lines = text.splitlines()
+ 
+     header: list[str] | None = None
+@@ -390,13 +401,18 @@ def _load_params_file(file_path: Path) -> list[SourceParams]:
+         parts = line.split(None, len(header) - 1)
+         if len(parts) != len(header):
+             raise ValueError(
+-                f"{file_path}:{lineno}: expected {len(header)} columns, got {len(parts)}"
++                f"{source}:{lineno}: expected {len(header)} columns, got {len(parts)}"
+             )
+-        params.append(SourceParams(values=dict(zip(header, parts))))
++        params.append(SourceParams(values=dict(zip(header, parts, strict=True))))
+ 
+     return params
+ 
+ 
++def _load_params_file(file_path: Path) -> list[SourceParams]:
++    """Load parameter rows through the exact-byte parser."""
++    return parse_source_params_bytes(file_path.read_bytes(), source=file_path)
++
++
+ def _resolve_param_indirection(values: dict[str, str]) -> dict[str, str]:
+     """Resolve environment-indirected param values (SPEC §9.5 secrets-indirection).
+ 
+diff --git a/libs/engine/src/engine/runtime_write.py b/libs/engine/src/engine/runtime_write.py
+index 7f4f989c..407af212 100644
+--- a/libs/engine/src/engine/runtime_write.py
++++ b/libs/engine/src/engine/runtime_write.py
+@@ -69,6 +69,7 @@ __all__ = [
+     "BatchWritePlan",
+     "BatchWriteCommitUnknown",
+     "BatchWritePreparationRefused",
++    "BoundaryContinuityRefused",
+     "CommittedBatchWrite",
+     "OrdinaryWritePlan",
+     "OrdinaryWritePreparationRefused",
+@@ -91,6 +92,33 @@ class RuntimeWriteRefused(Exception):
+     """The runtime writer cannot establish a safe pre-append plan."""
+ 
+ 
++class BoundaryContinuityRefused(RuntimeWriteRefused):
++    """Current replay would consume an unlicensed historical boundary edge."""
++
++    def __init__(
++        self,
++        *,
++        issue: Any,
++        basis: ReadBasis,
++        effective_declaration: VertexFile,
++        cause: Exception,
++    ) -> None:
++        super().__init__(str(cause))
++        self.issue = issue
++        self.basis = basis
++        self.captured_head = basis.captured_head
++        self.effective_declaration = effective_declaration
++        self.tick_id = issue.tick_id
++        self.ordinal = issue.tick_ordinal
++        self.fact_id = issue.declaration_fact_id
++        self.vertex = issue.vertex_name
++        self.coordinator_phase = "prepare"
++        self.effects = {
++            "custody": {"attempt": "not-entered", "state": "not-attempted"}
++        }
++        self.cause = cause
++
++
+ class OrdinaryWritePreparationRefused(RuntimeWriteRefused):
+     """A supported pre-append refusal with same-snapshot preview evidence.
+ 
+@@ -718,7 +746,14 @@ def _build_effective_arrival_candidate(
+     locator: VertexFile,
+     *,
+     fold_overrides: dict[str, FoldOverride] | None = None,
+-) -> tuple[Vertex, VertexFile, tuple[dict[str, Any], ...], tuple[Any, ...]]:
++) -> tuple[
++    Vertex,
++    VertexFile,
++    tuple[dict[str, Any], ...],
++    tuple[Any, ...],
++    tuple[SnapshotFact, ...],
++    tuple[SnapshotTick, ...],
++]:
+     """Build a fresh, storeless candidate from this exact bounded snapshot.
+ 
+     The locator contributes only ingress/residence fields. Effective documents,
+@@ -772,6 +807,36 @@ def _build_effective_arrival_candidate(
+         from .executor import validate_dependency_graph
+ 
+         validate_dependency_graph(sources)
++    runtime_ticks = tuple(snapshot.ticks(TickRequest()))
++    continuity_ticks = tuple(snapshot.ticks(TickRequest(since=float("-inf"))))
++    from .arrival_boundary_continuity import (
++        BoundaryContinuityConflict,
++        analyze_boundary_continuity,
++        collect_verified_parameter_rows,
++    )
++
++    verified_params = collect_verified_parameter_rows(
++        snapshot.declaration_anchor,
++        facts,
++        target_documents=documents,
++        base_dir=base_dir,
++    )
++    try:
++        analyze_boundary_continuity(
++            snapshot.declaration_anchor,
++            facts,
++            continuity_ticks,
++            target_documents=documents,
++            verified_params=verified_params,
++            compiled_loop_names=set(specs) | {"cite"},
++        )
++    except BoundaryContinuityConflict as exc:
++        raise BoundaryContinuityRefused(
++            issue=exc.issue,
++            basis=basis,
++            effective_declaration=effective,
++            cause=exc,
++        ) from exc
+     compiled = CompiledVertex(
+         name=effective.name,
+         specs=specs,
+@@ -786,8 +851,15 @@ def _build_effective_arrival_candidate(
+         template_specs=template_specs or None,
+     )
+     candidate = materialize_vertex(compiled, fold_overrides=fold_overrides, attach_store=False)
+-    candidate.hydrate_snapshot(facts, snapshot.ticks(TickRequest()))
+-    return candidate, effective, tuple(copy.deepcopy(documents)), tuple(copy.deepcopy(sources))
++    candidate.hydrate_snapshot(facts, runtime_ticks)
++    return (
++        candidate,
++        effective,
++        tuple(copy.deepcopy(documents)),
++        tuple(copy.deepcopy(sources)),
++        tuple(copy.deepcopy(facts)),
++        tuple(copy.deepcopy(runtime_ticks)),
++    )
+ 
+ 
+ def _hydrate_effective_arrival_candidate(
+@@ -797,8 +869,10 @@ def _hydrate_effective_arrival_candidate(
+     *,
+     fold_overrides: dict[str, FoldOverride] | None = None,
+ ) -> tuple[Vertex, VertexFile]:
+-    candidate, effective, _documents, _sources = _build_effective_arrival_candidate(
+-        snapshot, basis, locator, fold_overrides=fold_overrides
++    candidate, effective, _documents, _sources, _facts, _ticks = (
++        _build_effective_arrival_candidate(
++            snapshot, basis, locator, fold_overrides=fold_overrides
++        )
+     )
+     return candidate, effective
+ 
+@@ -1005,13 +1079,11 @@ def capture_runtime(
+             captured_head=captured, requirement=ProjectionRequirement.CURRENT
+         )
+         basis = _current_write_basis(ledger, snapshot, captured)
+-        candidate, effective, documents, sources = _build_effective_arrival_candidate(
+-            snapshot, basis, locator, fold_overrides=fold_overrides
+-        )
+-        facts = tuple(
+-            snapshot.facts(FactRequest(limit=None, include_internal=True, order="oldest")).items
++        candidate, effective, documents, sources, facts, ticks = (
++            _build_effective_arrival_candidate(
++                snapshot, basis, locator, fold_overrides=fold_overrides
++            )
+         )
+-        ticks = tuple(snapshot.ticks(TickRequest()))
+         at = time.time() if evaluated_at is None else evaluated_at
+         post_boundary_candidate = candidate.detached_copy() if source_mode else None
+         pending = (
+diff --git a/libs/engine/tests/test_arrival_boundary_continuity.py b/libs/engine/tests/test_arrival_boundary_continuity.py
+new file mode 100644
+index 00000000..792ad6fe
+--- /dev/null
++++ b/libs/engine/tests/test_arrival_boundary_continuity.py
+@@ -0,0 +1,549 @@
++"""Focused C6 continuity checks over receipt-ordered declaration evidence."""
++
++from __future__ import annotations
++
++import hashlib
++from pathlib import Path
++
++import pytest
++
++from engine.arrival_boundary_continuity import (
++    BoundaryContinuityConflict,
++    analyze_boundary_continuity,
++    collect_verified_parameter_rows,
++)
++from engine.arrival_contract import DeclarationAnchor, Fact, Tick
++from engine.declaration import DeclarationResolutionError
++
++LINEAGE = "01C6LINEAGE0000000000000000"
++
++
++def _vertex_docs(*, name: str = "v", loops: tuple[str, ...] = (), vertex_boundary: bool = False):
++    vertex_payload = {
++        "name": name,
++        "boundary": [
++            {"type": "when", "kind": "seal", "match": [], "conditions": [], "run": None}
++        ] if vertex_boundary else [],
++    }
++    return [
++        {"kind": "_decl.vertex-defined", "subject": name, "payload": vertex_payload},
++        *[
++            {
++                "kind": "_decl.kind-defined",
++                "subject": loop,
++                "payload": {"folds": [], "boundary": None},
++            }
++            for loop in loops
++        ],
++    ]
++
++
++def _anchor(documents, *, arrival_ordinal: int = 0):
++    genesis = Fact(
++        id=LINEAGE,
++        kind="_decl.genesis",
++        ts=0.0,
++        observer="alice",
++        origin="",
++        payload={"protocol": 1, "documents": documents},
++        arrival_ordinal=arrival_ordinal,
++        arrival_seq=0,
++        payload_text="{}",
++    )
++    return DeclarationAnchor(LINEAGE, genesis)
++
++
++def _fact(fid, kind, payload, ordinal, *, lineage=LINEAGE, seq=0):
++    body = dict(payload)
++    if kind != "_decl.genesis":
++        body.setdefault("lineage", lineage)
++    return Fact(
++        id=fid,
++        kind=kind,
++        ts=float(ordinal),
++        observer="alice",
++        origin="",
++        payload=body,
++        arrival_ordinal=ordinal,
++        arrival_seq=seq,
++        payload_text="{}",
++    )
++
++
++def _tick(tid, name, ordinal, *, origin="v", ts=2.0, seq=0):
++    return Tick(
++        id=tid,
++        name=name,
++        ts=ts,
++        since=None,
++        origin=origin,
++        payload={},
++        arrival_ordinal=ordinal,
++        arrival_seq=seq,
++        payload_text="{}",
++    )
++
++
++def _analyze(
++    anchor,
++    facts=(),
++    ticks=(),
++    *,
++    target_documents,
++    compiled_loop_names=None,
++    verified_params=None,
++):
++    return analyze_boundary_continuity(
++        anchor,
++        tuple(facts),
++        tuple(ticks),
++        target_documents=target_documents,
++        compiled_loop_names=compiled_loop_names,
++        verified_params=verified_params,
++    )
++
++
++def _reason(anchor, facts, ticks, *, target_documents, compiled_loop_names=None):
++    with pytest.raises(BoundaryContinuityConflict) as raised:
++        _analyze(
++            anchor,
++            facts,
++            ticks,
++            target_documents=target_documents,
++            compiled_loop_names=compiled_loop_names,
++        )
++    return raised.value.issue.reason
++
++
++def test_remove_recreate_same_name_refuses_only_when_owned_tick_exists():
++    documents = _vertex_docs(loops=("pulse",))
++    anchor = _anchor(documents)
++    retired = _fact("retire", "_decl.kind-retired", {"subject": "pulse"}, 2)
++    redefined = _fact(
++        "redefine",
++        "_decl.kind-defined",
++        {"subject": "pulse", "payload": {"folds": [], "boundary": None}},
++        3,
++    )
++    assert _reason(
++        anchor,
++        (retired, redefined),
++        (_tick("old", "pulse", 1),),
++        target_documents=documents,
++    ) == "prior-incarnation"
++    assert _analyze(
++        anchor,
++        (retired, redefined),
++        (),
++        target_documents=documents,
++    ).provable_names >= {"pulse", "cite"}
++
++
++def test_owned_loop_tick_crossing_vertex_identity_is_refused():
++    documents = _vertex_docs(name="v", loops=("pulse",))
++    renamed = _fact(
++        "rename-away",
++        "_decl.vertex-defined",
++        {"subject": "v", "payload": {"name": "u", "boundary": []}},
++        2,
++    )
++    returned = _fact(
++        "rename-back",
++        "_decl.vertex-defined",
++        {"subject": "v", "payload": {"name": "v", "boundary": []}},
++        3,
++    )
++    assert _reason(
++        _anchor(documents),
++        (renamed, returned),
++        (_tick("old", "pulse", 1),),
++        target_documents=documents,
++    ) == "prior-incarnation"
++
++
++def test_atomic_declaration_group_does_not_expose_transient_retirement():
++    documents = _vertex_docs(loops=("pulse",))
++    retired = _fact("retire", "_decl.kind-retired", {"subject": "pulse"}, 2)
++    redefined = _fact(
++        "redefine",
++        "_decl.kind-defined",
++        {"subject": "pulse", "payload": {"folds": [], "boundary": None}},
++        2,
++        seq=1,
++    )
++    result = _analyze(
++        _anchor(documents),
++        (retired, redefined),
++        (_tick("old", "pulse", 1),),
++        target_documents=documents,
++    )
++    assert "pulse" in result.provable_names
++
++
++def test_absent_retired_target_is_not_attached_by_old_tick_name():
++    documents = _vertex_docs(loops=("pulse",))
++    retired = _fact("retire", "_decl.kind-retired", {"subject": "pulse"}, 2)
++    result = _analyze(
++        _anchor(documents),
++        (retired,),
++        (_tick("old", "pulse", 1),),
++        target_documents=_vertex_docs(),
++    )
++    assert "pulse" not in result.provable_names
++
++
++def test_foreign_declarations_and_originless_ticks_are_inert():
++    documents = _vertex_docs(loops=("pulse",))
++    anchor = _anchor(documents)
++    foreign_retirement = _fact(
++        "foreign-retire",
++        "_decl.kind-retired",
++        {"subject": "pulse"},
++        2,
++        lineage="FOREIGN",
++    )
++    result = _analyze(
++        anchor,
++        (foreign_retirement,),
++        (_tick("originless", "pulse", 1, origin=""),),
++        target_documents=documents,
++    )
++    assert "pulse" in result.provable_names
++
++
++def test_implicit_cite_is_present_even_without_explicit_document():
++    documents = _vertex_docs()
++    result = _analyze(
++        _anchor(documents),
++        (),
++        (_tick("cite-tick", "cite", 1),),
++        target_documents=documents,
++    )
++    assert "cite" in result.provable_names
++
++
++def test_historical_collision_refuses_only_with_vertex_boundary_consumer():
++    historical = _vertex_docs(name="v", loops=("v",), vertex_boundary=False)
++    retirement = _fact("retire-v", "_decl.kind-retired", {"subject": "v"}, 2)
++    old = _tick("collision", "v", 1)
++    no_consumer = _analyze(
++        _anchor(historical),
++        (retirement,),
++        (old,),
++        target_documents=_vertex_docs(name="v", loops=()),
++    )
++    assert "cite" in no_consumer.provable_names
++
++    with_consumer = _vertex_docs(name="v", loops=(), vertex_boundary=True)
++    assert _reason(
++        _anchor(historical),
++        (retirement,),
++        (old,),
++        target_documents=with_consumer,
++    ) == "ambiguous-tick-role"
++
++
++def test_vertex_name_tick_does_not_enter_loop_branch_without_vertex_consumer():
++    dynamic = _template_document(params=({"kind": "$DYNAMIC_KIND"},))
++    documents = [*_vertex_docs(name="v"), dynamic]
++    result = _analyze(
++        _anchor(documents),
++        (),
++        (_tick("ambiguous-v", "v", 1),),
++        target_documents=documents,
++    )
++    assert result.has_unknown_generators is True
++
++
++def test_same_receipt_ordinal_declaration_and_owned_tick_is_invalid_shape():
++    documents = _vertex_docs(loops=("pulse",))
++    retirement = _fact("retire", "_decl.kind-retired", {"subject": "pulse"}, 2)
++    observer = _fact(
++        "observer-pulse",
++        "_decl.observer-defined",
++        {"subject": "pulse", "payload": {}},
++        2,
++        seq=1,
++    )
++    assert _reason(
++        _anchor(documents),
++        (retirement, observer),
++        (_tick("same-receipt", "pulse", 2, seq=2),),
++        target_documents=documents,
++    ) == "invalid-projection-shape"
++
++
++def test_later_absence_with_mixed_subject_declarations_identifies_loop_fact():
++    documents = _vertex_docs(loops=("pulse",))
++    retired = _fact("retire-pulse", "_decl.kind-retired", {"subject": "pulse"}, 2)
++    observer = _fact(
++        "observer-pulse",
++        "_decl.observer-defined",
++        {"subject": "pulse", "payload": {}},
++        2,
++        seq=1,
++    )
++    with pytest.raises(BoundaryContinuityConflict) as raised:
++        _analyze(
++            _anchor(documents),
++            (retired, observer),
++            (_tick("old-pulse", "pulse", 1),),
++            target_documents=documents,
++        )
++    assert raised.value.issue.reason == "prior-incarnation"
++    assert raised.value.issue.declaration_fact_id == "retire-pulse"
++
++
++def test_same_receipt_unknown_declaration_kind_is_typed_invalid_shape():
++    documents = _vertex_docs(loops=("pulse",))
++    future = _fact(
++        "future",
++        "_decl.future",
++        {"subject": "pulse", "payload": {}},
++        2,
++    )
++    assert _reason(
++        _anchor(documents),
++        (future,),
++        (_tick("same-receipt", "pulse", 2, seq=1),),
++        target_documents=documents,
++    ) == "invalid-projection-shape"
++
++
++def test_tick_before_genesis_cannot_use_an_earlier_overlay():
++    documents = _vertex_docs(loops=())
++    anchor = _anchor(documents, arrival_ordinal=10)
++    defined = _fact(
++        "early-define",
++        "_decl.kind-defined",
++        {"subject": "pulse", "payload": {"folds": [], "boundary": None}},
++        3,
++    )
++    with pytest.raises(BoundaryContinuityConflict) as raised:
++        _analyze(
++            anchor,
++            (defined,),
++            (_tick("pre-genesis", "pulse", 5),),
++            target_documents=_vertex_docs(loops=("pulse",)),
++        )
++    assert raised.value.issue.reason in {"unproven-loop-role", "prior-incarnation"}
++
++
++def test_negative_event_time_is_still_receipt_ordered():
++    documents = _vertex_docs(loops=("pulse",))
++    result = _analyze(
++        _anchor(documents),
++        (),
++        (_tick("pre-epoch", "pulse", 1, ts=-1.0),),
++        target_documents=documents,
++    )
++    assert "pulse" in result.provable_names
++
++
++def test_generated_name_cross_check_and_dynamic_unknown_membership():
++    documents = _vertex_docs(loops=("pulse",))
++    result = _analyze(
++        _anchor(documents),
++        (),
++        (),
++        target_documents=documents,
++        compiled_loop_names=("pulse", "cite"),
++    )
++    assert result.has_unknown_generators is False
++    assert _reason(
++        _anchor(documents),
++        (),
++        (),
++        target_documents=documents,
++        compiled_loop_names=("cite",),
++    ) == "runtime-namespace-mismatch"
++    with pytest.raises(BoundaryContinuityConflict):
++        _analyze(
++            _anchor(documents),
++            (),
++            (),
++            target_documents=documents,
++            compiled_loop_names=("pulse", "unrecorded-env-kind"),
++        )
++
++
++def _template_document(*, params=(), from_document=None):
++    return {
++        "kind": "_decl.source-defined",
++        "subject": "generated-template",
++        "payload": {
++            "form": "template",
++            "template": "template.loop",
++            "content_sha256": None,
++            "params": [{"values": dict(values)} for values in params],
++            "from": from_document,
++            "loop": {"folds": [], "boundary": None},
++        },
++    }
++
++
++def test_literal_dollar_escape_and_verified_params_are_historical_names(tmp_path: Path):
++    params_path = tmp_path / "params.txt"
++    params_bytes = b"kind\nfrom-file\n"
++    params_path.write_bytes(params_bytes)
++    pin = hashlib.sha256(params_bytes).hexdigest()
++    source = _template_document(
++        params=({"kind": "$$literal"},),
++        from_document={
++            "strategy": "file",
++            "path": "params.txt",
++            "params_sha256": pin,
++        },
++    )
++    documents = [*_vertex_docs(), source]
++    rows = collect_verified_parameter_rows(
++        _anchor(documents), (), target_documents=documents, base_dir=tmp_path
++    )
++    result = _analyze(
++        _anchor(documents),
++        (),
++        (),
++        target_documents=documents,
++        verified_params=rows,
++        compiled_loop_names=("cite", "$literal", "from-file"),
++    )
++    assert result.provable_names >= {"cite", "$literal", "from-file"}
++    assert result.has_unknown_generators is False
++
++
++def test_dynamic_kind_is_unknown_and_refuses_owned_edge():
++    source = _template_document(params=({"kind": "$DYNAMIC_KIND"},))
++    documents = [*_vertex_docs(), source]
++    reason = _reason(
++        _anchor(documents),
++        (),
++        (_tick("dynamic-tick", "runtime-value", 1),),
++        target_documents=documents,
++    )
++    assert reason == "unproven-generated-incarnation"
++
++
++def test_unknown_generator_between_owned_ticks_refuses_earlier_interval():
++    known_generated = _template_document(params=({"kind": "pulse"},))
++    unknown_generated = _template_document(params=({"kind": "$DYNAMIC_KIND"},))
++    documents = [*_vertex_docs(), known_generated]
++    introduced = _fact(
++        "unknown-generated",
++        "_decl.source-defined",
++        unknown_generated,
++        2,
++    )
++    restored = _fact(
++        "known-generated",
++        "_decl.source-defined",
++        known_generated,
++        3,
++    )
++    before_and_after = (
++        _tick("before-unknown", "pulse", 1),
++        _tick("after-unknown", "pulse", 4),
++    )
++    assert _reason(
++        _anchor(documents),
++        (introduced, restored),
++        before_and_after,
++        target_documents=documents,
++    ) == "unproven-generated-incarnation"
++    after_retirement = _analyze(
++        _anchor(documents),
++        (introduced, restored),
++        (
++            _tick("after-unknown-1", "pulse", 4),
++            _tick("after-unknown-2", "pulse", 5),
++        ),
++        target_documents=documents,
++    )
++    assert "pulse" in after_retirement.provable_names
++
++
++def test_unknown_generator_does_not_poison_proven_direct_membership():
++    source = _template_document(params=({"kind": "$DYNAMIC_KIND"},))
++    documents = [*_vertex_docs(loops=("pulse",)), source]
++    result = _analyze(
++        _anchor(documents),
++        (),
++        (_tick("pulse-tick", "pulse", 1),),
++        target_documents=documents,
++    )
++    assert result.has_unknown_generators is True
++    assert "pulse" in result.provable_names
++
++
++def test_pre_genesis_owned_tick_is_unproven():
++    documents = _vertex_docs(loops=("pulse",))
++    assert _reason(
++        _anchor(documents),
++        (),
++        (_tick("old", "pulse", -1),),
++        target_documents=documents,
++    ) == "unproven-loop-role"
++
++
++def test_vertex_document_without_name_is_not_inferred_from_subject():
++    documents = _vertex_docs()
++    documents[0]["payload"].pop("name")
++    with pytest.raises(DeclarationResolutionError):
++        _analyze(_anchor(documents), target_documents=documents)
++
++
++def test_unknown_old_membership_does_not_attach_by_current_name():
++    genesis_documents = _vertex_docs(loops=())
++    current_documents = _vertex_docs(loops=("ghost",))
++    defined = _fact(
++        "define-ghost",
++        "_decl.kind-defined",
++        {"subject": "ghost", "payload": {"folds": [], "boundary": None}},
++        3,
++    )
++    assert _reason(
++        _anchor(genesis_documents),
++        (defined,),
++        (_tick("old-ghost", "ghost", 1),),
++        target_documents=current_documents,
++    ) == "unproven-loop-role"
++
++
++def test_parameter_collector_does_not_open_foreign_source_paths(
++    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
++):
++    documents = _vertex_docs()
++    foreign = _fact(
++        "foreign-source",
++        "_decl.source-defined",
++        {
++            "subject": "foreign-template",
++            "payload": {
++                "form": "template",
++                "template": "foreign.loop",
++                "params": [],
++                "from": {
++                    "strategy": "file",
++                    "path": "foreign-secret.params",
++                    "params_sha256": "0" * 64,
++                },
++                "loop": {"folds": [], "boundary": None},
++            },
++        },
++        2,
++        lineage="FOREIGN",
++    )
++
++    original_read_bytes = Path.read_bytes
++
++    def fail_foreign_read(self):
++        if self.name == "foreign-secret.params":
++            raise AssertionError("foreign source path was opened")
++        return original_read_bytes(self)
++
++    monkeypatch.setattr(Path, "read_bytes", fail_foreign_read)
++    assert collect_verified_parameter_rows(
++        _anchor(documents),
++        (foreign,),
++        target_documents=documents,
++        base_dir=tmp_path,
++    ) == {}
+diff --git a/libs/engine/tests/test_arrival_declaration_custody.py b/libs/engine/tests/test_arrival_declaration_custody.py
+index a178e2cd..be675080 100644
+--- a/libs/engine/tests/test_arrival_declaration_custody.py
++++ b/libs/engine/tests/test_arrival_declaration_custody.py
+@@ -8,6 +8,7 @@ import pytest
+ from lang.document import vertex_to_documents
+ from lang.loader import parse_vertex
+ 
++from engine.arrival_boundary_continuity import BoundaryContinuityConflict
+ from engine.arrival_contract import (
+     DeclarationAnchor,
+     Fact,
+@@ -16,6 +17,7 @@ from engine.arrival_contract import (
+     Profile,
+     ProjectionBehind,
+     StoreDescriptor,
++    Tick,
+     Watermark,
+ )
+ from engine.arrival_declarations import (
+@@ -32,10 +34,15 @@ class _Snapshot:
+         self.view_generation = "view"
+         self.declaration_anchor = DeclarationAnchor(genesis.id, genesis)
+         self._genesis = genesis
++        self._facts = [genesis]
++        self._ticks = []
+         self.closed = False
+ 
+     def facts(self, request):
+-        return FactPage((self._genesis,), None, False, request.order)
++        return FactPage(tuple(self._facts), None, False, request.order)
++
++    def ticks(self, _request):
++        return tuple(self._ticks)
+ 
+     def close(self):
+         self.closed = True
+@@ -328,6 +335,83 @@ def test_proposed_declaration_can_repair_ambiguous_effective_history(
+     assert "scan" in activity
+ 
+ 
++def test_declaration_preparation_refuses_ticked_reincarnation_before_scan(
++    tmp_path,
++) -> None:
++    registry, descriptor, target, proposed, captured, snapshot, activity, _ = (
++        _declaration_fixture(tmp_path, case="advance", changed=True)
++    )
++    item_document = next(
++        document
++        for document in snapshot._genesis.payload["documents"]
++        if document["kind"] == "_decl.kind-defined"
++        and document["subject"] == "item"
++    )
++    snapshot._ticks.append(
++        Tick(
++            id="old-item-edge",
++            name="item",
++            ts=-1.0,
++            since=None,
++            origin="x",
++            payload={},
++            arrival_ordinal=1,
++            arrival_seq=0,
++            payload_text="{}",
++        )
++    )
++    snapshot._facts.extend(
++        (
++            Fact(
++                id="retire-item",
++                kind="_decl.kind-retired",
++                ts=2.0,
++                observer="alice",
++                origin="",
++                payload={"lineage": captured.lineage, "subject": "item"},
++                arrival_ordinal=2,
++                arrival_seq=0,
++                payload_text="{}",
++            ),
++            Fact(
++                id="redefine-item",
++                kind="_decl.kind-defined",
++                ts=3.0,
++                observer="alice",
++                origin="",
++                payload={
++                    "lineage": captured.lineage,
++                    "subject": "item",
++                    "payload": item_document["payload"],
++                },
++                arrival_ordinal=3,
++                arrival_seq=0,
++                payload_text="{}",
++            ),
++        )
++    )
++
++    with pytest.raises(DeclarationPreparationRefused) as raised:
++        prepare_declaration_edit(
++            registry,
++            descriptor,
++            target=target,
++            proposed_text=proposed,
++            observer="alice",
++            credentials=None,
++            fact_verify=lambda *_args: True,
++            arrival_verify=lambda *_args: True,
++        )
++
++    assert "boundary continuity refuses" in str(raised.value)
++    assert isinstance(raised.value.__cause__, BoundaryContinuityConflict)
++    assert raised.value.__cause__.tick_id == "old-item-edge"
++    assert raised.value.__cause__.fact_id == "retire-item"
++    assert raised.value.captured_head == captured
++    assert activity == ["head_at", "query-close", "ledger-close"]
++    assert snapshot.closed
++
++
+ @pytest.mark.parametrize("args", [(), ("message",), ("message", "detail")])
+ def test_preparation_refusal_preserves_inherited_exception_arguments(args) -> None:
+     refusal = DeclarationPreparationRefused(*args)
+diff --git a/libs/engine/tests/test_runtime_capture.py b/libs/engine/tests/test_runtime_capture.py
+index 4a40c1eb..043ede9a 100644
+--- a/libs/engine/tests/test_runtime_capture.py
++++ b/libs/engine/tests/test_runtime_capture.py
+@@ -7,8 +7,10 @@ import json
+ 
+ import pytest
+ from atoms import Fact as AtomFact
++from lang import parse_vertex
++from lang.document import DECL_KIND_DEFINED, DECL_KIND_RETIRED, vertex_to_documents
+ 
+-from engine.arrival_body import body_of_fact_row
++from engine.arrival_body import body_of_fact_row, body_of_tick_row
+ from engine.arrival_file_backend import FileLedger
+ from engine.arrival_maintenance import sync_projection
+ from engine.declaration import SourceDrift, verify_source_pins_from_documents
+@@ -16,11 +18,13 @@ from engine.handle import WriteCredentials
+ from engine.row_commitment import tick_row_hash
+ from engine.runtime_write import (
+     BatchFactInput,
++    BoundaryContinuityRefused,
+     RuntimeWriteRefused,
+     capture_runtime,
+     execute_batch_write,
+     plan_batch_from_capture,
+ )
++from engine.vertex import Vertex
+ from tests.test_runtime_batch_write import _make_target
+ 
+ 
+@@ -53,6 +57,196 @@ def _sync(target) -> None:
+     )
+ 
+ 
++def _append_declaration_fact(target, identifier, kind, payload, ts, signer):
++    _append_fact(
++        target,
++        identifier,
++        kind,
++        ts,
++        signer,
++        {"lineage": target.log.lineage(), **payload},
++    )
++
++
++def _append_tick(target, identifier, name, ts, signer):
++    target.log.append(
++        "tick",
++        body_of_tick_row(
++            (
++                identifier,
++                name,
++                ts,
++                None,
++                target.locator.name,
++                "{}",
++                None,
++                None,
++                None,
++                None,
++                None,
++            )
++        ),
++        observer="kyle",
++        origin=target.locator.name,
++        at=abs(ts) + 3.0,
++        signer=signer,
++    )
++
++
++@pytest.mark.parametrize("source_mode", [False, True])
++@pytest.mark.parametrize("tick_ts", [-1.0, 3.0])
++def test_capture_refuses_ticked_retirement_and_recreation_from_full_tick_prefix(
++    tmp_path, monkeypatch, keys, signer, source_mode, tick_ts
++):
++    target = _make_target(tmp_path, monkeypatch, keys, signer)
++    _append_tick(target, "old-note-edge", "note", tick_ts, signer)
++    _append_declaration_fact(
++        target,
++        "retire-note",
++        DECL_KIND_RETIRED,
++        {"subject": "note"},
++        4.0,
++        signer,
++    )
++    note_document = next(
++        document
++        for document in vertex_to_documents(target.locator)
++        if document.kind == DECL_KIND_DEFINED and document.subject == "note"
++    )
++    _append_declaration_fact(
++        target,
++        "redefine-note",
++        DECL_KIND_DEFINED,
++        {"subject": "note", "payload": note_document.payload},
++        5.0,
++        signer,
++    )
++    _sync(target)
++    before = target.log.path.read_bytes()
++    hydration_calls = []
++    original_hydrate = Vertex.hydrate_snapshot
++
++    def hydrate_spy(self, facts, ticks):
++        hydration_calls.append((facts, ticks))
++        return original_hydrate(self, facts, ticks)
++
++    monkeypatch.setattr(Vertex, "hydrate_snapshot", hydrate_spy)
++
++    with pytest.raises(BoundaryContinuityRefused) as raised:
++        capture_runtime(
++            target.registry,
++            target.descriptor,
++            target.locator,
++            source_mode=source_mode,
++        )
++
++    assert raised.value.issue.reason == "prior-incarnation"
++    assert raised.value.tick_id == "old-note-edge"
++    assert raised.value.fact_id == "retire-note"
++    assert raised.value.basis.captured_head == FileLedger(target.log).head()
++    assert raised.value.coordinator_phase == "prepare"
++    assert raised.value.effects["custody"]["attempt"] == "not-entered"
++    assert hydration_calls == []
++    assert target.log.path.read_bytes() == before
++
++
++def test_in_place_every_edit_inherits_tick_and_post_tick_count(
++    tmp_path, monkeypatch, keys, signer
++):
++    target = _make_target(
++        tmp_path, monkeypatch, keys, signer, boundary="boundary every=10"
++    )
++    _append_tick(target, "old-every-edge", "note", 3.0, signer)
++    for offset in range(7):
++        _append_fact(
++            target,
++            f"after-edge-{offset}",
++            "note",
++            4.0 + offset,
++            signer,
++        )
++    edited = parse_vertex(
++        target.vertex.read_text().replace("every=10", "every=5"),
++        path=target.vertex,
++    )
++    note_document = next(
++        document
++        for document in vertex_to_documents(edited)
++        if document.kind == DECL_KIND_DEFINED and document.subject == "note"
++    )
++    _append_declaration_fact(
++        target,
++        "edit-every",
++        DECL_KIND_DEFINED,
++        {"subject": "note", "payload": note_document.payload},
++        12.0,
++        signer,
++    )
++    _sync(target)
++
++    capture = capture_runtime(target.registry, target.descriptor, target.locator)
++    plan = plan_batch_from_capture(
++        capture,
++        (
++            BatchFactInput(
++                AtomFact("note", 13.0, {}, observer="kyle"),
++                fact_id="next-note",
++            ),
++        ),
++        credentials=WriteCredentials(),
++    )
++
++    assert plan.items[0].tick_name == "note"
++    assert [draft.kind for draft in plan.drafts] == ["fact", "tick"]
++
++
++def test_unticked_every_uses_modulo_and_ticked_after_stays_exhausted(
++    tmp_path, monkeypatch, keys, signer
++):
++    repeating = _make_target(
++        tmp_path / "every", monkeypatch, keys, signer, boundary="boundary every=5"
++    )
++    for offset in range(7):
++        _append_fact(
++            repeating,
++            f"replayed-{offset}",
++            "note",
++            3.0 + offset,
++            signer,
++        )
++    _sync(repeating)
++    repeating_plan = plan_batch_from_capture(
++        capture_runtime(repeating.registry, repeating.descriptor, repeating.locator),
++        tuple(
++            BatchFactInput(
++                AtomFact("note", 10.0 + offset, {}, observer="kyle"),
++                fact_id=f"next-{offset}",
++            )
++            for offset in range(3)
++        ),
++        credentials=WriteCredentials(),
++    )
++    assert [item.tick_name for item in repeating_plan.items] == [None, None, "note"]
++
++    one_shot = _make_target(
++        tmp_path / "after", monkeypatch, keys, signer, boundary="boundary after=5"
++    )
++    _append_tick(one_shot, "old-after-edge", "note", 3.0, signer)
++    _append_fact(one_shot, "later", "note", 4.0, signer)
++    _sync(one_shot)
++    exhausted_plan = plan_batch_from_capture(
++        capture_runtime(one_shot.registry, one_shot.descriptor, one_shot.locator),
++        (
++            BatchFactInput(
++                AtomFact("note", 5.0, {}, observer="kyle"),
++                fact_id="still-exhausted",
++            ),
++        ),
++        credentials=WriteCredentials(),
++    )
++    assert exhausted_plan.items[0].tick_id is None
++
++
+ @pytest.mark.parametrize("damage", ["marker", "genesis", "both"])
+ @pytest.mark.parametrize("source_mode", [False, True])
+ def test_capture_refuses_foreign_declaration_before_runtime_planning(
+diff --git a/libs/sdk/src/sdk/kind.py b/libs/sdk/src/sdk/kind.py
+index 44aaf037..5fa5e4b7 100644
+--- a/libs/sdk/src/sdk/kind.py
++++ b/libs/sdk/src/sdk/kind.py
+@@ -80,6 +80,12 @@ def _arrival_semantic_preview(
+     registry: Any | None,
+ ) -> DeclarationPlanResult:
+     """Preview a splice only after confirming the cache matches CURRENT."""
++    from engine.arrival_boundary_continuity import (
++        BoundaryContinuityConflict,
++        analyze_boundary_continuity,
++        collect_verified_parameter_rows,
++    )
++    from engine.arrival_contract import TickRequest
+     from engine.arrival_declarations import DeclarationPreparationRefused
+     from engine.declaration import validate_arrival_runtime_identity
+     from lang import diff_documents, parse_vertex, validate_vertex, vertex_to_documents
+@@ -127,6 +133,33 @@ def _arrival_semantic_preview(
+                 doc.as_json() for doc in vertex_to_documents(proposed_ast)
+             ]
+             changes = diff_documents(local_docs, proposed_docs)
++            try:
++                verified_params = collect_verified_parameter_rows(
++                    opened.snapshot.declaration_anchor,
++                    _facts,
++                    target_documents=proposed_docs,
++                    base_dir=vertex_path.parent,
++                )
++                analyze_boundary_continuity(
++                    opened.snapshot.declaration_anchor,
++                    _facts,
++                    opened.snapshot.ticks(TickRequest(since=float("-inf"))),
++                    target_documents=proposed_docs,
++                    verified_params=verified_params,
++                )
++            except BoundaryContinuityConflict as conflict:
++                refusal = DeclarationPreparationRefused(
++                    f"boundary continuity refuses declaration preview: {conflict}",
++                    coordinator_phase="prepare",
++                    effects={
++                        "custody": {
++                            "attempt": "not-entered",
++                            "state": "not-attempted",
++                        }
++                    },
++                    captured_head=opened.basis.captured_head,
++                )
++                raise refusal from conflict
+             return DeclarationPreviewResult(
+                 applicable=True,
+                 reason="semantic preview only; signed execution requires observer credentials",
+diff --git a/libs/sdk/tests/test_arrival_boundary_continuity.py b/libs/sdk/tests/test_arrival_boundary_continuity.py
+new file mode 100644
+index 00000000..dbee322c
+--- /dev/null
++++ b/libs/sdk/tests/test_arrival_boundary_continuity.py
+@@ -0,0 +1,295 @@
++"""Public C6 boundary-continuity acceptance over declared Arrival history."""
++
++from __future__ import annotations
++
++import json
++from pathlib import Path
++
++import pytest
++from custody.signing import ARRIVAL_DOMAIN, FACT_DOMAIN
++from engine.admission import fact_commitment_hash
++from engine.arrival import ArrivalLog
++from engine.arrival_body import body_of_fact_row, body_of_tick_row
++from engine.handle import WriteCredentials
++from lang import genesis_payload, parse_vertex_file
++from lang.ast import FoldCollect, FoldDecl, LoopDef
++from lang.vertex_mutation import add_vertex_kind, remove_vertex_kind
++from sign import ed25519
++
++from sdk import (
++    ArrivalRefusal,
++    add_kind,
++    edit_declaration,
++    emit_fact,
++    export_target,
++    init_vertex,
++    plan_kind_mutation,
++    read_state,
++    read_ticks,
++)
++
++
++@pytest.fixture(autouse=True)
++def _isolated_custody(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
++    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
++
++
++def _ticked_target(tmp_path: Path) -> tuple[Path, Path]:
++    """Create a real Arrival target whose ``item`` loop already sealed once."""
++    target = tmp_path / "continuity.vertex"
++    initialized = init_vertex(target, store_type="arrival", observer="alice")
++    assert initialized.store is not None
++    log_path = Path(initialized.store.location)
++    current = target.read_text(encoding="utf-8")
++    item = '  item {\n    fold {\n      items "collect" 100\n    }\n  }'
++    bounded_item = item.replace('\n  }', '\n    boundary every=1\n  }')
++    keep = '  keep {\n    fold {\n      items "collect" 100\n    }\n  }'
++    assert item in current
++    bounded = current.replace(item, bounded_item + "\n" + keep)
++    changed = edit_declaration(target, bounded, observer="alice")
++    assert changed.commit is not None
++    sealed = emit_fact(target, "item", {"n": 1}, observer="alice", ts=1.0)
++    assert sealed.tick_id is not None
++    return target, log_path
++
++
++def _ambiguous_vertex_tick_target(tmp_path: Path) -> tuple[Path, Path, WriteCredentials]:
++    """Bootstrap pre-C5 history with a vertex-shaped local tick as evidence."""
++    keypair = ed25519.load_or_generate(tmp_path / "fixture-key")
++
++    def arrival_sign(_observer: str, digest: str) -> str:
++        return ed25519.sign(keypair, digest.encode(), domain=ARRIVAL_DOMAIN)
++
++    def fact_sign(_observer: str, digest: str) -> str:
++        return ed25519.sign(keypair, digest.encode(), domain=FACT_DOMAIN)
++
++    log = ArrivalLog.mint(
++        tmp_path / "ambiguous.arrival",
++        observer="physical-custodian",
++        signer=arrival_sign,
++        key=keypair.public_b64,
++        at=1.0,
++    )
++    target = tmp_path / "ambiguous.vertex"
++    target.write_text(
++        f'name "collision"\nstore "{log.path}" backend="file" '
++        f'lineage="{log.lineage()}" role="authority"\n'
++        'observers { "alice" { } }\n'
++        'loops {\n'
++        '  collision { fold { items "collect" 5 } }\n'
++        '  safe { fold { items "collect" 5 } }\n'
++        '}\n',
++        encoding="utf-8",
++    )
++    declaration = json.dumps(genesis_payload(parse_vertex_file(target)))
++    inner = fact_sign(
++        "physical-custodian",
++        fact_commitment_hash(
++            "_decl.genesis", 2.0, "physical-custodian", "fixture", declaration
++        ),
++    )
++    log.append(
++        "fact",
++        body_of_fact_row(
++            (
++                log.lineage(),
++                "_decl.genesis",
++                2.0,
++                "physical-custodian",
++                "fixture",
++                declaration,
++                inner,
++            )
++        ),
++        observer="physical-custodian",
++        origin="fixture",
++        at=2.0,
++        signer=arrival_sign,
++    )
++    log.append(
++        "tick",
++        body_of_tick_row(
++            (
++                "ambiguous-period",
++                "collision",
++                3.0,
++                None,
++                "collision",
++                "{}",
++                None,
++                None,
++                None,
++                None,
++                None,
++            )
++        ),
++        observer="physical-custodian",
++        origin="collision",
++        at=3.0,
++        signer=arrival_sign,
++    )
++    from sdk import sync_target
++
++    sync_target(target)
++    return target, log.path, WriteCredentials(
++        fact_signer=fact_sign, arrival_signer=arrival_sign
++    )
++
++
++def _verified_generated_ticked_target(tmp_path: Path) -> Path:
++    """Declare a generated loop whose historical parameter bytes are pinned."""
++    (tmp_path / "template.loop").write_text(
++        'source #"echo never-executed"#\n'
++        'kind "{{kind}}"\n'
++        'observer "alice"\n'
++        'format "json"\n',
++        encoding="utf-8",
++    )
++    (tmp_path / "params.txt").write_text("kind\ngenerated\n", encoding="utf-8")
++    target = tmp_path / "sourcehistory.vertex"
++    init_vertex(target, store_type="arrival", observer="alice")
++    current = target.read_text(encoding="utf-8")
++    declared = current.replace(
++        "loops {",
++        'sources {\n'
++        '  template "template.loop" {\n'
++        '    from file "params.txt"\n'
++        '    loop {\n'
++        '      fold { count "inc" }\n'
++        '      boundary every=1\n'
++        '    }\n'
++        '  }\n'
++        '}\n\nloops {',
++    )
++    adopted = edit_declaration(target, declared, observer="alice")
++    assert adopted.commit is not None
++    sealed = emit_fact(target, "generated", {"n": 1}, observer="alice", ts=1.0)
++    assert sealed.tick_id is not None
++    return target
++
++
++def test_ticked_retirement_refuses_same_name_readd_without_writing_and_keeps_evidence(
++    tmp_path: Path,
++) -> None:
++    """A retired name cannot reuse its earlier local edge through the SDK."""
++    target, log_path = _ticked_target(tmp_path)
++    retired_text = remove_vertex_kind(target.read_text(encoding="utf-8"), "item")
++    before_retirement = log_path.read_bytes()
++    retired = edit_declaration(target, retired_text, observer="alice")
++    assert retired.commit is not None
++    assert log_path.read_bytes().startswith(before_retirement)
++    before_refusal = log_path.read_bytes()
++
++    with pytest.raises(ArrivalRefusal) as preview:
++        plan_kind_mutation(target, "add", "item")
++    assert preview.value.source_type == "DeclarationPreparationRefused"
++    evidence = preview.value.details["evidence"]
++    assert evidence["phase"] == "prepare"
++    assert evidence["effects"]["custody"] == {
++        "attempt": "not-entered", "state": "not-attempted"
++    }
++    assert evidence["cause"]["type"] == "BoundaryContinuityConflict"
++    assert evidence["cause"]["details"]["tick_id"]
++    assert log_path.read_bytes() == before_refusal
++
++    ticks = read_ticks(target)
++    assert len(ticks.items) == 1
++    assert ticks.basis is not None
++    state = read_state(target)
++    assert state.read_path == "arrival" and state.basis == ticks.basis
++    exported_path = tmp_path / "retired-evidence.arrival.jsonl"
++    exported = export_target(target, exported_path)
++    assert exported.head == ticks.basis.captured_head
++    assert exported_path.read_bytes() == before_refusal
++
++    fresh_text = add_vertex_kind(
++        retired_text, "item_v2", LoopDef(folds=(FoldDecl("items", FoldCollect(100)),))
++    )
++    fresh = edit_declaration(target, fresh_text, observer="alice")
++    assert fresh.commit is not None
++    assert log_path.read_bytes().startswith(before_refusal)
++
++
++def test_in_place_count_and_fold_edit_inherits_the_sealed_edge(tmp_path: Path) -> None:
++    """An edit changes interpretation but does not restart a ticked loop."""
++    target, _log_path = _ticked_target(tmp_path)
++    before = read_ticks(target)
++    assert len(before.items) == 1 and before.basis is not None
++
++    current = target.read_text(encoding="utf-8")
++    proposed = current.replace('items "collect" 100', 'items "collect" 2').replace(
++        "boundary every=1", "boundary every=2"
++    )
++    edited = edit_declaration(target, proposed, observer="alice")
++    assert edited.commit is not None
++
++    first = emit_fact(target, "item", {"n": 2}, observer="alice", ts=2.0)
++    second = emit_fact(target, "item", {"n": 3}, observer="alice", ts=3.0)
++    assert first.tick_id is None
++    assert second.tick_id is not None and second.tick_mark == "item"
++
++    after = read_ticks(target)
++    assert len(after.items) == 2
++    assert after.basis is not None
++    assert after.basis.captured_head.ordinal > before.basis.captured_head.ordinal
++
++
++def test_disabling_a_boundary_keeps_the_ticked_loop_identity(tmp_path: Path) -> None:
++    """Boundary disable is an in-place interpretation edit, not retirement."""
++    target, _log_path = _ticked_target(tmp_path)
++    disabled = target.read_text(encoding="utf-8").replace("    boundary every=1\n", "", 1)
++    applied = edit_declaration(target, disabled, observer="alice")
++    assert applied.commit is not None
++
++    emitted = emit_fact(target, "item", {"n": 2}, observer="alice", ts=2.0)
++    assert emitted.tick_id is None
++    assert len(read_ticks(target).items) == 1
++
++
++def test_verified_parameter_rows_license_generated_ticked_loop_across_preview_edit_and_runtime(
++    tmp_path: Path,
++) -> None:
++    """The SDK supplies historical pinned rows to all C6 consumers it owns."""
++    target = _verified_generated_ticked_target(tmp_path)
++
++    preview = plan_kind_mutation(target, "add", "unrelated")
++    assert preview.applicable is True
++    changed = add_kind(target, "unrelated", observer="alice")
++    assert changed.commit is not None
++
++    again = emit_fact(target, "generated", {"n": 2}, observer="alice", ts=2.0)
++    assert again.tick_id is not None and again.tick_mark == "generated"
++    assert [tick["name"] for tick in read_ticks(target).items] == [
++        "generated",
++        "generated",
++    ]
++
++
++def test_ambiguous_vertex_tick_allows_consumer_removal_but_refuses_readdition(
++    tmp_path: Path,
++) -> None:
++    """A C5 correction may retain evidence until a vertex boundary consumes it."""
++    target, log_path, credentials = _ambiguous_vertex_tick_target(tmp_path)
++    corrected = remove_vertex_kind(target.read_text(encoding="utf-8"), "collision")
++    repaired = edit_declaration(
++        target,
++        corrected,
++        observer="physical-custodian",
++        credentials=credentials,
++    )
++    assert repaired.commit is not None
++    before_refusal = log_path.read_bytes()
++
++    with pytest.raises(ArrivalRefusal) as refusal:
++        edit_declaration(
++            target,
++            corrected.replace("loops {\n", 'loops {\n  boundary when="safe"\n'),
++            observer="physical-custodian",
++            credentials=credentials,
++        )
++    assert refusal.value.source_type == "DeclarationPreparationRefused"
++    assert refusal.value.details["evidence"]["cause"]["type"] == "BoundaryContinuityConflict"
++    assert refusal.value.details["evidence"]["cause"]["details"]["tick_id"] == (
++        "ambiguous-period"
++    )
++    assert log_path.read_bytes() == before_refusal
+diff --git a/tests/architecture/test_rule_18_arrival_vocabulary_denylist.py b/tests/architecture/test_rule_18_arrival_vocabulary_denylist.py
+index 8c49f577..2e1d1fcb 100644
+--- a/tests/architecture/test_rule_18_arrival_vocabulary_denylist.py
++++ b/tests/architecture/test_rule_18_arrival_vocabulary_denylist.py
+@@ -106,6 +106,7 @@ _SCAN_TARGETS = (
+     "libs/engine/src/engine/arrival_aggregate.py",
+     "libs/engine/src/engine/arrival_transfer.py",
+     "libs/engine/src/engine/arrival_restore.py",
++    "libs/engine/src/engine/arrival_boundary_continuity.py",
+     "libs/engine/src/engine/arrival_declarations.py",
+     "libs/engine/src/engine/arrival_search.py",
+     "libs/engine/src/engine/arrival_sources.py",

@@ -1,0 +1,2 @@
+params-pin-unchanged accepted
+params-pin-drift SourceDrift params file params.csv has drifted from its declaration pin — the store's ontology no longer describes this file; run `loops store absorb` to declare the change (never auto-enacted)

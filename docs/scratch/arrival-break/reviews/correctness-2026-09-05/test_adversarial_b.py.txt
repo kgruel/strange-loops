@@ -1,0 +1,122 @@
+"""Independent adversarial probe for Category B: Boundary period consumption."""
+
+import pytest
+from engine.handle import WriteCredentials
+from engine.runtime_write import (
+    capture_runtime,
+    execute_batch_write,
+    plan_batch_from_capture,
+)
+from tests.test_runtime_batch_write import _make_target
+from tests.test_runtime_capture import _append_fact, _sync
+
+
+def _tick_credentials(signer) -> WriteCredentials:
+    return WriteCredentials(tick_signer=lambda digest: signer("kyle", digest))
+
+
+def test_adversarial_simultaneous_vertex_and_loop_boundaries(tmp_path, monkeypatch, keys, signer):
+    """When both a vertex boundary and an independent loop boundary match in the same period,
+    both must fire without interfering with each other's consumption edges.
+    """
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    target = _make_target(
+        tmp_path,
+        monkeypatch,
+        keys,
+        signer,
+        extra_loops=(
+            '  boundary when="seal"\n'
+            "  audit {\n"
+            '    fold { items "collect" 20 }\n'
+            '    boundary when="audit_close"\n'
+            "  }\n"
+        ),
+    )
+    _append_fact(target, "audit-fact", "audit_close", 4.0, signer, {"tag": "audit"})
+    _append_fact(target, "seal-fact", "seal", 4.0, signer, {"tag": "seal"})
+    _sync(target)
+
+    capture = capture_runtime(
+        target.registry, target.descriptor, target.locator,
+        source_mode=True, evaluated_at=5.0,
+    )
+    names = [tick.name for tick in capture.pending_boundaries]
+    assert "batch-target" in names
+    assert "audit" in names
+    assert len(capture.pending_boundaries) == 2
+
+    plan = plan_batch_from_capture(
+        capture, (), credentials=_tick_credentials(signer), include_pending_boundaries=True,
+    )
+    execute_batch_write(target.registry, target.descriptor, plan)
+    _sync(target)
+
+    recapture = capture_runtime(
+        target.registry, target.descriptor, target.locator,
+        source_mode=True, evaluated_at=5.0,
+    )
+    assert recapture.pending_boundaries == ()
+
+    _append_fact(target, "audit-late", "audit_close", 4.0, signer, {"tag": "audit2"})
+    _sync(target)
+
+    recapture2 = capture_runtime(
+        target.registry, target.descriptor, target.locator,
+        source_mode=True, evaluated_at=5.0,
+    )
+    assert [tick.name for tick in recapture2.pending_boundaries] == ["audit"]
+
+
+def test_adversarial_interleaved_multi_period_consumption(tmp_path, monkeypatch, keys, signer):
+    """Verify that multiple successive boundary triggers across different timestamps
+    are consumed strictly one period per cycle, advancing edges without skipping facts.
+    """
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    target = _make_target(
+        tmp_path,
+        monkeypatch,
+        keys,
+        signer,
+        extra_loops='  boundary when="seal"\n',
+    )
+    _append_fact(target, "seal-1", "seal", 2.0, signer, {"idx": 1})
+    _append_fact(target, "seal-2", "seal", 4.0, signer, {"idx": 2})
+    _append_fact(target, "seal-3", "seal", 6.0, signer, {"idx": 3})
+    _sync(target)
+
+    c1 = capture_runtime(
+        target.registry, target.descriptor, target.locator,
+        source_mode=True, evaluated_at=10.0,
+    )
+    assert len(c1.pending_boundaries) == 1
+    assert c1.pending_boundaries[0].payload["_boundary"] == {"idx": 1}
+    plan1 = plan_batch_from_capture(c1, (), credentials=_tick_credentials(signer), include_pending_boundaries=True)
+    execute_batch_write(target.registry, target.descriptor, plan1)
+    _sync(target)
+
+    c2 = capture_runtime(
+        target.registry, target.descriptor, target.locator,
+        source_mode=True, evaluated_at=10.0,
+    )
+    assert len(c2.pending_boundaries) == 1
+    assert c2.pending_boundaries[0].payload["_boundary"] == {"idx": 2}
+    plan2 = plan_batch_from_capture(c2, (), credentials=_tick_credentials(signer), include_pending_boundaries=True)
+    execute_batch_write(target.registry, target.descriptor, plan2)
+    _sync(target)
+
+    c3 = capture_runtime(
+        target.registry, target.descriptor, target.locator,
+        source_mode=True, evaluated_at=10.0,
+    )
+    assert len(c3.pending_boundaries) == 1
+    assert c3.pending_boundaries[0].payload["_boundary"] == {"idx": 3}
+    plan3 = plan_batch_from_capture(c3, (), credentials=_tick_credentials(signer), include_pending_boundaries=True)
+    execute_batch_write(target.registry, target.descriptor, plan3)
+    _sync(target)
+
+    c4 = capture_runtime(
+        target.registry, target.descriptor, target.locator,
+        source_mode=True, evaluated_at=10.0,
+    )
+    assert c4.pending_boundaries == ()

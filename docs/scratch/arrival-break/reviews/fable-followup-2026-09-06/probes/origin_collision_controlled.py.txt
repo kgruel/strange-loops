@@ -1,0 +1,119 @@
+import hashlib
+import os
+import tempfile
+from pathlib import Path
+
+from tests.conftest import Custodian
+from tests.test_runtime_batch_write import _make_target
+from tests.test_runtime_capture import _append_fact, _sync
+
+from engine.arrival_body import body_of_tick_row
+from engine.arrival_contract import ProjectionRequirement, RecordDraft, TickRequest
+from engine.handle import WriteCredentials
+from engine.row_commitment import tick_commitment_hash, tick_row_hash
+from engine.runtime_write import (
+    capture_runtime,
+    execute_batch_write,
+    plan_batch_from_capture,
+)
+
+
+class Env:
+    def setenv(self, key, value):
+        os.environ[key] = value
+
+
+with tempfile.TemporaryDirectory() as directory:
+    root = Path(directory)
+    custodian = Custodian(root, "kyle")
+    signer = custodian.signer
+    target = _make_target(
+        root,
+        Env(),
+        custodian,
+        signer,
+        boundary='boundary when="seal"',
+    )
+
+    _append_fact(target, "seal-one", "seal", 4.0, signer, {"status": "first"})
+    _sync(target)
+    capture = capture_runtime(
+        target.registry,
+        target.descriptor,
+        target.locator,
+        source_mode=True,
+        evaluated_at=5.0,
+    )
+    plan = plan_batch_from_capture(
+        capture,
+        (),
+        credentials=WriteCredentials(tick_signer=lambda digest: signer("kyle", digest)),
+        include_pending_boundaries=True,
+    )
+    execute_batch_write(target.registry, target.descriptor, plan)
+    _sync(target)
+
+    ledger, query = target.registry.open(target.descriptor)
+    snapshot = query.open_snapshot(
+        captured_head=ledger.head(),
+        requirement=ProjectionRequirement.CURRENT,
+    )
+    ticks = snapshot.ticks(TickRequest())
+    snapshot.close()
+    query.close()
+    ledger.close()
+    previous = ticks[-1]
+    previous_hash = tick_row_hash(
+        (
+            previous.id,
+            previous.name,
+            previous.ts,
+            previous.since,
+            previous.origin,
+            previous.payload_text,
+            previous.prev_hash,
+            previous.window_start,
+            previous.fact_cursor,
+            previous.window_hash,
+            previous.signature,
+        )
+    )
+    row = (
+        "foreign-tick",
+        "note",
+        10.0,
+        None,
+        "other",
+        "{}",
+        previous_hash,
+        previous.fact_cursor,
+        previous.fact_cursor,
+        hashlib.sha256().hexdigest(),
+        None,
+    )
+    signature = signer("kyle", tick_commitment_hash(row))
+    body = body_of_tick_row((*row[:-1], signature))
+    ledger, query = target.registry.open(target.descriptor)
+    if os.environ.get("ARRIVAL_PROBE_SKIP_FOREIGN") != "1":
+        foreign_commit = ledger.append(
+            ledger.head(),
+            [RecordDraft("tick", 10.0, "kyle", body=body, signature=None)],
+        )
+        print("foreign_commit_ordinal", foreign_commit.after.ordinal)
+    query.close()
+    ledger.close()
+
+    _append_fact(target, "seal-late", "seal", 5.0, signer, {"status": "late"})
+    _sync(target)
+    recaptured = capture_runtime(
+        target.registry,
+        target.descriptor,
+        target.locator,
+        source_mode=True,
+        evaluated_at=6.0,
+    )
+    print("ticks", [(tick.name, tick.origin, tick.ts) for tick in recaptured.ticks])
+    print(
+        "pending",
+        [(tick.name, tick.payload.get("_boundary")) for tick in recaptured.pending_boundaries],
+    )

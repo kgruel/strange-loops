@@ -1,0 +1,95 @@
+{
+  "restore_succeeded": true,
+  "ledger_exact_source": true,
+  "equal_fork_and_source_byte_length": true,
+  "projected_before_sync": {
+    "schema": "loops.sdk/facts-page/v2",
+    "read_path": "arrival",
+    "basis": {
+      "lineage": "01M1TAX14QCKX68MJE66HWXE0E",
+      "captured_head": {
+        "lineage": "01M1TAX14QCKX68MJE66HWXE0E",
+        "ordinal": 2,
+        "record_hash": "4eb13c120917017442ddc23777c8611768ee54c241ee76027280ae050dbf7b6c"
+      },
+      "projected_through": {
+        "lineage": "01M1TAX14QCKX68MJE66HWXE0E",
+        "ordinal": 2,
+        "record_hash": "4eb13c120917017442ddc23777c8611768ee54c241ee76027280ae050dbf7b6c"
+      },
+      "view_generation": "file-projection-v1:78258a4ce26a36d4e55237278d78c67814ce0b27042d28b9b06596bd69bf7479"
+    },
+    "store": {
+      "backend": "file",
+      "location": "/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/arrival-projection-triage-y_drigd5/receiver.arrival",
+      "lineage": "01M1TAX14QCKX68MJE66HWXE0E",
+      "role": "replica",
+      "query": null,
+      "witness": null
+    },
+    "items": [
+      {
+        "id": "forked-fact",
+        "kind": "note",
+        "ts": 10.0,
+        "observer": "alice",
+        "origin": "fixture",
+        "payload": {
+          "value": "forked-fact"
+        },
+        "arrival_ordinal": 2,
+        "arrival_seq": 0
+      }
+    ],
+    "next_cursor": null,
+    "prev_cursor": null,
+    "truncated": false,
+    "order": "newest",
+    "has_continuation": false
+  },
+  "projected_after_sync": {
+    "schema": "loops.sdk/facts-page/v2",
+    "read_path": "arrival",
+    "basis": {
+      "lineage": "01M1TAX14QCKX68MJE66HWXE0E",
+      "captured_head": {
+        "lineage": "01M1TAX14QCKX68MJE66HWXE0E",
+        "ordinal": 2,
+        "record_hash": "4eb13c120917017442ddc23777c8611768ee54c241ee76027280ae050dbf7b6c"
+      },
+      "projected_through": {
+        "lineage": "01M1TAX14QCKX68MJE66HWXE0E",
+        "ordinal": 2,
+        "record_hash": "4eb13c120917017442ddc23777c8611768ee54c241ee76027280ae050dbf7b6c"
+      },
+      "view_generation": "file-projection-v1:78258a4ce26a36d4e55237278d78c67814ce0b27042d28b9b06596bd69bf7479"
+    },
+    "store": {
+      "backend": "file",
+      "location": "/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/arrival-projection-triage-y_drigd5/receiver.arrival",
+      "lineage": "01M1TAX14QCKX68MJE66HWXE0E",
+      "role": "replica",
+      "query": null,
+      "witness": null
+    },
+    "items": [
+      {
+        "id": "forked-fact",
+        "kind": "note",
+        "ts": 10.0,
+        "observer": "alice",
+        "origin": "fixture",
+        "payload": {
+          "value": "forked-fact"
+        },
+        "arrival_ordinal": 2,
+        "arrival_seq": 0
+      }
+    ],
+    "next_cursor": null,
+    "prev_cursor": null,
+    "truncated": false,
+    "order": "newest",
+    "has_continuation": false
+  }
+}

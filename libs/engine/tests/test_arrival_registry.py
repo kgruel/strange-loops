@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -22,13 +23,21 @@ from lang import parse_vertex, parse_vertex_file
 from lang.ast import BackendDecl, VertexFile
 
 from engine.arrival import ArrivalLog
+from engine.arrival_binding import BindingIdentity, opaque_binding
 from engine.arrival_contract import (
     ArrivalLedger,
     ArrivalQuery,
+    Open,
+    NotAuthority,
+    NotSupported,
+    Profile,
+    RecordDraft,
     StoreDescriptor,
     UnknownBackend,
 )
-from engine.arrival_head_seam import AttestedLedger, PreGenesis
+from engine.arrival_file_backend import FileLedger
+from engine.arrival_head_seam import AttestedLedger, LineageReplaced, PreGenesis
+from engine.arrival_head_attestation import bindings_path
 from engine.arrival_registry import BackendRegistry, descriptor_for
 from engine.arrival_store import ArrivalStore
 from engine.jsonl_store import open_canonical_store
@@ -104,20 +113,15 @@ def test_unregistered_backend_names_still_describe(tmp_path):
     assert descriptor.backend == "postgres"
 
 
-def test_undeclared_arrival_store_infers_the_file_backend(tmp_path):
-    """The transitional arm that keeps slices 3-4 unstranded.
-
-    Every .arrival store in the wild predates the grammar that would let it
-    declare a backend. This arm dies in slice 5.
-    """
+def test_undeclared_arrival_store_has_no_descriptor(tmp_path):
+    """A suffix no longer synthesizes an adapter declaration."""
     vpath = _vertex(tmp_path, 'store "./s.arrival"')
-    descriptor = descriptor_for(parse_vertex_file(vpath), vpath)
-    assert descriptor == StoreDescriptor(
-        backend="file", location=str(tmp_path / "s.arrival")
-    )
+    assert descriptor_for(parse_vertex_file(vpath), vpath) is None
 
 
-@pytest.mark.parametrize("locator", ["./s.jsonl", "./s.db", "./s.sqlite"])
+@pytest.mark.parametrize(
+    "locator", ["./s.arrival", "./s.jsonl", "./s.db", "./s.sqlite"]
+)
 def test_modes_with_no_ledger_describe_nothing(tmp_path, locator):
     """None is the honest answer, not a refusal.
 
@@ -146,13 +150,69 @@ def test_a_relative_locator_resolves_against_the_vertex_not_the_cwd(tmp_path):
     assert Path(descriptor.location) == nested / "s.arrival"
 
 
-def test_role_and_lineage_are_left_unset(tmp_path):
-    """Deferred deliberately — nothing in slices 2-4 reads them."""
-    vpath = _vertex(tmp_path, 'store "./s.arrival" backend="file"')
+def test_declared_role_and_lineage_reach_the_descriptor(tmp_path):
+    vpath = _vertex(
+        tmp_path,
+        'store "./s.arrival" backend="file" '
+        'lineage="01ARRIVALPIN" role="replica"',
+    )
     descriptor = descriptor_for(parse_vertex_file(vpath), vpath)
     assert descriptor is not None
-    assert descriptor.role is None
-    assert descriptor.lineage is None
+    assert descriptor.role is Profile.REPLICA
+    assert descriptor.lineage == "01ARRIVALPIN"
+
+
+def test_non_file_location_is_opaque_and_suffix_independent(tmp_path):
+    location = "postgresql://db.example/loops?sslmode=require"
+    vpath = _vertex(
+        tmp_path,
+        f'store "{location}" backend="postgres" role="replica"',
+    )
+    descriptor = descriptor_for(parse_vertex_file(vpath), vpath)
+    assert descriptor == StoreDescriptor(
+        backend="postgres", location=location, role=Profile.REPLICA
+    )
+
+
+class _TrackingQuery:
+    def __init__(self) -> None:
+        self.closed = False
+
+    def lineage(self):
+        return None
+
+    def projected_through(self):
+        return None
+
+    def close(self):
+        self.closed = True
+
+
+class _ClosableFileLedger(FileLedger):
+    def __init__(self, log):
+        super().__init__(log)
+        self.closed = False
+
+    def close(self):
+        self.closed = True
+
+
+class _ArchiveCapableFileLedger(FileLedger):
+    def capabilities(self):
+        capabilities = super().capabilities()
+        return replace(
+            capabilities,
+            profiles=capabilities.profiles | {Profile.ARCHIVE},
+        )
+
+
+class _ForeignExportFileLedger(FileLedger):
+    def export(self, *, through, codec):
+        exported = super().export(through=through, codec=codec)
+        return replace(
+            exported,
+            head=replace(exported.head, lineage="01FOREIGNLINEAGE"),
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -197,21 +257,456 @@ def test_a_registered_opener_is_what_open_calls(tmp_path):
     directly rather than through an equality that also happened to pin the
     absence of a wrapper.
 
-    The stub's halves are strings, which name no head: the seam asks a ledger
-    for one, gets an ``AttributeError`` instead, and — with nothing remembered
-    for this location — reports pre-genesis and writes nothing. That is the
-    same no-claim branch a location about to be minted into takes, and it is
-    exercised properly against real stores below.
+    The empty FileLedger names no head, so the seam reports pre-genesis and
+    writes nothing. That is the same no-claim branch a location about to be
+    minted into takes, and it is exercised properly against real stores below.
     """
     calls: list[StoreDescriptor] = []
+    query = _TrackingQuery()
     registry = BackendRegistry()
-    registry.register("probe", lambda d: (calls.append(d), ("L", "Q"))[1])  # type: ignore[arg-type,return-value]
+    registry.register(
+        "probe",
+        lambda d: (calls.append(d), (FileLedger(ArrivalLog(d.location)), query))[1],
+    )
     descriptor = StoreDescriptor(backend="probe", location=str(tmp_path / "y"))
-    ledger, query = registry.open(descriptor)
+    ledger, opened_query = registry.open(descriptor)
     assert calls == [descriptor]
-    assert query == "Q"
+    assert opened_query is query
     assert isinstance(ledger, AttestedLedger)
     assert isinstance(ledger.opened.comparison, PreGenesis)
+
+
+def test_successful_open_close_reaches_a_resourceful_adapter(tmp_path):
+    raw_ledger = _ClosableFileLedger(ArrivalLog(tmp_path / "empty.arrival"))
+    query = _TrackingQuery()
+    registry = BackendRegistry()
+    registry.register("resourceful", lambda _d: (raw_ledger, query))
+
+    ledger, opened_query = registry.open(
+        StoreDescriptor(
+            backend="resourceful", location=str(tmp_path / "empty.arrival")
+        )
+    )
+    assert opened_query is query
+    assert not raw_ledger.closed
+    ledger.close()
+    assert raw_ledger.closed
+
+
+def test_registered_opaque_binding_never_interprets_a_dsn_as_a_path(
+    tmp_path, monkeypatch
+):
+    """An adapter receives the exact DSN and owns its non-file identity."""
+    dsn = "postgresql://node/db?sslmode=verify-full"
+    query = _TrackingQuery()
+    raw_ledger = _ClosableFileLedger(ArrivalLog(tmp_path / "adapter.arrival"))
+    calls: list[str] = []
+    registry = BackendRegistry()
+
+    def opener(descriptor):
+        calls.append(descriptor.location)
+        return raw_ledger, query
+
+    registry.register("postgres", opener)
+
+    # The fake adapter's provider is the only code allowed to see this
+    # locator. If the seam falls back to Path.resolve/stat the test fails.
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError("opaque locator reached filesystem interpretation")
+
+    monkeypatch.setattr("engine.arrival_head_seam.canonical_location", forbidden)
+    monkeypatch.setattr("engine.arrival_head_seam._identity_of", forbidden)
+
+    ledger, opened_query = registry.open(
+        StoreDescriptor(backend="postgres", location=dsn)
+    )
+    assert calls == [dsn]
+    assert opened_query is query
+    assert ledger._canonical == opaque_binding("postgres", dsn).key
+    ledger.close()
+
+
+def test_opaque_binding_bootstrap_reopen_and_replacement_are_exact_keyed(
+    tmp_path, monkeypatch
+):
+    """Opaque binding writes and reads its key without filesystem probing."""
+    dsn = "postgresql://node/db?sslmode=verify-full"
+    first = "01OPAQUEFIRST"
+    second = "01OPAQUESECOND"
+    log_path = tmp_path / "adapter.arrival"
+    ArrivalLog.mint(log_path, observer="kyle", signer=_sign, key=_KEY, lineage=first)
+
+    def opener(_descriptor):
+        return FileLedger(ArrivalLog(log_path)), _TrackingQuery()
+
+    registry = BackendRegistry()
+    registry.register("postgres", opener)
+    descriptor = StoreDescriptor(backend="postgres", location=dsn)
+    ledger, query = registry.open(descriptor)
+    query.close()
+    ledger.close()
+    key = opaque_binding("postgres", dsn).key
+    binding_lines = bindings_path().read_text(encoding="utf-8").splitlines()
+    assert any(key in line and first in line for line in binding_lines)
+
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError("opaque locator reached filesystem interpretation")
+
+    monkeypatch.setattr("engine.arrival_head_seam.canonical_location", forbidden)
+    monkeypatch.setattr("engine.arrival_head_seam._identity_of", forbidden)
+
+    reopened, reopened_query = registry.open(descriptor)
+    reopened_query.close()
+    reopened.close()
+
+    log_path.unlink()
+    ArrivalLog.mint(log_path, observer="kyle", signer=_sign, key=_KEY, lineage=second)
+    with pytest.raises(LineageReplaced, match="previously presented lineage"):
+        registry.open(descriptor)
+
+
+def test_registered_backend_keys_are_namespaced_and_do_not_collide(tmp_path):
+    """Equal locators under different adapters cannot share journal memory."""
+    assert opaque_binding("a:b", "c").key != opaque_binding("a", "b:c").key
+    query_a = _TrackingQuery()
+    query_b = _TrackingQuery()
+    registry = BackendRegistry()
+    registry.register(
+        "alpha",
+        lambda _d: (_ClosableFileLedger(ArrivalLog(tmp_path / "a.arrival")), query_a),
+    )
+    registry.register(
+        "beta",
+        lambda _d: (_ClosableFileLedger(ArrivalLog(tmp_path / "b.arrival")), query_b),
+    )
+    location = "same://opaque/locator"
+    alpha, _ = registry.open(StoreDescriptor(backend="alpha", location=location))
+    beta, _ = registry.open(StoreDescriptor(backend="beta", location=location))
+    try:
+        assert alpha._canonical == opaque_binding("alpha", location).key
+        assert beta._canonical == opaque_binding("beta", location).key
+        assert alpha._canonical != beta._canonical
+        assert not alpha._canonical.startswith(str(tmp_path))
+    finally:
+        alpha.close()
+        beta.close()
+
+
+@pytest.mark.parametrize(
+    "binding",
+    [
+        BindingIdentity("other", "backend:5:other:1:x"),
+        BindingIdentity("remote", "/tmp/shared-file-key"),
+    ],
+)
+def test_custom_binding_provider_is_validated_before_opener_or_witness(
+    tmp_path, binding
+):
+    """A provider cannot smuggle a foreign or file-shaped key into custody."""
+    calls: list[StoreDescriptor] = []
+    registry = BackendRegistry()
+
+    def opener(descriptor):
+        calls.append(descriptor)
+        return FileLedger(ArrivalLog(tmp_path / "never-opened.arrival")), _TrackingQuery()
+
+    registry.register("remote", opener, binding_provider=lambda _d: binding)
+    with pytest.raises(ValueError, match="binding"):
+        registry.open(
+            StoreDescriptor(
+                backend="remote", location="https://node.example/db?tls=1"
+            )
+        )
+    assert calls == []
+    assert not (tmp_path / "state").exists()
+
+
+def test_custom_provider_may_normalize_inside_its_opaque_namespace(tmp_path):
+    """Adapter normalization is allowed when its returned key is framed."""
+    dsn = "https://node.example/db?tls=1"
+    normalized = "cluster-instance-7"
+    query = _TrackingQuery()
+    raw = _ClosableFileLedger(ArrivalLog(tmp_path / "normalized.arrival"))
+    seen: list[str] = []
+    registry = BackendRegistry()
+
+    def provider(descriptor):
+        seen.append(descriptor.location)
+        return opaque_binding(descriptor.backend, normalized)
+
+    registry.register(
+        "remote",
+        lambda _d: (raw, query),
+        binding_provider=provider,
+    )
+    ledger, opened_query = registry.open(
+        StoreDescriptor(backend="remote", location=dsn)
+    )
+    assert seen == [dsn]
+    assert ledger._canonical == opaque_binding("remote", normalized).key
+    assert opened_query is query
+    ledger.close()
+
+
+def test_builtin_file_binding_retains_replacement_refusal(tmp_path):
+    """Registry file opens retain canonical-path lineage replacement checks."""
+    log_path = tmp_path / "bound.arrival"
+    first = "01FIRSTLINEAGE"
+    second = "01SECONDLINEAGE"
+    ArrivalLog.mint(log_path, observer="kyle", signer=_sign, key=_KEY, lineage=first)
+    ledger, query = BackendRegistry.with_builtin_backends().open(
+        StoreDescriptor(backend="file", location=str(log_path))
+    )
+    query.close()
+    ledger.close()
+
+    log_path.unlink()
+    ArrivalLog.mint(log_path, observer="kyle", signer=_sign, key=_KEY, lineage=second)
+    with pytest.raises(LineageReplaced, match="previously presented lineage"):
+        BackendRegistry.with_builtin_backends().open(
+            StoreDescriptor(backend="file", location=str(log_path))
+        )
+
+
+def test_unsupported_declared_role_refuses_and_closes_query(tmp_path):
+    query = _TrackingQuery()
+    raw_ledger = _ClosableFileLedger(ArrivalLog(tmp_path / "empty.arrival"))
+    registry = BackendRegistry()
+    registry.register("probe", lambda _d: (raw_ledger, query))
+
+    with pytest.raises(NotSupported, match="archive"):
+        registry.open(
+            StoreDescriptor(
+                backend="probe",
+                location=str(tmp_path / "empty.arrival"),
+                role=Profile.ARCHIVE,
+            )
+        )
+
+    assert query.closed
+    assert raw_ledger.closed
+    assert not list((tmp_path / "state").rglob("*"))
+
+
+def test_wrong_declared_lineage_refuses_before_journaling_and_closes_query(
+    tmp_path,
+):
+    log_path = tmp_path / "foreign.arrival"
+    actual = "01ACTUALLINEAGE"
+    ArrivalLog.mint(
+        log_path, observer="kyle", signer=_sign, key=_KEY, lineage=actual
+    )
+    query = _TrackingQuery()
+    registry = BackendRegistry()
+    registry.register("probe", lambda _d: (FileLedger(ArrivalLog(log_path)), query))
+
+    with pytest.raises(NotAuthority, match=actual):
+        registry.open(
+            StoreDescriptor(
+                backend="probe",
+                location=str(log_path),
+                lineage="01DECLAREDLINEAGE",
+                role=Profile.REPLICA,
+            )
+        )
+
+    assert query.closed
+    assert not list((tmp_path / "state").rglob("*"))
+
+
+def test_empty_pinned_lineage_refuses_a_different_mint_before_mutation(tmp_path):
+    log_path = tmp_path / "new.arrival"
+    ledger, query = BackendRegistry.with_builtin_backends().open(
+        StoreDescriptor(
+            backend="file",
+            location=str(log_path),
+            lineage="01DECLAREDLINEAGE",
+            role=Profile.AUTHORITY,
+        )
+    )
+    try:
+        with pytest.raises(NotAuthority, match="01OTHERLINEAGE"):
+            ledger.mint(
+                {
+                    "observer": "kyle",
+                    "signer": _sign,
+                    "key": _KEY,
+                    "lineage": "01OTHERLINEAGE",
+                }
+            )
+        assert not log_path.exists()
+        assert not list((tmp_path / "state").rglob("*"))
+
+        head = ledger.mint(
+            {
+                "observer": "kyle",
+                "signer": _sign,
+                "key": _KEY,
+                "lineage": "01DECLAREDLINEAGE",
+            }
+        )
+        assert head.lineage == "01DECLAREDLINEAGE"
+    finally:
+        query.close()
+
+
+def test_explicit_replica_role_cannot_mint_or_append(tmp_path):
+    log_path = tmp_path / "replica.arrival"
+    ArrivalLog.mint(log_path, observer="kyle", signer=_sign, key=_KEY)
+    ledger, query = BackendRegistry.with_builtin_backends().open(
+        StoreDescriptor(
+            backend="file",
+            location=str(log_path),
+            lineage=ArrivalLog(log_path).lineage(),
+            role=Profile.REPLICA,
+        )
+    )
+    try:
+        with pytest.raises(NotAuthority, match="does not permit mint"):
+            ledger.mint({})
+        with pytest.raises(NotAuthority, match="does not permit append"):
+            ledger.append(
+                ledger.head(),
+                [
+                    RecordDraft(
+                        kind="fact",
+                        authored_at=1.0,
+                        observer="kyle",
+                        body={"kind": "note"},
+                    )
+                ],
+            )
+        assert ledger.head().ordinal == 0
+    finally:
+        query.close()
+
+
+def test_pinned_lineage_refuses_foreign_replication_before_mutation(tmp_path):
+    log_path = tmp_path / "replica.arrival"
+    ArrivalLog.mint(
+        log_path,
+        observer="kyle",
+        signer=_sign,
+        key=_KEY,
+        lineage="01DECLAREDLINEAGE",
+    )
+    ledger, query = BackendRegistry.with_builtin_backends().open(
+        StoreDescriptor(
+            backend="file",
+            location=str(log_path),
+            lineage="01DECLAREDLINEAGE",
+            role=Profile.REPLICA,
+        )
+    )
+    before = log_path.read_bytes()
+    try:
+        with pytest.raises(NotAuthority, match="01FOREIGNLINEAGE"):
+            ledger.replicate(
+                ledger.head(),
+                [{"lin": "01FOREIGNLINEAGE", "ord": 1}],
+            )
+        assert log_path.read_bytes() == before
+    finally:
+        query.close()
+
+
+def test_pinned_lineage_refuses_replication_without_a_lineage_before_mutation(
+    tmp_path,
+):
+    log_path = tmp_path / "replica.arrival"
+    ArrivalLog.mint(
+        log_path,
+        observer="kyle",
+        signer=_sign,
+        key=_KEY,
+        lineage="01DECLAREDLINEAGE",
+    )
+    ledger, query = BackendRegistry.with_builtin_backends().open(
+        StoreDescriptor(
+            backend="file",
+            location=str(log_path),
+            lineage="01DECLAREDLINEAGE",
+            role=Profile.REPLICA,
+        )
+    )
+    before = log_path.read_bytes()
+    try:
+        with pytest.raises(NotAuthority, match="must name a string lineage"):
+            ledger.replicate(ledger.head(), [{"ord": 1}])
+        assert log_path.read_bytes() == before
+    finally:
+        query.close()
+
+
+def test_archive_role_only_reaches_archive_ledger_operations(tmp_path):
+    log_path = tmp_path / "archive.arrival"
+    ArrivalLog.mint(log_path, observer="kyle", signer=_sign, key=_KEY)
+    raw = _ArchiveCapableFileLedger(ArrivalLog(log_path))
+    raw_head = raw.head()
+    query = _TrackingQuery()
+    registry = BackendRegistry()
+    registry.register("archive-file", lambda _d: (raw, query))
+    ledger, opened_query = registry.open(
+        StoreDescriptor(
+            backend="archive-file",
+            location=str(log_path),
+            role=Profile.ARCHIVE,
+        )
+    )
+    try:
+        assert opened_query is query
+        assert ledger.verify(Open()) == raw_head
+        for operation in (
+            lambda: ledger.head(),
+            lambda: ledger.read(0),
+            lambda: next(ledger.scan()),
+            lambda: ledger.export(through=raw_head, codec="arrival-jsonl-v1"),
+        ):
+            with pytest.raises(NotAuthority):
+                operation()
+    finally:
+        query.close()
+
+
+def test_in_memory_non_file_descriptor_refuses_a_lossy_location():
+    ast = VertexFile(
+        name="t",
+        loops={},
+        store=Path("postgresql:/db.example/loops"),
+        store_backend=BackendDecl(name="postgres"),
+    )
+    with pytest.raises(ValueError, match="no opaque store location"):
+        descriptor_for(ast)
+
+
+def test_pinned_lineage_checks_the_exported_prefix_head(tmp_path):
+    log_path = tmp_path / "export.arrival"
+    ArrivalLog.mint(
+        log_path,
+        observer="kyle",
+        signer=_sign,
+        key=_KEY,
+        lineage="01DECLAREDLINEAGE",
+    )
+    raw = _ForeignExportFileLedger(ArrivalLog(log_path))
+    query = _TrackingQuery()
+    registry = BackendRegistry()
+    registry.register("foreign-export", lambda _d: (raw, query))
+    ledger, _ = registry.open(
+        StoreDescriptor(
+            backend="foreign-export",
+            location=str(log_path),
+            lineage="01DECLAREDLINEAGE",
+            role=Profile.AUTHORITY,
+        )
+    )
+    try:
+        with pytest.raises(NotAuthority, match="export result"):
+            ledger.export(
+                through=raw.head(), codec="arrival-jsonl-v1"
+            )
+    finally:
+        query.close()
 
 
 def test_the_file_opener_hands_back_both_halves(tmp_path):
@@ -389,17 +884,9 @@ def _minted_arrival_vertex(tmp_path: Path, store_line: str) -> tuple[Path, Path]
     return vpath, log_path
 
 
-@pytest.mark.parametrize(
-    "store_line",
-    [
-        'store "./s.arrival" backend="file"',  # explicit arm
-        'store "./s.arrival"',                 # transitional inferred arm
-    ],
-)
-def test_the_registry_opens_the_artifact_the_legacy_path_opens(
-    tmp_path, store_line
-):
-    """Both arrival arms name — and open — the same artifact as today's path."""
+def test_the_registry_opens_the_artifact_the_legacy_path_opens(tmp_path):
+    """The explicit file descriptor opens the same artifact as today's path."""
+    store_line = 'store "./s.arrival" backend="file"'
     vpath, log_path = _minted_arrival_vertex(tmp_path, store_line)
     ast = parse_vertex_file(vpath)
 
@@ -441,7 +928,9 @@ def test_a_declared_backend_does_not_change_where_the_store_lives(tmp_path):
     arm into existing vertices without moving anybody's data.
     """
     vpath = _vertex(tmp_path, 'store "./s.arrival"')
-    inferred = descriptor_for(parse_vertex_file(vpath), vpath)
+    legacy_location = canonical_store_path(
+        parse_vertex_file(vpath).store, vpath
+    )
 
     vpath.write_text(
         vpath.read_text().replace(
@@ -450,7 +939,8 @@ def test_a_declared_backend_does_not_change_where_the_store_lives(tmp_path):
     )
     declared = descriptor_for(parse_vertex_file(vpath), vpath)
 
-    assert inferred == declared
+    assert declared is not None
+    assert Path(declared.location) == legacy_location
 
 
 def test_a_vertex_file_constructed_in_memory_describes_the_same_way(tmp_path):

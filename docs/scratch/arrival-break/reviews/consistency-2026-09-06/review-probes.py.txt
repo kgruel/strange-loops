@@ -1,0 +1,98 @@
+"""Disposable synthetic probes; no live store or filesystem key access."""
+import asyncio
+import json
+from types import SimpleNamespace
+
+from atoms import Fact
+from engine.arrival_consumer import open_read
+from engine.arrival_contract import DeclarationAnchor, Head, Profile, StoreDescriptor, Watermark
+from engine.arrival_head_seam import AttestedLedger, Compared
+from engine.arrival_sources import _collect_one
+from engine.runtime_write import _current_write_basis
+
+
+class Snapshot:
+    represented = Watermark('L', 3)
+    declaration_anchor = DeclarationAnchor(None, None)
+    view_generation = 'g'
+    def close(self):
+        pass
+
+
+class ChangedLedger(AttestedLedger):
+    def __init__(self):
+        self.opened = SimpleNamespace(comparison=Compared(None, Head('L', 3, 'old'), None))
+    def head_at(self, watermark):
+        return Head('L', 3, 'replacement')
+    def close(self):
+        pass
+
+
+class Query:
+    def open_snapshot(self, **kwargs):
+        return Snapshot()
+    def close(self):
+        pass
+
+
+class Registry:
+    def open(self, descriptor):
+        return ChangedLedger(), Query()
+
+
+def head_probe():
+    with open_read(Registry(), StoreDescriptor('synthetic', 'opaque', role=Profile.AUTHORITY)) as opened:
+        basis = opened.basis
+        result = {'probe_kind': 'synthetic interface substitution after captured H',
+                  'read_accepted': True, 'captured_hash': basis.captured_head.record_hash,
+                  'projected_hash': basis.projected_through.record_hash}
+    try:
+        _current_write_basis(ChangedLedger(), Snapshot(), Head('L', 3, 'old'))
+    except Exception as exc:
+        result['runtime_refusal'] = type(exc).__name__
+    return result
+
+
+class Stream:
+    def __init__(self, fail_after_first=False, cancel=False):
+        self.seen = False
+        self.closed = False
+        self.fail_after_first = fail_after_first
+        self.cancel = cancel
+    def __aiter__(self):
+        return self
+    async def __anext__(self):
+        if self.cancel:
+            raise asyncio.CancelledError()
+        if not self.seen:
+            self.seen = True
+            return Fact('note', 1.0, {'value': 1}, observer='author')
+        if self.fail_after_first:
+            raise RuntimeError('collector fault')
+        raise StopAsyncIteration
+    async def aclose(self):
+        self.closed = True
+
+
+async def source_probes():
+    invocation = SimpleNamespace(observer='owner', invocation_id='invocation', lifecycle_ids=('lifecycle',))
+    source = SimpleNamespace(kind='feed', command='synthetic', observer='author')
+    results = []
+    for mode in ('id-failure', 'collector-failure', 'cancel'):
+        stream = Stream(fail_after_first=mode == 'collector-failure', cancel=mode == 'cancel')
+        def new_id():
+            if mode == 'id-failure':
+                raise OSError('coordinator ID service failed')
+            return 'fact-id'
+        try:
+            result = await _collect_one(invocation, 0, source, lambda _: stream,
+                                        clock=lambda: 2.0, id_factory=new_id)
+            results.append({'mode': mode, 'status': result.status, 'error_type': result.error_type,
+                            'fact_count': len(result.facts), 'id_count': len(result.fact_ids),
+                            'closed': stream.closed, 'lifecycle_payload': dict(result.lifecycle_fact.payload)})
+        except asyncio.CancelledError:
+            results.append({'mode': mode, 'cancel_propagated': True, 'closed': stream.closed})
+    return results
+
+
+print(json.dumps({'same_height': head_probe(), 'source_cases': asyncio.run(source_probes())}, indent=2))

@@ -1,0 +1,2 @@
+case_alias {'same_public': True, 'samefile': True, 'entries': ['keys/Alice', 'keys/Alice/ed25519.key', 'keys/Alice/ed25519.pub']}
+stem_nested {'same_public': False, 'signature_uses_nested': True, 'signature_uses_flat': False, 'entries': ['keys/Alice', 'keys/Alice/ed25519.key', 'keys/Alice/ed25519.pub', 'keys/ed25519.key', 'keys/ed25519.pub', 'keys/new', 'keys/new/ed25519.key', 'keys/new/ed25519.pub']}

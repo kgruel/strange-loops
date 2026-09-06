@@ -1,0 +1,298 @@
+--- before/libs/engine/src/engine/arrival_consumer.py
++++ after/libs/engine/src/engine/arrival_consumer.py
+@@ -16,6 +16,7 @@
+     FactPage,
+     FactRequest,
+     Head,
++    HeadMismatch,
+     InvalidContinuation,
+     NotAuthority,
+     ProjectionAbsent,
+@@ -24,7 +25,14 @@
+     ReadBasis,
+     Watermark,
+ )
+-from .arrival_head_seam import AttestedLedger, Compared, Indeterminate, OpenReport, PreGenesis
++from .arrival_head_seam import (
++    AttestedLedger,
++    Compared,
++    Indeterminate,
++    OpenReport,
++    PreGenesis,
++    complete_projection_custody,
++)
+ from .declaration import validate_arrival_declaration_anchor
+ 
+ if TYPE_CHECKING:  # pragma: no cover - imports only for annotations
+@@ -180,7 +188,17 @@
+             # The query transaction can observe a projection written after the
+             # seam captured H, including while resuming a prior page. Every
+             # reported watermark still needs custody membership validation.
+-            observed = ledger.head_at(watermark)
++            observed = (
++                complete_projection_custody(
++                    ledger,
++                    captured=captured,
++                    represented=watermark,
++                    lineage_refusal=NotAuthority,
++                    conflict_refusal=HeadMismatch,
++                )
++                if continuation is None
++                else ledger.head_at(watermark)
++            )
+             if (
+                 continuation is not None
+                 and snapshot.view_generation != continuation.view_generation
+
+--- before/libs/engine/src/engine/arrival_declarations.py
++++ after/libs/engine/src/engine/arrival_declarations.py
+@@ -45,7 +45,12 @@
+     StoreDescriptor,
+     Watermark,
+ )
+-from .arrival_head_seam import Compared, Indeterminate, PreGenesis
++from .arrival_head_seam import (
++    Compared,
++    Indeterminate,
++    PreGenesis,
++    complete_projection_custody,
++)
+ from .arrival_registry import BackendRegistry
+ from .credentials import WriteCredentials
+ from .declaration import (
+@@ -852,21 +857,20 @@
+                 "the CURRENT Arrival snapshot has no historized declaration"
+             )
+         represented = snapshot.represented
+-        if represented is None or represented.lineage != captured_head.lineage:
++        if represented is None:
+             raise DeclarationPreparationRefused(
+                 "the CURRENT declaration snapshot has no matching lineage basis"
+             )
+-        if represented.ordinal < captured_head.ordinal:
++        projected = complete_projection_custody(
++            ledger,
++            captured=captured_head,
++            represented=represented,
++            lineage_refusal=lambda message: DeclarationPreparationRefused(message),
++            conflict_refusal=lambda message: DeclarationPreparationRefused(message),
++        )
++        if projected.ordinal < captured_head.ordinal:
+             raise ProjectionBehind(
+                 "the CURRENT declaration snapshot is behind the captured Arrival head"
+-            )
+-        projected = captured_head
+-        if represented.ordinal <= captured_head.ordinal:
+-            projected = ledger.head_at(
+-                Watermark(
+-                    lineage=represented.lineage,
+-                    ordinal=represented.ordinal,
+-                )
+             )
+         basis = ReadBasis(
+             lineage=captured_head.lineage,
+
+--- before/libs/engine/src/engine/arrival_head_seam.py
++++ after/libs/engine/src/engine/arrival_head_seam.py
+@@ -59,6 +59,8 @@
+     ExportedPrefix,
+     Full,
+     Head,
++    HeadMismatch,
++    NotAuthority,
+     Open,
+     RecordDraft,
+     VerifyScope,
+@@ -116,6 +118,7 @@
+     "bootstrap",
+     "aliased_lineage",
+     "canonical_location",
++    "complete_projection_custody",
+     "days_since_audit",
+     "match_identity",
+     "trust_reset",
+@@ -939,6 +942,47 @@
+     def head_at(self, watermark: Watermark) -> Head: ...
+ 
+ 
++def complete_projection_custody(
++    evidence: _HeadEvidence,
++    *,
++    captured: Head,
++    represented: Watermark,
++    lineage_refusal: Callable[[str], BaseException] = NotAuthority,
++    conflict_refusal: Callable[[str], BaseException] = HeadMismatch,
++) -> Head:
++    """Complete one projection watermark against independently captured custody.
++
++    The caller owns missing/behind policy and its public refusal family. This
++    seam owns the evidence rule shared by fresh reads and CURRENT writers: the
++    represented lineage must be the captured lineage, ``head_at`` must vouch
++    for the exact reported coordinate, and a report at captured height must
++    name the captured full head. A projection that advanced after capture is
++    legitimate once custody vouches for it, but the bounded operation still
++    receives the captured head.
++
++    Backend ``head_at`` refusals deliberately pass through unchanged. They are
++    the backend-neutral contract's evidence that the reported prefix does not
++    exist, and wrapping them here would erase the cause callers already expose.
++    """
++    if represented.lineage != captured.lineage:
++        raise lineage_refusal(
++            f"projection represents {represented.lineage}, not {captured.lineage}"
++        )
++    observed = evidence.head_at(represented)
++    if (
++        observed.lineage != represented.lineage
++        or observed.ordinal != represented.ordinal
++    ):
++        raise conflict_refusal(
++            "custody resolved the projection watermark to a different coordinate"
++        )
++    if represented.ordinal == captured.ordinal and observed != captured:
++        raise conflict_refusal(
++            "projection head disagrees with captured custody head"
++        )
++    return captured if observed.ordinal > captured.ordinal else observed
++
++
+ class _HeadObservation:
+     """Pure witness comparison shared by ordinary open and restoration proof.
+ 
+
+--- before/libs/engine/src/engine/runtime_write.py
++++ after/libs/engine/src/engine/runtime_write.py
+@@ -46,6 +46,7 @@
+     Indeterminate,
+     NotWitnessed,
+     PreGenesis,
++    complete_projection_custody,
+ )
+ from .credentials import WriteCredentials
+ from .row_commitment import fact_row_hash, tick_commitment_hash, tick_row_hash
+@@ -694,15 +695,15 @@
+     watermark = snapshot.represented
+     if watermark is None:
+         raise RuntimeWriteRefused("ordinary emission requires a projection watermark")
+-    observed = ledger.head_at(watermark)
+-    if observed.ordinal < captured.ordinal:
++    projected = complete_projection_custody(
++        ledger,
++        captured=captured,
++        represented=watermark,
++        lineage_refusal=NotAuthority,
++        conflict_refusal=RuntimeWriteRefused,
++    )
++    if projected.ordinal < captured.ordinal:
+         raise ProjectionBehind("CURRENT snapshot did not reach the captured head")
+-    if observed.ordinal == captured.ordinal and observed != captured:
+-        raise RuntimeWriteRefused("projection head disagrees with captured custody head")
+-    # A query transaction may observe maintenance that advanced after H. Its
+-    # rows remain bounded to H, and custody membership has been established;
+-    # retain H as the only execution CAS basis.
+-    projected = captured if observed.ordinal > captured.ordinal else observed
+     return ReadBasis(
+         lineage=captured.lineage,
+         captured_head=captured,
+
+--- before/libs/sdk/src/sdk/declare.py
++++ after/libs/sdk/src/sdk/declare.py
+@@ -629,6 +629,11 @@
+         details = {"intent_path": str(arrival_intent_path(vertex_path))}
+         context = {"fact_id": lineage} if lineage is not None else None
+         normalized = normalize_exception(exc, context=context)
++        if normalized is exc:
++            # Keep SDK exceptions and process-control exceptions exactly as
++            # raised.  ``raise exc from exc`` would install a self-cause and
++            # obscure both cancellation and an already-established cause.
++            raise
+         if hasattr(normalized, "details"):
+             normalized.details.update(details)
+         raise normalized from exc
+
+--- before/libs/sdk/tests/test_arrival_init.py
++++ after/libs/sdk/tests/test_arrival_init.py
+@@ -230,14 +230,15 @@
+     class RefusingRegistry:
+         def __init__(self) -> None:
+             self.opened: list[StoreDescriptor] = []
++            self.failure = UnknownBackend("test registry refusal")
+ 
+         def open(self, descriptor: StoreDescriptor):
+             self.opened.append(descriptor)
+-            raise UnknownBackend("test registry refusal")
++            raise self.failure
+ 
+     target = tmp_path / "remote.vertex"
+     registry = RefusingRegistry()
+-    with pytest.raises(ArrivalRefusal, match="test registry refusal"):
++    with pytest.raises(ArrivalRefusal, match="test registry refusal") as caught:
+         init_vertex(
+             target,
+             store_type="arrival",
+@@ -247,6 +248,7 @@
+             registry=registry,
+         )
+ 
++    assert caught.value.__cause__ is registry.failure
+     assert registry.opened
+     assert all(item.backend == "remote" for item in registry.opened)
+     assert all(
+@@ -254,3 +256,57 @@
+         for item in registry.opened
+     )
+     assert not target.exists()
++
++
++def test_arrival_init_reraises_unchanged_exception_with_original_cause(
++    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
++) -> None:
++    """Unmapped initialization failures retain identity and their existing cause."""
++    import engine.arrival_initialization as initialization
++
++    cause = OSError("underlying setup failure")
++    failure = RuntimeError("unmapped initializer failure")
++    failure.__cause__ = cause
++
++    def fail_initialize(*_args, **_kwargs):
++        raise failure
++
++    monkeypatch.setattr(initialization, "initialize_arrival", fail_initialize)
++    with pytest.raises(RuntimeError) as caught:
++        init_vertex(
++            tmp_path / "unchanged.vertex",
++            store_type="arrival",
++            observer="alice",
++            signer=lambda _observer, _digest: "arrival-signature",
++            fact_signer=lambda _observer, _digest: "fact-signature",
++            public_key="unused-by-injected-failure",
++        )
++
++    assert caught.value is failure
++    assert caught.value.__cause__ is cause
++
++
++def test_arrival_init_reraises_interrupt_unchanged(
++    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
++) -> None:
++    """The initializer does not turn a process-control interrupt into an SDK error."""
++    import engine.arrival_initialization as initialization
++
++    interruption = KeyboardInterrupt()
++
++    def interrupt_initialize(*_args, **_kwargs):
++        raise interruption
++
++    monkeypatch.setattr(initialization, "initialize_arrival", interrupt_initialize)
++    with pytest.raises(KeyboardInterrupt) as caught:
++        init_vertex(
++            tmp_path / "interrupt.vertex",
++            store_type="arrival",
++            observer="alice",
++            signer=lambda _observer, _digest: "arrival-signature",
++            fact_signer=lambda _observer, _digest: "fact-signature",
++            public_key="unused-by-injected-interrupt",
++        )
++
++    assert caught.value is interruption
++    assert caught.value.__cause__ is None

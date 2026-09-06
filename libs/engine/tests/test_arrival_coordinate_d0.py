@@ -1857,7 +1857,7 @@ class TestSolWp101StructuralVerification:
         store.close()
 
         # On reopen, monkeypatch _rebuild_table to fail if called
-        import engine.sqlite_store as sqlmod
+        import engine.file_projection_schema as sqlmod
 
         def forbid_rebuild(*args: Any, **kwargs: Any) -> None:
             pytest.fail(
@@ -1977,7 +1977,7 @@ class TestSolHigh01UnmarkedStructurallyCompleteValidation:
             conn.close()
 
         # Forbid _rebuild_table on reopen
-        import engine.sqlite_store as sqlmod
+        import engine.file_projection_schema as sqlmod
 
         def forbid_rebuild(*args: Any, **kwargs: Any) -> None:
             pytest.fail("_rebuild_table was invoked on structurally-complete matching index")
@@ -2009,7 +2009,7 @@ class TestSolHigh02IdentifierQuotingInRebuild:
     """
 
     def test_rebuild_migrates_identifiers_with_spaces(self, tmp_path: Path) -> None:
-        import engine.sqlite_store as sqlmod
+        import engine.file_projection_schema as sqlmod
 
         db_path = tmp_path / "spaces.db"
         conn = sqlite3.connect(str(db_path))
@@ -2324,7 +2324,7 @@ class TestSolHigh09ArrivalStampGatekeeperByConstruction:
 
     def test_structural_ratchet_single_arrival_stamp_in_store_meta(self) -> None:
         """Structural ratchet: exactly ONE write site of literal 'arrival' into store_meta
-        remains in sqlite_store.py, located strictly inside _stamp_arrival_axis.
+        remains in file_projection_schema.py, located strictly inside _stamp_arrival_axis.
 
         NOTE: This ratchet is a residue locator for the literal 'arrival' write into store_meta,
         not proof of provider-agreement correctness alone. The behavioral gates own the verdict.
@@ -2333,7 +2333,7 @@ class TestSolHigh09ArrivalStampGatekeeperByConstruction:
         import re
 
         store_file = (
-            Path(__file__).parent.parent / "src" / "engine" / "sqlite_store.py"
+            Path(__file__).parent.parent / "src" / "engine" / "file_projection_schema.py"
         )
         content = store_file.read_text()
 

@@ -12,6 +12,7 @@ from sdk import (
     FoldStateResult,
     ReadSummary,
     TargetUnsupported,
+    TickReadResult,
     emit_fact,
     read_fact_by_id,
     read_facts,
@@ -219,11 +220,13 @@ def test_read_ticks(populated_vertex: tuple[Path, list[EmitReceipt]]) -> None:
     """read_ticks extracts store ticks and supports optional name filtering."""
     vertex_path, _ = populated_vertex
     ticks = read_ticks(vertex_path)
-    assert isinstance(ticks, list)
+    assert isinstance(ticks, TickReadResult)
+    assert ticks.read_path == "legacy"
+    assert ticks.basis is None
 
     # Filter with non-existent tick name
     empty_ticks = read_ticks(vertex_path, name="nonexistent_tick_mark")
-    assert empty_ticks == []
+    assert empty_ticks.items == []
 
 
 def test_read_fact_by_id(populated_vertex: tuple[Path, list[EmitReceipt]]) -> None:
@@ -232,13 +235,13 @@ def test_read_fact_by_id(populated_vertex: tuple[Path, list[EmitReceipt]]) -> No
     target_receipt = receipts[0]
 
     # Full ID lookup
-    fact = read_fact_by_id(vertex_path, target_receipt.id)
-    assert fact is not None
-    assert fact["id"] == target_receipt.id
-    assert fact["payload"]["title"] == "Task 0"
+    result = read_fact_by_id(vertex_path, target_receipt.id)
+    assert result.fact is not None
+    assert result.fact["id"] == target_receipt.id
+    assert result.fact["payload"]["title"] == "Task 0"
 
     # Non-existent ID lookup returns None
-    assert read_fact_by_id(vertex_path, "00000000000000000000000000") is None
+    assert read_fact_by_id(vertex_path, "00000000000000000000000000").fact is None
 
     # Ambiguous prefix raises ValueError from engine reader
     short_prefix = target_receipt.id[:4]
@@ -278,11 +281,11 @@ def test_read_operations_missing_store(tmp_path: Path) -> None:
 
     # read_ticks
     ticks = read_ticks(vertex_path)
-    assert ticks == []
+    assert ticks.items == []
 
     # read_fact_by_id
     fact = read_fact_by_id(vertex_path, "any_id")
-    assert fact is None
+    assert fact.fact is None
 
 
 def test_fold_serialization_helpers() -> None:
@@ -414,13 +417,17 @@ def test_resolve_entity(tmp_path: Path) -> None:
     r2 = emit_fact(vertex, "task", {"task_id": "T-102", "title": "Second"}, observer="alice")
 
     resolved = resolve_entity(vertex, "task", "task_id", "T-101")
-    assert resolved == r1.id
+    assert resolved.found and resolved.fact_id == r1.id
+    assert resolved.read_path == "legacy"
+    assert resolved.store is None and resolved.basis is None
+    assert resolved.address == {"kind": "task", "key": "task_id", "value": "T-101"}
 
     resolved_2 = resolve_entity(vertex, "task", "task_id", "T-102")
-    assert resolved_2 == r2.id
+    assert resolved_2.fact_id == r2.id
 
     resolved_missing = resolve_entity(vertex, "task", "task_id", "T-999")
-    assert resolved_missing is None
+    assert not resolved_missing.found and resolved_missing.fact_id is None
+    assert resolved_missing.address == {"kind": "task", "key": "task_id", "value": "T-999"}
 
 
 def _aggregate_with_backdated_reassertion(
@@ -485,6 +492,7 @@ def test_resolve_entity_single_member_aggregate_rides_receipt_order(
     must agree or the fold's winner and the resolved id disagree.
     """
     from engine.vertex_reader import vertex_fold
+
     from sdk import resolve_entity
 
     parent, receipt_last, ts_latest = _aggregate_with_backdated_reassertion(
@@ -497,7 +505,7 @@ def test_resolve_entity_single_member_aggregate_rides_receipt_order(
     assert section.items[0].payload["msg"] == "beta"
 
     # ...and resolution agrees with it.
-    assert resolve_entity(parent, "task", "name", "z") == receipt_last
+    assert resolve_entity(parent, "task", "name", "z").fact_id == receipt_last
 
 
 def test_resolve_entity_multi_member_aggregate_keeps_the_lens(tmp_path: Path) -> None:
@@ -512,7 +520,7 @@ def test_resolve_entity_multi_member_aggregate_keeps_the_lens(tmp_path: Path) ->
     parent, receipt_last, ts_latest = _aggregate_with_backdated_reassertion(
         tmp_path, n_members=2
     )
-    assert resolve_entity(parent, "task", "name", "z") == ts_latest
+    assert resolve_entity(parent, "task", "name", "z").fact_id == ts_latest
 
 
 def test_read_timeline_interleaved(tmp_path: Path) -> None:

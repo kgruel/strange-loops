@@ -1,0 +1,174 @@
+# Arrival consistency contract matrix — September 6, 2026
+
+Status: source-backed audit and work order; C3/C8a implementation is tracked in the
+[first consistency slice](consistency-slice1-2026-09-06.md), and C1 in the
+[registry consistency slice](consistency-c1-2026-09-06.md). Remaining items are recommendations.
+Sol audited reads and transfer, Terra audited identity, Luna audited writes and
+recovery, and root reconciled their findings against the current implementation.
+The worktree is `loops-wt/arrival-finish` on `arrival/finish`; prior correctness
+remediation remains intact and uncommitted.
+
+Updated after [Fable-low review and root triage](reviews/consistency-2026-09-06/primary-triage.md).
+Fable reviewed frozen copies; root's subsequent changes below are separately
+identified in the triage. The later C3/C8a implementation and its own review are
+recorded separately in the first-slice report; the original review did not review that code.
+
+The first consistency slice aligns fresh captured projection evidence and
+unchanged exception propagation. The subsequent C1 slice adds consistent registry
+injection to the remaining supported read paths.
+Public outcome classification needs a phase/cause evidence check before broader
+normalization. Those are concrete
+differences between entrypoints that already claim the same contract. Identity
+work should preserve existing namespaces, reject ambiguous local boundary
+interpretation, and replace filename-derived credential selection with an
+explicit binding in a separately specified implementation slice.
+
+## Evidence and scope
+
+- [Read, inspection, maintenance and transfer audit](consistency-audit-read-transfer-2026-09-06.md): per-entrypoint source references, resource ownership, and current test coverage.
+- [Write, source and recovery audit](consistency-audit-write-recovery-2026-09-06.md): capture/CAS, durable outcomes and interruption questions.
+- [Identity audit](consistency-audit-identity-2026-09-06.md): the current namespaces and implementation constraints.
+- [Root identity decisions](identity-decisions-2026-09-06.md): recommendations, existing restrictions, compatibility implications, and deferred semantic choices.
+
+Normative baseline: the Arrival [backend contract](../../architecture/arrival/backend-contract.html),
+[protocol](../../architecture/arrival/protocol.html), and
+[wire profile](../../architecture/arrival/wire-format.html). Historical package
+guides still describe suffix-selected stores, repairing opens, and a future
+unused backend seam. Those descriptions are transitional documentation debt,
+not authority to reintroduce those behaviors into descriptor-first Arrival.
+
+The matrices below describe current supported Arrival paths unless explicitly
+marked as a gap or recommendation. Legacy branches are identified separately;
+their presence does not confer the Arrival guarantees.
+
+## Shared vocabulary
+
+`H` is a captured **full Head**, including hash. `P` is the custody-resolved
+prefix represented by the query answer. `G` is an opaque derived-view generation.
+An observed projection watermark must be resolved through custody before it
+is accepted as evidence. A concurrent legitimate projection advance may be
+observed above H, while the answer and write CAS remain bounded to H.
+
+`CURRENT` refuses an absent/behind projection; it does not authorize repair.
+Ordinary open checks identity and available projection evidence, but it is not
+a full comparison of every projected row against custody. Full content audit
+is a stronger, explicitly invoked operation used by restore.
+
+`W` below means an accepted registry open **may write external witness/binding
+evidence**. Query/read/preview does not therefore mean zero filesystem writes.
+The attestation constructor refuses before its own witness writes, but a later
+query or declaration refusal can occur after a successful open advanced that
+witness. Current SDK read DTOs expose their basis, not a complete witness-write
+receipt. No new public witness receipt is assumed by this matrix.
+
+## Capture and authority matrix
+
+| Operation | Authority / declaration source | Fixed evidence and concurrency | Actual supported distinction |
+| --- | --- | --- | --- |
+| Target resolution | Explicit backend and role; locator supplies adapter address. No backend open. | Parsed locator only; it has not authenticated genesis or captured H. | Legacy `resolve_target`/discovery still probe filesystem-shaped targets. `resolve_arrival_target` is currently single-descriptor only. |
+| Facts, lookup, ticks, entity | Descriptor/genesis plus one CURRENT snapshot; declared semantics come from bounded documents where needed. | H/P/G; fact pages additionally bind request, receipt cursor and generation. Later records cannot enter the captured answer. | Literal exact-first fact-ID lookup; internal rows are hidden by public defaults. Entity resolution accepts the same optional registry as other supported reads. |
+| Summary, state, timeline | Single-store captured effective declaration; aggregate topology from each descriptor's effective declaration, or frozen local definition for storeless nodes. | One H/P/G or per-occurrence basis vector. Timeline orders by event time; fold/receipt order is a different axis. | Same-lineage occurrences remain distinct; own declared fold kinds shadow children even when empty. Timeline forwards the supplied registry through root and member opens. |
+| Declaration inspection | Captured effective declaration, plus separately reported local cache fingerprint. | CURRENT H/P/G; local drift is not substituted for effective history. | Optional registry injection is supported; aggregate declaration inspection currently refuses. Supporting it is a scope decision, not permission to invent an aggregate H. |
+| Search | Captured declaration supplies indexed-field specification. | H/P/G plus exact FTS coverage, field hash, schema/ranking evidence. | CURRENT base projection is insufficient when FTS coverage is stale. Search never builds its own index. |
+| Preview, ordinary emit, batch | Authority; snapshot anchor and effective admission/folds; operation-fresh domain-separated credentials. | Detached CURRENT capture; full-head CAS for execution. A batch has one final atomic draft set, even with mixed observers. | Preview does not reserve H. Exact duplicates and empty batches can be no-ops; preview success cannot promise a later append. |
+| Source execution | Authority and frozen source graph/observers selected before collection. | Deterministic dependency tiers; later tiers recapture and check declaration continuity; one CAS per tier. | External collection precedes custody. External dispatch follows the required commit/witness evidence; it has no exactly-once guarantee. |
+| Declaration edit / recovery | Authority; own historized declarations, edit author's key introduced through H and valid for the proposed successor, unchanged descriptor residence. This is key-history validation, not an added admin/grant rule. | CURRENT H and exact cache/draft evidence; operation lock, durable intent and full-head CAS. Recovery proves predecessor and exact suffix. | Convenience edits require cache semantics to match history. Preparation now shares custody completion with fresh read/runtime capture. Vertex rename is already refused as a routine edit. |
+| Initialization / recovery | Explicit new Authority; signed physical genesis and own declaration genesis share lineage identity. | No pre-mint H; exclusive mint plus durable reserved initialization evidence and exact bootstrap reconciliation. | Several durable phases, not one global transaction. Recovery uses reserved evidence and does not mint a replacement identity. |
+| Projection sync | Attested descriptor; verify selected H before private maintenance. | Target fixed at captured H; actual P may advance further under another maintainer and must be reported honestly. | Catch-up only, including a physically absent projection; existing unwatermarked rows and inconsistent/foreign markers refuse. No rebuild, witness reset or custody mutation. |
+| Search sync | First capture selects declaration/spec; coordinator's second capture verifies that exact target. | First basis, coordinator H, fixed target and before/after FTS coverage remain separate. | Two captures are deliberate. The newer coordinator head must not silently enlarge the search corpus. |
+| Verify / export | Descriptor and custody prefix membership; no query snapshot/current P required. | Capture H; optional selected prefix must resolve to its exact hash and be fully structurally verified. | Ordinary attestation still checks available projection evidence. Verify does not claim authorship or full projection agreement. |
+| Restore-forward | Source normally attested; private receiver procedure proves actual older prefix and source containment. | Fixed source H/selected head, receiver full before-head, one exact-suffix CAS, post-append observation/audit. | Source and receiver keep their roles. Receiver projection is audited but not caught up. No raw bypass handle or lowered witness escapes. |
+
+## Mutation, outcome and ownership matrix
+
+These dimensions are deliberately separate: custody certainty, witness state,
+derived-state completion, and actions performed by this invocation. Similar
+meaning should have consistent SDK classification even when one operation
+returns a structured tier result and another raises an exception.
+
+| Operation | Mutations | Success / interruption evidence | Resource owner |
+| --- | --- | --- | --- |
+| Resolution | None beyond reading locator files. | Named descriptor is not proof of a live authority. | Resolver's file reads. |
+| Query / inspection / search | W only. | Typed basis on hits, misses and empty results; a refusal may follow an already-successful attestation. Some public readers currently leak engine error families. | Read context closes snapshot, query, ledger. Aggregate closes all captures, including partial construction failures. |
+| Preview | W; local signer loading only. | Captured admission/plan evidence; zero custody append or key mint. | Capture closes backend resources; plan is detached. |
+| Emit / batch | W, one custody append for non-no-op plan, witness, post-commit projection sync. | Actual Commit retained on known post-commit failure. Unknown outcome is not retried. No-op does not fabricate Commit. | Runtime executor and post-commit maintenance own their handles. |
+| Sources | W per capture, external collection, custody per tier, projection maintenance, optional external dispatch. | Collected, known-uncommitted, committed, unknown and dispatch outcomes remain distinct. An earlier tier can be durable when a later tier fails. | Coordinator owns captures/execution; failed/custom collector stream close policy needs verification. |
+| Declaration edit | W, lock/intent/temp/cache files, one custody append, witness, projection sync and cache publication. | Intent survives uncertain or incomplete commit. Exact old/cache checks prevent overwriting unrelated edits. | Coordinator closes backend handles and scopes the operation lock/publication files. |
+| Declaration recovery | W plus only reconciliation actions required by durable intent. | Original Commit is unavailable: `commit=None` is honest even if recovery proves completion. `file_written` means this invocation actually published the cache. | Recovery lock and coordinator resources. |
+| Initialization | Explicit SDK key creation when requested, intent, genesis mint, declaration append, witness, projection/cache publication. | Phase and reserved identity survive interruption. Success currently gives lineage/head/phase, not a universal initialization Commit. | SDK custody composition and engine initializer/recovery. |
+| Projection / search sync | W and derived-state writes only. | Target/before/observed-after distinguish completed work from unknown derived outcome; no custody Commit. `sync_target` currently bypasses an existing SDK normalization mapping. | Registry-owned maintainer, snapshot where needed, query, ledger. |
+| Verify | W only. | Captured and verified heads; structural verification coverage is explicit. | Query/ledger handles closed even without a query snapshot. |
+| Export | W plus new destination artifact. | Complete bytes staged/fsynced, published exclusively, then directory synced. Source error preserves its identity; publication error states whether the complete artifact became visible. | Captured stream owns iterator/query/ledger; SDK owns output/temp cleanup. |
+| Restore-forward | Source W, exact receiver custody suffix, receiver witness on success. | No-op or actual Commit; unknown and known-committed-incomplete are distinct. A failed call does not imply receiver unchanged. | Private coordinator closes all source/receiver handles. |
+
+## Prioritized consistency worklist
+
+“Source-confirmed” means the divergent code paths were inspected, not that a
+new adversarial failing test was executed in this documentation pass. Each
+implementation item starts with a public reproduction or a focused contract
+test where the question concerns an injected backend.
+
+| ID / order | Finding and disposition | Bounded next change and acceptance |
+| --- | --- | --- |
+| C1 / implemented; review tracked separately | `resolve_entity`, `read_timeline`, and `inspect_declaration` accept optional registry injection. Timeline forwards it across local aggregation and effective-root member capture, retaining the opened root. | See the [C1 report](consistency-c1-2026-09-06.md) for registered opaque-backend and refusal coverage, validation and review status. Existing entity/inspection aggregate restrictions remain; C7 is separate. |
+| C2 / evidence design before normalization | Source-confirmed: `sync_target` bypasses `ProjectionSyncError -> ProjectionOutcomeUnknown`; ordinary reads also vary in normalization. Maintenance wrappers can contain both adapter preflight failures and uncertain effects; SDK serialization can lose the underlying cause. | Define phase/cause/effect evidence before expanding normalization. Preserve known pre-mutation refusal only when established; never infer it just from a nested exception class. Retain source/cause type, IDs, H/Commit, cancellation and admission detail. Declaration preparation currently wraps `ProjectionBehind` in `DeclarationPreparationRefused` with cause; preserve that evidence while deciding future classification. Keep structured source-tier results. A sync coverage boolean is not full projection-content audit; equality with target is not required when another maintainer legitimately advanced further. |
+| C3 / implemented in slice 1 | Fresh read, runtime capture and declaration preparation now use one custody-completion rule before clamping: lineage, membership, returned coordinate, equal-height full-head agreement. | See the [slice report](consistency-slice1-2026-09-06.md) for regressions and review. The same-height comparison checks two custody answers, not projected row contents. Continuation token/generation policy is retained; extending the helper to the resumed snapshot watermark remains a bounded follow-up, with prior H/P and legitimate advance preserved. |
+| C4 / next | Source-confirmed: SDK `CustodyCredentialProvider.key_dir` is accepted and unused. | Recommend clear refusal of non-None configuration until a consistent override exists; keep ordinary default behavior. Document compatibility impact. The later mapped provider must cover public-key registration and all signing domains. |
+| C5 / next | Confirmed architectural ambiguity: local vertex ticks and same-named loops share production/interpretation keys, even without a loop boundary trigger. | Recommend initially refusing every loop/vertex name equality in supported Arrival runtime materialization/planning and proposed declarations; explicitly document this compatibility restriction. Include passive/count/reset/boundary cases. Preserve evidence reads/export; later relaxation requires proof of unambiguous interpretation. See D4. |
+| C6 / design | Remove/recreate and incompatible same-name boundary edits have no incarnation evidence; hydration associates historical ticks by current name. Credential requests are still locator-shaped. | Define continuity/refusal before automatic rename/reset. Preserve fixed facts and existing vertex-rename refusal. Specify the D0 observer/domain/custody-scope request and bootstrap verification context before persisted key mappings; do not bind all authors to the genesis observer or require founding observer to equal vertex name. See D0–D5. |
+| C7 / bounded scope decision | Inspection can report aggregate structure in its DTO, but Arrival aggregate inspection is blocked by single-store guards. | Admit local aggregate shape at descriptor resolution while preserving explicit role checks, then permit bounded effective-root inspection. Both guards need addressing. Inspect root topology without opening members for a fictitious global basis; specify storeless-root evidence separately and test both directions of local/effective topology disagreement. |
+| C8a / implemented in slice 1 | Initialization now bare re-raises `normalized is exc` after existing intent-path enrichment. | Regressions retain identity, original cause, existing SDK details, intent path and interrupts; newly mapped exceptions still chain from the engine cause. See the [slice report](consistency-slice1-2026-09-06.md). |
+| C8b / next correctness slice | Root probes confirm custom collector streams remain unclosed on error/cancellation, and ID-factory failures are mislabeled as collector errors with mismatched fact/ID lengths. | Separate coordinator bookkeeping failures from collector outcomes; retain atomically paired fact/ID evidence. Specify owned-stream close on normal/error/cancel exits, preserving the primary exception if cleanup also fails. Do not claim erroneous lifecycle facts were durably appended: later strict pairing currently refuses mismatched lengths. |
+| C9 / after conformance | Legacy resolution/writer paths and stale docs remain competing public interpretations. | Finish SDK/minimal-CLI transition and retire legacy authority paths deliberately. Update docs/help with the supported API; do not implement new storage behavior in the CLI. |
+
+Projection preserve/rebuild recovery, empty-receiver exact import, foreign
+admission and descriptor adoption remain on the larger
+[completion worklist](completion-worklist-2026-09-05.md). They are not made
+available by consistency cleanup. Restore projection recovery still has a
+separate [design proposal](projection-recovery-correctness-design-2026-09-05.md).
+
+## Cross-operation acceptance scenarios
+
+Extend existing integration fixtures instead of reproducing implementation
+branches in isolated unit tests. These were acceptance targets from the initial audit. C3/C8a evidence now lives
+in the linked first-slice report; remaining scenarios still need their own
+implementation and validation.
+
+| Scenario | Existing coverage to build on | Added cross-operation assertion |
+| --- | --- | --- |
+| Emit/batch → fresh read | `test_arrival_emit.py`: emit/sync/current-read and batch-boundary/lookup tests. | Same actual Commit, admitted IDs, declaration interpretation and read prefix across one registry; post-commit projection failure remains distinguishable from no append. |
+| Declaration failure → recover → inspect/read/emit | `test_arrival_declarations.py`: interruption, exact suffix, cache drift, granted observer emission. | Public recovered result serializes independently, no invented Commit/cache write, and all subsequent operations use the recovered effective declaration. |
+| Concurrent projection advance → read/runtime/declaration prepare | Consumer continuation tests and runtime capture tests; declaration anchor regression. | Every path validates membership and equal-ordinal hash agreement before clamping to H; fabricated evidence refuses before signing/append. A legitimate later projection prefix still works and continuations retain their prior bound/generation rules. |
+| Sources → read and retry decision | `test_arrival_sources.py`: unknown, unwitnessed, projection and dispatch outcomes. | Public certainty matches persisted tiers; coordinator ID failure is not collector failure; fact/ID evidence stays paired. No recollection or dispatch replay inferred from a generic category; owned streams close under cancellation/errors without masking primary failures. |
+| Restore → verify → explicit sync → read | `test_arrival_restore.py` plus projection-maintenance tests. | Exact receiver prefix survives restoration, witness never lowers, structural verify matches selected head, and only explicit sync enables a formerly-behind CURRENT read. |
+| Export while source advances → inspect artifact | `test_arrival_export.py` and engine captured-export tests. | Artifact ends at selected full head with returned byte count/manifest; output-close failure cannot mask source failure. |
+| Same backend across SDK entrypoints | Existing fake-registry read fixtures. | Summary/facts/state/ticks/lookup/entity/timeline/inspection/search share injection and refusal behavior; serialization retains appropriate evidence. |
+| Identity move/change → sign/hydrate | Custody alias/flat-nested tests and runtime boundary-consumption tests. | Stable binding survives locator moves; unauthorized replacement key is not a rotation; collisions and incompatible reincarnations are explicit rather than inferred. |
+
+Inject failures before custody mutation, after a returned Commit, and during
+derived/cache/artifact publication. Assert persisted evidence as well as the
+returned result. Do not use an ordinal comparison as a substitute for exact
+prefix or row agreement.
+
+## Validation and completion boundary
+
+Sol ran the focused existing SDK read/aggregate/inspection/search/verify/export/
+restore suites: **56 passed**. This is current-behavior coverage; the newly
+identified gaps need targeted tests in their implementation slices. Root
+reviewed the strongest divergent call paths and reconciled agent conclusions,
+including ordinary-open projection checks and the existing vertex-rename
+restriction. That initial native audit was followed by one user-requested
+Fable 5.1 review at low effort. Root then ran six existing targeted maintenance/
+aggregate tests (all passed) and disposable synthetic basis/collector probes.
+Those probes establish interface behavior, not a reproduced attack against a
+live file backend. The [review triage](reviews/consistency-2026-09-06/primary-triage.md)
+records accepted findings, rejected suggestions, and the exact validation scope.
+The subsequent C3/C8a implementation is recorded in the first-slice report,
+including separate implementation reviews and regression results.
+
+Root's initial scope/link check is recorded in
+`/tmp/loops-arrival-consistency-2026-09-06/validation.json`; the review's final
+scope check is retained with its triage. No implementation,
+test, dependency, live-store, or live-key changes were part of that initial audit
+pass. The C3/C8a rows above now link to the separately authorized implementation;
+all remaining work and new identity capabilities remain recommendations.

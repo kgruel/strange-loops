@@ -1,0 +1,42 @@
+{
+  "engine": {
+    "passed": 2510,
+    "skipped": 1,
+    "seconds": 72.35
+  },
+  "sdk": {
+    "passed": 494,
+    "seconds": 17.95
+  },
+  "sign": {
+    "passed": 40,
+    "seconds": 5.2
+  },
+  "custody": {
+    "passed": 50,
+    "seconds": 0.27
+  },
+  "architecture": {
+    "passed": 101,
+    "seconds": 7.34
+  },
+  "minimal_cli": {
+    "passed": 8,
+    "seconds": 6.37,
+    "includes": "wheel smoke"
+  },
+  "migrate": {
+    "passed": 69,
+    "seconds": 0.98
+  },
+  "legacy_cli_signing": {
+    "passed": 32,
+    "reported_by": "Terra"
+  },
+  "root_red_green": {
+    "initial_export_recovery_regressions": "4 failures before fixes, passing after",
+    "dual_export_failure": "2 failures before preserving primary exception, passing after",
+    "empty_origin_hydration": "1 failure before nonempty owner check, passing after"
+  },
+  "lint": "Changed modules/tests pass Ruff under owning-package configurations; vertex.py retains preexisting UP017/SIM108 debt. Root combined invocation has first-party import classification mismatch for custody tests, not owning-package failure."
+}

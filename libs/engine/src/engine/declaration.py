@@ -64,8 +64,9 @@ Resolution contract (SPEC §9.2 Lineage, §9.5):
   :class:`~engine.witness.WitnessPosition` as ``at=`` (mutually exclusive with
   ``as_of``) and the cutoff is the receipt prefix ``arrival_ordinal <= at.ordinal`` rather
   than ``ts <= as_of``. Selection and replay now share one axis — the prefix is
-  chosen by arrival coordinate and replayed by arrival coordinate — so ``at`` no longer has to reconcile
-  two orderings; the ``as_of`` ts tie-break above governs that selector only. The
+  chosen by arrival coordinate and replayed by arrival coordinate — so ``at``
+  no longer has to reconcile two orderings; the ``as_of`` ts tie-break above
+  governs that selector only. The
   position is A10-verified against this store before its ordinal is applied
   (:func:`~engine.witness.verify_position_for_store`).
 
@@ -80,6 +81,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -93,10 +95,12 @@ from lang.document import (
     is_internal_kind,
 )
 
+from .arrival_contract import DeclarationAnchor, Fact, Head, NotAuthority
 from .residence import resolve_store_path
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from engine.witness import WitnessPosition
+    from lang.ast import VertexFile
 
 # ---------------------------------------------------------------------------
 # Tombstone vocabulary: which "*-defined" subject a "*-retired/-removed" row
@@ -184,12 +188,91 @@ def _read_own_lineage(conn: sqlite3.Connection) -> str | None:
     before the marker existed simply lack the table/row.
     """
     try:
-        row = conn.execute(
-            "SELECT value FROM store_meta WHERE key = 'own_lineage'"
-        ).fetchone()
+        row = conn.execute("SELECT value FROM store_meta WHERE key = 'own_lineage'").fetchone()
     except sqlite3.Error:
         return None
     return row[0] if row else None
+
+
+def validate_arrival_declaration_anchor(anchor: DeclarationAnchor, head: Head) -> None:
+    """Check derived declaration identity against independently captured custody.
+
+    An unadopted snapshot may have no anchor. Once a projection claims its own
+    lineage, it must supply that lineage's genesis on the same snapshot. This
+    validates identity, not the content or authorship of declaration rows.
+    """
+    if anchor.own_lineage is not None:
+        if anchor.own_lineage != head.lineage:
+            raise NotAuthority(
+                "projection declaration identity does not match captured Arrival lineage"
+            )
+        if anchor.genesis is None:
+            raise NotAuthority("projection declaration identity has no matching genesis")
+    if anchor.genesis is not None:
+        if anchor.genesis.id != head.lineage:
+            raise NotAuthority(
+                "projection declaration genesis does not match captured Arrival lineage"
+            )
+        if anchor.genesis.kind != DECL_GENESIS:
+            raise NotAuthority("projection declaration anchor is not a genesis fact")
+
+
+def resolve_declaration_documents_from_snapshot(
+    anchor: DeclarationAnchor, facts: list[Fact] | tuple[Fact, ...]
+) -> list[dict[str, Any]] | None | Unhistorized:
+    """Fold declaration documents from one already-bounded query snapshot.
+
+    This is the pure sibling of :func:`resolve_declaration_documents`. The
+    caller supplies internal facts through its query prefix and the exact
+    store-local identity anchor observed on that same transaction. It therefore
+    never opens SQLite, does not consult a vertex file, and never guesses which
+    ``_decl.genesis`` is self from rows that may have arrived by merge.
+    """
+    internal = sorted(
+        (fact for fact in facts if is_internal_kind(fact.kind)),
+        key=lambda fact: (fact.arrival_ordinal, fact.arrival_seq),
+    )
+    if anchor.own_lineage is None:
+        if any(fact.kind == DECL_GENESIS for fact in internal):
+            raise UnadoptedLineage(
+                "declaration genesis rows occur in this snapshot without an "
+                "own_lineage identity marker; facts cannot identify self"
+            )
+        return None
+    genesis = anchor.genesis
+    if genesis is None or genesis.id != anchor.own_lineage or genesis.kind != DECL_GENESIS:
+        raise DeclarationResolutionError(
+            f"own_lineage marker {anchor.own_lineage!r} has no matching "
+            "_decl.genesis row in this snapshot"
+        )
+    payload = genesis.payload
+    protocol = payload.get("protocol", 1)
+    if protocol > DECLARATION_PROTOCOL_VERSION:
+        raise UnsupportedProtocol(
+            f"genesis protocol {protocol} exceeds supported {DECLARATION_PROTOCOL_VERSION}"
+        )
+    if genesis.arrival_ordinal > max((fact.arrival_ordinal for fact in internal), default=-1):
+        return Unhistorized(list(payload.get("documents", ())))
+
+    docs: dict[tuple[str, str], dict[str, Any]] = {}
+    for document in payload.get("documents", ()):
+        docs[(document["kind"], document["subject"])] = document
+    for fact in internal:
+        if fact.kind == DECL_GENESIS:
+            continue
+        row_payload = fact.payload
+        if row_payload.get("lineage") != anchor.own_lineage:
+            continue
+        if fact.kind in _TOMBSTONE_OF_DEFINED:
+            docs.pop((_TOMBSTONE_OF_DEFINED[fact.kind], row_payload.get("subject")), None)
+        elif fact.kind in _DEFINED_KINDS:
+            subject = row_payload.get("subject")
+            docs[(fact.kind, subject)] = {
+                "kind": fact.kind,
+                "subject": subject,
+                "payload": row_payload.get("payload", {}),
+            }
+    return list(docs.values())
 
 
 class StoreBusy(DeclarationResolutionError):
@@ -202,9 +285,7 @@ class StoreBusy(DeclarationResolutionError):
     """
 
 
-def _open_readonly(
-    store_path: Path, *, timeout: float = 5.0
-) -> sqlite3.Connection | None:
+def _open_readonly(store_path: Path, *, timeout: float = 5.0) -> sqlite3.Connection | None:
     """Open ``store_path`` read-only, or None if it is not a usable store.
 
     Read-only (URI ``mode=ro``) so declaration resolution never mutates a
@@ -237,8 +318,9 @@ def resolve_declaration_documents(
       is unchanged (module docstring).
     - ``at`` — a **witness prefix** (:class:`~engine.witness.WitnessPosition`):
       the ``_decl`` rows this store had *received* at that position
-      (``arrival_ordinal <= at.ordinal``), replayed in arrival order (``arrival_ordinal, arrival_seq`` ascending) —
-      the same axis the prefix is selected on. Late arrivals do not rewrite an
+      (``arrival_ordinal <= at.ordinal``), replayed in arrival order
+      (``arrival_ordinal, arrival_seq`` ascending) — the same axis the prefix
+      is selected on. Late arrivals do not rewrite an
       earlier position; this is the §9.3 cursor default. A
       position strictly inside an atomic receipt group is refused
       (:class:`~engine.witness.MidReceiptGroupPosition`) — the guard runs at this
@@ -344,9 +426,7 @@ def resolve_declaration_documents(
                     "matching _decl.genesis row — the store's identity record "
                     "is corrupt (marker without its genesis)"
                 )
-            genesis_id, genesis_ordinal, genesis_ts, genesis_payload_text = (
-                selected[0]
-            )
+            genesis_id, genesis_ordinal, genesis_ts, genesis_payload_text = selected[0]
         else:
             # No marker + genesis rows present. Facts alone CANNOT distinguish
             # a pre-marker own genesis from a merged-foreign one — a singleton
@@ -504,6 +584,7 @@ def load_declaration_status(
     # back a vertex whose adapter designation had silently reverted to suffix
     # inference — and nothing downstream would report that.
     backend_field = file_ast.store_backend
+    location_field = file_ast.store_location
     if store_field is None:
         return _finish(file_ast, "file-pre-genesis")
 
@@ -512,11 +593,19 @@ def load_declaration_status(
         return _finish(file_ast, "file-pre-genesis")
 
     docs = resolve_declaration_documents(
-        store_path, as_of=as_of, at=at, timeout=store_timeout, on_locked=on_locked,
+        store_path,
+        as_of=as_of,
+        at=at,
+        timeout=store_timeout,
+        on_locked=on_locked,
     )
     if isinstance(docs, list):
         resolved = documents_to_vertex(
-            docs, path=vertex_path, store=store_field, store_backend=backend_field
+            docs,
+            path=vertex_path,
+            store=store_field,
+            store_backend=backend_field,
+            store_location=location_field,
         )
         return _finish(_reattach_ingress(resolved, file_ast), "store")
     if isinstance(docs, Unhistorized):
@@ -525,6 +614,7 @@ def load_declaration_status(
             path=vertex_path,
             store=store_field,
             store_backend=backend_field,
+            store_location=location_field,
         )
         return _finish(_reattach_ingress(resolved, file_ast), "unhistorized")
     return _finish(file_ast, "file-pre-genesis")
@@ -580,23 +670,29 @@ def declaration_generation(
     from lang.document import vertex_to_documents
 
     ast, status = load_declaration_status(
-        vertex_path, as_of=as_of, at=at, store_timeout=store_timeout,
+        vertex_path,
+        as_of=as_of,
+        at=at,
+        store_timeout=store_timeout,
     )
     try:
         docs = vertex_to_documents(ast)
         canonical = json.dumps(
-            [d.as_json() for d in docs], sort_keys=True, separators=(",", ":"),
+            [d.as_json() for d in docs],
+            sort_keys=True,
+            separators=(",", ":"),
         )
-        fingerprint: str | None = (
-            "sha256:" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()
-        )
+        fingerprint: str | None = "sha256:" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()
     except Exception:
         # A resolved-but-unprojectable declaration must not abort a review —
         # degrade the ONE field honestly rather than crash the read.
         fingerprint = None
 
     lineage, decl_head = _decl_lineage_and_head(
-        vertex_path, as_of=as_of, at=at, timeout=store_timeout,
+        vertex_path,
+        as_of=as_of,
+        at=at,
+        timeout=store_timeout,
     )
     return {
         "status": status,
@@ -732,8 +828,11 @@ def load_declaration(
     AST but erases the provenance.
     """
     ast, _status = load_declaration_status(
-        vertex_path, as_of=as_of, at=at,
-        store_timeout=store_timeout, on_locked=on_locked,
+        vertex_path,
+        as_of=as_of,
+        at=at,
+        store_timeout=store_timeout,
+        on_locked=on_locked,
     )
     return ast
 
@@ -749,36 +848,22 @@ class SourceDrift(DeclarationResolutionError):
     """
 
 
-def verify_source_pins(vertex_path: Path) -> None:
-    """Refuse to run over drifted pinned sources (SPEC §9.2, no-auto-enact).
+def verify_source_pins_from_documents(
+    documents: Sequence[Mapping[str, Any]], base_dir: Path
+) -> None:
+    """Verify source file pins using already-bounded declaration documents.
 
-    For every ``source-defined`` document carrying a ``content_sha256`` (or a
-    ``from.params_sha256``), hash the referenced file's current bytes and
-    raise :class:`SourceDrift` on mismatch. Pre-genesis stores (no documents)
-    and unpinned rows (legacy genesis, missing files at absorb) are no-ops —
-    the pin gate only guards claims the declaration actually makes.
+    This is the pure Arrival runtime boundary: callers supply the declaration
+    documents captured from their attested snapshot and the locator's ingress
+    directory. It never opens a store or resolves declaration state again.
     """
     import hashlib
 
-    from lang import parse_vertex_file
     from lang.document import DECL_SOURCE_DEFINED
-
-    file_ast = parse_vertex_file(vertex_path)
-    store_field = file_ast.store
-    if store_field is None:
-        return
-    store_path = resolve_store_path(store_field, vertex_path)
-    if not store_path.exists():
-        return
-    docs = resolve_declaration_documents(store_path)
-    if not isinstance(docs, list):
-        return
-
-    base = vertex_path.parent
 
     def _check(ref: str, pinned: str, what: str) -> None:
         path = Path(ref)
-        candidate = path if path.is_absolute() else (base / path)
+        candidate = path if path.is_absolute() else (base_dir / path)
         try:
             current = hashlib.sha256(candidate.read_bytes()).hexdigest()
         except OSError:
@@ -794,19 +879,73 @@ def verify_source_pins(vertex_path: Path) -> None:
                 "auto-enacted)"
             )
 
-    for d in docs:
-        if d.get("kind") != DECL_SOURCE_DEFINED:
+    for document in documents:
+        if document.get("kind") != DECL_SOURCE_DEFINED:
             continue
-        payload = d.get("payload", {})
+        payload = document.get("payload", {})
         pinned = payload.get("content_sha256")
         if pinned:
             ref = payload.get("template") or payload.get("path")
             if ref:
                 _check(ref, pinned, "source")
-        from_d = payload.get("from") or {}
-        params_pin = from_d.get("params_sha256")
-        if params_pin and from_d.get("path"):
-            _check(from_d["path"], params_pin, "params file")
+        from_document = payload.get("from") or {}
+        params_pin = from_document.get("params_sha256")
+        if params_pin and from_document.get("path"):
+            _check(from_document["path"], params_pin, "params file")
+
+
+def effective_declaration_from_documents(
+    documents: Sequence[Mapping[str, Any]],
+    locator: VertexFile,
+    *,
+    verify_pins: bool = True,
+) -> VertexFile:
+    """Rebuild effective declaration state using only bounded documents.
+
+    Residence and source environment ingress come from the already-parsed
+    locator. Source structure remains document-authoritative, and optional pin
+    verification reads source files only after the bounded declaration has
+    selected their expected hashes. No projection or declaration store opens.
+    """
+    import copy
+
+    resolved = documents_to_vertex(
+        copy.deepcopy(list(documents)),
+        path=locator.path,
+        store=locator.store,
+        store_backend=locator.store_backend,
+        store_location=locator.store_location,
+    )
+    effective = _reattach_ingress(resolved, locator)
+    if verify_pins:
+        base_dir = locator.path.parent if locator.path is not None else Path.cwd()
+        verify_source_pins_from_documents(documents, base_dir)
+    return effective
+
+
+def verify_source_pins(vertex_path: Path) -> None:
+    """Refuse to run over drifted pinned sources (SPEC §9.2, no-auto-enact).
+
+    For every ``source-defined`` document carrying a ``content_sha256`` (or a
+    ``from.params_sha256``), hash the referenced file's current bytes and
+    raise :class:`SourceDrift` on mismatch. Pre-genesis stores (no documents)
+    and unpinned rows (legacy genesis, missing files at absorb) are no-ops —
+    the pin gate only guards claims the declaration actually makes.
+    """
+    from lang import parse_vertex_file
+
+    file_ast = parse_vertex_file(vertex_path)
+    store_field = file_ast.store
+    if store_field is None:
+        return
+    store_path = resolve_store_path(store_field, vertex_path)
+    if not store_path.exists():
+        return
+    docs = resolve_declaration_documents(store_path)
+    if not isinstance(docs, list):
+        return
+
+    verify_source_pins_from_documents(docs, vertex_path.parent)
 
 
 def _reattach_ingress(resolved, file_ast):
@@ -850,9 +989,7 @@ def _reattach_ingress(resolved, file_ast):
     resolved_counts: dict[tuple[int, str], int] = {}
     for bi, block in enumerate(resolved.sources_blocks):
         for src in block.sources:
-            resolved_counts[(bi, src.command)] = (
-                resolved_counts.get((bi, src.command), 0) + 1
-            )
+            resolved_counts[(bi, src.command)] = resolved_counts.get((bi, src.command), 0) + 1
 
     from lang.ast import InlineSource, SourcesBlock
 
@@ -870,26 +1007,25 @@ def _reattach_ingress(resolved, file_ast):
                 # No cross-block fallback: a moved source resolves empty
                 # until re-absorbed (a fallback with block-local ordinals
                 # cross-wired secrets across blocks — branch-review round 2).
-                block_stable = (
-                    resolved_counts.get((bi, src.command))
-                    == file_seen.get((bi, src.command))
+                block_stable = resolved_counts.get((bi, src.command)) == file_seen.get(
+                    (bi, src.command)
                 )
-                env_map = (
-                    by_block.get((bi, src.command, nth), {})
-                    if block_stable
-                    else {}
-                )
-                env = tuple(
-                    (k, v or env_map.get(k, ""))
-                    for k, v in src.env
-                )
+                env_map = by_block.get((bi, src.command, nth), {}) if block_stable else {}
+                env = tuple((k, v or env_map.get(k, "")) for k, v in src.env)
                 if env != src.env:
                     changed = True
                     src = InlineSource(
-                        command=src.command, kind=src.kind, observer=src.observer,
-                        every=src.every, on=src.on, format=src.format,
-                        timeout=src.timeout, origin=src.origin, env=env,
-                        parse=src.parse, path=src.path,
+                        command=src.command,
+                        kind=src.kind,
+                        observer=src.observer,
+                        every=src.every,
+                        on=src.on,
+                        format=src.format,
+                        timeout=src.timeout,
+                        origin=src.origin,
+                        env=env,
+                        parse=src.parse,
+                        path=src.path,
                     )
             new_sources.append(src)
         new_blocks.append(SourcesBlock(mode=block.mode, sources=tuple(new_sources)))
@@ -905,6 +1041,7 @@ def _reattach_ingress(resolved, file_ast):
         loops=resolved.loops,
         store=resolved.store,
         store_backend=resolved.store_backend,
+        store_location=resolved.store_location,
         discover=resolved.discover,
         sources=resolved.sources,
         vertices=resolved.vertices,

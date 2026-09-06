@@ -1037,8 +1037,8 @@ def test_read_ticks_name_filter_no_match_returns_empty(
     path (see KNOWN BUG note below).
     """
     vertex_path, _ = populated_vertex
-    assert read_ticks(vertex_path, name="not_a_real_tick_mark") == []
-    assert isinstance(read_ticks(vertex_path), list)
+    assert read_ticks(vertex_path, name="not_a_real_tick_mark").items == []
+    assert isinstance(read_ticks(vertex_path).items, list)
 
 
 def test_read_ticks_on_real_boundary_fire_serializes_ticks(tmp_path: Path) -> None:
@@ -1063,8 +1063,8 @@ def test_read_ticks_on_real_boundary_fire_serializes_ticks(tmp_path: Path) -> No
     assert receipt.tick_mark == "event"
 
     ticks = read_ticks(vertex_path, name="event")
-    assert len(ticks) == 1
-    assert ticks[0]["name"] == "event"
+    assert len(ticks.items) == 1
+    assert ticks.items[0]["name"] == "event"
 
 
 @pytest.fixture
@@ -1097,16 +1097,16 @@ def test_read_ticks_name_filter_selects_one_of_two_marks(two_mark_vertex: Path) 
     """With two real tick marks present, the `name` argument must select
     exactly one — a dropped or None-ed `name=` passthrough returns both.
     """
-    assert {t["name"] for t in read_ticks(two_mark_vertex)} == {"alpha", "beta"}
-    assert [t["name"] for t in read_ticks(two_mark_vertex, name="alpha")] == ["alpha"]
-    assert [t["name"] for t in read_ticks(two_mark_vertex, name="beta")] == ["beta"]
+    assert {t["name"] for t in read_ticks(two_mark_vertex).items} == {"alpha", "beta"}
+    assert [t["name"] for t in read_ticks(two_mark_vertex, name="alpha").items] == ["alpha"]
+    assert [t["name"] for t in read_ticks(two_mark_vertex, name="beta").items] == ["beta"]
 
 
 def test_read_ticks_window_starts_at_zero_not_one(two_mark_vertex: Path) -> None:
     """The tick window's lower bound is 0.0, so a tick sealed at ts=0.5 is
     inside it. A bound of 1.0 would silently drop that tick.
     """
-    assert 0.5 in {t["ts"] for t in read_ticks(two_mark_vertex)}
+    assert 0.5 in {t["ts"] for t in read_ticks(two_mark_vertex).items}
 
 
 def test_read_ticks_discover_aggregate_reads_member_ticks(
@@ -1119,13 +1119,13 @@ def test_read_ticks_discover_aggregate_reads_member_ticks(
     parent, _ = discover_aggregate
 
     ticks = read_ticks(parent)
-    assert len(ticks) == 3
-    assert all(isinstance(t, dict) for t in ticks)
-    assert {t["name"] for t in ticks} == {"task", "note"}
-    assert 0.5 in {t["ts"] for t in ticks}
+    assert len(ticks.items) == 3
+    assert all(isinstance(t, dict) for t in ticks.items)
+    assert {t["name"] for t in ticks.items} == {"task", "note"}
+    assert 0.5 in {t["ts"] for t in ticks.items}
 
-    assert [t["name"] for t in read_ticks(parent, name="note")] == ["note"]
-    assert read_ticks(parent, name="no_such_mark") == []
+    assert [t["name"] for t in read_ticks(parent, name="note").items] == ["note"]
+    assert read_ticks(parent, name="no_such_mark").items == []
 
 
 def test_read_ticks_combine_aggregate_reads_member_ticks(tmp_path: Path) -> None:
@@ -1154,7 +1154,7 @@ def test_read_ticks_combine_aggregate_reads_member_ticks(tmp_path: Path) -> None
     )
 
     ticks = read_ticks(parent)
-    assert [t["name"] for t in ticks] == ["event"]
+    assert [t["name"] for t in ticks.items] == ["event"]
 
 
 def test_read_ticks_jsonl_vertex_reads_through_derived_index(tmp_path: Path) -> None:
@@ -1175,7 +1175,7 @@ def test_read_ticks_jsonl_vertex_reads_through_derived_index(tmp_path: Path) -> 
         encoding="utf-8",
     )
     emit_fact(vertex_path, "event", {"n": 1}, observer="alice")
-    assert [t["name"] for t in read_ticks(vertex_path)] == ["event"]
+    assert [t["name"] for t in read_ticks(vertex_path).items] == ["event"]
 
 
 # =============================================================================
@@ -1202,10 +1202,10 @@ def test_read_fact_by_id_aggregate_combine(tmp_path: Path) -> None:
     )
 
     fact = read_fact_by_id(parent, r.id)
-    assert fact is not None
-    assert fact["id"] == r.id
+    assert fact.fact is not None
+    assert fact.fact["id"] == r.id
 
-    assert read_fact_by_id(parent, "00000000000000000000000000") is None
+    assert read_fact_by_id(parent, "00000000000000000000000000").fact is None
 
 
 def test_read_fact_by_id_discover_aggregate(
@@ -1217,10 +1217,10 @@ def test_read_fact_by_id_discover_aggregate(
     """
     parent, receipts = discover_aggregate
     fact = read_fact_by_id(parent, receipts[0].id)
-    assert fact is not None
-    assert fact["id"] == receipts[0].id
-    assert fact["kind"] == "task"
-    assert read_fact_by_id(parent, "00000000000000000000000000") is None
+    assert fact.fact is not None
+    assert fact.fact["id"] == receipts[0].id
+    assert fact.fact["kind"] == "task"
+    assert read_fact_by_id(parent, "00000000000000000000000000").fact is None
 
 
 def test_read_fact_by_id_jsonl_vertex_recovers_index_from_canonical(
@@ -1240,9 +1240,9 @@ def test_read_fact_by_id_jsonl_vertex_recovers_index_from_canonical(
     info.index_path.unlink()
 
     fact = read_fact_by_id(jsonl_vertex, receipt.id)
-    assert fact is not None
-    assert fact["id"] == receipt.id
-    assert fact["kind"] == "entry"
+    assert fact.fact is not None
+    assert fact.fact["id"] == receipt.id
+    assert fact.fact["kind"] == "entry"
 
 
 # =============================================================================

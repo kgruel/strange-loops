@@ -1,0 +1,45 @@
+from pathlib import Path
+import hashlib
+import json
+import re
+import shutil
+import subprocess
+
+root=Path('/Users/kaygee/Code/loops-wt/arrival-finish')
+base=Path('/tmp/loops-arrival-consistency-slice1-2026-09-06')
+out=root/'docs/scratch/arrival-break/reviews/consistency-slice1-2026-09-06'
+subprocess.run(['python3',str(base/'check_scope.py')],check=True,capture_output=True)
+scope=json.loads((base/'scope-check.json').read_text())
+reviews=[]
+for directory in (out,out/'followup'):
+    state=json.loads((directory/'status.json').read_text())
+    job=state['jobs'][0]
+    assert job['status']=='reviewed-awaiting-triage',job['status']
+    production={f:h for f,h in job['sources'].items() if not f.startswith('docs/')}
+    drift=[f for f,h in production.items() if hashlib.sha256((root/f).read_bytes()).hexdigest()!=h]
+    reviews.append(dict(directory=str(directory.relative_to(root)),effort=job['effort'],finished_at=job['finished_at'],model_usage=job['model_usage'],post_review_code_drift=drift,launch_source_drift=job['source_drift']))
+assert reviews[-1]['post_review_code_drift']==[]
+scope['reviews']=reviews
+scope['status']='complete'
+scope['pending_reviews']=0
+scope['validation']={'engine_passed':2528,'engine_skipped':1,'sdk_passed':497,'architecture_passed':101,'initializer_passed':11,'real_file_concurrency_passed':3,'ruff':'changed source/tests pass; preexisting head-seam docstring E501 at line 23 unchanged'}
+documents=[root/'docs/scratch/arrival-break'/f for f in ('consistency-contract-matrix-2026-09-06.md','consistency-slice1-2026-09-06.md','consistency-slice1-validation-2026-09-06.md')]+[out/'primary-triage.md']
+broken=[]
+count=0
+for p in documents:
+    for ref in re.findall(r'\]\(([^)]+)\)',p.read_text()):
+        if ref.startswith(('http:','https:','#','mailto:')):continue
+        target=ref.split('#')[0]
+        if not target:continue
+        count+=1
+        if not (p.parent/target).exists():broken.append({'file':str(p),'link':ref})
+scope['local_links_checked']=count
+scope['broken_links']=broken
+assert not broken,broken
+assert scope['main_status']==''
+assert scope['diff_check']==0
+assert scope['removed']==[]
+(out/'scope-check.json').write_text(json.dumps(scope,indent=2)+'\n')
+(out/'triage-status.json').write_text(json.dumps(dict(status='complete',pending_reviews=0,source_review='final follow-up code hashes unchanged',validation=scope['validation']),indent=2)+'\n')
+shutil.copyfile(base/'finalize_evidence.py',out/'finalize-evidence.py.txt')
+print(json.dumps({'status':'complete','code_files_changed':len(scope['non_doc_changed']),'links':count,'broken_links':broken,'review_code_drift':reviews[-1]['post_review_code_drift'],'main_clean':True,'validation':scope['validation']}))

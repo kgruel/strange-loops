@@ -150,18 +150,20 @@ class Loop:
             since=self._period_start,
             run=self.boundary_run,
         )
+        self.replay_boundary()
+
+        return tick
+
+    def replay_boundary(self) -> None:
+        """Apply a recorded boundary's post-fire state without making a Tick."""
         if self.reset:
             self._projection.reset(copy.deepcopy(self._initial_snapshot))
             self._period_start = None
-
-        # Handle count-based boundary reset
         if self.boundary_mode == "every":
             self._count_since_boundary = 0
         elif self.boundary_mode == "after":
             self._count_since_boundary = 0
             self._boundary_exhausted = True
-
-        return tick
 
     @property
     def state(self) -> Any:

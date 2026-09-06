@@ -58,10 +58,12 @@ from contextlib import contextmanager, suppress
 from dataclasses import dataclass, replace
 from pathlib import Path
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any
 
+from engine.credentials import CredentialProvider, WriteCredentials
 from engine.declaration import _read_own_lineage
 from engine.witness import GENESIS_SENTINEL, WitnessPosition
+
 from .jsonl_store import resolved_index
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -148,40 +150,6 @@ class ReceiveCommittedError(HandleError):
             f"fact {fact_id!r} committed but the boundary/tick step failed: "
             f"{cause!r} — the fact landed; do not retry as uncommitted"
         )
-
-
-# ---------------------------------------------------------------------------
-# S3 write credentials — operation-fresh signers, never frozen at handle build.
-# ---------------------------------------------------------------------------
-
-
-@dataclass(frozen=True)
-class WriteCredentials:
-    """The signers for one write, fetched fresh at the moment of the write.
-
-    ``tick_signer`` (commitment digest -> signature) and ``fact_signer``
-    (observer, content digest -> signature | None) are the same opaque callables
-    the store constructor takes — but supplied per-operation rather than cached
-    for the handle's lifetime. ``None`` on either = unsigned for that axis
-    (honest NULL, a pre-signature or per-observer era).
-    """
-
-    tick_signer: Callable[[str], str] | None = None
-    fact_signer: Callable[[str, str], str | None] | None = None
-
-
-class CredentialProvider(Protocol):
-    """Supplies :class:`WriteCredentials` fresh for each write.
-
-    Operation-fresh lookup is mandatory: caching signer callables for the handle
-    lifetime wedges a process after key creation or rotation (tasked's
-    ``substrate.py`` lesson — a handle-lifetime cache froze key material at
-    startup; a key minted/rotated after start left ``tick_signer`` ``None`` →
-    ``UnsignedTickInSignedEra`` on every boundary until restart). The handle
-    calls ``for_write`` at the moment of each write, never at open.
-    """
-
-    def for_write(self, vertex: Path) -> WriteCredentials: ...
 
 
 # ---------------------------------------------------------------------------
@@ -848,7 +816,9 @@ class VertexHandle:
         if self._probe is None:
             # Storeless / nonexistent store: bare head reconstruction.
             fold, status = self._reconstruct(None)
-            store_str = str(self._store_path) if self._store_path is not None else str(self._vertex_path)
+            store_str = (
+                str(self._store_path) if self._store_path is not None else str(self._vertex_path)
+            )
             position = WitnessPosition(
                 fact_id=GENESIS_SENTINEL, arrival_lineage=None, ordinal=-1, seq=0, lineage=None,
                 unadopted=True, anchor=None, store=store_str,

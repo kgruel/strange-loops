@@ -1,0 +1,83 @@
+{
+  "due_at": "2026-09-06T14:58:45.325869+00:00",
+  "model": "claude-fable-5-1[1m]",
+  "effort": "low",
+  "worktree": "/Users/kaygee/Code/loops-wt/arrival-finish",
+  "results": "/Users/kaygee/Code/loops-wt/arrival-finish/docs/scratch/arrival-break/reviews/remediation-2026-09-06/custody-and-followup",
+  "jobs": [
+    {
+      "name": "custody-and-followup",
+      "packet": "/Users/kaygee/Code/loops-wt/arrival-finish/docs/scratch/arrival-break/reviews/remediation-2026-09-06/custody-and-followup/custody-and-followup-prompt.txt",
+      "sha256": "688a491283d6e1cdc44bac1cd90b89c94f703211e7bf7346b1a0fb03dcea7622",
+      "sources": {
+        "libs/engine/src/engine/arrival_contract.py": "4859b8935a34c4ee08fb0cd75064bdd1360ce85e43647263ae08be86ddef2a1d",
+        "libs/custody/src/custody/signing.py": "b4870a266d4fb5c571e0056a5b6553b782f718b214d73c316d0557c460aa4929",
+        "libs/sign/src/sign/ed25519.py": "73b912ddf1b281ad2dedf02d33af02c236731af70014f3393b240096c501bb83",
+        "libs/custody/tests/test_signing.py": "dbdfaae7fdba5c66671e92a9b089c9be9061c343d92a274567f687e85426219d",
+        "libs/sign/tests/test_ed25519.py": "30b470457bfdf147ca411636c1f5fda50e9b6dd0b23bf006e88a041069858f35",
+        "libs/sdk/src/sdk/transfer.py": "ac5d0e8d596c5cc281f5db4aa94ffea686cb4bf11ac9f4c85522a2d109ea29b7",
+        "libs/sdk/tests/test_arrival_export.py": "b2c80617574686b80a60d740415f2b60af39e54ac0b4123ecddd64dafe6c42e0",
+        "libs/sdk/src/sdk/errors.py": "dbb3b3352a1d713445476b810271b15082b7fbbb1fd1de49cd611a4439f32c68",
+        "libs/engine/src/engine/vertex.py": "acf72ed52646de8132d250a2d9c909eef8889ee8e919a1c769472eb844c21b28",
+        "libs/engine/tests/test_runtime_boundary_consumption.py": "69da5bee807b1a440557ea7b6c2aaa31bee140125e3afbc417aa1f03da987790"
+      },
+      "status": "reviewed-awaiting-triage",
+      "packet_characters": 84227,
+      "started_at": "2026-09-06T14:58:45.357564+00:00",
+      "effort": "low",
+      "source_drift": [],
+      "command": [
+        "/Users/kaygee/.local/bin/claude",
+        "-p",
+        "--safe-mode",
+        "--model",
+        "claude-fable-5-1[1m]",
+        "--effort",
+        "low",
+        "--no-session-persistence",
+        "--tools",
+        "",
+        "--output-format",
+        "json"
+      ],
+      "returncode": 0,
+      "model_usage": {
+        "claude-haiku-4-5-20251001": {
+          "inputTokens": 26871,
+          "outputTokens": 12,
+          "cacheReadInputTokens": 0,
+          "cacheCreationInputTokens": 0,
+          "webSearchRequests": 0,
+          "costUSD": 0.026931,
+          "contextWindow": 200000,
+          "maxOutputTokens": 32000,
+          "thinkingTokens": 0,
+          "canonicalModel": "claude-haiku-4-5",
+          "provider": "firstParty",
+          "costBasis": "list"
+        },
+        "claude-fable-5-1": {
+          "inputTokens": 2,
+          "outputTokens": 10237,
+          "cacheReadInputTokens": 3264,
+          "cacheCreationInputTokens": 35576,
+          "webSearchRequests": 0,
+          "costUSD": 1.2242060000000001,
+          "contextWindow": 1000000,
+          "maxOutputTokens": 64000,
+          "thinkingTokens": 8408,
+          "canonicalModel": "claude-fable-5-1",
+          "provider": "firstParty",
+          "costBasis": "list"
+        }
+      },
+      "response_subtype": "success",
+      "finished_at": "2026-09-06T15:00:58.463031+00:00"
+    }
+  ],
+  "status": "reviews-finished-awaiting-triage",
+  "pid": 55486,
+  "updated_at": "2026-09-06T15:00:58.463038+00:00",
+  "started_at": "2026-09-06T14:58:45.357330+00:00",
+  "finished_at": "2026-09-06T15:00:58.463805+00:00"
+}

@@ -45,6 +45,7 @@ only-include = [
     "libs/sign/src/sign",
     "libs/store/src/store",
     "apps/loops/src/loops",
+    "apps/loops-min/src/loops_min",
     "README.md",
     "LICENSE",
 ]
@@ -60,6 +61,7 @@ packages = [
     "libs/sign/src/sign",
     "libs/store/src/store",
     "apps/loops/src/loops",
+    "apps/loops-min/src/loops_min",
 ]
 
 # The root runs the tests that belong to no single package — the architecture
@@ -86,4 +88,5 @@ members = [
     "libs/sign",
     "libs/store",
     "apps/loops",
+    "apps/loops-min",
 ]

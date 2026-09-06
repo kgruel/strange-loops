@@ -1,0 +1,28 @@
+"""Real SDK recovery after cache publication; disposable state only."""
+import os
+import runpy
+import tempfile
+from pathlib import Path
+from engine.arrival_declarations import apply_declaration_edit, DeclarationCommittedIncomplete
+from engine.arrival_registry import BackendRegistry
+from sdk import recover_declaration
+
+with tempfile.TemporaryDirectory(prefix='arrival-recovery-report-') as directory:
+    root = Path(directory)
+    os.environ['XDG_STATE_HOME'] = str(root / 'state')
+    helpers = runpy.run_path('tests/test_arrival_declarations.py')
+    target, descriptor, plan = helpers['_prepared_edit'](root)
+    registry = BackendRegistry.with_builtin_backends()
+    def fail(phase):
+        if phase == 'before-intent-remove':
+            raise OSError('injected after cache publication')
+    try:
+        apply_declaration_edit(registry, plan, failure_hook=fail)
+    except DeclarationCommittedIncomplete as error:
+        intent = error.intent_path
+    before = (target.read_bytes(), target.stat().st_ino, target.stat().st_mtime_ns)
+    result = recover_declaration(intent, registry=registry)
+    after = (target.read_bytes(), target.stat().st_ino, target.stat().st_mtime_ns)
+    print({'status': result.status, 'file_written': result.file_written,
+           'cache_bytes_inode_mtime_unchanged': before == after,
+           'commit': result.commit, 'intent_remaining': intent.exists()})

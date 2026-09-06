@@ -563,6 +563,15 @@ def test_full_verification_covers_the_head_it_claims(ledger):
     assert ledger.verify(Full(through=head)) == head
 
 
+def test_full_verification_stops_at_its_captured_prefix(ledger):
+    """A malformed suffix is not evidence against an earlier Full(H) claim."""
+    head = ledger.head()
+    path = ledger._log.path
+    path.write_bytes(path.read_bytes() + b'{}\n')
+
+    assert ledger.verify(Full(through=head)) == head
+
+
 def test_full_verification_refuses_a_head_it_cannot_find(ledger):
     head = ledger.head()
     absent = Head(

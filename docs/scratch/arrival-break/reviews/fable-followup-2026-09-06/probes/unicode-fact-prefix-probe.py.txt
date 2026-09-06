@@ -1,0 +1,45 @@
+from __future__ import annotations
+
+import json
+import os
+import tempfile
+from pathlib import Path
+
+from sdk import emit_fact, init_vertex, read_fact_by_id
+
+CASES = (
+    ("aé-tail", "a"),
+    ("b~tail", "b"),
+    ("c[tail", "c"),
+    ("d%tail", "d"),
+    ("e_tail", "e"),
+)
+
+with tempfile.TemporaryDirectory() as temporary:
+    root = Path(temporary)
+    os.environ["XDG_STATE_HOME"] = str(root / "state")
+    vertex = root / "probe.vertex"
+    init_vertex(vertex, store_type="arrival", observer="alice")
+
+    results = []
+    for fact_id, prefix in CASES:
+        receipt = emit_fact(
+            vertex,
+            "item",
+            {"name": fact_id},
+            observer="alice",
+            id_override=fact_id,
+        )
+        exact = read_fact_by_id(vertex, fact_id).fact
+        prefixed = read_fact_by_id(vertex, prefix).fact
+        results.append(
+            {
+                "supplied_id": fact_id,
+                "stored_id": receipt.id,
+                "exact_lookup": None if exact is None else exact["id"],
+                "prefix": prefix,
+                "prefix_lookup": None if prefixed is None else prefixed["id"],
+            }
+        )
+
+    print(json.dumps(results, ensure_ascii=False, indent=2))

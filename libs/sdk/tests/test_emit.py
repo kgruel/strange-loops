@@ -369,9 +369,7 @@ def test_preview_emission_strict_rejection(strict_vertex: Path) -> None:
     assert preview.fold_key_present is True
     assert preview.fold_key_value is None
     assert preview.admitted is False
-    expected_reason = (
-        "vertex 'strict' declares strict — kind 'unregistered_kind' is not declared"
-    )
+    expected_reason = "vertex 'strict' declares strict — kind 'unregistered_kind' is not declared"
     assert preview.reason == expected_reason
     assert preview.strict is True
     assert preview.would_store is False
@@ -487,6 +485,10 @@ def test_emit_batch_multiple_shapes(sample_vertex: Path) -> None:
     receipts = emit_batch(sample_vertex, items, observer="alice")
 
     assert len(receipts) == 3
+    assert receipts.write_path == "legacy"
+    assert receipts.atomic is False
+    assert receipts.atomicity == "legacy-sequential"
+    assert receipts.commit is None
     assert all(r.stored for r in receipts)
     assert receipts[0].observer == "alice"
     assert receipts[1].observer == "alice"
@@ -852,9 +854,7 @@ def test_preview_emission_strict_reason_uses_declared_ast_name(tmp_path: Path) -
     v.write_text(content, encoding="utf-8")
     preview = preview_emission(v, "bad_kind", {}, observer="alice")
     assert preview.admitted is False
-    expected_msg = (
-        "vertex 'declared_name' declares strict — kind 'bad_kind' is not declared"
-    )
+    expected_msg = "vertex 'declared_name' declares strict — kind 'bad_kind' is not declared"
     assert preview.reason == expected_msg
     assert preview.strict is True
 
@@ -949,6 +949,7 @@ def test_emit_fact_receive_committed_error_handling(
     sample_vertex: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """emit_fact maps ReceiveCommittedError to CommittedEmissionError."""
+
     def fake_receive_as(*args: Any, **kwargs: Any) -> Any:
         raise ReceiveCommittedError(
             "01TESTFACTID0000000000000", None, RuntimeError("tick write failed")
@@ -966,6 +967,7 @@ def test_emit_fact_unhandled_exception_wrapped_in_emission_failed(
     sample_vertex: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """emit_fact wraps unexpected runtime errors in EmissionFailed."""
+
     def fake_receive_as(*args: Any, **kwargs: Any) -> Any:
         raise RuntimeError("database locked unexpectedly")
 
@@ -997,10 +999,13 @@ def test_emit_fact_atom_admission_failed_properties(strict_vertex: Path) -> None
     assert exc_info.value.vertex == "strict"
 
 
-def test_emit_batch_empty_list_returns_empty_list(sample_vertex: Path) -> None:
-    """emit_batch returns [] when given empty facts list."""
-    receipts = emit_batch(sample_vertex, [])
-    assert receipts == []
+def test_emit_batch_empty_list_returns_explicit_noop(sample_vertex: Path) -> None:
+    """An empty legacy batch reports a zero-write atomic no-op."""
+    result = emit_batch(sample_vertex, [])
+    assert result.items == []
+    assert result.atomic is True
+    assert result.atomicity == "empty-noop"
+    assert result.commit is None
 
 
 def test_emit_batch_3_tuple_item_with_ts_and_origin(sample_vertex: Path) -> None:
@@ -1048,9 +1053,7 @@ def test_emit_batch_dict_defaults_and_validation(sample_vertex: Path) -> None:
 
     # Dict without payload or origin or ts - defaults applied
     items = [{"kind": "note"}]
-    receipts = emit_batch(
-        sample_vertex, items, observer="alice", origin="batch-def-origin"
-    )
+    receipts = emit_batch(sample_vertex, items, observer="alice", origin="batch-def-origin")
     assert len(receipts) == 1
     assert receipts[0].stored is True
     assert receipts[0].observer == "alice"
@@ -1104,20 +1107,56 @@ def test_emit_batch_unsigned_unfolded_receipt_fields(sample_vertex: Path) -> Non
     assert r.predicted_state_change is False
 
 
-def test_emit_batch_receive_committed_error_handling(
+def test_emit_batch_receive_committed_error_retains_partial_outcome(
     sample_vertex: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """emit_batch maps ReceiveCommittedError to CommittedEmissionError."""
+    """A legacy committed item is exposed as a partial sequential batch."""
+    from sdk import LegacyBatchPartialFailure
+
     def fake_receive_as(*args: Any, **kwargs: Any) -> Any:
         raise ReceiveCommittedError(
             "01BATCHCOMMITID0000000000", None, RuntimeError("tick write failed")
         )
 
     monkeypatch.setattr("engine.handle.VertexHandle.receive_as", fake_receive_as)
-    with pytest.raises(CommittedEmissionError) as exc_info:
+    with pytest.raises(LegacyBatchPartialFailure) as exc_info:
         emit_batch(sample_vertex, [("note", {"title": "Fail"})], observer="alice")
-    assert exc_info.value.fact_id == "01BATCHCOMMITID0000000000"
-    assert "01BATCHCOMMITID0000000000" in str(exc_info.value)
+    assert exc_info.value.failed_index == 0
+    assert exc_info.value.items == ()
+    assert exc_info.value.committed_fact_id == "01BATCHCOMMITID0000000000"
+    assert exc_info.value.as_dict()["outcome"] == "legacy-partial"
+
+
+def test_emit_batch_legacy_failure_retains_successful_prefix(
+    sample_vertex: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Legacy compatibility exposes earlier sequential receipts on failure."""
+    from engine.handle import VertexHandle
+
+    from sdk import LegacyBatchPartialFailure
+
+    original = VertexHandle.receive_as
+    calls = 0
+
+    def receive_then_fail(self, *args: Any, **kwargs: Any) -> Any:
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise RuntimeError("second legacy write failed")
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(VertexHandle, "receive_as", receive_then_fail)
+    with pytest.raises(LegacyBatchPartialFailure) as caught:
+        emit_batch(
+            sample_vertex,
+            [("note", {"title": "stored"}), ("note", {"title": "fails"})],
+            observer="alice",
+        )
+    assert caught.value.failed_index == 1
+    assert len(caught.value.items) == 1
+    assert caught.value.items[0].stored is True
+    assert caught.value.committed_fact_id is None
+    assert caught.value.as_dict()["items"][0]["id"]
 
 
 def test_emit_fact_missing_observer_raises_invalid_emission_request(
@@ -1216,9 +1255,7 @@ def test_emit_batch_strict_admit_undeclared(strict_vertex: Path) -> None:
 
 def test_emit_batch_default_origin_and_tuple_origin(sample_vertex: Path) -> None:
     """emit_batch defaults origin to empty string and applies origin to 2-tuples."""
-    receipts1 = emit_batch(
-        sample_vertex, [("note", {"title": "Default"})], observer="alice"
-    )
+    receipts1 = emit_batch(sample_vertex, [("note", {"title": "Default"})], observer="alice")
     assert len(receipts1) == 1
     receipts2 = emit_batch(
         sample_vertex,
@@ -1264,6 +1301,7 @@ def test_emit_batch_unhandled_exception_wrapped_in_emission_failed(
     sample_vertex: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """emit_batch wraps unexpected runtime errors in EmissionFailed."""
+
     def fake_receive_as(*args: Any, **kwargs: Any) -> Any:
         raise RuntimeError("batch storage crashed")
 

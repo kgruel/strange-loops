@@ -1,0 +1,32 @@
+{
+  "status": "complete",
+  "pending_reviews": 0,
+  "production_reviewed_unchanged": true,
+  "changed_code_files": [
+    "libs/sdk/src/sdk/declare.py",
+    "libs/sdk/src/sdk/read.py",
+    "libs/sdk/tests/test_arrival_registry_injection.py"
+  ],
+  "final_code_hashes": {
+    "libs/sdk/src/sdk/declare.py": "35ed47b9fd34577898fb66b92d98f5ee485b0f77cdfe000681f89450d6d70e4c",
+    "libs/sdk/src/sdk/read.py": "cc07116ffc158c6d7d8c9eda9b4d9a9cb4780ce5c2f59cad521385c8c4124c36",
+    "libs/sdk/tests/test_arrival_registry_injection.py": "85d58228aaf6d42addee376c8d52002d26f5da99b269fefe9acb9870e61d1011"
+  },
+  "validation": {
+    "sdk_full": 504,
+    "architecture": 101,
+    "c1_final": 10,
+    "full_sdk_predates_three_test_only_additions": true,
+    "scoped_ruff": "passed",
+    "diff_check": "passed",
+    "main_checkout": "clean",
+    "local_links": 9
+  },
+  "review": {
+    "model": "claude-fable-5-1",
+    "effort": "low",
+    "verdict": "accept",
+    "finished_at": "2026-09-06T17:00:27.994746+00:00"
+  },
+  "finished_at": "2026-09-06T17:03:11.831559+00:00"
+}

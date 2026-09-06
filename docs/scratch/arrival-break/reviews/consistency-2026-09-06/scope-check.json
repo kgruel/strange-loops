@@ -1,0 +1,59 @@
+{
+  "checked_at": "2026-09-06T16:02:11.331155+00:00",
+  "non_documentation_files": 985,
+  "implementation_drift": [],
+  "reviewed_source_drift_excluding_intentional_document_revisions": [],
+  "intentional_document_revisions": [
+    "docs/scratch/arrival-break/consistency-contract-matrix-2026-09-06.md",
+    "docs/scratch/arrival-break/identity-decisions-2026-09-06.md"
+  ],
+  "reviewed_document_snapshots_match": true,
+  "packet_hash_matches": true,
+  "current_document_hashes": {
+    "docs/scratch/arrival-break/consistency-contract-matrix-2026-09-06.md": "c8e478bad6c3d153b68368ac7cad019118623cb778946571d9bb974950fe2b50",
+    "docs/scratch/arrival-break/identity-decisions-2026-09-06.md": "8a41dcdba405217480b154911ad00f7ceb028e15cc1226a08b63fe25888d33d9",
+    "docs/scratch/arrival-break/reviews/consistency-2026-09-06/primary-triage.md": "560a807ec3be1b43431136fba6b57416240e1d56b246728b11f06d9e762238de"
+  },
+  "local_links_checked": 21,
+  "broken_links": [],
+  "trailing_whitespace": [],
+  "git_diff_check": 0,
+  "main_checkout_clean": true,
+  "focused_tests": {
+    "engine_maintenance": 4,
+    "sdk_aggregate": 2
+  },
+  "model_usage": {
+    "claude-haiku-4-5-20251001": {
+      "inputTokens": 35640,
+      "outputTokens": 17,
+      "cacheReadInputTokens": 0,
+      "cacheCreationInputTokens": 0,
+      "webSearchRequests": 0,
+      "costUSD": 0.035725,
+      "contextWindow": 200000,
+      "maxOutputTokens": 32000,
+      "thinkingTokens": 0,
+      "canonicalModel": "claude-haiku-4-5",
+      "provider": "firstParty",
+      "costBasis": "list"
+    },
+    "claude-fable-5-1": {
+      "inputTokens": 2,
+      "outputTokens": 9219,
+      "cacheReadInputTokens": 3264,
+      "cacheCreationInputTokens": 48896,
+      "webSearchRequests": 0,
+      "costUSD": 1.439706,
+      "contextWindow": 1000000,
+      "maxOutputTokens": 64000,
+      "thinkingTokens": 5913,
+      "canonicalModel": "claude-fable-5-1",
+      "provider": "firstParty",
+      "costBasis": "list"
+    }
+  },
+  "review_status": "complete and triaged",
+  "remaining_reviews": [],
+  "production_code_changes": false
+}

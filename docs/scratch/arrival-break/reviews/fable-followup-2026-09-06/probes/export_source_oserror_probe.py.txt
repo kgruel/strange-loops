@@ -1,0 +1,43 @@
+"""Disposable real FileLedger export probe; no repository files or live stores."""
+from __future__ import annotations
+
+import os
+import shutil
+import tempfile
+from dataclasses import replace
+from pathlib import Path
+
+from engine.arrival_file_backend import FileLedger
+from sdk import ExportPublicationError, export_target, init_vertex
+
+root = Path(tempfile.mkdtemp(prefix="export-source-oserror-probe-"))
+os.environ["XDG_STATE_HOME"] = str(root / "state")
+try:
+    target = root / "source.vertex"
+    init_vertex(target, store_type="arrival", observer="alice")
+    output = root / "export.arrival"
+    original = FileLedger.export
+    def damaged(self, **kwargs):
+        prefix = original(self, **kwargs)
+        def records():
+            try:
+                yield next(prefix.records)
+                raise PermissionError("injected source drain failure")
+            finally:
+                prefix.records.close()
+        return replace(prefix, records=records())
+    FileLedger.export = damaged
+    try:
+        export_target(target, output)
+    except ExportPublicationError as exc:
+        print({
+            "exception": type(exc).__name__,
+            "cause": type(exc.cause).__name__,
+            "outcome": exc.as_dict()["outcome"],
+            "output_exists": output.exists(),
+            "temporary_outputs": sorted(p.name for p in root.glob(".export.arrival.*")),
+        })
+    finally:
+        FileLedger.export = original
+finally:
+    shutil.rmtree(root)

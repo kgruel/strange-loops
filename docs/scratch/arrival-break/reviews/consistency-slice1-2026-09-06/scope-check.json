@@ -1,0 +1,158 @@
+{
+  "changed": [
+    "docs/scratch/arrival-break/consistency-contract-matrix-2026-09-06.md",
+    "docs/scratch/arrival-break/orchestration-2026-09-05.md",
+    "libs/engine/src/engine/arrival_consumer.py",
+    "libs/engine/src/engine/arrival_declarations.py",
+    "libs/engine/src/engine/arrival_head_seam.py",
+    "libs/engine/src/engine/runtime_write.py",
+    "libs/engine/tests/test_arrival_consumer.py",
+    "libs/engine/tests/test_runtime_write.py",
+    "libs/sdk/src/sdk/declare.py",
+    "libs/sdk/tests/test_arrival_init.py"
+  ],
+  "added": [
+    "docs/scratch/arrival-break/consistency-slice1-2026-09-06.md",
+    "docs/scratch/arrival-break/consistency-slice1-validation-2026-09-06.md",
+    "docs/scratch/arrival-break/reviews/consistency-slice1-2026-09-06/build-review.py.txt",
+    "docs/scratch/arrival-break/reviews/consistency-slice1-2026-09-06/engine-final.txt",
+    "docs/scratch/arrival-break/reviews/consistency-slice1-2026-09-06/first-slice-findings.md",
+    "docs/scratch/arrival-break/reviews/consistency-slice1-2026-09-06/first-slice-prompt.txt",
+    "docs/scratch/arrival-break/reviews/consistency-slice1-2026-09-06/first-slice-result.json",
+    "docs/scratch/arrival-break/reviews/consistency-slice1-2026-09-06/first-slice-stderr.txt",
+    "docs/scratch/arrival-break/reviews/consistency-slice1-2026-09-06/followup/build-review.py.txt",
+    "docs/scratch/arrival-break/reviews/consistency-slice1-2026-09-06/followup/consistency-slice1-2026-09-06-reviewed.md",
+    "docs/scratch/arrival-break/reviews/consistency-slice1-2026-09-06/followup/first-slice-followup-findings.md",
+    "docs/scratch/arrival-break/reviews/consistency-slice1-2026-09-06/followup/first-slice-followup-prompt.txt",
+    "docs/scratch/arrival-break/reviews/consistency-slice1-2026-09-06/followup/first-slice-followup-result.json",
+    "docs/scratch/arrival-break/reviews/consistency-slice1-2026-09-06/followup/first-slice-followup-stderr.txt",
+    "docs/scratch/arrival-break/reviews/consistency-slice1-2026-09-06/followup/manifest.json",
+    "docs/scratch/arrival-break/reviews/consistency-slice1-2026-09-06/followup/primary-triage-reviewed.md",
+    "docs/scratch/arrival-break/reviews/consistency-slice1-2026-09-06/followup/runner.lock",
+    "docs/scratch/arrival-break/reviews/consistency-slice1-2026-09-06/followup/status.json",
+    "docs/scratch/arrival-break/reviews/consistency-slice1-2026-09-06/manifest.json",
+    "docs/scratch/arrival-break/reviews/consistency-slice1-2026-09-06/primary-triage.md",
+    "docs/scratch/arrival-break/reviews/consistency-slice1-2026-09-06/runner.lock",
+    "docs/scratch/arrival-break/reviews/consistency-slice1-2026-09-06/scope-check.json",
+    "docs/scratch/arrival-break/reviews/consistency-slice1-2026-09-06/slice-incremental.patch",
+    "docs/scratch/arrival-break/reviews/consistency-slice1-2026-09-06/slice-reviewed.md",
+    "docs/scratch/arrival-break/reviews/consistency-slice1-2026-09-06/status.json",
+    "docs/scratch/arrival-break/reviews/consistency-slice1-2026-09-06/triage-status.json",
+    "libs/engine/tests/test_arrival_declaration_custody.py",
+    "libs/engine/tests/test_arrival_projection_custody_integration.py"
+  ],
+  "removed": [],
+  "non_doc_changed": [
+    "libs/engine/src/engine/arrival_consumer.py",
+    "libs/engine/src/engine/arrival_declarations.py",
+    "libs/engine/src/engine/arrival_head_seam.py",
+    "libs/engine/src/engine/runtime_write.py",
+    "libs/engine/tests/test_arrival_consumer.py",
+    "libs/engine/tests/test_runtime_write.py",
+    "libs/sdk/src/sdk/declare.py",
+    "libs/sdk/tests/test_arrival_init.py",
+    "libs/engine/tests/test_arrival_declaration_custody.py",
+    "libs/engine/tests/test_arrival_projection_custody_integration.py"
+  ],
+  "diff_check": 0,
+  "main_status": "",
+  "post_packet_drift": [
+    "docs/scratch/arrival-break/consistency-slice1-2026-09-06.md",
+    "libs/sdk/src/sdk/declare.py",
+    "libs/sdk/tests/test_arrival_init.py",
+    "libs/engine/tests/test_arrival_consumer.py"
+  ],
+  "reviews": [
+    {
+      "directory": "docs/scratch/arrival-break/reviews/consistency-slice1-2026-09-06",
+      "effort": "low",
+      "finished_at": "2026-09-06T16:30:19.716695+00:00",
+      "model_usage": {
+        "claude-haiku-4-5-20251001": {
+          "inputTokens": 51079,
+          "outputTokens": 17,
+          "cacheReadInputTokens": 0,
+          "cacheCreationInputTokens": 0,
+          "webSearchRequests": 0,
+          "costUSD": 0.051164,
+          "contextWindow": 200000,
+          "maxOutputTokens": 32000,
+          "thinkingTokens": 0,
+          "canonicalModel": "claude-haiku-4-5",
+          "provider": "firstParty",
+          "costBasis": "list"
+        },
+        "claude-fable-5-1": {
+          "inputTokens": 2,
+          "outputTokens": 4617,
+          "cacheReadInputTokens": 3264,
+          "cacheCreationInputTokens": 67446,
+          "webSearchRequests": 0,
+          "costUSD": 1.5806060000000002,
+          "contextWindow": 1000000,
+          "maxOutputTokens": 64000,
+          "thinkingTokens": 3105,
+          "canonicalModel": "claude-fable-5-1",
+          "provider": "firstParty",
+          "costBasis": "list"
+        }
+      },
+      "post_review_code_drift": [
+        "libs/sdk/src/sdk/declare.py",
+        "libs/sdk/tests/test_arrival_init.py",
+        "libs/engine/tests/test_arrival_consumer.py"
+      ],
+      "launch_source_drift": []
+    },
+    {
+      "directory": "docs/scratch/arrival-break/reviews/consistency-slice1-2026-09-06/followup",
+      "effort": "low",
+      "finished_at": "2026-09-06T16:42:56.948682+00:00",
+      "model_usage": {
+        "claude-haiku-4-5-20251001": {
+          "inputTokens": 36553,
+          "outputTokens": 20,
+          "cacheReadInputTokens": 0,
+          "cacheCreationInputTokens": 0,
+          "webSearchRequests": 0,
+          "costUSD": 0.036653000000000005,
+          "contextWindow": 200000,
+          "maxOutputTokens": 32000,
+          "thinkingTokens": 0,
+          "canonicalModel": "claude-haiku-4-5",
+          "provider": "firstParty",
+          "costBasis": "list"
+        },
+        "claude-fable-5-1": {
+          "inputTokens": 2,
+          "outputTokens": 3166,
+          "cacheReadInputTokens": 3264,
+          "cacheCreationInputTokens": 48930,
+          "webSearchRequests": 0,
+          "costUSD": 1.137736,
+          "contextWindow": 1000000,
+          "maxOutputTokens": 64000,
+          "thinkingTokens": 1960,
+          "canonicalModel": "claude-fable-5-1",
+          "provider": "firstParty",
+          "costBasis": "list"
+        }
+      },
+      "post_review_code_drift": [],
+      "launch_source_drift": []
+    }
+  ],
+  "status": "complete",
+  "pending_reviews": 0,
+  "validation": {
+    "engine_passed": 2528,
+    "engine_skipped": 1,
+    "sdk_passed": 497,
+    "architecture_passed": 101,
+    "initializer_passed": 11,
+    "real_file_concurrency_passed": 3,
+    "ruff": "changed source/tests pass; preexisting head-seam docstring E501 at line 23 unchanged"
+  },
+  "local_links_checked": 22,
+  "broken_links": []
+}

@@ -41,8 +41,10 @@ that can change what a lineage holds whether the contract names it or not.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import sqlite3
-from collections.abc import Iterable, Iterator, Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -52,6 +54,7 @@ from .arrival import (
     ArrivalLog,
     Entry,
     ForkedHeight,
+    ResumeMark,
     StaleHead,
     decode_record,
     encode_record,
@@ -60,36 +63,92 @@ from .arrival_contract import (
     AtomicLimitExceeded,
     Capabilities,
     Commit,
+    Continuation,
+    DeclarationAnchor,
     DurabilityProfile,
     DurabilityReceipt,
     ExportedPrefix,
+    Fact,
+    FactCursor,
+    FactPage,
+    FactRequest,
     Full,
     Head,
     HeadMismatch,
     Incremental,
+    InvalidContinuation,
     NotAuthority,
     NotSupported,
     Open,
     Profile,
+    ProjectionAbsent,
+    ProjectionBehind,
+    ProjectionRequirement,
+    QuerySnapshot,
     RecordDraft,
     SameHeightFork,
+    SearchFieldSpec,
+    SearchMatch,
+    SearchPage,
+    SearchRequest,
+    SearchStale,
+    Summary,
+    SummaryRequest,
+    Tick,
+    TickRequest,
     VerificationLevel,
     VerifyScope,
     Watermark,
 )
-from .arrival_store import (
+from .arrival_maintenance import MaintenanceAdvance, MaintenanceCapabilities
+from .arrival_projection import (
+    _ensure_index_schema,
+    _meta_get,
+    _meta_set,
+    _stamp_mark,
+    has_rows,
+    licensed_own_lineage,
+    rows_of_record,
+)
+from .arrival_search import SearchCoverage, SearchIndexBuild
+from .file_projection_schema import (
     ARRIVAL_LINEAGE_KEY,
+    ARRIVAL_OFFSET_KEY,
     ARRIVAL_ORDINAL_KEY,
+    FACT_INSERT_SQL,
+    TICK_INSERT_SQL,
+    ArrivalCanonicalUnsupported,
 )
 from .store_reader import StoreReader
 
-__all__ = ["EXPORT_CODEC", "FileLedger", "FileQuery"]
+__all__ = [
+    "EXPORT_CODEC",
+    "FileLedger",
+    "FileProjectionMaintenance",
+    "FileQuery",
+    "FileSearchMaintenance",
+    "SearchIndexBuild",
+    "SearchCoverage",
+]
 
 # The one wire codec this backend exports and imports. Named after the grammar
 # it is, and versioned separately from `GRAMMAR_VERSION` on purpose: the codec
 # is what an export FILE claims about its own framing, and a future codec that
 # packed the same records differently would leave the record grammar alone.
 EXPORT_CODEC = "arrival-jsonl-v1"
+
+
+def file_projection_path(location: Path | str) -> Path:
+    """Choose a derived pathname without interpreting the ledger's format.
+
+    Retain the established sibling for conventional log names. Other explicit
+    file locators get a distinct sidecar; a .db spelling is still an Arrival
+    ledger and must never be opened as its own SQLite projection.
+    """
+    path = Path(location)
+    if path.suffix.lower() in (".arrival", ".jsonl"):
+        return path.with_suffix(".db")
+    return path.with_name(path.name + ".projection.db")
 
 # How the codec frames one record. A manifest field rather than a convention,
 # because "each element is one record's line INCLUDING its newline" is what
@@ -436,7 +495,7 @@ class FileLedger:
 
         def lines() -> Iterator[bytes]:
             for record in self.scan(through=through):
-                yield (encode_record(record) + "\n").encode("utf-8")
+                yield (encode_record(dict(record)) + "\n").encode("utf-8")
 
         return ExportedPrefix(
             head=through,
@@ -651,6 +710,7 @@ class FileLedger:
             if through is not None and record["ord"] >= through.ordinal:
                 break
         if not reached:
+            assert through is not None
             raise HeadMismatch(
                 f"{self._log.path} ends before ordinal {through.ordinal} — "
                 "absence before a captured head is corruption, not end of "
@@ -697,14 +757,14 @@ class FileLedger:
         if not isinstance(scope, Full):
             raise TypeError(f"not a verification scope: {scope!r}")
 
-        # Grammar, density, lineage and the hash chain for the complete
-        # prefix — `walk` IS that statement, and it is consumed to the end
-        # here rather than returned, because a generator nobody drains
-        # verifies nothing.
+        # Grammar, density, lineage and the hash chain for the complete named
+        # prefix. `walk` is consumed through that head, then stopped: Full(H)
+        # makes no claim about a later concurrently appended or corrupted tail.
         found: Mapping[str, Any] | None = None
         for record in self._log.walk():
             if record["ord"] == scope.through.ordinal:
                 found = record
+                break
         if found is None:
             raise HeadMismatch(
                 f"{self._log.path} holds no record at ordinal "
@@ -786,6 +846,539 @@ def _meta(index_path: Path, key: str) -> str | None:
     return None if row is None else row[0]
 
 
+def _snapshot_meta(conn: sqlite3.Connection, key: str) -> str | None:
+    """Read projection metadata on the same transaction as its rows."""
+    try:
+        row = conn.execute(
+            "SELECT value FROM store_meta WHERE key = ?", (key,)
+        ).fetchone()
+    except sqlite3.OperationalError:
+        return None
+    return None if row is None else row[0]
+
+
+class _AbsentFileQuerySnapshot:
+    """An honest allow-behind snapshot where no projection exists yet."""
+
+    represented: Watermark | None = None
+    view_generation: str | None = None
+    declaration_anchor = DeclarationAnchor(own_lineage=None, genesis=None)
+
+    def facts(self, request: FactRequest) -> FactPage:
+        return FactPage(items=(), cursor=None, truncated=False, order=request.order)
+
+    def ticks(self, request: TickRequest) -> tuple[Tick, ...]:
+        return ()
+
+    def summary(self, request: SummaryRequest) -> Summary:
+        return Summary(
+            fact_total=0, tick_total=0, signed_count=0, unsigned_count=0,
+            fact_kinds={}, tick_names={},
+        )
+
+    def search(self, request: SearchRequest) -> SearchPage:
+        raise NotSupported("the file query snapshot has no search coverage")
+
+    def close(self) -> None:
+        return None
+
+
+class _FileQuerySnapshot:
+    """One SQLite read transaction, bounded to a captured Arrival prefix.
+
+    The snapshot deliberately works below ``StoreReader``: that class's public
+    page API has no captured-head bound.  The legacy reader remains available
+    on :class:`FileQuery`; this private implementation is the new portable
+    surface and never exposes its connection.
+    """
+
+    def __init__(
+        self,
+        path: Path,
+        *,
+        captured_head: Head,
+        requirement: ProjectionRequirement,
+        continuation: Continuation | None,
+    ) -> None:
+        self._path = path
+        self._captured_head = captured_head
+        self._conn = sqlite3.connect(
+            f"{path.absolute().as_uri()}?mode=ro", uri=True
+        )
+        self._conn.execute("PRAGMA query_only=ON")
+        self._conn.execute("BEGIN DEFERRED")
+        self._closed = False
+        try:
+            self._fact_signature_column = self._has_column("facts", "signature")
+            self._tick_chain_columns = {
+                row[1] for row in self._conn.execute("PRAGMA table_info(ticks)")
+            }
+            lineage = _snapshot_meta(self._conn, ARRIVAL_LINEAGE_KEY)
+            ordinal = _snapshot_meta(self._conn, ARRIVAL_ORDINAL_KEY)
+            if lineage is None or ordinal is None:
+                raise ProjectionAbsent(f"{path} has no complete projection watermark")
+            watermark = Watermark(lineage=lineage, ordinal=int(ordinal))
+            if watermark.lineage != captured_head.lineage:
+                raise NotAuthority(
+                    f"projection at {path} represents {watermark.lineage}, not "
+                    f"captured lineage {captured_head.lineage}"
+                )
+            if continuation is not None:
+                if continuation.captured_head != captured_head:
+                    raise InvalidContinuation(
+                        "continuation captured head differs from this read"
+                    )
+                if continuation.projected_through.lineage != captured_head.lineage:
+                    raise InvalidContinuation(
+                        "continuation represented another lineage"
+                    )
+                if watermark.ordinal < continuation.projected_through.ordinal:
+                    raise InvalidContinuation(
+                        "projection no longer reaches the continuation prefix"
+                    )
+                if (
+                    requirement is ProjectionRequirement.CURRENT
+                    and continuation.projected_through.ordinal < captured_head.ordinal
+                ):
+                    raise ProjectionBehind(
+                        f"continuation prefix ends at "
+                        f"{continuation.projected_through.ordinal}, but the "
+                        f"captured head is {captured_head.ordinal}"
+                    )
+                bound = continuation.projected_through.ordinal
+            elif watermark.ordinal < captured_head.ordinal:
+                if requirement is ProjectionRequirement.CURRENT:
+                    raise ProjectionBehind(
+                        f"projection at {path} ends at {watermark.ordinal}, but "
+                        f"the captured head is {captured_head.ordinal}"
+                    )
+                bound = watermark.ordinal
+            else:
+                # A watermark beyond H may be a normal append/catch-up after H
+                # was captured. The consumer validates its membership and
+                # clamps the externally reported basis to H.
+                bound = captured_head.ordinal
+            self._bound = Watermark(lineage=captured_head.lineage, ordinal=bound)
+            self._observed_watermark = watermark
+            self._declaration_anchor = self._read_declaration_anchor()
+            self._continuation = continuation
+            self._view_generation = self._generation(bound)
+            if (
+                continuation is not None
+                and continuation.view_generation != self._view_generation
+            ):
+                raise InvalidContinuation(
+                    "projection view changed since this continuation was issued"
+                )
+        except BaseException:
+            self.close()
+            raise
+
+    @property
+    def represented(self) -> Watermark:
+        """The actual watermark read in this transaction, before any clamp."""
+        return self._observed_watermark
+
+    @property
+    def view_generation(self) -> str:
+        return self._view_generation
+
+    @property
+    def observed_watermark(self) -> Watermark:
+        """The actual projection mark, retained for coordinator validation."""
+        return self._observed_watermark
+
+    @property
+    def declaration_anchor(self) -> DeclarationAnchor:
+        return self._declaration_anchor
+
+    def _read_declaration_anchor(self) -> DeclarationAnchor:
+        """Read the marker and its exact genesis without inferring identity."""
+        own_lineage = _snapshot_meta(self._conn, "own_lineage")
+        if own_lineage is None:
+            return DeclarationAnchor(own_lineage=None, genesis=None)
+        try:
+            row = self._conn.execute(
+                "SELECT " + self._fact_select() + " FROM facts "
+                "WHERE id = ? AND kind = '_decl.genesis'",
+                (own_lineage,),
+            ).fetchone()
+        except sqlite3.OperationalError as exc:
+            raise ProjectionAbsent(
+                f"{self._path} cannot read declaration identity: {exc}"
+            ) from exc
+        return DeclarationAnchor(
+            own_lineage=own_lineage,
+            genesis=None if row is None else self._fact(row),
+        )
+
+    def _has_column(self, table: str, column: str) -> bool:
+        columns = {row[1] for row in self._conn.execute(f"PRAGMA table_info({table})")}
+        return column in columns
+
+    def _fact_select(self) -> str:
+        columns = "id, kind, ts, observer, origin, payload, arrival_ordinal, arrival_seq"
+        return columns + (", signature" if self._fact_signature_column else "")
+
+    def _tick_select(self) -> str:
+        columns = [
+            "id", "name", "ts", "since", "origin", "payload",
+            "arrival_ordinal", "arrival_seq",
+        ]
+        for column in ("prev_hash", "window_start", "fact_cursor", "window_hash", "signature"):
+            columns.append(column if column in self._tick_chain_columns else f"NULL AS {column}")
+        return ", ".join(columns)
+
+    def _generation(self, bound: int) -> str:
+        """Opaque identity for this file projection through ``bound``.
+
+        SQLite offers no durable projection-generation token. A digest of the
+        snapshot's schema, declaration identity, and complete bounded row
+        content makes a conservative token: maintenance or row changes
+        invalidate a resume even when its ledger prefix remains available.
+        """
+        digest = hashlib.sha256()
+        schema_version = self._conn.execute("PRAGMA schema_version").fetchone()[0]
+        genesis = self._declaration_anchor.genesis
+        anchor = {
+            "own_lineage": self._declaration_anchor.own_lineage,
+            "genesis": None
+            if genesis is None
+            else {
+                "id": genesis.id,
+                "kind": genesis.kind,
+                "ts": genesis.ts,
+                "observer": genesis.observer,
+                "origin": genesis.origin,
+                "payload": genesis.payload,
+                "arrival_ordinal": genesis.arrival_ordinal,
+                "arrival_seq": genesis.arrival_seq,
+            },
+        }
+        digest.update(
+            f"schema:{schema_version}:bound:{bound}:".encode()
+        )
+        digest.update(json.dumps(anchor, sort_keys=True, separators=(",", ":")).encode())
+        for table, columns in (
+            (
+                "facts",
+                self._fact_select(),
+            ),
+            (
+                "ticks",
+                self._tick_select(),
+            ),
+        ):
+            try:
+                rows = self._conn.execute(
+                    f"SELECT {columns} FROM {table} WHERE arrival_ordinal <= ? "
+                    "ORDER BY arrival_ordinal, arrival_seq",
+                    (bound,),
+                )
+            except sqlite3.OperationalError as exc:
+                raise ProjectionAbsent(
+                    f"{self._path} cannot answer projected {table}: {exc}"
+                ) from exc
+            digest.update(table.encode())
+            for row in rows:
+                digest.update(
+                    json.dumps(row, separators=(",", ":"), ensure_ascii=False).encode()
+                )
+                digest.update(b"\0")
+        return f"file-projection-v1:{digest.hexdigest()}"
+
+    @staticmethod
+    def _fact(row: tuple[Any, ...]) -> Fact:
+        return Fact(
+            id=row[0], kind=row[1], ts=float(row[2]), observer=row[3], origin=row[4],
+            payload=json.loads(row[5]), arrival_ordinal=int(row[6]), arrival_seq=int(row[7]),
+            payload_text=row[5], signature=row[8] if len(row) > 8 else None,
+        )
+
+    @staticmethod
+    def _tick(row: tuple[Any, ...]) -> Tick:
+        return Tick(
+            id=row[0],
+            name=row[1],
+            ts=float(row[2]),
+            since=None if row[3] is None else float(row[3]),
+            origin=row[4],
+            payload=json.loads(row[5]),
+            arrival_ordinal=int(row[6]),
+            arrival_seq=int(row[7]),
+            payload_text=row[5],
+            prev_hash=row[8],
+            window_start=row[9],
+            fact_cursor=row[10],
+            window_hash=row[11],
+            signature=row[12],
+        )
+
+    def facts(self, request: FactRequest) -> FactPage:
+        if request.order not in ("newest", "oldest"):
+            raise ValueError(f"facts order must be 'newest' or 'oldest', got {request.order!r}")
+        if request.limit is not None and request.limit < 1:
+            raise ValueError("facts limit must be >= 1 or None")
+        if self._continuation is not None and request != self._continuation.request:
+            raise InvalidContinuation("continuation request does not match this facts request")
+
+        clauses = ["arrival_ordinal <= ?"]
+        params: list[Any] = [self._bound.ordinal]
+        if request.kind is not None:
+            from .sql_util import kind_subtree_predicate
+
+            kind_sql, kind_params = kind_subtree_predicate(request.kind)
+            clauses.append(kind_sql)
+            params.extend(kind_params)
+        if request.observer is not None:
+            if "/" in request.observer:
+                clauses.append("(observer = ? OR observer = ?)")
+                params.extend((request.observer, request.observer.rsplit("/", 1)[1]))
+            else:
+                tail = "/" + request.observer
+                clauses.append("(observer = ? OR substr(observer, -?, ?) = ?)")
+                params.extend((request.observer, len(tail), len(tail), tail))
+        if not request.include_internal:
+            clauses.append("kind NOT GLOB '_decl.*'")
+        if self._continuation is not None:
+            cursor = self._continuation.cursor
+            # A page is a hard row bound, so resume at the complete receipt
+            # coordinate.  One packed Arrival record can contribute rows to
+            # several pages; custody remains atomic at the ledger layer.
+            if request.order == "newest":
+                clauses.append(
+                    "(arrival_ordinal < ? OR "
+                    "(arrival_ordinal = ? AND (arrival_seq < ? OR "
+                    "(arrival_seq = ? AND id < ?))))"
+                )
+            else:
+                clauses.append(
+                    "(arrival_ordinal > ? OR "
+                    "(arrival_ordinal = ? AND (arrival_seq > ? OR "
+                    "(arrival_seq = ? AND id > ?))))"
+                )
+            params.extend(
+                (
+                    cursor.arrival_ordinal,
+                    cursor.arrival_ordinal,
+                    cursor.arrival_seq,
+                    cursor.arrival_seq,
+                    cursor.fact_id,
+                )
+            )
+        if request.fact_id is not None:
+            # Preserve the established lookup rule: an exact visible ID wins
+            # even when other IDs extend it. Only when no exact row survives
+            # this request's bound, filters, and cursor is the value a prefix.
+            exact_sql = (
+                "SELECT "
+                + self._fact_select()
+                + " FROM facts WHERE "
+                + " AND ".join((*clauses, "id = ?"))
+                + " LIMIT 1"
+            )
+            exact = self._conn.execute(
+                exact_sql, (*params, request.fact_id)
+            ).fetchone()
+            if exact is not None:
+                return FactPage(
+                    items=(self._fact(exact),),
+                    cursor=None,
+                    truncated=False,
+                    order=request.order,
+                )
+            # IDs are arbitrary strings. Compare their UTF-8 bytes literally
+            # so Unicode, NUL, and LIKE/GLOB metacharacters remain ordinary ID
+            # content rather than depending on a sentinel alphabet or pattern
+            # escaping convention.
+            clauses.append(
+                "substr(CAST(id AS BLOB), 1, length(CAST(? AS BLOB))) "
+                "= CAST(? AS BLOB)"
+            )
+            params.extend((request.fact_id, request.fact_id))
+
+        direction = "DESC" if request.order == "newest" else "ASC"
+        sql = (
+            "SELECT " + self._fact_select() + " FROM facts WHERE " + " AND ".join(clauses) +
+            f" ORDER BY arrival_ordinal {direction}, arrival_seq {direction}, id {direction}"
+        )
+        if request.limit is None:
+            rows = self._conn.execute(sql, params).fetchall()
+            return FactPage(
+                items=tuple(self._fact(row) for row in rows), cursor=None,
+                truncated=False, order=request.order,
+            )
+
+        # Fetch one look-ahead row.  Unlike ledger/export operations, a query
+        # page does not preserve a whole Arrival record: ``limit`` is a strict
+        # maximum number of projected fact rows.
+        rows = self._conn.execute(sql + " LIMIT ?", (*params, request.limit + 1)).fetchall()
+        more = len(rows) > request.limit
+        page_rows = rows[:request.limit]
+        cursor = None
+        if more:
+            last = page_rows[-1]
+            cursor = FactCursor(int(last[6]), int(last[7]), last[0])
+        return FactPage(
+            items=tuple(self._fact(row) for row in page_rows), cursor=cursor,
+            truncated=more, order=request.order,
+        )
+
+    def ticks(self, request: TickRequest) -> tuple[Tick, ...]:
+        clauses = ["arrival_ordinal <= ?", "ts >= ?", "ts <= ?"]
+        params: list[Any] = [self._bound.ordinal, request.since, request.until]
+        if request.name is not None:
+            clauses.append("name = ?")
+            params.append(request.name)
+        rows = self._conn.execute(
+            "SELECT " + self._tick_select() + " FROM ticks WHERE "
+            + " AND ".join(clauses)
+            + " ORDER BY ts, arrival_ordinal, arrival_seq",
+            params,
+        ).fetchall()
+        return tuple(self._tick(row) for row in rows)
+
+    def summary(self, request: SummaryRequest) -> Summary:
+        internal = "" if request.include_internal else " AND kind NOT GLOB '_decl.*'"
+        fact_total = self._conn.execute(
+            "SELECT COUNT(*) FROM facts WHERE arrival_ordinal <= ?" + internal,
+            (self._bound.ordinal,),
+        ).fetchone()[0]
+        tick_total = self._conn.execute(
+            "SELECT COUNT(*) FROM ticks WHERE arrival_ordinal <= ?",
+            (self._bound.ordinal,),
+        ).fetchone()[0]
+        fact_rows = self._conn.execute(
+            "SELECT kind, COUNT(*), MIN(ts), MAX(ts) FROM facts "
+            "WHERE arrival_ordinal <= ?" + internal + " GROUP BY kind",
+            (self._bound.ordinal,),
+        ).fetchall()
+        tick_rows = self._conn.execute(
+            "SELECT name, COUNT(*), MIN(ts), MAX(ts) FROM ticks "
+            "WHERE arrival_ordinal <= ? GROUP BY name",
+            (self._bound.ordinal,),
+        ).fetchall()
+        signed_count = 0
+        columns = {row[1] for row in self._conn.execute("PRAGMA table_info(facts)")}
+        if "signature" in columns:
+            signed_count = int(self._conn.execute(
+                "SELECT COUNT(signature) FROM facts WHERE arrival_ordinal <= ?" + internal,
+                (self._bound.ordinal,),
+            ).fetchone()[0])
+        return Summary(
+            fact_total=int(fact_total), tick_total=int(tick_total),
+            signed_count=signed_count, unsigned_count=int(fact_total) - signed_count,
+            fact_kinds={
+                row[0]: {"count": row[1], "earliest": row[2], "latest": row[3]}
+                for row in fact_rows
+            },
+            tick_names={
+                row[0]: {"count": row[1], "earliest": row[2], "latest": row[3]}
+                for row in tick_rows
+            },
+        )
+
+    def _search_coverage(self) -> tuple[Head, str, str] | None:
+        try:
+            rows = self._conn.execute(
+                "SELECT key, value FROM arrival_fts_state"
+            ).fetchall()
+        except sqlite3.OperationalError:
+            return None
+        state = {str(key): str(value) for key, value in rows}
+        try:
+            head = Head(
+                state["lineage"], int(state["ordinal"]), state["record_hash"]
+            )
+            fields_hash = state["fields_hash"]
+            schema_token = state["schema_version"]
+        except (KeyError, ValueError):
+            return None
+        actual_schema = str(self._conn.execute("PRAGMA schema_version").fetchone()[0])
+        if schema_token != actual_schema:
+            return None
+        return head, fields_hash, schema_token
+
+    def search(self, request: SearchRequest) -> SearchPage:
+        """Run FTS5 only when its exact corpus is this snapshot's head."""
+        if request.limit < 1:
+            raise ValueError("search limit must be >= 1")
+        coverage = self._search_coverage()
+        if coverage is None:
+            raise SearchStale("file search coverage is absent or schema-invalid")
+        ranking_through, fields_hash, _schema_token = coverage
+        if ranking_through != self._captured_head:
+            raise SearchStale(
+                "file search corpus does not exactly match this captured head"
+            )
+        if fields_hash != request.expected_fields_hash:
+            raise SearchStale(
+                "file search coverage was built for different declared fields"
+            )
+
+        clauses = [
+            "arrival_facts_fts MATCH ?",
+            "f.arrival_ordinal <= ?",
+        ]
+        params: list[Any] = [request.expression, self._bound.ordinal]
+        if request.kind is not None:
+            from .sql_util import kind_subtree_predicate
+
+            kind_sql, kind_params = kind_subtree_predicate(request.kind, "f.kind")
+            clauses.append(kind_sql)
+            params.extend(kind_params)
+        if request.observer is not None:
+            clauses.append("f.observer = ?")
+            params.append(request.observer)
+        if request.since is not None:
+            clauses.append("f.ts >= ?")
+            params.append(request.since)
+        if request.until is not None:
+            clauses.append("f.ts <= ?")
+            params.append(request.until)
+        if not request.include_internal:
+            clauses.append("f.kind NOT GLOB '_decl.*'")
+        where = " AND ".join(clauses)
+        joined = (
+            " FROM arrival_facts_fts JOIN facts f "
+            "ON f.id = arrival_facts_fts.fact_id WHERE " + where
+        )
+        total = int(self._conn.execute("SELECT COUNT(*)" + joined, params).fetchone()[0])
+        rows = self._conn.execute(
+            "SELECT " + self._fact_select() + ", "
+            "bm25(arrival_facts_fts), "
+            "snippet(arrival_facts_fts, 0, '[', ']', '…', 16)"
+            + joined
+            + " ORDER BY bm25(arrival_facts_fts), f.arrival_ordinal DESC, "
+            "f.arrival_seq DESC, f.id DESC LIMIT ?",
+            (*params, request.limit + 1),
+        ).fetchall()
+        truncated = len(rows) > request.limit
+        matches = tuple(
+            SearchMatch(
+                fact=self._fact(row[:-2]), rank=float(row[-2]), snippet=row[-1]
+            )
+            for row in rows[:request.limit]
+        )
+        return SearchPage(
+            matches=matches,
+            total_matches=total,
+            truncated=truncated,
+            ranking="sqlite-fts5-bm25",
+            ranking_through=ranking_through,
+            fields_hash=fields_hash,
+        )
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        try:
+            self._conn.rollback()
+        finally:
+            self._conn.close()
+
+
 class FileQuery:
     """Reads over the projection, with no route back into custody.
 
@@ -865,6 +1458,30 @@ class FileQuery:
             return None
         return Watermark(lineage=lineage, ordinal=int(ordinal))
 
+    def open_snapshot(
+        self,
+        *,
+        captured_head: Head,
+        requirement: ProjectionRequirement,
+        continuation: Continuation | None = None,
+    ) -> QuerySnapshot:
+        """Open a read-only SQLite snapshot bounded by ``captured_head``.
+
+        No projection is created or repaired here. A missing index is an
+        explicit current-read refusal, or an empty allow-behind snapshot that
+        carries no represented watermark for diagnostics.
+        """
+        if not self._path.exists():
+            if requirement is ProjectionRequirement.CURRENT:
+                raise ProjectionAbsent(f"{self._path} does not exist")
+            return _AbsentFileQuerySnapshot()
+        return _FileQuerySnapshot(
+            self._path,
+            captured_head=captured_head,
+            requirement=requirement,
+            continuation=continuation,
+        )
+
     def close(self) -> None:
         """Close the read handle this query built, if it ever built one.
 
@@ -876,3 +1493,321 @@ class FileQuery:
         if self._reader is not None:
             self._reader.close()
             self._reader = None
+
+
+class FileProjectionMaintenance:
+    """Explicit, bounded catch-up for the file adapter's SQLite projection.
+
+    Construction performs no I/O. ``catch_up`` validates the requested full
+    head against the log before opening a write transaction, then re-reads the
+    projection mark under ``BEGIN IMMEDIATE`` so concurrent maintainers
+    serialize on the projection itself. Existing rows and identity markers are
+    never discarded or replaced.
+    """
+
+    def __init__(self, log_path: Path | str, index_path: Path | str) -> None:
+        self._log = ArrivalLog(log_path)
+        self._path = Path(index_path)
+        self._closed = False
+
+    def capabilities(self) -> MaintenanceCapabilities:
+        return MaintenanceCapabilities(catch_up=True, rebuild=False)
+
+    @staticmethod
+    def _tables(conn: sqlite3.Connection) -> set[str]:
+        return {
+            str(row[0])
+            for row in conn.execute(
+                "SELECT name FROM sqlite_schema WHERE type = 'table'"
+            )
+        }
+
+    @staticmethod
+    def _read_mark(conn: sqlite3.Connection) -> ResumeMark | None:
+        values = (
+            _meta_get(conn, ARRIVAL_LINEAGE_KEY),
+            _meta_get(conn, ARRIVAL_OFFSET_KEY),
+            _meta_get(conn, ARRIVAL_ORDINAL_KEY),
+        )
+        if values == (None, None, None):
+            return None
+        if any(value is None for value in values):
+            raise ArrivalCanonicalUnsupported(
+                "projection carries a partial Arrival resume mark"
+            )
+        lineage, raw_offset, raw_ordinal = values
+        assert raw_offset is not None and raw_ordinal is not None
+        try:
+            offset = int(raw_offset)
+            ordinal = int(raw_ordinal)
+        except (TypeError, ValueError) as exc:
+            raise ArrivalCanonicalUnsupported(
+                "projection carries a non-integer Arrival resume mark"
+            ) from exc
+        if not isinstance(lineage, str) or not lineage or offset <= 0 or ordinal < 0:
+            raise ArrivalCanonicalUnsupported(
+                "projection carries an invalid Arrival resume mark"
+            )
+        return ResumeMark(lineage, offset, ordinal)
+
+    def _validate_target(self, through: Head) -> None:
+        record = self._log.read(through.ordinal)
+        if (
+            record["lin"] != through.lineage
+            or record["ord"] != through.ordinal
+            or record["rh"] != through.record_hash
+        ):
+            raise HeadMismatch(
+                "projection maintenance target is not the full head at its coordinate"
+            )
+
+    def _validate_existing(
+        self, conn: sqlite3.Connection
+    ) -> tuple[ResumeMark | None, str | None]:
+        required = {"facts", "ticks", "store_meta"}
+        tables = self._tables(conn)
+        if not tables:
+            # sqlite may leave a zero-schema file after a rolled-back first
+            # materialization. It contains no projection evidence to recover
+            # or overwrite and is equivalent to an absent derived artifact.
+            return None, None
+        missing = required - tables
+        if missing:
+            raise ArrivalCanonicalUnsupported(
+                f"existing projection lacks required tables: {sorted(missing)}"
+            )
+        mark = self._read_mark(conn)
+        rows_present = has_rows(conn)
+        if mark is None and rows_present:
+            raise ArrivalCanonicalUnsupported(
+                "projection holds rows without an Arrival resume mark"
+            )
+        if mark is not None:
+            anchor = self._log.anchor(mark)
+            if anchor is None:
+                raise ArrivalCanonicalUnsupported(
+                    "projection resume mark is not a verified log boundary"
+                )
+            if _meta_get(conn, "coordinate_axis") != "arrival":
+                raise ArrivalCanonicalUnsupported(
+                    "represented projection does not declare the Arrival coordinate axis"
+                )
+        return mark, _meta_get(conn, "own_lineage")
+
+    def _validate_identity(self, marker: str | None, lineage: str) -> None:
+        if marker is not None and marker != lineage:
+            raise ArrivalCanonicalUnsupported(
+                f"projection own_lineage {marker!r} differs from log lineage {lineage!r}"
+            )
+
+    def _insert_record(self, conn: sqlite3.Connection, record: dict[str, Any]) -> None:
+        for sequence, (kind, row) in enumerate(rows_of_record(record)):
+            try:
+                conn.execute(
+                    FACT_INSERT_SQL if kind == "fact" else TICK_INSERT_SQL,
+                    (*row, record["ord"], sequence),
+                )
+            except Exception as exc:
+                raise ArrivalCanonicalUnsupported(
+                    f"projection refuses {kind} {row[0]!r} from ordinal "
+                    f"{record['ord']}; existing state is not a consumable prefix"
+                ) from exc
+
+    def catch_up(self, through: Head) -> MaintenanceAdvance:
+        if self._closed:
+            raise RuntimeError("projection maintenance handle is closed")
+        self._validate_target(through)
+
+        existed = self._path.exists()
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        # A competing maintainer owns a normal serialization turn, not an
+        # immediate failure. Keep the wait finite so operational lock loss is
+        # still reported through ProjectionSyncError with observed evidence.
+        conn = sqlite3.connect(str(self._path), timeout=30.0)
+        conn.isolation_level = None
+        try:
+            if existed:
+                mark, marker = self._validate_existing(conn)
+                self._validate_identity(marker, through.lineage)
+            else:
+                mark, marker = None, None
+
+            # The shared schema helper owns its commits, so schema setup must
+            # complete before the explicit row/watermark transaction begins.
+            # It is idempotent derived structure; projection content and its
+            # resume mark remain one atomic transaction below.
+            _ensure_index_schema(conn, self._log)
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                # Revalidate all evidence after acquiring the adapter's write
+                # lock. Another maintainer may have advanced or exposed a
+                # conflict between the initial observation and this turn.
+                mark, marker = self._validate_existing(conn)
+                self._validate_identity(marker, through.lineage)
+                before = (
+                    None
+                    if mark is None
+                    else Watermark(mark.arrival_lineage, mark.arrival_ordinal)
+                )
+
+                changed = False
+                last_mark = mark
+                if mark is None or mark.arrival_ordinal < through.ordinal:
+                    resumed, records = self._log.walk_marked(mark)
+                    if mark is not None and resumed == 0:
+                        raise ArrivalCanonicalUnsupported(
+                            "projection resume mark was refused during verified traversal"
+                        )
+                    for record, record_mark in records:
+                        if record["ord"] > through.ordinal:
+                            break
+                        if (
+                            record["ord"] == through.ordinal
+                            and record["rh"] != through.record_hash
+                        ):
+                            raise HeadMismatch(
+                                "log changed at the maintenance target after full "
+                                "verification"
+                            )
+                        self._insert_record(conn, record)
+                        last_mark = record_mark
+                        changed = True
+                    if last_mark is None or last_mark.arrival_ordinal < through.ordinal:
+                        raise HeadMismatch(
+                            "verified traversal ended before the maintenance target"
+                        )
+
+                if marker is None:
+                    licensed = licensed_own_lineage(conn, through.lineage)
+                    if licensed is not None:
+                        _meta_set(conn, "own_lineage", licensed)
+                        changed = True
+                if last_mark is None:
+                    raise HeadMismatch("maintenance established no projection mark")
+                if changed or mark != last_mark:
+                    _stamp_mark(conn, last_mark)
+                conn.commit()
+            except BaseException:
+                conn.rollback()
+                raise
+
+            after = Watermark(last_mark.arrival_lineage, last_mark.arrival_ordinal)
+            return MaintenanceAdvance(before=before, after=after, changed=changed)
+        finally:
+            conn.close()
+
+    def close(self) -> None:
+        self._closed = True
+
+
+class FileSearchMaintenance:
+    """Explicit full-prefix FTS5 builder; never reached from a read snapshot."""
+
+    def __init__(self, log_path: Path | str, index_path: Path | str) -> None:
+        self._log = ArrivalLog(log_path)
+        self._path = Path(index_path)
+        self._closed = False
+
+    def _coverage(self, conn: sqlite3.Connection) -> SearchCoverage | None:
+        try:
+            values = dict(conn.execute("SELECT key, value FROM arrival_fts_state"))
+            return SearchCoverage(
+                Head(values["lineage"], int(values["ordinal"]), values["record_hash"]),
+                values["fields_hash"],
+                values["schema_version"],
+            )
+        except (sqlite3.Error, KeyError, ValueError):
+            return None
+
+    def coverage(self) -> SearchCoverage | None:
+        if not self._path.exists():
+            return None
+        conn = sqlite3.connect(str(self._path))
+        try:
+            return self._coverage(conn)
+        finally:
+            conn.close()
+
+    def build(self, through: Head, spec: SearchFieldSpec) -> SearchIndexBuild:
+        if self._closed:
+            raise RuntimeError("search maintenance handle is closed")
+        record = self._log.read(through.ordinal)
+        if (record["lin"], record["ord"], record["rh"]) != (
+            through.lineage, through.ordinal, through.record_hash
+        ):
+            raise HeadMismatch("search target no longer names this file prefix")
+        if not self._path.exists():
+            raise ProjectionAbsent("cannot build search before the projection exists")
+        conn = sqlite3.connect(str(self._path), timeout=30.0)
+        conn.isolation_level = None
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                lineage = _meta_get(conn, ARRIVAL_LINEAGE_KEY)
+                ordinal = _meta_get(conn, ARRIVAL_ORDINAL_KEY)
+                if lineage is None or ordinal is None:
+                    raise ProjectionAbsent(
+                        "cannot build search before the projection watermark exists"
+                    )
+                watermark = Watermark(str(lineage), int(str(ordinal)))
+                if watermark.lineage != through.lineage or watermark.ordinal < through.ordinal:
+                    raise ProjectionBehind("projection does not reach the search target")
+                before = self._coverage(conn)
+                conn.execute("DROP TABLE IF EXISTS arrival_facts_fts")
+                conn.execute("DROP TABLE IF EXISTS arrival_fts_state")
+                conn.execute(
+                    "CREATE VIRTUAL TABLE arrival_facts_fts USING fts5("
+                    "text_content, fact_id UNINDEXED)"
+                )
+                conn.execute(
+                    "CREATE TABLE arrival_fts_state (key TEXT PRIMARY KEY, value TEXT)"
+                )
+                rows = conn.execute(
+                    "SELECT id, kind, payload FROM facts WHERE arrival_ordinal <= ? "
+                    "ORDER BY arrival_ordinal, arrival_seq, id", (through.ordinal,)
+                ).fetchall()
+                from .search_fields import extract_field_text
+
+                for fact_id, kind, payload_text in rows:
+                    fields = spec.fields_by_kind.get(kind, ())
+                    if not fields:
+                        continue
+                    try:
+                        payload = json.loads(payload_text)
+                    except (TypeError, json.JSONDecodeError) as exc:
+                        raise ArrivalCanonicalUnsupported(
+                            f"projected fact {fact_id!r} has invalid payload text"
+                        ) from exc
+                    text = " ".join(extract_field_text(payload, field) for field in fields)
+                    if text.strip():
+                        conn.execute(
+                            "INSERT INTO arrival_facts_fts(text_content, fact_id) VALUES (?, ?)",
+                            (text, fact_id),
+                        )
+                schema_version = str(conn.execute("PRAGMA schema_version").fetchone()[0])
+                state = {
+                    "lineage": through.lineage,
+                    "ordinal": str(through.ordinal),
+                    "record_hash": through.record_hash,
+                    "fields_hash": spec.fields_hash,
+                    "normalization_version": spec.normalization_version,
+                    "schema_version": schema_version,
+                }
+                conn.executemany(
+                    "INSERT INTO arrival_fts_state(key, value) VALUES (?, ?)", state.items()
+                )
+                conn.commit()
+                after = SearchCoverage(through, spec.fields_hash, schema_version)
+                return SearchIndexBuild(
+                    before=before,
+                    after=after,
+                    changed=before != after,
+                )
+            except BaseException:
+                conn.rollback()
+                raise
+        finally:
+            conn.close()
+
+    def close(self) -> None:
+        self._closed = True

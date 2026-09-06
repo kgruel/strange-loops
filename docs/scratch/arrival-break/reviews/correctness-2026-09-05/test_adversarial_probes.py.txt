@@ -1,0 +1,183 @@
+"""Comprehensive adversarial probes for Category A (Restore Audit) and Category B (Boundary Consumption)."""
+
+import json
+import sqlite3
+from pathlib import Path
+import pytest
+
+from engine.arrival import ArrivalLog
+from engine.arrival_body import body_of_fact_row, body_of_tick_row
+from engine.arrival_contract import (
+    Head,
+    HeadMismatch,
+    Profile,
+    StoreDescriptor,
+)
+from engine.arrival_file_backend import FileProjectionMaintenance, file_projection_path
+from engine.arrival_registry import BackendRegistry
+from engine.handle import WriteCredentials
+from engine.runtime_write import (
+    capture_runtime,
+    execute_batch_write,
+    plan_batch_from_capture,
+)
+from tests.test_arrival_restore import _head
+from tests.test_runtime_batch_write import _make_target
+from tests.test_runtime_capture import _append_fact, _sync
+
+
+def _tick_credentials(signer) -> WriteCredentials:
+    return WriteCredentials(tick_signer=lambda digest: signer("kyle", digest))
+
+
+# --- Category A Adversarial Probes ---
+
+def test_restore_refuses_projection_with_extra_phantom_fact(tmp_path, keys, signer):
+    """If projection has an extra phantom fact row not in custody, restore must refuse before mutation."""
+    registry = BackendRegistry.with_builtin_backends()
+    source_log = ArrivalLog.mint(
+        tmp_path / "source.arrival", observer="alice", key=keys.public, signer=signer
+    )
+    receiver_path = tmp_path / "receiver.arrival"
+    receiver_path.write_bytes(source_log.path.read_bytes())
+    source = StoreDescriptor("file", str(source_log.path), role=Profile.AUTHORITY)
+    receiver = StoreDescriptor("file", str(receiver_path), role=Profile.REPLICA)
+
+    source_log.append(
+        "fact",
+        body_of_fact_row(("row-1", "note", 1.0, "alice", "test", "{}", None)),
+        observer="alice", origin="test", at=1.0, signer=signer,
+    )
+    receiver_path.write_bytes(source_log.path.read_bytes())
+
+    projection_path = file_projection_path(receiver.location)
+    maintenance = FileProjectionMaintenance(receiver.location, projection_path)
+    try:
+        maintenance.catch_up(_head(source_log))
+    finally:
+        maintenance.close()
+
+    # Inject an extra phantom fact into the projection at ordinal 1
+    with sqlite3.connect(projection_path) as conn:
+        conn.execute(
+            "INSERT INTO facts(id, kind, ts, observer, origin, payload, arrival_ordinal, arrival_seq) "
+            "VALUES(?, ?, ?, ?, ?, ?, ?, ?)",
+            ("phantom-id", "note", 1.5, "alice", "test", "{}", 1, 99),
+        )
+
+    original_bytes = receiver_path.read_bytes()
+    with pytest.raises(HeadMismatch, match="projection rows do not exactly match"):
+        registry.restore_forward(source, receiver)
+    assert receiver_path.read_bytes() == original_bytes
+
+
+def test_restore_refuses_projection_with_corrupted_signature(tmp_path, keys, signer):
+    """If projection fact row has a modified signature, restore must refuse before mutation."""
+    registry = BackendRegistry.with_builtin_backends()
+    source_log = ArrivalLog.mint(
+        tmp_path / "source.arrival", observer="alice", key=keys.public, signer=signer
+    )
+    receiver_path = tmp_path / "receiver.arrival"
+    source = StoreDescriptor("file", str(source_log.path), role=Profile.AUTHORITY)
+    receiver = StoreDescriptor("file", str(receiver_path), role=Profile.REPLICA)
+
+    source_log.append(
+        "fact",
+        body_of_fact_row(("fact-sig", "note", 1.0, "alice", "test", "{}", "sig-valid")),
+        observer="alice", origin="test", at=1.0, signer=signer,
+    )
+    receiver_path.write_bytes(source_log.path.read_bytes())
+
+    projection_path = file_projection_path(receiver.location)
+    maintenance = FileProjectionMaintenance(receiver.location, projection_path)
+    try:
+        maintenance.catch_up(_head(source_log))
+    finally:
+        maintenance.close()
+
+    with sqlite3.connect(projection_path) as conn:
+        conn.execute(
+            "UPDATE facts SET signature = ? WHERE id = ?",
+            ("sig-tampered", "fact-sig"),
+        )
+
+    original_bytes = receiver_path.read_bytes()
+    with pytest.raises(HeadMismatch, match="projection rows do not exactly match"):
+        registry.restore_forward(source, receiver)
+    assert receiver_path.read_bytes() == original_bytes
+
+
+def test_restore_refuses_projection_with_corrupted_tick_chain(tmp_path, keys, signer):
+    """If projection tick row has a modified window_hash or fact_cursor, restore must refuse."""
+    registry = BackendRegistry.with_builtin_backends()
+    source_log = ArrivalLog.mint(
+        tmp_path / "source.arrival", observer="alice", key=keys.public, signer=signer
+    )
+    receiver_path = tmp_path / "receiver.arrival"
+    source = StoreDescriptor("file", str(source_log.path), role=Profile.AUTHORITY)
+    receiver = StoreDescriptor("file", str(receiver_path), role=Profile.REPLICA)
+
+    tick_row = (
+        "tick-1", "tick_close", 1.0, None, "test", "{}",
+        "prev_hash_1", "start_1", "cursor_1", "window_hash_1",
+    )
+    source_log.append(
+        "tick",
+        body_of_tick_row((*tick_row, None)),
+        observer="alice", origin="test", at=1.0, signer=signer,
+    )
+    receiver_path.write_bytes(source_log.path.read_bytes())
+
+    projection_path = file_projection_path(receiver.location)
+    maintenance = FileProjectionMaintenance(receiver.location, projection_path)
+    try:
+        maintenance.catch_up(_head(source_log))
+    finally:
+        maintenance.close()
+
+    with sqlite3.connect(projection_path) as conn:
+        conn.execute(
+            "UPDATE ticks SET window_hash = ? WHERE id = ?",
+            ("window_hash_tampered", "tick-1"),
+        )
+
+    original_bytes = receiver_path.read_bytes()
+    with pytest.raises(HeadMismatch, match="projection rows do not exactly match"):
+        registry.restore_forward(source, receiver)
+    assert receiver_path.read_bytes() == original_bytes
+
+
+# --- Category B Adversarial Probes ---
+
+def test_adversarial_submicrosecond_coincident_facts_consumption(tmp_path, monkeypatch, keys, signer):
+    """Submicrosecond facts rounding to the SAME microsecond belong to one closed period.
+    A later arrival at that same normalized microsecond triggers anew.
+    """
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    target = _make_target(
+        tmp_path, monkeypatch, keys, signer, extra_loops='  boundary when="seal"\n'
+    )
+    # Both 4.0000001 and 4.0000003 round down to the exact same datetime (microsecond 0)
+    _append_fact(target, "seal-early-sub", "seal", 4.0000001, signer, {"which": "first"})
+    _append_fact(target, "seal-late-sub", "seal", 4.0000003, signer, {"which": "second"})
+    _sync(target)
+
+    c1 = capture_runtime(target.registry, target.descriptor, target.locator, source_mode=True, evaluated_at=5.0)
+    assert len(c1.pending_boundaries) == 1
+    assert c1.pending_boundaries[0].payload["_boundary"] == {"which": "first"}
+
+    p1 = plan_batch_from_capture(c1, (), credentials=_tick_credentials(signer), include_pending_boundaries=True)
+    execute_batch_write(target.registry, target.descriptor, p1)
+    _sync(target)
+
+    # Both facts should be consumed because both normalized to 4.000000 and arrived before closing tick
+    c2 = capture_runtime(target.registry, target.descriptor, target.locator, source_mode=True, evaluated_at=5.0)
+    assert c2.pending_boundaries == ()
+
+    # Now append later arrival at 4.0000002 (same normalized microsecond 4.000000)
+    _append_fact(target, "seal-later-sub", "seal", 4.0000002, signer, {"which": "third"})
+    _sync(target)
+
+    c3 = capture_runtime(target.registry, target.descriptor, target.locator, source_mode=True, evaluated_at=5.0)
+    assert len(c3.pending_boundaries) == 1
+    assert c3.pending_boundaries[0].payload["_boundary"] == {"which": "third"}

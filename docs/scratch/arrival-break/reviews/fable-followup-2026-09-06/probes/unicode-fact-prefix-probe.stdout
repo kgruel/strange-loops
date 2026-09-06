@@ -1,0 +1,37 @@
+[
+  {
+    "supplied_id": "aé-tail",
+    "stored_id": "aé-tail",
+    "exact_lookup": "aé-tail",
+    "prefix": "a",
+    "prefix_lookup": null
+  },
+  {
+    "supplied_id": "b~tail",
+    "stored_id": "b~tail",
+    "exact_lookup": "b~tail",
+    "prefix": "b",
+    "prefix_lookup": null
+  },
+  {
+    "supplied_id": "c[tail",
+    "stored_id": "c[tail",
+    "exact_lookup": "c[tail",
+    "prefix": "c",
+    "prefix_lookup": "c[tail"
+  },
+  {
+    "supplied_id": "d%tail",
+    "stored_id": "d%tail",
+    "exact_lookup": "d%tail",
+    "prefix": "d",
+    "prefix_lookup": "d%tail"
+  },
+  {
+    "supplied_id": "e_tail",
+    "stored_id": "e_tail",
+    "exact_lookup": "e_tail",
+    "prefix": "e",
+    "prefix_lookup": "e_tail"
+  }
+]

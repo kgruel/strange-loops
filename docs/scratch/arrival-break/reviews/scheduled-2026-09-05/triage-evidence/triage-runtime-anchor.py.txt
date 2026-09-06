@@ -1,0 +1,28 @@
+from pathlib import Path
+import sys,tempfile,json,sqlite3
+import pytest
+ROOT=Path('/Users/kaygee/Code/loops-wt/arrival-finish');sys.path.insert(0,str(ROOT/'libs/engine'))
+from tests.conftest import Custodian
+from tests.test_runtime_batch_write import _make_target
+from tests.test_runtime_capture import _append_fact,_sync
+from engine.runtime_write import capture_runtime,plan_batch_from_capture,execute_batch_write
+from engine.credentials import WriteCredentials
+from engine.arrival_consumer import open_read
+from engine.arrival_file_backend import file_projection_path
+with tempfile.TemporaryDirectory(prefix='arrival-anchor-triage-') as directory,pytest.MonkeyPatch.context() as mp:
+ p=Path(directory);keys=Custodian(p,'kyle')
+ target=_make_target(p,mp,keys,keys.signer,extra_loops='  boundary when="close"\n')
+ _append_fact(target,'close-one','close',4.0,keys.signer);_sync(target)
+ # Fixture simulates a misplaced/corrupt declaration identity in derived state.
+ with sqlite3.connect(file_projection_path(target.log.path)) as c:
+  c.execute("UPDATE facts SET id='foreign-declaration' WHERE kind='_decl.genesis'")
+  c.execute("UPDATE store_meta SET value='foreign-declaration' WHERE key='own_lineage'")
+ try:
+  with open_read(target.registry,target.descriptor): pass
+  read_error=None
+ except Exception as exc:read_error=type(exc).__name__+': '+str(exc)
+ capture=capture_runtime(target.registry,target.descriptor,target.locator,source_mode=True,evaluated_at=5.0)
+ plan=plan_batch_from_capture(capture,(),credentials=WriteCredentials(),include_pending_boundaries=True)
+ result=execute_batch_write(target.registry,target.descriptor,plan)
+ out={'ordinary_read_error':read_error,'capture_accepted_foreign_anchor':capture._declaration_anchor.own_lineage,'pending_ticks':[t.name for t in capture.pending_boundaries],'boundary_only_commit_before':result.commit.before.ordinal,'boundary_only_commit_after':result.commit.after.ordinal}
+ print(json.dumps(out,indent=2));Path('/tmp/loops-arrival-review/triage-runtime-anchor-result.json').write_text(json.dumps(out,indent=2)+'\n')

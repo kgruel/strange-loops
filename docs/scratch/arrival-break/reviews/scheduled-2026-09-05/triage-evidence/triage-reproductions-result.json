@@ -1,0 +1,29 @@
+[
+  {
+    "case": "SDK recovery",
+    "error": "AttributeError: 'DeclarationEditResult' object has no attribute 'basis'",
+    "cache_published": true,
+    "intent_removed": true
+  },
+  {
+    "case": "Local aggregate shape drift",
+    "before_facts": 1,
+    "after_facts": 0,
+    "read_path": "arrival-aggregate",
+    "state": {
+      "note": {
+        "n": 0
+      }
+    },
+    "ledger_still_contains_fact": true
+  },
+  {
+    "case": "Recorded vertex boundary",
+    "first_pending": [
+      "batch-target"
+    ],
+    "after_commit_pending": [
+      "batch-target"
+    ]
+  }
+]

@@ -32,11 +32,155 @@ FACT_DOMAIN = "loops-fact-v1"
 ARRIVAL_DOMAIN = "loops-arrival-v1"
 
 _KEY_FILE = "ed25519.key"
+_PUB_FILE = "ed25519.pub"
+_RESERVED_KEY_COMPONENTS = frozenset({_KEY_FILE.casefold(), _PUB_FILE.casefold()})
+
+
+def _valid_key_observer(observer: str) -> bool:
+    """Directory-mapped names cannot escape or occupy reserved key files."""
+    return (
+        isinstance(observer, str)
+        and bool(observer)
+        and "\0" not in observer
+        and all(
+            part not in ("", ".", "..") and part.casefold() not in _RESERVED_KEY_COMPONENTS
+            for part in observer.split("/")
+        )
+    )
 
 
 def keys_dir_for(vertex_path: Path) -> Path:
     """The custody-co-located key directory for a vertex file."""
     return vertex_path.parent / "keys"
+
+
+def _observer_key_dir(keys_root: Path, observer: str) -> Path:
+    """Return an exact observer directory, refusing filesystem aliases.
+
+    Observer names remain exact declaration identities.  On a
+    case-insensitive filesystem, however, a second spelling such as ``alice``
+    can resolve to the existing ``Alice`` directory.  Do not reinterpret that
+    as an identity normalization or silently borrow its private key.
+    """
+    if not _valid_key_observer(observer):
+        raise ValueError(
+            "observer must use nonempty relative components without reserved key filenames"
+        )
+    current = keys_root
+    for component in observer.split("/"):
+        candidate = current / component
+        if not current.exists():
+            current = candidate
+            continue
+        exact = next((entry for entry in current.iterdir() if entry.name == component), None)
+        if exact is None:
+            # On a case-insensitive filesystem candidate.exists() can name an
+            # existing differently spelled component.  Reject before a nested
+            # child or private key is minted beneath it.
+            if candidate.exists():
+                raise ValueError(
+                    f"observer {observer!r} aliases existing custody directory "
+                    f"at {candidate}"
+                )
+            current = candidate
+            continue
+        if exact.is_symlink():
+            raise ValueError(
+                f"observer {observer!r} aliases existing custody through symlink {exact}"
+            )
+        if not exact.is_dir():
+            raise ValueError(
+                f"observer {observer!r} has non-directory custody component {exact}"
+            )
+        current = exact
+    return current
+
+
+def _ensure_observer_key_dir(keys_root: Path, observer: str) -> Path:
+    """Create a key directory only after checking its exact components again."""
+    candidate = _observer_key_dir(keys_root, observer)
+    candidate.mkdir(parents=True, exist_ok=True)
+    return _observer_key_dir(keys_root, observer)
+
+
+def _load_existing_keypair(key_dir: Path):
+    """Load an already-present key without granting a load path minting power."""
+    from sign import ed25519
+
+    try:
+        return ed25519.load(key_dir)
+    except FileNotFoundError:
+        return None
+
+
+def _exact_nested_self_dir(keys_root: Path, observer: str) -> Path | None:
+    """Find only the exact nested self spelling; other observers stay distinct."""
+    if not _valid_key_observer(observer):
+        return None
+    current = keys_root
+    for component in observer.split("/"):
+        if not current.exists():
+            return None
+        exact = next((entry for entry in current.iterdir() if entry.name == component), None)
+        if exact is None:
+            return None
+        if exact.is_symlink():
+            raise ValueError(
+                f"self observer {observer!r} aliases custody through symlink {exact}"
+            )
+        if not exact.is_dir():
+            raise ValueError(
+                f"self observer {observer!r} has non-directory custody component {exact}"
+            )
+        current = exact
+    return current
+
+
+def _self_observer(vertex_path: Path) -> str:
+    """Return the exact self identity without normalizing an existing locator."""
+    if not vertex_path.exists():
+        # Initializers may mint before the future .vertex file exists.
+        return vertex_path.stem
+    exact = next(
+        (entry for entry in vertex_path.parent.iterdir() if entry.name == vertex_path.name),
+        None,
+    )
+    if exact is None:
+        raise ValueError(
+            f"vertex locator {vertex_path} aliases an existing differently spelled file"
+        )
+    return exact.stem
+
+
+def _self_key_dir(vertex_path: Path) -> Path | None:
+    """Select the self key consistently for minting and all signer domains.
+
+    New vertices retain the legacy flat layout.  A nested key for the stem can
+    survive an ordinary vertex-file rename; when it is the only key, it is the
+    self key for fact, Arrival, and tick signing alike.  Two different keys
+    are an ambiguous custody history and must be repaired explicitly.
+    """
+    keys_root = keys_dir_for(vertex_path)
+    flat = keys_root
+    flat_pair = _load_existing_keypair(flat)
+
+    self_observer = _self_observer(vertex_path)
+    nested = _exact_nested_self_dir(keys_root, self_observer)
+    nested_pair = None
+    if nested is not None:
+        nested_pair = _load_existing_keypair(nested)
+
+    if flat_pair is not None and nested_pair is not None:
+        if flat_pair.public_b64 != nested_pair.public_b64:
+            raise ValueError(
+                "ambiguous self-observer custody: flat and nested keys differ"
+            )
+        return flat
+    if flat_pair is not None:
+        return flat
+    if nested_pair is not None:
+        return nested
+    return None
 
 
 def ensure_signing_key(vertex_path: Path, observer: str | None = None):
@@ -52,14 +196,29 @@ def ensure_signing_key(vertex_path: Path, observer: str | None = None):
 
     ``observer`` (delta 3): mint into the per-observer layout
     ``keys/<observer>/`` instead of the flat (self-observer) layout.
-    The self-observer keeps the flat layout — fact_signer_for resolves
-    both, and the flat key remains what tick_signer_for loads.
+    New self-observer keys retain the flat layout.  An existing nested
+    self-observer key is retained after a vertex-file rename, and all signer
+    domains select the same key.  Ambiguous or filesystem-aliased key paths
+    refuse rather than silently selecting one identity's private key.
     """
     from sign import ed25519
 
-    key_dir = keys_dir_for(vertex_path)
-    if observer is not None and observer != vertex_path.stem:
-        key_dir = key_dir / observer
+    self_observer = _self_observer(vertex_path)
+    if (
+        observer is not None
+        and observer != self_observer
+        and not _valid_key_observer(observer)
+    ):
+        raise ValueError(
+            "observer must use nonempty relative components without reserved key filenames"
+        )
+    keys_root = keys_dir_for(vertex_path)
+    if observer is None or observer == self_observer:
+        key_dir = _self_key_dir(vertex_path) or keys_root
+    else:
+        key_dir = _observer_key_dir(keys_root, observer)
+        if _load_existing_keypair(key_dir) is None:
+            key_dir = _ensure_observer_key_dir(keys_root, observer)
     keypair = ed25519.load_or_generate(key_dir)
 
     gitignore = vertex_path.parent / ".gitignore"
@@ -80,12 +239,14 @@ def tick_signer_for(vertex_path: Path) -> Callable[[str], str] | None:
     init's job; an absent key here means this vertex has not opted into
     signing yet.
     """
-    key_dir = keys_dir_for(vertex_path)
-    if not (key_dir / _KEY_FILE).exists():
+    key_dir = _self_key_dir(vertex_path)
+    if key_dir is None:
+        return None
+    keypair = _load_existing_keypair(key_dir)
+    if keypair is None:  # Defensive against deletion between selection and load.
         return None
     from sign import ed25519
 
-    keypair = ed25519.load_or_generate(key_dir)  # exists → pure load
     return lambda digest: ed25519.sign(keypair, digest.encode(), domain=TICK_DOMAIN)
 
 
@@ -98,7 +259,7 @@ def observer_keys_dir_for(vertex_path: Path, observer: str) -> Path:
     vertex's own name, so existing single-key vertices sign facts
     without a key migration.
     """
-    return keys_dir_for(vertex_path) / observer
+    return _observer_key_dir(keys_dir_for(vertex_path), observer)
 
 
 def _scoped_signer_for(
@@ -110,7 +271,7 @@ def _scoped_signer_for(
         return None
     from sign import ed25519
 
-    self_observer = vertex_path.stem
+    self_observer = _self_observer(vertex_path)
     cache: dict[str, ed25519.Keypair | None] = {}
 
     def _keypair(observer: str):
@@ -118,18 +279,22 @@ def _scoped_signer_for(
         # to the flat layout, which would mint the VERTEX key's authorship
         # claim for an anonymous writer. Same guard for path traversal —
         # an observer name is a key, not a path expression.
-        if not observer or ".." in observer.split("/"):
-            return None
         if observer in cache:
             return cache[observer]
-        key_dir = keys_root / observer
-        if not (key_dir / _KEY_FILE).exists():
-            if observer == self_observer and (keys_root / _KEY_FILE).exists():
-                key_dir = keys_root  # flat delta-2 layout = self-observer
-            else:
-                cache[observer] = None
+        if observer == self_observer:
+            key_dir = _self_key_dir(vertex_path)
+        else:
+            if not _valid_key_observer(observer):
                 return None
-        cache[observer] = ed25519.load_or_generate(key_dir)  # exists → pure load
+            key_dir = _observer_key_dir(keys_root, observer)
+        if key_dir is None:
+            cache[observer] = None
+            return None
+        keypair = _load_existing_keypair(key_dir)
+        if keypair is None:  # Deleted after selection: remain in unsigned era.
+            cache[observer] = None
+            return None
+        cache[observer] = keypair
         return cache[observer]
 
     def signer(observer: str, digest: str) -> str | None:

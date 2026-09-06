@@ -1,0 +1,148 @@
+### 1. Environment & Baseline Verification
+
+- **Working Directory**: `/tmp/loops-arrival-correctness/review-stage2`
+- **Active Branch**: `review/correctness-stage2`
+- **Repository Worktree**: Clean (verified via `git status --short`).
+- **Allowed Write Fence**: Strictly limited to `/tmp/loops-arrival-correctness/stage2-probes`.
+
+---
+
+### Category A: Restore Exact Projection Audit
+
+#### 1. Code Spans Inspected
+- [`arrival_restore.py:89-102`](file:///tmp/loops-arrival-correctness/review-stage2/libs/engine/src/engine/arrival_restore.py#L89-L102): `_ledger_rows` walks `ledger.scan(through=through)`, skips `GENESIS_KIND` and `KEY_INTRODUCTION_KIND`, checks `ROW_KINDS`, and unpacks via `rows_of_body`.
+- [`arrival_restore.py:105-155`](file:///tmp/loops-arrival-correctness/review-stage2/libs/engine/src/engine/arrival_restore.py#L105-L155): `_snapshot_rows` queries `snapshot.facts` and `snapshot.ticks`, verifies non-null `payload_text`, forms uniform projection row tuples, and sorts by `(arrival_ordinal, arrival_seq, kind)`.
+- [`arrival_restore.py:157-193`](file:///tmp/loops-arrival-correctness/review-stage2/libs/engine/src/engine/arrival_restore.py#L157-L193): `_audit_declaration_anchor` invokes [`validate_arrival_declaration_anchor`](file:///tmp/loops-arrival-correctness/review-stage2/libs/engine/src/engine/declaration.py#L197-L216) and enforces 1-to-1 exact identity against expected genesis evidence.
+- [`arrival_restore.py:195-226`](file:///tmp/loops-arrival-correctness/review-stage2/libs/engine/src/engine/arrival_restore.py#L195-L226): `_audit_projection` opens snapshot with `ALLOW_BEHIND`, validates watermark resolution via `ledger.head_at`, clamps `audited = through if observed.ordinal > through.ordinal else observed`, and enforces `actual == expected`.
+- [`arrival_restore.py:256-267, 302-322`](file:///tmp/loops-arrival-correctness/review-stage2/libs/engine/src/engine/arrival_restore.py#L256-L267): `_restore_forward` pre-audit invokes `_HeadObservation._projection(before)` (refuses $P > \text{before}$) and `_audit_projection(target_ledger, target_query, before)`. Post-commit failure in `_audit_projection(actual, target_query, selected)` wraps in `RestoreForwardIncomplete(commit, exc)`, preserving the committed receipt.
+- [`arrival_body.py:89-100, 269-294`](file:///tmp/loops-arrival-correctness/review-stage2/libs/engine/src/engine/arrival_body.py#L89-L100): `ROW_KINDS` and `rows_of_body` tuple mapping.
+- [`arrival_file_backend.py:650-666, 886-960`](file:///tmp/loops-arrival-correctness/review-stage2/libs/engine/src/engine/arrival_file_backend.py#L650-L666): `head_at` resolves watermark coordinate against log; `_FileQuerySnapshot` clamps bounded rows to `captured_head.ordinal`.
+
+#### 2. Baseline Test Run
+```
+cd libs/engine && uv run pytest -p no:cacheprovider tests/test_arrival_restore.py
+============================== 18 passed in 0.93s ==============================
+```
+
+#### 3. Independent Adversarial Probes
+Probes created in `/tmp/loops-arrival-correctness/stage2-probes/test_adversarial_probes.py`:
+- `test_restore_refuses_projection_with_extra_phantom_fact`: Injected phantom fact row into projection index at receiver coordinate.
+- `test_restore_refuses_projection_with_corrupted_signature`: Injected modified fact signature string into projection database.
+- `test_restore_refuses_projection_with_corrupted_tick_chain`: Injected modified `window_hash` on projected tick row.
+```
+cd libs/engine && PYTHONPATH=. PYTHONDONTWRITEBYTECODE=1 uv run pytest -c pyproject.toml -p tests.conftest -p no:cacheprovider /tmp/loops-arrival-correctness/stage2-probes/test_adversarial_probes.py -k "restore_refuses" -v
+::test_restore_refuses_projection_with_extra_phantom_fact PASSED         [ 33%]
+::test_restore_refuses_projection_with_corrupted_signature PASSED        [ 66%]
+::test_restore_refuses_projection_with_corrupted_tick_chain PASSED       [100%]
+============================== 3 passed in 0.17s ===============================
+```
+
+#### 4. Audit Assessment
+- **Watermark as Coordinate**: Watermarks hold `(lineage, ordinal)` without hashes; `_audit_projection` performs $O(N)$ row-level comparison to catch forks at equal ordinal coordinates.
+- **Bounding and Clamping**: Clamping `audited` to `through` when represented watermark is concurrently advanced maintains integrity against `ALLOW_BEHIND` reads.
+- **Fail-Closed Semantics**: Projection mismatches reject prior to mutation on the pre-check and retain durable `Commit` receipts under `RestoreForwardIncomplete` post-mutation. Pure read snapshots never trigger repair.
+
+---
+
+### Category B: Boundary Period Consumption
+
+#### 1. Code Spans Inspected
+- [`vertex.py:773-834`](file:///tmp/loops-arrival-correctness/review-stage2/libs/engine/src/engine/vertex.py#L773-L834): `hydrate_snapshot` replays receipt-ordered facts and ticks, advancing loop counts and restoring `_vertex_period_start` from historical vertex ticks.
+- [`vertex.py:1245-1338`](file:///tmp/loops-arrival-correctness/review-stage2/libs/engine/src/engine/vertex.py#L1245-L1338): `plan_pending_boundaries` constructs `edges` mapping `tick.name -> (tick_time, ordinal, seq)`. Normalizes float timestamps using `datetime.fromtimestamp(ts, tz=timezone.utc).timestamp()` to match SQLite microsecond precision. Breaks on first vertex boundary match (`line 1315`); tracks loop boundaries per `fold_kind` in `fired_boundaries` (`line 1337`).
+- [`runtime_write.py:985-1020`](file:///tmp/loops-arrival-correctness/review-stage2/libs/engine/src/engine/runtime_write.py#L985-L1020): `capture_runtime` passes frozen snapshot facts and ticks to `post_boundary_candidate.plan_pending_boundaries`.
+- [`runtime_write.py:1227-1270`](file:///tmp/loops-arrival-correctness/review-stage2/libs/engine/src/engine/runtime_write.py#L1227-L1270): `_pending_tick_draft` binds `fact_cursor` to `current_fact.id` ($\max(\text{arrival\_ordinal}, \text{arrival\_seq})$), verifying evidence horizon rather than trigger ID.
+- [`runtime_write.py:1273-1340`](file:///tmp/loops-arrival-correctness/review-stage2/libs/engine/src/engine/runtime_write.py#L1273-L1340): `plan_batch_from_capture` plans pending tick drafts sequentially with monotonic receipt ordinals.
+
+#### 2. Baseline Test Run
+```
+cd libs/engine && uv run pytest -p no:cacheprovider tests/test_runtime_boundary_consumption.py tests/test_runtime_capture.py
+============================== 26 passed in 0.84s ==============================
+```
+
+#### 3. Independent Adversarial Probes
+Probes created in `/tmp/loops-arrival-correctness/stage2-probes/test_adversarial_b.py` and `test_adversarial_probes.py`:
+- `test_adversarial_simultaneous_vertex_and_loop_boundaries`: Verified that simultaneous firing of vertex and loop boundaries at $t=4.0$ creates both ticks, and late arrival for the loop boundary triggers only the loop tick without re-triggering the vertex tick.
+- `test_adversarial_interleaved_multi_period_consumption`: Verified 3 interleaved triggers across distinct timestamps execute strictly one period per cycle and terminate cleanly.
+- `test_adversarial_submicrosecond_coincident_facts_consumption`: Verified submicrosecond facts rounding to the same microsecond belong to one closed period; later arrivals at the same normalized timestamp trigger anew.
+```
+cd libs/engine && PYTHONPATH=. PYTHONDONTWRITEBYTECODE=1 uv run pytest -c pyproject.toml -p tests.conftest -p no:cacheprovider /tmp/loops-arrival-correctness/stage2-probes/test_adversarial_b.py /tmp/loops-arrival-correctness/stage2-probes/test_adversarial_probes.py -k "adversarial" -v
+test_adversarial_b.py::test_adversarial_simultaneous_vertex_and_loop_boundaries PASSED [ 33%]
+test_adversarial_b.py::test_adversarial_interleaved_multi_period_consumption PASSED [ 66%]
+test_adversarial_probes.py::test_adversarial_submicrosecond_coincident_facts_consumption PASSED [100%]
+============================== 3 passed in 0.24s ===============================
+```
+
+#### 4. Audit Assessment
+- **Edge Comparison & Microsecond Normalization**: `tick_time(ts)` prevents submicrosecond float artifacts from repeating consumed facts or dropping late arrivals.
+- **Consumption Horizon**: `fact_cursor` reflects total evidence ceiling at planning time, not triggering fact identity.
+- **Single Period Closure**: First vertex boundary match breaks immediately, avoiding multiple vertex closures in a single batch.
+
+---
+
+### Category C: Aggregate Adopted Topology
+
+#### 1. Code Spans Inspected
+- [`libs/sdk/src/sdk/aggregate.py:241-273, 285-304`](file:///tmp/loops-arrival-correctness/review-stage2/libs/sdk/src/sdk/aggregate.py#L241-L273): `streams` and `_eligible_members` enforce own-overlay shadowing over child facts for declared kinds, including when own-overlay data is empty.
+- [`libs/sdk/src/sdk/aggregate.py:402-452`](file:///tmp/loops-arrival-correctness/review-stage2/libs/sdk/src/sdk/aggregate.py#L402-L452): `has_local_descriptor_aggregate` filters out descriptor-bearing roots (`descriptor_for(root_ast, root) is not None`), routing only storeless roots with Arrival descendants.
+- [`libs/sdk/src/sdk/read.py:548-567, 971-991, 1502-1520`](file:///tmp/loops-arrival-correctness/review-stage2/libs/sdk/src/sdk/read.py#L548-L567): In `read_summary`, `read_state`, and `read_timeline`, descriptor roots open once (`_open_arrival_read`), inspect adopted `effective_ast`, and pass `opened_root=opened` into `open_aggregate_read`.
+- [`libs/engine/src/engine/arrival_aggregate.py:221-236`](file:///tmp/loops-arrival-correctness/review-stage2/libs/engine/src/engine/arrival_aggregate.py#L221-L236): `_effective_declaration` extracts adopted documents from snapshot facts and declaration anchor.
+- [`libs/engine/src/engine/arrival_aggregate.py:288-320`](file:///tmp/loops-arrival-correctness/review-stage2/libs/engine/src/engine/arrival_aggregate.py#L288-L320): `capture_aggregate` reuses `opened_root` and retains root member with `role=node.role` when `effective.combine is None` and `effective.discover is None`.
+
+#### 2. Baseline Test Runs
+```
+cd libs/sdk && uv run pytest -p no:cacheprovider tests/test_arrival_aggregate.py
+============================== 8 passed in 0.48s ===============================
+```
+```
+cd libs/engine && uv run pytest -p no:cacheprovider tests/test_arrival_aggregate.py
+============================== 6 passed in 0.14s ===============================
+```
+
+#### 3. Audit Assessment
+- **Storeless vs Adopted Routing**: Storeless roots route via `has_local_descriptor_aggregate` based on local topology. Descriptor-bearing roots route through `_aggregate_aware_arrival_descriptor` and evaluate exclusively against the adopted declaration at the captured head.
+- **Effective Plain Retention**: If a descriptor root has a local `discover` clause on disk but its adopted declaration is plain, unadopted children are ignored, and root facts are retained across `summary`, `state`, and `timeline`.
+- **Shadowing & Deduplication**: Discovered own-overlay correctly shadows child kinds (even when empty) without synthetic deduplication or occurrence destruction.
+
+---
+
+### Category D: Follow-up Verification
+
+1. **`declaration.py:214-215` (`validate_arrival_declaration_anchor`)**:
+   Enforces `anchor.genesis.kind == DECL_GENESIS` (`_decl.genesis`), raising `NotAuthority` if kind differs.
+2. **`arrival_declarations.py:832-834` (`prepare_declaration_edit`)**:
+   Invokes `validate_arrival_declaration_anchor(snapshot.declaration_anchor, captured_head)` immediately after opening `CURRENT` snapshot, prior to folding or signing edits.
+3. **`arrival_declarations.py:551-569` (`_recover_declaration_edit` basis validation)**:
+   Validates `basis.projected_through == captured` and `isinstance(view_generation, str | None)`; when `basis_data` is omitted, defaults to unknown (`projected_through=None, view_generation=None`).
+4. **Test Confirmation**:
+   Verified via `libs/sdk/tests/test_arrival_declarations.py`:
+   - `test_prepare_refuses_foreign_derived_declaration_anchor_before_signing`
+   - `test_recovery_rejects_malformed_persisted_basis_before_side_effects`
+```
+cd libs/sdk && uv run pytest -k "foreign_anchor or invalid_basis or recover_declaration" -p no:cacheprovider
+====================== 2 passed, 484 deselected in 0.85s =======================
+```
+All Category D follow-up items are confirmed closed.
+
+---
+
+### Findings Summary & Limitations
+
+- **Actionable Findings**: **0**.
+  All reviewed mechanisms adhere to specified correctness constraints:
+  - Exact prefix audit in `arrival_restore.py` rejects same-height forks, malformed anchors, and phantom rows without store mutation, while preserving durable receipts under post-append failures.
+  - Boundary consumption in `vertex.py` and `runtime_write.py` correctly handles microsecond-normalized edges, multi-period interleaved consumption, and evidence-horizon cursors.
+  - Aggregate resolution distinguishes storeless local composition from adopted descriptor topology, correctly isolating unadopted children and respecting own-overlay shadowing.
+- **Review Limitations**: Read-only evaluation of commit `164875b` on branch `review/correctness-stage2`. Next-stage source-aware projection rebuild/repair is intentionally out of scope.
+
+---
+
+### Status and Output
+
+```
+cd /tmp/loops-arrival-correctness/review-stage2 && git status --short
+```
+*(No output — worktree is clean)*
+
+**Files Written (Restricted to `/tmp/loops-arrival-correctness/stage2-probes`)**:
+- `/tmp/loops-arrival-correctness/stage2-probes/test_adversarial_b.py`
+- `/tmp/loops-arrival-correctness/stage2-probes/test_adversarial_probes.py`

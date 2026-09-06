@@ -893,12 +893,13 @@ def documents_to_vertex(
     path: Path | None = None,
     store: Path | None = None,
     store_backend: BackendDecl | None = None,
+    store_location: str | None = None,
 ) -> VertexFile:
     """Project declaration documents back to a ``VertexFile`` AST.
 
-    ``path``, ``store`` and ``store_backend`` are residence, supplied by the
+    ``path``, ``store``, ``store_backend`` and ``store_location`` are residence, supplied by the
     caller — they are not present in the documents. Pure inverse of
-    :func:`vertex_to_documents` modulo those three fields.
+    :func:`vertex_to_documents` modulo those four fields.
 
     ``store_backend`` is residence for the same reason the locator is: which
     adapter opens a store is an operational choice about where the vertex
@@ -1018,6 +1019,7 @@ def documents_to_vertex(
         loops=loops,
         store=store,
         store_backend=store_backend,
+        store_location=store_location,
         discover=discover,
         sources=sources,
         vertices=vertices,

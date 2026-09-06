@@ -59,10 +59,15 @@ from .arrival_projection import (
     derived_log_path_for,
     rows_of_record,
 )
-from .jsonl_codec import JsonlCodecError, deserialize_records
-from .sqlite_store import (
+from .file_projection_schema import (
+    ARRIVAL_LINEAGE_KEY,
+    ARRIVAL_OFFSET_KEY,
+    ARRIVAL_ORDINAL_KEY,
     FACT_COLUMNS,
     TICK_COLUMNS,
+)
+from .jsonl_codec import JsonlCodecError, deserialize_records
+from .sqlite_store import (
     _fact_row_hash,
     _tick_row_hash,
 )
@@ -77,11 +82,6 @@ __all__ = [
     "audit_agreement",
     "audit_deep",
 ]
-
-# The marker keys, spelled once.
-ARRIVAL_LINEAGE_KEY = "arrival_lineage"
-ARRIVAL_OFFSET_KEY = "arrival_offset"
-ARRIVAL_ORDINAL_KEY = "arrival_ordinal"
 
 OFFSET_KEY = "jsonl_offset"
 FACT_COUNT_KEY = "jsonl_fact_count"
@@ -1167,5 +1167,4 @@ class _ChainWalkJsonl:
             "chain", True,
             f"{self._chained} chained tick(s) re-derived from canonical content",
         )
-
 

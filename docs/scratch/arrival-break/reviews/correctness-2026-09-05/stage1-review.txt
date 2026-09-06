@@ -1,0 +1,157 @@
+### Verification Preconditions
+
+Working directory and branch verified prior to test execution:
+- Working directory: `/tmp/loops-arrival-correctness/review-stage1`
+- Git branch: `review/correctness-stage1`
+- Target model: Gemini 3.8 Flash (High)
+- Isolation: Review executed read-only on repo; all test probes and state isolated under `/tmp/loops-arrival-correctness/stage1-probes`.
+
+---
+
+### Actionable Findings
+
+#### Finding 1: [`prepare_declaration_edit`](file:///tmp/loops-arrival-correctness/review-stage1/libs/engine/src/engine/arrival_declarations.py#L810-L840) Omits Shared Anchor Validation, Accepting Foreign/Tainted Declaration Anchors
+- **Severity**: High
+- **Trigger**: An Arrival store's derived projection contains a foreign declaration anchor (`store_meta.own_lineage` set to a foreign lineage that has a corresponding `_decl.genesis` fact in `facts`, e.g., via merged fact events or projection corruption) while the underlying log custody remains at its legitimate physical lineage.
+- **Actual Behavior**: [`open_read`](file:///tmp/loops-arrival-correctness/review-stage1/libs/engine/src/engine/arrival_consumer.py#L163) and [`capture_runtime`](file:///tmp/loops-arrival-correctness/review-stage1/libs/engine/src/engine/runtime_write.py#L736) reject this state with [`NotAuthority`](file:///tmp/loops-arrival-correctness/review-stage1/libs/engine/src/engine/arrival_contract.py#L98) via [`validate_arrival_declaration_anchor`](file:///tmp/loops-arrival-correctness/review-stage1/libs/engine/src/engine/declaration.py#L197-L211). However, [`prepare_declaration_edit`](file:///tmp/loops-arrival-correctness/review-stage1/libs/engine/src/engine/arrival_declarations.py#L814-L835) opens `query.open_snapshot` and directly passes `snapshot.declaration_anchor` to [`resolve_declaration_documents_from_snapshot`](file:///tmp/loops-arrival-correctness/review-stage1/libs/engine/src/engine/declaration.py#L213-L260) without invoking [`validate_arrival_declaration_anchor`](file:///tmp/loops-arrival-correctness/review-stage1/libs/engine/src/engine/declaration.py#L197-L211). It resolves documents belonging to the foreign lineage, diffs them against proposed edits, and prepares a signed plan against the store.
+- **Expected Behavior**: [`prepare_declaration_edit`](file:///tmp/loops-arrival-correctness/review-stage1/libs/engine/src/engine/arrival_declarations.py#L827-L835) must call `validate_arrival_declaration_anchor(snapshot.declaration_anchor, captured_head)` immediately after opening the snapshot to refuse foreign declaration state before document diffing.
+- **Source Location**: [arrival_declarations.py:L814-835](file:///tmp/loops-arrival-correctness/review-stage1/libs/engine/src/engine/arrival_declarations.py#L814-L835)
+- **Proof**: Executed disposable store probe `/tmp/loops-arrival-correctness/stage1-probes/probe_decl_edit_foreign.py`. With `store_meta.own_lineage` set to a foreign lineage with matching foreign genesis, `prepare_declaration_edit` succeeded:
+  ```
+  PROVED: prepare_declaration_edit allowed foreign declaration anchor!
+  Plan captured_head lineage: 01M1TD0A0SAFT0FJ8D5ZH0WVD9
+  Plan basis lineage: 01M1TD0A0SAFT0FJ8D5ZH0WVD9
+  Plan changes: ()
+  ```
+
+---
+
+#### Finding 2: [`validate_arrival_declaration_anchor`](file:///tmp/loops-arrival-correctness/review-stage1/libs/engine/src/engine/declaration.py#L197-L211) Does Not Enforce Genesis Kind When Called Standalone
+- **Severity**: Low
+- **Trigger**: Directly invoking [`plan_ordinary_write`](file:///tmp/loops-arrival-correctness/review-stage1/libs/engine/src/engine/runtime_write.py#L834-L840) or consumer entry points with an unadopted or synthetic snapshot whose `anchor.genesis` is an ordinary fact (`kind != "_decl.genesis"`) that shares the lineage ID.
+- **Actual Behavior**: [`validate_arrival_declaration_anchor`](file:///tmp/loops-arrival-correctness/review-stage1/libs/engine/src/engine/declaration.py#L197-L211) validates only `anchor.genesis.id == head.lineage` and `anchor.own_lineage == head.lineage`, omitting a check for `anchor.genesis.kind == DECL_GENESIS`. While full candidate hydration in [`_build_effective_arrival_candidate`](file:///tmp/loops-arrival-correctness/review-stage1/libs/engine/src/engine/runtime_write.py#L737) invokes [`resolve_declaration_documents_from_snapshot`](file:///tmp/loops-arrival-correctness/review-stage1/libs/engine/src/engine/declaration.py#L236) (which checks `DECL_GENESIS`), callers relying exclusively on [`validate_arrival_declaration_anchor`](file:///tmp/loops-arrival-correctness/review-stage1/libs/engine/src/engine/declaration.py#L197-L211) accept non-genesis facts as identity genesis anchors.
+- **Expected Behavior**: [`validate_arrival_declaration_anchor`](file:///tmp/loops-arrival-correctness/review-stage1/libs/engine/src/engine/declaration.py#L207-L211) should verify `anchor.genesis.kind == DECL_GENESIS` whenever `anchor.genesis is not None`.
+- **Source Location**: [declaration.py:L207-211](file:///tmp/loops-arrival-correctness/review-stage1/libs/engine/src/engine/declaration.py#L207-L211)
+- **Proof**: Calling `validate_arrival_declaration_anchor(DeclarationAnchor(own_lineage=h.lineage, genesis=Fact(id=h.lineage, kind="note", ...)), h)` passes without raising `NotAuthority`.
+
+---
+
+### Compact Evidence by Category
+
+#### Category 1: Restore Guard
+- **Spans Read**:
+  - [arrival_restore.py:L1-180](file:///tmp/loops-arrival-correctness/review-stage1/libs/engine/src/engine/arrival_restore.py#L1-L180) ([`_restore_forward`](file:///tmp/loops-arrival-correctness/review-stage1/libs/engine/src/engine/arrival_restore.py#L83-L175), specifically lines 110–121)
+  - [test_arrival_restore.py:L1-344](file:///tmp/loops-arrival-correctness/review-stage1/libs/engine/tests/test_arrival_restore.py#L1-L344) (specifically lines 244–281)
+  - [arrival_head_seam.py:L942-1050, 1506-1567](file:///tmp/loops-arrival-correctness/review-stage1/libs/engine/src/engine/arrival_head_seam.py#L942-L1050) ([`_HeadObservation._projection`](file:///tmp/loops-arrival-correctness/review-stage1/libs/engine/src/engine/arrival_head_seam.py#L1506-L1567))
+  - [backend-contract.html:L1-150, 400-435](file:///tmp/loops-arrival-correctness/review-stage1/docs/architecture/arrival/backend-contract.html#L400-L435)
+- **Executed Command**:
+  ```bash
+  cd /tmp/loops-arrival-correctness/review-stage1 && cd libs/engine && PYTHONDONTWRITEBYTECODE=1 uv run pytest -p no:cacheprovider tests/test_arrival_restore.py::test_restore_refuses_fork_projection_ahead_of_actual_receiver
+  ```
+- **Output**:
+  ```
+  ============================= test session starts ==============================
+  platform darwin -- Python 3.13.11, pytest-9.1.1, pluggy-1.6.0
+  rootdir: /private/tmp/loops-arrival-correctness/review-stage1/libs/engine
+  configfile: pyproject.toml
+  plugins: cov-7.1.0, asyncio-1.4.0, hypothesis-6.167.1
+  asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function
+  collected 1 item
+
+  tests/test_arrival_restore.py .                                          [100%]
+
+  ============================== 1 passed in 1.04s ===============================
+  ```
+- **Assessment**: The guard `_HeadObservation(target_ledger, ..., query=target_query, binding=binding)._projection(before)` at [arrival_restore.py:L115-120](file:///tmp/loops-arrival-correctness/review-stage1/libs/engine/src/engine/arrival_restore.py#L115-L120) correctly evaluates the receiver's existing projection watermark against `before` before evaluating proposed source records. A receiver projection ahead of `before` immediately raises [`ProjectionAheadOfLedger`](file:///tmp/loops-arrival-correctness/review-stage1/libs/engine/src/engine/arrival_head_seam.py#L216) without modifying the receiver.
+
+---
+
+#### Category 2: Shared Declaration Anchor Check
+- **Spans Read**:
+  - [declaration.py:L1-100, 183-260](file:///tmp/loops-arrival-correctness/review-stage1/libs/engine/src/engine/declaration.py#L183-L260) ([`validate_arrival_declaration_anchor`](file:///tmp/loops-arrival-correctness/review-stage1/libs/engine/src/engine/declaration.py#L197-L211), [`resolve_declaration_documents_from_snapshot`](file:///tmp/loops-arrival-correctness/review-stage1/libs/engine/src/engine/declaration.py#L213-L260))
+  - [arrival_consumer.py:L125-225](file:///tmp/loops-arrival-correctness/review-stage1/libs/engine/src/engine/arrival_consumer.py#L125-L225) ([`open_read`](file:///tmp/loops-arrival-correctness/review-stage1/libs/engine/src/engine/arrival_consumer.py#L118-L225), specifically line 163)
+  - [runtime_write.py:L720-760, 820-860, 990-1040](file:///tmp/loops-arrival-correctness/review-stage1/libs/engine/src/engine/runtime_write.py#L720-L760) ([`_build_effective_arrival_candidate`](file:///tmp/loops-arrival-correctness/review-stage1/libs/engine/src/engine/runtime_write.py#L720-L760), [`plan_ordinary_write`](file:///tmp/loops-arrival-correctness/review-stage1/libs/engine/src/engine/runtime_write.py#L820-L860))
+  - [test_runtime_capture.py:L50-90](file:///tmp/loops-arrival-correctness/review-stage1/libs/engine/tests/test_runtime_capture.py#L50-L90)
+  - [arrival_declarations.py:L810-850](file:///tmp/loops-arrival-correctness/review-stage1/libs/engine/src/engine/arrival_declarations.py#L810-L850)
+- **Executed Command**:
+  ```bash
+  cd /tmp/loops-arrival-correctness/review-stage1 && cd libs/engine && PYTHONDONTWRITEBYTECODE=1 uv run pytest -p no:cacheprovider tests/test_runtime_capture.py -k foreign_declaration
+  ```
+- **Output**:
+  ```
+  ============================= test session starts ==============================
+  platform darwin -- Python 3.13.11, pytest-9.1.1, pluggy-1.6.0
+  rootdir: /private/tmp/loops-arrival-correctness/review-stage1/libs/engine
+  configfile: pyproject.toml
+  plugins: cov-7.1.0, asyncio-1.4.0, hypothesis-6.167.1
+  asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function
+  collected 16 items / 10 deselected / 6 selected
+
+  tests/test_runtime_capture.py ......                                     [100%]
+
+  ======================= 6 passed, 10 deselected in 0.66s =======================
+  ```
+- **Executed Probe**:
+  ```bash
+  cd /tmp/loops-arrival-correctness/review-stage1 && cd libs/engine && uv run python /tmp/loops-arrival-correctness/stage1-probes/probe_foreign_decl_prep.py
+  ```
+- **Probe Output**:
+  ```
+  Testing validate_arrival_declaration_anchor directly:
+  PASS: Case 1 correctly raised NotAuthority: projection declaration identity does not match captured Arrival lineage
+  PASS: Case 2 correctly raised NotAuthority: projection declaration identity has no matching genesis
+  PASS: Case 3 correctly raised NotAuthority: projection declaration genesis does not match captured Arrival lineage
+  PASS: Case 4 unadopted anchor accepted without error
+  ```
+- **Assessment**: The anchor validation successfully protects [`open_read`](file:///tmp/loops-arrival-correctness/review-stage1/libs/engine/src/engine/arrival_consumer.py#L163) and [`capture_runtime`](file:///tmp/loops-arrival-correctness/review-stage1/libs/engine/src/engine/runtime_write.py#L736) from foreign `own_lineage` and missing genesis, but Finding 1 details how [`prepare_declaration_edit`](file:///tmp/loops-arrival-correctness/review-stage1/libs/engine/src/engine/arrival_declarations.py#L827) omitted the check.
+
+---
+
+#### Category 3: SDK Recovery
+- **Spans Read**:
+  - [arrival_declarations.py:L156-176, 264-287, 504-578, 1019-1036, 1213-1333](file:///tmp/loops-arrival-correctness/review-stage1/libs/engine/src/engine/arrival_declarations.py#L156-L176) ([`DeclarationEditResult`](file:///tmp/loops-arrival-correctness/review-stage1/libs/engine/src/engine/arrival_declarations.py#L156-L176), [`_intent_data`](file:///tmp/loops-arrival-correctness/review-stage1/libs/engine/src/engine/arrival_declarations.py#L264-L287), [`_plan_from_intent`](file:///tmp/loops-arrival-correctness/review-stage1/libs/engine/src/engine/arrival_declarations.py#L504-L578), [`_result`](file:///tmp/loops-arrival-correctness/review-stage1/libs/engine/src/engine/arrival_declarations.py#L1019-L1036), [`recover_declaration_edit`](file:///tmp/loops-arrival-correctness/review-stage1/libs/engine/src/engine/arrival_declarations.py#L1213-L1333))
+  - [declare.py:L39-65, 99-123, 234-255](file:///tmp/loops-arrival-correctness/review-stage1/libs/sdk/src/sdk/declare.py#L39-L65) ([`DeclarationEditResult`](file:///tmp/loops-arrival-correctness/review-stage1/libs/sdk/src/sdk/declare.py#L39-L65), [`_arrival_result`](file:///tmp/loops-arrival-correctness/review-stage1/libs/sdk/src/sdk/declare.py#L99-L123), [`recover_declaration`](file:///tmp/loops-arrival-correctness/review-stage1/libs/sdk/src/sdk/declare.py#L234-L255))
+  - [test_arrival_declarations.py:L330-405](file:///tmp/loops-arrival-correctness/review-stage1/libs/sdk/tests/test_arrival_declarations.py#L330-L405)
+- **Executed Command**:
+  ```bash
+  cd /tmp/loops-arrival-correctness/review-stage1 && cd libs/sdk && PYTHONDONTWRITEBYTECODE=1 uv run pytest -p no:cacheprovider tests/test_arrival_declarations.py -k recover_declaration
+  ```
+- **Output**:
+  ```
+  ============================= test session starts ==============================
+  platform darwin -- Python 3.13.11, pytest-9.1.1, pluggy-1.6.0
+  rootdir: /private/tmp/loops-arrival-correctness/review-stage1/libs/sdk
+  configfile: pyproject.toml
+  plugins: cov-7.1.0, asyncio-1.4.0, hypothesis-6.167.1
+  asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+  collected 27 items / 25 deselected / 2 selected
+
+  tests/test_arrival_declarations.py ..                                    [100%]
+
+  ======================= 2 passed, 25 deselected in 0.49s =======================
+  ```
+- **Assessment**:
+  1. [`DeclarationEditResult`](file:///tmp/loops-arrival-correctness/review-stage1/libs/engine/src/engine/arrival_declarations.py#L156-L176) and SDK [`DeclarationEditResult`](file:///tmp/loops-arrival-correctness/review-stage1/libs/sdk/src/sdk/declare.py#L39-L65) properly accommodate `basis: ReadBasis`, `changes: tuple[Change, ...] | None`, and `intent_path: Path | None`.
+  2. In [`_arrival_result`](file:///tmp/loops-arrival-correctness/review-stage1/libs/sdk/src/sdk/declare.py#L99-L123), `changes = None if result.changes is None else ...` prevents iteration over `None` when recovery completes with removed intent.
+  3. [`_plan_from_intent`](file:///tmp/loops-arrival-correctness/review-stage1/libs/engine/src/engine/arrival_declarations.py#L516-L556) accurately handles backwards compatibility: intents missing `"basis"` reconstruct a `ReadBasis(lineage=captured.lineage, captured_head=captured, projected_through=None, view_generation=None)`, while new intents retain their exact captured basis.
+  4. Recovery leaves `commit=None` and `changes=None` rather than synthesizing fictitious diffs or commits.
+
+---
+
+### Limitations
+
+1. **Unfinished Tree Snapshot**: Review was restricted strictly to the 3 target correctness fixes and their immediate helpers. Surrounding experimental modules in `libs/` were not reviewed.
+2. **Rebuild / Explicit Projection Recovery Out of Scope**: In accordance with specification rulings, the absence of an automatic projection rebuild mechanism following a restore guard refusal was not evaluated as a defect.
+3. **No External Network / Live Store Verification**: Testing relied exclusively on isolated local file stores and SQLite projection indices within temporary files.
+
+---
+
+### Git Status & Writes Report
+
+All probe scripts and test artifacts were written strictly inside the allowed fence `/tmp/loops-arrival-correctness/stage1-probes`. The repository working tree remains unmodified and clean.
+
+```bash
+cd /tmp/loops-arrival-correctness/review-stage1 && git status --short
+```
+Output:
+*(clean - no untracked or modified files)*

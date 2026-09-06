@@ -1,0 +1,36 @@
+{
+  "status": "reviews-finished-awaiting-triage",
+  "checks": [
+    {
+      "name": "sdk-verify-pagination",
+      "status": "reviewed-awaiting-triage",
+      "source_drift": [],
+      "packet_verified": true
+    },
+    {
+      "name": "custody-observer-guard",
+      "status": "reviewed-awaiting-triage",
+      "source_drift": [],
+      "packet_verified": true
+    },
+    {
+      "name": "export",
+      "status": "reviewed-awaiting-triage",
+      "source_drift": [],
+      "packet_verified": true
+    },
+    {
+      "name": "correctness-followup",
+      "status": "reviewed-awaiting-triage",
+      "source_drift": [],
+      "packet_verified": true
+    }
+  ],
+  "fable_usage": {
+    "inputTokens": 8,
+    "outputTokens": 30270,
+    "cacheReadInputTokens": 6569,
+    "cacheCreationInputTokens": 104449,
+    "thinkingTokens": 24113
+  }
+}

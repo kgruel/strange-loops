@@ -1,0 +1,10 @@
+{
+  "status": "complete",
+  "reviews": 4,
+  "original_reviews_total_completed": 13,
+  "remaining_original_reviews": 0,
+  "production_changes": false,
+  "actionable_behavior_observations": 6,
+  "severity_note": "four medium/identity-policy concerns, two low reporting semantics; see primary-triage.md",
+  "pending_jobs": 0
+}

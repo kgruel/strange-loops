@@ -1,0 +1,27 @@
+{
+  "engine": {
+    "passed": 2501,
+    "skipped": 1
+  },
+  "sdk": {
+    "passed": 486
+  },
+  "migrate": {
+    "passed": 69
+  },
+  "architecture": {
+    "passed": 101
+  },
+  "minimal_cli": {
+    "passed": 8
+  },
+  "review_model": "gemini-3.8-flash-high",
+  "stage1_review": "completed; high and low findings addressed",
+  "stage2_review": "completed; zero actionable findings; primary gate accepted within scope",
+  "production_commits": false,
+  "live_store_changes": false,
+  "root_adversarial_probes": 6,
+  "root_declaration_followup_cases": 5,
+  "restore_focused_after_additional_healthy_case": 19,
+  "additional_healthy_test_after_full_engine_run": 1
+}

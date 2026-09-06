@@ -61,8 +61,8 @@ def test_property_emission_and_pagination_invariants(
     # 2. Lookup Fixpoint Property
     for fid in emitted_ids:
         fact = read_fact_by_id(vertex_path, fid)
-        assert fact is not None
-        assert fact["id"] == fid
+        assert fact.fact is not None
+        assert fact.fact["id"] == fid
 
     # 3. Newest Pagination Completeness & Partition Property (pages of size 3)
     page_size = 3

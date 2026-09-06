@@ -26,6 +26,9 @@ from __future__ import annotations
 import base64
 import binascii
 import logging
+import os
+import tempfile
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -38,6 +41,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import (
 
 __all__ = [
     "Keypair",
+    "load",
     "load_or_generate",
     "public_key_b64",
     "public_key_from_b64",
@@ -102,22 +106,67 @@ def _generate(key_dir: Path) -> None:
         serialization.NoEncryption(),
     )
     key_path = key_dir / _KEY_FILE
-    key_path.write_bytes(key_pem)
-    key_path.chmod(0o600)
-    (key_dir / _PUB_FILE).write_text(public_key_b64(private.public_key()) + "\n")
+    fd, raw = tempfile.mkstemp(prefix=f".{_KEY_FILE}.", dir=key_dir)
+    temporary = Path(raw)
+    try:
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(key_pem)
+            stream.flush()
+            os.fsync(stream.fileno())
+        temporary.chmod(0o600)
+        with suppress(FileExistsError):
+            # Publish a complete private key once.  A concurrent loser loads
+            # this winning file below; it never replaces it with its draft.
+            os.link(temporary, key_path)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
-def load_or_generate(key_dir: str | Path) -> Keypair:
-    """Ensure an Ed25519 keypair exists in ``key_dir``, then load and return it."""
-    key_dir = Path(key_dir)
-    key_path = key_dir / _KEY_FILE
-    if not key_path.exists():
-        _generate(key_dir)
+def _publish_public(key_dir: Path, keypair: Keypair) -> None:
+    """Atomically make the convenience public-key file agree with the private key."""
+    public_path = key_dir / _PUB_FILE
+    expected = public_key_b64(keypair.public) + "\n"
+    try:
+        if public_path.read_text() == expected:
+            return
+    except FileNotFoundError:
+        pass
+    fd, raw = tempfile.mkstemp(prefix=f".{_PUB_FILE}.", dir=key_dir)
+    temporary = Path(raw)
+    try:
+        with os.fdopen(fd, "w") as stream:
+            stream.write(expected)
+            stream.flush()
+            os.fsync(stream.fileno())
+        temporary.replace(public_path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def load(key_dir: str | Path) -> Keypair:
+    """Load an existing Ed25519 keypair without creating any filesystem state.
+
+    ``FileNotFoundError`` is deliberate: read-side callers can distinguish the
+    pre-signature era from a request to mint a new key.
+    """
+    key_path = Path(key_dir) / _KEY_FILE
     private = serialization.load_pem_private_key(key_path.read_bytes(), password=None)
     if not isinstance(private, Ed25519PrivateKey):
         kind = type(private).__name__
         raise ValueError(f"expected Ed25519 private key in {key_path}, got {kind}")
     return Keypair(private=private, public=private.public_key())
+
+
+def load_or_generate(key_dir: str | Path) -> Keypair:
+    """Ensure an Ed25519 keypair exists in ``key_dir``, then load and return it."""
+    key_dir = Path(key_dir)
+    try:
+        keypair = load(key_dir)
+    except FileNotFoundError:
+        _generate(key_dir)
+        keypair = load(key_dir)
+    _publish_public(key_dir, keypair)
+    return keypair
 
 
 def sign(keypair: Keypair, digest: bytes, *, domain: str) -> str:

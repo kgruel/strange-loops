@@ -546,7 +546,7 @@ def _verify_admitted_rows(
     pre-signature sources. Verifying nothing is honest; pretending an absent
     signature is a failed one is not.
     """
-    from .sqlite_store import FACT_COLUMN_INDEX
+    from .file_projection_schema import FACT_COLUMN_INDEX
 
     # Derived, not hardcoded (WP-1a F-4 / WP-5 W5-1).
     col = FACT_COLUMN_INDEX

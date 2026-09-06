@@ -1,0 +1,56 @@
+{
+  "custody_case_alias": {
+    "same_public": true,
+    "samefile": true,
+    "physical_directory": "keys/Alice"
+  },
+  "custody_rename": {
+    "same_public": false,
+    "signature_uses_nested": true,
+    "signature_uses_returned_flat": false
+  },
+  "export_source_oserror": {
+    "exception": "ExportPublicationError",
+    "cause": "PermissionError",
+    "outcome": "artifact-not-published",
+    "output_exists": false,
+    "temporary_outputs": []
+  },
+  "unicode_prefix": {
+    "exact_lookup_succeeds": [
+      "aé-tail",
+      "b~tail",
+      "c[tail",
+      "d%tail",
+      "e_tail"
+    ],
+    "prefix_lookup_misses": [
+      "aé-tail",
+      "b~tail"
+    ],
+    "prefix_lookup_succeeds": [
+      "c[tail",
+      "d%tail",
+      "e_tail"
+    ]
+  },
+  "origin_boundary": {
+    "with_other_origin_tick": [],
+    "without_other_origin_tick": [
+      {
+        "name": "note",
+        "boundary": {
+          "status": "late"
+        }
+      }
+    ]
+  },
+  "recovery_written": {
+    "status": "recovered",
+    "file_written": true,
+    "cache_bytes_inode_mtime_unchanged": true,
+    "commit": null,
+    "intent_remaining": false
+  },
+  "provenance": "Root independently executed all five saved probe scripts, including the origin controlled variant twice. These are recorded observations from the tool output, not a newly executed suite."
+}

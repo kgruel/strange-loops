@@ -49,7 +49,7 @@ import json
 import math
 import os
 import time
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import NoReturn, TypeGuard
@@ -85,6 +85,8 @@ __all__ = [
     "build_record",
     "key_registry",
     "verify_authorship",
+    "key_registry_from_records",
+    "verify_authorship_records",
     "arrival_path_for",
     "lock_path_for",
     "tmp_path_for",
@@ -1951,8 +1953,24 @@ def key_registry(log: ArrivalLog, verify: Verify) -> KeyRegistry:
     Raises :class:`AuthorshipUnverified` on the first registry-forming
     record no valid key verifies.
     """
-    registry, _rows = _walk_authority(log, verify, verify_ordinary=False)
+    registry, _rows = key_registry_from_records(log.walk(), verify)
     return registry
+
+
+def key_registry_from_records(
+    records: Iterable[Mapping[str, object]], verify: Verify
+) -> tuple[KeyRegistry, tuple[KeyResolution, ...]]:
+    """Build selective key history from a structurally verified record stream.
+
+    ``records`` must be the complete, ordered genesis-through-H prefix from a
+    structural verifier such as :meth:`ArrivalLog.walk` or an attested
+    backend scan. This function deliberately does not decode, hash, or check
+    ordinal/lineage/chain structure again; its claim is authorship over that
+    already-verified sequence. Only the genesis and key-introduction envelope
+    signatures are checked, matching :func:`key_registry`. The returned rows
+    are the verified registry-forming signatures, alongside the registry.
+    """
+    return _walk_authority_records(records, verify, verify_ordinary=False)
 
 
 def verify_authorship(log: ArrivalLog, verify: Verify) -> tuple[KeyResolution, ...]:
@@ -1994,8 +2012,23 @@ def verify_authorship(log: ArrivalLog, verify: Verify) -> tuple[KeyResolution, .
     :func:`key_registry` — this verb is that one plus the verify-every-
     envelope clause, so the two cannot drift on what "valid at N" means.
     """
-    _registry, rows = _walk_authority(log, verify, verify_ordinary=True)
+    _registry, rows = verify_authorship_records(log.walk(), verify)
     return rows
+
+
+def verify_authorship_records(
+    records: Iterable[Mapping[str, object]], verify: Verify
+) -> tuple[KeyRegistry, tuple[KeyResolution, ...]]:
+    """Verify all signed envelopes in a structural verified record stream.
+
+    ``records`` has the same complete-prefix precondition as
+    :func:`key_registry_from_records`. Unlike the selective width, every
+    signed ordinary envelope is verified; unsigned non-genesis records still
+    make no authorship claim. The returned pair keeps both the resulting key
+    registry and per-signature resolution evidence for callers that need to
+    establish an author at a particular head.
+    """
+    return _walk_authority_records(records, verify, verify_ordinary=True)
 
 
 def _walk_authority(
@@ -2010,12 +2043,28 @@ def _walk_authority(
     self-certification, the authorization rule on key introductions, the
     placement clause — is shared by construction.
     """
+    return _walk_authority_records(log.walk(), verify, verify_ordinary=verify_ordinary)
+
+
+def _walk_authority_records(
+    records: Iterable[Mapping[str, object]],
+    verify: Verify,
+    *,
+    verify_ordinary: bool,
+) -> tuple[KeyRegistry, tuple[KeyResolution, ...]]:
+    """Shared authorship walk over a complete, structurally verified stream.
+
+    The caller owns structural verification. Keeping this separate from the
+    file walk lets an authority adapter provide its already-attested records
+    without importing or reopening :class:`ArrivalLog`, while the boolean
+    retains the selective admission and whole-envelope verification widths.
+    """
     # observer -> [(key, introduced_ordinal)] in introduction order.
     registry: dict[str, list[tuple[str, int]]] = {}
     rows: list[KeyResolution] = []
     lineage = ""
 
-    for record in log.walk():
+    for record in records:
         ordinal = record["ord"]
         # The walk holds every record to the genesis's lineage, so this is
         # one value for the whole loop; re-read per record for simplicity.

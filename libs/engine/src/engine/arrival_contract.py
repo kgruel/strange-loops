@@ -32,9 +32,12 @@ contract only licenses location claims.
 
 from __future__ import annotations
 
+import hashlib
+import json
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import Enum
+from types import MappingProxyType
 from typing import Any, Protocol, runtime_checkable
 
 __all__ = [
@@ -43,6 +46,23 @@ __all__ = [
     "VerificationLevel",
     "Head",
     "Watermark",
+    "ProjectionRequirement",
+    "Fact",
+    "Tick",
+    "FactRequest",
+    "TickRequest",
+    "SummaryRequest",
+    "Summary",
+    "SearchFieldSpec",
+    "SearchRequest",
+    "SearchMatch",
+    "SearchPage",
+    "FactCursor",
+    "Continuation",
+    "FactPage",
+    "ReadBasis",
+    "DeclarationAnchor",
+    "QuerySnapshot",
     "RecordDraft",
     "DurabilityReceipt",
     "Commit",
@@ -63,6 +83,10 @@ __all__ = [
     "UnknownBackend",
     "AtomicLimitExceeded",
     "NotSupported",
+    "ProjectionAbsent",
+    "ProjectionBehind",
+    "InvalidContinuation",
+    "SearchStale",
 ]
 
 
@@ -112,6 +136,19 @@ class VerificationLevel(Enum):
     FULL = "full"
 
 
+class ProjectionRequirement(Enum):
+    """How current a projection answer must be for this read.
+
+    The caller, rather than a backend-specific reader, makes the availability
+    choice explicit. ``CURRENT`` refuses a missing or lagging projection;
+    ``ALLOW_BEHIND`` returns only the verified represented prefix and labels it
+    in :class:`ReadBasis`.
+    """
+
+    CURRENT = "current"
+    ALLOW_BEHIND = "allow-behind"
+
+
 # ---------------------------------------------------------------------------
 # Core types (§03)
 # ---------------------------------------------------------------------------
@@ -148,6 +185,222 @@ class Watermark:
 
     lineage: str
     ordinal: int
+
+
+# ---------------------------------------------------------------------------
+# Neutral query values
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Fact:
+    """One projected fact with its deterministic Arrival expansion coordinate."""
+
+    id: str
+    kind: str
+    ts: float
+    observer: str
+    origin: str
+    payload: Mapping[str, Any]
+    arrival_ordinal: int
+    arrival_seq: int
+    payload_text: str | None = None
+    signature: str | None = None
+
+
+@dataclass(frozen=True)
+class Tick:
+    """One projected tick with its deterministic Arrival expansion coordinate."""
+
+    id: str
+    name: str
+    ts: float
+    since: float | None
+    origin: str
+    payload: Mapping[str, Any]
+    arrival_ordinal: int
+    arrival_seq: int
+    payload_text: str | None = None
+    prev_hash: str | None = None
+    window_start: str | None = None
+    fact_cursor: str | None = None
+    window_hash: str | None = None
+    signature: str | None = None
+
+
+@dataclass(frozen=True)
+class FactRequest:
+    """A bounded receipt-ordered fact read.
+
+    ``fact_id`` is an exact/id-prefix lookup expressed as a constrained facts
+    request, rather than a separate backend operation.  The continuation
+    carries the prior request and a snapshot refuses a differing one.
+    """
+
+    limit: int | None = 50
+    kind: str | None = None
+    observer: str | None = None
+    include_internal: bool = False
+    order: str = "newest"
+    fact_id: str | None = None
+
+
+@dataclass(frozen=True)
+class TickRequest:
+    """A bounded chronological tick read."""
+
+    since: float = 0.0
+    until: float = float("inf")
+    name: str | None = None
+
+
+@dataclass(frozen=True)
+class SummaryRequest:
+    """Whether a summary includes the reserved declaration namespace."""
+
+    include_internal: bool = False
+
+
+@dataclass(frozen=True)
+class Summary:
+    """One snapshot's inexpensive factual inventory."""
+
+    fact_total: int
+    tick_total: int
+    signed_count: int
+    unsigned_count: int
+    fact_kinds: Mapping[str, Mapping[str, Any]]
+    tick_names: Mapping[str, Mapping[str, Any]]
+
+
+@dataclass(frozen=True)
+class SearchFieldSpec:
+    """Canonical declared fields and extraction version for one FTS corpus."""
+
+    fields_by_kind: Mapping[str, tuple[str, ...]]
+    fields_hash: str
+    normalization_version: str
+
+    @classmethod
+    def from_fields(
+        cls, fields_by_kind: Mapping[str, Sequence[str]], *, normalization_version: str
+    ) -> SearchFieldSpec:
+        frozen = {
+            str(kind): tuple(str(field) for field in fields)
+            for kind, fields in sorted(fields_by_kind.items())
+        }
+        canonical = json.dumps(
+            {"fields": frozen, "normalization": normalization_version},
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        return cls(
+            fields_by_kind=MappingProxyType(frozen),
+            fields_hash="sha256:" + hashlib.sha256(canonical.encode()).hexdigest(),
+            normalization_version=normalization_version,
+        )
+
+
+@dataclass(frozen=True)
+class SearchRequest:
+    """One adapter-grammar full-text query bound to a declared field spec."""
+
+    expression: str
+    expected_fields_hash: str
+    kind: str | None = None
+    observer: str | None = None
+    since: float | None = None
+    until: float | None = None
+    limit: int = 50
+    include_internal: bool = False
+
+
+@dataclass(frozen=True)
+class SearchMatch:
+    """One bounded fact hit and its adapter-local rank/display snippet."""
+
+    fact: Fact
+    rank: float
+    snippet: str | None
+
+
+@dataclass(frozen=True)
+class SearchPage:
+    """Search hits whose ranking corpus is exactly ``ranking_through``."""
+
+    matches: tuple[SearchMatch, ...]
+    total_matches: int
+    truncated: bool
+    ranking: str
+    ranking_through: Head
+    fields_hash: str
+
+
+@dataclass(frozen=True)
+class FactCursor:
+    """The final projected fact coordinate of one receipt-ordered page."""
+
+    arrival_ordinal: int
+    arrival_seq: int
+    fact_id: str
+
+
+@dataclass(frozen=True)
+class Continuation:
+    """A continuation bound to both custody and derived-view identity.
+
+    This in-memory value is deliberately not a wire token. A process boundary
+    may encode it only with integrity protection. ``view_generation`` prevents
+    a rebuilt projection or declaration/query change from passing solely
+    because the same ledger prefix remains available.
+    """
+
+    captured_head: Head
+    projected_through: Head
+    request: FactRequest
+    cursor: FactCursor
+    view_generation: str | None
+
+
+@dataclass(frozen=True)
+class FactPage:
+    """One bounded facts page and its final cursor, if more rows exist.
+
+    Only the consumer opener holds the complete custody basis needed to turn a
+    cursor into a :class:`Continuation`; query snapshots return this smaller
+    cursor and never manufacture a head hash.
+    """
+
+    items: tuple[Fact, ...]
+    cursor: FactCursor | None
+    truncated: bool
+    order: str
+
+
+@dataclass(frozen=True)
+class ReadBasis:
+    """The custody and projection prefixes one SDK read actually represents."""
+
+    lineage: str
+    captured_head: Head
+    projected_through: Head | None
+    view_generation: str | None
+
+
+@dataclass(frozen=True)
+class DeclarationAnchor:
+    """Store-local declaration identity observed in a query snapshot.
+
+    ``own_lineage`` is the declaration identity selected by the projection's
+    store-local marker. The supported Arrival projection licenses it only when
+    it equals the physical Arrival lineage; the consumer validates that link.
+    ``genesis`` is selected from the same query transaction and may sit after
+    a bounded read prefix; that preserves the explicit unhistorized declaration
+    floor without inferring identity from arbitrary fact rows.
+    """
+
+    own_lineage: str | None
+    genesis: Fact | None
 
 
 @dataclass(frozen=True)
@@ -418,6 +671,51 @@ class ArrivalLedger(Protocol):
 
 
 @runtime_checkable
+class QuerySnapshot(Protocol):
+    """One closeable, bounded projection read.
+
+    The snapshot reports only the projection's watermark. The consumer opener
+    resolves that coordinate through custody and publishes the resulting
+    :class:`ReadBasis`; this keeps the query half from gaining a ledger route.
+    """
+
+    @property
+    def represented(self) -> Watermark | None:
+        """The projection coordinate held by this snapshot, if any."""
+        ...
+
+    @property
+    def view_generation(self) -> str | None:
+        """Identity of the query/declaration/projection view for resume checks."""
+        ...
+
+    @property
+    def declaration_anchor(self) -> DeclarationAnchor:
+        """Declaration identity provenance from this same projection snapshot."""
+        ...
+
+    def facts(self, request: FactRequest) -> FactPage:
+        """A bounded receipt-ordered facts page."""
+        ...
+
+    def ticks(self, request: TickRequest) -> tuple[Tick, ...]:
+        """Ticks evaluated against this same represented prefix."""
+        ...
+
+    def summary(self, request: SummaryRequest) -> Summary:
+        """A factual inventory evaluated against this represented prefix."""
+        ...
+
+    def search(self, request: SearchRequest) -> SearchPage:
+        """Optional exact-corpus search; unsupported backends raise NotSupported."""
+        ...
+
+    def close(self) -> None:
+        """Release the backend read snapshot."""
+        ...
+
+
+@runtime_checkable
 class ArrivalQuery(Protocol):
     """Reads: what a projection can answer, and how far it can answer it for.
 
@@ -437,6 +735,16 @@ class ArrivalQuery(Protocol):
 
     def projected_through(self) -> Watermark | None:
         """How much of the lineage this projection accounts for."""
+        ...
+
+    def open_snapshot(
+        self,
+        *,
+        captured_head: Head,
+        requirement: ProjectionRequirement,
+        continuation: Continuation | None = None,
+    ) -> QuerySnapshot:
+        """Open one bounded projection snapshot for a captured custody head."""
         ...
 
 
@@ -522,3 +830,19 @@ class NotSupported(ContractRefusal):
     asserts and no more, and widening it to mean "anything that went wrong"
     would turn a location claim into a verdict.
     """
+
+
+class ProjectionAbsent(ContractRefusal):
+    """The query surface has no represented projection prefix."""
+
+
+class ProjectionBehind(ContractRefusal):
+    """A caller required the captured head but the projection represents less."""
+
+
+class SearchStale(ContractRefusal):
+    """Search coverage cannot prove the requested exact ranking corpus."""
+
+
+class InvalidContinuation(ContractRefusal):
+    """A page token no longer names the same custody prefix or derived view."""

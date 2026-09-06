@@ -1,0 +1,14 @@
+{
+  "status": "complete",
+  "reviews": 3,
+  "effort": "low",
+  "pending_jobs": 0,
+  "original_behaviors_remediated": 6,
+  "confirmed_followup_defects": "fixed",
+  "remaining_constraints": [
+    "local vertex/loop tick-name namespace",
+    "exact filesystem spelling requirement; encoded paths deferred",
+    "hard-link publication support"
+  ],
+  "production_commit": false
+}

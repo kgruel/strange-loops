@@ -1,0 +1,43 @@
+"""Disposable current-filesystem probe; no repository files or live stores."""
+from __future__ import annotations
+
+import os
+import shutil
+import tempfile
+from pathlib import Path
+
+from custody import ensure_signing_key, fact_signer_for
+from sign import ed25519
+from custody import FACT_DOMAIN
+
+root = Path(tempfile.mkdtemp(prefix="custody-observer-probe-"))
+try:
+    case_vertex = root / "x.vertex"
+    case_vertex.write_text('name "x"\n')
+    upper = ensure_signing_key(case_vertex, observer="Alice")
+    lower = ensure_signing_key(case_vertex, observer="alice")
+    upper_file = root / "keys" / "Alice" / "ed25519.key"
+    lower_file = root / "keys" / "alice" / "ed25519.key"
+    print("case_alias", {
+        "same_public": upper.public_b64 == lower.public_b64,
+        "samefile": os.path.samefile(upper_file, lower_file),
+        "entries": sorted(str(p.relative_to(root)) for p in (root / "keys").rglob("*")),
+    })
+
+    old = root / "old.vertex"
+    old.write_text('name "old"\n')
+    nested = ensure_signing_key(old, observer="new")
+    new = root / "new.vertex"
+    old.rename(new)
+    flat = ensure_signing_key(new, observer="new")
+    signature = fact_signer_for(new)("new", "digest")  # type: ignore[misc]
+    nested_pub = ed25519.public_key_from_b64(nested.public_b64)
+    flat_pub = ed25519.public_key_from_b64(flat.public_b64)
+    print("stem_nested", {
+        "same_public": nested.public_b64 == flat.public_b64,
+        "signature_uses_nested": ed25519.verify(nested_pub, signature, b"digest", domain=FACT_DOMAIN),
+        "signature_uses_flat": ed25519.verify(flat_pub, signature, b"digest", domain=FACT_DOMAIN),
+        "entries": sorted(str(p.relative_to(root)) for p in (root / "keys").rglob("*")),
+    })
+finally:
+    shutil.rmtree(root)

@@ -306,14 +306,14 @@ def test_resolve_entity_finds_matching_fact_id(
 ) -> None:
     vertex_path, receipts = populated_vertex
     fact_id = resolve_entity(vertex_path, "task", "title", "Widget Task 3")
-    assert fact_id == receipts[3].id
+    assert fact_id.fact_id == receipts[3].id
 
 
 def test_resolve_entity_no_match_returns_none(
     populated_vertex: tuple[Path, list[EmitReceipt]],
 ) -> None:
     vertex_path, _ = populated_vertex
-    assert resolve_entity(vertex_path, "task", "title", "does-not-exist") is None
+    assert not resolve_entity(vertex_path, "task", "title", "does-not-exist").found
 
 
 def test_resolve_entity_missing_canonical_returns_none(tmp_path: Path) -> None:
@@ -324,7 +324,7 @@ def test_resolve_entity_missing_canonical_returns_none(tmp_path: Path) -> None:
         'loops { item { fold { items "collect" 10 } } }\n',
         encoding="utf-8",
     )
-    assert resolve_entity(vertex_path, "item", "key", "value") is None
+    assert not resolve_entity(vertex_path, "item", "key", "value").found
 
 
 def test_resolve_entity_aggregate_combine_finds_latest_across_children(
@@ -364,7 +364,7 @@ def test_resolve_entity_aggregate_combine_finds_latest_across_children(
 
     fact_id = resolve_entity(parent, "task", "key", "x")
     # Reversed iteration means the last-appended (most recent) fact wins.
-    assert fact_id == r2.id
+    assert fact_id.fact_id == r2.id
     assert fact_id != r1.id
 
 
@@ -393,9 +393,9 @@ def test_resolve_entity_aggregate_combine_kind_filter_and_zero_ts_boundary(
         encoding="utf-8",
     )
     # kind filter must exclude the "note" fact even though it shares key "x".
-    assert resolve_entity(parent, "task", "key", "x") == task_r.id
+    assert resolve_entity(parent, "task", "key", "x").fact_id == task_r.id
     # since_ts=0.0 lower bound must include the ts=0.0 fact.
-    assert resolve_entity(parent, "task", "key", "x") is not None
+    assert resolve_entity(parent, "task", "key", "x").found
 
 
 def test_resolve_entity_aggregate_combine_no_match_returns_none(
@@ -414,7 +414,7 @@ def test_resolve_entity_aggregate_combine_no_match_returns_none(
         'name "aggregate"\ncombine {\n' f'  vertex "{child_a}" as="a"\n' "}\n",
         encoding="utf-8",
     )
-    assert resolve_entity(parent, "task", "key", "does-not-exist") is None
+    assert not resolve_entity(parent, "task", "key", "does-not-exist").found
 
 
 def test_resolve_entity_returns_latest_when_multiple_match(tmp_path: Path) -> None:
@@ -428,7 +428,7 @@ def test_resolve_entity_returns_latest_when_multiple_match(tmp_path: Path) -> No
     emit_fact(vertex_path, "item", {"key": "x", "v": 1}, observer="a", ts=1700000000.0)
     r2 = emit_fact(vertex_path, "item", {"key": "x", "v": 2}, observer="a", ts=1700000100.0)
     fact_id = resolve_entity(vertex_path, "item", "key", "x")
-    assert fact_id == r2.id
+    assert fact_id.fact_id == r2.id
 
 
 # =============================================================================

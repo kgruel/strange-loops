@@ -1,0 +1,87 @@
+{
+  "due_at": "2026-09-06T16:29:06.989193+00:00",
+  "model": "claude-fable-5-1[1m]",
+  "effort": "low",
+  "worktree": "/Users/kaygee/Code/loops-wt/arrival-finish",
+  "results": "/Users/kaygee/Code/loops-wt/arrival-finish/docs/scratch/arrival-break/reviews/consistency-slice1-2026-09-06",
+  "jobs": [
+    {
+      "name": "first-slice",
+      "packet": "/Users/kaygee/Code/loops-wt/arrival-finish/docs/scratch/arrival-break/reviews/consistency-slice1-2026-09-06/first-slice-prompt.txt",
+      "sha256": "129048522518dfebf2446cd08c1dd4c75066d1ff45e3a271ab0a87097b732988",
+      "sources": {
+        "docs/scratch/arrival-break/consistency-slice1-2026-09-06.md": "37efca91fbc2b23ee878d3e128aaad504fd9b24e5a3de7eb28876818a59cf2a6",
+        "docs/architecture/arrival/backend-contract.html": "f10fc4273a340d4ccdc8c12d022b2c3fb0a84ff3bbb909ad085384c559f7e2c3",
+        "libs/engine/src/engine/arrival_contract.py": "4859b8935a34c4ee08fb0cd75064bdd1360ce85e43647263ae08be86ddef2a1d",
+        "libs/engine/src/engine/arrival_consumer.py": "7ade5e7a10110bcbad033a70e3e40976879c46c7cd32ab690d9d594809b50a20",
+        "libs/engine/src/engine/runtime_write.py": "51d412248c306ea381d28506bf38880118d1a68a2dd63c77b0137c1f0a6acae9",
+        "libs/engine/src/engine/arrival_declarations.py": "c45bb938f2aef343ef33b1c4fe7fb1fd191ac09f7b61d2ac238066c2fd50a137",
+        "libs/engine/src/engine/declaration.py": "1bf9c51d49eed321c0ac517e726cf97df693472b39e4f04fff05520d9420a7b8",
+        "libs/engine/src/engine/arrival_head_seam.py": "98aa31cc74654852f64f74b8a5d2465ab9efb0022f4d018c1c31ed40f334393b",
+        "libs/sdk/src/sdk/declare.py": "6b6a377fac88f33efaa736e85c10b71917fab38dd888ff963202794d5e89d1bc",
+        "libs/sdk/src/sdk/errors.py": "dbb3b3352a1d713445476b810271b15082b7fbbb1fd1de49cd611a4439f32c68",
+        "libs/sdk/tests/test_arrival_init.py": "ef20e5d43b1cb2ea731189567e03424797a2e7b0461821bb95e00ac3916f4551",
+        "libs/engine/tests/test_arrival_consumer.py": "7303ec64c88d3e066c4974d71a71d9ce759863a1517167493517415e8a2098f7",
+        "libs/engine/tests/test_arrival_declaration_custody.py": "92c76c6b9ca46199380c64e5bcfd38a72152c92436fb0cedc9602fc6bc595813",
+        "libs/engine/tests/test_runtime_write.py": "a91d00cbf754256ee97800d37c0b26f93edf59c78bcecf51aed9253121b06a0f"
+      },
+      "status": "reviewed-awaiting-triage",
+      "packet_characters": 170454,
+      "started_at": "2026-09-06T16:29:16.485007+00:00",
+      "effort": "low",
+      "source_drift": [],
+      "command": [
+        "/Users/kaygee/.local/bin/claude",
+        "-p",
+        "--safe-mode",
+        "--model",
+        "claude-fable-5-1[1m]",
+        "--effort",
+        "low",
+        "--no-session-persistence",
+        "--tools",
+        "",
+        "--output-format",
+        "json"
+      ],
+      "returncode": 0,
+      "model_usage": {
+        "claude-haiku-4-5-20251001": {
+          "inputTokens": 51079,
+          "outputTokens": 17,
+          "cacheReadInputTokens": 0,
+          "cacheCreationInputTokens": 0,
+          "webSearchRequests": 0,
+          "costUSD": 0.051164,
+          "contextWindow": 200000,
+          "maxOutputTokens": 32000,
+          "thinkingTokens": 0,
+          "canonicalModel": "claude-haiku-4-5",
+          "provider": "firstParty",
+          "costBasis": "list"
+        },
+        "claude-fable-5-1": {
+          "inputTokens": 2,
+          "outputTokens": 4617,
+          "cacheReadInputTokens": 3264,
+          "cacheCreationInputTokens": 67446,
+          "webSearchRequests": 0,
+          "costUSD": 1.5806060000000002,
+          "contextWindow": 1000000,
+          "maxOutputTokens": 64000,
+          "thinkingTokens": 3105,
+          "canonicalModel": "claude-fable-5-1",
+          "provider": "firstParty",
+          "costBasis": "list"
+        }
+      },
+      "response_subtype": "success",
+      "finished_at": "2026-09-06T16:30:19.716695+00:00"
+    }
+  ],
+  "status": "reviews-finished-awaiting-triage",
+  "pid": 86853,
+  "updated_at": "2026-09-06T16:30:19.716699+00:00",
+  "started_at": "2026-09-06T16:29:16.484828+00:00",
+  "finished_at": "2026-09-06T16:30:19.716984+00:00"
+}

@@ -2287,7 +2287,7 @@ class TestSpecsMatch:
 
     def test_matching_specs(self):
         from atoms import Spec, Count
-        from engine.vertex_reader import _specs_match
+        from engine.composition import specs_match as _specs_match
 
         a = Spec(name="metric", folds=(Count(target="n"),))
         b = Spec(name="other_name", folds=(Count(target="n"),))
@@ -2295,7 +2295,7 @@ class TestSpecsMatch:
 
     def test_different_fold_count(self):
         from atoms import Spec, Count, Sum
-        from engine.vertex_reader import _specs_match
+        from engine.composition import specs_match as _specs_match
 
         a = Spec(name="x", folds=(Count(target="n"),))
         b = Spec(name="x", folds=(Count(target="n"), Sum(target="t", field="v")))
@@ -2303,7 +2303,7 @@ class TestSpecsMatch:
 
     def test_different_fold_type(self):
         from atoms import Spec, Count, Sum
-        from engine.vertex_reader import _specs_match
+        from engine.composition import specs_match as _specs_match
 
         a = Spec(name="x", folds=(Count(target="n"),))
         b = Spec(name="x", folds=(Sum(target="n", field="v"),))
@@ -2311,7 +2311,7 @@ class TestSpecsMatch:
 
     def test_different_key(self):
         from atoms import Spec, Upsert
-        from engine.vertex_reader import _specs_match
+        from engine.composition import specs_match as _specs_match
 
         a = Spec(name="x", folds=(Upsert(target="items", key="name"),))
         b = Spec(name="x", folds=(Upsert(target="items", key="id"),))
@@ -2319,7 +2319,7 @@ class TestSpecsMatch:
 
     def test_matching_upsert(self):
         from atoms import Spec, Upsert
-        from engine.vertex_reader import _specs_match
+        from engine.composition import specs_match as _specs_match
 
         a = Spec(name="x", folds=(Upsert(target="items", key="name"),))
         b = Spec(name="x", folds=(Upsert(target="items", key="name"),))
@@ -2328,7 +2328,7 @@ class TestSpecsMatch:
     def test_same_type_same_key_matches(self):
         """Collect with same type matches even if max differs (limit not checked for Collect)."""
         from atoms import Spec, Collect
-        from engine.vertex_reader import _specs_match
+        from engine.composition import specs_match as _specs_match
 
         a = Spec(name="x", folds=(Collect(target="history", max=10),))
         b = Spec(name="x", folds=(Collect(target="history", max=20),))

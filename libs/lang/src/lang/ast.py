@@ -679,11 +679,11 @@ class ObserverDecl:
 
 @dataclass(frozen=True)
 class BackendDecl:
-    """Which adapter opens the declared store.
+    """Which adapter and descriptor claims open the declared store.
 
-    The adapter designation, never the location: the location is the store
-    clause's positional argument and stays on ``VertexFile.store``. The two
-    cannot disagree because they are not two spellings of one value.
+    The location is the store clause's positional argument and stays on
+    ``VertexFile.store`` / ``store_location``. ``lineage`` and ``role`` are
+    claims checked during registry open; parsing them confers no authority.
 
     Backend selection is explicit — nothing here is inferred from a
     ``.arrival``/``.duckdb`` suffix. A name this repo has no adapter for is
@@ -693,6 +693,11 @@ class BackendDecl:
     """
 
     name: str
+    # Optional descriptor claims. Strings stay in lang so this layer does not
+    # import the engine contract merely to parse a .vertex file; resolution
+    # maps ``role`` onto arrival_contract.Profile.
+    lineage: str | None = None
+    role: str | None = None
 
 
 @dataclass(frozen=True)
@@ -740,13 +745,15 @@ class VertexFile:
     name: str
     loops: dict[str, LoopDef]
     store: Path | None = None
-    # Residence's second half. `store` keeps meaning exactly what it meant
-    # before — the location — so every reader of it is unaffected by a
-    # declared backend. None means "not declared", which is not the same as
-    # "no backend": resolution of an undeclared store is the registry's, and
-    # the grammar's silence here is what lets legacy `store "<path>"` parse
-    # unchanged.
+    # Descriptor claims beside the legacy Path-shaped residence. None means
+    # "not declared"; bare legacy stores continue to parse unchanged. A
+    # descriptor consumer uses ``store_location`` for non-file backends rather
+    # than interpreting this compatibility Path.
     store_backend: BackendDecl | None = None
+    # The store argument exactly as declared when pathlib would be lossy.
+    # ``store`` remains Path-shaped for legacy consumers, while this spelling
+    # keeps non-file DSNs and service URLs intact for their named adapter.
+    store_location: str | None = None
     discover: str | None = None
     sources: tuple[SourceEntry, ...] | None = None
     vertices: tuple[Path, ...] | None = None

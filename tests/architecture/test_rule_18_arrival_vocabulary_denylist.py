@@ -78,6 +78,11 @@ _SCAN_TARGETS = (
     # artifact, so its names are the ones every future backend is registered
     # under.
     "libs/engine/src/engine/arrival_contract.py",
+    "libs/engine/src/engine/arrival_consumer.py",
+    # Stage 2C adds the adapter-owned binding identity policy. It is part of
+    # the arrival surface at birth, so its names join the glossary scan with
+    # the registry and head seam it serves.
+    "libs/engine/src/engine/arrival_binding.py",
     "libs/engine/src/engine/arrival_file_backend.py",
     "libs/engine/src/engine/arrival_registry.py",
     # Slice 3 adds one. `arrival_head_attestation` is the witness minimum —
@@ -93,6 +98,24 @@ _SCAN_TARGETS = (
     # joins at birth — and like its WP1 sibling the name was chosen so the glob
     # below enrolls it without anyone remembering to edit this tuple.
     "libs/engine/src/engine/arrival_head_seam.py",
+    # Stage 3M adds the explicit, attested projection-maintenance coordinator.
+    # It is born on the Arrival surface and joins the vocabulary gate at birth.
+    "libs/engine/src/engine/arrival_maintenance.py",
+    # Bounded declaration reconstruction and exact-prefix FTS maintenance are
+    # Arrival surface modules at birth, so both join the completeness scan.
+    "libs/engine/src/engine/arrival_aggregate.py",
+    "libs/engine/src/engine/arrival_transfer.py",
+    "libs/engine/src/engine/arrival_restore.py",
+    "libs/engine/src/engine/arrival_declarations.py",
+    "libs/engine/src/engine/arrival_search.py",
+    "libs/engine/src/engine/arrival_sources.py",
+    # Stage 3C adds the registry-backed fresh initializer and its recoverable
+    # intent coordinator. It is born on the Arrival surface and joins at birth.
+    "libs/engine/src/engine/arrival_initialization.py",
+    # Stage 3D adds declaration-edit preparation against the attested Arrival
+    # basis. It is born on the Arrival surface and joins at birth; apply and
+    # recovery remain later stages.
+    "libs/engine/src/engine/arrival_declarations.py",
     "libs/engine/src/engine/arrival_projection.py",
     "libs/engine/src/engine/arrival_store.py",
     "libs/engine/src/engine/probe.py",

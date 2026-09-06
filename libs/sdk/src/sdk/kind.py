@@ -3,15 +3,17 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
+from engine.arrival_registry import BackendRegistry
 from engine.ceremony import (
     apply_declaration_update,
     plan_declaration_update,
     recover_declaration_update,
 )
-from engine.handle import CredentialProvider
+from engine.credentials import CredentialProvider
 from lang.ast import FoldCollect, FoldDecl, LoopDef
 from lang.vertex_mutation import (
     add_vertex_kind,
@@ -28,6 +30,7 @@ from .types import (
     DeclarationPlanResult,
     KindMutationResult,
     SdkValueError,
+    StoreDescriptorInfo,
     TargetUnsupported,
 )
 
@@ -47,11 +50,108 @@ def _default_loop_def() -> LoopDef:
     return LoopDef(folds=(FoldDecl("items", FoldCollect(100)),))
 
 
+def _arrival_descriptor_for(vertex_path: Path):
+    from .target import _arrival_descriptor
+
+    return _arrival_descriptor(vertex_path)
+
+
+def _legacy_result(result: KindMutationResult):
+    from .declare import DeclarationEditResult
+
+    return DeclarationEditResult(
+        status=result.status,
+        reason=result.reason,
+        mode=result.mode,
+        vertex_path=result.vertex_path,
+        target_path=result.vertex_path,
+        read_path="legacy",
+        generation_before=result.generation_before,
+        generation_after=result.generation_after,
+        changes=result.changes,
+        file_written=result.file_written,
+    )
+
+
+def _arrival_semantic_preview(
+    vertex_path: Path,
+    proposed_text: str,
+    *,
+    registry: Any | None,
+) -> DeclarationPlanResult:
+    """Preview a splice only after confirming the cache matches CURRENT."""
+    from lang import diff_documents, parse_vertex, validate_vertex, vertex_to_documents
+
+    from .declare import DeclarationPreviewResult
+    from .errors import normalize_exception
+    from .read import _arrival_declaration, _open_arrival_read
+
+    resolved = _arrival_descriptor_for(vertex_path)
+    if resolved is None:
+        raise TargetUnsupported(f"not an explicit Arrival target: {vertex_path}")
+    _path, locator_ast, descriptor = resolved
+    active = registry or BackendRegistry.with_builtin_backends()
+    try:
+        local_ast = parse_vertex(vertex_path.read_text(encoding="utf-8"), path=vertex_path)
+        with _open_arrival_read(resolved, registry=active) as (_locator, _descriptor, opened):
+            effective_ast, _status, _facts, _lineage = _arrival_declaration(
+                locator_ast, vertex_path, opened
+            )
+            local_docs = [doc.as_json() for doc in vertex_to_documents(local_ast)]
+            effective_docs = [doc.as_json() for doc in vertex_to_documents(effective_ast)]
+            if local_docs != effective_docs:
+                return DeclarationPreviewResult(
+                    applicable=False,
+                    reason="declaration cache differs from CURRENT Arrival history",
+                    mode="arrival-semantic-preview",
+                    vertex_path=str(vertex_path),
+                    generation_before={"captured_head": opened.basis.captured_head},
+                    changes=[],
+                    store=StoreDescriptorInfo.from_descriptor(descriptor),
+                    basis=asdict(opened.basis),
+                    captured_head={
+                        "lineage": opened.basis.captured_head.lineage,
+                        "ordinal": opened.basis.captured_head.ordinal,
+                        "record_hash": opened.basis.captured_head.record_hash,
+                    },
+                    lineage=opened.basis.lineage,
+                )
+            proposed_ast = parse_vertex(proposed_text, path=vertex_path)
+            validate_vertex(proposed_ast)
+            proposed_docs = [
+                doc.as_json() for doc in vertex_to_documents(proposed_ast)
+            ]
+            changes = diff_documents(local_docs, proposed_docs)
+            return DeclarationPreviewResult(
+                applicable=True,
+                reason="semantic preview only; signed execution requires observer credentials",
+                mode="arrival-semantic-preview",
+                vertex_path=str(vertex_path),
+                generation_before={"captured_head": opened.basis.captured_head},
+                changes=[c.as_dict() if hasattr(c, "as_dict") else str(c) for c in changes],
+                store=StoreDescriptorInfo.from_descriptor(descriptor),
+                basis=asdict(opened.basis),
+                captured_head={
+                    "lineage": opened.basis.captured_head.lineage,
+                    "ordinal": opened.basis.captured_head.ordinal,
+                    "record_hash": opened.basis.captured_head.record_hash,
+                },
+                lineage=opened.basis.lineage,
+            )
+    except Exception as exc:
+        normalized = normalize_exception(exc)
+        if normalized is exc:
+            raise
+        raise normalized from exc
+
+
 def plan_kind_mutation(
     target: Path | str,
     op: str,
     kind_name: str,
     definition: LoopDef | None = None,
+    *,
+    registry: BackendRegistry | None = None,
 ) -> DeclarationPlanResult:
     """Dry-run preview of a proposed kind declaration mutation.
 
@@ -64,6 +164,32 @@ def plan_kind_mutation(
     Returns:
         DeclarationPlanResult with proposed changes and applicability status.
     """
+    vertex_path = Path(target).resolve()
+    if _arrival_descriptor_for(vertex_path) is not None:
+        from .declare import DeclarationPreviewResult
+
+        loop_def = definition or _default_loop_def()
+        current_text = vertex_path.read_text(encoding="utf-8")
+        try:
+            if op == "add":
+                new_text = add_vertex_kind(current_text, kind_name, loop_def)
+            elif op == "edit":
+                new_text = edit_vertex_kind(current_text, kind_name, loop_def)
+            elif op == "remove":
+                new_text = remove_vertex_kind(current_text, kind_name)
+            else:
+                raise SdkValueError(
+                    f"unsupported mutation op '{op}', expected 'add', 'edit', or 'remove'"
+                )
+        except SdkValueError:
+            raise
+        except ValueError as exc:
+            return DeclarationPreviewResult(
+                applicable=False, reason=str(exc), mode="refused",
+                vertex_path=str(vertex_path), generation_before=None, changes=[],
+            )
+        return _arrival_semantic_preview(vertex_path, new_text, registry=registry)
+
     info = resolve_target(target)
     if info.target_type != "vertex":
         raise TargetUnsupported(
@@ -118,6 +244,7 @@ def add_kind(
     *,
     observer: str,
     credentials: CredentialProvider | None = None,
+    registry: BackendRegistry | None = None,
 ) -> KindMutationResult:
     """Add a new loop-kind definition to a vertex and orchestrate declaration persistence.
 
@@ -131,11 +258,12 @@ def add_kind(
     Returns:
         KindMutationResult detailing the preview, apply status, and updated generation.
     """
-    info = resolve_target(target)
-    if info.target_type != "vertex":
-        raise TargetUnsupported(f"add_kind requires a .vertex target, got {info.target_type}")
-
     vertex_path = Path(target).resolve()
+    arrival = _arrival_descriptor_for(vertex_path)
+    if arrival is None:
+        info = resolve_target(target)
+        if info.target_type != "vertex":
+            raise TargetUnsupported(f"add_kind requires a .vertex target, got {info.target_type}")
     loop_def = definition or _default_loop_def()
     cred_provider = credentials or CustodyCredentialProvider()
 
@@ -143,7 +271,19 @@ def add_kind(
     try:
         new_text = add_vertex_kind(current_text, kind_name, loop_def)
     except Exception as exc:
+        if arrival is not None:
+            raise SdkValueError(f"could not generate Arrival kind mutation: {exc}") from exc
         raise CeremonyFailed(f"could not generate kind mutation: {exc}") from exc
+
+    if arrival is not None:
+        from .declare import _edit_arrival_declaration
+
+        return _edit_arrival_declaration(
+            vertex_path, new_text, observer=observer, credentials=cred_provider,
+            registry=registry,
+            source_cache_bytes=current_text.encode("utf-8"),
+            require_cache_basis=True,
+        )
 
     preview = plan_declaration_update(vertex_path, proposed_text=new_text)
     if not preview.applicable:
@@ -157,7 +297,7 @@ def add_kind(
 
     gen_after = declaration_generation(vertex_path)
 
-    return KindMutationResult(
+    return _legacy_result(KindMutationResult(
         status=result.status,
         reason=result.reason,
         mode=preview.mode,
@@ -166,7 +306,7 @@ def add_kind(
         generation_after=gen_after,
         changes=[c.as_dict() if hasattr(c, "as_dict") else str(c) for c in preview.changes],
         file_written=result.file_written,
-    )
+    ))
 
 
 def edit_kind(
@@ -176,20 +316,34 @@ def edit_kind(
     *,
     observer: str,
     credentials: CredentialProvider | None = None,
+    registry: BackendRegistry | None = None,
 ) -> KindMutationResult:
     """Edit an existing loop-kind definition in a vertex and orchestrate declaration persistence."""
-    info = resolve_target(target)
-    if info.target_type != "vertex":
-        raise TargetUnsupported(f"edit_kind requires a .vertex target, got {info.target_type}")
-
     vertex_path = Path(target).resolve()
+    arrival = _arrival_descriptor_for(vertex_path)
+    if arrival is None:
+        info = resolve_target(target)
+        if info.target_type != "vertex":
+            raise TargetUnsupported(f"edit_kind requires a .vertex target, got {info.target_type}")
     cred_provider = credentials or CustodyCredentialProvider()
 
     current_text = vertex_path.read_text(encoding="utf-8")
     try:
         new_text = edit_vertex_kind(current_text, kind_name, definition)
     except Exception as exc:
+        if arrival is not None:
+            raise SdkValueError(f"could not generate Arrival kind mutation: {exc}") from exc
         raise CeremonyFailed(f"could not generate kind mutation: {exc}") from exc
+
+    if arrival is not None:
+        from .declare import _edit_arrival_declaration
+
+        return _edit_arrival_declaration(
+            vertex_path, new_text, observer=observer, credentials=cred_provider,
+            registry=registry,
+            source_cache_bytes=current_text.encode("utf-8"),
+            require_cache_basis=True,
+        )
 
     preview = plan_declaration_update(vertex_path, proposed_text=new_text)
     if not preview.applicable:
@@ -203,7 +357,7 @@ def edit_kind(
 
     gen_after = declaration_generation(vertex_path)
 
-    return KindMutationResult(
+    return _legacy_result(KindMutationResult(
         status=result.status,
         reason=result.reason,
         mode=preview.mode,
@@ -212,7 +366,7 @@ def edit_kind(
         generation_after=gen_after,
         changes=[c.as_dict() if hasattr(c, "as_dict") else str(c) for c in preview.changes],
         file_written=result.file_written,
-    )
+    ))
 
 
 def remove_kind(
@@ -221,20 +375,36 @@ def remove_kind(
     *,
     observer: str,
     credentials: CredentialProvider | None = None,
+    registry: BackendRegistry | None = None,
 ) -> KindMutationResult:
     """Remove a loop-kind definition from a vertex and orchestrate declaration persistence."""
-    info = resolve_target(target)
-    if info.target_type != "vertex":
-        raise TargetUnsupported(f"remove_kind requires a .vertex target, got {info.target_type}")
-
     vertex_path = Path(target).resolve()
+    arrival = _arrival_descriptor_for(vertex_path)
+    if arrival is None:
+        info = resolve_target(target)
+        if info.target_type != "vertex":
+            raise TargetUnsupported(
+                f"remove_kind requires a .vertex target, got {info.target_type}"
+            )
     cred_provider = credentials or CustodyCredentialProvider()
 
     current_text = vertex_path.read_text(encoding="utf-8")
     try:
         new_text = remove_vertex_kind(current_text, kind_name)
     except Exception as exc:
+        if arrival is not None:
+            raise SdkValueError(f"could not generate Arrival kind mutation: {exc}") from exc
         raise CeremonyFailed(f"could not generate kind mutation: {exc}") from exc
+
+    if arrival is not None:
+        from .declare import _edit_arrival_declaration
+
+        return _edit_arrival_declaration(
+            vertex_path, new_text, observer=observer, credentials=cred_provider,
+            registry=registry,
+            source_cache_bytes=current_text.encode("utf-8"),
+            require_cache_basis=True,
+        )
 
     preview = plan_declaration_update(vertex_path, proposed_text=new_text)
     if not preview.applicable:
@@ -248,7 +418,7 @@ def remove_kind(
 
     gen_after = declaration_generation(vertex_path)
 
-    return KindMutationResult(
+    return _legacy_result(KindMutationResult(
         status=result.status,
         reason=result.reason,
         mode=preview.mode,
@@ -257,7 +427,7 @@ def remove_kind(
         generation_after=gen_after,
         changes=[c.as_dict() if hasattr(c, "as_dict") else str(c) for c in preview.changes],
         file_written=result.file_written,
-    )
+    ))
 
 
 def grant_observer(
@@ -269,6 +439,7 @@ def grant_observer(
     key: str | None = None,
     observer: str,
     credentials: CredentialProvider | None = None,
+    registry: BackendRegistry | None = None,
 ) -> KindMutationResult:
     """Add or update an observer in the vertex's admission block via ceremony.
 
@@ -284,17 +455,25 @@ def grant_observer(
     Returns:
         KindMutationResult detailing the applied ceremony outcome.
     """
-    info = resolve_target(target)
-    if info.target_type != "vertex":
-        raise TargetUnsupported(f"grant_observer requires a .vertex target, got {info.target_type}")
-
     vertex_path = Path(target).resolve()
+    arrival = _arrival_descriptor_for(vertex_path)
+    if arrival is None:
+        info = resolve_target(target)
+        if info.target_type != "vertex":
+            raise TargetUnsupported(
+                f"grant_observer requires a .vertex target, got {info.target_type}"
+            )
     cred_provider = credentials or CustodyCredentialProvider()
 
     if key is None:
         from custody import ensure_signing_key
 
-        keypair = ensure_signing_key(vertex_path, observer=observer_name)
+        try:
+            keypair = ensure_signing_key(vertex_path, observer=observer_name)
+        except ValueError as exc:
+            if arrival is not None:
+                raise SdkValueError(f"could not prepare Arrival observer grant: {exc}") from exc
+            raise CeremonyFailed(f"could not splice observer grant: {exc}") from exc
         pub_key = keypair.public_b64
     else:
         pub_key = key
@@ -309,7 +488,19 @@ def grant_observer(
             grants=tuple(grants) if grants else (),
         )
     except Exception as exc:
+        if arrival is not None:
+            raise SdkValueError(f"could not generate Arrival observer grant: {exc}") from exc
         raise CeremonyFailed(f"could not splice observer grant: {exc}") from exc
+
+    if arrival is not None:
+        from .declare import _edit_arrival_declaration
+
+        return _edit_arrival_declaration(
+            vertex_path, new_text, observer=observer, credentials=cred_provider,
+            registry=registry,
+            source_cache_bytes=current_text.encode("utf-8"),
+            require_cache_basis=True,
+        )
 
     preview = plan_declaration_update(vertex_path, proposed_text=new_text)
     if not preview.applicable:
@@ -323,7 +514,7 @@ def grant_observer(
 
     gen_after = declaration_generation(vertex_path)
 
-    return KindMutationResult(
+    return _legacy_result(KindMutationResult(
         status=result.status,
         reason=result.reason,
         mode=preview.mode,
@@ -332,7 +523,7 @@ def grant_observer(
         generation_after=gen_after,
         changes=[c.as_dict() if hasattr(c, "as_dict") else str(c) for c in preview.changes],
         file_written=result.file_written,
-    )
+    ))
 
 
 def revoke_observer(
@@ -341,22 +532,36 @@ def revoke_observer(
     *,
     observer: str,
     credentials: CredentialProvider | None = None,
+    registry: BackendRegistry | None = None,
 ) -> KindMutationResult:
     """Remove an observer from the vertex's declared admission block via ceremony."""
-    info = resolve_target(target)
-    if info.target_type != "vertex":
-        raise TargetUnsupported(
-            f"revoke_observer requires a .vertex target, got {info.target_type}"
-        )
-
     vertex_path = Path(target).resolve()
+    arrival = _arrival_descriptor_for(vertex_path)
+    if arrival is None:
+        info = resolve_target(target)
+        if info.target_type != "vertex":
+            raise TargetUnsupported(
+                f"revoke_observer requires a .vertex target, got {info.target_type}"
+            )
     cred_provider = credentials or CustodyCredentialProvider()
 
     current_text = vertex_path.read_text(encoding="utf-8")
     try:
         new_text = remove_vertex_observer(current_text, observer_name)
     except ValueError as exc:
+        if arrival is not None:
+            raise SdkValueError(f"could not generate Arrival observer removal: {exc}") from exc
         raise CeremonyFailed(f"could not remove observer '{observer_name}': {exc}") from exc
+
+    if arrival is not None:
+        from .declare import _edit_arrival_declaration
+
+        return _edit_arrival_declaration(
+            vertex_path, new_text, observer=observer, credentials=cred_provider,
+            registry=registry,
+            source_cache_bytes=current_text.encode("utf-8"),
+            require_cache_basis=True,
+        )
 
     preview = plan_declaration_update(vertex_path, proposed_text=new_text)
     if not preview.applicable:
@@ -370,7 +575,7 @@ def revoke_observer(
 
     gen_after = declaration_generation(vertex_path)
 
-    return KindMutationResult(
+    return _legacy_result(KindMutationResult(
         status=result.status,
         reason=result.reason,
         mode=preview.mode,
@@ -379,11 +584,26 @@ def revoke_observer(
         generation_after=gen_after,
         changes=[c.as_dict() if hasattr(c, "as_dict") else str(c) for c in preview.changes],
         file_written=result.file_written,
-    )
+    ))
 
 
-def recover_ceremony(intent_path: Path | str) -> dict[str, Any]:
-    """Recover an interrupted declaration update ceremony from its .intent file."""
+def recover_ceremony(
+    intent_path: Path | str,
+    *,
+    registry: BackendRegistry | None = None,
+) -> dict[str, Any]:
+    """Recover an interrupted legacy or explicit Arrival ceremony."""
+    try:
+        import json
+
+        intent = Path(intent_path).resolve()
+        data = json.loads(intent.read_text(encoding="utf-8"))
+        if data.get("schema") == "loops.engine/arrival-declaration-intent/v1":
+            from .declare import recover_declaration
+
+            return recover_declaration(intent, registry=registry).as_dict()
+    except (OSError, ValueError, KeyError):
+        pass
     outcome = recover_declaration_update(intent_path)
     return {
         "classification": outcome.classification,

@@ -1,0 +1,71 @@
+Using CPython 3.13.11
+Creating virtual environment at: /private/tmp/loops-arrival-correctness/review-stage2/.venv
+   Building engine @ file:///private/tmp/loops-arrival-correctness/review-stage2/libs/engine
+   Building custody @ file:///private/tmp/loops-arrival-correctness/review-stage2/libs/custody
+   Building sign @ file:///private/tmp/loops-arrival-correctness/review-stage2/libs/sign
+   Building atoms @ file:///private/tmp/loops-arrival-correctness/review-stage2/libs/atoms
+   Building lang @ file:///private/tmp/loops-arrival-correctness/review-stage2/libs/lang
+      Built atoms @ file:///private/tmp/loops-arrival-correctness/review-stage2/libs/atoms
+      Built custody @ file:///private/tmp/loops-arrival-correctness/review-stage2/libs/custody
+      Built sign @ file:///private/tmp/loops-arrival-correctness/review-stage2/libs/sign
+      Built lang @ file:///private/tmp/loops-arrival-correctness/review-stage2/libs/lang
+      Built engine @ file:///private/tmp/loops-arrival-correctness/review-stage2/libs/engine
+Installed 37 packages in 122ms
+F                                                                        [100%]
+=================================== FAILURES ===================================
+______________ test_restore_refuses_same_ordinal_fork_projection _______________
+
+tmp_path = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-621/test_restore_refuses_same_ordi0')
+keys = <tests.conftest.Custodian object at 0x10ba10830>
+signer = <bound method Custodian.signer of <tests.conftest.Custodian object at 0x10ba10830>>
+
+    def test_restore_refuses_same_ordinal_fork_projection(tmp_path, keys, signer):
+        """A level watermark cannot stand in for the record hash it lacks."""
+        from engine.arrival_body import body_of_fact_row
+        from engine.arrival_file_backend import FileProjectionMaintenance, file_projection_path
+    
+        registry = BackendRegistry.with_builtin_backends()
+        source_log = ArrivalLog.mint(
+            tmp_path / "source.arrival", observer="alice", key=keys.public, signer=signer
+        )
+        receiver_path = tmp_path / "receiver.arrival"
+        receiver_path.write_bytes(source_log.path.read_bytes())
+        source = StoreDescriptor("file", str(source_log.path), role=Profile.AUTHORITY)
+        receiver = StoreDescriptor("file", str(receiver_path), role=Profile.REPLICA)
+        fork = ArrivalLog(receiver_path)
+        source_log.append(
+            "fact",
+            body_of_fact_row(("source-row", "note", 1.0, "alice", "test", "{}", None)),
+            observer="alice",
+            origin="test",
+            at=1.0,
+            signer=signer,
+        )
+        fork.append(
+            "fact",
+            body_of_fact_row(("fork-row", "note", 1.0, "alice", "test", "{}", None)),
+            observer="alice",
+            origin="test",
+            at=1.0,
+            signer=signer,
+        )
+        fork_head = _head(fork)
+        index = file_projection_path(receiver.location)
+        maintenance = FileProjectionMaintenance(receiver_path, index)
+        try:
+            maintenance.catch_up(fork_head)
+        finally:
+            maintenance.close()
+        projection_bytes = index.read_bytes()
+        receiver_path.write_bytes(source_log.path.read_bytes())
+        assert fork_head.ordinal == _head(source_log).ordinal
+        assert fork_head.record_hash != _head(source_log).record_hash
+    
+>       with pytest.raises(HeadMismatch, match="projection rows do not exactly match"):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE HeadMismatch
+
+tests/test_arrival_restore.py:330: Failed
+=========================== short test summary info ============================
+FAILED tests/test_arrival_restore.py::test_restore_refuses_same_ordinal_fork_projection
+1 failed, 17 deselected in 1.77s

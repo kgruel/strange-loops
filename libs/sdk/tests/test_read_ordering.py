@@ -11,10 +11,9 @@ from pathlib import Path
 
 import pytest
 from atoms import Arrival, ByKey
+from test_read import _aggregate_with_backdated_reassertion
 
 from sdk import SdkValueError, read_facts
-
-from test_read import _aggregate_with_backdated_reassertion
 
 
 @pytest.fixture
@@ -159,7 +158,7 @@ class TestResolveEntityRidesTheResolvedOrdering:
             tmp_path, n_members=1
         )
         assert receipt_last != ts_latest
-        assert resolve_entity(parent, "task", "name", "z") == receipt_last
+        assert resolve_entity(parent, "task", "name", "z").fact_id == receipt_last
 
     def test_two_members_ride_the_lens(self, tmp_path: Path) -> None:
         from sdk import resolve_entity
@@ -167,4 +166,4 @@ class TestResolveEntityRidesTheResolvedOrdering:
         parent, _receipt_last, ts_latest = _aggregate_with_backdated_reassertion(
             tmp_path, n_members=2
         )
-        assert resolve_entity(parent, "task", "name", "z") == ts_latest
+        assert resolve_entity(parent, "task", "name", "z").fact_id == ts_latest

@@ -84,17 +84,21 @@ from .arrival_body import (
 )
 from .arrival_contract import Head
 from .arrival_projection import has_rows, licensed_own_lineage, rows_of_record
-from .jsonl_store import _as_int, _stamped_offset_current
-from .residence import canonical_for, index_path_for
-from .sqlite_store import (
+from .file_projection_schema import (
+    ARRIVAL_LINEAGE_KEY,
+    ARRIVAL_OFFSET_KEY,
+    ARRIVAL_ORDINAL_KEY,
+    ArrivalCanonicalUnsupported,
     FACT_ALL_COLUMNS,
     FACT_COLUMN_INDEX,
     FACT_COLUMNS,
     FACT_INSERT_SQL,
     TICK_COLUMN_INDEX,
     TICK_INSERT_SQL,
-    SqliteStore,
 )
+from .jsonl_store import _as_int, _stamped_offset_current
+from .residence import canonical_for, index_path_for
+from .sqlite_store import SqliteStore
 
 __all__ = [
     "ARRIVAL_LINEAGE_KEY",
@@ -105,26 +109,7 @@ __all__ = [
     "ensure_arrival_index",
 ]
 
-# The resume mark's three store_meta keys — the ratified fields and no
-# others. The old cursor custody's row counts deliberately do not return:
-# the ordinal is dense, so "how many records precede this one" is ``ord``,
-# by construction.
-ARRIVAL_LINEAGE_KEY = "arrival_lineage"
-ARRIVAL_OFFSET_KEY = "arrival_offset"
-ARRIVAL_ORDINAL_KEY = "arrival_ordinal"
-
 T = TypeVar("T")
-
-
-class ArrivalCanonicalUnsupported(NotImplementedError):
-    """An operation an arrival-canonical store refuses rather than fudges.
-
-    Two families: history-mutating ops (they would rewrite index rows while
-    the log kept the originals), and index states that only projection
-    re-derivation can honestly resolve — which is the next cut's verb, so
-    refusing keeps it designable there. A refusal names what the caller can
-    do instead.
-    """
 
 
 class ArrivalStore(SqliteStore[T], Generic[T]):

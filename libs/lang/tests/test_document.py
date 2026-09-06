@@ -307,7 +307,8 @@ def test_roundtrip_via_documents(name: str) -> None:
     # fields. A caller that forgets store_backend gets no error, just a
     # vertex whose backend arm has quietly reverted to inference.
     projected = documents_to_vertex(
-        docs, path=ast.path, store=ast.store, store_backend=ast.store_backend
+        docs, path=ast.path, store=ast.store, store_backend=ast.store_backend,
+        store_location=ast.store_location,
     )
     assert projected == _ingress_stripped(ast)
 
@@ -323,6 +324,7 @@ def test_roundtrip_via_genesis(name: str) -> None:
         path=ast.path,
         store=ast.store,
         store_backend=ast.store_backend,
+        store_location=ast.store_location,
     )
     assert projected == _ingress_stripped(ast)
 
@@ -333,7 +335,8 @@ def test_roundtrip_is_idempotent(name: str) -> None:
     ast = parse_vertex(ALL_CASES[name])
     docs1 = vertex_to_documents(ast)
     ast2 = documents_to_vertex(
-        docs1, path=ast.path, store=ast.store, store_backend=ast.store_backend
+        docs1, path=ast.path, store=ast.store, store_backend=ast.store_backend,
+        store_location=ast.store_location,
     )
     docs2 = vertex_to_documents(ast2)
     assert [d.as_json() for d in docs1] == [d.as_json() for d in docs2]
@@ -439,10 +442,34 @@ def test_backend_survives_the_document_round_trip() -> None:
     assert ast.store_backend == BackendDecl(name="duckdb")
     docs = vertex_to_documents(ast)
     projected = documents_to_vertex(
-        docs, path=ast.path, store=ast.store, store_backend=ast.store_backend
+        docs, path=ast.path, store=ast.store, store_backend=ast.store_backend,
+        store_location=ast.store_location,
     )
     assert projected.store_backend == BackendDecl(name="duckdb")
     assert projected.store == ast.store
+
+
+def test_complete_descriptor_residence_survives_the_document_round_trip() -> None:
+    location = "postgresql://db.example/loops?sslmode=require"
+    ast = parse_vertex(
+        f'name "backed"\nstore "{location}" backend="postgres" '
+        'lineage="01ARRIVALPIN" role="replica"\n'
+        'loops { a { fold { n "inc" } } }'
+    )
+    docs = vertex_to_documents(ast)
+    projected = documents_to_vertex(
+        docs,
+        path=ast.path,
+        store=ast.store,
+        store_backend=ast.store_backend,
+        store_location=ast.store_location,
+    )
+    assert projected == ast
+    assert projected.store_location == location
+    blob = json.dumps(genesis_payload(ast))
+    assert location not in blob
+    assert "01ARRIVALPIN" not in blob
+    assert "replica" not in blob
 
 
 def test_source_defined_for_each_source() -> None:
@@ -697,7 +724,8 @@ def test_order_preserved_after_shuffle(name: str) -> None:
     shuffled = list(docs)
     random.Random(1234).shuffle(shuffled)
     projected = documents_to_vertex(
-        shuffled, path=ast.path, store=ast.store, store_backend=ast.store_backend
+        shuffled, path=ast.path, store=ast.store, store_backend=ast.store_backend,
+        store_location=ast.store_location,
     )
     assert projected == _ingress_stripped(ast)
 
@@ -836,6 +864,7 @@ def _vertex_kwargs(ast: VertexFile) -> dict:
         "loops": ast.loops,
         "store": ast.store,
         "store_backend": ast.store_backend,
+        "store_location": ast.store_location,
         "discover": ast.discover,
         "sources": ast.sources,
         "vertices": ast.vertices,
@@ -871,7 +900,7 @@ def _residence_stripped(ast: VertexFile) -> VertexFile:
     ``store_backend``, and an assertion that cleared only some of it would
     pass while proving less.
     """
-    return _edit(ast, store=None, store_backend=None)
+    return _edit(ast, store=None, store_backend=None, store_location=None)
 
 
 def _ingress_stripped(ast: VertexFile) -> VertexFile:

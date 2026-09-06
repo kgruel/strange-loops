@@ -1,0 +1,1 @@
+{'exception': 'ExportPublicationError', 'cause': 'PermissionError', 'outcome': 'artifact-not-published', 'output_exists': False, 'temporary_outputs': []}

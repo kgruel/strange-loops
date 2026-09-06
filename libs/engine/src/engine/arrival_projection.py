@@ -62,14 +62,18 @@ from typing import Iterator, NoReturn
 
 from .arrival import GENESIS_KIND, KEY_INTRODUCTION_KIND, ArrivalLog, ResumeMark
 from .arrival_body import ROW_KINDS, legacy_object_of_body, rows_of_body
-from .jsonl_codec import serialize_object
-from .residence import canonical_for, index_path_for
-from .sqlite_store import (
+from .file_projection_schema import (
+    ARRIVAL_LINEAGE_KEY,
+    ARRIVAL_OFFSET_KEY,
+    ARRIVAL_ORDINAL_KEY,
+    ArrivalCanonicalUnsupported,
     _SCHEMA_STMTS,
     FACT_INSERT_SQL,
     TICK_INSERT_SQL,
     ensure_coordinate_schema,
 )
+from .jsonl_codec import serialize_object
+from .residence import canonical_for, index_path_for
 
 __all__ = [
     "DerivedLogAgreement",
@@ -100,16 +104,7 @@ _OWN_LINEAGE_KEY = "own_lineage"
 
 
 def _unsupported(message: str) -> NoReturn:
-    """Refuse in the arrival store's refusal family.
-
-    Imported inside the function on purpose: :mod:`engine.arrival_store`
-    sits ABOVE this module (it reaches :func:`has_rows` through
-    :mod:`engine.jsonl_store`), so naming the exception at module level
-    would close an import cycle. A second exception family would be two
-    names for one verdict, which is worse than a deferred import.
-    """
-    from .arrival_store import ArrivalCanonicalUnsupported
-
+    """Refuse in the shared file-projection refusal family."""
     raise ArrivalCanonicalUnsupported(message)
 
 
@@ -514,6 +509,9 @@ def rederive_projections(
             conn.execute("DELETE FROM ticks")
             conn.execute("DROP TABLE IF EXISTS facts_fts")
             conn.execute("DROP TABLE IF EXISTS fts_state")
+            # Arrival exact-prefix FTS coverage is derived from these rows too.
+            conn.execute("DROP TABLE IF EXISTS arrival_facts_fts")
+            conn.execute("DROP TABLE IF EXISTS arrival_fts_state")
 
             records = facts = ticks = 0
             last: ResumeMark | None = None
@@ -608,14 +606,7 @@ def _meta_set(conn: sqlite3.Connection, key: str, value: object) -> None:
 
 
 def _stamp_mark(conn: sqlite3.Connection, mark: ResumeMark) -> None:
-    """The resume mark's three fields, written through this module's own
-    connection. The key names are the store's — imported inside the
-    function because :mod:`engine.arrival_store` sits above this one."""
-    from .arrival_store import (
-        ARRIVAL_LINEAGE_KEY,
-        ARRIVAL_OFFSET_KEY,
-        ARRIVAL_ORDINAL_KEY,
-    )
+    """Write the resume mark's three shared file-projection fields."""
 
     _meta_set(conn, ARRIVAL_LINEAGE_KEY, mark.arrival_lineage)
     _meta_set(conn, ARRIVAL_OFFSET_KEY, mark.arrival_offset)

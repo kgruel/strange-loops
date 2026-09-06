@@ -770,6 +770,7 @@ def _load_vertex_file(doc: ckdl.Document, path: Path | None) -> VertexFile:
     name: str | None = None
     store: Path | None = None
     store_backend: BackendDecl | None = None
+    store_location: str | None = None
     discover: str | None = None
     sources: tuple[SourceEntry, ...] | None = None
     vertices: tuple[Path, ...] | None = None
@@ -799,9 +800,10 @@ def _load_vertex_file(doc: ckdl.Document, path: Path | None) -> VertexFile:
             # letter wrong parsed clean and the store degraded to suffix
             # inference forever. Explicit declaration that a typo can silently
             # undo is not explicit declaration.
-            store = Path(_require_arg(node, 0, "path", path))
+            declared_location = _require_arg(node, 0, "path", path)
+            store = Path(declared_location)
             for prop in node.properties:
-                if prop != "backend":
+                if prop not in {"backend", "lineage", "role"}:
                     raise _error(f"store: unknown property {prop!r}", path)
             if node.children:
                 # Reserved, not rejected on principle: a child block is where
@@ -814,11 +816,50 @@ def _load_vertex_file(doc: ckdl.Document, path: Path | None) -> VertexFile:
                 # loader cannot tell it from the no-block case. It declares
                 # nothing, so nothing is silently discarded.
                 raise _error("store: takes no child block", path)
+            backend_name: str | None = None
+            lineage: str | None = None
+            role: str | None = None
             if "backend" in node.properties:
-                backend_name = str(node.properties["backend"]).strip()
+                backend_value = node.properties["backend"]
+                if not isinstance(backend_value, str):
+                    raise _error("store: backend must be a string", path)
+                backend_name = backend_value.strip()
                 if not backend_name:
                     raise _error("store: backend must not be empty", path)
-                store_backend = BackendDecl(name=backend_name)
+            if "lineage" in node.properties:
+                lineage_value = node.properties["lineage"]
+                if not isinstance(lineage_value, str):
+                    raise _error("store: lineage must be a string", path)
+                lineage = lineage_value.strip()
+                if not lineage:
+                    raise _error("store: lineage must not be empty", path)
+            if "role" in node.properties:
+                role_value = node.properties["role"]
+                if not isinstance(role_value, str):
+                    raise _error("store: role must be a string", path)
+                role = role_value.strip()
+                if role not in {"authority", "replica", "archive"}:
+                    raise _error(
+                        "store: role must be one of authority, replica, archive",
+                        path,
+                    )
+            if (lineage is not None or role is not None) and backend_name is None:
+                raise _error(
+                    "store: lineage and role require an explicit backend", path
+                )
+            if backend_name is not None:
+                raw_location = node.args[0]
+                if not isinstance(raw_location, str):
+                    raise _error("store: descriptor location must be a string", path)
+                if not raw_location.strip():
+                    raise _error(
+                        "store: descriptor location must not be empty", path
+                    )
+                store_backend = BackendDecl(
+                    name=backend_name, lineage=lineage, role=role
+                )
+                if backend_name != "file":
+                    store_location = raw_location
         elif key == "strict":
             # `strict true` / `strict false` — when true, all emits to this vertex
             # refuse on validation failures. No CLI override.
@@ -911,6 +952,7 @@ def _load_vertex_file(doc: ckdl.Document, path: Path | None) -> VertexFile:
         loops=loops,
         store=store,
         store_backend=store_backend,
+        store_location=store_location,
         discover=discover,
         sources=sources,
         vertices=vertices,

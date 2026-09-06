@@ -2009,6 +2009,100 @@ class TestStoreBackend:
         assert v.store == Path("./t.arrival")
         assert v.store_backend == BackendDecl(name="file")
 
+    def test_store_with_lineage_and_role(self):
+        v = parse_vertex(
+            'name "t"\nstore "./t.arrival" backend="file" '
+            'lineage="01ARRIVALPIN" role="authority"\n'
+            'loops { x { fold { items "inc" } } }'
+        )
+        assert v.store_backend == BackendDecl(
+            name="file", lineage="01ARRIVALPIN", role="authority"
+        )
+
+    @pytest.mark.parametrize("property_name", ["lineage", "role"])
+    @pytest.mark.parametrize("value", ["null", "true", "0", "1.5"])
+    def test_descriptor_claims_must_be_strings(self, property_name, value):
+        text = (
+            f'name "t"\nstore "./t.arrival" backend="file" '
+            f'{property_name}={value}\n'
+            'loops { x { fold { items "inc" } } }'
+        )
+        with pytest.raises(
+            ParseError, match=rf"store: {property_name} must be a string"
+        ):
+            parse_vertex(text)
+
+    @pytest.mark.parametrize("property_name", ["lineage", "role"])
+    def test_descriptor_claims_require_an_explicit_backend(self, property_name):
+        value = "authority" if property_name == "role" else "01ARRIVALPIN"
+        text = (
+            f'name "t"\nstore "./t.arrival" {property_name}="{value}"\n'
+            'loops { x { fold { items "inc" } } }'
+        )
+        with pytest.raises(
+            ParseError,
+            match="lineage and role require an explicit backend",
+        ):
+            parse_vertex(text)
+
+    @pytest.mark.parametrize("role", ["primary", "query", "writer", ""])
+    def test_unsupported_role_is_refused(self, role):
+        text = (
+            f'name "t"\nstore "./t.arrival" backend="file" role="{role}"\n'
+            'loops { x { fold { items "inc" } } }'
+        )
+        with pytest.raises(ParseError, match="role must be one of"):
+            parse_vertex(text)
+
+    def test_non_file_location_keeps_its_opaque_spelling(self):
+        location = "postgresql://db.example/loops?sslmode=require"
+        v = parse_vertex(
+            f'name "t"\nstore "{location}" backend="postgres" role="replica"\n'
+            'loops { x { fold { items "inc" } } }'
+        )
+        assert v.store_location == location
+
+    @pytest.mark.parametrize("value", ["null", "true", "false", "0", "1.5"])
+    def test_descriptor_location_must_be_a_string(self, value):
+        text = (
+            f'name "t"\nstore {value} backend="file" role="authority"\n'
+            'loops { x { fold { items "inc" } } }'
+        )
+        with pytest.raises(
+            ParseError, match="store: descriptor location must be a string"
+        ):
+            parse_vertex(text)
+
+    @pytest.mark.parametrize("location", ["", "   "])
+    def test_descriptor_location_must_not_be_blank(self, location):
+        text = (
+            f'name "t"\nstore "{location}" backend="file" role="authority"\n'
+            'loops { x { fold { items "inc" } } }'
+        )
+        with pytest.raises(
+            ParseError, match="store: descriptor location must not be empty"
+        ):
+            parse_vertex(text)
+
+    @pytest.mark.parametrize("value", ["null", "true", "false", "0", "42", "1.5"])
+    def test_non_string_backend_refused(self, value):
+        """Typed KDL values must not invent an adapter name via str()."""
+        text = (
+            f'name "t"\nstore "./t.arrival" backend={value}\n'
+            'loops { x { fold { items "inc" } } }'
+        )
+        with pytest.raises(ParseError, match="store: backend must be a string"):
+            parse_vertex(text)
+
+    @pytest.mark.parametrize("name", ["null", "true", "42", "custom-adapter"])
+    def test_literal_string_backend_names_remain_open(self, name):
+        """Grammar validates the type; the registry decides what is installed."""
+        text = (
+            f'name "t"\nstore "./t.arrival" backend="{name}"\n'
+            'loops { x { fold { items "inc" } } }'
+        )
+        assert parse_vertex(text).store_backend == BackendDecl(name=name)
+
     def test_backend_name_is_not_cross_checked_against_the_suffix(self):
         """Explicit wins. Once the backend is declared the suffix means
         nothing, so a declared backend that disagrees with the suffix is

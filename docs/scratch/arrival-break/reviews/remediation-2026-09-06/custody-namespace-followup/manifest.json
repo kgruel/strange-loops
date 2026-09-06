@@ -1,0 +1,22 @@
+{
+  "due_at": "2026-09-06T15:10:19.127778+00:00",
+  "model": "claude-fable-5-1[1m]",
+  "effort": "low",
+  "worktree": "/Users/kaygee/Code/loops-wt/arrival-finish",
+  "results": "/Users/kaygee/Code/loops-wt/arrival-finish/docs/scratch/arrival-break/reviews/remediation-2026-09-06/custody-namespace-followup",
+  "jobs": [
+    {
+      "name": "custody-namespace-followup",
+      "packet": "/Users/kaygee/Code/loops-wt/arrival-finish/docs/scratch/arrival-break/reviews/remediation-2026-09-06/custody-namespace-followup/custody-namespace-followup-prompt.txt",
+      "sha256": "6d21d63188cedfd6c298b02d523f50817a420950173bde0633a484dadf9f2811",
+      "sources": {
+        "libs/engine/src/engine/arrival_contract.py": "4859b8935a34c4ee08fb0cd75064bdd1360ce85e43647263ae08be86ddef2a1d",
+        "libs/custody/src/custody/signing.py": "8a8f506b35c67b671c7714fbf11cfbdaa86c4a14c3cc4a3d429fc8b05a338710",
+        "libs/custody/tests/test_signing.py": "f0d7bec937789ded6e349c2af5e6865de51a8206238cc03f5e248b47f8c3ccd0",
+        "libs/sign/src/sign/ed25519.py": "73b912ddf1b281ad2dedf02d33af02c236731af70014f3393b240096c501bb83"
+      },
+      "status": "pending",
+      "packet_characters": 47848
+    }
+  ]
+}

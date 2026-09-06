@@ -893,6 +893,7 @@ def materialize_vertex(
     fold_overrides: dict[str, FoldOverride] | None = None,
     tick_signer=None,
     fact_signer=None,
+    attach_store: bool = True,
 ) -> "Vertex":
     """Instantiate a runtime Vertex tree from a CompiledVertex.
 
@@ -931,7 +932,7 @@ def materialize_vertex(
     from .vertex import Vertex
 
     store = None
-    if compiled.store is not None:
+    if attach_store and compiled.store is not None:
         from atoms import Fact
 
         from .residence import (
@@ -1052,6 +1053,7 @@ def materialize_vertex(
         child_vertex = materialize_vertex(
             child_compiled,
             fold_overrides=child_overrides if child_overrides else None,
+            attach_store=attach_store,
         )
         vertex.add_child(child_vertex)
 

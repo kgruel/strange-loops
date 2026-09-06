@@ -2,13 +2,24 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
+from typing import Any
 
+from engine.arrival_contract import StoreDescriptor
+from engine.arrival_registry import descriptor_for
 from engine.probe import TargetInfo, probe_target
+from lang import parse_vertex_file, resolve_vertex
 
-from .types import TargetNotFound, TargetUnsupported
+from .types import (
+    ArrivalTarget,
+    SdkValueError,
+    StoreDescriptorInfo,
+    TargetNotFound,
+    TargetUnsupported,
+)
 
-__all__ = ["resolve_target", "discover_targets", "TargetInfo"]
+__all__ = ["resolve_target", "resolve_arrival_target", "discover_targets", "TargetInfo"]
 
 _IGNORE_DIRS = frozenset(
     {
@@ -46,6 +57,107 @@ def resolve_target(target: Path | str) -> TargetInfo:
         )
 
     return info
+
+
+def _arrival_descriptor(target: Path | str) -> tuple[Path, Any, StoreDescriptor] | None:
+    """Resolve an explicitly declared descriptor without probing its location.
+
+    ``TargetInfo`` is a legacy filesystem classification and necessarily turns
+    a store spelling into a ``Path``. Descriptor resolution instead parses the
+    vertex locator directly, so another backend's DSN or service URL remains
+    byte-for-byte opaque until that named adapter receives it.
+    """
+    path = Path(target).resolve()
+    if path.suffix.lower() != ".vertex":
+        return None
+    if not path.exists():
+        raise TargetNotFound(f"target path does not exist: {path}")
+    try:
+        ast = parse_vertex_file(path)
+    except Exception:
+        return None  # the legacy resolver owns malformed-target classification
+    descriptor = descriptor_for(ast, path)
+    if descriptor is None:
+        return None
+    if ast.combine is not None or ast.discover is not None:
+        raise TargetUnsupported(
+            f"Arrival target {path} is an aggregate; member-basis reads are not "
+            "implemented in this single-store stage"
+        )
+    if descriptor.role is None:
+        raise SdkValueError(
+            f"Arrival target {path} must declare store role explicitly"
+        )
+    return path, ast, descriptor
+
+
+def _refuse_arrival_aggregate_members(target: Path | str) -> None:
+    """Keep legacy aggregate composition from opening descriptor members."""
+    root = Path(target).resolve()
+    if root.suffix.lower() != ".vertex" or not root.exists():
+        return
+
+    config_home = Path(
+        os.environ.get(
+            "LOOPS_HOME",
+            Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "loops",
+        )
+    )
+    visited: set[Path] = set()
+
+    def visit(path: Path) -> None:
+        path = path.resolve()
+        if path in visited or not path.exists():
+            return
+        visited.add(path)
+        try:
+            ast = parse_vertex_file(path)
+        except Exception:
+            return  # legacy resolver reports malformed targets in its own taxonomy
+
+        if path != root and ast.store_backend is not None:
+            raise TargetUnsupported(
+                f"aggregate target {root} includes descriptor-backed member {path}; "
+                "member-basis Arrival reads are not implemented"
+            )
+
+        members: list[Path] = []
+        if ast.discover is not None:
+            members.extend(
+                match.resolve()
+                for match in sorted(path.parent.glob(ast.discover))
+                if match.suffix.lower() == ".vertex" and match.resolve() != path
+            )
+        elif ast.combine is not None:
+            for entry in ast.combine:
+                member = resolve_vertex(entry.name, config_home)
+                if not member.is_absolute():
+                    member = (path.parent / member).resolve()
+                members.append(member)
+        for member in members:
+            visit(member)
+
+    visit(root)
+
+
+def resolve_arrival_target(target: Path | str) -> ArrivalTarget:
+    """Resolve the supported descriptor-first Arrival target.
+
+    Bare stores and vertices without ``backend=`` remain legacy inputs. They
+    are deliberately refused here instead of being inferred from a suffix.
+    """
+    resolved = _arrival_descriptor(target)
+    if resolved is None:
+        path = Path(target).resolve()
+        raise TargetUnsupported(
+            f"target {path} does not declare an Arrival backend and role"
+        )
+    path, ast, descriptor = resolved
+    return ArrivalTarget(
+        target_path=str(path),
+        vertex_name=ast.name,
+        store=StoreDescriptorInfo.from_descriptor(descriptor),
+    )
 
 
 def discover_targets(

@@ -589,13 +589,13 @@ class SdkStateMachine(RuleBasedStateMachine):
         """Verify every model fact is retrievable by ID and nonexistent ID returns None."""
         for mf in self.facts:
             f = self.call_sdk(read_fact_by_id, self.vertex_path, mf.id)
-            assert f is not None
-            assert f["id"] == mf.id
-            assert f["kind"] == mf.kind
-            assert f["observer"] == mf.observer
+            assert f.fact is not None
+            assert f.fact["id"] == mf.id
+            assert f.fact["kind"] == mf.kind
+            assert f.fact["observer"] == mf.observer
 
         none_res = self.call_sdk(read_fact_by_id, self.vertex_path, "00000000000000000000000000")
-        assert none_res is None
+        assert none_res.fact is None
 
     @rule()
     def check_read_state(self) -> None:
@@ -620,8 +620,8 @@ class SdkStateMachine(RuleBasedStateMachine):
     def check_read_ticks(self) -> None:
         """Verify read_ticks returns valid chronological tick structures."""
         ticks = self.call_sdk(read_ticks, self.vertex_path)
-        assert isinstance(ticks, list)
-        for t in ticks:
+        assert isinstance(ticks.items, list)
+        for t in ticks.items:
             assert isinstance(t, dict)
             assert "id" in t
             assert "name" in t
@@ -678,10 +678,10 @@ class SdkStateMachine(RuleBasedStateMachine):
         """(2) Every emitted receipt id is subsequently readable via read_fact_by_id."""
         for mf in self.facts:
             stored = self.call_sdk(read_fact_by_id, self.vertex_path, mf.id)
-            assert stored is not None
-            assert stored["id"] == mf.id
-            assert stored["kind"] == mf.kind
-            assert stored["observer"] == mf.observer
+            assert stored.fact is not None
+            assert stored.fact["id"] == mf.id
+            assert stored.fact["kind"] == mf.kind
+            assert stored.fact["observer"] == mf.observer
 
     @invariant()
     def invariant_dry_run_semantics_and_non_mutation(self) -> None:

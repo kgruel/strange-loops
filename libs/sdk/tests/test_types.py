@@ -6,24 +6,30 @@ from dataclasses import FrozenInstanceError
 from datetime import UTC, datetime
 
 import pytest
+from engine.arrival_contract import Commit, DurabilityProfile, DurabilityReceipt, Head, ReadBasis
 
 from sdk import (
     AdmissionFailed,
+    BatchEmitResult,
     CeremonyFailed,
     CommittedEmissionError,
     EmissionFailed,
     EmitReceipt,
+    FactLookupResult,
     FactPageResult,
     FoldStateResult,
     InvalidEmissionRequest,
     KindMutationResult,
+    LegacyBatchPartialFailure,
     ReadSummary,
     SdkError,
     SdkValueError,
+    StoreDescriptorInfo,
     TargetError,
     TargetNotFound,
     TargetNotWritable,
     TargetUnsupported,
+    TickReadResult,
 )
 
 # =============================================================================
@@ -108,7 +114,9 @@ def test_read_summary_model() -> None:
 
     # Serialization
     d = summary.as_dict()
-    assert d["schema"] == "loops.sdk/read-summary/v1"
+    assert d["schema"] == "loops.sdk/read-summary/v2"
+    assert d["read_path"] == "legacy"
+    assert d["basis"] is None
     assert d["target_type"] == "vertex"
     assert d["target_path"] == "/tmp/test.vertex"
     assert d["canonical_mode"] == "sqlite"
@@ -140,9 +148,10 @@ def test_fact_page_result_model() -> None:
 
     # Serialization
     d = page.as_dict()
-    assert d["schema"] == "loops.sdk/facts-page/v1"
+    assert d["schema"] == "loops.sdk/facts-page/v2"
     assert len(d["items"]) == 1
     assert d["next_cursor"] == "cursor_token"
+    assert d["has_continuation"] is False
     assert d["truncated"] is True
     assert d["order"] == "newest"
 
@@ -163,10 +172,36 @@ def test_fold_state_result_model() -> None:
 
     # Serialization
     d = state.as_dict()
-    assert d["schema"] == "loops.sdk/fold-state/v1"
+    assert d["schema"] == "loops.sdk/fold-state/v2"
     assert d["vertex_name"] == "my_vertex"
     assert d["declaration_status"] == "store"
     assert d["sections"]["note"]["count"] == 5
+
+
+def test_basis_bearing_read_models_serialize_heads_and_empty_answers() -> None:
+    """Every Arrival result retains the same full basis, including empties."""
+    captured = Head(lineage="lin-1", ordinal=7, record_hash="sha256:head")
+    basis = ReadBasis(
+        lineage="lin-1",
+        captured_head=captured,
+        projected_through=captured,
+        view_generation="view-1",
+    )
+    store = StoreDescriptorInfo(
+        backend="remote",
+        location="svc://tenant//ledger?q=a%2Fb",
+        lineage="lin-1",
+        role="replica",
+    )
+
+    ticks = TickReadResult(read_path="arrival", basis=basis, store=store)
+    lookup = FactLookupResult(read_path="arrival", basis=basis, store=store)
+
+    assert ticks.as_dict()["basis"]["captured_head"]["record_hash"] == "sha256:head"
+    assert ticks.as_dict()["store"]["location"] == "svc://tenant//ledger?q=a%2Fb"
+    assert lookup.found is False
+    assert lookup.as_dict()["found"] is False
+    assert lookup.as_dict()["basis"]["projected_through"]["ordinal"] == 7
 
 
 def test_emit_receipt_model() -> None:
@@ -190,7 +225,9 @@ def test_emit_receipt_model() -> None:
 
     # Serialization
     d = receipt.as_dict()
-    assert d["schema"] == "loops.sdk/emit-receipt/v1"
+    assert d["schema"] == "loops.sdk/emit-receipt/v2"
+    assert d["write_path"] == "legacy"
+    assert d["captured_head"] is None
     assert d["id"] == "01JABCD12345"
     assert d["stored"] is True
     assert d["signed"] is True
@@ -223,6 +260,66 @@ def test_emit_receipt_model() -> None:
     assert d_dry["id"] == ""
 
 
+def test_batch_emit_result_keeps_shared_commit_outside_item_receipts() -> None:
+    head = Head("lineage", 4, "before")
+    after = Head("lineage", 5, "after")
+    commit = Commit(
+        before=head,
+        records=(),
+        after=after,
+        durability=DurabilityReceipt(DurabilityProfile.HOST, "fsync"),
+    )
+    item = EmitReceipt(
+        write_path="arrival",
+        id="fact-one",
+        observer="alice",
+        captured_head=head,
+        witnessed=True,
+        projection="synced",
+    )
+    result = BatchEmitResult(
+        write_path="arrival",
+        items=[item],
+        atomic=True,
+        atomicity="single-append",
+        captured_head=head,
+        commit=commit,
+        witnessed=True,
+        projection="synced",
+    )
+
+    assert list(result) == [item]
+    assert result[0] is item and len(result) == 1
+    encoded = result.as_dict()
+    assert encoded["schema"] == "loops.sdk/batch-emit/v2"
+    assert encoded["item_count"] == encoded["stored_count"] == 1
+    assert encoded["commit"] == {
+        "before": {"lineage": "lineage", "ordinal": 4, "record_hash": "before"},
+        "after": {"lineage": "lineage", "ordinal": 5, "record_hash": "after"},
+        "record_count": 0,
+        "durability": {"profile": "host", "mechanism": "fsync"},
+    }
+    assert encoded["items"][0]["commit"] is None
+
+
+def test_legacy_batch_partial_failure_serializes_retained_prefix() -> None:
+    retained = EmitReceipt(id="stored", observer="alice")
+    cause = CommittedEmissionError("post-commit failed", fact_id="uncertain")
+    failure = LegacyBatchPartialFailure(
+        "legacy sequence stopped",
+        failed_index=1,
+        items=[retained],
+        cause=cause,
+        committed_fact_id="uncertain",
+    )
+    payload = failure.as_dict()
+    assert failure.items == (retained,)
+    assert payload["outcome"] == "legacy-partial"
+    assert payload["failed_index"] == 1
+    assert payload["items"][0]["id"] == "stored"
+    assert payload["committed_fact_id"] == "uncertain"
+
+
 def test_emit_preview_result_model() -> None:
     """EmitPreviewResult defaults, frozenness, and as_dict conversion."""
     from sdk import EmitPreviewResult
@@ -250,7 +347,9 @@ def test_emit_preview_result_model() -> None:
 
     # Serialization
     d = preview.as_dict()
-    assert d["schema"] == "loops.sdk/emit-preview/v1"
+    assert d["schema"] == "loops.sdk/emit-preview/v2"
+    assert d["read_path"] == "legacy"
+    assert d["captured_head"] is None
     assert d["target"] == "/tmp/test.vertex"
     assert d["kind"] == "task"
     assert d["kind_declared"] is True
@@ -306,11 +405,16 @@ def test_search_result_models() -> None:
         res.total_matches = 2  # type: ignore[misc]
 
     d = res.as_dict()
-    assert d["schema"] == "loops.sdk/search-result/v1"
+    assert d["schema"] == "loops.sdk/search-result/v2"
+    assert d["read_path"] == "legacy"
+    assert d["basis"] is None
+    assert d["store"] is None
     assert d["query"] == "task"
     assert d["total_matches"] == 1
     assert len(d["matches"]) == 1
     assert d["matches"][0]["id"] == "01FACT00000000000000000001"
+    assert d["ranking"] is None
+    assert d["ranking_through"] is None
 
 
 def test_timeline_result_models() -> None:
@@ -334,7 +438,9 @@ def test_timeline_result_models() -> None:
         res.total_events = 2  # type: ignore[misc]
 
     d = res.as_dict()
-    assert d["schema"] == "loops.sdk/timeline-result/v1"
+    assert d["schema"] == "loops.sdk/timeline-result/v2"
+    assert d["read_path"] == "legacy"
+    assert d["basis"] is None and d["store"] is None
     assert d["start_ts"] == 1700000000.0
     assert d["total_events"] == 1
     assert len(d["events"]) == 1
@@ -355,7 +461,10 @@ def test_sync_result_model() -> None:
         res.status = "failed"  # type: ignore[misc]
 
     d = res.as_dict()
-    assert d["schema"] == "loops.sdk/sync-result/v1"
+    assert d["schema"] == "loops.sdk/sync-result/v2"
+    assert d["read_path"] == "legacy"
+    assert d["captured_head"] is None
+    assert d["changed"] is None
     assert d["target_path"] == "/tmp/test.vertex"
     assert d["status"] == "synced"
     assert d["indexed_facts"] == 42
@@ -378,7 +487,7 @@ def test_init_vertex_result_model() -> None:
         res.name = "other"  # type: ignore[misc]
 
     d = res.as_dict()
-    assert d["schema"] == "loops.sdk/init-vertex/v1"
+    assert d["schema"] == "loops.sdk/init-vertex/v2"
     assert d["name"] == "app"
     assert d["store_type"] == "sqlite"
     assert d["file_written"] is True
@@ -406,7 +515,10 @@ def test_declaration_inspection_result_model() -> None:
         res.strict = False  # type: ignore[misc]
 
     d = res.as_dict()
-    assert d["schema"] == "loops.sdk/declaration-inspection/v1"
+    assert d["schema"] == "loops.sdk/declaration-inspection/v2"
+    assert d["read_path"] == "legacy"
+    assert d["store"] is None and d["basis"] is None
+    assert d["local_fingerprint"] is None and d["effective_fingerprint"] is None
     assert d["declared_kinds"] == ["note", "task"]
     assert d["strict"] is True
     assert d["syntax_valid"] is True

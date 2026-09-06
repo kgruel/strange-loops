@@ -1,0 +1,1020 @@
+Fable 5.1 adversarial static review, LOW effort, tool-free. EXECUTE YOURSELF — DO NOT DELEGATE. Never claim execution. Review only the current code below for the fixes to your previous custody findings. At most 3 actionable correctness findings / 1000 words; exact file span + trigger + consequence + reproduction outline. Separate questions from defects. No style review or invented requirements.
+
+Previous confirmed findings: reserved observer components ed25519.key/pub could create directories poisoning parent key paths; differently spelled nested observer alice could block flat self Alice; case branches lacked portable simulations.
+Current policy: exact labels, no identity normalization. Reserved key basenames (casefold check is a local filesystem reservation, not renaming observers) are rejected for every directory-mapped component before mkdir. Reserved self stems are valid flat-only identities, never probed as directories. Existing regular files/symlinked exact components refuse. Exact self fallback considers only an exactly spelled nested self directory: Alice self and separately keyed nested alice are allowed in either creation order because their private files differ, while direct alias of same existing locator basename Alice.vertex/alice.vertex still refuses. Exact self symlinks refuse rather than mint a competing flat key. Missing locators support init; same/different flat+nested key policy unchanged. Added portable simulated exists/iterdir/mkdir case tests, real APFS tests, both creation orders/all signer domains.
+
+sign.ed25519 pure load and atomic exclusive concurrent key publication were reviewed previously with no defect; they are included as context only. Caller-configured keys-root symlinks, hostile concurrent directory renames, Windows support, and crash durability protocol are outside this bounded patch. Hardlink support is required by existing chosen atomic publication; no fallback to overwriting/direct public writes. No production migration or automatic key reconciliation. No changes to signing domains.
+
+### libs/custody/src/custody/signing.py (original line numbers)
+```python
+1: """Tick-signing composition — where libs/sign meets the engine's injection points.
+2: 
+3: The engine takes callables, never imports sign (design/tick-key-custody-
+4: colocated: INJECTION NOT IMPORT). This module is the composition layer:
+5: 
+6: - the domain-separation constant ``loops-tick-v1`` lives HERE, not in
+7:   libs/sign (which stays loops-agnostic) and not in engine (which never
+8:   sees the algorithm);
+9: - key custody is co-located with the store: the private key lives at
+10:   ``<vertex dir>/keys/ed25519.key`` next to the .vertex and its db —
+11:   slice/merge already strip chain+signature columns, so the key dies with
+12:   the store's home (new custody context semantics);
+13: - the verification registry IS the vertex file (design/observer-key-
+14:   registry): observer declarations carry a ``key`` field (raw-32-byte
+15:   base64), and the verifier accepts a signature matching ANY declared key
+16:   (anticipates rotation and multi-writer without a key-id column today).
+17: 
+18: Progressive policy is structural: no key material → tick_signer_for
+19: returns None → ticks append unsigned (honest pre-signature era). Key
+20: generation + gitignoring happens only through ``ensure_signing_key``
+21: (reached via ``loops init`` or ``loops add <v> observer --keygen``);
+22: the load-side helpers never generate implicitly.
+23: """
+24: 
+25: from __future__ import annotations
+26: 
+27: from collections.abc import Callable
+28: from pathlib import Path
+29: 
+30: TICK_DOMAIN = "loops-tick-v1"
+31: FACT_DOMAIN = "loops-fact-v1"
+32: ARRIVAL_DOMAIN = "loops-arrival-v1"
+33: 
+34: _KEY_FILE = "ed25519.key"
+35: _PUB_FILE = "ed25519.pub"
+36: _RESERVED_KEY_COMPONENTS = frozenset({_KEY_FILE.casefold(), _PUB_FILE.casefold()})
+37: 
+38: 
+39: def _valid_key_observer(observer: str) -> bool:
+40:     """Directory-mapped names cannot escape or occupy reserved key files."""
+41:     return (
+42:         isinstance(observer, str)
+43:         and bool(observer)
+44:         and "\0" not in observer
+45:         and all(
+46:             part not in ("", ".", "..") and part.casefold() not in _RESERVED_KEY_COMPONENTS
+47:             for part in observer.split("/")
+48:         )
+49:     )
+50: 
+51: 
+52: def keys_dir_for(vertex_path: Path) -> Path:
+53:     """The custody-co-located key directory for a vertex file."""
+54:     return vertex_path.parent / "keys"
+55: 
+56: 
+57: def _observer_key_dir(keys_root: Path, observer: str) -> Path:
+58:     """Return an exact observer directory, refusing filesystem aliases.
+59: 
+60:     Observer names remain exact declaration identities.  On a
+61:     case-insensitive filesystem, however, a second spelling such as ``alice``
+62:     can resolve to the existing ``Alice`` directory.  Do not reinterpret that
+63:     as an identity normalization or silently borrow its private key.
+64:     """
+65:     if not _valid_key_observer(observer):
+66:         raise ValueError(
+67:             "observer must use nonempty relative components without reserved key filenames"
+68:         )
+69:     current = keys_root
+70:     for component in observer.split("/"):
+71:         candidate = current / component
+72:         if not current.exists():
+73:             current = candidate
+74:             continue
+75:         exact = next((entry for entry in current.iterdir() if entry.name == component), None)
+76:         if exact is None:
+77:             # On a case-insensitive filesystem candidate.exists() can name an
+78:             # existing differently spelled component.  Reject before a nested
+79:             # child or private key is minted beneath it.
+80:             if candidate.exists():
+81:                 raise ValueError(
+82:                     f"observer {observer!r} aliases existing custody directory "
+83:                     f"at {candidate}"
+84:                 )
+85:             current = candidate
+86:             continue
+87:         if exact.is_symlink():
+88:             raise ValueError(
+89:                 f"observer {observer!r} aliases existing custody through symlink {exact}"
+90:             )
+91:         if not exact.is_dir():
+92:             raise ValueError(
+93:                 f"observer {observer!r} has non-directory custody component {exact}"
+94:             )
+95:         current = exact
+96:     return current
+97: 
+98: 
+99: def _ensure_observer_key_dir(keys_root: Path, observer: str) -> Path:
+100:     """Create a key directory only after checking its exact components again."""
+101:     candidate = _observer_key_dir(keys_root, observer)
+102:     candidate.mkdir(parents=True, exist_ok=True)
+103:     return _observer_key_dir(keys_root, observer)
+104: 
+105: 
+106: def _load_existing_keypair(key_dir: Path):
+107:     """Load an already-present key without granting a load path minting power."""
+108:     from sign import ed25519
+109: 
+110:     try:
+111:         return ed25519.load(key_dir)
+112:     except FileNotFoundError:
+113:         return None
+114: 
+115: 
+116: def _exact_nested_self_dir(keys_root: Path, observer: str) -> Path | None:
+117:     """Find only the exact nested self spelling; other observers stay distinct."""
+118:     if not _valid_key_observer(observer):
+119:         return None
+120:     current = keys_root
+121:     for component in observer.split("/"):
+122:         if not current.exists():
+123:             return None
+124:         exact = next((entry for entry in current.iterdir() if entry.name == component), None)
+125:         if exact is None:
+126:             return None
+127:         if exact.is_symlink():
+128:             raise ValueError(
+129:                 f"self observer {observer!r} aliases custody through symlink {exact}"
+130:             )
+131:         if not exact.is_dir():
+132:             raise ValueError(
+133:                 f"self observer {observer!r} has non-directory custody component {exact}"
+134:             )
+135:         current = exact
+136:     return current
+137: 
+138: 
+139: def _self_observer(vertex_path: Path) -> str:
+140:     """Return the exact self identity without normalizing an existing locator."""
+141:     if not vertex_path.exists():
+142:         # Initializers may mint before the future .vertex file exists.
+143:         return vertex_path.stem
+144:     exact = next(
+145:         (entry for entry in vertex_path.parent.iterdir() if entry.name == vertex_path.name),
+146:         None,
+147:     )
+148:     if exact is None:
+149:         raise ValueError(
+150:             f"vertex locator {vertex_path} aliases an existing differently spelled file"
+151:         )
+152:     return exact.stem
+153: 
+154: 
+155: def _self_key_dir(vertex_path: Path) -> Path | None:
+156:     """Select the self key consistently for minting and all signer domains.
+157: 
+158:     New vertices retain the legacy flat layout.  A nested key for the stem can
+159:     survive an ordinary vertex-file rename; when it is the only key, it is the
+160:     self key for fact, Arrival, and tick signing alike.  Two different keys
+161:     are an ambiguous custody history and must be repaired explicitly.
+162:     """
+163:     keys_root = keys_dir_for(vertex_path)
+164:     flat = keys_root
+165:     flat_pair = _load_existing_keypair(flat)
+166: 
+167:     self_observer = _self_observer(vertex_path)
+168:     nested = _exact_nested_self_dir(keys_root, self_observer)
+169:     nested_pair = None
+170:     if nested is not None:
+171:         nested_pair = _load_existing_keypair(nested)
+172: 
+173:     if flat_pair is not None and nested_pair is not None:
+174:         if flat_pair.public_b64 != nested_pair.public_b64:
+175:             raise ValueError(
+176:                 "ambiguous self-observer custody: flat and nested keys differ"
+177:             )
+178:         return flat
+179:     if flat_pair is not None:
+180:         return flat
+181:     if nested_pair is not None:
+182:         return nested
+183:     return None
+184: 
+185: 
+186: def ensure_signing_key(vertex_path: Path, observer: str | None = None):
+187:     """Generate (or load) the custody-co-located keypair for a vertex.
+188: 
+189:     design/tick-key-custody-colocated: the private key lives at
+190:     ``<vertex dir>/keys/`` next to the store it signs, and key CREATION
+191:     owns gitignoring that directory (convenience is the mitigation for
+192:     the committed-key failure mode, not discipline). Idempotent: an
+193:     existing key loads untouched. This is the single entry point for
+194:     minting custody — ``loops init`` and ``loops add ... observer
+195:     --keygen`` both ride it; everything else only LOADS.
+196: 
+197:     ``observer`` (delta 3): mint into the per-observer layout
+198:     ``keys/<observer>/`` instead of the flat (self-observer) layout.
+199:     New self-observer keys retain the flat layout.  An existing nested
+200:     self-observer key is retained after a vertex-file rename, and all signer
+201:     domains select the same key.  Ambiguous or filesystem-aliased key paths
+202:     refuse rather than silently selecting one identity's private key.
+203:     """
+204:     from sign import ed25519
+205: 
+206:     self_observer = _self_observer(vertex_path)
+207:     if (
+208:         observer is not None
+209:         and observer != self_observer
+210:         and not _valid_key_observer(observer)
+211:     ):
+212:         raise ValueError(
+213:             "observer must use nonempty relative components without reserved key filenames"
+214:         )
+215:     keys_root = keys_dir_for(vertex_path)
+216:     if observer is None or observer == self_observer:
+217:         key_dir = _self_key_dir(vertex_path) or keys_root
+218:     else:
+219:         key_dir = _observer_key_dir(keys_root, observer)
+220:         if _load_existing_keypair(key_dir) is None:
+221:             key_dir = _ensure_observer_key_dir(keys_root, observer)
+222:     keypair = ed25519.load_or_generate(key_dir)
+223: 
+224:     gitignore = vertex_path.parent / ".gitignore"
+225:     if gitignore.exists():
+226:         lines = gitignore.read_text().splitlines()
+227:         if "keys/" not in (ln.strip() for ln in lines):
+228:             gitignore.write_text(gitignore.read_text().rstrip("\n") + "\nkeys/\n")
+229:     else:
+230:         gitignore.write_text("keys/\n")
+231: 
+232:     return keypair
+233: 
+234: 
+235: def tick_signer_for(vertex_path: Path) -> Callable[[str], str] | None:
+236:     """Build the tick signer for a vertex, or None when no key exists.
+237: 
+238:     None is not an error — it is the pre-signature era. Key generation is
+239:     init's job; an absent key here means this vertex has not opted into
+240:     signing yet.
+241:     """
+242:     key_dir = _self_key_dir(vertex_path)
+243:     if key_dir is None:
+244:         return None
+245:     keypair = _load_existing_keypair(key_dir)
+246:     if keypair is None:  # Defensive against deletion between selection and load.
+247:         return None
+248:     from sign import ed25519
+249: 
+250:     return lambda digest: ed25519.sign(keypair, digest.encode(), domain=TICK_DOMAIN)
+251: 
+252: 
+253: def observer_keys_dir_for(vertex_path: Path, observer: str) -> Path:
+254:     """Per-observer key directory (delta 3) — ``keys/<observer>/``.
+255: 
+256:     Observer names may carry slashes (``kyle/loops-claude``); they nest
+257:     as directories. The FLAT layout (``keys/ed25519.key``, delta 2) is
+258:     the SELF-observer's key — fact_signer_for falls back to it for the
+259:     vertex's own name, so existing single-key vertices sign facts
+260:     without a key migration.
+261:     """
+262:     return _observer_key_dir(keys_dir_for(vertex_path), observer)
+263: 
+264: 
+265: def _scoped_signer_for(
+266:     vertex_path: Path, domain: str
+267: ) -> Callable[[str, str], str | None] | None:
+268:     """Build a per-observer signer under an explicit domain."""
+269:     keys_root = keys_dir_for(vertex_path)
+270:     if not keys_root.exists():
+271:         return None
+272:     from sign import ed25519
+273: 
+274:     self_observer = _self_observer(vertex_path)
+275:     cache: dict[str, ed25519.Keypair | None] = {}
+276: 
+277:     def _keypair(observer: str):
+278:         # An empty observer must never sign: ``keys_root / ""`` collapses
+279:         # to the flat layout, which would mint the VERTEX key's authorship
+280:         # claim for an anonymous writer. Same guard for path traversal —
+281:         # an observer name is a key, not a path expression.
+282:         if observer in cache:
+283:             return cache[observer]
+284:         if observer == self_observer:
+285:             key_dir = _self_key_dir(vertex_path)
+286:         else:
+287:             if not _valid_key_observer(observer):
+288:                 return None
+289:             key_dir = _observer_key_dir(keys_root, observer)
+290:         if key_dir is None:
+291:             cache[observer] = None
+292:             return None
+293:         keypair = _load_existing_keypair(key_dir)
+294:         if keypair is None:  # Deleted after selection: remain in unsigned era.
+295:             cache[observer] = None
+296:             return None
+297:         cache[observer] = keypair
+298:         return cache[observer]
+299: 
+300:     def signer(observer: str, digest: str) -> str | None:
+301:         keypair = _keypair(observer)
+302:         if keypair is None:
+303:             return None
+304:         return ed25519.sign(keypair, digest.encode(), domain=domain)
+305: 
+306:     return signer
+307: 
+308: 
+309: def fact_signer_for(vertex_path: Path) -> Callable[[str, str], str | None] | None:
+310:     """Build the per-observer fact signer for a vertex, or None when the
+311:     vertex has no key material at all.
+312: 
+313:     Returns a callable (observer str, content digest str) -> signature
+314:     str | None, matching engine's fact_signer contract
+315:     (design/fact-signing-per-observer-keys). Key resolution per observer:
+316: 
+317:     1. ``keys/<observer>/ed25519.key`` — the per-observer layout;
+318:     2. flat ``keys/ed25519.key`` — ONLY for the self-observer (the
+319:        vertex's own name), delta-2 back-compat;
+320:     3. otherwise None — that observer's facts append unsigned (honest
+321:        per-observer pre-signature era).
+322: 
+323:     Keypairs are loaded lazily and cached per observer for the life of
+324:     the signer (one CLI invocation). Returns None (no signer at all)
+325:     when the keys/ directory doesn't exist — structurally identical to
+326:     the pre-signature era, same posture as tick_signer_for.
+327:     """
+328:     return _scoped_signer_for(vertex_path, domain=FACT_DOMAIN)
+329: 
+330: 
+331: def arrival_signer_for(vertex_path: Path) -> Callable[[str, str], str | None] | None:
+332:     """Build the per-observer arrival attestation signer for a vertex, or None
+333:     when the vertex has no key material at all.
+334: 
+335:     Returns a callable (observer str, content digest str) -> signature
+336:     str | None, matching the arrival attestation signer contract. Key resolution
+337:     per observer matches fact_signer_for:
+338: 
+339:     1. ``keys/<observer>/ed25519.key`` — the per-observer layout;
+340:     2. flat ``keys/ed25519.key`` — ONLY for the self-observer (the
+341:        vertex's own name), delta-2 back-compat;
+342:     3. otherwise None — unkeyed observer.
+343: 
+344:     Signatures mint under ARRIVAL_DOMAIN (loops-arrival-v1).
+345:     """
+346:     return _scoped_signer_for(vertex_path, domain=ARRIVAL_DOMAIN)
+347: 
+348: 
+349: def _scoped_verifier_for(
+350:     vertex_path: Path, domain: str
+351: ) -> tuple[Callable[[str, str, str], bool] | None, dict[str, str]]:
+352:     """Build an observer verifier under an explicit domain."""
+353:     keys = declared_observer_keys(vertex_path)
+354:     if not keys:
+355:         return None, keys
+356:     from sign import ed25519
+357: 
+358:     publics = {}
+359:     for name, b64 in keys.items():
+360:         try:
+361:             publics[name] = ed25519.public_key_from_b64(b64)
+362:         except ValueError:
+363:             continue  # malformed declared key: cannot verify against it
+364: 
+365:     def verifier(observer: str, signature: str, digest: str) -> bool:
+366:         pub = publics.get(observer)
+367:         if pub is None:
+368:             return False
+369:         return ed25519.verify(pub, signature, digest.encode(), domain=domain)
+370: 
+371:     return verifier, keys
+372: 
+373: 
+374: def fact_verifier_for(
+375:     vertex_path: Path,
+376: ) -> tuple[Callable[[str, str, str], bool] | None, dict[str, str]]:
+377:     """Build the fact verifier from a vertex's observer-key registry.
+378: 
+379:     Returns (verifier, declared_keys). verifier is a callable
+380:     (observer, signature, content digest) -> bool that checks against
+381:     THAT observer's declared key EXACTLY — authorship is a per-observer
+382:     claim, so the tick path's any-key relaxation (a receipt-claim
+383:     affordance) deliberately does not apply here. An observer with no
+384:     declared key fails verification of any signature attributed to it
+385:     (a signed fact from an unregistered observer is unverifiable, which
+386:     verify reports as a break — the registry is the trust anchor).
+387:     None when the registry declares no keys.
+388:     """
+389:     return _scoped_verifier_for(vertex_path, domain=FACT_DOMAIN)
+390: 
+391: 
+392: def arrival_verifier_for(
+393:     vertex_path: Path,
+394: ) -> tuple[Callable[[str, str, str], bool] | None, dict[str, str]]:
+395:     """Build the arrival attestation verifier from a vertex's observer-key registry.
+396: 
+397:     Returns (verifier, declared_keys). verifier is a callable
+398:     (observer, signature, content digest) -> bool that checks against
+399:     THAT observer's declared key EXACTLY under ARRIVAL_DOMAIN.
+400:     None when the registry declares no keys.
+401:     """
+402:     return _scoped_verifier_for(vertex_path, domain=ARRIVAL_DOMAIN)
+403: 
+404: 
+405: def declared_observer_keys(vertex_path: Path) -> dict[str, str]:
+406:     """Read the observer-key registry from a vertex's resolved declaration.
+407: 
+408:     Routes through the store-backed resolver (SPEC §9.5): once a lineage is
+409:     opened, the current-head keys come from the store's declaration, not the
+410:     file. (Key-as-of-witness-position — verifying a historical tick under the
+411:     key that was current AT that tick — is S7, not here; this is the
+412:     current-head registry.)
+413: 
+414:     Returns {observer_name: base64_public_key} for observers declaring a
+415:     key field. Empty dict when there is no observers block, no keys, or
+416:     the file is not parseable as a vertex (e.g. a raw .db target).
+417:     """
+418:     if vertex_path.suffix != ".vertex" or not vertex_path.exists():
+419:         return {}
+420:     try:
+421:         from engine import load_declaration
+422: 
+423:         ast = load_declaration(vertex_path)
+424:     except Exception:  # noqa: BLE001 — no registry is an answer, not a crash
+425:         return {}
+426:     if not getattr(ast, "observers", None):
+427:         return {}
+428:     return {o.name: o.key for o in ast.observers if o.key}
+429: 
+430: 
+431: def tick_verifier_for(
+432:     vertex_path: Path,
+433: ) -> tuple[Callable[[str, str], bool] | None, dict[str, str]]:
+434:     """Build the tick verifier from a vertex's observer-key registry.
+435: 
+436:     Returns (verifier, declared_keys). verifier is None when the registry
+437:     declares no keys — verify_chain then skips signature checks and the
+438:     caller can render the honest 'unchecked' state. A signature passes if
+439:     it verifies under ANY declared key.
+440:     """
+441:     keys = declared_observer_keys(vertex_path)
+442:     if not keys:
+443:         return None, keys
+444:     from sign import ed25519
+445: 
+446:     publics = []
+447:     for b64 in keys.values():
+448:         try:
+449:             publics.append(ed25519.public_key_from_b64(b64))
+450:         except ValueError:
+451:             continue  # malformed declared key: cannot verify against it
+452: 
+453:     def verifier(signature: str, digest: str) -> bool:
+454:         return any(
+455:             ed25519.verify(pub, signature, digest.encode(), domain=TICK_DOMAIN)
+456:             for pub in publics
+457:         )
+458: 
+459:     return verifier, keys
+```
+
+### libs/custody/tests/test_signing.py (original line numbers)
+```python
+1: """Direct unit tests for the custody composition layer.
+2: 
+3: Full CLI composition (emit → verify) is exercised in apps/loops/tests;
+4: these pin the lib's own contract: key layout, minting side effects,
+5: signer/verifier construction, and the guards.
+6: """
+7: 
+8: from __future__ import annotations
+9: 
+10: import os
+11: import shutil
+12: from pathlib import Path
+13: 
+14: import pytest
+15: from sign import ed25519
+16: 
+17: from custody import (
+18:     FACT_DOMAIN,
+19:     TICK_DOMAIN,
+20:     ensure_signing_key,
+21:     fact_signer_for,
+22:     keys_dir_for,
+23:     observer_keys_dir_for,
+24:     tick_signer_for,
+25: )
+26: from custody.signing import (
+27:     ARRIVAL_DOMAIN,
+28:     arrival_signer_for,
+29:     arrival_verifier_for,
+30:     fact_verifier_for,
+31: )
+32: 
+33: 
+34: def _vertex(tmp_path: Path) -> Path:
+35:     vpath = tmp_path / "x.vertex"
+36:     vpath.write_text('vertex "x" { store "./x.db" }\n')
+37:     return vpath
+38: 
+39: 
+40: class TestLayout:
+41:     def test_keys_dir_is_sibling_of_vertex(self, tmp_path):
+42:         v = _vertex(tmp_path)
+43:         assert keys_dir_for(v) == tmp_path / "keys"
+44: 
+45:     def test_observer_dir_nests_slashed_names(self, tmp_path):
+46:         v = _vertex(tmp_path)
+47:         assert observer_keys_dir_for(v, "kyle/loops-claude") == (
+48:             tmp_path / "keys" / "kyle" / "loops-claude"
+49:         )
+50: 
+51: 
+52: class TestEnsureSigningKey:
+53:     @pytest.mark.parametrize(
+54:         "observer",
+55:         [
+56:             "",
+57:             ".",
+58:             "..",
+59:             "../escape",
+60:             "alice/../bob",
+61:             "alice//bob",
+62:             "ed25519.key",
+63:             "ed25519.pub",
+64:             "ED25519.KEY",
+65:             "alice/ed25519.key",
+66:         ],
+67:     )
+68:     def test_refuses_path_aliases_before_creating_keys(self, tmp_path, observer):
+69:         vertex = _vertex(tmp_path)
+70:         with pytest.raises(ValueError, match="observer"):
+71:             ensure_signing_key(vertex, observer=observer)
+72:         assert not (tmp_path / "keys").exists()
+73:         assert not (tmp_path / ".gitignore").exists()
+74: 
+75:     def test_absolute_observer_cannot_select_external_key_directory(self, tmp_path):
+76:         home = tmp_path / "vertex"
+77:         home.mkdir()
+78:         vertex = _vertex(home)
+79:         external = tmp_path / "external"
+80:         with pytest.raises(ValueError, match="observer"):
+81:             ensure_signing_key(vertex, observer=str(external))
+82:         assert not external.exists()
+83:         assert not (home / "keys").exists()
+84: 
+85:     def test_mints_flat_key_and_gitignores(self, tmp_path):
+86:         v = _vertex(tmp_path)
+87:         ensure_signing_key(v)
+88:         assert (tmp_path / "keys" / "ed25519.key").exists()
+89:         assert "keys/" in (tmp_path / ".gitignore").read_text().splitlines()
+90: 
+91:     def test_idempotent_load(self, tmp_path):
+92:         v = _vertex(tmp_path)
+93:         kp1 = ensure_signing_key(v)
+94:         kp2 = ensure_signing_key(v)
+95:         assert kp1.public_b64 == kp2.public_b64
+96: 
+97:     def test_observer_mints_nested(self, tmp_path):
+98:         v = _vertex(tmp_path)
+99:         ensure_signing_key(v, observer="alice")
+100:         assert (tmp_path / "keys" / "alice" / "ed25519.key").exists()
+101: 
+102:     def test_self_observer_mints_flat(self, tmp_path):
+103:         v = _vertex(tmp_path)
+104:         ensure_signing_key(v, observer="x")  # == vertex stem → flat layout
+105:         assert (tmp_path / "keys" / "ed25519.key").exists()
+106:         assert not (tmp_path / "keys" / "x").exists()
+107: 
+108:     @pytest.mark.parametrize("stem", ["ed25519", "ed25519.key", "ed25519.pub"])
+109:     def test_reserved_self_stem_uses_flat_key_only(self, tmp_path, stem):
+110:         v = tmp_path / f"{stem}.vertex"
+111:         v.write_text(f'vertex "{stem}" {{ store "./x.db" }}\n')
+112:         ensured = ensure_signing_key(v, observer=v.stem)
+113:         assert (keys_dir_for(v) / "ed25519.key").is_file()
+114:         assert not (keys_dir_for(v) / v.stem).is_dir()
+115:         public = ed25519.public_key_from_b64(ensured.public_b64)
+116:         tick = tick_signer_for(v)
+117:         fact = fact_signer_for(v)
+118:         arrival = arrival_signer_for(v)
+119:         assert tick is not None and fact is not None and arrival is not None
+120:         assert ed25519.verify(public, tick("digest"), b"digest", domain=TICK_DOMAIN)
+121:         assert ed25519.verify(public, fact(v.stem, "digest"), b"digest", domain=FACT_DOMAIN)
+122:         assert ed25519.verify(
+123:             public, arrival(v.stem, "digest"), b"digest", domain=ARRIVAL_DOMAIN
+124:         )
+125: 
+126:     def test_missing_vertex_locator_still_mints_its_self_key(self, tmp_path):
+127:         future = tmp_path / "future.vertex"
+128:         ensure_signing_key(future, observer="future")
+129:         assert (tmp_path / "keys" / "ed25519.key").exists()
+130: 
+131:     def test_refuses_case_alias_of_existing_self_locator(self, tmp_path):
+132:         actual = tmp_path / "Alice.vertex"
+133:         actual.write_text('vertex "Alice" { store "./a.db" }\n')
+134:         ensure_signing_key(actual, observer="Alice")
+135:         alias = tmp_path / "alice.vertex"
+136:         if not alias.exists():
+137:             pytest.skip("filesystem preserves case-distinct vertex basenames")
+138: 
+139:         with pytest.raises(ValueError, match="vertex locator.*differently spelled"):
+140:             ensure_signing_key(alias, observer="alice")
+141:         with pytest.raises(ValueError, match="vertex locator.*differently spelled"):
+142:             tick_signer_for(alias)
+143:         for factory in (fact_signer_for, arrival_signer_for):
+144:             with pytest.raises(ValueError, match="vertex locator.*differently spelled"):
+145:                 factory(alias)
+146: 
+147:     def test_appends_to_existing_gitignore(self, tmp_path):
+148:         v = _vertex(tmp_path)
+149:         (tmp_path / ".gitignore").write_text("*.db\n")
+150:         ensure_signing_key(v)
+151:         lines = (tmp_path / ".gitignore").read_text().splitlines()
+152:         assert lines == ["*.db", "keys/"]
+153: 
+154:     def test_refuses_symlinked_observer_directory_portably(self, tmp_path):
+155:         v = _vertex(tmp_path)
+156:         ensure_signing_key(v, observer="Alice")
+157:         alias = keys_dir_for(v) / "alias"
+158:         alias.symlink_to("Alice", target_is_directory=True)
+159: 
+160:         with pytest.raises(ValueError, match="aliases existing custody"):
+161:             ensure_signing_key(v, observer="alias")
+162:         with pytest.raises(ValueError, match="aliases existing custody"):
+163:             observer_keys_dir_for(v, "alias")
+164: 
+165:     def test_refuses_case_variant_alias_on_case_insensitive_filesystem(self, tmp_path):
+166:         v = _vertex(tmp_path)
+167:         ensure_signing_key(v, observer="Alice")
+168:         if not (keys_dir_for(v) / "alice" / "ed25519.key").exists():
+169:             pytest.skip("filesystem preserves case-distinct observer directories")
+170:         with pytest.raises(ValueError, match="aliases existing custody"):
+171:             ensure_signing_key(v, observer="alice")
+172: 
+173:     def test_refuses_case_alias_parent_before_creating_nested_key(self, tmp_path):
+174:         v = _vertex(tmp_path)
+175:         ensure_signing_key(v, observer="Alice/child")
+176:         if not (keys_dir_for(v) / "alice").exists():
+177:             pytest.skip("filesystem preserves case-distinct observer directories")
+178:         with pytest.raises(ValueError, match="aliases existing custody"):
+179:             ensure_signing_key(v, observer="alice")
+180:         assert not (keys_dir_for(v) / "Alice" / "ed25519.key").exists()
+181: 
+182:     def test_case_alias_component_refusal_is_portable(self, tmp_path, monkeypatch):
+183:         v = _vertex(tmp_path)
+184:         keys = keys_dir_for(v)
+185:         keys.mkdir()
+186:         (keys / "Alice").mkdir()
+187:         candidate = keys / "alice"
+188:         original_exists = Path.exists
+189: 
+190:         def case_alias_exists(path):
+191:             if path == candidate:
+192:                 return True
+193:             return original_exists(path)
+194: 
+195:         monkeypatch.setattr(Path, "exists", case_alias_exists)
+196:         with pytest.raises(ValueError, match="aliases existing custody"):
+197:             ensure_signing_key(v, observer="alice")
+198: 
+199:     def test_case_alias_created_during_mkdir_recheck_is_portable(self, tmp_path, monkeypatch):
+200:         v = _vertex(tmp_path)
+201:         keys = keys_dir_for(v)
+202:         candidate = keys / "alice"
+203:         original_exists = Path.exists
+204:         original_mkdir = Path.mkdir
+205: 
+206:         def case_alias_exists(path):
+207:             if path == candidate:
+208:                 return True
+209:             return original_exists(path)
+210: 
+211:         def race_mkdir(path, *args, **kwargs):
+212:             if path == candidate:
+213:                 return original_mkdir(keys / "Alice", parents=True, exist_ok=True)
+214:             return original_mkdir(path, *args, **kwargs)
+215: 
+216:         monkeypatch.setattr(Path, "exists", case_alias_exists)
+217:         monkeypatch.setattr(Path, "mkdir", race_mkdir)
+218:         with pytest.raises(ValueError, match="aliases existing custody"):
+219:             ensure_signing_key(v, observer="alice")
+220: 
+221:     def test_refuses_regular_file_observer_component(self, tmp_path):
+222:         v = _vertex(tmp_path)
+223:         keys = keys_dir_for(v)
+224:         keys.mkdir()
+225:         (keys / "observer").write_text("not a directory")
+226:         with pytest.raises(ValueError, match="non-directory custody component"):
+227:             ensure_signing_key(v, observer="observer")
+228: 
+229: 
+230: class TestTickSigner:
+231:     def test_none_without_key_material(self, tmp_path):
+232:         assert tick_signer_for(_vertex(tmp_path)) is None
+233: 
+234:     def test_signs_under_tick_domain(self, tmp_path):
+235:         v = _vertex(tmp_path)
+236:         kp = ensure_signing_key(v)
+237:         sig = tick_signer_for(v)("digest")
+238:         pub = ed25519.public_key_from_b64(kp.public_b64)
+239:         assert ed25519.verify(pub, sig, b"digest", domain=TICK_DOMAIN)
+240:         assert not ed25519.verify(pub, sig, b"digest", domain=FACT_DOMAIN)
+241: 
+242:     def test_renamed_nested_self_key_is_shared_by_all_signers(self, tmp_path):
+243:         old = tmp_path / "old.vertex"
+244:         old.write_text('vertex "old" { store "./old.db" }\n')
+245:         nested = ensure_signing_key(old, observer="new")
+246:         new = tmp_path / "new.vertex"
+247:         old.rename(new)
+248: 
+249:         # A renamed nested self key remains the one returned by mint/load;
+250:         # do not mint a competing flat key.
+251:         ensured = ensure_signing_key(new, observer="new")
+252:         assert ensured.public_b64 == nested.public_b64
+253:         assert not (keys_dir_for(new) / "ed25519.key").exists()
+254:         public = ed25519.public_key_from_b64(ensured.public_b64)
+255:         tick = tick_signer_for(new)
+256:         fact = fact_signer_for(new)
+257:         arrival = arrival_signer_for(new)
+258:         assert tick is not None and fact is not None and arrival is not None
+259:         assert ed25519.verify(public, tick("digest"), b"digest", domain=TICK_DOMAIN)
+260:         assert ed25519.verify(public, fact("new", "digest"), b"digest", domain=FACT_DOMAIN)
+261:         assert ed25519.verify(
+262:             public, arrival("new", "digest"), b"digest", domain=ARRIVAL_DOMAIN
+263:         )
+264: 
+265:     def test_exact_self_symlink_refuses_instead_of_minting_a_flat_key(self, tmp_path):
+266:         vertex = _vertex(tmp_path)
+267:         ensure_signing_key(vertex, observer="alice")
+268:         root = keys_dir_for(vertex)
+269:         (root / "x").symlink_to("alice", target_is_directory=True)
+270:         original_key = (root / "alice" / "ed25519.key").read_bytes()
+271: 
+272:         with pytest.raises(ValueError, match="self observer.*symlink"):
+273:             ensure_signing_key(vertex)
+274:         with pytest.raises(ValueError, match="self observer.*symlink"):
+275:             tick_signer_for(vertex)
+276:         for factory in (fact_signer_for, arrival_signer_for):
+277:             signer = factory(vertex)
+278:             assert signer is not None
+279:             with pytest.raises(ValueError, match="self observer.*symlink"):
+280:                 signer("x", "digest")
+281:         assert not (root / "ed25519.key").exists()
+282:         assert (root / "alice" / "ed25519.key").read_bytes() == original_key
+283: 
+284:     def test_refuses_different_flat_and_nested_self_keys(self, tmp_path):
+285:         old = tmp_path / "old.vertex"
+286:         old.write_text('vertex "old" { store "./old.db" }\n')
+287:         ensure_signing_key(old, observer="new")
+288:         new = tmp_path / "new.vertex"
+289:         old.rename(new)
+290:         # Construct an interrupted/manual migration with two key materials.
+291:         from sign import ed25519 as signing
+292: 
+293:         signing.load_or_generate(keys_dir_for(new))
+294:         with pytest.raises(ValueError, match="ambiguous self-observer custody"):
+295:             ensure_signing_key(new, observer="new")
+296:         with pytest.raises(ValueError, match="ambiguous self-observer custody"):
+297:             tick_signer_for(new)
+298:         for factory in (fact_signer_for, arrival_signer_for):
+299:             signer = factory(new)
+300:             assert signer is not None
+301:             with pytest.raises(ValueError, match="ambiguous self-observer custody"):
+302:                 signer("new", "digest")
+303: 
+304:     def test_same_flat_and_nested_self_key_selects_consistently(self, tmp_path):
+305:         v = _vertex(tmp_path)
+306:         flat = ensure_signing_key(v, observer="x")
+307:         nested = keys_dir_for(v) / "x"
+308:         nested.mkdir()
+309:         os.link(keys_dir_for(v) / "ed25519.key", nested / "ed25519.key")
+310:         shutil.copy2(keys_dir_for(v) / "ed25519.pub", nested / "ed25519.pub")
+311: 
+312:         ensured = ensure_signing_key(v, observer="x")
+313:         assert ensured.public_b64 == flat.public_b64
+314:         public = ed25519.public_key_from_b64(flat.public_b64)
+315:         tick = tick_signer_for(v)
+316:         fact = fact_signer_for(v)
+317:         arrival = arrival_signer_for(v)
+318:         assert tick is not None and fact is not None and arrival is not None
+319:         assert ed25519.verify(public, tick("digest"), b"digest", domain=TICK_DOMAIN)
+320:         assert ed25519.verify(public, fact("x", "digest"), b"digest", domain=FACT_DOMAIN)
+321:         assert ed25519.verify(
+322:             public, arrival("x", "digest"), b"digest", domain=ARRIVAL_DOMAIN
+323:         )
+324: 
+325:     def test_signer_load_paths_do_not_mint_after_a_missing_read(self, tmp_path, monkeypatch):
+326:         v = _vertex(tmp_path)
+327:         ensure_signing_key(v)
+328:         key_path = keys_dir_for(v) / "ed25519.key"
+329:         original = key_path.read_bytes()
+330: 
+331:         def missing(_key_dir):
+332:             raise FileNotFoundError("simulated deletion race")
+333: 
+334:         monkeypatch.setattr(ed25519, "load", missing)
+335:         assert tick_signer_for(v) is None
+336:         for factory in (fact_signer_for, arrival_signer_for):
+337:             signer = factory(v)
+338:             assert signer is not None
+339:             assert signer("x", "digest") is None
+340:         assert key_path.read_bytes() == original
+341: 
+342: 
+343: class TestFactSigner:
+344:     def test_path_shaped_observers_cannot_borrow_other_keys(self, tmp_path):
+345:         vertex = _vertex(tmp_path)
+346:         ensure_signing_key(vertex)
+347:         for factory in (fact_signer_for, arrival_signer_for):
+348:             signer = factory(vertex)
+349:             assert signer is not None
+350:             for observer in ("", ".", "..", "../keys", str(tmp_path / "keys")):
+351:                 assert signer(observer, "digest") is None
+352:                 with pytest.raises(ValueError, match="observer"):
+353:                     observer_keys_dir_for(vertex, observer)
+354: 
+355:     def test_none_without_keys_dir(self, tmp_path):
+356:         assert fact_signer_for(_vertex(tmp_path)) is None
+357: 
+358:     def test_flat_key_is_self_observer_only(self, tmp_path):
+359:         v = _vertex(tmp_path)
+360:         ensure_signing_key(v)
+361:         signer = fact_signer_for(v)
+362:         assert signer("x", "digest") is not None  # self-observer → flat key
+363:         assert signer("stranger", "digest") is None  # unkeyed → unsigned era
+364: 
+365:     def test_empty_observer_never_signs(self, tmp_path):
+366:         v = _vertex(tmp_path)
+367:         ensure_signing_key(v)
+368:         assert fact_signer_for(v)("", "digest") is None
+369: 
+370:     def test_path_traversal_guarded(self, tmp_path):
+371:         v = _vertex(tmp_path)
+372:         ensure_signing_key(v)
+373:         assert fact_signer_for(v)("../x", "digest") is None
+374: 
+375:     def test_refuses_alias_when_loading_existing_observer_key(self, tmp_path):
+376:         v = _vertex(tmp_path)
+377:         ensure_signing_key(v, observer="Alice")
+378:         alice = keys_dir_for(v) / "alice"
+379:         if not (alice / "ed25519.key").exists():
+380:             alice.symlink_to("Alice", target_is_directory=True)
+381:         for factory in (fact_signer_for, arrival_signer_for):
+382:             signer = factory(v)
+383:             assert signer is not None
+384:             with pytest.raises(ValueError, match="aliases existing custody"):
+385:                 signer("alice", "digest")
+386: 
+387:     @pytest.mark.parametrize("first", ["flat", "nested"])
+388:     def test_case_variant_nested_observer_does_not_poison_flat_self(self, tmp_path, first):
+389:         v = tmp_path / "Alice.vertex"
+390:         v.write_text('vertex "Alice" { store "./a.db" }\n')
+391:         if first == "flat":
+392:             flat = ensure_signing_key(v, observer="Alice")
+393:             nested = ensure_signing_key(v, observer="alice")
+394:         else:
+395:             nested = ensure_signing_key(v, observer="alice")
+396:             flat = ensure_signing_key(v, observer="Alice")
+397:         assert flat.public_b64 != nested.public_b64
+398:         self_public = ed25519.public_key_from_b64(flat.public_b64)
+399:         nested_public = ed25519.public_key_from_b64(nested.public_b64)
+400:         tick = tick_signer_for(v)
+401:         fact = fact_signer_for(v)
+402:         arrival = arrival_signer_for(v)
+403:         assert tick is not None and fact is not None and arrival is not None
+404:         assert ed25519.verify(self_public, tick("digest"), b"digest", domain=TICK_DOMAIN)
+405:         assert ed25519.verify(
+406:             self_public, fact("Alice", "digest"), b"digest", domain=FACT_DOMAIN
+407:         )
+408:         assert ed25519.verify(
+409:             self_public, arrival("Alice", "digest"), b"digest", domain=ARRIVAL_DOMAIN
+410:         )
+411:         assert ed25519.verify(
+412:             nested_public, fact("alice", "digest"), b"digest", domain=FACT_DOMAIN
+413:         )
+414:         assert ed25519.verify(
+415:             nested_public, arrival("alice", "digest"), b"digest", domain=ARRIVAL_DOMAIN
+416:         )
+417: 
+418: 
+419: class TestArrivalSigner:
+420:     def test_none_without_keys_dir(self, tmp_path):
+421:         assert arrival_signer_for(_vertex(tmp_path)) is None
+422: 
+423:     def test_signs_under_arrival_domain_and_roundtrips(self, tmp_path):
+424:         v = tmp_path / "x.vertex"
+425:         kp = ensure_signing_key(v)
+426:         v.write_text(
+427:             f'name "x"\nstore "./x.arrival" backend="file"\nobservers {{\n  x {{\n    key "{kp.public_b64}"\n  }}\n}}\nloops {{\n  concept {{ fold {{ items "collect" 100 }} }}\n}}\n'
+428:         )
+429:         signer = arrival_signer_for(v)
+430:         assert signer is not None
+431:         sig = signer("x", "0" * 64)
+432:         assert sig is not None
+433:         pub = ed25519.public_key_from_b64(kp.public_b64)
+434:         assert ed25519.verify(pub, sig, ("0" * 64).encode(), domain=ARRIVAL_DOMAIN)
+435: 
+436:         verifier, _keys = arrival_verifier_for(v)
+437:         assert verifier is not None
+438:         assert verifier("x", sig, "0" * 64) is True
+439: 
+440:     def test_fact_and_arrival_mutually_refuse(self, tmp_path):
+441:         v = tmp_path / "x.vertex"
+442:         kp = ensure_signing_key(v)
+443:         v.write_text(
+444:             f'name "x"\nstore "./x.arrival" backend="file"\nobservers {{\n  x {{\n    key "{kp.public_b64}"\n  }}\n}}\nloops {{\n  concept {{ fold {{ items "collect" 100 }} }}\n}}\n'
+445:         )
+446:         arr_signer = arrival_signer_for(v)
+447:         fact_signer = fact_signer_for(v)
+448:         arr_verifier, _ = arrival_verifier_for(v)
+449:         fact_verifier, _ = fact_verifier_for(v)
+450: 
+451:         digest = "a" * 64
+452:         arr_sig = arr_signer("x", digest)
+453:         fact_sig = fact_signer("x", digest)
+454: 
+455:         # Arrival signature verifies under arrival, fails under fact
+456:         assert arr_verifier("x", arr_sig, digest) is True
+457:         assert fact_verifier("x", arr_sig, digest) is False
+458: 
+459:         # Fact signature verifies under fact, fails under arrival
+460:         assert fact_verifier("x", fact_sig, digest) is True
+461:         assert arr_verifier("x", fact_sig, digest) is False
+462: 
+463:     def test_flat_key_is_self_observer_only(self, tmp_path):
+464:         v = _vertex(tmp_path)
+465:         ensure_signing_key(v)
+466:         signer = arrival_signer_for(v)
+467:         assert signer("x", "digest") is not None
+468:         assert signer("stranger", "digest") is None
+469: 
+470:     def test_empty_observer_never_signs(self, tmp_path):
+471:         v = _vertex(tmp_path)
+472:         ensure_signing_key(v)
+473:         assert arrival_signer_for(v)("", "digest") is None
+474: 
+475:     def test_path_traversal_guarded(self, tmp_path):
+476:         v = _vertex(tmp_path)
+477:         ensure_signing_key(v)
+478:         assert arrival_signer_for(v)("../x", "digest") is None
+```
+
+### libs/sign/src/sign/ed25519.py (original line numbers)
+```python
+99: def _generate(key_dir: Path) -> None:
+100:     log.info("generating Ed25519 signing key in %s", key_dir)
+101:     key_dir.mkdir(parents=True, exist_ok=True)
+102:     private = Ed25519PrivateKey.generate()
+103:     key_pem = private.private_bytes(
+104:         serialization.Encoding.PEM,
+105:         serialization.PrivateFormat.PKCS8,
+106:         serialization.NoEncryption(),
+107:     )
+108:     key_path = key_dir / _KEY_FILE
+109:     fd, raw = tempfile.mkstemp(prefix=f".{_KEY_FILE}.", dir=key_dir)
+110:     temporary = Path(raw)
+111:     try:
+112:         with os.fdopen(fd, "wb") as stream:
+113:             stream.write(key_pem)
+114:             stream.flush()
+115:             os.fsync(stream.fileno())
+116:         temporary.chmod(0o600)
+117:         with suppress(FileExistsError):
+118:             # Publish a complete private key once.  A concurrent loser loads
+119:             # this winning file below; it never replaces it with its draft.
+120:             os.link(temporary, key_path)
+121:     finally:
+122:         temporary.unlink(missing_ok=True)
+125: def _publish_public(key_dir: Path, keypair: Keypair) -> None:
+126:     """Atomically make the convenience public-key file agree with the private key."""
+127:     public_path = key_dir / _PUB_FILE
+128:     expected = public_key_b64(keypair.public) + "\n"
+129:     try:
+130:         if public_path.read_text() == expected:
+131:             return
+132:     except FileNotFoundError:
+133:         pass
+134:     fd, raw = tempfile.mkstemp(prefix=f".{_PUB_FILE}.", dir=key_dir)
+135:     temporary = Path(raw)
+136:     try:
+137:         with os.fdopen(fd, "w") as stream:
+138:             stream.write(expected)
+139:             stream.flush()
+140:             os.fsync(stream.fileno())
+141:         temporary.replace(public_path)
+142:     finally:
+143:         temporary.unlink(missing_ok=True)
+146: def load(key_dir: str | Path) -> Keypair:
+147:     """Load an existing Ed25519 keypair without creating any filesystem state.
+148: 
+149:     ``FileNotFoundError`` is deliberate: read-side callers can distinguish the
+150:     pre-signature era from a request to mint a new key.
+151:     """
+152:     key_path = Path(key_dir) / _KEY_FILE
+153:     private = serialization.load_pem_private_key(key_path.read_bytes(), password=None)
+154:     if not isinstance(private, Ed25519PrivateKey):
+155:         kind = type(private).__name__
+156:         raise ValueError(f"expected Ed25519 private key in {key_path}, got {kind}")
+157:     return Keypair(private=private, public=private.public_key())
+160: def load_or_generate(key_dir: str | Path) -> Keypair:
+161:     """Ensure an Ed25519 keypair exists in ``key_dir``, then load and return it."""
+162:     key_dir = Path(key_dir)
+163:     try:
+164:         keypair = load(key_dir)
+165:     except FileNotFoundError:
+166:         _generate(key_dir)
+167:         keypair = load(key_dir)
+168:     _publish_public(key_dir, keypair)
+169:     return keypair
+```

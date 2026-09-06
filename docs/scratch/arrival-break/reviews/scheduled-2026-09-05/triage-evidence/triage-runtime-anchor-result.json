@@ -1,0 +1,9 @@
+{
+  "ordinary_read_error": "NotAuthority: projection declaration identity does not match captured Arrival lineage",
+  "capture_accepted_foreign_anchor": "foreign-declaration",
+  "pending_ticks": [
+    "batch-target"
+  ],
+  "boundary_only_commit_before": 2,
+  "boundary_only_commit_after": 3
+}

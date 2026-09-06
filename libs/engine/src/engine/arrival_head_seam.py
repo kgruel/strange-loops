@@ -18,7 +18,9 @@ by discipline. That is F2's "verification never repairs" applied one level out.
 **Always on, never a flag.** A configuration switch for a safety property is a
 shape the arrival vocabulary ratchet's own denylist rejects: custody is structural
 rather than configured, so there is no setting that turns the comparison off and no
-second opener that skips it. Slice 4's migration sidecar needs no exemption either —
+second ordinary opener that skips it. Explicit restore-forward uses the same
+pure comparison against a proven proposed prefix, then compares the actual
+receiver after its full-head CAS. No handle escapes that procedure. Slice 4's migration sidecar needs no exemption either —
 minting through the wrapper IS how its bootstrap receipt gets written, and there is
 no privileged path.
 
@@ -46,8 +48,9 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol, cast
 
+from .arrival_binding import BindingIdentity
 from .arrival_contract import (
     ArrivalLedger,
     ArrivalQuery,
@@ -56,6 +59,8 @@ from .arrival_contract import (
     ExportedPrefix,
     Full,
     Head,
+    HeadMismatch,
+    NotAuthority,
     Open,
     RecordDraft,
     VerifyScope,
@@ -113,6 +118,7 @@ __all__ = [
     "bootstrap",
     "aliased_lineage",
     "canonical_location",
+    "complete_projection_custody",
     "days_since_audit",
     "match_identity",
     "trust_reset",
@@ -505,7 +511,12 @@ def match_identity(
     return found
 
 
-def aliased_lineage(location: str) -> str | None:
+_IDENTITY_UNSET = object()
+
+
+def aliased_lineage(
+    location: str, *, identity: Identity | None | object = _IDENTITY_UNSET
+) -> str | None:
     """The lineage bound to this store under a DIFFERENT spelling.
 
     Consulted only when the presenting location has no binding of its own —
@@ -520,6 +531,10 @@ def aliased_lineage(location: str) -> str | None:
     this host and not a verdict about the store. DELETE IN SLICE 5 with the
     rest of the binding.
     """
+    # An explicit None means a file path is absent: still read and validate
+    # the historical bindings before returning no alias. Opaque registry keys
+    # never call this function; AttestedLedger gates that branch on the
+    # adapter's ``filesystem`` policy.
     try:
         text = bindings_path().read_text(encoding="utf-8")
     except FileNotFoundError:
@@ -564,8 +579,17 @@ def aliased_lineage(location: str) -> str | None:
                 "Nothing has been accepted or written — repair or remove the "
                 "line"
             )
+        # Historical bindings are canonical file paths. Future opaque keys
+        # are namespaced and must never be handed to Path.stat by this seam.
+        if where.startswith("backend:"):
+            continue
         recorded.append((where, lineage, _identity_of(where)))
-    return match_identity(_identity_of(location), recorded)
+    presenting = (
+        _identity_of(location)
+        if identity is _IDENTITY_UNSET
+        else cast(Identity | None, identity)
+    )
+    return match_identity(presenting, recorded)
 
 
 # ---------------------------------------------------------------------------
@@ -574,7 +598,12 @@ def aliased_lineage(location: str) -> str | None:
 
 
 def bootstrap(
-    head: Head, *, level: Level, location: str, observed_at: float
+    head: Head,
+    *,
+    level: Level,
+    location: str,
+    observed_at: float,
+    binding: BindingIdentity | None = None,
 ) -> Path:
     """The first entry for a lineage, plus its binding. Returns the journal.
 
@@ -603,7 +632,7 @@ def bootstrap(
             "level names evidence a first entry cannot have, because there was "
             "nothing before it to descend from or verify against"
         )
-    canonical = canonical_location(location)
+    canonical = binding.key if binding is not None else canonical_location(location)
     path = append_entry(
         HeadAttestation(
             head=head,
@@ -905,95 +934,82 @@ def _vouched_at(
 # ---------------------------------------------------------------------------
 
 
-class AttestedLedger:
-    """An :class:`~engine.arrival_contract.ArrivalLedger` that remembers.
+class _HeadEvidence(Protocol):
+    """The read-only evidence needed by witness comparison."""
 
-    Two things, and no third: it compares at construction, and it journals
-    after a successful ``mint``, ``append`` or ``replicate``. Everything else
-    is delegation.
+    def verify(self, scope: VerifyScope) -> Head: ...
 
-    **Delegation is by explicit method, never** ``__getattr__``. A catch-all
-    would forward ``import_prefix`` — a mutation the contract Protocol
-    deliberately does not declare but which is in ``LEDGER_MUTATIONS``
-    regardless, because the custody/reads separation must cover every op that
-    can change what a lineage holds. Forwarded silently, it would be a mutation
-    reachable through the attested handle that the seam does not journal: a
-    hole in the witness, opened by a convenience nobody wrote down. It is
-    therefore NOT reachable through this wrapper, and a future op added to the
-    adapter is not reachable either until somebody decides how it is witnessed.
+    def head_at(self, watermark: Watermark) -> Head: ...
 
-    **The IndeterminateComparison posture** — the WP's flagged design point — is
-    in :meth:`_degraded`, with the argument.
+
+def complete_projection_custody(
+    evidence: _HeadEvidence,
+    *,
+    captured: Head,
+    represented: Watermark,
+    lineage_refusal: Callable[[str], BaseException] = NotAuthority,
+    conflict_refusal: Callable[[str], BaseException] = HeadMismatch,
+) -> Head:
+    """Complete one projection watermark against independently captured custody.
+
+    The caller owns missing/behind policy and its public refusal family. This
+    seam owns the evidence rule shared by fresh reads and CURRENT writers: the
+    represented lineage must be the captured lineage, ``head_at`` must vouch
+    for the exact reported coordinate, and a report at captured height must
+    name the captured full head. A projection that advanced after capture is
+    legitimate once custody vouches for it, but the bounded operation still
+    receives the captured head.
+
+    Backend ``head_at`` refusals deliberately pass through unchanged. They are
+    the backend-neutral contract's evidence that the reported prefix does not
+    exist, and wrapping them here would erase the cause callers already expose.
+    """
+    if represented.lineage != captured.lineage:
+        raise lineage_refusal(
+            f"projection represents {represented.lineage}, not {captured.lineage}"
+        )
+    observed = evidence.head_at(represented)
+    if (
+        observed.lineage != represented.lineage
+        or observed.ordinal != represented.ordinal
+    ):
+        raise conflict_refusal(
+            "custody resolved the projection watermark to a different coordinate"
+        )
+    if represented.ordinal == captured.ordinal and observed != captured:
+        raise conflict_refusal(
+            "projection head disagrees with captured custody head"
+        )
+    return captured if observed.ordinal > captured.ordinal else observed
+
+
+class _HeadObservation:
+    """Pure witness comparison shared by ordinary open and restoration proof.
+
+    This object has no custody mutations and does not write observations.
+    A restoration can test a bounded proposed prefix without accepting it.
     """
 
     def __init__(
         self,
-        ledger: ArrivalLedger,
+        ledger: _HeadEvidence,
         *,
         location: str,
         query: ArrivalQuery | None = None,
         clock: Callable[[], float] = time.time,
+        binding: BindingIdentity | None = None,
     ) -> None:
-        """Compare, then write what the comparison earned.
-
-        ``clock`` is injected because WP1's module reads no clock — every
-        ``observed_at`` there is a caller-supplied argument — and this is the
-        caller. It is what keeps staleness reporting testable without freezing
-        time inside the journal.
-
-        **This is the ONLY place the open path writes**, and that is the whole
-        of "nothing writes until every refusal has had its chance". Observation
-        is pure with respect to the journal — it returns an :class:`_Earned`
-        and writes nothing — so an open that refuses anywhere leaves no memory
-        claiming it accepted the thing it refused.
-
-        Stating it per-branch was not enough: the first-contact branch deferred
-        while the advance branch wrote inline, and a store that passed the
-        journal comparison and then failed the projection one kept an
-        ``advance`` entry for the head it had just been refused
-        (``finding:s3wp3-gate-advance-journaled-before-projection-refusal``).
-        The rule is now carried by the return type, and
-        ``test_only_the_constructor_and_the_producers_write_to_the_journal``
-        pins it against the branch somebody adds next.
-        """
-        self._ledger = ledger
+        self._evidence = ledger
         self._location = location
-        self._canonical = canonical_location(location)
+        # Direct callers retain the transitional file behavior. Registry
+        # callers supply an adapter-owned identity, so an opaque DSN never
+        # reaches Path.resolve/stat in this seam.
+        self._binding = binding
+        self._canonical = (
+            canonical_location(location) if binding is None else binding.key
+        )
         self._query = query
         self._clock = clock
-
-        report, earned = self._observe()
-        if earned is not None:
-            self._write(earned)
-        self.opened: OpenReport = report
-        """What the compare-on-open established. See :class:`OpenReport`."""
-
-    def _write(self, earned: _Earned) -> None:
-        """Write what an observation earned, once it has earned it.
-
-        A bootstrap goes through :func:`bootstrap` rather than straight to
-        ``append_entry`` so that the level validation and the binding stay on
-        one path — a seam that appended its own bootstrap would be the second
-        place the canonical form is applied, which is how two spellings
-        diverge.
-        """
-        if earned.kind is Kind.BOOTSTRAP:
-            bootstrap(
-                earned.head,
-                level=earned.level,
-                location=self._location,
-                observed_at=self._clock(),
-            )
-            return
-        append_entry(
-            HeadAttestation(
-                head=earned.head,
-                kind=earned.kind,
-                level=earned.level,
-                observed_at=self._clock(),
-                location=self._canonical,
-            )
-        )
 
     # -- the comparison ----------------------------------------------------
 
@@ -1033,7 +1049,13 @@ class AttestedLedger:
             # same object — a case variant, or a second mount. Live-stat, and
             # only here: once a binding exists for the spelling in use, the
             # exact match above answers and this sweep never runs.
-            remembered_lineage = aliased_lineage(self._canonical)
+            if self._binding is None:
+                remembered_lineage = aliased_lineage(self._canonical)
+            elif self._binding.filesystem:
+                remembered_lineage = aliased_lineage(
+                    self._canonical,
+                    identity=self._binding.filesystem_identity,
+                )
         if (
             remembered_lineage is not None
             and remembered_lineage != presented.lineage
@@ -1140,7 +1162,7 @@ class AttestedLedger:
         never swallowed either way.
         """
         try:
-            return self._ledger.verify(Open()), None
+            return self._evidence.verify(Open()), None
         except Exception as exc:  # noqa: BLE001 — see the docstring
             return None, exc
 
@@ -1341,7 +1363,7 @@ class AttestedLedger:
 
         for ordinal in sorted(fenced):
             try:
-                vouched = self._ledger.head_at(
+                vouched = self._evidence.head_at(
                     Watermark(lineage=presented.lineage, ordinal=ordinal)
                 )
             except Exception as exc:  # noqa: BLE001 — see the refusal's docstring
@@ -1390,9 +1412,9 @@ class AttestedLedger:
         the comparison would not proceed, and here is what the walk hit.
         """
         try:
-            self._ledger.verify(Full(through=presented))
+            self._evidence.verify(Full(through=presented))
             return (
-                self._ledger.head_at(
+                self._evidence.head_at(
                     Watermark(lineage=known.lineage, ordinal=known.ordinal)
                 ),
                 None,
@@ -1554,7 +1576,7 @@ class AttestedLedger:
             # contract's own NotAuthority, which is exactly the right answer:
             # this projection is not a projection of this log. Letting it out
             # keeps the refusal the contract names rather than restating it.
-            self._ledger.head_at(watermark)
+            self._evidence.head_at(watermark)
             raise ProjectionAheadOfLedger(
                 f"the projection beside {self._canonical} reports lineage "
                 f"{watermark.lineage} while the log presents "
@@ -1566,7 +1588,7 @@ class AttestedLedger:
         if watermark.ordinal > presented.ordinal:
             cause: BaseException | None = None
             try:
-                self._ledger.head_at(watermark)
+                self._evidence.head_at(watermark)
             except Exception as exc:  # noqa: BLE001 — the refusal IS the answer
                 cause = exc
             raise ProjectionAheadOfLedger(
@@ -1639,6 +1661,96 @@ class AttestedLedger:
 
     # -- custody, witnessed ------------------------------------------------
 
+class AttestedLedger(_HeadObservation):
+    """An :class:`~engine.arrival_contract.ArrivalLedger` that remembers.
+
+    Two things, and no third: it compares at construction, and it journals
+    after a successful ``mint``, ``append`` or ``replicate``. Everything else
+    is delegation.
+
+    **Delegation is by explicit method, never** ``__getattr__``. A catch-all
+    would forward ``import_prefix`` — a mutation the contract Protocol
+    deliberately does not declare but which is in ``LEDGER_MUTATIONS``
+    regardless, because the custody/reads separation must cover every op that
+    can change what a lineage holds. Forwarded silently, it would be a mutation
+    reachable through the attested handle that the seam does not journal: a
+    hole in the witness, opened by a convenience nobody wrote down. It is
+    therefore NOT reachable through this wrapper, and a future op added to the
+    adapter is not reachable either until somebody decides how it is witnessed.
+
+    **The IndeterminateComparison posture** — the WP's flagged design point — is
+    in :meth:`_degraded`, with the argument.
+    """
+
+    def __init__(
+        self,
+        ledger: ArrivalLedger,
+        *,
+        location: str,
+        query: ArrivalQuery | None = None,
+        clock: Callable[[], float] = time.time,
+        binding: BindingIdentity | None = None,
+    ) -> None:
+        """Compare, then write what the comparison earned.
+
+        ``clock`` is injected because WP1's module reads no clock — every
+        ``observed_at`` there is a caller-supplied argument — and this is the
+        caller. It is what keeps staleness reporting testable without freezing
+        time inside the journal.
+
+        **This is the ONLY place the open path writes**, and that is the whole
+        of "nothing writes until every refusal has had its chance". Observation
+        is pure with respect to the journal — it returns an :class:`_Earned`
+        and writes nothing — so an open that refuses anywhere leaves no memory
+        claiming it accepted the thing it refused.
+
+        Stating it per-branch was not enough: the first-contact branch deferred
+        while the advance branch wrote inline, and a store that passed the
+        journal comparison and then failed the projection one kept an
+        ``advance`` entry for the head it had just been refused
+        (``finding:s3wp3-gate-advance-journaled-before-projection-refusal``).
+        The rule is now carried by the return type, and
+        ``test_only_the_constructor_and_the_producers_write_to_the_journal``
+        pins it against the branch somebody adds next.
+        """
+        super().__init__(
+            ledger, location=location, query=query, clock=clock, binding=binding
+        )
+        self._ledger = ledger
+        report, earned = self._observe()
+        if earned is not None:
+            self._write(earned)
+        self.opened: OpenReport = report
+        """What the compare-on-open established. See :class:`OpenReport`."""
+
+    def _write(self, earned: _Earned) -> None:
+        """Write what an observation earned, once it has earned it.
+
+        A bootstrap goes through :func:`bootstrap` rather than straight to
+        ``append_entry`` so that the level validation and the binding stay on
+        one path — a seam that appended its own bootstrap would be the second
+        place the canonical form is applied, which is how two spellings
+        diverge.
+        """
+        if earned.kind is Kind.BOOTSTRAP:
+            bootstrap(
+                earned.head,
+                level=earned.level,
+                location=self._location,
+                observed_at=self._clock(),
+                binding=self._binding,
+            )
+            return
+        append_entry(
+            HeadAttestation(
+                head=earned.head,
+                kind=earned.kind,
+                level=earned.level,
+                observed_at=self._clock(),
+                location=self._canonical,
+            )
+        )
+
     def mint(self, options: Mapping[str, Any]) -> Head:
         """Mint through the wrapper, and the bootstrap receipt is a consequence.
 
@@ -1656,6 +1768,7 @@ class AttestedLedger:
                 level=Level.MINT,
                 location=self._location,
                 observed_at=self._clock(),
+                binding=self._binding,
             )
         except (OSError, AttestationRefusal) as exc:
             raise NotWitnessed(
@@ -1768,6 +1881,12 @@ class AttestedLedger:
         guarantee at the layer that does not provide it.
         """
         return self._ledger.capabilities()
+
+    def close(self) -> None:
+        """Release the wrapped custody handle, when the adapter owns one."""
+        close = getattr(self._ledger, "close", None)
+        if callable(close):
+            close()
 
 
 def _observed_text(entry: HeadAttestation) -> str:

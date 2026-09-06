@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import hashlib
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from threading import Barrier
 
 import pytest
 
@@ -18,6 +20,36 @@ def test_generates_when_dir_empty(tmp_path: Path) -> None:
     assert isinstance(kp, ed25519.Keypair)
     assert (tmp_path / "ed25519.key").exists()
     assert (tmp_path / "ed25519.pub").exists()
+
+
+def test_load_reads_existing_keypair_without_creating(tmp_path: Path) -> None:
+    original = ed25519.load_or_generate(tmp_path)
+    loaded = ed25519.load(tmp_path)
+    assert loaded.public_b64 == original.public_b64
+
+
+def test_load_missing_key_never_creates_directory(tmp_path: Path) -> None:
+    missing = tmp_path / "missing"
+    with pytest.raises(FileNotFoundError):
+        ed25519.load(missing)
+    assert not missing.exists()
+
+
+def test_concurrent_creation_publishes_one_complete_keypair(tmp_path: Path) -> None:
+    key_dir = tmp_path / "concurrent"
+    workers = 12
+    barrier = Barrier(workers)
+
+    def mint() -> str:
+        barrier.wait()
+        return ed25519.load_or_generate(key_dir).public_b64
+
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        public_keys = list(pool.map(lambda _unused: mint(), range(workers)))
+
+    assert len(set(public_keys)) == 1
+    assert (key_dir / "ed25519.pub").read_text().strip() == public_keys[0]
+    assert list(key_dir.glob(".ed25519.*")) == []
 
 
 def test_private_key_file_is_owner_only(tmp_path: Path) -> None:

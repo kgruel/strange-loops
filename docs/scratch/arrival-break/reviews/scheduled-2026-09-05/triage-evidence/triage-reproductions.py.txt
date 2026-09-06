@@ -1,0 +1,59 @@
+from pathlib import Path
+import importlib.util, sys, tempfile, os, json
+import pytest
+ROOT=Path('/Users/kaygee/Code/loops-wt/arrival-finish')
+sys.path.insert(0,str(ROOT/'libs/engine'))
+def load(name,path):
+ spec=importlib.util.spec_from_file_location(name,ROOT/path)
+ module=importlib.util.module_from_spec(spec);sys.modules[name]=module;spec.loader.exec_module(module)
+ return module
+D=load('triage_declarations','libs/sdk/tests/test_arrival_declarations.py')
+A=load('triage_aggregates','libs/sdk/tests/test_arrival_aggregate.py')
+from sdk import recover_declaration, read_summary, read_state
+from engine.arrival_declarations import apply_declaration_edit, declaration_intent_path, DeclarationCommittedIncomplete
+from engine.arrival_registry import BackendRegistry
+from tests.conftest import Custodian
+from tests.test_runtime_batch_write import _make_target
+from tests.test_runtime_capture import _append_fact, _sync
+from engine.runtime_write import capture_runtime, plan_batch_from_capture, execute_batch_write
+from engine.credentials import WriteCredentials
+
+out=[]
+with tempfile.TemporaryDirectory(prefix='arrival-review-triage-') as directory:
+ base=Path(directory)
+ with pytest.MonkeyPatch.context() as mp:
+  p=base/'declaration';p.mkdir();mp.setenv('XDG_STATE_HOME',str(p/'state'))
+  target,desc,plan=D._prepared_edit(p)
+  def fail(phase):
+   if phase=='after-append':raise OSError('triage after append')
+  try:apply_declaration_edit(BackendRegistry.with_builtin_backends(),plan,failure_hook=fail)
+  except DeclarationCommittedIncomplete:pass
+  intent=declaration_intent_path(target)
+  try:
+   recovered=recover_declaration(intent)
+   error=None
+  except Exception as exc:error=f'{type(exc).__name__}: {exc}'
+  out.append({'case':'SDK recovery','error':error,'cache_published':target.read_text()==plan.proposed_text,'intent_removed':not intent.exists()})
+ with pytest.MonkeyPatch.context() as mp:
+  p=base/'aggregate';p.mkdir();mp.setenv('XDG_STATE_HOME',str(p/'state'))
+  target,log,sign=A._member(p,'root')
+  A._append(target,log,sign,fact_id='retained-fact',ts=10.0)
+  before=read_summary(target).fact_total
+  target.write_text(target.read_text()+'discover "children/*.vertex"\n')
+  result=read_summary(target)
+  out.append({'case':'Local aggregate shape drift','before_facts':before,'after_facts':result.fact_total,'read_path':result.read_path,'state':read_state(target).sections,'ledger_still_contains_fact':'retained-fact' in log.path.read_text()})
+ with pytest.MonkeyPatch.context() as mp:
+  p=base/'boundary';p.mkdir();mp.setenv('XDG_STATE_HOME',str(p/'state'))
+  keys=Custodian(p,'kyle')
+  target=_make_target(p,mp,keys,keys.signer,extra_loops='  boundary when="close"\n')
+  _append_fact(target,'note-one','note',3.0,keys.signer)
+  _append_fact(target,'close-one','close',4.0,keys.signer)
+  _sync(target)
+  capture=capture_runtime(target.registry,target.descriptor,target.locator,source_mode=True,evaluated_at=5.0)
+  first=[x.name for x in capture.pending_boundaries]
+  plan=plan_batch_from_capture(capture,(),credentials=WriteCredentials(),include_pending_boundaries=True)
+  execute_batch_write(target.registry,target.descriptor,plan);_sync(target)
+  nextcapture=capture_runtime(target.registry,target.descriptor,target.locator,source_mode=True,evaluated_at=5.0)
+  out.append({'case':'Recorded vertex boundary','first_pending':first,'after_commit_pending':[x.name for x in nextcapture.pending_boundaries]})
+print(json.dumps(out,indent=2))
+Path('/tmp/loops-arrival-review/triage-reproductions-result.json').write_text(json.dumps(out,indent=2)+'\n')

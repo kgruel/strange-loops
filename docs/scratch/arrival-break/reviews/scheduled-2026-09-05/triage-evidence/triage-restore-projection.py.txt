@@ -1,0 +1,38 @@
+from pathlib import Path
+import importlib.util, sys, tempfile, json
+import pytest
+ROOT=Path('/Users/kaygee/Code/loops-wt/arrival-finish')
+spec=importlib.util.spec_from_file_location('triage_aggregate',ROOT/'libs/sdk/tests/test_arrival_aggregate.py')
+A=importlib.util.module_from_spec(spec);sys.modules[spec.name]=A;spec.loader.exec_module(A)
+from engine.arrival import ArrivalLog
+from engine.arrival_body import body_of_fact_row
+from engine.arrival_contract import Head, Profile, StoreDescriptor
+from engine.arrival_file_backend import FileLedger, FileProjectionMaintenance, file_projection_path
+from engine.arrival_registry import BackendRegistry
+from sdk import restore_forward, read_facts, sync_target
+
+def append(log,sign,identifier):
+ log.append('fact',body_of_fact_row((identifier,'note',10.0,'alice','fixture',json.dumps({'value':identifier}),None)),observer='alice',origin='fixture',at=10.0,signer=sign)
+
+with tempfile.TemporaryDirectory(prefix='arrival-projection-triage-') as directory, pytest.MonkeyPatch.context() as mp:
+ p=Path(directory);mp.setenv('XDG_STATE_HOME',str(p/'state'))
+ source,source_log,sign=A._member(p,'source')
+ prefix=source_log.path.read_bytes()
+ receiver_log=ArrivalLog(p/'receiver.arrival');receiver_log.path.write_bytes(prefix)
+ receiver=p/'receiver.vertex'
+ receiver.write_text(source.read_text().replace(str(source_log.path),str(receiver_log.path)).replace('role="authority"','role="replica"'))
+ append(source_log,sign,'source-fact')
+ append(receiver_log,sign,'forked-fact')
+ fork_length=receiver_log.path.stat().st_size
+ maintenance=FileProjectionMaintenance(receiver_log.path,file_projection_path(receiver_log.path))
+ maintenance.catch_up(FileLedger(receiver_log).head());maintenance.close()
+ # Model a truncated receiver whose derived projection still carries its fork.
+ receiver_log.path.write_bytes(prefix)
+ result=restore_forward(source,receiver)
+ rows=read_facts(receiver,kind='note',include_internal=False).as_dict()
+ before_sync=rows
+ synced=sync_target(receiver)
+ after_sync=read_facts(receiver,kind='note',include_internal=False).as_dict()
+ output={'restore_succeeded':result.after==FileLedger(source_log).head(),'ledger_exact_source':receiver_log.path.read_bytes()==source_log.path.read_bytes(),'equal_fork_and_source_byte_length':fork_length==source_log.path.stat().st_size,'projected_before_sync':before_sync,'projected_after_sync':after_sync}
+ Path('/tmp/loops-arrival-review/triage-restore-projection-result.json').write_text(json.dumps(output,indent=2)+'\n')
+ print(json.dumps(output,indent=2))

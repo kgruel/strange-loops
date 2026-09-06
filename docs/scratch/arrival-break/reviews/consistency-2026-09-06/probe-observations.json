@@ -1,0 +1,51 @@
+{
+  "scope": "Synthetic interface/custom iterator probes; no live file-backend attack reproduced; no custody append attempted.",
+  "same_height": {
+    "captured": [
+      "L",
+      3,
+      "old"
+    ],
+    "read_projected": [
+      "L",
+      3,
+      "replacement"
+    ],
+    "read_accepted": true,
+    "runtime_refusal": "RuntimeWriteRefused"
+  },
+  "source_cases": [
+    {
+      "mode": "id-failure",
+      "status": "error",
+      "error_type": "OSError",
+      "fact_count": 1,
+      "id_count": 0,
+      "closed": false,
+      "lifecycle_error": "coordinator ID service failed"
+    },
+    {
+      "mode": "collector-failure",
+      "status": "error",
+      "error_type": "RuntimeError",
+      "fact_count": 1,
+      "id_count": 1,
+      "closed": false
+    },
+    {
+      "mode": "cancel",
+      "cancel_propagated": true,
+      "closed": false
+    }
+  ],
+  "tests": {
+    "engine_maintenance": {
+      "passed": 4,
+      "seconds": 0.65
+    },
+    "sdk_aggregate": {
+      "passed": 2,
+      "seconds": 0.66
+    }
+  }
+}

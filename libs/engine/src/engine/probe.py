@@ -58,6 +58,7 @@ from pathlib import Path
 from typing import Any
 
 from .arrival import ARRIVAL_SUFFIX
+from .file_projection_schema import ARRIVAL_OFFSET_KEY
 from .residence import (
     CANONICAL_LOG_SUFFIX,
     SQLITE_SUFFIXES,
@@ -450,7 +451,7 @@ def _currency(canonical: Path, mode: str) -> bool | None:
     if not index.is_file():
         return False
     if mode == "arrival":
-        from .arrival_store import ARRIVAL_OFFSET_KEY as offset_key
+        offset_key = ARRIVAL_OFFSET_KEY
     else:
         offset_key = OFFSET_KEY
     return _stamped_offset_current(index, canonical, offset_key)

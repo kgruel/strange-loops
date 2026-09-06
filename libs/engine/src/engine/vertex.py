@@ -29,20 +29,21 @@ from __future__ import annotations
 
 import fnmatch
 import re
+from collections.abc import Callable, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any, Callable, NamedTuple
+from datetime import UTC, datetime, timezone
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 from lang.document import is_internal_kind
 
 from .loop import Loop
-
 from .store import Store
 from .tick import Tick
 
 if TYPE_CHECKING:
     from atoms import Fact
+
     from .peer import Grant
 
 
@@ -152,6 +153,7 @@ class ReservedKindError(Exception):
 def _json_default(obj: object) -> object:
     """Handle MappingProxyType in JSON serialization."""
     from types import MappingProxyType
+
     if isinstance(obj, MappingProxyType):
         return dict(obj)
     raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
@@ -164,6 +166,7 @@ def _eval_condition(state: Any, condition: Any) -> bool:
     target is looked up in state, then compared using the operator.
     """
     from types import MappingProxyType
+
     if isinstance(state, MappingProxyType):
         state = dict(state)
     if not isinstance(state, dict):
@@ -236,7 +239,10 @@ class Vertex:
     """
 
     def __init__(
-        self, name: str = "", *, store: Store | None = None,
+        self,
+        name: str = "",
+        *,
+        store: Store | None = None,
         strict: bool = False,
     ) -> None:
         self._name = name
@@ -276,7 +282,9 @@ class Vertex:
         return bool(self._vertex_boundaries)
 
     def _match_vertex_boundary(
-        self, kind: str, payload: Any,
+        self,
+        kind: str,
+        payload: Any,
     ) -> _VertexBoundarySpec | None:
         """First vertex-level boundary spec this fact satisfies, or None.
 
@@ -287,15 +295,11 @@ class Vertex:
         for spec in self._vertex_boundaries:
             if spec.kind != kind:
                 continue
-            if spec.match and not all(
-                payload.get(k) == v for k, v in spec.match
-            ):
+            if spec.match and not all(payload.get(k) == v for k, v in spec.match):
                 continue
             if spec.conditions:
                 cond_loop = self._loops.get(self._routed_kind(kind))
-                if cond_loop is None or not _eval_conditions(
-                    cond_loop.state, spec.conditions
-                ):
+                if cond_loop is None or not _eval_conditions(cond_loop.state, spec.conditions):
                     continue
             return spec
         return None
@@ -487,12 +491,13 @@ class Vertex:
         execution when the boundary fires.
         """
         if kind in self._boundary_map:
-            raise ValueError(
-                f"Boundary kind '{kind}' already registered at loop level"
-            )
+            raise ValueError(f"Boundary kind '{kind}' already registered at loop level")
         self._vertex_boundaries.append(
             _VertexBoundarySpec(
-                kind=kind, match=match, conditions=conditions, run=run,
+                kind=kind,
+                match=match,
+                conditions=conditions,
+                run=run,
             )
         )
         self._vertex_boundary_kinds.add(kind)
@@ -518,7 +523,10 @@ class Vertex:
         so the projections cannot drift.
         """
         return self.receive_receipt(
-            fact, grant, _from_child=_from_child, id_override=id_override,
+            fact,
+            grant,
+            _from_child=_from_child,
+            id_override=id_override,
             admit_undeclared=admit_undeclared,
         ).tick
 
@@ -530,6 +538,7 @@ class Vertex:
         _from_child: str | None = None,
         id_override: str | None = None,
         admit_undeclared: bool = False,
+        _plan_only: bool = False,
     ) -> Receipt:
         """Route a fact to the appropriate fold engine, gated by optional grant.
 
@@ -603,17 +612,12 @@ class Vertex:
         # is exempt. Observer-state kinds (focus.*/scroll.*/selection.*) get
         # no special case: undeclared is undeclared. Bypass is the explicit
         # admit_undeclared parameter only.
-        if (
-            self._strict
-            and not admit_undeclared
-            and _from_child is None
-            and not self.accepts(kind)
-        ):
+        if self._strict and not admit_undeclared and _from_child is None and not self.accepts(kind):
             from .admission import UndeclaredKind
 
             raise UndeclaredKind(kind, self._name)
 
-        if self._store is not None and is_internal_kind(kind):
+        if (self._store is not None or _plan_only) and is_internal_kind(kind):
             raise ReservedKindError(
                 f"kind '{kind}' is in the reserved declaration namespace "
                 f"('_decl.*') — recorded via the absorb ceremony, not ingest"
@@ -637,11 +641,19 @@ class Vertex:
                 # row" clause).
                 fact_id, signature = appender(fact, id_override=id_override)
                 attestation = FactAttestation(
-                    signed=signature is not None, observer=observer,
+                    signed=signature is not None,
+                    observer=observer,
                 )
             else:
                 fact_id = self._store.append(fact, id_override=id_override)
                 attestation = self._fact_attestation(fact_id, observer)
+            stored = True
+        elif _plan_only:
+            # A detached runtime plan must exercise the exact admission,
+            # parse, fold and boundary path without creating a second store.
+            # ``stored`` means accepted for this planning-only invocation;
+            # its id was selected by the caller and no persistence occurred.
+            fact_id = id_override
             stored = True
 
         # Convert fact timestamp for Loop routing
@@ -649,9 +661,7 @@ class Vertex:
 
         # Track vertex-level period start (first fact after reset)
         # Suppressed during replay — replay sets period from last tick instead
-        if (self._has_vertex_boundary
-                and self._vertex_period_start is None
-                and not self._replaying):
+        if self._has_vertex_boundary and self._vertex_period_start is None and not self._replaying:
             self._vertex_period_start = fact_ts
 
         if self._has_routes:
@@ -666,8 +676,7 @@ class Vertex:
                 # consistent with source-level parse where None means
                 # "drop the record." Fact is already stored for audit —
                 # the receipt says so honestly (stored, no tick).
-                return Receipt(fact_id=fact_id, tick=None, stored=stored,
-                               attestation=attestation)
+                return Receipt(fact_id=fact_id, tick=None, stored=stored, attestation=attestation)
 
         # Route to Loop — Loop tracks its own period_start internally
         # Loop.receive() returns True if a count-based boundary should fire
@@ -677,9 +686,7 @@ class Vertex:
             # Inject the event timestamp the same way the replay/read paths
             # do — Latest folds consume _ts; without it the live fold would
             # diverge from every re-fold of the same store.
-            count_boundary_fire = loop.receive(
-                {**payload, "_ts": fact.ts}, ts=fact_ts
-            )
+            count_boundary_fire = loop.receive({**payload, "_ts": fact.ts}, ts=fact_ts)
 
         # Forward to children that accept this kind
         # Skip the child that produced this fact (prevents loopback)
@@ -696,15 +703,166 @@ class Vertex:
 
         # Phase: boundary (live only — replay bypasses receive entirely)
         if self._replaying:
-            return Receipt(fact_id=fact_id, tick=None, stored=stored,
-                           attestation=attestation)
+            return Receipt(fact_id=fact_id, tick=None, stored=stored, attestation=attestation)
 
         tick, tick_attestation = self._fire_live_boundaries(
-            kind, routed_kind, payload, loop, count_boundary_fire, fact_ts,
+            kind,
+            routed_kind,
+            payload,
+            loop,
+            count_boundary_fire,
+            fact_ts,
         )
-        return Receipt(fact_id=fact_id, tick=tick, stored=stored,
-                       attestation=attestation,
-                       tick_attestation=tick_attestation)
+        return Receipt(
+            fact_id=fact_id,
+            tick=tick,
+            stored=stored,
+            attestation=attestation,
+            tick_attestation=tick_attestation,
+        )
+
+    def plan_receive_receipt(
+        self,
+        fact: Fact,
+        grant: Grant | None = None,
+        *,
+        id_override: str,
+        admit_undeclared: bool = False,
+    ) -> Receipt:
+        """Run ordinary ingress against detached state without persistence.
+
+        This is the runtime writer's planning hook. It deliberately reuses
+        :meth:`receive_receipt` so gate, parse, fold and boundary behavior
+        cannot drift from live execution, while the private flag makes the
+        accepted plan observable without attaching a store.
+        """
+        if self._store is not None:
+            raise RuntimeError("planning requires a detached vertex")
+        return self.receive_receipt(
+            fact,
+            grant,
+            id_override=id_override,
+            admit_undeclared=admit_undeclared,
+            _plan_only=True,
+        )
+
+    def detached_copy(self) -> Vertex:
+        """Copy runtime fold state without copying or opening a store handle."""
+        import copy
+
+        clone = copy.copy(self)
+        clone._store = None
+        clone._loops = copy.deepcopy(self._loops)
+        clone._boundary_map = copy.deepcopy(self._boundary_map)
+        clone._boundary_match = copy.deepcopy(self._boundary_match)
+        clone._boundary_conditions = copy.deepcopy(self._boundary_conditions)
+        clone._vertex_boundaries = copy.deepcopy(self._vertex_boundaries)
+        clone._vertex_boundary_kinds = copy.deepcopy(self._vertex_boundary_kinds)
+        clone._children = [child.detached_copy() for child in self._children]
+        clone._routes = copy.deepcopy(self._routes)
+        clone._parse_pipelines = copy.deepcopy(self._parse_pipelines)
+        clone._route_cache = {}
+        clone._accepts_cache = {}
+        clone._replaying = False
+        return clone
+
+    def _owns_tick(self, tick: Any) -> bool:
+        """Whether a persisted tick belongs to this vertex's local runtime.
+
+        A tick is local only when its explicit origin matches this vertex's
+        name. Tick names are only local fold names; another vertex may publish
+        the same name into the same physical ledger. Originless evidence
+        (``None`` or ``""``) is never local proof, including for an unnamed
+        runtime candidate.
+        """
+        return bool(self._name) and getattr(tick, "origin", None) == self._name
+
+    def hydrate_facts(self, facts: list[Fact] | tuple[Fact, ...]) -> int:
+        """Backward-compatible facts-only replay for a storeless candidate."""
+        return self.hydrate_snapshot(facts, ())
+
+    def hydrate_snapshot(self, facts: Sequence[Any], ticks: Sequence[Any]) -> int:
+        """Rebuild this fresh, storeless vertex from already-captured facts.
+
+        The caller supplies one receipt-ordered snapshot.  Hydration is replay:
+        it never calls ordinary ingress, persists nothing, and never evaluates
+        or fires a boundary.  Runtime writing uses it to make a candidate from
+        its CURRENT projection rather than trusting a live vertex's mutable
+        fold state.
+        """
+        if self._store is not None:
+            raise RuntimeError("hydration requires a storeless vertex")
+        if self._has_children:
+            raise RuntimeError("stage 3A hydration does not support child vertices")
+        count = 0
+        ticked_loops: set[str] = set()
+        last_vertex_tick: datetime | None = None
+        entries = [
+            (fact.arrival_ordinal, fact.arrival_seq, "fact", fact) for fact in facts
+        ] + [
+            (tick.arrival_ordinal, tick.arrival_seq, "tick", tick) for tick in ticks
+        ]
+        with self._replay_guard():
+            for _, _, entry_kind, entry in sorted(entries, key=lambda row: row[:2]):
+                if entry_kind == "tick":
+                    tick = entry
+                    if not self._owns_tick(tick):
+                        continue
+                    loop = self._loops.get(tick.name)
+                    if loop is not None:
+                        loop.replay_boundary()
+                        ticked_loops.add(tick.name)
+                    if tick.name == self._name:
+                        # Match ``replay()``: a vertex tick snapshots all
+                        # loops but does not reset them; its timestamp is the
+                        # period context restored after the bounded replay.
+                        last_vertex_tick = datetime.fromtimestamp(tick.ts, tz=timezone.utc)
+                    continue
+                fact = entry
+                routed_kind = self._routed_kind(fact.kind) if self._has_routes else fact.kind
+                payload = fact.payload
+                if self._parse_pipelines:
+                    payload = self._apply_parse_pipeline(routed_kind, payload)
+                    if payload is None:
+                        continue
+                loop = self._loops.get(routed_kind)
+                if loop is not None:
+                    loop.receive(
+                        {**payload, "_ts": fact.ts},
+                        ts=datetime.fromtimestamp(fact.ts, tz=timezone.utc),
+                    )
+                count += 1
+        # A historical loop tick is its own exact count/reset checkpoint. A
+        # loop with no persisted tick retains legacy replay's modulo recovery.
+        for name, loop in self._loops.items():
+            if loop.boundary_count is not None and name not in ticked_loops:
+                replayed = loop._projection.events_folded
+                if loop.boundary_mode == "after":
+                    loop._boundary_exhausted = replayed >= loop.boundary_count
+                    loop._count_since_boundary = 0 if loop._boundary_exhausted else replayed
+                elif loop.boundary_mode == "every":
+                    loop._count_since_boundary = replayed % loop.boundary_count
+                else:
+                    loop._count_since_boundary = replayed
+        if last_vertex_tick is not None:
+            self._vertex_period_start = last_vertex_tick
+        return count
+
+    def _reconcile_replayed_boundaries(self) -> None:
+        """Restore count-boundary bookkeeping after non-firing replay."""
+        for loop in self._loops.values():
+            if loop.boundary_count is not None:
+                replayed = loop._projection.events_folded
+                if loop.boundary_mode == "after":
+                    if replayed >= loop.boundary_count:
+                        loop._boundary_exhausted = True
+                        loop._count_since_boundary = 0
+                    else:
+                        loop._count_since_boundary = replayed
+                elif loop.boundary_mode == "every":
+                    loop._count_since_boundary = replayed % loop.boundary_count
+                else:
+                    loop._count_since_boundary = replayed
 
     def _fire_live_boundaries(
         self,
@@ -748,7 +906,9 @@ class Vertex:
             spec = self._match_vertex_boundary(kind, payload)
             if spec is not None:
                 tick = self._fire_vertex_boundary(
-                    fact_ts, payload, run=spec.run,
+                    fact_ts,
+                    payload,
+                    run=spec.run,
                 )
                 return tick, self._store_tick(tick)
 
@@ -768,12 +928,14 @@ class Vertex:
                 return None, None
 
         target_loop = self._loops[fold_kind]
-        tick = target_loop.fire(fact_ts, origin=self._name,
-                                boundary_payload=payload)
+        tick = target_loop.fire(fact_ts, origin=self._name, boundary_payload=payload)
         return tick, self._store_tick(tick)
 
     def _fire_vertex_boundary(
-        self, ts: datetime, boundary_payload: dict, run: str | None = None,
+        self,
+        ts: datetime,
+        boundary_payload: dict,
+        run: str | None = None,
     ) -> Tick[dict[str, Any]]:
         """Fire a vertex-level boundary — snapshot ALL loop states.
 
@@ -900,7 +1062,7 @@ class Vertex:
             not self._has_routes
             and not has_parse_pipelines
             and not self._has_children
-            and hasattr(store, 'since_raw')
+            and hasattr(store, "since_raw")
         )
 
         if use_raw:
@@ -910,13 +1072,13 @@ class Vertex:
             mut_dispatch: dict[str, tuple] = {}
             for kind, loop in loops.items():
                 fold_fn = loop._projection._fold
-                if fold_fn is not None and hasattr(fold_fn, '__self__'):
+                if fold_fn is not None and hasattr(fold_fn, "__self__"):
                     spec = fold_fn.__self__
-                    if hasattr(spec, 'folds') and hasattr(spec, '_cached_fold_fns'):
+                    if hasattr(spec, "folds") and hasattr(spec, "_cached_fold_fns"):
                         mut_dispatch[kind] = (spec._cached_fold_fns, loop._projection)
 
             # Stream path: store provides data, vertex dispatches to projections
-            if mut_dispatch and hasattr(store, 'replay_cursor'):
+            if mut_dispatch and hasattr(store, "replay_cursor"):
                 get = mut_dispatch.get
                 count = 0
                 with self._replay_guard():
@@ -970,25 +1132,9 @@ class Vertex:
                             if child.accepts(fact.kind):
                                 child.receive(fact)
 
-        # Reconcile count-based boundary state after replay.
-        # During replay, loop.receive() may or may not have been called
-        # (fast path bypasses it). Either way, the count needs to reflect
-        # how many facts of the loop's kind were replayed, modulo the
-        # boundary threshold. For "after" mode: if threshold was reached,
-        # mark exhausted. For "every" mode: keep the residual count.
-        for loop in self._loops.values():
-            if loop.boundary_count is not None:
-                replayed = loop._projection.events_folded
-                if loop.boundary_mode == "after":
-                    if replayed >= loop.boundary_count:
-                        loop._boundary_exhausted = True
-                        loop._count_since_boundary = 0
-                    else:
-                        loop._count_since_boundary = replayed
-                elif loop.boundary_mode == "every":
-                    loop._count_since_boundary = replayed % loop.boundary_count
-                else:
-                    loop._count_since_boundary = replayed
+        # Replay paths that bypass ``receive`` still need the boundary
+        # bookkeeping a live loop would have accumulated.
+        self._reconcile_replayed_boundaries()
 
         # Initialize period start from last vertex-level tick.
         # Vertex-level boundary ticks use self._name as tick name.
@@ -1032,7 +1178,7 @@ class Vertex:
         # may be None (reset). Use the latest stored tick's timestamp as the
         # authoritative scan start — avoids re-scanning already-evaluated facts.
         since_ts: float = 0.0
-        if hasattr(self._store, 'ticks_since'):
+        if hasattr(self._store, "ticks_since"):
             stored_ticks = self._store.ticks_since(0)
             if stored_ticks:
                 since_ts = stored_ticks[-1].ts.timestamp()
@@ -1042,6 +1188,7 @@ class Vertex:
                 since_ts = ps_ts
 
         import time as _time
+
         period_facts = self._store.between(since_ts, _time.time())
         if not period_facts:
             return ticks
@@ -1075,7 +1222,9 @@ class Vertex:
                 spec = self._match_vertex_boundary(kind, payload)
                 if spec is not None:
                     tick = self._fire_vertex_boundary(
-                        fact_ts, payload, run=spec.run,
+                        fact_ts,
+                        payload,
+                        run=spec.run,
                     )
                     self._store_tick(tick)
                     ticks.append(tick)
@@ -1101,16 +1250,114 @@ class Vertex:
 
             # Fire
             target_loop = self._loops[fold_kind]
-            tick = target_loop.fire(fact_ts, origin=self._name,
-                                    boundary_payload=payload)
+            tick = target_loop.fire(fact_ts, origin=self._name, boundary_payload=payload)
             self._store_tick(tick)
             ticks.append(tick)
             fired_boundaries.add(fold_kind)
 
         return ticks
 
+    def plan_pending_boundaries(
+        self,
+        facts: tuple[Any, ...],
+        ticks: tuple[Any, ...],
+        *,
+        evaluated_at: float,
+    ) -> tuple[Tick, ...]:
+        """Evaluate externally pending boundaries from captured evidence only.
+
+        This is the storeless counterpart of :meth:`evaluate_boundaries` for
+        Arrival source planning. Each boundary's recorded ticks establish its
+        event-time period edge. At equal event time, facts received before the
+        closing tick belong to that closed period; later arrivals are eligible
+        for a new period. A tick's fact cursor is its evidence horizon, not a
+        trigger cursor: future-dated facts can already occur before that cursor.
+        The method mutates only this detached candidate and never persists.
+        Count boundaries remain ingress-driven and are not invented from replay.
+        """
+        if self._store is not None:
+            raise RuntimeError("pending-boundary planning requires a detached vertex")
+
+        def tick_time(ts: float) -> float:
+            # Runtime ticks are datetimes (microsecond precision). Compare on
+            # that same axis or rounding down repeats a consumed fact, while
+            # rounding up hides a later receipt carrying the exact same ts.
+            # The original fact timestamps and receipt coordinates stay intact.
+            return datetime.fromtimestamp(ts, tz=UTC).timestamp()
+
+        edges: dict[str, tuple[float, int, int]] = {}
+        for tick in ticks:
+            if not self._owns_tick(tick):
+                continue
+            edge = (tick_time(tick.ts), tick.arrival_ordinal, tick.arrival_seq)
+            if tick.name not in edges or edge > edges[tick.name]:
+                edges[tick.name] = edge
+
+        def unconsumed(fact: Any, name: str) -> bool:
+            edge = edges.get(name)
+            return edge is None or (
+                tick_time(fact.ts), fact.arrival_ordinal, fact.arrival_seq
+            ) > edge
+
+        period_facts = sorted(
+            (fact for fact in facts if 0.0 <= fact.ts <= evaluated_at),
+            key=lambda fact: (
+                fact.ts,
+                getattr(fact, "arrival_ordinal", 0),
+                getattr(fact, "arrival_seq", 0),
+            ),
+        )
+        if not period_facts:
+            return ()
+
+        planned: list[Tick] = []
+        fired_boundaries: set[str] = set()
+        for fact in period_facts:
+            kind = fact.kind
+            payload = fact.payload
+            fact_ts = datetime.fromtimestamp(fact.ts, tz=timezone.utc)
+            if (
+                self._has_vertex_boundary
+                and self._vertex_period_start is None
+                and unconsumed(fact, self._name)
+            ):
+                self._vertex_period_start = fact_ts
+
+            if kind in self._vertex_boundary_kinds:
+                if not unconsumed(fact, self._name):
+                    continue
+                spec = self._match_vertex_boundary(kind, payload)
+                if spec is not None:
+                    planned.append(self._fire_vertex_boundary(fact_ts, payload, run=spec.run))
+                    break
+                continue
+
+            fold_kind = self._boundary_map.get(kind)
+            if fold_kind is None or fold_kind in fired_boundaries:
+                continue
+            if not unconsumed(fact, fold_kind):
+                continue
+            match = self._boundary_match.get(kind, ())
+            if match and not all(payload.get(key) == value for key, value in match):
+                continue
+            conditions = self._boundary_conditions.get(kind, ())
+            target_loop = self._loops[fold_kind]
+            if conditions and not _eval_conditions(target_loop.state, conditions):
+                continue
+            planned.append(
+                target_loop.fire(
+                    fact_ts,
+                    origin=self._name,
+                    boundary_payload=payload,
+                )
+            )
+            fired_boundaries.add(fold_kind)
+        return tuple(planned)
+
     def _evaluate_vertex_only_boundaries(
-        self, period_facts: list, since_ts: float,
+        self,
+        period_facts: list,
+        since_ts: float,
     ) -> list[Tick]:
         """Evaluate boundaries when only vertex-level boundaries exist.
 
@@ -1137,7 +1384,9 @@ class Vertex:
             if spec is None:
                 continue
             tick = self._fire_vertex_boundary(
-                fact_ts, fact.payload, run=spec.run,
+                fact_ts,
+                fact.payload,
+                run=spec.run,
             )
             self._store_tick(tick)
             ticks.append(tick)
@@ -1176,7 +1425,7 @@ class Vertex:
         it, else the ``tick_signature_state`` read-back; None when the store
         doesn't persist ticks or doesn't report attestation.
         """
-        if self._store is None or not hasattr(self._store, 'append_tick'):
+        if self._store is None or not hasattr(self._store, "append_tick"):
             return None
         appender = getattr(self._store, "append_tick_attested", None)
         if appender is not None:
@@ -1184,8 +1433,7 @@ class Vertex:
             return TickAttestation(signed=signature is not None, chained=True)
         return self._tick_attestation(self._store.append_tick(tick))
 
-    def _fact_attestation(self, fact_id: str | None,
-                          observer: str) -> FactAttestation | None:
+    def _fact_attestation(self, fact_id: str | None, observer: str) -> FactAttestation | None:
         """Persisted signature state of the just-committed fact row.
 
         Read back from the store (``fact_signature``) — the committed row is
@@ -1199,7 +1447,8 @@ class Vertex:
         if reader is None:
             return None
         return FactAttestation(
-            signed=reader(fact_id) is not None, observer=observer,
+            signed=reader(fact_id) is not None,
+            observer=observer,
         )
 
     def _tick_attestation(self, tick_row_id: str | None) -> TickAttestation | None:

@@ -32,14 +32,15 @@ from atoms import (
     totalize,
 )
 
+from .composition import merge_fold_specs
 from .declaration import (
     decl_lineage_and_head_on,
     declaration_generation,
     load_declaration,
     load_declaration_status,
 )
-from .observer import observer_matches
 from .jsonl_store import resolved_index
+from .observer import observer_matches
 from .residence import canonical_store_path
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -233,36 +234,6 @@ def emit_topology(vertex_path: Path) -> None:
         store.close()
 
 
-class ConflictingFoldSpec(Exception):
-    """Two source vertices declare the same kind with different fold specs."""
-
-    def __init__(self, kind: str, source_a: str, source_b: str) -> None:
-        self.kind = kind
-        super().__init__(
-            f"Conflicting fold spec for '{kind}' from '{source_a}' and '{source_b}'. "
-            f"Add an explicit '{kind}' declaration to the aggregation vertex to resolve."
-        )
-
-
-def _specs_match(a: Any, b: Any) -> bool:
-    """Check if two Specs have equivalent fold declarations.
-
-    Compares fold ops (type + parameters) — the part that determines
-    how facts accumulate. Ignores name/about metadata.
-    """
-    if len(a.folds) != len(b.folds):
-        return False
-    for fa, fb in zip(a.folds, b.folds):
-        if type(fa) is not type(fb):
-            return False
-        # Compare fold-relevant attributes (key for Upsert, limit for Collect)
-        if hasattr(fa, "key") and fa.key != fb.key:
-            return False
-        if hasattr(fa, "limit") and fa.limit != fb.limit:
-            return False
-    return True
-
-
 def _collect_source_specs(
     ast: Any,
     vertex_path: Path,
@@ -292,24 +263,11 @@ def _collect_source_specs(
 
     from .compiler import compile_vertex
 
-    merged: dict = {}
-    # Track which source each kind came from (for error messages)
-    source_of: dict[str, str] = {}
+    sources: list[tuple[str, dict]] = []
 
     def _merge_from(ref_ast: Any, source_name: str) -> None:
-        if not ref_ast.loops:
-            return
-        source_specs = compile_vertex(ref_ast)
-        for kind, spec in source_specs.items():
-            if kind in merged:
-                if kind in override_kinds:
-                    pass  # Aggregation will override — skip conflict check
-                elif not _specs_match(merged[kind], spec):
-                    raise ConflictingFoldSpec(kind, source_of[kind], source_name)
-                # Matching specs or overridden — keep existing
-            else:
-                merged[kind] = spec
-                source_of[kind] = source_name
+        if ref_ast.loops:
+            sources.append((source_name, compile_vertex(ref_ast)))
 
     if ast.combine is not None:
         home = _loops_home()
@@ -336,7 +294,7 @@ def _collect_source_specs(
                 continue
             _merge_from(ref_ast, match.stem)
 
-    return merged
+    return merge_fold_specs(sources, override_kinds=override_kinds)
 
 
 def _open_combined(store_paths: list[Path]) -> tuple[sqlite3.Connection, list[str]]:
@@ -1833,43 +1791,10 @@ def _resolve_store(vertex_path: Path) -> tuple[Any, Path | None]:
 
 
 def _extract_field(payload: dict, field: str) -> str:
-    """Extract a search field value from a payload, handling nested paths and polymorphic values.
+    """Compatibility spelling delegated to the shared Arrival-safe helper."""
+    from .search_fields import extract_field_text
 
-    Supports:
-    - Flat fields: ``"prompt"`` → ``payload["prompt"]``
-    - Dot paths: ``"message.content"`` → ``payload["message"]["content"]``
-    - String values: returned directly
-    - List of dicts: extracts ``"text"`` from each element, concatenates
-    - List of strings: concatenated
-    - Dict values: JSON-serialized (fallback)
-    - Missing fields: empty string
-    """
-    # Traverse dot path
-    value: Any = payload
-    for part in field.split("."):
-        if isinstance(value, dict):
-            value = value.get(part)
-        else:
-            return ""
-        if value is None:
-            return ""
-
-    # Resolve polymorphic value
-    if isinstance(value, str):
-        return value
-    if isinstance(value, list):
-        parts = []
-        for item in value:
-            if isinstance(item, str):
-                parts.append(item)
-            elif isinstance(item, dict):
-                text = item.get("text")
-                if isinstance(text, str):
-                    parts.append(text)
-        return " ".join(parts)
-    if isinstance(value, dict):
-        return json.dumps(value)
-    return str(value)
+    return extract_field_text(payload, field)
 
 
 class FtsGenerationChanged(Exception):

@@ -11,6 +11,7 @@ from sdk import (
     TargetNotFound,
     TargetUnsupported,
     discover_targets,
+    resolve_arrival_target,
     resolve_target,
 )
 
@@ -133,6 +134,74 @@ def test_resolve_target_accepts_str_and_path(tmp_path: Path) -> None:
     info_path = resolve_target(vertex_path)
     info_str = resolve_target(str(vertex_path))
     assert info_path == info_str
+
+
+def test_resolve_arrival_target_preserves_opaque_location(tmp_path: Path) -> None:
+    vertex_path = tmp_path / "remote.vertex"
+    vertex_path.write_text(
+        'name "remote"\n'
+        'store "svc://tenant//ledger?q=a%2Fb" backend="remote" '
+        'lineage="lin-1" role="replica"\n'
+        'loops { item { fold { items "collect" 5 } } }\n',
+        encoding="utf-8",
+    )
+
+    target = resolve_arrival_target(vertex_path)
+
+    assert target.store is not None
+    assert target.store.backend == "remote"
+    assert target.store.location == "svc://tenant//ledger?q=a%2Fb"
+    assert target.store.lineage == "lin-1"
+    assert target.store.role == "replica"
+    assert target.as_dict()["store"]["location"] == "svc://tenant//ledger?q=a%2Fb"
+
+
+def test_resolve_arrival_target_requires_explicit_role(tmp_path: Path) -> None:
+    from sdk import SdkValueError
+
+    vertex_path = tmp_path / "unassigned.vertex"
+    vertex_path.write_text(
+        'name "unassigned"\n'
+        'store "opaque:key" backend="remote" lineage="lin-1"\n'
+        'loops { item { fold { items "collect" 5 } } }\n',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(SdkValueError, match="must declare store role"):
+        resolve_arrival_target(vertex_path)
+
+
+def test_resolve_arrival_target_classifies_malformed_vertex(tmp_path: Path) -> None:
+    vertex_path = tmp_path / "malformed.vertex"
+    vertex_path.write_text('name "unterminated\n', encoding="utf-8")
+
+    with pytest.raises(TargetUnsupported, match="does not declare an Arrival backend"):
+        resolve_arrival_target(vertex_path)
+
+
+def test_resolve_arrival_target_refuses_legacy_suffix_inference(tmp_path: Path) -> None:
+    vertex_path = tmp_path / "legacy.vertex"
+    vertex_path.write_text(
+        'name "legacy"\nstore "looks.arrival"\n'
+        'loops { item { fold { items "collect" 5 } } }\n',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(TargetUnsupported, match="does not declare an Arrival backend"):
+        resolve_arrival_target(vertex_path)
+
+
+def test_resolve_arrival_target_refuses_aggregate_with_own_descriptor(tmp_path: Path) -> None:
+    vertex_path = tmp_path / "aggregate.vertex"
+    vertex_path.write_text(
+        'name "aggregate"\n'
+        'store "opaque:self" backend="remote" lineage="lin-1" role="replica"\n'
+        'discover "members/*.vertex"\n',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(TargetUnsupported, match="member-basis reads"):
+        resolve_arrival_target(vertex_path)
 
 
 def test_discover_targets_tree(tmp_path: Path) -> None:
@@ -292,4 +361,3 @@ def test_discover_targets_sorting_order(tmp_path: Path) -> None:
     # a_store.db sorts before z_store.db even though a_app was discovered first
     assert targets[1].canonical_path is not None and targets[1].canonical_path.name == "a_store.db"
     assert targets[2].canonical_path is not None and targets[2].canonical_path.name == "z_store.db"
-

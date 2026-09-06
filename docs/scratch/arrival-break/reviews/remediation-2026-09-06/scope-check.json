@@ -1,0 +1,50 @@
+{
+  "reviews": [
+    {
+      "name": "runtime-query-results",
+      "effort": "low",
+      "packet_verified": true,
+      "finished_at": "2026-09-06T14:52:48.476026+00:00"
+    },
+    {
+      "name": "custody-and-followup",
+      "effort": "low",
+      "packet_verified": true,
+      "finished_at": "2026-09-06T15:00:58.463031+00:00"
+    },
+    {
+      "name": "custody-namespace-followup",
+      "effort": "low",
+      "packet_verified": true,
+      "finished_at": "2026-09-06T15:11:48.324568+00:00"
+    }
+  ],
+  "latest_reviewed_sources": {
+    "libs/engine/src/engine/arrival_contract.py": "4859b8935a34c4ee08fb0cd75064bdd1360ce85e43647263ae08be86ddef2a1d",
+    "libs/engine/src/engine/vertex.py": "acf72ed52646de8132d250a2d9c909eef8889ee8e919a1c769472eb844c21b28",
+    "libs/engine/src/engine/arrival_file_backend.py": "196db6be0bd6c06794e7935946d102def55cc5b48832f1b0cc4147932c047dbe",
+    "libs/sdk/src/sdk/read.py": "8ad2c118440f2dfe7e842179891cead0c1dccfb4843b55d5bda6866828e033e7",
+    "libs/sdk/src/sdk/transfer.py": "ac5d0e8d596c5cc281f5db4aa94ffea686cb4bf11ac9f4c85522a2d109ea29b7",
+    "libs/sdk/src/sdk/errors.py": "dbb3b3352a1d713445476b810271b15082b7fbbb1fd1de49cd611a4439f32c68",
+    "libs/engine/src/engine/arrival_declarations.py": "21211ae9ed75e13f9e1c0687fed1f48544b533113c7159059735fccee2c1bc91",
+    "libs/sdk/src/sdk/declare.py": "10458e89fdeeaea2f76547cdbf097aac92bd0ce7add73b5d5a493d9a7cb6c22b",
+    "libs/sdk/tests/test_arrival_export.py": "b2c80617574686b80a60d740415f2b60af39e54ac0b4123ecddd64dafe6c42e0",
+    "libs/sdk/tests/test_arrival_declarations.py": "8975fd9e6a3e302a7ba7ed38375da0fa7f74f4a7ff0450de89dd038f0d9d573d",
+    "libs/sdk/tests/test_arrival_read.py": "ee7fc151f519c46402f444a963f064d981cdc6c810ca2cd86f8d4251647e74db",
+    "libs/engine/tests/test_arrival_consumer.py": "4a68a698ca82c91f6ed32ae009cefbe27f31660504f9ac940725bd683564b177",
+    "libs/engine/tests/test_runtime_boundary_consumption.py": "69da5bee807b1a440557ea7b6c2aaa31bee140125e3afbc417aa1f03da987790",
+    "libs/custody/src/custody/signing.py": "8a8f506b35c67b671c7714fbf11cfbdaa86c4a14c3cc4a3d429fc8b05a338710",
+    "libs/sign/src/sign/ed25519.py": "73b912ddf1b281ad2dedf02d33af02c236731af70014f3393b240096c501bb83",
+    "libs/custody/tests/test_signing.py": "f0d7bec937789ded6e349c2af5e6865de51a8206238cc03f5e248b47f8c3ccd0",
+    "libs/sign/tests/test_ed25519.py": "30b470457bfdf147ca411636c1f5fda50e9b6dd0b23bf006e88a041069858f35"
+  },
+  "final_source_drift": [],
+  "fable_usage": {
+    "inputTokens": 6,
+    "outputTokens": 21986,
+    "cacheReadInputTokens": 9792,
+    "cacheCreationInputTokens": 84879,
+    "thinkingTokens": 17847
+  },
+  "note": "Later packets supersede earlier hashes for files changed to address review findings."
+}

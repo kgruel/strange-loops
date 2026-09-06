@@ -93,7 +93,10 @@ class CustodyCredentialProvider:
     """Bridge custody's disk keypair management to engine's CredentialProvider interface."""
 
     def __init__(self, key_dir: Path | None = None) -> None:
-        self._key_dir = key_dir
+        if key_dir is not None:
+            raise SdkValueError(
+                "CustodyCredentialProvider key_dir overrides are not supported"
+            )
 
     def for_write(self, vertex: Path) -> WriteCredentials:
         """Construct operation-fresh WriteCredentials using custody key resolution."""

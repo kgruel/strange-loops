@@ -1,3 +1,25 @@
+## September 6: C4 complete and accepted
+
+C4 is complete using Sol/Terra/Luna and root. The SDK custody provider now
+refuses every non-None `key_dir` at construction with `SdkValueError`; the
+default and explicit-None paths retain existing credential resolution. The
+compatibility change is documented. See the
+[C4 report](consistency-c4-2026-09-06.md),
+[validation](consistency-c4-validation-2026-09-06.md), and
+[Fable-low triage](reviews/consistency-c4-2026-09-06/primary-triage.md).
+
+One Fable 5.1 low-effort review accepted with no blockers. All three optional
+notes are adjudicated. Production, tests and README match the reviewed bytes;
+final SDK 528 passed, architecture 101 passed, scoped Ruff clean. No jobs or
+reviews remain. C2 was checkpointed at `831698ff`; C4 remains uncommitted on
+`arrival/finish`. Main is clean; nothing pushed or applied to live stores.
+
+Next bounded candidate: C5, refusing same-named Arrival loops and their vertex
+during supported runtime/planning and proposed declaration changes, including
+passive/count/reset/boundary cases while preserving evidence reads/export.
+Credential request scope and persisted observer/key mappings remain D0/D2
+design work; C4 only makes the unsupported override explicit.
+
 ## September 6 checkpoint: C2 implementation complete and accepted
 
 C2 is implemented using Sol/Terra/Luna and root. Arrival projection/search

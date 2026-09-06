@@ -169,6 +169,14 @@ print(batch.commit, batch.atomicity, batch.projection)
 - **`emit_batch(target, facts, *, observer=None, origin="", credentials=None, admit_undeclared=False, registry=None) -> BatchEmitResult`**:
   Normalizes every item before resolving the target. A descriptor-first Arrival batch derives all per-item admission decisions from one current snapshot, appends the packed records under one head comparison, witnesses one shared commit, and explicitly synchronizes the projection. Each mapping item may set its own boolean `admit_undeclared`; duplicate receipts retain `stored=False`. Empty input is an explicit zero-write result. Legacy targets return the same wrapper with `atomic=False`, `atomicity="legacy-sequential"`, and no invented shared commit; `LegacyBatchPartialFailure` retains receipts if that sequential loop stops after an observable prefix.
 
+`CustodyCredentialProvider()` and `CustodyCredentialProvider(key_dir=None)` use
+the existing custody resolver. A non-`None` `key_dir` now raises
+`SdkValueError` during construction because directory overrides were previously
+accepted but ignored. This applies before either Arrival or legacy operations
+can use the provider. Callers that need another credential source can continue
+to supply a custom `CredentialProvider`; that interface does not itself create
+an observer mapping or register public keys.
+
 ---
 
 ### 4. Arrival Source Execution

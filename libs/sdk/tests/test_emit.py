@@ -6,8 +6,9 @@ from typing import Any
 
 import pytest
 from atoms import Fact
-from custody import ensure_signing_key
+from custody import ARRIVAL_DOMAIN, FACT_DOMAIN, TICK_DOMAIN, ensure_signing_key
 from engine.handle import CredentialProvider, ReceiveCommittedError, WriteCredentials
+from sign import ed25519
 
 from sdk import (
     AdmissionFailed,
@@ -16,6 +17,7 @@ from sdk import (
     EmitPreviewResult,
     EmitReceipt,
     InvalidEmissionRequest,
+    SdkValueError,
     TargetNotFound,
     TargetUnsupported,
     emit_batch,
@@ -178,21 +180,93 @@ def test_emit_fact_nonexistent_vertex_raises_target_not_found(tmp_path: Path) ->
         )
 
 
-def test_custody_credential_provider_for_write(sample_vertex: Path) -> None:
+@pytest.mark.parametrize(
+    "provider_factory",
+    (CustodyCredentialProvider, lambda: CustodyCredentialProvider(None)),
+    ids=("default", "explicit-none"),
+)
+def test_custody_credential_provider_for_write(sample_vertex: Path, provider_factory) -> None:
     """CustodyCredentialProvider returns valid WriteCredentials with signers."""
 
     # Without keys, signers are None
-    provider = CustodyCredentialProvider()
+    provider = provider_factory()
     creds_empty = provider.for_write(sample_vertex)
     assert creds_empty.fact_signer is None
     assert creds_empty.tick_signer is None
+    assert creds_empty.arrival_signer is None
 
     # After creating vertex and observer signing keys, signers become callable
-    ensure_signing_key(sample_vertex)
-    ensure_signing_key(sample_vertex, "admin")
+    keypair = ensure_signing_key(sample_vertex)
     creds_with_key = provider.for_write(sample_vertex)
     assert callable(creds_with_key.fact_signer)
     assert callable(creds_with_key.tick_signer)
+    assert callable(creds_with_key.arrival_signer)
+
+    tick_digest = "tick-digest"
+    fact_digest = "fact-digest"
+    arrival_digest = "arrival-digest"
+    tick_signature = creds_with_key.tick_signer(tick_digest)
+    fact_signature = creds_with_key.fact_signer("test", fact_digest)
+    arrival_signature = creds_with_key.arrival_signer("test", arrival_digest)
+
+    assert ed25519.verify(
+        keypair.public, tick_signature, tick_digest.encode(), domain=TICK_DOMAIN
+    )
+    assert fact_signature is not None
+    assert ed25519.verify(
+        keypair.public, fact_signature, fact_digest.encode(), domain=FACT_DOMAIN
+    )
+    assert arrival_signature is not None
+    assert ed25519.verify(
+        keypair.public,
+        arrival_signature,
+        arrival_digest.encode(),
+        domain=ARRIVAL_DOMAIN,
+    )
+
+
+@pytest.mark.parametrize(
+    "provider_factory, existing_root",
+    (
+        (lambda key_dir: CustodyCredentialProvider(key_dir), False),
+        (lambda key_dir: CustodyCredentialProvider(key_dir=key_dir), True),
+    ),
+    ids=("positional-missing", "keyword-existing"),
+)
+def test_custody_credential_provider_rejects_key_dir_without_resolution(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    provider_factory,
+    existing_root: bool,
+) -> None:
+    """An unsupported root refuses before any signer lookup or filesystem effect."""
+    configured_root = tmp_path / "unsupported-custody-root"
+    sentinel = configured_root / "sentinel"
+    if existing_root:
+        configured_root.mkdir()
+        sentinel.write_bytes(b"already-present")
+    calls: list[object] = []
+
+    def forbidden(*args, **kwargs):
+        calls.append((args, kwargs))
+        raise AssertionError("key resolution must not run for rejected configuration")
+
+    monkeypatch.setattr("sdk.emit.tick_signer_for", forbidden)
+    monkeypatch.setattr("sdk.emit.fact_signer_for", forbidden)
+    monkeypatch.setattr("sdk.emit.arrival_signer_for", forbidden)
+
+    with pytest.raises(
+        SdkValueError,
+        match="^CustodyCredentialProvider key_dir overrides are not supported$",
+    ):
+        provider_factory(configured_root)
+
+    assert calls == []
+    if existing_root:
+        assert sentinel.read_bytes() == b"already-present"
+        assert list(configured_root.iterdir()) == [sentinel]
+    else:
+        assert not configured_root.exists()
 
 
 def test_emit_fact_preserves_custom_origin_and_ts(sample_vertex: Path) -> None:

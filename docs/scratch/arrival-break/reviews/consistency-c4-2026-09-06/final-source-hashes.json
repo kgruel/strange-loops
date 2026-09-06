@@ -1,0 +1,5 @@
+{
+  "libs/sdk/src/sdk/emit.py": "6a73c80688aae65b35f1690b9fa1908aaebd1e4ae591f43817cd5cc2b142f129",
+  "libs/sdk/tests/test_emit.py": "785414bfa3234340aade6101b597503169d82925b145a43f3fadc77f56504edd",
+  "libs/sdk/README.md": "8c0c5acf34328b29c9f66c1891cfab30b2b66463c7f450c00d67123dd33d3571"
+}

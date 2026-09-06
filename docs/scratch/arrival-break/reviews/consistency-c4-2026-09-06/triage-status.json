@@ -1,0 +1,28 @@
+{
+  "status": "complete",
+  "pending_reviews": 0,
+  "final_review": "accept",
+  "packet_sha256": "3e2feabf76d9c8a9a01a143512d337b045c00e3af17199ab7c43fba6ff36a73e",
+  "source_drift_at_start": [],
+  "source_drift_before_primary_triage": [],
+  "production_tests_readme_unchanged_after_review": true,
+  "production_matches_final_validation": true,
+  "findings": [
+    {
+      "id": 1,
+      "status": "deferred-optional",
+      "reason": "Fixture fixes the self identity; deriving it from the fixture path would simplify a future rename."
+    },
+    {
+      "id": 2,
+      "status": "regression-premise-rejected",
+      "reason": "Baseline never invoked the nested observer signer; additional SDK observer coverage is optional."
+    },
+    {
+      "id": 3,
+      "status": "placement-claim-rejected-docstring-optional",
+      "reason": "README already follows the list; class help-text enrichment is optional."
+    }
+  ],
+  "committed": false
+}

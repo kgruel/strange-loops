@@ -38,6 +38,7 @@ from sign import ed25519
 
 from sdk import (
     ArrivalRefusal,
+    MappedCredentialProvider,
     add_kind,
     edit_declaration,
     emit_fact,
@@ -686,6 +687,65 @@ def test_sdk_edit_declaration_routes_explicit_arrival_with_public_evidence(
     assert result.file_written is True
     assert result.as_dict()["commit"]["after"]["record_hash"] == result.head["record_hash"]
     json.dumps(result.as_dict(), allow_nan=False)
+
+
+def test_declaration_edit_preserves_absolute_file_location_spelling(
+    tmp_path: Path,
+):
+    """An absolute File location remains the declared spelling across an edit."""
+    real_residence = tmp_path / "real-residence"
+    real_residence.mkdir()
+    alias_residence = tmp_path / "alias-residence"
+    try:
+        alias_residence.symlink_to(real_residence, target_is_directory=True)
+    except OSError as exc:
+        pytest.skip(f"directory symlinks unavailable: {exc}")
+
+    credentials = MappedCredentialProvider(
+        tmp_path / "bindings",
+        namespace="declaration-alias",
+        receipt_observer="alice",
+    )
+    credentials.create_binding("alice", token="alice-binding")
+    target = tmp_path / "alias.vertex"
+    declared_location = alias_residence / "ledger.arrival"
+    assert not declared_location.exists()
+    initialized = init_vertex(
+        target,
+        name="alias",
+        store_type="arrival",
+        location=declared_location,
+        observer="alice",
+        credentials=credentials,
+    )
+    assert initialized.store is not None
+    # Init's result retains its existing resolved File location convention;
+    # the declaration itself retains the exact absolute residence spelling.
+    assert initialized.store.location == str(declared_location.resolve())
+    assert str(declared_location) in target.read_text()
+
+    applied = edit_declaration(
+        target,
+        _edited_text(target),
+        observer="alice",
+        credentials=credentials,
+    )
+    assert applied.status == "applied"
+    assert applied.commit is not None
+    assert applied.store is not None and applied.store.location == str(declared_location)
+
+    before = Path(initialized.store.location).read_bytes()
+    changed_residence = target.read_text().replace(
+        str(declared_location), str(alias_residence / "other.arrival")
+    )
+    with pytest.raises(ArrivalRefusal, match="preserve the descriptor location"):
+        edit_declaration(
+            target,
+            changed_residence,
+            observer="alice",
+            credentials=credentials,
+        )
+    assert Path(initialized.store.location).read_bytes() == before
 
 
 def test_sdk_kind_entrypoint_uses_arrival_coordinator(tmp_path: Path):

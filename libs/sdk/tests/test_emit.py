@@ -1418,3 +1418,30 @@ def test_emit_fact_firing_boundary_populates_tick_fields(tmp_path: Path) -> None
         assert r.stored is True
         assert r.tick_mark == "event"
         assert r.tick_id
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("payload", None),
+        ("payload", 42),
+        ("payload", ["not-a-pair"]),
+        ("ts", "not-a-number"),
+        ("ts", {}),
+        ("ts", 10**400),
+    ],
+)
+def test_batch_mapping_conversion_refuses_before_target_resolution(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, field: str, value: Any,
+) -> None:
+    """A malformed later item is a usage error before any batch can write."""
+    def unexpected_resolution(*args: Any, **kwargs: Any) -> Any:
+        pytest.fail("malformed batch reached target resolution")
+
+    monkeypatch.setattr("sdk.emit._arrival_descriptor", unexpected_resolution)
+    malformed = {"kind": "item", "payload": {}, "observer": "alice", field: value}
+    with pytest.raises(InvalidEmissionRequest, match=f"batch item '{field}'"):
+        emit_batch(
+            tmp_path / "unopened.vertex",
+            [{"kind": "item", "payload": {}, "observer": "alice"}, malformed],
+        )

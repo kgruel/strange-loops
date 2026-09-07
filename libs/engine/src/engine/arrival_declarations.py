@@ -74,6 +74,7 @@ from .declaration import (
     validate_arrival_declaration_anchor,
     validate_arrival_runtime_identity,
 )
+from .residence import canonical_store_path
 
 __all__ = [
     "DeclarationPreparationError",
@@ -660,7 +661,7 @@ def _descriptor_location(target: Path, ast: Any, descriptor: StoreDescriptor) ->
             raise _preparation_refused(
                 "proposed file declaration has no store location"
             )
-        return str((target.parent / str(ast.store)).resolve())
+        return str(canonical_store_path(ast.store, target))
     if ast.store_location is None:
         raise _preparation_refused(
             "proposed non-file declaration has no opaque store location"

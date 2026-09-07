@@ -1,0 +1,7 @@
+All subprocess tests used isolated roots; full-suite invocations used uv --no-sync.
+CLI: XDG_STATE_HOME=/tmp/loops-c9-transition-2026-09-06/validation/cli-state XDG_CONFIG_HOME=/tmp/loops-c9-transition-2026-09-06/validation/cli-config LOOPS_HOME=/tmp/loops-c9-transition-2026-09-06/validation/cli-loops uv run --no-sync --package loops-min pytest apps/loops-min/tests -q
+SDK: XDG_STATE_HOME=/tmp/loops-c9-transition-2026-09-06/validation/sdk-state XDG_CONFIG_HOME=/tmp/loops-c9-transition-2026-09-06/validation/sdk-config LOOPS_HOME=/tmp/loops-c9-transition-2026-09-06/validation/sdk-loops uv run --no-sync --package sdk pytest libs/sdk/tests -q
+ARCH: XDG_STATE_HOME=/tmp/loops-c9-transition-2026-09-06/validation/arch-state XDG_CONFIG_HOME=/tmp/loops-c9-transition-2026-09-06/validation/arch-config LOOPS_HOME=/tmp/loops-c9-transition-2026-09-06/validation/arch-loops uv run --no-sync pytest tests/architecture -q
+RUFF: uv run --no-sync ruff check apps/loops-min/src/loops_min/main.py apps/loops-min/tests/test_cli.py apps/loops-min/tests/test_writer_cli.py
+POST-PATCH CLI: uv run --no-sync --package loops-min pytest apps/loops-min/tests/test_writer_cli.py -q
+POST-PATCH RUFF: uv run --no-sync ruff check apps/loops-min/src/loops_min/main.py apps/loops-min/tests/test_cli.py apps/loops-min/tests/test_writer_cli.py

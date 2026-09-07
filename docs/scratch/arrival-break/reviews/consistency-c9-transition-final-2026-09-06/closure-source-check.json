@@ -1,0 +1,30 @@
+{
+  "checked_at": "2026-09-07T02:48:53.107130+00:00",
+  "all_frozen_sources_match": true,
+  "checks": {
+    "apps/loops-min/src/loops_min/main.py": true,
+    "apps/loops-min/README.md": true,
+    "apps/loops-min/tests/test_cli.py": true,
+    "apps/loops-min/tests/test_writer_cli.py": true,
+    "apps/loops-min/tests/test_writer_boundary.py": true,
+    "docs/scratch/arrival-break/consistency-c9-transition-2026-09-06.md": true,
+    "libs/sdk/src/sdk/emit.py": true,
+    "libs/sdk/src/sdk/errors.py": true,
+    "libs/engine/src/engine/credentials.py": true,
+    "docs/scratch/arrival-break/reviews/consistency-c9-transition-final-2026-09-06/validation-evidence/cli-final.txt": true,
+    "docs/scratch/arrival-break/reviews/consistency-c9-transition-final-2026-09-06/validation-evidence/engine-declaration.txt": true,
+    "docs/scratch/arrival-break/reviews/consistency-c9-transition-final-2026-09-06/validation-evidence/sdk-full.txt": true,
+    "docs/scratch/arrival-break/reviews/consistency-c9-transition-final-2026-09-06/validation-evidence/architecture-full.txt": true,
+    "docs/scratch/arrival-break/reviews/consistency-c9-transition-final-2026-09-06/validation-evidence/ruff-app.txt": true,
+    "docs/scratch/arrival-break/reviews/consistency-c9-transition-final-2026-09-06/validation-evidence/wheel-status.json": true,
+    "libs/sdk/src/sdk/target.py": true,
+    "libs/sdk/src/sdk/declare.py": true,
+    "libs/engine/src/engine/arrival_declarations.py": true,
+    "libs/engine/src/engine/arrival_registry.py": true,
+    "libs/engine/src/engine/residence.py": true,
+    "libs/custody/src/custody/binding.py": true,
+    "libs/engine/src/engine/runtime_write.py": true,
+    "libs/sdk/tests/test_arrival_declarations.py": true,
+    "libs/sdk/tests/test_emit.py": true
+  }
+}

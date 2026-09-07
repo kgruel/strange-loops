@@ -74,6 +74,8 @@ def _ledger_path(vertex: Path) -> Path:
 def _run(vertex: Path, *args: str, state_home: Path) -> subprocess.CompletedProcess[str]:
     environment = os.environ.copy()
     environment["XDG_STATE_HOME"] = str(state_home)
+    environment["XDG_CONFIG_HOME"] = str(state_home.parent / "config")
+    environment["LOOPS_HOME"] = str(state_home.parent / "loops")
     prefix: list[str] = []
     if args and args[0] == "--pretty":
         prefix.append(args[0])
@@ -237,8 +239,10 @@ def test_sdk_refusal_and_unavailable_operation_have_stable_json_status(tmp_path:
     init_target = tmp_path / "would-be.vertex"
     environment = os.environ.copy()
     environment["XDG_STATE_HOME"] = str(state_home)
+    environment["XDG_CONFIG_HOME"] = str(state_home.parent / "config")
+    environment["LOOPS_HOME"] = str(state_home.parent / "loops")
     init = subprocess.run(
-        [sys.executable, "-m", "loops_min", "init", str(init_target)],
+        [sys.executable, "-m", "loops_min", "replicate", str(init_target)],
         capture_output=True,
         text=True,
         env=environment,
@@ -249,8 +253,8 @@ def test_sdk_refusal_and_unavailable_operation_have_stable_json_status(tmp_path:
         "ok": False,
         "error": {
             "type": "Unavailable",
-            "message": "init is unavailable until its Arrival SDK operation exists",
-            "details": {"operation": "init"},
+            "message": "replicate is unavailable until its Arrival SDK operation exists",
+            "details": {"operation": "replicate"},
         },
     }
     assert not init_target.exists()
@@ -340,14 +344,18 @@ def test_arrival_corruption_rollback_and_projection_behind_are_typed_refusals(
     corrupt_log.write_text("\n".join(corrupt_rows) + "\n", encoding="utf-8")
     corrupt = _run(corrupt_vertex, "summary", state_home=tmp_path / "corrupt-xdg")
     assert corrupt.returncode == 4
-    assert json.loads(corrupt.stdout)["error"] == {
-        "schema": "loops.sdk/error/v1",
-        "type": "ArrivalRefusal",
-        "message": "arrival log corrupt at ordinal -1: rh does not recompute — the record's bytes have changed",
-        "source_type": "ArrivalCorrupt",
-        "outcome": "refused",
-        "details": {"ordinal": -1, "source_type": "ArrivalCorrupt"},
-    }
+    corrupt_error = json.loads(corrupt.stdout)["error"]
+    assert corrupt_error["schema"] == "loops.sdk/error/v1"
+    assert corrupt_error["type"] == "ArrivalRefusal"
+    assert corrupt_error["message"] == (
+        "arrival log corrupt at ordinal -1: rh does not recompute — "
+        "the record's bytes have changed"
+    )
+    assert corrupt_error["source_type"] == "ArrivalCorrupt"
+    assert corrupt_error["outcome"] == "refused"
+    assert corrupt_error["details"]["ordinal"] == -1
+    assert corrupt_error["details"]["source_type"] == "ArrivalCorrupt"
+    assert corrupt_error["details"]["evidence"]["schema"] == "loops.sdk/evidence/v1"
 
     rollback_vertex, _fact_id = _fixture(tmp_path / "rollback")
     rollback_log = _ledger_path(rollback_vertex)

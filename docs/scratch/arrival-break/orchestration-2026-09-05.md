@@ -1,3 +1,58 @@
+## September 6: C9 first writer transition complete; setup/recovery next
+
+Checkpoint `f45f1f03` contains the accepted captured-transfer SDK workload.
+This subsequent C9 slice is complete on `arrival/finish` in
+`loops-wt/arrival-finish`, based on that checkpoint, and is included in this
+checkpoint; nothing pushed. Sol implemented the client and boundary tests, Luna added
+process conformance and validated suites, Terra inventoried authority paths
+and fixed the residence mismatch, and root integrated SDK input normalization,
+wheel validation and review triage.
+
+`loops-min` now exposes `init`, `emit`, `emit-batch`, `declaration`, and
+`declaration-recover`. Writers require explicit mapped credential root,
+namespace and receipt observer. Init forces Arrival File; emission uses public
+SDK descriptor classification and one SDK write. The mapped SDK guard prevents
+legacy fallback even after a descriptor replacement. The precheck does not pin
+a different valid Arrival descriptor across the later SDK parse; no stronger
+identity continuity is claimed. Recovery accepts an intent without credentials.
+Strict JSON and finite CLI timestamps are transport validation; semantic input,
+admission, signing, custody outcomes and serialization stay in the SDK.
+
+Two real integration failures were corrected: SDK batch mapping conversions
+now report InvalidEmissionRequest before target resolution instead of raw
+Python errors; declaration residence comparison uses the same File-location
+rule as descriptor construction, allowing unchanged absolute symlink paths.
+Relative and opaque residence behavior remains as defined by those resolvers.
+
+Mapped selection does not impose mandatory signatures. A missing optional
+binding can produce an unsigned observation without minting keys; a present
+unauthorized key refuses against captured authorization. Mapped init requires
+a founding binding. Tests distinguish these cases and retain exact Commit,
+complete read rows, projection heads and committed/unknown error evidence.
+Boundary injection tests are not subprocess-crash claims; the prior SDK
+conformance provides actual declaration interruption/recovery coverage.
+
+Validation: final CLI **20 passed** /7.45s, full SDK **590 passed** /32.93s,
+architecture **101 passed** /7.83s, engine declaration custody **14 passed**
+/0.15s. Scoped Ruff and whitespace pass. A fresh modular-wheel installation
+without legacy loops or Painted passes init → emit → declaration → read →
+verify outside the checkout. Exact source hashes and native logs are archived
+without fixture stores or keys. Fable 5.1 LOW and primary verdicts: **ACCEPT**, no blockers. Frozen sources
+matched at closure; afterward only optional documentation clarifications and
+maintained status/handoff changed. No jobs remain.
+
+See the [C9 report](consistency-c9-transition-2026-09-06.md) and its authority
+inventory. **C9 retirement remains open:** no legacy runtime path was deleted.
+Next bounded work is process initialization recovery and SDK-owned serializable
+credential-lifecycle outcomes before adding binding commands. Source execution
+is the next larger caller transition. Inventory named old-command consumers
+before removing wrappers/entry points, generic legacy SDK arms, suffix paths
+or JsonlStore; reanchor has no Arrival successor and is slated for removal.
+Projection rebuild, empty-receiver import, foreign admission, descriptor
+adoption and live migration remain separate. No next slice began here.
+
+Earlier entries below preserve their status at the time of writing.
+
 ## September 6: captured transfer conformance complete; C9 transition next
 
 The fourth agreed public SDK workload-conformance slice is complete on

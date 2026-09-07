@@ -18,11 +18,16 @@ from sdk import (
     CeremonyFailed,
     CommittedEmissionError,
     EmissionFailed,
+    MappedCredentialProvider,
     SdkError,
     SdkValueError,
     TargetError,
     TargetUnsupported,
+    edit_declaration,
+    emit_batch,
+    emit_fact,
     export_target,
+    init_vertex,
     inspect_declaration,
     read_fact_by_id,
     read_facts,
@@ -30,6 +35,7 @@ from sdk import (
     read_summary,
     read_ticks,
     read_timeline,
+    recover_declaration,
     resolve_arrival_target,
     resolve_entity,
     restore_forward,
@@ -69,6 +75,18 @@ class UsageError(Exception):
 class _ArgumentParser(argparse.ArgumentParser):
     def error(self, message: str) -> None:
         raise UsageError(message)
+
+
+def _finite_float(raw: str) -> float:
+    try:
+        value = float(raw)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
+    try:
+        json.dumps(value, allow_nan=False)
+    except ValueError:
+        raise argparse.ArgumentTypeError("expected a finite number")
+    return value
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -125,16 +143,51 @@ def _parser() -> argparse.ArgumentParser:
     restore = target_command("restore-forward", "restore an existing exact Arrival copy")
     restore.add_argument("receiver", help="receiver descriptor target")
 
+    def mapped_credentials(sub: argparse.ArgumentParser) -> None:
+        sub.add_argument("--credential-root", required=True)
+        sub.add_argument("--credential-namespace", required=True)
+        sub.add_argument("--receipt-observer", required=True)
+
+    init = target_command("init", "initialize a mapped Arrival file target")
+    init.add_argument("--name")
+    init.add_argument("--location", required=True)
+    init.add_argument("--observer", required=True)
+    init.add_argument("--strict", action="store_true")
+    mapped_credentials(init)
+
+    emit = target_command("emit", "emit one fact through the Arrival SDK")
+    emit.add_argument("kind")
+    emit.add_argument("--payload-json", required=True)
+    emit.add_argument("--observer", required=True)
+    emit.add_argument("--origin", default="")
+    emit.add_argument("--ts", type=_finite_float)
+    emit.add_argument("--id", dest="id_override")
+    mapped_credentials(emit)
+
+    batch = target_command("emit-batch", "atomically emit a fact batch through the SDK")
+    batch.add_argument("--facts-json", required=True)
+    mapped_credentials(batch)
+
+    declaration = target_command("declaration", "apply one Arrival declaration edit")
+    declaration.add_argument("--proposed-file", required=True)
+    declaration.add_argument("--observer", required=True)
+    mapped_credentials(declaration)
+
+    recovery = commands.add_parser(
+        "declaration-recover",
+        help="recover one interrupted Arrival declaration edit intent",
+    )
+    recovery.add_argument("intent")
+    recovery.add_argument(
+        "--pretty", action="store_true", default=argparse.SUPPRESS, help=argparse.SUPPRESS
+    )
+
     # These names are reserved for the Arrival SDK contracts that are still
     # being implemented. Keeping them in help makes the process boundary
     # discoverable without routing them through legacy writer code.
     for name, help_text in (
-        ("init", "initialize an Arrival target (SDK operation pending)"),
-        ("emit", "emit a fact (Arrival SDK operation pending)"),
-        ("emit-batch", "emit a batch (Arrival SDK operation pending)"),
         ("replicate", "replicate an exact prefix (SDK operation pending)"),
         ("admit", "admit records into an authority (SDK operation pending)"),
-        ("declaration", "edit a declaration (Arrival SDK operation pending)"),
     ):
         target_command(name, help_text)
 
@@ -151,8 +204,100 @@ def _as_dict(result: Any) -> dict[str, Any]:
     return value
 
 
+def _json_argument(raw: str, *, name: str, shape: type) -> Any:
+    def object_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        value: dict[str, Any] = {}
+        for key, item in pairs:
+            if key in value:
+                raise UsageError(f"{name} contains duplicate key {key!r}")
+            value[key] = item
+        return value
+
+    def nonfinite(value: str) -> None:
+        raise UsageError(f"{name} contains non-finite number {value!r}")
+
+    try:
+        value = json.loads(raw, object_pairs_hook=object_pairs, parse_constant=nonfinite)
+        # JSON exponent overflow (for example 1e999) is not passed through
+        # parse_constant, so validate the decoded transport once more.
+        json.dumps(value, allow_nan=False)
+    except UsageError:
+        raise
+    except (TypeError, ValueError) as exc:
+        raise UsageError(f"{name} is not valid finite JSON: {exc}") from exc
+    if not isinstance(value, shape):
+        expected = "object" if shape is dict else "array"
+        raise UsageError(f"{name} must be a JSON {expected}")
+    return value
+
+
+def _credentials(args: argparse.Namespace) -> MappedCredentialProvider:
+    return MappedCredentialProvider(
+        args.credential_root,
+        namespace=args.credential_namespace,
+        receipt_observer=args.receipt_observer,
+    )
+
+
+def _require_arrival_target(target: str) -> None:
+    # This is an SDK classification gate, not a second CLI target resolver.
+    # The writer repeats descriptor resolution under its own captured contract.
+    resolve_arrival_target(target)
+
+
 def _dispatch(args: argparse.Namespace) -> dict[str, Any]:
     command = args.command
+    if command == "init":
+        return _as_dict(
+            init_vertex(
+                args.target,
+                name=args.name,
+                store_type="arrival",
+                backend="file",
+                location=args.location,
+                observer=args.observer,
+                strict=args.strict,
+                credentials=_credentials(args),
+            )
+        )
+    if command == "emit":
+        payload = _json_argument(args.payload_json, name="--payload-json", shape=dict)
+        _require_arrival_target(args.target)
+        return _as_dict(
+            emit_fact(
+                args.target,
+                args.kind,
+                payload,
+                observer=args.observer,
+                origin=args.origin,
+                ts=args.ts,
+                id_override=args.id_override,
+                credentials=_credentials(args),
+            )
+        )
+    if command == "emit-batch":
+        facts = _json_argument(args.facts_json, name="--facts-json", shape=list)
+        if not all(isinstance(item, dict) for item in facts):
+            raise UsageError("--facts-json must contain only JSON objects")
+        _require_arrival_target(args.target)
+        return _as_dict(emit_batch(args.target, facts, credentials=_credentials(args)))
+    if command == "declaration":
+        try:
+            with open(args.proposed_file, encoding="utf-8") as stream:
+                proposed_text = stream.read()
+        except (OSError, UnicodeError) as exc:
+            raise UsageError(f"cannot read --proposed-file: {exc}") from exc
+        _require_arrival_target(args.target)
+        return _as_dict(
+            edit_declaration(
+                args.target,
+                proposed_text,
+                observer=args.observer,
+                credentials=_credentials(args),
+            )
+        )
+    if command == "declaration-recover":
+        return _as_dict(recover_declaration(args.intent))
     if command == "target":
         return _as_dict(resolve_arrival_target(args.target))
     if command == "inspect":

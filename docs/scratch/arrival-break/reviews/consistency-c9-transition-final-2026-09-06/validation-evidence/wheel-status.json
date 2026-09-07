@@ -1,0 +1,10 @@
+{
+  "status": "PASS",
+  "installed_source_hashes": {
+    "apps/loops-min/src/loops_min/main.py": "992422239d44deca651aebdd0b2f134143a65caa99a7c5bd0aad80492d35b7a1",
+    "libs/sdk/src/sdk/emit.py": "29779cdb0b805d24f6689e129236beed5bfb908a412319baaa1acc47ec34a0ce",
+    "libs/engine/src/engine/arrival_declarations.py": "3caf30f5a3c249586cba05ea03a9b6b9efc0c259f17d465e1b8ecfca091a15f1"
+  },
+  "harness_correction": "Initial module-origin assertion resolved __file__ but not sys.prefix on macOS; resolved both, then passed. No product changes or artifact creation before first assertion failure.",
+  "scope": "Separate modular dependency wheels installed in fresh venv; SDK credential setup; console init,emit,declaration,facts,verify from outside checkout; no loops or painted installed."
+}

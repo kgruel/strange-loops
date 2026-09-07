@@ -1,0 +1,1109 @@
+diff --git a/apps/loops-min/README.md b/apps/loops-min/README.md
+index 7b171fbe..ad127536 100644
+--- a/apps/loops-min/README.md
++++ b/apps/loops-min/README.md
+@@ -2,8 +2,49 @@
+ 
+ `loops-min` is the transitional JSON process client for the headless `sdk`
+ package. It provides descriptor/read operations, verification, projection and
+-search maintenance, exact export, and explicit restore-forward. Other custody
+-writers and empty-receiver import remain pending the final SDK cutover.
++search maintenance, exact export, explicit restore-forward, and a mapped-only
++Arrival writer surface. Empty-receiver import, admission, a generic replicate
++command, and legacy writer retirement remain later work.
++
++Writer commands require all of `--credential-root`, `--credential-namespace`,
++and `--receipt-observer`. They never select locator-derived credentials or fall
++back to a legacy writer or create keys. The founding binding must be
++pre-provisioned for `init`; pre-provision every author and receipt binding used
++by a signed workflow. Selecting the mapped provider does not make every domain
++mandatory: an absent optional signer retains the SDK's unsigned behavior under
++the captured declaration and signed-era rules. Callers should inspect each
++result's `signed` and `witnessed` evidence. Create or import bindings explicitly
++with the SDK's `MappedCredentialProvider`. For example,
++`MappedCredentialProvider(root, namespace="tenant",
++receipt_observer="alice").create_binding("alice", token="setup-alice")`
++prepares the founding binding used by `init`.
++
++`init` always requests an Arrival file target and never uses `init_vertex`'s
++legacy default. A minimal lifecycle is:
++
++```text
++loops-min init app.vertex --name app --location /data/app.arrival \
++  --observer alice --credential-root /keys --credential-namespace tenant \
++  --receipt-observer alice --strict
++loops-min emit app.vertex item --payload-json '{"value":1}' --observer alice \
++  --credential-root /keys --credential-namespace tenant --receipt-observer alice
++loops-min emit-batch app.vertex --facts-json '[{"kind":"item","payload":{"value":2},"observer":"alice","id":"item-2"}]' \
++  --credential-root /keys --credential-namespace tenant --receipt-observer alice
++```
++
++`emit` requires a JSON object payload. `emit-batch` requires an array of JSON
++objects and preserves each item's explicit observer, ID, timestamp, origin,
++and admission choice. Transport JSON rejects duplicate keys and non-finite
++numbers before credential resolution. The client does not retry unknown
++outcomes; stable IDs and the SDK's returned evidence are the reconciliation
++boundary.
++
++`declaration target.vertex --proposed-file next.vertex --observer alice ...`
++passes the file's text to the SDK's captured declaration-edit protocol. If an
++edit reports an intent after a durable interruption,
++`declaration-recover INTENT` resumes it without resolving credentials again.
++Initialization recovery and credential creation are not CLI commands in this
++slice.
+ 
+ `loops-min export target.vertex captured.jsonl` publishes a complete captured
+ wire prefix at a new pathname and returns the SDK manifest in its JSON result.
+@@ -22,6 +63,14 @@ on stderr. Result objects are serialized with the SDK model's `as_dict()`;
+ continuation capabilities remain process-local and are reported without a
+ fake cursor token.
+ 
++Exit status 2 covers argument, transport JSON, and local input-file errors; 3
++means a recognized unsupported operation or target; 4 is a target, custody,
++projection, publication, or contract refusal/outcome; 5 is admission or
++ceremony refusal; and 6 means custody committed or may have committed. Status
++4 does not by itself prove zero derived or publication effects. Status 6 is
++not permission to retry: the JSON error retains commit, IDs, intent, and
++outcome evidence supplied by the SDK.
++
+ The executable is deliberately named `loops-min` while the legacy `loops`
+ application remains in the workspace. It has no presentation, storage, or
+ legacy CLI dependency.
+diff --git a/apps/loops-min/src/loops_min/main.py b/apps/loops-min/src/loops_min/main.py
+index 5f17b2ec..0abdf26e 100644
+--- a/apps/loops-min/src/loops_min/main.py
++++ b/apps/loops-min/src/loops_min/main.py
+@@ -18,11 +18,16 @@ from sdk import (
+     CeremonyFailed,
+     CommittedEmissionError,
+     EmissionFailed,
++    MappedCredentialProvider,
+     SdkError,
+     SdkValueError,
+     TargetError,
+     TargetUnsupported,
++    edit_declaration,
++    emit_batch,
++    emit_fact,
+     export_target,
++    init_vertex,
+     inspect_declaration,
+     read_fact_by_id,
+     read_facts,
+@@ -30,6 +35,7 @@ from sdk import (
+     read_summary,
+     read_ticks,
+     read_timeline,
++    recover_declaration,
+     resolve_arrival_target,
+     resolve_entity,
+     restore_forward,
+@@ -71,6 +77,18 @@ class _ArgumentParser(argparse.ArgumentParser):
+         raise UsageError(message)
+ 
+ 
++def _finite_float(raw: str) -> float:
++    try:
++        value = float(raw)
++    except ValueError as exc:
++        raise argparse.ArgumentTypeError(str(exc)) from exc
++    try:
++        json.dumps(value, allow_nan=False)
++    except ValueError:
++        raise argparse.ArgumentTypeError("expected a finite number")
++    return value
++
++
+ def _parser() -> argparse.ArgumentParser:
+     parser = _ArgumentParser(
+         prog="loops-min",
+@@ -125,16 +143,51 @@ def _parser() -> argparse.ArgumentParser:
+     restore = target_command("restore-forward", "restore an existing exact Arrival copy")
+     restore.add_argument("receiver", help="receiver descriptor target")
+ 
++    def mapped_credentials(sub: argparse.ArgumentParser) -> None:
++        sub.add_argument("--credential-root", required=True)
++        sub.add_argument("--credential-namespace", required=True)
++        sub.add_argument("--receipt-observer", required=True)
++
++    init = target_command("init", "initialize a mapped Arrival file target")
++    init.add_argument("--name")
++    init.add_argument("--location", required=True)
++    init.add_argument("--observer", required=True)
++    init.add_argument("--strict", action="store_true")
++    mapped_credentials(init)
++
++    emit = target_command("emit", "emit one fact through the Arrival SDK")
++    emit.add_argument("kind")
++    emit.add_argument("--payload-json", required=True)
++    emit.add_argument("--observer", required=True)
++    emit.add_argument("--origin", default="")
++    emit.add_argument("--ts", type=_finite_float)
++    emit.add_argument("--id", dest="id_override")
++    mapped_credentials(emit)
++
++    batch = target_command("emit-batch", "atomically emit a fact batch through the SDK")
++    batch.add_argument("--facts-json", required=True)
++    mapped_credentials(batch)
++
++    declaration = target_command("declaration", "apply one Arrival declaration edit")
++    declaration.add_argument("--proposed-file", required=True)
++    declaration.add_argument("--observer", required=True)
++    mapped_credentials(declaration)
++
++    recovery = commands.add_parser(
++        "declaration-recover",
++        help="recover one interrupted Arrival declaration edit intent",
++    )
++    recovery.add_argument("intent")
++    recovery.add_argument(
++        "--pretty", action="store_true", default=argparse.SUPPRESS, help=argparse.SUPPRESS
++    )
++
+     # These names are reserved for the Arrival SDK contracts that are still
+     # being implemented. Keeping them in help makes the process boundary
+     # discoverable without routing them through legacy writer code.
+     for name, help_text in (
+-        ("init", "initialize an Arrival target (SDK operation pending)"),
+-        ("emit", "emit a fact (Arrival SDK operation pending)"),
+-        ("emit-batch", "emit a batch (Arrival SDK operation pending)"),
+         ("replicate", "replicate an exact prefix (SDK operation pending)"),
+         ("admit", "admit records into an authority (SDK operation pending)"),
+-        ("declaration", "edit a declaration (Arrival SDK operation pending)"),
+     ):
+         target_command(name, help_text)
+ 
+@@ -151,8 +204,100 @@ def _as_dict(result: Any) -> dict[str, Any]:
+     return value
+ 
+ 
++def _json_argument(raw: str, *, name: str, shape: type) -> Any:
++    def object_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
++        value: dict[str, Any] = {}
++        for key, item in pairs:
++            if key in value:
++                raise UsageError(f"{name} contains duplicate key {key!r}")
++            value[key] = item
++        return value
++
++    def nonfinite(value: str) -> None:
++        raise UsageError(f"{name} contains non-finite number {value!r}")
++
++    try:
++        value = json.loads(raw, object_pairs_hook=object_pairs, parse_constant=nonfinite)
++        # JSON exponent overflow (for example 1e999) is not passed through
++        # parse_constant, so validate the decoded transport once more.
++        json.dumps(value, allow_nan=False)
++    except UsageError:
++        raise
++    except (TypeError, ValueError) as exc:
++        raise UsageError(f"{name} is not valid finite JSON: {exc}") from exc
++    if not isinstance(value, shape):
++        expected = "object" if shape is dict else "array"
++        raise UsageError(f"{name} must be a JSON {expected}")
++    return value
++
++
++def _credentials(args: argparse.Namespace) -> MappedCredentialProvider:
++    return MappedCredentialProvider(
++        args.credential_root,
++        namespace=args.credential_namespace,
++        receipt_observer=args.receipt_observer,
++    )
++
++
++def _require_arrival_target(target: str) -> None:
++    # This is an SDK classification gate, not a second CLI target resolver.
++    # The writer repeats descriptor resolution under its own captured contract.
++    resolve_arrival_target(target)
++
++
+ def _dispatch(args: argparse.Namespace) -> dict[str, Any]:
+     command = args.command
++    if command == "init":
++        return _as_dict(
++            init_vertex(
++                args.target,
++                name=args.name,
++                store_type="arrival",
++                backend="file",
++                location=args.location,
++                observer=args.observer,
++                strict=args.strict,
++                credentials=_credentials(args),
++            )
++        )
++    if command == "emit":
++        payload = _json_argument(args.payload_json, name="--payload-json", shape=dict)
++        _require_arrival_target(args.target)
++        return _as_dict(
++            emit_fact(
++                args.target,
++                args.kind,
++                payload,
++                observer=args.observer,
++                origin=args.origin,
++                ts=args.ts,
++                id_override=args.id_override,
++                credentials=_credentials(args),
++            )
++        )
++    if command == "emit-batch":
++        facts = _json_argument(args.facts_json, name="--facts-json", shape=list)
++        if not all(isinstance(item, dict) for item in facts):
++            raise UsageError("--facts-json must contain only JSON objects")
++        _require_arrival_target(args.target)
++        return _as_dict(emit_batch(args.target, facts, credentials=_credentials(args)))
++    if command == "declaration":
++        try:
++            with open(args.proposed_file, encoding="utf-8") as stream:
++                proposed_text = stream.read()
++        except (OSError, UnicodeError) as exc:
++            raise UsageError(f"cannot read --proposed-file: {exc}") from exc
++        _require_arrival_target(args.target)
++        return _as_dict(
++            edit_declaration(
++                args.target,
++                proposed_text,
++                observer=args.observer,
++                credentials=_credentials(args),
++            )
++        )
++    if command == "declaration-recover":
++        return _as_dict(recover_declaration(args.intent))
+     if command == "target":
+         return _as_dict(resolve_arrival_target(args.target))
+     if command == "inspect":
+diff --git a/apps/loops-min/tests/test_cli.py b/apps/loops-min/tests/test_cli.py
+index cf9c389b..5cf8bc0f 100644
+--- a/apps/loops-min/tests/test_cli.py
++++ b/apps/loops-min/tests/test_cli.py
+@@ -74,6 +74,8 @@ def _ledger_path(vertex: Path) -> Path:
+ def _run(vertex: Path, *args: str, state_home: Path) -> subprocess.CompletedProcess[str]:
+     environment = os.environ.copy()
+     environment["XDG_STATE_HOME"] = str(state_home)
++    environment["XDG_CONFIG_HOME"] = str(state_home.parent / "config")
++    environment["LOOPS_HOME"] = str(state_home.parent / "loops")
+     prefix: list[str] = []
+     if args and args[0] == "--pretty":
+         prefix.append(args[0])
+@@ -237,8 +239,10 @@ def test_sdk_refusal_and_unavailable_operation_have_stable_json_status(tmp_path:
+     init_target = tmp_path / "would-be.vertex"
+     environment = os.environ.copy()
+     environment["XDG_STATE_HOME"] = str(state_home)
++    environment["XDG_CONFIG_HOME"] = str(state_home.parent / "config")
++    environment["LOOPS_HOME"] = str(state_home.parent / "loops")
+     init = subprocess.run(
+-        [sys.executable, "-m", "loops_min", "init", str(init_target)],
++        [sys.executable, "-m", "loops_min", "replicate", str(init_target)],
+         capture_output=True,
+         text=True,
+         env=environment,
+@@ -249,8 +253,8 @@ def test_sdk_refusal_and_unavailable_operation_have_stable_json_status(tmp_path:
+         "ok": False,
+         "error": {
+             "type": "Unavailable",
+-            "message": "init is unavailable until its Arrival SDK operation exists",
+-            "details": {"operation": "init"},
++            "message": "replicate is unavailable until its Arrival SDK operation exists",
++            "details": {"operation": "replicate"},
+         },
+     }
+     assert not init_target.exists()
+@@ -340,14 +344,18 @@ def test_arrival_corruption_rollback_and_projection_behind_are_typed_refusals(
+     corrupt_log.write_text("\n".join(corrupt_rows) + "\n", encoding="utf-8")
+     corrupt = _run(corrupt_vertex, "summary", state_home=tmp_path / "corrupt-xdg")
+     assert corrupt.returncode == 4
+-    assert json.loads(corrupt.stdout)["error"] == {
+-        "schema": "loops.sdk/error/v1",
+-        "type": "ArrivalRefusal",
+-        "message": "arrival log corrupt at ordinal -1: rh does not recompute — the record's bytes have changed",
+-        "source_type": "ArrivalCorrupt",
+-        "outcome": "refused",
+-        "details": {"ordinal": -1, "source_type": "ArrivalCorrupt"},
+-    }
++    corrupt_error = json.loads(corrupt.stdout)["error"]
++    assert corrupt_error["schema"] == "loops.sdk/error/v1"
++    assert corrupt_error["type"] == "ArrivalRefusal"
++    assert corrupt_error["message"] == (
++        "arrival log corrupt at ordinal -1: rh does not recompute — "
++        "the record's bytes have changed"
++    )
++    assert corrupt_error["source_type"] == "ArrivalCorrupt"
++    assert corrupt_error["outcome"] == "refused"
++    assert corrupt_error["details"]["ordinal"] == -1
++    assert corrupt_error["details"]["source_type"] == "ArrivalCorrupt"
++    assert corrupt_error["details"]["evidence"]["schema"] == "loops.sdk/evidence/v1"
+ 
+     rollback_vertex, _fact_id = _fixture(tmp_path / "rollback")
+     rollback_log = _ledger_path(rollback_vertex)
+diff --git a/apps/loops-min/tests/test_writer_boundary.py b/apps/loops-min/tests/test_writer_boundary.py
+new file mode 100644
+index 00000000..be895245
+--- /dev/null
++++ b/apps/loops-min/tests/test_writer_boundary.py
+@@ -0,0 +1,159 @@
++"""Narrow process-boundary regressions for the mapped writer commands."""
++
++from __future__ import annotations
++
++import importlib
++import json
++from pathlib import Path
++from typing import Any
++
++import pytest
++from sdk import MappedCredentialProvider, init_vertex
++
++cli = importlib.import_module("loops_min.main")
++
++
++@pytest.fixture(autouse=True)
++def _isolated_process_roots(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
++    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
++    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
++    monkeypatch.setenv("LOOPS_HOME", str(tmp_path / "loops-home"))
++
++
++def _credentials(root: Path) -> list[str]:
++    return [
++        "--credential-root",
++        str(root),
++        "--credential-namespace",
++        "tenant",
++        "--receipt-observer",
++        "alice",
++    ]
++
++
++@pytest.mark.parametrize(
++    "transport",
++    [
++        ("--payload-json", '{"a":1,"a":2}'),
++        ("--payload-json", '{"a":NaN}'),
++        ("--payload-json", '{"a":1e999}'),
++        ("--ts", "nan"),
++        ("--ts", "inf"),
++    ],
++)
++def test_invalid_numeric_or_duplicate_transport_stops_before_sdk_write(
++    tmp_path: Path,
++    monkeypatch: pytest.MonkeyPatch,
++    capsys: pytest.CaptureFixture[str],
++    transport: tuple[str, str],
++) -> None:
++    reached: list[str] = []
++
++    def resolver(*_args: Any, **_kwargs: Any) -> None:
++        reached.append("resolve")
++
++    def writer(*_args: Any, **_kwargs: Any) -> None:
++        reached.append("write")
++
++    monkeypatch.setattr(cli, "resolve_arrival_target", resolver)
++    monkeypatch.setattr(cli, "emit_fact", writer)
++    arguments = [
++        "emit",
++        str(tmp_path / "unused.vertex"),
++        "item",
++        "--payload-json",
++        "{}",
++        "--observer",
++        "alice",
++        *_credentials(tmp_path / "custody"),
++    ]
++    option, value = transport
++    if option == "--payload-json":
++        arguments[arguments.index(option) + 1] = value
++    else:
++        arguments.extend((option, value))
++
++    assert cli.main(arguments) == cli.EXIT_USAGE
++    output = json.loads(capsys.readouterr().out)
++    assert output["ok"] is False
++    assert output["error"]["type"] == "UsageError"
++    assert reached == []
++    assert not (tmp_path / "custody").exists()
++
++
++def test_declaration_recovery_passes_only_intent_and_serializes_sdk_result(
++    tmp_path: Path,
++    monkeypatch: pytest.MonkeyPatch,
++    capsys: pytest.CaptureFixture[str],
++) -> None:
++    intent = tmp_path / "pending.intent"
++    expected = {
++        "schema": "loops.sdk/declaration-edit/v2",
++        "status": "recovered",
++        "intent_path": str(intent),
++        "commit": None,
++    }
++    calls: list[str] = []
++
++    class Result:
++        def as_dict(self) -> dict[str, Any]:
++            return expected
++
++    def recover(value: str) -> Result:
++        calls.append(value)
++        return Result()
++
++    monkeypatch.setattr(cli, "recover_declaration", recover)
++    assert cli.main(["declaration-recover", str(intent)]) == cli.EXIT_OK
++    output = json.loads(capsys.readouterr().out)
++    assert output == {"ok": True, "result": expected}
++    assert calls == [str(intent)]
++
++
++def test_descriptor_swap_to_legacy_cannot_downgrade_mapped_emit(
++    tmp_path: Path,
++    monkeypatch: pytest.MonkeyPatch,
++    capsys: pytest.CaptureFixture[str],
++) -> None:
++    custody = tmp_path / "custody"
++    provider = MappedCredentialProvider(
++        custody, namespace="tenant", receipt_observer="alice"
++    )
++    provider.create_binding("alice", token="create-alice")
++    target = tmp_path / "arrival.vertex"
++    ledger = (tmp_path / "arrival.arrival").resolve()
++    init_vertex(
++        target,
++        name="arrival",
++        store_type="arrival",
++        location=ledger,
++        observer="alice",
++        credentials=provider,
++    )
++    ledger_before = ledger.read_bytes()
++    original_resolver = cli.resolve_arrival_target
++
++    def resolve_then_replace(value: str) -> Any:
++        resolved = original_resolver(value)
++        target.write_text('name "legacy"\nstore "legacy.db"\n', encoding="utf-8")
++        return resolved
++
++    monkeypatch.setattr(cli, "resolve_arrival_target", resolve_then_replace)
++    result = cli.main(
++        [
++            "emit",
++            str(target),
++            "item",
++            "--payload-json",
++            '{"must":"refuse"}',
++            "--observer",
++            "alice",
++            *_credentials(custody),
++        ]
++    )
++    output = json.loads(capsys.readouterr().out)
++    assert result == cli.EXIT_UNSUPPORTED
++    assert output["ok"] is False
++    assert output["error"]["type"] == "TargetUnsupported"
++    assert ledger.read_bytes() == ledger_before
++    assert not (tmp_path / "legacy.db").exists()
+diff --git a/apps/loops-min/tests/test_writer_cli.py b/apps/loops-min/tests/test_writer_cli.py
+new file mode 100644
+index 00000000..02a1c331
+--- /dev/null
++++ b/apps/loops-min/tests/test_writer_cli.py
+@@ -0,0 +1,426 @@
++"""Process-boundary acceptance tests for the mapped Arrival writer commands."""
++
++from __future__ import annotations
++
++import importlib
++import json
++import os
++import subprocess
++import sys
++from pathlib import Path
++
++import pytest
++from sdk import MappedCredentialProvider, init_vertex
++from sdk.errors import CommittedOutcomeUnknown, CommittedProjectionFailed
++
++
++@pytest.fixture(autouse=True)
++def _isolated_parent_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
++    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
++    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
++    monkeypatch.setenv("LOOPS_HOME", str(tmp_path / "loops"))
++
++
++def _environment(tmp_path: Path) -> dict[str, str]:
++    environment = os.environ.copy()
++    environment.update(
++        {
++            "XDG_STATE_HOME": str(tmp_path / "state"),
++            "XDG_CONFIG_HOME": str(tmp_path / "config"),
++            "LOOPS_HOME": str(tmp_path / "loops"),
++        }
++    )
++    return environment
++
++
++def _run(
++    tmp_path: Path, command: str, target: Path, *arguments: str
++) -> subprocess.CompletedProcess[str]:
++    return subprocess.run(
++        [sys.executable, "-m", "loops_min", command, str(target), *arguments],
++        capture_output=True,
++        text=True,
++        env=_environment(tmp_path),
++        check=False,
++    )
++
++
++def _json(process: subprocess.CompletedProcess[str]) -> dict:
++    assert process.stdout, process.stderr
++    return json.loads(process.stdout)
++
++
++def _credentials(root: Path, *, namespace: str = "tenant") -> list[str]:
++    return [
++        "--credential-root",
++        str(root),
++        "--credential-namespace",
++        namespace,
++        "--receipt-observer",
++        "alice",
++    ]
++
++
++def _provision(tmp_path: Path) -> tuple[Path, Path, MappedCredentialProvider, object, object]:
++    custody = tmp_path / "mapped-custody"
++    provider = MappedCredentialProvider(
++        custody, namespace="tenant", receipt_observer="alice"
++    )
++    alice = provider.create_binding("alice", token="create-alice")
++    bob = provider.create_binding("bob", token="create-bob")
++    target = tmp_path / "workload.vertex"
++    location = (tmp_path / "workload.arrival").resolve()
++    return target, location, provider, alice, bob
++
++
++def _init_mapped(
++    tmp_path: Path, target: Path, location: Path, custody: Path
++) -> dict:
++    process = _run(
++        tmp_path,
++        "init",
++        target,
++        "--name",
++        "workload",
++        "--location",
++        str(location),
++        "--observer",
++        "alice",
++        *_credentials(custody),
++    )
++    assert process.returncode == 0, process.stdout + process.stderr
++    result = _json(process)
++    assert result["ok"] is True
++    assert result["result"]["read_path"] == "arrival"
++    assert result["result"]["phase"] == "published"
++    return result["result"]
++
++
++def _ledger_path(target: Path) -> Path:
++    store_line = next(
++        line for line in target.read_text(encoding="utf-8").splitlines() if line.startswith("store ")
++    )
++    return Path(store_line.split('"', 2)[1])
++
++
++def _file_snapshot(root: Path) -> dict[str, bytes]:
++    if not root.exists():
++        return {}
++    return {
++        str(path.relative_to(root)): path.read_bytes()
++        for path in root.rglob("*")
++        if path.is_file()
++    }
++
++
++def _proposal_with_bob(target: Path, bob_public_key: str) -> Path:
++    current = target.read_text(encoding="utf-8")
++    proposed = current.replace(
++        "  }\n}\n\nloops",
++        f'''  }}
++  "bob" {{
++    key "{bob_public_key}"
++    grant {{ potential "item" }}
++  }}
++}}
++
++loops''',
++        1,
++    )
++    proposal = target.with_name("proposal.vertex")
++    proposal.write_text(proposed, encoding="utf-8")
++    return proposal
++
++
++def test_mapped_writer_workflow_is_real_process_sdk_boundary(tmp_path: Path) -> None:
++    target, location, provider, _alice, bob = _provision(tmp_path)
++    init_result = _init_mapped(tmp_path, target, location, provider.root)
++
++    first = _run(
++        tmp_path,
++        "emit",
++        target,
++        "item",
++        "--payload-json",
++        '{"owner":"alice","step":1}',
++        "--observer",
++        "alice",
++        "--origin",
++        "cli-test",
++        "--id",
++        "alice-first",
++        *_credentials(provider.root),
++    )
++    assert first.returncode == 0, first.stdout + first.stderr
++    first_result = _json(first)["result"]
++    assert first_result["schema"] == "loops.sdk/emit-receipt/v2"
++    assert first_result["stored"] is True
++    assert first_result["witnessed"] is True
++    assert first_result["commit"]["before"] == init_result["head"]
++
++    proposal = _proposal_with_bob(target, bob.public_key)
++    declaration = _run(
++        tmp_path,
++        "declaration",
++        target,
++        "--proposed-file",
++        str(proposal),
++        "--observer",
++        "alice",
++        *_credentials(provider.root),
++    )
++    assert declaration.returncode == 0, declaration.stdout + declaration.stderr
++    declaration_result = _json(declaration)["result"]
++    assert declaration_result["schema"] == "loops.sdk/declaration-edit/v2"
++    assert declaration_result["status"] == "applied"
++    assert any(change["subject"] == "bob" for change in declaration_result["changes"])
++    assert declaration_result["commit"]["before"] == first_result["commit"]["after"]
++
++    batch = _run(
++        tmp_path,
++        "emit-batch",
++        target,
++        "--facts-json",
++        json.dumps(
++            [
++                {
++                    "id": "alice-batch",
++                    "kind": "item",
++                    "payload": {"owner": "alice", "step": 2},
++                    "observer": "alice",
++                    "origin": "cli-test",
++                    "ts": 10,
++                },
++                {
++                    "id": "bob-batch",
++                    "kind": "item",
++                    "payload": {"owner": "bob", "step": 2},
++                    "observer": "bob",
++                    "origin": "cli-test",
++                    "ts": 11,
++                },
++            ]
++        ),
++        *_credentials(provider.root),
++    )
++    assert batch.returncode == 0, batch.stdout + batch.stderr
++    batch_result = _json(batch)["result"]
++    assert batch_result["schema"] == "loops.sdk/batch-emit/v2"
++    assert batch_result["atomic"] is True
++    assert batch_result["atomicity"] == "single-append"
++    assert [item["id"] for item in batch_result["items"]] == ["alice-batch", "bob-batch"]
++    assert all(item["signed"] and item["stored"] for item in batch_result["items"])
++    assert batch_result["commit"]["before"] == declaration_result["commit"]["after"]
++    assert batch_result["commit"]["record_count"] == 2
++
++    facts = _run(tmp_path, "facts", target, "--order", "oldest", "--limit", "20")
++    assert facts.returncode == 0, facts.stdout + facts.stderr
++    items = _json(facts)["result"]["items"]
++    assert [item["id"] for item in items] == ["alice-first", "alice-batch", "bob-batch"]
++    assert [(item["observer"], item["payload"]) for item in items] == [
++        ("alice", {"owner": "alice", "step": 1}),
++        ("alice", {"owner": "alice", "step": 2}),
++        ("bob", {"owner": "bob", "step": 2}),
++    ]
++    facts_result = _json(facts)["result"]
++    assert facts_result
++    assert facts_result["truncated"] is False
++    assert facts_result["basis"]["captured_head"] == batch_result["commit"]["after"]
++
++    verified = _run(tmp_path, "verify", target)
++    assert verified.returncode == 0, verified.stdout + verified.stderr
++    assert _json(verified)["result"]["level"] == "full"
++
++
++def test_writer_input_refusals_do_not_append_or_create_target(tmp_path: Path) -> None:
++    target, location, provider, _alice, _bob = _provision(tmp_path)
++    _init_mapped(tmp_path, target, location, provider.root)
++    ledger = _ledger_path(target)
++    before = ledger.read_bytes()
++
++    for malformed in (
++        [{"kind": "item", "payload": {"ok": True}, "observer": "alice"},
++         {"kind": "item", "payload": None, "observer": "alice"}],
++        [{"kind": "item", "payload": {"ok": True}, "observer": "alice"},
++         {"kind": "item", "payload": {}, "observer": "alice", "ts": "bad"}],
++    ):
++        process = _run(
++            tmp_path,
++            "emit-batch",
++            target,
++            "--facts-json",
++            json.dumps(malformed),
++            *_credentials(provider.root),
++        )
++        assert process.returncode == 2, process.stdout + process.stderr
++        assert _json(process)["ok"] is False
++        assert _json(process)["error"]["type"] == "InvalidEmissionRequest"
++        assert ledger.read_bytes() == before
++
++    absent = tmp_path / "partial.vertex"
++    partial = _run(
++        tmp_path,
++        "init",
++        absent,
++        "--name",
++        "partial",
++        "--location",
++        str((tmp_path / "partial.arrival").resolve()),
++        "--observer",
++        "alice",
++        "--credential-root",
++        str(provider.root),
++    )
++    assert partial.returncode == 2
++    assert not absent.exists()
++
++
++def test_wrong_namespace_and_legacy_writer_refuse_without_effects(tmp_path: Path) -> None:
++    target, location, provider, _alice, _bob = _provision(tmp_path)
++    _init_mapped(tmp_path, target, location, provider.root)
++    ledger = _ledger_path(target)
++    before = ledger.read_bytes()
++    wrong_provider = MappedCredentialProvider(
++        provider.root, namespace="wrong-tenant", receipt_observer="alice"
++    )
++    wrong_binding = wrong_provider.create_binding("alice", token="wrong-alice")
++    wrong_namespace = _run(
++        tmp_path,
++        "emit",
++        target,
++        "item",
++        "--payload-json",
++        '{"wrong":true}',
++        "--observer",
++        "alice",
++        *_credentials(provider.root, namespace="wrong-tenant"),
++    )
++    assert wrong_namespace.returncode == 4
++    assert _json(wrong_namespace)["ok"] is False
++    assert _json(wrong_namespace)["error"]["type"] == "ArrivalRefusal"
++    assert _json(wrong_namespace)["error"]["source_type"] == "CredentialBindingRefused"
++    wrong_error = _json(wrong_namespace)["error"]
++    request = wrong_error["details"]["credential_binding"]["request"]
++    assert request == {
++        "namespace": "wrong-tenant",
++        "observer": "alice",
++        "domain": "fact",
++        "purpose": "authorship",
++    }
++    assert wrong_error["details"]["credential_binding"]["reason"] == (
++        "resolved public key is not authorized at the captured position"
++    )
++    assert wrong_error["details"]["credential_binding"]["binding"]["public_key"] == wrong_binding.public_key
++    assert ledger.read_bytes() == before
++
++    # An absent optional author binding follows the SDK's pre-signed-era rule:
++    # it is an unsigned observation, and the CLI must not mint a key implicitly.
++    custody_before_absent = _file_snapshot(provider.root)
++    absent_namespace = _run(
++        tmp_path,
++        "emit",
++        target,
++        "item",
++        "--payload-json",
++        '{"optional":true}',
++        "--observer",
++        "alice",
++        *_credentials(provider.root, namespace="absent-tenant"),
++    )
++    assert absent_namespace.returncode == 0, absent_namespace.stdout + absent_namespace.stderr
++    absent_result = _json(absent_namespace)["result"]
++    assert absent_result["signed"] is False
++    assert absent_result["stored"] is True
++    assert _file_snapshot(provider.root) == custody_before_absent
++
++    missing_root_target = tmp_path / "missing-root.vertex"
++    missing_root = _run(
++        tmp_path,
++        "init",
++        missing_root_target,
++        "--name",
++        "missing-root",
++        "--location",
++        str((tmp_path / "missing-root.arrival").resolve()),
++        "--observer",
++        "alice",
++        *_credentials(tmp_path / "does-not-exist"),
++    )
++    assert missing_root.returncode == 2
++    assert _json(missing_root)["error"]["type"] == "SdkValueError"
++    assert not missing_root_target.exists()
++    assert not (tmp_path / "missing-root.arrival").exists()
++    assert not (tmp_path / "does-not-exist").exists()
++
++    legacy = tmp_path / "legacy.vertex"
++    legacy_result = init_vertex(legacy, store_type="sqlite")
++    legacy_before = legacy.read_bytes()
++    legacy_write = _run(
++        tmp_path,
++        "emit",
++        legacy,
++        "item",
++        "--payload-json",
++        '{"legacy":true}',
++        "--observer",
++        "alice",
++        *_credentials(provider.root),
++    )
++    assert legacy_write.returncode == 3
++    assert _json(legacy_write)["error"]["type"] == "TargetUnsupported"
++    assert legacy.read_bytes() == legacy_before
++    assert legacy_result.store_path is not None
++    assert not (legacy.parent / legacy_result.store_path).exists()
++
++
++@pytest.mark.parametrize(
++    ("error_type", "outcome"),
++    [
++        (CommittedOutcomeUnknown, "unknown"),
++        (CommittedProjectionFailed, "committed-projection-failed"),
++    ],
++)
++def test_cli_error_boundary_preserves_committed_evidence(
++    monkeypatch: pytest.MonkeyPatch,
++    capsys: pytest.CaptureFixture[str],
++    tmp_path: Path,
++    error_type: type[BaseException],
++    outcome: str,
++) -> None:
++    cli = importlib.import_module("loops_min.main")
++    target, location, provider, _alice, _bob = _provision(tmp_path)
++    _init_mapped(tmp_path, target, location, provider.root)
++    head = {"lineage": "L", "ordinal": 4, "record_hash": "H"}
++    error = error_type(
++        "reconcile this attempt",
++        source_type="InjectedBoundary",
++        details={"fact_id": "fact-1", "captured_head": head},
++    )
++
++    def fail(*_args: object, **_kwargs: object) -> dict:
++        raise error
++
++    monkeypatch.setattr(cli, "emit_fact", fail)
++    assert cli.main(
++        [
++            "emit",
++            str(target),
++            "item",
++            "--payload-json",
++            "{}",
++            "--observer",
++            "alice",
++            "--credential-root",
++            str(provider.root),
++            "--credential-namespace",
++            "tenant",
++            "--receipt-observer",
++            "alice",
++        ]
++    ) == 6
++    output = json.loads(capsys.readouterr().out)
++    assert output["ok"] is False
++    assert output["error"]["outcome"] == outcome
++    assert output["error"]["source_type"] == "InjectedBoundary"
++    assert output["error"]["details"]["fact_id"] == "fact-1"
++    assert output["error"]["details"]["captured_head"] == head
+diff --git a/libs/engine/src/engine/arrival_declarations.py b/libs/engine/src/engine/arrival_declarations.py
+index 13f5d073..8c563085 100644
+--- a/libs/engine/src/engine/arrival_declarations.py
++++ b/libs/engine/src/engine/arrival_declarations.py
+@@ -74,6 +74,7 @@ from .declaration import (
+     validate_arrival_declaration_anchor,
+     validate_arrival_runtime_identity,
+ )
++from .residence import canonical_store_path
+ 
+ __all__ = [
+     "DeclarationPreparationError",
+@@ -660,7 +661,7 @@ def _descriptor_location(target: Path, ast: Any, descriptor: StoreDescriptor) ->
+             raise _preparation_refused(
+                 "proposed file declaration has no store location"
+             )
+-        return str((target.parent / str(ast.store)).resolve())
++        return str(canonical_store_path(ast.store, target))
+     if ast.store_location is None:
+         raise _preparation_refused(
+             "proposed non-file declaration has no opaque store location"
+diff --git a/libs/sdk/src/sdk/emit.py b/libs/sdk/src/sdk/emit.py
+index ad3d3216..52cdc24e 100644
+--- a/libs/sdk/src/sdk/emit.py
++++ b/libs/sdk/src/sdk/emit.py
+@@ -653,18 +653,28 @@ def emit_batch(
+             k = item.get("kind")
+             if not k:
+                 raise InvalidEmissionRequest(f"batch item dict missing 'kind': {item}")
+-            p = dict(item.get("payload", {}))
++            try:
++                p = dict(item.get("payload", {}))
++            except (TypeError, ValueError) as exc:
++                raise InvalidEmissionRequest(
++                    "batch item 'payload' must be convertible to a dictionary"
++                ) from exc
+             item_obs = (
+                 str(item["observer"]) if "observer" in item and item["observer"] else observer
+             )
+             if not item_obs:
+                 raise InvalidEmissionRequest("observer is required for dict fact")
+             item_origin = str(item.get("origin", origin))
+-            item_ts = (
+-                float(item["ts"])
+-                if "ts" in item and item["ts"] is not None
+-                else datetime.now(UTC).timestamp()
+-            )
++            try:
++                item_ts = (
++                    float(item["ts"])
++                    if "ts" in item and item["ts"] is not None
++                    else datetime.now(UTC).timestamp()
++                )
++            except (TypeError, ValueError, OverflowError) as exc:
++                raise InvalidEmissionRequest(
++                    "batch item 'ts' must be convertible to a timestamp"
++                ) from exc
+             if "id" in item and item["id"]:
+                 item_id_override = str(item["id"])
+             if "admit_undeclared" in item:
+diff --git a/libs/sdk/tests/test_arrival_declarations.py b/libs/sdk/tests/test_arrival_declarations.py
+index ec2789f9..46151f30 100644
+--- a/libs/sdk/tests/test_arrival_declarations.py
++++ b/libs/sdk/tests/test_arrival_declarations.py
+@@ -38,6 +38,7 @@ from sign import ed25519
+ 
+ from sdk import (
+     ArrivalRefusal,
++    MappedCredentialProvider,
+     add_kind,
+     edit_declaration,
+     emit_fact,
+@@ -688,6 +689,65 @@ def test_sdk_edit_declaration_routes_explicit_arrival_with_public_evidence(
+     json.dumps(result.as_dict(), allow_nan=False)
+ 
+ 
++def test_declaration_edit_preserves_absolute_file_location_spelling(
++    tmp_path: Path,
++):
++    """An absolute File location remains the declared spelling across an edit."""
++    real_residence = tmp_path / "real-residence"
++    real_residence.mkdir()
++    alias_residence = tmp_path / "alias-residence"
++    try:
++        alias_residence.symlink_to(real_residence, target_is_directory=True)
++    except OSError as exc:
++        pytest.skip(f"directory symlinks unavailable: {exc}")
++
++    credentials = MappedCredentialProvider(
++        tmp_path / "bindings",
++        namespace="declaration-alias",
++        receipt_observer="alice",
++    )
++    credentials.create_binding("alice", token="alice-binding")
++    target = tmp_path / "alias.vertex"
++    declared_location = alias_residence / "ledger.arrival"
++    assert not declared_location.exists()
++    initialized = init_vertex(
++        target,
++        name="alias",
++        store_type="arrival",
++        location=declared_location,
++        observer="alice",
++        credentials=credentials,
++    )
++    assert initialized.store is not None
++    # Init's result retains its existing resolved File location convention;
++    # the declaration itself retains the exact absolute residence spelling.
++    assert initialized.store.location == str(declared_location.resolve())
++    assert str(declared_location) in target.read_text()
++
++    applied = edit_declaration(
++        target,
++        _edited_text(target),
++        observer="alice",
++        credentials=credentials,
++    )
++    assert applied.status == "applied"
++    assert applied.commit is not None
++    assert applied.store is not None and applied.store.location == str(declared_location)
++
++    before = Path(initialized.store.location).read_bytes()
++    changed_residence = target.read_text().replace(
++        str(declared_location), str(alias_residence / "other.arrival")
++    )
++    with pytest.raises(ArrivalRefusal, match="preserve the descriptor location"):
++        edit_declaration(
++            target,
++            changed_residence,
++            observer="alice",
++            credentials=credentials,
++        )
++    assert Path(initialized.store.location).read_bytes() == before
++
++
+ def test_sdk_kind_entrypoint_uses_arrival_coordinator(tmp_path: Path):
+     target, _descriptor, _credentials = _fixture(tmp_path)
+     preview = plan_kind_mutation(target, "add", "extra")
+diff --git a/libs/sdk/tests/test_emit.py b/libs/sdk/tests/test_emit.py
+index 3a2c36c6..e7183cdb 100644
+--- a/libs/sdk/tests/test_emit.py
++++ b/libs/sdk/tests/test_emit.py
+@@ -1418,3 +1418,30 @@ def test_emit_fact_firing_boundary_populates_tick_fields(tmp_path: Path) -> None
+         assert r.stored is True
+         assert r.tick_mark == "event"
+         assert r.tick_id
++
++
++@pytest.mark.parametrize(
++    ("field", "value"),
++    [
++        ("payload", None),
++        ("payload", 42),
++        ("payload", ["not-a-pair"]),
++        ("ts", "not-a-number"),
++        ("ts", {}),
++        ("ts", 10**400),
++    ],
++)
++def test_batch_mapping_conversion_refuses_before_target_resolution(
++    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, field: str, value: Any,
++) -> None:
++    """A malformed later item is a usage error before any batch can write."""
++    def unexpected_resolution(*args: Any, **kwargs: Any) -> Any:
++        pytest.fail("malformed batch reached target resolution")
++
++    monkeypatch.setattr("sdk.emit._arrival_descriptor", unexpected_resolution)
++    malformed = {"kind": "item", "payload": {}, "observer": "alice", field: value}
++    with pytest.raises(InvalidEmissionRequest, match=f"batch item '{field}'"):
++        emit_batch(
++            tmp_path / "unopened.vertex",
++            [{"kind": "item", "payload": {}, "observer": "alice"}, malformed],
++        )

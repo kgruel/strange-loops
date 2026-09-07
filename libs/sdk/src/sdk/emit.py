@@ -653,18 +653,28 @@ def emit_batch(
             k = item.get("kind")
             if not k:
                 raise InvalidEmissionRequest(f"batch item dict missing 'kind': {item}")
-            p = dict(item.get("payload", {}))
+            try:
+                p = dict(item.get("payload", {}))
+            except (TypeError, ValueError) as exc:
+                raise InvalidEmissionRequest(
+                    "batch item 'payload' must be convertible to a dictionary"
+                ) from exc
             item_obs = (
                 str(item["observer"]) if "observer" in item and item["observer"] else observer
             )
             if not item_obs:
                 raise InvalidEmissionRequest("observer is required for dict fact")
             item_origin = str(item.get("origin", origin))
-            item_ts = (
-                float(item["ts"])
-                if "ts" in item and item["ts"] is not None
-                else datetime.now(UTC).timestamp()
-            )
+            try:
+                item_ts = (
+                    float(item["ts"])
+                    if "ts" in item and item["ts"] is not None
+                    else datetime.now(UTC).timestamp()
+                )
+            except (TypeError, ValueError, OverflowError) as exc:
+                raise InvalidEmissionRequest(
+                    "batch item 'ts' must be convertible to a timestamp"
+                ) from exc
             if "id" in item and item["id"]:
                 item_id_override = str(item["id"])
             if "admit_undeclared" in item:

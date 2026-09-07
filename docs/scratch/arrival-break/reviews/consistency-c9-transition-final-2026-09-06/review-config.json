@@ -1,0 +1,85 @@
+{
+  "instruction": "You are Fable 5.1 LOW adversarial final reviewer for a bounded C9 SDK/minimal-CLI transition. Static review only, no tools. Decide ACCEPT or REVISE; separate blockers with exact file/line evidence and minimal correction from optional observations. Review implementation, tests, documentation and recorded validation for correctness and false positives.\nBaseline f45f1f03 already checkpointed the accepted SDK transfer workload. This additive slice connects loops-min init/emit/emit-batch/declaration/declaration-recover to public SDK exports, with explicit mapped credential selection; no old CLI/storage implementation in client. Init forces Arrival File. Existing generic SDK readers/writers and old CLI remain transitional per inventory, not retired. User-approved strategy Sol/Terra/Luna implementation/testing, primary integration, your final low-effort review. Do not require full C9 retirement/feature parity to accept this bounded slice, but flag dishonest scope claims.\nImportant established contracts: mapped provider selection does NOT force optional signatures to exist; missing optional binding can yield unsigned observations while existing unauthorized key MUST refuse against captured auth. Founding init binding is required. Mapping resolution never implicitly mints or falls back to locator keys. SDK supports mapped-to-legacy fail-closed; CLI resolver precheck is classification only, not descriptor identity pinning against replacement by another valid Arrival descriptor. No stronger continuity is claimed. CLI adds no retry/repair; SDK writer postcommit projection work remains its contract. Committed or unknown custody outcomes exit6 and retain SDK evidence; projection-only unknown/publication effects can be exit4, so exit4 is not global no-effects.\nTwo necessary backend/SDK integration fixes: mapping payload/ts conversion failures become InvalidEmissionRequest before target resolution (accepted coercions unchanged), and declaration File-location comparison uses same canonical_store_path convention as descriptor_for (absolute symlink spelling preserved, relative locations resolve). Init result's resolved File location versus later declared alias is existing documented behavior, not normalized here. Confirm real residence changes still refuse and opaque locations unchanged.\nTests: real subprocess writer lifecycle and refusal controls; deterministic mocked SDK boundaries for transport, recovery routing, committed evidence and post-precheck legacy downgrade; prior SDK recovery workload supplies actual interruption behavior. Don't misread mocked recovery as process-crash coverage. Full SDK/architecture, focused engine, final CLI, installed modular-wheel smoke are native logs, not reviewer-run tests. The wheel harness initially had an assertion bug comparing resolved __file__ to unresolved sys.prefix; fixed assertion passed same wheels, documented. All fixture stores/keys isolated; only explicit logs archived.\nAssess whether new client preserves SDK outcomes and observer vs local custody distinction, whether JSON inputs fail honestly before mutation, whether tests prove claimed receipts/rows/refusals, and whether legacy retirement gates are candid. Finish with explicit ACCEPT or REVISE. Review packet contains complete changed production/test patch plus full main/client tests and bounded relevant SDK/engine source; hashes refer to whole files even for excerpts.",
+  "sources": [
+    "apps/loops-min/src/loops_min/main.py",
+    "apps/loops-min/README.md",
+    "apps/loops-min/tests/test_cli.py",
+    "apps/loops-min/tests/test_writer_cli.py",
+    "apps/loops-min/tests/test_writer_boundary.py",
+    "docs/scratch/arrival-break/consistency-c9-transition-2026-09-06.md",
+    "libs/sdk/src/sdk/emit.py",
+    "libs/sdk/src/sdk/errors.py",
+    "libs/engine/src/engine/credentials.py",
+    "docs/scratch/arrival-break/reviews/consistency-c9-transition-final-2026-09-06/validation-evidence/cli-final.txt",
+    "docs/scratch/arrival-break/reviews/consistency-c9-transition-final-2026-09-06/validation-evidence/engine-declaration.txt",
+    "docs/scratch/arrival-break/reviews/consistency-c9-transition-final-2026-09-06/validation-evidence/sdk-full.txt",
+    "docs/scratch/arrival-break/reviews/consistency-c9-transition-final-2026-09-06/validation-evidence/architecture-full.txt",
+    "docs/scratch/arrival-break/reviews/consistency-c9-transition-final-2026-09-06/validation-evidence/ruff-app.txt",
+    "docs/scratch/arrival-break/reviews/consistency-c9-transition-final-2026-09-06/validation-evidence/wheel-status.json"
+  ],
+  "excerpts": {
+    "libs/sdk/src/sdk/target.py": [
+      [
+        1,
+        192
+      ]
+    ],
+    "libs/sdk/src/sdk/declare.py": [
+      [
+        129,
+        260
+      ],
+      [
+        268,
+        340
+      ],
+      [
+        396,
+        606
+      ]
+    ],
+    "libs/engine/src/engine/arrival_declarations.py": [
+      [
+        1,
+        77
+      ],
+      [
+        652,
+        702
+      ]
+    ],
+    "libs/engine/src/engine/arrival_registry.py": [
+      [
+        121,
+        180
+      ]
+    ],
+    "libs/engine/src/engine/residence.py": [
+      [
+        121,
+        134
+      ]
+    ],
+    "libs/custody/src/custody/binding.py": [
+      [
+        235,
+        275
+      ],
+      [
+        436,
+        465
+      ]
+    ],
+    "libs/engine/src/engine/runtime_write.py": [
+      [
+        784,
+        870
+      ],
+      [
+        1092,
+        1138
+      ]
+    ]
+  },
+  "patch": true
+}

@@ -1,0 +1,16 @@
+{
+  "instruction": "You are the final adversarial reviewer for a bounded public SDK workload-conformance slice. Use Fable 5.1 LOW. Static review only; no tools, execution, delegation or modifications. Return ACCEPT or REVISE, blockers with source locations, concrete false positives and smallest corrections, then optional findings. Do not infer validation you did not run.\nBaseline d75aae9e. User-approved scope: mapped public source execution with partial failure, inspection of persisted tiers, and safe continuation decisions. The test parameterizes a downstream SourceError before versus after yielding one observation; a fresh non-forced invocation should skip a successful elapsed upstream and run the failed triggered downstream successfully. The after-yield case should explicitly retain repeated logical observations under distinct fact IDs. There is no resume-token API, automatic deduplication or exactly-once collection/dispatch guarantee. The test uses in-memory collectors; no external side effects are being tested. Existing engine/SDK tests separately cover unknown append, known-uncommitted, collection failure, projection and dispatch failures. No production change intended.\nAssess causal specificity of source failure and success, exact durable tier/fact/lifecycle identities versus status strings, fresh per-tier/public read bases, lineage/head alignment, accurate deterministic timing and cadence evidence, correct skip/retry behavior and fresh identities across invocations, strict JSON evidence, isolated mapped fixtures, and documentation claim boundaries. Full prefix verification does not verify signatures/key trust/projected rows; explicit comparisons and existing mapped signing tests are complementary. Do not demand C9 retirement, generic retry APIs or unrelated scope expansion. Native logs are prior executed validation, not reviewer execution.\n",
+  "sources": [
+    "libs/sdk/tests/test_arrival_source_resumption_workload.py",
+    "libs/sdk/README.md",
+    "docs/scratch/arrival-break/sdk-conformance-source-resumption-2026-09-06.md",
+    "libs/engine/src/engine/arrival_sources.py",
+    "libs/sdk/src/sdk/sources.py",
+    "docs/scratch/arrival-break/reviews/sdk-conformance-source-resumption-final-2026-09-06/validation-evidence/focused-pytest.log",
+    "docs/scratch/arrival-break/reviews/sdk-conformance-source-resumption-final-2026-09-06/validation-evidence/ruff.log",
+    "docs/scratch/arrival-break/reviews/sdk-conformance-source-resumption-final-2026-09-06/validation-evidence/sdk-full.txt",
+    "docs/scratch/arrival-break/reviews/sdk-conformance-source-resumption-final-2026-09-06/validation-evidence/architecture-full.txt",
+    "docs/scratch/arrival-break/reviews/sdk-conformance-source-resumption-final-2026-09-06/validation-evidence/engine-sources.txt"
+  ],
+  "patch": true
+}

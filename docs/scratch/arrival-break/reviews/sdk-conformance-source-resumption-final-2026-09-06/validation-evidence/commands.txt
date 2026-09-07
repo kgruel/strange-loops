@@ -1,0 +1,4 @@
+sdk: XDG_STATE_HOME=/tmp/loops-sdk-source-conformance-2026-09-06/validation/sdk-state XDG_CONFIG_HOME=/tmp/loops-sdk-source-conformance-2026-09-06/validation/sdk-config LOOPS_HOME=/tmp/loops-sdk-source-conformance-2026-09-06/validation/sdk-loops
+architecture: XDG_STATE_HOME=/tmp/loops-sdk-source-conformance-2026-09-06/validation/arch-state XDG_CONFIG_HOME=/tmp/loops-sdk-source-conformance-2026-09-06/validation/arch-config LOOPS_HOME=/tmp/loops-sdk-source-conformance-2026-09-06/validation/arch-loops
+engine: XDG_STATE_HOME=/tmp/loops-sdk-source-conformance-2026-09-06/validation/engine-state XDG_CONFIG_HOME=/tmp/loops-sdk-source-conformance-2026-09-06/validation/engine-config LOOPS_HOME=/tmp/loops-sdk-source-conformance-2026-09-06/validation/engine-loops
+commands launched separately with uv run --no-sync

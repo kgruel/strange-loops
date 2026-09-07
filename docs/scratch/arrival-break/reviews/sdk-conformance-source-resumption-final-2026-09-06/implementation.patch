@@ -1,0 +1,348 @@
+diff --git a/libs/sdk/README.md b/libs/sdk/README.md
+index eba88131..7276409b 100644
+--- a/libs/sdk/README.md
++++ b/libs/sdk/README.md
+@@ -309,10 +309,24 @@ for tier in result.tiers:
+ - **`await run_sources(target, *, observer, force=False, credentials=None, registry=None, collector_factory=None, dispatcher=None, evaluated_at=None) -> SourceRunResult`**:
+   Captures a CURRENT Arrival Authority before collection, fixes cadence and dependency tiers, and commits each collected tier with one exact-head batch append plus explicit projection synchronization. The lifecycle observer is always explicit. Existing custody keys are loaded when present; the operation never creates keys.
+ 
+-  A source error after yielding observations returns `status="error"` after its error lifecycle fact becomes durable. Interrupted results retain prior commits and distinguish `known_uncommitted` collection from an append whose durability is `unknown`; collectors are not rerun. When `dispatcher` is omitted, captured tick run intents remain visible with `dispatch_status="not-requested"` and `attempted=False`. This operation supports explicit single-store Arrival Authority descriptors only and never falls through to legacy source execution.
++  When the invocation finishes without a terminal failure, a source error returns `status="error"` with its yielded observations and error lifecycle fact durable. Interrupted results retain prior commits and distinguish `known_uncommitted` collection from an append whose durability is `unknown`; collectors are not rerun within the invocation. When `dispatcher` is omitted, captured tick run intents remain visible with `dispatch_status="not-requested"` and `attempted=False`. This operation supports explicit single-store Arrival Authority descriptors only and never falls through to legacy source execution.
+ 
+   Coordinator failures during ID allocation, lifecycle construction, or otherwise successful collector cleanup return an incomplete result with terminal category `collection-failed`. `terminal.details.collection` contains the current tier's basis, `custody="not-attempted"`, completed siblings, and paired partial observations from failed or cancelled siblings. Incomplete attempts have no lifecycle fact; prior tiers keep their commits. These partial observations live in terminal evidence, not `known_uncommitted`, which describes a fully collected tier. Owned iterators and distinct iterable owners receive `aclose()` when available; caller cancellation propagates after sibling cleanup. Closing a collector does not undo its external effects or guarantee subprocess termination.
+ 
++  Calling `run_sources` again is a fresh, cadence-based invocation with fresh
++  generated IDs; it is not a resume token for retained collector output. For
++  example, an upstream source can remain skipped by its persisted successful
++  cadence while a downstream source retries from its persisted trigger. A
++  downstream failure before yielding leaves no domain observation from that
++  collector attempt to repeat; it says nothing about its external effects. If
++  it yielded before reporting a `SourceError` and that tier has an actual
++  commit, the observation and error lifecycle are durable. A later fresh
++  invocation can collect the same logical observation again under a distinct
++  fact ID. Callers need a source-specific idempotency or reconciliation policy
++  for external effects and overlapping collected observations. The public
++  two-tier case is exercised in
++  [`tests/test_arrival_source_resumption_workload.py`](tests/test_arrival_source_resumption_workload.py).
++
+ ### 5. Declaration, Scaffolding & Ceremonies
+ 
+ ```python
+diff --git a/libs/sdk/tests/test_arrival_source_resumption_workload.py b/libs/sdk/tests/test_arrival_source_resumption_workload.py
+new file mode 100644
+index 00000000..d23c22ef
+--- /dev/null
++++ b/libs/sdk/tests/test_arrival_source_resumption_workload.py
+@@ -0,0 +1,312 @@
++"""Public mapped-custody conformance for partial source-tier resumption."""
++
++from __future__ import annotations
++
++import asyncio
++import json
++from collections import Counter
++from pathlib import Path
++
++import pytest
++from atoms import Fact, SourceError
++
++import sdk.sources as sdk_sources
++from sdk import (
++    MappedCredentialProvider,
++    edit_declaration,
++    init_vertex,
++    read_fact_by_id,
++    read_facts,
++    run_sources,
++    verify_target,
++)
++
++
++@pytest.fixture(autouse=True)
++def _isolated_process_roots(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
++    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
++    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
++    monkeypatch.setenv("LOOPS_HOME", str(tmp_path / "loops-home"))
++
++
++def _source_declaration(vertex: Path) -> str:
++    (vertex.parent / "a.loop").write_text(
++        'kind "a"\nobserver "alice"\nsource "collect-a"\nevery "1h"\n',
++        encoding="utf-8",
++    )
++    (vertex.parent / "b.loop").write_text(
++        'kind "b"\nobserver "alice"\nsource "collect-b"\non "_sync.a"\n',
++        encoding="utf-8",
++    )
++    current = vertex.read_text(encoding="utf-8")
++    with_sources = current.replace(
++        "loops {",
++        'sources {\n  path "./a.loop"\n  path "./b.loop"\n}\n\nloops {',
++        1,
++    )
++    item = '  item {\n    fold {\n      items "collect" 100\n    }\n  }\n'
++    added = (
++        '  a {\n    fold { items "collect" 20 }\n  }\n  b {\n    fold { items "collect" 20 }\n  }\n'
++    )
++    assert with_sources.count(item) == 1
++    return with_sources.replace(item, item + added)
++
++
++def _internal_page(vertex: Path):
++    page = read_facts(
++        vertex,
++        include_internal=True,
++        limit=100,
++        order="oldest",
++    )
++    assert page.truncated is False
++    return page
++
++
++@pytest.mark.parametrize("failed_after_yield", [False, True])
++def test_mapped_source_failure_has_honest_fresh_invocation_resume(
++    tmp_path: Path,
++    monkeypatch: pytest.MonkeyPatch,
++    failed_after_yield: bool,
++) -> None:
++    provider = MappedCredentialProvider(
++        tmp_path / "custody",
++        namespace="source-workload",
++        receipt_observer="alice",
++    )
++    provider.create_binding("alice", token="create-alice")
++    vertex = tmp_path / "sources.vertex"
++    initialized = init_vertex(
++        vertex,
++        name="source-workload",
++        store_type="arrival",
++        location=(tmp_path / "data" / "sources.arrival").resolve(),
++        observer="alice",
++        strict=True,
++        credentials=provider,
++    )
++    assert initialized.lineage is not None
++    declared = edit_declaration(
++        vertex,
++        _source_declaration(vertex),
++        observer="alice",
++        credentials=provider,
++    )
++    assert declared.status == "applied"
++    assert declared.commit is not None
++    baseline = _internal_page(vertex)
++    assert baseline.basis is not None
++    assert baseline.basis.captured_head == declared.commit.after
++    assert baseline.basis.projected_through == baseline.basis.captured_head
++    baseline_ids = [item["id"] for item in baseline.items]
++
++    original_execute = sdk_sources.execute_source_invocation
++    execution_clocks = iter((12.0, 22.0))
++
++    async def deterministic_execute(*args, **kwargs):
++        now = next(execution_clocks)
++        return await original_execute(*args, **kwargs, clock=lambda: now)
++
++    monkeypatch.setattr(
++        sdk_sources,
++        "execute_source_invocation",
++        deterministic_execute,
++    )
++    attempts: Counter[str] = Counter()
++    invocation = "first"
++
++    def collector(source):
++        async def collect():
++            attempts[source.kind] += 1
++            if source.kind == "a":
++                assert invocation == "first"
++                yield Fact("a", 11.0, {"logical": "a"}, observer="alice")
++                return
++            assert source.kind == "b"
++            if invocation == "first":
++                if failed_after_yield:
++                    yield Fact("b", 11.5, {"logical": "b"}, observer="alice")
++                raise SourceError(source.command, returncode=7, stderr="b failed")
++            yield Fact("b", 11.5, {"logical": "b"}, observer="alice")
++
++        return collect()
++
++    first = asyncio.run(
++        run_sources(
++            vertex,
++            observer="alice",
++            force=True,
++            credentials=provider,
++            collector_factory=collector,
++            evaluated_at=10.0,
++        )
++    )
++    assert first.status == "error"
++    assert first.terminal is None
++    assert first.known_uncommitted is None and first.unknown is None
++    assert first.initial_basis == baseline.basis
++    assert all(item.forced and item.evaluated_at == 10.0 for item in first.cadence)
++    assert first.tier_decisions == ((0,), (1,))
++    assert len(first.bases) == len(first.tiers) == 2
++    a_tier, failed_b_tier = first.tiers
++    assert first.bases == (a_tier.basis, failed_b_tier.basis)
++    assert a_tier.basis == first.initial_basis
++    assert a_tier.outcome == failed_b_tier.outcome == "committed"
++    assert a_tier.commit is not None and failed_b_tier.commit is not None
++    assert a_tier.commit.before == declared.commit.after
++    assert a_tier.commit.after.lineage == a_tier.commit.before.lineage
++    assert a_tier.commit.after.ordinal > a_tier.commit.before.ordinal
++    assert failed_b_tier.basis is not None
++    assert failed_b_tier.basis.captured_head == a_tier.commit.after
++    assert failed_b_tier.basis.projected_through == a_tier.commit.after
++    assert failed_b_tier.commit.before == a_tier.commit.after
++    assert failed_b_tier.commit.after.lineage == failed_b_tier.commit.before.lineage
++    assert failed_b_tier.commit.after.ordinal > failed_b_tier.commit.before.ordinal
++    assert all(tier.witnessed is True for tier in first.tiers)
++    assert all(tier.projection == "synced" for tier in first.tiers)
++    assert all(tier.tick_ids == () and tier.dispatches == () for tier in first.tiers)
++    a_source = a_tier.sources[0]
++    failed_b_source = failed_b_tier.sources[0]
++    assert a_source.status == "ok"
++    assert failed_b_source.status == "error"
++    assert failed_b_source.returncode == 7
++    assert failed_b_source.stderr == "b failed"
++    assert failed_b_source.error_type == "SourceError"
++    assert len(failed_b_source.facts) == int(failed_after_yield)
++    assert (
++        first.error_lifecycle_ids
++        == first.durable_error_lifecycle_ids
++        == (failed_b_source.lifecycle_id,)
++    )
++    assert attempts == Counter(a=1, b=1)
++
++    after_failure = _internal_page(vertex)
++    assert after_failure.basis is not None
++    assert after_failure.basis.lineage == initialized.lineage
++    assert after_failure.basis.captured_head == failed_b_tier.commit.after
++    assert after_failure.basis.projected_through == after_failure.basis.captured_head
++    first_appended_ids = [*a_tier.fact_ids, *failed_b_tier.fact_ids]
++    after_failure_ids = [item["id"] for item in after_failure.items]
++    assert after_failure_ids == baseline_ids + first_appended_ids
++    assert len(after_failure_ids) == len(set(after_failure_ids))
++    by_id = {item["id"]: item for item in after_failure.items}
++    for source in (a_source, failed_b_source):
++        assert source.lifecycle_fact is not None
++        for fact in (*source.facts, source.lifecycle_fact):
++            persisted = by_id[fact.id]
++            assert (
++                persisted["kind"],
++                persisted["ts"],
++                persisted["observer"],
++                persisted["origin"],
++                persisted["payload"],
++            ) == (
++                fact.kind,
++                fact.ts,
++                fact.observer,
++                fact.origin,
++                fact.payload,
++            )
++    assert by_id[a_source.lifecycle_id]["payload"]["status"] == "ok"
++    failed_lifecycle = by_id[failed_b_source.lifecycle_id]
++    assert failed_lifecycle["kind"] == "_sync.b"
++    assert failed_lifecycle["payload"] == {
++        "command": "collect-b",
++        "status": "error",
++        "count": int(failed_after_yield),
++        "invocation_id": first.invocation_id,
++        "source_index": 1,
++        "stderr": "b failed",
++        "returncode": 7,
++        "error_type": "SourceError",
++        "error": failed_b_source.error_message,
++    }
++    assert by_id[first.overall_sync_id]["payload"]["status"] == "error"
++    failed_b_ids = [fact.id for fact in failed_b_source.facts]
++    assert all(read_fact_by_id(vertex, fact_id).found for fact_id in failed_b_ids)
++    first_verified = verify_target(vertex)
++    assert first_verified.captured_head == failed_b_tier.commit.after
++    assert first_verified.verified_through == after_failure.basis.captured_head
++    assert first_verified.claims == ("grammar", "density", "lineage", "hash-chain")
++    assert "signature-authorship" in first_verified.excludes
++    json.dumps(first.as_dict(), allow_nan=False)
++
++    invocation = "resume"
++    reopened = MappedCredentialProvider(
++        tmp_path / "custody",
++        namespace="source-workload",
++        receipt_observer="alice",
++    )
++    resumed = asyncio.run(
++        run_sources(
++            vertex,
++            observer="alice",
++            force=False,
++            credentials=reopened,
++            collector_factory=collector,
++            evaluated_at=20.0,
++        )
++    )
++    assert resumed.status == "ok"
++    assert resumed.terminal is None
++    assert resumed.known_uncommitted is None and resumed.unknown is None
++    assert resumed.invocation_id != first.invocation_id
++    assert resumed.initial_basis is not None
++    assert resumed.initial_basis.captured_head == failed_b_tier.commit.after
++    assert resumed.initial_basis.projected_through == resumed.initial_basis.captured_head
++    a_cadence, b_cadence = resumed.cadence
++    assert all(not item.forced and item.evaluated_at == 20.0 for item in resumed.cadence)
++    assert a_cadence.kind == "a" and a_cadence.mode == "elapsed"
++    assert a_cadence.latest_success_id == a_source.lifecycle_id
++    assert a_cadence.latest_success_ts == 12.0
++    assert a_cadence.interval_seconds == 3600.0
++    assert a_cadence.qualified is False
++    assert b_cadence.kind == "b" and b_cadence.mode == "triggered"
++    assert b_cadence.latest_success_id is None
++    assert b_cadence.trigger_fact_ids == (a_source.lifecycle_id,)
++    assert b_cadence.qualified is True
++    assert resumed.tier_decisions == ((1,),)
++    assert len(resumed.tiers) == 1
++    resumed_tier = resumed.tiers[0]
++    assert resumed_tier.outcome == "committed"
++    assert resumed.bases == (resumed.initial_basis,) == (resumed_tier.basis,)
++    assert resumed_tier.commit is not None
++    assert resumed_tier.commit.before == failed_b_tier.commit.after
++    assert resumed_tier.commit.after.lineage == resumed_tier.commit.before.lineage
++    assert resumed_tier.commit.after.ordinal > resumed_tier.commit.before.ordinal
++    assert resumed_tier.witnessed is True and resumed_tier.projection == "synced"
++    resumed_b_source = resumed_tier.sources[0]
++    assert resumed_b_source.kind == "b" and resumed_b_source.status == "ok"
++    assert len(resumed_b_source.facts) == 1
++    assert resumed.error_lifecycle_ids == resumed.durable_error_lifecycle_ids == ()
++    assert attempts == Counter(a=1, b=2)
++
++    resumed_b_id = resumed_b_source.facts[0].id
++    assert resumed_b_id not in failed_b_ids
++    assert set(resumed_tier.fact_ids).isdisjoint(first_appended_ids)
++    final_page = _internal_page(vertex)
++    assert final_page.basis is not None
++    assert final_page.basis.captured_head == resumed_tier.commit.after
++    assert final_page.basis.projected_through == final_page.basis.captured_head
++    final_ids = [item["id"] for item in final_page.items]
++    assert final_ids == after_failure_ids + list(resumed_tier.fact_ids)
++    assert len(final_ids) == len(set(final_ids))
++    domain_facts = {item["id"]: item for item in final_page.items if item["kind"] in {"a", "b"}}
++    expected_domain_ids = {a_source.facts[0].id, resumed_b_id, *failed_b_ids}
++    assert set(domain_facts) == expected_domain_ids
++    assert domain_facts[a_source.facts[0].id]["kind"] == "a"
++    assert domain_facts[a_source.facts[0].id]["payload"] == {"logical": "a"}
++    for fact_id in (resumed_b_id, *failed_b_ids):
++        assert domain_facts[fact_id]["kind"] == "b"
++        assert domain_facts[fact_id]["payload"] == {"logical": "b"}
++    final_by_id = {item["id"]: item for item in final_page.items}
++    assert all(final_by_id[fact_id] == row for fact_id, row in by_id.items())
++    assert final_by_id[resumed_b_source.lifecycle_id]["payload"]["status"] == "ok"
++    assert final_by_id[resumed.overall_sync_id]["payload"]["status"] == "ok"
++    assert read_fact_by_id(vertex, resumed_b_id).found is True
++    final_verified = verify_target(vertex)
++    assert final_verified.captured_head == resumed_tier.commit.after
++    assert final_verified.verified_through == final_page.basis.captured_head
++    assert final_verified.claims == first_verified.claims
++    assert final_verified.excludes == first_verified.excludes
++    json.dumps(resumed.as_dict(), allow_nan=False)

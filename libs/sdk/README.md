@@ -309,9 +309,23 @@ for tier in result.tiers:
 - **`await run_sources(target, *, observer, force=False, credentials=None, registry=None, collector_factory=None, dispatcher=None, evaluated_at=None) -> SourceRunResult`**:
   Captures a CURRENT Arrival Authority before collection, fixes cadence and dependency tiers, and commits each collected tier with one exact-head batch append plus explicit projection synchronization. The lifecycle observer is always explicit. Existing custody keys are loaded when present; the operation never creates keys.
 
-  A source error after yielding observations returns `status="error"` after its error lifecycle fact becomes durable. Interrupted results retain prior commits and distinguish `known_uncommitted` collection from an append whose durability is `unknown`; collectors are not rerun. When `dispatcher` is omitted, captured tick run intents remain visible with `dispatch_status="not-requested"` and `attempted=False`. This operation supports explicit single-store Arrival Authority descriptors only and never falls through to legacy source execution.
+  When the invocation finishes without a terminal failure, a source error returns `status="error"` with its yielded observations and error lifecycle fact durable. Interrupted results retain prior commits and distinguish `known_uncommitted` collection from an append whose durability is `unknown`; collectors are not rerun within the invocation. When `dispatcher` is omitted, captured tick run intents remain visible with `dispatch_status="not-requested"` and `attempted=False`. This operation supports explicit single-store Arrival Authority descriptors only and never falls through to legacy source execution.
 
   Coordinator failures during ID allocation, lifecycle construction, or otherwise successful collector cleanup return an incomplete result with terminal category `collection-failed`. `terminal.details.collection` contains the current tier's basis, `custody="not-attempted"`, completed siblings, and paired partial observations from failed or cancelled siblings. Incomplete attempts have no lifecycle fact; prior tiers keep their commits. These partial observations live in terminal evidence, not `known_uncommitted`, which describes a fully collected tier. Owned iterators and distinct iterable owners receive `aclose()` when available; caller cancellation propagates after sibling cleanup. Closing a collector does not undo its external effects or guarantee subprocess termination.
+
+  Calling `run_sources` again is a fresh, cadence-based invocation with fresh
+  generated IDs; it is not a resume token for retained collector output. For
+  example, an upstream source can remain skipped by its persisted successful
+  cadence while a downstream source retries from its persisted trigger. A
+  downstream failure before yielding leaves no domain observation from that
+  collector attempt to repeat; it says nothing about its external effects. If
+  it yielded before reporting a `SourceError` and that tier has an actual
+  commit, the observation and error lifecycle are durable. A later fresh
+  invocation can collect the same logical observation again under a distinct
+  fact ID. Callers need a source-specific idempotency or reconciliation policy
+  for external effects and overlapping collected observations. The public
+  two-tier case is exercised in
+  [`tests/test_arrival_source_resumption_workload.py`](tests/test_arrival_source_resumption_workload.py).
 
 ### 5. Declaration, Scaffolding & Ceremonies
 

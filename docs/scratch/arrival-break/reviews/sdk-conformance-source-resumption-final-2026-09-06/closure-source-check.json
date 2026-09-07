@@ -1,0 +1,17 @@
+{
+  "checked_at": "2026-09-07T01:53:08.679412+00:00",
+  "before_maintained_status_updates": true,
+  "checks": {
+    "libs/sdk/tests/test_arrival_source_resumption_workload.py": true,
+    "libs/sdk/README.md": true,
+    "docs/scratch/arrival-break/sdk-conformance-source-resumption-2026-09-06.md": true,
+    "libs/engine/src/engine/arrival_sources.py": true,
+    "libs/sdk/src/sdk/sources.py": true,
+    "docs/scratch/arrival-break/reviews/sdk-conformance-source-resumption-final-2026-09-06/validation-evidence/focused-pytest.log": true,
+    "docs/scratch/arrival-break/reviews/sdk-conformance-source-resumption-final-2026-09-06/validation-evidence/ruff.log": true,
+    "docs/scratch/arrival-break/reviews/sdk-conformance-source-resumption-final-2026-09-06/validation-evidence/sdk-full.txt": true,
+    "docs/scratch/arrival-break/reviews/sdk-conformance-source-resumption-final-2026-09-06/validation-evidence/architecture-full.txt": true,
+    "docs/scratch/arrival-break/reviews/sdk-conformance-source-resumption-final-2026-09-06/validation-evidence/engine-sources.txt": true,
+    "packet": true
+  }
+}

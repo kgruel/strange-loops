@@ -1,0 +1,2940 @@
+You are the final adversarial reviewer for a bounded public SDK workload-conformance slice. Use Fable 5.1 LOW. Static review only; no tools, execution, delegation or modifications. Return ACCEPT or REVISE, blockers with source locations, concrete false positives and smallest corrections, then optional findings. Do not infer validation you did not run.
+Baseline d75aae9e. User-approved scope: mapped public source execution with partial failure, inspection of persisted tiers, and safe continuation decisions. The test parameterizes a downstream SourceError before versus after yielding one observation; a fresh non-forced invocation should skip a successful elapsed upstream and run the failed triggered downstream successfully. The after-yield case should explicitly retain repeated logical observations under distinct fact IDs. There is no resume-token API, automatic deduplication or exactly-once collection/dispatch guarantee. The test uses in-memory collectors; no external side effects are being tested. Existing engine/SDK tests separately cover unknown append, known-uncommitted, collection failure, projection and dispatch failures. No production change intended.
+Assess causal specificity of source failure and success, exact durable tier/fact/lifecycle identities versus status strings, fresh per-tier/public read bases, lineage/head alignment, accurate deterministic timing and cadence evidence, correct skip/retry behavior and fresh identities across invocations, strict JSON evidence, isolated mapped fixtures, and documentation claim boundaries. Full prefix verification does not verify signatures/key trust/projected rows; explicit comparisons and existing mapped signing tests are complementary. Do not demand C9 retirement, generic retry APIs or unrelated scope expansion. Native logs are prior executed validation, not reviewer execution.
+
+
+===== libs/sdk/tests/test_arrival_source_resumption_workload.py =====
+1: """Public mapped-custody conformance for partial source-tier resumption."""
+2: 
+3: from __future__ import annotations
+4: 
+5: import asyncio
+6: import json
+7: from collections import Counter
+8: from pathlib import Path
+9: 
+10: import pytest
+11: from atoms import Fact, SourceError
+12: 
+13: import sdk.sources as sdk_sources
+14: from sdk import (
+15:     MappedCredentialProvider,
+16:     edit_declaration,
+17:     init_vertex,
+18:     read_fact_by_id,
+19:     read_facts,
+20:     run_sources,
+21:     verify_target,
+22: )
+23: 
+24: 
+25: @pytest.fixture(autouse=True)
+26: def _isolated_process_roots(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+27:     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+28:     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+29:     monkeypatch.setenv("LOOPS_HOME", str(tmp_path / "loops-home"))
+30: 
+31: 
+32: def _source_declaration(vertex: Path) -> str:
+33:     (vertex.parent / "a.loop").write_text(
+34:         'kind "a"\nobserver "alice"\nsource "collect-a"\nevery "1h"\n',
+35:         encoding="utf-8",
+36:     )
+37:     (vertex.parent / "b.loop").write_text(
+38:         'kind "b"\nobserver "alice"\nsource "collect-b"\non "_sync.a"\n',
+39:         encoding="utf-8",
+40:     )
+41:     current = vertex.read_text(encoding="utf-8")
+42:     with_sources = current.replace(
+43:         "loops {",
+44:         'sources {\n  path "./a.loop"\n  path "./b.loop"\n}\n\nloops {',
+45:         1,
+46:     )
+47:     item = '  item {\n    fold {\n      items "collect" 100\n    }\n  }\n'
+48:     added = (
+49:         '  a {\n    fold { items "collect" 20 }\n  }\n  b {\n    fold { items "collect" 20 }\n  }\n'
+50:     )
+51:     assert with_sources.count(item) == 1
+52:     return with_sources.replace(item, item + added)
+53: 
+54: 
+55: def _internal_page(vertex: Path):
+56:     page = read_facts(
+57:         vertex,
+58:         include_internal=True,
+59:         limit=100,
+60:         order="oldest",
+61:     )
+62:     assert page.truncated is False
+63:     return page
+64: 
+65: 
+66: @pytest.mark.parametrize("failed_after_yield", [False, True])
+67: def test_mapped_source_failure_has_honest_fresh_invocation_resume(
+68:     tmp_path: Path,
+69:     monkeypatch: pytest.MonkeyPatch,
+70:     failed_after_yield: bool,
+71: ) -> None:
+72:     provider = MappedCredentialProvider(
+73:         tmp_path / "custody",
+74:         namespace="source-workload",
+75:         receipt_observer="alice",
+76:     )
+77:     provider.create_binding("alice", token="create-alice")
+78:     vertex = tmp_path / "sources.vertex"
+79:     initialized = init_vertex(
+80:         vertex,
+81:         name="source-workload",
+82:         store_type="arrival",
+83:         location=(tmp_path / "data" / "sources.arrival").resolve(),
+84:         observer="alice",
+85:         strict=True,
+86:         credentials=provider,
+87:     )
+88:     assert initialized.lineage is not None
+89:     declared = edit_declaration(
+90:         vertex,
+91:         _source_declaration(vertex),
+92:         observer="alice",
+93:         credentials=provider,
+94:     )
+95:     assert declared.status == "applied"
+96:     assert declared.commit is not None
+97:     baseline = _internal_page(vertex)
+98:     assert baseline.basis is not None
+99:     assert baseline.basis.captured_head == declared.commit.after
+100:     assert baseline.basis.projected_through == baseline.basis.captured_head
+101:     baseline_ids = [item["id"] for item in baseline.items]
+102: 
+103:     original_execute = sdk_sources.execute_source_invocation
+104:     execution_clocks = iter((12.0, 22.0))
+105: 
+106:     async def deterministic_execute(*args, **kwargs):
+107:         now = next(execution_clocks)
+108:         return await original_execute(*args, **kwargs, clock=lambda: now)
+109: 
+110:     monkeypatch.setattr(
+111:         sdk_sources,
+112:         "execute_source_invocation",
+113:         deterministic_execute,
+114:     )
+115:     attempts: Counter[str] = Counter()
+116:     invocation = "first"
+117: 
+118:     def collector(source):
+119:         async def collect():
+120:             attempts[source.kind] += 1
+121:             if source.kind == "a":
+122:                 assert invocation == "first"
+123:                 yield Fact("a", 11.0, {"logical": "a"}, observer="alice")
+124:                 return
+125:             assert source.kind == "b"
+126:             if invocation == "first":
+127:                 if failed_after_yield:
+128:                     yield Fact("b", 11.5, {"logical": "b"}, observer="alice")
+129:                 raise SourceError(source.command, returncode=7, stderr="b failed")
+130:             yield Fact("b", 11.5, {"logical": "b"}, observer="alice")
+131: 
+132:         return collect()
+133: 
+134:     first = asyncio.run(
+135:         run_sources(
+136:             vertex,
+137:             observer="alice",
+138:             force=True,
+139:             credentials=provider,
+140:             collector_factory=collector,
+141:             evaluated_at=10.0,
+142:         )
+143:     )
+144:     assert first.status == "error"
+145:     assert first.terminal is None
+146:     assert first.known_uncommitted is None and first.unknown is None
+147:     assert first.initial_basis == baseline.basis
+148:     assert all(item.forced and item.evaluated_at == 10.0 for item in first.cadence)
+149:     assert first.tier_decisions == ((0,), (1,))
+150:     assert len(first.bases) == len(first.tiers) == 2
+151:     a_tier, failed_b_tier = first.tiers
+152:     assert first.bases == (a_tier.basis, failed_b_tier.basis)
+153:     assert a_tier.basis == first.initial_basis
+154:     assert a_tier.outcome == failed_b_tier.outcome == "committed"
+155:     assert a_tier.commit is not None and failed_b_tier.commit is not None
+156:     assert a_tier.commit.before == declared.commit.after
+157:     assert a_tier.commit.after.lineage == a_tier.commit.before.lineage
+158:     assert a_tier.commit.after.ordinal > a_tier.commit.before.ordinal
+159:     assert failed_b_tier.basis is not None
+160:     assert failed_b_tier.basis.captured_head == a_tier.commit.after
+161:     assert failed_b_tier.basis.projected_through == a_tier.commit.after
+162:     assert failed_b_tier.commit.before == a_tier.commit.after
+163:     assert failed_b_tier.commit.after.lineage == failed_b_tier.commit.before.lineage
+164:     assert failed_b_tier.commit.after.ordinal > failed_b_tier.commit.before.ordinal
+165:     assert all(tier.witnessed is True for tier in first.tiers)
+166:     assert all(tier.projection == "synced" for tier in first.tiers)
+167:     assert all(tier.tick_ids == () and tier.dispatches == () for tier in first.tiers)
+168:     a_source = a_tier.sources[0]
+169:     failed_b_source = failed_b_tier.sources[0]
+170:     assert a_source.status == "ok"
+171:     assert failed_b_source.status == "error"
+172:     assert failed_b_source.returncode == 7
+173:     assert failed_b_source.stderr == "b failed"
+174:     assert failed_b_source.error_type == "SourceError"
+175:     assert len(failed_b_source.facts) == int(failed_after_yield)
+176:     assert (
+177:         first.error_lifecycle_ids
+178:         == first.durable_error_lifecycle_ids
+179:         == (failed_b_source.lifecycle_id,)
+180:     )
+181:     assert attempts == Counter(a=1, b=1)
+182: 
+183:     after_failure = _internal_page(vertex)
+184:     assert after_failure.basis is not None
+185:     assert after_failure.basis.lineage == initialized.lineage
+186:     assert after_failure.basis.captured_head == failed_b_tier.commit.after
+187:     assert after_failure.basis.projected_through == after_failure.basis.captured_head
+188:     first_appended_ids = [*a_tier.fact_ids, *failed_b_tier.fact_ids]
+189:     after_failure_ids = [item["id"] for item in after_failure.items]
+190:     assert after_failure_ids == baseline_ids + first_appended_ids
+191:     assert len(after_failure_ids) == len(set(after_failure_ids))
+192:     by_id = {item["id"]: item for item in after_failure.items}
+193:     for source in (a_source, failed_b_source):
+194:         assert source.lifecycle_fact is not None
+195:         for fact in (*source.facts, source.lifecycle_fact):
+196:             persisted = by_id[fact.id]
+197:             assert (
+198:                 persisted["kind"],
+199:                 persisted["ts"],
+200:                 persisted["observer"],
+201:                 persisted["origin"],
+202:                 persisted["payload"],
+203:             ) == (
+204:                 fact.kind,
+205:                 fact.ts,
+206:                 fact.observer,
+207:                 fact.origin,
+208:                 fact.payload,
+209:             )
+210:     assert by_id[a_source.lifecycle_id]["payload"]["status"] == "ok"
+211:     failed_lifecycle = by_id[failed_b_source.lifecycle_id]
+212:     assert failed_lifecycle["kind"] == "_sync.b"
+213:     assert failed_lifecycle["payload"] == {
+214:         "command": "collect-b",
+215:         "status": "error",
+216:         "count": int(failed_after_yield),
+217:         "invocation_id": first.invocation_id,
+218:         "source_index": 1,
+219:         "stderr": "b failed",
+220:         "returncode": 7,
+221:         "error_type": "SourceError",
+222:         "error": failed_b_source.error_message,
+223:     }
+224:     assert by_id[first.overall_sync_id]["payload"]["status"] == "error"
+225:     failed_b_ids = [fact.id for fact in failed_b_source.facts]
+226:     assert all(read_fact_by_id(vertex, fact_id).found for fact_id in failed_b_ids)
+227:     first_verified = verify_target(vertex)
+228:     assert first_verified.captured_head == failed_b_tier.commit.after
+229:     assert first_verified.verified_through == after_failure.basis.captured_head
+230:     assert first_verified.claims == ("grammar", "density", "lineage", "hash-chain")
+231:     assert "signature-authorship" in first_verified.excludes
+232:     json.dumps(first.as_dict(), allow_nan=False)
+233: 
+234:     invocation = "resume"
+235:     reopened = MappedCredentialProvider(
+236:         tmp_path / "custody",
+237:         namespace="source-workload",
+238:         receipt_observer="alice",
+239:     )
+240:     resumed = asyncio.run(
+241:         run_sources(
+242:             vertex,
+243:             observer="alice",
+244:             force=False,
+245:             credentials=reopened,
+246:             collector_factory=collector,
+247:             evaluated_at=20.0,
+248:         )
+249:     )
+250:     assert resumed.status == "ok"
+251:     assert resumed.terminal is None
+252:     assert resumed.known_uncommitted is None and resumed.unknown is None
+253:     assert resumed.invocation_id != first.invocation_id
+254:     assert resumed.initial_basis is not None
+255:     assert resumed.initial_basis.captured_head == failed_b_tier.commit.after
+256:     assert resumed.initial_basis.projected_through == resumed.initial_basis.captured_head
+257:     a_cadence, b_cadence = resumed.cadence
+258:     assert all(not item.forced and item.evaluated_at == 20.0 for item in resumed.cadence)
+259:     assert a_cadence.kind == "a" and a_cadence.mode == "elapsed"
+260:     assert a_cadence.latest_success_id == a_source.lifecycle_id
+261:     assert a_cadence.latest_success_ts == 12.0
+262:     assert a_cadence.interval_seconds == 3600.0
+263:     assert a_cadence.qualified is False
+264:     assert b_cadence.kind == "b" and b_cadence.mode == "triggered"
+265:     assert b_cadence.latest_success_id is None
+266:     assert b_cadence.trigger_fact_ids == (a_source.lifecycle_id,)
+267:     assert b_cadence.qualified is True
+268:     assert resumed.tier_decisions == ((1,),)
+269:     assert len(resumed.tiers) == 1
+270:     resumed_tier = resumed.tiers[0]
+271:     assert resumed_tier.outcome == "committed"
+272:     assert resumed.bases == (resumed.initial_basis,) == (resumed_tier.basis,)
+273:     assert resumed_tier.commit is not None
+274:     assert resumed_tier.commit.before == failed_b_tier.commit.after
+275:     assert resumed_tier.commit.after.lineage == resumed_tier.commit.before.lineage
+276:     assert resumed_tier.commit.after.ordinal > resumed_tier.commit.before.ordinal
+277:     assert resumed_tier.witnessed is True and resumed_tier.projection == "synced"
+278:     resumed_b_source = resumed_tier.sources[0]
+279:     assert resumed_b_source.kind == "b" and resumed_b_source.status == "ok"
+280:     assert len(resumed_b_source.facts) == 1
+281:     assert resumed.error_lifecycle_ids == resumed.durable_error_lifecycle_ids == ()
+282:     assert attempts == Counter(a=1, b=2)
+283: 
+284:     resumed_b_id = resumed_b_source.facts[0].id
+285:     assert resumed_b_id not in failed_b_ids
+286:     assert set(resumed_tier.fact_ids).isdisjoint(first_appended_ids)
+287:     final_page = _internal_page(vertex)
+288:     assert final_page.basis is not None
+289:     assert final_page.basis.captured_head == resumed_tier.commit.after
+290:     assert final_page.basis.projected_through == final_page.basis.captured_head
+291:     final_ids = [item["id"] for item in final_page.items]
+292:     assert final_ids == after_failure_ids + list(resumed_tier.fact_ids)
+293:     assert len(final_ids) == len(set(final_ids))
+294:     domain_facts = {item["id"]: item for item in final_page.items if item["kind"] in {"a", "b"}}
+295:     expected_domain_ids = {a_source.facts[0].id, resumed_b_id, *failed_b_ids}
+296:     assert set(domain_facts) == expected_domain_ids
+297:     assert domain_facts[a_source.facts[0].id]["kind"] == "a"
+298:     assert domain_facts[a_source.facts[0].id]["payload"] == {"logical": "a"}
+299:     for fact_id in (resumed_b_id, *failed_b_ids):
+300:         assert domain_facts[fact_id]["kind"] == "b"
+301:         assert domain_facts[fact_id]["payload"] == {"logical": "b"}
+302:     final_by_id = {item["id"]: item for item in final_page.items}
+303:     assert all(final_by_id[fact_id] == row for fact_id, row in by_id.items())
+304:     assert final_by_id[resumed_b_source.lifecycle_id]["payload"]["status"] == "ok"
+305:     assert final_by_id[resumed.overall_sync_id]["payload"]["status"] == "ok"
+306:     assert read_fact_by_id(vertex, resumed_b_id).found is True
+307:     final_verified = verify_target(vertex)
+308:     assert final_verified.captured_head == resumed_tier.commit.after
+309:     assert final_verified.verified_through == final_page.basis.captured_head
+310:     assert final_verified.claims == first_verified.claims
+311:     assert final_verified.excludes == first_verified.excludes
+312:     json.dumps(resumed.as_dict(), allow_nan=False)
+
+===== libs/sdk/README.md =====
+1: # sdk — Loops Apex Composition Library
+2: 
+3: `sdk` is the headless composition layer uniting `engine`, `custody`, `lang`, `store`, `atoms`, and `sign` into unified, typed operations. It serves as the single foundation for presentation layers (`apps/loops`, TUI, external agents, Python scripts) without leaking presentation logic into the core substrate.
+4: 
+5: ---
+6: 
+7: ## Architectural Guarantees
+8: 
+9: - **Zero Presentation Logic**: Returns pure typed dataclasses; never formats terminal escape codes or parses CLI flags.
+10: - **Descriptor-First Arrival Reads**: An explicitly declared backend and instance role select the adapter; store locations remain opaque to the SDK.
+11: - **Visible Legacy Boundary**: Bare `.jsonl`/SQLite inputs remain transitional and every read result labels its path as `legacy` with `basis=None`.
+12: - **Witness-Axis Honesty**: Fact listing and pagination use append-order cursors (`WitnessPosition`) ensuring deterministic, non-lossy walks.
+13: - **Declared Admission & Attestation**: Fact emission enforces declared observer and kind admission policies, signing with operation-fresh custody keys.
+14: - **AST-Verified Ceremonies**: Declarative vertex modifications are verified against the language grammar and executed via transactional plan/apply ceremonies.
+15: 
+16: ---
+17: 
+18: ## API Reference
+19: 
+20: ### 1. Target Resolution & Discovery
+21: 
+22: ```python
+23: from sdk import resolve_arrival_target, resolve_target, discover_targets, TargetInfo
+24: 
+25: # Supported Arrival target: the descriptor carries backend, opaque location,
+26: # optional lineage pin, and mandatory instance role.
+27: arrival = resolve_arrival_target("path/to/target.vertex")
+28: # -> ArrivalTarget(store=StoreDescriptorInfo(backend='file', location='...', role='replica'))
+29: 
+30: # Single target probe
+31: info = resolve_target("path/to/target.vertex")
+32: # -> TargetInfo(target_type='vertex', canonical_mode='sqlite', canonical_path=..., index_path=..., exists=True, ...)
+33: 
+34: # Multi-target workspace discovery
+35: targets = discover_targets(".", recursive=True)
+36: ```
+37: 
+38: - **`resolve_target(target: Path | str) -> TargetInfo`**:
+39:   Transitional filesystem probe for legacy targets. Raises `TargetNotFound` or `TargetUnsupported`.
+40: - **`resolve_arrival_target(target: Path | str) -> ArrivalTarget`**:
+41:   Parses an explicit vertex descriptor without probing or normalizing its backend-owned location. It refuses suffix inference and an omitted instance role.
+42: - **`discover_targets(root_path=".", *, recursive=True, include_bare=True) -> list[TargetInfo]`**:
+43:   Discovers all Loops vertices and bare stores in a directory tree.
+44: 
+45: ---
+46: 
+47: ### 2. Read Operations
+48: 
+49: ```python
+50: from sdk import (
+51:     read_summary,
+52:     read_facts,
+53:     read_state,
+54:     read_ticks,
+55:     read_fact_by_id,
+56:     search_facts,
+57:     resolve_entity,
+58:     read_timeline,
+59:     sync_target,
+60: )
+61: 
+62: # Target statistical summary & kind inventory
+63: summary = read_summary("target.vertex")
+64: # -> ReadSummary(read_path='arrival', basis=ReadBasis(...), store=StoreDescriptorInfo(...), ...)
+65: 
+66: # Bounded, cursor-bearing fact pagination
+67: page = read_facts("target.vertex", limit=10, order="newest")
+68: # -> FactPageResult(items=[...], next_cursor=..., truncated=True, order='newest')
+69: 
+70: # Arrival continuations are process-local capabilities. Pass next_cursor back
+71: # to read_facts() directly; as_dict() reports has_continuation=True and redacts
+72: # the engine value instead of emitting an unprotected wire token.
+73: 
+74: # Folded vertex state
+75: state = read_state("target.vertex", kind="note")
+76: # -> FoldStateResult(vertex_name='target', sections={'note': {'count': 10, 'items': [...]}})
+77: 
+78: # Full-text search across observation payloads
+79: search_res = search_facts("target.vertex", query="refactor auth", limit=10)
+80: # -> SearchResult(query='refactor auth', matches=[...], total_matches=1)
+81: 
+82: # Domain entity fold-key resolution
+83: fact_id = resolve_entity("target.vertex", kind="task", key="task_id", value="T-100")
+84: 
+85: # Interleaved chronological timeline (facts + ticks)
+86: timeline = read_timeline("target.vertex", limit=50)
+87: 
+88: # Explicit projection synchronization. Arrival sync first attests custody and
+89: # catches a missing or behind projection up through the captured head.
+90: sync_res = sync_target("target.vertex")
+91: # -> SyncResult(read_path='arrival', captured_head=..., target=...,
+92: #               projected_before=..., projected_after=..., changed=True, ...)
+93: 
+94: # Tick records
+95: ticks = read_ticks("target.vertex", name="default")
+96: for tick in ticks.items:
+97:     print(tick["name"])
+98: 
+99: # Fact lookup by full ID or prefix
+100: lookup = read_fact_by_id("target.vertex", "01M01...")
+101: fact = lookup.fact
+102: ```
+103: 
+104: `read_summary`, `read_facts`, `read_state`, `read_ticks`, and
+105: `read_fact_by_id` always return typed result models. Descriptor-first results
+106: carry the custody head and represented projection prefix in `basis`; legacy
+107: results carry `read_path="legacy"` and `basis=None`. Descriptor reads require a
+108: current projection and never materialize, repair, or catch it up. Search,
+109: entity resolution, and timelines carry the same captured basis. Aggregate
+110: state, summary and timeline results retain per-occurrence member bases rather
+111: than inventing one shared head. `sync_target` is the
+112: explicit maintenance boundary: it may catch up a missing or behind Arrival
+113: projection, while inconsistent existing state and rebuild requests refuse.
+114: 
+115: Arrival read operations, including `resolve_entity`, `read_timeline`, and
+116: `inspect_declaration`, accept an optional keyword-only `registry=` for custom
+117: `engine.arrival_registry.BackendRegistry` instances. Omission selects the
+118: built-in backends. A supplied registry handles every supported root and member
+119: Arrival open; unknown backends refuse without fallback, and non-file locations reach
+120: the named adapter unchanged. Timeline reuses its captured root when the
+121: effective declaration selects aggregation. Entity resolution and declaration
+122: inspection retain their current Arrival aggregate restrictions.
+123: Legacy targets keep their existing behavior and do not consult the registry.
+124: 
+125: `export_target("target.vertex", "snapshot.jsonl")` writes an exact captured
+126: wire prefix and returns its manifest, selected/captured heads and byte count.
+127: It refuses to replace an existing output. A late source failure publishes no
+128: partial artifact; a directory-sync failure after publication raises
+129: `ExportPublicationError` with `published=True` and the complete artifact's
+130: identity. Export requires no current query projection. Import and replication
+131: are still pending their explicit initialization/restoration boundary.
+132: 
+133: ---
+134: 
+135: ### 3. Fact Emission
+136: 
+137: ```python
+138: from sdk import BatchEmitResult, EmitReceipt, emit_batch, emit_fact, preview_emission
+139: from atoms import Fact
+140: 
+141: # Emitting by kind and payload
+142: receipt = emit_fact(
+143:     "target.vertex",
+144:     kind_or_fact="note",
+145:     payload={"title": "Meeting Notes", "body": "Discussed SDK API"},
+146:     observer="alice",
+147: )
+148: # Descriptor-first Arrival receipts carry the captured head, durable Commit,
+149: # witness state, and post-commit projection status.
+150: 
+151: # Or preflight dry-run simulation
+152: preview = preview_emission("target.vertex", "note", {"title": "Test"}, observer="alice")
+153: 
+154: # A descriptor-first batch is planned from one snapshot and uses one append.
+155: batch = emit_batch(
+156:     "target.vertex",
+157:     [fact, ("note", {"title": "Batch item"})],
+158:     observer="alice",
+159: )
+160: for receipt in batch.items:
+161:     print(receipt.id, receipt.stored)
+162: print(batch.commit, batch.atomicity, batch.projection)
+163: ```
+164: 
+165: - **`emit_fact(target, kind_or_fact, payload=None, *, observer=None, origin="", ts=None, id_override=None, credentials=None, admit_undeclared=False, dry_run=False, registry=None) -> EmitReceipt`**:
+166:   Emits a fact (or `Fact` atom) under declared admission rules. Descriptor-first Arrival writes prepare from one CURRENT snapshot, append once against its captured full head, witness the commit, then explicitly synchronize the projection. Bypassing strict kind admission requires `admit_undeclared=True`. Deterministic IDs can be specified with `id_override`. `dry_run=True` simulates emission without storage.
+167: - **`preview_emission(target, kind_or_fact, payload=None, *, observer=None, origin="", ts=None, admit_undeclared=False, credentials=None, registry=None) -> EmitPreviewResult`**:
+168:   Simulates emission against declared policies, checking fold key requirements without disk side effects. Arrival policy and fold metadata come from the same bounded effective declaration used for planning; a missing projection refuses without materializing it.
+169: - **`emit_batch(target, facts, *, observer=None, origin="", credentials=None, admit_undeclared=False, registry=None) -> BatchEmitResult`**:
+170:   Normalizes every item before resolving the target. A descriptor-first Arrival batch derives all per-item admission decisions from one current snapshot, appends the packed records under one head comparison, witnesses one shared commit, and explicitly synchronizes the projection. Each mapping item may set its own boolean `admit_undeclared`; duplicate receipts retain `stored=False`. Empty input is an explicit zero-write result. Legacy targets return the same wrapper with `atomic=False`, `atomicity="legacy-sequential"`, and no invented shared commit; `LegacyBatchPartialFailure` retains receipts if that sequential loop stops after an observable prefix.
+171: 
+172: `CustodyCredentialProvider()` and `CustodyCredentialProvider(key_dir=None)` use
+173: the existing custody resolver. A non-`None` `key_dir` now raises
+174: `SdkValueError` during construction because directory overrides were previously
+175: accepted but ignored. This applies before either Arrival or legacy operations
+176: can use the provider. Callers that need another credential source can continue
+177: to supply a custom `CredentialProvider`; that interface does not itself create
+178: an observer mapping or register public keys.
+179: 
+180: For an explicit persisted namespace, use `MappedCredentialProvider` with an
+181: Arrival target. Prepare the binding separately from initializing the store:
+182: 
+183: ```python
+184: from pathlib import Path
+185: from sdk import MappedCredentialProvider, init_vertex, emit_fact
+186: 
+187: credentials = MappedCredentialProvider(
+188:     Path("/absolute/path/to/private-custody"),
+189:     namespace="personal",
+190:     receipt_observer="alice",  # explicit local receipt-signing selection
+191: )
+192: binding = credentials.create_binding("alice", token="bootstrap-alice-1")
+193: init_vertex(
+194:     Path("observations.vertex"), store_type="arrival", observer="alice",
+195:     credentials=credentials,
+196: )
+197: emit_fact(
+198:     Path("observations.vertex"), "item", {"value": 1},
+199:     observer="alice", credentials=credentials,
+200: )
+201: ```
+202: 
+203: Mapped selection uses the exact namespace and observer, independently of the
+204: vertex filename or lineage. The engine checks author keys against verified
+205: history through captured H, for use after H, and verifies each signature in its
+206: own domain. Receipt signing uses the explicitly selected local observer and
+207: the effective declaration's current receipt-key policy; the unsigned outer tick
+208: still names the physical genesis custodian. Omitting `receipt_observer` permits
+209: unsigned ticks before the signed-tick era, and refuses a required signed tick.
+210: A missing author binding may remain unsigned where the existing policy allows;
+211: a contradictory or unauthorized binding refuses before append.
+212: 
+213: Mapped initialization only loads a pre-created binding. For another observer,
+214: prepare its binding and pass `key=binding.public_key` to `grant_observer` with
+215: the existing author's credentials. Mapped `grant_observer(key=None)` refuses
+216: before creating keys. Recovery of an existing Arrival initialization intent
+217: signs nothing and does not require private custody to remain available.
+218: Mapped providers are supported on Arrival targets; legacy writers explicitly
+219: refuse them. The default `CustodyCredentialProvider` remains unchanged.
+220: 
+221: The runnable [two-observer mapped workload](tests/test_arrival_mapped_workload.py)
+222: shows the complete public lifecycle: create Alice and Bob bindings under one
+223: persisted provider root and exact namespace; initialize with Alice; grant Bob
+224: using Bob's pre-created public key; then emit with both authors. For a locator
+225: move that keeps the same physical file-backed store, initialize with an
+226: **absolute** `location` and move only the `.vertex` file while retaining its
+227: store clause, lineage, and role. Recreate `MappedCredentialProvider` with the
+228: same provider root, namespace, and receipt observer before continuing work.
+229: The absolute store location keeps the same store residence, while
+230: mapped key selection comes only from the provider namespace and exact observer
+231: label; neither the vertex filename nor its new directory chooses a key.
+232: 
+233: After relocation, `verify_target(relocated_vertex)` provides a `Full`
+234: verification of the captured prefix's grammar, dense ordinals, lineage, and
+235: record-hash chain. It does not establish projection agreement, signature
+236: authorship, key trust, or the identity of an observer across lineages. The
+237: mapped workload exercises public writes with captured authorization; the
+238: [mapped signing tests](tests/test_arrival_mapped_credentials.py) separately
+239: verify domain-specific signatures and key-history behavior.
+240: 
+241: `import_legacy(vertex_path, observer, token=...)` explicitly copies a verified
+242: legacy key into managed storage without changing the original. It preserves
+243: flat/nested ambiguity and alias refusals. After import, locator moves do not
+244: change mapped selection. No read, preview, or signer load imports or creates a
+245: binding. `bind_existing_ref(observer, key_ref, expected_public_key, token=...)`
+246: permits deliberate reuse of a completed managed key in another namespace;
+247: equal observer labels alone never select another namespace's key.
+248: See [custody binding recovery](../custody/README.md#explicit-mapped-bindings)
+249: for interruption handling and filesystem scope.
+250: 
+251: ### Recovering an interrupted mapped declaration edit
+252: 
+253: An edit can raise `CommittedIncomplete` after its declaration records are
+254: durable but before projection synchronization or local cache publication
+255: finishes. Its public `details["intent_path"]` identifies the retained recovery
+256: intent. Use it before deciding whether to retry the proposal:
+257: 
+258: ```python
+259: from sdk import CommittedIncomplete, edit_declaration, recover_declaration
+260: 
+261: try:
+262:     edit_declaration(vertex, proposal, observer="alice", credentials=credentials)
+263: except CommittedIncomplete as outcome:
+264:     recovered = recover_declaration(outcome.details["intent_path"])
+265: ```
+266: 
+267: Recovery reconciles the exact retained suffix, synchronizes the projection,
+268: and publishes the retained declaration bytes without re-signing or appending
+269: the proposal again. A recovery result has no original `Commit`; its basis is
+270: the original captured edit basis. Follow it with `inspect_declaration(vertex)`
+271: to obtain a fresh effective-declaration/read basis, and use
+272: `verify_target(vertex)` when the bounded `Full` hash-chain claim is needed.
+273: The [mapped declaration recovery workload](tests/test_arrival_declaration_recovery_workload.py)
+274: uses a deterministic injected `after-append` interruption beneath the public
+275: SDK edit call; it is not a process-kill or crash-survival test.
+276: 
+277: Supported Arrival execution reserves the vertex name from its loop names.
+278: Every exact name collision refuses, including passive loops, reset/carry loops,
+279: and count- or event-triggered boundaries. The runtime also adds an implicit
+280: `cite` loop, so a vertex named `cite` cannot execute under this restriction.
+281: Runtime capture checks the historized effective declaration and expanded
+282: template loop names before hydration and planning; editing only the local cache
+283: cannot bypass it. New and proposed declarations check their declared loops and
+284: the implicit `cite` loop. The SDK initializer also refuses the name `item`,
+285: because its scaffold declares an `item` loop, before creating custody keys.
+286: External template sources are expanded and checked at runtime; declaration
+287: editing does not load them solely to enforce this rule.
+288: 
+289: This is an Arrival execution compatibility restriction. Existing histories
+290: remain available through evidence reads, declaration inspection and export.
+291: A collision-free declaration can be appended to correct an ambiguous current
+292: declaration; prior facts and ticks retain their original names and bytes.
+293: This does not establish which role an already-recorded ambiguous tick had;
+294: historical boundary continuity remains a separate limitation.
+295: Legacy runtime behavior and the wire format retain their existing rules.
+296: 
+297: ---
+298: 
+299: ### 4. Arrival Source Execution
+300: 
+301: ```python
+302: from sdk import run_sources
+303: 
+304: result = await run_sources("target.vertex", observer="alice", force=False)
+305: for tier in result.tiers:
+306:     print(tier.outcome, tier.commit, tier.fact_ids, tier.tick_ids)
+307: ```
+308: 
+309: - **`await run_sources(target, *, observer, force=False, credentials=None, registry=None, collector_factory=None, dispatcher=None, evaluated_at=None) -> SourceRunResult`**:
+310:   Captures a CURRENT Arrival Authority before collection, fixes cadence and dependency tiers, and commits each collected tier with one exact-head batch append plus explicit projection synchronization. The lifecycle observer is always explicit. Existing custody keys are loaded when present; the operation never creates keys.
+311: 
+312:   When the invocation finishes without a terminal failure, a source error returns `status="error"` with its yielded observations and error lifecycle fact durable. Interrupted results retain prior commits and distinguish `known_uncommitted` collection from an append whose durability is `unknown`; collectors are not rerun within the invocation. When `dispatcher` is omitted, captured tick run intents remain visible with `dispatch_status="not-requested"` and `attempted=False`. This operation supports explicit single-store Arrival Authority descriptors only and never falls through to legacy source execution.
+313: 
+314:   Coordinator failures during ID allocation, lifecycle construction, or otherwise successful collector cleanup return an incomplete result with terminal category `collection-failed`. `terminal.details.collection` contains the current tier's basis, `custody="not-attempted"`, completed siblings, and paired partial observations from failed or cancelled siblings. Incomplete attempts have no lifecycle fact; prior tiers keep their commits. These partial observations live in terminal evidence, not `known_uncommitted`, which describes a fully collected tier. Owned iterators and distinct iterable owners receive `aclose()` when available; caller cancellation propagates after sibling cleanup. Closing a collector does not undo its external effects or guarantee subprocess termination.
+315: 
+316:   Calling `run_sources` again is a fresh, cadence-based invocation with fresh
+317:   generated IDs; it is not a resume token for retained collector output. For
+318:   example, an upstream source can remain skipped by its persisted successful
+319:   cadence while a downstream source retries from its persisted trigger. A
+320:   downstream failure before yielding leaves no domain observation from that
+321:   collector attempt to repeat; it says nothing about its external effects. If
+322:   it yielded before reporting a `SourceError` and that tier has an actual
+323:   commit, the observation and error lifecycle are durable. A later fresh
+324:   invocation can collect the same logical observation again under a distinct
+325:   fact ID. Callers need a source-specific idempotency or reconciliation policy
+326:   for external effects and overlapping collected observations. The public
+327:   two-tier case is exercised in
+328:   [`tests/test_arrival_source_resumption_workload.py`](tests/test_arrival_source_resumption_workload.py).
+329: 
+330: ### 5. Declaration, Scaffolding & Ceremonies
+331: 
+332: ```python
+333: from sdk import (
+334:     init_vertex,
+335:     inspect_declaration,
+336:     add_kind,
+337:     edit_kind,
+338:     remove_kind,
+339:     grant_observer,
+340:     revoke_observer,
+341:     plan_kind_mutation,
+342:     recover_ceremony,
+343: )
+344: from lang.ast import LoopDef, FoldDecl, FoldCollect
+345: 
+346: # Scaffold a new vertex declaration
+347: init_res = init_vertex("target.vertex", name="my_app", store_type="sqlite")
+348: 
+349: # Deep structural inspection & syntax validation
+350: info = inspect_declaration("target.vertex")
+351: 
+352: # Plan declaration update (dry-run diff)
+353: plan = plan_kind_mutation("target.vertex", "add", "todo")
+354: 
+355: # Add new loop kind with default 'items collect 100'
+356: result = add_kind("target.vertex", "todo", observer="admin")
+357: 
+358: # Edit existing kind definition
+359: result = edit_kind(
+360:     "target.vertex",
+361:     "note",
+362:     LoopDef(folds=(FoldDecl("items", FoldCollect(50)),)),
+363:     observer="admin",
+364: )
+365: 
+366: # Remove kind definition
+367: result = remove_kind("target.vertex", "deprecated_kind", observer="admin")
+368: 
+369: # Manage observer admission grants
+370: grant_observer("target.vertex", "alice", grants=["todo", "note"], observer="admin")
+371: revoke_observer("target.vertex", "alice", observer="admin")
+372: 
+373: # Recover interrupted ceremony
+374: recovery = recover_ceremony("target.vertex.intent")
+375: ```
+376: 
+377: ---
+378: 
+379: ## Result Models
+380: 
+381: All models are frozen, immutable dataclasses providing `.as_dict()` conversion:
+382: 
+383: Arrival fact and tick items include receipt-order coordinates. Legacy items
+384: retain their established serialized fields; use `read_path`, `basis`, and
+385: `store` on the enclosing result to identify the source and read boundary.
+386: 
+387: | Model | Schema | Purpose |
+388: | :--- | :--- | :--- |
+389: | **`ArrivalTarget`** | `loops.sdk/arrival-target/v1` | Vertex path plus its serializable explicit store descriptor. |
+390: | **`InitVertexResult`** | `loops.sdk/init-vertex/v1` | Outcome of vertex scaffolding operation. |
+391: | **`DeclarationInspectionResult`** | `loops.sdk/declaration-inspection/v1` | Deep structural inspection of a `.vertex` file. |
+392: | **`DeclarationPlanResult`** | `loops.sdk/declaration-plan/v1` | Dry-run preview of a proposed declaration update. |
+393: | **`ReadSummary`** | `loops.sdk/read-summary/v2` | Basis-bearing inventory of facts, ticks, and kinds. |
+394: | **`FactPageResult`** | `loops.sdk/facts-page/v2` | Basis-bearing bounded page with continuation metadata. |
+395: | **`FactLookupResult`** | `loops.sdk/fact-lookup/v1` | Basis-bearing exact/prefix lookup; a miss retains its basis. |
+396: | **`TickReadResult`** | `loops.sdk/tick-read/v1` | Basis-bearing chronological tick records. |
+397: | **`FoldStateResult`** | `loops.sdk/fold-state/v2` | State folded from facts and declarations in one bounded snapshot. |
+398: | **`SearchResult`** | `loops.sdk/search-result/v1` | Full-text search matches, snippets, and rankings. |
+399: | **`TimelineResult`** | `loops.sdk/timeline-result/v1` | Interleaved chronological stream of facts and tick seals. |
+400: | **`SyncResult`** | `loops.sdk/sync-result/v2` | Legacy index status or Arrival captured/target/before/after projection basis. |
+401: | **`EmitReceipt`** | `loops.sdk/emit-receipt/v2` | Legacy receipt fields plus Arrival store, captured head, commit, witness, and projection outcome. |
+402: | **`SourceRunResult`** | `loops.sdk/source-run/v1` | Captured cadence, collected bodies, tier commits, and interrupted projection/dispatch evidence. |
+403: | **`EmitPreviewResult`** | `loops.sdk/emit-preview/v2` | Preflight admission/fold result with descriptor and captured-head provenance. |
+404: | **`KindMutationResult`** | `loops.sdk/kind-mutation/v1` | Outcome of a declaration update ceremony and generation diffs. |
+405: 
+406: ---
+407: 
+408: ## Exception Taxonomy
+409: 
+410: ```mermaid
+411: graph TD
+412:     SdkError --> TargetError
+413:     TargetError --> TargetNotFound
+414:     TargetError --> TargetUnsupported
+415:     TargetError --> TargetNotWritable
+416:     SdkError --> AdmissionFailed
+417:     SdkError --> EmissionFailed
+418:     SdkError --> SdkValueError
+419:     SdkValueError --> InvalidEmissionRequest
+420:     EmissionFailed --> InvalidEmissionRequest
+421:     EmissionFailed --> CommittedEmissionError
+422:     SdkError --> CeremonyFailed
+423: ```
+424: 
+425: - **`SdkError`**: Base class for all high-level SDK exceptions.
+426: - **`SdkValueError`**: Base class for SDK parameter and validation errors (inherits from `ValueError`).
+427: - **`TargetNotFound`**: Target path does not exist on disk.
+428: - **`TargetUnsupported`**: Path exists but is not a recognized Loops artifact.
+429: - **`TargetNotWritable`**: Target or derived index cannot be written to.
+430: - **`AdmissionFailed`**: Declared admission policy (strict kinds or observer grants) refused the operation.
+431: - **`EmissionFailed`**: Fact emission failed prior to committing.
+432: - **`InvalidEmissionRequest`**: Invalid emission parameters (missing required observer or invalid shape).
+433: - **`CommittedEmissionError`**: Fact was written to storage, but a post-commit task failed (carries `.fact_id`).
+434: - **`CeremonyFailed`**: Declaration update AST generation or ceremony apply was refused.
+435: 
+436: Descriptor-first reads also surface engine contract refusals (for example, a
+437: missing or behind projection or an invalid continuation) and declaration
+438: resolution errors. These keep the adapter's evidence-bearing refusal intact.
+439: 
+440: Arrival `sync_target` and `sync_search_index` normalize maintenance failures as
+441: `ProjectionOutcomeUnknown`. Their optional `details.evidence` object uses
+442: `loops.sdk/evidence/v1`: it records the coordinator phase, resource effects,
+443: available head/coverage coordinates, and up to two explicit causal exceptions.
+444: Search failures before the build call report derived state as
+445: `not-entered`/`not-attempted`; failures after entering build or projection
+446: catch-up report `entered`/`unknown`. A nested refusal does not prove that an
+447: adapter left derived state unchanged. Existing error outcomes, source types,
+448: and operation-specific `details.phase` remain intact. Cause messages are capped
+449: at 512 characters; record bodies and implicit exception context are excluded.
+450: Declaration preparation refusals carry preparation evidence without claiming a
+451: custody append. Cancellation and process-control exceptions propagate unchanged.
+452: 
+453: ## Restore an existing exact copy
+454: 
+455: ```python
+456: from sdk import restore_forward
+457: 
+458: restored = restore_forward("source.vertex", "replica.vertex")
+459: print(restored.before, restored.after)
+460: ```
+461: 
+462: Both vertices require explicit Arrival descriptors. The receiver must already
+463: be an exact prefix of the verified source. Restoration appends the complete
+464: missing suffix atomically through at least the witnessed head, preserving its
+465: declared role. `restored.commit` is an actual receipt, or `None` when the exact
+466: selected head is already present. Projection catch-up remains explicit.
+467: 
+468: Ordinary opening still refuses rollback. `CommittedOutcomeUnknown` retains
+469: before/target heads when a replication receipt was lost;
+470: `CommittedIncomplete` retains the commit if later witnessing or comparison
+471: failed. Empty receiver installation is a separate, pending import operation.
+
+===== docs/scratch/arrival-break/sdk-conformance-source-resumption-2026-09-06.md =====
+1: # Public SDK conformance: partial source failure and a fresh invocation
+2: 
+3: Status: implemented and natively validated on `arrival/finish`, based on
+4: `d75aae9e`; awaiting final Fable-low review. Changes remain uncommitted.
+5: This is the third bounded public workload-conformance slice before C9.
+6: 
+7: ## Contract under test
+8: 
+9: Source execution commits one dependency tier at a time. A collector's
+10: `SourceError` can become durable evidence along with observations yielded
+11: before the error. An invocation-level error does not mean its tiers rolled
+12: back. Public tier receipts, lifecycle identities, fact reads and verification
+13: must agree about what persisted.
+14: 
+15: Calling `run_sources` again starts a new invocation with newly evaluated
+16: cadence and fresh fact identities. It does not resume a retained batch or
+17: reuse the previous invocation's IDs. A successful upstream source can be
+18: skipped while its persisted lifecycle still qualifies a failed downstream
+19: source. A downstream error lifecycle is not a successful completion for
+20: cadence purposes.
+21: 
+22: ## Scope and executable evidence
+23: 
+24: Sol implements the public workflow; Terra audits contracts and SDK guidance;
+25: Luna validates the integrated tests; root checks causal assertions and triages
+26: a frozen Fable 5.1 LOW adversarial review. Test processes isolate XDG state,
+27: XDG config and `LOOPS_HOME`; all stores and mapped bindings are disposable.
+28: 
+29: The [workflow](../../../libs/sdk/tests/test_arrival_source_resumption_workload.py)
+30: uses public mapped initialization and declaration editing to
+31: install an elapsed upstream source and a dependent triggered source. A forced
+32: first invocation fixes both dependency tiers. The downstream collector fails
+33: either before yielding or after yielding one observation. Public inspection
+34: then accounts for the committed observations and error lifecycles. A fresh
+35: non-forced invocation before the upstream interval expires must run only the
+36: downstream collector.
+37: 
+38: The public SDK calls remain unchanged. A wrapper beneath `run_sources` supplies
+39: the existing engine execution clock so lifecycle times are deterministic:
+40: 12 for the first invocation, 22 for the next, with cadence evaluations at 10
+41: and 20. The upstream's persisted success is therefore eight seconds old at
+42: the retry, inside its one-hour interval. This is not a process-crash test.
+43: 
+44: Both reads account for the entire internal fact-ID sequence in receipt order
+45: and refuse unnoticed pagination. The test compares returned observations and
+46: lifecycles with persisted bodies, checks the failed lifecycle's error and
+47: invocation evidence, and requires all rows read after failure to remain
+48: unchanged after the successful retry. Initial/per-tier bases, actual commit
+49: predecessors and final verified/projected heads agree. The second invocation
+50: uses a newly constructed mapped provider with the same root and namespace.
+51: 
+52: The before-yield case demonstrates a narrow retry that introduces no repeated
+53: domain observation. The after-yield case deliberately collects the same
+54: logical observation again and must retain both independently identified facts.
+55: The store provides no automatic semantic deduplication. Retry safety still
+56: depends on the collector's external effects and the application's handling of
+57: already-observed data. The fixture uses in-memory collectors with no external
+58: effects; it does not establish exactly-once collection or dispatch.
+59: 
+60: This slice covers durable source errors. Existing source tests separately
+61: exercise known-uncommitted tiers, unknown append outcomes, unwitnessed commits,
+62: projection failure, dispatch failure and collection bookkeeping/cleanup
+63: interruption. Those categories do not imply the same retry decision. There
+64: is no new resume-token API, automatic retry policy, or legacy migration here.
+65: 
+66: Full prefix verification checks grammar, density, lineage and hash chain.
+67: It excludes signature authorship, external key trust and projection
+68: verification; the workflow separately compares public read/projection and
+69: custody coordinates. Existing mapped signing tests supply complementary
+70: cryptographic coverage.
+71: 
+72: ## Validation and review
+73: 
+74: The focused SDK source, mapped credential and new workload suite passes:
+75: **28 passed** /0.99s. Final full SDK: **582 passed** /23.30s. Architecture:
+76: **101 passed** /6.79s. Engine source/coordinator regression suites:
+77: **30 passed** /0.78s. Scoped Ruff and maintained-file whitespace checks pass.
+78: All commands use `uv run --no-sync` and isolated per-process state/config/home
+79: roots. No production code changed. The final executable SHA-256 is
+80: `ac1513bd080f907e3f7722602f9a520475f9e315b9612abe152048363f27f48e`.
+81: 
+82: The SDK guidance also narrows an existing unconditional source-error durability
+83: claim: the completed invocation has durable error evidence; an interrupted
+84: operation requires inspecting its actual tier commits and terminal outcome.
+85: Fable-low review is pending. Native logs will accompany the frozen packet.
+86: 
+87: ## Next
+88: 
+89: Captured-prefix export → restore forward → verify → explicitly sync → read.
+90: C9 transition and retirement remain ahead, with larger maintenance, transfer
+91: and adoption work tracked separately.
+
+===== libs/engine/src/engine/arrival_sources.py =====
+1: """Captured, tier-atomic source execution for an Arrival Authority.
+2: 
+3: Collection has no custody handle.  A CURRENT runtime capture is taken before
+4: each tier's collectors run, and the resulting observations are planned against
+5: that same head.  A completed tier uses one batch append and explicit projection
+6: catch-up; failures retain collection and any durable commits without retrying a
+7: collector.
+8: """
+9: 
+10: from __future__ import annotations
+11: 
+12: import asyncio
+13: import json
+14: import time
+15: from collections.abc import AsyncIterable, Callable, Mapping, Sequence
+16: from dataclasses import dataclass, replace
+17: from pathlib import Path
+18: from types import MappingProxyType
+19: from typing import TYPE_CHECKING, Any, Literal
+20: 
+21: from atoms import Fact, SourceError
+22: from ulid import ULID
+23: 
+24: from .arrival_head_seam import NotWitnessed
+25: from .arrival_maintenance import sync_projection
+26: from .runtime_write import (
+27:     BatchFactInput,
+28:     BatchPostCommitProjectionFailed,
+29:     BatchWriteCommitUnknown,
+30:     BatchWritePlan,
+31:     CommittedBatchWrite,
+32:     ProjectionOutcome,
+33:     RuntimeCapture,
+34:     capture_runtime,
+35:     execute_batch_write,
+36:     plan_batch_from_capture,
+37: )
+38: 
+39: if TYPE_CHECKING:  # pragma: no cover - annotations only
+40:     from .arrival_contract import Commit, ReadBasis, StoreDescriptor
+41:     from .arrival_registry import BackendRegistry
+42:     from .credentials import WriteCredentials
+43: 
+44: __all__ = [
+45:     "CadenceEvidence",
+46:     "CollectedSource",
+47:     "CollectedTier",
+48:     "DeclarationChangedDuringInvocation",
+49:     "DispatchFailed",
+50:     "DispatchIntent",
+51:     "InvalidSourceOutput",
+52:     "PartialCollectedSource",
+53:     "SourceInvocationPlan",
+54:     "SourceInvocationResult",
+55:     "SourcePreparationRefused",
+56:     "SourceTierCollectionFailed",
+57:     "SourceTierPreparationRefused",
+58:     "TierCommitted",
+59:     "collect_source_tier",
+60:     "execute_source_invocation",
+61:     "prepare_collected_tier",
+62:     "prepare_source_invocation",
+63: ]
+64: 
+65: CollectorFactory = Callable[[Any], AsyncIterable[Fact]]
+66: RunDispatcher = Callable[["Commit", tuple["DispatchIntent", ...]], None]
+67: 
+68: 
+69: class SourcePreparationRefused(Exception):
+70:     """Known source/lifecycle admission refused before any collector ran."""
+71: 
+72:     def __init__(self, message: str, *, capture: RuntimeCapture, cause: Exception) -> None:
+73:         super().__init__(message)
+74:         self.capture = capture
+75:         self.cause = cause
+76: 
+77: 
+78: class InvalidSourceOutput(Exception):
+79:     """A collector yielded a value that is not an observation Fact."""
+80: 
+81:     def __init__(self, source_index: int, value: object) -> None:
+82:         super().__init__(
+83:             f"source {source_index} yielded {type(value).__name__}, expected atoms.Fact"
+84:         )
+85:         self.source_index = source_index
+86:         self.value_type = type(value).__name__
+87:         self.value_repr = repr(value)
+88: 
+89: 
+90: class SourceTierPreparationRefused(Exception):
+91:     """A collected tier could not become an appendable all-or-nothing plan."""
+92: 
+93:     def __init__(self, collected: CollectedTier, cause: Exception) -> None:
+94:         super().__init__(f"source tier {collected.tier_index} was refused: {cause}")
+95:         self.collected = collected
+96:         self.cause = cause
+97: 
+98: 
+99: class DeclarationChangedDuringInvocation(Exception):
+100:     """A later CURRENT capture no longer has the invocation's declaration."""
+101: 
+102:     def __init__(self, initial: RuntimeCapture, observed: RuntimeCapture) -> None:
+103:         super().__init__(
+104:             "effective declaration changed after a prior source tier committed; "
+105:             "remaining collectors were not run"
+106:         )
+107:         self.initial_basis = initial.basis
+108:         self.observed_basis = observed.basis
+109:         self.initial_documents = initial.declaration_documents
+110:         self.observed_documents = observed.declaration_documents
+111: 
+112: 
+113: class DispatchFailed(Exception):
+114:     """A run-clause dispatch failed after its tier commit became durable."""
+115: 
+116:     def __init__(
+117:         self,
+118:         commit: Commit,
+119:         intents: tuple[DispatchIntent, ...],
+120:         cause: Exception,
+121:     ) -> None:
+122:         super().__init__(
+123:             "source tier committed but postcommit run-clause dispatch failed; "
+124:             "the invocation is incomplete and is not retried"
+125:         )
+126:         self.commit = commit
+127:         self.intents = intents
+128:         self.tick_ids = tuple(intent.tick_id for intent in intents)
+129:         self.tick_names = tuple(intent.tick_name for intent in intents)
+130:         self.commands = tuple(intent.command for intent in intents)
+131:         self.cause = cause
+132: 
+133: 
+134: @dataclass(frozen=True)
+135: class CadenceEvidence:
+136:     """Why one captured source did or did not qualify at the initial H."""
+137: 
+138:     source_index: int
+139:     kind: str
+140:     mode: str
+141:     evaluated_at: float
+142:     latest_success_id: str | None
+143:     latest_success_ts: float | None
+144:     trigger_fact_ids: tuple[str, ...]
+145:     interval_seconds: float | None
+146:     forced: bool
+147:     qualified: bool
+148: 
+149: 
+150: @dataclass(frozen=True)
+151: class SourceInvocationPlan:
+152:     """Fixed qualification and source order built before collection."""
+153: 
+154:     invocation_id: str
+155:     observer: str
+156:     initial_capture: RuntimeCapture
+157:     cadence: tuple[CadenceEvidence, ...]
+158:     qualifying_indices: tuple[int, ...]
+159:     tiers: tuple[tuple[int, ...], ...]
+160:     lifecycle_ids: tuple[str, ...]
+161:     overall_sync_id: str
+162: 
+163:     @property
+164:     def skipped(self) -> tuple[CadenceEvidence, ...]:
+165:         return tuple(evidence for evidence in self.cadence if not evidence.qualified)
+166: 
+167:     @property
+168:     def source_kinds(self) -> tuple[str, ...]:
+169:         sources = self.initial_capture.sources
+170:         return tuple(source.kind for source, _cadence in sources)
+171: 
+172: 
+173: @dataclass(frozen=True)
+174: class CollectedSource:
+175:     """One collector attempt, including output retained before an error."""
+176: 
+177:     source_index: int
+178:     kind: str
+179:     command: str
+180:     source_observer: str
+181:     facts: tuple[Fact, ...]
+182:     fact_ids: tuple[str, ...]
+183:     lifecycle_fact: Fact
+184:     lifecycle_id: str
+185:     status: Literal["ok", "error", "invalid"]
+186:     attempt_count: int = 1
+187:     stderr: str = ""
+188:     returncode: int | None = None
+189:     error_type: str | None = None
+190:     error_message: str | None = None
+191:     invalid_output: InvalidSourceOutput | None = None
+192: 
+193: 
+194: @dataclass(frozen=True)
+195: class PartialCollectedSource:
+196:     """Paired observations retained when coordinator collection did not finish."""
+197: 
+198:     source_index: int
+199:     kind: str
+200:     command: str
+201:     source_observer: str
+202:     pairs: tuple[tuple[Fact, str], ...]
+203:     phase: Literal["bookkeeping", "cleanup", "cancelled"]
+204:     error_type: str | None = None
+205:     error_message: str | None = None
+206: 
+207:     @property
+208:     def facts(self) -> tuple[Fact, ...]:
+209:         return tuple(fact for fact, _fact_id in self.pairs)
+210: 
+211:     @property
+212:     def fact_ids(self) -> tuple[str, ...]:
+213:         return tuple(fact_id for _fact, fact_id in self.pairs)
+214: 
+215: 
+216: @dataclass(frozen=True)
+217: class CollectedTier:
+218:     """Deterministically ordered results from one concurrently collected tier."""
+219: 
+220:     tier_index: int
+221:     basis: ReadBasis
+222:     sources: tuple[CollectedSource, ...]
+223:     include_pending_boundaries: bool
+224: 
+225: 
+226: class SourceTierCollectionFailed(Exception):
+227:     """Coordinator work failed after retaining an exactly paired partial tier."""
+228: 
+229:     def __init__(
+230:         self,
+231:         *,
+232:         tier_index: int,
+233:         basis: ReadBasis,
+234:         completed_sources: tuple[CollectedSource, ...],
+235:         failed_sources: tuple[PartialCollectedSource, ...],
+236:         cancelled_sources: tuple[PartialCollectedSource, ...],
+237:         cause: Exception,
+238:     ) -> None:
+239:         super().__init__(
+240:             f"source tier {tier_index} collection coordinator failed: {cause}"
+241:         )
+242:         self.tier_index = tier_index
+243:         self.basis = basis
+244:         self.completed_sources = completed_sources
+245:         self.failed_sources = failed_sources
+246:         self.cancelled_sources = cancelled_sources
+247:         self.cause = cause
+248: 
+249: 
+250: @dataclass(frozen=True)
+251: class _CollectionState:
+252:     """Fixed source identity plus one coroutine-owned paired accumulator."""
+253: 
+254:     source_index: int
+255:     kind: str
+256:     command: str
+257:     source_observer: str
+258:     pairs: list[tuple[Fact, str]]
+259: 
+260:     def partial(
+261:         self,
+262:         phase: Literal["bookkeeping", "cleanup", "cancelled"],
+263:         error: Exception | None = None,
+264:     ) -> PartialCollectedSource:
+265:         return PartialCollectedSource(
+266:             source_index=self.source_index,
+267:             kind=self.kind,
+268:             command=self.command,
+269:             source_observer=self.source_observer,
+270:             pairs=tuple(self.pairs),
+271:             phase=phase,
+272:             error_type=None if error is None else type(error).__name__,
+273:             error_message=None if error is None else str(error),
+274:         )
+275: 
+276: 
+277: class _CollectionStepFailed(Exception):
+278:     def __init__(
+279:         self,
+280:         state: _CollectionState,
+281:         phase: Literal["bookkeeping", "cleanup"],
+282:         cause: Exception,
+283:     ) -> None:
+284:         super().__init__(str(cause))
+285:         self.state = state
+286:         self.phase = phase
+287:         self.cause = cause
+288: 
+289: 
+290: @dataclass(frozen=True)
+291: class DispatchIntent:
+292:     """Captured run-clause command plus the exact durable tick evidence."""
+293: 
+294:     tick_id: str
+295:     tick_name: str
+296:     command: str
+297:     ts: float
+298:     since: float | None
+299:     origin: str
+300:     payload_text: str
+301:     payload: Mapping[str, Any]
+302:     fact_cursor: str | None
+303:     window_start: str | None
+304:     window_hash: str | None
+305:     vertex_path: Path | None
+306: 
+307: 
+308: @dataclass(frozen=True)
+309: class TierCommitted:
+310:     """One actual custody commit and the collection it made durable."""
+311: 
+312:     tier_index: int
+313:     basis: ReadBasis
+314:     collected: CollectedTier
+315:     plan: BatchWritePlan
+316:     outcome: CommittedBatchWrite
+317:     witnessed: bool
+318:     dispatch_intents: tuple[DispatchIntent, ...] = ()
+319:     dispatch_succeeded: bool | None = None
+320: 
+321:     @property
+322:     def commit(self) -> Commit:
+323:         assert self.outcome.commit is not None
+324:         return self.outcome.commit
+325: 
+326: 
+327: @dataclass(frozen=True)
+328: class SourceInvocationResult:
+329:     """Complete or interrupted source execution with durable evidence separated."""
+330: 
+331:     invocation_id: str
+332:     status: Literal["ok", "error", "incomplete"]
+333:     plan: SourceInvocationPlan
+334:     bases: tuple[ReadBasis, ...]
+335:     collected_tiers: tuple[CollectedTier, ...]
+336:     durable_tiers: tuple[TierCommitted, ...]
+337:     terminal_tier: CollectedTier | None
+338:     terminal_plan: BatchWritePlan | None
+339:     collected_uncommitted: CollectedTier | None
+340:     collected_unknown: CollectedTier | None
+341:     error_lifecycle_ids: tuple[str, ...]
+342:     durable_error_lifecycle_ids: tuple[str, ...]
+343:     overall_sync_id: str
+344:     terminal: BaseException | None = None
+345: 
+346: 
+347: def _new_id() -> str:
+348:     return str(ULID())
+349: 
+350: 
+351: def _latest_success(facts: Sequence[Any], kind: str) -> Any | None:
+352:     matching = [
+353:         fact
+354:         for fact in facts
+355:         if fact.kind == f"_sync.{kind}" and fact.payload.get("status") == "ok"
+356:     ]
+357:     return max(matching, key=lambda fact: (fact.ts, fact.id), default=None)
+358: 
+359: 
+360: def _cadence_evidence(
+361:     source_index: int,
+362:     source: Any,
+363:     cadence: Any,
+364:     facts: Sequence[Any],
+365:     *,
+366:     evaluated_at: float,
+367:     force: bool,
+368: ) -> CadenceEvidence:
+369:     last = _latest_success(facts, source.kind)
+370:     mode = cadence.mode
+371:     trigger_ids: tuple[str, ...] = ()
+372:     interval = getattr(cadence, "_interval", None)
+373:     if mode == "always":
+374:         qualified = True
+375:     elif mode == "elapsed":
+376:         qualified = last is None or evaluated_at - last.ts >= interval
+377:     elif mode == "triggered":
+378:         threshold = float("-inf") if last is None else last.ts
+379:         trigger_ids = tuple(
+380:             fact.id
+381:             for fact in facts
+382:             if fact.kind in cadence.trigger_kinds and fact.ts > threshold
+383:         )
+384:         qualified = bool(trigger_ids)
+385:     else:
+386:         qualified = False
+387:     if force:
+388:         qualified = True
+389:     return CadenceEvidence(
+390:         source_index=source_index,
+391:         kind=source.kind,
+392:         mode=mode,
+393:         evaluated_at=evaluated_at,
+394:         latest_success_id=None if last is None else last.id,
+395:         latest_success_ts=None if last is None else last.ts,
+396:         trigger_fact_ids=trigger_ids,
+397:         interval_seconds=interval,
+398:         forced=force,
+399:         qualified=qualified,
+400:     )
+401: 
+402: 
+403: def _source_observers(source: Any) -> tuple[str, ...]:
+404:     nested = getattr(source, "sources", None)
+405:     if nested is not None:
+406:         return tuple(observer for item in nested for observer in _source_observers(item))
+407:     observer = getattr(source, "observer", "")
+408:     return (observer,) if observer else ()
+409: 
+410: 
+411: def _preflight_known_admission(
+412:     capture: RuntimeCapture,
+413:     sources: Sequence[tuple[Any, Any]],
+414:     qualifying: Sequence[int],
+415:     *,
+416:     observer: str,
+417:     credentials: WriteCredentials,
+418:     lifecycle_ids: Sequence[str],
+419:     overall_sync_id: str,
+420: ) -> None:
+421:     from .admission import grant_for_observer
+422: 
+423:     effective = capture.effective_declaration
+424:     try:
+425:         grant_for_observer(effective, observer)
+426:         for index in qualifying:
+427:             for source_observer in _source_observers(sources[index][0]):
+428:                 grant_for_observer(effective, source_observer)
+429:         known = [
+430:             BatchFactInput(
+431:                 Fact.of(
+432:                     f"_sync.{sources[index][0].kind}",
+433:                     observer,
+434:                     ts=capture.evaluated_at,
+435:                     command=sources[index][0].command,
+436:                     status="ok",
+437:                 ),
+438:                 fact_id=lifecycle_ids[index],
+439:                 admit_undeclared=True,
+440:             )
+441:             for index in qualifying
+442:         ]
+443:         known.append(
+444:             BatchFactInput(
+445:                 Fact.of(
+446:                     "_sync",
+447:                     observer,
+448:                     ts=capture.evaluated_at,
+449:                     status="ok",
+450:                     sources_run=len(qualifying),
+451:                 ),
+452:                 fact_id=overall_sync_id,
+453:                 admit_undeclared=True,
+454:             )
+455:         )
+456:         # One at a time checks exact lifecycle grant/strict/tick-signing rules
+457:         # without imposing a fictitious whole-invocation atomic limit.
+458:         for item in known:
+459:             plan_batch_from_capture(capture, (item,), credentials=credentials)
+460:         if capture.pending_boundaries:
+461:             # Pending ticks are already known at H and can require a tick signer
+462:             # in a signed era. Refuse before any external collector runs.
+463:             plan_batch_from_capture(
+464:                 capture,
+465:                 (),
+466:                 credentials=credentials,
+467:                 include_pending_boundaries=True,
+468:             )
+469:     except Exception as exc:
+470:         raise SourcePreparationRefused(
+471:             "source lifecycle admission refused before collection",
+472:             capture=capture,
+473:             cause=exc,
+474:         ) from exc
+475: 
+476: 
+477: def prepare_source_invocation(
+478:     registry: BackendRegistry,
+479:     descriptor: StoreDescriptor,
+480:     locator: Any,
+481:     *,
+482:     observer: str,
+483:     credentials: WriteCredentials,
+484:     force: bool = False,
+485:     evaluated_at: float | None = None,
+486:     id_factory: Callable[[], str] = _new_id,
+487: ) -> SourceInvocationPlan:
+488:     """Capture H, cadence, source order and tiers before any collector runs."""
+489:     from .executor import _build_dependency_graph, _toposort_tiers
+490: 
+491:     if not observer:
+492:         raise ValueError("source lifecycle observer must be explicit and nonempty")
+493:     capture = capture_runtime(
+494:         registry,
+495:         descriptor,
+496:         locator,
+497:         source_mode=True,
+498:         evaluated_at=evaluated_at,
+499:         credentials=credentials,
+500:     )
+501:     sources = capture.sources
+502:     evidence = tuple(
+503:         _cadence_evidence(
+504:             index,
+505:             source,
+506:             cadence,
+507:             capture.facts,
+508:             evaluated_at=capture.evaluated_at,
+509:             force=force,
+510:         )
+511:         for index, (source, cadence) in enumerate(sources)
+512:     )
+513:     qualifying = tuple(item.source_index for item in evidence if item.qualified)
+514:     deps = _build_dependency_graph(list(sources))
+515:     tiers = tuple(tuple(tier) for tier in _toposort_tiers(set(qualifying), deps))
+516:     invocation_id = id_factory()
+517:     lifecycle_ids = tuple(id_factory() for _ in sources)
+518:     overall_sync_id = id_factory()
+519:     _preflight_known_admission(
+520:         capture,
+521:         sources,
+522:         qualifying,
+523:         observer=observer,
+524:         credentials=credentials,
+525:         lifecycle_ids=lifecycle_ids,
+526:         overall_sync_id=overall_sync_id,
+527:     )
+528:     return SourceInvocationPlan(
+529:         invocation_id=invocation_id,
+530:         observer=observer,
+531:         initial_capture=capture,
+532:         cadence=evidence,
+533:         qualifying_indices=qualifying,
+534:         tiers=tiers,
+535:         lifecycle_ids=lifecycle_ids,
+536:         overall_sync_id=overall_sync_id,
+537:     )
+538: 
+539: 
+540: async def _close_owned_streams(
+541:     stream: object | None,
+542:     iterator: object | None,
+543:     *,
+544:     primary: BaseException | None,
+545: ) -> Exception | None:
+546:     """Attempt async close on the iterator and owner before propagating interruption.
+547: 
+548:     This releases Python iterator resources only. It does not claim that an
+549:     underlying collector reversed or terminated any external effect.
+550:     """
+551:     failures: list[Exception] = []
+552:     handles: list[object] = []
+553:     deferred_interrupt: BaseException | None = None
+554:     primary_is_interrupt = primary is not None and not isinstance(primary, Exception)
+555:     for handle in (iterator, stream):
+556:         if handle is None or any(handle is existing for existing in handles):
+557:             continue
+558:         handles.append(handle)
+559:         try:
+560:             close = getattr(handle, "aclose", None)
+561:             if not callable(close):
+562:                 continue
+563:             await close()
+564:         except Exception as exc:
+565:             failures.append(exc)
+566:         except BaseException as exc:
+567:             if not primary_is_interrupt and deferred_interrupt is None:
+568:                 deferred_interrupt = exc
+569:     if deferred_interrupt is not None:
+570:         raise deferred_interrupt
+571:     return failures[0] if failures else None
+572: 
+573: 
+574: async def _collect_one(
+575:     invocation: SourceInvocationPlan,
+576:     state: _CollectionState,
+577:     source: Any,
+578:     collector_factory: CollectorFactory | None,
+579:     *,
+580:     clock: Callable[[], float],
+581:     id_factory: Callable[[], str],
+582: ) -> CollectedSource:
+583:     status: Literal["ok", "error", "invalid"] = "ok"
+584:     stderr = ""
+585:     returncode: int | None = None
+586:     error_type: str | None = None
+587:     error_message: str | None = None
+588:     invalid: InvalidSourceOutput | None = None
+589:     stream: object | None = None
+590:     iterator: object | None = None
+591:     primary: BaseException | None = None
+592:     try:
+593:         stream = source.collect() if collector_factory is None else collector_factory(source)
+594:         iterator = aiter(stream)
+595:         async for value in iterator:
+596:             if not isinstance(value, Fact):
+597:                 invalid = InvalidSourceOutput(state.source_index, value)
+598:                 primary = invalid
+599:                 status = "invalid"
+600:                 break
+601:             try:
+602:                 fact_id = id_factory()
+603:                 state.pairs.append((value, fact_id))
+604:             except Exception as exc:
+605:                 failure = _CollectionStepFailed(state, "bookkeeping", exc)
+606:                 primary = failure
+607:                 raise failure from exc
+608:     except _CollectionStepFailed:
+609:         raise
+610:     except asyncio.CancelledError as exc:
+611:         primary = exc
+612:         raise
+613:     except SourceError as exc:
+614:         primary = exc
+615:         status = "error"
+616:         stderr = exc.stderr
+617:         returncode = exc.returncode
+618:         error_type = type(exc).__name__
+619:         error_message = str(exc)
+620:     except Exception as exc:
+621:         primary = exc
+622:         status = "error"
+623:         error_type = type(exc).__name__
+624:         error_message = str(exc)
+625:     except BaseException as exc:
+626:         primary = exc
+627:         raise
+628:     finally:
+629:         cleanup_error = await _close_owned_streams(
+630:             stream, iterator, primary=primary
+631:         )
+632:         if cleanup_error is not None and primary is None:
+633:             raise _CollectionStepFailed(state, "cleanup", cleanup_error) from cleanup_error
+634: 
+635:     try:
+636:         payload: dict[str, Any] = {
+637:             "command": state.command,
+638:             "status": "error" if status != "ok" else "ok",
+639:             "count": len(state.pairs),
+640:             "invocation_id": invocation.invocation_id,
+641:             "source_index": state.source_index,
+642:         }
+643:         if stderr:
+644:             payload["stderr"] = stderr
+645:         if returncode is not None:
+646:             payload["returncode"] = returncode
+647:         if error_type is not None:
+648:             payload["error_type"] = error_type
+649:         if error_message is not None:
+650:             payload["error"] = error_message
+651:         if invalid is not None:
+652:             payload["error_type"] = type(invalid).__name__
+653:             payload["error"] = str(invalid)
+654:         lifecycle = Fact(
+655:             f"_sync.{state.kind}",
+656:             clock(),
+657:             payload,
+658:             observer=invocation.observer,
+659:         )
+660:         return CollectedSource(
+661:             source_index=state.source_index,
+662:             kind=state.kind,
+663:             command=state.command,
+664:             source_observer=state.source_observer,
+665:             facts=tuple(fact for fact, _fact_id in state.pairs),
+666:             fact_ids=tuple(fact_id for _fact, fact_id in state.pairs),
+667:             lifecycle_fact=lifecycle,
+668:             lifecycle_id=invocation.lifecycle_ids[state.source_index],
+669:             status=status,
+670:             stderr=stderr,
+671:             returncode=returncode,
+672:             error_type=error_type,
+673:             error_message=error_message,
+674:             invalid_output=invalid,
+675:         )
+676:     except Exception as exc:
+677:         raise _CollectionStepFailed(state, "bookkeeping", exc) from exc
+678: 
+679: 
+680: async def collect_source_tier(
+681:     invocation: SourceInvocationPlan,
+682:     capture: RuntimeCapture,
+683:     tier_index: int,
+684:     collector_factory: CollectorFactory | None = None,
+685:     *,
+686:     clock: Callable[[], float] = time.time,
+687:     id_factory: Callable[[], str] = _new_id,
+688: ) -> CollectedTier:
+689:     """Collect one fixed tier concurrently while retaining source-list order."""
+690:     indices = invocation.tiers[tier_index]
+691:     sources = invocation.initial_capture.sources
+692:     states = [
+693:         _CollectionState(
+694:             source_index=index,
+695:             kind=sources[index][0].kind,
+696:             command=sources[index][0].command,
+697:             source_observer=sources[index][0].observer,
+698:             pairs=[],
+699:         )
+700:         for index in indices
+701:     ]
+702:     tasks = [
+703:         asyncio.create_task(
+704:             _collect_one(
+705:                 invocation,
+706:                 state,
+707:                 sources[state.source_index][0],
+708:                 collector_factory,
+709:                 clock=clock,
+710:                 id_factory=id_factory,
+711:             )
+712:         )
+713:         for state in states
+714:     ]
+715:     try:
+716:         collected = tuple(await asyncio.gather(*tasks))
+717:     except _CollectionStepFailed as primary:
+718:         for task in tasks:
+719:             if not task.done():
+720:                 task.cancel()
+721:         settled = await asyncio.gather(*tasks, return_exceptions=True)
+722:         for result in settled:
+723:             if isinstance(result, BaseException) and not isinstance(
+724:                 result, (_CollectionStepFailed, asyncio.CancelledError)
+725:             ):
+726:                 # This sibling already owns its chaining evidence. Adding or
+727:                 # clearing a cause here would rewrite the control exception.
+728:                 raise result  # noqa: B904
+729:         completed = tuple(
+730:             result for result in settled if isinstance(result, CollectedSource)
+731:         )
+732:         failed = tuple(
+733:             result.state.partial(result.phase, result.cause)
+734:             for result in settled
+735:             if isinstance(result, _CollectionStepFailed)
+736:         )
+737:         cancelled = tuple(
+738:             state.partial("cancelled")
+739:             for state, result in zip(states, settled, strict=True)
+740:             if isinstance(result, asyncio.CancelledError)
+741:         )
+742:         raise SourceTierCollectionFailed(
+743:             tier_index=tier_index,
+744:             basis=capture.basis,
+745:             completed_sources=completed,
+746:             failed_sources=failed,
+747:             cancelled_sources=cancelled,
+748:             cause=primary.cause,
+749:         ) from primary.cause
+750:     except BaseException:
+751:         for task in tasks:
+752:             if not task.done():
+753:                 task.cancel()
+754:         await asyncio.gather(*tasks, return_exceptions=True)
+755:         raise
+756:     return CollectedTier(
+757:         tier_index=tier_index,
+758:         basis=capture.basis,
+759:         sources=collected,
+760:         include_pending_boundaries=tier_index == 0,
+761:     )
+762: 
+763: 
+764: def _overall_fact(
+765:     invocation: SourceInvocationPlan,
+766:     collected: Sequence[CollectedTier],
+767:     *,
+768:     now: float,
+769: ) -> Fact:
+770:     sources = [source for tier in collected for source in tier.sources]
+771:     errors = sum(source.status != "ok" for source in sources)
+772:     total = sum(len(source.facts) + 1 for source in sources)
+773:     duration_ms = max(0, int((now - invocation.initial_capture.evaluated_at) * 1000))
+774:     return Fact.of(
+775:         "_sync",
+776:         invocation.observer,
+777:         ts=now,
+778:         status="error" if errors else "ok",
+779:         sources_run=len(invocation.qualifying_indices),
+780:         sources_skipped=len(invocation.skipped),
+781:         source_errors=errors,
+782:         total_facts=total,
+783:         duration_ms=duration_ms,
+784:         invocation_id=invocation.invocation_id,
+785:     )
+786: 
+787: 
+788: def prepare_collected_tier(
+789:     capture: RuntimeCapture,
+790:     collected: CollectedTier,
+791:     *,
+792:     credentials: WriteCredentials,
+793:     overall_fact: Fact | None = None,
+794:     overall_sync_id: str | None = None,
+795: ) -> BatchWritePlan:
+796:     """Turn retained collection into one exact-H tier batch plan."""
+797:     try:
+798:         if collected.basis != capture.basis:
+799:             raise ValueError(
+800:                 "collected tier basis does not match the runtime capture basis"
+801:             )
+802:         invalid = next(
+803:             (
+804:                 source.invalid_output
+805:                 for source in collected.sources
+806:                 if source.invalid_output is not None
+807:             ),
+808:             None,
+809:         )
+810:         if invalid is not None:
+811:             raise invalid
+812:         items: list[BatchFactInput] = []
+813:         for source in collected.sources:
+814:             items.extend(
+815:                 BatchFactInput(fact, fact_id=fact_id)
+816:                 for fact, fact_id in zip(source.facts, source.fact_ids, strict=True)
+817:             )
+818:             items.append(
+819:                 BatchFactInput(
+820:                     source.lifecycle_fact,
+821:                     fact_id=source.lifecycle_id,
+822:                     admit_undeclared=True,
+823:                 )
+824:             )
+825:         if overall_fact is not None:
+826:             if overall_sync_id is None:
+827:                 raise ValueError("overall_sync_id is required with overall_fact")
+828:             items.append(
+829:                 BatchFactInput(
+830:                     overall_fact,
+831:                     fact_id=overall_sync_id,
+832:                     admit_undeclared=True,
+833:                 )
+834:             )
+835:         return plan_batch_from_capture(
+836:             capture,
+837:             items,
+838:             credentials=credentials,
+839:             include_pending_boundaries=collected.include_pending_boundaries,
+840:         )
+841:     except Exception as exc:
+842:         if isinstance(exc, SourceTierPreparationRefused):
+843:             raise
+844:         raise SourceTierPreparationRefused(collected, exc) from exc
+845: 
+846: 
+847: def _dispatch_intents(
+848:     capture: RuntimeCapture, plan: BatchWritePlan
+849: ) -> tuple[DispatchIntent, ...]:
+850:     runs = {
+851:         **dict(zip(plan.pending_tick_ids, plan.pending_tick_runs, strict=True)),
+852:         **{
+853:             item.tick_id: item.tick_run
+854:             for item in plan.items
+855:             if item.tick_id is not None
+856:         },
+857:     }
+858:     vertex_path = capture.effective_declaration.path
+859:     intents: list[DispatchIntent] = []
+860:     for draft in plan.drafts:
+861:         if draft.kind != "tick":
+862:             continue
+863:         body = draft.body
+864:         tick_id = str(body["id"])
+865:         command = runs.get(tick_id)
+866:         if not command:
+867:             continue
+868:         payload_text = str(body["payload"])
+869:         payload = json.loads(payload_text)
+870:         intents.append(
+871:             DispatchIntent(
+872:                 tick_id=tick_id,
+873:                 tick_name=str(body["name"]),
+874:                 command=command,
+875:                 ts=float(body["ts"]),
+876:                 since=None if body["since"] is None else float(body["since"]),
+877:                 origin=str(body["origin"]),
+878:                 payload_text=payload_text,
+879:                 payload=MappingProxyType(payload),
+880:                 fact_cursor=body.get("fact_cursor"),
+881:                 window_start=body.get("window_start"),
+882:                 window_hash=body.get("window_hash"),
+883:                 vertex_path=vertex_path,
+884:             )
+885:         )
+886:     return tuple(intents)
+887: 
+888: 
+889: def _result(
+890:     invocation: SourceInvocationPlan,
+891:     *,
+892:     bases: Sequence[ReadBasis],
+893:     collected: Sequence[CollectedTier],
+894:     durable: Sequence[TierCommitted],
+895:     terminal_tier: CollectedTier | None = None,
+896:     terminal_plan: BatchWritePlan | None = None,
+897:     collected_uncommitted: CollectedTier | None = None,
+898:     collected_unknown: CollectedTier | None = None,
+899:     terminal: BaseException | None = None,
+900: ) -> SourceInvocationResult:
+901:     error_ids = tuple(
+902:         source.lifecycle_id
+903:         for tier in collected
+904:         for source in tier.sources
+905:         if source.status != "ok"
+906:     )
+907:     durable_indices = {tier.tier_index for tier in durable}
+908:     durable_error_ids = tuple(
+909:         source.lifecycle_id
+910:         for tier in collected
+911:         if tier.tier_index in durable_indices
+912:         for source in tier.sources
+913:         if source.status != "ok"
+914:     )
+915:     status: Literal["ok", "error", "incomplete"]
+916:     if terminal is not None:
+917:         status = "incomplete"
+918:     elif error_ids:
+919:         status = "error"
+920:     else:
+921:         status = "ok"
+922:     return SourceInvocationResult(
+923:         invocation_id=invocation.invocation_id,
+924:         status=status,
+925:         plan=invocation,
+926:         bases=tuple(bases),
+927:         collected_tiers=tuple(collected),
+928:         durable_tiers=tuple(durable),
+929:         terminal_tier=terminal_tier,
+930:         terminal_plan=terminal_plan,
+931:         collected_uncommitted=collected_uncommitted,
+932:         collected_unknown=collected_unknown,
+933:         error_lifecycle_ids=error_ids,
+934:         durable_error_lifecycle_ids=durable_error_ids,
+935:         overall_sync_id=invocation.overall_sync_id,
+936:         terminal=terminal,
+937:     )
+938: 
+939: 
+940: async def execute_source_invocation(
+941:     registry: BackendRegistry,
+942:     descriptor: StoreDescriptor,
+943:     locator: Any,
+944:     invocation: SourceInvocationPlan,
+945:     *,
+946:     credentials: WriteCredentials,
+947:     collector_factory: CollectorFactory | None = None,
+948:     dispatcher: RunDispatcher | None = None,
+949:     clock: Callable[[], float] = time.time,
+950:     id_factory: Callable[[], str] = _new_id,
+951: ) -> SourceInvocationResult:
+952:     """Collect and commit fixed tiers once each; never retry external effects."""
+953:     bases: list[ReadBasis] = []
+954:     collected_tiers: list[CollectedTier] = []
+955:     durable_tiers: list[TierCommitted] = []
+956:     tiers: tuple[tuple[int, ...], ...] = invocation.tiers or ((),)
+957:     current_capture = invocation.initial_capture
+958:     frozen_locator = invocation.initial_capture._locator_copy()
+959: 
+960:     for tier_index, _indices in enumerate(tiers):
+961:         if tier_index:
+962:             try:
+963:                 current_capture = capture_runtime(
+964:                     registry,
+965:                     descriptor,
+966:                     frozen_locator,
+967:                     credentials=credentials,
+968:                 )
+969:             except Exception as exc:
+970:                 return _result(
+971:                     invocation,
+972:                     bases=bases,
+973:                     collected=collected_tiers,
+974:                     durable=durable_tiers,
+975:                     terminal=exc,
+976:                 )
+977:             if (
+978:                 current_capture.declaration_documents
+979:                 != invocation.initial_capture.declaration_documents
+980:             ):
+981:                 changed = DeclarationChangedDuringInvocation(
+982:                     invocation.initial_capture, current_capture
+983:                 )
+984:                 return _result(
+985:                     invocation,
+986:                     bases=(*bases, current_capture.basis),
+987:                     collected=collected_tiers,
+988:                     durable=durable_tiers,
+989:                     terminal=changed,
+990:                 )
+991:         bases.append(current_capture.basis)
+992: 
+993:         if invocation.tiers:
+994:             try:
+995:                 tier = await collect_source_tier(
+996:                     invocation,
+997:                     current_capture,
+998:                     tier_index,
+999:                     collector_factory,
+1000:                     clock=clock,
+1001:                     id_factory=id_factory,
+1002:                 )
+1003:             except SourceTierCollectionFailed as exc:
+1004:                 return _result(
+1005:                     invocation,
+1006:                     bases=bases,
+1007:                     collected=collected_tiers,
+1008:                     durable=durable_tiers,
+1009:                     terminal=exc,
+1010:                 )
+1011:         else:
+1012:             tier = CollectedTier(
+1013:                 tier_index=0,
+1014:                 basis=current_capture.basis,
+1015:                 sources=(),
+1016:                 include_pending_boundaries=True,
+1017:             )
+1018:         collected_tiers.append(tier)
+1019:         final_tier = tier_index == len(tiers) - 1
+1020:         try:
+1021:             overall = (
+1022:                 _overall_fact(invocation, collected_tiers, now=clock())
+1023:                 if final_tier
+1024:                 else None
+1025:             )
+1026:             batch_plan = prepare_collected_tier(
+1027:                 current_capture,
+1028:                 tier,
+1029:                 credentials=credentials,
+1030:                 overall_fact=overall,
+1031:                 overall_sync_id=invocation.overall_sync_id if final_tier else None,
+1032:             )
+1033:         except Exception as exc:
+1034:             return _result(
+1035:                 invocation,
+1036:                 bases=bases,
+1037:                 collected=collected_tiers,
+1038:                 durable=durable_tiers,
+1039:                 terminal_tier=tier,
+1040:                 collected_uncommitted=tier,
+1041:                 terminal=exc,
+1042:             )
+1043: 
+1044:         try:
+1045:             intents = _dispatch_intents(current_capture, batch_plan)
+1046:         except Exception as exc:
+1047:             return _result(
+1048:                 invocation,
+1049:                 bases=bases,
+1050:                 collected=collected_tiers,
+1051:                 durable=durable_tiers,
+1052:                 terminal_tier=tier,
+1053:                 terminal_plan=batch_plan,
+1054:                 collected_uncommitted=tier,
+1055:                 terminal=exc,
+1056:             )
+1057: 
+1058:         try:
+1059:             outcome = execute_batch_write(
+1060:                 registry,
+1061:                 descriptor,
+1062:                 batch_plan,
+1063:                 after_commit=lambda head: sync_projection(
+1064:                     registry, descriptor, through=head
+1065:                 ),
+1066:             )
+1067:         except NotWitnessed as exc:
+1068:             if exc.commit is not None:
+1069:                 outcome = CommittedBatchWrite(
+1070:                     exc.commit,
+1071:                     batch_plan.items,
+1072:                     ProjectionOutcome.PENDING,
+1073:                     batch_plan.pending_tick_ids,
+1074:                     batch_plan.pending_tick_names,
+1075:                     batch_plan.pending_tick_runs,
+1076:                 )
+1077:                 durable_tiers.append(
+1078:                     TierCommitted(
+1079:                         tier_index,
+1080:                         current_capture.basis,
+1081:                         tier,
+1082:                         batch_plan,
+1083:                         outcome,
+1084:                         witnessed=False,
+1085:                         dispatch_intents=intents,
+1086:                     )
+1087:                 )
+1088:             return _result(
+1089:                 invocation,
+1090:                 bases=bases,
+1091:                 collected=collected_tiers,
+1092:                 durable=durable_tiers,
+1093:                 terminal_tier=tier,
+1094:                 terminal_plan=batch_plan,
+1095:                 collected_uncommitted=None if exc.commit is not None else tier,
+1096:                 terminal=exc,
+1097:             )
+1098:         except BatchPostCommitProjectionFailed as exc:
+1099:             outcome = CommittedBatchWrite(
+1100:                 exc.commit,
+1101:                 batch_plan.items,
+1102:                 ProjectionOutcome.FAILED,
+1103:                 batch_plan.pending_tick_ids,
+1104:                 batch_plan.pending_tick_names,
+1105:                 batch_plan.pending_tick_runs,
+1106:             )
+1107:             durable_tiers.append(
+1108:                 TierCommitted(
+1109:                     tier_index,
+1110:                     current_capture.basis,
+1111:                     tier,
+1112:                     batch_plan,
+1113:                     outcome,
+1114:                     witnessed=True,
+1115:                     dispatch_intents=intents,
+1116:                 )
+1117:             )
+1118:             return _result(
+1119:                 invocation,
+1120:                 bases=bases,
+1121:                 collected=collected_tiers,
+1122:                 durable=durable_tiers,
+1123:                 terminal_tier=tier,
+1124:                 terminal_plan=batch_plan,
+1125:                 terminal=exc,
+1126:             )
+1127:         except BatchWriteCommitUnknown as exc:
+1128:             # The append was attempted exactly once, but its durability is unknown.
+1129:             # Calling this tier "uncommitted" would invite an unsafe retry.
+1130:             return _result(
+1131:                 invocation,
+1132:                 bases=bases,
+1133:                 collected=collected_tiers,
+1134:                 durable=durable_tiers,
+1135:                 terminal_tier=tier,
+1136:                 terminal_plan=batch_plan,
+1137:                 collected_unknown=tier,
+1138:                 terminal=exc,
+1139:             )
+1140:         except Exception as exc:
+1141:             return _result(
+1142:                 invocation,
+1143:                 bases=bases,
+1144:                 collected=collected_tiers,
+1145:                 durable=durable_tiers,
+1146:                 terminal_tier=tier,
+1147:                 terminal_plan=batch_plan,
+1148:                 collected_uncommitted=tier,
+1149:                 terminal=exc,
+1150:             )
+1151: 
+1152:         committed = TierCommitted(
+1153:             tier_index=tier_index,
+1154:             basis=current_capture.basis,
+1155:             collected=tier,
+1156:             plan=batch_plan,
+1157:             outcome=outcome,
+1158:             witnessed=True,
+1159:             dispatch_intents=intents,
+1160:         )
+1161:         if dispatcher is not None and intents:
+1162:             try:
+1163:                 dispatcher(committed.commit, intents)
+1164:             except Exception as exc:
+1165:                 committed = replace(committed, dispatch_succeeded=False)
+1166:                 durable_tiers.append(committed)
+1167:                 failed = DispatchFailed(committed.commit, intents, exc)
+1168:                 return _result(
+1169:                     invocation,
+1170:                     bases=bases,
+1171:                     collected=collected_tiers,
+1172:                     durable=durable_tiers,
+1173:                     terminal_tier=tier,
+1174:                     terminal_plan=batch_plan,
+1175:                     terminal=failed,
+1176:                 )
+1177:             committed = replace(committed, dispatch_succeeded=True)
+1178:         durable_tiers.append(committed)
+1179: 
+1180:     return _result(
+1181:         invocation,
+1182:         bases=bases,
+1183:         collected=collected_tiers,
+1184:         durable=durable_tiers,
+1185:     )
+
+===== libs/sdk/src/sdk/sources.py =====
+1: """Captured Arrival source execution at the SDK process boundary."""
+2: 
+3: from __future__ import annotations
+4: 
+5: import copy
+6: from collections.abc import AsyncIterable, Callable, Mapping
+7: from pathlib import Path
+8: from typing import Any
+9: 
+10: from atoms import Fact
+11: from engine.arrival_contract import Commit, Profile
+12: from engine.arrival_head_seam import NotWitnessed
+13: from engine.arrival_registry import BackendRegistry
+14: from engine.arrival_sources import (
+15:     CollectedSource,
+16:     CollectedTier,
+17:     DeclarationChangedDuringInvocation,
+18:     DispatchFailed,
+19:     DispatchIntent,
+20:     InvalidSourceOutput,
+21:     PartialCollectedSource,
+22:     SourceInvocationResult,
+23:     SourcePreparationRefused,
+24:     SourceTierCollectionFailed,
+25:     SourceTierPreparationRefused,
+26:     TierCommitted,
+27:     execute_source_invocation,
+28:     prepare_source_invocation,
+29: )
+30: from engine.credentials import CredentialProvider
+31: from engine.runtime_write import (
+32:     BatchPostCommitProjectionFailed,
+33:     BatchWriteCommitUnknown,
+34:     BatchWritePlan,
+35:     BatchWritePreparationRefused,
+36: )
+37: 
+38: from .emit import CustodyCredentialProvider
+39: from .errors import ArrivalRefusal, normalize_exception
+40: from .target import _arrival_descriptor, _refuse_arrival_aggregate_members
+41: from .types import (
+42:     SdkError,
+43:     SourceCadenceResult,
+44:     SourceCollectedResult,
+45:     SourceDispatchResult,
+46:     SourceFactResult,
+47:     SourceRunResult,
+48:     SourceTerminalResult,
+49:     SourceTierResult,
+50:     StoreDescriptorInfo,
+51:     TargetUnsupported,
+52: )
+53: 
+54: __all__ = ["run_sources"]
+55: 
+56: CollectorFactory = Callable[[Any], AsyncIterable[Fact]]
+57: RunDispatcher = Callable[[Commit, tuple[DispatchIntent, ...]], None]
+58: 
+59: 
+60: def _source_fact(fact: Fact, fact_id: str) -> SourceFactResult:
+61:     try:
+62:         payload = copy.deepcopy(
+63:             dict(fact.payload) if isinstance(fact.payload, Mapping) else fact.payload
+64:         )
+65:         payload_snapshot = True
+66:     except Exception:  # retain type/value without claiming a detached snapshot
+67:         payload = fact.payload
+68:         payload_snapshot = False
+69:     return SourceFactResult(
+70:         id=fact_id,
+71:         kind=fact.kind,
+72:         ts=fact.ts,
+73:         observer=fact.observer,
+74:         origin=fact.origin,
+75:         payload=payload,
+76:         payload_snapshot=payload_snapshot,
+77:     )
+78: 
+79: 
+80: def _collected_source(source: CollectedSource) -> SourceCollectedResult:
+81:     facts = tuple(
+82:         _source_fact(fact, fact_id)
+83:         for fact, fact_id in zip(source.facts, source.fact_ids, strict=True)
+84:     )
+85:     return SourceCollectedResult(
+86:         source_index=source.source_index,
+87:         kind=source.kind,
+88:         command=source.command,
+89:         source_observer=source.source_observer,
+90:         facts=facts,
+91:         lifecycle_fact=_source_fact(source.lifecycle_fact, source.lifecycle_id),
+92:         lifecycle_id=source.lifecycle_id,
+93:         status=source.status,
+94:         attempt_count=source.attempt_count,
+95:         stderr=source.stderr,
+96:         returncode=source.returncode,
+97:         error_type=(
+98:             type(source.invalid_output).__name__
+99:             if source.invalid_output is not None
+100:             else source.error_type
+101:         ),
+102:         error_message=(
+103:             str(source.invalid_output)
+104:             if source.invalid_output is not None
+105:             else source.error_message
+106:         ),
+107:     )
+108: 
+109: 
+110: def _dispatch_result(
+111:     intent: DispatchIntent, committed: TierCommitted
+112: ) -> SourceDispatchResult:
+113:     try:
+114:         payload = copy.deepcopy(dict(intent.payload))
+115:     except Exception:  # pragma: no cover - engine intent payloads are JSON mappings
+116:         payload = dict(intent.payload)
+117:     attempted = committed.dispatch_succeeded is not None
+118:     return SourceDispatchResult(
+119:         tick_id=intent.tick_id,
+120:         tick_name=intent.tick_name,
+121:         command=intent.command,
+122:         attempted=attempted,
+123:         succeeded=committed.dispatch_succeeded,
+124:         ts=intent.ts,
+125:         since=intent.since,
+126:         origin=intent.origin,
+127:         payload_text=intent.payload_text,
+128:         payload=payload,
+129:         fact_cursor=intent.fact_cursor,
+130:         window_start=intent.window_start,
+131:         window_hash=intent.window_hash,
+132:         vertex_path=None if intent.vertex_path is None else str(intent.vertex_path),
+133:     )
+134: 
+135: 
+136: def _dispatch_status(
+137:     committed: TierCommitted, *, dispatcher_requested: bool
+138: ) -> str:
+139:     if not committed.dispatch_intents:
+140:         return "none"
+141:     if committed.dispatch_succeeded is True:
+142:         return "succeeded"
+143:     if committed.dispatch_succeeded is False:
+144:         return "failed"
+145:     return "withheld" if dispatcher_requested else "not-requested"
+146: 
+147: 
+148: def _plan_ids(plan: BatchWritePlan | None) -> tuple[tuple[str, ...], tuple[str, ...]]:
+149:     if plan is None:
+150:         return (), ()
+151:     facts = tuple(item.fact_id for item in plan.items)
+152:     ticks = plan.pending_tick_ids + tuple(
+153:         item.tick_id for item in plan.items if item.tick_id is not None
+154:     )
+155:     return facts, ticks
+156: 
+157: 
+158: def _unplanned_fact_ids(
+159:     result: SourceInvocationResult, tier: CollectedTier
+160: ) -> tuple[str, ...]:
+161:     ids = tuple(
+162:         identifier
+163:         for source in tier.sources
+164:         for identifier in (*source.fact_ids, source.lifecycle_id)
+165:     )
+166:     last_index = len(result.plan.tiers or ((),)) - 1
+167:     if tier.tier_index == last_index:
+168:         ids = (*ids, result.overall_sync_id)
+169:     return ids
+170: 
+171: 
+172: def _committed_outcome(committed: TierCommitted) -> str:
+173:     if not committed.witnessed:
+174:         return "committed-unwitnessed"
+175:     if committed.outcome.projection.value == "failed":
+176:         return "committed-projection-failed"
+177:     if committed.dispatch_succeeded is False:
+178:         return "dispatch-failed"
+179:     return "committed"
+180: 
+181: 
+182: def _tier_result(
+183:     result: SourceInvocationResult,
+184:     collected: CollectedTier,
+185:     *,
+186:     dispatcher_requested: bool,
+187: ) -> SourceTierResult:
+188:     committed = next(
+189:         (
+190:             item
+191:             for item in result.durable_tiers
+192:             if item.tier_index == collected.tier_index
+193:         ),
+194:         None,
+195:     )
+196:     plan = (
+197:         committed.plan
+198:         if committed is not None
+199:         else result.terminal_plan
+200:         if result.terminal_tier is collected
+201:         else None
+202:     )
+203:     fact_ids, tick_ids = _plan_ids(plan)
+204:     if not fact_ids:
+205:         fact_ids = _unplanned_fact_ids(result, collected)
+206:     pending_tick_ids = () if plan is None else plan.pending_tick_ids
+207:     sources = tuple(_collected_source(source) for source in collected.sources)
+208:     lifecycle_ids = tuple(source.lifecycle_id for source in collected.sources)
+209:     if committed is not None:
+210:         dispatches = tuple(
+211:             _dispatch_result(intent, committed) for intent in committed.dispatch_intents
+212:         )
+213:         return SourceTierResult(
+214:             tier_index=collected.tier_index,
+215:             outcome=_committed_outcome(committed),
+216:             basis=collected.basis,
+217:             sources=sources,
+218:             fact_ids=fact_ids,
+219:             tick_ids=tick_ids,
+220:             pending_tick_ids=pending_tick_ids,
+221:             lifecycle_ids=lifecycle_ids,
+222:             commit=committed.commit,
+223:             witnessed=committed.witnessed,
+224:             projection=committed.outcome.projection.value,
+225:             dispatch_status=_dispatch_status(
+226:                 committed, dispatcher_requested=dispatcher_requested
+227:             ),
+228:             dispatches=dispatches,
+229:         )
+230:     return SourceTierResult(
+231:         tier_index=collected.tier_index,
+232:         outcome=("unknown" if result.collected_unknown is collected else "uncommitted"),
+233:         basis=collected.basis,
+234:         sources=sources,
+235:         fact_ids=fact_ids,
+236:         tick_ids=tick_ids,
+237:         pending_tick_ids=pending_tick_ids,
+238:         lifecycle_ids=lifecycle_ids,
+239:     )
+240: 
+241: 
+242: def _safe_detail(value: Any) -> Any | None:
+243:     if value is None or isinstance(value, (str, int, float, bool)):
+244:         return value
+245:     if isinstance(value, tuple) and all(isinstance(item, str) for item in value):
+246:         return list(value)
+247:     if all(hasattr(value, name) for name in ("lineage", "ordinal", "record_hash")):
+248:         return {
+249:             "lineage": value.lineage,
+250:             "ordinal": value.ordinal,
+251:             "record_hash": value.record_hash,
+252:         }
+253:     if all(
+254:         hasattr(value, name)
+255:         for name in ("lineage", "captured_head", "projected_through", "view_generation")
+256:     ):
+257:         return {
+258:             "lineage": value.lineage,
+259:             "captured_head": _safe_detail(value.captured_head),
+260:             "projected_through": _safe_detail(value.projected_through),
+261:             "view_generation": value.view_generation,
+262:         }
+263:     return None
+264: 
+265: 
+266: def _terminal_result(exc: BaseException | None) -> SourceTerminalResult | None:
+267:     if exc is None:
+268:         return None
+269:     category = "failed"
+270:     if isinstance(exc, SourceTierCollectionFailed):
+271:         category = "collection-failed"
+272:     elif isinstance(exc, BatchWriteCommitUnknown):
+273:         category = "unknown"
+274:     elif isinstance(exc, NotWitnessed):
+275:         category = "committed-unwitnessed" if exc.commit is not None else "unwitnessed"
+276:     elif isinstance(exc, BatchPostCommitProjectionFailed):
+277:         category = "committed-projection-failed"
+278:     elif isinstance(exc, DispatchFailed):
+279:         category = "dispatch-failed"
+280:     elif isinstance(exc, DeclarationChangedDuringInvocation):
+281:         category = "declaration-changed"
+282:     elif isinstance(exc, SourceTierPreparationRefused):
+283:         if isinstance(exc.cause, InvalidSourceOutput):
+284:             category = "invalid-output"
+285:         elif isinstance(exc.cause, BatchWritePreparationRefused) and exc.cause.admission_refused:
+286:             category = "admission-refused"
+287:         else:
+288:             category = "refused"
+289: 
+290:     cause = getattr(exc, "cause", None)
+291:     details: dict[str, Any] = {}
+292:     if isinstance(exc, SourceTierCollectionFailed):
+293:         def partial_source(source: PartialCollectedSource) -> dict[str, Any]:
+294:             return SourceCollectedResult(
+295:                 source_index=source.source_index,
+296:                 kind=source.kind,
+297:                 command=source.command,
+298:                 source_observer=source.source_observer,
+299:                 facts=tuple(_source_fact(fact, identifier) for fact, identifier in source.pairs),
+300:                 status=source.phase,
+301:                 error_type=source.error_type,
+302:                 error_message=source.error_message,
+303:             ).as_dict()
+304: 
+305:         details["collection"] = {
+306:             "tier_index": exc.tier_index,
+307:             "basis": _safe_detail(exc.basis),
+308:             "custody": "not-attempted",
+309:             "completed_sources": [
+310:                 _collected_source(source).as_dict() for source in exc.completed_sources
+311:             ],
+312:             "failed_sources": [partial_source(source) for source in exc.failed_sources],
+313:             "cancelled_sources": [partial_source(source) for source in exc.cancelled_sources],
+314:         }
+315:     for name in (
+316:         "captured_head",
+317:         "head",
+318:         "initial_basis",
+319:         "observed_basis",
+320:         "source_index",
+321:         "value_type",
+322:         "item_index",
+323:         "fact_ids",
+324:         "tick_ids",
+325:         "tick_names",
+326:         "commands",
+327:     ):
+328:         value = getattr(exc, name, None)
+329:         safe = _safe_detail(value)
+330:         if safe is not None:
+331:             details[name] = safe
+332:     if cause is not None:
+333:         details["cause_type"] = type(cause).__name__
+334:         for source_name, public_name in (
+335:             ("input_index", "item_index"),
+336:             ("source_index", "source_index"),
+337:             ("value_type", "value_type"),
+338:         ):
+339:             safe = _safe_detail(getattr(cause, source_name, None))
+340:             if safe is not None:
+341:                 details[public_name] = safe
+342:         if isinstance(cause, BatchWritePreparationRefused):
+343:             details["admission_refused"] = cause.admission_refused
+344:             details["observer"] = cause.item.fact.observer
+345:             details["kind"] = cause.item.fact.kind
+346:     commit = getattr(exc, "commit", None)
+347:     if commit is not None:
+348:         from .types import _commit_dict
+349: 
+350:         details["commit"] = _commit_dict(commit)
+351:     return SourceTerminalResult(
+352:         category=category,
+353:         source_type=type(exc).__name__,
+354:         message=str(exc),
+355:         cause_type=None if cause is None else type(cause).__name__,
+356:         details=details,
+357:     )
+358: 
+359: 
+360: def _sdk_result(
+361:     target_path: Path,
+362:     store: StoreDescriptorInfo,
+363:     result: SourceInvocationResult,
+364:     *,
+365:     dispatcher_requested: bool,
+366: ) -> SourceRunResult:
+367:     cadence = tuple(
+368:         SourceCadenceResult(
+369:             source_index=item.source_index,
+370:             kind=item.kind,
+371:             mode=item.mode,
+372:             evaluated_at=item.evaluated_at,
+373:             latest_success_id=item.latest_success_id,
+374:             latest_success_ts=item.latest_success_ts,
+375:             trigger_fact_ids=item.trigger_fact_ids,
+376:             interval_seconds=item.interval_seconds,
+377:             forced=item.forced,
+378:             qualified=item.qualified,
+379:         )
+380:         for item in result.plan.cadence
+381:     )
+382:     tiers = tuple(
+383:         _tier_result(result, tier, dispatcher_requested=dispatcher_requested)
+384:         for tier in result.collected_tiers
+385:     )
+386:     tier_by_index = {tier.tier_index: tier for tier in tiers}
+387:     known_uncommitted = (
+388:         None
+389:         if result.collected_uncommitted is None
+390:         else tier_by_index[result.collected_uncommitted.tier_index]
+391:     )
+392:     unknown = (
+393:         None
+394:         if result.collected_unknown is None
+395:         else tier_by_index[result.collected_unknown.tier_index]
+396:     )
+397:     return SourceRunResult(
+398:         store=store,
+399:         target_path=str(target_path),
+400:         invocation_id=result.invocation_id,
+401:         status=result.status,
+402:         initial_basis=result.plan.initial_capture.basis,
+403:         bases=result.bases,
+404:         cadence=cadence,
+405:         tier_decisions=result.plan.tiers,
+406:         tiers=tiers,
+407:         known_uncommitted=known_uncommitted,
+408:         unknown=unknown,
+409:         error_lifecycle_ids=result.error_lifecycle_ids,
+410:         durable_error_lifecycle_ids=result.durable_error_lifecycle_ids,
+411:         overall_sync_id=result.overall_sync_id,
+412:         terminal=_terminal_result(result.terminal),
+413:     )
+414: 
+415: 
+416: def _raise_preparation(exc: BaseException) -> None:
+417:     normalized = normalize_exception(exc)
+418:     if normalized is not exc:
+419:         raise normalized from exc
+420:     details: dict[str, Any] = {"phase": "source-preparation"}
+421:     cause = getattr(exc, "cause", None)
+422:     if cause is not None:
+423:         details["cause_type"] = type(cause).__name__
+424:     raise ArrivalRefusal(
+425:         str(exc), source_type=type(exc).__name__, details=details
+426:     ) from exc
+427: 
+428: 
+429: async def run_sources(
+430:     target: Path | str,
+431:     *,
+432:     observer: str,
+433:     force: bool = False,
+434:     credentials: CredentialProvider | None = None,
+435:     registry: BackendRegistry | None = None,
+436:     collector_factory: CollectorFactory | None = None,
+437:     dispatcher: RunDispatcher | None = None,
+438:     evaluated_at: float | None = None,
+439: ) -> SourceRunResult:
+440:     """Collect and tier-atomically commit one explicit Arrival source invocation."""
+441:     target_path = Path(target).resolve()
+442:     arrival = _arrival_descriptor(target_path)
+443:     if arrival is None:
+444:         _refuse_arrival_aggregate_members(target_path)
+445:         raise TargetUnsupported(
+446:             "run_sources requires a single-store Arrival Authority .vertex target"
+447:         )
+448:     _path, locator, descriptor = arrival
+449:     if descriptor.role is not Profile.AUTHORITY:
+450:         raise ArrivalRefusal(
+451:             "source execution requires an Authority descriptor role",
+452:             source_type="NotAuthority",
+453:             details={"phase": "source-preparation"},
+454:         )
+455:     active_registry = registry or BackendRegistry.with_builtin_backends()
+456:     provider = credentials or CustodyCredentialProvider()
+457:     try:
+458:         write_credentials = provider.for_write(target_path)
+459:         invocation = prepare_source_invocation(
+460:             active_registry,
+461:             descriptor,
+462:             locator,
+463:             observer=observer,
+464:             credentials=write_credentials,
+465:             force=force,
+466:             evaluated_at=evaluated_at,
+467:         )
+468:     except SdkError:
+469:         raise
+470:     except SourcePreparationRefused as exc:
+471:         _raise_preparation(exc.cause)
+472:     except Exception as exc:
+473:         _raise_preparation(exc)
+474:     result = await execute_source_invocation(
+475:         active_registry,
+476:         descriptor,
+477:         locator,
+478:         invocation,
+479:         credentials=write_credentials,
+480:         collector_factory=collector_factory,
+481:         dispatcher=dispatcher,
+482:     )
+483:     return _sdk_result(
+484:         target_path,
+485:         StoreDescriptorInfo.from_descriptor(descriptor),
+486:         result,
+487:         dispatcher_requested=dispatcher is not None,
+488:     )
+
+===== docs/scratch/arrival-break/reviews/sdk-conformance-source-resumption-final-2026-09-06/validation-evidence/focused-pytest.log =====
+1: ............................                                             [100%]
+2: 28 passed in 0.99s
+
+===== docs/scratch/arrival-break/reviews/sdk-conformance-source-resumption-final-2026-09-06/validation-evidence/ruff.log =====
+1: All checks passed!
+
+===== docs/scratch/arrival-break/reviews/sdk-conformance-source-resumption-final-2026-09-06/validation-evidence/sdk-full.txt =====
+1: ........................................................................ [ 12%]
+2: ........................................................................ [ 24%]
+3: ........................................................................ [ 37%]
+4: ........................................................................ [ 49%]
+5: ........................................................................ [ 61%]
+6: ........................................................................ [ 74%]
+7: ........................................................................ [ 86%]
+8: ........................................................................ [ 98%]
+9: ......                                                                   [100%]
+10: 582 passed in 23.30s
+
+===== docs/scratch/arrival-break/reviews/sdk-conformance-source-resumption-final-2026-09-06/validation-evidence/architecture-full.txt =====
+1: ........................................................................ [ 71%]
+2: .............................                                            [100%]
+3: 101 passed in 6.79s
+
+===== docs/scratch/arrival-break/reviews/sdk-conformance-source-resumption-final-2026-09-06/validation-evidence/engine-sources.txt =====
+1: ..............................                                           [100%]
+2: 30 passed in 0.78s
+
+===== FULL PRODUCTION / TEST PATCH =====
+diff --git a/libs/sdk/README.md b/libs/sdk/README.md
+index eba88131..7276409b 100644
+--- a/libs/sdk/README.md
++++ b/libs/sdk/README.md
+@@ -309,10 +309,24 @@ for tier in result.tiers:
+ - **`await run_sources(target, *, observer, force=False, credentials=None, registry=None, collector_factory=None, dispatcher=None, evaluated_at=None) -> SourceRunResult`**:
+   Captures a CURRENT Arrival Authority before collection, fixes cadence and dependency tiers, and commits each collected tier with one exact-head batch append plus explicit projection synchronization. The lifecycle observer is always explicit. Existing custody keys are loaded when present; the operation never creates keys.
+ 
+-  A source error after yielding observations returns `status="error"` after its error lifecycle fact becomes durable. Interrupted results retain prior commits and distinguish `known_uncommitted` collection from an append whose durability is `unknown`; collectors are not rerun. When `dispatcher` is omitted, captured tick run intents remain visible with `dispatch_status="not-requested"` and `attempted=False`. This operation supports explicit single-store Arrival Authority descriptors only and never falls through to legacy source execution.
++  When the invocation finishes without a terminal failure, a source error returns `status="error"` with its yielded observations and error lifecycle fact durable. Interrupted results retain prior commits and distinguish `known_uncommitted` collection from an append whose durability is `unknown`; collectors are not rerun within the invocation. When `dispatcher` is omitted, captured tick run intents remain visible with `dispatch_status="not-requested"` and `attempted=False`. This operation supports explicit single-store Arrival Authority descriptors only and never falls through to legacy source execution.
+ 
+   Coordinator failures during ID allocation, lifecycle construction, or otherwise successful collector cleanup return an incomplete result with terminal category `collection-failed`. `terminal.details.collection` contains the current tier's basis, `custody="not-attempted"`, completed siblings, and paired partial observations from failed or cancelled siblings. Incomplete attempts have no lifecycle fact; prior tiers keep their commits. These partial observations live in terminal evidence, not `known_uncommitted`, which describes a fully collected tier. Owned iterators and distinct iterable owners receive `aclose()` when available; caller cancellation propagates after sibling cleanup. Closing a collector does not undo its external effects or guarantee subprocess termination.
+ 
++  Calling `run_sources` again is a fresh, cadence-based invocation with fresh
++  generated IDs; it is not a resume token for retained collector output. For
++  example, an upstream source can remain skipped by its persisted successful
++  cadence while a downstream source retries from its persisted trigger. A
++  downstream failure before yielding leaves no domain observation from that
++  collector attempt to repeat; it says nothing about its external effects. If
++  it yielded before reporting a `SourceError` and that tier has an actual
++  commit, the observation and error lifecycle are durable. A later fresh
++  invocation can collect the same logical observation again under a distinct
++  fact ID. Callers need a source-specific idempotency or reconciliation policy
++  for external effects and overlapping collected observations. The public
++  two-tier case is exercised in
++  [`tests/test_arrival_source_resumption_workload.py`](tests/test_arrival_source_resumption_workload.py).
++
+ ### 5. Declaration, Scaffolding & Ceremonies
+ 
+ ```python
+diff --git a/libs/sdk/tests/test_arrival_source_resumption_workload.py b/libs/sdk/tests/test_arrival_source_resumption_workload.py
+new file mode 100644
+index 00000000..d23c22ef
+--- /dev/null
++++ b/libs/sdk/tests/test_arrival_source_resumption_workload.py
+@@ -0,0 +1,312 @@
++"""Public mapped-custody conformance for partial source-tier resumption."""
++
++from __future__ import annotations
++
++import asyncio
++import json
++from collections import Counter
++from pathlib import Path
++
++import pytest
++from atoms import Fact, SourceError
++
++import sdk.sources as sdk_sources
++from sdk import (
++    MappedCredentialProvider,
++    edit_declaration,
++    init_vertex,
++    read_fact_by_id,
++    read_facts,
++    run_sources,
++    verify_target,
++)
++
++
++@pytest.fixture(autouse=True)
++def _isolated_process_roots(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
++    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
++    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
++    monkeypatch.setenv("LOOPS_HOME", str(tmp_path / "loops-home"))
++
++
++def _source_declaration(vertex: Path) -> str:
++    (vertex.parent / "a.loop").write_text(
++        'kind "a"\nobserver "alice"\nsource "collect-a"\nevery "1h"\n',
++        encoding="utf-8",
++    )
++    (vertex.parent / "b.loop").write_text(
++        'kind "b"\nobserver "alice"\nsource "collect-b"\non "_sync.a"\n',
++        encoding="utf-8",
++    )
++    current = vertex.read_text(encoding="utf-8")
++    with_sources = current.replace(
++        "loops {",
++        'sources {\n  path "./a.loop"\n  path "./b.loop"\n}\n\nloops {',
++        1,
++    )
++    item = '  item {\n    fold {\n      items "collect" 100\n    }\n  }\n'
++    added = (
++        '  a {\n    fold { items "collect" 20 }\n  }\n  b {\n    fold { items "collect" 20 }\n  }\n'
++    )
++    assert with_sources.count(item) == 1
++    return with_sources.replace(item, item + added)
++
++
++def _internal_page(vertex: Path):
++    page = read_facts(
++        vertex,
++        include_internal=True,
++        limit=100,
++        order="oldest",
++    )
++    assert page.truncated is False
++    return page
++
++
++@pytest.mark.parametrize("failed_after_yield", [False, True])
++def test_mapped_source_failure_has_honest_fresh_invocation_resume(
++    tmp_path: Path,
++    monkeypatch: pytest.MonkeyPatch,
++    failed_after_yield: bool,
++) -> None:
++    provider = MappedCredentialProvider(
++        tmp_path / "custody",
++        namespace="source-workload",
++        receipt_observer="alice",
++    )
++    provider.create_binding("alice", token="create-alice")
++    vertex = tmp_path / "sources.vertex"
++    initialized = init_vertex(
++        vertex,
++        name="source-workload",
++        store_type="arrival",
++        location=(tmp_path / "data" / "sources.arrival").resolve(),
++        observer="alice",
++        strict=True,
++        credentials=provider,
++    )
++    assert initialized.lineage is not None
++    declared = edit_declaration(
++        vertex,
++        _source_declaration(vertex),
++        observer="alice",
++        credentials=provider,
++    )
++    assert declared.status == "applied"
++    assert declared.commit is not None
++    baseline = _internal_page(vertex)
++    assert baseline.basis is not None
++    assert baseline.basis.captured_head == declared.commit.after
++    assert baseline.basis.projected_through == baseline.basis.captured_head
++    baseline_ids = [item["id"] for item in baseline.items]
++
++    original_execute = sdk_sources.execute_source_invocation
++    execution_clocks = iter((12.0, 22.0))
++
++    async def deterministic_execute(*args, **kwargs):
++        now = next(execution_clocks)
++        return await original_execute(*args, **kwargs, clock=lambda: now)
++
++    monkeypatch.setattr(
++        sdk_sources,
++        "execute_source_invocation",
++        deterministic_execute,
++    )
++    attempts: Counter[str] = Counter()
++    invocation = "first"
++
++    def collector(source):
++        async def collect():
++            attempts[source.kind] += 1
++            if source.kind == "a":
++                assert invocation == "first"
++                yield Fact("a", 11.0, {"logical": "a"}, observer="alice")
++                return
++            assert source.kind == "b"
++            if invocation == "first":
++                if failed_after_yield:
++                    yield Fact("b", 11.5, {"logical": "b"}, observer="alice")
++                raise SourceError(source.command, returncode=7, stderr="b failed")
++            yield Fact("b", 11.5, {"logical": "b"}, observer="alice")
++
++        return collect()
++
++    first = asyncio.run(
++        run_sources(
++            vertex,
++            observer="alice",
++            force=True,
++            credentials=provider,
++            collector_factory=collector,
++            evaluated_at=10.0,
++        )
++    )
++    assert first.status == "error"
++    assert first.terminal is None
++    assert first.known_uncommitted is None and first.unknown is None
++    assert first.initial_basis == baseline.basis
++    assert all(item.forced and item.evaluated_at == 10.0 for item in first.cadence)
++    assert first.tier_decisions == ((0,), (1,))
++    assert len(first.bases) == len(first.tiers) == 2
++    a_tier, failed_b_tier = first.tiers
++    assert first.bases == (a_tier.basis, failed_b_tier.basis)
++    assert a_tier.basis == first.initial_basis
++    assert a_tier.outcome == failed_b_tier.outcome == "committed"
++    assert a_tier.commit is not None and failed_b_tier.commit is not None
++    assert a_tier.commit.before == declared.commit.after
++    assert a_tier.commit.after.lineage == a_tier.commit.before.lineage
++    assert a_tier.commit.after.ordinal > a_tier.commit.before.ordinal
++    assert failed_b_tier.basis is not None
++    assert failed_b_tier.basis.captured_head == a_tier.commit.after
++    assert failed_b_tier.basis.projected_through == a_tier.commit.after
++    assert failed_b_tier.commit.before == a_tier.commit.after
++    assert failed_b_tier.commit.after.lineage == failed_b_tier.commit.before.lineage
++    assert failed_b_tier.commit.after.ordinal > failed_b_tier.commit.before.ordinal
++    assert all(tier.witnessed is True for tier in first.tiers)
++    assert all(tier.projection == "synced" for tier in first.tiers)
++    assert all(tier.tick_ids == () and tier.dispatches == () for tier in first.tiers)
++    a_source = a_tier.sources[0]
++    failed_b_source = failed_b_tier.sources[0]
++    assert a_source.status == "ok"
++    assert failed_b_source.status == "error"
++    assert failed_b_source.returncode == 7
++    assert failed_b_source.stderr == "b failed"
++    assert failed_b_source.error_type == "SourceError"
++    assert len(failed_b_source.facts) == int(failed_after_yield)
++    assert (
++        first.error_lifecycle_ids
++        == first.durable_error_lifecycle_ids
++        == (failed_b_source.lifecycle_id,)
++    )
++    assert attempts == Counter(a=1, b=1)
++
++    after_failure = _internal_page(vertex)
++    assert after_failure.basis is not None
++    assert after_failure.basis.lineage == initialized.lineage
++    assert after_failure.basis.captured_head == failed_b_tier.commit.after
++    assert after_failure.basis.projected_through == after_failure.basis.captured_head
++    first_appended_ids = [*a_tier.fact_ids, *failed_b_tier.fact_ids]
++    after_failure_ids = [item["id"] for item in after_failure.items]
++    assert after_failure_ids == baseline_ids + first_appended_ids
++    assert len(after_failure_ids) == len(set(after_failure_ids))
++    by_id = {item["id"]: item for item in after_failure.items}
++    for source in (a_source, failed_b_source):
++        assert source.lifecycle_fact is not None
++        for fact in (*source.facts, source.lifecycle_fact):
++            persisted = by_id[fact.id]
++            assert (
++                persisted["kind"],
++                persisted["ts"],
++                persisted["observer"],
++                persisted["origin"],
++                persisted["payload"],
++            ) == (
++                fact.kind,
++                fact.ts,
++                fact.observer,
++                fact.origin,
++                fact.payload,
++            )
++    assert by_id[a_source.lifecycle_id]["payload"]["status"] == "ok"
++    failed_lifecycle = by_id[failed_b_source.lifecycle_id]
++    assert failed_lifecycle["kind"] == "_sync.b"
++    assert failed_lifecycle["payload"] == {
++        "command": "collect-b",
++        "status": "error",
++        "count": int(failed_after_yield),
++        "invocation_id": first.invocation_id,
++        "source_index": 1,
++        "stderr": "b failed",
++        "returncode": 7,
++        "error_type": "SourceError",
++        "error": failed_b_source.error_message,
++    }
++    assert by_id[first.overall_sync_id]["payload"]["status"] == "error"
++    failed_b_ids = [fact.id for fact in failed_b_source.facts]
++    assert all(read_fact_by_id(vertex, fact_id).found for fact_id in failed_b_ids)
++    first_verified = verify_target(vertex)
++    assert first_verified.captured_head == failed_b_tier.commit.after
++    assert first_verified.verified_through == after_failure.basis.captured_head
++    assert first_verified.claims == ("grammar", "density", "lineage", "hash-chain")
++    assert "signature-authorship" in first_verified.excludes
++    json.dumps(first.as_dict(), allow_nan=False)
++
++    invocation = "resume"
++    reopened = MappedCredentialProvider(
++        tmp_path / "custody",
++        namespace="source-workload",
++        receipt_observer="alice",
++    )
++    resumed = asyncio.run(
++        run_sources(
++            vertex,
++            observer="alice",
++            force=False,
++            credentials=reopened,
++            collector_factory=collector,
++            evaluated_at=20.0,
++        )
++    )
++    assert resumed.status == "ok"
++    assert resumed.terminal is None
++    assert resumed.known_uncommitted is None and resumed.unknown is None
++    assert resumed.invocation_id != first.invocation_id
++    assert resumed.initial_basis is not None
++    assert resumed.initial_basis.captured_head == failed_b_tier.commit.after
++    assert resumed.initial_basis.projected_through == resumed.initial_basis.captured_head
++    a_cadence, b_cadence = resumed.cadence
++    assert all(not item.forced and item.evaluated_at == 20.0 for item in resumed.cadence)
++    assert a_cadence.kind == "a" and a_cadence.mode == "elapsed"
++    assert a_cadence.latest_success_id == a_source.lifecycle_id
++    assert a_cadence.latest_success_ts == 12.0
++    assert a_cadence.interval_seconds == 3600.0
++    assert a_cadence.qualified is False
++    assert b_cadence.kind == "b" and b_cadence.mode == "triggered"
++    assert b_cadence.latest_success_id is None
++    assert b_cadence.trigger_fact_ids == (a_source.lifecycle_id,)
++    assert b_cadence.qualified is True
++    assert resumed.tier_decisions == ((1,),)
++    assert len(resumed.tiers) == 1
++    resumed_tier = resumed.tiers[0]
++    assert resumed_tier.outcome == "committed"
++    assert resumed.bases == (resumed.initial_basis,) == (resumed_tier.basis,)
++    assert resumed_tier.commit is not None
++    assert resumed_tier.commit.before == failed_b_tier.commit.after
++    assert resumed_tier.commit.after.lineage == resumed_tier.commit.before.lineage
++    assert resumed_tier.commit.after.ordinal > resumed_tier.commit.before.ordinal
++    assert resumed_tier.witnessed is True and resumed_tier.projection == "synced"
++    resumed_b_source = resumed_tier.sources[0]
++    assert resumed_b_source.kind == "b" and resumed_b_source.status == "ok"
++    assert len(resumed_b_source.facts) == 1
++    assert resumed.error_lifecycle_ids == resumed.durable_error_lifecycle_ids == ()
++    assert attempts == Counter(a=1, b=2)
++
++    resumed_b_id = resumed_b_source.facts[0].id
++    assert resumed_b_id not in failed_b_ids
++    assert set(resumed_tier.fact_ids).isdisjoint(first_appended_ids)
++    final_page = _internal_page(vertex)
++    assert final_page.basis is not None
++    assert final_page.basis.captured_head == resumed_tier.commit.after
++    assert final_page.basis.projected_through == final_page.basis.captured_head
++    final_ids = [item["id"] for item in final_page.items]
++    assert final_ids == after_failure_ids + list(resumed_tier.fact_ids)
++    assert len(final_ids) == len(set(final_ids))
++    domain_facts = {item["id"]: item for item in final_page.items if item["kind"] in {"a", "b"}}
++    expected_domain_ids = {a_source.facts[0].id, resumed_b_id, *failed_b_ids}
++    assert set(domain_facts) == expected_domain_ids
++    assert domain_facts[a_source.facts[0].id]["kind"] == "a"
++    assert domain_facts[a_source.facts[0].id]["payload"] == {"logical": "a"}
++    for fact_id in (resumed_b_id, *failed_b_ids):
++        assert domain_facts[fact_id]["kind"] == "b"
++        assert domain_facts[fact_id]["payload"] == {"logical": "b"}
++    final_by_id = {item["id"]: item for item in final_page.items}
++    assert all(final_by_id[fact_id] == row for fact_id, row in by_id.items())
++    assert final_by_id[resumed_b_source.lifecycle_id]["payload"]["status"] == "ok"
++    assert final_by_id[resumed.overall_sync_id]["payload"]["status"] == "ok"
++    assert read_fact_by_id(vertex, resumed_b_id).found is True
++    final_verified = verify_target(vertex)
++    assert final_verified.captured_head == resumed_tier.commit.after
++    assert final_verified.verified_through == final_page.basis.captured_head
++    assert final_verified.claims == first_verified.claims
++    assert final_verified.excludes == first_verified.excludes
++    json.dumps(resumed.as_dict(), allow_nan=False)
+

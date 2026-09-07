@@ -1,3 +1,52 @@
+## September 6: source failure conformance complete; captured transfer next
+
+The third public SDK workload-conformance slice is complete on `arrival/finish`
+in `loops-wt/arrival-finish`, based on `d75aae9e`, and included in this
+checkpoint; nothing pushed. No production change was needed. Sol built
+the workflow, Terra audited contracts/guidance, Luna validated suites, and root
+tightened causal/persisted-evidence assertions and triaged the frozen Fable-low
+review. The main checkout is clean and no jobs remain.
+
+The mapped strict workflow installs an elapsed upstream source and a triggered
+downstream source through public initialization/declaration editing. A forced
+first invocation commits both tiers while the downstream reports SourceError,
+either before yielding or after one observation. Public reads account for the
+exact receipt-order IDs, returned/persisted bodies and error lifecycle evidence.
+Tier commit predecessors, capture/projection coordinates and bounded Full
+verification align. Controlled lifecycle times keep cadence deterministic.
+
+A fresh non-forced invocation with a reconstructed mapped provider skips the
+upstream from its persisted success and runs only the downstream from its
+persisted trigger. All previously read rows remain unchanged. Before-yield
+failure leaves one downstream observation after the successful retry;
+after-yield failure leaves two logically identical observations with distinct
+fact IDs. This is fresh collection, not a resume token or automatic semantic
+deduplication. External effects remain a collector/application concern. The
+README now makes source-error durability conditional on the actual outcome.
+
+Fable 5.1 LOW and primary verdicts: **ACCEPT**, no blockers or review corrections.
+Final focused SDK **28 passed** /0.99s; full SDK **582 passed** /23.30s;
+architecture **101 passed** /6.79s; engine source/coordinator regressions
+**30 passed** /0.78s. Scoped Ruff and whitespace checks pass. Every test process
+isolated XDG state/config and `LOOPS_HOME`; no live stores/keys were used.
+The accepted test SHA-256 is
+`ac1513bd080f907e3f7722602f9a520475f9e315b9612abe152048363f27f48e`.
+Only status/handoff prose changed after review. See the
+[report](sdk-conformance-source-resumption-2026-09-06.md) and its final triage.
+
+**Next bounded slice:** captured-prefix export → restore forward → verify →
+explicitly sync → read, using the established Sol/Terra/Luna implementation and
+Fable-low final-review pattern. Start from existing public SDK transfer/restore
+tests and contracts; distinguish retained selected prefix from later source
+advance and receiver custody from its projection. Source unknown-append,
+known-uncommitted, collection interruption, projection and dispatch outcomes
+retain their existing separate tests; this completed workload covers durable
+source errors. C9 SDK/minimal-CLI transition and legacy retirement, plus larger
+maintenance/transfer/adoption work, remain separate. Resume after the user's
+compaction; no next slice began here.
+
+Earlier entries below preserve their status at the time of writing.
+
 ## September 6: declaration recovery conformance complete; source tiers next
 
 The second public SDK workload-conformance slice is complete and checkpointed

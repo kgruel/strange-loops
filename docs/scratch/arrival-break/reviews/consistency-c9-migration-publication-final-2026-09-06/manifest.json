@@ -1,0 +1,48 @@
+{
+  "model": "claude-fable-5-1[1m]",
+  "effort": "low",
+  "worktree": "/Users/kaygee/Code/loops-wt/arrival-finish",
+  "results": "/Users/kaygee/Code/loops-wt/arrival-finish/docs/scratch/arrival-break/reviews/consistency-c9-migration-publication-final-2026-09-06",
+  "due_at": "2026-09-07T03:57:18.128005+00:00",
+  "baseline": "50e37595",
+  "scope": "C9 migration descriptor publication and explicit adoption design final",
+  "jobs": [
+    {
+      "name": "final",
+      "packet": "/Users/kaygee/Code/loops-wt/arrival-finish/docs/scratch/arrival-break/reviews/consistency-c9-migration-publication-final-2026-09-06/final-prompt.txt",
+      "sha256": "50cb3e69f5e351bc72414cf03edd76db6b66983045fd87fba015a36083742eac",
+      "sources": {
+        "libs/migrate/src/migrate/sidecar.py": "ac17f89ef914d2ead3d5fe73f5bff2d0f6cc4faae5457aed04def2220ff1054f",
+        "libs/migrate/README.md": "a939a3b48cb105f0ca59006c67443662753d03021b1595ec2b0c14b912b88d0a",
+        "libs/migrate/tests/test_sidecar.py": "21c9d79b9c27c3e7fa506ae9105ce2a80761513e6ab881cec65d8198defc5df6",
+        "tests/test_arrival_migration_boundary.py": "530b192550befb6fafd69ebdcd197a525f58e52aff1b454c2ad4eb35e2f6a842",
+        "docs/scratch/arrival-break/consistency-c9-migration-publication-2026-09-06.md": "7b5bb06ed2866c4b0eac1f377fd55453ce3a809fcb60bfbb2667e73310e1875e",
+        "docs/scratch/arrival-break/consistency-c9-migration-adoption-design-2026-09-06.md": "51ac4da9aa6d10a6c7f3e6a3b002155bcbd188236378e8be7048ca7f1ba33c76",
+        "docs/scratch/arrival-break/reviews/consistency-c9-migration-publication-final-2026-09-06/validation-evidence/migration-baseline.txt": "2833d54b715c07b7beb90d23c4585625bfc14a0a344104d205e11423f7a62029",
+        "docs/scratch/arrival-break/reviews/consistency-c9-migration-publication-final-2026-09-06/validation-evidence/migration-baseline-command.txt": "31c2d3cceaadb003db96967f372050fa9a54448d97702eaf5dfdfa7a824d6bcf",
+        "docs/scratch/arrival-break/reviews/consistency-c9-migration-publication-final-2026-09-06/validation-evidence/combined-final.txt": "9f904240fe3bb34859340f3e74a5729d460500a5d58e4b50ade821871de48c61",
+        "docs/scratch/arrival-break/reviews/consistency-c9-migration-publication-final-2026-09-06/validation-evidence/combined-status.txt": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+        "docs/scratch/arrival-break/reviews/consistency-c9-migration-publication-final-2026-09-06/validation-evidence/validation-commands.txt": "f441d5f22a08f622bc679a7e4d78438e397de7e0fcd070bb13e4a89d184b7129",
+        "docs/scratch/arrival-break/reviews/consistency-c9-migration-publication-final-2026-09-06/validation-evidence/validated-source-hashes.txt": "9441ec69aea45bd685da571a4407e6d92063010d23b30c2612d09a23223e3693",
+        "docs/scratch/arrival-break/reviews/consistency-c9-migration-publication-final-2026-09-06/validation-evidence/boundary-final.txt": "68fb1d1b825a7069f126336d006d1dd78e5e0ac952904651631cd13f7c812100",
+        "docs/scratch/arrival-break/reviews/consistency-c9-migration-publication-final-2026-09-06/validation-evidence/boundary-status.txt": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+        "docs/scratch/arrival-break/reviews/consistency-c9-migration-publication-final-2026-09-06/validation-evidence/ruff-boundary.txt": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18",
+        "docs/scratch/arrival-break/reviews/consistency-c9-migration-publication-final-2026-09-06/validation-evidence/ruff-migration.txt": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18",
+        "docs/scratch/arrival-break/reviews/consistency-c9-migration-publication-final-2026-09-06/validation-evidence/architecture-final.txt": "e3b3f0a86bdc8c2320611af20fb59bb83db83fa82e5a35678454b808bf7d3138",
+        "docs/scratch/arrival-break/reviews/consistency-c9-migration-publication-final-2026-09-06/validation-evidence/architecture-status.json": "e022740343d376a643e9e939d5637551036175a1c5c7d2a32ac3a5ccf3bb5690",
+        "docs/scratch/arrival-break/reviews/consistency-c9-migration-publication-final-2026-09-06/validation-evidence/legacy-caller-final.txt": "e5d5f1394812085dbd5763bfb60de5f0e2997a913674ff88d465f1f6436ceba9",
+        "docs/scratch/arrival-break/reviews/consistency-c9-migration-publication-final-2026-09-06/validation-evidence/legacy-caller-status.json": "ecdb5f8cd99a68dec6dd02b7c3ef3bd3f15eb9c4c9d35f293810a371573ab9fe",
+        "libs/migrate/src/migrate/transform.py": "4d281e9d741641d6aa2f4e490550e78264049d4309d03958c07b8d406da5edd2",
+        "libs/sdk/src/sdk/target.py": "5e7dbeb993dc0788d242749b7730419e349af8418d4b659134d7180c72841dc8",
+        "libs/sdk/src/sdk/read.py": "cf5d37367cd20b20560f051fd307ac521e3c3651c970b75069473096936b37de",
+        "libs/sdk/src/sdk/declare.py": "7a2106bd2ab50aafb93623212eabff09ef4e92a73748f2c4501d4df1e5d64533",
+        "libs/engine/src/engine/arrival_projection.py": "932d50fa5c84c364bf817f4f97804cb89f89d8011c24916f48a30e50af247aec",
+        "libs/engine/src/engine/arrival_initialization.py": "49cd10b3fce2a0170c7105cce06cd09b3d7a7b6a300624a3244ae12e27faaf39",
+        "libs/engine/src/engine/arrival_registry.py": "33e80522d0919a05ced14360c6bf28a3bb049a7f7fda7d12eb11b49f302a2113",
+        "libs/engine/src/engine/arrival_declarations.py": "3caf30f5a3c249586cba05ea03a9b6b9efc0c259f17d465e1b8ecfca091a15f1",
+        "libs/engine/src/engine/runtime_write.py": "f3589955faf7a66d88fd184e0673b07d848e7bd95ef67fc145be4e1a0654faaa"
+      },
+      "status": "pending"
+    }
+  ]
+}

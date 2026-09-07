@@ -1,0 +1,98 @@
+{
+  "instruction": "You are Fable 5.1 LOW, adversarial cross-model reviewer of the frozen C9 migration publication slice and future adoption design. Read only this packet, no tools. Separate IMPLEMENTATION blockers from DESIGN blockers and optional observations; cite concrete file/line, trigger, consequence and minimum correction. End ACCEPT or REVISE. Runtime code is intentionally a bounded offline migration-sidecar hardening, not a completed adoption/cutover workflow. Do not mistake narrow scope for claiming usable SDK reads. Earlier setup/recovery changes at the same uncommitted worktree were reviewed separately and are outside this patch.\nImplementation: keep migration transformation/quarantine rules, publish explicit File location + exact physical lineage + authority role, use the exact bytes parsed before transformation and check again before publication, quote KDL safely, refuse unrelated preexisting descriptors, permit exact explicit already-published resume without rewriting descriptor. Check regression error taxonomy after pinning lineage on internal opens. These byte checks are NOT atomic compare-and-swap and inputs are required quiescent; no concurrency exclusion, live migration, crash recovery intent, or arbitrary power-loss guarantee is claimed. A post-staging refusal can leave evidence; post-rename fsync failure can leave a visible descriptor, so do not infer zero effects from an exception. Stronger durable adoption ceremony remains a design/worklist.\nCurrent protocol gap: migration creates physical Arrival genesis plus key introductions and legacy rows; it does NOT create _decl.genesis fact whose id equals new physical lineage. Thus resolve/structural verify/sync should work but declaration-dependent SDK inspect/read/edit/write should refuse without appending. Historical _decl rows must not be silently selected as own. Verify Full without cryptographic verifier excludes signature authorship, external key trust and projection; migration report is independently signed and currently verifies exact live-head equality (before future adoption appends).\nReview proposed append-forward adoption identity decisions too: explicit reviewed snapshot not stale locator fallback; physical lineage fact-ID binding; no existing/colliding own anchor; mapped author proven against captured verified key registry; selected declaration observer keys must match existing history in initial scope; separate FACT/ARRIVAL signatures; immutable planned draft/recovery evidence; source legacy rows remain prefix evidence; no automatic old identity claim. Open provenance/report-domain decisions may remain explicit worklist items, but flag any unsafe recommended operation.\nTests/logs are provided evidence, not your executions. Distinguish hook exceptions/seeded partial-state tests from actual subprocess crash claims. No real user store has been selected or touched. Assess API compatibility honestly for exported editor now requiring explicit lineage/expected bytes.",
+  "sources": [
+    "libs/migrate/src/migrate/sidecar.py",
+    "libs/migrate/README.md",
+    "libs/migrate/tests/test_sidecar.py",
+    "tests/test_arrival_migration_boundary.py",
+    "docs/scratch/arrival-break/consistency-c9-migration-publication-2026-09-06.md",
+    "docs/scratch/arrival-break/consistency-c9-migration-adoption-design-2026-09-06.md",
+    "docs/scratch/arrival-break/reviews/consistency-c9-migration-publication-final-2026-09-06/validation-evidence/migration-baseline.txt",
+    "docs/scratch/arrival-break/reviews/consistency-c9-migration-publication-final-2026-09-06/validation-evidence/migration-baseline-command.txt",
+    "docs/scratch/arrival-break/reviews/consistency-c9-migration-publication-final-2026-09-06/validation-evidence/combined-final.txt",
+    "docs/scratch/arrival-break/reviews/consistency-c9-migration-publication-final-2026-09-06/validation-evidence/combined-status.txt",
+    "docs/scratch/arrival-break/reviews/consistency-c9-migration-publication-final-2026-09-06/validation-evidence/validation-commands.txt",
+    "docs/scratch/arrival-break/reviews/consistency-c9-migration-publication-final-2026-09-06/validation-evidence/validated-source-hashes.txt",
+    "docs/scratch/arrival-break/reviews/consistency-c9-migration-publication-final-2026-09-06/validation-evidence/boundary-final.txt",
+    "docs/scratch/arrival-break/reviews/consistency-c9-migration-publication-final-2026-09-06/validation-evidence/boundary-status.txt",
+    "docs/scratch/arrival-break/reviews/consistency-c9-migration-publication-final-2026-09-06/validation-evidence/ruff-boundary.txt",
+    "docs/scratch/arrival-break/reviews/consistency-c9-migration-publication-final-2026-09-06/validation-evidence/ruff-migration.txt",
+    "docs/scratch/arrival-break/reviews/consistency-c9-migration-publication-final-2026-09-06/validation-evidence/architecture-final.txt",
+    "docs/scratch/arrival-break/reviews/consistency-c9-migration-publication-final-2026-09-06/validation-evidence/architecture-status.json",
+    "docs/scratch/arrival-break/reviews/consistency-c9-migration-publication-final-2026-09-06/validation-evidence/legacy-caller-final.txt",
+    "docs/scratch/arrival-break/reviews/consistency-c9-migration-publication-final-2026-09-06/validation-evidence/legacy-caller-status.json"
+  ],
+  "excerpts": {
+    "libs/migrate/src/migrate/transform.py": [
+      [
+        155,
+        365
+      ]
+    ],
+    "libs/sdk/src/sdk/target.py": [
+      [
+        60,
+        115
+      ],
+      [
+        165,
+        190
+      ]
+    ],
+    "libs/sdk/src/sdk/read.py": [
+      [
+        194,
+        240
+      ],
+      [
+        730,
+        775
+      ],
+      [
+        1782,
+        1895
+      ]
+    ],
+    "libs/sdk/src/sdk/declare.py": [
+      [
+        765,
+        838
+      ]
+    ],
+    "libs/engine/src/engine/arrival_projection.py": [
+      [
+        423,
+        450
+      ]
+    ],
+    "libs/engine/src/engine/arrival_initialization.py": [
+      [
+        273,
+        329
+      ]
+    ],
+    "libs/engine/src/engine/arrival_registry.py": [
+      [
+        130,
+        174
+      ],
+      [
+        515,
+        566
+      ]
+    ],
+    "libs/engine/src/engine/arrival_declarations.py": [
+      [
+        885,
+        997
+      ]
+    ],
+    "libs/engine/src/engine/runtime_write.py": [
+      [
+        870,
+        920
+      ]
+    ]
+  },
+  "patch": true
+}

@@ -97,6 +97,8 @@ from engine.arrival_contract import (
     Full,
     Head,
     HeadMismatch,
+    NotAuthority,
+    Profile,
     RecordDraft,
     StoreDescriptor,
 )
@@ -107,7 +109,7 @@ from engine.arrival_head_attestation import (
     read_journal,
 )
 from engine.arrival_head_seam import StoreLost
-from engine.arrival_registry import BackendRegistry
+from engine.arrival_registry import BackendRegistry, descriptor_for
 from lang import BackendDecl, VertexFile, effective_store_clause, parse_vertex
 
 from .inventory import SourceInventory, inventory
@@ -129,7 +131,6 @@ from .refusals import (
 )
 from .transform import (
     TransformExceptions,
-    coerce_vertex,
     transform,
 )
 
@@ -210,17 +211,22 @@ def edit_vertex_store_clause(
     vertex_path: Path | str,
     target_location: str,
     *,
+    lineage: str,
     backend: str = "file",
+    expected_original: bytes,
 ) -> None:
     """Surgically edit the store clause in a .vertex file with verification-by-re-parse (§H.1).
 
-    Replaces the positional location and sets backend="file", writes to a temp file
-    in the same directory, fsyncs, and atomically replaces the .vertex file.
+    Replaces the positional location and sets the exact backend, lineage, and
+    authority role. The caller supplies the bytes it planned from; publication
+    checks them on entry and again immediately before the final replace.
 
     Args:
         vertex_path: Path to the .vertex file to edit.
         target_location: Formatted location string to put in the store clause.
+        lineage: Exact physical Arrival lineage named by the descriptor.
         backend: Backend name (defaults to 'file').
+        expected_original: Exact declaration bytes captured before staging.
 
     Raises:
         PublishPreconditionRefused: If verification-by-re-parse fails or store clause
@@ -231,7 +237,26 @@ def edit_vertex_store_clause(
     if not v_path.exists():
         raise FileNotFoundError(f"Vertex file not found: {v_path}")
 
-    original_text = v_path.read_text(encoding="utf-8")
+    try:
+        actual_original = v_path.read_bytes()
+    except OSError as exc:
+        raise PublishPreconditionRefused(
+            f"Cannot re-read declaration before publication: {exc}",
+            condition="vertex_changed",
+        ) from exc
+    if actual_original != expected_original:
+        raise PublishPreconditionRefused(
+            "Declaration changed after migration staging; refusing to publish over "
+            "a different descriptor snapshot.",
+            condition="vertex_changed",
+        )
+    try:
+        original_text = expected_original.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise PublishPreconditionRefused(
+            f"Captured declaration is not valid UTF-8: {exc}",
+            condition="vertex_reparse",
+        ) from exc
     pre_ast = parse_vertex(original_text, v_path)
 
     try:
@@ -258,7 +283,20 @@ def edit_vertex_store_clause(
         )
 
     start, end = store_span.span
-    new_store_clause = f'store "{target_location}" backend="{backend}"'
+
+    def quote(value: str, field: str) -> str:
+        if any(ord(char) < 0x20 or ord(char) == 0x7F for char in value):
+            raise PublishPreconditionRefused(
+                f"{field} contains KDL control characters",
+                condition="vertex_store_encoding",
+            )
+        return json.dumps(value, ensure_ascii=False)
+
+    new_store_clause = (
+        f"store {quote(target_location, 'store location')} "
+        f"backend={quote(backend, 'backend')} "
+        f"lineage={quote(lineage, 'lineage')} role=\"authority\""
+    )
     edited_text = original_text[:start] + new_store_clause + original_text[end:]
 
     # Verification-by-re-parse
@@ -278,10 +316,13 @@ def edit_vertex_store_clause(
             condition="vertex_store_location",
         )
 
-    if post_ast.store_backend != BackendDecl(name=backend):
+    expected_backend = BackendDecl(
+        name=backend, lineage=lineage, role=Profile.AUTHORITY.value
+    )
+    if post_ast.store_backend != expected_backend:
         raise PublishPreconditionRefused(
             "Verification-by-re-parse failed: "
-            f"expected store_backend={BackendDecl(name=backend)!r}, "
+            f"expected store_backend={expected_backend!r}, "
             f"got {post_ast.store_backend!r}. "
             "Advisory: check store clause backend property.",
             condition="vertex_store_backend",
@@ -309,11 +350,21 @@ def edit_vertex_store_clause(
     v_dir = v_path.parent
     temp_path = v_dir / f".tmp_{v_path.name}_{uuid4().hex}"
     try:
-        with temp_path.open("w", encoding="utf-8") as f:
-            f.write(edited_text)
+        with temp_path.open("wb") as f:
+            f.write(edited_text.encode("utf-8"))
             f.flush()
             os.fsync(f.fileno())
+        if v_path.read_bytes() != expected_original:
+            raise PublishPreconditionRefused(
+                "Declaration changed while preparing publication; refusing to replace it.",
+                condition="vertex_changed",
+            )
         temp_path.replace(v_path)
+        dir_fd = os.open(v_dir, os.O_RDONLY)
+        try:
+            os.fsync(dir_fd)
+        finally:
+            os.close(dir_fd)
     finally:
         if temp_path.exists():
             with contextlib.suppress(OSError):
@@ -619,10 +670,19 @@ def verify_migration_report(
         raise ReportMissingTargetRefused(f"Target arrival store does not exist: {t_path}")
 
     registry = BackendRegistry.with_builtin_backends()
-    descriptor = StoreDescriptor(backend="file", location=str(t_path))
+    descriptor = StoreDescriptor(
+        backend="file",
+        location=str(t_path),
+        lineage=str(lineage),
+        role=Profile.AUTHORITY,
+    )
     try:
         ledger, _ = registry.open(descriptor)
         live_head = ledger.head()
+    except NotAuthority as exc:
+        raise ReportHeadMismatchRefused(
+            f"Target store lineage does not match report claim: {exc}"
+        ) from exc
     except (StoreLost, ArrivalTornTail, ArrivalCorrupt, GenesisRefused, OSError) as exc:
         raise ReportTargetUnopenableRefused(
             f"Cannot open or read head from target arrival store {t_path}: {exc}",
@@ -693,6 +753,31 @@ def run_migration(
     if not v_path.exists():
         raise FileNotFoundError(f"Vertex file not found: {v_path}")
 
+    original_vertex_bytes = v_path.read_bytes()
+    vertex_ast = parse_vertex(original_vertex_bytes.decode("utf-8"), v_path)
+    already_published = False
+    if vertex_ast.store_backend is not None:
+        existing_descriptor = descriptor_for(vertex_ast, v_path)
+        resume_path = None if resume_target is None else Path(resume_target).resolve()
+        if (
+            resume_path is not None
+            and existing_descriptor is not None
+            and existing_descriptor.backend == "file"
+            and existing_descriptor.role is Profile.AUTHORITY
+            and existing_descriptor.lineage == resume_path.stem
+            and Path(existing_descriptor.location).resolve() == resume_path
+        ):
+            # A process may have stopped after the atomic descriptor replace
+            # but before returning its outcome. Re-verification of that exact
+            # published target is safe; no descriptor rewrite is needed.
+            already_published = True
+        else:
+            raise PublishPreconditionRefused(
+                "Migration requires a legacy descriptor snapshot; refusing to replace an "
+                "existing explicit backend/lineage/role declaration.",
+                condition="vertex_already_descriptor_backed",
+            )
+
     # Stage 1: Inventory pass (refusals fire here, before any target creation)
     try:
         inv = inventory(src_path)
@@ -704,7 +789,6 @@ def run_migration(
         ) from exc
 
     # Stage 2: Transform pass
-    vertex_ast = coerce_vertex(v_path)
     t_rule = transform_rule if transform_rule is not None else identity()
 
     try:
@@ -738,7 +822,10 @@ def run_migration(
         target_path.parent.mkdir(parents=True, exist_ok=True)
 
         descriptor = StoreDescriptor(
-            backend="file", location=str(target_path), lineage=lineage
+            backend="file",
+            location=str(target_path),
+            lineage=lineage,
+            role=Profile.AUTHORITY,
         )
         ledger, query = registry.open(descriptor)
 
@@ -762,11 +849,23 @@ def run_migration(
         if not target_path.exists():
             raise FileNotFoundError(f"Resume target does not exist: {target_path}")
 
-        descriptor = StoreDescriptor(backend="file", location=str(target_path))
+        expected_lineage = target_path.stem
+        descriptor = StoreDescriptor(
+            backend="file",
+            location=str(target_path),
+            lineage=expected_lineage,
+            role=Profile.AUTHORITY,
+        )
 
         try:
             ledger, query = registry.open(descriptor)
             current_head = ledger.head()
+        except NotAuthority as exc:
+            raise TargetMismatchOnResumeRefused(
+                f"Resume target {target_path} does not match its filename lineage: {exc}",
+                target_path=str(target_path),
+                ordinal=0,
+            ) from exc
         except (ArrivalTornTail, StoreLost, ArrivalCorrupt, GenesisRefused, OSError) as exc:
             cause = exc.__cause__
             if isinstance(exc, ArrivalTornTail) or isinstance(cause, ArrivalTornTail):
@@ -1028,9 +1127,19 @@ def run_migration(
     except ValueError:
         new_store_location = str(target_path)
 
-    edit_vertex_store_clause(
-        vertex_path=v_path, target_location=new_store_location, backend="file"
-    )
+    if not already_published:
+        edit_vertex_store_clause(
+            vertex_path=v_path,
+            target_location=new_store_location,
+            lineage=lineage,
+            backend="file",
+            expected_original=original_vertex_bytes,
+        )
+    elif v_path.read_bytes() != original_vertex_bytes:
+        raise PublishPreconditionRefused(
+            "Already-published descriptor changed during migration verification.",
+            condition="vertex_changed",
+        )
 
     return MigrationOutcome(
         target_path=target_path,

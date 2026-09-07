@@ -129,7 +129,7 @@ test where the question concerns an injected backend.
 | C8a / implemented in slice 1 | Initialization now bare re-raises `normalized is exc` after existing intent-path enrichment. | Regressions retain identity, original cause, existing SDK details, intent path and interrupts; newly mapped exceptions still chain from the engine cause. See the [slice report](consistency-slice1-2026-09-06.md). |
 | C8b / implemented | Owned iterator cleanup and atomically paired partial observations now survive collector/coordinator failure; failed current-tier custody is not attempted. | Typed collection terminal preserves completed/failed/cancelled sibling evidence and earlier commits through SDK serialization. No lifecycle is fabricated for an incomplete attempt. Fully collected final-summary failures retain known-uncommitted tier evidence. See the [C8b report](consistency-c8b-2026-09-06.md). The previous strict zip already refused mismatched lists before append. |
 | D0/D2 / opt-in implementation accepted and checkpointed | Neutral exact credential requests separate local namespace/observer/domain selection from captured authorization. The mapped provider persists opaque key references through serialized, recoverable binding intents; resolution is read-only and default legacy callers are not auto-migrated. | See the [D0/D2 report](consistency-d0-d2-2026-09-06.md) and [design](consistency-d0-d2-design-2026-09-06.md). Runtime/declaration/source planning checks mapped public evidence at captured H+1 or against current receipt keys. Mapped initialization loads a pre-created binding; explicit create/import/recovery retains concurrent and interrupted operation evidence. Focused Fable-low and primary triage accepted completed-slot recovery and the subsequent directory/import durability corrections; final custody validation passed 81 tests. |
-| C9 / first writer transition implemented; retirement open | The minimal client now connects mapped initialization, emission and declaration editing/recovery to the SDK. Legacy resolution/writer paths remain inventoried and retained. | See the [C9 transition report](consistency-c9-transition-2026-09-06.md) for the process boundary, validation and retirement gates. Finish remaining client workflows and remove legacy authority paths only with surviving consumers covered. |
+| C9 / writers, setup/recovery, migration publication implemented; adoption/retirement open | The minimal client connects mapped initialization, emission, declaration editing/recovery, initialization recovery, and explicit credential lifecycle operations to the SDK. Legacy paths remain inventoried and retained. | See the [C9 transition report](consistency-c9-transition-2026-09-06.md) and [setup/recovery report](consistency-c9-setup-2026-09-06.md). The [migration publication boundary](consistency-c9-migration-publication-2026-09-06.md) is accepted; explicit append-forward [declaration adoption](consistency-c9-migration-adoption-design-2026-09-06.md) precedes a usable-store rehearsal. Cover remaining callers before legacy retirement. |
 
 Projection preserve/rebuild recovery, empty-receiver exact import, foreign
 admission and descriptor adoption remain on the larger
@@ -149,8 +149,8 @@ public workflow slices now have accepted evidence for
 and [captured export, restore, verify and sync/read](sdk-conformance-captured-transfer-2026-09-06.md).
 These bounded workflows complement the individual consistency regressions;
 they do not claim every concurrency, failure or adoption scenario below.
-The first C9 mapped-writer client transition is accepted; deliberate legacy
-retirement and larger maintenance/transfer work remain separate.
+The C9 mapped-writer and setup/recovery client slices are accepted; deliberate
+legacy retirement and larger maintenance/transfer work remain separate.
 
 | Scenario | Existing coverage to build on | Added cross-operation assertion |
 | --- | --- | --- |

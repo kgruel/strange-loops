@@ -26,6 +26,10 @@ from .types import (
     AdmissionFailed,
     BatchEmitResult,
     CommittedEmissionError,
+    CredentialBindingConflict,
+    CredentialBindingIncomplete,
+    CredentialBindingRecoveryRequired,
+    CredentialBindingResult,
     EmissionFailed,
     EmitPreviewResult,
     EmitReceipt,
@@ -123,6 +127,155 @@ class MappedCredentialProvider(_MappedCredentialProvider):
             super().__init__(root, namespace=namespace, receipt_observer=receipt_observer)
         except ValueError as exc:
             raise SdkValueError(str(exc)) from exc
+
+    def create_binding(self, observer: str, *, token: str) -> CredentialBindingResult:
+        """Create one explicit binding and return its process-safe outcome."""
+        return self._binding_mutation(
+            "create",
+            observer,
+            token,
+            lambda: _MappedCredentialProvider.create_binding(self, observer, token=token),
+        )
+
+    def recover_binding(self, observer: str, *, token: str) -> CredentialBindingResult:
+        """Reconcile one retained binding intent without resolver-side mutation."""
+        return self._binding_mutation(
+            "recover",
+            observer,
+            token,
+            lambda: _MappedCredentialProvider.recover_binding(self, observer, token=token),
+        )
+
+    def bind_existing_ref(
+        self,
+        observer: str,
+        key_ref: str,
+        expected_public_key: str,
+        *,
+        token: str,
+    ) -> CredentialBindingResult:
+        """Publish one explicit binding to already managed public material."""
+        self._binding_input(key_ref, "key_ref")
+        self._binding_input(expected_public_key, "expected_public_key")
+        return self._binding_mutation(
+            "bind-existing-ref",
+            observer,
+            token,
+            lambda: _MappedCredentialProvider.bind_existing_ref(
+                self,
+                observer, key_ref, expected_public_key, token=token
+            ),
+            key_ref=key_ref,
+        )
+
+    def import_legacy(
+        self, vertex_path: Path | str, observer: str, *, token: str
+    ) -> CredentialBindingResult:
+        """Import one explicitly selected legacy key through custody validation."""
+        if not isinstance(vertex_path, (str, Path)):
+            raise SdkValueError("vertex_path must be a path string or Path")
+        return self._binding_mutation(
+            "import-legacy",
+            observer,
+            token,
+            lambda: _MappedCredentialProvider.import_legacy(
+                self, vertex_path, observer, token=token
+            ),
+        )
+
+    def _binding_mutation(
+        self,
+        operation: str,
+        observer: str,
+        token: str,
+        invoke,
+        *,
+        key_ref: str | None = None,
+    ) -> CredentialBindingResult:
+        """Translate custody mutation evidence without weakening its protocol."""
+        from custody.binding import (
+            BindingConflict,
+            BindingCreationResult,
+            BindingMutationIncomplete,
+            BindingRecoveryRequired,
+        )
+
+        self._binding_input(observer, "observer")
+        self._binding_input(token, "token")
+        if key_ref is not None:
+            self._binding_input(key_ref, "key_ref")
+        try:
+            raw = invoke()
+        except BindingMutationIncomplete as exc:
+            raise CredentialBindingIncomplete(
+                str(exc),
+                operation=operation,
+                namespace=exc.namespace,
+                observer=exc.observer,
+                token=exc.token,
+                key_ref=exc.key_ref,
+                phase=exc.phase,
+                source_type=type(exc).__name__,
+            ) from exc
+        except BindingConflict as exc:
+            raise CredentialBindingConflict(
+                str(exc),
+                operation=operation,
+                namespace=self.namespace,
+                observer=observer,
+                token=token,
+                key_ref=key_ref,
+            ) from exc
+        except BindingRecoveryRequired as exc:
+            raise CredentialBindingRecoveryRequired(
+                str(exc),
+                operation=operation,
+                namespace=self.namespace,
+                observer=observer,
+                token=token,
+                key_ref=key_ref,
+            ) from exc
+        except (OSError, ValueError, TypeError) as exc:
+            # Once custody enters its implementation, a raw failure does not
+            # prove that no durable binding artifact exists.  The caller keeps
+            # its exact request evidence and reconciles rather than retrying.
+            raise CredentialBindingIncomplete(
+                "mapped binding mutation outcome is incomplete or unknown",
+                operation=operation,
+                namespace=self.namespace,
+                observer=observer,
+                token=token,
+                key_ref=key_ref,
+                phase="unknown",
+                source_type=type(exc).__name__,
+            ) from exc
+        if not isinstance(raw, BindingCreationResult):
+            raise CredentialBindingIncomplete(
+                "mapped binding mutation returned invalid custody evidence",
+                operation=operation,
+                namespace=self.namespace,
+                observer=observer,
+                token=token,
+                key_ref=key_ref,
+                phase="unknown",
+                source_type=type(raw).__name__,
+            )
+        return CredentialBindingResult(
+            operation=operation,
+            namespace=raw.namespace,
+            observer=raw.observer,
+            key_ref=raw.key_ref,
+            public_key=raw.public_key,
+            provenance=raw.provenance,
+            token=raw.token,
+            binding_created=raw.binding_created,
+            key_created=raw.key_created,
+        )
+
+    @staticmethod
+    def _binding_input(value: object, field: str) -> None:
+        if not isinstance(value, str) or not value:
+            raise SdkValueError(f"{field} must be a non-empty string")
 
 
 def _mapped_credentials(

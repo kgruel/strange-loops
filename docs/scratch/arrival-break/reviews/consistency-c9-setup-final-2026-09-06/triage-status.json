@@ -1,0 +1,11 @@
+{
+  "status": "resolved-by-correction",
+  "primary_verdict": "REVISE",
+  "fable_verdict": "REVISE",
+  "blockers": [
+    "B1: raw custody TypeError loses incomplete recovery evidence"
+  ],
+  "initial_sources_matched": true,
+  "resolved_by": "../consistency-c9-setup-correction-2026-09-06/triage-status.json",
+  "resolved_at": "2026-09-07T03:34:58.516607+00:00"
+}

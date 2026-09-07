@@ -1,0 +1,11 @@
+{
+  "status": "complete",
+  "primary_verdict": "ACCEPT",
+  "fable_verdict": "ACCEPT",
+  "closed_blockers": [
+    "B1"
+  ],
+  "remaining_blockers": [],
+  "completed_at": "2026-09-07T03:34:58.516607+00:00",
+  "post_review_changes": "Maintained status and handoff only"
+}

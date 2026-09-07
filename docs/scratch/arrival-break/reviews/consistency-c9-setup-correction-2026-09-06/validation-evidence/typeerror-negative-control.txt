@@ -1,0 +1,200 @@
+.FFF                                                                     [100%]
+=================================== FAILURES ===================================
+_ test_raw_post_marker_custody_failures_keep_unknown_phase_and_reconcile[TypeError-TypeError] _
+
+tmp_path = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-1087/test_raw_post_marker_custody_f1')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10952cfc0>
+failure_type = <class 'TypeError'>, source_type = 'TypeError'
+
+    @pytest.mark.parametrize(
+        ("failure_type", "source_type"),
+        [(OSError, "OSError"), (TypeError, "TypeError")],
+    )
+    def test_raw_post_marker_custody_failures_keep_unknown_phase_and_reconcile(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        failure_type: type[Exception],
+        source_type: str,
+    ) -> None:
+        provider = _provider(tmp_path)
+        original_index = provider._ensure_token_index
+    
+        def interrupt_index(_intent: dict[str, object]) -> None:
+            raise failure_type("injected token-index failure")
+    
+        monkeypatch.setattr(provider, "_ensure_token_index", interrupt_index)
+        with pytest.raises(CredentialBindingIncomplete) as raised:
+>           provider.create_binding("alice", token="index-token")
+
+libs/sdk/tests/test_credential_lifecycle.py:189: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+libs/sdk/src/sdk/emit.py:133: in create_binding
+    return self._binding_mutation(
+libs/sdk/src/sdk/emit.py:208: in _binding_mutation
+    raw = invoke()
+          ^^^^^^^^
+libs/sdk/src/sdk/emit.py:137: in <lambda>
+    lambda: _MappedCredentialProvider.create_binding(self, observer, token=token),
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+libs/custody/src/custody/binding.py:923: in create_binding
+    return self._mutate(observer, token=token, provenance="created")
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+libs/custody/src/custody/binding.py:871: in _mutate
+    intent = self._intent_for(
+libs/custody/src/custody/binding.py:721: in _intent_for
+    self._ensure_token_index(intent)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+_intent = {'schema': 'loops.custody/binding-intent/v1', 'namespace': 'tenant/a', 'observer': 'alice', 'token': 'index-token', ...}
+
+    def interrupt_index(_intent: dict[str, object]) -> None:
+>       raise failure_type("injected token-index failure")
+E       TypeError: injected token-index failure
+
+libs/sdk/tests/test_credential_lifecycle.py:185: TypeError
+_ test_corrupt_pending_or_intent_record_is_lifecycle_incomplete_without_mutation[pending] _
+
+tmp_path = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-1087/test_corrupt_pending_or_intent0')
+record_kind = 'pending'
+
+    @pytest.mark.parametrize("record_kind", ["pending", "intent"])
+    def test_corrupt_pending_or_intent_record_is_lifecycle_incomplete_without_mutation(
+        tmp_path: Path, record_kind: str
+    ) -> None:
+        provider = _provider(tmp_path)
+        token = "pending-corrupt"
+        if record_kind == "pending":
+            record = provider.root / "pending-v1" / "corrupt.json"
+        else:
+            record = provider._intent_path(token)
+        record.parent.mkdir(parents=True)
+        record.write_text("[]")
+        # Entering a custody mutation normally creates this advisory lock. Seed it
+        # so the unchanged-byte assertion isolates record handling from that
+        # established lock-file side effect.
+        (provider.root / ".bindings-v1.lock").touch()
+        before = _files(provider.root)
+    
+        with pytest.raises(CredentialBindingIncomplete) as raised:
+>           provider.create_binding("alice", token=token)
+
+libs/sdk/tests/test_credential_lifecycle.py:245: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+libs/sdk/src/sdk/emit.py:133: in create_binding
+    return self._binding_mutation(
+libs/sdk/src/sdk/emit.py:208: in _binding_mutation
+    raw = invoke()
+          ^^^^^^^^
+libs/sdk/src/sdk/emit.py:137: in <lambda>
+    lambda: _MappedCredentialProvider.create_binding(self, observer, token=token),
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+libs/custody/src/custody/binding.py:923: in create_binding
+    return self._mutate(observer, token=token, provenance="created")
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+libs/custody/src/custody/binding.py:871: in _mutate
+    intent = self._intent_for(
+libs/custody/src/custody/binding.py:593: in _intent_for
+    pending_for_token = self._pending_by_token(token)
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+libs/custody/src/custody/binding.py:508: in _pending_by_token
+    record = self._read_json(path)
+             ^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <sdk.emit.MappedCredentialProvider object at 0x109565bd0>
+path = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-1087/test_corrupt_pending_or_intent0/bindings/pending-v1/corrupt.json')
+
+    def _read_json(self, path: Path) -> dict[str, object] | None:
+        if not _regular(path, required=False):
+            return None
+        try:
+            def reject_duplicates(pairs: list[tuple[str, object]]) -> dict[str, object]:
+                result: dict[str, object] = {}
+                for key, value in pairs:
+                    if key in result:
+                        raise ValueError(f"duplicate field {key!r}")
+                    result[key] = value
+                return result
+    
+            loaded = json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=reject_duplicates)
+        except (OSError, json.JSONDecodeError) as exc:
+            raise ValueError(f"malformed mapped custody record: {path}") from exc
+        if not isinstance(loaded, dict):
+>           raise TypeError(f"mapped custody record is not an object: {path}")
+E           TypeError: mapped custody record is not an object: /private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-1087/test_corrupt_pending_or_intent0/bindings/pending-v1/corrupt.json
+
+libs/custody/src/custody/binding.py:343: TypeError
+_ test_corrupt_pending_or_intent_record_is_lifecycle_incomplete_without_mutation[intent] _
+
+tmp_path = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-1087/test_corrupt_pending_or_intent1')
+record_kind = 'intent'
+
+    @pytest.mark.parametrize("record_kind", ["pending", "intent"])
+    def test_corrupt_pending_or_intent_record_is_lifecycle_incomplete_without_mutation(
+        tmp_path: Path, record_kind: str
+    ) -> None:
+        provider = _provider(tmp_path)
+        token = "pending-corrupt"
+        if record_kind == "pending":
+            record = provider.root / "pending-v1" / "corrupt.json"
+        else:
+            record = provider._intent_path(token)
+        record.parent.mkdir(parents=True)
+        record.write_text("[]")
+        # Entering a custody mutation normally creates this advisory lock. Seed it
+        # so the unchanged-byte assertion isolates record handling from that
+        # established lock-file side effect.
+        (provider.root / ".bindings-v1.lock").touch()
+        before = _files(provider.root)
+    
+        with pytest.raises(CredentialBindingIncomplete) as raised:
+>           provider.create_binding("alice", token=token)
+
+libs/sdk/tests/test_credential_lifecycle.py:245: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+libs/sdk/src/sdk/emit.py:133: in create_binding
+    return self._binding_mutation(
+libs/sdk/src/sdk/emit.py:208: in _binding_mutation
+    raw = invoke()
+          ^^^^^^^^
+libs/sdk/src/sdk/emit.py:137: in <lambda>
+    lambda: _MappedCredentialProvider.create_binding(self, observer, token=token),
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+libs/custody/src/custody/binding.py:923: in create_binding
+    return self._mutate(observer, token=token, provenance="created")
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+libs/custody/src/custody/binding.py:871: in _mutate
+    intent = self._intent_for(
+libs/custody/src/custody/binding.py:586: in _intent_for
+    None if intents is None else self._read_json(intents / f"{_digest(token)}.json")
+                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <sdk.emit.MappedCredentialProvider object at 0x10952de00>
+path = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-1087/test_corrupt_pending_or_intent1/bindings/intents-v1/6a0ee29dd7f8d60c985728b4d88d51696b0dfd019ced0c4c13d40c4d2abfc06c.json')
+
+    def _read_json(self, path: Path) -> dict[str, object] | None:
+        if not _regular(path, required=False):
+            return None
+        try:
+            def reject_duplicates(pairs: list[tuple[str, object]]) -> dict[str, object]:
+                result: dict[str, object] = {}
+                for key, value in pairs:
+                    if key in result:
+                        raise ValueError(f"duplicate field {key!r}")
+                    result[key] = value
+                return result
+    
+            loaded = json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=reject_duplicates)
+        except (OSError, json.JSONDecodeError) as exc:
+            raise ValueError(f"malformed mapped custody record: {path}") from exc
+        if not isinstance(loaded, dict):
+>           raise TypeError(f"mapped custody record is not an object: {path}")
+E           TypeError: mapped custody record is not an object: /private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-1087/test_corrupt_pending_or_intent1/bindings/intents-v1/6a0ee29dd7f8d60c985728b4d88d51696b0dfd019ced0c4c13d40c4d2abfc06c.json
+
+libs/custody/src/custody/binding.py:343: TypeError
+=========================== short test summary info ============================
+FAILED libs/sdk/tests/test_credential_lifecycle.py::test_raw_post_marker_custody_failures_keep_unknown_phase_and_reconcile[TypeError-TypeError]
+FAILED libs/sdk/tests/test_credential_lifecycle.py::test_corrupt_pending_or_intent_record_is_lifecycle_incomplete_without_mutation[pending]
+FAILED libs/sdk/tests/test_credential_lifecycle.py::test_corrupt_pending_or_intent_record_is_lifecycle_incomplete_without_mutation[intent]
+3 failed, 1 passed, 5 deselected in 0.92s

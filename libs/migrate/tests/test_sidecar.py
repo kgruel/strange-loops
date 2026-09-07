@@ -18,7 +18,7 @@ from engine.arrival import (
     mint_lineage,
 )
 from engine.arrival_body import body_of_fact_row
-from engine.arrival_contract import Full, Head, RecordDraft, StoreDescriptor
+from engine.arrival_contract import Full, Head, Profile, RecordDraft, StoreDescriptor
 from engine.arrival_head_attestation import Kind, Level, read_journal
 from engine.arrival_head_seam import StoreLost
 from engine.arrival_registry import BackendRegistry, descriptor_for
@@ -190,7 +190,9 @@ def test_full_roundtrip_synthetic_store(tmp_path: Path, source_format: str) -> N
 
     # 6. Descriptor updated atomically with verification-by-re-parse (§H)
     post_ast = parse_vertex_file(v_path)
-    assert post_ast.store_backend == BackendDecl(name="file")
+    assert post_ast.store_backend == BackendDecl(
+        name="file", lineage=outcome.lineage, role="authority"
+    )
     resolved_desc = descriptor_for(post_ast, v_path)
     assert resolved_desc is not None
     assert resolved_desc.backend == "file"
@@ -302,6 +304,25 @@ def test_kill_mid_append_restart_byte_identical(tmp_path: Path) -> None:
     assert outcome_resumed.target_path.read_bytes() == ref_path.read_bytes(), (
         "Final target MUST be byte-identical to uninterrupted run"
     )
+    resumed_ast = parse_vertex_file(v_path)
+    assert resumed_ast.store_backend == BackendDecl(
+        name="file", lineage=lineage, role="authority"
+    )
+    published_descriptor = v_path.read_bytes()
+    with patch(
+        "migrate.sidecar.edit_vertex_store_clause",
+        side_effect=AssertionError("already-published resume must not replace descriptor"),
+    ):
+        repeated = run_migration(
+            source_path=source_path,
+            vertex_path=v_path,
+            store_dir=store_dir,
+            signer=cust.signer,
+            resume_target=interrupted_target,
+        )
+    assert repeated.target_path == outcome_resumed.target_path
+    assert repeated.head == outcome_resumed.head
+    assert v_path.read_bytes() == published_descriptor
 
 
 # ---------------------------------------------------------------------------
@@ -556,6 +577,105 @@ def test_source_mutated_during_staging_refuses_publish(tmp_path: Path) -> None:
     assert v_path.read_text(encoding="utf-8") == pre_vertex_text
 
 
+def test_descriptor_mutated_during_staging_refuses_captured_publish(tmp_path: Path) -> None:
+    store_dir = tmp_path / "data"
+    store_dir.mkdir(parents=True)
+    cust = CustodianFixture(tmp_path, "alice")
+    source_path = build_synthetic_jsonl(store_dir / "legacy.jsonl")
+    v_path = _make_vertex_file(
+        tmp_path,
+        custodian_name=cust.name,
+        custodian_key=cust.public,
+        other_observers=[],
+    )
+    original_transform = transform
+
+    def mutating_transform(*args, **kwargs):
+        result = original_transform(*args, **kwargs)
+        v_path.write_bytes(v_path.read_bytes() + b"// concurrent declaration edit\n")
+        return result
+
+    with (
+        patch("migrate.sidecar.transform", side_effect=mutating_transform),
+        pytest.raises(PublishPreconditionRefused) as exc_info,
+    ):
+        run_migration(
+            source_path=source_path,
+            vertex_path=v_path,
+            store_dir=store_dir,
+            signer=cust.signer,
+        )
+
+    assert exc_info.value.condition == "vertex_changed"
+    assert v_path.read_bytes().endswith(b"// concurrent declaration edit\n")
+
+
+def test_publish_quotes_location_and_declares_exact_authority(tmp_path: Path) -> None:
+    store_dir = tmp_path / 'data "quoted" \\ segment'
+    store_dir.mkdir(parents=True)
+    cust = CustodianFixture(tmp_path, "alice")
+    source_path = build_synthetic_jsonl(tmp_path / "legacy.jsonl")
+    v_path = _make_vertex_file(
+        tmp_path,
+        custodian_name=cust.name,
+        custodian_key=cust.public,
+        other_observers=[],
+        store_rel_path="./legacy.jsonl",
+    )
+
+    outcome = run_migration(
+        source_path=source_path,
+        vertex_path=v_path,
+        store_dir=store_dir,
+        signer=cust.signer,
+    )
+
+    ast = parse_vertex_file(v_path)
+    descriptor = descriptor_for(ast, v_path)
+    assert descriptor == StoreDescriptor(
+        backend="file",
+        location=str(outcome.target_path),
+        lineage=outcome.lineage,
+        role=Profile.AUTHORITY,
+    )
+
+
+@pytest.mark.parametrize("role", ["authority", "replica"])
+def test_migration_refuses_preexisting_arrival_descriptor(
+    tmp_path: Path, role: str
+) -> None:
+    store_dir = tmp_path / "data"
+    store_dir.mkdir(parents=True)
+    cust = CustodianFixture(tmp_path, "alice")
+    source_path = build_synthetic_jsonl(store_dir / "legacy.jsonl")
+    v_path = _make_vertex_file(
+        tmp_path,
+        custodian_name=cust.name,
+        custodian_key=cust.public,
+        other_observers=[],
+    )
+    original = v_path.read_text(encoding="utf-8")
+    v_path.write_text(
+        original.replace(
+            'store "./data/legacy.jsonl"',
+            f'store "./data/existing.arrival" backend="file" '
+            f'lineage="existing-lineage" role="{role}"',
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(PublishPreconditionRefused) as exc_info:
+        run_migration(
+            source_path=source_path,
+            vertex_path=v_path,
+            store_dir=store_dir,
+            signer=cust.signer,
+        )
+
+    assert exc_info.value.condition == "vertex_already_descriptor_backed"
+    assert list(store_dir.glob("*.arrival")) == []
+
+
 # ---------------------------------------------------------------------------
 # Test 7: Publish atomicity and verification-by-re-parse (§H)
 # ---------------------------------------------------------------------------
@@ -601,6 +721,41 @@ def test_publish_atomicity_and_crash_simulation(tmp_path: Path) -> None:
     assert post_ast.name == pre_ast.name
     assert post_ast.loops == pre_ast.loops
     assert post_ast.store == pre_ast.store
+
+
+def test_publish_rechecks_descriptor_after_temp_file_fsync(tmp_path: Path) -> None:
+    cust = CustodianFixture(tmp_path, "alice")
+    v_path = _make_vertex_file(
+        tmp_path,
+        custodian_name=cust.name,
+        custodian_key=cust.public,
+        other_observers=[],
+    )
+    captured = v_path.read_bytes()
+    real_fsync = os.fsync
+    invoked = False
+
+    def mutate_during_fsync(fd: int) -> None:
+        nonlocal invoked
+        real_fsync(fd)
+        if not invoked:
+            invoked = True
+            v_path.write_bytes(captured + b"// late declaration edit\n")
+
+    with (
+        patch("migrate.sidecar.os.fsync", side_effect=mutate_during_fsync),
+        pytest.raises(PublishPreconditionRefused) as exc_info,
+    ):
+        edit_vertex_store_clause(
+            v_path,
+            "./data/target.arrival",
+            lineage="lineage-1",
+            expected_original=captured,
+        )
+
+    assert invoked is True
+    assert exc_info.value.condition == "vertex_changed"
+    assert v_path.read_bytes() == captured + b"// late declaration edit\n"
 
 
 # ---------------------------------------------------------------------------
@@ -1011,7 +1166,12 @@ def test_edit_vertex_store_clause_ambiguity_and_syntax_refusals(tmp_path: Path) 
         encoding="utf-8",
     )
     with pytest.raises(PublishPreconditionRefused) as exc_info:
-        edit_vertex_store_clause(v_dup, "./data/target.arrival")
+        edit_vertex_store_clause(
+            v_dup,
+            "./data/target.arrival",
+            lineage="lineage-1",
+            expected_original=v_dup.read_bytes(),
+        )
     assert exc_info.value.condition == "vertex_store_duplicate_nodes"
 
     # (b) Store inside block comment
@@ -1021,7 +1181,12 @@ def test_edit_vertex_store_clause_ambiguity_and_syntax_refusals(tmp_path: Path) 
         encoding="utf-8",
     )
     with pytest.raises(PublishPreconditionRefused) as exc_info:
-        edit_vertex_store_clause(v_comment, "./data/target.arrival")
+        edit_vertex_store_clause(
+            v_comment,
+            "./data/target.arrival",
+            lineage="lineage-1",
+            expected_original=v_comment.read_bytes(),
+        )
     assert exc_info.value.condition == "vertex_store_ineffective"
 
 
@@ -1034,13 +1199,21 @@ def test_edit_vertex_store_clause_comment_shadowed_active_store(tmp_path: Path) 
         f'store "./data/active.jsonl"\n{loops_block}\n',
         encoding="utf-8",
     )
-    edit_vertex_store_clause(v_shadow, "./data/target.arrival", backend="file")
+    edit_vertex_store_clause(
+        v_shadow,
+        "./data/target.arrival",
+        lineage="lineage-1",
+        backend="file",
+        expected_original=v_shadow.read_bytes(),
+    )
     text = v_shadow.read_text(encoding="utf-8")
     assert 'store "./data/legacy.jsonl"' in text
     assert 'store "./data/target.arrival" backend="file"' in text
     post_ast = parse_vertex(text, v_shadow)
     assert post_ast.store == Path("./data/target.arrival")
-    assert post_ast.store_backend == BackendDecl(name="file")
+    assert post_ast.store_backend == BackendDecl(
+        name="file", lineage="lineage-1", role="authority"
+    )
 
 
 def test_edit_vertex_store_clause_preserves_same_line_comments(tmp_path: Path) -> None:
@@ -1052,12 +1225,23 @@ def test_edit_vertex_store_clause_preserves_same_line_comments(tmp_path: Path) -
         f'name "alice"\nstore "./data/a.jsonl" // KEEP\n{loops_block}\n',
         encoding="utf-8",
     )
-    edit_vertex_store_clause(v_comment, "./data/target.arrival", backend="file")
+    edit_vertex_store_clause(
+        v_comment,
+        "./data/target.arrival",
+        lineage="lineage-1",
+        backend="file",
+        expected_original=v_comment.read_bytes(),
+    )
     text = v_comment.read_text(encoding="utf-8")
-    assert 'store "./data/target.arrival" backend="file" // KEEP' in text
+    assert (
+        'store "./data/target.arrival" backend="file" '
+        'lineage="lineage-1" role="authority" // KEEP'
+    ) in text
     post_ast = parse_vertex(text, v_comment)
     assert post_ast.store == Path("./data/target.arrival")
-    assert post_ast.store_backend == BackendDecl(name="file")
+    assert post_ast.store_backend == BackendDecl(
+        name="file", lineage="lineage-1", role="authority"
+    )
 
 
 # ---------------------------------------------------------------------------

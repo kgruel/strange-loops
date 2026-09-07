@@ -16,9 +16,9 @@ from atoms import Fact, SourceError
 from engine.credentials import CredentialPurpose, CredentialRequest, SigningDomain
 
 from sdk import (
+    CredentialBindingIncomplete,
     MappedCredentialProvider,
     SdkError,
-    SdkValueError,
     edit_declaration,
     emit_batch,
     emit_fact,
@@ -517,13 +517,15 @@ def test_mapped_binding_existing_ref_rejects_unknown_key_without_replacement(
     created = _create(provider, "alice", "create-alice")
     before = sorted(path.relative_to(provider.root) for path in provider.root.rglob("*"))
 
-    with pytest.raises((OSError, SdkValueError, ValueError)):
+    with pytest.raises(CredentialBindingIncomplete) as raised:
         provider.bind_existing_ref(
             "bob",
             "missing-key-ref",
             created.public_key,
             token="bind-bob",
         )
+    assert raised.value.operation == "bind-existing-ref"
+    assert raised.value.source_type == "FileNotFoundError"
 
     after = sorted(path.relative_to(provider.root) for path in provider.root.rglob("*"))
     assert after == before

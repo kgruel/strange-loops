@@ -1,0 +1,42 @@
+from pathlib import Path
+from datetime import datetime, timezone
+import hashlib, json, subprocess, sys
+root = Path('/Users/kaygee/Code/loops-wt/arrival-finish')
+stage = sys.argv[1]
+config = json.loads(Path(sys.argv[2]).read_text())
+review = root / f'docs/scratch/arrival-break/reviews/consistency-c9-migration-publication-{stage}-2026-09-06'
+review.mkdir(parents=True, exist_ok=True)
+packet = review / f'{stage}-prompt.txt'
+assert not packet.exists(), 'Review packet already frozen'
+parts = [config['instruction']]
+sources = {}
+for name in config['sources']:
+    data = (root / name).read_bytes()
+    sources[name] = hashlib.sha256(data).hexdigest()
+    parts.append(f'\n===== {name} =====\n' + '\n'.join(f'{i}: {line}' for i,line in enumerate(data.decode().splitlines(), 1)))
+for name, ranges in config.get('excerpts', {}).items():
+    data = (root/name).read_bytes()
+    sources[name] = hashlib.sha256(data).hexdigest()
+    lines = data.decode().splitlines()
+    for start, end in ranges:
+        parts.append(f'\n===== {name} lines {start}-{end} (excerpt; full source hashed) =====\n' + '\n'.join(f'{i}: {lines[i-1]}' for i in range(start, min(end,len(lines))+1)))
+if config.get('patch'):
+    changed = subprocess.check_output(['git','diff','--name-only','50e37595'],cwd=root,text=True).splitlines()
+    untracked = subprocess.check_output(['git','ls-files','--others','--exclude-standard'],cwd=root,text=True).splitlines()
+    names = sorted(set(n for n in changed + untracked if n.startswith(('libs/migrate/','tests/migration/')) or n == 'tests/test_arrival_migration_boundary.py'))
+    patches=[]
+    for name in names:
+        cmd = ['git','diff','50e37595','--',name] if name in changed else ['git','diff','--no-index','--','/dev/null',name]
+        result=subprocess.run(cmd,cwd=root,capture_output=True,text=True)
+        assert result.returncode in (0,1), result.stderr
+        patches.append(result.stdout)
+        sources[name]=hashlib.sha256((root/name).read_bytes()).hexdigest()
+    patch=''.join(patches)
+    (review/'implementation.patch').write_text(patch)
+    parts.append('\n===== FULL PRODUCTION / TEST PATCH =====\n'+patch)
+packet.write_text('\n'.join(parts)+'\n')
+manifest={'model':'claude-fable-5-1[1m]','effort':'low','worktree':str(root),'results':str(review),'due_at':datetime.now(timezone.utc).isoformat(),'baseline':'50e37595','scope':f'C9 migration descriptor publication and explicit adoption design {stage}','jobs':[{'name':stage,'packet':str(packet),'sha256':hashlib.sha256(packet.read_bytes()).hexdigest(),'sources':sources,'status':'pending'}]}
+(review/'manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
+(review/'build-review.py.txt').write_bytes(Path(__file__).read_bytes())
+(review/'review-config.json').write_text(json.dumps(config,indent=2)+'\n')
+print(json.dumps({'manifest':str(review/'manifest.json'),'packet_bytes':packet.stat().st_size,'sha256':manifest['jobs'][0]['sha256']},indent=2))

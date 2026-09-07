@@ -1,0 +1,62 @@
+$ uv build --package atoms --wheel --out-dir /tmp/loops-c9-setup-2026-09-06/wheel-smoke-correction/wheels
+Building wheel...
+Successfully built /tmp/loops-c9-setup-2026-09-06/wheel-smoke-correction/wheels/atoms-0.1.0-py3-none-any.whl
+$ uv build --package sign --wheel --out-dir /tmp/loops-c9-setup-2026-09-06/wheel-smoke-correction/wheels
+Building wheel...
+Successfully built /tmp/loops-c9-setup-2026-09-06/wheel-smoke-correction/wheels/sign-0.1.0-py3-none-any.whl
+$ uv build --package store --wheel --out-dir /tmp/loops-c9-setup-2026-09-06/wheel-smoke-correction/wheels
+Building wheel...
+Successfully built /tmp/loops-c9-setup-2026-09-06/wheel-smoke-correction/wheels/store-0.1.0-py3-none-any.whl
+$ uv build --package lang --wheel --out-dir /tmp/loops-c9-setup-2026-09-06/wheel-smoke-correction/wheels
+Building wheel...
+Successfully built /tmp/loops-c9-setup-2026-09-06/wheel-smoke-correction/wheels/lang-0.1.0-py3-none-any.whl
+$ uv build --package engine --wheel --out-dir /tmp/loops-c9-setup-2026-09-06/wheel-smoke-correction/wheels
+Building wheel...
+Successfully built /tmp/loops-c9-setup-2026-09-06/wheel-smoke-correction/wheels/engine-0.1.0-py3-none-any.whl
+$ uv build --package custody --wheel --out-dir /tmp/loops-c9-setup-2026-09-06/wheel-smoke-correction/wheels
+Building wheel...
+Successfully built /tmp/loops-c9-setup-2026-09-06/wheel-smoke-correction/wheels/custody-0.1.0-py3-none-any.whl
+$ uv build --package sdk --wheel --out-dir /tmp/loops-c9-setup-2026-09-06/wheel-smoke-correction/wheels
+Building wheel...
+Successfully built /tmp/loops-c9-setup-2026-09-06/wheel-smoke-correction/wheels/sdk-0.1.0-py3-none-any.whl
+$ uv build --package loops-min --wheel --out-dir /tmp/loops-c9-setup-2026-09-06/wheel-smoke-correction/wheels
+Building wheel...
+Successfully built /tmp/loops-c9-setup-2026-09-06/wheel-smoke-correction/wheels/loops_min-0.1.0-py3-none-any.whl
+$ uv venv /tmp/loops-c9-setup-2026-09-06/wheel-smoke-correction/venv
+Using CPython 3.13.11
+Creating virtual environment at: /tmp/loops-c9-setup-2026-09-06/wheel-smoke-correction/venv
+Activate with: source /tmp/loops-c9-setup-2026-09-06/wheel-smoke-correction/venv/bin/activate
+$ uv pip install --python /tmp/loops-c9-setup-2026-09-06/wheel-smoke-correction/venv/bin/python /tmp/loops-c9-setup-2026-09-06/wheel-smoke-correction/wheels/atoms-0.1.0-py3-none-any.whl /tmp/loops-c9-setup-2026-09-06/wheel-smoke-correction/wheels/custody-0.1.0-py3-none-any.whl /tmp/loops-c9-setup-2026-09-06/wheel-smoke-correction/wheels/engine-0.1.0-py3-none-any.whl /tmp/loops-c9-setup-2026-09-06/wheel-smoke-correction/wheels/lang-0.1.0-py3-none-any.whl /tmp/loops-c9-setup-2026-09-06/wheel-smoke-correction/wheels/loops_min-0.1.0-py3-none-any.whl /tmp/loops-c9-setup-2026-09-06/wheel-smoke-correction/wheels/sdk-0.1.0-py3-none-any.whl /tmp/loops-c9-setup-2026-09-06/wheel-smoke-correction/wheels/sign-0.1.0-py3-none-any.whl /tmp/loops-c9-setup-2026-09-06/wheel-smoke-correction/wheels/store-0.1.0-py3-none-any.whl
+Using Python 3.13.11 environment at: /tmp/loops-c9-setup-2026-09-06/wheel-smoke-correction/venv
+Resolved 16 packages in 179ms
+Prepared 8 packages in 20ms
+Installed 16 packages in 17ms
+ + atoms==0.1.0 (from file:///tmp/loops-c9-setup-2026-09-06/wheel-smoke-correction/wheels/atoms-0.1.0-py3-none-any.whl)
+ + cffi==2.1.1
+ + ckdl==1.0
+ + cryptography==50.0.1
+ + custody==0.1.0 (from file:///tmp/loops-c9-setup-2026-09-06/wheel-smoke-correction/wheels/custody-0.1.0-py3-none-any.whl)
+ + engine==0.1.0 (from file:///tmp/loops-c9-setup-2026-09-06/wheel-smoke-correction/wheels/engine-0.1.0-py3-none-any.whl)
+ + lang==0.1.0 (from file:///tmp/loops-c9-setup-2026-09-06/wheel-smoke-correction/wheels/lang-0.1.0-py3-none-any.whl)
+ + loops-min==0.1.0 (from file:///tmp/loops-c9-setup-2026-09-06/wheel-smoke-correction/wheels/loops_min-0.1.0-py3-none-any.whl)
+ + pycparser==3.0
+ + pyjwt==2.13.0
+ + python-ulid==4.0.1
+ + rfc8785==0.1.4
+ + sdk==0.1.0 (from file:///tmp/loops-c9-setup-2026-09-06/wheel-smoke-correction/wheels/sdk-0.1.0-py3-none-any.whl)
+ + sign==0.1.0 (from file:///tmp/loops-c9-setup-2026-09-06/wheel-smoke-correction/wheels/sign-0.1.0-py3-none-any.whl)
+ + store==0.1.0 (from file:///tmp/loops-c9-setup-2026-09-06/wheel-smoke-correction/wheels/store-0.1.0-py3-none-any.whl)
+ + typing-extensions==4.16.0
+$ /tmp/loops-c9-setup-2026-09-06/wheel-smoke-correction/venv/bin/python /tmp/loops-c9-setup-2026-09-06/wheel-smoke-correction/smoke.py
+installed-module sdk /private/tmp/loops-c9-setup-2026-09-06/wheel-smoke-correction/venv/lib/python3.13/site-packages/sdk/__init__.py
+installed-module loops_min /private/tmp/loops-c9-setup-2026-09-06/wheel-smoke-correction/venv/lib/python3.13/site-packages/loops_min/__init__.py
+command credential-create {"ok": true, "result": {"binding_created": true, "key_created": true, "key_ref": "286cdc4cde3a4a8093816145d504298c", "namespace": "wheel", "observer": "alice", "operation": "create", "provenance": "created", "public_key": "6gLQQyZTSQg38diuU3swKc8deVtE8Om6GKl7OY0TTZk=", "schema": "loops.sdk/credential-binding/v1", "token": "create-alice"}}
+command credential-create {"ok": true, "result": {"binding_created": false, "key_created": false, "key_ref": "286cdc4cde3a4a8093816145d504298c", "namespace": "wheel", "observer": "alice", "operation": "create", "provenance": "created", "public_key": "6gLQQyZTSQg38diuU3swKc8deVtE8Om6GKl7OY0TTZk=", "schema": "loops.sdk/credential-binding/v1", "token": "create-alice"}}
+command credential-recover {"ok": true, "result": {"binding_created": false, "key_created": false, "key_ref": "286cdc4cde3a4a8093816145d504298c", "namespace": "wheel", "observer": "alice", "operation": "recover", "provenance": "created", "public_key": "6gLQQyZTSQg38diuU3swKc8deVtE8Om6GKl7OY0TTZk=", "schema": "loops.sdk/credential-binding/v1", "token": "create-alice"}}
+command credential-bind-existing-ref {"ok": true, "result": {"binding_created": true, "key_created": false, "key_ref": "286cdc4cde3a4a8093816145d504298c", "namespace": "another", "observer": "alice", "operation": "bind-existing-ref", "provenance": "existing-ref", "public_key": "6gLQQyZTSQg38diuU3swKc8deVtE8Om6GKl7OY0TTZk=", "schema": "loops.sdk/credential-binding/v1", "token": "reuse-alice"}}
+command init {"ok": true, "result": {"file_written": true, "head": {"lineage": "01M1WYNRJ9HJ1AXMG62RZ03RFT", "ordinal": 1, "record_hash": "82083e206fb17a27b53a7eab048fb2a9a8f7d676144280a98375336d16618e88"}, "is_root": false, "lineage": "01M1WYNRJ9HJ1AXMG62RZ03RFT", "name": "wheel", "phase": "published", "read_path": "arrival", "schema": "loops.sdk/init-vertex/v2", "store": {"backend": "file", "lineage": "01M1WYNRJ9HJ1AXMG62RZ03RFT", "location": "/private/tmp/loops-c9-setup-2026-09-06/wheel-smoke-correction/wheel.arrival", "query": null, "role": "authority", "witness": null}, "store_path": "/private/tmp/loops-c9-setup-2026-09-06/wheel-smoke-correction/wheel.arrival", "store_type": "arrival", "target_path": "/private/tmp/loops-c9-setup-2026-09-06/wheel-smoke-correction/wheel.vertex"}}
+command emit {"ok": true, "result": {"affected_sections": [], "captured_head": {"lineage": "01M1WYNRJ9HJ1AXMG62RZ03RFT", "ordinal": 1, "record_hash": "82083e206fb17a27b53a7eab048fb2a9a8f7d676144280a98375336d16618e88"}, "commit": {"after": {"lineage": "01M1WYNRJ9HJ1AXMG62RZ03RFT", "ordinal": 2, "record_hash": "d5d30d2d0875ff86c184a0b54002c17be09eed615aa44409a69e486dc7427cf4"}, "before": {"lineage": "01M1WYNRJ9HJ1AXMG62RZ03RFT", "ordinal": 1, "record_hash": "82083e206fb17a27b53a7eab048fb2a9a8f7d676144280a98375336d16618e88"}, "durability": {"mechanism": "advisory flock, one write, one fsync, on local POSIX storage", "profile": "host"}, "record_count": 1}, "delta_count": null, "id": "wheel-fact", "observer": "alice", "predicted_state_change": false, "projection": "synced", "schema": "loops.sdk/emit-receipt/v2", "signed": true, "state_change": null, "store": {"backend": "file", "lineage": "01M1WYNRJ9HJ1AXMG62RZ03RFT", "location": "/private/tmp/loops-c9-setup-2026-09-06/wheel-smoke-correction/wheel.arrival", "query": null, "role": "authority", "witness": null}, "stored": true, "tick_id": null, "tick_mark": null, "witnessed": true, "write_path": "arrival"}}
+command declaration {"ok": true, "result": {"basis": {"captured_head": {"lineage": "01M1WYNRJ9HJ1AXMG62RZ03RFT", "ordinal": 2, "record_hash": "d5d30d2d0875ff86c184a0b54002c17be09eed615aa44409a69e486dc7427cf4"}, "lineage": "01M1WYNRJ9HJ1AXMG62RZ03RFT", "projected_through": {"lineage": "01M1WYNRJ9HJ1AXMG62RZ03RFT", "ordinal": 2, "record_hash": "d5d30d2d0875ff86c184a0b54002c17be09eed615aa44409a69e486dc7427cf4"}, "view_generation": "file-projection-v1:6c745409243924bf3e1231202e982246c2e6a4865a888af7c8572db0b9f95bbd"}, "captured_head": {"lineage": "01M1WYNRJ9HJ1AXMG62RZ03RFT", "ordinal": 2, "record_hash": "d5d30d2d0875ff86c184a0b54002c17be09eed615aa44409a69e486dc7427cf4"}, "changes": [{"annotation": "modified", "kind": "_decl.kind-defined", "payload": {"boundary": null, "edges": [], "folds": [{"op": {"max_items": 50, "op": "collect"}, "target": "items"}], "lifecycle": null, "order": 0, "parse": [], "preview": [], "search": []}, "subject": "item"}], "commit": {"after": {"lineage": "01M1WYNRJ9HJ1AXMG62RZ03RFT", "ordinal": 3, "record_hash": "d8295e48744c035fd22de1c04a65c4826a01ce8ebc9528bce7afe3f03e3381a4"}, "before": {"lineage": "01M1WYNRJ9HJ1AXMG62RZ03RFT", "ordinal": 2, "record_hash": "d5d30d2d0875ff86c184a0b54002c17be09eed615aa44409a69e486dc7427cf4"}, "durability": {"mechanism": "advisory flock, one write, one fsync, on local POSIX storage", "profile": "host"}, "record_count": 1}, "fact_ids": ["01M1WYNSC0PXWRCTYWPRAK5NPM"], "file_written": true, "generation_after": null, "generation_before": null, "head": {"lineage": "01M1WYNRJ9HJ1AXMG62RZ03RFT", "ordinal": 3, "record_hash": "d8295e48744c035fd22de1c04a65c4826a01ce8ebc9528bce7afe3f03e3381a4"}, "intent_path": null, "lineage": "01M1WYNRJ9HJ1AXMG62RZ03RFT", "mode": "arrival-edit", "phase": "published", "read_path": "arrival", "reason": "", "schema": "loops.sdk/declaration-edit/v2", "status": "applied", "store": {"backend": "file", "lineage": "01M1WYNRJ9HJ1AXMG62RZ03RFT", "location": "/private/tmp/loops-c9-setup-2026-09-06/wheel-smoke-correction/wheel.arrival", "query": null, "role": "authority", "witness": null}, "target_path": "/private/tmp/loops-c9-setup-2026-09-06/wheel-smoke-correction/wheel.vertex", "vertex_path": "/private/tmp/loops-c9-setup-2026-09-06/wheel-smoke-correction/wheel.vertex"}}
+command facts {"ok": true, "result": {"basis": {"captured_head": {"lineage": "01M1WYNRJ9HJ1AXMG62RZ03RFT", "ordinal": 3, "record_hash": "d8295e48744c035fd22de1c04a65c4826a01ce8ebc9528bce7afe3f03e3381a4"}, "lineage": "01M1WYNRJ9HJ1AXMG62RZ03RFT", "projected_through": {"lineage": "01M1WYNRJ9HJ1AXMG62RZ03RFT", "ordinal": 3, "record_hash": "d8295e48744c035fd22de1c04a65c4826a01ce8ebc9528bce7afe3f03e3381a4"}, "view_generation": "file-projection-v1:0faa1a1418fe84a40fc5afe8afddac5b6a8b6e3fa9adcada9b7ab305c56df220"}, "has_continuation": false, "items": [{"arrival_ordinal": 2, "arrival_seq": 0, "id": "wheel-fact", "kind": "item", "observer": "alice", "origin": "", "payload": {"message": "installed wheel"}, "ts": 42.0}], "next_cursor": null, "order": "oldest", "prev_cursor": null, "read_path": "arrival", "schema": "loops.sdk/facts-page/v2", "store": {"backend": "file", "lineage": "01M1WYNRJ9HJ1AXMG62RZ03RFT", "location": "/private/tmp/loops-c9-setup-2026-09-06/wheel-smoke-correction/wheel.arrival", "query": null, "role": "authority", "witness": null}, "truncated": false}}
+command verify {"ok": true, "result": {"captured_head": {"lineage": "01M1WYNRJ9HJ1AXMG62RZ03RFT", "ordinal": 3, "record_hash": "d8295e48744c035fd22de1c04a65c4826a01ce8ebc9528bce7afe3f03e3381a4"}, "claims": ["grammar", "density", "lineage", "hash-chain"], "excludes": ["signature-authorship", "external-key-trust", "projection"], "level": "full", "schema": "loops.sdk/verify-result/v1", "store": {"backend": "file", "lineage": "01M1WYNRJ9HJ1AXMG62RZ03RFT", "location": "/private/tmp/loops-c9-setup-2026-09-06/wheel-smoke-correction/wheel.arrival", "query": null, "role": "authority", "witness": null}, "verified_through": {"lineage": "01M1WYNRJ9HJ1AXMG62RZ03RFT", "ordinal": 3, "record_hash": "d8295e48744c035fd22de1c04a65c4826a01ce8ebc9528bce7afe3f03e3381a4"}}}
+PASS isolated installed-wheel credential create/replay/recover/reuse -> init -> emit -> declaration -> read -> verify; no legacy CLI or Painted installed

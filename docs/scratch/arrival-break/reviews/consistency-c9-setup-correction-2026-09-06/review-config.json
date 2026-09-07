@@ -1,0 +1,64 @@
+{
+  "instruction": "Focused Fable 5.1 LOW correction review for your accepted blocker B1 in the initial C9 setup review. Initial full packet SHA8e15169b83e225d34e29a3a901e1b36a12aa814a0341e6a5feb4a58c898626b5 judged the whole slice REVISE solely for TypeError escaping SDK credential lifecycle handling. Initial findings are included. Review current SDK provider/types, regression tests, CLI mapping, and supporting custody excerpts. The ONLY production change since that review is adding TypeError to the existing (OSError, ValueError) catch tuple in sdk/emit.py. Remaining changes are regressions/docs/evidence. Confirm B1 fixed without broadening catch to arbitrary exceptions or fabricating durable evidence; identify any remaining concrete blocker, then end ACCEPT or REVISE.\nActual pending/intents JSON arrays now yield incomplete unknown source_type TypeError with request coordinates and byte invariance. Post-marker injected TypeError retains unknown phase/no invented key_ref then same-token recovery succeeds. Actual CLI corrupt pending record returns6 with recovery coordinates and unchanged files. Optional absent legacy candidate recovery has SDK assertion. Native negative control replaces catch tuple only in memory to the old version then runs regression subset: 3 TypeError cases fail, OSError passes. This is a deliberately injected negative control, not historical raw test output and never a worktree edit. Full corrected SDK599 and CLI30 pass, scoped Ruff passes, installed wheels rerun with final source hashes matching. Prior architecture101/custody31 unaffected by exception tuple change. Initial evidence-scope and conservative incomplete limitations remain documented. No other protocol changes or legacy migration/retirement. Do not claim to have run tools/tests yourself.",
+  "sources": [
+    "docs/scratch/arrival-break/reviews/consistency-c9-setup-final-2026-09-06/final-findings.md",
+    "docs/scratch/arrival-break/consistency-c9-setup-2026-09-06.md",
+    "libs/sdk/tests/test_credential_lifecycle.py",
+    "apps/loops-min/tests/test_binding_cli.py",
+    "apps/loops-min/README.md",
+    "docs/scratch/arrival-break/reviews/consistency-c9-setup-correction-2026-09-06/validation-evidence/sdk.txt",
+    "docs/scratch/arrival-break/reviews/consistency-c9-setup-correction-2026-09-06/validation-evidence/cli.txt",
+    "docs/scratch/arrival-break/reviews/consistency-c9-setup-correction-2026-09-06/validation-evidence/ruff.txt",
+    "docs/scratch/arrival-break/reviews/consistency-c9-setup-correction-2026-09-06/validation-evidence/wheel-status.json",
+    "docs/scratch/arrival-break/reviews/consistency-c9-setup-correction-2026-09-06/validation-evidence/typeerror-negative-control.py.txt"
+  ],
+  "excerpts": {
+    "libs/sdk/src/sdk/emit.py": [
+      [
+        1,
+        289
+      ]
+    ],
+    "libs/sdk/src/sdk/types.py": [
+      [
+        1,
+        225
+      ]
+    ],
+    "apps/loops-min/src/loops_min/main.py": [
+      [
+        170,
+        318
+      ],
+      [
+        423,
+        526
+      ]
+    ],
+    "libs/custody/src/custody/binding.py": [
+      [
+        45,
+        106
+      ],
+      [
+        326,
+        354
+      ],
+      [
+        490,
+        549
+      ],
+      [
+        859,
+        1090
+      ]
+    ],
+    "libs/sdk/README.md": [
+      [
+        190,
+        283
+      ]
+    ]
+  },
+  "patch": false
+}

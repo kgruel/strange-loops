@@ -17,6 +17,7 @@ from sdk import (
     AdmissionFailed,
     CeremonyFailed,
     CommittedEmissionError,
+    CredentialBindingIncomplete,
     EmissionFailed,
     MappedCredentialProvider,
     SdkError,
@@ -182,6 +183,37 @@ def _parser() -> argparse.ArgumentParser:
         "--pretty", action="store_true", default=argparse.SUPPRESS, help=argparse.SUPPRESS
     )
 
+    target_command(
+        "init-recover",
+        "recover one interrupted Arrival initialization intent",
+    )
+
+    def binding_command(name: str, help_text: str) -> argparse.ArgumentParser:
+        sub = commands.add_parser(name, help=help_text)
+        sub.add_argument("root")
+        sub.add_argument("--namespace", required=True)
+        sub.add_argument("--observer", required=True)
+        sub.add_argument("--token", required=True)
+        sub.add_argument(
+            "--pretty", action="store_true", default=argparse.SUPPRESS,
+            help=argparse.SUPPRESS,
+        )
+        return sub
+
+    binding_command("credential-create", "create one explicit mapped credential binding")
+    binding_command("credential-recover", "recover one mapped credential binding intent")
+    existing = binding_command(
+        "credential-bind-existing-ref",
+        "bind an observer to an existing managed key reference",
+    )
+    existing.add_argument("--key-ref", required=True)
+    existing.add_argument("--expected-public-key", required=True)
+    legacy_import = binding_command(
+        "credential-import-legacy",
+        "import one explicitly selected legacy credential",
+    )
+    legacy_import.add_argument("--vertex", required=True)
+
     # These names are reserved for the Arrival SDK contracts that are still
     # being implemented. Keeping them in help makes the process boundary
     # discoverable without routing them through legacy writer code.
@@ -239,6 +271,10 @@ def _credentials(args: argparse.Namespace) -> MappedCredentialProvider:
     )
 
 
+def _binding_provider(args: argparse.Namespace) -> MappedCredentialProvider:
+    return MappedCredentialProvider(args.root, namespace=args.namespace)
+
+
 def _require_arrival_target(target: str) -> None:
     # This is an SDK classification gate, not a second CLI target resolver.
     # The writer repeats descriptor resolution under its own captured contract.
@@ -247,6 +283,33 @@ def _require_arrival_target(target: str) -> None:
 
 def _dispatch(args: argparse.Namespace) -> dict[str, Any]:
     command = args.command
+    if command == "init-recover":
+        return _as_dict(
+            init_vertex(args.target, store_type="arrival", recover=True)
+        )
+    if command == "credential-create":
+        return _as_dict(
+            _binding_provider(args).create_binding(args.observer, token=args.token)
+        )
+    if command == "credential-recover":
+        return _as_dict(
+            _binding_provider(args).recover_binding(args.observer, token=args.token)
+        )
+    if command == "credential-bind-existing-ref":
+        return _as_dict(
+            _binding_provider(args).bind_existing_ref(
+                args.observer,
+                args.key_ref,
+                args.expected_public_key,
+                token=args.token,
+            )
+        )
+    if command == "credential-import-legacy":
+        return _as_dict(
+            _binding_provider(args).import_legacy(
+                args.vertex, args.observer, token=args.token
+            )
+        )
     if command == "init":
         return _as_dict(
             init_vertex(
@@ -371,6 +434,8 @@ def _exit_code(exc: BaseException) -> int:
     if isinstance(exc, (AdmissionFailed, CeremonyFailed)):
         return EXIT_ADMISSION
     if isinstance(exc, CommittedOutcome):
+        return EXIT_COMMITTED
+    if isinstance(exc, CredentialBindingIncomplete):
         return EXIT_COMMITTED
     if isinstance(exc, CommittedEmissionError):
         return EXIT_COMMITTED

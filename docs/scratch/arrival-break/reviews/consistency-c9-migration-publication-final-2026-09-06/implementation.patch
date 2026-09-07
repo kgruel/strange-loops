@@ -1,0 +1,893 @@
+diff --git a/libs/migrate/README.md b/libs/migrate/README.md
+index 2f3c0a8f..2934bfb7 100644
+--- a/libs/migrate/README.md
++++ b/libs/migrate/README.md
+@@ -1,3 +1,42 @@
+ # `migrate` — Migration Sidecar
+ 
+-The `migrate` package provides a migration sidecar for transforming pre-Arrival legacy stores into Arrival lineages. Under the quarantine architecture, no active runtime package may import `migrate`, isolating historical format knowledge and legacy codecs from the 1.0 runtime. For full design specifications and protocol obligations, see `docs/scratch/arrival-break/slice4-design-proposal.md` and design fact `design:arrival-break-slice4-migration-sidecar`.
++The `migrate` package transforms pre-Arrival legacy stores into a new Arrival
++history. Legacy readers and codecs remain quarantined here: active runtime
++packages do not import `migrate`.
++
++The sidecar preserves source rows under the selected transform, verifies the
++resulting log and row equivalence, writes a signed external report, and publishes
++an explicit File descriptor with the minted lineage and `role="authority"`.
++It checks that the vertex bytes captured for transformation have not changed
++at publication entry and immediately before replacement. This is an offline operation on quiescent inputs; the check
++is not a lock or an atomic compare-and-swap against concurrent writers.
++
++**Publication does not adopt a declaration.** The descriptor can be resolved,
++verified, and explicitly synced through the SDK. The new log still needs an
++explicit declaration adoption before ordinary SDK reads, declaration edits, or
++writes can proceed. Historical `_decl.*` rows are retained as migration evidence;
++the current runtime does not infer the new store's identity from them or from
++its locator file. The old `loops store migrate` wrapper is therefore not a
++complete migration-to-current-runtime workflow.
++
++Use isolated copies for rehearsals, with separate state/configuration and
++credential roots. Keep the original stores and descriptors untouched. SQLite
++copies must come from quiescent inputs or a coherent database snapshot.
++
++The exported `edit_vertex_store_clause` helper now requires explicit `lineage`
++and `expected_original` byte arguments. Direct callers must supply the exact
++vertex snapshot used for planning; `run_migration` supplies these itself. An
++error after replacement (for example, directory fsync failure) can leave the new
++descriptor visible. Inspect the artifacts before retrying. An exact explicit
++`resume_target` can re-verify an already published migration without replacing
++the descriptor. This is not a general recovery or adoption API.
++
++The migration report certifies the head at migration completion. Its current
++verifier requires that exact live head, so verify it before a later adoption or
++ordinary append advances the target. Structural Full verification without an
++injected signature verifier does not establish historical authorship.
++
++See the [publication report](../../docs/scratch/arrival-break/consistency-c9-migration-publication-2026-09-06.md)
++and [adoption design](../../docs/scratch/arrival-break/consistency-c9-migration-adoption-design-2026-09-06.md).
++The historical sidecar design is recorded in
++[the slice 4 proposal](../../docs/scratch/arrival-break/slice4-design-proposal.md).
+diff --git a/libs/migrate/src/migrate/sidecar.py b/libs/migrate/src/migrate/sidecar.py
+index e40865e5..ad20df49 100644
+--- a/libs/migrate/src/migrate/sidecar.py
++++ b/libs/migrate/src/migrate/sidecar.py
+@@ -97,6 +97,8 @@ from engine.arrival_contract import (
+     Full,
+     Head,
+     HeadMismatch,
++    NotAuthority,
++    Profile,
+     RecordDraft,
+     StoreDescriptor,
+ )
+@@ -107,7 +109,7 @@ from engine.arrival_head_attestation import (
+     read_journal,
+ )
+ from engine.arrival_head_seam import StoreLost
+-from engine.arrival_registry import BackendRegistry
++from engine.arrival_registry import BackendRegistry, descriptor_for
+ from lang import BackendDecl, VertexFile, effective_store_clause, parse_vertex
+ 
+ from .inventory import SourceInventory, inventory
+@@ -129,7 +131,6 @@ from .refusals import (
+ )
+ from .transform import (
+     TransformExceptions,
+-    coerce_vertex,
+     transform,
+ )
+ 
+@@ -210,17 +211,22 @@ def edit_vertex_store_clause(
+     vertex_path: Path | str,
+     target_location: str,
+     *,
++    lineage: str,
+     backend: str = "file",
++    expected_original: bytes,
+ ) -> None:
+     """Surgically edit the store clause in a .vertex file with verification-by-re-parse (§H.1).
+ 
+-    Replaces the positional location and sets backend="file", writes to a temp file
+-    in the same directory, fsyncs, and atomically replaces the .vertex file.
++    Replaces the positional location and sets the exact backend, lineage, and
++    authority role. The caller supplies the bytes it planned from; publication
++    checks them on entry and again immediately before the final replace.
+ 
+     Args:
+         vertex_path: Path to the .vertex file to edit.
+         target_location: Formatted location string to put in the store clause.
++        lineage: Exact physical Arrival lineage named by the descriptor.
+         backend: Backend name (defaults to 'file').
++        expected_original: Exact declaration bytes captured before staging.
+ 
+     Raises:
+         PublishPreconditionRefused: If verification-by-re-parse fails or store clause
+@@ -231,7 +237,26 @@ def edit_vertex_store_clause(
+     if not v_path.exists():
+         raise FileNotFoundError(f"Vertex file not found: {v_path}")
+ 
+-    original_text = v_path.read_text(encoding="utf-8")
++    try:
++        actual_original = v_path.read_bytes()
++    except OSError as exc:
++        raise PublishPreconditionRefused(
++            f"Cannot re-read declaration before publication: {exc}",
++            condition="vertex_changed",
++        ) from exc
++    if actual_original != expected_original:
++        raise PublishPreconditionRefused(
++            "Declaration changed after migration staging; refusing to publish over "
++            "a different descriptor snapshot.",
++            condition="vertex_changed",
++        )
++    try:
++        original_text = expected_original.decode("utf-8")
++    except UnicodeDecodeError as exc:
++        raise PublishPreconditionRefused(
++            f"Captured declaration is not valid UTF-8: {exc}",
++            condition="vertex_reparse",
++        ) from exc
+     pre_ast = parse_vertex(original_text, v_path)
+ 
+     try:
+@@ -258,7 +283,20 @@ def edit_vertex_store_clause(
+         )
+ 
+     start, end = store_span.span
+-    new_store_clause = f'store "{target_location}" backend="{backend}"'
++
++    def quote(value: str, field: str) -> str:
++        if any(ord(char) < 0x20 or ord(char) == 0x7F for char in value):
++            raise PublishPreconditionRefused(
++                f"{field} contains KDL control characters",
++                condition="vertex_store_encoding",
++            )
++        return json.dumps(value, ensure_ascii=False)
++
++    new_store_clause = (
++        f"store {quote(target_location, 'store location')} "
++        f"backend={quote(backend, 'backend')} "
++        f"lineage={quote(lineage, 'lineage')} role=\"authority\""
++    )
+     edited_text = original_text[:start] + new_store_clause + original_text[end:]
+ 
+     # Verification-by-re-parse
+@@ -278,10 +316,13 @@ def edit_vertex_store_clause(
+             condition="vertex_store_location",
+         )
+ 
+-    if post_ast.store_backend != BackendDecl(name=backend):
++    expected_backend = BackendDecl(
++        name=backend, lineage=lineage, role=Profile.AUTHORITY.value
++    )
++    if post_ast.store_backend != expected_backend:
+         raise PublishPreconditionRefused(
+             "Verification-by-re-parse failed: "
+-            f"expected store_backend={BackendDecl(name=backend)!r}, "
++            f"expected store_backend={expected_backend!r}, "
+             f"got {post_ast.store_backend!r}. "
+             "Advisory: check store clause backend property.",
+             condition="vertex_store_backend",
+@@ -309,11 +350,21 @@ def edit_vertex_store_clause(
+     v_dir = v_path.parent
+     temp_path = v_dir / f".tmp_{v_path.name}_{uuid4().hex}"
+     try:
+-        with temp_path.open("w", encoding="utf-8") as f:
+-            f.write(edited_text)
++        with temp_path.open("wb") as f:
++            f.write(edited_text.encode("utf-8"))
+             f.flush()
+             os.fsync(f.fileno())
++        if v_path.read_bytes() != expected_original:
++            raise PublishPreconditionRefused(
++                "Declaration changed while preparing publication; refusing to replace it.",
++                condition="vertex_changed",
++            )
+         temp_path.replace(v_path)
++        dir_fd = os.open(v_dir, os.O_RDONLY)
++        try:
++            os.fsync(dir_fd)
++        finally:
++            os.close(dir_fd)
+     finally:
+         if temp_path.exists():
+             with contextlib.suppress(OSError):
+@@ -619,10 +670,19 @@ def verify_migration_report(
+         raise ReportMissingTargetRefused(f"Target arrival store does not exist: {t_path}")
+ 
+     registry = BackendRegistry.with_builtin_backends()
+-    descriptor = StoreDescriptor(backend="file", location=str(t_path))
++    descriptor = StoreDescriptor(
++        backend="file",
++        location=str(t_path),
++        lineage=str(lineage),
++        role=Profile.AUTHORITY,
++    )
+     try:
+         ledger, _ = registry.open(descriptor)
+         live_head = ledger.head()
++    except NotAuthority as exc:
++        raise ReportHeadMismatchRefused(
++            f"Target store lineage does not match report claim: {exc}"
++        ) from exc
+     except (StoreLost, ArrivalTornTail, ArrivalCorrupt, GenesisRefused, OSError) as exc:
+         raise ReportTargetUnopenableRefused(
+             f"Cannot open or read head from target arrival store {t_path}: {exc}",
+@@ -693,6 +753,31 @@ def run_migration(
+     if not v_path.exists():
+         raise FileNotFoundError(f"Vertex file not found: {v_path}")
+ 
++    original_vertex_bytes = v_path.read_bytes()
++    vertex_ast = parse_vertex(original_vertex_bytes.decode("utf-8"), v_path)
++    already_published = False
++    if vertex_ast.store_backend is not None:
++        existing_descriptor = descriptor_for(vertex_ast, v_path)
++        resume_path = None if resume_target is None else Path(resume_target).resolve()
++        if (
++            resume_path is not None
++            and existing_descriptor is not None
++            and existing_descriptor.backend == "file"
++            and existing_descriptor.role is Profile.AUTHORITY
++            and existing_descriptor.lineage == resume_path.stem
++            and Path(existing_descriptor.location).resolve() == resume_path
++        ):
++            # A process may have stopped after the atomic descriptor replace
++            # but before returning its outcome. Re-verification of that exact
++            # published target is safe; no descriptor rewrite is needed.
++            already_published = True
++        else:
++            raise PublishPreconditionRefused(
++                "Migration requires a legacy descriptor snapshot; refusing to replace an "
++                "existing explicit backend/lineage/role declaration.",
++                condition="vertex_already_descriptor_backed",
++            )
++
+     # Stage 1: Inventory pass (refusals fire here, before any target creation)
+     try:
+         inv = inventory(src_path)
+@@ -704,7 +789,6 @@ def run_migration(
+         ) from exc
+ 
+     # Stage 2: Transform pass
+-    vertex_ast = coerce_vertex(v_path)
+     t_rule = transform_rule if transform_rule is not None else identity()
+ 
+     try:
+@@ -738,7 +822,10 @@ def run_migration(
+         target_path.parent.mkdir(parents=True, exist_ok=True)
+ 
+         descriptor = StoreDescriptor(
+-            backend="file", location=str(target_path), lineage=lineage
++            backend="file",
++            location=str(target_path),
++            lineage=lineage,
++            role=Profile.AUTHORITY,
+         )
+         ledger, query = registry.open(descriptor)
+ 
+@@ -762,11 +849,23 @@ def run_migration(
+         if not target_path.exists():
+             raise FileNotFoundError(f"Resume target does not exist: {target_path}")
+ 
+-        descriptor = StoreDescriptor(backend="file", location=str(target_path))
++        expected_lineage = target_path.stem
++        descriptor = StoreDescriptor(
++            backend="file",
++            location=str(target_path),
++            lineage=expected_lineage,
++            role=Profile.AUTHORITY,
++        )
+ 
+         try:
+             ledger, query = registry.open(descriptor)
+             current_head = ledger.head()
++        except NotAuthority as exc:
++            raise TargetMismatchOnResumeRefused(
++                f"Resume target {target_path} does not match its filename lineage: {exc}",
++                target_path=str(target_path),
++                ordinal=0,
++            ) from exc
+         except (ArrivalTornTail, StoreLost, ArrivalCorrupt, GenesisRefused, OSError) as exc:
+             cause = exc.__cause__
+             if isinstance(exc, ArrivalTornTail) or isinstance(cause, ArrivalTornTail):
+@@ -1028,9 +1127,19 @@ def run_migration(
+     except ValueError:
+         new_store_location = str(target_path)
+ 
+-    edit_vertex_store_clause(
+-        vertex_path=v_path, target_location=new_store_location, backend="file"
+-    )
++    if not already_published:
++        edit_vertex_store_clause(
++            vertex_path=v_path,
++            target_location=new_store_location,
++            lineage=lineage,
++            backend="file",
++            expected_original=original_vertex_bytes,
++        )
++    elif v_path.read_bytes() != original_vertex_bytes:
++        raise PublishPreconditionRefused(
++            "Already-published descriptor changed during migration verification.",
++            condition="vertex_changed",
++        )
+ 
+     return MigrationOutcome(
+         target_path=target_path,
+diff --git a/libs/migrate/tests/test_sidecar.py b/libs/migrate/tests/test_sidecar.py
+index cac74c9a..0d2d465c 100644
+--- a/libs/migrate/tests/test_sidecar.py
++++ b/libs/migrate/tests/test_sidecar.py
+@@ -18,7 +18,7 @@ from engine.arrival import (
+     mint_lineage,
+ )
+ from engine.arrival_body import body_of_fact_row
+-from engine.arrival_contract import Full, Head, RecordDraft, StoreDescriptor
++from engine.arrival_contract import Full, Head, Profile, RecordDraft, StoreDescriptor
+ from engine.arrival_head_attestation import Kind, Level, read_journal
+ from engine.arrival_head_seam import StoreLost
+ from engine.arrival_registry import BackendRegistry, descriptor_for
+@@ -190,7 +190,9 @@ def test_full_roundtrip_synthetic_store(tmp_path: Path, source_format: str) -> N
+ 
+     # 6. Descriptor updated atomically with verification-by-re-parse (§H)
+     post_ast = parse_vertex_file(v_path)
+-    assert post_ast.store_backend == BackendDecl(name="file")
++    assert post_ast.store_backend == BackendDecl(
++        name="file", lineage=outcome.lineage, role="authority"
++    )
+     resolved_desc = descriptor_for(post_ast, v_path)
+     assert resolved_desc is not None
+     assert resolved_desc.backend == "file"
+@@ -302,6 +304,25 @@ def test_kill_mid_append_restart_byte_identical(tmp_path: Path) -> None:
+     assert outcome_resumed.target_path.read_bytes() == ref_path.read_bytes(), (
+         "Final target MUST be byte-identical to uninterrupted run"
+     )
++    resumed_ast = parse_vertex_file(v_path)
++    assert resumed_ast.store_backend == BackendDecl(
++        name="file", lineage=lineage, role="authority"
++    )
++    published_descriptor = v_path.read_bytes()
++    with patch(
++        "migrate.sidecar.edit_vertex_store_clause",
++        side_effect=AssertionError("already-published resume must not replace descriptor"),
++    ):
++        repeated = run_migration(
++            source_path=source_path,
++            vertex_path=v_path,
++            store_dir=store_dir,
++            signer=cust.signer,
++            resume_target=interrupted_target,
++        )
++    assert repeated.target_path == outcome_resumed.target_path
++    assert repeated.head == outcome_resumed.head
++    assert v_path.read_bytes() == published_descriptor
+ 
+ 
+ # ---------------------------------------------------------------------------
+@@ -556,6 +577,105 @@ def test_source_mutated_during_staging_refuses_publish(tmp_path: Path) -> None:
+     assert v_path.read_text(encoding="utf-8") == pre_vertex_text
+ 
+ 
++def test_descriptor_mutated_during_staging_refuses_captured_publish(tmp_path: Path) -> None:
++    store_dir = tmp_path / "data"
++    store_dir.mkdir(parents=True)
++    cust = CustodianFixture(tmp_path, "alice")
++    source_path = build_synthetic_jsonl(store_dir / "legacy.jsonl")
++    v_path = _make_vertex_file(
++        tmp_path,
++        custodian_name=cust.name,
++        custodian_key=cust.public,
++        other_observers=[],
++    )
++    original_transform = transform
++
++    def mutating_transform(*args, **kwargs):
++        result = original_transform(*args, **kwargs)
++        v_path.write_bytes(v_path.read_bytes() + b"// concurrent declaration edit\n")
++        return result
++
++    with (
++        patch("migrate.sidecar.transform", side_effect=mutating_transform),
++        pytest.raises(PublishPreconditionRefused) as exc_info,
++    ):
++        run_migration(
++            source_path=source_path,
++            vertex_path=v_path,
++            store_dir=store_dir,
++            signer=cust.signer,
++        )
++
++    assert exc_info.value.condition == "vertex_changed"
++    assert v_path.read_bytes().endswith(b"// concurrent declaration edit\n")
++
++
++def test_publish_quotes_location_and_declares_exact_authority(tmp_path: Path) -> None:
++    store_dir = tmp_path / 'data "quoted" \\ segment'
++    store_dir.mkdir(parents=True)
++    cust = CustodianFixture(tmp_path, "alice")
++    source_path = build_synthetic_jsonl(tmp_path / "legacy.jsonl")
++    v_path = _make_vertex_file(
++        tmp_path,
++        custodian_name=cust.name,
++        custodian_key=cust.public,
++        other_observers=[],
++        store_rel_path="./legacy.jsonl",
++    )
++
++    outcome = run_migration(
++        source_path=source_path,
++        vertex_path=v_path,
++        store_dir=store_dir,
++        signer=cust.signer,
++    )
++
++    ast = parse_vertex_file(v_path)
++    descriptor = descriptor_for(ast, v_path)
++    assert descriptor == StoreDescriptor(
++        backend="file",
++        location=str(outcome.target_path),
++        lineage=outcome.lineage,
++        role=Profile.AUTHORITY,
++    )
++
++
++@pytest.mark.parametrize("role", ["authority", "replica"])
++def test_migration_refuses_preexisting_arrival_descriptor(
++    tmp_path: Path, role: str
++) -> None:
++    store_dir = tmp_path / "data"
++    store_dir.mkdir(parents=True)
++    cust = CustodianFixture(tmp_path, "alice")
++    source_path = build_synthetic_jsonl(store_dir / "legacy.jsonl")
++    v_path = _make_vertex_file(
++        tmp_path,
++        custodian_name=cust.name,
++        custodian_key=cust.public,
++        other_observers=[],
++    )
++    original = v_path.read_text(encoding="utf-8")
++    v_path.write_text(
++        original.replace(
++            'store "./data/legacy.jsonl"',
++            f'store "./data/existing.arrival" backend="file" '
++            f'lineage="existing-lineage" role="{role}"',
++        ),
++        encoding="utf-8",
++    )
++
++    with pytest.raises(PublishPreconditionRefused) as exc_info:
++        run_migration(
++            source_path=source_path,
++            vertex_path=v_path,
++            store_dir=store_dir,
++            signer=cust.signer,
++        )
++
++    assert exc_info.value.condition == "vertex_already_descriptor_backed"
++    assert list(store_dir.glob("*.arrival")) == []
++
++
+ # ---------------------------------------------------------------------------
+ # Test 7: Publish atomicity and verification-by-re-parse (§H)
+ # ---------------------------------------------------------------------------
+@@ -603,6 +723,41 @@ def test_publish_atomicity_and_crash_simulation(tmp_path: Path) -> None:
+     assert post_ast.store == pre_ast.store
+ 
+ 
++def test_publish_rechecks_descriptor_after_temp_file_fsync(tmp_path: Path) -> None:
++    cust = CustodianFixture(tmp_path, "alice")
++    v_path = _make_vertex_file(
++        tmp_path,
++        custodian_name=cust.name,
++        custodian_key=cust.public,
++        other_observers=[],
++    )
++    captured = v_path.read_bytes()
++    real_fsync = os.fsync
++    invoked = False
++
++    def mutate_during_fsync(fd: int) -> None:
++        nonlocal invoked
++        real_fsync(fd)
++        if not invoked:
++            invoked = True
++            v_path.write_bytes(captured + b"// late declaration edit\n")
++
++    with (
++        patch("migrate.sidecar.os.fsync", side_effect=mutate_during_fsync),
++        pytest.raises(PublishPreconditionRefused) as exc_info,
++    ):
++        edit_vertex_store_clause(
++            v_path,
++            "./data/target.arrival",
++            lineage="lineage-1",
++            expected_original=captured,
++        )
++
++    assert invoked is True
++    assert exc_info.value.condition == "vertex_changed"
++    assert v_path.read_bytes() == captured + b"// late declaration edit\n"
++
++
+ # ---------------------------------------------------------------------------
+ # Test 8: Refused inventory creates NO target path (WP1 gate re-checked)
+ # ---------------------------------------------------------------------------
+@@ -1011,7 +1166,12 @@ def test_edit_vertex_store_clause_ambiguity_and_syntax_refusals(tmp_path: Path)
+         encoding="utf-8",
+     )
+     with pytest.raises(PublishPreconditionRefused) as exc_info:
+-        edit_vertex_store_clause(v_dup, "./data/target.arrival")
++        edit_vertex_store_clause(
++            v_dup,
++            "./data/target.arrival",
++            lineage="lineage-1",
++            expected_original=v_dup.read_bytes(),
++        )
+     assert exc_info.value.condition == "vertex_store_duplicate_nodes"
+ 
+     # (b) Store inside block comment
+@@ -1021,7 +1181,12 @@ def test_edit_vertex_store_clause_ambiguity_and_syntax_refusals(tmp_path: Path)
+         encoding="utf-8",
+     )
+     with pytest.raises(PublishPreconditionRefused) as exc_info:
+-        edit_vertex_store_clause(v_comment, "./data/target.arrival")
++        edit_vertex_store_clause(
++            v_comment,
++            "./data/target.arrival",
++            lineage="lineage-1",
++            expected_original=v_comment.read_bytes(),
++        )
+     assert exc_info.value.condition == "vertex_store_ineffective"
+ 
+ 
+@@ -1034,13 +1199,21 @@ def test_edit_vertex_store_clause_comment_shadowed_active_store(tmp_path: Path)
+         f'store "./data/active.jsonl"\n{loops_block}\n',
+         encoding="utf-8",
+     )
+-    edit_vertex_store_clause(v_shadow, "./data/target.arrival", backend="file")
++    edit_vertex_store_clause(
++        v_shadow,
++        "./data/target.arrival",
++        lineage="lineage-1",
++        backend="file",
++        expected_original=v_shadow.read_bytes(),
++    )
+     text = v_shadow.read_text(encoding="utf-8")
+     assert 'store "./data/legacy.jsonl"' in text
+     assert 'store "./data/target.arrival" backend="file"' in text
+     post_ast = parse_vertex(text, v_shadow)
+     assert post_ast.store == Path("./data/target.arrival")
+-    assert post_ast.store_backend == BackendDecl(name="file")
++    assert post_ast.store_backend == BackendDecl(
++        name="file", lineage="lineage-1", role="authority"
++    )
+ 
+ 
+ def test_edit_vertex_store_clause_preserves_same_line_comments(tmp_path: Path) -> None:
+@@ -1052,12 +1225,23 @@ def test_edit_vertex_store_clause_preserves_same_line_comments(tmp_path: Path) -
+         f'name "alice"\nstore "./data/a.jsonl" // KEEP\n{loops_block}\n',
+         encoding="utf-8",
+     )
+-    edit_vertex_store_clause(v_comment, "./data/target.arrival", backend="file")
++    edit_vertex_store_clause(
++        v_comment,
++        "./data/target.arrival",
++        lineage="lineage-1",
++        backend="file",
++        expected_original=v_comment.read_bytes(),
++    )
+     text = v_comment.read_text(encoding="utf-8")
+-    assert 'store "./data/target.arrival" backend="file" // KEEP' in text
++    assert (
++        'store "./data/target.arrival" backend="file" '
++        'lineage="lineage-1" role="authority" // KEEP'
++    ) in text
+     post_ast = parse_vertex(text, v_comment)
+     assert post_ast.store == Path("./data/target.arrival")
+-    assert post_ast.store_backend == BackendDecl(name="file")
++    assert post_ast.store_backend == BackendDecl(
++        name="file", lineage="lineage-1", role="authority"
++    )
+ 
+ 
+ # ---------------------------------------------------------------------------
+diff --git a/tests/test_arrival_migration_boundary.py b/tests/test_arrival_migration_boundary.py
+new file mode 100644
+index 00000000..59c38f1e
+--- /dev/null
++++ b/tests/test_arrival_migration_boundary.py
+@@ -0,0 +1,296 @@
++"""Public SDK boundary checks for the offline migration sidecar.
++
++These tests intentionally live in the repository integration suite: the SDK
++must remain installable without making the quarantined ``migrate`` package a
++runtime or test dependency.
++"""
++
++from __future__ import annotations
++
++import json
++import sqlite3
++from pathlib import Path
++
++import pytest
++from custody.signing import ARRIVAL_DOMAIN, FACT_DOMAIN
++from engine.arrival_contract import Full
++from engine.arrival_registry import BackendRegistry, descriptor_for
++from engine.credentials import WriteCredentials
++from lang import parse_vertex_file
++from migrate.sidecar import run_migration, verify_migration_report
++from sdk import (
++    SdkError,
++    edit_declaration,
++    emit_fact,
++    inspect_declaration,
++    read_fact_by_id,
++    read_facts,
++    read_summary,
++    read_ticks,
++    resolve_arrival_target,
++    sync_target,
++    verify_target,
++)
++from sign import ed25519
++
++
++@pytest.fixture(autouse=True)
++def _isolate_runtime(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
++    """Keep custody and projection state out of the user's environment."""
++    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
++    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
++    monkeypatch.setenv("LOOPS_HOME", str(tmp_path / "loops"))
++
++
++class _StaticCredentials:
++    def __init__(self, pair) -> None:
++        self.pair = pair
++
++    def for_write(self, _vertex: Path) -> WriteCredentials:
++        return WriteCredentials(
++            fact_signer=lambda _observer, digest: ed25519.sign(
++                self.pair, digest.encode(), domain=FACT_DOMAIN
++            ),
++            arrival_signer=lambda _observer, digest: ed25519.sign(
++                self.pair, digest.encode(), domain=ARRIVAL_DOMAIN
++            ),
++        )
++
++
++def _signer(pair):
++    return lambda _observer, digest: ed25519.sign(
++        pair, digest.encode(), domain=ARRIVAL_DOMAIN
++    )
++
++
++def _verifier(key: str, signature: str, digest: str) -> bool:
++    try:
++        public = ed25519.public_key_from_b64(key)
++    except ValueError:
++        return False
++    return ed25519.verify(public, signature, digest.encode(), domain=ARRIVAL_DOMAIN)
++
++
++def _write_vertex(path: Path, public_key: str, source_name: str) -> None:
++    path.write_text(
++        f'''name "alice"
++store "./data/{source_name}"
++
++observers {{
++  alice {{
++    key "{public_key}"
++  }}
++}}
++
++loops {{
++  concept {{ fold {{ items "collect" 100 }} }}
++}}
++''',
++        encoding="utf-8",
++    )
++
++
++def _write_jsonl(path: Path) -> None:
++    rows = [
++        {
++            "t": "fact",
++            "id": "01ARZ3NDEKTSV4RRFFQ69G5FA0",
++            "kind": "concept",
++            "ts": 1000.0,
++            "observer": "alice",
++            "origin": "legacy",
++            "payload": '{"text":"migrated"}',
++        },
++        {
++            "t": "tick",
++            "id": "01ARZ3NDEKTSV4RRFFQ69G5FT1",
++            "name": "heartbeat",
++            "ts": 1001.0,
++            "since": 1000.0,
++            "origin": "system",
++            "payload": '{"seq":1}',
++            "prev_hash": None,
++            "window_start": None,
++            "fact_cursor": None,
++            "window_hash": None,
++        },
++    ]
++    path.write_text("".join(json.dumps(row, separators=(",", ":")) + "\n" for row in rows))
++
++
++def _write_sqlite(path: Path) -> None:
++    with sqlite3.connect(path) as conn:
++        conn.executescript(
++            """
++            CREATE TABLE facts (
++                id TEXT PRIMARY KEY, kind TEXT NOT NULL, ts REAL NOT NULL,
++                observer TEXT NOT NULL, origin TEXT NOT NULL,
++                payload TEXT NOT NULL, signature TEXT
++            );
++            CREATE TABLE ticks (
++                id TEXT PRIMARY KEY, name TEXT NOT NULL, ts REAL NOT NULL,
++                since REAL, origin TEXT NOT NULL, payload TEXT NOT NULL,
++                prev_hash TEXT, window_start TEXT, fact_cursor TEXT,
++                window_hash TEXT, signature TEXT
++            );
++            INSERT INTO facts VALUES
++              ('01ARZ3NDEKTSV4RRFFQ69G5FA0', 'concept', 1000.0,
++               'alice', 'legacy', '{"text":"migrated"}', NULL);
++            INSERT INTO ticks VALUES
++              ('01ARZ3NDEKTSV4RRFFQ69G5FT1', 'heartbeat', 1001.0, 1000.0,
++               'system', '{"seq":1}', NULL, NULL, NULL, NULL, NULL);
++            """
++        )
++
++
++@pytest.mark.parametrize("source_format", ["jsonl", "sqlite"])
++def test_migrated_descriptor_reaches_public_sdk_boundary(
++    tmp_path: Path, source_format: str
++) -> None:
++    """Migration output is structurally readable, but lacks adopted declaration history."""
++    data = tmp_path / "data"
++    data.mkdir()
++    source = data / ("legacy.jsonl" if source_format == "jsonl" else "legacy.sqlite")
++    if source_format == "jsonl":
++        _write_jsonl(source)
++    else:
++        _write_sqlite(source)
++    source_before = source.read_bytes()
++
++    pair = ed25519.load_or_generate(tmp_path / "keys" / "alice")
++    vertex = tmp_path / "alice.vertex"
++    _write_vertex(vertex, pair.public_b64, source.name)
++    outcome = run_migration(source, vertex, store_dir=data, signer=_signer(pair))
++
++    # The migration's low-level records and report remain independently verifiable.
++    assert verify_migration_report(
++        outcome.report_path,
++        pair.public_b64,
++        verify=_verifier,
++        target_path=outcome.target_path,
++    )
++    descriptor = descriptor_for(parse_vertex_file(vertex), vertex)
++    assert descriptor is not None
++    assert descriptor.backend == "file"
++    assert descriptor.lineage == outcome.lineage
++    assert descriptor.role is not None and descriptor.role.value == "authority"
++    target_bytes_before_sync = outcome.target_path.read_bytes()
++    registry = BackendRegistry.with_builtin_backends()
++    ledger, query = registry.open(descriptor)
++    try:
++        head = ledger.verify(Full(through=outcome.head))
++        records = list(ledger.scan(through=head))
++        assert head == outcome.head
++        assert [record["k"] for record in records] == ["genesis", "fact", "tick"]
++        genesis, fact, tick = records
++        assert genesis["v"] == 1
++        assert genesis["lin"] == outcome.lineage
++        assert genesis["ord"] == 0
++        assert genesis["prev"] is None
++        assert genesis["at"] == 0.0
++        assert genesis["observer"] == "alice"
++        assert genesis["origin"] == ""
++        assert genesis["body"] == {
++            "protocol": 1,
++            "lineage": outcome.lineage,
++            "key": pair.public_b64,
++        }
++        assert isinstance(genesis["sig"], str) and genesis["sig"]
++        assert isinstance(genesis["rh"], str) and len(genesis["rh"]) == 64
++        assert fact == {
++            "v": 1,
++            "lin": outcome.lineage,
++            "ord": 1,
++            "prev": genesis["rh"],
++            "at": 1000.0,
++            "k": "fact",
++            "observer": "alice",
++            "origin": "legacy",
++            "body": {
++                "id": "01ARZ3NDEKTSV4RRFFQ69G5FA0",
++                "kind": "concept",
++                "ts": 1000.0,
++                "observer": "alice",
++                "origin": "legacy",
++                "payload": '{"text":"migrated"}',
++            },
++            "rh": fact["rh"],
++        }
++        assert tick == {
++            "v": 1,
++            "lin": outcome.lineage,
++            "ord": 2,
++            "prev": fact["rh"],
++            "at": 1001.0,
++            "k": "tick",
++            "observer": "alice",
++            "origin": "system",
++            "body": {
++                "id": "01ARZ3NDEKTSV4RRFFQ69G5FT1",
++                "name": "heartbeat",
++                "ts": 1001.0,
++                "since": 1000.0,
++                "origin": "system",
++                "payload": '{"seq":1}',
++                "prev_hash": None,
++                "window_start": None,
++                "fact_cursor": None,
++                "window_hash": None,
++            },
++            "rh": tick["rh"],
++        }
++        assert "sig" not in fact
++        assert "sig" not in tick
++    finally:
++        query.close()
++        ledger.close()
++
++    resolved = resolve_arrival_target(vertex)
++    assert resolved.store.lineage == outcome.lineage
++    assert resolved.store.role == "authority"
++    verified = verify_target(vertex)
++    assert verified.store == resolved.store
++    assert verified.captured_head == outcome.head
++    assert verified.verified_through == outcome.head
++    synced = sync_target(vertex)
++    assert synced.store == resolved.store
++    assert synced.captured_head == outcome.head
++    assert synced.target == outcome.head
++    assert synced.projected_before is None
++    assert synced.projected_after == outcome.head
++    assert synced.agreement is True
++    assert outcome.target_path.read_bytes() == target_bytes_before_sync
++
++    # Reads and writes must not substitute the current locator for an absent
++    # adopted declaration. These operations may create/update a derived index,
++    # so compare the authority log and descriptor around all refusal checks.
++    ledger_before_refusals = outcome.target_path.read_bytes()
++    descriptor_before_refusals = vertex.read_bytes()
++    operations = [
++        lambda: read_summary(vertex),
++        lambda: read_facts(vertex),
++        lambda: read_fact_by_id(vertex, "01ARZ3NDEKTSV4RRFFQ69G5FA0"),
++        lambda: read_ticks(vertex),
++        lambda: inspect_declaration(vertex),
++        lambda: edit_declaration(
++            vertex,
++            vertex.read_text(encoding="utf-8"),
++            observer="alice",
++            credentials=_StaticCredentials(pair),
++        ),
++        lambda: emit_fact(
++            vertex,
++            "concept",
++            {"text": "must refuse"},
++            observer="alice",
++            credentials=_StaticCredentials(pair),
++        ),
++    ]
++    for operation in operations:
++        with pytest.raises(
++            SdkError, match="adopted declaration|historized(?: effective)? declarations?"
++        ):
++            operation()
++    assert outcome.target_path.read_bytes() == ledger_before_refusals
++    assert vertex.read_bytes() == descriptor_before_refusals
++    assert source.read_bytes() == source_before

@@ -1,0 +1,11 @@
+{
+  "command": [
+    "uv",
+    "run",
+    "--no-sync",
+    "pytest",
+    "tests/architecture",
+    "-q"
+  ],
+  "returncode": 0
+}

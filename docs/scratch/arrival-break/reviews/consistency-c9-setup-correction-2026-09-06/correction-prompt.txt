@@ -1,0 +1,2017 @@
+Focused Fable 5.1 LOW correction review for your accepted blocker B1 in the initial C9 setup review. Initial full packet SHA8e15169b83e225d34e29a3a901e1b36a12aa814a0341e6a5feb4a58c898626b5 judged the whole slice REVISE solely for TypeError escaping SDK credential lifecycle handling. Initial findings are included. Review current SDK provider/types, regression tests, CLI mapping, and supporting custody excerpts. The ONLY production change since that review is adding TypeError to the existing (OSError, ValueError) catch tuple in sdk/emit.py. Remaining changes are regressions/docs/evidence. Confirm B1 fixed without broadening catch to arbitrary exceptions or fabricating durable evidence; identify any remaining concrete blocker, then end ACCEPT or REVISE.
+Actual pending/intents JSON arrays now yield incomplete unknown source_type TypeError with request coordinates and byte invariance. Post-marker injected TypeError retains unknown phase/no invented key_ref then same-token recovery succeeds. Actual CLI corrupt pending record returns6 with recovery coordinates and unchanged files. Optional absent legacy candidate recovery has SDK assertion. Native negative control replaces catch tuple only in memory to the old version then runs regression subset: 3 TypeError cases fail, OSError passes. This is a deliberately injected negative control, not historical raw test output and never a worktree edit. Full corrected SDK599 and CLI30 pass, scoped Ruff passes, installed wheels rerun with final source hashes matching. Prior architecture101/custody31 unaffected by exception tuple change. Initial evidence-scope and conservative incomplete limitations remain documented. No other protocol changes or legacy migration/retirement. Do not claim to have run tools/tests yourself.
+
+===== docs/scratch/arrival-break/reviews/consistency-c9-setup-final-2026-09-06/final-findings.md =====
+1: # final — Fable review
+2: 
+3: Effort: low. Finished: 2026-09-07T03:27:58.663927+00:00.
+4: Packet SHA-256: `8e15169b83e225d34e29a3a901e1b36a12aa814a0341e6a5feb4a58c898626b5`.
+5: 
+6: Static reviewer output; findings still require primary triage.
+7: 
+8: **Verdict: REVISE** — one blocker, otherwise the slice matches its claims.
+9: 
+10: ## Blocker
+11: 
+12: **B1. Custody `TypeError` escapes the conservative incomplete wrapper.**
+13: `libs/sdk/src/sdk/emit.py:238` catches only `(OSError, ValueError)`. Custody raises `TypeError` at `libs/custody/src/custody/binding.py:343` (`_read_json`, non-object JSON record) and `:514` (`_pending_by_token`, pending intent lacking slot identity).
+14: 
+15: - **Trigger:** any corrupt `pending-v1/*.json` or `intents-v1/*.json` whose top level is a JSON array/scalar. Reachable pre-mutation via `_intent_for` → `_pending_by_token` (`binding.py:593`), and **post-mutation** via `_ensure_token_index` → `_read_json` (`binding.py:531`) after the pending marker has already been published at `:711`.
+16: - **Consequence:** the raw `TypeError` reaches `main.py:511`, `normalize_exception` has no SDK family for it, `_exit_code` returns 70, and the JSON error is the generic fallback with no namespace/observer/token/phase. This contradicts the packet's claim (`consistency-c9-setup…md:47-52`, `sol-audit.txt:6-7`) that failures after entering custody are reported as incomplete/unknown with request coordinates, and in the post-marker case it drops the exact evidence the operator needs to run `credential-recover`.
+17: - **Minimal correction:** change `emit.py:238` to `except (OSError, ValueError, TypeError) as exc:` and add one lifecycle test that plants `[]` in a pending or intents record and asserts `CredentialBindingIncomplete` with `phase="unknown"`, `source_type="TypeError"`, and the request coordinates. Update the doc sentence at `md:47` and the README sentence to say "raw custody OSError/ValueError/TypeError".
+18: 
+19: ## Optional observations (non-blocking)
+20: 
+21: - **Status-6 for pure precondition mismatches.** `bind_existing_ref` with a wrong expected key or unknown `key_ref` yields exit 6/incomplete although custody fails before any write (`binding.py:1046`). This is documented as deliberate conservatism and tested (`test_credential_lifecycle.py:144-150`); it just means operators will see "reconcile" for what is really a refusal. Acceptable for this slice.
+22: - **Legacy-import absent-candidate recovery is not asserted in this packet.** `binding.py:980-984` raises `BindingRecoveryRequired` for that case, and the docs describe it (`md:56-57`), but no test in the packet exercises it. The custody suite log (31 passed) may cover it; the packet cannot prove that. Worth one SDK-level assertion.
+23: - **Compatibility wording.** `CredentialBindingResult` is a field superset of `BindingCreationResult` (adds `operation`, `schema`). Callers that round-trip via `BindingCreationResult(**asdict(result))` would break. The README already says the concrete type changed, which is honest enough.
+24: - **`recover_binding` raw re-raises.** Custody deliberately re-raises `FileNotFoundError`/`ValueError` from recovery as precommit refusals (`binding.py:1023-1026`); the SDK reclassifies them as incomplete/unknown with `key_ref=None`. Consistent with the stated policy, just note that the conservative path loses the intent's known `key_ref`.
+25: - **Evidence scope confirmed.** The `os._exit(75)` after-mint test, custody-moved-away recovery, refused repeat recovery, and post-recovery signed emit/read/verify are all asserted as claimed in `test_setup_cli.py:124-197`. The mocked delegation tests are correctly labeled as not crash evidence. Wheel evidence covers create/replay/recover/reuse only, matching its stated scope. No private keys or callables appear in serialized output (`types.py:215-216`, `:102-120`).
+26: - **Migration sidecar gap** (`migrate.sidecar.edit_vertex_store_clause` lacking role) is recorded as next work at `md:108-113`, not silently changed. Correct.
+
+===== docs/scratch/arrival-break/consistency-c9-setup-2026-09-06.md =====
+1: # C9: initialization recovery and credential lifecycle
+2: 
+3: Status: implemented and validated on `arrival/finish`, based on `50e37595`.
+4: Initial Fable-low review found B1; corrected implementation awaits focused review.
+5: No commit, push, live migration, or legacy retirement in this slice.
+6: 
+7: ## Boundary decisions
+8: 
+9: Initialization recovery is a separate `init-recover TARGET` command. It calls
+10: `sdk.init_vertex(target, store_type="arrival", recover=True)` without credentials,
+11: backend selection, observer selection, or scaffold parameters. The SDK and engine
+12: load the reserved descriptor, observer, declaration, and signatures from the
+13: retained initialization intent. Recovery finishes that operation; it does not
+14: choose a new lineage or sign a new initialization. Successful recovery removes
+15: the intent. A subsequent recovery invocation refuses the missing intent without
+16: starting another initialization.
+17: 
+18: Mapped binding mutation remains a separate local custody operation. SDK-owned
+19: results serialize public binding coordinates and mutation outcomes. They carry
+20: no Arrival Commit and no private key material. The exact namespace and observer
+21: select a local slot; the explicit token identifies the durable operation. Receipt
+22: observer selection belongs to subsequent writes and is not a binding mutation
+23: argument. Existing read resolution remains read-only and can return no binding.
+24: 
+25: The process client exposes create, recover, bind-existing-ref, and import-legacy
+26: through the corresponding public SDK provider methods. The SDK owns validation,
+27: serialization and failure classification. The client performs one invocation and
+28: preserves its result or error. It never scans private custody files, manufactures
+29: an outcome, or performs an automatic retry. Import copies an explicitly selected
+30: legacy key; it does not migrate a store or publish an Arrival descriptor.
+31: 
+32: ## SDK outcome contract
+33: 
+34: `MappedCredentialProvider` keeps its four public method signatures and existing
+35: result attributes. Those methods now return `CredentialBindingResult`, with
+36: schema `loops.sdk/credential-binding/v1`, operation, namespace, observer, token,
+37: key_ref, public_key, provenance, binding_created, and key_created. This changes
+38: the concrete result type from the custody dataclass; callers inspecting that
+39: concrete type must adopt the SDK result. Reusing an existing reference publishes
+40: a binding, without implying new key creation or a vertex authorization grant.
+41: 
+42: SDK lifecycle errors are dedicated `CredentialBindingError` subclasses. They
+43: replace exposed custody exceptions for these SDK methods; direct custody callers
+44: are unchanged. `CredentialBindingConflict` and `CredentialBindingRecoveryRequired`
+45: retain the attempted request coordinates and map to CLI status 4.
+46: `CredentialBindingIncomplete` maps to status 6, retaining custody-supplied
+47: key_ref/phase when available. Raw custody OSError/ValueError/TypeError cannot establish
+48: that no mutation happened: they use the same incomplete family with phase
+49: `unknown`, the source exception type, and the request coordinates. That fallback
+50: does not claim an intent exists or supply a guessed key reference. Some failures,
+51: such as an absent import source, consequently receive a conservative incomplete
+52: outcome even though their current implementation fails before binding publication.
+53: Simple invalid SDK argument shapes are rejected before the custody call.
+54: 
+55: The error's `recovery_action="reconcile"` is not an automatic retry command.
+56: Recovery may require the exact retained token; an interrupted legacy import
+57: without a published candidate may require repeating that explicit import with
+58: the same token and source. A conflicting operation's attempted token is not the
+59: token owning another pending intent. Exit status 4 also makes no blanket
+60: zero-effects claim. No binding outcome fabricates an Arrival Commit.
+61: 
+62: ## Evidence and validation
+63: 
+64: The process workload provisions its binding through `credential-create`, then
+65: runs the actual `init` dispatch in an instrumented child process that exits with
+66: `os._exit(75)` at the engine's `after-mint` hook. The parent retains the exact
+67: genesis prefix and intent. A fresh `init-recover` process runs while the configured
+68: custody directory is moved away, publishes the exact retained declaration, and
+69: preserves the original ledger prefix and lineage. Repeating recovery refuses
+70: with the intent gone and leaves both descriptor and ledger unchanged. Restoring
+71: the original credential directory permits a signed emit whose Commit predecessor
+72: is the recovered head; complete reads and structural Full verification account
+73: for the result. This covers process termination at a durable hook, not arbitrary
+74: power loss or a concurrent writer.
+75: 
+76: SDK lifecycle tests exercise actual custody hooks for incomplete publication and
+77: for a raw OSError after the pending marker but before its token index. They retain
+78: known versus unknown phase evidence and recover with the same token. Additional
+79: checks cover wrong-token and key conflicts without mutation, corrupt persisted
+80: public evidence without repair, idempotent results, explicit import/reuse, and
+81: read-only resolution. A separate actual CLI subprocess injects an exception after binding publication.
+82: It emits status 6 with exact SDK incomplete evidence, a wrong-token recovery
+83: refuses with all persisted bytes unchanged, and a fresh exact-token recovery
+84: preserves the complete key-file set and bytes. Same-token create replay is also
+85: unchanged. This is an exception at a custody hook, not process termination.
+86: CLI boundary tests separately check exact SDK delegation,
+87: argument rejection, and serialization of a supplied incomplete error. Mocked
+88: serialization is not process-crash evidence.
+89: 
+90: A fresh modular-wheel installation outside the checkout, with neither legacy
+91: `loops` nor Painted installed, exercises credential create/replay/recover/reuse
+92: then init → emit → declaration → read → verify. All four changed production
+93: files match installed-source hashes. Every fixture uses isolated state/config/home
+94: roots; only explicit text evidence is archived, never key/store fixture directories.
+95: 
+96: Final corrected validation: CLI **30 passed** /14.26s; SDK **599 passed** /29.17s;
+97: architecture **101 passed** /16.00s; custody binding/recovery **31 passed** /1.33s.
+98: Focused SDK compatibility **60 passed** /2.46s. Scoped Ruff and whitespace
+99: checks pass. SDK and CLI suites and installed wheels were rerun after B1; the unchanged
+100: architecture/custody boundary retains its prior passing suites.
+101: 
+102: ## Initial review and B1 correction
+103: 
+104: Fable-low's initial verdict was **REVISE** for one accepted blocker: custody's
+105: non-object JSON and malformed slot-identity checks raise TypeError, which the
+106: SDK wrapper did not classify. Such failures escaped as CLI status 70 without
+107: request/recovery evidence. The correction adds TypeError to the existing narrow
+108: OSError/ValueError fallback; no blanket Exception handler or custody change.
+109: 
+110: New SDK tests cover actual array-valued pending and intent records with unchanged
+111: bytes, and a post-marker TypeError before token-index publication followed by
+112: same-token recovery. An actual CLI malformed-pending recovery now reports status
+113: 6 and the exact request coordinates with phase unknown and no invented key_ref
+114: or Commit. The optional missing legacy-import candidate case also now has an SDK
+115: recovery-required assertion. A native negative control temporarily restores the
+116: old catch tuple in an in-memory SDK module: all three TypeError regressions fail
+117: while the OSError case passes. It changes no worktree files; the archived script
+118: and log distinguish it from the agent's earlier reported red run. The corrected
+119: full suites pass. Focused Fable-low correction review is pending.
+120: 
+121: ## Remaining transition
+122: 
+123: After this boundary is accepted, select a representative existing store for a
+124: migration rehearsal on a copy. Store conversion, descriptor adoption, credential
+125: binding, and consumer cutover are distinct operations. Live writers and originals
+126: remain untouched by this implementation. Before executing that rehearsal, reconcile
+127: the older sidecar publication path
+128: with current descriptor adoption: `migrate.sidecar.edit_vertex_store_clause`
+129: currently writes location/backend without the explicit role required by the
+130: Arrival SDK resolver. Do not assume the old wrapper is a complete adoption
+131: workflow. Source execution is the next substantial minimal-client transition.
+132: Deliberate legacy retirement still requires an inventory
+133: of surviving consumers and replacement workflows.
+
+===== libs/sdk/tests/test_credential_lifecycle.py =====
+1: """Public outcomes for explicit mapped-credential lifecycle mutations."""
+2: 
+3: from __future__ import annotations
+4: 
+5: import json
+6: from pathlib import Path
+7: 
+8: import pytest
+9: from custody import ensure_signing_key
+10: from engine.credentials import CredentialPurpose, CredentialRequest, SigningDomain
+11: 
+12: from sdk import (
+13:     CredentialBindingConflict,
+14:     CredentialBindingIncomplete,
+15:     CredentialBindingRecoveryRequired,
+16:     CredentialBindingResult,
+17:     MappedCredentialProvider,
+18:     SdkValueError,
+19: )
+20: 
+21: 
+22: @pytest.fixture(autouse=True)
+23: def _isolated_process_roots(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+24:     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+25:     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+26:     monkeypatch.setenv("LOOPS_HOME", str(tmp_path / "loops"))
+27: 
+28: 
+29: def _files(root: Path) -> dict[Path, bytes]:
+30:     return {
+31:         path.relative_to(root): path.read_bytes()
+32:         for path in root.rglob("*")
+33:         if path.is_file()
+34:     }
+35: 
+36: 
+37: def _provider(tmp_path: Path) -> MappedCredentialProvider:
+38:     return MappedCredentialProvider(
+39:         tmp_path / "bindings", namespace="tenant/a", receipt_observer="alice"
+40:     )
+41: 
+42: 
+43: def test_lifecycle_results_are_serializable_and_resolution_stays_read_only(
+44:     tmp_path: Path,
+45: ) -> None:
+46:     provider = _provider(tmp_path)
+47:     created = provider.create_binding("alice", token="create-alice")
+48: 
+49:     assert isinstance(created, CredentialBindingResult)
+50:     assert created.operation == "create"
+51:     assert created.namespace == "tenant/a"
+52:     assert created.observer == "alice"
+53:     assert created.binding_created is True
+54:     serialized = created.as_dict()
+55:     assert serialized["schema"] == "loops.sdk/credential-binding/v1"
+56:     assert serialized["key_ref"] == created.key_ref
+57:     assert json.loads(json.dumps(serialized, allow_nan=False)) == serialized
+58:     private = (provider.root / "keys-v1" / created.key_ref / "ed25519.key").read_text()
+59:     assert private not in json.dumps(serialized)
+60:     assert "bindings-v1" not in json.dumps(serialized)
+61: 
+62:     before = _files(provider.root)
+63:     resolved = provider.resolve(
+64:         CredentialRequest(
+65:             provider.namespace,
+66:             "alice",
+67:             SigningDomain.FACT,
+68:             CredentialPurpose.AUTHORSHIP,
+69:         )
+70:     )
+71:     assert resolved is not None and resolved.evidence.key_ref == created.key_ref
+72:     assert _files(provider.root) == before
+73: 
+74:     repeated = provider.create_binding("alice", token="create-alice")
+75:     assert repeated.key_ref == created.key_ref
+76:     assert repeated.public_key == created.public_key
+77:     assert repeated.binding_created is False
+78:     assert repeated.key_created is False
+79: 
+80: 
+81: def test_lifecycle_incomplete_retains_reconciliation_evidence(tmp_path: Path) -> None:
+82:     provider = _provider(tmp_path)
+83: 
+84:     def interrupt(phase: str, _intent: dict[str, object]) -> None:
+85:         if phase == "binding-published":
+86:             raise OSError("injected publication interruption")
+87: 
+88:     provider._creation_hook = interrupt
+89:     with pytest.raises(CredentialBindingIncomplete) as raised:
+90:         provider.create_binding("alice", token="recover-alice")
+91: 
+92:     error = raised.value
+93:     assert error.operation == "create"
+94:     assert error.namespace == provider.namespace
+95:     assert error.observer == "alice"
+96:     assert error.token == "recover-alice"
+97:     assert error.key_ref is not None
+98:     assert error.phase == "binding-published"
+99:     assert error.source_type == "BindingMutationIncomplete"
+100:     assert error.outcome == "incomplete"
+101:     assert error.recovery_action == "reconcile"
+102:     assert error.as_dict()["phase"] == "binding-published"
+103:     assert "commit" not in error.as_dict()
+104:     assert json.loads(json.dumps(error.as_dict(), allow_nan=False)) == error.as_dict()
+105: 
+106:     provider._creation_hook = None
+107:     recovered = provider.recover_binding("alice", token="recover-alice")
+108:     assert recovered.operation == "recover"
+109:     assert recovered.key_ref == error.key_ref
+110:     assert recovered.binding_created is False
+111: 
+112: 
+113: def test_lifecycle_conflict_recovery_and_input_errors_are_typed(tmp_path: Path) -> None:
+114:     provider = _provider(tmp_path)
+115:     alice = provider.create_binding("alice", token="alice-token")
+116: 
+117:     pending_provider = MappedCredentialProvider(
+118:         tmp_path / "pending-bindings", namespace="tenant/a"
+119:     )
+120: 
+121:     def interrupt(phase: str, _intent: dict[str, object]) -> None:
+122:         if phase == "intent-published":
+123:             raise OSError("leave pending intent")
+124: 
+125:     pending_provider._creation_hook = interrupt
+126:     with pytest.raises(CredentialBindingIncomplete):
+127:         pending_provider.create_binding("alice", token="pending-token")
+128:     pending_provider._creation_hook = None
+129:     pending_before = _files(pending_provider.root)
+130:     with pytest.raises(CredentialBindingRecoveryRequired) as recovery:
+131:         pending_provider.create_binding("alice", token="different-token")
+132:     assert recovery.value.as_dict()["operation"] == "create"
+133:     assert recovery.value.as_dict()["token"] == "different-token"
+134:     assert recovery.value.as_dict()["outcome"] == "refused"
+135:     assert _files(pending_provider.root) == pending_before
+136: 
+137:     before_token_conflict = _files(provider.root)
+138:     with pytest.raises(CredentialBindingConflict) as conflict:
+139:         provider.create_binding("bob", token="alice-token")
+140:     assert conflict.value.as_dict()["observer"] == "bob"
+141:     assert conflict.value.as_dict()["recovery_action"] == "reconcile"
+142:     assert _files(provider.root) == before_token_conflict
+143: 
+144:     before_wrong_key = _files(provider.root)
+145:     with pytest.raises(CredentialBindingIncomplete) as wrong_key:
+146:         provider.bind_existing_ref(
+147:             "carol", alice.key_ref, "not-the-managed-public-key", token="wrong-key"
+148:         )
+149:     assert wrong_key.value.source_type == "ValueError"
+150:     assert _files(provider.root) == before_wrong_key
+151:     assert provider.resolve(
+152:         CredentialRequest(
+153:             provider.namespace,
+154:             "carol",
+155:             SigningDomain.FACT,
+156:             CredentialPurpose.AUTHORSHIP,
+157:         )
+158:     ) is None
+159: 
+160:     shared = provider.bind_existing_ref(
+161:         "bob", alice.key_ref, alice.public_key, token="share-alice"
+162:     )
+163:     assert shared.operation == "bind-existing-ref"
+164:     assert shared.key_ref == alice.key_ref
+165:     with pytest.raises(SdkValueError, match="key_ref must be a non-empty string"):
+166:         provider.bind_existing_ref("carol", None, alice.public_key, token="bad")  # type: ignore[arg-type]
+167:     with pytest.raises(SdkValueError, match="vertex_path must be a path string or Path"):
+168:         provider.import_legacy(None, "carol", token="bad")  # type: ignore[arg-type]
+169: 
+170: 
+171: @pytest.mark.parametrize(
+172:     ("failure_type", "source_type"),
+173:     [(OSError, "OSError"), (TypeError, "TypeError")],
+174: )
+175: def test_raw_post_marker_custody_failures_keep_unknown_phase_and_reconcile(
+176:     tmp_path: Path,
+177:     monkeypatch: pytest.MonkeyPatch,
+178:     failure_type: type[Exception],
+179:     source_type: str,
+180: ) -> None:
+181:     provider = _provider(tmp_path)
+182:     original_index = provider._ensure_token_index
+183: 
+184:     def interrupt_index(_intent: dict[str, object]) -> None:
+185:         raise failure_type("injected token-index failure")
+186: 
+187:     monkeypatch.setattr(provider, "_ensure_token_index", interrupt_index)
+188:     with pytest.raises(CredentialBindingIncomplete) as raised:
+189:         provider.create_binding("alice", token="index-token")
+190:     error = raised.value
+191:     assert error.operation == "create"
+192:     assert error.namespace == provider.namespace
+193:     assert error.observer == "alice"
+194:     assert error.token == "index-token"
+195:     assert error.phase == "unknown"
+196:     assert error.source_type == source_type
+197:     assert error.key_ref is None
+198:     pending = json.loads(next((provider.root / "pending-v1").glob("*.json")).read_text())
+199:     assert pending.pop("key_ref")
+200:     assert pending == {
+201:         "expected_public_key": None,
+202:         "namespace": provider.namespace,
+203:         "observer": "alice",
+204:         "provenance": "created",
+205:         "schema": "loops.custody/binding-intent/v1",
+206:         "stage": "pending",
+207:         "token": "index-token",
+208:     }
+209:     assert json.loads(json.dumps(error.as_dict(), allow_nan=False)) == error.as_dict()
+210: 
+211:     monkeypatch.setattr(provider, "_ensure_token_index", original_index)
+212:     recovered = provider.recover_binding("alice", token="index-token")
+213:     assert recovered.operation == "recover"
+214:     assert recovered.observer == "alice"
+215: 
+216:     binding = next((provider.root / "bindings-v1").glob("*.json"))
+217:     binding.write_text("{malformed binding record")
+218:     before_corrupt = _files(provider.root)
+219:     with pytest.raises(CredentialBindingIncomplete) as corrupt:
+220:         provider.create_binding("alice", token="fresh-token")
+221:     assert corrupt.value.phase == "unknown"
+222:     assert corrupt.value.source_type == "ValueError"
+223:     assert _files(provider.root) == before_corrupt
+224: 
+225: 
+226: @pytest.mark.parametrize("record_kind", ["pending", "intent"])
+227: def test_corrupt_pending_or_intent_record_is_lifecycle_incomplete_without_mutation(
+228:     tmp_path: Path, record_kind: str
+229: ) -> None:
+230:     provider = _provider(tmp_path)
+231:     token = "pending-corrupt"
+232:     if record_kind == "pending":
+233:         record = provider.root / "pending-v1" / "corrupt.json"
+234:     else:
+235:         record = provider._intent_path(token)
+236:     record.parent.mkdir(parents=True)
+237:     record.write_text("[]")
+238:     # Entering a custody mutation normally creates this advisory lock. Seed it
+239:     # so the unchanged-byte assertion isolates record handling from that
+240:     # established lock-file side effect.
+241:     (provider.root / ".bindings-v1.lock").touch()
+242:     before = _files(provider.root)
+243: 
+244:     with pytest.raises(CredentialBindingIncomplete) as raised:
+245:         provider.create_binding("alice", token=token)
+246: 
+247:     error = raised.value
+248:     assert error.operation == "create"
+249:     assert error.namespace == provider.namespace
+250:     assert error.observer == "alice"
+251:     assert error.token == token
+252:     assert error.key_ref is None
+253:     assert error.phase == "unknown"
+254:     assert error.source_type == "TypeError"
+255:     assert json.loads(json.dumps(error.as_dict(), allow_nan=False)) == error.as_dict()
+256:     assert _files(provider.root) == before
+257: 
+258: 
+259: def test_import_legacy_returns_the_same_public_result_shape(tmp_path: Path) -> None:
+260:     legacy_vertex = tmp_path / "legacy.vertex"
+261:     pair = ensure_signing_key(legacy_vertex, observer="legacy")
+262:     provider = _provider(tmp_path)
+263: 
+264:     imported = provider.import_legacy(legacy_vertex, "legacy", token="import-legacy")
+265:     assert isinstance(imported, CredentialBindingResult)
+266:     assert imported.operation == "import-legacy"
+267:     assert imported.provenance == "legacy-import"
+268:     assert imported.public_key == pair.public_b64
+269:     assert json.loads(json.dumps(imported.as_dict(), allow_nan=False)) == imported.as_dict()
+270: 
+271: 
+272: def test_legacy_import_recovery_requires_its_missing_candidate(tmp_path: Path) -> None:
+273:     legacy_vertex = tmp_path / "legacy.vertex"
+274:     ensure_signing_key(legacy_vertex, observer="legacy")
+275:     provider = _provider(tmp_path)
+276: 
+277:     def interrupt(phase: str, _intent: dict[str, object]) -> None:
+278:         if phase == "intent-published":
+279:             raise OSError("retain import intent without a candidate")
+280: 
+281:     provider._creation_hook = interrupt
+282:     with pytest.raises(CredentialBindingIncomplete):
+283:         provider.import_legacy(legacy_vertex, "legacy", token="import-recover")
+284:     provider._creation_hook = None
+285: 
+286:     with pytest.raises(CredentialBindingRecoveryRequired) as raised:
+287:         provider.recover_binding("legacy", token="import-recover")
+288:     error = raised.value
+289:     assert error.operation == "recover"
+290:     assert error.namespace == provider.namespace
+291:     assert error.observer == "legacy"
+292:     assert error.token == "import-recover"
+
+===== apps/loops-min/tests/test_binding_cli.py =====
+1: """A real custody publication failure crosses the process boundary intact."""
+2: 
+3: from __future__ import annotations
+4: 
+5: import json
+6: import os
+7: import subprocess
+8: import sys
+9: from pathlib import Path
+10: 
+11: 
+12: def test_binding_publication_failure_and_fresh_process_recovery(tmp_path: Path) -> None:
+13:     environment = os.environ.copy()
+14:     for variable, directory in (
+15:         ("XDG_STATE_HOME", "state"),
+16:         ("XDG_CONFIG_HOME", "config"),
+17:         ("LOOPS_HOME", "loops"),
+18:     ):
+19:         environment[variable] = str(tmp_path / directory)
+20:     root = tmp_path / "credentials"
+21:     arguments = [str(root), "--namespace", "tenant", "--observer", "alice"]
+22:     launcher = """
+23: import sys
+24: from custody.binding import MappedCredentialProvider
+25: def interrupt(self, phase, intent):
+26:     if phase == 'binding-published':
+27:         raise OSError('injected failure after binding publication')
+28: MappedCredentialProvider._hook = interrupt
+29: from loops_min.main import main
+30: raise SystemExit(main(sys.argv[1:]))
+31: """
+32:     failed = subprocess.run(
+33:         [sys.executable, "-c", launcher, "credential-create", *arguments,
+34:          "--token", "setup-alice"],
+35:         capture_output=True, text=True, env=environment, check=False,
+36:     )
+37:     assert failed.returncode == 6, failed.stdout + failed.stderr
+38:     failure = json.loads(failed.stdout)
+39:     assert failure["ok"] is False
+40:     error = failure["error"]
+41:     assert error == {
+42:         "schema": "loops.sdk/error/v1",
+43:         "type": "CredentialBindingIncomplete",
+44:         "message": "mapped binding mutation outcome is incomplete or unknown",
+45:         "outcome": "incomplete",
+46:         "operation": "create",
+47:         "namespace": "tenant",
+48:         "observer": "alice",
+49:         "token": "setup-alice",
+50:         "key_ref": error["key_ref"],
+51:         "phase": "binding-published",
+52:         "source_type": "BindingMutationIncomplete",
+53:         "recovery_action": "reconcile",
+54:     }
+55: 
+56:     def files() -> dict[Path, bytes]:
+57:         return {p.relative_to(root): p.read_bytes() for p in root.rglob("*") if p.is_file()}
+58: 
+59:     def invoke(command: str, token: str) -> subprocess.CompletedProcess[str]:
+60:         return subprocess.run(
+61:             [sys.executable, "-m", "loops_min", command, *arguments, "--token", token],
+62:             capture_output=True, text=True, env=environment, check=False,
+63:         )
+64: 
+65:     before = files()
+66:     key_prefix = Path("keys-v1") / error["key_ref"]
+67:     retained_key = {p: value for p, value in before.items() if p.is_relative_to(key_prefix)}
+68:     assert retained_key
+69:     wrong = invoke("credential-recover", "wrong-token")
+70:     assert wrong.returncode == 4, wrong.stdout + wrong.stderr
+71:     wrong_error = json.loads(wrong.stdout)["error"]
+72:     assert wrong_error["type"] == "CredentialBindingRecoveryRequired"
+73:     assert wrong_error["token"] == "wrong-token"
+74:     assert files() == before
+75: 
+76:     recovered = invoke("credential-recover", "setup-alice")
+77:     assert recovered.returncode == 0, recovered.stdout + recovered.stderr
+78:     result = json.loads(recovered.stdout)["result"]
+79:     assert result["operation"] == "recover"
+80:     assert result["key_ref"] == error["key_ref"]
+81:     assert result["token"] == "setup-alice"
+82:     assert result["binding_created"] is False
+83:     assert result["key_created"] is False
+84:     after = files()
+85:     assert {p: value for p, value in after.items() if p.parts[0] == "keys-v1"} == retained_key
+86:     assert all(after[p] == value for p, value in before.items())
+87: 
+88:     replayed = invoke("credential-create", "setup-alice")
+89:     assert replayed.returncode == 0, replayed.stdout + replayed.stderr
+90:     replay_result = json.loads(replayed.stdout)["result"]
+91:     assert replay_result == {**result, "operation": "create"}
+92:     assert files() == after
+93: 
+94: 
+95: def test_non_object_custody_record_retains_process_recovery_coordinates(tmp_path: Path) -> None:
+96:     environment = os.environ.copy()
+97:     for variable, directory in (
+98:         ("XDG_STATE_HOME", "state"),
+99:         ("XDG_CONFIG_HOME", "config"),
+100:         ("LOOPS_HOME", "loops"),
+101:     ):
+102:         environment[variable] = str(tmp_path / directory)
+103:     root = tmp_path / "credentials"
+104:     arguments = [str(root), "--namespace", "tenant", "--observer", "alice",
+105:                  "--token", "setup-alice"]
+106: 
+107:     def invoke(command: str) -> subprocess.CompletedProcess[str]:
+108:         return subprocess.run(
+109:             [sys.executable, "-m", "loops_min", command, *arguments],
+110:             capture_output=True, text=True, env=environment, check=False,
+111:         )
+112: 
+113:     created = invoke("credential-create")
+114:     assert created.returncode == 0, created.stdout + created.stderr
+115:     pending = list((root / "pending-v1").glob("*.json"))
+116:     assert len(pending) == 1
+117:     pending[0].write_text("[]\n", encoding="utf-8")
+118:     before = {p.relative_to(root): p.read_bytes() for p in root.rglob("*") if p.is_file()}
+119: 
+120:     refused = invoke("credential-recover")
+121:     assert refused.returncode == 6, refused.stdout + refused.stderr
+122:     result = json.loads(refused.stdout)
+123:     assert result["ok"] is False
+124:     error = result["error"]
+125:     assert error["type"] == "CredentialBindingIncomplete"
+126:     assert error["source_type"] == "TypeError"
+127:     assert error["phase"] == "unknown"
+128:     assert error["operation"] == "recover"
+129:     assert error["namespace"] == "tenant"
+130:     assert error["observer"] == "alice"
+131:     assert error["token"] == "setup-alice"
+132:     assert "key_ref" not in error
+133:     assert "commit" not in error
+134:     assert {p.relative_to(root): p.read_bytes() for p in root.rglob("*") if p.is_file()} == before
+
+===== apps/loops-min/README.md =====
+1: # loops-min
+2: 
+3: `loops-min` is the transitional JSON process client for the headless `sdk`
+4: package. It provides descriptor/read operations, verification, projection and
+5: search maintenance, exact export, explicit restore-forward, and a mapped-only
+6: Arrival writer surface. Empty-receiver import, admission, a generic replicate
+7: command, and legacy writer retirement remain later work.
+8: 
+9: Writer commands require all of `--credential-root`, `--credential-namespace`,
+10: and `--receipt-observer`. They never select locator-derived credentials or fall
+11: back to a legacy writer or create keys implicitly. The founding binding must be
+12: pre-provisioned for `init`; pre-provision every author and receipt binding used
+13: by a signed workflow. Selecting the mapped provider does not make every domain
+14: mandatory: an absent optional signer retains the SDK's unsigned behavior under
+15: the captured declaration and signed-era rules. Callers should inspect each
+16: result's `signed` and `witnessed` evidence.
+17: 
+18: Credential mutations are explicit SDK-backed commands. Their tokens name one
+19: durable operation and should be retained with the JSON result or error:
+20: 
+21: ```text
+22: loops-min credential-create /keys --namespace tenant --observer alice \
+23:   --token setup-alice
+24: loops-min credential-recover /keys --namespace tenant --observer alice \
+25:   --token setup-alice
+26: loops-min credential-bind-existing-ref /keys --namespace tenant \
+27:   --observer bob --token bind-bob --key-ref KEY_REF \
+28:   --expected-public-key PUBLIC_KEY
+29: loops-min credential-import-legacy /keys --namespace tenant --observer carol \
+30:   --token import-carol --vertex old.vertex
+31: ```
+32: 
+33: `credential-recover` uses the exact namespace, observer, and token of a retained
+34: binding intent. An incomplete result is a reconciliation boundary, not an
+35: automatic retry instruction. Existing-reference binding and legacy import are
+36: explicit selections; the client does not search for keys or serialize custody
+37: implementation objects.
+38: 
+39: `init` always requests an Arrival file target and never uses `init_vertex`'s
+40: legacy default. A minimal lifecycle is:
+41: 
+42: ```text
+43: loops-min init app.vertex --name app --location /data/app.arrival \
+44:   --observer alice --credential-root /keys --credential-namespace tenant \
+45:   --receipt-observer alice --strict
+46: loops-min emit app.vertex item --payload-json '{"value":1}' --observer alice \
+47:   --credential-root /keys --credential-namespace tenant --receipt-observer alice
+48: loops-min emit-batch app.vertex --facts-json '[{"kind":"item","payload":{"value":2},"observer":"alice","id":"item-2"}]' \
+49:   --credential-root /keys --credential-namespace tenant --receipt-observer alice
+50: ```
+51: 
+52: `emit` requires a JSON object payload. `emit-batch` requires an array of JSON
+53: objects and passes their observer, ID, timestamp, origin, and admission fields
+54: to the SDK, retaining its existing defaults and coercion rules. Transport JSON rejects duplicate keys and non-finite
+55: numbers before credential resolution. The client does not retry unknown
+56: outcomes; stable IDs and the SDK's returned evidence are the reconciliation
+57: boundary.
+58: 
+59: `declaration target.vertex --proposed-file next.vertex --observer alice ...`
+60: passes the file's text to the SDK's captured declaration-edit protocol. If an
+61: edit reports an intent after a durable interruption,
+62: `declaration-recover INTENT` resumes it without resolving credentials again.
+63: Likewise, `init-recover TARGET` uses only the target's reserved initialization
+64: intent. It does not accept credentials, observer, backend, location, name, or
+65: strictness overrides. It does not choose a new lineage or re-sign the reserved
+66: bootstrap records.
+67: 
+68: `loops-min export target.vertex captured.jsonl` publishes a complete captured
+69: wire prefix at a new pathname and returns the SDK manifest in its JSON result.
+70: It never replaces an existing output. Export publication failures report
+71: whether the complete artifact became visible before directory durability failed.
+72: 
+73: `loops-min restore-forward source.vertex receiver.vertex` restores an existing
+74: exact copy through the witnessed source head. It preserves the receiver's
+75: role and reports its before/after heads and commit receipt. Ordinary opens
+76: continue to refuse older copies. Unknown or incomplete outcomes retain the
+77: identity evidence needed to reconcile custody before repeating the operation.
+78: 
+79: Each successful invocation prints one `{"ok": true, "result": ...}` JSON
+80: object. Failures print one JSON error object on stdout and a concise diagnostic
+81: on stderr. Result objects are serialized with the SDK model's `as_dict()`;
+82: continuation capabilities remain process-local and are reported without a
+83: fake cursor token.
+84: 
+85: Exit status 2 covers argument, transport JSON, local input-file, and SDK
+86: invalid-input/configuration errors (including missing founding credentials); 3
+87: means a recognized unsupported operation or target; 4 is a target, custody,
+88: projection, publication, or contract refusal/outcome; 5 is admission or
+89: ceremony refusal; and 6 means ledger custody committed or may have committed,
+90: or a credential-binding mutation is incomplete. Status
+91: 4 does not by itself prove zero derived or publication effects. Status 6 is
+92: not permission to retry: the JSON error retains commit, IDs, intent, and
+93: outcome evidence supplied by the SDK. A credential-binding incomplete result
+94: has a binding token and phase rather than a ledger Commit or fact IDs; an
+95: unknown phase does not prove that a durable binding intent exists.
+96: 
+97: The executable is deliberately named `loops-min` while the legacy `loops`
+98: application remains in the workspace. It has no presentation, storage, or
+99: legacy CLI dependency.
+100: 
+101: The global `--pretty` option may appear before or after a command. Argument
+102: errors also use the JSON envelope and exit with status 2. A built-wheel smoke
+103: can be run from a clean environment by building `loops-min`, installing it
+104: alongside the local SDK dependency wheels, and invoking `loops-min --help` and
+105: one temporary Arrival `summary`; the package does not require a repository
+106: checkout at runtime.
+
+===== docs/scratch/arrival-break/reviews/consistency-c9-setup-correction-2026-09-06/validation-evidence/sdk.txt =====
+1: ........................................................................ [ 12%]
+2: ........................................................................ [ 24%]
+3: ........................................................................ [ 36%]
+4: ........................................................................ [ 48%]
+5: ........................................................................ [ 60%]
+6: ........................................................................ [ 72%]
+7: ........................................................................ [ 84%]
+8: ........................................................................ [ 96%]
+9: .......................                                                  [100%]
+10: 599 passed in 29.17s
+
+===== docs/scratch/arrival-break/reviews/consistency-c9-setup-correction-2026-09-06/validation-evidence/cli.txt =====
+1: ..............................                                           [100%]
+2: 30 passed in 14.26s
+
+===== docs/scratch/arrival-break/reviews/consistency-c9-setup-correction-2026-09-06/validation-evidence/ruff.txt =====
+1: All checks passed!
+
+===== docs/scratch/arrival-break/reviews/consistency-c9-setup-correction-2026-09-06/validation-evidence/wheel-status.json =====
+1: {
+2:   "status": "passed",
+3:   "source_checks": [
+4:     {
+5:       "source": "apps/loops-min/src/loops_min/main.py",
+6:       "sha256": "fd6919ab21f61285c7e4f81d823d812bddad06b772f9215ea61b2254a71c8e62",
+7:       "installed_sha256": "fd6919ab21f61285c7e4f81d823d812bddad06b772f9215ea61b2254a71c8e62",
+8:       "matched": true
+9:     },
+10:     {
+11:       "source": "libs/sdk/src/sdk/emit.py",
+12:       "sha256": "78bc1ccc27226e26e6ad0c0370c4cfe78388491b07c1a9d4af17ad28450d56f9",
+13:       "installed_sha256": "78bc1ccc27226e26e6ad0c0370c4cfe78388491b07c1a9d4af17ad28450d56f9",
+14:       "matched": true
+15:     },
+16:     {
+17:       "source": "libs/sdk/src/sdk/types.py",
+18:       "sha256": "75bbc6eab3ca5cf03b2fa712f14170035d87b8cf58bd19b936e01548281fc9f7",
+19:       "installed_sha256": "75bbc6eab3ca5cf03b2fa712f14170035d87b8cf58bd19b936e01548281fc9f7",
+20:       "matched": true
+21:     },
+22:     {
+23:       "source": "libs/sdk/src/sdk/__init__.py",
+24:       "sha256": "fe5ed14249d8eaf2d8345a3a588d3c5565755dfddc3bc4fb3bb19d922ada2691",
+25:       "installed_sha256": "fe5ed14249d8eaf2d8345a3a588d3c5565755dfddc3bc4fb3bb19d922ada2691",
+26:       "matched": true
+27:     }
+28:   ]
+29: }
+
+===== docs/scratch/arrival-break/reviews/consistency-c9-setup-correction-2026-09-06/validation-evidence/typeerror-negative-control.py.txt =====
+1: import importlib
+2: from pathlib import Path
+3: import pytest
+4: import sdk
+5: module = importlib.import_module("sdk.emit")
+6: source = Path(module.__file__).read_text()
+7: corrected = "except (OSError, ValueError, TypeError) as exc:"
+8: assert source.count(corrected) == 1
+9: source = source.replace(corrected, "except (OSError, ValueError) as exc:")
+10: exec(compile(source, str(module.__file__), "exec"), module.__dict__)
+11: sdk.MappedCredentialProvider = module.MappedCredentialProvider
+12: raise SystemExit(pytest.main(["libs/sdk/tests/test_credential_lifecycle.py", "-q", "-k", "post_marker or corrupt_pending_or_intent"]))
+
+===== libs/sdk/src/sdk/emit.py lines 1-289 (excerpt; full source hashed) =====
+1: """Headless fact and batch emission operations over Loops vertices."""
+2: 
+3: from __future__ import annotations
+4: 
+5: from collections.abc import Mapping
+6: from datetime import UTC, datetime
+7: from pathlib import Path
+8: from typing import Any
+9: 
+10: from atoms import Fact
+11: from custody.binding import MappedCredentialProvider as _MappedCredentialProvider
+12: from custody.signing import arrival_signer_for, fact_signer_for, tick_signer_for
+13: from engine.admission import AdmissionError, UndeclaredKind, grant_for_observer
+14: from engine.arrival_registry import BackendRegistry
+15: from engine.credentials import CredentialProvider, WriteCredentials
+16: from engine.declaration import load_declaration_status
+17: from engine.handle import ReceiveCommittedError, open_vertex
+18: from lang.ast import FoldBy
+19: 
+20: from .target import (
+21:     _arrival_descriptor,
+22:     _refuse_arrival_aggregate_members,
+23:     resolve_target,
+24: )
+25: from .types import (
+26:     AdmissionFailed,
+27:     BatchEmitResult,
+28:     CommittedEmissionError,
+29:     CredentialBindingConflict,
+30:     CredentialBindingIncomplete,
+31:     CredentialBindingRecoveryRequired,
+32:     CredentialBindingResult,
+33:     EmissionFailed,
+34:     EmitPreviewResult,
+35:     EmitReceipt,
+36:     InvalidEmissionRequest,
+37:     LegacyBatchPartialFailure,
+38:     SdkError,
+39:     SdkValueError,
+40:     StoreDescriptorInfo,
+41:     TargetUnsupported,
+42: )
+43: 
+44: __all__ = [
+45:     "emit_fact",
+46:     "emit_batch",
+47:     "preview_emission",
+48:     "CustodyCredentialProvider",
+49:     "MappedCredentialProvider",
+50: ]
+51: 
+52: 
+53: def _tick_fields(tick: Any, change: Any) -> tuple[str | None, str | None]:
+54:     """Resolve (tick_mark, tick_id) for a receipt whose write fired a boundary.
+55: 
+56:     The in-memory engine ``Tick`` carries no id — the store assigns one on the
+57:     tick row, surfaced as ``TickEvent.tick_id`` in the post-write ``ChangeBatch``.
+58:     Reading ``tick.id`` off the Tick object was an AttributeError on every
+59:     boundary-firing emission.
+60:     """
+61:     if tick is None:
+62:         return None, None
+63:     tick_id: str | None = None
+64:     if change is not None and change.ticks:
+65:         matching = [ev for ev in change.ticks if ev.name == tick.name]
+66:         if matching:
+67:             tick_id = matching[-1].tick_id
+68:     return tick.name, tick_id
+69: 
+70: 
+71: def _fold_preview(
+72:     declaration: Any, kind: str, payload: Mapping[str, Any]
+73: ) -> tuple[bool, str | None, bool, Any | None]:
+74:     """Describe the existing SDK fold fields from one effective declaration."""
+75:     kind_declared = kind in declaration.loops
+76:     fold_key_field: str | None = None
+77:     fold_key_present = True
+78:     fold_key_value: Any | None = None
+79:     if kind_declared:
+80:         for fold in declaration.loops[kind].folds:
+81:             if isinstance(fold.op, FoldBy):
+82:                 fold_key_field = fold.op.key_field
+83:                 fold_key_present = fold_key_field in payload
+84:                 fold_key_value = payload.get(fold_key_field)
+85:                 break
+86:     return kind_declared, fold_key_field, fold_key_present, fold_key_value
+87: 
+88: 
+89: def _preparation_refusal_reason(refusal: Any) -> str:
+90:     """Preserve the established strict-kind message from snapshot evidence."""
+91:     effective = refusal.effective_declaration
+92:     fact = refusal.fact
+93:     if isinstance(refusal.cause, UndeclaredKind):
+94:         return f"vertex {effective.name!r} declares strict — kind {fact.kind!r} is not declared"
+95:     return str(refusal.cause)
+96: 
+97: 
+98: class CustodyCredentialProvider:
+99:     """Bridge custody's disk keypair management to engine's CredentialProvider interface."""
+100: 
+101:     def __init__(self, key_dir: Path | None = None) -> None:
+102:         if key_dir is not None:
+103:             raise SdkValueError(
+104:                 "CustodyCredentialProvider key_dir overrides are not supported"
+105:             )
+106: 
+107:     def for_write(self, vertex: Path) -> WriteCredentials:
+108:         """Construct operation-fresh WriteCredentials using custody key resolution."""
+109:         return WriteCredentials(
+110:             tick_signer=tick_signer_for(vertex),
+111:             fact_signer=fact_signer_for(vertex),
+112:             arrival_signer=arrival_signer_for(vertex),
+113:         )
+114: 
+115: 
+116: class MappedCredentialProvider(_MappedCredentialProvider):
+117:     """SDK export for explicit namespace-scoped, persistent custody bindings."""
+118: 
+119:     def __init__(
+120:         self,
+121:         root: Path | str,
+122:         *,
+123:         namespace: str,
+124:         receipt_observer: str | None = None,
+125:     ) -> None:
+126:         try:
+127:             super().__init__(root, namespace=namespace, receipt_observer=receipt_observer)
+128:         except ValueError as exc:
+129:             raise SdkValueError(str(exc)) from exc
+130: 
+131:     def create_binding(self, observer: str, *, token: str) -> CredentialBindingResult:
+132:         """Create one explicit binding and return its process-safe outcome."""
+133:         return self._binding_mutation(
+134:             "create",
+135:             observer,
+136:             token,
+137:             lambda: _MappedCredentialProvider.create_binding(self, observer, token=token),
+138:         )
+139: 
+140:     def recover_binding(self, observer: str, *, token: str) -> CredentialBindingResult:
+141:         """Reconcile one retained binding intent without resolver-side mutation."""
+142:         return self._binding_mutation(
+143:             "recover",
+144:             observer,
+145:             token,
+146:             lambda: _MappedCredentialProvider.recover_binding(self, observer, token=token),
+147:         )
+148: 
+149:     def bind_existing_ref(
+150:         self,
+151:         observer: str,
+152:         key_ref: str,
+153:         expected_public_key: str,
+154:         *,
+155:         token: str,
+156:     ) -> CredentialBindingResult:
+157:         """Publish one explicit binding to already managed public material."""
+158:         self._binding_input(key_ref, "key_ref")
+159:         self._binding_input(expected_public_key, "expected_public_key")
+160:         return self._binding_mutation(
+161:             "bind-existing-ref",
+162:             observer,
+163:             token,
+164:             lambda: _MappedCredentialProvider.bind_existing_ref(
+165:                 self,
+166:                 observer, key_ref, expected_public_key, token=token
+167:             ),
+168:             key_ref=key_ref,
+169:         )
+170: 
+171:     def import_legacy(
+172:         self, vertex_path: Path | str, observer: str, *, token: str
+173:     ) -> CredentialBindingResult:
+174:         """Import one explicitly selected legacy key through custody validation."""
+175:         if not isinstance(vertex_path, (str, Path)):
+176:             raise SdkValueError("vertex_path must be a path string or Path")
+177:         return self._binding_mutation(
+178:             "import-legacy",
+179:             observer,
+180:             token,
+181:             lambda: _MappedCredentialProvider.import_legacy(
+182:                 self, vertex_path, observer, token=token
+183:             ),
+184:         )
+185: 
+186:     def _binding_mutation(
+187:         self,
+188:         operation: str,
+189:         observer: str,
+190:         token: str,
+191:         invoke,
+192:         *,
+193:         key_ref: str | None = None,
+194:     ) -> CredentialBindingResult:
+195:         """Translate custody mutation evidence without weakening its protocol."""
+196:         from custody.binding import (
+197:             BindingConflict,
+198:             BindingCreationResult,
+199:             BindingMutationIncomplete,
+200:             BindingRecoveryRequired,
+201:         )
+202: 
+203:         self._binding_input(observer, "observer")
+204:         self._binding_input(token, "token")
+205:         if key_ref is not None:
+206:             self._binding_input(key_ref, "key_ref")
+207:         try:
+208:             raw = invoke()
+209:         except BindingMutationIncomplete as exc:
+210:             raise CredentialBindingIncomplete(
+211:                 str(exc),
+212:                 operation=operation,
+213:                 namespace=exc.namespace,
+214:                 observer=exc.observer,
+215:                 token=exc.token,
+216:                 key_ref=exc.key_ref,
+217:                 phase=exc.phase,
+218:                 source_type=type(exc).__name__,
+219:             ) from exc
+220:         except BindingConflict as exc:
+221:             raise CredentialBindingConflict(
+222:                 str(exc),
+223:                 operation=operation,
+224:                 namespace=self.namespace,
+225:                 observer=observer,
+226:                 token=token,
+227:                 key_ref=key_ref,
+228:             ) from exc
+229:         except BindingRecoveryRequired as exc:
+230:             raise CredentialBindingRecoveryRequired(
+231:                 str(exc),
+232:                 operation=operation,
+233:                 namespace=self.namespace,
+234:                 observer=observer,
+235:                 token=token,
+236:                 key_ref=key_ref,
+237:             ) from exc
+238:         except (OSError, ValueError, TypeError) as exc:
+239:             # Once custody enters its implementation, a raw failure does not
+240:             # prove that no durable binding artifact exists.  The caller keeps
+241:             # its exact request evidence and reconciles rather than retrying.
+242:             raise CredentialBindingIncomplete(
+243:                 "mapped binding mutation outcome is incomplete or unknown",
+244:                 operation=operation,
+245:                 namespace=self.namespace,
+246:                 observer=observer,
+247:                 token=token,
+248:                 key_ref=key_ref,
+249:                 phase="unknown",
+250:                 source_type=type(exc).__name__,
+251:             ) from exc
+252:         if not isinstance(raw, BindingCreationResult):
+253:             raise CredentialBindingIncomplete(
+254:                 "mapped binding mutation returned invalid custody evidence",
+255:                 operation=operation,
+256:                 namespace=self.namespace,
+257:                 observer=observer,
+258:                 token=token,
+259:                 key_ref=key_ref,
+260:                 phase="unknown",
+261:                 source_type=type(raw).__name__,
+262:             )
+263:         return CredentialBindingResult(
+264:             operation=operation,
+265:             namespace=raw.namespace,
+266:             observer=raw.observer,
+267:             key_ref=raw.key_ref,
+268:             public_key=raw.public_key,
+269:             provenance=raw.provenance,
+270:             token=raw.token,
+271:             binding_created=raw.binding_created,
+272:             key_created=raw.key_created,
+273:         )
+274: 
+275:     @staticmethod
+276:     def _binding_input(value: object, field: str) -> None:
+277:         if not isinstance(value, str) or not value:
+278:             raise SdkValueError(f"{field} must be a non-empty string")
+279: 
+280: 
+281: def _mapped_credentials(
+282:     value: CredentialProvider | WriteCredentials | None, *, vertex: Path | None = None
+283: ) -> bool:
+284:     """Mapped credentials cannot silently route through legacy store writers."""
+285:     if value is None:
+286:         return False
+287:     if bool(getattr(value, "mapped", False)):
+288:         return True
+289:     if isinstance(value, WriteCredentials):
+
+===== libs/sdk/src/sdk/types.py lines 1-225 (excerpt; full source hashed) =====
+1: """SDK types, models, and exceptions for the Loops composition library."""
+2: 
+3: from __future__ import annotations
+4: 
+5: import json
+6: import math
+7: from collections.abc import Mapping, Sequence
+8: from dataclasses import asdict, dataclass, field, fields
+9: from datetime import UTC, datetime
+10: from typing import Any
+11: 
+12: from engine.arrival_contract import Commit, Continuation, Head, ReadBasis, StoreDescriptor
+13: 
+14: 
+15: def _as_serializable(value: Any) -> Any:
+16:     """Turn nested aggregate evidence values into JSON-shaped SDK output."""
+17:     if hasattr(value, "__dataclass_fields__"):
+18:         return _as_serializable(asdict(value))
+19:     if isinstance(value, Mapping):
+20:         return {str(key): _as_serializable(item) for key, item in value.items()}
+21:     if isinstance(value, (list, tuple)):
+22:         return [_as_serializable(item) for item in value]
+23:     return value
+24: 
+25: # ---------------------------------------------------------------------------
+26: # Exceptions
+27: # ---------------------------------------------------------------------------
+28: 
+29: 
+30: class SdkError(Exception):
+31:     """Base exception for all high-level SDK operations."""
+32: 
+33: 
+34: class TargetError(SdkError):
+35:     """Target resolution or probe error."""
+36: 
+37: 
+38: class TargetNotFound(TargetError):
+39:     """The requested target path does not exist."""
+40: 
+41: 
+42: class TargetUnsupported(TargetError):
+43:     """The target exists but is not a recognized loops artifact."""
+44: 
+45: 
+46: class TargetNotWritable(TargetError):
+47:     """The target or its store is not writable for the requested operation."""
+48: 
+49: 
+50: class AdmissionFailed(SdkError):
+51:     """Declared admission policy rejected the operation."""
+52: 
+53:     def __init__(
+54:         self,
+55:         message: str,
+56:         *,
+57:         observer: str | None = None,
+58:         kind: str | None = None,
+59:         vertex: str | None = None,
+60:     ) -> None:
+61:         super().__init__(message)
+62:         self.observer = observer
+63:         self.kind = kind
+64:         self.vertex = vertex
+65: 
+66: 
+67: class EmissionFailed(SdkError):
+68:     """Fact emission failed before committing to the store."""
+69: 
+70: 
+71: class SdkValueError(SdkError, ValueError):
+72:     """Invalid input parameter or missing required argument for an SDK operation."""
+73: 
+74: 
+75: class CredentialBindingError(SdkError):
+76:     """A public outcome of an explicit mapped-credential lifecycle mutation."""
+77: 
+78:     outcome = "refused"
+79:     recovery_action = "reconcile"
+80: 
+81:     def __init__(
+82:         self,
+83:         message: str,
+84:         *,
+85:         operation: str,
+86:         namespace: str,
+87:         observer: str,
+88:         token: str,
+89:         key_ref: str | None = None,
+90:         phase: str | None = None,
+91:         source_type: str | None = None,
+92:     ) -> None:
+93:         super().__init__(message)
+94:         self.operation = operation
+95:         self.namespace = namespace
+96:         self.observer = observer
+97:         self.token = token
+98:         self.key_ref = key_ref
+99:         self.phase = phase
+100:         self.source_type = source_type
+101: 
+102:     def as_dict(self) -> dict[str, Any]:
+103:         result: dict[str, Any] = {
+104:             "schema": "loops.sdk/error/v1",
+105:             "type": type(self).__name__,
+106:             "message": str(self),
+107:             "outcome": self.outcome,
+108:             "operation": self.operation,
+109:             "namespace": self.namespace,
+110:             "observer": self.observer,
+111:             "token": self.token,
+112:             "recovery_action": self.recovery_action,
+113:         }
+114:         if self.key_ref is not None:
+115:             result["key_ref"] = self.key_ref
+116:         if self.phase is not None:
+117:             result["phase"] = self.phase
+118:         if self.source_type is not None:
+119:             result["source_type"] = self.source_type
+120:         return result
+121: 
+122: 
+123: class CredentialBindingConflict(CredentialBindingError):
+124:     """A requested binding mutation contradicts durable binding evidence."""
+125: 
+126: 
+127: class CredentialBindingRecoveryRequired(CredentialBindingError):
+128:     """A lifecycle request needs explicit reconciliation of retained evidence."""
+129: 
+130: 
+131: class CredentialBindingIncomplete(CredentialBindingError):
+132:     """A binding mutation may have durable effects and must be reconciled."""
+133: 
+134:     outcome = "incomplete"
+135: 
+136: 
+137: class InvalidEmissionRequest(SdkValueError, EmissionFailed):
+138:     """Invalid parameters supplied for fact emission (e.g. missing observer)."""
+139: 
+140: 
+141: class LegacyBatchPartialFailure(EmissionFailed):
+142:     """A sequential legacy batch failed after storing an observable prefix."""
+143: 
+144:     outcome = "legacy-partial"
+145: 
+146:     def __init__(
+147:         self,
+148:         message: str,
+149:         *,
+150:         failed_index: int,
+151:         items: list[EmitReceipt],
+152:         cause: BaseException,
+153:         committed_fact_id: str | None = None,
+154:     ) -> None:
+155:         super().__init__(message)
+156:         self.failed_index = failed_index
+157:         self.items = tuple(items)
+158:         self.cause = cause
+159:         self.committed_fact_id = committed_fact_id
+160: 
+161:     def as_dict(self) -> dict[str, Any]:
+162:         return {
+163:             "schema": "loops.sdk/error/v1",
+164:             "type": type(self).__name__,
+165:             "message": str(self),
+166:             "outcome": self.outcome,
+167:             "failed_index": self.failed_index,
+168:             "items": [item.as_dict() for item in self.items],
+169:             "committed_fact_id": self.committed_fact_id,
+170:             "cause_type": type(self.cause).__name__,
+171:         }
+172: 
+173: 
+174: class CommittedEmissionError(EmissionFailed):
+175:     """The fact was successfully committed to the canonical store, but a
+176:     compound post-commit operation (e.g. tick computation or index sync) failed.
+177: 
+178:     The fact ID is preserved so callers know not to blindly retry.
+179:     """
+180: 
+181:     def __init__(self, message: str, *, fact_id: str) -> None:
+182:         super().__init__(message)
+183:         self.fact_id = fact_id
+184: 
+185: 
+186: class CeremonyFailed(SdkError):
+187:     """Declaration update ceremony failed."""
+188: 
+189: 
+190: # ---------------------------------------------------------------------------
+191: # Result Models
+192: # ---------------------------------------------------------------------------
+193: 
+194: 
+195: @dataclass(frozen=True)
+196: class CredentialBindingResult:
+197:     """Serializable outcome of one explicit mapped-credential mutation.
+198: 
+199:     ``key_ref`` is an opaque provider reference and ``public_key`` is public
+200:     verification material.  Private key bytes and provider filesystem paths
+201:     are intentionally absent.
+202:     """
+203: 
+204:     operation: str
+205:     namespace: str
+206:     observer: str
+207:     key_ref: str
+208:     public_key: str
+209:     provenance: str
+210:     token: str
+211:     binding_created: bool
+212:     key_created: bool
+213:     schema: str = "loops.sdk/credential-binding/v1"
+214: 
+215:     def as_dict(self) -> dict[str, Any]:
+216:         return asdict(self)
+217: 
+218: 
+219: @dataclass(frozen=True)
+220: class StoreDescriptorInfo:
+221:     """Serializable store identity for descriptor-first SDK operations."""
+222: 
+223:     backend: str
+224:     location: str
+225:     lineage: str | None = None
+
+===== apps/loops-min/src/loops_min/main.py lines 170-318 (excerpt; full source hashed) =====
+170:     mapped_credentials(batch)
+171: 
+172:     declaration = target_command("declaration", "apply one Arrival declaration edit")
+173:     declaration.add_argument("--proposed-file", required=True)
+174:     declaration.add_argument("--observer", required=True)
+175:     mapped_credentials(declaration)
+176: 
+177:     recovery = commands.add_parser(
+178:         "declaration-recover",
+179:         help="recover one interrupted Arrival declaration edit intent",
+180:     )
+181:     recovery.add_argument("intent")
+182:     recovery.add_argument(
+183:         "--pretty", action="store_true", default=argparse.SUPPRESS, help=argparse.SUPPRESS
+184:     )
+185: 
+186:     target_command(
+187:         "init-recover",
+188:         "recover one interrupted Arrival initialization intent",
+189:     )
+190: 
+191:     def binding_command(name: str, help_text: str) -> argparse.ArgumentParser:
+192:         sub = commands.add_parser(name, help=help_text)
+193:         sub.add_argument("root")
+194:         sub.add_argument("--namespace", required=True)
+195:         sub.add_argument("--observer", required=True)
+196:         sub.add_argument("--token", required=True)
+197:         sub.add_argument(
+198:             "--pretty", action="store_true", default=argparse.SUPPRESS,
+199:             help=argparse.SUPPRESS,
+200:         )
+201:         return sub
+202: 
+203:     binding_command("credential-create", "create one explicit mapped credential binding")
+204:     binding_command("credential-recover", "recover one mapped credential binding intent")
+205:     existing = binding_command(
+206:         "credential-bind-existing-ref",
+207:         "bind an observer to an existing managed key reference",
+208:     )
+209:     existing.add_argument("--key-ref", required=True)
+210:     existing.add_argument("--expected-public-key", required=True)
+211:     legacy_import = binding_command(
+212:         "credential-import-legacy",
+213:         "import one explicitly selected legacy credential",
+214:     )
+215:     legacy_import.add_argument("--vertex", required=True)
+216: 
+217:     # These names are reserved for the Arrival SDK contracts that are still
+218:     # being implemented. Keeping them in help makes the process boundary
+219:     # discoverable without routing them through legacy writer code.
+220:     for name, help_text in (
+221:         ("replicate", "replicate an exact prefix (SDK operation pending)"),
+222:         ("admit", "admit records into an authority (SDK operation pending)"),
+223:     ):
+224:         target_command(name, help_text)
+225: 
+226:     return parser
+227: 
+228: 
+229: def _as_dict(result: Any) -> dict[str, Any]:
+230:     method = getattr(result, "as_dict", None)
+231:     if not callable(method):
+232:         raise TypeError(f"SDK result {type(result).__name__} has no as_dict()")
+233:     value = method()
+234:     if not isinstance(value, dict):
+235:         raise TypeError(f"SDK result {type(result).__name__} did not serialize to an object")
+236:     return value
+237: 
+238: 
+239: def _json_argument(raw: str, *, name: str, shape: type) -> Any:
+240:     def object_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+241:         value: dict[str, Any] = {}
+242:         for key, item in pairs:
+243:             if key in value:
+244:                 raise UsageError(f"{name} contains duplicate key {key!r}")
+245:             value[key] = item
+246:         return value
+247: 
+248:     def nonfinite(value: str) -> None:
+249:         raise UsageError(f"{name} contains non-finite number {value!r}")
+250: 
+251:     try:
+252:         value = json.loads(raw, object_pairs_hook=object_pairs, parse_constant=nonfinite)
+253:         # JSON exponent overflow (for example 1e999) is not passed through
+254:         # parse_constant, so validate the decoded transport once more.
+255:         json.dumps(value, allow_nan=False)
+256:     except UsageError:
+257:         raise
+258:     except (TypeError, ValueError) as exc:
+259:         raise UsageError(f"{name} is not valid finite JSON: {exc}") from exc
+260:     if not isinstance(value, shape):
+261:         expected = "object" if shape is dict else "array"
+262:         raise UsageError(f"{name} must be a JSON {expected}")
+263:     return value
+264: 
+265: 
+266: def _credentials(args: argparse.Namespace) -> MappedCredentialProvider:
+267:     return MappedCredentialProvider(
+268:         args.credential_root,
+269:         namespace=args.credential_namespace,
+270:         receipt_observer=args.receipt_observer,
+271:     )
+272: 
+273: 
+274: def _binding_provider(args: argparse.Namespace) -> MappedCredentialProvider:
+275:     return MappedCredentialProvider(args.root, namespace=args.namespace)
+276: 
+277: 
+278: def _require_arrival_target(target: str) -> None:
+279:     # This is an SDK classification gate, not a second CLI target resolver.
+280:     # The writer repeats descriptor resolution under its own captured contract.
+281:     resolve_arrival_target(target)
+282: 
+283: 
+284: def _dispatch(args: argparse.Namespace) -> dict[str, Any]:
+285:     command = args.command
+286:     if command == "init-recover":
+287:         return _as_dict(
+288:             init_vertex(args.target, store_type="arrival", recover=True)
+289:         )
+290:     if command == "credential-create":
+291:         return _as_dict(
+292:             _binding_provider(args).create_binding(args.observer, token=args.token)
+293:         )
+294:     if command == "credential-recover":
+295:         return _as_dict(
+296:             _binding_provider(args).recover_binding(args.observer, token=args.token)
+297:         )
+298:     if command == "credential-bind-existing-ref":
+299:         return _as_dict(
+300:             _binding_provider(args).bind_existing_ref(
+301:                 args.observer,
+302:                 args.key_ref,
+303:                 args.expected_public_key,
+304:                 token=args.token,
+305:             )
+306:         )
+307:     if command == "credential-import-legacy":
+308:         return _as_dict(
+309:             _binding_provider(args).import_legacy(
+310:                 args.vertex, args.observer, token=args.token
+311:             )
+312:         )
+313:     if command == "init":
+314:         return _as_dict(
+315:             init_vertex(
+316:                 args.target,
+317:                 name=args.name,
+318:                 store_type="arrival",
+
+===== apps/loops-min/src/loops_min/main.py lines 423-526 (excerpt; full source hashed) =====
+423:             details[name] = value
+424:     return details
+425: 
+426: 
+427: def _exit_code(exc: BaseException) -> int:
+428:     if isinstance(exc, UsageError):
+429:         return EXIT_USAGE
+430:     if isinstance(exc, UnavailableOperation):
+431:         return EXIT_UNSUPPORTED
+432:     if isinstance(exc, (SdkValueError, argparse.ArgumentError)):
+433:         return EXIT_USAGE
+434:     if isinstance(exc, (AdmissionFailed, CeremonyFailed)):
+435:         return EXIT_ADMISSION
+436:     if isinstance(exc, CommittedOutcome):
+437:         return EXIT_COMMITTED
+438:     if isinstance(exc, CredentialBindingIncomplete):
+439:         return EXIT_COMMITTED
+440:     if isinstance(exc, CommittedEmissionError):
+441:         return EXIT_COMMITTED
+442:     if isinstance(exc, TargetUnsupported):
+443:         return EXIT_UNSUPPORTED
+444:     if isinstance(exc, TargetError):
+445:         return EXIT_REFUSAL
+446:     if isinstance(exc, (ArrivalRefusal, ProjectionOutcomeUnknown)):
+447:         return EXIT_REFUSAL
+448:     if isinstance(exc, (EmissionFailed, SdkError)):
+449:         return EXIT_REFUSAL
+450:     return EXIT_INTERNAL
+451: 
+452: 
+453: def _write(value: dict[str, Any], *, pretty: bool) -> None:
+454:     encoded = json.dumps(
+455:         value,
+456:         allow_nan=False,
+457:         indent=2 if pretty else None,
+458:         sort_keys=True,
+459:     )
+460:     sys.stdout.write(encoded + "\n")
+461: 
+462: 
+463: def _write_error(exc: BaseException, *, command: str, pretty: bool) -> None:
+464:     """Write one safe error document, even if an exception detail is not JSON-native."""
+465:     try:
+466:         message = str(exc)
+467:     except Exception:  # noqa: BLE001 - keep the process boundary serializable
+468:         message = type(exc).__name__
+469:     fallback = {
+470:         "type": type(exc).__name__ if not isinstance(exc, UnavailableOperation) else "Unavailable",
+471:         "message": message,
+472:         "details": _error_details(exc),
+473:     }
+474:     try:
+475:         serializer = getattr(exc, "as_dict", None)
+476:         error = serializer() if callable(serializer) else fallback
+477:         if not isinstance(error, dict):
+478:             error = fallback
+479:         _write({"ok": False, "error": error}, pretty=pretty)
+480:     except (TypeError, ValueError):
+481:         _write(
+482:             {
+483:                 "ok": False,
+484:                 "error": {
+485:                     "type": "Serialization",
+486:                     "message": "the SDK error could not be serialized as JSON",
+487:                     "details": {},
+488:                 },
+489:             },
+490:             pretty=pretty,
+491:         )
+492:     print(f"loops-min {command}: {fallback['message']}", file=sys.stderr)
+493: 
+494: 
+495: def main(argv: list[str] | None = None) -> int:
+496:     parser = _parser()
+497:     try:
+498:         args = parser.parse_args(argv)
+499:     except UsageError as exc:
+500:         invocation = sys.argv[1:] if argv is None else argv
+501:         pretty = "--pretty" in invocation
+502:         _write_error(exc, command="parse", pretty=pretty)
+503:         return EXIT_USAGE
+504:     except SystemExit as exc:
+505:         # argparse has already emitted help/usage. Preserve its conventional
+506:         # status while keeping normal operation's stdout JSON-only.
+507:         return int(exc.code or 0) if not isinstance(exc.code, str) else 1
+508: 
+509:     try:
+510:         result = _dispatch(args)
+511:     except Exception as exc:  # noqa: BLE001 - serialize the process boundary failure
+512:         normalized = normalize_exception(exc)
+513:         code = _exit_code(normalized)
+514:         _write_error(normalized, command=args.command, pretty=args.pretty)
+515:         return code
+516: 
+517:     try:
+518:         _write({"ok": True, "result": result}, pretty=args.pretty)
+519:     except (TypeError, ValueError):
+520:         exc = TypeError("the SDK result could not be serialized as JSON")
+521:         _write_error(exc, command=args.command, pretty=args.pretty)
+522:         return EXIT_INTERNAL
+523:     return EXIT_OK
+524: 
+525: 
+526: if __name__ == "__main__":
+
+===== libs/custody/src/custody/binding.py lines 45-106 (excerpt; full source hashed) =====
+45:     "BindingConflict",
+46:     "BindingCreationResult",
+47:     "BindingMutationIncomplete",
+48:     "BindingRecoveryRequired",
+49:     "MappedCredentialProvider",
+50: ]
+51: 
+52: _SCHEMA = "loops.custody/binding/v1"
+53: _INTENT_SCHEMA = "loops.custody/binding-intent/v1"
+54: _KEY_REF = re.compile(r"^[0-9a-f]{32}$")
+55: 
+56: 
+57: class BindingConflict(ValueError):
+58:     """An explicit mutation conflicts with an already published binding."""
+59: 
+60: 
+61: class BindingRecoveryRequired(ValueError):
+62:     """A different durable mutation token owns this namespace/observer slot."""
+63: 
+64: 
+65: class BindingMutationIncomplete(ValueError):
+66:     """A durable binding mutation needs reconciliation rather than blind retry."""
+67: 
+68:     def __init__(
+69:         self,
+70:         *,
+71:         namespace: str,
+72:         observer: str,
+73:         token: str,
+74:         key_ref: str,
+75:         phase: str,
+76:     ) -> None:
+77:         super().__init__("mapped binding mutation outcome is incomplete or unknown")
+78:         self.namespace = namespace
+79:         self.observer = observer
+80:         self.token = token
+81:         self.key_ref = key_ref
+82:         self.phase = phase
+83: 
+84: 
+85: @dataclass(frozen=True)
+86: class BindingCreationResult:
+87:     """The durable result of an explicit local binding mutation."""
+88: 
+89:     namespace: str
+90:     observer: str
+91:     key_ref: str
+92:     public_key: str
+93:     provenance: str
+94:     token: str
+95:     binding_created: bool
+96:     key_created: bool
+97: 
+98: 
+99: def _exact(value: str, field: str) -> str:
+100:     if not isinstance(value, str) or not value:
+101:         raise ValueError(f"{field} must be a non-empty string")
+102:     return value
+103: 
+104: 
+105: def _frame(*values: str) -> bytes:
+106:     encoded = [value.encode("utf-8") for value in values]
+
+===== libs/custody/src/custody/binding.py lines 326-354 (excerpt; full source hashed) =====
+326: 
+327:     def _read_json(self, path: Path) -> dict[str, object] | None:
+328:         if not _regular(path, required=False):
+329:             return None
+330:         try:
+331:             def reject_duplicates(pairs: list[tuple[str, object]]) -> dict[str, object]:
+332:                 result: dict[str, object] = {}
+333:                 for key, value in pairs:
+334:                     if key in result:
+335:                         raise ValueError(f"duplicate field {key!r}")
+336:                     result[key] = value
+337:                 return result
+338: 
+339:             loaded = json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=reject_duplicates)
+340:         except (OSError, json.JSONDecodeError) as exc:
+341:             raise ValueError(f"malformed mapped custody record: {path}") from exc
+342:         if not isinstance(loaded, dict):
+343:             raise TypeError(f"mapped custody record is not an object: {path}")
+344:         return loaded
+345: 
+346:     def _binding_record(self, namespace: str, observer: str) -> dict[str, object] | None:
+347:         parent = self._subdir("bindings-v1", create=False)
+348:         if parent is None:
+349:             return None
+350:         record = self._read_json(parent / f"{self._slot(namespace, observer)}.json")
+351:         if record is None:
+352:             return None
+353:         expected = {
+354:             "schema": _SCHEMA,
+
+===== libs/custody/src/custody/binding.py lines 490-549 (excerpt; full source hashed) =====
+490:             "namespace": self.namespace,
+491:             "observer": observer,
+492:             "token": token,
+493:             "key_ref": key_ref,
+494:             "provenance": provenance,
+495:             "expected_public_key": expected_public_key,
+496:             "stage": "pending",
+497:         }
+498: 
+499:     def _pending_by_token(self, token: str) -> dict[str, object] | None:
+500:         """Find a durable token reservation while holding the provider lock."""
+501:         pending_dir = self._subdir("pending-v1", create=False)
+502:         if pending_dir is None:
+503:             return None
+504:         found: dict[str, object] | None = None
+505:         for path in pending_dir.iterdir():
+506:             if path.suffix != ".json":
+507:                 continue
+508:             record = self._read_json(path)
+509:             if record is None or record.get("token") != token:
+510:                 continue
+511:             namespace = record.get("namespace")
+512:             observer = record.get("observer")
+513:             if not isinstance(namespace, str) or not isinstance(observer, str):
+514:                 raise TypeError("mapped pending intent lacks exact slot identity")
+515:             expected_name = f"{self._slot(namespace, observer)}.json"
+516:             if path.name != expected_name:
+517:                 raise ValueError("mapped pending intent is stored in the wrong slot")
+518:             if found is not None:
+519:                 raise BindingConflict("mapped binding token owns multiple pending slots")
+520:             found = record
+521:         return found
+522: 
+523:     def _ensure_token_index(self, intent: dict[str, object]) -> None:
+524:         """Publish or validate the token index for an already durable intent."""
+525:         token = str(intent["token"])
+526:         intents = self._subdir("intents-v1", create=True)
+527:         assert intents is not None
+528:         path = intents / f"{_digest(token)}.json"
+529:         if _publish_no_clobber(path, _json_bytes(intent)):
+530:             return
+531:         existing = self._read_json(path)
+532:         if existing != intent:
+533:             raise BindingConflict("mapped binding token already names another intent")
+534:         _fsync_directory(intents)
+535: 
+536:     def _publish_completion(self, intent: dict[str, object]) -> None:
+537:         """Record a validated completed intent without deleting recovery evidence."""
+538:         complete = dict(intent)
+539:         complete["stage"] = "complete"
+540:         intents = self._subdir("intents-v1", create=True)
+541:         assert intents is not None
+542:         completion = intents / f"{_digest(str(intent['token']))}.complete.json"
+543:         if not _publish_no_clobber(completion, _json_bytes(complete)):
+544:             existing = self._read_json(completion)
+545:             if existing != complete:
+546:                 raise BindingConflict("mapped binding completion receipt conflicts with its intent")
+547:             _fsync_directory(intents)
+548: 
+549:     def _assert_published_intent(
+
+===== libs/custody/src/custody/binding.py lines 859-1090 (excerpt; full source hashed) =====
+859:     def _mutate(
+860:         self,
+861:         observer: str,
+862:         *,
+863:         token: str,
+864:         provenance: str,
+865:         key_ref: str | None = None,
+866:         expected_public_key: str | None = None,
+867:         source_key_dir: Path | None = None,
+868:         _locked: bool = False,
+869:     ) -> BindingCreationResult:
+870:         with (nullcontext() if _locked else self._mutation_lock()):
+871:             intent = self._intent_for(
+872:                 observer,
+873:                 token=token,
+874:                 provenance=provenance,
+875:                 key_ref=key_ref,
+876:                 expected_public_key=expected_public_key,
+877:             )
+878:             if intent.get("completed"):
+879:                 return BindingCreationResult(
+880:                     namespace=self.namespace,
+881:                     observer=observer,
+882:                     key_ref=str(intent["key_ref"]),
+883:                     public_key=str(intent["public_key"]),
+884:                     provenance=str(intent["provenance"]),
+885:                     token=token,
+886:                     binding_created=False,
+887:                     key_created=False,
+888:                 )
+889:             phase = "intent-published"
+890:             try:
+891:                 self._hook(phase, intent)
+892:                 if source_key_dir is None:
+893:                     phase = "key-published"
+894:                     pair, key_created = self._ensure_created_key(intent)
+895:                 else:
+896:                     phase = "key-published"
+897:                     pair, key_created = self._copy_key(source_key_dir, intent)
+898:                 phase = "binding-published"
+899:                 record, binding_created = self._publish_binding(intent, pair)
+900:             except BaseException as exc:
+901:                 if not isinstance(exc, Exception):
+902:                     raise
+903:                 raise BindingMutationIncomplete(
+904:                     namespace=self.namespace,
+905:                     observer=observer,
+906:                     token=token,
+907:                     key_ref=str(intent["key_ref"]),
+908:                     phase=phase,
+909:                 ) from exc
+910:             return BindingCreationResult(
+911:                 namespace=self.namespace,
+912:                 observer=observer,
+913:                 key_ref=str(record["key_ref"]),
+914:                 public_key=str(record["public_key"]),
+915:                 provenance=str(record["provenance"]),
+916:                 token=token,
+917:                 binding_created=binding_created,
+918:                 key_created=key_created,
+919:             )
+920: 
+921:     def create_binding(self, observer: str, *, token: str) -> BindingCreationResult:
+922:         """Create or recover one explicit mapped key binding."""
+923:         return self._mutate(observer, token=token, provenance="created")
+924: 
+925:     def recover_binding(self, observer: str, *, token: str) -> BindingCreationResult:
+926:         """Resume the exact token's durable binding intent without a new key."""
+927:         _exact(observer, "observer")
+928:         _exact(token, "token")
+929:         with self._mutation_lock():
+930:             intent = self._pending_for_recovery(observer, token)
+931:             phase = "intent-published"
+932:             try:
+933:                 # A published slot is authority over its candidate. Validate it
+934:                 # against the retained pending marker so a missing/moved key can
+935:                 # never be regenerated under an already-named reference.
+936:                 published = self._binding_record(self.namespace, observer)
+937:                 if published is not None:
+938:                     self._validated_binding(self.namespace, observer)
+939:                     self._assert_published_intent(
+940:                         published, intent, require_token_index=False
+941:                     )
+942:                     pending_dir = self._subdir("pending-v1", create=False)
+943:                     assert pending_dir is not None
+944:                     bindings = self._subdir("bindings-v1", create=False)
+945:                     assert bindings is not None
+946:                     _fsync_directory(pending_dir)
+947:                     _fsync_directory(bindings)
+948:                     _fsync_directory(self._key_dir(str(published["key_ref"])))
+949:                     # Restore the token index only after the material-valid
+950:                     # slot proves it is the retained intent's exact binding.
+951:                     self._ensure_token_index(intent)
+952:                     self._assert_published_intent(published, intent)
+953:                     phase = "binding-published"
+954:                     self._publish_completion(intent)
+955:                     return BindingCreationResult(
+956:                         namespace=self.namespace,
+957:                         observer=observer,
+958:                         key_ref=str(published["key_ref"]),
+959:                         public_key=str(published["public_key"]),
+960:                         provenance=str(published["provenance"]),
+961:                         token=str(intent["token"]),
+962:                         binding_created=False,
+963:                         key_created=False,
+964:                     )
+965:                 pending_dir = self._subdir("pending-v1", create=False)
+966:                 assert pending_dir is not None
+967:                 _fsync_directory(pending_dir)
+968:                 self._ensure_token_index(intent)
+969:                 provenance = str(intent["provenance"])
+970:                 if provenance == "created":
+971:                     phase = "key-published"
+972:                     pair, key_created = self._ensure_created_key(intent)
+973:                 else:
+974:                     # Import and existing-reference intents have already selected a
+975:                     # durable candidate. Recovery never reopens the legacy source
+976:                     # or creates a replacement key under the reserved reference.
+977:                     key_ref = str(intent["key_ref"])
+978:                     try:
+979:                         pair = self._load_keypair(key_ref)
+980:                     except FileNotFoundError as exc:
+981:                         if provenance == "legacy-import":
+982:                             raise BindingRecoveryRequired(
+983:                                 "legacy import candidate is absent; repeat the explicit import with this token"
+984:                             ) from exc
+985:                         raise
+986:                     expected = intent.get("expected_public_key")
+987:                     if expected is not None and pair.public_b64 != expected:
+988:                         raise BindingConflict("recovery candidate disagrees with its intent")
+989:                     key_dir = self._key_dir(key_ref)
+990:                     public = key_dir / "ed25519.pub"
+991:                     if _lstat_kind(public) is None:
+992:                         if provenance != "legacy-import":
+993:                             raise BindingRecoveryRequired(
+994:                                 "existing-reference candidate lacks durable public evidence"
+995:                             )
+996:                         _publish_no_clobber(
+997:                             public, (pair.public_b64 + "\n").encode(), mode=0o644
+998:                         )
+999:                         _fsync_directory(key_dir)
+1000:                     pair = self._load_keypair(key_ref, require_public_file=True)
+1001:                     # A legacy import can have linked both key files before a
+1002:                     # directory fsync was interrupted. Validate the retained
+1003:                     # candidate first, then retain that existing directory
+1004:                     # before publishing its binding; recovery never needs the
+1005:                     # original legacy source for this step.
+1006:                     _fsync_directory(key_dir)
+1007:                     key_created = False
+1008:                 phase = "binding-published"
+1009:                 record, binding_created = self._publish_binding(intent, pair)
+1010:                 return BindingCreationResult(
+1011:                     namespace=self.namespace,
+1012:                     observer=observer,
+1013:                     key_ref=str(record["key_ref"]),
+1014:                     public_key=str(record["public_key"]),
+1015:                     provenance=str(record["provenance"]),
+1016:                     token=token,
+1017:                     binding_created=binding_created,
+1018:                     key_created=key_created,
+1019:                 )
+1020:             except BaseException as exc:
+1021:                 if not isinstance(exc, Exception):
+1022:                     raise
+1023:                 if isinstance(
+1024:                     exc, (BindingConflict, BindingRecoveryRequired, FileNotFoundError, ValueError)
+1025:                 ):
+1026:                     raise
+1027:                 raise BindingMutationIncomplete(
+1028:                     namespace=self.namespace,
+1029:                     observer=observer,
+1030:                     token=token,
+1031:                     key_ref=str(intent["key_ref"]),
+1032:                     phase=phase,
+1033:                 ) from exc
+1034: 
+1035:     def bind_existing_ref(
+1036:         self,
+1037:         observer: str,
+1038:         key_ref: str,
+1039:         expected_public_key: str,
+1040:         *,
+1041:         token: str,
+1042:     ) -> BindingCreationResult:
+1043:         """Deliberately reuse an already managed key in this namespace slot."""
+1044:         _exact(expected_public_key, "expected_public_key")
+1045:         with self._mutation_lock():
+1046:             self._completed_key_reference(key_ref, expected_public_key)
+1047:             return self._mutate(
+1048:                 observer,
+1049:                 token=token,
+1050:                 provenance="existing-ref",
+1051:                 key_ref=key_ref,
+1052:                 expected_public_key=expected_public_key,
+1053:                 source_key_dir=self._key_dir(key_ref),
+1054:                 _locked=True,
+1055:             )
+1056: 
+1057:     def import_legacy(
+1058:         self, vertex_path: Path | str, observer: str, *, token: str
+1059:     ) -> BindingCreationResult:
+1060:         """Copy one explicitly selected legacy key after load-only validation."""
+1061:         vertex = Path(vertex_path)
+1062:         self_observer = _self_observer(vertex)
+1063:         if observer == self_observer:
+1064:             source = _self_key_dir(vertex)
+1065:         else:
+1066:             source = _observer_key_dir(keys_dir_for(vertex), observer)
+1067:         if source is None:
+1068:             raise FileNotFoundError("legacy custody key is absent")
+1069:         # Validate before publishing any intent/candidate. A bad legacy .pub is
+1070:         # evidence conflict, never something a mapped import repairs.
+1071:         pair = self._load_external_key(source)
+1072:         return self._mutate(
+1073:             observer,
+1074:             token=token,
+1075:             provenance="legacy-import",
+1076:             expected_public_key=pair.public_b64,
+1077:             source_key_dir=source,
+1078:         )
+
+===== libs/sdk/README.md lines 190-283 (excerpt; full source hashed) =====
+190: Arrival target. Prepare the binding separately from initializing the store:
+191: 
+192: ```python
+193: from pathlib import Path
+194: from sdk import MappedCredentialProvider, init_vertex, emit_fact
+195: 
+196: credentials = MappedCredentialProvider(
+197:     Path("/absolute/path/to/private-custody"),
+198:     namespace="personal",
+199:     receipt_observer="alice",  # explicit local receipt-signing selection
+200: )
+201: binding = credentials.create_binding("alice", token="bootstrap-alice-1")
+202: init_vertex(
+203:     Path("observations.vertex"), store_type="arrival", observer="alice",
+204:     credentials=credentials,
+205: )
+206: emit_fact(
+207:     Path("observations.vertex"), "item", {"value": 1},
+208:     observer="alice", credentials=credentials,
+209: )
+210: ```
+211: 
+212: The SDK lifecycle methods `create_binding`, `recover_binding`,
+213: `bind_existing_ref`, and `import_legacy` return
+214: `CredentialBindingResult` (`loops.sdk/credential-binding/v1`).  It retains the
+215: exact namespace, observer, opaque key reference, public key, provenance,
+216: token, and creation flags, and serializes with `as_dict()`; it never exposes a
+217: private key or provider filesystem path.  The result keeps the field names of
+218: the earlier custody dataclass, but its public SDK type is now
+219: `CredentialBindingResult`.  Lifecycle conflicts and recovery requirements are
+220: typed SDK errors.  An incomplete or otherwise ambiguous mutation raises
+221: `CredentialBindingIncomplete`, whose serializable namespace/observer/token,
+222: key reference when known, and phase are reconciliation evidence; it is not an
+223: Arrival `Commit` and does not prove that no binding artifact was published.
+224: Use its `recovery_action="reconcile"` guidance with the original operation
+225: rather than assuming every incomplete import can be recovered without its
+226: source. A `phase="unknown"` result has no narrower durable-effect proof; in
+227: particular, it does not establish that an intent was published.
+228: Raw custody `OSError`, `ValueError`, and `TypeError` failures are represented
+229: by that same incomplete outcome with the original request coordinates.
+230: 
+231: Mapped selection uses the exact namespace and observer, independently of the
+232: vertex filename or lineage. The engine checks author keys against verified
+233: history through captured H, for use after H, and verifies each signature in its
+234: own domain. Receipt signing uses the explicitly selected local observer and
+235: the effective declaration's current receipt-key policy; the unsigned outer tick
+236: still names the physical genesis custodian. Omitting `receipt_observer` permits
+237: unsigned ticks before the signed-tick era, and refuses a required signed tick.
+238: A missing author binding may remain unsigned where the existing policy allows;
+239: a contradictory or unauthorized binding refuses before append.
+240: 
+241: Mapped initialization only loads a pre-created binding. For another observer,
+242: prepare its binding and pass `key=binding.public_key` to `grant_observer` with
+243: the existing author's credentials. Mapped `grant_observer(key=None)` refuses
+244: before creating keys. Recovery of an existing Arrival initialization intent
+245: signs nothing and does not require private custody to remain available.
+246: Mapped providers are supported on Arrival targets; legacy writers explicitly
+247: refuse them. The default `CustodyCredentialProvider` remains unchanged.
+248: 
+249: The runnable [two-observer mapped workload](tests/test_arrival_mapped_workload.py)
+250: shows the complete public lifecycle: create Alice and Bob bindings under one
+251: persisted provider root and exact namespace; initialize with Alice; grant Bob
+252: using Bob's pre-created public key; then emit with both authors. For a locator
+253: move that keeps the same physical file-backed store, initialize with an
+254: **absolute** `location` and move only the `.vertex` file while retaining its
+255: store clause, lineage, and role. Recreate `MappedCredentialProvider` with the
+256: same provider root, namespace, and receipt observer before continuing work.
+257: The absolute store location keeps the same store residence, while
+258: mapped key selection comes only from the provider namespace and exact observer
+259: label; neither the vertex filename nor its new directory chooses a key.
+260: 
+261: After relocation, `verify_target(relocated_vertex)` provides a `Full`
+262: verification of the captured prefix's grammar, dense ordinals, lineage, and
+263: record-hash chain. It does not establish projection agreement, signature
+264: authorship, key trust, or the identity of an observer across lineages. The
+265: mapped workload exercises public writes with captured authorization; the
+266: [mapped signing tests](tests/test_arrival_mapped_credentials.py) separately
+267: verify domain-specific signatures and key-history behavior.
+268: 
+269: `import_legacy(vertex_path, observer, token=...)` explicitly copies a verified
+270: legacy key into managed storage without changing the original. It preserves
+271: flat/nested ambiguity and alias refusals. After import, locator moves do not
+272: change mapped selection. No read, preview, or signer load imports or creates a
+273: binding. `bind_existing_ref(observer, key_ref, expected_public_key, token=...)`
+274: permits deliberate reuse of a completed managed key in another namespace;
+275: equal observer labels alone never select another namespace's key.
+276: See [custody binding recovery](../custody/README.md#explicit-mapped-bindings)
+277: for interruption handling and filesystem scope.
+278: 
+279: ### Recovering an interrupted mapped declaration edit
+280: 
+281: An edit can raise `CommittedIncomplete` after its declaration records are
+282: durable but before projection synchronization or local cache publication
+283: finishes. Its public `details["intent_path"]` identifies the retained recovery

@@ -1,0 +1,1 @@
+XDG_STATE_HOME=/tmp/loops-migrate-baseline-2026-09-06/state XDG_CONFIG_HOME=/tmp/loops-migrate-baseline-2026-09-06/config LOOPS_HOME=/tmp/loops-migrate-baseline-2026-09-06/loops uv run --no-sync --package migrate pytest libs/migrate/tests -q

@@ -1,0 +1,62 @@
+{
+  "instruction": "You are Fable 5.1 LOW, independent adversarial reviewer of the C9 setup/recovery slice on arrival/finish baseline50e37595. Review only the frozen packet; no tools, no implementation. Return concrete blockers with file/line, trigger, consequence, minimal correction, separating optional observations. End ACCEPT or REVISE. Focus correctness, authority boundaries, durable recovery evidence, tests versus actual claims, and compatibility honesty.\nScope: add CLI init-recover TARGET delegating SDK init_vertex(store_type=arrival,recover=True) with no credential/observer/descriptor overrides. SDK MappedCredentialProvider overrides four existing custody mutation methods with SDK-owned public DTO and errors; create/recover/bind-existing-ref/import-legacy commands delegate one SDK call and serialize as_dict. No engine or custody semantic changes, no legacy retirement, migration, live stores or authority transfer. A binding is local credential selection, not observer authorization in a vertex and not an Arrival Commit. Read resolution/for_write and optional unsigned policy remain inherited.\nPay close attention to raw OSError/ValueError outside custody's typed mutation wrapper: SDK conservatively returns incomplete phase unknown and source_type with request coordinates, not proof a durable intent exists. Invalid argument shape checked before invocation. Do not require fake certainty about pre/postcommit. Typed conflict/recovery-required use status4 (not proof zero effects); incomplete6 no automatic retry. Recovery_action reconcile does not mean recover_binding always suffices: a legacy import missing its reserved candidate can need same-token explicit import. Wrong attempted token must not be mistaken for the token owning a pending slot. Result type changes from custody dataclass with field compatibility, exceptions normalize into SDK family; direct custody is unchanged. No private keys/callables should enter serialized output.\nInitialization recovery can finish a reserved mint, not choose a new lineage/signatures. Successful recovery unlinks intent; repeating should refuse, not create another lineage. Tests distinguish actual process termination via injected os._exit after-mint, binding hook exception through actual custody, and mocked SDK transport seams. Native suite/wheel logs are supplied evidence, not reviewer-executed tests. Installed modular-wheel test outside checkout without loops/Painted tests create/replay/recover/reuse then init/emit/declaration/read/verify; process-crash conformance is a separate test. Validate claims against actual assertions; do not infer broader power-loss/concurrency coverage. Migration sidecar role/adoption gap is recorded as next work, not silently fixed here.\n",
+  "sources": [
+    "apps/loops-min/src/loops_min/main.py",
+    "apps/loops-min/README.md",
+    "docs/scratch/arrival-break/consistency-c9-setup-2026-09-06.md",
+    "libs/sdk/tests/test_credential_lifecycle.py",
+    "apps/loops-min/tests/test_setup_cli.py",
+    "apps/loops-min/tests/test_writer_boundary.py",
+    "apps/loops-min/tests/test_binding_cli.py",
+    "docs/scratch/arrival-break/reviews/consistency-c9-setup-final-2026-09-06/validation-evidence/cli-final.txt",
+    "docs/scratch/arrival-break/reviews/consistency-c9-setup-final-2026-09-06/validation-evidence/ruff-final.txt",
+    "docs/scratch/arrival-break/reviews/consistency-c9-setup-final-2026-09-06/validation-evidence/sdk-final.txt",
+    "docs/scratch/arrival-break/reviews/consistency-c9-setup-final-2026-09-06/validation-evidence/architecture-final.txt",
+    "docs/scratch/arrival-break/reviews/consistency-c9-setup-final-2026-09-06/validation-evidence/custody-final.txt",
+    "docs/scratch/arrival-break/reviews/consistency-c9-setup-final-2026-09-06/validation-evidence/wheel-status.json",
+    "docs/scratch/arrival-break/reviews/consistency-c9-setup-final-2026-09-06/validation-evidence/sol-audit.txt"
+  ],
+  "excerpts": {
+    "libs/sdk/src/sdk/emit.py": [
+      [
+        1,
+        310
+      ]
+    ],
+    "libs/sdk/src/sdk/types.py": [
+      [
+        1,
+        230
+      ]
+    ],
+    "libs/sdk/src/sdk/declare.py": [
+      [
+        268,
+        770
+      ]
+    ],
+    "libs/custody/src/custody/binding.py": [
+      [
+        1,
+        1100
+      ]
+    ],
+    "libs/engine/src/engine/arrival_initialization.py": [
+      [
+        1,
+        140
+      ],
+      [
+        510,
+        890
+      ]
+    ],
+    "libs/sdk/README.md": [
+      [
+        190,
+        285
+      ]
+    ]
+  },
+  "patch": true
+}

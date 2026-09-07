@@ -1,0 +1,13 @@
+{
+  "command": [
+    "uv",
+    "run",
+    "--no-sync",
+    "--package",
+    "loops",
+    "pytest",
+    "apps/loops/tests/test_store_migrate.py",
+    "-q"
+  ],
+  "returncode": 0
+}

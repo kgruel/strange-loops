@@ -1,0 +1,149 @@
+"""One-shot, sequential, quota-respecting static review queue."""
+from datetime import datetime, timezone
+from pathlib import Path
+import fcntl
+import hashlib
+import json
+import os
+import subprocess
+import sys
+import time
+
+
+def now():
+    return datetime.now(timezone.utc).isoformat()
+
+
+def write_json(path, data):
+    temporary = path.with_suffix('.tmp')
+    temporary.write_text(json.dumps(data, indent=2) + '\n')
+    temporary.replace(path)
+
+
+def validate(manifest):
+    assert manifest['effort'] in ('low', 'high')
+    assert manifest['model'] == 'claude-fable-5-1[1m]'
+    assert Path(manifest['worktree']).is_dir()
+    for job in manifest['jobs']:
+        actual = hashlib.sha256(Path(job['packet']).read_bytes()).hexdigest()
+        if actual != job['sha256']:
+            raise ValueError(f"packet checksum changed: {job['name']}")
+    return datetime.fromisoformat(manifest['due_at']).timestamp()
+
+
+def verified_review_model(usage):
+    """Require substantive Fable output; allow the observed tiny CLI helper.
+
+    modelUsage aggregates the main turn and internal helper calls. A Haiku
+    helper is not a replacement reviewer. Unknown models or substantive
+    non-Fable output still stop the queue for inspection.
+    """
+    primary = 0
+    auxiliary = 0
+    for model, value in usage.items():
+        canonical = value.get('canonicalModel', model)
+        output = value.get('outputTokens', 0)
+        if canonical == 'claude-fable-5-1':
+            primary += output
+        elif canonical == 'claude-haiku-4-5' and output <= 128 and not value.get('thinkingTokens', 0):
+            auxiliary += output
+        else:
+            return False
+    return primary > max(auxiliary, 0)
+
+
+def main():
+    manifest_path = Path(sys.argv[1])
+    manifest = json.loads(manifest_path.read_text())
+    due = validate(manifest)
+    if '--validate' in sys.argv:
+        print(json.dumps({'valid': True, 'jobs': len(manifest['jobs']),
+                          'due_at': manifest['due_at'], 'effort': manifest['effort']}))
+        return
+    results = Path(manifest['results'])
+    status_path = results / 'status.json'
+    # A repeated launch cannot start another queue or repeat a previous result.
+    with (results / 'runner.lock').open('a') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        state = dict(manifest)
+        if status_path.exists():
+            previous = json.loads(status_path.read_text())
+            if '--resume-pending' in sys.argv:
+                if previous.get('status') != 'stopped':
+                    raise RuntimeError('resume requires a stopped queue')
+                if any(j['status'] not in ('pending', 'reviewed-awaiting-triage') for j in previous['jobs']):
+                    raise RuntimeError('reconcile ambiguous results before resuming')
+                state = previous
+                state['effort'] = manifest['effort']
+                state['resumed_at'] = now()
+                state.pop('stop_reason', None)
+            elif previous.get('status') != 'scheduled':
+                raise RuntimeError('queue already entered; review status before any manual retry')
+        state.update(status='scheduled', pid=os.getpid(), updated_at=now())
+        write_json(status_path, state)
+        while time.time() < due:
+            time.sleep(min(30, due - time.time()))
+        state.update(status='running', started_at=now())
+        write_json(status_path, state)
+        for job in state['jobs']:
+            if job['status'] == 'reviewed-awaiting-triage':
+                continue
+            job.update(status='running', started_at=now(), effort=state['effort'])
+            job['source_drift'] = [
+                source for source, digest in job['sources'].items()
+                if not (Path(state['worktree']) / source).exists()
+                or hashlib.sha256((Path(state['worktree']) / source).read_bytes()).hexdigest() != digest
+            ]
+            state['current'] = job['name']
+            write_json(status_path, state)
+            output = results / f"{job['name']}-result.json"
+            errors = results / f"{job['name']}-stderr.txt"
+            command = [
+                '/Users/kaygee/.local/bin/claude', '-p', '--safe-mode',
+                '--model', state['model'], '--effort', state['effort'],
+                '--no-session-persistence', '--tools', '', '--output-format', 'json',
+            ]
+            job['command'] = command
+            try:
+                with Path(job['packet']).open('rb') as prompt, output.open('xb') as out, errors.open('xb') as err:
+                    process = subprocess.run(command, stdin=prompt, stdout=out, stderr=err,
+                                             cwd=state['worktree'], timeout=1200, check=False)
+                job['returncode'] = process.returncode
+                response = json.loads(output.read_text())
+                text = response.get('result', '')
+                job['model_usage'] = response.get('modelUsage', {})
+                job['response_subtype'] = response.get('subtype')
+                quota = any(token in str(text).lower() for token in (
+                    "you've hit your limit", "you've hit your session limit", 'rate_limit_error', 'rate limit reached',
+                    'usage limit', 'quota exceeded', 'credit balance is too low',
+                ))
+                if quota:
+                    job['status'] = 'quota-blocked'
+                elif process.returncode or response.get('is_error') or not str(text).strip():
+                    job['status'] = 'failed'
+                elif not verified_review_model(job['model_usage']):
+                    job['status'] = 'model-unverified'
+                else:
+                    job['status'] = 'reviewed-awaiting-triage'
+                    (results / f"{job['name']}-findings.md").write_text(
+                        f"# {job['name']} — Fable review\n\n"
+                        f"Effort: {job['effort']}. Finished: {now()}.\n"
+                        f"Packet SHA-256: `{job['sha256']}`.\n\n"
+                        "Static reviewer output; findings still require primary triage.\n\n" + text + '\n'
+                    )
+            except Exception as exc:
+                job.update(status='failed', error=f'{type(exc).__name__}: {exc}')
+            job['finished_at'] = now()
+            state['updated_at'] = now()
+            if job['status'] != 'reviewed-awaiting-triage':
+                state.update(status='stopped', stop_reason=job['status'])
+                write_json(status_path, state)
+                return
+            write_json(status_path, state)
+        state.update(status='reviews-finished-awaiting-triage', finished_at=now())
+        state.pop('current', None)
+        write_json(status_path, state)
+
+
+if __name__ == '__main__':
+    main()

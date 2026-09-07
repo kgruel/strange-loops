@@ -1,0 +1,11 @@
+--- reviewed/sdk/emit.py
++++ corrected/sdk/emit.py
+@@ -235,7 +235,7 @@
+                 token=token,
+                 key_ref=key_ref,
+             ) from exc
+-        except (OSError, ValueError) as exc:
++        except (OSError, ValueError, TypeError) as exc:
+             # Once custody enters its implementation, a raw failure does not
+             # prove that no durable binding artifact exists.  The caller keeps
+             # its exact request evidence and reconciles rather than retrying.

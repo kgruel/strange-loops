@@ -1,0 +1,12 @@
+import importlib
+from pathlib import Path
+import pytest
+import sdk
+module = importlib.import_module("sdk.emit")
+source = Path(module.__file__).read_text()
+corrected = "except (OSError, ValueError, TypeError) as exc:"
+assert source.count(corrected) == 1
+source = source.replace(corrected, "except (OSError, ValueError) as exc:")
+exec(compile(source, str(module.__file__), "exec"), module.__dict__)
+sdk.MappedCredentialProvider = module.MappedCredentialProvider
+raise SystemExit(pytest.main(["libs/sdk/tests/test_credential_lifecycle.py", "-q", "-k", "post_marker or corrupt_pending_or_intent"]))

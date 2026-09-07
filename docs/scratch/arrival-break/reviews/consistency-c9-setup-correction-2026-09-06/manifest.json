@@ -1,0 +1,34 @@
+{
+  "model": "claude-fable-5-1[1m]",
+  "effort": "low",
+  "worktree": "/Users/kaygee/Code/loops-wt/arrival-finish",
+  "results": "/Users/kaygee/Code/loops-wt/arrival-finish/docs/scratch/arrival-break/reviews/consistency-c9-setup-correction-2026-09-06",
+  "due_at": "2026-09-07T03:32:32.846279+00:00",
+  "baseline": "50e37595",
+  "scope": "C9 initialization recovery and credential lifecycle correction",
+  "jobs": [
+    {
+      "name": "correction",
+      "packet": "/Users/kaygee/Code/loops-wt/arrival-finish/docs/scratch/arrival-break/reviews/consistency-c9-setup-correction-2026-09-06/correction-prompt.txt",
+      "sha256": "bf12dc18a4508b6db1a34f5fc65197cf4a79780219aa781aabb4865795b82d5d",
+      "sources": {
+        "docs/scratch/arrival-break/reviews/consistency-c9-setup-final-2026-09-06/final-findings.md": "3f25de33e3908053be1a72bf22e1c91ee27c5e544da3229b796a444c88c22508",
+        "docs/scratch/arrival-break/consistency-c9-setup-2026-09-06.md": "3a363f908f2425cce7b75eaa62f2798f5f415805893070f9c7decd6ffecbf2e2",
+        "libs/sdk/tests/test_credential_lifecycle.py": "2531ec52e83c927aab19fe9792ca6b60496e088c9304a5c449fb9a24f6dc0fa6",
+        "apps/loops-min/tests/test_binding_cli.py": "a6561ce084b223c2343cfa54ef9293bfb932784344e102bb5aae82e8a97c0d31",
+        "apps/loops-min/README.md": "4fee732021255929c05adfe593c6e408d6a641af7899f75a5ad63792b203f38d",
+        "docs/scratch/arrival-break/reviews/consistency-c9-setup-correction-2026-09-06/validation-evidence/sdk.txt": "9e27fcd5233419eeea8422e5fc3f90db64d7a617b646a4a9ce51935fce71e9a4",
+        "docs/scratch/arrival-break/reviews/consistency-c9-setup-correction-2026-09-06/validation-evidence/cli.txt": "45e84b52e24e10d4596ac56cd6c716af39c244ea9387cbcbac5307f82854633d",
+        "docs/scratch/arrival-break/reviews/consistency-c9-setup-correction-2026-09-06/validation-evidence/ruff.txt": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18",
+        "docs/scratch/arrival-break/reviews/consistency-c9-setup-correction-2026-09-06/validation-evidence/wheel-status.json": "fa3ae9bf3f99441aff977146d40d5f86caeabc4b9b3792f8215e5b030cfd5ea3",
+        "docs/scratch/arrival-break/reviews/consistency-c9-setup-correction-2026-09-06/validation-evidence/typeerror-negative-control.py.txt": "9969801c4edbbb03c46c0a8554a84a79fe9f1cf4582b1940d2b4a91309626caf",
+        "libs/sdk/src/sdk/emit.py": "78bc1ccc27226e26e6ad0c0370c4cfe78388491b07c1a9d4af17ad28450d56f9",
+        "libs/sdk/src/sdk/types.py": "75bbc6eab3ca5cf03b2fa712f14170035d87b8cf58bd19b936e01548281fc9f7",
+        "apps/loops-min/src/loops_min/main.py": "fd6919ab21f61285c7e4f81d823d812bddad06b772f9215ea61b2254a71c8e62",
+        "libs/custody/src/custody/binding.py": "c2ce270edd3ab24d9e1b375d89ac4668c2200bc5c90e289bd4c84eedaef0752b",
+        "libs/sdk/README.md": "18646771651a05cbcda9ba1f56d8e100f197763111e1286df1b3ace58a935b1b"
+      },
+      "status": "pending"
+    }
+  ]
+}

@@ -209,6 +209,25 @@ emit_fact(
 )
 ```
 
+The SDK lifecycle methods `create_binding`, `recover_binding`,
+`bind_existing_ref`, and `import_legacy` return
+`CredentialBindingResult` (`loops.sdk/credential-binding/v1`).  It retains the
+exact namespace, observer, opaque key reference, public key, provenance,
+token, and creation flags, and serializes with `as_dict()`; it never exposes a
+private key or provider filesystem path.  The result keeps the field names of
+the earlier custody dataclass, but its public SDK type is now
+`CredentialBindingResult`.  Lifecycle conflicts and recovery requirements are
+typed SDK errors.  An incomplete or otherwise ambiguous mutation raises
+`CredentialBindingIncomplete`, whose serializable namespace/observer/token,
+key reference when known, and phase are reconciliation evidence; it is not an
+Arrival `Commit` and does not prove that no binding artifact was published.
+Use its `recovery_action="reconcile"` guidance with the original operation
+rather than assuming every incomplete import can be recovered without its
+source. A `phase="unknown"` result has no narrower durable-effect proof; in
+particular, it does not establish that an intent was published.
+Raw custody `OSError`, `ValueError`, and `TypeError` failures are represented
+by that same incomplete outcome with the original request coordinates.
+
 Mapped selection uses the exact namespace and observer, independently of the
 vertex filename or lineage. The engine checks author keys against verified
 history through captured H, for use after H, and verifies each signature in its

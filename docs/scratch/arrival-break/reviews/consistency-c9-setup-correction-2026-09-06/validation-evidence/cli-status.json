@@ -1,0 +1,13 @@
+{
+  "command": [
+    "uv",
+    "run",
+    "--no-sync",
+    "--package",
+    "loops-min",
+    "pytest",
+    "apps/loops-min/tests",
+    "-q"
+  ],
+  "returncode": 0
+}

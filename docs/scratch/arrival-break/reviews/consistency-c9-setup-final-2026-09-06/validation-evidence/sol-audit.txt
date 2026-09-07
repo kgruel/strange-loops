@@ -1,0 +1,20 @@
+SDK lifecycle audit: no blocker found.
+
+MappedCredentialProvider overrides only create_binding, recover_binding,
+bind_existing_ref, and import_legacy. Inherited resolve/for_write remain
+read-only and unchanged. Public inputs validate before custody invocation;
+process-control BaseException identities escape. Ordinary custody failures are
+chained into JSON-safe SDK outcomes. Same-token create replay retains the key
+and returns binding_created/key_created false. A wrong token for an occupied
+pending slot becomes CredentialBindingRecoveryRequired with the requested
+identity; cross-slot token reuse becomes CredentialBindingConflict.
+CredentialBindingIncomplete retains operation, namespace, observer, token,
+optional key_ref, phase, and source_type without inventing an Arrival Commit.
+CredentialBindingResult omits provider root and private key material.
+
+Conflict and RecoveryRequired do not repeat the underlying custody class in the
+optional source_type field. Their dedicated public type and chained cause retain
+the category, so this is a diagnostic limit rather than a correctness defect.
+Missing legacy source and unknown existing key reference are intentionally
+reported conservatively as incomplete/unknown; the SDK does not infer zero
+effects after entering the provider call.

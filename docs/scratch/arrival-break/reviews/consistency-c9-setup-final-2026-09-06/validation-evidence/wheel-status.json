@@ -1,0 +1,30 @@
+{
+  "status": "passed",
+  "scope": "Installed console binding create/replay/recover/reuse -> init -> emit -> declaration -> read -> verify; no legacy CLI or Painted; initialization interruption is a separate source test",
+  "source_checks": [
+    {
+      "source": "apps/loops-min/src/loops_min/main.py",
+      "worktree_sha256": "fd6919ab21f61285c7e4f81d823d812bddad06b772f9215ea61b2254a71c8e62",
+      "installed_sha256": "fd6919ab21f61285c7e4f81d823d812bddad06b772f9215ea61b2254a71c8e62",
+      "matched": true
+    },
+    {
+      "source": "libs/sdk/src/sdk/emit.py",
+      "worktree_sha256": "bbc7c7b3879fae2f3eb6e8ad1a2cc8e17c51695eb82be75030a2ee1aa30ea981",
+      "installed_sha256": "bbc7c7b3879fae2f3eb6e8ad1a2cc8e17c51695eb82be75030a2ee1aa30ea981",
+      "matched": true
+    },
+    {
+      "source": "libs/sdk/src/sdk/types.py",
+      "worktree_sha256": "75bbc6eab3ca5cf03b2fa712f14170035d87b8cf58bd19b936e01548281fc9f7",
+      "installed_sha256": "75bbc6eab3ca5cf03b2fa712f14170035d87b8cf58bd19b936e01548281fc9f7",
+      "matched": true
+    },
+    {
+      "source": "libs/sdk/src/sdk/__init__.py",
+      "worktree_sha256": "fe5ed14249d8eaf2d8345a3a588d3c5565755dfddc3bc4fb3bb19d922ada2691",
+      "installed_sha256": "fe5ed14249d8eaf2d8345a3a588d3c5565755dfddc3bc4fb3bb19d922ada2691",
+      "matched": true
+    }
+  ]
+}

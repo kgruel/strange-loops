@@ -1,3 +1,131 @@
+## September 7: checkpoint setup/recovery and migration publication
+
+This checkpoint includes both accepted slices below: SDK-owned credential
+lifecycle outcomes/minimal-CLI setup and recovery, and explicit migration
+descriptor publication with its reviewed adoption design. Production/test hashes
+still match their accepted review packets; no tests were repeated for this
+checkpoint-only change. Nothing pushed.
+
+The next user-directed task is a focused, tested greenfield loops-min how-to for
+`~/Code/gruel.network/docs/atlas`. Fresh initialization already establishes the
+declaration anchor; existing-store adoption remains the next implementation
+slice after that documentation exercise. Preserve the existing atlas/homelab
+stores while exercising a separate fresh store.
+
+Earlier entries below preserve their status at the time of writing.
+
+## September 6: C9 migration publication accepted; explicit adoption next
+
+The setup/recovery slice below remains intact and uncommitted on `arrival/finish`
+in `loops-wt/arrival-finish` at `50e37595`. This subsequent publication slice is
+also **uncommitted**; nothing pushed. Sol implemented sidecar hardening, Luna
+owned the repository integration boundary, Terra drafted/reviewed adoption
+identity decisions, and root integrated evidence, Fable-low review and triage.
+No real user store, credentials, or live writers were touched. A representative
+store has not been selected; no real-copy rehearsal has run.
+
+The old sidecar did not publish lineage/role and did not create the current
+runtime's declaration anchor. The first gap is now fixed: published descriptors
+name File + physical lineage + authority role. One exact vertex byte snapshot
+feeds transform and publication checks, including a second check immediately
+before replacement; paths are safely quoted and parsed claims verified. The
+descriptor directory is fsynced after replacement. Internal fresh/resume/report
+opens pin lineage/role and preserve typed mismatch refusals. Existing descriptors
+refuse except exact explicit already-published authority resume, which re-verifies
+and skips descriptor replacement but **regenerates/re-signs/replaces the report**.
+The exported editor now requires `lineage` and `expected_original`; the ordinary
+run_migration signature is unchanged. Previous sidecar descriptors missing claims
+are deliberately not silently upgraded.
+
+The central remaining gap is explicit declaration adoption. Physical Arrival
+mint does not provide an `_decl.genesis` fact whose ID equals the new lineage.
+Historical declaration facts stay evidence; the SDK will not substitute the
+locator as canonical meaning. Synthetic JSONL and SQLite workflows prove public
+resolution/Full verification/sync succeed, while summary/facts/ticks/lookup/
+inspection/edit/emission refuse the missing anchor without changing source,
+ledger or descriptor. The future adoption must append forward from a selected
+head using an explicitly reviewed snapshot and mapped captured-key proof;
+existing-anchor/ID/current-lineage-overlay collisions refuse. Separate FACT and
+ARRIVAL signatures and durable planned-draft recovery are required. Registry
+signatures must verify in ARRIVAL_DOMAIN; the current production legacy wrapper
+already uses that domain. See the adoption design for the finite worklist.
+
+Validation: combined migration + repository boundary **76 passed** (74 + 2),
+architecture **101**, legacy migration CLI **9**, scoped Ruff/whitespace pass.
+No SDK runtime production changed in this slice. In-process seam failures and
+seeded partial-state tests do not claim subprocess crashes. Byte checks require
+quiescent inputs and are not CAS. An error after rename can leave the descriptor
+visible; no durable multi-artifact cutover or power-loss guarantee is claimed.
+Native logs/statuses/hashes are archived without fixture stores/private keys.
+Fable 5.1 LOW and primary verdicts **ACCEPT**, no blockers. Frozen sources matched
+before minor maintained documentation clarifications; production/tests are still
+exactly the reviewed versions. No jobs or reviews remain running.
+
+Next: checkpoint both accepted uncommitted slices when requested. Then implement
+the shared declaration-anchor builder and explicit adoption preparation/intent/
+apply/recovery, followed by SDK mapped binding integration and a copy-rehearsal
+orchestrator. Do not treat current `loops store migrate` as a complete adoption
+workflow. Historical report verification through selected S, report signing
+policy/provenance, live cutover coordination, source CLI transition and legacy
+retirement remain explicit separate work.
+
+See [publication report](consistency-c9-migration-publication-2026-09-06.md),
+[adoption design](consistency-c9-migration-adoption-design-2026-09-06.md), and
+[review triage](reviews/consistency-c9-migration-publication-final-2026-09-06/primary-triage.md).
+
+Earlier entries below preserve their status at the time of writing.
+
+## September 6: C9 setup/recovery accepted; checkpoint and migration adoption next
+
+The C9 setup/recovery slice is complete on `arrival/finish` in
+`loops-wt/arrival-finish`, based on `50e37595`. Changes are **uncommitted**;
+nothing pushed. Sol implemented CLI commands and boundary tests, Terra owned SDK
+lifecycle outcomes and regressions, Luna owned process initialization conformance
+and suite validation, and root integrated process binding tests, installed wheels,
+review triage and evidence. No live stores or credentials were touched.
+
+`loops-min` now adds `init-recover TARGET` plus `credential-create`,
+`credential-recover`, `credential-bind-existing-ref`, and `credential-import-legacy`.
+Initialization recovery reads its reserved intent without credentials or scaffold
+overrides. Success removes the intent; repeated recovery refuses without mutation.
+Binding commands use exact root/namespace/observer/token via public SDK methods;
+receipt selection remains a writer concern. SDK result DTOs retain former public
+attributes but change concrete result type; dedicated lifecycle errors replace raw
+custody errors for SDK callers. Binding incomplete outcomes use CLI6 with token,
+known key_ref/phase or explicitly unknown phase, never an invented Arrival Commit.
+Conflict/recovery-required use CLI4, which is not a zero-effects guarantee.
+Inherited mapped resolution and optional unsigned policy are unchanged.
+
+Fable-low initially found one real blocker: raw custody TypeError from malformed
+JSON lost request evidence as CLI70. Terra added it to the existing narrow
+OSError/ValueError incomplete fallback. Actual malformed pending/intent records,
+post-marker TypeError recovery, and an actual CLI failure are covered. A native
+in-memory negative control restores only the old catch tuple: three TypeError
+regressions fail while OSError passes. Corrected Fable-low and primary verdicts
+are **ACCEPT**, no remaining blockers. Both review packets remain immutable and
+sources matched closure; only maintained status/handoff changed afterward.
+
+Final corrected validation: **SDK599**, **CLI30**, **architecture101**,
+**custody binding/recovery31**, focused SDK60; scoped Ruff and whitespace pass.
+The architecture/custody runs precede the narrow TypeError correction; SDK/CLI
+and installed modular wheels were rerun afterward. Installed console binding
+create/replay/recover/reuse → init → emit → declaration → read → verify passes
+outside checkout without legacy loops or Painted; four production hashes match.
+Only explicit text logs/scripts/status are archived, never fixtures or keys.
+No running tests, agents or reviews remain.
+
+Next: checkpoint this slice when requested, then reconcile migration sidecar
+publication with current descriptor adoption before rehearsing on a selected
+representative store copy. The old sidecar store-clause editor writes location/
+backend without the explicit role required by the current SDK resolver; the old
+wrapper is not yet a complete current adoption workflow. Keep original stores
+and live writers untouched during the copy rehearsal. Source execution is the
+next substantial CLI transition; deliberate legacy retirement remains open.
+No migration implementation or rehearsal started in this slice. See the
+[setup/recovery report](consistency-c9-setup-2026-09-06.md).
+
+Earlier entries below preserve their status at the time of writing.
+
 ## September 6: C9 first writer transition complete; setup/recovery next
 
 Checkpoint `f45f1f03` contains the accepted captured-transfer SDK workload.

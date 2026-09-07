@@ -1,0 +1,62 @@
+$ uv build --package atoms --wheel --out-dir /tmp/loops-c9-setup-2026-09-06/wheel-smoke-final/wheels
+Building wheel...
+Successfully built /tmp/loops-c9-setup-2026-09-06/wheel-smoke-final/wheels/atoms-0.1.0-py3-none-any.whl
+$ uv build --package sign --wheel --out-dir /tmp/loops-c9-setup-2026-09-06/wheel-smoke-final/wheels
+Building wheel...
+Successfully built /tmp/loops-c9-setup-2026-09-06/wheel-smoke-final/wheels/sign-0.1.0-py3-none-any.whl
+$ uv build --package store --wheel --out-dir /tmp/loops-c9-setup-2026-09-06/wheel-smoke-final/wheels
+Building wheel...
+Successfully built /tmp/loops-c9-setup-2026-09-06/wheel-smoke-final/wheels/store-0.1.0-py3-none-any.whl
+$ uv build --package lang --wheel --out-dir /tmp/loops-c9-setup-2026-09-06/wheel-smoke-final/wheels
+Building wheel...
+Successfully built /tmp/loops-c9-setup-2026-09-06/wheel-smoke-final/wheels/lang-0.1.0-py3-none-any.whl
+$ uv build --package engine --wheel --out-dir /tmp/loops-c9-setup-2026-09-06/wheel-smoke-final/wheels
+Building wheel...
+Successfully built /tmp/loops-c9-setup-2026-09-06/wheel-smoke-final/wheels/engine-0.1.0-py3-none-any.whl
+$ uv build --package custody --wheel --out-dir /tmp/loops-c9-setup-2026-09-06/wheel-smoke-final/wheels
+Building wheel...
+Successfully built /tmp/loops-c9-setup-2026-09-06/wheel-smoke-final/wheels/custody-0.1.0-py3-none-any.whl
+$ uv build --package sdk --wheel --out-dir /tmp/loops-c9-setup-2026-09-06/wheel-smoke-final/wheels
+Building wheel...
+Successfully built /tmp/loops-c9-setup-2026-09-06/wheel-smoke-final/wheels/sdk-0.1.0-py3-none-any.whl
+$ uv build --package loops-min --wheel --out-dir /tmp/loops-c9-setup-2026-09-06/wheel-smoke-final/wheels
+Building wheel...
+Successfully built /tmp/loops-c9-setup-2026-09-06/wheel-smoke-final/wheels/loops_min-0.1.0-py3-none-any.whl
+$ uv venv /tmp/loops-c9-setup-2026-09-06/wheel-smoke-final/venv
+Using CPython 3.13.11
+Creating virtual environment at: /tmp/loops-c9-setup-2026-09-06/wheel-smoke-final/venv
+Activate with: source /tmp/loops-c9-setup-2026-09-06/wheel-smoke-final/venv/bin/activate
+$ uv pip install --python /tmp/loops-c9-setup-2026-09-06/wheel-smoke-final/venv/bin/python /tmp/loops-c9-setup-2026-09-06/wheel-smoke-final/wheels/atoms-0.1.0-py3-none-any.whl /tmp/loops-c9-setup-2026-09-06/wheel-smoke-final/wheels/custody-0.1.0-py3-none-any.whl /tmp/loops-c9-setup-2026-09-06/wheel-smoke-final/wheels/engine-0.1.0-py3-none-any.whl /tmp/loops-c9-setup-2026-09-06/wheel-smoke-final/wheels/lang-0.1.0-py3-none-any.whl /tmp/loops-c9-setup-2026-09-06/wheel-smoke-final/wheels/loops_min-0.1.0-py3-none-any.whl /tmp/loops-c9-setup-2026-09-06/wheel-smoke-final/wheels/sdk-0.1.0-py3-none-any.whl /tmp/loops-c9-setup-2026-09-06/wheel-smoke-final/wheels/sign-0.1.0-py3-none-any.whl /tmp/loops-c9-setup-2026-09-06/wheel-smoke-final/wheels/store-0.1.0-py3-none-any.whl
+Using Python 3.13.11 environment at: /tmp/loops-c9-setup-2026-09-06/wheel-smoke-final/venv
+Resolved 16 packages in 14ms
+Prepared 8 packages in 21ms
+Installed 16 packages in 16ms
+ + atoms==0.1.0 (from file:///tmp/loops-c9-setup-2026-09-06/wheel-smoke-final/wheels/atoms-0.1.0-py3-none-any.whl)
+ + cffi==2.1.1
+ + ckdl==1.0
+ + cryptography==50.0.1
+ + custody==0.1.0 (from file:///tmp/loops-c9-setup-2026-09-06/wheel-smoke-final/wheels/custody-0.1.0-py3-none-any.whl)
+ + engine==0.1.0 (from file:///tmp/loops-c9-setup-2026-09-06/wheel-smoke-final/wheels/engine-0.1.0-py3-none-any.whl)
+ + lang==0.1.0 (from file:///tmp/loops-c9-setup-2026-09-06/wheel-smoke-final/wheels/lang-0.1.0-py3-none-any.whl)
+ + loops-min==0.1.0 (from file:///tmp/loops-c9-setup-2026-09-06/wheel-smoke-final/wheels/loops_min-0.1.0-py3-none-any.whl)
+ + pycparser==3.0
+ + pyjwt==2.13.0
+ + python-ulid==4.0.1
+ + rfc8785==0.1.4
+ + sdk==0.1.0 (from file:///tmp/loops-c9-setup-2026-09-06/wheel-smoke-final/wheels/sdk-0.1.0-py3-none-any.whl)
+ + sign==0.1.0 (from file:///tmp/loops-c9-setup-2026-09-06/wheel-smoke-final/wheels/sign-0.1.0-py3-none-any.whl)
+ + store==0.1.0 (from file:///tmp/loops-c9-setup-2026-09-06/wheel-smoke-final/wheels/store-0.1.0-py3-none-any.whl)
+ + typing-extensions==4.16.0
+$ /tmp/loops-c9-setup-2026-09-06/wheel-smoke-final/venv/bin/python /tmp/loops-c9-setup-2026-09-06/wheel-smoke-final/smoke.py
+installed-module sdk /private/tmp/loops-c9-setup-2026-09-06/wheel-smoke-final/venv/lib/python3.13/site-packages/sdk/__init__.py
+installed-module loops_min /private/tmp/loops-c9-setup-2026-09-06/wheel-smoke-final/venv/lib/python3.13/site-packages/loops_min/__init__.py
+command credential-create {"ok": true, "result": {"binding_created": true, "key_created": true, "key_ref": "7e9a058a46a44b388655a40bf42a8310", "namespace": "wheel", "observer": "alice", "operation": "create", "provenance": "created", "public_key": "4jqG9uKnHZZSQrJoGciuNqPmNsUTbCIyEbS1XpTSMhg=", "schema": "loops.sdk/credential-binding/v1", "token": "create-alice"}}
+command credential-create {"ok": true, "result": {"binding_created": false, "key_created": false, "key_ref": "7e9a058a46a44b388655a40bf42a8310", "namespace": "wheel", "observer": "alice", "operation": "create", "provenance": "created", "public_key": "4jqG9uKnHZZSQrJoGciuNqPmNsUTbCIyEbS1XpTSMhg=", "schema": "loops.sdk/credential-binding/v1", "token": "create-alice"}}
+command credential-recover {"ok": true, "result": {"binding_created": false, "key_created": false, "key_ref": "7e9a058a46a44b388655a40bf42a8310", "namespace": "wheel", "observer": "alice", "operation": "recover", "provenance": "created", "public_key": "4jqG9uKnHZZSQrJoGciuNqPmNsUTbCIyEbS1XpTSMhg=", "schema": "loops.sdk/credential-binding/v1", "token": "create-alice"}}
+command credential-bind-existing-ref {"ok": true, "result": {"binding_created": true, "key_created": false, "key_ref": "7e9a058a46a44b388655a40bf42a8310", "namespace": "another", "observer": "alice", "operation": "bind-existing-ref", "provenance": "existing-ref", "public_key": "4jqG9uKnHZZSQrJoGciuNqPmNsUTbCIyEbS1XpTSMhg=", "schema": "loops.sdk/credential-binding/v1", "token": "reuse-alice"}}
+command init {"ok": true, "result": {"file_written": true, "head": {"lineage": "01M1WY3TYDVZRFRKCBXSQSFTBT", "ordinal": 1, "record_hash": "c956ded3c341cd876b4f8e5a8bf9b692ad9db42dc03208a86e7276799a457be1"}, "is_root": false, "lineage": "01M1WY3TYDVZRFRKCBXSQSFTBT", "name": "wheel", "phase": "published", "read_path": "arrival", "schema": "loops.sdk/init-vertex/v2", "store": {"backend": "file", "lineage": "01M1WY3TYDVZRFRKCBXSQSFTBT", "location": "/private/tmp/loops-c9-setup-2026-09-06/wheel-smoke-final/wheel.arrival", "query": null, "role": "authority", "witness": null}, "store_path": "/private/tmp/loops-c9-setup-2026-09-06/wheel-smoke-final/wheel.arrival", "store_type": "arrival", "target_path": "/private/tmp/loops-c9-setup-2026-09-06/wheel-smoke-final/wheel.vertex"}}
+command emit {"ok": true, "result": {"affected_sections": [], "captured_head": {"lineage": "01M1WY3TYDVZRFRKCBXSQSFTBT", "ordinal": 1, "record_hash": "c956ded3c341cd876b4f8e5a8bf9b692ad9db42dc03208a86e7276799a457be1"}, "commit": {"after": {"lineage": "01M1WY3TYDVZRFRKCBXSQSFTBT", "ordinal": 2, "record_hash": "c0125ed8ef34b385b96e3c9caa32b3d6ba15a4f7806854845ed0a76414ade8a8"}, "before": {"lineage": "01M1WY3TYDVZRFRKCBXSQSFTBT", "ordinal": 1, "record_hash": "c956ded3c341cd876b4f8e5a8bf9b692ad9db42dc03208a86e7276799a457be1"}, "durability": {"mechanism": "advisory flock, one write, one fsync, on local POSIX storage", "profile": "host"}, "record_count": 1}, "delta_count": null, "id": "wheel-fact", "observer": "alice", "predicted_state_change": false, "projection": "synced", "schema": "loops.sdk/emit-receipt/v2", "signed": true, "state_change": null, "store": {"backend": "file", "lineage": "01M1WY3TYDVZRFRKCBXSQSFTBT", "location": "/private/tmp/loops-c9-setup-2026-09-06/wheel-smoke-final/wheel.arrival", "query": null, "role": "authority", "witness": null}, "stored": true, "tick_id": null, "tick_mark": null, "witnessed": true, "write_path": "arrival"}}
+command declaration {"ok": true, "result": {"basis": {"captured_head": {"lineage": "01M1WY3TYDVZRFRKCBXSQSFTBT", "ordinal": 2, "record_hash": "c0125ed8ef34b385b96e3c9caa32b3d6ba15a4f7806854845ed0a76414ade8a8"}, "lineage": "01M1WY3TYDVZRFRKCBXSQSFTBT", "projected_through": {"lineage": "01M1WY3TYDVZRFRKCBXSQSFTBT", "ordinal": 2, "record_hash": "c0125ed8ef34b385b96e3c9caa32b3d6ba15a4f7806854845ed0a76414ade8a8"}, "view_generation": "file-projection-v1:0a7993d91fd2fec371ce0239cec08758642f7d04d837f362b775070eabf5ca59"}, "captured_head": {"lineage": "01M1WY3TYDVZRFRKCBXSQSFTBT", "ordinal": 2, "record_hash": "c0125ed8ef34b385b96e3c9caa32b3d6ba15a4f7806854845ed0a76414ade8a8"}, "changes": [{"annotation": "modified", "kind": "_decl.kind-defined", "payload": {"boundary": null, "edges": [], "folds": [{"op": {"max_items": 50, "op": "collect"}, "target": "items"}], "lifecycle": null, "order": 0, "parse": [], "preview": [], "search": []}, "subject": "item"}], "commit": {"after": {"lineage": "01M1WY3TYDVZRFRKCBXSQSFTBT", "ordinal": 3, "record_hash": "fbec694c33186ce207ef2d98ca9531afa76779ceb421ed0b517ecb2f49b78cb9"}, "before": {"lineage": "01M1WY3TYDVZRFRKCBXSQSFTBT", "ordinal": 2, "record_hash": "c0125ed8ef34b385b96e3c9caa32b3d6ba15a4f7806854845ed0a76414ade8a8"}, "durability": {"mechanism": "advisory flock, one write, one fsync, on local POSIX storage", "profile": "host"}, "record_count": 1}, "fact_ids": ["01M1WY3VDNJ7Q76B4DYT2Z9VPK"], "file_written": true, "generation_after": null, "generation_before": null, "head": {"lineage": "01M1WY3TYDVZRFRKCBXSQSFTBT", "ordinal": 3, "record_hash": "fbec694c33186ce207ef2d98ca9531afa76779ceb421ed0b517ecb2f49b78cb9"}, "intent_path": null, "lineage": "01M1WY3TYDVZRFRKCBXSQSFTBT", "mode": "arrival-edit", "phase": "published", "read_path": "arrival", "reason": "", "schema": "loops.sdk/declaration-edit/v2", "status": "applied", "store": {"backend": "file", "lineage": "01M1WY3TYDVZRFRKCBXSQSFTBT", "location": "/private/tmp/loops-c9-setup-2026-09-06/wheel-smoke-final/wheel.arrival", "query": null, "role": "authority", "witness": null}, "target_path": "/private/tmp/loops-c9-setup-2026-09-06/wheel-smoke-final/wheel.vertex", "vertex_path": "/private/tmp/loops-c9-setup-2026-09-06/wheel-smoke-final/wheel.vertex"}}
+command facts {"ok": true, "result": {"basis": {"captured_head": {"lineage": "01M1WY3TYDVZRFRKCBXSQSFTBT", "ordinal": 3, "record_hash": "fbec694c33186ce207ef2d98ca9531afa76779ceb421ed0b517ecb2f49b78cb9"}, "lineage": "01M1WY3TYDVZRFRKCBXSQSFTBT", "projected_through": {"lineage": "01M1WY3TYDVZRFRKCBXSQSFTBT", "ordinal": 3, "record_hash": "fbec694c33186ce207ef2d98ca9531afa76779ceb421ed0b517ecb2f49b78cb9"}, "view_generation": "file-projection-v1:04ac1226991db69a806b013736d9bb784da58672ceb9dcadca036c82390142ab"}, "has_continuation": false, "items": [{"arrival_ordinal": 2, "arrival_seq": 0, "id": "wheel-fact", "kind": "item", "observer": "alice", "origin": "", "payload": {"message": "installed wheel"}, "ts": 42.0}], "next_cursor": null, "order": "oldest", "prev_cursor": null, "read_path": "arrival", "schema": "loops.sdk/facts-page/v2", "store": {"backend": "file", "lineage": "01M1WY3TYDVZRFRKCBXSQSFTBT", "location": "/private/tmp/loops-c9-setup-2026-09-06/wheel-smoke-final/wheel.arrival", "query": null, "role": "authority", "witness": null}, "truncated": false}}
+command verify {"ok": true, "result": {"captured_head": {"lineage": "01M1WY3TYDVZRFRKCBXSQSFTBT", "ordinal": 3, "record_hash": "fbec694c33186ce207ef2d98ca9531afa76779ceb421ed0b517ecb2f49b78cb9"}, "claims": ["grammar", "density", "lineage", "hash-chain"], "excludes": ["signature-authorship", "external-key-trust", "projection"], "level": "full", "schema": "loops.sdk/verify-result/v1", "store": {"backend": "file", "lineage": "01M1WY3TYDVZRFRKCBXSQSFTBT", "location": "/private/tmp/loops-c9-setup-2026-09-06/wheel-smoke-final/wheel.arrival", "query": null, "role": "authority", "witness": null}, "verified_through": {"lineage": "01M1WY3TYDVZRFRKCBXSQSFTBT", "ordinal": 3, "record_hash": "fbec694c33186ce207ef2d98ca9531afa76779ceb421ed0b517ecb2f49b78cb9"}}}
+PASS isolated installed-wheel credential create/replay/recover/reuse -> init -> emit -> declaration -> read -> verify; no legacy CLI or Painted installed

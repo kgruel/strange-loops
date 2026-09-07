@@ -1,0 +1,13 @@
+{
+  "command": [
+    "uv",
+    "run",
+    "--no-sync",
+    "--package",
+    "sdk",
+    "pytest",
+    "libs/sdk/tests",
+    "-q"
+  ],
+  "returncode": 0
+}

@@ -1,0 +1,34 @@
+{
+  "cli-final": {
+    "command": [
+      "uv",
+      "run",
+      "--no-sync",
+      "--package",
+      "loops-min",
+      "pytest",
+      "apps/loops-min/tests",
+      "-q"
+    ],
+    "returncode": 0
+  },
+  "ruff-final": {
+    "command": [
+      "uv",
+      "run",
+      "--no-sync",
+      "ruff",
+      "check",
+      "apps/loops-min/src/loops_min/main.py",
+      "apps/loops-min/tests/test_binding_cli.py",
+      "apps/loops-min/tests/test_setup_cli.py",
+      "apps/loops-min/tests/test_writer_boundary.py",
+      "libs/sdk/src/sdk/emit.py",
+      "libs/sdk/src/sdk/types.py",
+      "libs/sdk/src/sdk/__init__.py",
+      "libs/sdk/tests/test_credential_lifecycle.py",
+      "libs/sdk/tests/test_arrival_mapped_credentials.py"
+    ],
+    "returncode": 0
+  }
+}

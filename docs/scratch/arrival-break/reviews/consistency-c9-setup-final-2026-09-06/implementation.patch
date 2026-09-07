@@ -1,0 +1,1285 @@
+diff --git a/apps/loops-min/README.md b/apps/loops-min/README.md
+index 3da95baf..6e0c5bd9 100644
+--- a/apps/loops-min/README.md
++++ b/apps/loops-min/README.md
+@@ -8,16 +8,33 @@ command, and legacy writer retirement remain later work.
+ 
+ Writer commands require all of `--credential-root`, `--credential-namespace`,
+ and `--receipt-observer`. They never select locator-derived credentials or fall
+-back to a legacy writer or create keys. The founding binding must be
++back to a legacy writer or create keys implicitly. The founding binding must be
+ pre-provisioned for `init`; pre-provision every author and receipt binding used
+ by a signed workflow. Selecting the mapped provider does not make every domain
+ mandatory: an absent optional signer retains the SDK's unsigned behavior under
+ the captured declaration and signed-era rules. Callers should inspect each
+-result's `signed` and `witnessed` evidence. Create or import bindings explicitly
+-with the SDK's `MappedCredentialProvider`. For example,
+-`MappedCredentialProvider(root, namespace="tenant",
+-receipt_observer="alice").create_binding("alice", token="setup-alice")`
+-prepares the founding binding used by `init`.
++result's `signed` and `witnessed` evidence.
++
++Credential mutations are explicit SDK-backed commands. Their tokens name one
++durable operation and should be retained with the JSON result or error:
++
++```text
++loops-min credential-create /keys --namespace tenant --observer alice \
++  --token setup-alice
++loops-min credential-recover /keys --namespace tenant --observer alice \
++  --token setup-alice
++loops-min credential-bind-existing-ref /keys --namespace tenant \
++  --observer bob --token bind-bob --key-ref KEY_REF \
++  --expected-public-key PUBLIC_KEY
++loops-min credential-import-legacy /keys --namespace tenant --observer carol \
++  --token import-carol --vertex old.vertex
++```
++
++`credential-recover` uses the exact namespace, observer, and token of a retained
++binding intent. An incomplete result is a reconciliation boundary, not an
++automatic retry instruction. Existing-reference binding and legacy import are
++explicit selections; the client does not search for keys or serialize custody
++implementation objects.
+ 
+ `init` always requests an Arrival file target and never uses `init_vertex`'s
+ legacy default. A minimal lifecycle is:
+@@ -43,8 +60,10 @@ boundary.
+ passes the file's text to the SDK's captured declaration-edit protocol. If an
+ edit reports an intent after a durable interruption,
+ `declaration-recover INTENT` resumes it without resolving credentials again.
+-Initialization recovery and credential creation are not CLI commands in this
+-slice.
++Likewise, `init-recover TARGET` uses only the target's reserved initialization
++intent. It does not accept credentials, observer, backend, location, name, or
++strictness overrides. It does not choose a new lineage or re-sign the reserved
++bootstrap records.
+ 
+ `loops-min export target.vertex captured.jsonl` publishes a complete captured
+ wire prefix at a new pathname and returns the SDK manifest in its JSON result.
+@@ -67,10 +86,13 @@ Exit status 2 covers argument, transport JSON, local input-file, and SDK
+ invalid-input/configuration errors (including missing founding credentials); 3
+ means a recognized unsupported operation or target; 4 is a target, custody,
+ projection, publication, or contract refusal/outcome; 5 is admission or
+-ceremony refusal; and 6 means custody committed or may have committed. Status
++ceremony refusal; and 6 means ledger custody committed or may have committed,
++or a credential-binding mutation is incomplete. Status
+ 4 does not by itself prove zero derived or publication effects. Status 6 is
+ not permission to retry: the JSON error retains commit, IDs, intent, and
+-outcome evidence supplied by the SDK.
++outcome evidence supplied by the SDK. A credential-binding incomplete result
++has a binding token and phase rather than a ledger Commit or fact IDs; an
++unknown phase does not prove that a durable binding intent exists.
+ 
+ The executable is deliberately named `loops-min` while the legacy `loops`
+ application remains in the workspace. It has no presentation, storage, or
+diff --git a/apps/loops-min/src/loops_min/main.py b/apps/loops-min/src/loops_min/main.py
+index 0abdf26e..76c27a46 100644
+--- a/apps/loops-min/src/loops_min/main.py
++++ b/apps/loops-min/src/loops_min/main.py
+@@ -17,6 +17,7 @@ from sdk import (
+     AdmissionFailed,
+     CeremonyFailed,
+     CommittedEmissionError,
++    CredentialBindingIncomplete,
+     EmissionFailed,
+     MappedCredentialProvider,
+     SdkError,
+@@ -182,6 +183,37 @@ def _parser() -> argparse.ArgumentParser:
+         "--pretty", action="store_true", default=argparse.SUPPRESS, help=argparse.SUPPRESS
+     )
+ 
++    target_command(
++        "init-recover",
++        "recover one interrupted Arrival initialization intent",
++    )
++
++    def binding_command(name: str, help_text: str) -> argparse.ArgumentParser:
++        sub = commands.add_parser(name, help=help_text)
++        sub.add_argument("root")
++        sub.add_argument("--namespace", required=True)
++        sub.add_argument("--observer", required=True)
++        sub.add_argument("--token", required=True)
++        sub.add_argument(
++            "--pretty", action="store_true", default=argparse.SUPPRESS,
++            help=argparse.SUPPRESS,
++        )
++        return sub
++
++    binding_command("credential-create", "create one explicit mapped credential binding")
++    binding_command("credential-recover", "recover one mapped credential binding intent")
++    existing = binding_command(
++        "credential-bind-existing-ref",
++        "bind an observer to an existing managed key reference",
++    )
++    existing.add_argument("--key-ref", required=True)
++    existing.add_argument("--expected-public-key", required=True)
++    legacy_import = binding_command(
++        "credential-import-legacy",
++        "import one explicitly selected legacy credential",
++    )
++    legacy_import.add_argument("--vertex", required=True)
++
+     # These names are reserved for the Arrival SDK contracts that are still
+     # being implemented. Keeping them in help makes the process boundary
+     # discoverable without routing them through legacy writer code.
+@@ -239,6 +271,10 @@ def _credentials(args: argparse.Namespace) -> MappedCredentialProvider:
+     )
+ 
+ 
++def _binding_provider(args: argparse.Namespace) -> MappedCredentialProvider:
++    return MappedCredentialProvider(args.root, namespace=args.namespace)
++
++
+ def _require_arrival_target(target: str) -> None:
+     # This is an SDK classification gate, not a second CLI target resolver.
+     # The writer repeats descriptor resolution under its own captured contract.
+@@ -247,6 +283,33 @@ def _require_arrival_target(target: str) -> None:
+ 
+ def _dispatch(args: argparse.Namespace) -> dict[str, Any]:
+     command = args.command
++    if command == "init-recover":
++        return _as_dict(
++            init_vertex(args.target, store_type="arrival", recover=True)
++        )
++    if command == "credential-create":
++        return _as_dict(
++            _binding_provider(args).create_binding(args.observer, token=args.token)
++        )
++    if command == "credential-recover":
++        return _as_dict(
++            _binding_provider(args).recover_binding(args.observer, token=args.token)
++        )
++    if command == "credential-bind-existing-ref":
++        return _as_dict(
++            _binding_provider(args).bind_existing_ref(
++                args.observer,
++                args.key_ref,
++                args.expected_public_key,
++                token=args.token,
++            )
++        )
++    if command == "credential-import-legacy":
++        return _as_dict(
++            _binding_provider(args).import_legacy(
++                args.vertex, args.observer, token=args.token
++            )
++        )
+     if command == "init":
+         return _as_dict(
+             init_vertex(
+@@ -372,6 +435,8 @@ def _exit_code(exc: BaseException) -> int:
+         return EXIT_ADMISSION
+     if isinstance(exc, CommittedOutcome):
+         return EXIT_COMMITTED
++    if isinstance(exc, CredentialBindingIncomplete):
++        return EXIT_COMMITTED
+     if isinstance(exc, CommittedEmissionError):
+         return EXIT_COMMITTED
+     if isinstance(exc, TargetUnsupported):
+diff --git a/apps/loops-min/tests/test_binding_cli.py b/apps/loops-min/tests/test_binding_cli.py
+new file mode 100644
+index 00000000..b4ea4b8c
+--- /dev/null
++++ b/apps/loops-min/tests/test_binding_cli.py
+@@ -0,0 +1,92 @@
++"""A real custody publication failure crosses the process boundary intact."""
++
++from __future__ import annotations
++
++import json
++import os
++import subprocess
++import sys
++from pathlib import Path
++
++
++def test_binding_publication_failure_and_fresh_process_recovery(tmp_path: Path) -> None:
++    environment = os.environ.copy()
++    for variable, directory in (
++        ("XDG_STATE_HOME", "state"),
++        ("XDG_CONFIG_HOME", "config"),
++        ("LOOPS_HOME", "loops"),
++    ):
++        environment[variable] = str(tmp_path / directory)
++    root = tmp_path / "credentials"
++    arguments = [str(root), "--namespace", "tenant", "--observer", "alice"]
++    launcher = """
++import sys
++from custody.binding import MappedCredentialProvider
++def interrupt(self, phase, intent):
++    if phase == 'binding-published':
++        raise OSError('injected failure after binding publication')
++MappedCredentialProvider._hook = interrupt
++from loops_min.main import main
++raise SystemExit(main(sys.argv[1:]))
++"""
++    failed = subprocess.run(
++        [sys.executable, "-c", launcher, "credential-create", *arguments,
++         "--token", "setup-alice"],
++        capture_output=True, text=True, env=environment, check=False,
++    )
++    assert failed.returncode == 6, failed.stdout + failed.stderr
++    failure = json.loads(failed.stdout)
++    assert failure["ok"] is False
++    error = failure["error"]
++    assert error == {
++        "schema": "loops.sdk/error/v1",
++        "type": "CredentialBindingIncomplete",
++        "message": "mapped binding mutation outcome is incomplete or unknown",
++        "outcome": "incomplete",
++        "operation": "create",
++        "namespace": "tenant",
++        "observer": "alice",
++        "token": "setup-alice",
++        "key_ref": error["key_ref"],
++        "phase": "binding-published",
++        "source_type": "BindingMutationIncomplete",
++        "recovery_action": "reconcile",
++    }
++
++    def files() -> dict[Path, bytes]:
++        return {p.relative_to(root): p.read_bytes() for p in root.rglob("*") if p.is_file()}
++
++    def invoke(command: str, token: str) -> subprocess.CompletedProcess[str]:
++        return subprocess.run(
++            [sys.executable, "-m", "loops_min", command, *arguments, "--token", token],
++            capture_output=True, text=True, env=environment, check=False,
++        )
++
++    before = files()
++    key_prefix = Path("keys-v1") / error["key_ref"]
++    retained_key = {p: value for p, value in before.items() if p.is_relative_to(key_prefix)}
++    assert retained_key
++    wrong = invoke("credential-recover", "wrong-token")
++    assert wrong.returncode == 4, wrong.stdout + wrong.stderr
++    wrong_error = json.loads(wrong.stdout)["error"]
++    assert wrong_error["type"] == "CredentialBindingRecoveryRequired"
++    assert wrong_error["token"] == "wrong-token"
++    assert files() == before
++
++    recovered = invoke("credential-recover", "setup-alice")
++    assert recovered.returncode == 0, recovered.stdout + recovered.stderr
++    result = json.loads(recovered.stdout)["result"]
++    assert result["operation"] == "recover"
++    assert result["key_ref"] == error["key_ref"]
++    assert result["token"] == "setup-alice"
++    assert result["binding_created"] is False
++    assert result["key_created"] is False
++    after = files()
++    assert {p: value for p, value in after.items() if p.parts[0] == "keys-v1"} == retained_key
++    assert all(after[p] == value for p, value in before.items())
++
++    replayed = invoke("credential-create", "setup-alice")
++    assert replayed.returncode == 0, replayed.stdout + replayed.stderr
++    replay_result = json.loads(replayed.stdout)["result"]
++    assert replay_result == {**result, "operation": "create"}
++    assert files() == after
+diff --git a/apps/loops-min/tests/test_setup_cli.py b/apps/loops-min/tests/test_setup_cli.py
+new file mode 100644
+index 00000000..bdd08eb8
+--- /dev/null
++++ b/apps/loops-min/tests/test_setup_cli.py
+@@ -0,0 +1,197 @@
++"""Process conformance for mapped custody setup and recoverable initialization."""
++
++from __future__ import annotations
++
++import json
++import os
++import subprocess
++import sys
++from pathlib import Path
++
++import pytest
++from engine.arrival_initialization import arrival_intent_path
++
++
++@pytest.fixture(autouse=True)
++def _isolated_parent_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
++    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
++    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
++    monkeypatch.setenv("LOOPS_HOME", str(tmp_path / "loops"))
++
++
++def _environment(tmp_path: Path) -> dict[str, str]:
++    environment = os.environ.copy()
++    environment.update(
++        {
++            "XDG_STATE_HOME": str(tmp_path / "state"),
++            "XDG_CONFIG_HOME": str(tmp_path / "config"),
++            "LOOPS_HOME": str(tmp_path / "loops"),
++        }
++    )
++    return environment
++
++
++def _credentials(root: Path) -> list[str]:
++    return [
++        "--credential-root",
++        str(root),
++        "--credential-namespace",
++        "tenant",
++        "--receipt-observer",
++        "alice",
++    ]
++
++
++def _cli(
++    tmp_path: Path, command: str, target: Path, *args: str
++) -> subprocess.CompletedProcess[str]:
++    return subprocess.run(
++        [sys.executable, "-m", "loops_min", command, str(target), *args],
++        capture_output=True,
++        text=True,
++        env=_environment(tmp_path),
++        check=False,
++    )
++
++
++def _json(process: subprocess.CompletedProcess[str]) -> dict:
++    assert process.stdout, process.stderr
++    return json.loads(process.stdout)
++
++
++def test_mapped_setup_interrupted_init_recovery_then_cli_write(tmp_path: Path) -> None:
++    custody = tmp_path / "mapped-custody"
++    setup = subprocess.run(
++        [
++            sys.executable,
++            "-m",
++            "loops_min",
++            "credential-create",
++            str(custody),
++            "--namespace",
++            "tenant",
++            "--observer",
++            "alice",
++            "--token",
++            "setup-alice",
++        ],
++        capture_output=True,
++        text=True,
++        env=_environment(tmp_path),
++        check=False,
++    )
++    assert setup.returncode == 0, setup.stdout + setup.stderr
++    setup_result = _json(setup)["result"]
++    assert setup_result["binding_created"] is True
++    assert setup_result["observer"] == "alice"
++
++    target = tmp_path / "workload.vertex"
++    location = (tmp_path / "workload.arrival").resolve()
++    interrupted_launcher = """
++import os, sys
++import engine.arrival_initialization as initialization
++original = initialization.initialize_arrival
++def interrupted(*args, **kwargs):
++    def stop(stage):
++        if stage == 'after-mint':
++            os._exit(75)
++    kwargs['failure_hook'] = stop
++    return original(*args, **kwargs)
++initialization.initialize_arrival = interrupted
++from loops_min.main import main
++raise SystemExit(main(sys.argv[1:]))
++"""
++    interrupted = subprocess.run(
++        [
++            sys.executable,
++            "-c",
++            interrupted_launcher,
++            "init",
++            str(target),
++            "--name",
++            "workload",
++            "--location",
++            str(location),
++            "--observer",
++            "alice",
++            *_credentials(custody),
++        ],
++        capture_output=True,
++        text=True,
++        env=_environment(tmp_path),
++        check=False,
++    )
++    assert interrupted.returncode == 75, interrupted.stdout + interrupted.stderr
++    intent = arrival_intent_path(target)
++    assert intent.exists()
++    assert not target.exists()
++    intent_data = json.loads(intent.read_text(encoding="utf-8"))
++    assert intent_data["phase"] == "minted"
++    lineage = intent_data["lineage"]
++    retained_declaration = intent_data["declaration_text"]
++    ledger_before_recovery = location.read_bytes()
++
++    custody_backup = tmp_path / "mapped-custody-recovery-offline"
++    custody.rename(custody_backup)
++    try:
++        recovered = _cli(tmp_path, "init-recover", target)
++        assert recovered.returncode == 0, recovered.stdout + recovered.stderr
++        assert not custody.exists()
++    finally:
++        custody_backup.rename(custody)
++    recovered_result = _json(recovered)["result"]
++    assert recovered_result["read_path"] == "arrival"
++    assert recovered_result["phase"] == "published"
++    assert recovered_result["lineage"] == lineage
++    assert recovered_result["head"]["ordinal"] == 1
++    assert target.exists()
++    assert target.read_text(encoding="utf-8") == retained_declaration
++    recovered_ledger = location.read_bytes()
++    assert recovered_ledger.startswith(ledger_before_recovery)
++    assert len(recovered_ledger) > len(ledger_before_recovery)
++    assert not intent.exists()
++
++    target_after_recovery = target.read_bytes()
++    repeated = _cli(tmp_path, "init-recover", target)
++    assert repeated.returncode == 4
++    assert target.read_bytes() == target_after_recovery
++    assert location.read_bytes() == recovered_ledger
++
++    emitted = _cli(
++        tmp_path,
++        "emit",
++        target,
++        "item",
++        "--payload-json",
++        '{"after":"recovery"}',
++        "--observer",
++        "alice",
++        "--id",
++        "after-recovery",
++        *_credentials(custody),
++    )
++    assert emitted.returncode == 0, emitted.stdout + emitted.stderr
++    emitted_result = _json(emitted)["result"]
++    assert emitted_result["signed"] is True
++    assert emitted_result["commit"]["before"] == recovered_result["head"]
++
++    facts = _cli(tmp_path, "facts", target, "--order", "oldest", "--limit", "10")
++    assert facts.returncode == 0, facts.stdout + facts.stderr
++    facts_result = _json(facts)["result"]
++    assert facts_result["truncated"] is False
++    assert facts_result["basis"]["captured_head"] == emitted_result["commit"]["after"]
++    assert facts_result["basis"]["projected_through"] == emitted_result["commit"]["after"]
++    fact_rows = facts_result["items"]
++    assert len(fact_rows) == 1
++    assert {
++        key: fact_rows[0][key] for key in ("id", "kind", "observer", "payload")
++    } == {
++        "id": "after-recovery",
++        "kind": "item",
++        "observer": "alice",
++        "payload": {"after": "recovery"},
++    }
++
++    verified = _cli(tmp_path, "verify", target)
++    assert verified.returncode == 0, verified.stdout + verified.stderr
++    assert _json(verified)["result"]["verified_through"] == emitted_result["commit"]["after"]
+diff --git a/apps/loops-min/tests/test_writer_boundary.py b/apps/loops-min/tests/test_writer_boundary.py
+index be895245..66363554 100644
+--- a/apps/loops-min/tests/test_writer_boundary.py
++++ b/apps/loops-min/tests/test_writer_boundary.py
+@@ -8,7 +8,7 @@ from pathlib import Path
+ from typing import Any
+ 
+ import pytest
+-from sdk import MappedCredentialProvider, init_vertex
++from sdk import CredentialBindingIncomplete, MappedCredentialProvider, init_vertex
+ 
+ cli = importlib.import_module("loops_min.main")
+ 
+@@ -110,6 +110,188 @@ def test_declaration_recovery_passes_only_intent_and_serializes_sdk_result(
+     assert calls == [str(intent)]
+ 
+ 
++def test_initialization_recovery_uses_only_target_and_reserved_intent(
++    tmp_path: Path,
++    monkeypatch: pytest.MonkeyPatch,
++    capsys: pytest.CaptureFixture[str],
++) -> None:
++    target = tmp_path / "interrupted.vertex"
++    expected = {"schema": "loops.sdk/init-vertex/v2", "phase": "published"}
++    calls: list[tuple[str, dict[str, Any]]] = []
++
++    class Result:
++        def as_dict(self) -> dict[str, Any]:
++            return expected
++
++    def recover(value: str, **kwargs: Any) -> Result:
++        calls.append((value, kwargs))
++        return Result()
++
++    monkeypatch.setattr(cli, "init_vertex", recover)
++    assert cli.main(["init-recover", str(target)]) == cli.EXIT_OK
++    output = json.loads(capsys.readouterr().out)
++    assert output == {"ok": True, "result": expected}
++    assert calls == [(str(target), {"store_type": "arrival", "recover": True})]
++
++
++@pytest.mark.parametrize(
++    ("command", "extra", "expected_call"),
++    [
++        ("credential-create", (), ("create", "alice", "operation-token")),
++        ("credential-recover", (), ("recover", "alice", "operation-token")),
++        (
++            "credential-bind-existing-ref",
++            ("--key-ref", "key-1", "--expected-public-key", "public-1"),
++            ("bind", "alice", "key-1", "public-1", "operation-token"),
++        ),
++        (
++            "credential-import-legacy",
++            ("--vertex", "old.vertex"),
++            ("import", "old.vertex", "alice", "operation-token"),
++        ),
++    ],
++)
++def test_binding_commands_delegate_to_sdk_and_preserve_result(
++    tmp_path: Path,
++    monkeypatch: pytest.MonkeyPatch,
++    capsys: pytest.CaptureFixture[str],
++    command: str,
++    extra: tuple[str, ...],
++    expected_call: tuple[str, ...],
++) -> None:
++    root = tmp_path / "custody"
++    expected = {
++        "schema": "loops.sdk/credential-binding/v1",
++        "operation": expected_call[0],
++        "namespace": "tenant",
++        "observer": "alice",
++        "token": "operation-token",
++        "key_ref": "opaque-ref",
++        "public_key": "public-key",
++    }
++    constructed: list[tuple[str, str, object]] = []
++    calls: list[tuple[str, ...]] = []
++
++    class Result:
++        def as_dict(self) -> dict[str, Any]:
++            return expected
++
++    class Provider:
++        def create_binding(self, observer: str, *, token: str) -> Result:
++            calls.append(("create", observer, token))
++            return Result()
++
++        def recover_binding(self, observer: str, *, token: str) -> Result:
++            calls.append(("recover", observer, token))
++            return Result()
++
++        def bind_existing_ref(
++            self, observer: str, key_ref: str, public_key: str, *, token: str
++        ) -> Result:
++            calls.append(("bind", observer, key_ref, public_key, token))
++            return Result()
++
++        def import_legacy(
++            self, vertex: str, observer: str, *, token: str
++        ) -> Result:
++            calls.append(("import", vertex, observer, token))
++            return Result()
++
++    def provider(value: str, *, namespace: str, receipt_observer: object = None) -> Provider:
++        constructed.append((value, namespace, receipt_observer))
++        return Provider()
++
++    monkeypatch.setattr(cli, "MappedCredentialProvider", provider)
++    result = cli.main(
++        [
++            command,
++            str(root),
++            "--namespace",
++            "tenant",
++            "--observer",
++            "alice",
++            "--token",
++            "operation-token",
++            *extra,
++        ]
++    )
++    output = json.loads(capsys.readouterr().out)
++    assert result == cli.EXIT_OK
++    assert output == {"ok": True, "result": expected}
++    assert constructed == [(str(root), "tenant", None)]
++    assert calls == [expected_call]
++
++
++def test_missing_binding_argument_stops_before_provider_construction(
++    tmp_path: Path,
++    monkeypatch: pytest.MonkeyPatch,
++    capsys: pytest.CaptureFixture[str],
++) -> None:
++    reached: list[str] = []
++
++    def provider(*_args: Any, **_kwargs: Any) -> None:
++        reached.append("provider")
++
++    monkeypatch.setattr(cli, "MappedCredentialProvider", provider)
++    result = cli.main(
++        [
++            "credential-create",
++            str(tmp_path / "custody"),
++            "--namespace",
++            "tenant",
++            "--observer",
++            "alice",
++        ]
++    )
++    output = json.loads(capsys.readouterr().out)
++    assert result == cli.EXIT_USAGE
++    assert output["error"]["type"] == "UsageError"
++    assert reached == []
++
++
++def test_incomplete_binding_outcome_retains_reconciliation_evidence(
++    tmp_path: Path,
++    monkeypatch: pytest.MonkeyPatch,
++    capsys: pytest.CaptureFixture[str],
++) -> None:
++    error = CredentialBindingIncomplete(
++        "binding publication outcome is incomplete",
++        operation="create",
++        namespace="tenant",
++        observer="alice",
++        token="operation-token",
++        key_ref="opaque-ref",
++        phase="binding-published",
++        source_type="BindingMutationIncomplete",
++    )
++
++    class Provider:
++        def create_binding(self, _observer: str, *, token: str) -> None:
++            assert token == "operation-token"
++            raise error
++
++    monkeypatch.setattr(cli, "_binding_provider", lambda _args: Provider())
++    result = cli.main(
++        [
++            "credential-create",
++            str(tmp_path / "custody"),
++            "--namespace",
++            "tenant",
++            "--observer",
++            "alice",
++            "--token",
++            "operation-token",
++        ]
++    )
++    output = json.loads(capsys.readouterr().out)
++    assert result == cli.EXIT_COMMITTED
++    assert output["error"]["outcome"] == "incomplete"
++    assert output["error"]["source_type"] == "BindingMutationIncomplete"
++    assert output["error"]["phase"] == "binding-published"
++    assert output["error"]["recovery_action"] == "reconcile"
++    assert "commit" not in output["error"]
++
++
+ def test_descriptor_swap_to_legacy_cannot_downgrade_mapped_emit(
+     tmp_path: Path,
+     monkeypatch: pytest.MonkeyPatch,
+diff --git a/libs/sdk/README.md b/libs/sdk/README.md
+index 4fca5812..9657b91c 100644
+--- a/libs/sdk/README.md
++++ b/libs/sdk/README.md
+@@ -209,6 +209,23 @@ emit_fact(
+ )
+ ```
+ 
++The SDK lifecycle methods `create_binding`, `recover_binding`,
++`bind_existing_ref`, and `import_legacy` return
++`CredentialBindingResult` (`loops.sdk/credential-binding/v1`).  It retains the
++exact namespace, observer, opaque key reference, public key, provenance,
++token, and creation flags, and serializes with `as_dict()`; it never exposes a
++private key or provider filesystem path.  The result keeps the field names of
++the earlier custody dataclass, but its public SDK type is now
++`CredentialBindingResult`.  Lifecycle conflicts and recovery requirements are
++typed SDK errors.  An incomplete or otherwise ambiguous mutation raises
++`CredentialBindingIncomplete`, whose serializable namespace/observer/token,
++key reference when known, and phase are reconciliation evidence; it is not an
++Arrival `Commit` and does not prove that no binding artifact was published.
++Use its `recovery_action="reconcile"` guidance with the original operation
++rather than assuming every incomplete import can be recovered without its
++source. A `phase="unknown"` result has no narrower durable-effect proof; in
++particular, it does not establish that an intent was published.
++
+ Mapped selection uses the exact namespace and observer, independently of the
+ vertex filename or lineage. The engine checks author keys against verified
+ history through captured H, for use after H, and verifies each signature in its
+diff --git a/libs/sdk/src/sdk/__init__.py b/libs/sdk/src/sdk/__init__.py
+index 93fdca04..fd119ec0 100644
+--- a/libs/sdk/src/sdk/__init__.py
++++ b/libs/sdk/src/sdk/__init__.py
+@@ -66,6 +66,11 @@ from .types import (
+     BatchEmitResult,
+     CeremonyFailed,
+     CommittedEmissionError,
++    CredentialBindingConflict,
++    CredentialBindingError,
++    CredentialBindingIncomplete,
++    CredentialBindingRecoveryRequired,
++    CredentialBindingResult,
+     DeclarationInspectionResult,
+     DeclarationPlanResult,
+     EmissionFailed,
+@@ -159,6 +164,7 @@ __all__ = [
+     "TickReadResult",
+     "EmitReceipt",
+     "BatchEmitResult",
++    "CredentialBindingResult",
+     "EntityResolutionResult",
+     "EmitPreviewResult",
+     "SearchResult",
+@@ -176,6 +182,10 @@ __all__ = [
+     "SyncResult",
+     "VerifyResult",
+     "KindMutationResult",
++    "CredentialBindingError",
++    "CredentialBindingConflict",
++    "CredentialBindingRecoveryRequired",
++    "CredentialBindingIncomplete",
+     # Exceptions
+     "SdkError",
+     "ExportPublicationError",
+diff --git a/libs/sdk/src/sdk/emit.py b/libs/sdk/src/sdk/emit.py
+index 52cdc24e..91ef71bf 100644
+--- a/libs/sdk/src/sdk/emit.py
++++ b/libs/sdk/src/sdk/emit.py
+@@ -26,6 +26,10 @@ from .types import (
+     AdmissionFailed,
+     BatchEmitResult,
+     CommittedEmissionError,
++    CredentialBindingConflict,
++    CredentialBindingIncomplete,
++    CredentialBindingRecoveryRequired,
++    CredentialBindingResult,
+     EmissionFailed,
+     EmitPreviewResult,
+     EmitReceipt,
+@@ -124,6 +128,155 @@ class MappedCredentialProvider(_MappedCredentialProvider):
+         except ValueError as exc:
+             raise SdkValueError(str(exc)) from exc
+ 
++    def create_binding(self, observer: str, *, token: str) -> CredentialBindingResult:
++        """Create one explicit binding and return its process-safe outcome."""
++        return self._binding_mutation(
++            "create",
++            observer,
++            token,
++            lambda: _MappedCredentialProvider.create_binding(self, observer, token=token),
++        )
++
++    def recover_binding(self, observer: str, *, token: str) -> CredentialBindingResult:
++        """Reconcile one retained binding intent without resolver-side mutation."""
++        return self._binding_mutation(
++            "recover",
++            observer,
++            token,
++            lambda: _MappedCredentialProvider.recover_binding(self, observer, token=token),
++        )
++
++    def bind_existing_ref(
++        self,
++        observer: str,
++        key_ref: str,
++        expected_public_key: str,
++        *,
++        token: str,
++    ) -> CredentialBindingResult:
++        """Publish one explicit binding to already managed public material."""
++        self._binding_input(key_ref, "key_ref")
++        self._binding_input(expected_public_key, "expected_public_key")
++        return self._binding_mutation(
++            "bind-existing-ref",
++            observer,
++            token,
++            lambda: _MappedCredentialProvider.bind_existing_ref(
++                self,
++                observer, key_ref, expected_public_key, token=token
++            ),
++            key_ref=key_ref,
++        )
++
++    def import_legacy(
++        self, vertex_path: Path | str, observer: str, *, token: str
++    ) -> CredentialBindingResult:
++        """Import one explicitly selected legacy key through custody validation."""
++        if not isinstance(vertex_path, (str, Path)):
++            raise SdkValueError("vertex_path must be a path string or Path")
++        return self._binding_mutation(
++            "import-legacy",
++            observer,
++            token,
++            lambda: _MappedCredentialProvider.import_legacy(
++                self, vertex_path, observer, token=token
++            ),
++        )
++
++    def _binding_mutation(
++        self,
++        operation: str,
++        observer: str,
++        token: str,
++        invoke,
++        *,
++        key_ref: str | None = None,
++    ) -> CredentialBindingResult:
++        """Translate custody mutation evidence without weakening its protocol."""
++        from custody.binding import (
++            BindingConflict,
++            BindingCreationResult,
++            BindingMutationIncomplete,
++            BindingRecoveryRequired,
++        )
++
++        self._binding_input(observer, "observer")
++        self._binding_input(token, "token")
++        if key_ref is not None:
++            self._binding_input(key_ref, "key_ref")
++        try:
++            raw = invoke()
++        except BindingMutationIncomplete as exc:
++            raise CredentialBindingIncomplete(
++                str(exc),
++                operation=operation,
++                namespace=exc.namespace,
++                observer=exc.observer,
++                token=exc.token,
++                key_ref=exc.key_ref,
++                phase=exc.phase,
++                source_type=type(exc).__name__,
++            ) from exc
++        except BindingConflict as exc:
++            raise CredentialBindingConflict(
++                str(exc),
++                operation=operation,
++                namespace=self.namespace,
++                observer=observer,
++                token=token,
++                key_ref=key_ref,
++            ) from exc
++        except BindingRecoveryRequired as exc:
++            raise CredentialBindingRecoveryRequired(
++                str(exc),
++                operation=operation,
++                namespace=self.namespace,
++                observer=observer,
++                token=token,
++                key_ref=key_ref,
++            ) from exc
++        except (OSError, ValueError) as exc:
++            # Once custody enters its implementation, a raw failure does not
++            # prove that no durable binding artifact exists.  The caller keeps
++            # its exact request evidence and reconciles rather than retrying.
++            raise CredentialBindingIncomplete(
++                "mapped binding mutation outcome is incomplete or unknown",
++                operation=operation,
++                namespace=self.namespace,
++                observer=observer,
++                token=token,
++                key_ref=key_ref,
++                phase="unknown",
++                source_type=type(exc).__name__,
++            ) from exc
++        if not isinstance(raw, BindingCreationResult):
++            raise CredentialBindingIncomplete(
++                "mapped binding mutation returned invalid custody evidence",
++                operation=operation,
++                namespace=self.namespace,
++                observer=observer,
++                token=token,
++                key_ref=key_ref,
++                phase="unknown",
++                source_type=type(raw).__name__,
++            )
++        return CredentialBindingResult(
++            operation=operation,
++            namespace=raw.namespace,
++            observer=raw.observer,
++            key_ref=raw.key_ref,
++            public_key=raw.public_key,
++            provenance=raw.provenance,
++            token=raw.token,
++            binding_created=raw.binding_created,
++            key_created=raw.key_created,
++        )
++
++    @staticmethod
++    def _binding_input(value: object, field: str) -> None:
++        if not isinstance(value, str) or not value:
++            raise SdkValueError(f"{field} must be a non-empty string")
++
+ 
+ def _mapped_credentials(
+     value: CredentialProvider | WriteCredentials | None, *, vertex: Path | None = None
+diff --git a/libs/sdk/src/sdk/types.py b/libs/sdk/src/sdk/types.py
+index 0c80c77b..5d9f451e 100644
+--- a/libs/sdk/src/sdk/types.py
++++ b/libs/sdk/src/sdk/types.py
+@@ -72,6 +72,68 @@ class SdkValueError(SdkError, ValueError):
+     """Invalid input parameter or missing required argument for an SDK operation."""
+ 
+ 
++class CredentialBindingError(SdkError):
++    """A public outcome of an explicit mapped-credential lifecycle mutation."""
++
++    outcome = "refused"
++    recovery_action = "reconcile"
++
++    def __init__(
++        self,
++        message: str,
++        *,
++        operation: str,
++        namespace: str,
++        observer: str,
++        token: str,
++        key_ref: str | None = None,
++        phase: str | None = None,
++        source_type: str | None = None,
++    ) -> None:
++        super().__init__(message)
++        self.operation = operation
++        self.namespace = namespace
++        self.observer = observer
++        self.token = token
++        self.key_ref = key_ref
++        self.phase = phase
++        self.source_type = source_type
++
++    def as_dict(self) -> dict[str, Any]:
++        result: dict[str, Any] = {
++            "schema": "loops.sdk/error/v1",
++            "type": type(self).__name__,
++            "message": str(self),
++            "outcome": self.outcome,
++            "operation": self.operation,
++            "namespace": self.namespace,
++            "observer": self.observer,
++            "token": self.token,
++            "recovery_action": self.recovery_action,
++        }
++        if self.key_ref is not None:
++            result["key_ref"] = self.key_ref
++        if self.phase is not None:
++            result["phase"] = self.phase
++        if self.source_type is not None:
++            result["source_type"] = self.source_type
++        return result
++
++
++class CredentialBindingConflict(CredentialBindingError):
++    """A requested binding mutation contradicts durable binding evidence."""
++
++
++class CredentialBindingRecoveryRequired(CredentialBindingError):
++    """A lifecycle request needs explicit reconciliation of retained evidence."""
++
++
++class CredentialBindingIncomplete(CredentialBindingError):
++    """A binding mutation may have durable effects and must be reconciled."""
++
++    outcome = "incomplete"
++
++
+ class InvalidEmissionRequest(SdkValueError, EmissionFailed):
+     """Invalid parameters supplied for fact emission (e.g. missing observer)."""
+ 
+@@ -130,6 +192,30 @@ class CeremonyFailed(SdkError):
+ # ---------------------------------------------------------------------------
+ 
+ 
++@dataclass(frozen=True)
++class CredentialBindingResult:
++    """Serializable outcome of one explicit mapped-credential mutation.
++
++    ``key_ref`` is an opaque provider reference and ``public_key`` is public
++    verification material.  Private key bytes and provider filesystem paths
++    are intentionally absent.
++    """
++
++    operation: str
++    namespace: str
++    observer: str
++    key_ref: str
++    public_key: str
++    provenance: str
++    token: str
++    binding_created: bool
++    key_created: bool
++    schema: str = "loops.sdk/credential-binding/v1"
++
++    def as_dict(self) -> dict[str, Any]:
++        return asdict(self)
++
++
+ @dataclass(frozen=True)
+ class StoreDescriptorInfo:
+     """Serializable store identity for descriptor-first SDK operations."""
+diff --git a/libs/sdk/tests/test_arrival_mapped_credentials.py b/libs/sdk/tests/test_arrival_mapped_credentials.py
+index 5be28a4f..b090b203 100644
+--- a/libs/sdk/tests/test_arrival_mapped_credentials.py
++++ b/libs/sdk/tests/test_arrival_mapped_credentials.py
+@@ -16,9 +16,9 @@ from atoms import Fact, SourceError
+ from engine.credentials import CredentialPurpose, CredentialRequest, SigningDomain
+ 
+ from sdk import (
++    CredentialBindingIncomplete,
+     MappedCredentialProvider,
+     SdkError,
+-    SdkValueError,
+     edit_declaration,
+     emit_batch,
+     emit_fact,
+@@ -517,13 +517,15 @@ def test_mapped_binding_existing_ref_rejects_unknown_key_without_replacement(
+     created = _create(provider, "alice", "create-alice")
+     before = sorted(path.relative_to(provider.root) for path in provider.root.rglob("*"))
+ 
+-    with pytest.raises((OSError, SdkValueError, ValueError)):
++    with pytest.raises(CredentialBindingIncomplete) as raised:
+         provider.bind_existing_ref(
+             "bob",
+             "missing-key-ref",
+             created.public_key,
+             token="bind-bob",
+         )
++    assert raised.value.operation == "bind-existing-ref"
++    assert raised.value.source_type == "FileNotFoundError"
+ 
+     after = sorted(path.relative_to(provider.root) for path in provider.root.rglob("*"))
+     assert after == before
+diff --git a/libs/sdk/tests/test_credential_lifecycle.py b/libs/sdk/tests/test_credential_lifecycle.py
+new file mode 100644
+index 00000000..e6b32600
+--- /dev/null
++++ b/libs/sdk/tests/test_credential_lifecycle.py
+@@ -0,0 +1,229 @@
++"""Public outcomes for explicit mapped-credential lifecycle mutations."""
++
++from __future__ import annotations
++
++import json
++from pathlib import Path
++
++import pytest
++from custody import ensure_signing_key
++from engine.credentials import CredentialPurpose, CredentialRequest, SigningDomain
++
++from sdk import (
++    CredentialBindingConflict,
++    CredentialBindingIncomplete,
++    CredentialBindingRecoveryRequired,
++    CredentialBindingResult,
++    MappedCredentialProvider,
++    SdkValueError,
++)
++
++
++@pytest.fixture(autouse=True)
++def _isolated_process_roots(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
++    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
++    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
++    monkeypatch.setenv("LOOPS_HOME", str(tmp_path / "loops"))
++
++
++def _files(root: Path) -> dict[Path, bytes]:
++    return {
++        path.relative_to(root): path.read_bytes()
++        for path in root.rglob("*")
++        if path.is_file()
++    }
++
++
++def _provider(tmp_path: Path) -> MappedCredentialProvider:
++    return MappedCredentialProvider(
++        tmp_path / "bindings", namespace="tenant/a", receipt_observer="alice"
++    )
++
++
++def test_lifecycle_results_are_serializable_and_resolution_stays_read_only(
++    tmp_path: Path,
++) -> None:
++    provider = _provider(tmp_path)
++    created = provider.create_binding("alice", token="create-alice")
++
++    assert isinstance(created, CredentialBindingResult)
++    assert created.operation == "create"
++    assert created.namespace == "tenant/a"
++    assert created.observer == "alice"
++    assert created.binding_created is True
++    serialized = created.as_dict()
++    assert serialized["schema"] == "loops.sdk/credential-binding/v1"
++    assert serialized["key_ref"] == created.key_ref
++    assert json.loads(json.dumps(serialized, allow_nan=False)) == serialized
++    private = (provider.root / "keys-v1" / created.key_ref / "ed25519.key").read_text()
++    assert private not in json.dumps(serialized)
++    assert "bindings-v1" not in json.dumps(serialized)
++
++    before = _files(provider.root)
++    resolved = provider.resolve(
++        CredentialRequest(
++            provider.namespace,
++            "alice",
++            SigningDomain.FACT,
++            CredentialPurpose.AUTHORSHIP,
++        )
++    )
++    assert resolved is not None and resolved.evidence.key_ref == created.key_ref
++    assert _files(provider.root) == before
++
++    repeated = provider.create_binding("alice", token="create-alice")
++    assert repeated.key_ref == created.key_ref
++    assert repeated.public_key == created.public_key
++    assert repeated.binding_created is False
++    assert repeated.key_created is False
++
++
++def test_lifecycle_incomplete_retains_reconciliation_evidence(tmp_path: Path) -> None:
++    provider = _provider(tmp_path)
++
++    def interrupt(phase: str, _intent: dict[str, object]) -> None:
++        if phase == "binding-published":
++            raise OSError("injected publication interruption")
++
++    provider._creation_hook = interrupt
++    with pytest.raises(CredentialBindingIncomplete) as raised:
++        provider.create_binding("alice", token="recover-alice")
++
++    error = raised.value
++    assert error.operation == "create"
++    assert error.namespace == provider.namespace
++    assert error.observer == "alice"
++    assert error.token == "recover-alice"
++    assert error.key_ref is not None
++    assert error.phase == "binding-published"
++    assert error.source_type == "BindingMutationIncomplete"
++    assert error.outcome == "incomplete"
++    assert error.recovery_action == "reconcile"
++    assert error.as_dict()["phase"] == "binding-published"
++    assert "commit" not in error.as_dict()
++    assert json.loads(json.dumps(error.as_dict(), allow_nan=False)) == error.as_dict()
++
++    provider._creation_hook = None
++    recovered = provider.recover_binding("alice", token="recover-alice")
++    assert recovered.operation == "recover"
++    assert recovered.key_ref == error.key_ref
++    assert recovered.binding_created is False
++
++
++def test_lifecycle_conflict_recovery_and_input_errors_are_typed(tmp_path: Path) -> None:
++    provider = _provider(tmp_path)
++    alice = provider.create_binding("alice", token="alice-token")
++
++    pending_provider = MappedCredentialProvider(
++        tmp_path / "pending-bindings", namespace="tenant/a"
++    )
++
++    def interrupt(phase: str, _intent: dict[str, object]) -> None:
++        if phase == "intent-published":
++            raise OSError("leave pending intent")
++
++    pending_provider._creation_hook = interrupt
++    with pytest.raises(CredentialBindingIncomplete):
++        pending_provider.create_binding("alice", token="pending-token")
++    pending_provider._creation_hook = None
++    pending_before = _files(pending_provider.root)
++    with pytest.raises(CredentialBindingRecoveryRequired) as recovery:
++        pending_provider.create_binding("alice", token="different-token")
++    assert recovery.value.as_dict()["operation"] == "create"
++    assert recovery.value.as_dict()["token"] == "different-token"
++    assert recovery.value.as_dict()["outcome"] == "refused"
++    assert _files(pending_provider.root) == pending_before
++
++    before_token_conflict = _files(provider.root)
++    with pytest.raises(CredentialBindingConflict) as conflict:
++        provider.create_binding("bob", token="alice-token")
++    assert conflict.value.as_dict()["observer"] == "bob"
++    assert conflict.value.as_dict()["recovery_action"] == "reconcile"
++    assert _files(provider.root) == before_token_conflict
++
++    before_wrong_key = _files(provider.root)
++    with pytest.raises(CredentialBindingIncomplete) as wrong_key:
++        provider.bind_existing_ref(
++            "carol", alice.key_ref, "not-the-managed-public-key", token="wrong-key"
++        )
++    assert wrong_key.value.source_type == "ValueError"
++    assert _files(provider.root) == before_wrong_key
++    assert provider.resolve(
++        CredentialRequest(
++            provider.namespace,
++            "carol",
++            SigningDomain.FACT,
++            CredentialPurpose.AUTHORSHIP,
++        )
++    ) is None
++
++    shared = provider.bind_existing_ref(
++        "bob", alice.key_ref, alice.public_key, token="share-alice"
++    )
++    assert shared.operation == "bind-existing-ref"
++    assert shared.key_ref == alice.key_ref
++    with pytest.raises(SdkValueError, match="key_ref must be a non-empty string"):
++        provider.bind_existing_ref("carol", None, alice.public_key, token="bad")  # type: ignore[arg-type]
++    with pytest.raises(SdkValueError, match="vertex_path must be a path string or Path"):
++        provider.import_legacy(None, "carol", token="bad")  # type: ignore[arg-type]
++
++
++def test_raw_custody_failures_keep_unknown_phase_and_reconcile(
++    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
++) -> None:
++    provider = _provider(tmp_path)
++    original_index = provider._ensure_token_index
++
++    def interrupt_index(_intent: dict[str, object]) -> None:
++        raise OSError("injected token-index failure")
++
++    monkeypatch.setattr(provider, "_ensure_token_index", interrupt_index)
++    with pytest.raises(CredentialBindingIncomplete) as raised:
++        provider.create_binding("alice", token="index-token")
++    error = raised.value
++    assert error.operation == "create"
++    assert error.namespace == provider.namespace
++    assert error.observer == "alice"
++    assert error.token == "index-token"
++    assert error.phase == "unknown"
++    assert error.source_type == "OSError"
++    assert error.key_ref is None
++    pending = json.loads(next((provider.root / "pending-v1").glob("*.json")).read_text())
++    assert pending.pop("key_ref")
++    assert pending == {
++        "expected_public_key": None,
++        "namespace": provider.namespace,
++        "observer": "alice",
++        "provenance": "created",
++        "schema": "loops.custody/binding-intent/v1",
++        "stage": "pending",
++        "token": "index-token",
++    }
++    assert json.loads(json.dumps(error.as_dict(), allow_nan=False)) == error.as_dict()
++
++    monkeypatch.setattr(provider, "_ensure_token_index", original_index)
++    recovered = provider.recover_binding("alice", token="index-token")
++    assert recovered.operation == "recover"
++    assert recovered.observer == "alice"
++
++    binding = next((provider.root / "bindings-v1").glob("*.json"))
++    binding.write_text("{malformed binding record")
++    before_corrupt = _files(provider.root)
++    with pytest.raises(CredentialBindingIncomplete) as corrupt:
++        provider.create_binding("alice", token="fresh-token")
++    assert corrupt.value.phase == "unknown"
++    assert corrupt.value.source_type == "ValueError"
++    assert _files(provider.root) == before_corrupt
++
++
++def test_import_legacy_returns_the_same_public_result_shape(tmp_path: Path) -> None:
++    legacy_vertex = tmp_path / "legacy.vertex"
++    pair = ensure_signing_key(legacy_vertex, observer="legacy")
++    provider = _provider(tmp_path)
++
++    imported = provider.import_legacy(legacy_vertex, "legacy", token="import-legacy")
++    assert isinstance(imported, CredentialBindingResult)
++    assert imported.operation == "import-legacy"
++    assert imported.provenance == "legacy-import"
++    assert imported.public_key == pair.public_b64
++    assert json.loads(json.dumps(imported.as_dict(), allow_nan=False)) == imported.as_dict()

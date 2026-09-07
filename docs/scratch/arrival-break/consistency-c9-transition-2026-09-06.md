@@ -122,9 +122,9 @@ outside this slice.
 
 ## Follow-up work
 
-Next, expose initialization recovery through the process client and define
-SDK-owned serializable credential-lifecycle outcomes before adding binding
-commands. Source execution is the next substantial caller transition after
+The subsequent [setup/recovery slice](consistency-c9-setup-2026-09-06.md) now
+exposes initialization recovery and SDK-owned serializable credential-lifecycle
+outcomes with explicit binding commands. Source execution is the next substantial caller transition after
 those setup/recovery boundaries. Inventory named old-command consumers before
 removing wrappers or changing entry points. Generic SDK legacy arms, suffix
 resolution, `JsonlStore`, and the reanchor command remain present; no runtime

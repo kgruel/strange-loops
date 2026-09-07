@@ -72,6 +72,68 @@ class SdkValueError(SdkError, ValueError):
     """Invalid input parameter or missing required argument for an SDK operation."""
 
 
+class CredentialBindingError(SdkError):
+    """A public outcome of an explicit mapped-credential lifecycle mutation."""
+
+    outcome = "refused"
+    recovery_action = "reconcile"
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        operation: str,
+        namespace: str,
+        observer: str,
+        token: str,
+        key_ref: str | None = None,
+        phase: str | None = None,
+        source_type: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.operation = operation
+        self.namespace = namespace
+        self.observer = observer
+        self.token = token
+        self.key_ref = key_ref
+        self.phase = phase
+        self.source_type = source_type
+
+    def as_dict(self) -> dict[str, Any]:
+        result: dict[str, Any] = {
+            "schema": "loops.sdk/error/v1",
+            "type": type(self).__name__,
+            "message": str(self),
+            "outcome": self.outcome,
+            "operation": self.operation,
+            "namespace": self.namespace,
+            "observer": self.observer,
+            "token": self.token,
+            "recovery_action": self.recovery_action,
+        }
+        if self.key_ref is not None:
+            result["key_ref"] = self.key_ref
+        if self.phase is not None:
+            result["phase"] = self.phase
+        if self.source_type is not None:
+            result["source_type"] = self.source_type
+        return result
+
+
+class CredentialBindingConflict(CredentialBindingError):
+    """A requested binding mutation contradicts durable binding evidence."""
+
+
+class CredentialBindingRecoveryRequired(CredentialBindingError):
+    """A lifecycle request needs explicit reconciliation of retained evidence."""
+
+
+class CredentialBindingIncomplete(CredentialBindingError):
+    """A binding mutation may have durable effects and must be reconciled."""
+
+    outcome = "incomplete"
+
+
 class InvalidEmissionRequest(SdkValueError, EmissionFailed):
     """Invalid parameters supplied for fact emission (e.g. missing observer)."""
 
@@ -128,6 +190,30 @@ class CeremonyFailed(SdkError):
 # ---------------------------------------------------------------------------
 # Result Models
 # ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class CredentialBindingResult:
+    """Serializable outcome of one explicit mapped-credential mutation.
+
+    ``key_ref`` is an opaque provider reference and ``public_key`` is public
+    verification material.  Private key bytes and provider filesystem paths
+    are intentionally absent.
+    """
+
+    operation: str
+    namespace: str
+    observer: str
+    key_ref: str
+    public_key: str
+    provenance: str
+    token: str
+    binding_created: bool
+    key_created: bool
+    schema: str = "loops.sdk/credential-binding/v1"
+
+    def as_dict(self) -> dict[str, Any]:
+        return asdict(self)
 
 
 @dataclass(frozen=True)

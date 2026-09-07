@@ -1,0 +1,9 @@
+{
+  "status": "complete",
+  "primary_verdict": "ACCEPT",
+  "fable_verdict": "ACCEPT",
+  "implementation_blockers": [],
+  "design_blockers": [],
+  "production_changed_after_review": false,
+  "documentation_clarifications_after_review": true
+}

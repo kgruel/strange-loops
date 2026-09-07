@@ -1,0 +1,84 @@
+from pathlib import Path
+import hashlib
+import json
+import os
+import subprocess
+import sys
+
+root = Path('/Users/kaygee/Code/loops-wt/arrival-finish')
+base = Path('/tmp/loops-c9-setup-2026-09-06/wheel-smoke-final')
+base.mkdir(exist_ok=True)
+wheels = base / 'wheels'
+log_path = base.parent / 'validation' / 'wheel-smoke.txt'
+with log_path.open('w') as log:
+    def run(command, cwd=root, env=None):
+        log.write('$ ' + ' '.join(map(str, command)) + '\n')
+        log.flush()
+        result = subprocess.run(command, cwd=cwd, env=env, text=True, stdout=log, stderr=subprocess.STDOUT)
+        if result.returncode:
+            raise SystemExit(result.returncode)
+    for package in ('atoms', 'sign', 'store', 'lang', 'engine', 'custody', 'sdk', 'loops-min'):
+        run(['uv', 'build', '--package', package, '--wheel', '--out-dir', str(wheels)])
+    venv = base / 'venv'
+    run(['uv', 'venv', str(venv)])
+    run(['uv', 'pip', 'install', '--python', str(venv/'bin/python'), *map(str, sorted(wheels.glob('*.whl')))])
+    script = base / 'smoke.py'
+    script.write_text('''from pathlib import Path
+import importlib.util
+import json
+import os
+import subprocess
+import sys
+import sdk
+import loops_min
+from sdk import MappedCredentialProvider
+
+base = Path.cwd()
+for module in (sdk, loops_min):
+    path = Path(module.__file__).resolve()
+    assert path.is_relative_to(Path(sys.prefix).resolve()), path
+    print("installed-module", module.__name__, str(path))
+assert importlib.util.find_spec("loops") is None
+assert importlib.util.find_spec("painted") is None
+cli = str(Path(sys.executable).parent / "loops-min")
+creds = ["--credential-root", str(base / "custody"), "--credential-namespace", "wheel", "--receipt-observer", "alice"]
+vertex = str(base / "wheel.vertex")
+def invoke(*args):
+    p = subprocess.run([cli, *args], text=True, capture_output=True)
+    assert p.returncode == 0, (p.returncode, p.stdout, p.stderr)
+    assert not p.stderr, p.stderr
+    value = json.loads(p.stdout)
+    assert value["ok"] is True
+    print("command", args[0], p.stdout.strip())
+    return value["result"]
+binding = invoke("credential-create", str(base / "custody"), "--namespace", "wheel", "--observer", "alice", "--token", "create-alice")
+assert binding["binding_created"] and binding["key_created"]
+replayed = invoke("credential-create", str(base / "custody"), "--namespace", "wheel", "--observer", "alice", "--token", "create-alice")
+assert replayed["key_ref"] == binding["key_ref"] and not replayed["key_created"] and not replayed["binding_created"]
+recovered = invoke("credential-recover", str(base / "custody"), "--namespace", "wheel", "--observer", "alice", "--token", "create-alice")
+assert recovered["key_ref"] == binding["key_ref"] and not recovered["key_created"]
+shared = invoke("credential-bind-existing-ref", str(base / "custody"), "--namespace", "another", "--observer", "alice", "--token", "reuse-alice", "--key-ref", binding["key_ref"], "--expected-public-key", binding["public_key"])
+assert shared["key_ref"] == binding["key_ref"] and not shared["key_created"]
+initialized = invoke("init", vertex, "--location", str(base / "wheel.arrival"), "--observer", "alice", *creds)
+receipt = invoke("emit", vertex, "item", "--payload-json", '{"message":"installed wheel"}', "--observer", "alice", "--id", "wheel-fact", "--ts", "42", *creds)
+assert receipt["write_path"] == "arrival" and receipt["stored"] is True
+proposal = base / "proposed.vertex"
+original = Path(vertex).read_text()
+changed = original.replace('items "collect" 100', 'items "collect" 50')
+assert changed != original
+proposal.write_text(changed)
+declared = invoke("declaration", vertex, "--proposed-file", str(proposal), "--observer", "alice", *creds)
+assert declared["status"] == "applied"
+facts = invoke("facts", vertex, "--order", "oldest")
+assert facts["truncated"] is False and [f["id"] for f in facts["items"]] == ["wheel-fact"]
+assert facts["items"][0]["payload"] == {"message":"installed wheel"}
+verified = invoke("verify", vertex)
+assert verified["captured_head"] == verified["verified_through"]
+print("PASS isolated installed-wheel credential create/replay/recover/reuse -> init -> emit -> declaration -> read -> verify; no legacy CLI or Painted installed")
+''')
+    env = os.environ.copy()
+    env.pop('PYTHONPATH', None)
+    for key, suffix in [('XDG_STATE_HOME','state'), ('XDG_CONFIG_HOME','config'), ('LOOPS_HOME','loops-home')]:
+        env[key] = str(base / suffix)
+    run([str(venv/'bin/python'), str(script)], cwd=base, env=env)
+print(log_path)
